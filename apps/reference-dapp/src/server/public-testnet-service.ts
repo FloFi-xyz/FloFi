@@ -403,7 +403,7 @@ export function validatePublicRunLog(bytes: Uint8Array): void {
  * `provenance` labels quotes and evidence (`MOCKED` for the loopback harness). Code pins may be replaced only by a MOCKED harness.
  */
 export type CatalogSwapRuntime = { readonly catalogFor: (chain: string) => Promise<AssetCatalog>; readonly provenance: 'PUBLIC_MAINNET' | 'MOCKED';
-  readonly codePins?: Partial<CatalogSwapProfile['codeSha256']>; readonly executionEnabled: boolean };
+  readonly codePins?: Partial<Record<keyof CatalogSwapProfile['codeSha256'], string>>; readonly executionEnabled: boolean };
 const sha256Hex = (code: string) => createHash('sha256').update(Buffer.from(code.slice(2), 'hex')).digest('hex');
 /** One side of a catalog swap: the current official catalog must still map the authored identity exactly. */
 function catalogSide(catalog: AssetCatalog, ref: { address: string; decimals: number; officialId: string | null }, side: 'input' | 'output'): CanonicalAsset {
@@ -427,7 +427,7 @@ async function catalogQuote(workflow: SemanticWorkflow, executionId: string, P: 
   const catalog = await runtime.catalogFor(P.chainRef);
   if (catalog.chain !== P.chainRef) fail('CATALOG_NETWORK_MISMATCH');
   const input = catalogSide(catalog, fields.input, 'input'), output = catalogSide(catalog, fields.output, 'output');
-  const pins = { ...P.codeSha256, ...runtime.provenance === 'MOCKED' ? runtime.codePins : {} };
+  const pins: Record<keyof CatalogSwapProfile['codeSha256'], string> = { ...P.codeSha256, ...runtime.provenance === 'MOCKED' ? runtime.codePins : {} };
   const call = async (to: string, data: string, block: string) => hex(await rpc('eth_call', [{ to, data }, block]));
   const word0 = (value: string) => value.length >= 66 ? BigInt(value.slice(0, 66)) : fail('RPC_RESPONSE_INVALID');
   const addressOf = (value: string) => address('0x' + value.slice(-40));
@@ -483,7 +483,8 @@ async function catalogQuote(workflow: SemanticWorkflow, executionId: string, P: 
     if (addressOf(await call(pool, '0xc45a0155', block)) !== P.factory || addressOf(await call(pool, '0x0dfe1681', block)) !== token0 ||
         addressOf(await call(pool, '0xd21220a7', block)) !== token1 || BigInt(await call(pool, '0xddca3f43', block)) !== BigInt(tier.fee)) fail('POOL_METADATA_MISMATCH');
     if (BigInt(await call(pool, '0x1a686502', block)) === 0n || word0(await call(pool, '0x3850c7bd', block)) === 0n) { tiers.push({ fee: tier.fee, pool, expectedOut: null }); continue; }
-    let out: bigint | null = null;
+    // A tier whose quote reverts (no usable liquidity for this size) is simply not a candidate.
+    let out: bigint | null;
     try { out = word0(await call(P.quoter, quoteData(input.address!, output.address!, amountIn, tier.fee), block)); } catch { out = null; }
     tiers.push({ fee: tier.fee, pool, expectedOut: out && out > 0n ? out.toString() : null });
   }

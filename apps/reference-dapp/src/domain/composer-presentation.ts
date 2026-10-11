@@ -13,6 +13,7 @@ import { solanaSwapDetails, solanaSwapLabels } from './jupiter-authoring';
 import { solanaLiquidityDetails } from './solana-liquidity-authoring';
 import { uniswapLiquidityDetails } from './uniswap-liquidity-authoring';
 import { transferDetails } from './robinhood-transfer-authoring';
+import { catalogSwapDetails } from './catalog-swap-authoring';
 
 /** Display projections only. No editable values, validation rules or execution states live here. */
 export function composerActions(workflow: Workflow) {
@@ -54,7 +55,9 @@ const providerLabels: Record<string, string> = {
   'flofi.router': 'Cross-chain Router', 'cow-protocol': 'CoW Protocol',
 };
 export function composerSummary(workflow: Workflow, node: Workflow['nodes'][number], context: ReviewContext) {
-  const action = actionLabels[node.actionType] ?? 'Action';
+  // BUILD-RH-002: a catalog swap reads its assets from the network catalog; buying a Stock Token with USDG is the Stocks card.
+  const catalogSwap = catalogSwapDetails(node);
+  const action = catalogSwap?.stockPurchase ? 'Stocks' : actionLabels[node.actionType] ?? 'Action';
   const lending = lendingDetails(workflow);
   const swap = swapDetails(node, context), solana = solanaSwapDetails(node);
   const router = routerDetails(node), bridge = bridgeDetails(node);
@@ -77,11 +80,11 @@ export function composerSummary(workflow: Workflow, node: Workflow['nodes'][numb
   const linked = node.inputs.some(input => input.kind === 'OUTPUT_REFERENCE');
   const amount = lending ? `${node.actionType === 'supply' ? lending.supply : lending.borrow} USDC` : money ? `${money.amount} ${money.asset}` :
     transfer ? `${transfer.amount} ETH` : router ? `${router.amount} ${router.token}` : bridge ? `${bridge.amount} USDC` :
-    solana ? `${solana.amount} ${solana.from}` : swap ? `${swap.amount} ${swap.from}` :
+    solana ? `${solana.amount} ${solana.from}` : swap ? `${swap.amount} ${swap.from}` : catalogSwap ? `${catalogSwap.amount} ${catalogSwap.from}` :
     uni ? `${uni.maxUsdc} USDC + ${uni.maxWeth} WETH` : orca ? `${orca.maxSol} SOL + ${orca.maxDevUsdc} devUSDC` :
     position ? `${formatHumanAmount(position.amountWeth, 'WETH', context)} WETH + ${formatHumanAmount(position.amountUsdc, 'USDC', context)} USDC` :
     linked ? 'Amount from linked step' : 'Amount not available';
-  const detail = solana ? `${solana.from} → ${solana.to}` : swap ? `${swap.from} → ${swap.to}` :
+  const detail = solana ? `${solana.from} → ${solana.to}` : swap ? `${swap.from} → ${swap.to}` : catalogSwap ? `${catalogSwap.from} → ${catalogSwap.to}` :
     lending && node.actionType === 'asset.swap.exact-input' ? 'Borrowed USDC → WETH' :
     uni ? 'USDC / WETH' : orca ? 'SOL / devUSDC' : position ? 'WETH / USDC' : undefined;
   // Supported router and legacy bridge readers describe USDC on both ends. Build alone displays this token route.

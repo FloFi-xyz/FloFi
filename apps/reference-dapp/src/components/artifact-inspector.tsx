@@ -3,7 +3,7 @@
 import { useLocale } from '../i18n/locale';
 
 import { CryptoPoolForm } from './crypto-pool-form';
-import { cryptoInputOf, cryptoProfile, canSelectCryptoAssets } from '../domain/crypto-action-picker';
+import { cryptoInputOf, cryptoProfile, canSelectCryptoAssets, selectCryptoToken } from '../domain/crypto-action-picker';
 import {LendingNodeEditor} from './lending-node-editor';
 import {isLendingComposition} from '@defi-workflow-engine/workflow-contracts';
 import { WithdrawAuthoringForm } from './withdraw-panel';
@@ -33,8 +33,9 @@ import { RouterForm } from './router-panel';
 import { routerDetails } from '../domain/router-authoring';
 import { canEditCanvasAmount, setupSummary } from '../domain/canvas-action-setup';
 import { supplyReviewFormId, poolReviewFormId } from './composer-card';
-import { usePoolContributionInputs, useStockCardInputs } from './canvas-card-inputs';
+import { usePoolContributionInputs } from './canvas-card-inputs';
 import { StocksSettings } from './stocks-settings';
+
 
 const emptyCrossChain: CrossChainLiquidityInput = { amount: '100', bridgeSlippageBps: '50', swapSlippageBps: '50', tickLower: '-200100', tickUpper: '-199900', recipient: '0x1111111111111111111111111111111111111111', provider: 'lifi.rest', noSwap: false };
 const emptyLiquidity: LiquidityInput = { weth: '', usdc: '', minimumWeth: '', minimumUsdc: '', tickLower: '', tickUpper: '', recipient: '' };
@@ -43,9 +44,17 @@ type InspectorProps = {
   expanded?: boolean; onExpandedChange: (expanded: boolean) => void;
 };
 export function ArtifactInspector(props: InspectorProps) {
-  const stocks = useStockCardInputs();
-  const card = stocks.cards.find(card => card.id === props.selectedId);
-  return card ? <StocksSettings card={card} expanded={props.expanded ?? false} onExpandedChange={props.onExpandedChange}/> : <CanonicalArtifactInspector {...props}/>;
+  const { state, context, actionSetup = null, amountInputs = {}, cryptoSelections = {}, editCanvasAmount, editCryptoSelection } = useWorkflow();
+  // BUILD-RH-002: the Stocks card (a draft or a canonical Robinhood Chain stock purchase) edits its own selection and amount.
+  const setup = actionSetup?.id === props.selectedId && actionSetup.action === 'swap' && actionSetup.stocks ? actionSetup : null;
+  const node = setup ? null : state.workflow.nodes.find(item => item.nodeId === props.selectedId && composerSummary(state.workflow, item, context).action === 'Stocks');
+  const input = node ? cryptoInputOf(node) : null;
+  const selection = setup?.cryptoSelection ?? (node ? cryptoSelections[node.nodeId] ?? input?.selection : null);
+  if (!selection || (!setup && !node)) return <CanonicalArtifactInspector {...props}/>;
+  const id = (setup?.id ?? node?.nodeId)!;
+  return <StocksSettings selection={selection} amount={setup ? setup.amount : amountInputs[id] ?? input?.amount ?? ''} expanded={props.expanded ?? false}
+    onExpandedChange={props.onExpandedChange} onAmountChange={amount => editCanvasAmount(id, amount)}
+    onEquityChange={symbol => { try { editCryptoSelection(id, selectCryptoToken(selection, 'destination', symbol)); } catch { /* not in the current catalog */ } }}/>;
 }
 function CanonicalArtifactInspector({ selectedId, select, expanded = false, onExpandedChange }: InspectorProps) {
   const { t: tr } = useLocale();

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { ROBINHOOD_NETWORK, featuredStockSymbols } from './asset-catalogs';
 import { createBaseSepoliaReviewContext, validateAuthoringWorkflow, type ReviewContext } from '@defi-workflow-engine/reference-linter';
 import { validateSavedWorkflow } from './saved-workflow';
 import {isLendingComposition,type SemanticWorkflow} from '@defi-workflow-engine/workflow-contracts';
@@ -26,6 +27,8 @@ export type HistoryAction =
   | { readonly type: 'RESTORE_LENDING_CANVAS'; readonly workflow: SemanticWorkflow }
   | { readonly type: 'COMMAND'; readonly command: Command; readonly context: ReviewContext; readonly position?: { x: number; y: number }; readonly authoringId?: string; readonly authoringAmount?: string }
   | { readonly type: 'START_ACTION_SETUP'; readonly action: CanvasActionSetup['action']; readonly position: { x: number; y: number }; readonly beneficiary?: string }
+  /** BUILD-RH-002: the Stocks card — a Robinhood Chain catalog swap from USDG into the first featured Stock Token. */
+  | { readonly type: 'START_STOCKS_SETUP'; readonly position: { x: number; y: number } }
   | { readonly type: 'EDIT_POOL_SETUP'; readonly id: string; readonly input: UniswapLiquidityInput }
   | { readonly type: 'EDIT_SWAP_SETUP_DIRECTION'; readonly id: string; readonly direction: Direction }
   | { readonly type: 'EDIT_BRIDGE_NETWORKS'; readonly id: string; readonly patch: Partial<CanvasBridgeNetworks>; readonly context: ReviewContext }
@@ -92,6 +95,14 @@ export function editorHistoryReducer(state: EditorHistory, action: HistoryAction
     else actionSetup = { id, action: action.action, amount: '0' };
     return { ...state, actionSetup, setupSerial: state.setupSerial + 1,
       layout: { ...state.layout, [id]: { ...action.position, actionType: action.action === 'swap' ? 'asset.swap.exact-input' : action.action === 'bridge' ? 'asset.bridge' : action.action } },
+      past: [...state.past, snapshot(state)], future: [] };
+  }
+  if (action.type === 'START_STOCKS_SETUP') {
+    if (state.actionSetup || !Number.isFinite(action.position.x) || !Number.isFinite(action.position.y)) return state;
+    const id = `action-setup-${state.setupSerial + 1}`;
+    const actionSetup: CanvasActionSetup = { id, action: 'swap', amount: '0', stocks: true,
+      cryptoSelection: { action: 'swap', network: ROBINHOOD_NETWORK, from: 'USDG', to: featuredStockSymbols()[0]! } };
+    return { ...state, actionSetup, setupSerial: state.setupSerial + 1, layout: { ...state.layout, [id]: { ...action.position, actionType: 'asset.swap.exact-input' } },
       past: [...state.past, snapshot(state)], future: [] };
   }
   if (action.type === 'EDIT_CRYPTO_SELECTION') {

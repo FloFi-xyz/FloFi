@@ -3,12 +3,14 @@
 import { useLocale } from '../i18n/locale';
 
 import { useId } from 'react';
-import { STOCK_EQUITIES, useStockCardInputs, type StockCardInput, type StockEquity } from './canvas-card-inputs';
+import { featuredStockSymbols } from '../domain/asset-catalogs';
+import type { CryptoSelection } from '../domain/crypto-action-picker';
 import { TokenAmountInput } from './token-amount-input';
 
-export function StocksSettings({ card, expanded, onExpandedChange }: { card: StockCardInput; expanded: boolean; onExpandedChange(expanded: boolean): void }) {
+/** BUILD-RH-002: Advanced Settings of the Stocks card, bound to the same Robinhood Chain swap selection and amount as the card. */
+export function StocksSettings({ selection, amount, expanded, onExpandedChange, onAmountChange, onEquityChange }: { selection: CryptoSelection; amount: string; expanded: boolean;
+  onExpandedChange(expanded: boolean): void; onAmountChange(amount: string): void; onEquityChange(equity: string): void }) {
   const { t: tr } = useLocale();
-  const stocks = useStockCardInputs();
   const contentId = useId();
   return <section className="inspector panel inspector-disclosure" aria-label={tr("Action inspector")}>
     <button type="button" className="inspector-toggle" aria-expanded={expanded} aria-controls={contentId} onClick={() => onExpandedChange(!expanded)}>
@@ -16,20 +18,22 @@ export function StocksSettings({ card, expanded, onExpandedChange }: { card: Sto
     </button>
     <div id={contentId} className="inspector-body" hidden={!expanded}>
       <h2>{tr("Stocks settings")}</h2>
-      <p className="composer-editor-context">{tr("Stocks · Robinhood · ")}{tr(stocks.network)}</p>
-      <StocksConfiguration amount={card.amount} equity={card.equity} onAmountChange={amount => stocks.edit(card.id, { amount })} onEquityChange={equity => stocks.edit(card.id, { equity })}/>
+      <p className="composer-editor-context">{tr("Stocks · Uniswap · ")}{tr(selection.network)}</p>
+      <StocksConfiguration amount={amount} source={selection.from} equity={selection.to ?? ''} onAmountChange={onAmountChange} onEquityChange={onEquityChange}/>
     </div>
   </section>;
 }
 
-export function StocksConfiguration({ amount, equity, onAmountChange, onEquityChange }: {
-  amount: string; equity: StockEquity; onAmountChange(amount: string): void; onEquityChange(equity: StockEquity): void;
+export function StocksConfiguration({ amount, source, equity, onAmountChange, onEquityChange }: {
+  amount: string; source: string; equity: string; onAmountChange(amount: string): void; onEquityChange(equity: string): void;
 }) {
   const { t: tr } = useLocale();
+  // Featured shortcuts plus the current choice (a search result from the card's Stocks panel).
+  const options = [...new Set([...featuredStockSymbols(), ...equity ? [equity] : []])];
   return <div className="inspector-fields">
-    <label>{tr("Equity")}<select aria-label={tr("Equity")} value={equity} onChange={event => onEquityChange(event.target.value as StockEquity)}>
-      {STOCK_EQUITIES.map(symbol => <option key={symbol} value={symbol}>{symbol}</option>)}
+    <label>{tr("Equity")}<select aria-label={tr("Equity")} value={equity} onChange={event => onEquityChange(event.target.value)}>
+      {options.map(symbol => <option key={symbol} value={symbol}>{symbol}</option>)}
     </select></label>
-    <label>{tr("Amount")}<TokenAmountInput aria-label={tr("Stocks amount")} value={amount} maxLength={80} onValueChange={onAmountChange}/></label>
+    <label>{tr("Amount")}<TokenAmountInput aria-label={tr(`Stocks amount (${source})`)} value={amount} maxLength={80} onValueChange={onAmountChange}/></label>
   </div>;
 }

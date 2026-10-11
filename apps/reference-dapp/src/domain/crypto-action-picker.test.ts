@@ -57,7 +57,8 @@ describe('one network per crypto action', () => {
     expect(reverse.from).toBe('USDT'); expect(reverse.to).toBe('SOL'); expect(reverse.network).toBe('Solana');
   });
   it('does not advertise Arbitrum swaps or unsupported pool adapters and pairs', () => {
-    expect(cryptoNetworks('swap', 'mainnet').map(profile => profile.network)).toEqual(['Base', 'Solana']);
+    // BUILD-RH-002: Robinhood Chain is a mainnet swap network (catalog-backed); Arbitrum still has no swap profile.
+    expect(cryptoNetworks('swap', 'mainnet').map(profile => profile.network)).toEqual(['Base', 'Solana', 'Robinhood Chain']);
     expect(cryptoNetworks('pool', 'mainnet').map(profile => profile.network)).toEqual(['Base']);
     expect(() => selectCryptoNetwork('pool', 'Solana')).toThrow('ACTION_NETWORK_UNSUPPORTED');
     expect(validCryptoSelection({ action: 'pool', network: 'Base Sepolia', from: 'WETH', to: 'USDC' })).toBe(false);

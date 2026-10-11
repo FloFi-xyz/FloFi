@@ -11,19 +11,37 @@ import { createUniswapLiquidityNode, uniswapLiquidityDetails } from './uniswap-l
 import { createSolanaLiquidityNode, solanaLiquidityDetails } from './solana-liquidity-authoring';
 import { createLiquidityNode } from './liquidity-authoring';
 import { createAuthoredSupply, createAuthoredBorrow, createAuthoredRepay, createAuthoredWithdraw, supplyDetails, borrowDetails, repayDetails, withdrawDetails, lendingProfileFor } from './supply-authoring';
+import { ROBINHOOD_CHAIN, ROBINHOOD_NETWORK, featuredStockSymbols, resolveNetworkAsset } from './asset-catalogs';
+import { catalogSwapDetails, createCatalogSwapAuthoringNode } from './catalog-swap-authoring';
 
 export type CryptoAction = 'swap' | 'pool' | 'supply' | 'borrow' | 'repay' | 'withdraw' | 'transfer';
 /** One network for the entire action. Assets never carry separate network selections. */
 export type CryptoSelection = { action: CryptoAction; network: string; from: string; to?: string };
 export type CryptoSelections = Readonly<Record<string, CryptoSelection>>;
-export type CryptoPickerProfile = { network: string; chain: string; provider: string; tokens: readonly string[]; pair?: readonly [string, string] };
+/**
+ * `catalog`: the network's assets come from its official asset catalog (BUILD-RH-002, Robinhood Chain). `tokens` are then the
+ * shortcuts shown as chips; any other catalog asset is reached through search and stays valid only while it resolves.
+ */
+export type CryptoPickerProfile = { network: string; chain: string; provider: string; tokens: readonly string[]; pair?: readonly [string, string]; catalog?: true };
 const mainnetContext = createReviewContext({ registryId: 'reference.registry', capabilityId: 'swap.direct-transaction', actionId: 'asset.swap.exact-input', assets: baseAssetRegistry });
 export function cryptoReviewContext(network: string) { return network === 'Base Sepolia' ? createBaseSepoliaReviewContext() : network === 'Ethereum Sepolia' ? createEthereumSepoliaReviewContext() : mainnetContext; }
 const evm = [
   { network: 'Base', chain: baseAssetRegistry.USDC.asset.chainId, provider: 'Uniswap', tokens: ['USDC', 'WETH'] },
   ...UNISWAP_LIQUIDITY_PROFILES.map(profile => ({ network: profile.network, chain: profile.chain, provider: 'Uniswap', tokens: ['USDC', 'WETH'] })),
 ];
-const swaps: readonly CryptoPickerProfile[] = [...evm, ...SOLANA_SWAP_RUNTIMES.map(runtime => ({ network: runtime.network, chain: runtime.chain, provider: runtime.providerLabel, tokens: Object.keys(runtime.tokens) }))];
+/** Robinhood Chain shortcuts: its stablecoin and wrapped ETH, then the featured Stock Tokens. Search reaches the full catalog. */
+const robinhoodSwap: CryptoPickerProfile = { network: ROBINHOOD_NETWORK, chain: ROBINHOOD_CHAIN, provider: 'Uniswap',
+  get tokens() { return ['USDG', 'WETH', ...featuredStockSymbols()]; }, catalog: true };
+const swaps: readonly CryptoPickerProfile[] = [...evm, ...SOLANA_SWAP_RUNTIMES.map(runtime => ({ network: runtime.network, chain: runtime.chain, provider: runtime.providerLabel, tokens: Object.keys(runtime.tokens) })),
+  robinhoodSwap];
+/** A token of a profile: a shortcut, or (catalog networks) any ERC-20 the current catalog resolves. */
+function profileHasToken(profile: CryptoPickerProfile, symbol: string | undefined, action: CryptoAction): boolean {
+  if (!symbol) return false;
+  if (profile.tokens.includes(symbol)) return !profile.catalog || action !== 'swap' || resolveNetworkAsset(profile.chain, { symbol })?.kind !== 'NATIVE';
+  if (!profile.catalog || !/^[A-Z][A-Z0-9.]{0,15}$/.test(symbol)) return false;
+  const asset = resolveNetworkAsset(profile.chain, { symbol });
+  return Boolean(asset && (action !== 'swap' || asset.kind === 'ERC20'));
+}
 const pools: readonly CryptoPickerProfile[] = [
   { ...evm[0]!, provider: 'Uniswap v3', pair: ['WETH', 'USDC'] },
   ...UNISWAP_LIQUIDITY_PROFILES.map(profile => ({ network: profile.network, chain: profile.chain, provider: 'Uniswap v3', tokens: [profile.token0.symbol, profile.token1.symbol], pair: [profile.token0.symbol, profile.token1.symbol] as const })),
@@ -40,9 +58,9 @@ export function cryptoProfile(selection: CryptoSelection) { return cryptoProfile
 export function validCryptoSelection(selection: CryptoSelection): boolean {
   if (!selection || !['swap', 'pool', 'supply', 'borrow', 'repay', 'withdraw', 'transfer'].includes(selection.action) || Object.keys(selection).some(key => !['action', 'network', 'from', 'to'].includes(key))) return false;
   const profile = cryptoProfile(selection);
-  if (!profile?.tokens.includes(selection.from)) return false;
+  if (!profile || !profileHasToken(profile, selection.from, selection.action)) return false;
   if (selection.action === 'pool') return selection.from === profile.pair?.[0] && selection.to === profile.pair?.[1];
-  return selection.action === 'swap' ? Boolean(selection.to && selection.to !== selection.from && profile.tokens.includes(selection.to)) : selection.to === undefined;
+  return selection.action === 'swap' ? Boolean(selection.to && selection.to !== selection.from && profileHasToken(profile, selection.to, 'swap')) : selection.to === undefined;
 }
 export function selectCryptoNetwork(action: CryptoAction, network: string, current?: CryptoSelection): CryptoSelection {
   const profile = cryptoProfiles(action).find(entry => entry.network === network);
@@ -53,12 +71,17 @@ export function selectCryptoNetwork(action: CryptoAction, network: string, curre
 }
 export function cryptoTokenOptions(selection: CryptoSelection, side: 'source' | 'destination') {
   const profile = cryptoProfile(selection);
-  return selection.action === 'pool' ? [side === 'source' ? profile?.pair?.[0] : profile?.pair?.[1]].filter((token): token is string => Boolean(token)) : profile?.tokens ?? [];
+  if (selection.action === 'pool') return [side === 'source' ? profile?.pair?.[0] : profile?.pair?.[1]].filter((token): token is string => Boolean(token));
+  const current = side === 'source' ? selection.from : selection.to;
+  // A catalog asset chosen through search stays visible next to the shortcuts.
+  return profile?.catalog && current && !profile.tokens.includes(current) ? [...profile.tokens, current] : profile?.tokens ?? [];
 }
 export function selectCryptoToken(selection: CryptoSelection, side: 'source' | 'destination', token: string): CryptoSelection {
-  if (!cryptoTokenOptions(selection, side).includes(token)) throw new Error('ACTION_TOKEN_UNSUPPORTED');
+  const found = cryptoProfile(selection);
+  if (!found || (!cryptoTokenOptions(selection, side).includes(token) && !(found.catalog && selection.action === 'swap' && profileHasToken(found, token, 'swap'))))
+    throw new Error('ACTION_TOKEN_UNSUPPORTED');
   if (selection.action !== 'swap') return selection;
-  const profile = cryptoProfile(selection)!;
+  const profile = found;
   const next = side === 'source' ? { ...selection, from: token } : { ...selection, to: token };
   if (next.from === next.to) {
     if (side === 'source') next.to = selection.from !== token ? selection.from : profile.tokens.find(asset => asset !== token)!;
@@ -72,6 +95,8 @@ export function cryptoSelectionOf(node: Node): CryptoSelection | null {
   if (!network) return null;
   if (transferDetails(node as Parameters<typeof transferDetails>[0])) return selectCryptoNetwork('transfer', network);
   if (node.actionType === 'asset.swap.exact-input') {
+    const catalog = catalogSwapDetails(node);
+    if (catalog) return catalog.fromAsset && catalog.toAsset ? { action: 'swap', network, from: catalog.from, to: catalog.to } : null;
     const solana = solanaSwapDetails(node);
     const evmSwap = node.chainId.startsWith('eip155:') ? swapDetails(node, cryptoReviewContext(network)) : null;
     return solana ? { action: 'swap', network, from: solana.from, to: solana.to } : evmSwap ? { action: 'swap', network, from: evmSwap.from, to: evmSwap.to } : null;
@@ -91,6 +116,7 @@ export function createCryptoActionNode(id: string, input: CryptoActionInput): Se
   if (!validCryptoSelection(selection)) throw new Error('ACTION_ASSETS_UNSUPPORTED');
   if (selection.action === 'swap') {
     if (selection.network === 'Solana' || selection.network === 'Solana Devnet') return createSolanaSwapNode(id, { network: selection.network, from: selection.from, to: selection.to, amount, slippage } as SolanaSwapInput);
+    if (selection.network === ROBINHOOD_NETWORK) return createCatalogSwapAuthoringNode(id, { network: ROBINHOOD_NETWORK, from: selection.from, to: selection.to!, amount, slippage });
     return createSwapNode(id, selection.from === 'USDC' ? 'USDC_TO_WETH' : 'WETH_TO_USDC', amount, slippage, cryptoReviewContext(selection.network));
   }
   if (selection.action === 'pool') {
@@ -108,6 +134,8 @@ export function createCryptoActionNode(id: string, input: CryptoActionInput): Se
 export function cryptoInputOf(node: Node): CryptoActionInput | null {
   const selection = cryptoSelectionOf(node);
   if (!selection) return null;
+  const catalogSwap = catalogSwapDetails(node);
+  if (catalogSwap) return { selection, amount: catalogSwap.amount, slippage: String(catalogSwap.slippage) };
   const solana = solanaSwapDetails(node), uni = uniswapLiquidityDetails(node), orca = solanaLiquidityDetails(node);
   const evmSwap = selection.action === 'swap' && !solana ? swapDetails(node, cryptoReviewContext(selection.network)) : null;
   if (solana || evmSwap) return { selection, amount: (solana ?? evmSwap)!.amount, slippage: solana?.slippage ?? String(evmSwap!.slippage ?? 50) };

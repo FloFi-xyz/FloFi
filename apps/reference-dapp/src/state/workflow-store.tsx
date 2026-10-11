@@ -25,6 +25,8 @@ type Store = { restorationEpoch: number; state: EditorState; dispatch: Dispatch<
   actionSetup: CanvasActionSetup | null; amountInputs: CanvasAmountInputs; authoringIncomplete: boolean;
   bridgeNetworkInputs: CanvasBridgeNetworkInputs; editBridgeNetworks(id: string, patch: Partial<CanvasBridgeNetworks>): void;
   startActionSetup(action: CanvasActionSetup['action'], position: { x: number; y: number }, beneficiary?: string): string;
+  /** BUILD-RH-002: the Stocks card, a Robinhood Chain catalog swap (USDG → Stock Token). */
+  startStocksSetup(position: { x: number; y: number }): string;
   editCanvasAmount(id: string, amount: string): void; cancelCanvasAmount(id: string): void;
   editPoolSetup(id: string, input: UniswapLiquidityInput): void;
   editSwapSetupDirection(id: string, direction: Direction): void;
@@ -141,6 +143,11 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
     dispatchHistory({ type: 'START_ACTION_SETUP', action, position, ...(beneficiary ? { beneficiary } : {}) });
     return `action-setup-${history.setupSerial + 1}`;
   }
+  function startStocksSetup(position: { x: number; y: number }) {
+    if (history.actionSetup) return history.actionSetup.id;
+    dispatchHistory({ type: 'START_STOCKS_SETUP', position });
+    return `action-setup-${history.setupSerial + 1}`;
+  }
   function editCanvasAmount(id: string, amount: string) {
     dispatchHistory({ type: 'EDIT_CANVAS_AMOUNT', id, amount, context });
     setPending(current => current?.authoringId === id ? null : current);
@@ -211,7 +218,7 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
   return <Context.Provider value={{ restorationEpoch, state, dispatch, context, restoreLendingCanvas, adoptDraftIdentity: workflowId => dispatchHistory({ type: 'ADOPT_DRAFT_IDENTITY', workflowId }), restoreWorkflow: workflow => { setRestorationEpoch(n => n + 1); setPending(null); dispatchHistory({ type: 'RESTORE_WORKFLOW', workflow }); }, canvasLayout: history.layout, canUndo: history.past.length > 0,
     actionSetup: history.actionSetup, amountInputs: history.amountInputs, authoringIncomplete,
     bridgeNetworkInputs: history.bridgeNetworkInputs, editBridgeNetworks, cryptoSelections: history.cryptoSelections, editCryptoSelection, reviewCryptoPool,
-    startActionSetup, editCanvasAmount, editPoolSetup, editSwapSetupDirection, cancelCanvasAmount, reviewCanvasAmount, removeActionSetup,
+    startActionSetup, startStocksSetup, editCanvasAmount, editPoolSetup, editSwapSetupDirection, cancelCanvasAmount, reviewCanvasAmount, removeActionSetup,
     canRedo: history.future.length > 0, undo, redo, moveCanvasNodes, addCanvasCommand, duplicateCanvasNodes,
     pending, propose, applyProposal, dismissProposal: () => setPending(null), ...reviewState,
     chain, eligibility, generateArtifacts, refreshArtifacts, accessCheck }}>

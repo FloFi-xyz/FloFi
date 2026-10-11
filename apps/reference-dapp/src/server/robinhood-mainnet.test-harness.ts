@@ -70,7 +70,7 @@ export function createRobinhoodMockChain(catalog: AssetCatalog, options: { reado
   function call(to: string, data: string): string {
     to = to.toLowerCase();
     const selector = data.slice(0, 10);
-    if ([UNI.router, UNI.quoter, UNI.positionManager].includes(to)) {
+    if (([UNI.router, UNI.quoter, UNI.positionManager] as readonly string[]).includes(to)) {
       if (selector === '0xc45a0155') return addressWord(UNI.factory);
       if (selector === '0x4aa4a4fc') return addressWord(UNI.weth);
     }

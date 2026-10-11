@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
+import { swapProfile } from '../domain/public-testnet-swap';
 import { useLocale } from '../i18n/locale';
 
 import { WithdrawPanel } from './withdraw-panel';
@@ -174,7 +175,8 @@ function AppShellContent({ engineering = false, pathname, navigate, simulationRe
   const solanaLiquidityPath = !supplyPath && !uniswapLiquidityPath && (state.workflow.nodes.some(n => n.actionType === 'asset.liquidity.concentrated' && n.chainId.startsWith('solana:')) || Boolean(solanaLiquidity.recovered && solanaLiquidity.record));
   const solanaPath = !supplyPath && !solanaLiquidityPath && (state.workflow.nodes.some(n => n.actionType === 'asset.swap.exact-input' && n.chainId.startsWith('solana:')) || Boolean(jupiter.recovered && jupiter.record));
   const publicTestnet = usePublicTestnet();
-  const testnetWorkflow = state.workflow.nodes.some(node => node.actionType === 'asset.swap.exact-input' && ['eip155:84532', 'eip155:11155111'].includes(node.chainId));
+  // The shared owner-wallet Uniswap swap: the testnet pairs and (BUILD-RH-002) Robinhood Chain catalog swaps.
+  const testnetWorkflow = state.workflow.nodes.some(node => node.actionType === 'asset.swap.exact-input' && swapProfile(node.chainId) !== null);
   const publicRecovery = Boolean(publicTestnet.recoveryOnly && publicTestnet.run);
   const continuedApproval = Boolean(publicTestnet.run && !publicTestnet.retired &&
     publicTestnet.run.attempts.at(-1)?.step === 'approval' &&

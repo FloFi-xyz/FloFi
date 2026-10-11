@@ -17,7 +17,9 @@ import { createCryptoActionNode, cryptoInputOf, cryptoProfile, canSelectCryptoAs
 
 /** Required-field authoring only, never an executable node or alternate workflow. */
 export type CanvasActionSetup = { readonly id: string; readonly amount: string; readonly cryptoSelection?: CryptoSelection; readonly cryptoBeneficiary?: string } &
-  ({ readonly action: 'pool'; readonly input: UniswapLiquidityInput } | { readonly action: 'swap'; readonly direction?: Direction } | { readonly action: 'bridge'; readonly networks?: CanvasBridgeNetworks } | { readonly action: 'withdraw' | 'transfer' } | { readonly action: 'supply' | 'borrow' | 'repay'; readonly beneficiary: string });
+  ({ readonly action: 'pool'; readonly input: UniswapLiquidityInput } |
+  /** `stocks`: the Stocks card (BUILD-RH-002): a Robinhood Chain catalog swap that buys a Stock Token with USDG. */
+  { readonly action: 'swap'; readonly direction?: Direction; readonly stocks?: true } | { readonly action: 'bridge'; readonly networks?: CanvasBridgeNetworks } | { readonly action: 'withdraw' | 'transfer' } | { readonly action: 'supply' | 'borrow' | 'repay'; readonly beneficiary: string });
 export type CanvasBridgeNetworks = Pick<RouterBridgeInput, 'source' | 'destination'>;
 export type CanvasBridgeNetworkInputs = Readonly<Record<string, CanvasBridgeNetworks>>;
 export const CANVAS_BRIDGE_NETWORK_OPTIONS = {
@@ -127,11 +129,15 @@ export function canvasAmountMessage(cause: unknown) {
   if (/LOCK|PROTECTED/.test(code)) return 'This amount is protected.';
   if (/STALE/.test(code)) return 'The workflow changed. Review this amount again.';
   if (code === 'ROUTER_PAIR_UNSUPPORTED') return 'Choose matching bridge networks.';
+  if (code === 'ASSET_CATALOG_UNAVAILABLE') return 'Robinhood Stock Tokens are unavailable right now. Try again in a moment.';
+  if (code === 'INVALID_ASSET_PAIR') return 'Choose two different assets.';
   return 'This action cannot be combined with the current workflow. Check its settings or use a separate workflow.';
 }
 
 /** Known authoring choices, without manufacturing a temporary canonical action. */
 export function setupSummary(setup: CanvasActionSetup, context: ReviewContext) {
+  if (setup.action === 'swap' && setup.stocks && setup.cryptoSelection) return { action: 'Stocks', provider: 'Uniswap', chain: setup.cryptoSelection.network,
+    amount: `${setup.amount || '0'} ${setup.cryptoSelection.from}`, detail: `${setup.cryptoSelection.from} → ${setup.cryptoSelection.to}`, bridgePair: undefined, linked: false, risk: undefined };
   if (setup.cryptoSelection) {
     const selection = setup.cryptoSelection, profile = cryptoProfile(selection)!;
     return { action: selection.action === 'pool' ? 'Pool / Liquidity' : selection.action[0]!.toUpperCase() + selection.action.slice(1), provider: profile.provider, chain: selection.network,

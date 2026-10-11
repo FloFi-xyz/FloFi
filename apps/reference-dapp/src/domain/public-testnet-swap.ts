@@ -28,7 +28,7 @@ export const ETHEREUM_SEPOLIA_SWAP = Object.freeze({
  * pools and bound into the Review, never authored.
  */
 export const ROBINHOOD_MAINNET_SWAP = Object.freeze({
-  chainId: robinhood.chainId, chainHex: robinhood.chainHex, chainRef: robinhood.chain, network: robinhood.network,
+  chainId: 4663, chainHex: '0x1237', chainRef: 'eip155:4663', network: robinhood.network,
   rpcUrl: robinhood.rpc, explorer: `${robinhood.explorer}/tx/`,
   factory: robinhood.factory, router: robinhood.router, quoter: robinhood.quoter, weth: robinhood.weth,
   poolInitCodeHash: robinhood.poolInitCodeHash, feeTiers: robinhood.feeTiers, codeSha256: robinhood.codeSha256,

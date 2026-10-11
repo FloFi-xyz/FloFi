@@ -653,6 +653,17 @@
 .composer-stock-option[data-selected] .composer-stock-check{visibility:visible}
 .composer-stock-option:has(input:focus-visible){outline:2px solid var(--blue);outline-offset:1px}
 @media(prefers-reduced-motion:reduce){.composer-stocks-panel{animation:none}}
+/* BUILD-RH-002: Stocks catalog search (featured shortcuts stay above; results are bounded and scroll inside the panel). */
+.composer-stocks-catalog{width:min(260px,calc(100vw - 48px));padding-right:10px}
+.composer-stock-search{display:grid;gap:2px;margin:8px 0 4px}
+.composer-stock-search input{width:100%;min-width:0;padding:6px 8px;border:1px solid var(--accent-line);border-radius:6px;background:var(--paper);color:var(--ink);font:inherit;font-size:12px}
+.composer-stock-search input:focus-visible{outline:2px solid var(--blue);outline-offset:1px}
+.composer-stock-results{display:grid;gap:2px;max-height:216px;margin:0;padding:0;overflow-y:auto;list-style:none;overscroll-behavior:contain}
+.composer-stock-results .composer-stock-option{width:100%;justify-content:flex-start;font-family:inherit;text-align:left;background:transparent}
+.composer-stock-name{overflow:hidden;color:var(--muted);font-weight:500;text-overflow:ellipsis}
+.composer-stock-status{margin:6px 8px;color:var(--muted);font-size:11px;line-height:1.4}
+.composer-stock-retry{margin-left:4px;padding:2px 6px;font-size:11px}
+:root[data-theme="dark"] .composer-stock-search input{background:var(--surface-raised)}
 
 /* Approved FloFi artwork uses the same theme selector as the product shell. */
 .flofi-logo{display:inline-flex;align-items:center;flex:none}
