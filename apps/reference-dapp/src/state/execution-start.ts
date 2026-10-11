@@ -49,7 +49,8 @@ export function useExecutionStart(kind: SimulationSource['kind'], wallet: Review
     }
     case 'public': {
       const r = publicSwap.run;
-      attach(Boolean(publicSwap.available && r && r.reviewedManifestHash === r.quote.manifestHash && !publicSwap.retired && !publicSwap.recoveryOnly && !publicSwap.busy && !r.outcome), Boolean(r?.attempts.length), publicSwap.execute,
+      attach(Boolean(publicSwap.available && r && r.reviewedManifestHash === r.quote.manifestHash && !publicSwap.retired && !publicSwap.recoveryOnly && !publicSwap.busy && !r.outcome && !r.divergence &&
+        !r.attempts.some(a => ['PREPARED', 'HASH', 'PENDING', 'UNKNOWN'].includes(a.state) || a.step === 'swap' && a.state !== 'REJECTED')), Boolean(r?.attempts.length), publicSwap.execute,
         'Confirm the next transaction in your wallet. A token approval is requested only if the current allowance is insufficient.'); break;
     }
     case 'solana-swap': {

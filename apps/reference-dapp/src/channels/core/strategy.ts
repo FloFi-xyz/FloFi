@@ -13,13 +13,14 @@
  */
 import type { Command } from '../../domain/commands';
 import type { WorkflowStep } from '../../domain/workflow-steps';
+import { CATALOG_NETWORK_IDENTITIES } from '../../domain/network-registry';
 import type { NetworkId, StrategySpec } from '../../engine/strategy-spec';
 import { composeWorkflowOrRefuse, PlatformRefusal, type WalletRef } from '../../platform/index.ts';
 import { workflowVisualModel, type WorkflowVisualModel } from '../../platform/workflow-visual.ts';
 
 const LENDING_NETWORK: Readonly<Record<string, NetworkId>> = { 'Base Sepolia': 'base-sepolia', 'Ethereum Sepolia': 'ethereum-sepolia', 'Base': 'base' };
 /** BUILD-BASE-001: the catalog networks (Canvas name → strategy network): Robinhood Chain and Base. */
-const CATALOG_NETWORK: Readonly<Record<string, NetworkId>> = { 'Robinhood Chain': 'robinhood', 'Base': 'base' };
+const CATALOG_NETWORK: Readonly<Record<string, NetworkId>> = Object.fromEntries(CATALOG_NETWORK_IDENTITIES.map(network => [network.name, network.key as NetworkId]));
 const SWAP_NETWORK: Readonly<Record<string, NetworkId>> = { ADD_SWAP: 'base', ADD_TESTNET_SWAP: 'base-sepolia', ADD_ETHEREUM_SEPOLIA_SWAP: 'ethereum-sepolia' };
 const ROUTING = { AUTO: 'auto', LIFI: 'lifi', ACROSS: 'across' } as const;
 /** The router's chain names as strategy networks (BUILD-RH-002 adds Robinhood Chain in and out of Base and Arbitrum One). */

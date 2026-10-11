@@ -76,7 +76,7 @@ describe('BUILD-BASE-001 Copilot parity on catalog networks', () => {
   });
   it('never infers real funds: an unnamed or test-worded mainnet is asked, not chosen', () => {
     const unnamed = new CopilotSession().say('Send 5 USDC to ' + RECIPIENT, intent.action(act.transfer({ asset: 'USDC', amount: '5', recipient: RECIPIENT })))!;
-    expect(unnamed).toMatchObject({ kind: 'CLARIFICATION', options: ['Base', 'Robinhood Chain'] });
+    expect(unnamed).toMatchObject({ kind: 'CLARIFICATION', options: ['Base', 'Arbitrum One', 'Robinhood Chain'] });
     const testWords = new CopilotSession().say('Swap 10 USDC for cbBTC on the Base test network', intent.action(act.swap({ network: 'BASE', inputAsset: 'USDC', outputAsset: 'cbBTC', amount: '10' })))!;
     expect(testWords).toMatchObject({ kind: 'CLARIFICATION' });
     expect(testWords.text).toContain('uses real funds');

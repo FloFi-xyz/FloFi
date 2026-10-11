@@ -17,7 +17,7 @@ describe('BUILD-CLOUD-001 backend entry point loads under plain Node', () => {
     { cwd, timeout: 60_000, env: { PATH: process.env.PATH ?? '', NODE_ENV: 'test' } });
     // BUILD-RH-002 adds the Robinhood Chain swap, mainnet transfer, liquidity and the four Robinhood bridge routes; BUILD-BASE-001 the Base
     // mainnet swap, transfer, liquidity and Aave flows and the Router's Arbitrum One → Base route.
-    expect(stdout.trim()).toBe('aave-supply,base-aave,base-liquidity,base-mainnet-transfer,base-sepolia-swap,base-swap,crosschain-router,crosschain-router-arbitrum-to-base,' +
+    expect(stdout.trim()).toBe('aave-supply,arbitrum-mainnet-transfer,arbitrum-swap,base-aave,base-liquidity,base-mainnet-transfer,base-sepolia-swap,base-swap,crosschain-router,crosschain-router-arbitrum-to-base,' +
       'crosschain-router-arbitrum-to-robinhood,crosschain-router-base-to-robinhood,' +
       'crosschain-router-robinhood-to-arbitrum,crosschain-router-robinhood-to-base,crosschain-router-testnet,jupiter-swap,lending-composition,orca-liquidity,pix-payment,' +
       'robinhood-liquidity,robinhood-mainnet-transfer,robinhood-swap,robinhood-transfer,solana-devnet-swap,uniswap-liquidity');

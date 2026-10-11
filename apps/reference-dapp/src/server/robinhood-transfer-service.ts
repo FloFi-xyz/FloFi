@@ -11,7 +11,7 @@
  * validated official catalog at Simulate, and `begin` needs the deployment's real-funds owner-execution opt-in.
  */
 import { randomBytes } from 'node:crypto';
-import { catalogAsset, type AssetCatalog } from '@defi-workflow-engine/action-registry';
+import { catalogAsset, transferEnvironment, type AssetCatalog } from '@defi-workflow-engine/action-registry';
 import { isAbsolute } from 'node:path';
 import { createBaseSepoliaReviewContext, validateAuthoringWorkflow } from '@defi-workflow-engine/reference-linter';
 import { assertNativeTransferReview, readTransferState, simulateNativeTransfer, nativeTransferProfile, ROBINHOOD_TESTNET_TRANSFER, transferToken,
@@ -31,9 +31,10 @@ const REFUSALS = [4001, 4100, 4200];
 const idCheck = (id: string) => { if (!TRANSFER_RUN_ID.test(id)) throw new Error('TRANSFER_ID_INVALID'); return id; };
 /** The official catalog must still map the reviewed token exactly (address, decimals, official id and multiplier). */
 function assertCatalogToken(catalog: AssetCatalog, review: NativeTransferReview): void {
+  if (catalog.chain !== review.chain || catalog.chainId !== review.chainId) throw new Error('TRANSFER_CATALOG_NETWORK_MISMATCH');
   const token = review.asset!;
   const asset = catalogAsset(catalog, { address: token.token });
-  if (!asset || asset.kind !== 'ERC20' || asset.decimals !== token.decimals || (asset.stock?.officialId ?? null) !== token.officialId) throw new Error('TRANSFER_ASSET_IDENTITY_CHANGED');
+  if (!asset || asset.chain !== catalog.chain || asset.chainId !== catalog.chainId || asset.kind !== 'ERC20' || asset.decimals !== token.decimals || (asset.stock?.officialId ?? null) !== token.officialId) throw new Error('TRANSFER_ASSET_IDENTITY_CHANGED');
   if (asset.stock && asset.stock.multiplierWad !== token.multiplierWad) throw new Error('TRANSFER_STOCK_MULTIPLIER_MISMATCH');
 }
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
@@ -45,7 +46,7 @@ const prefix = (before: readonly unknown[], after: readonly unknown[]) => after.
  */
 export function createRobinhoodTransferService(input: { rpc?: TransferRpc; rpcs?: Readonly<Partial<Record<string, TransferRpc>>>; journalDir?: string;
   storage?: ExecutionStorage; provenance: 'PUBLIC_TESTNET' | 'PUBLIC_MAINNET' | 'MOCKED'; now?: () => number;
-  /** BUILD-RH-002: `rht` for the Robinhood Chain mainnet deployment, BUILD-BASE-001 `bat` for Base mainnet (default `rhx`, the public-testnet runs). */ idPrefix?: 'rhx' | 'rht' | 'bat';
+  /** BUILD-RH-002: `rht` for the Robinhood Chain mainnet deployment, BUILD-BASE-001 `bat` for Base mainnet (default `rhx`, the public-testnet runs). */ idPrefix?: 'rhx' | 'rht' | 'bat' | 'art';
   /** The official catalog of a catalog network; token transfers there fail closed without it. */ catalogFor?: (chain: string) => Promise<AssetCatalog>;
   /** Real-funds owner execution (mainnet only); Simulate and Review stay available without it. */ executionEnabled?: boolean }) {
   const idPrefix = input.idPrefix ?? 'rhx';
@@ -59,7 +60,16 @@ export function createRobinhoodTransferService(input: { rpc?: TransferRpc; rpcs?
     return rpc;
   };
   const stateOf = (review: NativeTransferReview, account: string) => readTransferState(rpcFor(review.chain), nativeTransferProfile(review.chain), account, now(),
-    review.asset ? { address: review.asset.token, officialId: review.asset.officialId } : undefined);
+    review.asset ? { address: review.asset.token, officialId: review.asset.officialId } : undefined, review.recipient);
+  // Nitro posting gas can change independently of the child gas price. Re-estimate the exact reviewed call before handoff.
+  const assertFreshGas = async (review: NativeTransferReview, block: number) => {
+    const profile = nativeTransferProfile(review.chain);
+    if (!('reestimateBeforeSubmission' in profile) || !profile.reestimateBeforeSubmission) return;
+    const { from, to, value, data } = review.transaction;
+    const gas = await rpcFor(review.chain)('eth_estimateGas', [{ from, to, value, data }, '0x' + block.toString(16)]);
+    if (typeof gas !== 'string' || !/^0x(?:0|[1-9a-f][0-9a-f]*)$/i.test(gas)) throw new Error('TRANSFER_GAS_INVALID');
+    if (BigInt(gas) > BigInt(review.gasLimit)) throw new Error('TRANSFER_GAS_CHANGED_REVIEW_REQUIRED');
+  };
   const path = (id: string) => { idCheck(id); if (!id.startsWith(idPrefix + '-')) throw new Error('TRANSFER_ID_INVALID'); return id + '.jsonl'; };
   /** Append-only history: every line is a valid run and never rewrites what an earlier line established. */
   const validate = (bytes: Uint8Array) => {
@@ -150,9 +160,18 @@ export function createRobinhoodTransferService(input: { rpc?: TransferRpc; rpcs?
       if (record.attempt) throw new Error('TRANSFER_EXISTING_ATTEMPT_OBSERVE_ONLY');
       if (now() >= Date.parse(record.review.expiresAt)) throw new Error('TRANSFER_REVIEW_EXPIRED');
       // Real funds: nothing is reserved or prepared unless this deployment explicitly allows owner execution.
-      if (input.executionEnabled === false) throw new Error('OWNER_EXECUTION_NOT_ENABLED');
+      if (input.executionEnabled === false || transferEnvironment(nativeTransferProfile(record.review.chain)) === 'MAINNET' && input.executionEnabled !== true) throw new Error('OWNER_EXECUTION_NOT_ENABLED');
       const state = await stateOf(record.review, account);
       assertNativeTransferReview(record.review, workflow, account, state, now());
+      await assertFreshGas(record.review, state.block);
+      if (record.review.asset) {
+        if (!input.catalogFor) throw new Error('TRANSFER_NETWORK_UNAVAILABLE');
+        assertCatalogToken(await input.catalogFor(record.review.chain), record.review);
+        const rpc = rpcFor(record.review.chain), token = record.review.asset, block = '0x' + state.block.toString(16);
+        if (await rpc('eth_getCode', [token.token, block]) === '0x') throw new Error('TRANSFER_TOKEN_CODE_MISSING');
+        if (BigInt(String(await rpc('eth_call', [{ to: token.token, data: '0x313ce567' }, block]))) !== BigInt(token.decimals))
+          throw new Error('TRANSFER_TOKEN_METADATA_MISMATCH');
+      }
       await reserveNonce(record);
       const prepared = await save({ ...record, ...prepareTransferAttempt(record, state.block, state.nonce, at()), error: null });
       return { record: prepared, transaction: prepared.attempt!.transaction };
@@ -164,6 +183,8 @@ export function createRobinhoodTransferService(input: { rpc?: TransferRpc; rpcs?
         throw new Error('TRANSFER_WALLET_HANDOFF_NOT_AUTHORIZED');
       const state = await stateOf(record.review, record.review.account);
       if (state.nonce !== record.attempt.nonce || state.pendingNonce !== record.attempt.nonce) throw new Error('TRANSFER_NONCE_CHANGED');
+      if (record.review.state.recipientCodeHash !== undefined) assertNativeTransferReview(record.review, record.review.workflow, record.review.account, state, now());
+      await assertFreshGas(record.review, state.block);
       return save({ ...record, ...transferTransition(record, 'SUBMITTING', at()) });
     }); },
     async report(id: string, result: { kind: 'HASH'; hash: string } | { kind: 'UNKNOWN' | 'REJECTED'; code?: string }): Promise<TransferRecord> { return locked(idCheck(id), async () => {

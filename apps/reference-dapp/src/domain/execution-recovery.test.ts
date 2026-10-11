@@ -22,6 +22,22 @@ function project(s: ExecutionLifecycleSource, wallet = reviewFixture().wallet) {
   return { progress, recovery: projectExecutionRecovery(s, progress, wallet) };
 }
 describe('current execution recovery presentation', () => {
+  it.each(['PREPARED', 'UNKNOWN'] as const)('exposes observation-only nonce discovery for an owner-bound %s swap without a hash', status => {
+    const s = publicSource(status, true);
+    if (s.kind !== 'public' || !s.state.run) throw Error('fixture');
+    const run = { ...s.state.run, quote: { ...s.state.run.quote, chainId: 42161, ownerReview: { account: reviewOwner, nonce: '7' } },
+      attempts: [{ ...s.state.run.attempts.at(-1)!, state: status, txHash: null }] };
+    const { recovery } = project(source('public', { ...s.state, run }));
+    expect(recovery.action).toBe('observe');
+    expect(recovery.contextIssue).toContain('Arbitrum (42161)');
+  });
+  it('keeps a divergent owner-bound swap unresolved despite a successful receipt', () => {
+    const s = publicSource('CONFIRMED', true);
+    if (s.kind !== 'public' || !s.state.run) throw Error('fixture');
+    const { progress, recovery } = project(source('public', { ...s.state, run: { ...s.state.run, divergence: 'TRANSACTION_BOUNDS_MISMATCH' } }));
+    expect(progress).toMatchObject({ state: 'uncertain', completed: 0 });
+    expect(recovery.action).toBeNull();
+  });
   it('restores the same run and never treats an unknown submission as failure or success', () => {
     const { progress, recovery } = project(publicSource('UNKNOWN', true));
     expect(progress).toMatchObject({ started: true, restored: true, completed: 0, state: 'uncertain' });

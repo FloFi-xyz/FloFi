@@ -6,16 +6,12 @@ import { assetIdentity, networkMark } from './asset-identity';
 import { OFFICIAL_CATALOG_CHAINS, officialCatalogLoaded, registerNetworkCatalog, resetNetworkCatalogs, resolveAssetReference, resolveNetworkAsset } from './asset-catalogs';
 import { AUTHORING_CAPABILITIES, bridgeOffers, capabilityNetworks, catalogCapabilityNetworks } from './authoring-capabilities';
 import { CATALOG_NETWORK_IDENTITIES, NETWORKS, catalogNetworkOfChatName, catalogNetworksNamed, networkIdentity } from './network-registry';
-import { CopilotSession, act, intent } from './copilot-session.test-harness';
 import { mentionedNetworks } from './copilot-authoring';
 import { copilotSupportsSection } from '../server/copilot-capabilities';
 import { prepareCatalogsForText, prepareNetworkCatalogs } from '../platform/catalogs';
 import { composeStrategy, semanticWorkflowHash } from '../engine/strategy-engine';
 import { supportedNetworks } from '../engine/capability-catalog';
 import { cryptoProfiles } from './crypto-action-picker';
-import { parseLocalCommand } from './commands';
-import { initialWorkflow } from './initial-workflow';
-import { dappReviewContext } from '../engine/strategy-engine';
 import { walletNetwork } from '../wallet/evm-networks';
 
 const bytes = readFileSync(new URL('../../../../packages/action-registry/test/fixtures/arbitrum-token-list-fixture.json', import.meta.url), 'utf8');
@@ -23,7 +19,7 @@ const catalog = () => parseArbitrumTokenList(bytes, '2026-10-11T21:36:16.041Z');
 const chain = ARBITRUM_ONE.chain;
 afterEach(resetNetworkCatalogs);
 
-describe('BUILD-ARB-001 shared first-class recognition without runtime activation', () => {
+describe('BUILD-ARB-001 shared first-class recognition through shared runtime registration', () => {
   it('resolves one canonical network, its existing icon and wallet identity, including natural-language vocabulary', () => {
     const network = networkIdentity(chain)!;
     for (const value of ['arbitrum-one', 'Arbitrum', 'Arbitrum One', 'Arbitrum (42161)']) expect(networkIdentity(value)).toBe(network);
@@ -102,26 +98,20 @@ describe('BUILD-ARB-001 shared first-class recognition without runtime activatio
     expect(assets.map(workflowAsset)).toEqual(original.assets);
     expect(JSON.stringify(original.workflow)).not.toMatch(/logoUrl|\/brand\/|coingecko|Presentation changed/);
   });
-  it('keeps runtime capability truth generated: bridges only, with every unbuilt financial action refused', () => {
+  it('keeps runtime capability truth generated and unbuilt liquidity/lending refused', () => {
     registerNetworkCatalog(catalog());
     expect(discoverNetworkCapabilities(chain)).toHaveLength(10);
-    expect(supportedNetworks().find(n => n.id === 'arbitrum-one')).toMatchObject({ class: 'MAINNET', funds: 'REAL_FUNDS', actions: ['bridge'] });
-    expect(AUTHORING_CAPABILITIES.filter(c => c.network.chain === chain).every(c => c.action === 'bridge')).toBe(true);
+    expect(supportedNetworks().find(n => n.id === 'arbitrum-one')).toMatchObject({ class: 'MAINNET', funds: 'REAL_FUNDS', actions: ['bridge', 'swap', 'transfer'] });
+    expect(AUTHORING_CAPABILITIES.filter(c => c.network.chain === chain).every(c => ['bridge', 'swap', 'transfer'].includes(c.action))).toBe(true);
     expect(bridgeOffers().some(r => r.source.chain === chain && r.destination.key === 'base')).toBe(true);
     expect(bridgeOffers().some(r => r.destination.chain === chain && r.source.key === 'base')).toBe(true);
     expect(catalogCapabilityNetworks().map(n => n.key)).toEqual(['base', 'robinhood']);
     const supports = copilotSupportsSection();
     expect(supports).toContain('from Arbitrum One to Base');
-    for (const line of supports.split('\n').filter(line => /^- (?:SWAP|TRANSFER|SUPPLY|LIQUIDITY)\b/.test(line))) expect(line).not.toContain('Arbitrum');
-    for (const action of ['swap', 'transfer', 'add_liquidity', 'supply', 'borrow', 'repay', 'withdraw'] as const) {
+    for (const line of supports.split('\n').filter(line => /^- (?:SUPPLY|LIQUIDITY)\b/.test(line))) expect(line).not.toContain('Arbitrum');
+    for (const action of ['add_liquidity', 'supply', 'borrow', 'repay', 'withdraw'] as const) {
       expect(capabilityNetworks(action).some(n => n.chain === chain)).toBe(false);
       expect(cryptoProfiles(action === 'add_liquidity' ? 'pool' : action).some(p => p.chain === chain)).toBe(false);
     }
-    for (const sentence of ['swap 1 USDC to WETH on Arbitrum', 'transfer 0.01 ETH on Arbitrum One'])
-      expect(() => parseLocalCommand(sentence, initialWorkflow(), dappReviewContext(), null)).toThrow();
-    const session = new CopilotSession();
-    const reply = session.say('Please swap 1 USDC for WETH on Arbitrum One', intent.action(act.swap({ network: 'ARBITRUM', inputAsset: 'USDC', outputAsset: 'WETH', amount: '1' })));
-    expect(reply?.kind).not.toBe('PROPOSAL');
-    expect(session.pending).toBeNull();
   });
 });

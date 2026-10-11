@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { AAVE_V3_LENDING_PROFILES, ASSET_SYMBOL, UNISWAP_LIQUIDITY_PROFILES, baseAssetRegistry, SOLANA_SWAP_RUNTIMES, ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY } from '@defi-workflow-engine/action-registry';
+import { AAVE_V3_LENDING_PROFILES, ASSET_SYMBOL, transferAllowsTokens, UNISWAP_LIQUIDITY_PROFILES, baseAssetRegistry, SOLANA_SWAP_RUNTIMES, ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY } from '@defi-workflow-engine/action-registry';
 import { createBaseSepoliaReviewContext, createEthereumSepoliaReviewContext, createReviewContext } from '@defi-workflow-engine/reference-linter';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { createAuthoredTransfer, transferDetails, TRANSFER_NETWORKS, type TransferNetwork } from './robinhood-transfer-authoring';
@@ -11,7 +11,7 @@ import { createUniswapLiquidityNode, uniswapLiquidityDetails } from './uniswap-l
 import { createSolanaLiquidityNode, solanaLiquidityDetails } from './solana-liquidity-authoring';
 import { createAuthoredSupply, createAuthoredBorrow, createAuthoredRepay, createAuthoredWithdraw, supplyDetails, borrowDetails, repayDetails, withdrawDetails, lendingProfileFor } from './supply-authoring';
 import { BASE_CHAIN, BASE_NETWORK, ROBINHOOD_CHAIN, ROBINHOOD_NETWORK, featuredNetworkSymbols, featuredStockSymbols, resolveNetworkAsset } from './asset-catalogs';
-import { catalogSwapDetails, createCatalogSwapAuthoringNode } from './catalog-swap-authoring';
+import { CATALOG_SWAP_NETWORKS, catalogSwapDetails, createCatalogSwapAuthoringNode, type CatalogSwapNetwork } from './catalog-swap-authoring';
 import { networkIdentity } from './network-registry';
 import { CATALOG_LIQUIDITY_NETWORKS, createCatalogLiquidityNode, catalogLiquidityDetails, robinhoodFullRange, ROBINHOOD_LIQUIDITY_DEFAULT_FEE, type CatalogLiquidityNetwork } from './robinhood-liquidity-authoring';
 
@@ -40,7 +40,8 @@ const isBaseReferencePair = (selection: CryptoSelection) => selection.network ==
 const robinhoodSwap: CryptoPickerProfile = { network: ROBINHOOD_NETWORK, chain: ROBINHOOD_CHAIN, provider: 'Uniswap',
   get tokens() { return ['USDG', 'WETH', ...featuredStockSymbols()]; }, catalog: true };
 const swaps: readonly CryptoPickerProfile[] = [...evm, ...SOLANA_SWAP_RUNTIMES.map(runtime => ({ network: runtime.network, chain: runtime.chain, provider: runtime.providerLabel, tokens: Object.keys(runtime.tokens) })),
-  robinhoodSwap];
+  robinhoodSwap, ...Object.entries(CATALOG_SWAP_NETWORKS).filter(([network]) => network !== BASE_NETWORK && network !== ROBINHOOD_NETWORK)
+    .map(([network, chain]): CryptoPickerProfile => ({ network, chain, provider: 'Uniswap', get tokens() { return featuredNetworkSymbols(chain); }, catalog: true }))];
 /** Swaps and pools on a catalog network take ERC-20s only (native ETH is wrapped first); transfers may also send ETH. */
 const erc20Only = (action: CryptoAction) => action === 'swap' || action === 'pool';
 /** A token of a profile: a shortcut, or (catalog networks) any ERC-20 the current catalog resolves. */
@@ -64,7 +65,7 @@ const transfers: readonly CryptoPickerProfile[] = Object.entries(TRANSFER_NETWOR
   // BUILD-RH-002: Robinhood Chain transfers native ETH and catalog assets; non-shortcut assets come from the official catalog.
   ? { network, chain: profile.chain, provider: 'Transfer', get tokens() { return ['ETH', 'USDG', 'WETH', ...featuredStockSymbols()]; }, catalog: true }
   // BUILD-BASE-001: Base likewise (ETH, then its shortcuts; search reaches the validated token list).
-  : profile.chain === BASE_CHAIN ? { network, chain: profile.chain, provider: 'Transfer', get tokens() { return ['ETH', ...featuredNetworkSymbols(BASE_CHAIN)]; }, catalog: true }
+  : transferAllowsTokens(profile) ? { network, chain: profile.chain, provider: 'Transfer', get tokens() { return ['ETH', ...featuredNetworkSymbols(profile.chain)]; }, catalog: true }
   : { network, chain: profile.chain, provider: 'Native transfer', tokens: ['ETH'] });
 const lending: readonly CryptoPickerProfile[] = AAVE_V3_LENDING_PROFILES.map(profile => ({ network: profile.network, chain: profile.chain, provider: 'Aave V3', tokens: [profile.symbol] }));
 export function cryptoProfiles(action: CryptoAction): readonly CryptoPickerProfile[] { return action === 'swap' ? swaps : action === 'pool' ? pools : action === 'transfer' ? transfers : lending; }
@@ -158,8 +159,8 @@ export function createCryptoActionNode(id: string, input: CryptoActionInput): Se
   if (!validCryptoSelection(selection)) throw new Error('ACTION_ASSETS_UNSUPPORTED');
   if (selection.action === 'swap') {
     if (selection.network === 'Solana' || selection.network === 'Solana Devnet') return createSolanaSwapNode(id, { network: selection.network, from: selection.from, to: selection.to, amount, slippage } as SolanaSwapInput);
-    if (selection.network === ROBINHOOD_NETWORK || (selection.network === BASE_NETWORK && !isBaseReferencePair(selection)))
-      return createCatalogSwapAuthoringNode(id, { network: selection.network, from: selection.from, to: selection.to!, amount, slippage });
+    if (Object.hasOwn(CATALOG_SWAP_NETWORKS, selection.network) && !isBaseReferencePair(selection))
+      return createCatalogSwapAuthoringNode(id, { network: selection.network as CatalogSwapNetwork, from: selection.from, to: selection.to!, amount, slippage });
     return createSwapNode(id, selection.from === 'USDC' ? 'USDC_TO_WETH' : 'WETH_TO_USDC', amount, slippage, cryptoReviewContext(selection.network));
   }
   if (selection.action === 'pool' && Object.hasOwn(CATALOG_LIQUIDITY_NETWORKS, selection.network)) {

@@ -46,4 +46,6 @@ export const STRATEGY_EXAMPLES: readonly { readonly id: string; readonly strateg
   ...(['supply', 'borrow', 'repay'] as const).map(action =>
     ({ id: `${action}-base`, strategy: { action, network: 'base', asset: 'USDC', amount: '1', beneficiary: EXAMPLE_ACCOUNT } as StrategySpec })),
   { id: 'withdraw-base', strategy: { action: 'withdraw', network: 'base', asset: 'USDC', amount: '1' } },
+  { id: 'swap-arbitrum', strategy: { action: 'swap', network: 'arbitrum-one', inputAsset: 'USDC', outputAsset: 'WETH', amount: '10', slippageBps: 50 } },
+  { id: 'transfer-arbitrum', strategy: { action: 'transfer', network: 'arbitrum-one', asset: 'USDC', amount: '5' } },
 ]);

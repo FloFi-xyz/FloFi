@@ -235,3 +235,4 @@ export * from './asset-logo-rules.js';
 export * from './uniswap-v3-catalog.js';
 export * from './uniswap-v3-base.js';
 export * from './uniswap-catalog-networks.js';
+export * from './uniswap-v3-arbitrum.js';

@@ -1,0 +1,92 @@
+{
+  "environment": "PUBLIC_READ_ONLY",
+  "fetchedAt": "2026-10-11T22:16:56.266Z",
+  "chain": "eip155:42161",
+  "block": "0x1ea22999",
+  "blockNumber": 513943961,
+  "deploymentFeedSha256": "221f66d3f58524462f7e7f49173aee1bbebbaa97d3f6502d099bace3085b4070",
+  "contracts": {
+    "UniswapV3Factory": {
+      "address": "0x1f98431c8ad98523631ae4a59f267346ea31f984",
+      "codeSha256": "fd5e0ec0633afeb92b2f6b6cac36e13a9732bd1914f8158a78f127d51d54a572"
+    },
+    "SwapRouter02": {
+      "address": "0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45",
+      "codeSha256": "e1d11180e845c882d04df87f009d45061fdf1115ef607b734cbf6d3da9a58d86",
+      "factory": "0x0000000000000000000000001f98431c8ad98523631ae4a59f267346ea31f984",
+      "weth": "0x00000000000000000000000082af49447d8a07e3bd95bd0d56f35241523fbab1"
+    },
+    "QuoterV2": {
+      "address": "0x61ffe014ba17989e743c5f6cb21bf9697530b21e",
+      "codeSha256": "606e62b332f9d979e27593eb38e3e214d22f08e1502b3ded0bd32c4fa81398ea",
+      "factory": "0x0000000000000000000000001f98431c8ad98523631ae4a59f267346ea31f984",
+      "weth": "0x00000000000000000000000082af49447d8a07e3bd95bd0d56f35241523fbab1"
+    },
+    "USDC": {
+      "address": "0xaf88d065e77c8cc2239327c5edb3a432268e5831",
+      "codeSha256": "b46445c0c96a50cd0ae6245d2ceb5058fbbcd24afad9cb878974d8f17b4655c8",
+      "decimals": 6
+    },
+    "WETH": {
+      "address": "0x82af49447d8a07e3bd95bd0d56f35241523fbab1",
+      "codeSha256": "cbbb906270e2b7c031e119ec2f41a8d73d3e14ab437075760adc735e38edd888",
+      "decimals": 18
+    }
+  },
+  "tiers": [
+    {
+      "fee": 100,
+      "tickSpacing": 1
+    },
+    {
+      "fee": 500,
+      "tickSpacing": 10
+    },
+    {
+      "fee": 3000,
+      "tickSpacing": 60
+    },
+    {
+      "fee": 10000,
+      "tickSpacing": 200
+    }
+  ],
+  "pool": "0xc6962004f452be9203591991d15f6b388e09e8d0",
+  "quote": {
+    "amountIn": "10000000",
+    "expectedOut": "3948103484044223"
+  },
+  "catalog": {
+    "sha256": "aaf0c47f30ec22cb70231143ad7e83539693eeb21b75466652d730f74b95296e",
+    "version": {
+      "major": 22,
+      "minor": 26,
+      "patch": 0
+    },
+    "timestamp": "2026-10-08T17:54:32.750Z",
+    "arbitrumEntries": 204,
+    "fluxDecimals": 8
+  },
+  "feeRead": {
+    "gasEstimate": "21526",
+    "gasPrice": "20016000",
+    "receipt": {
+      "transactionHash": "0x4cc4e09312b0805349040846e371e97e8124097fbf125afa1ae093a947480a7e",
+      "gasUsed": "0x13269",
+      "effectiveGasPrice": "0x16e3600",
+      "gasUsedForL1": "0x1ec",
+      "l1FeePresent": false,
+      "actualFeeWei": "1882584000000"
+    }
+  },
+  "sources": {
+    "network": "https://docs.arbitrum.io/chain-info",
+    "deployments": "https://developers.uniswap.org/docs/protocols/v3/deployments/v3-arbitrum-deployments",
+    "deploymentFeed": "https://developers.uniswap.org/deployments.json",
+    "catalog": "https://tokens.uniswap.org",
+    "nitroFees": "https://docs.arbitrum.io/how-arbitrum-works/deep-dives/gas-and-fees",
+    "estimateGas": "https://docs.arbitrum.io/arbitrum-essentials/how-to-estimate-gas",
+    "rpc": "https://arb1.arbitrum.io/rpc"
+  },
+  "method": "Public JSON-RPC reads only; no wallet, signing, transaction submission or MAINNET_EXECUTED evidence. Receipt refers to an existing third-party transaction."
+}

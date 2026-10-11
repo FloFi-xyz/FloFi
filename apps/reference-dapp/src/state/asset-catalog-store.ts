@@ -28,7 +28,7 @@ export function ensureNetworkCatalog(retry = false, chain: string = ROBINHOOD_CH
   state.inflight = loadNetworkAssetCatalog(chain).then(result => {
     if (!result.ok) { state.status = 'unavailable'; state.code = result.code; return; }
     registerNetworkCatalog(result.catalog); state.status = 'ready';
-  }).catch(() => { state.status = 'unavailable'; state.code = chain === ROBINHOOD_CHAIN ? 'STOCK_REGISTRY_UNAVAILABLE' : 'BASE_TOKEN_LIST_UNAVAILABLE'; })
+  }).catch(() => { state.status = 'unavailable'; state.code = 'ASSET_CATALOG_UNAVAILABLE'; })
     .finally(() => { state.inflight = null; emit(); });
   return state.inflight;
 }

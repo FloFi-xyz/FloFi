@@ -65,7 +65,13 @@ export async function reconcileNativeTransfer(review: NativeTransferReview, atte
     // A native transfer between externally owned accounts emits no logs. A token transfer emits only the token's own transfer
     // log(s) for exactly (owner → recipient, amount); anything else is unexplained.
     if (!Array.isArray(receipt.logs)) throw new Error('TRANSFER_LOGS_MISMATCH');
-    if (!token && receipt.logs.length) throw new Error('TRANSFER_LOGS_MISMATCH');
+    if (!token) {
+      const recipientCode = review.state.recipientCodeHash === undefined ? '0x' : await rpc('eth_getCode', [review.recipient, supplyHex(blockNumber - 1)]);
+      if (review.state.recipientCodeHash !== undefined && supplyHash(recipientCode) !== review.state.recipientCodeHash)
+        throw new Error('TRANSFER_RECIPIENT_CODE_MISMATCH');
+      // A reviewed value-only call can run the recipient's receive/fallback code. The owner debit is still exact below.
+      if ((review.state.recipientCodeHash === undefined || recipientCode === '0x') && receipt.logs.length) throw new Error('TRANSFER_LOGS_MISMATCH');
+    }
     if (token) {
       const logs = receipt.logs.map(rpcRecord);
       const transfers = logs.filter(log => Array.isArray(log.topics) && log.topics[0] === TRANSFER_TOPIC);
@@ -149,10 +155,10 @@ export function buildNativeTransferEvidence(input: { id: string; review: NativeT
           : 'Self-transfer: the value leg nets to zero; the owner balance moved by exactly the fee.',
         'The fee is gasUsed × effectiveGasPrice plus the OP Stack L1 data fee (l1Fee) of the receipt.']
         : review.asset || review.recipient !== review.account ? [
-        'Inclusion is verified at Robinhood Chain (L2) sequencer level after confirmations; L1 finality is not claimed.',
+        `Inclusion is verified at ${profile.network} (L2) sequencer level after confirmations; L1 finality is not claimed.`,
         review.asset ? 'Token transfer: exact transfer(recipient, amount) call, its transfer log(s) and both token balances; ETH moved by exactly the fee.'
-          : 'Native transfer to an explicit recipient: the owner balance moved by exactly the value plus the fee.',
-        'The fee is gasUsed × effectiveGasPrice, which includes Arbitrum Nitro L1 data gas.'] : profile.settlement === 'L2' ? ['Inclusion is verified at Robinhood Chain (L2) sequencer level after confirmations; L1 finality is reported by the independent verifier.',
+          : 'Native transfer to an explicit recipient: the exact value-only call and owner debit (value plus fee) are verified; contract recipients may execute their receive/fallback code.',
+        'The fee is gasUsed × effectiveGasPrice, which includes Arbitrum Nitro L1 data gas.'] : profile.settlement === 'L2' ? [`Inclusion is verified at ${profile.network} (L2) sequencer level after confirmations; L1 finality is not claimed.`,
         'Self-transfer: the value leg nets to zero; the fee is gasUsed × effectiveGasPrice, which includes Arbitrum Nitro L1 data gas.',
         'This is a chain execution proof, not a DeFi capability.'] :
         [`Inclusion is verified at ${profile.network} block level after ${profile.minimumConfirmations} confirmations; finalized-checkpoint status is not claimed.`,

@@ -99,7 +99,7 @@ export const COPILOT_EVAL_CASES: readonly EvalCase[] = [
     { user: 'Base Sepolia', expect: P('ADD_SUPPLY', { local: true, sentence: 'supply 10 USDC to Aave on Base Sepolia' }) }] },
   { id: 'C03', category: 'clarification', language: 'EN', turns: [
     { user: 'Swap 5 USDC to ETH', model: intent.action(act.swap({ inputAsset: 'USDC', outputAsset: 'ETH', amount: '5' })),
-      expect: Q({ contains: ['still needs the network'], options: ['Base', 'Base Sepolia', 'Ethereum Sepolia', 'Solana', 'Solana Devnet', 'Robinhood Chain'] }) },
+      expect: Q({ contains: ['still needs the network'], options: ['Base', 'Base Sepolia', 'Arbitrum One', 'Ethereum Sepolia', 'Solana', 'Solana Devnet', 'Robinhood Chain'] }) },
     { user: 'Base Sepolia', expect: P('ADD_TESTNET_SWAP', { local: true }) }] },
   { id: 'C04', category: 'clarification', language: 'EN', turns: [
     { user: 'Swap USDC to WETH on Base Sepolia', model: intent.action(act.swap({ network: 'BASE_SEPOLIA', inputAsset: 'USDC', outputAsset: 'WETH' })), expect: Q() },
@@ -376,7 +376,7 @@ export const COPILOT_EVAL_CASES: readonly EvalCase[] = [
   { id: 'L02', category: 'language', language: 'PT', turns: [{ user: 'Troca 5 USDC por ETH na Base Sepolia', model: intent.action(swapTestnet('5'), 'PT'),
     expect: P('ADD_TESTNET_SWAP', { contains: ['ETH embrulhado'] }) }] },
   { id: 'L03', category: 'language', language: 'MIXED', turns: [{ user: 'Swap 5 USDC pra ETH', model: intent.action(act.swap({ inputAsset: 'USDC', outputAsset: 'ETH', amount: '5' }), 'PT'),
-    expect: Q({ contains: ['o Flofi ainda precisa saber: a rede'], options: ['Base', 'Base Sepolia', 'Ethereum Sepolia', 'Solana', 'Solana Devnet', 'Robinhood Chain'] }) }] },
+    expect: Q({ contains: ['o Flofi ainda precisa saber: a rede'], options: ['Base', 'Base Sepolia', 'Arbitrum One', 'Ethereum Sepolia', 'Solana', 'Solana Devnet', 'Robinhood Chain'] }) }] },
   { id: 'L04', category: 'language', language: 'MIXED', setup: [FIXTURE.supply], turns: [{ user: 'Muda o amount para 3', model: intent.edit({ amount: '3' }, {}, 'PT'),
     expect: P('SET_SUPPLY', { input: { amount: '3' } }) }] },
   { id: 'L05', category: 'language', language: 'MIXED', turns: [

@@ -1,8 +1,297 @@
 # BUILD-ARB-001 Handoff
 
-BASELINE: 4df974f6ae6ae1d22b86f220db6281294cd20035 (BUILD-BASE-001 / PR #81)
-CURRENT HEAD: Phase 1 checkpoint — the commit containing this file. Resolve its SHA with `git log -1 --format=%H -- docs/builds/BUILD-ARB-001-HANDOFF.md` (a commit cannot embed its own SHA).
-CURRENT PHASE: Phase 1 complete; stop here. Branch: `codex/build-arb-001-network-ux`.
+BASELINE: `4df974f6ae6ae1d22b86f220db6281294cd20035` (BUILD-BASE-001 / PR #81)
+CURRENT HEAD: Phase 2 checkpoint, the commit containing this file. Resolve its exact SHA with `git log -1 --format=%H -- docs/builds/BUILD-ARB-001-HANDOFF.md`; checkpoint parent is `87f4a7a575ff10f5b8e7c05e56af4fa0bc335bce`.
+CURRENT PHASE: Phase 2 complete; stop at this checkpoint. Branch: `codex/build-arb-001-network-ux`.
+PHASE 2 STATUS: Recovered, completed and verified with focused checks. Mainnet deployment/owner-execution gates default off and were not configured by this build.
+
+## Final Phase 2 checkpoint
+
+COMPLETED:
+- Recovered all 41 dirty tracked files and six untracked build files without reset/clean/stash/discard/checkout/rebase/revert or recreation. Preserved the implementation and wrote the recovery checkpoint below before continuing.
+- Live Arbitrum catalog runtime on the shared chain-bound provider/parser/loader. Exact chain/address/decimals, deterministic duplicate rejection, FLUX exclusion, generic trusted logos and fail-closed provider expiry/failure. Base catalog fixtures/regressions pass. No downloaded list snapshot committed.
+- Arbitrum swap-only Uniswap profile through the shared quote/execution service; exact owner/chain/nonce/call/gas/budget Review, stale-state invalidation, exact-input approvals and fresh Review before the swap. Deadline calldata now reuses the existing compiler ABI encoder.
+- Native ETH and direct ERC-20 transfers through the existing compiler, owner-wallet coordinator, durable stores and reconciler. Token transfers use transfer(recipient, amount) without approval; native sends use value plus empty calldata. Existing recipient authoring retained.
+- Nitro fee verification: official docs checked during recovery confirm posting cost inside standard gas estimates. Arbitrum uses receipt gasUsed × effectiveGasPrice with no OP Stack oracle/separate l1Fee. Exact-call gas is bounded at Review and re-estimated before preparation/handoff. Public verification facts remain in PHASE-2-READ-VERIFICATION.json; mocked tests are not mainnet execution.
+- Owner-bound swap preparation and recovery in existing browser stores/server actions, cloud flow registration and worker projection. PREPARED/UNKNOWN recovery discovers the nonce transaction; no blind resend. A successful receipt with unfinished balance reads stays under observation. Proven mismatches persist as divergence and cannot revive Review or look reconciled.
+- A proven wallet rejection permits only an explicit identical transaction in the same run, after fresh nonce/preflight checks; another run cannot take that reservation. Transfers retain their established proven-refusal recovery flow.
+- Canvas builders, deterministic Chat, deterministic EN/PT Copilot intent provider, channel conversion and actual MCP gateway compose parity. Capability wording derives from registries; no hand-written Copilot list.
+- Focused Base/Robinhood, catalog, compiler/contracts, lifecycle, browser-store and cloud startup regressions. No redesign, Transfer To field, saved wallet, picker/modal/card/layout change, new Bridge/Pool/Aave runtime, testnet expansion, Production change, push or PR.
+
+PARTIAL:
+- None within the authorized Phase 2 implementation.
+
+NOT STARTED:
+- Owner mainnet execution or MAINNET_EXECUTED certification, live-model Copilot acceptance, browser/fork/PostgreSQL acceptance matrix and full CI. These evidence/validation levels are not claimed here.
+- Later Bridge, Pool/Liquidity, Aave/Lending, UX and deployment phases require separate owner scope. Do not continue them automatically.
+
+FILES TOUCHED:
+- The classified table below contains every Phase 2 file, including recovered and continuation work.
+
+UNCOMMITTED FILES:
+- None after the phase-ending commit; verify `git status --short` at resumption. The table represents the committed build work, not permission to discard later changes.
+
+TESTS ALREADY PRESENT:
+- Reused the recovered Arbitrum runtime/authoring/core/catalog suites; extended existing lifecycle/Review/browser tests only for confirmed gaps. Added no duplicate swap/transfer engine or harness gate.
+
+TESTS PASSED:
+- Node 24.21.0 / pnpm 11.22.0. Dependency exports rebuilt: reference-linter... (contracts + registry + linter), compiler, executor, reconciler, cloud-runtime; strict package builds passed.
+- Final focused Vitest: **30 files / 673 tests passed**. Backend plain-Node startup: **1 file / 2 tests passed** outside the sandbox. Total **675 focused Vitest tests**, no skips. After the final test-only type annotation, the affected browser-store suite passed again (7 tests).
+- Strict scoped TypeScript for the runtime/core/authoring and server-action graph passed with dependency declarations checked. The larger hook-test graph also passed strict source checking with `--skipLibCheck` (see limitations below).
+- ESLint passed on all **55 changed TypeScript files**; final type-only test adjustment linted again. Governance-lite passed, its **19** self-tests passed, and `git diff --check` passed.
+
+TESTS FAILING:
+- No remaining implementation or focused Vitest failure.
+- Unfiltered hook-graph declaration checking reaches existing Next bundled declaration problems (URLPatternInput/URLPatternOptions; without next-env also webpack/React server declarations). Source-only strict checking passed with `--skipLibCheck`; repository configuration/dependencies were not changed or weakened. Reassess declaration checks during the separately authorized final CI phase.
+- Sandbox-only backend startup failures were diagnosed as empty nested-process stdout, reproduced with console.log(123), and resolved by running that focused suite outside the sandbox. No test was skipped or weakened.
+
+TESTS NOT YET RUN:
+- Full CI, complete Next build, browser, fork/Anvil, PostgreSQL/cloud remote, public financial execution and live-model suites, intentionally outside this phase.
+
+ARCHITECTURAL DECISIONS:
+- `eip155:42161` / chainId 42161 is MAINNET / REAL_FUNDS. The existing Base/Robinhood architecture is shared; Arbitrum supplies only profiles and narrow generic options.
+- `GRYLOO_ARBITRUM_MAINNET=live` enables catalog/read simulation/Review; owner-wallet preparation additionally requires `GRYLOO_ARBITRUM_OWNER_EXECUTION=MAINNET_OWNER_APPROVED`. Neither was configured or enabled by this build. Router gates are independent; no Arbitrum harness bypass. Hosted execution uses existing durable cloud storage.
+- No signer/key/custody in server RPC; connected owner wallet remains the only submission boundary. All automated lifecycles are MOCKED.
+- Direct token transfers have no approval. Native contract recipients bind/revalidate code and reconcile the exact owner debit; receive/fallback effects are possible, and retained recipient balance is not claimed.
+- Nitro needs no separate fee adapter: posting gas is already included in estimate/receipt handling. Review bounds remain observations, not a future fee guarantee. L2 receipt inclusion is not L1 finality.
+- Strict owner-bound swap Review is a generic profile option enabled for Arbitrum. Existing Base/Robinhood quote paths remain under their current profiles and have focused regression coverage.
+
+DISCOVERIES / IMPORTANT FACTS:
+- The recovered handoff was stale while the plan already described substantial implementation. Code/tests, not the old text, established the recovery point.
+- Continuation fixed hashless browser recovery, same-run rejection nonce reuse, final-preflight nonce drift, owner binding, persisted divergence and the receipt-before-balance-read crash window.
+- The existing ABI module already encoded the deadline multicall. Reused it instead of retaining a duplicate recovered encoder.
+- Shared workflow hashes and public-read contract/source facts are in PLAN.md and PHASE-2-READ-VERIFICATION.json. Fixtures are independently authored, not upstream list snapshots.
+
+OWNER-APPROVED UX CHANGES:
+- none yet
+
+DO NOT REDO:
+- Do not discard or restart recovered Phase 2. Do not duplicate the parser/provider, runtime engines, durable services or tests.
+- Do not rerun full discovery or public deployment verification without a concrete discrepancy. Run focused affected checks after actual changes; full CI belongs to the final authorized phase.
+- Do not enable gates, touch Production variables, sign/send real funds automatically, push/open a PR or start later phases from this checkpoint.
+- Do not add the Transfer To field, saved wallets or any layout/picker/modal/card redesign. All new behavior here is shared runtime/lifecycle correctness.
+
+NEXT EXACT ACTION:
+- Stop at the Phase 2 commit. At the next owner-authorized phase, run pwd/status/branch/HEAD/log/diffs, inspect any new dirty/untracked files, and read this handoff plus DISCOVERY.md and PLAN.md. Await explicit next-phase scope; the plan proposes Bridge next but grants no authorization.
+
+| Classification | Phase 2 file |
+| --- | --- |
+| TEST-ONLY | `apps/reference-dapp/backend/entrypoint.test.ts` |
+| COMPLETE | `apps/reference-dapp/backend/flows.ts` |
+| COMPLETE | `apps/reference-dapp/backend/preview.ts` |
+| COMPLETE | `apps/reference-dapp/src/app/public-testnet-action.ts` |
+| COMPLETE | `apps/reference-dapp/src/app/uniswap-liquidity-action.ts` |
+| COMPLETE | `apps/reference-dapp/src/channels/core/strategy.ts` |
+| TEST-ONLY | `apps/reference-dapp/src/domain/arbitrum-authoring.test.ts` |
+| TEST-ONLY | `apps/reference-dapp/src/domain/arbitrum-core.test.ts` |
+| TEST-ONLY | `apps/reference-dapp/src/domain/catalog-copilot-parity.test.ts` |
+| COMPLETE | `apps/reference-dapp/src/domain/catalog-swap-authoring.ts` |
+| TEST-ONLY | `apps/reference-dapp/src/domain/copilot-eval.corpus.ts` |
+| TEST-ONLY | `apps/reference-dapp/src/domain/crypto-action-picker.test.ts` |
+| COMPLETE | `apps/reference-dapp/src/domain/crypto-action-picker.ts` |
+| COMPLETE | `apps/reference-dapp/src/domain/execution-lifecycle.ts` |
+| TEST-ONLY | `apps/reference-dapp/src/domain/execution-recovery.test.ts` |
+| COMPLETE | `apps/reference-dapp/src/domain/execution-recovery.ts` |
+| COMPLETE | `apps/reference-dapp/src/domain/public-testnet-swap.ts` |
+| COMPLETE | `apps/reference-dapp/src/domain/robinhood-transfer-authoring.ts` |
+| COMPLETE | `apps/reference-dapp/src/domain/simulation-presentation.ts` |
+| COMPLETE | `apps/reference-dapp/src/engine/capability-catalog.ts` |
+| COMPLETE | `apps/reference-dapp/src/engine/strategy-examples.ts` |
+| COMPLETE | `apps/reference-dapp/src/engine/strategy-spec.ts` |
+| COMPLETE | `apps/reference-dapp/src/mcp/simulation.ts` |
+| COMPLETE | `apps/reference-dapp/src/mcp/tools.ts` |
+| COMPLETE | `apps/reference-dapp/src/server/arbitrum-mainnet.ts` |
+| TEST-ONLY | `apps/reference-dapp/src/server/arbitrum-runtime.test.ts` |
+| COMPLETE | `apps/reference-dapp/src/server/authoring-catalogs.ts` |
+| COMPLETE | `apps/reference-dapp/src/server/base-mainnet.ts` |
+| COMPLETE | `apps/reference-dapp/src/server/catalog-networks.ts` |
+| COMPLETE | `apps/reference-dapp/src/server/evm-catalog-runtime.ts` |
+| COMPLETE | `apps/reference-dapp/src/server/public-testnet-service.ts` |
+| TEST-ONLY | `apps/reference-dapp/src/server/robinhood-mainnet.test-harness.ts` |
+| TEST-ONLY | `apps/reference-dapp/src/server/robinhood-swap.test.ts` |
+| COMPLETE | `apps/reference-dapp/src/server/robinhood-transfer-service.ts` |
+| COMPLETE | `apps/reference-dapp/src/state/asset-catalog-store.ts` |
+| TEST-ONLY | `apps/reference-dapp/src/state/execution-start.test.ts` |
+| COMPLETE | `apps/reference-dapp/src/state/execution-start.ts` |
+| TEST-ONLY | `apps/reference-dapp/src/state/public-testnet-store.test.tsx` |
+| COMPLETE | `apps/reference-dapp/src/state/public-testnet-store.tsx` |
+| TEST-ONLY | `apps/reference-dapp/src/state/review-authorization.test.ts` |
+| COMPLETE | `apps/reference-dapp/src/state/review-authorization.ts` |
+| COMPLETE | `apps/reference-dapp/src/state/robinhood-transfer-store.tsx` |
+| DOC/HANDOFF | `docs/builds/BUILD-ARB-001-HANDOFF.md` |
+| DOC/HANDOFF | `docs/builds/BUILD-ARB-001-PHASE-2-READ-VERIFICATION.json` |
+| DOC/HANDOFF | `docs/builds/BUILD-ARB-001-PLAN.md` |
+| COMPLETE | `packages/action-registry/src/arbitrum-chain.ts` |
+| COMPLETE | `packages/action-registry/src/capability-discovery.ts` |
+| COMPLETE | `packages/action-registry/src/execution-capabilities.ts` |
+| COMPLETE | `packages/action-registry/src/index.ts` |
+| COMPLETE | `packages/action-registry/src/native-transfer.ts` |
+| COMPLETE | `packages/action-registry/src/uniswap-v3-arbitrum.ts` |
+| TEST-ONLY | `packages/action-registry/test/arbitrum-network.test.ts` |
+| COMPLETE | `packages/reference-compiler/src/native-transfer.ts` |
+| COMPLETE | `packages/reference-executor/src/native-transfer.ts` |
+| COMPLETE | `packages/reference-linter/src/catalog-swap.ts` |
+| COMPLETE | `packages/reference-reconciler/src/native-transfer.ts` |
+| COMPLETE | `packages/workflow-contracts/src/catalog-swap.ts` |
+| TEST-ONLY | `packages/workflow-contracts/test/catalog-swap.test.ts` |
+
+TEMPORARY / GENERATED: None tracked or newly added. Ignored dependency artifacts are retained.
+
+## Reproducible focused validation
+
+Dependency builds (no full app build):
+
+```sh
+pnpm --filter @defi-workflow-engine/reference-linter... build
+pnpm --filter @defi-workflow-engine/reference-compiler build
+pnpm --filter @defi-workflow-engine/reference-executor build
+pnpm --filter @defi-workflow-engine/reference-reconciler build
+pnpm --filter @defi-workflow-engine/cloud-runtime build
+```
+
+Final 30-file focused Vitest run:
+
+```sh
+pnpm exec vitest run \
+  packages/action-registry/test/arbitrum-network.test.ts \
+  packages/action-registry/test/base-network.test.ts \
+  packages/action-registry/test/robinhood-chain.test.ts \
+  packages/action-registry/test/asset-logos.test.ts \
+  packages/action-registry/test/asset-registry.test.ts \
+  packages/action-registry/test/execution-capabilities.test.ts \
+  packages/workflow-contracts/test/catalog-swap.test.ts \
+  packages/workflow-contracts/test/native-transfer.test.ts \
+  packages/reference-linter/test/native-transfer.test.ts \
+  packages/reference-reconciler/test/native-transfer.test.ts \
+  apps/reference-dapp/src/server/arbitrum-runtime.test.ts \
+  apps/reference-dapp/src/server/base-mainnet.test.ts \
+  apps/reference-dapp/src/server/robinhood-swap.test.ts \
+  apps/reference-dapp/src/server/robinhood-transfer-mainnet.test.ts \
+  apps/reference-dapp/src/server/robinhood-transfer-service.test.ts \
+  apps/reference-dapp/src/server/public-testnet-service.test.ts \
+  apps/reference-dapp/src/state/public-testnet-store.test.tsx \
+  apps/reference-dapp/src/state/review-authorization.test.ts \
+  apps/reference-dapp/src/state/execution-start.test.ts \
+  apps/reference-dapp/src/domain/arbitrum-authoring.test.ts \
+  apps/reference-dapp/src/domain/arbitrum-core.test.ts \
+  apps/reference-dapp/src/domain/crypto-action-picker.test.ts \
+  apps/reference-dapp/src/domain/catalog-copilot-parity.test.ts \
+  apps/reference-dapp/src/domain/copilot-eval.test.ts \
+  apps/reference-dapp/src/domain/execution-lifecycle.test.ts \
+  apps/reference-dapp/src/domain/execution-recovery.test.ts \
+  apps/reference-dapp/src/domain/simulation-presentation.test.ts \
+  apps/reference-dapp/src/engine/capability-catalog.test.ts \
+  apps/reference-dapp/src/mcp/simulation.test.ts \
+  apps/reference-dapp/backend/preview.test.ts --maxWorkers=2
+pnpm exec vitest run apps/reference-dapp/backend/entrypoint.test.ts --maxWorkers=1
+```
+
+The entrypoint command requires working nested-process stdout (the recovery sandbox did not provide it).
+Core strict declaration check used:
+
+```sh
+pnpm exec tsc --noEmit --target ES2024 --lib ES2024,DOM,DOM.Iterable \
+  --module ESNext --moduleResolution Bundler --jsx react-jsx --strict \
+  --noUncheckedIndexedAccess --exactOptionalPropertyTypes --esModuleInterop \
+  --resolveJsonModule --allowImportingTsExtensions --types node \
+  apps/reference-dapp/src/server/arbitrum-runtime.test.ts \
+  apps/reference-dapp/src/domain/arbitrum-authoring.test.ts \
+  apps/reference-dapp/src/domain/arbitrum-core.test.ts \
+  apps/reference-dapp/src/state/public-testnet-store.tsx \
+  apps/reference-dapp/src/app/public-testnet-action.ts \
+  apps/reference-dapp/src/app/uniswap-liquidity-action.ts \
+  apps/reference-dapp/src/state/robinhood-transfer-store.tsx \
+  packages/action-registry/test/arbitrum-network.test.ts \
+  packages/workflow-contracts/test/catalog-swap.test.ts
+```
+
+The hook-test check used those same flags plus `--skipLibCheck` and additionally:
+`src/state/public-testnet-store.test.tsx`, `src/state/review-authorization.test.ts`,
+`src/state/execution-start.test.ts` and `src/domain/execution-recovery.test.ts` under `apps/reference-dapp`.
+No typecheck configuration file changed. ESLint received every changed/new `.ts`/`.tsx` path compared with Phase 1.
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/governance_lite.py
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p test_governance_lite.py
+git diff --check
+```
+
+## Archived recovery checkpoint (before final fixes/checks)
+
+COMPLETED:
+- Reconstructed pwd, status, branch, HEAD, recent history, working/staged diffs and all six untracked files without resetting, cleaning, stashing or replacing build work. Staged diff is empty.
+- Recovered shared `createEvmCatalogRuntime`, Base wrapper extraction, Arbitrum live loader/gates and server/cloud catalog-network registration.
+- Recovered swap-only Uniswap deployment/profile, native/token transfer profile, namespaces, authoring maps, strategy contract, examples and MCP/channel wiring. No liquidity/Aave profile is activated.
+- Recovered public read evidence at block 513943961 and existing focused catalog/runtime/authoring tests; no downloaded token-list snapshot.
+
+PARTIAL:
+- Shared owner-bound swap Review, permanent nonce reservations, PREPARED/UNKNOWN nonce recovery and receipt bounds exist; audit callers, immutable history and retries before declaring complete.
+- Transfers include exact direct ERC-20 calls, catalog/code/decimals revalidation, Nitro re-estimation and recipient-code commitments; verify compiler/service/reconciler lifecycle and existing Base/Robinhood behavior.
+- Canvas/Chat/Copilot/MCP parity tests exist; execution through browser stores/server actions and cloud workers still needs focused validation.
+- All Phase 2 test, strict typecheck and lint results are unknown in this recovery session. Do not infer passes from the plan.
+
+NOT STARTED:
+- Final Phase 2 checkpoint commit.
+- Later phases: Bridge, Pool/Liquidity, Aave/Lending, UX, testnet expansion, full CI, PR/push and Production configuration. These remain outside this phase.
+
+FILES TOUCHED / UNCOMMITTED FILES (recovery classification; COMPLETE means implementation present, validation still pending):
+
+| Classification | Files |
+| --- | --- |
+| COMPLETE | `apps/reference-dapp/backend/flows.ts`; `backend/preview.ts` |
+| COMPLETE | `apps/reference-dapp/src/app/public-testnet-action.ts`; `src/app/uniswap-liquidity-action.ts` (unsupported-network guard only) |
+| COMPLETE | `apps/reference-dapp/src/channels/core/strategy.ts`; `src/domain/catalog-swap-authoring.ts`; `src/domain/crypto-action-picker.ts`; `src/domain/public-testnet-swap.ts`; `src/domain/robinhood-transfer-authoring.ts` |
+| COMPLETE | `apps/reference-dapp/src/engine/capability-catalog.ts`; `src/engine/strategy-examples.ts`; `src/engine/strategy-spec.ts`; `src/mcp/simulation.ts`; `src/mcp/tools.ts` |
+| COMPLETE | `apps/reference-dapp/src/server/authoring-catalogs.ts`; `src/server/base-mainnet.ts`; `src/server/catalog-networks.ts`; **new** `src/server/arbitrum-mainnet.ts`; **new** `src/server/evm-catalog-runtime.ts` |
+| COMPLETE | `apps/reference-dapp/src/state/asset-catalog-store.ts`; `src/state/robinhood-transfer-store.tsx` |
+| COMPLETE | `packages/action-registry/src/arbitrum-chain.ts`; `src/capability-discovery.ts`; `src/execution-capabilities.ts`; `src/index.ts`; `src/native-transfer.ts`; **new** `src/uniswap-v3-arbitrum.ts` |
+| COMPLETE | `packages/reference-executor/src/native-transfer.ts`; `packages/reference-linter/src/catalog-swap.ts`; `packages/workflow-contracts/src/catalog-swap.ts` |
+| PARTIAL | `apps/reference-dapp/src/server/public-testnet-service.ts`; `src/server/robinhood-transfer-service.ts`; `src/state/public-testnet-store.tsx`; `packages/reference-compiler/src/native-transfer.ts`; `packages/reference-reconciler/src/native-transfer.ts` |
+| TEST-ONLY | **new** `apps/reference-dapp/src/domain/arbitrum-authoring.test.ts`; **new** `src/server/arbitrum-runtime.test.ts`; `src/domain/arbitrum-core.test.ts`; `src/domain/catalog-copilot-parity.test.ts`; `src/domain/copilot-eval.corpus.ts`; `src/domain/crypto-action-picker.test.ts`; `src/server/robinhood-mainnet.test-harness.ts`; `src/server/robinhood-swap.test.ts` |
+| TEST-ONLY | `packages/action-registry/test/arbitrum-network.test.ts`; `packages/workflow-contracts/test/catalog-swap.test.ts` |
+| DOC/HANDOFF | `docs/builds/BUILD-ARB-001-PLAN.md`; **new** `BUILD-ARB-001-PHASE-2-READ-VERIFICATION.json`; `BUILD-ARB-001-HANDOFF.md` (updated during recovery) |
+| TEMPORARY / GENERATED | None in the recovered Git status. Existing ignored dependency artifacts are retained. |
+
+TESTS ALREADY PRESENT:
+- `arbitrum-runtime.test.ts`: loader failure/expiry/identity/FLUX, gates/read-only RPC, quote/deployment checks, owner Review, stale state, exact approvals, Nitro bounds, restart/UNKNOWN recovery, nonce collision, native/ERC-20 lifecycle and recipient validation.
+- `arbitrum-authoring.test.ts`: Canvas builders, deterministic Chat, deterministic EN/PT Copilot intent provider, channel conversion and actual MCP gateway compose parity; amounts/decimals and capability scope.
+- Phase 1 `arbitrum-network.test.ts`, `arbitrum-core.test.ts` plus adjusted Base/Robinhood/catalog tests above.
+
+TESTS PASSED:
+- Recovery inspection commands and pinned toolchain checks (Node 24.21.0 / pnpm 11.22.0).
+- Phase 1 results are archived below; prior Phase 2 results cannot be reconstructed from durable records and are not claimed.
+
+TESTS FAILING:
+- None established yet; recovered tests have not run in this recovery session.
+
+TESTS NOT YET RUN:
+- Rebuild changed workspace package exports in dependency order, recovered focused Arbitrum suites, focused Base/Robinhood/runtime/cloud/parity regressions, scoped strict TypeScript, changed-file ESLint and diff check.
+- Full CI, live/fork/browser/PostgreSQL suites intentionally outside this checkpoint.
+
+ARCHITECTURAL DECISIONS:
+- Continue the existing shared catalog, Uniswap swap, transfer compiler/executor/reconciler and durable storage/lease engines. No parallel Arbitrum financial engine.
+- Arbitrum is `eip155:42161`, MAINNET / REAL_FUNDS. `GRYLOO_ARBITRUM_MAINNET=live` enables reads; owner preparation additionally needs `GRYLOO_ARBITRUM_OWNER_EXECUTION=MAINNET_OWNER_APPROVED`. No Production variables set; no Arbitrum harness bypass.
+- Strict owner-bound swap Review is a generic profile option currently enabled for Arbitrum; preserve existing Base/Robinhood semantics. Direct token transfers have no approval.
+- Nitro posting cost is included in `eth_estimateGas` and receipt `gasUsed × effectiveGasPrice`; no Base OP Stack oracle or additional `l1Fee` term. Recheck official documentation during the fee audit.
+
+DISCOVERIES / IMPORTANT FACTS:
+- HEAD equals Phase 1; there are zero later commits, 41 modified tracked files and six untracked build files before this handoff edit.
+- The old handoff was stale. The recovered plan contains extensive Phase 2 claims but no reproducible final test results; code and checks are authoritative.
+- All six untracked files are relevant implementation, authored tests or public read evidence. No temporary file or token-list snapshot was found.
+- Contract native recipients are handled by a narrow profile option and recipient code commitment, with exact value-only call/owner debit reconciliation. This needs validation, not a recipient UX redesign.
+
+OWNER-APPROVED UX CHANGES:
+- none yet
+
+DO NOT REDO:
+- Preserve the dirty recovery work. Do not reset/clean/stash/checkout/rebase/revert, recreate branch/worktree, duplicate existing services/tests or restart Phase 2.
+- Do not repeat Phase 1 discovery/parser work or Phase 2 public deployment verification without a concrete new discrepancy.
+- Do not implement Transfer "To", saved wallets, picker/modal/card/layout changes, new Bridge/Pool/Aave runtimes, testnet expansion, full CI, PR/push or Production variables. No automated real-money transaction.
+
+NEXT EXACT ACTION:
+- Build `reference-linter...` dependencies, then compiler → executor/reconciler → cloud-runtime exports; run the existing Arbitrum runtime/authoring/core and catalog tests. Record actual failures, then audit/fix only identified Phase 2 lifecycle or parity gaps and run relevant Base/Robinhood regressions. Update this checkpoint before the phase-ending commit.
+
+## Archived Phase 1 checkpoint (historical; instructions to stop are superseded by Phase 2 authorization)
 
 COMPLETED:
 - Verified clean starting state, requested branch and exact baseline. Read CLAUDE.md, BASE-001 discovery/plan/report and docs/deploy/ENVIRONMENT.md. Root AGENTS.md is absent; read app AGENTS.md and installed Next.js guidance.

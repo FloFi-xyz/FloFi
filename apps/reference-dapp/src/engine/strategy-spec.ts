@@ -31,8 +31,7 @@ const Version = Type.Literal(1, { description: 'Strategy contract version. Omit 
  * the validated official registry at composition; an unknown, ambiguous or unloaded symbol is refused, never guessed. Never an address.
  */
 const CatalogSymbol = Type.String({ pattern: '^[A-Za-z][A-Za-z0-9.]{0,15}$', maxLength: 16,
-  description: 'On robinhood or base: a symbol of that network\'s official catalog (robinhood: USDG, WETH or a Stock Token such as TSLA; base: USDC, WETH or a ' +
-    'token-list symbol such as cbBTC), matched case-insensitively.' });
+  description: 'A symbol of the selected network\'s validated official catalog, matched case-insensitively; unknown or ambiguous symbols are refused.' });
 const strict = { additionalProperties: false } as const;
 
 const Bridge = Type.Object({
@@ -48,8 +47,8 @@ const Bridge = Type.Object({
 }, strict);
 const Swap = Type.Object({
   version: Type.Optional(Version), action: Type.Literal('swap'),
-  network: enumOf(['base', 'base-sepolia', 'ethereum-sepolia', 'solana', 'solana-devnet', 'robinhood'] as const, 'base-sepolia and ethereum-sepolia swap USDC/WETH on Uniswap v3; ' +
-    'solana swaps SOL/USDC/USDT via Jupiter; solana-devnet swaps SOL/devUSDC on Orca; base and robinhood swap any two official catalog assets on Uniswap v3 (real funds).'),
+  network: enumOf(['base', 'base-sepolia', 'ethereum-sepolia', 'solana', 'solana-devnet', 'robinhood', 'arbitrum-one'] as const,
+    'Swap network. Assets, protocols and runtime support are validated against the shared registries; mainnet uses real funds.'),
   inputAsset: Type.Union([enumOf(ASSET_SYMBOLS, 'Asset spent.'), CatalogSymbol]), outputAsset: Type.Union([enumOf(ASSET_SYMBOLS, 'Asset received.'), CatalogSymbol]),
   amount: Decimal('Exact input amount as a decimal string.'), slippageBps: Type.Optional(Slippage),
 }, strict);
@@ -94,8 +93,8 @@ const LendingComposition = Type.Object({
 /** BUILD-RH-002: a transfer on Robinhood Chain (real funds): native ETH or an official catalog asset, to the signing wallet or a recipient. BUILD-BASE-001: and Base. */
 const Transfer = Type.Object({
   version: Type.Optional(Version), action: Type.Literal('transfer'),
-  network: enumOf(['robinhood', 'base'] as const, 'Robinhood Chain or Base mainnet (real funds).'),
-  asset: Type.Union([Type.Literal('ETH'), CatalogSymbol], { description: 'ETH, or a symbol of the network\'s official catalog (robinhood: USDG, WETH, a Stock Token; base: USDC, WETH, a token-list symbol).' }),
+  network: enumOf(['robinhood', 'base', 'arbitrum-one'] as const, 'The registered mainnet for this same-chain transfer (real funds).'),
+  asset: Type.Union([Type.Literal('ETH'), CatalogSymbol], { description: 'Native ETH, or a symbol of the selected network\'s validated official catalog.' }),
   amount: Decimal('Amount as a decimal string.'),
   recipient: Type.Optional(EvmAddress('Recipient. Omit to transfer to the wallet that signs in the FloFi app (bound at Review).')),
 }, strict);

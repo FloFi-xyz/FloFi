@@ -8,13 +8,14 @@
  */
 import { formatAssetAmount, parseAssetAmount, type CanonicalAsset } from '@defi-workflow-engine/action-registry';
 import { createCatalogSwapNode, isCatalogSwapNode, readCatalogSwapNode, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
-import { BASE_CHAIN, BASE_NETWORK, ROBINHOOD_CHAIN, ROBINHOOD_NETWORK, resolveNetworkAsset } from './asset-catalogs';
+import { resolveNetworkAsset } from './asset-catalogs';
+import { SWAP_PROFILES, type CatalogSwapProfile } from './public-testnet-swap';
 import { parseSlippage } from './swap-authoring';
 
 type Node = SemanticWorkflow['nodes'][number];
-export type CatalogSwapNetwork = typeof ROBINHOOD_NETWORK | typeof BASE_NETWORK;
+export type CatalogSwapNetwork = CatalogSwapProfile['network'];
 export type CatalogSwapInput = { readonly network: CatalogSwapNetwork; readonly from: string; readonly to: string; readonly amount: string; readonly slippage: string };
-export const CATALOG_SWAP_NETWORKS = Object.freeze({ [ROBINHOOD_NETWORK]: ROBINHOOD_CHAIN, [BASE_NETWORK]: BASE_CHAIN } as const);
+export const CATALOG_SWAP_NETWORKS = Object.freeze(Object.fromEntries(SWAP_PROFILES.filter(profile => profile.kind === 'CATALOG').map(profile => [profile.network, profile.chainRef])) as Record<CatalogSwapNetwork, string>);
 const networkOfChain = (chain: string): CatalogSwapNetwork | null =>
   (Object.keys(CATALOG_SWAP_NETWORKS) as CatalogSwapNetwork[]).find(network => CATALOG_SWAP_NETWORKS[network] === chain) ?? null;
 function erc20(chain: string, symbol: string): CanonicalAsset {

@@ -5,7 +5,8 @@ Branch: `codex/build-arb-001-network-ux`.
 Inputs: [discovery and capability matrix](BUILD-ARB-001-DISCOVERY.md), [read verification](BUILD-ARB-001-READ-VERIFICATION.json),
 [persistent handoff](BUILD-ARB-001-HANDOFF.md), BASE-001 shared architecture and existing Router.
 
-The owner authorizes **Phase 1 only**. Every phase requires focused checks, an updated handoff and a commit.
+The owner authorized and completed **Phase 1**, then authorized **Phase 2: Swap + Transfer runtime only**.
+Phase 2 starts at `87f4a7a575ff10f5b8e7c05e56af4fa0bc335bce`. Every phase requires focused checks, an updated handoff and a commit.
 Do not start later phases automatically. Full CI belongs at the end of BUILD-ARB-001; no PR or push in this checkpoint.
 
 ## Phase 1 — core architecture
@@ -26,16 +27,95 @@ Do not start later phases automatically. Full CI belongs at the end of BUILD-ARB
 Phase 1 deliberately leaves Arbitrum's live catalog loader unwired. Pure providers and loader seams are callable with server-validated
 bytes, and tests use the FloFi-authored fixture. Existing pins/Router continue working without enabling other actions.
 
+## Phase 2 — swap and transfer runtime (implemented, gates remain off)
+
+- Extract Base's catalog runtime wiring into `createEvmCatalogRuntime`; Base keeps the same loader, URL, TTL, parser, gates, harness
+  and public exports. The Arbitrum wrapper supplies canonical profile/parser metadata, without a new engine or harness gate.
+- Register Arbitrum in the existing catalog runtime registry, shared loader entry points and backend flow factory. The normal shared
+  authoring surfaces can load the curated catalog when the network deployment is enabled. No downloaded list is committed.
+- Catalog trust remains Phase 1's model: the pinned Uniswap Labs Default Token List endpoint, chainId 42161 only, validated address/
+  decimals, deterministic duplicate/ambiguous-symbol rejection, exact chain/address identity and validated HTTPS logo metadata.
+  Native ETH retains FloFi's canonical native identity. Runtime token code and decimals must also match before financial use.
+  Fresh source v22.26.0 has 204 Arbitrum entries: FLUX (listed 18, onchain 8) and 1INCH (existing symbol grammar) are excluded;
+  the resulting catalog has **203 assets including native ETH**. Base's parser and testnet catalogs are unchanged.
+- Add a **swap-only** Uniswap v3 deployment profile to the shared catalog swap engine. Fresh official deployment feed and public
+  reads verify factory `0x1f98431c8ad98523631ae4a59f267346ea31f984`, SwapRouter02
+  `0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45`, QuoterV2 `0x61ffe014ba17989e743c5f6cb21bf9697530b21e`,
+  runtime SHA-256 pins, factory/WETH relationships and standard fee tiers. Canonical CREATE2 pools, live liquidity and quotes determine
+  the route; no usable route fails honestly. USDC/WETH and USDC/ARB authoring do not promise liquidity for every amount/pair.
+- A generic profile option enables owner-bound swap Review: exact canonical assets, amount, minimum output/slippage, pool/tier/router,
+  chain, owner, nonce, allowance/current approval step, exact calldata/value, gas ceiling, max fee, budget, deadline, quote state and
+  workflow revision are committed to the Review hash. Owner Simulation is required before Review. Economic or authorization changes
+  clear Review. Approval is exact-input only; after reconciliation, refresh and a new Review precede the swap. Router02's existing
+  `multicall(uint256,bytes[])` enforces the reviewed swap deadline on chain. Direct ERC-20 approval itself has no onchain expiry.
+- Reuse the native/token transfer compiler, manifests, executor, coordinator and reconciler. Arbitrum native ETH sends use empty
+  calldata, recipient as target and value only. ERC-20 sends call the exact catalog contract's `transfer(recipient, amount)` with zero
+  value and no approval. Existing deterministic amount conversion and recipient validation apply. Valid contract native recipients
+  are supported through a profile option: recipient code hash is bound into Review, rechecked before handoff/inclusion, and the exact
+  value-only call and owner debit are verified. Contract receive/fallback effects may occur; no recipient-retained-balance claim is made.
+- Generalize the two remaining authoring maps from swap/transfer profiles and fix the picker builder's Base/Robinhood-only branch.
+  Channels/MCP select the shared catalog network by registry identity. Capabilities/examples derive support wording from shared
+  registries. No independent Copilot capability list, Arbitrum picker, Canvas or workflow engine is added.
+
+### Nitro transaction fees
+
+[Arbitrum's gas documentation](https://docs.arbitrum.io/how-arbitrum-works/deep-dives/gas-and-fees) and
+[estimation guide](https://docs.arbitrum.io/arbitrum-essentials/how-to-estimate-gas) describe parent posting cost as part of Nitro gas.
+The existing standard EVM `eth_estimateGas`/`eth_gasPrice` path applies; **no Base OP Stack GasPriceOracle or separate `l1Fee` is used**.
+Owner Simulation estimates the exact transaction, with 150% gas margin and 2× gas-price ceiling; Review binds the resulting budget.
+Transfers and swaps re-estimate before submission/handoff and refuse any estimate above that ceiling. Swap quoter gas is not used
+as the transaction fee estimate. Receipts reconcile `gasUsed × effectiveGasPrice`, checking offered and paid fee bounds.
+Public read-only block **513943961** confirmed nonzero `gasUsedForL1`, no `l1Fee`, and an existing third-party receipt fee of
+**1882584000000 wei**. This is an observation, not a FloFi execution. Facts, source URLs and hashes are in
+[Phase 2 read verification](BUILD-ARB-001-PHASE-2-READ-VERIFICATION.json).
+
+### Owner execution, durability and deployment
+
+- Reuse Base's gate shape: `GRYLOO_ARBITRUM_MAINNET=live` for catalog/read simulation/Review, and additionally
+  `GRYLOO_ARBITRUM_OWNER_EXECUTION=MAINNET_OWNER_APPROVED` for owner execution. **Neither is set by this phase.** Router gates
+  remain Router-specific. No Arbitrum harness bypass is added. Optional later configuration uses `GRYLOO_ARBITRUM_RPC_URL` (HTTPS)
+  and `GRYLOO_ARBITRUM_JOURNAL` in local development; hosted deployments use the established cloud execution storage.
+  These names are recorded here for later ENVIRONMENT.md work; no deployment configuration changes now.
+- Existing connected-wallet controls sign and submit; server RPC methods are read-only. No custody, operator wallet, AI signing,
+  delegated authority or new wallet allowlist. Catalog metadata/registration never grants execution permission.
+- Swaps persist PREPARED before the wallet boundary, then HASH/PENDING/CONFIRMED or UNKNOWN/REJECTED/REVERTED and final
+  reconciliation/divergence. Permanent owner/chain/nonce intents prevent another swap run from using an ambiguous nonce.
+  Existing durable log/storage/lease APIs serve the backend workers. PREPARED/UNKNOWN without a returned hash recover by the
+  shared nonce-discovery reader; a different transaction consuming the nonce is divergent. Workers never resend.
+  Recovery audit also covered a receipt saved before balance reads finish: the worker continues observation until reconciliation,
+  and refresh cannot advance an incomplete approval. Proven mismatches persist as divergence and cannot revive authority.
+  A proven wallet rejection can reuse only the same run's identical reviewed transaction/nonce after fresh preflight; another run
+  remains blocked by the permanent intent. The existing browser status-check handler reaches nonce discovery without a hash.
+- Transfers retain PREPARED → SUBMITTING → PENDING or SUBMISSION_RESULT_UNKNOWN → RECONCILED/DIVERGENT, with the established
+  permanent nonce lease and observation-only recovery. A restarted service can reconcile from durable state.
+- Unit lifecycles produce **MOCKED** evidence only. No owner public execution, public certification or MAINNET_EXECUTED evidence is
+  demonstrated. Swap receipt canonical inclusion and transfers' two-confirmation L2 inclusion follow the existing engines;
+  L1 finality is not claimed. Fee estimates and 60-second Reviews are bounded observations, not future fee guarantees.
+- All financial runtimes remain isolated actions under existing composition restrictions. No Bridge, Pool or Aave runtime is added.
+
+### Focused authoring acceptance
+
+Canvas builders, deterministic Chat, English/Portuguese Copilot intent handling and the actual MCP gateway compose identical IR.
+Copilot tests use deterministic intent-provider responses; they do not claim a live model or browser acceptance run.
+For workflow-local's standard authored graph (mock read node-001 plus node-002, revision 1), canonical hashes are:
+
+| Request | Canonical identity / amount | Shared workflow hash |
+| --- | --- | --- |
+| Swap 10 USDC for WETH on Arbitrum / troca 10 USDC por WETH na Arbitrum | eip155:42161; USDC `0xaf88d065e77c8cc2239327c5edb3a432268e5831` (6), WETH `0x82af49447d8a07e3bd95bd0d56f35241523fbab1` (18); 10000000 input units | `0xc99e88d5b6482d670b37468f84f2873df9d14aeb71c333947d2dba265423a9f4` |
+| Send 5 USDC on Arbitrum to 0x3333333333333333333333333333333333333333 | Same chain/USDC contract; 5000000 units, explicit recipient | `0xed288b9e22d82e3a9d6dee559aa219ff4066804c78f9dae41c9d471fd7b792c9` |
+| mande 0.01 ETH na Arbitrum para 0x3333333333333333333333333333333333333333 | Same chain; nativeId ETH (18); 10000000000000000 wei, explicit recipient | `0xb62adb7214d1abaa1d6bdae9779c9f505c78814ebedade05c2c6cc7c6db4ef49` |
+
+Exact final focused commands/results and the resumption checkpoint are in the handoff. No full CI or browser/fork/PostgreSQL matrix
+is run, and no PR, push, real-money transaction, UX or Production change is part of this phase.
+
 ## Recommended later phases — proposals only
 
-1. **Phase 2: shared Arbitrum catalog runtime and transfers.** Add a chain-bound read-only catalog/network runtime profile under the
-   existing generic catalog infrastructure, then native/ERC-20 transfer profiles on the shared engine. Verify Nitro fee accounting,
-   fresh code/decimals, Simulate/Review, connected-user wallet authorization, recovery and exact reconciliation. Register authoring
-   capabilities only after those paths exist. Do not enable any Production gate.
-2. **Phase 3: Uniswap swap and liquidity profiles.** Bind current deployed identities and runtime code pins to shared services;
-   verify factory/WETH relationships, CREATE2 pools, tier selection, quotes, approvals, range accounting and lifecycle. Use the same
-   SemanticWorkflow, Canvas/Chat/Copilot/MCP abstractions. Regress existing Router directions.
-3. **Phase 4: Aave native USDC reserve.** Add a one-reserve Arbitrum profile for id 12 after fresh deployment, reserve, cap, liquidity
+1. **Phase 3: Bridge.** Reuse the existing Router for first-class Arbitrum authoring/runtime continuity. Verify existing directions,
+   route identities, owner approvals, source submission, destination settlement, durable recovery and truthful evidence. Freshly
+   inspect route/provider state; do not create another bridge engine. Await the owner's separate Phase 3 instruction.
+2. **Pool/Liquidity.** Add an explicitly authorized shared Uniswap liquidity profile after fresh deployment verification; test
+   position/range accounting, approvals, lifecycle and reconciliation. Phase 2's swap profile grants no Pool capability.
+3. **Aave native USDC reserve.** Add a one-reserve Arbitrum profile for id 12 after fresh deployment, reserve, cap, liquidity
    and ABI verification; test supply/borrow/repay/withdraw lifecycle. Do not infer multi-reserve or composition support.
 4. **Final phase: end-to-end integration and full CI.** Confirm registry parity across all surfaces, existing Base/Robinhood behavior,
    execution gates, recovery/reconciliation and hash continuity; run the full required CI only here. Delivery/PR remains owner-directed.

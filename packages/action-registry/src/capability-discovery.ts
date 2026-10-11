@@ -31,9 +31,9 @@ const uniSource = 'https://developers.uniswap.org/deployments.json';
 const aaveSource = 'https://github.com/aave-dao/aave-address-book/blob/4250a79306a1de2a98aa3f60bb42fbfcfc612ec7/src/AaveV3Arbitrum.sol';
 const noContracts = Object.freeze({});
 export const capabilityDiscoveryRegistry: readonly NetworkCapabilityDiscovery[] = Object.freeze([
-  row('SWAP', 'uniswap.v3', 'Uniswap v3', ARBITRUM_PROTOCOL_DEPLOYMENTS.uniswap, uniSource, 'Catalog ERC-20 pairs; liquidity and decimals must be revalidated'),
-  row('TRANSFER_NATIVE', 'evm.native-transfer', 'EVM', noContracts, ARBITRUM_ONE.officialSource, 'Native ETH to an explicit recipient or connected owner'),
-  row('TRANSFER_ERC20', 'evm.token-transfer', 'ERC-20', noContracts, 'https://eips.ethereum.org/EIPS/eip-20', 'Catalog assets; standard transfer semantics must be revalidated'),
+  row('SWAP', 'uniswap.v3', 'Uniswap v3', ARBITRUM_PROTOCOL_DEPLOYMENTS.uniswap, uniSource, 'Catalog ERC-20 pairs; liquidity and decimals must be revalidated', 'EXISTING'),
+  row('TRANSFER_NATIVE', 'evm.native-transfer', 'EVM', noContracts, ARBITRUM_ONE.officialSource, 'Native ETH to an explicit recipient or connected owner', 'EXISTING'),
+  row('TRANSFER_ERC20', 'evm.token-transfer', 'ERC-20', noContracts, 'https://eips.ethereum.org/EIPS/eip-20', 'Catalog assets; standard transfer semantics must be revalidated', 'EXISTING'),
   row('BRIDGE_IN', 'flofi.router', 'Across', Object.freeze({ sourceSpokePool: CROSSCHAIN_ROUTER_BASE_ARBITRUM.source.spokePool,
     destinationSpokePool: CROSSCHAIN_ROUTER_BASE_ARBITRUM.destination.spokePool }), 'https://app.across.to/api/available-routes', 'Existing Base USDC → Arbitrum USDC route', 'EXISTING'),
   row('BRIDGE_OUT', 'flofi.router', 'Across', Object.freeze({ sourceSpokePool: CROSSCHAIN_ROUTER_ARBITRUM_BASE.source.spokePool,

@@ -12,7 +12,7 @@
  * its upper bound from the GasPriceOracle predeploy (`getL1FeeUpperBound`) into the fee budget, and the wallet request carries the
  * network's suggested priority fee. Profiles without an L1 data fee keep their Reviews and transactions byte-identical.
  */
-import { nativeTransferProfile, transferAllowsRecipients, transferAllowsTokens, transferEnvironment, transferL1FeeOracle, type NativeTransferProfile } from '@defi-workflow-engine/action-registry';
+import { nativeTransferProfile, transferAllowsRecipients, transferAllowsContractRecipients, transferAllowsTokens, transferEnvironment, transferL1FeeOracle, type NativeTransferProfile } from '@defi-workflow-engine/action-registry';
 export { ROBINHOOD_TESTNET_TRANSFER, ETHEREUM_SEPOLIA_TRANSFER, ROBINHOOD_MAINNET_TRANSFER, NATIVE_TRANSFER_PROFILES, nativeTransferProfile,
   type NativeTransferProfile } from '@defi-workflow-engine/action-registry';
 import { readTransferNode, supplyAddress, hashSupplyValue, TRANSFER_ACTION, type SemanticWorkflow, type ArtifactSet, type TransferFields,
@@ -30,7 +30,9 @@ export type TransferTokenReview = { kind: 'ERC20'; token: string; decimals: numb
 export type TransferState = { block: number; blockHash: string; blockTimestamp: number; account: string; balance: string;
   nonce: string; pendingNonce: string; gasPrice: string; baseFee: string; observedAt: string;
   /** Token transfers only: the owner's token balance and (Stock Token) multiplier state at the same block. */
-  tokenBalance?: string; multiplierWad?: string; scheduledMultiplierWad?: string; scheduledEffectiveAt?: number };
+  tokenBalance?: string; multiplierWad?: string; scheduledMultiplierWad?: string; scheduledEffectiveAt?: number;
+  /** Native sends only, on profiles that support contract recipients. Absence preserves existing profile commitments. */
+  recipientCodeHash?: string };
 export type NativeTransferReview = { format: 'gryloo.native-transfer-review.v1'; workflow: SemanticWorkflow; chain: string; chainId: number;
   account: string; recipient: string; value: string; nonce: string; transaction: NativeTransferTransaction;
   gasEstimate: string; gasLimit: string; gasPrice: string; maxFeePerGas: string; expectedFee: string; feeBudget: string;
@@ -45,7 +47,7 @@ const transferData = (recipient: string, amount: string) => '0xa9059cbb' + suppl
 const TRUE_WORD = '0x' + word(1n);
 type TokenRef = { address: string; officialId: string | null };
 
-export async function readTransferState(rpc: TransferRpc, profile: NativeTransferProfile, accountInput: string, now = Date.now(), token?: TokenRef): Promise<TransferState> {
+export async function readTransferState(rpc: TransferRpc, profile: NativeTransferProfile, accountInput: string, now = Date.now(), token?: TokenRef, recipient?: string): Promise<TransferState> {
   const account = supplyAddress(accountInput);
   if (rpcUint(await rpc('eth_chainId', [])) !== BigInt(profile.chainId)) throw new Error('TRANSFER_WRONG_CHAIN');
   const block = rpcRecord(await rpc('eth_getBlockByNumber', ['latest', false]));
@@ -60,6 +62,7 @@ export async function readTransferState(rpc: TransferRpc, profile: NativeTransfe
   if (rpcHexOrEmpty(code) !== '0x') throw new Error('TRANSFER_OWNER_NOT_EOA');
   const tokenFacts: Pick<TransferState, 'tokenBalance' | 'multiplierWad' | 'scheduledMultiplierWad' | 'scheduledEffectiveAt'> = {};
   if (token) {
+    if (rpcHexOrEmpty(await rpc('eth_getCode', [token.address, tag])) === '0x') throw new Error('TRANSFER_TOKEN_CODE_MISSING');
     const call = async (data: string) => rpcHex(await rpc('eth_call', [{ to: token.address, data }, tag]));
     tokenFacts.tokenBalance = BigInt(await call('0x70a08231' + account.slice(2).padStart(64, '0'))).toString();
     if (token.officialId) {
@@ -68,11 +71,13 @@ export async function readTransferState(rpc: TransferRpc, profile: NativeTransfe
       tokenFacts.scheduledEffectiveAt = Number(BigInt(await call('0x97a4064f')));
     }
   }
+  const recipientFacts = !token && recipient && transferAllowsContractRecipients(profile)
+    ? { recipientCodeHash: supplyHash(rpcHexOrEmpty(await rpc('eth_getCode', [supplyAddress(recipient), tag]))) } : {};
   if (rpcHash(rpcRecord(await rpc('eth_getBlockByNumber', [tag, false])).hash) !== blockHash) throw new Error('TRANSFER_REORG');
   const baseFee = block.baseFeePerGas === undefined ? 0n : rpcUint(block.baseFeePerGas);
   return { block: number, blockHash, blockTimestamp: timestamp, account, balance: rpcUint(balance).toString(), nonce: rpcUint(nonce).toString(),
     pendingNonce: rpcUint(pendingNonce).toString(), gasPrice: rpcUint(gasPrice).toString(), baseFee: baseFee.toString(), observedAt: new Date(now).toISOString(),
-    ...tokenFacts };
+    ...tokenFacts, ...recipientFacts };
 }
 function rpcHexOrEmpty(value: unknown): string { return value === '0x' ? '0x' : rpcHex(value); }
 
@@ -119,7 +124,8 @@ export async function simulateNativeTransfer(workflow: SemanticWorkflow, account
   const semanticHash = supplyArtifactHash('semantic-workflow', workflow);
   const { node, read, profile } = transferFields(workflow), native = { chainId: profile.chain, nativeId: 'ETH', decimals: 18 };
   const token = read.kind === 'TOKEN' ? read.fields.token : null;
-  const state = await readTransferState(rpc, profile, accountInput, now, token ? { address: token.address, officialId: token.officialId } : undefined);
+  const intendedRecipient = read.fields.recipient === 'CONNECTED_OWNER' ? supplyAddress(accountInput) : supplyAddress(read.fields.recipient);
+  const state = await readTransferState(rpc, profile, accountInput, now, token ? { address: token.address, officialId: token.officialId } : undefined, intendedRecipient);
   const account = state.account, tag = supplyHex(state.block);
   const recipient = read.fields.recipient === 'CONNECTED_OWNER' ? account : supplyAddress(read.fields.recipient);
   const insufficient = transferEnvironment(profile) === 'MAINNET' ? 'TRANSFER_INSUFFICIENT_ETH' : 'TRANSFER_INSUFFICIENT_TEST_ETH';
@@ -127,6 +133,7 @@ export async function simulateNativeTransfer(workflow: SemanticWorkflow, account
   if (state.pendingNonce !== state.nonce) throw new Error('TRANSFER_PENDING_TRANSACTION');
   let asset: TransferTokenReview | undefined;
   if (token) {
+    if (rpcHexOrEmpty(await rpc('eth_getCode', [token.address, tag])) === '0x') throw new Error('TRANSFER_TOKEN_CODE_MISSING');
     const call = async (data: string) => rpcHex(await rpc('eth_call', [{ to: token.address, data }, tag]));
     if (BigInt(await call('0x313ce567')) !== BigInt(token.decimals)) throw new Error('TRANSFER_TOKEN_METADATA_MISMATCH');
     if (token.officialId) {
@@ -143,7 +150,7 @@ export async function simulateNativeTransfer(workflow: SemanticWorkflow, account
       expectedBalanceAfter: self ? state.tokenBalance! : (BigInt(state.tokenBalance!) - BigInt(read.fields.amount)).toString(),
       recipientBalanceBefore: recipientBalance.toString(), multiplierWad: state.multiplierWad ?? null, scheduledMultiplierWad: state.scheduledMultiplierWad ?? null,
       scheduledEffectiveAt: state.scheduledEffectiveAt ?? null };
-  } else if (recipient !== account) {
+  } else if (recipient !== account && !transferAllowsContractRecipients(profile)) {
     // A native value transfer to a contract would run its code (and possibly emit logs); only an EOA recipient is reconcilable.
     if (rpcHexOrEmpty(await rpc('eth_getCode', [recipient, tag])) !== '0x') throw new Error('TRANSFER_RECIPIENT_NOT_EOA');
   }
@@ -152,7 +159,8 @@ export async function simulateNativeTransfer(workflow: SemanticWorkflow, account
   const transactionPreview = compileNativeTransfer(workflow, account, '1', '1');
   const call = { from: account, to: transactionPreview.to, value: transactionPreview.value, data: transactionPreview.data };
   const result = await rpc('eth_call', [call, tag]);
-  if (token ? result !== TRUE_WORD : result !== '0x') throw new Error('TRANSFER_SIMULATION_UNEXPECTED_RETURN');
+  if (token ? result !== TRUE_WORD : transferAllowsContractRecipients(profile) ? typeof result !== 'string' || !/^0x(?:[0-9a-fA-F]{2})*$/.test(result) : result !== '0x')
+    throw new Error('TRANSFER_SIMULATION_UNEXPECTED_RETURN');
   const gas = rpcUint(await rpc('eth_estimateGas', [call, tag]));
   if (gas < 21_000n || gas > 500_000n) throw new Error('TRANSFER_GAS_INVALID');
   const gasPrice = BigInt(state.gasPrice), baseFee = BigInt(state.baseFee);
@@ -175,7 +183,7 @@ export async function simulateNativeTransfer(workflow: SemanticWorkflow, account
   const simulation: SimulationBundle = { schemaVersion: '1.0.0', simulationId: 'native-transfer-simulation', semanticWorkflowRevision: workflow.revision,
     semanticWorkflowHash: semanticHash, artifactSetHash: artifactHash, adapters: [adapter], contracts: [], outputs: [], propagatedOutputs: [],
     failurePaths: [], uncertainty: transferL1FeeOracle(profile) ? [{ code: 'L2_SOFT_CONFIRMATION', description: `Inclusion is first a ${profile.network} sequencer block; L1 finality follows later.` }]
-      : profile.settlement === 'L2' ? [{ code: 'L2_SOFT_CONFIRMATION', description: 'Inclusion is first a Robinhood Chain sequencer confirmation; L1 finality follows later.' }] :
+      : profile.settlement === 'L2' ? [{ code: 'L2_SOFT_CONFIRMATION', description: `Inclusion is first a ${profile.network} sequencer confirmation; L1 finality follows later.` }] :
       [{ code: 'L1_REORG_WINDOW', description: `Inclusion is an ${profile.network} block; reconciliation waits for ${profile.minimumConfirmations} confirmations.` }],
     unsupportedAssumptions: [], freshness: { observedAt: state.observedAt, expiresAt, maximumAgeSeconds: profile.reviewTtlSeconds } };
   const simulationHash = supplyArtifactHash('simulation-bundle', simulation), owner = { chainId: profile.chain, address: account };
@@ -225,6 +233,7 @@ export function assertNativeTransferReview(review: NativeTransferReview, workflo
   const value = read.kind === 'TOKEN' ? 0n : BigInt(review.value);
   if (state.account !== review.account || state.nonce !== review.nonce || state.pendingNonce !== review.nonce || state.block < review.state.block ||
       BigInt(state.gasPrice) > BigInt(review.maxFeePerGas) || BigInt(state.balance) < value + BigInt(review.feeBudget)) throw new Error('TRANSFER_AUTHORIZATION_STALE');
+  if (review.state.recipientCodeHash !== state.recipientCodeHash) throw new Error('TRANSFER_RECIPIENT_CODE_CHANGED_REVIEW_REQUIRED');
   if (review.asset) {
     if (state.tokenBalance === undefined || BigInt(state.tokenBalance) < BigInt(review.value)) throw new Error('TRANSFER_AUTHORIZATION_STALE');
     // A Stock Token multiplier that moved since Review changes what the reviewed amount represents.

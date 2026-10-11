@@ -96,13 +96,13 @@ describe('BUILD-ARB-001 shared curated catalog policy', () => {
 });
 
 describe('BUILD-ARB-001 capability discovery is not execution authority', () => {
-  it('discovers all ten verified protocol capabilities by chain without granting any new executable row', () => {
+  it('discovers all ten verified protocol capabilities by chain with runtime availability distinct from discovery evidence', () => {
     const rows = discoverNetworkCapabilities(ARBITRUM_ONE.chain);
     expect(rows.map(row => row.capability)).toEqual(['SWAP', 'TRANSFER_NATIVE', 'TRANSFER_ERC20', 'BRIDGE_IN', 'BRIDGE_OUT', 'LIQUIDITY', 'SUPPLY', 'BORROW', 'REPAY', 'WITHDRAW']);
     expect(rows.every(row => row.status === 'SUPPORTED' && row.evidence === 'PUBLIC_READ_ONLY')).toBe(true);
-    expect(rows.filter(row => row.runtime === 'EXISTING').map(row => row.capability)).toEqual(['BRIDGE_IN', 'BRIDGE_OUT']);
+    expect(rows.filter(row => row.runtime === 'EXISTING').map(row => row.capability)).toEqual(['SWAP', 'TRANSFER_NATIVE', 'TRANSFER_ERC20', 'BRIDGE_IN', 'BRIDGE_OUT']);
     expect(executionCapabilityRegistry.filter(row => row.chainId === ARBITRUM_ONE.chain && row.environment === 'MAINNET')
-      .map(row => `${row.actionType}/${row.adapterId}`)).toEqual(['asset.bridge/flofi.router']);
+      .map(row => `${row.actionType}/${row.adapterId}`)).toEqual(['asset.bridge/flofi.router', 'asset.swap.exact-input/uniswap.v3', 'asset.transfer/evm.native-transfer', 'asset.transfer/evm.token-transfer']);
     expect(discoverNetworkCapabilities('eip155:421614')).toEqual([]);
     expect(discoverNetworkCapabilities('arbitrum')).toEqual([]);
   });

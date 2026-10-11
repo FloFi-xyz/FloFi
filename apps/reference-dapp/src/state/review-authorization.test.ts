@@ -43,6 +43,18 @@ function supply() {
   return fixture;
 }
 describe('shared wallet and existing Review capability', () => {
+  it('binds owner-bound swap Review to the simulated owner and refuses a quote-only or divergent run', () => {
+    const fixture = reviewFixture();
+    if (fixture.source.kind !== 'public' || !fixture.source.state.run) throw Error('fixture');
+    const saved = fixture.source.state.run;
+    const run = { ...saved, quote: { ...saved.quote, chainId: 42161, ownerReview: { account: reviewOwner } } };
+    f.stores.public = { run, available: true, busy: false, retired: false, recoveryOnly: false, review: vi.fn() };
+    expect(useReviewAuthorization('public').authorization).toMatchObject({ owner: reviewOwner, chain: 'eip155:42161', ready: true });
+    Object.assign(run, { divergence: 'TRANSACTION_MISMATCH' });
+    expect(useReviewAuthorization('public').authorization.ready).toBe(false);
+    Object.assign(run, { divergence: undefined, quote: { ...run.quote, ownerReview: undefined } });
+    expect(useReviewAuthorization('public').authorization.ready).toBe(false);
+  });
   it('allows Review of a refreshed public quote after a confirmed approval, without reviving the old quote binding', () => {
     const fixture = reviewFixture();
     if (fixture.source.kind !== 'public' || !fixture.source.state.run) throw Error('fixture');

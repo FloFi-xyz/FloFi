@@ -12,6 +12,8 @@
 import { hashArtifactBytes } from '@defi-workflow-engine/workflow-contracts';
 import { validateArtifact } from '@defi-workflow-engine/workflow-contracts/schemas';
 import type { FlowName } from '../../backend/flows.ts';
+import { catalogNetworkOfChain } from '../server/catalog-networks.ts';
+import { networkIdentity } from '../domain/network-registry.ts';
 import type { StrategySpec } from '../engine/strategy-spec';
 
 export type PreviewPlan = { readonly flow: FlowName; readonly subject: 'EVM' | 'SOLANA' | 'NONE' };
@@ -29,8 +31,8 @@ export function previewPlan(spec: StrategySpec): PreviewPlan | { readonly code: 
     case 'transfer': return { code: 'SIMULATION_REQUIRES_OWNER_BROWSER' };
     case 'swap':
       // BUILD-BASE-001: Base mainnet swaps (the USDC ⇄ WETH reference pair included) quote on the Base catalog-network swap flow.
-      if (spec.network === 'base') return { flow: 'base-swap', subject: 'NONE' };
-      if (spec.network === 'robinhood') return { flow: 'robinhood-swap', subject: 'NONE' };
+      { const network = catalogNetworkOfChain(networkIdentity(spec.network)?.chain);
+        if (network) return { flow: network.flows.swap, subject: 'NONE' }; }
       if (spec.network === 'solana') return { flow: 'jupiter-swap', subject: 'SOLANA' };
       if (spec.network === 'solana-devnet') return { flow: 'solana-devnet-swap', subject: 'SOLANA' };
       return { flow: 'base-sepolia-swap', subject: 'NONE' };
@@ -45,7 +47,7 @@ export function previewPlan(spec: StrategySpec): PreviewPlan | { readonly code: 
 export function strategyFlow(spec: StrategySpec): FlowName | null {
   const plan = previewPlan(spec);
   if ('flow' in plan) return plan.flow;
-  return spec.action === 'add_liquidity' ? 'orca-liquidity' : spec.action === 'transfer' ? spec.network === 'base' ? 'base-mainnet-transfer' : 'robinhood-mainnet-transfer' : null;
+  return spec.action === 'add_liquidity' ? 'orca-liquidity' : spec.action === 'transfer' ? catalogNetworkOfChain(networkIdentity(spec.network)?.chain)?.flows.transfer ?? null : null;
 }
 
 type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
@@ -108,7 +110,7 @@ export function projectSimulation(flow: FlowName, value: unknown): SimulationVie
           projected: pick(r.withdraw ?? r.repay ?? r.borrow ?? {}, ['expectedPostHealthFactor', 'debtAfter', 'debtAfterBase', 'collateralAfter', 'walletAfter']) },
         canonicalArtifacts: canonicalArtifacts(r) };
     }
-    case 'base-sepolia-swap': case 'robinhood-swap': case 'base-swap': {
+    case 'base-sepolia-swap': case 'robinhood-swap': case 'base-swap': case 'arbitrum-swap': {
       const q = obj(record.quote);
       // BUILD-RH-002: a catalog-network quote (Robinhood Chain, BUILD-BASE-001 Base) carries its own provenance (PUBLIC_MAINNET or MOCKED) and decimals;
       // Robinhood Chain quotes also carry the Stock Token multipliers.

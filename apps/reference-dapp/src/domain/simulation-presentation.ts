@@ -239,7 +239,7 @@ export function projectSimulation(workflow: Workflow, context: ReviewContext, so
       for (const stock of q.stocks ?? []) warn('attention', `${stock.symbol}: ${simulationAmount(stock.multiplierWad, 18)} underlying shares per token (Robinhood corporate-action multiplier).`);
       if (q.stocks?.length) warn('attention', 'Stock Tokens are not offered to US persons or in restricted jurisdictions.');
       if (s) s.resultLabel = 'Quoted output';
-      warn('attention', 'This is a pool quote. Network fees and exact transaction simulation are not available yet.');
+      if (!q.ownerReview) warn('attention', 'This is a pool quote. Network fees and exact transaction simulation are not available yet.');
       break;
     }
     case 'solana-swap': {
