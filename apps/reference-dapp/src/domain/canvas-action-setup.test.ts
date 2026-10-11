@@ -97,6 +97,13 @@ describe('zero-based product authoring without invalid executable IR', () => {
       expect(financial(state)).toEqual([]);
     }
   });
+  // BUILD-BASE-001: an unavailable catalog names the card's own network; Robinhood Chain (or no network) keeps its Stock Token wording.
+  it('names the unavailable catalog of the card network', () => {
+    const unavailable = new Error('ASSET_CATALOG_UNAVAILABLE');
+    expect(canvasAmountMessage(unavailable, 'Base')).toBe('Base tokens are unavailable right now. Try again in a moment.');
+    for (const network of ['Robinhood Chain', undefined])
+      expect(canvasAmountMessage(unavailable, network)).toBe('Robinhood Stock Tokens are unavailable right now. Try again in a moment.');
+  });
 
   it.each(['swap', 'bridge', 'supply', 'borrow', 'repay', 'withdraw'] as const)('%s accepts a positive amount only through the existing validated command, preserving position/history', action => {
     const prepared = input(start(action), '2.5');

@@ -3,9 +3,14 @@
 export const portugueseBase: Readonly<Record<string, string>> = {
   'Search {0} tokens': 'Pesquisar tokens na {0}', 'Search by symbol or name…': 'Pesquise por símbolo ou nome…', 'Loading {0} tokens…': 'Carregando os tokens da {0}…',
   '{0} tokens are unavailable right now.': 'Os tokens da {0} estão indisponíveis no momento.', 'No token matches this search.': 'Nenhum token corresponde a esta pesquisa.',
+  '{0} tokens are unavailable right now. Try again in a moment.': 'Os tokens da {0} estão indisponíveis no momento. Tente novamente em instantes.',
   '{0} token results': 'Resultados de tokens na {0}', '{0} tokens · type to search': '{0} tokens · digite para pesquisar',
   'Real funds on {0}. Simulate checks both tokens against the network\'s official catalog and the chain, and that the pool is live.':
     'Fundos reais na {0}. A simulação confere os dois tokens no catálogo oficial da rede e na chain, e se o pool está ativo.',
+  'Real funds on {0}: your wallet signs every request after your Review; Flofi never signs or sends.':
+    'Fundos reais na {0}: sua carteira assina cada solicitação depois da sua revisão; o Flofi nunca assina nem envia.',
+  'Base liquidity is not enabled on this server.': 'A liquidez na Base não está habilitada neste servidor.',
+  'The Base token list is unavailable. Nothing was simulated or sent.': 'A lista de tokens da Base está indisponível. Nada foi simulado nem enviado.',
   '{0} transfer': 'Transferência na {0}', 'Base mainnet is not enabled on this app instance.': 'A Base mainnet não está habilitada nesta instância do app.',
   'The Base token list is unavailable. Try again later.': 'A lista de tokens da Base está indisponível. Tente novamente mais tarde.',
   'The network\'s official asset catalog is unavailable. Try again later.': 'O catálogo oficial de ativos da rede está indisponível. Tente novamente mais tarde.',

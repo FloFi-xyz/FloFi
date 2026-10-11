@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { CONCENTRATED_LIQUIDITY_ACTION, createConcentratedLiquidityNode, readConcentratedLiquidity, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
-import { catalogPoolOn, formatAssetAmount, parseAssetAmount, uniswapCatalogDeployment, UNISWAP_V3_ROBINHOOD, type CanonicalAsset } from '@defi-workflow-engine/action-registry';
+import { catalogPoolOn, formatAssetAmount, parseAssetAmount, uniswapCatalogDeployment, uniswapLiquidityProfile, UNISWAP_V3_BASE_SEPOLIA_LIQUIDITY, UNISWAP_V3_ROBINHOOD,
+  type CanonicalAsset } from '@defi-workflow-engine/action-registry';
 import { validateUniswapLiquidityNode } from '@defi-workflow-engine/reference-linter';
 import { uniswapQuotePriceAtTick } from '@defi-workflow-engine/reference-compiler';
 import { BASE_CHAIN, BASE_NETWORK, canonicalSymbol, resolveNetworkAsset, ROBINHOOD_CHAIN, ROBINHOOD_NETWORK } from './asset-catalogs';
+import { networkIdentity } from './network-registry';
 
 /**
  * BUILD-RH-002: concentrated liquidity on a catalog network through Uniswap v3 — any two catalog ERC-20s at a standard fee tier, authored
@@ -127,3 +129,18 @@ export function parseBaseLiquidityChat(text: string): RobinhoodLiquidityInput | 
   const m = BASE_LIQUIDITY_PATTERN.exec(text.trim());
   return m ? fromMatch(m, BASE_NETWORK, symbol => canonicalSymbol(BASE_CHAIN, symbol) ?? symbol) : null;
 }
+
+/**
+ * BUILD-BASE-001: the network a liquidity run is presented on (the reviewed chain, else the authored one). A catalog network (real funds) is
+ * named by its own deployment and never falls back to a testnet profile; the testnet profiles are unchanged (Base Sepolia before anything
+ * is authored). Display only: the service binds the chain, pool and tokens at Review.
+ */
+export function liquidityRunNetwork(chain: string | number | null | undefined) {
+  const catalog = uniswapCatalogDeployment(chain), robinhood = catalog?.chain === ROBINHOOD_CHAIN;
+  const profile = catalog ?? uniswapLiquidityProfile(chain) ?? UNISWAP_V3_BASE_SEPOLIA_LIQUIDITY;
+  return { profile, network: profile.network, realFunds: catalog !== null, robinhood,
+    evidenceSlug: robinhood ? 'robinhood-chain' : catalog ? `${networkIdentity(catalog.chain)?.key ?? 'catalog'}-mainnet` : 'base-sepolia' } as const;
+}
+/** The catalog networks' liquidity copy is written for Robinhood Chain; another catalog network's name is substituted. Display text only. */
+export const catalogLiquidityCopy = (text: string, network: string): string => network === ROBINHOOD_NETWORK || !networkIdentity(network)?.catalog ? text
+  : text.replaceAll('Robinhood Chain', network).replaceAll('Robinhood', network);

@@ -45,6 +45,12 @@ export const ROUTER_NETWORK_OPTIONS = Object.freeze({
   'arbitrum-to-base': Object.freeze({ source: 'Arbitrum' as const, destination: 'Base' as const, sourceLabel: 'Arbitrum One', destinationLabel: 'Base',
     pair: pairOf(CROSSCHAIN_ROUTER_ARBITRUM_BASE.id), profile: CROSSCHAIN_ROUTER_ARBITRUM_BASE, funds: 'Real funds: Arbitrum One and Base mainnet.', environment: 'mainnet' as const }),
 }) satisfies Readonly<Record<RouterNetwork, RouterOption>>;
+/**
+ * BUILD-BASE-001: the code a route reports while its deployment gate is off (as `app/router-action.ts` refuses it): the testnet Router, a
+ * Robinhood Chain route (`GRYLOO_ROBINHOOD_MAINNET`), or the Router itself (`GRYLOO_ROUTER`: Base → Arbitrum One and Arbitrum One → Base).
+ */
+export const routerDisabledCode = (network: RouterNetwork): string => network === 'testnet' ? 'ROUTER_TESTNET_NOT_ENABLED'
+  : [ROUTER_NETWORK_OPTIONS[network].source, ROUTER_NETWORK_OPTIONS[network].destination].includes('Robinhood Chain') ? 'ROBINHOOD_MAINNET_NOT_ENABLED' : 'ROUTER_NOT_ENABLED';
 /** The router networks (pairs) of a wallet environment: Base ⇄ Arbitrum and the Robinhood routes on mainnet, the test pair on testnet. */
 export const routerNetworksOf = (environment: 'mainnet' | 'testnet'): readonly RouterNetwork[] =>
   (Object.keys(ROUTER_NETWORK_OPTIONS) as RouterNetwork[]).filter(network => ROUTER_NETWORK_OPTIONS[network].environment === environment);

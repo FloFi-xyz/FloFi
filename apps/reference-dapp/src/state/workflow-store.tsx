@@ -180,7 +180,7 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
       const amount = actionReviewValue(setup, id, input.amount, undefined, history.cryptoSelections[id]);
       propose(command, { authoringId: id, authoringAmount: amount! });
       return null;
-    } catch (cause) { return canvasAmountMessage(cause); }
+    } catch (cause) { return canvasAmountMessage(cause, input.selection.network); }
   }
   function removeActionSetup() { dispatchHistory({ type: 'REMOVE_ACTION_SETUP' }); setPending(current => current?.authoringId === history.actionSetup?.id ? null : current); }
   function reviewCanvasAmount(id: string, poolInput?: UniswapLiquidityInput) {
@@ -192,7 +192,7 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
       const amount = actionReviewValue(setup, id, history.amountInputs[id], history.bridgeNetworkInputs[id], history.cryptoSelections[id])!;
       propose(command, { authoringId: id, authoringAmount: amount });
       return null;
-    } catch (cause) { return canvasAmountMessage(cause); }
+    } catch (cause) { return canvasAmountMessage(cause, (history.cryptoSelections[id] ?? history.actionSetup?.cryptoSelection)?.network); }
   }
   const generateArtifacts = useCallback(() => {
     const workflow = workflowRef.current;

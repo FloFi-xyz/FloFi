@@ -35,7 +35,8 @@ export function RobinhoodTransferAuthoringForm({ nodeId, onDone, direct = false 
     const command = nodeId ? { type: 'SET_RH_TRANSFER' as const, nodeId, input, source: 'CANVAS' as const, baseRevision: state.workflow.revision }
       : { type: 'ADD_RH_TRANSFER' as const, input, source: 'CANVAS' as const, baseRevision: state.workflow.revision };
     if (direct) dispatch(command); else propose(command); onDone?.();
-  } catch (cause) { setError(cause instanceof Error && cause.message === 'ASSET_CATALOG_UNAVAILABLE' ? 'Robinhood assets are unavailable right now. Try again in a moment.'
+  } catch (cause) { setError(cause instanceof Error && cause.message === 'ASSET_CATALOG_UNAVAILABLE' ? network === 'Robinhood Chain'
+      ? 'Robinhood assets are unavailable right now. Try again in a moment.' : `${network} tokens are unavailable right now. Try again in a moment.`
     : mainnet ? 'Enter an exact positive amount for the selected asset and, optionally, a valid recipient address.' : 'Enter an exact positive test-ETH amount up to 0.001 with at most 18 decimal places.'); } }
   return <form className="inspector-fields" aria-label={tr(nodeId ? 'Edit Robinhood transfer' : 'Create Robinhood transfer')} onSubmit={submit}>
     <strong>{tr(mainnet ? `${network} transfer` : transferCopy('Robinhood Testnet test-ETH self-transfer', network))}</strong>

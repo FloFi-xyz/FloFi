@@ -15,7 +15,7 @@ import { readConcentratedLiquidity, type SemanticWorkflow } from '@defi-workflow
 import { catalogPoolOn, UNISWAP_V3_BASE, type AssetCatalog, type CanonicalAsset } from '@defi-workflow-engine/action-registry';
 import { editorReducer, initialEditor } from '../domain/editor';
 import { registerNetworkCatalog, resetNetworkCatalogs } from '../domain/asset-catalogs';
-import { parseBaseLiquidityChat } from '../domain/robinhood-liquidity-authoring';
+import { catalogLiquidityCopy, liquidityRunNetwork, parseBaseLiquidityChat } from '../domain/robinhood-liquidity-authoring';
 import { parseLocalCommand } from '../domain/commands';
 import { createUniswapLiquidityChain, UNI_MOCK_CODE_PINS, UNI_OWNER, type UniswapLiquidityChain } from '../../e2e/uniswap-liquidity-harness';
 import { baseAsset, baseCatalog } from './base-mainnet.test-harness';
@@ -59,6 +59,21 @@ describe('BUILD-BASE-001 Base liquidity authoring', () => {
     const chat = parseLocalCommand('add liquidity 100 USDC and 0.001 cbBTC on Base fee 0.05% slippage 100 bps', initialEditor().workflow, context, null);
     const viaChat = editorReducer(initialEditor(), chat, context).workflow.nodes.at(-1);
     expect(JSON.stringify(viaChat)).toBe(JSON.stringify(node));
+  });
+  it('presents a Base position as real funds on Base, never as a testnet profile', () => {
+    expect(liquidityRunNetwork('eip155:8453')).toMatchObject({ network: 'Base', realFunds: true, robinhood: false, evidenceSlug: 'base-mainnet',
+      profile: { chainHex: '0x2105', explorer: 'https://basescan.org/' } });
+    expect(liquidityRunNetwork(8453)).toMatchObject({ network: 'Base', realFunds: true });
+    // Robinhood Chain and the testnet profiles keep their presentation; nothing authored is still Base Sepolia, as before.
+    expect(liquidityRunNetwork('eip155:4663')).toMatchObject({ network: 'Robinhood Chain', realFunds: true, robinhood: true, evidenceSlug: 'robinhood-chain' });
+    expect(liquidityRunNetwork('eip155:84532')).toMatchObject({ network: 'Base Sepolia', realFunds: false, evidenceSlug: 'base-sepolia' });
+    expect(liquidityRunNetwork('eip155:11155111')).toMatchObject({ network: 'Ethereum Sepolia', realFunds: false });
+    expect(liquidityRunNetwork(undefined)).toMatchObject({ network: 'Base Sepolia', realFunds: false });
+    // The catalog copy names the position's own network; Robinhood Chain's and the testnets' text is unchanged.
+    const text = 'This pair has no live Uniswap v3 pool at this fee tier on Robinhood Chain. Choose another fee tier; nothing was signed.';
+    expect(catalogLiquidityCopy(text, 'Base')).toBe('This pair has no live Uniswap v3 pool at this fee tier on Base. Choose another fee tier; nothing was signed.');
+    expect(catalogLiquidityCopy('Robinhood Chain liquidity is not enabled on this server.', 'Base')).toBe('Base liquidity is not enabled on this server.');
+    for (const network of ['Robinhood Chain', 'Base Sepolia']) expect(catalogLiquidityCopy(text, network)).toBe(text);
   });
 });
 
