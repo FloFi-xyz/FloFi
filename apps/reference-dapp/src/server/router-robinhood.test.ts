@@ -94,6 +94,25 @@ describe('BUILD-RH-002 Robinhood Chain routes on the canonical Router (MOCKED)',
     expect(await service.load(run.id)).toMatchObject({ phase: 'PREPARED', authorization: null, requote: true });
     expect(h.counters.sends).toBe(0);
   });
+  it('recovery: an ambiguous submission is observed, never resent; an unfilled USDG deposit out of Robinhood is reconciled as a verified refund', async () => {
+    const route = ROUTES[1]!, { h, service, owner } = await setup(route, { autoFillSeconds: null }), w = workflow(route, { routing: 'ACROSS' });
+    const run = await service.simulate(w, owner);
+    await service.review(run.id, run.review.commitment, w);
+    const approval = await service.begin(run.id, owner, w);
+    await service.handoff(run.id);
+    h.wallet.send(approval.transaction, { hold: true });                     // reaches the mempool; the browser loses the answer
+    expect((await service.report(run.id, { kind: 'UNKNOWN', code: 'ROUTER_SUBMISSION_UNKNOWN' })).attempts.at(-1)!.state).toBe('SUBMISSION_RESULT_UNKNOWN');
+    await expect(service.begin(run.id, owner, w)).rejects.toThrow('ROUTER_ATTEMPT_ACTIVE_OBSERVE_EXISTING');
+    h.wallet.mine();
+    expect((await service.observe(run.id)).attempts.at(-1)).toMatchObject({ step: 'APPROVAL', state: 'CONFIRMED', reconciled: true });
+    await execute(service, h, owner, run.id, w);
+    expect((await service.observe(run.id)).phase).toBe('SOURCE_CONFIRMED');
+    h.advance(7_300);
+    expect(await until(service, h, run.id, 'RECOVERY_REQUIRED')).toMatchObject({ error: 'ROUTER_FILL_DEADLINE_PASSED_REFUND_EXPECTED' });
+    h.relayer.refund();
+    expect(await service.observe(run.id)).toMatchObject({ phase: 'REFUNDED', verdict: 'REFUNDED', refund: { amount: '2000000', recipient: owner }, evidence: null });
+    expect(h.counters.sends).toBe(2);
+  });
   it('an insufficient source balance names the route token and stops before any wallet request', async () => {
     const route = ROUTES[1]!, { h, service, owner } = await setup(route, { usdc: 1_000_000n }), w = workflow(route);
     await expect(service.simulate(w, owner)).rejects.toThrow('ROUTER_INSUFFICIENT_TOKEN');

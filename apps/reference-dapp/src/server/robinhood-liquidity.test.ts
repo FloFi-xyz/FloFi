@@ -160,6 +160,19 @@ describe('BUILD-RH-002 Robinhood Chain liquidity service (MOCKED)', () => {
     await expect(c.service.simulate(w, UNI_OWNER)).rejects.toThrow('STOCK_MULTIPLIER_CHANGE_PENDING');
     expect(a.chain.counters.sends + b.chain.counters.sends + c.chain.counters.sends).toBe(0);
   });
+  it('recovery: an uncertain wallet result is observation-only and the landed approval is rediscovered by nonce, never resent', async () => {
+    const { service, chain } = await setup(), w = workflow();
+    const run = await reviewed(service, w);
+    const begun = await service.begin(run.id, UNI_OWNER, w);
+    await service.handoff(run.id);
+    chain.wallet.send(begun.transaction, { hold: true });
+    expect((await service.report(run.id, { kind: 'UNKNOWN', code: 'UNISWAP_SUBMISSION_UNKNOWN' })).attempts.at(-1)!.state).toBe('SUBMISSION_RESULT_UNKNOWN');
+    await expect(service.begin(run.id, UNI_OWNER, w)).rejects.toThrow('UNISWAP_ATTEMPT_ACTIVE_OBSERVE_EXISTING');
+    expect((await service.observe(run.id)).error).toBe('UNISWAP_TRANSACTION_NOT_OBSERVED');
+    chain.wallet.release();
+    expect((await service.observe(run.id)).attempts.at(-1)).toMatchObject({ step: 'APPROVE_TOKEN0', state: 'CONFIRMED', reconciled: true });
+    expect(chain.counters.sends).toBe(1);
+  });
   it('fails closed: registry unavailable, an asset no longer in the registry, no pool at the fee tier, unverified deployments', async () => {
     const w = workflow();
     await expect((await setup({ catalogFor: async () => { throw new Error('STOCK_REGISTRY_UNAVAILABLE'); } })).service.simulate(w, UNI_OWNER)).rejects.toThrow('STOCK_REGISTRY_UNAVAILABLE');

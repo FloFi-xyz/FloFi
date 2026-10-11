@@ -62,14 +62,18 @@ Capability rows are added for `eip155:4663` / `MAINNET`, all with `evidenceMatur
 
 - `asset.swap.exact-input` / `uniswap.v3`
 - `asset.liquidity.concentrated` / `uniswap.v3`
-- `asset.transfer` / `evm.native-transfer`
+- `asset.transfer` / `evm.native-transfer` and `evm.token-transfer`
 - `asset.bridge` / `flofi.router` (source chain)
 
-Gates follow the existing mainnet convention:
+A router row is also added for Arbitrum One (42161) as a source.
 
-- `GRYLOO_ROBINHOOD=live`: quotes, simulation and Review.
+Gates follow the existing mainnet convention. They are separate from the RH-DEMO-001 testnet gates (`GRYLOO_ROBINHOOD_TESTNET`, `GRYLOO_ROBINHOOD_HARNESS`), which are unchanged:
+
+- `GRYLOO_ROBINHOOD_MAINNET=live`: the official catalog, quotes, simulation and Review on Robinhood Chain. In-process server actions additionally need `NODE_ENV=development`; hosted deployments use the cloud flows.
 - `GRYLOO_ROBINHOOD_OWNER_EXECUTION=MAINNET_OWNER_APPROVED`: additionally allows `begin`. The owner's wallet signs and sends.
-- `GRYLOO_ROBINHOOD_HARNESS=MOCKED_LOOPBACK_ONLY`: loopback tests.
+- `GRYLOO_ROBINHOOD_MAINNET_HARNESS=MOCKED_LOOPBACK_ONLY`: loopback tests. It always wins over `live`.
+- `GRYLOO_ROBINHOOD_JOURNAL`: local file storage (`mainnet-transfer`, `liquidity`, `router-<route>` subdirectories). The swap uses the public swap service's own journal.
+- Optional HTTPS overrides: `GRYLOO_ROBINHOOD_RPC_URL`, plus the existing `GRYLOO_BASE_RPC_URL` and `GRYLOO_ARBITRUM_RPC_URL`.
 
 No production variable is set by this build.
 
@@ -86,15 +90,24 @@ No production variable is set by this build.
 
   The existing self-transfer node and Review stay byte-identical, so RH-DEMO evidence and hashes keep their continuity. The reconciler adds the ERC-20 `Transfer` log and the token balance delta.
 - **Bridge:** router pairs Base ↔ Robinhood and Arbitrum ↔ Robinhood (USDC ↔ USDG) on the existing `flofi.router`.
-  - Profile token fields are generalized from `usdc` to `token` plus `symbol`.
-  - Review and visuals show both assets explicitly.
-- **Liquidity:** the existing Uniswap public-liquidity runtime gains a Robinhood registry profile: pool derived per pair and fee, factory/NPM pins, tick spacing read from the pool.
+  - Profile token fields are generalized from `usdc` to `token`, `symbol` and `decimals`, with an `l1DataFee` flag on the source side.
+  - Each bridge moves 1–100, the release cap of Base → Arbitrum.
+  - Across's `internalizedSwap` (the stablecoin conversion) becomes its own Review fee line. LI.FI does not itemize the conversion, so its route fails closed and AUTO falls back to Across.
+  - Each route is its own flow and storage. Review and visuals show both assets explicitly.
+- **Liquidity:** the existing Uniswap public-liquidity service gains Robinhood Chain:
+  - The pool is the node's own pair and a standard fee tier: the CREATE2 pool of the pinned factory, confirmed by `getPool` and the pool's own token0/token1/fee/tickSpacing.
+  - Both tokens must resolve in the freshly validated official catalog. Stock Tokens go through the same on-chain identity and multiplier check as swaps (a shared helper), with the multiplier bound into Review.
+  - Runs are `rhlp-` in their own flow (`robinhood-liquidity`).
 
 ### 2.5 Composition
 
-Canonical multi-step workflows (for example bridge → swap → add liquidity) are representable in the IR with resource edges. The linter checks asset continuity across chains, `workflow-steps` describes every step, and the shared renderer draws them.
+Multichain workflows use the existing MCP step-list contract (`version: 2`), not new IR edges:
 
-Each step executes through its own reviewed single-step runtime. A cross-chain orchestrator that auto-continues after the bridge settles is out of scope; the report records this boundary.
+- An ordered list of single-action steps, for example "bridge 100 USDC from Base into Robinhood → buy TSLA with USDG → transfer AAPL".
+- Each step keeps its own isolated canonical IR and `semanticWorkflowHash`. The workflow hash covers the ordered step hashes. One step is exactly the v1 strategy.
+- FloFi's authoring rules keep every publicly executable capability alone in its workflow. A cross-chain resource edge from a bridge fill into a swap input would need an orchestrator that waits for settlement, which does not exist.
+
+The execution plan is therefore honestly `MULTI_STEP_SEQUENCE_NOT_IMPLEMENTED`. Each step is reviewed, signed and reconciled through its own flow. The shared visual draws the sequence with its real-funds and not-executable warnings.
 
 ### 2.6 Canvas, Chat/MCP, visuals
 
@@ -102,7 +115,10 @@ Each step executes through its own reviewed single-step runtime. A cross-chain o
   - It authors `asset.swap.exact-input` on Robinhood: pay USDG, receive the chosen Stock Token.
   - Its asset picker keeps AAPL/TSLA/NVDA/MSFT/AMZN as featured shortcuts and gains a search input over the full validated catalog, with loading, empty and unavailable states. Results are rendered incrementally.
   - Robinhood joins the existing Swap, Pool, Transfer and Bridge network selectors.
-- **Chat/MCP:** "Bridge 100 USDC from Base to Robinhood", "Swap 50 USDG for TSLA on Robinhood" and "Transfer 3 AAPL on Robinhood" produce the same IR builders' output. The handoff is unchanged.
+- **Chat/MCP:** "Bridge 100 USDC from Base to Robinhood", "Swap 50 USDG for TSLA on Robinhood", "Transfer 3 AAPL on Robinhood" and "Add liquidity 100 USDG and 0.4 TSLA on Robinhood" are exact chat grammar.
+  - The MCP strategy contract gains the `robinhood` network, USDG bridges, catalog symbols, a fee tier and full range, and a `transfer` action.
+  - Every Robinhood example composes byte-identically to its chat sentence (parity tests).
+  - Stock Token symbols resolve only in the validated official catalog, which MCP and the in-app chat load before composing, and only where the deployment enables Robinhood Chain. The handoff is unchanged.
 - **Visuals:** the shared renderer resolves Robinhood chain labels and asset symbols from the registry. There is no new renderer.
 
 ## 3. Evidence ceilings
