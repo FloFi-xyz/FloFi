@@ -84,8 +84,10 @@ export function stepSentence(step: WorkflowStep, language: CopilotLanguage): str
       : `Swaps ${d.input.amount} ${d.input.from} for ${d.input.to} on ${d.input.network} through ${step.protocol}, with at most ${d.input.slippage} bps slippage.`;
     case 'ROUTER': {
       const option = ROUTER_NETWORK_OPTIONS[d.network], routing = ROUTER_ROUTING_LABEL[d.input.routing];
-      return pt ? `Faz bridge de ${d.input.amount} USDC da ${option.sourceLabel} para a ${option.destinationLabel} pelo Flofi Cross-chain Router (${routing}), com slippage máximo de ${d.input.slippage} bps, para ${recipientOf(d.input.recipient, pt)}.`
-        : `Bridges ${d.input.amount} USDC from ${option.sourceLabel} to ${option.destinationLabel} through the Flofi Cross-chain Router (${routing}), with at most ${d.input.slippage} bps slippage, to ${recipientOf(d.input.recipient, pt)}.`;
+      // BUILD-RH-002: a route into or out of Robinhood Chain delivers another asset (USDC → USDG), named explicitly.
+      const arrives = option.pair.destination.symbol !== d.input.token ? option.pair.destination.symbol : null;
+      return pt ? `Faz bridge de ${d.input.amount} ${d.input.token} da ${option.sourceLabel} para a ${option.destinationLabel}${arrives ? `, chegando como ${arrives},` : ''} pelo Flofi Cross-chain Router (${routing}), com slippage máximo de ${d.input.slippage} bps, para ${recipientOf(d.input.recipient, pt)}.`
+        : `Bridges ${d.input.amount} ${d.input.token} from ${option.sourceLabel} to ${option.destinationLabel}${arrives ? `, arriving as ${arrives},` : ''} through the Flofi Cross-chain Router (${routing}), with at most ${d.input.slippage} bps slippage, to ${recipientOf(d.input.recipient, pt)}.`;
     }
     case 'AAVE': { const { amount, asset, network, beneficiary } = d.input;
       return d.operation === 'SUPPLY' ? (pt ? `Faz supply de ${amount} ${asset} na Aave V3 na ${network} para ${beneficiary}.`
@@ -120,8 +122,8 @@ function approvalLine(step: WorkflowStep, pt: boolean): string {
       : (pt ? `${d.operation === 'SUPPLY' ? 'Supply' : 'Repay'}: a Aave precisa de permissão para mover seu ${d.input.asset}, então o fluxo inclui uma transação de approval de ${d.input.asset} antes, mostrada na Review.`
         : `${d.operation === 'SUPPLY' ? 'Supply' : 'Repay'}: Aave needs permission to move your ${d.input.asset}, so the flow includes a ${d.input.asset} approval transaction first, shown in Review.`);
     case 'AAVE_WITHDRAW': return pt ? 'Withdraw: a Review lista cada transação deste passo antes de sua carteira assinar.' : 'Withdraw: Review lists every transaction of this step before your wallet signs.';
-    case 'ROUTER': return pt ? `Bridge: um approval exato de USDC (nunca ilimitado) para o spender da rota, depois o depósito na ${ROUTER_NETWORK_OPTIONS[d.network].sourceLabel}.`
-      : `Bridge: an exact USDC approval (never unlimited) to the route's spender, then the deposit on ${ROUTER_NETWORK_OPTIONS[d.network].sourceLabel}.`;
+    case 'ROUTER': return pt ? `Bridge: um approval exato de ${d.input.token} (nunca ilimitado) para o spender da rota, depois o depósito na ${ROUTER_NETWORK_OPTIONS[d.network].sourceLabel}.`
+      : `Bridge: an exact ${d.input.token} approval (never unlimited) to the route's spender, then the deposit on ${ROUTER_NETWORK_OPTIONS[d.network].sourceLabel}.`;
     case 'EVM_SWAP': return d.network !== 'Base'
       ? (pt ? `Swap: só pede approval se a allowance atual de ${d.from} for menor que o valor do swap; depois a transação de swap.` : `Swap: an approval only if your current ${d.from} allowance is below the swap amount, then the swap transaction.`)
       : (pt ? 'Swap na Base: a Review mostra cada transação antes de qualquer assinatura.' : 'Base swap: Review shows every transaction before any signature.');
@@ -136,8 +138,8 @@ function approvalLine(step: WorkflowStep, pt: boolean): string {
 function failureLine(step: WorkflowStep, pt: boolean): string {
   const d = step.detail;
   if (d.type === 'ROUTER') { const source = ROUTER_NETWORK_OPTIONS[d.network].sourceLabel; return pt
-    ? `Bridge: o sucesso exige observar o fill na ${ROUTER_NETWORK_OPTIONS[d.network].destinationLabel}. Se nenhum relayer preencher antes do prazo, a Across devolve o depósito para você na ${source}, e o Flofi acompanha esse reembolso. Se o depósito reverter, nenhum USDC sai da sua carteira.`
-    : `Bridge: success needs the fill observed on ${ROUTER_NETWORK_OPTIONS[d.network].destinationLabel}. If no relayer fills before the fill deadline, Across refunds the deposit to you on ${source}, and Flofi watches for that refund. If the deposit reverts, no USDC leaves your wallet.`; }
+    ? `Bridge: o sucesso exige observar o fill na ${ROUTER_NETWORK_OPTIONS[d.network].destinationLabel}. Se nenhum relayer preencher antes do prazo, a Across devolve o depósito para você na ${source}, e o Flofi acompanha esse reembolso. Se o depósito reverter, nenhum ${d.input.token} sai da sua carteira.`
+    : `Bridge: success needs the fill observed on ${ROUTER_NETWORK_OPTIONS[d.network].destinationLabel}. If no relayer fills before the fill deadline, Across refunds the deposit to you on ${source}, and Flofi watches for that refund. If the deposit reverts, no ${d.input.token} leaves your wallet.`; }
   if (d.type === 'LENDING_COMPOSITION') return pt ? 'Composição: se o Swap falhar, o USDC emprestado e a dívida continuam; não há pagamento nem nova tentativa automática.'
     : 'Composition: if the Swap fails, the borrowed USDC and the debt remain; there is no automatic repayment or retry.';
   if (d.type === 'TEMPLATE') return pt ? 'Template: nunca executa.' : 'Template: never executes.';

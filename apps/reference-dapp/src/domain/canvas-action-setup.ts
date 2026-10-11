@@ -5,7 +5,7 @@ import type { Command } from './commands';
 import { createUniswapLiquidityNode, type UniswapLiquidityInput } from './uniswap-liquidity-authoring';
 import { canvasAddCommand } from './canvas-authoring';
 import { swapDetails, inputSymbol, directionLabel, type Direction } from './swap-authoring';
-import { createRouterNode, routerDetails, routerInputOf, ROUTER_NETWORK_OPTIONS, type RouterBridgeInput } from './router-authoring';
+import { createRouterNode, routerDetails, routerInputForNetworks, routerInputOf, routerTokensOf, ROUTER_NETWORK_OPTIONS, type RouterBridgeInput } from './router-authoring';
 import { createBridgeNode, bridgeDetails } from './bridge-authoring';
 import { shellChainLabel } from './product-shell';
 import { editorReducer, type EditorState } from './editor';
@@ -26,6 +26,11 @@ export const CANVAS_BRIDGE_NETWORK_OPTIONS = {
   source: Object.values(ROUTER_NETWORK_OPTIONS).map(option => option.source),
   destination: Object.values(ROUTER_NETWORK_OPTIONS).map(option => option.destination),
 } as const;
+/** "USDC → USDC", or (BUILD-RH-002) "USDC → USDG" into Robinhood Chain; an unsupported chain pair keeps the neutral USDC wording. */
+export function bridgePairLabel(networks: CanvasBridgeNetworks): string {
+  const tokens = routerTokensOf(networks);
+  return tokens ? `${tokens.token} → ${tokens.destinationToken}` : 'USDC → USDC';
+}
 export function bridgeSetupNetworks(setup: Extract<CanvasActionSetup, { action: 'bridge' }>): CanvasBridgeNetworks {
   return setup.networks ?? { source: ROUTER_NETWORK_OPTIONS.testnet.source, destination: ROUTER_NETWORK_OPTIONS.testnet.destination };
 }
@@ -81,7 +86,7 @@ export function canvasAmountCommand(state: EditorState, setup: CanvasActionSetup
       ? { type: 'ADD_UNISWAP_LIQUIDITY', input: setup.input, source: 'CANVAS', baseRevision: state.workflow.revision }
       : canvasAddCommand(setup.action, state.workflow.revision, 'beneficiary' in setup ? setup.beneficiary : null, setup.amount);
     if (command.type === 'ADD_SWAP' && setup.action === 'swap' && setup.direction) command = { ...command, direction: setup.direction };
-    if (command.type === 'ADD_ROUTER_BRIDGE' && setup.action === 'bridge') command = { ...command, input: { ...command.input, ...bridgeSetupNetworks(setup) } };
+    if (command.type === 'ADD_ROUTER_BRIDGE' && setup.action === 'bridge') command = { ...command, input: routerInputForNetworks(command.input, bridgeSetupNetworks(setup)) };
     }
   }
   else {
@@ -102,7 +107,7 @@ export function canvasAmountCommand(state: EditorState, setup: CanvasActionSetup
       : repay ? { ...base, type: 'SET_REPAY', input: { ...repay, amount } }
       : withdraw ? { ...base, type: 'SET_WITHDRAW', input: { ...withdraw, amount } }
       : supply ? { ...base, type: 'SET_SUPPLY', input: { ...supply, amount } }
-      : router ? { ...base, type: 'SET_ROUTER_BRIDGE', input: { ...routerInputOf(router), ...bridgeNetworks[id], amount } }
+      : router ? { ...base, type: 'SET_ROUTER_BRIDGE', input: routerInputForNetworks({ ...routerInputOf(router), amount }, bridgeNetworks[id] ?? router) }
       : bridge ? { ...base, type: 'SET_BRIDGE', input: { amount, slippageBps: String(bridge.slippageBps) } }
         : { ...base, type: 'SET_SWAP_AMOUNT', amount };
   }
@@ -152,6 +157,7 @@ export function setupSummary(setup: CanvasActionSetup, context: ReviewContext) {
   return { action: setup.action === 'swap' ? 'Swap' : setup.action === 'bridge' ? 'Bridge' : setup.action[0]!.toUpperCase() + setup.action.slice(1),
     provider: setup.action === 'swap' ? 'Uniswap' : setup.action === 'bridge' ? 'Router' : 'Aave V3',
     chain: setup.action === 'swap' ? shellChainLabel(context.assets.USDC.asset.chainId) : setup.action === 'bridge' ? `${bridgeSetupNetworks(setup).source} → ${bridgeSetupNetworks(setup).destination}` : 'Base Sepolia',
-    amount: `${setup.amount || '0'} ${setup.action === 'swap' ? inputSymbol(setup.direction ?? 'USDC_TO_WETH') : 'USDC'}`, detail: setup.action === 'swap' ? directionLabel(setup.direction ?? 'USDC_TO_WETH') : undefined,
-    bridgePair: setup.action === 'bridge' ? 'USDC → USDC' : undefined, linked: false, risk: undefined };
+    amount: `${setup.amount || '0'} ${setup.action === 'swap' ? inputSymbol(setup.direction ?? 'USDC_TO_WETH') : setup.action === 'bridge' ? routerTokensOf(bridgeSetupNetworks(setup))?.token ?? 'USDC' : 'USDC'}`,
+    detail: setup.action === 'swap' ? directionLabel(setup.direction ?? 'USDC_TO_WETH') : undefined,
+    bridgePair: setup.action === 'bridge' ? bridgePairLabel(bridgeSetupNetworks(setup)) : undefined, linked: false, risk: undefined };
 }

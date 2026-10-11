@@ -47,10 +47,10 @@ export function describeProposal(before: EditorState, after: EditorState, comman
   if (routed) {
     const n = ROUTER_NETWORK_OPTIONS[routed.network], changedNetwork = routedBefore && routedBefore.network !== routed.network;
     return Object.freeze([`Revision ${before.workflow.revision} → ${after.workflow.revision}`,
-      `Node ${newNode?.nodeId}: cross-chain bridge ${n.sourceLabel} USDC → ${n.destinationLabel} USDC (Cross-chain Router)`,
+      `Node ${newNode?.nodeId}: cross-chain bridge ${n.sourceLabel} ${n.pair.source.symbol} → ${n.destinationLabel} ${n.pair.destination.symbol} (Cross-chain Router)`,
       ...changedNetwork ? [`Network: ${ROUTER_NETWORK_OPTIONS[routedBefore.network].sourceLabel} → ${n.sourceLabel}`] : [],
-      `Amount: ${routedBefore?.amount ?? 'none'} → ${routed.amount} USDC; slippage ${routed.slippage} bps`,
-      `Recipient on ${routed.network === 'testnet' ? n.destinationLabel : 'Arbitrum'}: ${routedBefore ? routedBefore.recipientLabel + ' → ' : ''}${routed.recipientLabel}`,
+      `Amount: ${routedBefore?.amount ?? 'none'} → ${routed.amount} ${routed.token}; slippage ${routed.slippage} bps`,
+      `Recipient on ${routed.network === 'mainnet' ? 'Arbitrum' : n.destinationLabel}: ${routedBefore ? routedBefore.recipientLabel + ' → ' : ''}${routed.recipientLabel}`,
       `Routing: ${ROUTER_ROUTING_LABEL[routed.routing]}`,
       `${routed.network === 'testnet' ? 'Test USDC on public testnets.' : 'Real funds on mainnet.'} A fresh route, transaction simulation and route-bound Manifest review are required before any wallet request.`]);
   }

@@ -12,7 +12,10 @@
  *    `GRYLOO_ROUTER_TESTNET_EXECUTION=DISABLED` keeps it Simulate/Review-only;
  *  - `GRYLOO_ROUTER_TESTNET_HARNESS=MOCKED_LOOPBACK_ONLY`: its loopback MOCKED harness (tests only).
  */
-import { CROSSCHAIN_ROUTER_BASE_ARBITRUM as profile, CROSSCHAIN_ROUTER_BASE_SEPOLIA_ARBITRUM_SEPOLIA as TESTNET, type RouterProfile } from '@defi-workflow-engine/action-registry';
+import { CROSSCHAIN_ROUTER_ARBITRUM_ROBINHOOD, CROSSCHAIN_ROUTER_BASE_ARBITRUM as profile, CROSSCHAIN_ROUTER_BASE_ROBINHOOD, CROSSCHAIN_ROUTER_BASE_SEPOLIA_ARBITRUM_SEPOLIA as TESTNET,
+  CROSSCHAIN_ROUTER_ROBINHOOD_ARBITRUM, CROSSCHAIN_ROUTER_ROBINHOOD_BASE, type RouterProfile } from '@defi-workflow-engine/action-registry';
+import { robinhoodMainnetMode, robinhoodOwnerExecutionEnabled, robinhoodRpcUrl } from './robinhood-mainnet.ts';
+import { chainBoundRpc } from './public-testnet-rpc.ts';
 import type { RoutingProvider } from '@defi-workflow-engine/workflow-contracts';
 import { createBaseSepoliaReadRpc, pacedReadRpc } from './public-testnet-rpc.ts';
 import type { Rpc } from './public-testnet-service.ts';
@@ -21,9 +24,20 @@ import { ROUTER_MOCK_ACROSS_API, ROUTER_MOCK_ARBITRUM_RPC_URL, ROUTER_MOCK_BASE_
 import type { RouterCodePins, RouterProvenance } from './router-service.ts';
 
 export type RouterMode = 'live' | 'harness' | 'off';
-/** BUILD-JOURNEY-001: which router deployment a call addresses. Each network is its own flow and durable namespace. */
-export type RouterNetwork = 'mainnet' | 'testnet';
-export const ROUTER_NETWORKS: readonly RouterNetwork[] = Object.freeze(['mainnet', 'testnet']);
+/**
+ * BUILD-JOURNEY-001: which router deployment a call addresses. Each network is its own flow and durable namespace.
+ * BUILD-RH-002: the four Robinhood Chain routes (real funds), each its own deployment, flow and storage.
+ */
+export const ROBINHOOD_ROUTER_NETWORKS = Object.freeze(['base-to-robinhood', 'robinhood-to-base', 'arbitrum-to-robinhood', 'robinhood-to-arbitrum'] as const);
+export type RobinhoodRouterNetwork = typeof ROBINHOOD_ROUTER_NETWORKS[number];
+export type RouterNetwork = 'mainnet' | 'testnet' | RobinhoodRouterNetwork;
+export const ROUTER_NETWORKS: readonly RouterNetwork[] = Object.freeze(['mainnet', 'testnet', ...ROBINHOOD_ROUTER_NETWORKS]);
+export const ROBINHOOD_ROUTER_PROFILES: Readonly<Record<RobinhoodRouterNetwork, RouterProfile>> = Object.freeze({
+  'base-to-robinhood': CROSSCHAIN_ROUTER_BASE_ROBINHOOD, 'robinhood-to-base': CROSSCHAIN_ROUTER_ROBINHOOD_BASE,
+  'arbitrum-to-robinhood': CROSSCHAIN_ROUTER_ARBITRUM_ROBINHOOD, 'robinhood-to-arbitrum': CROSSCHAIN_ROUTER_ROBINHOOD_ARBITRUM });
+export const isRobinhoodRouterNetwork = (network: RouterNetwork): network is RobinhoodRouterNetwork => (ROBINHOOD_ROUTER_NETWORKS as readonly string[]).includes(network);
+/** The router profile a network key serves. */
+export const routerNetworkProfile = (network: RouterNetwork): RouterProfile => isRobinhoodRouterNetwork(network) ? ROBINHOOD_ROUTER_PROFILES[network] : network === 'testnet' ? TESTNET : profile;
 type Env = Readonly<Record<string, string | undefined>>;
 export const ROUTER_BASE_RPC_METHODS = Object.freeze(['eth_chainId', 'eth_blockNumber', 'eth_getBlockByNumber', 'eth_getCode', 'eth_call', 'eth_getBalance',
   'eth_getTransactionCount', 'eth_maxPriorityFeePerGas', 'eth_simulateV1', 'eth_getTransactionReceipt', 'eth_getTransactionByHash', 'eth_getStorageAt', 'eth_getLogs']);
@@ -37,7 +51,9 @@ export function routerTestnetMode(env: Env): RouterMode {
   if (env.GRYLOO_ROUTER_TESTNET_HARNESS === 'MOCKED_LOOPBACK_ONLY') return 'harness';
   return env.GRYLOO_ROUTER_TESTNET === 'live' ? 'live' : 'off';
 }
-export const routerNetworkMode = (network: RouterNetwork, env: Env): RouterMode => network === 'testnet' ? routerTestnetMode(env) : routerMode(env);
+/** Robinhood routes follow the Robinhood Chain mainnet gates (`GRYLOO_ROBINHOOD_MAINNET`, its loopback harness), like every Robinhood capability. */
+export const routerNetworkMode = (network: RouterNetwork, env: Env): RouterMode => isRobinhoodRouterNetwork(network) ? robinhoodMainnetMode(env)
+  : network === 'testnet' ? routerTestnetMode(env) : routerMode(env);
 /** Optional HTTPS override (e.g. a keyed provider for rate limits); anything else is a configuration error. */
 export function routerRpcUrl(override: string | undefined, fallback: string): string {
   if (override === undefined || override === '') return fallback;
@@ -78,5 +94,22 @@ export function routerTestnetRuntime(mode: 'live' | 'harness', env: Env): Router
     providers: createRouteProviders({ http, profile: TESTNET, ...env.LIFI_API_KEY ? { lifiApiKey: env.LIFI_API_KEY } : {} }),
     provenance: 'PUBLIC_TESTNET', executionEnabled: env.GRYLOO_ROUTER_TESTNET_EXECUTION !== 'DISABLED', profile: TESTNET };
 }
+/**
+ * BUILD-RH-002: a Robinhood Chain route. Source and destination read clients are chain-bound (Base, Arbitrum One or Robinhood Chain;
+ * optional HTTPS overrides `GRYLOO_BASE_RPC_URL`, `GRYLOO_ARBITRUM_RPC_URL`, `GRYLOO_ROBINHOOD_RPC_URL`). Owner execution needs the
+ * Robinhood real-funds opt-in. The MOCKED harness has no public endpoint: its loopback chains are injected by tests.
+ */
+export function robinhoodRouterRuntime(network: RobinhoodRouterNetwork, mode: 'live' | 'harness', env: Env): RouterRuntime {
+  const route = ROBINHOOD_ROUTER_PROFILES[network], http = createRouterHttp();
+  const url = (chainId: number) => mode === 'harness' ? `http://127.0.0.1:8561/router/${chainId}` : chainId === 4663 ? robinhoodRpcUrl(env.GRYLOO_ROBINHOOD_RPC_URL)
+    : routerRpcUrl(chainId === 8453 ? env.GRYLOO_BASE_RPC_URL : env.GRYLOO_ARBITRUM_RPC_URL, chainId === 8453 ? profile.source.rpc : profile.destination.rpc);
+  const client = (chainId: number, methods: readonly string[]) => chainBoundRpc(mode === 'harness' ? createBaseSepoliaReadRpc(url(chainId), methods)
+    : pacedReadRpc(createBaseSepoliaReadRpc(url(chainId), methods)), chainId);
+  return { sourceRpc: client(route.source.chainId, ROUTER_BASE_RPC_METHODS), destinationRpc: client(route.destination.chainId, ROUTER_ARBITRUM_RPC_METHODS),
+    providers: createRouteProviders({ http, profile: route, ...mode === 'live' && env.ACROSS_API_KEY ? { acrossApiKey: env.ACROSS_API_KEY } : {},
+      ...mode === 'live' && env.ACROSS_INTEGRATOR_ID ? { acrossIntegratorId: env.ACROSS_INTEGRATOR_ID } : {}, ...mode === 'live' && env.LIFI_API_KEY ? { lifiApiKey: env.LIFI_API_KEY } : {},
+      ...mode === 'harness' ? { lifiApi: 'http://127.0.0.1:8561/lifi', acrossApi: 'http://127.0.0.1:8561/across' } : {} }),
+    provenance: mode === 'harness' ? 'MOCKED' : 'PUBLIC_MAINNET', executionEnabled: robinhoodOwnerExecutionEnabled(mode, env), profile: route };
+}
 export const routerNetworkRuntime = (network: RouterNetwork, mode: 'live' | 'harness', env: Env): RouterRuntime =>
-  network === 'testnet' ? routerTestnetRuntime(mode, env) : routerRuntime(mode, env);
+  isRobinhoodRouterNetwork(network) ? robinhoodRouterRuntime(network, mode, env) : network === 'testnet' ? routerTestnetRuntime(mode, env) : routerRuntime(mode, env);

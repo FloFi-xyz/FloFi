@@ -73,8 +73,9 @@ function project(s: WorkflowStep, node: Workflow['nodes'][number] | undefined): 
       toAsset: d.input.to, slippageBps: bps(d.input.slippage), testFunds });
     case 'ROUTER': {
       const option = ROUTER_NETWORK_OPTIONS[d.network];
+      // BUILD-RH-002: a Robinhood Chain route delivers another asset (USDC → USDG); a same-asset bridge keeps no output asset.
       return step({ action: 'BRIDGE', provider: ROUTING_PROVIDER[d.input.routing], network: option.sourceLabel, toNetwork: option.destinationLabel,
-        amounts: [{ amount: d.input.amount, asset: d.input.token }], slippageBps: bps(d.input.slippage),
+        amounts: [{ amount: d.input.amount, asset: d.input.token }], ...option.pair.destination.symbol !== d.input.token ? { toAsset: option.pair.destination.symbol } : {}, slippageBps: bps(d.input.slippage),
         account: d.input.recipient ? { role: 'RECIPIENT', address: short(d.input.recipient) } : { role: 'CONNECTED_WALLET' }, testFunds });
     }
     case 'AAVE': return step({ action: d.operation, provider: 'Aave V3', network: d.input.network, amounts: [{ amount: d.input.amount, asset: d.input.asset }],

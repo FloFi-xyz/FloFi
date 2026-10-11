@@ -87,8 +87,8 @@ export function composerSummary(workflow: Workflow, node: Workflow['nodes'][numb
   const detail = solana ? `${solana.from} → ${solana.to}` : swap ? `${swap.from} → ${swap.to}` : catalogSwap ? `${catalogSwap.from} → ${catalogSwap.to}` :
     lending && node.actionType === 'asset.swap.exact-input' ? 'Borrowed USDC → WETH' :
     uni ? 'USDC / WETH' : orca ? 'SOL / devUSDC' : position ? 'WETH / USDC' : undefined;
-  // Supported router and legacy bridge readers describe USDC on both ends. Build alone displays this token route.
-  const bridgePair = router ? `${router.token} → ${router.token}` : bridge ? 'USDC → USDC' : undefined;
+  // The router pair names both assets (BUILD-RH-002: USDC → USDG into Robinhood Chain); legacy bridge readers describe USDC on both ends.
+  const bridgePair = router ? `${router.token} → ${router.destinationToken}` : bridge ? 'USDC → USDC' : undefined;
   const liquidityValues = uni ? [{ amount: uni.maxUsdc, token: 'USDC' }, { amount: uni.maxWeth, token: 'WETH' }]
     : orca ? [{ amount: orca.maxSol, token: 'SOL' }, { amount: orca.maxDevUsdc, token: 'devUSDC' }]
     : position ? [{ amount: formatHumanAmount(position.amountWeth, 'WETH', context), token: 'WETH' }, { amount: formatHumanAmount(position.amountUsdc, 'USDC', context), token: 'USDC' }] : undefined;

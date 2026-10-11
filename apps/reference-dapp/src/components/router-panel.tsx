@@ -4,8 +4,8 @@ import { useLocale } from '../i18n/locale';
 
 import { useEffect, useState, type FormEvent } from 'react';
 import { ROUTER_PHASES, type RouteChange, type RouterPhase } from '@defi-workflow-engine/workflow-contracts';
-import { createRouterNode, routerDetails, routerInputOf, ROUTER_DEFAULT_SLIPPAGE, ROUTER_NETWORK_OPTIONS, ROUTER_ROUTING_LABEL, type RouterBridgeInput,
-  type RouterNetwork, type RouterRouting } from '../domain/router-authoring';
+import { createRouterNode, routerChainChoices, routerDetails, routerInputForNetworks, routerInputOf, routerNetworkOfInput, ROUTER_DEFAULT_SLIPPAGE, ROUTER_NETWORK_OPTIONS,
+  ROUTER_ROUTING_LABEL, type RouterBridgeInput, type RouterDestination, type RouterNetwork, type RouterRouting, type RouterSource } from '../domain/router-authoring';
 import { formatTokenAmount } from '../domain/jupiter-authoring';
 import { useWorkflow } from '../state/workflow-store';
 import { TokenAmountInput } from './token-amount-input';
@@ -13,16 +13,26 @@ import { useRouter } from '../state/router-store';
 import { useBuild009Wallet } from '../state/build009-wallet-store';
 import { useExecutionEnvironment } from '../state/capability-store';
 
-/** Network labels: mainnet keeps the BUILD-ROUTER-001 wording; the testnet journey names Base Sepolia / Arbitrum Sepolia. */
-type Labels = { src: string; dst: string; dstShort: string; srcScan: string; dstScan: string };
+/**
+ * Network labels: mainnet keeps the BUILD-ROUTER-001 wording; the testnet journey names Base Sepolia / Arbitrum Sepolia; BUILD-RH-002 adds
+ * the Robinhood Chain routes, whose source and destination tokens differ (USDC ⇄ USDG).
+ */
+type Labels = { src: string; dst: string; dstShort: string; srcScan: string; dstScan: string; token: string };
+const RH_SCAN = 'Robinhood Chain explorer';
 const LABELS: Readonly<Record<RouterNetwork, Labels>> = {
-  mainnet: { src: 'Base', dst: 'Arbitrum One', dstShort: 'Arbitrum', srcScan: 'Basescan', dstScan: 'Arbiscan' },
-  testnet: { src: 'Base Sepolia', dst: 'Arbitrum Sepolia', dstShort: 'Arbitrum Sepolia', srcScan: 'Base Sepolia explorer', dstScan: 'Arbitrum Sepolia explorer' },
+  mainnet: { src: 'Base', dst: 'Arbitrum One', dstShort: 'Arbitrum', srcScan: 'Basescan', dstScan: 'Arbiscan', token: 'USDC' },
+  testnet: { src: 'Base Sepolia', dst: 'Arbitrum Sepolia', dstShort: 'Arbitrum Sepolia', srcScan: 'Base Sepolia explorer', dstScan: 'Arbitrum Sepolia explorer', token: 'USDC' },
+  'base-to-robinhood': { src: 'Base', dst: 'Robinhood Chain', dstShort: 'Robinhood Chain', srcScan: 'Basescan', dstScan: RH_SCAN, token: 'USDC' },
+  'robinhood-to-base': { src: 'Robinhood Chain', dst: 'Base', dstShort: 'Base', srcScan: RH_SCAN, dstScan: 'Basescan', token: 'USDG' },
+  'arbitrum-to-robinhood': { src: 'Arbitrum One', dst: 'Robinhood Chain', dstShort: 'Robinhood Chain', srcScan: 'Arbiscan', dstScan: RH_SCAN, token: 'USDC' },
+  'robinhood-to-arbitrum': { src: 'Robinhood Chain', dst: 'Arbitrum One', dstShort: 'Arbitrum', srcScan: RH_SCAN, dstScan: 'Arbiscan', token: 'USDG' },
 };
+/** Whole-token bounds of a pair, e.g. "1" and "100". */
+const bound = (units: string, decimals: number) => formatTokenAmount(units, decimals);
 const explorerTx = (network: RouterNetwork, chain: 'source' | 'destination', hash: string) =>
   (chain === 'source' ? ROUTER_NETWORK_OPTIONS[network].profile.source.explorer : ROUTER_NETWORK_OPTIONS[network].profile.destination.explorer) + 'tx/' + hash;
 
-/** Canvas form for the canonical cross-chain bridge node (USDC → USDC through the Cross-chain Router, mainnet or testnet). */
+/** Canvas form for the canonical cross-chain bridge node (USDC → USDC, or USDC ⇄ USDG with Robinhood Chain, through the Cross-chain Router). */
 export function RouterForm({ nodeId, onDone, network: initialNetwork }: { nodeId?: string; onDone?: () => void; network?: RouterNetwork }) {
   const { t: tr } = useLocale();
   const { walletEnvironment } = useExecutionEnvironment();
@@ -40,11 +50,18 @@ export function RouterForm({ nodeId, onDone, network: initialNetwork }: { nodeId
     setInput(value => ({ ...value, ...patch, source: nodeId ? value.source : patch.source ?? value.source,
       destination: nodeId ? value.destination : patch.destination ?? value.destination, amount: nodeId ? value.amount : patch.amount ?? value.amount }));
   };
-  const network = walletEnvironment === 'unknown' ? null : walletEnvironment;
-  const option = network ? ROUTER_NETWORK_OPTIONS[network] : null;
-  const fields = { ...input, ...(nodeId ? bridgeNetworkInputs[nodeId] : {}),
-    ...(option ? { source: option.source, destination: option.destination } : {}), amount: nodeId ? amountInputs[nodeId] ?? input.amount : input.amount };
+  // The wallet's environment bounds the choice; within it the chosen chains select the route (mainnet also offers the Robinhood Chain routes).
+  const environment = walletEnvironment === 'unknown' ? null : walletEnvironment;
+  const chosen = { ...input, ...(nodeId ? bridgeNetworkInputs[nodeId] : {}) }, routed = routerNetworkOfInput(chosen);
+  const network: RouterNetwork | null = !environment ? null : routed && ROUTER_NETWORK_OPTIONS[routed].environment === environment ? routed : environment;
+  const option = network ? ROUTER_NETWORK_OPTIONS[network] : null, choices = environment && option ? routerChainChoices(environment, option.source) : null;
+  const fields = routerInputForNetworks({ ...chosen, amount: nodeId ? amountInputs[nodeId] ?? input.amount : input.amount }, option ?? chosen);
   const l = LABELS[network ?? existing?.network ?? initialNetwork ?? 'mainnet'];
+  const chooseSource = (source: RouterSource) => {
+    if (!environment) return;
+    const destinations = routerChainChoices(environment, source).destinations;
+    set({ source, ...destinations.includes(fields.destination) ? {} : { destination: destinations[0]! } });
+  };
   function submit(event: FormEvent) {
     event.preventDefault();
     if (!network) return;
@@ -57,19 +74,23 @@ export function RouterForm({ nodeId, onDone, network: initialNetwork }: { nodeId
   }
   return <form className="inspector-fields" aria-label={tr(nodeId ? 'Edit cross-chain bridge' : network === 'testnet' ? 'Create testnet cross-chain bridge' : 'Create cross-chain bridge')} onSubmit={submit}>
     <p className="muted">{tr(!network ? 'Connect a wallet on a supported network to configure Bridge.' : network === 'testnet' ? 'Cross-chain Router · Base Sepolia → Arbitrum Sepolia · test USDC → USDC. No real funds; any wallet can use it. A route is chosen and shown at Review.'
-      : 'Cross-chain Router · Base → Arbitrum One · USDC → USDC. Real funds on mainnet; a route is chosen and shown at Review.')}</p>
-    <label>{tr("Network")}<select aria-label={tr("Cross-chain network")} value={network ?? ''} disabled>
-      <option value={network ?? ''}>{tr(network === 'mainnet' ? 'Mainnet (real funds)' : network === 'testnet' ? 'Testnet (test USDC)' : 'Network')}</option></select></label>
-    <label>{tr("Source chain")}<select aria-label={tr("Cross-chain source chain")} value={option?.source ?? ''} disabled><option value={option?.source ?? ''}>{tr(option?.source ?? 'Network')}</option></select></label>
-    <label>{tr("Destination chain")}<select aria-label={tr("Cross-chain destination chain")} value={option?.destination ?? ''} disabled><option value={option?.destination ?? ''}>{tr(option?.destination === 'Arbitrum' ? 'Arbitrum One' : option?.destination ?? 'Network')}</option></select></label>
-    <label>{tr("Token")}<select aria-label={tr("Cross-chain token")} value={input.token} onChange={() => set({ token: 'USDC' })}><option value="USDC">{tr("USDC → USDC")}</option></select></label>
-    <label>{tr("Amount (USDC)")}<TokenAmountInput aria-label={tr("Cross-chain amount (USDC)")} maxLength={40} value={fields.amount} onValueChange={amount => set({ amount })}/></label>
+      : `Cross-chain Router · ${option!.sourceLabel} → ${option!.destinationLabel} · ${option!.pair.source.symbol} → ${option!.pair.destination.symbol}. Real funds on mainnet; a route is chosen and shown at Review.`)}</p>
+    <label>{tr("Network")}<select aria-label={tr("Cross-chain network")} value={environment ?? ''} disabled>
+      <option value={environment ?? ''}>{tr(environment === 'mainnet' ? 'Mainnet (real funds)' : environment === 'testnet' ? 'Testnet (test USDC)' : 'Network')}</option></select></label>
+    <label>{tr("Source chain")}<select aria-label={tr("Cross-chain source chain")} value={option?.source ?? ''} disabled={!choices || choices.sources.length < 2}
+      onChange={e => chooseSource(e.target.value as RouterSource)}>{(choices?.sources ?? [option?.source ?? '']).map(source => <option key={source} value={source}>{tr(source || 'Network')}</option>)}</select></label>
+    <label>{tr("Destination chain")}<select aria-label={tr("Cross-chain destination chain")} value={option?.destination ?? ''} disabled={!choices || choices.destinations.length < 2}
+      onChange={e => set({ destination: e.target.value as RouterDestination })}>{(choices?.destinations ?? [option?.destination ?? '']).map(destination =>
+        <option key={destination} value={destination}>{tr(destination === 'Arbitrum' ? 'Arbitrum One' : destination || 'Network')}</option>)}</select></label>
+    <label>{tr("Token")}<select aria-label={tr("Cross-chain token")} value={fields.token} disabled={!option}><option value={fields.token}>{tr(`${fields.token} → ${option?.pair.destination.symbol ?? fields.token}`)}</option></select></label>
+    <label>{tr(`Amount (${fields.token})`)}<TokenAmountInput aria-label={tr(`Cross-chain amount (${fields.token})`)} maxLength={40} value={fields.amount} onValueChange={amount => set({ amount })}/></label>
     <label>{tr("Recipient")}{tr(network ? ` on ${l.dstShort}` : '')}<input aria-label={tr("Cross-chain recipient")} autoComplete="off" spellCheck={false} maxLength={42} placeholder={tr("Your connected wallet")} value={input.recipient}
       onChange={e => set({ recipient: e.target.value })}/></label>
     <label>{tr("Routing")}<select aria-label={tr("Cross-chain routing policy")} value={input.routing} onChange={e => set({ routing: e.target.value as RouterRouting })}>
       {(Object.keys(ROUTER_ROUTING_LABEL) as RouterRouting[]).map(k => <option key={k} value={k}>{tr(ROUTER_ROUTING_LABEL[k])}</option>)}</select></label>
     <label>{tr("Slippage (bps)")}<input aria-label={tr("Cross-chain slippage (bps)")} inputMode="numeric" autoComplete="off" maxLength={4} value={input.slippage} onChange={e => set({ slippage: e.target.value })}/></label>
-    {network && <small>{tr(network === 'testnet' ? 'Between 0.5 and 5 test USDC per bridge (the testnet relayer has little liquidity).' : 'Maximum 100 USDC per bridge in this release.')}{tr(" The minimum you receive is fixed in the reviewed deposit.")}</small>}
+    {network && option && <small>{tr(network === 'testnet' ? 'Between 0.5 and 5 test USDC per bridge (the testnet relayer has little liquidity).' : network === 'mainnet' ? 'Maximum 100 USDC per bridge in this release.'
+      : `Between ${bound(option.pair.minimumAmount, option.pair.source.decimals)} and ${bound(option.pair.maximumAmount, option.pair.source.decimals)} ${option.pair.source.symbol} per bridge in this release.`)}{tr(" The minimum you receive is fixed in the reviewed deposit.")}</small>}
     {error && <p role="alert">{tr(error)}</p>}
     <button type="submit" disabled={!network}>{tr(nodeId ? 'Review bridge change' : 'Review bridge proposal')}</button>
     {onDone && <button type="button" className="quiet" onClick={onDone}>{tr("Cancel")}</button>}
@@ -86,7 +107,8 @@ const messagesFor = (l: Labels): Record<string, string> => ({
   ROUTER_STATE_CHANGED_REVIEW_REQUIRED: 'Chain state changed materially since Review. Your authorization was cleared and nothing was sent.',
   ROUTER_ROUTE_REVALIDATION_UNAVAILABLE: 'The routing provider could not confirm the reviewed route right now. Nothing was sent; try again shortly.',
   ROUTER_SEMANTIC_REVISION_CHANGED: 'The workflow changed. Simulate the current bridge again.', ROUTER_NO_EXECUTABLE_ROUTE: 'No allowed provider returned a route Flofi can reconcile.',
-  ROUTER_INSUFFICIENT_USDC: `Your wallet needs more USDC on ${l.src} for this bridge.`, ROUTER_INSUFFICIENT_GAS_ETH: `Your wallet needs more ETH on ${l.src} for network fees.`,
+  ROUTER_INSUFFICIENT_USDC: `Your wallet needs more USDC on ${l.src} for this bridge.`, ROUTER_INSUFFICIENT_TOKEN: `Your wallet needs more ${l.token} on ${l.src} for this bridge.`,
+  ROBINHOOD_MAINNET_NOT_ENABLED: 'Robinhood Chain routes are not enabled on this server.', ROUTER_INSUFFICIENT_GAS_ETH: `Your wallet needs more ETH on ${l.src} for network fees.`,
   ROUTER_SIMULATION_UNAVAILABLE: 'The network provider cannot simulate these transactions. Nothing was signed.',
   ROUTER_SIMULATION_DEPOSIT_REVERTED: 'The simulation of the bridge deposit failed. Nothing was signed.', ROUTER_UNEXPECTED_CONTRACT: 'A contract does not match its verified deployment.',
   ROUTER_PENDING_TRANSACTION: `Your wallet has a queued transaction on ${l.src}. Let it confirm first.`,
@@ -121,7 +143,8 @@ const changeLabel: Record<RouteChange, string> = { CHAIN_CHANGED: 'chain', TOKEN
   SLIPPAGE_CHANGED: 'slippage', APPROVAL_CHANGED: 'approval', TRANSACTION_TARGET_CHANGED: 'transaction target', TRANSACTION_FUNCTION_CHANGED: 'transaction function',
   VALUE_CHANGED: 'transaction value', BRIDGE_CONTRACT_CHANGED: 'bridge contracts', BRIDGE_MESSAGE_CHANGED: 'destination message', CALLDATA_CHANGED: 'calldata',
   QUOTE_CHANGED: 'quote', DEADLINE_CHANGED: 'deadlines' };
-const usdc = (units: string | null | undefined) => units ? `${formatTokenAmount(units, 6)} USDC` : '--';
+/** A token amount of one side of the route (its own decimals and symbol). */
+const tokenAmount = (side: { decimals: number; symbol: string }) => (units: string | null | undefined) => units ? `${formatTokenAmount(units, side.decimals)} ${side.symbol}` : '--';
 const eth = (wei: string | null | undefined) => wei ? `${formatTokenAmount(wei, 18)} ETH` : 'not available';
 const providerLabel = (p: string) => p === 'lifi' ? 'LI.FI' : p === 'across' ? 'Across (direct)' : p;
 const LIFECYCLE: readonly RouterPhase[] = ['PREPARED', 'AUTHORIZED', 'SOURCE_SUBMITTED', 'SOURCE_CONFIRMED', 'IN_FLIGHT', 'DESTINATION_OBSERVED', 'RECONCILED'];
@@ -156,6 +179,8 @@ export function RouterPanel({ view }: { view: 'simulate' | 'execute' }) {
   const { state } = useWorkflow(), router = useRouter();
   const node = state.workflow.nodes.find(n => routerDetails(n)), fields = node ? routerDetails(node) : null;
   const network = router.network, l = LABELS[network], messages = messagesFor(l), message = (code: string | null | undefined) => !code ? null : messages[code] ?? null;
+  // Source-side amounts (input, fees, approvals, balance, refund) and destination-side amounts (outputs, fill) in their own tokens.
+  const { pair } = ROUTER_NETWORK_OPTIONS[network], usdc = tokenAmount(pair.source), out = tokenAmount(pair.destination);
   const record = router.record, r = record?.review, route = r?.route, last = record?.attempts.at(-1);
   const [clock, setClock] = useState(() => Date.now());
   useEffect(() => { const timer = setInterval(() => setClock(Date.now()), 1000); return () => clearInterval(timer); }, []);
@@ -169,13 +194,13 @@ export function RouterPanel({ view }: { view: 'simulate' | 'execute' }) {
   const canRefresh = Boolean(record && record.verdict === 'PENDING' && !pending && ['PREPARED', 'AUTHORIZED'].includes(record.phase) &&
     !record.attempts.some(a => a.step === 'DEPOSIT' && a.state !== 'CANCELLED') && (record.requote || fresh === 0 || record.phase === 'PREPARED' && record.attempts.length > 0));
   const info = router.error ?? record?.error ?? router.notice;
-  const evidenceName = network === 'testnet' ? 'flofi-crosschain-router-testnet' : 'flofi-crosschain-router';
+  const evidenceName = network === 'testnet' ? 'flofi-crosschain-router-testnet' : network === 'mainnet' ? 'flofi-crosschain-router' : `flofi-crosschain-router-${network}`;
   const stepLabel = (purpose: 'APPROVAL' | 'BRIDGE_DEPOSIT') => purpose === 'APPROVAL' ? `Approve exactly ${usdc(route?.approval.amount)} to ${route?.routingProvider === 'lifi' ? 'the LI.FI Diamond' : 'the Across SpokePool'}`
     : `Deposit into the bridge (${providerLabel(route?.routingProvider ?? '')} → Across)`;
   return <section className="panel" aria-label={tr("Cross-chain bridge")}><h2>{tr(view === 'simulate' ? 'Simulate cross-chain bridge' : 'Review cross-chain bridge')}</h2>
-    {fields && <p>{tr("Bridge ")}{tr(fields.amount)}{tr(" USDC from ")}{tr(l.src)}{tr(" to ")}{tr(l.dst)}{tr(" for ")}{tr(fields.recipientLabel)}{tr(", routing: ")}{tr(ROUTER_ROUTING_LABEL[fields.routing])}.</p>}
-    <p role="note">{tr(network === 'testnet' ? 'Test USDC on public testnets: Base Sepolia and Arbitrum Sepolia. No real funds.' : 'Real funds: Base mainnet and Arbitrum One.')}{tr(" Flofi never signs or sends; every transaction is your wallet's, after your Review.")}</p>
-    {!router.available && <p role="status">{tr(message(network === 'testnet' ? 'ROUTER_TESTNET_NOT_ENABLED' : 'ROUTER_NOT_ENABLED'))}</p>}
+    {fields && <p>{tr("Bridge ")}{tr(fields.amount)}{tr(fields.token === 'USDG' ? ' USDG from ' : ' USDC from ')}{tr(l.src)}{tr(" to ")}{tr(l.dst)}{tr(" for ")}{tr(fields.recipientLabel)}{tr(", routing: ")}{tr(ROUTER_ROUTING_LABEL[fields.routing])}.</p>}
+    <p role="note">{tr(network === 'testnet' ? 'Test USDC on public testnets: Base Sepolia and Arbitrum Sepolia. No real funds.' : network === 'mainnet' ? 'Real funds: Base mainnet and Arbitrum One.' : ROUTER_NETWORK_OPTIONS[network].funds)}{tr(" Flofi never signs or sends; every transaction is your wallet's, after your Review.")}</p>
+    {!router.available && <p role="status">{tr(message(network === 'testnet' ? 'ROUTER_TESTNET_NOT_ENABLED' : network === 'mainnet' ? 'ROUTER_NOT_ENABLED' : 'ROBINHOOD_MAINNET_NOT_ENABLED'))}</p>}
     {router.retired && <p role="alert">{tr("The workflow changed. Prior authorization is invalid. Simulate the current bridge again.")}</p>}
     {router.recovered && record && <p role="status">{tr("Recovered run ")}{record.id}{tr(". Its state comes from the server; nothing is resent automatically.")}</p>}
     <WalletSessionBlock showRuns={true}/>
@@ -185,10 +210,10 @@ export function RouterPanel({ view }: { view: 'simulate' | 'execute' }) {
       <dl className="swap-summary" aria-label={tr("Route review")}>
         <dt>{tr("Routing provider")}</dt><dd>{tr(providerLabel(route.routingProvider))}{tr(" · underlying protocol ")}{tr(route.underlyingProtocol)}</dd>
         <dt>{tr("Route")}</dt><dd><ol aria-label={tr("Route steps")}>{route.steps.map((s, i) => <li key={i}>{tr(s.kind === 'FEE_COLLECTION' ? `LI.FI fee collection on ${l.src}: ${usdc(s.amountIn)} → ${usdc(s.amountOut)}`
-          : `Across bridge ${l.src} → ${l.dst}: ${usdc(s.amountIn)} → ${usdc(s.amountOut)}`)}</li>)}</ol></dd>
+          : `Across bridge ${l.src} → ${l.dst}: ${usdc(s.amountIn)} → ${out(s.amountOut)}`)}</li>)}</ol></dd>
         <dt>{tr("Amount in")}</dt><dd>{tr(usdc(route.inputAmount))}{tr(" on ")}{tr(l.src)}</dd>
-        <dt>{tr("Expected out")}</dt><dd>{tr(usdc(route.expectedOutput))}{tr(" on ")}{tr(l.dst)}</dd>
-        <dt>{tr("Minimum received")}</dt><dd>{tr(usdc(route.minimumOutput))}{tr(" — fixed in the reviewed deposit; a smaller fill is a mismatch")}</dd>
+        <dt>{tr("Expected out")}</dt><dd>{tr(out(route.expectedOutput))}{tr(" on ")}{tr(l.dst)}</dd>
+        <dt>{tr("Minimum received")}</dt><dd>{tr(out(route.minimumOutput))}{tr(" — fixed in the reviewed deposit; a smaller fill is a mismatch")}</dd>
         <dt>{tr("Fees")}</dt><dd>{route.fees.map((f, i) => <span key={i}>{tr(f.label)}: {tr(usdc(f.amount))}{tr(f.recipient ? ` (to ${f.recipient})` : '')}. </span>)}{tr("Total ")}{tr(usdc(route.feeTotal))}</dd>
         <dt>{tr("Network fees (")}{tr(l.src)})</dt><dd>{tr("at most ")}{tr(eth(r.fees.totalUpperBoundWei ?? r.fees.executionFeeUpperBoundWei))}{tr(" for ")}{tr(r.calls.length)}{tr(" transaction")}{tr(r.calls.length > 1 ? 's' : '')}{tr(r.fees.l1FeeUpperBoundWei === null ? ' (L1 data fee not estimated)' : '')}</dd>
         <dt>{tr("Estimated duration")}</dt><dd>{tr("about ")}{tr(route.quote.estimatedDurationSeconds)}{tr(" s after the deposit confirms (provider estimate)")}</dd>
@@ -202,8 +227,8 @@ export function RouterPanel({ view }: { view: 'simulate' | 'execute' }) {
       <details><summary>{tr("Sources: provider quote, transaction simulation, chain observation")}</summary>
         <dl aria-label={tr("Evidence sources")}>
           <dt>{tr("Provider quote (not a simulation)")}</dt><dd>{tr(providerLabel(r.quote.provider))}{tr(" quote ")}{tr(r.quote.quoteId)}{tr(" · raw response ")}{tr(r.quote.rawHash)}</dd>
-          <dt>{tr("Alternatives considered")}</dt><dd>{tr(r.selection.considered.map(c => `${providerLabel(c.provider)}: ${c.outcome.toLowerCase()}${c.code ? ` (${c.code})` : ''}${c.minimumOutput ? `, minimum ${usdc(c.minimumOutput)}` : ''}`).join('; '))}</dd>
-          <dt>{tr("Transaction simulation")}</dt><dd>{tr(r.simulation.method)}{tr(" of the exact ")}{tr(l.src)}{tr(" transactions at block ")}{tr(r.simulation.block)}{tr(": deposit to ")}{tr(r.simulation.deposit.recipient)}{tr(", output ")}{tr(usdc(r.simulation.deposit.outputAmount))}{tr(". Not simulated: the destination fill, relayer behaviour and refunds.")}</dd>
+          <dt>{tr("Alternatives considered")}</dt><dd>{tr(r.selection.considered.map(c => `${providerLabel(c.provider)}: ${c.outcome.toLowerCase()}${c.code ? ` (${c.code})` : ''}${c.minimumOutput ? `, minimum ${out(c.minimumOutput)}` : ''}`).join('; '))}</dd>
+          <dt>{tr("Transaction simulation")}</dt><dd>{tr(r.simulation.method)}{tr(" of the exact ")}{tr(l.src)}{tr(" transactions at block ")}{tr(r.simulation.block)}{tr(": deposit to ")}{tr(r.simulation.deposit.recipient)}{tr(", output ")}{tr(out(r.simulation.deposit.outputAmount))}{tr(". Not simulated: the destination fill, relayer behaviour and refunds.")}</dd>
           <dt>{tr("Chain observation")}</dt><dd>{tr(l.src)}{tr(" block ")}{tr(r.observation.source.block.number)}, {tr(l.dstShort)}{tr(" block ")}{tr(r.observation.destination.block.number)}{tr("; balance ")}{tr(usdc(r.observation.source.usdcBalance))}{tr("; contracts match their pinned code.")}</dd>
           <dt>{tr("Route commitment")}</dt><dd><code>{tr(r.routeCommitment)}</code></dd>
           <dt>{tr("Manifest")}</dt><dd><code>{tr(r.artifacts.hashes.manifest)}</code>{tr(" (binds the route commitment and the fixed provider ")}{tr(r.artifacts.manifest.providers.kind === 'FIXED' ? r.artifacts.manifest.providers.providerId : '')})</dd>
@@ -221,11 +246,11 @@ export function RouterPanel({ view }: { view: 'simulate' | 'execute' }) {
       {(pending || settling) && <button type="button" disabled={router.busy} onClick={() => void router.observe()}>{tr("Observe bridge")}</button>}
       {record.attempts.length > 0 && <ol aria-label={tr(`${l.src} transactions`)}>{record.attempts.map(a => <li key={a.attemptId}>{tr(a.step === 'APPROVAL' ? 'Approval' : 'Bridge deposit')}: {tr(a.state.toLowerCase().replaceAll('_', ' '))}
         {a.transactionHash && <> · <a href={explorerTx(network, 'source', a.replacementHash ?? a.transactionHash)} target="_blank" rel="noreferrer">{tr("view on ")}{tr(l.srcScan)}</a></>}{tr(a.note ? ` · ${message(a.note) ?? a.note}` : '')}</li>)}</ol>}
-      {record.source && <p>{tr("Deposit ")}{tr(record.source.depositId)}{tr(" confirmed on ")}{tr(l.src)}{tr(record.source.safe ? ' (safe head)' : '')}: {tr(usdc(record.source.inputAmount))}{tr(" in, ")}{tr(usdc(record.source.outputAmount))}{tr(" owed on ")}{tr(l.dstShort)}.</p>}
-      {record.destination && <p>{tr("Fill observed on ")}{tr(l.dstShort)}{tr(record.destination.safe ? ' (safe head)' : '')}: {tr(usdc(record.destination.outputAmount))}{tr(" to ")}{tr(record.destination.recipient)} · <a
+      {record.source && <p>{tr("Deposit ")}{tr(record.source.depositId)}{tr(" confirmed on ")}{tr(l.src)}{tr(record.source.safe ? ' (safe head)' : '')}: {tr(usdc(record.source.inputAmount))}{tr(" in, ")}{tr(out(record.source.outputAmount))}{tr(" owed on ")}{tr(l.dstShort)}.</p>}
+      {record.destination && <p>{tr("Fill observed on ")}{tr(l.dstShort)}{tr(record.destination.safe ? ' (safe head)' : '')}: {tr(out(record.destination.outputAmount))}{tr(" to ")}{tr(record.destination.recipient)} · <a
         href={explorerTx(network, 'destination', record.destination.transactionHash)} target="_blank" rel="noreferrer">{tr("view on ")}{tr(l.dstScan)}</a></p>}
       {record.evidence && <section aria-label={tr("Bridge result")} className="swap-result"><h3>{tr("Bridge reconciled")}</h3>
-        <p>{tr(usdc(record.evidence.destination.outputAmount))}{tr(" arrived at ")}{tr(record.evidence.recipient)}{tr(" on ")}{tr(l.dst)}{tr(" (minimum ")}{tr(usdc(record.evidence.minimumOutput))}{tr("). Independently reconciled on both chains.")}</p>
+        <p>{tr(out(record.evidence.destination.outputAmount))}{tr(" arrived at ")}{tr(record.evidence.recipient)}{tr(" on ")}{tr(l.dst)}{tr(" (minimum ")}{tr(out(record.evidence.minimumOutput))}{tr("). Independently reconciled on both chains.")}</p>
         <p>{tr("Evidence: ")}{tr(record.evidence.evidenceClass)}{tr(" · bundle ")}{record.evidence.bundleHash}</p>
         <ul aria-label={tr("Evidence transactions")}>{record.evidence.transactions.map(t => <li key={t.transactionHash}>{tr(t.step.toLowerCase())} · <a href={t.explorer} target="_blank" rel="noreferrer">{t.transactionHash}</a></li>)}</ul>
         <a download={`${evidenceName}-evidence.json`} href={'data:application/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(record.evidence, null, 2))}>{tr("Download Evidence Bundle")}</a></section>}

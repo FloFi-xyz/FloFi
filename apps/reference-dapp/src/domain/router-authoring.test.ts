@@ -4,7 +4,9 @@ import { createBaseSepoliaReviewContext } from '@defi-workflow-engine/reference-
 import { readRouterBridgeNode, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { commandIsValid, parseLocalCommand, summarize, type Command } from './commands';
 import { editorReducer, initialEditor } from './editor';
-import { createRouterNode, parseRouterChat, routerDetails, routerInputOf, type RouterBridgeInput } from './router-authoring';
+import { createRouterNode, parseRouterChat, routerChainChoices, routerDetails, routerInputForNetworks, routerInputOf, routerNetworksOf, routerTokensOf,
+  type RouterBridgeInput } from './router-authoring';
+import { bridgePairLabel } from './canvas-action-setup';
 
 const context = createBaseSepoliaReviewContext();
 const canvasInput: RouterBridgeInput = { source: 'Base', destination: 'Arbitrum', token: 'USDC', amount: '5', recipient: '0x6666666666666666666666666666666666666666',
@@ -46,5 +48,45 @@ describe('BUILD-ROUTER-001 Guided Chat / Canvas authoring', () => {
     expect(() => createRouterNode('n', { ...canvasInput, slippage: '301' })).toThrow('ROUTER_SLIPPAGE_OUT_OF_RANGE');
     expect(() => createRouterNode('n', { ...canvasInput, routing: 'STARGATE' as 'AUTO' })).toThrow('ROUTER_PROVIDER_POLICY_INVALID');
     expect(parseRouterChat('bridge 5 USDC from Base to Optimism')).toBeNull();
+  });
+});
+
+describe('BUILD-RH-002 Robinhood Chain bridge routes', () => {
+  const USDG = '0x5fc5360d0400a0fd4f2af552add042d716f1d168';
+  it('chat authors Base/Arbitrum USDC → Robinhood USDG and USDG → USDC, naming the delivered asset', () => {
+    const into = parseRouterChat('Bridge 100 USDC from Base to Robinhood');
+    expect(into).toMatchObject({ source: 'Base', destination: 'Robinhood Chain', token: 'USDC', amount: '100', routing: 'AUTO', recipient: '' });
+    const node = createRouterNode('n', into!), fields = readRouterBridgeNode(node);
+    expect(fields).toMatchObject({ sourceChain: 'eip155:8453', destinationChain: 'eip155:4663', outputToken: USDG, amount: '100000000' });
+    expect(routerDetails(node)).toMatchObject({ network: 'base-to-robinhood', token: 'USDC', destinationToken: 'USDG', amount: '100' });
+    const out = parseRouterChat('bridge 50 USDG from Robinhood Chain to Arbitrum via Across');
+    expect(out).toMatchObject({ source: 'Robinhood Chain', destination: 'Arbitrum', token: 'USDG', routing: 'ACROSS' });
+    expect(routerDetails(createRouterNode('n', out!))).toMatchObject({ network: 'robinhood-to-arbitrum', token: 'USDG', destinationToken: 'USDC' });
+    // Chat and Canvas produce the identical IR.
+    expect(createRouterNode('n', routerInputOf(routerDetails(node)!))).toEqual(node);
+  });
+  it('refuses a token that is not the pair\'s source asset, unsupported directions and the 100-per-bridge cap', () => {
+    for (const text of ['Bridge 5 USDC from Robinhood to Base', 'Bridge 5 USDG from Base to Robinhood', 'Bridge 5 USDC from Arbitrum to Base',
+      'Bridge 5 USDC from Robinhood to Robinhood', 'Bridge 5 USDG from Base Sepolia to Robinhood']) expect(parseRouterChat(text), text).toBeNull();
+    const base: RouterBridgeInput = { source: 'Robinhood Chain', destination: 'Base', token: 'USDG', amount: '5', recipient: '', slippage: '50', routing: 'AUTO' };
+    expect(() => createRouterNode('n', { ...base, token: 'USDC' })).toThrow('ROUTER_PAIR_UNSUPPORTED');
+    expect(() => createRouterNode('n', { ...base, destination: 'Robinhood Chain' })).toThrow('ROUTER_PAIR_UNSUPPORTED');
+    expect(() => createRouterNode('n', { ...base, amount: '100.000001' })).toThrow();
+    expect(() => createRouterNode('n', { ...base, amount: '0.5' })).toThrow();
+    expect(readRouterBridgeNode(createRouterNode('n', { ...base, amount: '100' })).amount).toBe('100000000');
+  });
+  it('Canvas choices: mainnet offers the Robinhood routes beside Base → Arbitrum One; the token follows the chosen pair', () => {
+    expect(routerNetworksOf('mainnet')).toEqual(['mainnet', 'base-to-robinhood', 'robinhood-to-base', 'arbitrum-to-robinhood', 'robinhood-to-arbitrum']);
+    expect(routerNetworksOf('testnet')).toEqual(['testnet']);
+    expect(routerChainChoices('mainnet')).toEqual({ sources: ['Base', 'Robinhood Chain', 'Arbitrum'], destinations: ['Arbitrum', 'Robinhood Chain', 'Base'] });
+    expect(routerChainChoices('mainnet', 'Base').destinations).toEqual(['Arbitrum', 'Robinhood Chain']);
+    expect(routerChainChoices('mainnet', 'Arbitrum').destinations).toEqual(['Robinhood Chain']);
+    expect(routerChainChoices('mainnet', 'Robinhood Chain').destinations).toEqual(['Base', 'Arbitrum']);
+    expect(routerChainChoices('testnet')).toEqual({ sources: ['Base Sepolia'], destinations: ['Arbitrum Sepolia'] });
+    expect(routerTokensOf({ source: 'Robinhood Chain', destination: 'Base' })).toEqual({ token: 'USDG', destinationToken: 'USDC' });
+    expect(routerTokensOf({ source: 'Arbitrum', destination: 'Base' })).toBeNull();
+    expect(routerInputForNetworks(canvasInput, { source: 'Robinhood Chain', destination: 'Arbitrum' })).toMatchObject({ source: 'Robinhood Chain', destination: 'Arbitrum', token: 'USDG' });
+    expect(routerInputForNetworks(canvasInput, { source: 'Arbitrum', destination: 'Base' })).toMatchObject({ token: 'USDC' });
+    expect([bridgePairLabel({ source: 'Base', destination: 'Robinhood Chain' }), bridgePairLabel({ source: 'Base', destination: 'Arbitrum' })]).toEqual(['USDC → USDG', 'USDC → USDC']);
   });
 });

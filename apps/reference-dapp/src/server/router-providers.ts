@@ -32,8 +32,8 @@ function depositExpiry(quoteTimestamp: number, fillDeadline: number, buffer: num
   return Math.min((quoteTimestamp + buffer - profile.depositSafetyMarginSeconds) * 1000, (fillDeadline - profile.depositSafetyMarginSeconds) * 1000);
 }
 const token = (side: 'source' | 'destination', profile: RouterProfile) => side === 'source'
-  ? { chainId: profile.source.chain, address: profile.source.usdc, decimals: 6, symbol: 'USDC' }
-  : { chainId: profile.destination.chain, address: profile.destination.usdc, decimals: 6, symbol: 'USDC' };
+  ? { chainId: profile.source.chain, address: profile.source.token, decimals: profile.source.decimals, symbol: profile.source.symbol }
+  : { chainId: profile.destination.chain, address: profile.destination.token, decimals: profile.destination.decimals, symbol: profile.destination.symbol };
 
 /** Default transport: bounded JSON over HTTPS, no redirects, no caching. */
 export function createRouterHttp(fetcher: typeof fetch = fetch): RouterHttp {
@@ -67,7 +67,7 @@ export function normalizeLifiRoute(raw: unknown, request: RouteRequest, profile:
   if (q.tool !== profile.underlyingProtocol) fail('LIFI_UNDERLYING_PROTOCOL_NOT_RECONCILABLE');
   if (q.type !== 'lifi' || typeof q.id !== 'string' || q.id.length < 1 || q.id.length > 160 || action.fromChainId !== SRC.chainId || action.toChainId !== DST.chainId ||
       action.fromAmount !== request.amount || addr(action.fromAddress, 'LIFI_ROUTE_UNSUPPORTED') !== owner || addr(action.toAddress, 'LIFI_ROUTE_UNSUPPORTED') !== recipient ||
-      addr(from.address, 'LIFI_ROUTE_UNSUPPORTED') !== SRC.usdc || addr(to.address, 'LIFI_ROUTE_UNSUPPORTED') !== DST.usdc || from.decimals !== 6 || to.decimals !== 6 ||
+      addr(from.address, 'LIFI_ROUTE_UNSUPPORTED') !== SRC.token || addr(to.address, 'LIFI_ROUTE_UNSUPPORTED') !== DST.token || from.decimals !== SRC.decimals || to.decimals !== DST.decimals ||
       typeof action.slippage !== 'number' || Math.abs(action.slippage - request.slippageBps / 10_000) > 1e-9) fail('LIFI_ROUTE_UNSUPPORTED');
   const steps = Array.isArray(q.includedSteps) ? q.includedSteps.map(s => rec(s, 'LIFI_ROUTE_UNSUPPORTED')) : fail('LIFI_ROUTE_UNSUPPORTED');
   const kinds = steps.map(s => `${String(s.type)}:${String(s.tool)}`);
@@ -78,17 +78,17 @@ export function normalizeLifiRoute(raw: unknown, request: RouteRequest, profile:
       (tx.value !== '0x0' && tx.value !== '0x00' && tx.value !== '0')) fail('LIFI_TRANSACTION_UNSUPPORTED');
   const data = typeof tx.data === 'string' ? tx.data.toLowerCase() : fail('LIFI_TRANSACTION_UNSUPPORTED'), call = decodeLifiAcrossV4(data), bd = call.bridgeData, ac = call.across;
   // Calldata is authoritative; the API summary must agree with it.
-  if (bd.bridge !== profile.underlyingProtocol || bd.receiver !== recipient || bd.sendingAssetId !== SRC.usdc || bd.destinationChainId !== BigInt(DST.chainId) ||
+  if (bd.bridge !== profile.underlyingProtocol || bd.receiver !== recipient || bd.sendingAssetId !== SRC.token || bd.destinationChainId !== BigInt(DST.chainId) ||
       bd.hasDestinationCall || bd.integrator !== profile.providers.lifi.integrator || (typeof q.transactionId === 'string' && q.transactionId.toLowerCase() !== bd.transactionId) ||
-      ac.receiverAddress !== recipient || ac.refundAddress !== owner || ac.sendingAssetId !== SRC.usdc || ac.receivingAssetId !== DST.usdc || ac.message !== '0x')
+      ac.receiverAddress !== recipient || ac.refundAddress !== owner || ac.sendingAssetId !== SRC.token || ac.receivingAssetId !== DST.token || ac.message !== '0x')
     fail('LIFI_CALLDATA_MISMATCH');
   let integratorFees: { recipient: string; amount: bigint }[] = [];
   if (call.kind === 'SWAP_AND_START') {
     const s = call.swaps.length === 1 ? call.swaps[0]! : fail('LIFI_CALLDATA_MISMATCH');
     if (call.swaps.length !== 1 || !bd.hasSourceSwaps || s.callTo !== SRC.lifiFeeForwarder || s.approveTo !== SRC.lifiFeeForwarder ||
-        s.sendingAssetId !== SRC.usdc || s.receivingAssetId !== SRC.usdc || s.fromAmount !== BigInt(request.amount) || !s.requiresDeposit) fail('LIFI_CALLDATA_MISMATCH');
+        s.sendingAssetId !== SRC.token || s.receivingAssetId !== SRC.token || s.fromAmount !== BigInt(request.amount) || !s.requiresDeposit) fail('LIFI_CALLDATA_MISMATCH');
     const forward = decodeLifiFeeForward(s.callData);
-    if (forward.token !== SRC.usdc || forward.fees.some(f => f.recipient === ZERO || f.amount === 0n)) fail('LIFI_CALLDATA_MISMATCH');
+    if (forward.token !== SRC.token || forward.fees.some(f => f.recipient === ZERO || f.amount === 0n)) fail('LIFI_CALLDATA_MISMATCH');
     integratorFees = forward.fees;
     if (BigInt(request.amount) - integratorFees.reduce((sum, f) => sum + f.amount, 0n) !== bd.minAmount ||
         lifiAcrossOutput(bd.minAmount, ac.outputAmountMultiplier) !== ac.outputAmount) fail('LIFI_CALLDATA_MISMATCH');
@@ -98,15 +98,15 @@ export function normalizeLifiRoute(raw: unknown, request: RouteRequest, profile:
   const feeLines = Array.isArray(estimate.feeCosts) && estimate.feeCosts.length <= 12 ? estimate.feeCosts.map(f => rec(f, 'LIFI_FEES_INVALID')) : fail('LIFI_FEES_INVALID');
   const lines = feeLines.map(f => {
     const t = rec(f.token, 'LIFI_FEES_INVALID');
-    if (t.chainId !== SRC.chainId || addr(t.address, 'LIFI_FEES_INVALID') !== SRC.usdc || f.included !== true || typeof f.name !== 'string') fail('LIFI_FEE_ASSET_UNSUPPORTED');
+    if (t.chainId !== SRC.chainId || addr(t.address, 'LIFI_FEES_INVALID') !== SRC.token || f.included !== true || typeof f.name !== 'string') fail('LIFI_FEE_ASSET_UNSUPPORTED');
     return { name: (f.name as string).slice(0, 80), amount: BigInt(units(f.amount, 'LIFI_FEES_INVALID')) };
   });
   const integratorQuoted = lines.filter(l => INTEGRATOR_FEE.test(l.name)).reduce((sum, l) => sum + l.amount, 0n);
   const bridgeLines = lines.filter(l => !INTEGRATOR_FEE.test(l.name) && l.amount > 0n);
   if (integratorQuoted !== integratorFees.reduce((sum, f) => sum + f.amount, 0n) ||
       bridgeLines.reduce((sum, l) => sum + l.amount, 0n) !== bd.minAmount - ac.outputAmount) fail('LIFI_FEES_INCONSISTENT');
-  const fees: RouteFee[] = [...integratorFees.map(f => ({ kind: 'INTEGRATOR' as const, label: 'LI.FI fee', chainId: SRC.chain, token: SRC.usdc, amount: f.amount.toString(),
-    recipient: f.recipient })), ...bridgeLines.map(l => ({ kind: lifiBridgeFeeKind(l.name), label: l.name, chainId: SRC.chain, token: SRC.usdc, amount: l.amount.toString(), recipient: null }))];
+  const fees: RouteFee[] = [...integratorFees.map(f => ({ kind: 'INTEGRATOR' as const, label: 'LI.FI fee', chainId: SRC.chain, token: SRC.token, amount: f.amount.toString(),
+    recipient: f.recipient })), ...bridgeLines.map(l => ({ kind: lifiBridgeFeeKind(l.name), label: l.name, chainId: SRC.chain, token: SRC.token, amount: l.amount.toString(), recipient: null }))];
   const expiresMs = depositExpiry(ac.quoteTimestamp, ac.fillDeadline, request.depositQuoteTimeBuffer, profile);
   if (expiresMs <= request.nowMs) fail('LIFI_QUOTE_EXPIRED');
   const gas = Array.isArray(estimate.gasCosts) ? estimate.gasCosts.map(g => rec(g, 'LIFI_GAS_INVALID')) : [];
@@ -117,20 +117,20 @@ export function normalizeLifiRoute(raw: unknown, request: RouteRequest, profile:
   return canonicalizeRoute({ format: 'flofi.route.v1', sourceChain: SRC.chain, destinationChain: DST.chain, inputToken: token('source', profile), outputToken: token('destination', profile),
     inputAmount: request.amount, expectedOutput: output, minimumOutput: output, recipient, depositor: owner, refundAddress: owner, routingProvider: 'lifi',
     underlyingProtocol: 'across',
-    steps: [...call.kind === 'SWAP_AND_START' ? [{ kind: 'FEE_COLLECTION' as const, protocol: 'lifi-fee', fromChain: SRC.chain, toChain: SRC.chain, fromToken: SRC.usdc,
-      toToken: SRC.usdc, amountIn: request.amount, amountOut: bd.minAmount.toString() }] : [],
-      { kind: 'BRIDGE' as const, protocol: 'across', fromChain: SRC.chain, toChain: DST.chain, fromToken: SRC.usdc, toToken: DST.usdc, amountIn: bd.minAmount.toString(), amountOut: output }],
+    steps: [...call.kind === 'SWAP_AND_START' ? [{ kind: 'FEE_COLLECTION' as const, protocol: 'lifi-fee', fromChain: SRC.chain, toChain: SRC.chain, fromToken: SRC.token,
+      toToken: SRC.token, amountIn: request.amount, amountOut: bd.minAmount.toString() }] : [],
+      { kind: 'BRIDGE' as const, protocol: 'across', fromChain: SRC.chain, toChain: DST.chain, fromToken: SRC.token, toToken: DST.token, amountIn: bd.minAmount.toString(), amountOut: output }],
     fees, feeTotal: (BigInt(request.amount) - ac.outputAmount).toString(), slippageBps: request.slippageBps,
-    approval: { token: SRC.usdc, spender: SRC.lifiDiamond, amount: request.amount },
+    approval: { token: SRC.token, spender: SRC.lifiDiamond, amount: request.amount },
     deposit: { purpose: 'BRIDGE_DEPOSIT', chainId: SRC.chain, to: SRC.lifiDiamond, data, value: '0x0' },
-    bridge: { protocol: 'across', originSpokePool: SRC.spokePool, destinationSpokePool: DST.spokePool, depositor: ac.refundAddress, recipient, inputToken: SRC.usdc,
-      outputToken: DST.usdc, inputAmount: bd.minAmount.toString(), outputAmount: output, destinationChainId: DST.chainId, exclusiveRelayer: ac.exclusiveRelayer,
+    bridge: { protocol: 'across', originSpokePool: SRC.spokePool, destinationSpokePool: DST.spokePool, depositor: ac.refundAddress, recipient, inputToken: SRC.token,
+      outputToken: DST.token, inputAmount: bd.minAmount.toString(), outputAmount: output, destinationChainId: DST.chainId, exclusiveRelayer: ac.exclusiveRelayer,
       quoteTimestamp: ac.quoteTimestamp, fillDeadline: ac.fillDeadline, exclusivityParameter: ac.exclusivityParameter, message: '0x' },
     quote: { id: quoteId, rawHash: rawHash(raw), quotedAt: iso(request.nowMs), expiresAt: iso(expiresMs), estimatedDurationSeconds: duration, providerGasEstimate: gasTotal } });
 }
 export function lifiQuoteUrl(request: RouteRequest, api?: string, profile: RouterProfile = MAINNET): string {
   const SRC = profile.source, DST = profile.destination;
-  const params = new URLSearchParams({ fromChain: String(SRC.chainId), toChain: String(DST.chainId), fromToken: SRC.usdc, toToken: DST.usdc, fromAmount: request.amount,
+  const params = new URLSearchParams({ fromChain: String(SRC.chainId), toChain: String(DST.chainId), fromToken: SRC.token, toToken: DST.token, fromAmount: request.amount,
     fromAddress: request.owner, toAddress: request.recipient, slippage: String(request.slippageBps / 10_000), integrator: profile.providers.lifi.integrator,
     allowBridges: profile.underlyingProtocol, allowDestinationCall: 'false' });
   return `${api ?? profile.providers.lifi.api}/quote?${params}`;
@@ -156,30 +156,33 @@ export function normalizeAcrossRoute(raw: unknown, request: RouteRequest, profil
   const owner = addr(request.owner, 'ROUTER_OWNER_INVALID'), recipient = addr(request.recipient, 'ROUTER_RECIPIENT_INVALID');
   const q = rec(raw, 'ACROSS_RESPONSE_INVALID'), steps = rec(q.steps, 'ACROSS_RESPONSE_INVALID'), bridge = rec(steps.bridge, 'ACROSS_ROUTE_UNSUPPORTED');
   const tx = rec(q.swapTx, 'ACROSS_TRANSACTION_UNSUPPORTED'), checks = rec(q.checks, 'ACROSS_RESPONSE_INVALID'), allowance = rec(checks.allowance, 'ACROSS_RESPONSE_INVALID');
-  const tok = (v: unknown, chainId: number, address: string) => { const t = rec(v, 'ACROSS_ROUTE_UNSUPPORTED'); return t.chainId === chainId && addr(t.address, 'ACROSS_ROUTE_UNSUPPORTED') === address && t.decimals === 6; };
+  const tok = (v: unknown, chainId: number, address: string) => { const t = rec(v, 'ACROSS_ROUTE_UNSUPPORTED');
+    return t.chainId === chainId && addr(t.address, 'ACROSS_ROUTE_UNSUPPORTED') === address && t.decimals === (chainId === SRC.chainId ? SRC.decimals : DST.decimals); };
   if (q.crossSwapType !== 'bridgeableToBridgeable' || q.amountType !== 'exactInput' || steps.originSwap != null || steps.destinationSwap != null ||
       bridge.provider !== 'across' || units(q.inputAmount, 'ACROSS_ROUTE_UNSUPPORTED') !== request.amount ||
       (q.maxInputAmount !== undefined && q.maxInputAmount !== request.amount) || units(bridge.inputAmount, 'ACROSS_ROUTE_UNSUPPORTED') !== request.amount ||
-      !tok(q.inputToken, SRC.chainId, SRC.usdc) || !tok(q.outputToken, DST.chainId, DST.usdc) || !tok(q.refundToken, SRC.chainId, SRC.usdc) ||
-      !tok(bridge.tokenIn, SRC.chainId, SRC.usdc) || !tok(bridge.tokenOut, DST.chainId, DST.usdc)) fail('ACROSS_ROUTE_UNSUPPORTED');
-  if (addr(allowance.spender, 'ACROSS_ROUTE_UNSUPPORTED') !== SRC.spokePool || addr(allowance.token, 'ACROSS_ROUTE_UNSUPPORTED') !== SRC.usdc) fail('ACROSS_SPENDER_UNEXPECTED');
+      !tok(q.inputToken, SRC.chainId, SRC.token) || !tok(q.outputToken, DST.chainId, DST.token) || !tok(q.refundToken, SRC.chainId, SRC.token) ||
+      !tok(bridge.tokenIn, SRC.chainId, SRC.token) || !tok(bridge.tokenOut, DST.chainId, DST.token)) fail('ACROSS_ROUTE_UNSUPPORTED');
+  if (addr(allowance.spender, 'ACROSS_ROUTE_UNSUPPORTED') !== SRC.spokePool || addr(allowance.token, 'ACROSS_ROUTE_UNSUPPORTED') !== SRC.token) fail('ACROSS_SPENDER_UNEXPECTED');
   if (tx.chainId !== SRC.chainId || addr(tx.to, 'ACROSS_TRANSACTION_UNSUPPORTED') !== SRC.spokePool || (tx.value != null && tx.value !== '0' && tx.value !== '0x0') ||
       (tx.ecosystem !== undefined && tx.ecosystem !== 'evm')) fail('ACROSS_TRANSACTION_UNSUPPORTED');
   const data = typeof tx.data === 'string' ? tx.data.toLowerCase() : fail('ACROSS_TRANSACTION_UNSUPPORTED'), call = decodeAcrossDeposit(data);
-  if (call.depositor !== owner || call.recipient !== recipient || call.inputToken !== SRC.usdc || call.outputToken !== DST.usdc || call.inputAmount !== BigInt(request.amount) ||
+  if (call.depositor !== owner || call.recipient !== recipient || call.inputToken !== SRC.token || call.outputToken !== DST.token || call.inputAmount !== BigInt(request.amount) ||
       call.destinationChainId !== BigInt(DST.chainId) || call.message !== '0x') fail('ACROSS_CALLDATA_MISMATCH');
   const output = call.outputAmount.toString();
   if (units(q.minOutputAmount, 'ACROSS_ROUTE_UNSUPPORTED') !== output || units(q.expectedOutputAmount, 'ACROSS_ROUTE_UNSUPPORTED') !== output ||
       units(bridge.outputAmount, 'ACROSS_ROUTE_UNSUPPORTED') !== output) fail('ACROSS_OUTPUT_MISMATCH');
   const fees = rec(bridge.fees, 'ACROSS_FEES_INVALID'), details = rec(fees.details, 'ACROSS_FEES_INVALID'), feeToken = rec(fees.token, 'ACROSS_FEES_INVALID');
-  if (feeToken.chainId !== SRC.chainId || addr(feeToken.address, 'ACROSS_FEES_INVALID') !== SRC.usdc) fail('ACROSS_FEE_ASSET_UNSUPPORTED');
+  if (feeToken.chainId !== SRC.chainId || addr(feeToken.address, 'ACROSS_FEES_INVALID') !== SRC.token) fail('ACROSS_FEE_ASSET_UNSUPPORTED');
   const part = (key: string, kind: RouteFee['kind'], label: string): RouteFee[] => {
     const v = details[key]; if (v === undefined) return [];
     const amount = typeof v === 'object' && v !== null ? units((v as Record<string, unknown>).amount, 'ACROSS_FEES_INVALID') : units(v, 'ACROSS_FEES_INVALID');
-    return amount === '0' ? [] : [{ kind, label, chainId: SRC.chain, token: SRC.usdc, amount, recipient: null }];
+    return amount === '0' ? [] : [{ kind, label, chainId: SRC.chain, token: SRC.token, amount, recipient: null }];
   };
   const lines = [...part('relayerCapital', 'BRIDGE_RELAYER_CAPITAL', 'Across relayer capital fee'), ...part('destinationGas', 'BRIDGE_DESTINATION_GAS', 'Across destination gas fee'),
-    ...part('lp', 'BRIDGE_LP', 'Across LP fee')];
+    ...part('lp', 'BRIDGE_LP', 'Across LP fee'),
+    // BUILD-RH-002: a cross-asset route (USDC → USDG) itemizes Across's own stablecoin conversion; it is shown, never folded into another line.
+    ...SRC.symbol !== DST.symbol ? part('internalizedSwap', 'BRIDGE_OTHER', `Across ${SRC.symbol} → ${DST.symbol} conversion fee`) : []];
   const feeTotal = (BigInt(request.amount) - call.outputAmount).toString();
   if (units(fees.amount, 'ACROSS_FEES_INVALID') !== feeTotal || lines.reduce((sum, f) => sum + BigInt(f.amount), 0n) !== BigInt(feeTotal)) fail('ACROSS_FEES_INCONSISTENT');
   const quoteExpiry = typeof q.quoteExpiryTimestamp === 'number' && Number.isSafeInteger(q.quoteExpiryTimestamp) ? q.quoteExpiryTimestamp : fail('ACROSS_ROUTE_UNSUPPORTED');
@@ -189,18 +192,18 @@ export function normalizeAcrossRoute(raw: unknown, request: RouteRequest, profil
   const duration = typeof q.expectedFillTime === 'number' && Number.isFinite(q.expectedFillTime) ? Math.max(0, Math.round(q.expectedFillTime)) : 0;
   return canonicalizeRoute({ format: 'flofi.route.v1', sourceChain: SRC.chain, destinationChain: DST.chain, inputToken: token('source', profile), outputToken: token('destination', profile),
     inputAmount: request.amount, expectedOutput: output, minimumOutput: output, recipient, depositor: owner, refundAddress: owner, routingProvider: 'across',
-    underlyingProtocol: 'across', steps: [{ kind: 'BRIDGE', protocol: 'across', fromChain: SRC.chain, toChain: DST.chain, fromToken: SRC.usdc, toToken: DST.usdc,
+    underlyingProtocol: 'across', steps: [{ kind: 'BRIDGE', protocol: 'across', fromChain: SRC.chain, toChain: DST.chain, fromToken: SRC.token, toToken: DST.token,
       amountIn: request.amount, amountOut: output }],
-    fees: lines, feeTotal, slippageBps: request.slippageBps, approval: { token: SRC.usdc, spender: SRC.spokePool, amount: request.amount },
+    fees: lines, feeTotal, slippageBps: request.slippageBps, approval: { token: SRC.token, spender: SRC.spokePool, amount: request.amount },
     deposit: { purpose: 'BRIDGE_DEPOSIT', chainId: SRC.chain, to: SRC.spokePool, data, value: '0x0' },
-    bridge: { protocol: 'across', originSpokePool: SRC.spokePool, destinationSpokePool: DST.spokePool, depositor: owner, recipient, inputToken: SRC.usdc, outputToken: DST.usdc,
+    bridge: { protocol: 'across', originSpokePool: SRC.spokePool, destinationSpokePool: DST.spokePool, depositor: owner, recipient, inputToken: SRC.token, outputToken: DST.token,
       inputAmount: request.amount, outputAmount: output, destinationChainId: DST.chainId, exclusiveRelayer: call.exclusiveRelayer, quoteTimestamp: call.quoteTimestamp,
       fillDeadline: call.fillDeadline, exclusivityParameter: call.exclusivityParameter, message: '0x' },
     quote: { id: quoteId, rawHash: rawHash(raw), quotedAt: iso(request.nowMs), expiresAt: iso(expiresMs), estimatedDurationSeconds: duration, providerGasEstimate: null } });
 }
 export function acrossQuoteUrl(request: RouteRequest, integratorId?: string, api?: string, profile: RouterProfile = MAINNET): string {
   const SRC = profile.source, DST = profile.destination;
-  const params = new URLSearchParams({ tradeType: 'exactInput', strictTradeType: 'true', amount: request.amount, inputToken: SRC.usdc, outputToken: DST.usdc,
+  const params = new URLSearchParams({ tradeType: 'exactInput', strictTradeType: 'true', amount: request.amount, inputToken: SRC.token, outputToken: DST.token,
     originChainId: String(SRC.chainId), destinationChainId: String(DST.chainId), depositor: request.owner, recipient: request.recipient, refundAddress: request.owner,
     refundOnOrigin: 'true', slippage: String(request.slippageBps / 10_000), ...integratorId ? { integratorId } : {} });
   return `${api ?? profile.providers.across.api}/swap/approval?${params}`;

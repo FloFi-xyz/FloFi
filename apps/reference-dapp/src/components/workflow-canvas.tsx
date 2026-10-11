@@ -19,7 +19,7 @@ import { directions, inputSymbol, outputSymbol, formatHumanAmount, swapDetails, 
 import { solanaSwapDetails, solanaSwapLabels } from '../domain/jupiter-authoring';
 import { solanaLiquidityDetails } from '../domain/solana-liquidity-authoring';
 import { uniswapLiquidityDetails } from '../domain/uniswap-liquidity-authoring';
-import { routerDetails, routerNetworkOfInput, ROUTER_NETWORK_OPTIONS, ROUTER_ROUTING_LABEL } from '../domain/router-authoring';
+import { routerChainChoices, routerDetails, routerNetworkOfInput, routerTokensOf, ROUTER_NETWORK_OPTIONS, ROUTER_ROUTING_LABEL } from '../domain/router-authoring';
 import { useWorkflow } from '../state/workflow-store';
 import { editorReducer } from '../domain/editor';
 import { CANVAS_ACTIONS, canvasAddCommand, type CanvasAction } from '../domain/canvas-authoring';
@@ -29,7 +29,7 @@ import { DarkSpotlight } from './dark-spotlight';
 import { CANVAS_GESTURES, CanvasNavigator } from './canvas-navigator';
 import { WorkflowEditReview } from './workflow-edit-review';
 import { ComposerCard, supplyReviewFormId, poolReviewFormId, poolProposalTarget, type ComposerCardData } from './composer-card';
-import { canEditCanvasAmount, setupSummary, bridgeSetupNetworks, type CanvasBridgeNetworks } from '../domain/canvas-action-setup';
+import { canEditCanvasAmount, setupSummary, bridgePairLabel, bridgeSetupNetworks, type CanvasBridgeNetworks } from '../domain/canvas-action-setup';
 import { ActionIcon } from './action-icon';
 import { ROBINHOOD_NETWORK } from '../domain/asset-catalogs';
 import { useNetworkCatalog } from '../state/asset-catalog-store';
@@ -370,6 +370,9 @@ function BuildCanvas({ environment, selectedId, select, openSettings, workflowNa
     if (environment !== 'mainnet' && environment !== 'testnet') return;
     const option = ROUTER_NETWORK_OPTIONS[environment];
     const alignNetworks = (id: string, current: CanvasBridgeNetworks) => {
+      // BUILD-RH-002: any route of the wallet's environment stays (mainnet: Base → Arbitrum One and the Robinhood Chain routes).
+      const network = routerNetworkOfInput(current);
+      if (network && ROUTER_NETWORK_OPTIONS[network].environment === environment) return;
       const patch: Partial<CanvasBridgeNetworks> = {
         ...(current.source !== option.source ? { source: option.source } : {}),
         ...(current.destination !== option.destination ? { destination: option.destination } : {}),
@@ -401,17 +404,28 @@ function BuildCanvas({ environment, selectedId, select, openSettings, workflowNa
       amount: `${summary.amount.split(' ')[0]} ${selection.from}`, detail: selection.action === 'swap' ? `${selection.from} → ${selection.to}` : summary.detail,
       ...(summary.liquidityValues ? { liquidityValues: summary.liquidityValues.map((value, index) => ({ ...value, token: index ? selection.to! : selection.from })) } : {}),
     };
+    // BUILD-RH-002: an environment may offer several routes (mainnet: Base → Arbitrum One, Base/Arbitrum ⇄ Robinhood Chain); the destination
+    // list follows the chosen source, and choosing a source keeps the destination only when it still forms a supported pair.
     const bridgeSelection = (id: string, networks: CanvasBridgeNetworks) => {
       const network = environment === 'mainnet' || environment === 'testnet' ? environment : null;
-      const option = network ? ROUTER_NETWORK_OPTIONS[network] : null;
+      const choices = network ? routerChainChoices(network, networks.source) : null;
+      const routed = routerNetworkOfInput(networks);
       return {
-        source: option ? [option.source] : [], destination: option ? [option.destination] : [],
-        valid: network !== null && routerNetworkOfInput(networks) === network,
+        source: choices?.sources ?? [], destination: choices?.destinations ?? [],
+        valid: network !== null && routed !== null && ROUTER_NETWORK_OPTIONS[routed].environment === network,
         // Solana has swap/liquidity support, but no canonical Bridge pair yet.
         unavailable: [network === 'testnet' ? ORCA_WHIRLPOOLS_DEVNET.network : JUPITER_SOLANA_MAINNET.network],
         onSelect: (side: 'source' | 'destination', selected: string) => {
-          if (option && side === 'source' && selected === option.source) editBridgeNetworks(id, { source: option.source });
-          if (option && side === 'destination' && selected === option.destination) editBridgeNetworks(id, { destination: option.destination });
+          if (!network) return;
+          if (side === 'source') {
+            const source = routerChainChoices(network).sources.find(candidate => candidate === selected);
+            if (!source) return;
+            const destinations = routerChainChoices(network, source).destinations;
+            editBridgeNetworks(id, { source, ...destinations.includes(networks.destination) ? {} : { destination: destinations[0]! } });
+          } else {
+            const destination = choices!.destinations.find(candidate => candidate === selected);
+            if (destination) editBridgeNetworks(id, { destination });
+          }
         },
       };
     };
@@ -428,7 +442,9 @@ function BuildCanvas({ environment, selectedId, select, openSettings, workflowNa
       ...(cryptoSelectionOf(node) ? { actionSelection: actionSelection(node.nodeId, cryptoSelections[node.nodeId] ?? cryptoSelectionOf(node)!, canSelectCryptoAssets(node, workflow)) } : {}),
       ...(composerSummary(workflow, node, context).action === 'Stocks' && (cryptoSelections[node.nodeId] ?? cryptoSelectionOf(node)) ? { stocks: stocksData(node.nodeId, cryptoSelections[node.nodeId] ?? cryptoSelectionOf(node)!, canSelectCryptoAssets(node, workflow)) } : {}),
       ...(routerDetails(node) ? {
-        summary: { ...composerSummary(workflow, node, context), chain: `${(bridgeNetworkInputs[node.nodeId] ?? routerDetails(node)!).source} → ${(bridgeNetworkInputs[node.nodeId] ?? routerDetails(node)!).destination}` },
+        summary: { ...composerSummary(workflow, node, context), chain: `${(bridgeNetworkInputs[node.nodeId] ?? routerDetails(node)!).source} → ${(bridgeNetworkInputs[node.nodeId] ?? routerDetails(node)!).destination}`,
+          bridgePair: bridgePairLabel(bridgeNetworkInputs[node.nodeId] ?? routerDetails(node)!),
+          amount: `${composerSummary(workflow, node, context).amount.split(' ')[0]} ${routerTokensOf(bridgeNetworkInputs[node.nodeId] ?? routerDetails(node)!)?.token ?? routerDetails(node)!.token}` },
         ...(canEditCanvasAmount(node, context, workflow) ? { networkSelection: bridgeSelection(node.nodeId, bridgeNetworkInputs[node.nodeId] ?? routerDetails(node)!) } : {}),
       } : {}),
       ...(composerSummary(workflow, node, context).action === 'Pool / Liquidity' ? { poolProposal: {

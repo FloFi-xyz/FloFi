@@ -67,7 +67,7 @@ describe('BUILD-ROUTER-001 Quote → Simulation → Review → route-bound Manif
       notSimulated: ['DESTINATION_FILL', 'RELAYER_BEHAVIOUR', 'ORIGIN_REFUND'], ownerDebit: '10000000' });
     expect(r.simulation.deposit).toMatchObject({ recipient: ROUTER_OWNER, depositor: ROUTER_OWNER, outputAmount: r.route.minimumOutput, destinationChainId: 42161 });
     expect(r.observation.provenance).toBe('CHAIN_OBSERVATION');
-    expect(r.approvals).toEqual([{ token: SRC.usdc, spender: SRC.lifiDiamond, amount: '10000000', currentAllowance: '0', required: true }]);
+    expect(r.approvals).toEqual([{ token: SRC.token, spender: SRC.lifiDiamond, amount: '10000000', currentAllowance: '0', required: true }]);
     expect(decodeRouterApprove(r.calls[0]!.data)).toEqual({ spender: SRC.lifiDiamond, amount: 10_000_000n });
     expect(r.calls.map(c => c.purpose)).toEqual(['APPROVAL', 'BRIDGE_DEPOSIT']);
     expect(Number(r.fees.gasLimitTotal)).toBeGreaterThan(0);

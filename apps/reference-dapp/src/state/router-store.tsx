@@ -20,7 +20,12 @@ import type { WalletSession } from '../server/wallet-session';
  * can recover them. When the connected account changes, an unused authorization of the previous account is cleared and
  * that session ends: another wallet never sees, authorizes or resumes the run.
  */
-const KEY: Readonly<Record<RouterNetwork, string>> = { mainnet: 'flofi:crosschain-router:run', testnet: 'flofi:crosschain-router-testnet:run' };
+const KEY: Readonly<Record<RouterNetwork, string>> = { mainnet: 'flofi:crosschain-router:run', testnet: 'flofi:crosschain-router-testnet:run',
+  'base-to-robinhood': 'flofi:crosschain-router-base-to-robinhood:run', 'robinhood-to-base': 'flofi:crosschain-router-robinhood-to-base:run',
+  'arbitrum-to-robinhood': 'flofi:crosschain-router-arbitrum-to-robinhood:run', 'robinhood-to-arbitrum': 'flofi:crosschain-router-robinhood-to-arbitrum:run' };
+const NETWORKS = Object.keys(KEY) as RouterNetwork[];
+/** Resume order: the testnet journey first (as before BUILD-RH-002), then the real-funds routes. */
+const RESUME: readonly RouterNetwork[] = ['testnet', ...NETWORKS.filter(n => n !== 'testnet')];
 const REFUSALS = [4001, 4100, 4200];
 const ACTIVE = ['PREPARED', 'SUBMITTING', 'SUBMISSION_RESULT_UNKNOWN', 'PENDING'];
 type Pointer = { id: string; owner?: string; hash?: string };
@@ -42,9 +47,10 @@ function errorValue(value: unknown): unknown {
 }
 const unwrap = <T,>(result: { ok: true; value: T } | { ok: false; code: string }): T => { if (!result.ok) throw new Error(result.code); return result.value; };
 const utf8Hex = (text: string) => '0x' + Array.from(new TextEncoder().encode(text), b => b.toString(16).padStart(2, '0')).join('');
-/** The network a stored run belongs to (its reviewed source chain). */
+/** The network a stored run belongs to (its reviewed source and destination chains). */
 const networkOfRecord = (record: RouterRecord): RouterNetwork =>
-  record.review.intent.sourceChain === ROUTER_NETWORK_OPTIONS.testnet.pair.source.chainId ? 'testnet' : 'mainnet';
+  NETWORKS.find(n => ROUTER_NETWORK_OPTIONS[n].pair.source.chainId === record.review.intent.sourceChain &&
+    ROUTER_NETWORK_OPTIONS[n].pair.destination.chainId === record.review.intent.destinationChain) ?? 'mainnet';
 function readPointer(network: RouterNetwork): Pointer | null {
   try {
     const value = JSON.parse(window.localStorage.getItem(KEY[network]) ?? 'null') as Pointer | null;
@@ -56,7 +62,7 @@ export function RouterProvider({ children }: { children: ReactNode }) {
   const { state } = useWorkflow(), wallet = useBuild009Wallet();
   const [record, setRecord] = useState<RouterRecord | null>(null), [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null);
   const [signing, setSigning] = useState(false), [executionEnabled, setExecutionEnabled] = useState(false);
-  const [availability, setAvailability] = useState<Record<RouterNetwork, boolean>>({ mainnet: false, testnet: false });
+  const [availability, setAvailability] = useState<Record<RouterNetwork, boolean>>(() => Object.fromEntries(NETWORKS.map(n => [n, false])) as Record<RouterNetwork, boolean>);
   const [recovered, setRecovered] = useState(false), [session, setSession] = useState<WalletSession | null>(null), [sessionReady, setSessionReady] = useState(false);
   const [runs, setRuns] = useState<readonly RouterRunSummary[]>([]), [notice, setNotice] = useState<string | null>(null);
   const workflow = state.workflow as unknown as SemanticWorkflow;
@@ -84,7 +90,7 @@ export function RouterProvider({ children }: { children: ReactNode }) {
   }
   /** Resumes a stored pointer of the signed-in wallet: a hash saved before the browser closed reaches the server first (never a wallet). */
   async function resume(current: WalletSession) {
-    for (const net of ['testnet', 'mainnet'] as const) {
+    for (const net of RESUME) {
       const pointer = readPointer(net);
       if (!pointer || pointer.owner !== current.account) continue;
       if (typeof pointer.hash === 'string' && /^0x[0-9a-f]{64}$/.test(pointer.hash)) await routerReport(net, pointer.id, { kind: 'HASH', hash: pointer.hash }).catch(() => undefined);
@@ -98,7 +104,7 @@ export function RouterProvider({ children }: { children: ReactNode }) {
    */
   async function endStaleSession(stale: WalletSession, open: RouterRecord | null) {
     let target = open && open.owner === stale.account ? open : null;
-    for (const net of ['testnet', 'mainnet'] as const) {
+    for (const net of RESUME) {
       if (target) break;
       const pointer = readPointer(net);
       if (pointer?.owner !== stale.account) continue;
@@ -113,7 +119,7 @@ export function RouterProvider({ children }: { children: ReactNode }) {
   }
   useEffect(() => {
     let mounted = true;
-    for (const net of ['mainnet', 'testnet'] as const)
+    for (const net of NETWORKS)
       crossChainRouterMode(net).then(mode => { if (mounted) setAvailability(value => ({ ...value, [net]: mode !== 'off' })); }).catch(() => undefined);
     walletSessionStatus().then(async current => {
       if (!mounted) return;

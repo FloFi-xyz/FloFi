@@ -5,8 +5,8 @@ import { CROSSCHAIN_ROUTER_BASE_ARBITRUM as profile, CROSSCHAIN_ROUTER_BASE_SEPO
   routerProfileFor } from '../src/crosschain-router.js';
 import { executionCapabilityRegistry, resolveNodeCapability, resolveWorkflowCapability } from '../src/execution-capabilities.js';
 
-const node = createRouterBridgeNode('node-002', { sourceChain: 'eip155:8453', destinationChain: 'eip155:42161', inputToken: profile.source.usdc,
-  outputToken: profile.destination.usdc, amount: '1000000', recipient: 'CONNECTED_OWNER', slippageBps: 50, providers: ['lifi', 'across'] });
+const node = createRouterBridgeNode('node-002', { sourceChain: 'eip155:8453', destinationChain: 'eip155:42161', inputToken: profile.source.token,
+  outputToken: profile.destination.token, amount: '1000000', recipient: 'CONNECTED_OWNER', slippageBps: 50, providers: ['lifi', 'across'] });
 
 describe('BUILD-ROUTER-001 router capability', () => {
   it('declares one owner-wallet MAINNET row with no evidence ceiling until an owner run reconciles', () => {
@@ -29,15 +29,15 @@ describe('BUILD-ROUTER-001 router capability', () => {
       .map(row => [row.adapterId, row.environment, row.evidenceMaturity])).toEqual([['lifi.rest', 'MOCK', 'MOCKED'], ['across.direct', 'MOCK', 'MOCKED']]);
   });
   it('profile matches the canonical pair and pins every contract it touches', () => {
-    expect(ROUTER_PAIRS[0]!.source.address).toBe(profile.source.usdc);
-    expect(ROUTER_PAIRS[0]!.destination.address).toBe(profile.destination.usdc);
+    expect(ROUTER_PAIRS[0]!.source.address).toBe(profile.source.token);
+    expect(ROUTER_PAIRS[0]!.destination.address).toBe(profile.destination.token);
     expect(Object.values(profile.codeSha256).every(v => /^[0-9a-f]{64}$/.test(v))).toBe(true);
     for (const value of [profile.source.spokePool, profile.source.lifiDiamond, profile.source.lifiFeeForwarder, profile.destination.spokePool])
       expect(value).toMatch(/^0x[0-9a-f]{40}$/);
   });
   it('BUILD-JOURNEY-001: one PUBLIC_TESTNET row for Base Sepolia → Arbitrum Sepolia, no evidence ceiling, never on mainnet', () => {
-    const testnetNode = createRouterBridgeNode('node-002', { sourceChain: 'eip155:84532', destinationChain: 'eip155:421614', inputToken: testnet.source.usdc,
-      outputToken: testnet.destination.usdc, amount: '1000000', recipient: 'CONNECTED_OWNER', slippageBps: 50, providers: ['lifi', 'across'] });
+    const testnetNode = createRouterBridgeNode('node-002', { sourceChain: 'eip155:84532', destinationChain: 'eip155:421614', inputToken: testnet.source.token,
+      outputToken: testnet.destination.token, amount: '1000000', recipient: 'CONNECTED_OWNER', slippageBps: 50, providers: ['lifi', 'across'] });
     const rows = executionCapabilityRegistry.filter(row => row.adapterId === 'flofi.router' && row.chainId === 'eip155:84532');
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ actionType: 'asset.bridge', environment: 'PUBLIC_TESTNET', evidenceMaturity: null, authorizationModes: ['A'] });
@@ -50,11 +50,11 @@ describe('BUILD-ROUTER-001 router capability', () => {
     for (const pair of ROUTER_PAIRS) {
       const p = routerProfileFor(pair.source.chainId, pair.destination.chainId)!;
       expect(p.id).toBe(pair.id);
-      expect([p.source.usdc, p.destination.usdc]).toEqual([pair.source.address, pair.destination.address]);
+      expect([p.source.token, p.destination.token]).toEqual([pair.source.address, pair.destination.address]);
       expect(p.source.chainHex).toBe('0x' + p.source.chainId.toString(16));
       expect(p.destination.chainHex).toBe('0x' + p.destination.chainId.toString(16));
       expect(Object.values(p.codeSha256).every(v => /^[0-9a-f]{64}$/.test(v))).toBe(true);
-      for (const value of [p.source.usdc, p.source.spokePool, p.source.lifiDiamond, p.source.lifiFeeForwarder, p.destination.usdc, p.destination.spokePool])
+      for (const value of [p.source.token, p.source.spokePool, p.source.lifiDiamond, p.source.lifiFeeForwarder, p.destination.token, p.destination.spokePool])
         expect(value).toMatch(/^0x[0-9a-f]{40}$/);
     }
     expect(testnet).toMatchObject({ network: 'TESTNET', environment: 'PUBLIC_TESTNET', source: { chainId: 84532 }, destination: { chainId: 421614 } });
