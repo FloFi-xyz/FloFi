@@ -109,7 +109,7 @@ Profile registries (Uniswap, Aave, Router, transfer) ┘                        
   - `add liquidity 100 USDC and 0.04 WETH on Base fee 0.05%`
   - `supply 100 USDC to Aave on Base`
   - `bridge 100 USDC from Arbitrum to Base`
-  
+
   Existing sentences keep their commands and IR.
 - **MCP and channels.** `base` for swap (catalog symbols), transfer, `add_liquidity` and lending; `arbitrum-one → base` for bridges. Each Base
   example composes byte-identically to its chat sentence. Channels load the named catalogs through the read-only `authoring-catalogs`
