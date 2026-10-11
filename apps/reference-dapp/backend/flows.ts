@@ -16,7 +16,8 @@ import type { Projection, Projector, WorkRequest } from '@defi-workflow-engine/c
 import { createRobinhoodTransferService, type TransferRecord, type TransferWalletDiagnostic } from '../src/server/robinhood-transfer-service.ts';
 import { createSupplyService, type SupplyRecord, type SupplyWalletDiagnostic } from '../src/server/supply-service.ts';
 import { createDurablePublicTestnetService, type PublicRun } from '../src/server/public-testnet-service.ts';
-import { JUPITER_SOLANA_MAINNET, ORCA_WHIRLPOOLS_DEVNET, ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY } from '@defi-workflow-engine/action-registry';
+import { JUPITER_SOLANA_MAINNET, ORCA_WHIRLPOOLS_DEVNET, ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY, type AssetCatalog } from '@defi-workflow-engine/action-registry';
+import { robinhoodCatalogFor, robinhoodMainnetMode, robinhoodMainnetRpc, robinhoodSwapRuntime } from '../src/server/robinhood-mainnet.ts';
 import type { JupiterHttp } from '@defi-workflow-engine/reference-compiler';
 import { nativeTransferReadRpcs } from '../src/server/robinhood-rpc.ts';
 import { createLendingReadRpcs } from '../src/server/supply-rpc.ts';
@@ -42,14 +43,16 @@ import { paymentMode, paymentRuntime } from '../src/server/payment-runtime.ts';
 import { MAX_LOG_BYTES } from '@defi-workflow-engine/cloud-runtime';
 
 export type FlowName = 'robinhood-transfer' | 'aave-supply' | 'base-sepolia-swap' | 'solana-devnet-swap' | 'orca-liquidity' | 'jupiter-swap' | 'uniswap-liquidity' | 'crosschain-router'
-  | 'crosschain-router-testnet' | 'lending-composition' | 'pix-payment';
+  | 'crosschain-router-testnet' | 'lending-composition' | 'pix-payment' | 'robinhood-swap';
 export type Rpc = (method: string, params: readonly unknown[]) => Promise<unknown>;
 /** Network transport for one flow. Built from configuration in production; replaced by MOCKED chains in tests. */
 export type FlowDeps = { readonly rpc: Rpc; readonly mode: 'live' | 'harness'; readonly env: Readonly<Record<string, string | undefined>>; readonly http?: JupiterHttp;
   /** BUILD-ROUTER-001: the destination chain and the routing providers (the source chain is `rpc`). */
   readonly router?: { readonly destinationRpc: Rpc; readonly providers: Readonly<Record<RoutingProvider, RouteProvider>> };
   /** BUILD-ETHEREUM-001: further chain-bound read clients of a multi-network flow, keyed by CAIP-2 chain (`rpc` is its original network). */
-  readonly chains?: { readonly rpcs: Readonly<Record<string, Rpc>> } };
+  readonly chains?: { readonly rpcs: Readonly<Record<string, Rpc>> };
+  /** BUILD-RH-002: the official asset catalog of a catalog network (fails closed when the registry is unavailable or malformed). */
+  readonly catalog?: (chain: string) => Promise<AssetCatalog> };
 export type FlowMode = 'live' | 'harness' | 'off';
 type Args = readonly unknown[];
 export type FlowService = { readonly call: (method: string, args: Args) => Promise<unknown>; readonly load: (runId: string) => Promise<unknown>;
@@ -280,6 +283,51 @@ const swap: FlowDefinition = {
         preparedAtBlock: a.preBlock, reconciled: a.state === 'CONFIRMED' && (a.step === 'approval' || run.outcome !== null) })),
       journal: [] },
     work: work('base-sepolia-swap', run.quote.executionId, observe, 5_000, evidence !== null) };
+  },
+  evidence: run => swapEvidence(run),
+};
+
+/**
+ * BUILD-RH-002: Robinhood Chain mainnet (real funds) catalog swaps on the same durable swap service, in their own `rhs-`
+ * namespace. `begin` additionally needs the deployment's real-funds owner-execution opt-in; the owner's wallet still signs
+ * and sends. Workers only read receipts of attempts that already carry the owner's transaction hash.
+ */
+const RH_SWAP_ID = /^rhs-[0-9a-f]{24}$/;
+const robinhoodSwap: FlowDefinition = {
+  name: 'robinhood-swap', busyCode: 'EXECUTION_BUSY', runId: RH_SWAP_ID, unavailableCode: 'PUBLIC_INTERNAL_ERROR',
+  methods: {
+    prepare: { mutates: true, validate: shape(workflow) },
+    refresh: { mutates: true, validate: shape(id(RH_SWAP_ID)) },
+    review: { mutates: true, validate: shape(id(RH_SWAP_ID), commitment) },
+    begin: { mutates: true, validate: shape(id(RH_SWAP_ID), account) },
+    report: { mutates: true, validate: shape(id(RH_SWAP_ID), v => typeof v === 'string' && /^rhs-[0-9a-f]{24}\.(approval|swap)\.[1-8]$/.test(v), swapResult) },
+    observe: { mutates: true, validate: shape(id(RH_SWAP_ID)) },
+    status: { mutates: false, validate: shape(id(RH_SWAP_ID)) },
+  },
+  transport: (mode, env) => ({ rpc: robinhoodMainnetRpc(mode, env), catalog: robinhoodCatalogFor(mode) }),
+  create(storage, { rpc, mode, env, catalog }) {
+    const s = createDurablePublicTestnetService({ storage, rpc: networkNotEnabled('PUBLIC_NETWORK_UNAVAILABLE'), rpcs: { 'eip155:4663': rpc }, idPrefix: 'rhs',
+      catalog: robinhoodSwapRuntime(mode, env, catalog ?? (async () => { throw new Error('STOCK_REGISTRY_UNAVAILABLE'); })) });
+    const table: Record<string, (args: Args) => Promise<unknown>> = {
+      prepare: ([w]) => s.prepare(w as SemanticWorkflow), refresh: ([i]) => s.refresh(i as string), review: ([i, h]) => s.review(i as string, h as string),
+      begin: ([i, a]) => s.begin(i as string, a as string),
+      report: ([i, attempt, r]) => s.report(i as string, attempt as string, r as Parameters<typeof s.report>[2]),
+      observe: ([i]) => s.observe(i as string), status: ([i]) => s.load(i as string),
+    };
+    return { call: (method, args) => table[method]!(args), load: runId => s.load(runId), observe: runId => s.observe(runId) };
+  },
+  needsObservation: swapNeedsObservation,
+  projector(name, bytes): Projection | null {
+    if (!name.endsWith('.jsonl')) return null;
+    const run = lastRecord<PublicRun>(bytes), observe = swapNeedsObservation(run), evidence = swapEvidence(run), last = run.attempts.at(-1);
+    return { run: { runId: run.quote.executionId, workflowId: run.workflow.workflowId, flow: 'robinhood-swap',
+      status: run.outcome ? 'RECONCILED' : last ? last.state : run.reviewedManifestHash ? 'AUTHORIZED' : 'SIMULATED',
+      provenance: run.quote.provenance === 'MOCKED' ? 'MOCKED' : 'PUBLIC_MAINNET', ownerAccount: last?.account ?? null, recoveryOf: null, errorCode: null,
+      needsObservation: observe, hasEvidence: evidence !== null,
+      attempts: run.attempts.map(a => ({ attemptId: a.attemptId, step: a.step.toUpperCase(), state: a.state, nonce: null, transactionHash: a.txHash,
+        preparedAtBlock: a.preBlock, reconciled: a.state === 'CONFIRMED' && (a.step === 'approval' || run.outcome !== null) })),
+      journal: [] },
+    work: work('robinhood-swap', run.quote.executionId, observe, 5_000, evidence !== null) };
   },
   evidence: run => swapEvidence(run),
 };
@@ -673,7 +721,7 @@ const pixPayment: FlowDefinition = {
 export const FLOWS: Readonly<Record<FlowName, FlowDefinition>> = Object.freeze({ 'robinhood-transfer': robinhood, 'aave-supply': supply, 'base-sepolia-swap': swap,
   'solana-devnet-swap': solanaDevnetSwap, 'orca-liquidity': orcaLiquidity, 'jupiter-swap': jupiterSwap, 'uniswap-liquidity': uniswapLiquidity,
   'crosschain-router': crosschainRouter, 'crosschain-router-testnet': crosschainRouterTestnet, 'lending-composition': lendingComposition,
-  'pix-payment': pixPayment });
+  'pix-payment': pixPayment, 'robinhood-swap': robinhoodSwap });
 export const isFlowName = (value: string): value is FlowName => Object.hasOwn(FLOWS, value);
 
 /**
@@ -706,6 +754,9 @@ function configuredFlowMode(flow: FlowName, env: Readonly<Record<string, string 
   if (flow === 'lending-composition') return env.GRYLOO_LENDING_HARNESS === 'MOCKED_LOOPBACK_ONLY' ? 'harness' : env.GRYLOO_SUPPLY_TESTNET === 'live' ? 'live' : 'off';
   // Stablecoin → Pix: `GRYLOO_PAYMENT=live`; begin additionally needs the provider's production environment and the owner-execution opt-in.
   if (flow === 'pix-payment') return paymentMode(env);
+  // BUILD-RH-002 Robinhood Chain mainnet: `GRYLOO_ROBINHOOD_MAINNET=live` enables the catalog, quotes, simulation and Review;
+  // owner execution additionally needs GRYLOO_ROBINHOOD_OWNER_EXECUTION. The MOCKED loopback harness wins.
+  if (flow === 'robinhood-swap') return robinhoodMainnetMode(env);
   if (flow === 'robinhood-transfer') {
     if (env.GRYLOO_ROBINHOOD_HARNESS === 'MOCKED_LOOPBACK_ONLY') return 'harness';
     return env.GRYLOO_ROBINHOOD_TESTNET === 'live' || env.GRYLOO_ETHEREUM_SEPOLIA_TRANSFER === 'live' ? 'live' : 'off';
@@ -717,5 +768,5 @@ const DISABLED: Readonly<Record<FlowName, string>> = { 'robinhood-transfer': 'TR
   'base-sepolia-swap': 'PUBLIC_RECORDING_OFF', 'solana-devnet-swap': 'DEVNET_SWAP_PUBLIC_DEVNET_NOT_ENABLED', 'orca-liquidity': 'ORCA_LIQUIDITY_PUBLIC_DEVNET_NOT_ENABLED',
   'jupiter-swap': 'JUPITER_PUBLIC_MAINNET_NOT_ENABLED', 'uniswap-liquidity': 'UNISWAP_LIQUIDITY_PUBLIC_TESTNET_NOT_ENABLED',
   'crosschain-router': 'ROUTER_NOT_ENABLED', 'crosschain-router-testnet': 'ROUTER_TESTNET_NOT_ENABLED', 'lending-composition': 'LENDING_PUBLIC_TESTNET_NOT_ENABLED',
-  'pix-payment': 'PAYMENT_NOT_ENABLED' };
+  'pix-payment': 'PAYMENT_NOT_ENABLED', 'robinhood-swap': 'ROBINHOOD_MAINNET_NOT_ENABLED' };
 export const disabledCode = (flow: FlowName) => DISABLED[flow];

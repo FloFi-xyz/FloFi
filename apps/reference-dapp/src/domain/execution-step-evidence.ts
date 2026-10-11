@@ -3,6 +3,7 @@
 import type { ExecutionJournal } from '@defi-workflow-engine/workflow-contracts';
 import type { ExecutionLifecycle, ExecutionLifecycleSource, LifecycleStep } from './execution-lifecycle';
 import { simulationAmount } from './simulation-presentation';
+import { quoteDecimals } from './public-testnet-swap';
 
 export type EvidenceComparison = { label: string; planned: string; actual: string };
 export type ExecutionStepEvidence = {
@@ -61,10 +62,9 @@ export function projectExecutionStepEvidence(source: ExecutionLifecycleSource, p
     case 'public': {
       const run = source.state.run, outcome = run?.outcome;
       const reconciled = outcome?.evidence.outcome === 'RECONCILED';
-      const decimals = (symbol: 'USDC' | 'WETH') => symbol === 'USDC' ? 6 : 18;
       add('swap', reconciled, false, reconciled && run ? [
-        ...comparison('Input', run.quote.amountIn, outcome?.inputSpent, decimals(run.quote.inputSymbol), run.quote.inputSymbol),
-        ...comparison('Output', run.quote.expectedOut, outcome?.outputReceived, decimals(run.quote.outputSymbol), run.quote.outputSymbol),
+        ...comparison('Input', run.quote.amountIn, outcome?.inputSpent, quoteDecimals(run.quote, 'input'), run.quote.inputSymbol),
+        ...comparison('Output', run.quote.expectedOut, outcome?.outputReceived, quoteDecimals(run.quote, 'output'), run.quote.outputSymbol),
       ] : []);
       break;
     }

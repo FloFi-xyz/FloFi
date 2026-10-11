@@ -18,6 +18,7 @@ import { validateNativeTransferWorkflow } from './native-transfer.js';
 import { isSolanaSwapNode, validateSolanaSwapWorkflow } from './solana-swap.js';
 import { isConcentratedLiquidityNode, validateSolanaLiquidityWorkflow } from './solana-liquidity.js';
 import { isUniswapLiquidityNode, validateUniswapLiquidityWorkflow } from './uniswap-liquidity.js';
+import { isCatalogSwapNode, validateCatalogSwapWorkflow } from './catalog-swap.js';
 
 const schemaValidator = new Ajv({ strict: true, allErrors: true, coerceTypes: false, removeAdditional: false, useDefaults: false, ownProperties: true }).compile<SemanticWorkflow>(workflowSchema);
 const SWAP = 'asset.swap.exact-input';
@@ -105,6 +106,8 @@ export function validateAuthoringWorkflow(input: unknown, context: ReviewContext
   }
   if (workflow.nodes.some(node => ['supply','borrow','repay','withdraw'].includes(node.actionType))) validateSupplyWorkflow(workflow);
   if (workflow.nodes.some(node => node.actionType === 'asset.transfer')) { validateNativeTransferWorkflow(workflow); return workflow; }
+  // BUILD-RH-002: the canonical swap over a network's official asset catalog (Robinhood Chain Stock Tokens, USDG, WETH).
+  if (workflow.nodes.some(isCatalogSwapNode)) { validateCatalogSwapWorkflow(workflow); return workflow; }
   // The canonical swap on Solana: same action and ports, chain-specific asset and provider profile.
   if (workflow.nodes.some(isSolanaSwapNode)) { validateSolanaSwapWorkflow(workflow); return workflow; }
   // The canonical concentrated-liquidity action: Uniswap v3 on Base Sepolia (owner wallet) or Orca Whirlpools on Solana

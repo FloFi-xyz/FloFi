@@ -5,6 +5,7 @@ import { baseAssetRegistry } from '@defi-workflow-engine/action-registry';
 import { executionExplorer, type ExecutionLifecycle, type ExecutionLifecycleSource } from './execution-lifecycle';
 import type { EvidenceComparison } from './execution-step-evidence';
 import { simulationAmount } from './simulation-presentation';
+import { quoteDecimals } from './public-testnet-swap';
 import { shellChainLabel } from './product-shell';
 
 export type EvidenceIdentifier = { label: string; value: string; kind: 'transaction' | 'order' | 'reference'; chain?: string; explorer?: string | null; status?: string };
@@ -71,9 +72,8 @@ export function projectExecutionEvidence(source: ExecutionLifecycleSource, progr
       const actual = run.outcome;
       bundle(actual?.evidence, actual?.evidenceBundleHash);
       if (actual?.evidence.outcome === 'RECONCILED') {
-        const decimals = (symbol: 'USDC' | 'WETH') => symbol === 'USDC' ? 6 : 18;
-        amount('swap', 'Executed input', actual.inputSpent, decimals(run.quote.inputSymbol), run.quote.inputSymbol);
-        amount('swap', 'Actual received', actual.outputReceived, decimals(run.quote.outputSymbol), run.quote.outputSymbol);
+        amount('swap', 'Executed input', actual.inputSpent, quoteDecimals(run.quote, 'input'), run.quote.inputSymbol);
+        amount('swap', 'Actual received', actual.outputReceived, quoteDecimals(run.quote, 'output'), run.quote.outputSymbol);
         allowance(actual.allowanceAfter);
       } break;
     }

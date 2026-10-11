@@ -32,6 +32,8 @@ export type BackendOptions = {
   readonly router?: FlowDeps['router'];
   /** Test seam (BUILD-JOURNEY-001): per-flow MOCKED destination chains when both Router networks run in one test. */
   readonly routers?: Partial<Record<FlowName, FlowDeps['router']>>;
+  /** Test seam (BUILD-RH-002): the official asset catalog served from a committed fixture with `rpc[flow]`. */
+  readonly catalog?: FlowDeps['catalog'];
 };
 const CODE = /^[A-Z][A-Z0-9_]{2,80}$/;
 
@@ -45,7 +47,8 @@ export function createBackend(options: BackendOptions) {
     if (!transport) {
       const override = options.rpc?.[flow];
       const router = options.routers?.[flow] ?? options.router;
-      transport = override ? { rpc: override, ...options.http ? { http: options.http } : {}, ...router ? { router } : {} } : FLOWS[flow].transport(mode, env);
+      transport = override ? { rpc: override, ...options.http ? { http: options.http } : {}, ...router ? { router } : {},
+        ...options.catalog ? { catalog: options.catalog } : {} } : FLOWS[flow].transport(mode, env);
       transports.set(flow, transport);
     }
     const router = transport.router && readOnly ? { router: { ...transport.router, destinationRpc: observeOnly(transport.router.destinationRpc) } } : {};

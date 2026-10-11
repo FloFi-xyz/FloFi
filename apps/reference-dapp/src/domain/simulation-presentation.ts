@@ -17,6 +17,7 @@ import type { useLiquidity } from '../state/liquidity-store';
 import type { useAcross } from '../state/across-store';
 import type { Workflow } from './initial-workflow';
 import { composerActions, composerSummary } from './composer-presentation';
+import { quoteDecimals } from './public-testnet-swap';
 
 type Snapshot<T> = Pick<T, Extract<keyof T, 'record' | 'run' | 'prepared' | 'status' | 'info' | 'retired' | 'recoveryOnly' | 'busy' | 'error' | 'available' | 'verifyError' | 'verified' | 'quoteExpired'>>;
 export type SimulationSource =
@@ -230,9 +231,12 @@ export function projectSimulation(workflow: Workflow, context: ReviewContext, so
     }
     case 'public': {
       const r = source.state.run; if (!r) break; const q = r.quote;
-      if (!guard(same(r.workflow) && boundHash(q.workflowHash, q.revision), 'PUBLIC_TESTNET', iso(q.expiresAt))) break;
-      const s = step(q.nodeId);
-      result(s, simulationAmount(q.amountIn, decimals(q.inputSymbol), q.inputSymbol), simulationAmount(q.expectedOut, decimals(q.outputSymbol), q.outputSymbol), 'Uniswap V3', simulationAmount(q.minimumOut, decimals(q.outputSymbol), q.outputSymbol), q.slippageBps);
+      // BUILD-RH-002: a catalog quote carries its own provenance (PUBLIC_MAINNET, or MOCKED for the loopback harness) and decimals.
+      if (!guard(same(r.workflow) && boundHash(q.workflowHash, q.revision), q.provenance ?? 'PUBLIC_TESTNET', iso(q.expiresAt))) break;
+      const s = step(q.nodeId), din = quoteDecimals(q, 'input'), dout = quoteDecimals(q, 'output');
+      result(s, simulationAmount(q.amountIn, din, q.inputSymbol), simulationAmount(q.expectedOut, dout, q.outputSymbol), 'Uniswap V3', simulationAmount(q.minimumOut, dout, q.outputSymbol), q.slippageBps);
+      for (const stock of q.stocks ?? []) warn('attention', `${stock.symbol}: ${simulationAmount(stock.multiplierWad, 18)} underlying shares per token (Robinhood corporate-action multiplier).`);
+      if (q.stocks?.length) warn('attention', 'Stock Tokens are not offered to US persons or in restricted jurisdictions.');
       if (s) s.resultLabel = 'Quoted output';
       warn('attention', 'This is a pool quote. Network fees and exact transaction simulation are not available yet.');
       break;

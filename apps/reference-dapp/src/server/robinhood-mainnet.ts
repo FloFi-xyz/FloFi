@@ -1,0 +1,85 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+/**
+ * BUILD-RH-002: the Robinhood Chain mainnet (4663) runtime, shared by the in-process server actions and the cloud backend.
+ * Real funds. Explicit gates, none set by this build:
+ *  - `GRYLOO_ROBINHOOD_MAINNET=live`: the official asset catalog, quotes, simulation and Review on Robinhood Chain;
+ *  - `GRYLOO_ROBINHOOD_OWNER_EXECUTION=MAINNET_OWNER_APPROVED`: additionally allows `begin` (the owner's wallet signs and sends
+ *    every transaction; Flofi never does) — the same real-funds opt-in convention as the Router and Jupiter mainnet flows;
+ *  - `GRYLOO_ROBINHOOD_MAINNET_HARNESS=MOCKED_LOOPBACK_ONLY`: the loopback MOCKED harness (tests); it always wins over `live`.
+ * Reads use allowlisted methods only (no send, sign or wallet method exists) on a client bound to chain 4663; the official
+ * Stock Token registry is read from its pinned HTTPS endpoint without redirects, size-capped, and validated fail-closed.
+ */
+import { ROBINHOOD_CHAIN_MAINNET, ROBINHOOD_STOCK_TOKEN_REGISTRY, parseRobinhoodStockTokenRegistry, robinhoodNetworkCatalog,
+  type AssetCatalog } from '@defi-workflow-engine/action-registry';
+import { chainBoundRpc, createBaseSepoliaReadRpc, pacedReadRpc } from './public-testnet-rpc.ts';
+import type { CatalogSwapRuntime, Rpc } from './public-testnet-service.ts';
+
+type Env = Readonly<Record<string, string | undefined>>;
+export type RobinhoodMainnetMode = 'live' | 'harness' | 'off';
+/** Loopback MOCKED harness (e2e/robinhood-mainnet-harness.mjs); never a public provider. */
+export const ROBINHOOD_MAINNET_HARNESS = Object.freeze({ rpc: 'http://127.0.0.1:8561/rpc', registry: 'http://127.0.0.1:8561/rhj/assets' });
+export const ROBINHOOD_MAINNET_RPC_METHODS = Object.freeze(['eth_chainId', 'eth_blockNumber', 'eth_getBlockByNumber', 'eth_getCode', 'eth_call',
+  'eth_getStorageAt', 'eth_getBalance', 'eth_getTransactionCount', 'eth_estimateGas', 'eth_gasPrice', 'eth_getTransactionReceipt',
+  'eth_getTransactionByHash', 'eth_getLogs']);
+export function robinhoodMainnetMode(env: Env): RobinhoodMainnetMode {
+  if (env.GRYLOO_ROBINHOOD_MAINNET_HARNESS === 'MOCKED_LOOPBACK_ONLY') return 'harness';
+  return env.GRYLOO_ROBINHOOD_MAINNET === 'live' ? 'live' : 'off';
+}
+/** Owner execution on mainnet needs the explicit real-funds opt-in; the MOCKED harness always allows it (loopback only). */
+export const robinhoodOwnerExecutionEnabled = (mode: RobinhoodMainnetMode, env: Env) =>
+  mode === 'harness' || (mode === 'live' && env.GRYLOO_ROBINHOOD_OWNER_EXECUTION === 'MAINNET_OWNER_APPROVED');
+/** Optional HTTPS override of the public RPC (a keyed provider); anything else is a configuration error. */
+export function robinhoodRpcUrl(override: string | undefined): string {
+  if (override === undefined || override === '') return ROBINHOOD_CHAIN_MAINNET.rpc;
+  let url: URL;
+  try { url = new URL(override); } catch { throw new Error('ROBINHOOD_RPC_CONFIGURATION_INVALID'); }
+  if (url.protocol !== 'https:' || url.username || url.password || url.hash) throw new Error('ROBINHOOD_RPC_CONFIGURATION_INVALID');
+  return url.href;
+}
+/** The chain-bound read client: an `eth_chainId` for any chain but 4663 is refused, never followed. */
+export function robinhoodMainnetRpc(mode: 'live' | 'harness', env: Env, methods: readonly string[] = ROBINHOOD_MAINNET_RPC_METHODS): Rpc {
+  if (mode === 'harness') return chainBoundRpc(createBaseSepoliaReadRpc(ROBINHOOD_MAINNET_HARNESS.rpc, methods), ROBINHOOD_CHAIN_MAINNET.chainId);
+  return chainBoundRpc(pacedReadRpc(createBaseSepoliaReadRpc(robinhoodRpcUrl(env.GRYLOO_ROBINHOOD_RPC_URL), methods)), ROBINHOOD_CHAIN_MAINNET.chainId);
+}
+
+export type RegistryFetch = (url: string, init: RequestInit) => Promise<Response>;
+/**
+ * The official Robinhood Chain catalog (base assets + every validated active Stock Token). Each call returns a catalog no
+ * older than `ttlMs` (the registry itself caches; prices are never read here); concurrent callers share one read. Any
+ * failure — HTTP, size, redirect, malformed payload, duplicate or ambiguous asset — fails closed and is never replaced by
+ * an older or recorded catalog.
+ */
+export function createRobinhoodCatalogLoader(options: { readonly mode: 'live' | 'harness'; readonly fetcher?: RegistryFetch;
+  readonly now?: () => Date; readonly ttlMs?: number }): (chain: string) => Promise<AssetCatalog> {
+  const fetcher = options.fetcher ?? ((url, init) => fetch(url, init)), now = options.now ?? (() => new Date()), ttlMs = options.ttlMs ?? 30_000;
+  const url = options.mode === 'harness' ? ROBINHOOD_MAINNET_HARNESS.registry : ROBINHOOD_STOCK_TOKEN_REGISTRY.url;
+  let cached: { catalog: AssetCatalog; at: number } | null = null, inflight: Promise<AssetCatalog> | null = null;
+  async function read(): Promise<AssetCatalog> {
+    let response: Response;
+    try { response = await fetcher(url, { method: 'GET', cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(15_000),
+      headers: { accept: 'application/json', 'user-agent': 'Flofi/BUILD-RH-002 asset registry' } }); }
+    catch { throw new Error('STOCK_REGISTRY_UNAVAILABLE'); }
+    if (response.status !== 200) throw new Error('STOCK_REGISTRY_UNAVAILABLE');
+    const declared = Number(response.headers.get('content-length') ?? '0');
+    if (declared > ROBINHOOD_STOCK_TOKEN_REGISTRY.maximumBytes) throw new Error('STOCK_REGISTRY_UNAVAILABLE');
+    const text = await response.text();
+    return robinhoodNetworkCatalog(parseRobinhoodStockTokenRegistry(text, now().toISOString()));
+  }
+  return async chain => {
+    if (chain !== ROBINHOOD_CHAIN_MAINNET.chain) throw new Error('CATALOG_NETWORK_UNSUPPORTED');
+    if (cached && now().getTime() - cached.at < ttlMs) return cached.catalog;
+    inflight ??= read().then(catalog => { cached = { catalog, at: now().getTime() }; return catalog; }).finally(() => { inflight = null; });
+    return inflight;
+  };
+}
+/** The catalog swap runtime of the shared Uniswap swap service on Robinhood Chain. */
+export function robinhoodSwapRuntime(mode: 'live' | 'harness', env: Env, catalogFor: (chain: string) => Promise<AssetCatalog>): CatalogSwapRuntime {
+  return { catalogFor, provenance: mode === 'harness' ? 'MOCKED' : 'PUBLIC_MAINNET', executionEnabled: robinhoodOwnerExecutionEnabled(mode, env) };
+}
+const loaders = new Map<'live' | 'harness', (chain: string) => Promise<AssetCatalog>>();
+/** The process-wide catalog loader of a mode, shared by the swap, transfer and liquidity services and the authoring catalog. */
+export function robinhoodCatalogFor(mode: 'live' | 'harness'): (chain: string) => Promise<AssetCatalog> {
+  let loader = loaders.get(mode);
+  if (!loader) { loader = createRobinhoodCatalogLoader({ mode }); loaders.set(mode, loader); }
+  return loader;
+}
