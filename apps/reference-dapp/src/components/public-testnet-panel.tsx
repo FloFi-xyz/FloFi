@@ -6,7 +6,8 @@ import { usePublicTestnet } from '../state/public-testnet-store';
 import { useBuild009Wallet } from '../state/build009-wallet-store';
 import { useWorkflow } from '../state/workflow-store';
 import { BASE_SEPOLIA, quoteDecimals, swapProfile } from '../domain/public-testnet-swap';
-import type { PublicQuote, StockQuoteState } from '../server/public-testnet-service';
+import type { PublicQuote } from '../server/public-testnet-service';
+import { StockFacts } from './stock-facts';
 
 function units(value: string, decimals: number): string {
   if (!/^(0|[1-9][0-9]*)$/.test(value)) return '--';
@@ -17,21 +18,6 @@ function units(value: string, decimals: number): string {
 const amount = (value: string, symbol: string, decimals: number) => `${units(value, decimals)} ${symbol}`;
 const pay = (q: PublicQuote, value: string) => amount(value, q.inputSymbol, quoteDecimals(q, 'input'));
 const get = (q: PublicQuote, value: string) => amount(value, q.outputSymbol, quoteDecimals(q, 'output'));
-/** BUILD-RH-002: shares per token as an exact decimal (1e18 = 1.0), never rounded through a float. */
-const multiplier = (wad: string) => units(wad, 18);
-/** Stock Token facts bound into a Robinhood Chain Review (a swap or a liquidity position): multiplier, scheduled change and the issuer's notice. */
-export function StockFacts({ stocks }: { stocks: readonly StockQuoteState[] | undefined }) {
-  const { t: tr } = useLocale();
-  if (!stocks?.length) return null;
-  return <div className="step-card" aria-label={tr("Stock Token details")}>
-    <dl className="step-facts">{stocks.map(stock => <div key={stock.officialId}><dt>{tr("{0} shares per token", stock.symbol)}</dt>
-      <dd className="numeric">{multiplier(stock.multiplierWad)}</dd></div>)}</dl>
-    {stocks.some(stock => stock.scheduledEffectiveAt > 0 && stock.scheduledMultiplierWad !== stock.multiplierWad) &&
-      <p role="status">{tr("A corporate action will change the shares per token after this Review expires.")}</p>}
-    {stocks.some(stock => stock.fractionalRestricted) && <p role="status">{tr("Fractional trading of the underlying share is restricted.")}</p>}
-    <p className="muted">{tr("Stock Tokens are issued by Robinhood Assets (Jersey) Limited and are not offered to US persons or in restricted jurisdictions.")}</p>
-  </div>;
-}
 export function PublicTestnetPanel({ view }: { view: 'simulate' | 'execute' }) {
   const { t: tr } = useLocale();
   const flow = usePublicTestnet();

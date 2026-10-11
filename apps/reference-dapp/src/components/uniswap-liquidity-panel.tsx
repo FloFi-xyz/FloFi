@@ -15,7 +15,7 @@ import { useUniswapLiquidity } from '../state/uniswap-liquidity-store';
 import { useBuild009Wallet } from '../state/build009-wallet-store';
 import type { UniswapLiquidityStep, UniswapTokenView } from '../server/uniswap-liquidity-service';
 import { robinhoodLiquidityDetails } from '../domain/robinhood-liquidity-authoring';
-import { StockFacts } from './public-testnet-panel';
+import { StockFacts } from './stock-facts';
 
 /** Canvas form for the canonical concentrated-liquidity node: Uniswap v3 USDC / WETH on Base Sepolia (0.05%) or Ethereum Sepolia (0.3%). */
 /** Copy is written for Base Sepolia; another network's name is substituted. Display text only. */
