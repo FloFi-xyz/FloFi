@@ -1,11 +1,172 @@
 # BUILD-ARB-001 Handoff
 
 BASELINE: `4df974f6ae6ae1d22b86f220db6281294cd20035` (BUILD-BASE-001 / PR #81)
-CURRENT HEAD: Phase 2 checkpoint, the commit containing this file. Resolve its exact SHA with `git log -1 --format=%H -- docs/builds/BUILD-ARB-001-HANDOFF.md`; checkpoint parent is `87f4a7a575ff10f5b8e7c05e56af4fa0bc335bce`.
-CURRENT PHASE: Phase 2 complete; stop at this checkpoint. Branch: `codex/build-arb-001-network-ux`.
+CURRENT HEAD: Phase 3 checkpoint, the commit containing this handoff. Resolve its exact SHA with `git log -1 --format=%H -- docs/builds/BUILD-ARB-001-HANDOFF.md`; parent is `861bb606dd073b3d83720cc8b1ee9cd254b9d063`.
+CURRENT PHASE: Phase 3 complete — stop here. Branch: `codex/build-arb-001-network-ux`.
 PHASE 2 STATUS: Recovered, completed and verified with focused checks. Mainnet deployment/owner-execution gates default off and were not configured by this build.
 
-## Final Phase 2 checkpoint
+## Final Phase 3 checkpoint
+
+COMPLETED:
+- Read all three required build documents and inspected pwd/status/branch/HEAD/log/unstaged and staged diffs. Preserved another session's seven modified files and two untracked tests, and recorded their exact state below before further implementation. No previous phase was restarted.
+- Both canonical native USDC routes: Base → Arbitrum One and Arbitrum One → Base. Base USDC `eip155:8453 / 0x833589fcd6edb6e08f4c7c32d4f71b54bda02913` and Arbitrum USDC `eip155:42161 / 0xaf88d065e77c8cc2239327c5edb3a432268e5831` remain separate assets with six decimals. No symbol-only routing, native ETH/WETH bridge or catalog/network expansion.
+- Reused canonical `asset.bridge` IR, Router profiles/capabilities, provider normalization/codecs, compiler/artifact chain, owner Review, browser wallet boundary, source submission, existing append-only storage/leases/cloud worker projection, chain observation, Recover/Reconcile and Evidence. No new engine/provider/flow/gate or operator signer.
+- Direct Across and LI.FI (Across protocol only) complete both mocked lifecycles. AUTO remains LI.FI first then direct Across only during discovery when the first quote is unavailable/refused; named providers never fall back. Selected-provider revalidation after Review never substitutes another route. Chain/address/amount/fees/spender/expiry mismatches fail closed; material changes clear authorization and require a fresh quote/Review.
+- Review binds source/destination chains/assets, amount, owner/recipient/refund address, provider, route commitment, fees, output bounds, exact approvals/calls, expiry, gas/price/budget and observed nonce/state/implementations. Source deposit id/hash and destination proof are stored durably for reconciliation. Approval is exact-input USDC to the verified Diamond or source SpokePool. Connected owner wallet is the only submission point; server/worker read transports cannot sign/send.
+- Shared fee fixes preserve the reviewed max price, re-estimate the exact current call before preparation and handoff, enforce per-call Base L1 bounds and check direct receipt nonce, offered gas/max fee/priority, gas used and paid fees. Policy/Manifest/Quote gas budgets include total source-chain fee bounds; provider USDC fees remain separate from native ETH gas.
+- Arbitrum-specific code is confined to the existing service's Nitro fee branch. It combines source sequence simulation with NodeInterface posting-gas estimates and a 150% gas margin, then verifies standard total-gas estimates at preparation/handoff. Uses 2× `eth_gasPrice`, zero priority and `gasUsed × effectiveGasPrice` receipts. No OP Stack GasPriceOracle or extra `l1Fee` applies. The [official NodeInterface ABI](https://raw.githubusercontent.com/OffchainLabs/nitro-contracts/main/src/node-interface/NodeInterface.sol) and [gas documentation](https://docs.arbitrum.io/how-arbitrum-works/deep-dives/gas-and-fees) were checked; selector independently computed as `0x77d488a2`. Malformed posting estimates fail closed. No live transaction or runtime availability proof is inferred from these sources.
+- Recovery: PREPARED → AUTHORIZED → SOURCE_SUBMITTED → SOURCE_CONFIRMED → IN_FLIGHT → DESTINATION_OBSERVED → RECONCILED, with UNKNOWN attempt state, RECOVERY_REQUIRED, FAILED, RECONCILIATION_REQUIRED/DIVERGENT and REFUNDED branches. Workers only observe; PREPARED stays outside automatic observation while browser handoff is open.
+- Source recovery now scans bounded windows with durable safe-block cursors and timestamp-based eligibility, without Base's block interval or a 4,000-block lifetime cap. Proven absence requires complete scanning and safe-head expiry. Ambiguous submission cannot resend in this run or another owner run; a restarted service finds the original effect, including relayed owner-wallet effects beyond 4,000 quarter-second blocks.
+- Destination scanning uses safe blocks. Provider outages stay recoverable, delayed delivery stays pending, and refund recovery continues checking fill proofs. `DESTINATION_OBSERVED` is persisted before evidence reads, preserving restart recovery. Wrong asset/recipient, duplicate fill and out-of-bounds amounts become DIVERGENT without success evidence; another origin's fill never proves delivery. Both directions reconcile idempotently only after source/destination safe-head checks.
+- Four owner-supplied 100 USDC EN/PT requests pass Canvas builder / deterministic Chat parsing the exact original text / deterministic intent-provider Copilot / actual MCP gateway IR and hash parity. Added shared closed-grammar Move and manda/traga aliases with existing canonical pair checks; no Copilot prompt/list/layout or Canvas change. Natural-language engine handling is also tested directly so deterministic shortcuts cannot hide it. Four existing Copilot corpus probes now say “Please move” to preserve their required model, clarification, adversarial and race checks after Move becomes an exact command; their assertions remain intact.
+
+VALIDATION:
+- Final Router/authoring/Copilot suite: **14 files / 365 tests passed**. Focused Base/Robinhood/Arbitrum Phase 2 regressions: **14 files / 245 tests passed**. Total **28 files / 610 tests**, no skips. Both directions also recover from evidence-read interruption after durable destination observation. All financial lifecycle evidence is **MOCKED**; no MAINNET_EXECUTED certification.
+- Strict TypeScript passes for the Router runtime/core/authoring graph, including dependency declarations. The broader server-action graph passes strict source checking with `--skipLibCheck`. Unfiltered broader declaration checking still reaches existing Next bundled webpack/React-server/URLPattern declaration errors, as in Phase 2. Repository configuration and dependencies were not changed to hide this issue; final CI remains separately authorized.
+- ESLint passes all twelve changed TypeScript files. Governance-lite passes and all **19** self-tests pass. `git diff --check` passes. Package dependency builds pass strict checking; no full app build or full CI.
+- During iteration, additional adversarial tests failed for unsafe source cursor advancement, over-bound destination output and the Base per-call fee budget. Fixed shared runtime behavior; corrected the fee test's injected value to exceed the actual per-call fixture bound. A readonly authoring-test type mismatch and unused local were corrected. Governance self-tests initially used an incompatible module invocation; the script's direct invocation passes. No test removed/skipped/weakened.
+
+CHANGED FILES (complete Phase 3 scope):
+- Runtime/shared contracts/compiler: `apps/reference-dapp/src/server/router-service.ts`, `apps/reference-dapp/src/server/router-runtime.ts`, `packages/reference-compiler/src/crosschain-router.ts`, `packages/workflow-contracts/src/router.ts`.
+- Authored tests/harness: `apps/reference-dapp/e2e/router-harness.ts`, `apps/reference-dapp/src/server/router-service.test.ts`, `apps/reference-dapp/src/server/router-arbitrum-certification.test.ts` (new), `apps/reference-dapp/src/domain/arbitrum-bridge-parity.test.ts` (new).
+- Shared authoring/affected model probes (assertions preserved): `apps/reference-dapp/src/domain/router-authoring.ts`, `apps/reference-dapp/src/domain/router-authoring.test.ts`, `apps/reference-dapp/src/domain/copilot-eval.corpus.ts`, `apps/reference-dapp/src/domain/catalog-copilot-parity.test.ts`. The Robinhood Move probe also uses “Please move” to retain natural-language intent coverage.
+- Docs: this handoff and `docs/builds/BUILD-ARB-001-PLAN.md`.
+
+DEPLOYMENT / LIMITS:
+- Existing `GRYLOO_ROUTER=live` and `GRYLOO_ROUTER_OWNER_EXECUTION=MAINNET_OWNER_APPROVED` gates cover both mainnet directions. Neither enabled/configured; no new variable or Arbitrum bridge gate. Object-injected test configurations do not change any deployment.
+- UX changes: NONE. Production changes: NONE. Real-money transactions: NONE. Push / PR: NONE. Full pnpm check / browser / fork / PostgreSQL / live-model / public execution: NOT RUN, outside this phase.
+- No temporary/generated file is added to the repository; new certification test directories self-clean under /tmp. Ignored dependency build artifacts are retained for package imports.
+- No outstanding Phase 3 implementation/test failure. The existing broader Next declaration issue remains for final CI. MOCKED parity does not prove live-model behavior or public owner execution.
+- Phase 4 blockers: separate owner authorization and fresh Pool/Liquidity deployment/pool verification are required. No Phase 4 implementation has started.
+- NEXT EXACT ACTION: stop at the Phase 3 commit. Do not push/open a PR or execute Phase 4. Recommended next authorized scope: shared Pool/Liquidity. At resumption read the build docs and inspect pwd/status/branch/HEAD/log/diffs, preserving any intervening work.
+
+## Reproducible Phase 3 focused validation
+
+Dependency exports only (no full app build):
+
+```sh
+pnpm --filter @defi-workflow-engine/reference-linter... build
+pnpm --filter @defi-workflow-engine/reference-compiler build
+pnpm --filter @defi-workflow-engine/reference-executor build
+pnpm --filter @defi-workflow-engine/reference-reconciler build
+pnpm --filter @defi-workflow-engine/cloud-runtime build
+```
+
+Router/authoring/Copilot certification (**365 tests**):
+
+```sh
+pnpm exec vitest run \
+  packages/workflow-contracts/test/router.test.ts \
+  packages/action-registry/test/crosschain-router.test.ts \
+  packages/reference-compiler/test/crosschain-router.test.ts \
+  packages/reference-linter/test/crosschain-router.test.ts \
+  apps/reference-dapp/src/server/router-providers.test.ts \
+  apps/reference-dapp/src/server/router-service.test.ts \
+  apps/reference-dapp/src/server/router-runtime.test.ts \
+  apps/reference-dapp/src/server/router-arbitrum-base.test.ts \
+  apps/reference-dapp/src/server/router-arbitrum-certification.test.ts \
+  apps/reference-dapp/src/server/router-robinhood.test.ts \
+  apps/reference-dapp/src/server/router-testnet.test.ts \
+  apps/reference-dapp/src/domain/router-authoring.test.ts \
+  apps/reference-dapp/src/domain/arbitrum-bridge-parity.test.ts \
+  apps/reference-dapp/src/domain/copilot-eval.test.ts --maxWorkers=4
+```
+
+Focused regressions (**245 tests**):
+
+```sh
+pnpm exec vitest run \
+  packages/action-registry/test/arbitrum-network.test.ts \
+  packages/action-registry/test/base-network.test.ts \
+  packages/action-registry/test/robinhood-chain.test.ts \
+  packages/action-registry/test/execution-capabilities.test.ts \
+  apps/reference-dapp/src/server/arbitrum-runtime.test.ts \
+  apps/reference-dapp/src/server/base-mainnet.test.ts \
+  apps/reference-dapp/src/server/robinhood-swap.test.ts \
+  apps/reference-dapp/src/server/robinhood-transfer-service.test.ts \
+  apps/reference-dapp/src/state/review-authorization.test.ts \
+  apps/reference-dapp/src/state/execution-start.test.ts \
+  apps/reference-dapp/src/domain/arbitrum-core.test.ts \
+  apps/reference-dapp/src/domain/arbitrum-authoring.test.ts \
+  apps/reference-dapp/src/domain/catalog-copilot-parity.test.ts \
+  apps/reference-dapp/src/domain/execution-recovery.test.ts --maxWorkers=4
+```
+
+Strict runtime/core/authoring TypeScript (declarations checked):
+
+```sh
+pnpm exec tsc --noEmit --strict --target ES2024 --module ESNext \
+  --moduleResolution Bundler --jsx react-jsx --esModuleInterop --resolveJsonModule \
+  --allowImportingTsExtensions --exactOptionalPropertyTypes --noUncheckedIndexedAccess \
+  apps/reference-dapp/src/server/router-service.ts \
+  apps/reference-dapp/src/server/router-runtime.ts \
+  apps/reference-dapp/src/server/router-service.test.ts \
+  apps/reference-dapp/src/server/router-arbitrum-certification.test.ts \
+  apps/reference-dapp/src/domain/arbitrum-bridge-parity.test.ts \
+  apps/reference-dapp/src/domain/router-authoring.test.ts \
+  apps/reference-dapp/src/domain/copilot-eval.test.ts
+```
+
+The same command with `--skipLibCheck` and `apps/reference-dapp/src/app/router-action.ts` additionally checks the broader server-action source graph. Omitting `--skipLibCheck` on that broader graph exposes the existing bundled declaration errors described above.
+
+```sh
+pnpm exec eslint \
+  apps/reference-dapp/e2e/router-harness.ts \
+  apps/reference-dapp/src/server/router-runtime.ts \
+  apps/reference-dapp/src/server/router-service.ts \
+  apps/reference-dapp/src/server/router-service.test.ts \
+  apps/reference-dapp/src/server/router-arbitrum-certification.test.ts \
+  apps/reference-dapp/src/domain/arbitrum-bridge-parity.test.ts \
+  apps/reference-dapp/src/domain/router-authoring.ts \
+  apps/reference-dapp/src/domain/router-authoring.test.ts \
+  apps/reference-dapp/src/domain/copilot-eval.corpus.ts \
+  apps/reference-dapp/src/domain/catalog-copilot-parity.test.ts \
+  packages/reference-compiler/src/crosschain-router.ts \
+  packages/workflow-contracts/src/router.ts
+python3 scripts/governance_lite.py
+python3 scripts/test_governance_lite.py
+git diff --check
+```
+
+## Archived Phase 3 starting trace (before implementation; superseded by final checkpoint)
+
+Starting state: clean, expected branch and exact Phase 2 HEAD verified. Required ARB discovery/plan/handoff, BASE network integration report, ENVIRONMENT.md and repository instructions read.
+
+ALREADY PRESENT:
+- `workflow-contracts/router-pairs.ts` + `router.ts`: both exact chain/address-bound USDC pairs, canonical `asset.bridge` IR, provider preference, route commitments/comparison and cross-chain phases.
+- `action-registry/crosschain-router.ts`: Base → Arbitrum and BUILD-BASE-001 Arbitrum → Base profiles, contract pins, shared capability authority; no new pair is needed.
+- Shared `domain/router-authoring.ts`, editor, strategy engine/examples, registry-driven Copilot and MCP composition already author both routes. Existing Router store/action and backend flow enforce signed-in owner ownership and the connected wallet boundary.
+- `server/router-providers.ts`: LI.FI Across-only calldata decoder + direct Across decoder, canonical fee/amount/recipient/refund/spender validation, no provider signing. AUTO prefers LI.FI then Across when an allowed quote is unavailable/refused during discovery. Explicit provider allows no fallback. Begin revalidates the selected provider only, never switches after Review.
+- `server/router-service.ts`: exact approval + deposit sequence simulation, compiled route-bound artifacts/Manifest, owner Review, append-only durable storage/leases, nonce/deposit guards, source receipt/deposit identity, independent destination FilledRelay + token Transfer proof, safe-head finality, refund recovery and MOCKED/public evidence separation.
+- `server/router-runtime.ts`, `app/router-action.ts`, `state/router-store.tsx`, `backend/flows.ts`: independent source/destination RPC methods, cloud/local route namespaces and existing Router gates. Workers observe only and never submit.
+
+PHASE 3 MUST ADD / AUDIT GAPS:
+- Explicit two-direction lifecycle, negative identity/provider/fees/spender, restart/ambiguity/delay/divergence/idempotence and actual MCP/Canvas/Chat/EN/PT Copilot parity coverage; reuse existing tests/harness.
+- Source transaction fees currently budget from eth_simulateV1 gasUsed. Nitro posting gas needs an explicit reviewed bound and standard exact-call re-estimation at preparation/handoff; do not copy Base's OP Stack oracle. Base's L1 bound must also be in the Manifest gas budget and checked before handoff.
+- Begin currently recomputes offered gas price without enforcing the reviewed ceiling; receipt offered/paid bounds need verification. These are shared Router correctness fixes.
+- Source deposit discovery currently assumes two-second blocks/caps the scan; verify time-bounded recovery on Arbitrum's faster chain. Destination RECOVERY_REQUIRED currently stops checking for fill proofs; audit delayed observation and safe-head deadline handling.
+- PREPARED attempts can be explicitly observed/cancelled before wallet handoff, but workers do not automatically observe them. Preserve the durable handoff rule; do not introduce a worker race with an open browser preparation.
+
+CONTINUATION CHECKPOINT (2026-10-11, before further implementation):
+- Exact HEAD remains `861bb606dd073b3d83720cc8b1ee9cd254b9d063`, branch `codex/build-arb-001-network-ux`; index empty. Another session already started Phase 3. All existing edits are preserved.
+- Seven tracked dirty files: `apps/reference-dapp/e2e/router-harness.ts`, `apps/reference-dapp/src/server/router-runtime.ts`, `apps/reference-dapp/src/server/router-service.test.ts`, `apps/reference-dapp/src/server/router-service.ts`, this handoff, `packages/reference-compiler/src/crosschain-router.ts`, `packages/workflow-contracts/src/router.ts`.
+- Two untracked authored tests: `apps/reference-dapp/src/domain/arbitrum-bridge-parity.test.ts`, `apps/reference-dapp/src/server/router-arbitrum-certification.test.ts`.
+- Existing edits add Nitro posting-gas Review bounds, exact-call fee preflights, Manifest total gas budget, receipt bounds, timestamp-based durable source scanning, safe-head absence/destination scanning and late destination proof recovery. Existing tests cover two-direction lifecycle and four authoring requests. These changes are under audit, not yet certified by this continuation.
+- Before Phase 3, Base → Arbitrum shipped in BUILD-ROUTER-001. BUILD-BASE-001 added the reverse canonical pair/profile, runtime namespace/cloud flow and registry-derived authoring under the same gates. No new pair/provider/engine is required.
+
+IN PROGRESS: Audit preserved Phase 3 code/tests and run focused validation.
+REMAINING: Correct demonstrated gaps, focused checks, final handoff/plan and Phase 3 commit. No later-phase work.
+TESTS PASSED: current branch/HEAD/status/diffs inspected; implementation checks pending in this continuation.
+TESTS FAILING: none established yet; prior session test results are not inferred.
+
+PROVIDER / ROUTE POLICY: Existing AUTO = [lifi, across], Across protocol only; named-provider policies are single-provider. Both exact USDC addresses stay distinct by chain. No ETH/WETH/arbitrary-token or additional-network expansion.
+RECOVERY MODEL: PREPARED → AUTHORIZED → SOURCE_SUBMITTED → SOURCE_CONFIRMED → IN_FLIGHT → DESTINATION_OBSERVED → RECONCILED, with RECONCILIATION_REQUIRED/DIVERGENT, RECOVERY_REQUIRED, REFUNDED and FAILED branches. Source submission alone is never success; provider statuses are hints only.
+DEPLOYMENT GATES: `GRYLOO_ROUTER=live` and `GRYLOO_ROUTER_OWNER_EXECUTION=MAINNET_OWNER_APPROVED` cover both mainnet directions. Neither configured/enabled. No Arbitrum bridge-specific gate.
+OWNER-APPROVED UX CHANGES: none yet.
+DO NOT REDO: profiles, engine, provider UX, Phase 1/2 catalog/swap/transfer work. No Pool/Aave/UX/testnet expansion/full CI/push/PR/Production changes or real-money transaction.
+NEXT EXACT ACTION: Complete the Nitro/source fee and delayed-recovery audit, add focused failing tests for confirmed gaps, then implement narrow shared Router fixes.
+
+## Archived final Phase 2 checkpoint
 
 COMPLETED:
 - Recovered all 41 dirty tracked files and six untracked build files without reset/clean/stash/discard/checkout/rebase/revert or recreation. Preserved the implementation and wrote the recovery checkpoint below before continuing.

@@ -113,13 +113,14 @@ export function routerNetworkOf(workflow: { readonly nodes: readonly (SemanticWo
 /** Editing input that reproduces the node exactly. */
 export const routerInputOf = (d: RouterDetails): RouterBridgeInput =>
   ({ source: d.source, destination: d.destination, token: d.token, amount: d.amount, recipient: d.recipient, slippage: d.slippage, routing: d.routing });
-export const ROUTER_CHAT_PATTERN = /^bridge ([0-9]+(?:\.[0-9]+)?) (USDC|USDG) from (Base Sepolia|Base|Arbitrum|Robinhood(?: Chain)?) to (Arbitrum Sepolia|Arbitrum|Base|Robinhood(?: Chain)?)(?: (?:to|recipient) (0x[0-9a-fA-F]{40}))?(?: via (LI\.FI|LIFI|Across|auto))?(?: (?:with )?slippage ([0-9]+) bps)?$/i;
+export const ROUTER_CHAT_PATTERN = /^(?:bridge|move|manda|traga) ([0-9]+(?:\.[0-9]+)?) (USDC|USDG) (?:from|da|de|do) (Base Sepolia|Base|Arbitrum|Robinhood(?: Chain)?) (?:to|para) (?:a |o )?(Arbitrum Sepolia|Arbitrum|Base|Robinhood(?: Chain)?)(?: (?:to|recipient) (0x[0-9a-fA-F]{40}))?(?: via (LI\.FI|LIFI|Across|auto))?(?: (?:with )?slippage ([0-9]+) bps)?$/i;
 const chainName = (text: string) => /sepolia/i.test(text) ? text.replace(/\s+/g, ' ').replace(/^base sepolia$/i, 'Base Sepolia').replace(/^arbitrum sepolia$/i, 'Arbitrum Sepolia')
   : /^robinhood/i.test(text) ? 'Robinhood Chain' : /^arbitrum/i.test(text) ? 'Arbitrum' : 'Base';
 /**
  * "Bridge 5 USDC from Base [Sepolia] to Arbitrum [Sepolia] [to 0x…] [via LI.FI|Across|auto] [slippage 50 bps]"; BUILD-RH-002 adds
  * "Bridge 100 USDC from Base to Robinhood" and "Bridge 50 USDG from Robinhood to Arbitrum". The pair must exist and the token must be
- * its source token (USDC into Robinhood, USDG out); mixed networks and any other combination are refused.
+ * its source token (USDC into Robinhood, USDG out); mixed networks and any other combination are refused. BUILD-ARB-001 adds shared
+ * "move ... from ... to ..." and "manda/traga ... da ... para ..." aliases; all retain the same pair validation and defaults.
  */
 export function parseRouterChat(text: string): RouterBridgeInput | null {
   const m = ROUTER_CHAT_PATTERN.exec(text.trim());

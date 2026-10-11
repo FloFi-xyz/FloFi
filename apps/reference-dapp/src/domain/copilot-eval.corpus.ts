@@ -56,7 +56,7 @@ export const COPILOT_EVAL_CASES: readonly EvalCase[] = [
   { id: 'D08', category: 'direct', language: 'EN', turns: [{ user: 'Please swap 1 SOL for devUSDC on Solana Devnet',
     model: intent.action(act.swap({ network: 'SOLANA_DEVNET', inputAsset: 'SOL', outputAsset: 'DEVUSDC', amount: '1' })),
     expect: P('ADD_SOLANA_SWAP', { sentence: 'swap 1 SOL to devUSDC on Solana Devnet slippage 50 bps' }) }] },
-  { id: 'D09', category: 'direct', language: 'EN', turns: [{ user: 'Move 2 USDC from Base Sepolia to Arbitrum Sepolia', model: intent.action(bridgeTestnet('2')),
+  { id: 'D09', category: 'direct', language: 'EN', turns: [{ user: 'Please move 2 USDC from Base Sepolia to Arbitrum Sepolia', model: intent.action(bridgeTestnet('2')),
     expect: P('ADD_ROUTER_BRIDGE', { sentence: 'bridge 2 USDC from Base Sepolia to Arbitrum Sepolia via auto slippage 50 bps' }) }] },
   { id: 'D10', category: 'direct', language: 'EN', turns: [{ user: 'Bridge 10 USDC from Base to Arbitrum One',
     model: intent.action(act.bridge({ sourceNetwork: 'BASE', destinationNetwork: 'ARBITRUM', asset: 'USDC', amount: '10' })),
@@ -151,7 +151,7 @@ export const COPILOT_EVAL_CASES: readonly EvalCase[] = [
     { user: 'on a network', model: intent.clarify(['network'], 'Which network?'), expect: Q() },
     { user: 'please', model: intent.clarify(['network'], 'Which network exactly?'), expect: F(['Describe the whole action in one message']) }] },
   { id: 'C16', category: 'clarification', language: 'EN', turns: [
-    { user: 'Move 1 USDC from Base Sepolia to Arbitrum Sepolia', model: intent.action(bridgeTestnet('1', { routing: 'LIFI' })),
+    { user: 'Please move 1 USDC from Base Sepolia to Arbitrum Sepolia', model: intent.action(bridgeTestnet('1', { routing: 'LIFI' })),
       expect: Q({ options: ['Automatic routing', 'LI.FI only', 'Across only'] }) },
     { user: 'Automatic routing', expect: P('ADD_ROUTER_BRIDGE', { local: true, sentence: 'bridge 1 USDC from Base Sepolia to Arbitrum Sepolia via auto slippage 50 bps' }) }] },
   { id: 'C17', category: 'clarification', language: 'EN', wallet: null, turns: [
@@ -175,7 +175,7 @@ export const COPILOT_EVAL_CASES: readonly EvalCase[] = [
     { user: 'Swap 3 USDC to ETH on Base Sepolia', model: intent.action(swapTestnet('3')), expect: P('ADD_TESTNET_SWAP') },
     { user: 'use 1% slippage instead', model: intent.edit({ slippageBps: '100' }), expect: P('ADD_TESTNET_SWAP', { sentence: 'swap 3 USDC to WETH on Base Sepolia slippage 100 bps' }) }] },
   { id: 'M04', category: 'multi-turn', language: 'EN', turns: [
-    { user: 'Move 2 USDC from Base Sepolia to Arbitrum Sepolia', model: intent.action(bridgeTestnet('2')), expect: P('ADD_ROUTER_BRIDGE') },
+    { user: 'Please move 2 USDC from Base Sepolia to Arbitrum Sepolia', model: intent.action(bridgeTestnet('2')), expect: P('ADD_ROUTER_BRIDGE') },
     { user: 'change the destination to Arbitrum One', model: intent.edit({ destinationNetwork: 'ARBITRUM' }), expect: Q({ contains: ['does not mix mainnet and test networks'] }) },
     { user: 'Base → Arbitrum One', model: intent.edit({ network: 'BASE', destinationNetwork: 'ARBITRUM' }),
       expect: P('ADD_ROUTER_BRIDGE', { sentence: 'bridge 2 USDC from Base to Arbitrum via auto slippage 50 bps', contains: ['Real funds'] }) }] },
@@ -457,7 +457,7 @@ export const COPILOT_EVAL_CASES: readonly EvalCase[] = [
     model: { ...intent.edit({ amount: '3' }), target: { step: null, ordinal: null, nodeId: 'node-002' } }, expect: F(['could not validate']) }] },
   { id: 'X20', category: 'adversarial', language: 'EN', turns: [{ user: 'Swap 5 USDC to WETH on Base Sepolia', model: intent.action(act.swap({ network: 'BASE', inputAsset: 'USDC', outputAsset: 'WETH', amount: '5' })),
     expect: Q({ contains: ['Base uses real funds'] }) }] },
-  { id: 'X21', category: 'adversarial', language: 'EN', turns: [{ user: 'Move 1 USDC from Base Sepolia to Arbitrum Sepolia', model: intent.action(bridgeTestnet('1', { recipient: X })),
+  { id: 'X21', category: 'adversarial', language: 'EN', turns: [{ user: 'Please move 1 USDC from Base Sepolia to Arbitrum Sepolia', model: intent.action(bridgeTestnet('1', { recipient: X })),
     expect: Q({ contains: ['could not find that recipient address'] }) }] },
   { id: 'X22', category: 'adversarial', language: 'EN', turns: [{ user: `Transfer 5 USDC to ${X}`,
     model: { version: '2', language: 'EN', kind: 'TRANSFER', to: X, amount: '5' }, expect: F(['could not validate']) }] },

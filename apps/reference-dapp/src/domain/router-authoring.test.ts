@@ -29,6 +29,12 @@ describe('BUILD-ROUTER-001 Guided Chat / Canvas authoring', () => {
     const w = apply({ type: 'ADD_ROUTER_BRIDGE', input: parseRouterChat('bridge 1.25 USDC from Base to Arbitrum via Across')!, source: 'CHAT', baseRevision: 0 });
     expect(readRouterBridgeNode(w.nodes[0]!)).toMatchObject({ recipient: 'CONNECTED_OWNER', providers: ['across'] });
   });
+  it('shared English/Portuguese aliases preserve pair, token and network validation', () => {
+    expect(parseRouterChat('move 5 USDG from Robinhood to Base')).toEqual(parseRouterChat('bridge 5 USDG from Robinhood to Base'));
+    expect(parseRouterChat('manda 5 USDC da Base para a Arbitrum')).toEqual(parseRouterChat('bridge 5 USDC from Base to Arbitrum'));
+    for (const text of ['move 5 USDC from Base to Base', 'manda 5 USDG da Base para Arbitrum', 'traga 5 USDC da Arbitrum para Base Sepolia',
+      'move 5 USDC from Optimism to Base', 'manda 5 ETH da Base para Arbitrum']) expect(parseRouterChat(text), text).toBeNull();
+  });
   it('edits round-trip and an identical edit is a no-op; changing recipient or amount is a new revision', () => {
     const w = apply({ type: 'ADD_ROUTER_BRIDGE', input: canvasInput, source: 'CANVAS', baseRevision: 0 });
     const node = w.nodes[0]!, details = routerDetails(node)!;

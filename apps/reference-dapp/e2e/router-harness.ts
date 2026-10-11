@@ -34,9 +34,9 @@ type Snapshot = { usdc: Record<string, bigint>; allowances: Record<string, bigin
 type Mined = { hash: string; from: string; to: string; input: string; nonce: bigint; block: number; status: 0 | 1; logs: RouterLog[]; gasUsed: bigint; chain: 'base' | 'arbitrum' };
 type Deposit = { depositId: bigint; sourceHash: string; depositor: string; recipient: string; inputAmount: bigint; outputAmount: bigint; fillDeadline: number;
   readyAt: number; filled: string | null; refunded: string | null };
-export type FillMode = 'normal' | 'wrongRecipient' | 'belowMinimum' | 'duplicate';
+export type FillMode = 'normal' | 'wrongRecipient' | 'belowMinimum' | 'aboveMaximum' | 'wrongAsset' | 'wrongOrigin' | 'duplicate';
 export type RouterHarnessOptions = { owner?: string; usdc?: bigint; eth?: bigint; nonce?: bigint; simulateV1?: boolean; autoFillSeconds?: number | null;
-  baseSafeLagBlocks?: number; arbitrumSafeLagBlocks?: number; startMs?: number;
+  baseSafeLagBlocks?: number; arbitrumSafeLagBlocks?: number; startMs?: number; sourceBlockMs?: number;
   /** The owner's EOA is EIP-7702-delegated to the MetaMask delegator, so its wallet may relay requests (`wallet.sendRelayed`). */ delegatedOwner?: boolean;
   /** BUILD-JOURNEY-001: the router profile (network) these chains impersonate. */ profile?: RouterProfile;
   /** Further funded wallets on the source chain (other external users). */ wallets?: readonly string[] };
@@ -52,9 +52,10 @@ export function createRouterHarness(options: RouterHarnessOptions = {}) {
   const nowMs = () => origin + (Date.now() - started) + offset;
   const clock = () => new Date(nowMs());
   const BASE_GENESIS = 52_000_000, ARB_GENESIS = 510_000_000;
-  const baseHead = () => BASE_GENESIS + Math.floor((nowMs() - origin) / 2000);
+  const sourceBlockMs = options.sourceBlockMs ?? 2000;
+  const baseHead = () => BASE_GENESIS + Math.floor((nowMs() - origin) / sourceBlockMs);
   const arbHead = () => ARB_GENESIS + Math.floor((nowMs() - origin) / 250);
-  const baseTime = (n: number) => Math.floor((origin + (n - BASE_GENESIS) * 2000) / 1000);
+  const baseTime = (n: number) => Math.floor((origin + (n - BASE_GENESIS) * sourceBlockMs) / 1000);
   const arbTime = (n: number) => Math.floor((origin + (n - ARB_GENESIS) * 250) / 1000);
   const advance = (seconds: number) => { offset += seconds * 1000; processFills(); };
   const others = (options.wallets ?? []).map(w => w.toLowerCase());
@@ -153,15 +154,16 @@ export function createRouterHarness(options: RouterHarnessOptions = {}) {
     if (result.deposit) deposits.push({ ...result.deposit, sourceHash: hash, readyAt: nowMs() + (controls.autoFillSeconds ?? 0) * 1000, filled: null, refunded: null });
     return tx;
   }
+  const requests = new Map<string, { gas?: string; maxFeePerGas?: string; maxPriorityFeePerGas?: string }>();
   const wallet = {
     /** The owner's wallet sends the exact request (`hold` keeps it unmined). */
-    send(tx: { from: string; to: string; data: string; value: string; chainId: string }, mode: { hold?: boolean } = {}): string {
+    send(tx: { from: string; to: string; data: string; value: string; chainId: string; gas?: string; maxFeePerGas?: string; maxPriorityFeePerGas?: string }, mode: { hold?: boolean } = {}): string {
       const from = String(tx.from).toLowerCase();
       if (tx.chainId !== SRC.chainHex || tx.value !== '0x0' || (from !== owner && !others.includes(from))) throw new Error('MOCK_WALLET_REQUEST_INVALID');
       counters.sends++;
       const nonce = state.nonces[from] ?? 0n;
-      if (mode.hold) { const hash = '0x' + randomBytes(32).toString('hex'); pending.push({ hash, from, to: tx.to, input: tx.data, nonce }); return hash; }
-      return mineBase(from, tx.to, tx.data, nonce).hash;
+      if (mode.hold) { const hash = '0x' + randomBytes(32).toString('hex'); pending.push({ hash, from, to: tx.to, input: tx.data, nonce }); requests.set(hash, tx); return hash; }
+      const hash = mineBase(from, tx.to, tx.data, nonce).hash; requests.set(hash, tx); return hash;
     },
     /** MetaMask delegated redemption: a relayer sends it; the owner's nonce does not change. */
     sendRelayed(tx: { from: string; to: string; data: string; chainId: string }): string {
@@ -179,9 +181,9 @@ export function createRouterHarness(options: RouterHarnessOptions = {}) {
   function fill(deposit: Deposit, mode: FillMode = controls.fillMode): string {
     const block = arbHead(), hash = '0x' + randomBytes(32).toString('hex');
     const recipient = mode === 'wrongRecipient' ? '0x8888888888888888888888888888888888888888' : deposit.recipient;
-    const amount = mode === 'belowMinimum' ? deposit.outputAmount - 1n : deposit.outputAmount;
-    const event = { spokePool: DST.spokePool, originChainId: BigInt(SRC.chainId), depositId: deposit.depositId, relayer: '0x' + aw(ROUTER_RELAYER), inputToken: SRC.token,
-      outputToken: DST.token, inputAmount: deposit.inputAmount, outputAmount: deposit.outputAmount, repaymentChainId: BigInt(SRC.chainId), fillDeadline: deposit.fillDeadline,
+    const amount = mode === 'belowMinimum' ? deposit.outputAmount - 1n : mode === 'aboveMaximum' ? deposit.outputAmount + 1n : deposit.outputAmount;
+    const event = { spokePool: DST.spokePool, originChainId: BigInt(mode === 'wrongOrigin' ? DST.chainId : SRC.chainId), depositId: deposit.depositId, relayer: '0x' + aw(ROUTER_RELAYER), inputToken: SRC.token,
+      outputToken: mode === 'wrongAsset' ? SRC.token : DST.token, inputAmount: deposit.inputAmount, outputAmount: deposit.outputAmount, repaymentChainId: BigInt(SRC.chainId), fillDeadline: deposit.fillDeadline,
       exclusivityDeadline: 0, exclusiveRelayer: '0x' + '0'.repeat(64), depositor: deposit.depositor, recipient: deposit.recipient, messageHash: '0x' + '0'.repeat(64),
       updatedRecipient: recipient, updatedMessageHash: '0x' + '0'.repeat(64), updatedOutputAmount: amount, fillType: 0 };
     const logs = [encodeFilledRelayLog(event), encodeErc20TransferLog(DST.token, ROUTER_RELAYER, recipient, amount)];
@@ -211,7 +213,8 @@ export function createRouterHarness(options: RouterHarnessOptions = {}) {
   const receipt = (m: Mined) => ({ transactionHash: m.hash, status: hx(m.status), blockNumber: hx(m.block), blockHash: blockHash(m.chain, m.block), from: m.from, to: m.to,
     gasUsed: hx(m.gasUsed), effectiveGasPrice: hx(1_000_000n), ...m.chain === 'base' && !SRC.l1DataFee ? { gasUsedForL1: hx(1_234n) } : { l1Fee: hx(10_000n) }, logs: m.logs.map((l, i) => ({ ...l, logIndex: hx(i), transactionHash: m.hash, blockNumber: hx(m.block) })) });
   const txObject = (m: Mined) => ({ hash: m.hash, from: m.from, to: m.to, input: m.input, value: '0x0', nonce: hx(m.nonce), chainId: hx(m.chain === 'base' ? SRC.chainId : DST.chainId),
-    type: '0x2', blockHash: blockHash(m.chain, m.block), blockNumber: hx(m.block) });
+    gas: requests.get(m.hash)?.gas ?? hx(m.gasUsed * 2n), maxFeePerGas: requests.get(m.hash)?.maxFeePerGas ?? hx(11_000_000n),
+    maxPriorityFeePerGas: requests.get(m.hash)?.maxPriorityFeePerGas ?? hx(1_000_000n), type: '0x2', blockHash: blockHash(m.chain, m.block), blockNumber: hx(m.block) });
   const block = (chain: 'base' | 'arbitrum', n: number, full: boolean) => {
     const txs = [...mined.values()].filter(m => m.chain === chain && m.block === n);
     return { number: hx(n), hash: blockHash(chain, n), timestamp: hx(chain === 'base' ? baseTime(n) : arbTime(n)), baseFeePerGas: hx(5_000_000n),
@@ -249,9 +252,17 @@ export function createRouterHarness(options: RouterHarnessOptions = {}) {
         if (p[1] === 'pending') return hx((state.nonces[who] ?? 0n) + BigInt(pending.filter(x => x.from === who).length));
         return hx(snapshotAt(p[1]).nonces[who] ?? 0n);
       }
+      case 'eth_gasPrice': return hx(5_000_000n);
+      case 'eth_estimateGas': {
+        const c = p[0] as { from: string; to: string; data: string }, scratch = structuredClone(snapshotAt(p[1]));
+        const result = execute(scratch, c.from.toLowerCase(), c.to.toLowerCase(), c.data, baseTime(baseHead()), false);
+        if (!result.ok) throw Error('MOCK_ESTIMATE_REVERTED');
+        return hx(result.gas + (SRC.chainId === 42161 ? 30_000n : 0n));
+      }
       case 'eth_maxPriorityFeePerGas': return hx(1_000_000n);
       case 'eth_call': {
         const { to, data } = p[0] as { to: string; data: string }, s = snapshotAt(p[1]);
+        if (to === '0x00000000000000000000000000000000000000c8' && data.startsWith('0x77d488a2')) return '0x' + w(30_000n) + w(5_000_000n) + w(10_000_000_000n);
         if (to === SRC.token && data.startsWith(SEL.balanceOf)) return '0x' + w(s.usdc['0x' + data.slice(34, 74)] ?? 0n);
         if (to === SRC.token && data.startsWith(SEL.allowance)) return '0x' + w(s.allowances[allowanceKey(SRC.token, '0x' + data.slice(34, 74), '0x' + data.slice(98, 138))] ?? 0n);
         if (to === SRC.token && data === SEL.decimals) return '0x' + w(BigInt(SRC.decimals));

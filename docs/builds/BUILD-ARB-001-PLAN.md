@@ -5,7 +5,7 @@ Branch: `codex/build-arb-001-network-ux`.
 Inputs: [discovery and capability matrix](BUILD-ARB-001-DISCOVERY.md), [read verification](BUILD-ARB-001-READ-VERIFICATION.json),
 [persistent handoff](BUILD-ARB-001-HANDOFF.md), BASE-001 shared architecture and existing Router.
 
-The owner authorized and completed **Phase 1**, then authorized **Phase 2: Swap + Transfer runtime only**.
+The owner authorized and completed **Phase 1**, **Phase 2: Swap + Transfer runtime only**, and **Phase 3: existing Router Bridge certification only**.
 Phase 2 starts at `87f4a7a575ff10f5b8e7c05e56af4fa0bc335bce`. Every phase requires focused checks, an updated handoff and a commit.
 Do not start later phases automatically. Full CI belongs at the end of BUILD-ARB-001; no PR or push in this checkpoint.
 
@@ -108,16 +108,48 @@ For workflow-local's standard authored graph (mock read node-001 plus node-002, 
 Exact final focused commands/results and the resumption checkpoint are in the handoff. No full CI or browser/fork/PostgreSQL matrix
 is run, and no PR, push, real-money transaction, UX or Production change is part of this phase.
 
+## Phase 3 — existing Router Bridge certification (completed, gates remain off)
+
+Continuation started at exact Phase 2 HEAD `861bb606dd073b3d83720cc8b1ee9cd254b9d063`; another session's seven modified files and two
+new tests were preserved and audited. The handoff records that exact recovery state before further edits and the final commands/results.
+BUILD-ROUTER-001 already supplied Base USDC → Arbitrum USDC; BUILD-BASE-001 supplied the reverse. No route, provider, bridge engine,
+authoring channel, operator signer, wallet custody or deployment gate was added.
+
+- Both chain/address/decimal-bound native USDC directions pass the shared quote → exact approval/deposit simulation → owner Review /
+  Strategy Manifest → scripted owner-wallet submission → independent source/destination observation → reconciliation / Evidence lifecycle,
+  with direct Across and LI.FI routing through Across. AUTO remains preference-order LI.FI then direct Across during discovery only;
+  an explicit provider has no fallback. Review revalidation never switches provider/spender. Source submission is never delivery proof.
+- Shared fixes bind gas-price ceilings, exact-call gas re-estimates and per-call OP Stack posting-fee bounds at preparation and handoff.
+  Manifest/Policy/Quote gas budgets include the whole source fee bound. Direct receipt offered/paid gas, price, priority and nonce are
+  verified. Bridge/provider USDC fees remain separate from source native ETH gas.
+- Arbitrum One adds a narrow Nitro fee branch to the existing service: sequence simulation plus
+  [NodeInterface posting-gas estimate](https://raw.githubusercontent.com/OffchainLabs/nitro-contracts/main/src/node-interface/NodeInterface.sol)
+  builds a 150% gas ceiling even before approval exists. Standard exact-call `eth_estimateGas` rechecks total gas before preparation and
+  handoff; the gas-price ceiling is 2× `eth_gasPrice`, with zero priority. Receipt cost stays `gasUsed × effectiveGasPrice` as in Phase 2.
+  No OP Stack oracle or additional `l1Fee` applies to Arbitrum. Malformed/unavailable posting estimates fail closed.
+- Durable source log discovery uses source timestamps and bounded, persisted scans of safe blocks, without Base's block interval or a
+  4,000-block lifetime cap. Ambiguous submission remains reserved and cannot resend; expiry requires complete eligible-range scanning
+  and a source safe head past the deadline. Destination scans advance through safe blocks; refund recovery keeps checking delayed fill
+  proofs, with a durable `DESTINATION_OBSERVED` snapshot before final evidence reads. Wrong asset/recipient, duplicate fill or output
+  outside reviewed bounds freezes the run as DIVERGENT; unrelated origin-chain proof remains pending. Reconciliation is idempotent.
+- Four owner-supplied EN/PT requests pass Canvas builder, exact-original-text deterministic Chat, deterministic intent-provider Copilot
+  and actual MCP gateway parity for 100 USDC. Shared Move and manda/traga grammar aliases retain existing canonical route checks and
+  defaults. Copilot's natural-language engine is also exercised directly; existing model corpus checks retain their assertions using
+  “Please move” text to avoid the new shortcut. Existing registries/examples/prompt paths are reused; no Arbitrum prompt/list is added.
+- Final focused validation: **28 files / 610 Vitest tests**, changed-file lint, strict Router/core/authoring TypeScript, broader
+  server-action source checking with `--skipLibCheck`, governance-lite + **19** self-tests and whitespace check pass. The broader
+  unfiltered TypeScript graph retains the existing Next bundled declaration errors recorded in Phase 2; no repository configuration
+  or dependency was changed to hide them. No full CI/browser/fork/PostgreSQL/live-model/mainnet execution is claimed.
+- Existing `GRYLOO_ROUTER=live` and `GRYLOO_ROUTER_OWNER_EXECUTION=MAINNET_OWNER_APPROVED` gates serve both directions and were not
+  enabled/configured. Evidence is MOCKED only. UX changes, Production changes, real-money transactions, push, PR and Phase 4 work: none.
+
 ## Recommended later phases — proposals only
 
-1. **Phase 3: Bridge.** Reuse the existing Router for first-class Arbitrum authoring/runtime continuity. Verify existing directions,
-   route identities, owner approvals, source submission, destination settlement, durable recovery and truthful evidence. Freshly
-   inspect route/provider state; do not create another bridge engine. Await the owner's separate Phase 3 instruction.
-2. **Pool/Liquidity.** Add an explicitly authorized shared Uniswap liquidity profile after fresh deployment verification; test
+1. **Phase 4: Pool/Liquidity.** Add an explicitly authorized shared Uniswap liquidity profile after fresh deployment verification; test
    position/range accounting, approvals, lifecycle and reconciliation. Phase 2's swap profile grants no Pool capability.
-3. **Aave native USDC reserve.** Add a one-reserve Arbitrum profile for id 12 after fresh deployment, reserve, cap, liquidity
+2. **Aave native USDC reserve.** Add a one-reserve Arbitrum profile for id 12 after fresh deployment, reserve, cap, liquidity
    and ABI verification; test supply/borrow/repay/withdraw lifecycle. Do not infer multi-reserve or composition support.
-4. **Final phase: end-to-end integration and full CI.** Confirm registry parity across all surfaces, existing Base/Robinhood behavior,
+3. **Final phase: end-to-end integration and full CI.** Confirm registry parity across all surfaces, existing Base/Robinhood behavior,
    execution gates, recovery/reconciliation and hash continuity; run the full required CI only here. Delivery/PR remains owner-directed.
 
 The owner may reorder or narrow these phases and will supply any future UX changes explicitly.

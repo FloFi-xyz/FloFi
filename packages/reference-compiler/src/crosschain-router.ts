@@ -242,7 +242,7 @@ export type RouterArtifactInput = {
   /** Exact Base transactions in order (an approval only when the observed allowance is short, then the deposit). */
   readonly calls: readonly { readonly purpose: 'APPROVAL' | 'BRIDGE_DEPOSIT'; readonly to: string; readonly data: string }[];
   readonly simulation: { readonly block: number; readonly observedAt: string; readonly gasLimitTotal: string; readonly executionFeeUpperBoundWei: string;
-    readonly depositId: string | null };
+    readonly depositId: string | null; readonly totalFeeUpperBoundWei?: string };
   readonly expiresAt: string;
 };
 export type RouterArtifacts = { readonly quote: QuoteStateArtifact; readonly artifactSet: ArtifactSet; readonly simulation: SimulationBundle;
@@ -254,6 +254,7 @@ export const routerProviderId = (route: Pick<CanonicalRoute, 'routingProvider' |
 export function compileRouterArtifacts(input: RouterArtifactInput): RouterArtifacts {
   const { workflow, route, owner } = input;
   const src = route.sourceChain, dst = route.destinationChain;
+  const gasBudget = input.simulation.totalFeeUpperBoundWei ?? input.simulation.executionFeeUpperBoundWei;
   const inputAsset = { chainId: src, address: route.inputToken.address, decimals: route.inputToken.decimals };
   const outputAsset = { chainId: dst, address: route.outputToken.address, decimals: route.outputToken.decimals };
   const native = { chainId: src, nativeId: 'ETH', decimals: 18 };
@@ -263,7 +264,7 @@ export function compileRouterArtifacts(input: RouterArtifactInput): RouterArtifa
   const ageSeconds = Math.max(1, Math.ceil((Date.parse(input.expiresAt) - Date.parse(input.simulation.observedAt)) / 1000));
   const freshness = { observedAt: input.simulation.observedAt, expiresAt: input.expiresAt, maximumAgeSeconds: ageSeconds };
   const uncertainty = [{ code: 'CROSS_CHAIN_SETTLEMENT_NOT_SIMULATED',
-    description: 'Base transactions are simulated with eth_simulateV1; the Across relayer fill on Arbitrum is a provider quote until observed on chain.' }];
+    description: 'Source transactions are simulated with eth_simulateV1; the destination Across relayer fill remains a provider quote until observed on chain.' }];
   const contracts = [{ chainId: src, address: route.inputToken.address, version: 'pinned' }, { chainId: src, address: route.deposit.to, version: 'pinned' },
     ...route.deposit.to !== route.bridge.originSpokePool ? [{ chainId: src, address: route.bridge.originSpokePool, version: 'pinned' }] : [],
     { chainId: dst, address: route.bridge.destinationSpokePool, version: 'pinned' }];
@@ -281,7 +282,7 @@ export function compileRouterArtifacts(input: RouterArtifactInput): RouterArtifa
       { name: 'deposit-payload-hash', kind: 'IDENTIFIER', value: payloads.at(-1)! }],
     providerReference: { kind: 'ROUTE', id: 'route-' + suffix }, proposedContracts: contracts,
     proposedSpenders: [sourceOwner, { chainId: src, address: route.approval.spender }], proposedRecipients: [recipient],
-    fees: [{ asset: inputAsset, amount: route.feeTotal }], gas: [{ asset: native, amount: input.simulation.executionFeeUpperBoundWei }],
+    fees: [{ asset: inputAsset, amount: route.feeTotal }], gas: [{ asset: native, amount: gasBudget }],
     outputBounds: [{ outputId: 'amount-out', expected: { asset: outputAsset, amount: route.expectedOutput }, minimum: { asset: outputAsset, amount: route.minimumOutput },
       adverse: { asset: outputAsset, amount: route.minimumOutput } }],
     uncertainty, registryValidation: { registryVersion: '1.1.0', actionType: 'asset.bridge', result: 'CONTRACT_VALIDATED', enforcement: 'NOT_ENFORCED' } });
@@ -299,7 +300,7 @@ export function compileRouterArtifacts(input: RouterArtifactInput): RouterArtifa
   const simulationHash = H('simulation-bundle', simulation);
   const recovery = { failurePolicy: 'PAUSE_FOR_APPROVAL' as const, residualAssetRecipient: sourceOwner, maximumAttemptsPerStep: 1, requiresHumanReview: true as const };
   const spendLimits = [{ asset: inputAsset, maximumAmount: route.inputAmount, maximumPerStepAmount: route.inputAmount, maximumCumulativeAmount: route.inputAmount }];
-  const gasBudgets = [{ asset: native, maximumAmount: input.simulation.executionFeeUpperBoundWei }];
+  const gasBudgets = [{ asset: native, maximumAmount: gasBudget }];
   const feeBudgets = [{ asset: inputAsset, maximumAmount: route.feeTotal }];
   const providers = { kind: 'FIXED' as const, providerId: routerProviderId(route) };
   const functions = input.calls.map(c => ({ chainId: src, contract: c.to, functionId: c.data.slice(0, 10) }));
