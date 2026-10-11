@@ -13,12 +13,14 @@ import { solanaLiquidityDetails, solanaLiquidityInputOf, type SolanaLiquidityInp
 import { lendingDetails, type LendingInput } from './lending-authoring';
 import { catalogSwapDetails, type CatalogSwapNetwork } from './catalog-swap-authoring';
 import { robinhoodLiquidityDetails, robinhoodLiquidityInputOf, type RobinhoodLiquidityInput } from './robinhood-liquidity-authoring';
+import { transferDetails, type RobinhoodTransferInput } from './robinhood-transfer-authoring';
+import { networkIdentity } from './network-registry';
 
 /**
  * BUILD-COPILOT-002: ordered, typed descriptions of the canonical workflow's steps, read only from the IR through the
  * existing `*Details` readers. AI-agnostic and read-only: nothing here edits, quotes or observes a chain.
  */
-export type StepKind = 'SWAP' | 'BRIDGE' | 'SUPPLY' | 'BORROW' | 'REPAY' | 'WITHDRAW' | 'LIQUIDITY' | 'TEMPLATE' | 'OTHER';
+export type StepKind = 'SWAP' | 'BRIDGE' | 'SUPPLY' | 'BORROW' | 'REPAY' | 'WITHDRAW' | 'LIQUIDITY' | 'TRANSFER' | 'TEMPLATE' | 'OTHER';
 export type StepDetail =
   | { readonly type: 'EVM_SWAP'; readonly network: 'Base' | 'Base Sepolia' | 'Ethereum Sepolia'; readonly from: 'USDC' | 'WETH'; readonly to: 'USDC' | 'WETH'; readonly amount: string;
       readonly slippage: string }
@@ -33,6 +35,8 @@ export type StepDetail =
   /** BUILD-RH-002: a catalog-network Uniswap v3 position on a catalog pair; prices are `priceUnit` (token0 per token1) at the range edges. */
   | { readonly type: 'CATALOG_LIQUIDITY'; readonly input: RobinhoodLiquidityInput; readonly lowerPrice: string; readonly upperPrice: string; readonly priceUnit: string;
       readonly fullRange: boolean }
+  /** BUILD-BASE-001: a transfer (native ETH, or a catalog token on a catalog network) to the connected owner or an explicit recipient. */
+  | { readonly type: 'TRANSFER'; readonly input: RobinhoodTransferInput }
   | { readonly type: 'LENDING_COMPOSITION'; readonly role: 'SUPPLY' | 'BORROW' | 'SWAP'; readonly input: LendingInput }
   | { readonly type: 'TEMPLATE'; readonly template: string }
   | { readonly type: 'OTHER'; readonly actionType: string };
@@ -93,6 +97,10 @@ function describe(node: Node, workflow: Workflow, context: ReviewContext): Descr
     protocol: orca.provider, network: orca.network, testFunds: true };
   const network = CHAIN_LABEL[node.chainId] ?? node.chainId;
   const testFunds = TEST_CHAINS.has(node.chainId) ? true : MAIN_CHAINS.has(node.chainId) ? false : null;
+  // BUILD-BASE-001: transfers are typed steps (the Copilot refers to and re-authors catalog-network transfers like any other step).
+  const transfer = read(() => transferDetails(node as Parameters<typeof transferDetails>[0]));
+  if (transfer) return { kind: 'TRANSFER', detail: { type: 'TRANSFER', input: transfer }, protocol: 'Transfer', network: transfer.network,
+    testFunds: networkIdentity(node.chainId)?.environment === 'TESTNET' };
   // CoW swaps and the legacy bridges, compositions and transfers keep their own panels; they are described, not typed.
   if (node.actionType === SWAP_ACTION && node.adapterConstraints.protocols.join() === 'uniswap' && ['eip155:8453', 'eip155:84532', 'eip155:11155111'].includes(node.chainId)) {
     const swap = read(() => swapDetails(node, reviewContextForChain(node.chainId, context)));

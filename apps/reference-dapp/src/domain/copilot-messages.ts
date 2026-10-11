@@ -10,19 +10,24 @@ export const COPILOT_LANGUAGES = ['EN', 'PT'] as const;
 export type CopilotLanguage = (typeof COPILOT_LANGUAGES)[number];
 export type MissingLabel = 'amount' | 'asset' | 'network' | 'sourceNetwork' | 'destinationNetwork' | 'protocol' | 'range' | 'slippage' | 'beneficiary' | 'recipient';
 /** What a clarification or refusal is about. */
-export type Subject = 'swap' | 'bridge' | 'supply' | 'borrow' | 'repay' | 'withdraw' | 'liquidity' | 'composition' | 'request';
+export type Subject = 'swap' | 'bridge' | 'supply' | 'borrow' | 'repay' | 'withdraw' | 'liquidity' | 'composition' | 'request' | 'transfer';
 /** Which network question is asked; V1 used a capitalized label per action. */
-export type NetworkSubject = 'swap' | 'aave' | 'liquidity' | 'composition';
+export type NetworkSubject = 'swap' | 'aave' | 'liquidity' | 'composition' | 'transfer';
 export type CarriedLabel = 'network' | 'token' | 'amount' | 'destination' | 'recipient' | 'beneficiary' | 'slippage' | 'routing' | 'range' | 'maxima' | 'owner';
 
 const EN_CAPABILITIES = 'Flofi Copilot can author: swaps on Base, Base Sepolia, Ethereum Sepolia, Solana and Solana Devnet; Cross-chain Router USDC bridges ' +
   '(Base → Arbitrum One, Base Sepolia → Arbitrum Sepolia); Aave V3 Supply, Borrow, Repay and Withdraw of USDC on Base Sepolia and of WBTC on Ethereum Sepolia; Uniswap v3 liquidity on ' +
-  'Base Sepolia and Ethereum Sepolia and Orca liquidity on Solana Devnet; and Supply → Borrow → Swap the borrowed USDC to WETH on Base Sepolia.';
+  'Base Sepolia and Ethereum Sepolia and Orca liquidity on Solana Devnet; and Supply → Borrow → Swap the borrowed USDC to WETH on Base Sepolia. ' +
+  // BUILD-BASE-001: the catalog networks (real funds).
+  'On Base and Robinhood Chain (real funds): swaps, transfers and Uniswap v3 liquidity with any token of the network\'s official catalog, Aave V3 USDC on Base, ' +
+  'and the Router routes Arbitrum One → Base and Base or Arbitrum One ⇄ Robinhood Chain.';
 const EN_COMPOSITION = 'Flofi can combine steps only as Supply USDC → Borrow USDC → Swap the borrowed USDC to WETH (Aave V3, Base Sepolia). ' +
   'Other combinations cannot share one workflow yet: author each action on its own.';
 const PT_CAPABILITIES = 'O Flofi Copilot pode criar: swaps na Base, Base Sepolia, Ethereum Sepolia, Solana e Solana Devnet; bridges de USDC pelo Cross-chain Router ' +
   '(Base → Arbitrum One, Base Sepolia → Arbitrum Sepolia); Supply, Borrow, Repay e Withdraw na Aave V3 de USDC na Base Sepolia e de WBTC na Ethereum Sepolia; liquidez Uniswap v3 na ' +
-  'Base Sepolia e na Ethereum Sepolia e liquidez Orca na Solana Devnet; e Supply → Borrow → Swap do USDC emprestado para WETH na Base Sepolia.';
+  'Base Sepolia e na Ethereum Sepolia e liquidez Orca na Solana Devnet; e Supply → Borrow → Swap do USDC emprestado para WETH na Base Sepolia. ' +
+  'Na Base e na Robinhood Chain (fundos reais): swaps, transferências e liquidez Uniswap v3 com qualquer token do catálogo oficial da rede, Aave V3 de USDC na Base ' +
+  'e as rotas do Router Arbitrum One → Base e Base ou Arbitrum One ⇄ Robinhood Chain.';
 const PT_COMPOSITION = 'O Flofi só combina passos como Supply de USDC → Borrow de USDC → Swap do USDC emprestado para WETH (Aave V3, Base Sepolia). ' +
   'Outras combinações ainda não podem ficar no mesmo fluxo: crie cada ação separadamente.';
 
@@ -34,10 +39,10 @@ const EN = {
     protocol: 'the protocol', range: 'the price range', slippage: 'the maximum slippage',
     beneficiary: 'a beneficiary (connect your wallet, or include the address in your message)', recipient: 'the recipient' } as Record<MissingLabel, string>,
   subject: { swap: 'swap', bridge: 'bridge', supply: 'Aave Supply', borrow: 'Aave Borrow', repay: 'Aave Repay', withdraw: 'Aave Withdraw',
-    liquidity: 'liquidity position', composition: 'Supply → Borrow → Swap workflow', request: 'request' } as Record<Subject, string>,
+    liquidity: 'liquidity position', composition: 'Supply → Borrow → Swap workflow', request: 'request', transfer: 'transfer' } as Record<Subject, string>,
   tokenSubject: { swap: 'this swap', bridge: 'this bridge', supply: 'Aave Supply', borrow: 'Aave Borrow', repay: 'Aave Repay', withdraw: 'Aave Withdraw',
-    liquidity: 'this liquidity position', composition: 'Supply → Borrow → Swap workflow', request: 'this request' } as Record<Subject, string>,
-  networkSubject: { swap: 'Swap', aave: 'Aave V3', liquidity: 'Concentrated liquidity', composition: 'The Supply → Borrow → Swap workflow' } as Record<NetworkSubject, string>,
+    liquidity: 'this liquidity position', composition: 'Supply → Borrow → Swap workflow', request: 'this request', transfer: 'this transfer' } as Record<Subject, string>,
+  networkSubject: { swap: 'Swap', aave: 'Aave V3', liquidity: 'Concentrated liquidity', composition: 'The Supply → Borrow → Swap workflow', transfer: 'Transfer' } as Record<NetworkSubject, string>,
   stillNeeds: (subject: string, labels: readonly string[]) => `To prepare this ${subject}, Flofi still needs ${labels.join(', ')}.`,
   networkOnlyOn: (subject: string, options: readonly string[]) => `${subject} is available in Flofi on ${options.join(', ')} only. Which network?`,
   whichNetwork: (subject: string) => `Which network should Flofi use for ${subject}?`,
@@ -69,6 +74,19 @@ const EN = {
   connectedRecipientNote: 'Recipient: your connected wallet, bound at Review.',
   mainnetFundsNote: ROUTER_NETWORK_OPTIONS.mainnet.funds as string,
   aaveOnly: 'Flofi supports Aave V3 with USDC on Base Sepolia and WBTC on Ethereum Sepolia only.',
+  // BUILD-BASE-001: catalog networks.
+  aaveOnlyCatalog: 'Flofi supports Aave V3 with USDC on Base (real funds) and Base Sepolia, and WBTC on Ethereum Sepolia, only.',
+  catalogTokenUnknown: (token: string, network: string) => `${token} is not in the official ${network} catalog Flofi uses. Name a token from that catalog.`,
+  catalogUnavailable: (network: string) => `The official ${network} asset catalog is unavailable right now, so Flofi cannot check that token. Try again shortly.`,
+  catalogFundsNote: (network: string) => `Real funds on ${network}: your wallet signs every transaction after your Review; Flofi never signs.`,
+  catalogLiquidityNeeds: (network: string) => `To prepare this ${network} liquidity position, Flofi still needs both tokens and their maximum amounts (0 for none).`,
+  feeNotFound: (fee: string) => `Flofi could not find the fee tier ${fee}% in your message. Which fee tier: 0.01%, 0.05%, 0.3% or 1%?`,
+  catalogRangeNotFound: 'On this network Flofi takes the full range or exact ticks ("ticks -887220 to 887220"). Which range?',
+  fullRangeNote: 'Range: the full price range of the fee tier. Give ticks, for example "ticks -600 to 600", to narrow it.',
+  defaultFeeNote: (fee: string) => `Fee tier ${fee}% (Flofi default). Say, for example, "fee 0.05%" to choose another.`,
+  routerRoutesAll: (routes: readonly string[]) => `The Cross-chain Router supports ${routes.join(', ')}, plus Base → Arbitrum One and Base Sepolia → Arbitrum Sepolia.`,
+  routeRealFunds: (route: string) => `${route} uses real funds and no test network. Which route do you mean?`,
+  routerTokenOnly: (token: string, network: string) => `From ${network} the Cross-chain Router bridges ${token} only.`,
   withdrawToWallet: 'An Aave withdrawal always pays your connected wallet; Flofi cannot send it to another address.',
   beneficiaryNote: (wallet: string) => `Beneficiary: your connected wallet ${wallet}.`,
   whichPool: 'Which pool do you mean?',
@@ -123,7 +141,7 @@ const EN = {
   noKind: (kind: string) => `This workflow has no ${kind}. Nothing changed.`,
   noOrdinal: (count: number) => `This workflow has ${count} step${count === 1 ? '' : 's'}, so Flofi cannot find that one. Nothing changed.`,
   noOrdinalKind: (count: number, kind: string) => `This workflow has ${count} ${kind}${count === 1 ? '' : 's'}, so Flofi cannot find that one. Nothing changed.`,
-  kind: { SWAP: 'swap', BRIDGE: 'bridge', SUPPLY: 'supply', BORROW: 'borrow', REPAY: 'repay', WITHDRAW: 'withdraw', LIQUIDITY: 'liquidity position' } as Record<string, string>,
+  kind: { SWAP: 'swap', BRIDGE: 'bridge', SUPPLY: 'supply', BORROW: 'borrow', REPAY: 'repay', WITHDRAW: 'withdraw', LIQUIDITY: 'liquidity position', TRANSFER: 'transfer' } as Record<string, string>,
   repeatNeedsCue: 'Flofi repeats an earlier proposal only when you ask for “the same” or “again”. Describe the whole action, or say “do the same again”.',
   answered: (topic: string) => `Flofi answered a read-only question (${topic}).`,
   noReferent: 'Flofi cannot tell which step you mean: there is no pending proposal or single matching step. Name the step, for example “the swap” or “step 2”.',
@@ -183,10 +201,10 @@ const PT: CopilotCopy = {
     protocol: 'o protocolo', range: 'a faixa de preço', slippage: 'o slippage máximo',
     beneficiary: 'um beneficiário (conecte sua carteira ou inclua o endereço na mensagem)', recipient: 'o destinatário' },
   subject: { swap: 'swap', bridge: 'bridge', supply: 'Aave Supply', borrow: 'Aave Borrow', repay: 'Aave Repay', withdraw: 'Aave Withdraw',
-    liquidity: 'posição de liquidez', composition: 'fluxo Supply → Borrow → Swap', request: 'pedido' },
+    liquidity: 'posição de liquidez', composition: 'fluxo Supply → Borrow → Swap', request: 'pedido', transfer: 'transferência' },
   tokenSubject: { swap: 'este swap', bridge: 'esta bridge', supply: 'Aave Supply', borrow: 'Aave Borrow', repay: 'Aave Repay', withdraw: 'Aave Withdraw',
-    liquidity: 'esta posição de liquidez', composition: 'o fluxo Supply → Borrow → Swap', request: 'este pedido' },
-  networkSubject: { swap: 'o swap', aave: 'a Aave V3', liquidity: 'a liquidez concentrada', composition: 'o fluxo Supply → Borrow → Swap' },
+    liquidity: 'esta posição de liquidez', composition: 'o fluxo Supply → Borrow → Swap', request: 'este pedido', transfer: 'esta transferência' },
+  networkSubject: { swap: 'o swap', aave: 'a Aave V3', liquidity: 'a liquidez concentrada', composition: 'o fluxo Supply → Borrow → Swap', transfer: 'a transferência' },
   stillNeeds: (subject, labels) => `Para preparar este ${subject}, o Flofi ainda precisa saber: ${labels.join(', ')}.`,
   networkOnlyOn: (subject, options) => `${capitalize(subject)} está disponível no Flofi apenas em ${options.join(', ')}. Qual rede?`,
   whichNetwork: subject => `Em qual rede? O Flofi precisa saber a rede para ${subject}.`,
@@ -218,6 +236,18 @@ const PT: CopilotCopy = {
   connectedRecipientNote: 'Destinatário: sua carteira conectada, definida na Review.',
   mainnetFundsNote: 'Fundos reais: Base mainnet e Arbitrum One.',
   aaveOnly: 'O Flofi suporta a Aave V3 apenas com USDC na Base Sepolia e WBTC na Ethereum Sepolia.',
+  aaveOnlyCatalog: 'O Flofi suporta a Aave V3 apenas com USDC na Base (fundos reais) e na Base Sepolia, e WBTC na Ethereum Sepolia.',
+  catalogTokenUnknown: (token, network) => `${token} não está no catálogo oficial da ${network} que o Flofi usa. Indique um token desse catálogo.`,
+  catalogUnavailable: network => `O catálogo oficial de ativos da ${network} está indisponível agora, então o Flofi não consegue conferir esse token. Tente de novo em instantes.`,
+  catalogFundsNote: network => `Fundos reais na ${network}: sua carteira assina cada transação depois da sua revisão; o Flofi nunca assina.`,
+  catalogLiquidityNeeds: network => `Para preparar esta posição de liquidez na ${network}, o Flofi ainda precisa dos dois tokens e dos valores máximos de cada um (0 para nenhum).`,
+  feeNotFound: fee => `O Flofi não encontrou a faixa de taxa ${fee}% na sua mensagem. Qual faixa: 0,01%, 0,05%, 0,3% ou 1%?`,
+  catalogRangeNotFound: 'Nesta rede o Flofi usa a faixa completa ou ticks exatos ("ticks -887220 to 887220"). Qual faixa?',
+  fullRangeNote: 'Faixa: toda a faixa de preço da taxa escolhida. Informe ticks, por exemplo "ticks -600 to 600", para estreitá-la.',
+  defaultFeeNote: fee => `Faixa de taxa ${fee}% (padrão do Flofi). Diga, por exemplo, "fee 0.05%" para escolher outra.`,
+  routerRoutesAll: routes => `O Cross-chain Router suporta ${routes.join(', ')}, além de Base → Arbitrum One e Base Sepolia → Arbitrum Sepolia.`,
+  routeRealFunds: route => `${route} usa fundos reais e nenhuma rede de teste. Qual rota você quer dizer?`,
+  routerTokenOnly: (token, network) => `A partir da ${network}, o Cross-chain Router faz bridge apenas de ${token}.`,
   withdrawToWallet: 'Um withdraw da Aave sempre paga sua carteira conectada; o Flofi não pode enviá-lo para outro endereço.',
   beneficiaryNote: wallet => `Beneficiário: sua carteira conectada ${wallet}.`,
   whichPool: 'Qual pool você quer dizer?',
@@ -272,7 +302,7 @@ const PT: CopilotCopy = {
   noKind: kind => `Este fluxo não tem ${kind}. Nada mudou.`,
   noOrdinal: count => `Este fluxo tem ${count} passo${count === 1 ? '' : 's'}, então o Flofi não encontrou esse. Nada mudou.`,
   noOrdinalKind: (count, kind) => `Este fluxo tem ${count} ${kind}, então o Flofi não encontrou esse. Nada mudou.`,
-  kind: { SWAP: 'swap', BRIDGE: 'bridge', SUPPLY: 'supply', BORROW: 'borrow', REPAY: 'repay', WITHDRAW: 'withdraw', LIQUIDITY: 'posição de liquidez' },
+  kind: { SWAP: 'swap', BRIDGE: 'bridge', SUPPLY: 'supply', BORROW: 'borrow', REPAY: 'repay', WITHDRAW: 'withdraw', LIQUIDITY: 'posição de liquidez', TRANSFER: 'transferência' },
   repeatNeedsCue: 'O Flofi só repete uma proposta anterior quando você pede “o mesmo” ou “de novo”. Descreva a ação completa, ou diga “faz o mesmo de novo”.',
   answered: topic => `Flofi answered a read-only question (${topic}).`,
   noReferent: 'O Flofi não sabe a qual passo você se refere: não há proposta pendente nem um único passo correspondente. Diga o passo, por exemplo “o swap” ou “o passo 2”.',

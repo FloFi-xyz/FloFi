@@ -17,7 +17,9 @@ import type { NetworkId, StrategySpec } from '../../engine/strategy-spec';
 import { composeWorkflowOrRefuse, PlatformRefusal, type WalletRef } from '../../platform/index.ts';
 import { workflowVisualModel, type WorkflowVisualModel } from '../../platform/workflow-visual.ts';
 
-const LENDING_NETWORK: Readonly<Record<string, NetworkId>> = { 'Base Sepolia': 'base-sepolia', 'Ethereum Sepolia': 'ethereum-sepolia' };
+const LENDING_NETWORK: Readonly<Record<string, NetworkId>> = { 'Base Sepolia': 'base-sepolia', 'Ethereum Sepolia': 'ethereum-sepolia', 'Base': 'base' };
+/** BUILD-BASE-001: the catalog networks (Canvas name → strategy network): Robinhood Chain and Base. */
+const CATALOG_NETWORK: Readonly<Record<string, NetworkId>> = { 'Robinhood Chain': 'robinhood', 'Base': 'base' };
 const SWAP_NETWORK: Readonly<Record<string, NetworkId>> = { ADD_SWAP: 'base', ADD_TESTNET_SWAP: 'base-sepolia', ADD_ETHEREUM_SEPOLIA_SWAP: 'ethereum-sepolia' };
 const ROUTING = { AUTO: 'auto', LIFI: 'lifi', ACROSS: 'across' } as const;
 /** The router's chain names as strategy networks (BUILD-RH-002 adds Robinhood Chain in and out of Base and Arbitrum One). */
@@ -44,21 +46,23 @@ export function strategyOfCommand(command: Command): StrategySpec | null {
       return { version: 1, action: 'bridge', sourceNetwork: ROUTER_NETWORK[i.source], destinationNetwork: ROUTER_NETWORK[i.destination], asset: i.token, amount: i.amount,
         routing: ROUTING[i.routing], slippageBps: bps(i.slippage), ...i.recipient ? { recipient: i.recipient } : {} } as StrategySpec;
     }
-    // BUILD-RH-002: Robinhood Chain swaps and positions over the official catalog, and Robinhood Chain transfers.
+    // BUILD-RH-002: Robinhood Chain swaps and positions over the official catalog, and Robinhood Chain transfers (BUILD-BASE-001: and Base's).
     case 'ADD_CRYPTO_ACTION': {
       const i = c.input as { selection: { action: string; network: string; from: string; to?: string }; amount: string; secondAmount?: string; slippage: string;
         fee?: number; rangeUnit?: string; lower?: string; upper?: string };
-      if (i.selection.network !== 'Robinhood Chain' || !i.selection.to) return null;
-      if (i.selection.action === 'swap') return { version: 1, action: 'swap', network: 'robinhood', inputAsset: i.selection.from, outputAsset: i.selection.to,
+      const network = CATALOG_NETWORK[i.selection.network];
+      if (!network || !i.selection.to) return null;
+      if (i.selection.action === 'swap') return { version: 1, action: 'swap', network, inputAsset: i.selection.from, outputAsset: i.selection.to,
         amount: i.amount, slippageBps: bps(i.slippage) } as StrategySpec;
       if (i.selection.action !== 'pool') return null;
-      return { version: 1, action: 'add_liquidity', network: 'robinhood', maxAmounts: { [i.selection.from]: i.amount, [i.selection.to]: i.secondAmount ?? '0' },
+      return { version: 1, action: 'add_liquidity', network, maxAmounts: { [i.selection.from]: i.amount, [i.selection.to]: i.secondAmount ?? '0' },
         range: i.rangeUnit === 'TICK' ? { unit: 'tick', lower: i.lower, upper: i.upper } : { unit: 'full' }, ...i.fee === undefined ? {} : { feeTier: i.fee },
         slippageBps: bps(i.slippage) } as StrategySpec;
     }
     case 'ADD_RH_TRANSFER': {
       const i = c.input as { network: string; asset: string; amount: string; recipient: string };
-      return i.network !== 'Robinhood Chain' ? null : { version: 1, action: 'transfer', network: 'robinhood', asset: i.asset, amount: i.amount,
+      const network = CATALOG_NETWORK[i.network];
+      return !network ? null : { version: 1, action: 'transfer', network, asset: i.asset, amount: i.amount,
         ...i.recipient === 'CONNECTED_OWNER' ? {} : { recipient: i.recipient } } as StrategySpec;
     }
     case 'ADD_SUPPLY': case 'ADD_BORROW': case 'ADD_REPAY': {

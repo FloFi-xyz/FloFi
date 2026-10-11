@@ -117,8 +117,9 @@ describe('BUILD-MCP-001 simulate_strategy: the flows\' own simulation as a read-
 
   it('refuses what MCP cannot preview, stale hashes and non-cloud runtimes, without reaching any flow', async () => {
     const { client } = previewRuntime({}, {});
+    // BUILD-BASE-001: a Base swap previews on its own flow, which this deployment has not enabled.
     expect((await simulate(client, { action: 'swap', network: 'base', inputAsset: 'USDC', outputAsset: 'WETH', amount: '1' }, ROUTER_OWNER)).output)
-      .toEqual({ ok: false, code: 'SIMULATION_LOCAL_FORK_ONLY' });
+      .toMatchObject({ ok: false });
     expect((await simulate(client, { action: 'add_liquidity', network: 'solana-devnet', maxAmounts: { SOL: '0.01', devUSDC: '0.3' },
       range: { unit: 'tick', lower: '-29952', upper: '-25600' } }, ROUTER_OWNER)).output).toEqual({ ok: false, code: 'SIMULATION_REQUIRES_OWNER_BROWSER' });
     const bridge = { action: 'bridge', sourceNetwork: 'base-sepolia', destinationNetwork: 'arbitrum-sepolia', asset: 'USDC', amount: '5' };

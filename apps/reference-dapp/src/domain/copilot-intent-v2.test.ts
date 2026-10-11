@@ -36,7 +36,8 @@ describe('CopilotIntentV2 strict parsing', () => {
     rejects({ ...intent.edit({ amount: '2' }), calldata: '0xa9059cbb' });
     rejects({ ...intent.edit({ amount: '2' }), changes: { ...CHANGES, amount: '2', data: '0x00' } });
     rejects({ ...intent.edit({ amount: '2' }), target: { ...NO_TARGET, nodeId: 'node-002' } });
-    rejects({ ...intent.edit({ amount: '2' }), target: { step: 'TRANSFER', ordinal: null } });
+    // BUILD-BASE-001: TRANSFER is a step kind now; an undeclared kind is still refused.
+    rejects({ ...intent.edit({ amount: '2' }), target: { step: 'STAKE', ordinal: null } });
     rejects({ ...intent.edit({ amount: '2' }), target: { step: null, ordinal: 'SIXTH' } });
     rejects(intent.question('SEND_FUNDS'));
     rejects({ ...intent.question('PROTOCOLS'), answer: 'Aave pays 12%' });

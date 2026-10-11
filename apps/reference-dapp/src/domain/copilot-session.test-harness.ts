@@ -91,5 +91,9 @@ export const act = {
   bridge: (fields: Record<string, unknown> = {}) => ({ type: 'BRIDGE', sourceNetwork: null, destinationNetwork: null, asset: null, amount: null, slippageBps: null, routing: null, recipient: null, ...fields }),
   lending: (type: string, fields: Record<string, unknown> = {}) => ({ type, protocol: 'AAVE_V3', network: null, asset: null, amount: null, beneficiary: null, ...fields }),
   liquidity: (fields: Record<string, unknown> = {}) => ({ type: 'LIQUIDITY', protocol: null, network: null, deposits: [], rangeUnit: null, lower: null, upper: null, slippageBps: null, ...fields }),
+  /** BUILD-BASE-001: a catalog-network transfer, and a catalog pool with its fee tier. */
+  transfer: (fields: Record<string, unknown> = {}) => ({ type: 'TRANSFER', network: null, asset: null, amount: null, recipient: null, ...fields }),
+  catalogLiquidity: (fields: Record<string, unknown> = {}) => ({ type: 'LIQUIDITY', protocol: null, network: null, deposits: [], rangeUnit: null, lower: null, upper: null,
+    slippageBps: null, feeTier: null, ...fields }),
 };
 export { TEST_WALLET };

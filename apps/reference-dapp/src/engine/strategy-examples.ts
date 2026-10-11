@@ -37,4 +37,13 @@ export const STRATEGY_EXAMPLES: readonly { readonly id: string; readonly strateg
   { id: 'swap-robinhood', strategy: { action: 'swap', network: 'robinhood', inputAsset: 'USDG', outputAsset: 'WETH', amount: '10', slippageBps: 50 } },
   { id: 'add-liquidity-robinhood', strategy: { action: 'add_liquidity', network: 'robinhood', maxAmounts: { USDG: '10', WETH: '0.003' }, range: { unit: 'full' }, feeTier: 100 } },
   { id: 'transfer-robinhood', strategy: { action: 'transfer', network: 'robinhood', asset: 'USDG', amount: '1' } },
+  // BUILD-BASE-001: Base mainnet (real funds) as a catalog network. Examples use the code-pinned ETH/USDC/WETH so they compose without the token
+  // list; any token-list symbol (e.g. `outputAsset: 'cbBTC'`) is named the same way once the validated list is loaded. `swap-base` above is
+  // the USDC ⇄ WETH reference swap (BUILD-002 declaration).
+  { id: 'bridge-arbitrum-base', strategy: { action: 'bridge', sourceNetwork: 'arbitrum-one', destinationNetwork: 'base', asset: 'USDC', amount: '5', routing: 'auto' } },
+  { id: 'add-liquidity-base', strategy: { action: 'add_liquidity', network: 'base', maxAmounts: { USDC: '10', WETH: '0.003' }, range: { unit: 'full' }, feeTier: 500 } },
+  { id: 'transfer-base', strategy: { action: 'transfer', network: 'base', asset: 'USDC', amount: '1' } },
+  ...(['supply', 'borrow', 'repay'] as const).map(action =>
+    ({ id: `${action}-base`, strategy: { action, network: 'base', asset: 'USDC', amount: '1', beneficiary: EXAMPLE_ACCOUNT } as StrategySpec })),
+  { id: 'withdraw-base', strategy: { action: 'withdraw', network: 'base', asset: 'USDC', amount: '1' } },
 ]);

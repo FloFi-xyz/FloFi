@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { AAVE_V3_LENDING_PROFILES, ASSET_SYMBOL, UNISWAP_LIQUIDITY_PROFILES, baseAssetRegistry, SOLANA_SWAP_RUNTIMES, ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY } from '@defi-workflow-engine/action-registry';
-import { createBaseSepoliaReviewContext, createEthereumSepoliaReviewContext, createReviewContext, liquidityDetails } from '@defi-workflow-engine/reference-linter';
+import { createBaseSepoliaReviewContext, createEthereumSepoliaReviewContext, createReviewContext } from '@defi-workflow-engine/reference-linter';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { createAuthoredTransfer, transferDetails, TRANSFER_NETWORKS, type TransferNetwork } from './robinhood-transfer-authoring';
 import { classifyWalletEnvironment, type WalletEnvironment } from '../wallet/environment';
 import type { Workflow } from './initial-workflow';
-import { createSwapNode, swapDetails, formatHumanAmount } from './swap-authoring';
+import { createSwapNode, swapDetails } from './swap-authoring';
 import { createSolanaSwapNode, solanaSwapDetails, type SolanaSwapInput } from './jupiter-authoring';
 import { createUniswapLiquidityNode, uniswapLiquidityDetails } from './uniswap-liquidity-authoring';
 import { createSolanaLiquidityNode, solanaLiquidityDetails } from './solana-liquidity-authoring';
@@ -62,6 +62,8 @@ const pools: readonly CryptoPickerProfile[] = [
 const transfers: readonly CryptoPickerProfile[] = Object.entries(TRANSFER_NETWORKS).map(([network, profile]): CryptoPickerProfile => profile.chain === ROBINHOOD_CHAIN
   // BUILD-RH-002: Robinhood Chain transfers native ETH and catalog assets; non-shortcut assets come from the official catalog.
   ? { network, chain: profile.chain, provider: 'Transfer', get tokens() { return ['ETH', 'USDG', 'WETH', ...featuredStockSymbols()]; }, catalog: true }
+  // BUILD-BASE-001: Base likewise (ETH, then its shortcuts; search reaches the validated token list).
+  : profile.chain === BASE_CHAIN ? { network, chain: profile.chain, provider: 'Transfer', get tokens() { return ['ETH', ...featuredNetworkSymbols(BASE_CHAIN)]; }, catalog: true }
   : { network, chain: profile.chain, provider: 'Native transfer', tokens: ['ETH'] });
 const lending: readonly CryptoPickerProfile[] = AAVE_V3_LENDING_PROFILES.map(profile => ({ network: profile.network, chain: profile.chain, provider: 'Aave V3', tokens: [profile.symbol] }));
 export function cryptoProfiles(action: CryptoAction): readonly CryptoPickerProfile[] { return action === 'swap' ? swaps : action === 'pool' ? pools : action === 'transfer' ? transfers : lending; }
@@ -96,8 +98,11 @@ export function cryptoTokenOptions(selection: CryptoSelection, side: 'source' | 
 }
 export function selectCryptoToken(selection: CryptoSelection, side: 'source' | 'destination', token: string): CryptoSelection {
   const found = cryptoProfile(selection);
-  if (!found || (!cryptoTokenOptions(selection, side).includes(token) && !(found.catalog && erc20Only(selection.action) && profileHasToken(found, token, selection.action))))
+  // BUILD-BASE-001: on a catalog network a searched asset is valid for transfers too (their source asset), not only swaps and pools.
+  const searchable = found?.catalog && (erc20Only(selection.action) || (selection.action === 'transfer' && side === 'source'));
+  if (!found || (!cryptoTokenOptions(selection, side).includes(token) && !(searchable && profileHasToken(found, token, selection.action))))
     throw new Error('ACTION_TOKEN_UNSUPPORTED');
+  if (selection.action === 'transfer' && found.catalog && side === 'source') return { ...selection, from: token };
   if (!erc20Only(selection.action) || (selection.action === 'pool' && !found.catalog)) return selection;
   const profile = found;
   const next = side === 'source' ? { ...selection, from: token } : { ...selection, to: token };

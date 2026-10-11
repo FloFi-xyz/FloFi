@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { COPILOT_ASSETS, COPILOT_LIMITS, COPILOT_MISSING_FIELDS, COPILOT_NETWORKS, COPILOT_RANGE_UNITS, COPILOT_ROUTING, COPILOT_V1_PARTS,
-  CopilotIntentError, type CopilotAction, type CopilotAsset, type CopilotDeposit, type CopilotMissingField, type CopilotNetwork,
+import { COPILOT_FEE_TIERS, COPILOT_LIMITS, COPILOT_MISSING_FIELDS, COPILOT_ROUTING, COPILOT_V1_PARTS, COPILOT_V2_NETWORKS, COPILOT_V2_RANGE_UNITS,
+  CopilotIntentError, type CopilotAction, type CopilotAsset, type CopilotDeposit, type CopilotFeeTier, type CopilotMissingField, type CopilotNetwork,
   type CopilotRouting } from './copilot-intent';
 import { parseAutomationDraft, AUTOMATION_DRAFT_SCHEMA, type AutomationDraft } from './copilot-automation';
 import { COPILOT_LANGUAGES, type CopilotLanguage } from './copilot-messages';
@@ -13,7 +13,8 @@ import { COPILOT_LANGUAGES, type CopilotLanguage } from './copilot-messages';
  * sign, quote, carry calldata or name a chain id, nonce, key or signature.
  */
 export const COPILOT_INTENT_V2_VERSION = '2';
-export const COPILOT_STEP_KINDS = ['SWAP', 'BRIDGE', 'SUPPLY', 'BORROW', 'REPAY', 'WITHDRAW', 'LIQUIDITY'] as const;
+/** BUILD-BASE-001: TRANSFER steps (catalog-network transfers) can be referred to like every other step. */
+export const COPILOT_STEP_KINDS = ['SWAP', 'BRIDGE', 'SUPPLY', 'BORROW', 'REPAY', 'WITHDRAW', 'LIQUIDITY', 'TRANSFER'] as const;
 export const COPILOT_ORDINALS = ['FIRST', 'SECOND', 'THIRD', 'FOURTH', 'FIFTH', 'LAST'] as const;
 export const COPILOT_REUSE_FIELDS = ['network', 'asset', 'amount', 'destination', 'recipient', 'slippage'] as const;
 export const COPILOT_QUESTION_TOPICS = ['WORKFLOW_OVERVIEW', 'STEP_COUNT', 'STEP_DETAIL', 'PROTOCOLS', 'NETWORKS', 'APPROVALS', 'EXECUTION_FLOW',
@@ -36,7 +37,8 @@ export type CopilotTarget = { readonly step: CopilotStepKind | null; readonly or
 export type CopilotChanges = {
   readonly amount: string | null; readonly slippageBps: string | null; readonly network: CopilotNetwork | null; readonly destinationNetwork: CopilotNetwork | null;
   readonly inputAsset: CopilotAsset | null; readonly outputAsset: CopilotAsset | null; readonly recipient: string | null; readonly routing: CopilotRouting | null;
-  readonly deposits: readonly CopilotDeposit[]; readonly rangeUnit: (typeof COPILOT_RANGE_UNITS)[number] | null; readonly lower: string | null; readonly upper: string | null;
+  readonly deposits: readonly CopilotDeposit[]; readonly rangeUnit: (typeof COPILOT_V2_RANGE_UNITS)[number] | null; readonly lower: string | null; readonly upper: string | null;
+  /** BUILD-BASE-001: a new catalog-pool fee tier; absent when the model's shape omits it. */ readonly feeTier?: CopilotFeeTier | null;
 };
 export type CopilotReuse = { readonly from: CopilotTarget; readonly fields: readonly CopilotReuseField[] };
 type Common = { readonly version: '2'; readonly language: CopilotLanguage };
@@ -52,7 +54,7 @@ export type CopilotIntentV2 = Common & (
   | { readonly kind: 'CLARIFICATION_REQUIRED'; readonly missing: readonly CopilotV2MissingField[]; readonly question: string; readonly options: readonly string[] }
   | { readonly kind: 'UNSUPPORTED'; readonly reason: string });
 
-const { exact, list, oneOf, nullableOneOf, text, amount, bps, address, parseAction, signedDecimal, depositAmount, fail } = COPILOT_V1_PARTS;
+const { exact, list, oneOf, nullableOneOf, text, amount, bps, address, parseActionV2: parseAction, signedDecimal, depositAmount, fail, symbol } = COPILOT_V1_PARTS;
 const CHANGE_KEYS = ['amount', 'slippageBps', 'network', 'destinationNetwork', 'inputAsset', 'outputAsset', 'recipient', 'routing', 'deposits', 'rangeUnit',
   'lower', 'upper'] as const;
 
@@ -61,19 +63,21 @@ function parseTarget(value: unknown): CopilotTarget {
   return { step: nullableOneOf(COPILOT_STEP_KINDS, v.step), ordinal: nullableOneOf(COPILOT_ORDINALS, v.ordinal) };
 }
 function parseChanges(value: unknown, requireOne: boolean): CopilotChanges {
-  const v = exact(value, CHANGE_KEYS);
+  const withTier = !!value && typeof value === 'object' && Object.hasOwn(value, 'feeTier');
+  const v = exact(value, withTier ? [...CHANGE_KEYS, 'feeTier'] : CHANGE_KEYS);
   const deposits = list(v.deposits, COPILOT_V2_LIMITS.maxDeposits).map(item => {
     const d = exact(item, ['asset', 'maxAmount']);
-    return { asset: oneOf(COPILOT_ASSETS, d.asset), maxAmount: depositAmount(d.maxAmount) };
+    return { asset: symbol(d.asset) ?? fail(), maxAmount: depositAmount(d.maxAmount) };
   });
-  const changes: CopilotChanges = { amount: amount(v.amount), slippageBps: bps(v.slippageBps), network: nullableOneOf(COPILOT_NETWORKS, v.network),
-    destinationNetwork: nullableOneOf(COPILOT_NETWORKS, v.destinationNetwork), inputAsset: nullableOneOf(COPILOT_ASSETS, v.inputAsset),
-    outputAsset: nullableOneOf(COPILOT_ASSETS, v.outputAsset), recipient: address(v.recipient), routing: nullableOneOf(COPILOT_ROUTING, v.routing), deposits,
-    rangeUnit: nullableOneOf(COPILOT_RANGE_UNITS, v.rangeUnit), lower: signedDecimal(v.lower), upper: signedDecimal(v.upper) };
-  // A range is one change: unit and both bounds together, or none of them.
+  const changes: CopilotChanges = { amount: amount(v.amount), slippageBps: bps(v.slippageBps), network: nullableOneOf(COPILOT_V2_NETWORKS, v.network),
+    destinationNetwork: nullableOneOf(COPILOT_V2_NETWORKS, v.destinationNetwork), inputAsset: symbol(v.inputAsset),
+    outputAsset: symbol(v.outputAsset), recipient: address(v.recipient), routing: nullableOneOf(COPILOT_ROUTING, v.routing), deposits,
+    rangeUnit: nullableOneOf(COPILOT_V2_RANGE_UNITS, v.rangeUnit), lower: signedDecimal(v.lower), upper: signedDecimal(v.upper),
+    ...withTier ? { feeTier: nullableOneOf(COPILOT_FEE_TIERS, v.feeTier) } : {} };
+  // A range is one change: unit and both bounds together (the full range has none), or none of them.
   const range = [changes.rangeUnit, changes.lower, changes.upper].filter(item => item !== null).length;
-  if (range !== 0 && range !== 3) return fail();
-  if (requireOne && !CHANGE_KEYS.some(key => key === 'deposits' ? deposits.length > 0 : changes[key] !== null)) return fail();
+  if (changes.rangeUnit === 'FULL' ? range !== 1 : range !== 0 && range !== 3) return fail();
+  if (requireOne && !CHANGE_KEYS.some(key => key === 'deposits' ? deposits.length > 0 : changes[key] !== null) && !changes.feeTier) return fail();
   return changes;
 }
 const common = (v: Record<string, unknown>): Common => {
@@ -139,7 +143,7 @@ export const v1MissingFields = (missing: readonly CopilotV2MissingField[]): Copi
   missing.filter((field): field is CopilotMissingField => field !== 'target');
 
 // Strict structured-output schema. Only conservative keywords; lengths, patterns, counts and the range rule are enforced above.
-const { string, nullableString, constant, choice, nullableChoice, object, actions: actionSchemas } = COPILOT_V1_PARTS.schema;
+const { string, nullableString, constant, choice, nullableChoice, object, actionsV2: actionSchemas, symbolText, networkV2Text } = COPILOT_V1_PARTS.schema;
 const AMOUNT_TEXT = 'Exactly the number the user wrote in the current request, digits with "." as decimal separator; null if not stated.';
 const TARGET = object({
   step: nullableChoice(COPILOT_STEP_KINDS, 'The kind of step the user referred to ("the swap", "a bridge", "o supply"); null if none was named.'),
@@ -148,16 +152,17 @@ const TARGET = object({
 const CHANGES = object({
   amount: nullableString(AMOUNT_TEXT),
   slippageBps: nullableString('New maximum slippage in basis points only if the user stated it (0.5% = "50"); null otherwise.'),
-  network: nullableChoice(COPILOT_NETWORKS, 'New network (for a bridge: new source) only if the user named it; null otherwise.'),
-  destinationNetwork: nullableChoice(COPILOT_NETWORKS, 'New bridge destination only if the user named it; null otherwise.'),
-  inputAsset: nullableChoice(COPILOT_ASSETS, 'New input token only if the user named it; null otherwise.'),
-  outputAsset: nullableChoice(COPILOT_ASSETS, 'New output token only if the user named it; null otherwise.'),
+  network: nullableChoice(COPILOT_V2_NETWORKS, 'New network (for a bridge: new source) only if the user named it; null otherwise. ' + networkV2Text),
+  destinationNetwork: nullableChoice(COPILOT_V2_NETWORKS, 'New bridge destination only if the user named it; null otherwise.'),
+  inputAsset: nullableString('New input token only if the user named it; null otherwise. ' + symbolText),
+  outputAsset: nullableString('New output token only if the user named it; null otherwise. ' + symbolText),
   recipient: nullableString('A new recipient or beneficiary 0x address only if the user typed it exactly; null otherwise.'),
   routing: nullableChoice(COPILOT_ROUTING, 'New bridge provider preference only if the user named LI.FI, Across or automatic; null otherwise.'),
   deposits: { type: 'array', description: 'New liquidity maximum for each token the user named (at most 2); empty if unchanged.',
-    items: object({ asset: choice(COPILOT_ASSETS, 'Token.'), maxAmount: string(AMOUNT_TEXT) }) },
-  rangeUnit: nullableChoice(COPILOT_RANGE_UNITS, 'PRICE or TICK for a new liquidity range; null if unchanged.'),
+    items: object({ asset: string(symbolText), maxAmount: string(AMOUNT_TEXT) }) },
+  rangeUnit: nullableChoice(COPILOT_V2_RANGE_UNITS, 'PRICE or TICK (with both bounds) or FULL (no bounds) for a new liquidity range; null if unchanged.'),
   lower: nullableString('New lower range bound exactly as written; null if unchanged.'), upper: nullableString('New upper range bound exactly as written; null if unchanged.'),
+  feeTier: nullableChoice(COPILOT_FEE_TIERS, 'New catalog-pool fee tier in percent only if the user named it; null otherwise.'),
 });
 const head = (kind: string) => ({ version: constant(COPILOT_INTENT_V2_VERSION),
   language: choice(COPILOT_LANGUAGES, 'Language of the latest user message: PT for Portuguese (also mixed Portuguese and English), EN otherwise.'), kind: constant(kind) });

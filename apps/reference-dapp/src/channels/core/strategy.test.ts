@@ -43,6 +43,14 @@ const SENTENCES: Readonly<Record<string, string>> = {
   'swap-robinhood': 'swap 10 USDG for WETH on Robinhood slippage 50 bps',
   'add-liquidity-robinhood': 'add liquidity 10 USDG and 0.003 WETH on Robinhood fee 0.01% full range slippage 100 bps',
   'transfer-robinhood': 'transfer 1 USDG on Robinhood',
+  // BUILD-BASE-001: Base mainnet (real funds) as a catalog network, and the Router's Arbitrum One → Base route.
+  'bridge-arbitrum-base': 'bridge 5 USDC from Arbitrum to Base via auto slippage 50 bps',
+  'add-liquidity-base': 'add liquidity 10 USDC and 0.003 WETH on Base fee 0.05% full range slippage 100 bps',
+  'transfer-base': 'transfer 1 USDC on Base',
+  'supply-base': `supply 1 USDC to Aave on Base beneficiary ${OWNER}`,
+  'borrow-base': `borrow 1 USDC from Aave on Base beneficiary ${OWNER}`,
+  'repay-base': `repay 1 USDC to Aave on Base beneficiary ${OWNER}`,
+  'withdraw-base': 'withdraw 1 USDC from Aave on Base',
 };
 const base = initialEditor().workflow, context = dappReviewContext();
 const chat = (sentence: string) => parseLocalCommand(sentence, base, context, null);

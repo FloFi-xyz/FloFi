@@ -54,7 +54,9 @@ export type TurnDecision = { readonly action: TurnAction; readonly command: Comm
   /** BUILD-AUTOMATION-001: the one-time code of a SUBSCRIBE turn (`automations ABCD-EFGH-JKLM`), handed to the subscription hook. */
   readonly subscribeCode?: string };
 export type TurnInput = { readonly content: TurnContent; readonly state: ChannelState; readonly optedOut: boolean; readonly interpret: ChannelInterpreter | null;
-  readonly support: string; readonly privacy: string };
+  readonly support: string; readonly privacy: string;
+  /** BUILD-BASE-001: registers the validated catalogs of the catalog networks a text (and an untrusted intent) names; none = pinned assets only. */
+  readonly catalogs?: ((text: string, intent?: unknown) => Promise<void>) | null };
 
 const BASE: Workflow = initialEditor().workflow;
 const CONTEXT = dappReviewContext();
@@ -148,6 +150,8 @@ export async function decideTurn(input: TurnInput): Promise<TurnDecision> {
   const pending = state.pending, env = environment(pending), conversation = decodeCopilot(state.copilot, env);
   const openQuestion = conversation.draft !== null || state.choices.length > 0;
   if (!openQuestion && AUTHORIZATION.test(normalized)) return decision('REPLY', 'AUTHORIZATION_REFUSED', greet([text(m.authority)]), greeted);
+  // Catalog-network symbols resolve only in validated catalogs, registered for the networks this request names (where the deployment enables them).
+  await input.catalogs?.([...conversation.segment, raw].join('\n'));
   // The exact grammar first: exactly what a user could type in FloFi's chat, with no default beneficiary.
   try {
     const command = parseLocalCommand(raw, BASE, CONTEXT, null);
@@ -164,6 +168,7 @@ export async function decideTurn(input: TurnInput): Promise<TurnDecision> {
   else {
     let result: CopilotResultV2;
     try { result = await input.interpret(start.request); } catch { result = { ok: false, code: 'COPILOT_UNAVAILABLE' }; }
+    if (result.ok) await input.catalogs?.([...conversation.segment, raw].join('\n'), result.intent);
     ({ reply, next } = finishTurn(start.turn, result, env));
   }
   const lm = channelCopy(next.language);

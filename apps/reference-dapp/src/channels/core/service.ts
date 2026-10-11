@@ -37,7 +37,9 @@ export type ChannelContext = { readonly core: ChannelCoreConfig; readonly store:
   /** BUILD-AUTOMATION-001: the subscription hook (linking a chat to an owner's automation notifications); none = not offered. */
   readonly subscriptions?: ChannelSubscriptions | null;
   /** BUILD-WORKFLOW-VISUAL-PRESENTATION-001: the shared workflow renderer; none = proposals are sent as text only. */
-  readonly visuals?: ChannelVisualRenderer | null };
+  readonly visuals?: ChannelVisualRenderer | null;
+  /** BUILD-BASE-001: registers the validated catalogs of the catalog networks a message names (the deployment's own gates); none = pinned assets only. */
+  readonly catalogs?: ((text: string, intent?: unknown) => Promise<void>) | null };
 export const LEASE_SECONDS = 300;
 export const LIMITS = Object.freeze({ inbound: [20, 600] as const, model: [30, 3_600] as const, preview: [10, 3_600] as const });
 const MAX_EVENT_ATTEMPTS = 3;
@@ -144,7 +146,8 @@ export function createChannelService(ctx: ChannelContext) {
     }
     const interpret: ChannelInterpreter | null = ctx.interpreter && core.copilot ? async request =>
       await store.allow(`channel:model:${conversationId}`, LIMITS.model[0], LIMITS.model[1], now) ? ctx.interpreter!(request) : { ok: false, code: 'COPILOT_BUSY' } : null;
-    const prior = state, decision = await decideTurn({ content: payload.content, state, optedOut: !active, interpret, support: core.supportContact, privacy: core.privacyUrl });
+    const prior = state, decision = await decideTurn({ content: payload.content, state, optedOut: !active, interpret, support: core.supportContact, privacy: core.privacyUrl,
+      catalogs: ctx.catalogs ?? null });
     state = decision.state;
     const lm = channelCopy(state.language);
     switch (decision.action) {

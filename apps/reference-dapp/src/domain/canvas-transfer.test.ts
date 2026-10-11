@@ -7,9 +7,9 @@ import { canvasAmountCommand } from './canvas-action-setup';
 import { editorHistoryReducer, initialEditorHistory } from './editor-history';
 
 describe('native self-transfer Canvas parity', () => {
-  // BUILD-RH-002 adds Robinhood Chain mainnet (native ETH and catalog assets); the testnets stay native self-transfers.
-  it('offers the two test networks and Robinhood Chain mainnet', () => {
-    expect(cryptoProfiles('transfer' as CryptoAction).map(p => p.network)).toEqual(['Robinhood Chain Testnet', 'Ethereum Sepolia', 'Robinhood Chain']);
+  // BUILD-RH-002 adds Robinhood Chain mainnet (native ETH and catalog assets); the testnets stay native self-transfers. BUILD-BASE-001 adds Base.
+  it('offers the two test networks, Robinhood Chain and Base mainnet', () => {
+    expect(cryptoProfiles('transfer' as CryptoAction).map(p => p.network)).toEqual(['Robinhood Chain Testnet', 'Ethereum Sepolia', 'Robinhood Chain', 'Base']);
     expect(cryptoProfiles('transfer' as CryptoAction).slice(0, 2).every(p => p.tokens.join() === 'ETH')).toBe(true);
   });
   it.each(['Robinhood Chain Testnet', 'Ethereum Sepolia'])('uses the existing canonical self-transfer on %s', network => {
