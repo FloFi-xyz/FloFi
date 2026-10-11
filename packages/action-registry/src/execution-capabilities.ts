@@ -46,7 +46,7 @@ const adapterVersions: Readonly<Record<string, string>> = Object.freeze({
   'aave-v3': '1.0.0', 'uniswap.v3': '1.0.0', 'cow.protocol': '1.0.0', 'lifi.rest': '1.0.0', 'across.direct': '1.0.0',
   'gryloo.calculated-split': '1.0.0', 'gryloo.template': '1.0.0', 'jupiter.swap-v2': '1.0.0',
   'orca.whirlpools-devnet': '1.0.0', 'orca.whirlpools-devnet-liquidity': '1.0.0', 'evm.native-transfer': '1.0.0',
-  'flofi.router': '1.0.0',
+  'flofi.router': '1.0.0', 'evm.token-transfer': '1.0.0',
 });
 const rows: ExecutionCapabilityProfile[] = [];
 function add(actionType: string, adapterId: string, chainId: string, environment: ExecutionEnvironment,
@@ -103,6 +103,16 @@ add('asset.transfer', 'evm.native-transfer', 'eip155:11155111', 'PUBLIC_TESTNET'
 add('asset.swap.exact-input', 'uniswap.v3', 'eip155:11155111', 'PUBLIC_TESTNET', fork, null, 'DIRECT_TRANSACTION', ['INJECTED_WALLET', 'QUOTE_PROVIDER', 'REVIEWED_ARTIFACTS'], ['A']);
 // The canonical concentrated-liquidity action on Ethereum Sepolia via Uniswap v3 (USDC/WETH 0.3%), owner wallet only; none demonstrated yet.
 add('asset.liquidity.concentrated', 'uniswap.v3', 'eip155:11155111', 'PUBLIC_TESTNET', fork, null, 'DIRECT_TRANSACTION', ['INJECTED_WALLET', 'QUOTE_PROVIDER', 'REVIEWED_ARTIFACTS'], ['A']);
+// BUILD-RH-002: Robinhood Chain mainnet (eip155:4663) as a first-class network. Uniswap v3 swap and concentrated liquidity
+// over the official asset catalog (Stock Tokens, USDG, WETH), the transfer engine (native ETH and catalog ERC-20s) and the
+// Cross-chain Router (Robinhood USDG ↔ Base/Arbitrum USDC, WETH ↔ WETH, sourced on either side). Real funds: owner execution
+// is implemented, signed and sent only by the owner's wallet and gated by an explicit deployment opt-in; none is
+// demonstrated, so no evidence ceiling is claimed.
+for (const [action, adapter] of [['asset.swap.exact-input', 'uniswap.v3'], ['asset.liquidity.concentrated', 'uniswap.v3'],
+  ['asset.transfer', 'evm.native-transfer'], ['asset.transfer', 'evm.token-transfer'], ['asset.bridge', 'flofi.router']] as const)
+  add(action, adapter, 'eip155:4663', 'MAINNET', fork, null, 'DIRECT_TRANSACTION', ['INJECTED_WALLET', 'QUOTE_PROVIDER', 'REVIEWED_ARTIFACTS'], ['A']);
+// The router on Arbitrum One as a source (Arbitrum USDC → Robinhood USDG, WETH → WETH); Base already has its MAINNET row.
+add('asset.bridge', 'flofi.router', 'eip155:42161', 'MAINNET', fork, null, 'DIRECT_TRANSACTION', ['INJECTED_WALLET', 'QUOTE_PROVIDER', 'REVIEWED_ARTIFACTS'], ['A']);
 // Public execution and demonstrated evidence are limited to the exact Base Sepolia Uniswap swap profile.
 export const executionCapabilityRegistry: readonly ExecutionCapabilityProfile[] = Object.freeze(rows);
 

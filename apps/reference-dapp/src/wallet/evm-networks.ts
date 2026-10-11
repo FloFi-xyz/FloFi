@@ -27,9 +27,9 @@ export const EVM_WALLET_NETWORKS: readonly EvmWalletNetwork[] = Object.freeze(([
   // BUILD-ETHEREUM-001: a public testnet; added only from the official network record after the wallet reports 4902.
   { hex: ETHEREUM_SEPOLIA.chainHex, chain: ETHEREUM_SEPOLIA.chain, label: 'Ethereum Sepolia (11155111)', environment: 'testnet', switchable: true,
     add: ethereumSepoliaAddChainParameters() },
-  // Recognized for display and wrong-chain detection. No Gryloo flow executes here, so it is never a switch target.
+  // BUILD-RH-002: a first-class mainnet. A switch target; added only from the official network record after the wallet reports 4902.
   { hex: ROBINHOOD_CHAIN_MAINNET.chainHex, chain: ROBINHOOD_CHAIN_MAINNET.chain, label: 'Robinhood Chain (4663)',
-    environment: 'mainnet', switchable: false, add: null },
+    environment: 'mainnet', switchable: true, add: robinhoodAddChainParameters(ROBINHOOD_CHAIN_MAINNET) },
   // Ethereum Mainnet is named so a wallet on it is recognized and refused. Sepolia support never implies Mainnet: no switch, no add.
   { hex: ETHEREUM_MAINNET.chainHex, chain: ETHEREUM_MAINNET.chain, label: 'Ethereum Mainnet (1)', environment: 'mainnet', switchable: false, add: null },
 ] satisfies EvmWalletNetwork[]).map(network => Object.freeze(network)));

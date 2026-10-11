@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "@defi-workflow-engine/workflow-contracts": "workspace:0.3.0",
+    "@noble/hashes": "2.4.0",
     "@sinclair/typebox": "0.34.52",
     "ajv": "8.20.0"
   }
