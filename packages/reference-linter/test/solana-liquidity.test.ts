@@ -24,8 +24,9 @@ describe('canonical concentrated liquidity on Solana Devnet (Orca Whirlpools)', 
   it.each([
     ['an unknown Solana cluster', { chain: 'solana:4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z', token0: { ...fields.token0, chainId: 'solana:4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z' },
       token1: { ...fields.token1, chainId: 'solana:4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z' }, positionAsset: { ...fields.positionAsset, chainId: 'solana:4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z' } }, 'SOLANA_CLUSTER_UNSUPPORTED'],
-    ['an EVM chain on the neutral action', { chain: 'eip155:8453', token0: { ...fields.token0, chainId: 'eip155:8453' }, token1: { ...fields.token1, chainId: 'eip155:8453' },
-      positionAsset: { ...fields.positionAsset, chainId: 'eip155:8453' } }, 'LIQUIDITY_RUNTIME_UNSUPPORTED'],
+    // BUILD-BASE-001: Base (8453) is now a catalog liquidity network, so the probe is an EVM chain with no liquidity runtime.
+    ['an EVM chain on the neutral action', { chain: 'eip155:10', token0: { ...fields.token0, chainId: 'eip155:10' }, token1: { ...fields.token1, chainId: 'eip155:10' },
+      positionAsset: { ...fields.positionAsset, chainId: 'eip155:10' } }, 'LIQUIDITY_RUNTIME_UNSUPPORTED'],
     ['mainnet USDC on Devnet', { token1: { chainId: chain, address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', decimals: 6 } }, 'SOLANA_MINT_UNSUPPORTED'],
     ['reversed token order', { token0: fields.token1, token1: fields.token0 }, 'SOLANA_MINT_UNSUPPORTED'],
     ['wrong decimals', { token0: { ...fields.token0, decimals: 6 } }, 'SOLANA_MINT_UNSUPPORTED'],

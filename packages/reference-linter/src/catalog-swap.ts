@@ -1,18 +1,25 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { isCatalogSwapNode, readCatalogSwapNode, type CatalogAssetRef, type CatalogSwapFields, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
-import { ROBINHOOD_BASE_ASSETS, type AssetCatalog } from '@defi-workflow-engine/action-registry';
+import { BASE_BASE_ASSETS, ROBINHOOD_BASE_ASSETS, type AssetCatalog } from '@defi-workflow-engine/action-registry';
 export { isCatalogSwapNode };
-/** The code-pinned base assets of each catalog network. Anything else must carry an official issuer id. */
-const BASE_ASSETS: Readonly<Record<string, AssetCatalog>> = Object.freeze({ [ROBINHOOD_BASE_ASSETS.chain]: ROBINHOOD_BASE_ASSETS });
+/** The code-pinned base assets of each catalog network. */
+const BASE_ASSETS: Readonly<Record<string, AssetCatalog>> = Object.freeze({ [ROBINHOOD_BASE_ASSETS.chain]: ROBINHOOD_BASE_ASSETS,
+  [BASE_BASE_ASSETS.chain]: BASE_BASE_ASSETS });
+/** Networks whose other catalog assets are issuer-registered (official id, 18 decimals): Robinhood Chain Stock Tokens. */
+const ISSUER_REGISTERED: ReadonlySet<string> = new Set([ROBINHOOD_BASE_ASSETS.chain]);
 /**
- * Authoring identity of one catalog-swap asset, without network access: a pinned base asset must match its address and
- * decimals exactly and carries no official id; any other asset must be an issuer-registered asset (official id, 18
- * decimals). Membership in the current official registry is proven at Simulate, never assumed here.
+ * Authoring identity of one catalog asset, without network access: a pinned base asset must match its address and decimals exactly
+ * and carries no official id. On Robinhood Chain any other asset must be an issuer-registered asset (official id, 18 decimals); on
+ * Base (BUILD-BASE-001) any other asset is a listed token, which carries no official id. Membership in the current official catalog,
+ * and the contract's own `decimals()`, are proven at Simulate, never assumed here.
  */
 export function validateCatalogAssetIdentity(ref: CatalogAssetRef): void {
-  const base = BASE_ASSETS[ref.chain]?.assets.find(asset => asset.address === ref.address);
-  if (base ? base.decimals !== ref.decimals || ref.officialId !== null : ref.officialId === null || ref.decimals !== 18)
-    throw new Error('CATALOG_SWAP_ASSET_IDENTITY_INVALID');
+  const pinned = BASE_ASSETS[ref.chain];
+  const base = pinned?.assets.find(asset => asset.address === ref.address);
+  const valid = !pinned ? false : base ? base.decimals === ref.decimals && ref.officialId === null
+    : ISSUER_REGISTERED.has(ref.chain) ? ref.officialId !== null && ref.decimals === 18
+    : ref.officialId === null && Number.isSafeInteger(ref.decimals) && ref.decimals >= 0 && ref.decimals <= 36;
+  if (!valid) throw new Error('CATALOG_SWAP_ASSET_IDENTITY_INVALID');
 }
 /** One isolated catalog swap (templates may coexist, nothing may connect). */
 export function validateCatalogSwapWorkflow(workflow: SemanticWorkflow): CatalogSwapFields {

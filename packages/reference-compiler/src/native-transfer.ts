@@ -7,8 +7,12 @@
  * BUILD-RH-002 generalizes the same engine for Robinhood Chain mainnet: native ETH or a catalog ERC-20 (`transfer(recipient,
  * amount)`), to the connected owner or an explicit recipient. A Stock Token's onchain `uid()` and ERC-8056 multiplier state are
  * bound into the Review. A native self-transfer Review is byte-identical to before (no new field appears in it).
+ *
+ * BUILD-BASE-001: Base mainnet on the same engine. An OP Stack profile (`l1DataFee`) also pays a separate L1 data fee: the Review binds
+ * its upper bound from the GasPriceOracle predeploy (`getL1FeeUpperBound`) into the fee budget, and the wallet request carries the
+ * network's suggested priority fee. Profiles without an L1 data fee keep their Reviews and transactions byte-identical.
  */
-import { nativeTransferProfile, transferAllowsRecipients, transferAllowsTokens, transferEnvironment, type NativeTransferProfile } from '@defi-workflow-engine/action-registry';
+import { nativeTransferProfile, transferAllowsRecipients, transferAllowsTokens, transferEnvironment, transferL1FeeOracle, type NativeTransferProfile } from '@defi-workflow-engine/action-registry';
 export { ROBINHOOD_TESTNET_TRANSFER, ETHEREUM_SEPOLIA_TRANSFER, ROBINHOOD_MAINNET_TRANSFER, NATIVE_TRANSFER_PROFILES, nativeTransferProfile,
   type NativeTransferProfile } from '@defi-workflow-engine/action-registry';
 import { readTransferNode, supplyAddress, hashSupplyValue, TRANSFER_ACTION, type SemanticWorkflow, type ArtifactSet, type TransferFields,
@@ -16,9 +20,9 @@ import { readTransferNode, supplyAddress, hashSupplyValue, TRANSFER_ACTION, type
 import { rpcRecord, rpcHex, rpcUint, rpcHash, supplyHex, supplyHash, supplyArtifactHash } from './supply.js';
 
 export type TransferRpc = (method: string, params: readonly unknown[]) => Promise<unknown>;
-/** The exact request a wallet receives. The wallet assigns the nonce; it must equal the reviewed nonce. */
+/** The exact request a wallet receives. The wallet assigns the nonce; it must equal the reviewed nonce. The priority fee is 0 except on OP Stack profiles. */
 export type NativeTransferTransaction = { from: string; to: string; value: string; data: string; chainId: string;
-  gas: string; maxFeePerGas: string; maxPriorityFeePerGas: '0x0' };
+  gas: string; maxFeePerGas: string; maxPriorityFeePerGas: string };
 /** BUILD-RH-002: the token side of an ERC-20 transfer Review (absent on native transfers). */
 export type TransferTokenReview = { kind: 'ERC20'; token: string; decimals: number; officialId: string | null; balanceBefore: string;
   expectedBalanceAfter: string; recipientBalanceBefore: string; multiplierWad: string | null; scheduledMultiplierWad: string | null;
@@ -32,7 +36,9 @@ export type NativeTransferReview = { format: 'gryloo.native-transfer-review.v1';
   gasEstimate: string; gasLimit: string; gasPrice: string; maxFeePerGas: string; expectedFee: string; feeBudget: string;
   balanceBefore: string; expectedBalanceAfter: string; minimumBalanceAfter: string; simulationResult: string;
   state: TransferState; expiresAt: string; artifactSet: ArtifactSet; simulation: SimulationBundle; policy: AuthorizationPolicy;
-  manifest: StrategyManifest; plan: ExecutionPlan; commitment: string; asset?: TransferTokenReview };
+  manifest: StrategyManifest; plan: ExecutionPlan; commitment: string; asset?: TransferTokenReview;
+  /** BUILD-BASE-001, OP Stack profiles only: the GasPriceOracle's L1 data fee upper bound for this transaction (wei), part of `feeBudget`. */
+  l1FeeUpperBound?: string };
 const nativeAdapter = { id: 'evm.native-transfer', version: '1.0.0' }, tokenAdapter = { id: 'evm.token-transfer', version: '1.0.0' };
 const word = (value: bigint) => value.toString(16).padStart(64, '0');
 const transferData = (recipient: string, amount: string) => '0xa9059cbb' + supplyAddress(recipient).slice(2).padStart(64, '0') + word(BigInt(amount));
@@ -87,13 +93,25 @@ export function transferToken(workflow: SemanticWorkflow): TokenRef | null {
   return read.kind === 'TOKEN' ? { address: read.fields.token.address, officialId: read.fields.token.officialId } : null;
 }
 /** The exact transaction for the connected owner: a native value transfer, or the token's `transfer(recipient, amount)`. */
-export function compileNativeTransfer(workflow: SemanticWorkflow, accountInput: string, gasLimit: string, maxFeePerGas: string): NativeTransferTransaction {
+export function compileNativeTransfer(workflow: SemanticWorkflow, accountInput: string, gasLimit: string, maxFeePerGas: string, maxPriorityFeePerGas = '0'): NativeTransferTransaction {
   const { read, profile } = transferFields(workflow), owner = supplyAddress(accountInput);
   const recipient = read.fields.recipient === 'CONNECTED_OWNER' ? owner : supplyAddress(read.fields.recipient);
+  // Only an OP Stack profile carries a priority fee; every other profile's request stays exactly as reviewed before.
+  const priority = transferL1FeeOracle(profile) ? supplyHex(maxPriorityFeePerGas) : '0x0';
   if (read.kind === 'TOKEN') return { from: owner, to: read.fields.token.address, value: '0x0', data: transferData(recipient, read.fields.amount),
-    chainId: profile.chainHex, gas: supplyHex(gasLimit), maxFeePerGas: supplyHex(maxFeePerGas), maxPriorityFeePerGas: '0x0' };
+    chainId: profile.chainHex, gas: supplyHex(gasLimit), maxFeePerGas: supplyHex(maxFeePerGas), maxPriorityFeePerGas: priority };
   return { from: owner, to: recipient, value: supplyHex(read.fields.amount), data: '0x', chainId: profile.chainHex,
-    gas: supplyHex(gasLimit), maxFeePerGas: supplyHex(maxFeePerGas), maxPriorityFeePerGas: '0x0' };
+    gas: supplyHex(gasLimit), maxFeePerGas: supplyHex(maxFeePerGas), maxPriorityFeePerGas: priority };
+}
+/** BUILD-BASE-001: the OP Stack L1 data fee upper bound of a transaction (GasPriceOracle `getL1FeeUpperBound(size)`); 0 on other profiles. */
+async function l1FeeUpperBound(rpc: TransferRpc, profile: NativeTransferProfile, data: string, tag: string): Promise<bigint> {
+  const oracle = transferL1FeeOracle(profile);
+  if (!oracle) return 0n;
+  let value: unknown;
+  try { value = await rpc('eth_call', [{ to: oracle, data: '0xf1c7a58b' + word(BigInt((data.length - 2) / 2 + 120)) }, tag]); } catch { throw new Error('TRANSFER_L1_FEE_UNAVAILABLE'); }
+  const fee = rpcUint(value);
+  if (fee <= 0n || fee >= 1n << 128n) throw new Error('TRANSFER_L1_FEE_UNAVAILABLE');
+  return fee;
 }
 
 /** Only reads. eth_call and eth_estimateGas execute the exact transfer against ephemeral state. */
@@ -141,9 +159,13 @@ export async function simulateNativeTransfer(workflow: SemanticWorkflow, account
   if (gasPrice <= 0n) throw new Error('TRANSFER_GAS_PRICE_INVALID');
   const gasLimit = (gas * BigInt(profile.gasLimitMarginPercent) + 99n) / 100n;
   const maxFeePerGas = (gasPrice > baseFee ? gasPrice : baseFee) * BigInt(profile.maxFeeMultiplier);
-  const expectedFee = gas * gasPrice, feeBudget = gasLimit * maxFeePerGas;
+  // OP Stack (Base): the owner also pays an L1 data fee, bounded here, and the request offers the network's suggested priority fee.
+  const l1Fee = await l1FeeUpperBound(rpc, profile, transactionPreview.data, tag);
+  const suggested = transferL1FeeOracle(profile) ? rpcUint(await rpc('eth_maxPriorityFeePerGas', [])) : 0n;
+  const priority = suggested > maxFeePerGas ? maxFeePerGas : suggested;
+  const expectedFee = gas * gasPrice + l1Fee, feeBudget = gasLimit * maxFeePerGas + l1Fee;
   if (balance < value + feeBudget) throw new Error(insufficient);
-  const transaction = compileNativeTransfer(workflow, account, gasLimit.toString(), maxFeePerGas.toString());
+  const transaction = compileNativeTransfer(workflow, account, gasLimit.toString(), maxFeePerGas.toString(), priority.toString());
   if (rpcHash(rpcRecord(await rpc('eth_getBlockByNumber', [tag, false])).hash) !== state.blockHash) throw new Error('TRANSFER_REORG');
   const expiresAt = new Date(now + profile.reviewTtlSeconds * 1000).toISOString();
   const artifactSet: ArtifactSet = { schemaVersion: '1.0.0', artifactSetId: 'native-transfer-artifacts', semanticWorkflowHash: semanticHash,
@@ -152,7 +174,8 @@ export async function simulateNativeTransfer(workflow: SemanticWorkflow, account
   const adapter = token ? tokenAdapter : nativeAdapter;
   const simulation: SimulationBundle = { schemaVersion: '1.0.0', simulationId: 'native-transfer-simulation', semanticWorkflowRevision: workflow.revision,
     semanticWorkflowHash: semanticHash, artifactSetHash: artifactHash, adapters: [adapter], contracts: [], outputs: [], propagatedOutputs: [],
-    failurePaths: [], uncertainty: profile.settlement === 'L2' ? [{ code: 'L2_SOFT_CONFIRMATION', description: 'Inclusion is first a Robinhood Chain sequencer confirmation; L1 finality follows later.' }] :
+    failurePaths: [], uncertainty: transferL1FeeOracle(profile) ? [{ code: 'L2_SOFT_CONFIRMATION', description: `Inclusion is first a ${profile.network} sequencer block; L1 finality follows later.` }]
+      : profile.settlement === 'L2' ? [{ code: 'L2_SOFT_CONFIRMATION', description: 'Inclusion is first a Robinhood Chain sequencer confirmation; L1 finality follows later.' }] :
       [{ code: 'L1_REORG_WINDOW', description: `Inclusion is an ${profile.network} block; reconciliation waits for ${profile.minimumConfirmations} confirmations.` }],
     unsupportedAssumptions: [], freshness: { observedAt: state.observedAt, expiresAt, maximumAgeSeconds: profile.reviewTtlSeconds } };
   const simulationHash = supplyArtifactHash('simulation-bundle', simulation), owner = { chainId: profile.chain, address: account };
@@ -183,7 +206,7 @@ export async function simulateNativeTransfer(workflow: SemanticWorkflow, account
     value: read.fields.amount, nonce: state.nonce, transaction, gasEstimate: gas.toString(), gasLimit: gasLimit.toString(), gasPrice: gasPrice.toString(),
     maxFeePerGas: maxFeePerGas.toString(), expectedFee: expectedFee.toString(), feeBudget: feeBudget.toString(), balanceBefore: state.balance,
     expectedBalanceAfter: (balance - value - expectedFee).toString(), minimumBalanceAfter: (balance - value - feeBudget).toString(), simulationResult: String(result),
-    state, expiresAt, artifactSet, simulation, policy, manifest, plan, ...asset ? { asset } : {} };
+    state, expiresAt, artifactSet, simulation, policy, manifest, plan, ...asset ? { asset } : {}, ...transferL1FeeOracle(profile) ? { l1FeeUpperBound: l1Fee.toString() } : {} };
   // A native self-transfer keeps its original Review exactly: the value nets to zero for the owner's balance.
   if (!token && recipient === account) Object.assign(review, { expectedBalanceAfter: (balance - expectedFee).toString(), minimumBalanceAfter: (balance - feeBudget).toString() });
   return { ...review, commitment: supplyHash(review) };
@@ -208,5 +231,7 @@ export function assertNativeTransferReview(review: NativeTransferReview, workflo
     if (review.asset.officialId && (state.multiplierWad !== review.asset.multiplierWad || state.scheduledMultiplierWad !== review.asset.scheduledMultiplierWad ||
         state.scheduledEffectiveAt !== review.asset.scheduledEffectiveAt)) throw new Error('TRANSFER_STOCK_MULTIPLIER_CHANGED_REVIEW_REQUIRED');
   }
-  if (JSON.stringify(compileNativeTransfer(workflow, owner, review.gasLimit, review.maxFeePerGas)) !== JSON.stringify(review.transaction)) throw new Error('TRANSFER_AUTHORIZATION_INVALID');
+  if ((review.l1FeeUpperBound !== undefined) !== Boolean(transferL1FeeOracle(profile))) throw new Error('TRANSFER_AUTHORIZATION_INVALID');
+  if (JSON.stringify(compileNativeTransfer(workflow, owner, review.gasLimit, review.maxFeePerGas, BigInt(review.transaction.maxPriorityFeePerGas).toString())) !==
+      JSON.stringify(review.transaction)) throw new Error('TRANSFER_AUTHORIZATION_INVALID');
 }

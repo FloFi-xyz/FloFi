@@ -39,9 +39,14 @@ describe('canonical concentrated liquidity on Base Sepolia (Uniswap v3, owner wa
     ['a foreign position asset', { positionAsset: { chainId: chain, address: profile.pool, decimals: 0 } }, 'UNISWAP_LIQUIDITY_DECLARATION_INVALID'],
   ])('rejects %s', (_name, patch, code) => expect(() => validateAuthoringWorkflow(workflow([node(patch as Partial<ConcentratedLiquidityFields>)]), context)).toThrow(code));
   it('keeps every other EVM chain unsupported and rejects tampering and composition', () => {
+    // BUILD-BASE-001: Base (8453) became a catalog network (its pool follows the pair and tier), so the unsupported probe is Optimism.
+    const optimism = { ...fields, chain: 'eip155:10', token0: { ...usdc, chainId: 'eip155:10' }, token1: { ...weth, chainId: 'eip155:10' },
+      positionAsset: { ...fields.positionAsset, chainId: 'eip155:10' } };
+    expect(() => validateAuthoringWorkflow(workflow([createConcentratedLiquidityNode('node-002', optimism)]), context)).toThrow('LIQUIDITY_RUNTIME_UNSUPPORTED');
+    // On Base the structure is checked against Base's own Position Manager; catalog membership is proven at Simulate.
     const base = { ...fields, chain: 'eip155:8453', token0: { ...usdc, chainId: 'eip155:8453' }, token1: { ...weth, chainId: 'eip155:8453' },
       positionAsset: { ...fields.positionAsset, chainId: 'eip155:8453' } };
-    expect(() => validateAuthoringWorkflow(workflow([createConcentratedLiquidityNode('node-002', base)]), context)).toThrow('LIQUIDITY_RUNTIME_UNSUPPORTED');
+    expect(() => validateAuthoringWorkflow(workflow([createConcentratedLiquidityNode('node-002', base)]), context)).toThrow('UNISWAP_LIQUIDITY_DECLARATION_INVALID');
     const tampered = node(); tampered.requiredAuthorizationClass = 'MODE_B';
     expect(() => validateUniswapLiquidityNode(tampered)).toThrow('UNISWAP_LIQUIDITY_DECLARATION_INVALID');
     const retry = node(); retry.failurePolicy = 'RETRY';

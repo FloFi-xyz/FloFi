@@ -13,7 +13,8 @@ import { keccak_256 } from '@noble/hashes/sha3.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 
 export type AssetKind = 'NATIVE' | 'ERC20';
-export type AssetClass = 'NATIVE' | 'WRAPPED_NATIVE' | 'STABLECOIN' | 'STOCK_TOKEN';
+/** `TOKEN` (BUILD-BASE-001): a listed ERC-20 of a curated token list; its listing proves nothing about liquidity or lending support. */
+export type AssetClass = 'NATIVE' | 'WRAPPED_NATIVE' | 'STABLECOIN' | 'STOCK_TOKEN' | 'TOKEN';
 /** Normalized tradability of the underlying equity; `UNSET` means the source has not set the field. */
 export type TradingStatus = 'TRADABLE' | 'UNTRADABLE' | 'POSITION_CLOSING_ONLY' | 'POSITION_OPENING_ONLY' | 'UNSET';
 export type StockTrading = {
@@ -67,7 +68,12 @@ export interface AssetProvider<Input = unknown> {
 }
 
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
-const SYMBOL = /^[A-Z][A-Z0-9.]{0,15}$/;
+/**
+ * Catalog symbol grammar. BUILD-BASE-001: lower-case letters are allowed (`cbBTC`, `USDbC`, `wstETH`); symbols stay unique
+ * case-insensitively inside a catalog, so a symbol always resolves to exactly one asset of its network.
+ */
+export const ASSET_SYMBOL = /^[A-Za-z][A-Za-z0-9.]{0,15}$/;
+const SYMBOL = ASSET_SYMBOL;
 function fail(code: string): never { throw new Error(code); }
 const hex = (bytes: Uint8Array) => Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
 const deepFreeze = <T>(value: T): T => {

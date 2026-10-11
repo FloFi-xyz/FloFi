@@ -131,7 +131,8 @@ const PINS = Object.freeze({
 });
 type Side = keyof typeof PINS;
 const SIDES = Object.freeze({ base: BASE_SIDE, arbitrum: ARBITRUM_SIDE, robinhood: ROBINHOOD_SIDE });
-function robinhoodRoute(id: string, from: Side, to: Side): RouterProfile {
+/** A route between two verified sides (BUILD-RH-002; BUILD-BASE-001 reuses it for Arbitrum → Base). */
+function routeBetween(id: string, from: Side, to: Side): RouterProfile {
   return Object.freeze({ id, adapterId: 'flofi.router', underlyingProtocol: 'across', network: 'MAINNET', environment: 'MAINNET',
     source: SIDES[from], destination: destinationOf(SIDES[to]),
     codeSha256: Object.freeze({ baseSpokePool: PINS[from].spokePool, baseLifiDiamond: PINS[from].lifiDiamond, baseLifiFeeForwarder: PINS[from].lifiFeeForwarder,
@@ -139,13 +140,21 @@ function robinhoodRoute(id: string, from: Side, to: Side): RouterProfile {
     providers: CROSSCHAIN_ROUTER_BASE_ARBITRUM.providers, reviewTtlSeconds: 180, depositSafetyMarginSeconds: 300, defaultSlippageBps: 50, maximumSlippageBps: 300,
     finality: 'safe', destinationScanBlocks: 2_000 });
 }
-export const CROSSCHAIN_ROUTER_BASE_ROBINHOOD = robinhoodRoute('base-usdc-to-robinhood-usdg', 'base', 'robinhood');
-export const CROSSCHAIN_ROUTER_ROBINHOOD_BASE = robinhoodRoute('robinhood-usdg-to-base-usdc', 'robinhood', 'base');
-export const CROSSCHAIN_ROUTER_ARBITRUM_ROBINHOOD = robinhoodRoute('arbitrum-usdc-to-robinhood-usdg', 'arbitrum', 'robinhood');
-export const CROSSCHAIN_ROUTER_ROBINHOOD_ARBITRUM = robinhoodRoute('robinhood-usdg-to-arbitrum-usdc', 'robinhood', 'arbitrum');
+export const CROSSCHAIN_ROUTER_BASE_ROBINHOOD = routeBetween('base-usdc-to-robinhood-usdg', 'base', 'robinhood');
+export const CROSSCHAIN_ROUTER_ROBINHOOD_BASE = routeBetween('robinhood-usdg-to-base-usdc', 'robinhood', 'base');
+export const CROSSCHAIN_ROUTER_ARBITRUM_ROBINHOOD = routeBetween('arbitrum-usdc-to-robinhood-usdg', 'arbitrum', 'robinhood');
+export const CROSSCHAIN_ROUTER_ROBINHOOD_ARBITRUM = routeBetween('robinhood-usdg-to-arbitrum-usdc', 'robinhood', 'arbitrum');
+/**
+ * BUILD-BASE-001: Base bridge IN from Arbitrum One — Arbitrum USDC → Base USDC through the same router and Across, the reverse of the
+ * BUILD-ROUTER-001 pair. Verified read-only on 2026-10-11: `app.across.to` lists the route; the Across Swap API answers with the
+ * Arbitrum SpokePool (code pin below, `chainId()` 42161, deposits and fills not paused, buffers 3600/21600) as `swapTx.to` and allowance
+ * spender (selector 0xad5425c6); LI.FI (`allowBridges=across`) answers through the Arbitrum Diamond with fee lines that sum exactly to
+ * input − output. Both sides reuse the pins verified for the existing routes (identical runtime code on 2026-10-11).
+ */
+export const CROSSCHAIN_ROUTER_ARBITRUM_BASE = routeBetween('arbitrum-usdc-to-base-usdc', 'arbitrum', 'base');
 export type CrossChainRouterProfile = RouterProfile;
 export const CROSSCHAIN_ROUTER_PROFILES: readonly RouterProfile[] = Object.freeze([CROSSCHAIN_ROUTER_BASE_ARBITRUM, CROSSCHAIN_ROUTER_BASE_SEPOLIA_ARBITRUM_SEPOLIA,
-  CROSSCHAIN_ROUTER_BASE_ROBINHOOD, CROSSCHAIN_ROUTER_ROBINHOOD_BASE, CROSSCHAIN_ROUTER_ARBITRUM_ROBINHOOD, CROSSCHAIN_ROUTER_ROBINHOOD_ARBITRUM]);
+  CROSSCHAIN_ROUTER_BASE_ROBINHOOD, CROSSCHAIN_ROUTER_ROBINHOOD_BASE, CROSSCHAIN_ROUTER_ARBITRUM_ROBINHOOD, CROSSCHAIN_ROUTER_ROBINHOOD_ARBITRUM, CROSSCHAIN_ROUTER_ARBITRUM_BASE]);
 /** The profile serving one canonical pair (source and destination CAIP-2 chains), or null. */
 export function routerProfileFor(sourceChain: string, destinationChain: string): RouterProfile | null {
   return CROSSCHAIN_ROUTER_PROFILES.find(p => p.source.chain === sourceChain && p.destination.chain === destinationChain) ?? null;
