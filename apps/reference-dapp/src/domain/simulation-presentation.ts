@@ -18,6 +18,7 @@ import type { useAcross } from '../state/across-store';
 import type { Workflow } from './initial-workflow';
 import { composerActions, composerSummary } from './composer-presentation';
 import { quoteDecimals } from './public-testnet-swap';
+import { resolveNetworkAsset } from './asset-catalogs';
 
 type Snapshot<T> = Pick<T, Extract<keyof T, 'record' | 'run' | 'prepared' | 'status' | 'info' | 'retired' | 'recoveryOnly' | 'busy' | 'error' | 'available' | 'verifyError' | 'verified' | 'quoteExpired'>>;
 export type SimulationSource =
@@ -286,11 +287,15 @@ export function projectSimulation(workflow: Workflow, context: ReviewContext, so
     case 'transfer': {
       const r = source.state.record; if (!r) break; const q = r.review;
       if (!guard(same(q.workflow), r.provenance, iso(q.expiresAt), r.error)) break;
-      const amount = simulationAmount(q.value, 18, 'ETH'), s = step();
-      result(s, amount, amount ? `Transfer ${amount} to your wallet` : null, 'Wallet transfer');
+      // BUILD-RH-002: a token transfer is shown in its own asset and decimals; an explicit recipient is named.
+      const symbol = q.asset ? resolveNetworkAsset(q.chain, { address: q.asset.token })?.symbol ?? 'Token' : 'ETH';
+      const amount = simulationAmount(q.value, q.asset?.decimals ?? 18, symbol), s = step(), self = q.recipient === q.account;
+      result(s, amount, amount ? self ? `Transfer ${amount} to your wallet` : `Transfer ${amount} to ${q.recipient}` : null, 'Wallet transfer');
       if (s) s.resultLabel = 'Expected action';
       fee('Estimated network fee', q.expectedFee, 18, 'ETH'); fee('Maximum network fee', q.feeBudget, 18, 'ETH', 'Fee ceiling, not an additional charge.');
-      warn('info', 'This transfer returns funds to the same wallet; only the network fee is spent.'); break;
+      if (q.asset?.multiplierWad) warn('attention', `${symbol}: ${simulationAmount(q.asset.multiplierWad, 18)} underlying shares per token (Robinhood corporate-action multiplier).`);
+      if (!self) warn('attention', 'Funds go to an address other than the signing wallet. Confirm it belongs to the intended recipient.');
+      warn('info', self && !q.asset ? 'This transfer returns funds to the same wallet; only the network fee is spent.' : 'Only the reviewed amount moves; the network fee is paid in ETH.'); break;
     }
     case 'fork-swap': {
       const q = source.state.prepared; if (!q) break;

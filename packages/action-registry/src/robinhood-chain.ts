@@ -99,6 +99,22 @@ export const ROBINHOOD_TESTNET_TRANSFER = Object.freeze({
   /** Inclusion is first a sequencer (soft) confirmation; L1 finality follows later. */
   settlement: 'L2' as const,
 });
+/**
+ * BUILD-RH-002: transfers on Robinhood Chain mainnet (real funds) through the same transfer engine: native ETH
+ * (`evm.native-transfer`) and canonical catalog ERC-20s — USDG, WETH and official Stock Tokens — (`evm.token-transfer`), to the
+ * connected owner or an explicit recipient. Owner execution needs the deployment's real-funds opt-in; Flofi never signs or sends.
+ */
+export const ROBINHOOD_MAINNET_TRANSFER = Object.freeze({
+  network: ROBINHOOD_CHAIN_MAINNET.name, chain: 'eip155:4663', chainId: 4663,
+  chainHex: '0x1237', rpc: ROBINHOOD_CHAIN_MAINNET.rpc, explorer: ROBINHOOD_CHAIN_MAINNET.explorer,
+  officialSource: ROBINHOOD_CHAIN_MAINNET.officialSource, adapterId: 'evm.native-transfer', action: 'asset.transfer',
+  /** No product ceiling on real funds beyond the owner's balance and the reviewed fee budget (one million ETH is a representation bound). */
+  maximumValueWei: '1000000000000000000000000', defaultValueWei: '1000000000000',
+  reviewTtlSeconds: 60, gasLimitMarginPercent: 150, maxFeeMultiplier: 2, minimumConfirmations: 2,
+  settlement: 'L2' as const,
+  /** Explicit recipients and catalog ERC-20 transfers are allowed on this profile (testnet profiles stay owner-only, native only). */
+  recipients: 'ANY' as const, tokenAdapterId: 'evm.token-transfer', environment: 'MAINNET' as const,
+});
 /** Accepts a CAIP-2 reference or an EIP-155 hex chain ID, in any case. */
 export function robinhoodNetwork(chain: string | null | undefined): RobinhoodNetwork | null {
   if (typeof chain !== 'string') return null;

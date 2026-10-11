@@ -6,6 +6,7 @@ import { executionExplorer, type ExecutionLifecycle, type ExecutionLifecycleSour
 import type { EvidenceComparison } from './execution-step-evidence';
 import { simulationAmount } from './simulation-presentation';
 import { quoteDecimals } from './public-testnet-swap';
+import { resolveNetworkAsset } from './asset-catalogs';
 import { shellChainLabel } from './product-shell';
 
 export type EvidenceIdentifier = { label: string; value: string; kind: 'transaction' | 'order' | 'reference'; chain?: string; explorer?: string | null; status?: string };
@@ -186,7 +187,11 @@ export function projectExecutionEvidence(source: ExecutionLifecycleSource, progr
       if (record.attempt) failure('transfer', record.attempt.state, record.attempt.transactionHash, record.notSubmitted ? record.walletDiagnostic?.code : undefined);
       const observed = record.observations?.findLast(item => item.receipt?.transactionHash === record.attempt?.transactionHash);
       fee('transfer', record.review.chain, record.attempt?.transactionHash, observed?.facts?.fee);
-      if (record.attempt?.reconciled && observed?.verdict === 'RECONCILED' && typeof observed.transaction?.value === 'string' && /^0x[0-9a-f]+$/i.test(observed.transaction.value)) {
+      if (record.attempt?.reconciled && observed?.verdict === 'RECONCILED' && record.review.asset && observed.facts?.tokenBalanceBefore !== undefined && observed.facts.tokenBalanceAfter !== undefined) {
+        // BUILD-RH-002: the reconciled token movement (the owner's token balance delta, or the recipient's for a self-transfer).
+        const moved = record.review.recipient === record.review.account ? record.review.value : (BigInt(observed.facts.tokenBalanceBefore) - BigInt(observed.facts.tokenBalanceAfter)).toString();
+        amount('transfer', 'Actual transferred', moved, record.review.asset.decimals, resolveNetworkAsset(record.review.chain, { address: record.review.asset.token })?.symbol ?? 'Token', record.review.value);
+      } else if (record.attempt?.reconciled && observed?.verdict === 'RECONCILED' && typeof observed.transaction?.value === 'string' && /^0x[0-9a-f]+$/i.test(observed.transaction.value)) {
         amount('transfer', 'Actual transferred', BigInt(observed.transaction.value).toString(), 18, 'ETH', record.review.value);
       } break;
     }

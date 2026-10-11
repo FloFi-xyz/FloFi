@@ -3,7 +3,9 @@
 import { useLocale } from '../i18n/locale';
 
 import { useState, type FormEvent } from 'react';
+import { formatAssetAmount } from '@defi-workflow-engine/action-registry';
 import { createAuthoredTransfer, formatEth, transferDetails, transferProfileFor, TRANSFER_NETWORKS, type RobinhoodTransferInput, type TransferNetwork } from '../domain/robinhood-transfer-authoring';
+import { featuredStockSymbols, resolveNetworkAsset } from '../domain/asset-catalogs';
 import { useWorkflow } from '../state/workflow-store';
 import { useRobinhoodTransfer } from '../state/robinhood-transfer-store';
 import { useBuild009Wallet } from '../state/build009-wallet-store';
@@ -20,19 +22,28 @@ export function RobinhoodTransferAuthoringForm({ nodeId, onDone, direct = false 
   const existing = node ? transferDetails(node as Parameters<typeof transferDetails>[0]) : null;
   const [amount, setAmount] = useState(existing?.amount ?? '0.000001'), [error, setError] = useState('');
   const [network, setNetwork] = useState<TransferNetwork>(existing?.network ?? 'Robinhood Chain Testnet');
+  // BUILD-RH-002: Robinhood Chain mainnet moves native ETH or a catalog asset, to the owner or an explicit recipient.
+  const mainnet = network === 'Robinhood Chain';
+  const [asset, setAsset] = useState(existing?.asset ?? 'ETH');
+  const [recipient, setRecipient] = useState(existing && existing.recipient !== 'CONNECTED_OWNER' ? existing.recipient : '');
+  const assets = mainnet ? [...new Set(['ETH', 'USDG', 'WETH', ...featuredStockSymbols(), asset])] : ['ETH'];
   function submit(event: FormEvent) { event.preventDefault(); try {
-    const input: RobinhoodTransferInput = { network, asset: 'ETH', amount, recipient: 'CONNECTED_OWNER' };
+    const input: RobinhoodTransferInput = { network, asset: mainnet ? asset : 'ETH', amount, recipient: mainnet && recipient.trim() ? recipient.trim() : 'CONNECTED_OWNER' };
     createAuthoredTransfer(nodeId ?? 'node-preview', input);
     const command = nodeId ? { type: 'SET_RH_TRANSFER' as const, nodeId, input, source: 'CANVAS' as const, baseRevision: state.workflow.revision }
       : { type: 'ADD_RH_TRANSFER' as const, input, source: 'CANVAS' as const, baseRevision: state.workflow.revision };
     if (direct) dispatch(command); else propose(command); onDone?.();
-  } catch { setError('Enter an exact positive test-ETH amount up to 0.001 with at most 18 decimal places.'); } }
+  } catch (cause) { setError(cause instanceof Error && cause.message === 'ASSET_CATALOG_UNAVAILABLE' ? 'Robinhood assets are unavailable right now. Try again in a moment.'
+    : mainnet ? 'Enter an exact positive amount for the selected asset and, optionally, a valid recipient address.' : 'Enter an exact positive test-ETH amount up to 0.001 with at most 18 decimal places.'); } }
   return <form className="inspector-fields" aria-label={tr(nodeId ? 'Edit Robinhood transfer' : 'Create Robinhood transfer')} onSubmit={submit}>
-    <strong>{tr(transferCopy('Robinhood Testnet test-ETH self-transfer', network))}</strong>
+    <strong>{tr(mainnet ? 'Robinhood Chain transfer' : transferCopy('Robinhood Testnet test-ETH self-transfer', network))}</strong>
     <label>{tr("Transfer network")}<select aria-label={tr("Transfer network")} value={network} onChange={e => setNetwork(e.target.value as TransferNetwork)}>
       {(Object.keys(TRANSFER_NETWORKS) as TransferNetwork[]).map(name => <option key={name}>{name}</option>)}</select></label>
-    <label>{tr("Transfer amount (test ETH)")}<input aria-label={tr("Transfer amount (test ETH)")} inputMode="decimal" value={amount} maxLength={40} onChange={e => setAmount(e.target.value)}/></label>
-    <p>{tr("Recipient: your connected owner wallet (a self-transfer), bound at Review. Only the network fee is spent. A chain execution proof, not a DeFi action.")}</p>
+    {mainnet && <label>{tr("Asset")}<select aria-label={tr("Transfer asset")} value={asset} onChange={e => setAsset(e.target.value)}>
+      {assets.map(symbol => <option key={symbol}>{symbol}</option>)}</select></label>}
+    <label>{tr(mainnet ? 'Transfer amount' : 'Transfer amount (test ETH)')}<input aria-label={tr(mainnet ? 'Transfer amount' : 'Transfer amount (test ETH)')} inputMode="decimal" value={amount} maxLength={40} onChange={e => setAmount(e.target.value)}/></label>
+    {mainnet ? <label>{tr("Recipient (optional)")}<input aria-label={tr("Transfer recipient")} placeholder={tr("Your connected wallet")} autoComplete="off" spellCheck={false} value={recipient} maxLength={42} onChange={e => setRecipient(e.target.value)}/></label>
+      : <p>{tr("Recipient: your connected owner wallet (a self-transfer), bound at Review. Only the network fee is spent. A chain execution proof, not a DeFi action.")}</p>}
     {error && <p role="alert">{tr(error)}</p>}
     <button type="submit">{tr(nodeId ? 'Review transfer change' : direct ? 'Add transfer' : 'Review transfer proposal')}</button>
     {onDone && <button type="button" className="quiet" onClick={onDone}>{tr("Cancel")}</button>}
@@ -40,6 +51,15 @@ export function RobinhoodTransferAuthoringForm({ nodeId, onDone, direct = false 
 }
 const messages: Record<string, string> = {
   TRANSFER_PUBLIC_TESTNET_NOT_ENABLED: 'Robinhood Testnet execution is not enabled on this app instance.',
+  ROBINHOOD_MAINNET_NOT_ENABLED: 'Robinhood Chain is not enabled on this app instance.',
+  OWNER_EXECUTION_NOT_ENABLED: 'Real-funds execution is not enabled on this app instance. Review is available; nothing was sent.',
+  TRANSFER_INSUFFICIENT_ETH: 'The owner wallet needs ETH on this network for the network fee.', TRANSFER_INSUFFICIENT_TOKEN_BALANCE: 'The owner wallet does not hold enough of this asset.',
+  TRANSFER_RECIPIENT_NOT_EOA: 'ETH can only be sent to a regular wallet address here, not to a contract.',
+  TRANSFER_ASSET_IDENTITY_CHANGED: 'The official asset registry no longer matches this asset. Build the transfer again.',
+  TRANSFER_STOCK_MULTIPLIER_MISMATCH: 'The Robinhood registry and the chain disagree on the shares per token. Nothing was prepared.',
+  TRANSFER_STOCK_MULTIPLIER_CHANGE_PENDING: 'A corporate action will change the shares per token before this Review could be used. Try again after it takes effect.',
+  TRANSFER_STOCK_MULTIPLIER_CHANGED_REVIEW_REQUIRED: 'A corporate action changed the shares per token. Simulate and review again.',
+  STOCK_REGISTRY_UNAVAILABLE: 'The official Robinhood asset registry is unavailable. Try again later.',
   TRANSFER_WRONG_CHAIN: 'Switch your wallet to Robinhood Chain Testnet.', TRANSFER_WRONG_ACCOUNT: 'Select the owner wallet shown in Review.',
   TRANSFER_INSUFFICIENT_TEST_ETH: 'The owner wallet needs Robinhood Testnet ETH from the faucet.', TRANSFER_OWNER_NOT_EOA: 'The owner account has code (for example a smart-account delegation). Use a plain EOA account.',
   TRANSFER_PENDING_TRANSACTION: 'The wallet has a pending transaction. Wait for it to settle, then simulate again.',
@@ -61,16 +81,31 @@ export function RobinhoodTransferPanel({ view }: { view: 'simulate' | 'execute' 
   const attempt = record?.attempt, info = run.error ?? record?.error, observation = record?.observations.at(-1);
   const observing = Boolean(attempt && !attempt.reconciled && !record?.notSubmitted && record?.verdict === 'PENDING');
   const evidenceLevel = record?.evidence ? `${record.evidence.bundle.environment} / RECONCILED` : record?.verdict === 'DIVERGENT' ? 'DIVERGENT' : record?.authorization ? 'READY_FOR_OWNER_EXECUTION' : null;
+  // BUILD-RH-002: token transfers show the asset in its own decimals; the native self-transfer copy stays as it was.
+  const token = review?.asset ? resolveNetworkAsset(review.chain, { address: review.asset.token }) : null;
+  const symbol = review?.asset ? token?.symbol ?? 'Token' : fields?.asset ?? 'ETH';
+  const amountText = review?.asset ? formatAssetAmount(review.value, review.asset.decimals) : fields?.amount ?? (review ? formatEth(review.value) : '');
+  const selfTransfer = !review || review.recipient === review.account;
   return <section className="panel" aria-label={tr(transferCopy('Robinhood Testnet transfer', network))}><h2>{tr(view === 'simulate' ? `Simulate ${short(network)} transfer` : record?.evidence ? `${short(network)} transfer result` : `Review ${short(network)} transfer`)}</h2>
-    <p>{tr("Self-transfer ")}{tr(fields?.amount ?? (review ? formatEth(review.value) : ''))}{tr(" test ETH on ")}{network}{tr(". A chain execution proof, not a DeFi action.")}</p>
+    {network === 'Robinhood Chain' ? <p>{tr("Transfer ")}{tr(amountText)} {tr(symbol)}{tr(" on ")}{network}{tr(selfTransfer ? ' to your connected wallet.' : '.')}
+      {' '}{tr("Real funds: your wallet signs and sends this transaction; Flofi never signs for you.")}</p>
+      : <p>{tr("Self-transfer ")}{tr(fields?.amount ?? (review ? formatEth(review.value) : ''))}{tr(" test ETH on ")}{network}{tr(". A chain execution proof, not a DeFi action.")}</p>}
     {run.retired && record && <p role="alert">{tr("The workflow changed. Authorization is invalid. Observe any existing transaction before starting again.")}</p>}
     {review && <dl className="step-facts">
       <div><dt>{tr("Network")}</dt><dd>{network}{tr(" · chain ID ")}{tr(review.chainId)} ({tr(review.chain)})</dd></div>
-      <div><dt>{tr("Owner")}</dt><dd className="numeric">{review.account}</dd></div><div><dt>{tr("Recipient")}</dt><dd className="numeric">{tr(review.recipient)}{tr(" (owner, self-transfer)")}</dd></div>
-      <div><dt>{tr("Exact value")}</dt><dd className="numeric">{tr(formatEth(review.value))}{tr(" ETH (")}{tr(review.value)}{tr(" wei)")}</dd></div>
-      <div><dt>{tr("Calldata")}</dt><dd><code>{tr(review.transaction.data)}</code>{tr(" (none: native transfer)")}</dd></div>
+      <div><dt>{tr("Owner")}</dt><dd className="numeric">{review.account}</dd></div><div><dt>{tr("Recipient")}</dt><dd className="numeric">{tr(review.recipient)}{tr(selfTransfer ? ' (owner, self-transfer)' : '')}</dd></div>
+      {review.asset ? <>
+        <div><dt>{tr("Asset")}</dt><dd>{tr(symbol)} · <span className="numeric">{tr(review.asset.token)}</span></dd></div>
+        <div><dt>{tr("Exact amount")}</dt><dd className="numeric">{tr(amountText)} {tr(symbol)}{tr(" (")}{tr(review.value)}{tr(" units)")}</dd></div>
+        {review.asset.multiplierWad && <div><dt>{tr("Shares per token")}</dt><dd className="numeric">{tr(formatAssetAmount(review.asset.multiplierWad, 18))}</dd></div>}
+        <div><dt>{tr("Asset balance")}</dt><dd className="numeric">{tr(formatAssetAmount(review.asset.balanceBefore, review.asset.decimals))} → {tr(formatAssetAmount(review.asset.expectedBalanceAfter, review.asset.decimals))} {tr(symbol)}</dd></div>
+        <div><dt>{tr("Calldata")}</dt><dd><code>{tr(review.transaction.data)}</code>{tr(" (token transfer)")}</dd></div>
+      </> : <>
+        <div><dt>{tr("Exact value")}</dt><dd className="numeric">{tr(formatEth(review.value))}{tr(" ETH (")}{tr(review.value)}{tr(" wei)")}</dd></div>
+        <div><dt>{tr("Calldata")}</dt><dd><code>{tr(review.transaction.data)}</code>{tr(" (none: native transfer)")}</dd></div>
+      </>}
       <div><dt>{tr("Current balance")}</dt><dd className="numeric">{tr(formatEth(review.balanceBefore))}{tr(" ETH")}</dd></div>
-      <div><dt>{tr("Expected balance after")}</dt><dd className="numeric">{tr(formatEth(review.expectedBalanceAfter))}{tr(" ETH (value returns to the owner; only the fee is spent)")}</dd></div>
+      <div><dt>{tr("Expected balance after")}</dt><dd className="numeric">{tr(formatEth(review.expectedBalanceAfter))}{tr(selfTransfer && !review.asset ? ' ETH (value returns to the owner; only the fee is spent)' : ' ETH')}</dd></div>
       <div><dt>{tr("Gas estimate")}</dt><dd className="numeric">{tr(review.gasEstimate)}{tr(" gas (limit ")}{tr(review.gasLimit)})</dd></div>
       <div><dt>{tr("Expected network cost")}</dt><dd className="numeric">{tr(formatEth(review.expectedFee))}{tr(" ETH")}</dd></div>
       <div><dt>{tr("Maximum fee budget")}</dt><dd className="numeric">{tr(formatEth(review.feeBudget))}{tr(" ETH (")}{tr(review.gasLimit)}{tr(" gas × ")}{tr(review.maxFeePerGas)}{tr(" wei)")}</dd></div>
@@ -80,6 +115,7 @@ export function RobinhoodTransferPanel({ view }: { view: 'simulate' | 'execute' 
       <div><dt>{tr("Review expires")}</dt><dd>{tr(review.expiresAt)}</dd></div>
       <div><dt>{tr("Exact transaction")}</dt><dd className="numeric">{JSON.stringify(review.transaction)}</dd></div>
     </dl>}
+    {review?.asset?.officialId && <p className="muted">{tr("Stock Tokens are issued by Robinhood Assets (Jersey) Limited and are not offered to US persons or in restricted jurisdictions.")}</p>}
     {evidenceLevel && <p role="status">{tr("Evidence state: ")}{tr(evidenceLevel)}</p>}
     {view === 'simulate' ? <button type="button" disabled={run.busy || observing} onClick={() => void run.simulate()}>{tr("Simulate transfer")}</button> : <>
       {record && wallet.account && wallet.chainId !== profile.chainHex && !record.evidence && <div><p role="status">{tr("Switch your wallet to ")}{network}{tr(" to continue.")}</p>

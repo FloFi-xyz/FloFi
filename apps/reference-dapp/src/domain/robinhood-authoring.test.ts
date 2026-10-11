@@ -112,3 +112,33 @@ describe('the Stocks card is a canonical Robinhood Chain swap', () => {
     expect(cryptoSelectionOf(node)).toBeNull();
   });
 });
+
+describe('Robinhood Chain transfers through the shared transfer card', () => {
+  const recipient = '0x3333333333333333333333333333333333333333';
+  it('authors native ETH, USDG and Stock Token transfers (featured or searched) on the same canonical action', async () => {
+    const { readTransferNode } = await import('@defi-workflow-engine/workflow-contracts');
+    const { transferDetails, transferCardLabel } = await import('./robinhood-transfer-authoring');
+    const eth = createCryptoActionNode('node-002', { selection: { action: 'transfer', network: ROBINHOOD_NETWORK, from: 'ETH' }, amount: '0.5', slippage: '50', recipient });
+    expect(readTransferNode(eth)).toEqual({ kind: 'NATIVE', fields: { chain: 'eip155:4663', amount: '500000000000000000', recipient } });
+    // Stock Tokens need the official catalog; without it authoring fails closed.
+    expect(() => createCryptoActionNode('node-002', { selection: { action: 'transfer', network: ROBINHOOD_NETWORK, from: 'AAPL' }, amount: '3', slippage: '50' }))
+      .toThrow('ASSET_CATALOG_UNAVAILABLE');
+    registerNetworkCatalog(catalog);
+    const aapl = createCryptoActionNode('node-002', { selection: { action: 'transfer', network: ROBINHOOD_NETWORK, from: 'AAPL' }, amount: '3', slippage: '50', recipient });
+    const read = readTransferNode(aapl);
+    expect(read).toMatchObject({ kind: 'TOKEN', fields: { amount: '3000000000000000000', recipient,
+      token: { address: '0xaf3d76f1834a1d425780943c99ea8a608f8a93f9', decimals: 18, officialId: '0x00000000000000000000000000000000c2425be3658540dd8e2424cbf3c5c649' } } });
+    expect(transferDetails(aapl)).toEqual({ network: ROBINHOOD_NETWORK, asset: 'AAPL', amount: '3', recipient });
+    expect(transferCardLabel(aapl)).toBe('3 AAPL → 0x3333…3333 · Robinhood Chain');
+    expect(validCryptoSelection({ action: 'transfer', network: ROBINHOOD_NETWORK, from: 'PLTR' })).toBe(true);
+    const pltr = createCryptoActionNode('node-002', { selection: { action: 'transfer', network: ROBINHOOD_NETWORK, from: 'PLTR' }, amount: '1.25', slippage: '50' });
+    expect(transferDetails(pltr)).toMatchObject({ asset: 'PLTR', amount: '1.25', recipient: 'CONNECTED_OWNER' });
+    expect(cryptoSelectionOf(pltr)).toEqual({ action: 'transfer', network: ROBINHOOD_NETWORK, from: 'PLTR' });
+    expect(validateAuthoringWorkflow({ schemaVersion: '1.0.0', workflowId: 'w', revision: 1, nodes: [aapl], resourceEdges: [] }, context).nodes).toHaveLength(1);
+  });
+  it('keeps testnet transfers native self-transfers only', () => {
+    expect(() => createCryptoActionNode('node-002', { selection: { action: 'transfer', network: 'Robinhood Chain Testnet', from: 'ETH' }, amount: '0.000001', slippage: '50', recipient }))
+      .toThrow('TRANSFER_PROFILE_UNSUPPORTED');
+    expect(validCryptoSelection({ action: 'transfer', network: 'Robinhood Chain Testnet', from: 'USDG' })).toBe(false);
+  });
+});

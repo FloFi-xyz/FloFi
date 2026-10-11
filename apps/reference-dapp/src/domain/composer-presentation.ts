@@ -79,7 +79,7 @@ export function composerSummary(workflow: Workflow, node: Workflow['nodes'][numb
     ? `${shellChainLabel(node.chainId)} → ${shellChainLabel(destinationChain)}` : shellChainLabel(node.chainId);
   const linked = node.inputs.some(input => input.kind === 'OUTPUT_REFERENCE');
   const amount = lending ? `${node.actionType === 'supply' ? lending.supply : lending.borrow} USDC` : money ? `${money.amount} ${money.asset}` :
-    transfer ? `${transfer.amount} ETH` : router ? `${router.amount} ${router.token}` : bridge ? `${bridge.amount} USDC` :
+    transfer ? `${transfer.amount} ${transfer.asset}` : router ? `${router.amount} ${router.token}` : bridge ? `${bridge.amount} USDC` :
     solana ? `${solana.amount} ${solana.from}` : swap ? `${swap.amount} ${swap.from}` : catalogSwap ? `${catalogSwap.amount} ${catalogSwap.from}` :
     uni ? `${uni.maxUsdc} USDC + ${uni.maxWeth} WETH` : orca ? `${orca.maxSol} SOL + ${orca.maxDevUsdc} devUSDC` :
     position ? `${formatHumanAmount(position.amountWeth, 'WETH', context)} WETH + ${formatHumanAmount(position.amountUsdc, 'USDC', context)} USDC` :

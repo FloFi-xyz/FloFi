@@ -25,11 +25,12 @@ export const MOCK_CODE_PINS = Object.freeze(Object.fromEntries(Object.entries(MO
 export const word = (value: bigint) => '0x' + BigInt.asUintN(256, value).toString(16).padStart(64, '0');
 export const addressWord = (value: string) => '0x' + value.toLowerCase().slice(2).padStart(64, '0');
 export const TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
+export const SCALED_TRANSFER_TOPIC = '0x37e7f0db430edc9dd31bc66f25f8449353aa0818f503b906747dd8f286cd3802';
 
 export type MockPool = { readonly fee: number; readonly liquidity: bigint;
   /** Output units per 1e18 input units, for each direction keyed by input address. */ readonly rate: Readonly<Record<string, bigint>> };
 export type MockStock = { uid?: string; multiplierWad: bigint; scheduledWad?: bigint; effectiveAt?: number; beacon?: string; code?: string };
-export type MockTx = { from: string; to: string; data: string; value: string };
+export type MockTx = { from: string; to: string; data: string; value: string; gas?: string; maxFeePerGas?: string };
 /**
  * The mutable chain: head block, token balances and allowances, native balances, Stock Token multiplier state, pools keyed
  * by their locally derived address. `apply` executes an owner transaction (approve, ERC-20 transfer, exact-input swap) the
@@ -42,7 +43,15 @@ export function createRobinhoodMockChain(catalog: AssetCatalog, options: { reado
     stocks: new Map<string, MockStock>(), pools: new Map<string, { token0: string; token1: string } & MockPool>(),
     code: new Map<string, string>(), receipts: new Map<string, Record<string, unknown>>(), transactions: new Map<string, Record<string, unknown>>(),
     gasPrice: 10_000_000n, gasUsed: 120_000n, blockTime: new Map<number, number>(), codeOverride: new Map<string, string>(),
+    /** Balances, native balances and nonces as they were at the end of each past block (historical reads). */
+    snapshots: new Map<number, { balances: Map<string, bigint>; native: Map<string, bigint>; nonces: Map<string, number> }>(),
   };
+  /** The state a read at `tag` sees: the live state at the head, the snapshot of that block before it. */
+  const at = (tag: unknown) => {
+    const n = tag === undefined || tag === 'latest' || tag === 'pending' ? state.head : Number(BigInt(tag as string));
+    return n >= state.head ? state : state.snapshots.get(n) ?? (() => { throw new Error('MOCK_HISTORY_UNAVAILABLE ' + n); })();
+  };
+  const snapshot = () => state.snapshots.set(state.head, { balances: new Map(state.balances), native: new Map(state.native), nonces: new Map(state.nonces) });
   const key = (token: string, owner: string) => `${token.toLowerCase()}:${owner.toLowerCase()}`;
   const allowanceKey = (token: string, owner: string, spender: string) => `${token.toLowerCase()}:${owner.toLowerCase()}:${spender.toLowerCase()}`;
   const blockHash = (n: number) => { if (!state.hashes.has(n)) state.hashes.set(n, '0x' + createHash('sha256').update('rh-block-' + n).digest('hex')); return state.hashes.get(n)!; };
@@ -67,8 +76,9 @@ export function createRobinhoodMockChain(catalog: AssetCatalog, options: { reado
   };
   const readWord = (data: string, index: number) => BigInt('0x' + data.slice(10 + index * 64, 10 + (index + 1) * 64));
   const readAddress = (data: string, index: number) => '0x' + data.slice(10 + index * 64 + 24, 10 + (index + 1) * 64);
-  function call(to: string, data: string): string {
+  function call(to: string, data: string, view: { balances: Map<string, bigint> } = state): string {
     to = to.toLowerCase();
+    if (data === '0x') return '0x';
     const selector = data.slice(0, 10);
     if (([UNI.router, UNI.quoter, UNI.positionManager] as readonly string[]).includes(to)) {
       if (selector === '0xc45a0155') return addressWord(UNI.factory);
@@ -97,7 +107,7 @@ export function createRobinhoodMockChain(catalog: AssetCatalog, options: { reado
       if (selector === '0x97a4064f') return word(BigInt(stock.effectiveAt ?? 0));
     }
     if (selector === '0x313ce567') return word(BigInt(tokenDecimals(to)));
-    if (selector === '0x70a08231') return word(state.balances.get(key(to, readAddress(data, 0))) ?? 0n);
+    if (selector === '0x70a08231') return word(view.balances.get(key(to, readAddress(data, 0))) ?? 0n);
     if (selector === '0xdd62ed3e') return word(state.allowances.get(allowanceKey(to, readAddress(data, 0), readAddress(data, 1))) ?? 0n);
     if (selector === '0xa9059cbb') return word(1n);
     if (selector === '0x04e45aaf') return word(0n);
@@ -119,10 +129,10 @@ export function createRobinhoodMockChain(catalog: AssetCatalog, options: { reado
       const stock = state.stocks.get(String(params[0]).toLowerCase());
       return stock && params[1] === UNI.beaconSlot ? addressWord(stock.beacon ?? UNI.stockTokenBeacon) : word(0n);
     }
-    if (method === 'eth_getBalance') return '0x' + (state.native.get(String(params[0]).toLowerCase()) ?? 0n).toString(16);
-    if (method === 'eth_getTransactionCount') return '0x' + (state.nonces.get(String(params[0]).toLowerCase()) ?? 0).toString(16);
+    if (method === 'eth_getBalance') return '0x' + (at(params[1]).native.get(String(params[0]).toLowerCase()) ?? 0n).toString(16);
+    if (method === 'eth_getTransactionCount') return '0x' + (at(params[1]).nonces.get(String(params[0]).toLowerCase()) ?? 0).toString(16);
     if (method === 'eth_estimateGas') return '0x' + state.gasUsed.toString(16);
-    if (method === 'eth_call') { const request = params[0] as { to: string; data: string }; return call(request.to, request.data); }
+    if (method === 'eth_call') { const request = params[0] as { to: string; data: string }; return call(request.to, request.data, at(params[1])); }
     if (method === 'eth_getTransactionReceipt') return state.receipts.get(String(params[0])) ?? null;
     if (method === 'eth_getTransactionByHash') return state.transactions.get(String(params[0])) ?? null;
     if (method === 'eth_getLogs') return [];
@@ -130,6 +140,7 @@ export function createRobinhoodMockChain(catalog: AssetCatalog, options: { reado
   };
   /** Plays the owner's wallet: executes one owner transaction against the mock state and returns its hash. */
   function apply(tx: MockTx): string {
+    snapshot();
     const from = tx.from.toLowerCase(), to = tx.to.toLowerCase(), data = tx.data, selector = data.slice(0, 10);
     const nonce = state.nonces.get(from) ?? 0, hash = '0x' + createHash('sha256').update(`rh-tx-${from}-${nonce}-${data}`).digest('hex');
     const logs: Record<string, unknown>[] = [];
@@ -139,6 +150,9 @@ export function createRobinhoodMockChain(catalog: AssetCatalog, options: { reado
       state.balances.set(key(token, a), before - amount);
       state.balances.set(key(token, b), (state.balances.get(key(token, b)) ?? 0n) + amount);
       logs.push({ address: token, topics: [TRANSFER_TOPIC, addressWord(a), addressWord(b)], data: word(amount) });
+      // Robinhood Stock Tokens (ERC-8056) also emit the scaled transfer next to Transfer.
+      const stock = state.stocks.get(token.toLowerCase());
+      if (stock) logs.push({ address: token, topics: [SCALED_TRANSFER_TOPIC, addressWord(a), addressWord(b)], data: word(amount) + word(amount * stock.multiplierWad / 10n ** 18n).slice(2) });
     };
     if (selector === '0x095ea7b3') state.allowances.set(allowanceKey(to, from, readAddress(data, 0)), readWord(data, 1));
     else if (selector === '0xa9059cbb') move(to, from, readAddress(data, 0), readWord(data, 1));
@@ -164,12 +178,15 @@ export function createRobinhoodMockChain(catalog: AssetCatalog, options: { reado
     state.head += 1;
     const blockNumber = '0x' + state.head.toString(16);
     state.blockTime.set(state.head, Math.floor(options.now() / 1000));
-    state.transactions.set(hash, { hash, from, to, input: data, value: tx.value, chainId: state.chainHex, type: '0x2', nonce: '0x' + nonce.toString(16), blockHash: blockHash(state.head) });
+    state.transactions.set(hash, { hash, from, to, input: data, value: tx.value, chainId: state.chainHex, type: '0x2', nonce: '0x' + nonce.toString(16),
+      blockHash: blockHash(state.head), blockNumber, gas: tx.gas ?? '0x' + (state.gasUsed * 2n).toString(16), maxFeePerGas: tx.maxFeePerGas ?? '0x' + (state.gasPrice * 2n).toString(16) });
     state.receipts.set(hash, { transactionHash: hash, status: '0x1', blockNumber, blockHash: blockHash(state.head), from, to, gasUsed: '0x' + state.gasUsed.toString(16),
       effectiveGasPrice: '0x' + state.gasPrice.toString(16), gasUsedForL1: '0x0', logs });
     return hash;
   }
-  return { rpc, state, addPool, apply, fund: (token: string, owner: string, amount: bigint) => state.balances.set(key(token, owner), amount),
+  /** Advances the head by `n` empty blocks (confirmations), keeping historical reads exact. */
+  const mine = (n = 1) => { for (let i = 0; i < n; i++) { snapshot(); state.head += 1; state.blockTime.set(state.head, Math.floor(options.now() / 1000)); } };
+  return { rpc, state, addPool, apply, mine, fund: (token: string, owner: string, amount: bigint) => state.balances.set(key(token, owner), amount),
     fundNative: (owner: string, amount: bigint) => state.native.set(owner.toLowerCase(), amount), balance: (token: string, owner: string) => state.balances.get(key(token, owner)) ?? 0n };
 }
 export type RobinhoodMockChain = ReturnType<typeof createRobinhoodMockChain>;

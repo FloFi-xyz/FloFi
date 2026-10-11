@@ -2,7 +2,7 @@
 /**
  * RH-DEMO-001 durable run for one owner-signed native self-transfer. One run has at most one attempt,
  * so it can make at most one economic submission. Recovery only reads; no send function exists here.
- * The chain is always the reviewed transaction's own chain (Robinhood Testnet or Ethereum Sepolia).
+ * The chain is always the reviewed transaction's own chain (Robinhood Testnet, Ethereum Sepolia or, BUILD-RH-002, Robinhood Chain mainnet).
  */
 import { createJournal, appendJournalState } from './journal.js';
 import { supplyArtifactHash, supplyHash, rpcRecord, rpcUint, rpcHash, supplyHex,
@@ -13,12 +13,13 @@ export type TransferAttemptState = 'PREPARED' | 'CANCELLED' | 'SUBMITTING' | 'SU
   'CONFIRMED' | 'REVERTED' | 'RECONCILIATION_REQUIRED';
 export type TransferAttempt = { state: TransferAttemptState; nonce: string; preparedAtBlock: number; transaction: NativeTransferTransaction;
   transactionHash: string | null; reconciled: boolean };
-export type TransferRun = { format: 'gryloo.native-transfer-run.v1'; id: string; review: NativeTransferReview; provenance: 'PUBLIC_TESTNET' | 'MOCKED';
+export type TransferRun = { format: 'gryloo.native-transfer-run.v1'; id: string; review: NativeTransferReview; provenance: 'PUBLIC_TESTNET' | 'PUBLIC_MAINNET' | 'MOCKED';
   authorization: string | null; attempt: TransferAttempt | null; journal: ExecutionJournal; verdict: 'PENDING' | 'RECONCILED' | 'DIVERGENT';
   ownerInitiated: boolean };
 const SEGMENT = 'native-transfer-segment', STEP = 'native-transfer';
 const entity = (run: Pick<TransferRun, 'id'>) => `${run.id}.TRANSFER`;
-export const TRANSFER_RUN_ID = /^rhx-[a-f0-9]{32}$/;
+/** `rhx-`: public-testnet transfer runs (RH-DEMO-001, Ethereum Sepolia); `rht-` (BUILD-RH-002): Robinhood Chain mainnet runs. */
+export const TRANSFER_RUN_ID = /^(rhx|rht)-[a-f0-9]{32}$/;
 
 export function createTransferRun(id: string, review: NativeTransferReview, provenance: TransferRun['provenance'], now = new Date()): TransferRun {
   if (!TRANSFER_RUN_ID.test(id)) throw new Error('TRANSFER_RUN_ID_INVALID');
@@ -58,7 +59,7 @@ export function prepareTransferAttempt(run: TransferRun, block: number, nonce: s
 export function matchTransferTransaction(attempt: Pick<TransferAttempt, 'nonce' | 'transaction'>, value: unknown): boolean {
   const tx = rpcRecord(value), expected = attempt.transaction;
   return typeof tx.from === 'string' && typeof tx.to === 'string' && tx.from.toLowerCase() === expected.from && tx.to.toLowerCase() === expected.to &&
-    rpcUint(tx.value) === BigInt(expected.value) && tx.input === '0x' && rpcUint(tx.nonce) === BigInt(attempt.nonce) &&
+    rpcUint(tx.value) === BigInt(expected.value) && tx.input === expected.data && rpcUint(tx.nonce) === BigInt(attempt.nonce) &&
     rpcUint(tx.chainId) === BigInt(expected.chainId);
 }
 /**
@@ -86,7 +87,9 @@ export async function discoverTransferByNonce(attempt: Pick<TransferAttempt, 'no
 /** Structural validation of a persisted run; any inconsistency fails closed. */
 export function validateTransferRun(run: TransferRun): void {
   const { commitment, ...review } = run.review;
-  if (run.format !== 'gryloo.native-transfer-run.v1' || !TRANSFER_RUN_ID.test(run.id) || !['PUBLIC_TESTNET', 'MOCKED'].includes(run.provenance) ||
+  // A mainnet run lives only in the rht- namespace; a testnet run never does (BUILD-RH-002).
+  if (run.format !== 'gryloo.native-transfer-run.v1' || !TRANSFER_RUN_ID.test(run.id) || !['PUBLIC_TESTNET', 'PUBLIC_MAINNET', 'MOCKED'].includes(run.provenance) ||
+      (run.provenance === 'PUBLIC_MAINNET' && !run.id.startsWith('rht-')) || (run.provenance === 'PUBLIC_TESTNET' && !run.id.startsWith('rhx-')) ||
       supplyHash(review) !== commitment || supplyArtifactHash('execution-plan', run.review.plan) !== run.journal.executionPlanHash ||
       supplyArtifactHash('strategy-manifest', run.review.manifest) !== run.journal.manifestHash || run.journal.journalId !== run.id ||
       run.authorization !== null && run.authorization !== commitment || run.ownerInitiated !== Boolean(run.attempt) ||

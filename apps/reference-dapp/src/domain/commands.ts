@@ -228,7 +228,8 @@ export function commandIsValid(input: unknown): input is Command {
     case 'SET_RH_TRANSFER': {
       if(command.type==='SET_RH_TRANSFER'&&!id(command.nodeId))return false;
       const fields=command.input;
-      if(!fields||typeof fields!=='object'||Array.isArray(fields)||Object.getPrototypeOf(fields)!==Object.prototype||Reflect.ownKeys(fields).sort().join()!==['network','asset','amount','recipient'].sort().join()||!Object.values(fields).every(v=>typeof v==='string'&&v.length<=40))return false;
+      // BUILD-RH-002: a recipient may be an explicit 42-character address on Robinhood Chain.
+      if(!fields||typeof fields!=='object'||Array.isArray(fields)||Object.getPrototypeOf(fields)!==Object.prototype||Reflect.ownKeys(fields).sort().join()!==['network','asset','amount','recipient'].sort().join()||!Object.values(fields).every(v=>typeof v==='string'&&v.length<=64))return false;
       try{createAuthoredTransfer('node-preview',fields as RobinhoodTransferInput);return true;}catch{return false;}
     }
     case 'ADD_WITHDRAW':
