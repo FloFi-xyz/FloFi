@@ -5,8 +5,8 @@
  * Observation (read-only USD prices): ETH, BTC, SOL — when the deployment's price source serves them.
  * Execution (the action an automation proposes): FloFi's existing swap flows only, expressed as canonical StrategySpecs:
  *
- *   ETH   USDC ⇄ WETH on Base Sepolia and Ethereum Sepolia (Uniswap v3). Base mainnet composes, but current main has no owner-execution
- *         flow for it (the gates answer OWNER_EXECUTION_NOT_IMPLEMENTED) and mainnet is disabled by policy by default
+ *   ETH   USDC ⇄ WETH on Base Sepolia and Ethereum Sepolia (Uniswap v3). Base mainnet composes and (BUILD-BASE-001) has the owner-wallet
+ *         `base-swap` flow, behind its deployment gates; mainnet automations are disabled by policy by default
  *   SOL   devUSDC ⇄ SOL on Solana Devnet (Orca); USDC ⇄ SOL on Solana mainnet (Jupiter) exists in code, disabled by policy by default
  *   BTC   none: FloFi has no BTC/WBTC/cbBTC swap route (WBTC is Aave-only on Ethereum Sepolia) → BTC_EXECUTION_ROUTE_UNAVAILABLE
  *

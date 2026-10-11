@@ -92,8 +92,10 @@ describe('BUILD-AUTOMATION-001 rules: owner isolation and optimistic concurrency
     const h = automationHarness(t.db);
     await expect(h.service().create(OWNER_A, weeklyDca({ action: { kind: 'ROUTE', asset: 'BTC', side: 'BUY', network: 'base-sepolia', amount: '50', slippageBps: 50 } })))
       .rejects.toThrow('BTC_EXECUTION_ROUTE_UNAVAILABLE');
+    // BUILD-BASE-001 (intentional change): Base mainnet now has an owner-wallet swap flow, so the refusal is the mainnet policy (disabled by
+    // default), no longer a missing flow. The rule is still never created.
     await expect(h.service().create(OWNER_A, weeklyDca({ action: { kind: 'ROUTE', asset: 'ETH', side: 'BUY', network: 'base', amount: '50', slippageBps: 50 } })))
-      .rejects.toThrow('OWNER_EXECUTION_NOT_IMPLEMENTED');
+      .rejects.toThrow('MAINNET_HANDOFF_DISABLED_BY_POLICY');
     await expect(h.service().create(OWNER_A, weeklyDca({ limits: { ...weeklyDca().limits, maxAmountPerExecution: '49' } }))).rejects.toThrow('LIMIT_AMOUNT_PER_EXECUTION');
     // A Solana route needs a Solana wallet to claim: never offered to (or created for) an EVM owner.
     await expect(h.service().create(OWNER_A, weeklyDca({ action: { kind: 'ROUTE', asset: 'SOL', side: 'BUY', network: 'solana-devnet', amount: '1', slippageBps: 50 } })))

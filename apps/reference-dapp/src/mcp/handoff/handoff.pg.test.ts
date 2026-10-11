@@ -91,10 +91,12 @@ describe('BUILD-MCP-002 request_user_approval', () => {
       requires: expect.arrayContaining(['Explicit wallet signature']) });
   });
 
-  it('refuses what no existing flow executes with the owner wallet, and review blockers', async () => {
+  // BUILD-BASE-001 (intentional change): the Base swap has an owner-wallet flow now (`base-swap`); a mainnet the handoff policy allows is still
+  // refused while the deployment has not enabled that flow, and nothing is handed off.
+  it('refuses a strategy whose owner-wallet flow this deployment has not enabled', async () => {
     const { approve } = await consumer(undefined, { FLOFI_MCP_HANDOFF_MAINNET_NETWORKS: 'base' });
     expect((await approve({ action: 'swap', network: 'base', inputAsset: 'USDC', outputAsset: 'WETH', amount: '2' })).output)
-      .toMatchObject({ ok: false, code: 'OWNER_EXECUTION_NOT_IMPLEMENTED' });
+      .toMatchObject({ ok: false, code: 'FLOW_NOT_ENABLED_IN_DEPLOYMENT' });
   });
 
   it('refuses a general multi-step sequence honestly (per-step facts) and accepts the lending shape as its existing executor', async () => {
