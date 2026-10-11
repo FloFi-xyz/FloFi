@@ -18,6 +18,7 @@
  * network. BUILD-RH-002: a side's token is generic (`token`, `symbol`, `decimals`) because a route may map assets across chains
  * (Base or Arbitrum USDC → Robinhood USDG); `l1DataFee` says whether the source chain's receipts carry an OP Stack `l1Fee`.
  */
+import { ARBITRUM_ONE } from './arbitrum-chain.js';
 export type RouterProfile = {
   readonly id: string; readonly adapterId: 'flofi.router'; readonly underlyingProtocol: 'across';
   readonly network: 'MAINNET' | 'TESTNET'; readonly environment: 'MAINNET' | 'PUBLIC_TESTNET';
@@ -39,8 +40,8 @@ export const CROSSCHAIN_ROUTER_BASE_ARBITRUM: RouterProfile = Object.freeze({
     explorer: 'https://basescan.org/', token: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913', symbol: 'USDC', decimals: 6,
     spokePool: '0x09aea4b2242abc8bb4bb78d537a67a245a7bec64', lifiDiamond: '0x1231deb6f5749ef6ce6943a275a1d3e7486f4eae',
     lifiFeeForwarder: '0xce40449b773a3e6e5e769adb4e567179d4828cbd', l1DataFee: true }),
-  destination: Object.freeze({ network: 'Arbitrum One', chain: 'eip155:42161', chainId: 42161, chainHex: '0xa4b1', rpc: 'https://arb1.arbitrum.io/rpc',
-    explorer: 'https://arbiscan.io/', token: '0xaf88d065e77c8cc2239327c5edb3a432268e5831', symbol: 'USDC', decimals: 6, spokePool: '0xe35e9842fceaca96570b734083f4a58e8f7c5f2a' }),
+  destination: Object.freeze({ network: ARBITRUM_ONE.name, chain: ARBITRUM_ONE.chain, chainId: ARBITRUM_ONE.chainId, chainHex: ARBITRUM_ONE.chainHex, rpc: ARBITRUM_ONE.rpc,
+    explorer: ARBITRUM_ONE.explorer, token: '0xaf88d065e77c8cc2239327c5edb3a432268e5831', symbol: 'USDC', decimals: 6, spokePool: '0xe35e9842fceaca96570b734083f4a58e8f7c5f2a' }),
   /** SHA-256 of the runtime code read on 2026-10-04; a different deployment fails closed. */
   codeSha256: Object.freeze({
     baseSpokePool: '3cc5e539eb61133fec38655ae3f55d8e1f944fce2cbc02e151972cf9c9880545',

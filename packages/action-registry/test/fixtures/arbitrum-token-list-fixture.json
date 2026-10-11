@@ -1,0 +1,18 @@
+{
+  "name": "Uniswap Labs Default",
+  "timestamp": "2026-10-11T00:00:00.000Z",
+  "version": { "major": 1, "minor": 0, "patch": 0 },
+  "tokens": [
+    { "chainId": 42161, "address": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831", "name": "USD Coin", "symbol": "USDC", "decimals": 6 },
+    { "chainId": 42161, "address": "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1", "name": "Wrapped Ether", "symbol": "WETH", "decimals": 18 },
+    { "chainId": 42161, "address": "0x912CE59144191C1204E64559FE8253a0e49E6548", "name": "Arbitrum", "symbol": "ARB", "decimals": 18, "logoURI": "https://arbitrum.foundation/logo.png" },
+    { "chainId": 42161, "address": "0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f", "name": "Wrapped BTC", "symbol": "WBTC", "decimals": 8, "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599/logo.png" },
+    { "chainId": 42161, "address": "0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8", "name": "Bridged USDC", "symbol": "USDC.e", "decimals": 6 },
+    { "chainId": 42161, "address": "0xf97f4df75117a78c1A5a0DBb814Af92458539FB4", "name": "ChainLink Token", "symbol": "LINK", "decimals": 18 },
+    { "chainId": 42161, "address": "0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1", "name": "Dai Stablecoin", "symbol": "DAI", "decimals": 18 },
+    { "chainId": 42161, "address": "0x63806C056Fa458c548Fb416B15E358A9D685710A", "name": "Flux", "symbol": "FLUX", "decimals": 18 },
+    { "chainId": 42161, "address": "0x6314C31A7a1652cE482cffe247E9CB7c3f4BB9aF", "name": "1inch", "symbol": "1INCH", "decimals": 18 },
+    { "chainId": 8453, "address": "0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf", "name": "Coinbase Wrapped BTC", "symbol": "cbBTC", "decimals": 8 },
+    { "chainId": 4663, "address": "0x0000000000000000000000000000000000000001", "name": "Foreign fixture token", "symbol": "FOREIGN", "decimals": 18 }
+  ]
+}

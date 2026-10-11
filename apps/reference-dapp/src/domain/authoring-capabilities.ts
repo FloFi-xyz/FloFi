@@ -46,7 +46,8 @@ export const bridgeOffers = (): readonly { readonly source: NetworkIdentity; rea
   AUTHORING_CAPABILITIES.filter(capability => capability.action === 'bridge').map(capability => ({ source: capability.network, destination: capability.destination!, asset: capability.asset! }));
 /** Networks whose swaps, transfers and pools take any asset of their validated official catalog. */
 export const catalogCapabilityNetworks = (): readonly NetworkIdentity[] =>
-  NETWORKS.filter(network => network.catalog && AUTHORING_CAPABILITIES.some(capability => capability.network === network));
+  NETWORKS.filter(network => network.catalog && (['swap', 'transfer', 'add_liquidity'] as const)
+    .every(action => AUTHORING_CAPABILITIES.some(capability => capability.network === network && capability.action === action)));
 
 type Language = 'EN' | 'PT';
 const join = (items: readonly string[], language: Language) => items.length < 2 ? items.join('') : `${items.slice(0, -1).join(', ')} ${language === 'PT' ? 'e' : 'and'} ${items.at(-1)}`;
