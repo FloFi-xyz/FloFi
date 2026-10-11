@@ -36,9 +36,10 @@ const profiles = phase === 'composition' ? [
   ['orca-liquidity-provenance', [boundary], { FLOFI_RELEASE_PROVENANCE_PROFILE: 'solana-liquidity', GRYLOO_SOLANA_DEVNET_E2E: 'MOCKED_LOOPBACK_ONLY' }],
   ['transfer-provenance', [boundary], { FLOFI_RELEASE_PROVENANCE_PROFILE: 'transfer', GRYLOO_ROBINHOOD_E2E: 'MOCKED_LOOPBACK_ONLY' }],
   // BUILD-RH-002: Robinhood Chain authoring against the committed official registry capture on loopback (MOCKED; nothing is quoted or sent).
-  ['robinhood-mainnet-authoring', ['robinhood-stocks.spec.ts'], { GRYLOO_ROBINHOOD_MAINNET_E2E: 'MOCKED_LOOPBACK_ONLY' }],
-  // BUILD-BASE-001: Base as a catalog network in the existing cards (shortcuts, search, a non-featured token, generated identity), MOCKED list only.
-  ['base-mainnet-authoring', ['base-mainnet-authoring.spec.ts'], { GRYLOO_BASE_MAINNET_E2E: 'MOCKED_LOOPBACK_ONLY' }],
+  ['robinhood-mainnet-authoring', ['robinhood-stocks.spec.ts'], { GRYLOO_ROBINHOOD_MAINNET_E2E: 'MOCKED_LOOPBACK_ONLY', FLOFI_COPILOT: 'replay' }],
+  // BUILD-BASE-001: Base as a catalog network in the existing cards (shortcuts, search, a non-featured token, provider logos through a closed
+  // replay) and in the natural-language Copilot (committed replay answers), MOCKED list only.
+  ['base-mainnet-authoring', ['base-mainnet-authoring.spec.ts'], { GRYLOO_BASE_MAINNET_E2E: 'MOCKED_LOOPBACK_ONLY', FLOFI_COPILOT: 'replay' }],
   ['uniswap-provenance', [boundary], { FLOFI_RELEASE_PROVENANCE_PROFILE: 'uniswap', GRYLOO_UNISWAP_LIQUIDITY_E2E: 'MOCKED_LOOPBACK_ONLY' }],
   ['router-provenance', [boundary], { FLOFI_RELEASE_PROVENANCE_PROFILE: 'router', GRYLOO_ROUTER_E2E: 'MOCKED_LOOPBACK_ONLY' }],
   ['journey-provenance', [boundary], { FLOFI_RELEASE_PROVENANCE_PROFILE: 'journey', GRYLOO_ROUTER_TESTNET_E2E: 'MOCKED_LOOPBACK_ONLY' }],

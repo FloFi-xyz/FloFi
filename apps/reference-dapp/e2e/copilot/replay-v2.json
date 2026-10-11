@@ -843,6 +843,203 @@
      }
     }
    }
+  },
+  {
+   "user": [
+    "Buy Tesla with 50 USDG on Robinhood Chain"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "EN",
+      "kind": "ACTION",
+      "action": {
+       "type": "SWAP",
+       "network": "ROBINHOOD",
+       "inputAsset": "USDG",
+       "outputAsset": "Tesla",
+       "amount": "50",
+       "slippageBps": null
+      },
+      "reuse": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "Compre ações da Tesla com 50 USDG na Robinhood"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "PT",
+      "kind": "ACTION",
+      "action": {
+       "type": "SWAP",
+       "network": "ROBINHOOD",
+       "inputAsset": "USDG",
+       "outputAsset": "Tesla",
+       "amount": "50",
+       "slippageBps": null
+      },
+      "reuse": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "Buy Salesforce with 20 USDG on Robinhood Chain"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "EN",
+      "kind": "ACTION",
+      "action": {
+       "type": "SWAP",
+       "network": "ROBINHOOD",
+       "inputAsset": "USDG",
+       "outputAsset": "Salesforce",
+       "amount": "20",
+       "slippageBps": null
+      },
+      "reuse": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "Please swap 100 USDC for Coinbase Wrapped BTC on Base"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "EN",
+      "kind": "ACTION",
+      "action": {
+       "type": "SWAP",
+       "network": "BASE",
+       "inputAsset": "USDC",
+       "outputAsset": "Coinbase Wrapped BTC",
+       "amount": "100",
+       "slippageBps": null
+      },
+      "reuse": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "Quero colocar 100 USDC e 50 Aerodrome num pool da Uniswap na Base com taxa de 0,3%"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "PT",
+      "kind": "ACTION",
+      "action": {
+       "type": "LIQUIDITY",
+       "protocol": "UNISWAP_V3",
+       "network": "BASE",
+       "deposits": [
+        {
+         "asset": "USDC",
+         "maxAmount": "100"
+        },
+        {
+         "asset": "Aerodrome",
+         "maxAmount": "50"
+        }
+       ],
+       "rangeUnit": null,
+       "lower": null,
+       "upper": null,
+       "slippageBps": null,
+       "feeTier": "0.3"
+      },
+      "reuse": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "Please lend 25 USDC on Aave on Base for 0x3333333333333333333333333333333333333333"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "EN",
+      "kind": "ACTION",
+      "action": {
+       "type": "SUPPLY",
+       "protocol": "AAVE_V3",
+       "network": "BASE",
+       "asset": "USDC",
+       "amount": "25",
+       "beneficiary": "0x3333333333333333333333333333333333333333"
+      },
+      "reuse": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "Please send 0.01 ETH on Base over to 0x3333333333333333333333333333333333333333"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "EN",
+      "kind": "ACTION",
+      "action": {
+       "type": "TRANSFER",
+       "network": "BASE",
+       "asset": "ETH",
+       "amount": "0.01",
+       "recipient": "0x3333333333333333333333333333333333333333"
+      },
+      "reuse": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "Move 20 USDC from Arbitrum over to Base"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "EN",
+      "kind": "ACTION",
+      "action": {
+       "type": "BRIDGE",
+       "sourceNetwork": "ARBITRUM",
+       "destinationNetwork": "BASE",
+       "asset": "USDC",
+       "amount": "20",
+       "slippageBps": null,
+       "routing": null,
+       "recipient": null
+      },
+      "reuse": null
+     }
+    }
+   }
   }
  ]
 }
