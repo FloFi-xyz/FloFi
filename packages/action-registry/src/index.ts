@@ -225,6 +225,8 @@ export * from './robinhood-stock-tokens.js';
 export * from './uniswap-v3-robinhood.js';
 export * from './base-chain.js';
 export * from './base-token-list.js';
+export * from './asset-logos.js';
+export * from './asset-logo-rules.js';
 export * from './uniswap-v3-catalog.js';
 export * from './uniswap-v3-base.js';
 export * from './uniswap-catalog-networks.js';

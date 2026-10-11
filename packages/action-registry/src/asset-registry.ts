@@ -155,6 +155,16 @@ export const featuredAssets = (catalog: AssetCatalog): readonly CanonicalAsset[]
   catalog.featured.map(id => catalog.assets.find(asset => asset.id === id)!);
 /** Display name without the issuer suffix (" • Robinhood Token"). */
 export const assetDisplayName = (asset: Pick<CanonicalAsset, 'name'>): string => asset.name.replace(/\s*[•·]\s*Robinhood Token$/u, '').trim();
+const nameKey = (text: string) => text.normalize('NFKC').trim().replace(/\s+/g, ' ').toUpperCase();
+/**
+ * BUILD-BASE-001: the assets whose display name or full catalog name is exactly `name` (case- and spacing-insensitive), never a fragment:
+ * "tesla" names TSLA ("Tesla • Robinhood Token"); "Coinbase BTC" names nothing. More than one result is an ambiguity the caller must ask
+ * about; this never chooses.
+ */
+export function catalogAssetsByName(catalog: AssetCatalog, name: string): readonly CanonicalAsset[] {
+  const wanted = typeof name === 'string' ? nameKey(name) : '';
+  return wanted ? catalog.assets.filter(asset => nameKey(assetDisplayName(asset)) === wanted || nameKey(asset.name) === wanted) : [];
+}
 
 /**
  * Case-insensitive search by symbol and display name. Ranking: exact symbol, symbol prefix, name word prefix, then

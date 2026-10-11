@@ -12,17 +12,28 @@
  *  - an EIP-55 checksummed address, integer decimals 0–36, a 1–160 character name without control characters;
  *  - a symbol in FloFi's catalog grammar (1–16 characters, a letter first); any other symbol is counted and excluded, never renamed.
  * A malformed Base record, a duplicate address or (case-insensitive) symbol, or a pinned asset listed with another identity fails the
- * whole catalog closed. Entries of other chains are not Base assets and are not projected. Logo URLs point at third-party hosts and
- * are dropped. The list is GPL-3.0: FloFi reads it at runtime and never commits or redistributes it (tests use a FloFi-authored fixture).
+ * whole catalog closed. Entries of other chains are not Base assets and are not projected. A `logoURI` is kept as presentation metadata
+ * only under the reviewed image prefixes of `BASE_TOKEN_LIST_LOGOS` (the hosts the list used on 2026-10-11); any other value is dropped,
+ * never followed, and never fails the catalog. The list is GPL-3.0: FloFi reads it at runtime and never commits or redistributes it (tests
+ * use a FloFi-authored fixture).
  */
 import { ASSET_SYMBOL, BASE_BASE_ASSETS, contentSha256, createAssetCatalog, erc20AssetId, isChecksumAddress, mergeAssetCatalogs,
   type AssetCatalog, type AssetProvider, type CanonicalAsset } from './asset-registry.js';
 import { BASE_MAINNET } from './base-chain.js';
+import { acceptAssetLogo, type AssetLogoRule } from './asset-logos.js';
 
 export const BASE_TOKEN_LIST = Object.freeze({
   url: 'https://tokens.uniswap.org', docs: 'https://github.com/Uniswap/default-token-list', name: 'Uniswap Labs Default',
   provider: 'uniswap.default-token-list', host: 'tokens.uniswap.org', maximumBytes: 4_000_000, maximumTokens: 20_000,
 });
+/**
+ * The image prefixes a Base list `logoURI` may use (CoinGecko's image CDNs, the Superchain token list data, Trust Wallet's asset repository,
+ * CoinMarketCap's coin images and Basescan's token images). CoinGecko appends a numeric cache-buster query. Presentation only.
+ */
+export const BASE_TOKEN_LIST_LOGOS: AssetLogoRule = Object.freeze({ kind: 'PREFIXED', provider: BASE_TOKEN_LIST.provider, chain: BASE_MAINNET.chain,
+  prefixes: Object.freeze(['https://coin-images.coingecko.com/coins/images/', 'https://assets.coingecko.com/coins/images/',
+    'https://ethereum-optimism.github.io/data/', 'https://raw.githubusercontent.com/trustwallet/assets/', 'https://s2.coinmarketcap.com/static/img/coins/',
+    'https://basescan.org/token/images/']), cacheBusterQuery: true });
 /** Shortcuts on the Base pickers. They never limit the catalog; search exposes every validated asset. */
 export const BASE_FEATURED_ASSETS = Object.freeze(['USDC', 'WETH'] as const);
 
@@ -31,15 +42,16 @@ const isRecord = (value: unknown): value is Record<string, unknown> => value !==
 const hasControlCharacter = (text: string) => Array.from(text).some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127);
 const VERSION_PART = (value: unknown) => Number.isSafeInteger(value) && (value as number) >= 0;
 
-type BaseRecord = { address: string; symbol: string; name: string; decimals: number; included: boolean };
+type BaseRecord = { address: string; symbol: string; name: string; decimals: number; included: boolean; logoUrl: string | null };
 function parseRecord(raw: Record<string, unknown>): BaseRecord {
   const { address, symbol, name, decimals } = raw;
   if (typeof address !== 'string' || !isChecksumAddress(address)) fail('BASE_TOKEN_LIST_ADDRESS_INVALID');
   if (!Number.isSafeInteger(decimals) || (decimals as number) < 0 || (decimals as number) > 36) fail('BASE_TOKEN_LIST_DECIMALS_INVALID');
   if (typeof name !== 'string' || name.trim().length < 1 || name.length > 160 || hasControlCharacter(name)) fail('BASE_TOKEN_LIST_NAME_INVALID');
   if (typeof symbol !== 'string' || symbol.length < 1 || symbol.length > 32 || hasControlCharacter(symbol)) fail('BASE_TOKEN_LIST_SYMBOL_INVALID');
-  return { address: (address as string).toLowerCase(), symbol: symbol as string, name: (name as string).trim(), decimals: decimals as number,
-    included: ASSET_SYMBOL.test(symbol as string) };
+  const lower = (address as string).toLowerCase();
+  return { address: lower, symbol: symbol as string, name: (name as string).trim(), decimals: decimals as number,
+    included: ASSET_SYMBOL.test(symbol as string), logoUrl: acceptAssetLogo(raw.logoURI, BASE_TOKEN_LIST_LOGOS, lower) };
 }
 
 /**
@@ -76,7 +88,7 @@ export function parseBaseTokenList(text: string, fetchedAt: string): AssetCatalo
   if (!listed.length) fail('BASE_TOKEN_LIST_EMPTY');
   const chain = BASE_MAINNET.chain;
   const assets: CanonicalAsset[] = listed.map(record => ({ id: erc20AssetId(chain, record.address), chain, chainId: BASE_MAINNET.chainId, network: BASE_MAINNET.name,
-    kind: 'ERC20', assetClass: 'TOKEN', symbol: record.symbol, name: record.name, address: record.address, decimals: record.decimals, logoUrl: null,
+    kind: 'ERC20', assetClass: 'TOKEN', symbol: record.symbol, name: record.name, address: record.address, decimals: record.decimals, logoUrl: record.logoUrl,
     source: { provider: BASE_TOKEN_LIST.provider, url: BASE_TOKEN_LIST.url, officialId: null }, stock: null }));
   const list = createAssetCatalog({ chain, network: BASE_MAINNET.name, assets, provenance: [{ provider: BASE_TOKEN_LIST.provider, source: BASE_TOKEN_LIST.url,
     fetchedAt: new Date(Date.parse(fetchedAt)).toISOString(), contentSha256: contentSha256(text), officialRecords: records.length,

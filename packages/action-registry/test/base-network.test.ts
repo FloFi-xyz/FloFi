@@ -11,11 +11,12 @@ import { AAVE_V3_BASE, AAVE_V3_LENDING_PROFILES, BASE_BASE_ASSETS, BASE_FEATURED
 /**
  * A FloFi-authored fixture in the token-list format: Base assets whose address, name, symbol and decimals were read directly from chain
  * on 2026-10-11, plus the two entries whose declared decimals differ from their contract (FLUX, WMTX) and one out-of-grammar symbol
- * (1INCH). It is not the official list (GPL-3.0, read at runtime only; see the discovery §2.4).
+ * (1INCH). Four entries (cbBTC, AERO, DEGEN, ZORA) carry the `logoURI` the live list gave them: URL references only, no image bytes. It
+ * is not the official list (GPL-3.0, read at runtime only; see the discovery §2.4).
  */
 const FIXTURE = readFileSync(new URL('./fixtures/base-token-list-fixture.json', import.meta.url), 'utf8');
 const FETCHED = '2026-10-11T03:00:00.000Z';
-type Entry = { chainId: number; address: string; name: string; symbol: string; decimals: number };
+type Entry = { chainId: number; address: string; name: string; symbol: string; decimals: number; logoURI?: unknown };
 const payload = () => JSON.parse(FIXTURE) as { name: string; timestamp: string; version: unknown; tokens: Entry[] };
 const parse = (value: unknown) => parseBaseTokenList(typeof value === 'string' ? value : JSON.stringify(value), FETCHED);
 const withTokens = (change: (tokens: Entry[]) => unknown[]) => { const data = payload(); return { ...data, tokens: change(data.tokens) }; };
@@ -53,7 +54,12 @@ describe('BUILD-BASE-001 Base asset catalog (Uniswap Labs Default Token List pol
     expect(catalog.assets).toHaveLength(18);
     expect(catalog.assets.slice(0, 3).map(asset => asset.symbol)).toEqual(['ETH', 'USDC', 'WETH']);
     expect(catalog.assets.slice(0, 3)).toEqual(BASE_BASE_ASSETS.assets);
-    expect(catalog.assets.slice(3).every(asset => asset.assetClass === 'TOKEN' && asset.kind === 'ERC20' && asset.logoUrl === null && asset.stock === null &&
+    // BUILD-BASE-001 (intentional change, owner addendum): a reviewed-prefix `logoURI` is kept as presentation metadata; pinned assets keep none.
+    expect(Object.fromEntries(catalog.assets.filter(asset => asset.logoUrl !== null).map(asset => [asset.symbol, asset.logoUrl]))).toEqual({
+      cbBTC: 'https://assets.coingecko.com/coins/images/40143/standard/cbbtc.webp', AERO: 'https://basescan.org/token/images/aerodrome_32.png',
+      DEGEN: 'https://assets.coingecko.com/coins/images/34515/large/android-chrome-512x512.png?1706198225',
+      ZORA: 'https://coin-images.coingecko.com/coins/images/54693/large/zora.jpg?1741094751' });
+    expect(catalog.assets.slice(3).every(asset => asset.assetClass === 'TOKEN' && asset.kind === 'ERC20' && asset.stock === null &&
       asset.source.provider === BASE_TOKEN_LIST.provider && asset.source.officialId === null)).toBe(true);
     expect(catalog.provenance.at(-1)).toEqual({ provider: 'uniswap.default-token-list', source: 'https://tokens.uniswap.org', fetchedAt: FETCHED,
       contentSha256: contentSha256(FIXTURE), officialRecords: 18, activeRecords: 17 });

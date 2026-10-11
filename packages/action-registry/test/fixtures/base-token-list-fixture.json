@@ -30,7 +30,8 @@
    "address": "0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf",
    "name": "Coinbase Wrapped BTC",
    "symbol": "cbBTC",
-   "decimals": 8
+   "decimals": 8,
+   "logoURI": "https://assets.coingecko.com/coins/images/40143/standard/cbbtc.webp"
   },
   {
    "chainId": 8453,
@@ -44,14 +45,16 @@
    "address": "0x940181a94A35A4569E4529A3CDfB74e38FD98631",
    "name": "Aerodrome",
    "symbol": "AERO",
-   "decimals": 18
+   "decimals": 18,
+   "logoURI": "https://basescan.org/token/images/aerodrome_32.png"
   },
   {
    "chainId": 8453,
    "address": "0x4ed4E862860beD51a9570b96d89aF5E1B0Efefed",
    "name": "Degen",
    "symbol": "DEGEN",
-   "decimals": 18
+   "decimals": 18,
+   "logoURI": "https://assets.coingecko.com/coins/images/34515/large/android-chrome-512x512.png?1706198225"
   },
   {
    "chainId": 8453,
@@ -79,7 +82,8 @@
    "address": "0x1111111111166b7FE7bd91427724B487980aFc69",
    "name": "Zora",
    "symbol": "ZORA",
-   "decimals": 18
+   "decimals": 18,
+   "logoURI": "https://coin-images.coingecko.com/coins/images/54693/large/zora.jpg?1741094751"
   },
   {
    "chainId": 8453,
