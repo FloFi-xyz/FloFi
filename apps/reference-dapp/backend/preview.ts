@@ -15,6 +15,9 @@ import type { FlowName } from './flows.ts';
 export const PREVIEW_METHODS: Readonly<Partial<Record<FlowName, 'simulate' | 'prepare'>>> = Object.freeze({
   'crosschain-router': 'simulate', 'crosschain-router-testnet': 'simulate', 'aave-supply': 'simulate', 'base-sepolia-swap': 'prepare',
   'uniswap-liquidity': 'simulate', 'jupiter-swap': 'simulate', 'solana-devnet-swap': 'simulate', 'lending-composition': 'simulate',
+  // BUILD-RH-002: Robinhood Chain (real funds) previews are the same read-only simulations; nothing is authorized, signed or sent.
+  'robinhood-swap': 'prepare', 'robinhood-liquidity': 'simulate', 'crosschain-router-base-to-robinhood': 'simulate', 'crosschain-router-robinhood-to-base': 'simulate',
+  'crosschain-router-arbitrum-to-robinhood': 'simulate', 'crosschain-router-robinhood-to-arbitrum': 'simulate',
 });
 
 /**

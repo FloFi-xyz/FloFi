@@ -85,3 +85,12 @@ export function robinhoodCatalogFor(mode: 'live' | 'harness'): (chain: string) =
   if (!loader) { loader = createRobinhoodCatalogLoader({ mode }); loaders.set(mode, loader); }
   return loader;
 }
+/**
+ * The validated official catalog for authoring outside the browser (MCP): read only where the deployment enables
+ * Robinhood Chain — `deploymentMode` is the cloud flow's own mode, `null` when unknowable here (then the local gates decide).
+ */
+export async function robinhoodAuthoringCatalog(deploymentMode: RobinhoodMainnetMode | null, env: Env = process.env): Promise<AssetCatalog> {
+  const mode = deploymentMode ?? robinhoodMainnetMode(env);
+  if (mode === 'off') throw new Error('ROBINHOOD_MAINNET_NOT_ENABLED');
+  return robinhoodCatalogFor(mode)(ROBINHOOD_CHAIN_MAINNET.chain);
+}

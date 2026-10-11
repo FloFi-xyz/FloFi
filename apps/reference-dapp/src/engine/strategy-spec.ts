@@ -12,9 +12,10 @@ import { Type, type Static, type TSchema } from '@sinclair/typebox';
 import { Ajv, type ErrorObject } from 'ajv';
 
 /** Networks by stable MCP identifier. Chain ids come from the registries (see `capability-catalog.ts`). */
-export const NETWORK_IDS = ['base', 'base-sepolia', 'arbitrum-one', 'arbitrum-sepolia', 'ethereum-sepolia', 'solana', 'solana-devnet'] as const;
+/** BUILD-RH-002: `robinhood` is Robinhood Chain mainnet (4663, real funds); its assets are the official catalog's (USDG, WETH, Stock Tokens). */
+export const NETWORK_IDS = ['base', 'base-sepolia', 'arbitrum-one', 'arbitrum-sepolia', 'ethereum-sepolia', 'solana', 'solana-devnet', 'robinhood'] as const;
 export type NetworkId = (typeof NETWORK_IDS)[number];
-export const STRATEGY_ACTIONS = ['bridge', 'swap', 'supply', 'borrow', 'repay', 'withdraw', 'add_liquidity', 'lending_composition'] as const;
+export const STRATEGY_ACTIONS = ['bridge', 'swap', 'supply', 'borrow', 'repay', 'withdraw', 'add_liquidity', 'lending_composition', 'transfer'] as const;
 export type StrategyAction = (typeof STRATEGY_ACTIONS)[number];
 export const ASSET_SYMBOLS = ['USDC', 'WETH', 'WBTC', 'SOL', 'USDT', 'devUSDC'] as const;
 
@@ -24,22 +25,30 @@ const Decimal = (description: string) => Type.String({ pattern: '^(0|[1-9][0-9]{
 const EvmAddress = (description: string) => Type.String({ pattern: '^0x[0-9a-fA-F]{40}$', minLength: 42, maxLength: 42, description });
 const Slippage = Type.Integer({ minimum: 0, maximum: 10_000, description: 'Maximum slippage in basis points. Omit to use FloFi\'s documented default for the action; each action enforces its own maximum.' });
 const Version = Type.Literal(1, { description: 'Strategy contract version. Omit or 1.' });
+/**
+ * BUILD-RH-002: an asset of the official Robinhood Chain catalog by symbol (USDG, WETH or a Stock Token such as TSLA). It resolves only in
+ * the validated official registry at composition; an unknown, ambiguous or unloaded symbol is refused, never guessed. Never an address.
+ */
+const CatalogSymbol = Type.String({ pattern: '^[A-Z][A-Z0-9.]{0,15}$', maxLength: 16,
+  description: 'On robinhood: a symbol of the official Robinhood Chain catalog (USDG, WETH or a Stock Token such as TSLA).' });
 const strict = { additionalProperties: false } as const;
 
 const Bridge = Type.Object({
   version: Type.Optional(Version), action: Type.Literal('bridge'),
-  sourceNetwork: enumOf(['base-sepolia', 'base'] as const, 'Source network. base-sepolia pairs with arbitrum-sepolia (test USDC); base pairs with arbitrum-one (real funds).'),
-  destinationNetwork: enumOf(['arbitrum-sepolia', 'arbitrum-one'] as const, 'Destination network.'),
-  asset: Type.Literal('USDC', { description: 'The Cross-chain Router moves USDC only.' }),
-  amount: Decimal('USDC amount as a decimal string, e.g. "5".'),
+  sourceNetwork: enumOf(['base-sepolia', 'base', 'arbitrum-one', 'robinhood'] as const, 'Source network. base-sepolia pairs with arbitrum-sepolia (test USDC); base pairs with ' +
+    'arbitrum-one (real funds); base or arbitrum-one USDC bridges into robinhood as USDG, and robinhood USDG bridges out to base or arbitrum-one as USDC (real funds).'),
+  destinationNetwork: enumOf(['arbitrum-sepolia', 'arbitrum-one', 'robinhood', 'base'] as const, 'Destination network; only the pairs above are supported.'),
+  asset: enumOf(['USDC', 'USDG'] as const, 'The source token: USDC, or USDG when leaving robinhood. The destination asset follows the pair (USDC → USDG into robinhood).'),
+  amount: Decimal('Source token amount as a decimal string, e.g. "5".'),
   routing: Type.Optional(enumOf(['auto', 'lifi', 'across'] as const, 'Provider policy. auto = LI.FI first, direct Across if LI.FI has no reconcilable route (a preference order, not a best-price search). Default auto.')),
   slippageBps: Type.Optional(Slippage),
   recipient: Type.Optional(EvmAddress('Destination recipient. Omit to deliver to the wallet that signs in the FloFi app (bound at Review).')),
 }, strict);
 const Swap = Type.Object({
   version: Type.Optional(Version), action: Type.Literal('swap'),
-  network: enumOf(['base', 'base-sepolia', 'ethereum-sepolia', 'solana', 'solana-devnet'] as const, 'EVM networks swap USDC/WETH on Uniswap v3; solana swaps SOL/USDC/USDT via Jupiter; solana-devnet swaps SOL/devUSDC on Orca.'),
-  inputAsset: enumOf(ASSET_SYMBOLS, 'Asset spent.'), outputAsset: enumOf(ASSET_SYMBOLS, 'Asset received.'),
+  network: enumOf(['base', 'base-sepolia', 'ethereum-sepolia', 'solana', 'solana-devnet', 'robinhood'] as const, 'EVM networks swap USDC/WETH on Uniswap v3; solana swaps ' +
+    'SOL/USDC/USDT via Jupiter; solana-devnet swaps SOL/devUSDC on Orca; robinhood swaps official catalog assets (USDG, WETH, Stock Tokens) on Uniswap v3 (real funds).'),
+  inputAsset: Type.Union([enumOf(ASSET_SYMBOLS, 'Asset spent.'), CatalogSymbol]), outputAsset: Type.Union([enumOf(ASSET_SYMBOLS, 'Asset received.'), CatalogSymbol]),
   amount: Decimal('Exact input amount as a decimal string.'), slippageBps: Type.Optional(Slippage),
 }, strict);
 const Lending = (action: 'supply' | 'borrow' | 'repay', who: string) => Type.Object({
@@ -54,15 +63,20 @@ const Withdraw = Type.Object({
   network: enumOf(['base-sepolia', 'ethereum-sepolia'] as const, 'Aave V3 network.'), asset: enumOf(['USDC', 'WBTC'] as const, 'The network\'s one Aave asset.'),
   amount: Decimal('Amount as a decimal string. The recipient is always the wallet that signs.'),
 }, strict);
+const Bound = Type.String({ pattern: '^-?(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$', maxLength: 48 });
 const Liquidity = Type.Object({
   version: Type.Optional(Version), action: Type.Literal('add_liquidity'),
-  network: enumOf(['base-sepolia', 'ethereum-sepolia', 'solana-devnet'] as const, 'Uniswap v3 USDC/WETH on base-sepolia or ethereum-sepolia; Orca SOL/devUSDC on solana-devnet.'),
-  maxAmounts: Type.Object({ USDC: Type.Optional(Decimal('Maximum USDC.')), WETH: Type.Optional(Decimal('Maximum WETH.')),
-    SOL: Type.Optional(Decimal('Maximum SOL.')), devUSDC: Type.Optional(Decimal('Maximum devUSDC.')) },
-  { ...strict, minProperties: 2, maxProperties: 2, description: 'Maximum deposit of each pool asset (limits, not amounts to spend); exactly the network\'s two assets.' }),
-  range: Type.Object({ unit: enumOf(['price', 'tick'] as const, 'price: quote per base asset (USDC per WETH, devUSDC per SOL); tick: aligned tick indexes.'),
-    lower: Type.String({ pattern: '^-?(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$', maxLength: 48 }),
-    upper: Type.String({ pattern: '^-?(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$', maxLength: 48 }) }, strict),
+  network: enumOf(['base-sepolia', 'ethereum-sepolia', 'solana-devnet', 'robinhood'] as const, 'Uniswap v3 USDC/WETH on base-sepolia or ethereum-sepolia; Orca SOL/devUSDC ' +
+    'on solana-devnet; on robinhood, Uniswap v3 on any two official catalog assets (e.g. USDG and a Stock Token) at feeTier (real funds).'),
+  maxAmounts: Type.Record(Type.String({ pattern: '^[A-Za-z][A-Za-z0-9.]{0,15}$' }), Decimal('Maximum deposit of this asset.'),
+    { minProperties: 2, maxProperties: 2, description: 'Maximum deposit of each pool asset (limits, not amounts to spend); exactly the pool\'s two assets by symbol: ' +
+      'USDC and WETH, SOL and devUSDC, or two official catalog symbols on robinhood.' }),
+  range: Type.Union([
+    Type.Object({ unit: enumOf(['price', 'tick'] as const, 'price: quote per base asset (USDC per WETH, devUSDC per SOL); tick: aligned tick indexes.'),
+      lower: Bound, upper: Bound }, strict),
+    Type.Object({ unit: Type.Literal('full', { description: 'robinhood only: the widest usable range of the fee tier.' }) }, strict)]),
+  feeTier: Type.Optional(Type.Union([Type.Literal(100), Type.Literal(500), Type.Literal(3000), Type.Literal(10000)],
+    { description: 'robinhood only: the Uniswap v3 fee tier in hundredths of a basis point (3000 = 0.3%). Default 3000.' })),
   slippageBps: Type.Optional(Slippage),
 }, strict);
 const LendingComposition = Type.Object({
@@ -75,9 +89,17 @@ const LendingComposition = Type.Object({
   owner: EvmAddress('The wallet that supplies, borrows and receives WETH. Debt remains after the swap.'),
 }, strict);
 
+/** BUILD-RH-002: a transfer on Robinhood Chain (real funds): native ETH or an official catalog asset, to the signing wallet or a recipient. */
+const Transfer = Type.Object({
+  version: Type.Optional(Version), action: Type.Literal('transfer'),
+  network: Type.Literal('robinhood', { description: 'Robinhood Chain mainnet (real funds).' }),
+  asset: Type.Union([Type.Literal('ETH'), CatalogSymbol], { description: 'ETH, or a symbol of the official Robinhood Chain catalog (USDG, WETH, a Stock Token).' }),
+  amount: Decimal('Amount as a decimal string.'),
+  recipient: Type.Optional(EvmAddress('Recipient. Omit to transfer to the wallet that signs in the FloFi app (bound at Review).')),
+}, strict);
 const BRANCHES = Object.freeze({ bridge: Bridge, swap: Swap, supply: Lending('supply', 'Account credited with the supplied position.'),
   borrow: Lending('borrow', 'Account whose debt the borrow creates (onBehalfOf).'), repay: Lending('repay', 'Account whose debt is repaid (onBehalfOf).'),
-  withdraw: Withdraw, add_liquidity: Liquidity, lending_composition: LendingComposition }) satisfies Readonly<Record<StrategyAction, TSchema>>;
+  withdraw: Withdraw, add_liquidity: Liquidity, lending_composition: LendingComposition, transfer: Transfer }) satisfies Readonly<Record<StrategyAction, TSchema>>;
 export const StrategySpecSchema = Type.Union(Object.values(BRANCHES), { description: 'A FloFi strategy: structured intent only. FloFi maps it to registered profiles.' });
 export type StrategySpec = Static<typeof StrategySpecSchema>;
 

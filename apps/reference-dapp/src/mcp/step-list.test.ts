@@ -61,7 +61,8 @@ describe('BUILD-MCP-002 step-list contract', () => {
     expect(strategyInputIssues({ version: 2, steps: Array(9).fill(SWAP) })).toEqual([{ path: '/steps', rule: 'maxItems' }]);
     expect(strategyInputIssues({ version: 2, steps: [SWAP], extra: 1 })).toEqual([{ path: '/', rule: 'additionalProperties' }]);
     expect(strategyInputIssues({ version: 2, steps: [SWAP, { ...SWAP, calldata: '0xdead' }] })).toEqual([{ path: '/steps/1/calldata', rule: 'additionalProperties' }]);
-    expect(strategyInputIssues({ version: 2, steps: [{ action: 'transfer' }] })).toEqual([{ path: '/steps/0/action', rule: 'enum' }]);
+    // BUILD-RH-002 made `transfer` an action (Robinhood Chain); an unknown action is still refused at its field.
+    expect(strategyInputIssues({ version: 2, steps: [{ action: 'stake' }] })).toEqual([{ path: '/steps/0/action', rule: 'enum' }]);
     expect(composeWorkflow({ version: 2, steps: [SWAP, { ...BRIDGE, amount: '500' }] })).toMatchObject({ ok: false, code: 'ROUTER_AMOUNT_OUT_OF_RANGE' });
   });
   it('plans and gates a general sequence honestly: per-step facts, MULTI_STEP_SEQUENCE_NOT_IMPLEMENTED, policy over every network', async () => {

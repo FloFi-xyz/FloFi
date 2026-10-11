@@ -22,7 +22,11 @@ import type { Workflow } from '../domain/initial-workflow';
 import { createSolanaSwapNode } from '../domain/jupiter-authoring';
 import { createAuthoredLending } from '../domain/lending-authoring';
 import { describeProposal } from '../domain/proposal';
-import { createRouterNode, ROUTER_NETWORK_OPTIONS, type RouterBridgeInput } from '../domain/router-authoring';
+import { createRouterNode, routerNetworkOfInput, ROUTER_NETWORK_OPTIONS, type RouterBridgeInput, type RouterDestination, type RouterSource } from '../domain/router-authoring';
+import { ROBINHOOD_NETWORK } from '../domain/asset-catalogs';
+import { createCryptoActionNode, type CryptoActionInput } from '../domain/crypto-action-picker';
+import { createAuthoredTransfer, type RobinhoodTransferInput } from '../domain/robinhood-transfer-authoring';
+import { ROBINHOOD_LIQUIDITY_DEFAULT_FEE, ROBINHOOD_LIQUIDITY_DEFAULT_SLIPPAGE } from '../domain/robinhood-liquidity-authoring';
 import { createSolanaLiquidityNode, SOLANA_LIQUIDITY_DEFAULT_SLIPPAGE } from '../domain/solana-liquidity-authoring';
 import { createAuthoredBorrow, createAuthoredRepay, createAuthoredSupply, createAuthoredWithdraw, type LendingNetwork } from '../domain/supply-authoring';
 import { createSwapNode, type Direction } from '../domain/swap-authoring';
@@ -55,15 +59,21 @@ export const NETWORKS: Readonly<Record<NetworkId, { readonly label: string; read
   'ethereum-sepolia': { label: 'Ethereum Sepolia', class: 'TESTNET', environment: 'PUBLIC_TESTNET' },
   'solana': { label: 'Solana', class: 'MAINNET', environment: 'MAINNET' },
   'solana-devnet': { label: 'Solana Devnet', class: 'DEVNET', environment: 'PUBLIC_TESTNET' },
+  'robinhood': { label: 'Robinhood Chain', class: 'MAINNET', environment: 'MAINNET' },
 });
+/** The router's chain names of a bridge's networks (BUILD-RH-002: Robinhood Chain in and out of Base and Arbitrum One). */
+const ROUTER_CHAIN: Readonly<Partial<Record<NetworkId, RouterSource & RouterDestination | 'Base Sepolia' | 'Arbitrum Sepolia'>>> =
+  Object.freeze({ 'base': 'Base', 'base-sepolia': 'Base Sepolia', 'arbitrum-one': 'Arbitrum', 'arbitrum-sepolia': 'Arbitrum Sepolia', 'robinhood': 'Robinhood Chain' });
+const routerChains = (spec: Extract<StrategySpec, { action: 'bridge' }>) =>
+  ({ source: ROUTER_CHAIN[spec.sourceNetwork] as RouterSource, destination: ROUTER_CHAIN[spec.destinationNetwork] as RouterDestination });
 const ROUTING = { auto: 'AUTO', lifi: 'LIFI', across: 'ACROSS' } as const;
 /** Defaults FloFi applies when a spec omits slippage: the same values the Copilot planners and profiles use. */
 export function defaultSlippageBps(spec: StrategySpec): number | null {
   switch (spec.action) {
-    case 'bridge': return ROUTER_NETWORK_OPTIONS[spec.sourceNetwork === 'base' ? 'mainnet' : 'testnet'].profile.defaultSlippageBps;
+    case 'bridge': return ROUTER_NETWORK_OPTIONS[routerNetworkOfInput(routerChains(spec)) ?? 'mainnet'].profile.defaultSlippageBps;
     case 'swap': case 'lending_composition': return 50;
     case 'add_liquidity': return spec.network === 'solana-devnet' ? Number(SOLANA_LIQUIDITY_DEFAULT_SLIPPAGE)
-      : uniswapLiquidityProfileFor(NETWORKS[spec.network].label).defaultSlippageBps;
+      : spec.network === 'robinhood' ? Number(ROBINHOOD_LIQUIDITY_DEFAULT_SLIPPAGE) : uniswapLiquidityProfileFor(NETWORKS[spec.network].label).defaultSlippageBps;
     default: return null;
   }
 }
@@ -79,15 +89,25 @@ export function normalizeStrategy(spec: StrategySpec): { readonly strategy: Stra
     case 'bridge': {
       if (spec.routing === undefined) notes.push('Default routing auto applied: LI.FI first, direct Across only if LI.FI has no reconcilable route.');
       if (spec.recipient === undefined) notes.push('No recipient given: the wallet that signs in the FloFi app receives the funds (bound at Review).');
-      return { notes, strategy: { version: 1, action: 'bridge', sourceNetwork: spec.sourceNetwork, destinationNetwork: spec.destinationNetwork, asset: 'USDC', amount: spec.amount,
+      return { notes, strategy: { version: 1, action: 'bridge', sourceNetwork: spec.sourceNetwork, destinationNetwork: spec.destinationNetwork, asset: spec.asset, amount: spec.amount,
         routing: spec.routing ?? 'auto', slippageBps: slippage!, ...spec.recipient === undefined ? {} : { recipient: lower(spec.recipient) } } };
     }
     case 'swap': return { notes, strategy: { version: 1, action: 'swap', network: spec.network, inputAsset: spec.inputAsset, outputAsset: spec.outputAsset, amount: spec.amount, slippageBps: slippage! } };
     case 'supply': case 'borrow': case 'repay':
       return { notes, strategy: { version: 1, action: spec.action, network: spec.network, asset: spec.asset, amount: spec.amount, beneficiary: lower(spec.beneficiary) } };
     case 'withdraw': return { notes, strategy: { version: 1, action: 'withdraw', network: spec.network, asset: spec.asset, amount: spec.amount } };
-    case 'add_liquidity': return { notes, strategy: { version: 1, action: 'add_liquidity', network: spec.network, maxAmounts: { ...spec.maxAmounts },
-      range: { unit: spec.range.unit, lower: spec.range.lower, upper: spec.range.upper }, slippageBps: slippage! } };
+    case 'add_liquidity': {
+      // BUILD-RH-002: a Robinhood Chain position names its fee tier (default 0.3%); other networks have one pool each and take none.
+      const feeTier = spec.network === 'robinhood' ? spec.feeTier ?? ROBINHOOD_LIQUIDITY_DEFAULT_FEE : spec.feeTier;
+      if (spec.network === 'robinhood' && spec.feeTier === undefined) notes.push(`Default fee tier ${ROBINHOOD_LIQUIDITY_DEFAULT_FEE / 10_000}% applied.`);
+      return { notes, strategy: { version: 1, action: 'add_liquidity', network: spec.network, maxAmounts: { ...spec.maxAmounts },
+        range: spec.range.unit === 'full' ? { unit: 'full' } : { unit: spec.range.unit, lower: spec.range.lower, upper: spec.range.upper },
+        ...feeTier === undefined ? {} : { feeTier }, slippageBps: slippage! } };
+    }
+    case 'transfer':
+      if (spec.recipient === undefined) notes.push('No recipient given: the wallet that signs in the FloFi app receives the transfer (bound at Review).');
+      return { notes, strategy: { version: 1, action: 'transfer', network: 'robinhood', asset: spec.asset, amount: spec.amount,
+        ...spec.recipient === undefined ? {} : { recipient: lower(spec.recipient) } } };
     case 'lending_composition': return { notes, strategy: { version: 1, action: 'lending_composition', network: 'base-sepolia', asset: 'USDC', supplyAmount: spec.supplyAmount,
       borrowAmount: spec.borrowAmount, outputAsset: 'WETH', slippageBps: slippage!, owner: lower(spec.owner) } };
   }
@@ -105,12 +125,17 @@ function build(spec: StrategySpec, context: ReviewContext): Built {
   const slippage = 'slippageBps' in spec ? String(spec.slippageBps) : '';
   switch (spec.action) {
     case 'bridge': {
-      const input: RouterBridgeInput = { source: spec.sourceNetwork === 'base' ? 'Base' : 'Base Sepolia', destination: spec.destinationNetwork === 'arbitrum-one' ? 'Arbitrum' : 'Arbitrum Sepolia',
-        token: 'USDC', amount: spec.amount, recipient: spec.recipient ?? '', slippage, routing: ROUTING[spec.routing ?? 'auto'] };
+      const input: RouterBridgeInput = { ...routerChains(spec), token: spec.asset, amount: spec.amount, recipient: spec.recipient ?? '', slippage,
+        routing: ROUTING[spec.routing ?? 'auto'] };
       return { command: { ...base, type: 'ADD_ROUTER_BRIDGE', input }, check: () => createRouterNode('node-preview', input) };
     }
     case 'swap': {
       if (spec.inputAsset === spec.outputAsset) refuse('INVALID_ASSET_PAIR');
+      // BUILD-RH-002: Robinhood Chain swaps the official catalog (USDG, WETH, Stock Tokens), exactly as the Canvas Stocks card and chat author it.
+      if (spec.network === 'robinhood') {
+        const input: CryptoActionInput = { selection: { action: 'swap', network: ROBINHOOD_NETWORK, from: spec.inputAsset, to: spec.outputAsset }, amount: spec.amount, slippage };
+        return { command: { ...base, type: 'ADD_CRYPTO_ACTION', input }, check: () => createCryptoActionNode('node-preview', input) };
+      }
       if (spec.network === 'solana' || spec.network === 'solana-devnet') {
         const input = { network: NETWORKS[spec.network].label as 'Solana' | 'Solana Devnet', from: spec.inputAsset as never, to: spec.outputAsset as never, amount: spec.amount, slippage };
         return { command: { ...base, type: 'ADD_SOLANA_SWAP', input }, check: () => createSolanaSwapNode('node-preview', input) };
@@ -132,7 +157,19 @@ function build(spec: StrategySpec, context: ReviewContext): Built {
     }
     case 'add_liquidity': {
       const amounts = spec.maxAmounts, keys = Object.keys(amounts).sort().join();
-      const rangeUnit = spec.range.unit === 'price' ? 'PRICE' as const : 'TICK' as const, { lower, upper } = spec.range;
+      if (spec.network === 'robinhood') {
+        // Any two official catalog assets at a standard fee tier: the full range, or explicit ticks (a price range would need the pool's live price).
+        if (spec.range.unit === 'price') refuse('LIQUIDITY_RANGE_UNIT_UNSUPPORTED');
+        const [tokenA, tokenB] = Object.keys(amounts) as [string, string];
+        const input: CryptoActionInput = { selection: { action: 'pool', network: ROBINHOOD_NETWORK, from: tokenA, to: tokenB }, amount: amounts[tokenA]!,
+          secondAmount: amounts[tokenB]!, slippage, fee: spec.feeTier ?? ROBINHOOD_LIQUIDITY_DEFAULT_FEE,
+          ...spec.range.unit === 'tick' ? { rangeUnit: 'TICK' as const, lower: spec.range.lower, upper: spec.range.upper } : {} };
+        return { command: { ...base, type: 'ADD_CRYPTO_ACTION', input }, check: () => createCryptoActionNode('node-preview', input) };
+      }
+      if (spec.range.unit === 'full') refuse('LIQUIDITY_RANGE_UNIT_UNSUPPORTED');
+      if (spec.feeTier !== undefined) refuse('LIQUIDITY_FEE_TIER_UNSUPPORTED');
+      const range = spec.range as Extract<typeof spec.range, { lower: string }>;
+      const rangeUnit = range.unit === 'price' ? 'PRICE' as const : 'TICK' as const, { lower, upper } = range;
       if (spec.network === 'solana-devnet') {
         if (keys !== 'SOL,devUSDC') refuse('LIQUIDITY_ASSET_PAIR_UNSUPPORTED');
         const input = { network: 'Solana Devnet' as const, maxSol: amounts.SOL!, maxDevUsdc: amounts.devUSDC!, rangeUnit, lower, upper, slippage };
@@ -145,6 +182,10 @@ function build(spec: StrategySpec, context: ReviewContext): Built {
     case 'lending_composition': {
       const input = { supply: spec.supplyAmount, borrow: spec.borrowAmount, slippage, owner: spec.owner };
       return { command: { ...base, type: 'AUTHOR_LENDING', input }, check: () => createAuthoredLending('lending-preview', 1, input) };
+    }
+    case 'transfer': {
+      const input: RobinhoodTransferInput = { network: 'Robinhood Chain', asset: spec.asset, amount: spec.amount, recipient: spec.recipient ?? 'CONNECTED_OWNER' };
+      return { command: { ...base, type: 'ADD_RH_TRANSFER', input }, check: () => createAuthoredTransfer('node-preview', input) };
     }
   }
 }
@@ -259,7 +300,7 @@ export function reviewComposition(composed: Composition): StrategyReview {
   const s = composed.strategy;
   if (composed.fundsClass === 'REAL_FUNDS') findings.push({ level: 'WARNING', code: 'REAL_FUNDS', source: 'STRATEGY', nodeId: null,
     message: 'This strategy uses a mainnet: real funds. Nothing executes without the owner\'s Review and wallet signature in the FloFi app.' });
-  if (s.action === 'bridge' && s.recipient) findings.push({ level: 'WARNING', code: 'EXPLICIT_RECIPIENT', source: 'STRATEGY', nodeId: null,
+  if ((s.action === 'bridge' || s.action === 'transfer') && s.recipient) findings.push({ level: 'WARNING', code: 'EXPLICIT_RECIPIENT', source: 'STRATEGY', nodeId: null,
     message: `Funds are delivered to ${s.recipient}, not necessarily the signing wallet. Confirm this address belongs to the intended recipient.` });
   if ((s.action === 'supply' || s.action === 'borrow' || s.action === 'repay') && s.beneficiary) findings.push({ level: 'WARNING', code: 'EXPLICIT_BENEFICIARY', source: 'STRATEGY', nodeId: null,
     message: `The Aave position of ${s.beneficiary} is affected (onBehalfOf). Confirm it is the intended account; the signer may differ.` });

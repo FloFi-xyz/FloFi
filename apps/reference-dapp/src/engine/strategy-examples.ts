@@ -28,4 +28,13 @@ export const STRATEGY_EXAMPLES: readonly { readonly id: string; readonly strateg
     range: { unit: 'tick', lower: '-29952', upper: '-25600' } } },
   { id: 'lending-composition-base-sepolia', strategy: { action: 'lending_composition', network: 'base-sepolia', asset: 'USDC', supplyAmount: '10', borrowAmount: '2',
     outputAsset: 'WETH', owner: EXAMPLE_ACCOUNT } },
+  // BUILD-RH-002: Robinhood Chain (real funds). Examples use the code-pinned USDG and WETH so they compose without the registry; a Stock Token
+  // (e.g. `outputAsset: 'TSLA'`) is named the same way once the official registry is loaded.
+  { id: 'bridge-base-robinhood', strategy: { action: 'bridge', sourceNetwork: 'base', destinationNetwork: 'robinhood', asset: 'USDC', amount: '5', routing: 'auto' } },
+  { id: 'bridge-robinhood-base', strategy: { action: 'bridge', sourceNetwork: 'robinhood', destinationNetwork: 'base', asset: 'USDG', amount: '5', routing: 'auto' } },
+  { id: 'bridge-arbitrum-robinhood', strategy: { action: 'bridge', sourceNetwork: 'arbitrum-one', destinationNetwork: 'robinhood', asset: 'USDC', amount: '5', routing: 'auto' } },
+  { id: 'bridge-robinhood-arbitrum', strategy: { action: 'bridge', sourceNetwork: 'robinhood', destinationNetwork: 'arbitrum-one', asset: 'USDG', amount: '5', routing: 'auto' } },
+  { id: 'swap-robinhood', strategy: { action: 'swap', network: 'robinhood', inputAsset: 'USDG', outputAsset: 'WETH', amount: '10', slippageBps: 50 } },
+  { id: 'add-liquidity-robinhood', strategy: { action: 'add_liquidity', network: 'robinhood', maxAmounts: { USDG: '10', WETH: '0.003' }, range: { unit: 'full' }, feeTier: 100 } },
+  { id: 'transfer-robinhood', strategy: { action: 'transfer', network: 'robinhood', asset: 'USDG', amount: '1' } },
 ]);
