@@ -47,7 +47,7 @@ No Base-specific engine, IR, page or MCP path is created. Every capability below
   ETH/USDC/WETH merged with every Base list entry that passes the discovery §2.3 policy.
   - A malformed Base record, a duplicate, or a collision with a pinned asset under another identity fails the whole catalog closed.
   - Out-of-grammar symbols are counted (`officialRecords` vs `activeRecords`) and excluded.
-  - Logos are dropped.
+  - A `logoURI` is kept only under reviewed image prefixes, as presentation metadata (§8.1).
 - **Pinned assets.** ETH, USDC and WETH are pinned because the Router, Aave and the BUILD-002 reference swap bind their exact identity.
 - **Authoring catalogs** (`domain/asset-catalogs.ts`) become a per-network registry of official catalogs: Robinhood and Base. Before
   the Base list is loaded, or when it fails, only the pinned assets resolve. Anything else fails closed (`ASSET_CATALOG_UNAVAILABLE`);
@@ -135,7 +135,7 @@ No Base-specific engine, IR, page or MCP path is created. Every capability below
   - `arbitrum-one → base` for bridges.
 
   Each Base example composes byte-identically to its chat sentence. Discovery tools read the same registries.
-- **Copilot.** No new free-form authority. Exact grammar only.
+- **Copilot.** No new free-form authority: every proposal is an exact-grammar sentence. Names, symbols and capabilities come from the shared registries (§8.2).
 - **Visual.** The shared renderer resolves Base labels and assets from the registry. EN/PT strings are added.
 
 ### 2.9 Composition
@@ -219,25 +219,56 @@ typography, the lifecycle and every other surface are unchanged.
 
 ## 8. Owner addendum (2026-10-11): generic visual identity and Copilot parity
 
-The owner approved two more requirements during implementation. They are built on shared, network-agnostic infrastructure so Base
-(and Robinhood Chain, which shares it) needs no network-specific path:
+The owner approved two more requirements during implementation. The detailed requirements arrived with the continuation handoff and
+supersede the first interpretation, which showed no remote logo and resolved Copilot tokens by symbol only. Everything below is shared,
+network-agnostic infrastructure, so Base, Robinhood Chain and any future network inherit it.
 
-1. **Generic network and token visual identity in the existing Canvas.**
-   - One app-level network registry (`domain/network-registry.ts`) keyed by CAIP-2 chain: name, short label, environment
-     (real funds or test), Copilot and MCP identifiers, chat names, and the local network mark.
-   - One asset identity resolver: a vetted local brand mark when FloFi already ships one (`public/brand/crypto`, licenses recorded),
-     otherwise a deterministic monogram generated locally from the canonical asset identity (chain + address + symbol).
-     Third-party logo URLs (such as the token list `logoURI`) are never fetched, embedded or committed.
-   - The existing token avatar and network badge components resolve through it: Canvas cards, the asset search results and picker
-     chips, Simulate/Review and the timeline. No new page, card or layout. The Stock Token card keeps its markup.
-2. **Generic natural-language Copilot parity with Canvas, Chat and MCP.**
-   - The Copilot vocabulary is derived from the same registries: catalog networks (Base, Robinhood Chain) and any catalog symbol
-     the user writes, validated by the asset symbol grammar and resolved by FloFi through the network's validated catalog.
-   - New TRANSFER intent; liquidity gains a fee tier and the full range on catalog networks; bridges cover every Router pair; lending covers
-     every Aave profile (Base mainnet USDC included).
-   - Copilot keeps its boundary: the model reports, FloFi grounds every value in the user's own words and renders the same exact-grammar
-     sentence Chat accepts, so its proposal is byte-identical IR. Real-funds networks must be named explicitly. Nothing executes without
-     the owner's Review and wallet signature.
-3. **Server runtime registry.** The catalog-network runtime (`server/catalog-networks.ts`) binds each catalog network's gates, read
-   clients, catalog loader, run namespaces, journals and cloud flow names once. The cloud flows and the in-process server actions look
-   networks up there instead of branching per network.
+### 8.1 Network and token visual identity (existing Canvas and pickers only)
+
+- **Networks.** One app-level network registry (`domain/network-registry.ts`) keyed by CAIP-2 chain. It holds the name, aliases, environment,
+  local reviewed mark, official-catalog flag, and the Copilot vocabulary (identifier, family, how a message names the network). Network
+  icons are always local reviewed files under `public/brand`.
+- **Tokens.** `CanonicalAsset.logoUrl` is rendered through the one icon resolver (`domain/asset-identity.ts`) the Canvas cards, asset
+  search and picker chips already use:
+  1. a reviewed local mark for a code-pinned asset (by chain + address);
+  2. else the asset's provider logo, when that provider's rule accepts it for this exact asset;
+  3. else a deterministic monogram generated locally from chain + address + symbol.
+- **Logo rules** (`packages/action-registry/src/asset-logos.ts`), declared by each provider for its own network:
+  - Robinhood Stock Tokens: the issuer's CDN path of the asset's own address (`https://cdn.robinhood.com/ncw_assets/logos/<address>.png`).
+  - Base list tokens: the list's `logoURI` under six reviewed image prefixes (CoinGecko's two image CDNs, the Superchain token-list data,
+    Trust Wallet's asset repository, CoinMarketCap's coin images, Basescan's token images). The URL must be normalized HTTPS: no
+    credentials, port, fragment, dot segments or encoded separators, and at most a numeric cache-buster query.
+  - Any other value is dropped to null at parse time; it never fails the catalog. `trustedAssetLogo` re-checks the rule at render.
+  - A logo is never inferred from a symbol, so the same or a similar symbol on another chain never shares an image.
+- **Rendering.** A provider logo is always an `<img>` (an SVG is never inlined), sent without a referrer. A missing, broken or blocked
+  image falls back to the monogram. Showing one means the viewer's browser loads that image from the provider's host.
+- **No IR effect.** Presentation metadata never enters the IR, a hash, a Manifest, a Review or execution (tested).
+
+### 8.2 Natural-language Copilot parity
+
+Natural language → intent extraction (the model) → shared network resolver (registry `mention`) → shared asset resolver → shared
+capability truth → canonical exact-grammar sentence → `parseLocalCommand` → SemanticWorkflow IR.
+
+- **Asset resolver** (`resolveAssetReference`): within the named network's validated catalog only:
+  - the symbol, in any case;
+  - else the whole display or catalog name of exactly one asset ("Tesla" is TSLA on Robinhood Chain, nothing on Base).
+  - Several holders of a name are asked about. An unknown token is refused. An unloaded catalog fails closed.
+  - The reply names the canonical asset whenever a name was used.
+- **Intent.** The V2 token field carries the symbol or the name as written. The model is no longer told to report OTHER for a named
+  company. That was the Robinhood USDG → Stock Token natural-language regression.
+- **Capability truth** (`domain/authoring-capabilities.ts`): MCP's canonical examples (one per supported action × network, which MCP
+  discovery composes through the real reducer) over the network registry. Tests bind it to the Aave and Router registries and to the
+  Canvas pickers.
+- **Generated, not written:**
+  - the Copilot planners' networks per action;
+  - the in-app capability answer (EN/PT);
+  - the lending, router and composition refusals;
+  - the model instructions' network rule and "What Flofi supports" (`server/copilot-capabilities.ts`).
+- **Unchanged authority.** Real funds must be named. The proposal is the exact grammar's command. Nothing executes without the owner's
+  Review and wallet signature. CopilotIntent V1 stays frozen.
+
+### 8.3 Server runtime registry
+
+The catalog-network runtime (`server/catalog-networks.ts`) binds each catalog network's gates, read clients, catalog loader, run
+namespaces, journals and cloud flow names once. The cloud flows and the in-process server actions look networks up there instead of
+branching per network.
