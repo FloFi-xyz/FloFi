@@ -12,6 +12,7 @@ import { createSolanaLiquidityNode, solanaLiquidityDetails } from './solana-liqu
 import { createAuthoredSupply, createAuthoredBorrow, createAuthoredRepay, createAuthoredWithdraw, supplyDetails, borrowDetails, repayDetails, withdrawDetails, lendingProfileFor } from './supply-authoring';
 import { BASE_CHAIN, BASE_NETWORK, ROBINHOOD_CHAIN, ROBINHOOD_NETWORK, featuredNetworkSymbols, featuredStockSymbols, resolveNetworkAsset } from './asset-catalogs';
 import { catalogSwapDetails, createCatalogSwapAuthoringNode } from './catalog-swap-authoring';
+import { networkIdentity } from './network-registry';
 import { CATALOG_LIQUIDITY_NETWORKS, createCatalogLiquidityNode, catalogLiquidityDetails, robinhoodFullRange, ROBINHOOD_LIQUIDITY_DEFAULT_FEE, type CatalogLiquidityNetwork } from './robinhood-liquidity-authoring';
 
 export type CryptoAction = 'swap' | 'pool' | 'supply' | 'borrow' | 'repay' | 'withdraw' | 'transfer';
@@ -140,6 +141,18 @@ export type CryptoActionInput = { selection: CryptoSelection; amount: string; se
   /** Catalog-network pools only (BUILD-RH-002 Robinhood Chain, BUILD-BASE-001 Base): the Uniswap v3 fee tier (0.3% when absent). */ fee?: number;
   /** Transfer only (BUILD-RH-002): an explicit recipient address; the connected owner when absent. */ recipient?: string;
   rangeUnit?: 'PRICE' | 'TICK'; lower?: string; upper?: string };
+/**
+ * The tick range a new or re-networked pool starts with: Solana Devnet's and Ethereum Sepolia's full ranges, a catalog network's full range
+ * at its default fee tier (BUILD-BASE-001: Base as well as Robinhood Chain — never Base Sepolia's 0.05% ticks, which a 0.3% pool cannot
+ * use), else Base Sepolia's.
+ */
+export function defaultPoolRange(network: string): { readonly rangeUnit: 'TICK'; readonly lower: string; readonly upper: string } {
+  const full = (tick: number) => ({ rangeUnit: 'TICK' as const, lower: String(-tick), upper: String(tick) });
+  if (network === 'Solana Devnet') return full(443584);
+  if (network === 'Ethereum Sepolia') return full(887220);
+  const catalog = networkIdentity(network);
+  return catalog?.catalog ? full(robinhoodFullRange(ROBINHOOD_LIQUIDITY_DEFAULT_FEE, catalog.chain).tickUpper) : full(887270);
+}
 export function createCryptoActionNode(id: string, input: CryptoActionInput): SemanticWorkflow['nodes'][number] {
   const { selection: selection, amount, slippage } = input;
   if (!validCryptoSelection(selection)) throw new Error('ACTION_ASSETS_UNSUPPORTED');
@@ -158,7 +171,7 @@ export function createCryptoActionNode(id: string, input: CryptoActionInput): Se
       ...ranged ? { rangeUnit: 'TICK' as const, lower: input.lower!, upper: input.upper! } : { rangeUnit: 'FULL' as const }, slippage });
   }
   if (selection.action === 'pool') {
-    const range = { rangeUnit: input.rangeUnit ?? 'TICK', lower: input.lower ?? (selection.network === 'Solana Devnet' ? '-443584' : selection.network === 'Ethereum Sepolia' ? '-887220' : '-887270'), upper: input.upper ?? (selection.network === 'Solana Devnet' ? '443584' : selection.network === 'Ethereum Sepolia' ? '887220' : '887270'), slippage };
+    const range = { rangeUnit: input.rangeUnit ?? 'TICK', lower: input.lower ?? defaultPoolRange(selection.network).lower, upper: input.upper ?? defaultPoolRange(selection.network).upper, slippage };
     if (selection.network === 'Solana Devnet') return createSolanaLiquidityNode(id, { ...range, network: 'Solana Devnet', maxSol: amount, maxDevUsdc: input.secondAmount ?? '0' });
     if (selection.network === 'Base Sepolia' || selection.network === 'Ethereum Sepolia') return createUniswapLiquidityNode(id, { ...range, network: selection.network, maxUsdc: amount, maxWeth: input.secondAmount ?? '0' });
     throw new Error('ACTION_NETWORK_UNSUPPORTED');

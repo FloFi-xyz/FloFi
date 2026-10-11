@@ -3,7 +3,7 @@
 import { useLocale } from '../i18n/locale';
 
 import { useState, type FormEvent } from 'react';
-import { cryptoInputOf, cryptoProfile } from '../domain/crypto-action-picker';
+import { cryptoInputOf, cryptoProfile, defaultPoolRange } from '../domain/crypto-action-picker';
 import { useUniswapLiquidity } from '../state/uniswap-liquidity-store';
 import { uniswapBandInput, uniswapLiquidityProfileFor } from '../domain/uniswap-liquidity-authoring';
 import { useWorkflow } from '../state/workflow-store';
@@ -25,7 +25,9 @@ export function CryptoPoolForm({ nodeId }: { nodeId: string }) {
   const setup = actionSetup?.id === nodeId && actionSetup.action === 'pool' ? actionSetup : null;
   const node = state.workflow.nodes.find(node => node.nodeId === nodeId), existing = node ? cryptoInputOf(node) : null;
   const selection = setup?.cryptoSelection ?? cryptoSelections[nodeId] ?? existing?.selection;
-  const [fields, setFields] = useState({ rangeUnit: existing?.rangeUnit ?? 'TICK', lower: existing && existing.selection.network === selection?.network ? existing.lower ?? '-887270' : selection?.network === 'Solana Devnet' ? '-443584' : selection?.network === 'Ethereum Sepolia' || networkIdentity(selection?.network)?.catalog ? '-887220' : '-887270', upper: existing && existing.selection.network === selection?.network ? existing.upper ?? '887270' : selection?.network === 'Solana Devnet' ? '443584' : selection?.network === 'Ethereum Sepolia' || networkIdentity(selection?.network)?.catalog ? '887220' : '887270', slippage: existing?.slippage ?? '50' });
+  const sameNetwork = Boolean(existing && existing.selection.network === selection?.network), initial = defaultPoolRange(selection?.network ?? '');
+  const [fields, setFields] = useState({ rangeUnit: existing?.rangeUnit ?? 'TICK', lower: sameNetwork ? existing!.lower ?? '-887270' : initial.lower,
+    upper: sameNetwork ? existing!.upper ?? '887270' : initial.upper, slippage: existing?.slippage ?? '50' });
   // BUILD-RH-002: a catalog-network pool (Robinhood Chain, BUILD-BASE-001 Base) is the pair's pool at the chosen Uniswap v3 fee tier.
   const [fee, setFee] = useState(existing?.fee ?? ROBINHOOD_LIQUIDITY_DEFAULT_FEE);
   const [error, setError] = useState('');

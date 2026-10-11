@@ -15,7 +15,7 @@ import { createAuthoredSupply, createAuthoredBorrow, createAuthoredRepay, create
 import { lendingDetails, lendingNodeInput } from './lending-authoring';
 import { createAuthoredTransfer, transferDetails } from './robinhood-transfer-authoring';
 import { singleAmountProposalTarget } from './composer-presentation';
-import { createCryptoActionNode, cryptoInputOf, cryptoProfile, canSelectCryptoAssets, type CryptoSelection, type CryptoSelections, type CryptoActionInput } from './crypto-action-picker';
+import { createCryptoActionNode, cryptoInputOf, cryptoProfile, canSelectCryptoAssets, defaultPoolRange, type CryptoSelection, type CryptoSelections, type CryptoActionInput } from './crypto-action-picker';
 
 /** Required-field authoring only, never an executable node or alternate workflow. */
 export type CanvasActionSetup = { readonly id: string; readonly amount: string; readonly cryptoSelection?: CryptoSelection; readonly cryptoBeneficiary?: string } &
@@ -101,7 +101,7 @@ export function canvasAmountCommand(state: EditorState, setup: CanvasActionSetup
     const transfer = transferDetails(node as Parameters<typeof transferDetails>[0]);
     const cryptoInput = cryptoSelections[id] ? cryptoInputOf(node) : null;
     command = cryptoInput ? { ...base, type: 'SET_CRYPTO_ACTION', input: { ...cryptoInput, selection: cryptoSelections[id]!, amount,
-      ...(cryptoInput.selection.action === 'pool' && cryptoInput.selection.network !== cryptoSelections[id]!.network ? { rangeUnit: 'TICK', lower: cryptoSelections[id]!.network === 'Solana Devnet' ? '-443584' : cryptoSelections[id]!.network === 'Ethereum Sepolia' || cryptoSelections[id]!.network === ROBINHOOD_NETWORK ? '-887220' : '-887270', upper: cryptoSelections[id]!.network === 'Solana Devnet' ? '443584' : cryptoSelections[id]!.network === 'Ethereum Sepolia' || cryptoSelections[id]!.network === ROBINHOOD_NETWORK ? '887220' : '887270' } : {}) } }
+      ...(cryptoInput.selection.action === 'pool' && cryptoInput.selection.network !== cryptoSelections[id]!.network ? defaultPoolRange(cryptoSelections[id]!.network) : {}) } }
       : transfer ? { ...base, type: 'SET_RH_TRANSFER', input: { ...transfer, amount } }
       : lending && (id === 'lending-supply' || id === 'lending-borrow')
       ? { type: 'AUTHOR_LENDING', input: lendingNodeInput(state.workflow, id, amount), source: 'CANVAS', baseRevision: state.workflow.revision }

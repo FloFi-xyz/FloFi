@@ -17,6 +17,9 @@ import { editorReducer, initialEditor } from '../domain/editor';
 import { registerNetworkCatalog, resetNetworkCatalogs } from '../domain/asset-catalogs';
 import { catalogLiquidityCopy, liquidityRunNetwork, parseBaseLiquidityChat } from '../domain/robinhood-liquidity-authoring';
 import { parseLocalCommand } from '../domain/commands';
+import { canvasAmountCommand } from '../domain/canvas-action-setup';
+import { defaultPoolRange, selectCryptoNetwork } from '../domain/crypto-action-picker';
+import { editorHistoryReducer, initialEditorHistory } from '../domain/editor-history';
 import { createUniswapLiquidityChain, UNI_MOCK_CODE_PINS, UNI_OWNER, type UniswapLiquidityChain } from '../../e2e/uniswap-liquidity-harness';
 import { baseAsset, baseCatalog } from './base-mainnet.test-harness';
 import { createUniswapLiquidityService, type UniswapBegin } from './uniswap-liquidity-service';
@@ -59,6 +62,26 @@ describe('BUILD-BASE-001 Base liquidity authoring', () => {
     const chat = parseLocalCommand('add liquidity 100 USDC and 0.001 cbBTC on Base fee 0.05% slippage 100 bps', initialEditor().workflow, context, null);
     const viaChat = editorReducer(initialEditor(), chat, context).workflow.nodes.at(-1);
     expect(JSON.stringify(viaChat)).toBe(JSON.stringify(node));
+  });
+  // A Base pool used to start at Base Sepolia's 0.05% ticks (±887270), which the default 0.3% tier (spacing 60) cannot use: Review failed and
+  // the toolbox card never applied (canvas-ux browser profile). Every catalog network now starts at its default tier's full range.
+  it('starts a new Pool card on Base at the default tier\'s full range, so the toolbox flow reviews and applies', () => {
+    for (const [network, tick] of [['Base', '887220'], ['Robinhood Chain', '887220'], ['Base Sepolia', '887270'], ['Ethereum Sepolia', '887220'], ['Solana Devnet', '443584']] as const)
+      expect(defaultPoolRange(network), network).toEqual({ rangeUnit: 'TICK', lower: `-${tick}`, upper: tick });
+    let history = editorHistoryReducer(initialEditorHistory(), { type: 'START_ACTION_SETUP', action: 'pool', position: { x: 10, y: 20 } });
+    const id = history.actionSetup!.id;
+    history = editorHistoryReducer(history, { type: 'EDIT_CRYPTO_SELECTION', id, selection: selectCryptoNetwork('pool', 'Base'), context });
+    expect(history.actionSetup).toMatchObject({ cryptoSelection: { network: 'Base' }, input: { rangeUnit: 'TICK', lower: '-887220', upper: '887220' } });
+    const setup = history.actionSetup as Extract<NonNullable<typeof history.actionSetup>, { action: 'pool' }>;
+    history = editorHistoryReducer(history, { type: 'EDIT_POOL_SETUP', id, input: { ...setup.input, maxUsdc: '0.0001', maxWeth: '1' } });
+    const command = canvasAmountCommand(history.editor, history.actionSetup, history.amountInputs, id, context, {}, history.cryptoSelections);
+    const next = editorReducer(history.editor, command, context);
+    expect(next.error).toBeNull();
+    const node = next.workflow.nodes.at(-1)!;
+    expect(node).toMatchObject({ actionType: 'asset.liquidity.concentrated', chainId: 'eip155:8453' });
+    // The default 0.3% tier at its full range (tick spacing 60).
+    const fields = readConcentratedLiquidity(node as Parameters<typeof readConcentratedLiquidity>[0]);
+    expect([fields.feeTier, fields.tickLower, fields.tickUpper]).toEqual([3000, -887_220, 887_220]);
   });
   it('presents a Base position as real funds on Base, never as a testnet profile', () => {
     expect(liquidityRunNetwork('eip155:8453')).toMatchObject({ network: 'Base', realFunds: true, robinhood: false, evidenceSlug: 'base-mainnet',

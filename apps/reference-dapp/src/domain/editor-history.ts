@@ -7,7 +7,7 @@ import type { Command } from './commands';
 import { directions, type Direction } from './swap-authoring';
 import { routerDetails } from './router-authoring';
 import type { UniswapLiquidityInput } from './uniswap-liquidity-authoring';
-import { validCryptoSelection, canSelectCryptoAssets, cryptoInputOf, type CryptoSelection, type CryptoSelections } from './crypto-action-picker';
+import { defaultPoolRange, validCryptoSelection, canSelectCryptoAssets, cryptoInputOf, type CryptoSelection, type CryptoSelections } from './crypto-action-picker';
 import { actionReviewValue } from './canvas-action-setup';
 import type { CanvasLayout } from './canvas-layout';
 import { editorReducer, initialEditor, type EditorState } from './editor';
@@ -113,8 +113,7 @@ export function editorHistoryReducer(state: EditorHistory, action: HistoryAction
     const current = setup?.cryptoSelection ?? state.cryptoSelections[action.id];
     if (JSON.stringify(current) === JSON.stringify(action.selection)) return state;
     const changedNetwork = current?.network !== action.selection.network;
-    const poolInput = setup?.action === 'pool' && changedNetwork ? { ...setup.input, rangeUnit: 'TICK' as const,
-      lower: action.selection.network === 'Solana Devnet' ? '-443584' : action.selection.network === 'Ethereum Sepolia' || action.selection.network === ROBINHOOD_NETWORK ? '-887220' : '-887270', upper: action.selection.network === 'Solana Devnet' ? '443584' : action.selection.network === 'Ethereum Sepolia' || action.selection.network === ROBINHOOD_NETWORK ? '887220' : '887270' } : null;
+    const poolInput = setup?.action === 'pool' && changedNetwork ? { ...setup.input, ...defaultPoolRange(action.selection.network) } : null;
     return { ...state, ...(setup ? { actionSetup: { ...setup, cryptoSelection: action.selection, ...(action.beneficiary ? { cryptoBeneficiary: action.beneficiary } : {}), ...(poolInput ? { input: poolInput } : {}) } as CanvasActionSetup } : {
       cryptoSelections: { ...state.cryptoSelections, [action.id]: action.selection },
       amountInputs: { ...state.amountInputs, [action.id]: state.amountInputs[action.id] ?? cryptoInputOf(node!)!.amount },
