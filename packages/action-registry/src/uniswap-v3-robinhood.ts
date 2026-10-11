@@ -13,9 +13,9 @@
  * Mainnet: real funds. Quotes, simulation and Review need `GRYLOO_ROBINHOOD_MAINNET=live`; owner execution additionally needs
  * the explicit real-funds opt-in `GRYLOO_ROBINHOOD_OWNER_EXECUTION=MAINNET_OWNER_APPROVED`. Flofi never signs or sends.
  */
-import { keccak_256 } from '@noble/hashes/sha3.js';
 import { ROBINHOOD_CHAIN_MAINNET } from './robinhood-chain.js';
 import type { UniswapPoolProfile, UniswapPoolToken } from './uniswap-liquidity-profiles.js';
+import { catalogLiquidityMaximumUnits, catalogLiquidityPool, uniswapV3PoolAddress, type UniswapCatalogLiquidity } from './uniswap-v3-catalog.js';
 
 export const UNISWAP_V3_ROBINHOOD = Object.freeze({
   network: ROBINHOOD_CHAIN_MAINNET.name, chain: ROBINHOOD_CHAIN_MAINNET.chain, chainId: ROBINHOOD_CHAIN_MAINNET.chainId,
@@ -60,40 +60,16 @@ export const UNISWAP_V3_ROBINHOOD_LIQUIDITY = Object.freeze({
   gasPriceOracle: null, maximumSlippageBps: 300, defaultSlippageBps: 100, reviewTtlSeconds: 60, mintDeadlineSeconds: 900,
 });
 /** Per-side sanity bound of a Robinhood Chain position (the catalog swap's bound: 10^9 whole tokens); real amounts are checked against balances. */
-export const robinhoodLiquidityMaximumUnits = (decimals: number) => (10n ** BigInt(decimals + 9)).toString();
+export const robinhoodLiquidityMaximumUnits = catalogLiquidityMaximumUnits;
+/** BUILD-BASE-001: the Robinhood Chain deployment as the shared catalog-pool builder consumes it (no OP Stack L1 fee). */
+export const UNISWAP_V3_ROBINHOOD_CATALOG: UniswapCatalogLiquidity = Object.freeze({ ...UNISWAP_V3_ROBINHOOD_LIQUIDITY, weth: UNISWAP_V3_ROBINHOOD.weth,
+  poolInitCodeHash: UNISWAP_V3_ROBINHOOD.poolInitCodeHash, feeTiers: UNISWAP_V3_ROBINHOOD.feeTiers,
+  codeSha256: Object.freeze({ factory: UNISWAP_V3_ROBINHOOD.codeSha256.factory, positionManager: UNISWAP_V3_ROBINHOOD.codeSha256.positionManager }) });
 /**
  * A Uniswap v3 pool on Robinhood Chain as a liquidity runtime: the CREATE2 pool of the pinned factory for (tokenA, tokenB, fee),
  * tokens in pool order. Identity, code and live state are verified at simulation; an unknown fee tier or identical tokens fail closed.
  */
 export function robinhoodLiquidityPool(tokenA: Omit<UniswapPoolToken, 'maximumAmount'>, tokenB: Omit<UniswapPoolToken, 'maximumAmount'>, fee: number): UniswapPoolProfile {
-  const tier = UNISWAP_V3_ROBINHOOD.feeTiers.find(item => item.fee === fee);
-  if (!tier) throw new Error('UNISWAP_FEE_TIER_UNSUPPORTED');
-  const side = (token: Omit<UniswapPoolToken, 'maximumAmount'>): UniswapPoolToken => {
-    if (!/^0x[0-9a-f]{40}$/.test(token.address) || !Number.isSafeInteger(token.decimals) || token.decimals < 0 || token.decimals > 36) throw new Error('UNISWAP_TOKEN_UNSUPPORTED');
-    return Object.freeze({ symbol: token.symbol, address: token.address, decimals: token.decimals, maximumAmount: robinhoodLiquidityMaximumUnits(token.decimals) });
-  };
-  if (tokenA.address === tokenB.address) throw new Error('UNISWAP_TOKEN_UNSUPPORTED');
-  const [token0, token1] = tokenA.address < tokenB.address ? [side(tokenA), side(tokenB)] : [side(tokenB), side(tokenA)];
-  const P = UNISWAP_V3_ROBINHOOD_LIQUIDITY;
-  return Object.freeze({ network: P.network, chain: P.chain, chainId: P.chainId, chainHex: P.chainHex, protocol: 'uniswap-v3', adapterId: 'uniswap.v3',
-    providerLabel: P.providerLabel, rpc: P.rpc, explorer: P.explorer, officialSource: P.officialSource, factory: P.factory, positionManager: P.positionManager,
-    pool: uniswapV3PoolAddress(P.factory, UNISWAP_V3_ROBINHOOD.poolInitCodeHash, token0.address, token1.address, fee), gasPriceOracle: null, token0, token1,
-    codeSha256: Object.freeze({ factory: UNISWAP_V3_ROBINHOOD.codeSha256.factory, positionManager: UNISWAP_V3_ROBINHOOD.codeSha256.positionManager, pool: null }),
-    feeTier: fee, tickSpacing: tier.tickSpacing, maximumSlippageBps: P.maximumSlippageBps, defaultSlippageBps: P.defaultSlippageBps,
-    reviewTtlSeconds: P.reviewTtlSeconds, mintDeadlineSeconds: P.mintDeadlineSeconds, weth: UNISWAP_V3_ROBINHOOD.weth,
-    poolInitCodeHash: UNISWAP_V3_ROBINHOOD.poolInitCodeHash, environment: 'MAINNET' });
+  return catalogLiquidityPool(UNISWAP_V3_ROBINHOOD_CATALOG, tokenA, tokenB, fee);
 }
-/**
- * The CREATE2 address of a Uniswap v3 pool: keccak256(0xff ‖ factory ‖ keccak256(abi.encode(token0, token1, fee)) ‖ initCodeHash).
- * Computed locally, so a pool is proven by the factory's own derivation rather than by an RPC answer.
- */
-export function uniswapV3PoolAddress(factory: string, initCodeHash: string, tokenA: string, tokenB: string, fee: number): string {
-  const word = (hex: string) => hex.toLowerCase().replace(/^0x/, '').padStart(64, '0');
-  if (![factory, tokenA, tokenB].every(value => /^0x[0-9a-fA-F]{40}$/.test(value)) || !/^0x[0-9a-f]{64}$/.test(initCodeHash) ||
-      !Number.isSafeInteger(fee) || fee < 0 || fee >= 1 << 24 || tokenA.toLowerCase() === tokenB.toLowerCase()) throw new Error('POOL_IDENTITY_INVALID');
-  const [token0, token1] = [tokenA.toLowerCase(), tokenB.toLowerCase()].sort();
-  const bytes = (hex: string) => Uint8Array.from(hex.match(/../g)!.map(pair => parseInt(pair, 16)));
-  const salt = keccak_256(bytes(word(token0!) + word(token1!) + fee.toString(16).padStart(64, '0')));
-  const hash = keccak_256(bytes('ff' + factory.toLowerCase().slice(2) + Array.from(salt, b => b.toString(16).padStart(2, '0')).join('') + initCodeHash.slice(2)));
-  return '0x' + Array.from(hash.slice(12), b => b.toString(16).padStart(2, '0')).join('');
-}
+export { uniswapV3PoolAddress };

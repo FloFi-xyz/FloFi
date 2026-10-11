@@ -22,7 +22,8 @@ import type { WalletSession } from '../server/wallet-session';
  */
 const KEY: Readonly<Record<RouterNetwork, string>> = { mainnet: 'flofi:crosschain-router:run', testnet: 'flofi:crosschain-router-testnet:run',
   'base-to-robinhood': 'flofi:crosschain-router-base-to-robinhood:run', 'robinhood-to-base': 'flofi:crosschain-router-robinhood-to-base:run',
-  'arbitrum-to-robinhood': 'flofi:crosschain-router-arbitrum-to-robinhood:run', 'robinhood-to-arbitrum': 'flofi:crosschain-router-robinhood-to-arbitrum:run' };
+  'arbitrum-to-robinhood': 'flofi:crosschain-router-arbitrum-to-robinhood:run', 'robinhood-to-arbitrum': 'flofi:crosschain-router-robinhood-to-arbitrum:run',
+  'arbitrum-to-base': 'flofi:crosschain-router-arbitrum-to-base:run' };
 const NETWORKS = Object.keys(KEY) as RouterNetwork[];
 /** Resume order: the testnet journey first (as before BUILD-RH-002), then the real-funds routes. */
 const RESUME: readonly RouterNetwork[] = ['testnet', ...NETWORKS.filter(n => n !== 'testnet')];

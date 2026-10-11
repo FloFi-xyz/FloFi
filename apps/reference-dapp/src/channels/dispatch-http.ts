@@ -21,6 +21,7 @@ import { channelProviders, type ProviderSeams } from './providers.ts';
 import { channelProviderStatus, readChannelDeployment } from './registry.ts';
 import { channelHost, channelRuntime, type ChannelHost } from './runtime.ts';
 import { channelVisualRenderer } from './visuals.ts';
+import { authoringCatalogPreparer } from '../server/authoring-catalogs.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
 export type ChannelOperatorOptions = { readonly env?: Env; readonly logger?: ChannelLogSink | null; readonly host?: ChannelHost; readonly runtime?: EngineRuntime;
@@ -54,6 +55,7 @@ export async function handleChannelDispatch(request: Request, options: ChannelOp
   const interpreter = options.interpreter !== undefined ? options.interpreter : channelInterpreter(env, { enabled: core.copilot });
   const services = new Map([...providers.adapters.values()].map(adapter => [adapter.channel, createChannelService({ core, store, log, now, platform, adapter, interpreter,
     previewTimeoutMs: 30_000, subscriptions: channelSubscriptions(env, host), visuals: options.visuals !== undefined ? options.visuals : channelVisualRenderer,
+    catalogs: authoringCatalogPreparer(env),
     ...options.sleep ? { sleep: options.sleep } : {}, ...options.random ? { random: options.random } : {} })]));
   try {
     const summary = await dispatchChannels({ core, store, platform, log, now, adapters: providers.adapters, services, ...options.sleep ? { sleep: options.sleep } : {},

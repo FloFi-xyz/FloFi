@@ -9,6 +9,7 @@ import type { useWalletProof } from './wallet-proof';
 import { useState, type FormEvent } from 'react';
 import { parseLocalCommand, summarize } from '../domain/commands';
 import { ensureNetworkCatalog } from '../state/asset-catalog-store';
+import { catalogNetworksNamed } from '../domain/network-registry';
 import { useWorkflow } from '../state/workflow-store';
 
 import { useBuild009Wallet } from '../state/build009-wallet-store';
@@ -34,7 +35,8 @@ export function CopilotPanel({ interactive = true, owner = null, proof }: { inte
   }
   async function send(text: string) {
     // BUILD-RH-002: Robinhood Chain Stock Tokens resolve only in the validated official catalog; load it (where enabled) before parsing.
-    if (/\brobinhood\b/i.test(text)) await ensureNetworkCatalog();
+    // BUILD-RH-002 / BUILD-BASE-001: catalog-network symbols resolve only in validated catalogs; load those the sentence names first.
+    await Promise.all(catalogNetworksNamed(text).map(network => ensureNetworkCatalog(false, network.chain)));
     setAutomation(null);
     if (text.toLowerCase() === 'explain') {
       dismissProposal();

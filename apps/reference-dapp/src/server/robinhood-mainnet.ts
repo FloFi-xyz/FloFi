@@ -13,6 +13,7 @@ import { ROBINHOOD_CHAIN_MAINNET, ROBINHOOD_STOCK_TOKEN_REGISTRY, parseRobinhood
   type AssetCatalog } from '@defi-workflow-engine/action-registry';
 import { chainBoundRpc, createBaseSepoliaReadRpc, pacedReadRpc } from './public-testnet-rpc.ts';
 import type { CatalogSwapRuntime, Rpc } from './public-testnet-service.ts';
+import { createOfficialCatalogLoader, type RegistryFetch } from './network-catalog.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
 export type RobinhoodMainnetMode = 'live' | 'harness' | 'off';
@@ -44,35 +45,19 @@ export function robinhoodMainnetRpc(mode: 'live' | 'harness', env: Env, methods:
   return chainBoundRpc(pacedReadRpc(createBaseSepoliaReadRpc(robinhoodRpcUrl(env.GRYLOO_ROBINHOOD_RPC_URL), methods)), ROBINHOOD_CHAIN_MAINNET.chainId);
 }
 
-export type RegistryFetch = (url: string, init: RequestInit) => Promise<Response>;
+export type { RegistryFetch } from './network-catalog.ts';
 /**
  * The official Robinhood Chain catalog (base assets + every validated active Stock Token). Each call returns a catalog no
  * older than `ttlMs` (the registry itself caches; prices are never read here); concurrent callers share one read. Any
  * failure — HTTP, size, redirect, malformed payload, duplicate or ambiguous asset — fails closed and is never replaced by
- * an older or recorded catalog.
+ * an older or recorded catalog. BUILD-BASE-001: the generic official-catalog loader every catalog network shares.
  */
 export function createRobinhoodCatalogLoader(options: { readonly mode: 'live' | 'harness'; readonly fetcher?: RegistryFetch;
   readonly now?: () => Date; readonly ttlMs?: number }): (chain: string) => Promise<AssetCatalog> {
-  const fetcher = options.fetcher ?? ((url, init) => fetch(url, init)), now = options.now ?? (() => new Date()), ttlMs = options.ttlMs ?? 30_000;
-  const url = options.mode === 'harness' ? ROBINHOOD_MAINNET_HARNESS.registry : ROBINHOOD_STOCK_TOKEN_REGISTRY.url;
-  let cached: { catalog: AssetCatalog; at: number } | null = null, inflight: Promise<AssetCatalog> | null = null;
-  async function read(): Promise<AssetCatalog> {
-    let response: Response;
-    try { response = await fetcher(url, { method: 'GET', cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(15_000),
-      headers: { accept: 'application/json', 'user-agent': 'Flofi/BUILD-RH-002 asset registry' } }); }
-    catch { throw new Error('STOCK_REGISTRY_UNAVAILABLE'); }
-    if (response.status !== 200) throw new Error('STOCK_REGISTRY_UNAVAILABLE');
-    const declared = Number(response.headers.get('content-length') ?? '0');
-    if (declared > ROBINHOOD_STOCK_TOKEN_REGISTRY.maximumBytes) throw new Error('STOCK_REGISTRY_UNAVAILABLE');
-    const text = await response.text();
-    return robinhoodNetworkCatalog(parseRobinhoodStockTokenRegistry(text, now().toISOString()));
-  }
-  return async chain => {
-    if (chain !== ROBINHOOD_CHAIN_MAINNET.chain) throw new Error('CATALOG_NETWORK_UNSUPPORTED');
-    if (cached && now().getTime() - cached.at < ttlMs) return cached.catalog;
-    inflight ??= read().then(catalog => { cached = { catalog, at: now().getTime() }; return catalog; }).finally(() => { inflight = null; });
-    return inflight;
-  };
+  return createOfficialCatalogLoader({ chain: ROBINHOOD_CHAIN_MAINNET.chain,
+    url: options.mode === 'harness' ? ROBINHOOD_MAINNET_HARNESS.registry : ROBINHOOD_STOCK_TOKEN_REGISTRY.url,
+    maximumBytes: ROBINHOOD_STOCK_TOKEN_REGISTRY.maximumBytes, userAgent: 'Flofi/BUILD-RH-002 asset registry', unavailableCode: 'STOCK_REGISTRY_UNAVAILABLE',
+    parse: (text, fetchedAt) => robinhoodNetworkCatalog(parseRobinhoodStockTokenRegistry(text, fetchedAt)) }, options);
 }
 /** The catalog swap runtime of the shared Uniswap swap service on Robinhood Chain. */
 export function robinhoodSwapRuntime(mode: 'live' | 'harness', env: Env, catalogFor: (chain: string) => Promise<AssetCatalog>): CatalogSwapRuntime {

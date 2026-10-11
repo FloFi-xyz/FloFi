@@ -20,19 +20,23 @@ import { currentWalletPrincipal } from '../server/session-principal';
 type Result<T> = { ok: true; value: T } | { ok: false; code: string };
 export type RouterRunSummary = { runId: string; status: string; hasEvidence: boolean; updatedAt: string };
 // BUILD-RH-002: each Robinhood Chain route is its own flow and storage (under `$GRYLOO_ROBINHOOD_JOURNAL/router-<route>`).
+// BUILD-BASE-001: Arbitrum → Base is the Router's own route, under `$GRYLOO_ROUTER_JOURNAL/router-arbitrum-to-base`.
 const FLOW = { mainnet: 'crosschain-router', testnet: 'crosschain-router-testnet', 'base-to-robinhood': 'crosschain-router-base-to-robinhood',
   'robinhood-to-base': 'crosschain-router-robinhood-to-base', 'arbitrum-to-robinhood': 'crosschain-router-arbitrum-to-robinhood',
-  'robinhood-to-arbitrum': 'crosschain-router-robinhood-to-arbitrum' } as const satisfies Readonly<Record<RouterNetwork, string>>;
+  'robinhood-to-arbitrum': 'crosschain-router-robinhood-to-arbitrum', 'arbitrum-to-base': 'crosschain-router-arbitrum-to-base' } as const satisfies Readonly<Record<RouterNetwork, string>>;
 const DISABLED: Readonly<Record<RouterNetwork, string>> = { mainnet: 'ROUTER_NOT_ENABLED', testnet: 'ROUTER_TESTNET_NOT_ENABLED', 'base-to-robinhood': 'ROBINHOOD_MAINNET_NOT_ENABLED',
-  'robinhood-to-base': 'ROBINHOOD_MAINNET_NOT_ENABLED', 'arbitrum-to-robinhood': 'ROBINHOOD_MAINNET_NOT_ENABLED', 'robinhood-to-arbitrum': 'ROBINHOOD_MAINNET_NOT_ENABLED' };
+  'robinhood-to-base': 'ROBINHOOD_MAINNET_NOT_ENABLED', 'arbitrum-to-robinhood': 'ROBINHOOD_MAINNET_NOT_ENABLED', 'robinhood-to-arbitrum': 'ROBINHOOD_MAINNET_NOT_ENABLED',
+  'arbitrum-to-base': 'ROUTER_NOT_ENABLED' };
 const JOURNAL: Readonly<Record<RouterNetwork, string>> = { mainnet: 'GRYLOO_ROUTER_JOURNAL', testnet: 'GRYLOO_ROUTER_TESTNET_JOURNAL', 'base-to-robinhood': 'GRYLOO_ROBINHOOD_JOURNAL',
-  'robinhood-to-base': 'GRYLOO_ROBINHOOD_JOURNAL', 'arbitrum-to-robinhood': 'GRYLOO_ROBINHOOD_JOURNAL', 'robinhood-to-arbitrum': 'GRYLOO_ROBINHOOD_JOURNAL' };
+  'robinhood-to-base': 'GRYLOO_ROBINHOOD_JOURNAL', 'arbitrum-to-robinhood': 'GRYLOO_ROBINHOOD_JOURNAL', 'robinhood-to-arbitrum': 'GRYLOO_ROBINHOOD_JOURNAL',
+  'arbitrum-to-base': 'GRYLOO_ROUTER_JOURNAL' };
 const isNetwork = (value: unknown): value is RouterNetwork => (ROUTER_NETWORKS as readonly unknown[]).includes(value);
 const services = new Map<RouterNetwork, RouterService>();
 function journalDir(network: RouterNetwork): string {
   const dir = process.env[JOURNAL[network]];
   if (!dir || !isAbsolute(dir)) throw new Error('ROUTER_STORAGE_NOT_CONFIGURED');
-  return JOURNAL[network] === 'GRYLOO_ROBINHOOD_JOURNAL' ? join(dir, `router-${network}`) : dir;
+  // The original pairs keep their directories; every further route has its own subdirectory.
+  return network === 'mainnet' || network === 'testnet' ? dir : join(dir, `router-${network}`);
 }
 function current(network: RouterNetwork): RouterService {
   const mode = routerNetworkMode(network, process.env);

@@ -29,10 +29,10 @@ describe('BUILD-MCP-001 discovery derived from registries', () => {
       demonstratedEvidence: null, funds: 'TEST_FUNDS' });
     // The exact Base Sepolia Uniswap swap path is the one with recorded public testnet execution.
     expect(rows['swap:base-sepolia']!.demonstratedEvidence).toBe('TESTNET_EXECUTED');
-    // Base mainnet Uniswap swap exists only as MOCK / LOCAL_FORK: no public execution is claimed.
-    expect(rows['swap:base']).toMatchObject({ ownerWalletExecutionImplemented: false, demonstratedEvidence: null, funds: 'REAL_FUNDS' });
-    expect(rows['swap:base']!.registryEnvironments).toEqual(expect.arrayContaining(['MOCK', 'LOCAL_FORK']));
-    expect(rows['swap:base']!.registryEnvironments).not.toContain('MAINNET');
+    // BUILD-BASE-001 (intentional change): the Base mainnet Uniswap swap is an owner-wallet capability (real funds) beside its MOCK and
+    // LOCAL_FORK rows; nothing is demonstrated on mainnet, so no evidence is claimed.
+    expect(rows['swap:base']).toMatchObject({ ownerWalletExecutionImplemented: true, demonstratedEvidence: null, funds: 'REAL_FUNDS' });
+    expect(rows['swap:base']!.registryEnvironments).toEqual(expect.arrayContaining(['MOCK', 'LOCAL_FORK', 'MAINNET']));
     expect(rows['bridge:base']).toMatchObject({ publicEnvironment: 'MAINNET', funds: 'REAL_FUNDS' });
     for (const row of codeCapabilities()) expect(row.supportedByCode.AUTHOR).toBe(true);
   });

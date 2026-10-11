@@ -5,7 +5,7 @@ import { useLocale } from '../i18n/locale';
 import { useEffect, useState, type FormEvent } from 'react';
 import { ROUTER_PHASES, type RouteChange, type RouterPhase } from '@defi-workflow-engine/workflow-contracts';
 import { createRouterNode, routerChainChoices, routerDetails, routerInputForNetworks, routerInputOf, routerNetworkOfInput, ROUTER_DEFAULT_SLIPPAGE, ROUTER_NETWORK_OPTIONS,
-  ROUTER_ROUTING_LABEL, type RouterBridgeInput, type RouterDestination, type RouterNetwork, type RouterRouting, type RouterSource } from '../domain/router-authoring';
+  ROUTER_ROUTING_LABEL, routerDisabledCode, type RouterBridgeInput, type RouterDestination, type RouterNetwork, type RouterRouting, type RouterSource } from '../domain/router-authoring';
 import { formatTokenAmount } from '../domain/jupiter-authoring';
 import { useWorkflow } from '../state/workflow-store';
 import { TokenAmountInput } from './token-amount-input';
@@ -15,7 +15,7 @@ import { useExecutionEnvironment } from '../state/capability-store';
 
 /**
  * Network labels: mainnet keeps the BUILD-ROUTER-001 wording; the testnet journey names Base Sepolia / Arbitrum Sepolia; BUILD-RH-002 adds
- * the Robinhood Chain routes, whose source and destination tokens differ (USDC ⇄ USDG).
+ * the Robinhood Chain routes, whose source and destination tokens differ (USDC ⇄ USDG); BUILD-BASE-001 adds Arbitrum One → Base.
  */
 type Labels = { src: string; dst: string; dstShort: string; srcScan: string; dstScan: string; token: string };
 const RH_SCAN = 'Robinhood Chain explorer';
@@ -26,6 +26,8 @@ const LABELS: Readonly<Record<RouterNetwork, Labels>> = {
   'robinhood-to-base': { src: 'Robinhood Chain', dst: 'Base', dstShort: 'Base', srcScan: RH_SCAN, dstScan: 'Basescan', token: 'USDG' },
   'arbitrum-to-robinhood': { src: 'Arbitrum One', dst: 'Robinhood Chain', dstShort: 'Robinhood Chain', srcScan: 'Arbiscan', dstScan: RH_SCAN, token: 'USDC' },
   'robinhood-to-arbitrum': { src: 'Robinhood Chain', dst: 'Arbitrum One', dstShort: 'Arbitrum', srcScan: RH_SCAN, dstScan: 'Arbiscan', token: 'USDG' },
+  // BUILD-BASE-001: Base bridge IN from Arbitrum One.
+  'arbitrum-to-base': { src: 'Arbitrum One', dst: 'Base', dstShort: 'Base', srcScan: 'Arbiscan', dstScan: 'Basescan', token: 'USDC' },
 };
 /** Whole-token bounds of a pair, e.g. "1" and "100". */
 const bound = (units: string, decimals: number) => formatTokenAmount(units, decimals);
@@ -200,7 +202,7 @@ export function RouterPanel({ view }: { view: 'simulate' | 'execute' }) {
   return <section className="panel" aria-label={tr("Cross-chain bridge")}><h2>{tr(view === 'simulate' ? 'Simulate cross-chain bridge' : 'Review cross-chain bridge')}</h2>
     {fields && <p>{tr("Bridge ")}{tr(fields.amount)}{tr(fields.token === 'USDG' ? ' USDG from ' : ' USDC from ')}{tr(l.src)}{tr(" to ")}{tr(l.dst)}{tr(" for ")}{tr(fields.recipientLabel)}{tr(", routing: ")}{tr(ROUTER_ROUTING_LABEL[fields.routing])}.</p>}
     <p role="note">{tr(network === 'testnet' ? 'Test USDC on public testnets: Base Sepolia and Arbitrum Sepolia. No real funds.' : network === 'mainnet' ? 'Real funds: Base mainnet and Arbitrum One.' : ROUTER_NETWORK_OPTIONS[network].funds)}{tr(" Flofi never signs or sends; every transaction is your wallet's, after your Review.")}</p>
-    {!router.available && <p role="status">{tr(message(network === 'testnet' ? 'ROUTER_TESTNET_NOT_ENABLED' : network === 'mainnet' ? 'ROUTER_NOT_ENABLED' : 'ROBINHOOD_MAINNET_NOT_ENABLED'))}</p>}
+    {!router.available && <p role="status">{tr(message(routerDisabledCode(network)))}</p>}
     {router.retired && <p role="alert">{tr("The workflow changed. Prior authorization is invalid. Simulate the current bridge again.")}</p>}
     {router.recovered && record && <p role="status">{tr("Recovered run ")}{record.id}{tr(". Its state comes from the server; nothing is resent automatically.")}</p>}
     <WalletSessionBlock showRuns={true}/>

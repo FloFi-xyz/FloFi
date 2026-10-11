@@ -18,7 +18,8 @@ export { SOLANA_SWAP_RUNTIMES, solanaSwapRuntime, solanaTokenOn } from "./solana
 export type { SolanaSwapRuntime, SolanaSwapToken } from "./solana-swap-runtimes.js";
 export { capabilityDeclares } from "./capabilities.js";
 export { CROSSCHAIN_ROUTER_BASE_ARBITRUM, CROSSCHAIN_ROUTER_BASE_SEPOLIA_ARBITRUM_SEPOLIA, CROSSCHAIN_ROUTER_PROFILES, routerProfileFor,
-  CROSSCHAIN_ROUTER_BASE_ROBINHOOD, CROSSCHAIN_ROUTER_ROBINHOOD_BASE, CROSSCHAIN_ROUTER_ARBITRUM_ROBINHOOD, CROSSCHAIN_ROUTER_ROBINHOOD_ARBITRUM } from "./crosschain-router.js";
+  CROSSCHAIN_ROUTER_BASE_ROBINHOOD, CROSSCHAIN_ROUTER_ROBINHOOD_BASE, CROSSCHAIN_ROUTER_ARBITRUM_ROBINHOOD, CROSSCHAIN_ROUTER_ROBINHOOD_ARBITRUM,
+  CROSSCHAIN_ROUTER_ARBITRUM_BASE } from "./crosschain-router.js";
 export type { CrossChainRouterProfile, RouterProfile } from "./crosschain-router.js";
 export { ROBINHOOD_CHAIN_MAINNET, ROBINHOOD_CHAIN_TESTNET, ROBINHOOD_NETWORKS, ROBINHOOD_PROTOCOL_AVAILABILITY,
   robinhoodNetwork, robinhoodDeploymentStatus, robinhoodAddChainParameters, robinhoodExpectedCode, ROBINHOOD_TESTNET_TRANSFER, ROBINHOOD_MAINNET_TRANSFER } from "./robinhood-chain.js";
@@ -222,3 +223,10 @@ export * from './uniswap-liquidity-profiles.js';
 export * from './asset-registry.js';
 export * from './robinhood-stock-tokens.js';
 export * from './uniswap-v3-robinhood.js';
+export * from './base-chain.js';
+export * from './base-token-list.js';
+export * from './asset-logos.js';
+export * from './asset-logo-rules.js';
+export * from './uniswap-v3-catalog.js';
+export * from './uniswap-v3-base.js';
+export * from './uniswap-catalog-networks.js';

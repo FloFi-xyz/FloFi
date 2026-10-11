@@ -39,6 +39,11 @@ export function editCommandFor(workflow: Workflow, context: ReviewContext, nodeI
     case 'ORCA_LIQUIDITY': return authoring.type === 'ADD_SOLANA_LIQUIDITY' ? { ok: true, command: { ...base, type: 'SET_SOLANA_LIQUIDITY', nodeId, input: authoring.input } }
       : refuse('STEP_KIND_MISMATCH');
     case 'EVM_SWAP': return evmSwapEdit(step, detail, authoring, context, base);
+    // BUILD-BASE-001: catalog-network swaps and positions (Base, Robinhood Chain) and catalog transfers take the Canvas's own edit commands.
+    case 'CATALOG_SWAP': case 'CATALOG_LIQUIDITY': return authoring.type === 'ADD_CRYPTO_ACTION'
+      ? { ok: true, command: { ...base, type: 'SET_CRYPTO_ACTION', nodeId, input: authoring.input } } : refuse('STEP_KIND_MISMATCH');
+    case 'TRANSFER': return authoring.type === 'ADD_RH_TRANSFER' ? { ok: true, command: { ...base, type: 'SET_RH_TRANSFER', nodeId, input: authoring.input } }
+      : refuse('STEP_KIND_MISMATCH');
     default: return refuse('STEP_NOT_EDITABLE');
   }
 }
@@ -46,6 +51,8 @@ export function editCommandFor(workflow: Workflow, context: ReviewContext, nodeI
 /** A Base or Base Sepolia swap node can change its amount or its slippage, one per proposal; never its tokens or network. */
 function evmSwapEdit(step: WorkflowStep, detail: Extract<WorkflowStep['detail'], { type: 'EVM_SWAP' }>, authoring: Command, context: ReviewContext,
   base: Pick<Command, 'source' | 'baseRevision'>): EditPlan {
+  // BUILD-BASE-001: another Base pair is a catalog swap, i.e. other tokens: this swap's tokens stay fixed, as before.
+  if (authoring.type === 'ADD_CRYPTO_ACTION' && detail.network === 'Base') return refuse('SWAP_TOKENS_OR_NETWORK_FIXED');
   if (authoring.type !== 'ADD_SWAP' && authoring.type !== 'ADD_TESTNET_SWAP') return refuse('STEP_KIND_MISMATCH');
   const testnet = detail.network === 'Base Sepolia';
   if ((authoring.type === 'ADD_TESTNET_SWAP') !== testnet || authoring.direction !== `${detail.from}_TO_${detail.to}`) return refuse('SWAP_TOKENS_OR_NETWORK_FIXED');

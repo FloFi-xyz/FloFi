@@ -481,6 +481,9 @@
 .composer-token-avatar>.brand-icon{min-width:0;min-height:0;max-width:100%;max-height:100%}
 .brand-icon{display:block;width:100%;height:100%;object-fit:contain;filter:none}
 .brand-icon-fallback{display:grid;place-items:center;width:100%;height:100%;border-radius:50%;background:#e4e4e7;color:#52525b;font:inherit}
+/* BUILD-BASE-001: generated asset and network monograms (no third-party logos); the hue comes from the canonical identity. */
+.brand-mark-monogram{background:hsl(var(--mark-hue,220) 42% 90%);color:hsl(var(--mark-hue,220) 48% 28%);font-weight:650;font-size:.82em;letter-spacing:-.02em;line-height:1;overflow:hidden}
+:root[data-theme="dark"] .brand-mark-monogram{background:hsl(var(--mark-hue,220) 28% 26%);color:hsl(var(--mark-hue,220) 70% 86%)}
 .composer-equity-pill{position:relative;color:var(--blue);font:inherit;cursor:pointer}
 .composer-equity-pill:hover,.composer-equity-pill[aria-expanded="true"]{border-color:var(--accent-border);background:var(--accent-quiet)}
 .composer-robinhood-avatar{background:#ccff00}
@@ -661,6 +664,7 @@
 .composer-stock-results{display:grid;gap:2px;max-height:216px;margin:0;padding:0;overflow-y:auto;list-style:none;overscroll-behavior:contain}
 .composer-stock-results .composer-stock-option{width:100%;justify-content:flex-start;font-family:inherit;text-align:left;background:transparent}
 .composer-stock-name{overflow:hidden;color:var(--muted);font-weight:500;text-overflow:ellipsis}
+.composer-stock-mark{flex:none;width:18px;height:18px;display:grid;place-items:center}
 .composer-stock-status{margin:6px 8px;color:var(--muted);font-size:11px;line-height:1.4}
 .composer-stock-retry{margin-left:4px;padding:2px 6px;font-size:11px}
 :root[data-theme="dark"] .composer-stock-search input{background:var(--surface-raised)}

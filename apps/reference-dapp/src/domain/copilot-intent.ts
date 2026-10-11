@@ -5,6 +5,8 @@
  * user said (with `null` for anything unstated). Flofi alone decides support, defaults and clarifications, then
  * renders an exact-grammar sentence for `parseLocalCommand`. Nothing here can execute, sign, quote or authorize.
  */
+import { COPILOT_NETWORK_IDS } from './network-registry';
+
 export const COPILOT_INTENT_VERSION = '1';
 /** BUILD-ETHEREUM-001: ETHEREUM_SEPOLIA is a test network; ETHEREUM is "Ethereum" named without Sepolia (never executable, always clarified). */
 export const COPILOT_NETWORKS = ['BASE', 'BASE_SEPOLIA', 'ARBITRUM', 'ARBITRUM_SEPOLIA', 'ETHEREUM', 'ETHEREUM_SEPOLIA', 'SOLANA', 'SOLANA_DEVNET', 'OTHER'] as const;
@@ -13,6 +15,23 @@ export const COPILOT_ROUTING = ['AUTO', 'LIFI', 'ACROSS'] as const;
 export const COPILOT_LENDING_TYPES = ['SUPPLY', 'BORROW', 'REPAY', 'WITHDRAW'] as const;
 export const COPILOT_LIQUIDITY_PROTOCOLS = ['UNISWAP_V3', 'ORCA'] as const;
 export const COPILOT_RANGE_UNITS = ['PRICE', 'TICK'] as const;
+/**
+ * BUILD-BASE-001 (CopilotIntentV2 only; V1 is unchanged): catalog networks join the vocabulary (ROBINHOOD; BASE already is one), a token
+ * is any catalog symbol exactly as the user wrote it (FloFi resolves it through that network's validated catalog, never the model), a
+ * TRANSFER action, and catalog pools take a fee tier and the full range.
+ */
+/** The network registry's Copilot identifiers, plus OTHER for any network FloFi does not know. */
+export const COPILOT_V2_NETWORKS = Object.freeze([...COPILOT_NETWORK_IDS, 'OTHER'] as const);
+export const COPILOT_V2_RANGE_UNITS = ['PRICE', 'TICK', 'FULL'] as const;
+export const COPILOT_FEE_TIERS = ['0.01', '0.05', '0.3', '1'] as const;
+/** The asset symbol grammar of every catalog (`ASSET_SYMBOL`), case as written: `cbBTC`, `TSLA`, `USDbC`. */
+export const COPILOT_SYMBOL = /^[A-Za-z][A-Za-z0-9.]{0,15}$/;
+/**
+ * BUILD-BASE-001 (owner addendum): a V2 token is what the user wrote — a symbol (`COPILOT_SYMBOL`) or a whole token or company name
+ * (`Tesla`, `Coinbase Wrapped BTC`, `Coca-Cola`): ASCII words separated by single spaces, at most `maxValueLength` characters. It is only
+ * text to look up: FloFi resolves it in the named network's catalog (`resolveAssetReference`) and requires it in the user's own words.
+ */
+export const COPILOT_ASSET_REFERENCE = /^[A-Za-z0-9][A-Za-z0-9.&'-]*(?: [A-Za-z0-9.&'-]+)*$/;
 export const COPILOT_MISSING_FIELDS = ['amount', 'asset', 'network', 'sourceNetwork', 'destinationNetwork', 'protocol', 'range', 'slippage',
   'beneficiary', 'recipient'] as const;
 export const COPILOT_LIMITS = Object.freeze({
@@ -20,13 +39,19 @@ export const COPILOT_LIMITS = Object.freeze({
   maxQuestionLength: 300, maxReasonLength: 300, maxOptions: 4, maxOptionLength: 60, maxOutputTextLength: 8192,
 });
 
-export type CopilotNetwork = (typeof COPILOT_NETWORKS)[number];
-export type CopilotAsset = (typeof COPILOT_ASSETS)[number];
+export type CopilotNetwork = (typeof COPILOT_V2_NETWORKS)[number];
+/** A V1 token name; V2 also carries any catalog symbol or token name as written (`COPILOT_ASSET_REFERENCE`). */
+export type CopilotLegacyAsset = (typeof COPILOT_ASSETS)[number];
+export type CopilotAsset = CopilotLegacyAsset | (string & {});
 export type CopilotRouting = (typeof COPILOT_ROUTING)[number];
 export type CopilotLendingType = (typeof COPILOT_LENDING_TYPES)[number];
 export type CopilotMissingField = (typeof COPILOT_MISSING_FIELDS)[number];
+export type CopilotFeeTier = (typeof COPILOT_FEE_TIERS)[number];
 export type CopilotSwapAction = { readonly type: 'SWAP'; readonly network: CopilotNetwork | null; readonly inputAsset: CopilotAsset | null;
   readonly outputAsset: CopilotAsset | null; readonly amount: string | null; readonly slippageBps: string | null };
+/** BUILD-BASE-001 (V2): a transfer of native ETH or a catalog token on a catalog network, to the connected owner (null) or a typed address. */
+export type CopilotTransferAction = { readonly type: 'TRANSFER'; readonly network: CopilotNetwork | null; readonly asset: CopilotAsset | null;
+  readonly amount: string | null; readonly recipient: string | null };
 export type CopilotBridgeAction = { readonly type: 'BRIDGE'; readonly sourceNetwork: CopilotNetwork | null; readonly destinationNetwork: CopilotNetwork | null;
   readonly asset: CopilotAsset | null; readonly amount: string | null; readonly slippageBps: string | null; readonly routing: CopilotRouting | null;
   readonly recipient: string | null };
@@ -34,9 +59,10 @@ export type CopilotLendingAction = { readonly type: CopilotLendingType; readonly
   readonly asset: CopilotAsset | null; readonly amount: string | null; readonly beneficiary: string | null };
 export type CopilotDeposit = { readonly asset: CopilotAsset; readonly maxAmount: string };
 export type CopilotLiquidityAction = { readonly type: 'LIQUIDITY'; readonly protocol: (typeof COPILOT_LIQUIDITY_PROTOCOLS)[number] | null;
-  readonly network: CopilotNetwork | null; readonly deposits: readonly CopilotDeposit[]; readonly rangeUnit: (typeof COPILOT_RANGE_UNITS)[number] | null;
-  readonly lower: string | null; readonly upper: string | null; readonly slippageBps: string | null };
-export type CopilotAction = CopilotSwapAction | CopilotBridgeAction | CopilotLendingAction | CopilotLiquidityAction;
+  readonly network: CopilotNetwork | null; readonly deposits: readonly CopilotDeposit[]; readonly rangeUnit: (typeof COPILOT_V2_RANGE_UNITS)[number] | null;
+  readonly lower: string | null; readonly upper: string | null; readonly slippageBps: string | null;
+  /** V2, catalog pools only: the fee tier the user named (null: Flofi's default tier). Absent in V1 intents. */ readonly feeTier?: CopilotFeeTier | null };
+export type CopilotAction = CopilotSwapAction | CopilotBridgeAction | CopilotLendingAction | CopilotLiquidityAction | CopilotTransferAction;
 export type CopilotIntentV1 =
   | { readonly version: '1'; readonly kind: 'ACTION'; readonly action: CopilotAction }
   | { readonly version: '1'; readonly kind: 'COMPOSITION'; readonly actions: readonly CopilotAction[] }
@@ -126,6 +152,49 @@ function parseAction(value: unknown): CopilotAction {
   return fail();
 }
 
+/** V2 token: null, OTHER, or a symbol or token name as written (grammar only; FloFi resolves it). */
+const symbol = (value: unknown): CopilotAsset | null => value === null ? null : typeof value === 'string' && (value === 'OTHER' ||
+  (value.length <= COPILOT_LIMITS.maxValueLength && COPILOT_ASSET_REFERENCE.test(value))) ? value : fail();
+/**
+ * BUILD-BASE-001: the CopilotIntentV2 action — the V1 shapes over the V2 vocabulary (catalog networks and symbols), TRANSFER, and a
+ * liquidity fee tier and full range. A key a V1-shaped action omits (`feeTier`) stays omitted, so every V1-shaped action is still valid.
+ */
+function parseActionV2(value: unknown): CopilotAction {
+  const type = value && typeof value === 'object' ? (value as Record<string, unknown>).type : undefined;
+  const network = (v: unknown) => nullableOneOf(COPILOT_V2_NETWORKS, v);
+  if (type === 'SWAP') {
+    const v = exact(value, ['type', 'network', 'inputAsset', 'outputAsset', 'amount', 'slippageBps']);
+    return { type, network: network(v.network), inputAsset: symbol(v.inputAsset), outputAsset: symbol(v.outputAsset), amount: amount(v.amount), slippageBps: bps(v.slippageBps) };
+  }
+  if (type === 'TRANSFER') {
+    const v = exact(value, ['type', 'network', 'asset', 'amount', 'recipient']);
+    return { type, network: network(v.network), asset: symbol(v.asset), amount: amount(v.amount), recipient: address(v.recipient) };
+  }
+  if (type === 'BRIDGE') {
+    const v = exact(value, ['type', 'sourceNetwork', 'destinationNetwork', 'asset', 'amount', 'slippageBps', 'routing', 'recipient']);
+    return { type, sourceNetwork: network(v.sourceNetwork), destinationNetwork: network(v.destinationNetwork), asset: symbol(v.asset), amount: amount(v.amount),
+      slippageBps: bps(v.slippageBps), routing: nullableOneOf(COPILOT_ROUTING, v.routing), recipient: address(v.recipient) };
+  }
+  if ((COPILOT_LENDING_TYPES as readonly unknown[]).includes(type)) {
+    const v = exact(value, ['type', 'protocol', 'network', 'asset', 'amount', 'beneficiary']);
+    return { type: type as CopilotLendingType, protocol: oneOf(['AAVE_V3'] as const, v.protocol), network: network(v.network), asset: symbol(v.asset),
+      amount: amount(v.amount), beneficiary: address(v.beneficiary) };
+  }
+  if (type === 'LIQUIDITY') {
+    const keys = ['type', 'protocol', 'network', 'deposits', 'rangeUnit', 'lower', 'upper', 'slippageBps'];
+    const withTier = !!value && typeof value === 'object' && Object.hasOwn(value, 'feeTier');
+    const v = exact(value, withTier ? [...keys, 'feeTier'] : keys);
+    const deposits = list(v.deposits, 2).map(item => {
+      const d = exact(item, ['asset', 'maxAmount']);
+      return { asset: symbol(d.asset) ?? fail(), maxAmount: pattern(d.maxAmount, AMOUNT, false)! };
+    });
+    return { type, protocol: nullableOneOf(COPILOT_LIQUIDITY_PROTOCOLS, v.protocol), network: network(v.network), deposits,
+      rangeUnit: nullableOneOf(COPILOT_V2_RANGE_UNITS, v.rangeUnit), lower: pattern(v.lower, SIGNED_DECIMAL, true), upper: pattern(v.upper, SIGNED_DECIMAL, true),
+      slippageBps: bps(v.slippageBps), ...withTier ? { feeTier: nullableOneOf(COPILOT_FEE_TIERS, v.feeTier) } : {} };
+  }
+  return fail();
+}
+
 /** Strict validation of one intent. Throws `CopilotIntentError` with a closed code; never repairs or guesses. */
 export function parseCopilotIntent(value: unknown): CopilotIntentV1 {
   const kind = value && typeof value === 'object' ? (value as Record<string, unknown>).kind : undefined;
@@ -204,6 +273,32 @@ const actionSchemas = [
     lower: nullableString('Lower range bound exactly as written; null if not stated.'), upper: nullableString('Upper range bound exactly as written; null if not stated.'),
     slippageBps: nullableString(SLIPPAGE_TEXT) }),
 ];
+/** BUILD-BASE-001: the V2 action schemas (catalog networks and symbols, TRANSFER, fee tier and full range). */
+const NETWORK_V2_TEXT = 'Network the user named; BASE and ROBINHOOD (Robinhood Chain) are real-funds mainnets; ETHEREUM for Ethereum without "Sepolia" (including ' +
+  'Ethereum Mainnet); OTHER for any network not listed; null if not named.';
+const SYMBOL_TEXT = 'The token exactly as the user wrote it: its symbol (USDC, WETH, cbBTC, TSLA, USDG) or its token or company name (Tesla, Apple, ' +
+  'Coinbase Wrapped BTC), without words such as stock, shares, ações or token; ETH for ether. OTHER only if the user described a token without naming it ' +
+  '("that car company"); null if not named. Never translate a name into a symbol the user did not write: Flofi resolves names and symbols in the network\'s official catalog.';
+const nullableSymbol = nullableString(SYMBOL_TEXT);
+const actionSchemasV2 = [
+  object({ type: constant('SWAP'), network: nullableChoice(COPILOT_V2_NETWORKS, NETWORK_V2_TEXT), inputAsset: nullableSymbol, outputAsset: nullableSymbol,
+    amount: nullableString(AMOUNT_TEXT), slippageBps: nullableString(SLIPPAGE_TEXT) }),
+  object({ type: constant('TRANSFER'), network: nullableChoice(COPILOT_V2_NETWORKS, NETWORK_V2_TEXT), asset: nullableSymbol, amount: nullableString(AMOUNT_TEXT),
+    recipient: nullableString(ADDRESS_TEXT) }),
+  object({ type: constant('BRIDGE'), sourceNetwork: nullableChoice(COPILOT_V2_NETWORKS, NETWORK_V2_TEXT), destinationNetwork: nullableChoice(COPILOT_V2_NETWORKS, NETWORK_V2_TEXT),
+    asset: nullableSymbol, amount: nullableString(AMOUNT_TEXT), slippageBps: nullableString(SLIPPAGE_TEXT),
+    routing: nullableChoice(COPILOT_ROUTING, 'Provider preference only if the user named LI.FI or Across; null otherwise.'),
+    recipient: nullableString(ADDRESS_TEXT) }),
+  object({ type: choice(COPILOT_LENDING_TYPES, 'Aave V3 operation.'), protocol: constant('AAVE_V3'), network: nullableChoice(COPILOT_V2_NETWORKS, NETWORK_V2_TEXT),
+    asset: nullableSymbol, amount: nullableString(AMOUNT_TEXT), beneficiary: nullableString(ADDRESS_TEXT + ' Always null for WITHDRAW.') }),
+  object({ type: constant('LIQUIDITY'), protocol: nullableChoice(COPILOT_LIQUIDITY_PROTOCOLS, 'Pool protocol only if the user named it; null otherwise.'),
+    network: nullableChoice(COPILOT_V2_NETWORKS, NETWORK_V2_TEXT),
+    deposits: { type: 'array', description: 'Maximum amount of each token the user named (at most 2).', items: object({ asset: string(SYMBOL_TEXT), maxAmount: string(AMOUNT_TEXT) }) },
+    rangeUnit: nullableChoice(COPILOT_V2_RANGE_UNITS, 'PRICE for a price range (quote token per base token), TICK for tick indexes, FULL for "full range"; null if not stated.'),
+    lower: nullableString('Lower range bound exactly as written; null if not stated.'), upper: nullableString('Upper range bound exactly as written; null if not stated.'),
+    slippageBps: nullableString(SLIPPAGE_TEXT),
+    feeTier: nullableChoice(COPILOT_FEE_TIERS, 'Pool fee tier in percent only if the user named it (0.01, 0.05, 0.3 or 1); null otherwise.') }),
+];
 export const COPILOT_OUTPUT_SCHEMA = Object.freeze(object({ intent: { anyOf: [
   object({ version: constant('1'), kind: constant('ACTION'), action: { anyOf: actionSchemas } }),
   object({ version: constant('1'), kind: constant('COMPOSITION'),
@@ -216,6 +311,7 @@ export const COPILOT_OUTPUT_SCHEMA = Object.freeze(object({ intent: { anyOf: [
 /** BUILD-COPILOT-002: the V1 building blocks that CopilotIntentV2 reuses unchanged (same checks, same closed error codes). */
 export const COPILOT_V1_PARTS = Object.freeze({
   exact, list, oneOf, nullableOneOf, text, amount, bps, address, parseAction, signedDecimal: (value: unknown) => pattern(value, SIGNED_DECIMAL, true),
-  depositAmount: (value: unknown) => pattern(value, AMOUNT, false)!, fail,
-  schema: Object.freeze({ string, nullableString, constant, choice, nullableChoice, object, actions: actionSchemas }),
+  depositAmount: (value: unknown) => pattern(value, AMOUNT, false)!, fail, symbol, parseActionV2,
+  schema: Object.freeze({ string, nullableString, constant, choice, nullableChoice, object, actions: actionSchemas, actionsV2: actionSchemasV2, symbolText: SYMBOL_TEXT,
+    networkV2Text: NETWORK_V2_TEXT }),
 });

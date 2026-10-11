@@ -2256,7 +2256,7 @@
                     "type": "string"
                   },
                   "sourceNetwork": {
-                    "description": "Source network. base-sepolia pairs with arbitrum-sepolia (test USDC); base pairs with arbitrum-one (real funds); base or arbitrum-one USDC bridges into robinhood as USDG, and robinhood USDG bridges out to base or arbitrum-one as USDC (real funds).",
+                    "description": "Source network. base-sepolia pairs with arbitrum-sepolia (test USDC); base and arbitrum-one pair both ways (real funds); base or arbitrum-one USDC bridges into robinhood as USDG, and robinhood USDG bridges out to base or arbitrum-one as USDC (real funds).",
                     "anyOf": [
                       {
                         "const": "base-sepolia",
@@ -2369,7 +2369,7 @@
                     "type": "string"
                   },
                   "network": {
-                    "description": "EVM networks swap USDC/WETH on Uniswap v3; solana swaps SOL/USDC/USDT via Jupiter; solana-devnet swaps SOL/devUSDC on Orca; robinhood swaps official catalog assets (USDG, WETH, Stock Tokens) on Uniswap v3 (real funds).",
+                    "description": "base-sepolia and ethereum-sepolia swap USDC/WETH on Uniswap v3; solana swaps SOL/USDC/USDT via Jupiter; solana-devnet swaps SOL/devUSDC on Orca; base and robinhood swap any two official catalog assets on Uniswap v3 (real funds).",
                     "anyOf": [
                       {
                         "const": "base",
@@ -2429,9 +2429,9 @@
                         ]
                       },
                       {
-                        "pattern": "^[A-Z][A-Z0-9.]{0,15}$",
+                        "pattern": "^[A-Za-z][A-Za-z0-9.]{0,15}$",
                         "maxLength": 16,
-                        "description": "On robinhood: a symbol of the official Robinhood Chain catalog (USDG, WETH or a Stock Token such as TSLA).",
+                        "description": "On robinhood or base: a symbol of that network's official catalog (robinhood: USDG, WETH or a Stock Token such as TSLA; base: USDC, WETH or a token-list symbol such as cbBTC), matched case-insensitively.",
                         "type": "string"
                       }
                     ]
@@ -2468,9 +2468,9 @@
                         ]
                       },
                       {
-                        "pattern": "^[A-Z][A-Z0-9.]{0,15}$",
+                        "pattern": "^[A-Za-z][A-Za-z0-9.]{0,15}$",
                         "maxLength": 16,
-                        "description": "On robinhood: a symbol of the official Robinhood Chain catalog (USDG, WETH or a Stock Token such as TSLA).",
+                        "description": "On robinhood or base: a symbol of that network's official catalog (robinhood: USDG, WETH or a Stock Token such as TSLA; base: USDC, WETH or a token-list symbol such as cbBTC), matched case-insensitively.",
                         "type": "string"
                       }
                     ]
@@ -2510,7 +2510,7 @@
                     "type": "string"
                   },
                   "network": {
-                    "description": "Aave V3 network: base-sepolia lends test USDC, ethereum-sepolia lends test WBTC.",
+                    "description": "Aave V3 network: base-sepolia lends test USDC, ethereum-sepolia lends test WBTC, base lends USDC (real funds).",
                     "anyOf": [
                       {
                         "const": "base-sepolia",
@@ -2518,6 +2518,10 @@
                       },
                       {
                         "const": "ethereum-sepolia",
+                        "type": "string"
+                      },
+                      {
+                        "const": "base",
                         "type": "string"
                       }
                     ]
@@ -2571,7 +2575,7 @@
                     "type": "string"
                   },
                   "network": {
-                    "description": "Aave V3 network: base-sepolia lends test USDC, ethereum-sepolia lends test WBTC.",
+                    "description": "Aave V3 network: base-sepolia lends test USDC, ethereum-sepolia lends test WBTC, base lends USDC (real funds).",
                     "anyOf": [
                       {
                         "const": "base-sepolia",
@@ -2579,6 +2583,10 @@
                       },
                       {
                         "const": "ethereum-sepolia",
+                        "type": "string"
+                      },
+                      {
+                        "const": "base",
                         "type": "string"
                       }
                     ]
@@ -2632,7 +2640,7 @@
                     "type": "string"
                   },
                   "network": {
-                    "description": "Aave V3 network: base-sepolia lends test USDC, ethereum-sepolia lends test WBTC.",
+                    "description": "Aave V3 network: base-sepolia lends test USDC, ethereum-sepolia lends test WBTC, base lends USDC (real funds).",
                     "anyOf": [
                       {
                         "const": "base-sepolia",
@@ -2640,6 +2648,10 @@
                       },
                       {
                         "const": "ethereum-sepolia",
+                        "type": "string"
+                      },
+                      {
+                        "const": "base",
                         "type": "string"
                       }
                     ]
@@ -2692,7 +2704,7 @@
                     "type": "string"
                   },
                   "network": {
-                    "description": "Aave V3 network.",
+                    "description": "Aave V3 network (base: real funds).",
                     "anyOf": [
                       {
                         "const": "base-sepolia",
@@ -2700,6 +2712,10 @@
                       },
                       {
                         "const": "ethereum-sepolia",
+                        "type": "string"
+                      },
+                      {
+                        "const": "base",
                         "type": "string"
                       }
                     ]
@@ -2745,7 +2761,7 @@
                     "type": "string"
                   },
                   "network": {
-                    "description": "Uniswap v3 USDC/WETH on base-sepolia or ethereum-sepolia; Orca SOL/devUSDC on solana-devnet; on robinhood, Uniswap v3 on any two official catalog assets (e.g. USDG and a Stock Token) at feeTier (real funds).",
+                    "description": "Uniswap v3 USDC/WETH on base-sepolia or ethereum-sepolia; Orca SOL/devUSDC on solana-devnet; on robinhood or base, Uniswap v3 on any two official catalog assets (e.g. USDG and a Stock Token; USDC and cbBTC) at feeTier (real funds).",
                     "anyOf": [
                       {
                         "const": "base-sepolia",
@@ -2762,13 +2778,17 @@
                       {
                         "const": "robinhood",
                         "type": "string"
+                      },
+                      {
+                        "const": "base",
+                        "type": "string"
                       }
                     ]
                   },
                   "maxAmounts": {
                     "minProperties": 2,
                     "maxProperties": 2,
-                    "description": "Maximum deposit of each pool asset (limits, not amounts to spend); exactly the pool's two assets by symbol: USDC and WETH, SOL and devUSDC, or two official catalog symbols on robinhood.",
+                    "description": "Maximum deposit of each pool asset (limits, not amounts to spend); exactly the pool's two assets by symbol: USDC and WETH, SOL and devUSDC, or two official catalog symbols on robinhood or base.",
                     "type": "object",
                     "patternProperties": {
                       "^[A-Za-z][A-Za-z0-9.]{0,15}$": {
@@ -2823,7 +2843,7 @@
                         ],
                         "properties": {
                           "unit": {
-                            "description": "robinhood only: the widest usable range of the fee tier.",
+                            "description": "robinhood and base only: the widest usable range of the fee tier.",
                             "const": "full",
                             "type": "string"
                           }
@@ -2832,7 +2852,7 @@
                     ]
                   },
                   "feeTier": {
-                    "description": "robinhood only: the Uniswap v3 fee tier in hundredths of a basis point (3000 = 0.3%). Default 3000.",
+                    "description": "robinhood and base only: the Uniswap v3 fee tier in hundredths of a basis point (3000 = 0.3%). Default 3000.",
                     "anyOf": [
                       {
                         "const": 100,
@@ -2944,21 +2964,29 @@
                     "type": "string"
                   },
                   "network": {
-                    "description": "Robinhood Chain mainnet (real funds).",
-                    "const": "robinhood",
-                    "type": "string"
+                    "description": "Robinhood Chain or Base mainnet (real funds).",
+                    "anyOf": [
+                      {
+                        "const": "robinhood",
+                        "type": "string"
+                      },
+                      {
+                        "const": "base",
+                        "type": "string"
+                      }
+                    ]
                   },
                   "asset": {
-                    "description": "ETH, or a symbol of the official Robinhood Chain catalog (USDG, WETH, a Stock Token).",
+                    "description": "ETH, or a symbol of the network's official catalog (robinhood: USDG, WETH, a Stock Token; base: USDC, WETH, a token-list symbol).",
                     "anyOf": [
                       {
                         "const": "ETH",
                         "type": "string"
                       },
                       {
-                        "pattern": "^[A-Z][A-Z0-9.]{0,15}$",
+                        "pattern": "^[A-Za-z][A-Za-z0-9.]{0,15}$",
                         "maxLength": 16,
-                        "description": "On robinhood: a symbol of the official Robinhood Chain catalog (USDG, WETH or a Stock Token such as TSLA).",
+                        "description": "On robinhood or base: a symbol of that network's official catalog (robinhood: USDG, WETH or a Stock Token such as TSLA; base: USDC, WETH or a token-list symbol such as cbBTC), matched case-insensitively.",
                         "type": "string"
                       }
                     ]
@@ -3019,7 +3047,7 @@
                               "type": "string"
                             },
                             "sourceNetwork": {
-                              "description": "Source network. base-sepolia pairs with arbitrum-sepolia (test USDC); base pairs with arbitrum-one (real funds); base or arbitrum-one USDC bridges into robinhood as USDG, and robinhood USDG bridges out to base or arbitrum-one as USDC (real funds).",
+                              "description": "Source network. base-sepolia pairs with arbitrum-sepolia (test USDC); base and arbitrum-one pair both ways (real funds); base or arbitrum-one USDC bridges into robinhood as USDG, and robinhood USDG bridges out to base or arbitrum-one as USDC (real funds).",
                               "anyOf": [
                                 {
                                   "const": "base-sepolia",
@@ -3132,7 +3160,7 @@
                               "type": "string"
                             },
                             "network": {
-                              "description": "EVM networks swap USDC/WETH on Uniswap v3; solana swaps SOL/USDC/USDT via Jupiter; solana-devnet swaps SOL/devUSDC on Orca; robinhood swaps official catalog assets (USDG, WETH, Stock Tokens) on Uniswap v3 (real funds).",
+                              "description": "base-sepolia and ethereum-sepolia swap USDC/WETH on Uniswap v3; solana swaps SOL/USDC/USDT via Jupiter; solana-devnet swaps SOL/devUSDC on Orca; base and robinhood swap any two official catalog assets on Uniswap v3 (real funds).",
                               "anyOf": [
                                 {
                                   "const": "base",
@@ -3192,9 +3220,9 @@
                                   ]
                                 },
                                 {
-                                  "pattern": "^[A-Z][A-Z0-9.]{0,15}$",
+                                  "pattern": "^[A-Za-z][A-Za-z0-9.]{0,15}$",
                                   "maxLength": 16,
-                                  "description": "On robinhood: a symbol of the official Robinhood Chain catalog (USDG, WETH or a Stock Token such as TSLA).",
+                                  "description": "On robinhood or base: a symbol of that network's official catalog (robinhood: USDG, WETH or a Stock Token such as TSLA; base: USDC, WETH or a token-list symbol such as cbBTC), matched case-insensitively.",
                                   "type": "string"
                                 }
                               ]
@@ -3231,9 +3259,9 @@
                                   ]
                                 },
                                 {
-                                  "pattern": "^[A-Z][A-Z0-9.]{0,15}$",
+                                  "pattern": "^[A-Za-z][A-Za-z0-9.]{0,15}$",
                                   "maxLength": 16,
-                                  "description": "On robinhood: a symbol of the official Robinhood Chain catalog (USDG, WETH or a Stock Token such as TSLA).",
+                                  "description": "On robinhood or base: a symbol of that network's official catalog (robinhood: USDG, WETH or a Stock Token such as TSLA; base: USDC, WETH or a token-list symbol such as cbBTC), matched case-insensitively.",
                                   "type": "string"
                                 }
                               ]
@@ -3273,7 +3301,7 @@
                               "type": "string"
                             },
                             "network": {
-                              "description": "Aave V3 network: base-sepolia lends test USDC, ethereum-sepolia lends test WBTC.",
+                              "description": "Aave V3 network: base-sepolia lends test USDC, ethereum-sepolia lends test WBTC, base lends USDC (real funds).",
                               "anyOf": [
                                 {
                                   "const": "base-sepolia",
@@ -3281,6 +3309,10 @@
                                 },
                                 {
                                   "const": "ethereum-sepolia",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "base",
                                   "type": "string"
                                 }
                               ]
@@ -3334,7 +3366,7 @@
                               "type": "string"
                             },
                             "network": {
-                              "description": "Aave V3 network: base-sepolia lends test USDC, ethereum-sepolia lends test WBTC.",
+                              "description": "Aave V3 network: base-sepolia lends test USDC, ethereum-sepolia lends test WBTC, base lends USDC (real funds).",
                               "anyOf": [
                                 {
                                   "const": "base-sepolia",
@@ -3342,6 +3374,10 @@
                                 },
                                 {
                                   "const": "ethereum-sepolia",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "base",
                                   "type": "string"
                                 }
                               ]
@@ -3395,7 +3431,7 @@
                               "type": "string"
                             },
                             "network": {
-                              "description": "Aave V3 network: base-sepolia lends test USDC, ethereum-sepolia lends test WBTC.",
+                              "description": "Aave V3 network: base-sepolia lends test USDC, ethereum-sepolia lends test WBTC, base lends USDC (real funds).",
                               "anyOf": [
                                 {
                                   "const": "base-sepolia",
@@ -3403,6 +3439,10 @@
                                 },
                                 {
                                   "const": "ethereum-sepolia",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "base",
                                   "type": "string"
                                 }
                               ]
@@ -3455,7 +3495,7 @@
                               "type": "string"
                             },
                             "network": {
-                              "description": "Aave V3 network.",
+                              "description": "Aave V3 network (base: real funds).",
                               "anyOf": [
                                 {
                                   "const": "base-sepolia",
@@ -3463,6 +3503,10 @@
                                 },
                                 {
                                   "const": "ethereum-sepolia",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "base",
                                   "type": "string"
                                 }
                               ]
@@ -3508,7 +3552,7 @@
                               "type": "string"
                             },
                             "network": {
-                              "description": "Uniswap v3 USDC/WETH on base-sepolia or ethereum-sepolia; Orca SOL/devUSDC on solana-devnet; on robinhood, Uniswap v3 on any two official catalog assets (e.g. USDG and a Stock Token) at feeTier (real funds).",
+                              "description": "Uniswap v3 USDC/WETH on base-sepolia or ethereum-sepolia; Orca SOL/devUSDC on solana-devnet; on robinhood or base, Uniswap v3 on any two official catalog assets (e.g. USDG and a Stock Token; USDC and cbBTC) at feeTier (real funds).",
                               "anyOf": [
                                 {
                                   "const": "base-sepolia",
@@ -3525,13 +3569,17 @@
                                 {
                                   "const": "robinhood",
                                   "type": "string"
+                                },
+                                {
+                                  "const": "base",
+                                  "type": "string"
                                 }
                               ]
                             },
                             "maxAmounts": {
                               "minProperties": 2,
                               "maxProperties": 2,
-                              "description": "Maximum deposit of each pool asset (limits, not amounts to spend); exactly the pool's two assets by symbol: USDC and WETH, SOL and devUSDC, or two official catalog symbols on robinhood.",
+                              "description": "Maximum deposit of each pool asset (limits, not amounts to spend); exactly the pool's two assets by symbol: USDC and WETH, SOL and devUSDC, or two official catalog symbols on robinhood or base.",
                               "type": "object",
                               "patternProperties": {
                                 "^[A-Za-z][A-Za-z0-9.]{0,15}$": {
@@ -3586,7 +3634,7 @@
                                   ],
                                   "properties": {
                                     "unit": {
-                                      "description": "robinhood only: the widest usable range of the fee tier.",
+                                      "description": "robinhood and base only: the widest usable range of the fee tier.",
                                       "const": "full",
                                       "type": "string"
                                     }
@@ -3595,7 +3643,7 @@
                               ]
                             },
                             "feeTier": {
-                              "description": "robinhood only: the Uniswap v3 fee tier in hundredths of a basis point (3000 = 0.3%). Default 3000.",
+                              "description": "robinhood and base only: the Uniswap v3 fee tier in hundredths of a basis point (3000 = 0.3%). Default 3000.",
                               "anyOf": [
                                 {
                                   "const": 100,
@@ -3707,21 +3755,29 @@
                               "type": "string"
                             },
                             "network": {
-                              "description": "Robinhood Chain mainnet (real funds).",
-                              "const": "robinhood",
-                              "type": "string"
+                              "description": "Robinhood Chain or Base mainnet (real funds).",
+                              "anyOf": [
+                                {
+                                  "const": "robinhood",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "base",
+                                  "type": "string"
+                                }
+                              ]
                             },
                             "asset": {
-                              "description": "ETH, or a symbol of the official Robinhood Chain catalog (USDG, WETH, a Stock Token).",
+                              "description": "ETH, or a symbol of the network's official catalog (robinhood: USDG, WETH, a Stock Token; base: USDC, WETH, a token-list symbol).",
                               "anyOf": [
                                 {
                                   "const": "ETH",
                                   "type": "string"
                                 },
                                 {
-                                  "pattern": "^[A-Z][A-Z0-9.]{0,15}$",
+                                  "pattern": "^[A-Za-z][A-Za-z0-9.]{0,15}$",
                                   "maxLength": 16,
-                                  "description": "On robinhood: a symbol of the official Robinhood Chain catalog (USDG, WETH or a Stock Token such as TSLA).",
+                                  "description": "On robinhood or base: a symbol of that network's official catalog (robinhood: USDG, WETH or a Stock Token such as TSLA; base: USDC, WETH or a token-list symbol such as cbBTC), matched case-insensitively.",
                                   "type": "string"
                                 }
                               ]

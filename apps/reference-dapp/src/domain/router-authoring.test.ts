@@ -4,7 +4,7 @@ import { createBaseSepoliaReviewContext } from '@defi-workflow-engine/reference-
 import { readRouterBridgeNode, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { commandIsValid, parseLocalCommand, summarize, type Command } from './commands';
 import { editorReducer, initialEditor } from './editor';
-import { createRouterNode, parseRouterChat, routerChainChoices, routerDetails, routerInputForNetworks, routerInputOf, routerNetworksOf, routerTokensOf,
+import { createRouterNode, parseRouterChat, routerChainChoices, routerDetails, routerDisabledCode, routerInputForNetworks, routerInputOf, routerNetworksOf, routerTokensOf,
   type RouterBridgeInput } from './router-authoring';
 import { bridgePairLabel } from './canvas-action-setup';
 
@@ -66,7 +66,8 @@ describe('BUILD-RH-002 Robinhood Chain bridge routes', () => {
     expect(createRouterNode('n', routerInputOf(routerDetails(node)!))).toEqual(node);
   });
   it('refuses a token that is not the pair\'s source asset, unsupported directions and the 100-per-bridge cap', () => {
-    for (const text of ['Bridge 5 USDC from Robinhood to Base', 'Bridge 5 USDG from Base to Robinhood', 'Bridge 5 USDC from Arbitrum to Base',
+    // BUILD-BASE-001: 'Bridge 5 USDC from Arbitrum to Base' is a route now (see the Base route test).
+    for (const text of ['Bridge 5 USDC from Robinhood to Base', 'Bridge 5 USDG from Base to Robinhood', 'Bridge 5 USDG from Arbitrum to Base',
       'Bridge 5 USDC from Robinhood to Robinhood', 'Bridge 5 USDG from Base Sepolia to Robinhood']) expect(parseRouterChat(text), text).toBeNull();
     const base: RouterBridgeInput = { source: 'Robinhood Chain', destination: 'Base', token: 'USDG', amount: '5', recipient: '', slippage: '50', routing: 'AUTO' };
     expect(() => createRouterNode('n', { ...base, token: 'USDC' })).toThrow('ROUTER_PAIR_UNSUPPORTED');
@@ -76,17 +77,27 @@ describe('BUILD-RH-002 Robinhood Chain bridge routes', () => {
     expect(readRouterBridgeNode(createRouterNode('n', { ...base, amount: '100' })).amount).toBe('100000000');
   });
   it('Canvas choices: mainnet offers the Robinhood routes beside Base → Arbitrum One; the token follows the chosen pair', () => {
-    expect(routerNetworksOf('mainnet')).toEqual(['mainnet', 'base-to-robinhood', 'robinhood-to-base', 'arbitrum-to-robinhood', 'robinhood-to-arbitrum']);
+    // BUILD-BASE-001 (intentional change): Arbitrum One → Base joins the mainnet routes.
+    expect(routerNetworksOf('mainnet')).toEqual(['mainnet', 'base-to-robinhood', 'robinhood-to-base', 'arbitrum-to-robinhood', 'robinhood-to-arbitrum', 'arbitrum-to-base']);
     expect(routerNetworksOf('testnet')).toEqual(['testnet']);
     expect(routerChainChoices('mainnet')).toEqual({ sources: ['Base', 'Robinhood Chain', 'Arbitrum'], destinations: ['Arbitrum', 'Robinhood Chain', 'Base'] });
     expect(routerChainChoices('mainnet', 'Base').destinations).toEqual(['Arbitrum', 'Robinhood Chain']);
-    expect(routerChainChoices('mainnet', 'Arbitrum').destinations).toEqual(['Robinhood Chain']);
+    expect(routerChainChoices('mainnet', 'Arbitrum').destinations).toEqual(['Robinhood Chain', 'Base']);
     expect(routerChainChoices('mainnet', 'Robinhood Chain').destinations).toEqual(['Base', 'Arbitrum']);
     expect(routerChainChoices('testnet')).toEqual({ sources: ['Base Sepolia'], destinations: ['Arbitrum Sepolia'] });
     expect(routerTokensOf({ source: 'Robinhood Chain', destination: 'Base' })).toEqual({ token: 'USDG', destinationToken: 'USDC' });
-    expect(routerTokensOf({ source: 'Arbitrum', destination: 'Base' })).toBeNull();
+    // BUILD-BASE-001 (intentional change): Arbitrum One → Base is a USDC route.
+    expect(routerTokensOf({ source: 'Arbitrum', destination: 'Base' })).toEqual({ token: 'USDC', destinationToken: 'USDC' });
     expect(routerInputForNetworks(canvasInput, { source: 'Robinhood Chain', destination: 'Arbitrum' })).toMatchObject({ source: 'Robinhood Chain', destination: 'Arbitrum', token: 'USDG' });
     expect(routerInputForNetworks(canvasInput, { source: 'Arbitrum', destination: 'Base' })).toMatchObject({ token: 'USDC' });
     expect([bridgePairLabel({ source: 'Base', destination: 'Robinhood Chain' }), bridgePairLabel({ source: 'Base', destination: 'Arbitrum' })]).toEqual(['USDC → USDG', 'USDC → USDC']);
+  });
+  // BUILD-BASE-001: the panel reports the code the server action refuses with (`app/router-action.ts`): Arbitrum One → Base is behind the
+  // Router's own gate, not the Robinhood Chain gate.
+  it('names the deployment gate of each route as the server action does', () => {
+    expect(Object.fromEntries([...routerNetworksOf('mainnet'), ...routerNetworksOf('testnet')].map(network => [network, routerDisabledCode(network)]))).toEqual({
+      mainnet: 'ROUTER_NOT_ENABLED', testnet: 'ROUTER_TESTNET_NOT_ENABLED', 'base-to-robinhood': 'ROBINHOOD_MAINNET_NOT_ENABLED',
+      'robinhood-to-base': 'ROBINHOOD_MAINNET_NOT_ENABLED', 'arbitrum-to-robinhood': 'ROBINHOOD_MAINNET_NOT_ENABLED', 'robinhood-to-arbitrum': 'ROBINHOOD_MAINNET_NOT_ENABLED',
+      'arbitrum-to-base': 'ROUTER_NOT_ENABLED' });
   });
 });

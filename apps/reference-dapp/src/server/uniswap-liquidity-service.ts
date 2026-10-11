@@ -11,13 +11,17 @@
  * pinned factory); both tokens must be official catalog assets, Stock Tokens are verified as the official beacon proxy with the registry's
  * uid and multiplier (bound into Review), and runs are `rhlp-` with PUBLIC_MAINNET provenance (MAINNET_EXECUTED evidence) or MOCKED.
  *
- * Run = append-only snapshot log `unilp-<32 hex>.jsonl` (`rhlp-` on Robinhood Chain). Steps: exact finite approval of token0 and/or token1 to the
+ * BUILD-BASE-001: Base mainnet (8453, real funds) is a second catalog network on the same runtime: pools of any two Base catalog ERC-20s at a
+ * standard tier (the CREATE2 pool of Base's pinned factory), tokens verified on chain against the Base catalog, the OP Stack L1 fee bounded
+ * through the GasPriceOracle, and `balp-` runs.
+ *
+ * Run = append-only snapshot log `unilp-<32 hex>.jsonl` (`rhlp-` on Robinhood Chain, `balp-` on Base). Steps: exact finite approval of token0 and/or token1 to the
  * Position Manager when the on-chain allowance is short, then one mint whose NFT recipient is the owner. Each step is
  * its own wallet request; a confirmed approval requires a fresh simulation and Review before the mint.
  */
 import { createHash, randomBytes } from 'node:crypto';
-import { catalogAsset, resolveWorkflowCapability, robinhoodLiquidityPool, UNISWAP_V3_BASE_SEPOLIA_LIQUIDITY as BASE_PROFILE, UNISWAP_V3_ROBINHOOD as ROBINHOOD,
-  uniswapLiquidityProfile, type AssetCatalog, type CanonicalAsset, type UniswapPoolProfile } from '@defi-workflow-engine/action-registry';
+import { catalogAsset, catalogPoolOn, resolveWorkflowCapability, UNISWAP_V3_BASE_SEPOLIA_LIQUIDITY as BASE_PROFILE, UNISWAP_V3_ROBINHOOD as ROBINHOOD,
+  uniswapCatalogDeployment, uniswapLiquidityProfile, type AssetCatalog, type CanonicalAsset, type UniswapPoolProfile } from '@defi-workflow-engine/action-registry';
 import { createBaseSepoliaReviewContext, validateAuthoringWorkflow, validateUniswapLiquidityWorkflow } from '@defi-workflow-engine/reference-linter';
 import { UNISWAP_SELECTORS as SEL, UNISWAP_TOPICS as TOPIC, decodeUniswapApprove, decodeUniswapMint, decodeUniswapMintResult, decodeUniswapPosition,
   encodeUniswapApprove, encodeUniswapMint, uniswapComposition, uniswapMinimum, uniswapQuotePriceAtSqrt, uniswapQuotePriceAtTick, uniswapRangeState,
@@ -25,7 +29,8 @@ import { UNISWAP_SELECTORS as SEL, UNISWAP_TOPICS as TOPIC, decodeUniswapApprove
 import { hashArtifactBytes, readConcentratedLiquidity, type EvidenceBundle, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { validateArtifact } from '@defi-workflow-engine/workflow-contracts/schemas';
 import { utf8, type ExecutionStorage } from '@defi-workflow-engine/reference-executor';
-import { verifyCatalogToken, verifyOwnerSubmission, type Rpc, type StockQuoteState } from './public-testnet-service.ts';
+import { catalogTokenPolicy, verifyCatalogToken, verifyOwnerSubmission, type Rpc, type StockQuoteState } from './public-testnet-service.ts';
+import { swapProfile, type CatalogSwapProfile } from '../domain/public-testnet-swap.ts';
 
 export type UniswapLiquidityStep = 'APPROVE_TOKEN0' | 'APPROVE_TOKEN1' | 'MINT';
 export type UniswapAttemptState = 'PREPARED' | 'CANCELLED' | 'SUBMITTING' | 'SUBMISSION_RESULT_UNKNOWN' | 'NOT_FOUND' | 'PENDING' | 'CONFIRMED' |
@@ -33,7 +38,7 @@ export type UniswapAttemptState = 'PREPARED' | 'CANCELLED' | 'SUBMITTING' | 'SUB
 export type UniswapTx = { readonly chainId: string; readonly from: string; readonly to: string; readonly data: string; readonly value: '0x0';
   readonly gas: string; readonly maxFeePerGas: string; readonly maxPriorityFeePerGas: string };
 export type UniswapReviewCall = { readonly step: UniswapLiquidityStep; readonly to: string; readonly data: string; readonly gasUsed: string; readonly gasLimit: string };
-/** `officialId`: Robinhood Chain only — the token's official registry identity (null for USDG and WETH). */
+/** `officialId`: catalog networks only — the token's official issuer identity (a Robinhood Stock Token), else null (USDG, WETH, Base tokens). */
 export type UniswapTokenView = { readonly symbol: string; readonly address: string; readonly decimals: number; readonly officialId?: string | null };
 export type UniswapLiquidityReview = {
   readonly format: 'flofi.uniswap-liquidity-review.v1'; readonly commitment: string;
@@ -94,7 +99,7 @@ export type UniswapWalletDiagnostic = { invoked: boolean; calls: { method: strin
   code: string; rejectionCode?: number };
 export type UniswapLiquidityPrice = { readonly sqrtPriceX96: string; readonly tick: number; readonly price: string; readonly blockNumber: number };
 
-export const UNISWAP_LIQUIDITY_RUN_ID = /^(?:unilp|rhlp)-[a-f0-9]{32}$/;
+export const UNISWAP_LIQUIDITY_RUN_ID = /^(?:unilp|rhlp|balp)-[a-f0-9]{32}$/;
 const ADDRESS = /^0x[0-9a-f]{40}$/, HASH = /^0x[0-9a-f]{64}$/;
 const ACTIVE: readonly UniswapAttemptState[] = ['PREPARED', 'SUBMITTING', 'SUBMISSION_RESULT_UNKNOWN', 'PENDING'];
 export const UNISWAP_OBSERVABLE: readonly UniswapAttemptState[] = ['SUBMITTING', 'SUBMISSION_RESULT_UNKNOWN', 'PENDING'];
@@ -103,19 +108,24 @@ const REFUSALS = [4001, 4100, 4200];
 /** An approval whose nonce was never consumed and nothing is queued is abandoned after this long. */
 const APPROVAL_ABANDON_MS = 15 * 60_000;
 /**
- * The run's reviewed pool: the chain's fixed profile, or (Robinhood Chain) the CREATE2 pool of its reviewed pair and fee tier. A persisted
- * review whose pool does not reproduce is corrupt.
+ * The run's reviewed pool: the chain's fixed profile, or (a catalog network: Robinhood Chain, Base) the CREATE2 pool of its reviewed pair and
+ * fee tier. A persisted review whose pool does not reproduce is corrupt.
  */
 function profileOfReview(review: UniswapLiquidityReview): UniswapPoolProfile {
   let profile: UniswapPoolProfile | null = uniswapLiquidityProfile(review.chainId);
-  if (!profile && review.chainId === ROBINHOOD.chainId) {
-    try { profile = robinhoodLiquidityPool(review.token0, review.token1, review.pool.fee); } catch { profile = null; }
+  if (!profile && uniswapCatalogDeployment(review.chainId)) {
+    try { profile = catalogPoolOn(review.chainId, review.token0, review.token1, review.pool.fee); } catch { profile = null; }
   }
   if (!profile || profile.pool !== review.contracts.pool || profile.token0.address !== review.token0.address) fail('UNISWAP_LIQUIDITY_STORE_CORRUPT');
   return profile;
 }
-/** Testnet profiles run as `unilp-` with PUBLIC_TESTNET (or MOCKED) provenance; Robinhood Chain as `rhlp-` with PUBLIC_MAINNET (or MOCKED). */
-const robinhoodRun = (id: string) => id.startsWith('rhlp-');
+/**
+ * Testnet profiles run as `unilp-` with PUBLIC_TESTNET (or MOCKED) provenance; each catalog network has its own mainnet namespace with
+ * PUBLIC_MAINNET (or MOCKED): `rhlp-` on Robinhood Chain, `balp-` (BUILD-BASE-001) on Base. A namespace never holds another chain's run.
+ */
+const CATALOG_RUN_PREFIX: Readonly<Record<number, 'rhlp' | 'balp'>> = Object.freeze({ [ROBINHOOD.chainId]: 'rhlp', 8453: 'balp' });
+const catalogRun = (id: string) => id.startsWith('rhlp-') || id.startsWith('balp-');
+const runChainMatches = (id: string, chainId: number) => catalogRun(id) ? id.startsWith(`${CATALOG_RUN_PREFIX[chainId]}-`) : !uniswapCatalogDeployment(chainId);
 
 function fail(code: string): never { throw new Error(code); }
 function isObject(value: unknown): value is Record<string, unknown> { return !!value && typeof value === 'object' && !Array.isArray(value); }
@@ -174,7 +184,7 @@ export function validateUniswapLiquidityLog(bytes: Uint8Array): void {
     try { run = JSON.parse(line) as UniswapLiquidityRecord; } catch { fail('UNISWAP_LIQUIDITY_STORE_CORRUPT'); }
     if (!isObject(run) || run.format !== 'flofi.uniswap-liquidity-run.v1' || !UNISWAP_LIQUIDITY_RUN_ID.test(String(run.id)) ||
         !['PUBLIC_TESTNET', 'PUBLIC_MAINNET', 'MOCKED'].includes(run.provenance) || !ADDRESS.test(String(run.owner)) || !isObject(run.workflow) || !isObject(run.review) ||
-        run.provenance === (robinhoodRun(run.id) ? 'PUBLIC_TESTNET' : 'PUBLIC_MAINNET') || robinhoodRun(run.id) !== (run.review.chainId === ROBINHOOD.chainId) ||
+        run.provenance === (catalogRun(run.id) ? 'PUBLIC_TESTNET' : 'PUBLIC_MAINNET') || !runChainMatches(run.id, run.review.chainId) ||
         run.review.owner !== run.owner || run.review.recipient !== run.owner || !profileOfReview(run.review) ||
         run.review.commitment !== reviewCommitment(run.review) || (run.authorization !== null && run.authorization !== run.review.commitment) ||
         !Array.isArray(run.attempts) || run.attempts.length > 16 || !['PENDING', 'RECONCILED', 'DIVERGENT'].includes(run.verdict) ||
@@ -217,21 +227,27 @@ export function uniswapNeedsObservation(value: unknown): boolean {
 
 /**
  * `rpc` is the Base Sepolia read client; `rpcs` adds one chain-bound read client per further liquidity profile (CAIP-2 keyed).
- * BUILD-RH-002: with `catalog`, the service is the Robinhood Chain liquidity runtime (only chain 4663, `rhlp-` runs): pools come from the
- * node's pair and fee tier, and both tokens must resolve in the freshly validated official catalog. Without it, only the testnet profiles.
+ * BUILD-RH-002: with `catalog`, the service is one catalog network's liquidity runtime — Robinhood Chain by default (only chain 4663,
+ * `rhlp-` runs), or BUILD-BASE-001 Base (`catalog.chain` 8453, `balp-` runs): pools come from the node's pair and fee tier, and both tokens
+ * must resolve in that network's freshly validated catalog. Without it, only the testnet profiles.
  */
 export function createUniswapLiquidityService(input: { readonly storage: ExecutionStorage; readonly rpc: Rpc; readonly rpcs?: Readonly<Partial<Record<string, Rpc>>>;
   readonly provenance: UniswapProvenance; readonly executionEnabled?: boolean; readonly now?: () => Date;
   /** MOCKED harness only: the synthetic chain's code pins. A public run always uses the profile's verified pins. */
   readonly mockedCodePins?: Readonly<Record<'factory' | 'positionManager' | 'pool', string>>;
   readonly catalog?: { readonly catalogFor: (chain: string) => Promise<AssetCatalog>;
+    /** The catalog network this instance serves (default Robinhood Chain). */ readonly chain?: string;
     /** MOCKED harness only: synthetic code pins of the catalog's base assets and Stock Token proxy. */
-    readonly codePins?: Partial<Record<'weth' | 'usdg' | 'stockTokenProxy', string>> } }) {
+    readonly codePins?: Partial<Record<string, string>> } }) {
   const { provenance } = input, { log, leases } = input.storage;
   if ((input.mockedCodePins || input.catalog?.codePins) && provenance !== 'MOCKED') fail('UNISWAP_CODE_PINS_MOCKED_ONLY');
   // A Robinhood Chain service is never labelled as a testnet, and a testnet service never as mainnet.
   if (provenance === (input.catalog ? 'PUBLIC_TESTNET' : 'PUBLIC_MAINNET')) fail('UNISWAP_PROVENANCE_INVALID');
-  const idPrefix = input.catalog ? 'rhlp' : 'unilp';
+  const servedChain = input.catalog?.chain ?? ROBINHOOD.chain, served = input.catalog ? swapProfile(servedChain) : null;
+  if (input.catalog && (served?.kind !== 'CATALOG' || !uniswapCatalogDeployment(servedChain))) fail('UNISWAP_LIQUIDITY_NETWORK_UNSUPPORTED');
+  const idPrefix = input.catalog ? CATALOG_RUN_PREFIX[served!.chainId]! : 'unilp';
+  // The on-chain token policy of the served catalog network (pinned base assets; Stock Tokens on Robinhood Chain; listed tokens on Base).
+  const tokenPolicy = input.catalog ? catalogTokenPolicy(served as CatalogSwapProfile, input.catalog.codePins) : null;
   const now = input.now ?? (() => new Date());
   const executionEnabled = input.executionEnabled !== false;
   const runName = (id: string) => { if (!UNISWAP_LIQUIDITY_RUN_ID.test(id) || !id.startsWith(idPrefix + '-')) fail('UNISWAP_LIQUIDITY_RUN_ID_INVALID'); return id + '.jsonl'; };
@@ -258,7 +274,7 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
   /** Every chain-specific helper of one profile, bound to that profile's own read client. */
   function bind(profile: UniswapPoolProfile, rpc: Rpc) {
   const pins = input.mockedCodePins ?? profile.codeSha256;
-  const t0 = profile.token0, t1 = profile.token1, catalogPool = profile.chainId === ROBINHOOD.chainId;
+  const t0 = profile.token0, t1 = profile.token1, catalogPool = uniswapCatalogDeployment(profile.chainId) !== null;
   const view = (token: UniswapPoolProfile['token0'], asset: CanonicalAsset | undefined): UniswapTokenView =>
     ({ symbol: token.symbol, address: token.address, decimals: token.decimals, ...catalogPool ? { officialId: asset?.stock?.officialId ?? null } : {} });
   async function ethCall(to: string, data: string, at: string): Promise<string> { return hex(await rpc('eth_call', [{ to, data }, at])); }
@@ -296,10 +312,11 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
       fail('UNISWAP_POOL_MISMATCH');
     if (wordAt(await ethCall(t0.address, SEL.decimals, at), 0) !== BigInt(t0.decimals) || wordAt(await ethCall(t1.address, SEL.decimals, at), 0) !== BigInt(t1.decimals))
       fail('UNISWAP_TOKEN_MISMATCH');
-    // BUILD-RH-002: both tokens are official catalog assets, verified on chain (pinned base assets; Stock Tokens by beacon, uid and multiplier).
+    // BUILD-RH-002: both tokens are catalog assets, verified on chain (pinned base assets; Stock Tokens by beacon, uid and multiplier;
+    // BUILD-BASE-001 listed Base tokens by code and decimals()).
     const stocks: StockQuoteState[] = [];
     if (assets) for (const [side, asset] of [['token0', assets.token0], ['token1', assets.token1]] as const) {
-      const stock = await verifyCatalogToken(rpc, ROBINHOOD, { ...ROBINHOOD.codeSha256, ...input.catalog?.codePins }, asset, side, at, block.timestamp, profile.reviewTtlSeconds, now);
+      const stock = await verifyCatalogToken(rpc, tokenPolicy ?? fail('ASSET_CATALOG_UNAVAILABLE'), asset, side, at, block.timestamp, profile.reviewTtlSeconds, now);
       if (stock) stocks.push(stock);
     }
     const slot0 = await ethCall(profile.pool, SEL.slot0, at);
@@ -610,10 +627,10 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
     runtimes.set(key, created);
     return created;
   }
-  /** BUILD-RH-002: both pool tokens as official catalog ERC-20s with their authored decimals (and, for a stored Review, the same identity). */
+  /** BUILD-RH-002: both pool tokens as catalog ERC-20s of the served network with their authored decimals (and, for a stored Review, the same identity). */
   async function catalogAssets(token0: { address: string; decimals: number; officialId?: string | null }, token1: typeof token0): Promise<PoolAssets> {
-    const catalog = await input.catalog!.catalogFor(ROBINHOOD.chain);
-    if (catalog.chain !== ROBINHOOD.chain) fail('CATALOG_NETWORK_MISMATCH');
+    const catalog = await input.catalog!.catalogFor(servedChain);
+    if (catalog.chain !== servedChain) fail('CATALOG_NETWORK_MISMATCH');
     const side = (ref: typeof token0) => {
       const asset = catalogAsset(catalog, { address: ref.address });
       if (!asset || asset.kind !== 'ERC20' || asset.decimals !== ref.decimals || (ref.officialId !== undefined && (asset.stock?.officialId ?? null) !== ref.officialId))
@@ -627,12 +644,12 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
   async function runtimeOfWorkflow(workflow: SemanticWorkflow): Promise<{ runtime: ReturnType<typeof bind>; assets: PoolAssets | null }> {
     const node = isObject(workflow) && Array.isArray(workflow.nodes) ? workflow.nodes.find(n => n.actionType === 'asset.liquidity.concentrated') : undefined;
     if (!input.catalog) return { runtime: runtimeOf(uniswapLiquidityProfile(node?.chainId) ?? fail('UNISWAP_LIQUIDITY_NETWORK_UNSUPPORTED')), assets: null };
-    if (node?.chainId !== ROBINHOOD.chain) fail('UNISWAP_LIQUIDITY_NETWORK_UNSUPPORTED');
+    if (node?.chainId !== servedChain) fail('UNISWAP_LIQUIDITY_NETWORK_UNSUPPORTED');
     let fields: ReturnType<typeof readConcentratedLiquidity>;
     try { fields = readConcentratedLiquidity(node); } catch { return fail('UNISWAP_LIQUIDITY_DECLARATION_INVALID'); }
     const assets = await catalogAssets(fields.token0, fields.token1);
     let profile: UniswapPoolProfile;
-    try { profile = robinhoodLiquidityPool(assets.token0 as { symbol: string; address: string; decimals: number }, assets.token1 as { symbol: string; address: string; decimals: number }, fields.feeTier); }
+    try { profile = catalogPoolOn(servedChain, assets.token0 as { symbol: string; address: string; decimals: number }, assets.token1 as { symbol: string; address: string; decimals: number }, fields.feeTier); }
     catch (cause) { return fail(cause instanceof Error && /^UNISWAP_[A-Z_]+$/.test(cause.message) ? cause.message : 'UNISWAP_LIQUIDITY_DECLARATION_INVALID'); }
     if (profile.token0.address !== fields.token0.address) fail('UNISWAP_TOKEN_ORDER_INVALID');
     return { runtime: runtimeOf(profile), assets };
@@ -640,15 +657,15 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
 
   return {
     executionEnabled,
-    /** The current pool price of a liquidity network (Base Sepolia unless a chain is named; a Robinhood Chain pool by its pair and fee tier). */
+    /** The current pool price of a liquidity network (Base Sepolia unless a chain is named; a catalog-network pool by its pair and fee tier). */
     async price(chain: string = BASE_PROFILE.chain, pair?: { readonly tokenA: string; readonly tokenB: string; readonly fee: number }): Promise<UniswapLiquidityPrice> {
-      if (chain !== ROBINHOOD.chain || !input.catalog) return runtimeOf(uniswapLiquidityProfile(chain) ?? fail('UNISWAP_LIQUIDITY_NETWORK_UNSUPPORTED')).price();
+      if (chain !== servedChain || !input.catalog) return runtimeOf(uniswapLiquidityProfile(chain) ?? fail('UNISWAP_LIQUIDITY_NETWORK_UNSUPPORTED')).price();
       if (!pair) fail('UNISWAP_POOL_REQUIRED');
-      const catalog = await input.catalog.catalogFor(ROBINHOOD.chain);
+      const catalog = await input.catalog.catalogFor(servedChain);
       const a = catalogAsset(catalog, { address: String(pair.tokenA).toLowerCase() }), b = catalogAsset(catalog, { address: String(pair.tokenB).toLowerCase() });
       if (!a || !b || a.kind !== 'ERC20' || b.kind !== 'ERC20') fail('CATALOG_ASSET_IDENTITY_CHANGED');
       let profile: UniswapPoolProfile;
-      try { profile = robinhoodLiquidityPool(a as { symbol: string; address: string; decimals: number }, b as { symbol: string; address: string; decimals: number }, pair.fee); }
+      try { profile = catalogPoolOn(servedChain, a as { symbol: string; address: string; decimals: number }, b as { symbol: string; address: string; decimals: number }, pair.fee); }
       catch { return fail('UNISWAP_FEE_TIER_UNSUPPORTED'); }
       return runtimeOf(profile).price();
     },

@@ -12,6 +12,7 @@ import { previewPlan } from '../mcp/simulation';
 import { workflowPlan } from '../mcp/execution';
 import { prepareStrategyCatalogs, strategyNamesRobinhood } from '../platform/catalogs';
 import { workflowVisualModel } from '../platform/workflow-visual';
+import { baseCatalog } from '../server/base-mainnet.test-harness';
 import { officialCatalog } from '../server/robinhood-mainnet.test-harness';
 import { composeStrategy, composeWorkflow, dappReviewContext, reviewComposition, semanticWorkflowHash } from './strategy-engine';
 
@@ -74,17 +75,25 @@ describe('BUILD-RH-002 Robinhood Chain strategies', () => {
     expect(composeStrategy({ ...BUY_TSLA, outputAsset: 'WETH' })).toMatchObject({ ok: true });
     registerNetworkCatalog(officialCatalog());
     expect(composeStrategy({ ...BUY_TSLA, outputAsset: 'NOTREAL' })).toMatchObject({ ok: false });
-    expect(composeStrategy({ ...BUY_TSLA, network: 'base' })).toMatchObject({ ok: false, code: 'SWAP_ASSET_PAIR_UNSUPPORTED' });
+    // BUILD-BASE-001: Base is a catalog network too; a Robinhood symbol is not in its catalog and fails closed (never mapped to something nearby).
+    expect(composeStrategy({ ...BUY_TSLA, network: 'base' })).toMatchObject({ ok: false, code: 'ACTION_ASSETS_UNSUPPORTED' });
     expect(composeStrategy({ ...BRIDGE_IN, asset: 'USDG' })).toMatchObject({ ok: false, code: 'ROUTER_PAIR_UNSUPPORTED' });
     expect(composeStrategy({ ...BRIDGE_IN, sourceNetwork: 'robinhood' })).toMatchObject({ ok: false, code: 'ROUTER_PAIR_UNSUPPORTED' });
-    expect(composeStrategy({ ...BRIDGE_IN, sourceNetwork: 'arbitrum-one', destinationNetwork: 'base' })).toMatchObject({ ok: false, code: 'ROUTER_PAIR_UNSUPPORTED' });
+    // BUILD-BASE-001 (intentional change): Arbitrum One → Base is now a Router route.
+    expect(composeStrategy({ ...BRIDGE_IN, sourceNetwork: 'arbitrum-one', destinationNetwork: 'base' })).toMatchObject({ ok: true });
+    expect(composeStrategy({ ...BRIDGE_IN, sourceNetwork: 'arbitrum-one', destinationNetwork: 'arbitrum-one' })).toMatchObject({ ok: false, code: 'ROUTER_PAIR_UNSUPPORTED' });
     const pool = { action: 'add_liquidity', network: 'robinhood', maxAmounts: { USDG: '100', TSLA: '0.4' } } as const;
     expect(composeStrategy({ ...pool, range: { unit: 'price', lower: '1', upper: '2' } })).toMatchObject({ ok: false, code: 'LIQUIDITY_RANGE_UNIT_UNSUPPORTED' });
     expect(composeStrategy({ ...pool, range: { unit: 'full' }, feeTier: 2500 })).toMatchObject({ ok: false, code: 'STRATEGY_SCHEMA_INVALID' });
     const testnet = { action: 'add_liquidity', network: 'base-sepolia', maxAmounts: { USDC: '10', WETH: '0.005' } } as const;
     expect(composeStrategy({ ...testnet, range: { unit: 'full' } })).toMatchObject({ ok: false, code: 'LIQUIDITY_RANGE_UNIT_UNSUPPORTED' });
     expect(composeStrategy({ ...testnet, range: { unit: 'tick', lower: '189960', upper: '200040' }, feeTier: 3000 })).toMatchObject({ ok: false, code: 'LIQUIDITY_FEE_TIER_UNSUPPORTED' });
-    expect(composeStrategy({ ...SEND_AAPL, network: 'base' })).toMatchObject({ ok: false, code: 'STRATEGY_SCHEMA_INVALID' });
+    // BUILD-BASE-001: Base is a transfer network too. A symbol outside its pinned assets resolves only in Base's validated list; a Robinhood
+    // Stock Token is in neither, before or after the list is loaded (transfer authoring reports any unresolved symbol as the catalog's).
+    expect(composeStrategy({ ...SEND_AAPL, network: 'base' })).toMatchObject({ ok: false, code: 'ASSET_CATALOG_UNAVAILABLE' });
+    registerNetworkCatalog(baseCatalog());
+    expect(composeStrategy({ ...SEND_AAPL, network: 'base' })).toMatchObject({ ok: false, code: 'ASSET_CATALOG_UNAVAILABLE' });
+    expect(composeStrategy({ ...SEND_AAPL, network: 'base', asset: 'cbBTC' })).toMatchObject({ ok: true });
     expect(composeStrategy({ ...SEND_AAPL, asset: '0x' + '1'.repeat(40) })).toMatchObject({ ok: false, code: 'STRATEGY_SCHEMA_INVALID' });
   });
   it('MCP loads the official catalog only for strategies naming Robinhood Chain, and a registry failure only leaves Stock Tokens unresolvable', async () => {

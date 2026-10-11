@@ -23,8 +23,9 @@ import { Type, type Static, type TSchema } from '@sinclair/typebox';
 import { McpServer, type CallToolResult, type StandardSchemaWithJSON, type ToolAnnotations } from '@modelcontextprotocol/server';
 import { supportedAssets, supportedNetworks } from '../engine/capability-catalog';
 import { compileSchema, MAX_WORKFLOW_STEPS, NETWORK_IDS, STRATEGY_ACTIONS, strategyInputIssues, StrategyInputSchema } from '../engine/strategy-spec';
-import { prepareStrategyCatalogs } from '../platform/catalogs.ts';
+import { prepareNetworkCatalogs } from '../platform/catalogs.ts';
 import { robinhoodAuthoringCatalog } from '../server/robinhood-mainnet.ts';
+import { baseAuthoringCatalog } from '../server/base-mainnet.ts';
 import { approvalForRequester, approvalProgress, capabilityFacts, composeWorkflowOrRefuse, evidenceView, executionStatusView, findOwnedRun, MULTI_STEP_PLAN,
   openApprovalSession, PlatformRefusal, refuse, requestApproval, reviewWorkflow, simulatePreview, stepViews, validateStrategy, type ApprovalDeps,
   type ApprovalRequester } from '../platform/index.ts';
@@ -167,8 +168,10 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
       let result: CallToolResult, outcome = 'OK';
       try {
         if (!principalScopes(ctx.principal).includes(scope)) failWith('MCP_INSUFFICIENT_SCOPE');
-        // BUILD-RH-002: a strategy naming Robinhood Chain composes against the validated official catalog (where this deployment enables it).
-        if (args && typeof args === 'object' && 'strategy' in args) await prepareStrategyCatalogs((args as { strategy: unknown }).strategy, async () => robinhoodAuthoringCatalog(await ctx.runtime.mode('robinhood-swap')));
+        // BUILD-RH-002: a strategy naming Robinhood Chain composes against the validated official catalog (where this deployment enables it);
+        // BUILD-BASE-001: so does one naming Base (its validated token list).
+        if (args && typeof args === 'object' && 'strategy' in args) await prepareNetworkCatalogs((args as { strategy: unknown }).strategy, {
+          robinhood: async () => robinhoodAuthoringCatalog(await ctx.runtime.mode('robinhood-swap')), base: async () => baseAuthoringCatalog(await ctx.runtime.mode('base-swap')) });
         const output = await run(args);
         assertSafeOutput(output);
         // MCP Apps tool-result _meta is delivered to the UI, outside model context. App visibility alone does not redact results.

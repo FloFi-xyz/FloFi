@@ -3,7 +3,6 @@
 import { useLocale } from '../i18n/locale';
 
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { UNISWAP_V3_BASE_SEPOLIA_LIQUIDITY, UNISWAP_V3_ROBINHOOD_LIQUIDITY, uniswapLiquidityProfile } from '@defi-workflow-engine/action-registry';
 import { createUniswapLiquidityNode, uniswapBandInput, uniswapLiquidityDetails, uniswapLiquidityInputOf, uniswapLiquidityProfileFor, UNISWAP_LIQUIDITY_DEFAULT_SLIPPAGE,
   UNISWAP_LIQUIDITY_NETWORKS, type UniswapLiquidityInput, type UniswapLiquidityNetwork } from '../domain/uniswap-liquidity-authoring';
 import { poolPriceBounds, usePoolPriceRange } from './pool-price-range';
@@ -14,7 +13,7 @@ import { useWorkflow } from '../state/workflow-store';
 import { useUniswapLiquidity } from '../state/uniswap-liquidity-store';
 import { useBuild009Wallet } from '../state/build009-wallet-store';
 import type { UniswapLiquidityStep, UniswapTokenView } from '../server/uniswap-liquidity-service';
-import { robinhoodLiquidityDetails } from '../domain/robinhood-liquidity-authoring';
+import { catalogLiquidityCopy, liquidityRunNetwork, robinhoodLiquidityDetails } from '../domain/robinhood-liquidity-authoring';
 import { StockFacts } from './stock-facts';
 
 /** Canvas form for the canonical concentrated-liquidity node: Uniswap v3 USDC / WETH on Base Sepolia (0.05%) or Ethereum Sepolia (0.3%). */
@@ -129,6 +128,9 @@ const messages: Record<string, string> = {
   UNISWAP_TRANSACTION_MISMATCH: 'The reported transaction is not the reviewed call. The run needs your attention; nothing will be resent.',
   // BUILD-RH-002: Robinhood Chain positions (real funds; official catalog pairs).
   ROBINHOOD_MAINNET_NOT_ENABLED: 'Robinhood Chain liquidity is not enabled on this server.',
+  // BUILD-BASE-001: Base positions (real funds; any two validated token-list ERC-20s).
+  BASE_MAINNET_NOT_ENABLED: 'Base liquidity is not enabled on this server.', BASE_STORAGE_NOT_CONFIGURED: 'Base liquidity is not enabled on this server.',
+  BASE_TOKEN_LIST_UNAVAILABLE: 'The Base token list is unavailable. Nothing was simulated or sent.',
   UNISWAP_INSUFFICIENT_TOKEN: 'Your wallet needs more of a deposited token for this position.',
   UNISWAP_POOL_MISMATCH: 'This pair has no live Uniswap v3 pool at this fee tier on Robinhood Chain. Choose another fee tier; nothing was signed.',
   UNISWAP_CONTRACT_CODE_MISSING: 'This pair has no deployed Uniswap v3 pool at this fee tier. Choose another fee tier; nothing was signed.',
@@ -170,18 +172,19 @@ export function UniswapLiquidityPanel({ view }: { view: 'simulate' | 'execute' }
   const needsRefresh = Boolean(record && record.verdict === 'PENDING' && !pending && (!authorized && record.attempts.length > 0 || fresh === 0));
   const info = lp.error ?? record?.error;
   // The reviewed chain (else the authored one) names the network; Base Sepolia before anything is authored, as before.
-  // BUILD-RH-002: Robinhood Chain (real funds) names its pool's own tokens; the testnet profiles keep their USDC / WETH wording.
-  const robinhood = (r?.chainId ?? node?.chainId) === UNISWAP_V3_ROBINHOOD_LIQUIDITY.chainId || (r?.chainId ?? node?.chainId) === UNISWAP_V3_ROBINHOOD_LIQUIDITY.chain;
-  const profile = robinhood ? UNISWAP_V3_ROBINHOOD_LIQUIDITY : uniswapLiquidityProfile(r?.chainId ?? node?.chainId) ?? UNISWAP_V3_BASE_SEPOLIA_LIQUIDITY, network = profile.network;
+  // BUILD-RH-002: a catalog network (real funds) names its pool's own tokens; the testnet profiles keep their USDC / WETH wording.
+  // BUILD-BASE-001: every catalog network (Robinhood Chain, Base) by its own deployment; a mainnet position never falls back to a testnet profile.
+  const { profile, network, realFunds, robinhood, evidenceSlug } = liquidityRunNetwork(r?.chainId ?? node?.chainId);
   const t0 = r?.token0 ?? USDC_VIEW, t1 = r?.token1 ?? WETH_VIEW, amount0 = tokenAmount(t0), amount1 = tokenAmount(t1);
-  const stepLabel = stepLabelOf(t0.symbol, t1.symbol), evidenceSlug = robinhood ? 'robinhood-chain' : 'base-sepolia';
+  const stepLabel = stepLabelOf(t0.symbol, t1.symbol);
   return <section className="panel" aria-label={tr(`${network} liquidity`)}><h2>{tr(view === 'simulate' ? 'Simulate liquidity position' : 'Review liquidity position')}</h2>
     {fields && <p>{tr("Concentrated liquidity on ")}{network}{tr(" via Uniswap v3: up to ")}{tr(fields.maxUsdc)}{tr(" USDC and ")}{tr(fields.maxWeth)}{tr(" WETH between ")}{tr(fields.lowerPrice)}{tr(" and ")}{tr(fields.upperPrice)}{tr(" USDC per WETH.")}</p>}
     {rhFields && <p>{tr("Concentrated liquidity on ")}{network}{tr(" via Uniswap v3: up to ")}{tr(`${rhFields.amountA} ${rhFields.tokenA} and ${rhFields.amountB} ${rhFields.tokenB}`)}
       {tr(rhFields.fullRange ? ' across the full price range' : ` between ${rhFields.lowerPrice} and ${rhFields.upperPrice} ${rhFields.priceUnit.split(' per ')[0]} per ${rhFields.priceUnit.split(' per ')[1]}`)}{tr(` · fee ${rhFields.fee / 10_000}%.`)}</p>}
     <p role="note">{robinhood ? tr("Real funds on Robinhood Chain: your wallet signs every request after your Review; Flofi never signs or sends.")
+      : realFunds ? tr("Real funds on {0}: your wallet signs every request after your Review; Flofi never signs or sends.", network)
       : <>{network}{tr(" test tokens only. They have no value, and no real funds are used.")}</>}</p>
-    {!lp.available && <p role="status">{tr(message(robinhood ? 'ROBINHOOD_MAINNET_NOT_ENABLED' : 'UNISWAP_LIQUIDITY_PUBLIC_TESTNET_NOT_ENABLED'))}</p>}
+    {!lp.available && <p role="status">{tr(realFunds ? catalogLiquidityCopy(message('ROBINHOOD_MAINNET_NOT_ENABLED')!, network) : message('UNISWAP_LIQUIDITY_PUBLIC_TESTNET_NOT_ENABLED'))}</p>}
     {lp.retired && <p role="alert">{tr("The workflow changed. Prior authorization is invalid. Simulate the current position again.")}</p>}
     {lp.recovered && record && <p role="status">{tr("Recovered run ")}{record.id}{tr(". Its state comes from the server; nothing is resent automatically.")}</p>}
     {!wallet.account ? <button type="button" disabled={wallet.busy} onClick={() => void wallet.connect()}>{tr("Connect wallet")}</button>
@@ -221,7 +224,7 @@ export function UniswapLiquidityPanel({ view }: { view: 'simulate' | 'execute' }
         <a download={`flofi-${evidenceSlug}-liquidity-evidence.json`} href={'data:application/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(record.evidence, null, 2))}>{tr("Download Evidence Bundle")}</a></section>}
       {record.attempts.length > 0 && !record.evidence && <a download={`flofi-${evidenceSlug}-liquidity-execution-record.json`} href={'data:application/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(record, null, 2))}>{tr("Download execution record")}</a>}
     </>}
-    {info && <p role="status">{tr(networkCopy(message(info) ?? 'Execution needs attention. Inspect technical details and observe any existing transaction.', network))}</p>}
+    {info && <p role="status">{tr(catalogLiquidityCopy(networkCopy(message(info) ?? 'Execution needs attention. Inspect technical details and observe any existing transaction.', network), network))}</p>}
     {lp.busy && <p role="status">{tr("Working…")}</p>}
     <details><summary>{tr("Show technical details")}</summary><pre>{JSON.stringify({ error: info, run: record?.id, commitment: r?.commitment, calls: r?.calls, attempts: record?.attempts, verdict: record?.verdict }, null, 2)}</pre></details>
   </section>;

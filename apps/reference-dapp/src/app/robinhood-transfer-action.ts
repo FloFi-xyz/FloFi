@@ -5,27 +5,34 @@ import { createRobinhoodTransferService, type RobinhoodTransferService, type Tra
 import { nativeTransferReadRpcs } from '../server/robinhood-rpc';
 import { cloudFlow, cloudFlowMode } from '../server/flow-runtime';
 import { join } from 'node:path';
-import { robinhoodCatalogFor, robinhoodMainnetMode, robinhoodMainnetRpc, robinhoodOwnerExecutionEnabled } from '../server/robinhood-mainnet';
+import { CATALOG_NETWORKS, catalogNetworkOfChain, catalogNetworkOfRun, catalogNetworkOfWorkflow, localCatalogNetworkMode, type CatalogNetworkId,
+  type CatalogNetworkRuntime } from '../server/catalog-networks';
 
 let service: RobinhoodTransferService | null = null;
 /**
- * BUILD-RH-002: Robinhood Chain mainnet transfers (`rht-` runs, real funds) on the same coordinator with the Robinhood runtime:
- * `GRYLOO_ROBINHOOD_MAINNET=live` in local development (hosted deployments use the cloud flow) or the loopback harness;
- * owner execution additionally needs `GRYLOO_ROBINHOOD_OWNER_EXECUTION=MAINNET_OWNER_APPROVED`. Journal: `$GRYLOO_ROBINHOOD_JOURNAL/mainnet-transfer`.
+ * BUILD-RH-002 / BUILD-BASE-001: catalog-network mainnet transfers (Robinhood Chain `rht-`, Base `bat-`; real funds) on the same
+ * coordinator with each network's runtime: `GRYLOO_<NETWORK>_MAINNET=live` in local development (hosted deployments use the cloud flow) or
+ * the loopback harness; owner execution additionally needs `GRYLOO_<NETWORK>_OWNER_EXECUTION=MAINNET_OWNER_APPROVED`.
+ * Journal: `$<journal root>/mainnet-transfer`.
  */
-let mainnetService: RobinhoodTransferService | null = null;
-function mainnet(): RobinhoodTransferService {
-  const mode = robinhoodMainnetMode(process.env);
-  if (mode === 'off' || (mode === 'live' && process.env.NODE_ENV !== 'development')) throw new Error('ROBINHOOD_MAINNET_NOT_ENABLED');
-  const journalDir = process.env.GRYLOO_ROBINHOOD_JOURNAL;
+const mainnetServices = new Map<CatalogNetworkId, RobinhoodTransferService>();
+function mainnet(network: CatalogNetworkRuntime): RobinhoodTransferService {
+  const mode = localCatalogNetworkMode(network, process.env);
+  if (mode === 'off') throw new Error(network.disabledCode);
+  const journalDir = process.env[network.journalEnv];
   if (!journalDir) throw new Error('TRANSFER_STORAGE_NOT_CONFIGURED');
-  mainnetService ??= createRobinhoodTransferService({ journalDir: join(journalDir, 'mainnet-transfer'), idPrefix: 'rht', provenance: mode === 'harness' ? 'MOCKED' : 'PUBLIC_MAINNET',
-    rpcs: { 'eip155:4663': robinhoodMainnetRpc(mode, process.env) }, catalogFor: robinhoodCatalogFor(mode), executionEnabled: robinhoodOwnerExecutionEnabled(mode, process.env) });
-  return mainnetService;
+  let service = mainnetServices.get(network.id);
+  if (!service) {
+    service = createRobinhoodTransferService({ journalDir: join(journalDir, 'mainnet-transfer'), idPrefix: network.prefixes.transfer,
+      provenance: mode === 'harness' ? 'MOCKED' : 'PUBLIC_MAINNET', rpcs: { [network.chain]: network.rpc(mode, process.env) }, catalogFor: network.catalogFor(mode),
+      executionEnabled: network.ownerExecutionEnabled(mode, process.env) });
+    mainnetServices.set(network.id, service);
+  }
+  return service;
 }
-const mainnetRun = (args: readonly unknown[]) => typeof args[0] === 'string' ? args[0].startsWith('rht-')
-  : Boolean(args[0] && typeof args[0] === 'object' && Array.isArray((args[0] as SemanticWorkflow).nodes) &&
-    (args[0] as SemanticWorkflow).nodes.some(node => node.actionType === 'asset.transfer' && node.chainId === 'eip155:4663'));
+/** The catalog network a call addresses: its run's namespace, or the chain of its workflow's transfer. */
+const mainnetOf = (args: readonly unknown[]) => typeof args[0] === 'string' ? catalogNetworkOfRun(args[0], 'transfer')
+  : catalogNetworkOfWorkflow(args[0], 'asset.transfer');
 /**
  * Live public reads need an explicit local development flag per network (`GRYLOO_ROBINHOOD_TESTNET=live`,
  * `GRYLOO_ETHEREUM_SEPOLIA_TRANSFER=live`); automated tests use only the loopback harness.
@@ -37,13 +44,16 @@ export async function robinhoodTransferMode(): Promise<'live' | 'harness' | 'off
   if (process.env.GRYLOO_ROBINHOOD_HARNESS === 'MOCKED_LOOPBACK_ONLY') return 'harness';
   return (process.env.GRYLOO_ROBINHOOD_TESTNET === 'live' || process.env.GRYLOO_ETHEREUM_SEPOLIA_TRANSFER === 'live') && process.env.NODE_ENV === 'development' ? 'live' : 'off';
 }
-/** BUILD-RH-002: whether this instance serves Robinhood Chain mainnet transfers (live or the MOCKED loopback harness). */
-export async function robinhoodMainnetTransferMode(): Promise<'live' | 'harness' | 'off'> {
-  const cloud = await cloudFlowMode('robinhood-mainnet-transfer');
+/** BUILD-RH-002 / BUILD-BASE-001: whether this instance serves a catalog network's mainnet transfers (live or the MOCKED loopback harness). */
+export async function catalogTransferMode(chain: string): Promise<'live' | 'harness' | 'off'> {
+  const network = catalogNetworkOfChain(chain);
+  if (!network) return 'off';
+  const cloud = await cloudFlowMode(network.flows.transfer);
   if (cloud) return cloud;
-  const mode = robinhoodMainnetMode(process.env);
-  return mode === 'harness' || (mode === 'live' && process.env.NODE_ENV === 'development') ? mode : 'off';
+  return localCatalogNetworkMode(network, process.env);
 }
+/** BUILD-RH-002: whether this instance serves Robinhood Chain mainnet transfers (live or the MOCKED loopback harness). */
+export async function robinhoodMainnetTransferMode(): Promise<'live' | 'harness' | 'off'> { return catalogTransferMode(CATALOG_NETWORKS.robinhood.chain); }
 async function current(): Promise<RobinhoodTransferService> {
   const mode = await robinhoodTransferMode();
   if (mode === 'off') throw new Error('TRANSFER_PUBLIC_TESTNET_NOT_ENABLED');
@@ -53,10 +63,10 @@ async function current(): Promise<RobinhoodTransferService> {
   return service;
 }
 async function run<T>(method: string, args: readonly unknown[], action: (service: RobinhoodTransferService) => Promise<T>): Promise<{ ok: true; value: T } | { ok: false; code: string }> {
-  const isMainnet = mainnetRun(args);
-  const cloud = await cloudFlow<T>(isMainnet ? 'robinhood-mainnet-transfer' : 'robinhood-transfer', method, args);
+  const network = mainnetOf(args);
+  const cloud = await cloudFlow<T>(network ? network.flows.transfer : 'robinhood-transfer', method, args);
   if (cloud) return cloud;
-  try { return { ok: true, value: await action(isMainnet ? mainnet() : await current()) }; }
+  try { return { ok: true, value: await action(network ? mainnet(network) : await current()) }; }
   catch (cause) { const code = cause instanceof Error ? cause.message : ''; return { ok: false, code: /^[A-Z][A-Z0-9_]{2,80}$/.test(code) ? code : 'TRANSFER_SERVICE_UNAVAILABLE' }; }
 }
 export async function transferSimulate(workflow: SemanticWorkflow, account: string) { return run('simulate', [workflow, account], s => s.simulate(workflow, account)); }

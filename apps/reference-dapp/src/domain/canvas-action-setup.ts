@@ -6,6 +6,7 @@ import { createUniswapLiquidityNode, type UniswapLiquidityInput } from './uniswa
 import { canvasAddCommand } from './canvas-authoring';
 import { swapDetails, inputSymbol, directionLabel, type Direction } from './swap-authoring';
 import { ROBINHOOD_NETWORK } from './asset-catalogs';
+import { networkIdentity } from './network-registry';
 import { createRouterNode, routerDetails, routerInputForNetworks, routerInputOf, routerTokensOf, ROUTER_NETWORK_OPTIONS, type RouterBridgeInput } from './router-authoring';
 import { createBridgeNode, bridgeDetails } from './bridge-authoring';
 import { shellChainLabel } from './product-shell';
@@ -14,7 +15,7 @@ import { createAuthoredSupply, createAuthoredBorrow, createAuthoredRepay, create
 import { lendingDetails, lendingNodeInput } from './lending-authoring';
 import { createAuthoredTransfer, transferDetails } from './robinhood-transfer-authoring';
 import { singleAmountProposalTarget } from './composer-presentation';
-import { createCryptoActionNode, cryptoInputOf, cryptoProfile, canSelectCryptoAssets, type CryptoSelection, type CryptoSelections, type CryptoActionInput } from './crypto-action-picker';
+import { createCryptoActionNode, cryptoInputOf, cryptoProfile, canSelectCryptoAssets, defaultPoolRange, type CryptoSelection, type CryptoSelections, type CryptoActionInput } from './crypto-action-picker';
 
 /** Required-field authoring only, never an executable node or alternate workflow. */
 export type CanvasActionSetup = { readonly id: string; readonly amount: string; readonly cryptoSelection?: CryptoSelection; readonly cryptoBeneficiary?: string } &
@@ -100,7 +101,7 @@ export function canvasAmountCommand(state: EditorState, setup: CanvasActionSetup
     const transfer = transferDetails(node as Parameters<typeof transferDetails>[0]);
     const cryptoInput = cryptoSelections[id] ? cryptoInputOf(node) : null;
     command = cryptoInput ? { ...base, type: 'SET_CRYPTO_ACTION', input: { ...cryptoInput, selection: cryptoSelections[id]!, amount,
-      ...(cryptoInput.selection.action === 'pool' && cryptoInput.selection.network !== cryptoSelections[id]!.network ? { rangeUnit: 'TICK', lower: cryptoSelections[id]!.network === 'Solana Devnet' ? '-443584' : cryptoSelections[id]!.network === 'Ethereum Sepolia' || cryptoSelections[id]!.network === ROBINHOOD_NETWORK ? '-887220' : '-887270', upper: cryptoSelections[id]!.network === 'Solana Devnet' ? '443584' : cryptoSelections[id]!.network === 'Ethereum Sepolia' || cryptoSelections[id]!.network === ROBINHOOD_NETWORK ? '887220' : '887270' } : {}) } }
+      ...(cryptoInput.selection.action === 'pool' && cryptoInput.selection.network !== cryptoSelections[id]!.network ? defaultPoolRange(cryptoSelections[id]!.network) : {}) } }
       : transfer ? { ...base, type: 'SET_RH_TRANSFER', input: { ...transfer, amount } }
       : lending && (id === 'lending-supply' || id === 'lending-borrow')
       ? { type: 'AUTHOR_LENDING', input: lendingNodeInput(state.workflow, id, amount), source: 'CANVAS', baseRevision: state.workflow.revision }
@@ -129,13 +130,18 @@ export function canvasAmountCommand(state: EditorState, setup: CanvasActionSetup
   return command;
 }
 
-export function canvasAmountMessage(cause: unknown) {
+/** `network`: the card's network name, when it has one (BUILD-BASE-001: a catalog network names its own token list). */
+export function canvasAmountMessage(cause: unknown, network?: string | null) {
   const code = cause instanceof Error ? cause.message : '';
   if (/AMOUNT|PRECISION/.test(code)) return 'Enter a valid amount greater than 0.';
   if (/LOCK|PROTECTED/.test(code)) return 'This amount is protected.';
   if (/STALE/.test(code)) return 'The workflow changed. Review this amount again.';
   if (code === 'ROUTER_PAIR_UNSUPPORTED') return 'Choose matching bridge networks.';
-  if (code === 'ASSET_CATALOG_UNAVAILABLE') return 'Robinhood Stock Tokens are unavailable right now. Try again in a moment.';
+  if (code === 'ASSET_CATALOG_UNAVAILABLE') {
+    const catalog = networkIdentity(network);
+    return catalog?.catalog && catalog.name !== ROBINHOOD_NETWORK ? `${catalog.name} tokens are unavailable right now. Try again in a moment.`
+      : 'Robinhood Stock Tokens are unavailable right now. Try again in a moment.';
+  }
   if (code === 'INVALID_ASSET_PAIR') return 'Choose two different assets.';
   return 'This action cannot be combined with the current workflow. Check its settings or use a separate workflow.';
 }

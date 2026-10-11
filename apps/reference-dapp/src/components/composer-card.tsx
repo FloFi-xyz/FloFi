@@ -14,10 +14,11 @@ import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { PoolPriceRange, usePoolPriceRange, type PoolPricePreset } from './pool-price-range';
 import { TokenAmountInput } from './token-amount-input';
 import { usePoolContributionInputs } from './canvas-card-inputs';
-import { assetDisplayName } from '@defi-workflow-engine/action-registry';
-import { featuredStockSymbols, ROBINHOOD_CHAIN, searchNetworkAssets } from '../domain/asset-catalogs';
-import { useNetworkCatalog } from '../state/asset-catalog-store';
+import type { CanonicalAsset } from '@defi-workflow-engine/action-registry';
+import { featuredStockSymbols, ROBINHOOD_CHAIN } from '../domain/asset-catalogs';
+import { networkIdentity } from '../domain/network-registry';
 import type { CryptoSelection } from '../domain/crypto-action-picker';
+import { AssetSearch } from './asset-search';
 import { ProposalReviewArtifact } from './proposal-review';
 
 export type CanvasAmountEditor = { value: string; changed: boolean; canApply: boolean; formId?: string; onChange(value: string): void; onReview(): string | null; onApply(): void; onCancel?: () => void };
@@ -43,11 +44,12 @@ function ValuePair({ relationship, className = '', children }: { relationship: '
   </div>;
 }
 
-function TokenChip({ symbol, network }: { symbol: string; network?: string }) {
+/** `network` adds the network badge; `markNetwork` only binds the token's identity to its network (picker options carry no badge). */
+function TokenChip({ symbol, network, markNetwork }: { symbol: string; network?: string; markNetwork?: string }) {
   const { t: tr } = useLocale();
   return <span className="composer-token-chip">
     <span className="composer-token-avatar" data-token={symbol}>
-      <TokenBrandIcon symbol={symbol}/>
+      <TokenBrandIcon symbol={symbol} network={network ?? markNetwork}/>
       {network !== undefined && <span className="composer-network-badge" role="img" aria-label={tr(`${network} network`)} title={network}><NetworkBrandIcon network={network}/></span>}
     </span>
     <span className="composer-amount-token">{symbol}</span>
@@ -73,7 +75,7 @@ function TokenPicker({ symbol, network, options, onChange }: { symbol: string; n
     <legend className="sr-only">{tr("Choose token on ")}{network}</legend>
     {options.map(option => <label key={option} className="composer-stock-option" data-selected={option === symbol || undefined}>
       <input className="sr-only" type="radio" name={name} value={option} aria-label={option} checked={option === symbol} onChange={() => onChange(option)}/>
-      <TokenChip symbol={option}/>
+      <TokenChip symbol={option} markNetwork={network}/>
       <svg className="composer-stock-check" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="m3 8 3 3 7-7"/></svg>
     </label>)}
   </fieldset>;
@@ -93,10 +95,12 @@ function NetworkPicker({ network, options, unavailable = [], onSelect }: { netwo
   </fieldset>;
 }
 
-function AssetNetworkPicker({ id, side, symbol, network, tokens, networks, unavailable, onTokenChange, onNetworkChange, onCollapse, bridge = false }: {
+function AssetNetworkPicker({ id, side, symbol, network, tokens, networks, unavailable, onTokenChange, onNetworkChange, onCollapse, bridge = false, search }: {
   id: string; side: 'source' | 'destination'; symbol: string; network: string; tokens: readonly string[]; networks: readonly string[]; unavailable?: readonly string[] | undefined;
   onTokenChange(symbol: string): void; onNetworkChange(network: string): void; onCollapse(): void;
   bridge?: boolean;
+  /** BUILD-BASE-001: an official-catalog network's search (the whole validated catalog behind the shortcuts). */
+  search?: { readonly chain: string; readonly accept: (asset: CanonicalAsset) => boolean; onSelect(symbol: string): void } | undefined;
 }) {
   const { t: tr } = useLocale();
   const sideLabel = side === 'source' ? 'Source' : 'Destination';
@@ -111,6 +115,10 @@ function AssetNetworkPicker({ id, side, symbol, network, tokens, networks, unava
       <div className="composer-bridge-picker-column" role="region" aria-label={tr(`${sideLabel} token picker`)}>
         <span className="composer-bridge-picker-heading" aria-hidden="true">{tr("Tokens")}</span>
         <TokenPicker symbol={symbol} network={network} options={tokens} onChange={token => { if (tokens.includes(token)) onTokenChange(token); }}/>
+        {search && <AssetSearch chain={search.chain} selected={symbol} accept={search.accept} onSelect={search.onSelect} copy={{
+          heading: tr("Search assets"), searchLabel: tr("Search {0} tokens", network), placeholder: tr("Search by symbol or name…"),
+          loading: tr("Loading {0} tokens…", network), unavailable: tr("{0} tokens are unavailable right now.", network), retry: tr("Try again"),
+          empty: tr("No token matches this search."), results: tr("{0} token results", network), total: count => tr("{0} tokens · type to search", count) }}/>}
       </div>
       <div className="composer-bridge-picker-column" role="region" aria-label={tr(bridge ? `${sideLabel} network picker` : 'Action network picker')}>
         <span className="composer-bridge-picker-heading" title={tr(bridge ? undefined : 'One network for all assets in this action')} aria-hidden="true">{tr("Networks")}</span>
@@ -147,19 +155,13 @@ function StockPicker({ equity, options, onChange }: { equity: string; options: r
     </label>)}
   </fieldset>;
 }
-/** At most this many search results are rendered at once; typing narrows the full validated catalog. */
-const STOCK_RESULTS = 12;
 /**
  * BUILD-RH-002: featured shortcuts plus search over every validated active official Robinhood Stock Token. Loading, empty and
  * unavailable states are explicit; a result configures the same Stocks card. No registry data beyond symbol and name is shown.
+ * BUILD-BASE-001: the search is the shared catalog asset search.
  */
 function StocksPanel({ id, equity, onChange, onCollapse }: { id: string; equity: string; onChange(equity: string): void; onCollapse(): void }) {
   const { t: tr } = useLocale();
-  const catalog = useNetworkCatalog();
-  const [query, setQuery] = useState('');
-  useEffect(() => { void catalog.ensure(); }, [catalog]);
-  const results = catalog.status === 'ready' ? searchNetworkAssets(ROBINHOOD_CHAIN, query, { assetClass: 'STOCK_TOKEN', limit: STOCK_RESULTS }) : [];
-  const total = catalog.status === 'ready' ? searchNetworkAssets(ROBINHOOD_CHAIN, '', { assetClass: 'STOCK_TOKEN', limit: 200 }).length : 0;
   return <section id={id} className="composer-stocks-panel composer-stocks-catalog nodrag nopan" aria-label={tr("Stocks configuration")} onClick={event => event.stopPropagation()}
     onKeyDown={event => event.stopPropagation()} onKeyDownCapture={event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); onCollapse(); } }}>
     <button type="button" className="composer-pool-collapse" aria-label={tr("Hide Stocks configuration")} title={tr("Hide Stocks configuration")} onClick={onCollapse}>
@@ -167,19 +169,10 @@ function StocksPanel({ id, equity, onChange, onCollapse }: { id: string; equity:
     </button>
     <span className="composer-bridge-picker-heading">{tr("Featured")}</span>
     <StockPicker equity={equity} options={featuredStockSymbols()} onChange={onChange}/>
-    <label className="composer-stock-search"><span className="composer-bridge-picker-heading">{tr("Search assets")}</span>
-      <input type="search" aria-label={tr("Search Stock Tokens")} placeholder={tr("Search by symbol or company name…")} autoComplete="off" spellCheck={false} maxLength={64}
-        value={query} onChange={event => setQuery(event.target.value)}/></label>
-    {catalog.status === 'loading' || catalog.status === 'idle' ? <p className="composer-stock-status" role="status">{tr("Loading Robinhood Stock Tokens…")}</p>
-      : catalog.status === 'unavailable' ? <p className="composer-stock-status" role="status">{tr("Robinhood Stock Tokens are unavailable right now.")} <button type="button" className="composer-stock-retry" onClick={() => void catalog.retry()}>{tr("Try again")}</button></p>
-      : !results.length ? <p className="composer-stock-status" role="status">{tr("No Stock Token matches this search.")}</p>
-      : <>
-        <ul className="composer-stock-results" aria-label={tr("Stock Token results")}>
-          {results.map(asset => <li key={asset.id}><button type="button" className="composer-stock-option" aria-pressed={asset.symbol === equity} data-selected={asset.symbol === equity || undefined}
-            onClick={() => onChange(asset.symbol)}><span>{asset.symbol}</span><span className="composer-stock-name">{assetDisplayName(asset)}</span></button></li>)}
-        </ul>
-        {!query.trim() && total > results.length && <p className="composer-stock-status">{tr("{0} Stock Tokens · type to search", total)}</p>}
-      </>}
+    <AssetSearch chain={ROBINHOOD_CHAIN} selected={equity} assetClass="STOCK_TOKEN" onSelect={onChange} copy={{ heading: tr("Search assets"),
+      searchLabel: tr("Search Stock Tokens"), placeholder: tr("Search by symbol or company name…"), loading: tr("Loading Robinhood Stock Tokens…"),
+      unavailable: tr("Robinhood Stock Tokens are unavailable right now."), retry: tr("Try again"), empty: tr("No Stock Token matches this search."),
+      results: tr("Stock Token results"), total: count => tr("{0} Stock Tokens · type to search", count) }}/>
   </section>;
 }
 
@@ -441,8 +434,14 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
       </button>}
       <Handle type="source" position={card.vertical ? Position.Bottom : Position.Right} isConnectable={false}/>
     </div>;
+  // BUILD-BASE-001: on an official-catalog network the editable picker also searches the whole validated catalog (swaps and pools: ERC-20s).
+  const catalogNetwork = card.actionSelection && card.actionSelection.tokens[tokenPanel || 'source'].length > 1 ? networkIdentity(tokenNetwork) : null;
+  const searchAction = card.actionSelection?.selection.action;
+  const tokenSearch = tokenPanel && catalogNetwork?.catalog && (searchAction === 'swap' || searchAction === 'pool' || (searchAction === 'transfer' && tokenPanel === 'source'))
+    ? { chain: catalogNetwork.chain, accept: (asset: CanonicalAsset) => searchAction === 'transfer' || asset.kind === 'ERC20',
+      onSelect: (symbol: string) => card.actionSelection!.onToken(tokenPanel, symbol) } : undefined;
   const tokens = tokenPanel && tokenSymbol && <AssetNetworkPicker key={tokenPanel + tokenNetwork} id={tokenPanelId} side={tokenPanel} symbol={tokenSymbol} network={tokenNetwork}
-    tokens={tokenOptions} networks={card.actionSelection?.networks ?? []} onCollapse={collapseTokens}
+    tokens={tokenOptions} networks={card.actionSelection?.networks ?? []} onCollapse={collapseTokens} search={tokenSearch}
     onTokenChange={symbol => { if (card.actionSelection) card.actionSelection.onToken(tokenPanel, symbol); else card.tokenSelection?.onSelect(tokenPanel, symbol); }}
     onNetworkChange={network => { card.actionSelection?.onNetwork(network); setAmountError(null); if (poolCard) poolRange.reset(); }}/>;
   const bridge = bridgePanel && bridgeSymbol && <AssetNetworkPicker bridge key={bridgePanel} id={bridgePanelId} side={bridgePanel} symbol={bridgeSymbol} network={bridgeNetwork}

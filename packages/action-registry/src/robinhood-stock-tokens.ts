@@ -14,12 +14,16 @@
 import { assetDisplayName, contentSha256, createAssetCatalog, erc20AssetId, formatWad, isChecksumAddress, mergeAssetCatalogs, parseMultiplier,
   ROBINHOOD_BASE_ASSETS, type AssetCatalog, type AssetProvider, type CanonicalAsset, type StockTrading, type TradingStatus } from './asset-registry.js';
 import { ROBINHOOD_CHAIN_MAINNET } from './robinhood-chain.js';
+import { acceptAssetLogo, type AssetLogoRule } from './asset-logos.js';
 
 export const ROBINHOOD_STOCK_TOKEN_REGISTRY = Object.freeze({
   url: 'https://api.robinhood.com/rhj/assets', docs: 'https://docs.robinhood.com/chain/stock-token-apis',
   host: 'api.robinhood.com', path: '/rhj/assets', maximumBytes: 2_000_000, maximumAssets: 2_000,
   logoPrefix: 'https://cdn.robinhood.com/ncw_assets/logos/',
 });
+/** BUILD-BASE-001: a Stock Token logo is the issuer's CDN image of the representative deployment's own address (see `asset-logos.ts`). */
+export const ROBINHOOD_STOCK_TOKEN_LOGOS: AssetLogoRule = Object.freeze({ kind: 'ADDRESS_DERIVED', provider: 'robinhood.rhj-assets',
+  chain: ROBINHOOD_CHAIN_MAINNET.chain, prefix: ROBINHOOD_STOCK_TOKEN_REGISTRY.logoPrefix, suffix: '.png' });
 /** Featured shortcuts on the Stocks card. They never limit the catalog; search exposes every validated asset. */
 export const ROBINHOOD_FEATURED_STOCKS = Object.freeze(['AAPL', 'TSLA', 'NVDA', 'MSFT', 'AMZN'] as const);
 
@@ -88,11 +92,11 @@ function parseAsset(raw: unknown): { asset: CanonicalAsset; active: boolean } {
       typeof effective !== 'string' || !RFC3339.test(effective) || !Number.isFinite(Date.parse(effective))) fail('STOCK_REGISTRY_PENDING_MULTIPLIER_INVALID');
   const isin = raw.isin === undefined || raw.isin === null || raw.isin === '' ? null : typeof raw.isin === 'string' && ISIN.test(raw.isin) ? raw.isin : fail('STOCK_REGISTRY_ISIN_INVALID');
   // The logo is derived from the representative deployment's address; any other URL is dropped, never followed.
-  const logoUrl = raw.logoUrl === `${ROBINHOOD_STOCK_TOKEN_REGISTRY.logoPrefix}${address}.png` ? raw.logoUrl as string : null;
+  const logoUrl = acceptAssetLogo(raw.logoUrl, ROBINHOOD_STOCK_TOKEN_LOGOS, address);
   const chain = ROBINHOOD_CHAIN_MAINNET.chain;
   const asset: CanonicalAsset = { id: erc20AssetId(chain, address), chain, chainId: ROBINHOOD_CHAIN_MAINNET.chainId, network: ROBINHOOD_CHAIN_MAINNET.name,
     kind: 'ERC20', assetClass: 'STOCK_TOKEN', symbol: tokenSymbol, name: tokenName, address, decimals: 18, logoUrl,
-    source: { provider: 'robinhood.rhj-assets', url: ROBINHOOD_STOCK_TOKEN_REGISTRY.url, officialId: id as string },
+    source: { provider: ROBINHOOD_STOCK_TOKEN_LOGOS.provider, url: ROBINHOOD_STOCK_TOKEN_REGISTRY.url, officialId: id as string },
     stock: { officialId: id as string, isin, multiplier: formatWad(multiplierWad), multiplierWad: multiplierWad.toString(),
       pendingMultiplier: pendingWad === null ? null : formatWad(pendingWad), pendingMultiplierWad: pendingWad?.toString() ?? null,
       pendingEffectiveTime: pendingWad === null ? null : new Date(Date.parse(effective as string)).toISOString(),

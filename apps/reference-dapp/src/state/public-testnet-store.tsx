@@ -2,14 +2,18 @@
 'use client';
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
-import { publicAvailability, publicBegin, publicObserve, publicPrepare, publicRefresh, publicReport, publicReview, publicStatus, robinhoodSwapAvailability } from '../app/public-testnet-action';
+import { catalogSwapAvailability, publicAvailability, publicBegin, publicObserve, publicPrepare, publicRefresh, publicReport, publicReview, publicStatus } from '../app/public-testnet-action';
+import { CATALOG_NETWORK_IDENTITIES } from '../domain/network-registry';
 import type { PublicRun } from '../server/public-testnet-service';
 import { swapProfile } from '../domain/public-testnet-swap';
 import { injected, useBuild009Wallet } from './build009-wallet-store';
 import { useWorkflow } from './workflow-store';
 
 const KEY = 'gryloo:public-testnet-execution-id';
-type Store = { readonly available: boolean; readonly run: PublicRun | null; readonly recoveryOnly: boolean;
+type Store = { readonly available: boolean;
+  /** BUILD-BASE-001: whether this instance serves a catalog network's mainnet swaps (live or the MOCKED loopback harness). */
+  readonly catalogAvailable: (chain: string) => boolean;
+  readonly run: PublicRun | null; readonly recoveryOnly: boolean;
   readonly retired: boolean; readonly busy: string | null; readonly error: string | null;
   simulate(): void; review(): void; execute(): void; observe(): void; switchNetwork(): void };
 const Context = createContext<Store | null>(null);
@@ -22,6 +26,11 @@ function message(error: unknown): string {
   const messages: Record<string, string> = {
     PUBLIC_RECORDING_OFF: 'Public testnet recording is not enabled on this app instance.',
     ROBINHOOD_MAINNET_NOT_ENABLED: 'Robinhood Chain is not enabled on this app instance.',
+    BASE_MAINNET_NOT_ENABLED: 'Base mainnet is not enabled on this app instance.', BASE_STORAGE_NOT_CONFIGURED: 'Base mainnet is not enabled on this app instance.',
+    BASE_TOKEN_LIST_UNAVAILABLE: 'The Base token list is unavailable. Try again later.',
+    ASSET_CATALOG_UNAVAILABLE: 'The network\'s official asset catalog is unavailable. Try again later.',
+    TOKEN_METADATA_MISMATCH: 'A token\'s decimals on chain differ from its catalog entry. Nothing was prepared.',
+    TOKEN_DEPLOYMENT_MISMATCH: 'A token\'s deployment could not be verified. Nothing was prepared.',
     ROBINHOOD_STORAGE_NOT_CONFIGURED: 'Robinhood Chain is not enabled on this app instance.',
     OWNER_EXECUTION_NOT_ENABLED: 'Real-funds execution is not enabled on this app instance. Review is available; nothing was sent.',
     STOCK_REGISTRY_UNAVAILABLE: 'The official Robinhood asset registry is unavailable. Try again later.',
@@ -53,7 +62,7 @@ async function calldataDigest(data: string): Promise<string> {
 export function PublicTestnetProvider({ children }: { children: ReactNode }) {
   const { state, restoreWorkflow } = useWorkflow();
   const wallet = useBuild009Wallet();
-  const [availability, setAvailability] = useState({ testnet: false, robinhood: false });
+  const [availability, setAvailability] = useState<{ testnet: boolean; catalogs: Readonly<Record<string, boolean>> }>({ testnet: false, catalogs: {} });
   const [run, setRun] = useState<PublicRun | null>(null);
   const [source, setSource] = useState<SemanticWorkflow | null>(null);
   const [recoveryOnly, setRecoveryOnly] = useState(false);
@@ -65,9 +74,11 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
   const initialWorkflow = useRef(state.workflow);
   const restoreRef = useRef(restoreWorkflow); restoreRef.current = restoreWorkflow;
   const retired = Boolean(run && (recoveryOnly || source !== state.workflow));
-  // BUILD-RH-002: the authored (else quoted) swap's network decides which deployment gate applies.
+  // BUILD-RH-002: the authored (else quoted) swap's network decides which deployment gate applies (BUILD-BASE-001: each catalog network its own).
   const authoredChain = state.workflow.nodes.find(node => node.actionType === 'asset.swap.exact-input')?.chainId ?? null;
-  const available = swapProfile(authoredChain ?? run?.quote.chainId)?.kind === 'CATALOG' ? availability.robinhood : availability.testnet;
+  const authoredProfile = swapProfile(authoredChain ?? run?.quote.chainId);
+  const catalogAvailable = useCallback((chain: string) => availability.catalogs[chain] === true, [availability]);
+  const available = authoredProfile?.kind === 'CATALOG' ? catalogAvailable(authoredProfile.chainRef) : availability.testnet;
   const guarded = useCallback((label: string, action: () => Promise<void>) => {
     if (busyRef.current) return;
     busyRef.current = true; setBusy(label); setError(null);
@@ -75,7 +86,9 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
   }, []);
   useEffect(() => {
     let cancelled = false;
-    Promise.all([publicAvailability(), robinhoodSwapAvailability()]).then(([testnet, robinhood]) => { if (!cancelled) setAvailability({ testnet, robinhood }); });
+    Promise.all([publicAvailability(), ...CATALOG_NETWORK_IDENTITIES.map(network => catalogSwapAvailability(network.chain))]).then(([testnet, ...catalogs]) => {
+      if (!cancelled) setAvailability({ testnet, catalogs: Object.fromEntries(CATALOG_NETWORK_IDENTITIES.map((network, index) => [network.chain, catalogs[index] === true])) });
+    });
     const id = localStorage.getItem(KEY);
     if (id) publicStatus(id).then(async result => {
       if (cancelled || !result.ok) return;
@@ -99,7 +112,8 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
     return () => { cancelled = true; };
   }, []);
   const simulate = useCallback(() => guarded(`Reading ${swapProfile(authoredChain)?.network ?? 'Base Sepolia'}`, async () => {
-    if (!available) throw new Error(swapProfile(authoredChain)?.kind === 'CATALOG' ? 'ROBINHOOD_MAINNET_NOT_ENABLED' : 'PUBLIC_RECORDING_OFF');
+    const profile = swapProfile(authoredChain);
+    if (!available) throw new Error(profile?.kind === 'CATALOG' ? profile.runPrefix === 'bas' ? 'BASE_MAINNET_NOT_ENABLED' : 'ROBINHOOD_MAINNET_NOT_ENABLED' : 'PUBLIC_RECORDING_OFF');
     if (run?.attempts.some(a => ['PREPARED', 'HASH', 'PENDING', 'UNKNOWN'].includes(a.state))) throw new Error('ATTEMPT_ALREADY_ACTIVE');
     const workflow = workflowRef.current;
     const approval = run?.attempts.at(-1);
@@ -179,7 +193,7 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
       await new Promise<void>(resolve => setTimeout(resolve, 2_000));
     }
   }), [guarded, run, retired, wallet]);
-  return <Context.Provider value={{ available, run, recoveryOnly, retired, busy, error,
+  return <Context.Provider value={{ available, catalogAvailable, run, recoveryOnly, retired, busy, error,
     simulate, review, execute, observe, switchNetwork }}>{children}</Context.Provider>;
 }
 export function usePublicTestnet(): Store { const value = useContext(Context); if (!value) throw new Error('PUBLIC_TESTNET_PROVIDER_MISSING'); return value; }

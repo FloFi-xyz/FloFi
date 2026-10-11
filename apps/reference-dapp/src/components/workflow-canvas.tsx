@@ -31,8 +31,8 @@ import { WorkflowEditReview } from './workflow-edit-review';
 import { ComposerCard, supplyReviewFormId, poolReviewFormId, poolProposalTarget, type ComposerCardData } from './composer-card';
 import { canEditCanvasAmount, setupSummary, bridgePairLabel, bridgeSetupNetworks, type CanvasBridgeNetworks } from '../domain/canvas-action-setup';
 import { ActionIcon } from './action-icon';
-import { ROBINHOOD_NETWORK } from '../domain/asset-catalogs';
-import { useNetworkCatalog } from '../state/asset-catalog-store';
+import { ensureNetworkCatalog, useNetworkCatalog } from '../state/asset-catalog-store';
+import { CATALOG_NETWORK_IDENTITIES } from '../domain/network-registry';
 import { cryptoNetworks, cryptoSelectionOf, cryptoProfile, cryptoTokenOptions, selectCryptoNetwork, selectCryptoToken, canSelectCryptoAssets, type CryptoSelection, type CryptoAction } from '../domain/crypto-action-picker';
 import { actionReviewValue } from '../domain/canvas-action-setup';
 import { SimulateWorkflowCanvas } from './simulate-workflow-canvas';
@@ -237,10 +237,12 @@ function BuildCanvas({ environment, selectedId, select, openSettings, workflowNa
     actionSetup = null, amountInputs = {}, bridgeNetworkInputs = {}, cryptoSelections = {}, editCryptoSelection, startActionSetup, startStocksSetup, editCanvasAmount, editSwapSetupDirection, editBridgeNetworks, cancelCanvasAmount, reviewCanvasAmount, removeActionSetup, pending, applyProposal, dismissProposal } = useWorkflow();
   const workflow: Workflow = state.workflow;
   const wallet=useBuild009Wallet();
-  // BUILD-RH-002: Robinhood Chain assets resolve from the official catalog; load it whenever the Canvas shows a Robinhood action.
+  // BUILD-RH-002: catalog-network assets resolve from the official catalog; load it whenever the Canvas shows an action on that network
+  // (BUILD-BASE-001: Robinhood Chain and Base). The hook re-renders the Canvas when any catalog registers.
   const catalog = useNetworkCatalog();
-  const robinhoodShown = Boolean(actionSetup?.cryptoSelection?.network === ROBINHOOD_NETWORK || workflow.nodes.some(node => node.chainId === 'eip155:4663'));
-  useEffect(() => { if (robinhoodShown) void catalog.ensure(); }, [robinhoodShown, catalog]);
+  const shownCatalogs = CATALOG_NETWORK_IDENTITIES.filter(network => actionSetup?.cryptoSelection?.network === network.name ||
+    workflow.nodes.some(node => node.chainId === network.chain)).map(network => network.chain).join();
+  useEffect(() => { for (const chain of shownCatalogs ? shownCatalogs.split(',') : []) void ensureNetworkCatalog(false, chain); }, [shownCatalogs]);
   const [selectedIds, setSelectedIds] = useState<readonly string[]>(() => selectedId ? [selectedId] : []);
   const selectedIdsRef = useRef<readonly string[]>(selectedId ? [selectedId] : []);
   const surfaceRef = useRef<HTMLDivElement>(null);

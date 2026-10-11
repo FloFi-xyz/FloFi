@@ -139,7 +139,7 @@ export async function reconcileSupplyAttempt(review: SupplyReview, attempt: Supp
     return {...base,verdict:divergent?'DIVERGENT':'INCONCLUSIVE',reason:message};
   }
 }
-export function buildSupplyEvidence(input:{id:string;review:SupplyReview;journal:ExecutionJournal;provenance:'PUBLIC_TESTNET'|'MOCKED';ownerInitiated:boolean;observations:SupplyObservation[];approval?:SupplyObservation}): {bundle:EvidenceBundle;bundleHash:string;publicExecution:unknown;artifacts:unknown} {
+export function buildSupplyEvidence(input:{id:string;review:SupplyReview;journal:ExecutionJournal;provenance:'PUBLIC_TESTNET'|'PUBLIC_MAINNET'|'MOCKED';ownerInitiated:boolean;observations:SupplyObservation[];approval?:SupplyObservation}): {bundle:EvidenceBundle;bundleHash:string;publicExecution:unknown;artifacts:unknown} {
   if(input.review.withdraw) return buildWithdrawEvidence(input);
   if(input.review.repay) return buildRepayEvidence(input);
   if(input.review.borrow) return buildBorrowEvidence(input);
@@ -159,7 +159,7 @@ export function buildSupplyEvidence(input:{id:string;review:SupplyReview;journal
   const bundle:EvidenceBundle={schemaVersion:'1.0.0',evidenceBundleId:input.id,version:1,supersedes:null,
     semanticWorkflowHash:review.manifest.semanticWorkflowHash,artifactSetHash:review.manifest.artifactSetHash,simulationHash:review.manifest.simulationHash,
     policyHash:review.manifest.policyHash,manifestHash:supplyArtifactHash('strategy-manifest',review.manifest),executionPlanHash:supplyArtifactHash('execution-plan',review.plan),
-    journalHeadHash:head,observedAt:new Date().toISOString(),environment:input.provenance==='PUBLIC_TESTNET'?'TESTNET_EXECUTED':'MOCKED',outcome:'RECONCILED',
+    journalHeadHash:head,observedAt:new Date().toISOString(),environment:input.provenance==='PUBLIC_TESTNET'?'TESTNET_EXECUTED':input.provenance==='PUBLIC_MAINNET'?'MAINNET_EXECUTED':'MOCKED',outcome:'RECONCILED',
     receipts:(approval&&!input.observations.includes(approval)?[approval,...input.observations]:input.observations).map((o,i)=>({receiptId:`supply-receipt-${i}`,contentHash:supplyHash(o.receipt)})),differences:[],
     reconciliation:{balances:[{asset:{chainId:profile.chain,address:profile.asset,decimals:profile.decimals},amount:supply.postPosition.balance}],
       allowances:[{asset:{chainId:profile.chain,address:profile.asset,decimals:profile.decimals},amount:supply.postPosition.allowance}],debt:[],

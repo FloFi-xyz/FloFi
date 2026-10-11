@@ -7,7 +7,7 @@
  */
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { catalogAsset, parseRobinhoodStockTokenRegistry, robinhoodNetworkCatalog, uniswapV3PoolAddress, UNISWAP_V3_ROBINHOOD as UNI,
+import { catalogAsset, parseRobinhoodStockTokenRegistry, robinhoodNetworkCatalog, uniswapV3PoolAddress, UNISWAP_V3_BASE, UNISWAP_V3_ROBINHOOD,
   type AssetCatalog, type CanonicalAsset } from '@defi-workflow-engine/action-registry';
 import type { CatalogSwapRuntime, Rpc } from './public-testnet-service.ts';
 
@@ -19,7 +19,8 @@ export const asset = (catalog: AssetCatalog, symbol: string): CanonicalAsset => 
 const sha = (code: string) => createHash('sha256').update(Buffer.from(code.slice(2), 'hex')).digest('hex');
 /** Synthetic runtime code per contract role; pins are their SHA-256. */
 export const MOCK_CODE = Object.freeze({ factory: '0x60016001', router: '0x60026002', quoter: '0x60036003', positionManager: '0x60046004',
-  weth: '0x60056005', usdg: '0x60066006', stockTokenProxy: '0x60076007', pool: '0x60086008' });
+  weth: '0x60056005', usdg: '0x60066006', stockTokenProxy: '0x60076007', pool: '0x60086008',
+  /** BUILD-BASE-001: Base's pinned USDC, and the (unpinned) code of every listed Base token. */ usdc: '0x60096009', listed: '0x600a600a' });
 export const MOCK_CODE_PINS = Object.freeze(Object.fromEntries(Object.entries(MOCK_CODE).map(([name, code]) => [name, sha(code)])) as Record<keyof typeof MOCK_CODE, string>);
 
 export const word = (value: bigint) => '0x' + BigInt.asUintN(256, value).toString(16).padStart(64, '0');
@@ -36,13 +37,20 @@ export type MockTx = { from: string; to: string; data: string; value: string; ga
  * by their locally derived address. `apply` executes an owner transaction (approve, ERC-20 transfer, exact-input swap) the
  * way the real contracts would for these tests, records a receipt and advances the head.
  */
-export function createRobinhoodMockChain(catalog: AssetCatalog, options: { readonly now: () => number }) {
+export function createRobinhoodMockChain(catalog: AssetCatalog, options: { readonly now: () => number;
+  /** BUILD-BASE-001: the catalog network this chain plays (default Robinhood Chain): its Uniswap deployment, pinned tokens and OP Stack L1 fee. */
+  readonly network?: 'robinhood' | 'base' }) {
+  const base = options.network === 'base';
+  const UNI = { ...UNISWAP_V3_ROBINHOOD, ...base ? { factory: UNISWAP_V3_BASE.factory, router: UNISWAP_V3_BASE.router, quoter: UNISWAP_V3_BASE.quoter,
+    positionManager: UNISWAP_V3_BASE.positionManager, weth: UNISWAP_V3_BASE.weth, poolInitCodeHash: UNISWAP_V3_BASE.poolInitCodeHash } : {} };
   const state = {
-    chainHex: '0x1237', head: 1_000, hashes: new Map<number, string>(),
+    chainHex: base ? '0x2105' : '0x1237', head: 1_000, hashes: new Map<number, string>(),
+    /** OP Stack (Base): the L1 data fee the GasPriceOracle bounds and every receipt carries. */ l1Fee: base ? 25_000_000_000n : 0n,
     balances: new Map<string, bigint>(), allowances: new Map<string, bigint>(), native: new Map<string, bigint>(), nonces: new Map<string, number>(),
     stocks: new Map<string, MockStock>(), pools: new Map<string, { token0: string; token1: string } & MockPool>(),
     code: new Map<string, string>(), receipts: new Map<string, Record<string, unknown>>(), transactions: new Map<string, Record<string, unknown>>(),
     gasPrice: 10_000_000n, gasUsed: 120_000n, blockTime: new Map<number, number>(), codeOverride: new Map<string, string>(),
+    /** BUILD-BASE-001: a token whose `decimals()` differs from its catalog entry (a wrong list record). */ decimalsOverride: new Map<string, number>(),
     /** Balances, native balances and nonces as they were at the end of each past block (historical reads). */
     snapshots: new Map<number, { balances: Map<string, bigint>; native: Map<string, bigint>; nonces: Map<string, number> }>(),
   };
@@ -55,8 +63,10 @@ export function createRobinhoodMockChain(catalog: AssetCatalog, options: { reado
   const key = (token: string, owner: string) => `${token.toLowerCase()}:${owner.toLowerCase()}`;
   const allowanceKey = (token: string, owner: string, spender: string) => `${token.toLowerCase()}:${owner.toLowerCase()}:${spender.toLowerCase()}`;
   const blockHash = (n: number) => { if (!state.hashes.has(n)) state.hashes.set(n, '0x' + createHash('sha256').update('rh-block-' + n).digest('hex')); return state.hashes.get(n)!; };
-  for (const [role, address] of [['factory', UNI.factory], ['router', UNI.router], ['quoter', UNI.quoter], ['positionManager', UNI.positionManager],
-    ['weth', UNI.weth], ['usdg', UNI.usdg]] as const) state.code.set(address, MOCK_CODE[role]);
+  const roles: readonly (readonly [keyof typeof MOCK_CODE, string])[] = [['factory', UNI.factory], ['router', UNI.router], ['quoter', UNI.quoter],
+    ['positionManager', UNI.positionManager], ['weth', UNI.weth], base ? ['usdc', UNISWAP_V3_BASE.usdc] : ['usdg', UNI.usdg]];
+  for (const [role, address] of roles) state.code.set(address, MOCK_CODE[role]);
+  if (base) for (const listed of catalog.assets.filter(a => a.kind === 'ERC20' && a.address && !state.code.has(a.address))) state.code.set(listed.address!, MOCK_CODE.listed);
   for (const stock of catalog.assets.filter(a => a.stock)) {
     state.code.set(stock.address!, MOCK_CODE.stockTokenProxy);
     state.stocks.set(stock.address!, { multiplierWad: BigInt(stock.stock!.multiplierWad) });
@@ -106,7 +116,8 @@ export function createRobinhoodMockChain(catalog: AssetCatalog, options: { reado
       if (selector === '0xdc767007') return word(stock.scheduledWad ?? stock.multiplierWad);
       if (selector === '0x97a4064f') return word(BigInt(stock.effectiveAt ?? 0));
     }
-    if (selector === '0x313ce567') return word(BigInt(tokenDecimals(to)));
+    if (base && to === '0x420000000000000000000000000000000000000f' && selector === '0xf1c7a58b') return word(state.l1Fee);
+    if (selector === '0x313ce567') return word(BigInt(state.decimalsOverride.get(to) ?? tokenDecimals(to)));
     if (selector === '0x70a08231') return word(view.balances.get(key(to, readAddress(data, 0))) ?? 0n);
     if (selector === '0xdd62ed3e') return word(state.allowances.get(allowanceKey(to, readAddress(data, 0), readAddress(data, 1))) ?? 0n);
     if (selector === '0xa9059cbb') return word(1n);
@@ -119,6 +130,7 @@ export function createRobinhoodMockChain(catalog: AssetCatalog, options: { reado
     if (method === 'eth_chainId') return state.chainHex;
     if (method === 'eth_blockNumber') return '0x' + block.toString(16);
     if (method === 'eth_gasPrice') return '0x' + state.gasPrice.toString(16);
+    if (method === 'eth_maxPriorityFeePerGas') return '0x' + (state.gasPrice / 10n).toString(16);
     if (method === 'eth_getBlockByNumber') {
       const n = params[0] === 'latest' ? block : Number(BigInt(params[0] as string));
       const txs = [...state.receipts.values()].filter(r => r.blockNumber === '0x' + n.toString(16)).map(r => r.transactionHash);
@@ -172,7 +184,7 @@ export function createRobinhoodMockChain(catalog: AssetCatalog, options: { reado
       state.native.set(from, (state.native.get(from) ?? 0n) - value);
       state.native.set(to, (state.native.get(to) ?? 0n) + value);
     } else throw new Error('UNSUPPORTED_MOCK_TRANSACTION');
-    const fee = state.gasUsed * state.gasPrice;
+    const fee = state.gasUsed * state.gasPrice + state.l1Fee;
     state.native.set(from, (state.native.get(from) ?? 0n) - fee);
     state.nonces.set(from, nonce + 1);
     state.head += 1;
@@ -181,7 +193,7 @@ export function createRobinhoodMockChain(catalog: AssetCatalog, options: { reado
     state.transactions.set(hash, { hash, from, to, input: data, value: tx.value, chainId: state.chainHex, type: '0x2', nonce: '0x' + nonce.toString(16),
       blockHash: blockHash(state.head), blockNumber, gas: tx.gas ?? '0x' + (state.gasUsed * 2n).toString(16), maxFeePerGas: tx.maxFeePerGas ?? '0x' + (state.gasPrice * 2n).toString(16) });
     state.receipts.set(hash, { transactionHash: hash, status: '0x1', blockNumber, blockHash: blockHash(state.head), from, to, gasUsed: '0x' + state.gasUsed.toString(16),
-      effectiveGasPrice: '0x' + state.gasPrice.toString(16), gasUsedForL1: '0x0', logs });
+      effectiveGasPrice: '0x' + state.gasPrice.toString(16), ...base ? { l1Fee: '0x' + state.l1Fee.toString(16) } : { gasUsedForL1: '0x0' }, logs });
     return hash;
   }
   /** Advances the head by `n` empty blocks (confirmations), keeping historical reads exact. */

@@ -80,10 +80,11 @@ answers `*_NOT_ENABLED`.
 | `GRYLOO_ROUTER_TESTNET_EXECUTION=DISABLED` | keeps the testnet Router Simulate/Review-only | optional | optional |
 | `GRYLOO_SOLANA_DEVNET=live` | Orca Whirlpools swap and liquidity — Solana Devnet | recommended | as chosen |
 | `GRYLOO_SOLANA_DEVNET_EXECUTION=DISABLED` | keeps both Devnet flows Simulate/Review-only | optional | optional |
-| `GRYLOO_ROUTER=live` | Cross-chain Router — Base → Arbitrum One, **Simulate/Review only** | — | as chosen |
+| `GRYLOO_ROUTER=live` | Cross-chain Router — Base → Arbitrum One and (BUILD-BASE-001) Arbitrum One → Base, **Simulate/Review only** | — | as chosen |
 | `GRYLOO_JUPITER=live` | Jupiter — Solana mainnet-beta, **Simulate/Review only** | — | as chosen |
 | `GRYLOO_ROBINHOOD_MAINNET=live` | Robinhood Chain mainnet (BUILD-RH-002): the official Stock Token catalog (Canvas search, chat, MCP), catalog swaps, token transfers, Uniswap v3 liquidity and the Router routes Base/Arbitrum USDC ⇄ Robinhood USDG, **Simulate/Review only** | — | as chosen |
-| `GRYLOO_ROUTER_OWNER_EXECUTION=MAINNET_OWNER_APPROVED`, `GRYLOO_JUPITER_OWNER_EXECUTION=MAINNET_OWNER_APPROVED`, `GRYLOO_ROBINHOOD_OWNER_EXECUTION=MAINNET_OWNER_APPROVED` | real-funds owner execution | **never** | only by explicit owner decision; not set by this build |
+| `GRYLOO_BASE_MAINNET=live` | Base mainnet (BUILD-BASE-001): the Base asset catalog — pinned ETH/USDC/WETH plus the Uniswap Labs Default Token List, read server-side from `https://tokens.uniswap.org` (no redirects, size-capped, validated fail-closed, never a recorded copy) — for Canvas search, chat, Copilot and MCP; catalog swaps; ETH and token transfers (OP Stack L1 data fee bounded at Review and reconciled); Uniswap v3 liquidity; Aave V3 USDC Supply/Borrow/Repay/Withdraw. **Simulate/Review only**. In-process server actions additionally need `NODE_ENV=development`; hosted deployments use the cloud flows (`base-swap`, `base-mainnet-transfer`, `base-liquidity`, `base-aave`). The BUILD-002 Base USDC ⇄ WETH reference swap keeps its observation and fork paths; it uses the Base swap flow only when this gate is on and the Mode A fork runtime is unavailable | — | as chosen |
+| `GRYLOO_ROUTER_OWNER_EXECUTION=MAINNET_OWNER_APPROVED`, `GRYLOO_JUPITER_OWNER_EXECUTION=MAINNET_OWNER_APPROVED`, `GRYLOO_ROBINHOOD_OWNER_EXECUTION=MAINNET_OWNER_APPROVED`, `GRYLOO_BASE_OWNER_EXECUTION=MAINNET_OWNER_APPROVED` | real-funds owner execution (deployment-wide: any connected user signs with their own wallet; no wallet allowlist; the Router gate also covers Arbitrum One → Base) | **never** | only by explicit owner decision; not set by this build |
 
 ## 4. RPC endpoints and provider keys (optional; all HTTPS, no credentials in the userinfo part)
 
@@ -96,7 +97,7 @@ chain, to Mainnet or to localhost, and every response's chain identity is verifi
 | `GRYLOO_ETHEREUM_SEPOLIA_RPC_URL` | Ethereum Sepolia 11155111 — swap, liquidity, Aave WBTC, transfer | `https://ethereum-sepolia-rpc.publicnode.com` | if keyed |
 | `GRYLOO_ARBITRUM_SEPOLIA_RPC_URL` | Arbitrum Sepolia 421614 — Router testnet destination | `https://sepolia-rollup.arbitrum.io/rpc` | if keyed |
 | `GRYLOO_SOLANA_DEVNET_RPC_URL` | Solana Devnet (genesis-verified) | `https://api.devnet.solana.com` | if keyed |
-| `GRYLOO_BASE_RPC_URL`, `GRYLOO_ARBITRUM_RPC_URL` | Base 8453 / Arbitrum One 42161 — Router mainnet (read-only) | `https://mainnet.base.org`, `https://arb1.arbitrum.io/rpc` | if keyed |
+| `GRYLOO_BASE_RPC_URL`, `GRYLOO_ARBITRUM_RPC_URL` | Base 8453 / Arbitrum One 42161 — Router mainnet (read-only, both directions). BUILD-BASE-001: `GRYLOO_BASE_RPC_URL` also serves the chain-bound Base mainnet swap, transfer, liquidity and Aave reads (OP Stack L1-fee oracle included); it must support `eth_simulateV1` for liquidity | `https://mainnet.base.org`, `https://arb1.arbitrum.io/rpc` | if keyed |
 | `GRYLOO_SOLANA_RPC_URL` | Solana mainnet-beta (genesis-verified) — Jupiter (read-only) | `https://api.mainnet-beta.solana.com` | if keyed |
 | `GRYLOO_ROBINHOOD_RPC_URL` | Robinhood Chain 4663 (chain-bound) — catalog swap, transfer, liquidity and the Robinhood Router routes. Must support `eth_simulateV1` for liquidity. The Router routes also use `GRYLOO_BASE_RPC_URL` / `GRYLOO_ARBITRUM_RPC_URL` for their other chain | `https://rpc.mainnet.chain.robinhood.com` | if keyed |
 | `GRYLOO_ALCHEMY_API_KEY` | Keyed Base Sepolia provider the Supply → Borrow → Swap composition requires (public endpoints rate-limit its sequential `eth_simulateV1`; sent only as a server-side Bearer header); dev-only Base observation. Without it the composition fails closed with `LENDING_PUBLIC_CREDENTIAL_NOT_CONFIGURED` | — | **yes** |
@@ -293,9 +294,9 @@ flows' worker, which keep `WORKER_SUBMISSION_FORBIDDEN`. Startup logs: `delegati
 These select local journals, loopback MOCKED harnesses or local forks. On a hosted deployment they are refused: journals and
 `/tmp` state are never used, harness gates leave the flow `off`, and fork/demo actions report themselves unavailable.
 
-`GRYLOO_*_HARNESS=MOCKED_LOOPBACK_ONLY` (supply, lending, Jupiter, Solana Devnet, Robinhood, Robinhood mainnet — `GRYLOO_ROBINHOOD_MAINNET_HARNESS`, its registry read from 127.0.0.1:8561 — Uniswap liquidity, Router, Router testnet, card
+`GRYLOO_*_HARNESS=MOCKED_LOOPBACK_ONLY` (supply, lending, Jupiter, Solana Devnet, Robinhood, Robinhood mainnet — `GRYLOO_ROBINHOOD_MAINNET_HARNESS`, its registry read from 127.0.0.1:8561 — Base mainnet — `GRYLOO_BASE_MAINNET_HARNESS`, its token list and RPC on 127.0.0.1:8562; it always wins over `live` — Uniswap liquidity, Router, Router testnet, card
 provider — `GRYLOO_CARD_HARNESS` points Add card at the loopback Mercado Pago stand-in on 127.0.0.1:8555),
-`GRYLOO_*_JOURNAL` (supply, public testnet, Robinhood, Jupiter, Solana Devnet, Uniswap liquidity, Router, Router testnet, liquidity,
+`GRYLOO_*_JOURNAL` (supply, public testnet, Robinhood, Base — `GRYLOO_BASE_JOURNAL`, with one subdirectory per capability — Jupiter, Solana Devnet, Uniswap liquidity, Router, Router testnet, liquidity,
 Mode A, bridge), `GRYLOO_PUBLIC_TESTNET_READ`, `GRYLOO_BASE_OBSERVATION=live`, `GRYLOO_MODE_A`/`_PROFILE`, `GRYLOO_MODE_B`/`_PROFILE`/
 `_EXECUTOR_KEY_FILE`/`_SMOKE_PROFILE`, `GRYLOO_COMPOSITION_MODE`/`_PROFILE`/`_EXECUTOR_KEY_FILE`/`_ALLOW_MOCKED_UI`/`_SMOKE_PROFILE`,
 `GRYLOO_LIQUIDITY`/`_PROFILE`, `GRYLOO_COW`/`GRYLOO_COW_RUNTIME`, `GRYLOO_BRIDGE`, `FLOFI_DEVELOPER_WEBHOOK_LOOPBACK`, `FLOFI_TELEGRAM_API_BASE` (loopback Bot API double), `GRYLOO_CHANNEL_E2E`, and the

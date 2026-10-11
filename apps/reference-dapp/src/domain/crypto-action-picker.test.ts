@@ -29,9 +29,13 @@ describe('one network per crypto action', () => {
     }
     expect(cryptoNetworks(action, 'unknown')).toEqual([]);
   });
-  it.each(['supply', 'borrow', 'repay', 'withdraw'] as const)('%s exposes the two pinned Aave deployments', action => {
+  // BUILD-BASE-001 (intentional change): Base mainnet USDC (real funds) joins the two test deployments.
+  it.each(['supply', 'borrow', 'repay', 'withdraw'] as const)('%s exposes the pinned Aave deployments', action => {
     expect(cryptoNetworks(action, 'testnet').map(profile => [profile.network, profile.tokens])).toEqual([['Base Sepolia', ['USDC']], ['Ethereum Sepolia', ['WBTC']]]);
-    expect(cryptoNetworks(action, 'mainnet')).toEqual([]);
+    expect(cryptoNetworks(action, 'mainnet').map(profile => [profile.network, profile.tokens])).toEqual([['Base', ['USDC']]]);
+    const base = createCryptoActionNode('base', input(action, 'Base'));
+    expect(base.chainId).toBe('eip155:8453');
+    expect(cryptoInputOf(base)?.selection).toEqual(selectCryptoNetwork(action, 'Base'));
     expect(() => selectCryptoNetwork(action, 'Solana Devnet')).toThrow('ACTION_NETWORK_UNSUPPORTED');
     const node = createCryptoActionNode('asset', input(action, 'Base Sepolia'));
     expect(node.chainId).toBe('eip155:84532');
@@ -88,7 +92,9 @@ describe('one network per crypto action', () => {
     const rejected = editorReducer({ ...before, workflow: { ...before.workflow, nodes: [locked] } }, { type: 'SET_CRYPTO_ACTION', nodeId: old.nodeId, input: input('swap', 'Solana Devnet'), source: 'CANVAS', baseRevision: 1 }, context);
     expect(rejected.error).toBe('ACTION_SELECTION_LOCKED');
   });
-  it('retains provider constraints and legacy pool minimums on the same deployment', () => {
+  // BUILD-BASE-001 (intentional change): the Base Pool card authors the canonical catalog position; the BUILD-006 fork-only position is a
+  // legacy declaration the picker never edits or converts.
+  it('retains provider constraints, and never converts the legacy fork-only Base position', () => {
     const baseContext = cryptoReviewContext('Base');
     const cow = editorReducer(initialEditor(), { type: 'ADD_COW_SWAP', direction: 'USDC_TO_WETH', amount: '1', slippage: '50', source: 'CANVAS', baseRevision: 0 }, baseContext);
     const swap = cow.workflow.nodes.find(node => node.actionType === 'asset.swap.exact-input')!;
@@ -96,14 +102,13 @@ describe('one network per crypto action', () => {
     expect(changed.error).toBeNull();
     expect(changed.workflow.nodes.find(node => node.nodeId === swap.nodeId)?.adapterConstraints).toEqual(swap.adapterConstraints);
     const pool = editorReducer(initialEditor(), { type: 'ADD_CRYPTO_ACTION', input: input('pool', 'Base'), source: 'CANVAS', baseRevision: 0 }, baseContext);
-    const position = pool.workflow.nodes.find(node => node.actionType === 'asset.liquidity.uniswap-v3')!;
-    const protectedPosition = { ...position, inputs: position.inputs.map(parameter => parameter.kind === 'QUANTITY' && parameter.name === 'amount0-min' ? { ...parameter, value: { ...parameter.value, amount: '10000000000000000' } } : parameter) };
-    const protectedState = { ...pool, workflow: { ...pool.workflow, nodes: pool.workflow.nodes.map(node => node.nodeId === position.nodeId ? protectedPosition : node) } };
-    const edited = editorReducer(protectedState, { type: 'SET_CRYPTO_ACTION', nodeId: position.nodeId, input: { ...input('pool', 'Base'), amount: '0.2' }, source: 'CANVAS', baseRevision: 1 }, baseContext);
-    expect(edited.error).toBeNull();
-    expect(edited.workflow.nodes.find(node => node.nodeId === position.nodeId)?.inputs.find(parameter => parameter.name === 'amount0-min')).toEqual(protectedPosition.inputs.find(parameter => parameter.name === 'amount0-min'));
-    const rejected = editorReducer(protectedState, { type: 'SET_CRYPTO_ACTION', nodeId: position.nodeId, input: { ...input('pool', 'Base'), amount: '0.001' }, source: 'CANVAS', baseRevision: 1 }, baseContext);
-    expect(rejected.error).not.toBeNull(); expect(rejected.workflow).toBe(protectedState.workflow);
+    expect(pool.error).toBeNull();
+    expect(pool.workflow.nodes.map(node => [node.actionType, node.chainId])).toContainEqual(['asset.liquidity.concentrated', 'eip155:8453']);
+    const legacy = editorReducer(initialEditor(), { type: 'ADD_LIQUIDITY', input: { weth: '0.1', usdc: '100', tickLower: '-887270', tickUpper: '887270', recipient: owner,
+      minimumWeth: '0', minimumUsdc: '0' }, source: 'CHAT', baseRevision: 0 }, baseContext);
+    const position = legacy.workflow.nodes.find(node => node.actionType === 'asset.liquidity.uniswap-v3')!;
+    const converted = editorReducer(legacy, { type: 'SET_CRYPTO_ACTION', nodeId: position.nodeId, input: { ...input('pool', 'Base'), amount: '0.2' }, source: 'CANVAS', baseRevision: 1 }, baseContext);
+    expect(converted.error).toBe('ACTION_SELECTION_LOCKED'); expect(converted.workflow).toBe(legacy.workflow);
   });
   it('invalidates a reviewed selection and restores the entire selection through undo', () => {
     let state = editorHistoryReducer(initialEditorHistory(), { type: 'START_ACTION_SETUP', action: 'swap', position: { x: 0, y: 0 }, beneficiary: owner });

@@ -35,7 +35,14 @@ export const ROUTER_PAIRS: readonly RouterPair[] = Object.freeze([Object.freeze(
   .map(([id, sourceChain, sourceAddress, sourceSymbol, destinationChain, destinationAddress, destinationSymbol]) => Object.freeze({ id,
     source: Object.freeze({ chainId: sourceChain, address: sourceAddress, decimals: 6, symbol: sourceSymbol }),
     destination: Object.freeze({ chainId: destinationChain, address: destinationAddress, decimals: 6, symbol: destinationSymbol }),
-    minimumAmount: '1000000', maximumAmount: '100000000' }))]);
+    minimumAmount: '1000000', maximumAmount: '100000000' })),
+// BUILD-BASE-001: Base bridge IN from Arbitrum One, the reverse of the BUILD-ROUTER-001 pair with the same 0.1–100 USDC bounds.
+Object.freeze({
+  id: 'arbitrum-usdc-to-base-usdc',
+  source: Object.freeze({ chainId: 'eip155:42161', address: '0xaf88d065e77c8cc2239327c5edb3a432268e5831', decimals: 6, symbol: 'USDC' }),
+  destination: Object.freeze({ chainId: 'eip155:8453', address: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913', decimals: 6, symbol: 'USDC' }),
+  minimumAmount: '100000', maximumAmount: '100000000',
+})]);
 export const ROUTER_MAXIMUM_SLIPPAGE_BPS = 300;
 export function routerPair(sourceChain: string, sourceToken: string, destinationChain: string, destinationToken: string): RouterPair | null {
   return ROUTER_PAIRS.find(p => p.source.chainId === sourceChain && p.source.address === sourceToken &&

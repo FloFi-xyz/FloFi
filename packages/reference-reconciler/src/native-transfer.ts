@@ -7,9 +7,13 @@
  * BUILD-RH-002: the same reconciler for a native transfer to an explicit recipient and for a catalog ERC-20 transfer: the token
  * call must be the reviewed `transfer(recipient, amount)`, its only logs the token's `Transfer` (and a Stock Token's
  * `TransferWithScaledUI`), the token balances must move by exactly the amount and the owner's ETH by exactly the fee.
+ *
+ * BUILD-BASE-001: on an OP Stack profile (Base) the fee is gasUsed × effectiveGasPrice plus the receipt's `l1Fee`; a receipt without
+ * `l1Fee` there is not reconcilable. Profiles without an L1 data fee are unchanged.
  */
 import { rpcRecord, rpcHash, supplyHex, supplyHash, supplyArtifactHash, nativeTransferProfile,
   type NativeTransferReview, type TransferRpc } from '@defi-workflow-engine/reference-compiler';
+import { transferL1FeeOracle } from '@defi-workflow-engine/action-registry';
 import { hashJournalBytes, type EvidenceBundle, type ExecutionJournal } from '@defi-workflow-engine/workflow-contracts';
 
 export type TransferChainAttempt = { nonce: string; transactionHash: string | null; preparedAtBlock: number };
@@ -75,7 +79,11 @@ export async function reconcileNativeTransfer(review: NativeTransferReview, atte
     const gasUsed = strict(receipt.gasUsed), effectiveGasPrice = strict(receipt.effectiveGasPrice);
     if (gasUsed > gasLimit || effectiveGasPrice > offeredPrice) throw new Error('TRANSFER_FEE_BOUND_MISMATCH');
     // Ethereum L1 charges gasUsed × effectiveGasPrice; Arbitrum Nitro also folds L1 data into gasUsed. No separate L1 fee.
-    const fee = gasUsed * effectiveGasPrice;
+    // BUILD-BASE-001: an OP Stack receipt adds its own `l1Fee`, which the owner also pays.
+    const opStack = transferL1FeeOracle(profile) !== null;
+    if (opStack && receipt.l1Fee === undefined) throw new Error('TRANSFER_RECEIPT_L1_FEE_MISMATCH');
+    const l1Fee = opStack ? strict(receipt.l1Fee) : 0n;
+    const fee = gasUsed * effectiveGasPrice + l1Fee;
     if (fee > BigInt(review.feeBudget)) throw new Error('TRANSFER_FEE_BOUND_MISMATCH');
     const before = supplyHex(blockNumber - 1), after = supplyHex(blockNumber);
     const [balanceBefore, balanceAfter, nonceBefore, nonceAfter, code] = await Promise.all([
@@ -134,7 +142,13 @@ export function buildNativeTransferEvidence(input: { id: string; review: NativeT
       ...review.asset && o.facts.tokenBalanceAfter !== undefined ? [{ asset: { chainId: profile.chain, address: review.asset.token, decimals: review.asset.decimals }, amount: o.facts.tokenBalanceAfter }] : []],
       allowances: [], debt: [], positions: [],
       fees: [{ asset: nativeAsset, amount: o.facts.fee }], residualAssets: [], ownership: [{ chainId: profile.chain, address: review.account }],
-      limitations: review.asset || review.recipient !== review.account ? [
+      limitations: transferL1FeeOracle(profile) ? [
+        `Inclusion is verified at ${profile.network} (L2) sequencer level after confirmations; L1 finality is not claimed.`,
+        review.asset ? 'Token transfer: exact transfer(recipient, amount) call, its transfer log(s) and both token balances; ETH moved by exactly the fee.'
+          : review.recipient !== review.account ? 'Native transfer to an explicit recipient: the owner balance moved by exactly the value plus the fee.'
+          : 'Self-transfer: the value leg nets to zero; the owner balance moved by exactly the fee.',
+        'The fee is gasUsed × effectiveGasPrice plus the OP Stack L1 data fee (l1Fee) of the receipt.']
+        : review.asset || review.recipient !== review.account ? [
         'Inclusion is verified at Robinhood Chain (L2) sequencer level after confirmations; L1 finality is not claimed.',
         review.asset ? 'Token transfer: exact transfer(recipient, amount) call, its transfer log(s) and both token balances; ETH moved by exactly the fee.'
           : 'Native transfer to an explicit recipient: the owner balance moved by exactly the value plus the fee.',

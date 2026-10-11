@@ -8,7 +8,7 @@
  *    execution capability registry is resolved on that exact IR. "Supported by code" is the registry's verdict; demonstrated
  *    evidence is the registry's ceiling (often none). Deployment enablement is added by the caller from the runtime.
  */
-import { AAVE_V3_LENDING_PROFILES, executionCapabilityRegistry, LENDING_BASE_SEPOLIA, ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY, resolveNodeCapability, ROBINHOOD_BASE_ASSETS,
+import { AAVE_V3_LENDING_PROFILES, executionCapabilityRegistry, LENDING_BASE_SEPOLIA, ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY, resolveNodeCapability, ROBINHOOD_BASE_ASSETS, BASE_BASE_ASSETS,
   resolveWorkflowCapability, SOLANA_DEVNET_CHAIN, SOLANA_DEVNET_TOKENS, SOLANA_MAINNET_CHAIN, SOLANA_MAINNET_TOKENS, UNISWAP_LIQUIDITY_PROFILES,
   type CapabilityDimension, type EvidenceMaturity, type ExecutionEnvironment } from '@defi-workflow-engine/action-registry';
 import { createBaseSepoliaReviewContext, createEthereumSepoliaReviewContext } from '@defi-workflow-engine/reference-linter';
@@ -58,10 +58,12 @@ function assetEntries(): Entry[] {
   for (const t of [ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY.token0, ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY.token1])
     out.push({ chain: ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY.chain, symbol: t.symbol, address: t.mint, decimals: t.decimals, action: 'add_liquidity', source: 'orca-whirlpools-liquidity:Solana Devnet' });
   // BUILD-RH-002: Robinhood Chain's code-pinned base assets. Its Stock Tokens come only from the official registry at composition time
-  // (`prepareStrategyCatalogs`), so they are not listed here; any official symbol may be named.
-  for (const t of ROBINHOOD_BASE_ASSETS.assets.filter(a => a.kind === 'ERC20' && a.address))
-    for (const action of ['swap', 'add_liquidity', 'transfer'] as const)
-      out.push({ chain: ROBINHOOD_BASE_ASSETS.chain, symbol: t.symbol, address: t.address!, decimals: t.decimals, action, source: `robinhood-catalog:${action}` });
+  // (`prepareStrategyCatalogs`), so they are not listed here; any official symbol may be named. BUILD-BASE-001: likewise Base's pinned
+  // USDC and WETH; its token-list assets come only from the validated list.
+  for (const [catalog, name] of [[ROBINHOOD_BASE_ASSETS, 'robinhood'], [BASE_BASE_ASSETS, 'base']] as const)
+    for (const t of catalog.assets.filter(a => a.kind === 'ERC20' && a.address))
+      for (const action of ['swap', 'add_liquidity', 'transfer'] as const)
+        out.push({ chain: catalog.chain, symbol: t.symbol, address: t.address!, decimals: t.decimals, action, source: `${name}-catalog:${action}` });
   const aave = AAVE_V3_LENDING_PROFILES.find(p => p.network === 'Base Sepolia')!;
   out.push({ chain: aave.chain, symbol: aave.symbol, address: aave.asset, decimals: aave.decimals, action: 'lending_composition', source: 'lending-composition:Base Sepolia' });
   out.push({ chain: aave.chain, symbol: 'WETH', address: LENDING_BASE_SEPOLIA.weth, decimals: 18, action: 'lending_composition', source: 'lending-composition:Base Sepolia' });

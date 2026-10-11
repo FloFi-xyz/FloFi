@@ -6,18 +6,21 @@ import { canDeleteCanvasNode } from './canvas-keyboard';
 import { SWAP_ACTION, swapDetails } from './swap-authoring';
 import { solanaSwapDetails, solanaSwapLabels, type SolanaSwapInput } from './jupiter-authoring';
 import { routerDetails, routerInputOf, ROUTER_NETWORK_OPTIONS, ROUTER_ROUTING_LABEL, type RouterBridgeInput, type RouterNetwork } from './router-authoring';
-import { borrowDetails, repayDetails, supplyDetails, withdrawDetails, type SupplyInput, type WithdrawInput } from './supply-authoring';
+import { borrowDetails, lendingProfileFor, repayDetails, supplyDetails, withdrawDetails, type SupplyInput, type WithdrawInput } from './supply-authoring';
+import { aaveEnvironment } from '@defi-workflow-engine/action-registry';
 import { uniswapLiquidityDetails, uniswapLiquidityInputOf, type UniswapLiquidityInput } from './uniswap-liquidity-authoring';
 import { solanaLiquidityDetails, solanaLiquidityInputOf, type SolanaLiquidityInput } from './solana-liquidity-authoring';
 import { lendingDetails, type LendingInput } from './lending-authoring';
-import { catalogSwapDetails } from './catalog-swap-authoring';
+import { catalogSwapDetails, type CatalogSwapNetwork } from './catalog-swap-authoring';
 import { robinhoodLiquidityDetails, robinhoodLiquidityInputOf, type RobinhoodLiquidityInput } from './robinhood-liquidity-authoring';
+import { transferDetails, type RobinhoodTransferInput } from './robinhood-transfer-authoring';
+import { networkIdentity } from './network-registry';
 
 /**
  * BUILD-COPILOT-002: ordered, typed descriptions of the canonical workflow's steps, read only from the IR through the
  * existing `*Details` readers. AI-agnostic and read-only: nothing here edits, quotes or observes a chain.
  */
-export type StepKind = 'SWAP' | 'BRIDGE' | 'SUPPLY' | 'BORROW' | 'REPAY' | 'WITHDRAW' | 'LIQUIDITY' | 'TEMPLATE' | 'OTHER';
+export type StepKind = 'SWAP' | 'BRIDGE' | 'SUPPLY' | 'BORROW' | 'REPAY' | 'WITHDRAW' | 'LIQUIDITY' | 'TRANSFER' | 'TEMPLATE' | 'OTHER';
 export type StepDetail =
   | { readonly type: 'EVM_SWAP'; readonly network: 'Base' | 'Base Sepolia' | 'Ethereum Sepolia'; readonly from: 'USDC' | 'WETH'; readonly to: 'USDC' | 'WETH'; readonly amount: string;
       readonly slippage: string }
@@ -27,11 +30,13 @@ export type StepDetail =
   | { readonly type: 'AAVE_WITHDRAW'; readonly input: WithdrawInput }
   | { readonly type: 'UNISWAP_LIQUIDITY'; readonly input: UniswapLiquidityInput; readonly lowerPrice: string; readonly upperPrice: string }
   | { readonly type: 'ORCA_LIQUIDITY'; readonly input: SolanaLiquidityInput; readonly lowerPrice: string; readonly upperPrice: string }
-  /** BUILD-RH-002: a Robinhood Chain swap over the official catalog (USDG, WETH, Stock Tokens). */
-  | { readonly type: 'CATALOG_SWAP'; readonly network: 'Robinhood Chain'; readonly from: string; readonly to: string; readonly amount: string; readonly slippage: string }
-  /** BUILD-RH-002: a Robinhood Chain Uniswap v3 position on a catalog pair; prices are `priceUnit` (token0 per token1) at the range edges. */
+  /** BUILD-RH-002: a catalog-network swap (Robinhood Chain: USDG, WETH, Stock Tokens; BUILD-BASE-001 Base: its validated catalog). */
+  | { readonly type: 'CATALOG_SWAP'; readonly network: CatalogSwapNetwork; readonly from: string; readonly to: string; readonly amount: string; readonly slippage: string }
+  /** BUILD-RH-002: a catalog-network Uniswap v3 position on a catalog pair; prices are `priceUnit` (token0 per token1) at the range edges. */
   | { readonly type: 'CATALOG_LIQUIDITY'; readonly input: RobinhoodLiquidityInput; readonly lowerPrice: string; readonly upperPrice: string; readonly priceUnit: string;
       readonly fullRange: boolean }
+  /** BUILD-BASE-001: a transfer (native ETH, or a catalog token on a catalog network) to the connected owner or an explicit recipient. */
+  | { readonly type: 'TRANSFER'; readonly input: RobinhoodTransferInput }
   | { readonly type: 'LENDING_COMPOSITION'; readonly role: 'SUPPLY' | 'BORROW' | 'SWAP'; readonly input: LendingInput }
   | { readonly type: 'TEMPLATE'; readonly template: string }
   | { readonly type: 'OTHER'; readonly actionType: string };
@@ -69,16 +74,18 @@ function describe(node: Node, workflow: Workflow, context: ReviewContext): Descr
       protocol: `Cross-chain Router (${ROUTER_ROUTING_LABEL[routed.routing]})`, network: `${option.sourceLabel} → ${option.destinationLabel}`,
       testFunds: routed.network === 'testnet' };
   }
+  // Test funds on the testnet Aave profiles; BUILD-BASE-001 Base mainnet lends real funds.
+  const lendingTestFunds = (input: { network: string; asset: string }) => aaveEnvironment(lendingProfileFor(input.network, input.asset)) !== 'MAINNET';
   const withdrawn = read(() => withdrawDetails(node as Parameters<typeof withdrawDetails>[0]));
-  if (withdrawn) return { kind: 'WITHDRAW', detail: { type: 'AAVE_WITHDRAW', input: withdrawn }, protocol: 'Aave V3', network: withdrawn.network, testFunds: true };
+  if (withdrawn) return { kind: 'WITHDRAW', detail: { type: 'AAVE_WITHDRAW', input: withdrawn }, protocol: 'Aave V3', network: withdrawn.network, testFunds: lendingTestFunds(withdrawn) };
   for (const [operation, reader] of [['REPAY', repayDetails], ['BORROW', borrowDetails], ['SUPPLY', supplyDetails]] as const) {
     const input = read(() => reader(node as Parameters<typeof reader>[0]));
-    if (input) return { kind: operation, detail: { type: 'AAVE', operation, input }, protocol: 'Aave V3', network: input.network, testFunds: true };
+    if (input) return { kind: operation, detail: { type: 'AAVE', operation, input }, protocol: 'Aave V3', network: input.network, testFunds: lendingTestFunds(input) };
   }
   const uni = read(() => uniswapLiquidityDetails(node));
   if (uni) return { kind: 'LIQUIDITY', detail: { type: 'UNISWAP_LIQUIDITY', input: uniswapLiquidityInputOf(uni), lowerPrice: uni.lowerPrice, upperPrice: uni.upperPrice },
     protocol: uni.provider, network: uni.network, testFunds: true };
-  // BUILD-RH-002: Robinhood Chain (real funds) — catalog swaps and Uniswap v3 positions on catalog pairs.
+  // BUILD-RH-002: catalog networks (real funds: Robinhood Chain, BUILD-BASE-001 Base) — catalog swaps and Uniswap v3 positions on catalog pairs.
   const catalogSwap = read(() => catalogSwapDetails(node));
   if (catalogSwap) return { kind: 'SWAP', detail: { type: 'CATALOG_SWAP', network: catalogSwap.network, from: catalogSwap.from, to: catalogSwap.to,
     amount: catalogSwap.amount, slippage: String(catalogSwap.slippage) }, protocol: 'Uniswap v3', network: catalogSwap.network, testFunds: false };
@@ -90,6 +97,10 @@ function describe(node: Node, workflow: Workflow, context: ReviewContext): Descr
     protocol: orca.provider, network: orca.network, testFunds: true };
   const network = CHAIN_LABEL[node.chainId] ?? node.chainId;
   const testFunds = TEST_CHAINS.has(node.chainId) ? true : MAIN_CHAINS.has(node.chainId) ? false : null;
+  // BUILD-BASE-001: transfers are typed steps (the Copilot refers to and re-authors catalog-network transfers like any other step).
+  const transfer = read(() => transferDetails(node as Parameters<typeof transferDetails>[0]));
+  if (transfer) return { kind: 'TRANSFER', detail: { type: 'TRANSFER', input: transfer }, protocol: 'Transfer', network: transfer.network,
+    testFunds: networkIdentity(node.chainId)?.environment === 'TESTNET' };
   // CoW swaps and the legacy bridges, compositions and transfers keep their own panels; they are described, not typed.
   if (node.actionType === SWAP_ACTION && node.adapterConstraints.protocols.join() === 'uniswap' && ['eip155:8453', 'eip155:84532', 'eip155:11155111'].includes(node.chainId)) {
     const swap = read(() => swapDetails(node, reviewContextForChain(node.chainId, context)));

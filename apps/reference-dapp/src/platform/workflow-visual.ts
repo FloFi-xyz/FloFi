@@ -101,6 +101,9 @@ function project(s: WorkflowStep, node: Workflow['nodes'][number] | undefined): 
       return step({ action: d.role, provider: 'Aave V3', network: s.network, amounts: [{ amount: d.role === 'SUPPLY' ? d.input.supply : d.input.borrow, asset: 'USDC' }],
         account: owner, testFunds });
     }
+    // BUILD-BASE-001: transfers are typed steps; an explicit recipient is shown as such.
+    case 'TRANSFER': return step({ action: 'TRANSFER', network: d.input.network, amounts: [{ amount: d.input.amount, asset: d.input.asset }],
+      account: d.input.recipient === 'CONNECTED_OWNER' ? { role: 'CONNECTED_WALLET' } : { role: 'RECIPIENT', address: short(d.input.recipient) }, testFunds });
     case 'OTHER': {
       const transfer = node ? transferDetails(node as Parameters<typeof transferDetails>[0]) : null;
       if (transfer) return step({ action: 'TRANSFER', network: transfer.network, amounts: [{ amount: transfer.amount, asset: transfer.asset }],

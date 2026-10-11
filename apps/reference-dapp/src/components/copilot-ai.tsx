@@ -10,6 +10,8 @@ import { buildCopilotFacts, simulationFlowOf, type CopilotFacts, type Simulation
 import { closeSegment, emptyConversation, finishTurn, recordProposal, startTurn, type CopilotConversation, type CopilotEnvironment, type CopilotReply,
   type CopilotResultV2 } from '../domain/copilot-conversation';
 import { workflowSteps } from '../domain/workflow-steps';
+import { catalogNetworksNamed } from '../domain/network-registry';
+import { ensureNetworkCatalog } from '../state/asset-catalog-store';
 import type { CopilotMode } from '../server/copilot-service';
 import { useBuild009Wallet } from '../state/build009-wallet-store';
 import { useWorkflowCapability } from '../state/capability-store';
@@ -92,6 +94,8 @@ export function useCopilotInterpreter() {
     try {
       let result: CopilotResultV2;
       try { result = await copilotInterpret(start.request) as CopilotResultV2; } catch { result = { ok: false, code: 'COPILOT_UNAVAILABLE' }; }
+      // BUILD-BASE-001: catalog-network symbols resolve only in validated catalogs: load those this request or its intent names (where enabled).
+      if (result.ok) await Promise.all(catalogNetworksNamed(start.turn.state.segment.join('\n'), result.intent).map(n => ensureNetworkCatalog(false, n.chain)));
       const finished = finishTurn(start.turn, result, environmentNow());
       conversation.current = finished.next;
       return show(finished.reply);

@@ -10,8 +10,11 @@ import { workflowSteps, type WorkflowStep } from './workflow-steps';
 import { editCommandFor, removeCommandFor } from './workflow-edits';
 import { COPILOT_AUTHORING_COMMANDS, COPILOT_NETWORK_LABEL, COPILOT_POOLS, amountReadings, copilotRejection, planCopilotActions, proposalFromPlan,
   type CarriedField, type CopilotOutcome, type Grounding } from './copilot-authoring';
-import { COPILOT_LIMITS, hasUnsafeCharacters, safeCopilotProse, type CopilotAction, type CopilotLendingAction, type CopilotNetwork,
+import { COPILOT_LIMITS, hasUnsafeCharacters, safeCopilotProse, type CopilotAction, type CopilotFeeTier, type CopilotLendingAction, type CopilotNetwork,
   type CopilotSwapAction } from './copilot-intent';
+import { canonicalSymbol } from './asset-catalogs';
+import { networkIdentity, networkOfCopilot } from './network-registry';
+import { ROUTER_NETWORK_OPTIONS } from './router-authoring';
 import { COPILOT_TRANSCRIPT, COPILOT_V2_LIMITS, isCopilotIntentError, parseCopilotIntentV2, type CopilotChanges, type CopilotIntentV2, type CopilotOrdinal, type CopilotQuestionTopic,
   type CopilotReuseField, type CopilotTarget } from './copilot-intent-v2';
 import { copilotCopy, type CarriedLabel, type CopilotCopy, type CopilotLanguage } from './copilot-messages';
@@ -57,7 +60,9 @@ type Result = { readonly reply: CopilotReply; readonly next: CopilotConversation
 
 /** Every Command the Copilot may hand to `propose`: new authoring, typed edits of existing steps, and removal. */
 export const COPILOT_V2_COMMANDS: ReadonlySet<string> = new Set([...COPILOT_AUTHORING_COMMANDS, 'SET_SUPPLY', 'SET_BORROW', 'SET_REPAY', 'SET_WITHDRAW',
-  'SET_SOLANA_SWAP', 'SET_ROUTER_BRIDGE', 'SET_UNISWAP_LIQUIDITY', 'SET_SOLANA_LIQUIDITY', 'SET_SWAP_AMOUNT', 'SET_SLIPPAGE', 'REMOVE']);
+  'SET_SOLANA_SWAP', 'SET_ROUTER_BRIDGE', 'SET_UNISWAP_LIQUIDITY', 'SET_SOLANA_LIQUIDITY', 'SET_SWAP_AMOUNT', 'SET_SLIPPAGE', 'REMOVE',
+  // BUILD-BASE-001: edits of catalog-network swaps, positions and transfers, with the same commands the Canvas uses.
+  'SET_CRYPTO_ACTION', 'SET_RH_TRANSFER']);
 export const emptyConversation = (): CopilotConversation => ({ transcript: [], segment: [], clarifications: 0, draft: null, referents: [], language: 'EN' });
 export const snapshotOf = (env: CopilotEnvironment): ContextSnapshot =>
   ({ workflow: env.workflow, pending: env.pending, wallet: env.wallet, walletChainId: env.walletChainId });
@@ -199,9 +204,14 @@ type ChangeField = keyof CopilotChanges | 'deposit';
 const SWAP_FIELDS: readonly CarriedField[] = ['network', 'inputAsset', 'outputAsset', 'amount', 'slippage'];
 const BRIDGE_FIELDS: readonly CarriedField[] = ['sourceNetwork', 'destinationNetwork', 'asset', 'amount', 'slippage', 'routing', 'recipient'];
 const LENDING_FIELDS: readonly CarriedField[] = ['network', 'asset', 'amount', 'beneficiary'];
+const TRANSFER_FIELDS: readonly CarriedField[] = ['network', 'asset', 'amount', 'recipient'];
 const COMPOSITION_FIELDS: readonly CarriedField[] = ['network', 'asset', 'inputAsset', 'outputAsset', 'supplyAmount', 'borrowAmount', 'slippage', 'beneficiary'];
-/** The two EVM test networks a step can name (Aave and Uniswap liquidity): never a mainnet. */
-const lendingNetworkOf = (network: 'Base Sepolia' | 'Ethereum Sepolia'): CopilotNetwork => network === 'Ethereum Sepolia' ? 'ETHEREUM_SEPOLIA' : 'BASE_SEPOLIA';
+/** The Copilot id of a step's network label (Base Sepolia, Ethereum Sepolia, BUILD-BASE-001 Base, Robinhood Chain, …), from the network registry. */
+const lendingNetworkOf = (network: string): CopilotNetwork => (networkIdentity(network)?.copilot ?? 'OTHER') as CopilotNetwork;
+/** Catalog-pool fee tiers as the user writes them (3000 → "0.3"). */
+const FEE_PERCENT: Readonly<Record<number, CopilotFeeTier>> = { 100: '0.01', 500: '0.05', 3000: '0.3', 10000: '1' };
+/** A neutral label ("Token", "Stock Token") means the current catalog does not resolve the asset: never re-authored from a guess. */
+const unresolved = (...symbols: readonly string[]) => symbols.some(symbol => symbol === 'Token' || symbol === 'Stock Token');
 /** A step's typed IR fields as the V1 action that would author it again; null for steps the Copilot does not re-author. */
 function stepAction(step: WorkflowStep): Base | null {
   const d = step.detail;
@@ -211,15 +221,26 @@ function stepAction(step: WorkflowStep): Base | null {
       outputAsset: d.to, amount: d.amount, slippageBps: d.slippage }] };
     case 'SOLANA_SWAP': return { composition: false, role: null, actions: [{ type: 'SWAP', network: d.input.network === 'Solana' ? 'SOLANA' : 'SOLANA_DEVNET',
       inputAsset: solana(d.input.from), outputAsset: solana(d.input.to), amount: d.input.amount, slippageBps: d.input.slippage }] };
-    // A Robinhood Chain route is not in this intent vocabulary: it is described as no typed action rather than as another route.
-    case 'ROUTER': if (d.network !== 'mainnet' && d.network !== 'testnet') return null;
-      return { composition: false, role: null, actions: [{ type: 'BRIDGE', sourceNetwork: d.input.source === 'Base' ? 'BASE' : 'BASE_SEPOLIA',
-      destinationNetwork: d.input.destination === 'Arbitrum' ? 'ARBITRUM' : 'ARBITRUM_SEPOLIA', asset: 'USDC', amount: d.input.amount, slippageBps: d.input.slippage,
-      routing: d.input.routing === 'AUTO' ? null : d.input.routing, recipient: d.input.recipient ? d.input.recipient.toLowerCase() : null }] };
-    case 'AAVE': return { composition: false, role: null, actions: [{ type: d.operation, protocol: 'AAVE_V3', network: lendingNetworkOf(d.input.network), asset: d.input.asset, amount: d.input.amount,
-      beneficiary: d.input.beneficiary.toLowerCase() }] };
+    // BUILD-BASE-001: every Router route, from the route registry (Robinhood Chain routes and Arbitrum One → Base included).
+    case 'ROUTER': { const option = ROUTER_NETWORK_OPTIONS[d.network];
+      return { composition: false, role: null, actions: [{ type: 'BRIDGE', sourceNetwork: lendingNetworkOf(option.sourceLabel), destinationNetwork: lendingNetworkOf(option.destinationLabel),
+      asset: d.input.token, amount: d.input.amount, slippageBps: d.input.slippage,
+      routing: d.input.routing === 'AUTO' ? null : d.input.routing, recipient: d.input.recipient ? d.input.recipient.toLowerCase() : null }] }; }
+    case 'AAVE': return { composition: false, role: null, actions: [{ type: d.operation, protocol: 'AAVE_V3', network: lendingNetworkOf(d.input.network), asset: d.input.asset,
+      amount: d.input.amount, beneficiary: d.input.beneficiary.toLowerCase() }] };
     case 'AAVE_WITHDRAW': return { composition: false, role: null, actions: [{ type: 'WITHDRAW', protocol: 'AAVE_V3', network: lendingNetworkOf(d.input.network), asset: d.input.asset,
       amount: d.input.amount, beneficiary: null }] };
+    // BUILD-BASE-001: catalog networks (Base, Robinhood Chain): swaps, positions and transfers re-authored through the same exact grammar.
+    case 'CATALOG_SWAP': if (unresolved(d.from, d.to)) return null;
+      return { composition: false, role: null, actions: [{ type: 'SWAP', network: lendingNetworkOf(d.network), inputAsset: d.from, outputAsset: d.to, amount: d.amount,
+      slippageBps: d.slippage }] };
+    case 'CATALOG_LIQUIDITY': if (unresolved(d.input.tokenA, d.input.tokenB)) return null;
+      return { composition: false, role: null, actions: [{ type: 'LIQUIDITY', protocol: 'UNISWAP_V3', network: lendingNetworkOf(d.input.network),
+      deposits: [{ asset: d.input.tokenA, maxAmount: d.input.amountA }, { asset: d.input.tokenB, maxAmount: d.input.amountB }], rangeUnit: d.fullRange ? 'FULL' : 'TICK',
+      lower: d.fullRange ? null : d.input.lower ?? null, upper: d.fullRange ? null : d.input.upper ?? null, slippageBps: d.input.slippage, feeTier: FEE_PERCENT[d.input.fee] ?? null }] };
+    case 'TRANSFER': if (unresolved(d.input.asset) || !networkIdentity(d.input.network)?.catalog) return null;
+      return { composition: false, role: null, actions: [{ type: 'TRANSFER', network: lendingNetworkOf(d.input.network), asset: d.input.asset, amount: d.input.amount,
+      recipient: d.input.recipient === 'CONNECTED_OWNER' ? null : d.input.recipient.toLowerCase() }] };
     case 'UNISWAP_LIQUIDITY': return { composition: false, role: null, actions: [{ type: 'LIQUIDITY', protocol: 'UNISWAP_V3', network: lendingNetworkOf(d.input.network),
       deposits: [{ asset: 'USDC', maxAmount: d.input.maxUsdc }, { asset: 'WETH', maxAmount: d.input.maxWeth }], rangeUnit: d.input.rangeUnit, lower: d.input.lower,
       upper: d.input.upper, slippageBps: d.input.slippage }] };
@@ -240,10 +261,16 @@ function allFields(base: Base): Set<CarriedField> {
   const action = base.actions[0]!;
   if (action.type === 'SWAP') return new Set(SWAP_FIELDS);
   if (action.type === 'BRIDGE') return new Set(BRIDGE_FIELDS);
-  if (action.type === 'LIQUIDITY') return new Set<CarriedField>(['protocol', 'network', 'range', 'slippage', ...action.deposits.map(d => `deposit:${poolSymbol(action, d.asset)}` as CarriedField)]);
+  if (action.type === 'TRANSFER') return new Set(TRANSFER_FIELDS);
+  if (action.type === 'LIQUIDITY') return new Set<CarriedField>(['protocol', 'network', 'range', 'slippage', ...action.feeTier !== undefined ? ['feeTier' as const] : [],
+    ...action.deposits.map(d => `deposit:${poolSymbol(action, d.asset)}` as CarriedField)]);
   return new Set(LENDING_FIELDS);
 }
-const poolSymbol = (action: Extract<CopilotAction, { type: 'LIQUIDITY' }>, asset: string) => COPILOT_POOLS[action.protocol === 'ORCA' ? 'ORCA' : 'UNISWAP_V3'].symbol(asset);
+/** A deposit's pool token: the fixed test pools map their aliases; a catalog pool (BUILD-BASE-001) takes the catalog's own spelling. */
+const poolSymbol = (action: Extract<CopilotAction, { type: 'LIQUIDITY' }>, asset: string) => {
+  const network = action.network !== null && action.network !== 'OTHER' ? networkOfCopilot(action.network) : null;
+  return network?.catalog ? canonicalSymbol(network.chain, asset) ?? asset : COPILOT_POOLS[action.protocol === 'ORCA' ? 'ORCA' : 'UNISWAP_V3'].symbol(asset);
+};
 const CARRIED_LABEL: Readonly<Record<string, CarriedLabel>> = { network: 'network', sourceNetwork: 'network', destinationNetwork: 'destination', asset: 'token',
   inputAsset: 'token', outputAsset: 'token', amount: 'amount', supplyAmount: 'amount', borrowAmount: 'amount', slippage: 'slippage', recipient: 'recipient',
   beneficiary: 'beneficiary', routing: 'routing', range: 'range' };
@@ -258,7 +285,7 @@ function applyChanges(base: Base, changes: CopilotChanges): Applied {
   const set = (index: number, key: string, value: unknown) => { actions = actions.map((item, at) => at === index ? { ...item, [key]: value } as CopilotAction : item); };
   const drop = (...fields: CarriedField[]) => fields.forEach(field => carried.delete(field));
   const entries = (Object.keys(changes) as (keyof CopilotChanges)[]).filter(key => key === 'deposits' ? changes.deposits.length > 0 : key === 'lower' || key === 'upper' ? false
-    : changes[key] !== null);
+    : changes[key] !== null && changes[key] !== undefined);
   for (const key of entries) {
     const action = actions[0]!, type = base.composition ? 'COMPOSITION' : action.type;
     const fail = (): Applied => ({ ok: false, field: key });
@@ -283,16 +310,17 @@ function applyChanges(base: Base, changes: CopilotChanges): Applied {
       case 'destinationNetwork': if (type !== 'BRIDGE') return fail(); set(0, 'destinationNetwork', changes.destinationNetwork); drop('destinationNetwork'); break;
       case 'inputAsset': case 'outputAsset':
         if (type === 'SWAP') { set(0, key, changes[key]); drop(key); }
-        else if (type === 'BRIDGE' || type === 'SUPPLY' || type === 'BORROW' || type === 'REPAY' || type === 'WITHDRAW') { set(0, 'asset', changes[key]); drop('asset'); }
+        else if (type === 'BRIDGE' || type === 'SUPPLY' || type === 'BORROW' || type === 'REPAY' || type === 'WITHDRAW' || type === 'TRANSFER') { set(0, 'asset', changes[key]); drop('asset'); }
         else return fail();
         break;
       case 'recipient':
-        if (type === 'BRIDGE') { set(0, 'recipient', changes.recipient); drop('recipient'); }
+        if (type === 'BRIDGE' || type === 'TRANSFER') { set(0, 'recipient', changes.recipient); drop('recipient'); }
         else if (type === 'COMPOSITION') { set(0, 'beneficiary', changes.recipient); set(1, 'beneficiary', changes.recipient); drop('beneficiary'); }
         else if (type === 'SUPPLY' || type === 'BORROW' || type === 'REPAY' || type === 'WITHDRAW') { set(0, 'beneficiary', changes.recipient); drop('beneficiary'); }
         else return fail();
         break;
       case 'routing': if (type !== 'BRIDGE') return fail(); set(0, 'routing', changes.routing); drop('routing'); break;
+      case 'feeTier': if (type !== 'LIQUIDITY') return fail(); set(0, 'feeTier', changes.feeTier); drop('feeTier'); break;
       case 'rangeUnit':
         if (type !== 'LIQUIDITY') return fail();
         set(0, 'rangeUnit', changes.rangeUnit); set(0, 'lower', changes.lower); set(0, 'upper', changes.upper); drop('range'); break;
@@ -333,8 +361,10 @@ function applyReuse(action: CopilotAction, from: Base, fields: readonly CopilotR
     }
     if (field === 'amount') fill('amount', sourceAmount(), 'amount');
     if (field === 'slippage') fill('slippageBps', source.type === 'SWAP' || source.type === 'BRIDGE' || source.type === 'LIQUIDITY' ? source.slippageBps : null, 'slippage');
-    if (field === 'recipient' && action.type === 'BRIDGE') fill('recipient', source.type === 'BRIDGE' ? source.recipient : null, 'recipient');
-    else if (field === 'recipient') fill('beneficiary', source.type !== 'SWAP' && source.type !== 'BRIDGE' && source.type !== 'LIQUIDITY' ? source.beneficiary : null, 'beneficiary');
+    if (field === 'recipient' && (action.type === 'BRIDGE' || action.type === 'TRANSFER'))
+      fill('recipient', source.type === 'BRIDGE' || source.type === 'TRANSFER' ? source.recipient : null, 'recipient');
+    else if (field === 'recipient') fill('beneficiary', source.type !== 'SWAP' && source.type !== 'BRIDGE' && source.type !== 'LIQUIDITY' && source.type !== 'TRANSFER'
+      ? source.beneficiary : null, 'beneficiary');
   }
   return { action: out as CopilotAction, carried };
 }
@@ -502,7 +532,8 @@ function resolveIntent(intent: CopilotIntentV2, state: CopilotConversation, env:
 function author(intent: CopilotIntentV2, actions: readonly CopilotAction[], composition: boolean, carried: ReadonlySet<CarriedField>, state: CopilotConversation,
   env: CopilotEnvironment, notes: readonly string[], describe: (sentence: string) => string, label: string, editNodeId: string | null = null): Result {
   const language = intent.language, m = copilotCopy(language);
-  const grounding: Grounding = { text: segmentText(state), carried, policy: { language, networkDefaults: false }, latest: state.segment.at(-1) ?? '' };
+  // BUILD-BASE-001: the conversation (CopilotIntentV2) authors on the catalog networks too.
+  const grounding: Grounding = { text: segmentText(state), carried, policy: { language, networkDefaults: false, catalog: true }, latest: state.segment.at(-1) ?? '' };
   const planned = planCopilotActions(actions, composition, grounding, env.wallet);
   if (planned.kind !== 'PLAN') return stopped(planned, intent, state, env, m);
   const outcome = proposalFromPlan(planned.plan, env, language);

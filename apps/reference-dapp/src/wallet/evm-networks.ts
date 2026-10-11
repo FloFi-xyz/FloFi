@@ -5,7 +5,7 @@
  * official parameters after the wallet reports it unknown (EIP-1193 code 4902). Switching never
  * signs, sends or retries a transaction.
  */
-import { ETHEREUM_MAINNET, ETHEREUM_SEPOLIA, ROBINHOOD_CHAIN_MAINNET, ROBINHOOD_CHAIN_TESTNET, ethereumSepoliaAddChainParameters,
+import { ETHEREUM_MAINNET, ETHEREUM_SEPOLIA, ROBINHOOD_CHAIN_MAINNET, ROBINHOOD_CHAIN_TESTNET, baseAddChainParameters, ethereumSepoliaAddChainParameters,
   robinhoodAddChainParameters } from '@defi-workflow-engine/action-registry';
 
 export type AddChainParameters = { readonly chainId: string; readonly chainName: string;
@@ -16,7 +16,8 @@ export type EvmWalletNetwork = { readonly hex: string; readonly chain: string; r
 type Provider = { request(input: { method: string; params?: unknown[] }): Promise<unknown> };
 
 export const EVM_WALLET_NETWORKS: readonly EvmWalletNetwork[] = Object.freeze(([
-  { hex: '0x2105', chain: 'eip155:8453', label: 'Base (8453)', environment: 'mainnet', switchable: true, add: null },
+  // BUILD-BASE-001: a first-class mainnet; added only from the official network record after the wallet reports 4902.
+  { hex: '0x2105', chain: 'eip155:8453', label: 'Base (8453)', environment: 'mainnet', switchable: true, add: baseAddChainParameters() },
   { hex: '0xa4b1', chain: 'eip155:42161', label: 'Arbitrum (42161)', environment: 'mainnet', switchable: true, add: null },
   { hex: '0x14a34', chain: 'eip155:84532', label: 'Base Sepolia', environment: 'testnet', switchable: true, add: { chainId: '0x14a34',
     chainName: 'Base Sepolia', nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },

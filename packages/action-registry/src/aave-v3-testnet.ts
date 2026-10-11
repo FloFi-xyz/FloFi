@@ -39,9 +39,36 @@ export const AAVE_V3_ETHEREUM_SEPOLIA = Object.freeze({
   /** Ethereum L1: the network cost is gasUsed × effectiveGasPrice; a receipt `l1Fee` would be unexplained. */
   l1DataFee: false,
 });
-export type AaveLendingProfile = typeof AAVE_V3_BASE_SEPOLIA | typeof AAVE_V3_ETHEREUM_SEPOLIA;
+/**
+ * BUILD-BASE-001: Aave V3 on Base mainnet (real funds), USDC reserve only — the same one-asset-per-network semantics as Base Sepolia.
+ * From the Aave DAO address book (`AaveV3Base.sol`, aave-dao/aave-address-book main b5da40f, 2026-10-11) and verified read-only on
+ * 2026-10-11 (block 52,469,150): Provider `getPool()` and `getPriceOracle()` equal the Pool and Oracle below; Pool
+ * `ADDRESSES_PROVIDER()` equals the Provider; `POOL_REVISION` 11 (Aave v3.7; supply/borrow/repay/withdraw accounting as v3.6);
+ * reserve id 4, 6 decimals, active, not frozen or paused, borrowing enabled, no debt ceiling, LTV 75%, liquidation threshold 78%,
+ * supply cap 230M and borrow cap 207M; the aToken and variable-debt token report this underlying and Pool; oracle base unit 1e8.
+ * Real-funds owner execution needs the deployment's explicit opt-in; there is no faucet.
+ */
+export const AAVE_V3_BASE = Object.freeze({
+  network: 'Base', chainId: 8453, chain: 'eip155:8453', chainHex: '0x2105', protocol: 'aave-v3',
+  pool: '0xa238dd80c259a72e81d7e4664a9801593f98d1c5',
+  provider: '0xe20fcbdbffc4dd138ce8b2e6fbb6cb49777ad64d',
+  asset: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913', decimals: 6, symbol: 'USDC',
+  reserveId: 4,
+  aToken: '0x4e65fe4dba92790696d040ac24aa414708f5c0ab',
+  variableDebtToken: '0x59dca05b6c26dbd64b5381374aaac5cd05644c28',
+  oracle: '0x2cc0fc26ed4563a5ce5e8bdcfe1a2878676ae156',
+  faucet: null,
+  explorer: 'https://basescan.org', rpc: 'https://mainnet.base.org',
+  officialSource: 'https://github.com/aave-dao/aave-address-book/blob/main/src/AaveV3Base.sol',
+  /** OP Stack: receipts carry a separate L1 data fee (`l1Fee`) that is part of the owner's network cost. */
+  l1DataFee: true,
+  environment: 'MAINNET',
+} as const);
+export type AaveLendingProfile = typeof AAVE_V3_BASE_SEPOLIA | typeof AAVE_V3_ETHEREUM_SEPOLIA | typeof AAVE_V3_BASE;
 /** One verified asset per network. Profiles are chosen by the authored or reviewed chain, never by symbol. */
-export const AAVE_V3_LENDING_PROFILES: readonly AaveLendingProfile[] = Object.freeze([AAVE_V3_BASE_SEPOLIA, AAVE_V3_ETHEREUM_SEPOLIA]);
+export const AAVE_V3_LENDING_PROFILES: readonly AaveLendingProfile[] = Object.freeze([AAVE_V3_BASE_SEPOLIA, AAVE_V3_ETHEREUM_SEPOLIA, AAVE_V3_BASE]);
+/** The deployment environment of a lending profile (the testnet profiles predate the field). */
+export const aaveEnvironment = (profile: AaveLendingProfile): 'PUBLIC_TESTNET' | 'MAINNET' => 'environment' in profile ? profile.environment : 'PUBLIC_TESTNET';
 export function aaveLendingProfile(chain: string): AaveLendingProfile {
   const profile = AAVE_V3_LENDING_PROFILES.find(item => item.chain === chain);
   if (!profile) throw new Error('AAVE_PROFILE_UNSUPPORTED');

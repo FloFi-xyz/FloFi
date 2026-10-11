@@ -99,11 +99,17 @@ describe('BUILD-CHANNELS-001 channel boundaries', () => {
       // The owner's decisions on /approve and FloFi's execution: never called by a channel.
       expect(text, file).not.toMatch(/\b(?:claimApproval|applyApproval|shareApproval)\(|runtime\.(?:run|journal)\(|callFlow\(/);
     }
-    // Channel code reaches no execution service: only the copilot boundary, the runtime host, the deployment facts and (BUILD-WORKFLOW-
-    // VISUAL-PRESENTATION-001) FloFi's shared workflow renderer.
+    // Channel code reaches no execution service: only the copilot boundary, the runtime host, the deployment facts, (BUILD-WORKFLOW-
+    // VISUAL-PRESENTATION-001) FloFi's shared workflow renderer and (BUILD-BASE-001) the read-only authoring catalogs.
     const servers = [...channelFiles].flatMap(file => importsOf(join(app, file)).map(([, s]) => s.startsWith('.') ? target(join(app, file), s) : s)).filter(t => t.startsWith('src/server/'));
-    expect([...new Set(servers)].sort()).toEqual(['src/server/copilot-service.ts', 'src/server/deployment.ts', 'src/server/platform-state-host.ts',
-      'src/server/workflow-visual-image.ts']);
+    expect([...new Set(servers)].sort()).toEqual(['src/server/authoring-catalogs.ts', 'src/server/copilot-service.ts', 'src/server/deployment.ts',
+      'src/server/platform-state-host.ts', 'src/server/workflow-visual-image.ts']);
+    // BUILD-BASE-001: the authoring catalogs only read and validate the official asset catalogs (where the deployment enables each network).
+    // Nothing they reach runs a flow, calls the cloud API, is a server action, or touches a handoff, an approval or a wallet session.
+    const catalogs = closure(join(app, 'src/server/authoring-catalogs.ts')).files;
+    expect(catalogs.filter(f => /^backend\/|^src\/app\/|^src\/mcp\/|flow-runtime|cloud-api|handoff|approval|wallet-session|session-principal/.test(f))).toEqual([]);
+    for (const file of catalogs.filter(f => f.startsWith('src/server/') && f !== 'src/server/public-testnet-rpc.ts'))
+      expect(code(join(app, file)), file).not.toMatch(/eth_sendTransaction|eth_signTypedData|personal_sign|sendRawTransaction|signTransaction|signMessage|privateKey|createWalletClient|callFlow\(/);
     // The renderer draws the presentation model and nothing else: its whole closure signs nothing, reaches no flow, runtime, handoff,
     // wallet session or network, and holds no secret.
     const renderer = closure(join(app, 'src/server/workflow-visual-image.ts'));

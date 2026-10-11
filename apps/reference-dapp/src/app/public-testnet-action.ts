@@ -6,8 +6,8 @@ import { createPublicTestnetService, publicRecordingEnabled,
   type PublicTestnetService, type PublicRun, type PublicBegin } from '../server/public-testnet-service';
 import { baseSepoliaSwapRpc, ethereumSepoliaSwapRpc } from '../server/public-testnet-rpc';
 import { cloudFlow, cloudFlowMode } from '../server/flow-runtime';
-import { robinhoodCatalogFor, robinhoodMainnetMode, robinhoodMainnetRpc, robinhoodSwapRuntime } from '../server/robinhood-mainnet';
-import { swapProfile } from '../domain/public-testnet-swap';
+import { CATALOG_NETWORKS, catalogNetworkOfChain, catalogNetworkOfRun, catalogNetworkOfWorkflow, localCatalogNetworkMode, type CatalogNetworkId,
+  type CatalogNetworkRuntime } from '../server/catalog-networks';
 
 export type PublicResult<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly code: string };
 let service: PublicTestnetService | null = null;
@@ -20,38 +20,41 @@ function current(): PublicTestnetService {
   return service;
 }
 /**
- * BUILD-RH-002: Robinhood Chain mainnet swaps (`rhs-` runs) on the same shared swap service, with the Robinhood runtime.
- * Live public reads need `GRYLOO_ROBINHOOD_MAINNET=live` in local development (hosted deployments use the cloud flow);
- * automated tests use only the loopback harness. The journal is `$GRYLOO_ROBINHOOD_JOURNAL/swap`.
+ * BUILD-RH-002 / BUILD-BASE-001: catalog-network mainnet swaps (Robinhood Chain `rhs-`, Base `bas-`) on the same shared swap service, each
+ * with its own runtime from the catalog-network registry. Live public reads need the network's `GRYLOO_<NETWORK>_MAINNET=live` in local
+ * development (hosted deployments use the cloud flow); automated tests use only the loopback harness. Journal: `$<journal root>/swap`.
  */
-let robinhood: PublicTestnetService | null = null;
-function robinhoodService(): PublicTestnetService {
-  const mode = robinhoodMainnetMode(process.env);
-  if (mode === 'off' || (mode === 'live' && process.env.NODE_ENV !== 'development')) throw new Error('ROBINHOOD_MAINNET_NOT_ENABLED');
-  const dir = process.env.GRYLOO_ROBINHOOD_JOURNAL;
-  if (!dir || !isAbsolute(dir)) throw new Error('ROBINHOOD_STORAGE_NOT_CONFIGURED');
-  robinhood ??= createPublicTestnetService({ rpc: async () => { throw new Error('PUBLIC_NETWORK_UNAVAILABLE'); },
-    rpcs: { 'eip155:4663': robinhoodMainnetRpc(mode, process.env) }, journalDir: join(dir, 'swap'), idPrefix: 'rhs',
-    catalog: robinhoodSwapRuntime(mode, process.env, robinhoodCatalogFor(mode)) });
-  return robinhood;
+const catalogServices = new Map<CatalogNetworkId, PublicTestnetService>();
+function catalogService(network: CatalogNetworkRuntime): PublicTestnetService {
+  const mode = localCatalogNetworkMode(network, process.env);
+  if (mode === 'off') throw new Error(network.disabledCode);
+  const dir = process.env[network.journalEnv];
+  if (!dir || !isAbsolute(dir)) throw new Error(network.storageCode);
+  let service = catalogServices.get(network.id);
+  if (!service) {
+    service = createPublicTestnetService({ rpc: async () => { throw new Error('PUBLIC_NETWORK_UNAVAILABLE'); },
+      rpcs: { [network.chain]: network.rpc(mode, process.env) }, journalDir: join(dir, 'swap'), idPrefix: network.prefixes.swap,
+      catalog: network.swapRuntime(mode, process.env, network.catalogFor(mode)) });
+    catalogServices.set(network.id, service);
+  }
+  return service;
 }
-const isRobinhoodRun = (id: unknown) => typeof id === 'string' && id.startsWith('rhs-');
-const isRobinhoodWorkflow = (workflow: SemanticWorkflow) =>
-  swapProfile(workflow.nodes.find(node => node.actionType === 'asset.swap.exact-input')?.chainId)?.kind === 'CATALOG';
 function code(error: unknown): string {
   const message = error instanceof Error ? error.message : '';
   return /^[A-Z][A-Z0-9_]{2,63}$/.test(message) ? message : 'PUBLIC_INTERNAL_ERROR';
 }
-async function run<T>(method: string, args: readonly unknown[], action: (service: PublicTestnetService) => T | Promise<T>, robinhoodRun = isRobinhoodRun(args[0])): Promise<PublicResult<T>> {
+async function run<T>(method: string, args: readonly unknown[], action: (service: PublicTestnetService) => T | Promise<T>,
+  network: CatalogNetworkRuntime | null = catalogNetworkOfRun(args[0], 'swap')): Promise<PublicResult<T>> {
   // Cloud deployment: the remote Flofi API (BUILD-CLOUD-001) or the embedded PostgreSQL runtime (BUILD-CLOUD-PARITY-001).
-  const cloud = await cloudFlow<T>(robinhoodRun ? 'robinhood-swap' : 'base-sepolia-swap', method, args);
+  const cloud = await cloudFlow<T>(network ? network.flows.swap : 'base-sepolia-swap', method, args);
   if (cloud) return cloud;
-  try { return { ok: true, value: await action(robinhoodRun ? robinhoodService() : current()) }; }
+  try { return { ok: true, value: await action(network ? catalogService(network) : current()) }; }
   catch (error) { return { ok: false, code: code(error) }; }
 }
-const id = (value: unknown) => typeof value === 'string' && /^(pub|rhs)-[0-9a-f]{24}$/.test(value) ? value : (() => { throw new Error('INPUT_INVALID'); })();
+const id = (value: unknown) => typeof value === 'string' && /^(pub|rhs|bas)-[0-9a-f]{24}$/.test(value) ? value : (() => { throw new Error('INPUT_INVALID'); })();
 export async function publicPrepare(workflow: SemanticWorkflow): Promise<PublicResult<PublicRun>> {
-  return run('prepare', [workflow], service => service.prepare(workflow), isRobinhoodWorkflow(workflow));
+  // The authored swap's chain selects the deployment: a catalog network (Base's USDC ⇄ WETH reference swap included), else the testnets.
+  return run('prepare', [workflow], service => service.prepare(workflow), catalogNetworkOfWorkflow(workflow, 'asset.swap.exact-input'));
 }
 export async function publicRefresh(executionId: string): Promise<PublicResult<PublicRun>> {
   return run('refresh', [executionId], service => service.refresh(id(executionId)));
@@ -77,10 +80,14 @@ export async function publicAvailability(): Promise<boolean> {
   if (cloud) return cloud === 'live';
   return publicRecordingEnabled(process.env);
 }
-/** BUILD-RH-002: whether this instance serves Robinhood Chain mainnet swaps (live or the MOCKED loopback harness). */
-export async function robinhoodSwapAvailability(): Promise<boolean> {
-  const cloud = await cloudFlowMode('robinhood-swap');
+/** BUILD-RH-002 / BUILD-BASE-001: whether this instance serves a catalog network's mainnet swaps (live or the MOCKED loopback harness). */
+export async function catalogSwapAvailability(chain: string): Promise<boolean> {
+  const network = catalogNetworkOfChain(chain);
+  if (!network) return false;
+  const cloud = await cloudFlowMode(network.flows.swap);
   if (cloud) return cloud !== 'off';
-  const mode = robinhoodMainnetMode(process.env), dir = process.env.GRYLOO_ROBINHOOD_JOURNAL;
-  return (mode === 'harness' || (mode === 'live' && process.env.NODE_ENV === 'development')) && Boolean(dir && isAbsolute(dir));
+  const dir = process.env[network.journalEnv];
+  return localCatalogNetworkMode(network, process.env) !== 'off' && Boolean(dir && isAbsolute(dir));
 }
+/** BUILD-RH-002: whether this instance serves Robinhood Chain mainnet swaps (live or the MOCKED loopback harness). */
+export async function robinhoodSwapAvailability(): Promise<boolean> { return catalogSwapAvailability(CATALOG_NETWORKS.robinhood.chain); }

@@ -73,6 +73,7 @@ export function stepSummary(step: WorkflowStep, language: CopilotLanguage): stri
     case 'LENDING_COMPOSITION': return d.role === 'SUPPLY' ? `Supply ${d.input.supply} USDC · Aave V3 (${pt ? 'composição' : 'composition'})`
       : d.role === 'BORROW' ? `Borrow ${d.input.borrow} USDC · Aave V3 (${pt ? 'composição' : 'composition'})`
       : `Swap ${pt ? 'do USDC emprestado' : 'of the borrowed USDC'} → WETH · Uniswap v3 (${pt ? 'composição' : 'composition'})`;
+    case 'TRANSFER': return `${pt ? 'Transferência' : 'Transfer'} ${d.input.amount} ${d.input.asset} · ${d.input.network}`;
     case 'TEMPLATE': return pt ? `Template ${d.template} (só autoria)` : `Template ${d.template} (authoring only)`;
     case 'OTHER': return `${d.actionType} · ${step.network}`;
   }
@@ -119,6 +120,9 @@ export function stepSentence(step: WorkflowStep, language: CopilotLanguage): str
         : `After a health-factor checkpoint (HF ≥ 2.0), borrows ${d.input.borrow} USDC from Aave V3.`)
       : (pt ? `Troca exatamente os ${d.input.borrow} USDC emprestados por WETH na Uniswap v3, com slippage máximo de ${d.input.slippage} bps. A dívida continua.`
         : `Swaps exactly the borrowed ${d.input.borrow} USDC to WETH on Uniswap v3 with at most ${d.input.slippage} bps slippage. The debt remains.`);
+    // BUILD-BASE-001: a typed transfer step (real funds on a mainnet).
+    case 'TRANSFER': return pt ? `Transfere ${d.input.amount} ${d.input.asset} na ${d.input.network} para ${recipientOf(d.input.recipient, pt)}.${step.testFunds ? '' : ' Fundos reais.'}`
+      : `Transfers ${d.input.amount} ${d.input.asset} on ${d.input.network} to ${recipientOf(d.input.recipient, pt)}.${step.testFunds ? '' : ' Real funds.'}`;
     case 'TEMPLATE': return pt ? `Um passo template "${d.template}": um marcador de autoria que nunca executa.` : `A "${d.template}" template step: an authoring placeholder that never executes.`;
     case 'OTHER': return pt ? `Um passo ${d.actionType} na ${step.network}. O painel dele mostra os detalhes.` : `A ${d.actionType} step on ${step.network}. Its own panel shows the details.`;
   }
@@ -144,6 +148,7 @@ function approvalLine(step: WorkflowStep, pt: boolean): string {
     case 'LENDING_COMPOSITION': return pt ? 'Composição: approval de USDC para o Pool da Aave antes do Supply e approval para o router antes do Swap; cada passo é assinado separadamente.'
       : 'Composition: a USDC approval to the Aave Pool before Supply and an approval to the swap router before Swap; each step is signed separately.';
     case 'TEMPLATE': return pt ? 'Template: nunca executa e não precisa de approval.' : 'Template: never executes and needs no approval.';
+    case 'TRANSFER': return pt ? 'Transferência: sem approval; sua carteira assina a única transação, mostrada na Review.' : 'Transfer: no approval; your wallet signs the single transaction, shown in Review.';
     case 'OTHER': return pt ? 'Este passo tem seu próprio painel de Review, que lista cada transação.' : 'This step has its own Review panel, which lists every transaction.';
   }
 }

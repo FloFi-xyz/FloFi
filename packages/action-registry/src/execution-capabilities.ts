@@ -113,6 +113,15 @@ for (const [action, adapter] of [['asset.swap.exact-input', 'uniswap.v3'], ['ass
   add(action, adapter, 'eip155:4663', 'MAINNET', fork, null, 'DIRECT_TRANSACTION', ['INJECTED_WALLET', 'QUOTE_PROVIDER', 'REVIEWED_ARTIFACTS'], ['A']);
 // The router on Arbitrum One as a source (Arbitrum USDC → Robinhood USDG, WETH → WETH); Base already has its MAINNET row.
 add('asset.bridge', 'flofi.router', 'eip155:42161', 'MAINNET', fork, null, 'DIRECT_TRANSACTION', ['INJECTED_WALLET', 'QUOTE_PROVIDER', 'REVIEWED_ARTIFACTS'], ['A']);
+// BUILD-BASE-001: Base mainnet (eip155:8453) as a first-class network on the same engines: Uniswap v3 swap and concentrated liquidity over
+// the Base asset catalog, the transfer engine (native ETH and catalog ERC-20s, OP Stack L1 fee bounded at Review) and Aave V3 USDC
+// (Supply/Borrow/Repay/Withdraw). The router already has its Base and Arbitrum One MAINNET rows (Arbitrum → Base reuses the latter).
+// Real funds: owner execution is implemented, signed and sent only by the connected owner's wallet and gated by an explicit
+// deployment-wide opt-in; none is demonstrated, so no evidence ceiling is claimed.
+for (const [action, adapter] of [['asset.swap.exact-input', 'uniswap.v3'], ['asset.liquidity.concentrated', 'uniswap.v3'],
+  ['asset.transfer', 'evm.native-transfer'], ['asset.transfer', 'evm.token-transfer'],
+  ['supply', 'aave-v3'], ['borrow', 'aave-v3'], ['repay', 'aave-v3'], ['withdraw', 'aave-v3']] as const)
+  add(action, adapter, 'eip155:8453', 'MAINNET', fork, null, 'DIRECT_TRANSACTION', ['INJECTED_WALLET', 'QUOTE_PROVIDER', 'REVIEWED_ARTIFACTS'], ['A']);
 // Public execution and demonstrated evidence are limited to the exact Base Sepolia Uniswap swap profile.
 export const executionCapabilityRegistry: readonly ExecutionCapabilityProfile[] = Object.freeze(rows);
 

@@ -4,8 +4,10 @@ import { supplyHash, supplyArtifactHash, SUPPLY_METAMASK, decodeSupplyWalletEnve
 import { hashJournalBytes, type ExecutionJournal } from '@defi-workflow-engine/workflow-contracts';
 export type SupplyAttempt = { step: 'APPROVAL' | 'SUPPLY' | 'BORROW' | 'REPAY' | 'WITHDRAW'; state: 'PREPARED' | 'CANCELLED' | 'NOT_FOUND' | 'SUBMITTING' | 'SUBMISSION_RESULT_UNKNOWN' | 'PENDING' | 'CONFIRMED' | 'REVERTED' | 'RECONCILIATION_REQUIRED';
   nonce: string; preparedAtBlock: number; transaction: SupplyTransaction; transactionHash: string | null; receipt: Record<string, unknown> | null; reconciled: boolean; ownerNonceAfter?:string };
-export type SupplyRun = { format: 'gryloo.supply-run.v1'; id: string; review: SupplyReview; provenance: 'PUBLIC_TESTNET' | 'MOCKED';
+export type SupplyRun = { format: 'gryloo.supply-run.v1'; id: string; review: SupplyReview; provenance: 'PUBLIC_TESTNET' | 'PUBLIC_MAINNET' | 'MOCKED';
   authorization: string | null; attempts: SupplyAttempt[]; journal: ExecutionJournal; verdict: 'PENDING' | 'RECONCILED' | 'DIVERGENT' | 'INCONCLUSIVE'; ownerInitiated: boolean };
+/** `supply-`: the public-testnet Aave runs; `baave-` (BUILD-BASE-001): Base mainnet Aave runs. */
+export const SUPPLY_RUN_ID = /^(supply|baave)-[a-f0-9]{32}$/;
 export function createSupplyRun(id: string, review: SupplyReview, provenance: SupplyRun['provenance']): SupplyRun {
   let journal=createJournal({journalId:id,workflowId:review.workflow.workflowId,executionPlanHash:supplyArtifactHash('execution-plan',review.plan),manifestHash:supplyArtifactHash('strategy-manifest',review.manifest)});
   const append=(level:'workflow'|'segment'|'step',entityId:string,toState:'DRAFT'|'PLANNED'|'REVIEWED'|'SIMULATED',stepId:string|null)=>{
@@ -86,7 +88,9 @@ export async function persistSupplyPreparation(store: SupplyPersistence, block: 
   return run;
 }
 export function validateSupplyRun(run: SupplyRun): void {
-  if (run.format!=='gryloo.supply-run.v1'||!/^supply-[a-f0-9]{32}$/.test(run.id)||!['PUBLIC_TESTNET','MOCKED'].includes(run.provenance)||
+  // BUILD-BASE-001: Base mainnet lending runs live only in the `baave-` namespace (PUBLIC_MAINNET or MOCKED) and only on Base; testnet runs stay `supply-`.
+  if (run.format!=='gryloo.supply-run.v1'||!SUPPLY_RUN_ID.test(run.id)||!['PUBLIC_TESTNET','PUBLIC_MAINNET','MOCKED'].includes(run.provenance)||
+      run.id.startsWith('baave-')!==(run.review.chain==='eip155:8453')||(run.provenance==='PUBLIC_MAINNET')&&!run.id.startsWith('baave-')||(run.provenance==='PUBLIC_TESTNET')&&!run.id.startsWith('supply-')||
       new Set(run.attempts.map(a=>a.step)).size!==run.attempts.length||run.attempts.length>2) throw new Error('SUPPLY_STORE_CORRUPT');
   const {commitment,...review}=run.review;
   if (supplyHash(review)!==commitment || supplyArtifactHash('execution-plan',run.review.plan)!==run.journal.executionPlanHash ||

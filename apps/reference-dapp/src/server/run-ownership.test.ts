@@ -28,7 +28,8 @@ describe('BUILD-JOURNEY-001 run ownership', () => {
     await expect(check('somethingNew', [RUN], A)).rejects.toThrow('RUN_OWNERSHIP_UNDECLARED');
   });
   // BUILD-RH-002: the four Robinhood Chain routes are Router flows with the same ownership policy.
-  const ROBINHOOD_ROUTES = ['crosschain-router-arbitrum-to-robinhood', 'crosschain-router-base-to-robinhood', 'crosschain-router-robinhood-to-arbitrum',
+  // BUILD-BASE-001: so is the Router's Arbitrum One → Base route.
+  const ROBINHOOD_ROUTES = ['crosschain-router-arbitrum-to-base', 'crosschain-router-arbitrum-to-robinhood', 'crosschain-router-base-to-robinhood', 'crosschain-router-robinhood-to-arbitrum',
     'crosschain-router-robinhood-to-base'] as const;
   it('covers every method of the Router flows and the payment flow and leaves other flows unchanged', () => {
     for (const [flow, policy] of [['crosschain-router', ROUTER_OWNERSHIP], ['crosschain-router-testnet', ROUTER_OWNERSHIP], ...ROBINHOOD_ROUTES.map(route => [route, ROUTER_OWNERSHIP] as const),

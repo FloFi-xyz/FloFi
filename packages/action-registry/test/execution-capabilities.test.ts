@@ -37,7 +37,9 @@ describe('execution capability registry', () => {
     expect(resolveNodeCapability(pool('eip155:10'), { environment: 'MOCK' }).blockers[0]?.code).toBe('CHAIN_NOT_SUPPORTED');
     expect(resolveNodeCapability(swap(), { environment: 'LOCAL_FORK' }).blockers[0]?.code).toBe('RUNTIME_UNAVAILABLE');
     expect(resolveNodeCapability(swap(), { environment: 'PUBLIC_TESTNET' }).blockers[0]?.code).toBe('PUBLIC_EXECUTION_NOT_ENABLED');
-    expect(resolveNodeCapability(swap(), { environment: 'MAINNET' }).blockers[0]?.code).toBe('MAINNET_EXECUTION_NOT_ENABLED');
+    // BUILD-BASE-001: Base mainnet is an execution network; a chain without a mainnet row still fails closed.
+    expect(resolveNodeCapability(swap(), { environment: 'MAINNET' })).toMatchObject({ blockers: [], profile: { environment: 'MAINNET', evidenceMaturity: null } });
+    expect(resolveNodeCapability({ ...swap(), chainId: 'eip155:84532' } as Node, { environment: 'MAINNET' }).blockers[0]?.code).toBe('MAINNET_EXECUTION_NOT_ENABLED');
     expect(resolveNodeCapability(swap(), { environment: 'INVALID' }).blockers[0]?.code).toBe('ENVIRONMENT_NOT_SUPPORTED');
   });
   it('keeps authoring, simulation, execution, reconciliation and recovery independent', () => {
@@ -141,7 +143,10 @@ describe('execution capability registry', () => {
     // The historical BUILD-006 fork row is unchanged.
     expect(resolveNodeCapability(pool(), { environment: 'LOCAL_FORK', runtime: { forkAvailable: true } }).profile?.evidenceMaturity).toBe('FORK_REPRODUCED');
     // Wrong network, environment, protocol mix or Mode B fails closed.
-    expect(resolveNodeCapability(concentrated('eip155:8453', ['uniswap-v3']), { environment: 'PUBLIC_TESTNET' }).blockers[0]?.code).toBe('CHAIN_NOT_SUPPORTED');
+    expect(resolveNodeCapability(concentrated('eip155:10', ['uniswap-v3']), { environment: 'PUBLIC_TESTNET' }).blockers[0]?.code).toBe('CHAIN_NOT_SUPPORTED');
+    // BUILD-BASE-001: Base mainnet has the same canonical action as a MAINNET row only (never a public testnet one).
+    expect(resolveNodeCapability(concentrated('eip155:8453', ['uniswap-v3']), { environment: 'PUBLIC_TESTNET' }).blockers[0]?.code).toBe('PUBLIC_EXECUTION_NOT_ENABLED');
+    expect(resolveNodeCapability(concentrated('eip155:8453', ['uniswap-v3']), { environment: 'MAINNET' })).toMatchObject({ blockers: [], evidenceCeiling: null });
     expect(resolveNodeCapability(concentrated('eip155:84532', ['uniswap-v3']), { environment: 'MAINNET' }).blockers[0]?.code).toBe('MAINNET_EXECUTION_NOT_ENABLED');
     expect(resolveNodeCapability(concentrated('eip155:84532', ['uniswap-v3', 'orca-whirlpools']), { environment: 'PUBLIC_TESTNET' }).blockers[0]?.code).toBe('ADAPTER_NOT_AVAILABLE');
     expect(resolveNodeCapability(concentrated('eip155:84532', ['sushiswap']), { environment: 'PUBLIC_TESTNET' }).blockers[0]?.code).toBe('ADAPTER_NOT_AVAILABLE');

@@ -23,6 +23,7 @@ import { channelProviders, type ProviderSeams } from './providers.ts';
 import { readChannelDeployment, type ChannelRoute } from './registry.ts';
 import { channelHost, channelRuntime, type ChannelHost } from './runtime.ts';
 import { channelVisualRenderer } from './visuals.ts';
+import { authoringCatalogPreparer } from '../server/authoring-catalogs.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
 export type ChannelWebhookOptions = {
@@ -89,7 +90,7 @@ export async function handleChannelWebhook(route: ChannelRoute, request: Request
   const { store, platform } = channelRuntime(env, core, host, options.runtime);
   const service = createChannelService({ core, store, log, now, platform, previewTimeoutMs: options.previewTimeoutMs ?? 60_000, adapter: provider.adapter,
     interpreter: options.interpreter !== undefined ? options.interpreter : channelInterpreter(env, { enabled: core.copilot }), subscriptions: channelSubscriptions(env, host),
-    visuals: options.visuals !== undefined ? options.visuals : channelVisualRenderer,
+    visuals: options.visuals !== undefined ? options.visuals : channelVisualRenderer, catalogs: authoringCatalogPreparer(env),
     ...options.sleep ? { sleep: options.sleep } : {}, ...options.random ? { random: options.random } : {} });
   let ingested;
   try { ingested = await service.ingest(parsed.messages, parsed.deliveries); }

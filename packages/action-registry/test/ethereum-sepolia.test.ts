@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from 'vitest';
 import { createBorrowNode, createLendingCompositionWorkflow, createNativeTransferNode, createSupplyNode, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
-import { AAVE_V3_BASE_SEPOLIA, AAVE_V3_ETHEREUM_SEPOLIA, AAVE_V3_LENDING_PROFILES, ETHEREUM_MAINNET, ETHEREUM_SEPOLIA, ETHEREUM_SEPOLIA_ASSETS,
+import { AAVE_V3_BASE, AAVE_V3_BASE_SEPOLIA, AAVE_V3_ETHEREUM_SEPOLIA, AAVE_V3_LENDING_PROFILES, ETHEREUM_MAINNET, ETHEREUM_SEPOLIA, ETHEREUM_SEPOLIA_ASSETS,
   ETHEREUM_SEPOLIA_TRANSFER, NATIVE_TRANSFER_PROFILES, ROBINHOOD_TESTNET_TRANSFER, aaveLendingProfile, assertAaveLendingProfile, baseAssetRegistry,
   ethereumSepoliaAddChainParameters, executionCapabilityRegistry, nativeTransferProfile, resolveWorkflowCapability, LENDING_BASE_SEPOLIA } from '../src/index.js';
 
@@ -46,7 +46,8 @@ describe('Ethereum Sepolia assets', () => {
 
 describe('Aave V3 lending profiles', () => {
   it('select by CAIP-2 chain: Base Sepolia USDC (reserve 0) and Ethereum Sepolia WBTC (reserve 3, 8 decimals)', () => {
-    expect(AAVE_V3_LENDING_PROFILES).toEqual([AAVE_V3_BASE_SEPOLIA, AAVE_V3_ETHEREUM_SEPOLIA]);
+    // BUILD-BASE-001 appends Base mainnet (USDC); the testnet profiles keep their order and identity.
+    expect(AAVE_V3_LENDING_PROFILES).toEqual([AAVE_V3_BASE_SEPOLIA, AAVE_V3_ETHEREUM_SEPOLIA, AAVE_V3_BASE]);
     expect(aaveLendingProfile('eip155:84532')).toBe(AAVE_V3_BASE_SEPOLIA);
     expect(aaveLendingProfile(ETH)).toBe(AAVE_V3_ETHEREUM_SEPOLIA);
     expect(AAVE_V3_BASE_SEPOLIA).toMatchObject({ reserveId: 0, decimals: 6, symbol: 'USDC', l1DataFee: true });
@@ -57,12 +58,12 @@ describe('Aave V3 lending profiles', () => {
     expect(AAVE_V3_ETHEREUM_SEPOLIA.asset).toBe(ETHEREUM_SEPOLIA_ASSETS.WBTC.address);
   });
   it('refuses Mainnet, unknown chains and look-alike profile objects', () => {
-    for (const chain of ['eip155:1', 'eip155:8453', 'eip155:11155112', '']) expect(() => aaveLendingProfile(chain)).toThrow('AAVE_PROFILE_UNSUPPORTED');
+    for (const chain of ['eip155:1', 'eip155:42161', 'eip155:4663', 'eip155:11155112', '']) expect(() => aaveLendingProfile(chain)).toThrow('AAVE_PROFILE_UNSUPPORTED');
     expect(() => assertAaveLendingProfile({ ...AAVE_V3_ETHEREUM_SEPOLIA })).toThrow('AAVE_PROFILE_UNSUPPORTED');
     expect(assertAaveLendingProfile(AAVE_V3_ETHEREUM_SEPOLIA)).toBe(AAVE_V3_ETHEREUM_SEPOLIA);
   });
   it('transfer profiles cover the two testnets and (BUILD-RH-002) Robinhood Chain mainnet, never Ethereum Mainnet', () => {
-    expect(NATIVE_TRANSFER_PROFILES.map(profile => profile.chain)).toEqual([ROBINHOOD_TESTNET_TRANSFER.chain, ETHEREUM_SEPOLIA_TRANSFER.chain, 'eip155:4663']);
+    expect(NATIVE_TRANSFER_PROFILES.map(profile => profile.chain)).toEqual([ROBINHOOD_TESTNET_TRANSFER.chain, ETHEREUM_SEPOLIA_TRANSFER.chain, 'eip155:4663', 'eip155:8453']);
     expect(NATIVE_TRANSFER_PROFILES.slice(0, 2)).toEqual([ROBINHOOD_TESTNET_TRANSFER, ETHEREUM_SEPOLIA_TRANSFER]);
     expect(nativeTransferProfile(ETH)).toMatchObject({ chainHex: '0xaa36a7', settlement: 'L1', minimumConfirmations: 3, adapterId: 'evm.native-transfer' });
     expect(nativeTransferProfile('eip155:46630')).toMatchObject({ settlement: 'L2' });

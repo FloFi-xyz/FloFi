@@ -59,5 +59,7 @@ describe('locale preference and workflow isolation', () => {
   it('preserves user names, addresses and template values', () => {
     expect(translate('PT', 'My workflow 0x1234')).toBe('My workflow 0x1234');
     expect(translate('PT', '  Save workflow  ')).toBe('  Guardar fluxo  ');
+    // BUILD-BASE-001: a catalog network's name is a template value, not a catalog entry per network.
+    expect(translate('PT', 'Base tokens are unavailable right now. Try again in a moment.')).toBe('Os tokens da Base estão indisponíveis no momento. Tente novamente em instantes.');
   });
 });

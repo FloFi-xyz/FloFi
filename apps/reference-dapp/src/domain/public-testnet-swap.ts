@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { UNISWAP_V3_ETHEREUM_SEPOLIA as ethereum, UNISWAP_V3_ROBINHOOD as robinhood } from '@defi-workflow-engine/action-registry';
+import { isCatalogSwapNode } from '@defi-workflow-engine/workflow-contracts';
+import { UNISWAP_V3_BASE as base, UNISWAP_V3_ETHEREUM_SEPOLIA as ethereum, UNISWAP_V3_ROBINHOOD as robinhood } from '@defi-workflow-engine/action-registry';
 /** Pinned Base Sepolia Uniswap v3 profile; verified again against public chain state before use. */
 export const BASE_SEPOLIA = Object.freeze({
   chainId: 84532, chainHex: '0x14a34', chainRef: 'eip155:84532', network: 'Base Sepolia',
@@ -35,9 +36,26 @@ export const ROBINHOOD_MAINNET_SWAP = Object.freeze({
   stockTokenBeacon: robinhood.stockTokenBeacon, beaconSlot: robinhood.beaconSlot, reviewTtlSeconds: robinhood.reviewTtlSeconds,
   /** Arbitrum Nitro: gasUsed already includes L1 data gas; a receipt never carries `l1Fee`. */
   l1DataFee: false, kind: 'CATALOG', environment: 'MAINNET',
+  /** Run namespace of this catalog network; the code-pinned tokens by address; only pinned assets and Stock Tokens exist here. */
+  runPrefix: 'rhs', pinnedTokens: { [robinhood.weth]: 'weth', [robinhood.usdg]: 'usdg' }, listedTokens: 'REFUSE', referencePair: null,
+} as const);
+/**
+ * BUILD-BASE-001: Base mainnet (real funds) over the Base asset catalog (pinned ETH/USDC/WETH and the validated token list). Any catalog pair
+ * with a live canonical Uniswap v3 pool; pool and fee tier are chosen per quote and bound into the Review. Base USDC ⇄ WETH keeps its
+ * BUILD-002 declaration (`referencePair`) and is read into the same fields. A listed token is verified by code presence and its own
+ * `decimals()` (listing is never authority); USDC and WETH carry their pinned code.
+ */
+export const BASE_MAINNET_SWAP = Object.freeze({
+  chainId: 8453, chainHex: '0x2105', chainRef: 'eip155:8453', network: base.network,
+  rpcUrl: base.rpc, explorer: `${base.explorer}/tx/`,
+  factory: base.factory, router: base.router, quoter: base.quoter, weth: base.weth, usdc: base.usdc,
+  poolInitCodeHash: base.poolInitCodeHash, feeTiers: base.feeTiers, codeSha256: base.codeSha256, reviewTtlSeconds: base.reviewTtlSeconds,
+  /** OP Stack: receipts carry a separate `l1Fee`, bounded through the GasPriceOracle before the wallet is asked. */
+  l1DataFee: true, gasPriceOracle: base.gasPriceOracle, kind: 'CATALOG', environment: 'MAINNET',
+  runPrefix: 'bas', pinnedTokens: { [base.weth]: 'weth', [base.usdc]: 'usdc' }, listedTokens: 'CODE_AND_DECIMALS', referencePair: [base.usdc, base.weth],
 } as const);
 export type PairSwapProfile = typeof BASE_SEPOLIA | typeof ETHEREUM_SEPOLIA_SWAP;
-export type CatalogSwapProfile = typeof ROBINHOOD_MAINNET_SWAP;
+export type CatalogSwapProfile = typeof ROBINHOOD_MAINNET_SWAP | typeof BASE_MAINNET_SWAP;
 /** The exact USDC/WETH public-testnet pair profiles (unchanged by BUILD-RH-002). */
 export type PublicSwapProfile = PairSwapProfile;
 export const PUBLIC_SWAP_PROFILES: readonly PublicSwapProfile[] = Object.freeze([BASE_SEPOLIA, ETHEREUM_SEPOLIA_SWAP]);
@@ -45,9 +63,9 @@ export const PUBLIC_SWAP_PROFILES: readonly PublicSwapProfile[] = Object.freeze(
 export function publicSwapProfile(chain: string | number | null | undefined): PublicSwapProfile | null {
   return PUBLIC_SWAP_PROFILES.find(profile => profile.chainRef === chain || profile.chainId === chain) ?? null;
 }
-/** Every profile the shared owner-wallet Uniswap swap service serves: the testnet pairs and the BUILD-RH-002 catalog networks. */
+/** Every profile the shared owner-wallet Uniswap swap service serves: the testnet pairs and the catalog networks (BUILD-RH-002, BUILD-BASE-001). */
 export type SwapProfile = PairSwapProfile | CatalogSwapProfile;
-export const SWAP_PROFILES: readonly SwapProfile[] = Object.freeze([...PUBLIC_SWAP_PROFILES, ROBINHOOD_MAINNET_SWAP]);
+export const SWAP_PROFILES: readonly SwapProfile[] = Object.freeze([...PUBLIC_SWAP_PROFILES, ROBINHOOD_MAINNET_SWAP, BASE_MAINNET_SWAP]);
 export function swapProfile(chain: string | number | null | undefined): SwapProfile | null {
   return SWAP_PROFILES.find(profile => profile.chainRef === chain || profile.chainId === chain) ?? null;
 }
@@ -56,4 +74,14 @@ export function quoteDecimals(quote: { readonly inputSymbol: string; readonly ou
   side: 'input' | 'output'): number {
   const bound = side === 'input' ? quote.inputDecimals : quote.outputDecimals;
   return bound ?? ((side === 'input' ? quote.inputSymbol : quote.outputSymbol) === 'USDC' ? 6 : 18);
+}
+/**
+ * BUILD-BASE-001: whether the shared owner-wallet swap serves this swap node. Every testnet pair and catalog-network swap does. Base's
+ * USDC ⇄ WETH reference swap (BUILD-002 declaration) does only where this instance serves Base mainnet swaps and no local fork runtime is
+ * available (`referenceServed`); otherwise it keeps its BUILD-002 observation and fork paths, unchanged.
+ */
+export function ownerWalletSwapServes(node: { readonly actionType: string; readonly chainId: string }, referenceServed: boolean): boolean {
+  const profile = node.actionType === 'asset.swap.exact-input' ? swapProfile(node.chainId) : null;
+  if (!profile) return false;
+  return profile.kind !== 'CATALOG' || !profile.referencePair || isCatalogSwapNode(node) || referenceServed;
 }

@@ -23,7 +23,7 @@ import { createSolanaSwapNode } from '../domain/jupiter-authoring';
 import { createAuthoredLending } from '../domain/lending-authoring';
 import { describeProposal } from '../domain/proposal';
 import { createRouterNode, routerNetworkOfInput, ROUTER_NETWORK_OPTIONS, type RouterBridgeInput, type RouterDestination, type RouterSource } from '../domain/router-authoring';
-import { ROBINHOOD_NETWORK } from '../domain/asset-catalogs';
+import { networkIdentity } from '../domain/network-registry';
 import { createCryptoActionNode, type CryptoActionInput } from '../domain/crypto-action-picker';
 import { createAuthoredTransfer, type RobinhoodTransferInput } from '../domain/robinhood-transfer-authoring';
 import { ROBINHOOD_LIQUIDITY_DEFAULT_FEE, ROBINHOOD_LIQUIDITY_DEFAULT_SLIPPAGE } from '../domain/robinhood-liquidity-authoring';
@@ -61,6 +61,13 @@ export const NETWORKS: Readonly<Record<NetworkId, { readonly label: string; read
   'solana-devnet': { label: 'Solana Devnet', class: 'DEVNET', environment: 'PUBLIC_TESTNET' },
   'robinhood': { label: 'Robinhood Chain', class: 'MAINNET', environment: 'MAINNET' },
 });
+/**
+ * BUILD-BASE-001: the catalog networks (official asset catalog: Robinhood Chain, Base) by strategy id → their authoring network name. Their
+ * swaps, positions and transfers are the Canvas's catalog actions; Base's USDC ⇄ WETH swap keeps its BUILD-002 command (hash continuity).
+ */
+const catalogNetworkName = (network: NetworkId): string | null => { const identity = networkIdentity(network); return identity?.catalog ? identity.name : null; };
+const referencePair = (spec: { readonly network: NetworkId; readonly inputAsset: string; readonly outputAsset: string }) => spec.network === 'base' &&
+  new Set([spec.inputAsset, spec.outputAsset].map(s => s.toUpperCase())).size === 2 && [spec.inputAsset, spec.outputAsset].every(s => ['USDC', 'WETH'].includes(s.toUpperCase()));
 /** The router's chain names of a bridge's networks (BUILD-RH-002: Robinhood Chain in and out of Base and Arbitrum One). */
 const ROUTER_CHAIN: Readonly<Partial<Record<NetworkId, RouterSource & RouterDestination | 'Base Sepolia' | 'Arbitrum Sepolia'>>> =
   Object.freeze({ 'base': 'Base', 'base-sepolia': 'Base Sepolia', 'arbitrum-one': 'Arbitrum', 'arbitrum-sepolia': 'Arbitrum Sepolia', 'robinhood': 'Robinhood Chain' });
@@ -73,7 +80,7 @@ export function defaultSlippageBps(spec: StrategySpec): number | null {
     case 'bridge': return ROUTER_NETWORK_OPTIONS[routerNetworkOfInput(routerChains(spec)) ?? 'mainnet'].profile.defaultSlippageBps;
     case 'swap': case 'lending_composition': return 50;
     case 'add_liquidity': return spec.network === 'solana-devnet' ? Number(SOLANA_LIQUIDITY_DEFAULT_SLIPPAGE)
-      : spec.network === 'robinhood' ? Number(ROBINHOOD_LIQUIDITY_DEFAULT_SLIPPAGE) : uniswapLiquidityProfileFor(NETWORKS[spec.network].label).defaultSlippageBps;
+      : catalogNetworkName(spec.network) ? Number(ROBINHOOD_LIQUIDITY_DEFAULT_SLIPPAGE) : uniswapLiquidityProfileFor(NETWORKS[spec.network].label).defaultSlippageBps;
     default: return null;
   }
 }
@@ -97,16 +104,17 @@ export function normalizeStrategy(spec: StrategySpec): { readonly strategy: Stra
       return { notes, strategy: { version: 1, action: spec.action, network: spec.network, asset: spec.asset, amount: spec.amount, beneficiary: lower(spec.beneficiary) } };
     case 'withdraw': return { notes, strategy: { version: 1, action: 'withdraw', network: spec.network, asset: spec.asset, amount: spec.amount } };
     case 'add_liquidity': {
-      // BUILD-RH-002: a Robinhood Chain position names its fee tier (default 0.3%); other networks have one pool each and take none.
-      const feeTier = spec.network === 'robinhood' ? spec.feeTier ?? ROBINHOOD_LIQUIDITY_DEFAULT_FEE : spec.feeTier;
-      if (spec.network === 'robinhood' && spec.feeTier === undefined) notes.push(`Default fee tier ${ROBINHOOD_LIQUIDITY_DEFAULT_FEE / 10_000}% applied.`);
+      // BUILD-RH-002: a catalog-network position (Robinhood Chain, BUILD-BASE-001 Base) names its fee tier (default 0.3%); other networks have one pool each.
+      const catalog = catalogNetworkName(spec.network) !== null;
+      const feeTier = catalog ? spec.feeTier ?? ROBINHOOD_LIQUIDITY_DEFAULT_FEE : spec.feeTier;
+      if (catalog && spec.feeTier === undefined) notes.push(`Default fee tier ${ROBINHOOD_LIQUIDITY_DEFAULT_FEE / 10_000}% applied.`);
       return { notes, strategy: { version: 1, action: 'add_liquidity', network: spec.network, maxAmounts: { ...spec.maxAmounts },
         range: spec.range.unit === 'full' ? { unit: 'full' } : { unit: spec.range.unit, lower: spec.range.lower, upper: spec.range.upper },
         ...feeTier === undefined ? {} : { feeTier }, slippageBps: slippage! } };
     }
     case 'transfer':
       if (spec.recipient === undefined) notes.push('No recipient given: the wallet that signs in the FloFi app receives the transfer (bound at Review).');
-      return { notes, strategy: { version: 1, action: 'transfer', network: 'robinhood', asset: spec.asset, amount: spec.amount,
+      return { notes, strategy: { version: 1, action: 'transfer', network: spec.network, asset: spec.asset, amount: spec.amount,
         ...spec.recipient === undefined ? {} : { recipient: lower(spec.recipient) } } };
     case 'lending_composition': return { notes, strategy: { version: 1, action: 'lending_composition', network: 'base-sepolia', asset: 'USDC', supplyAmount: spec.supplyAmount,
       borrowAmount: spec.borrowAmount, outputAsset: 'WETH', slippageBps: slippage!, owner: lower(spec.owner) } };
@@ -132,15 +140,17 @@ function build(spec: StrategySpec, context: ReviewContext): Built {
     case 'swap': {
       if (spec.inputAsset === spec.outputAsset) refuse('INVALID_ASSET_PAIR');
       // BUILD-RH-002: Robinhood Chain swaps the official catalog (USDG, WETH, Stock Tokens), exactly as the Canvas Stocks card and chat author it.
-      if (spec.network === 'robinhood') {
-        const input: CryptoActionInput = { selection: { action: 'swap', network: ROBINHOOD_NETWORK, from: spec.inputAsset, to: spec.outputAsset }, amount: spec.amount, slippage };
+      // BUILD-BASE-001: so does Base (its validated token list), except the USDC ⇄ WETH reference swap below.
+      const catalogName = catalogNetworkName(spec.network);
+      if (catalogName && !referencePair(spec)) {
+        const input: CryptoActionInput = { selection: { action: 'swap', network: catalogName, from: spec.inputAsset, to: spec.outputAsset }, amount: spec.amount, slippage };
         return { command: { ...base, type: 'ADD_CRYPTO_ACTION', input }, check: () => createCryptoActionNode('node-preview', input) };
       }
       if (spec.network === 'solana' || spec.network === 'solana-devnet') {
         const input = { network: NETWORKS[spec.network].label as 'Solana' | 'Solana Devnet', from: spec.inputAsset as never, to: spec.outputAsset as never, amount: spec.amount, slippage };
         return { command: { ...base, type: 'ADD_SOLANA_SWAP', input }, check: () => createSolanaSwapNode('node-preview', input) };
       }
-      const pair = `${spec.inputAsset}>${spec.outputAsset}`;
+      const pair = `${spec.inputAsset.toUpperCase()}>${spec.outputAsset.toUpperCase()}`;
       const direction: Direction = pair === 'USDC>WETH' ? 'USDC_TO_WETH' : pair === 'WETH>USDC' ? 'WETH_TO_USDC' : refuse('SWAP_ASSET_PAIR_UNSUPPORTED');
       const type = spec.network === 'base' ? 'ADD_SWAP' : spec.network === 'base-sepolia' ? 'ADD_TESTNET_SWAP' : 'ADD_ETHEREUM_SEPOLIA_SWAP';
       const swapContext = spec.network === 'base' ? context : reviewContextForChain(spec.network === 'base-sepolia' ? 'eip155:84532' : 'eip155:11155111', context);
@@ -157,11 +167,12 @@ function build(spec: StrategySpec, context: ReviewContext): Built {
     }
     case 'add_liquidity': {
       const amounts = spec.maxAmounts, keys = Object.keys(amounts).sort().join();
-      if (spec.network === 'robinhood') {
+      const poolNetwork = catalogNetworkName(spec.network);
+      if (poolNetwork) {
         // Any two official catalog assets at a standard fee tier: the full range, or explicit ticks (a price range would need the pool's live price).
         if (spec.range.unit === 'price') refuse('LIQUIDITY_RANGE_UNIT_UNSUPPORTED');
         const [tokenA, tokenB] = Object.keys(amounts) as [string, string];
-        const input: CryptoActionInput = { selection: { action: 'pool', network: ROBINHOOD_NETWORK, from: tokenA, to: tokenB }, amount: amounts[tokenA]!,
+        const input: CryptoActionInput = { selection: { action: 'pool', network: poolNetwork, from: tokenA, to: tokenB }, amount: amounts[tokenA]!,
           secondAmount: amounts[tokenB]!, slippage, fee: spec.feeTier ?? ROBINHOOD_LIQUIDITY_DEFAULT_FEE,
           ...spec.range.unit === 'tick' ? { rangeUnit: 'TICK' as const, lower: spec.range.lower, upper: spec.range.upper } : {} };
         return { command: { ...base, type: 'ADD_CRYPTO_ACTION', input }, check: () => createCryptoActionNode('node-preview', input) };
@@ -184,7 +195,8 @@ function build(spec: StrategySpec, context: ReviewContext): Built {
       return { command: { ...base, type: 'AUTHOR_LENDING', input }, check: () => createAuthoredLending('lending-preview', 1, input) };
     }
     case 'transfer': {
-      const input: RobinhoodTransferInput = { network: 'Robinhood Chain', asset: spec.asset, amount: spec.amount, recipient: spec.recipient ?? 'CONNECTED_OWNER' };
+      const input: RobinhoodTransferInput = { network: (catalogNetworkName(spec.network) ?? refuse('TRANSFER_PROFILE_UNSUPPORTED')) as RobinhoodTransferInput['network'],
+        asset: spec.asset, amount: spec.amount, recipient: spec.recipient ?? 'CONNECTED_OWNER' };
       return { command: { ...base, type: 'ADD_RH_TRANSFER', input }, check: () => createAuthoredTransfer('node-preview', input) };
     }
   }

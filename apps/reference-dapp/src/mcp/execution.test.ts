@@ -37,7 +37,8 @@ describe('BUILD-MCP-002 handoff policy', () => {
 describe('BUILD-MCP-002 execution plans', () => {
   it('maps every supported strategy to an existing flow, the lending composition to its executor, and nothing nearby', () => {
     const plans = Object.fromEntries(STRATEGY_EXAMPLES.map(e => [e.id, executionPlan(compose(e.strategy))]));
-    expect(plans['swap-base']).toMatchObject({ kind: 'NOT_EXECUTABLE', flow: null, reason: 'OWNER_EXECUTION_NOT_IMPLEMENTED', fundsClass: 'REAL_FUNDS' });
+    // BUILD-BASE-001 (intentional change): the Base swap (reference pair included) is the Base catalog-network swap flow.
+    expect(plans['swap-base']).toMatchObject({ kind: 'SINGLE_FLOW', flow: 'base-swap', reason: null, fundsClass: 'REAL_FUNDS' });
     expect(plans['lending-composition-base-sepolia']).toMatchObject({ kind: 'COMPOSITE_FLOW', flow: 'lending-composition', fundsClass: 'TEST_FUNDS',
       steps: [{ index: 0, action: 'supply', nodeIds: ['lending-supply'] }, { index: 1, action: 'borrow', nodeIds: ['lending-borrow'] }, { index: 2, action: 'swap', nodeIds: ['lending-swap'] }] });
     expect(plans['bridge-base-arbitrum-one']).toMatchObject({ kind: 'SINGLE_FLOW', flow: 'crosschain-router', networks: ['base', 'arbitrum-one'], networkEnvironment: 'MAINNET',
@@ -101,9 +102,10 @@ describe('BUILD-MCP-002 handoff gates', () => {
   });
 
   it('refuses what no existing flow executes with the owner\'s wallet, whatever the deployment or policy says', async () => {
+    // BUILD-BASE-001: the Base swap now has a flow; another flow's enablement or a permissive policy still never enables it.
     const swapBase = compose(example('swap-base'));
     expect((await evaluateGates(swapBase, runtime({ 'base-sepolia-swap': 'live' }), readHandoffPolicy({ FLOFI_MCP_HANDOFF_MAINNET_NETWORKS: 'base' }))).handoff)
-      .toEqual({ allowed: false, reason: 'OWNER_EXECUTION_NOT_IMPLEMENTED' });
+      .toEqual({ allowed: false, reason: 'FLOW_NOT_ENABLED_IN_DEPLOYMENT' });
   });
 
   it('test funds can be switched off by policy, and an invalid policy refuses everything', () => {

@@ -61,6 +61,14 @@ describe('BUILD-MCP-001 deterministic engine facade', () => {
       'swap-robinhood': 'swap 10 USDG for WETH on Robinhood slippage 50 bps',
       'add-liquidity-robinhood': 'add liquidity 10 USDG and 0.003 WETH on Robinhood fee 0.01% full range slippage 100 bps',
       'transfer-robinhood': 'transfer 1 USDG on Robinhood',
+      // BUILD-BASE-001: Base mainnet (real funds) as a catalog network, and the Router's Arbitrum One → Base route.
+      'bridge-arbitrum-base': 'bridge 5 USDC from Arbitrum to Base via auto slippage 50 bps',
+      'add-liquidity-base': 'add liquidity 10 USDC and 0.003 WETH on Base fee 0.05% full range slippage 100 bps',
+      'transfer-base': 'transfer 1 USDC on Base',
+      'supply-base': `supply 1 USDC to Aave on Base beneficiary 0x0000000000000000000000000000000000000001`,
+      'borrow-base': `borrow 1 USDC from Aave on Base beneficiary 0x0000000000000000000000000000000000000001`,
+      'repay-base': `repay 1 USDC to Aave on Base beneficiary 0x0000000000000000000000000000000000000001`,
+      'withdraw-base': 'withdraw 1 USDC from Aave on Base',
     };
     expect(Object.keys(sentences).sort()).toEqual(STRATEGY_EXAMPLES.map(e => e.id).sort());
     for (const example of STRATEGY_EXAMPLES) {
@@ -146,10 +154,12 @@ describe('BUILD-MCP-001 deterministic engine facade', () => {
     expect(testnet.capability).toMatchObject({ executionImplementedForOwnerWallet: true, evidenceCeiling: null });
     const mainnet = reviewComposition(composed({ action: 'bridge', sourceNetwork: 'base', destinationNetwork: 'arbitrum-one', asset: 'USDC', amount: '5', recipient: OWNER }));
     expect(mainnet.findings.map(f => f.code)).toEqual(expect.arrayContaining(['REAL_FUNDS', 'EXPLICIT_RECIPIENT']));
-    // Base mainnet Uniswap is a local-fork capability only: no public execution is claimed.
+    // BUILD-BASE-001 (intentional change): Base mainnet Uniswap is an owner-wallet capability (real funds, quote required, deployment-gated);
+    // nothing is demonstrated, so no evidence ceiling is claimed.
     const swap = reviewComposition(composed({ action: 'swap', network: 'base', inputAsset: 'USDC', outputAsset: 'WETH', amount: '2' }));
-    expect(swap.findings).toEqual(expect.arrayContaining([expect.objectContaining({ level: 'BLOCK', code: 'MAINNET_EXECUTION_NOT_ENABLED' })]));
-    expect(swap.capability.executionImplementedForOwnerWallet).toBe(false);
+    expect(swap.findings).toEqual(expect.arrayContaining([expect.objectContaining({ level: 'WARNING', code: 'REAL_FUNDS' }),
+      expect.objectContaining({ level: 'BLOCK', code: 'UNQUOTED_EXECUTION_UNAVAILABLE' })]));
+    expect(swap.capability).toMatchObject({ executionImplementedForOwnerWallet: true, evidenceCeiling: null });
     const lending = reviewComposition(composed(STRATEGY_EXAMPLES.find(e => e.id === 'lending-composition-base-sepolia')!.strategy));
     expect(lending.findings.map(f => f.code)).toContain('DEBT_REMAINS');
   });
