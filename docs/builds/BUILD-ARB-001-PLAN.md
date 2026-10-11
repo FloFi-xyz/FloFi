@@ -5,7 +5,8 @@ Branch: `codex/build-arb-001-network-ux`.
 Inputs: [discovery and capability matrix](BUILD-ARB-001-DISCOVERY.md), [read verification](BUILD-ARB-001-READ-VERIFICATION.json),
 [persistent handoff](BUILD-ARB-001-HANDOFF.md), BASE-001 shared architecture and existing Router.
 
-The owner authorized and completed **Phase 1**, **Phase 2: Swap + Transfer runtime only**, and **Phase 3: existing Router Bridge certification only**.
+The owner authorized and completed **Phase 1**, **Phase 2: Swap + Transfer runtime only**, **Phase 3: existing Router Bridge certification only**,
+and **Phase 4: Arbitrum Pool / Liquidity runtime only**.
 Phase 2 starts at `87f4a7a575ff10f5b8e7c05e56af4fa0bc335bce`. Every phase requires focused checks, an updated handoff and a commit.
 Do not start later phases automatically. Full CI belongs at the end of BUILD-ARB-001; no PR or push in this checkpoint.
 
@@ -143,13 +144,78 @@ authoring channel, operator signer, wallet custody or deployment gate was added.
 - Existing `GRYLOO_ROUTER=live` and `GRYLOO_ROUTER_OWNER_EXECUTION=MAINNET_OWNER_APPROVED` gates serve both directions and were not
   enabled/configured. Evidence is MOCKED only. UX changes, Production changes, real-money transactions, push, PR and Phase 4 work: none.
 
+## Phase 4 — existing Uniswap v3 Pool / Liquidity runtime (completed, gates remain off)
+
+Started from clean `ead7575819db7d5f1904db766cd093c10c68451e`; no other session's Phase 4 edits were present. The starting handoff
+records the complete existing path before implementation. Reused `asset.liquidity.concentrated`, catalog CREATE2 resolution,
+shared linter/compiler, sequential simulation, exact approvals, Review/Manifest commitments, owner-wallet submission, append-only
+execution storage, nonce discovery, workers, NFT/receipt/amount reconciliation and Evidence. The canonical operation remains one
+mint; no increase/withdraw engine, pool creation, native ETH wrapping, testnet expansion or Aave implementation was added.
+
+### Verified deployment and pool policy
+
+Fresh [official Uniswap Arbitrum deployments](https://developers.uniswap.org/docs/protocols/v3/deployments/v3-arbitrum-deployments)
+and public read-only verification at Arbitrum block **513952674** bind the following to `eip155:42161`:
+
+| Contract | Verified address |
+| --- | --- |
+| Factory | `0x1f98431c8ad98523631ae4a59f267346ea31f984` |
+| Nonfungible Position Manager | `0xc36442b4a4522e871399cd717abdd847ab11fe88` |
+| SwapRouter02 (existing Phase 2 swap profile) | `0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45` |
+| QuoterV2 (existing Phase 2 swap profile) | `0x61ffe014ba17989e743c5f6cb21bf9697530b21e` |
+
+The liquidity runtime uses Factory, Position Manager and the pool; it does not route the mint through SwapRouter or Quoter.
+Factory/NPM code hashes and factory/WETH relationships are pinned; wrong-chain responses fail closed. Full observations, deployment
+feed hash, token identities, pool state and a successful zero-value `eth_simulateV1` **view-only** probe are in
+[Phase 4 read verification](BUILD-ARB-001-PHASE-4-READ-VERIFICATION.json). This proves read-method availability, not a public owner mint.
+
+- Only two verified catalog ERC-20 assets and an existing initialized pool of the verified factory are accepted. Pool code,
+  factory `getPool`, pool factory/order/fee/spacing and token identity/decimals are checked before price reads or simulation.
+  Missing pools and disabled/mismatched tiers are refused; no fallback pool or tier is authored/substituted.
+- USDC/WETH, USDC/ARB and WETH/ARB existed at all four standard tiers in that observation. This is historical read evidence;
+  each runtime request must establish existence again. Canonical asset identity is chain plus address, never symbol alone.
+- Factory reads confirmed **100 → 1, 500 → 10, 3000 → 60, 10000 → 200** (fee units → tick spacing). Every selected tier is
+  rechecked. Lower < upper, alignment and protocol bounds follow shared integer math; full ranges use the selected tier's
+  usable endpoints, avoiding the inherited incompatible-range bug found during BUILD-BASE-001.
+- Assets and amounts map by address to token0/token1 in either authored order. Arbitrum USDC/WETH has WETH as token0,
+  so the compiler's canonical token0-per-token1 quote is WETH per USDC. Existing deterministic price/band conversion is tested
+  in that orientation. Existing catalog authoring remains full/aligned tick ranges; no price/band UX or implicit native wrapping.
+
+### Review, fees and durable owner execution
+
+- Review binds chain, owner/NFT recipient, canonical tokens/amount bounds, verified pool/Factory/NPM/code, enabled fee/spacing,
+  aligned ticks, pool state, minimum usage/liquidity, slippage, exact approvals/calls, zero value, expiry/deadline and fee ceilings.
+  Exact approval amounts go only to the verified NPM. Changed identity, approval requirements, material range/amount state or
+  over-bound fees clear authorization; neither pool nor fee tier can silently change after Review.
+- Shared liquidity now preserves the reviewed gas/price envelope and rechecks exact-call estimates before PREPARED and wallet
+  handoff. The browser also checks chain, owner, target, calldata, value, gas and price against Review. No operator signer,
+  AI financial authority, new allowlist or cloud submission path exists.
+- Extracted Phase 2's 150% gas margin and 2× price ceiling plus Phase 3's NodeInterface posting-gas reader into a shared helper.
+  Swap and Router reuse it without policy changes. Liquidity combines sequence simulation and posting gas into a conservative
+  Nitro ceiling before approvals exist, then rechecks total `eth_estimateGas`; zero priority, no Base OP Stack oracle or extra
+  `l1Fee`. Reconciliation records receipt `gasUsed × effectiveGasPrice` and checks offered/paid bounds. Base retains its OP
+  Stack oracle and now binds each call's separate L1 fee allowance instead of silently repricing at submission.
+- Durable `arlp-` runs reuse PREPARED → SUBMITTING → PENDING/CONFIRMED, SUBMISSION_RESULT_UNKNOWN, CANCELLED/NOT_FOUND,
+  REVERTED and RECONCILIATION_REQUIRED/DIVERGENT branches, then RECONCILED. Nonce discovery and permanent owner nonce leases
+  prevent blind repeat mints after ambiguity. Restart, delayed receipts, RPC/evidence outages, position readback and repeated
+  reconciliation are tested. Wrong chain/NPM/owner/pair/tier/range/amount/cost/spender freezes execution without success evidence.
+  A MOCKED journal cannot be reloaded as PUBLIC_MAINNET. Workers remain observation-only.
+- Register the existing `liquidityFlow`, server actions, browser run recovery and MCP mappings through the shared catalog profile.
+  Canvas, deterministic Chat, EN/PT deterministic intent-provider Copilot and the actual MCP gateway converge on equal IR/hashes.
+  The owner's incomplete representative sentences use existing clarification for deposit amounts/range; no Arbitrum prompt/list.
+- Reuse **GRYLOO_ARBITRUM_MAINNET=live** and **GRYLOO_ARBITRUM_OWNER_EXECUTION=MAINNET_OWNER_APPROVED**. Both remain off;
+  no variable was set and no liquidity-specific gate was introduced. All financial lifecycle tests/evidence are **MOCKED**.
+
+Focused commands and results are recorded in the handoff. Scoped strict TypeScript, changed-file lint, governance-lite and
+whitespace checks pass; the broader server-action graph retains the documented dependency declaration limitation and uses
+`--skipLibCheck` for source checking. No full CI/browser/fork/PostgreSQL matrix, live model or public owner execution was run.
+UX changes, Production changes, real-money transactions, push and PR: **NONE**. Phase 5 has not started.
+
 ## Recommended later phases — proposals only
 
-1. **Phase 4: Pool/Liquidity.** Add an explicitly authorized shared Uniswap liquidity profile after fresh deployment verification; test
-   position/range accounting, approvals, lifecycle and reconciliation. Phase 2's swap profile grants no Pool capability.
-2. **Aave native USDC reserve.** Add a one-reserve Arbitrum profile for id 12 after fresh deployment, reserve, cap, liquidity
+1. **Phase 5: Aave native USDC reserve.** Add a one-reserve Arbitrum profile for id 12 after fresh deployment, reserve, cap, liquidity
    and ABI verification; test supply/borrow/repay/withdraw lifecycle. Do not infer multi-reserve or composition support.
-3. **Final phase: end-to-end integration and full CI.** Confirm registry parity across all surfaces, existing Base/Robinhood behavior,
+2. **Final phase: end-to-end integration and full CI.** Confirm registry parity across all surfaces, existing Base/Robinhood behavior,
    execution gates, recovery/reconciliation and hash continuity; run the full required CI only here. Delivery/PR remains owner-directed.
 
 The owner may reorder or narrow these phases and will supply any future UX changes explicitly.

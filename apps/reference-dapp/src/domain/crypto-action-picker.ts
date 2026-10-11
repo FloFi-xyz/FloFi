@@ -60,6 +60,8 @@ const pools: readonly CryptoPickerProfile[] = [
     tokens: [ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY.token0.symbol, ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY.token1.symbol], pair: [ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY.token0.symbol, ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY.token1.symbol] },
   // BUILD-RH-002: any two Robinhood Chain catalog ERC-20s (USDG, WETH, Stock Tokens); the pool follows the pair and fee tier.
   { network: ROBINHOOD_NETWORK, chain: ROBINHOOD_CHAIN, provider: 'Uniswap v3', get tokens() { return ['USDG', 'WETH', ...featuredStockSymbols()]; }, catalog: true },
+  ...Object.entries(CATALOG_LIQUIDITY_NETWORKS).filter(([network]) => network !== BASE_NETWORK && network !== ROBINHOOD_NETWORK)
+    .map(([network, chain]): CryptoPickerProfile => ({ network, chain, provider: 'Uniswap v3', get tokens() { return featuredNetworkSymbols(chain); }, catalog: true })),
 ];
 const transfers: readonly CryptoPickerProfile[] = Object.entries(TRANSFER_NETWORKS).map(([network, profile]): CryptoPickerProfile => profile.chain === ROBINHOOD_CHAIN
   // BUILD-RH-002: Robinhood Chain transfers native ETH and catalog assets; non-shortcut assets come from the official catalog.
@@ -86,7 +88,7 @@ export function selectCryptoNetwork(action: CryptoAction, network: string, curre
   const from = profile.pair?.[0] ?? (current && profile.tokens.includes(current.from) ? current.from : profile.tokens[0]!);
   // A Robinhood Chain pool starts as USDG against the first featured Stock Token (the live Stock Token / USDG pools), never USDG/WETH by accident;
   // a Base pool starts as USDC/WETH.
-  const pooled = action === 'pool' && profile.catalog ? profile.chain === BASE_CHAIN ? (from === 'USDC' ? 'WETH' : 'USDC')
+  const pooled = action === 'pool' && profile.catalog ? profile.chain !== ROBINHOOD_CHAIN ? profile.tokens.find(token => token !== from)
     : (from === 'USDG' ? featuredStockSymbols()[0] : 'USDG') : undefined;
   const to = profile.pair?.[1] ?? (erc20Only(action) ? current?.to && current.to !== from && profile.tokens.includes(current.to) ? current.to : pooled ?? profile.tokens.find(token => token !== from) : undefined);
   return { action, network, from, ...(to ? { to } : {}) };

@@ -11,3 +11,4 @@ export const arbitrumMainnetMode = runtime.mode, arbitrumOwnerExecutionEnabled =
   arbitrumRpcUrl = runtime.rpcUrl, arbitrumMainnetRpc = runtime.rpc, createArbitrumCatalogLoader = runtime.createCatalogLoader,
   arbitrumCatalogFor = runtime.catalogFor, arbitrumSwapRuntime = runtime.swapRuntime, arbitrumAuthoringCatalog = runtime.authoringCatalog,
   ARBITRUM_MAINNET_RPC_METHODS = EVM_CATALOG_RPC_METHODS;
+export const ARBITRUM_LIQUIDITY_RPC_METHODS = Object.freeze([...ARBITRUM_MAINNET_RPC_METHODS, 'eth_simulateV1']);

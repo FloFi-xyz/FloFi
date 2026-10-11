@@ -21,7 +21,7 @@ import { createRouterNode, parseRouterChat, routerDetails, ROUTER_ROUTING_LABEL,
 import { createCryptoActionNode, type CryptoActionInput } from './crypto-action-picker';
 import { BASE_CHAIN, canonicalSymbol } from './asset-catalogs';
 import { catalogSwapDetails } from './catalog-swap-authoring';
-import { parseBaseLiquidityChat, parseRobinhoodLiquidityChat, robinhoodLiquidityDetails } from './robinhood-liquidity-authoring';
+import { parseCatalogLiquidityChat, robinhoodLiquidityDetails } from './robinhood-liquidity-authoring';
 import { CATALOG_CHAT_NETWORKS, catalogNetworkOfChatName, networkIdentity } from './network-registry';
 
 type Base = { readonly baseRevision: number; readonly source: 'CHAT' | 'CANVAS' };
@@ -138,7 +138,7 @@ export function parseLocalCommand(text: string, workflow: Workflow, context: Rev
     createAuthoredTransfer('node-preview', fields);
     return { type: 'ADD_RH_TRANSFER', input: fields, source: 'CHAT', baseRevision: workflow.revision };
   }
-  const rhLiquidity = parseRobinhoodLiquidityChat(input) ?? parseBaseLiquidityChat(input);
+  const rhLiquidity = parseCatalogLiquidityChat(input);
   if (rhLiquidity) {
     const fields: CryptoActionInput = { selection: { action: 'pool', network: rhLiquidity.network, from: rhLiquidity.tokenA, to: rhLiquidity.tokenB }, amount: rhLiquidity.amountA,
       secondAmount: rhLiquidity.amountB, slippage: rhLiquidity.slippage, fee: rhLiquidity.fee,

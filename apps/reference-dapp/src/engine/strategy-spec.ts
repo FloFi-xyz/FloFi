@@ -67,17 +67,17 @@ const Withdraw = Type.Object({
 const Bound = Type.String({ pattern: '^-?(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$', maxLength: 48 });
 const Liquidity = Type.Object({
   version: Type.Optional(Version), action: Type.Literal('add_liquidity'),
-  network: enumOf(['base-sepolia', 'ethereum-sepolia', 'solana-devnet', 'robinhood', 'base'] as const, 'Uniswap v3 USDC/WETH on base-sepolia or ethereum-sepolia; Orca ' +
-    'SOL/devUSDC on solana-devnet; on robinhood or base, Uniswap v3 on any two official catalog assets (e.g. USDG and a Stock Token; USDC and cbBTC) at feeTier (real funds).'),
+  network: enumOf(['base-sepolia', 'ethereum-sepolia', 'solana-devnet', 'robinhood', 'base', 'arbitrum-one'] as const, 'Uniswap v3 USDC/WETH on base-sepolia or ethereum-sepolia; Orca ' +
+    'SOL/devUSDC on solana-devnet; on catalog networks, Uniswap v3 on two catalog ERC-20 assets at feeTier (real funds), only when the factory pool exists.'),
   maxAmounts: Type.Record(Type.String({ pattern: '^[A-Za-z][A-Za-z0-9.]{0,15}$' }), Decimal('Maximum deposit of this asset.'),
     { minProperties: 2, maxProperties: 2, description: 'Maximum deposit of each pool asset (limits, not amounts to spend); exactly the pool\'s two assets by symbol: ' +
-      'USDC and WETH, SOL and devUSDC, or two official catalog symbols on robinhood or base.' }),
+      'USDC and WETH, SOL and devUSDC, or two official catalog symbols on a supported catalog network.' }),
   range: Type.Union([
     Type.Object({ unit: enumOf(['price', 'tick'] as const, 'price: quote per base asset (USDC per WETH, devUSDC per SOL); tick: aligned tick indexes.'),
       lower: Bound, upper: Bound }, strict),
-    Type.Object({ unit: Type.Literal('full', { description: 'robinhood and base only: the widest usable range of the fee tier.' }) }, strict)]),
+    Type.Object({ unit: Type.Literal('full', { description: 'Catalog networks: the widest usable range of the selected fee tier.' }) }, strict)]),
   feeTier: Type.Optional(Type.Union([Type.Literal(100), Type.Literal(500), Type.Literal(3000), Type.Literal(10000)],
-    { description: 'robinhood and base only: the Uniswap v3 fee tier in hundredths of a basis point (3000 = 0.3%). Default 3000.' })),
+    { description: 'Catalog networks: the Uniswap v3 fee tier in hundredths of a basis point (3000 = 0.3%). Default 3000; a missing pool is refused.' })),
   slippageBps: Type.Optional(Slippage),
 }, strict);
 const LendingComposition = Type.Object({

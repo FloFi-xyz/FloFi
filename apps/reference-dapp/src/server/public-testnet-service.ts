@@ -7,6 +7,7 @@
  * (pinned USDC/WETH plus the validated token list; `bas-` runs), with the OP Stack L1 fee in its balance check. The authored chain
  * selects the profile and its own read client; no chain falls back to another. This service never signs or sends.
  */
+import { nitroGasLimit, nitroMaxFeePerGas } from './arbitrum-fees.ts';
 import { createHash, randomBytes } from 'node:crypto';
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
@@ -642,7 +643,7 @@ async function bindSwapOwner(q: PublicQuote, rpc: Rpc, ownerValue: string, expir
   const gas = quantity(await rpc('eth_estimateGas', [call, at]));
   if (gas < 21_000n || gas > 30_000_000n || gasPrice <= 0n || gasPrice >= 1n << 128n) fail('SWAP_FEE_INVALID');
   // Nitro: estimate includes posting gas. No separate OP Stack l1Fee, no quoter-only gas estimate.
-  const gasLimit = (gas * 150n + 99n) / 100n, maxFee = gasPrice * 2n, budget = gasLimit * maxFee;
+  const gasLimit = nitroGasLimit(gas), maxFee = nitroMaxFeePerGas(gasPrice), budget = gasLimit * maxFee;
   if (native < budget) fail('INSUFFICIENT_GAS_FUNDS');
   const transaction: Tx = { ...call, chainId: P.chainHex, nonce: '0x' + nonce.toString(16), gas: '0x' + gasLimit.toString(16),
     maxFeePerGas: '0x' + maxFee.toString(16), maxPriorityFeePerGas: '0x0' };

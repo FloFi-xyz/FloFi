@@ -39,7 +39,7 @@ export function previewPlan(spec: StrategySpec): PreviewPlan | { readonly code: 
     case 'supply': case 'borrow': case 'repay': case 'withdraw': return { flow: spec.network === 'base' ? 'base-aave' : 'aave-supply', subject: 'EVM' };
     // Orca positions need a position-mint key generated in the owner's browser; there is nothing to preview without it.
     case 'add_liquidity': return spec.network === 'solana-devnet' ? { code: 'SIMULATION_REQUIRES_OWNER_BROWSER' }
-      : { flow: spec.network === 'robinhood' ? 'robinhood-liquidity' : spec.network === 'base' ? 'base-liquidity' : 'uniswap-liquidity', subject: 'EVM' };
+      : { flow: spec.network === 'robinhood' ? 'robinhood-liquidity' : catalogNetworkOfChain(networkIdentity(spec.network)?.chain)?.flows.liquidity ?? 'uniswap-liquidity', subject: 'EVM' };
     case 'lending_composition': return { flow: 'lending-composition', subject: 'EVM' };
   }
 }
@@ -120,7 +120,7 @@ export function projectSimulation(flow: FlowName, value: unknown): SimulationVie
           ...flow === 'robinhood-swap' ? { stocks: list(q.stocks, ['side', 'symbol', 'officialId', 'multiplierWad', 'scheduledMultiplierWad', 'scheduledEffectiveAt']) } : {} },
         canonicalArtifacts: null };
     }
-    case 'uniswap-liquidity': case 'robinhood-liquidity': case 'base-liquidity': {
+    case 'uniswap-liquidity': case 'robinhood-liquidity': case 'base-liquidity': case 'arbitrum-liquidity': {
       const r = obj(record.review);
       return { kind: 'CONCENTRATED_LIQUIDITY', provenance: String(record.provenance), observedAt: String(r.observedAt), expiresAt: String(r.expiresAt),
         facts: { ...pick(r, ['network', 'chainId', 'recipient', 'deadline']), pool: pick(r.pool, ['fee', 'tickSpacing', 'tick', 'price']),

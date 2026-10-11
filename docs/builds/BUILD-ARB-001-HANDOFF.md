@@ -1,5 +1,339 @@
 # BUILD-ARB-001 Handoff
 
+## Final Phase 4 checkpoint — 2026-10-12
+
+- CURRENT HEAD: the Phase 4 commit containing this checkpoint; resolve its exact SHA with
+  `git log -1 --format=%H -- docs/builds/BUILD-ARB-001-HANDOFF.md`. Exact parent/start:
+  `ead7575819db7d5f1904db766cd093c10c68451e` (Phase 3, clean at reconstruction).
+- CURRENT PHASE: **Phase 4 COMPLETE — Arbitrum Pool / Liquidity runtime only; stop here**.
+- Branch/worktree: `codex/build-arb-001-network-ux`, `/home/asus/projects/flofi-arb`.
+- COMPLETED: Phase 1 core architecture, Phase 2 swap/transfer, Phase 3 Base ⇄ Arbitrum Router,
+  Phase 4 existing Uniswap v3 catalog liquidity mint path. No previous phase was restarted.
+- IN PROGRESS: none. REMAINING: separately authorized Phase 5 Aave Lending, then final integration/full CI.
+- TESTS PASSED: **29 focused Vitest files / 443 tests**, no skips (200 liquidity/network/runtime regressions,
+  241 Phase 2/3/authoring/MCP regressions, 2 backend-import smoke tests); strict scoped TypeScript,
+  broader strict source graph with `--skipLibCheck`, ESLint on all **32** changed/new TypeScript files,
+  governance-lite and **19** governance self-tests, `git diff --check`. Registry/linter/compiler dependency builds pass.
+- TESTS FAILING: none in the final focused checks. Full CI was not run, as instructed.
+- OWNER-APPROVED UX CHANGES: **none yet**. UX, Production configuration, deployment gate changes,
+  real-money transactions, push and PR: **NONE**.
+
+### Existing architecture versus Phase 4 additions
+
+Before Phase 4, Base/Robinhood catalog liquidity and Base/Ethereum Sepolia fixed-profile liquidity already shared:
+`asset.liquidity.concentrated` IR, address-sorted CREATE2 pools/amounts, range/tick math, linter/compiler,
+sequential `eth_simulateV1`, exact NPM approvals, commitment-bound Review/Manifest, connected owner wallet,
+append-only ExecutionStorage (file/PostgreSQL), durable handoff/nonce leases/discovery, receipt/NFT/amount
+readback, workers, recovery and Evidence. The public canonical operation was one mint. Phase 2 supplied
+Arbitrum catalog/wallet gates and Nitro fee policy; Phase 3 supplied the NodeInterface posting-gas reader.
+
+Phase 4 added the verified Arbitrum catalog liquidity deployment/capability, `arlp-` run namespace and
+registry-based registrations in the existing flow, server actions, browser recovery, authoring and MCP.
+Shared refactors verify pool/factory/tier relationships even for price reads, freeze reviewed fee envelopes,
+recheck material state/approvals/fees before wallet handoff, verify receipt fee bounds, and keep RPC outages
+recoverable rather than classifying every UNISWAP error as divergence. The browser checks the full reviewed
+transaction envelope. Phase 2/3 Nitro policy is now one shared helper used by swap, Router and liquidity.
+No new liquidity engine, pool creation, increase/withdraw operation, native wrapping, testnet support,
+operator signer, wallet allowlist, Aave implementation, component/layout/control change or Copilot prompt was added.
+
+### Uniswap deployments and pool/range policy
+
+Fresh authoritative sources: [Uniswap Arbitrum deployments](https://developers.uniswap.org/docs/protocols/v3/deployments/v3-arbitrum-deployments),
+[deployment feed](https://developers.uniswap.org/deployments.json),
+[factory rules](https://github.com/Uniswap/v3-core/blob/main/contracts/UniswapV3Factory.sol).
+Public read-only verification at **Arbitrum block 513952674**, with hashes and all observed pool state, is retained in
+[Phase 4 read verification](BUILD-ARB-001-PHASE-4-READ-VERIFICATION.json). All identities are bound to `eip155:42161`:
+
+| Contract | Address |
+| --- | --- |
+| Factory | `0x1f98431c8ad98523631ae4a59f267346ea31f984` |
+| Position Manager | `0xc36442b4a4522e871399cd717abdd847ab11fe88` |
+| SwapRouter02 (existing swap profile) | `0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45` |
+| QuoterV2 (existing swap profile) | `0x61ffe014ba17989e743c5f6cb21bf9697530b21e` |
+
+- Factory/NPM code pins, factory/WETH relationships and chain are verified. Liquidity uses Factory/NPM/pool;
+  router/quoter are unchanged Phase 2 identities. Wrong-chain/deployment responses fail closed.
+- POOL POLICY: only catalog ERC-20 pairs whose actual initialized pool exists at the selected tier.
+  CREATE2 is an expected address, not proof of existence. Runtime verifies code, factory `getPool`, pool.factory,
+  token0/1, fee/spacing, canonical token identity/decimals and state before price or simulation.
+  Missing pools/unsupported tiers are honestly refused, with no silent pool/tier fallback.
+- USDC/WETH, USDC/ARB and WETH/ARB existed at all four observed tiers at that block. Runtime checks each request
+  anew; no promise that every catalog pair/tier exists. USDC `0xaf88d065e77c8cc2239327c5edb3a432268e5831` (6),
+  WETH `0x82af49447d8a07e3bd95bd0d56f35241523fbab1` (18), ARB `0x912ce59144191c1204e64559fe8253a0e49e6548` (18).
+- FEE-TIER / TICK POLICY: factory reads confirm **100→1, 500→10, 3000→60, 10000→200**.
+  Selected tier is checked on chain. Shared math requires lower < upper, aligned ticks within protocol bounds
+  ±887272, and fee-specific usable endpoints. No inherited incompatible testnet/default tick range.
+- TOKEN ORDERING: contract addresses order token0/token1; amounts follow their asset address in both user orders.
+  Arbitrum USDC/WETH has WETH as token0. Canonical compiler quote is token0 per token1 (WETH per USDC), with
+  deterministic integer price/band-to-tick conversion tested in this orientation. Catalog authoring retains
+  existing full/aligned tick ranges; no new price/band UX. WETH is represented honestly; native ETH is refused.
+
+### Simulate, Review, approvals, fees and execution
+
+- SIMULATE / REVIEW: PASS. Bind chain, owner/NFT recipient, canonical tokens, maximum/minimum amounts,
+  verified Factory/NPM/pool/code, fee/spacing, aligned range, observed pool state, expected liquidity/usage,
+  slippage, approvals, exact calls, zero value, gas/price/budget, expiry and mint deadline. Stale identity,
+  changed approval requirement, material range/amount drift and over-bound estimates invalidate authorization.
+  Pool/tier/spender/amount changes require a new Review; nothing is silently substituted after Review.
+- APPROVAL MODEL: exact finite amount0/amount1 only to the verified NPM. Each approval/mint remains a separate
+  owner-wallet request. The browser refreshes simulation/Review after confirmed approvals. Existing safe
+  allowance handling and explicit owner approval remain; no unrelated approvals.
+- OWNER-WALLET EXECUTION: PASS in MOCKED/local lifecycle. Only the connected user signs/submits; server read
+  RPC allowlists contain no send/sign methods and cloud workers only observe. Browser checks chain, owner,
+  spender/target, calldata, value, gas and fee ceilings against Review before invoking the wallet.
+- ARBITRUM FEES: PASS. Reuse Phase 2 margin/price policy and Phase 3 NodeInterface reader via
+  `arbitrum-fees.ts`; swap/Router semantics unchanged. Sequence execution gas plus posting-gas estimates form
+  a conservative 150% Nitro gas ceiling before approvals exist, 2× `eth_gasPrice`, zero priority.
+  Exact total `eth_estimateGas` must fit the frozen envelope at begin/handoff. Receipt actual cost is
+  `gasUsed × effectiveGasPrice`; no OP Stack oracle or extra `l1Fee`. Base retains its own oracle/separate L1
+  fee and now binds per-call allowances. [Arbitrum estimation semantics](https://docs.arbitrum.io/arbitrum-essentials/how-to-estimate-gas).
+- DEPLOYMENT GATES: **GRYLOO_ARBITRUM_MAINNET=live**, **GRYLOO_ARBITRUM_OWNER_EXECUTION=MAINNET_OWNER_APPROVED**.
+  Reused Phase 2 gates; no liquidity-specific gate. Neither was enabled/set. Current-process read confirmed
+  network mode `off`, owner execution `false`; no Production configuration was accessed or changed.
+- PUBLIC READ LIMIT: the official RPC accepted a zero-value `eth_simulateV1` factory view call, recorded in the
+  read proof. This establishes read-method availability only. Financial tests/evidence remain **MOCKED**;
+  no MAINNET_EXECUTED evidence, public owner mint, live-model or browser acceptance claim.
+
+### Durable recovery/reconciliation and authoring parity
+
+- RECOVERY MODEL: PREPARED → SUBMITTING → PENDING → CONFIRMED / RECONCILED; ambiguous boundary becomes
+  SUBMISSION_RESULT_UNKNOWN, with CANCELLED/NOT_FOUND for proven absence, REVERTED for a failed receipt,
+  and RECONCILIATION_REQUIRED / DIVERGENT for proven mismatches. Existing names are reused.
+- Ambiguous submission: PASS. Observe nonce/receipt/position before any subsequent mint. Permanent owner/chain
+  nonce leases block another run; UNKNOWN/lost hash/no returned result never authorizes blind resend.
+- Restart and delayed receipt: PASS. `arlp-` browser pointer, persisted attempt/lease and worker observation
+  recover the original effect; no hash and unavailable receipt remain pending. RPC/position/evidence timeouts
+  retry safely without premature success or permanent financial divergence.
+- Position reconciliation: PASS. Receipt success/chain/target/NPM, owner, pair/tier/ticks, NFT tokenId,
+  actual usage, token transfers and paid fees must match Review. Wrong owner/token/tier/range/amount/NPM/
+  chain/cost/offered gas/price/priority/nonce/approval spender becomes sticky DIVERGENT without success evidence. MOCKED journals cannot be
+  recovered with PUBLIC_MAINNET provenance. Repeated recovery is idempotent and cannot mint again.
+- AUTHORING PARITY: Canvas, deterministic Chat, shared EN/PT natural-language Copilot intent handling and
+  actual MCP `compose_strategy` produce equal stable IR and hashes, including reversed user token order.
+  The owner's three incomplete representative requests use ordinary shared clarification for deposit amounts/
+  range; no amount or pool is invented. MCP preview/execution maps to the existing liquidity flow.
+  Copilot tests use deterministic intent responses, not a live model. No Arbitrum-specific prompt/list.
+
+### Focused validation and limits
+
+Final focused checks: **14 files / 200 tests** for liquidity and network/Base/Robinhood regressions,
+**14 files / 241 tests** for Arbitrum Phase 2/3, authoring and MCP regressions, and **1 file / 2 tests**
+for backend imports. Total **29 files / 443 tests**, no skips. Base/Robinhood liquidity and existing Base/
+Ethereum Sepolia liquidity pass, as do Arbitrum swap/transfer and both Phase 3 Router directions.
+
+Strict runtime/authoring/wallet TypeScript checks dependency declarations too. Broader server-action/store/MCP
+source checking uses `--skipLibCheck` for the already documented Next bundled webpack/React-server/URLPattern
+issues. No repository configuration/dependency was weakened. Backend import smoke tests passed outside the
+sandbox because the sandbox suppresses stdout from environment-cleared Node subprocesses (a trivial
+console.log probe reproduced it); the rerun involved only local imports, no network/database/deployment.
+An old registry expectation of Phase 2's supported capability set was updated to include liquidity;
+existing assertions still distinguish discovery, implementation and demonstrated evidence.
+No final implementation/test failure remains. Full CI/browser/fork/PostgreSQL matrices were not run.
+
+### Files touched
+
+- `apps/reference-dapp/backend/entrypoint.test.ts`
+- `apps/reference-dapp/backend/flows.ts`
+- `apps/reference-dapp/backend/preview.ts`
+- `apps/reference-dapp/e2e/uniswap-liquidity-harness.ts`
+- `apps/reference-dapp/src/domain/arbitrum-authoring.test.ts`
+- `apps/reference-dapp/src/domain/arbitrum-core.test.ts`
+- `apps/reference-dapp/src/domain/arbitrum-liquidity-parity.test.ts`
+- `apps/reference-dapp/src/domain/authoring-capabilities.test.ts`
+- `apps/reference-dapp/src/domain/commands.ts`
+- `apps/reference-dapp/src/domain/crypto-action-picker.ts`
+- `apps/reference-dapp/src/domain/robinhood-liquidity-authoring.ts`
+- `apps/reference-dapp/src/engine/strategy-examples.ts`
+- `apps/reference-dapp/src/engine/strategy-spec.ts`
+- `apps/reference-dapp/src/mcp/execution.ts`
+- `apps/reference-dapp/src/mcp/simulation.ts`
+- `apps/reference-dapp/src/server/arbitrum-fees.ts`
+- `apps/reference-dapp/src/server/arbitrum-liquidity.test.ts`
+- `apps/reference-dapp/src/server/arbitrum-mainnet.ts`
+- `apps/reference-dapp/src/server/arbitrum-runtime.test.ts`
+- `apps/reference-dapp/src/server/catalog-networks.ts`
+- `apps/reference-dapp/src/server/public-testnet-service.ts`
+- `apps/reference-dapp/src/server/router-service.ts`
+- `apps/reference-dapp/src/server/uniswap-liquidity-service.ts`
+- `apps/reference-dapp/src/state/uniswap-liquidity-store.tsx`
+- `apps/reference-dapp/src/wallet/uniswap-liquidity-eip1193.test.ts`
+- `apps/reference-dapp/src/wallet/uniswap-liquidity-eip1193.ts`
+- `docs/builds/BUILD-ARB-001-HANDOFF.md`
+- `docs/builds/BUILD-ARB-001-PHASE-4-READ-VERIFICATION.json`
+- `docs/builds/BUILD-ARB-001-PLAN.md`
+- `packages/action-registry/src/capability-discovery.ts`
+- `packages/action-registry/src/execution-capabilities.ts`
+- `packages/action-registry/src/uniswap-catalog-networks.ts`
+- `packages/action-registry/src/uniswap-v3-arbitrum.ts`
+- `packages/action-registry/test/arbitrum-network.test.ts`
+- `packages/reference-compiler/src/uniswap-public-liquidity.ts`
+
+### Reproducible Phase 4 focused commands
+
+Run from the repository root. Dependency exports only: registry/linter/compiler builds, no full app build.
+
+```sh
+pnpm --filter @defi-workflow-engine/reference-linter... build
+pnpm --filter @defi-workflow-engine/reference-compiler build
+pnpm --filter @defi-workflow-engine/action-registry build
+```
+
+Liquidity/network/Base/Robinhood certification (**200 tests**):
+
+```sh
+pnpm exec vitest run \
+  apps/reference-dapp/src/server/arbitrum-liquidity.test.ts \
+  apps/reference-dapp/src/domain/arbitrum-liquidity-parity.test.ts \
+  apps/reference-dapp/src/wallet/uniswap-liquidity-eip1193.test.ts \
+  apps/reference-dapp/src/server/uniswap-liquidity-service.test.ts \
+  apps/reference-dapp/src/server/base-liquidity.test.ts \
+  apps/reference-dapp/src/server/robinhood-liquidity.test.ts \
+  apps/reference-dapp/src/server/ethereum-sepolia-liquidity.test.ts \
+  packages/reference-compiler/test/uniswap-public-liquidity.test.ts \
+  packages/reference-linter/test/uniswap-liquidity.test.ts \
+  packages/action-registry/test/arbitrum-network.test.ts \
+  packages/action-registry/test/execution-capabilities.test.ts \
+  apps/reference-dapp/src/server/base-mainnet.test.ts \
+  apps/reference-dapp/src/server/robinhood-swap.test.ts \
+  apps/reference-dapp/src/server/robinhood-transfer-service.test.ts --maxWorkers=4
+```
+
+Phase 2/3/authoring/MCP regressions (**241 tests**):
+
+```sh
+pnpm exec vitest run \
+  apps/reference-dapp/src/server/arbitrum-runtime.test.ts \
+  apps/reference-dapp/src/domain/arbitrum-authoring.test.ts \
+  apps/reference-dapp/src/domain/arbitrum-core.test.ts \
+  apps/reference-dapp/src/server/router-arbitrum-certification.test.ts \
+  apps/reference-dapp/src/server/router-arbitrum-base.test.ts \
+  apps/reference-dapp/src/server/router-service.test.ts \
+  apps/reference-dapp/src/server/router-providers.test.ts \
+  apps/reference-dapp/src/server/router-runtime.test.ts \
+  apps/reference-dapp/src/domain/arbitrum-bridge-parity.test.ts \
+  apps/reference-dapp/src/domain/authoring-capabilities.test.ts \
+  apps/reference-dapp/src/domain/catalog-copilot-parity.test.ts \
+  apps/reference-dapp/src/mcp/execution.test.ts \
+  apps/reference-dapp/src/mcp/simulation.test.ts \
+  apps/reference-dapp/backend/preview.test.ts --maxWorkers=4
+```
+
+Local backend imports (**2 tests**, outside-sandbox local-only rerun described above):
+
+```sh
+pnpm exec vitest run apps/reference-dapp/backend/entrypoint.test.ts --maxWorkers=1
+```
+
+Strict runtime/authoring/wallet graph (dependency declarations checked):
+
+```sh
+pnpm exec tsc --noEmit --strict --target ES2024 --module ESNext --moduleResolution Bundler --jsx react-jsx --esModuleInterop --resolveJsonModule --allowImportingTsExtensions --exactOptionalPropertyTypes --noUncheckedIndexedAccess \
+  apps/reference-dapp/src/server/arbitrum-liquidity.test.ts \
+  apps/reference-dapp/src/domain/arbitrum-liquidity-parity.test.ts \
+  apps/reference-dapp/src/wallet/uniswap-liquidity-eip1193.test.ts \
+  apps/reference-dapp/src/server/router-service.ts \
+  apps/reference-dapp/src/server/public-testnet-service.ts \
+  packages/action-registry/test/arbitrum-network.test.ts
+```
+
+Broader strict source graph (existing dependency declaration limitation):
+
+```sh
+pnpm exec tsc --noEmit --strict --skipLibCheck --target ES2024 --module ESNext --moduleResolution Bundler --jsx react-jsx --esModuleInterop --resolveJsonModule --allowImportingTsExtensions --exactOptionalPropertyTypes --noUncheckedIndexedAccess \
+  apps/reference-dapp/src/state/uniswap-liquidity-store.tsx \
+  apps/reference-dapp/src/app/uniswap-liquidity-action.ts \
+  apps/reference-dapp/src/mcp/simulation.ts \
+  apps/reference-dapp/src/mcp/execution.ts \
+  apps/reference-dapp/backend/flows.ts \
+  apps/reference-dapp/backend/preview.ts
+```
+
+Scoped lint (**32 files**), governance-lite and whitespace:
+
+```sh
+pnpm exec eslint \
+  apps/reference-dapp/backend/entrypoint.test.ts \
+  apps/reference-dapp/backend/flows.ts \
+  apps/reference-dapp/backend/preview.ts \
+  apps/reference-dapp/e2e/uniswap-liquidity-harness.ts \
+  apps/reference-dapp/src/domain/arbitrum-authoring.test.ts \
+  apps/reference-dapp/src/domain/arbitrum-core.test.ts \
+  apps/reference-dapp/src/domain/arbitrum-liquidity-parity.test.ts \
+  apps/reference-dapp/src/domain/authoring-capabilities.test.ts \
+  apps/reference-dapp/src/domain/commands.ts \
+  apps/reference-dapp/src/domain/crypto-action-picker.ts \
+  apps/reference-dapp/src/domain/robinhood-liquidity-authoring.ts \
+  apps/reference-dapp/src/engine/strategy-examples.ts \
+  apps/reference-dapp/src/engine/strategy-spec.ts \
+  apps/reference-dapp/src/mcp/execution.ts \
+  apps/reference-dapp/src/mcp/simulation.ts \
+  apps/reference-dapp/src/server/arbitrum-fees.ts \
+  apps/reference-dapp/src/server/arbitrum-liquidity.test.ts \
+  apps/reference-dapp/src/server/arbitrum-mainnet.ts \
+  apps/reference-dapp/src/server/arbitrum-runtime.test.ts \
+  apps/reference-dapp/src/server/catalog-networks.ts \
+  apps/reference-dapp/src/server/public-testnet-service.ts \
+  apps/reference-dapp/src/server/router-service.ts \
+  apps/reference-dapp/src/server/uniswap-liquidity-service.ts \
+  apps/reference-dapp/src/state/uniswap-liquidity-store.tsx \
+  apps/reference-dapp/src/wallet/uniswap-liquidity-eip1193.test.ts \
+  apps/reference-dapp/src/wallet/uniswap-liquidity-eip1193.ts \
+  packages/action-registry/src/capability-discovery.ts \
+  packages/action-registry/src/execution-capabilities.ts \
+  packages/action-registry/src/uniswap-catalog-networks.ts \
+  packages/action-registry/src/uniswap-v3-arbitrum.ts \
+  packages/action-registry/test/arbitrum-network.test.ts \
+  packages/reference-compiler/src/uniswap-public-liquidity.ts
+```
+
+```sh
+python3 scripts/governance_lite.py
+python3 scripts/test_governance_lite.py
+git diff --check
+```
+
+### Stop / next action
+
+- DO NOT REDO Phases 1–4. Preserve all valid intervening work; no reset/clean/stash/rebase.
+- Temporary verification scripts/results remain outside the worktree and are removed after copying the intentional
+  read proof. Test directories self-clean under /tmp; ignored dependency outputs are retained for package imports.
+- BLOCKERS FOR PHASE 5: no outstanding Phase 4 implementation blocker. Phase 5 requires a new owner instruction
+  and fresh Aave deployment/reserve/cap/liquidity/ABI verification. The broader dependency declaration issue is
+  deferred to separately authorized final integration/CI; MOCKED tests do not certify public owner execution.
+- NEXT EXACT ACTION: stop at the Phase 4 commit. Do not push/open a PR, enable gates or execute Phase 5.
+  Recommended next authorized scope: **Aave Lending**, using the existing architecture after fresh verification.
+
+## Archived Phase 4 starting checkpoint
+
+### Phase 4 starting checkpoint — 2026-10-12
+
+- CURRENT HEAD: `ead7575819db7d5f1904db766cd093c10c68451e` (Phase 3), verified clean.
+- CURRENT PHASE: **Phase 4 IN PROGRESS — Arbitrum Pool / Liquidity only**.
+- Branch/worktree: `codex/build-arb-001-network-ux`, `/home/asus/projects/flofi-arb`.
+- COMPLETED: Phases 1–3. No other session's Phase 4 edits were present.
+- FILES TOUCHED at reconstruction: none. This checkpoint is the first Phase 4 edit.
+- EXISTING: `asset.liquidity.concentrated` IR, Uniswap catalog CREATE2 resolver, address-sorted amounts,
+  full/aligned tick ranges and deterministic integer price/band math, fixed Base/Ethereum Sepolia profiles,
+  Base/Robinhood catalog profiles, shared linter/compiler, sequential `eth_simulateV1`, exact Position Manager
+  approvals, commitment-bound Review, owner-wallet execution, append-only execution storage, leases/nonce
+  discovery, receipt/log/NFT/amount readback and evidence. Server actions, cloud `liquidityFlow`, run store and
+  MCP consume that shared service; workers observe only. Base alone uses its OP Stack oracle and receipt `l1Fee`.
+- NEEDED: freshly verified Arbitrum NPM/code pin and catalog liquidity profile; MAINNET capability;
+  existing catalog runtime/flow/MCP/authoring registrations; an `arlp-` durable namespace; reuse of Phase 2
+  Nitro fee semantics (posting included in gas, 150% gas margin, 2× price ceiling, receipt gasUsed × price),
+  bound at Review and rechecked before wallet handoff; focused recovery/identity/range/parity regressions.
+- AUDIT: shared liquidity currently budgets simulation gas and reprices at begin. Phase 4 must preserve
+  reviewed gas/price ceilings and account for Nitro posting gas. Pool-price reads must verify factory/pool
+  identity and enabled tick spacing before supplying authoring state. Existing recovery never blindly resends.
+- DEPLOYMENT GATES: reuse `GRYLOO_ARBITRUM_MAINNET=live` and
+  `GRYLOO_ARBITRUM_OWNER_EXECUTION=MAINNET_OWNER_APPROVED`; neither enabled or changed.
+- OWNER-APPROVED UX CHANGES: **none yet**. No components/layout/control changes planned.
+- DO NOT REDO: Phases 1–3; do not implement Aave, expand testnets, run full CI, push or open a PR.
+- NEXT EXACT ACTION: fresh authoritative deployment/factory reads, then shared registrations and focused
+  fee/recovery certification. All automated execution remains MOCKED/local; public reads have no wallet.
+
+## Archived Phase 3 checkpoint
+
 BASELINE: `4df974f6ae6ae1d22b86f220db6281294cd20035` (BUILD-BASE-001 / PR #81)
 CURRENT HEAD: Phase 3 checkpoint, the commit containing this handoff. Resolve its exact SHA with `git log -1 --format=%H -- docs/builds/BUILD-ARB-001-HANDOFF.md`; parent is `861bb606dd073b3d83720cc8b1ee9cd254b9d063`.
 CURRENT PHASE: Phase 3 complete — stop here. Branch: `codex/build-arb-001-network-ux`.

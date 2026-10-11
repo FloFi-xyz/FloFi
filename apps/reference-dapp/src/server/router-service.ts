@@ -23,6 +23,7 @@ import { assertRouterTransition, compareRoutes, hashArtifactBytes, routeCommitme
 import { validateArtifact } from '@defi-workflow-engine/workflow-contracts/schemas';
 import { utf8, type ExecutionStorage } from '@defi-workflow-engine/reference-executor';
 import { verifyOwnerSubmission, type Rpc } from './public-testnet-service.ts';
+import { nitroGasLimit, nitroMaxFeePerGas, nitroPostingGas } from './arbitrum-fees.ts';
 import type { RouteProvider, RouteRequest, TransferHint } from './router-providers.ts';
 
 export const ROUTER_RUN_ID = /^xroute-[a-f0-9]{32}$/;
@@ -344,24 +345,13 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
     try { return wordAt(await call(rpc, '0x420000000000000000000000000000000000000f', '0xf1c7a58b' + word(BigInt(dataBytes + 120)), at), 0); } catch { return null; }
   }
   const nitroSource = SRC.chainId === ARBITRUM_ONE.chainId;
-  /** Nitro NodeInterface RPC facade: posting gas can be estimated even before the sequence's approval exists.
-   * Official ABI: gasEstimateL1Component(address,bool,bytes), OffchainLabs/nitro-contracts NodeInterface.sol.
-   * This conservative Review ceiling combines simulation gas and posting gas; actual fees remain gasUsed × effectiveGasPrice.
-   */
-  async function postingGas(owner: string, c: { to: string; data: string }, at: string): Promise<bigint> {
-    const bytes = c.data.slice(2), length = bytes.length / 2;
-    const data = '0x77d488a2' + addrWord(c.to) + word(0n) + word(96n) + word(BigInt(length)) + bytes.padEnd(Math.ceil(bytes.length / 64) * 64, '0');
-    const raw = await rpc('eth_call', [{ from: owner, to: '0x00000000000000000000000000000000000000c8', value: '0x0', data }, at]);
-    if (typeof raw !== 'string' || !/^0x[0-9a-fA-F]{192}$/.test(raw)) fail('ROUTER_NITRO_FEE_UNAVAILABLE');
-    const gas = wordAt(raw.toLowerCase(), 0), baseFee = wordAt(raw.toLowerCase(), 1);
-    if (gas >= 1n << 64n || baseFee <= 0n) fail('ROUTER_NITRO_FEE_UNAVAILABLE');
-    return gas;
-  }
+  const postingGas = (owner: string, call: { to: string; data: string }, at: string) =>
+    nitroPostingGas(rpc, owner, call, at, 'ROUTER_NITRO_FEE_UNAVAILABLE');
   async function feePrice(baseFee: bigint): Promise<{ priority: bigint; maximum: bigint }> {
     if (nitroSource) {
       const price = quantity(await rpc('eth_gasPrice', []));
       if (price <= 0n || price >= 1n << 128n) fail('ROUTER_FEE_INVALID');
-      return { priority: 0n, maximum: price * 2n };
+      return { priority: 0n, maximum: nitroMaxFeePerGas(price) };
     }
     const priority = quantity(await rpc('eth_maxPriorityFeePerGas', []));
     return { priority, maximum: baseFee * 2n + priority };
@@ -430,7 +420,7 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
     const { priority, maximum: maxFeePerGas } = await feePrice(source.block.baseFee);
     const calls: RouterCall[] = await Promise.all(plan.map(async (c, i) => {
       const gas = simulated[i]!.gasUsed;
-      const gasLimit = nitroSource ? ((gas + await postingGas(owner, c, at)) * 150n + 99n) / 100n : gas * 13n / 10n + 25_000n;
+      const gasLimit = nitroSource ? nitroGasLimit(gas + await postingGas(owner, c, at)) : gas * 13n / 10n + 25_000n;
       const l1 = await l1FeeUpperBound((c.data.length - 2) / 2, at);
       return { ...c, gasUsed: gas.toString(), gasLimit: gasLimit.toString(), l1FeeUpperBoundWei: l1?.toString() ?? null };
     }));

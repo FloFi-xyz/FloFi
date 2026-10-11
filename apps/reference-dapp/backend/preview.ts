@@ -19,7 +19,7 @@ export const PREVIEW_METHODS: Readonly<Partial<Record<FlowName, 'simulate' | 'pr
   'robinhood-swap': 'prepare', 'robinhood-liquidity': 'simulate', 'crosschain-router-base-to-robinhood': 'simulate', 'crosschain-router-robinhood-to-base': 'simulate',
   'crosschain-router-arbitrum-to-robinhood': 'simulate', 'crosschain-router-robinhood-to-arbitrum': 'simulate',
   // BUILD-BASE-001: Base mainnet (real funds) previews, likewise read-only.
-  'arbitrum-swap': 'prepare', 'base-swap': 'prepare', 'base-liquidity': 'simulate', 'base-aave': 'simulate', 'crosschain-router-arbitrum-to-base': 'simulate',
+  'arbitrum-swap': 'prepare', 'arbitrum-liquidity': 'simulate', 'base-swap': 'prepare', 'base-liquidity': 'simulate', 'base-aave': 'simulate', 'crosschain-router-arbitrum-to-base': 'simulate',
 });
 
 /**

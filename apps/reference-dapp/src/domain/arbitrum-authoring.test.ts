@@ -70,12 +70,13 @@ describe('Arbitrum canonical authoring parity, no new UX or Copilot list', () =>
       expect(capabilityNetworks(action).some(n => n.chain === 'eip155:42161')).toBe(true);
       expect(cryptoProfiles(action).some(p => p.chain === 'eip155:42161')).toBe(true);
     }
-    expect(catalogCapabilityNetworks().some(n => n.chain === 'eip155:42161')).toBe(false);
+    expect(catalogCapabilityNetworks().some(n => n.chain === 'eip155:42161')).toBe(true);
     const rows = codeCapabilities().filter(row => row.network === 'arbitrum-one' && ['swap', 'transfer'].includes(row.action));
     expect(rows).toHaveLength(2); expect(rows.every(row => row.ownerWalletExecutionImplemented && row.demonstratedEvidence === null)).toBe(true);
     expect(previewPlan(cases[0].strategy)).toEqual({ flow: 'arbitrum-swap', subject: 'NONE' });
     expect(strategyFlow(cases[3].strategy)).toBe('arbitrum-mainnet-transfer');
-    for (const action of ['supply', 'borrow', 'repay', 'withdraw', 'add_liquidity'] as const) expect(capabilityNetworks(action).some(n => n.chain === 'eip155:42161')).toBe(false);
-    expect(composeStrategy({ action: 'add_liquidity', network: 'arbitrum-one', maxAmounts: { USDC: '1', WETH: '1' }, range: { unit: 'full' } } as unknown as StrategySpec).ok).toBe(false);
+    for (const action of ['supply', 'borrow', 'repay', 'withdraw'] as const) expect(capabilityNetworks(action).some(n => n.chain === 'eip155:42161')).toBe(false);
+    // Phase 4 implements the formerly unavailable pool capability; swap/transfer assertions above remain unchanged.
+    expect(composeStrategy({ action: 'add_liquidity', network: 'arbitrum-one', maxAmounts: { USDC: '1', WETH: '1' }, range: { unit: 'full' } } as unknown as StrategySpec).ok).toBe(true);
   });
 });

@@ -38,7 +38,7 @@ export const capabilityDiscoveryRegistry: readonly NetworkCapabilityDiscovery[] 
     destinationSpokePool: CROSSCHAIN_ROUTER_BASE_ARBITRUM.destination.spokePool }), 'https://app.across.to/api/available-routes', 'Existing Base USDC → Arbitrum USDC route', 'EXISTING'),
   row('BRIDGE_OUT', 'flofi.router', 'Across', Object.freeze({ sourceSpokePool: CROSSCHAIN_ROUTER_ARBITRUM_BASE.source.spokePool,
     destinationSpokePool: CROSSCHAIN_ROUTER_ARBITRUM_BASE.destination.spokePool }), 'https://app.across.to/api/available-routes', 'Existing Arbitrum USDC → Base USDC route', 'EXISTING'),
-  row('LIQUIDITY', 'uniswap.v3', 'Uniswap v3', ARBITRUM_PROTOCOL_DEPLOYMENTS.uniswap, uniSource, 'Concentrated positions, existing pools only; no new pool creation'),
+  row('LIQUIDITY', 'uniswap.v3', 'Uniswap v3', ARBITRUM_PROTOCOL_DEPLOYMENTS.uniswap, uniSource, 'Concentrated positions, existing pools only; no new pool creation', 'EXISTING'),
   ...(['SUPPLY', 'BORROW', 'REPAY', 'WITHDRAW'] as const).map(capability => row(capability, 'aave-v3', 'Aave V3', ARBITRUM_PROTOCOL_DEPLOYMENTS.aave,
     aaveSource, 'Native Circle USDC reserve id 12, 6 decimals; one-reserve engine profile still required')),
 ]);

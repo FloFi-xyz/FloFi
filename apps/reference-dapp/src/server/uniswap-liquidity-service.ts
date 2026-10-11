@@ -15,12 +15,15 @@
  * standard tier (the CREATE2 pool of Base's pinned factory), tokens verified on chain against the Base catalog, the OP Stack L1 fee bounded
  * through the GasPriceOracle, and `balp-` runs.
  *
- * Run = append-only snapshot log `unilp-<32 hex>.jsonl` (`rhlp-` on Robinhood Chain, `balp-` on Base). Steps: exact finite approval of token0 and/or token1 to the
+ * BUILD-ARB-001: Arbitrum One (42161) reuses the catalog mint path with `arlp-` runs and the Phase 2 Nitro fee policy.
+ * Posting gas is included in the reviewed gas ceiling; receipt cost is gasUsed × effectiveGasPrice, without an OP Stack oracle.
+ *
+ * Run = append-only snapshot log `unilp-<32 hex>.jsonl` (`rhlp-` on Robinhood Chain, `balp-` on Base, `arlp-` on Arbitrum). Steps: exact finite approval of token0 and/or token1 to the
  * Position Manager when the on-chain allowance is short, then one mint whose NFT recipient is the owner. Each step is
  * its own wallet request; a confirmed approval requires a fresh simulation and Review before the mint.
  */
 import { createHash, randomBytes } from 'node:crypto';
-import { catalogAsset, catalogPoolOn, resolveWorkflowCapability, UNISWAP_V3_BASE_SEPOLIA_LIQUIDITY as BASE_PROFILE, UNISWAP_V3_ROBINHOOD as ROBINHOOD,
+import { ARBITRUM_ONE, catalogAsset, catalogPoolOn, resolveWorkflowCapability, UNISWAP_V3_BASE_SEPOLIA_LIQUIDITY as BASE_PROFILE, UNISWAP_V3_ROBINHOOD as ROBINHOOD,
   uniswapCatalogDeployment, uniswapLiquidityProfile, type AssetCatalog, type CanonicalAsset, type UniswapPoolProfile } from '@defi-workflow-engine/action-registry';
 import { createBaseSepoliaReviewContext, validateAuthoringWorkflow, validateUniswapLiquidityWorkflow } from '@defi-workflow-engine/reference-linter';
 import { UNISWAP_SELECTORS as SEL, UNISWAP_TOPICS as TOPIC, decodeUniswapApprove, decodeUniswapMint, decodeUniswapMintResult, decodeUniswapPosition,
@@ -31,13 +34,15 @@ import { validateArtifact } from '@defi-workflow-engine/workflow-contracts/schem
 import { utf8, type ExecutionStorage } from '@defi-workflow-engine/reference-executor';
 import { catalogTokenPolicy, verifyCatalogToken, verifyOwnerSubmission, type Rpc, type StockQuoteState } from './public-testnet-service.ts';
 import { swapProfile, type CatalogSwapProfile } from '../domain/public-testnet-swap.ts';
+import { nitroGasLimit, nitroMaxFeePerGas, nitroPostingGas } from './arbitrum-fees.ts';
 
 export type UniswapLiquidityStep = 'APPROVE_TOKEN0' | 'APPROVE_TOKEN1' | 'MINT';
 export type UniswapAttemptState = 'PREPARED' | 'CANCELLED' | 'SUBMITTING' | 'SUBMISSION_RESULT_UNKNOWN' | 'NOT_FOUND' | 'PENDING' | 'CONFIRMED' |
   'REVERTED' | 'RECONCILIATION_REQUIRED';
 export type UniswapTx = { readonly chainId: string; readonly from: string; readonly to: string; readonly data: string; readonly value: '0x0';
   readonly gas: string; readonly maxFeePerGas: string; readonly maxPriorityFeePerGas: string };
-export type UniswapReviewCall = { readonly step: UniswapLiquidityStep; readonly to: string; readonly data: string; readonly gasUsed: string; readonly gasLimit: string };
+export type UniswapReviewCall = { readonly step: UniswapLiquidityStep; readonly to: string; readonly data: string; readonly gasUsed: string; readonly gasLimit: string;
+  readonly l1FeeUpperBoundWei?: string | null };
 /** `officialId`: catalog networks only — the token's official issuer identity (a Robinhood Stock Token), else null (USDG, WETH, Base tokens). */
 export type UniswapTokenView = { readonly symbol: string; readonly address: string; readonly decimals: number; readonly officialId?: string | null };
 export type UniswapLiquidityReview = {
@@ -99,12 +104,14 @@ export type UniswapWalletDiagnostic = { invoked: boolean; calls: { method: strin
   code: string; rejectionCode?: number };
 export type UniswapLiquidityPrice = { readonly sqrtPriceX96: string; readonly tick: number; readonly price: string; readonly blockNumber: number };
 
-export const UNISWAP_LIQUIDITY_RUN_ID = /^(?:unilp|rhlp|balp)-[a-f0-9]{32}$/;
+export const UNISWAP_LIQUIDITY_RUN_ID = /^(?:unilp|rhlp|balp|arlp)-[a-f0-9]{32}$/;
 const ADDRESS = /^0x[0-9a-f]{40}$/, HASH = /^0x[0-9a-f]{64}$/;
 const ACTIVE: readonly UniswapAttemptState[] = ['PREPARED', 'SUBMITTING', 'SUBMISSION_RESULT_UNKNOWN', 'PENDING'];
 export const UNISWAP_OBSERVABLE: readonly UniswapAttemptState[] = ['SUBMITTING', 'SUBMISSION_RESULT_UNKNOWN', 'PENDING'];
 const TERMINAL: readonly UniswapAttemptState[] = ['CANCELLED', 'NOT_FOUND', 'CONFIRMED', 'REVERTED', 'RECONCILIATION_REQUIRED'];
 const REFUSALS = [4001, 4100, 4200];
+const staleReviewError = (code: string) => /^UNISWAP_(?:.*_REVIEW_REQUIRED|UNEXPECTED_CONTRACT|DEPLOYMENT_MISMATCH|POOL_MISMATCH|TOKEN_MISMATCH|FEE_TIER_UNSUPPORTED|SIMULATION_(?:MINT|APPROVAL)_REVERTED)$/.test(code) ||
+  /^(STOCK_[A-Z_]+|CATALOG_ASSET_IDENTITY_CHANGED)$/.test(code);
 /** An approval whose nonce was never consumed and nothing is queued is abandoned after this long. */
 const APPROVAL_ABANDON_MS = 15 * 60_000;
 /**
@@ -116,15 +123,17 @@ function profileOfReview(review: UniswapLiquidityReview): UniswapPoolProfile {
   if (!profile && uniswapCatalogDeployment(review.chainId)) {
     try { profile = catalogPoolOn(review.chainId, review.token0, review.token1, review.pool.fee); } catch { profile = null; }
   }
-  if (!profile || profile.pool !== review.contracts.pool || profile.token0.address !== review.token0.address) fail('UNISWAP_LIQUIDITY_STORE_CORRUPT');
+  if (!profile || profile.pool !== review.contracts.pool || profile.factory !== review.contracts.factory || profile.positionManager !== review.contracts.positionManager ||
+      profile.token0.address !== review.token0.address || profile.token1.address !== review.token1.address || profile.token0.decimals !== review.token0.decimals ||
+      profile.token1.decimals !== review.token1.decimals || profile.tickSpacing !== review.pool.tickSpacing) fail('UNISWAP_LIQUIDITY_STORE_CORRUPT');
   return profile;
 }
 /**
  * Testnet profiles run as `unilp-` with PUBLIC_TESTNET (or MOCKED) provenance; each catalog network has its own mainnet namespace with
- * PUBLIC_MAINNET (or MOCKED): `rhlp-` on Robinhood Chain, `balp-` (BUILD-BASE-001) on Base. A namespace never holds another chain's run.
+ * PUBLIC_MAINNET (or MOCKED): `rhlp-` on Robinhood Chain, `balp-` on Base, `arlp-` on Arbitrum. A namespace never holds another chain's run.
  */
-const CATALOG_RUN_PREFIX: Readonly<Record<number, 'rhlp' | 'balp'>> = Object.freeze({ [ROBINHOOD.chainId]: 'rhlp', 8453: 'balp' });
-const catalogRun = (id: string) => id.startsWith('rhlp-') || id.startsWith('balp-');
+const CATALOG_RUN_PREFIX: Readonly<Record<number, 'rhlp' | 'balp' | 'arlp'>> = Object.freeze({ [ROBINHOOD.chainId]: 'rhlp', 8453: 'balp', [ARBITRUM_ONE.chainId]: 'arlp' });
+const catalogRun = (id: string) => Object.values(CATALOG_RUN_PREFIX).some(prefix => id.startsWith(prefix + '-'));
 const runChainMatches = (id: string, chainId: number) => catalogRun(id) ? id.startsWith(`${CATALOG_RUN_PREFIX[chainId]}-`) : !uniswapCatalogDeployment(chainId);
 
 function fail(code: string): never { throw new Error(code); }
@@ -256,7 +265,7 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
     if (!bytes) fail('UNISWAP_LIQUIDITY_RUN_NOT_FOUND');
     try { validateUniswapLiquidityLog(bytes); } catch { fail('UNISWAP_LIQUIDITY_STORE_CORRUPT'); }
     const record = JSON.parse(utf8(bytes).trimEnd().split('\n').at(-1)!) as UniswapLiquidityRecord;
-    if (record.id !== id) fail('UNISWAP_LIQUIDITY_STORE_CORRUPT');
+    if (record.id !== id || record.provenance !== provenance) fail('UNISWAP_LIQUIDITY_STORE_CORRUPT');
     return record;
   }
   async function save(record: UniswapLiquidityRecord): Promise<UniswapLiquidityRecord> {
@@ -275,6 +284,7 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
   function bind(profile: UniswapPoolProfile, rpc: Rpc) {
   const pins = input.mockedCodePins ?? profile.codeSha256;
   const t0 = profile.token0, t1 = profile.token1, catalogPool = uniswapCatalogDeployment(profile.chainId) !== null;
+  const nitro = profile.chain === ARBITRUM_ONE.chain;
   const view = (token: UniswapPoolProfile['token0'], asset: CanonicalAsset | undefined): UniswapTokenView =>
     ({ symbol: token.symbol, address: token.address, decimals: token.decimals, ...catalogPool ? { officialId: asset?.stock?.officialId ?? null } : {} });
   async function ethCall(to: string, data: string, at: string): Promise<string> { return hex(await rpc('eth_call', [{ to, data }, at])); }
@@ -305,9 +315,12 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
       fail('UNISWAP_UNEXPECTED_CONTRACT');
     if (addressAt(await ethCall(profile.positionManager, SEL.factory, at)) !== profile.factory ||
         addressAt(await ethCall(profile.positionManager, SEL.weth9, at)) !== (profile.weth ?? t1.address)) fail('UNISWAP_DEPLOYMENT_MISMATCH');
+    if (int24At(await ethCall(profile.factory, SEL.feeAmountTickSpacing + word(BigInt(profile.feeTier)), at), 0) !== profile.tickSpacing)
+      fail('UNISWAP_FEE_TIER_UNSUPPORTED');
     if (addressAt(await ethCall(profile.factory, SEL.getPool + addrWord(t0.address) + addrWord(t1.address) + word(BigInt(profile.feeTier)), at)) !== profile.pool)
       fail('UNISWAP_POOL_MISMATCH');
-    if (addressAt(await ethCall(profile.pool, SEL.token0, at)) !== t0.address || addressAt(await ethCall(profile.pool, SEL.token1, at)) !== t1.address ||
+    if (addressAt(await ethCall(profile.pool, SEL.factory, at)) !== profile.factory ||
+        addressAt(await ethCall(profile.pool, SEL.token0, at)) !== t0.address || addressAt(await ethCall(profile.pool, SEL.token1, at)) !== t1.address ||
         wordAt(await ethCall(profile.pool, SEL.fee, at), 0) !== BigInt(profile.feeTier) || int24At(await ethCall(profile.pool, SEL.tickSpacing, at), 0) !== profile.tickSpacing)
       fail('UNISWAP_POOL_MISMATCH');
     if (wordAt(await ethCall(t0.address, SEL.decimals, at), 0) !== BigInt(t0.decimals) || wordAt(await ethCall(t1.address, SEL.decimals, at), 0) !== BigInt(t1.decimals))
@@ -322,7 +335,8 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
     const slot0 = await ethCall(profile.pool, SEL.slot0, at);
     const sqrtPriceX96 = wordAt(slot0, 0), tick = int24At(slot0, 1);
     if (wordAt(slot0, 6) !== 1n) fail('UNISWAP_POOL_LOCKED');
-    if (sqrtPriceX96 <= 4_295_128_739n) fail('UNISWAP_POOL_UNINITIALIZED');
+    if (sqrtPriceX96 <= 4_295_128_739n || sqrtPriceX96 >= 1_461_446_703_485_210_103_287_273_052_203_988_822_378_723_970_342n ||
+        tick < -887_272 || tick > 887_272) fail('UNISWAP_POOL_UNINITIALIZED');
     const liquidity = wordAt(await ethCall(profile.pool, SEL.liquidity, at), 0);
     const balance = async (token: string) => wordAt(await ethCall(token, SEL.balanceOf + addrWord(owner), at), 0);
     const allowance = async (token: string) => wordAt(await ethCall(token, SEL.allowance + addrWord(owner) + addrWord(profile.positionManager), at), 0);
@@ -358,6 +372,32 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
     // Ethereum L1 has no separate data fee; an OP Stack chain reads its GasPriceOracle upper bound.
     if (profile.gasPriceOracle === null) return 0n;
     try { return wordAt(await ethCall(profile.gasPriceOracle, SEL.l1FeeUpperBound + word(BigInt(dataBytes + 120)), at), 0); } catch { return null; }
+  }
+  /** Exact executable step: current estimates must fit the frozen Review envelope, including OP fees where applicable. */
+  async function assertRequestFees(review: UniswapLiquidityReview, tx: UniswapTx, at: string): Promise<void> {
+    if (quantity(await rpc('eth_chainId', [])) !== BigInt(profile.chainId)) fail('UNISWAP_WRONG_CHAIN');
+    const call = review.calls.find(c => c.to === tx.to && c.data === tx.data);
+    if (!call || tx.chainId !== profile.chainHex || tx.from !== review.owner || tx.value !== '0x0' ||
+        quantity(tx.gas) !== BigInt(call.gasLimit) || quantity(tx.maxFeePerGas) !== BigInt(review.fees.maxFeePerGas) ||
+        quantity(tx.maxPriorityFeePerGas) !== BigInt(review.fees.maxPriorityFeePerGas)) fail('UNISWAP_REVIEW_CHANGED');
+    const block = await rpc('eth_getBlockByNumber', [at, false]);
+    if (!isObject(block)) fail('UNISWAP_RPC_INVALID');
+    const price = nitro ? quantity(await rpc('eth_gasPrice', [])) : quantity(block.baseFeePerGas) + quantity(tx.maxPriorityFeePerGas);
+    if (price <= 0n || price > quantity(tx.maxFeePerGas)) fail('UNISWAP_FEES_CHANGED_REVIEW_REQUIRED');
+    const estimate = quantity(await rpc('eth_estimateGas', [{ from: tx.from, to: tx.to, data: tx.data, value: tx.value }, at]));
+    if (estimate <= 0n || estimate > quantity(tx.gas)) fail('UNISWAP_GAS_CHANGED_REVIEW_REQUIRED');
+    const l1 = await l1FeeUpperBound((tx.data.length - 2) / 2, at), bound = call.l1FeeUpperBoundWei === undefined ? review.fees.l1FeeUpperBoundWei : call.l1FeeUpperBoundWei;
+    if (l1 === null || bound === null || l1 > BigInt(bound)) fail('UNISWAP_L1_FEES_CHANGED_REVIEW_REQUIRED');
+    if (quantity(await rpc('eth_getBalance', [tx.from, at])) < quantity(tx.gas) * quantity(tx.maxFeePerGas) + l1) fail('UNISWAP_INSUFFICIENT_GAS_ETH');
+  }
+  function assertMintBounds(review: UniswapLiquidityReview, state: ChainState, fresh: readonly SimulatedCall[]): void {
+    const minted = decodeUniswapMintResult(fresh.at(-1)!.returnData);
+    const drift = (a: bigint, b: bigint) => (a > b ? a - b : b - a) * 20_000n > b * BigInt(review.intent.slippageBps);
+    if (canonical(state.codeSha256) !== canonical(review.contracts.codeSha256) ||
+        stockEconomics(state.stocks) !== stockEconomics(review.stocks) ||
+        uniswapRangeState(state.tick, review.range.tickLower, review.range.tickUpper) !== review.range.state ||
+        drift(minted.amount0, BigInt(review.expected.amount0)) || drift(minted.amount1, BigInt(review.expected.amount1)) ||
+        drift(minted.liquidity, BigInt(review.expected.liquidity))) fail('UNISWAP_STATE_CHANGED_REVIEW_REQUIRED');
   }
   function intentOf(workflow: SemanticWorkflow) {
     const checked = validateAuthoringWorkflow(workflow, createBaseSepoliaReviewContext()) as SemanticWorkflow;
@@ -404,12 +444,19 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
         minted.amount0 > amount0Max || minted.amount1 > amount1Max || minted.amount0 < min0 || minted.amount1 < min1) fail('UNISWAP_SIMULATION_DIVERGENT');
     const state0 = uniswapRangeState(state.tick, f.tickLower, f.tickUpper);
     if (state0 === 'BELOW_RANGE' && minted.amount1 !== 0n || state0 === 'ABOVE_RANGE' && minted.amount0 !== 0n) fail('UNISWAP_SIMULATION_DIVERGENT');
-    const priority = quantity(await rpc('eth_maxPriorityFeePerGas', []));
-    const maxFeePerGas = state.block.baseFee * 2n + priority;
-    const reviewCalls: UniswapReviewCall[] = calls.map((call, index) => ({ ...call, gasUsed: simulated[index]!.gasUsed.toString(),
-      gasLimit: (simulated[index]!.gasUsed * 13n / 10n + 25_000n).toString() }));
+    const priority = nitro ? 0n : quantity(await rpc('eth_maxPriorityFeePerGas', []));
+    const price = nitro ? quantity(await rpc('eth_gasPrice', [])) : state.block.baseFee;
+    if (nitro && (price <= 0n || price >= 1n << 128n)) fail('UNISWAP_FEE_INVALID');
+    const maxFeePerGas = nitro ? nitroMaxFeePerGas(price) : price * 2n + priority;
+    const reviewCalls: UniswapReviewCall[] = await Promise.all(calls.map(async (call, index) => {
+      const gas = simulated[index]!.gasUsed;
+      if (gas <= 0n || gas > 30_000_000n) fail('UNISWAP_FEE_INVALID');
+      const gasLimit = nitro ? nitroGasLimit(gas + await nitroPostingGas(rpc, owner, call, at, 'UNISWAP_NITRO_FEE_UNAVAILABLE')) : gas * 13n / 10n + 25_000n;
+      return { ...call, gasUsed: gas.toString(), gasLimit: gasLimit.toString(),
+        l1FeeUpperBoundWei: (await l1FeeUpperBound((call.data.length - 2) / 2, at))?.toString() ?? null };
+    }));
     const gasLimitTotal = reviewCalls.reduce((sum, c) => sum + BigInt(c.gasLimit), 0n);
-    const l1Fees = await Promise.all(reviewCalls.map(c => l1FeeUpperBound((c.data.length - 2) / 2, at)));
+    const l1Fees = reviewCalls.map(c => c.l1FeeUpperBoundWei === null ? null : BigInt(c.l1FeeUpperBoundWei!));
     const l1Total = l1Fees.every(v => v !== null) ? l1Fees.reduce((sum, v) => sum + v!, 0n) : null;
     const execution = gasLimitTotal * maxFeePerGas;
     if (state.native < execution + (l1Total ?? 0n)) fail('UNISWAP_INSUFFICIENT_GAS_ETH');
@@ -589,6 +636,16 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
     const receipt: UniswapReceipt = { transactionHash: hash, status: verified.status, blockNumber: verified.blockNumber, blockHash: hex(raw.blockHash),
       from: verified.txFrom, gasUsed: verified.gasUsed.toString(), effectiveGasPrice: verified.effectiveGasPrice.toString(), l1FeeWei: verified.l1Fee.toString(),
       gasCostWei: (execution + verified.l1Fee).toString(), submissionKind: verified.delegated ? 'DELEGATED_SINGLE' : 'DIRECT', contentHash: digest(raw) };
+    const reviewedCall = record.review.calls.find(c => c.to === attempt.tx.to && c.data === attempt.tx.data);
+    const l1Bound = reviewedCall?.l1FeeUpperBoundWei === undefined ? record.review.fees.l1FeeUpperBoundWei : reviewedCall.l1FeeUpperBoundWei;
+    if (verified.direct && (!isObject(tx) || quantity(tx.nonce) !== BigInt(attempt.nonce) || quantity(tx.gas) > quantity(attempt.tx.gas) ||
+        quantity(tx.maxFeePerGas ?? tx.gasPrice) > quantity(attempt.tx.maxFeePerGas) ||
+        quantity(tx.maxPriorityFeePerGas ?? '0x0') > quantity(attempt.tx.maxPriorityFeePerGas) ||
+        verified.gasUsed > quantity(attempt.tx.gas) || verified.effectiveGasPrice > quantity(attempt.tx.maxFeePerGas) ||
+        l1Bound === null || verified.l1Fee > BigInt(l1Bound))) {
+      return save(replaceAttempt({ ...record, verdict: 'DIVERGENT', authorization: null, error: 'UNISWAP_RECEIPT_BOUNDS_VIOLATED' },
+        { ...attempt, state: 'RECONCILIATION_REQUIRED', receipt, note: 'UNISWAP_RECEIPT_BOUNDS_VIOLATED' }));
+    }
     if (verified.status === 0) {
       return save(replaceAttempt({ ...record, authorization: null, error: 'UNISWAP_TRANSACTION_REVERTED' }, { ...attempt, state: 'REVERTED', receipt, note: 'UNISWAP_TRANSACTION_REVERTED' }));
     }
@@ -602,19 +659,19 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
       const evidence = await buildEvidence(confirmed, position);
       return save({ ...confirmed, position, evidence, verdict: 'RECONCILED' });
     } catch (cause) {
-      const code = cause instanceof Error && /^UNISWAP_[A-Z0-9_]+$/.test(cause.message) ? cause.message : null;
+      const code = cause instanceof Error && /^UNISWAP_(?:APPROVAL_MISMATCH|APPROVAL_NOT_EFFECTIVE|MINT_MISMATCH|POSITION_RECIPIENT_MISMATCH|MINT_BOUNDS_VIOLATED|TOKEN_TRANSFER_MISMATCH|POSITION_OWNER_MISMATCH|POSITION_MISMATCH|BALANCE_DELTA_MISMATCH|POSITION_INVALID|MINT_INVALID|APPROVAL_INVALID|RECEIPT_INVALID)$/.test(cause.message) ? cause.message : null;
       // A confirmed transaction whose effects disagree with the Review is frozen for attention; RPC trouble is retried.
-      if (!code || code === 'UNISWAP_RPC_INVALID') throw cause;
+      if (!code) throw cause;
       return save(replaceAttempt({ ...record, verdict: 'DIVERGENT', authorization: null, error: code }, { ...attempt, state: 'RECONCILIATION_REQUIRED', receipt, note: code }));
     }
   }
 
-  async function price(): Promise<UniswapLiquidityPrice> {
-    const block = await head(), slot0 = await ethCall(profile.pool, SEL.slot0, tag(block.number));
-    const sqrtPriceX96 = wordAt(slot0, 0);
-    return { sqrtPriceX96: sqrtPriceX96.toString(), tick: int24At(slot0, 1), price: uniswapQuotePriceAtSqrt(sqrtPriceX96, t0.decimals, t1.decimals), blockNumber: block.number };
+  async function price(assets: PoolAssets | null): Promise<UniswapLiquidityPrice> {
+    const state = await readState('0x' + '0'.repeat(40), assets);
+    return { sqrtPriceX96: state.sqrtPriceX96.toString(), tick: state.tick,
+      price: uniswapQuotePriceAtSqrt(state.sqrtPriceX96, t0.decimals, t1.decimals), blockNumber: state.block.number };
   }
-  return { profile, rpc, head, readState, simulateCalls, buildReview, reserveNonce, discoverByNonce, sameIntent, settle, price };
+  return { profile, rpc, head, readState, simulateCalls, buildReview, assertRequestFees, assertMintBounds, reserveNonce, discoverByNonce, sameIntent, settle, price };
   }
   /** The runtime of a pool: its chain's own read client, never another chain's. A chain without a configured client is not enabled. */
   const runtimes = new Map<string, ReturnType<typeof bind>>();
@@ -659,7 +716,7 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
     executionEnabled,
     /** The current pool price of a liquidity network (Base Sepolia unless a chain is named; a catalog-network pool by its pair and fee tier). */
     async price(chain: string = BASE_PROFILE.chain, pair?: { readonly tokenA: string; readonly tokenB: string; readonly fee: number }): Promise<UniswapLiquidityPrice> {
-      if (chain !== servedChain || !input.catalog) return runtimeOf(uniswapLiquidityProfile(chain) ?? fail('UNISWAP_LIQUIDITY_NETWORK_UNSUPPORTED')).price();
+      if (chain !== servedChain || !input.catalog) return runtimeOf(uniswapLiquidityProfile(chain) ?? fail('UNISWAP_LIQUIDITY_NETWORK_UNSUPPORTED')).price(null);
       if (!pair) fail('UNISWAP_POOL_REQUIRED');
       const catalog = await input.catalog.catalogFor(servedChain);
       const a = catalogAsset(catalog, { address: String(pair.tokenA).toLowerCase() }), b = catalogAsset(catalog, { address: String(pair.tokenB).toLowerCase() });
@@ -667,7 +724,8 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
       let profile: UniswapPoolProfile;
       try { profile = catalogPoolOn(servedChain, a as { symbol: string; address: string; decimals: number }, b as { symbol: string; address: string; decimals: number }, pair.fee); }
       catch { return fail('UNISWAP_FEE_TIER_UNSUPPORTED'); }
-      return runtimeOf(profile).price();
+      const assets = await catalogAssets(profile.token0, profile.token1);
+      return runtimeOf(profile).price(assets);
     },
     /** Read-only: a new run with a fresh public simulation for this owner. */
     async simulate(workflowInput: unknown, ownerInput: string): Promise<UniswapLiquidityRecord> {
@@ -716,7 +774,7 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
       // BUILD-RH-002: a Stock Token whose identity or multiplier changed (or is about to) since Review clears the authorization.
       let state: ChainState;
       try { state = await R.readState(owner, await assetsOfRecord(record)); }
-      catch (cause) { if (cause instanceof Error && /^(STOCK_[A-Z_]+|CATALOG_ASSET_IDENTITY_CHANGED)$/.test(cause.message)) return changed(cause.message); throw cause; }
+      catch (cause) { if (cause instanceof Error && staleReviewError(cause.message)) return changed(cause.message); throw cause; }
       if (canonical(state.codeSha256) !== canonical(review.contracts.codeSha256)) return changed();
       if (stockEconomics(state.stocks) !== stockEconomics(review.stocks)) return changed('STOCK_MULTIPLIER_CHANGED_REVIEW_REQUIRED');
       const need0 = BigInt(review.intent.amount0Max) > 0n && state.allowance0 < BigInt(review.intent.amount0Max);
@@ -729,11 +787,7 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
       let fresh: SimulatedCall[];
       try { fresh = await R.simulateCalls(owner, remaining, state.block.number); }
       catch (cause) { if (cause instanceof Error && /^UNISWAP_SIMULATION_(MINT|APPROVAL)_REVERTED$/.test(cause.message)) return changed(); throw cause; }
-      const minted = decodeUniswapMintResult(fresh.at(-1)!.returnData);
-      const drift = (a: bigint, b: bigint) => (a > b ? a - b : b - a) * 20_000n > b * BigInt(review.intent.slippageBps);
-      if (uniswapRangeState(state.tick, review.range.tickLower, review.range.tickUpper) !== review.range.state ||
-          drift(minted.amount0, BigInt(review.expected.amount0)) || drift(minted.amount1, BigInt(review.expected.amount1)) ||
-          drift(minted.liquidity, BigInt(review.expected.liquidity))) return changed();
+      try { R.assertMintBounds(review, state, fresh); } catch { return changed(); }
       if (state.nonce !== state.pendingNonce) fail('UNISWAP_PENDING_TRANSACTION');
       if (step === 'MINT') {
         if (record.attempts.some(a => a.step === 'MINT' && a.state === 'CONFIRMED')) fail('UNISWAP_POSITION_ALREADY_MINTED');
@@ -742,12 +796,13 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
         if (earlier && BigInt(earlier.positionsBefore ?? '0') !== state.positionCount) fail('UNISWAP_POSITION_MAY_EXIST_OBSERVE');
       }
       const call = review.calls[index]!;
-      const priority = BigInt(review.fees.maxPriorityFeePerGas), maxFeePerGas = state.block.baseFee * 2n + priority;
-      if (state.native < BigInt(call.gasLimit) * maxFeePerGas) fail('UNISWAP_INSUFFICIENT_GAS_ETH');
+      const priority = BigInt(review.fees.maxPriorityFeePerGas), maxFeePerGas = BigInt(review.fees.maxFeePerGas);
       const attemptId = `${id}.${step.toLowerCase()}.${record.attempts.length + 1}`;
-      await R.reserveNonce(record, attemptId, state.nonce);
       const tx: UniswapTx = { chainId: profile.chainHex, from: owner, to: call.to, data: call.data, value: '0x0', gas: tag(BigInt(call.gasLimit)),
         maxFeePerGas: tag(maxFeePerGas), maxPriorityFeePerGas: tag(priority) };
+      try { await R.assertRequestFees(review, tx, tag(state.block.number)); }
+      catch (cause) { if (cause instanceof Error && /^UNISWAP_.*_REVIEW_REQUIRED$/.test(cause.message)) return changed(cause.message); throw cause; }
+      await R.reserveNonce(record, attemptId, state.nonce);
       const attempt: UniswapAttempt = { attemptId, step, state: 'PREPARED', reviewCommitment: review.commitment, nonce: state.nonce.toString(),
         preparedAtBlock: state.block.number, createdAt: now().toISOString(), tx, transactionHash: null, replacementHash: null,
         positionsBefore: step === 'MINT' ? state.positionCount.toString() : null, receipt: null, reconciled: false, note: null };
@@ -759,7 +814,22 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
       const record = await load(id), attempt = record.attempts.at(-1);
       if (!executionEnabled || attempt?.state !== 'PREPARED' || record.authorization !== attempt.reviewCommitment ||
           now().getTime() >= Date.parse(record.review.expiresAt)) fail('UNISWAP_WALLET_HANDOFF_NOT_AUTHORIZED');
-      const { rpc } = runtimeOfRecord(record);
+      const R = runtimeOfRecord(record), { rpc } = R;
+      try {
+        const state = await R.readState(record.owner, await assetsOfRecord(record));
+        const need0 = BigInt(record.review.intent.amount0Max) > 0n && state.allowance0 < BigInt(record.review.intent.amount0Max);
+        const need1 = BigInt(record.review.intent.amount1Max) > 0n && state.allowance1 < BigInt(record.review.intent.amount1Max);
+        if (attempt.step !== (need0 ? 'APPROVE_TOKEN0' : need1 ? 'APPROVE_TOKEN1' : 'MINT')) fail('UNISWAP_STATE_CHANGED_REVIEW_REQUIRED');
+        const remaining = record.review.calls.slice(record.review.calls.findIndex(c => c.step === attempt.step))
+          .filter(c => c.step === 'MINT' || (c.step === 'APPROVE_TOKEN0' ? need0 : need1));
+        R.assertMintBounds(record.review, state, await R.simulateCalls(record.owner, remaining, state.block.number));
+        await R.assertRequestFees(record.review, attempt.tx, tag(state.block.number));
+      } catch (cause) {
+        if (cause instanceof Error && staleReviewError(cause.message)) {
+          await save({ ...record, authorization: null, error: cause.message });
+        }
+        throw cause;
+      }
       const [latest, pending] = await Promise.all([rpc('eth_getTransactionCount', [record.owner, 'latest']).then(quantity),
         rpc('eth_getTransactionCount', [record.owner, 'pending']).then(quantity)]);
       if (latest !== BigInt(attempt.nonce) || pending !== BigInt(attempt.nonce)) fail('UNISWAP_NONCE_CHANGED');

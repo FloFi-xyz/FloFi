@@ -48,4 +48,5 @@ export const STRATEGY_EXAMPLES: readonly { readonly id: string; readonly strateg
   { id: 'withdraw-base', strategy: { action: 'withdraw', network: 'base', asset: 'USDC', amount: '1' } },
   { id: 'swap-arbitrum', strategy: { action: 'swap', network: 'arbitrum-one', inputAsset: 'USDC', outputAsset: 'WETH', amount: '10', slippageBps: 50 } },
   { id: 'transfer-arbitrum', strategy: { action: 'transfer', network: 'arbitrum-one', asset: 'USDC', amount: '5' } },
+  { id: 'add-liquidity-arbitrum', strategy: { action: 'add_liquidity', network: 'arbitrum-one', maxAmounts: { USDC: '10', WETH: '0.003' }, range: { unit: 'full' }, feeTier: 500 } },
 ]);

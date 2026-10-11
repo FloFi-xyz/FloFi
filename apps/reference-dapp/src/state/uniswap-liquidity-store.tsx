@@ -3,8 +3,8 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { useWorkflow } from './workflow-store';
-import { BASE_HEX, injected, ROBINHOOD_HEX, useBuild009Wallet } from './build009-wallet-store';
-import { uniswapLiquidityProfile } from '@defi-workflow-engine/action-registry';
+import { injected, useBuild009Wallet } from './build009-wallet-store';
+import { uniswapLiquidityChainHex, uniswapLiquidityWalletTransactionMatches } from '../wallet/uniswap-liquidity-eip1193';
 import { uniswapLiquidityBegin, uniswapLiquidityHandoff, uniswapLiquidityInvalidate, uniswapLiquidityMode, uniswapLiquidityObserve, uniswapLiquidityPrice,
   uniswapLiquidityRefresh, uniswapLiquidityReport, uniswapLiquidityReview, uniswapLiquiditySimulate, uniswapLiquidityStatus, uniswapLiquidityWalletFailure,
   uniswapLiquidityInfo, catalogLiquidityInfo, catalogLiquidityMode } from '../app/uniswap-liquidity-action';
@@ -68,7 +68,7 @@ export function UniswapLiquidityProvider({ children }: { children: ReactNode }) 
       }).catch(() => undefined);
     try {
       const pointer = JSON.parse(window.localStorage.getItem(KEY) ?? 'null') as { id?: unknown; hash?: unknown } | null;
-      if (pointer && typeof pointer.id === 'string' && /^(?:unilp|rhlp|balp)-[a-f0-9]{32}$/.test(pointer.id)) (async () => {
+      if (pointer && typeof pointer.id === 'string' && /^(?:unilp|rhlp|balp|arlp)-[a-f0-9]{32}$/.test(pointer.id)) (async () => {
         // A hash saved before the browser closed reaches the server first; it is never resent to a wallet.
         if (typeof pointer.hash === 'string' && /^0x[0-9a-f]{64}$/.test(pointer.hash))
           await uniswapLiquidityReport(pointer.id as string, { kind: 'HASH', hash: pointer.hash }).catch(() => undefined);
@@ -96,8 +96,7 @@ export function UniswapLiquidityProvider({ children }: { children: ReactNode }) 
     return value;
   }
   /** The reviewed run's chain (else the authored position's) is the only network the wallet may be on. */
-  const chainHexOf = (chain: string | number | undefined) => chain === 4663 || chain === 'eip155:4663' ? ROBINHOOD_HEX : chain === 8453 || chain === 'eip155:8453' ? BASE_HEX
-    : uniswapLiquidityProfile(chain)?.chainHex;
+  const chainHexOf = uniswapLiquidityChainHex;
   async function simulate() { await operation(async () => {
     if (record && !retired && record.verdict === 'PENDING' && record.attempts.some(a => ['PREPARED', 'SUBMITTING', 'SUBMISSION_RESULT_UNKNOWN', 'PENDING'].includes(a.state)))
       throw new Error('UNISWAP_ATTEMPT_ACTIVE_OBSERVE_EXISTING');
@@ -115,7 +114,8 @@ export function UniswapLiquidityProvider({ children }: { children: ReactNode }) 
   async function switchNetwork() { await operation(async () => {
     const target = chainHexOf(record?.review.chainId ?? latest.current.nodes.find(n => n.actionType === 'asset.liquidity.concentrated')?.chainId);
     if (!target) throw new Error('UNISWAP_REVIEW_REQUIRED');
-    await wallet.switchTo(target);
+    // The profile registry supplies the chain; the shared wallet revalidates it against its switchable network registry.
+    await wallet.switchTo(target as Parameters<typeof wallet.switchTo>[0]);
   }); }
   /** One Execute click = one exact wallet request (the next approval or the mint). */
   async function execute() { await operation(async () => {
@@ -148,8 +148,7 @@ export function UniswapLiquidityProvider({ children }: { children: ReactNode }) 
       await validateSession(null);
       const begun = unwrap(await uniswapLiquidityBegin(id, session.account, snapshot)); accept(begun.record); prepared = true;
       const tx = begun.transaction;
-      if (tx.from !== record.owner || tx.chainId !== reviewedChain || tx.value !== '0x0' ||
-          !record.review.calls.some(c => c.step === begun.attempt.step && c.to === tx.to && c.data === tx.data)) throw new Error('UNISWAP_TRANSACTION_ARTIFACT_CHANGED');
+      if (!uniswapLiquidityWalletTransactionMatches(record.review, begun.attempt.step, tx)) throw new Error('UNISWAP_TRANSACTION_ARTIFACT_CHANGED');
       await validateSession(begun.attempt.nonce);
       accept(unwrap(await uniswapLiquidityHandoff(id)));
       if (latestWallet.current.account !== session.account || latestWallet.current.chainId !== session.chainId) throw new Error('UNISWAP_WRONG_OWNER');
