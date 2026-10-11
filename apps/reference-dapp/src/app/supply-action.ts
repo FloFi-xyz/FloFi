@@ -4,7 +4,7 @@ import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts'
 import { createSupplyService, type SupplyWalletDiagnostic, type SupplyService } from '../server/supply-service';
 import { join } from 'node:path';
 import { createBaseLendingReadRpc, createLendingReadRpcs } from '../server/supply-rpc';
-import { cloudFlow, cloudFlowMode } from '../server/flow-runtime';
+import { cloudFlow } from '../server/flow-runtime';
 import { CATALOG_NETWORKS, localCatalogNetworkMode } from '../server/catalog-networks';
 let service:SupplyService|null=null;
 function current():SupplyService {
@@ -43,11 +43,7 @@ async function run<T>(method:string,args:readonly unknown[],action:(service:Supp
   const cloud=await cloudFlow<T>(onBase?'base-aave':'aave-supply',method,args);if(cloud)return cloud;
   try{return{ok:true,value:await action(onBase?base():current())};}catch(cause){const code=cause instanceof Error?cause.message:'';return{ok:false,code:/^[A-Z][A-Z0-9_]{2,80}$/.test(code)?code:'SUPPLY_SERVICE_UNAVAILABLE'};}
 }
-/** BUILD-BASE-001: whether this instance serves Base mainnet Aave lending (live or the MOCKED loopback harness). */
-export async function baseLendingMode():Promise<'live'|'harness'|'off'>{
-  const cloud=await cloudFlowMode('base-aave');if(cloud)return cloud;
-  return localCatalogNetworkMode(BASE,process.env);
-}
+
 export async function supplySimulate(workflow:SemanticWorkflow,account:string){return run('simulate',[workflow,account],service=>service.simulate(workflow,account));}
 export async function supplyReview(id:string,commitment:string,workflow:SemanticWorkflow){return run('review',[id,commitment,workflow],service=>service.review(id,commitment,workflow));}
 export async function supplyBegin(id:string,account:string,workflow:SemanticWorkflow){return run('begin',[id,account,workflow],service=>service.begin(id,account,workflow));}

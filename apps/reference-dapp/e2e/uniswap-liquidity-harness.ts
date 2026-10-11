@@ -7,7 +7,7 @@
  * BUILD-RH-002: `profile` may be a Robinhood Chain pool (any catalog pair and fee tier); `stocks` makes a token a Stock Token (official
  * beacon proxy code, beacon slot, uid and multiplier reads) and `catalogPins` are the synthetic pins of its USDG/WETH/Stock Token code.
  */
-import { UNISWAP_V3_BASE_SEPOLIA_LIQUIDITY, UNISWAP_V3_ROBINHOOD, type UniswapPoolProfile } from '@defi-workflow-engine/action-registry';
+import { UNISWAP_V3_BASE, UNISWAP_V3_BASE_SEPOLIA_LIQUIDITY, UNISWAP_V3_ROBINHOOD, type UniswapPoolProfile } from '@defi-workflow-engine/action-registry';
 import { uniMockCode, uniMockCodePin, UNI_MOCK_CODE_PINS, UNI_MOCK_STOCK_PROXY_CODE } from '../src/server/uniswap-liquidity-mock.ts';
 import { UNISWAP_SELECTORS as SEL, UNISWAP_TOPICS as TOPIC, decodeUniswapApprove, decodeUniswapMint, sqrtRatioAtTick, uniswapComposition } from '@defi-workflow-engine/reference-compiler';
 
@@ -52,7 +52,10 @@ export function createUniswapLiquidityChain(options: { owner?: string; usdc?: bi
   /** Synthetic pins of the catalog's base assets and Stock Token proxy, as a MOCKED Robinhood Chain service accepts them. */
   const catalogPins = { stockTokenProxy: uniMockCodePin(UNI_MOCK_STOCK_PROXY_CODE),
     ...[t0, t1].includes(UNISWAP_V3_ROBINHOOD.usdg) ? { usdg: uniMockCodePin(CODE[UNISWAP_V3_ROBINHOOD.usdg]!) } : {},
-    ...[t0, t1].includes(UNISWAP_V3_ROBINHOOD.weth) ? { weth: uniMockCodePin(CODE[UNISWAP_V3_ROBINHOOD.weth]!) } : {} };
+    ...[t0, t1].includes(UNISWAP_V3_ROBINHOOD.weth) ? { weth: uniMockCodePin(CODE[UNISWAP_V3_ROBINHOOD.weth]!) } : {},
+    // BUILD-BASE-001: Base's pinned USDC and WETH (listed Base tokens carry no pin: code presence and decimals() only).
+    ...[t0, t1].includes(UNISWAP_V3_BASE.usdc) ? { usdc: uniMockCodePin(CODE[UNISWAP_V3_BASE.usdc]!) } : {},
+    ...[t0, t1].includes(UNISWAP_V3_BASE.weth) ? { weth: uniMockCodePin(CODE[UNISWAP_V3_BASE.weth]!) } : {} };
   const owner = options.owner ?? UNI_OWNER;
   const tick = options.tick ?? 225_600;
   let head = 1_000;

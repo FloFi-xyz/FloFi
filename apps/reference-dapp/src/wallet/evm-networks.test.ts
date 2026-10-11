@@ -97,8 +97,16 @@ describe('shared EVM wallet networks', () => {
   });
   it('never adds a mainnet it cannot add; the 4902 error propagates', async () => {
     const { provider, calls } = wallet({ chain: '0x14a34', known: [] });
-    await expect(switchWalletNetwork(provider, '0x2105')).rejects.toMatchObject({ code: 4902 });
+    await expect(switchWalletNetwork(provider, '0xa4b1')).rejects.toMatchObject({ code: 4902 });
     expect(calls.map(call => call.method)).toEqual(['wallet_switchEthereumChain']);
+  });
+  // BUILD-BASE-001 (intentional change): Base is added only from its official network record, and only after the wallet reports 4902.
+  it('adds Base mainnet from the official parameters after 4902', async () => {
+    const { provider, calls } = wallet({ chain: '0x14a34', known: [] });
+    await switchWalletNetwork(provider, '0x2105');
+    expect(calls.map(call => call.method)).toEqual(['wallet_switchEthereumChain', 'wallet_addEthereumChain', 'wallet_switchEthereumChain', 'eth_chainId']);
+    expect(calls[1]!.params).toEqual([{ chainId: '0x2105', chainName: 'Base', nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
+      rpcUrls: ['https://mainnet.base.org'], blockExplorerUrls: ['https://basescan.org'] }]);
   });
   it('propagates a user rejection without adding or retrying', async () => {
     const { provider, calls } = wallet({ chain: '0x14a34', switchError: Object.assign(new Error('rejected'), { code: 4001 }) });

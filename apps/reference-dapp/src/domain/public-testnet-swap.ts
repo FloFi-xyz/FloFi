@@ -76,12 +76,12 @@ export function quoteDecimals(quote: { readonly inputSymbol: string; readonly ou
   return bound ?? ((side === 'input' ? quote.inputSymbol : quote.outputSymbol) === 'USDC' ? 6 : 18);
 }
 /**
- * BUILD-BASE-001: whether the shared owner-wallet swap serves this swap node in the current execution environment. A catalog-network swap
- * does, except Base's USDC ⇄ WETH reference pair outside a mainnet wallet: that intent keeps its BUILD-002 observation and fork paths.
+ * BUILD-BASE-001: whether the shared owner-wallet swap serves this swap node. Every testnet pair and catalog-network swap does. Base's
+ * USDC ⇄ WETH reference swap (BUILD-002 declaration) does only where this instance serves Base mainnet swaps and no local fork runtime is
+ * available (`referenceServed`); otherwise it keeps its BUILD-002 observation and fork paths, unchanged.
  */
-export function ownerWalletSwapServes(node: { readonly actionType: string; readonly chainId: string; readonly inputs?: readonly { readonly name: string; readonly kind: string; readonly value: unknown }[] },
-  environment: string): boolean {
+export function ownerWalletSwapServes(node: { readonly actionType: string; readonly chainId: string }, referenceServed: boolean): boolean {
   const profile = node.actionType === 'asset.swap.exact-input' ? swapProfile(node.chainId) : null;
   if (!profile) return false;
-  return profile.kind !== 'CATALOG' || !profile.referencePair || environment === 'MAINNET' || isCatalogSwapNode(node);
+  return profile.kind !== 'CATALOG' || !profile.referencePair || isCatalogSwapNode(node) || referenceServed;
 }

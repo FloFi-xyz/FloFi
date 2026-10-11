@@ -5,7 +5,8 @@ import { useLocale } from '../i18n/locale';
 import { useState, type FormEvent } from 'react';
 import { formatAssetAmount } from '@defi-workflow-engine/action-registry';
 import { createAuthoredTransfer, formatEth, transferDetails, transferProfileFor, TRANSFER_NETWORKS, type RobinhoodTransferInput, type TransferNetwork } from '../domain/robinhood-transfer-authoring';
-import { featuredStockSymbols, resolveNetworkAsset } from '../domain/asset-catalogs';
+import { BASE_CHAIN, featuredNetworkSymbols, featuredStockSymbols, resolveNetworkAsset } from '../domain/asset-catalogs';
+import { networkIdentity } from '../domain/network-registry';
 import { useWorkflow } from '../state/workflow-store';
 import { useRobinhoodTransfer } from '../state/robinhood-transfer-store';
 import { useBuild009Wallet } from '../state/build009-wallet-store';
@@ -22,11 +23,12 @@ export function RobinhoodTransferAuthoringForm({ nodeId, onDone, direct = false 
   const existing = node ? transferDetails(node as Parameters<typeof transferDetails>[0]) : null;
   const [amount, setAmount] = useState(existing?.amount ?? '0.000001'), [error, setError] = useState('');
   const [network, setNetwork] = useState<TransferNetwork>(existing?.network ?? 'Robinhood Chain Testnet');
-  // BUILD-RH-002: Robinhood Chain mainnet moves native ETH or a catalog asset, to the owner or an explicit recipient.
-  const mainnet = network === 'Robinhood Chain';
+  // BUILD-RH-002: Robinhood Chain mainnet moves native ETH or a catalog asset, to the owner or an explicit recipient (BUILD-BASE-001: so does Base).
+  const mainnet = networkIdentity(network)?.catalog === true;
   const [asset, setAsset] = useState(existing?.asset ?? 'ETH');
   const [recipient, setRecipient] = useState(existing && existing.recipient !== 'CONNECTED_OWNER' ? existing.recipient : '');
-  const assets = mainnet ? [...new Set(['ETH', 'USDG', 'WETH', ...featuredStockSymbols(), asset])] : ['ETH'];
+  const assets = network === 'Base' ? [...new Set(['ETH', ...featuredNetworkSymbols(BASE_CHAIN), asset])]
+    : mainnet ? [...new Set(['ETH', 'USDG', 'WETH', ...featuredStockSymbols(), asset])] : ['ETH'];
   function submit(event: FormEvent) { event.preventDefault(); try {
     const input: RobinhoodTransferInput = { network, asset: mainnet ? asset : 'ETH', amount, recipient: mainnet && recipient.trim() ? recipient.trim() : 'CONNECTED_OWNER' };
     createAuthoredTransfer(nodeId ?? 'node-preview', input);
@@ -36,7 +38,7 @@ export function RobinhoodTransferAuthoringForm({ nodeId, onDone, direct = false 
   } catch (cause) { setError(cause instanceof Error && cause.message === 'ASSET_CATALOG_UNAVAILABLE' ? 'Robinhood assets are unavailable right now. Try again in a moment.'
     : mainnet ? 'Enter an exact positive amount for the selected asset and, optionally, a valid recipient address.' : 'Enter an exact positive test-ETH amount up to 0.001 with at most 18 decimal places.'); } }
   return <form className="inspector-fields" aria-label={tr(nodeId ? 'Edit Robinhood transfer' : 'Create Robinhood transfer')} onSubmit={submit}>
-    <strong>{tr(mainnet ? 'Robinhood Chain transfer' : transferCopy('Robinhood Testnet test-ETH self-transfer', network))}</strong>
+    <strong>{tr(mainnet ? `${network} transfer` : transferCopy('Robinhood Testnet test-ETH self-transfer', network))}</strong>
     <label>{tr("Transfer network")}<select aria-label={tr("Transfer network")} value={network} onChange={e => setNetwork(e.target.value as TransferNetwork)}>
       {(Object.keys(TRANSFER_NETWORKS) as TransferNetwork[]).map(name => <option key={name}>{name}</option>)}</select></label>
     {mainnet && <label>{tr("Asset")}<select aria-label={tr("Transfer asset")} value={asset} onChange={e => setAsset(e.target.value)}>
@@ -52,6 +54,7 @@ export function RobinhoodTransferAuthoringForm({ nodeId, onDone, direct = false 
 const messages: Record<string, string> = {
   TRANSFER_PUBLIC_TESTNET_NOT_ENABLED: 'Robinhood Testnet execution is not enabled on this app instance.',
   ROBINHOOD_MAINNET_NOT_ENABLED: 'Robinhood Chain is not enabled on this app instance.',
+  BASE_MAINNET_NOT_ENABLED: 'Base mainnet is not enabled on this app instance.',
   OWNER_EXECUTION_NOT_ENABLED: 'Real-funds execution is not enabled on this app instance. Review is available; nothing was sent.',
   TRANSFER_INSUFFICIENT_ETH: 'The owner wallet needs ETH on this network for the network fee.', TRANSFER_INSUFFICIENT_TOKEN_BALANCE: 'The owner wallet does not hold enough of this asset.',
   TRANSFER_RECIPIENT_NOT_EOA: 'ETH can only be sent to a regular wallet address here, not to a contract.',
@@ -87,7 +90,7 @@ export function RobinhoodTransferPanel({ view }: { view: 'simulate' | 'execute' 
   const amountText = review?.asset ? formatAssetAmount(review.value, review.asset.decimals) : fields?.amount ?? (review ? formatEth(review.value) : '');
   const selfTransfer = !review || review.recipient === review.account;
   return <section className="panel" aria-label={tr(transferCopy('Robinhood Testnet transfer', network))}><h2>{tr(view === 'simulate' ? `Simulate ${short(network)} transfer` : record?.evidence ? `${short(network)} transfer result` : `Review ${short(network)} transfer`)}</h2>
-    {network === 'Robinhood Chain' ? <p>{tr("Transfer ")}{tr(amountText)} {tr(symbol)}{tr(" on ")}{network}{tr(selfTransfer ? ' to your connected wallet.' : '.')}
+    {networkIdentity(network)?.catalog ? <p>{tr("Transfer ")}{tr(amountText)} {tr(symbol)}{tr(" on ")}{network}{tr(selfTransfer ? ' to your connected wallet.' : '.')}
       {' '}{tr("Real funds: your wallet signs and sends this transaction; Flofi never signs for you.")}</p>
       : <p>{tr("Self-transfer ")}{tr(fields?.amount ?? (review ? formatEth(review.value) : ''))}{tr(" test ETH on ")}{network}{tr(". A chain execution proof, not a DeFi action.")}</p>}
     {run.retired && record && <p role="alert">{tr("The workflow changed. Authorization is invalid. Observe any existing transaction before starting again.")}</p>}

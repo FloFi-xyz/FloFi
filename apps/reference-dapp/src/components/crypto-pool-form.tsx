@@ -13,6 +13,7 @@ import { usePoolContributionInputs } from './canvas-card-inputs';
 import { poolReviewFormId } from './composer-card';
 import { usePoolPriceRange, poolPriceBounds } from './pool-price-range';
 import { ROBINHOOD_NETWORK } from '../domain/asset-catalogs';
+import { networkIdentity } from '../domain/network-registry';
 import { robinhoodFullRange, ROBINHOOD_LIQUIDITY_DEFAULT_FEE, ROBINHOOD_LIQUIDITY_FEE_TIERS } from '../domain/robinhood-liquidity-authoring';
 
 /** Picker drafts use the existing pool builders and range validators at Review. */
@@ -24,8 +25,8 @@ export function CryptoPoolForm({ nodeId }: { nodeId: string }) {
   const setup = actionSetup?.id === nodeId && actionSetup.action === 'pool' ? actionSetup : null;
   const node = state.workflow.nodes.find(node => node.nodeId === nodeId), existing = node ? cryptoInputOf(node) : null;
   const selection = setup?.cryptoSelection ?? cryptoSelections[nodeId] ?? existing?.selection;
-  const [fields, setFields] = useState({ rangeUnit: existing?.rangeUnit ?? 'TICK', lower: existing && existing.selection.network === selection?.network ? existing.lower ?? '-887270' : selection?.network === 'Solana Devnet' ? '-443584' : selection?.network === 'Ethereum Sepolia' || selection?.network === ROBINHOOD_NETWORK ? '-887220' : '-887270', upper: existing && existing.selection.network === selection?.network ? existing.upper ?? '887270' : selection?.network === 'Solana Devnet' ? '443584' : selection?.network === 'Ethereum Sepolia' || selection?.network === ROBINHOOD_NETWORK ? '887220' : '887270', slippage: existing?.slippage ?? '50' });
-  // BUILD-RH-002: a Robinhood Chain pool is the pair's pool at the chosen Uniswap v3 fee tier.
+  const [fields, setFields] = useState({ rangeUnit: existing?.rangeUnit ?? 'TICK', lower: existing && existing.selection.network === selection?.network ? existing.lower ?? '-887270' : selection?.network === 'Solana Devnet' ? '-443584' : selection?.network === 'Ethereum Sepolia' || networkIdentity(selection?.network)?.catalog ? '-887220' : '-887270', upper: existing && existing.selection.network === selection?.network ? existing.upper ?? '887270' : selection?.network === 'Solana Devnet' ? '443584' : selection?.network === 'Ethereum Sepolia' || networkIdentity(selection?.network)?.catalog ? '887220' : '887270', slippage: existing?.slippage ?? '50' });
+  // BUILD-RH-002: a catalog-network pool (Robinhood Chain, BUILD-BASE-001 Base) is the pair's pool at the chosen Uniswap v3 fee tier.
   const [fee, setFee] = useState(existing?.fee ?? ROBINHOOD_LIQUIDITY_DEFAULT_FEE);
   const [error, setError] = useState('');
   if (!selection || selection.action !== 'pool' || !contributions.values) return null;
@@ -40,7 +41,7 @@ export function CryptoPoolForm({ nodeId }: { nodeId: string }) {
     try {
       const bounds = range.edited ? poolPriceBounds(range.reference, range.percent, range.preset) : input;
       const failure = reviewCryptoPool(nodeId, { selection, amount: contributions.values![0]!.amount, secondAmount: contributions.values![1]!.amount,
-        rangeUnit: bounds.rangeUnit, lower: bounds.lower, upper: bounds.upper, slippage: input.slippage, ...selection.network === ROBINHOOD_NETWORK ? { fee } : {},
+        rangeUnit: bounds.rangeUnit, lower: bounds.lower, upper: bounds.upper, slippage: input.slippage, ...networkIdentity(selection.network)?.catalog ? { fee } : {},
         ...(setup?.cryptoBeneficiary ?? existing?.beneficiary ?? wallet.account ? { beneficiary: setup?.cryptoBeneficiary ?? existing?.beneficiary ?? wallet.account! } : {}) });
       if (failure) throw new Error(failure);
       if (range.edited) range.markReviewed();
@@ -53,22 +54,23 @@ export function CryptoPoolForm({ nodeId }: { nodeId: string }) {
     if (price) { const bounds = uniswapBandInput(price.sqrtPriceX96, 1_000, selection.network); set({ rangeUnit: bounds.rangeUnit, lower: bounds.lower, upper: bounds.upper }); }
   }
   const profile = cryptoProfile(selection)!;
-  const symbols = [selection.from, selection.to!], robinhood = selection.network === ROBINHOOD_NETWORK;
+  const catalogNetwork = networkIdentity(selection.network), symbols = [selection.from, selection.to!], robinhood = catalogNetwork?.catalog === true;
   /** A new fee tier has its own tick spacing: the range restarts at that tier's full range. */
-  const chooseFee = (value: number) => { const full = robinhoodFullRange(value); setFee(value); set({ rangeUnit: 'TICK', lower: String(full.tickLower), upper: String(full.tickUpper) }); };
+  const chooseFee = (value: number) => { const full = robinhoodFullRange(value, catalogNetwork?.chain); setFee(value); set({ rangeUnit: 'TICK', lower: String(full.tickLower), upper: String(full.tickUpper) }); };
   return <form id={poolReviewFormId(nodeId)} className="inspector-fields" aria-label={tr(`Edit ${selection.network} liquidity position`)} onSubmit={submit}>
     <p className="muted">{tr(profile.provider)} · {tr(selection.network)} · {tr(symbols.join(' / '))}</p>
     {symbols.map((symbol, index) => <label key={symbol}>{tr("Maximum ")}{symbol}<TokenAmountInput aria-label={tr(`Maximum ${symbol}`)} maxLength={40} value={contributions.values![index]!.amount} onValueChange={amount => contributions.edit(index, amount)}/></label>)}
     <label>{tr("Range unit")}<select aria-label={tr("Range unit")} value={input.rangeUnit} onChange={event => set({ rangeUnit: event.target.value as 'PRICE' | 'TICK' })}>
-      <option value="TICK">{tr("Tick")}</option>{selection.network !== 'Base' && !robinhood && <option value="PRICE">{tr("Price")}</option>}
+      <option value="TICK">{tr("Tick")}</option>{!robinhood && <option value="PRICE">{tr("Price")}</option>}
     </select></label>
     {robinhood && <label>{tr("Fee tier")}<select aria-label={tr("Liquidity fee tier")} value={fee} onChange={event => chooseFee(Number(event.target.value))}>
       {ROBINHOOD_LIQUIDITY_FEE_TIERS.map(tier => <option key={tier} value={tier}>{tr(`${tier / 10_000}%`)}</option>)}</select></label>}
     <label>{tr("Lower bound")}<input aria-label={tr("Lower bound")} value={input.lower} onChange={event => set({ lower: event.target.value })}/></label>
     <label>{tr("Upper bound")}<input aria-label={tr("Upper bound")} value={input.upper} onChange={event => set({ upper: event.target.value })}/></label>
-    {robinhood ? <small>{tr("Real funds on Robinhood Chain. Simulate checks both tokens against the official registry and the live pool.")}</small>
+    {robinhood ? <small>{selection.network === ROBINHOOD_NETWORK ? tr("Real funds on Robinhood Chain. Simulate checks both tokens against the official registry and the live pool.")
+      : tr("Real funds on {0}. Simulate checks both tokens against the network's official catalog and the chain, and that the pool is live.", selection.network)}</small>
       : selection.network === 'Base Sepolia' || selection.network === 'Ethereum Sepolia' ? <button type="button" className="quiet" disabled={liquidity.busy || !liquidity.available} onClick={() => void aroundCurrent()}>{tr("Use ±10% around the current ")}{tr(selection.network)}{tr(" price")}</button> : <button type="button" className="quiet" onClick={() => void range.refresh()}>{tr("Refresh current pool price")}</button>}
-    {selection.network !== 'Base' && <label>{tr("Slippage (bps)")}<input aria-label={tr("Liquidity slippage (bps)")} inputMode="numeric" value={input.slippage} onChange={event => set({ slippage: event.target.value })}/></label>}
+    {<label>{tr("Slippage (bps)")}<input aria-label={tr("Liquidity slippage (bps)")} inputMode="numeric" value={input.slippage} onChange={event => set({ slippage: event.target.value })}/></label>}
     {error && <p role="alert">{tr(error)}</p>}
   </form>;
 }
