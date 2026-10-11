@@ -15,7 +15,7 @@ import { useExecutionEnvironment } from '../state/capability-store';
 
 /**
  * Network labels: mainnet keeps the BUILD-ROUTER-001 wording; the testnet journey names Base Sepolia / Arbitrum Sepolia; BUILD-RH-002 adds
- * the Robinhood Chain routes, whose source and destination tokens differ (USDC ⇄ USDG).
+ * the Robinhood Chain routes, whose source and destination tokens differ (USDC ⇄ USDG); BUILD-BASE-001 adds Arbitrum One → Base.
  */
 type Labels = { src: string; dst: string; dstShort: string; srcScan: string; dstScan: string; token: string };
 const RH_SCAN = 'Robinhood Chain explorer';
@@ -26,6 +26,8 @@ const LABELS: Readonly<Record<RouterNetwork, Labels>> = {
   'robinhood-to-base': { src: 'Robinhood Chain', dst: 'Base', dstShort: 'Base', srcScan: RH_SCAN, dstScan: 'Basescan', token: 'USDG' },
   'arbitrum-to-robinhood': { src: 'Arbitrum One', dst: 'Robinhood Chain', dstShort: 'Robinhood Chain', srcScan: 'Arbiscan', dstScan: RH_SCAN, token: 'USDC' },
   'robinhood-to-arbitrum': { src: 'Robinhood Chain', dst: 'Arbitrum One', dstShort: 'Arbitrum', srcScan: RH_SCAN, dstScan: 'Arbiscan', token: 'USDG' },
+  // BUILD-BASE-001: Base bridge IN from Arbitrum One.
+  'arbitrum-to-base': { src: 'Arbitrum One', dst: 'Base', dstShort: 'Base', srcScan: 'Arbiscan', dstScan: 'Basescan', token: 'USDC' },
 };
 /** Whole-token bounds of a pair, e.g. "1" and "100". */
 const bound = (units: string, decimals: number) => formatTokenAmount(units, decimals);

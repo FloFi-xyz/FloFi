@@ -18,6 +18,8 @@ export const PREVIEW_METHODS: Readonly<Partial<Record<FlowName, 'simulate' | 'pr
   // BUILD-RH-002: Robinhood Chain (real funds) previews are the same read-only simulations; nothing is authorized, signed or sent.
   'robinhood-swap': 'prepare', 'robinhood-liquidity': 'simulate', 'crosschain-router-base-to-robinhood': 'simulate', 'crosschain-router-robinhood-to-base': 'simulate',
   'crosschain-router-arbitrum-to-robinhood': 'simulate', 'crosschain-router-robinhood-to-arbitrum': 'simulate',
+  // BUILD-BASE-001: Base mainnet (real funds) previews, likewise read-only.
+  'base-swap': 'prepare', 'base-liquidity': 'simulate', 'base-aave': 'simulate', 'crosschain-router-arbitrum-to-base': 'simulate',
 });
 
 /**

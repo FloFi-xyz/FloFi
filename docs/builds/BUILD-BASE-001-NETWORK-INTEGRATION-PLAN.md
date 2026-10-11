@@ -216,3 +216,28 @@ It uses the loopback catalog harness.
 
 No redesign. The existing cards, pickers and selectors gain Base options, the shared asset search and labels. Landing, navigation, branding,
 typography, the lifecycle and every other surface are unchanged.
+
+## 8. Owner addendum (2026-10-11): generic visual identity and Copilot parity
+
+The owner approved two more requirements during implementation. They are built on shared, network-agnostic infrastructure so Base
+(and Robinhood Chain, which shares it) needs no network-specific path:
+
+1. **Generic network and token visual identity in the existing Canvas.**
+   - One app-level network registry (`domain/network-registry.ts`) keyed by CAIP-2 chain: name, short label, environment
+     (real funds or test), Copilot and MCP identifiers, chat names, and the local network mark.
+   - One asset identity resolver: a vetted local brand mark when FloFi already ships one (`public/brand/crypto`, licenses recorded),
+     otherwise a deterministic monogram generated locally from the canonical asset identity (chain + address + symbol).
+     Third-party logo URLs (such as the token list `logoURI`) are never fetched, embedded or committed.
+   - The existing token avatar and network badge components resolve through it: Canvas cards, the asset search results and picker
+     chips, Simulate/Review and the timeline. No new page, card or layout. The Stock Token card keeps its markup.
+2. **Generic natural-language Copilot parity with Canvas, Chat and MCP.**
+   - The Copilot vocabulary is derived from the same registries: catalog networks (Base, Robinhood Chain) and any catalog symbol
+     the user writes, validated by the asset symbol grammar and resolved by FloFi through the network's validated catalog.
+   - New TRANSFER intent; liquidity gains a fee tier and the full range on catalog networks; bridges cover every Router pair; lending covers
+     every Aave profile (Base mainnet USDC included).
+   - Copilot keeps its boundary: the model reports, FloFi grounds every value in the user's own words and renders the same exact-grammar
+     sentence Chat accepts, so its proposal is byte-identical IR. Real-funds networks must be named explicitly. Nothing executes without
+     the owner's Review and wallet signature.
+3. **Server runtime registry.** The catalog-network runtime (`server/catalog-networks.ts`) binds each catalog network's gates, read
+   clients, catalog loader, run namespaces, journals and cloud flow names once. The cloud flows and the in-process server actions look
+   networks up there instead of branching per network.

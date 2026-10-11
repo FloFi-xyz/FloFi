@@ -216,9 +216,12 @@ function stepAction(step: WorkflowStep): Base | null {
       return { composition: false, role: null, actions: [{ type: 'BRIDGE', sourceNetwork: d.input.source === 'Base' ? 'BASE' : 'BASE_SEPOLIA',
       destinationNetwork: d.input.destination === 'Arbitrum' ? 'ARBITRUM' : 'ARBITRUM_SEPOLIA', asset: 'USDC', amount: d.input.amount, slippageBps: d.input.slippage,
       routing: d.input.routing === 'AUTO' ? null : d.input.routing, recipient: d.input.recipient ? d.input.recipient.toLowerCase() : null }] };
-    case 'AAVE': return { composition: false, role: null, actions: [{ type: d.operation, protocol: 'AAVE_V3', network: lendingNetworkOf(d.input.network), asset: d.input.asset, amount: d.input.amount,
+    // BUILD-BASE-001: Base mainnet lending is not in this intent vocabulary (exact grammar only): it is described as no typed action.
+    case 'AAVE': if (d.input.network === 'Base') return null;
+      return { composition: false, role: null, actions: [{ type: d.operation, protocol: 'AAVE_V3', network: lendingNetworkOf(d.input.network), asset: d.input.asset, amount: d.input.amount,
       beneficiary: d.input.beneficiary.toLowerCase() }] };
-    case 'AAVE_WITHDRAW': return { composition: false, role: null, actions: [{ type: 'WITHDRAW', protocol: 'AAVE_V3', network: lendingNetworkOf(d.input.network), asset: d.input.asset,
+    case 'AAVE_WITHDRAW': if (d.input.network === 'Base') return null;
+      return { composition: false, role: null, actions: [{ type: 'WITHDRAW', protocol: 'AAVE_V3', network: lendingNetworkOf(d.input.network), asset: d.input.asset,
       amount: d.input.amount, beneficiary: null }] };
     case 'UNISWAP_LIQUIDITY': return { composition: false, role: null, actions: [{ type: 'LIQUIDITY', protocol: 'UNISWAP_V3', network: lendingNetworkOf(d.input.network),
       deposits: [{ asset: 'USDC', maxAmount: d.input.maxUsdc }, { asset: 'WETH', maxAmount: d.input.maxWeth }], rangeUnit: d.input.rangeUnit, lower: d.input.lower,

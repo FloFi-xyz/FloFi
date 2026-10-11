@@ -3,19 +3,20 @@
  * One opt-in, exact-profile Uniswap v3 swap on a public testnet: Base Sepolia USDC/WETH 0.05%, or (BUILD-ETHEREUM-001)
  * Ethereum Sepolia USDC/WETH 0.3%. BUILD-RH-002 adds the catalog profile kind: Robinhood Chain mainnet (real funds), any
  * pair of the official asset catalog (Stock Tokens, USDG, WETH) on a locally derived canonical pool, with the Stock Token
- * identity and ERC-8056 multiplier state bound into the Review. The authored chain selects the profile and its own read
- * client; no chain falls back to another. This service never signs or sends.
+ * identity and ERC-8056 multiplier state bound into the Review. BUILD-BASE-001 adds Base mainnet as a second catalog network
+ * (pinned USDC/WETH plus the validated token list; `bas-` runs), with the OP Stack L1 fee in its balance check. The authored chain
+ * selects the profile and its own read client; no chain falls back to another. This service never signs or sends.
  */
 import { createHash, randomBytes } from 'node:crypto';
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
-import { catalogAsset, resolveWorkflowCapability, uniswapV3PoolAddress, type AssetCatalog, type CanonicalAsset } from '@defi-workflow-engine/action-registry';
-import { createBaseSepoliaReviewContext, reviewContextForChain, validateAuthoringWorkflow } from '@defi-workflow-engine/reference-linter';
-import { hashArtifactBytes, isCatalogSwapNode, readCatalogSwapNode, type EvidenceBundle, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
+import { baseAssetRegistry, catalogAsset, referenceRegistry, resolveWorkflowCapability, uniswapV3PoolAddress, type AssetCatalog, type CanonicalAsset } from '@defi-workflow-engine/action-registry';
+import { createBaseSepoliaReviewContext, createReviewContext, reviewContextForChain, validateAuthoringWorkflow } from '@defi-workflow-engine/reference-linter';
+import { hashArtifactBytes, isCatalogSwapNode, isReferencePairSwap, readCatalogSwapNode, type CatalogSwapFields, type EvidenceBundle, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { validateArtifact } from '@defi-workflow-engine/workflow-contracts/schemas';
 import { utf8, type ExecutionStorage } from '@defi-workflow-engine/reference-executor';
 import { BASE_SEPOLIA, publicSwapProfile, quoteDecimals, swapProfile, type CatalogSwapProfile, type PairSwapProfile, type SwapProfile } from '../domain/public-testnet-swap.ts';
-export { BASE_SEPOLIA, ETHEREUM_SEPOLIA_SWAP, ROBINHOOD_MAINNET_SWAP, quoteDecimals } from '../domain/public-testnet-swap.ts';
+export { BASE_MAINNET_SWAP, BASE_SEPOLIA, ETHEREUM_SEPOLIA_SWAP, ROBINHOOD_MAINNET_SWAP, quoteDecimals } from '../domain/public-testnet-swap.ts';
 
 export type Rpc = (method: string, params: readonly unknown[]) => Promise<unknown>;
 type Step = 'approval' | 'swap';
@@ -62,14 +63,15 @@ export type PublicBegin = { readonly attempt: PublicAttempt; readonly tx: Tx };
 const ADDRESS = /^0x[0-9a-f]{40}$/;
 const HASH = /^0x[0-9a-f]{64}$/;
 /**
- * Run-id namespaces: `pub-` for the public-testnet pairs, `rhs-` (BUILD-RH-002) for Robinhood Chain mainnet catalog swaps, so a
- * run id alone routes to its deployment and a testnet journal can never hold a mainnet run (or the reverse).
+ * Run-id namespaces: `pub-` for the public-testnet pairs, `rhs-` (BUILD-RH-002) for Robinhood Chain mainnet catalog swaps, `bas-`
+ * (BUILD-BASE-001) for Base mainnet swaps, so a run id alone routes to its deployment and a testnet journal can never hold a mainnet
+ * run (or the reverse), nor one network's run another's.
  */
-export type SwapRunPrefix = 'pub' | 'rhs';
-export const SWAP_RUN_ID = /^(pub|rhs)-[0-9a-f]{24}$/;
-const runIdPattern = (prefix: SwapRunPrefix) => prefix === 'rhs' ? /^rhs-[0-9a-f]{24}$/ : /^pub-[0-9a-f]{24}$/;
-/** A run's namespace must match its network kind: catalog (mainnet) runs are `rhs-`, testnet pair runs are `pub-`. */
-const prefixFor = (profile: SwapProfile): SwapRunPrefix => profile.kind === 'CATALOG' ? 'rhs' : 'pub';
+export type SwapRunPrefix = 'pub' | 'rhs' | 'bas';
+export const SWAP_RUN_ID = /^(pub|rhs|bas)-[0-9a-f]{24}$/;
+const runIdPattern = (prefix: SwapRunPrefix) => prefix === 'rhs' ? /^rhs-[0-9a-f]{24}$/ : prefix === 'bas' ? /^bas-[0-9a-f]{24}$/ : /^pub-[0-9a-f]{24}$/;
+/** A run's namespace must match its network: each catalog (mainnet) network has its own, testnet pair runs are `pub-`. */
+const prefixFor = (profile: SwapProfile): SwapRunPrefix => profile.kind === 'CATALOG' ? profile.runPrefix : 'pub';
 // MetaMask Delegation Framework v1.3.0 on Base Sepolia. This is a readback format only;
 // Gryloo still prepares one direct exact-call artifact and never constructs a delegation.
 const DELEGATION_MANAGER = '0xdb9b1e94b5b69df7e401ddbede43491141047db3';
@@ -403,7 +405,7 @@ export function validatePublicRunLog(bytes: Uint8Array): void {
  * `provenance` labels quotes and evidence (`MOCKED` for the loopback harness). Code pins may be replaced only by a MOCKED harness.
  */
 export type CatalogSwapRuntime = { readonly catalogFor: (chain: string) => Promise<AssetCatalog>; readonly provenance: 'PUBLIC_MAINNET' | 'MOCKED';
-  readonly codePins?: Partial<Record<keyof CatalogSwapProfile['codeSha256'], string>>; readonly executionEnabled: boolean };
+  readonly codePins?: Partial<Record<string, string>>; readonly executionEnabled: boolean };
 const sha256Hex = (code: string) => createHash('sha256').update(Buffer.from(code.slice(2), 'hex')).digest('hex');
 /** One side of a catalog swap: the current official catalog must still map the authored identity exactly. */
 function catalogSide(catalog: AssetCatalog, ref: { address: string; decimals: number; officialId: string | null }, side: 'input' | 'output'): CanonicalAsset {
@@ -415,13 +417,28 @@ function catalogSide(catalog: AssetCatalog, ref: { address: string; decimals: nu
   return asset;
 }
 /**
- * BUILD-RH-002: one official catalog ERC-20 verified at a pinned block, shared by catalog swaps and Robinhood liquidity. USDG and WETH must
- * carry their pinned code; every Stock Token must be the official beacon proxy on the official beacon and report the registry's uid, and its
- * onchain multiplier must equal the registry's. A change scheduled to take effect before the Review expires fails closed
- * (STOCK_MULTIPLIER_CHANGE_PENDING). Returns the Stock Token state the Review binds, or null for a base asset. Read-only.
+ * BUILD-BASE-001: how a catalog network's tokens are verified on chain. `pinnedTokens` maps each code-pinned base asset (by address) to its
+ * runtime SHA-256; `listedTokens` says what any other non-issuer asset needs — `REFUSE` (Robinhood Chain: only its pinned assets and Stock
+ * Tokens exist) or `CODE_AND_DECIMALS` (Base: a listed token must have code and report exactly the catalog's decimals); `stockToken` is the
+ * Robinhood Stock Token beacon policy (null elsewhere).
  */
-export async function verifyCatalogToken(rpc: Rpc, P: Pick<CatalogSwapProfile, 'weth' | 'beaconSlot' | 'stockTokenBeacon'>,
-  pins: Pick<Record<keyof CatalogSwapProfile['codeSha256'], string>, 'weth' | 'usdg' | 'stockTokenProxy'>, asset: CanonicalAsset, side: StockQuoteState['side'],
+export type CatalogTokenPolicy = { readonly pinnedTokens: Readonly<Record<string, string>>; readonly listedTokens: 'REFUSE' | 'CODE_AND_DECIMALS';
+  readonly stockToken: { readonly beacon: string; readonly beaconSlot: string; readonly proxySha256: string } | null };
+/** The token policy of a catalog swap profile; a MOCKED harness may replace code pins (never a public run). */
+export function catalogTokenPolicy(P: CatalogSwapProfile, codePins: Partial<Record<string, string>> = {}): CatalogTokenPolicy {
+  const pins: Record<string, string> = { ...P.codeSha256 };
+  for (const [key, value] of Object.entries(codePins)) if (value) pins[key] = value;
+  return { pinnedTokens: Object.fromEntries(Object.entries(P.pinnedTokens).map(([token, key]) => [token, pins[key]!])), listedTokens: P.listedTokens,
+    stockToken: 'stockTokenBeacon' in P ? { beacon: P.stockTokenBeacon, beaconSlot: P.beaconSlot, proxySha256: pins.stockTokenProxy! } : null };
+}
+/**
+ * BUILD-RH-002: one official catalog ERC-20 verified at a pinned block, shared by catalog swaps and catalog liquidity. A pinned base asset
+ * (USDG and WETH on Robinhood Chain, USDC and WETH on Base) must carry its pinned code; every Stock Token must be the official beacon proxy on
+ * the official beacon and report the registry's uid, and its onchain multiplier must equal the registry's. A change scheduled to take effect
+ * before the Review expires fails closed (STOCK_MULTIPLIER_CHANGE_PENDING). BUILD-BASE-001: a listed Base token must have code and report the
+ * catalog's decimals (listing is never authority). Returns the Stock Token state the Review binds, or null for any other asset. Read-only.
+ */
+export async function verifyCatalogToken(rpc: Rpc, policy: CatalogTokenPolicy, asset: CanonicalAsset, side: StockQuoteState['side'],
   block: string, headTime: number, reviewTtlSeconds: number, now: () => Date): Promise<StockQuoteState | null> {
   const call = async (to: string, data: string) => hex(await rpc('eth_call', [{ to, data }, block]));
   const word0 = (value: string) => value.length >= 66 ? BigInt(value.slice(0, 66)) : fail('RPC_RESPONSE_INVALID');
@@ -432,12 +449,13 @@ export async function verifyCatalogToken(rpc: Rpc, P: Pick<CatalogSwapProfile, '
   const tokenCode = sha256Hex(code.toLowerCase());
   if (BigInt(await call(asset.address!, '0x313ce567')) !== BigInt(asset.decimals)) fail('TOKEN_METADATA_MISMATCH');
   if (!asset.stock) {
-    const pin = asset.address === P.weth ? pins.weth : asset.symbol === 'USDG' ? pins.usdg : null;
-    if (!pin || tokenCode !== pin) fail('TOKEN_DEPLOYMENT_MISMATCH');
+    const pin = policy.pinnedTokens[asset.address!];
+    if (pin !== undefined ? tokenCode !== pin : policy.listedTokens !== 'CODE_AND_DECIMALS') fail('TOKEN_DEPLOYMENT_MISMATCH');
     return null;
   }
   // Every official Stock Token is the same beacon proxy on the official beacon, and reports the registry's uid.
-  if (tokenCode !== pins.stockTokenProxy || addressOf(hex(await rpc('eth_getStorageAt', [asset.address, P.beaconSlot, block]))) !== P.stockTokenBeacon)
+  const stockPolicy = policy.stockToken ?? fail('STOCK_TOKEN_DEPLOYMENT_MISMATCH');
+  if (tokenCode !== stockPolicy.proxySha256 || addressOf(hex(await rpc('eth_getStorageAt', [asset.address, stockPolicy.beaconSlot, block]))) !== stockPolicy.beacon)
     fail('STOCK_TOKEN_DEPLOYMENT_MISMATCH');
   if ('0x' + word0(await call(asset.address!, '0xf514ce36')).toString(16).padStart(64, '0') !== asset.stock.officialId) fail('STOCK_TOKEN_IDENTITY_MISMATCH');
   const multiplier = word0(await call(asset.address!, '0xa60bf13d')), scheduled = word0(await call(asset.address!, '0xdc767007'));
@@ -455,20 +473,46 @@ export async function verifyCatalogToken(rpc: Rpc, P: Pick<CatalogSwapProfile, '
     registryPendingMultiplierWad: asset.stock.pendingMultiplierWad, registryPendingEffectiveTime: asset.stock.pendingEffectiveTime,
     fractionalRestricted: asset.stock.trading.fractionalRestricted };
 }
+/** The Base mainnet reference registry context (the DApp's initial context): Base USDC and WETH of the BUILD-002 reference swap. */
+const baseReferenceContext = () => createReviewContext({ registryId: referenceRegistry.registryId, capabilityId: referenceRegistry.capabilities[0]!.id,
+  actionId: referenceRegistry.actions[0]!.id, assets: baseAssetRegistry });
+/**
+ * The swap node of a catalog-network workflow and its fields: a canonical catalog swap, or (BUILD-BASE-001) Base's USDC ⇄ WETH reference
+ * swap, validated by the reference registry exactly as before and read into the same fields. One isolated swap; anything else fails closed.
+ */
+function catalogSwapRead(workflow: SemanticWorkflow, P: CatalogSwapProfile): { node: SemanticWorkflow['nodes'][number]; fields: CatalogSwapFields } {
+  const catalogNode = workflow.nodes.find(isCatalogSwapNode);
+  if (catalogNode) {
+    if (catalogNode.chainId !== P.chainRef) fail('PUBLIC_WORKFLOW_UNSUPPORTED');
+    validateAuthoringWorkflow(workflow, createBaseSepoliaReviewContext());
+    return { node: catalogNode, fields: readCatalogSwapNode(catalogNode) };
+  }
+  const financial = workflow.nodes.filter(node => !node.actionType.startsWith('mock-'));
+  const node = financial.length === 1 && P.referencePair && financial[0]!.chainId === P.chainRef && isReferencePairSwap(financial[0]!) ? financial[0]! : fail('PUBLIC_WORKFLOW_UNSUPPORTED');
+  validateAuthoringWorkflow(workflow, baseReferenceContext());
+  const amount = node.inputs.find(p => p.name === 'amount-in'), out = node.inputs.find(p => p.name === 'asset-out');
+  const slip = node.userConstraints.find(c => c.kind === 'MAXIMUM_SLIPPAGE_BPS');
+  // The CoW variant names a second protocol; only the plain Uniswap declaration is this service's intent.
+  if (amount?.kind !== 'QUANTITY' || !('address' in amount.value.asset) || out?.kind !== 'ASSET' || !('address' in out.value) || slip?.kind !== 'MAXIMUM_SLIPPAGE_BPS' ||
+      node.adapterConstraints.protocols.join() !== 'uniswap' || slip.maximumBps < 1 || slip.maximumBps > 300) fail('PUBLIC_SWAP_INVALID');
+  const ref = (asset: { chainId: string; address: string; decimals: number }) => ({ chain: asset.chainId, address: asset.address, decimals: asset.decimals, officialId: null });
+  return { node, fields: { chain: node.chainId, input: ref(amount.value.asset), output: ref(out.value), amount: amount.value.amount, slippageBps: slip.maximumBps } };
+}
 /**
  * The catalog quote: official identity, deployment code, Stock Token uid and multiplier state, and every locally derived
  * canonical pool are read at one pinned block; the best live fee tier is bound with its pool. Read-only.
  */
 async function catalogQuote(workflow: SemanticWorkflow, executionId: string, P: CatalogSwapProfile, rpc: Rpc, runtime: CatalogSwapRuntime, now: () => Date): Promise<PublicQuote> {
-  const node = workflow.nodes.find(isCatalogSwapNode) ?? fail('PUBLIC_WORKFLOW_UNSUPPORTED');
-  validateAuthoringWorkflow(workflow, createBaseSepoliaReviewContext());
-  const fields = readCatalogSwapNode(node);
+  const { node, fields } = catalogSwapRead(workflow, P);
   const cap = resolveWorkflowCapability(workflow, { environment: P.environment });
   if (!cap.executionSupported || cap.nodes.find(item => item.nodeId === node.nodeId)?.profile?.adapterId !== 'uniswap.v3') fail('PUBLIC_WORKFLOW_UNSUPPORTED');
   const catalog = await runtime.catalogFor(P.chainRef);
   if (catalog.chain !== P.chainRef) fail('CATALOG_NETWORK_MISMATCH');
   const input = catalogSide(catalog, fields.input, 'input'), output = catalogSide(catalog, fields.output, 'output');
-  const pins: Record<keyof CatalogSwapProfile['codeSha256'], string> = { ...P.codeSha256, ...runtime.provenance === 'MOCKED' ? runtime.codePins : {} };
+  const mockedPins = runtime.provenance === 'MOCKED' ? runtime.codePins ?? {} : {};
+  const pins: Record<string, string> = { ...P.codeSha256 };
+  for (const [key, value] of Object.entries(mockedPins)) if (value) pins[key] = value;
+  const policy = catalogTokenPolicy(P, mockedPins);
   const call = async (to: string, data: string, block: string) => hex(await rpc('eth_call', [{ to, data }, block]));
   const word0 = (value: string) => value.length >= 66 ? BigInt(value.slice(0, 66)) : fail('RPC_RESPONSE_INVALID');
   const addressOf = (value: string) => address('0x' + value.slice(-40));
@@ -489,7 +533,7 @@ async function catalogQuote(workflow: SemanticWorkflow, executionId: string, P: 
     if (addressOf(await call(target, '0xc45a0155', block)) !== P.factory || addressOf(await call(target, '0x4aa4a4fc', block)) !== P.weth) fail('PROTOCOL_DEPLOYMENT_MISMATCH');
   const stocks: StockQuoteState[] = [];
   for (const [side, asset] of [['input', input], ['output', output]] as const) {
-    const stock = await verifyCatalogToken(rpc, P, pins, asset, side, block, headTime, P.reviewTtlSeconds, now);
+    const stock = await verifyCatalogToken(rpc, policy, asset, side, block, headTime, P.reviewTtlSeconds, now);
     if (stock) stocks.push(stock);
   }
   // Every standard fee tier's canonical pool is derived locally (CREATE2), checked for code and live liquidity, and quoted.
@@ -532,7 +576,8 @@ function catalogEconomics(quote: PublicQuote) {
 export function createPublicSwapQuoteReader(rpcFor: (profile: SwapProfile) => Rpc, now: () => Date = () => new Date(), catalog?: CatalogSwapRuntime) {
   const read = async (rpc: Rpc, to: string, data: string, block: string) => hex(await rpc('eth_call', [{ to, data }, block]));
   async function quote(workflow: SemanticWorkflow, executionId: string): Promise<PublicQuote> {
-    const catalogNode = workflow.nodes.find(isCatalogSwapNode), catalogProfile = catalogNode ? swapProfile(catalogNode.chainId) : null;
+    // A swap on a catalog network (Robinhood Chain, Base) takes the catalog path; BUILD-BASE-001: Base's reference pair included.
+    const swapNode = workflow.nodes.find(node => node.actionType === 'asset.swap.exact-input'), catalogProfile = swapNode ? swapProfile(swapNode.chainId) : null;
     if (catalogProfile?.kind === 'CATALOG') return catalogQuote(workflow, executionId, catalogProfile, rpcFor(catalogProfile),
       catalog ?? fail('PUBLIC_NETWORK_UNAVAILABLE'), now);
     const swap = swapOf(workflow), P = swap.profile, rpc = rpcFor(P);
@@ -664,7 +709,9 @@ function createPublicTestnetCore(rpcFor: (profile: SwapProfile) => Rpc, now: () 
       const baseTx = { chainId: P.chainHex, from: owner, to, data, value: '0x0' as const };
       const gas = quantity(await rpc('eth_estimateGas', [{ from: owner, to, data, value: '0x0' }]));
       const gasPrice = quantity(await rpc('eth_gasPrice', []));
-      if (gas <= 0n || gasPrice <= 0n || ethBefore < gas * gasPrice * 2n) fail(P.environment === 'MAINNET' ? 'INSUFFICIENT_GAS_FUNDS' : 'INSUFFICIENT_TEST_ETH');
+      // BUILD-BASE-001: on an OP Stack catalog network the owner also pays the L1 data fee, bounded by the GasPriceOracle (fails closed).
+      const l1Fee = 'gasPriceOracle' in P ? quantity(await rpc('eth_call', [{ to: P.gasPriceOracle, data: '0xf1c7a58b' + word(BigInt((data.length - 2) / 2 + 120)) }, at])) : 0n;
+      if (gas <= 0n || gasPrice <= 0n || ethBefore < gas * gasPrice * 2n + l1Fee) fail(P.environment === 'MAINNET' ? 'INSUFFICIENT_GAS_FUNDS' : 'INSUFFICIENT_TEST_ETH');
       const tx: Tx = { ...baseTx, gas: '0x' + (gas * 12n / 10n).toString(16) };
       const attempt: PublicAttempt = { attemptId: id + '.' + step + '.' + String(run.attempts.length + 1), executionId: id,
         step, state: 'PREPARED', createdAt: now().toISOString(), submittedAt: null, account: owner, chainId: P.chainId, environment: P.environment,

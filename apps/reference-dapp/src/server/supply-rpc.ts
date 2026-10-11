@@ -5,14 +5,17 @@
  * and every `eth_chainId` it returns must be that chain. Public reads are paced and serialized; only bounded provider
  * throttling is retried. No mutation method is permitted and no network falls back to another.
  */
-import { AAVE_V3_BASE_SEPOLIA, AAVE_V3_ETHEREUM_SEPOLIA, type AaveLendingProfile } from '@defi-workflow-engine/action-registry';
+import { AAVE_V3_BASE, AAVE_V3_BASE_SEPOLIA, AAVE_V3_ETHEREUM_SEPOLIA, type AaveLendingProfile } from '@defi-workflow-engine/action-registry';
 import type { SupplyRpc } from '@defi-workflow-engine/reference-compiler';
 
 const methods = new Set(['eth_chainId', 'eth_blockNumber', 'eth_getBlockByNumber', 'eth_getCode', 'eth_call', 'eth_simulateV1',
   'eth_getBalance', 'eth_getTransactionCount', 'eth_estimateGas', 'eth_gasPrice', 'eth_getTransactionByHash', 'eth_getTransactionReceipt']);
-/** Loopback MOCKED harness endpoints (e2e/supply-harness.mjs); never a public provider. */
+/** Loopback MOCKED harness endpoints (e2e/supply-harness.mjs; BUILD-BASE-001 the Base mainnet harness); never a public provider. */
 const HARNESS: Readonly<Record<AaveLendingProfile['chain'], string>> = Object.freeze({
-  [AAVE_V3_BASE_SEPOLIA.chain]: 'http://127.0.0.1:8549', [AAVE_V3_ETHEREUM_SEPOLIA.chain]: 'http://127.0.0.1:8549/ethereum-sepolia' });
+  [AAVE_V3_BASE_SEPOLIA.chain]: 'http://127.0.0.1:8549', [AAVE_V3_ETHEREUM_SEPOLIA.chain]: 'http://127.0.0.1:8549/ethereum-sepolia',
+  [AAVE_V3_BASE.chain]: 'http://127.0.0.1:8562/rpc' });
+/** The public-testnet Aave profiles served by the `aave-supply` flow (Base mainnet has its own flow and gates). */
+type TestnetLendingChain = typeof AAVE_V3_BASE_SEPOLIA.chain | typeof AAVE_V3_ETHEREUM_SEPOLIA.chain;
 /** Optional HTTPS override for a profile's public RPC (for example a keyed provider); anything else is a configuration error. */
 export function supplyRpcUrl(profile: AaveLendingProfile, override: string | undefined): string {
   if (override === undefined || override === '') return profile.rpc;
@@ -52,9 +55,16 @@ export function createSupplyReadRpc(harness: boolean, profile: AaveLendingProfil
  * override for that chain (server-side only, never sent to the browser): `GRYLOO_ETHEREUM_SEPOLIA_RPC_URL`, and
  * (BUILD-CLOUD-PARITY-001) the same `GRYLOO_BASE_SEPOLIA_RPC_URL` every other Base Sepolia client already honours.
  */
-export function createLendingReadRpcs(harness: boolean, env: Readonly<Record<string, string | undefined>> = {}): Readonly<Record<AaveLendingProfile['chain'], SupplyRpc>> {
+export function createLendingReadRpcs(harness: boolean, env: Readonly<Record<string, string | undefined>> = {}): Readonly<Record<TestnetLendingChain, SupplyRpc>> {
   return Object.freeze({
     [AAVE_V3_BASE_SEPOLIA.chain]: createSupplyReadRpc(harness, AAVE_V3_BASE_SEPOLIA, env.GRYLOO_BASE_SEPOLIA_RPC_URL),
     [AAVE_V3_ETHEREUM_SEPOLIA.chain]: createSupplyReadRpc(harness, AAVE_V3_ETHEREUM_SEPOLIA, env.GRYLOO_ETHEREUM_SEPOLIA_RPC_URL),
   });
+}
+/**
+ * BUILD-BASE-001: the Base mainnet Aave read client (real funds): the public Base RPC or the deployment's HTTPS override `GRYLOO_BASE_RPC_URL`
+ * (shared with every Base mainnet flow), bound to chain 8453; the MOCKED harness reads the loopback Base chain.
+ */
+export function createBaseLendingReadRpc(harness: boolean, env: Readonly<Record<string, string | undefined>> = {}): SupplyRpc {
+  return createSupplyReadRpc(harness, AAVE_V3_BASE, env.GRYLOO_BASE_RPC_URL);
 }
