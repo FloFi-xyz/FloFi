@@ -6,6 +6,9 @@
  * owner's browser wallet in a real deployment) and the relayer's fill on Arbitrum.
  * BUILD-JOURNEY-001: `profile` selects the network (default Base → Arbitrum One; the testnet profile runs the identical
  * chains at Base Sepolia / Arbitrum Sepolia ids and addresses). `owner` may be any address, e.g. a random test wallet.
+ * BUILD-RH-002: a Robinhood Chain profile runs the same chains with each side's own token (USDC ⇄ USDG). Like the recorded live
+ * responses, Across itemizes its stablecoin conversion (`internalizedSwap`) while LI.FI folds it into the output without a fee
+ * line; a source chain without OP Stack L1 fees (Robinhood, Arbitrum) returns Nitro-style receipts (`gasUsedForL1`, no `l1Fee`).
  */
 import { createHash, randomBytes } from 'node:crypto';
 import { CROSSCHAIN_ROUTER_BASE_ARBITRUM as MAINNET, type RouterProfile } from '@defi-workflow-engine/action-registry';
@@ -40,6 +43,8 @@ export type RouterHarnessOptions = { owner?: string; usdc?: bigint; eth?: bigint
 
 export function createRouterHarness(options: RouterHarnessOptions = {}) {
   const profile = options.profile ?? MAINNET, SRC = profile.source, DST = profile.destination, MOCK_CODE = routerMockCode(profile);
+  /** Across's stablecoin conversion on a cross-asset route (≈ 0.05 %, as quoted live for USDC ⇄ USDG); none on a same-asset route. */
+  const conversionFee = (amount: bigint) => SRC.symbol === DST.symbol ? 0n : amount * 5n / 10_000n;
   const owner = (options.owner ?? ROUTER_OWNER).toLowerCase();
   let offset = 0;
   const origin = options.startMs ?? Date.now();
@@ -83,10 +88,10 @@ export function createRouterHarness(options: RouterHarnessOptions = {}) {
   const transfer = (s: Snapshot, from: string, to: string, amount: bigint, logs: RouterLog[]) => {
     if ((s.usdc[from] ?? 0n) < amount) throw new Error('MOCK_INSUFFICIENT_BALANCE');
     s.usdc[from] = (s.usdc[from] ?? 0n) - amount; s.usdc[to] = (s.usdc[to] ?? 0n) + amount;
-    logs.push(encodeErc20TransferLog(SRC.usdc, from, to, amount));
+    logs.push(encodeErc20TransferLog(SRC.token, from, to, amount));
   };
   const pull = (s: Snapshot, owner_: string, spender: string, amount: bigint, logs: RouterLog[]) => {
-    const key = allowanceKey(SRC.usdc, owner_, spender);
+    const key = allowanceKey(SRC.token, owner_, spender);
     if ((s.allowances[key] ?? 0n) < amount) throw new Error('MOCK_ALLOWANCE');
     s.allowances[key] = (s.allowances[key] ?? 0n) - amount;
     transfer(s, owner_, spender, amount, logs);
@@ -95,17 +100,17 @@ export function createRouterHarness(options: RouterHarnessOptions = {}) {
   function execute(s: Snapshot, from: string, to: string, data: string, time: number, assignDeposit: boolean): { ok: boolean; logs: RouterLog[]; gas: bigint; deposit?: Omit<Deposit, 'sourceHash' | 'readyAt' | 'filled' | 'refunded'> } {
     const logs: RouterLog[] = [];
     try {
-      if (to === SRC.usdc && data.startsWith(SEL.approve)) {
+      if (to === SRC.token && data.startsWith(SEL.approve)) {
         const { spender, amount } = decodeRouterApprove(data);
-        s.allowances[allowanceKey(SRC.usdc, from, spender)] = amount;
-        logs.push(encodeErc20ApprovalLog(SRC.usdc, from, spender, amount));
+        s.allowances[allowanceKey(SRC.token, from, spender)] = amount;
+        logs.push(encodeErc20ApprovalLog(SRC.token, from, spender, amount));
         return { ok: true, logs, gas: 46_000n };
       }
       const emitDeposit = (depositor: string, recipient: string, inputAmount: bigint, outputAmount: bigint, quoteTimestamp: number, fillDeadline: number,
         exclusivityParameter: number, exclusiveRelayer: string) => {
         if (time - quoteTimestamp > 3600 || quoteTimestamp > time || fillDeadline > time + 21_600 || fillDeadline < time) throw new Error('MOCK_DEPOSIT_TIME');
         const depositId = assignDeposit ? nextDepositId++ : nextDepositId;
-        logs.push(encodeFundsDepositedLog({ spokePool: SRC.spokePool, destinationChainId: BigInt(DST.chainId), depositId, depositor, inputToken: SRC.usdc, outputToken: DST.usdc,
+        logs.push(encodeFundsDepositedLog({ spokePool: SRC.spokePool, destinationChainId: BigInt(DST.chainId), depositId, depositor, inputToken: SRC.token, outputToken: DST.token,
           inputAmount, outputAmount, quoteTimestamp, fillDeadline, exclusivityDeadline: exclusivityParameter ? time + exclusivityParameter : 0, recipient,
           exclusiveRelayer: '0x' + aw(exclusiveRelayer), message: '0x' }));
         return { depositId, depositor, recipient, inputAmount, outputAmount, fillDeadline };
@@ -175,11 +180,11 @@ export function createRouterHarness(options: RouterHarnessOptions = {}) {
     const block = arbHead(), hash = '0x' + randomBytes(32).toString('hex');
     const recipient = mode === 'wrongRecipient' ? '0x8888888888888888888888888888888888888888' : deposit.recipient;
     const amount = mode === 'belowMinimum' ? deposit.outputAmount - 1n : deposit.outputAmount;
-    const event = { spokePool: DST.spokePool, originChainId: BigInt(SRC.chainId), depositId: deposit.depositId, relayer: '0x' + aw(ROUTER_RELAYER), inputToken: SRC.usdc,
-      outputToken: DST.usdc, inputAmount: deposit.inputAmount, outputAmount: deposit.outputAmount, repaymentChainId: BigInt(SRC.chainId), fillDeadline: deposit.fillDeadline,
+    const event = { spokePool: DST.spokePool, originChainId: BigInt(SRC.chainId), depositId: deposit.depositId, relayer: '0x' + aw(ROUTER_RELAYER), inputToken: SRC.token,
+      outputToken: DST.token, inputAmount: deposit.inputAmount, outputAmount: deposit.outputAmount, repaymentChainId: BigInt(SRC.chainId), fillDeadline: deposit.fillDeadline,
       exclusivityDeadline: 0, exclusiveRelayer: '0x' + '0'.repeat(64), depositor: deposit.depositor, recipient: deposit.recipient, messageHash: '0x' + '0'.repeat(64),
       updatedRecipient: recipient, updatedMessageHash: '0x' + '0'.repeat(64), updatedOutputAmount: amount, fillType: 0 };
-    const logs = [encodeFilledRelayLog(event), encodeErc20TransferLog(DST.usdc, ROUTER_RELAYER, recipient, amount)];
+    const logs = [encodeFilledRelayLog(event), encodeErc20TransferLog(DST.token, ROUTER_RELAYER, recipient, amount)];
     if (mode === 'duplicate') logs.push(encodeFilledRelayLog(event));
     arbUsdc[ROUTER_RELAYER] = (arbUsdc[ROUTER_RELAYER] ?? 0n) - amount; arbUsdc[recipient] = (arbUsdc[recipient] ?? 0n) + amount;
     arbHistory.push([block, { ...arbUsdc }]);
@@ -204,7 +209,7 @@ export function createRouterHarness(options: RouterHarnessOptions = {}) {
   };
 
   const receipt = (m: Mined) => ({ transactionHash: m.hash, status: hx(m.status), blockNumber: hx(m.block), blockHash: blockHash(m.chain, m.block), from: m.from, to: m.to,
-    gasUsed: hx(m.gasUsed), effectiveGasPrice: hx(1_000_000n), l1Fee: hx(10_000n), logs: m.logs.map((l, i) => ({ ...l, logIndex: hx(i), transactionHash: m.hash, blockNumber: hx(m.block) })) });
+    gasUsed: hx(m.gasUsed), effectiveGasPrice: hx(1_000_000n), ...m.chain === 'base' && !SRC.l1DataFee ? { gasUsedForL1: hx(1_234n) } : { l1Fee: hx(10_000n) }, logs: m.logs.map((l, i) => ({ ...l, logIndex: hx(i), transactionHash: m.hash, blockNumber: hx(m.block) })) });
   const txObject = (m: Mined) => ({ hash: m.hash, from: m.from, to: m.to, input: m.input, value: '0x0', nonce: hx(m.nonce), chainId: hx(m.chain === 'base' ? SRC.chainId : DST.chainId),
     type: '0x2', blockHash: blockHash(m.chain, m.block), blockNumber: hx(m.block) });
   const block = (chain: 'base' | 'arbitrum', n: number, full: boolean) => {
@@ -247,9 +252,9 @@ export function createRouterHarness(options: RouterHarnessOptions = {}) {
       case 'eth_maxPriorityFeePerGas': return hx(1_000_000n);
       case 'eth_call': {
         const { to, data } = p[0] as { to: string; data: string }, s = snapshotAt(p[1]);
-        if (to === SRC.usdc && data.startsWith(SEL.balanceOf)) return '0x' + w(s.usdc['0x' + data.slice(34, 74)] ?? 0n);
-        if (to === SRC.usdc && data.startsWith(SEL.allowance)) return '0x' + w(s.allowances[allowanceKey(SRC.usdc, '0x' + data.slice(34, 74), '0x' + data.slice(98, 138))] ?? 0n);
-        if (to === SRC.usdc && data === SEL.decimals) return '0x' + w(6n);
+        if (to === SRC.token && data.startsWith(SEL.balanceOf)) return '0x' + w(s.usdc['0x' + data.slice(34, 74)] ?? 0n);
+        if (to === SRC.token && data.startsWith(SEL.allowance)) return '0x' + w(s.allowances[allowanceKey(SRC.token, '0x' + data.slice(34, 74), '0x' + data.slice(98, 138))] ?? 0n);
+        if (to === SRC.token && data === SEL.decimals) return '0x' + w(BigInt(SRC.decimals));
         if (to === SRC.spokePool && data === SEL.chainId) return '0x' + w(BigInt(SRC.chainId));
         if (to === SRC.spokePool && data === SEL.pausedDeposits) return '0x' + w(0n);
         if (to === SRC.spokePool && data === SEL.depositQuoteTimeBuffer) return '0x' + w(3600n);
@@ -282,7 +287,7 @@ export function createRouterHarness(options: RouterHarnessOptions = {}) {
       case 'eth_getStorageAt': return '0x' + aw('0xcfcda84333431bcc9155f2368b8362f0d1dff8c9');
       case 'eth_call': {
         const { to, data } = p[0] as { to: string; data: string };
-        if (to === DST.usdc && data.startsWith(SEL.balanceOf)) return '0x' + w(arbAt(p[1])['0x' + data.slice(34, 74)] ?? 0n);
+        if (to === DST.token && data.startsWith(SEL.balanceOf)) return '0x' + w(arbAt(p[1])['0x' + data.slice(34, 74)] ?? 0n);
         if (to === DST.spokePool && data === SEL.chainId) return '0x' + w(BigInt(DST.chainId));
         if (to === DST.spokePool && data === SEL.pausedFills) return '0x' + w(0n);
         throw new Error('MOCK_CALL_UNSUPPORTED');
@@ -295,29 +300,33 @@ export function createRouterHarness(options: RouterHarnessOptions = {}) {
   }
 
   // --- loopback provider APIs, shaped like the recorded real responses ------------------------------------------------
-  const usdcToken = (chainId: number, address: string) => ({ address, chainId, symbol: 'USDC', decimals: 6, name: 'USD Coin', coinKey: 'USDC' });
+  const side = (chainId: number) => chainId === SRC.chainId ? SRC : DST;
+  const usdcToken = (chainId: number, address: string) => ({ address, chainId, symbol: side(chainId).symbol, decimals: side(chainId).decimals, name: side(chainId).symbol,
+    coinKey: side(chainId).symbol });
   function lifiQuote(q: URLSearchParams): unknown {
     if (controls.lifi === 'down') throw new Error('ROUTER_PROVIDER_HTTP_503');
     counters.quotes.lifi++;
     const amount = BigInt(q.get('fromAmount')!), from = q.get('fromAddress')!.toLowerCase(), to = q.get('toAddress')!.toLowerCase();
     const time = baseTime(baseHead()), fee = amount * 25n / 10_000n, minAmount = amount - fee;
     const relayerCapital = 997n + controls.feeBump, quotedGas = 7_776n;
-    const multiplier = (minAmount - relayerCapital - quotedGas) * 10n ** 18n / minAmount, output = lifiAcrossOutput(minAmount, multiplier);
-    // Like LI.FI's lines, the relayer fees absorb the multiplier's rounding so that they sum exactly to minAmount − output.
-    const relayerGas = minAmount - output - relayerCapital, bridgeFee = relayerCapital + relayerGas;
+    const conversion = conversionFee(minAmount);
+    const multiplier = (minAmount - relayerCapital - quotedGas - conversion) * 10n ** 18n / minAmount, output = lifiAcrossOutput(minAmount, multiplier);
+    // Like LI.FI's lines, the relayer fees absorb the multiplier's rounding so that they sum exactly to minAmount − output; a cross-asset
+    // conversion is not itemized (live LI.FI behaviour), so those lines then fall short of it.
+    const relayerGas = minAmount - output - relayerCapital - conversion, bridgeFee = relayerCapital + relayerGas;
     const tool = controls.lifi === 'stargate' ? 'stargateV2' : 'across', noFee = controls.lifi === 'noFeeStep';
-    const across = { receiverAddress: to, refundAddress: from, sendingAssetId: SRC.usdc, receivingAssetId: DST.usdc, outputAmount: noFee ? amount - bridgeFee : output,
+    const across = { receiverAddress: to, refundAddress: from, sendingAssetId: SRC.token, receivingAssetId: DST.token, outputAmount: noFee ? amount - bridgeFee : output,
       outputAmountMultiplier: noFee ? 0n : multiplier, exclusiveRelayer: ZERO, quoteTimestamp: time, fillDeadline: time + 7_200, exclusivityParameter: 0, message: '0x' };
     const transactionId = '0x' + randomBytes(32).toString('hex');
-    const bridgeData = { transactionId, bridge: tool, integrator: 'flofi', referrer: ZERO, sendingAssetId: SRC.usdc, receiver: to, minAmount: noFee ? amount : minAmount,
+    const bridgeData = { transactionId, bridge: tool, integrator: 'flofi', referrer: ZERO, sendingAssetId: SRC.token, receiver: to, minAmount: noFee ? amount : minAmount,
       destinationChainId: BigInt(DST.chainId), hasSourceSwaps: !noFee, hasDestinationCall: false };
     const data = noFee ? encodeLifiAcrossV4({ kind: 'START', bridgeData, swaps: [], across })
-      : encodeLifiAcrossV4({ kind: 'SWAP_AND_START', bridgeData, across, swaps: [{ callTo: SRC.lifiFeeForwarder, approveTo: SRC.lifiFeeForwarder, sendingAssetId: SRC.usdc,
-        receivingAssetId: SRC.usdc, fromAmount: amount, callData: encodeLifiFeeForward(SRC.usdc, [{ recipient: LIFI_FEE_RECIPIENT, amount: fee }]), requiresDeposit: true }] });
+      : encodeLifiAcrossV4({ kind: 'SWAP_AND_START', bridgeData, across, swaps: [{ callTo: SRC.lifiFeeForwarder, approveTo: SRC.lifiFeeForwarder, sendingAssetId: SRC.token,
+        receivingAssetId: SRC.token, fromAmount: amount, callData: encodeLifiFeeForward(SRC.token, [{ recipient: LIFI_FEE_RECIPIENT, amount: fee }]), requiresDeposit: true }] });
     const out = (noFee ? amount - bridgeFee : output).toString();
-    const feeLine = (name: string, value: bigint) => ({ name, description: name, token: usdcToken(SRC.chainId, SRC.usdc), amount: value.toString(), amountUSD: '0', included: true });
+    const feeLine = (name: string, value: bigint) => ({ name, description: name, token: usdcToken(SRC.chainId, SRC.token), amount: value.toString(), amountUSD: '0', included: true });
     return { type: 'lifi', id: randomBytes(8).toString('hex') + ':0', tool, toolDetails: { key: tool, name: tool },
-      action: { fromChainId: SRC.chainId, toChainId: DST.chainId, fromToken: usdcToken(SRC.chainId, SRC.usdc), toToken: usdcToken(DST.chainId, DST.usdc),
+      action: { fromChainId: SRC.chainId, toChainId: DST.chainId, fromToken: usdcToken(SRC.chainId, SRC.token), toToken: usdcToken(DST.chainId, DST.token),
         fromAmount: amount.toString(), slippage: Number(q.get('slippage')), fromAddress: from, toAddress: to },
       estimate: { tool, fromAmount: amount.toString(), toAmount: out, toAmountMin: out, approvalAddress: SRC.lifiDiamond, executionDuration: 2,
         feeCosts: [...noFee ? [] : [feeLine('LIFI Fixed Fee', fee)], feeLine('Relayer fee', relayerCapital), feeLine('Relayer gas fee', relayerGas)],
@@ -329,18 +338,19 @@ export function createRouterHarness(options: RouterHarnessOptions = {}) {
     if (controls.across === 'down') throw new Error('ROUTER_PROVIDER_HTTP_503');
     counters.quotes.across++;
     const amount = BigInt(q.get('amount')!), depositor = q.get('depositor')!.toLowerCase(), recipient = q.get('recipient')!.toLowerCase();
-    const time = baseTime(baseHead()), capital = 1_000n + controls.feeBump, gas = 7_777n, output = amount - capital - gas;
-    const data = encodeAcrossDeposit({ depositor, recipient, inputToken: SRC.usdc, outputToken: DST.usdc, inputAmount: amount, outputAmount: output,
+    const time = baseTime(baseHead()), capital = 1_000n + controls.feeBump, gas = 7_777n, swap = conversionFee(amount), output = amount - capital - gas - swap;
+    const data = encodeAcrossDeposit({ depositor, recipient, inputToken: SRC.token, outputToken: DST.token, inputAmount: amount, outputAmount: output,
       destinationChainId: BigInt(DST.chainId), exclusiveRelayer: ZERO, quoteTimestamp: time, fillDeadline: time + 7_200, exclusivityParameter: 0, message: '0x', trailer: '0x73c0de' });
-    const t = (chainId: number, address: string) => ({ decimals: 6, symbol: 'USDC', address, name: 'USD Coin', chainId });
-    const amt = (value: bigint) => ({ amount: value.toString(), token: t(SRC.chainId, SRC.usdc) });
+    const t = (chainId: number, address: string) => ({ decimals: side(chainId).decimals, symbol: side(chainId).symbol, address, name: side(chainId).symbol, chainId });
+    const amt = (value: bigint) => ({ amount: value.toString(), token: t(SRC.chainId, SRC.token) });
     return { crossSwapType: 'bridgeableToBridgeable', amountType: 'exactInput',
-      checks: { allowance: { token: SRC.usdc, spender: SRC.spokePool, actual: '0', expected: amount.toString() }, balance: { token: SRC.usdc, actual: '0', expected: amount.toString() } },
-      approvalTxns: [{ chainId: SRC.chainId, to: SRC.usdc, data: SEL.approve + aw(SRC.spokePool) + 'f'.repeat(64) }],
-      steps: { bridge: { inputAmount: amount.toString(), outputAmount: output.toString(), tokenIn: t(SRC.chainId, SRC.usdc), tokenOut: t(DST.chainId, DST.usdc),
-        fees: { ...amt(capital + gas), details: { type: 'across', relayerCapital: amt(capital), destinationGas: amt(gas), lp: amt(0n) } }, provider: 'across' } },
-      inputToken: t(SRC.chainId, SRC.usdc), outputToken: t(DST.chainId, DST.usdc), refundToken: t(SRC.chainId, SRC.usdc),
-      fees: { total: amt(capital + gas) }, inputAmount: amount.toString(), maxInputAmount: amount.toString(), expectedOutputAmount: output.toString(),
+      checks: { allowance: { token: SRC.token, spender: SRC.spokePool, actual: '0', expected: amount.toString() }, balance: { token: SRC.token, actual: '0', expected: amount.toString() } },
+      approvalTxns: [{ chainId: SRC.chainId, to: SRC.token, data: SEL.approve + aw(SRC.spokePool) + 'f'.repeat(64) }],
+      steps: { bridge: { inputAmount: amount.toString(), outputAmount: output.toString(), tokenIn: t(SRC.chainId, SRC.token), tokenOut: t(DST.chainId, DST.token),
+        fees: { ...amt(capital + gas + swap), details: { type: 'across', relayerCapital: amt(capital), destinationGas: amt(gas), lp: amt(0n), ...swap ? { internalizedSwap: amt(swap) } : {} } },
+        provider: 'across' } },
+      inputToken: t(SRC.chainId, SRC.token), outputToken: t(DST.chainId, DST.token), refundToken: t(SRC.chainId, SRC.token),
+      fees: { total: amt(capital + gas + swap) }, inputAmount: amount.toString(), maxInputAmount: amount.toString(), expectedOutputAmount: output.toString(),
       minOutputAmount: output.toString(), expectedFillTime: 2, swapTx: { ecosystem: 'evm', simulationSuccess: false, chainId: SRC.chainId, to: SRC.spokePool, data, gas: '0' },
       quoteExpiryTimestamp: time + 3_400, id: 'mock-' + randomBytes(6).toString('hex') };
   }

@@ -65,7 +65,8 @@
                 "arbitrum-sepolia",
                 "ethereum-sepolia",
                 "solana",
-                "solana-devnet"
+                "solana-devnet",
+                "robinhood"
               ]
             }
           },
@@ -83,7 +84,8 @@
                 "repay",
                 "withdraw",
                 "add_liquidity",
-                "lending_composition"
+                "lending_composition",
+                "transfer"
               ]
             }
           }
@@ -2254,7 +2256,7 @@
                     "type": "string"
                   },
                   "sourceNetwork": {
-                    "description": "Source network. base-sepolia pairs with arbitrum-sepolia (test USDC); base pairs with arbitrum-one (real funds).",
+                    "description": "Source network. base-sepolia pairs with arbitrum-sepolia (test USDC); base pairs with arbitrum-one (real funds); base or arbitrum-one USDC bridges into robinhood as USDG, and robinhood USDG bridges out to base or arbitrum-one as USDC (real funds).",
                     "anyOf": [
                       {
                         "const": "base-sepolia",
@@ -2263,11 +2265,19 @@
                       {
                         "const": "base",
                         "type": "string"
+                      },
+                      {
+                        "const": "arbitrum-one",
+                        "type": "string"
+                      },
+                      {
+                        "const": "robinhood",
+                        "type": "string"
                       }
                     ]
                   },
                   "destinationNetwork": {
-                    "description": "Destination network.",
+                    "description": "Destination network; only the pairs above are supported.",
                     "anyOf": [
                       {
                         "const": "arbitrum-sepolia",
@@ -2276,18 +2286,34 @@
                       {
                         "const": "arbitrum-one",
                         "type": "string"
+                      },
+                      {
+                        "const": "robinhood",
+                        "type": "string"
+                      },
+                      {
+                        "const": "base",
+                        "type": "string"
                       }
                     ]
                   },
                   "asset": {
-                    "description": "The Cross-chain Router moves USDC only.",
-                    "const": "USDC",
-                    "type": "string"
+                    "description": "The source token: USDC, or USDG when leaving robinhood. The destination asset follows the pair (USDC → USDG into robinhood).",
+                    "anyOf": [
+                      {
+                        "const": "USDC",
+                        "type": "string"
+                      },
+                      {
+                        "const": "USDG",
+                        "type": "string"
+                      }
+                    ]
                   },
                   "amount": {
                     "pattern": "^(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
                     "maxLength": 48,
-                    "description": "USDC amount as a decimal string, e.g. \"5\".",
+                    "description": "Source token amount as a decimal string, e.g. \"5\".",
                     "type": "string"
                   },
                   "routing": {
@@ -2343,7 +2369,7 @@
                     "type": "string"
                   },
                   "network": {
-                    "description": "EVM networks swap USDC/WETH on Uniswap v3; solana swaps SOL/USDC/USDT via Jupiter; solana-devnet swaps SOL/devUSDC on Orca.",
+                    "description": "EVM networks swap USDC/WETH on Uniswap v3; solana swaps SOL/USDC/USDT via Jupiter; solana-devnet swaps SOL/devUSDC on Orca; robinhood swaps official catalog assets (USDG, WETH, Stock Tokens) on Uniswap v3 (real funds).",
                     "anyOf": [
                       {
                         "const": "base",
@@ -2364,63 +2390,87 @@
                       {
                         "const": "solana-devnet",
                         "type": "string"
+                      },
+                      {
+                        "const": "robinhood",
+                        "type": "string"
                       }
                     ]
                   },
                   "inputAsset": {
-                    "description": "Asset spent.",
                     "anyOf": [
                       {
-                        "const": "USDC",
-                        "type": "string"
+                        "description": "Asset spent.",
+                        "anyOf": [
+                          {
+                            "const": "USDC",
+                            "type": "string"
+                          },
+                          {
+                            "const": "WETH",
+                            "type": "string"
+                          },
+                          {
+                            "const": "WBTC",
+                            "type": "string"
+                          },
+                          {
+                            "const": "SOL",
+                            "type": "string"
+                          },
+                          {
+                            "const": "USDT",
+                            "type": "string"
+                          },
+                          {
+                            "const": "devUSDC",
+                            "type": "string"
+                          }
+                        ]
                       },
                       {
-                        "const": "WETH",
-                        "type": "string"
-                      },
-                      {
-                        "const": "WBTC",
-                        "type": "string"
-                      },
-                      {
-                        "const": "SOL",
-                        "type": "string"
-                      },
-                      {
-                        "const": "USDT",
-                        "type": "string"
-                      },
-                      {
-                        "const": "devUSDC",
+                        "pattern": "^[A-Z][A-Z0-9.]{0,15}$",
+                        "maxLength": 16,
+                        "description": "On robinhood: a symbol of the official Robinhood Chain catalog (USDG, WETH or a Stock Token such as TSLA).",
                         "type": "string"
                       }
                     ]
                   },
                   "outputAsset": {
-                    "description": "Asset received.",
                     "anyOf": [
                       {
-                        "const": "USDC",
-                        "type": "string"
+                        "description": "Asset received.",
+                        "anyOf": [
+                          {
+                            "const": "USDC",
+                            "type": "string"
+                          },
+                          {
+                            "const": "WETH",
+                            "type": "string"
+                          },
+                          {
+                            "const": "WBTC",
+                            "type": "string"
+                          },
+                          {
+                            "const": "SOL",
+                            "type": "string"
+                          },
+                          {
+                            "const": "USDT",
+                            "type": "string"
+                          },
+                          {
+                            "const": "devUSDC",
+                            "type": "string"
+                          }
+                        ]
                       },
                       {
-                        "const": "WETH",
-                        "type": "string"
-                      },
-                      {
-                        "const": "WBTC",
-                        "type": "string"
-                      },
-                      {
-                        "const": "SOL",
-                        "type": "string"
-                      },
-                      {
-                        "const": "USDT",
-                        "type": "string"
-                      },
-                      {
-                        "const": "devUSDC",
+                        "pattern": "^[A-Z][A-Z0-9.]{0,15}$",
+                        "maxLength": 16,
+                        "description": "On robinhood: a symbol of the official Robinhood Chain catalog (USDG, WETH or a Stock Token such as TSLA).",
                         "type": "string"
                       }
                     ]
@@ -2695,7 +2745,7 @@
                     "type": "string"
                   },
                   "network": {
-                    "description": "Uniswap v3 USDC/WETH on base-sepolia or ethereum-sepolia; Orca SOL/devUSDC on solana-devnet.",
+                    "description": "Uniswap v3 USDC/WETH on base-sepolia or ethereum-sepolia; Orca SOL/devUSDC on solana-devnet; on robinhood, Uniswap v3 on any two official catalog assets (e.g. USDG and a Stock Token) at feeTier (real funds).",
                     "anyOf": [
                       {
                         "const": "base-sepolia",
@@ -2708,75 +2758,99 @@
                       {
                         "const": "solana-devnet",
                         "type": "string"
+                      },
+                      {
+                        "const": "robinhood",
+                        "type": "string"
                       }
                     ]
                   },
                   "maxAmounts": {
-                    "additionalProperties": false,
                     "minProperties": 2,
                     "maxProperties": 2,
-                    "description": "Maximum deposit of each pool asset (limits, not amounts to spend); exactly the network's two assets.",
+                    "description": "Maximum deposit of each pool asset (limits, not amounts to spend); exactly the pool's two assets by symbol: USDC and WETH, SOL and devUSDC, or two official catalog symbols on robinhood.",
                     "type": "object",
-                    "properties": {
-                      "USDC": {
+                    "patternProperties": {
+                      "^[A-Za-z][A-Za-z0-9.]{0,15}$": {
                         "pattern": "^(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
                         "maxLength": 48,
-                        "description": "Maximum USDC.",
-                        "type": "string"
-                      },
-                      "WETH": {
-                        "pattern": "^(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
-                        "maxLength": 48,
-                        "description": "Maximum WETH.",
-                        "type": "string"
-                      },
-                      "SOL": {
-                        "pattern": "^(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
-                        "maxLength": 48,
-                        "description": "Maximum SOL.",
-                        "type": "string"
-                      },
-                      "devUSDC": {
-                        "pattern": "^(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
-                        "maxLength": 48,
-                        "description": "Maximum devUSDC.",
+                        "description": "Maximum deposit of this asset.",
                         "type": "string"
                       }
                     }
                   },
                   "range": {
-                    "additionalProperties": false,
-                    "type": "object",
-                    "required": [
-                      "unit",
-                      "lower",
-                      "upper"
-                    ],
-                    "properties": {
-                      "unit": {
-                        "description": "price: quote per base asset (USDC per WETH, devUSDC per SOL); tick: aligned tick indexes.",
-                        "anyOf": [
-                          {
-                            "const": "price",
+                    "anyOf": [
+                      {
+                        "additionalProperties": false,
+                        "type": "object",
+                        "required": [
+                          "unit",
+                          "lower",
+                          "upper"
+                        ],
+                        "properties": {
+                          "unit": {
+                            "description": "price: quote per base asset (USDC per WETH, devUSDC per SOL); tick: aligned tick indexes.",
+                            "anyOf": [
+                              {
+                                "const": "price",
+                                "type": "string"
+                              },
+                              {
+                                "const": "tick",
+                                "type": "string"
+                              }
+                            ]
+                          },
+                          "lower": {
+                            "pattern": "^-?(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
+                            "maxLength": 48,
                             "type": "string"
                           },
-                          {
-                            "const": "tick",
+                          "upper": {
+                            "pattern": "^-?(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
+                            "maxLength": 48,
                             "type": "string"
                           }
-                        ]
+                        }
                       },
-                      "lower": {
-                        "pattern": "^-?(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
-                        "maxLength": 48,
-                        "type": "string"
-                      },
-                      "upper": {
-                        "pattern": "^-?(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
-                        "maxLength": 48,
-                        "type": "string"
+                      {
+                        "additionalProperties": false,
+                        "type": "object",
+                        "required": [
+                          "unit"
+                        ],
+                        "properties": {
+                          "unit": {
+                            "description": "robinhood only: the widest usable range of the fee tier.",
+                            "const": "full",
+                            "type": "string"
+                          }
+                        }
                       }
-                    }
+                    ]
+                  },
+                  "feeTier": {
+                    "description": "robinhood only: the Uniswap v3 fee tier in hundredths of a basis point (3000 = 0.3%). Default 3000.",
+                    "anyOf": [
+                      {
+                        "const": 100,
+                        "type": "number"
+                      },
+                      {
+                        "const": 500,
+                        "type": "number"
+                      },
+                      {
+                        "const": 3000,
+                        "type": "number"
+                      },
+                      {
+                        "const": 10000,
+                        "type": "number"
+                      }
+                    ]
                   },
                   "slippageBps": {
                     "minimum": 0,
@@ -2854,6 +2928,60 @@
                 "additionalProperties": false,
                 "type": "object",
                 "required": [
+                  "action",
+                  "network",
+                  "asset",
+                  "amount"
+                ],
+                "properties": {
+                  "version": {
+                    "description": "Strategy contract version. Omit or 1.",
+                    "const": 1,
+                    "type": "number"
+                  },
+                  "action": {
+                    "const": "transfer",
+                    "type": "string"
+                  },
+                  "network": {
+                    "description": "Robinhood Chain mainnet (real funds).",
+                    "const": "robinhood",
+                    "type": "string"
+                  },
+                  "asset": {
+                    "description": "ETH, or a symbol of the official Robinhood Chain catalog (USDG, WETH, a Stock Token).",
+                    "anyOf": [
+                      {
+                        "const": "ETH",
+                        "type": "string"
+                      },
+                      {
+                        "pattern": "^[A-Z][A-Z0-9.]{0,15}$",
+                        "maxLength": 16,
+                        "description": "On robinhood: a symbol of the official Robinhood Chain catalog (USDG, WETH or a Stock Token such as TSLA).",
+                        "type": "string"
+                      }
+                    ]
+                  },
+                  "amount": {
+                    "pattern": "^(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
+                    "maxLength": 48,
+                    "description": "Amount as a decimal string.",
+                    "type": "string"
+                  },
+                  "recipient": {
+                    "pattern": "^0x[0-9a-fA-F]{40}$",
+                    "minLength": 42,
+                    "maxLength": 42,
+                    "description": "Recipient. Omit to transfer to the wallet that signs in the FloFi app (bound at Review).",
+                    "type": "string"
+                  }
+                }
+              },
+              {
+                "additionalProperties": false,
+                "type": "object",
+                "required": [
                   "version",
                   "steps"
                 ],
@@ -2891,7 +3019,7 @@
                               "type": "string"
                             },
                             "sourceNetwork": {
-                              "description": "Source network. base-sepolia pairs with arbitrum-sepolia (test USDC); base pairs with arbitrum-one (real funds).",
+                              "description": "Source network. base-sepolia pairs with arbitrum-sepolia (test USDC); base pairs with arbitrum-one (real funds); base or arbitrum-one USDC bridges into robinhood as USDG, and robinhood USDG bridges out to base or arbitrum-one as USDC (real funds).",
                               "anyOf": [
                                 {
                                   "const": "base-sepolia",
@@ -2900,11 +3028,19 @@
                                 {
                                   "const": "base",
                                   "type": "string"
+                                },
+                                {
+                                  "const": "arbitrum-one",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "robinhood",
+                                  "type": "string"
                                 }
                               ]
                             },
                             "destinationNetwork": {
-                              "description": "Destination network.",
+                              "description": "Destination network; only the pairs above are supported.",
                               "anyOf": [
                                 {
                                   "const": "arbitrum-sepolia",
@@ -2913,18 +3049,34 @@
                                 {
                                   "const": "arbitrum-one",
                                   "type": "string"
+                                },
+                                {
+                                  "const": "robinhood",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "base",
+                                  "type": "string"
                                 }
                               ]
                             },
                             "asset": {
-                              "description": "The Cross-chain Router moves USDC only.",
-                              "const": "USDC",
-                              "type": "string"
+                              "description": "The source token: USDC, or USDG when leaving robinhood. The destination asset follows the pair (USDC → USDG into robinhood).",
+                              "anyOf": [
+                                {
+                                  "const": "USDC",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "USDG",
+                                  "type": "string"
+                                }
+                              ]
                             },
                             "amount": {
                               "pattern": "^(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
                               "maxLength": 48,
-                              "description": "USDC amount as a decimal string, e.g. \"5\".",
+                              "description": "Source token amount as a decimal string, e.g. \"5\".",
                               "type": "string"
                             },
                             "routing": {
@@ -2980,7 +3132,7 @@
                               "type": "string"
                             },
                             "network": {
-                              "description": "EVM networks swap USDC/WETH on Uniswap v3; solana swaps SOL/USDC/USDT via Jupiter; solana-devnet swaps SOL/devUSDC on Orca.",
+                              "description": "EVM networks swap USDC/WETH on Uniswap v3; solana swaps SOL/USDC/USDT via Jupiter; solana-devnet swaps SOL/devUSDC on Orca; robinhood swaps official catalog assets (USDG, WETH, Stock Tokens) on Uniswap v3 (real funds).",
                               "anyOf": [
                                 {
                                   "const": "base",
@@ -3001,63 +3153,87 @@
                                 {
                                   "const": "solana-devnet",
                                   "type": "string"
+                                },
+                                {
+                                  "const": "robinhood",
+                                  "type": "string"
                                 }
                               ]
                             },
                             "inputAsset": {
-                              "description": "Asset spent.",
                               "anyOf": [
                                 {
-                                  "const": "USDC",
-                                  "type": "string"
+                                  "description": "Asset spent.",
+                                  "anyOf": [
+                                    {
+                                      "const": "USDC",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "const": "WETH",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "const": "WBTC",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "const": "SOL",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "const": "USDT",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "const": "devUSDC",
+                                      "type": "string"
+                                    }
+                                  ]
                                 },
                                 {
-                                  "const": "WETH",
-                                  "type": "string"
-                                },
-                                {
-                                  "const": "WBTC",
-                                  "type": "string"
-                                },
-                                {
-                                  "const": "SOL",
-                                  "type": "string"
-                                },
-                                {
-                                  "const": "USDT",
-                                  "type": "string"
-                                },
-                                {
-                                  "const": "devUSDC",
+                                  "pattern": "^[A-Z][A-Z0-9.]{0,15}$",
+                                  "maxLength": 16,
+                                  "description": "On robinhood: a symbol of the official Robinhood Chain catalog (USDG, WETH or a Stock Token such as TSLA).",
                                   "type": "string"
                                 }
                               ]
                             },
                             "outputAsset": {
-                              "description": "Asset received.",
                               "anyOf": [
                                 {
-                                  "const": "USDC",
-                                  "type": "string"
+                                  "description": "Asset received.",
+                                  "anyOf": [
+                                    {
+                                      "const": "USDC",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "const": "WETH",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "const": "WBTC",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "const": "SOL",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "const": "USDT",
+                                      "type": "string"
+                                    },
+                                    {
+                                      "const": "devUSDC",
+                                      "type": "string"
+                                    }
+                                  ]
                                 },
                                 {
-                                  "const": "WETH",
-                                  "type": "string"
-                                },
-                                {
-                                  "const": "WBTC",
-                                  "type": "string"
-                                },
-                                {
-                                  "const": "SOL",
-                                  "type": "string"
-                                },
-                                {
-                                  "const": "USDT",
-                                  "type": "string"
-                                },
-                                {
-                                  "const": "devUSDC",
+                                  "pattern": "^[A-Z][A-Z0-9.]{0,15}$",
+                                  "maxLength": 16,
+                                  "description": "On robinhood: a symbol of the official Robinhood Chain catalog (USDG, WETH or a Stock Token such as TSLA).",
                                   "type": "string"
                                 }
                               ]
@@ -3332,7 +3508,7 @@
                               "type": "string"
                             },
                             "network": {
-                              "description": "Uniswap v3 USDC/WETH on base-sepolia or ethereum-sepolia; Orca SOL/devUSDC on solana-devnet.",
+                              "description": "Uniswap v3 USDC/WETH on base-sepolia or ethereum-sepolia; Orca SOL/devUSDC on solana-devnet; on robinhood, Uniswap v3 on any two official catalog assets (e.g. USDG and a Stock Token) at feeTier (real funds).",
                               "anyOf": [
                                 {
                                   "const": "base-sepolia",
@@ -3345,75 +3521,99 @@
                                 {
                                   "const": "solana-devnet",
                                   "type": "string"
+                                },
+                                {
+                                  "const": "robinhood",
+                                  "type": "string"
                                 }
                               ]
                             },
                             "maxAmounts": {
-                              "additionalProperties": false,
                               "minProperties": 2,
                               "maxProperties": 2,
-                              "description": "Maximum deposit of each pool asset (limits, not amounts to spend); exactly the network's two assets.",
+                              "description": "Maximum deposit of each pool asset (limits, not amounts to spend); exactly the pool's two assets by symbol: USDC and WETH, SOL and devUSDC, or two official catalog symbols on robinhood.",
                               "type": "object",
-                              "properties": {
-                                "USDC": {
+                              "patternProperties": {
+                                "^[A-Za-z][A-Za-z0-9.]{0,15}$": {
                                   "pattern": "^(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
                                   "maxLength": 48,
-                                  "description": "Maximum USDC.",
-                                  "type": "string"
-                                },
-                                "WETH": {
-                                  "pattern": "^(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
-                                  "maxLength": 48,
-                                  "description": "Maximum WETH.",
-                                  "type": "string"
-                                },
-                                "SOL": {
-                                  "pattern": "^(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
-                                  "maxLength": 48,
-                                  "description": "Maximum SOL.",
-                                  "type": "string"
-                                },
-                                "devUSDC": {
-                                  "pattern": "^(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
-                                  "maxLength": 48,
-                                  "description": "Maximum devUSDC.",
+                                  "description": "Maximum deposit of this asset.",
                                   "type": "string"
                                 }
                               }
                             },
                             "range": {
-                              "additionalProperties": false,
-                              "type": "object",
-                              "required": [
-                                "unit",
-                                "lower",
-                                "upper"
-                              ],
-                              "properties": {
-                                "unit": {
-                                  "description": "price: quote per base asset (USDC per WETH, devUSDC per SOL); tick: aligned tick indexes.",
-                                  "anyOf": [
-                                    {
-                                      "const": "price",
+                              "anyOf": [
+                                {
+                                  "additionalProperties": false,
+                                  "type": "object",
+                                  "required": [
+                                    "unit",
+                                    "lower",
+                                    "upper"
+                                  ],
+                                  "properties": {
+                                    "unit": {
+                                      "description": "price: quote per base asset (USDC per WETH, devUSDC per SOL); tick: aligned tick indexes.",
+                                      "anyOf": [
+                                        {
+                                          "const": "price",
+                                          "type": "string"
+                                        },
+                                        {
+                                          "const": "tick",
+                                          "type": "string"
+                                        }
+                                      ]
+                                    },
+                                    "lower": {
+                                      "pattern": "^-?(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
+                                      "maxLength": 48,
                                       "type": "string"
                                     },
-                                    {
-                                      "const": "tick",
+                                    "upper": {
+                                      "pattern": "^-?(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
+                                      "maxLength": 48,
                                       "type": "string"
                                     }
-                                  ]
+                                  }
                                 },
-                                "lower": {
-                                  "pattern": "^-?(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
-                                  "maxLength": 48,
-                                  "type": "string"
-                                },
-                                "upper": {
-                                  "pattern": "^-?(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
-                                  "maxLength": 48,
-                                  "type": "string"
+                                {
+                                  "additionalProperties": false,
+                                  "type": "object",
+                                  "required": [
+                                    "unit"
+                                  ],
+                                  "properties": {
+                                    "unit": {
+                                      "description": "robinhood only: the widest usable range of the fee tier.",
+                                      "const": "full",
+                                      "type": "string"
+                                    }
+                                  }
                                 }
-                              }
+                              ]
+                            },
+                            "feeTier": {
+                              "description": "robinhood only: the Uniswap v3 fee tier in hundredths of a basis point (3000 = 0.3%). Default 3000.",
+                              "anyOf": [
+                                {
+                                  "const": 100,
+                                  "type": "number"
+                                },
+                                {
+                                  "const": 500,
+                                  "type": "number"
+                                },
+                                {
+                                  "const": 3000,
+                                  "type": "number"
+                                },
+                                {
+                                  "const": 10000,
+                                  "type": "number"
+                                }
+                              ]
                             },
                             "slippageBps": {
                               "minimum": 0,
@@ -3483,6 +3683,60 @@
                               "minLength": 42,
                               "maxLength": 42,
                               "description": "The wallet that supplies, borrows and receives WETH. Debt remains after the swap.",
+                              "type": "string"
+                            }
+                          }
+                        },
+                        {
+                          "additionalProperties": false,
+                          "type": "object",
+                          "required": [
+                            "action",
+                            "network",
+                            "asset",
+                            "amount"
+                          ],
+                          "properties": {
+                            "version": {
+                              "description": "Strategy contract version. Omit or 1.",
+                              "const": 1,
+                              "type": "number"
+                            },
+                            "action": {
+                              "const": "transfer",
+                              "type": "string"
+                            },
+                            "network": {
+                              "description": "Robinhood Chain mainnet (real funds).",
+                              "const": "robinhood",
+                              "type": "string"
+                            },
+                            "asset": {
+                              "description": "ETH, or a symbol of the official Robinhood Chain catalog (USDG, WETH, a Stock Token).",
+                              "anyOf": [
+                                {
+                                  "const": "ETH",
+                                  "type": "string"
+                                },
+                                {
+                                  "pattern": "^[A-Z][A-Z0-9.]{0,15}$",
+                                  "maxLength": 16,
+                                  "description": "On robinhood: a symbol of the official Robinhood Chain catalog (USDG, WETH or a Stock Token such as TSLA).",
+                                  "type": "string"
+                                }
+                              ]
+                            },
+                            "amount": {
+                              "pattern": "^(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
+                              "maxLength": 48,
+                              "description": "Amount as a decimal string.",
+                              "type": "string"
+                            },
+                            "recipient": {
+                              "pattern": "^0x[0-9a-fA-F]{40}$",
+                              "minLength": 42,
+                              "maxLength": 42,
+                              "description": "Recipient. Omit to transfer to the wallet that signs in the FloFi app (bound at Review).",
                               "type": "string"
                             }
                           }

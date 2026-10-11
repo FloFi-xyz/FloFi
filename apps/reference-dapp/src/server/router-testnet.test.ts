@@ -52,11 +52,11 @@ describe('BUILD-JOURNEY-001 testnet Router for arbitrary wallets', () => {
     expect(run.owner).toBe(owner);
     expect(run.review.intent).toMatchObject({ sourceChain: 'eip155:84532', destinationChain: 'eip155:421614', amount: '1000000' });
     expect(run.review.simulation).toMatchObject({ chainId: 84532, deposit: { destinationChainId: 421614, depositor: owner, recipient: owner } });
-    expect(run.review.approvals[0]).toMatchObject({ token: TESTNET.source.usdc, spender: TESTNET.source.lifiDiamond, amount: '1000000', required: true });
+    expect(run.review.approvals[0]).toMatchObject({ token: TESTNET.source.token, spender: TESTNET.source.lifiDiamond, amount: '1000000', required: true });
     expect(run.review.route.bridge).toMatchObject({ originSpokePool: TESTNET.source.spokePool, destinationSpokePool: TESTNET.destination.spokePool });
     await service.review(run.id, run.review.commitment, w);
     const approval = await execute(service, h, owner, run.id, w);
-    expect(approval.begun.transaction).toMatchObject({ chainId: '0x14a34', from: owner, to: TESTNET.source.usdc, value: '0x0' });
+    expect(approval.begun.transaction).toMatchObject({ chainId: '0x14a34', from: owner, to: TESTNET.source.token, value: '0x0' });
     await service.observe(run.id);
     const deposit = await execute(service, h, owner, run.id, w);
     expect(deposit.begun.transaction).toMatchObject({ chainId: '0x14a34', from: owner, to: TESTNET.source.lifiDiamond });

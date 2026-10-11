@@ -19,15 +19,20 @@ import { currentWalletPrincipal } from '../server/session-principal';
  */
 type Result<T> = { ok: true; value: T } | { ok: false; code: string };
 export type RouterRunSummary = { runId: string; status: string; hasEvidence: boolean; updatedAt: string };
-const FLOW = { mainnet: 'crosschain-router', testnet: 'crosschain-router-testnet' } as const satisfies Readonly<Record<RouterNetwork, string>>;
-const DISABLED: Readonly<Record<RouterNetwork, string>> = { mainnet: 'ROUTER_NOT_ENABLED', testnet: 'ROUTER_TESTNET_NOT_ENABLED' };
-const JOURNAL: Readonly<Record<RouterNetwork, string>> = { mainnet: 'GRYLOO_ROUTER_JOURNAL', testnet: 'GRYLOO_ROUTER_TESTNET_JOURNAL' };
+// BUILD-RH-002: each Robinhood Chain route is its own flow and storage (under `$GRYLOO_ROBINHOOD_JOURNAL/router-<route>`).
+const FLOW = { mainnet: 'crosschain-router', testnet: 'crosschain-router-testnet', 'base-to-robinhood': 'crosschain-router-base-to-robinhood',
+  'robinhood-to-base': 'crosschain-router-robinhood-to-base', 'arbitrum-to-robinhood': 'crosschain-router-arbitrum-to-robinhood',
+  'robinhood-to-arbitrum': 'crosschain-router-robinhood-to-arbitrum' } as const satisfies Readonly<Record<RouterNetwork, string>>;
+const DISABLED: Readonly<Record<RouterNetwork, string>> = { mainnet: 'ROUTER_NOT_ENABLED', testnet: 'ROUTER_TESTNET_NOT_ENABLED', 'base-to-robinhood': 'ROBINHOOD_MAINNET_NOT_ENABLED',
+  'robinhood-to-base': 'ROBINHOOD_MAINNET_NOT_ENABLED', 'arbitrum-to-robinhood': 'ROBINHOOD_MAINNET_NOT_ENABLED', 'robinhood-to-arbitrum': 'ROBINHOOD_MAINNET_NOT_ENABLED' };
+const JOURNAL: Readonly<Record<RouterNetwork, string>> = { mainnet: 'GRYLOO_ROUTER_JOURNAL', testnet: 'GRYLOO_ROUTER_TESTNET_JOURNAL', 'base-to-robinhood': 'GRYLOO_ROBINHOOD_JOURNAL',
+  'robinhood-to-base': 'GRYLOO_ROBINHOOD_JOURNAL', 'arbitrum-to-robinhood': 'GRYLOO_ROBINHOOD_JOURNAL', 'robinhood-to-arbitrum': 'GRYLOO_ROBINHOOD_JOURNAL' };
 const isNetwork = (value: unknown): value is RouterNetwork => (ROUTER_NETWORKS as readonly unknown[]).includes(value);
 const services = new Map<RouterNetwork, RouterService>();
 function journalDir(network: RouterNetwork): string {
   const dir = process.env[JOURNAL[network]];
   if (!dir || !isAbsolute(dir)) throw new Error('ROUTER_STORAGE_NOT_CONFIGURED');
-  return dir;
+  return JOURNAL[network] === 'GRYLOO_ROBINHOOD_JOURNAL' ? join(dir, `router-${network}`) : dir;
 }
 function current(network: RouterNetwork): RouterService {
   const mode = routerNetworkMode(network, process.env);

@@ -122,7 +122,7 @@ describe('BUILD-JOURNEY-001 permissionless testnet journey on durable cloud stat
     expect(ok<RouterRecord>(await api2.post('status', [id], A)).phase).toBe('AUTHORIZED');
     const approval = ok<RouterBegin>(await api2.post('begin', [id, A, w], A));
     expect(approval.attempt).toMatchObject({ step: 'APPROVAL', state: 'PREPARED', nonce: '12' });
-    expect(approval.transaction).toMatchObject({ chainId: '0x14a34', from: A, to: TESTNET.source.usdc });
+    expect(approval.transaction).toMatchObject({ chainId: '0x14a34', from: A, to: TESTNET.source.token });
     ok(await api2.post('handoff', [id], A));
     const approvalHash = h.wallet.send(approval.transaction);
     ok(await api2.post('report', [id, { kind: 'HASH', hash: approvalHash }], A));

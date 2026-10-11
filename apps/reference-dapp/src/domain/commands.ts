@@ -19,6 +19,9 @@ import { createSolanaLiquidityNode, parseSolanaLiquidityChat, solanaLiquidityDet
 import { createUniswapLiquidityNode, parseUniswapLiquidityChat, uniswapLiquidityDetails, type UniswapLiquidityInput } from './uniswap-liquidity-authoring';
 import { createRouterNode, parseRouterChat, routerDetails, ROUTER_ROUTING_LABEL, type RouterBridgeInput } from './router-authoring';
 import { createCryptoActionNode, type CryptoActionInput } from './crypto-action-picker';
+import { ROBINHOOD_NETWORK } from './asset-catalogs';
+import { catalogSwapDetails } from './catalog-swap-authoring';
+import { parseRobinhoodLiquidityChat, robinhoodLiquidityDetails } from './robinhood-liquidity-authoring';
 
 type Base = { readonly baseRevision: number; readonly source: 'CHAT' | 'CANVAS' };
 const lendingNetwork = (text: string): SupplyInput['network'] => /^base sepolia$/i.test(text) ? 'Base Sepolia' : 'Ethereum Sepolia';
@@ -110,6 +113,31 @@ export function parseLocalCommand(text: string, workflow: Workflow, context: Rev
     const fields: SupplyInput = { network: lendingNetwork(supply[3]!), asset: lendingAsset(supply[2]!), amount: supply[1]!, beneficiary };
     createAuthoredSupply('node-preview', fields);
     return { type: 'ADD_SUPPLY', input: fields, source: 'CHAT', baseRevision: workflow.revision };
+  }
+  // BUILD-RH-002: Robinhood Chain (real funds) — catalog swaps, transfers and positions over the official asset catalog. Symbols resolve only
+  // in the validated catalog (USDG, WETH, Stock Tokens); an unknown or ambiguous symbol fails closed, never maps to something nearby.
+  const SYMBOL = '([A-Za-z][A-Za-z0-9.]{0,15})';
+  const rhSwap = new RegExp(`^swap ([0-9]+(?:\\.[0-9]+)?) ${SYMBOL} (?:for|to) ${SYMBOL} on Robinhood(?: Chain)?(?: (?:with )?slippage ([0-9]+) bps)?$`, 'i').exec(input);
+  if (rhSwap) {
+    const fields: CryptoActionInput = { selection: { action: 'swap', network: ROBINHOOD_NETWORK, from: rhSwap[2]!.toUpperCase(), to: rhSwap[3]!.toUpperCase() }, amount: rhSwap[1]!,
+      slippage: rhSwap[4] ?? '50' };
+    createCryptoActionNode('node-preview', fields);
+    return { type: 'ADD_CRYPTO_ACTION', input: fields, source: 'CHAT', baseRevision: workflow.revision };
+  }
+  const rhTransfer = new RegExp(`^(?:transfer|send) ([0-9]+(?:\\.[0-9]+)?) ${SYMBOL} on Robinhood(?: Chain)?(?: to (0x[0-9a-fA-F]{40}))?$`, 'i').exec(input);
+  if (rhTransfer) {
+    const symbol = rhTransfer[2]!.toUpperCase();
+    const fields: RobinhoodTransferInput = { network: 'Robinhood Chain', asset: symbol, amount: rhTransfer[1]!, recipient: rhTransfer[3]?.toLowerCase() ?? 'CONNECTED_OWNER' };
+    createAuthoredTransfer('node-preview', fields);
+    return { type: 'ADD_RH_TRANSFER', input: fields, source: 'CHAT', baseRevision: workflow.revision };
+  }
+  const rhLiquidity = parseRobinhoodLiquidityChat(input);
+  if (rhLiquidity) {
+    const fields: CryptoActionInput = { selection: { action: 'pool', network: ROBINHOOD_NETWORK, from: rhLiquidity.tokenA, to: rhLiquidity.tokenB }, amount: rhLiquidity.amountA,
+      secondAmount: rhLiquidity.amountB, slippage: rhLiquidity.slippage, fee: rhLiquidity.fee,
+      ...rhLiquidity.rangeUnit === 'TICK' ? { rangeUnit: 'TICK' as const, lower: rhLiquidity.lower!, upper: rhLiquidity.upper! } : {} };
+    createCryptoActionNode('node-preview', fields);
+    return { type: 'ADD_CRYPTO_ACTION', input: fields, source: 'CHAT', baseRevision: workflow.revision };
   }
   const router = parseRouterChat(input);
   if (router) { createRouterNode('node-preview', router); return { type: 'ADD_ROUTER_BRIDGE', input: router, source: 'CHAT', baseRevision: workflow.revision }; }
@@ -228,7 +256,8 @@ export function commandIsValid(input: unknown): input is Command {
     case 'SET_RH_TRANSFER': {
       if(command.type==='SET_RH_TRANSFER'&&!id(command.nodeId))return false;
       const fields=command.input;
-      if(!fields||typeof fields!=='object'||Array.isArray(fields)||Object.getPrototypeOf(fields)!==Object.prototype||Reflect.ownKeys(fields).sort().join()!==['network','asset','amount','recipient'].sort().join()||!Object.values(fields).every(v=>typeof v==='string'&&v.length<=40))return false;
+      // BUILD-RH-002: a recipient may be an explicit 42-character address on Robinhood Chain.
+      if(!fields||typeof fields!=='object'||Array.isArray(fields)||Object.getPrototypeOf(fields)!==Object.prototype||Reflect.ownKeys(fields).sort().join()!==['network','asset','amount','recipient'].sort().join()||!Object.values(fields).every(v=>typeof v==='string'&&v.length<=64))return false;
       try{createAuthoredTransfer('node-preview',fields as RobinhoodTransferInput);return true;}catch{return false;}
     }
     case 'ADD_WITHDRAW':
@@ -362,7 +391,12 @@ export function summarize(workflow: Workflow, context?: ReviewContext): string {
     const solana = solanaSwapDetails(node);
     if (solana) return `${node.nodeId}: Swap ${solana.amount} ${solana.from} to ${solana.to} on ${solana.network} via ${solanaSwapLabels(solana.network).provider}, ${solana.slippage} bps, quote required.`;
     const transfer=transferDetails(node as Parameters<typeof transferDetails>[0]);
+    if(transfer&&transfer.network==='Robinhood Chain')return `${node.nodeId}: Transfer ${transfer.amount} ${transfer.asset} on Robinhood Chain to ${transfer.recipient==='CONNECTED_OWNER'?'the connected owner':transfer.recipient}; real funds, simulation and review required.`;
     if(transfer)return `${node.nodeId}: Self-transfer ${transfer.amount} test ETH on ${transfer.network} to the connected owner; chain execution proof, not DeFi.`;
+    const catalogSwap=catalogSwapDetails(node);
+    if(catalogSwap)return `${node.nodeId}: Swap ${catalogSwap.amount} ${catalogSwap.from} to ${catalogSwap.to} on ${catalogSwap.network} via Uniswap v3, ${catalogSwap.slippage} bps; real funds, quote required.`;
+    const rhPool=robinhoodLiquidityDetails(node);
+    if(rhPool)return `${node.nodeId}: Concentrated liquidity on ${rhPool.network} via ${rhPool.provider}, up to ${rhPool.amountA} ${rhPool.tokenA} and ${rhPool.amountB} ${rhPool.tokenB}, ${rhPool.fullRange?'full range':`${rhPool.lowerPrice}–${rhPool.upperPrice} ${rhPool.priceUnit}`} (ticks ${rhPool.tickLower} to ${rhPool.tickUpper}, fee ${rhPool.fee/10_000}%), ${rhPool.slippage} bps; real funds, simulation required.`;
     const withdrawn=withdrawDetails(node as Parameters<typeof withdrawDetails>[0]);
     if(withdrawn)return `${node.nodeId}: Withdraw ${withdrawn.amount} ${withdrawn.asset} from Aave V3 on ${withdrawn.network}, recipient connected owner at Review.`;
     const repaid=repayDetails(node as Parameters<typeof repayDetails>[0]);
@@ -376,7 +410,7 @@ export function summarize(workflow: Workflow, context?: ReviewContext): string {
     const supply = supplyDetails(node as Parameters<typeof supplyDetails>[0]);
     if (supply) return `${node.nodeId}: Supply ${supply.amount} ${supply.asset} to Aave V3 on ${supply.network}, beneficiary ${supply.beneficiary}.`;
     const routed = routerDetails(node);
-    if (routed) return `${node.nodeId}: Cross-chain bridge ${routed.amount} USDC from ${routed.source} to ${routed.destination}, recipient ${routed.recipientLabel}, ${routed.slippage} bps, routing ${ROUTER_ROUTING_LABEL[routed.routing]}; quote, simulation and route review required.`;
+    if (routed) return `${node.nodeId}: Cross-chain bridge ${routed.amount} ${routed.token} from ${routed.source} to ${routed.destination}${routed.destinationToken !== routed.token ? ` (delivered as ${routed.destinationToken})` : ''}, recipient ${routed.recipientLabel}, ${routed.slippage} bps, routing ${ROUTER_ROUTING_LABEL[routed.routing]}; quote, simulation and route review required.`;
     const bridge = bridgeDetails(node);
     if (bridge) return `${node.nodeId}: Base to ${node.expectedOutputs[0]?.asset.chainId === 'eip155:42161' ? 'Arbitrum' : 'Optimism'} USDC bridge, ${bridge.amount} USDC, ${bridge.slippageBps} bps, unquoted.`;
     const position = context && liquidityDetails(node, context);

@@ -53,3 +53,4 @@ export * from './native-transfer.js';
 export * from './pix.js';
 export * from './boleto.js';
 export * from './payment.js';
+export * from './catalog-swap.js';

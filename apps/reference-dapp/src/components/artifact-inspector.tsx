@@ -3,7 +3,7 @@
 import { useLocale } from '../i18n/locale';
 
 import { CryptoPoolForm } from './crypto-pool-form';
-import { cryptoInputOf, cryptoProfile, canSelectCryptoAssets } from '../domain/crypto-action-picker';
+import { cryptoInputOf, cryptoProfile, canSelectCryptoAssets, selectCryptoToken } from '../domain/crypto-action-picker';
 import {LendingNodeEditor} from './lending-node-editor';
 import {isLendingComposition} from '@defi-workflow-engine/workflow-contracts';
 import { WithdrawAuthoringForm } from './withdraw-panel';
@@ -30,11 +30,12 @@ import { SolanaLiquidityForm } from './solana-liquidity-panel';
 import { UniswapLiquidityForm } from './uniswap-liquidity-panel';
 import { uniswapLiquidityDetails } from '../domain/uniswap-liquidity-authoring';
 import { RouterForm } from './router-panel';
-import { routerDetails } from '../domain/router-authoring';
+import { routerDetails, ROUTER_NETWORK_OPTIONS } from '../domain/router-authoring';
 import { canEditCanvasAmount, setupSummary } from '../domain/canvas-action-setup';
 import { supplyReviewFormId, poolReviewFormId } from './composer-card';
-import { usePoolContributionInputs, useStockCardInputs } from './canvas-card-inputs';
+import { usePoolContributionInputs } from './canvas-card-inputs';
 import { StocksSettings } from './stocks-settings';
+
 
 const emptyCrossChain: CrossChainLiquidityInput = { amount: '100', bridgeSlippageBps: '50', swapSlippageBps: '50', tickLower: '-200100', tickUpper: '-199900', recipient: '0x1111111111111111111111111111111111111111', provider: 'lifi.rest', noSwap: false };
 const emptyLiquidity: LiquidityInput = { weth: '', usdc: '', minimumWeth: '', minimumUsdc: '', tickLower: '', tickUpper: '', recipient: '' };
@@ -43,9 +44,17 @@ type InspectorProps = {
   expanded?: boolean; onExpandedChange: (expanded: boolean) => void;
 };
 export function ArtifactInspector(props: InspectorProps) {
-  const stocks = useStockCardInputs();
-  const card = stocks.cards.find(card => card.id === props.selectedId);
-  return card ? <StocksSettings card={card} expanded={props.expanded ?? false} onExpandedChange={props.onExpandedChange}/> : <CanonicalArtifactInspector {...props}/>;
+  const { state, context, actionSetup = null, amountInputs = {}, cryptoSelections = {}, editCanvasAmount, editCryptoSelection } = useWorkflow();
+  // BUILD-RH-002: the Stocks card (a draft or a canonical Robinhood Chain stock purchase) edits its own selection and amount.
+  const setup = actionSetup?.id === props.selectedId && actionSetup.action === 'swap' && actionSetup.stocks ? actionSetup : null;
+  const node = setup ? null : state.workflow.nodes.find(item => item.nodeId === props.selectedId && composerSummary(state.workflow, item, context).action === 'Stocks');
+  const input = node ? cryptoInputOf(node) : null;
+  const selection = setup?.cryptoSelection ?? (node ? cryptoSelections[node.nodeId] ?? input?.selection : null);
+  if (!selection || (!setup && !node)) return <CanonicalArtifactInspector {...props}/>;
+  const id = (setup?.id ?? node?.nodeId)!;
+  return <StocksSettings selection={selection} amount={setup ? setup.amount : amountInputs[id] ?? input?.amount ?? ''} expanded={props.expanded ?? false}
+    onExpandedChange={props.onExpandedChange} onAmountChange={amount => editCanvasAmount(id, amount)}
+    onEquityChange={symbol => { try { editCryptoSelection(id, selectCryptoToken(selection, 'destination', symbol)); } catch { /* not in the current catalog */ } }}/>;
 }
 function CanonicalArtifactInspector({ selectedId, select, expanded = false, onExpandedChange }: InspectorProps) {
   const { t: tr } = useLocale();
@@ -171,7 +180,7 @@ function CanonicalArtifactInspector({ selectedId, select, expanded = false, onEx
         <label>{tr("Slippage (bps)")}<input value={slippage} onChange={event => { dismissProposal(); setSlippage(event.target.value); }} inputMode="numeric"/></label>
         <button type="submit">{tr("Review Swap settings")}</button>
       </form>}
-      {routed && <><p className="muted">{tr(routed.source)}{tr(" USDC → ")}{tr(routed.network === 'testnet' ? 'Arbitrum Sepolia' : 'Arbitrum One')}{tr(" USDC through the Cross-chain Router · ")}{tr(routed.network === 'testnet' ? 'test USDC' : 'real funds')}{tr(" · a fresh route, simulation and Review are required after changes.")}</p><RouterForm key={node.nodeId + ':' + state.workflow.revision} nodeId={node.nodeId}/></>}
+      {routed && <><p className="muted">{tr(routed.source)}{tr(` ${routed.token} → `)}{tr(ROUTER_NETWORK_OPTIONS[routed.network].destinationLabel)}{tr(` ${routed.destinationToken} through the Cross-chain Router · `)}{tr(routed.network === 'testnet' ? 'test USDC' : 'real funds')}{tr(" · a fresh route, simulation and Review are required after changes.")}</p><RouterForm key={node.nodeId + ':' + state.workflow.revision} nodeId={node.nodeId}/></>}
       {uniPosition && !cryptoSelections[node.nodeId] && <><p className="muted">{tr(uniPosition.network)}{tr(" USDC / WETH via ")}{tr(uniPosition.provider)}{tr(" · fee 0.05% · test tokens · simulate against the live pool. Changes require review.")}</p><UniswapLiquidityForm key={node.nodeId + ':' + state.workflow.revision} nodeId={node.nodeId} reviewFormId={poolReviewFormId(node.nodeId)}/></>}
       {orcaPosition && !cryptoSelections[node.nodeId] && <><p className="muted">{tr(orcaPosition.network)}{tr(" SOL / devUSDC via ")}{tr(orcaPosition.provider)}{tr(" · valueless test tokens · simulate against the live pool. Changes require review.")}</p><SolanaLiquidityForm key={node.nodeId + ':' + state.workflow.revision} nodeId={node.nodeId} reviewFormId={poolReviewFormId(node.nodeId)}/></>}
       {cross && <p className="muted">{tr("Base USDC → Arbitrum USDC → ")}{tr(cross.noSwap ? 'one-sided' : 'calculated partial swap →')}{tr(" Uniswap v3 position. Each boundary requires fresh review and reconciliation.")}</p>}

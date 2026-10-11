@@ -55,19 +55,27 @@ describe('Robinhood decision gate in the capability registry', () => {
     expect(robinhoodDeploymentStatus('eip155:8453', 'uniswap.v3')).toBeNull();
     expect(robinhoodDeploymentStatus('eip155:46630', 'unknown.adapter')).toBeNull();
   });
-  it('adds exactly one Robinhood execution profile: the RH-DEMO-001 testnet self-transfer, owner-executed and independently reconciled', () => {
+  it('keeps the RH-DEMO-001 testnet self-transfer and adds the BUILD-RH-002 mainnet rows with no evidence ceiling', () => {
     const rows = executionCapabilityRegistry.filter(row => robinhoodNetwork(row.chainId));
-    expect(rows.map(row => [row.actionType, row.adapterId, row.chainId, row.environment, row.evidenceMaturity])).toEqual(
-      [['asset.transfer', 'evm.native-transfer', 'eip155:46630', 'PUBLIC_TESTNET', 'TESTNET_EXECUTED']]);
-    expect(rows[0]!.authorizationModes).toEqual(['A']);
-    expect(rows[0]!.requirements).toEqual(['INJECTED_WALLET', 'QUOTE_PROVIDER', 'REVIEWED_ARTIFACTS']);
+    expect(rows.map(row => [row.actionType, row.adapterId, row.chainId, row.environment, row.evidenceMaturity])).toEqual([
+      ['asset.transfer', 'evm.native-transfer', 'eip155:46630', 'PUBLIC_TESTNET', 'TESTNET_EXECUTED'],
+      ['asset.swap.exact-input', 'uniswap.v3', 'eip155:4663', 'MAINNET', null],
+      ['asset.liquidity.concentrated', 'uniswap.v3', 'eip155:4663', 'MAINNET', null],
+      ['asset.transfer', 'evm.native-transfer', 'eip155:4663', 'MAINNET', null],
+      ['asset.transfer', 'evm.token-transfer', 'eip155:4663', 'MAINNET', null],
+      ['asset.bridge', 'flofi.router', 'eip155:4663', 'MAINNET', null]]);
+    for (const row of rows) {
+      expect(row.authorizationModes).toEqual(['A']);
+      expect(row.requirements).toEqual(['INJECTED_WALLET', 'QUOTE_PROVIDER', 'REVIEWED_ARTIFACTS']);
+    }
     expect(ROBINHOOD_TESTNET_TRANSFER).toMatchObject({ chain: 'eip155:46630', chainHex: '0xb626', adapterId: 'evm.native-transfer', maximumValueWei: '1000000000000000' });
   });
   it('resolves the self-transfer only on Robinhood Testnet and only in PUBLIC_TESTNET', () => {
     const transfer = (chain: string) => ({ ...node('asset.transfer', chain, 'evm.native-transfer', ['native']), requiredAuthorizationClass: 'MODE_A' }) as Node;
     expect(resolveNodeCapability(transfer('eip155:46630'), { environment: 'PUBLIC_TESTNET' }).profile?.adapterId).toBe('evm.native-transfer');
     expect(resolveNodeCapability(transfer('eip155:46630'), { environment: 'MAINNET' }).blockers[0]?.code).toBe('MAINNET_EXECUTION_NOT_ENABLED');
-    expect(resolveNodeCapability(transfer('eip155:4663'), { environment: 'MAINNET' }).blockers[0]?.code).toBe('CHAIN_NOT_SUPPORTED');
+    expect(resolveNodeCapability(transfer('eip155:4663'), { environment: 'MAINNET' }).profile?.environment).toBe('MAINNET');
+    expect(resolveNodeCapability(transfer('eip155:4663'), { environment: 'PUBLIC_TESTNET' }).blockers[0]?.code).toBe('PUBLIC_EXECUTION_NOT_ENABLED');
     expect(resolveNodeCapability(transfer('eip155:84532'), { environment: 'PUBLIC_TESTNET' }).blockers[0]?.code).toBe('CHAIN_NOT_SUPPORTED');
     const ready = resolveWorkflowCapability({ nodes: [transfer('eip155:46630')] }, { environment: 'PUBLIC_TESTNET', runtime: {
       walletConnected: true, walletChainId: 'eip155:46630', artifacts: 'CURRENT', simulationReady: true, authorizationReady: true } });
@@ -88,19 +96,24 @@ describe('Robinhood decision gate in the capability registry', () => {
     const bridge = node('asset.bridge', 'eip155:46630', 'across.direct', ['across']);
     expect(resolveNodeCapability(bridge, { environment: 'PUBLIC_TESTNET' }).blockers[0]?.code).toBe('PROTOCOL_NOT_DEPLOYED');
   });
-  it('keeps a canonically deployed mainnet protocol unsupported rather than implying a deployment gap', () => {
+  it('resolves Robinhood mainnet swaps to the Uniswap v3 MAINNET profile with no evidence ceiling', () => {
     const result = resolveNodeCapability(swap('eip155:4663'), { environment: 'MAINNET' });
-    expect(result.blockers[0]?.code).toBe('CHAIN_NOT_SUPPORTED');
-    expect(result.capabilities.EXECUTE).toBe(false);
+    expect(result.profile).toMatchObject({ adapterId: 'uniswap.v3', chainId: 'eip155:4663', environment: 'MAINNET', evidenceMaturity: null });
+    expect(result.capabilities.EXECUTE).toBe(true);
+    expect(result.evidenceCeiling).toBeNull();
+    for (const environment of ['MOCK', 'LOCAL_FORK', 'PUBLIC_TESTNET'])
+      expect(resolveNodeCapability(swap('eip155:4663'), { environment }).profile).toBeNull();
   });
-  it('never makes a Robinhood workflow executable or ready, even with a matching wallet and current artifacts', () => {
-    for (const [chain, environment] of [['eip155:46630', 'PUBLIC_TESTNET'], ['eip155:4663', 'MAINNET']] as const) {
-      const result = resolveWorkflowCapability({ nodes: [swap(chain)] }, { environment, runtime: {
-        walletConnected: true, walletChainId: chain, artifacts: 'CURRENT', simulationReady: true, authorizationReady: true } });
-      expect(result.executionSupported).toBe(false);
-      expect(result.executionReady).toBe(false);
-      expect(result.evidenceCeiling).toBeNull();
-    }
+  it('makes a Robinhood mainnet swap ready only with the wallet on 4663 and current Review artifacts; the testnet never', () => {
+    const ready = (walletChainId: string, artifacts: 'CURRENT' | 'MISSING' | 'STALE') => resolveWorkflowCapability({ nodes: [swap('eip155:4663')] }, { environment: 'MAINNET',
+      runtime: { walletConnected: true, walletChainId, artifacts, simulationReady: true, authorizationReady: true } });
+    expect(ready('eip155:4663', 'CURRENT')).toMatchObject({ executionSupported: true, executionReady: true, evidenceCeiling: null });
+    expect(ready('eip155:8453', 'CURRENT').blockers.map(b => b.code)).toContain('WRONG_WALLET_CHAIN');
+    expect(ready('eip155:4663', 'STALE').executionReady).toBe(false);
+    expect(ready('eip155:4663', 'MISSING').executionReady).toBe(false);
+    const testnet = resolveWorkflowCapability({ nodes: [swap('eip155:46630')] }, { environment: 'PUBLIC_TESTNET', runtime: {
+      walletConnected: true, walletChainId: 'eip155:46630', artifacts: 'CURRENT', simulationReady: true, authorizationReady: true } });
+    expect(testnet).toMatchObject({ executionSupported: false, executionReady: false, evidenceCeiling: null });
   });
   it('leaves existing chains unchanged', () => {
     expect(resolveNodeCapability(node('asset.liquidity.uniswap-v3', 'eip155:10', null, ['uniswap-v3']), { environment: 'MOCK' })

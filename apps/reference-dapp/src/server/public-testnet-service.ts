@@ -1,33 +1,47 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /**
  * One opt-in, exact-profile Uniswap v3 swap on a public testnet: Base Sepolia USDC/WETH 0.05%, or (BUILD-ETHEREUM-001)
- * Ethereum Sepolia USDC/WETH 0.3%. The authored chain selects the profile and its own read client; no chain falls back to
- * another. This service never signs or sends.
+ * Ethereum Sepolia USDC/WETH 0.3%. BUILD-RH-002 adds the catalog profile kind: Robinhood Chain mainnet (real funds), any
+ * pair of the official asset catalog (Stock Tokens, USDG, WETH) on a locally derived canonical pool, with the Stock Token
+ * identity and ERC-8056 multiplier state bound into the Review. The authored chain selects the profile and its own read
+ * client; no chain falls back to another. This service never signs or sends.
  */
 import { createHash, randomBytes } from 'node:crypto';
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
-import { resolveWorkflowCapability } from '@defi-workflow-engine/action-registry';
+import { catalogAsset, resolveWorkflowCapability, uniswapV3PoolAddress, type AssetCatalog, type CanonicalAsset } from '@defi-workflow-engine/action-registry';
 import { createBaseSepoliaReviewContext, reviewContextForChain, validateAuthoringWorkflow } from '@defi-workflow-engine/reference-linter';
-import { hashArtifactBytes, type EvidenceBundle, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
+import { hashArtifactBytes, isCatalogSwapNode, readCatalogSwapNode, type EvidenceBundle, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { validateArtifact } from '@defi-workflow-engine/workflow-contracts/schemas';
 import { utf8, type ExecutionStorage } from '@defi-workflow-engine/reference-executor';
-import { BASE_SEPOLIA, publicSwapProfile, type PublicSwapProfile } from '../domain/public-testnet-swap.ts';
-export { BASE_SEPOLIA, ETHEREUM_SEPOLIA_SWAP } from '../domain/public-testnet-swap.ts';
+import { BASE_SEPOLIA, publicSwapProfile, quoteDecimals, swapProfile, type CatalogSwapProfile, type PairSwapProfile, type SwapProfile } from '../domain/public-testnet-swap.ts';
+export { BASE_SEPOLIA, ETHEREUM_SEPOLIA_SWAP, ROBINHOOD_MAINNET_SWAP, quoteDecimals } from '../domain/public-testnet-swap.ts';
 
 export type Rpc = (method: string, params: readonly unknown[]) => Promise<unknown>;
 type Step = 'approval' | 'swap';
-type Tx = { readonly chainId: PublicSwapProfile['chainHex']; readonly from: string; readonly to: string;
+type Tx = { readonly chainId: SwapProfile['chainHex']; readonly from: string; readonly to: string;
   readonly data: string; readonly value: '0x0'; readonly gas: string };
+/** BUILD-RH-002: the identity and ERC-8056 multiplier state of a Stock Token side, read at the quote block and bound into the Review. */
+export type StockQuoteState = { readonly side: 'input' | 'output' | 'token0' | 'token1'; readonly symbol: string; readonly token: string; readonly officialId: string;
+  /** Onchain `uiMultiplier()`, `newUIMultiplier()` and `effectiveAt()` (1e18 = 1.0; `effectiveAt` 0 when nothing is scheduled). */
+  readonly multiplierWad: string; readonly scheduledMultiplierWad: string; readonly scheduledEffectiveAt: number;
+  /** The official registry's view at the same Review (must agree with the chain). */
+  readonly registryMultiplierWad: string; readonly registryPendingMultiplierWad: string | null; readonly registryPendingEffectiveTime: string | null;
+  readonly fractionalRestricted: boolean };
 export type PublicQuote = { readonly executionId: string; readonly revision: number; readonly nodeId: string;
-  readonly workflowHash: string; readonly manifestHash: string; readonly chainId: PublicSwapProfile['chainId']; readonly inputToken: string;
-  readonly outputToken: string; readonly inputSymbol: 'USDC' | 'WETH'; readonly outputSymbol: 'USDC' | 'WETH';
+  readonly workflowHash: string; readonly manifestHash: string; readonly chainId: SwapProfile['chainId']; readonly inputToken: string;
+  readonly outputToken: string; readonly inputSymbol: string; readonly outputSymbol: string;
   readonly amountIn: string; readonly expectedOut: string; readonly minimumOut: string; readonly slippageBps: number;
-  readonly pool: string; readonly fee: PublicSwapProfile['fee']; readonly blockNumber: number; readonly blockHash: string;
-  readonly observedAt: string; readonly expiresAt: string; readonly estimatedGas: string | null };
+  readonly pool: string; readonly fee: number; readonly blockNumber: number; readonly blockHash: string;
+  readonly observedAt: string; readonly expiresAt: string; readonly estimatedGas: string | null;
+  /** BUILD-RH-002 catalog quotes only (absent on testnet pair quotes, whose decimals follow the USDC/WETH symbol). */
+  readonly inputDecimals?: number; readonly outputDecimals?: number; readonly environment?: 'MAINNET';
+  readonly provenance?: 'PUBLIC_MAINNET' | 'MOCKED'; readonly stocks?: readonly StockQuoteState[];
+  readonly feeTiers?: readonly { readonly fee: number; readonly pool: string; readonly expectedOut: string | null }[];
+  readonly catalog?: { readonly contentSha256: readonly (string | null)[]; readonly fetchedAt: string } };
 export type PublicAttempt = { readonly attemptId: string; readonly executionId: string; readonly step: Step;
   readonly state: 'PREPARED' | 'HASH' | 'REJECTED' | 'UNKNOWN' | 'PENDING' | 'REVERTED' | 'CONFIRMED';
-  readonly createdAt: string; readonly submittedAt: string | null; readonly account: string; readonly chainId: PublicSwapProfile['chainId']; readonly environment: 'PUBLIC_TESTNET';
+  readonly createdAt: string; readonly submittedAt: string | null; readonly account: string; readonly chainId: SwapProfile['chainId']; readonly environment: 'PUBLIC_TESTNET' | 'MAINNET';
   readonly adapter: 'uniswap.v3'; readonly semanticRevision: number; readonly manifestHash: string;
   readonly tx: Tx; readonly calldataDigest: string; readonly authorizedInput: string; readonly authorizedMinimumOutput: string;
   readonly preBlock: number; readonly nativeBefore: string; readonly inputBefore: string; readonly outputBefore: string;
@@ -47,6 +61,15 @@ export type PublicRun = { readonly quote: PublicQuote; readonly workflow: Semant
 export type PublicBegin = { readonly attempt: PublicAttempt; readonly tx: Tx };
 const ADDRESS = /^0x[0-9a-f]{40}$/;
 const HASH = /^0x[0-9a-f]{64}$/;
+/**
+ * Run-id namespaces: `pub-` for the public-testnet pairs, `rhs-` (BUILD-RH-002) for Robinhood Chain mainnet catalog swaps, so a
+ * run id alone routes to its deployment and a testnet journal can never hold a mainnet run (or the reverse).
+ */
+export type SwapRunPrefix = 'pub' | 'rhs';
+export const SWAP_RUN_ID = /^(pub|rhs)-[0-9a-f]{24}$/;
+const runIdPattern = (prefix: SwapRunPrefix) => prefix === 'rhs' ? /^rhs-[0-9a-f]{24}$/ : /^pub-[0-9a-f]{24}$/;
+/** A run's namespace must match its network kind: catalog (mainnet) runs are `rhs-`, testnet pair runs are `pub-`. */
+const prefixFor = (profile: SwapProfile): SwapRunPrefix => profile.kind === 'CATALOG' ? 'rhs' : 'pub';
 // MetaMask Delegation Framework v1.3.0 on Base Sepolia. This is a readback format only;
 // Gryloo still prepares one direct exact-call artifact and never constructs a delegation.
 const DELEGATION_MANAGER = '0xdb9b1e94b5b69df7e401ddbede43491141047db3';
@@ -66,15 +89,15 @@ function digest(value: unknown): string { return '0x' + createHash('sha256').upd
 const blockHex = (n: number) => '0x' + n.toString(16);
 const callData = (selector: string, ...words: string[]) => selector + words.join('');
 const balanceData = (owner: string) => callData('0x70a08231', addrWord(owner));
-const allowanceData = (owner: string, p: PublicSwapProfile) => callData('0xdd62ed3e', addrWord(owner), addrWord(p.router));
-const approveData = (amount: bigint, p: PublicSwapProfile) => callData('0x095ea7b3', addrWord(p.router), word(amount));
+const allowanceData = (owner: string, p: SwapProfile) => callData('0xdd62ed3e', addrWord(owner), addrWord(p.router));
+const approveData = (amount: bigint, p: SwapProfile) => callData('0x095ea7b3', addrWord(p.router), word(amount));
 const swapData = (q: PublicQuote, owner: string) => callData('0x04e45aaf', addrWord(q.inputToken), addrWord(q.outputToken),
   word(BigInt(q.fee)), addrWord(owner), word(BigInt(q.amountIn)), word(BigInt(q.minimumOut)), word(0n));
-const poolData = (a: string, b: string, p: PublicSwapProfile) => callData('0x1698ee82', addrWord(a), addrWord(b), word(BigInt(p.fee)));
-const quoteData = (a: string, b: string, amount: bigint, p: PublicSwapProfile) => callData('0xc6a5026a', addrWord(a), addrWord(b),
-  word(amount), word(BigInt(p.fee)), word(0n));
+const poolData = (a: string, b: string, p: PairSwapProfile) => callData('0x1698ee82', addrWord(a), addrWord(b), word(BigInt(p.fee)));
+const quoteData = (a: string, b: string, amount: bigint, fee: number) => callData('0xc6a5026a', addrWord(a), addrWord(b),
+  word(amount), word(BigInt(fee)), word(0n));
 /** The swap profile of a run's quote; a persisted chain without a profile is corrupt. */
-const profileOf = (chainId: number): PublicSwapProfile => publicSwapProfile(chainId) ?? fail('PUBLIC_STORE_CORRUPT');
+const profileOf = (chainId: number): SwapProfile => swapProfile(chainId) ?? fail('PUBLIC_STORE_CORRUPT');
 function canonical(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value);
   if (Array.isArray(value)) return '[' + value.map(canonical).join(',') + ']';
@@ -236,7 +259,7 @@ export function publicRecordingEnabled(env: NodeJS.ProcessEnv): boolean {
   return env.GRYLOO_PUBLIC_TESTNET === 'record' && env.NODE_ENV === 'development' &&
     typeof env.GRYLOO_PUBLIC_TESTNET_JOURNAL === 'string' && isAbsolute(env.GRYLOO_PUBLIC_TESTNET_JOURNAL);
 }
-export function explorerUrl(txHash: string, profile: PublicSwapProfile = BASE_SEPOLIA): string { if (!HASH.test(txHash)) fail('TX_HASH_INVALID'); return profile.explorer + txHash; }
+export function explorerUrl(txHash: string, profile: SwapProfile = BASE_SEPOLIA): string { if (!HASH.test(txHash)) fail('TX_HASH_INVALID'); return profile.explorer + txHash; }
 /** Persistence used by the shared core: synchronous files locally, async shared storage in the cloud. */
 type Persistence = { readonly save: (run: PublicRun) => PublicRun | Promise<PublicRun>; readonly load: (id: string) => PublicRun | Promise<PublicRun>;
   readonly locked: <T>(id: string, action: () => Promise<T>) => Promise<T> };
@@ -265,8 +288,11 @@ export function reportPublicRun(run: PublicRun, attemptId: string, result: { kin
   return { ...run, attempts: run.attempts.map(a => a.attemptId === attemptId ? changed : a) };
 }
 /** `rpc` is the Base Sepolia read client; `rpcs` adds one chain-bound read client per further swap profile (CAIP-2 keyed). */
-export function createPublicTestnetService(config: { readonly rpc: Rpc; readonly rpcs?: Readonly<Partial<Record<string, Rpc>>>; readonly journalDir: string; readonly now?: () => Date }) {
+export function createPublicTestnetService(config: { readonly rpc: Rpc; readonly rpcs?: Readonly<Partial<Record<string, Rpc>>>; readonly journalDir: string; readonly now?: () => Date;
+  /** BUILD-RH-002: the catalog runtime (Robinhood Chain); without it a catalog swap fails closed. */ readonly catalog?: CatalogSwapRuntime;
+  readonly idPrefix?: SwapRunPrefix }) {
   const { journalDir } = config;
+  const idPattern = runIdPattern(config.idPrefix ?? 'pub');
   const now = config.now ?? (() => new Date());
   if (!isAbsolute(journalDir)) fail('PUBLIC_JOURNAL_INVALID');
   mkdirSync(journalDir, { recursive: true, mode: 0o700 });
@@ -282,7 +308,7 @@ export function createPublicTestnetService(config: { readonly rpc: Rpc; readonly
     return run;
   }
   function load(id: string): PublicRun {
-    if (!/^pub-[0-9a-f]{24}$/.test(id)) fail('EXECUTION_ID_INVALID');
+    if (!idPattern.test(id)) fail('EXECUTION_ID_INVALID');
     const file = join(journalDir, id + '.json');
     if (!existsSync(file)) fail('EXECUTION_NOT_FOUND');
     return JSON.parse(readFileSync(file, 'utf8')) as PublicRun;
@@ -296,12 +322,12 @@ export function createPublicTestnetService(config: { readonly rpc: Rpc; readonly
     locks.add(id);
     try { return await action(); } finally { locks.delete(id); unlinkSync(lockFile); }
   }
-  const core = createPublicTestnetCore(rpcRouter(config), now, { save, load, locked });
+  const core = createPublicTestnetCore(rpcRouter(config), now, { save, load, locked }, config.catalog, config.idPrefix ?? 'pub');
   const review = (id: string, manifestHash: string): PublicRun => save(reviewPublicRun(load(id), manifestHash, now()));
   const report = (id: string, attemptId: string, result: { kind: 'HASH'; txHash: string } | { kind: 'REJECTED' | 'UNKNOWN' }): PublicRun =>
     save(reportPublicRun(load(id), attemptId, result, now()));
   return { ...core, review, report, load,
-    list: () => readdirSync(journalDir).filter(file => /^pub-[0-9a-f]{24}\.json$/.test(file)).map(file => file.slice(0, -5)) };
+    list: () => readdirSync(journalDir).filter(file => file.endsWith('.json') && idPattern.test(file.slice(0, -5))).map(file => file.slice(0, -5)) };
 }
 export type PublicTestnetService = ReturnType<typeof createPublicTestnetService>;
 
@@ -310,9 +336,11 @@ export type PublicTestnetService = ReturnType<typeof createPublicTestnetService>
  * append-only log (`<id>.jsonl`) under fenced leases, so N API/worker instances can serve one run and its full
  * history survives. Every mutation, including Review and wallet results, runs under the run lease.
  */
-export function createDurablePublicTestnetService(config: { readonly rpc: Rpc; readonly rpcs?: Readonly<Partial<Record<string, Rpc>>>; readonly storage: ExecutionStorage; readonly now?: () => Date }) {
+export function createDurablePublicTestnetService(config: { readonly rpc: Rpc; readonly rpcs?: Readonly<Partial<Record<string, Rpc>>>; readonly storage: ExecutionStorage; readonly now?: () => Date;
+  readonly catalog?: CatalogSwapRuntime; readonly idPrefix?: SwapRunPrefix }) {
   const now = config.now ?? (() => new Date()), { log, leases } = config.storage;
-  const name = (id: string) => { if (!/^pub-[0-9a-f]{24}$/.test(id)) fail('EXECUTION_ID_INVALID'); return id + '.jsonl'; };
+  const idPattern = runIdPattern(config.idPrefix ?? 'pub');
+  const name = (id: string) => { if (!idPattern.test(id)) fail('EXECUTION_ID_INVALID'); return id + '.jsonl'; };
   const validate = (bytes: Uint8Array) => validatePublicRunLog(bytes);
   async function load(id: string): Promise<PublicRun> {
     const bytes = await log.read(name(id));
@@ -328,7 +356,7 @@ export function createDurablePublicTestnetService(config: { readonly rpc: Rpc; r
     return run;
   }
   const locked = <T,>(id: string, action: () => Promise<T>): Promise<T> => leases.hold(name(id).slice(0, -6), action);
-  const core = createPublicTestnetCore(rpcRouter(config), now, { save, load, locked });
+  const core = createPublicTestnetCore(rpcRouter(config), now, { save, load, locked }, config.catalog, config.idPrefix ?? 'pub');
   return { ...core, load,
     review: (id: string, manifestHash: string) => locked(id, async () => save(reviewPublicRun(await load(id), manifestHash, now()))),
     report: (id: string, attemptId: string, result: { kind: 'HASH'; txHash: string } | { kind: 'REJECTED' | 'UNKNOWN' }) =>
@@ -337,7 +365,7 @@ export function createDurablePublicTestnetService(config: { readonly rpc: Rpc; r
 export type DurablePublicTestnetService = ReturnType<typeof createDurablePublicTestnetService>;
 
 /** The read client of a profile's chain; a chain without a configured client is not enabled and fails closed. */
-function rpcRouter(config: { readonly rpc: Rpc; readonly rpcs?: Readonly<Partial<Record<string, Rpc>>> }): (profile: PublicSwapProfile) => Rpc {
+function rpcRouter(config: { readonly rpc: Rpc; readonly rpcs?: Readonly<Partial<Record<string, Rpc>>> }): (profile: SwapProfile) => Rpc {
   return profile => config.rpcs?.[profile.chainRef] ?? (profile.chainRef === BASE_SEPOLIA.chainRef ? config.rpc : fail('PUBLIC_NETWORK_UNAVAILABLE'));
 }
 /** Append-only snapshot history: identity, authorized calls, hashes and terminal results never change. */
@@ -348,7 +376,8 @@ export function validatePublicRunLog(bytes: Uint8Array): void {
   const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
   for (const line of text.trimEnd().split('\n')) {
     const run = JSON.parse(line) as PublicRun;
-    if (!isObject(run) || !isObject(run.quote) || !/^pub-[0-9a-f]{24}$/.test(String(run.quote.executionId)) || !publicSwapProfile(run.quote.chainId) ||
+    const profile = isObject(run) && isObject(run.quote) ? swapProfile(run.quote.chainId as number) : null;
+    if (!isObject(run) || !isObject(run.quote) || !profile || !runIdPattern(prefixFor(profile)).test(String(run.quote.executionId)) ||
         !isObject(run.workflow) || !Array.isArray(run.attempts) || run.attempts.length > 8 || (run.outcome !== null && !isObject(run.outcome)) ||
         run.attempts.some(a => !isObject(a) || a.executionId !== run.quote.executionId || a.chainId !== run.quote.chainId || !ADDRESS.test(String(a.account)) ||
           (a.txHash !== null && !HASH.test(String(a.txHash)))) || new Set(run.attempts.map(a => a.attemptId)).size !== run.attempts.length)
@@ -368,10 +397,144 @@ export function validatePublicRunLog(bytes: Uint8Array): void {
   }
 }
 
+/**
+ * BUILD-RH-002: the catalog runtime of a network whose swaps are authored from its official asset catalog. `catalogFor`
+ * returns the freshly validated official catalog (it fails closed when the registry is unavailable or malformed);
+ * `provenance` labels quotes and evidence (`MOCKED` for the loopback harness). Code pins may be replaced only by a MOCKED harness.
+ */
+export type CatalogSwapRuntime = { readonly catalogFor: (chain: string) => Promise<AssetCatalog>; readonly provenance: 'PUBLIC_MAINNET' | 'MOCKED';
+  readonly codePins?: Partial<Record<keyof CatalogSwapProfile['codeSha256'], string>>; readonly executionEnabled: boolean };
+const sha256Hex = (code: string) => createHash('sha256').update(Buffer.from(code.slice(2), 'hex')).digest('hex');
+/** One side of a catalog swap: the current official catalog must still map the authored identity exactly. */
+function catalogSide(catalog: AssetCatalog, ref: { address: string; decimals: number; officialId: string | null }, side: 'input' | 'output'): CanonicalAsset {
+  const asset = catalogAsset(catalog, { address: ref.address });
+  if (!asset || asset.kind !== 'ERC20' || asset.decimals !== ref.decimals || (asset.stock?.officialId ?? null) !== ref.officialId)
+    fail('CATALOG_ASSET_IDENTITY_CHANGED');
+  if (asset.stock && side === 'output' && !asset.stock.trading.acquirable) fail('STOCK_TOKEN_NOT_ACQUIRABLE');
+  if (asset.stock && side === 'input' && !asset.stock.trading.disposable) fail('STOCK_TOKEN_NOT_DISPOSABLE');
+  return asset;
+}
+/**
+ * BUILD-RH-002: one official catalog ERC-20 verified at a pinned block, shared by catalog swaps and Robinhood liquidity. USDG and WETH must
+ * carry their pinned code; every Stock Token must be the official beacon proxy on the official beacon and report the registry's uid, and its
+ * onchain multiplier must equal the registry's. A change scheduled to take effect before the Review expires fails closed
+ * (STOCK_MULTIPLIER_CHANGE_PENDING). Returns the Stock Token state the Review binds, or null for a base asset. Read-only.
+ */
+export async function verifyCatalogToken(rpc: Rpc, P: Pick<CatalogSwapProfile, 'weth' | 'beaconSlot' | 'stockTokenBeacon'>,
+  pins: Pick<Record<keyof CatalogSwapProfile['codeSha256'], string>, 'weth' | 'usdg' | 'stockTokenProxy'>, asset: CanonicalAsset, side: StockQuoteState['side'],
+  block: string, headTime: number, reviewTtlSeconds: number, now: () => Date): Promise<StockQuoteState | null> {
+  const call = async (to: string, data: string) => hex(await rpc('eth_call', [{ to, data }, block]));
+  const word0 = (value: string) => value.length >= 66 ? BigInt(value.slice(0, 66)) : fail('RPC_RESPONSE_INVALID');
+  const addressOf = (value: string) => address('0x' + value.slice(-40));
+  const code = await rpc('eth_getCode', [asset.address, block]);
+  if (typeof code !== 'string' || !/^0x(?:[0-9a-fA-F]{2})*$/.test(code)) fail('RPC_RESPONSE_INVALID');
+  if (code === '0x') fail('CONTRACT_CODE_MISSING');
+  const tokenCode = sha256Hex(code.toLowerCase());
+  if (BigInt(await call(asset.address!, '0x313ce567')) !== BigInt(asset.decimals)) fail('TOKEN_METADATA_MISMATCH');
+  if (!asset.stock) {
+    const pin = asset.address === P.weth ? pins.weth : asset.symbol === 'USDG' ? pins.usdg : null;
+    if (!pin || tokenCode !== pin) fail('TOKEN_DEPLOYMENT_MISMATCH');
+    return null;
+  }
+  // Every official Stock Token is the same beacon proxy on the official beacon, and reports the registry's uid.
+  if (tokenCode !== pins.stockTokenProxy || addressOf(hex(await rpc('eth_getStorageAt', [asset.address, P.beaconSlot, block]))) !== P.stockTokenBeacon)
+    fail('STOCK_TOKEN_DEPLOYMENT_MISMATCH');
+  if ('0x' + word0(await call(asset.address!, '0xf514ce36')).toString(16).padStart(64, '0') !== asset.stock.officialId) fail('STOCK_TOKEN_IDENTITY_MISMATCH');
+  const multiplier = word0(await call(asset.address!, '0xa60bf13d')), scheduled = word0(await call(asset.address!, '0xdc767007'));
+  const effectiveAt = Number(word0(await call(asset.address!, '0x97a4064f')));
+  if (multiplier <= 0n || !Number.isSafeInteger(effectiveAt)) fail('STOCK_MULTIPLIER_INVALID');
+  // The registry and the chain must agree on the multiplier the Review shows; a disagreement is not resolved by guessing.
+  if (multiplier.toString() !== asset.stock.multiplierWad) fail('STOCK_MULTIPLIER_MISMATCH');
+  // A scheduled change that takes effect before this Review can be executed would change the economic meaning under it.
+  const reviewEnd = Math.floor(now().getTime() / 1000) + reviewTtlSeconds;
+  const registryPending = asset.stock.pendingEffectiveTime ? Math.floor(Date.parse(asset.stock.pendingEffectiveTime) / 1000) : null;
+  if ((scheduled !== multiplier && effectiveAt > headTime && effectiveAt <= reviewEnd) || (registryPending !== null && registryPending <= reviewEnd))
+    fail('STOCK_MULTIPLIER_CHANGE_PENDING');
+  return { side, symbol: asset.symbol, token: asset.address!, officialId: asset.stock.officialId, multiplierWad: multiplier.toString(),
+    scheduledMultiplierWad: scheduled.toString(), scheduledEffectiveAt: effectiveAt, registryMultiplierWad: asset.stock.multiplierWad,
+    registryPendingMultiplierWad: asset.stock.pendingMultiplierWad, registryPendingEffectiveTime: asset.stock.pendingEffectiveTime,
+    fractionalRestricted: asset.stock.trading.fractionalRestricted };
+}
+/**
+ * The catalog quote: official identity, deployment code, Stock Token uid and multiplier state, and every locally derived
+ * canonical pool are read at one pinned block; the best live fee tier is bound with its pool. Read-only.
+ */
+async function catalogQuote(workflow: SemanticWorkflow, executionId: string, P: CatalogSwapProfile, rpc: Rpc, runtime: CatalogSwapRuntime, now: () => Date): Promise<PublicQuote> {
+  const node = workflow.nodes.find(isCatalogSwapNode) ?? fail('PUBLIC_WORKFLOW_UNSUPPORTED');
+  validateAuthoringWorkflow(workflow, createBaseSepoliaReviewContext());
+  const fields = readCatalogSwapNode(node);
+  const cap = resolveWorkflowCapability(workflow, { environment: P.environment });
+  if (!cap.executionSupported || cap.nodes.find(item => item.nodeId === node.nodeId)?.profile?.adapterId !== 'uniswap.v3') fail('PUBLIC_WORKFLOW_UNSUPPORTED');
+  const catalog = await runtime.catalogFor(P.chainRef);
+  if (catalog.chain !== P.chainRef) fail('CATALOG_NETWORK_MISMATCH');
+  const input = catalogSide(catalog, fields.input, 'input'), output = catalogSide(catalog, fields.output, 'output');
+  const pins: Record<keyof CatalogSwapProfile['codeSha256'], string> = { ...P.codeSha256, ...runtime.provenance === 'MOCKED' ? runtime.codePins : {} };
+  const call = async (to: string, data: string, block: string) => hex(await rpc('eth_call', [{ to, data }, block]));
+  const word0 = (value: string) => value.length >= 66 ? BigInt(value.slice(0, 66)) : fail('RPC_RESPONSE_INVALID');
+  const addressOf = (value: string) => address('0x' + value.slice(-40));
+  if (quantity(await rpc('eth_chainId', [])) !== BigInt(P.chainId)) fail('WRONG_PROVIDER_CHAIN');
+  const head = await rpc('eth_getBlockByNumber', ['latest', false]);
+  if (!isObject(head) || typeof head.number !== 'string' || typeof head.hash !== 'string' || typeof head.timestamp !== 'string') fail('RPC_RESPONSE_INVALID');
+  const blockNumber = Number(quantity(head.number)), blockHash = hex(head.hash), block = blockHex(blockNumber), headTime = Number(quantity(head.timestamp));
+  if (!Number.isSafeInteger(blockNumber) || !HASH.test(blockHash)) fail('RPC_RESPONSE_INVALID');
+  const age = now().getTime() - headTime * 1000;
+  if (age > 120_000 || age < -30_000) fail('STALE_CHAIN_HEAD');
+  // Runtime code may legitimately be empty (`0x`): no contract there. Anything that is not even-length hex is a malformed answer.
+  const codeAt = async (target: string) => { const value = await rpc('eth_getCode', [target, block]);
+    return typeof value === 'string' && /^0x(?:[0-9a-fA-F]{2})*$/.test(value) ? value.toLowerCase() : fail('RPC_RESPONSE_INVALID'); };
+  const code = async (target: string) => { const value = await codeAt(target); return value === '0x' ? fail('CONTRACT_CODE_MISSING') : value; };
+  for (const [name, target] of [['factory', P.factory], ['router', P.router], ['quoter', P.quoter]] as const)
+    if (sha256Hex(await code(target)) !== pins[name]) fail('PROTOCOL_DEPLOYMENT_MISMATCH');
+  for (const target of [P.quoter, P.router])
+    if (addressOf(await call(target, '0xc45a0155', block)) !== P.factory || addressOf(await call(target, '0x4aa4a4fc', block)) !== P.weth) fail('PROTOCOL_DEPLOYMENT_MISMATCH');
+  const stocks: StockQuoteState[] = [];
+  for (const [side, asset] of [['input', input], ['output', output]] as const) {
+    const stock = await verifyCatalogToken(rpc, P, pins, asset, side, block, headTime, P.reviewTtlSeconds, now);
+    if (stock) stocks.push(stock);
+  }
+  // Every standard fee tier's canonical pool is derived locally (CREATE2), checked for code and live liquidity, and quoted.
+  const amountIn = BigInt(fields.amount), tiers: { fee: number; pool: string; expectedOut: string | null }[] = [];
+  for (const tier of P.feeTiers) {
+    const pool = uniswapV3PoolAddress(P.factory, P.poolInitCodeHash, input.address!, output.address!, tier.fee);
+    if (await codeAt(pool) === '0x') { tiers.push({ fee: tier.fee, pool, expectedOut: null }); continue; }
+    const [token0, token1] = [input.address!, output.address!].sort();
+    if (addressOf(await call(pool, '0xc45a0155', block)) !== P.factory || addressOf(await call(pool, '0x0dfe1681', block)) !== token0 ||
+        addressOf(await call(pool, '0xd21220a7', block)) !== token1 || BigInt(await call(pool, '0xddca3f43', block)) !== BigInt(tier.fee)) fail('POOL_METADATA_MISMATCH');
+    if (BigInt(await call(pool, '0x1a686502', block)) === 0n || word0(await call(pool, '0x3850c7bd', block)) === 0n) { tiers.push({ fee: tier.fee, pool, expectedOut: null }); continue; }
+    // A tier whose quote reverts (no usable liquidity for this size) is simply not a candidate.
+    let out: bigint | null;
+    try { out = word0(await call(P.quoter, quoteData(input.address!, output.address!, amountIn, tier.fee), block)); } catch { out = null; }
+    tiers.push({ fee: tier.fee, pool, expectedOut: out && out > 0n ? out.toString() : null });
+  }
+  const best = tiers.filter(tier => tier.expectedOut !== null).sort((a, b) => BigInt(b.expectedOut!) > BigInt(a.expectedOut!) ? 1 : BigInt(b.expectedOut!) < BigInt(a.expectedOut!) ? -1 : a.fee - b.fee)[0];
+  if (!best) fail('POOL_UNUSABLE');
+  const expectedOut = BigInt(best.expectedOut!), minimumOut = expectedOut * BigInt(10_000 - fields.slippageBps) / 10_000n;
+  if (minimumOut <= 0n) fail('QUOTE_INVALID');
+  const sameBlock = await rpc('eth_getBlockByNumber', [block, false]);
+  if (!isObject(sameBlock) || sameBlock.hash !== blockHash) fail('QUOTE_BLOCK_REORG');
+  const observedAt = now().toISOString();
+  const quoteFields = { executionId, revision: workflow.revision, nodeId: node.nodeId,
+    workflowHash: hashArtifactBytes('semantic-workflow', new TextEncoder().encode(JSON.stringify(workflow))), chainId: P.chainId,
+    inputToken: input.address!, outputToken: output.address!, inputSymbol: input.symbol, outputSymbol: output.symbol, amountIn: fields.amount,
+    expectedOut: expectedOut.toString(), minimumOut: minimumOut.toString(), slippageBps: fields.slippageBps, pool: best.pool, fee: best.fee,
+    blockNumber, blockHash, observedAt, expiresAt: new Date(now().getTime() + P.reviewTtlSeconds * 1000).toISOString(), estimatedGas: null,
+    inputDecimals: input.decimals, outputDecimals: output.decimals, environment: 'MAINNET' as const, provenance: runtime.provenance, stocks, feeTiers: tiers,
+    catalog: { contentSha256: catalog.provenance.map(item => item.contentSha256), fetchedAt: catalog.provenance.map(item => item.fetchedAt).sort().at(-1)! } };
+  return { ...quoteFields, manifestHash: digest(canonical(quoteFields)) };
+}
+/** The economically material state of a catalog quote: a change of any of it needs a new Review. */
+function catalogEconomics(quote: PublicQuote) {
+  return canonical({ expectedOut: quote.expectedOut, minimumOut: quote.minimumOut, pool: quote.pool, fee: quote.fee,
+    stocks: (quote.stocks ?? []).map(stock => [stock.officialId, stock.multiplierWad, stock.scheduledMultiplierWad, stock.scheduledEffectiveAt]) });
+}
+
 /** Shared verified read path. It has no persistence, Review or transaction submission port. */
-export function createPublicSwapQuoteReader(rpcFor: (profile: PublicSwapProfile) => Rpc, now: () => Date = () => new Date()) {
+export function createPublicSwapQuoteReader(rpcFor: (profile: SwapProfile) => Rpc, now: () => Date = () => new Date(), catalog?: CatalogSwapRuntime) {
   const read = async (rpc: Rpc, to: string, data: string, block: string) => hex(await rpc('eth_call', [{ to, data }, block]));
   async function quote(workflow: SemanticWorkflow, executionId: string): Promise<PublicQuote> {
+    const catalogNode = workflow.nodes.find(isCatalogSwapNode), catalogProfile = catalogNode ? swapProfile(catalogNode.chainId) : null;
+    if (catalogProfile?.kind === 'CATALOG') return catalogQuote(workflow, executionId, catalogProfile, rpcFor(catalogProfile),
+      catalog ?? fail('PUBLIC_NETWORK_UNAVAILABLE'), now);
     const swap = swapOf(workflow), P = swap.profile, rpc = rpcFor(P);
     const call = (to: string, data: string, block: string) => read(rpc, to, data, block);
     if (quantity(await rpc('eth_chainId', [])) !== BigInt(P.chainId)) fail('WRONG_PROVIDER_CHAIN');
@@ -399,7 +562,7 @@ export function createPublicSwapQuoteReader(rpcFor: (profile: PublicSwapProfile)
         BigInt(await call(P.pool, '0xddca3f43', block)) !== BigInt(P.fee)) fail('POOL_METADATA_MISMATCH');
     if (BigInt(await call(P.pool, '0x1a686502', block)) === 0n ||
         BigInt((await call(P.pool, '0x3850c7bd', block)).slice(0, 66)) === 0n) fail('POOL_UNUSABLE');
-    const raw = await call(P.quoter, quoteData(swap.inputToken, swap.outputToken, swap.amountIn, P), block);
+    const raw = await call(P.quoter, quoteData(swap.inputToken, swap.outputToken, swap.amountIn, P.fee), block);
     if (raw.length < 66) fail('QUOTE_INVALID');
     const expectedOut = BigInt(raw.slice(0, 66));
     const minimumOut = expectedOut * BigInt(10_000 - swap.slippageBps) / 10_000n;
@@ -418,7 +581,7 @@ export function createPublicSwapQuoteReader(rpcFor: (profile: PublicSwapProfile)
   return quote;
 }
 
-function createPublicTestnetCore(rpcFor: (profile: PublicSwapProfile) => Rpc, now: () => Date, persistence: Persistence) {
+function createPublicTestnetCore(rpcFor: (profile: SwapProfile) => Rpc, now: () => Date, persistence: Persistence, catalog: CatalogSwapRuntime | undefined, idPrefix: SwapRunPrefix) {
   const { locked } = persistence;
   const save = async (run: PublicRun) => persistence.save(run), load = async (id: string) => persistence.load(id);
   async function read(rpc: Rpc, to: string, data: string, block: string): Promise<string> {
@@ -427,12 +590,15 @@ function createPublicTestnetCore(rpcFor: (profile: PublicSwapProfile) => Rpc, no
   async function balance(rpc: Rpc, token: string, owner: string, block: string): Promise<bigint> {
     return BigInt(await read(rpc, token, balanceData(owner), block));
   }
-  async function allowance(rpc: Rpc, profile: PublicSwapProfile, token: string, owner: string, block: string): Promise<bigint> {
+  async function allowance(rpc: Rpc, profile: SwapProfile, token: string, owner: string, block: string): Promise<bigint> {
     return BigInt(await read(rpc, token, allowanceData(owner, profile), block));
   }
-  const quote = createPublicSwapQuoteReader(rpcFor, now);
+  const quote = createPublicSwapQuoteReader(rpcFor, now, catalog);
   async function prepare(workflow: SemanticWorkflow): Promise<PublicRun> {
-    const executionId = 'pub-' + randomBytes(12).toString('hex');
+    const node = workflow.nodes.find(item => item.actionType === 'asset.swap.exact-input'), profile = node ? swapProfile(node.chainId) : null;
+    // Each service serves one namespace; a workflow for the other kind of network is refused before any read.
+    if (!profile || prefixFor(profile) !== idPrefix) fail('PUBLIC_WORKFLOW_UNSUPPORTED');
+    const executionId = idPrefix + '-' + randomBytes(12).toString('hex');
     const q = await quote(workflow, executionId);
     return save({ quote: q, workflow, reviewedManifestHash: null, attempts: [], outcome: null });
   }
@@ -454,21 +620,32 @@ function createPublicTestnetCore(rpcFor: (profile: PublicSwapProfile) => Rpc, no
       if (run.outcome || run.attempts.some(attempt => ['PREPARED', 'HASH', 'PENDING', 'UNKNOWN'].includes(attempt.state))) fail('ATTEMPT_ALREADY_ACTIVE');
       if (run.attempts.some(attempt => attempt.step === 'swap' && attempt.state !== 'REJECTED')) fail('SWAP_ALREADY_ATTEMPTED');
       if (run.reviewedManifestHash !== run.quote.manifestHash) fail('REVIEW_REQUIRED');
-      const fresh = await quote(run.workflow, id);
+      const P = profileOf(run.quote.chainId), rpc = rpcFor(P);
+      // BUILD-RH-002: real-funds execution needs the deployment's explicit owner-execution opt-in; Review stays available without it.
+      if (P.kind === 'CATALOG' && !catalog?.executionEnabled) fail('OWNER_EXECUTION_NOT_ENABLED');
+      let fresh: PublicQuote;
+      try { fresh = await quote(run.workflow, id); }
+      catch (cause) {
+        // A Stock Token multiplier change now inside the Review window invalidates the reviewed authority.
+        if (cause instanceof Error && cause.message === 'STOCK_MULTIPLIER_CHANGE_PENDING') { await save({ ...run, reviewedManifestHash: null }); }
+        throw cause;
+      }
       if (fresh.manifestHash !== run.quote.manifestHash) {
-        // Observation metadata changes each block; only economic changes require a new review.
-        if (fresh.expectedOut !== run.quote.expectedOut || fresh.minimumOut !== run.quote.minimumOut ||
-            fresh.pool !== run.quote.pool || fresh.fee !== run.quote.fee) {
+        // Observation metadata changes each block; only economic changes require a new review. For a catalog quote the
+        // Stock Token multiplier state is economic: a changed multiplier changes what the owner's tokens represent.
+        const stockChanged = canonical((fresh.stocks ?? []).map(x => [x.officialId, x.multiplierWad, x.scheduledMultiplierWad, x.scheduledEffectiveAt])) !==
+          canonical((run.quote.stocks ?? []).map(x => [x.officialId, x.multiplierWad, x.scheduledMultiplierWad, x.scheduledEffectiveAt]));
+        if (P.kind === 'CATALOG' ? catalogEconomics(fresh) !== catalogEconomics(run.quote) : fresh.expectedOut !== run.quote.expectedOut ||
+            fresh.minimumOut !== run.quote.minimumOut || fresh.pool !== run.quote.pool || fresh.fee !== run.quote.fee) {
           run = await save({ ...run, quote: fresh, reviewedManifestHash: null });
-          fail('QUOTE_CHANGED_REVIEW_REQUIRED');
+          fail(stockChanged ? 'STOCK_MULTIPLIER_CHANGED_REVIEW_REQUIRED' : 'QUOTE_CHANGED_REVIEW_REQUIRED');
         }
       }
       if (now().getTime() >= Date.parse(run.quote.expiresAt)) {
         run = await save({ ...run, quote: fresh, reviewedManifestHash: null });
         fail('QUOTE_EXPIRED_REVIEW_REQUIRED');
       }
-      const P = profileOf(run.quote.chainId), rpc = rpcFor(P);
-      const gate = resolveWorkflowCapability(run.workflow, { environment: 'PUBLIC_TESTNET', runtime: {
+      const gate = resolveWorkflowCapability(run.workflow, { environment: P.environment, runtime: {
         quoteProviderAvailable: true, walletConnected: true, walletChainId: P.chainRef,
         artifacts: 'CURRENT', simulationReady: true, authorizationReady: true,
       } });
@@ -487,10 +664,10 @@ function createPublicTestnetCore(rpcFor: (profile: PublicSwapProfile) => Rpc, no
       const baseTx = { chainId: P.chainHex, from: owner, to, data, value: '0x0' as const };
       const gas = quantity(await rpc('eth_estimateGas', [{ from: owner, to, data, value: '0x0' }]));
       const gasPrice = quantity(await rpc('eth_gasPrice', []));
-      if (gas <= 0n || gasPrice <= 0n || ethBefore < gas * gasPrice * 2n) fail('INSUFFICIENT_TEST_ETH');
+      if (gas <= 0n || gasPrice <= 0n || ethBefore < gas * gasPrice * 2n) fail(P.environment === 'MAINNET' ? 'INSUFFICIENT_GAS_FUNDS' : 'INSUFFICIENT_TEST_ETH');
       const tx: Tx = { ...baseTx, gas: '0x' + (gas * 12n / 10n).toString(16) };
       const attempt: PublicAttempt = { attemptId: id + '.' + step + '.' + String(run.attempts.length + 1), executionId: id,
-        step, state: 'PREPARED', createdAt: now().toISOString(), submittedAt: null, account: owner, chainId: P.chainId, environment: 'PUBLIC_TESTNET',
+        step, state: 'PREPARED', createdAt: now().toISOString(), submittedAt: null, account: owner, chainId: P.chainId, environment: P.environment,
         adapter: 'uniswap.v3', semanticRevision: run.quote.revision, manifestHash: run.quote.manifestHash,
         tx, calldataDigest: digest(data), authorizedInput: run.quote.amountIn,
         authorizedMinimumOutput: run.quote.minimumOut, preBlock: head, nativeBefore: ethBefore.toString(), inputBefore: inputBefore.toString(),
@@ -600,24 +777,25 @@ function createPublicTestnetCore(rpcFor: (profile: PublicSwapProfile) => Rpc, no
         { ...a, nativeAfter: nativeAfter.toString() } : a) };
       const journalHeadHash = digest(canonical(run));
       const receiptHash = digest(canonical(raw));
-      const inputAsset = { chainId: P.chainRef, address: run.quote.inputToken,
-        decimals: run.quote.inputSymbol === 'USDC' ? 6 : 18 };
-      const outputAsset = { chainId: P.chainRef, address: run.quote.outputToken,
-        decimals: run.quote.outputSymbol === 'USDC' ? 6 : 18 };
+      const inputAsset = { chainId: P.chainRef, address: run.quote.inputToken, decimals: quoteDecimals(run.quote, 'input') };
+      const outputAsset = { chainId: P.chainRef, address: run.quote.outputToken, decimals: quoteDecimals(run.quote, 'output') };
       const nativeAsset = { chainId: P.chainRef, nativeId: 'ETH', decimals: 18 };
       const reconciliation = { balances: [{ asset: inputAsset, amount: inputAfter.toString() },
         { asset: outputAsset, amount: outputAfter.toString() }],
         allowances: [{ asset: inputAsset, amount: allowanceAfter.toString() }], debt: [], positions: [],
         fees: [{ asset: nativeAsset, amount: actualGasCost.toString() }],
         residualAssets: [{ asset: inputAsset, amount: inputAfter.toString() }, { asset: outputAsset, amount: outputAfter.toString() }],
-        ownership: [{ chainId: P.chainRef, address: attempt.account }], limitations: ['PUBLIC_TESTNET_ONLY'] };
+        ownership: [{ chainId: P.chainRef, address: attempt.account }],
+        limitations: P.kind === 'CATALOG' ? ['OWNER_WALLET_MAINNET', ...run.quote.provenance === 'MOCKED' ? ['MOCKED_LOOPBACK_CHAIN'] : []] : ['PUBLIC_TESTNET_ONLY'] };
       const bundle = validateArtifact('evidence-bundle', { schemaVersion: '1.0.0',
         evidenceBundleId: id + '.evidence', version: 1, supersedes: null,
         semanticWorkflowHash: run.quote.workflowHash, artifactSetHash: digest(canonical(run.quote)),
         simulationHash: digest(canonical({ expected: run.quote.expectedOut, minimum: run.quote.minimumOut, pool: run.quote.pool })),
         policyHash: digest(canonical({ amount: run.quote.amountIn, slippageBps: run.quote.slippageBps })),
         manifestHash: run.quote.manifestHash, executionPlanHash: digest(canonical(attempt.tx)),
-        journalHeadHash, observedAt: now().toISOString(), environment: 'TESTNET_EXECUTED', outcome: 'RECONCILED',
+        journalHeadHash, observedAt: now().toISOString(),
+        // A MOCKED loopback run is never labeled as public execution.
+        environment: P.kind === 'CATALOG' ? run.quote.provenance === 'PUBLIC_MAINNET' ? 'MAINNET_EXECUTED' : 'MOCKED' : 'TESTNET_EXECUTED', outcome: 'RECONCILED',
         receipts: [{ receiptId: attempt.txHash, contentHash: receiptHash }], differences: [], reconciliation,
         evidence: [{ evidenceId: 'public-explorer', kind: 'EXTERNAL_REFERENCE', contentHash: digest(explorer) },
           { evidenceId: 'transaction-readback', kind: 'EXTERNAL_REFERENCE', contentHash: digest(canonical(tx)) },

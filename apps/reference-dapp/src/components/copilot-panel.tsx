@@ -8,6 +8,7 @@ import type { WorkflowOwner } from '../domain/saved-workflow';
 import type { useWalletProof } from './wallet-proof';
 import { useState, type FormEvent } from 'react';
 import { parseLocalCommand, summarize } from '../domain/commands';
+import { ensureNetworkCatalog } from '../state/asset-catalog-store';
 import { useWorkflow } from '../state/workflow-store';
 
 import { useBuild009Wallet } from '../state/build009-wallet-store';
@@ -29,9 +30,11 @@ export function CopilotPanel({ interactive = true, owner = null, proof }: { inte
     const text = input.trim();
     if (!text || copilot.busy) return;
     setInput('');
-    send(text);
+    void send(text);
   }
-  function send(text: string) {
+  async function send(text: string) {
+    // BUILD-RH-002: Robinhood Chain Stock Tokens resolve only in the validated official catalog; load it (where enabled) before parsing.
+    if (/\brobinhood\b/i.test(text)) await ensureNetworkCatalog();
     setAutomation(null);
     if (text.toLowerCase() === 'explain') {
       dismissProposal();

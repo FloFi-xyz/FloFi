@@ -12,15 +12,15 @@ import { CROSSCHAIN_ROUTER_BASE_ARBITRUM as MAINNET, CROSSCHAIN_ROUTER_BASE_SEPO
 export function routerMockCode(profile: RouterProfile): Readonly<Record<string, string>> {
   return Object.freeze({
     [profile.source.spokePool]: '0x60106010', [profile.source.lifiDiamond]: '0x60116011', [profile.source.lifiFeeForwarder]: '0x60126012',
-    [profile.source.usdc]: '0x60136013', ['dst:' + profile.destination.spokePool]: '0x60206020', ['dst:' + profile.destination.usdc]: '0x60216021' });
+    [profile.source.token]: '0x60136013', ['dst:' + profile.destination.spokePool]: '0x60206020', ['dst:' + profile.destination.token]: '0x60216021' });
 }
 const sha = (code: string) => createHash('sha256').update(Buffer.from(code.slice(2), 'hex')).digest('hex');
 export function routerMockCodePins(profile: RouterProfile) {
   const code = routerMockCode(profile);
   return Object.freeze({
     baseSpokePool: sha(code[profile.source.spokePool]!), baseLifiDiamond: sha(code[profile.source.lifiDiamond]!),
-    baseLifiFeeForwarder: sha(code[profile.source.lifiFeeForwarder]!), baseUsdc: sha(code[profile.source.usdc]!),
-    arbitrumSpokePool: sha(code['dst:' + profile.destination.spokePool]!), arbitrumUsdc: sha(code['dst:' + profile.destination.usdc]!),
+    baseLifiFeeForwarder: sha(code[profile.source.lifiFeeForwarder]!), baseUsdc: sha(code[profile.source.token]!),
+    arbitrumSpokePool: sha(code['dst:' + profile.destination.spokePool]!), arbitrumUsdc: sha(code['dst:' + profile.destination.token]!),
   });
 }
 export const ROUTER_MOCK_CODE = routerMockCode(MAINNET);

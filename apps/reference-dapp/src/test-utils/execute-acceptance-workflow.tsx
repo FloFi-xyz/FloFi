@@ -12,3 +12,6 @@ export function useWorkflow() { const value = useContext(Context); if (!value) t
 export function useExecutionEnvironment() { return { walletEnvironment: 'testnet' as const }; }
 export function useUniswapLiquidity() { return {}; }
 export function useSolanaLiquidity() { return {}; }
+// BUILD-RH-002: the official Robinhood Chain catalog store (it calls a Next server action) stays idle in this suite.
+export function useNetworkCatalog() { return { status: 'idle' as const, code: null, version: 'idle:0', ensure: async () => undefined, retry: async () => undefined }; }
+export async function ensureNetworkCatalog() { return undefined; }

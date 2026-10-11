@@ -82,7 +82,8 @@ answers `*_NOT_ENABLED`.
 | `GRYLOO_SOLANA_DEVNET_EXECUTION=DISABLED` | keeps both Devnet flows Simulate/Review-only | optional | optional |
 | `GRYLOO_ROUTER=live` | Cross-chain Router — Base → Arbitrum One, **Simulate/Review only** | — | as chosen |
 | `GRYLOO_JUPITER=live` | Jupiter — Solana mainnet-beta, **Simulate/Review only** | — | as chosen |
-| `GRYLOO_ROUTER_OWNER_EXECUTION=MAINNET_OWNER_APPROVED`, `GRYLOO_JUPITER_OWNER_EXECUTION=MAINNET_OWNER_APPROVED` | real-funds owner execution | **never** | only by explicit owner decision; not set by this build |
+| `GRYLOO_ROBINHOOD_MAINNET=live` | Robinhood Chain mainnet (BUILD-RH-002): the official Stock Token catalog (Canvas search, chat, MCP), catalog swaps, token transfers, Uniswap v3 liquidity and the Router routes Base/Arbitrum USDC ⇄ Robinhood USDG, **Simulate/Review only** | — | as chosen |
+| `GRYLOO_ROUTER_OWNER_EXECUTION=MAINNET_OWNER_APPROVED`, `GRYLOO_JUPITER_OWNER_EXECUTION=MAINNET_OWNER_APPROVED`, `GRYLOO_ROBINHOOD_OWNER_EXECUTION=MAINNET_OWNER_APPROVED` | real-funds owner execution | **never** | only by explicit owner decision; not set by this build |
 
 ## 4. RPC endpoints and provider keys (optional; all HTTPS, no credentials in the userinfo part)
 
@@ -97,6 +98,7 @@ chain, to Mainnet or to localhost, and every response's chain identity is verifi
 | `GRYLOO_SOLANA_DEVNET_RPC_URL` | Solana Devnet (genesis-verified) | `https://api.devnet.solana.com` | if keyed |
 | `GRYLOO_BASE_RPC_URL`, `GRYLOO_ARBITRUM_RPC_URL` | Base 8453 / Arbitrum One 42161 — Router mainnet (read-only) | `https://mainnet.base.org`, `https://arb1.arbitrum.io/rpc` | if keyed |
 | `GRYLOO_SOLANA_RPC_URL` | Solana mainnet-beta (genesis-verified) — Jupiter (read-only) | `https://api.mainnet-beta.solana.com` | if keyed |
+| `GRYLOO_ROBINHOOD_RPC_URL` | Robinhood Chain 4663 (chain-bound) — catalog swap, transfer, liquidity and the Robinhood Router routes. Must support `eth_simulateV1` for liquidity. The Router routes also use `GRYLOO_BASE_RPC_URL` / `GRYLOO_ARBITRUM_RPC_URL` for their other chain | `https://rpc.mainnet.chain.robinhood.com` | if keyed |
 | `GRYLOO_ALCHEMY_API_KEY` | Keyed Base Sepolia provider the Supply → Borrow → Swap composition requires (public endpoints rate-limit its sequential `eth_simulateV1`; sent only as a server-side Bearer header); dev-only Base observation. Without it the composition fails closed with `LENDING_PUBLIC_CREDENTIAL_NOT_CONFIGURED` | — | **yes** |
 | `LIFI_API_KEY`, `ACROSS_API_KEY`, `ACROSS_INTEGRATOR_ID`, `JUPITER_API_KEY` | Provider quotas | — | **yes** (integrator id: no) |
 
@@ -291,7 +293,7 @@ flows' worker, which keep `WORKER_SUBMISSION_FORBIDDEN`. Startup logs: `delegati
 These select local journals, loopback MOCKED harnesses or local forks. On a hosted deployment they are refused: journals and
 `/tmp` state are never used, harness gates leave the flow `off`, and fork/demo actions report themselves unavailable.
 
-`GRYLOO_*_HARNESS=MOCKED_LOOPBACK_ONLY` (supply, lending, Jupiter, Solana Devnet, Robinhood, Uniswap liquidity, Router, Router testnet, card
+`GRYLOO_*_HARNESS=MOCKED_LOOPBACK_ONLY` (supply, lending, Jupiter, Solana Devnet, Robinhood, Robinhood mainnet — `GRYLOO_ROBINHOOD_MAINNET_HARNESS`, its registry read from 127.0.0.1:8561 — Uniswap liquidity, Router, Router testnet, card
 provider — `GRYLOO_CARD_HARNESS` points Add card at the loopback Mercado Pago stand-in on 127.0.0.1:8555),
 `GRYLOO_*_JOURNAL` (supply, public testnet, Robinhood, Jupiter, Solana Devnet, Uniswap liquidity, Router, Router testnet, liquidity,
 Mode A, bridge), `GRYLOO_PUBLIC_TESTNET_READ`, `GRYLOO_BASE_OBSERVATION=live`, `GRYLOO_MODE_A`/`_PROFILE`, `GRYLOO_MODE_B`/`_PROFILE`/

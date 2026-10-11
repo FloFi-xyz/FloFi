@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 /**
- * BUILD-RH-001: Robinhood Chain network identity. This is declarative data only. It grants no
- * execution capability, and no row in the execution capability registry targets these chains.
+ * BUILD-RH-001: Robinhood Chain network identity. BUILD-RH-002 makes Robinhood Chain mainnet (4663) a first-class
+ * execution network: the capability rows (swap, concentrated liquidity, transfer, router bridge) live in the execution
+ * capability registry, each bound to a verified profile, gated by an explicit deployment opt-in and with no evidence
+ * ceiling until an owner-signed acceptance is reconciled. Robinhood Chain Testnet keeps only the RH-DEMO-001 self-transfer:
+ * Stock Tokens and the venues exist on mainnet only.
  *
  * Network sources (checked 2026-10-02): https://docs.robinhood.com/chain/connecting,
  * https://docs.robinhood.com/chain/add-network-to-wallet and https://docs.robinhood.com/chain/protocol-contracts.
@@ -15,7 +18,7 @@ export type RobinhoodNetwork = {
   readonly chainHex: string; readonly environment: 'MAINNET' | 'PUBLIC_TESTNET';
   readonly nativeCurrency: { readonly name: 'Ether'; readonly symbol: 'ETH'; readonly decimals: 18 };
   readonly rpc: string; readonly explorer: string; readonly officialSource: string;
-  /** Official contracts on this L2. Recognized for read-only verification only; none is an execution target. */
+  /** Official contracts on this L2, recorded for read-only verification. */
   readonly contracts: readonly RobinhoodContract[];
 };
 const PROTOCOL_CONTRACTS = 'https://docs.robinhood.com/chain/protocol-contracts';
@@ -53,7 +56,7 @@ export type RobinhoodDeploymentStatus = 'CANONICAL_DEPLOYMENT' | 'NO_CANONICAL_D
 export type RobinhoodProtocolAvailability = {
   readonly protocol: string; readonly adapterIds: readonly string[]; readonly source: string;
   readonly mainnet: RobinhoodDeploymentStatus; readonly testnet: RobinhoodDeploymentStatus;
-  /** Canonical mainnet addresses, recorded for read-only verification. Gryloo never targets them. */
+  /** Canonical mainnet addresses, recorded for read-only verification. BUILD-RH-002 targets Uniswap only through its verified profile. */
   readonly mainnetContracts: readonly RobinhoodContract[];
 };
 const UNISWAP = 'https://developers.uniswap.org/deployments.json';
@@ -95,6 +98,22 @@ export const ROBINHOOD_TESTNET_TRANSFER = Object.freeze({
   reviewTtlSeconds: 120, gasLimitMarginPercent: 150, maxFeeMultiplier: 2, minimumConfirmations: 2,
   /** Inclusion is first a sequencer (soft) confirmation; L1 finality follows later. */
   settlement: 'L2' as const,
+});
+/**
+ * BUILD-RH-002: transfers on Robinhood Chain mainnet (real funds) through the same transfer engine: native ETH
+ * (`evm.native-transfer`) and canonical catalog ERC-20s — USDG, WETH and official Stock Tokens — (`evm.token-transfer`), to the
+ * connected owner or an explicit recipient. Owner execution needs the deployment's real-funds opt-in; Flofi never signs or sends.
+ */
+export const ROBINHOOD_MAINNET_TRANSFER = Object.freeze({
+  network: ROBINHOOD_CHAIN_MAINNET.name, chain: 'eip155:4663', chainId: 4663,
+  chainHex: '0x1237', rpc: ROBINHOOD_CHAIN_MAINNET.rpc, explorer: ROBINHOOD_CHAIN_MAINNET.explorer,
+  officialSource: ROBINHOOD_CHAIN_MAINNET.officialSource, adapterId: 'evm.native-transfer', action: 'asset.transfer',
+  /** No product ceiling on real funds beyond the owner's balance and the reviewed fee budget (one million ETH is a representation bound). */
+  maximumValueWei: '1000000000000000000000000', defaultValueWei: '1000000000000',
+  reviewTtlSeconds: 60, gasLimitMarginPercent: 150, maxFeeMultiplier: 2, minimumConfirmations: 2,
+  settlement: 'L2' as const,
+  /** Explicit recipients and catalog ERC-20 transfers are allowed on this profile (testnet profiles stay owner-only, native only). */
+  recipients: 'ANY' as const, tokenAdapterId: 'evm.token-transfer', environment: 'MAINNET' as const,
 });
 /** Accepts a CAIP-2 reference or an EIP-155 hex chain ID, in any case. */
 export function robinhoodNetwork(chain: string | null | undefined): RobinhoodNetwork | null {

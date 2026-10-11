@@ -29,6 +29,7 @@ test.beforeAll(async () => {
       '../state/capability-store': fileURLToPath(new URL('../src/test-utils/execute-acceptance-workflow.tsx', import.meta.url)),
       '../state/uniswap-liquidity-store': fileURLToPath(new URL('../src/test-utils/execute-acceptance-workflow.tsx', import.meta.url)),
       '../state/solana-liquidity-store': fileURLToPath(new URL('../src/test-utils/execute-acceptance-workflow.tsx', import.meta.url)),
+      '../state/asset-catalog-store': fileURLToPath(new URL('../src/test-utils/execute-acceptance-workflow.tsx', import.meta.url)),
       'node:crypto': fileURLToPath(new URL('../node_modules/next/dist/compiled/crypto-browserify/index.js', import.meta.url)),
       buffer: fileURLToPath(new URL('../node_modules/next/dist/compiled/buffer/index.js', import.meta.url)),
       'node:buffer': fileURLToPath(new URL('../node_modules/next/dist/compiled/buffer/index.js', import.meta.url)),

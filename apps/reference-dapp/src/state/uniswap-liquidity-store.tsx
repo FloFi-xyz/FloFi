@@ -3,11 +3,11 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { useWorkflow } from './workflow-store';
-import { injected, useBuild009Wallet } from './build009-wallet-store';
+import { injected, ROBINHOOD_HEX, useBuild009Wallet } from './build009-wallet-store';
 import { uniswapLiquidityProfile } from '@defi-workflow-engine/action-registry';
 import { uniswapLiquidityBegin, uniswapLiquidityHandoff, uniswapLiquidityInvalidate, uniswapLiquidityMode, uniswapLiquidityObserve, uniswapLiquidityPrice,
   uniswapLiquidityRefresh, uniswapLiquidityReport, uniswapLiquidityReview, uniswapLiquiditySimulate, uniswapLiquidityStatus, uniswapLiquidityWalletFailure,
-  uniswapLiquidityInfo } from '../app/uniswap-liquidity-action';
+  uniswapLiquidityInfo, robinhoodLiquidityInfo, robinhoodLiquidityMode } from '../app/uniswap-liquidity-action';
 import type { UniswapLiquidityPrice, UniswapLiquidityRecord, UniswapWalletDiagnostic } from '../server/uniswap-liquidity-service';
 
 const KEY = 'flofi:uniswap-liquidity:run';
@@ -32,10 +32,14 @@ const unwrap = <T,>(result: { ok: true; value: T } | { ok: false; code: string }
 export function UniswapLiquidityProvider({ children }: { children: ReactNode }) {
   const { state } = useWorkflow(), wallet = useBuild009Wallet();
   const [record, setRecord] = useState<UniswapLiquidityRecord | null>(null), [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null);
-  const [signing, setSigning] = useState(false), [available, setAvailable] = useState(false), [executionEnabled, setExecutionEnabled] = useState(false);
+  // BUILD-RH-002: the testnet pools and Robinhood Chain (real funds) are enabled separately; the authored position (else the run) selects one.
+  const [signing, setSigning] = useState(false), [networks, setNetworks] = useState({ testnet: { available: false, executionEnabled: false },
+    robinhood: { available: false, executionEnabled: false } });
   const [recovered, setRecovered] = useState(false), [price, setPrice] = useState<UniswapLiquidityPrice | null>(null);
   const [priceChain, setPriceChain] = useState<'eip155:84532' | 'eip155:11155111' | null>(null);
   const workflow = state.workflow as unknown as SemanticWorkflow;
+  const authoredChain = workflow.nodes.find(n => n.actionType === 'asset.liquidity.concentrated')?.chainId;
+  const { available, executionEnabled } = networks[(authoredChain ? authoredChain === 'eip155:4663' : record?.review.chainId === 4663) ? 'robinhood' : 'testnet'];
   const latest = useRef(workflow); latest.current = workflow;
   const latestWallet = useRef(wallet); latestWallet.current = wallet;
   const busyRef = useRef(false);
@@ -49,14 +53,16 @@ export function UniswapLiquidityProvider({ children }: { children: ReactNode }) 
   }
   useEffect(() => {
     let mounted = true;
-    uniswapLiquidityMode().then(mode => {
-      if (!mounted) return;
-      setAvailable(mode !== 'off');
-      if (mode !== 'off') uniswapLiquidityInfo().then(info => { if (mounted && info.ok) setExecutionEnabled(info.value.executionEnabled); }).catch(() => undefined);
-    }).catch(() => undefined);
+    for (const [network, mode, info] of [['testnet', uniswapLiquidityMode, uniswapLiquidityInfo], ['robinhood', robinhoodLiquidityMode, robinhoodLiquidityInfo]] as const)
+      mode().then(value => {
+        if (!mounted) return;
+        setNetworks(current => ({ ...current, [network]: { ...current[network], available: value !== 'off' } }));
+        if (value !== 'off') info().then(result => { if (mounted && result.ok) setNetworks(current => ({ ...current, [network]: { ...current[network], executionEnabled: result.value.executionEnabled } })); })
+          .catch(() => undefined);
+      }).catch(() => undefined);
     try {
       const pointer = JSON.parse(window.localStorage.getItem(KEY) ?? 'null') as { id?: unknown; hash?: unknown } | null;
-      if (pointer && typeof pointer.id === 'string' && /^unilp-[a-f0-9]{32}$/.test(pointer.id)) (async () => {
+      if (pointer && typeof pointer.id === 'string' && /^(?:unilp|rhlp)-[a-f0-9]{32}$/.test(pointer.id)) (async () => {
         // A hash saved before the browser closed reaches the server first; it is never resent to a wallet.
         if (typeof pointer.hash === 'string' && /^0x[0-9a-f]{64}$/.test(pointer.hash))
           await uniswapLiquidityReport(pointer.id as string, { kind: 'HASH', hash: pointer.hash }).catch(() => undefined);
@@ -84,7 +90,7 @@ export function UniswapLiquidityProvider({ children }: { children: ReactNode }) 
     return value;
   }
   /** The reviewed run's chain (else the authored position's) is the only network the wallet may be on. */
-  const chainHexOf = (chain: string | number | undefined) => uniswapLiquidityProfile(chain)?.chainHex;
+  const chainHexOf = (chain: string | number | undefined) => chain === 4663 || chain === 'eip155:4663' ? ROBINHOOD_HEX : uniswapLiquidityProfile(chain)?.chainHex;
   async function simulate() { await operation(async () => {
     if (record && !retired && record.verdict === 'PENDING' && record.attempts.some(a => ['PREPARED', 'SUBMITTING', 'SUBMISSION_RESULT_UNKNOWN', 'PENDING'].includes(a.state)))
       throw new Error('UNISWAP_ATTEMPT_ACTIVE_OBSERVE_EXISTING');

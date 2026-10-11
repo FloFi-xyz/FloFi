@@ -35,6 +35,14 @@ const SENTENCES: Readonly<Record<string, string>> = {
   'add-liquidity-ethereum-sepolia': 'add liquidity 10 USDC and 0.005 WETH ticks 189960 to 200040 on Ethereum Sepolia slippage 100 bps',
   'add-liquidity-solana-devnet': 'add liquidity 0.01 SOL and 0.3 devUSDC ticks -29952 to -25600 on Solana Devnet slippage 100 bps',
   'lending-composition-base-sepolia': `compose supply 10 USDC to Aave then borrow 2 USDC then swap borrowed USDC to WETH on Base Sepolia slippage 50 bps owner ${OWNER}`,
+  // BUILD-RH-002: Robinhood Chain (real funds).
+  'bridge-base-robinhood': 'bridge 5 USDC from Base to Robinhood via auto slippage 50 bps',
+  'bridge-robinhood-base': 'bridge 5 USDG from Robinhood to Base via auto slippage 50 bps',
+  'bridge-arbitrum-robinhood': 'bridge 5 USDC from Arbitrum to Robinhood via auto slippage 50 bps',
+  'bridge-robinhood-arbitrum': 'bridge 5 USDG from Robinhood to Arbitrum via auto slippage 50 bps',
+  'swap-robinhood': 'swap 10 USDG for WETH on Robinhood slippage 50 bps',
+  'add-liquidity-robinhood': 'add liquidity 10 USDG and 0.003 WETH on Robinhood fee 0.01% full range slippage 100 bps',
+  'transfer-robinhood': 'transfer 1 USDG on Robinhood',
 };
 const base = initialEditor().workflow, context = dappReviewContext();
 const chat = (sentence: string) => parseLocalCommand(sentence, base, context, null);
@@ -66,8 +74,9 @@ describe('BUILD-CHANNELS-001 canonical strategy parity', () => {
 
   it('maps every authoring command type and refuses anything else', () => {
     const types = new Set(Object.values(SENTENCES).map(s => chat(s).type));
-    expect([...types].sort()).toEqual(['ADD_BORROW', 'ADD_ETHEREUM_SEPOLIA_SWAP', 'ADD_REPAY', 'ADD_ROUTER_BRIDGE', 'ADD_SOLANA_LIQUIDITY', 'ADD_SOLANA_SWAP', 'ADD_SUPPLY',
-      'ADD_SWAP', 'ADD_TESTNET_SWAP', 'ADD_UNISWAP_LIQUIDITY', 'ADD_WITHDRAW', 'AUTHOR_LENDING']);
+    // BUILD-RH-002: Robinhood Chain catalog swaps and positions (ADD_CRYPTO_ACTION) and transfers (ADD_RH_TRANSFER).
+    expect([...types].sort()).toEqual(['ADD_BORROW', 'ADD_CRYPTO_ACTION', 'ADD_ETHEREUM_SEPOLIA_SWAP', 'ADD_REPAY', 'ADD_RH_TRANSFER', 'ADD_ROUTER_BRIDGE', 'ADD_SOLANA_LIQUIDITY',
+      'ADD_SOLANA_SWAP', 'ADD_SUPPLY', 'ADD_SWAP', 'ADD_TESTNET_SWAP', 'ADD_UNISWAP_LIQUIDITY', 'ADD_WITHDRAW', 'AUTHOR_LENDING']);
     expect(strategyOfCommand({ type: 'ADD', kind: 'read', source: 'CHAT', baseRevision: 0 } as Command)).toBeNull();
     expect(canonicalStrategy({ type: 'REMOVE', nodeId: 'node-002', source: 'CHAT', baseRevision: 0 } as Command)).toEqual({ ok: false, code: 'CHANNEL_COMMAND_NOT_AUTHORING' });
   });

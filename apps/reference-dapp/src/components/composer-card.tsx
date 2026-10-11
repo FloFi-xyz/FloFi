@@ -13,7 +13,10 @@ import { TokenBrandIcon, NetworkBrandIcon } from './brand-icon';
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { PoolPriceRange, usePoolPriceRange, type PoolPricePreset } from './pool-price-range';
 import { TokenAmountInput } from './token-amount-input';
-import { STOCK_EQUITIES, usePoolContributionInputs, type StockEquity } from './canvas-card-inputs';
+import { usePoolContributionInputs } from './canvas-card-inputs';
+import { assetDisplayName } from '@defi-workflow-engine/action-registry';
+import { featuredStockSymbols, ROBINHOOD_CHAIN, searchNetworkAssets } from '../domain/asset-catalogs';
+import { useNetworkCatalog } from '../state/asset-catalog-store';
 import type { CryptoSelection } from '../domain/crypto-action-picker';
 import { ProposalReviewArtifact } from './proposal-review';
 
@@ -118,7 +121,7 @@ function AssetNetworkPicker({ id, side, symbol, network, tokens, networks, unava
   </section>;
 }
 
-function EquityPill({ equity, onToggle, expanded, controls }: { equity: StockEquity; onToggle(): void; expanded: boolean; controls: string }) {
+function EquityPill({ equity, onToggle, expanded, controls }: { equity: string; onToggle(): void; expanded: boolean; controls: string }) {
   const { t: tr } = useLocale();
   return <button type="button" className="composer-token-chip composer-equity-pill nodrag nopan" aria-label={tr("Select stock")} aria-expanded={expanded} aria-controls={controls}
     onClick={event => { event.stopPropagation(); onToggle(); }} onKeyDown={event => event.stopPropagation()}>
@@ -131,17 +134,53 @@ function EquityPill({ equity, onToggle, expanded, controls }: { equity: StockEqu
   </button>;
 }
 
-function StockPicker({ equity, onChange }: { equity: StockEquity; onChange(equity: StockEquity): void }) {
+/** Featured Stock Tokens: shortcuts only, never the limit of the catalog. */
+function StockPicker({ equity, options, onChange }: { equity: string; options: readonly string[]; onChange(equity: string): void }) {
   const { t: tr } = useLocale();
   const name = useId();
   return <fieldset className="composer-stock-options">
     <legend className="sr-only">{tr("Choose stock")}</legend>
-    {STOCK_EQUITIES.map(symbol => <label key={symbol} className="composer-stock-option" data-selected={symbol === equity || undefined}>
+    {options.map(symbol => <label key={symbol} className="composer-stock-option" data-selected={symbol === equity || undefined}>
       <input className="sr-only" type="radio" name={name} value={symbol} checked={symbol === equity} onChange={() => onChange(symbol)}/>
       <span>{symbol}</span>
       <svg className="composer-stock-check" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="m3 8 3 3 7-7"/></svg>
     </label>)}
   </fieldset>;
+}
+/** At most this many search results are rendered at once; typing narrows the full validated catalog. */
+const STOCK_RESULTS = 12;
+/**
+ * BUILD-RH-002: featured shortcuts plus search over every validated active official Robinhood Stock Token. Loading, empty and
+ * unavailable states are explicit; a result configures the same Stocks card. No registry data beyond symbol and name is shown.
+ */
+function StocksPanel({ id, equity, onChange, onCollapse }: { id: string; equity: string; onChange(equity: string): void; onCollapse(): void }) {
+  const { t: tr } = useLocale();
+  const catalog = useNetworkCatalog();
+  const [query, setQuery] = useState('');
+  useEffect(() => { void catalog.ensure(); }, [catalog]);
+  const results = catalog.status === 'ready' ? searchNetworkAssets(ROBINHOOD_CHAIN, query, { assetClass: 'STOCK_TOKEN', limit: STOCK_RESULTS }) : [];
+  const total = catalog.status === 'ready' ? searchNetworkAssets(ROBINHOOD_CHAIN, '', { assetClass: 'STOCK_TOKEN', limit: 200 }).length : 0;
+  return <section id={id} className="composer-stocks-panel composer-stocks-catalog nodrag nopan" aria-label={tr("Stocks configuration")} onClick={event => event.stopPropagation()}
+    onKeyDown={event => event.stopPropagation()} onKeyDownCapture={event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); onCollapse(); } }}>
+    <button type="button" className="composer-pool-collapse" aria-label={tr("Hide Stocks configuration")} title={tr("Hide Stocks configuration")} onClick={onCollapse}>
+      <svg viewBox="0 0 20 20" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="m8 5-5 5 5 5m9-10-5 5 5 5"/></svg>
+    </button>
+    <span className="composer-bridge-picker-heading">{tr("Featured")}</span>
+    <StockPicker equity={equity} options={featuredStockSymbols()} onChange={onChange}/>
+    <label className="composer-stock-search"><span className="composer-bridge-picker-heading">{tr("Search assets")}</span>
+      <input type="search" aria-label={tr("Search Stock Tokens")} placeholder={tr("Search by symbol or company name…")} autoComplete="off" spellCheck={false} maxLength={64}
+        value={query} onChange={event => setQuery(event.target.value)}/></label>
+    {catalog.status === 'loading' || catalog.status === 'idle' ? <p className="composer-stock-status" role="status">{tr("Loading Robinhood Stock Tokens…")}</p>
+      : catalog.status === 'unavailable' ? <p className="composer-stock-status" role="status">{tr("Robinhood Stock Tokens are unavailable right now.")} <button type="button" className="composer-stock-retry" onClick={() => void catalog.retry()}>{tr("Try again")}</button></p>
+      : !results.length ? <p className="composer-stock-status" role="status">{tr("No Stock Token matches this search.")}</p>
+      : <>
+        <ul className="composer-stock-results" aria-label={tr("Stock Token results")}>
+          {results.map(asset => <li key={asset.id}><button type="button" className="composer-stock-option" aria-pressed={asset.symbol === equity} data-selected={asset.symbol === equity || undefined}
+            onClick={() => onChange(asset.symbol)}><span>{asset.symbol}</span><span className="composer-stock-name">{assetDisplayName(asset)}</span></button></li>)}
+        </ul>
+        {!query.trim() && total > results.length && <p className="composer-stock-status">{tr("{0} Stock Tokens · type to search", total)}</p>}
+      </>}
+  </section>;
 }
 
 const priceStrategies = [
@@ -207,7 +246,7 @@ function PoolPricePanel({ strategy, onSelect, onCollapse }: { strategy: PoolPric
 }
 
 /** Display priority is shared by all value boxes in the card; token inputs keep their denomination. */
-function ValueBox({ amount, token, network, source, label, hint, editor, inputLabel, equity, picker, fiatFirst, onFiatFirstChange, readOnly = false }: { readOnly?: boolean; amount?: string | undefined; token: string; network: string; source?: boolean; label?: string; hint: string; editor?: Pick<CanvasAmountEditor, 'value' | 'formId' | 'onChange'> | undefined; inputLabel?: string; equity?: { symbol: StockEquity; onToggle(): void; expanded: boolean; controls: string }; picker?: TokenPickerControl; fiatFirst: boolean; onFiatFirstChange: (fiatFirst: boolean) => void }) {
+function ValueBox({ amount, token, network, source, label, hint, editor, inputLabel, equity, picker, fiatFirst, onFiatFirstChange, readOnly = false }: { readOnly?: boolean; amount?: string | undefined; token: string; network: string; source?: boolean; label?: string; hint: string; editor?: Pick<CanvasAmountEditor, 'value' | 'formId' | 'onChange'> | undefined; inputLabel?: string; equity?: { symbol: string; onToggle(): void; expanded: boolean; controls: string }; picker?: TokenPickerControl; fiatFirst: boolean; onFiatFirstChange: (fiatFirst: boolean) => void }) {
   const { t: tr } = useLocale();
   if (readOnly) return <span className={`numeric composer-amount-box ${source ? 'composer-amount' : 'composer-destination-box'}`}
     role="group" aria-label={tr(label ?? (source ? 'Source amount' : 'Destination amount'))} data-symbolic={!amount || undefined} title={tr(hint)}>
@@ -243,7 +282,8 @@ export type ComposerCardData = {
   contextualProposal?: boolean;
   tokenSelection?: { source: readonly string[]; destination: readonly string[]; onSelect(side: 'source' | 'destination', symbol: string): void };
   networkSelection?: { source: readonly string[]; destination: readonly string[]; valid: boolean; unavailable?: readonly string[]; onSelect(side: 'source' | 'destination', network: string): void };
-  stocks?: { equity: StockEquity; amount: string; onAmountChange(amount: string): void; onEquityChange(equity: StockEquity): void };
+  /** BUILD-RH-002: the Stocks card, a Robinhood Chain swap that pays USDG for the selected Stock Token. */
+  stocks?: { equity: string; onEquityChange(equity: string): void };
   supplyProposal?: { formId: string; reviewLabel?: string; canReview: boolean; hasProposal: boolean; canApply: boolean; onApply(): void };
   poolProposal?: { nodeId: string; formId: string; canReview: boolean; canApply: boolean; onApply(): void };
   onOpenSettings?: () => void;
@@ -255,9 +295,9 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
   const estimate = useBuildEstimate(card.summary.action === 'Swap' ? card.estimateWorkflow : undefined, card.estimateNodeId ?? '', card.estimateOwner);
   const [amountError, setAmountError] = useState<string | null>(null);
   const [fiatFirst, setFiatFirst] = useState(false);
-  const amountBox = !card.inspection && (card.summary.action === 'Swap' || card.summary.action === 'Bridge');
-  const bridgeCard = !card.inspection && card.summary.action === 'Bridge';
   const stocksCard = Boolean(card.stocks);
+  const amountBox = !card.inspection && (card.summary.action === 'Swap' || card.summary.action === 'Bridge' || stocksCard);
+  const bridgeCard = !card.inspection && card.summary.action === 'Bridge';
   const poolCard = !card.inspection && card.summary.action === 'Pool / Liquidity';
   const [poolMode, setPoolMode] = useState<'Tick' | 'Price'>('Tick');
   const [poolPanelOpen, setPoolPanelOpen] = useState(false);
@@ -312,7 +352,7 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
     return () => document.removeEventListener('pointerdown', dismiss);
   }, [tokenPanel, bridgePanel]);
   const poolValues = poolCard ? poolContributions.values ?? card.summary.liquidityValues : undefined;
-  const quietAmount = Boolean(card.stocks) || amountBox || (!card.inspection && ['Supply', 'Borrow', 'Repay', 'Withdraw', 'Transfer'].includes(card.summary.action) && (Boolean(card.amountEditor?.changed) || card.validation.status === 'Draft'));
+  const quietAmount = amountBox || (!card.inspection && ['Supply', 'Borrow', 'Repay', 'Withdraw', 'Transfer'].includes(card.summary.action) && (Boolean(card.amountEditor?.changed) || card.validation.status === 'Draft'));
   const amountParts = card.summary.amount.match(/^(\d+(?:\.\d+)?) (\S+)$/);
   const pair = card.summary.detail ?? card.summary.bridgePair;
   const [pairSource, pairDestination] = pair?.split(' → ') ?? [];
@@ -342,7 +382,7 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
       {!card.inspection && !quietAmount && card.validation.status !== 'Configured' && <span className="composer-card-state" title={tr(card.validation.message)}>{tr(card.validation.tone !== 'neutral' && '⚠ ')}{tr(card.validation.status === 'Draft' ? 'Check settings' : card.validation.status)}</span>}
       {poolCard ? <PoolProviderSelector provider={card.summary.provider} chain={card.summary.chain}/> : <span className="composer-metadata">
         <span className="composer-provider">{tr(card.summary.provider.replace(/Cross-chain Router/g, 'Router') || 'Provider not specified')}</span>
-        {!card.stocks && !bridgeCard && <>{tr(' · ')}<span className="composer-chain">{tr(card.summary.chain)}</span></>}
+        {!bridgeCard && <>{tr(' · ')}<span className="composer-chain">{tr(card.summary.chain)}</span></>}
       </span>}
       {card.inspection ? <>
         {card.summary.liquidityValues ? <ValuePair relationship="contribution">
@@ -354,13 +394,13 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
           {pairDestination && <><span className="composer-value-arrow" aria-hidden="true">↓</span><ValueBox readOnly token={pairDestination} network={destinationNetwork} hint="Output estimate unavailable" fiatFirst={false} onFiatFirstChange={setFiatFirst}/></>}
         </div>}
         {pairDestination && <span className="composer-quote-note">{tr("Estimate unavailable")}</span>}
-      </> : card.stocks ? <ValueBox source fiatFirst={fiatFirst} onFiatFirstChange={setFiatFirst} label="Stocks amount" inputLabel="Stocks amount" amount={card.stocks.amount} token={card.stocks.equity} network={sourceNetwork}
-        hint="Stocks amount" editor={{ value: card.stocks.amount, onChange: card.stocks.onAmountChange }} equity={{ symbol: card.stocks.equity, onToggle: () => setStocksPanelOpen(open => !open), expanded: stocksPanelOpen, controls: stocksPanelId }}/>
-        : amountBox ? <AmountContainer className="composer-amount-form nodrag nopan" onKeyDown={event => event.stopPropagation()} onSubmit={event => { event.preventDefault(); if (editor) setAmountError(editor.onReview()); }}>
+      </>        : amountBox ? <AmountContainer className="composer-amount-form nodrag nopan" onKeyDown={event => event.stopPropagation()} onSubmit={event => { event.preventDefault(); if (editor) setAmountError(editor.onReview()); }}>
         <ValuePair relationship="directional">
-        <ValueBox source amount={amountParts?.[1]} token={amountParts?.[2] ?? pairSource ?? '—'}
-          network={sourceNetwork} editor={editor} picker={picker('source')} hint={editor ? 'Enter the source amount' : card.summary.amount} fiatFirst={fiatFirst} onFiatFirstChange={setFiatFirst}/>
-        <ValueBox amount={estimate?.expected ?? '—'} token={pairDestination ?? '—'} network={destinationNetwork} picker={picker('destination')} hint="Approximate read-only output; simulate before review" fiatFirst={fiatFirst} onFiatFirstChange={setFiatFirst}/>
+        <ValueBox source amount={amountParts?.[1]} token={amountParts?.[2] ?? pairSource ?? '—'} {...stocksCard ? { label: 'Stocks amount', inputLabel: `Stocks amount (${amountParts?.[2] ?? pairSource ?? 'USDG'})` } : {}}
+          network={sourceNetwork} editor={editor} {...stocksCard ? {} : { picker: picker('source') }} hint={editor ? 'Enter the source amount' : card.summary.amount} fiatFirst={fiatFirst} onFiatFirstChange={setFiatFirst}/>
+        <ValueBox amount={estimate?.expected ?? '—'} token={pairDestination ?? '—'} network={destinationNetwork}
+          {...card.stocks ? { equity: { symbol: card.stocks.equity, onToggle: () => { setStocksPanelOpen(open => !open); setTokenPanel(null); }, expanded: stocksPanelOpen, controls: stocksPanelId } } : { picker: picker('destination') }}
+          hint="Approximate read-only output; simulate before review" fiatFirst={fiatFirst} onFiatFirstChange={setFiatFirst}/>
         </ValuePair>
         <span className="composer-quote-note">{card.networkSelection?.valid === false ? tr('Choose matching networks') : <>{!amountParts && <>{tr(card.summary.amount)} · </>}{tr(estimate ? `Approximate · ${estimate.provider} · Simulate before review` : 'Estimate unavailable')}</>}</span>
         {editor?.changed && <div className="composer-amount-actions">
@@ -410,11 +450,6 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
     onTokenChange={symbol => card.tokenSelection?.onSelect(bridgePanel, symbol)}
     onNetworkChange={network => { card.networkSelection?.onSelect(bridgePanel, network); setAmountError(null); }} onCollapse={collapseBridge}/>;
   return poolCard ? <div ref={poolNodeRef} className="composer-pool-node">{tr(content)}{tr(tokens)}{poolPanelOpen && <PoolPricePanel strategy={poolRange.preset} onSelect={poolRange.selectPreset} onCollapse={() => setPoolPanelOpen(false)}/>}</div> : card.stocks ? <div ref={poolNodeRef} className="composer-stocks-node">{tr(content)}
-    {stocksPanelOpen && <section id={stocksPanelId} className="composer-stocks-panel nodrag nopan" aria-label={tr("Stocks configuration")} onClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}>
-      <button type="button" className="composer-pool-collapse" aria-label={tr("Hide Stocks configuration")} title={tr("Hide Stocks configuration")} onClick={() => setStocksPanelOpen(false)}>
-        <svg viewBox="0 0 20 20" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="m8 5-5 5 5 5m9-10-5 5 5 5"/></svg>
-      </button>
-      <StockPicker equity={card.stocks.equity} onChange={card.stocks.onEquityChange}/>
-    </section>}
+    {stocksPanelOpen && <StocksPanel id={stocksPanelId} equity={card.stocks.equity} onChange={card.stocks.onEquityChange} onCollapse={() => setStocksPanelOpen(false)}/>}
   </div> : !card.inspection && (amountBox || ['Supply', 'Borrow', 'Repay', 'Withdraw', 'Transfer'].includes(card.summary.action)) ? <div ref={poolNodeRef} className="composer-token-node">{tr(content)}{tr(tokens)}{tr(bridge)}</div> : content;
 }

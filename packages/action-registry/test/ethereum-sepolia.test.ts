@@ -61,8 +61,9 @@ describe('Aave V3 lending profiles', () => {
     expect(() => assertAaveLendingProfile({ ...AAVE_V3_ETHEREUM_SEPOLIA })).toThrow('AAVE_PROFILE_UNSUPPORTED');
     expect(assertAaveLendingProfile(AAVE_V3_ETHEREUM_SEPOLIA)).toBe(AAVE_V3_ETHEREUM_SEPOLIA);
   });
-  it('native transfer profiles cover Robinhood Testnet and Ethereum Sepolia only', () => {
-    expect(NATIVE_TRANSFER_PROFILES).toEqual([ROBINHOOD_TESTNET_TRANSFER, ETHEREUM_SEPOLIA_TRANSFER]);
+  it('transfer profiles cover the two testnets and (BUILD-RH-002) Robinhood Chain mainnet, never Ethereum Mainnet', () => {
+    expect(NATIVE_TRANSFER_PROFILES.map(profile => profile.chain)).toEqual([ROBINHOOD_TESTNET_TRANSFER.chain, ETHEREUM_SEPOLIA_TRANSFER.chain, 'eip155:4663']);
+    expect(NATIVE_TRANSFER_PROFILES.slice(0, 2)).toEqual([ROBINHOOD_TESTNET_TRANSFER, ETHEREUM_SEPOLIA_TRANSFER]);
     expect(nativeTransferProfile(ETH)).toMatchObject({ chainHex: '0xaa36a7', settlement: 'L1', minimumConfirmations: 3, adapterId: 'evm.native-transfer' });
     expect(nativeTransferProfile('eip155:46630')).toMatchObject({ settlement: 'L2' });
     expect(() => nativeTransferProfile('eip155:1')).toThrow('TRANSFER_NETWORK_UNSUPPORTED');

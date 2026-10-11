@@ -7,39 +7,45 @@
  * and observes/reconciles what the owner's wallet sent. One implementation runs on the `ExecutionStorage` port:
  * the file store locally, PostgreSQL (fenced leases, CAS, outbox) in the cloud.
  *
- * Run = append-only snapshot log `unilp-<32 hex>.jsonl`. Steps: exact finite approval of token0 and/or token1 to the
+ * BUILD-RH-002: Robinhood Chain (4663, real funds) on the same runtime: the pool is the node's own pair and fee tier (the CREATE2 pool of the
+ * pinned factory); both tokens must be official catalog assets, Stock Tokens are verified as the official beacon proxy with the registry's
+ * uid and multiplier (bound into Review), and runs are `rhlp-` with PUBLIC_MAINNET provenance (MAINNET_EXECUTED evidence) or MOCKED.
+ *
+ * Run = append-only snapshot log `unilp-<32 hex>.jsonl` (`rhlp-` on Robinhood Chain). Steps: exact finite approval of token0 and/or token1 to the
  * Position Manager when the on-chain allowance is short, then one mint whose NFT recipient is the owner. Each step is
  * its own wallet request; a confirmed approval requires a fresh simulation and Review before the mint.
  */
 import { createHash, randomBytes } from 'node:crypto';
-import { resolveWorkflowCapability, UNISWAP_V3_BASE_SEPOLIA_LIQUIDITY as BASE_PROFILE, uniswapLiquidityProfile, type UniswapLiquidityProfile } from '@defi-workflow-engine/action-registry';
+import { catalogAsset, resolveWorkflowCapability, robinhoodLiquidityPool, UNISWAP_V3_BASE_SEPOLIA_LIQUIDITY as BASE_PROFILE, UNISWAP_V3_ROBINHOOD as ROBINHOOD,
+  uniswapLiquidityProfile, type AssetCatalog, type CanonicalAsset, type UniswapPoolProfile } from '@defi-workflow-engine/action-registry';
 import { createBaseSepoliaReviewContext, validateAuthoringWorkflow, validateUniswapLiquidityWorkflow } from '@defi-workflow-engine/reference-linter';
 import { UNISWAP_SELECTORS as SEL, UNISWAP_TOPICS as TOPIC, decodeUniswapApprove, decodeUniswapMint, decodeUniswapMintResult, decodeUniswapPosition,
   encodeUniswapApprove, encodeUniswapMint, uniswapComposition, uniswapMinimum, uniswapQuotePriceAtSqrt, uniswapQuotePriceAtTick, uniswapRangeState,
   type UniswapRangeState } from '@defi-workflow-engine/reference-compiler';
-import { hashArtifactBytes, type EvidenceBundle, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
+import { hashArtifactBytes, readConcentratedLiquidity, type EvidenceBundle, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { validateArtifact } from '@defi-workflow-engine/workflow-contracts/schemas';
 import { utf8, type ExecutionStorage } from '@defi-workflow-engine/reference-executor';
-import { verifyOwnerSubmission, type Rpc } from './public-testnet-service.ts';
+import { verifyCatalogToken, verifyOwnerSubmission, type Rpc, type StockQuoteState } from './public-testnet-service.ts';
 
 export type UniswapLiquidityStep = 'APPROVE_TOKEN0' | 'APPROVE_TOKEN1' | 'MINT';
 export type UniswapAttemptState = 'PREPARED' | 'CANCELLED' | 'SUBMITTING' | 'SUBMISSION_RESULT_UNKNOWN' | 'NOT_FOUND' | 'PENDING' | 'CONFIRMED' |
   'REVERTED' | 'RECONCILIATION_REQUIRED';
-export type UniswapTx = { readonly chainId: UniswapLiquidityProfile['chainHex']; readonly from: string; readonly to: string; readonly data: string; readonly value: '0x0';
+export type UniswapTx = { readonly chainId: string; readonly from: string; readonly to: string; readonly data: string; readonly value: '0x0';
   readonly gas: string; readonly maxFeePerGas: string; readonly maxPriorityFeePerGas: string };
 export type UniswapReviewCall = { readonly step: UniswapLiquidityStep; readonly to: string; readonly data: string; readonly gasUsed: string; readonly gasLimit: string };
-export type UniswapTokenView = { readonly symbol: 'USDC' | 'WETH'; readonly address: string; readonly decimals: number };
+/** `officialId`: Robinhood Chain only — the token's official registry identity (null for USDG and WETH). */
+export type UniswapTokenView = { readonly symbol: string; readonly address: string; readonly decimals: number; readonly officialId?: string | null };
 export type UniswapLiquidityReview = {
   readonly format: 'flofi.uniswap-liquidity-review.v1'; readonly commitment: string;
-  readonly network: UniswapLiquidityProfile['network']; readonly chainId: UniswapLiquidityProfile['chainId']; readonly owner: string; readonly recipient: string;
+  readonly network: string; readonly chainId: number; readonly owner: string; readonly recipient: string;
   readonly workflowHash: string; readonly revision: number; readonly nodeId: string;
   readonly observedAt: string; readonly expiresAt: string;
   readonly block: { readonly number: number; readonly hash: string; readonly timestamp: number };
   readonly contracts: { readonly factory: string; readonly positionManager: string; readonly pool: string; readonly codeSha256: Readonly<Record<string, string>> };
   readonly token0: UniswapTokenView; readonly token1: UniswapTokenView;
-  readonly pool: { readonly fee: UniswapLiquidityProfile['feeTier']; readonly tickSpacing: UniswapLiquidityProfile['tickSpacing']; readonly sqrtPriceX96: string; readonly tick: number; readonly liquidity: string;
-    /** USDC per WETH. */ readonly price: string };
-  readonly range: { readonly tickLower: number; readonly tickUpper: number; /** USDC per WETH (from tickUpper / tickLower). */ readonly lowerPrice: string;
+  readonly pool: { readonly fee: number; readonly tickSpacing: number; readonly sqrtPriceX96: string; readonly tick: number; readonly liquidity: string;
+    /** token0 per token1 (USDC per WETH on the testnet profiles). */ readonly price: string };
+  readonly range: { readonly tickLower: number; readonly tickUpper: number; /** token0 per token1 (from tickUpper / tickLower). */ readonly lowerPrice: string;
     readonly upperPrice: string; readonly state: UniswapRangeState; readonly description: string };
   readonly intent: { readonly amount0Max: string; readonly amount1Max: string; readonly slippageBps: number };
   readonly expected: { readonly liquidity: string; readonly amount0: string; readonly amount1: string };
@@ -47,7 +53,7 @@ export type UniswapLiquidityReview = {
   /** Unix seconds; the mint cannot land after it. */ readonly deadline: string;
   readonly balances: { readonly token0: string; readonly token1: string; readonly native: string };
   readonly allowances: { readonly token0: string; readonly token1: string };
-  readonly approvals: readonly { readonly step: 'APPROVE_TOKEN0' | 'APPROVE_TOKEN1'; readonly token: string; readonly symbol: 'USDC' | 'WETH';
+  readonly approvals: readonly { readonly step: 'APPROVE_TOKEN0' | 'APPROVE_TOKEN1'; readonly token: string; readonly symbol: string;
     readonly spender: string; readonly amount: string; readonly currentAllowance: string; readonly required: boolean }[];
   readonly calls: readonly UniswapReviewCall[];
   readonly fees: { readonly maxFeePerGas: string; readonly maxPriorityFeePerGas: string; readonly gasLimitTotal: string; readonly executionFeeUpperBoundWei: string;
@@ -56,6 +62,8 @@ export type UniswapLiquidityReview = {
     readonly mint: { readonly liquidity: string; readonly amount0: string; readonly amount1: string };
     readonly localEstimate: { readonly liquidity: string; readonly amount0: string; readonly amount1: string } };
   readonly nonce: string;
+  /** BUILD-RH-002: the Stock Token sides' identity and multiplier state at the Review block (Robinhood Chain only). */
+  readonly stocks?: readonly StockQuoteState[];
 };
 export type UniswapReceipt = { readonly transactionHash: string; readonly status: 0 | 1; readonly blockNumber: number; readonly blockHash: string;
   readonly from: string; readonly gasUsed: string; readonly effectiveGasPrice: string; readonly l1FeeWei: string; readonly gasCostWei: string;
@@ -68,15 +76,16 @@ export type UniswapAttempt = { readonly attemptId: string; readonly step: Uniswa
   readonly receipt: UniswapReceipt | null; readonly reconciled: boolean; readonly note: string | null };
 export type UniswapPosition = { readonly tokenId: string; readonly owner: string; readonly liquidity: string; readonly amount0: string; readonly amount1: string;
   readonly tickLower: number; readonly tickUpper: number; readonly pool: string; readonly blockNumber: number; readonly transactionHash: string };
-export type UniswapEvidence = { readonly bundle: EvidenceBundle; readonly bundleHash: string; readonly evidenceClass: 'TESTNET_EXECUTED' | 'MOCKED';
-  readonly network: UniswapLiquidityProfile['network']; readonly chainId: UniswapLiquidityProfile['chainId']; readonly owner: string; readonly positionManager: string; readonly pool: string;
-  readonly token0: UniswapTokenView; readonly token1: UniswapTokenView; readonly feeTier: UniswapLiquidityProfile['feeTier']; readonly tickLower: number; readonly tickUpper: number;
+export type UniswapEvidence = { readonly bundle: EvidenceBundle; readonly bundleHash: string; readonly evidenceClass: 'TESTNET_EXECUTED' | 'MAINNET_EXECUTED' | 'MOCKED';
+  readonly network: string; readonly chainId: number; readonly owner: string; readonly positionManager: string; readonly pool: string;
+  readonly token0: UniswapTokenView; readonly token1: UniswapTokenView; readonly feeTier: number; readonly tickLower: number; readonly tickUpper: number;
   readonly lowerPrice: string; readonly upperPrice: string; readonly position: UniswapPosition; readonly minimums: UniswapLiquidityReview['minimums'];
   readonly transactions: readonly { readonly step: UniswapLiquidityStep; readonly transactionHash: string; readonly blockNumber: number; readonly blockHash: string;
     readonly status: 0 | 1; readonly gasCostWei: string; readonly submissionKind: string; readonly reviewCommitment: string; readonly explorer: string }[];
   readonly residualAllowances: { readonly token0: string; readonly token1: string }; readonly balancesAfter: { readonly token0: string; readonly token1: string };
   readonly reconciliation: 'RECONCILED'; readonly observedAt: string };
-export type UniswapLiquidityRecord = { readonly format: 'flofi.uniswap-liquidity-run.v1'; readonly id: string; readonly provenance: 'PUBLIC_TESTNET' | 'MOCKED';
+export type UniswapProvenance = 'PUBLIC_TESTNET' | 'PUBLIC_MAINNET' | 'MOCKED';
+export type UniswapLiquidityRecord = { readonly format: 'flofi.uniswap-liquidity-run.v1'; readonly id: string; readonly provenance: UniswapProvenance;
   readonly workflow: SemanticWorkflow; readonly owner: string; readonly review: UniswapLiquidityReview; readonly authorization: string | null;
   readonly attempts: readonly UniswapAttempt[]; readonly position: UniswapPosition | null; readonly evidence: UniswapEvidence | null;
   readonly verdict: 'PENDING' | 'RECONCILED' | 'DIVERGENT'; readonly error: string | null };
@@ -85,7 +94,7 @@ export type UniswapWalletDiagnostic = { invoked: boolean; calls: { method: strin
   code: string; rejectionCode?: number };
 export type UniswapLiquidityPrice = { readonly sqrtPriceX96: string; readonly tick: number; readonly price: string; readonly blockNumber: number };
 
-export const UNISWAP_LIQUIDITY_RUN_ID = /^unilp-[a-f0-9]{32}$/;
+export const UNISWAP_LIQUIDITY_RUN_ID = /^(?:unilp|rhlp)-[a-f0-9]{32}$/;
 const ADDRESS = /^0x[0-9a-f]{40}$/, HASH = /^0x[0-9a-f]{64}$/;
 const ACTIVE: readonly UniswapAttemptState[] = ['PREPARED', 'SUBMITTING', 'SUBMISSION_RESULT_UNKNOWN', 'PENDING'];
 export const UNISWAP_OBSERVABLE: readonly UniswapAttemptState[] = ['SUBMITTING', 'SUBMISSION_RESULT_UNKNOWN', 'PENDING'];
@@ -93,8 +102,20 @@ const TERMINAL: readonly UniswapAttemptState[] = ['CANCELLED', 'NOT_FOUND', 'CON
 const REFUSALS = [4001, 4100, 4200];
 /** An approval whose nonce was never consumed and nothing is queued is abandoned after this long. */
 const APPROVAL_ABANDON_MS = 15 * 60_000;
-/** The run's reviewed chain selects its profile; a persisted chain without one is corrupt. */
-const profileOfChain = (chainId: number): UniswapLiquidityProfile => uniswapLiquidityProfile(chainId) ?? fail('UNISWAP_LIQUIDITY_STORE_CORRUPT');
+/**
+ * The run's reviewed pool: the chain's fixed profile, or (Robinhood Chain) the CREATE2 pool of its reviewed pair and fee tier. A persisted
+ * review whose pool does not reproduce is corrupt.
+ */
+function profileOfReview(review: UniswapLiquidityReview): UniswapPoolProfile {
+  let profile: UniswapPoolProfile | null = uniswapLiquidityProfile(review.chainId);
+  if (!profile && review.chainId === ROBINHOOD.chainId) {
+    try { profile = robinhoodLiquidityPool(review.token0, review.token1, review.pool.fee); } catch { profile = null; }
+  }
+  if (!profile || profile.pool !== review.contracts.pool || profile.token0.address !== review.token0.address) fail('UNISWAP_LIQUIDITY_STORE_CORRUPT');
+  return profile;
+}
+/** Testnet profiles run as `unilp-` with PUBLIC_TESTNET (or MOCKED) provenance; Robinhood Chain as `rhlp-` with PUBLIC_MAINNET (or MOCKED). */
+const robinhoodRun = (id: string) => id.startsWith('rhlp-');
 
 function fail(code: string): never { throw new Error(code); }
 function isObject(value: unknown): value is Record<string, unknown> { return !!value && typeof value === 'object' && !Array.isArray(value); }
@@ -123,18 +144,23 @@ export function canonical(value: unknown): string {
   return '{' + Object.keys(value).sort().filter(k => (value as Record<string, unknown>)[k] !== undefined)
     .map(key => JSON.stringify(key) + ':' + canonical((value as Record<string, unknown>)[key])).join(',') + '}';
 }
-const explorerTx = (hash: string, profile: UniswapLiquidityProfile = BASE_PROFILE) => profile.explorer + 'tx/' + hash;
+const explorerTx = (hash: string, profile: Pick<UniswapPoolProfile, 'explorer'> = BASE_PROFILE) => profile.explorer + 'tx/' + hash;
 export const uniswapExplorerTx = explorerTx;
-function rangeDescription(state: UniswapRangeState): string {
-  // Token order: USDC is token0. tick < tickLower means the USDC-per-WETH price is ABOVE the range.
-  return state === 'IN_RANGE' ? 'The current price is inside your range: the position holds USDC and WETH and earns fees while it stays in range.'
-    : state === 'BELOW_RANGE' ? 'The current price is above your range: the position would hold only USDC and earns no fees until the price falls into the range.'
-      : 'The current price is below your range: the position would hold only WETH and earns no fees until the price rises into the range.';
+function rangeDescription(state: UniswapRangeState, token0 = 'USDC', token1 = 'WETH'): string {
+  // Prices are token0 per token1 (USDC per WETH on the testnet profiles). tick < tickLower means that price is ABOVE the range.
+  return state === 'IN_RANGE' ? `The current price is inside your range: the position holds ${token0} and ${token1} and earns fees while it stays in range.`
+    : state === 'BELOW_RANGE' ? `The current price is above your range: the position would hold only ${token0} and earns no fees until the price falls into the range.`
+      : `The current price is below your range: the position would hold only ${token1} and earns no fees until the price rises into the range.`;
 }
 
 type ChainState = { block: { number: number; hash: string; timestamp: number; baseFee: bigint }; codeSha256: Record<string, string>;
   sqrtPriceX96: bigint; tick: number; liquidity: bigint; balance0: bigint; balance1: bigint; native: bigint; allowance0: bigint; allowance1: bigint;
-  nonce: bigint; pendingNonce: bigint; positionCount: bigint };
+  nonce: bigint; pendingNonce: bigint; positionCount: bigint; stocks: StockQuoteState[] };
+/** BUILD-RH-002: the official catalog assets of a Robinhood Chain pool's two tokens (fresh for every Review and begin). */
+type PoolAssets = { readonly token0: CanonicalAsset; readonly token1: CanonicalAsset };
+/** The economically material Stock Token state: a change of any of it needs a new Review. */
+const stockEconomics = (stocks: readonly StockQuoteState[] | undefined) =>
+  canonical((stocks ?? []).map(stock => [stock.officialId, stock.multiplierWad, stock.scheduledMultiplierWad, stock.scheduledEffectiveAt]));
 type SimulatedCall = { step: UniswapLiquidityStep; gasUsed: bigint; returnData: string };
 
 /** Append-only run history: identity, reviewed calls, hashes, terminal states and evidence never change. */
@@ -147,12 +173,13 @@ export function validateUniswapLiquidityLog(bytes: Uint8Array): void {
     let run: UniswapLiquidityRecord;
     try { run = JSON.parse(line) as UniswapLiquidityRecord; } catch { fail('UNISWAP_LIQUIDITY_STORE_CORRUPT'); }
     if (!isObject(run) || run.format !== 'flofi.uniswap-liquidity-run.v1' || !UNISWAP_LIQUIDITY_RUN_ID.test(String(run.id)) ||
-        !['PUBLIC_TESTNET', 'MOCKED'].includes(run.provenance) || !ADDRESS.test(String(run.owner)) || !isObject(run.workflow) || !isObject(run.review) ||
-        run.review.owner !== run.owner || run.review.recipient !== run.owner || !uniswapLiquidityProfile(run.review.chainId) ||
+        !['PUBLIC_TESTNET', 'PUBLIC_MAINNET', 'MOCKED'].includes(run.provenance) || !ADDRESS.test(String(run.owner)) || !isObject(run.workflow) || !isObject(run.review) ||
+        run.provenance === (robinhoodRun(run.id) ? 'PUBLIC_TESTNET' : 'PUBLIC_MAINNET') || robinhoodRun(run.id) !== (run.review.chainId === ROBINHOOD.chainId) ||
+        run.review.owner !== run.owner || run.review.recipient !== run.owner || !profileOfReview(run.review) ||
         run.review.commitment !== reviewCommitment(run.review) || (run.authorization !== null && run.authorization !== run.review.commitment) ||
         !Array.isArray(run.attempts) || run.attempts.length > 16 || !['PENDING', 'RECONCILED', 'DIVERGENT'].includes(run.verdict) ||
         new Set(run.attempts.map(a => a.attemptId)).size !== run.attempts.length ||
-        run.attempts.some(a => !isObject(a as unknown) || !a.attemptId.startsWith(run.id + '.') || a.tx.from !== run.owner || a.tx.chainId !== profileOfChain(run.review.chainId).chainHex ||
+        run.attempts.some(a => !isObject(a as unknown) || !a.attemptId.startsWith(run.id + '.') || a.tx.from !== run.owner || a.tx.chainId !== profileOfReview(run.review).chainHex ||
           (a.transactionHash !== null && !HASH.test(a.transactionHash)) || (a.replacementHash !== null && !HASH.test(a.replacementHash)) ||
           (a.reconciled && (a.state !== 'CONFIRMED' || a.transactionHash === null))) ||
         run.attempts.filter(a => ACTIVE.includes(a.state)).length > 1 ||
@@ -188,16 +215,26 @@ export function uniswapNeedsObservation(value: unknown): boolean {
   return record.verdict === 'PENDING' && !!last && UNISWAP_OBSERVABLE.includes(last.state);
 }
 
-/** `rpc` is the Base Sepolia read client; `rpcs` adds one chain-bound read client per further liquidity profile (CAIP-2 keyed). */
+/**
+ * `rpc` is the Base Sepolia read client; `rpcs` adds one chain-bound read client per further liquidity profile (CAIP-2 keyed).
+ * BUILD-RH-002: with `catalog`, the service is the Robinhood Chain liquidity runtime (only chain 4663, `rhlp-` runs): pools come from the
+ * node's pair and fee tier, and both tokens must resolve in the freshly validated official catalog. Without it, only the testnet profiles.
+ */
 export function createUniswapLiquidityService(input: { readonly storage: ExecutionStorage; readonly rpc: Rpc; readonly rpcs?: Readonly<Partial<Record<string, Rpc>>>;
-  readonly provenance: 'PUBLIC_TESTNET' | 'MOCKED'; readonly executionEnabled?: boolean; readonly now?: () => Date;
+  readonly provenance: UniswapProvenance; readonly executionEnabled?: boolean; readonly now?: () => Date;
   /** MOCKED harness only: the synthetic chain's code pins. A public run always uses the profile's verified pins. */
-  readonly mockedCodePins?: Readonly<Record<'factory' | 'positionManager' | 'pool', string>> }) {
+  readonly mockedCodePins?: Readonly<Record<'factory' | 'positionManager' | 'pool', string>>;
+  readonly catalog?: { readonly catalogFor: (chain: string) => Promise<AssetCatalog>;
+    /** MOCKED harness only: synthetic code pins of the catalog's base assets and Stock Token proxy. */
+    readonly codePins?: Partial<Record<'weth' | 'usdg' | 'stockTokenProxy', string>> } }) {
   const { provenance } = input, { log, leases } = input.storage;
-  if (input.mockedCodePins && provenance !== 'MOCKED') fail('UNISWAP_CODE_PINS_MOCKED_ONLY');
+  if ((input.mockedCodePins || input.catalog?.codePins) && provenance !== 'MOCKED') fail('UNISWAP_CODE_PINS_MOCKED_ONLY');
+  // A Robinhood Chain service is never labelled as a testnet, and a testnet service never as mainnet.
+  if (provenance === (input.catalog ? 'PUBLIC_TESTNET' : 'PUBLIC_MAINNET')) fail('UNISWAP_PROVENANCE_INVALID');
+  const idPrefix = input.catalog ? 'rhlp' : 'unilp';
   const now = input.now ?? (() => new Date());
   const executionEnabled = input.executionEnabled !== false;
-  const runName = (id: string) => { if (!UNISWAP_LIQUIDITY_RUN_ID.test(id)) fail('UNISWAP_LIQUIDITY_RUN_ID_INVALID'); return id + '.jsonl'; };
+  const runName = (id: string) => { if (!UNISWAP_LIQUIDITY_RUN_ID.test(id) || !id.startsWith(idPrefix + '-')) fail('UNISWAP_LIQUIDITY_RUN_ID_INVALID'); return id + '.jsonl'; };
   async function load(id: string): Promise<UniswapLiquidityRecord> {
     const bytes = await log.read(runName(id));
     if (!bytes) fail('UNISWAP_LIQUIDITY_RUN_NOT_FOUND');
@@ -219,11 +256,11 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
     return { ...record, attempts: record.attempts.map(a => a.attemptId === attempt.attemptId ? attempt : a) };
   }
   /** Every chain-specific helper of one profile, bound to that profile's own read client. */
-  function bind(profile: UniswapLiquidityProfile, rpc: Rpc) {
+  function bind(profile: UniswapPoolProfile, rpc: Rpc) {
   const pins = input.mockedCodePins ?? profile.codeSha256;
-  const t0 = profile.token0, t1 = profile.token1;
-  const TOKEN0: UniswapTokenView = { symbol: 'USDC', address: t0.address, decimals: t0.decimals };
-  const TOKEN1: UniswapTokenView = { symbol: 'WETH', address: t1.address, decimals: t1.decimals };
+  const t0 = profile.token0, t1 = profile.token1, catalogPool = profile.chainId === ROBINHOOD.chainId;
+  const view = (token: UniswapPoolProfile['token0'], asset: CanonicalAsset | undefined): UniswapTokenView =>
+    ({ symbol: token.symbol, address: token.address, decimals: token.decimals, ...catalogPool ? { officialId: asset?.stock?.officialId ?? null } : {} });
   async function ethCall(to: string, data: string, at: string): Promise<string> { return hex(await rpc('eth_call', [{ to, data }, at])); }
   async function head() {
     if (quantity(await rpc('eth_chainId', [])) !== BigInt(profile.chainId)) fail('UNISWAP_WRONG_CHAIN');
@@ -235,7 +272,8 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
     return { number, hash, timestamp, baseFee };
   }
   /** Every read at one block; identities and code are verified before any economic value is used. */
-  async function readState(owner: string): Promise<ChainState> {
+  async function readState(owner: string, assets: PoolAssets | null): Promise<ChainState> {
+    if (catalogPool !== Boolean(assets)) fail('ASSET_CATALOG_UNAVAILABLE');
     const block = await head(), at = tag(block.number);
     const age = now().getTime() - block.timestamp * 1000;
     if (age > 120_000 || age < -30_000) fail('UNISWAP_STALE_CHAIN_HEAD');
@@ -246,10 +284,11 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
       if (code.length <= 2) fail('UNISWAP_CONTRACT_CODE_MISSING');
       codeSha256[name] = sha256Hex(Buffer.from(code.slice(2), 'hex'));
     }
-    if (codeSha256.factory !== pins.factory || codeSha256.positionManager !== pins.positionManager || codeSha256.pool !== pins.pool)
+    // A pool without its own pin (Robinhood Chain) is proven by its CREATE2 address from the pinned factory, confirmed by getPool below.
+    if (codeSha256.factory !== pins.factory || codeSha256.positionManager !== pins.positionManager || (pins.pool !== null && codeSha256.pool !== pins.pool))
       fail('UNISWAP_UNEXPECTED_CONTRACT');
     if (addressAt(await ethCall(profile.positionManager, SEL.factory, at)) !== profile.factory ||
-        addressAt(await ethCall(profile.positionManager, SEL.weth9, at)) !== t1.address) fail('UNISWAP_DEPLOYMENT_MISMATCH');
+        addressAt(await ethCall(profile.positionManager, SEL.weth9, at)) !== (profile.weth ?? t1.address)) fail('UNISWAP_DEPLOYMENT_MISMATCH');
     if (addressAt(await ethCall(profile.factory, SEL.getPool + addrWord(t0.address) + addrWord(t1.address) + word(BigInt(profile.feeTier)), at)) !== profile.pool)
       fail('UNISWAP_POOL_MISMATCH');
     if (addressAt(await ethCall(profile.pool, SEL.token0, at)) !== t0.address || addressAt(await ethCall(profile.pool, SEL.token1, at)) !== t1.address ||
@@ -257,6 +296,12 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
       fail('UNISWAP_POOL_MISMATCH');
     if (wordAt(await ethCall(t0.address, SEL.decimals, at), 0) !== BigInt(t0.decimals) || wordAt(await ethCall(t1.address, SEL.decimals, at), 0) !== BigInt(t1.decimals))
       fail('UNISWAP_TOKEN_MISMATCH');
+    // BUILD-RH-002: both tokens are official catalog assets, verified on chain (pinned base assets; Stock Tokens by beacon, uid and multiplier).
+    const stocks: StockQuoteState[] = [];
+    if (assets) for (const [side, asset] of [['token0', assets.token0], ['token1', assets.token1]] as const) {
+      const stock = await verifyCatalogToken(rpc, ROBINHOOD, { ...ROBINHOOD.codeSha256, ...input.catalog?.codePins }, asset, side, at, block.timestamp, profile.reviewTtlSeconds, now);
+      if (stock) stocks.push(stock);
+    }
     const slot0 = await ethCall(profile.pool, SEL.slot0, at);
     const sqrtPriceX96 = wordAt(slot0, 0), tick = int24At(slot0, 1);
     if (wordAt(slot0, 6) !== 1n) fail('UNISWAP_POOL_LOCKED');
@@ -271,7 +316,7 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
     ]);
     const again = await rpc('eth_getBlockByNumber', [at, false]);
     if (!isObject(again) || hex(again.hash) !== block.hash) fail('UNISWAP_BLOCK_REORG');
-    return { block, codeSha256, sqrtPriceX96, tick, liquidity, balance0, balance1, native, allowance0, allowance1, nonce, pendingNonce, positionCount };
+    return { block, codeSha256, sqrtPriceX96, tick, liquidity, balance0, balance1, native, allowance0, allowance1, nonce, pendingNonce, positionCount, stocks };
   }
   /** Real public-network simulation of the exact call sequence, sequentially, from the owner, at the observed block. */
   async function simulateCalls(owner: string, calls: readonly { step: UniswapLiquidityStep; to: string; data: string }[], at: number): Promise<SimulatedCall[]> {
@@ -300,19 +345,26 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
   function intentOf(workflow: SemanticWorkflow) {
     const checked = validateAuthoringWorkflow(workflow, createBaseSepoliaReviewContext()) as SemanticWorkflow;
     const fields = validateUniswapLiquidityWorkflow(checked);
-    const capability = resolveWorkflowCapability(checked, { environment: 'PUBLIC_TESTNET' });
+    const capability = resolveWorkflowCapability(checked, { environment: profile.environment ?? 'PUBLIC_TESTNET' });
     if (!capability.executionSupported || capability.nodes.find(n => n.nodeId === fields.nodeId)?.adapterId !== 'uniswap.v3') fail('UNISWAP_CAPABILITY_UNAVAILABLE');
     return fields;
   }
   /** Fresh state, exact approvals, two-pass simulation (expected amounts → minimums → exact reviewed mint), fees, commitment. */
-  async function buildReview(workflow: SemanticWorkflow, owner: string): Promise<UniswapLiquidityReview> {
-    const f = intentOf(workflow), state = await readState(owner), at = tag(state.block.number);
+  async function buildReview(workflow: SemanticWorkflow, owner: string, assets: PoolAssets | null): Promise<UniswapLiquidityReview> {
+    const f = intentOf(workflow);
+    if (f.token0.address !== t0.address || f.token1.address !== t1.address || f.feeTier !== profile.feeTier) fail('UNISWAP_POOL_MISMATCH');
+    // Depositing a Stock Token into a pool disposes of it: the registry must allow that for this token.
+    for (const [asset, amount] of [[assets?.token0, f.amount0Max], [assets?.token1, f.amount1Max]] as const)
+      if (asset?.stock && BigInt(amount) > 0n && !asset.stock.trading.disposable) fail('STOCK_TOKEN_NOT_DISPOSABLE');
+    const state = await readState(owner, assets), at = tag(state.block.number);
+    const TOKEN0 = view(t0, assets?.token0), TOKEN1 = view(t1, assets?.token1);
     const amount0Max = BigInt(f.amount0Max), amount1Max = BigInt(f.amount1Max);
     let local: ReturnType<typeof uniswapComposition>;
     try { local = uniswapComposition(state.sqrtPriceX96, state.tick, f.tickLower, f.tickUpper, amount0Max, amount1Max); }
     catch { return fail('UNISWAP_LIQUIDITY_ZERO'); }
-    if (state.balance0 < local.amount0) fail('UNISWAP_INSUFFICIENT_USDC');
-    if (state.balance1 < local.amount1) fail('UNISWAP_INSUFFICIENT_WETH');
+    const insufficient = (symbol: string) => symbol === 'USDC' || symbol === 'WETH' ? `UNISWAP_INSUFFICIENT_${symbol}` : 'UNISWAP_INSUFFICIENT_TOKEN';
+    if (state.balance0 < local.amount0) fail(insufficient(t0.symbol));
+    if (state.balance1 < local.amount1) fail(insufficient(t1.symbol));
     const approvals = ([['APPROVE_TOKEN0', TOKEN0, amount0Max, state.allowance0], ['APPROVE_TOKEN1', TOKEN1, amount1Max, state.allowance1]] as const)
       .filter(([, , amount]) => amount > 0n)
       .map(([step, token, amount, current]) => ({ step, token: token.address, symbol: token.symbol, spender: profile.positionManager,
@@ -355,7 +407,7 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
       pool: { fee: profile.feeTier, tickSpacing: profile.tickSpacing, sqrtPriceX96: state.sqrtPriceX96.toString(), tick: state.tick, liquidity: state.liquidity.toString(),
         price: uniswapQuotePriceAtSqrt(state.sqrtPriceX96, t0.decimals, t1.decimals) },
       range: { tickLower: f.tickLower, tickUpper: f.tickUpper, lowerPrice: uniswapQuotePriceAtTick(f.tickUpper, t0.decimals, t1.decimals),
-        upperPrice: uniswapQuotePriceAtTick(f.tickLower, t0.decimals, t1.decimals), state: state0, description: rangeDescription(state0) },
+        upperPrice: uniswapQuotePriceAtTick(f.tickLower, t0.decimals, t1.decimals), state: state0, description: rangeDescription(state0, t0.symbol, t1.symbol) },
       intent: { amount0Max: f.amount0Max, amount1Max: f.amount1Max, slippageBps: f.slippageBps! },
       expected: { liquidity: minted.liquidity.toString(), amount0: minted.amount0.toString(), amount1: minted.amount1.toString() },
       minimums: { amount0Min: min0.toString(), amount1Min: min1.toString() }, deadline: deadline.toString(),
@@ -369,6 +421,7 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
         mint: { liquidity: minted.liquidity.toString(), amount0: minted.amount0.toString(), amount1: minted.amount1.toString() },
         localEstimate: { liquidity: local.liquidity.toString(), amount0: local.amount0.toString(), amount1: local.amount1.toString() } },
       nonce: state.nonce.toString(),
+      ...assets ? { stocks: state.stocks } : {},
     };
     return { ...review, commitment: reviewCommitment(review as UniswapLiquidityReview) };
   }
@@ -458,6 +511,8 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
     return { tokenId: tokenId.toString(), owner: record.owner, liquidity: liquidity.toString(), amount0: amount0.toString(), amount1: amount1.toString(),
       tickLower: params.tickLower, tickUpper: params.tickUpper, pool: profile.pool, blockNumber, transactionHash: hash };
   }
+  /** Evidence is never stronger than the run's provenance: a MOCKED chain is MOCKED; only a public mainnet run is MAINNET_EXECUTED. */
+  const evidenceClass = provenance === 'PUBLIC_TESTNET' ? 'TESTNET_EXECUTED' as const : provenance === 'PUBLIC_MAINNET' ? 'MAINNET_EXECUTED' as const : 'MOCKED' as const;
   async function buildEvidence(record: UniswapLiquidityRecord, position: UniswapPosition): Promise<UniswapEvidence> {
     const confirmed = record.attempts.filter(a => a.state === 'CONFIRMED' && a.receipt);
     const mintAttempt = confirmed.find(a => a.step === 'MINT')!;
@@ -475,7 +530,8 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
       positions: [{ asset: { chainId: profile.chain, address: profile.positionManager, decimals: 0 }, amount: '1' }],
       fees: [{ asset: { chainId: profile.chain, nativeId: 'ETH', decimals: 18 }, amount: fees.toString() }],
       residualAssets: [{ asset: asset0, amount: balance0.toString() }, { asset: asset1, amount: balance1.toString() }],
-      ownership: [{ chainId: profile.chain, address: record.owner }], limitations: [provenance === 'PUBLIC_TESTNET' ? 'PUBLIC_TESTNET_ONLY' : 'MOCKED_CHAIN_ONLY'] };
+      ownership: [{ chainId: profile.chain, address: record.owner }],
+      limitations: [provenance === 'PUBLIC_TESTNET' ? 'PUBLIC_TESTNET_ONLY' : provenance === 'PUBLIC_MAINNET' ? 'OWNER_WALLET_MAINNET' : 'MOCKED_CHAIN_ONLY'] };
     const transactions = confirmed.map(a => ({ step: a.step, transactionHash: a.receipt!.transactionHash, blockNumber: a.receipt!.blockNumber, blockHash: a.receipt!.blockHash,
       status: a.receipt!.status, gasCostWei: a.receipt!.gasCostWei, submissionKind: a.receipt!.submissionKind, reviewCommitment: a.reviewCommitment,
       explorer: explorerTx(a.receipt!.transactionHash, profile) }));
@@ -483,15 +539,15 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
       semanticWorkflowHash: record.review.workflowHash, artifactSetHash: digest(record.review), simulationHash: digest(record.review.simulation),
       policyHash: digest({ intent: record.review.intent, minimums: record.review.minimums, deadline: record.review.deadline, approvals: record.review.approvals }),
       manifestHash: mintAttempt.reviewCommitment, executionPlanHash: digest(confirmed.map(a => a.tx)), journalHeadHash: digest(record),
-      observedAt: now().toISOString(), environment: provenance === 'PUBLIC_TESTNET' ? 'TESTNET_EXECUTED' : 'MOCKED', outcome: 'RECONCILED',
+      observedAt: now().toISOString(), environment: evidenceClass, outcome: 'RECONCILED',
       receipts: confirmed.map(a => ({ receiptId: a.receipt!.transactionHash, contentHash: a.receipt!.contentHash })), differences: [], reconciliation,
       evidence: [{ evidenceId: 'position-readback', kind: 'EXTERNAL_REFERENCE', contentHash: digest(position) },
         { evidenceId: 'public-explorer', kind: 'EXTERNAL_REFERENCE', contentHash: digest(transactions.map(t => t.explorer).join('\n')) },
         { evidenceId: 'balance-reconciliation', kind: 'EXTERNAL_REFERENCE', contentHash: digest(reconciliation) }],
     }) as EvidenceBundle;
     const bundleHash = hashArtifactBytes('evidence-bundle', new TextEncoder().encode(JSON.stringify(bundle)));
-    return { bundle, bundleHash, evidenceClass: provenance === 'PUBLIC_TESTNET' ? 'TESTNET_EXECUTED' : 'MOCKED', network: profile.network, chainId: profile.chainId,
-      owner: record.owner, positionManager: profile.positionManager, pool: profile.pool, token0: TOKEN0, token1: TOKEN1, feeTier: profile.feeTier,
+    return { bundle, bundleHash, evidenceClass, network: profile.network, chainId: profile.chainId,
+      owner: record.owner, positionManager: profile.positionManager, pool: profile.pool, token0: record.review.token0, token1: record.review.token1, feeTier: profile.feeTier,
       tickLower: position.tickLower, tickUpper: position.tickUpper, lowerPrice: record.review.range.lowerPrice, upperPrice: record.review.range.upperPrice,
       position, minimums: record.review.minimums, transactions, residualAllowances: { token0: allowance0.toString(), token1: allowance1.toString() },
       balancesAfter: { token0: balance0.toString(), token1: balance1.toString() }, reconciliation: 'RECONCILED', observedAt: now().toISOString() };
@@ -543,34 +599,65 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
   }
   return { profile, rpc, head, readState, simulateCalls, buildReview, reserveNonce, discoverByNonce, sameIntent, settle, price };
   }
-  /** The runtime of a profile: its own read client, never another chain's. A profile without a configured client is not enabled. */
-  const runtimes = new Map<number, ReturnType<typeof bind>>();
-  function runtimeOf(profile: UniswapLiquidityProfile): ReturnType<typeof bind> {
-    const cached = runtimes.get(profile.chainId);
+  /** The runtime of a pool: its chain's own read client, never another chain's. A chain without a configured client is not enabled. */
+  const runtimes = new Map<string, ReturnType<typeof bind>>();
+  function runtimeOf(profile: UniswapPoolProfile): ReturnType<typeof bind> {
+    const key = `${profile.chainId}:${profile.pool}`, cached = runtimes.get(key);
     if (cached) return cached;
     const client = input.rpcs?.[profile.chain] ?? (profile.chain === BASE_PROFILE.chain ? input.rpc : undefined);
     if (!client) fail('UNISWAP_NETWORK_UNAVAILABLE');
     const created = bind(profile, client);
-    runtimes.set(profile.chainId, created);
+    runtimes.set(key, created);
     return created;
   }
-  const runtimeOfRecord = (record: UniswapLiquidityRecord) => runtimeOf(profileOfChain(record.review.chainId));
-  function runtimeOfWorkflow(workflow: SemanticWorkflow) {
-    const chain = isObject(workflow) && Array.isArray(workflow.nodes) ? workflow.nodes.find(n => n.actionType === 'asset.liquidity.concentrated')?.chainId : undefined;
-    return runtimeOf(uniswapLiquidityProfile(chain) ?? fail('UNISWAP_LIQUIDITY_NETWORK_UNSUPPORTED'));
+  /** BUILD-RH-002: both pool tokens as official catalog ERC-20s with their authored decimals (and, for a stored Review, the same identity). */
+  async function catalogAssets(token0: { address: string; decimals: number; officialId?: string | null }, token1: typeof token0): Promise<PoolAssets> {
+    const catalog = await input.catalog!.catalogFor(ROBINHOOD.chain);
+    if (catalog.chain !== ROBINHOOD.chain) fail('CATALOG_NETWORK_MISMATCH');
+    const side = (ref: typeof token0) => {
+      const asset = catalogAsset(catalog, { address: ref.address });
+      if (!asset || asset.kind !== 'ERC20' || asset.decimals !== ref.decimals || (ref.officialId !== undefined && (asset.stock?.officialId ?? null) !== ref.officialId))
+        fail('CATALOG_ASSET_IDENTITY_CHANGED');
+      return asset;
+    };
+    return { token0: side(token0), token1: side(token1) };
+  }
+  const assetsOfRecord = (record: UniswapLiquidityRecord) => input.catalog ? catalogAssets(record.review.token0, record.review.token1) : Promise.resolve(null);
+  const runtimeOfRecord = (record: UniswapLiquidityRecord) => runtimeOf(profileOfReview(record.review));
+  async function runtimeOfWorkflow(workflow: SemanticWorkflow): Promise<{ runtime: ReturnType<typeof bind>; assets: PoolAssets | null }> {
+    const node = isObject(workflow) && Array.isArray(workflow.nodes) ? workflow.nodes.find(n => n.actionType === 'asset.liquidity.concentrated') : undefined;
+    if (!input.catalog) return { runtime: runtimeOf(uniswapLiquidityProfile(node?.chainId) ?? fail('UNISWAP_LIQUIDITY_NETWORK_UNSUPPORTED')), assets: null };
+    if (node?.chainId !== ROBINHOOD.chain) fail('UNISWAP_LIQUIDITY_NETWORK_UNSUPPORTED');
+    let fields: ReturnType<typeof readConcentratedLiquidity>;
+    try { fields = readConcentratedLiquidity(node); } catch { return fail('UNISWAP_LIQUIDITY_DECLARATION_INVALID'); }
+    const assets = await catalogAssets(fields.token0, fields.token1);
+    let profile: UniswapPoolProfile;
+    try { profile = robinhoodLiquidityPool(assets.token0 as { symbol: string; address: string; decimals: number }, assets.token1 as { symbol: string; address: string; decimals: number }, fields.feeTier); }
+    catch (cause) { return fail(cause instanceof Error && /^UNISWAP_[A-Z_]+$/.test(cause.message) ? cause.message : 'UNISWAP_LIQUIDITY_DECLARATION_INVALID'); }
+    if (profile.token0.address !== fields.token0.address) fail('UNISWAP_TOKEN_ORDER_INVALID');
+    return { runtime: runtimeOf(profile), assets };
   }
 
   return {
     executionEnabled,
-    /** The current pool price of a liquidity network (Base Sepolia unless a chain is named). */
-    async price(chain: string = BASE_PROFILE.chain): Promise<UniswapLiquidityPrice> {
-      return runtimeOf(uniswapLiquidityProfile(chain) ?? fail('UNISWAP_LIQUIDITY_NETWORK_UNSUPPORTED')).price();
+    /** The current pool price of a liquidity network (Base Sepolia unless a chain is named; a Robinhood Chain pool by its pair and fee tier). */
+    async price(chain: string = BASE_PROFILE.chain, pair?: { readonly tokenA: string; readonly tokenB: string; readonly fee: number }): Promise<UniswapLiquidityPrice> {
+      if (chain !== ROBINHOOD.chain || !input.catalog) return runtimeOf(uniswapLiquidityProfile(chain) ?? fail('UNISWAP_LIQUIDITY_NETWORK_UNSUPPORTED')).price();
+      if (!pair) fail('UNISWAP_POOL_REQUIRED');
+      const catalog = await input.catalog.catalogFor(ROBINHOOD.chain);
+      const a = catalogAsset(catalog, { address: String(pair.tokenA).toLowerCase() }), b = catalogAsset(catalog, { address: String(pair.tokenB).toLowerCase() });
+      if (!a || !b || a.kind !== 'ERC20' || b.kind !== 'ERC20') fail('CATALOG_ASSET_IDENTITY_CHANGED');
+      let profile: UniswapPoolProfile;
+      try { profile = robinhoodLiquidityPool(a as { symbol: string; address: string; decimals: number }, b as { symbol: string; address: string; decimals: number }, pair.fee); }
+      catch { return fail('UNISWAP_FEE_TIER_UNSUPPORTED'); }
+      return runtimeOf(profile).price();
     },
     /** Read-only: a new run with a fresh public simulation for this owner. */
     async simulate(workflowInput: unknown, ownerInput: string): Promise<UniswapLiquidityRecord> {
       const workflow = workflowInput as SemanticWorkflow, owner = address(ownerInput);
-      const review = await runtimeOfWorkflow(workflow).buildReview(workflow, owner);
-      const id = 'unilp-' + randomBytes(16).toString('hex');
+      const { runtime, assets } = await runtimeOfWorkflow(workflow);
+      const review = await runtime.buildReview(workflow, owner, assets);
+      const id = `${idPrefix}-` + randomBytes(16).toString('hex');
       return save({ format: 'flofi.uniswap-liquidity-run.v1', id, provenance, workflow, owner, review, authorization: null, attempts: [], position: null,
         evidence: null, verdict: 'PENDING', error: null });
     },
@@ -578,7 +665,7 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
     async refresh(id: string): Promise<UniswapLiquidityRecord> { return locked(id, async () => {
       const record = await load(id);
       if (record.verdict !== 'PENDING' || active(record)) fail('UNISWAP_ATTEMPT_ACTIVE_OBSERVE_EXISTING');
-      return save({ ...record, review: await runtimeOfRecord(record).buildReview(record.workflow, record.owner), authorization: null, error: null });
+      return save({ ...record, review: await runtimeOfRecord(record).buildReview(record.workflow, record.owner, await assetsOfRecord(record)), authorization: null, error: null });
     }); },
     async review(id: string, commitment: string, workflow: SemanticWorkflow): Promise<UniswapLiquidityRecord> { return locked(id, async () => {
       const record = await load(id);
@@ -607,9 +694,14 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
       if (record.authorization !== record.review.commitment) fail('UNISWAP_REVIEW_REQUIRED');
       if (now().getTime() >= Date.parse(record.review.expiresAt)) fail('UNISWAP_REVIEW_EXPIRED');
       const R = runtimeOfRecord(record), profile = R.profile;
-      const review = record.review, state = await R.readState(owner);
+      const review = record.review;
       const changed = async (code = 'UNISWAP_STATE_CHANGED_REVIEW_REQUIRED'): Promise<never> => { await save({ ...record, authorization: null, error: code }); return fail(code); };
+      // BUILD-RH-002: a Stock Token whose identity or multiplier changed (or is about to) since Review clears the authorization.
+      let state: ChainState;
+      try { state = await R.readState(owner, await assetsOfRecord(record)); }
+      catch (cause) { if (cause instanceof Error && /^(STOCK_[A-Z_]+|CATALOG_ASSET_IDENTITY_CHANGED)$/.test(cause.message)) return changed(cause.message); throw cause; }
       if (canonical(state.codeSha256) !== canonical(review.contracts.codeSha256)) return changed();
+      if (stockEconomics(state.stocks) !== stockEconomics(review.stocks)) return changed('STOCK_MULTIPLIER_CHANGED_REVIEW_REQUIRED');
       const need0 = BigInt(review.intent.amount0Max) > 0n && state.allowance0 < BigInt(review.intent.amount0Max);
       const need1 = BigInt(review.intent.amount1Max) > 0n && state.allowance1 < BigInt(review.intent.amount1Max);
       const step: UniswapLiquidityStep = need0 ? 'APPROVE_TOKEN0' : need1 ? 'APPROVE_TOKEN1' : 'MINT';

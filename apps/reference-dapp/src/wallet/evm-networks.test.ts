@@ -47,14 +47,32 @@ describe('shared EVM wallet networks', () => {
     expect(walletChainLabel('0x89')).toBe('Other chain (0x89)');
     expect(walletChainLabel(null)).toBe('Unknown');
   });
-  it('never offers Robinhood mainnet as a switch target', async () => {
-    expect(walletNetwork('0x1237')).toMatchObject({ switchable: false, add: null });
+  it('refuses networks that are not switch targets without any wallet request', async () => {
     expect(walletNetwork('0x66eee')).toMatchObject({ environment: 'testnet', switchable: false, add: null });
     const { provider, calls } = wallet({ chain: '0x14a34' });
-    await expect(switchWalletNetwork(provider, '0x1237')).rejects.toThrow('WALLET_NETWORK_NOT_SWITCHABLE');
     await expect(switchWalletNetwork(provider, '0x66eee')).rejects.toThrow('WALLET_NETWORK_NOT_SWITCHABLE');
     await expect(switchWalletNetwork(provider, '0x1')).rejects.toThrow('WALLET_NETWORK_NOT_SWITCHABLE');
     expect(calls).toEqual([]);
+  });
+  // BUILD-RH-002: Robinhood Chain mainnet is a first-class network (it was recognized-only in BUILD-RH-001).
+  it('switches to Robinhood Chain mainnet directly when the wallet knows it, and reads the chain back', async () => {
+    expect(walletNetwork('0x1237')).toMatchObject({ chain: 'eip155:4663', environment: 'mainnet', switchable: true });
+    const { provider, calls } = wallet({ chain: '0x2105', known: ['0x1237'] });
+    await switchWalletNetwork(provider, '0x1237');
+    expect(calls.map(call => call.method)).toEqual(['wallet_switchEthereumChain', 'eth_chainId']);
+    expect(calls[0]?.params).toEqual([{ chainId: '0x1237' }]);
+  });
+  it('adds Robinhood Chain mainnet from the official parameters only after 4902, then switches and reads back', async () => {
+    const { provider, calls } = wallet({ chain: '0x2105' });
+    await switchWalletNetwork(provider, '0x1237');
+    expect(calls.map(call => call.method)).toEqual(['wallet_switchEthereumChain', 'wallet_addEthereumChain', 'wallet_switchEthereumChain', 'eth_chainId']);
+    expect(calls[1]?.params).toEqual([{ chainId: '0x1237', chainName: 'Robinhood Chain', nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
+      rpcUrls: ['https://rpc.mainnet.chain.robinhood.com'], blockExplorerUrls: ['https://robinhoodchain.blockscout.com'] }]);
+    expect(calls.some(call => ['eth_sendTransaction', 'eth_signTypedData_v4', 'personal_sign'].includes(call.method))).toBe(false);
+  });
+  it('fails when the wallet does not report Robinhood Chain after the switch', async () => {
+    const { provider } = wallet({ chain: '0x2105', known: ['0x1237'], reportAfterSwitch: '0x2105' });
+    await expect(switchWalletNetwork(provider, '0x1237')).rejects.toThrow('WALLET_DID_NOT_SWITCH');
   });
   it('switches to Robinhood Testnet directly when the wallet knows it', async () => {
     const { provider, calls } = wallet({ chain: '0x14a34', known: ['0xb626'] });

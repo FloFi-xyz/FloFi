@@ -249,25 +249,29 @@ describe('UX-002 canonical composer projections', () => {
     expect(fixture.store.dispatch).not.toHaveBeenCalled();
   });
 
-  it('renders Stocks with Supply-style editing and an equity selector without financial messaging or commands', () => {
+  // BUILD-RH-002: Stocks is a canonical Robinhood Chain swap (USDG → Stock Token); it was an editing-only placeholder before.
+  it('renders Stocks as a Robinhood Chain swap: USDG amount, Stock Token pill, and no command or wallet request on render', () => {
     setWorkflow();
     const before = JSON.stringify(fixture.store.state.workflow);
     const html = renderToStaticMarkup(createElement(ComposerCard, { data: {
       composer: true, step: 1, selected: true, vertical: false,
-      summary: { action: 'Stocks', provider: 'Robinhood', chain: 'Testnet', amount: '0 AAPL', detail: undefined, bridgePair: undefined, linked: false, risk: undefined },
+      summary: { action: 'Stocks', provider: 'Uniswap', chain: 'Robinhood Chain', amount: '0 USDG', detail: 'USDG → AAPL', bridgePair: undefined, linked: false, risk: undefined },
       validation: { findings: [], status: 'Draft', tone: 'neutral', message: undefined, next: undefined },
-      stocks: { amount: '0', equity: 'AAPL', onAmountChange: vi.fn(), onEquityChange: vi.fn() },
+      stocks: { equity: 'AAPL', onEquityChange: vi.fn() },
+      amountEditor: { value: '0', changed: false, canApply: false, onChange: vi.fn(), onReview: () => null, onApply: vi.fn() },
     } }));
-    expect(html).toContain('1. Stocks'); expect(html).toContain('Robinhood'); expect(html).not.toContain('Testnet');
-    expect(html.match(/class="numeric composer-amount-box/g)).toHaveLength(1);
-    expect(html).toContain('aria-label="Stocks amount"'); expect(html).toContain('value="0"');
-    expect(html).toContain('USD value unavailable'); expect(html).toContain('aria-label="Select stock"');
-    expect(html).toContain('aria-expanded="false"');
+    expect(html).toContain('1. Stocks'); expect(html).toContain('Uniswap'); expect(html).toContain('Robinhood Chain');
+    expect(html).toContain('data-relationship="directional"');
+    expect(html.match(/class="numeric composer-amount-box/g)).toHaveLength(2);
+    expect(html).toContain('aria-label="Stocks amount (USDG)"'); expect(html).toContain('value="0"');
+    expect(html).toContain('aria-label="Select stock"'); expect(html).toContain('aria-expanded="false"');
     expect(html).toContain('src="/brand/robinhood-avatar.jpg"');
     expect(html).toContain('aria-label="Robinhood Chain network"');
     expect(html).not.toContain('<select');
     expect(html).toContain('Advanced Settings');
-    expect(html).not.toMatch(/unsupported|non-executable|coming soon|placeholder\)|warning|disabled=|debug|lab\b|Review|Apply|Transfer|composer-destination-box|composer-card-state/i);
+    // The destination box keeps the shared Swap-card label ("Destination amount (unquoted placeholder)") until a quote exists.
+    expect(html).toContain('aria-label="Destination amount (unquoted placeholder)"');
+    expect(html.match(/unsupported|non-executable|coming soon|debug|lab\b|Transfer/i)?.[0] ?? null).toBeNull();
     expect(JSON.stringify(fixture.store.state.workflow)).toBe(before);
     expect(fixture.store.dispatch).not.toHaveBeenCalled(); expect(fixture.store.propose).not.toHaveBeenCalled();
   });

@@ -10,6 +10,8 @@ import { borrowDetails, repayDetails, supplyDetails, withdrawDetails, type Suppl
 import { uniswapLiquidityDetails, uniswapLiquidityInputOf, type UniswapLiquidityInput } from './uniswap-liquidity-authoring';
 import { solanaLiquidityDetails, solanaLiquidityInputOf, type SolanaLiquidityInput } from './solana-liquidity-authoring';
 import { lendingDetails, type LendingInput } from './lending-authoring';
+import { catalogSwapDetails } from './catalog-swap-authoring';
+import { robinhoodLiquidityDetails, robinhoodLiquidityInputOf, type RobinhoodLiquidityInput } from './robinhood-liquidity-authoring';
 
 /**
  * BUILD-COPILOT-002: ordered, typed descriptions of the canonical workflow's steps, read only from the IR through the
@@ -25,6 +27,11 @@ export type StepDetail =
   | { readonly type: 'AAVE_WITHDRAW'; readonly input: WithdrawInput }
   | { readonly type: 'UNISWAP_LIQUIDITY'; readonly input: UniswapLiquidityInput; readonly lowerPrice: string; readonly upperPrice: string }
   | { readonly type: 'ORCA_LIQUIDITY'; readonly input: SolanaLiquidityInput; readonly lowerPrice: string; readonly upperPrice: string }
+  /** BUILD-RH-002: a Robinhood Chain swap over the official catalog (USDG, WETH, Stock Tokens). */
+  | { readonly type: 'CATALOG_SWAP'; readonly network: 'Robinhood Chain'; readonly from: string; readonly to: string; readonly amount: string; readonly slippage: string }
+  /** BUILD-RH-002: a Robinhood Chain Uniswap v3 position on a catalog pair; prices are `priceUnit` (token0 per token1) at the range edges. */
+  | { readonly type: 'CATALOG_LIQUIDITY'; readonly input: RobinhoodLiquidityInput; readonly lowerPrice: string; readonly upperPrice: string; readonly priceUnit: string;
+      readonly fullRange: boolean }
   | { readonly type: 'LENDING_COMPOSITION'; readonly role: 'SUPPLY' | 'BORROW' | 'SWAP'; readonly input: LendingInput }
   | { readonly type: 'TEMPLATE'; readonly template: string }
   | { readonly type: 'OTHER'; readonly actionType: string };
@@ -37,9 +44,9 @@ export type WorkflowStep = {
 };
 
 const CHAIN_LABEL: Readonly<Record<string, string>> = { 'eip155:8453': 'Base', 'eip155:84532': 'Base Sepolia', 'eip155:42161': 'Arbitrum One',
-  'eip155:421614': 'Arbitrum Sepolia', 'eip155:11155111': 'Ethereum Sepolia', 'mock:local': 'local template' };
+  'eip155:421614': 'Arbitrum Sepolia', 'eip155:11155111': 'Ethereum Sepolia', 'eip155:4663': 'Robinhood Chain', 'mock:local': 'local template' };
 const TEST_CHAINS: ReadonlySet<string> = new Set(['eip155:84532', 'eip155:421614', 'eip155:11155111', 'mock:local']);
-const MAIN_CHAINS: ReadonlySet<string> = new Set(['eip155:8453', 'eip155:42161']);
+const MAIN_CHAINS: ReadonlySet<string> = new Set(['eip155:8453', 'eip155:42161', 'eip155:4663']);
 const LENDING_ROLE = { 'lending-supply': 'SUPPLY', 'lending-borrow': 'BORROW', 'lending-swap': 'SWAP' } as const;
 
 type Node = Workflow['nodes'][number];
@@ -71,6 +78,13 @@ function describe(node: Node, workflow: Workflow, context: ReviewContext): Descr
   const uni = read(() => uniswapLiquidityDetails(node));
   if (uni) return { kind: 'LIQUIDITY', detail: { type: 'UNISWAP_LIQUIDITY', input: uniswapLiquidityInputOf(uni), lowerPrice: uni.lowerPrice, upperPrice: uni.upperPrice },
     protocol: uni.provider, network: uni.network, testFunds: true };
+  // BUILD-RH-002: Robinhood Chain (real funds) — catalog swaps and Uniswap v3 positions on catalog pairs.
+  const catalogSwap = read(() => catalogSwapDetails(node));
+  if (catalogSwap) return { kind: 'SWAP', detail: { type: 'CATALOG_SWAP', network: catalogSwap.network, from: catalogSwap.from, to: catalogSwap.to,
+    amount: catalogSwap.amount, slippage: String(catalogSwap.slippage) }, protocol: 'Uniswap v3', network: catalogSwap.network, testFunds: false };
+  const rhPool = read(() => robinhoodLiquidityDetails(node));
+  if (rhPool) return { kind: 'LIQUIDITY', detail: { type: 'CATALOG_LIQUIDITY', input: robinhoodLiquidityInputOf(rhPool), lowerPrice: rhPool.lowerPrice,
+    upperPrice: rhPool.upperPrice, priceUnit: rhPool.priceUnit, fullRange: rhPool.fullRange }, protocol: rhPool.provider, network: rhPool.network, testFunds: false };
   const orca = read(() => solanaLiquidityDetails(node));
   if (orca) return { kind: 'LIQUIDITY', detail: { type: 'ORCA_LIQUIDITY', input: solanaLiquidityInputOf(orca), lowerPrice: orca.lowerPrice, upperPrice: orca.upperPrice },
     protocol: orca.provider, network: orca.network, testFunds: true };

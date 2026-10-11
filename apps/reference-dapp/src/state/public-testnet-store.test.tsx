@@ -14,7 +14,7 @@ const f = vi.hoisted(() => ({ workflow: null as Workflow | null, restore: vi.fn(
 vi.mock('./workflow-store', () => ({ useWorkflow: () => ({ state: { workflow: f.workflow }, restoreWorkflow: f.restore }) }));
 vi.mock('./build009-wallet-store', () => ({ useBuild009Wallet: () => ({}), injected: () => null }));
 vi.mock('../app/public-testnet-action', () => ({ publicAvailability: vi.fn(), publicStatus: vi.fn(), publicPrepare: vi.fn(), publicRefresh: vi.fn(),
-  publicReview: vi.fn(), publicBegin: vi.fn(), publicObserve: vi.fn(), publicReport: vi.fn() }));
+  publicReview: vi.fn(), publicBegin: vi.fn(), publicObserve: vi.fn(), publicReport: vi.fn(), robinhoodSwapAvailability: vi.fn(async () => false) }));
 let host: HookHarness, store: ReturnType<typeof usePublicTestnet>, run: PublicRun;
 function Probe() { store = usePublicTestnet(); return null; }
 const read = () => host.render(() => renderToStaticMarkup(<PublicTestnetProvider><Probe/></PublicTestnetProvider>));

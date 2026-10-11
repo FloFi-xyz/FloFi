@@ -5,7 +5,8 @@ import type { Command } from './commands';
 import { createUniswapLiquidityNode, type UniswapLiquidityInput } from './uniswap-liquidity-authoring';
 import { canvasAddCommand } from './canvas-authoring';
 import { swapDetails, inputSymbol, directionLabel, type Direction } from './swap-authoring';
-import { createRouterNode, routerDetails, routerInputOf, ROUTER_NETWORK_OPTIONS, type RouterBridgeInput } from './router-authoring';
+import { ROBINHOOD_NETWORK } from './asset-catalogs';
+import { createRouterNode, routerDetails, routerInputForNetworks, routerInputOf, routerTokensOf, ROUTER_NETWORK_OPTIONS, type RouterBridgeInput } from './router-authoring';
 import { createBridgeNode, bridgeDetails } from './bridge-authoring';
 import { shellChainLabel } from './product-shell';
 import { editorReducer, type EditorState } from './editor';
@@ -17,13 +18,20 @@ import { createCryptoActionNode, cryptoInputOf, cryptoProfile, canSelectCryptoAs
 
 /** Required-field authoring only, never an executable node or alternate workflow. */
 export type CanvasActionSetup = { readonly id: string; readonly amount: string; readonly cryptoSelection?: CryptoSelection; readonly cryptoBeneficiary?: string } &
-  ({ readonly action: 'pool'; readonly input: UniswapLiquidityInput } | { readonly action: 'swap'; readonly direction?: Direction } | { readonly action: 'bridge'; readonly networks?: CanvasBridgeNetworks } | { readonly action: 'withdraw' | 'transfer' } | { readonly action: 'supply' | 'borrow' | 'repay'; readonly beneficiary: string });
+  ({ readonly action: 'pool'; readonly input: UniswapLiquidityInput } |
+  /** `stocks`: the Stocks card (BUILD-RH-002): a Robinhood Chain catalog swap that buys a Stock Token with USDG. */
+  { readonly action: 'swap'; readonly direction?: Direction; readonly stocks?: true } | { readonly action: 'bridge'; readonly networks?: CanvasBridgeNetworks } | { readonly action: 'withdraw' | 'transfer' } | { readonly action: 'supply' | 'borrow' | 'repay'; readonly beneficiary: string });
 export type CanvasBridgeNetworks = Pick<RouterBridgeInput, 'source' | 'destination'>;
 export type CanvasBridgeNetworkInputs = Readonly<Record<string, CanvasBridgeNetworks>>;
 export const CANVAS_BRIDGE_NETWORK_OPTIONS = {
   source: Object.values(ROUTER_NETWORK_OPTIONS).map(option => option.source),
   destination: Object.values(ROUTER_NETWORK_OPTIONS).map(option => option.destination),
 } as const;
+/** "USDC → USDC", or (BUILD-RH-002) "USDC → USDG" into Robinhood Chain; an unsupported chain pair keeps the neutral USDC wording. */
+export function bridgePairLabel(networks: CanvasBridgeNetworks): string {
+  const tokens = routerTokensOf(networks);
+  return tokens ? `${tokens.token} → ${tokens.destinationToken}` : 'USDC → USDC';
+}
 export function bridgeSetupNetworks(setup: Extract<CanvasActionSetup, { action: 'bridge' }>): CanvasBridgeNetworks {
   return setup.networks ?? { source: ROUTER_NETWORK_OPTIONS.testnet.source, destination: ROUTER_NETWORK_OPTIONS.testnet.destination };
 }
@@ -79,7 +87,7 @@ export function canvasAmountCommand(state: EditorState, setup: CanvasActionSetup
       ? { type: 'ADD_UNISWAP_LIQUIDITY', input: setup.input, source: 'CANVAS', baseRevision: state.workflow.revision }
       : canvasAddCommand(setup.action, state.workflow.revision, 'beneficiary' in setup ? setup.beneficiary : null, setup.amount);
     if (command.type === 'ADD_SWAP' && setup.action === 'swap' && setup.direction) command = { ...command, direction: setup.direction };
-    if (command.type === 'ADD_ROUTER_BRIDGE' && setup.action === 'bridge') command = { ...command, input: { ...command.input, ...bridgeSetupNetworks(setup) } };
+    if (command.type === 'ADD_ROUTER_BRIDGE' && setup.action === 'bridge') command = { ...command, input: routerInputForNetworks(command.input, bridgeSetupNetworks(setup)) };
     }
   }
   else {
@@ -92,7 +100,7 @@ export function canvasAmountCommand(state: EditorState, setup: CanvasActionSetup
     const transfer = transferDetails(node as Parameters<typeof transferDetails>[0]);
     const cryptoInput = cryptoSelections[id] ? cryptoInputOf(node) : null;
     command = cryptoInput ? { ...base, type: 'SET_CRYPTO_ACTION', input: { ...cryptoInput, selection: cryptoSelections[id]!, amount,
-      ...(cryptoInput.selection.action === 'pool' && cryptoInput.selection.network !== cryptoSelections[id]!.network ? { rangeUnit: 'TICK', lower: cryptoSelections[id]!.network === 'Solana Devnet' ? '-443584' : cryptoSelections[id]!.network === 'Ethereum Sepolia' ? '-887220' : '-887270', upper: cryptoSelections[id]!.network === 'Solana Devnet' ? '443584' : cryptoSelections[id]!.network === 'Ethereum Sepolia' ? '887220' : '887270' } : {}) } }
+      ...(cryptoInput.selection.action === 'pool' && cryptoInput.selection.network !== cryptoSelections[id]!.network ? { rangeUnit: 'TICK', lower: cryptoSelections[id]!.network === 'Solana Devnet' ? '-443584' : cryptoSelections[id]!.network === 'Ethereum Sepolia' || cryptoSelections[id]!.network === ROBINHOOD_NETWORK ? '-887220' : '-887270', upper: cryptoSelections[id]!.network === 'Solana Devnet' ? '443584' : cryptoSelections[id]!.network === 'Ethereum Sepolia' || cryptoSelections[id]!.network === ROBINHOOD_NETWORK ? '887220' : '887270' } : {}) } }
       : transfer ? { ...base, type: 'SET_RH_TRANSFER', input: { ...transfer, amount } }
       : lending && (id === 'lending-supply' || id === 'lending-borrow')
       ? { type: 'AUTHOR_LENDING', input: lendingNodeInput(state.workflow, id, amount), source: 'CANVAS', baseRevision: state.workflow.revision }
@@ -100,7 +108,7 @@ export function canvasAmountCommand(state: EditorState, setup: CanvasActionSetup
       : repay ? { ...base, type: 'SET_REPAY', input: { ...repay, amount } }
       : withdraw ? { ...base, type: 'SET_WITHDRAW', input: { ...withdraw, amount } }
       : supply ? { ...base, type: 'SET_SUPPLY', input: { ...supply, amount } }
-      : router ? { ...base, type: 'SET_ROUTER_BRIDGE', input: { ...routerInputOf(router), ...bridgeNetworks[id], amount } }
+      : router ? { ...base, type: 'SET_ROUTER_BRIDGE', input: routerInputForNetworks({ ...routerInputOf(router), amount }, bridgeNetworks[id] ?? router) }
       : bridge ? { ...base, type: 'SET_BRIDGE', input: { amount, slippageBps: String(bridge.slippageBps) } }
         : { ...base, type: 'SET_SWAP_AMOUNT', amount };
   }
@@ -127,11 +135,15 @@ export function canvasAmountMessage(cause: unknown) {
   if (/LOCK|PROTECTED/.test(code)) return 'This amount is protected.';
   if (/STALE/.test(code)) return 'The workflow changed. Review this amount again.';
   if (code === 'ROUTER_PAIR_UNSUPPORTED') return 'Choose matching bridge networks.';
+  if (code === 'ASSET_CATALOG_UNAVAILABLE') return 'Robinhood Stock Tokens are unavailable right now. Try again in a moment.';
+  if (code === 'INVALID_ASSET_PAIR') return 'Choose two different assets.';
   return 'This action cannot be combined with the current workflow. Check its settings or use a separate workflow.';
 }
 
 /** Known authoring choices, without manufacturing a temporary canonical action. */
 export function setupSummary(setup: CanvasActionSetup, context: ReviewContext) {
+  if (setup.action === 'swap' && setup.stocks && setup.cryptoSelection) return { action: 'Stocks', provider: 'Uniswap', chain: setup.cryptoSelection.network,
+    amount: `${setup.amount || '0'} ${setup.cryptoSelection.from}`, detail: `${setup.cryptoSelection.from} → ${setup.cryptoSelection.to}`, bridgePair: undefined, linked: false, risk: undefined };
   if (setup.cryptoSelection) {
     const selection = setup.cryptoSelection, profile = cryptoProfile(selection)!;
     return { action: selection.action === 'pool' ? 'Pool / Liquidity' : selection.action[0]!.toUpperCase() + selection.action.slice(1), provider: profile.provider, chain: selection.network,
@@ -146,6 +158,7 @@ export function setupSummary(setup: CanvasActionSetup, context: ReviewContext) {
   return { action: setup.action === 'swap' ? 'Swap' : setup.action === 'bridge' ? 'Bridge' : setup.action[0]!.toUpperCase() + setup.action.slice(1),
     provider: setup.action === 'swap' ? 'Uniswap' : setup.action === 'bridge' ? 'Router' : 'Aave V3',
     chain: setup.action === 'swap' ? shellChainLabel(context.assets.USDC.asset.chainId) : setup.action === 'bridge' ? `${bridgeSetupNetworks(setup).source} → ${bridgeSetupNetworks(setup).destination}` : 'Base Sepolia',
-    amount: `${setup.amount || '0'} ${setup.action === 'swap' ? inputSymbol(setup.direction ?? 'USDC_TO_WETH') : 'USDC'}`, detail: setup.action === 'swap' ? directionLabel(setup.direction ?? 'USDC_TO_WETH') : undefined,
-    bridgePair: setup.action === 'bridge' ? 'USDC → USDC' : undefined, linked: false, risk: undefined };
+    amount: `${setup.amount || '0'} ${setup.action === 'swap' ? inputSymbol(setup.direction ?? 'USDC_TO_WETH') : setup.action === 'bridge' ? routerTokensOf(bridgeSetupNetworks(setup))?.token ?? 'USDC' : 'USDC'}`,
+    detail: setup.action === 'swap' ? directionLabel(setup.direction ?? 'USDC_TO_WETH') : undefined,
+    bridgePair: setup.action === 'bridge' ? bridgePairLabel(bridgeSetupNetworks(setup)) : undefined, linked: false, risk: undefined };
 }

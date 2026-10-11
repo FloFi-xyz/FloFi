@@ -2,9 +2,9 @@
 'use client';
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
-import { publicAvailability, publicBegin, publicObserve, publicPrepare, publicRefresh, publicReport, publicReview, publicStatus } from '../app/public-testnet-action';
+import { publicAvailability, publicBegin, publicObserve, publicPrepare, publicRefresh, publicReport, publicReview, publicStatus, robinhoodSwapAvailability } from '../app/public-testnet-action';
 import type { PublicRun } from '../server/public-testnet-service';
-import { publicSwapProfile } from '../domain/public-testnet-swap';
+import { swapProfile } from '../domain/public-testnet-swap';
 import { injected, useBuild009Wallet } from './build009-wallet-store';
 import { useWorkflow } from './workflow-store';
 
@@ -21,6 +21,15 @@ function message(error: unknown): string {
   const code = error instanceof Error ? error.message : '';
   const messages: Record<string, string> = {
     PUBLIC_RECORDING_OFF: 'Public testnet recording is not enabled on this app instance.',
+    ROBINHOOD_MAINNET_NOT_ENABLED: 'Robinhood Chain is not enabled on this app instance.',
+    ROBINHOOD_STORAGE_NOT_CONFIGURED: 'Robinhood Chain is not enabled on this app instance.',
+    OWNER_EXECUTION_NOT_ENABLED: 'Real-funds execution is not enabled on this app instance. Review is available; nothing was sent.',
+    STOCK_REGISTRY_UNAVAILABLE: 'The official Robinhood asset registry is unavailable. Try again later.',
+    STOCK_MULTIPLIER_CHANGED_REVIEW_REQUIRED: 'A corporate action changed the shares per token. Review the updated swap before executing.',
+    STOCK_MULTIPLIER_CHANGE_PENDING: 'A corporate action will change the shares per token before this Review could be used. Try again after it takes effect.',
+    STOCK_MULTIPLIER_MISMATCH: 'The Robinhood registry and the chain disagree on the shares per token. Nothing was prepared.',
+    CATALOG_ASSET_IDENTITY_CHANGED: 'The official asset registry no longer matches this workflow\'s asset. Build it again.',
+    STOCK_TOKEN_NOT_ACQUIRABLE: 'This Stock Token is not tradable now.', INSUFFICIENT_GAS_FUNDS: 'Insufficient ETH for network fees on this network.',
     QUOTE_CHANGED_REVIEW_REQUIRED: 'The quote changed. Review the updated amounts before executing.',
     QUOTE_EXPIRED_REVIEW_REQUIRED: 'Quote expired. Review a fresh quote.',
     REVIEW_EXPIRED: 'Quote expired. Simulate again.', REVIEW_REQUIRED: 'Review the current swap first.',
@@ -44,7 +53,7 @@ async function calldataDigest(data: string): Promise<string> {
 export function PublicTestnetProvider({ children }: { children: ReactNode }) {
   const { state, restoreWorkflow } = useWorkflow();
   const wallet = useBuild009Wallet();
-  const [available, setAvailable] = useState(false);
+  const [availability, setAvailability] = useState({ testnet: false, robinhood: false });
   const [run, setRun] = useState<PublicRun | null>(null);
   const [source, setSource] = useState<SemanticWorkflow | null>(null);
   const [recoveryOnly, setRecoveryOnly] = useState(false);
@@ -56,6 +65,9 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
   const initialWorkflow = useRef(state.workflow);
   const restoreRef = useRef(restoreWorkflow); restoreRef.current = restoreWorkflow;
   const retired = Boolean(run && (recoveryOnly || source !== state.workflow));
+  // BUILD-RH-002: the authored (else quoted) swap's network decides which deployment gate applies.
+  const authoredChain = state.workflow.nodes.find(node => node.actionType === 'asset.swap.exact-input')?.chainId ?? null;
+  const available = swapProfile(authoredChain ?? run?.quote.chainId)?.kind === 'CATALOG' ? availability.robinhood : availability.testnet;
   const guarded = useCallback((label: string, action: () => Promise<void>) => {
     if (busyRef.current) return;
     busyRef.current = true; setBusy(label); setError(null);
@@ -63,7 +75,7 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
   }, []);
   useEffect(() => {
     let cancelled = false;
-    publicAvailability().then(value => { if (!cancelled) setAvailable(value); });
+    Promise.all([publicAvailability(), robinhoodSwapAvailability()]).then(([testnet, robinhood]) => { if (!cancelled) setAvailability({ testnet, robinhood }); });
     const id = localStorage.getItem(KEY);
     if (id) publicStatus(id).then(async result => {
       if (cancelled || !result.ok) return;
@@ -86,8 +98,8 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
     }).catch(() => undefined);
     return () => { cancelled = true; };
   }, []);
-  const simulate = useCallback(() => guarded('Reading Base Sepolia', async () => {
-    if (!available) throw new Error('PUBLIC_RECORDING_OFF');
+  const simulate = useCallback(() => guarded(`Reading ${swapProfile(authoredChain)?.network ?? 'Base Sepolia'}`, async () => {
+    if (!available) throw new Error(swapProfile(authoredChain)?.kind === 'CATALOG' ? 'ROBINHOOD_MAINNET_NOT_ENABLED' : 'PUBLIC_RECORDING_OFF');
     if (run?.attempts.some(a => ['PREPARED', 'HASH', 'PENDING', 'UNKNOWN'].includes(a.state))) throw new Error('ATTEMPT_ALREADY_ACTIVE');
     const workflow = workflowRef.current;
     const approval = run?.attempts.at(-1);
@@ -97,7 +109,7 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
       await publicPrepare(workflow as unknown as SemanticWorkflow));
     localStorage.setItem(KEY, prepared.quote.executionId);
     setSource(workflow as unknown as SemanticWorkflow); setRecoveryOnly(false); setRun(prepared);
-  }), [guarded, available, run, recoveryOnly, source]);
+  }), [guarded, available, run, recoveryOnly, source, authoredChain]);
   const review = useCallback(() => guarded('Reviewing swap', async () => {
     if (!run || retired) throw new Error('REVIEW_REQUIRED');
     setRun(unwrap(await publicReview(run.quote.executionId, run.quote.manifestHash)));
@@ -108,7 +120,7 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
   }), [guarded, run]);
   // Switching only asks the wallet to move to the quoted (else the authored) swap's chain; it never signs or sends.
   const switchNetwork = useCallback(() => guarded('Switching wallet network', async () => {
-    const profile = publicSwapProfile(run?.quote.chainId ?? workflowRef.current.nodes.find(n => n.actionType === 'asset.swap.exact-input')?.chainId);
+    const profile = swapProfile(run?.quote.chainId ?? workflowRef.current.nodes.find(n => n.actionType === 'asset.swap.exact-input')?.chainId);
     if (!profile) throw new Error('REVIEW_REQUIRED');
     await wallet.switchTo(profile.chainHex);
   }), [guarded, wallet, run]);
@@ -118,7 +130,7 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
     const provider = injected();
     if (!provider) throw new Error('WALLET_NOT_FOUND');
     // The quoted chain fixes the only chain the wallet may be on; it is read again just before the single send.
-    const profile = publicSwapProfile(run.quote.chainId);
+    const profile = swapProfile(run.quote.chainId);
     if (!profile) throw new Error('WRONG_WALLET_CHAIN');
     let session = await wallet.session();
     if (!session) session = await wallet.connect();

@@ -43,7 +43,7 @@ export function RobinhoodTransferProvider({ children }: { children: ReactNode })
     let mounted = true;
     try {
       const pointer = JSON.parse(window.localStorage.getItem(key) ?? 'null') as { id?: unknown; hash?: unknown } | null;
-      if (pointer && typeof pointer.id === 'string' && /^rhx-[a-f0-9]{32}$/.test(pointer.id)) (async () => {
+      if (pointer && typeof pointer.id === 'string' && /^(rhx|rht)-[a-f0-9]{32}$/.test(pointer.id)) (async () => {
         if (typeof pointer.hash === 'string' && /^0x[0-9a-f]{64}$/.test(pointer.hash)) await transferReport(pointer.id as string, { kind: 'HASH', hash: pointer.hash }).catch(() => undefined);
         return transferStatus(pointer.id as string);
       })().then(result => { if (mounted && result.ok) setRecord(result.value); }).catch(() => undefined);
@@ -71,7 +71,7 @@ export function RobinhoodTransferProvider({ children }: { children: ReactNode })
   async function observe() { await operation(async () => { if (!record) throw new Error('TRANSFER_RUN_MISSING'); accept(unwrap(await transferObserve(record.id))); }); }
   async function recoverReview() { await operation(async () => { if (!record) throw new Error('TRANSFER_RUN_MISSING'); accept(unwrap(await transferRecoverReview(record.id))); }); }
   /** The reviewed transaction's chain (else the authored node's) is the only network the wallet is asked to switch to. */
-  const chainHexOf = (chain: string | undefined) => Object.values(TRANSFER_NETWORKS).find(profile => profile.chain === chain)?.chainHex as '0xb626' | '0xaa36a7' | undefined;
+  const chainHexOf = (chain: string | undefined) => Object.values(TRANSFER_NETWORKS).find(profile => profile.chain === chain)?.chainHex as '0xb626' | '0xaa36a7' | '0x1237' | undefined;
   async function switchNetwork() { await operation(async () => {
     const target = chainHexOf(record?.review.chain ?? latest.current.nodes.find(n => n.actionType === 'asset.transfer')?.chainId);
     if (!target) throw new Error('TRANSFER_REVIEW_REQUIRED');

@@ -18,15 +18,24 @@ export type PreviewPlan = { readonly flow: FlowName; readonly subject: 'EVM' | '
 /** The flow that previews a strategy, or the reason MCP cannot preview it. */
 export function previewPlan(spec: StrategySpec): PreviewPlan | { readonly code: string } {
   switch (spec.action) {
-    case 'bridge': return { flow: spec.sourceNetwork === 'base' ? 'crosschain-router' : 'crosschain-router-testnet', subject: 'EVM' };
+    case 'bridge': {
+      // BUILD-RH-002: each Robinhood Chain route is its own router flow.
+      const robinhood = { 'base>robinhood': 'crosschain-router-base-to-robinhood', 'robinhood>base': 'crosschain-router-robinhood-to-base',
+        'arbitrum-one>robinhood': 'crosschain-router-arbitrum-to-robinhood', 'robinhood>arbitrum-one': 'crosschain-router-robinhood-to-arbitrum' } as const;
+      const route = robinhood[`${spec.sourceNetwork}>${spec.destinationNetwork}` as keyof typeof robinhood];
+      return { flow: route ?? (spec.sourceNetwork === 'base' ? 'crosschain-router' : 'crosschain-router-testnet'), subject: 'EVM' };
+    }
+    case 'transfer': return { code: 'SIMULATION_REQUIRES_OWNER_BROWSER' };
     case 'swap':
       if (spec.network === 'base') return { code: 'SIMULATION_LOCAL_FORK_ONLY' };
+      if (spec.network === 'robinhood') return { flow: 'robinhood-swap', subject: 'NONE' };
       if (spec.network === 'solana') return { flow: 'jupiter-swap', subject: 'SOLANA' };
       if (spec.network === 'solana-devnet') return { flow: 'solana-devnet-swap', subject: 'SOLANA' };
       return { flow: 'base-sepolia-swap', subject: 'NONE' };
     case 'supply': case 'borrow': case 'repay': case 'withdraw': return { flow: 'aave-supply', subject: 'EVM' };
     // Orca positions need a position-mint key generated in the owner's browser; there is nothing to preview without it.
-    case 'add_liquidity': return spec.network === 'solana-devnet' ? { code: 'SIMULATION_REQUIRES_OWNER_BROWSER' } : { flow: 'uniswap-liquidity', subject: 'EVM' };
+    case 'add_liquidity': return spec.network === 'solana-devnet' ? { code: 'SIMULATION_REQUIRES_OWNER_BROWSER' }
+      : { flow: spec.network === 'robinhood' ? 'robinhood-liquidity' : 'uniswap-liquidity', subject: 'EVM' };
     case 'lending_composition': return { flow: 'lending-composition', subject: 'EVM' };
   }
 }
@@ -34,7 +43,7 @@ export function previewPlan(spec: StrategySpec): PreviewPlan | { readonly code: 
 export function strategyFlow(spec: StrategySpec): FlowName | null {
   const plan = previewPlan(spec);
   if ('flow' in plan) return plan.flow;
-  return spec.action === 'add_liquidity' ? 'orca-liquidity' : null;
+  return spec.action === 'add_liquidity' ? 'orca-liquidity' : spec.action === 'transfer' ? 'robinhood-mainnet-transfer' : null;
 }
 
 type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
@@ -72,7 +81,8 @@ export type SimulationView = { readonly kind: string; readonly provenance: strin
 export function projectSimulation(flow: FlowName, value: unknown): SimulationView {
   const record = obj(value);
   switch (flow) {
-    case 'crosschain-router': case 'crosschain-router-testnet': {
+    case 'crosschain-router': case 'crosschain-router-testnet': case 'crosschain-router-base-to-robinhood': case 'crosschain-router-robinhood-to-base':
+    case 'crosschain-router-arbitrum-to-robinhood': case 'crosschain-router-robinhood-to-arbitrum': {
       const r = obj(record.review), quote = obj(r.quote), route = obj(r.route), simulation = obj(r.simulation);
       return { kind: 'CROSS_CHAIN_ROUTE', provenance: String(record.provenance), observedAt: String(r.observedAt), expiresAt: String(r.expiresAt),
         facts: { recipient: String(r.recipient), recipientKind: String(r.recipientKind),
@@ -96,13 +106,16 @@ export function projectSimulation(flow: FlowName, value: unknown): SimulationVie
           projected: pick(r.withdraw ?? r.repay ?? r.borrow ?? {}, ['expectedPostHealthFactor', 'debtAfter', 'debtAfterBase', 'collateralAfter', 'walletAfter']) },
         canonicalArtifacts: canonicalArtifacts(r) };
     }
-    case 'base-sepolia-swap': {
+    case 'base-sepolia-swap': case 'robinhood-swap': {
       const q = obj(record.quote);
-      return { kind: 'SWAP_QUOTE', provenance: 'PUBLIC_TESTNET', observedAt: String(q.observedAt), expiresAt: String(q.expiresAt),
-        facts: pick(q, ['chainId', 'inputToken', 'outputToken', 'inputSymbol', 'outputSymbol', 'amountIn', 'expectedOut', 'minimumOut', 'slippageBps', 'pool', 'fee',
-          'blockNumber', 'estimatedGas']), canonicalArtifacts: null };
+      // BUILD-RH-002: a Robinhood Chain quote carries its own provenance (PUBLIC_MAINNET or MOCKED), decimals and Stock Token multipliers.
+      return { kind: 'SWAP_QUOTE', provenance: flow === 'robinhood-swap' ? String(q.provenance) : 'PUBLIC_TESTNET', observedAt: String(q.observedAt), expiresAt: String(q.expiresAt),
+        facts: { ...pick(q, ['chainId', 'inputToken', 'outputToken', 'inputSymbol', 'outputSymbol', 'amountIn', 'expectedOut', 'minimumOut', 'slippageBps', 'pool', 'fee',
+          'blockNumber', 'estimatedGas', 'inputDecimals', 'outputDecimals']),
+          ...flow === 'robinhood-swap' ? { stocks: list(q.stocks, ['side', 'symbol', 'officialId', 'multiplierWad', 'scheduledMultiplierWad', 'scheduledEffectiveAt']) } : {} },
+        canonicalArtifacts: null };
     }
-    case 'uniswap-liquidity': {
+    case 'uniswap-liquidity': case 'robinhood-liquidity': {
       const r = obj(record.review);
       return { kind: 'CONCENTRATED_LIQUIDITY', provenance: String(record.provenance), observedAt: String(r.observedAt), expiresAt: String(r.expiresAt),
         facts: { ...pick(r, ['network', 'chainId', 'recipient', 'deadline']), pool: pick(r.pool, ['fee', 'tickSpacing', 'tick', 'price']),

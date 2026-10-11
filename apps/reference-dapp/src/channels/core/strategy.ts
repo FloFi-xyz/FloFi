@@ -20,6 +20,9 @@ import { workflowVisualModel, type WorkflowVisualModel } from '../../platform/wo
 const LENDING_NETWORK: Readonly<Record<string, NetworkId>> = { 'Base Sepolia': 'base-sepolia', 'Ethereum Sepolia': 'ethereum-sepolia' };
 const SWAP_NETWORK: Readonly<Record<string, NetworkId>> = { ADD_SWAP: 'base', ADD_TESTNET_SWAP: 'base-sepolia', ADD_ETHEREUM_SEPOLIA_SWAP: 'ethereum-sepolia' };
 const ROUTING = { AUTO: 'auto', LIFI: 'lifi', ACROSS: 'across' } as const;
+/** The router's chain names as strategy networks (BUILD-RH-002 adds Robinhood Chain in and out of Base and Arbitrum One). */
+const ROUTER_NETWORK: Readonly<Record<string, NetworkId>> = { 'Base': 'base', 'Base Sepolia': 'base-sepolia', 'Arbitrum': 'arbitrum-one', 'Arbitrum Sepolia': 'arbitrum-sepolia',
+  'Robinhood Chain': 'robinhood' };
 const bps = (value: string) => /^(0|[1-9][0-9]{0,4})$/.test(value) ? Number(value) : NaN;
 
 /** The StrategySpec (v1) an authoring command expresses, or null for anything that is not one of the Copilot's authoring commands. */
@@ -37,9 +40,26 @@ export function strategyOfCommand(command: Command): StrategySpec | null {
         slippageBps: bps(i.slippage) } as StrategySpec;
     }
     case 'ADD_ROUTER_BRIDGE': {
-      const i = c.input as { source: string; destination: string; amount: string; recipient: string; slippage: string; routing: keyof typeof ROUTING };
-      return { version: 1, action: 'bridge', sourceNetwork: i.source === 'Base' ? 'base' : 'base-sepolia', destinationNetwork: i.destination === 'Arbitrum' ? 'arbitrum-one'
-        : 'arbitrum-sepolia', asset: 'USDC', amount: i.amount, routing: ROUTING[i.routing], slippageBps: bps(i.slippage), ...i.recipient ? { recipient: i.recipient } : {} } as StrategySpec;
+      const i = c.input as { source: string; destination: string; token: string; amount: string; recipient: string; slippage: string; routing: keyof typeof ROUTING };
+      return { version: 1, action: 'bridge', sourceNetwork: ROUTER_NETWORK[i.source], destinationNetwork: ROUTER_NETWORK[i.destination], asset: i.token, amount: i.amount,
+        routing: ROUTING[i.routing], slippageBps: bps(i.slippage), ...i.recipient ? { recipient: i.recipient } : {} } as StrategySpec;
+    }
+    // BUILD-RH-002: Robinhood Chain swaps and positions over the official catalog, and Robinhood Chain transfers.
+    case 'ADD_CRYPTO_ACTION': {
+      const i = c.input as { selection: { action: string; network: string; from: string; to?: string }; amount: string; secondAmount?: string; slippage: string;
+        fee?: number; rangeUnit?: string; lower?: string; upper?: string };
+      if (i.selection.network !== 'Robinhood Chain' || !i.selection.to) return null;
+      if (i.selection.action === 'swap') return { version: 1, action: 'swap', network: 'robinhood', inputAsset: i.selection.from, outputAsset: i.selection.to,
+        amount: i.amount, slippageBps: bps(i.slippage) } as StrategySpec;
+      if (i.selection.action !== 'pool') return null;
+      return { version: 1, action: 'add_liquidity', network: 'robinhood', maxAmounts: { [i.selection.from]: i.amount, [i.selection.to]: i.secondAmount ?? '0' },
+        range: i.rangeUnit === 'TICK' ? { unit: 'tick', lower: i.lower, upper: i.upper } : { unit: 'full' }, ...i.fee === undefined ? {} : { feeTier: i.fee },
+        slippageBps: bps(i.slippage) } as StrategySpec;
+    }
+    case 'ADD_RH_TRANSFER': {
+      const i = c.input as { network: string; asset: string; amount: string; recipient: string };
+      return i.network !== 'Robinhood Chain' ? null : { version: 1, action: 'transfer', network: 'robinhood', asset: i.asset, amount: i.amount,
+        ...i.recipient === 'CONNECTED_OWNER' ? {} : { recipient: i.recipient } } as StrategySpec;
     }
     case 'ADD_SUPPLY': case 'ADD_BORROW': case 'ADD_REPAY': {
       const i = c.input as { network: string; asset: string; amount: string; beneficiary: string };

@@ -32,8 +32,8 @@ const service = createRouterService({ storage: createFileExecutionStorage(await 
   sourceRpc: counted('base', runtime.sourceRpc), destinationRpc: counted('arbitrum', runtime.destinationRpc), providers: runtime.providers,
   provenance: 'PUBLIC_MAINNET', executionEnabled: false });
 const workflow = providers => ({ schemaVersion: '1.0.0', workflowId: 'router-preflight', revision: 1, resourceEdges: [],
-  nodes: [createRouterBridgeNode('node-002', { sourceChain: profile.source.chain, destinationChain: profile.destination.chain, inputToken: profile.source.usdc,
-    outputToken: profile.destination.usdc, amount: '1000000', recipient: 'CONNECTED_OWNER', slippageBps: 50, providers })] });
+  nodes: [createRouterBridgeNode('node-002', { sourceChain: profile.source.chain, destinationChain: profile.destination.chain, inputToken: profile.source.token,
+    outputToken: profile.destination.token, amount: '1000000', recipient: 'CONNECTED_OWNER', slippageBps: 50, providers })] });
 const summary = run => ({ runId: run.id, phase: run.phase, provenance: run.provenance, owner: run.owner, recipient: run.review.recipient,
   selection: run.review.selection, routeCommitment: run.review.routeCommitment, manifestHash: run.review.artifacts.hashes.manifest,
   manifestProvider: run.review.artifacts.manifest.providers,
@@ -53,7 +53,7 @@ try { await service.begin(automatic.id, OWNER, automatic.workflow); begin = 'UNE
 const direct = await service.simulate(workflow(['across']), OWNER);
 // The unrestricted LI.FI answer (any bridge), outside the product path: the router must refuse a bridge it cannot reconcile.
 const http = createRouterHttp();
-const params = new URLSearchParams({ fromChain: '8453', toChain: '42161', fromToken: profile.source.usdc, toToken: profile.destination.usdc, fromAmount: '1000000',
+const params = new URLSearchParams({ fromChain: '8453', toChain: '42161', fromToken: profile.source.token, toToken: profile.destination.token, fromAmount: '1000000',
   fromAddress: OWNER, toAddress: OWNER, slippage: '0.005', integrator: 'flofi', allowDestinationCall: 'false' });
 const unrestricted = await http(`${profile.providers.lifi.api}/quote?${params}`);
 let unrestrictedOutcome;

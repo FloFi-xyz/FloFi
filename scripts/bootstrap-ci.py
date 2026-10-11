@@ -416,8 +416,11 @@ def verify_dependencies():
     if contracts.get("version") != "0.3.0" or contracts.get("private") is not True:
         errors.append("BUILD-007 workflow-contracts workspace version differs")
     registry = json.loads(Path("packages/action-registry/package.json").read_text())
+    # BUILD-RH-002 (owner review): keccak-256 for EIP-55 checksums and CREATE2 Uniswap v3 pool identities, from the same locked
+    # @noble/hashes 2.4.0 (SRI-pinned above) that reference-compiler, reference-executor and reference-reconciler already use.
     if registry.get("dependencies") != {
         "@defi-workflow-engine/workflow-contracts": "workspace:0.3.0",
+        "@noble/hashes": "2.4.0",
         "@sinclair/typebox": "0.34.52",
         "ajv": "8.20.0",
     }:

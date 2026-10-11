@@ -27,14 +27,18 @@ describe('BUILD-JOURNEY-001 run ownership', () => {
   it('fails closed for a method the policy does not declare', async () => {
     await expect(check('somethingNew', [RUN], A)).rejects.toThrow('RUN_OWNERSHIP_UNDECLARED');
   });
-  it('covers every method of both Router flows and the payment flow and leaves other flows unchanged', () => {
-    for (const [flow, policy] of [['crosschain-router', ROUTER_OWNERSHIP], ['crosschain-router-testnet', ROUTER_OWNERSHIP], ['pix-payment', PAYMENT_OWNERSHIP]] as const) {
+  // BUILD-RH-002: the four Robinhood Chain routes are Router flows with the same ownership policy.
+  const ROBINHOOD_ROUTES = ['crosschain-router-arbitrum-to-robinhood', 'crosschain-router-base-to-robinhood', 'crosschain-router-robinhood-to-arbitrum',
+    'crosschain-router-robinhood-to-base'] as const;
+  it('covers every method of the Router flows and the payment flow and leaves other flows unchanged', () => {
+    for (const [flow, policy] of [['crosschain-router', ROUTER_OWNERSHIP], ['crosschain-router-testnet', ROUTER_OWNERSHIP], ...ROBINHOOD_ROUTES.map(route => [route, ROUTER_OWNERSHIP] as const),
+      ['pix-payment', PAYMENT_OWNERSHIP]] as const) {
       const definition = FLOWS[flow];
       expect(definition.ownership?.policy).toBe(policy);
       for (const method of Object.keys(definition.methods))
         expect(policy.open.includes(method) || Object.hasOwn(policy.ownerArgument, method) || policy.runArgument.includes(method)).toBe(true);
     }
-    expect(Object.values(FLOWS).filter(f => f.ownership).map(f => f.name).sort()).toEqual(['crosschain-router', 'crosschain-router-testnet', 'pix-payment']);
+    expect(Object.values(FLOWS).filter(f => f.ownership).map(f => f.name).sort()).toEqual(['crosschain-router', ...ROBINHOOD_ROUTES, 'crosschain-router-testnet', 'pix-payment']);
   });
   it('accepts only lower-case EVM principals', () => {
     expect(normalizePrincipal(A)).toBe(A);

@@ -1,10 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { describe, it, expect } from 'vitest';
+import { afterAll, beforeAll, describe, it, expect } from 'vitest';
 import { cryptoNetworks, selectCryptoNetwork, selectCryptoToken, cryptoTokenOptions, createCryptoActionNode, cryptoInputOf, validCryptoSelection, cryptoReviewContext, canSelectCryptoAssets, type CryptoAction } from './crypto-action-picker';
 import { editorReducer, initialEditor } from './editor';
 import { editorHistoryReducer, initialEditorHistory } from './editor-history';
 import { canvasAmountCommand, actionReviewValue } from './canvas-action-setup';
 import { classifyWalletEnvironment } from '../wallet/environment';
+import { registerNetworkCatalog, resetNetworkCatalogs } from './asset-catalogs';
+import { officialCatalog } from '../server/robinhood-mainnet.test-harness';
+
+// BUILD-RH-002: a Robinhood Chain pool pairs USDG with a Stock Token, which only the official catalog resolves (the committed capture).
+beforeAll(() => registerNetworkCatalog(officialCatalog()));
+afterAll(() => resetNetworkCatalogs());
 
 const owner = '0x1111111111111111111111111111111111111111', context = cryptoReviewContext('Base Sepolia');
 const actions: CryptoAction[] = ['swap', 'pool', 'supply', 'borrow', 'repay', 'withdraw'];
@@ -57,8 +63,10 @@ describe('one network per crypto action', () => {
     expect(reverse.from).toBe('USDT'); expect(reverse.to).toBe('SOL'); expect(reverse.network).toBe('Solana');
   });
   it('does not advertise Arbitrum swaps or unsupported pool adapters and pairs', () => {
-    expect(cryptoNetworks('swap', 'mainnet').map(profile => profile.network)).toEqual(['Base', 'Solana']);
-    expect(cryptoNetworks('pool', 'mainnet').map(profile => profile.network)).toEqual(['Base']);
+    // BUILD-RH-002: Robinhood Chain is a mainnet swap network (catalog-backed); Arbitrum still has no swap profile.
+    expect(cryptoNetworks('swap', 'mainnet').map(profile => profile.network)).toEqual(['Base', 'Solana', 'Robinhood Chain']);
+    // BUILD-RH-002: Robinhood Chain pools (official catalog pairs) join Base on mainnet.
+    expect(cryptoNetworks('pool', 'mainnet').map(profile => profile.network)).toEqual(['Base', 'Robinhood Chain']);
     expect(() => selectCryptoNetwork('pool', 'Solana')).toThrow('ACTION_NETWORK_UNSUPPORTED');
     expect(validCryptoSelection({ action: 'pool', network: 'Base Sepolia', from: 'WETH', to: 'USDC' })).toBe(false);
   });

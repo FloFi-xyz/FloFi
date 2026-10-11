@@ -4,6 +4,7 @@ import { installSupplyWallet, setSupplyWalletChain } from './supply-fixtures';
 import { configureCanvasAction } from './composer-authoring-fixtures';
 import type { Page } from '@playwright/test';
 
+// BUILD-RH-002: the Stocks amount names the asset it spends (USDG on Robinhood Chain): its field is "Stocks amount (USDG)".
 const cards = (page: Page) => page.locator('.build-flow-surface .composer-card');
 async function workflowJson(page: Page) {
   const advanced = page.locator('details.library[aria-label="Advanced action setup"]');
@@ -33,7 +34,7 @@ test('floating Stocks action creates a Supply-style editable card without connec
   await expect(card.locator('.composer-action-title')).toHaveText('1. Stocks');
   await expect(card.locator('.composer-metadata')).toHaveText('Robinhood');
   await expect(card.locator('.composer-amount-box')).toHaveCount(1);
-  await expect(card.getByRole('textbox', { name: 'Stocks amount', exact: true })).toHaveValue('0');
+  await expect(card.getByRole('textbox', { name: 'Stocks amount (USDG)', exact: true })).toHaveValue('0');
   await expect(card.locator('.composer-fiat-value')).toHaveText('USD value unavailable');
   await expect(card.getByRole('button', { name: 'Select stock', exact: true })).toHaveAttribute('aria-expanded', 'false');
   await expect(card.getByRole('img', { name: 'Robinhood', exact: true })).toBeVisible();
@@ -54,7 +55,7 @@ test('Stocks amount, equities and settings share UI state while canonical workfl
   const original = await workflowJson(page);
   expect(original).not.toBeNull();
   await page.getByRole('button', { name: 'Stocks', exact: true }).click();
-  const card = cards(page).filter({ hasText: 'Robinhood' }), amount = card.getByRole('textbox', { name: 'Stocks amount', exact: true });
+  const card = cards(page).filter({ hasText: 'Robinhood' }), amount = card.getByRole('textbox', { name: 'Stocks amount (USDG)', exact: true });
   await amount.click(); await amount.pressSequentially('25'); await expect(amount).toHaveValue('25');
   const equity = card.getByRole('button', { name: 'Select stock', exact: true });
   await equity.click();
@@ -65,8 +66,8 @@ test('Stocks amount, equities and settings share UI state while canonical workfl
   }
   await card.getByRole('button', { name: 'Advanced Settings', exact: true }).click();
   const inspector = page.getByRole('region', { name: 'Action inspector', exact: true });
-  await expect(inspector.getByRole('textbox', { name: 'Stocks amount', exact: true })).toHaveValue('25');
-  await inspector.getByRole('textbox', { name: 'Stocks amount', exact: true }).fill('12.5');
+  await expect(inspector.getByRole('textbox', { name: 'Stocks amount (USDG)', exact: true })).toHaveValue('25');
+  await inspector.getByRole('textbox', { name: 'Stocks amount (USDG)', exact: true }).fill('12.5');
   await expect(amount).toHaveValue('12.5');
   await inspector.getByRole('combobox', { name: 'Equity', exact: true }).selectOption('TSLA');
   await expect(equity).toContainText('TSLA');
@@ -90,19 +91,22 @@ test('Stocks amount, equities and settings share UI state while canonical workfl
   expect(await page.evaluate(() => (window as unknown as { supplyWalletRequests: { method: string }[] }).supplyWalletRequests.filter(request => /sign|send|switch|addEthereumChain/i.test(request.method)))).toEqual([]);
 });
 
-test('Stocks coexists with a Pool card and can be removed without changing the canonical Pool', async ({ page }) => {
+// BUILD-RH-002: the Stocks card is now a real authoring draft (a Robinhood Chain catalog swap), not a UI-only placeholder, so it follows the
+// Canvas rule "configure one new action at a time": another action starts once the draft is applied or removed.
+test('Stocks is one unfinished action at a time: Pool waits for it, and removing it leaves the canonical workflow untouched', async ({ page }) => {
   await page.goto('/app');
   await page.getByRole('button', { name: 'Stocks', exact: true }).click();
   const stock = cards(page).filter({ hasText: 'Robinhood' });
-  await stock.getByRole('textbox', { name: 'Stocks amount', exact: true }).fill('3');
+  await stock.getByRole('textbox', { name: 'Stocks amount (USDG)', exact: true }).fill('3');
   await page.getByRole('button', { name: 'Add pool', exact: true }).click();
-  await expect(cards(page)).toHaveCount(2);
-  await expect(stock.getByRole('textbox', { name: 'Stocks amount', exact: true })).toHaveValue('3');
-  const pool = cards(page).filter({ hasText: 'Pool / Liquidity' });
-  await expect(pool.getByRole('textbox', { name: 'First liquidity amount (USDC)', exact: true })).toHaveValue('0');
+  await expect(cards(page)).toHaveCount(1);
+  await expect(stock.getByRole('textbox', { name: 'Stocks amount (USDG)', exact: true })).toHaveValue('3');
   await stock.locator('.composer-action-title').click();
   await page.getByRole('button', { name: 'Delete', exact: true }).click();
-  await expect(cards(page)).toHaveCount(1);
+  await expect(cards(page)).toHaveCount(0);
+  await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '0');
+  await page.getByRole('button', { name: 'Add pool', exact: true }).click();
+  const pool = cards(page).filter({ hasText: 'Pool / Liquidity' });
   await expect(pool.getByRole('textbox', { name: 'First liquidity amount (USDC)', exact: true })).toHaveValue('0');
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '0');
 });
@@ -176,13 +180,15 @@ test('Stocks pill opens a compact stock list with shared selection and no extra 
   await expect(page.getByText('One semantic plan', { exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'Stocks', exact: true }).click();
   const card = cards(page), equity = card.getByRole('button', { name: 'Select stock', exact: true });
-  const amount = card.getByRole('textbox', { name: 'Stocks amount', exact: true });
+  const amount = card.getByRole('textbox', { name: 'Stocks amount (USDG)', exact: true });
   const panel = page.getByRole('region', { name: 'Stocks configuration', exact: true });
   await amount.fill('12.5');
   await expect(panel).toHaveCount(0);
   await equity.click();
   await expect(panel).toBeVisible(); await expect(equity).toHaveAttribute('aria-expanded', 'true');
-  await expect(panel.locator('form, select, input:not([type="radio"]), .composer-stocks-heading')).toHaveCount(0);
+  // BUILD-RH-002: besides the featured shortcuts, the panel's only field is the search over the full official catalog.
+  await expect(panel.locator('form, select, input:not([type="radio"]):not([type="search"]), .composer-stocks-heading')).toHaveCount(0);
+  await expect(panel.getByRole('searchbox', { name: 'Search Stock Tokens', exact: true })).toHaveCount(1);
   await expect(panel.getByRole('radio')).toHaveCount(5);
   await expect(panel.getByRole('radio', { name: 'AAPL', exact: true })).toBeChecked();
   await panel.locator('.composer-stock-option').filter({ hasText: 'NVDA' }).click();
@@ -205,7 +211,8 @@ test('Stocks pill opens a compact stock list with shared selection and no extra 
     expect(badge.overlay.x).toBeGreaterThan(badge.avatar.x);
     expect(badge.overlay.x).toBeLessThan(badge.avatar.x + badge.avatar.width);
     expect(badge.overlay.y + badge.overlay.height).toBeLessThan(badge.pill.y + badge.pill.height);
-    expect(await card.locator('.composer-network-badge').evaluate(element => getComputedStyle(element).borderRadius)).toBe('50%');
+    // BUILD-RH-002: the card also shows the USDG it spends (with its own network badge); this checks the stock pill's badge.
+    expect(await card.locator('.composer-equity-pill .composer-network-badge').evaluate(element => getComputedStyle(element).borderRadius)).toBe('50%');
     expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
   }
   await panel.getByRole('button', { name: 'Hide Stocks configuration', exact: true }).click();

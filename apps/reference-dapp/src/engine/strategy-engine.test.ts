@@ -53,6 +53,14 @@ describe('BUILD-MCP-001 deterministic engine facade', () => {
       'add-liquidity-ethereum-sepolia': 'add liquidity 10 USDC and 0.005 WETH ticks 189960 to 200040 on Ethereum Sepolia slippage 100 bps',
       'add-liquidity-solana-devnet': 'add liquidity 0.01 SOL and 0.3 devUSDC ticks -29952 to -25600 on Solana Devnet slippage 100 bps',
       'lending-composition-base-sepolia': 'compose supply 10 USDC to Aave then borrow 2 USDC then swap borrowed USDC to WETH on Base Sepolia slippage 50 bps owner 0x0000000000000000000000000000000000000001',
+      // BUILD-RH-002: Robinhood Chain (real funds) — the bridge routes in and out, a catalog swap, a position and a transfer.
+      'bridge-base-robinhood': 'bridge 5 USDC from Base to Robinhood via auto slippage 50 bps',
+      'bridge-robinhood-base': 'bridge 5 USDG from Robinhood to Base via auto slippage 50 bps',
+      'bridge-arbitrum-robinhood': 'bridge 5 USDC from Arbitrum to Robinhood via auto slippage 50 bps',
+      'bridge-robinhood-arbitrum': 'bridge 5 USDG from Robinhood to Arbitrum via auto slippage 50 bps',
+      'swap-robinhood': 'swap 10 USDG for WETH on Robinhood slippage 50 bps',
+      'add-liquidity-robinhood': 'add liquidity 10 USDG and 0.003 WETH on Robinhood fee 0.01% full range slippage 100 bps',
+      'transfer-robinhood': 'transfer 1 USDG on Robinhood',
     };
     expect(Object.keys(sentences).sort()).toEqual(STRATEGY_EXAMPLES.map(e => e.id).sort());
     for (const example of STRATEGY_EXAMPLES) {

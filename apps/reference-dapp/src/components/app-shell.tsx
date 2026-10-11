@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
+import { swapProfile } from '../domain/public-testnet-swap';
 import { useLocale } from '../i18n/locale';
 
 import { WithdrawPanel } from './withdraw-panel';
@@ -165,7 +166,8 @@ function AppShellContent({ engineering = false, pathname, navigate, simulationRe
   const solanaLiquidity = useSolanaLiquidity();
   const uniswapLiquidity = useUniswapLiquidity();
   // BUILD-UNISWAP-LIQUIDITY-PUBLIC: the canonical position on Base Sepolia, or a recovered run while the workflow is the untouched template.
-  const uniswapLiquidityPath = !supplyPath && (state.workflow.nodes.some(n => n.actionType === 'asset.liquidity.concentrated' && ['eip155:84532', 'eip155:11155111'].includes(n.chainId)) ||
+  // BUILD-ETHEREUM-001 adds Ethereum Sepolia; BUILD-RH-002 adds Robinhood Chain (catalog pairs, real funds) on the same panel.
+  const uniswapLiquidityPath = !supplyPath && (state.workflow.nodes.some(n => n.actionType === 'asset.liquidity.concentrated' && ['eip155:84532', 'eip155:11155111', 'eip155:4663'].includes(n.chainId)) ||
     Boolean(uniswapLiquidity.recovered && uniswapLiquidity.record && state.workflow.revision === 0 && state.workflow.nodes.every(n => n.actionType.startsWith('mock-'))));
   const routerState = useRouter();
   // BUILD-ROUTER-001: the canonical cross-chain bridge node, or a recovered run while the workflow is the untouched template.
@@ -174,7 +176,8 @@ function AppShellContent({ engineering = false, pathname, navigate, simulationRe
   const solanaLiquidityPath = !supplyPath && !uniswapLiquidityPath && (state.workflow.nodes.some(n => n.actionType === 'asset.liquidity.concentrated' && n.chainId.startsWith('solana:')) || Boolean(solanaLiquidity.recovered && solanaLiquidity.record));
   const solanaPath = !supplyPath && !solanaLiquidityPath && (state.workflow.nodes.some(n => n.actionType === 'asset.swap.exact-input' && n.chainId.startsWith('solana:')) || Boolean(jupiter.recovered && jupiter.record));
   const publicTestnet = usePublicTestnet();
-  const testnetWorkflow = state.workflow.nodes.some(node => node.actionType === 'asset.swap.exact-input' && ['eip155:84532', 'eip155:11155111'].includes(node.chainId));
+  // The shared owner-wallet Uniswap swap: the testnet pairs and (BUILD-RH-002) Robinhood Chain catalog swaps.
+  const testnetWorkflow = state.workflow.nodes.some(node => node.actionType === 'asset.swap.exact-input' && swapProfile(node.chainId) !== null);
   const publicRecovery = Boolean(publicTestnet.recoveryOnly && publicTestnet.run);
   const continuedApproval = Boolean(publicTestnet.run && !publicTestnet.retired &&
     publicTestnet.run.attempts.at(-1)?.step === 'approval' &&

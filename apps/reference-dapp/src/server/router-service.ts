@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /**
- * BUILD-ROUTER-001: the canonical Cross-chain Router service, Base USDC → Arbitrum USDC.
+ * BUILD-ROUTER-001: the canonical Cross-chain Router service, Base USDC → Arbitrum USDC. BUILD-RH-002: the same service serves the
+ * Robinhood Chain routes (Base/Arbitrum USDC ↔ Robinhood USDG) through a generic per-pair profile (token, decimals, L1 fee model).
  *
  * One implementation on the `ExecutionStorage` port (files locally, PostgreSQL in the cloud). It never signs or sends:
  * it asks the allowed routing providers for routes (LI.FI first by default, Across direct), normalizes them into the
@@ -276,19 +277,19 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
     const age = now().getTime() - block.timestamp * 1000;
     if (age > 120_000 || age < -30_000) fail('ROUTER_STALE_SOURCE_HEAD');
     const codeSha256: Record<string, string> = { baseSpokePool: await codeHash(rpc, SRC.spokePool, at), baseLifiDiamond: await codeHash(rpc, SRC.lifiDiamond, at),
-      baseLifiFeeForwarder: await codeHash(rpc, SRC.lifiFeeForwarder, at), baseUsdc: await codeHash(rpc, SRC.usdc, at) };
+      baseLifiFeeForwarder: await codeHash(rpc, SRC.lifiFeeForwarder, at), baseUsdc: await codeHash(rpc, SRC.token, at) };
     for (const key of Object.keys(codeSha256)) if (codeSha256[key] !== pins[key as keyof RouterCodePins]) fail('ROUTER_UNEXPECTED_CONTRACT');
     const implementations = { baseSpokePool: await implementation(rpc, SRC.spokePool, at) };
     if (wordAt(await call(rpc, SRC.spokePool, SEL.chainId, at), 0) !== BigInt(SRC.chainId)) fail('ROUTER_DEPLOYMENT_MISMATCH');
     if (wordAt(await call(rpc, SRC.spokePool, SEL.pausedDeposits, at), 0) !== 0n) fail('ROUTER_DEPOSITS_PAUSED');
-    if (wordAt(await call(rpc, SRC.usdc, SEL.decimals, at), 0) !== 6n) fail('ROUTER_TOKEN_MISMATCH');
+    if (wordAt(await call(rpc, SRC.token, SEL.decimals, at), 0) !== BigInt(SRC.decimals)) fail('ROUTER_TOKEN_MISMATCH');
     const depositQuoteTimeBuffer = Number(wordAt(await call(rpc, SRC.spokePool, SEL.depositQuoteTimeBuffer, at), 0));
     const fillDeadlineBuffer = Number(wordAt(await call(rpc, SRC.spokePool, SEL.fillDeadlineBuffer, at), 0));
     if (!Number.isSafeInteger(depositQuoteTimeBuffer) || depositQuoteTimeBuffer < 600 || !Number.isSafeInteger(fillDeadlineBuffer) || fillDeadlineBuffer < 600)
       fail('ROUTER_DEPLOYMENT_MISMATCH');
     const [usdc, allowance, native, nonce, pendingNonce] = await Promise.all([
-      call(rpc, SRC.usdc, SEL.balanceOf + addrWord(owner), at).then(d => wordAt(d, 0)),
-      spender ? call(rpc, SRC.usdc, SEL.allowance + addrWord(owner) + addrWord(spender), at).then(d => wordAt(d, 0)) : Promise.resolve(0n),
+      call(rpc, SRC.token, SEL.balanceOf + addrWord(owner), at).then(d => wordAt(d, 0)),
+      spender ? call(rpc, SRC.token, SEL.allowance + addrWord(owner) + addrWord(spender), at).then(d => wordAt(d, 0)) : Promise.resolve(0n),
       rpc('eth_getBalance', [owner, at]).then(quantity), rpc('eth_getTransactionCount', [owner, at]).then(quantity),
       rpc('eth_getTransactionCount', [owner, 'pending']).then(quantity)]);
     const again = await rpc('eth_getBlockByNumber', [at, false]);
@@ -297,11 +298,11 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
   }
   async function readDestination(recipient: string): Promise<DestinationState> {
     const block = await head(drpc, DST.chainId, 'ROUTER_WRONG_DESTINATION_CHAIN'), at = tag(block.number);
-    const codeSha256: Record<string, string> = { arbitrumSpokePool: await codeHash(drpc, DST.spokePool, at), arbitrumUsdc: await codeHash(drpc, DST.usdc, at) };
+    const codeSha256: Record<string, string> = { arbitrumSpokePool: await codeHash(drpc, DST.spokePool, at), arbitrumUsdc: await codeHash(drpc, DST.token, at) };
     for (const key of Object.keys(codeSha256)) if (codeSha256[key] !== pins[key as keyof RouterCodePins]) fail('ROUTER_UNEXPECTED_CONTRACT');
     if (wordAt(await call(drpc, DST.spokePool, SEL.chainId, at), 0) !== BigInt(DST.chainId)) fail('ROUTER_DEPLOYMENT_MISMATCH');
     if (wordAt(await call(drpc, DST.spokePool, SEL.pausedFills, at), 0) !== 0n) fail('ROUTER_FILLS_PAUSED');
-    const recipientUsdc = wordAt(await call(drpc, DST.usdc, SEL.balanceOf + addrWord(recipient), at), 0);
+    const recipientUsdc = wordAt(await call(drpc, DST.token, SEL.balanceOf + addrWord(recipient), at), 0);
     const recipientCode = hex(await drpc('eth_getCode', [recipient, at]));
     return { block, codeSha256, implementations: { arbitrumSpokePool: await implementation(drpc, DST.spokePool, at) }, recipientUsdc, recipientHasCode: recipientCode.length > 2 };
   }
@@ -325,15 +326,17 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
     const deposits = logs.filter(l => typeof l.address === 'string' && l.address.toLowerCase() === SRC.spokePool && String(l.topics?.[0]).toLowerCase() === TOPIC.fundsDeposited);
     if (deposits.length !== 1) fail('ROUTER_DEPOSIT_EVENT_MISMATCH');
     const d = decodeFundsDeposited(deposits[0]!), b = route.bridge;
-    if (d.destinationChainId !== BigInt(DST.chainId) || d.depositor !== b.depositor || d.recipient !== route.recipient || d.inputToken !== SRC.usdc ||
-        d.outputToken !== DST.usdc || d.inputAmount !== BigInt(b.inputAmount) || d.outputAmount !== BigInt(b.outputAmount) || d.quoteTimestamp !== b.quoteTimestamp ||
+    if (d.destinationChainId !== BigInt(DST.chainId) || d.depositor !== b.depositor || d.recipient !== route.recipient || d.inputToken !== SRC.token ||
+        d.outputToken !== DST.token || d.inputAmount !== BigInt(b.inputAmount) || d.outputAmount !== BigInt(b.outputAmount) || d.quoteTimestamp !== b.quoteTimestamp ||
         d.fillDeadline !== b.fillDeadline || d.message !== '0x' || d.exclusiveRelayer !== '0x' + addrWord(b.exclusiveRelayer)) fail('ROUTER_DEPOSIT_EVENT_MISMATCH');
-    const debits = logs.filter(l => typeof l.address === 'string' && l.address.toLowerCase() === SRC.usdc && String(l.topics?.[0]).toLowerCase() === TOPIC.transfer)
+    const debits = logs.filter(l => typeof l.address === 'string' && l.address.toLowerCase() === SRC.token && String(l.topics?.[0]).toLowerCase() === TOPIC.transfer)
       .map(decodeErc20Transfer).filter(t => t.from === owner);
     if (debits.length !== 1 || debits[0]!.amount !== BigInt(route.inputAmount)) fail('ROUTER_OWNER_DEBIT_MISMATCH');
     return { deposit: d, ownerDebit: debits[0]!.amount };
   }
   async function l1FeeUpperBound(dataBytes: number, at: string): Promise<bigint | null> {
+    // BUILD-RH-002: only an OP Stack source has the GasPriceOracle; an Arbitrum Orbit source folds L1 data gas into gasUsed.
+    if (!SRC.l1DataFee) return 0n;
     try { return wordAt(await call(rpc, '0x420000000000000000000000000000000000000f', '0xf1c7a58b' + word(BigInt(dataBytes + 120)), at), 0); } catch { return null; }
   }
   function intentOf(workflow: SemanticWorkflow) {
@@ -369,9 +372,9 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
     if (!selected) fail('ROUTER_NO_EXECUTABLE_ROUTE');
     const route = selected!;
     if (route.recipient !== recipient || route.depositor !== owner || route.inputAmount !== f.amount) fail('ROUTER_ROUTE_INTENT_MISMATCH');
-    const allowance = wordAt(await call(rpc, SRC.usdc, SEL.allowance + addrWord(owner) + addrWord(route.approval.spender), tag(probe.block.number)), 0);
+    const allowance = wordAt(await call(rpc, SRC.token, SEL.allowance + addrWord(owner) + addrWord(route.approval.spender), tag(probe.block.number)), 0);
     const source: SourceState = { ...probe, allowance }, destination = await readDestination(recipient), at = tag(source.block.number);
-    if (source.usdc < BigInt(route.inputAmount)) fail('ROUTER_INSUFFICIENT_USDC');
+    if (source.usdc < BigInt(route.inputAmount)) fail(SRC.symbol === 'USDC' ? 'ROUTER_INSUFFICIENT_USDC' : 'ROUTER_INSUFFICIENT_TOKEN');
     const approvals = [{ token: route.approval.token, spender: route.approval.spender, amount: route.approval.amount, currentAllowance: source.allowance.toString(),
       required: source.allowance < BigInt(route.approval.amount) }];
     const plan = [...approvals[0]!.required ? [{ purpose: 'APPROVAL' as const, to: route.approval.token, data: encodeRouterApprove(route.approval.spender, BigInt(route.approval.amount)) }] : [],
@@ -488,7 +491,7 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
         if (!isObject(entry) || typeof entry.transactionHash !== 'string') fail('ROUTER_RPC_INVALID');
         const d = decodeFundsDeposited(entry as unknown as RouterLog);
         if (d.recipient === record.review.route.recipient && d.inputAmount === BigInt(b.inputAmount) && d.outputAmount === BigInt(b.outputAmount) &&
-            d.quoteTimestamp === b.quoteTimestamp && d.fillDeadline === b.fillDeadline && d.outputToken === DST.usdc) return entry.transactionHash.toLowerCase();
+            d.quoteTimestamp === b.quoteTimestamp && d.fillDeadline === b.fillDeadline && d.outputToken === DST.token) return entry.transactionHash.toLowerCase();
       }
     }
     return null;
@@ -501,7 +504,7 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
     const tx = await rpc('eth_getTransactionByHash', [hash]);
     let verified: Awaited<ReturnType<typeof verifyOwnerSubmission>>;
     try { verified = await verifyOwnerSubmission(rpc, { txHash: hash, account: record.owner, target: attempt.tx.to, data: attempt.tx.data, preBlock: attempt.preparedAtBlock },
-      tx, raw, SRC.chainId); }
+      tx, raw, SRC.chainId, SRC.l1DataFee); }
     catch (cause) {
       if (cause instanceof Error && cause.message === 'RECEIPT_NOT_CANONICAL') return save({ ...record, error: 'ROUTER_RECEIPT_NOT_CANONICAL' });
       if (cause instanceof Error && /^(TRANSACTION_MISMATCH|RECEIPT_INVALID)$/.test(cause.message))
@@ -520,9 +523,9 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
     try {
       if (attempt.step === 'APPROVAL') {
         const { spender, amount } = decodeRouterApprove(attempt.tx.data);
-        const approvals = logs.filter(l => String(l.address).toLowerCase() === SRC.usdc && String(l.topics[0]).toLowerCase() === TOPIC.approval).map(decodeErc20Approval);
+        const approvals = logs.filter(l => String(l.address).toLowerCase() === SRC.token && String(l.topics[0]).toLowerCase() === TOPIC.approval).map(decodeErc20Approval);
         if (approvals.length !== 1 || approvals[0]!.owner !== record.owner || approvals[0]!.spender !== spender || approvals[0]!.amount !== amount) fail('ROUTER_APPROVAL_MISMATCH');
-        const effective = wordAt(await call(rpc, SRC.usdc, SEL.allowance + addrWord(record.owner) + addrWord(spender), tag(verified.blockNumber)), 0);
+        const effective = wordAt(await call(rpc, SRC.token, SEL.allowance + addrWord(record.owner) + addrWord(spender), tag(verified.blockNumber)), 0);
         if (effective !== amount) fail('ROUTER_APPROVAL_NOT_EFFECTIVE');
         return save(replaceAttempt({ ...record, error: null }, { ...attempt, state: 'CONFIRMED', receipt, reconciled: true }));
       }
@@ -624,12 +627,12 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
     if (fills.length === 0) return { ok: false, divergent: null };
     if (fills.length !== 1) return { ok: false, divergent: 'ROUTER_FILL_DUPLICATED' };
     const f: FilledRelay = fills[0]!;
-    if (f.inputToken !== SRC.usdc || f.outputToken !== DST.usdc || f.inputAmount !== BigInt(source.inputAmount) || f.outputAmount !== BigInt(source.outputAmount) ||
+    if (f.inputToken !== SRC.token || f.outputToken !== DST.token || f.inputAmount !== BigInt(source.inputAmount) || f.outputAmount !== BigInt(source.outputAmount) ||
         f.depositor !== source.depositor || f.recipient !== route.recipient || f.fillDeadline !== source.fillDeadline || !/^0x0{64}$/.test(f.messageHash))
       return { ok: false, divergent: 'ROUTER_FILL_MISMATCH' };
     if (f.updatedRecipient !== route.recipient) return { ok: false, divergent: 'ROUTER_FILL_RECIPIENT_MISMATCH' };
     if (f.updatedOutputAmount < BigInt(route.minimumOutput)) return { ok: false, divergent: 'ROUTER_FILL_BELOW_MINIMUM' };
-    const transfers = logs.filter(l => String(l.address).toLowerCase() === DST.usdc && String(l.topics?.[0]).toLowerCase() === TOPIC.transfer).map(decodeErc20Transfer)
+    const transfers = logs.filter(l => String(l.address).toLowerCase() === DST.token && String(l.topics?.[0]).toLowerCase() === TOPIC.transfer).map(decodeErc20Transfer)
       .filter(t => t.to === route.recipient);
     if (transfers.length !== 1 || transfers[0]!.amount !== f.updatedOutputAmount) return { ok: false, divergent: 'ROUTER_FILL_TRANSFER_MISMATCH' };
     return { ok: true, fill: { transactionHash: hash, blockNumber: Number(quantity(raw.blockNumber)), blockHash: hex(raw.blockHash), timestamp: Number(quantity(raw.timestamp)),
@@ -709,7 +712,7 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
         const raw = await canonicalReceipt(rpc, h.refundTxHash);
         if (raw && quantity(raw.status) === 1n) {
           const refunds = (Array.isArray(raw.logs) ? raw.logs.filter(isObject) as unknown as RouterLog[] : [])
-            .filter(l => String(l.address).toLowerCase() === SRC.usdc && String(l.topics?.[0]).toLowerCase() === TOPIC.transfer).map(decodeErc20Transfer)
+            .filter(l => String(l.address).toLowerCase() === SRC.token && String(l.topics?.[0]).toLowerCase() === TOPIC.transfer).map(decodeErc20Transfer)
             .filter(t => t.from === SRC.spokePool && t.to === route.refundAddress && t.amount === BigInt(record.source!.inputAmount));
           if (refunds.length === 1) return save({ ...transition(record, 'REFUNDED'), verdict: 'REFUNDED', error: null,
             refund: { transactionHash: h.refundTxHash, blockNumber: Number(quantity(raw.blockNumber)), blockHash: hex(raw.blockHash), amount: refunds[0]!.amount.toString(),
@@ -739,10 +742,10 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
     const confirmed = record.attempts.filter(x => x.state === 'CONFIRMED' && x.receipt);
     const evidenceClass = routerEvidenceClass(provenance);
     const [ownerUsdc, allowance, recipientUsdc] = await Promise.all([
-      call(rpc, SRC.usdc, SEL.balanceOf + addrWord(record.owner), tag(source.blockNumber)).then(d => wordAt(d, 0)),
-      call(rpc, SRC.usdc, SEL.allowance + addrWord(record.owner) + addrWord(route.approval.spender), tag(source.blockNumber)).then(d => wordAt(d, 0)),
-      call(drpc, DST.usdc, SEL.balanceOf + addrWord(route.recipient), tag(destination.blockNumber)).then(d => wordAt(d, 0))]);
-    const src = { chainId: SRC.chain, address: SRC.usdc, decimals: 6 }, dst = { chainId: DST.chain, address: DST.usdc, decimals: 6 };
+      call(rpc, SRC.token, SEL.balanceOf + addrWord(record.owner), tag(source.blockNumber)).then(d => wordAt(d, 0)),
+      call(rpc, SRC.token, SEL.allowance + addrWord(record.owner) + addrWord(route.approval.spender), tag(source.blockNumber)).then(d => wordAt(d, 0)),
+      call(drpc, DST.token, SEL.balanceOf + addrWord(route.recipient), tag(destination.blockNumber)).then(d => wordAt(d, 0))]);
+    const src = { chainId: SRC.chain, address: SRC.token, decimals: SRC.decimals }, dst = { chainId: DST.chain, address: DST.token, decimals: DST.decimals };
     const gas = confirmed.reduce((sum, x) => sum + BigInt(x.receipt!.gasCostWei), 0n);
     const reconciliation = { balances: [{ asset: src, amount: ownerUsdc.toString() }, { asset: dst, amount: recipientUsdc.toString() }],
       allowances: [{ asset: src, amount: allowance.toString() }], debt: [], positions: [],
@@ -852,7 +855,7 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
       try { simulated = await simulate(owner, remaining, state.block.number); }
       catch (cause) { if (cause instanceof Error && /^ROUTER_SIMULATION_(APPROVAL|DEPOSIT)_REVERTED$/.test(cause.message)) return invalidate('ROUTER_STATE_CHANGED_REVIEW_REQUIRED'); throw cause; }
       try { depositMatches(route, simulated.at(-1)!.logs, owner); } catch { return invalidate('ROUTER_STATE_CHANGED_REVIEW_REQUIRED'); }
-      if (state.usdc < BigInt(route.inputAmount)) fail('ROUTER_INSUFFICIENT_USDC');
+      if (state.usdc < BigInt(route.inputAmount)) fail(SRC.symbol === 'USDC' ? 'ROUTER_INSUFFICIENT_USDC' : 'ROUTER_INSUFFICIENT_TOKEN');
       if (state.nonce !== state.pendingNonce) fail('ROUTER_PENDING_TRANSACTION');
       if (step === 'DEPOSIT' && state.block.timestamp + 120 > review.deadlines.depositMustLandBy - profile.depositSafetyMarginSeconds) return invalidate('ROUTER_REVIEW_EXPIRED');
       const reviewed = review.calls[index]!;

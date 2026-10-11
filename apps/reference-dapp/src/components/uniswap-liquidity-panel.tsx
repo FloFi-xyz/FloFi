@@ -3,7 +3,7 @@
 import { useLocale } from '../i18n/locale';
 
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { UNISWAP_V3_BASE_SEPOLIA_LIQUIDITY, uniswapLiquidityProfile, type UniswapLiquidityProfile } from '@defi-workflow-engine/action-registry';
+import { UNISWAP_V3_BASE_SEPOLIA_LIQUIDITY, UNISWAP_V3_ROBINHOOD_LIQUIDITY, uniswapLiquidityProfile } from '@defi-workflow-engine/action-registry';
 import { createUniswapLiquidityNode, uniswapBandInput, uniswapLiquidityDetails, uniswapLiquidityInputOf, uniswapLiquidityProfileFor, UNISWAP_LIQUIDITY_DEFAULT_SLIPPAGE,
   UNISWAP_LIQUIDITY_NETWORKS, type UniswapLiquidityInput, type UniswapLiquidityNetwork } from '../domain/uniswap-liquidity-authoring';
 import { poolPriceBounds, usePoolPriceRange } from './pool-price-range';
@@ -13,11 +13,13 @@ import { formatTokenAmount } from '../domain/jupiter-authoring';
 import { useWorkflow } from '../state/workflow-store';
 import { useUniswapLiquidity } from '../state/uniswap-liquidity-store';
 import { useBuild009Wallet } from '../state/build009-wallet-store';
-import type { UniswapLiquidityStep } from '../server/uniswap-liquidity-service';
+import type { UniswapLiquidityStep, UniswapTokenView } from '../server/uniswap-liquidity-service';
+import { robinhoodLiquidityDetails } from '../domain/robinhood-liquidity-authoring';
+import { StockFacts } from './stock-facts';
 
 /** Canvas form for the canonical concentrated-liquidity node: Uniswap v3 USDC / WETH on Base Sepolia (0.05%) or Ethereum Sepolia (0.3%). */
 /** Copy is written for Base Sepolia; another network's name is substituted. Display text only. */
-const networkCopy = (text: string, network: UniswapLiquidityNetwork) => network === 'Base Sepolia' ? text : text.replaceAll('Base Sepolia', network);
+const networkCopy = (text: string, network: string) => network === 'Base Sepolia' ? text : text.replaceAll('Base Sepolia', network);
 export function UniswapLiquidityForm({ nodeId, onDone, reviewFormId }: { nodeId?: string; onDone?: () => void; reviewFormId?: string }) {
   const { t: tr } = useLocale();
   const { state, propose, actionSetup, editPoolSetup, reviewCanvasAmount } = useWorkflow(), liquidity = useUniswapLiquidity();
@@ -125,18 +127,37 @@ const messages: Record<string, string> = {
   UNISWAP_NONCE_CONSUMED_BY_DIFFERENT_TRANSACTION: 'Your wallet sent a different transaction instead (for example a cancellation). Refresh and review to try again.',
   UNISWAP_POSITION_MAY_EXIST_OBSERVE: 'A position may already exist from an earlier attempt. Inspect your wallet before creating another.',
   UNISWAP_TRANSACTION_MISMATCH: 'The reported transaction is not the reviewed call. The run needs your attention; nothing will be resent.',
+  // BUILD-RH-002: Robinhood Chain positions (real funds; official catalog pairs).
+  ROBINHOOD_MAINNET_NOT_ENABLED: 'Robinhood Chain liquidity is not enabled on this server.',
+  UNISWAP_INSUFFICIENT_TOKEN: 'Your wallet needs more of a deposited token for this position.',
+  UNISWAP_POOL_MISMATCH: 'This pair has no live Uniswap v3 pool at this fee tier on Robinhood Chain. Choose another fee tier; nothing was signed.',
+  UNISWAP_CONTRACT_CODE_MISSING: 'This pair has no deployed Uniswap v3 pool at this fee tier. Choose another fee tier; nothing was signed.',
+  UNISWAP_POOL_UNINITIALIZED: 'This pool exists but has no price yet. Nothing was signed.',
+  ASSET_CATALOG_UNAVAILABLE: 'The official Robinhood asset registry is unavailable. Nothing was simulated or sent.',
+  STOCK_REGISTRY_UNAVAILABLE: 'The official Robinhood asset registry is unavailable. Nothing was simulated or sent.',
+  CATALOG_ASSET_IDENTITY_CHANGED: 'A token no longer matches the official registry. Nothing was simulated or sent.',
+  STOCK_TOKEN_DEPLOYMENT_MISMATCH: 'A Stock Token does not match its official deployment. Nothing was simulated or sent.',
+  STOCK_TOKEN_IDENTITY_MISMATCH: 'A Stock Token does not report its official identity. Nothing was simulated or sent.',
+  TOKEN_DEPLOYMENT_MISMATCH: 'A token does not match its official deployment. Nothing was simulated or sent.',
+  STOCK_MULTIPLIER_MISMATCH: 'A Stock Token multiplier disagrees with the official registry. Nothing was simulated or sent.',
+  STOCK_MULTIPLIER_CHANGE_PENDING: 'A Stock Token corporate action takes effect before this Review would expire. Try again after it applies; nothing was signed.',
+  STOCK_MULTIPLIER_CHANGED_REVIEW_REQUIRED: 'A Stock Token multiplier changed since Review. Your authorization was cleared; simulate and review again.',
+  STOCK_TOKEN_NOT_DISPOSABLE: 'The official registry does not allow depositing this Stock Token right now. Nothing was signed.',
 };
 const message = (code: string | null | undefined) => !code ? null : messages[code] ?? null;
-const usdc = (units: string | null | undefined) => units ? `${formatTokenAmount(units, 6)} USDC` : '--';
-const weth = (units: string | null | undefined) => units ? `${formatTokenAmount(units, 18)} WETH` : '--';
+/** An amount of one pool token in its own decimals (USDC and WETH on the testnet profiles; any catalog token on Robinhood Chain). */
+const tokenAmount = (token: Pick<UniswapTokenView, 'symbol' | 'decimals'>) => (units: string | null | undefined) => units ? `${formatTokenAmount(units, token.decimals)} ${token.symbol}` : '--';
+const USDC_VIEW = { symbol: 'USDC', decimals: 6 }, WETH_VIEW = { symbol: 'WETH', decimals: 18 };
 const eth = (wei: string | null | undefined) => wei ? `${formatTokenAmount(wei, 18)} ETH` : 'not available';
-const stepLabel: Record<UniswapLiquidityStep, string> = { APPROVE_TOKEN0: 'Approve USDC (exact amount)', APPROVE_TOKEN1: 'Approve WETH (exact amount)', MINT: 'Mint the position NFT' };
-const explorer = (hash: string, profile: UniswapLiquidityProfile) => profile.explorer + 'tx/' + hash;
+const stepLabelOf = (token0: string, token1: string): Record<UniswapLiquidityStep, string> =>
+  ({ APPROVE_TOKEN0: `Approve ${token0} (exact amount)`, APPROVE_TOKEN1: `Approve ${token1} (exact amount)`, MINT: 'Mint the position NFT' });
+const explorer = (hash: string, profile: { explorer: string }) => profile.explorer + 'tx/' + hash;
 
 export function UniswapLiquidityPanel({ view }: { view: 'simulate' | 'execute' }) {
   const { t: tr } = useLocale();
   const { state } = useWorkflow(), wallet = useBuild009Wallet(), lp = useUniswapLiquidity();
-  const node = state.workflow.nodes.find(n => uniswapLiquidityDetails(n)), fields = node ? uniswapLiquidityDetails(node) : null;
+  const node = state.workflow.nodes.find(n => uniswapLiquidityDetails(n) || robinhoodLiquidityDetails(n)), fields = node ? uniswapLiquidityDetails(node) : null;
+  const rhFields = node ? robinhoodLiquidityDetails(node) : null;
   const record = lp.record, r = record?.review, last = record?.attempts.at(-1);
   const [clock, setClock] = useState(() => Date.now());
   useEffect(() => { const timer = setInterval(() => setClock(Date.now()), 1000); return () => clearInterval(timer); }, []);
@@ -149,27 +170,34 @@ export function UniswapLiquidityPanel({ view }: { view: 'simulate' | 'execute' }
   const needsRefresh = Boolean(record && record.verdict === 'PENDING' && !pending && (!authorized && record.attempts.length > 0 || fresh === 0));
   const info = lp.error ?? record?.error;
   // The reviewed chain (else the authored one) names the network; Base Sepolia before anything is authored, as before.
-  const profile = uniswapLiquidityProfile(r?.chainId ?? node?.chainId) ?? UNISWAP_V3_BASE_SEPOLIA_LIQUIDITY, network = profile.network;
+  // BUILD-RH-002: Robinhood Chain (real funds) names its pool's own tokens; the testnet profiles keep their USDC / WETH wording.
+  const robinhood = (r?.chainId ?? node?.chainId) === UNISWAP_V3_ROBINHOOD_LIQUIDITY.chainId || (r?.chainId ?? node?.chainId) === UNISWAP_V3_ROBINHOOD_LIQUIDITY.chain;
+  const profile = robinhood ? UNISWAP_V3_ROBINHOOD_LIQUIDITY : uniswapLiquidityProfile(r?.chainId ?? node?.chainId) ?? UNISWAP_V3_BASE_SEPOLIA_LIQUIDITY, network = profile.network;
+  const t0 = r?.token0 ?? USDC_VIEW, t1 = r?.token1 ?? WETH_VIEW, amount0 = tokenAmount(t0), amount1 = tokenAmount(t1);
+  const stepLabel = stepLabelOf(t0.symbol, t1.symbol), evidenceSlug = robinhood ? 'robinhood-chain' : 'base-sepolia';
   return <section className="panel" aria-label={tr(`${network} liquidity`)}><h2>{tr(view === 'simulate' ? 'Simulate liquidity position' : 'Review liquidity position')}</h2>
     {fields && <p>{tr("Concentrated liquidity on ")}{network}{tr(" via Uniswap v3: up to ")}{tr(fields.maxUsdc)}{tr(" USDC and ")}{tr(fields.maxWeth)}{tr(" WETH between ")}{tr(fields.lowerPrice)}{tr(" and ")}{tr(fields.upperPrice)}{tr(" USDC per WETH.")}</p>}
-    <p role="note">{network}{tr(" test tokens only. They have no value, and no real funds are used.")}</p>
-    {!lp.available && <p role="status">{tr(message('UNISWAP_LIQUIDITY_PUBLIC_TESTNET_NOT_ENABLED'))}</p>}
+    {rhFields && <p>{tr("Concentrated liquidity on ")}{network}{tr(" via Uniswap v3: up to ")}{tr(`${rhFields.amountA} ${rhFields.tokenA} and ${rhFields.amountB} ${rhFields.tokenB}`)}
+      {tr(rhFields.fullRange ? ' across the full price range' : ` between ${rhFields.lowerPrice} and ${rhFields.upperPrice} ${rhFields.priceUnit.split(' per ')[0]} per ${rhFields.priceUnit.split(' per ')[1]}`)}{tr(` · fee ${rhFields.fee / 10_000}%.`)}</p>}
+    <p role="note">{robinhood ? tr("Real funds on Robinhood Chain: your wallet signs every request after your Review; Flofi never signs or sends.")
+      : <>{network}{tr(" test tokens only. They have no value, and no real funds are used.")}</>}</p>
+    {!lp.available && <p role="status">{tr(message(robinhood ? 'ROBINHOOD_MAINNET_NOT_ENABLED' : 'UNISWAP_LIQUIDITY_PUBLIC_TESTNET_NOT_ENABLED'))}</p>}
     {lp.retired && <p role="alert">{tr("The workflow changed. Prior authorization is invalid. Simulate the current position again.")}</p>}
     {lp.recovered && record && <p role="status">{tr("Recovered run ")}{record.id}{tr(". Its state comes from the server; nothing is resent automatically.")}</p>}
     {!wallet.account ? <button type="button" disabled={wallet.busy} onClick={() => void wallet.connect()}>{tr("Connect wallet")}</button>
       : <p>{tr("Wallet connected: ")}<span>{wallet.account}</span>{wallet.chainId !== profile.chainHex && <> · <button type="button" disabled={lp.busy} onClick={() => void lp.switchNetwork()}>{tr("Switch to ")}{network}</button></>}</p>}
-    {view === 'simulate' && <button type="button" disabled={lp.busy || pending || !lp.available || !fields} onClick={() => void lp.simulate()}>{tr("Simulate position")}</button>}
+    {view === 'simulate' && <button type="button" disabled={lp.busy || pending || !lp.available || !(fields || rhFields)} onClick={() => void lp.simulate()}>{tr("Simulate position")}</button>}
     {r && !lp.retired && <dl className="swap-summary" aria-label={tr(view === 'simulate' ? 'Liquidity simulation' : 'Liquidity review')}>
       <dt>{tr("Network")}</dt><dd>{network}{tr(" (chain ")}{tr(r.chainId)}{tr(") · block ")}{tr(r.block.number)}</dd>
-      <dt>{tr("Pool")}</dt><dd>{tr("Uniswap v3 USDC/WETH ")}<code>{tr(r.contracts.pool)}</code>{tr(" · fee ")}{tr(r.pool.fee / 10_000)}{tr("% · tick spacing ")}{tr(r.pool.tickSpacing)}</dd>
+      <dt>{tr("Pool")}</dt><dd>{tr(`Uniswap v3 ${t0.symbol}/${t1.symbol} `)}<code>{tr(r.contracts.pool)}</code>{tr(" · fee ")}{tr(r.pool.fee / 10_000)}{tr("% · tick spacing ")}{tr(r.pool.tickSpacing)}</dd>
       <dt>{tr("Token order")}</dt><dd>{tr("token0 ")}{tr(r.token0.symbol)} <code>{r.token0.address}</code>{tr(" · token1 ")}{tr(r.token1.symbol)} <code>{r.token1.address}</code></dd>
-      <dt>{tr("Current price")}</dt><dd>{tr(r.pool.price)}{tr(" USDC per WETH · tick ")}{tr(r.pool.tick)}</dd>
-      <dt>{tr("Range")}</dt><dd>{tr(r.range.lowerPrice)}–{tr(r.range.upperPrice)}{tr(" USDC per WETH · exact ticks ")}{tr(r.range.tickLower)}{tr(" to ")}{tr(r.range.tickUpper)} · {tr(r.range.state.toLowerCase().replace('_', ' '))}</dd>
+      <dt>{tr("Current price")}</dt><dd>{tr(r.pool.price)}{tr(` ${t0.symbol} per ${t1.symbol} · tick `)}{tr(r.pool.tick)}</dd>
+      <dt>{tr("Range")}</dt><dd>{tr(r.range.lowerPrice)}–{tr(r.range.upperPrice)}{tr(` ${t0.symbol} per ${t1.symbol} · exact ticks `)}{tr(r.range.tickLower)}{tr(" to ")}{tr(r.range.tickUpper)} · {tr(r.range.state.toLowerCase().replace('_', ' '))}</dd>
       <dd>{tr(r.range.description)}</dd>
-      <dt>{tr("Maximum inputs")}</dt><dd>{tr(usdc(r.intent.amount0Max))} · {tr(weth(r.intent.amount1Max))}</dd>
-      <dt>{tr("Expected deposit")}</dt><dd>{tr(usdc(r.expected.amount0))} + {tr(weth(r.expected.amount1))}{tr(" · liquidity ")}{tr(r.expected.liquidity)}{tr(" (public simulation, not executed)")}</dd>
-      <dt>{tr("Minimum deposit")}</dt><dd>{tr(usdc(r.minimums.amount0Min))} + {tr(weth(r.minimums.amount1Min))} ({tr(r.intent.slippageBps)}{tr(" bps); otherwise the mint reverts")}</dd>
-      <dt>{tr("Approvals")}</dt><dd>{r.approvals.length ? r.approvals.map(a => <span key={a.step}>{tr(a.symbol)}: {tr(a.required ? `exactly ${a.symbol === 'USDC' ? usdc(a.amount) : weth(a.amount)} to the Position Manager` : 'existing allowance is sufficient')}. </span>) : 'none'}</dd>
+      <dt>{tr("Maximum inputs")}</dt><dd>{tr(amount0(r.intent.amount0Max))} · {tr(amount1(r.intent.amount1Max))}</dd>
+      <dt>{tr("Expected deposit")}</dt><dd>{tr(amount0(r.expected.amount0))} + {tr(amount1(r.expected.amount1))}{tr(" · liquidity ")}{tr(r.expected.liquidity)}{tr(" (public simulation, not executed)")}</dd>
+      <dt>{tr("Minimum deposit")}</dt><dd>{tr(amount0(r.minimums.amount0Min))} + {tr(amount1(r.minimums.amount1Min))} ({tr(r.intent.slippageBps)}{tr(" bps); otherwise the mint reverts")}</dd>
+      <dt>{tr("Approvals")}</dt><dd>{r.approvals.length ? r.approvals.map(a => <span key={a.step}>{tr(a.symbol)}: {tr(a.required ? `exactly ${a.step === 'APPROVE_TOKEN0' ? amount0(a.amount) : amount1(a.amount)} to the Position Manager` : 'existing allowance is sufficient')}. </span>) : 'none'}</dd>
       <dt>{tr("Position Manager")}</dt><dd><code>{tr(r.contracts.positionManager)}</code></dd>
       <dt>{tr("Position NFT recipient")}</dt><dd>{tr(r.recipient)}{tr(" (your wallet)")}</dd>
       <dt>{tr("Deadline")}</dt><dd>{tr(new Date(Number(r.deadline) * 1000).toISOString())}{tr(" · Review valid ")}{tr(fresh > 0 ? `for ${fresh}s` : 'no longer — refresh')}</dd>
@@ -177,6 +205,7 @@ export function UniswapLiquidityPanel({ view }: { view: 'simulate' | 'execute' }
       <dt>{tr("Wallet requests")}</dt><dd>{tr(r.calls.map(c => stepLabel[c.step]).join(' → '))}{tr(" — each needs its own Execute click and wallet signature")}</dd>
       <dt>{tr("Simulation")}</dt><dd>{tr(r.simulation.method)}{tr(" of the exact sequence at block ")}{tr(r.simulation.block)}{tr("; independent estimate ")}{tr(r.simulation.localEstimate.liquidity)}{tr(" liquidity")}</dd>
     </dl>}
+    {r && !lp.retired && <StockFacts stocks={r.stocks}/>}
     {view === 'execute' && record && <>
       {!authorized && !pending && record.verdict === 'PENDING' && !lp.retired && fresh > 0 && <button type="button" disabled={lp.busy} onClick={() => void lp.review()}>{tr("Accept liquidity review")}</button>}
       {authorized && !lp.executionEnabled && <p role="status">{tr("Execution is not enabled on this server. Simulation and Review remain read-only.")}</p>}
@@ -186,11 +215,11 @@ export function UniswapLiquidityPanel({ view }: { view: 'simulate' | 'execute' }
       {record.attempts.length > 0 && <ol aria-label={tr("Liquidity transactions")}>{record.attempts.map(a => <li key={a.attemptId}>{tr(stepLabel[a.step])}: {tr(a.state.toLowerCase().replaceAll('_', ' '))}
         {a.transactionHash && <> · <a href={explorer(a.replacementHash ?? a.transactionHash, profile)} target="_blank" rel="noreferrer">{tr("view transaction")}</a></>}{tr(a.note ? ` · ${message(a.note) ?? a.note}` : '')}</li>)}</ol>}
       {record.evidence && record.position && <section aria-label={tr("Liquidity result")} className="swap-result"><h3>{tr("Position created")}</h3>
-        <p>{tr("Position NFT #")}{tr(record.position.tokenId)}{tr(" is owned by your wallet ")}{tr(record.position.owner)}{tr(". Deposited ")}{tr(usdc(record.position.amount0))}{tr(" and ")}{tr(weth(record.position.amount1))}{tr("; liquidity ")}{tr(record.position.liquidity)}{tr("; ticks ")}{tr(record.position.tickLower)}{tr(" to ")}{tr(record.position.tickUpper)}{tr(". Independently reconciled.")}</p>
-        <p>{tr("Remaining allowances to the Position Manager: ")}{tr(usdc(record.evidence.residualAllowances.token0))} · {tr(weth(record.evidence.residualAllowances.token1))}.</p>
+        <p>{tr("Position NFT #")}{tr(record.position.tokenId)}{tr(" is owned by your wallet ")}{tr(record.position.owner)}{tr(". Deposited ")}{tr(amount0(record.position.amount0))}{tr(" and ")}{tr(amount1(record.position.amount1))}{tr("; liquidity ")}{tr(record.position.liquidity)}{tr("; ticks ")}{tr(record.position.tickLower)}{tr(" to ")}{tr(record.position.tickUpper)}{tr(". Independently reconciled.")}</p>
+        <p>{tr("Remaining allowances to the Position Manager: ")}{tr(amount0(record.evidence.residualAllowances.token0))} · {tr(amount1(record.evidence.residualAllowances.token1))}.</p>
         <p>{tr("Evidence: ")}{tr(record.evidence.evidenceClass)}{tr(" · bundle ")}{record.evidence.bundleHash}</p>
-        <a download="flofi-base-sepolia-liquidity-evidence.json" href={'data:application/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(record.evidence, null, 2))}>{tr("Download Evidence Bundle")}</a></section>}
-      {record.attempts.length > 0 && !record.evidence && <a download="flofi-base-sepolia-liquidity-execution-record.json" href={'data:application/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(record, null, 2))}>{tr("Download execution record")}</a>}
+        <a download={`flofi-${evidenceSlug}-liquidity-evidence.json`} href={'data:application/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(record.evidence, null, 2))}>{tr("Download Evidence Bundle")}</a></section>}
+      {record.attempts.length > 0 && !record.evidence && <a download={`flofi-${evidenceSlug}-liquidity-execution-record.json`} href={'data:application/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(record, null, 2))}>{tr("Download execution record")}</a>}
     </>}
     {info && <p role="status">{tr(networkCopy(message(info) ?? 'Execution needs attention. Inspect technical details and observe any existing transaction.', network))}</p>}
     {lp.busy && <p role="status">{tr("Working…")}</p>}

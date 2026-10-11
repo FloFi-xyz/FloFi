@@ -65,6 +65,11 @@ const robinhoodHarness = process.env.GRYLOO_ROBINHOOD_E2E === 'MOCKED_LOOPBACK_O
 if (process.env.GRYLOO_ROBINHOOD_E2E && !robinhoodHarness) throw new Error('Robinhood E2E permits only the MOCKED loopback harness');
 const robinhoodJournal = process.env.GRYLOO_ROBINHOOD_JOURNAL ?? join(tmpdir(), 'gryloo-rh-demo-001-' + Date.now() + '-' + process.pid);
 if (robinhoodHarness) process.env.GRYLOO_ROBINHOOD_JOURNAL = robinhoodJournal;
+// BUILD-RH-002: Robinhood Chain mainnet authoring browser tests read only the committed official registry capture on loopback 8561 (MOCKED);
+// never the public registry, a public chain or a broadcast.
+const robinhoodMainnetHarness = process.env.GRYLOO_ROBINHOOD_MAINNET_E2E === 'MOCKED_LOOPBACK_ONLY';
+if (process.env.GRYLOO_ROBINHOOD_MAINNET_E2E && !robinhoodMainnetHarness) throw new Error('Robinhood Chain mainnet E2E permits only the MOCKED loopback harness');
+const robinhoodMainnetJournal = join(tmpdir(), 'gryloo-rh-002-' + Date.now() + '-' + process.pid);
 
 // BUILD-UNISWAP-LIQUIDITY-PUBLIC: Base Sepolia Uniswap liquidity browser tests use only the MOCKED loopback chain; never the public network or a broadcast.
 const uniswapHarness = process.env.GRYLOO_UNISWAP_LIQUIDITY_E2E === 'MOCKED_LOOPBACK_ONLY';
@@ -226,7 +231,8 @@ export default defineConfig({
     ...(routerHarness || routerTestnetHarness || mcpHarness ? [{ command: 'node e2e/router-serve.ts', url: 'http://127.0.0.1:8557', reuseExistingServer: false, timeout: 30_000 }] : []),
     ...(cardHarness ? [{ command: 'node e2e/card-provider-harness.mjs --serve', url: 'http://127.0.0.1:8555/__harness/health', reuseExistingServer: false, timeout: 30_000 }] : []),
     ...(channelHarness ? [{ command: 'node e2e/telegram-bot-serve.ts', url: 'http://127.0.0.1:8559/__flofi/calls', reuseExistingServer: false, timeout: 30_000 }] : []),
-    ...(delegationHarness ? [{ command: 'node e2e/delegation-chain-serve.ts', url: 'http://127.0.0.1:8560', reuseExistingServer: false, timeout: 30_000 }] : []), {
+    ...(delegationHarness ? [{ command: 'node e2e/delegation-chain-serve.ts', url: 'http://127.0.0.1:8560', reuseExistingServer: false, timeout: 30_000 }] : []),
+    ...(robinhoodMainnetHarness ? [{ command: 'node e2e/robinhood-mainnet-serve.ts', url: 'http://127.0.0.1:8561', reuseExistingServer: false, timeout: 30_000 }] : []), {
     command: modeA === 'synthetic' ? 'node e2e/fork/offline-rehearsal.mjs --serve-synthetic' : 'node e2e/fork/owner-recording.mjs serve-replay',
     url: `http://127.0.0.1:${E2E_PORTS.health}`,
     reuseExistingServer: false,
@@ -246,6 +252,7 @@ export default defineConfig({
       ...(jupiterHarness ? { GRYLOO_JUPITER_HARNESS: 'MOCKED_LOOPBACK_ONLY', GRYLOO_JUPITER_JOURNAL: jupiterJournal } : {}),
       ...(devnetHarness ? { GRYLOO_SOLANA_DEVNET_HARNESS: 'MOCKED_LOOPBACK_ONLY', GRYLOO_SOLANA_DEVNET_JOURNAL: devnetJournal } : {}),
       ...(robinhoodHarness ? { GRYLOO_ROBINHOOD_HARNESS: 'MOCKED_LOOPBACK_ONLY', GRYLOO_ROBINHOOD_JOURNAL: robinhoodJournal } : {}),
+      ...(robinhoodMainnetHarness ? { GRYLOO_ROBINHOOD_MAINNET_HARNESS: 'MOCKED_LOOPBACK_ONLY', GRYLOO_ROBINHOOD_JOURNAL: robinhoodMainnetJournal } : {}),
       ...(uniswapHarness ? { GRYLOO_UNISWAP_LIQUIDITY_HARNESS: 'MOCKED_LOOPBACK_ONLY', GRYLOO_UNISWAP_LIQUIDITY_JOURNAL: uniswapJournal } : {}),
       ...(routerHarness ? { GRYLOO_ROUTER_HARNESS: 'MOCKED_LOOPBACK_ONLY', GRYLOO_ROUTER_JOURNAL: routerJournal } : {}),
       ...(routerTestnetHarness ? { GRYLOO_ROUTER_TESTNET_HARNESS: 'MOCKED_LOOPBACK_ONLY', GRYLOO_ROUTER_TESTNET_JOURNAL: routerTestnetJournal } : {}),

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
+import { swapProfile } from '../domain/public-testnet-swap';
 import { useLocale } from '../i18n/locale';
 
 import { createPortal } from 'react-dom';
@@ -31,7 +32,7 @@ export function SummaryBar({ tab, setTab, simulationActionHost, reviewAvailable,
   const solanaLiquidityPath = !supplyPath && (state.workflow.nodes.some(n => n.actionType === 'asset.liquidity.concentrated') || Boolean(solanaLiquidity.recovered && solanaLiquidity.record));
   const solanaPath = !supplyPath && !solanaLiquidityPath && (state.workflow.nodes.some(n => n.actionType === 'asset.swap.exact-input' && n.chainId.startsWith('solana:')) || Boolean(jupiter.recovered && jupiter.record));
   const publicTestnet = usePublicTestnet();
-  const testnetWorkflow = state.workflow.nodes.some(node => node.actionType === 'asset.swap.exact-input' && ['eip155:84532', 'eip155:11155111'].includes(node.chainId));
+  const testnetWorkflow = state.workflow.nodes.some(node => node.actionType === 'asset.swap.exact-input' && swapProfile(node.chainId) !== null);
   const publicPath = testnetWorkflow || Boolean(publicTestnet.recoveryOnly && publicTestnet.run);
   const reviewable = Boolean(info?.available && prepared && !retired && !verifyError && verified['step-approve'] && verified['step-swap']);
   const actionCount = workflowShellContext(state.workflow).actionCount + (actionSetup ? 1 : 0);

@@ -102,6 +102,9 @@ importers:
       '@defi-workflow-engine/workflow-contracts':
         specifier: workspace:0.3.0
         version: link:../workflow-contracts
+      '@noble/hashes':
+        specifier: 2.4.0
+        version: 2.4.0
       '@sinclair/typebox':
         specifier: 0.34.52
         version: 0.34.52
