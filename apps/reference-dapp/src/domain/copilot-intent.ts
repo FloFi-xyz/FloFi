@@ -5,6 +5,8 @@
  * user said (with `null` for anything unstated). Flofi alone decides support, defaults and clarifications, then
  * renders an exact-grammar sentence for `parseLocalCommand`. Nothing here can execute, sign, quote or authorize.
  */
+import { COPILOT_NETWORK_IDS } from './network-registry';
+
 export const COPILOT_INTENT_VERSION = '1';
 /** BUILD-ETHEREUM-001: ETHEREUM_SEPOLIA is a test network; ETHEREUM is "Ethereum" named without Sepolia (never executable, always clarified). */
 export const COPILOT_NETWORKS = ['BASE', 'BASE_SEPOLIA', 'ARBITRUM', 'ARBITRUM_SEPOLIA', 'ETHEREUM', 'ETHEREUM_SEPOLIA', 'SOLANA', 'SOLANA_DEVNET', 'OTHER'] as const;
@@ -18,11 +20,18 @@ export const COPILOT_RANGE_UNITS = ['PRICE', 'TICK'] as const;
  * is any catalog symbol exactly as the user wrote it (FloFi resolves it through that network's validated catalog, never the model), a
  * TRANSFER action, and catalog pools take a fee tier and the full range.
  */
-export const COPILOT_V2_NETWORKS = ['BASE', 'BASE_SEPOLIA', 'ARBITRUM', 'ARBITRUM_SEPOLIA', 'ETHEREUM', 'ETHEREUM_SEPOLIA', 'SOLANA', 'SOLANA_DEVNET', 'ROBINHOOD', 'OTHER'] as const;
+/** The network registry's Copilot identifiers, plus OTHER for any network FloFi does not know. */
+export const COPILOT_V2_NETWORKS = Object.freeze([...COPILOT_NETWORK_IDS, 'OTHER'] as const);
 export const COPILOT_V2_RANGE_UNITS = ['PRICE', 'TICK', 'FULL'] as const;
 export const COPILOT_FEE_TIERS = ['0.01', '0.05', '0.3', '1'] as const;
 /** The asset symbol grammar of every catalog (`ASSET_SYMBOL`), case as written: `cbBTC`, `TSLA`, `USDbC`. */
 export const COPILOT_SYMBOL = /^[A-Za-z][A-Za-z0-9.]{0,15}$/;
+/**
+ * BUILD-BASE-001 (owner addendum): a V2 token is what the user wrote — a symbol (`COPILOT_SYMBOL`) or a whole token or company name
+ * (`Tesla`, `Coinbase Wrapped BTC`, `Coca-Cola`): ASCII words separated by single spaces, at most `maxValueLength` characters. It is only
+ * text to look up: FloFi resolves it in the named network's catalog (`resolveAssetReference`) and requires it in the user's own words.
+ */
+export const COPILOT_ASSET_REFERENCE = /^[A-Za-z0-9][A-Za-z0-9.&'-]*(?: [A-Za-z0-9.&'-]+)*$/;
 export const COPILOT_MISSING_FIELDS = ['amount', 'asset', 'network', 'sourceNetwork', 'destinationNetwork', 'protocol', 'range', 'slippage',
   'beneficiary', 'recipient'] as const;
 export const COPILOT_LIMITS = Object.freeze({
@@ -31,7 +40,7 @@ export const COPILOT_LIMITS = Object.freeze({
 });
 
 export type CopilotNetwork = (typeof COPILOT_V2_NETWORKS)[number];
-/** A V1 token name; V2 also carries any catalog symbol (`COPILOT_SYMBOL`). */
+/** A V1 token name; V2 also carries any catalog symbol or token name as written (`COPILOT_ASSET_REFERENCE`). */
 export type CopilotLegacyAsset = (typeof COPILOT_ASSETS)[number];
 export type CopilotAsset = CopilotLegacyAsset | (string & {});
 export type CopilotRouting = (typeof COPILOT_ROUTING)[number];
@@ -143,8 +152,9 @@ function parseAction(value: unknown): CopilotAction {
   return fail();
 }
 
-/** V2 token: null, OTHER or a catalog symbol as written (grammar only). */
-const symbol = (value: unknown): CopilotAsset | null => value === null ? null : typeof value === 'string' && (value === 'OTHER' || COPILOT_SYMBOL.test(value)) ? value : fail();
+/** V2 token: null, OTHER, or a symbol or token name as written (grammar only; FloFi resolves it). */
+const symbol = (value: unknown): CopilotAsset | null => value === null ? null : typeof value === 'string' && (value === 'OTHER' ||
+  (value.length <= COPILOT_LIMITS.maxValueLength && COPILOT_ASSET_REFERENCE.test(value))) ? value : fail();
 /**
  * BUILD-BASE-001: the CopilotIntentV2 action — the V1 shapes over the V2 vocabulary (catalog networks and symbols), TRANSFER, and a
  * liquidity fee tier and full range. A key a V1-shaped action omits (`feeTier`) stays omitted, so every V1-shaped action is still valid.
@@ -266,8 +276,9 @@ const actionSchemas = [
 /** BUILD-BASE-001: the V2 action schemas (catalog networks and symbols, TRANSFER, fee tier and full range). */
 const NETWORK_V2_TEXT = 'Network the user named; BASE and ROBINHOOD (Robinhood Chain) are real-funds mainnets; ETHEREUM for Ethereum without "Sepolia" (including ' +
   'Ethereum Mainnet); OTHER for any network not listed; null if not named.';
-const SYMBOL_TEXT = 'The token symbol exactly as the user wrote it (for example USDC, WETH, ETH, cbBTC, TSLA, USDG); ETH for ether; OTHER if the user named a token ' +
-  'without a symbol; null if not named. Never translate a company or token name into a symbol the user did not write.';
+const SYMBOL_TEXT = 'The token exactly as the user wrote it: its symbol (USDC, WETH, cbBTC, TSLA, USDG) or its token or company name (Tesla, Apple, ' +
+  'Coinbase Wrapped BTC), without words such as stock, shares, ações or token; ETH for ether. OTHER only if the user described a token without naming it ' +
+  '("that car company"); null if not named. Never translate a name into a symbol the user did not write: Flofi resolves names and symbols in the network\'s official catalog.';
 const nullableSymbol = nullableString(SYMBOL_TEXT);
 const actionSchemasV2 = [
   object({ type: constant('SWAP'), network: nullableChoice(COPILOT_V2_NETWORKS, NETWORK_V2_TEXT), inputAsset: nullableSymbol, outputAsset: nullableSymbol,

@@ -482,12 +482,14 @@ export const COPILOT_EVAL_CASES: readonly EvalCase[] = [
   { id: 'U04', category: 'unsupported', language: 'EN', turns: [{ user: 'Manage my portfolio for me', model: intent.unsupported('Portfolio management is not supported.'), expect: U() }] },
   { id: 'U05', category: 'unsupported', language: 'EN', turns: [{ user: 'What is the latest crypto news?', model: intent.unsupported('News is not supported.'), expect: U() }] },
   { id: 'U06', category: 'unsupported', language: 'EN', turns: [{ user: 'Bridge 1 USDC from Base to Optimism',
-    model: intent.action(act.bridge({ sourceNetwork: 'BASE', destinationNetwork: 'OTHER', asset: 'USDC', amount: '1' })), expect: U(['bridges USDC from Base to Arbitrum One']) }] },
+    // BUILD-BASE-001 (intentional change): the refusal names every Router route, generated from the capability truth (it used to name two).
+    model: intent.action(act.bridge({ sourceNetwork: 'BASE', destinationNetwork: 'OTHER', asset: 'USDC', amount: '1' })),
+    expect: U(['The Cross-chain Router supports Base Sepolia → Arbitrum Sepolia, Base → Arbitrum One, Base → Robinhood Chain']) }] },
   { id: 'U07', category: 'unsupported', language: 'EN', turns: [{ user: 'Swap 1 USDC to DAI on Base', model: intent.action(act.swap({ network: 'BASE', inputAsset: 'USDC', outputAsset: 'OTHER', amount: '1' })),
     expect: U(['That token is not supported']) }] },
   { id: 'U08', category: 'unsupported', language: 'EN', turns: [{ user: 'Supply 5 ETH to Aave on Base Sepolia', model: intent.action(act.lending('SUPPLY', { asset: 'ETH', amount: '5', ...onSepolia })),
-    // BUILD-BASE-001: the conversation also lends USDC on Base mainnet (real funds).
-    expect: U(['Aave V3 with USDC on Base (real funds) and Base Sepolia, and WBTC on Ethereum Sepolia, only']) }] },
+    // BUILD-BASE-001: the conversation also lends USDC on Base mainnet (real funds); the refusal is generated from the Aave offers.
+    expect: U(['Aave V3 with USDC on Base Sepolia and Base, and WBTC on Ethereum Sepolia only']) }] },
   { id: 'U09', category: 'unsupported', language: 'EN', turns: [{ user: 'Supply 5 USDC to Compound', model: intent.unsupported('Compound is not supported.'), expect: U() }] },
   { id: 'U10', category: 'unsupported', language: 'PT', turns: [{ user: 'Tenho 500 USDC. Coloca 300 na Aave e troca 200 por ETH.',
     model: intent.composition([sup('300'), act.swap({ inputAsset: 'USDC', outputAsset: 'ETH', amount: '200' })], 'PT'), expect: U(['O Flofi só combina passos']) }] },
@@ -525,7 +527,8 @@ export const COPILOT_EVAL_CASES: readonly EvalCase[] = [
   { id: 'E12', category: 'clarification', language: 'EN', turns: [
     { user: 'Provide Uniswap liquidity with up to 10 USDC and 0.005 WETH between 2000 and 4000 USDC per WETH', model: intent.action(act.liquidity({ protocol: 'UNISWAP_V3',
       deposits: [{ asset: 'USDC', maxAmount: '10' }, { asset: 'WETH', maxAmount: '0.005' }], rangeUnit: 'PRICE', lower: '2000', upper: '4000' })),
-      expect: Q({ options: ['Base Sepolia', 'Ethereum Sepolia', 'Base', 'Robinhood Chain'] }) },
+      // BUILD-BASE-001: the Uniswap v3 networks of the capability truth, in network registry order.
+      expect: Q({ options: ['Base', 'Base Sepolia', 'Ethereum Sepolia', 'Robinhood Chain'] }) },
     { user: 'Ethereum Sepolia', expect: P('ADD_UNISWAP_LIQUIDITY', { local: true }) }] },
   { id: 'E13', category: 'language', language: 'PT', turns: [{ user: 'Faz swap de 2 USDC para WETH na Ethereum',
     model: intent.action(act.swap({ network: 'ETHEREUM', inputAsset: 'USDC', outputAsset: 'WETH', amount: '2' }), 'PT'), expect: Q({ contains: ['O Flofi nunca usa a Ethereum Mainnet'] }) }] },

@@ -11,7 +11,7 @@ import { registerNetworkCatalog, resetNetworkCatalogs } from './asset-catalogs';
 import { canonicalStrategy } from '../channels/core/strategy';
 import { CopilotSession, act, intent } from './copilot-session.test-harness';
 import { TEST_WALLET } from './copilot-test-fixtures';
-import { baseAsset, baseCatalog } from '../server/base-mainnet.test-harness';
+import { BASE_TOKEN_LIST_TEXT, baseAsset, baseCatalog } from '../server/base-mainnet.test-harness';
 import { officialCatalog } from '../server/robinhood-mainnet.test-harness';
 import { editorReducer } from './editor';
 
@@ -19,6 +19,13 @@ const RECIPIENT = '0x3333333333333333333333333333333333333333';
 beforeAll(() => { registerNetworkCatalog(baseCatalog()); registerNetworkCatalog(officialCatalog()); });
 afterAll(() => resetNetworkCatalogs());
 
+/** What a message proposes: the Copilot's reply, or (when the exact grammar already parses it, as Chat does) the exact command. */
+function proposalOf(session: CopilotSession, text: string, model: Record<string, unknown>): { command: Command; sentence: string; notes: readonly string[] } {
+  const reply = session.say(text, model);
+  if (reply === null) return { command: session.pending!.command, sentence: text, notes: [] };
+  expect(reply, text).toMatchObject({ kind: 'PROPOSAL' });
+  return { command: reply.command!, sentence: reply.sentence!, notes: reply.notes };
+}
 /** Copilot ≡ Chat (the same command from the canonical sentence) ≡ MCP/channels (the platform composes it back, same IR and hash). */
 function expectParity(session: CopilotSession, command: Command, sentence: string) {
   expect(parseLocalCommand(sentence, session.workflow, session.context, TEST_WALLET)).toEqual(command);
@@ -123,6 +130,83 @@ describe('BUILD-BASE-001 Copilot parity on catalog networks', () => {
     t.dismiss();
     const removed = t.say('remove the transfer', intent.remove({ step: 'TRANSFER' }))!;
     expect(removed).toMatchObject({ kind: 'PROPOSAL', command: { type: 'REMOVE' } });
+  });
+  // BUILD-BASE-001 (owner addendum): one shared asset resolver. A symbol in any case or the whole catalog name of exactly one asset, always in the
+  // named network's catalog; ambiguity is asked, an unknown token refused, a name never silently replaced.
+  it('resolves "Tesla" by its catalog name, in English or Portuguese, to the same canonical TSLA swap as the symbol and the exact grammar', () => {
+    const turns = [
+      ['Buy Tesla with 50 USDG on Robinhood Chain', 'Tesla', 'EN'],
+      ['Compre ações da Tesla com 50 USDG na Robinhood', 'Tesla', 'PT'],
+      ['Swap 50 USDG for TSLA on Robinhood Chain', 'TSLA', 'EN'],
+      ['swap 50 usdg for tsla on robinhood', 'tsla', 'EN'],
+    ] as const;
+    const tsla = baseAsset(officialCatalog(), 'TSLA');
+    const proposals = turns.map(([text, outputAsset, language]) => {
+      const session = new CopilotSession();
+      const proposal = proposalOf(session, text, intent.action(act.swap({ network: 'ROBINHOOD', inputAsset: /usdg/.test(text) ? 'usdg' : 'USDG', outputAsset, amount: '50' }), language));
+      expect(proposal.command, text).toMatchObject({ type: 'ADD_CRYPTO_ACTION' });
+      expectParity(session, proposal.command, 'swap 50 USDG to TSLA on Robinhood Chain slippage 50 bps');
+      const node = editorReducer({ workflow: session.workflow, error: null }, proposal.command, session.context).workflow.nodes.at(-1)!;
+      expect(JSON.stringify(node)).toContain(tsla.address!);
+      const shared = canonicalStrategy(proposal.command);
+      return { ...proposal, node: JSON.stringify(node), hash: shared.ok ? shared.workflowHash : shared.code };
+    });
+    // The natural-language turns are the Copilot's; the exact sentences are Chat's own grammar. One canonical command, node and platform
+    // workflow hash, whichever way the user named the token.
+    expect(proposals.map(p => p.sentence).slice(0, 2)).toEqual(['swap 50 USDG to TSLA on Robinhood Chain slippage 50 bps', 'swap 50 USDG to TSLA on Robinhood Chain slippage 50 bps']);
+    expect(new Set(proposals.map(p => JSON.stringify(p.command))).size).toBe(1);
+    expect(new Set(proposals.map(p => p.node)).size).toBe(1);
+    expect(new Set(proposals.map(p => p.hash)).size).toBe(1);
+    expect(proposals[0]!.hash).toMatch(/^0x[0-9a-f]{64}$/);
+    // A name is never replaced silently: the reply says which catalog asset it is, in the user's language.
+    expect(proposals[0]!.notes.join(' ')).toContain('“Tesla” is TSLA (Tesla) in the official Robinhood Chain catalog.');
+    expect(proposals[1]!.notes.join(' ')).toContain('“Tesla” é TSLA (Tesla) no catálogo oficial da Robinhood Chain.');
+  });
+  it('resolves a non-featured Stock Token by its company name (Salesforce → CRM, Coinbase → COIN)', () => {
+    for (const [name, symbol] of [['Salesforce', 'CRM'], ['Coinbase', 'COIN']] as const) {
+      expect(['AAPL', 'TSLA', 'NVDA', 'MSFT', 'AMZN']).not.toContain(symbol);
+      const s = new CopilotSession();
+      const reply = s.say(`Buy ${name} with 20 USDG on Robinhood Chain`, intent.action(act.swap({ network: 'ROBINHOOD', inputAsset: 'USDG', outputAsset: name, amount: '20' })))!;
+      expect(reply).toMatchObject({ kind: 'PROPOSAL', sentence: `swap 20 USDG to ${symbol} on Robinhood Chain slippage 50 bps` });
+      expectParity(s, reply.command!, reply.sentence!);
+    }
+  });
+  it('keeps chain context mandatory: the same name means nothing on another network, and no network is never guessed', () => {
+    const base = new CopilotSession().say('Buy Tesla with 50 USDC on Base', intent.action(act.swap({ network: 'BASE', inputAsset: 'USDC', outputAsset: 'Tesla', amount: '50' })))!;
+    expect(base).toMatchObject({ kind: 'UNSUPPORTED' });
+    expect(base.text).toContain('Tesla is not in the official Base catalog');
+    const unnamed = new CopilotSession().say('Buy Tesla with 50 USDG', intent.action(act.swap({ network: null, inputAsset: 'USDG', outputAsset: 'Tesla', amount: '50' })))!;
+    expect(unnamed).toMatchObject({ kind: 'CLARIFICATION' });
+    expect(unnamed.command).toBeUndefined();
+    // On Base, "Coinbase" is only a fragment of "Coinbase Wrapped BTC": refused, not completed.
+    const fragment = new CopilotSession().say('Swap 10 USDC for Coinbase on Base', intent.action(act.swap({ network: 'BASE', inputAsset: 'USDC', outputAsset: 'Coinbase', amount: '10' })))!;
+    expect(fragment).toMatchObject({ kind: 'UNSUPPORTED' });
+  });
+  it('asks when a name belongs to more than one asset, and never trusts a name the user did not write', () => {
+    const data = JSON.parse(BASE_TOKEN_LIST_TEXT) as { tokens: Record<string, unknown>[] };
+    data.tokens = data.tokens.map(token => token.symbol === 'DEGEN' ? { ...token, name: 'Aerodrome' } : token);
+    registerNetworkCatalog(baseCatalog(JSON.stringify(data)));
+    try {
+      const ambiguous = new CopilotSession().say('Swap 10 USDC for Aerodrome on Base', intent.action(act.swap({ network: 'BASE', inputAsset: 'USDC', outputAsset: 'Aerodrome', amount: '10' })))!;
+      expect(ambiguous).toMatchObject({ kind: 'CLARIFICATION', options: ['AERO', 'DEGEN'] });
+      expect(ambiguous.text).toContain('names more than one token in the official Base catalog');
+      expect(ambiguous.command).toBeUndefined();
+    } finally { registerNetworkCatalog(baseCatalog()); }
+    const invented = new CopilotSession().say('Buy the electric car company with 50 USDG on Robinhood Chain', intent.action(act.swap({ network: 'ROBINHOOD', inputAsset: 'USDG',
+      outputAsset: 'Tesla', amount: '50' })))!;
+    expect(invented).toMatchObject({ kind: 'CLARIFICATION' });
+    expect(invented.command).toBeUndefined();
+  });
+  it('resolves Base tokens by their list name in normal language, for swaps, pools and transfers alike', () => {
+    const swap = new CopilotSession().say('Please swap 100 USDC for some Coinbase Wrapped BTC on Base', intent.action(act.swap({ network: 'BASE', inputAsset: 'USDC',
+      outputAsset: 'Coinbase Wrapped BTC', amount: '100' })))!;
+    expect(swap).toMatchObject({ kind: 'PROPOSAL', sentence: 'swap 100 USDC to cbBTC on Base slippage 50 bps' });
+    const pool = new CopilotSession().say('Put 100 USDC and 50 Aerodrome into a pool on Base at 0.3%', intent.action(act.catalogLiquidity({ network: 'BASE',
+      deposits: [{ asset: 'USDC', maxAmount: '100' }, { asset: 'Aerodrome', maxAmount: '50' }], feeTier: '0.3' })))!;
+    expect(pool).toMatchObject({ kind: 'PROPOSAL', sentence: 'add liquidity 100 USDC and 50 AERO on Base fee 0.3% slippage 100 bps' });
+    const send = new CopilotSession().say(`Please send 3 Toshi on Base over to ${RECIPIENT}`, intent.action(act.transfer({ network: 'BASE', asset: 'Toshi', amount: '3', recipient: RECIPIENT })))!;
+    expect(send).toMatchObject({ kind: 'PROPOSAL', sentence: `transfer 3 TOSHI on Base to ${RECIPIENT}` });
+    for (const reply of [swap, pool, send]) expectParity(new CopilotSession(), reply.command!, reply.sentence!);
   });
   it('answers in Portuguese with the same proposal', () => {
     const reply = new CopilotSession().say('Quero trocar 100 USDC por cbBTC na Base', intent.action(act.swap({ network: 'BASE', inputAsset: 'USDC', outputAsset: 'cbBTC', amount: '100' }), 'PT'))!;

@@ -7,13 +7,14 @@ import { formatTokenAmount } from './jupiter-authoring';
 import { UNISWAP_LIQUIDITY_DEFAULT_SLIPPAGE } from './uniswap-liquidity-authoring';
 import { ROBINHOOD_LIQUIDITY_DEFAULT_SLIPPAGE } from './robinhood-liquidity-authoring';
 import { SOLANA_LIQUIDITY_DEFAULT_SLIPPAGE } from './solana-liquidity-authoring';
-import { CopilotIntentError, parseCopilotIntent, safeCopilotProse, type CopilotAction, type CopilotAsset, type CopilotBridgeAction,
+import { COPILOT_LIMITS, CopilotIntentError, parseCopilotIntent, safeCopilotProse, type CopilotAction, type CopilotAsset, type CopilotBridgeAction,
   type CopilotLegacyAsset, type CopilotLendingAction, type CopilotLiquidityAction, type CopilotMissingField, type CopilotNetwork, type CopilotSwapAction,
   type CopilotTransferAction } from './copilot-intent';
 import { copilotCopy, type CopilotCopy, type CopilotLanguage, type NetworkSubject, type Subject } from './copilot-messages';
-import { AAVE_V3_LENDING_PROFILES, assetDisplayName, type CanonicalAsset } from '@defi-workflow-engine/action-registry';
-import { officialCatalogLoaded, resolveNetworkAsset } from './asset-catalogs';
-import { networkIdentity, networkOfCopilot, type CopilotNetworkId } from './network-registry';
+import { assetDisplayName, type CanonicalAsset } from '@defi-workflow-engine/action-registry';
+import { copilotNetworksFor, lendingOffers, routeLabels, type StrategyAction } from './authoring-capabilities';
+import { resolveAssetReference } from './asset-catalogs';
+import { COPILOT_NETWORK_IDS, copilotNetworksMentioned, networkIdentity, networkOfCopilot, type CopilotNetworkId } from './network-registry';
 import { routerNetworksOf } from './router-authoring';
 
 /**
@@ -59,10 +60,10 @@ export type Grounding = { readonly text: string; readonly carried: ReadonlySet<C
 const NOTHING_CARRIED: ReadonlySet<CarriedField> = new Set();
 
 type Network = Exclude<CopilotNetwork, 'OTHER'>;
-type Family = 'base' | 'arbitrum' | 'ethereum' | 'solana' | 'robinhood';
-const FAMILY: Readonly<Record<Network, Family>> = { BASE: 'base', BASE_SEPOLIA: 'base', ARBITRUM: 'arbitrum', ARBITRUM_SEPOLIA: 'arbitrum',
-  ETHEREUM: 'ethereum', ETHEREUM_SEPOLIA: 'ethereum', SOLANA: 'solana', SOLANA_DEVNET: 'solana', ROBINHOOD: 'robinhood' };
-const NETWORK_IDS = Object.keys(FAMILY) as Network[];
+// BUILD-BASE-001: the network vocabulary (identifiers, names, environment, family, how a message names a network) is the network registry's.
+type Family = string;
+const NETWORK_IDS: readonly Network[] = COPILOT_NETWORK_IDS;
+const FAMILY: Readonly<Record<Network, Family>> = Object.freeze(Object.fromEntries(NETWORK_IDS.map(id => [id, networkOfCopilot(id).family])) as Record<Network, Family>);
 /** Display labels from the network registry (Base, Arbitrum One, Robinhood Chain, …). */
 export const COPILOT_NETWORK_LABEL: Readonly<Record<Network, string>> = Object.freeze(Object.fromEntries(NETWORK_IDS.map(id => [id, networkOfCopilot(id as CopilotNetworkId).name])) as
   Record<Network, string>);
@@ -71,15 +72,16 @@ export const COPILOT_NETWORK_LABEL: Readonly<Record<Network, string>> = Object.f
 const MAINNETS: ReadonlySet<CopilotNetwork> = new Set(NETWORK_IDS.filter(id => networkOfCopilot(id as CopilotNetworkId).environment === 'MAINNET'));
 /** The catalog networks (official asset catalog) and their CAIP-2 chains. */
 const isCatalogNetwork = (network: Network) => networkOfCopilot(network as CopilotNetworkId).catalog;
+/**
+ * BUILD-BASE-001 (owner addendum): where an action can be authored comes from the shared capability truth (`authoring-capabilities.ts`),
+ * never from a Copilot list. CopilotIntent V1 is a frozen protocol that cannot name catalog tokens: on a catalog network it keeps only the
+ * one action it always expressed, the BUILD-002 Base USDC ⇄ WETH reference swap.
+ */
+const V1_REFERENCE_SWAP: Network = 'BASE';
+function actionNetworks(action: StrategyAction, g: Grounding): Network[] {
+  return copilotNetworksFor(action).filter(id => g.policy.catalog === true || !isCatalogNetwork(id) || (action === 'swap' && id === V1_REFERENCE_SWAP));
+}
 const chainOf = (network: Network) => networkOfCopilot(network as CopilotNetworkId).chain;
-const MENTIONS: readonly (readonly [Network, RegExp])[] = [
-  ['BASE_SEPOLIA', /\bbase[\s-]*sepolia\b/i], ['BASE', /\bbase\b(?![\s-]*sepolia)/i],
-  ['ARBITRUM_SEPOLIA', /\barbitrum[\s-]*sepolia\b/i], ['ARBITRUM', /\barbitrum\b(?![\s-]*sepolia)/i],
-  ['ETHEREUM_SEPOLIA', /\bethereum[\s-]*sepolia\b/i], ['ETHEREUM', /\bethereum\b(?![\s-]*sepolia)/i],
-  ['SOLANA_DEVNET', /\bsolana[\s-]*devnet\b/i], ['SOLANA', /\bsolana\b(?![\s-]*devnet)/i],
-  // BUILD-BASE-001: Robinhood Chain mainnet; "Robinhood (Chain) Testnet" is not it (and is test-network wording anyway).
-  ['ROBINHOOD', /\brobinhood(?![\s-]*(?:chain[\s-]*)?testnet)(?:[\s-]*chain)?\b/i],
-];
 // Any test-network or test-token wording rules out a mainnet (real funds) interpretation.
 export const TESTNET_WORDS = /\b(?:sepolia|devnet|testnets?|test\s?net(?:work)?|test\s+(?:usdc|tokens?|funds?|sol|eth)|dev\s?usdc|teste|testes|de\s+teste)\b/i;
 const ASSET_MENTIONS: Readonly<Record<Exclude<CopilotLegacyAsset, 'OTHER'>, RegExp>> = {
@@ -88,8 +90,8 @@ const ASSET_MENTIONS: Readonly<Record<Exclude<CopilotLegacyAsset, 'OTHER'>, RegE
   SOL: /\bsol\b/i, USDT: /\b(?:usdt|tether)\b/i, WBTC: /\bwbtc\b/i,
 };
 
-/** Networks the user named, in any language that uses the network names. */
-export function mentionedNetworks(text: string): Network[] { return MENTIONS.filter(([, pattern]) => pattern.test(text)).map(([network]) => network); }
+/** Networks the user named, in any language that uses the network names (each by its network registry `mention`). */
+export function mentionedNetworks(text: string): Network[] { return copilotNetworksMentioned(text); }
 export const canonicalDecimal = (value: string): string => {
   const [whole, fraction = ''] = value.split('.');
   const trimmed = fraction.replace(/0+$/, '');
@@ -214,21 +216,31 @@ function needAsset(value: CopilotAsset | null, g: Grounding, subject: Subject, f
   return value;
 }
 /**
- * BUILD-BASE-001: a token on a catalog network, resolved by FloFi in that network's validated catalog (never by the model). The user must
- * have written its symbol or its full catalog name (or it was carried from a step). `ERC20`: swaps and pools take ERC-20s, so "ETH" is the
- * wrapped token, said in `ether`. An unknown symbol is refused; an unloaded catalog fails closed.
+ * BUILD-BASE-001: a token on a catalog network, resolved by FloFi through the shared resolver in that network's validated catalog, never
+ * by the model (owner addendum: the symbol in any case, or the whole token or company name of exactly one asset — "Tesla" is TSLA on
+ * Robinhood Chain and nothing on Base). The user must have written that symbol or name (or it was carried from a step). Several assets
+ * sharing a name are asked about; an unknown token is refused; an unloaded catalog fails closed. `ERC20`: swaps and pools take ERC-20s, so
+ * "ETH" is the wrapped token, said in `ether`. A name is never silently replaced: `notes` (when given) tells which catalog asset it is.
  */
-function catalogToken(value: CopilotAsset | null, network: Network, g: Grounding, subject: Subject, field: CarriedField, kinds: 'ERC20' | 'ANY'):
-  { readonly asset: CanonicalAsset; readonly ether: boolean } {
+function catalogToken(value: CopilotAsset | null, network: Network, g: Grounding, subject: Subject, field: CarriedField, kinds: 'ERC20' | 'ANY',
+  notes?: string[]): { readonly asset: CanonicalAsset; readonly ether: boolean } {
   const m = copyOf(g), label = COPILOT_NETWORK_LABEL[network], chain = chainOf(network);
   if (value === null) return ask(['asset'], stillNeeds(m, ['asset'], subject));
   if (value === 'OTHER') return refuse(m.tokenUnsupported(m.tokenSubject[subject]));
-  const ether = /^eth$/i.test(value) && kinds === 'ERC20', symbol = ether ? 'WETH' : value;
-  const asset = resolveNetworkAsset(chain, { symbol });
-  if (!asset) return officialCatalogLoaded(chain) ? refuse(m.catalogTokenUnknown(value, label)) : reject('ASSET_CATALOG_UNAVAILABLE', m.catalogUnavailable(label));
+  const ether = /^eth$/i.test(value) && kinds === 'ERC20';
+  const found = resolveAssetReference(chain, ether ? 'WETH' : value);
+  if (found.kind === 'UNAVAILABLE') return reject('ASSET_CATALOG_UNAVAILABLE', m.catalogUnavailable(label));
+  if (found.kind === 'UNKNOWN') return refuse(m.catalogTokenUnknown(value, label));
+  if (found.kind === 'AMBIGUOUS') {
+    const options = found.assets.map(asset => asset.symbol).slice(0, COPILOT_LIMITS.maxOptions);
+    return ask(['asset'], m.catalogTokenAmbiguous(value, label), options);
+  }
+  const asset = found.asset;
   if (kinds === 'ERC20' && asset.kind !== 'ERC20') return refuse(m.catalogTokenUnknown(value, label));
-  const grounded = g.carried.has(field) || symbolNamed(g.text, value) || (/^eth$/i.test(value) && ASSET_MENTIONS.ETH.test(g.text)) || nameNamed(g.text, asset);
+  const grounded = g.carried.has(field) || (found.by === 'SYMBOL' && symbolNamed(g.text, value)) || (/^eth$/i.test(value) && ASSET_MENTIONS.ETH.test(g.text)) ||
+    nameNamed(g.text, asset);
   if (!grounded) return ask(['asset'], m.tokenNotFound(value));
+  if (found.by === 'NAME' && notes) notes.push(m.catalogNameNote(value, asset.symbol, assetDisplayName(asset), label));
   return { asset, ether };
 }
 
@@ -236,7 +248,7 @@ export type Plan = { readonly sentence: string; readonly expect: CopilotAuthorin
 
 function planSwap(a: CopilotSwapAction, g: Grounding): Plan {
   const m = copyOf(g), notes: string[] = [];
-  const supported: Network[] = ['BASE', 'BASE_SEPOLIA', 'ETHEREUM_SEPOLIA', 'SOLANA', 'SOLANA_DEVNET', ...g.policy.catalog ? ['ROBINHOOD' as const] : []];
+  const supported = actionNetworks('swap', g);
   // A generic "Ethereum" is left to resolveNetwork, which explains that Ethereum Mainnet is never used.
   const named = mentionedNetworks(g.text);
   const missing: CopilotMissingField[] = [...(a.amount === null ? ['amount' as const] : []), ...(a.inputAsset === null || a.outputAsset === null ? ['asset' as const] : []),
@@ -245,7 +257,7 @@ function planSwap(a: CopilotSwapAction, g: Grounding): Plan {
   const network = resolveNetwork(a.network, supported, g, 'swap', notes);
   // BUILD-BASE-001: on a catalog network any two catalog ERC-20s; Base's USDC ⇄ WETH keeps its BUILD-002 sentence and command.
   if (g.policy.catalog && isCatalogNetwork(network)) {
-    const input = catalogToken(a.inputAsset, network, g, 'swap', 'inputAsset', 'ERC20'), output = catalogToken(a.outputAsset, network, g, 'swap', 'outputAsset', 'ERC20');
+    const input = catalogToken(a.inputAsset, network, g, 'swap', 'inputAsset', 'ERC20', notes), output = catalogToken(a.outputAsset, network, g, 'swap', 'outputAsset', 'ERC20', notes);
     if (input.asset.address === output.asset.address) reject('INVALID_ASSET_PAIR', m.differentTokens);
     const amount = amountOf(a.amount, g, 'swap');
     const slippage = slippageOf(a.slippageBps, '50', g, notes);
@@ -294,7 +306,7 @@ function planRoute(a: CopilotBridgeAction, g: Grounding): Plan {
   // A side counts only when the user named that network (or it was carried): a mainnet is never inferred.
   const side = (value: CopilotNetwork | null): Network | null | 'OTHER' => value === null ? null : value === 'OTHER' ? 'OTHER' : named.includes(value) ? value : null;
   const source = side(a.sourceNetwork), destination = side(a.destinationNetwork);
-  if (source === 'OTHER' || destination === 'OTHER') return refuse(m.routerRoutesAll(EXTENDED_ROUTES.map(r => `${r.option.sourceLabel} → ${r.option.destinationLabel}`)));
+  if (source === 'OTHER' || destination === 'OTHER') return refuse(m.routerRoutesAll(routeLabels()));
   const touching = EXTENDED_ROUTES.filter(r => (source === null || r.src === source) && (destination === null || r.dst === destination) &&
     (source !== null || destination !== null || named.includes(r.src) || named.includes(r.dst)));
   const options = touching.map(r => `${r.option.sourceLabel} → ${r.option.destinationLabel}`);
@@ -335,9 +347,9 @@ function planBridge(a: CopilotBridgeAction, g: Grounding): Plan {
     if (inFamily.length) return 'CONFLICT';
     return MAINNETS.has(value) ? null : value;
   };
-  const pairs = ['Base Sepolia → Arbitrum Sepolia', 'Base → Arbitrum One'];
+  const pairs = [ROUTER_NETWORK_OPTIONS.testnet, ROUTER_NETWORK_OPTIONS.mainnet].map(option => `${option.sourceLabel} → ${option.destinationLabel}`);
   let source = side(a.sourceNetwork, 'base'), destination = side(a.destinationNetwork, 'arbitrum');
-  if (source === 'OTHER' || destination === 'OTHER') refuse(m.routerRoutes);
+  if (source === 'OTHER' || destination === 'OTHER') refuse(g.policy.catalog ? m.routerRoutesAll(routeLabels()) : m.routerRoutes);
   if (source === 'CONFLICT' || destination === 'CONFLICT') ask(['sourceNetwork', 'destinationNetwork'], m.whichRoute, pairs);
   // V1: a test-network pair may complete itself; a mainnet side never implies the other one. V2 asks instead.
   if (g.policy.networkDefaults && source === null && destination === 'ARBITRUM_SEPOLIA') { source = 'BASE_SEPOLIA'; notes.push(m.routerSourceNote); }
@@ -373,16 +385,16 @@ function planBridge(a: CopilotBridgeAction, g: Grounding): Plan {
  * BUILD-BASE-001: a transfer on a catalog network (real funds): native ETH or a catalog token, to the connected owner or a typed address.
  * The network must be named; the sentence is the exact grammar's (`transfer 0.01 ETH on Base to 0x…`).
  */
-const TRANSFER_COPILOT_NETWORKS: readonly Network[] = Object.freeze(['BASE', 'ROBINHOOD'] satisfies Network[]);
 function planTransfer(a: CopilotTransferAction, g: Grounding): Plan {
   const m = copyOf(g), notes: string[] = [];
   if (!g.policy.catalog) return refuse(m.cannotAuthor);
+  const TRANSFER_COPILOT_NETWORKS = actionNetworks('transfer', g);
   const named = mentionedNetworks(g.text);
   const missing: CopilotMissingField[] = [...(a.amount === null ? ['amount' as const] : []), ...(a.asset === null ? ['asset' as const] : []),
     ...(a.network === null && !TRANSFER_COPILOT_NETWORKS.some(n => named.includes(n)) ? ['network' as const] : [])];
   if (missing.length) ask(missing, stillNeeds(m, missing, 'transfer'), missing.length === 1 && missing[0] === 'network' ? labels(TRANSFER_COPILOT_NETWORKS) : []);
   const network = resolveNetwork(a.network, TRANSFER_COPILOT_NETWORKS, g, 'transfer', notes), label = COPILOT_NETWORK_LABEL[network];
-  const token = catalogToken(a.asset, network, g, 'transfer', 'asset', 'ANY').asset;
+  const token = catalogToken(a.asset, network, g, 'transfer', 'asset', 'ANY', notes).asset;
   const amount = amountOf(a.amount, g, 'transfer');
   const recipient = addressOf(a.recipient, g, 'recipient');
   if (!recipient) notes.push(m.connectedRecipientNote);
@@ -391,10 +403,10 @@ function planTransfer(a: CopilotTransferAction, g: Grounding): Plan {
 }
 
 const LENDING_SUBJECT = { SUPPLY: 'supply', BORROW: 'borrow', REPAY: 'repay', WITHDRAW: 'withdraw' } as const;
-/** BUILD-BASE-001: the Aave profiles' networks by asset, from the profile registry (V1: the original test networks only). */
+/** BUILD-BASE-001: the Aave networks of an asset, from the shared capability truth (V1: no catalog, hence no real-funds, network). */
 function lendingNetworks(asset: CopilotAsset | null, g: Grounding): Network[] {
-  return AAVE_V3_LENDING_PROFILES.filter(profile => (asset === null || profile.symbol === asset) && (g.policy.catalog || networkIdentity(profile.chain)?.environment !== 'MAINNET'))
-    .map(profile => networkIdentity(profile.chain)!.copilot as Network);
+  return lendingOffers().filter(offer => (asset === null || offer.asset === asset) && offer.network.copilot !== null && actionNetworks('supply', g).includes(offer.network.copilot))
+    .map(offer => offer.network.copilot as Network);
 }
 function planLending(a: CopilotLendingAction, g: Grounding, wallet: string | null): Plan {
   const m = copyOf(g), notes: string[] = [], subject = LENDING_SUBJECT[a.type];
@@ -439,8 +451,9 @@ function planLiquidity(a: CopilotLiquidityAction, g: Grounding): Plan {
   // The protocol is trusted only when the user named it or the named network determines it. Uniswap v3 runs on two test
   // networks (BUILD-ETHEREUM-001), so it never defaults to one of them.
   // BUILD-BASE-001: Uniswap v3 also runs on the catalog networks (Base, Robinhood Chain: real funds), which are always named.
-  const uniswap: Network[] = [COPILOT_POOLS.UNISWAP_V3.network, 'ETHEREUM_SEPOLIA', ...g.policy.catalog ? CATALOG_POOL_NETWORKS : []];
-  const supported: Network[] = namedProtocols.length ? namedProtocols[0] === 'UNISWAP_V3' ? uniswap : [COPILOT_POOLS.ORCA.network] : [...uniswap, COPILOT_POOLS.ORCA.network];
+  // The pool networks come from the capability truth; Orca serves its own network and Uniswap v3 every other one.
+  const pools = actionNetworks('add_liquidity', g), orca = pools.filter(n => n === COPILOT_POOLS.ORCA.network), uniswap = pools.filter(n => n !== COPILOT_POOLS.ORCA.network);
+  const supported: Network[] = namedProtocols.length ? namedProtocols[0] === 'UNISWAP_V3' ? uniswap : orca : pools;
   const network = resolveNetwork(a.network, supported, g, 'liquidity', notes);
   if (g.policy.catalog && isCatalogNetwork(network)) {
     if (a.protocol === 'ORCA' || namedProtocols[0] === 'ORCA') ask(['protocol'], m.whichPool, m.poolOptions);
@@ -472,7 +485,6 @@ function planLiquidity(a: CopilotLiquidityAction, g: Grounding): Plan {
     `${COPILOT_NETWORK_LABEL[network]} slippage ${slippage} bps`, expect: pool.expect, notes };
 }
 
-const CATALOG_POOL_NETWORKS: readonly Network[] = Object.freeze(['BASE', 'ROBINHOOD'] satisfies Network[]);
 /** "0.05%" written as a fee percentage (the tier must be the user's own words, or carried). */
 const groundedFee = (text: string, fee: string) => numbersIn(text).some(reading => reading.percent && !reading.negative && reading.value === canonicalDecimal(fee));
 /**
@@ -484,7 +496,7 @@ function planCatalogLiquidity(a: CopilotLiquidityAction, g: Grounding, network: 
   const m = copyOf(g), text = g.text, label = COPILOT_NETWORK_LABEL[network];
   if (a.deposits.length < 2) ask(['amount'], m.catalogLiquidityNeeds(label));
   const tokens = a.deposits.map(deposit => {
-    const token = catalogToken(deposit.asset, network, g, 'liquidity', `deposit:${deposit.asset}` as CarriedField, 'ERC20');
+    const token = catalogToken(deposit.asset, network, g, 'liquidity', `deposit:${deposit.asset}` as CarriedField, 'ERC20', notes);
     return { symbol: token.asset.symbol, address: token.asset.address, ether: token.ether, amount: amountOf(deposit.maxAmount, g, 'liquidity', `deposit:${deposit.asset}` as CarriedField) };
   });
   if (tokens[0]!.address === tokens[1]!.address) reject('COPILOT_DUPLICATE_DEPOSIT', m.poolTokenOnce(tokens[0]!.symbol, tokens[1]!.symbol));
@@ -514,7 +526,7 @@ function planComposition(actions: readonly CopilotAction[], g: Grounding, wallet
   const missing: CopilotMissingField[] = [...(supply.amount === null || borrow.amount === null ? ['amount' as const] : []),
     ...(supply.asset === null || borrow.asset === null || swap.outputAsset === null ? ['asset' as const] : [])];
   if (missing.length) ask(missing, stillNeeds(m, missing, 'composition'));
-  for (const network of new Set([supply.network, borrow.network, swap.network])) resolveNetwork(network, ['BASE_SEPOLIA'], g, 'composition', notes);
+  for (const network of new Set([supply.network, borrow.network, swap.network])) resolveNetwork(network, actionNetworks('lending_composition', g), g, 'composition', notes);
   if (needAsset(supply.asset, g, 'composition', 'asset') !== 'USDC' || needAsset(borrow.asset, g, 'composition', 'asset') !== 'USDC' ||
     (swap.inputAsset !== null && needAsset(swap.inputAsset, g, 'composition', 'inputAsset') !== 'USDC')) refuse(m.compositionUnsupported);
   if (!['WETH', 'ETH'].includes(needAsset(swap.outputAsset, g, 'composition', 'outputAsset'))) refuse(m.compositionUnsupported);

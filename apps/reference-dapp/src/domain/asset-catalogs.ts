@@ -8,7 +8,7 @@
  * identity against the official source and the chain.
  */
 import { ARBITRUM_BASE_ASSETS, BASE_BASE_ASSETS, BASE_FEATURED_ASSETS, BASE_MAINNET, BASE_TOKEN_LIST, ROBINHOOD_BASE_ASSETS, ROBINHOOD_CHAIN_MAINNET, ROBINHOOD_FEATURED_STOCKS,
-  catalogAsset, createAssetRegistry, featuredAssets, isBaseNetworkCatalog, searchAssets, type AssetCatalog, type AssetClass, type AssetReference,
+  catalogAsset, catalogAssetsByName, createAssetRegistry, featuredAssets, isBaseNetworkCatalog, searchAssets, type AssetCatalog, type AssetClass, type AssetReference,
   type CanonicalAsset } from '@defi-workflow-engine/action-registry';
 
 export const ROBINHOOD_NETWORK = 'Robinhood Chain';
@@ -50,6 +50,32 @@ export function resolveNetworkAsset(chain: string, reference: AssetReference): C
   const catalog = networkCatalog(chain);
   return catalog ? catalogAsset(catalog, reference) : null;
 }
+/** What a written token reference names on one network: one asset (and how), several (ask), none, or the catalog is not loaded. */
+export type AssetResolution = { readonly kind: 'FOUND'; readonly asset: CanonicalAsset; readonly by: 'SYMBOL' | 'NAME' }
+  | { readonly kind: 'AMBIGUOUS'; readonly assets: readonly CanonicalAsset[] } | { readonly kind: 'UNKNOWN' } | { readonly kind: 'UNAVAILABLE' };
+/** Words people add after a company or token name ("Tesla stock", "Apple shares"); removed only to retry a whole-name match. */
+const NAME_SUFFIX = /\s+(?:stocks?|shares?|tokens?|stock\s+tokens?)$/i;
+/**
+ * BUILD-BASE-001: the shared resolver for a token a person wrote (natural-language Copilot; Chat and MCP pass symbols, the Canvas selects
+ * from the same catalog), always within one network's current catalog — a symbol never reaches another network:
+ *  1. the symbol, case-insensitively (`cbbtc` → cbBTC, `tsla` → TSLA);
+ *  2. otherwise the whole display or catalog name of exactly one asset (`Tesla` → TSLA, `Coinbase Wrapped BTC` → cbBTC), also after a
+ *     trailing "stock", "shares" or "token"; several assets sharing that name are AMBIGUOUS (the caller asks), never chosen.
+ * A reference that matches nothing is UNKNOWN once the network's official catalog is loaded, UNAVAILABLE before (fail closed).
+ */
+export function resolveAssetReference(chain: string, reference: string): AssetResolution {
+  const catalog = networkCatalog(chain), text = typeof reference === 'string' ? reference.trim() : '';
+  if (!catalog) return { kind: 'UNAVAILABLE' };
+  if (!text) return { kind: 'UNKNOWN' };
+  const symbol = catalogAsset(catalog, { symbol: text });
+  if (symbol) return { kind: 'FOUND', asset: symbol, by: 'SYMBOL' };
+  for (const name of new Set([text, text.replace(NAME_SUFFIX, '')])) {
+    const named = catalogAssetsByName(catalog, name);
+    if (named.length === 1) return { kind: 'FOUND', asset: named[0]!, by: 'NAME' };
+    if (named.length > 1) return { kind: 'AMBIGUOUS', assets: named };
+  }
+  return officialCatalogLoaded(chain) ? { kind: 'UNKNOWN' } : { kind: 'UNAVAILABLE' };
+}
 /** Featured Stock Tokens (shortcuts only): resolved from the official catalog, else the shortcut symbols themselves. */
 export function featuredStockSymbols(): readonly string[] {
   const robinhood = official.get(ROBINHOOD_CHAIN);
@@ -61,6 +87,14 @@ export function featuredNetworkSymbols(chain: string): readonly string[] {
   if (chain === BASE_CHAIN) return BASE_FEATURED_ASSETS;
   const catalog = networkCatalog(chain);
   return catalog ? featuredAssets(catalog).map(asset => asset.symbol) : [];
+}
+/**
+ * A network's code-pinned ERC-20s and its provider-declared shortcuts, independent of whichever catalog is loaded (for stable text such as
+ * the Copilot model instructions). Never the limit of the catalog.
+ */
+export function declaredNetworkSymbols(chain: string): readonly string[] {
+  const featured = chain === ROBINHOOD_CHAIN ? ROBINHOOD_FEATURED_STOCKS : chain === BASE_CHAIN ? BASE_FEATURED_ASSETS : [];
+  return [...new Set([...(pinned[chain]?.assets ?? []).filter(asset => asset.kind === 'ERC20').map(asset => asset.symbol), ...featured])];
 }
 /** The canonical symbol of a network asset (`cbbtc` → `cbBTC`), or null when this network's current catalog does not resolve it. */
 export const canonicalSymbol = (chain: string, symbol: string): string | null => resolveNetworkAsset(chain, { symbol })?.symbol ?? null;
