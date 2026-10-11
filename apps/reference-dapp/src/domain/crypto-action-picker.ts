@@ -13,6 +13,7 @@ import { createLiquidityNode } from './liquidity-authoring';
 import { createAuthoredSupply, createAuthoredBorrow, createAuthoredRepay, createAuthoredWithdraw, supplyDetails, borrowDetails, repayDetails, withdrawDetails, lendingProfileFor } from './supply-authoring';
 import { ROBINHOOD_CHAIN, ROBINHOOD_NETWORK, featuredStockSymbols, resolveNetworkAsset } from './asset-catalogs';
 import { catalogSwapDetails, createCatalogSwapAuthoringNode } from './catalog-swap-authoring';
+import { createRobinhoodLiquidityNode, robinhoodFullRange, robinhoodLiquidityDetails, ROBINHOOD_LIQUIDITY_DEFAULT_FEE } from './robinhood-liquidity-authoring';
 
 export type CryptoAction = 'swap' | 'pool' | 'supply' | 'borrow' | 'repay' | 'withdraw' | 'transfer';
 /** One network for the entire action. Assets never carry separate network selections. */
@@ -34,19 +35,23 @@ const robinhoodSwap: CryptoPickerProfile = { network: ROBINHOOD_NETWORK, chain: 
   get tokens() { return ['USDG', 'WETH', ...featuredStockSymbols()]; }, catalog: true };
 const swaps: readonly CryptoPickerProfile[] = [...evm, ...SOLANA_SWAP_RUNTIMES.map(runtime => ({ network: runtime.network, chain: runtime.chain, provider: runtime.providerLabel, tokens: Object.keys(runtime.tokens) })),
   robinhoodSwap];
+/** Swaps and pools on a catalog network take ERC-20s only (native ETH is wrapped first); transfers may also send ETH. */
+const erc20Only = (action: CryptoAction) => action === 'swap' || action === 'pool';
 /** A token of a profile: a shortcut, or (catalog networks) any ERC-20 the current catalog resolves. */
 function profileHasToken(profile: CryptoPickerProfile, symbol: string | undefined, action: CryptoAction): boolean {
   if (!symbol) return false;
-  if (profile.tokens.includes(symbol)) return !profile.catalog || action !== 'swap' || resolveNetworkAsset(profile.chain, { symbol })?.kind !== 'NATIVE';
+  if (profile.tokens.includes(symbol)) return !profile.catalog || !erc20Only(action) || resolveNetworkAsset(profile.chain, { symbol })?.kind !== 'NATIVE';
   if (!profile.catalog || !/^[A-Z][A-Z0-9.]{0,15}$/.test(symbol)) return false;
   const asset = resolveNetworkAsset(profile.chain, { symbol });
-  return Boolean(asset && (action !== 'swap' || asset.kind === 'ERC20'));
+  return Boolean(asset && (!erc20Only(action) || asset.kind === 'ERC20'));
 }
 const pools: readonly CryptoPickerProfile[] = [
   { ...evm[0]!, provider: 'Uniswap v3', pair: ['WETH', 'USDC'] },
   ...UNISWAP_LIQUIDITY_PROFILES.map(profile => ({ network: profile.network, chain: profile.chain, provider: 'Uniswap v3', tokens: [profile.token0.symbol, profile.token1.symbol], pair: [profile.token0.symbol, profile.token1.symbol] as const })),
   { network: ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY.network, chain: ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY.chain, provider: ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY.providerLabel,
     tokens: [ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY.token0.symbol, ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY.token1.symbol], pair: [ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY.token0.symbol, ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY.token1.symbol] },
+  // BUILD-RH-002: any two Robinhood Chain catalog ERC-20s (USDG, WETH, Stock Tokens); the pool follows the pair and fee tier.
+  { network: ROBINHOOD_NETWORK, chain: ROBINHOOD_CHAIN, provider: 'Uniswap v3', get tokens() { return ['USDG', 'WETH', ...featuredStockSymbols()]; }, catalog: true },
 ];
 const transfers: readonly CryptoPickerProfile[] = Object.entries(TRANSFER_NETWORKS).map(([network, profile]): CryptoPickerProfile => profile.chain === ROBINHOOD_CHAIN
   // BUILD-RH-002: Robinhood Chain transfers native ETH and catalog assets; non-shortcut assets come from the official catalog.
@@ -62,28 +67,30 @@ export function validCryptoSelection(selection: CryptoSelection): boolean {
   if (!selection || !['swap', 'pool', 'supply', 'borrow', 'repay', 'withdraw', 'transfer'].includes(selection.action) || Object.keys(selection).some(key => !['action', 'network', 'from', 'to'].includes(key))) return false;
   const profile = cryptoProfile(selection);
   if (!profile || !profileHasToken(profile, selection.from, selection.action)) return false;
-  if (selection.action === 'pool') return selection.from === profile.pair?.[0] && selection.to === profile.pair?.[1];
-  return selection.action === 'swap' ? Boolean(selection.to && selection.to !== selection.from && profileHasToken(profile, selection.to, 'swap')) : selection.to === undefined;
+  if (selection.action === 'pool' && profile.pair) return selection.from === profile.pair[0] && selection.to === profile.pair[1];
+  return erc20Only(selection.action) ? Boolean(selection.to && selection.to !== selection.from && profileHasToken(profile, selection.to, 'swap')) : selection.to === undefined;
 }
 export function selectCryptoNetwork(action: CryptoAction, network: string, current?: CryptoSelection): CryptoSelection {
   const profile = cryptoProfiles(action).find(entry => entry.network === network);
   if (!profile) throw new Error('ACTION_NETWORK_UNSUPPORTED');
   const from = profile.pair?.[0] ?? (current && profile.tokens.includes(current.from) ? current.from : profile.tokens[0]!);
-  const to = profile.pair?.[1] ?? (action === 'swap' ? current?.to && current.to !== from && profile.tokens.includes(current.to) ? current.to : profile.tokens.find(token => token !== from) : undefined);
+  // A Robinhood Chain pool starts as USDG against the first featured Stock Token (the live Stock Token / USDG pools), never USDG/WETH by accident.
+  const pooled = action === 'pool' && profile.catalog ? (from === 'USDG' ? featuredStockSymbols()[0] : 'USDG') : undefined;
+  const to = profile.pair?.[1] ?? (erc20Only(action) ? current?.to && current.to !== from && profile.tokens.includes(current.to) ? current.to : pooled ?? profile.tokens.find(token => token !== from) : undefined);
   return { action, network, from, ...(to ? { to } : {}) };
 }
 export function cryptoTokenOptions(selection: CryptoSelection, side: 'source' | 'destination') {
   const profile = cryptoProfile(selection);
-  if (selection.action === 'pool') return [side === 'source' ? profile?.pair?.[0] : profile?.pair?.[1]].filter((token): token is string => Boolean(token));
+  if (selection.action === 'pool' && !profile?.catalog) return [side === 'source' ? profile?.pair?.[0] : profile?.pair?.[1]].filter((token): token is string => Boolean(token));
   const current = side === 'source' ? selection.from : selection.to;
   // A catalog asset chosen through search stays visible next to the shortcuts.
   return profile?.catalog && current && !profile.tokens.includes(current) ? [...profile.tokens, current] : profile?.tokens ?? [];
 }
 export function selectCryptoToken(selection: CryptoSelection, side: 'source' | 'destination', token: string): CryptoSelection {
   const found = cryptoProfile(selection);
-  if (!found || (!cryptoTokenOptions(selection, side).includes(token) && !(found.catalog && selection.action === 'swap' && profileHasToken(found, token, 'swap'))))
+  if (!found || (!cryptoTokenOptions(selection, side).includes(token) && !(found.catalog && erc20Only(selection.action) && profileHasToken(found, token, selection.action))))
     throw new Error('ACTION_TOKEN_UNSUPPORTED');
-  if (selection.action !== 'swap') return selection;
+  if (!erc20Only(selection.action) || (selection.action === 'pool' && !found.catalog)) return selection;
   const profile = found;
   const next = side === 'source' ? { ...selection, from: token } : { ...selection, to: token };
   if (next.from === next.to) {
@@ -105,6 +112,8 @@ export function cryptoSelectionOf(node: Node): CryptoSelection | null {
     const evmSwap = node.chainId.startsWith('eip155:') ? swapDetails(node, cryptoReviewContext(network)) : null;
     return solana ? { action: 'swap', network, from: solana.from, to: solana.to } : evmSwap ? { action: 'swap', network, from: evmSwap.from, to: evmSwap.to } : null;
   }
+  const robinhoodPool = robinhoodLiquidityDetails(node);
+  if (robinhoodPool) return robinhoodPool.tokenA === 'Token' || robinhoodPool.tokenB === 'Token' ? null : { action: 'pool', network, from: robinhoodPool.tokenA, to: robinhoodPool.tokenB };
   if (uniswapLiquidityDetails(node) || solanaLiquidityDetails(node) || node.actionType === 'asset.liquidity.uniswap-v3') return selectCryptoNetwork('pool', network);
   if (['supply', 'borrow', 'repay', 'withdraw', 'transfer'].includes(node.actionType) && AAVE_V3_LENDING_PROFILES.some(profile => profile.chain === node.chainId)) return selectCryptoNetwork(node.actionType as CryptoAction, network);
   return null;
@@ -114,6 +123,7 @@ export function canSelectCryptoAssets(node: Node, workflow: Workflow) {
     !workflow.resourceEdges.some(edge => edge.fromNodeId === node.nodeId || edge.toNodeId === node.nodeId) && !workflow.nodes.some(other => other.dependencies.includes(node.nodeId)));
 }
 export type CryptoActionInput = { selection: CryptoSelection; amount: string; secondAmount?: string; beneficiary?: string; slippage: string;
+  /** Robinhood Chain pools only (BUILD-RH-002): the Uniswap v3 fee tier (0.3% when absent). */ fee?: number;
   /** Transfer only (BUILD-RH-002): an explicit recipient address; the connected owner when absent. */ recipient?: string;
   rangeUnit?: 'PRICE' | 'TICK'; lower?: string; upper?: string };
 export function createCryptoActionNode(id: string, input: CryptoActionInput): SemanticWorkflow['nodes'][number] {
@@ -123,6 +133,14 @@ export function createCryptoActionNode(id: string, input: CryptoActionInput): Se
     if (selection.network === 'Solana' || selection.network === 'Solana Devnet') return createSolanaSwapNode(id, { network: selection.network, from: selection.from, to: selection.to, amount, slippage } as SolanaSwapInput);
     if (selection.network === ROBINHOOD_NETWORK) return createCatalogSwapAuthoringNode(id, { network: ROBINHOOD_NETWORK, from: selection.from, to: selection.to!, amount, slippage });
     return createSwapNode(id, selection.from === 'USDC' ? 'USDC_TO_WETH' : 'WETH_TO_USDC', amount, slippage, cryptoReviewContext(selection.network));
+  }
+  if (selection.action === 'pool' && selection.network === ROBINHOOD_NETWORK) {
+    const fee = input.fee ?? ROBINHOOD_LIQUIDITY_DEFAULT_FEE, full = robinhoodFullRange(fee);
+    // No explicit range, or exactly the tier's full range, is the full range.
+    const ranged = input.lower !== undefined && input.upper !== undefined && !(Number(input.lower) === full.tickLower && Number(input.upper) === full.tickUpper);
+    if (ranged && input.rangeUnit !== 'TICK') throw new Error('LIQUIDITY_RANGE_INVALID');
+    return createRobinhoodLiquidityNode(id, { network: ROBINHOOD_NETWORK, tokenA: selection.from, tokenB: selection.to!, amountA: amount, amountB: input.secondAmount ?? '0', fee,
+      ...ranged ? { rangeUnit: 'TICK' as const, lower: input.lower!, upper: input.upper! } : { rangeUnit: 'FULL' as const }, slippage });
   }
   if (selection.action === 'pool') {
     const range = { rangeUnit: input.rangeUnit ?? 'TICK', lower: input.lower ?? (selection.network === 'Solana Devnet' ? '-443584' : selection.network === 'Ethereum Sepolia' ? '-887220' : '-887270'), upper: input.upper ?? (selection.network === 'Solana Devnet' ? '443584' : selection.network === 'Ethereum Sepolia' ? '887220' : '887270'), slippage };
@@ -141,6 +159,9 @@ export function cryptoInputOf(node: Node): CryptoActionInput | null {
   if (!selection) return null;
   const catalogSwap = catalogSwapDetails(node);
   if (catalogSwap) return { selection, amount: catalogSwap.amount, slippage: String(catalogSwap.slippage) };
+  const robinhoodPool = robinhoodLiquidityDetails(node);
+  if (robinhoodPool) return { selection, amount: robinhoodPool.amountA, secondAmount: robinhoodPool.amountB, rangeUnit: 'TICK', lower: String(robinhoodPool.tickLower),
+    upper: String(robinhoodPool.tickUpper), slippage: robinhoodPool.slippage, fee: robinhoodPool.fee };
   const solana = solanaSwapDetails(node), uni = uniswapLiquidityDetails(node), orca = solanaLiquidityDetails(node);
   const evmSwap = selection.action === 'swap' && !solana ? swapDetails(node, cryptoReviewContext(selection.network)) : null;
   if (solana || evmSwap) return { selection, amount: (solana ?? evmSwap)!.amount, slippage: solana?.slippage ?? String(evmSwap!.slippage ?? 50) };

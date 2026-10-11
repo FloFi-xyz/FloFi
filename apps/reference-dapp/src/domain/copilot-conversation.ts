@@ -211,7 +211,9 @@ function stepAction(step: WorkflowStep): Base | null {
       outputAsset: d.to, amount: d.amount, slippageBps: d.slippage }] };
     case 'SOLANA_SWAP': return { composition: false, role: null, actions: [{ type: 'SWAP', network: d.input.network === 'Solana' ? 'SOLANA' : 'SOLANA_DEVNET',
       inputAsset: solana(d.input.from), outputAsset: solana(d.input.to), amount: d.input.amount, slippageBps: d.input.slippage }] };
-    case 'ROUTER': return { composition: false, role: null, actions: [{ type: 'BRIDGE', sourceNetwork: d.input.source === 'Base' ? 'BASE' : 'BASE_SEPOLIA',
+    // A Robinhood Chain route is not in this intent vocabulary: it is described as no typed action rather than as another route.
+    case 'ROUTER': if (d.network !== 'mainnet' && d.network !== 'testnet') return null;
+      return { composition: false, role: null, actions: [{ type: 'BRIDGE', sourceNetwork: d.input.source === 'Base' ? 'BASE' : 'BASE_SEPOLIA',
       destinationNetwork: d.input.destination === 'Arbitrum' ? 'ARBITRUM' : 'ARBITRUM_SEPOLIA', asset: 'USDC', amount: d.input.amount, slippageBps: d.input.slippage,
       routing: d.input.routing === 'AUTO' ? null : d.input.routing, recipient: d.input.recipient ? d.input.recipient.toLowerCase() : null }] };
     case 'AAVE': return { composition: false, role: null, actions: [{ type: d.operation, protocol: 'AAVE_V3', network: lendingNetworkOf(d.input.network), asset: d.input.asset, amount: d.input.amount,

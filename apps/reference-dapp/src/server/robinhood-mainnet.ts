@@ -21,6 +21,8 @@ export const ROBINHOOD_MAINNET_HARNESS = Object.freeze({ rpc: 'http://127.0.0.1:
 export const ROBINHOOD_MAINNET_RPC_METHODS = Object.freeze(['eth_chainId', 'eth_blockNumber', 'eth_getBlockByNumber', 'eth_getCode', 'eth_call',
   'eth_getStorageAt', 'eth_getBalance', 'eth_getTransactionCount', 'eth_estimateGas', 'eth_gasPrice', 'eth_getTransactionReceipt',
   'eth_getTransactionByHash', 'eth_getLogs']);
+/** The liquidity runtime additionally simulates the exact approvals and mint (`eth_simulateV1`, supported on 4663) and reads the priority fee. */
+export const ROBINHOOD_LIQUIDITY_RPC_METHODS = Object.freeze([...ROBINHOOD_MAINNET_RPC_METHODS, 'eth_simulateV1', 'eth_maxPriorityFeePerGas']);
 export function robinhoodMainnetMode(env: Env): RobinhoodMainnetMode {
   if (env.GRYLOO_ROBINHOOD_MAINNET_HARNESS === 'MOCKED_LOOPBACK_ONLY') return 'harness';
   return env.GRYLOO_ROBINHOOD_MAINNET === 'live' ? 'live' : 'off';

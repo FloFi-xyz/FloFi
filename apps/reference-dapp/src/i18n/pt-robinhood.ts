@@ -22,4 +22,13 @@ export const portugueseRobinhood: Readonly<Record<string, string>> = {
     'Router entre redes · {0} → {1} · {2} → {3}. Fundos reais na rede principal; a rota é escolhida e mostrada na revisão.',
   'Cross-chain amount ({0})': 'Montante entre redes ({0})', 'Between {0} and {1} {2} per bridge in this release.': 'Entre {0} e {1} {2} por transferência nesta versão.',
   'USDG from': 'USDG de', '{0} through the Cross-chain Router ·': '{0} através do Router entre redes ·',
+  // Robinhood Chain liquidity (catalog pairs, real funds).
+  'Liquidity fee tier': 'Faixa de taxa da liquidez',
+  'Real funds on Robinhood Chain. Simulate checks both tokens against the official registry and the live pool.':
+    'Fundos reais na Robinhood Chain. A simulação confere os dois tokens no registro oficial e no pool ativo.',
+  '{0} {1} and {2} {3}': '{0} {1} e {2} {3}', 'across the full price range': 'em toda a faixa de preço',
+  'between {0} and {1} {2} per {3}': 'entre {0} e {1} {2} por {3}', '· fee {0}%.': '· taxa {0}%.',
+  'Real funds on Robinhood Chain: your wallet signs every request after your Review; Flofi never signs or sends.':
+    'Fundos reais na Robinhood Chain: sua carteira assina cada solicitação depois da sua revisão; o Flofi nunca assina nem envia.',
+  '{0} per {1} · tick': '{0} por {1} · tick', '{0} per {1} · exact ticks': '{0} por {1} · ticks exatos',
 };

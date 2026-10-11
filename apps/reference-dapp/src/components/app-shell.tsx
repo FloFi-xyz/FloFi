@@ -166,7 +166,8 @@ function AppShellContent({ engineering = false, pathname, navigate, simulationRe
   const solanaLiquidity = useSolanaLiquidity();
   const uniswapLiquidity = useUniswapLiquidity();
   // BUILD-UNISWAP-LIQUIDITY-PUBLIC: the canonical position on Base Sepolia, or a recovered run while the workflow is the untouched template.
-  const uniswapLiquidityPath = !supplyPath && (state.workflow.nodes.some(n => n.actionType === 'asset.liquidity.concentrated' && ['eip155:84532', 'eip155:11155111'].includes(n.chainId)) ||
+  // BUILD-ETHEREUM-001 adds Ethereum Sepolia; BUILD-RH-002 adds Robinhood Chain (catalog pairs, real funds) on the same panel.
+  const uniswapLiquidityPath = !supplyPath && (state.workflow.nodes.some(n => n.actionType === 'asset.liquidity.concentrated' && ['eip155:84532', 'eip155:11155111', 'eip155:4663'].includes(n.chainId)) ||
     Boolean(uniswapLiquidity.recovered && uniswapLiquidity.record && state.workflow.revision === 0 && state.workflow.nodes.every(n => n.actionType.startsWith('mock-'))));
   const routerState = useRouter();
   // BUILD-ROUTER-001: the canonical cross-chain bridge node, or a recovered run while the workflow is the untouched template.

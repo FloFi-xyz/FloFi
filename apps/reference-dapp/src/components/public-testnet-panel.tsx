@@ -6,7 +6,7 @@ import { usePublicTestnet } from '../state/public-testnet-store';
 import { useBuild009Wallet } from '../state/build009-wallet-store';
 import { useWorkflow } from '../state/workflow-store';
 import { BASE_SEPOLIA, quoteDecimals, swapProfile } from '../domain/public-testnet-swap';
-import type { PublicQuote } from '../server/public-testnet-service';
+import type { PublicQuote, StockQuoteState } from '../server/public-testnet-service';
 
 function units(value: string, decimals: number): string {
   if (!/^(0|[1-9][0-9]*)$/.test(value)) return '--';
@@ -19,16 +19,16 @@ const pay = (q: PublicQuote, value: string) => amount(value, q.inputSymbol, quot
 const get = (q: PublicQuote, value: string) => amount(value, q.outputSymbol, quoteDecimals(q, 'output'));
 /** BUILD-RH-002: shares per token as an exact decimal (1e18 = 1.0), never rounded through a float. */
 const multiplier = (wad: string) => units(wad, 18);
-/** Stock Token facts bound into a Robinhood Chain Review: multiplier, scheduled change and the issuer's eligibility notice. */
-function StockFacts({ quote }: { quote: PublicQuote }) {
+/** Stock Token facts bound into a Robinhood Chain Review (a swap or a liquidity position): multiplier, scheduled change and the issuer's notice. */
+export function StockFacts({ stocks }: { stocks: readonly StockQuoteState[] | undefined }) {
   const { t: tr } = useLocale();
-  if (!quote.stocks?.length) return null;
+  if (!stocks?.length) return null;
   return <div className="step-card" aria-label={tr("Stock Token details")}>
-    <dl className="step-facts">{quote.stocks.map(stock => <div key={stock.officialId}><dt>{tr("{0} shares per token", stock.symbol)}</dt>
+    <dl className="step-facts">{stocks.map(stock => <div key={stock.officialId}><dt>{tr("{0} shares per token", stock.symbol)}</dt>
       <dd className="numeric">{multiplier(stock.multiplierWad)}</dd></div>)}</dl>
-    {quote.stocks.some(stock => stock.scheduledEffectiveAt > 0 && stock.scheduledMultiplierWad !== stock.multiplierWad) &&
+    {stocks.some(stock => stock.scheduledEffectiveAt > 0 && stock.scheduledMultiplierWad !== stock.multiplierWad) &&
       <p role="status">{tr("A corporate action will change the shares per token after this Review expires.")}</p>}
-    {quote.stocks.some(stock => stock.fractionalRestricted) && <p role="status">{tr("Fractional trading of the underlying share is restricted.")}</p>}
+    {stocks.some(stock => stock.fractionalRestricted) && <p role="status">{tr("Fractional trading of the underlying share is restricted.")}</p>}
     <p className="muted">{tr("Stock Tokens are issued by Robinhood Assets (Jersey) Limited and are not offered to US persons or in restricted jurisdictions.")}</p>
   </div>;
 }
@@ -59,7 +59,7 @@ export function PublicTestnetPanel({ view }: { view: 'simulate' | 'execute' }) {
         <div><dt>{tr("Network")}</dt><dd>{network}</dd></div></dl>
       {expired && <p role="status">{tr("Quote expired. Simulate again.")}</p>}
     </div>}
-    {quote && !flow.retired && <StockFacts quote={quote}/>}
+    {quote && !flow.retired && <StockFacts stocks={quote.stocks}/>}
     {flow.retired && <p role="status">{tr("The swap changed. Simulate again to review the new amount.")}</p>}
   </section>;
   if (!quote || !run) return <section className="panel" aria-label={tr("Swap review")}><h2>{tr("Simulate your swap first")}</h2>
@@ -84,7 +84,7 @@ export function PublicTestnetPanel({ view }: { view: 'simulate' | 'execute' }) {
       <div><dt>{tr("Network")}</dt><dd>{network}</dd></div>
       <div><dt>{tr("Network cost")}</dt><dd>{tr("Shown in your wallet before confirmation")}</dd></div>
       <div><dt>{tr("Token approval")}</dt><dd>{tr("Requested only if your current allowance is insufficient")}</dd></div></dl>
-    <StockFacts quote={quote}/>
+    <StockFacts stocks={quote.stocks}/>
     {mainnet && <p role="note">{tr("Real funds: your wallet signs and sends this transaction on {0}. Flofi never signs for you.", network)}</p>}
     {flow.retired && <p role="alert">{tr("This swap changed. Simulate it again.")}</p>}
     {expired && <p role="status">{tr("Quote expired. Simulate again.")}</p>}

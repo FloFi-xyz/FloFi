@@ -12,6 +12,7 @@ import { routerDetails } from './router-authoring';
 import { solanaSwapDetails, solanaSwapLabels } from './jupiter-authoring';
 import { solanaLiquidityDetails } from './solana-liquidity-authoring';
 import { uniswapLiquidityDetails } from './uniswap-liquidity-authoring';
+import { robinhoodLiquidityDetails } from './robinhood-liquidity-authoring';
 import { transferDetails } from './robinhood-transfer-authoring';
 import { catalogSwapDetails } from './catalog-swap-authoring';
 
@@ -61,7 +62,7 @@ export function composerSummary(workflow: Workflow, node: Workflow['nodes'][numb
   const lending = lendingDetails(workflow);
   const swap = swapDetails(node, context), solana = solanaSwapDetails(node);
   const router = routerDetails(node), bridge = bridgeDetails(node);
-  const uni = uniswapLiquidityDetails(node), orca = solanaLiquidityDetails(node);
+  const uni = uniswapLiquidityDetails(node), orca = solanaLiquidityDetails(node), rhPool = robinhoodLiquidityDetails(node);
   const position = liquidityDetails(node, context);
   const supply = lending ? null : supplyDetails(node as Parameters<typeof supplyDetails>[0]);
   const borrow = lending ? null : borrowDetails(node as Parameters<typeof borrowDetails>[0]);
@@ -71,7 +72,7 @@ export function composerSummary(workflow: Workflow, node: Workflow['nodes'][numb
   const money = supply ?? borrow ?? repay ?? withdraw;
   const providers = node.adapterConstraints.adapters.map(adapter => adapter.id);
   const protocols = node.adapterConstraints.protocols;
-  const provider = solana ? solanaSwapLabels(solana.network).provider : uni?.provider ?? orca?.provider ??
+  const provider = solana ? solanaSwapLabels(solana.network).provider : uni?.provider ?? orca?.provider ?? rhPool?.provider ??
     [...new Set((providers.length ? providers : protocols).map(id => providerLabels[id] ?? id))].join(' / ');
   const destination = node.inputs.find(input => input.name === 'asset-out');
   const destinationChain = destination?.kind === 'ASSET' ? destination.value.chainId : null;
@@ -81,15 +82,16 @@ export function composerSummary(workflow: Workflow, node: Workflow['nodes'][numb
   const amount = lending ? `${node.actionType === 'supply' ? lending.supply : lending.borrow} USDC` : money ? `${money.amount} ${money.asset}` :
     transfer ? `${transfer.amount} ${transfer.asset}` : router ? `${router.amount} ${router.token}` : bridge ? `${bridge.amount} USDC` :
     solana ? `${solana.amount} ${solana.from}` : swap ? `${swap.amount} ${swap.from}` : catalogSwap ? `${catalogSwap.amount} ${catalogSwap.from}` :
-    uni ? `${uni.maxUsdc} USDC + ${uni.maxWeth} WETH` : orca ? `${orca.maxSol} SOL + ${orca.maxDevUsdc} devUSDC` :
+    uni ? `${uni.maxUsdc} USDC + ${uni.maxWeth} WETH` : rhPool ? `${rhPool.amountA} ${rhPool.tokenA} + ${rhPool.amountB} ${rhPool.tokenB}` : orca ? `${orca.maxSol} SOL + ${orca.maxDevUsdc} devUSDC` :
     position ? `${formatHumanAmount(position.amountWeth, 'WETH', context)} WETH + ${formatHumanAmount(position.amountUsdc, 'USDC', context)} USDC` :
     linked ? 'Amount from linked step' : 'Amount not available';
   const detail = solana ? `${solana.from} → ${solana.to}` : swap ? `${swap.from} → ${swap.to}` : catalogSwap ? `${catalogSwap.from} → ${catalogSwap.to}` :
     lending && node.actionType === 'asset.swap.exact-input' ? 'Borrowed USDC → WETH' :
-    uni ? 'USDC / WETH' : orca ? 'SOL / devUSDC' : position ? 'WETH / USDC' : undefined;
+    uni ? 'USDC / WETH' : rhPool ? `${rhPool.tokenA} / ${rhPool.tokenB}` : orca ? 'SOL / devUSDC' : position ? 'WETH / USDC' : undefined;
   // The router pair names both assets (BUILD-RH-002: USDC → USDG into Robinhood Chain); legacy bridge readers describe USDC on both ends.
   const bridgePair = router ? `${router.token} → ${router.destinationToken}` : bridge ? 'USDC → USDC' : undefined;
   const liquidityValues = uni ? [{ amount: uni.maxUsdc, token: 'USDC' }, { amount: uni.maxWeth, token: 'WETH' }]
+    : rhPool ? [{ amount: rhPool.amountA, token: rhPool.tokenA }, { amount: rhPool.amountB, token: rhPool.tokenB }]
     : orca ? [{ amount: orca.maxSol, token: 'SOL' }, { amount: orca.maxDevUsdc, token: 'devUSDC' }]
     : position ? [{ amount: formatHumanAmount(position.amountWeth, 'WETH', context), token: 'WETH' }, { amount: formatHumanAmount(position.amountUsdc, 'USDC', context), token: 'USDC' }] : undefined;
   return { action, provider, chain, amount, detail, bridgePair, linked, ...(liquidityValues ? { liquidityValues } : {}),

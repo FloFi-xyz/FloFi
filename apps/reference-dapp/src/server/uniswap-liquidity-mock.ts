@@ -4,16 +4,20 @@
  * SHA-256 pins. Accepted only with MOCKED provenance; a public run always checks the profile's verified pins.
  */
 import { createHash } from 'node:crypto';
-import { UNISWAP_V3_BASE_SEPOLIA_LIQUIDITY as profile, type UniswapLiquidityProfile } from '@defi-workflow-engine/action-registry';
+import { UNISWAP_V3_BASE_SEPOLIA_LIQUIDITY as profile, type UniswapPoolProfile } from '@defi-workflow-engine/action-registry';
 
 /** The same synthetic code at a profile's addresses, so one set of pins serves every MOCKED liquidity profile. */
-export function uniMockCode(p: UniswapLiquidityProfile): Readonly<Record<string, string>> {
+export function uniMockCode(p: UniswapPoolProfile): Readonly<Record<string, string>> {
   return Object.freeze({ [p.factory]: '0x60016001', [p.positionManager]: '0x60026002', [p.pool]: '0x60036003', [p.token0.address]: '0x60046004',
     [p.token1.address]: '0x60056005', ...p.gasPriceOracle ? { [p.gasPriceOracle]: '0x60066006' } : {} });
 }
 export const UNI_MOCK_CODE: Readonly<Record<string, string>> = uniMockCode(profile);
+/** BUILD-RH-002: synthetic code of a MOCKED Robinhood Chain Stock Token (the official beacon proxy stands in for every Stock Token). */
+export const UNI_MOCK_STOCK_PROXY_CODE = '0x60086008';
 const sha = (code: string) => createHash('sha256').update(Buffer.from(code.slice(2), 'hex')).digest('hex');
 export const UNI_MOCK_CODE_PINS = Object.freeze({ factory: sha(UNI_MOCK_CODE[profile.factory]!), positionManager: sha(UNI_MOCK_CODE[profile.positionManager]!),
   pool: sha(UNI_MOCK_CODE[profile.pool]!) });
 /** Loopback JSON-RPC of the MOCKED harness (browser suites only). */
 export const UNI_MOCK_RPC_URL = 'http://127.0.0.1:8556/rpc';
+/** SHA-256 of synthetic runtime code (MOCKED harness pins only). */
+export const uniMockCodePin = sha;

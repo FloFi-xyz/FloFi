@@ -22,7 +22,7 @@ type Step = 'approval' | 'swap';
 type Tx = { readonly chainId: SwapProfile['chainHex']; readonly from: string; readonly to: string;
   readonly data: string; readonly value: '0x0'; readonly gas: string };
 /** BUILD-RH-002: the identity and ERC-8056 multiplier state of a Stock Token side, read at the quote block and bound into the Review. */
-export type StockQuoteState = { readonly side: 'input' | 'output'; readonly symbol: string; readonly token: string; readonly officialId: string;
+export type StockQuoteState = { readonly side: 'input' | 'output' | 'token0' | 'token1'; readonly symbol: string; readonly token: string; readonly officialId: string;
   /** Onchain `uiMultiplier()`, `newUIMultiplier()` and `effectiveAt()` (1e18 = 1.0; `effectiveAt` 0 when nothing is scheduled). */
   readonly multiplierWad: string; readonly scheduledMultiplierWad: string; readonly scheduledEffectiveAt: number;
   /** The official registry's view at the same Review (must agree with the chain). */
@@ -415,6 +415,47 @@ function catalogSide(catalog: AssetCatalog, ref: { address: string; decimals: nu
   return asset;
 }
 /**
+ * BUILD-RH-002: one official catalog ERC-20 verified at a pinned block, shared by catalog swaps and Robinhood liquidity. USDG and WETH must
+ * carry their pinned code; every Stock Token must be the official beacon proxy on the official beacon and report the registry's uid, and its
+ * onchain multiplier must equal the registry's. A change scheduled to take effect before the Review expires fails closed
+ * (STOCK_MULTIPLIER_CHANGE_PENDING). Returns the Stock Token state the Review binds, or null for a base asset. Read-only.
+ */
+export async function verifyCatalogToken(rpc: Rpc, P: Pick<CatalogSwapProfile, 'weth' | 'beaconSlot' | 'stockTokenBeacon'>,
+  pins: Pick<Record<keyof CatalogSwapProfile['codeSha256'], string>, 'weth' | 'usdg' | 'stockTokenProxy'>, asset: CanonicalAsset, side: StockQuoteState['side'],
+  block: string, headTime: number, reviewTtlSeconds: number, now: () => Date): Promise<StockQuoteState | null> {
+  const call = async (to: string, data: string) => hex(await rpc('eth_call', [{ to, data }, block]));
+  const word0 = (value: string) => value.length >= 66 ? BigInt(value.slice(0, 66)) : fail('RPC_RESPONSE_INVALID');
+  const addressOf = (value: string) => address('0x' + value.slice(-40));
+  const code = await rpc('eth_getCode', [asset.address, block]);
+  if (typeof code !== 'string' || !/^0x(?:[0-9a-fA-F]{2})*$/.test(code)) fail('RPC_RESPONSE_INVALID');
+  if (code === '0x') fail('CONTRACT_CODE_MISSING');
+  const tokenCode = sha256Hex(code.toLowerCase());
+  if (BigInt(await call(asset.address!, '0x313ce567')) !== BigInt(asset.decimals)) fail('TOKEN_METADATA_MISMATCH');
+  if (!asset.stock) {
+    const pin = asset.address === P.weth ? pins.weth : asset.symbol === 'USDG' ? pins.usdg : null;
+    if (!pin || tokenCode !== pin) fail('TOKEN_DEPLOYMENT_MISMATCH');
+    return null;
+  }
+  // Every official Stock Token is the same beacon proxy on the official beacon, and reports the registry's uid.
+  if (tokenCode !== pins.stockTokenProxy || addressOf(hex(await rpc('eth_getStorageAt', [asset.address, P.beaconSlot, block]))) !== P.stockTokenBeacon)
+    fail('STOCK_TOKEN_DEPLOYMENT_MISMATCH');
+  if ('0x' + word0(await call(asset.address!, '0xf514ce36')).toString(16).padStart(64, '0') !== asset.stock.officialId) fail('STOCK_TOKEN_IDENTITY_MISMATCH');
+  const multiplier = word0(await call(asset.address!, '0xa60bf13d')), scheduled = word0(await call(asset.address!, '0xdc767007'));
+  const effectiveAt = Number(word0(await call(asset.address!, '0x97a4064f')));
+  if (multiplier <= 0n || !Number.isSafeInteger(effectiveAt)) fail('STOCK_MULTIPLIER_INVALID');
+  // The registry and the chain must agree on the multiplier the Review shows; a disagreement is not resolved by guessing.
+  if (multiplier.toString() !== asset.stock.multiplierWad) fail('STOCK_MULTIPLIER_MISMATCH');
+  // A scheduled change that takes effect before this Review can be executed would change the economic meaning under it.
+  const reviewEnd = Math.floor(now().getTime() / 1000) + reviewTtlSeconds;
+  const registryPending = asset.stock.pendingEffectiveTime ? Math.floor(Date.parse(asset.stock.pendingEffectiveTime) / 1000) : null;
+  if ((scheduled !== multiplier && effectiveAt > headTime && effectiveAt <= reviewEnd) || (registryPending !== null && registryPending <= reviewEnd))
+    fail('STOCK_MULTIPLIER_CHANGE_PENDING');
+  return { side, symbol: asset.symbol, token: asset.address!, officialId: asset.stock.officialId, multiplierWad: multiplier.toString(),
+    scheduledMultiplierWad: scheduled.toString(), scheduledEffectiveAt: effectiveAt, registryMultiplierWad: asset.stock.multiplierWad,
+    registryPendingMultiplierWad: asset.stock.pendingMultiplierWad, registryPendingEffectiveTime: asset.stock.pendingEffectiveTime,
+    fractionalRestricted: asset.stock.trading.fractionalRestricted };
+}
+/**
  * The catalog quote: official identity, deployment code, Stock Token uid and multiplier state, and every locally derived
  * canonical pool are read at one pinned block; the best live fee tier is bound with its pool. Read-only.
  */
@@ -448,31 +489,8 @@ async function catalogQuote(workflow: SemanticWorkflow, executionId: string, P: 
     if (addressOf(await call(target, '0xc45a0155', block)) !== P.factory || addressOf(await call(target, '0x4aa4a4fc', block)) !== P.weth) fail('PROTOCOL_DEPLOYMENT_MISMATCH');
   const stocks: StockQuoteState[] = [];
   for (const [side, asset] of [['input', input], ['output', output]] as const) {
-    const tokenCode = sha256Hex(await code(asset.address!));
-    if (BigInt(await call(asset.address!, '0x313ce567', block)) !== BigInt(asset.decimals)) fail('TOKEN_METADATA_MISMATCH');
-    if (!asset.stock) {
-      const pin = asset.address === P.weth ? pins.weth : asset.symbol === 'USDG' ? pins.usdg : null;
-      if (!pin || tokenCode !== pin) fail('TOKEN_DEPLOYMENT_MISMATCH');
-      continue;
-    }
-    // Every official Stock Token is the same beacon proxy on the official beacon, and reports the registry's uid.
-    if (tokenCode !== pins.stockTokenProxy || addressOf(hex(await rpc('eth_getStorageAt', [asset.address, P.beaconSlot, block]))) !== P.stockTokenBeacon)
-      fail('STOCK_TOKEN_DEPLOYMENT_MISMATCH');
-    if ('0x' + word0(await call(asset.address!, '0xf514ce36', block)).toString(16).padStart(64, '0') !== asset.stock.officialId) fail('STOCK_TOKEN_IDENTITY_MISMATCH');
-    const multiplier = word0(await call(asset.address!, '0xa60bf13d', block)), scheduled = word0(await call(asset.address!, '0xdc767007', block));
-    const effectiveAt = Number(word0(await call(asset.address!, '0x97a4064f', block)));
-    if (multiplier <= 0n || !Number.isSafeInteger(effectiveAt)) fail('STOCK_MULTIPLIER_INVALID');
-    // The registry and the chain must agree on the multiplier the Review shows; a disagreement is not resolved by guessing.
-    if (multiplier.toString() !== asset.stock.multiplierWad) fail('STOCK_MULTIPLIER_MISMATCH');
-    // A scheduled change that takes effect before this Review can be executed would change the economic meaning under it.
-    const reviewEnd = Math.floor(now().getTime() / 1000) + P.reviewTtlSeconds;
-    const registryPending = asset.stock.pendingEffectiveTime ? Math.floor(Date.parse(asset.stock.pendingEffectiveTime) / 1000) : null;
-    if ((scheduled !== multiplier && effectiveAt > headTime && effectiveAt <= reviewEnd) || (registryPending !== null && registryPending <= reviewEnd))
-      fail('STOCK_MULTIPLIER_CHANGE_PENDING');
-    stocks.push({ side, symbol: asset.symbol, token: asset.address!, officialId: asset.stock.officialId, multiplierWad: multiplier.toString(),
-      scheduledMultiplierWad: scheduled.toString(), scheduledEffectiveAt: effectiveAt, registryMultiplierWad: asset.stock.multiplierWad,
-      registryPendingMultiplierWad: asset.stock.pendingMultiplierWad, registryPendingEffectiveTime: asset.stock.pendingEffectiveTime,
-      fractionalRestricted: asset.stock.trading.fractionalRestricted });
+    const stock = await verifyCatalogToken(rpc, P, pins, asset, side, block, headTime, P.reviewTtlSeconds, now);
+    if (stock) stocks.push(stock);
   }
   // Every standard fee tier's canonical pool is derived locally (CREATE2), checked for code and live liquidity, and quoted.
   const amountIn = BigInt(fields.amount), tiers: { fee: number; pool: string; expectedOut: string | null }[] = [];

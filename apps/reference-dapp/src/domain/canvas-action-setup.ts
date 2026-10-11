@@ -5,6 +5,7 @@ import type { Command } from './commands';
 import { createUniswapLiquidityNode, type UniswapLiquidityInput } from './uniswap-liquidity-authoring';
 import { canvasAddCommand } from './canvas-authoring';
 import { swapDetails, inputSymbol, directionLabel, type Direction } from './swap-authoring';
+import { ROBINHOOD_NETWORK } from './asset-catalogs';
 import { createRouterNode, routerDetails, routerInputForNetworks, routerInputOf, routerTokensOf, ROUTER_NETWORK_OPTIONS, type RouterBridgeInput } from './router-authoring';
 import { createBridgeNode, bridgeDetails } from './bridge-authoring';
 import { shellChainLabel } from './product-shell';
@@ -99,7 +100,7 @@ export function canvasAmountCommand(state: EditorState, setup: CanvasActionSetup
     const transfer = transferDetails(node as Parameters<typeof transferDetails>[0]);
     const cryptoInput = cryptoSelections[id] ? cryptoInputOf(node) : null;
     command = cryptoInput ? { ...base, type: 'SET_CRYPTO_ACTION', input: { ...cryptoInput, selection: cryptoSelections[id]!, amount,
-      ...(cryptoInput.selection.action === 'pool' && cryptoInput.selection.network !== cryptoSelections[id]!.network ? { rangeUnit: 'TICK', lower: cryptoSelections[id]!.network === 'Solana Devnet' ? '-443584' : cryptoSelections[id]!.network === 'Ethereum Sepolia' ? '-887220' : '-887270', upper: cryptoSelections[id]!.network === 'Solana Devnet' ? '443584' : cryptoSelections[id]!.network === 'Ethereum Sepolia' ? '887220' : '887270' } : {}) } }
+      ...(cryptoInput.selection.action === 'pool' && cryptoInput.selection.network !== cryptoSelections[id]!.network ? { rangeUnit: 'TICK', lower: cryptoSelections[id]!.network === 'Solana Devnet' ? '-443584' : cryptoSelections[id]!.network === 'Ethereum Sepolia' || cryptoSelections[id]!.network === ROBINHOOD_NETWORK ? '-887220' : '-887270', upper: cryptoSelections[id]!.network === 'Solana Devnet' ? '443584' : cryptoSelections[id]!.network === 'Ethereum Sepolia' || cryptoSelections[id]!.network === ROBINHOOD_NETWORK ? '887220' : '887270' } : {}) } }
       : transfer ? { ...base, type: 'SET_RH_TRANSFER', input: { ...transfer, amount } }
       : lending && (id === 'lending-supply' || id === 'lending-borrow')
       ? { type: 'AUTHOR_LENDING', input: lendingNodeInput(state.workflow, id, amount), source: 'CANVAS', baseRevision: state.workflow.revision }

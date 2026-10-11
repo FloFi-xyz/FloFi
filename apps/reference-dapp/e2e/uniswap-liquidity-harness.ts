@@ -4,9 +4,11 @@
  * the liquidity unit, PostgreSQL and loopback browser suites. No network. Read methods answer exactly the calls the
  * service makes; the only transaction path is `wallet.send` — the owner's browser wallet in a real deployment.
  * Every block keeps a state snapshot so historical reads (receipt block and parent) behave like an archive node.
+ * BUILD-RH-002: `profile` may be a Robinhood Chain pool (any catalog pair and fee tier); `stocks` makes a token a Stock Token (official
+ * beacon proxy code, beacon slot, uid and multiplier reads) and `catalogPins` are the synthetic pins of its USDG/WETH/Stock Token code.
  */
-import { UNISWAP_V3_BASE_SEPOLIA_LIQUIDITY, type UniswapLiquidityProfile } from '@defi-workflow-engine/action-registry';
-import { uniMockCode, UNI_MOCK_CODE_PINS } from '../src/server/uniswap-liquidity-mock.ts';
+import { UNISWAP_V3_BASE_SEPOLIA_LIQUIDITY, UNISWAP_V3_ROBINHOOD, type UniswapPoolProfile } from '@defi-workflow-engine/action-registry';
+import { uniMockCode, uniMockCodePin, UNI_MOCK_CODE_PINS, UNI_MOCK_STOCK_PROXY_CODE } from '../src/server/uniswap-liquidity-mock.ts';
 import { UNISWAP_SELECTORS as SEL, UNISWAP_TOPICS as TOPIC, decodeUniswapApprove, decodeUniswapMint, sqrtRatioAtTick, uniswapComposition } from '@defi-workflow-engine/reference-compiler';
 
 export const UNI_OWNER = '0x5555555555555555555555555555555555555555';
@@ -40,9 +42,17 @@ const clone = (s: Snapshot): Snapshot => structuredClone(s);
 
 export function createUniswapLiquidityChain(options: { owner?: string; usdc?: bigint; weth?: bigint; eth?: bigint; tick?: number; nonce?: bigint; simulateV1?: boolean;
   /** The owner's EOA is already EIP-7702-delegated to the MetaMask delegator (code `0xef0100‖impl`). */ delegatedOwner?: boolean;
-  /** BUILD-ETHEREUM-001: the liquidity profile the chain stands in for (Base Sepolia by default). */ profile?: UniswapLiquidityProfile } = {}) {
-  const profile = options.profile ?? UNISWAP_V3_BASE_SEPOLIA_LIQUIDITY;
-  const t0 = profile.token0.address, t1 = profile.token1.address, NPM = profile.positionManager, POOL = profile.pool, CODE = uniMockCode(profile);
+  /** BUILD-ETHEREUM-001: the liquidity profile the chain stands in for (Base Sepolia by default). */ profile?: UniswapPoolProfile;
+  /** BUILD-RH-002: Stock Token sides of a Robinhood Chain pool, keyed by address. */
+  stocks?: Readonly<Record<string, { uid: string; multiplierWad: bigint; scheduledWad?: bigint; effectiveAt?: number }>> } = {}) {
+  const profile: UniswapPoolProfile = options.profile ?? UNISWAP_V3_BASE_SEPOLIA_LIQUIDITY;
+  const t0 = profile.token0.address, t1 = profile.token1.address, NPM = profile.positionManager, POOL = profile.pool;
+  const stocks = new Map(Object.entries(options.stocks ?? {}).map(([address, stock]) => [address, { ...stock }]));
+  const CODE: Readonly<Record<string, string>> = { ...uniMockCode(profile), ...Object.fromEntries([...stocks.keys()].map(address => [address, UNI_MOCK_STOCK_PROXY_CODE])) };
+  /** Synthetic pins of the catalog's base assets and Stock Token proxy, as a MOCKED Robinhood Chain service accepts them. */
+  const catalogPins = { stockTokenProxy: uniMockCodePin(UNI_MOCK_STOCK_PROXY_CODE),
+    ...[t0, t1].includes(UNISWAP_V3_ROBINHOOD.usdg) ? { usdg: uniMockCodePin(CODE[UNISWAP_V3_ROBINHOOD.usdg]!) } : {},
+    ...[t0, t1].includes(UNISWAP_V3_ROBINHOOD.weth) ? { weth: uniMockCodePin(CODE[UNISWAP_V3_ROBINHOOD.weth]!) } : {} };
   const owner = options.owner ?? UNI_OWNER;
   const tick = options.tick ?? 225_600;
   let head = 1_000;
@@ -107,7 +117,12 @@ export function createUniswapLiquidityChain(options: { owner?: string; usdc?: bi
   function read(s: Snapshot, to: string, data: string): string {
     const sel = data.slice(0, 10), arg = (i: number) => '0x' + data.slice(10 + i * 64 + 24, 10 + (i + 1) * 64);
     if (to === NPM && sel === SEL.factory) return '0x' + aw(profile.factory);
-    if (to === NPM && sel === SEL.weth9) return '0x' + aw(t1);
+    if (to === NPM && sel === SEL.weth9) return '0x' + aw(profile.weth ?? t1);
+    const stock = stocks.get(to);
+    if (stock && sel === '0xf514ce36') return stock.uid;
+    if (stock && sel === '0xa60bf13d') return '0x' + w(stock.multiplierWad);
+    if (stock && sel === '0xdc767007') return '0x' + w(stock.scheduledWad ?? stock.multiplierWad);
+    if (stock && sel === '0x97a4064f') return '0x' + w(BigInt(stock.effectiveAt ?? 0));
     if (to === profile.factory && sel === SEL.getPool) return '0x' + aw(arg(0) === t0 && arg(1) === t1 ? POOL : '0x' + '0'.repeat(40));
     if (to === POOL && sel === SEL.token0) return '0x' + aw(t0);
     if (to === POOL && sel === SEL.token1) return '0x' + aw(t1);
@@ -115,7 +130,7 @@ export function createUniswapLiquidityChain(options: { owner?: string; usdc?: bi
     if (to === POOL && sel === SEL.tickSpacing) return '0x' + w(BigInt(profile.tickSpacing));
     if (to === POOL && sel === SEL.liquidity) return '0x' + w(448_000_000_000n);
     if (to === POOL && sel === SEL.slot0) return '0x' + w(s.sqrtPriceX96) + w(BigInt(s.tick)) + w(1n) + w(1n) + w(1n) + w(0n) + w(1n);
-    if ((to === t0 || to === t1) && sel === SEL.decimals) return '0x' + w(to === t0 ? 6n : 18n);
+    if ((to === t0 || to === t1) && sel === SEL.decimals) return '0x' + w(BigInt(to === t0 ? profile.token0.decimals : profile.token1.decimals));
     if ((to === t0 || to === t1) && sel === SEL.balanceOf) return '0x' + w(s.balances[to]![arg(0)] ?? 0n);
     if ((to === t0 || to === t1) && sel === SEL.allowance) return '0x' + w(s.allowances[allowanceKey(to, arg(0), arg(1))] ?? 0n);
     if (to === NPM && sel === SEL.balanceOf) return '0x' + w(BigInt(Object.values(s.owners).filter(o => o === arg(0)).length));
@@ -162,6 +177,8 @@ export function createUniswapLiquidityChain(options: { owner?: string; usdc?: bi
         if (s === owner && options.delegatedOwner) return '0xef0100' + UNI_DELEGATOR_IMPL.slice(2);
         return CODE[s] ?? '0x';
       }
+      case 'eth_getStorageAt': return '0x' + (stocks.has((params[0] as string).toLowerCase()) && params[1] === UNISWAP_V3_ROBINHOOD.beaconSlot
+        ? aw(UNISWAP_V3_ROBINHOOD.stockTokenBeacon) : w(0n));
       case 'eth_getBalance': return hx(at(params[1]).native[(params[0] as string).toLowerCase()] ?? 0n);
       case 'eth_getTransactionCount': {
         const who = (params[0] as string).toLowerCase(), base = at(params[1]).nonces[who] ?? 0n;
@@ -223,7 +240,9 @@ export function createUniswapLiquidityChain(options: { owner?: string; usdc?: bi
       mine(txs); return replacement;
     },
   };
-  return { rpc, wallet, owner, counters, mined,
+  return { rpc, wallet, owner, counters, mined, catalogPins,
+    /** A Stock Token's issuer changes its multiplier state (a corporate action). */
+    setStock(address: string, patch: Partial<{ uid: string; multiplierWad: bigint; scheduledWad: bigint; effectiveAt: number }>) { Object.assign(stocks.get(address)!, patch); },
     /** Wall clock aligned with the chain head (the service rejects stale or future heads). */
     clock: () => new Date(timestamp * 1000 + 1_000),
     /** Another market participant moves the pool price (a swap): `ticks` up or down. */

@@ -16,6 +16,8 @@ export const preservedValues = new Set<string>([
   "USDC →",
   "{0} →",
   "{0} → {1}",
+  "{0}%",
+  "Uniswap v3 {0}/{1}",
   "(",
   ".",
   "Arbitrum Sepolia",

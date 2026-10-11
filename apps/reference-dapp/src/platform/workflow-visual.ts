@@ -85,6 +85,12 @@ function project(s: WorkflowStep, node: Workflow['nodes'][number] | undefined): 
     case 'UNISWAP_LIQUIDITY': return step({ action: 'ADD_LIQUIDITY', provider: 'Uniswap v3', network: d.input.network, amountKind: 'MAXIMUM',
       amounts: [{ amount: d.input.maxUsdc, asset: 'USDC' }, { amount: d.input.maxWeth, asset: 'WETH' }], range: { lower: d.lowerPrice, upper: d.upperPrice, unit: 'USDC/WETH' },
       slippageBps: bps(d.input.slippage), testFunds });
+    // BUILD-RH-002: Robinhood Chain catalog swaps and positions (real funds); a full-range position states no price bounds.
+    case 'CATALOG_SWAP': return step({ action: 'SWAP', provider: 'Uniswap v3', network: d.network, amounts: [{ amount: d.amount, asset: d.from }], toAsset: d.to,
+      slippageBps: bps(d.slippage), account: { role: 'CONNECTED_WALLET' }, testFunds });
+    case 'CATALOG_LIQUIDITY': return step({ action: 'ADD_LIQUIDITY', provider: 'Uniswap v3', network: d.input.network, amountKind: 'MAXIMUM',
+      amounts: [{ amount: d.input.amountA, asset: d.input.tokenA }, { amount: d.input.amountB, asset: d.input.tokenB }],
+      range: d.fullRange ? null : { lower: d.lowerPrice, upper: d.upperPrice, unit: d.priceUnit.replace(' per ', '/') }, slippageBps: bps(d.input.slippage), testFunds });
     case 'ORCA_LIQUIDITY': return step({ action: 'ADD_LIQUIDITY', provider: s.protocol, network: d.input.network, chain: 'SOLANA', amountKind: 'MAXIMUM',
       amounts: [{ amount: d.input.maxSol, asset: 'SOL' }, { amount: d.input.maxDevUsdc, asset: 'devUSDC' }], range: { lower: d.lowerPrice, upper: d.upperPrice, unit: 'devUSDC/SOL' },
       slippageBps: bps(d.input.slippage), testFunds });

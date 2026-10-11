@@ -28,7 +28,8 @@ export const ENGINE_VERSION = 'flofi-engine-2';
 export const FLOWS_WITH_EXECUTION_SWITCH: readonly FlowName[] = Object.freeze(['solana-devnet-swap', 'jupiter-swap', 'orca-liquidity', 'uniswap-liquidity',
   'crosschain-router', 'crosschain-router-testnet', 'pix-payment',
   // BUILD-RH-002: the Robinhood Chain bridge routes (owner execution needs the Robinhood real-funds approval).
-  'crosschain-router-base-to-robinhood', 'crosschain-router-robinhood-to-base', 'crosschain-router-arbitrum-to-robinhood', 'crosschain-router-robinhood-to-arbitrum']);
+  'crosschain-router-base-to-robinhood', 'crosschain-router-robinhood-to-base', 'crosschain-router-arbitrum-to-robinhood', 'crosschain-router-robinhood-to-arbitrum',
+  'robinhood-liquidity']);
 
 /**
  * Review findings that are not defects but the owner's own pre-execution steps in FloFi: every executable flow quotes, simulates

@@ -39,10 +39,11 @@ export function simulationFlowOf(steps: readonly WorkflowStep[]): SimulationFlow
   if (types.has('LENDING_COMPOSITION')) return 'LENDING';
   if (types.has('ROUTER')) return 'ROUTER';
   if (types.has('AAVE') || types.has('AAVE_WITHDRAW')) return 'SUPPLY';
-  if (types.has('UNISWAP_LIQUIDITY')) return 'UNISWAP';
+  if (types.has('UNISWAP_LIQUIDITY') || types.has('CATALOG_LIQUIDITY')) return 'UNISWAP';
   if (types.has('ORCA_LIQUIDITY')) return 'ORCA';
   if (types.has('SOLANA_SWAP')) return 'SOLANA_SWAP';
-  if (steps.some(step => step.detail.type === 'EVM_SWAP' && step.detail.network !== 'Base')) return 'PUBLIC_TESTNET';
+  // The public swap panel also serves Robinhood Chain catalog swaps (BUILD-RH-002).
+  if (steps.some(step => step.detail.type === 'EVM_SWAP' && step.detail.network !== 'Base' || step.detail.type === 'CATALOG_SWAP')) return 'PUBLIC_TESTNET';
   if (steps.some(step => step.detail.type === 'OTHER' && step.detail.actionType === 'asset.transfer')) return 'TRANSFER';
   return 'MOCKED_CHAIN';
 }
@@ -62,7 +63,9 @@ export function stepSummary(step: WorkflowStep, language: CopilotLanguage): stri
   switch (d.type) {
     case 'EVM_SWAP': return `Swap ${d.amount} ${d.from} → ${d.to} · ${d.network}`;
     case 'SOLANA_SWAP': return `Swap ${d.input.amount} ${d.input.from} → ${d.input.to} · ${d.input.network} (${step.protocol})`;
-    case 'ROUTER': return `Bridge ${d.input.amount} USDC · ${step.network}`;
+    case 'ROUTER': return `Bridge ${d.input.amount} ${d.input.token} · ${step.network}`;
+    case 'CATALOG_SWAP': return `Swap ${d.amount} ${d.from} → ${d.to} · ${d.network}`;
+    case 'CATALOG_LIQUIDITY': return `${pt ? 'Liquidez' : 'Liquidity'} ≤ ${d.input.amountA} ${d.input.tokenA} + ${d.input.amountB} ${d.input.tokenB} · Uniswap v3 · ${d.input.network}`;
     case 'AAVE': return `${d.operation === 'SUPPLY' ? 'Supply' : d.operation === 'BORROW' ? 'Borrow' : 'Repay'} ${d.input.amount} ${d.input.asset} · Aave V3 · ${d.input.network}`;
     case 'AAVE_WITHDRAW': return `Withdraw ${d.input.amount} ${d.input.asset} · Aave V3 · ${d.input.network}`;
     case 'UNISWAP_LIQUIDITY': return `${pt ? 'Liquidez' : 'Liquidity'} ≤ ${d.input.maxUsdc} USDC + ${d.input.maxWeth} WETH · Uniswap v3 · ${d.input.network}`;
@@ -101,6 +104,13 @@ export function stepSentence(step: WorkflowStep, language: CopilotLanguage): str
     case 'UNISWAP_LIQUIDITY': { const pool = `${d.input.network}, USDC/WETH ${uniswapLiquidityProfileFor(d.input.network).feeTier / 10_000}%`;
       return pt ? `Adiciona liquidez concentrada na Uniswap v3 (${pool}): até ${d.input.maxUsdc} USDC e ${d.input.maxWeth} WETH entre ${d.lowerPrice} e ${d.upperPrice} USDC por WETH, com slippage máximo de ${d.input.slippage} bps.`
       : `Adds concentrated liquidity on Uniswap v3 (${pool}): up to ${d.input.maxUsdc} USDC and ${d.input.maxWeth} WETH between ${d.lowerPrice} and ${d.upperPrice} USDC per WETH, with at most ${d.input.slippage} bps slippage.`; }
+    case 'CATALOG_SWAP': return pt ? `Troca ${d.amount} ${d.from} por ${d.to} na ${d.network} pela Uniswap v3, com slippage máximo de ${d.slippage} bps. Fundos reais.`
+      : `Swaps ${d.amount} ${d.from} for ${d.to} on ${d.network} through Uniswap v3, with at most ${d.slippage} bps slippage. Real funds.`;
+    case 'CATALOG_LIQUIDITY': { const pool = `${d.input.network}, ${d.input.tokenA}/${d.input.tokenB} ${d.input.fee / 10_000}%`;
+      const range = d.fullRange ? (pt ? 'em toda a faixa de preço' : 'across the full price range') : pt ? `entre ${d.lowerPrice} e ${d.upperPrice} ${d.priceUnit.replace(' per ', ' por ')}`
+        : `between ${d.lowerPrice} and ${d.upperPrice} ${d.priceUnit}`;
+      return pt ? `Adiciona liquidez concentrada na Uniswap v3 (${pool}): até ${d.input.amountA} ${d.input.tokenA} e ${d.input.amountB} ${d.input.tokenB} ${range}, com slippage máximo de ${d.input.slippage} bps. Fundos reais.`
+        : `Adds concentrated liquidity on Uniswap v3 (${pool}): up to ${d.input.amountA} ${d.input.tokenA} and ${d.input.amountB} ${d.input.tokenB} ${range}, with at most ${d.input.slippage} bps slippage. Real funds.`; }
     case 'ORCA_LIQUIDITY': return pt ? `Adiciona liquidez concentrada na Orca Whirlpools (Solana Devnet, SOL/devUSDC): até ${d.input.maxSol} SOL e ${d.input.maxDevUsdc} devUSDC entre ${d.lowerPrice} e ${d.upperPrice} devUSDC por SOL, com slippage máximo de ${d.input.slippage} bps.`
       : `Adds concentrated liquidity on Orca Whirlpools (Solana Devnet, SOL/devUSDC): up to ${d.input.maxSol} SOL and ${d.input.maxDevUsdc} devUSDC between ${d.lowerPrice} and ${d.upperPrice} devUSDC per SOL, with at most ${d.input.slippage} bps slippage.`;
     case 'LENDING_COMPOSITION': return d.role === 'SUPPLY' ? (pt ? `Faz supply de ${d.input.supply} USDC na Aave V3 como colateral para ${d.input.owner}.`
@@ -124,11 +134,13 @@ function approvalLine(step: WorkflowStep, pt: boolean): string {
     case 'AAVE_WITHDRAW': return pt ? 'Withdraw: a Review lista cada transação deste passo antes de sua carteira assinar.' : 'Withdraw: Review lists every transaction of this step before your wallet signs.';
     case 'ROUTER': return pt ? `Bridge: um approval exato de ${d.input.token} (nunca ilimitado) para o spender da rota, depois o depósito na ${ROUTER_NETWORK_OPTIONS[d.network].sourceLabel}.`
       : `Bridge: an exact ${d.input.token} approval (never unlimited) to the route's spender, then the deposit on ${ROUTER_NETWORK_OPTIONS[d.network].sourceLabel}.`;
+    case 'CATALOG_SWAP': return pt ? `Swap: só pede approval se a allowance atual de ${d.from} for menor que o valor do swap; depois a transação de swap.`
+      : `Swap: an approval only if your current ${d.from} allowance is below the swap amount, then the swap transaction.`;
     case 'EVM_SWAP': return d.network !== 'Base'
       ? (pt ? `Swap: só pede approval se a allowance atual de ${d.from} for menor que o valor do swap; depois a transação de swap.` : `Swap: an approval only if your current ${d.from} allowance is below the swap amount, then the swap transaction.`)
       : (pt ? 'Swap na Base: a Review mostra cada transação antes de qualquer assinatura.' : 'Base swap: Review shows every transaction before any signature.');
     case 'SOLANA_SWAP': case 'ORCA_LIQUIDITY': return pt ? 'Solana: não há approvals ERC-20; você revisa e assina cada transação exata.' : 'Solana: there are no ERC-20 approvals; you review and sign each exact transaction.';
-    case 'UNISWAP_LIQUIDITY': return pt ? 'Liquidez Uniswap: approvals exatos de cada token, e cada approval e o mint precisam da própria assinatura.' : 'Uniswap liquidity: exact approvals for each token, and each approval and the mint need their own wallet signature.';
+    case 'UNISWAP_LIQUIDITY': case 'CATALOG_LIQUIDITY': return pt ? 'Liquidez Uniswap: approvals exatos de cada token, e cada approval e o mint precisam da própria assinatura.' : 'Uniswap liquidity: exact approvals for each token, and each approval and the mint need their own wallet signature.';
     case 'LENDING_COMPOSITION': return pt ? 'Composição: approval de USDC para o Pool da Aave antes do Supply e approval para o router antes do Swap; cada passo é assinado separadamente.'
       : 'Composition: a USDC approval to the Aave Pool before Supply and an approval to the swap router before Swap; each step is signed separately.';
     case 'TEMPLATE': return pt ? 'Template: nunca executa e não precisa de approval.' : 'Template: never executes and needs no approval.';
