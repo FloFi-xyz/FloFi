@@ -4,7 +4,7 @@ import { selectSettingsTheme } from './settings-fixtures';
 import { installSupplyWallet } from './supply-fixtures';
 
 for (const action of ['swap', 'bridge', 'pool', 'Stocks', 'supply', 'borrow', 'repay', 'withdraw']) {
-  test(`${action} switches both value lines without changing token amounts`, async ({ page }) => {
+  test(`${action} explains the missing USD value on every line, without a USD-first mode or a changed amount`, async ({ page }) => {
     await installSupplyWallet(page);
     await page.goto('/app');
     await page.getByRole('button', { name: action === 'Stocks' ? action : `Add ${action}`, exact: true }).click();
@@ -14,20 +14,14 @@ for (const action of ['swap', 'bridge', 'pool', 'Stocks', 'supply', 'borrow', 'r
     await input.fill('12.5');
     const revision = await page.locator('.summary-bar').getAttribute('data-workflow-revision');
     const inputs = await boxes.locator('input').evaluateAll(elements => elements.map(element => (element as HTMLInputElement).value));
-    // Toggling either box changes the pair together, including read-only destination values.
-    await boxes.last().getByRole('button', { name: 'Show fiat amount first (estimate unavailable)', exact: true }).click();
-    await expect(boxes.locator('.composer-value-line .composer-primary-fiat')).toHaveCount(await boxes.count());
-    await expect(boxes.locator('.composer-value-line input')).toHaveCount(0);
-    await expect(boxes.locator('.composer-token-subline input').first()).toHaveValue('12.5');
-    expect(await boxes.locator('input').evaluateAll(elements => elements.map(element => (element as HTMLInputElement).value))).toEqual(inputs);
-    const hierarchy = await boxes.first().evaluate(element => ({
-      primary: parseFloat(getComputedStyle(element.querySelector('.composer-primary-fiat')!).fontSize),
-      secondary: parseFloat(getComputedStyle(element.querySelector('.composer-token-subline input')!).fontSize),
-    }));
-    expect(hierarchy.primary).toBeGreaterThan(hierarchy.secondary * 1.5);
-    await input.fill('7.25');
-    await boxes.first().getByRole('button', { name: 'Show token amount first', exact: true }).click();
+    // BUILD-FIX-UX-001: no verified USD price applies here (valueless test tokens, or an asset without a verified feed): every line says
+    // so, and the USD-first mode is offered only for a real USD value (see build-fix-ux.spec.ts). Nothing here edits an amount.
+    await expect(boxes.locator('.composer-fiat-value')).toHaveCount(await boxes.count());
+    for (const text of await boxes.locator('.composer-fiat-value').allInnerTexts()) expect(text).toMatch(/^(Test token · no USD value|USD price unavailable|Estimating USD…)$/);
+    await expect(card.getByRole('button', { name: 'Show USD value first', exact: true })).toHaveCount(0);
     await expect(boxes.locator('.composer-primary-fiat, .composer-token-subline')).toHaveCount(0);
+    expect(await boxes.locator('input').evaluateAll(elements => elements.map(element => (element as HTMLInputElement).value))).toEqual(inputs);
+    await input.fill('7.25');
     await expect(boxes.first().locator('.composer-value-line input')).toHaveValue('7.25');
     await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', revision!);
   });

@@ -70,8 +70,7 @@ async function setup(page: Page, request: APIRequestContext, loseAt = 0) {
   await page.getByRole('region', { name: 'Action network picker', exact: true }).getByRole('button', { name: 'Base Sepolia', exact: true }).click();
   await page.getByRole('button', { name: 'Hide token picker', exact: true }).click();
   await card.getByRole('textbox', { name: 'Source amount (USDC)', exact: true }).fill('1');
-  await card.getByRole('button', { name: 'Review amount', exact: true }).click();
-  await card.getByRole('button', { name: 'Apply amount', exact: true }).click();
+  await card.getByRole('textbox', { name: 'Source amount (USDC)', exact: true }).press('Enter');
   await stage(page, 'Simulate');
   await page.getByRole('button', { name: 'Simulate workflow', exact: true }).click();
   await acceptProductReview(page);

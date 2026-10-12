@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { projectReview } from './review-presentation';
+import { currentExecution, isFinalExecutionResult, nothingSubmitted } from './execution-result';
 import type { ExecutionControlsState } from '../state/execution-controls';
 
 /** `processing` (UX-003): simulating or waiting for the wallet; the CTA stays in place as a locked, active button. */
@@ -8,15 +9,18 @@ export type CanvasAction = { kind: 'simulate' | 'approve' | 'execute' | 'continu
 export function projectCanvasAction(props: ExecutionControlsState, controls: {
   requesting: boolean; verifying: boolean; canContinue: boolean; canCheck: boolean;
 }, now = Date.now()): CanvasAction {
-  // A completed saved run remains a result. Editing a new workflow can start
-  // a fresh simulation; an unresolved saved run always retains recovery.
-  const progress = props.progress?.started && !(props.progress.state === 'complete' && !props.progress.planUnavailable && props.progress.matchesWorkflow === false) ? props.progress : null;
+  // A final run remains this workflow's result. A new or edited workflow can start
+  // a fresh simulation; an unresolved run always retains recovery.
+  const progress = currentExecution(props.progress);
   const op = progress?.active?.operations.find(o => !['waiting', 'confirmed'].includes(o.state));
   if (controls.requesting || op?.state === 'wallet') return { kind: 'status', label: 'Waiting for wallet…', disabled: true, processing: true };
   if (controls.verifying) return { kind: 'status', label: 'Reconciling…', disabled: true };
   if (progress) {
     if (controls.canContinue) return { kind: 'continue', label: props.execution.nextLabel ?? 'Continue to wallet', disabled: false };
     if (controls.canCheck) return { kind: 'recover', label: progress.restored || progress.state === 'uncertain' ? 'Recover execution' : props.recovery?.recordOnly ? 'Refresh status' : props.recovery ? 'Check status' : 'Check confirmation', disabled: false };
+    // BUILD-FIX-UX-001: a public swap whose wallet request was declined before submission submitted nothing; starting over needs a fresh
+    // quote, Review and wallet confirmation and cannot repeat anything (its record stays saved).
+    if (props.source.kind === 'public' && nothingSubmitted(progress)) return { kind: 'simulate', label: 'Simulate again', disabled: Boolean(props.invalidWorkflow || props.source.state.busy) };
     // A confirmed prefix can need a fresh quote/Review before its still-unattempted suffix.
     // Never offer simulation as a retry for an unresolved submitted operation.
     const unresolved = progress.steps.some(step => step.operations.some(operation => !['waiting', 'confirmed', 'cancelled'].includes(operation.state)));
@@ -25,7 +29,7 @@ export function projectCanvasAction(props: ExecutionControlsState, controls: {
       if (review.canApprove) return { kind: 'approve', label: 'Approve & Continue', disabled: false };
       if (review.status !== 'approved') return { kind: 'simulate', label: 'Simulate again', disabled: Boolean(props.invalidWorkflow) };
     }
-    return { kind: 'status', label: progress.state === 'complete' ? 'Execution completed' : progress.state === 'uncertain' || progress.restored ? 'Recover execution' : progress.busy ? 'Reconciling…' : progress.label, disabled: true };
+    return { kind: 'status', label: progress.state === 'complete' ? 'Execution completed' : progress.state === 'uncertain' || progress.restored && !isFinalExecutionResult(progress) ? 'Recover execution' : progress.busy ? 'Reconciling…' : progress.label, disabled: true };
   }
   if (props.source.state.busy) return { kind: 'status', label: 'Simulating workflow…', disabled: true, processing: true };
   const review = projectReview(props.workflow, props.context, props.source, props.authorization, props.wallet, now, props.invalidWorkflow);

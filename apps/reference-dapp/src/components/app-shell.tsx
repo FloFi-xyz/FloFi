@@ -42,6 +42,7 @@ import { ExecuteWorkspace } from './execute-workspace';
 import { useExecutionLifecycle } from '../state/execution-lifecycle';
 import { useExecutionStart } from '../state/execution-start';
 import { restoredLocalExecutionKind } from '../domain/execution-recovery';
+import { currentExecution } from '../domain/execution-result';
 import { ReviewAuthorizationDetails } from './review-workspace';
 import { useReviewAuthorization } from '../state/review-authorization';
 import { SummaryBar } from './summary-bar';
@@ -243,7 +244,9 @@ function AppShellContent({ engineering = false, pathname, navigate, simulationRe
   if (restorationEpoch > 0 && (restoredBinding.epoch !== restorationEpoch || restoredBinding.key === reviewBinding.authorization.key))
     simulationSource = { ...simulationSource, state: { ...simulationSource.state, retired: true } } as SimulationSource;
   const executionProgress = useExecutionLifecycle(simulationSource.kind, reviewBinding.wallet);
-  const executionStart = useExecutionStart(simulationSource.kind, reviewBinding.wallet);
+  const recordedStart = useExecutionStart(simulationSource.kind, reviewBinding.wallet);
+  // BUILD-FIX-UX-001: a final run of another (new or edited) workflow has not started this workflow's execution; its record is unchanged.
+  const executionStart = executionProgress.started && !currentExecution(executionProgress) ? { ...recordedStart, started: false } : recordedStart;
   function openSimulationControls() {
     const details = document.querySelector<HTMLDetailsElement>('.simulation-technical');
     if (details) { details.open = true; details.scrollIntoView({ block: 'start' }); details.querySelector<HTMLElement>('summary')?.focus(); }

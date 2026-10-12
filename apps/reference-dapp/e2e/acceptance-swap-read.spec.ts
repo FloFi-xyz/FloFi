@@ -20,8 +20,7 @@ for (const [network, chain] of [['Base Sepolia', '0x14a34'], ['Ethereum Sepolia'
     await page.getByRole('region', { name: 'Action network picker', exact: true }).getByRole('button', { name: network, exact: true }).click();
     await page.getByRole('button', { name: 'Hide token picker', exact: true }).click();
     await card.getByRole('textbox', { name: 'Source amount (USDC)', exact: true }).fill('1');
-    await card.getByRole('button', { name: 'Review amount', exact: true }).click();
-    await card.getByRole('button', { name: 'Apply amount', exact: true }).click();
+    await card.getByRole('textbox', { name: 'Source amount (USDC)', exact: true }).press('Enter');
     await expect(card.locator('.composer-destination-box')).toContainText('0.0005');
     await expect(card).toContainText('Approximate · Uniswap V3 · Simulate before review');
     await expect.poll(() => workflows.length).toBeGreaterThan(0);

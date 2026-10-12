@@ -21,11 +21,17 @@ for (const action of ['swap', 'pool', 'supply', 'borrow', 'repay', 'withdraw']) 
   for (const unsupported of ['Base', 'Arbitrum', 'Arbitrum Sepolia', 'Solana']) await expect(networks.getByRole('button', { name: unsupported, exact: true })).toHaveCount(0);
   if (action === 'swap' || action === 'pool') {
     if (action === 'pool') await card.getByRole('textbox').nth(1).fill('0.01');
-    const review = card.getByRole('button', { name: action === 'swap' ? 'Review amount' : 'Review', exact: true });
-    const apply = card.getByRole('button', { name: action === 'swap' ? 'Apply amount' : 'Apply', exact: true });
-    await review.click(); await expect(apply).toBeEnabled();
+    const review = card.getByRole('button', { name: 'Review', exact: true }), apply = card.getByRole('button', { name: 'Apply', exact: true });
+    const revision = page.locator('.summary-bar');
+    // BUILD-FIX-UX-001: a swap applies its whole draft (amount, network and tokens together) on Enter; the Pool card keeps its Review/Apply.
+    const applyDraft = async () => {
+      if (action === 'swap') await card.getByRole('textbox').first().press('Enter');
+      else { await review.click(); await expect(apply).toBeEnabled(); await apply.click(); }
+    };
+    if (action === 'pool') { await review.click(); await expect(apply).toBeEnabled(); }
     await networks.getByRole('button', { name: 'Solana Devnet', exact: true }).click();
-    await expect(apply).toBeDisabled();
+    if (action === 'pool') await expect(apply).toBeDisabled();
+    await expect(revision).toHaveAttribute('data-workflow-revision', '0');
     await expect(card.getByRole('button', { name: 'Select source token', exact: true })).toHaveAttribute('title', 'SOL on Solana Devnet');
     await expect(card.getByRole('button', { name: 'Select destination token', exact: true })).toHaveAttribute('title', 'devUSDC on Solana Devnet');
     await expect(card.getByRole('textbox').first()).toHaveValue('2.5');
@@ -41,17 +47,19 @@ for (const action of ['swap', 'pool', 'supply', 'borrow', 'repay', 'withdraw']) 
     await expect(card.getByRole('button', { name: 'Select destination token', exact: true })).toHaveAttribute('title', 'WETH on Base Sepolia');
     await destination.getByRole('button', { name: 'Solana Devnet', exact: true }).click();
     await destination.getByRole('button', { name: 'Hide token picker', exact: true }).click();
-    await review.click(); await expect(apply).toBeEnabled(); await apply.click();
-    await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '1');
+    await expect(revision).toHaveAttribute('data-workflow-revision', '0');
+    await applyDraft();
+    await expect(revision).toHaveAttribute('data-workflow-revision', '1');
     await expect(card.getByRole('button', { name: 'Select source token', exact: true })).toHaveAttribute('title', 'SOL on Solana Devnet');
     await expect(card.getByRole('button', { name: 'Select destination token', exact: true })).toHaveAttribute('title', 'devUSDC on Solana Devnet');
     // The same invariant holds when editing an already-authored action.
     await card.getByRole('button', { name: 'Select source token', exact: true }).click();
     await page.getByRole('region', { name: 'Source asset picker', exact: true }).getByRole('button', { name: 'Base Sepolia', exact: true }).click();
     await page.getByRole('region', { name: 'Source asset picker', exact: true }).getByRole('button', { name: 'Hide token picker', exact: true }).click();
-    await expect(apply).toBeDisabled();
-    await review.click(); await expect(apply).toBeEnabled(); await apply.click();
-    await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '2');
+    if (action === 'pool') await expect(apply).toBeDisabled();
+    await expect(revision).toHaveAttribute('data-workflow-revision', '1');
+    await applyDraft();
+    await expect(revision).toHaveAttribute('data-workflow-revision', '2');
     await expect(card.getByRole('button', { name: 'Select source token', exact: true })).toHaveAttribute('title', 'USDC on Base Sepolia');
     await expect(card.getByRole('button', { name: 'Select destination token', exact: true })).toHaveAttribute('title', 'WETH on Base Sepolia');
   } else {
@@ -94,5 +102,8 @@ for (const theme of ['Light', 'Dark']) test(`${theme} Swap shares live environme
   await setSupplyWalletChain(page, '0x999999');
   await expect(page.getByRole('combobox', { name: 'Environment', exact: true })).toHaveText('Network');
   await expect(page.getByRole('region', { name: 'Action network picker', exact: true }).getByRole('button')).toHaveCount(0);
-  await expect(card.getByRole('button', { name: 'Review amount', exact: true })).toBeDisabled();
+  // BUILD-FIX-UX-001: with no network available for the connected wallet, Enter explains why nothing applies.
+  await card.getByRole('textbox').first().press('Enter');
+  await expect(card.getByRole('alert')).toContainText('Choose a network available for the connected wallet.');
+  await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '0');
 });

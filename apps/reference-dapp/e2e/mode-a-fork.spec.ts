@@ -82,9 +82,8 @@ test('a semantic edit retires the reviewed fork action and no wallet request is 
   await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Build', exact: true }).click();
   await page.locator('.flow-card').nth(1).click();
   await page.locator('.inspector').getByLabel('Slippage (bps)', { exact: true }).fill('50');
-  await page.getByRole('button', { name: 'Review slippage change' }).click();
-  await expect(page.getByText('Review proposed edit')).toBeVisible();
-  await page.getByRole('button', { name: 'Apply proposal' }).click();
+  // BUILD-FIX-UX-001: a slippage edit applies directly — still a new semantic revision that retires the reviewed fork action.
+  await page.getByRole('button', { name: 'Apply slippage', exact: true }).click();
   await expect(page.locator('.summary-bar[data-workflow-revision="2"]')).toBeVisible();
   await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Simulate', exact: true }).click();
   await openTechnicalDetails(page);

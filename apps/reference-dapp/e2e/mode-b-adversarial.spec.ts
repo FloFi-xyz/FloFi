@@ -55,8 +55,8 @@ test('semantic revision change retires the reviewed installation', async ({ page
   await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Build', exact: true }).click();
   await page.locator('.flow-card').nth(1).click();
   await page.locator('.inspector').getByLabel('Slippage (bps)', { exact: true }).fill('50');
-  await page.getByRole('button', { name: 'Review slippage change' }).click();
-  await page.getByRole('button', { name: 'Apply proposal' }).click();
+  // BUILD-FIX-UX-001: a slippage edit applies directly — still a new semantic revision that retires the finite authority.
+  await page.getByRole('button', { name: 'Apply slippage', exact: true }).click();
   await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Execute', exact: true }).click();
   const retired = page.getByRole('region', { name: 'Finite Mode B authority' });
   await expect(retired).toContainText('Semantic revision changed');

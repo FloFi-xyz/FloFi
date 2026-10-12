@@ -142,7 +142,9 @@ describe('corrected Build workspace presentation', () => {
     expect(canvas.match(/class="numeric composer-amount-box/g)).toHaveLength(1);
     expect(canvas).toContain('class="composer-token-chip"');
     expect(canvas).toContain('aria-label="Base Sepolia network"');
-    expect(canvas).toContain('USD value unavailable');
+    // BUILD-FIX-UX-001: Base Sepolia test tokens have no market value; the card says so instead of a placeholder.
+    expect(canvas).toContain('Test token · no USD value');
+    expect(canvas).not.toContain('USD value unavailable');
     expect(canvas).not.toMatch(/composer-destination-box|composer-value-arrow/);
     expect(canvas).not.toContain('Liquidity range view');
     expect(canvas).toMatch(/aria-label="Source amount \(USDC\)"[^>]*value="1"/);

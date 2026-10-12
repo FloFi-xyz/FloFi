@@ -91,11 +91,10 @@ for (const action of ['swap', 'bridge'] as const) test(`${action} has quiet edit
     const cardBox = (await card.boundingBox())!, footerBox = (await card.locator('.composer-selected').boundingBox())!;
     expect(footerBox.y).toBeGreaterThan(bottomBox.y + bottomBox.height);
     expect(footerBox.y + footerBox.height).toBeLessThan(cardBox.y + cardBox.height);
-    await fiat.click();
+    // BUILD-FIX-UX-001: test tokens have no USD value; the line says so and no USD-first mode is offered for a missing value.
+    await expect(fiat).toHaveText('Test token · no USD value');
+    await expect(card.getByRole('button', { name: 'Show USD value first', exact: true })).toHaveCount(0);
     await checkTokenPills(card);
-    const primaryFiat = card.locator('.composer-amount .composer-primary-fiat');
-    expect(await primaryFiat.evaluate(element => parseFloat(getComputedStyle(element).letterSpacing) / parseFloat(getComputedStyle(element).fontSize))).toBeCloseTo(-.05);
-    await primaryFiat.click();
     await card.locator('.composer-action-title').click();
     await expect(card).toHaveClass(/active/); await expect(toggle).toHaveAttribute('aria-expanded', 'false');
     await source.click();
@@ -108,9 +107,11 @@ for (const action of ['swap', 'bridge'] as const) test(`${action} has quiet edit
     expect(await source.evaluate(element => getComputedStyle(element).color)).toBe(await card.locator('.composer-amount-box').first().evaluate(element => getComputedStyle(element).borderTopColor));
     expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
   }
-  await card.getByRole('button', { name: 'Review amount', exact: true }).click();
+  // BUILD-FIX-UX-001: Enter applies a valid amount; an invalid one is refused with a visible inline message (no longer screen-reader only).
+  await source.press('Enter');
   await expect(card.getByRole('alert')).toContainText('greater than 0');
-  expect(await card.getByRole('alert').evaluate(element => getComputedStyle(element).clipPath)).toBe('inset(50%)');
+  await expect(card.getByRole('alert')).toBeVisible();
+  expect(await card.getByRole('alert').evaluate(element => getComputedStyle(element).clipPath)).not.toBe('inset(50%)');
   await expect(toggle).toHaveAttribute('aria-expanded', 'false');
   await expect(page.getByRole('button', { name: 'Simulate workflow', exact: true })).toBeDisabled();
   await openCanvasSettings(page);
@@ -129,7 +130,7 @@ for (const action of ['swap', 'bridge'] as const) test(`${action} has quiet edit
   await expect(panel.getByLabel(action === 'swap' ? 'Input amount (USDC)' : 'Cross-chain amount (USDC)', { exact: true })).toHaveValue('2.5');
 });
 
-for (const action of ['swap', 'bridge'] as const) test(`${action} shares one fiat/token display mode across both value boxes without changing amounts`, async ({ page }) => {
+for (const action of ['swap', 'bridge'] as const) test(`${action} shows why there is no USD value on test tokens, in both boxes, without changing amounts`, async ({ page }) => {
   await installSupplyWallet(page); await page.goto('/app');
   await page.getByRole('button', { name: `Add ${action}`, exact: true }).click();
   await configureCanvasAction(page, '2.5');
@@ -137,40 +138,17 @@ for (const action of ['swap', 'bridge'] as const) test(`${action} shares one fia
   const source = card.locator('.composer-amount'), destination = card.locator('.composer-destination-box');
   const sourceInput = source.getByRole('textbox', { name: 'Source amount (USDC)', exact: true });
   const revision = page.locator('.summary-bar');
-  const destinationToken = action === 'swap' ? 'WETH' : 'USDC';
-  async function expectTokenPrimary() {
-    await expect(sourceInput).toHaveValue('2.5'); await expect(sourceInput).toHaveClass(/composer-amount-value/);
-    await expect(destination.locator('.composer-amount-value')).toHaveText('0');
-    await expect(card.locator('.composer-primary-fiat, .composer-token-subline')).toHaveCount(0);
-    await expect(card.getByRole('button', { name: 'Show fiat amount first (estimate unavailable)', exact: true })).toHaveCount(2);
-    await expect(revision).toHaveAttribute('data-workflow-revision', '1');
-  }
-  async function expectFiatPrimary() {
-    await expect(card.locator('.composer-primary-fiat')).toHaveText(['USD value unavailable', 'USD value unavailable']);
-    await expect(source.locator('.composer-token-subline input')).toHaveValue('2.5');
-    await expect(source.locator('.composer-token-subline > span')).toHaveText('USDC');
-    await expect(destination.locator('.composer-token-subline')).toHaveText(`0 ${destinationToken}`);
-    await expect(card.getByRole('button', { name: 'Show fiat amount first (estimate unavailable)', exact: true })).toHaveCount(0);
-    await expect(revision).toHaveAttribute('data-workflow-revision', '1');
-  }
+  // BUILD-FIX-UX-001: no fabricated price: valueless test tokens say so; the USD-first mode exists only for a verified USD value
+  // (covered with a mainnet estimate in build-fix-ux.spec.ts).
   for (const width of [1440, 390, 320]) {
     await page.setViewportSize({ width, height: 900 });
-    await expectTokenPrimary(); await checkTokenPills(card);
-    // Either box controls both; mouse and keyboard return paths remain accessible.
-    for (const box of [source, destination]) {
-      await box.getByRole('button', { name: 'Show fiat amount first (estimate unavailable)', exact: true }).click();
-      await expectFiatPrimary(); await checkTokenPills(card);
-      const subInput = source.locator('.composer-token-subline input');
-      const inputBox = (await subInput.boundingBox())!, symbolBox = (await source.locator('.composer-token-subline > span').boundingBox())!;
-      const scale = inputBox.height / await subInput.evaluate(element => parseFloat(getComputedStyle(element).height));
-      expect(inputBox.width / scale).toBeLessThan(20);
-      expect((symbolBox.x - inputBox.x - inputBox.width) / scale).toBeCloseTo(3, 1);
-      await box.getByRole('button', { name: 'Show token amount first', exact: true }).press('Enter');
-      await expectTokenPrimary();
-      await box.getByRole('button', { name: 'Show fiat amount first (estimate unavailable)', exact: true }).press('Space');
-      await expectFiatPrimary();
-      await box.locator('.composer-primary-fiat').click(); await expectTokenPrimary();
-    }
+    await expect(sourceInput).toHaveValue('2.5'); await expect(sourceInput).toHaveClass(/composer-amount-value/);
+    await expect(destination.locator('.composer-amount-value')).toHaveText('0');
+    await expect(card.locator('.composer-fiat-value')).toHaveText(['Test token · no USD value', 'Test token · no USD value']);
+    await expect(card.locator('.composer-primary-fiat, .composer-token-subline')).toHaveCount(0);
+    await expect(card.getByRole('button', { name: /Show (USD value|token amount) first/ })).toHaveCount(0);
+    await expect(revision).toHaveAttribute('data-workflow-revision', '1');
+    await checkTokenPills(card);
     await expect(card.locator('.composer-quote-note')).toHaveText('Estimate unavailable');
     expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
   }
@@ -197,7 +175,7 @@ for (const action of ['borrow', 'repay', 'withdraw'] as const) test(`${action} u
   const apply = card.getByRole('button', { name: 'Apply proposal', exact: true });
   await expect(inline).toHaveValue('0');
   await expect(review).toBeVisible(); await expect(apply).toHaveCount(0);
-  await expect(block.locator('.composer-fiat-value')).toHaveText('USD value unavailable');
+  await expect(block.locator('.composer-fiat-value')).toHaveText('Test token · no USD value');
   await expect(block.locator('.composer-amount-token')).toHaveText('USDC');
   await expect(card.locator('form, .composer-destination-box, .composer-value-arrow')).toHaveCount(0);
   for (const width of [1440, 390, 320]) {
@@ -317,7 +295,7 @@ test('Supply edits inline with one shared editor value and validates through its
     const valueBox = (await value.boundingBox())!, tokenBox = (await token.boundingBox())!, blockBox = (await block.boundingBox())!;
     expect(valueBox.x + valueBox.width).toBeLessThan(tokenBox.x);
     expect(tokenBox.x + tokenBox.width).toBeLessThan(blockBox.x + blockBox.width);
-    await expect(block.locator('.composer-fiat-value')).toHaveText('USD value unavailable');
+    await expect(block.locator('.composer-fiat-value')).toHaveText('Test token · no USD value');
     const footerBox = (await card.locator('.composer-selected').boundingBox())!;
     expect(footerBox.y).toBeGreaterThan(blockBox.y + blockBox.height);
     expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
@@ -489,17 +467,12 @@ test('Pool uses two real liquidity asset blocks with the shared display mode and
     const top = (await first.boundingBox())!, bottom = (await second.boundingBox())!;
     const scale = top.height / await first.evaluate(element => parseFloat(getComputedStyle(element).height));
     expect((bottom.y - top.y - top.height) / scale).toBeCloseTo(8, 1);
-    for (const box of [first, second]) {
-      await box.getByRole('button', { name: 'Show fiat amount first (estimate unavailable)', exact: true }).click();
-      await expect(boxes.locator('.composer-primary-fiat')).toHaveText(['USD value unavailable', 'USD value unavailable']);
-      await expect(boxes.locator('.composer-token-subline input').first()).toHaveValue('1');
-      await expect(boxes.locator('.composer-token-subline input').last()).toHaveValue('0.0001');
-      await expect(boxes.locator('.composer-token-subline > span')).toHaveText(['USDC', 'WETH']);
-      await checkTokenPills(card);
-      await box.getByRole('button', { name: 'Show token amount first', exact: true }).press('Enter');
-      await expect(boxes.locator('.composer-amount-value').first()).toHaveValue('1');
-      await expect(boxes.locator('.composer-amount-value').last()).toHaveValue('0.0001');
-    }
+    // BUILD-FIX-UX-001: Base Sepolia test tokens have no USD value; both contributions say so and keep their token amounts primary.
+    await expect(boxes.locator('.composer-fiat-value')).toHaveText(['Test token · no USD value', 'Test token · no USD value']);
+    await expect(boxes.getByRole('button', { name: 'Show USD value first', exact: true })).toHaveCount(0);
+    await expect(boxes.locator('.composer-amount-value').first()).toHaveValue('1');
+    await expect(boxes.locator('.composer-amount-value').last()).toHaveValue('0.0001');
+    await checkTokenPills(card);
     await expect(revision).toHaveAttribute('data-workflow-revision', '1');
     expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
   }

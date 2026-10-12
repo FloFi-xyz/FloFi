@@ -27,7 +27,7 @@ for (const action of ['swap', 'bridge'] as const) test(`${action} starts unconfi
   const source = card(page).getByRole('textbox', { name: 'Source amount (USDC)', exact: true });
   await expect(source).toHaveValue('0');
   await expect(card(page).locator('.composer-destination-box .composer-amount-value')).toHaveText('—');
-  await expect(card(page).locator('.composer-fiat-value')).toHaveText(['USD value unavailable', 'USD value unavailable']);
+  await expect(card(page).locator('.composer-fiat-value')).toHaveText(['Test token · no USD value', 'Test token · no USD value']);
   await expect(card(page).locator('.composer-network-badge')).toHaveCount(2);
   expect(await card(page).innerText()).not.toMatch(/pending|unapplied|canonical|committed|draft/i);
   await expectBlocked(page);
@@ -38,33 +38,24 @@ for (const action of ['swap', 'bridge'] as const) test(`${action} starts unconfi
   await openCanvasSettings(page);
   const amountForm = page.getByRole('form', { name: `Configure ${action === 'swap' ? 'Swap' : 'Bridge'}`, exact: true });
   await expect(amountForm.getByLabel('Source amount (USDC)', { exact: true })).toHaveValue('0');
-  // Display priority never edits the amount or invents a quote.
-  await card(page).locator('.composer-amount').getByRole('button', { name: 'Show fiat amount first (estimate unavailable)', exact: true }).click();
-  await expect(card(page).locator('.composer-primary-fiat')).toHaveText(['USD value unavailable', 'USD value unavailable']);
-  await expect(card(page).locator('.composer-amount .composer-primary-fiat')).toHaveText('USD value unavailable');
-  await expect(source).toHaveValue('0');
-  await card(page).locator('.composer-amount').getByRole('button', { name: 'Show token amount first', exact: true }).click();
-  const destination = card(page).locator('.composer-destination-box');
-  await destination.getByRole('button', { name: 'Show fiat amount first (estimate unavailable)', exact: true }).click();
-  await expect(card(page).locator('.composer-primary-fiat')).toHaveText(['USD value unavailable', 'USD value unavailable']);
-  await expect(destination.locator('.composer-primary-fiat')).toHaveText('USD value unavailable');
-  await expect(destination.locator('.composer-token-subline')).toHaveText(action === 'swap' ? '— WETH' : '— USDC');
-  await destination.getByRole('button', { name: 'Show token amount first', exact: true }).click();
+  // BUILD-FIX-UX-001: test tokens have no USD value, so no USD-first mode is offered; display never edits the amount or invents a quote.
+  await expect(card(page).getByRole('button', { name: 'Show USD value first', exact: true })).toHaveCount(0);
   await expect(card(page).locator('.composer-primary-fiat')).toHaveCount(0);
+  await expect(source).toHaveValue('0');
+  const destination = card(page).locator('.composer-destination-box');
   await expect(destination.locator('.composer-amount-value')).toHaveText('—');
   await expect(card(page).locator('.composer-network-badge').first()).toHaveAttribute('aria-label', 'Base Sepolia network');
   await expect(card(page).locator('.composer-network-badge').last()).toHaveAttribute('aria-label', action === 'swap' ? 'Base Sepolia network' : 'Arbitrum Sepolia network');
-  await card(page).getByRole('button', { name: 'Review amount', exact: true }).click();
+  await source.press('Enter');
   await expect(card(page).getByRole('alert')).toContainText('greater than 0');
   expect(await readWorkflow(page)).toEqual(initial);
   await source.fill(''); await expectBlocked(page);
   await source.fill('2.5');
   await expect(amountForm.getByLabel('Source amount (USDC)', { exact: true })).toHaveValue('2.5');
+  // A typed amount is a draft: the workflow is unchanged and later stages stay blocked until Enter applies it.
   await expectBlocked(page);
-  await card(page).getByRole('button', { name: 'Review amount', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Apply amount', exact: true })).toBeEnabled();
   expect(await readWorkflow(page)).toEqual(initial);
-  await page.getByRole('button', { name: 'Apply amount', exact: true }).click();
+  await source.press('Enter');
   if (action === 'swap') {
     const configured = await readWorkflow(page), node = configured!.nodes.find(item => !item.actionType.startsWith('mock-'))!;
     expect(node.actionType).toBe('asset.swap.exact-input');
@@ -94,8 +85,9 @@ test('clearing an existing amount blocks both later stages without sending zero 
   await expect(page.getByRole('region', { name: 'Action inspector' }).locator('.composer-editor-context')).toContainText('0 USDC');
   await expect(page.getByRole('region', { name: 'Action inspector' }).getByLabel('Input amount (USDC)', { exact: true })).toHaveValue('0');
   expect(await readWorkflow(page)).toEqual(original);
-  await card(page).getByRole('button', { name: 'Review amount', exact: true }).click();
+  await source.press('Enter');
   await expect(card(page).getByRole('alert')).toContainText('greater than 0');
+  expect(await readWorkflow(page)).toEqual(original);
   await card(page).getByRole('button', { name: 'Cancel', exact: true }).click();
   await expect(source).toHaveValue('2');
   // Authoring enables stage inspection; this supply-only harness cannot simulate Swap/Router.
@@ -104,22 +96,21 @@ test('clearing an existing amount blocks both later stages without sending zero 
   expect(await readWorkflow(page)).toEqual(original);
 });
 
-test('changing the field after reviewing invalidates acceptance, and delete/history restores an incomplete card safely', async ({ page }) => {
+test('an unapplied amount can be corrected freely, and delete/history restores an incomplete card safely', async ({ page }) => {
   await installSupplyWallet(page); await page.goto('/app');
   await page.getByRole('button', { name: 'Add bridge', exact: true }).click();
   const source = card(page).getByRole('textbox', { name: 'Source amount (USDC)', exact: true });
-  await source.fill('2'); await card(page).getByRole('button', { name: 'Review amount', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Apply amount', exact: true })).toBeVisible();
-  await source.fill('0');
-  await expect(page.getByRole('button', { name: 'Apply amount', exact: true })).toBeDisabled();
-  await source.fill('2'); await card(page).getByRole('button', { name: 'Review amount', exact: true }).click();
+  await source.fill('2'); await source.fill('0');
+  await source.press('Enter');
+  await expect(card(page).getByRole('alert')).toContainText('greater than 0');
+  expect(await readWorkflow(page)).toBeNull();
+  // Focus moving to the toolbar never applies an invalid draft; Undo then removes the incomplete card.
   await page.getByRole('button', { name: 'Undo', exact: true }).click();
   await expect(card(page)).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Apply amount', exact: true })).toHaveCount(0);
+  expect(await readWorkflow(page)).toBeNull();
   await page.getByRole('button', { name: 'Redo', exact: true }).click();
-  await expect(source).toHaveValue('2');
-  await expect(page.getByRole('button', { name: 'Apply amount', exact: true })).toBeDisabled();
-  await source.fill('0');
+  await expect(source).toHaveValue('0');
+  await expect(card(page).locator('.composer-amount-hint')).toHaveText('Press Enter to apply');
   await expectBlocked(page);
   await page.getByRole('button', { name: 'Delete', exact: true }).click();
   await expect(card(page)).toHaveCount(0);
@@ -138,9 +129,8 @@ test('a new isolated Bridge cannot replace an already-configured workflow throug
   await expect(card(page)).toHaveCount(2);
   const bridge = card(page).last();
   await bridge.getByRole('textbox', { name: 'Source amount (USDC)', exact: true }).fill('3');
-  await bridge.getByRole('button', { name: 'Review amount', exact: true }).click();
+  await bridge.getByRole('textbox', { name: 'Source amount (USDC)', exact: true }).press('Enter');
   await expect(bridge.getByRole('alert')).toContainText('use a separate workflow');
-  await expect(page.getByRole('button', { name: 'Apply amount', exact: true })).toBeDisabled();
   await expectBlocked(page);
   expect(await readWorkflow(page)).toEqual(original);
   await page.getByRole('button', { name: 'Delete', exact: true }).click();
