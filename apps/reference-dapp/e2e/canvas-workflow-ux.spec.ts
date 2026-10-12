@@ -42,7 +42,7 @@ async function connect(page: Page, source: string, target: string) {
   await expect.poll(async () => (await ir(page)).nodes.find(n => n.nodeId === target)?.dependencies).toContain(source);
 }
 
-for (const width of [1440, 1536, 1920]) test(`UX-008 all desktop toolbar controls fit at ${width}px`, async ({ page, networkGuard }) => {
+for (const width of [1440, 1536, 1920]) test(`UX-008 all desktop toolbar controls fit at ${width}px`, async ({ page, networkGuard }, testInfo) => {
   await page.setViewportSize({ width, height: 1080 }); await open(page);
   const toolbar = page.getByRole('toolbar', { name: 'Canvas tools' });
   const geometry = await toolbar.evaluate(element => {
@@ -62,6 +62,36 @@ for (const width of [1440, 1536, 1920]) test(`UX-008 all desktop toolbar control
   }
   expect(geometry.scroll).toBeLessThanOrEqual(1);
   expect(await toolbar.locator('.canvas-primary-tools').evaluate(e => e.scrollWidth - e.clientWidth)).toBeLessThanOrEqual(1);
+  // Compare the former left-packed layout with distribution in the action region only.
+  const distribution = await toolbar.evaluate(element => {
+    const actions = element.querySelector<HTMLElement>('.canvas-primary-tools')!;
+    const measure = () => {
+      const bounds = actions.getBoundingClientRect();
+      const buttons = [...actions.querySelectorAll('button')].map(button => {
+        const r = button.getBoundingClientRect(); return { x: r.x, right: r.right, width: r.width, height: r.height };
+      });
+      const controls = [...element.querySelectorAll('.canvas-utility-tools button'), element.parentElement!.querySelector('.revision')!]
+        .map(control => { const r = control.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; });
+      return { left: bounds.left, right: bounds.right, buttons, controls };
+    };
+    const distributed = measure();
+    actions.style.justifyContent = 'flex-start';
+    const packed = measure();
+    actions.style.removeProperty('justify-content');
+    return { distributed, packed };
+  });
+  const { distributed, packed } = distribution;
+  expect(distributed.controls).toEqual(packed.controls);
+  expect(distributed.buttons.map(b => [b.width, b.height])).toEqual(packed.buttons.map(b => [b.width, b.height]));
+  expect(distributed.buttons).toHaveLength(11);
+  expect(geometry.buttons.slice(0, 11).map(b => b.text)).toEqual(labels.slice(0, 11));
+  const gaps = distributed.buttons.slice(1).map((button, index) => button.x - distributed.buttons[index]!.right);
+  expect(Math.max(...gaps) - Math.min(...gaps)).toBeLessThanOrEqual(1);
+  expect(distributed.buttons[0]!.x).toBeCloseTo(distributed.left, 0);
+  expect(distributed.buttons.at(-1)!.right).toBeCloseTo(distributed.right, 0);
+  expect(packed.right - packed.buttons.at(-1)!.right).toBeGreaterThan(1);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(1);
+  await testInfo.attach(`toolbar-distribution-${width}px`, { body: await toolbar.screenshot(), contentType: 'image/png' });
   // Privacy is the existing unavailable action; fit does not enable an unimplemented financial capability.
   await expect(toolbar.getByRole('button', { name: 'Privacy', exact: true })).toBeDisabled();
   await toolbar.getByRole('button', { name: 'Add swap', exact: true }).click(); await expect(cards(page)).toHaveCount(1);

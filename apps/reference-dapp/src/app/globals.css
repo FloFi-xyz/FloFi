@@ -626,7 +626,7 @@
 /* UX-008: intrinsic desktop controls, no clipped creation group or scrolling. */
 @media(min-width:1101px){
   .canvas-toolbar-row{gap:3px}
-  .canvas-toolbar-row .canvas-primary-tools{flex:1 0 auto;gap:0;padding-inline:0;overflow:visible}
+  .canvas-toolbar-row .canvas-primary-tools{flex:1 0 auto;justify-content:space-between;gap:0;padding-inline:0;overflow:visible}
   .canvas-toolbar-row .canvas-utility-tools{gap:1px;padding-inline:0}
   .canvas-toolbar-row .canvas-toolbox button{padding-inline:1px;gap:2px}
   .canvas-toolbar-row .canvas-toolbox button svg{width:16px;height:16px}
