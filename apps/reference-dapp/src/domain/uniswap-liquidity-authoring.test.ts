@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from 'vitest';
 import { baseAssetRegistry, referenceRegistry, UNISWAP_V3_BASE_SEPOLIA_LIQUIDITY as profile } from '@defi-workflow-engine/action-registry';
-import { createReviewContext } from '@defi-workflow-engine/reference-linter';
+import { createReviewContext, validateAuthoringWorkflow } from '@defi-workflow-engine/reference-linter';
 import { sqrtRatioAtTick } from '@defi-workflow-engine/reference-compiler';
 import { readConcentratedLiquidity } from '@defi-workflow-engine/workflow-contracts';
 import { commandIsValid, parseLocalCommand, summarize } from './commands';
@@ -62,7 +62,9 @@ describe('Base Sepolia Uniswap v3 liquidity chat/canvas authoring', () => {
     expect(commandIsValid({ type: 'ADD_UNISWAP_LIQUIDITY', input: canvas, source: 'CANVAS', baseRevision: 0 })).toBe(true);
     expect(commandIsValid({ type: 'ADD_UNISWAP_LIQUIDITY', input: { ...canvas, recipient: '0x1111111111111111111111111111111111111111' }, source: 'CANVAS', baseRevision: 0 })).toBe(false);
     const withSwap = editorReducer(initialEditor(), { type: 'ADD_TESTNET_SWAP', direction: 'USDC_TO_WETH', amount: '2', slippage: '50', source: 'CANVAS', baseRevision: 0 }, context);
-    expect(editorReducer(withSwap, { type: 'ADD_UNISWAP_LIQUIDITY', input: canvas, source: 'CANVAS', baseRevision: withSwap.workflow.revision }, context).error).toMatch(/ISOLATED_ONLY/);
+    const composed = editorReducer(withSwap, { type: 'ADD_UNISWAP_LIQUIDITY', input: canvas, source: 'CANVAS', baseRevision: withSwap.workflow.revision }, context);
+    expect(composed.error).toBeNull(); expect(composed.workflow.nodes.filter(n => !n.actionType.startsWith('mock-'))).toHaveLength(2);
+    expect(() => validateAuthoringWorkflow(composed.workflow, context)).toThrow();
   });
   it('leaves the BUILD-006 fork authoring bytes and the Base mainnet token order unchanged', () => {
     const evm = createLiquidityNode('node-002', { weth: '0.1', usdc: '200', minimumWeth: '0', minimumUsdc: '0', tickLower: '-100', tickUpper: '100',

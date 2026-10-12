@@ -28,8 +28,9 @@ export function deletableCanvasNodes(workflow: Workflow, selectedIds: readonly s
 export function canDeleteCanvasEdge(workflow: Workflow, from: string, to: string): boolean {
   const source = workflow.nodes.find(node => node.nodeId === from);
   const target = workflow.nodes.find(node => node.nodeId === to);
-  return Boolean(source && target && workflow.resourceEdges.some(edge => edge.fromNodeId === from && edge.toNodeId === to)
-    && source.actionType.startsWith('mock-') && target.actionType.startsWith('mock-'));
+  return Boolean(source && target && target.dependencies.includes(from)
+    && (!workflow.resourceEdges.some(edge => edge.fromNodeId === from && edge.toNodeId === to)
+      || source.actionType.startsWith('mock-') && target.actionType.startsWith('mock-')));
 }
 export function canvasShortcut(key: string, textEntry: boolean, selectedId: string | null,
   workflow: Workflow): 'REMOVE' | 'CLEAR' | null {

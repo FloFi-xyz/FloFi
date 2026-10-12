@@ -331,7 +331,7 @@
   },
   {
    "user": [
-    "Remove o segundo passo."
+    "Remove o primeiro passo."
    ],
    "answer": {
     "output": {
@@ -341,7 +341,7 @@
       "kind": "REMOVE",
       "target": {
        "step": null,
-       "ordinal": "SECOND"
+       "ordinal": "FIRST"
       }
      }
     }

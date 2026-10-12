@@ -1,12 +1,69 @@
 # BUILD-ARB-001 — Arbitrum One network integration report
 
-Checkpoint: **Phase 7A COMPLETE — UX-001 through UX-007**, 2026-10-12. **BUILD-ARB-001 is not final**.
-Branch: `codex/build-arb-001-network-ux`; worktree `/home/asus/projects/flofi-arb`.
-Exact recovered HEAD / Phase 6 parent: `ab5919842e036047047e614ebdb7176d06ba4aeb`.
-CURRENT HEAD is the Phase 7A commit containing this report; resolve it using the command in the [handoff](BUILD-ARB-001-HANDOFF.md).
-COMPLETED: Phases 1–6 and Phase 7A validation/docs/checkpoint. REMAINING / NEXT EXACT ACTION: stop here; on a subsequent owner instruction,
-Phase 7B — UX-008 Toolbar fit / UX-009 Auto-fit after card insertion / UX-010 Generic user-defined workflow connections.
-DO NOT REDO Phases 1–6, UX-001–007, the six-failure classification or already passing focused profiles. Phase 7B was not started.
+Checkpoint: **Phase 7B COMPLETE — UX-008 / UX-009 / UX-010**, 2026-10-12. **BUILD-ARB-001 is not final**.
+Branch/worktree: `codex/build-arb-001-network-ux`, `/home/asus/projects/flofi-arb`.
+Recovered clean Phase 7A parent: `04555b0f67cfcb70bb5c414196d23d41e04b3844`; Phase 6 parent: `ab5919842e036047047e614ebdb7176d06ba4aeb`.
+CURRENT HEAD is the Phase 7B commit containing this report; use the [handoff](BUILD-ARB-001-HANDOFF.md) commit-resolution command.
+COMPLETED: Phases 1–6, UX-001–007 and UX-008–010 implementation/validation/docs/local checkpoint.
+REMAINING / NEXT EXACT ACTION: stop here. **Phase 8 — full repository validation / CI / PR only on explicit owner instruction.**
+DO NOT REDO completed phases, the Phase 7A six-failure classification, or Phase 7B implementation. No push/PR/full CI in this checkpoint.
+
+## Phase 7B Canvas checkpoint
+
+| Item | Result | Evidence |
+| --- | --- | --- |
+| UX-008 | PASS | Same toolbar/order, compact intrinsic desktop flex sizing; all 15 labels and dock fit 1440/1536/1920px on one row. No overlap, clipping, horizontal scroll, hidden controls or scale transform. Shield + Privacy fully visible; existing unavailable state preserved. |
+| UX-009 | PASS | Shared InsertionViewport, committed canonical IDs only, measured React Flow bounds, fitView padding 32px/90px and zoom bounds 0.35–1.1, 180ms. Preserve comfortable manual viewport; 1–5 cards visible, no proposal-only fit, no ordinary-edit/quote/connection/drag fit. |
+| UX-010 | PASS within existing runtime capabilities | Existing canonical dependency DAG, real handles → CONNECT/DISCONNECT → SemanticWorkflow → derived arrows/numbers. Generic/repeated actions and network transitions; same persisted IR and stale Review guards, no separate graph/executor. |
+
+The canonical model is **DAG**, with instance-ID dependencies and separately typed resourceEdges. New dependency authoring does not guess
+asset-output references. Structural validation uses the existing schema; complete typed compositions keep their financial validator.
+validateWorkflowDraft accepts dependency-only compositions of independently valid registered actions. Existing strict financial validator,
+linter/compiler/Review/execution/recovery still decide what can run; no supported financial combinations or authorization rules expanded.
+Unsupported arbitrary financial fixtures are explicitly tested to fail strict validation. Existing valid lending simulation/call plan node
+order equals Canvas order; actual canonical dependency changes retire stale artifacts/Review. Next supported step still requires existing
+success/reconciliation boundaries. Compiler/executor/reconciler source is unchanged; no frontend executor was added.
+
+Instances remain distinct through add/edit/duplicate/save/reload. Bridge additions preserve financial siblings; ordinary edits keep edges.
+Deterministic topological numbering is shared by visible Canvas actions and Copilot; hidden template scaffolding no longer offsets action
+numbers. Mock-only templates remain protected. The Copilot corpus/replay and six browser journeys use the corresponding visible ordinals,
+with explicit Apply, clarification, refusal and authority invariants preserved. Layout snapshots retain positions through reconnects;
+dragging changes only layout and keeps IR/hash. No ordering from screen coordinates.
+
+Self/unknown/invalid-handle/cyclic edits reject, duplicate relations are idempotent. DAG joins/branches reuse existing dependencies;
+removing/reconnecting edges updates the same canonical IR, arrow and hash. Protected typed links remain protected. Disconnected authoring
+is permitted; it cannot bypass existing financial validation. Save/validate/RESTORE_WORKFLOW unit round-trips reconstruct IDs, order,
+numbering and edges; no separate edge persistence or PostgreSQL/browser durable-save claim. Chain/network composition is action-agnostic;
+financial network/asset compatibility stays with existing validators/Simulate.
+
+Action examples PASS: Bridge → Swap; Swap → Swap → Send; Bridge → Bridge → Bridge → Swap;
+Supply → Borrow → Swap → Bridge → Send; Send → Swap; Send → Send; three Swaps; Repay → Send; Withdraw → Swap; Swap → Pool → Send.
+New connection suite: 18 cases, including repeated independent parameters, reverse order, removal/reconnect, DAG validation, persistence,
+layout/hash stability, supported simulation parity and stale Review. Existing 40 Base/Robinhood vectors, Arbitrum certification vectors,
+Phase 2 Send hashes and canonical hash suite remain unchanged. Dependency edits naturally change semantic identity; layout does not.
+
+TESTS PASSED: final browser **23/23** (6 Canvas, 6 Copilot, 11 Phase 7A authoring); core focused unit **455 tests**;
+final numbering/Copilot/history/projection **8 files / 283 tests**, authoring/replay **6 files / 51 tests**, canonical **8/8**;
+scoped ESLint and TypeScript **33 code files**, governance-lite/**19 self-tests**, diff-check. Counts overlap and are not summed.
+Types use the existing skipLibCheck dependency-declaration limit; no full-app typecheck pass is claimed. An isolated compile-only Next
+bundle supported local browser checks; all gates stayed off, wallet checks were passive and external requests closed by replay.
+No full browser/database/fork matrix. Commands, logs, implementation detail and all changed paths are in the handoff.
+
+TESTS FAILING: core batch **1/456**, lending-composition-service.test.ts:477 (initial zero collateral before Supply/Borrow).
+Classification **PRE_EXISTING_BASELINE_BEHAVIOR**: exact case and old Phase 7A classifier probe reproduce it; service/test/harness/compiler/
+executor/reconciler match Phase 7A. Supply enables collateral and changes account LTV/threshold from zero; unchanged reconciliation reports
+LENDING_POSITION_CONFIGURATION_MISMATCH, clears authorization, and next begin fails LENDING_REVIEW_REQUIRED. No guard weakening/financial fix.
+Full service file has 60 passes/1 failure; filtered probe skips are not passes. Record for Phase 8 along with the inherited Robinhood line-83
+TS2532 and four engineering-profile timeouts described in the historical record below. Phase 8 also reviews approved toolbar/viewport
+visual baselines; none changed in Phase 7B. Generic authoring is not evidence that every financial DAG has an executable runtime today.
+
+Files changed: toolbar/card/Canvas, canonical editor/history/commands/presentation/readers/save/step projection, shared draft validation and
+ordering helpers/classifier, focused tests/Copilot numbering fixtures/browser profile, three build docs. Exact inventory in handoff.
+next-env.d.ts had generated .next-motion path noise only; restored to repository/Phase 6 bytes and excluded. No temporary results or probes,
+secrets, dependencies, Production configuration or databases changed. UX-001–007 remain protected by focused browser/unit regressions.
+UNAPPROVED UX CHANGES / PRODUCTION CHANGES / REAL-MONEY TRANSACTIONS: NONE. Gates off. FULL CI NOT RUN. No push/PR.
+
+The following Phase 7A and network sections are historical evidence, scoped to their completed checkpoint.
 
 ## Phase 7A UX checkpoint
 

@@ -40,7 +40,7 @@ export function catalogSwapDetails(node: { readonly actionType: string; readonly
   if (!isCatalogSwapNode(node)) return null;
   const network = networkOfChain(node.chainId);
   let fields;
-  try { fields = readCatalogSwapNode(node as Node); } catch { return null; }
+  try { fields = readCatalogSwapNode({ ...node as Node, dependencies: [] }); } catch { return null; }
   if (!network) return null;
   const fromAsset = resolveNetworkAsset(fields.chain, { address: fields.input.address }), toAsset = resolveNetworkAsset(fields.chain, { address: fields.output.address });
   // A resolved asset must still match the authored decimals (a listing change never relabels an authored amount).

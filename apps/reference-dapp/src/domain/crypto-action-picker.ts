@@ -144,8 +144,8 @@ export function cryptoSelectionOf(node: Node): CryptoSelection | null {
   return null;
 }
 export function canSelectCryptoAssets(node: Node, workflow: Workflow) {
-  return Boolean(cryptoSelectionOf(node) && !node.lockedParameters.length && !node.dependencies.length && !node.inputs.some(input => input.kind === 'OUTPUT_REFERENCE') &&
-    !workflow.resourceEdges.some(edge => edge.fromNodeId === node.nodeId || edge.toNodeId === node.nodeId) && !workflow.nodes.some(other => other.dependencies.includes(node.nodeId)));
+  return Boolean(cryptoSelectionOf(node) && !node.lockedParameters.length && !node.inputs.some(input => input.kind === 'OUTPUT_REFERENCE') &&
+    !workflow.resourceEdges.some(edge => edge.fromNodeId === node.nodeId || edge.toNodeId === node.nodeId));
 }
 export type CryptoActionInput = { selection: CryptoSelection; amount: string; secondAmount?: string; beneficiary?: string; slippage: string;
   /** Catalog-network pools only (BUILD-RH-002 Robinhood Chain, BUILD-BASE-001 Base): the Uniswap v3 fee tier (0.3% when absent). */ fee?: number;

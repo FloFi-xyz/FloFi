@@ -87,7 +87,7 @@ export function canEditCanvasAmount(node: Workflow['nodes'][number], context: Re
   if (workflow && canSelectCryptoAssets(node, workflow)) return true;
   if (workflow && lendingDetails(workflow) && ['lending-supply', 'lending-borrow'].includes(node.nodeId)) return true;
   return Boolean(supplyDetails(node as Parameters<typeof supplyDetails>[0]) || borrowDetails(node as Parameters<typeof borrowDetails>[0]) || repayDetails(node as Parameters<typeof repayDetails>[0]) || withdrawDetails(node as Parameters<typeof withdrawDetails>[0]) || swapDetails(node, context) || routerDetails(node) ||
-    (bridgeDetails(node) && !node.inputs.some(input => input.kind === 'OUTPUT_REFERENCE') && !node.dependencies.length));
+    (bridgeDetails(node) && !node.inputs.some(input => input.kind === 'OUTPUT_REFERENCE')));
 }
 
 export function canvasAmountCommand(state: EditorState, setup: CanvasActionSetup | null, inputs: CanvasAmountInputs, id: string, context: ReviewContext, bridgeNetworks: CanvasBridgeNetworkInputs = {}, cryptoSelections: CryptoSelections = {}, recipients: CanvasRecipientInputs = {}) {

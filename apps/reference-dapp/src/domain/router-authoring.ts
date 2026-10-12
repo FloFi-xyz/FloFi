@@ -102,7 +102,7 @@ export type RouterDetails = RouterBridgeInput & { units: string; recipientLabel:
 export function routerDetails(node: SemanticWorkflow['nodes'][number] | { readonly actionType: string }): RouterDetails | null {
   if (!('adapterConstraints' in node) || !isRouterBridgeNode(node)) return null;
   try {
-    const f = readRouterBridgeNode(node), routing = routingOf(f.providers), pair = routerPair(f.sourceChain, f.inputToken, f.destinationChain, f.outputToken);
+    const f = readRouterBridgeNode({ ...node, dependencies: [] }), routing = routingOf(f.providers), pair = routerPair(f.sourceChain, f.inputToken, f.destinationChain, f.outputToken);
     const network = (Object.keys(ROUTER_NETWORK_OPTIONS) as RouterNetwork[]).find(n => ROUTER_NETWORK_OPTIONS[n].pair.id === pair?.id);
     if (!routing || !pair || !network) return null;
     const option = ROUTER_NETWORK_OPTIONS[network];

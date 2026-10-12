@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from 'vitest';
 import { commandIsValid, parseLocalCommand, type Command } from './commands';
-import { editorReducer } from './editor';
+import { editorReducer, initialEditor } from './editor';
 import { buildWorkflow, contextFor, FIXTURE, OTHER_ADDRESS, TEST_WALLET } from './copilot-test-fixtures';
 import { editCommandFor, removeCommandFor, type EditPlan } from './workflow-edits';
 import type { Workflow } from './initial-workflow';
@@ -56,7 +56,8 @@ describe('edit commands for existing steps', () => {
   });
   it('refuses templates, legacy steps and unknown nodes', () => {
     const workflow = buildWorkflow([FIXTURE.supply]);
-    expect(edit(workflow, 'node-001', FIXTURE.supply)).toEqual({ ok: false, code: 'STEP_NOT_EDITABLE' });
+    expect(edit(workflow, 'node-001', FIXTURE.supply)).toEqual({ ok: false, code: 'UNKNOWN_STEP' });
+    expect(edit(initialEditor().workflow, 'node-001', FIXTURE.supply)).toEqual({ ok: false, code: 'STEP_NOT_EDITABLE' });
     expect(edit(workflow, 'node-404', FIXTURE.supply)).toEqual({ ok: false, code: 'UNKNOWN_STEP' });
   });
 });
@@ -65,7 +66,9 @@ describe('remove commands', () => {
   it('removes only what the canvas could delete, and says why otherwise', () => {
     const workflow = buildWorkflow([FIXTURE.supply]);
     expect(removeCommandFor(workflow, contextFor(workflow), 'node-002', 1)).toEqual({ ok: true, command: { type: 'REMOVE', nodeId: 'node-002', source: 'CHAT', baseRevision: 1 } });
-    expect(removeCommandFor(workflow, contextFor(workflow), 'node-001', 1)).toEqual({ ok: false, code: 'FIRST_STEP_PROTECTED' });
+    expect(removeCommandFor(workflow, contextFor(workflow), 'node-001', 1)).toEqual({ ok: false, code: 'UNKNOWN_STEP' });
+    const template = initialEditor().workflow;
+    expect(removeCommandFor(template, contextFor(template), 'node-001', 0)).toEqual({ ok: false, code: 'FIRST_STEP_PROTECTED' });
     const bridge = buildWorkflow([FIXTURE.bridge]);
     expect(removeCommandFor(bridge, contextFor(bridge), 'node-002', 1)).toEqual({ ok: false, code: 'LAST_STEP_PROTECTED' });
     const lending = buildWorkflow([FIXTURE.lending]);

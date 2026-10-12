@@ -52,7 +52,7 @@ export function createAuthoredTransfer(nodeId: string, input: RobinhoodTransferI
 export function transferDetails(node: SemanticWorkflow['nodes'][number]): RobinhoodTransferInput | null {
   if (node.actionType !== TRANSFER_ACTION) return null;
   try {
-    const read = readTransferNode(node);
+    const read = readTransferNode({ ...node, dependencies: [] });
     const network = (Object.keys(TRANSFER_NETWORKS) as TransferNetwork[]).find(name => TRANSFER_NETWORKS[name]?.chain === read.fields.chain);
     if (!network) return null;
     if (read.kind === 'NATIVE') return { network, asset: 'ETH', amount: formatEth(read.fields.amount), recipient: read.fields.recipient };

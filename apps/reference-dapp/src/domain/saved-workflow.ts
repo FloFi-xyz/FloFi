@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { hashArtifactBytes, parseArtifactBytes, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
-import { validateAuthoringWorkflow, createReviewContext, reviewContextForChain } from '@defi-workflow-engine/reference-linter';
+import { validateWorkflowDraft, createReviewContext, reviewContextForChain } from '@defi-workflow-engine/reference-linter';
 import { baseAssetRegistry, referenceRegistry } from '@defi-workflow-engine/action-registry';
 export type WorkflowOwner = { namespace: 'eip155' | 'solana'; address: string };
 export const WORKFLOW_OWNER_HEADER = 'x-flofi-workflow-owner';
@@ -17,7 +17,7 @@ export function validateSavedWorkflow(value: unknown): SemanticWorkflow {
   const base = createReviewContext({ registryId: referenceRegistry.registryId, capabilityId: referenceRegistry.capabilities[0]!.id,
     actionId: referenceRegistry.actions[0]!.id, assets: baseAssetRegistry });
   const chain = workflow.nodes.find(n => n.actionType === 'asset.swap.exact-input')?.chainId;
-  return validateAuthoringWorkflow(workflow, chain ? reviewContextForChain(chain, base) : base);
+  return validateWorkflowDraft(workflow, chain ? reviewContextForChain(chain, base) : base);
 }
 export const savedWorkflowHash = (workflow: SemanticWorkflow) => hashArtifactBytes('semantic-workflow', new TextEncoder().encode(JSON.stringify(workflow)));
 export type SavedWorkflow = { workflowId: string; name: string; workflow: SemanticWorkflow; revision: number; version: number; createdAt: string; updatedAt: string };

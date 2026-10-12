@@ -4,7 +4,7 @@ import { useLocale } from '../i18n/locale';
 
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { useLiveQuote } from '../state/build-estimate';
-import { Handle, Position, useReactFlow } from '@xyflow/react';
+import { Handle, Position } from '@xyflow/react';
 import type { composerSummary, composerNodeState } from '../domain/composer-presentation';
 import type { Command } from '../domain/commands';
 import type { CanvasAction } from '../domain/canvas-authoring';
@@ -283,6 +283,7 @@ function ValueBox({ amount, token, network, source, label, hint, editor, inputLa
 }
 
 export type ComposerCardData = {
+  connectable?: boolean;
   actionSelection?: { selection: CryptoSelection; networks: readonly string[]; valid: boolean; tokens: { source: readonly string[]; destination: readonly string[] }; onNetwork(network: string): void; onToken(side: 'source' | 'destination', token: string): void };
   composer: true; step: number; selected: boolean; vertical: boolean;
   summary: ReturnType<typeof composerSummary>;
@@ -337,26 +338,6 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
     else if (poolRange.edited) poolRange.reset();
   }
   const poolNodeRef = useRef<HTMLDivElement>(null);
-  const wasExpanded = useRef(false);
-  const { fitView } = useReactFlow();
-  useEffect(() => {
-    const expanded = (poolCard && poolMode === 'Price') || (stocksCard && stocksPanelOpen) || Boolean(tokenPanel || bridgePanel);
-    const closing = wasExpanded.current && !expanded;
-    wasExpanded.current = expanded;
-    if (!expanded && !closing) return;
-    // Fit expanded surfaces on resize, and restore a readable card when they close.
-    let frame = 0, measuredFrame = 0;
-    function fitPanel() {
-      cancelAnimationFrame(frame); cancelAnimationFrame(measuredFrame);
-      frame = requestAnimationFrame(() => { measuredFrame = requestAnimationFrame(() => { void fitView({ padding: { top: '16px', bottom: '96px', left: '16px', right: '56px' }, duration: 0 }); }); });
-    }
-    const canvas = poolNodeRef.current?.closest('.build-flow-surface');
-    const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(fitPanel) : null;
-    if (canvas) observer?.observe(canvas);
-    if (poolNodeRef.current) observer?.observe(poolNodeRef.current);
-    fitPanel();
-    return () => { observer?.disconnect(); cancelAnimationFrame(frame); cancelAnimationFrame(measuredFrame); };
-  }, [poolCard, poolMode, poolPanelOpen, stocksCard, stocksPanelOpen, tokenPanel, bridgePanel, fitView]);
   useEffect(() => {
     if (!tokenPanel && !bridgePanel) return;
     const dismiss = (event: PointerEvent) => { if (event.target instanceof Node && !poolNodeRef.current?.contains(event.target)) { setTokenPanel(null); setBridgePanel(null); } };
@@ -389,7 +370,7 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
   const tokenOptions = tokenPanel && tokenSymbol ? card.actionSelection?.tokens[tokenPanel] ?? card.tokenSelection?.[tokenPanel] ?? [tokenSymbol] : [];
   const AmountContainer = editor ? 'form' : 'div';
   const content = <div className={`flow-card composer-card ${card.selected ? 'active' : ''}`} data-state={card.inspection || quietAmount ? undefined : card.validation.tone}>
-      <Handle type="target" position={card.vertical ? Position.Top : Position.Left} isConnectable={false}/>
+      <Handle id="input" type="target" position={card.vertical ? Position.Top : Position.Left} isConnectable={!card.inspection && Boolean(card.connectable)}/>
       <strong className="composer-action-title"><span>{tr(card.step)}. {tr(card.summary.action)}</span><ActionIcon action={actionIcons[card.summary.action] ?? 'action'}/></strong>
       {!card.inspection && !quietAmount && card.validation.status !== 'Configured' && <span className="composer-card-state" title={tr(card.validation.message)}>{tr(card.validation.tone !== 'neutral' && '⚠ ')}{tr(card.validation.status === 'Draft' ? 'Check settings' : card.validation.status)}</span>}
       {poolCard ? <PoolProviderSelector provider={card.summary.provider} chain={card.summary.chain}/> : <span className="composer-metadata">
@@ -453,7 +434,7 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
       {card.summary.risk && <span className="flow-card-risk">{tr(card.summary.risk)}</span>}
       {!card.inspection && <button type="button" className="composer-selected nodrag nopan" onClick={event => { event.stopPropagation(); card.onOpenSettings?.(); }} title={tr("Open Advanced Settings")}>{tr("Advanced Settings ")}<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m10 3-.5 3-2 1.2L4.7 6l-2 3.5 2.3 2v1l-2.3 2 2 3.5 2.8-1.2 2 1.2.5 3h4l.5-3 2-1.2 2.8 1.2 2-3.5-2.3-2v-1l2.3-2-2-3.5-2.8 1.2-2-1.2-.5-3Z"/><circle cx="12" cy="12" r="3"/></svg>
       </button>}
-      <Handle type="source" position={card.vertical ? Position.Bottom : Position.Right} isConnectable={false}/>
+      <Handle id="output" type="source" position={card.vertical ? Position.Bottom : Position.Right} isConnectable={!card.inspection && Boolean(card.connectable)}/>
     </div>;
   // BUILD-BASE-001: on an official-catalog network the editable picker also searches the whole validated catalog (swaps and pools: ERC-20s).
   const catalogNetwork = card.actionSelection && card.actionSelection.tokens[tokenPanel || 'source'].length > 1 ? networkIdentity(tokenNetwork) : null;

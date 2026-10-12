@@ -25,12 +25,12 @@ describe('shared swap authoring', () => {
       expect(formatHumanAmount(quantity.value.amount, direction === 'USDC_TO_WETH' ? 'USDC' : 'WETH', context)).toBe(amount);
     }
   });
-  it('rejects stale edits, swap connections, locked edits and cap widening', () => {
+  it('rejects stale edits, mock-to-financial connections, locked edits and cap widening', () => {
     const added = editorReducer(initialEditor(), { type: 'ADD_SWAP', direction: 'USDC_TO_WETH', amount: '2', slippage: '50', source: 'CANVAS', baseRevision: 0 }, context);
     const stale = editorReducer(added, { type: 'SET_SLIPPAGE', nodeId: 'node-002', slippage: '80', source: 'CHAT', baseRevision: 0 }, context);
     expect(stale.workflow).toBe(added.workflow);
     const edge = editorReducer(added, { type: 'CONNECT', from: 'node-001', to: 'node-002', source: 'CANVAS', baseRevision: 1 }, context);
-    expect(edge.error).toBe('SWAP_EDGE_UNSUPPORTED');
+    expect(edge.error).toBe('ISOLATED_ACTION_EDGE_UNSUPPORTED');
     const locked = editorReducer(added, { type: 'LOCK', nodeId: 'node-002', locked: true, source: 'CANVAS', baseRevision: 1 }, context);
     expect(locked.workflow.nodes[1]?.editableBounds).toEqual([]);
     const refused = editorReducer(locked, { type: 'SET_SWAP_AMOUNT', nodeId: 'node-002', amount: '3', source: 'CHAT', baseRevision: 2 }, context);

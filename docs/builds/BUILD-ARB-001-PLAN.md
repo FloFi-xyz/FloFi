@@ -5,9 +5,10 @@ Branch: `codex/build-arb-001-network-ux`.
 Inputs: [discovery and capability matrix](BUILD-ARB-001-DISCOVERY.md), [read verification](BUILD-ARB-001-READ-VERIFICATION.json),
 [persistent handoff](BUILD-ARB-001-HANDOFF.md), BASE-001 shared architecture and existing Router.
 
-The owner authorized and completed **Phases 1–6** and **Phase 7A: UX-001 through UX-007 only**.
-Current checkpoint: the Phase 7A commit containing the updated handoff; exact Phase 6 parent is
-`ab5919842e036047047e614ebdb7176d06ba4aeb`. See the handoff for the commit-resolution command and full changed-file inventory.
+The owner authorized and completed **Phases 1–6**, **Phase 7A (UX-001–007)** and **Phase 7B (UX-008–010)**.
+Current checkpoint: the Phase 7B commit containing this plan; recovered clean Phase 7A parent is
+`04555b0f67cfcb70bb5c414196d23d41e04b3844`, Phase 6 parent `ab5919842e036047047e614ebdb7176d06ba4aeb`.
+See the handoff for commit resolution, implementation evidence and changed-file inventory.
 Phase 2 starts at `87f4a7a575ff10f5b8e7c05e56af4fa0bc335bce`. Every phase requires focused checks, an updated handoff and a commit.
 Do not start later phases automatically. Full CI belongs at the end of BUILD-ARB-001; no PR or push in this checkpoint.
 
@@ -319,16 +320,40 @@ The last captures the approved unavailable quote state and existing initial card
 next-env.d.ts matches Phase 6 and is excluded. All temporary evidence remains in /tmp. No Production changes, gate enablement,
 real-money execution, unrelated UX, UX-008/009/010 implementation, full CI, push or PR.
 
-## Next exact action — Phase 7B, do not execute automatically
+## Phase 7B — owner-approved Canvas UX (complete)
 
-Stop after the Phase 7A local checkpoint. The next owner-directed scope is:
+| Item | Result | Implementation and evidence |
+| --- | --- | --- |
+| UX-008 | PASS | Intrinsic flex sizing, reduced desktop gaps/padding and narrow-container label/icon sizing. All 15 actions plus dock control fit one row at 1440/1536/1920px; geometry, hit targets, no overlap/scroll assertions pass. Privacy remains fully visible with its existing disabled/unavailable behavior. No toolbar redesign/mobile change. |
+| UX-009 | PASS | Shared canonical-instance insertion boundary waits for React Flow measurement, then fitView with existing padding, zoom bounds 0.35–1.1 and 180ms transition. Skip when all nodes already comfortably fit. Browser commits 1–5 actions; no fit before Copilot Apply or from selection, amount/token/recipient/quote edits, connections or dragging. Manual viewport remains usable. |
+| UX-010 | PASS within existing runtime capabilities | Existing SemanticWorkflow DAG dependencies/resourceEdges remain the sole source. Real output/input handles dispatch canonical CONNECT/DISCONNECT; edges, arrows and numbering derive from instance dependencies. Generic/repeated/mixed-chain actions persist through existing canonical save/restore. Invalid/self/duplicate/cyclic edits fail closed/idempotently; removal/reconnect update the same IR/hash. No runtime expansion. |
 
-1. UX-008 — Toolbar fit.
-2. UX-009 — Auto-fit after card insertion.
-3. UX-010 — Generic user-defined workflow connections.
+Discovery: IR is a DAG, but financial execution is limited to existing profiles/certified compositions. validateWorkflowDraft reuses structural
+schema invariants plus existing complete/per-action validation for dependency-only authoring; typed asset links still require the complete
+composition validator. Runtime validation, compiler, Review/execution/recovery remain unchanged. Unsupported financial graphs fail strict
+validation; supported lending fixture has identical Canvas, simulation-plan and financial-call node order. Semantic connection edits stale
+prior Review; layout-only dragging preserves canonical hash. Hidden mock scaffold no longer offsets visible Copilot step numbering.
+Copilot corpus/replay/browser assertions were updated for that numbering; Apply and all authority protections remain intact.
 
-Phase 8 integration/final validation remains separate: address the pre-existing Robinhood type blocker and engineering test/profile
-alignment, then run full required CI only when explicitly directed. No Phase 7B or Phase 8 work is part of this checkpoint.
+Action-agnostic tests cover Bridge → Swap, two Swaps → Send, three Bridges → Swap, Supply → Borrow → Swap → Bridge → Send,
+Send → Swap, repeated Sends/Swaps, Repay/Withdraw and Pool. JSON validation/RESTORE_WORKFLOW reconstructs IDs/dependencies/edges/numbers;
+PostgreSQL/browser durable-save validation was not rerun. Existing 40 Base/Robinhood vectors, Arbitrum certification and Send hashes pass.
+
+Focused evidence: final browser 23/23 (6 Canvas, 6 Copilot, 11 Phase 7A authoring); core unit 455 passed / 1 failed across 28 files;
+final numbering/Copilot/history/projection batch 283/283 across 8 files; final authoring/replay batch 51/51 across 6 files;
+scoped ESLint/TypeScript on 33 code files, governance-lite/19 self-tests and diff-check PASS. Batches overlap; no aggregate claim.
+The one failure is confirmed pre-existing zero-collateral lending reconciliation, recorded below and in the handoff. No failing tests skipped.
+Isolated compile-only browser bundle; no full CI. next-env.d.ts restored/excluded; no Phase 7B snapshot updates or temporary artifacts committed.
+No Production/gate changes, real-money execution, push or PR. UX-001–007 preserved.
+
+## Next exact action — Phase 8, do not execute automatically
+
+Stop after the Phase 7B local checkpoint. On separate owner instruction, Phase 8 — full repository validation / CI / PR.
+Address the inherited Robinhood line-83 type blocker, four legacy engineering-profile routing failures and targeted approved visual baseline
+review. Also investigate the baseline initial-zero-collateral lending failure: enabling collateral changes account LTV/threshold, while the
+unchanged reconciler treats them as invariant and clears Review with LENDING_POSITION_CONFIGURATION_MISMATCH; the next step reports
+LENDING_REVIEW_REQUIRED. Old Phase 7A classifier reproduces it; all financial implementation/fixture sources are unchanged.
+Do not weaken reconciliation or execute Phase 8 automatically.
 
 ## Invariants for every later phase
 

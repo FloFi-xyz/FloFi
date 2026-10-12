@@ -1,5 +1,195 @@
 # BUILD-ARB-001 Handoff
 
+## Final Phase 7B checkpoint — 2026-10-12
+
+- CURRENT HEAD: the Phase 7B checkpoint commit containing this record; resolve with
+  `git log -1 --format=%H -- docs/builds/BUILD-ARB-001-HANDOFF.md`.
+- Exact recovered Phase 7A parent: `04555b0f67cfcb70bb5c414196d23d41e04b3844`
+  (`BUILD-ARB-001 phase 7a: polish workflow UX`). Worktree/index were clean; no pending implementation was discarded.
+- CURRENT PHASE: **Phase 7B COMPLETE — UX-008 / UX-009 / UX-010**, on `codex/build-arb-001-network-ux`.
+- COMPLETED: desktop toolbar fit; insertion-only viewport fit; canonical dependency connections; focused checks, docs and local commit.
+- REMAINING: separately authorized Phase 8 validation/integration blockers/CI/PR. BUILD-ARB-001 is not final.
+- TESTS PASSED: final browser **23/23**; focused core regression **455 tests**; final numbering/Copilot/history/visual-model batch
+  **8 files / 283 tests**; final affected authoring/replay batch **6 files / 51 tests**; canonical hash suite **8/8**;
+  scoped ESLint **33 code files**, scoped TypeScript, governance-lite / **19 self-tests**, `git diff --check`.
+  These batches overlap; counts are not added together.
+- TESTS FAILING: **1/456** in the core batch, the confirmed pre-existing initial-zero-collateral lending case described below.
+  Inherited Robinhood full-app type blocker and four Phase 6 engineering-profile browser failures remain for Phase 8.
+- DO NOT REDO: Phases 1–6, UX-001–007, the Phase 7A six-failure classification, or completed Phase 7B work.
+- NEXT EXACT ACTION: stop after the local Phase 7B commit. On explicit owner instruction only:
+  **Phase 8 — full repository validation / CI / PR**, including recorded blockers. Do not execute automatically.
+- No Production/config/gate changes, real-money transactions, push, PR or full CI. next-env.d.ts restored to HEAD and excluded.
+
+### UX-008 — toolbar fit: PASS
+
+Desktop flex/container sizing in globals.css reduces gaps/padding, keeps action wrappers intrinsic, and compacts utility controls.
+At the narrow desktop container only, readable 10.5px labels and 15px icons preserve the existing design; larger containers retain
+normal font sizing and 16px icons. All 15 action labels, including shield + Privacy, and the dock control fit on one row at
+**1440 / 1536 / 1920px**. Browser assertions check bounds, hit targets, label widths, overlap and scroll widths; Add/Delete behavior passes.
+No overflow menu, removed actions, transform scaling or mobile/tablet redesign. Privacy retains its existing disabled/unavailable
+behavior; fit does not enable an unimplemented capability. Undo/Redo/Delete availability still follows existing workflow state.
+
+### UX-009 — insertion-only auto-fit: PASS
+
+One shared InsertionViewport in the authoring React Flow watches canonical financial instance IDs/workflow identity. It waits for
+useNodesInitialized and measured node bounds, then calls fitView for those committed IDs with existing padding (32px top/sides,
+90px bottom), minZoom 0.35, maxZoom 1.1 and a 180ms transition. These are bounds, not a fixed zoom target. When every card is already
+comfortably inside the viewport, it keeps the manual viewport. Canonical positions are never rewritten to fit.
+
+Toolbar/picker commitments and Copilot Apply reach the same canonical insertion boundary. Proposals/setup drafts do not arm it.
+Removed the prior per-card picker/expanded-panel ResizeObserver fitting, which would refit during ordinary editing.
+Browser coverage commits 1–5 cards, checks every card inside the pane, proves no fit before Apply, and retains viewport through
+selection, amount/token/recipient editing, quote settlement and explicit connection/reconnection. Real card dragging keeps IR/order
+and viewport unchanged. User zoom remains available. No continuous fit, fixed zoom percentage, duplicated action or layout reset.
+
+### UX-010 — generic canonical connections: PASS within existing runtime capabilities
+
+**Discovered model: DAG**, not an implicit positional list. SemanticWorkflow.nodes[].dependencies holds predecessor instance IDs;
+resourceEdges holds separately typed asset-output links. Existing schema invariants reject cycles/dangling references. Canonical
+hashing sorts node sets by ID and binds dependency content; array order and Canvas coordinates are not sequencing authority.
+ExecutionPlan already carries step/segment dependencies, but financial compilers execute bounded profiles/certified compositions.
+This phase reuses that model and leaves those financial constraints intact.
+
+- Real output/input Handles become connectable only for committed authoring cards. onConnect requires output → input and dispatches
+  the existing CONNECT command. Edges/arrowheads are derived from canonical dependencies/resourceEdges, never an independent setEdges model.
+- CONNECT/DISCONNECT accept canonical instance identifiers. Financial links mutate dependencies only; no guessed OUTPUT_REFERENCE,
+  asset flow, chain conversion or protocol-specific sequence is invented. Mock template links retain their existing typed behavior.
+- validateWorkflowDraft validates the complete structural DAG, uses the existing complete financial validator when applicable, and
+  otherwise validates every independent action against its existing chain/profile. Typed resource/output-reference compositions still
+  require their complete validator. This authoring boundary is reused by editor/history/save restoration; it creates no financial authority.
+  Strict runtime validateAuthoringWorkflow, linter, compiler, Review, executor and reconciler remain in force.
+- Generic additions preserve existing financial instances, including repeated action types; Bridge no longer replaces prior financial cards.
+  Parameter edits preserve dependencies and sibling instances. Node IDs drive identity, edges, save/reload and recovery, never action names.
+  The existing BUILD-006 engineering-only legacy ADD_LIQUIDITY restriction remains; current toolbar Pool instances use the generic path.
+- Shared deterministic topological projection numbers visible financial cards and Copilot descriptors consistently. Hidden mock scaffolding
+  is excluded when financial actions exist; an untouched template remains protected. Copilot replay/corpus expectations now use visible
+  step 1/2 rather than counting the hidden template. No proposal applies automatically, and no connection is created before Apply.
+- Layout snapshots preserve existing card positions before semantic ordering changes; dragging changes layout only, with identical IR/hash.
+  Canonical ties between independent DAG nodes are displayed deterministically by instance ID; the display does not grant execution order.
+- Self/unknown/invalid-handle/cyclic connections reject; duplicate dependencies are idempotent. Existing DAG branching/joining is representable.
+  Removing a dependency updates canonical IR and visible edge together; reconnecting updates order/numbers and semantic hash. Protected typed
+  compositions remain protected by their existing validator. Disconnected drafts may be saved; financial simulation cannot bypass runtime
+  composition validation or silently manufacture a supported execution plan.
+- Save uses the existing canonical workflow document, revision/hash and validation path. JSON save/validate/RESTORE_WORKFLOW tests retain IDs,
+  dependencies, edges and numbering. No extra graph store. PostgreSQL/browser durable save was not rerun; this is canonical round-trip evidence.
+- Valid existing lending fixture: Canvas order equals simulation plan node order and financial call node IDs. Exact existing typed composition
+  validators remain authoritative; unsupported arbitrary financial fixtures are explicitly tested to fail strict validation.
+  Actual CONNECT invalidates prior simulation/Review through the shared revision/artifact stale guard. Changed lending dependencies invalidate Review.
+- Execution still requires the existing successful reconciliation/checkpoint boundary before the next supported step. Recovery/reconciliation
+  retain canonical node identities and prior failure handling. Compiler/executor/reconciler source is unchanged; focused composition regressions
+  pass except the baseline zero-collateral case below. No frontend executor or new financial DAG execution semantics.
+- Chain-agnostic links include Base → Arbitrum Bridge instances and Arbitrum actions. Financial asset/network compatibility remains separate;
+  the authoring link never silently rewrites assets or network context.
+
+Action-agnostic unit examples all PASS (18 new connection tests total): Bridge → Swap; Swap → Swap → Send;
+Bridge → Bridge → Bridge → Swap; Supply → Borrow → Swap → Bridge → Send; Send → Swap; Send → Send; three Swaps;
+Repay → Send; Withdraw → Swap; Swap → Pool → Send. Reversed creation order, removal/reconnect, repeated independent parameters,
+DAG joins, persistence, layout/hash stability, supported simulation parity and stale Review are included.
+Existing **40 Base/Robinhood baseline vectors**, Arbitrum certified authoring vectors, Phase 2 Send hashes and canonical hash suite pass.
+No hash implementation or financial fixture baseline changed. Layout alone keeps hashes; dependency edits change canonical semantic identity.
+
+### Focused validation and reproducibility
+
+Final browser command (23/23, no skips; normal /app, all financial gates off, passive wallet/replay, loopback mocks):
+
+```sh
+NEXT_TELEMETRY_DISABLED=1 PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
+BUILD002_BROWSER_CACHE=/home/asus/.cache/ms-playwright/chromium_headless_shell-1243 \
+FLOFI_E2E_APP_PORT=3119 FLOFI_CANVAS_UX_ISOLATED=true FLOFI_CANVAS_COPILOT_E2E=true \
+pnpm --filter @defi-workflow-engine/reference-dapp exec playwright test \
+  --config playwright.canvas-workflow-ux.config.ts --output /tmp/flofi-p7b-browser-checkpoint
+```
+
+Profile covers canvas-workflow-ux.spec.ts (6), copilot-conversation.spec.ts (6) and workflow-ux-authoring.spec.ts (11).
+The optional Copilot flag adds only the existing local supply RPC mock for its reset/read assertions. No Anvil or database matrix.
+An isolated `.next-motion` compile-only bundle was produced for browser validation with
+`FLOFI_MOTION_PREVIEW=true ... next build --experimental-build-mode compile`; the owner's existing .next server was preserved.
+This prerequisite is not full CI/full build validation. Browser/child-process checks required outside-sandbox execution for local services.
+
+Core focused Vitest batch: editor/history/connections/setup/keyboard, Send/workflow UX, estimate hook, Review/result components,
+Arbitrum certification, router/save/descriptors/artifact stale guards, lending service and relevant linter/contracts/compiler/executor/
+reconciler composition tests: **28 files, 455 passed / 1 failed**. All tests retained; no skip or weakened execution assertion.
+Final follow-up: **8 files / 283 passed** (connections, workflow-steps, Copilot conversation/eval, workflow-edits, legacy liquidity,
+history, workflow visual projection); **6 files / 51 passed** (five affected authoring files + Copilot replay service).
+The first follow-up's stale template-number/isolation expectations were corrected to the approved behavior; execution refusal and template
+protection remain explicitly asserted. The canonical suite's sandbox Python-spawn error was resolved by the authorized outside-sandbox run
+(**8/8**) and passes in the core batch. No broad CI rerun.
+
+Scoped ESLint: all **33** changed/new TS/TSX files. Scoped tsc: /tmp/flofi-p7b-tsconfig.json extends app config, includes the same 33 files
+and imports, noEmit/incremental=false; existing skipLibCheck declaration limit retained. PASS, with no new source diagnostic.
+Full-app typecheck was not claimed or rerun; the inherited Robinhood blocker lies outside this scoped import graph.
+Governance-lite plus 19 self-tests and final diff-check PASS. No screenshot baseline changes in Phase 7B; approved toolbar/viewport visuals
+need targeted baseline review during Phase 8's broader browser validation, not a bulk snapshot rewrite here.
+
+Local logs: /tmp/flofi-p7b-browser-checkpoint.log, /tmp/flofi-p7b-focused-unit-final.log,
+/tmp/flofi-p7b-numbering-final.log, /tmp/flofi-p7b-authoring-replay-final.log, /tmp/flofi-p7b-canonical.log,
+/tmp/flofi-p7b-types-checkpoint.log, /tmp/flofi-p7b-lint-checkpoint.log, /tmp/flofi-p7b-compile-final.log.
+
+### Phase 8 blockers and exclusions
+
+1. **PRE_EXISTING_BASELINE_BEHAVIOR** — lending-composition-service.test.ts:477,
+   “initial zero collateral is supplied and collateral enabled before Borrow; simulated reserve liquidity propagates”.
+   The core service file has 60 passes and this one failure. Reproduced in isolation and with the old Phase 7A Supply+Borrow classifier
+   in a temporary probe (removed). Read-only diagnostic: after Supply, LENDING_POSITION_CONFIGURATION_MISMATCH → FAILED / authorization
+   CLEARED; next begin reports LENDING_REVIEW_REQUIRED. Reconciler compares account LTV/liquidation threshold pre/post as invariant;
+   enabling initial collateral legitimately changes account values from zero to reserve values. Service, test, lending/supply harness,
+   compiler, executor and reconciler are byte-identical to Phase 7A. No financial fix/guard weakening in Phase 7B.
+   Probe log: /tmp/flofi-p7b-lending-baseline-probe.log. Its 60 filtered tests were skips, not passes; full core batch ran all 61.
+2. Known robinhood-transfer-panel.tsx:83:103 TS2532 remains unchanged, with Phase 2 byte-equivalence evidence in the historical 7A record.
+3. Four inherited cross-chain/BUILD-009 engineering-profile routing failures remain classified as pre-existing at Phase 6; no new investigation
+   or production routing changes. LI.FI availability was downstream of their missing controls and did not cause those timeouts.
+4. Phase 8 broader visual validation must review the approved compact toolbar/insertion viewport snapshots. No baselines updated blindly.
+
+next-env.d.ts's only diff was generated .next-motion path noise; restored only that file to Phase 7A/Phase 6 bytes and excluded.
+All temporary probes, logs and results remain under /tmp; no tracked/generated junk, secrets, dependency changes or Production configuration.
+No new UX beyond toolbar fit, insertion viewport and canonical connection/numbering behavior. UX-001–007 are preserved with focused regressions.
+No Production changes, enabled deployment gates, real-money transactions, full CI, push or PR. Stop before Phase 8.
+
+### Phase 7B changed files
+
+Intentional paths (38); temporary evidence stays under /tmp.
+
+```text
+apps/reference-dapp/e2e/canvas-workflow-ux.spec.ts
+apps/reference-dapp/e2e/copilot-conversation.spec.ts
+apps/reference-dapp/e2e/copilot/replay-v2.json
+apps/reference-dapp/playwright.canvas-workflow-ux.config.ts
+apps/reference-dapp/src/app/globals.css
+apps/reference-dapp/src/components/composer-card.tsx
+apps/reference-dapp/src/components/workflow-canvas.tsx
+apps/reference-dapp/src/domain/canvas-action-setup.test.ts
+apps/reference-dapp/src/domain/canvas-action-setup.ts
+apps/reference-dapp/src/domain/canvas-connections.test.ts
+apps/reference-dapp/src/domain/canvas-keyboard.ts
+apps/reference-dapp/src/domain/catalog-swap-authoring.ts
+apps/reference-dapp/src/domain/commands.ts
+apps/reference-dapp/src/domain/composer-presentation.ts
+apps/reference-dapp/src/domain/copilot-conversation.test.ts
+apps/reference-dapp/src/domain/copilot-eval.corpus.ts
+apps/reference-dapp/src/domain/crypto-action-picker.ts
+apps/reference-dapp/src/domain/editor-history.ts
+apps/reference-dapp/src/domain/editor.ts
+apps/reference-dapp/src/domain/jupiter-authoring.test.ts
+apps/reference-dapp/src/domain/robinhood-transfer-authoring.ts
+apps/reference-dapp/src/domain/router-authoring.ts
+apps/reference-dapp/src/domain/saved-workflow.ts
+apps/reference-dapp/src/domain/solana-liquidity-authoring.test.ts
+apps/reference-dapp/src/domain/supply-authoring.test.ts
+apps/reference-dapp/src/domain/swap-authoring.test.ts
+apps/reference-dapp/src/domain/uniswap-liquidity-authoring.test.ts
+apps/reference-dapp/src/domain/workflow-edits.test.ts
+apps/reference-dapp/src/domain/workflow-steps.test.ts
+apps/reference-dapp/src/domain/workflow-steps.ts
+docs/builds/BUILD-ARB-001-HANDOFF.md
+docs/builds/BUILD-ARB-001-NETWORK-INTEGRATION-REPORT.md
+docs/builds/BUILD-ARB-001-PLAN.md
+packages/reference-linter/src/index.ts
+packages/reference-linter/src/workflow-draft.ts
+packages/workflow-contracts/src/index.ts
+packages/workflow-contracts/src/lending-composition.ts
+packages/workflow-contracts/src/workflow-order.ts
+```
+
 ## Final Phase 7A checkpoint — 2026-10-12
 
 - CURRENT HEAD: the Phase 7A checkpoint commit containing this record; resolve with

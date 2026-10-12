@@ -335,7 +335,7 @@ export function commandIsValid(input: unknown): input is Command {
     case 'SET_AMOUNT': return id(command.nodeId) && typeof command.amount === 'string' && /^(0|[1-9][0-9]{0,77})$/.test(command.amount);
     case 'LOCK': return id(command.nodeId) && typeof command.locked === 'boolean' && command.source === 'CANVAS';
     case 'CONNECT':
-    case 'DISCONNECT': return id(command.from) && id(command.to);
+    case 'DISCONNECT': return [command.from, command.to].every(value => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value));
     case 'REMOVE': return id(command.nodeId);
     case 'REMOVE_MANY': return command.source === 'CANVAS' && Array.isArray(command.nodeIds)
       && command.nodeIds.length > 0 && command.nodeIds.length <= 1024

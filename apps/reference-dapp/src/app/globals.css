@@ -623,6 +623,20 @@
 .canvas-toolbar-row .toolbox-divider{flex:none}
 @container(max-width:1200px){.canvas-toolbar-row{gap:5px}.canvas-toolbar-row .canvas-primary-tools,.canvas-toolbar-row .canvas-utility-tools{gap:2px}.canvas-toolbar-row .canvas-toolbox button{padding-inline:4px;gap:4px}}
 @container(max-width:1100px){.canvas-toolbar-row{gap:3px}.canvas-toolbar-row .canvas-primary-tools,.canvas-toolbar-row .canvas-utility-tools{gap:1px}.canvas-toolbar-row .canvas-toolbox button{padding-inline:2px;gap:3px}.canvas-toolbar-row .toolbox-divider{margin-inline:2px}}
+/* UX-008: intrinsic desktop controls, no clipped creation group or scrolling. */
+@media(min-width:1101px){
+  .canvas-toolbar-row{gap:3px}
+  .canvas-toolbar-row .canvas-primary-tools{flex:1 0 auto;gap:0;padding-inline:0;overflow:visible}
+  .canvas-toolbar-row .canvas-utility-tools{gap:1px;padding-inline:0}
+  .canvas-toolbar-row .canvas-toolbox button{padding-inline:1px;gap:2px}
+  .canvas-toolbar-row .canvas-toolbox button svg{width:16px;height:16px}
+  .canvas-toolbar-row .toolbox-divider{margin-inline:2px}
+  .canvas-toolbar-row>.revision{font-size:10px}
+  @container(max-width:1100px){
+    .canvas-toolbar-row .canvas-toolbox button{font-size:10.5px}
+    .canvas-toolbar-row .canvas-toolbox button svg{width:15px;height:15px}
+  }
+}
 @container(max-width:850px){.canvas-toolbar-row .canvas-utility-tools button span{display:none}.canvas-toolbar-row .canvas-utility-tools button{width:32px;padding:0}.canvas-toolbar-row .canvas-utility-tools .toolbox-mode-toggle{width:32px}.canvas-toolbar-row>.revision{display:none}}
 @container(max-width:650px){.canvas-toolbar-row .canvas-utility-tools button,.canvas-toolbar-row .canvas-utility-tools .toolbox-mode-toggle{width:28px}.canvas-toolbar-row .canvas-primary-tools button{font-size:10px;padding-inline:1px;gap:2px}}
 .floating-toolbox .canvas-primary-tools,.floating-toolbox .canvas-utility-tools{display:flex;flex-direction:column;align-items:center;gap:0}

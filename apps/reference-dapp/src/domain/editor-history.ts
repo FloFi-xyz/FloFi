@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { ROBINHOOD_NETWORK, featuredStockSymbols } from './asset-catalogs';
-import { createBaseSepoliaReviewContext, validateAuthoringWorkflow, type ReviewContext } from '@defi-workflow-engine/reference-linter';
+import { createBaseSepoliaReviewContext, validateWorkflowDraft, type ReviewContext } from '@defi-workflow-engine/reference-linter';
 import { validateSavedWorkflow } from './saved-workflow';
-import {isLendingComposition,type SemanticWorkflow} from '@defi-workflow-engine/workflow-contracts';
+import {isLendingComposition,workflowDependencyOrder,type SemanticWorkflow} from '@defi-workflow-engine/workflow-contracts';
 import type { Command } from './commands';
 import { directions, type Direction } from './swap-authoring';
 import { routerDetails } from './router-authoring';
 import type { UniswapLiquidityInput } from './uniswap-liquidity-authoring';
 import { defaultPoolRange, validCryptoSelection, canSelectCryptoAssets, cryptoInputOf, type CryptoSelection, type CryptoSelections } from './crypto-action-picker';
 import { actionReviewValue } from './canvas-action-setup';
-import type { CanvasLayout } from './canvas-layout';
+import { canvasPosition, type CanvasLayout } from './canvas-layout';
 import { editorReducer, initialEditor, type EditorState } from './editor';
 import { freeze, type Workflow } from './initial-workflow';
 import { canEditCanvasAmount, canvasAmountCommand, amountCommandTarget, bridgeSetupNetworks, CANVAS_BRIDGE_NETWORK_OPTIONS, type CanvasActionSetup, type CanvasAmountInputs, type CanvasBridgeNetworks, type CanvasBridgeNetworkInputs, type CanvasRecipientInputs } from './canvas-action-setup';
@@ -76,7 +76,7 @@ export function planCanvasDuplicate(workflow: Workflow, layout: CanvasLayout, no
     .map(edge => ({ ...edge, fromNodeId: copies.get(edge.fromNodeId)!, toNodeId: copies.get(edge.toNodeId)! }));
   const candidate = { ...workflow, revision: workflow.revision + 1,
     nodes: [...workflow.nodes, ...nodes], resourceEdges: [...workflow.resourceEdges, ...resourceEdges] };
-  try { validateAuthoringWorkflow(candidate, context); } catch { return null; }
+  try { validateWorkflowDraft(candidate, context); } catch { return null; }
   const duplicateLayout = { ...layout };
   for (const [index, node] of sources.entries()) {
     const sourcePosition = layout[node.nodeId]?.actionType === node.actionType
@@ -206,7 +206,7 @@ export function editorHistoryReducer(state: EditorHistory, action: HistoryAction
     // Preserve its exact IR/revision; this creates no Review or execution authority.
     if(state.actionSetup||Object.keys(state.amountInputs).length||state.editor.workflow.revision!==0||state.past.length||!state.editor.workflow.nodes.every(n=>n.actionType.startsWith('mock-')))return state;
     try {
-      const workflow=validateAuthoringWorkflow(action.workflow,createBaseSepoliaReviewContext());
+      const workflow=validateWorkflowDraft(action.workflow,createBaseSepoliaReviewContext());
       if(!isLendingComposition(workflow))return state;
       return {...state,editor:{workflow:freeze(workflow),error:null},layout:{},past:[],future:[]};
     } catch {return state;}
@@ -296,7 +296,10 @@ export function editorHistoryReducer(state: EditorHistory, action: HistoryAction
   }
   const actionSetup = state.actionSetup?.id === action.authoringId ? null : state.actionSetup;
   if (editor.workflow === state.editor.workflow && actionSetup === state.actionSetup && Object.keys(amountInputs).length === Object.keys(state.amountInputs).length) return { ...state, editor };
-  let layout = state.layout;
+  let layout = { ...state.layout };
+  workflowDependencyOrder(state.editor.workflow.nodes).filter(n => !n.actionType.startsWith('mock-')).forEach((node, index) => {
+    if (!layout[node.nodeId]) layout[node.nodeId] = { ...(isLendingComposition(state.editor.workflow) ? { x: 180, y: 35 + index * 230 } : canvasPosition({}, node, index)), actionType: node.actionType };
+  });
   const position = action.position ?? (state.actionSetup && state.actionSetup.id === action.authoringId ? state.layout[state.actionSetup.id] : undefined);
   if (position) {
     const added = editor.workflow.nodes.find(node => !state.editor.workflow.nodes.some(previous => previous.nodeId === node.nodeId));
