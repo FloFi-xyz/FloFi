@@ -102,7 +102,7 @@ function evidenceFixture(scenario: EvidenceScenario, fixture: ReturnType<typeof 
   }, evidence: scenario === 'cow-reconciled' ? { bundle: { ...evidenceBundle, environment: 'MOCKED' } } : null } } } as unknown as ExecutionLifecycleSource;
   if (scenario === 'partial' || scenario === 'recovered') {
     const supply = createAuthoredSupply('supply', { network: 'Base Sepolia', asset: 'USDC', amount: '100', beneficiary: fixture.authorization.owner! });
-    const workflow = { ...fixture.workflow, nodes: [supply, { ...node, nodeId: 'later-swap' }], resourceEdges: [] };
+    const workflow = { ...fixture.workflow, nodes: [supply, { ...node, nodeId: 'later-swap', dependencies: [supply.nodeId] }], resourceEdges: [] };
     return { kind: 'lending', state: { recovered: scenario === 'recovered', record: { id: 'acceptance-partial', provenance: 'PUBLIC_TESTNET', reviews: [{ workflow, commitment: 'recorded-review', fields: { owner: fixture.wallet.account }, manifest: { owner: { chainId: 'eip155:84532' } }, calls: [{ id: 'SUPPLY', nodeId: supply.nodeId }, { id: 'SWAP', nodeId: 'later-swap' }] }],
       attempts: [{ id: 'first', step: 'SUPPLY', state: 'CONFIRMED', hash: b, reconciled: true }, { id: 'second', step: 'SWAP', state: scenario === 'recovered' ? 'CONFIRMED' : 'REVERTED', hash: c, reconciled: scenario === 'recovered' }], observations: [],
       journal: { entries: scenario === 'recovered' ? [{ level: 'attempt', entityId: 'second', toState: 'SUBMISSION_RESULT_UNKNOWN' }, { level: 'attempt', entityId: 'second', toState: 'CONFIRMED' }] : [] },

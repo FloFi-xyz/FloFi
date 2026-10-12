@@ -1,5 +1,7 @@
 # BUILD-ARB-001 — incremental plan
 
+> Phase 8 local certification is complete. See [Phase 8 certification](BUILD-ARB-001-PHASE-8-CERTIFICATION.md) for current results and corrected baseline classifications. The Phase 7 checkpoints below are historical; final GitHub checks and merge are tracked by the BUILD-ARB pull request.
+
 Baseline: `4df974f6ae6ae1d22b86f220db6281294cd20035` (BASE-001 / PR #81).
 Branch: `codex/build-arb-001-network-ux`.
 Inputs: [discovery and capability matrix](BUILD-ARB-001-DISCOVERY.md), [read verification](BUILD-ARB-001-READ-VERIFICATION.json),

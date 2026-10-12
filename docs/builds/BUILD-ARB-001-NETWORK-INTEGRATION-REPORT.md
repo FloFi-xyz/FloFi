@@ -1,5 +1,7 @@
 # BUILD-ARB-001 — Arbitrum One network integration report
 
+> Phase 8 local certification is complete. See [Phase 8 certification](BUILD-ARB-001-PHASE-8-CERTIFICATION.md) for current results and corrected baseline classifications. The Phase 7 checkpoints below are historical; final GitHub checks and merge are tracked by the BUILD-ARB pull request.
+
 Checkpoint: **Phase 7B COMPLETE — UX-008 / UX-009 / UX-010**, 2026-10-12. **BUILD-ARB-001 is not final**.
 Branch/worktree: `codex/build-arb-001-network-ux`, `/home/asus/projects/flofi-arb`.
 Recovered clean Phase 7A parent: `04555b0f67cfcb70bb5c414196d23d41e04b3844`; Phase 6 parent: `ab5919842e036047047e614ebdb7176d06ba4aeb`.

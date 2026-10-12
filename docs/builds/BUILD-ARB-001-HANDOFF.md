@@ -1,5 +1,7 @@
 # BUILD-ARB-001 Handoff
 
+> Phase 8 local certification is complete. See [Phase 8 certification](BUILD-ARB-001-PHASE-8-CERTIFICATION.md) for current results and corrected baseline classifications. The Phase 7 checkpoints below are historical; final GitHub checks and merge are tracked by the BUILD-ARB pull request.
+
 ## Final Phase 7B checkpoint — 2026-10-12
 
 - CURRENT HEAD: the Phase 7B checkpoint commit containing this record; resolve with

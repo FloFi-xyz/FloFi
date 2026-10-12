@@ -43,6 +43,8 @@ const profiles = phase === 'composition' ? [
   ['arbitrum-authoring-certification', ['--config', 'playwright.arbitrum-authoring.config.ts'], {}],
   // BUILD-ARB-001 Phase 7: owner-approved workflow UX (authoring only; replay Copilot, passive wallet, MOCKED registry harness).
   ['workflow-ux-authoring', ['--config', 'playwright.workflow-ux.config.ts'], {}],
+  // Phase 7B: toolbar geometry, insertion viewport and canonical connections use the same passive-wallet profile.
+  ['canvas-workflow-ux', ['--config', 'playwright.canvas-workflow-ux.config.ts', 'canvas-workflow-ux.spec.ts'], {}],
   ['base-mainnet-authoring', ['base-mainnet-authoring.spec.ts'], { GRYLOO_BASE_MAINNET_E2E: 'MOCKED_LOOPBACK_ONLY', FLOFI_COPILOT: 'replay' }],
   ['uniswap-provenance', [boundary], { FLOFI_RELEASE_PROVENANCE_PROFILE: 'uniswap', GRYLOO_UNISWAP_LIQUIDITY_E2E: 'MOCKED_LOOPBACK_ONLY' }],
   ['router-provenance', [boundary], { FLOFI_RELEASE_PROVENANCE_PROFILE: 'router', GRYLOO_ROUTER_E2E: 'MOCKED_LOOPBACK_ONLY' }],
