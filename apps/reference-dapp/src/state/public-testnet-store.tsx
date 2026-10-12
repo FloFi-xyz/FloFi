@@ -47,6 +47,8 @@ function message(error: unknown): string {
     WRONG_PROVIDER_CHAIN: 'The provider is not on the reviewed network.', PUBLIC_NETWORK_UNAVAILABLE: 'This network is not enabled on this app instance.',
     ATTEMPT_ALREADY_ACTIVE: 'A transaction is already in progress. Check its result before trying again.',
     SWAP_ALREADY_ATTEMPTED: 'This swap was already submitted. Check its result before trying again.',
+    // BUILD-FIX-UX-001: owner-bound mainnet swaps keep the reviewed wallet nonce reserved for the earlier request (a deliberate safety rule).
+    SWAP_NONCE_ALREADY_RESERVED: 'This wallet\'s next transaction on this network is still reserved for an earlier request, so a different one cannot be prepared yet. Nothing was sent.',
     RECONCILIATION_MISMATCH: 'The transaction needs manual review. The observed balances did not match the swap bounds.',
   };
   return messages[code] ?? (code.startsWith('PUBLIC_') ? 'The public testnet request could not be completed. Try again.' : code || 'Could not continue. Try again.');
@@ -68,6 +70,9 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
   const [recoveryOnly, setRecoveryOnly] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // BUILD-FIX-UX-001: an earlier attempt's message (e.g. a declined wallet request) belongs to that workflow; a new one starts without it.
+  const workflowId = state.workflow.workflowId;
+  useEffect(() => { setError(null); }, [workflowId]);
   const busyRef = useRef(false);
   const workflowRef = useRef(state.workflow);
   workflowRef.current = state.workflow;

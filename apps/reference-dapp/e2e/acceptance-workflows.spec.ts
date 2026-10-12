@@ -139,8 +139,7 @@ test('Save → Your workflows → exact Canvas restoration; grouped executions, 
   await stage(page, 'Build');
   const card = page.locator('.build-flow-surface .composer-card').first();
   await card.getByRole('textbox', { name: 'Source amount (USDC)', exact: true }).fill('2');
-  await card.getByRole('button', { name: 'Review amount', exact: true }).click();
-  await card.getByRole('button', { name: 'Apply amount', exact: true }).click();
+  await card.getByRole('textbox', { name: 'Source amount (USDC)', exact: true }).press('Enter');
   const run1 = await executeFixture(workflow, A), run2 = await executeFixture(workflow, A);
   const executed = { ...workflow, workflowId: 'executed-only-' + crypto.randomUUID() };
   await executeFixture(executed, A);

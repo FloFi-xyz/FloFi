@@ -20,8 +20,16 @@ import { networkIdentity } from '../domain/network-registry';
 import type { CryptoSelection } from '../domain/crypto-action-picker';
 import { AssetSearch } from './asset-search';
 import { ProposalReviewArtifact } from './proposal-review';
+import { usdLine, type UsdLine } from '../domain/usd-estimate';
 
-export type CanvasAmountEditor = { value: string; changed: boolean; canApply: boolean; formId?: string; onChange(value: string): void; onReview(): string | null; onApply(): void; onCancel?: () => void };
+export type CanvasAmountEditor = { value: string; changed: boolean; canApply: boolean; formId?: string; onChange(value: string): void; onReview(): string | null; onApply(): void; onCancel?: () => void;
+  /**
+   * BUILD-FIX-UX-001: Enter (or leaving the card) applies a valid draft to the editable workflow — no Review/Apply step for an ordinary
+   * amount. Returns the validation message; an invalid draft never changes the workflow. Not authorization (see `commitCanvasAmount`).
+   */
+  onCommit?: () => string | null;
+  /** Why the draft cannot apply yet (an unavailable network or bridge pair), or null. */
+  blocked?: string | null };
 export function supplyReviewFormId(nodeId: string) { return `composer-supply-review-${nodeId}`; }
 
 export function poolReviewFormId(nodeId: string) { return `composer-pool-review-${nodeId}`; }
@@ -255,28 +263,32 @@ function PoolPricePanel({ strategy, onSelect, onCollapse }: { strategy: PoolPric
 }
 
 /** Display priority is shared by all value boxes in the card; token inputs keep their denomination. */
-function ValueBox({ amount, token, network, source, label, hint, editor, inputLabel, equity, picker, fiatFirst, onFiatFirstChange, readOnly = false }: { readOnly?: boolean; amount?: string | undefined; token: string; network: string; source?: boolean; label?: string; hint: string; editor?: Pick<CanvasAmountEditor, 'value' | 'formId' | 'onChange'> | undefined; inputLabel?: string; equity?: { symbol: string; onToggle(): void; expanded: boolean; controls: string }; picker?: TokenPickerControl; fiatFirst: boolean; onFiatFirstChange: (fiatFirst: boolean) => void }) {
+function ValueBox({ amount, token, network, source, label, hint, editor, inputLabel, equity, picker, fiatFirst, onFiatFirstChange, readOnly = false, invalid = false, usd }: { usd?: UsdLine; invalid?: boolean; readOnly?: boolean; amount?: string | undefined; token: string; network: string; source?: boolean; label?: string; hint: string; editor?: (Pick<CanvasAmountEditor, 'value' | 'formId' | 'onChange'> & { onEscape?: () => void }) | undefined; inputLabel?: string; equity?: { symbol: string; onToggle(): void; expanded: boolean; controls: string }; picker?: TokenPickerControl; fiatFirst: boolean; onFiatFirstChange: (fiatFirst: boolean) => void }) {
   const { t: tr } = useLocale();
   if (readOnly) return <span className={`numeric composer-amount-box ${source ? 'composer-amount' : 'composer-destination-box'}`}
     role="group" aria-label={tr(label ?? (source ? 'Source amount' : 'Destination amount'))} data-symbolic={!amount || undefined} title={tr(hint)}>
     <span className="composer-value-column"><span className="composer-amount-value">{tr(amount ?? '—')}</span></span>{tr(' ')}
     <TokenChip symbol={token} network={network.replace(/ \(\d+\)$/, '').replace('Robinhood Chain Testnet', 'Robinhood Chain')}/>
   </span>;
-  const tokenValue = editor ? <TokenAmountInput className={`composer-token-value ${fiatFirst ? 'composer-fiat-value' : 'composer-amount-value'}`}
+  // BUILD-FIX-UX-001: USD first is offered only when a verified USD estimate exists; otherwise the line says why there is none.
+  const usdFirst = fiatFirst && usd?.kind === 'value';
+  const tokenValue = editor ? <TokenAmountInput className={`composer-token-value ${usdFirst ? 'composer-fiat-value' : 'composer-amount-value'}`}
     aria-label={tr(inputLabel ?? `Source amount (${token})`)} inputMode="decimal" autoComplete="off" spellCheck={false} maxLength={80}
-    form={editor.formId} value={editor.value} style={fiatFirst ? { width: `${Math.max(editor.value.length, 1)}ch` } : undefined}
-    onValueChange={editor.onChange} onKeyDown={event => event.stopPropagation()}/>
-    : <span className={fiatFirst ? 'composer-fiat-value' : 'composer-amount-value'}>{tr(amount ?? '0')}</span>;
+    form={editor.formId} value={editor.value} style={usdFirst ? { width: `${Math.max(editor.value.length, 1)}ch` } : undefined}
+    aria-invalid={invalid || undefined} onValueChange={editor.onChange}
+    onKeyDown={event => { event.stopPropagation(); if (event.key === 'Escape' && editor.onEscape) { event.preventDefault(); editor.onEscape(); } }}/>
+    : <span className={usdFirst ? 'composer-fiat-value' : 'composer-amount-value'}>{tr(amount ?? '0')}</span>;
   return <span className={`numeric composer-amount-box nodrag nopan ${source ? 'composer-amount' : 'composer-destination-box'}`}
     role="group" aria-label={tr(label ?? (source ? 'Source amount' : 'Destination amount (unquoted placeholder)'))}
     data-symbolic={!amount || undefined} title={tr(hint)}>
     <span className="composer-value-column">
       <span className="composer-value-line">
-        {fiatFirst ? <button type="button" className="composer-primary-fiat" aria-label={tr("Show token amount first")} onClick={() => onFiatFirstChange(false)}>{tr("USD value unavailable")}</button> : tokenValue}
+        {usdFirst ? <button type="button" className="composer-primary-fiat" aria-label={tr("Show token amount first")} title={tr(usd.title)} onClick={() => onFiatFirstChange(false)}>{tr(usd.text)}</button> : tokenValue}
       </span>
-      {fiatFirst ? <span className="composer-token-subline">{editor ? <>{tr(tokenValue)}<span>{tr(token)}</span></>
+      {usdFirst ? <span className="composer-token-subline">{editor ? <>{tr(tokenValue)}<span>{tr(token)}</span></>
         : <span>{tr(amount ?? '0')} {tr(token)}</span>}</span>
-        : <button type="button" className="composer-fiat-value" aria-label={tr("Show fiat amount first (estimate unavailable)")} onClick={() => onFiatFirstChange(true)}>{tr("USD value unavailable")}</button>}
+        : usd?.kind === 'value' ? <button type="button" className="composer-fiat-value" data-usd="value" aria-label={tr("Show USD value first")} title={tr(usd.title)} onClick={() => onFiatFirstChange(true)}>{tr(usd.text)}</button>
+        : <span className="composer-fiat-value" data-usd={usd?.kind ?? 'unavailable'} title={tr(usd?.title ?? 'No verified USD price is available for this asset right now.')}>{tr(usd?.text ?? 'USD price unavailable')}</span>}
     </span>
     {equity ? <EquityPill equity={equity.symbol} onToggle={equity.onToggle} expanded={equity.expanded} controls={equity.controls}/> : picker ? <TokenPill symbol={token} network={network} picker={picker}/> : <TokenChip symbol={token} network={network}/>}
   </span>;
@@ -306,6 +318,8 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
   // UX-007: the shared live quote for swap cards (Swap and the Stocks swap): calculating at once, then this exact amount's estimate or none.
   const quote = useLiveQuote(card.summary.action === 'Swap' || card.summary.action === 'Stocks' ? card.estimateWorkflow : undefined, card.estimateNodeId ?? '', card.estimateOwner);
   const estimate = quote.status === 'ready' ? quote.estimate : null;
+  const usdState = { status: quote.status === 'calculating' ? 'pending' as const : estimate ? 'ready' as const : 'none' as const,
+    mocked: estimate?.usd?.evidence === 'MOCKED', ...(estimate?.usd ? { observedAt: estimate.usd.observedAt } : {}) };
   const [amountError, setAmountError] = useState<string | null>(null);
   const [fiatFirst, setFiatFirst] = useState(false);
   const stocksCard = Boolean(card.stocks);
@@ -351,6 +365,13 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
   const [pairSource, pairDestination] = pair?.split(' → ') ?? [];
   const [sourceNetwork = 'Network not specified', destinationNetwork = sourceNetwork] = card.summary.chain.split(' → ');
   const editor = card.amountEditor ? { ...card.amountEditor, onChange: (value: string) => { setAmountError(null); card.amountEditor!.onChange(value); } } : undefined;
+  // BUILD-FIX-UX-001: an ordinary amount edit applies directly to the editable workflow. A chat (Copilot) proposal keeps its own review.
+  const directCommit = Boolean(editor?.onCommit && !card.contextualProposal);
+  function commitAmount() {
+    if (!editor?.changed) return;
+    if (!directCommit) { setAmountError(editor.onReview()); return; }
+    setAmountError(editor.blocked ?? editor.onCommit!());
+  }
   function picker(side: 'source' | 'destination'): TokenPickerControl {
     if (bridgeCard) return { label: `Configure ${side} asset`, title: `${side === 'source' ? amountParts?.[2] ?? pairSource : pairDestination} on ${side === 'source' ? sourceNetwork : destinationNetwork}`, expanded: bridgePanel === side, controls: bridgePanelId, onToggle: trigger => {
       bridgeTrigger.current = trigger; setBridgePanel(current => current === side ? null : side); setTokenPanel(null);
@@ -387,29 +408,42 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
           {pairDestination && <><span className="composer-value-arrow" aria-hidden="true">↓</span><ValueBox readOnly token={pairDestination} network={destinationNetwork} hint="Output estimate unavailable" fiatFirst={false} onFiatFirstChange={setFiatFirst}/></>}
         </div>}
         {pairDestination && <span className="composer-quote-note">{tr("Estimate unavailable")}</span>}
-      </>        : amountBox ? <AmountContainer className="composer-amount-form nodrag nopan" onKeyDown={event => event.stopPropagation()} onSubmit={event => { event.preventDefault(); if (editor) setAmountError(editor.onReview()); }}>
+      </>        : amountBox ? <AmountContainer className="composer-amount-form nodrag nopan"
+        onKeyDown={event => event.stopPropagation()}
+        onSubmit={event => { event.preventDefault(); commitAmount(); }}
+        // Leaving this step (pointer or touch: a decimal keypad may have no Enter key) applies a valid draft too; focus within the step,
+        // its pickers or its Canvas node (selecting the card) does not.
+        onBlur={event => {
+          const next = event.relatedTarget, node = event.currentTarget.closest('.react-flow__node');
+          if (directCommit && editor?.changed && !(next instanceof Node && (poolNodeRef.current?.contains(next) || node?.contains(next)))) commitAmount();
+        }}>
         <ValuePair relationship="directional">
         <ValueBox source amount={amountParts?.[1]} token={amountParts?.[2] ?? pairSource ?? '—'} {...stocksCard ? { label: 'Stocks amount', inputLabel: `Stocks amount (${amountParts?.[2] ?? pairSource ?? 'USDG'})` } : {}}
-          network={sourceNetwork} editor={editor} {...stocksCard ? {} : { picker: picker('source') }} hint={editor ? 'Enter the source amount' : card.summary.amount} fiatFirst={fiatFirst} onFiatFirstChange={setFiatFirst}/>
+          network={sourceNetwork} editor={editor && directCommit && editor.changed && editor.onCancel ? { ...editor, onEscape: () => { setAmountError(null); editor.onCancel!(); } } : editor} invalid={Boolean(amountError)} {...stocksCard ? {} : { picker: picker('source') }} hint={editor ? 'Enter the source amount' : card.summary.amount} fiatFirst={fiatFirst} onFiatFirstChange={setFiatFirst}
+          usd={usdLine(sourceNetwork, estimate?.usd?.input, usdState)}/>
         <ValueBox amount={estimate?.expected ?? (quote.status === 'calculating' ? 'Calculating…' : '—')} token={pairDestination ?? '—'} network={destinationNetwork}
           {...card.stocks ? { equity: { symbol: card.stocks.equity, onToggle: () => { setStocksPanelOpen(open => !open); setTokenPanel(null); }, expanded: stocksPanelOpen, controls: stocksPanelId } } : { picker: picker('destination') }}
-          hint="Approximate read-only output; simulate before review" fiatFirst={fiatFirst} onFiatFirstChange={setFiatFirst}/>
+          hint="Approximate read-only output; simulate before review" fiatFirst={fiatFirst} onFiatFirstChange={setFiatFirst}
+          usd={usdLine(destinationNetwork, estimate?.usd?.output, usdState)}/>
         </ValuePair>
         <span className="composer-quote-note">{card.networkSelection?.valid === false ? tr('Choose matching networks') : <>{!amountParts && <>{tr(card.summary.amount)} · </>}{tr(estimate ? `Approximate · ${estimate.provider} · Simulate before review` : quote.status === 'calculating' ? 'Calculating estimate…' : quote.status === 'unavailable' ? 'Quote unavailable' : 'Estimate unavailable')}</>}</span>
-        {editor?.changed && <div className="composer-amount-actions">
+        {editor?.changed && (directCommit ? <div className="composer-amount-actions composer-amount-direct">
+          <span className="composer-amount-hint">{tr("Press Enter to apply")}</span>
+          {editor.onCancel && <button type="button" className="composer-amount-cancel" onClick={() => { setAmountError(null); editor.onCancel!(); }}>{tr("Cancel")}</button>}
+        </div> : <div className="composer-amount-actions">
           <button type="submit" className="composer-amount-review" disabled={card.networkSelection?.valid === false || card.actionSelection?.valid === false}>{tr("Review amount")}</button>
           {card.contextualProposal ? <ProposalReviewArtifact portalFromCard canApply={editor.canApply} onApply={editor.onApply}/>
             : <button type="button" className="composer-amount-apply" disabled={!editor.canApply} onClick={editor.onApply}>{tr("Apply amount")}</button>}
           {editor.onCancel && <button type="button" className="composer-amount-cancel" onClick={editor.onCancel}>{tr("Cancel")}</button>}
-        </div>}
-        {amountError && <span className="sr-only" role="alert">{tr(amountError)}</span>}
+        </div>)}
+        {amountError && <span className="composer-amount-error" role="alert">{tr(amountError)}</span>}
       </AmountContainer> : poolValues?.length === 2 ? <ValuePair relationship="contribution" className="nodrag nopan">
-        <ValueBox source label="First liquidity asset amount" inputLabel={`First liquidity amount (${poolValues[0]!.token})`} amount={poolValues[0]!.amount} token={poolValues[0]!.token} network={sourceNetwork} hint="First liquidity contribution" fiatFirst={fiatFirst} onFiatFirstChange={setFiatFirst}
+        <ValueBox source label="First liquidity asset amount" inputLabel={`First liquidity amount (${poolValues[0]!.token})`} amount={poolValues[0]!.amount} token={poolValues[0]!.token} network={sourceNetwork} hint="First liquidity contribution" fiatFirst={fiatFirst} onFiatFirstChange={setFiatFirst} usd={usdLine(sourceNetwork, null, { status: 'none' })}
           picker={picker('source')} editor={card.poolProposal ? { value: poolValues[0]!.amount, formId: card.poolProposal.formId, onChange: amount => poolContributions.edit(0, amount) } : undefined}/>
-        <ValueBox label="Second liquidity asset amount" inputLabel={`Second liquidity amount (${poolValues[1]!.token})`} amount={poolValues[1]!.amount} token={poolValues[1]!.token} network={sourceNetwork} hint="Second liquidity contribution" fiatFirst={fiatFirst} onFiatFirstChange={setFiatFirst}
+        <ValueBox label="Second liquidity asset amount" inputLabel={`Second liquidity amount (${poolValues[1]!.token})`} amount={poolValues[1]!.amount} token={poolValues[1]!.token} network={sourceNetwork} hint="Second liquidity contribution" fiatFirst={fiatFirst} onFiatFirstChange={setFiatFirst} usd={usdLine(sourceNetwork, null, { status: 'none' })}
           picker={picker('destination')} editor={card.poolProposal ? { value: poolValues[1]!.amount, formId: card.poolProposal.formId, onChange: amount => poolContributions.edit(1, amount) } : undefined}/>
       </ValuePair> : !card.inspection && ['Supply', 'Borrow', 'Repay', 'Withdraw', 'Send'].includes(card.summary.action) && (amountParts || editor)
-        ? <ValueBox source fiatFirst={fiatFirst} onFiatFirstChange={setFiatFirst} amount={amountParts?.[1]} token={amountParts?.[2] ?? 'USDC'} network={sourceNetwork} picker={picker('source')} editor={editor} hint={editor ? 'Enter the source amount' : card.summary.amount}/>
+        ? <ValueBox source fiatFirst={fiatFirst} onFiatFirstChange={setFiatFirst} usd={usdLine(sourceNetwork, null, { status: 'none' })} amount={amountParts?.[1]} token={amountParts?.[2] ?? 'USDC'} network={sourceNetwork} picker={picker('source')} editor={editor} hint={editor ? 'Enter the source amount' : card.summary.amount}/>
         : <span className="numeric composer-amount">{tr(card.summary.amount)}</span>}
       {!card.inspection && card.recipient && <RecipientField recipient={card.recipient} formId={card.supplyProposal?.formId}/>}
       {!card.inspection && card.supplyProposal && <div className="composer-amount-actions composer-supply-actions nodrag nopan" onClick={event => event.stopPropagation()}>

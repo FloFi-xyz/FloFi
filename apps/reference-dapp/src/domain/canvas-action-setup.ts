@@ -4,7 +4,7 @@ import type { Workflow } from './initial-workflow';
 import type { Command } from './commands';
 import { createUniswapLiquidityNode, type UniswapLiquidityInput } from './uniswap-liquidity-authoring';
 import { canvasAddCommand } from './canvas-authoring';
-import { swapDetails, inputSymbol, directionLabel, type Direction } from './swap-authoring';
+import { swapDetails, inputSymbol, directionLabel, SWAP_DEFAULT_SLIPPAGE_BPS, type Direction } from './swap-authoring';
 import { ROBINHOOD_NETWORK } from './asset-catalogs';
 import { networkIdentity } from './network-registry';
 import { createRouterNode, routerDetails, routerInputForNetworks, routerInputOf, routerTokensOf, ROUTER_NETWORK_OPTIONS, type RouterBridgeInput } from './router-authoring';
@@ -47,7 +47,7 @@ export function setupReviewValue(setup: CanvasActionSetup) { return setup.action
 export function cryptoSetupInput(setup: CanvasActionSetup): CryptoActionInput {
   if (!setup.cryptoSelection) throw new Error('ACTION_SELECTION_REQUIRED');
   return { selection: setup.cryptoSelection, amount: setup.action === 'pool' ? setup.input.maxUsdc : setup.amount,
-    slippage: setup.action === 'pool' ? setup.input.slippage : '50', ...(setup.cryptoBeneficiary ? { beneficiary: setup.cryptoBeneficiary } : 'beneficiary' in setup ? { beneficiary: setup.beneficiary } : {}),
+    slippage: setup.action === 'pool' ? setup.input.slippage : setup.action === 'swap' ? String(SWAP_DEFAULT_SLIPPAGE_BPS) : '50', ...(setup.cryptoBeneficiary ? { beneficiary: setup.cryptoBeneficiary } : 'beneficiary' in setup ? { beneficiary: setup.beneficiary } : {}),
     ...(setup.cryptoSelection.action === 'transfer' && setup.cryptoRecipient !== undefined ? { recipient: setup.cryptoRecipient } : {}),
     ...(setup.action === 'pool' ? { secondAmount: setup.input.maxWeth, rangeUnit: setup.input.rangeUnit, lower: setup.input.lower, upper: setup.input.upper } : {}) };
 }

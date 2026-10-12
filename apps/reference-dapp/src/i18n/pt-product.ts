@@ -172,4 +172,17 @@ export const productPortuguese: Readonly<Record<string, string>> = {
   'Good for stablecoins or pairs with low volatility': 'Bom para stablecoins ou pares de baixa volatilidade',
   'Good for volatile pairs': 'Bom para pares voláteis', 'Provide liquidity if the price falls': 'Fornecer liquidez se o preço descer',
   'Provide liquidity if the price rises': 'Fornecer liquidez se o preço subir',
+  // BUILD-FIX-UX-001: direct amount and slippage edits, USD estimates.
+  'Press Enter to apply': 'Prima Enter para aplicar', 'Press Enter to apply the amount.': 'Prima Enter para aplicar o montante.',
+  'Swap amount': 'Montante da troca', 'Swap slippage': 'Desvio da troca', 'Apply slippage': 'Aplicar desvio',
+  'No slippage limit is set for this step.': 'Este passo não tem limite de desvio definido.',
+  'Applied limit: {0} bps ({1}). A fresh simulation and Review use it.': 'Limite aplicado: {0} bps ({1}). Uma nova simulação e a Revisão usam-no.',
+  'Enter the slippage as a whole number of basis points (100 bps = 1%).': 'Introduza o desvio como um número inteiro de pontos base (100 bps = 1%).',
+  'Enter a slippage from 1 to 300 bps (0.01%–3.00%).': 'Introduza um desvio de 1 a 300 bps (0,01%–3,00%).',
+  'This step is protected. Unlock it before changing its slippage.': 'Este passo está protegido. Desbloqueie-o antes de alterar o desvio.',
+  'This slippage cannot be applied to this step.': 'Este desvio não pode ser aplicado a este passo.',
+  'Choose a network available for the connected wallet.': 'Escolha uma rede disponível para a carteira ligada.', 'Choose matching networks.': 'Escolha redes compatíveis.',
+  'Show USD value first': 'Mostrar primeiro o valor em USD', 'Test token · no USD value': 'Token de teste · sem valor em USD',
+  'Estimating USD…': 'A estimar USD…', 'USD price unavailable': 'Preço USD indisponível', 'Waiting for the current estimate.': 'A aguardar a estimativa atual.',
+  'No verified USD price is available for this asset right now.': 'Não há um preço USD verificado disponível para este ativo neste momento.',
 };

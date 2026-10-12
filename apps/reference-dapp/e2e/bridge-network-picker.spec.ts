@@ -20,14 +20,14 @@ for (const theme of ['Light', 'Dark']) test(`${theme} Bridge side pickers show s
   await expect(card.locator('.composer-chain, .composer-bridge-network-pill, .composer-bridge-identities')).toHaveCount(0);
   await expect(card).not.toContainText('Sepolia');
   await expect(card.locator('.composer-value-arrow svg')).toBeVisible();
-  await card.getByRole('button', { name: 'Show fiat amount first (estimate unavailable)', exact: true }).first().click();
+  // BUILD-FIX-UX-001: test USDC has no USD value; the card says so and offers no USD-first mode for a value that does not exist.
+  await expect(card.locator('.composer-fiat-value')).toHaveText(['Test token · no USD value', 'Test token · no USD value']);
+  await expect(card.getByRole('button', { name: 'Show USD value first', exact: true })).toHaveCount(0);
   for (const box of await card.locator('.composer-amount-box').all()) {
-    const primary = (await box.locator('.composer-primary-fiat').boundingBox())!, pill = (await box.locator('.composer-token-pill').boundingBox())!;
-    expect(primary.x + primary.width).toBeLessThan(pill.x);
+    const line = (await box.locator('.composer-fiat-value').boundingBox())!, pill = (await box.locator('.composer-token-pill').boundingBox())!;
+    expect(line.x + line.width).toBeLessThan(pill.x);
   }
-  await card.getByRole('button', { name: 'Show token amount first', exact: true }).first().click();
-  await card.getByRole('button', { name: 'Review amount', exact: true }).click();
-  await expect(card.getByRole('button', { name: 'Apply amount', exact: true })).toBeEnabled();
+  await expect(card.locator('.composer-amount-hint')).toHaveText('Press Enter to apply');
   for (const [side, current, options] of [
     ['source', 'Base Sepolia', ['Base Sepolia', 'Solana Devnet']],
     ['destination', 'Arbitrum Sepolia', ['Arbitrum Sepolia', 'Solana Devnet']],
@@ -71,15 +71,14 @@ for (const theme of ['Light', 'Dark']) test(`${theme} Bridge side pickers show s
     await network.press('Enter');
     await expect(tokens).toBeVisible(); await expect(networks).toBeVisible();
     await expect(token).toBeChecked(); await expect(network).toHaveAttribute('aria-pressed', 'true');
-    await expect(card.getByRole('button', { name: 'Apply amount', exact: true })).toBeEnabled();
+    await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '0');
     await network.press('Escape'); await expect(panel).toHaveCount(0); await expect(trigger).toBeFocused();
   }
   await setSupplyWalletChain(page, '0x2105');
   await expect(source).toHaveAttribute('title', 'USDC on Base');
   await expect(destination).toHaveAttribute('title', 'USDC on Arbitrum');
   await expect(card.getByRole('textbox')).toHaveValue('2.5');
-  await expect(card.getByRole('button', { name: 'Apply amount', exact: true })).toBeDisabled();
-  await expect(card.getByRole('button', { name: 'Review amount', exact: true })).toBeEnabled();
+  await expect(card.locator('.composer-amount-hint')).toHaveText('Press Enter to apply');
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '0');
   await source.click();
   const panel = page.getByRole('region', { name: 'Source bridge picker', exact: true });
@@ -96,7 +95,7 @@ for (const theme of ['Light', 'Dark']) test(`${theme} Bridge side pickers show s
   await expect(panel).toHaveCount(0); await expect(source).toBeFocused();
 });
 
-test('Bridge wallet network changes keep supported drafts aligned and require fresh Review / Apply', async ({ page }) => {
+test('Bridge wallet network changes keep supported drafts aligned and apply only on Enter', async ({ page }) => {
   await installSupplyWallet(page); await page.goto('/app');
   await setSupplyWalletChain(page, '0x14a34');
   await page.getByRole('button', { name: 'Add bridge', exact: true }).click();
@@ -113,17 +112,15 @@ test('Bridge wallet network changes keep supported drafts aligned and require fr
     await page.getByRole('button', { name: 'Hide bridge picker', exact: true }).click();
   };
   await card.getByRole('textbox').fill('2.5');
-  await card.getByRole('button', { name: 'Review amount', exact: true }).click();
-  await expect(card.getByRole('button', { name: 'Apply amount', exact: true })).toBeEnabled();
+  // BUILD-FIX-UX-001: a wallet network change re-aligns the draft; nothing applies until the owner presses Enter.
   await setSupplyWalletChain(page, '0x2105');
   await expect(source).toHaveAttribute('title', 'USDC on Base'); await expect(destination).toHaveAttribute('title', 'USDC on Arbitrum');
-  await expect(card.getByRole('button', { name: 'Apply amount', exact: true })).toBeDisabled();
   await expect(page.getByRole('button', { name: 'Simulate workflow', exact: true })).toBeDisabled();
   await assertOptions('source', 'Base'); await assertOptions('destination', 'Arbitrum');
   await expect(card.getByRole('textbox')).toHaveValue('2.5');
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '0');
-  await card.getByRole('button', { name: 'Review amount', exact: true }).click();
-  await card.getByRole('button', { name: 'Apply amount', exact: true }).click();
+  await card.getByRole('textbox').press('Enter');
+  await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '1');
   await card.getByRole('button', { name: 'Advanced Settings', exact: true }).click();
   const form = page.getByRole('form', { name: 'Edit cross-chain bridge', exact: true });
   await expect(form.getByLabel('Cross-chain network', { exact: true })).toBeDisabled();
@@ -146,15 +143,12 @@ test('Bridge wallet network changes keep supported drafts aligned and require fr
   expect(await form.getByLabel('Cross-chain network', { exact: true }).locator('option').allTextContents()).toEqual(['Testnet (test USDC)']);
   await assertOptions('source', 'Base Sepolia'); await assertOptions('destination', 'Arbitrum Sepolia');
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', revision!);
-  await expect(card.getByRole('button', { name: 'Apply amount', exact: true })).toBeDisabled();
-  await card.getByRole('button', { name: 'Review amount', exact: true }).click();
-  await card.getByRole('button', { name: 'Apply amount', exact: true }).click();
+  await card.getByRole('textbox').press('Enter');
+  await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', String(Number(revision) + 1));
   await expect(form.getByLabel('Cross-chain network', { exact: true })).toHaveValue('testnet');
   await setSupplyWalletChain(page, '0x2105');
-  await card.getByRole('button', { name: 'Review amount', exact: true }).click();
-  await expect(card.getByRole('button', { name: 'Apply amount', exact: true })).toBeEnabled();
   await setSupplyWalletChain(page, '0x14a34');
-  await expect(card.getByRole('button', { name: 'Apply amount', exact: true })).toBeDisabled();
+  await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', String(Number(revision) + 1));
   await card.getByRole('button', { name: 'Cancel', exact: true }).click();
   // The supply fixture has no Router provider. Canvas runs simulation rather
   // than merely navigating, so cancelling a draft cannot enable that capability.

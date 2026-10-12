@@ -1,8 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import type { UsdEstimate } from './usd-estimate';
+
 /** Presentation data only. Deliberately excludes Review, calldata, execution IDs and financial authority. */
 export type BuildEstimate = { readonly workflowHash: string; readonly nodeId: string; readonly chain: string;
   readonly provider: string; readonly expected: string; readonly minimum: string | null; readonly symbol: string;
-  readonly slippageBps: number; readonly expiresAt: string };
+  readonly slippageBps: number; readonly expiresAt: string;
+  /** BUILD-FIX-UX-001: USD equivalents from the deployment's verified price source (mainnet assets only); absent when none applies. */
+  readonly usd?: UsdEstimate | null };
 export type BuildEstimateResult = { ok: true; estimate: BuildEstimate } | { ok: false; code: string };
 
 /**

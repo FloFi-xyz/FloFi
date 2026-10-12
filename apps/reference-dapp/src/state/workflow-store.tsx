@@ -33,6 +33,13 @@ type Store = { restorationEpoch: number; state: EditorState; dispatch: Dispatch<
   editPoolSetup(id: string, input: UniswapLiquidityInput): void;
   editSwapSetupDirection(id: string, direction: Direction): void;
   reviewCanvasAmount(id: string, poolInput?: UniswapLiquidityInput): string | null; removeActionSetup(): void;
+  /**
+   * BUILD-FIX-UX-001: apply the card's amount draft (with its draft token/network selection) to the editable workflow at once — the same
+   * command and validation as `reviewCanvasAmount`, without a proposal step. Editing the draft is not authorization: the new revision
+   * retires any simulation and Review, and execution still needs a fresh simulation, Strategy Manifest acceptance and wallet signature.
+   * Returns the validation message, or null once applied.
+   */
+  commitCanvasAmount(id: string): string | null;
   restoreLendingCanvas(workflow:SemanticWorkflow):void; restoreWorkflow(workflow: SemanticWorkflow): void; adoptDraftIdentity(workflowId: string): void;
   /** UX-004: start a genuinely clean workflow (fresh draft identity; prior Review/proposal retired). Wallet and session are untouched. */
   createNewWorkflow(): void;
@@ -205,6 +212,17 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
       return null;
     } catch (cause) { return canvasAmountMessage(cause, (history.cryptoSelections[id] ?? history.actionSetup?.cryptoSelection)?.network); }
   }
+  function commitCanvasAmount(id: string) {
+    try {
+      const command = canvasAmountCommand(state, history.actionSetup, history.amountInputs, id, context, history.bridgeNetworkInputs, history.cryptoSelections, history.recipientInputs);
+      const amount = actionReviewValue(history.actionSetup, id, history.amountInputs[id], history.bridgeNetworkInputs[id], history.cryptoSelections[id], history.recipientInputs[id]);
+      if (amount === undefined) return null;
+      // The history guard re-checks that the draft is still exactly this one, so a repeated commit of the same draft is a no-op.
+      dispatchHistory({ type: 'COMMAND', command, context, authoringId: id, authoringAmount: amount });
+      setPending(current => current?.authoringId === id ? null : current);
+      return null;
+    } catch (cause) { return canvasAmountMessage(cause, (history.cryptoSelections[id] ?? history.actionSetup?.cryptoSelection)?.network); }
+  }
   const generateArtifacts = useCallback(() => {
     const workflow = workflowRef.current;
     if (incompleteRef.current || chainRef.current.pending || !generationEligibility(workflow, context).eligible) return;
@@ -230,7 +248,7 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
     createNewWorkflow: () => { setRestorationEpoch(n => n + 1); setNewWorkflow(true); setPending(null); dispatchHistory({ type: 'NEW_WORKFLOW', workflowId: `workflow-${crypto.randomUUID()}` }); }, newWorkflow, canvasLayout: history.layout, canUndo: history.past.length > 0,
     actionSetup: history.actionSetup, amountInputs: history.amountInputs, authoringIncomplete,
     bridgeNetworkInputs: history.bridgeNetworkInputs, editBridgeNetworks, cryptoSelections: history.cryptoSelections, editCryptoSelection, reviewCryptoPool,
-    startActionSetup, startStocksSetup, editCanvasAmount, editPoolSetup, editSwapSetupDirection, cancelCanvasAmount, reviewCanvasAmount, removeActionSetup,
+    startActionSetup, startStocksSetup, editCanvasAmount, editPoolSetup, editSwapSetupDirection, cancelCanvasAmount, reviewCanvasAmount, commitCanvasAmount, removeActionSetup,
     recipientInputs: history.recipientInputs, editCanvasRecipient,
     canRedo: history.future.length > 0, undo, redo, moveCanvasNodes, addCanvasCommand, duplicateCanvasNodes,
     pending, propose, applyProposal, dismissProposal: () => setPending(null), ...reviewState,

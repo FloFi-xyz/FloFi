@@ -32,6 +32,20 @@ export function formatHumanAmount(units: string, symbol: Symbol, context: Review
   const fractional = padded.slice(-decimals).replace(/0+$/, '');
   return fractional ? `${whole}.${fractional}` : whole;
 }
+/** BUILD-FIX-UX-001: the slippage limit a newly created swap starts with: 100 bps (1%), the highest limit Review accepts without a warning. */
+export const SWAP_DEFAULT_SLIPPAGE_BPS = 100;
+/** Every swap runtime refuses more than 300 bps and Review blocks above it; a direct edit outside 1–300 bps is refused before it applies. */
+export const SWAP_SLIPPAGE_RANGE = { minimum: 1, maximum: 300 } as const;
+/** A direct Canvas slippage edit: the exact integer bps, refused (never clamped) outside the swap range. */
+export function parseSwapSlippageEdit(text: unknown): number {
+  const value = parseSlippage(typeof text === 'string' ? text.trim() : text);
+  if (value < SWAP_SLIPPAGE_RANGE.minimum || value > SWAP_SLIPPAGE_RANGE.maximum) throw new Error('SLIPPAGE_OUT_OF_RANGE');
+  return value;
+}
+/** "100 bps (1.00%)" — the exact percentage a bps limit means. */
+export function slippagePercent(bps: number): string {
+  return `${(bps / 100).toFixed(2)}%`;
+}
 export function parseSlippage(text: unknown): number {
   if (typeof text !== 'string' || text.length === 0 || text.length > 5 || !/^(0|[1-9][0-9]*)$/.test(text)) throw new Error('INVALID_SLIPPAGE');
   const value = Number(text);

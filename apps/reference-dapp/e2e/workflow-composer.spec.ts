@@ -156,17 +156,19 @@ test('accepted settings update the card and existing warnings link to Selected A
   await open(page); await page.getByRole('button', { name: 'Add swap', exact: true }).click();
   await configureCanvasAction(page, '1');
   await openCanvasSettings(page);
+  // BUILD-FIX-UX-001: the settings amount is the card's draft; Enter applies it (one revision), and slippage applies directly.
   await inspector(page).getByLabel('Input amount (USDC)').fill('2.5');
-  await cards(page).getByRole('button', { name: 'Review amount', exact: true }).click();
   await expect(cards(page).getByRole('textbox', { name: 'Source amount (USDC)', exact: true })).toHaveValue('2.5');
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '1');
   await expect(cards(page).locator('.composer-amount .composer-amount-token')).toHaveText('USDC');
-  await page.getByRole('button', { name: 'Apply amount' }).click();
+  await inspector(page).getByLabel('Input amount (USDC)').press('Enter');
+  await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '2');
   await expect(cards(page).getByRole('textbox', { name: 'Source amount (USDC)', exact: true })).toHaveValue('2.5');
   await expect(cards(page).locator('.composer-amount .composer-amount-token')).toHaveText('USDC');
   await inspector(page).getByLabel('Slippage (bps)').fill('200');
-  await inspector(page).getByRole('button', { name: 'Review Swap settings', exact: true }).click();
-  await cards(page).getByRole('button', { name: 'Apply amount', exact: true }).click();
+  await inspector(page).getByRole('button', { name: 'Apply slippage', exact: true }).click();
+  await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '3');
+  await expect(inspector(page)).toContainText('Applied limit: 200 bps (2.00%)');
   await expect(cards(page)).not.toHaveAttribute('data-state', 'warning');
   await expect(cards(page)).not.toContainText('Warning');
   await expect(inspector(page).getByLabel('Selected action checks')).toContainText('Review the prototype slippage limit.');
@@ -269,8 +271,9 @@ test('Swap and Bridge source/destination boxes select the existing editor, prese
     expect(destinationBox.y).toBeGreaterThanOrEqual(sourceBox.y + sourceBox.height + 3);
     expect(destinationBox.width).toBe(sourceBox.width);
     for (const valueBox of [amount, destination]) {
-      await expect(valueBox.locator('.composer-fiat-value')).toHaveText('USD value unavailable');
-      await expect(valueBox.locator('.composer-fiat-value')).toHaveAttribute('aria-label', /unavailable/);
+      // BUILD-FIX-UX-001: without a verified USD price the line states why (never a fabricated number).
+      await expect(valueBox.locator('.composer-fiat-value')).toHaveText(/^(Test token · no USD value|USD price unavailable)$/);
+      await expect(valueBox.locator('.composer-fiat-value')).toHaveAttribute('title', /no market value|No verified USD price/);
       await expect(valueBox.locator('.composer-token-avatar')).toBeVisible();
       const value = (await valueBox.locator('.composer-value-column').boundingBox())!;
       const token = (await valueBox.locator('.composer-token-pill').boundingBox())!;

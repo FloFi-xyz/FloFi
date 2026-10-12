@@ -39,9 +39,7 @@ test('Build, Simulate and Execute retain their current workflow through Dashboar
   await page.getByRole('button', { name: 'Add swap', exact: true }).click();
   const amount = page.getByRole('textbox', { name: 'Source amount (USDC)', exact: true });
   await expect(amount).toBeVisible();
-  await amount.fill('2.5');
-  await page.getByRole('button', { name: 'Review amount', exact: true }).click();
-  await page.getByRole('button', { name: 'Apply amount', exact: true }).click();
+  await amount.fill('2.5'); await amount.press('Enter');
   const nav = page.getByRole('navigation', { name: 'Workflow stages' });
   await nav.getByRole('button', { name: 'Dashboard', exact: true }).click();
   await expect(page).toHaveURL(/\/app\/dashboard$/);

@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { canContinueExecution, projectExecution, startReviewedExecution, type ExecutionWorkspaceState } from '../domain/execution-presentation';
 import type { ExecutionLifecycle } from '../domain/execution-lifecycle';
 import type { ExecutionRecovery } from '../domain/execution-recovery';
-import { projectExecutionResult } from '../domain/execution-result';
+import { currentExecution, projectExecutionResult } from '../domain/execution-result';
 
 export type ExecutionControlsState = ExecutionWorkspaceState & { progress?: ExecutionLifecycle; recovery?: ExecutionRecovery };
 /** Shared explicit request controls. Mounted across stages so navigation cannot clear a submission lock. */
@@ -17,7 +17,8 @@ export function useExecutionControls(props: ExecutionControlsState) {
   // UX-004: a new workflow identity does not inherit the previous workflow's failed-request or failed-check notice (presentation only).
   const workflowId = props.workflow.workflowId;
   useEffect(() => { setRequestFailed(false); setCheckFailed(false); }, [workflowId]);
-  const progress = props.progress, live = progress?.started ? progress : null;
+  // BUILD-FIX-UX-001: a final run of another (new or edited) workflow is not this workflow's execution state.
+  const progress = props.progress, live = currentExecution(progress);
   const [clock, setClock] = useState(() => Date.now());
   const [acknowledgement, setAcknowledgement] = useState<string | null>(null);
   const acknowledgementKey = JSON.stringify([authorization.key, wallet.account, wallet.chain, wallet.changed]);

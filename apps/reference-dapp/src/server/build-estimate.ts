@@ -12,6 +12,9 @@ import { catalogNetworkOfChain, localCatalogNetworkMode, type CatalogNetworkId }
 import { baseSepoliaSwapRpc, ethereumSepoliaSwapRpc } from './public-testnet-rpc.ts';
 import { createSolanaRpc, solanaRpcOverride } from './solana-rpc.ts';
 import { createJupiterHttp } from './jupiter-http.ts';
+import { deploymentPriceSource } from '../automations/config.ts';
+import type { PriceSource } from '../automations/price-source.ts';
+import { priceAssetOf, usdAmount, type PriceAsset, type UsdEstimate } from '../domain/usd-estimate.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
 type QuoteReader = ReturnType<typeof createPublicSwapQuoteReader>;
@@ -25,10 +28,32 @@ function catalogReader(id: CatalogNetworkId, mode: 'live' | 'harness', build: ()
   return reader;
 }
 
+// BUILD-FIX-UX-001: the deployment's price source, built once per process (its Chainlink feed verification is cached per instance).
+let processPrices: PriceSource | null | undefined;
+const USD_WAIT_MS = 2_500;
+type QuoteSide = { readonly symbol: string; readonly units: string; readonly decimals: number };
+/**
+ * USD equivalents of a MAINNET quote's two sides — each only for an asset the verified price source observes freshly (a stale, failed or
+ * slow observation gives none). Bounded, so a price read never delays the token estimate itself.
+ */
+async function usdOf(prices: PriceSource | null, now: Date, sides: readonly [QuoteSide, QuoteSide]): Promise<UsdEstimate | null> {
+  if (!prices) return null;
+  const assets = [...new Set(sides.map(side => priceAssetOf(side.symbol)).filter((asset): asset is PriceAsset => asset !== null && prices.assets.includes(asset)))];
+  if (!assets.length) return null;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const observed = await Promise.race([Promise.all(assets.map(async asset => [asset, await prices.observe(asset, now).catch(() => null)] as const)),
+    new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), USD_WAIT_MS); })]).finally(() => clearTimeout(timer));
+  const fresh = new Map((observed ?? []).flatMap(([asset, result]) => result?.ok ? [[asset, result.observation] as const] : []));
+  const value = (side: QuoteSide) => { const o = fresh.get(priceAssetOf(side.symbol)!); return o ? usdAmount(side.units, side.decimals, o.priceUsd) : null; };
+  const input = value(sides[0]), output = value(sides[1]), first = [...fresh.values()].sort((a, b) => a.observedAt.localeCompare(b.observedAt))[0];
+  return first && (input || output) ? { input, output, source: first.source, evidence: first.evidence, observedAt: first.observedAt } : null;
+}
+
 /** Adapter/profile selected reads; no execution store, session, Review, signature or submission port. */
 export async function readBuildEstimate(input: unknown, env: Env = process.env,
-  seams: { rpc?: Rpc; http?: ReturnType<typeof createJupiterHttp>; now?: () => Date; catalog?: CatalogSwapRuntime } = {}): Promise<BuildEstimateResult> {
+  seams: { rpc?: Rpc; http?: ReturnType<typeof createJupiterHttp>; now?: () => Date; catalog?: CatalogSwapRuntime; prices?: PriceSource | null } = {}): Promise<BuildEstimateResult> {
   try {
+    const prices = () => seams.prices !== undefined ? seams.prices : env === process.env ? processPrices === undefined ? processPrices = deploymentPriceSource(env) : processPrices : deploymentPriceSource(env);
     if (!input || typeof input !== 'object') throw Error('ESTIMATE_INVALID');
     const { workflow: raw, nodeId, owner } = input as { workflow?: unknown; nodeId?: unknown; owner?: unknown };
     const workflow = validateArtifact('semantic-workflow', raw) as SemanticWorkflow;
@@ -55,9 +80,11 @@ export async function readBuildEstimate(input: unknown, env: Env = process.env,
       const reader = env === process.env && !seams.rpc && !seams.catalog ? catalogReader(catalogNetwork.id, mode, build) : build();
       const q = await reader(workflow, 'read-only');
       if (q.outputDecimals === undefined) return { ok: false, code: 'ESTIMATE_UNAVAILABLE' };
+      const usd = q.environment === 'MAINNET' && q.inputDecimals !== undefined ? await usdOf(prices(), now(), [{ symbol: q.inputSymbol, units: q.amountIn, decimals: q.inputDecimals },
+        { symbol: q.outputSymbol, units: q.expectedOut, decimals: q.outputDecimals }]) : null;
       return { ok: true, estimate: { workflowHash, nodeId: node.nodeId, chain: node.chainId, provider: 'Uniswap V3',
         expected: simulationAmount(q.expectedOut, q.outputDecimals)!, minimum: simulationAmount(q.minimumOut, q.outputDecimals), symbol: q.outputSymbol,
-        slippageBps: q.slippageBps, expiresAt: q.expiresAt } };
+        slippageBps: q.slippageBps, expiresAt: q.expiresAt, usd } };
     };
     if (node.chainId === 'eip155:8453' && uniswap) {
       const read = await readBaseQuoteOnServer({ workflow, nodeId }, { env });
@@ -71,10 +98,12 @@ export async function readBuildEstimate(input: unknown, env: Env = process.env,
       if (!best || best.kind !== 'QUANTITY') return { ok: false, code: 'ESTIMATE_UNAVAILABLE' };
       const amount = node.inputs.find(v => v.name === 'amount-in');
       const slip = node.userConstraints.find(c => c.kind === 'MAXIMUM_SLIPPAGE_BPS');
+      const symbol = amount?.kind === 'QUANTITY' && amount.value.asset.decimals === 6 ? 'WETH' : 'USDC';
+      const usd = amount?.kind === 'QUANTITY' ? await usdOf(prices(), now(), [{ symbol: symbol === 'WETH' ? 'USDC' : 'WETH', units: amount.value.amount, decimals: amount.value.asset.decimals },
+        { symbol, units: best.value.amount, decimals: best.value.asset.decimals }]) : null;
       return { ok: true, estimate: { workflowHash, nodeId: node.nodeId, chain: node.chainId, provider: 'Uniswap V3',
-        expected: simulationAmount(best.value.amount, best.value.asset.decimals)!, minimum: null,
-        symbol: amount?.kind === 'QUANTITY' && amount.value.asset.decimals === 6 ? 'WETH' : 'USDC',
-        slippageBps: slip?.kind === 'MAXIMUM_SLIPPAGE_BPS' ? slip.maximumBps : 0, expiresAt: artifact.freshness.expiresAt } };
+        expected: simulationAmount(best.value.amount, best.value.asset.decimals)!, minimum: null, symbol,
+        slippageBps: slip?.kind === 'MAXIMUM_SLIPPAGE_BPS' ? slip.maximumBps : 0, expiresAt: artifact.freshness.expiresAt, usd } };
     }
     // UX-007: catalog networks (Base, Arbitrum One, Robinhood Chain) quote through the one shared read-only swap quote reader that
     // Simulate uses, under the network's own deployment gate (off: no estimate). No owner binding, approval state or Review is produced.
@@ -83,9 +112,11 @@ export async function readBuildEstimate(input: unknown, env: Env = process.env,
       // The taker is an untrusted quote parameter only; this read never binds ownership or grants authority.
       const intent = jupiterIntent(workflow, owner), http = seams.http ?? createJupiterHttp(JUPITER_SOLANA_MAINNET.api + JUPITER_SOLANA_MAINNET.endpoint, env.JUPITER_API_KEY);
       const q = parseJupiterBuild(await http(jupiterBuildQuery(intent)), intent, now().toISOString()).quote;
+      const usd = await usdOf(prices(), now(), [{ symbol: intent.input.symbol, units: intent.amount, decimals: intent.input.decimals },
+        { symbol: intent.output.symbol, units: q.outAmount, decimals: intent.output.decimals }]);
       return { ok: true, estimate: { workflowHash, nodeId: node.nodeId, chain: node.chainId, provider: 'Jupiter',
         expected: simulationAmount(q.outAmount, intent.output.decimals)!, minimum: simulationAmount(q.otherAmountThreshold, intent.output.decimals),
-        symbol: intent.output.symbol, slippageBps: intent.slippageBps, expiresAt: new Date(now().getTime() + 30_000).toISOString() } };
+        symbol: intent.output.symbol, slippageBps: intent.slippageBps, expiresAt: new Date(now().getTime() + 30_000).toISOString(), usd } };
     }
     if (node.chainId === ORCA_WHIRLPOOLS_DEVNET.chain && typeof owner === 'string') {
       const rpc = seams.rpc ?? createSolanaRpc(solanaRpcOverride(env.GRYLOO_SOLANA_DEVNET_RPC_URL, 'DEVNET_SWAP_RPC_URL_INVALID') ?? ORCA_WHIRLPOOLS_DEVNET.rpc, false);

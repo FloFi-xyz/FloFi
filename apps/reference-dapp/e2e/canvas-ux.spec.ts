@@ -25,8 +25,7 @@ async function addFromToolbox(page: Page, action: string) {
     await card.getByRole('button', { name: 'Apply', exact: true }).click();
   } else {
     await card.getByRole('textbox', { name: 'Source amount (USDC)', exact: true }).fill('1');
-    await card.getByRole('button', { name: 'Review amount', exact: true }).click();
-    await card.getByRole('button', { name: 'Apply amount', exact: true }).click();
+    await card.getByRole('textbox', { name: 'Source amount (USDC)', exact: true }).press('Enter');
   }
   await expect(page.locator('.build-flow-surface .react-flow__node')).toHaveCount(before + 1);
   await settledViewport(page);
@@ -141,8 +140,7 @@ test('selected action parameters edit shared IR', async ({ page }) => {
   await addFromToolbox(page, 'swap');
   const card = page.locator('.build-flow-surface .composer-card');
   await card.getByRole('textbox', { name: 'Source amount (USDC)' }).fill('2.5');
-  await card.getByRole('button', { name: 'Review amount', exact: true }).click();
-  await card.getByRole('button', { name: 'Apply amount', exact: true }).click();
+  await card.getByRole('textbox', { name: 'Source amount (USDC)' }).press('Enter');
   await expect(card.getByRole('textbox', { name: 'Source amount (USDC)' })).toHaveValue('2.5');
   const ir = JSON.parse(await readWorkflowIr(page));
   expect(ir.nodes.find((node: { nodeId: string }) => node.nodeId === 'node-002').inputs).toContainEqual(expect.objectContaining({ name: 'amount-in', value: expect.objectContaining({ amount: '2500000' }) }));

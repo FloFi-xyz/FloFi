@@ -7,6 +7,7 @@ import { createCryptoActionNode, selectCryptoNetwork } from './crypto-action-pic
 import { projectReview } from './review-presentation';
 import { projectCanvasAction } from './canvas-lifecycle';
 import { projectExecutionLifecycle, type ExecutionLifecycleSource } from './execution-lifecycle';
+import { currentExecution, isFinalExecutionResult, nothingSubmitted, projectExecutionResult } from './execution-result';
 import { reviewFixture, reviewNow, reviewExpiry } from '../test-utils/review-fixture';
 import type { SimulationSource } from './simulation-presentation';
 import type { ExecutionControlsState } from '../state/execution-controls';
@@ -34,6 +35,58 @@ function fixture(kind: 'public' | 'router' | 'supply' | 'solana-swap'): Executio
     execution: { ready: true, started: false, start: vi.fn(), prompt: '', expiresAt: null, requiresMainnetAcknowledgement: false } };
 }
 describe('shared Canvas lifecycle across runtime projections', () => {
+  // BUILD-FIX-UX-001: (1) declined before submission, (2) submitted and failed, (3) confirmed, (4) unknown outcome.
+  function publicRun(attempts: { step: string; state: string; txHash: string | null }[], options: { restored?: boolean; workflowId?: string } = {}) {
+    const f = fixture('public');
+    const run = { workflow: f.workflow, quote: { executionId: 'pub-run', nodeId: f.workflow.nodes.at(-1)!.nodeId, chainId: 84532 }, attempts };
+    const state = { ...f.source.state, recoveryOnly: Boolean(options.restored), retired: Boolean(options.restored), run };
+    if (options.workflowId) f.workflow = { ...f.workflow, workflowId: options.workflowId };
+    f.source = { kind: 'public', state } as unknown as SimulationSource;
+    f.progress = projectExecutionLifecycle(f.workflow, f.context, { kind: 'public', state } as unknown as ExecutionLifecycleSource);
+    return f;
+  }
+  const hash = (c: string) => `0x${c.repeat(64)}`;
+  it('a wallet request declined before submission concludes the attempt: Simulate again, also after a reload, never "Recover execution"', () => {
+    for (const restored of [false, true]) {
+      const f = publicRun([{ step: 'approval', state: 'REJECTED', txHash: null }], { restored });
+      expect(projectExecutionResult(f.progress)).toMatchObject({ label: 'Transaction not submitted' });
+      expect(isFinalExecutionResult(f.progress)).toBe(true); expect(nothingSubmitted(f.progress)).toBe(true);
+      expect(currentExecution(f.progress)).toBe(f.progress);
+      expect(projectCanvasAction(f, controls, reviewNow)).toEqual({ kind: 'simulate', label: 'Simulate again', disabled: false });
+    }
+  });
+  it('a new workflow (fresh identity, even the same swap) is not bound to a final earlier run, which stays recorded', () => {
+    for (const attempts of [[{ step: 'approval', state: 'REJECTED', txHash: null }],
+      [{ step: 'approval', state: 'CONFIRMED', txHash: hash('a') }, { step: 'swap', state: 'REVERTED', txHash: hash('b') }],
+      [{ step: 'approval', state: 'CONFIRMED', txHash: hash('a') }, { step: 'swap', state: 'CONFIRMED', txHash: hash('b') }]]) {
+      for (const restored of [false, true]) {
+        const f = publicRun(attempts, { restored, workflowId: 'workflow-00000000-0000-4000-8000-000000000000' });
+        expect(f.progress!.started).toBe(true); expect(f.progress!.matchesWorkflow).toBe(false);
+        expect(currentExecution(f.progress)).toBeNull();
+        expect(projectCanvasAction(f, controls, reviewNow)).toMatchObject({ kind: 'simulate', disabled: false });
+      }
+    }
+  });
+  it('a submitted run that failed or confirmed is not "nothing submitted": its own workflow shows the result, never a retry', () => {
+    const reverted = publicRun([{ step: 'approval', state: 'CONFIRMED', txHash: hash('a') }, { step: 'swap', state: 'REVERTED', txHash: hash('b') }]);
+    expect(isFinalExecutionResult(reverted.progress)).toBe(true); expect(nothingSubmitted(reverted.progress)).toBe(false);
+    expect(projectCanvasAction(reverted, controls, reviewNow)).toMatchObject({ kind: 'status', disabled: true });
+    const declinedAfterApproval = publicRun([{ step: 'approval', state: 'CONFIRMED', txHash: hash('a') }, { step: 'swap', state: 'REJECTED', txHash: null }]);
+    expect(nothingSubmitted(declinedAfterApproval.progress)).toBe(false);
+    expect(projectCanvasAction(declinedAfterApproval, controls, reviewNow)).toMatchObject({ kind: 'status', disabled: true });
+  });
+  it('an unknown or pending submission stays attached to every workflow: recovery only, never a new simulation', () => {
+    for (const attempts of [[{ step: 'approval', state: 'UNKNOWN', txHash: null }], [{ step: 'approval', state: 'PENDING', txHash: hash('a') }],
+      [{ step: 'approval', state: 'HASH', txHash: hash('a') }]]) {
+      for (const workflowId of [undefined, 'workflow-00000000-0000-4000-8000-000000000000']) {
+        const f = publicRun(attempts, workflowId ? { restored: true, workflowId } : {});
+        expect(isFinalExecutionResult(f.progress)).toBe(false); expect(nothingSubmitted(f.progress)).toBe(false);
+        expect(currentExecution(f.progress)).toBe(f.progress);
+        expect(projectCanvasAction(f, controls, reviewNow).kind).not.toBe('simulate');
+        expect(projectCanvasAction(f, { ...controls, canCheck: true }, reviewNow)).toMatchObject({ kind: 'recover' });
+      }
+    }
+  });
   it('allows a new edited workflow after completion, while preserving recovery for an unresolved old run', () => {
     const f = fixture('public');
     const state = { ...f.source.state, recoveryOnly: true, retired: true, run: {

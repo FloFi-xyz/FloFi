@@ -10,6 +10,7 @@ import { parseArbitrumTokenList, UNISWAP_V3_ARBITRUM, type AssetCatalog, type Ca
 import { readBuildEstimate } from './build-estimate';
 import { asset as rhAsset, createRobinhoodMockChain, mockCatalogRuntime, officialCatalog } from './robinhood-mainnet.test-harness';
 import { baseAsset, baseCatalog } from './base-mainnet.test-harness';
+import type { PriceResult, PriceSource } from '../automations/price-source';
 
 type Case = { name: string; chain: string; env: Record<string, string>; catalog: () => AssetCatalog; network?: 'base';
   pair: (catalog: AssetCatalog) => [CanonicalAsset, CanonicalAsset]; rate: (input: string, output: string) => Record<string, bigint>; amount: string; expected: string };
@@ -47,7 +48,9 @@ describe('UX-007 shared catalog-network live quote', () => {
     expect(Number(result.estimate.minimum)).toBeLessThan(Number(result.estimate.expected));
     expect(Date.parse(result.estimate.expiresAt)).toBeGreaterThan(T0);
     // A presentation estimate only: no Review, calldata, approval, owner binding or execution identity.
-    expect(Object.keys(result.estimate).sort()).toEqual(['chain', 'expected', 'expiresAt', 'minimum', 'nodeId', 'provider', 'slippageBps', 'symbol', 'workflowHash']);
+    expect(Object.keys(result.estimate).sort()).toEqual(['chain', 'expected', 'expiresAt', 'minimum', 'nodeId', 'provider', 'slippageBps', 'symbol', 'usd', 'workflowHash']);
+    // BUILD-FIX-UX-001: no price source is configured here, so there is no USD figure (never a fabricated one).
+    expect(result.estimate.usd).toBeNull();
   });
   it.each(CASES)('$name: the network gate off gives no estimate, before any read', async c => {
     const { workflow, seams } = setup(c);
@@ -58,5 +61,27 @@ describe('UX-007 shared catalog-network live quote', () => {
   it.each(CASES)('$name: no usable route is reported as unavailable, never a guessed number', async c => {
     const { workflow, seams } = setup(c, false);
     expect(await readBuildEstimate({ workflow, nodeId: 'node-002' }, c.env, seams)).toEqual({ ok: false, code: 'ESTIMATE_UNAVAILABLE' });
+  });
+
+  // BUILD-FIX-UX-001: USD equivalents come only from the deployment's verified price source, for an asset that has a feed.
+  const priced = (result: PriceResult, calls: string[] = []): PriceSource => ({ id: 'chainlink', maxAgeMs: 3_600_000, assets: ['ETH', 'BTC', 'SOL'],
+    observe: async asset => { calls.push(asset); return result; } });
+  const ethAt = (priceUsd: string): PriceResult => ({ ok: true, observation: { asset: 'ETH', priceUsd, observedAt: new Date(T0 - 60_000).toISOString(),
+    receivedAt: new Date(T0).toISOString(), source: 'CHAINLINK', evidence: 'PUBLIC_READ_ONLY', provenance: { network: 'base', chainId: 8453 } } });
+  const arbitrum = CASES.find(c => c.chain === 'eip155:42161')!;
+  it('values the WETH output at the fresh ETH/USD price and gives USDC (no verified feed) no figure', async () => {
+    const { workflow, seams } = setup(arbitrum), calls: string[] = [];
+    const result = await readBuildEstimate({ workflow, nodeId: 'node-002' }, arbitrum.env, { ...seams, prices: priced(ethAt('2500.5'), calls) });
+    expect(result.ok).toBe(true); if (!result.ok) return;
+    expect(calls).toEqual(['ETH']);
+    expect(result.estimate.usd).toMatchObject({ input: null, source: 'CHAINLINK', evidence: 'PUBLIC_READ_ONLY', observedAt: new Date(T0 - 60_000).toISOString() });
+    const usd = Number(result.estimate.usd!.output), expected = Number(result.estimate.expected) * 2500.5;
+    expect(Math.abs(usd - expected)).toBeLessThanOrEqual(Math.max(0.01, expected * 0.001));
+  });
+  it.each([{ ok: false, code: 'PRICE_STALE' }, { ok: false, code: 'PRICE_SOURCE_TIMEOUT' }] as const)('a $code observation gives no USD figure, and the token estimate is unchanged', async failure => {
+    const { workflow, seams } = setup(arbitrum);
+    const plain = await readBuildEstimate({ workflow, nodeId: 'node-002' }, arbitrum.env, { ...seams, prices: null });
+    const result = await readBuildEstimate({ workflow, nodeId: 'node-002' }, arbitrum.env, { ...seams, prices: priced(failure) });
+    expect(result).toEqual(plain); expect(result.ok && result.estimate.usd).toBeNull();
   });
 });
