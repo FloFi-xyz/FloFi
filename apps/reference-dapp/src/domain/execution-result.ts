@@ -40,3 +40,13 @@ export function projectExecutionResult(progress: ExecutionLifecycle | null | und
     tone: 'attention', completed, total, countLabel, networks,
   };
 }
+
+const IN_FLIGHT = ['wallet', 'signed', 'preparing', 'submitting', 'submitted', 'pending', 'uncertain', 'posted', 'settling', 'partial'];
+/**
+ * UX-004: a final outcome the owner can start over from (confirmed, declined, cancelled, failed or not submitted). An unresolved or still
+ * observable run is never final: its recovery stays in place and "Create new workflow" is not offered.
+ */
+export function isFinalExecutionResult(progress: ExecutionLifecycle | null | undefined): boolean {
+  return Boolean(progress?.started && (progress.state === 'complete' || progress.state === 'attention') &&
+    !progress.steps.some(step => step.operations.some(operation => IN_FLIGHT.includes(operation.state))));
+}

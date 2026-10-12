@@ -1459,6 +1459,74 @@
      }
     }
    }
+  },
+  {
+   "user": [
+    "Please send 5 USDC on Arbitrum"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "EN",
+      "kind": "ACTION",
+      "action": {
+       "type": "TRANSFER",
+       "network": "ARBITRUM",
+       "asset": "USDC",
+       "amount": "5",
+       "recipient": null
+      },
+      "reuse": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "Please send 5 USDC on Arbitrum",
+    "0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "EN",
+      "kind": "ACTION",
+      "action": {
+       "type": "TRANSFER",
+       "network": "ARBITRUM",
+       "asset": "USDC",
+       "amount": "5",
+       "recipient": "0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed"
+      },
+      "reuse": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "Swap 5 USDC for WETH on Base"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "EN",
+      "kind": "ACTION",
+      "action": {
+       "type": "SWAP",
+       "network": "BASE",
+       "inputAsset": "USDC",
+       "outputAsset": "WETH",
+       "amount": "5",
+       "slippageBps": null
+      },
+      "reuse": null
+     }
+    }
+   }
   }
  ]
 }

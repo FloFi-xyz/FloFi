@@ -16,6 +16,7 @@ import { copilotNetworksFor, lendingOffers, routeLabels, type StrategyAction } f
 import { resolveAssetReference } from './asset-catalogs';
 import { COPILOT_NETWORK_IDS, copilotNetworksMentioned, catalogNetworkOfChatName, networkIdentity, networkOfCopilot, type CopilotNetworkId } from './network-registry';
 import { routerNetworksOf } from './router-authoring';
+import { checkRecipient } from './recipient-address';
 
 /**
  * BUILD-COPILOT-001: the deterministic boundary between an untrusted AI intent and the existing authoring path.
@@ -147,6 +148,10 @@ export function groundedBps(text: string, value: string): boolean {
 export function groundedAddress(text: string, address: string): boolean {
   return [...text.matchAll(/(?<![0-9a-fA-Fx])0x[0-9a-fA-F]{40}(?![0-9a-fA-F])/g)].some(match => match[0].toLowerCase() === address.toLowerCase());
 }
+/** UX-001: a grounded address exactly as the user typed it (its EIP-55 case is validated); the interpreted value when it was carried. */
+function typedAddress(text: string, address: string): string {
+  return [...text.matchAll(/(?<![0-9a-fA-Fx])0x[0-9a-fA-F]{40}(?![0-9a-fA-F])/g)].map(match => match[0]).find(match => match.toLowerCase() === address.toLowerCase()) ?? address;
+}
 const assetNamed = (text: string, asset: Exclude<CopilotAsset, 'OTHER'>) => Object.hasOwn(ASSET_MENTIONS, asset)
   ? ASSET_MENTIONS[asset as Exclude<CopilotLegacyAsset, 'OTHER'>].test(text) : symbolNamed(text, asset);
 const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -216,8 +221,8 @@ function slippageOf(value: string | null, fallback: string, g: Grounding, notes:
   if (maximum !== undefined && Number(value) > maximum) return reject('COPILOT_SLIPPAGE_OUT_OF_RANGE', m.slippageAtMost(maximum));
   return value;
 }
-function addressOf(value: string | null, g: Grounding, field: 'beneficiary' | 'recipient'): string | null {
-  if (value !== null && !g.carried.has(field) && !groundedAddress(g.text, value)) return ask([field], copyOf(g).addressNotFound(field));
+function addressOf(value: string | null, g: Grounding, field: 'beneficiary' | 'recipient', notFound = copyOf(g).addressNotFound(field)): string | null {
+  if (value !== null && !g.carried.has(field) && !groundedAddress(g.text, value)) return ask([field], notFound);
   return value;
 }
 function needAsset(value: CopilotAsset | null, g: Grounding, subject: Subject, field: CarriedField): Exclude<CopilotAsset, 'OTHER'> {
@@ -400,21 +405,33 @@ function planBridge(a: CopilotBridgeAction, g: Grounding): Plan {
  * BUILD-BASE-001: a transfer on a catalog network (real funds): native ETH or a catalog token, to the connected owner or a typed address.
  * The network must be named; the sentence is the exact grammar's (`transfer 0.01 ETH on Base to 0x…`).
  */
+/** UX-001: the user names the connected owner as the destination, in the request or as the answer to "Which wallet should I send it to?". */
+const SELF_RECIPIENT = /\b(?:to|into)\s+(?:me|myself|my(?:\s+own)?(?:\s+connected)?\s+wallet)\b|\b(?:para|pra)\s+(?:mim(?:\s+mesm[oa])?|(?:a\s+)?minha(?:\s+própria)?\s+carteira)(?![\p{L}\p{N}])/iu;
+const SELF_ANSWER = /^(?:(?:to\s+)?(?:me|myself|my(?:\s+own)?(?:\s+connected)?\s+wallet)|(?:para\s+)?(?:mim(?:\s+mesm[oa])?|(?:a\s+)?minha(?:\s+própria)?\s+carteira))[.!]?$/iu;
 function planTransfer(a: CopilotTransferAction, g: Grounding): Plan {
   const m = copyOf(g), notes: string[] = [];
   if (!g.policy.catalog) return refuse(m.cannotAuthor);
   const TRANSFER_COPILOT_NETWORKS = actionNetworks('transfer', g);
   const named = mentionedNetworks(g.text);
+  // UX-001: the destination is a required slot. It is a typed address, or the connected owner only when the user says so ("to me",
+  // "to my own wallet", "para mim"); otherwise Flofi asks — it never defaults a Send to the connected wallet.
+  const self = a.recipient === null && (SELF_RECIPIENT.test(g.text) || SELF_ANSWER.test((g.latest ?? '').trim()));
   const missing: CopilotMissingField[] = [...(a.amount === null ? ['amount' as const] : []), ...(a.asset === null ? ['asset' as const] : []),
     ...(a.network === null && !TRANSFER_COPILOT_NETWORKS.some(n => named.includes(n)) ? ['network' as const] : [])];
-  if (missing.length) ask(missing, stillNeeds(m, missing, 'transfer'), missing.length === 1 && missing[0] === 'network' ? labels(TRANSFER_COPILOT_NETWORKS) : []);
+  // One combined question when other slots are missing too; a lone missing destination is asked once the asset and network resolve.
+  if (missing.length) ask(a.recipient === null && !self ? [...missing, 'recipient'] : missing, stillNeeds(m, a.recipient === null && !self ? [...missing, 'recipient'] : missing, 'transfer'),
+    missing.length === 1 && missing[0] === 'network' ? labels(TRANSFER_COPILOT_NETWORKS) : []);
   const network = resolveNetwork(a.network, TRANSFER_COPILOT_NETWORKS, g, 'transfer', notes), label = COPILOT_NETWORK_LABEL[network];
   const token = catalogToken(a.asset, network, g, 'transfer', 'asset', 'ANY', notes).asset;
   const amount = amountOf(a.amount, g, 'transfer');
-  const recipient = addressOf(a.recipient, g, 'recipient');
-  if (!recipient) notes.push(m.connectedRecipientNote);
+  // The Canvas "To" field's own network-aware check: the same canonical recipient whichever surface authored it.
+  const typed = self ? null : addressOf(a.recipient, g, 'recipient', m.sendRecipientNotFound);
+  const check = self ? { ok: true as const, recipient: 'CONNECTED_OWNER' } : checkRecipient(label, typed === null ? null : typedAddress(g.text, typed));
+  if (!check.ok) return check.code === 'TRANSFER_RECIPIENT_REQUIRED' ? ask(['recipient'], m.sendRecipientQuestion)
+    : check.code === 'TRANSFER_RECIPIENT_INVALID' ? ask(['recipient'], m.sendRecipientInvalid(label)) : refuse(m.cannotAuthor);
+  if (check.recipient === 'CONNECTED_OWNER') notes.push(m.connectedRecipientNote);
   notes.push(m.catalogFundsNote(label));
-  return { sentence: `transfer ${amount} ${token.symbol} on ${label}${recipient ? ' to ' + recipient : ''}`, expect: 'ADD_RH_TRANSFER', notes };
+  return { sentence: `transfer ${amount} ${token.symbol} on ${label}${check.recipient === 'CONNECTED_OWNER' ? '' : ' to ' + check.recipient}`, expect: 'ADD_RH_TRANSFER', notes };
 }
 
 const LENDING_SUBJECT = { SUPPLY: 'supply', BORROW: 'borrow', REPAY: 'repay', WITHDRAW: 'withdraw' } as const;

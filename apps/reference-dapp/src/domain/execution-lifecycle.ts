@@ -160,7 +160,7 @@ export function projectExecutionLifecycle(currentWorkflow: Workflow, context: Re
     case 'transfer': {
       const r = source.state.record; if (!r) break;
       select(r.review.workflow, r.id, r.provenance);
-      const a = r.attempt; add('transfer', composerActions(workflow)[0]?.nodeId ?? '', 'Transfer', r.review.chain, a?.state ?? null, a?.transactionHash ?? null, Boolean(a?.reconciled));
+      const a = r.attempt; add('transfer', composerActions(workflow)[0]?.nodeId ?? '', 'Send', r.review.chain, a?.state ?? null, a?.transactionHash ?? null, Boolean(a?.reconciled));
       if (a && r.notSubmitted && !a.reconciled) { const op = operations.at(-1)!; op.state = 'not-submitted'; op.label = labels['not-submitted']; } break;
     }
     case 'fork-swap': {

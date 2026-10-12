@@ -1,5 +1,238 @@
 # BUILD-ARB-001 Handoff
 
+## Final Phase 7A checkpoint — 2026-10-12
+
+- CURRENT HEAD: the Phase 7A checkpoint commit containing this record; resolve with
+  `git log -1 --format=%H -- docs/builds/BUILD-ARB-001-HANDOFF.md`.
+  Exact recovered HEAD / Phase 6 parent: `ab5919842e036047047e614ebdb7176d06ba4aeb`.
+- CURRENT PHASE: **Phase 7A COMPLETE — owner-approved UX-001 through UX-007 only**. BUILD-ARB-001 is not final.
+- Branch/worktree: `codex/build-arb-001-network-ux`, `/home/asus/projects/flofi-arb`.
+- COMPLETED: Phases 1–6 and UX-001–007; six default-product failures classified; inspected visual baselines updated;
+  focused validation and handoff/plan/integration report completed; local checkpoint commit.
+- REMAINING: Phase 7B (UX-008 Toolbar fit, UX-009 Auto-fit after card insertion, UX-010 Generic user-defined workflow connections);
+  Phase 8 integration blockers/final validation separately directed by the owner. None started automatically.
+- TESTS PASSED: final focused **12 Vitest files / 224 tests**, including all 40 frozen Base/Robinhood vectors and the Phase 2 Send hashes;
+  the two corrected test files rechecked (**27 tests**, then final **12-test** fixture recheck); temporary Phase 6 routing probe **3/3**;
+  exact affected visual cases **2/2**, covering three individually inspected snapshots; ESLint **53 code files** plus corrected-file rechecks;
+  strict pure authoring TypeScript including dependency declarations; governance-lite and **19 self-tests**; `git diff --check`.
+- TESTS FAILING: the four legacy engineering browser cases listed below reproduce their pre-existing profile routing failure;
+  they are not counted as passes. Broader scoped TypeScript with the already documented `--skipLibCheck` declaration limit has only
+  `robinhood-transfer-panel.tsx:83:103` (TS2532), pre-existing since Phase 2. Without that flag, existing Next bundled declaration errors remain.
+- DO NOT REDO: Phases 1–6; UX-001–007 implementation; visual-diff investigation; Phase 6 routing comparison;
+  the passing inherited browser profiles. Preserve this checkpoint and its financial/hash invariants.
+- NEXT EXACT ACTION: **stop after this local commit**. On a subsequent explicit instruction, Phase 7B — UX-008 / UX-009 / UX-010.
+  Do not execute it automatically. No push, PR, full CI, Production changes, gate enablement or real-money execution.
+
+### UX checkpoint
+
+| Item | Result | Verified behavior / evidence |
+| --- | --- | --- |
+| UX-001 Send recipient | PASS | Visible To; network policy; exact mixed-case EIP-55 validation; missing/invalid destination blocks Review; owner-only test networks show read-only Your connected wallet. Canonical transfer recipient matches Canvas, exact Chat, natural Copilot and MCP composition. Copilot asks “Which wallet should I send it to?” and explicit “to my own wallet” authors CONNECTED_OWNER. |
+| UX-002 Automate header | PASS | Same action/availability/handler, clock icon beside rename/save, tooltip and accessible label; former bottom-left control/CSS removed. Existing delegated-execution browser profile passes. |
+| UX-003 Processing CTA | PASS | Disabled, aria-busy Simulating workflow… / Waiting for wallet… buttons in the CTA position; existing locks plus forced-click browser checks prevent duplicate simulation/wallet requests. |
+| UX-004 Create new workflow | PASS | Completed/declined/cancelled/failed terminal outcomes only; fresh UUID, revision-0 empty Build, cleared drafts/proposal/selection/name/Copilot; wallet preserved. Return to Build keeps the existing workflow. Unresolved/pending runs keep recovery. |
+| UX-005 Send terminology | PASS | Product presentation says Send; internal transfer commands, asset.transfer, runtime identities and hashing unchanged. Both Phase 2 Send hashes and all 40 historical vectors pass. |
+| UX-006 Copilot confirmation | PASS | Same confirmation centered on empty Canvas, droplet hidden while proposal is present, IR unchanged before Apply, dismiss restores droplet. Non-empty proposal placement remains top-right. |
+| UX-007 Fast live quote | PASS | 200 ms debounce; AbortController/cleanup and active flag; generation and snapshot/chain/provider/expiry checks; immediate Calculating… then exact quote or Quote unavailable. Shared read-only estimate path for Base, Arbitrum and Robinhood, with each network's existing gate. No automatic Simulate/Review/Execute. |
+
+UX-007 cache details: the browser holds at most 32 answered snapshots keyed by complete workflow hash, node ID and owner (therefore amount,
+revision, chain and provider semantics are bound). Reuse requires the exact same snapshot and its own unexpired expiresAt. Changing an
+amount immediately hides the previous answer. Expired entries cannot be reused. Server caching reuses validated metadata/read clients,
+not quote outputs. Simulate obtains its own authoritative fresh quote; an estimate creates no Review, calldata or execution authority.
+The deterministic hook timing is calculating at 0 ms, request at 200 ms, ready at 280 ms with an 80 ms mocked response; this is not public
+provider latency. Browser timing/rapid input evidence is MOCKED replay, not a live-service performance claim.
+
+### Six default-product failures — final classification
+
+Original default-product run: **70 passed / 6 failed**. Full profile not rerun blindly. The two affected visual cases pass after targeted
+snapshot review/update. The four original timeout cases were rerun with their exact actions/assertions/timeouts and extra read-only
+panel diagnostics in temporary copies under /tmp; they still fail at the same missing controls. No assertions were removed or weakened.
+
+| # | Test | Classification | Evidence and resolution |
+| --- | --- | --- | --- |
+| 1 | visual-shell.spec.ts:5 — Build shell visual baseline | EXPECTED_OWNER_APPROVED_VISUAL_CHANGE | Saved diff changes the toolbar Transfer label to Send only (UX-005). Only build-chromium-linux.png updated; exact case PASS. |
+| 2 | swap-authoring.spec.ts:115 — proposal and blocked review snapshots show unquoted unavailable state | EXPECTED_OWNER_APPROVED_VISUAL_CHANGE | Proposal moves from top-right/droplet to the approved centered confirmation (UX-006), plus Send. Once that assertion passed, the same test exposed review-blocked.png: approved Quote unavailable copy (UX-007), Send, and card scale from existing initial viewport measurement. All three images for that newly reached assertion inspected before its separate update; test now awaits the settled unavailable state. Exact case PASS. No toolbar/fit algorithm added. |
+| 3 | cross-chain-liquidity.spec.ts:5 — cross-chain canvas and chat author the same graph while MOCKED simulation cannot authorize Execute | TEST_PROFILE_ROUTING_ISSUE (pre-existing Phase 6) | Waits for Generate MOCKED chained simulation in absent Cross-chain liquidity composition; Arbitrum One swap simulation is shown. Same graph builder/classifier/panel order at Phase 6. Retained unchanged; defer engineering routing/profile alignment. |
+| 4 | cross-chain-liquidity-recovery.spec.ts:6 — a MOCKED destination failure scenario cannot manufacture production completion, recovery or Evidence | TEST_PROFILE_ROUTING_ISSUE (pre-existing Phase 6) | Waits for Deterministic outcome in the same absent composition panel; identical Arbitrum owner-swap precedence. Retained unchanged and deferred; no timeout increase. |
+| 5 | build009.spec.ts:4 — BUILD-009 passive wallet restoration and read-only quote cannot grant production execution | TEST_PROFILE_ROUTING_ISSUE (pre-existing Phase 6) | Times out clicking Get live Base → Arbitrum LI.FI bridge quote in absent Base to Arbitrum bridge and swap; visible Arbitrum One swap simulation with gate-off message. Fails before quote request. Retained unchanged and deferred. |
+| 6 | build009.spec.ts:63 — BUILD-009 switches back to Base and invalidates quote on chain/account/provider change | TEST_PROFILE_ROUTING_ISSUE (pre-existing Phase 6) | Same missing LI.FI quote control after successful wallet switch, before BRIDGE_QUOTED response assertion. Identical Phase 6 routing; retained unchanged and deferred. |
+
+Phase 6 comparison is source equivalence plus pure execution of the actual graph builders/classifier, not a claim that a second complete
+Phase 6 application was built. `git show ab5919842e036047047e614ebdb7176d06ba4aeb:<path>` confirms byte-identical
+`domain/public-testnet-swap.ts`, `domain/bridge-swap-authoring.ts`, `domain/cross-chain-liquidity.ts`, both legacy panels,
+`server/build009-lifi.ts`, all three timeout specs and playwright.config.ts. AppShell's baseReferenceServed, testnetWorkflow,
+publicPath, bridgeSwapWorkflow, crossChainWorkflow and complete engineering Simulate ternary are unchanged.
+The only related Phase 7 AppShell change restricts persisted recovery to the initial draft; these cases have freshly authored revision-1
+graphs and no recovered runs, so that branch does not affect them.
+
+Both legacy graphs contain asset.swap.exact-input on eip155:42161 using lifi. The existing classifier checks action/chain;
+Arbitrum's CATALOG swap profile has referencePair=null, so ownerWalletSwapServes(node, false) returns true even for these legacy nodes.
+publicPath selects PublicTestnetPanel before crossChainWorkflow / bridgeSwapWorkflow. The final browser diagnostics for all four show
+Arbitrum One swap simulation, no legacy quote/simulation controls, and the existing Arbitrum gate-off message.
+**No Phase 7 regression identified; production routing and all gates preserved.**
+
+BUILD-009 / LI.FI: requestBuild009Quote uses live read-only li.quest/v1/tokens and /v1/quote after the explicit legacy quote click.
+That remains an external dependency if the legacy test profile is aligned later. It did not cause these timeouts: the button is absent,
+the click never happens and the response assertion is never reached. The focused LI.FI normalization and MOCKED lifecycle tests pass;
+no live LI.FI availability or public execution claim is made.
+
+### Visual baseline decisions
+
+Only these three inspected images changed:
+
+- e2e/visual-shell.spec.ts-snapshots/build-chromium-linux.png — UX-005 Send.
+- e2e/swap-authoring.spec.ts-snapshots/proposal-chromium-linux.png — UX-006 centered empty-Canvas proposal and UX-005 Send.
+- e2e/swap-authoring.spec.ts-snapshots/review-blocked-chromium-linux.png — newly reached assertion in the same affected test;
+  UX-007 settled Quote unavailable, UX-005 Send and resulting existing card measurement/scale. No UX-009 implementation.
+
+No bulk snapshot update; unrelated baselines remain untouched. Browser artifacts/logs/config/probe are under /tmp, excluded from Git.
+
+### Focused validation and reproducibility
+
+Final focused unit command (12 files / 224 tests, no skips):
+
+```sh
+pnpm exec vitest run \
+  apps/reference-dapp/src/domain/send-recipient.test.ts \
+  apps/reference-dapp/src/domain/workflow-ux.test.ts \
+  apps/reference-dapp/src/components/workflow-name.test.tsx \
+  apps/reference-dapp/src/domain/build-estimate.test.ts \
+  apps/reference-dapp/src/state/build-estimate.test.ts \
+  apps/reference-dapp/src/server/build-estimate-catalog.test.ts \
+  apps/reference-dapp/src/components/execute-workspace.test.tsx \
+  apps/reference-dapp/src/components/workflow-edit-review.test.tsx \
+  apps/reference-dapp/src/domain/arbitrum-certification.test.ts \
+  apps/reference-dapp/src/server/build009-lifi.test.ts \
+  apps/reference-dapp/src/domain/build009-run.test.ts \
+  apps/reference-dapp/src/domain/cross-chain-liquidity.test.ts --maxWorkers=4
+```
+
+Final visual command (2 cases / 3 snapshots):
+
+```sh
+NEXT_TELEMETRY_DISABLED=1 PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
+BUILD002_BROWSER_CACHE=/home/asus/.cache/ms-playwright/chromium_headless_shell-1243 \
+GRYLOO_ANVIL_BIN=/tmp/claude-1000/p7/foundry-v1.8.3/anvil GRYLOO_MODE_A_E2E=synthetic \
+GRYLOO_MODE_A_RUNTIME=/tmp/flofi-p7a-final-modea FLOFI_E2E_FORK_PORT=26445 FLOFI_E2E_APP_PORT=3117 \
+pnpm --filter @defi-workflow-engine/reference-dapp exec playwright test \
+  visual-shell.spec.ts swap-authoring.spec.ts \
+  --grep 'Build shell visual baseline|proposal and blocked review snapshots' --output /tmp/flofi-p7a-final-visual
+```
+
+Timeout reproduction uses the same default profile/environment and isolated ports, with build009.spec.ts,
+cross-chain-liquidity.spec.ts and cross-chain-liquidity-recovery.spec.ts. Temporary copies only add an afterEach read-only region/control
+diagnostic; no action, assertion or timeout changes. Config fixes during diagnosis concerned only the /tmp working directory/testMatch.
+Outside-sandbox execution was needed for loopback browser/harness startup and the probe's read-only git child process.
+
+Pure strict TypeScript command (PASS including dependency declarations):
+
+```sh
+pnpm exec tsc --noEmit --strict --target ES2024 --module ESNext --moduleResolution Bundler \
+  --jsx react-jsx --esModuleInterop --resolveJsonModule --allowImportingTsExtensions \
+  --exactOptionalPropertyTypes --noUncheckedIndexedAccess \
+  apps/reference-dapp/src/domain/recipient-address.ts apps/reference-dapp/src/domain/send-destination.ts \
+  apps/reference-dapp/src/domain/copilot-authoring.ts apps/reference-dapp/src/domain/crypto-action-picker.ts \
+  apps/reference-dapp/src/domain/editor-history.ts apps/reference-dapp/src/domain/canvas-action-setup.ts \
+  apps/reference-dapp/src/domain/build-estimate.ts
+```
+
+Broader scoped check extends the app tsconfig in /tmp and includes all 52 changed/new .ts/.tsx files (plus their imports).
+With the prior --skipLibCheck limit, the only remaining source diagnostic is the known Robinhood blocker. Two Phase 7 test typing issues
+were corrected: explicit React createElement props and a complete, discriminated execution fixture using the actual string busy state.
+Their unit/lint rechecks pass. No application behavior or assertion was weakened to satisfy types.
+
+Inherited passing browser evidence retained (not redundantly rerun): new authoring **11/11**; new execution **3/3**;
+execution-continuity **3/3**; arbitrum-authoring-certification **18/18**; Base authoring **4/4**; Robinhood authoring **4/4**;
+Copilot **13/13**; canvas-automation-ux **18/18**; review-execute-recovery-components **39/39**; delegated-execution **3/3**.
+The earlier stale Add transfer locator failed once, then the intended Send locator correction passed 18/18; it is not a remaining failure.
+Earlier focused unit batches were reported green; the final 224-test batch and corrected-test reruns provide this session's direct evidence.
+Compile-only app bundle from the prior session was reused; no full build/CI or full browser matrix run here.
+
+Local final logs: /tmp/flofi-p7a-final-unit.log, /tmp/flofi-p7a-baseline-comparison.log, /tmp/flofi-p7a-final-timeouts.log,
+/tmp/flofi-p7a-final-lint.log, /tmp/flofi-p7a-final-types-pure.log and /tmp/flofi-p7a-final-types-scoped.log.
+Governance: `python3 scripts/governance_lite.py` and `python3 scripts/test_governance_lite.py` — PASS / 19 tests.
+The initial root-level unittest module invocation needed the script's import path; direct documented script invocation passes.
+
+### Known Phase 8 blocker and exclusions
+
+`robinhood-transfer-panel.tsx:83:103`: TS2532, Object is possibly undefined, indexing TRANSFER_NETWORKS[name].chain.
+The component, native-transfer profile union and arbitrum-chain.ts are byte-identical to Phase 2
+`861bb606dd073b3d83720cc8b1ee9cd254b9d063`. TransferNetwork = NativeTransferProfile['network'] and the Record network map definitions
+also match Phase 2. Arbitrum's non-literal transfer network widens that key type to string, so noUncheckedIndexedAccess exposes the lookup.
+This is a pre-existing integration blocker, left for Phase 8. No Phase 7 fix, assertion suppression or tsconfig edit.
+
+next-env.d.ts has **no diff**, matches Phase 6 and is excluded from this commit. The disposable flofi-arb-p7-pg container/25432 was not
+needed for this final validation; no database mutation here. No temporary output, secrets, dependency/lockfile changes or Production config.
+No Production changes, real-money transactions, gate enablement, UX-008/009/010 implementation, unrelated UX, push or PR. Full CI NOT RUN.
+
+### Phase 7A changed files (61)
+
+Paths are repository-relative; this inventory includes preserved implementation/tests, the three reviewed PNGs, and these three build docs.
+
+```text
+apps/reference-dapp/e2e/base-observation.spec.ts
+apps/reference-dapp/e2e/bridge.spec.ts
+apps/reference-dapp/e2e/canvas-automation-ux.spec.ts
+apps/reference-dapp/e2e/canvas-ux.spec.ts
+apps/reference-dapp/e2e/copilot/replay-v2.json
+apps/reference-dapp/e2e/delegated-execution.spec.ts
+apps/reference-dapp/e2e/mock-artifact-chain.spec.ts
+apps/reference-dapp/e2e/robinhood-transfer.spec.ts
+apps/reference-dapp/e2e/swap-authoring.spec.ts
+apps/reference-dapp/e2e/swap-authoring.spec.ts-snapshots/proposal-chromium-linux.png
+apps/reference-dapp/e2e/swap-authoring.spec.ts-snapshots/review-blocked-chromium-linux.png
+apps/reference-dapp/e2e/visual-shell.spec.ts-snapshots/build-chromium-linux.png
+apps/reference-dapp/e2e/workflow-composer.spec.ts
+apps/reference-dapp/e2e/workflow-ux-authoring.spec.ts
+apps/reference-dapp/e2e/workflow-ux-execution.spec.ts
+apps/reference-dapp/playwright.workflow-ux.config.ts
+apps/reference-dapp/src/app/globals.css
+apps/reference-dapp/src/components/app-shell.tsx
+apps/reference-dapp/src/components/artifact-inspector.tsx
+apps/reference-dapp/src/components/canvas-lifecycle-action.tsx
+apps/reference-dapp/src/components/composer-card.tsx
+apps/reference-dapp/src/components/copilot-panel.tsx
+apps/reference-dapp/src/components/execute-workspace.test.tsx
+apps/reference-dapp/src/components/execute-workspace.tsx
+apps/reference-dapp/src/components/proposal-review.tsx
+apps/reference-dapp/src/components/workflow-canvas.tsx
+apps/reference-dapp/src/components/workflow-edit-review.test.tsx
+apps/reference-dapp/src/components/workflow-edit-review.tsx
+apps/reference-dapp/src/components/workflow-name.test.tsx
+apps/reference-dapp/src/components/workflow-name.tsx
+apps/reference-dapp/src/domain/arbitrum-certification.test.ts
+apps/reference-dapp/src/domain/build-estimate.test.ts
+apps/reference-dapp/src/domain/build-estimate.ts
+apps/reference-dapp/src/domain/canvas-action-setup.ts
+apps/reference-dapp/src/domain/canvas-lifecycle.ts
+apps/reference-dapp/src/domain/composer-presentation.ts
+apps/reference-dapp/src/domain/copilot-answers.ts
+apps/reference-dapp/src/domain/copilot-authoring.ts
+apps/reference-dapp/src/domain/copilot-messages.ts
+apps/reference-dapp/src/domain/crypto-action-picker.ts
+apps/reference-dapp/src/domain/editor-history.ts
+apps/reference-dapp/src/domain/execution-lifecycle.ts
+apps/reference-dapp/src/domain/execution-result.ts
+apps/reference-dapp/src/domain/recipient-address.ts
+apps/reference-dapp/src/domain/review-presentation.ts
+apps/reference-dapp/src/domain/send-destination.ts
+apps/reference-dapp/src/domain/send-recipient.test.ts
+apps/reference-dapp/src/domain/simulation-presentation.ts
+apps/reference-dapp/src/domain/workflow-ux.test.ts
+apps/reference-dapp/src/i18n/pt.ts
+apps/reference-dapp/src/lib/dashboard/run-mapping.ts
+apps/reference-dapp/src/server/build-estimate-catalog.test.ts
+apps/reference-dapp/src/server/build-estimate.ts
+apps/reference-dapp/src/state/build-estimate.test.ts
+apps/reference-dapp/src/state/build-estimate.ts
+apps/reference-dapp/src/state/execution-controls.ts
+apps/reference-dapp/src/state/workflow-store.tsx
+docs/builds/BUILD-ARB-001-HANDOFF.md
+docs/builds/BUILD-ARB-001-NETWORK-INTEGRATION-REPORT.md
+docs/builds/BUILD-ARB-001-PLAN.md
+scripts/guarded-release-browser.mjs
+```
+
 ## Final Phase 6 checkpoint — 2026-10-12
 
 - CURRENT HEAD: the Phase 6 commit containing this checkpoint; resolve its exact SHA with

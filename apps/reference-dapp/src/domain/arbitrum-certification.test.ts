@@ -166,8 +166,9 @@ describe('Canonical network and chain-bound catalog resolution', () => {
     payload.tokens.find(t => t.symbol === 'ARB')!.name = name; loadCatalog(JSON.stringify(payload));
     const reference = { action: 'transfer', network: 'arbitrum-one', asset: name, amount: '1' };
     const canonical = composeStrategy({ ...reference, asset: 'ARB' }); expect(canonical.ok).toBe(true);
-    const { reply } = natural('Please send 1 ' + name + ' on Arbitrum', act.transfer({ network: 'ARBITRUM', asset: name, amount: '1' }));
-    expect(reply.kind).toBe('PROPOSAL');
+    // UX-001: a Copilot Send names its destination; "to my own wallet" is the explicit connected-owner recipient the other surfaces default to.
+    const { reply } = natural('Please send 1 ' + name + ' on Arbitrum to my own wallet', act.transfer({ network: 'ARBITRUM', asset: name, amount: '1' }));
+    expect(reply.kind).toBe('PROPOSAL'); expect(reply.command).toMatchObject({ input: { recipient: 'CONNECTED_OWNER' } });
     const chat = parseLocalCommand('transfer 1 ' + name + ' on Arbitrum', new CopilotSession().workflow, new CopilotSession().context);
     expect(semanticWorkflowHash(authored(chat))).toBe(canonical.ok && canonical.workflowHash);
     const canvas = createCryptoActionNode('node-002', { selection: { action: 'transfer', network: 'Arbitrum One', from: name }, amount: '1', slippage: '50' });

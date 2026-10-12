@@ -11,6 +11,7 @@ import { parseLocalCommand, summarize } from '../domain/commands';
 import { ensureNetworkCatalog } from '../state/asset-catalog-store';
 import { catalogNetworksNamed } from '../domain/network-registry';
 import { useWorkflow } from '../state/workflow-store';
+import { completeSendDestination, sendDestinationIssue, SEND_DESTINATION_INVALID, SEND_DESTINATION_QUESTION } from '../domain/send-destination';
 
 import { useBuild009Wallet } from '../state/build009-wallet-store';
 import { CopilotMessage, COPILOT_PLACEHOLDER, copilotHelp, copilotIntro, copilotLabel, useCopilotInterpreter, useFollowLatest } from './copilot-ai';
@@ -25,6 +26,8 @@ export function CopilotPanel({ interactive = true, owner = null, proof }: { inte
   const [automation, setAutomation] = useState<AutomationInput | null>(null);
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<Message[]>([{ role: 'system', text: 'Review each proposed change before applying it.' }]);
+  // UX-001: an exact Send waiting for its destination ("Which wallet should I send it to?").
+  const [destination, setDestination] = useState<{ request: string; network: string } | null>(null);
   const log = useFollowLatest(copilot.enabled, messages.length, copilot.busy);
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -46,11 +49,26 @@ export function CopilotPanel({ interactive = true, owner = null, proof }: { inte
       setMessages(old => [...old, { role: 'you', text }, { role: 'system', text: summary }]);
       return;
     }
+    // UX-001: a one-word answer completes the pending exact Send with that destination; anything else starts a new request.
+    let request = text;
+    if (destination && /^\S+$/.test(text)) {
+      const completed = completeSendDestination(destination.request, destination.network, text);
+      if (!completed) { setMessages(old => [...old, { role: 'you', text }, { role: 'system', text: SEND_DESTINATION_INVALID }]); return; }
+      request = completed;
+    }
+    setDestination(null);
     try {
-      const command = parseLocalCommand(text, state.workflow, context, wallet.account);
+      const command = parseLocalCommand(request, state.workflow, context, wallet.account);
+      const issue = sendDestinationIssue(command, request);
+      if (issue) {
+        dismissProposal();
+        if (issue.kind === 'MISSING') setDestination({ request, network: issue.network });
+        setMessages(old => [...old, { role: 'you', text }, { role: 'system', text: issue.kind === 'MISSING' ? SEND_DESTINATION_QUESTION : SEND_DESTINATION_INVALID }]);
+        return;
+      }
       propose(command);
       copilot.reset();
-      setMessages(old => [...old, { role: 'you', text }, { role: 'system', text: `Proposal: ${text}. Review against revision ${command.baseRevision} before applying.` }]);
+      setMessages(old => [...old, { role: 'you', text }, { role: 'system', text: `Proposal: ${request}. Review against revision ${command.baseRevision} before applying.` }]);
     } catch {
       // BUILD-COPILOT-002: the Copilot keeps the pending proposal visible while it interprets ("make it 2", questions about it).
       if (copilot.mayInterpret) {

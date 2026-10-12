@@ -1,0 +1,169 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+/**
+ * BUILD-ARB-001 Phase 7 — UX-003 (locked processing CTA) and UX-004 (Create new workflow) on the real public-swap UI/API/durable runtime,
+ * with the synthetic loopback RPC and explicit scripted owner confirmations of the execution-continuity harness. MOCKED; no public broadcast.
+ */
+import type { APIRequestContext, Page } from '@playwright/test';
+import { test, expect, acceptProductReview, readWorkflowIr } from './fixtures';
+import { installJourneyWallet, walletRequests } from './journey-fixtures';
+import { createTestWallet } from '../../../packages/reference-reconciler/test/test-wallet';
+
+test.skip(process.env.FLOFI_SWAP_EXECUTION_E2E !== 'MOCKED_LOOPBACK_ONLY', 'Requires the opt-in loopback swap execution harness');
+test.setTimeout(90_000);
+const stage = (page: Page, name: 'Build' | 'Simulate' | 'Execute') => page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name, exact: true });
+const summary = (page: Page) => page.locator('.execution-summary');
+const cta = (page: Page) => page.locator('.canvas-primary-action');
+const processing = (page: Page) => cta(page).locator('[data-lifecycle-action="processing"]');
+async function control(request: APIRequestContext, method: string, params: unknown[] = []) {
+  const response = await request.post('https://127.0.0.1:8558/control', { ignoreHTTPSErrors: true, data: { jsonrpc: '2.0', id: 1, method, params } });
+  expect(response.ok()).toBe(true);
+  return (await response.json() as { result: unknown }).result;
+}
+/** Every wallet send waits for the test; `decline` turns that request into the wallet's EIP-1193 user rejection (code 4001). */
+async function setup(page: Page, request: APIRequestContext, options: { decline?: number; lose?: number } = {}) {
+  await control(request, 'MOCK_reset');
+  const confirmations: (() => void)[] = []; let requested = 0;
+  await installJourneyWallet(page, [createTestWallet()], { transactionControl: async (method, params) => {
+    if (method !== 'MOCK_send') throw Error('MOCK_METHOD_DENIED');
+    const number = ++requested;
+    await new Promise<void>(resolve => confirmations.push(resolve));
+    if (number === options.decline) throw Error('MOCK_USER_REJECTED');
+    const hash = await control(request, method, params);
+    if (number === options.lose) throw Error('MOCK_WALLET_RESPONSE_LOST');
+    return hash;
+  } });
+  await page.addInitScript(() => {
+    const w = window as unknown as { ethereum: { request(input: unknown): Promise<unknown> } }, original = w.ethereum.request;
+    w.ethereum.request = async input => {
+      try { return await original(input); } catch (error) {
+        if (String((error as Error)?.message ?? error).includes('MOCK_USER_REJECTED')) throw Object.assign(new Error('User rejected the request.'), { code: 4001 });
+        throw error;
+      }
+    };
+    window.addEventListener('eip6963:requestProvider', () => window.dispatchEvent(new CustomEvent('eip6963:announceProvider', {
+      detail: { provider: w.ethereum, info: { rdns: 'io.metamask', name: 'MetaMask', uuid: 'workflow-ux-metamask' } } })));
+  });
+  // UX-003: hold the server actions of one Simulate so its in-progress state can be observed.
+  let gate: Promise<void> | null = null, release: () => void = () => undefined, held = 0;
+  await page.route(url => url.pathname.startsWith('/app'), async route => {
+    if (gate && route.request().method() === 'POST' && route.request().headers()['next-action']) { held++; await gate; }
+    await route.fallback();
+  });
+  await page.goto('/app');
+  const wallet = page.getByRole('group', { name: 'Wallet connection' });
+  await expect(wallet).toContainText('MetaMask'); await expect(wallet).toContainText('Base Sepolia');
+  await page.getByRole('button', { name: 'Add swap', exact: true }).click();
+  const card = page.locator('.build-flow-surface .composer-card').first();
+  await card.getByRole('button', { name: 'Select source token', exact: true }).click();
+  await page.getByRole('region', { name: 'Action network picker', exact: true }).getByRole('button', { name: 'Base Sepolia', exact: true }).click();
+  await page.getByRole('button', { name: 'Hide token picker', exact: true }).click();
+  await card.getByRole('textbox', { name: 'Source amount (USDC)', exact: true }).fill('1');
+  await card.getByRole('button', { name: 'Review amount', exact: true }).click();
+  await card.getByRole('button', { name: 'Apply amount', exact: true }).click();
+  await stage(page, 'Simulate').click();
+  return {
+    wallet, requested: () => requested, sends: () => control(request, 'MOCK_sends'),
+    confirm: async () => { await expect.poll(() => confirmations.length).toBe(1); confirmations.shift()!(); },
+    hold: () => { held = 0; gate = new Promise<void>(resolve => { release = () => { gate = null; resolve(); }; }); }, release: () => release(), held: () => held,
+  };
+}
+/** UX-003: the wallet request keeps the CTA locked in place; a second click cannot start another request. */
+async function expectWaitingForWallet(page: Page, owner: Awaited<ReturnType<typeof setup>>, count: number) {
+  await expect.poll(owner.requested).toBe(count);
+  await expect(processing(page)).toHaveText('Waiting for wallet…'); await expect(processing(page)).toBeDisabled();
+  await expect(processing(page)).toHaveAttribute('aria-busy', 'true');
+  await expect(cta(page).locator('[data-lifecycle-action="status"]')).toHaveCount(0);
+  await processing(page).click({ force: true }); await processing(page).evaluate(button => (button as HTMLButtonElement).click());
+  await page.waitForTimeout(300); expect(owner.requested()).toBe(count);
+}
+async function simulateAndExecute(page: Page, owner: Awaited<ReturnType<typeof setup>>) {
+  // UX-003 Simulate: the same CTA becomes a locked, active "Simulating workflow…" button; no loose sentence, no second simulation.
+  // Hold only after the page's own availability reads have enabled Simulate (a cold server answers them late).
+  const simulate = cta(page).getByRole('button', { name: 'Simulate workflow', exact: true });
+  await expect(simulate).toBeEnabled({ timeout: 30_000 });
+  owner.hold(); await simulate.click();
+  await expect(processing(page)).toHaveText('Simulating workflow…'); await expect(processing(page)).toBeDisabled();
+  await expect(processing(page)).toHaveAttribute('aria-busy', 'true');
+  await expect(cta(page).locator('[data-lifecycle-action="status"]')).toHaveCount(0);
+  await expect.poll(owner.held).toBeGreaterThan(0); const held = owner.held();
+  await processing(page).click({ force: true }); await page.waitForTimeout(300);
+  expect(owner.held()).toBe(held);
+  owner.release();
+  await expect(processing(page)).toHaveCount(0);
+  await acceptProductReview(page);
+  const execute = page.getByRole('button', { name: 'Execute workflow', exact: true });
+  await expect(execute).toBeEnabled(); await execute.click();
+  await expectWaitingForWallet(page, owner, 1);
+}
+async function expectCleanNewWorkflow(page: Page, owner: Awaited<ReturnType<typeof setup>>, before: { workflowId: string; requested: number; sends: unknown }) {
+  await expect(stage(page, 'Build')).toHaveAttribute('aria-current', 'page');
+  await expect(page.locator('.build-flow-surface .canvas-empty')).toContainText('Start your workflow');
+  await expect(page.locator('.build-canvas-head .revision')).toHaveText('0 actions');
+  await expect(page.locator('.build-flow-surface .composer-card')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /^Review proposed change:/ })).toHaveCount(0);
+  await expect(page.locator('.build-canvas-head h2')).toHaveText('Your Workflow');
+  await expect(page.getByRole('log', { name: 'Conversation' }).locator('.message')).toHaveCount(1);
+  const fresh = JSON.parse(await readWorkflowIr(page)) as { workflowId: string; revision: number; nodes: { actionType: string }[] };
+  expect(fresh.revision).toBe(0); expect(fresh.workflowId).not.toBe(before.workflowId); expect(fresh.workflowId).toMatch(/^workflow-[0-9a-f-]{36}$/);
+  expect(fresh.nodes.every(node => node.actionType.startsWith('mock-'))).toBe(true);
+  // The wallet connection and session stay; no wallet request or send happens.
+  await expect(owner.wallet).toContainText('MetaMask'); await expect(owner.wallet).toContainText('Base Sepolia');
+  expect(owner.requested()).toBe(before.requested); expect(await owner.sends()).toEqual(before.sends);
+  // No stale simulation, Review or execution result belongs to the new workflow.
+  await stage(page, 'Simulate').click();
+  await expect(page.getByRole('button', { name: /Approve|Execute workflow/ })).toHaveCount(0);
+  await stage(page, 'Execute').click();
+  await expect(summary(page)).not.toContainText(/Execution completed|Transaction not submitted|Result Summary/);
+  await expect(page.getByRole('button', { name: 'Create new workflow', exact: true })).toHaveCount(0);
+  await stage(page, 'Build').click();
+}
+
+test('UX-003/UX-004: completed run — locked CTAs, Return to Build keeps the workflow, Create new workflow starts clean', async ({ page, request, networkGuard }) => {
+  const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
+  const owner = await setup(page, request);
+  await simulateAndExecute(page, owner);
+  await owner.confirm();
+  const next = cta(page).getByRole('button', { name: 'Continue to swap', exact: true });
+  await expect(next).toBeEnabled(); await expect(processing(page)).toHaveCount(0);
+  await next.click(); await expectWaitingForWallet(page, owner, 2);
+  await owner.confirm();
+  await expect(summary(page)).toContainText('Execution completed'); await expect(processing(page)).toHaveCount(0);
+  const create = summary(page).getByRole('button', { name: 'Create new workflow', exact: true });
+  await expect(create).toBeVisible(); await expect(summary(page).getByRole('button', { name: 'Return to Build', exact: true })).toBeVisible();
+  // Return to Build keeps editing the same workflow; the result stays available.
+  const authored = await readWorkflowIr(page);
+  await summary(page).getByRole('button', { name: 'Return to Build', exact: true }).click();
+  await expect(stage(page, 'Build')).toHaveAttribute('aria-current', 'page');
+  expect(await readWorkflowIr(page)).toBe(authored); await expect(page.locator('.build-canvas-head .revision')).toHaveText('1 action');
+  // A pending (uncommitted) Copilot proposal on the old workflow must not survive a new workflow.
+  await page.locator('#mock-prompt').fill('swap 2 USDC to WETH on Base Sepolia slippage 50 bps'); await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await expect(page.getByRole('button', { name: /^Review proposed change:/ })).toBeVisible();
+  await stage(page, 'Execute').click(); await expect(summary(page)).toContainText('Execution completed');
+  const before = { workflowId: (JSON.parse(authored) as { workflowId: string }).workflowId, requested: owner.requested(), sends: await owner.sends() };
+  await summary(page).getByRole('button', { name: 'Create new workflow', exact: true }).click();
+  await expectCleanNewWorkflow(page, owner, before);
+  expect((await walletRequests(page)).filter(method => method === 'eth_sendTransaction')).toHaveLength(2);
+  expect(errors).toEqual([]); networkGuard.assertClean();
+});
+
+test('UX-003/UX-004: a declined wallet request resolves the locked CTA and offers Create new workflow', async ({ page, request, networkGuard }) => {
+  const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
+  const owner = await setup(page, request, { decline: 1 });
+  await simulateAndExecute(page, owner);
+  await owner.confirm();
+  await expect(summary(page)).toContainText('Transaction not submitted'); await expect(processing(page)).toHaveCount(0);
+  expect(await owner.sends()).toBe(0);
+  const before = { workflowId: (JSON.parse(await readWorkflowIr(page)) as { workflowId: string }).workflowId, requested: owner.requested(), sends: await owner.sends() };
+  await summary(page).getByRole('button', { name: 'Create new workflow', exact: true }).click();
+  await expectCleanNewWorkflow(page, owner, before);
+  expect(errors).toEqual([]); networkGuard.assertClean();
+});
+
+test('UX-004: an unresolved wallet response is never offered Create new workflow', async ({ page, request, networkGuard }) => {
+  const owner = await setup(page, request, { lose: 1 });
+  await simulateAndExecute(page, owner);
+  await owner.confirm();
+  await expect(summary(page)).toContainText(/unresolved|uncertain/i); await expect(processing(page)).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Create new workflow', exact: true })).toHaveCount(0);
+  networkGuard.assertClean();
+});

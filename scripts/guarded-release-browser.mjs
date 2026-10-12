@@ -20,7 +20,7 @@ const profiles = phase === 'composition' ? [
   ['workflow-acceptance', ['acceptance-workflows.spec.ts'], { GRYLOO_CLOUD_RUNTIME_E2E: 'EMBEDDED_LOOPBACK_ONLY', GRYLOO_ROUTER_TESTNET_E2E: 'MOCKED_LOOPBACK_ONLY', TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres' }],
   ['swap-read-acceptance', ['acceptance-swap-read.spec.ts'], { GRYLOO_CLOUD_RUNTIME_E2E: 'EMBEDDED_LOOPBACK_ONLY', FLOFI_SWAP_READ_E2E: 'MOCKED_LOOPBACK_ONLY', TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres' }],
   // BUILD-EXECUTION-CONTINUITY-001: production UI/API/durable lifecycle, isolated synthetic RPC and scripted owner wallet confirmations.
-  ['execution-continuity', ['execution-continuity.spec.ts'], { GRYLOO_CLOUD_RUNTIME_E2E: 'EMBEDDED_LOOPBACK_ONLY', FLOFI_SWAP_READ_E2E: 'MOCKED_LOOPBACK_ONLY', FLOFI_SWAP_EXECUTION_E2E: 'MOCKED_LOOPBACK_ONLY', TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres' }],
+  ['execution-continuity', ['execution-continuity.spec.ts', 'workflow-ux-execution.spec.ts'], { GRYLOO_CLOUD_RUNTIME_E2E: 'EMBEDDED_LOOPBACK_ONLY', FLOFI_SWAP_READ_E2E: 'MOCKED_LOOPBACK_ONLY', FLOFI_SWAP_EXECUTION_E2E: 'MOCKED_LOOPBACK_ONLY', TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres' }],
   // BUILD-AUTOMATION-001: Automations (fixture price source, test clock) into the owner's /approve → Simulate → Review; never a transaction.
   ['automations', ['e2e/automations.spec.ts'], { GRYLOO_CLOUD_RUNTIME_E2E: 'EMBEDDED_LOOPBACK_ONLY', FLOFI_SWAP_READ_E2E: 'MOCKED_LOOPBACK_ONLY', GRYLOO_AUTOMATION_E2E: 'FIXTURE_LOOPBACK_ONLY', TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres' }],
   ['canvas-automation-ux', ['canvas-automation-ux.spec.ts', 'canvas-cta.spec.ts'], { GRYLOO_SUPPLY_E2E: 'MOCKED_LOOPBACK_ONLY' }],
@@ -41,6 +41,8 @@ const profiles = phase === 'composition' ? [
   // replay) and in the natural-language Copilot (committed replay answers), MOCKED list only.
   // BUILD-ARB-001 Phase 6: one authoring-only product profile, replay model and passive wallet; every financial gate stays off.
   ['arbitrum-authoring-certification', ['--config', 'playwright.arbitrum-authoring.config.ts'], {}],
+  // BUILD-ARB-001 Phase 7: owner-approved workflow UX (authoring only; replay Copilot, passive wallet, MOCKED registry harness).
+  ['workflow-ux-authoring', ['--config', 'playwright.workflow-ux.config.ts'], {}],
   ['base-mainnet-authoring', ['base-mainnet-authoring.spec.ts'], { GRYLOO_BASE_MAINNET_E2E: 'MOCKED_LOOPBACK_ONLY', FLOFI_COPILOT: 'replay' }],
   ['uniswap-provenance', [boundary], { FLOFI_RELEASE_PROVENANCE_PROFILE: 'uniswap', GRYLOO_UNISWAP_LIQUIDITY_E2E: 'MOCKED_LOOPBACK_ONLY' }],
   ['router-provenance', [boundary], { FLOFI_RELEASE_PROVENANCE_PROFILE: 'router', GRYLOO_ROUTER_E2E: 'MOCKED_LOOPBACK_ONLY' }],

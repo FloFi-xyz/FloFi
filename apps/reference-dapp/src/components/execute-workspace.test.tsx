@@ -160,3 +160,43 @@ it('shows restored recovery in-place, with an explicit read-only check and no in
   data.recovery.checking = true;
   expect(render(data)).toContain('data-lifecycle-action="status">Reconciling…'); expect(render(data)).toContain('Checking execution status…');
 });
+
+describe('UX-003 / UX-004 processing CTA and Create new workflow (presentation only)', () => {
+  const hash = '0x' + 'a'.repeat(64);
+  function recorded(state: string) {
+    const data = fixture();
+    const source = { ...data.source, state: { ...data.source.state, run: { ...('run' in data.source.state ? data.source.state.run : {}), attempts: [{ step: 'swap', state, txHash: ['HASH', 'PENDING', 'CONFIRMED', 'REVERTED'].includes(state) ? hash : null }] } } } as unknown as ExecutionLifecycleSource;
+    return { ...data, progress: projectExecutionLifecycle(data.workflow, data.context, source), execution: { ...data.execution, started: true, check: vi.fn() }, startNewWorkflow: vi.fn() };
+  }
+  it('keeps "Simulating workflow…" in the CTA position as a locked, active button instead of loose status text', () => {
+    const data = fixture(); Object.assign(data.source.state, { busy: 'journal_request_id' });
+    const html = render(data);
+    expect(html).toMatch(/<button data-lifecycle-action="processing" type="button" class="primary canvas-cta-processing" disabled="" aria-busy="true"><span class="canvas-cta-spinner" aria-hidden="true"><\/span>Simulating workflow…<\/button>/);
+    expect(html).not.toContain('data-lifecycle-action="status">Simulating workflow…');
+    expect(data.execution.start).not.toHaveBeenCalled();
+  });
+  it('keeps "Waiting for wallet…" in the CTA position as a locked button while a wallet request is pending', () => {
+    const data = fixture(), f = reviewFixture();
+    const source = { kind: 'supply', state: { signing: true, busy: true, recovered: false, record: { id: 'supply-wallet-request', provenance: 'PUBLIC_TESTNET',
+      review: { workflow: f.workflow, chain: f.wallet.chain, account: f.wallet.account }, attempts: [{ step: 'SUPPLY', state: 'SUBMITTING', transactionHash: null, reconciled: false }] } } } as unknown as ExecutionLifecycleSource;
+    data.progress = projectExecutionLifecycle(data.workflow, data.context, source); data.execution.started = true;
+    const html = render(data), canvas = html.slice(html.indexOf('aria-label="Execution plan"'), html.indexOf('<aside'));
+    expect(canvas).toMatch(/data-lifecycle-action="processing"[^>]*disabled="" aria-busy="true">.*Waiting for wallet…<\/button>/);
+    expect(canvas).not.toContain('role="status" data-lifecycle-action="status"');
+  });
+  it.each([['CONFIRMED', 'Execution completed'], ['REVERTED', 'Execution failed'], ['REJECTED', 'Transaction not submitted']] as const)(
+    'offers Create new workflow beside Return to Build after the final result %s', (state, label) => {
+      const data = recorded(state), html = render(data);
+      expect(html).toContain(label);
+      expect(html).toContain('class="primary execute-new-workflow">Create new workflow</button>');
+      expect(html.indexOf('Create new workflow')).toBeLessThan(html.indexOf('>Return to Build</button>'));
+      expect(data.startNewWorkflow).not.toHaveBeenCalled(); expect(data.backToBuild).not.toHaveBeenCalled();
+    });
+  it.each(['UNKNOWN', 'PENDING', 'HASH'] as const)('never offers Create new workflow while the run is %s (recovery stays in place)', state => {
+    const html = render(recorded(state)); expect(html).not.toContain('Create new workflow');
+  });
+  it('omits Create new workflow where the shell does not provide it', () => {
+    const data: ExecuteWorkspaceProps = recorded('CONFIRMED'); delete data.startNewWorkflow;
+    expect(render(data)).not.toContain('Create new workflow'); expect(render(data)).toContain('>Return to Build</button>');
+  });
+});

@@ -23,6 +23,8 @@ export function CanvasLifecycleAction(props: ExecutionControlsState & {
   }
   return <div className="canvas-lifecycle-control">
     {props.execution.requiresMainnetAcknowledgement && !props.execution.started && <label className="execute-acknowledgement"><input type="checkbox" checked={c.current.acknowledged} onChange={e => c.setAcknowledgement(e.target.checked ? c.acknowledgementKey : null)}/>{t('I understand this executes on Solana mainnet with real funds')}</label>}
-    {action.kind === 'status' ? <span role="status" data-lifecycle-action="status">{t(action.label)}</span> : <button data-lifecycle-action={action.kind} type="button" className="primary" disabled={disabled} onClick={act}>{t(action.label)}</button>}
+    {/* UX-003: simulating / waiting for the wallet keep the CTA position as a locked, active button; a duplicate request cannot start. */}
+    {action.processing ? <button data-lifecycle-action="processing" type="button" className="primary canvas-cta-processing" disabled aria-busy="true"><span className="canvas-cta-spinner" aria-hidden="true"/>{t(action.label)}</button>
+      : action.kind === 'status' ? <span role="status" data-lifecycle-action="status">{t(action.label)}</span> : <button data-lifecycle-action={action.kind} type="button" className="primary" disabled={disabled} onClick={act}>{t(action.label)}</button>}
   </div>;
 }

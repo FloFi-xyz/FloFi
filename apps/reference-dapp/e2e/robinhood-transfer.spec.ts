@@ -13,7 +13,7 @@ async function author(page: Page, options: TransferWalletOptions = {}) {
   await form.getByRole('button', { name: 'Review transfer proposal' }).click();
   await openProposalReview(page);
   await page.getByRole('button', { name: 'Apply proposal' }).click();
-  await expect(page.locator('.react-flow__node[data-id="node-002"]')).toContainText('Transfer');
+  await expect(page.locator('.react-flow__node[data-id="node-002"]')).toContainText('Send');
   await expect(page.locator('.react-flow__node[data-id="node-002"]')).toContainText('Robinhood Chain Testnet (46630)');
   await expect(page.locator('.react-flow__node[data-id="node-002"]')).toContainText('0.000001 ETH');
   await page.getByRole('button', { name: 'Simulate workflow' }).click(); await openSimulationDetails(page);

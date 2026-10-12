@@ -14,6 +14,9 @@ export function useExecutionControls(props: ExecutionControlsState) {
   const checkLock = useRef<{ sawBusy: boolean } | null>(null);
   const [checking, setChecking] = useState(false), [checkFailed, setCheckFailed] = useState(false);
   const [requesting, setRequesting] = useState(false), [requestFailed, setRequestFailed] = useState(false);
+  // UX-004: a new workflow identity does not inherit the previous workflow's failed-request or failed-check notice (presentation only).
+  const workflowId = props.workflow.workflowId;
+  useEffect(() => { setRequestFailed(false); setCheckFailed(false); }, [workflowId]);
   const progress = props.progress, live = progress?.started ? progress : null;
   const [clock, setClock] = useState(() => Date.now());
   const [acknowledgement, setAcknowledgement] = useState<string | null>(null);

@@ -65,9 +65,9 @@ const pools: readonly CryptoPickerProfile[] = [
 ];
 const transfers: readonly CryptoPickerProfile[] = Object.entries(TRANSFER_NETWORKS).map(([network, profile]): CryptoPickerProfile => profile.chain === ROBINHOOD_CHAIN
   // BUILD-RH-002: Robinhood Chain transfers native ETH and catalog assets; non-shortcut assets come from the official catalog.
-  ? { network, chain: profile.chain, provider: 'Transfer', get tokens() { return ['ETH', 'USDG', 'WETH', ...featuredStockSymbols()]; }, catalog: true }
+  ? { network, chain: profile.chain, provider: 'Send', get tokens() { return ['ETH', 'USDG', 'WETH', ...featuredStockSymbols()]; }, catalog: true }
   // BUILD-BASE-001: Base likewise (ETH, then its shortcuts; search reaches the validated token list).
-  : transferAllowsTokens(profile) ? { network, chain: profile.chain, provider: 'Transfer', get tokens() { return ['ETH', ...featuredNetworkSymbols(profile.chain)]; }, catalog: true }
+  : transferAllowsTokens(profile) ? { network, chain: profile.chain, provider: 'Send', get tokens() { return ['ETH', ...featuredNetworkSymbols(profile.chain)]; }, catalog: true }
   : { network, chain: profile.chain, provider: 'Native transfer', tokens: ['ETH'] });
 const lending: readonly CryptoPickerProfile[] = AAVE_V3_LENDING_PROFILES.map(profile => ({ network: profile.network, chain: profile.chain, provider: 'Aave V3', tokens: [profile.symbol] }));
 export function cryptoProfiles(action: CryptoAction): readonly CryptoPickerProfile[] { return action === 'swap' ? swaps : action === 'pool' ? pools : action === 'transfer' ? transfers : lending; }

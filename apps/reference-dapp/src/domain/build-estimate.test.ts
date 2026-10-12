@@ -1,14 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { requestBuildEstimate, type BuildEstimateResult } from './build-estimate';
+import { LIVE_QUOTE_DEBOUNCE_MS, requestBuildEstimate, type BuildEstimateResult } from './build-estimate';
 import { deferred } from '../test-utils/hook-harness';
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
 const result: BuildEstimateResult = { ok: true, estimate: { workflowHash: '0x' + 'a'.repeat(64), nodeId: 'node-002', chain: 'eip155:84532', provider: 'Uniswap V3', expected: '0.001', minimum: '0.000995', symbol: 'WETH', slippageBps: 50, expiresAt: '2099-01-01T00:00:00Z' } };
 describe('cancellable Build estimate requests', () => {
+  it('UX-007: the live-quote debounce is a short named constant (150–250 ms)', () => {
+    expect(LIVE_QUOTE_DEBOUNCE_MS).toBe(200);
+    expect(LIVE_QUOTE_DEBOUNCE_MS).toBeGreaterThanOrEqual(150); expect(LIVE_QUOTE_DEBOUNCE_MS).toBeLessThanOrEqual(250);
+  });
   it('debounces and publishes one successful response', async () => {
     const load = vi.fn().mockResolvedValue(result), publish = vi.fn(); requestBuildEstimate(load, publish);
-    await vi.advanceTimersByTimeAsync(349); expect(load).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(LIVE_QUOTE_DEBOUNCE_MS - 1); expect(load).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1); expect(load).toHaveBeenCalledOnce(); expect(publish).toHaveBeenCalledExactlyOnceWith(result);
     await vi.advanceTimersByTimeAsync(20_000); expect(publish).toHaveBeenCalledOnce();
   });

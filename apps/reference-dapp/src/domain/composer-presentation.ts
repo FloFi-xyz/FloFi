@@ -47,7 +47,7 @@ export function singleAmountProposalTarget(workflow: Workflow, command: Command,
 const actionLabels: Record<string, string> = {
   'asset.swap.exact-input': 'Swap', 'asset.bridge': 'Bridge',
   'asset.liquidity.concentrated': 'Pool / Liquidity', 'asset.liquidity.uniswap-v3': 'Pool / Liquidity',
-  'asset.liquidity.prepare': 'Prepare liquidity', 'asset.transfer': 'Transfer',
+  'asset.liquidity.prepare': 'Prepare liquidity', 'asset.transfer': 'Send',
   supply: 'Supply', borrow: 'Borrow', repay: 'Repay', withdraw: 'Withdraw',
 };
 const providerLabels: Record<string, string> = {

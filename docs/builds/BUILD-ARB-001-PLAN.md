@@ -5,8 +5,9 @@ Branch: `codex/build-arb-001-network-ux`.
 Inputs: [discovery and capability matrix](BUILD-ARB-001-DISCOVERY.md), [read verification](BUILD-ARB-001-READ-VERIFICATION.json),
 [persistent handoff](BUILD-ARB-001-HANDOFF.md), BASE-001 shared architecture and existing Router.
 
-The owner authorized and completed **Phase 1**, **Phase 2: Swap + Transfer runtime only**, **Phase 3: existing Router Bridge certification only**,
-**Phase 4: Arbitrum Pool / Liquidity runtime only**, and **Phase 5: Arbitrum Aave V3 lending only**.
+The owner authorized and completed **Phases 1–6** and **Phase 7A: UX-001 through UX-007 only**.
+Current checkpoint: the Phase 7A commit containing the updated handoff; exact Phase 6 parent is
+`ab5919842e036047047e614ebdb7176d06ba4aeb`. See the handoff for the commit-resolution command and full changed-file inventory.
 Phase 2 starts at `87f4a7a575ff10f5b8e7c05e56af4fa0bc335bce`. Every phase requires focused checks, an updated handoff and a commit.
 Do not start later phases automatically. Full CI belongs at the end of BUILD-ARB-001; no PR or push in this checkpoint.
 
@@ -276,13 +277,58 @@ The [integration report](BUILD-ARB-001-NETWORK-INTEGRATION-REPORT.md) begins the
 Arbitrum/Router deployment gates were not enabled/set. Production, real-money transactions, push and PR: **NONE**.
 **OWNER-APPROVED UX CHANGES: none yet.** Stop at the local Phase 6 commit; wait for an explicit owner-defined UX phase.
 
-## Recommended later phases — proposals only
+## Phase 7A — owner-approved workflow UX (complete)
 
-1. **Owner-approved UX phases.** Scope and approval must come from the owner; no UX change is approved yet. Do not start automatically.
-2. **Final integration and full CI.** Confirm registry parity across all surfaces, existing Base/Robinhood behavior,
-   execution gates, recovery/reconciliation and hash continuity; run the full required CI only here. Delivery/PR remains owner-directed.
+The three-session worktree was preserved, with no reset/stash/recreation or repeat of UX implementation. This checkpoint finishes validation,
+the six-failure investigation, documentation and the local commit. Historical phase records above describe their scope at that time.
 
-The owner may reorder or narrow these phases and will supply any future UX changes explicitly.
+| Item | Result | Checkpoint behavior |
+| --- | --- | --- |
+| UX-001 | PASS | Send To field, network/EIP-55 validation, owner-only read-only wallet destination, required destination before Review; Canvas/Chat/Copilot/MCP canonical recipient parity and Copilot clarification/self-wallet handling. |
+| UX-002 | PASS | Existing Automate action as an accessible header clock beside rename/save; old bottom-left placement removed; behavior retained. |
+| UX-003 | PASS | Locked Simulating / Waiting for wallet CTA; no duplicate simulation/wallet requests. |
+| UX-004 | PASS | Create new workflow after terminal results: fresh UUID, empty Build, cleared proposal/conversation/drafts, preserved wallet; Return to Build retains the current workflow; unresolved recovery retained. |
+| UX-005 | PASS | Send presentation only; internal transfer identity and both Phase 2 Send hashes plus all 40 historical vectors unchanged. |
+| UX-006 | PASS | Existing confirmation centered on empty Canvas; Apply boundary and dismiss/droplet restoration preserved; non-empty top-right behavior retained. |
+| UX-007 | PASS | 200 ms debounce, AbortController cleanup/active flag, latest-generation and exact response guards, exact unexpired snapshot cache, immediate Calculating… and truthful Quote unavailable; shared Base/Arbitrum/Robinhood read-only path under existing gates; Simulate/Review/Execute remain explicit. |
+
+Final focused evidence: 12 Vitest files / 224 tests; corrected test fixtures rechecked; temporary Phase 6 routing probe 3/3;
+two exact visual cases / three individually inspected images pass; lint on 53 code files; pure strict authoring TypeScript;
+governance-lite / 19 self-tests and diff-check. Prior passing browser profiles are retained in the handoff and were not rerun blindly.
+Broader scoped TypeScript retains only the known robinhood-transfer-panel.tsx:83:103 source blocker under the prior --skipLibCheck
+declaration limit; the component/profile/type definitions match Phase 2. No production fix in this phase; record for Phase 8.
+The new tests' React props/execution fixture typing was corrected without changing product behavior or weakening assertions.
+
+Six default-product classifications (exact titles/evidence in handoff/report):
+
+1. visual-shell Build snapshot — EXPECTED_OWNER_APPROVED_VISUAL_CHANGE (UX-005).
+2. swap-authoring proposal/blocked-review snapshots — EXPECTED_OWNER_APPROVED_VISUAL_CHANGE (UX-005/006/007).
+3. cross-chain-liquidity — TEST_PROFILE_ROUTING_ISSUE, pre-existing Phase 6.
+4. cross-chain-liquidity-recovery — TEST_PROFILE_ROUTING_ISSUE, pre-existing Phase 6.
+5. BUILD-009 passive restoration — TEST_PROFILE_ROUTING_ISSUE, pre-existing Phase 6.
+6. BUILD-009 wallet change — TEST_PROFILE_ROUTING_ISSUE, pre-existing Phase 6.
+
+Phase 6 source equivalence and execution of the actual pure builders/classifier prove that legacy Arbitrum swap nodes select
+PublicTestnetPanel before the engineering composition/BUILD-009 panels. The four unchanged browser cases reproduce the missing controls;
+they remain failures and are deferred, not skipped or relabeled as passes. No timeout increase or production routing edit.
+BUILD-009's live read-only LI.FI dependency remains downstream of an explicit quote click; these failures occur before that click,
+so external provider availability is not their cause. MOCKED LI.FI normalization/lifecycle tests pass.
+
+Only build.png, proposal.png and the subsequently reached review-blocked.png baseline were individually inspected and updated.
+The last captures the approved unavailable quote state and existing initial card measurement; no UX-009 fit behavior was introduced.
+next-env.d.ts matches Phase 6 and is excluded. All temporary evidence remains in /tmp. No Production changes, gate enablement,
+real-money execution, unrelated UX, UX-008/009/010 implementation, full CI, push or PR.
+
+## Next exact action — Phase 7B, do not execute automatically
+
+Stop after the Phase 7A local checkpoint. The next owner-directed scope is:
+
+1. UX-008 — Toolbar fit.
+2. UX-009 — Auto-fit after card insertion.
+3. UX-010 — Generic user-defined workflow connections.
+
+Phase 8 integration/final validation remains separate: address the pre-existing Robinhood type blocker and engineering test/profile
+alignment, then run full required CI only when explicitly directed. No Phase 7B or Phase 8 work is part of this checkpoint.
 
 ## Invariants for every later phase
 
