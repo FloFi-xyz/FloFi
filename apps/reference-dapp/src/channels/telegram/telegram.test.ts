@@ -43,6 +43,19 @@ describe('BUILD-CHANNELS-001 Telegram configuration', () => {
     expect(code({ ...f.env, FLOFI_TELEGRAM_API_BASE: 'http://127.0.0.1:8081', VERCEL: '1', VERCEL_ENV: 'preview' })).toBe('TELEGRAM_CONFIGURATION_INVALID:FLOFI_TELEGRAM_API_BASE');
   });
 
+  it('keeps allowlist as default and explicitly permits private human senders only in public mode', () => {
+    const f = telegramEnv();
+    const defaultConfig = readTelegramConfig({ ...f.env, FLOFI_TELEGRAM_ALLOWED_USERS: undefined }) as TelegramConfig;
+    expect(defaultConfig.accessMode).toBe('allowlist');
+    expect(parseUpdate(textUpdate('hi', { user: TELEGRAM_OTHER_USER }), defaultConfig, NOW)!.messages[0]!.allowed).toBe(false);
+    expect(code({ ...f.env, FLOFI_TELEGRAM_ACCESS_MODE: 'PUBLIC' })).toBe('TELEGRAM_CONFIGURATION_INVALID:FLOFI_TELEGRAM_ACCESS_MODE');
+    const publicConfig = readTelegramConfig({ ...f.env, FLOFI_TELEGRAM_ACCESS_MODE: 'public', FLOFI_TELEGRAM_ALLOWED_USERS: undefined }) as TelegramConfig;
+    expect(publicConfig.accessMode).toBe('public');
+    expect(parseUpdate(textUpdate('/start', { user: TELEGRAM_OTHER_USER }), publicConfig, NOW)!.messages[0]!.allowed).toBe(true);
+    expect(parseUpdate(textUpdate('/start', { chat: { id: -100123, type: 'supergroup' } }), publicConfig, NOW)!.messages).toEqual([]);
+    expect(parseUpdate(textUpdate('/start', { from: { id: TELEGRAM_USER, is_bot: true, first_name: 'Bot' } }), publicConfig, NOW)!.messages).toEqual([]);
+  });
+
   it('runs alongside WhatsApp on one Channel Core, and refuses a channel secret equal to the bot token or webhook secret', () => {
     const f = telegramEnv();
     expect(readChannelDeployment(f.env)).toMatchObject({ ok: true, deployment: { whatsapp: null, telegram: { botId: BOT_ID } } });
