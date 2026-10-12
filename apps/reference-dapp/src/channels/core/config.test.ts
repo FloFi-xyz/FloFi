@@ -22,6 +22,14 @@ describe('BUILD-CHANNELS-001 Channel Core configuration', () => {
       policy: { ok: true, testFunds: true, mainnetNetworks: [] } });
   });
 
+  it('BUILD-TELEGRAM-PUBLIC-001: bounds model calls globally (defaults 300/hour and 2000/day) and fails closed on a malformed budget', () => {
+    expect(readChannelCoreConfig(base())).toMatchObject({ enabled: true, modelBudget: { hourly: 300, daily: 2000 } });
+    expect(readChannelCoreConfig({ ...base(), FLOFI_CHANNEL_MODEL_BUDGET_HOURLY: '50', FLOFI_CHANNEL_MODEL_BUDGET_DAILY: '400' })).toMatchObject({ modelBudget: { hourly: 50, daily: 400 } });
+    for (const [name, value] of [['FLOFI_CHANNEL_MODEL_BUDGET_HOURLY', '0'], ['FLOFI_CHANNEL_MODEL_BUDGET_HOURLY', '-1'], ['FLOFI_CHANNEL_MODEL_BUDGET_HOURLY', '1.5'],
+      ['FLOFI_CHANNEL_MODEL_BUDGET_HOURLY', '100001'], ['FLOFI_CHANNEL_MODEL_BUDGET_HOURLY', 'many'], ['FLOFI_CHANNEL_MODEL_BUDGET_DAILY', '0'],
+      ['FLOFI_CHANNEL_MODEL_BUDGET_DAILY', '299']] as const) expect(reason({ ...base(), [name]: value }), `${name}=${value}`).toBe(name);
+  });
+
   it('fails closed on every missing or malformed value', () => {
     for (const [name, value, expected] of [
       ['FLOFI_CHANNEL_SECRET', undefined, 'FLOFI_CHANNEL_SECRET'], ['FLOFI_CHANNEL_SECRET', 'short', 'FLOFI_CHANNEL_SECRET'],

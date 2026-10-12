@@ -15,6 +15,7 @@
 import type { EngineRuntime } from '../platform/index.ts';
 import type { ChannelInterpreter } from './core/conversation.ts';
 import { channelInterpreter } from './core/interpreter.ts';
+import { keyedDigest } from './core/crypto.ts';
 import { channelLogger, type ChannelLogSink } from './core/log.ts';
 import { createChannelService } from './core/service.ts';
 import type { ChannelVisualRenderer } from './core/types.ts';
@@ -88,17 +89,22 @@ export async function handleChannelWebhook(route: ChannelRoute, request: Request
   const host = await channelHost(env, core, options.host);
   if ('code' in host) return answer(503, host.code);
   const { store, platform } = channelRuntime(env, core, host, options.runtime);
-  // Public Telegram admission is globally bounded BEFORE a sender's conversation,
-  // encrypted payload, model call, or approval handoff is allocated. PostgreSQL
-  // fixed-window increments are atomic across Vercel instances.
-  if (route === 'telegram' && result.deployment.telegram?.accessMode === 'public' && parsed.messages.length > 0) {
-    const message = parsed.messages[0]!;
-    const globalOk = await store.allow('channel:public:global:10m', 120, 600, now());
-    const senderDigest = core.keys.subject;
-    const { keyedDigest } = await import('./core/crypto.ts');
-    const senderBucket = keyedDigest(senderDigest, 'telegram:' + message.subject.business + ':' + message.subject.user).toString('hex');
-    const senderOk = globalOk && await store.allow('channel:public:sender:' + senderBucket, 12, 600, now());
-    if (!globalOk || !senderOk) return answer(200, 'TELEGRAM_PUBLIC_RATE_LIMITED');
+  // BUILD-TELEGRAM-PUBLIC-001: public admission is bounded per sender and globally BEFORE a conversation, an encrypted payload, a model
+  // call or an approval is allocated (PostgreSQL fixed windows: atomic across instances). The sender's own window is spent first, so one
+  // flooding sender cannot consume everyone's share. A limited update is acknowledged (200) so Telegram never retries it; the
+  // conversation's own limiter (lower than this backstop) is what tells a real person to slow down.
+  const telegram = route === 'telegram' ? result.deployment.telegram : null;
+  if (telegram?.accessMode === 'public' && parsed.messages.length > 0) {
+    const window = 600, limits = telegram.publicLimits;
+    const senders = [...new Set(parsed.messages.map(m => keyedDigest(core.keys.subject, `${m.channel}:${m.subject.business}:${m.subject.user}`).toString('hex')))];
+    for (const sender of senders) if (!await store.allow(`channel:public:sender:${sender}`, limits.sender, window, now())) {
+      log.warn('channel.public_rate_limited', { channel: prefix, kind: 'sender' });
+      return answer(200, 'TELEGRAM_PUBLIC_RATE_LIMITED');
+    }
+    if (!await store.allow('channel:public:global', limits.global, window, now())) {
+      log.warn('channel.public_rate_limited', { channel: prefix, kind: 'global' });
+      return answer(200, 'TELEGRAM_PUBLIC_RATE_LIMITED');
+    }
   }
   const service = createChannelService({ core, store, log, now, platform, previewTimeoutMs: options.previewTimeoutMs ?? 60_000, adapter: provider.adapter,
     interpreter: options.interpreter !== undefined ? options.interpreter : channelInterpreter(env, { enabled: core.copilot }), subscriptions: channelSubscriptions(env, host),

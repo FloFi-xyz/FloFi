@@ -56,6 +56,15 @@ describe('BUILD-CHANNELS-001 Telegram configuration', () => {
     expect(parseUpdate(textUpdate('/start', { from: { id: TELEGRAM_USER, is_bot: true, first_name: 'Bot' } }), publicConfig, NOW)!.messages).toEqual([]);
   });
 
+  it('BUILD-TELEGRAM-PUBLIC-001: public admission limits default to 300 per 10 min globally and 30 per sender, and fail closed when malformed or incoherent', () => {
+    const f = telegramEnv();
+    expect(readTelegramConfig({ ...f.env, FLOFI_TELEGRAM_ACCESS_MODE: 'public' })).toMatchObject({ accessMode: 'public', publicLimits: { global: 300, sender: 30 } });
+    expect(readTelegramConfig({ ...f.env, FLOFI_TELEGRAM_PUBLIC_GLOBAL_LIMIT: '40', FLOFI_TELEGRAM_PUBLIC_SENDER_LIMIT: '8' })).toMatchObject({ publicLimits: { global: 40, sender: 8 } });
+    expect(code({ ...f.env, FLOFI_TELEGRAM_PUBLIC_GLOBAL_LIMIT: '0' })).toBe('TELEGRAM_CONFIGURATION_INVALID:FLOFI_TELEGRAM_PUBLIC_GLOBAL_LIMIT');
+    expect(code({ ...f.env, FLOFI_TELEGRAM_PUBLIC_SENDER_LIMIT: 'lots' })).toBe('TELEGRAM_CONFIGURATION_INVALID:FLOFI_TELEGRAM_PUBLIC_SENDER_LIMIT');
+    expect(code({ ...f.env, FLOFI_TELEGRAM_PUBLIC_GLOBAL_LIMIT: '10', FLOFI_TELEGRAM_PUBLIC_SENDER_LIMIT: '11' })).toBe('TELEGRAM_CONFIGURATION_INVALID:FLOFI_TELEGRAM_PUBLIC_SENDER_LIMIT');
+  });
+
   it('runs alongside WhatsApp on one Channel Core, and refuses a channel secret equal to the bot token or webhook secret', () => {
     const f = telegramEnv();
     expect(readChannelDeployment(f.env)).toMatchObject({ ok: true, deployment: { whatsapp: null, telegram: { botId: BOT_ID } } });
