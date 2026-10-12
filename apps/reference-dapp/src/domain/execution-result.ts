@@ -50,3 +50,24 @@ export function isFinalExecutionResult(progress: ExecutionLifecycle | null | und
   return Boolean(progress?.started && (progress.state === 'complete' || progress.state === 'attention') &&
     !progress.steps.some(step => step.operations.some(operation => IN_FLIGHT.includes(operation.state))));
 }
+
+/**
+ * BUILD-FIX-UX-001: a final run in which no transaction was submitted and nothing was confirmed — every request it made was declined in
+ * the wallet before submission (or recorded as not submitted). Starting over cannot repeat anything, so a fresh simulation is safe.
+ */
+export function nothingSubmitted(progress: ExecutionLifecycle | null | undefined): boolean {
+  if (!progress || !isFinalExecutionResult(progress) || progress.state !== 'attention') return false;
+  const touched = progress.steps.flatMap(step => step.operations).filter(operation => operation.state !== 'waiting');
+  return touched.length > 0 && touched.every(operation => !operation.hash && (operation.state === 'not-submitted' ||
+    operation.state === 'failed' && (operation.label === 'Wallet request declined' || progress.evidence?.operations[operation.id]?.failure === 'declined')));
+}
+
+/**
+ * BUILD-FIX-UX-001: the run the current workflow shows. A final run (confirmed, declined, failed or not submitted) stays attached to the
+ * workflow it executed; once the owner creates or edits another workflow it no longer describes the Canvas, so it is not that workflow's
+ * execution state. Its record is unchanged (Dashboard history, durable journal). An unresolved run always stays attached.
+ */
+export function currentExecution(progress: ExecutionLifecycle | null | undefined): ExecutionLifecycle | null {
+  if (!progress?.started) return null;
+  return progress.matchesWorkflow === false && !progress.planUnavailable && isFinalExecutionResult(progress) ? null : progress;
+}
