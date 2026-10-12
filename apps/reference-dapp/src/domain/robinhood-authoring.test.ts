@@ -15,6 +15,7 @@ import { editorHistoryReducer, initialEditorHistory } from './editor-history';
 import { editorReducer } from './editor';
 import { composerSummary } from './composer-presentation';
 import { catalogSwapDetails } from './catalog-swap-authoring';
+import { SWAP_DEFAULT_SLIPPAGE_BPS } from './swap-authoring';
 
 const OFFICIAL = readFileSync(new URL('../../../../packages/action-registry/test/fixtures/robinhood-rhj-assets-2026-10-11.json', import.meta.url), 'utf8');
 const catalog = robinhoodNetworkCatalog(parseRobinhoodStockTokenRegistry(OFFICIAL, '2026-10-11T02:00:00.000Z'));
@@ -72,13 +73,14 @@ describe('the Stocks card is a canonical Robinhood Chain swap', () => {
     const node = workflow.nodes.find(item => item.actionType === 'asset.swap.exact-input')!;
     expect(node.chainId).toBe('eip155:4663');
     const fields = readCatalogSwapNode(node);
-    expect(fields).toMatchObject({ amount: '25000000', slippageBps: 50,
+    // BUILD-FIX-UX-001: a swap created on the Canvas (the Stocks card included) starts at the 100 bps swap default.
+    expect(fields).toMatchObject({ amount: '25000000', slippageBps: SWAP_DEFAULT_SLIPPAGE_BPS,
       input: { address: '0x5fc5360d0400a0fd4f2af552add042d716f1d168', decimals: 6, officialId: null },
       output: { address: '0xaf3d76f1834a1d425780943c99ea8a608f8a93f9', decimals: 18, officialId: '0x00000000000000000000000000000000c2425be3658540dd8e2424cbf3c5c649' } });
     expect(validateAuthoringWorkflow(workflow, context)).toBe(workflow);
     expect(composerSummary(workflow, node, context)).toMatchObject({ action: 'Stocks', amount: '25 USDG', detail: 'USDG → AAPL' });
     expect(cryptoSelectionOf(node)).toEqual({ action: 'swap', network: ROBINHOOD_NETWORK, from: 'USDG', to: 'AAPL' });
-    expect(cryptoInputOf(node)).toMatchObject({ amount: '25', slippage: '50' });
+    expect(cryptoInputOf(node)).toMatchObject({ amount: '25', slippage: String(SWAP_DEFAULT_SLIPPAGE_BPS) });
   });
   it('a non-featured search result (PLTR) configures the same card and flows into the same IR shape', () => {
     registerNetworkCatalog(catalog);

@@ -17,7 +17,9 @@ import { TokenAmountInput } from './token-amount-input';
 import { bridgeDetails, createBridgeNode, type BridgeInput } from '../domain/bridge-authoring';
 import { canDeleteCanvasNode } from '../domain/canvas-keyboard';
 import { createLiquidityNode, type LiquidityInput } from '../domain/liquidity-authoring';
-import { inputSymbol, formatHumanAmount, parseHumanAmount, parseSlippage, swapDetails } from '../domain/swap-authoring';
+import { inputSymbol, formatHumanAmount, parseHumanAmount, parseSwapSlippageEdit, slippagePercent, swapDetails, SWAP_SLIPPAGE_RANGE } from '../domain/swap-authoring';
+import { editorReducer } from '../domain/editor';
+import type { Command } from '../domain/commands';
 import { useWorkflow } from '../state/workflow-store';
 import { composerSummary, composerNodeState } from '../domain/composer-presentation';
 
@@ -47,6 +49,26 @@ type InspectorProps = {
 const SELF_TRANSFER_NOTE = 'Recipient: your connected owner wallet (a self-transfer), bound at Review. Only the network fee is spent. A chain execution proof, not a DeFi action.';
 // UX-001: on a recipient-capable network the destination is the card's "To" address, committed with the proposal and bound at Review.
 const SEND_RECIPIENT_NOTE = 'Recipient: the address in the card\'s To field, bound at Review. Only the reviewed amount moves; the network fee is paid in ETH.';
+/** BUILD-FIX-UX-001: the slippage field's own validation message (shown under the field; the workflow is unchanged). */
+function slippageMessage(cause: unknown) {
+  const code = cause instanceof Error ? cause.message : '';
+  if (code === 'SLIPPAGE_OUT_OF_RANGE') return `Enter a slippage from ${SWAP_SLIPPAGE_RANGE.minimum} to ${SWAP_SLIPPAGE_RANGE.maximum} bps (${slippagePercent(SWAP_SLIPPAGE_RANGE.minimum)}–${slippagePercent(SWAP_SLIPPAGE_RANGE.maximum)}).`;
+  if (/LOCK/.test(code)) return 'This step is protected. Unlock it before changing its slippage.';
+  return code === 'INVALID_SLIPPAGE' || !code ? 'Enter the slippage as a whole number of basis points (100 bps = 1%).' : 'This slippage cannot be applied to this step.';
+}
+/** BUILD-FIX-UX-001: the swap's maximum slippage, edited like any other parameter (Enter or Apply). It always shows the applied value. */
+function SlippageField({ value, current, error, onChange, onSubmit }: { value: string; current: number | null; error: string; onChange(value: string): void; onSubmit(event: FormEvent<HTMLFormElement>): void }) {
+  const { t: tr } = useLocale();
+  const id = useId();
+  return <form onSubmit={onSubmit} className="inspector-form" aria-label={tr("Swap slippage")}>
+    <label htmlFor={`${id}-slippage`}>{tr("Slippage (bps)")}</label>
+    <input id={`${id}-slippage`} type="text" value={value} onChange={event => onChange(event.target.value)} inputMode="numeric" autoComplete="off" spellCheck={false} maxLength={5}
+      aria-invalid={Boolean(error) || undefined} aria-describedby={`${id}-slippage-note`}/>
+    <button type="submit" disabled={value === (current?.toString() ?? '')}>{tr("Apply slippage")}</button>
+    <p id={`${id}-slippage-note`} className={error ? 'form-error' : 'muted'} role={error ? 'alert' : undefined}>{error ? tr(error)
+      : current === null ? tr('No slippage limit is set for this step.') : tr('Applied limit: {0} bps ({1}). A fresh simulation and Review use it.', current, slippagePercent(current))}</p>
+  </form>;
+}
 export function ArtifactInspector(props: InspectorProps) {
   const { state, context, actionSetup = null, amountInputs = {}, cryptoSelections = {}, editCanvasAmount, editCryptoSelection } = useWorkflow();
   // BUILD-RH-002: the Stocks card (a draft or a canonical Robinhood Chain stock purchase) edits its own selection and amount.
@@ -62,7 +84,7 @@ export function ArtifactInspector(props: InspectorProps) {
 }
 function CanonicalArtifactInspector({ selectedId, select, expanded = false, onExpandedChange }: InspectorProps) {
   const { t: tr } = useLocale();
-  const { state, dispatch, context, propose, review, actionSetup = null, amountInputs = {}, bridgeNetworkInputs = {}, cryptoSelections = {}, dismissProposal, editCanvasAmount, reviewCanvasAmount, removeActionSetup } = useWorkflow();
+  const { state, dispatch, context, propose, review, actionSetup = null, amountInputs = {}, bridgeNetworkInputs = {}, cryptoSelections = {}, dismissProposal, editCanvasAmount, reviewCanvasAmount, commitCanvasAmount, removeActionSetup } = useWorkflow();
   const contentId = useId();
   const lending=isLendingComposition(state.workflow);
   const node = state.workflow.nodes.find(item => item.nodeId === selectedId && !item.actionType.startsWith('mock-'));
@@ -79,6 +101,7 @@ function CanonicalArtifactInspector({ selectedId, select, expanded = false, onEx
   const template = node?.actionType.startsWith('mock-') ?? false;
   const [amount, setAmount] = useState('');
   const [slippage, setSlippage] = useState('');
+  const [slippageError, setSlippageError] = useState('');
   const [bridgeInput, setBridgeInput] = useState<BridgeInput>({ amount: '', slippageBps: '50' });
   const [liquidityInput, setLiquidityInput] = useState<LiquidityInput>(emptyLiquidity);
   const effectiveLiquidityInput = liquidity && contributions.values ? { ...liquidityInput, weth: contributions.values[0]!.amount, usdc: contributions.values[1]!.amount } : liquidityInput;
@@ -96,7 +119,7 @@ function CanonicalArtifactInspector({ selectedId, select, expanded = false, onEx
     if (cross) setCrossInput({ amount: (Number(cross.bridgeAmount) / 1e6).toString(), bridgeSlippageBps: String(cross.bridgeSlippageBps),
       swapSlippageBps: String(cross.swapSlippageBps || 50), tickLower: String(cross.tickLower), tickUpper: String(cross.tickUpper),
       recipient: cross.recipient, provider: cross.bridgeProvider, noSwap: cross.noSwap });
-    setError('');
+    setError(''); setSlippageError('');
   }, [cross, node, swap?.amount, swap?.slippage, cryptoInput?.slippage, bridge?.amount, bridge?.slippageBps, liquidity, context, template]);
   const selection = node ? cryptoSelections[node.nodeId] ?? cryptoInput?.selection : undefined;
   const cryptoSwap = cryptoInput?.selection.action === 'swap' ? cryptoInput : null;
@@ -104,16 +127,27 @@ function CanonicalArtifactInspector({ selectedId, select, expanded = false, onEx
   const deletable = canDeleteCanvasNode(state.workflow, selectedId);
   function saveAmount(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); if (!node) return;
-    if (swap && amountInputs[node.nodeId] !== undefined) { setError(reviewCanvasAmount(node.nodeId) ?? ''); return; }
+    if (swap && amountInputs[node.nodeId] !== undefined) { setError(commitCanvasAmount(node.nodeId) ?? ''); return; }
     if (swap) {
       try { parseHumanAmount(amount, swap.from, context); setError(''); propose({ type: 'SET_SWAP_AMOUNT', nodeId: node.nodeId, amount, source: 'CANVAS', baseRevision: state.workflow.revision }); }
       catch (cause) { setError(cause instanceof Error ? cause.message : 'Invalid amount'); }
     } else if (template) dispatch({ type: 'SET_AMOUNT', nodeId: node.nodeId, amount, source: 'CANVAS', baseRevision: state.workflow.revision });
   }
+  /**
+   * BUILD-FIX-UX-001: a slippage edit is an ordinary parameter edit of the editable workflow: validated, then applied at once (no proposal).
+   * The new revision retires every quote, simulation and Review; execution still needs fresh ones and the owner's wallet signature.
+   */
+  function applySlippage(event: FormEvent<HTMLFormElement>, command: (bps: string) => Command) {
+    event.preventDefault();
+    try {
+      const bps = String(parseSwapSlippageEdit(slippage)), next = command(bps), preview = editorReducer(state, next, context);
+      if (preview.error) throw new Error(preview.error);
+      dismissProposal(); dispatch(next); setSlippage(bps); setSlippageError('');
+    } catch (cause) { setSlippageError(slippageMessage(cause)); }
+  }
   function saveSlippage(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault(); if (!node || !swap) return;
-    try { parseSlippage(slippage); setError(''); propose({ type: 'SET_SLIPPAGE', nodeId: node.nodeId, slippage, source: 'CANVAS', baseRevision: state.workflow.revision }); }
-    catch (cause) { setError(cause instanceof Error ? cause.message : 'Invalid slippage'); }
+    if (!node || !swap) { event.preventDefault(); return; }
+    applySlippage(event, bps => ({ type: 'SET_SLIPPAGE', nodeId: node.nodeId, slippage: bps, source: 'CANVAS', baseRevision: state.workflow.revision }));
   }
   function saveBridge(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); if (!node || !bridge) return;
@@ -160,12 +194,12 @@ function CanonicalArtifactInspector({ selectedId, select, expanded = false, onEx
     {(setup?.action === 'pool' && setup.cryptoSelection || node && cryptoSelections[node.nodeId]?.action === 'pool') && <CryptoPoolForm key={`${setup?.id ?? node!.nodeId}:${setup?.cryptoSelection?.network ?? cryptoSelections[node!.nodeId]?.network}`} nodeId={setup?.id ?? node!.nodeId}/>}
     {node?.actionType === 'asset.transfer' && selection && <form id={supplyReviewFormId(node.nodeId)} onSubmit={event => { event.preventDefault(); setError(reviewCanvasAmount(node.nodeId) ?? ''); }}><p>{tr(recipientPolicy(selection.network).kind === 'ADDRESS' ? SEND_RECIPIENT_NOTE : SELF_TRANSFER_NOTE)}</p>{error && <p role="alert">{tr(error)}</p>}</form>}
     {setup?.action === 'transfer' && <p>{tr(setup.cryptoSelection && recipientPolicy(setup.cryptoSelection.network).kind === 'ADDRESS' ? SEND_RECIPIENT_NOTE : SELF_TRANSFER_NOTE)}</p>}
-    {setup && setup.action !== 'pool' && <form id={setup.action !== 'swap' && setup.action !== 'bridge' ? supplyReviewFormId(setup.id) : undefined} className="inspector-form" aria-label={tr(`Configure ${setupSummary(setup, context).action}`)} onSubmit={event => { event.preventDefault(); setError(reviewCanvasAmount(setup.id) ?? ''); }}>
+    {setup && setup.action !== 'pool' && <form id={setup.action !== 'swap' && setup.action !== 'bridge' ? supplyReviewFormId(setup.id) : undefined} className="inspector-form" aria-label={tr(`Configure ${setupSummary(setup, context).action}`)} onSubmit={event => { event.preventDefault(); setError((setup.action === 'swap' || setup.action === 'bridge' ? commitCanvasAmount(setup.id) : reviewCanvasAmount(setup.id)) ?? ''); }}>
       <label htmlFor="configure-action-amount">{tr("Source amount (")}{tr(setup.cryptoSelection?.from ?? (setup.action === 'swap' ? inputSymbol(setup.direction ?? 'USDC_TO_WETH') : 'USDC'))})</label>
       <TokenAmountInput id="configure-action-amount" value={setup.amount} maxLength={80} onValueChange={value => { setError(''); editCanvasAmount(setup.id, value); }}/>
       <p className="muted">{tr("Enter an amount greater than 0 to configure this action.")}</p>
       {error && <p className="form-error" role="alert">{tr(error)}</p>}
-      <p className="muted">{tr("Review and apply the amount in the card.")}</p>
+      <p className="muted">{tr(setup.action === 'swap' || setup.action === 'bridge' ? 'Press Enter to apply the amount.' : 'Review and apply the amount in the card.')}</p>
       <button type="button" className="quiet" onClick={() => { removeActionSetup(); select(null); }}>{tr("Remove step")}</button>
     </form>}
     {node ? <>
@@ -176,14 +210,12 @@ function CanonicalArtifactInspector({ selectedId, select, expanded = false, onEx
       {!lending&&node.actionType==='borrow'&&<BorrowAuthoringForm key={node.nodeId+':'+state.workflow.revision} nodeId={node.nodeId} reviewFormId={supplyReviewFormId(node.nodeId)}/>}
       {!lending && supply && <SupplyAuthoringForm key={node.nodeId + ':' + state.workflow.revision} nodeId={node.nodeId} reviewFormId={supplyReviewFormId(node.nodeId)}/>}
       {solana && !cryptoSwap && <><p className="muted">{tr(solana.network)} {tr(solana.from)} → {tr(solana.to)}{tr(" via ")}{tr(solanaSwapLabels(solana.network).provider)}{tr(solanaSwapLabels(solana.network).testTokens ? ' · valueless test tokens' : '')}{tr(" · simulate for a live quote. Changes require review.")}</p><SolanaSwapForm key={node.nodeId + ':' + state.workflow.revision} nodeId={node.nodeId}/></>}
-      {cryptoSwap && selection && <form className="inspector-form" aria-label={tr("Edit Swap")} onSubmit={event => {
-        event.preventDefault();
-        propose({ type: 'SET_CRYPTO_ACTION', nodeId: node.nodeId, input: { ...cryptoSwap, selection, amount: amountInputs[node.nodeId] ?? cryptoSwap.amount, slippage }, source: 'CANVAS', baseRevision: state.workflow.revision });
-      }}>
-        <label>{tr("Input amount (")}{tr(selection.from)})<TokenAmountInput value={amountInputs[node.nodeId] ?? cryptoSwap.amount} onValueChange={value => editCanvasAmount(node.nodeId, value)}/></label>
-        <label>{tr("Slippage (bps)")}<input value={slippage} onChange={event => { dismissProposal(); setSlippage(event.target.value); }} inputMode="numeric"/></label>
-        <button type="submit">{tr("Review Swap settings")}</button>
+      {cryptoSwap && selection && <form className="inspector-form" aria-label={tr("Swap amount")} onSubmit={event => { event.preventDefault(); setError(commitCanvasAmount(node.nodeId) ?? ''); }}>
+        <label>{tr("Input amount (")}{tr(selection.from)})<TokenAmountInput value={amountInputs[node.nodeId] ?? cryptoSwap.amount} aria-invalid={Boolean(error) || undefined} onValueChange={value => { setError(''); editCanvasAmount(node.nodeId, value); }}/></label>
+        {amountInputs[node.nodeId] !== undefined && <p className="muted">{tr("Press Enter to apply the amount.")}</p>}
       </form>}
+      {cryptoSwap && selection && <SlippageField value={slippage} current={Number(cryptoSwap.slippage)} error={slippageError} onChange={value => { setSlippageError(''); setSlippage(value); }}
+        onSubmit={event => applySlippage(event, bps => ({ type: 'SET_CRYPTO_ACTION', nodeId: node.nodeId, input: { ...cryptoSwap, slippage: bps }, source: 'CANVAS', baseRevision: state.workflow.revision }))}/>}
       {routed && <><p className="muted">{tr(routed.source)}{tr(` ${routed.token} → `)}{tr(ROUTER_NETWORK_OPTIONS[routed.network].destinationLabel)}{tr(` ${routed.destinationToken} through the Cross-chain Router · `)}{tr(routed.network === 'testnet' ? 'test USDC' : 'real funds')}{tr(" · a fresh route, simulation and Review are required after changes.")}</p><RouterForm key={node.nodeId + ':' + state.workflow.revision} nodeId={node.nodeId}/></>}
       {uniPosition && !cryptoSelections[node.nodeId] && <><p className="muted">{tr(uniPosition.network)}{tr(" USDC / WETH via ")}{tr(uniPosition.provider)}{tr(" · fee 0.05% · test tokens · simulate against the live pool. Changes require review.")}</p><UniswapLiquidityForm key={node.nodeId + ':' + state.workflow.revision} nodeId={node.nodeId} reviewFormId={poolReviewFormId(node.nodeId)}/></>}
       {orcaPosition && !cryptoSelections[node.nodeId] && <><p className="muted">{tr(orcaPosition.network)}{tr(" SOL / devUSDC via ")}{tr(orcaPosition.provider)}{tr(" · valueless test tokens · simulate against the live pool. Changes require review.")}</p><SolanaLiquidityForm key={node.nodeId + ':' + state.workflow.revision} nodeId={node.nodeId} reviewFormId={poolReviewFormId(node.nodeId)}/></>}
@@ -194,11 +226,9 @@ function CanonicalArtifactInspector({ selectedId, select, expanded = false, onEx
       {liquidity && <p className="muted">{tr("Base WETH/USDC position. Pool conditions require separate simulation.")}</p>}
       {(swap && !cryptoSwap || template) && <form onSubmit={saveAmount} className="inspector-form"><label htmlFor="sample-amount">{tr(swap ? `Input amount (${swap.from})` : 'Sample amount')}</label>
         <TokenAmountInput id="sample-amount" value={node ? amountInputs[node.nodeId] ?? amount : amount} onValueChange={value => swap && node ? editCanvasAmount(node.nodeId, value) : setAmount(value)} inputMode={swap ? 'decimal' : 'numeric'} maxLength={swap ? 80 : 78} disabled={locked} aria-invalid={Boolean(error)}/>
-        {node && canEditCanvasAmount(node, context, state.workflow) ? <p className="muted">{tr("Review and apply the amount in the card.")}</p>
+        {node && canEditCanvasAmount(node, context, state.workflow) ? <p className="muted">{tr("Press Enter to apply the amount.")}</p>
           : <button type="submit" disabled={locked || (node ? amountInputs[node.nodeId] ?? amount : amount) === (swap ? swap.amount : node ? amountOf(node) : '')}>{tr(swap ? 'Review amount change' : 'Save parameter')}</button>}</form>}
-      {swap && !cryptoSwap && <form onSubmit={saveSlippage} className="inspector-form"><label htmlFor="swap-edit-slippage">{tr("Slippage (bps)")}</label>
-        <input id="swap-edit-slippage" type="text" value={slippage} onChange={event => setSlippage(event.target.value)} inputMode="numeric" autoComplete="off" spellCheck={false} maxLength={5} aria-invalid={Boolean(error)}/>
-        <button type="submit" disabled={slippage === (swap.slippage?.toString() ?? '')}>{tr("Review slippage change")}</button></form>}
+      {swap && !cryptoSwap && <SlippageField value={slippage} current={swap.slippage} error={slippageError} onChange={value => { setSlippageError(''); setSlippage(value); }} onSubmit={saveSlippage}/>}
       {bridge && <form onSubmit={saveBridge} className="inspector-fields"><label>{tr("USDC amount")}<TokenAmountInput value={amountInputs[node.nodeId] ?? bridgeInput.amount} onValueChange={value => editCanvasAmount(node.nodeId, value)}/></label>
         <label>{tr("Maximum slippage (bps)")}<input type="text" inputMode="numeric" value={bridgeInput.slippageBps} onChange={event => setBridgeInput(current => ({ ...current, slippageBps: event.target.value }))}/></label><button type="submit">{tr("Review bridge change")}</button></form>}
       {liquidity && !cryptoSelections[node.nodeId] && <form id={poolReviewFormId(node.nodeId)} onSubmit={saveLiquidity} className="inspector-fields">{([

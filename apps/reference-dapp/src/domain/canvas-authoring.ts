@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { Command } from './commands';
+import { SWAP_DEFAULT_SLIPPAGE_BPS } from './swap-authoring';
 
 export const CANVAS_ACTIONS = ['swap', 'bridge', 'pool', 'supply', 'lending', 'borrow', 'repay', 'withdraw', 'transfer'] as const;
 export type CanvasAction = (typeof CANVAS_ACTIONS)[number];
@@ -9,7 +10,7 @@ export function canvasAddCommand(action: CanvasAction, revision: number, owner: 
   const base = { source: 'CANVAS' as const, baseRevision: revision };
   if ((action === 'swap' || action === 'bridge' || action === 'supply' || action === 'borrow' || action === 'repay' || action === 'withdraw') && amount === undefined) throw new Error('Enter an amount to configure this action.');
   if (action === 'transfer') { if (amount === undefined) throw new Error('Enter an amount to configure this action.'); return { ...base, type: 'ADD_RH_TRANSFER', input: { network: 'Robinhood Chain Testnet', asset: 'ETH', amount, recipient: 'CONNECTED_OWNER' } }; }
-  if (action === 'swap') return { ...base, type: 'ADD_SWAP', direction: 'USDC_TO_WETH', amount: amount!, slippage: '50' };
+  if (action === 'swap') return { ...base, type: 'ADD_SWAP', direction: 'USDC_TO_WETH', amount: amount!, slippage: String(SWAP_DEFAULT_SLIPPAGE_BPS) };
   if (action === 'bridge') return { ...base, type: 'ADD_ROUTER_BRIDGE', input: {
     source: 'Base Sepolia', destination: 'Arbitrum Sepolia', token: 'USDC', amount: amount!, recipient: '', slippage: '50', routing: 'AUTO',
   } };

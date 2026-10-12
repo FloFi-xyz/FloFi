@@ -139,6 +139,14 @@ export function readAutomationWorkerConfig(env: Env): AutomationWorkerConfig | {
   return Object.freeze({ enabled: true, tenantId, origin, price });
 }
 
+/**
+ * BUILD-FIX-UX-001: the deployment's configured price source for display-only USD estimates on Build cards (the same verified source and
+ * variables as automations; a fixture is refused on a hosted deployment). Off or misconfigured: null — the card then shows no USD figure.
+ */
+export function deploymentPriceSource(env: Env, fetchImpl: typeof fetch = fetch): PriceSource | null {
+  const config = readPriceSourceConfig(env, isHostedDeployment(env));
+  return 'reason' in config || config.kind === 'off' ? null : priceSourceOf(config, fetchImpl);
+}
 /** The configured price source (one per call site; the Chainlink feed verification is cached per source instance). */
 export function priceSourceOf(config: PriceSourceConfig, fetchImpl: typeof fetch = fetch): PriceSource {
   if (config.kind === 'chainlink') return chainlinkSource({ rpc: readOnlyRpc(config.rpcUrl, fetchImpl), feeds: config.feeds, maxAgeMs: config.maxAgeMs });
