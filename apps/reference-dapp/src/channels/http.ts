@@ -98,7 +98,7 @@ export async function handleChannelWebhook(route: ChannelRoute, request: Request
     const { keyedDigest } = await import('./core/crypto.ts');
     const senderBucket = keyedDigest(senderDigest, 'telegram:' + message.subject.business + ':' + message.subject.user).toString('hex');
     const senderOk = globalOk && await store.allow('channel:public:sender:' + senderBucket, 12, 600, now());
-    if (!globalOk || !senderOk) return answer(429, 'TELEGRAM_PUBLIC_RATE_LIMITED');
+    if (!globalOk || !senderOk) return answer(200, 'TELEGRAM_PUBLIC_RATE_LIMITED');
   }
   const service = createChannelService({ core, store, log, now, platform, previewTimeoutMs: options.previewTimeoutMs ?? 60_000, adapter: provider.adapter,
     interpreter: options.interpreter !== undefined ? options.interpreter : channelInterpreter(env, { enabled: core.copilot }), subscriptions: channelSubscriptions(env, host),
