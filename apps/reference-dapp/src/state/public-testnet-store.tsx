@@ -70,6 +70,9 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
   const [recoveryOnly, setRecoveryOnly] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // BUILD-FIX-UX-001: an earlier attempt's message (e.g. a declined wallet request) belongs to that workflow; a new one starts without it.
+  const workflowId = state.workflow.workflowId;
+  useEffect(() => { setError(null); }, [workflowId]);
   const busyRef = useRef(false);
   const workflowRef = useRef(state.workflow);
   workflowRef.current = state.workflow;

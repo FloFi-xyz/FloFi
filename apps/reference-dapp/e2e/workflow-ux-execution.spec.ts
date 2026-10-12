@@ -223,7 +223,7 @@ test('BUILD-FIX-UX-001: declined request → Create new workflow → same swap �
   // No stale execution state belongs to the new workflow, on any stage.
   await expect(cta(page).getByRole('button', { name: /^Simulate (workflow|again)$/ })).toBeEnabled({ timeout: 30_000 });
   await stage(page, 'Execute').click();
-  await expect(summary(page)).not.toContainText(/Transaction not submitted|Execution already started|Result Summary/);
+  await expect(summary(page)).not.toContainText(/Transaction not submitted|Execution already started|Result Summary|wallet request was cancelled/);
   await stage(page, 'Simulate').click();
   // Nothing was sent while starting over; the next request is a new, explicitly confirmed one with the same connected wallet.
   expect(owner.requested()).toBe(1); expect(await owner.sends()).toBe(0);
