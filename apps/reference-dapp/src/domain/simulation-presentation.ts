@@ -239,7 +239,7 @@ export function projectSimulation(workflow: Workflow, context: ReviewContext, so
       for (const stock of q.stocks ?? []) warn('attention', `${stock.symbol}: ${simulationAmount(stock.multiplierWad, 18)} underlying shares per token (Robinhood corporate-action multiplier).`);
       if (q.stocks?.length) warn('attention', 'Stock Tokens are not offered to US persons or in restricted jurisdictions.');
       if (s) s.resultLabel = 'Quoted output';
-      warn('attention', 'This is a pool quote. Network fees and exact transaction simulation are not available yet.');
+      if (!q.ownerReview) warn('attention', 'This is a pool quote. Network fees and exact transaction simulation are not available yet.');
       break;
     }
     case 'solana-swap': {
@@ -290,12 +290,12 @@ export function projectSimulation(workflow: Workflow, context: ReviewContext, so
       // BUILD-RH-002: a token transfer is shown in its own asset and decimals; an explicit recipient is named.
       const symbol = q.asset ? resolveNetworkAsset(q.chain, { address: q.asset.token })?.symbol ?? 'Token' : 'ETH';
       const amount = simulationAmount(q.value, q.asset?.decimals ?? 18, symbol), s = step(), self = q.recipient === q.account;
-      result(s, amount, amount ? self ? `Transfer ${amount} to your wallet` : `Transfer ${amount} to ${q.recipient}` : null, 'Wallet transfer');
+      result(s, amount, amount ? self ? `Send ${amount} to your wallet` : `Send ${amount} to ${q.recipient}` : null, 'Wallet send');
       if (s) s.resultLabel = 'Expected action';
       fee('Estimated network fee', q.expectedFee, 18, 'ETH'); fee('Maximum network fee', q.feeBudget, 18, 'ETH', 'Fee ceiling, not an additional charge.');
       if (q.asset?.multiplierWad) warn('attention', `${symbol}: ${simulationAmount(q.asset.multiplierWad, 18)} underlying shares per token (Robinhood corporate-action multiplier).`);
       if (!self) warn('attention', 'Funds go to an address other than the signing wallet. Confirm it belongs to the intended recipient.');
-      warn('info', self && !q.asset ? 'This transfer returns funds to the same wallet; only the network fee is spent.' : 'Only the reviewed amount moves; the network fee is paid in ETH.'); break;
+      warn('info', self && !q.asset ? 'Sending to the same wallet returns the funds; only the network fee is spent.' : 'Only the reviewed amount moves; the network fee is paid in ETH.'); break;
     }
     case 'fork-swap': {
       const q = source.state.prepared; if (!q) break;

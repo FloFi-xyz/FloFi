@@ -31,13 +31,14 @@ export function workflowProposalSummary(state: EditorState, command: Command, co
 }
 
 type Pending = NonNullable<ReturnType<typeof useWorkflow>['pending']>;
-type ReviewProps = { canApply?: boolean; onApply?: () => void; portalFromCard?: boolean };
+/** `centered` (UX-006): on an empty Canvas the same confirmation sits where the empty state's droplet is; placement only. */
+type ReviewProps = { canApply?: boolean; onApply?: () => void; portalFromCard?: boolean; centered?: boolean };
 export function ProposalReviewArtifact(props: ReviewProps = {}) {
   const { pending } = useWorkflow();
   return pending ? <ContextualProposal pending={pending} {...props}/> : null;
 }
 
-function ContextualProposal({ pending, canApply = true, onApply, portalFromCard = false }: { pending: Pending } & ReviewProps) {
+function ContextualProposal({ pending, canApply = true, onApply, portalFromCard = false, centered = false }: { pending: Pending } & ReviewProps) {
   const { t: tr } = useLocale();
   const { state, context, applyProposal, dismissProposal } = useWorkflow();
   const presentation = useMemo(() => workflowProposalSummary(state, pending.command, context), [state, pending.command, context]);
@@ -110,7 +111,7 @@ function ContextualProposal({ pending, canApply = true, onApply, portalFromCard 
     dismissProposal();
   }
   const content = <>
-    <button ref={trigger} type="button" className="proposal-artifact nodrag nopan nowheel" aria-label={tr(`Review proposed change: ${presentation.summary}`)}
+    <button ref={trigger} type="button" className={`proposal-artifact${centered ? ' proposal-artifact-centered' : ''} nodrag nopan nowheel`} aria-label={tr(`Review proposed change: ${presentation.summary}`)}
       aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? id : undefined}
       onPointerDown={event => event.stopPropagation()} onClick={event => { event.stopPropagation(); setPosition(null); setOpenCommand(open ? null : pending.command); }}>
       <span className="proposal-artifact-label">{tr("Proposed")}</span><span className="proposal-artifact-flow">{tr(presentation.summary)}</span>

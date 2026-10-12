@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { AAVE_V3_LENDING_PROFILES, ASSET_SYMBOL, UNISWAP_LIQUIDITY_PROFILES, baseAssetRegistry, SOLANA_SWAP_RUNTIMES, ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY } from '@defi-workflow-engine/action-registry';
+import { AAVE_V3_LENDING_PROFILES, ASSET_SYMBOL, transferAllowsTokens, UNISWAP_LIQUIDITY_PROFILES, baseAssetRegistry, SOLANA_SWAP_RUNTIMES, ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY } from '@defi-workflow-engine/action-registry';
 import { createBaseSepoliaReviewContext, createEthereumSepoliaReviewContext, createReviewContext } from '@defi-workflow-engine/reference-linter';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { createAuthoredTransfer, transferDetails, TRANSFER_NETWORKS, type TransferNetwork } from './robinhood-transfer-authoring';
@@ -10,8 +10,8 @@ import { createSolanaSwapNode, solanaSwapDetails, type SolanaSwapInput } from '.
 import { createUniswapLiquidityNode, uniswapLiquidityDetails } from './uniswap-liquidity-authoring';
 import { createSolanaLiquidityNode, solanaLiquidityDetails } from './solana-liquidity-authoring';
 import { createAuthoredSupply, createAuthoredBorrow, createAuthoredRepay, createAuthoredWithdraw, supplyDetails, borrowDetails, repayDetails, withdrawDetails, lendingProfileFor } from './supply-authoring';
-import { BASE_CHAIN, BASE_NETWORK, ROBINHOOD_CHAIN, ROBINHOOD_NETWORK, featuredNetworkSymbols, featuredStockSymbols, resolveNetworkAsset } from './asset-catalogs';
-import { catalogSwapDetails, createCatalogSwapAuthoringNode } from './catalog-swap-authoring';
+import { BASE_CHAIN, BASE_NETWORK, ROBINHOOD_CHAIN, ROBINHOOD_NETWORK, authoringAssetSymbol, featuredNetworkSymbols, featuredStockSymbols, resolveNetworkAsset } from './asset-catalogs';
+import { CATALOG_SWAP_NETWORKS, catalogSwapDetails, createCatalogSwapAuthoringNode, type CatalogSwapNetwork } from './catalog-swap-authoring';
 import { networkIdentity } from './network-registry';
 import { CATALOG_LIQUIDITY_NETWORKS, createCatalogLiquidityNode, catalogLiquidityDetails, robinhoodFullRange, ROBINHOOD_LIQUIDITY_DEFAULT_FEE, type CatalogLiquidityNetwork } from './robinhood-liquidity-authoring';
 
@@ -40,7 +40,8 @@ const isBaseReferencePair = (selection: CryptoSelection) => selection.network ==
 const robinhoodSwap: CryptoPickerProfile = { network: ROBINHOOD_NETWORK, chain: ROBINHOOD_CHAIN, provider: 'Uniswap',
   get tokens() { return ['USDG', 'WETH', ...featuredStockSymbols()]; }, catalog: true };
 const swaps: readonly CryptoPickerProfile[] = [...evm, ...SOLANA_SWAP_RUNTIMES.map(runtime => ({ network: runtime.network, chain: runtime.chain, provider: runtime.providerLabel, tokens: Object.keys(runtime.tokens) })),
-  robinhoodSwap];
+  robinhoodSwap, ...Object.entries(CATALOG_SWAP_NETWORKS).filter(([network]) => network !== BASE_NETWORK && network !== ROBINHOOD_NETWORK)
+    .map(([network, chain]): CryptoPickerProfile => ({ network, chain, provider: 'Uniswap', get tokens() { return featuredNetworkSymbols(chain); }, catalog: true }))];
 /** Swaps and pools on a catalog network take ERC-20s only (native ETH is wrapped first); transfers may also send ETH. */
 const erc20Only = (action: CryptoAction) => action === 'swap' || action === 'pool';
 /** A token of a profile: a shortcut, or (catalog networks) any ERC-20 the current catalog resolves. */
@@ -59,12 +60,14 @@ const pools: readonly CryptoPickerProfile[] = [
     tokens: [ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY.token0.symbol, ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY.token1.symbol], pair: [ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY.token0.symbol, ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY.token1.symbol] },
   // BUILD-RH-002: any two Robinhood Chain catalog ERC-20s (USDG, WETH, Stock Tokens); the pool follows the pair and fee tier.
   { network: ROBINHOOD_NETWORK, chain: ROBINHOOD_CHAIN, provider: 'Uniswap v3', get tokens() { return ['USDG', 'WETH', ...featuredStockSymbols()]; }, catalog: true },
+  ...Object.entries(CATALOG_LIQUIDITY_NETWORKS).filter(([network]) => network !== BASE_NETWORK && network !== ROBINHOOD_NETWORK)
+    .map(([network, chain]): CryptoPickerProfile => ({ network, chain, provider: 'Uniswap v3', get tokens() { return featuredNetworkSymbols(chain); }, catalog: true })),
 ];
 const transfers: readonly CryptoPickerProfile[] = Object.entries(TRANSFER_NETWORKS).map(([network, profile]): CryptoPickerProfile => profile.chain === ROBINHOOD_CHAIN
   // BUILD-RH-002: Robinhood Chain transfers native ETH and catalog assets; non-shortcut assets come from the official catalog.
-  ? { network, chain: profile.chain, provider: 'Transfer', get tokens() { return ['ETH', 'USDG', 'WETH', ...featuredStockSymbols()]; }, catalog: true }
+  ? { network, chain: profile.chain, provider: 'Send', get tokens() { return ['ETH', 'USDG', 'WETH', ...featuredStockSymbols()]; }, catalog: true }
   // BUILD-BASE-001: Base likewise (ETH, then its shortcuts; search reaches the validated token list).
-  : profile.chain === BASE_CHAIN ? { network, chain: profile.chain, provider: 'Transfer', get tokens() { return ['ETH', ...featuredNetworkSymbols(BASE_CHAIN)]; }, catalog: true }
+  : transferAllowsTokens(profile) ? { network, chain: profile.chain, provider: 'Send', get tokens() { return ['ETH', ...featuredNetworkSymbols(profile.chain)]; }, catalog: true }
   : { network, chain: profile.chain, provider: 'Native transfer', tokens: ['ETH'] });
 const lending: readonly CryptoPickerProfile[] = AAVE_V3_LENDING_PROFILES.map(profile => ({ network: profile.network, chain: profile.chain, provider: 'Aave V3', tokens: [profile.symbol] }));
 export function cryptoProfiles(action: CryptoAction): readonly CryptoPickerProfile[] { return action === 'swap' ? swaps : action === 'pool' ? pools : action === 'transfer' ? transfers : lending; }
@@ -85,7 +88,7 @@ export function selectCryptoNetwork(action: CryptoAction, network: string, curre
   const from = profile.pair?.[0] ?? (current && profile.tokens.includes(current.from) ? current.from : profile.tokens[0]!);
   // A Robinhood Chain pool starts as USDG against the first featured Stock Token (the live Stock Token / USDG pools), never USDG/WETH by accident;
   // a Base pool starts as USDC/WETH.
-  const pooled = action === 'pool' && profile.catalog ? profile.chain === BASE_CHAIN ? (from === 'USDC' ? 'WETH' : 'USDC')
+  const pooled = action === 'pool' && profile.catalog ? profile.chain !== ROBINHOOD_CHAIN ? profile.tokens.find(token => token !== from)
     : (from === 'USDG' ? featuredStockSymbols()[0] : 'USDG') : undefined;
   const to = profile.pair?.[1] ?? (erc20Only(action) ? current?.to && current.to !== from && profile.tokens.includes(current.to) ? current.to : pooled ?? profile.tokens.find(token => token !== from) : undefined);
   return { action, network, from, ...(to ? { to } : {}) };
@@ -99,6 +102,13 @@ export function cryptoTokenOptions(selection: CryptoSelection, side: 'source' | 
 }
 export function selectCryptoToken(selection: CryptoSelection, side: 'source' | 'destination', token: string): CryptoSelection {
   const found = cryptoProfile(selection);
+  if (found?.catalog) {
+    try { token = authoringAssetSymbol(found.chain, token); }
+    catch (cause) {
+      if (cause instanceof Error && cause.message === 'ASSET_REFERENCE_AMBIGUOUS') throw cause;
+      throw new Error('ACTION_TOKEN_UNSUPPORTED', { cause });
+    }
+  }
   // BUILD-BASE-001: on a catalog network a searched asset is valid for transfers too (their source asset), not only swaps and pools.
   const searchable = found?.catalog && (erc20Only(selection.action) || (selection.action === 'transfer' && side === 'source'));
   if (!found || (!cryptoTokenOptions(selection, side).includes(token) && !(searchable && profileHasToken(found, token, selection.action))))
@@ -134,8 +144,8 @@ export function cryptoSelectionOf(node: Node): CryptoSelection | null {
   return null;
 }
 export function canSelectCryptoAssets(node: Node, workflow: Workflow) {
-  return Boolean(cryptoSelectionOf(node) && !node.lockedParameters.length && !node.dependencies.length && !node.inputs.some(input => input.kind === 'OUTPUT_REFERENCE') &&
-    !workflow.resourceEdges.some(edge => edge.fromNodeId === node.nodeId || edge.toNodeId === node.nodeId) && !workflow.nodes.some(other => other.dependencies.includes(node.nodeId)));
+  return Boolean(cryptoSelectionOf(node) && !node.lockedParameters.length && !node.inputs.some(input => input.kind === 'OUTPUT_REFERENCE') &&
+    !workflow.resourceEdges.some(edge => edge.fromNodeId === node.nodeId || edge.toNodeId === node.nodeId));
 }
 export type CryptoActionInput = { selection: CryptoSelection; amount: string; secondAmount?: string; beneficiary?: string; slippage: string;
   /** Catalog-network pools only (BUILD-RH-002 Robinhood Chain, BUILD-BASE-001 Base): the Uniswap v3 fee tier (0.3% when absent). */ fee?: number;
@@ -154,12 +164,15 @@ export function defaultPoolRange(network: string): { readonly rangeUnit: 'TICK';
   return catalog?.catalog ? full(robinhoodFullRange(ROBINHOOD_LIQUIDITY_DEFAULT_FEE, catalog.chain).tickUpper) : full(887270);
 }
 export function createCryptoActionNode(id: string, input: CryptoActionInput): SemanticWorkflow['nodes'][number] {
-  const { selection: selection, amount, slippage } = input;
+  const { amount, slippage } = input;
+  const identity = networkIdentity(input.selection.network);
+  const selection = identity?.catalog ? { ...input.selection, from: authoringAssetSymbol(identity.chain, input.selection.from),
+    ...input.selection.to === undefined ? {} : { to: authoringAssetSymbol(identity.chain, input.selection.to) } } : input.selection;
   if (!validCryptoSelection(selection)) throw new Error('ACTION_ASSETS_UNSUPPORTED');
   if (selection.action === 'swap') {
     if (selection.network === 'Solana' || selection.network === 'Solana Devnet') return createSolanaSwapNode(id, { network: selection.network, from: selection.from, to: selection.to, amount, slippage } as SolanaSwapInput);
-    if (selection.network === ROBINHOOD_NETWORK || (selection.network === BASE_NETWORK && !isBaseReferencePair(selection)))
-      return createCatalogSwapAuthoringNode(id, { network: selection.network, from: selection.from, to: selection.to!, amount, slippage });
+    if (Object.hasOwn(CATALOG_SWAP_NETWORKS, selection.network) && !isBaseReferencePair(selection))
+      return createCatalogSwapAuthoringNode(id, { network: selection.network as CatalogSwapNetwork, from: selection.from, to: selection.to!, amount, slippage });
     return createSwapNode(id, selection.from === 'USDC' ? 'USDC_TO_WETH' : 'WETH_TO_USDC', amount, slippage, cryptoReviewContext(selection.network));
   }
   if (selection.action === 'pool' && Object.hasOwn(CATALOG_LIQUIDITY_NETWORKS, selection.network)) {

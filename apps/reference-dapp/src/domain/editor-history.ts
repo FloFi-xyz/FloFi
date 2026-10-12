@@ -1,29 +1,35 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { ROBINHOOD_NETWORK, featuredStockSymbols } from './asset-catalogs';
-import { createBaseSepoliaReviewContext, validateAuthoringWorkflow, type ReviewContext } from '@defi-workflow-engine/reference-linter';
+import { createBaseSepoliaReviewContext, validateWorkflowDraft, type ReviewContext } from '@defi-workflow-engine/reference-linter';
 import { validateSavedWorkflow } from './saved-workflow';
-import {isLendingComposition,type SemanticWorkflow} from '@defi-workflow-engine/workflow-contracts';
+import {isLendingComposition,workflowDependencyOrder,type SemanticWorkflow} from '@defi-workflow-engine/workflow-contracts';
 import type { Command } from './commands';
 import { directions, type Direction } from './swap-authoring';
 import { routerDetails } from './router-authoring';
 import type { UniswapLiquidityInput } from './uniswap-liquidity-authoring';
 import { defaultPoolRange, validCryptoSelection, canSelectCryptoAssets, cryptoInputOf, type CryptoSelection, type CryptoSelections } from './crypto-action-picker';
 import { actionReviewValue } from './canvas-action-setup';
-import type { CanvasLayout } from './canvas-layout';
+import { canvasPosition, type CanvasLayout } from './canvas-layout';
 import { editorReducer, initialEditor, type EditorState } from './editor';
 import { freeze, type Workflow } from './initial-workflow';
-import { canEditCanvasAmount, canvasAmountCommand, amountCommandTarget, bridgeSetupNetworks, CANVAS_BRIDGE_NETWORK_OPTIONS, type CanvasActionSetup, type CanvasAmountInputs, type CanvasBridgeNetworks, type CanvasBridgeNetworkInputs } from './canvas-action-setup';
+import { canEditCanvasAmount, canvasAmountCommand, amountCommandTarget, bridgeSetupNetworks, CANVAS_BRIDGE_NETWORK_OPTIONS, type CanvasActionSetup, type CanvasAmountInputs, type CanvasBridgeNetworks, type CanvasBridgeNetworkInputs, type CanvasRecipientInputs } from './canvas-action-setup';
+import { transferDetails } from './robinhood-transfer-authoring';
+import { checkRecipient, recipientPolicy } from './recipient-address';
 
-type Snapshot = { readonly workflow: Workflow; readonly layout: CanvasLayout; readonly actionSetup: CanvasActionSetup | null; readonly amountInputs: CanvasAmountInputs; readonly bridgeNetworkInputs: CanvasBridgeNetworkInputs; readonly cryptoSelections: CryptoSelections };
+type Snapshot = { readonly workflow: Workflow; readonly layout: CanvasLayout; readonly actionSetup: CanvasActionSetup | null; readonly amountInputs: CanvasAmountInputs; readonly bridgeNetworkInputs: CanvasBridgeNetworkInputs; readonly cryptoSelections: CryptoSelections; readonly recipientInputs: CanvasRecipientInputs };
 export type EditorHistory = { readonly editor: EditorState; readonly layout: CanvasLayout;
   readonly actionSetup: CanvasActionSetup | null; readonly amountInputs: CanvasAmountInputs; readonly setupSerial: number;
   readonly bridgeNetworkInputs: CanvasBridgeNetworkInputs;
   readonly cryptoSelections: CryptoSelections;
+  /** UX-001: edited "To" text of authored Send cards; it rides with that card's amount draft and is committed only on Apply. */
+  readonly recipientInputs: CanvasRecipientInputs;
   readonly past: readonly Snapshot[]; readonly future: readonly Snapshot[] };
 export type HistoryAction =
   | { readonly type: 'EDIT_CRYPTO_SELECTION'; readonly id: string; readonly selection: CryptoSelection; readonly context: ReviewContext; readonly beneficiary?: string }
   | { readonly type: 'RESTORE_WORKFLOW'; readonly workflow: SemanticWorkflow }
   | { readonly type: 'ADOPT_DRAFT_IDENTITY'; readonly workflowId: string }
+  /** UX-004: "Create new workflow": the empty initial draft under a fresh draft identity (no actions, drafts, layout or history). */
+  | { readonly type: 'NEW_WORKFLOW'; readonly workflowId: string }
   | { readonly type: 'RESTORE_LENDING_CANVAS'; readonly workflow: SemanticWorkflow }
   | { readonly type: 'COMMAND'; readonly command: Command; readonly context: ReviewContext; readonly position?: { x: number; y: number }; readonly authoringId?: string; readonly authoringAmount?: string }
   | { readonly type: 'START_ACTION_SETUP'; readonly action: CanvasActionSetup['action']; readonly position: { x: number; y: number }; readonly beneficiary?: string }
@@ -34,6 +40,7 @@ export type HistoryAction =
   | { readonly type: 'EDIT_BRIDGE_NETWORKS'; readonly id: string; readonly patch: Partial<CanvasBridgeNetworks>; readonly context: ReviewContext }
   | { readonly type: 'EDIT_CANVAS_AMOUNT'; readonly id: string; readonly amount: string; readonly context: ReviewContext }
   | { readonly type: 'CANCEL_CANVAS_AMOUNT'; readonly id: string }
+  | { readonly type: 'EDIT_CANVAS_RECIPIENT'; readonly id: string; readonly recipient: string; readonly context: ReviewContext }
   | { readonly type: 'REMOVE_ACTION_SETUP' }
   | { readonly type: 'MOVE'; readonly positions: Readonly<Record<string, { x: number; y: number }>> }
   | { readonly type: 'DUPLICATE'; readonly nodeIds: readonly string[]; readonly context: ReviewContext }
@@ -41,8 +48,8 @@ export type HistoryAction =
   | { readonly type: 'UNDO' }
   | { readonly type: 'REDO' };
 
-export const initialEditorHistory = (): EditorHistory => ({ editor: initialEditor(), layout: {}, actionSetup: null, amountInputs: {}, bridgeNetworkInputs: {}, cryptoSelections: {}, setupSerial: 0, past: [], future: [] });
-const snapshot = (state: EditorHistory): Snapshot => ({ workflow: state.editor.workflow, layout: state.layout, actionSetup: state.actionSetup, amountInputs: state.amountInputs, bridgeNetworkInputs: state.bridgeNetworkInputs, cryptoSelections: state.cryptoSelections });
+export const initialEditorHistory = (): EditorHistory => ({ editor: initialEditor(), layout: {}, actionSetup: null, amountInputs: {}, bridgeNetworkInputs: {}, cryptoSelections: {}, recipientInputs: {}, setupSerial: 0, past: [], future: [] });
+const snapshot = (state: EditorHistory): Snapshot => ({ workflow: state.editor.workflow, layout: state.layout, actionSetup: state.actionSetup, amountInputs: state.amountInputs, bridgeNetworkInputs: state.bridgeNetworkInputs, cryptoSelections: state.cryptoSelections, recipientInputs: state.recipientInputs });
 
 export function planCanvasDuplicate(workflow: Workflow, layout: CanvasLayout, nodeIds: readonly string[], context: ReviewContext) {
   const selected = new Set(nodeIds);
@@ -69,7 +76,7 @@ export function planCanvasDuplicate(workflow: Workflow, layout: CanvasLayout, no
     .map(edge => ({ ...edge, fromNodeId: copies.get(edge.fromNodeId)!, toNodeId: copies.get(edge.toNodeId)! }));
   const candidate = { ...workflow, revision: workflow.revision + 1,
     nodes: [...workflow.nodes, ...nodes], resourceEdges: [...workflow.resourceEdges, ...resourceEdges] };
-  try { validateAuthoringWorkflow(candidate, context); } catch { return null; }
+  try { validateWorkflowDraft(candidate, context); } catch { return null; }
   const duplicateLayout = { ...layout };
   for (const [index, node] of sources.entries()) {
     const sourcePosition = layout[node.nodeId]?.actionType === node.actionType
@@ -153,7 +160,23 @@ export function editorHistoryReducer(state: EditorHistory, action: HistoryAction
     const amountInputs = { ...state.amountInputs }; delete amountInputs[action.id];
     const bridgeNetworkInputs = { ...state.bridgeNetworkInputs }; delete bridgeNetworkInputs[action.id];
     const cryptoSelections = { ...state.cryptoSelections }; delete cryptoSelections[action.id];
-    return { ...state, amountInputs, bridgeNetworkInputs, cryptoSelections, future: [] };
+    const recipientInputs = { ...state.recipientInputs }; delete recipientInputs[action.id];
+    return { ...state, amountInputs, bridgeNetworkInputs, cryptoSelections, recipientInputs, future: [] };
+  }
+  // UX-001: the Send card's "To" text. It edits only a draft (the setup's, or an authored card's beside its amount draft) on a network whose
+  // transfer profile accepts recipients; the canonical `recipient` changes only when the reviewed proposal is applied.
+  if (action.type === 'EDIT_CANVAS_RECIPIENT') {
+    if (typeof action.recipient !== 'string' || action.recipient.length > 128) return state;
+    const setup = state.actionSetup?.id === action.id ? state.actionSetup : null;
+    if (setup) return setup.cryptoSelection?.action === 'transfer' && recipientPolicy(setup.cryptoSelection.network).kind === 'ADDRESS' && setup.cryptoRecipient !== action.recipient
+      ? { ...state, actionSetup: { ...setup, cryptoRecipient: action.recipient }, future: [] } : state;
+    const node = state.editor.workflow.nodes.find(item => item.nodeId === action.id);
+    const transfer = node ? transferDetails(node as Parameters<typeof transferDetails>[0]) : null;
+    if (!node || !transfer || !canEditCanvasAmount(node, action.context, state.editor.workflow) ||
+      recipientPolicy(state.cryptoSelections[action.id]?.network ?? transfer.network).kind !== 'ADDRESS' || state.recipientInputs[action.id] === action.recipient) return state;
+    return { ...state, recipientInputs: { ...state.recipientInputs, [action.id]: action.recipient },
+      amountInputs: { ...state.amountInputs, [action.id]: state.amountInputs[action.id] ?? transfer.amount },
+      past: state.amountInputs[action.id] === undefined ? [...state.past, snapshot(state)] : state.past, future: [] };
   }
   if (action.type === 'REMOVE_ACTION_SETUP') {
     if (!state.actionSetup) return state;
@@ -167,6 +190,11 @@ export function editorHistoryReducer(state: EditorHistory, action: HistoryAction
     if (workflow.revision !== 0 || workflow.workflowId === action.workflowId || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(action.workflowId)) return state;
     return { ...state, editor: { ...state.editor, workflow: freeze({ ...structuredClone(workflow), workflowId: action.workflowId }) } };
   }
+  if (action.type === 'NEW_WORKFLOW') {
+    if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(action.workflowId)) return state;
+    const fresh = initialEditorHistory();
+    return { ...fresh, editor: { ...fresh.editor, workflow: freeze({ ...structuredClone(fresh.editor.workflow), workflowId: action.workflowId }) } };
+  }
   if (action.type === 'RESTORE_WORKFLOW') {
     try {
       const workflow = validateSavedWorkflow(action.workflow);
@@ -178,7 +206,7 @@ export function editorHistoryReducer(state: EditorHistory, action: HistoryAction
     // Preserve its exact IR/revision; this creates no Review or execution authority.
     if(state.actionSetup||Object.keys(state.amountInputs).length||state.editor.workflow.revision!==0||state.past.length||!state.editor.workflow.nodes.every(n=>n.actionType.startsWith('mock-')))return state;
     try {
-      const workflow=validateAuthoringWorkflow(action.workflow,createBaseSepoliaReviewContext());
+      const workflow=validateWorkflowDraft(action.workflow,createBaseSepoliaReviewContext());
       if(!isLendingComposition(workflow))return state;
       return {...state,editor:{workflow:freeze(workflow),error:null},layout:{},past:[],future:[]};
     } catch {return state;}
@@ -200,7 +228,7 @@ export function editorHistoryReducer(state: EditorHistory, action: HistoryAction
       || target.workflow.resourceEdges !== current.workflow.resourceEdges;
     if (semantic && current.workflow.revision === Number.MAX_SAFE_INTEGER) return state;
     const workflow = semantic ? freeze({ ...target.workflow, revision: current.workflow.revision + 1 }) : current.workflow;
-    return { ...state, editor: { workflow, error: null }, layout: target.layout, actionSetup: target.actionSetup, amountInputs: target.amountInputs, bridgeNetworkInputs: target.bridgeNetworkInputs, cryptoSelections: target.cryptoSelections,
+    return { ...state, editor: { workflow, error: null }, layout: target.layout, actionSetup: target.actionSetup, amountInputs: target.amountInputs, bridgeNetworkInputs: target.bridgeNetworkInputs, cryptoSelections: target.cryptoSelections, recipientInputs: target.recipientInputs,
       past: action.type === 'UNDO' ? state.past.slice(0, -1) : [...state.past, current],
       future: action.type === 'REDO' ? state.future.slice(0, -1) : [...state.future, current] };
   }
@@ -219,11 +247,11 @@ export function editorHistoryReducer(state: EditorHistory, action: HistoryAction
     return changed ? { ...state, layout, past: [...state.past, snapshot(state)], future: [] } : state;
   }
   if (action.authoringId) {
-    const amount = actionReviewValue(state.actionSetup, action.authoringId, state.amountInputs[action.authoringId], state.bridgeNetworkInputs[action.authoringId], state.cryptoSelections[action.authoringId]);
+    const amount = actionReviewValue(state.actionSetup, action.authoringId, state.amountInputs[action.authoringId], state.bridgeNetworkInputs[action.authoringId], state.cryptoSelections[action.authoringId], state.recipientInputs[action.authoringId]);
     if (amount === undefined || amount !== action.authoringAmount) return state;
     if (state.actionSetup?.id === action.authoringId) {
       try {
-        if (JSON.stringify(canvasAmountCommand(state.editor, state.actionSetup, state.amountInputs, action.authoringId, action.context, state.bridgeNetworkInputs, state.cryptoSelections)) !== JSON.stringify(action.command)) return state;
+        if (JSON.stringify(canvasAmountCommand(state.editor, state.actionSetup, state.amountInputs, action.authoringId, action.context, state.bridgeNetworkInputs, state.cryptoSelections, state.recipientInputs)) !== JSON.stringify(action.command)) return state;
       } catch { return state; }
     } else {
       const target = amountCommandTarget(action.command, state.editor.workflow, action.authoringId);
@@ -232,6 +260,13 @@ export function editorHistoryReducer(state: EditorHistory, action: HistoryAction
       if (selection && (action.command.type !== 'SET_CRYPTO_ACTION' || JSON.stringify(action.command.input.selection) !== JSON.stringify(selection))) return state;
       const networks = state.bridgeNetworkInputs[action.authoringId];
       if (networks && (action.command.type !== 'SET_ROUTER_BRIDGE' || action.command.input.source !== networks.source || action.command.input.destination !== networks.destination)) return state;
+      // UX-001: an applied Send carries exactly the typed destination, validated for its network.
+      const typed = state.recipientInputs[action.authoringId];
+      if (typed !== undefined) {
+        if (action.command.type !== 'SET_RH_TRANSFER' && !(action.command.type === 'SET_CRYPTO_ACTION' && action.command.input.selection.action === 'transfer')) return state;
+        const check = checkRecipient(action.command.type === 'SET_RH_TRANSFER' ? action.command.input.network : action.command.input.selection.network, typed);
+        if (!check.ok || (action.command.input.recipient ?? 'CONNECTED_OWNER') !== check.recipient) return state;
+      }
     }
   }
   const editor = editorReducer(state.editor, action.command, action.context);
@@ -239,7 +274,9 @@ export function editorHistoryReducer(state: EditorHistory, action: HistoryAction
   const amountInputs = { ...state.amountInputs };
   const bridgeNetworkInputs = { ...state.bridgeNetworkInputs };
   const cryptoSelections = { ...state.cryptoSelections };
+  const recipientInputs = { ...state.recipientInputs };
   if (action.authoringId) delete cryptoSelections[action.authoringId];
+  if (action.authoringId) delete recipientInputs[action.authoringId];
   if (action.authoringId) delete amountInputs[action.authoringId];
   if (action.authoringId) delete bridgeNetworkInputs[action.authoringId];
   for (const id of Object.keys(amountInputs)) {
@@ -253,14 +290,21 @@ export function editorHistoryReducer(state: EditorHistory, action: HistoryAction
     const node = editor.workflow.nodes.find(node => node.nodeId === id);
     if (!node || !canSelectCryptoAssets(node, editor.workflow)) delete cryptoSelections[id];
   }
+  for (const id of Object.keys(recipientInputs)) {
+    const node = editor.workflow.nodes.find(node => node.nodeId === id);
+    if (amountInputs[id] === undefined || !node || !transferDetails(node as Parameters<typeof transferDetails>[0])) delete recipientInputs[id];
+  }
   const actionSetup = state.actionSetup?.id === action.authoringId ? null : state.actionSetup;
   if (editor.workflow === state.editor.workflow && actionSetup === state.actionSetup && Object.keys(amountInputs).length === Object.keys(state.amountInputs).length) return { ...state, editor };
-  let layout = state.layout;
+  let layout = { ...state.layout };
+  workflowDependencyOrder(state.editor.workflow.nodes).filter(n => !n.actionType.startsWith('mock-')).forEach((node, index) => {
+    if (!layout[node.nodeId]) layout[node.nodeId] = { ...(isLendingComposition(state.editor.workflow) ? { x: 180, y: 35 + index * 230 } : canvasPosition({}, node, index)), actionType: node.actionType };
+  });
   const position = action.position ?? (state.actionSetup && state.actionSetup.id === action.authoringId ? state.layout[state.actionSetup.id] : undefined);
   if (position) {
     const added = editor.workflow.nodes.find(node => !state.editor.workflow.nodes.some(previous => previous.nodeId === node.nodeId));
     if (added) layout = { ...layout, [added.nodeId]: { ...position, actionType: added.actionType } };
   }
   if (state.actionSetup && !actionSetup) { const nextLayout = { ...layout }; delete nextLayout[state.actionSetup.id]; layout = nextLayout; }
-  return { ...state, editor, layout, actionSetup, amountInputs, bridgeNetworkInputs, cryptoSelections, past: [...state.past, snapshot(state)], future: [] };
+  return { ...state, editor, layout, actionSetup, amountInputs, bridgeNetworkInputs, cryptoSelections, recipientInputs, past: [...state.past, snapshot(state)], future: [] };
 }

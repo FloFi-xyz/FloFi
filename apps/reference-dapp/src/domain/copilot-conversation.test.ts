@@ -12,7 +12,7 @@ describe('bounded multi-turn conversation', () => {
     const session = new CopilotSession();
     const asked = session.say('Quero colocar 5 USDC na Aave.', intent.action(supply5, 'PT'))!;
     // BUILD-BASE-001: Aave USDC also runs on Base mainnet; real funds are offered, never chosen for the user.
-    expect(asked).toMatchObject({ kind: 'CLARIFICATION', options: ['Base Sepolia', 'Base'] });
+    expect(asked).toMatchObject({ kind: 'CLARIFICATION', options: ['Base Sepolia', 'Base', 'Arbitrum One'] });
     expect(asked.text).toContain('Em qual rede?');
     expect(session.pending).toBeNull();
     const proposed = session.say('Base Sepolia')!;
@@ -26,7 +26,7 @@ describe('bounded multi-turn conversation', () => {
     expect(revised.notes.join(' ')).toContain('Mantido da proposta pendente: rede, token, beneficiário.');
     expect(session.workflow.revision).toBe(0);
     session.apply();
-    expect(workflowSteps(session.workflow, session.context)[1]).toMatchObject({ kind: 'SUPPLY', detail: { input: { amount: '2' } } });
+    expect(workflowSteps(session.workflow, session.context)[0]).toMatchObject({ kind: 'SUPPLY', detail: { input: { amount: '2' } } });
   });
   it('asks where a bridge should go instead of completing the pair, and fills the button deterministically', () => {
     const session = new CopilotSession();
@@ -44,10 +44,10 @@ describe('bounded multi-turn conversation', () => {
     const before = session.workflow;
     const edited = session.say('change it to 2', intent.edit({ amount: '2' }))!;
     expect(edited).toMatchObject({ kind: 'PROPOSAL', command: { type: 'SET_SWAP_AMOUNT', nodeId: 'node-002', amount: '2' } });
-    expect(edited.text).toContain('Interpreted as a change to step 2 (Swap 3 USDC → WETH · Base Sepolia)');
+    expect(edited.text).toContain('Interpreted as a change to step 1 (Swap 3 USDC → WETH · Base Sepolia)');
     expect(session.workflow).toBe(before);
     session.apply();
-    expect(workflowSteps(session.workflow, session.context)[1]!.detail).toMatchObject({ amount: '2' });
+    expect(workflowSteps(session.workflow, session.context)[0]!.detail).toMatchObject({ amount: '2' });
   });
   it('never lets the model invent a value: "make it smaller" becomes a question', () => {
     const session = new CopilotSession([FIXTURE.supply]);
@@ -60,17 +60,17 @@ describe('bounded multi-turn conversation', () => {
     const session = new CopilotSession([FIXTURE.baseSwap, FIXTURE.baseSwap2]);
     const asked = session.say('change the swap to 2', intent.edit({ amount: '2' }, { step: 'SWAP' }))!;
     expect(asked).toMatchObject({ kind: 'CLARIFICATION', text: 'Which swap do you mean?',
-      options: ['Step 2 · Swap 2 USDC → WETH · Base', 'Step 3 · Swap 3 USDC → WETH · Base'] });
+      options: ['Step 1 · Swap 2 USDC → WETH · Base', 'Step 2 · Swap 3 USDC → WETH · Base'] });
     expect(session.pending).toBeNull();
-    expect(session.say('Step 3 · Swap 3 USDC → WETH · Base')).toMatchObject({ kind: 'PROPOSAL', command: { type: 'SET_SWAP_AMOUNT', nodeId: 'node-003', amount: '2' } });
+    expect(session.say('Step 2 · Swap 3 USDC → WETH · Base')).toMatchObject({ kind: 'PROPOSAL', command: { type: 'SET_SWAP_AMOUNT', nodeId: 'node-003', amount: '2' } });
     expect(session.turns.at(-1)!.request).toBeNull();
   });
   it('resolves ordinals against the canonical IR and removes only what the canvas could', () => {
     const session = new CopilotSession([FIXTURE.supply]);
-    expect(session.say('Remove o segundo passo', intent.remove({ ordinal: 'SECOND' }, 'PT'))).toMatchObject({ kind: 'PROPOSAL', command: { type: 'REMOVE', nodeId: 'node-002' } });
+    expect(session.say('Remove o primeiro passo', intent.remove({ ordinal: 'FIRST' }, 'PT'))).toMatchObject({ kind: 'PROPOSAL', command: { type: 'REMOVE', nodeId: 'node-002' } });
     session.dismiss();
-    expect(session.say('remove the first step', intent.remove({ ordinal: 'FIRST' }))!.text).toContain('starting template');
-    expect(session.say('remove the fifth step', intent.remove({ ordinal: 'FIFTH' }))!.text).toContain('This workflow has 2 steps');
+    expect(new CopilotSession().say('remove the first step', intent.remove({ ordinal: 'FIRST' }))!.text).toContain('starting template');
+    expect(session.say('remove the fifth step', intent.remove({ ordinal: 'FIFTH' }))!.text).toContain('This workflow has 1 step');
   });
   it('repeats an earlier proposal only with a repeat cue, carrying its values with provenance', () => {
     const session = new CopilotSession();
@@ -123,7 +123,7 @@ describe('stale context and safety', () => {
     const session = new CopilotSession([FIXTURE.baseSwap, FIXTURE.baseSwap2]);
     session.say('change the swap to 2', intent.edit({ amount: '2' }, { step: 'SWAP' }));
     session.workflow = applyCommand(session.workflow, { type: 'ADD', kind: 'read', source: 'CANVAS', baseRevision: session.workflow.revision });
-    const reply = session.say('Step 3 · Swap 3 USDC → WETH · Base')!;
+    const reply = session.say('Step 2 · Swap 3 USDC → WETH · Base')!;
     expect(reply).toMatchObject({ kind: 'FAILED' });
     expect(reply.text).toContain('changed after Flofi asked');
     expect(session.pending).toBeNull();

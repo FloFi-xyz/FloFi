@@ -12,6 +12,8 @@
 import { hashArtifactBytes } from '@defi-workflow-engine/workflow-contracts';
 import { validateArtifact } from '@defi-workflow-engine/workflow-contracts/schemas';
 import type { FlowName } from '../../backend/flows.ts';
+import { catalogNetworkOfChain } from '../server/catalog-networks.ts';
+import { networkIdentity } from '../domain/network-registry.ts';
 import type { StrategySpec } from '../engine/strategy-spec';
 
 export type PreviewPlan = { readonly flow: FlowName; readonly subject: 'EVM' | 'SOLANA' | 'NONE' };
@@ -29,15 +31,15 @@ export function previewPlan(spec: StrategySpec): PreviewPlan | { readonly code: 
     case 'transfer': return { code: 'SIMULATION_REQUIRES_OWNER_BROWSER' };
     case 'swap':
       // BUILD-BASE-001: Base mainnet swaps (the USDC ⇄ WETH reference pair included) quote on the Base catalog-network swap flow.
-      if (spec.network === 'base') return { flow: 'base-swap', subject: 'NONE' };
-      if (spec.network === 'robinhood') return { flow: 'robinhood-swap', subject: 'NONE' };
+      { const network = catalogNetworkOfChain(networkIdentity(spec.network)?.chain);
+        if (network) return { flow: network.flows.swap, subject: 'NONE' }; }
       if (spec.network === 'solana') return { flow: 'jupiter-swap', subject: 'SOLANA' };
       if (spec.network === 'solana-devnet') return { flow: 'solana-devnet-swap', subject: 'SOLANA' };
       return { flow: 'base-sepolia-swap', subject: 'NONE' };
-    case 'supply': case 'borrow': case 'repay': case 'withdraw': return { flow: spec.network === 'base' ? 'base-aave' : 'aave-supply', subject: 'EVM' };
+    case 'supply': case 'borrow': case 'repay': case 'withdraw': return { flow: catalogNetworkOfChain(networkIdentity(spec.network)?.chain)?.flows.lending ?? 'aave-supply', subject: 'EVM' };
     // Orca positions need a position-mint key generated in the owner's browser; there is nothing to preview without it.
     case 'add_liquidity': return spec.network === 'solana-devnet' ? { code: 'SIMULATION_REQUIRES_OWNER_BROWSER' }
-      : { flow: spec.network === 'robinhood' ? 'robinhood-liquidity' : spec.network === 'base' ? 'base-liquidity' : 'uniswap-liquidity', subject: 'EVM' };
+      : { flow: spec.network === 'robinhood' ? 'robinhood-liquidity' : catalogNetworkOfChain(networkIdentity(spec.network)?.chain)?.flows.liquidity ?? 'uniswap-liquidity', subject: 'EVM' };
     case 'lending_composition': return { flow: 'lending-composition', subject: 'EVM' };
   }
 }
@@ -45,7 +47,7 @@ export function previewPlan(spec: StrategySpec): PreviewPlan | { readonly code: 
 export function strategyFlow(spec: StrategySpec): FlowName | null {
   const plan = previewPlan(spec);
   if ('flow' in plan) return plan.flow;
-  return spec.action === 'add_liquidity' ? 'orca-liquidity' : spec.action === 'transfer' ? spec.network === 'base' ? 'base-mainnet-transfer' : 'robinhood-mainnet-transfer' : null;
+  return spec.action === 'add_liquidity' ? 'orca-liquidity' : spec.action === 'transfer' ? catalogNetworkOfChain(networkIdentity(spec.network)?.chain)?.flows.transfer ?? null : null;
 }
 
 type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
@@ -99,7 +101,7 @@ export function projectSimulation(flow: FlowName, value: unknown): SimulationVie
           deadlines: pick(r.deadlines, ['reviewExpiresAt', 'quoteExpiresAt', 'depositMustLandBy', 'fillDeadline']) },
         canonicalArtifacts: canonicalArtifacts(r.artifacts) };
     }
-    case 'aave-supply': case 'base-aave': {
+    case 'aave-supply': case 'base-aave': case 'arbitrum-aave': {
       const r = obj(record.review), operation = r.withdraw ? 'WITHDRAW' : r.repay ? 'REPAY' : r.borrow ? 'BORROW' : 'SUPPLY';
       return { kind: 'AAVE_V3', provenance: String(record.provenance), observedAt: String(obj(r.state).observedAt), expiresAt: String(r.expiresAt),
         facts: { operation, ...pick(r, ['chain', 'pool', 'asset', 'aToken', 'amount', 'beneficiary', 'approvalRequired', 'allowance', 'gasPrice']),
@@ -108,7 +110,7 @@ export function projectSimulation(flow: FlowName, value: unknown): SimulationVie
           projected: pick(r.withdraw ?? r.repay ?? r.borrow ?? {}, ['expectedPostHealthFactor', 'debtAfter', 'debtAfterBase', 'collateralAfter', 'walletAfter']) },
         canonicalArtifacts: canonicalArtifacts(r) };
     }
-    case 'base-sepolia-swap': case 'robinhood-swap': case 'base-swap': {
+    case 'base-sepolia-swap': case 'robinhood-swap': case 'base-swap': case 'arbitrum-swap': {
       const q = obj(record.quote);
       // BUILD-RH-002: a catalog-network quote (Robinhood Chain, BUILD-BASE-001 Base) carries its own provenance (PUBLIC_MAINNET or MOCKED) and decimals;
       // Robinhood Chain quotes also carry the Stock Token multipliers.
@@ -118,7 +120,7 @@ export function projectSimulation(flow: FlowName, value: unknown): SimulationVie
           ...flow === 'robinhood-swap' ? { stocks: list(q.stocks, ['side', 'symbol', 'officialId', 'multiplierWad', 'scheduledMultiplierWad', 'scheduledEffectiveAt']) } : {} },
         canonicalArtifacts: null };
     }
-    case 'uniswap-liquidity': case 'robinhood-liquidity': case 'base-liquidity': {
+    case 'uniswap-liquidity': case 'robinhood-liquidity': case 'base-liquidity': case 'arbitrum-liquidity': {
       const r = obj(record.review);
       return { kind: 'CONCENTRATED_LIQUIDITY', provenance: String(record.provenance), observedAt: String(r.observedAt), expiresAt: String(r.expiresAt),
         facts: { ...pick(r, ['network', 'chainId', 'recipient', 'deadline']), pool: pick(r.pool, ['fee', 'tickSpacing', 'tick', 'price']),

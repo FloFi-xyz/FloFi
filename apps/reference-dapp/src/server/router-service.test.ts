@@ -318,6 +318,9 @@ describe('BUILD-ROUTER-001 recovery after restart and ambiguous submissions', ()
     await expect(service.begin(other.id, ROUTER_OWNER, w)).rejects.toThrow('ROUTER_OWNER_DEPOSIT_IN_FLIGHT');
     // Once the SpokePool quote window has passed with the owner's nonce unconsumed, the request can no longer move funds.
     h.advance(run.review.deadlines.depositMustLandBy - Math.floor(h.nowMs() / 1000) + 10);
+    // BUILD-ARB-001: absence must also be established past the source safe head, not only the sequencer timestamp.
+    expect((await service.observe(run.id)).verdict).toBe('PENDING');
+    h.advance(60);
     expect(await service.observe(run.id)).toMatchObject({ phase: 'FAILED', verdict: 'FAILED', error: 'ROUTER_SUBMISSION_EXPIRED_NOT_EXECUTED' });
     const again = await service.simulate(w, ROUTER_OWNER);
     await service.review(again.id, again.review.commitment, w);

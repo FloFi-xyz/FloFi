@@ -22,7 +22,7 @@ async function open(page: Page) {
 }
 async function apply(page: Page, text: string) {
   await page.getByLabel('Describe your flow').fill(text);
-  await page.getByRole('button', { name: 'Send' }).click();
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
   await applyPendingProposal(page);
 }
 async function generate(page: Page) {
@@ -129,13 +129,13 @@ test('semantic edits invalidate; presentation, dismissal, no-op and stale propos
   await expect(chip(page, 'CURRENT')).toBeVisible();
   await tab(page, 'Build');
   await page.getByLabel('Describe your flow').fill('set node-002 amount 3');
-  await page.getByRole('button', { name: 'Send' }).click();
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
   await openProposalReview(page);
   await page.getByRole('dialog', { name: 'Proposed change' }).getByRole('button', { name: 'Dismiss proposal' }).click();
   await apply(page, 'set node-002 amount 2.25');
   await expect(page.locator('.summary-bar[data-workflow-revision="1"]')).toBeVisible();
   await page.getByLabel('Describe your flow').fill('set node-002 amount 4');
-  await page.getByRole('button', { name: 'Send' }).click();
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
   await openFirstActionSettings(page);
   await page.getByRole('button', { name: 'Lock amount' }).click();
   await expect(page.locator('.summary-bar[data-workflow-revision="2"]')).toBeVisible();

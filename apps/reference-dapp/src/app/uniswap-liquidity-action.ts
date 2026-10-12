@@ -61,8 +61,9 @@ const catalogCall = (args: readonly unknown[]) => typeof args[0] === 'string' ? 
 async function run<T>(method: string, args: readonly unknown[], action: (service: UniswapLiquidityService) => Promise<T>,
   explicit?: CatalogNetworkRuntime): Promise<{ ok: true; value: T } | { ok: false; code: string }> {
   const network = explicit ?? catalogCall(args);
+  if (network && !network.flows.liquidity) return { ok: false, code: 'UNISWAP_LIQUIDITY_NETWORK_UNSUPPORTED' };
   // Cloud deployment: the remote Flofi API (BUILD-CLOUD-001) or the embedded PostgreSQL runtime (BUILD-CLOUD-PARITY-001).
-  const cloud = await cloudFlow<T>(network ? network.flows.liquidity : 'uniswap-liquidity', method, args);
+  const cloud = await cloudFlow<T>(network?.flows.liquidity ?? 'uniswap-liquidity', method, args);
   if (cloud) return cloud;
   try { return { ok: true, value: await action(network ? catalogService(network) : current()) }; }
   catch (cause) { const code = cause instanceof Error ? cause.message : ''; return { ok: false, code: /^[A-Z][A-Z0-9_]{2,80}$/.test(code) ? code : 'UNISWAP_LIQUIDITY_SERVICE_UNAVAILABLE' }; }
@@ -74,7 +75,7 @@ export async function uniswapLiquidityInfo() { return run('info', [], async s =>
 /** BUILD-RH-002 / BUILD-BASE-001: whether this instance serves a catalog network's positions (live or the MOCKED loopback harness). */
 export async function catalogLiquidityMode(chain: string): Promise<Mode> {
   const network = catalogNetworkOfChain(chain);
-  if (!network) return 'off';
+  if (!network?.flows.liquidity) return 'off';
   const cloud = await cloudFlowMode(network.flows.liquidity);
   if (cloud) return cloud;
   return localCatalogNetworkMode(network, process.env);

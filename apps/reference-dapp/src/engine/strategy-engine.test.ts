@@ -69,6 +69,14 @@ describe('BUILD-MCP-001 deterministic engine facade', () => {
       'borrow-base': `borrow 1 USDC from Aave on Base beneficiary 0x0000000000000000000000000000000000000001`,
       'repay-base': `repay 1 USDC to Aave on Base beneficiary 0x0000000000000000000000000000000000000001`,
       'withdraw-base': 'withdraw 1 USDC from Aave on Base',
+      // BUILD-ARB-001: append Phase 2/4/5 examples; every earlier sentence remains unchanged.
+      'swap-arbitrum': 'swap 10 USDC to WETH on Arbitrum One slippage 50 bps',
+      'transfer-arbitrum': 'transfer 5 USDC on Arbitrum One',
+      'add-liquidity-arbitrum': 'add liquidity 10 USDC and 0.003 WETH on Arbitrum One fee 0.05% full range slippage 100 bps',
+      'supply-arbitrum': 'supply 1 USDC to Aave on Arbitrum One beneficiary 0x0000000000000000000000000000000000000001',
+      'borrow-arbitrum': 'borrow 1 USDC from Aave on Arbitrum One beneficiary 0x0000000000000000000000000000000000000001',
+      'repay-arbitrum': 'repay 1 USDC to Aave on Arbitrum One beneficiary 0x0000000000000000000000000000000000000001',
+      'withdraw-arbitrum': 'withdraw 1 USDC from Aave on Arbitrum One',
     };
     expect(Object.keys(sentences).sort()).toEqual(STRATEGY_EXAMPLES.map(e => e.id).sort());
     for (const example of STRATEGY_EXAMPLES) {
@@ -95,6 +103,8 @@ describe('BUILD-MCP-001 deterministic engine facade', () => {
     expect(refused({ ...bridge, destinationNetwork: 'arbitrum-one' }).code).toBe('ROUTER_PAIR_UNSUPPORTED');
     expect(refused({ ...bridge, amount: '50' }).code).toMatch(/AMOUNT/);
     expect(refused({ ...bridge, amount: '0' }).code).toMatch(/AMOUNT/);
+    // Whole-name/symbol references are schema-valid; supported assets remain a canonical route decision.
+    expect(refused({ ...bridge, asset: 'ETH' }).code).toBe('ROUTER_PAIR_UNSUPPORTED');
     expect(refused({ ...bridge, slippageBps: 0 }).code).toBe('ROUTER_SLIPPAGE_OUT_OF_RANGE');
     expect(refused({ ...bridge, slippageBps: 5000 }).code).toMatch(/SLIPPAGE/);
     expect(refused({ ...bridge, recipient: '0x0000000000000000000000000000000000000000' }).code).toBe('ROUTER_RECIPIENT_INVALID');
@@ -117,7 +127,7 @@ describe('BUILD-MCP-001 deterministic engine facade', () => {
     const key = '0x' + 'ab'.repeat(32), words = 'alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima';
     const cases: [unknown, string][] = [
       [{ ...base, amount: '1e3' }, '/amount'], [{ ...base, amount: '-5' }, '/amount'], [{ ...base, amount: 5 }, '/amount'],
-      [{ ...base, sourceNetwork: 'optimism' }, '/sourceNetwork'], [{ ...base, asset: 'ETH' }, '/asset'],
+      [{ ...base, sourceNetwork: 'optimism' }, '/sourceNetwork'], [{ ...base, asset: '0x123' }, '/asset'],
       [{ ...base, calldata: '0xa9059cbb' }, '/calldata'], [{ ...base, to: OWNER, data: '0x' }, '/to'], [{ ...base, chainId: 'eip155:1' }, '/chainId'],
       [{ ...base, privateKey: key }, '/privateKey'], [{ ...base, mnemonic: words }, '/mnemonic'], [{ ...base, [key]: 1 }, '/'],
       [{ ...base, recipient: key }, '/recipient'], [{ ...base, version: 2 }, '/version'],

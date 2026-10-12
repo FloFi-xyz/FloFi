@@ -28,7 +28,7 @@ export const UNISWAP_SELECTORS = Object.freeze({
   approve: '0x095ea7b3', mint: '0x88316456', positions: '0x99fbab88', ownerOf: '0x6352211e', balanceOf: '0x70a08231',
   allowance: '0xdd62ed3e', decimals: '0x313ce567', factory: '0xc45a0155', weth9: '0x4aa4a4fc', getPool: '0x1698ee82',
   token0: '0x0dfe1681', token1: '0xd21220a7', fee: '0xddca3f43', tickSpacing: '0xd0c93a7c', slot0: '0x3850c7bd',
-  liquidity: '0x1a686502', l1FeeUpperBound: '0xf1c7a58b',
+  liquidity: '0x1a686502', feeAmountTickSpacing: '0x22afcccb', l1FeeUpperBound: '0xf1c7a58b',
 });
 const MINT_SIGNATURE = 'mint((address,address,uint24,int24,int24,uint256,uint256,uint256,uint256,address,uint256))';
 if ('0x' + Array.from(keccak_256(new TextEncoder().encode(MINT_SIGNATURE)).slice(0, 4), b => b.toString(16).padStart(2, '0')).join('') !== UNISWAP_SELECTORS.mint)

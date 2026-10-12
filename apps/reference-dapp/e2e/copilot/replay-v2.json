@@ -331,7 +331,7 @@
   },
   {
    "user": [
-    "Remove o segundo passo."
+    "Remove o primeiro passo."
    ],
    "answer": {
     "output": {
@@ -341,7 +341,7 @@
       "kind": "REMOVE",
       "target": {
        "step": null,
-       "ordinal": "SECOND"
+       "ordinal": "FIRST"
       }
      }
     }
@@ -1035,6 +1035,493 @@
        "slippageBps": null,
        "routing": null,
        "recipient": null
+      },
+      "reuse": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "Please Swap 10 USDC for WETH on Arbitrum"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "EN",
+      "kind": "ACTION",
+      "action": {
+       "type": "SWAP",
+       "network": "ARBITRUM",
+       "inputAsset": "USDC",
+       "outputAsset": "WETH",
+       "amount": "10",
+       "slippageBps": null
+      },
+      "reuse": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "Por favor, troca 10 USDC por WETH na Arbitrum"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "PT",
+      "kind": "ACTION",
+      "action": {
+       "type": "SWAP",
+       "network": "ARBITRUM",
+       "inputAsset": "USDC",
+       "outputAsset": "WETH",
+       "amount": "10",
+       "slippageBps": null
+      },
+      "reuse": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "Please Send 0.01 ETH on Arbitrum to 0x3333333333333333333333333333333333333333"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "EN",
+      "kind": "ACTION",
+      "action": {
+       "type": "TRANSFER",
+       "network": "ARBITRUM",
+       "asset": "ETH",
+       "amount": "0.01",
+       "recipient": "0x3333333333333333333333333333333333333333"
+      },
+      "reuse": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "Por favor, mande 0.01 ETH na Arbitrum para 0x3333333333333333333333333333333333333333"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "PT",
+      "kind": "ACTION",
+      "action": {
+       "type": "TRANSFER",
+       "network": "ARBITRUM",
+       "asset": "ETH",
+       "amount": "0.01",
+       "recipient": "0x3333333333333333333333333333333333333333"
+      },
+      "reuse": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "Please Send 5 USDC on Arbitrum to 0x3333333333333333333333333333333333333333"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "EN",
+      "kind": "ACTION",
+      "action": {
+       "type": "TRANSFER",
+       "network": "ARBITRUM",
+       "asset": "USDC",
+       "amount": "5",
+       "recipient": "0x3333333333333333333333333333333333333333"
+      },
+      "reuse": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "Please Bridge 100 USDC from Base to Arbitrum"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "EN",
+      "kind": "ACTION",
+      "action": {
+       "type": "BRIDGE",
+       "sourceNetwork": "BASE",
+       "destinationNetwork": "ARBITRUM",
+       "asset": "USDC",
+       "amount": "100",
+       "routing": null,
+       "slippageBps": null,
+       "recipient": null
+      },
+      "reuse": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "Please Move 100 USDC from Arbitrum to Base"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "EN",
+      "kind": "ACTION",
+      "action": {
+       "type": "BRIDGE",
+       "sourceNetwork": "ARBITRUM",
+       "destinationNetwork": "BASE",
+       "asset": "USDC",
+       "amount": "100",
+       "routing": null,
+       "slippageBps": null,
+       "recipient": null
+      },
+      "reuse": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "Please Provide liquidity with 10 USDC and 0.005 WETH on Arbitrum at 0.05% over the full range"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "EN",
+      "kind": "ACTION",
+      "action": {
+       "type": "LIQUIDITY",
+       "protocol": "UNISWAP_V3",
+       "network": "ARBITRUM",
+       "deposits": [
+        {
+         "asset": "USDC",
+         "maxAmount": "10"
+        },
+        {
+         "asset": "WETH",
+         "maxAmount": "0.005"
+        }
+       ],
+       "rangeUnit": "FULL",
+       "lower": null,
+       "upper": null,
+       "feeTier": "0.05",
+       "slippageBps": null
+      },
+      "reuse": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "Please supply 100 USDC on Arbitrum"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "EN",
+      "kind": "ACTION",
+      "action": {
+       "type": "SUPPLY",
+       "protocol": "AAVE_V3",
+       "network": "ARBITRUM",
+       "asset": "USDC",
+       "amount": "100",
+       "beneficiary": null
+      },
+      "reuse": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "Por favor, quero colocar 100 USDC no Aave da Arbitrum"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "PT",
+      "kind": "ACTION",
+      "action": {
+       "type": "SUPPLY",
+       "protocol": "AAVE_V3",
+       "network": "ARBITRUM",
+       "asset": "USDC",
+       "amount": "100",
+       "beneficiary": null
+      },
+      "reuse": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "Please borrow 20 USDC on Arbitrum"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "EN",
+      "kind": "ACTION",
+      "action": {
+       "type": "BORROW",
+       "protocol": "AAVE_V3",
+       "network": "ARBITRUM",
+       "asset": "USDC",
+       "amount": "20",
+       "beneficiary": null
+      },
+      "reuse": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "Please repay 10 USDC on Arbitrum"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "EN",
+      "kind": "ACTION",
+      "action": {
+       "type": "REPAY",
+       "protocol": "AAVE_V3",
+       "network": "ARBITRUM",
+       "asset": "USDC",
+       "amount": "10",
+       "beneficiary": null
+      },
+      "reuse": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "Please withdraw 50 USDC from Aave on Arbitrum"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "EN",
+      "kind": "ACTION",
+      "action": {
+       "type": "WITHDRAW",
+       "protocol": "AAVE_V3",
+       "network": "ARBITRUM",
+       "asset": "USDC",
+       "amount": "50",
+       "beneficiary": null
+      },
+      "reuse": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "Please supply 1 WETH to Aave on Arbitrum"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "EN",
+      "kind": "ACTION",
+      "action": {
+       "type": "SUPPLY",
+       "protocol": "AAVE_V3",
+       "network": "ARBITRUM",
+       "asset": "WETH",
+       "amount": "1",
+       "beneficiary": null
+      },
+      "reuse": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "Please repay all 10 USDC debt on Arbitrum"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "EN",
+      "kind": "ACTION",
+      "action": {
+       "type": "REPAY",
+       "protocol": "AAVE_V3",
+       "network": "ARBITRUM",
+       "asset": "USDC",
+       "amount": "10",
+       "beneficiary": null
+      },
+      "reuse": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "Provide liquidity for USDC and WETH on Arbitrum"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "EN",
+      "kind": "ACTION",
+      "action": {
+       "type": "LIQUIDITY",
+       "protocol": "UNISWAP_V3",
+       "network": "ARBITRUM",
+       "deposits": [],
+       "rangeUnit": null,
+       "lower": null,
+       "upper": null,
+       "feeTier": null,
+       "slippageBps": null
+      },
+      "reuse": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "Please provide 10 USDC and 0.005 WETH liquidity on Arbitrum fee 0.02%"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "EN",
+      "kind": "ACTION",
+      "action": {
+       "type": "LIQUIDITY",
+       "protocol": "UNISWAP_V3",
+       "network": "ARBITRUM",
+       "deposits": [
+        {
+         "asset": "USDC",
+         "maxAmount": "10"
+        },
+        {
+         "asset": "WETH",
+         "maxAmount": "0.005"
+        }
+       ],
+       "rangeUnit": "FULL",
+       "lower": null,
+       "upper": null,
+       "feeTier": null,
+       "slippageBps": null
+      },
+      "reuse": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "Please send 5 USDC on Arbitrum"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "EN",
+      "kind": "ACTION",
+      "action": {
+       "type": "TRANSFER",
+       "network": "ARBITRUM",
+       "asset": "USDC",
+       "amount": "5",
+       "recipient": null
+      },
+      "reuse": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "Please send 5 USDC on Arbitrum",
+    "0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "EN",
+      "kind": "ACTION",
+      "action": {
+       "type": "TRANSFER",
+       "network": "ARBITRUM",
+       "asset": "USDC",
+       "amount": "5",
+       "recipient": "0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed"
+      },
+      "reuse": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "Swap 5 USDC for WETH on Base"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "EN",
+      "kind": "ACTION",
+      "action": {
+       "type": "SWAP",
+       "network": "BASE",
+       "inputAsset": "USDC",
+       "outputAsset": "WETH",
+       "amount": "5",
+       "slippageBps": null
       },
       "reuse": null
      }

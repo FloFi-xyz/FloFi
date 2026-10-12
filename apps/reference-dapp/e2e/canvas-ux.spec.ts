@@ -5,6 +5,14 @@ import type { Page } from '@playwright/test';
 test.beforeEach(async ({ page }) => { await installPassiveWallet(page); });
 test.afterEach(async ({ page }) => { await assertPassiveWallet(page); });
 
+async function settledViewport(page: Page) {
+  let last: string | null = null, stable = 0;
+  await expect.poll(async () => {
+    const current = await page.locator('.build-flow-surface .react-flow__viewport').getAttribute('style');
+    stable = current === last ? stable + 1 : 0; last = current;
+    return stable;
+  }, { intervals: [100] }).toBeGreaterThanOrEqual(3);
+}
 async function addFromToolbox(page: Page, action: string) {
   const before = await page.locator('.build-flow-surface .react-flow__node').count();
   await page.getByRole('button', { name: `Add ${action}`, exact: true }).click();
@@ -21,13 +29,14 @@ async function addFromToolbox(page: Page, action: string) {
     await card.getByRole('button', { name: 'Apply amount', exact: true }).click();
   }
   await expect(page.locator('.build-flow-surface .react-flow__node')).toHaveCount(before + 1);
+  await settledViewport(page);
   return page.locator('.build-flow-surface .react-flow__node').last();
 }
 async function connect(page: Page, source: string, target: string) {
   const sourceHandle = page.locator(`.react-flow__node[data-id="${source}"] .react-flow__handle-right`);
   const targetHandle = page.locator(`.react-flow__node[data-id="${target}"] .react-flow__handle-left`);
-  await expect(sourceHandle).not.toHaveClass(/(?:^|\s)connectable(?:\s|$)/);
-  await expect(targetHandle).not.toHaveClass(/(?:^|\s)connectable(?:\s|$)/);
+  await expect(sourceHandle).toHaveClass(/(?:^|\s)connectable(?:\s|$)/);
+  await expect(targetHandle).toHaveClass(/(?:^|\s)connectable(?:\s|$)/);
   const from = await sourceHandle.boundingBox();
   const to = await page.locator(`.react-flow__node[data-id="${target}"] .react-flow__handle-left`).boundingBox();
   if (!from || !to) throw new Error('Connection handles missing');
@@ -56,6 +65,11 @@ test('dragging updates stored layout, survives editor changes and Build navigati
   await page.goto('/app');
   const node = await addFromToolbox(page, 'swap');
   const revisionBeforeDrag = await page.locator('.summary-bar').getAttribute('data-workflow-revision');
+  const irBeforeDrag = await readWorkflowIr(page);
+  const initialPosition = await node.evaluate(element => {
+    const matrix = new DOMMatrixReadOnly(getComputedStyle(element).transform); return { x: matrix.m41, y: matrix.m42 };
+  });
+  const viewportBeforeDrag = await page.locator('.build-flow-surface .react-flow__viewport').getAttribute('style');
   const id = await node.getAttribute('data-id');
   const before = await node.boundingBox();
   if (!before || !id) throw new Error('New node missing');
@@ -66,9 +80,19 @@ test('dragging updates stored layout, survives editor changes and Build navigati
   const after = await node.boundingBox();
   expect(after!.x).toBeGreaterThan(before.x + 80);
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', revisionBeforeDrag!);
+  expect(await readWorkflowIr(page)).toBe(irBeforeDrag);
+  expect(await page.locator('.build-flow-surface .react-flow__viewport').getAttribute('style')).toBe(viewportBeforeDrag);
   const workflowId = JSON.parse(await readWorkflowIr(page)).workflowId as string;
   const saved = await page.evaluate(({ id, workflowId }) => JSON.parse(localStorage.getItem(`gryloo:canvas:${workflowId}`) ?? '{}')[id], { id, workflowId });
-  expect(saved.x).toBeGreaterThan(100);
+  const movedPosition = await node.evaluate(element => {
+    const matrix = new DOMMatrixReadOnly(getComputedStyle(element).transform); return { x: matrix.m41, y: matrix.m42 };
+  });
+  // Auto-Fit preserves the card's original world coordinates, which may be negative.
+  // Verify the actual move and the exact persisted coordinates, independent of that origin.
+  expect(movedPosition.x).toBeGreaterThan(initialPosition.x);
+  expect(movedPosition.y).toBeGreaterThan(initialPosition.y);
+  expect(saved.x).toBeCloseTo(movedPosition.x, 2);
+  expect(saved.y).toBeCloseTo(movedPosition.y, 2);
   await addFromToolbox(page, 'swap');
   await page.getByRole('button', { name: 'Simulate', exact: true }).click();
   await page.getByRole('button', { name: 'Build', exact: true }).click();
@@ -102,8 +126,15 @@ test('node and edge selection, deletion, text entry and composition guards', asy
   if (!targetId) throw new Error('Replacement node missing');
   const revision = await page.locator('.summary-bar').getAttribute('data-workflow-revision');
   await connect(page, sourceId, targetId);
-  await expect(page.locator('.react-flow__edge')).toHaveCount(0);
-  await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', revision!);
+  await expect(page.locator('.react-flow__edge')).toHaveCount(1);
+  await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', String(Number(revision) + 1));
+  const connected = JSON.parse(await readWorkflowIr(page));
+  expect(connected.nodes.find((node: { nodeId: string }) => node.nodeId === targetId).dependencies).toEqual([sourceId]);
+  expect(connected.resourceEdges).toEqual([]);
+  const connectedIr = await readWorkflowIr(page);
+  await connect(page, targetId, sourceId);
+  expect(await readWorkflowIr(page)).toBe(connectedIr);
+  await expect(page.locator('.react-flow__edge')).toHaveCount(1);
 });
 test('selected action parameters edit shared IR', async ({ page }) => {
   await page.goto('/app');
@@ -225,27 +256,35 @@ test('marquee follows the pointer, stays clipped, and selects exactly the inters
   await expect.poll(async () => (await firstSelected.boundingBox())!.x).toBeCloseTo(moved!.x, 0);
 });
 
-test('drag keeps node mounted and invalid connections leave semantic edges unchanged', async ({ page }) => {
+test('drag keeps node mounted and cyclic connections leave semantic edges unchanged', async ({ page }) => {
   await page.goto('/app');
   await addFromToolbox(page, 'swap');
   await addFromToolbox(page, 'swap');
-  const node = page.locator('.react-flow__node[data-id="node-003"]');
+  // Move the left card away from its neighbour so both real handles stay reachable.
+  const node = page.locator('.react-flow__node[data-id="node-002"]');
   await node.evaluate(element => { (window as unknown as { draggedNode?: Element }).draggedNode = element; });
   const before = await node.boundingBox();
   if (!before) throw new Error('Node missing');
-  await page.mouse.move(before.x + 70, before.y + 60);
+  const title = await node.locator('.composer-action-title').boundingBox();
+  if (!title) throw new Error('Drag header missing');
+  const irBeforeDrag = await readWorkflowIr(page);
+  await page.mouse.move(title.x + 10, title.y + 10);
   await page.mouse.down();
-  await page.mouse.move(before.x + 5, before.y + 120, { steps: 25 });
+  await page.mouse.move(title.x - 55, title.y + 70, { steps: 25 });
   await page.mouse.up();
   expect(await node.evaluate(element => (window as unknown as { draggedNode?: Element }).draggedNode === element)).toBe(true);
   expect((await node.boundingBox())!.x).toBeLessThan(before.x - 40);
+  expect(await readWorkflowIr(page)).toBe(irBeforeDrag);
   const revision = await page.locator('.summary-bar').getAttribute('data-workflow-revision');
   await connect(page, 'node-002', 'node-003');
-  await expect(page.locator('.react-flow__edge')).toHaveCount(0);
+  await expect(page.locator('.react-flow__edge')).toHaveCount(1);
+  await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', String(Number(revision) + 1));
+  const connectedIr = await readWorkflowIr(page);
   await connect(page, 'node-003', 'node-002');
   await page.getByRole('button', { name: 'Undock toolbar' }).click();
-  await expect(page.locator('.react-flow__edge')).toHaveCount(0);
-  await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', revision!);
+  await expect(page.locator('.react-flow__edge')).toHaveCount(1);
+  expect(await readWorkflowIr(page)).toBe(connectedIr);
+  await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', String(Number(revision) + 1));
 });
 test('text controls guard deletion and approved workflow edges stay protected', async ({ page }) => {
   await page.goto('/app');
@@ -309,7 +348,7 @@ test('floating toolbox stays inside a narrow editor without page overflow', asyn
   const graph = page.getByRole('region', { name: 'Workflow graph' });
   await expect(graph.locator('.floating-toolbox')).toBeVisible();
   await expect(graph.locator('.floating-toolbox button')).toHaveCount(15);
-  await expect(graph.getByRole('button', { name: 'Add transfer', exact: true })).toBeVisible();
+  await expect(graph.getByRole('button', { name: 'Add send', exact: true })).toBeVisible();
   await expect(graph.getByRole('button', { name: 'Privacy', exact: true })).toBeDisabled();
   await expect(graph.getByRole('button', { name: 'Add repay', exact: true })).toBeVisible();
   await expect(graph.getByRole('button', { name: 'Add withdraw', exact: true })).toBeVisible();

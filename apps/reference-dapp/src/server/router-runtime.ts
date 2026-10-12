@@ -49,7 +49,7 @@ export const routerNetworkProfile = (network: RouterNetwork): RouterProfile => i
   : isBaseRouterNetwork(network) ? BASE_ROUTER_PROFILES[network] : network === 'testnet' ? TESTNET : profile;
 type Env = Readonly<Record<string, string | undefined>>;
 export const ROUTER_BASE_RPC_METHODS = Object.freeze(['eth_chainId', 'eth_blockNumber', 'eth_getBlockByNumber', 'eth_getCode', 'eth_call', 'eth_getBalance',
-  'eth_getTransactionCount', 'eth_maxPriorityFeePerGas', 'eth_simulateV1', 'eth_getTransactionReceipt', 'eth_getTransactionByHash', 'eth_getStorageAt', 'eth_getLogs']);
+  'eth_getTransactionCount', 'eth_maxPriorityFeePerGas', 'eth_gasPrice', 'eth_estimateGas', 'eth_simulateV1', 'eth_getTransactionReceipt', 'eth_getTransactionByHash', 'eth_getStorageAt', 'eth_getLogs']);
 export const ROUTER_ARBITRUM_RPC_METHODS = Object.freeze(['eth_chainId', 'eth_blockNumber', 'eth_getBlockByNumber', 'eth_getCode', 'eth_call', 'eth_getLogs',
   'eth_getTransactionReceipt', 'eth_getTransactionByHash', 'eth_getStorageAt']);
 export function routerMode(env: Env): RouterMode {

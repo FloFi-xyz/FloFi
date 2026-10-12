@@ -4,11 +4,12 @@
  * own pair and standard fee tier; its pool is derived (CREATE2) from that network's pinned factory, never chosen across networks.
  */
 import { UNISWAP_V3_BASE_LIQUIDITY } from './uniswap-v3-base.js';
+import { UNISWAP_V3_ARBITRUM_LIQUIDITY } from './uniswap-v3-arbitrum.js';
 import { UNISWAP_V3_ROBINHOOD_CATALOG } from './uniswap-v3-robinhood.js';
 import { catalogLiquidityPool, type UniswapCatalogLiquidity } from './uniswap-v3-catalog.js';
 import type { UniswapPoolProfile, UniswapPoolToken } from './uniswap-liquidity-profiles.js';
 
-export const UNISWAP_CATALOG_DEPLOYMENTS: readonly UniswapCatalogLiquidity[] = Object.freeze([UNISWAP_V3_ROBINHOOD_CATALOG, UNISWAP_V3_BASE_LIQUIDITY]);
+export const UNISWAP_CATALOG_DEPLOYMENTS: readonly UniswapCatalogLiquidity[] = Object.freeze([UNISWAP_V3_ROBINHOOD_CATALOG, UNISWAP_V3_BASE_LIQUIDITY, UNISWAP_V3_ARBITRUM_LIQUIDITY]);
 /** The catalog-pool deployment of a CAIP-2 chain or numeric chain id; null for a chain whose pools are fixed profiles (testnets). */
 export function uniswapCatalogDeployment(chain: string | number | null | undefined): UniswapCatalogLiquidity | null {
   return UNISWAP_CATALOG_DEPLOYMENTS.find(deployment => deployment.chain === chain || deployment.chainId === chain) ?? null;

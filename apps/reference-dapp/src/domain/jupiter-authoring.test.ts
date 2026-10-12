@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from 'vitest';
 import { baseAssetRegistry, referenceRegistry, SOLANA_MAINNET_TOKENS } from '@defi-workflow-engine/action-registry';
-import { createReviewContext } from '@defi-workflow-engine/reference-linter';
+import { createReviewContext, validateAuthoringWorkflow } from '@defi-workflow-engine/reference-linter';
 import { readExactInputSwap } from '@defi-workflow-engine/workflow-contracts';
 import { commandIsValid, parseLocalCommand, summarize } from './commands';
 import { editorReducer, initialEditor } from './editor';
@@ -56,9 +56,12 @@ describe('Solana swap chat/canvas authoring', () => {
     history = editorHistoryReducer(history, { type: 'REDO' });
     expect(solanaSwapDetails(history.editor.workflow.nodes.find(n => n.nodeId === 'node-002')!)?.amount).toBe('12.5');
   });
-  it('keeps the Solana swap isolated and validates commands strictly', () => {
+  it('authors distinct Solana swap instances, keeps runtime validation strict and validates commands', () => {
     const added = editorReducer(initialEditor(), { type: 'ADD_SOLANA_SWAP', input: canvasInput, source: 'CANVAS', baseRevision: 0 }, context);
-    expect(editorReducer(added, { type: 'ADD_SOLANA_SWAP', input: canvasInput, source: 'CANVAS', baseRevision: 1 }, context).error).toBe('SOLANA_SWAP_ISOLATED_ONLY');
+    const repeated = editorReducer(added, { type: 'ADD_SOLANA_SWAP', input: canvasInput, source: 'CANVAS', baseRevision: 1 }, context);
+    expect(repeated.error).toBeNull();
+    expect(new Set(repeated.workflow.nodes.filter(n => !n.actionType.startsWith('mock-')).map(n => n.nodeId)).size).toBe(2);
+    expect(() => validateAuthoringWorkflow(repeated.workflow, context)).toThrow();
     expect(commandIsValid({ type: 'ADD_SOLANA_SWAP', input: { ...canvasInput, extra: '1' }, source: 'CHAT', baseRevision: 0 })).toBe(false);
     expect(commandIsValid({ type: 'ADD_SOLANA_SWAP', input: canvasInput, source: 'CHAT', baseRevision: 0 })).toBe(true);
   });

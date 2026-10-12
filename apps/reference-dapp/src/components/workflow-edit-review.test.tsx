@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { createBaseSepoliaReviewContext } from '@defi-workflow-engine/reference-linter';
 import { canvasAddCommand } from '../domain/canvas-authoring';
 import { editorReducer, initialEditor } from '../domain/editor';
-import { WorkflowEditReview, workflowProposalSummary } from './workflow-edit-review';
+import { WorkflowEditReview, workflowEditProposalVisible, workflowProposalSummary } from './workflow-edit-review';
 import { CopilotPanel } from './copilot-panel';
 import { proposalReviewPosition } from './proposal-review-position';
 
@@ -92,5 +92,24 @@ describe('collision-aware proposal positioning', () => {
     expect(result.y).toBeGreaterThanOrEqual(bounds.y);
     expect(result.x + result.width).toBeLessThanOrEqual(bounds.x + bounds.width);
     expect(result.y + result.height).toBeLessThanOrEqual(bounds.y + bounds.height);
+  });
+});
+
+describe('UX-006 the proposal confirmation takes the empty Canvas centre', () => {
+  it('reuses the same uncommitted artifact, only adding the centred placement, and changes no workflow', () => {
+    const before = fixture.store.state;
+    const centred = renderToStaticMarkup(createElement<{ centered?: boolean }>(WorkflowEditReview, { centered: true }));
+    const normal = renderToStaticMarkup(createElement(WorkflowEditReview));
+    expect(centred).toContain('class="proposal-artifact proposal-artifact-centered nodrag nopan nowheel"');
+    expect(normal).toContain('class="proposal-artifact nodrag nopan nowheel"');
+    expect(centred.replace(' proposal-artifact-centered', '')).toBe(normal);
+    expect(centred).toContain('>Proposed</span>'); expect(centred).not.toMatch(/role="dialog"|Apply proposal/);
+    expect(fixture.store.state).toBe(before); expect(before.workflow.revision).toBe(0);
+    expect(fixture.store.applyProposal).not.toHaveBeenCalled(); expect(fixture.store.dismissProposal).not.toHaveBeenCalled();
+  });
+  it('is shown only for a Canvas-level proposal, never for a card-bound amount review', () => {
+    expect(workflowEditProposalVisible(fixture.store.pending, fixture.store.state.workflow)).toBe(true);
+    expect(workflowEditProposalVisible(null, fixture.store.state.workflow)).toBe(false);
+    expect(workflowEditProposalVisible({ ...fixture.store.pending!, authoringId: 'action-setup-1', authoringAmount: '1' }, fixture.store.state.workflow)).toBe(false);
   });
 });

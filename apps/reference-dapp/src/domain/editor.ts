@@ -1,6 +1,6 @@
 import {createAuthoredLending} from './lending-authoring';
 // SPDX-License-Identifier: AGPL-3.0-only
-import { createBaseSepoliaReviewContext, createEthereumSepoliaReviewContext, reviewContextForChain, validateAuthoringWorkflow, type ReviewContext } from '@defi-workflow-engine/reference-linter';
+import { createBaseSepoliaReviewContext, createEthereumSepoliaReviewContext, reviewContextForChain, validateWorkflowDraft, type ReviewContext } from '@defi-workflow-engine/reference-linter';
 import { commandIsValid, type Command } from './commands';
 import { freeze, initialWorkflow, type Workflow } from './initial-workflow';
 import { createMockNode } from './mock-actions';
@@ -37,7 +37,6 @@ export function editorReducer(state: EditorState, command: Command, context?: Re
     try {
       const old = command.type === 'SET_CRYPTO_ACTION' ? current.nodes.find(node => node.nodeId === command.nodeId) : null;
       if (command.type === 'SET_CRYPTO_ACTION' && (!old || !canSelectCryptoAssets(old, current) || cryptoSelectionOf(old)?.action !== command.input.selection.action)) return reject('ACTION_SELECTION_LOCKED');
-      if ((command.input.selection.action === 'pool' || command.input.selection.network.startsWith('Solana')) && current.nodes.some(node => !node.actionType.startsWith('mock-') && node.nodeId !== old?.nodeId)) return reject('ACTION_ISOLATED_ONLY');
       const id = old?.nodeId ?? `node-${String(current.revision + 2).padStart(3, '0')}`;
       let replacement = createCryptoActionNode(id, command.input);
       if (old?.chainId === replacement.chainId && old.actionType === replacement.actionType) {
@@ -45,24 +44,25 @@ export function editorReducer(state: EditorState, command: Command, context?: Re
         replacement = { ...replacement, adapterConstraints: old.adapterConstraints as typeof replacement.adapterConstraints };
         if (replacement.actionType === LIQUIDITY_ACTION) replacement = { ...replacement, inputs: replacement.inputs.map(input => ['amount0-min', 'amount1-min'].includes(input.name) ? old.inputs.find(previous => previous.name === input.name) as typeof input : input) };
       }
+      if (old) replacement = { ...replacement, dependencies: [...old.dependencies] };
       if (old && JSON.stringify(old) === JSON.stringify(replacement)) return { workflow: current, error: null };
       const workflow = { ...current, revision: current.revision + 1, nodes: old ? current.nodes.map(node => node.nodeId === id ? replacement : node) : [...current.nodes, replacement] };
-      validateAuthoringWorkflow(workflow, cryptoReviewContext(command.input.selection.network));
+      validateWorkflowDraft(workflow, cryptoReviewContext(command.input.selection.network));
       return { workflow: freeze(workflow), error: null };
     } catch (cause) { return reject(cause instanceof Error ? cause.message : 'ACTION_SELECTION_INVALID'); }
   }
-  if(command.type==='AUTHOR_LENDING'){try{const workflow=createAuthoredLending(current.workflowId,current.revision+1,command.input);validateAuthoringWorkflow(workflow,createBaseSepoliaReviewContext());return{workflow:freeze(workflow),error:null};}catch(cause){return reject(cause instanceof Error?cause.message:'LENDING_INPUT_INVALID');}}
+  if(command.type==='AUTHOR_LENDING'){try{const workflow=createAuthoredLending(current.workflowId,current.revision+1,command.input);validateWorkflowDraft(workflow,createBaseSepoliaReviewContext());return{workflow:freeze(workflow),error:null};}catch(cause){return reject(cause instanceof Error?cause.message:'LENDING_INPUT_INVALID');}}
   if (command.type === 'ADD_RH_TRANSFER' || command.type === 'SET_RH_TRANSFER') {
     const editing = command.type === 'SET_RH_TRANSFER';
     try {
       if (editing && !current.nodes.some(n => n.nodeId === command.nodeId && n.actionType === 'asset.transfer')) return reject('UNKNOWN_TRANSFER_NODE');
-      if (!editing && current.nodes.some(n => !n.actionType.startsWith('mock-'))) return reject('TRANSFER_ISOLATED_ONLY');
       const id = editing ? command.nodeId : `node-${String(current.revision + 2).padStart(3, '0')}`;
-      const replacement = createAuthoredTransfer(id, command.input);
+      let replacement = createAuthoredTransfer(id, command.input);
+      if (editing) replacement = { ...replacement, dependencies: [...current.nodes.find(n => n.nodeId === id)!.dependencies] };
       if (editing && JSON.stringify(replacement) === JSON.stringify(current.nodes.find(n => n.nodeId === id))) return { workflow: current, error: null };
       const workflow = { ...current, revision: current.revision + 1, nodes: !editing ? [...current.nodes, replacement] : current.nodes.map(n => n.nodeId === id ? replacement : n) };
       if (!context) return reject('REVIEW_CONTEXT_REQUIRED');
-      validateAuthoringWorkflow(workflow, context); return { workflow: freeze(workflow), error: null };
+      validateWorkflowDraft(workflow, context); return { workflow: freeze(workflow), error: null };
     } catch (cause) { return reject(cause instanceof Error ? cause.message : 'TRANSFER_INPUT_INVALID'); }
   }
   if (command.type === 'ADD_WITHDRAW' || command.type === 'SET_WITHDRAW' || command.type === 'ADD_REPAY' || command.type === 'SET_REPAY' || command.type === 'ADD_SUPPLY' || command.type === 'SET_SUPPLY' || command.type === 'ADD_BORROW' || command.type === 'SET_BORROW') {
@@ -72,67 +72,67 @@ export function editorReducer(state: EditorState, command: Command, context?: Re
     const editing=command.type==='SET_WITHDRAW'||command.type==='SET_REPAY'||command.type==='SET_SUPPLY'||command.type==='SET_BORROW';
     try {
       if (editing && !current.nodes.some(n => n.nodeId === command.nodeId && n.actionType === (withdrawing?'withdraw':repaying?'repay':borrowing?'borrow':'supply'))) return reject('UNKNOWN_SUPPLY_NODE');
-      if (!editing && current.nodes.some(n => !n.actionType.startsWith('mock-'))) return reject('SUPPLY_ISOLATED_ONLY');
       const id = editing ? command.nodeId : `node-${String(current.revision + 2).padStart(3, '0')}`;
-      const replacement = withdrawing ? createAuthoredWithdraw(id,command.input) : (repaying?createAuthoredRepay:borrowing?createAuthoredBorrow:createAuthoredSupply)(id, command.input);
+      let replacement = withdrawing ? createAuthoredWithdraw(id,command.input) : (repaying?createAuthoredRepay:borrowing?createAuthoredBorrow:createAuthoredSupply)(id, command.input);
+      if (editing) replacement = { ...replacement, dependencies: [...current.nodes.find(n => n.nodeId === id)!.dependencies] };
       if (editing && JSON.stringify(replacement) === JSON.stringify(current.nodes.find(n => n.nodeId === id))) return {workflow:current,error:null};
       const workflow = { ...current, revision: current.revision + 1, nodes: !editing ? [...current.nodes,replacement] : current.nodes.map(n => n.nodeId === id ? replacement : n) };
       if (!context) return reject('REVIEW_CONTEXT_REQUIRED');
-      validateAuthoringWorkflow(workflow, context); return {workflow:freeze(workflow),error:null};
+      validateWorkflowDraft(workflow, context); return {workflow:freeze(workflow),error:null};
     } catch (cause) { return reject(cause instanceof Error ? cause.message : 'SUPPLY_INPUT_INVALID'); }
   }
   if (command.type === 'ADD_SOLANA_SWAP' || command.type === 'SET_SOLANA_SWAP') {
     try {
       if (command.type === 'SET_SOLANA_SWAP' && !current.nodes.some(n => n.nodeId === command.nodeId && solanaSwapDetails(n))) return reject('UNKNOWN_SOLANA_SWAP_NODE');
-      if (command.type === 'ADD_SOLANA_SWAP' && current.nodes.some(n => !n.actionType.startsWith('mock-'))) return reject('SOLANA_SWAP_ISOLATED_ONLY');
       const id = command.type === 'SET_SOLANA_SWAP' ? command.nodeId : `node-${String(current.revision + 2).padStart(3, '0')}`;
-      const replacement = createSolanaSwapNode(id, command.input);
+      let replacement = createSolanaSwapNode(id, command.input);
+      if (command.type === 'SET_SOLANA_SWAP') replacement = { ...replacement, dependencies: [...current.nodes.find(n => n.nodeId === id)!.dependencies] };
       if (command.type === 'SET_SOLANA_SWAP' && JSON.stringify(replacement) === JSON.stringify(current.nodes.find(n => n.nodeId === id))) return { workflow: current, error: null };
       const workflow = { ...current, revision: current.revision + 1, nodes: command.type === 'ADD_SOLANA_SWAP' ? [...current.nodes, replacement] : current.nodes.map(n => n.nodeId === id ? replacement : n) };
       if (!context) return reject('REVIEW_CONTEXT_REQUIRED');
-      validateAuthoringWorkflow(workflow, context); return { workflow: freeze(workflow), error: null };
+      validateWorkflowDraft(workflow, context); return { workflow: freeze(workflow), error: null };
     } catch (cause) { return reject(cause instanceof Error ? cause.message : 'SOLANA_SWAP_INPUT_INVALID'); }
   }
   if (command.type === 'ADD_SOLANA_LIQUIDITY' || command.type === 'SET_SOLANA_LIQUIDITY') {
     try {
       if (command.type === 'SET_SOLANA_LIQUIDITY' && !current.nodes.some(n => n.nodeId === command.nodeId && solanaLiquidityDetails(n))) return reject('UNKNOWN_SOLANA_LIQUIDITY_NODE');
-      if (command.type === 'ADD_SOLANA_LIQUIDITY' && current.nodes.some(n => !n.actionType.startsWith('mock-'))) return reject('SOLANA_LIQUIDITY_ISOLATED_ONLY');
       const id = command.type === 'SET_SOLANA_LIQUIDITY' ? command.nodeId : `node-${String(current.revision + 2).padStart(3, '0')}`;
-      const replacement = createSolanaLiquidityNode(id, command.input);
+      let replacement = createSolanaLiquidityNode(id, command.input);
+      if (command.type === 'SET_SOLANA_LIQUIDITY') replacement = { ...replacement, dependencies: [...current.nodes.find(n => n.nodeId === id)!.dependencies] };
       if (command.type === 'SET_SOLANA_LIQUIDITY' && JSON.stringify(replacement) === JSON.stringify(current.nodes.find(n => n.nodeId === id))) return { workflow: current, error: null };
       const workflow = { ...current, revision: current.revision + 1, nodes: command.type === 'ADD_SOLANA_LIQUIDITY' ? [...current.nodes, replacement] : current.nodes.map(n => n.nodeId === id ? replacement : n) };
       if (!context) return reject('REVIEW_CONTEXT_REQUIRED');
-      validateAuthoringWorkflow(workflow, context); return { workflow: freeze(workflow), error: null };
+      validateWorkflowDraft(workflow, context); return { workflow: freeze(workflow), error: null };
     } catch (cause) { return reject(cause instanceof Error ? cause.message : 'SOLANA_LIQUIDITY_INPUT_INVALID'); }
   }
   if (command.type === 'ADD_UNISWAP_LIQUIDITY' || command.type === 'SET_UNISWAP_LIQUIDITY') {
     try {
       if (command.type === 'SET_UNISWAP_LIQUIDITY' && !current.nodes.some(n => n.nodeId === command.nodeId && uniswapLiquidityDetails(n))) return reject('UNKNOWN_UNISWAP_LIQUIDITY_NODE');
-      if (command.type === 'ADD_UNISWAP_LIQUIDITY' && current.nodes.some(n => !n.actionType.startsWith('mock-'))) return reject('UNISWAP_LIQUIDITY_ISOLATED_ONLY');
       const id = command.type === 'SET_UNISWAP_LIQUIDITY' ? command.nodeId : `node-${String(current.revision + 2).padStart(3, '0')}`;
-      const replacement = createUniswapLiquidityNode(id, command.input);
+      let replacement = createUniswapLiquidityNode(id, command.input);
+      if (command.type === 'SET_UNISWAP_LIQUIDITY') replacement = { ...replacement, dependencies: [...current.nodes.find(n => n.nodeId === id)!.dependencies] };
       if (command.type === 'SET_UNISWAP_LIQUIDITY' && JSON.stringify(replacement) === JSON.stringify(current.nodes.find(n => n.nodeId === id))) return { workflow: current, error: null };
       const workflow = { ...current, revision: current.revision + 1, nodes: command.type === 'ADD_UNISWAP_LIQUIDITY' ? [...current.nodes, replacement] : current.nodes.map(n => n.nodeId === id ? replacement : n) };
       if (!context) return reject('REVIEW_CONTEXT_REQUIRED');
-      validateAuthoringWorkflow(workflow, context); return { workflow: freeze(workflow), error: null };
+      validateWorkflowDraft(workflow, context); return { workflow: freeze(workflow), error: null };
     } catch (cause) { return reject(cause instanceof Error ? cause.message : 'UNISWAP_LIQUIDITY_INPUT_INVALID'); }
   }
   if (command.type === 'AUTHOR_CROSS_CHAIN_LIQUIDITY') {
     if (!context) return reject('REVIEW_CONTEXT_REQUIRED');
     try { const workflow = createCrossChainLiquidityWorkflow(current.workflowId, current.revision + 1, command.input);
-      validateAuthoringWorkflow(workflow, context); return { workflow: freeze(workflow), error: null };
+      validateWorkflowDraft(workflow, context); return { workflow: freeze(workflow), error: null };
     } catch (cause) { return reject(cause instanceof Error ? cause.message : 'CROSS_CHAIN_LIQUIDITY_INVALID'); }
   }
   if (command.type === 'AUTHOR_ACROSS') {
     if (!context) return reject('REVIEW_CONTEXT_REQUIRED');
     try { const workflow = createAcrossWorkflow(current.workflowId, current.revision + 1, command.input);
-      validateAuthoringWorkflow(workflow, context); return { workflow: freeze(workflow), error: null };
+      validateWorkflowDraft(workflow, context); return { workflow: freeze(workflow), error: null };
     } catch (cause) { return reject(cause instanceof Error ? cause.message : 'ACROSS_WORKFLOW_INVALID'); }
   }
   if (command.type === 'AUTHOR_BRIDGE_SWAP') {
     if (!context) return reject('REVIEW_CONTEXT_REQUIRED');
     try { const workflow = createBridgeSwapWorkflow(current.workflowId, current.revision + 1, command.input);
-      validateAuthoringWorkflow(workflow, context); return { workflow: freeze(workflow), error: null };
+      validateWorkflowDraft(workflow, context); return { workflow: freeze(workflow), error: null };
     } catch (cause) { return reject(cause instanceof Error ? cause.message : 'BRIDGE_SWAP_INVALID'); }
   }
   if (command.type === 'ADD_ROUTER_BRIDGE' || command.type === 'SET_ROUTER_BRIDGE') {
@@ -140,11 +140,11 @@ export function editorReducer(state: EditorState, command: Command, context?: Re
     try {
       if (command.type === 'SET_ROUTER_BRIDGE' && !current.nodes.some(node => node.nodeId === command.nodeId && routerDetails(node))) return reject('UNKNOWN_ROUTER_NODE');
       const id = command.type === 'SET_ROUTER_BRIDGE' ? command.nodeId : `node-${String(current.revision + 2).padStart(3, '0')}`;
-      const replacement = createRouterNode(id, command.input);
+      let replacement = createRouterNode(id, command.input);
+      if (command.type === 'SET_ROUTER_BRIDGE') replacement = { ...replacement, dependencies: [...current.nodes.find(n => n.nodeId === id)!.dependencies] };
       if (command.type === 'SET_ROUTER_BRIDGE' && JSON.stringify(replacement) === JSON.stringify(current.nodes.find(n => n.nodeId === id))) return { workflow: current, error: null };
-      // One isolated cross-chain bridge, like every other bridge workflow: authoring templates are replaced, never connected.
-      const workflow = { ...current, revision: current.revision + 1, nodes: [replacement], resourceEdges: [] };
-      validateAuthoringWorkflow(workflow, context);
+      const workflow = { ...current, revision: current.revision + 1, nodes: command.type.startsWith('SET_') ? current.nodes.map(n => n.nodeId === id ? { ...replacement, dependencies: [...n.dependencies] } : n) : [...current.nodes.filter(n => !n.actionType.startsWith('mock-')), replacement] };
+      validateWorkflowDraft(workflow, context);
       return { workflow: freeze(workflow), error: null };
     } catch (cause) { return reject(cause instanceof Error ? cause.message : 'ROUTER_INPUT_INVALID'); }
   }
@@ -154,8 +154,8 @@ export function editorReducer(state: EditorState, command: Command, context?: Re
       if (command.type === 'SET_BRIDGE' && !current.nodes.some(node => node.nodeId === command.nodeId && node.actionType === BRIDGE_ACTION)) return reject('UNKNOWN_BRIDGE_NODE');
       const id = command.type === 'SET_BRIDGE' ? command.nodeId : `node-${String(current.revision + 2).padStart(3, '0')}`;
       const replacement = createBridgeNode(id, command.input);
-      const workflow = { ...current, revision: current.revision + 1, nodes: [replacement], resourceEdges: [] };
-      validateAuthoringWorkflow(workflow, context);
+      const workflow = { ...current, revision: current.revision + 1, nodes: command.type.startsWith('SET_') ? current.nodes.map(n => n.nodeId === id ? { ...replacement, dependencies: [...n.dependencies] } : n) : [...current.nodes.filter(n => !n.actionType.startsWith('mock-')), replacement] };
+      validateWorkflowDraft(workflow, context);
       return { workflow: freeze(workflow), error: null };
     } catch (cause) { return reject(cause instanceof Error ? cause.message : 'INVALID_BRIDGE_INPUT'); }
   }
@@ -163,7 +163,7 @@ export function editorReducer(state: EditorState, command: Command, context?: Re
     if (!context) return reject('REVIEW_CONTEXT_REQUIRED');
     try {
       const workflow = createCompositionWorkflow(current.workflowId, current.revision + 1, command.safe, command.input, context);
-      validateAuthoringWorkflow(workflow, context);
+      validateWorkflowDraft(workflow, context);
       return { workflow: freeze(workflow), error: null };
     } catch (cause) { return reject(cause instanceof Error ? cause.message : 'INVALID_COMPOSITION'); }
   }
@@ -200,11 +200,9 @@ export function editorReducer(state: EditorState, command: Command, context?: Re
   } else if (command.type === 'CONNECT') {
     if (command.from === command.to || !nodes.some(n => n.nodeId === command.from)
         || !nodes.some(n => n.nodeId === command.to)) return reject('INVALID_CONNECTION');
-    if (nodes.some(n => (n.nodeId === command.from || n.nodeId === command.to) && n.actionType === SWAP_ACTION)) return reject('SWAP_EDGE_UNSUPPORTED');
-    if (nodes.some(n => (n.nodeId === command.from || n.nodeId === command.to) && [LIQUIDITY_ACTION, BRIDGE_ACTION, 'supply', 'borrow', 'repay', 'withdraw', 'asset.transfer'].includes(n.actionType))) return reject('ISOLATED_ACTION_EDGE_UNSUPPORTED');
     const target = nodes.find(n => n.nodeId === command.to)!;
+    if (nodes.find(n => n.nodeId === command.from)!.actionType.startsWith('mock-') !== target.actionType.startsWith('mock-')) return reject('ISOLATED_ACTION_EDGE_UNSUPPORTED');
     if (target.dependencies.includes(command.from)) return { workflow: current, error: null };
-    if (target.dependencies.length) return reject('INPUT_ALREADY_CONNECTED');
     const ancestors = (id: string, seen = new Set<string>()): boolean => {
       if (id === command.to) return true;
       if (seen.has(id)) return false;
@@ -212,16 +210,15 @@ export function editorReducer(state: EditorState, command: Command, context?: Re
       return nodes.find(n => n.nodeId === id)!.dependencies.some(parent => ancestors(parent, seen));
     };
     if (ancestors(command.from)) return reject('CYCLIC_CONNECTION');
-    if (!nodes.find(n => n.nodeId === command.from)!.actionType.startsWith('mock-')
-        || !target.actionType.startsWith('mock-') || target.inputs.some(input => input.name === 'source')) return reject('ISOLATED_ACTION_EDGE_UNSUPPORTED');
-    nodes = nodes.map(n => n.nodeId === command.to ? { ...n,
-      dependencies: [...n.dependencies, command.from],
-      inputs: [...n.inputs, { name: 'source' as const, kind: 'OUTPUT_REFERENCE' as const,
-        value: { nodeId: command.from, outputId: 'result' } }],
+    const mockLink = nodes.find(n => n.nodeId === command.from)!.actionType.startsWith('mock-') && target.actionType.startsWith('mock-');
+    if (mockLink && target.inputs.some(input => input.name === 'source')) return reject('INPUT_ALREADY_CONNECTED');
+    nodes = nodes.map(n => n.nodeId === command.to ? { ...n, dependencies: [...n.dependencies, command.from],
+      inputs: mockLink ? [...n.inputs, { name: 'source' as const, kind: 'OUTPUT_REFERENCE' as const,
+        value: { nodeId: command.from, outputId: 'result' } }] : n.inputs,
     } : n);
-    resourceEdges.push({ fromNodeId: command.from, outputId: 'result', toNodeId: command.to, inputName: 'source' });
+    if (mockLink) resourceEdges.push({ fromNodeId: command.from, outputId: 'result', toNodeId: command.to, inputName: 'source' });
   } else if (command.type === 'DISCONNECT') {
-    if (!current.resourceEdges.some(edge => edge.fromNodeId === command.from && edge.toNodeId === command.to)) return reject('UNKNOWN_CONNECTION');
+    if (!current.nodes.some(node => node.nodeId === command.to && node.dependencies.includes(command.from))) return reject('UNKNOWN_CONNECTION');
     if (!canDeleteCanvasEdge(current, command.from, command.to)) return reject('PROTECTED_CONNECTION: this connection is required by the workflow.');
     resourceEdges = resourceEdges.filter(edge => !(edge.fromNodeId === command.from && edge.toNodeId === command.to));
     nodes = nodes.map(node => node.nodeId === command.to ? { ...node,
@@ -240,7 +237,7 @@ export function editorReducer(state: EditorState, command: Command, context?: Re
     } else if (node.actionType === LIQUIDITY_ACTION) {
       if (command.type !== 'SET_LIQUIDITY' || !context) return reject('INVALID_LIQUIDITY_COMMAND');
       try {
-        const replacement = createLiquidityNode(node.nodeId, command.input, context);
+        const replacement = { ...createLiquidityNode(node.nodeId, command.input, context), dependencies: [...node.dependencies] };
         if (JSON.stringify(replacement) === JSON.stringify(node)) return { workflow: current, error: null };
         nodes = nodes.map(n => n.nodeId === node.nodeId ? replacement : n);
       } catch (cause) { return reject(cause instanceof Error ? cause.message : 'INVALID_LIQUIDITY_INPUT'); }
@@ -296,7 +293,7 @@ export function editorReducer(state: EditorState, command: Command, context?: Re
   if (context) {
     // A public testnet swap is validated against its own chain's trusted assets (Base Sepolia or Ethereum Sepolia).
     const swapChain = candidate.nodes.find(n => n.actionType === SWAP_ACTION && (n.chainId === 'eip155:84532' || n.chainId === 'eip155:11155111'))?.chainId;
-    try { validateAuthoringWorkflow(candidate, swapChain ? reviewContextForChain(swapChain, context) : context); }
+    try { validateWorkflowDraft(candidate, swapChain ? reviewContextForChain(swapChain, context) : context); }
     catch (cause) { return reject(cause instanceof Error ? cause.message : 'INVALID_WORKFLOW'); }
   } else if (nodes.some(n => [SWAP_ACTION, LIQUIDITY_ACTION].includes(n.actionType))) return reject('REVIEW_CONTEXT_REQUIRED');
   return { workflow: freeze(candidate), error: null };

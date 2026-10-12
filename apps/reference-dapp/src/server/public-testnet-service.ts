@@ -7,21 +7,28 @@
  * (pinned USDC/WETH plus the validated token list; `bas-` runs), with the OP Stack L1 fee in its balance check. The authored chain
  * selects the profile and its own read client; no chain falls back to another. This service never signs or sends.
  */
+import { nitroGasLimit, nitroMaxFeePerGas } from './arbitrum-fees.ts';
 import { createHash, randomBytes } from 'node:crypto';
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { baseAssetRegistry, catalogAsset, referenceRegistry, resolveWorkflowCapability, uniswapV3PoolAddress, type AssetCatalog, type CanonicalAsset } from '@defi-workflow-engine/action-registry';
 import { createBaseSepoliaReviewContext, createReviewContext, reviewContextForChain, validateAuthoringWorkflow } from '@defi-workflow-engine/reference-linter';
+import { encodeSwap, toHex } from '@defi-workflow-engine/reference-compiler';
 import { hashArtifactBytes, isCatalogSwapNode, isReferencePairSwap, readCatalogSwapNode, type CatalogSwapFields, type EvidenceBundle, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { validateArtifact } from '@defi-workflow-engine/workflow-contracts/schemas';
-import { utf8, type ExecutionStorage } from '@defi-workflow-engine/reference-executor';
-import { BASE_SEPOLIA, publicSwapProfile, quoteDecimals, swapProfile, type CatalogSwapProfile, type PairSwapProfile, type SwapProfile } from '../domain/public-testnet-swap.ts';
+import { createFileExecutionStorage, discoverTransferByNonce, utf8, type ExecutionStorage } from '@defi-workflow-engine/reference-executor';
+import { BASE_SEPOLIA, ownerBoundSwapReview, publicSwapProfile, quoteDecimals, swapProfile, type CatalogSwapProfile, type PairSwapProfile, type SwapProfile } from '../domain/public-testnet-swap.ts';
 export { BASE_MAINNET_SWAP, BASE_SEPOLIA, ETHEREUM_SEPOLIA_SWAP, ROBINHOOD_MAINNET_SWAP, quoteDecimals } from '../domain/public-testnet-swap.ts';
 
 export type Rpc = (method: string, params: readonly unknown[]) => Promise<unknown>;
 type Step = 'approval' | 'swap';
 type Tx = { readonly chainId: SwapProfile['chainHex']; readonly from: string; readonly to: string;
-  readonly data: string; readonly value: '0x0'; readonly gas: string };
+  readonly data: string; readonly value: '0x0'; readonly gas: string;
+  readonly nonce?: string; readonly maxFeePerGas?: string; readonly maxPriorityFeePerGas?: string };
+/** Optional strict owner preflight on the shared engine. Quote-only previews cannot be authorized. */
+export type SwapOwnerReview = { readonly account: string; readonly router: string; readonly nonce: string; readonly step: Step;
+  readonly allowance: string; readonly transaction: Tx; readonly gasEstimate: string; readonly maxFeePerGas: string;
+  readonly feeBudgetWei: string; readonly deadline: number; readonly simulationDigest: string };
 /** BUILD-RH-002: the identity and ERC-8056 multiplier state of a Stock Token side, read at the quote block and bound into the Review. */
 export type StockQuoteState = { readonly side: 'input' | 'output' | 'token0' | 'token1'; readonly symbol: string; readonly token: string; readonly officialId: string;
   /** Onchain `uiMultiplier()`, `newUIMultiplier()` and `effectiveAt()` (1e18 = 1.0; `effectiveAt` 0 when nothing is scheduled). */
@@ -39,7 +46,8 @@ export type PublicQuote = { readonly executionId: string; readonly revision: num
   readonly inputDecimals?: number; readonly outputDecimals?: number; readonly environment?: 'MAINNET';
   readonly provenance?: 'PUBLIC_MAINNET' | 'MOCKED'; readonly stocks?: readonly StockQuoteState[];
   readonly feeTiers?: readonly { readonly fee: number; readonly pool: string; readonly expectedOut: string | null }[];
-  readonly catalog?: { readonly contentSha256: readonly (string | null)[]; readonly fetchedAt: string } };
+  readonly catalog?: { readonly contentSha256: readonly (string | null)[]; readonly fetchedAt: string };
+  readonly ownerReview?: SwapOwnerReview };
 export type PublicAttempt = { readonly attemptId: string; readonly executionId: string; readonly step: Step;
   readonly state: 'PREPARED' | 'HASH' | 'REJECTED' | 'UNKNOWN' | 'PENDING' | 'REVERTED' | 'CONFIRMED';
   readonly createdAt: string; readonly submittedAt: string | null; readonly account: string; readonly chainId: SwapProfile['chainId']; readonly environment: 'PUBLIC_TESTNET' | 'MAINNET';
@@ -58,7 +66,7 @@ export type PublicOutcome = { readonly inputSpent: string; readonly outputReceiv
   readonly gasCostWei: string; readonly explorer: string; readonly evidence: EvidenceBundle;
   readonly evidenceBundleHash: string };
 export type PublicRun = { readonly quote: PublicQuote; readonly workflow: SemanticWorkflow; readonly reviewedManifestHash: string | null;
-  readonly attempts: readonly PublicAttempt[]; readonly outcome: PublicOutcome | null };
+  readonly attempts: readonly PublicAttempt[]; readonly outcome: PublicOutcome | null; readonly divergence?: string };
 export type PublicBegin = { readonly attempt: PublicAttempt; readonly tx: Tx };
 const ADDRESS = /^0x[0-9a-f]{40}$/;
 const HASH = /^0x[0-9a-f]{64}$/;
@@ -67,9 +75,9 @@ const HASH = /^0x[0-9a-f]{64}$/;
  * (BUILD-BASE-001) for Base mainnet swaps, so a run id alone routes to its deployment and a testnet journal can never hold a mainnet
  * run (or the reverse), nor one network's run another's.
  */
-export type SwapRunPrefix = 'pub' | 'rhs' | 'bas';
-export const SWAP_RUN_ID = /^(pub|rhs|bas)-[0-9a-f]{24}$/;
-const runIdPattern = (prefix: SwapRunPrefix) => prefix === 'rhs' ? /^rhs-[0-9a-f]{24}$/ : prefix === 'bas' ? /^bas-[0-9a-f]{24}$/ : /^pub-[0-9a-f]{24}$/;
+export type SwapRunPrefix = 'pub' | 'rhs' | 'bas' | 'ars';
+export const SWAP_RUN_ID = /^(pub|rhs|bas|ars)-[0-9a-f]{24}$/;
+const runIdPattern = (prefix: SwapRunPrefix) => new RegExp(`^${prefix}-[0-9a-f]{24}$`);
 /** A run's namespace must match its network: each catalog (mainnet) network has its own, testnet pair runs are `pub-`. */
 const prefixFor = (profile: SwapProfile): SwapRunPrefix => profile.kind === 'CATALOG' ? profile.runPrefix : 'pub';
 // MetaMask Delegation Framework v1.3.0 on Base Sepolia. This is a readback format only;
@@ -95,6 +103,12 @@ const allowanceData = (owner: string, p: SwapProfile) => callData('0xdd62ed3e', 
 const approveData = (amount: bigint, p: SwapProfile) => callData('0x095ea7b3', addrWord(p.router), word(amount));
 const swapData = (q: PublicQuote, owner: string) => callData('0x04e45aaf', addrWord(q.inputToken), addrWord(q.outputToken),
   word(BigInt(q.fee)), addrWord(owner), word(BigInt(q.amountIn)), word(BigInt(q.minimumOut)), word(0n));
+/** SwapRouter02 multicall(uint256,bytes[]) enforces the reviewed deadline on chain. */
+const deadlineSwapData = (q: PublicQuote, owner: string, deadline: number) => {
+  if (![100, 500, 3000, 10000].includes(q.fee)) fail('QUOTE_INVALID');
+  return toHex(encodeSwap({ tokenIn: q.inputToken, tokenOut: q.outputToken, fee: q.fee as 100 | 500 | 3000 | 10000,
+    recipient: owner, amountIn: BigInt(q.amountIn), amountOutMinimum: BigInt(q.minimumOut), sqrtPriceLimitX96: 0n, deadline: BigInt(deadline) }));
+};
 const poolData = (a: string, b: string, p: PairSwapProfile) => callData('0x1698ee82', addrWord(a), addrWord(b), word(BigInt(p.fee)));
 const quoteData = (a: string, b: string, amount: bigint, fee: number) => callData('0xc6a5026a', addrWord(a), addrWord(b),
   word(amount), word(BigInt(fee)), word(0n));
@@ -264,16 +278,42 @@ export function publicRecordingEnabled(env: NodeJS.ProcessEnv): boolean {
 export function explorerUrl(txHash: string, profile: SwapProfile = BASE_SEPOLIA): string { if (!HASH.test(txHash)) fail('TX_HASH_INVALID'); return profile.explorer + txHash; }
 /** Persistence used by the shared core: synchronous files locally, async shared storage in the cloud. */
 type Persistence = { readonly save: (run: PublicRun) => PublicRun | Promise<PublicRun>; readonly load: (id: string) => PublicRun | Promise<PublicRun>;
-  readonly locked: <T>(id: string, action: () => Promise<T>) => Promise<T> };
+  readonly locked: <T>(id: string, action: () => Promise<T>) => Promise<T>;
+  readonly reserveNonce: (run: PublicRun, owner: SwapOwnerReview) => Promise<void> };
+/** A permanent nonce intent survives restarts/unknown wallet results. No worker can release it or submit anything. */
+function nonceReservation(storage: ExecutionStorage): Persistence['reserveNonce'] {
+  return async (run, owner) => {
+    const key = `swap-${run.quote.chainId}-${owner.account}-${owner.nonce}`;
+    await storage.leases.hold(key, async () => {
+      const existing = await storage.log.read(key + '.intent');
+      if (existing) {
+        const intent = JSON.parse(utf8(existing)) as { id: string; transaction: Tx };
+        const last = run.attempts.at(-1);
+        // Only this run's identical call, after an explicit pre-broadcast wallet refusal, can reuse its intent.
+        if (intent.id === run.quote.executionId && canonical(intent.transaction) === canonical(owner.transaction) &&
+            last?.state === 'REJECTED' && !last.txHash && last.tx.nonce === owner.transaction.nonce) return;
+        fail('SWAP_NONCE_ALREADY_RESERVED');
+      }
+      if (!await storage.log.create(key + '.intent', new TextEncoder().encode(JSON.stringify({ id: run.quote.executionId, transaction: owner.transaction }) + '\n')))
+        fail('SWAP_NONCE_ALREADY_RESERVED');
+    });
+  };
+}
 /** Pure Review transition, shared by the local and the durable service. */
 /** Legacy quotes remain readable for recovery/evidence, but cannot create fresh financial authority. */
 function assertCanonicalQuote(run: PublicRun): void {
   if (run.quote.revision !== run.workflow.revision || run.quote.workflowHash !==
       hashArtifactBytes('semantic-workflow', new TextEncoder().encode(JSON.stringify(run.workflow))))
     fail('WORKFLOW_BINDING_REQUIRES_SIMULATION');
+  if (ownerBoundSwapReview(profileOf(run.quote.chainId))) {
+    const { manifestHash, ...fields } = run.quote;
+    if (manifestHash !== digest(canonical(fields))) fail('QUOTE_BINDING_INVALID');
+  }
 }
 export function reviewPublicRun(run: PublicRun, manifestHash: string, now: Date): PublicRun {
   assertCanonicalQuote(run);
+  if (ownerBoundSwapReview(profileOf(run.quote.chainId)) && !run.quote.ownerReview) fail('OWNER_SIMULATION_REQUIRED');
+  if (run.divergence) fail('RECONCILIATION_MISMATCH');
   if (run.quote.manifestHash !== manifestHash || now.getTime() >= Date.parse(run.quote.expiresAt) ||
       run.attempts.some(a => a.step === 'swap' || ['PREPARED', 'HASH', 'PENDING', 'UNKNOWN'].includes(a.state)))
     fail('REVIEW_EXPIRED');
@@ -282,7 +322,7 @@ export function reviewPublicRun(run: PublicRun, manifestHash: string, now: Date)
 /** Pure wallet-result transition, shared by the local and the durable service. */
 export function reportPublicRun(run: PublicRun, attemptId: string, result: { kind: 'HASH'; txHash: string } | { kind: 'REJECTED' | 'UNKNOWN' }, now: Date): PublicRun {
   const target = run.attempts.find(a => a.attemptId === attemptId);
-  if (!target || target.state !== 'PREPARED') fail('ATTEMPT_STATE_INVALID');
+  if (!target || !['PREPARED', 'UNKNOWN'].includes(target.state) || target.state === 'UNKNOWN' && result.kind !== 'HASH') fail('ATTEMPT_STATE_INVALID');
   if (result.kind === 'HASH' && !HASH.test(result.txHash)) fail('TX_HASH_INVALID');
   const changed: PublicAttempt = { ...target, state: result.kind === 'HASH' ? 'HASH' : result.kind,
     submittedAt: result.kind === 'HASH' ? now.toISOString() : null,
@@ -324,7 +364,8 @@ export function createPublicTestnetService(config: { readonly rpc: Rpc; readonly
     locks.add(id);
     try { return await action(); } finally { locks.delete(id); unlinkSync(lockFile); }
   }
-  const core = createPublicTestnetCore(rpcRouter(config), now, { save, load, locked }, config.catalog, config.idPrefix ?? 'pub');
+  const core = createPublicTestnetCore(rpcRouter(config), now, { save, load, locked,
+    reserveNonce: nonceReservation(createFileExecutionStorage(journalDir, 'EXECUTION_BUSY')) }, config.catalog, config.idPrefix ?? 'pub');
   const review = (id: string, manifestHash: string): PublicRun => save(reviewPublicRun(load(id), manifestHash, now()));
   const report = (id: string, attemptId: string, result: { kind: 'HASH'; txHash: string } | { kind: 'REJECTED' | 'UNKNOWN' }): PublicRun =>
     save(reportPublicRun(load(id), attemptId, result, now()));
@@ -358,7 +399,7 @@ export function createDurablePublicTestnetService(config: { readonly rpc: Rpc; r
     return run;
   }
   const locked = <T,>(id: string, action: () => Promise<T>): Promise<T> => leases.hold(name(id).slice(0, -6), action);
-  const core = createPublicTestnetCore(rpcRouter(config), now, { save, load, locked }, config.catalog, config.idPrefix ?? 'pub');
+  const core = createPublicTestnetCore(rpcRouter(config), now, { save, load, locked, reserveNonce: nonceReservation(config.storage) }, config.catalog, config.idPrefix ?? 'pub');
   return { ...core, load,
     review: (id: string, manifestHash: string) => locked(id, async () => save(reviewPublicRun(await load(id), manifestHash, now()))),
     report: (id: string, attemptId: string, result: { kind: 'HASH'; txHash: string } | { kind: 'REJECTED' | 'UNKNOWN' }) =>
@@ -384,9 +425,15 @@ export function validatePublicRunLog(bytes: Uint8Array): void {
         run.attempts.some(a => !isObject(a) || a.executionId !== run.quote.executionId || a.chainId !== run.quote.chainId || !ADDRESS.test(String(a.account)) ||
           (a.txHash !== null && !HASH.test(String(a.txHash)))) || new Set(run.attempts.map(a => a.attemptId)).size !== run.attempts.length)
       fail('PUBLIC_STORE_CORRUPT');
+    if (ownerBoundSwapReview(profile)) {
+      assertCanonicalQuote(run);
+      if (run.reviewedManifestHash !== null && run.reviewedManifestHash !== run.quote.manifestHash ||
+          run.attempts.some(a => !run.quote.ownerReview || a.account !== run.quote.ownerReview.account || a.tx.chainId !== profile.chainHex ||
+            a.tx.from !== a.account || a.calldataDigest !== digest(a.tx.data))) fail('PUBLIC_STORE_CORRUPT');
+    }
     if (prior) {
       if (run.quote.executionId !== prior.quote.executionId || run.quote.chainId !== prior.quote.chainId || !same(run.workflow, prior.workflow) || run.attempts.length < prior.attempts.length ||
-          prior.outcome && !same(run.outcome, prior.outcome)) fail('PUBLIC_STORE_CORRUPT');
+          prior.outcome && !same(run.outcome, prior.outcome) || prior.divergence && run.divergence !== prior.divergence) fail('PUBLIC_STORE_CORRUPT');
       for (const [index, before] of prior.attempts.entries()) {
         const after = run.attempts[index]!;
         if (after.attemptId !== before.attemptId || after.step !== before.step || after.account !== before.account || !same(after.tx, before.tx) ||
@@ -410,7 +457,7 @@ const sha256Hex = (code: string) => createHash('sha256').update(Buffer.from(code
 /** One side of a catalog swap: the current official catalog must still map the authored identity exactly. */
 function catalogSide(catalog: AssetCatalog, ref: { address: string; decimals: number; officialId: string | null }, side: 'input' | 'output'): CanonicalAsset {
   const asset = catalogAsset(catalog, { address: ref.address });
-  if (!asset || asset.kind !== 'ERC20' || asset.decimals !== ref.decimals || (asset.stock?.officialId ?? null) !== ref.officialId)
+  if (!asset || asset.chain !== catalog.chain || asset.chainId !== catalog.chainId || asset.kind !== 'ERC20' || asset.decimals !== ref.decimals || (asset.stock?.officialId ?? null) !== ref.officialId)
     fail('CATALOG_ASSET_IDENTITY_CHANGED');
   if (asset.stock && side === 'output' && !asset.stock.trading.acquirable) fail('STOCK_TOKEN_NOT_ACQUIRABLE');
   if (asset.stock && side === 'input' && !asset.stock.trading.disposable) fail('STOCK_TOKEN_NOT_DISPOSABLE');
@@ -507,7 +554,7 @@ async function catalogQuote(workflow: SemanticWorkflow, executionId: string, P: 
   const cap = resolveWorkflowCapability(workflow, { environment: P.environment });
   if (!cap.executionSupported || cap.nodes.find(item => item.nodeId === node.nodeId)?.profile?.adapterId !== 'uniswap.v3') fail('PUBLIC_WORKFLOW_UNSUPPORTED');
   const catalog = await runtime.catalogFor(P.chainRef);
-  if (catalog.chain !== P.chainRef) fail('CATALOG_NETWORK_MISMATCH');
+  if (catalog.chain !== P.chainRef || catalog.chainId !== P.chainId) fail('CATALOG_NETWORK_MISMATCH');
   const input = catalogSide(catalog, fields.input, 'input'), output = catalogSide(catalog, fields.output, 'output');
   const mockedPins = runtime.provenance === 'MOCKED' ? runtime.codePins ?? {} : {};
   const pins: Record<string, string> = { ...P.codeSha256 };
@@ -572,14 +619,61 @@ function catalogEconomics(quote: PublicQuote) {
     stocks: (quote.stocks ?? []).map(stock => [stock.officialId, stock.multiplierWad, stock.scheduledMultiplierWad, stock.scheduledEffectiveAt]) });
 }
 
+/** Read-only exact owner transaction preflight, hashed into Review before any wallet request is prepared. */
+async function bindSwapOwner(q: PublicQuote, rpc: Rpc, ownerValue: string, expiresAt = q.expiresAt): Promise<PublicQuote> {
+  const P = profileOf(q.chainId), account = address(ownerValue), at = blockHex(q.blockNumber);
+  if (account === '0x' + '0'.repeat(40)) fail('ADDRESS_INVALID');
+  if (quantity(await rpc('eth_chainId', [])) !== BigInt(P.chainId)) fail('WRONG_PROVIDER_CHAIN');
+  const [nonce, pending, allowed, input, native, gasPrice, code] = await Promise.all([
+    rpc('eth_getTransactionCount', [account, at]).then(quantity), rpc('eth_getTransactionCount', [account, 'pending']).then(quantity),
+    rpc('eth_call', [{ to: q.inputToken, data: allowanceData(account, P) }, at]).then(quantity),
+    rpc('eth_call', [{ to: q.inputToken, data: balanceData(account) }, at]).then(quantity),
+    rpc('eth_getBalance', [account, at]).then(quantity), rpc('eth_gasPrice', []).then(quantity), rpc('eth_getCode', [account, at]),
+  ]);
+  if (code !== '0x') fail('OWNER_NOT_EOA');
+  if (nonce !== pending) fail('OWNER_PENDING_TRANSACTION');
+  if (input < BigInt(q.amountIn)) fail('INSUFFICIENT_INPUT');
+  const step: Step = allowed < BigInt(q.amountIn) ? 'approval' : 'swap', deadline = Math.floor(Date.parse(expiresAt) / 1000);
+  const data = step === 'approval' ? approveData(BigInt(q.amountIn), P) : deadlineSwapData(q, account, deadline);
+  const to = step === 'approval' ? q.inputToken : P.router;
+  const call = { from: account, to, data, value: '0x0' as const };
+  const simulation = await rpc('eth_call', [call, at]);
+  if (typeof simulation !== 'string' || !/^0x(?:[0-9a-fA-F]{2})*$/.test(simulation) ||
+      step === 'approval' && simulation !== '0x' && simulation !== '0x' + word(1n)) fail('SWAP_SIMULATION_INVALID');
+  const gas = quantity(await rpc('eth_estimateGas', [call, at]));
+  if (gas < 21_000n || gas > 30_000_000n || gasPrice <= 0n || gasPrice >= 1n << 128n) fail('SWAP_FEE_INVALID');
+  // Nitro: estimate includes posting gas. No separate OP Stack l1Fee, no quoter-only gas estimate.
+  const gasLimit = nitroGasLimit(gas), maxFee = nitroMaxFeePerGas(gasPrice), budget = gasLimit * maxFee;
+  if (native < budget) fail('INSUFFICIENT_GAS_FUNDS');
+  const transaction: Tx = { ...call, chainId: P.chainHex, nonce: '0x' + nonce.toString(16), gas: '0x' + gasLimit.toString(16),
+    maxFeePerGas: '0x' + maxFee.toString(16), maxPriorityFeePerGas: '0x0' };
+  const ownerReview: SwapOwnerReview = { account, router: P.router, nonce: nonce.toString(), step, allowance: allowed.toString(), transaction,
+    gasEstimate: gas.toString(), maxFeePerGas: maxFee.toString(), feeBudgetWei: budget.toString(), deadline, simulationDigest: digest(simulation) };
+  const { manifestHash, ...fields } = q;
+  if (!HASH.test(manifestHash)) fail('QUOTE_BINDING_INVALID');
+  const bound = { ...fields, expiresAt, estimatedGas: gas.toString(), ownerReview };
+  if (quantity(await rpc('eth_chainId', [])) !== BigInt(P.chainId)) fail('WRONG_PROVIDER_CHAIN');
+  const head = await rpc('eth_getBlockByNumber', [at, false]);
+  if (!isObject(head) || head.hash !== q.blockHash) fail('QUOTE_BLOCK_REORG');
+  return { ...bound, manifestHash: digest(canonical(bound)) };
+}
+
+function ownerReviewChanged(before: SwapOwnerReview, after: SwapOwnerReview): boolean {
+  return before.account !== after.account || before.router !== after.router || before.nonce !== after.nonce || before.step !== after.step ||
+    before.allowance !== after.allowance || before.transaction.data !== after.transaction.data || before.deadline !== after.deadline ||
+    BigInt(after.gasEstimate) > BigInt(before.transaction.gas) || BigInt(after.maxFeePerGas) > BigInt(before.maxFeePerGas);
+}
+
 /** Shared verified read path. It has no persistence, Review or transaction submission port. */
 export function createPublicSwapQuoteReader(rpcFor: (profile: SwapProfile) => Rpc, now: () => Date = () => new Date(), catalog?: CatalogSwapRuntime) {
   const read = async (rpc: Rpc, to: string, data: string, block: string) => hex(await rpc('eth_call', [{ to, data }, block]));
-  async function quote(workflow: SemanticWorkflow, executionId: string): Promise<PublicQuote> {
+  async function quote(workflow: SemanticWorkflow, executionId: string, account?: string, expiresAt?: string): Promise<PublicQuote> {
     // A swap on a catalog network (Robinhood Chain, Base) takes the catalog path; BUILD-BASE-001: Base's reference pair included.
     const swapNode = workflow.nodes.find(node => node.actionType === 'asset.swap.exact-input'), catalogProfile = swapNode ? swapProfile(swapNode.chainId) : null;
-    if (catalogProfile?.kind === 'CATALOG') return catalogQuote(workflow, executionId, catalogProfile, rpcFor(catalogProfile),
-      catalog ?? fail('PUBLIC_NETWORK_UNAVAILABLE'), now);
+    if (catalogProfile?.kind === 'CATALOG') {
+      const q = await catalogQuote(workflow, executionId, catalogProfile, rpcFor(catalogProfile), catalog ?? fail('PUBLIC_NETWORK_UNAVAILABLE'), now);
+      return ownerBoundSwapReview(catalogProfile) && account !== undefined ? bindSwapOwner(q, rpcFor(catalogProfile), account, expiresAt) : q;
+    }
     const swap = swapOf(workflow), P = swap.profile, rpc = rpcFor(P);
     const call = (to: string, data: string, block: string) => read(rpc, to, data, block);
     if (quantity(await rpc('eth_chainId', [])) !== BigInt(P.chainId)) fail('WRONG_PROVIDER_CHAIN');
@@ -639,21 +733,23 @@ function createPublicTestnetCore(rpcFor: (profile: SwapProfile) => Rpc, now: () 
     return BigInt(await read(rpc, token, allowanceData(owner, profile), block));
   }
   const quote = createPublicSwapQuoteReader(rpcFor, now, catalog);
-  async function prepare(workflow: SemanticWorkflow): Promise<PublicRun> {
+  async function prepare(workflow: SemanticWorkflow, account?: string): Promise<PublicRun> {
     const node = workflow.nodes.find(item => item.actionType === 'asset.swap.exact-input'), profile = node ? swapProfile(node.chainId) : null;
     // Each service serves one namespace; a workflow for the other kind of network is refused before any read.
     if (!profile || prefixFor(profile) !== idPrefix) fail('PUBLIC_WORKFLOW_UNSUPPORTED');
     const executionId = idPrefix + '-' + randomBytes(12).toString('hex');
-    const q = await quote(workflow, executionId);
+    const q = await quote(workflow, executionId, account);
     return save({ quote: q, workflow, reviewedManifestHash: null, attempts: [], outcome: null });
   }
   async function refresh(id: string): Promise<PublicRun> {
     return locked(id, async () => {
       const run = await load(id);
+      if (run.divergence) fail('RECONCILIATION_MISMATCH');
       const last = run.attempts.at(-1);
       if (run.outcome || last?.step !== 'approval' || last.state !== 'CONFIRMED' ||
+          run.quote.ownerReview && last.nativeAfter === null ||
           run.attempts.some(attempt => attempt.step === 'swap')) fail('QUOTE_REFRESH_NOT_ALLOWED');
-      const fresh = await quote(run.workflow, id);
+      const fresh = await quote(run.workflow, id, run.quote.ownerReview?.account);
       return save({ ...run, quote: fresh, reviewedManifestHash: null });
     });
   }
@@ -662,18 +758,28 @@ function createPublicTestnetCore(rpcFor: (profile: SwapProfile) => Rpc, now: () 
       let run = await load(id);
       const owner = address(ownerValue);
       assertCanonicalQuote(run);
+      if (run.divergence) fail('RECONCILIATION_MISMATCH');
       if (run.outcome || run.attempts.some(attempt => ['PREPARED', 'HASH', 'PENDING', 'UNKNOWN'].includes(attempt.state))) fail('ATTEMPT_ALREADY_ACTIVE');
       if (run.attempts.some(attempt => attempt.step === 'swap' && attempt.state !== 'REJECTED')) fail('SWAP_ALREADY_ATTEMPTED');
       if (run.reviewedManifestHash !== run.quote.manifestHash) fail('REVIEW_REQUIRED');
       const P = profileOf(run.quote.chainId), rpc = rpcFor(P);
       // BUILD-RH-002: real-funds execution needs the deployment's explicit owner-execution opt-in; Review stays available without it.
       if (P.kind === 'CATALOG' && !catalog?.executionEnabled) fail('OWNER_EXECUTION_NOT_ENABLED');
+      const strict = ownerBoundSwapReview(P), reviewedOwner = run.quote.ownerReview;
+      if (strict && (!reviewedOwner || reviewedOwner.account !== owner)) fail('OWNER_REVIEW_MISMATCH');
+      if (now().getTime() >= Date.parse(run.quote.expiresAt)) {
+        const renewed = await quote(run.workflow, id, reviewedOwner?.account);
+        await save({ ...run, quote: renewed, reviewedManifestHash: null }); fail('QUOTE_EXPIRED_REVIEW_REQUIRED');
+      }
       let fresh: PublicQuote;
-      try { fresh = await quote(run.workflow, id); }
+      try { fresh = await quote(run.workflow, id, reviewedOwner?.account, strict ? run.quote.expiresAt : undefined); }
       catch (cause) {
         // A Stock Token multiplier change now inside the Review window invalidates the reviewed authority.
-        if (cause instanceof Error && cause.message === 'STOCK_MULTIPLIER_CHANGE_PENDING') { await save({ ...run, reviewedManifestHash: null }); }
+        if (strict || cause instanceof Error && cause.message === 'STOCK_MULTIPLIER_CHANGE_PENDING') { await save({ ...run, reviewedManifestHash: null }); }
         throw cause;
+      }
+      if (strict && reviewedOwner && fresh.ownerReview && ownerReviewChanged(reviewedOwner, fresh.ownerReview)) {
+        await save({ ...run, quote: fresh, reviewedManifestHash: null }); fail('OWNER_STATE_CHANGED_REVIEW_REQUIRED');
       }
       if (fresh.manifestHash !== run.quote.manifestHash) {
         // Observation metadata changes each block; only economic changes require a new review. For a catalog quote the
@@ -704,7 +810,7 @@ function createPublicTestnetCore(rpcFor: (profile: SwapProfile) => Rpc, now: () 
       if (inputBefore < amountIn) fail('INSUFFICIENT_INPUT');
       const step: Step = allowanceBefore < amountIn ? 'approval' : 'swap';
       if (step === 'approval' && run.attempts.some(a => a.step === 'approval' && a.state === 'CONFIRMED')) fail('APPROVAL_INEFFECTIVE');
-      const data = step === 'approval' ? approveData(amountIn, P) : swapData(run.quote, owner);
+      const data = strict ? reviewedOwner!.transaction.data : step === 'approval' ? approveData(amountIn, P) : swapData(run.quote, owner);
       const to = step === 'approval' ? run.quote.inputToken : P.router;
       const baseTx = { chainId: P.chainHex, from: owner, to, data, value: '0x0' as const };
       const gas = quantity(await rpc('eth_estimateGas', [{ from: owner, to, data, value: '0x0' }]));
@@ -712,7 +818,18 @@ function createPublicTestnetCore(rpcFor: (profile: SwapProfile) => Rpc, now: () 
       // BUILD-BASE-001: on an OP Stack catalog network the owner also pays the L1 data fee, bounded by the GasPriceOracle (fails closed).
       const l1Fee = 'gasPriceOracle' in P ? quantity(await rpc('eth_call', [{ to: P.gasPriceOracle, data: '0xf1c7a58b' + word(BigInt((data.length - 2) / 2 + 120)) }, at])) : 0n;
       if (gas <= 0n || gasPrice <= 0n || ethBefore < gas * gasPrice * 2n + l1Fee) fail(P.environment === 'MAINNET' ? 'INSUFFICIENT_GAS_FUNDS' : 'INSUFFICIENT_TEST_ETH');
-      const tx: Tx = { ...baseTx, gas: '0x' + (gas * 12n / 10n).toString(16) };
+      const tx: Tx = strict ? reviewedOwner!.transaction : { ...baseTx, gas: '0x' + (gas * 12n / 10n).toString(16) };
+      if (strict) {
+        const [nonce, pending] = await Promise.all([rpc('eth_getTransactionCount', [owner, 'latest']).then(quantity),
+          rpc('eth_getTransactionCount', [owner, 'pending']).then(quantity)]);
+        if (step !== reviewedOwner!.step || ethBefore < BigInt(reviewedOwner!.feeBudgetWei) || gas > BigInt(tx.gas) || gasPrice > BigInt(reviewedOwner!.maxFeePerGas)) {
+          await save({ ...run, reviewedManifestHash: null }); fail('OWNER_STATE_CHANGED_REVIEW_REQUIRED');
+        }
+        if (nonce !== BigInt(reviewedOwner!.nonce) || pending !== nonce) {
+          await save({ ...run, reviewedManifestHash: null }); fail('OWNER_STATE_CHANGED_REVIEW_REQUIRED');
+        }
+        await persistence.reserveNonce(run, reviewedOwner!);
+      }
       const attempt: PublicAttempt = { attemptId: id + '.' + step + '.' + String(run.attempts.length + 1), executionId: id,
         step, state: 'PREPARED', createdAt: now().toISOString(), submittedAt: null, account: owner, chainId: P.chainId, environment: P.environment,
         adapter: 'uniswap.v3', semanticRevision: run.quote.revision, manifestHash: run.quote.manifestHash,
@@ -726,133 +843,160 @@ function createPublicTestnetCore(rpcFor: (profile: SwapProfile) => Rpc, now: () 
   async function observe(id: string): Promise<PublicRun> {
     return locked(id, async () => {
       let run = await load(id);
-      const attempt = run.attempts.at(-1);
-      if (!attempt?.txHash || !['HASH', 'PENDING', 'CONFIRMED'].includes(attempt.state) || run.outcome) fail('NO_SUBMITTED_ATTEMPT');
-      const P = profileOf(run.quote.chainId), rpc = rpcFor(P);
-      if (quantity(await rpc('eth_chainId', [])) !== BigInt(P.chainId)) fail('WRONG_PROVIDER_CHAIN');
-      const raw = await rpc('eth_getTransactionReceipt', [attempt.txHash]);
-      if (raw === null) return await save({ ...run, attempts: run.attempts.map(a => a.attemptId === attempt.attemptId ? { ...a, state: 'PENDING' } : a) });
-      if (!isObject(raw)) fail('RECEIPT_INVALID');
-      const tx = await rpc('eth_getTransactionByHash', [attempt.txHash]);
-      let verified: Awaited<ReturnType<typeof verifyOwnerSubmission>>;
-      try { verified = await verifyOwnerSubmission(rpc, { txHash: attempt.txHash, account: attempt.account, target: attempt.tx.to, data: attempt.tx.data,
-        preBlock: attempt.preBlock }, tx, raw, P.chainId, P.l1DataFee); }
-      catch (cause) {
-        // Not yet canonically included (e.g. a preconfirmed receipt): exactly like no receipt yet.
-        if (cause instanceof Error && cause.message === 'RECEIPT_NOT_CANONICAL')
-          return await save({ ...run, attempts: run.attempts.map(a => a.attemptId === attempt.attemptId ? { ...a, state: 'PENDING' } : a) });
+      try {
+        let attempt = run.attempts.at(-1);
+        if (run.divergence) return run;
+        if (attempt && !attempt.txHash && run.quote.ownerReview && ['PREPARED', 'UNKNOWN'].includes(attempt.state)) {
+          const found = await discoverTransferByNonce({ nonce: run.quote.ownerReview.nonce, transaction: { ...attempt.tx, maxFeePerGas: attempt.tx.maxFeePerGas!, maxPriorityFeePerGas: attempt.tx.maxPriorityFeePerGas! }, preparedAtBlock: attempt.preBlock, transactionHash: null }, rpcFor(profileOf(run.quote.chainId)));
+          if (!found.hash) return run;
+          if (found.mismatch) return save({ ...run, divergence: 'NONCE_CONSUMED_BY_DIFFERENT_TRANSACTION' });
+          const changed: PublicAttempt = { ...attempt, state: 'HASH', txHash: found.hash, submittedAt: now().toISOString() };
+          run = await save({ ...run, attempts: run.attempts.map(a => a.attemptId === changed.attemptId ? changed : a) });
+          attempt = changed;
+        }
+        if (!attempt?.txHash || !['HASH', 'PENDING', 'CONFIRMED'].includes(attempt.state) || run.outcome) fail('NO_SUBMITTED_ATTEMPT');
+        const P = profileOf(run.quote.chainId), rpc = rpcFor(P);
+        if (quantity(await rpc('eth_chainId', [])) !== BigInt(P.chainId)) fail('WRONG_PROVIDER_CHAIN');
+        const raw = await rpc('eth_getTransactionReceipt', [attempt.txHash]);
+        if (raw === null) return await save({ ...run, attempts: run.attempts.map(a => a.attemptId === attempt.attemptId ? { ...a, state: 'PENDING' } : a) });
+        if (!isObject(raw)) fail('RECEIPT_INVALID');
+        const tx = await rpc('eth_getTransactionByHash', [attempt.txHash]);
+        let verified: Awaited<ReturnType<typeof verifyOwnerSubmission>>;
+        try { verified = await verifyOwnerSubmission(rpc, { txHash: attempt.txHash, account: attempt.account, target: attempt.tx.to, data: attempt.tx.data,
+          preBlock: attempt.preBlock }, tx, raw, P.chainId, P.l1DataFee); }
+        catch (cause) {
+          // Not yet canonically included (e.g. a preconfirmed receipt): exactly like no receipt yet.
+          if (cause instanceof Error && cause.message === 'RECEIPT_NOT_CANONICAL')
+            return await save({ ...run, attempts: run.attempts.map(a => a.attemptId === attempt.attemptId ? { ...a, state: 'PENDING' } : a) });
+          if (run.quote.ownerReview && cause instanceof Error && cause.message === 'TRANSACTION_MISMATCH')
+            return save({ ...run, divergence: cause.message });
+          throw cause;
+        }
+        const { direct, delegated, delegationDepth, txFrom, txTo, txInput, status, blockNumber, gasUsed, effectiveGasPrice, l1Fee, nonce } = verified;
+        if (delegated && status === 1) {
+          if (!Array.isArray(raw.logs)) fail('RECEIPT_INVALID');
+          if (attempt.step === 'approval') {
+            const tokenLogs = raw.logs.filter(log => isObject(log) &&
+              [run.quote.inputToken, run.quote.outputToken].includes(address(log.address)));
+            if (tokenLogs.length !== 1 || !isObject(tokenLogs[0]) ||
+                address(tokenLogs[0].address) !== run.quote.inputToken || !Array.isArray(tokenLogs[0].topics) ||
+                tokenLogs[0].topics[0] !== APPROVAL_TOPIC ||
+                topicAddress(tokenLogs[0].topics[1]) !== attempt.account ||
+                topicAddress(tokenLogs[0].topics[2]) !== P.router ||
+                quantity(tokenLogs[0].data) !== BigInt(attempt.authorizedInput)) fail('TRANSACTION_MISMATCH');
+          } else {
+            const tokenLogs = raw.logs.filter(log => isObject(log) &&
+              [run.quote.inputToken, run.quote.outputToken].includes(address(log.address)));
+            const poolLogs = raw.logs.filter(log => isObject(log) && address(log.address) === run.quote.pool);
+            if (tokenLogs.length !== 2 || poolLogs.length !== 1) fail('TRANSACTION_MISMATCH');
+            const inputLog = tokenLogs.find(log => isObject(log) && address(log.address) === run.quote.inputToken);
+            const outputLog = tokenLogs.find(log => isObject(log) && address(log.address) === run.quote.outputToken);
+            const poolLog = poolLogs[0];
+            if (!isObject(inputLog) || !Array.isArray(inputLog.topics) || inputLog.topics[0] !== TRANSFER_TOPIC ||
+                topicAddress(inputLog.topics[1]) !== attempt.account || topicAddress(inputLog.topics[2]) !== run.quote.pool ||
+                quantity(inputLog.data) !== BigInt(attempt.authorizedInput) ||
+                !isObject(outputLog) || !Array.isArray(outputLog.topics) || outputLog.topics[0] !== TRANSFER_TOPIC ||
+                topicAddress(outputLog.topics[1]) !== run.quote.pool || topicAddress(outputLog.topics[2]) !== attempt.account ||
+                !isObject(poolLog) || !Array.isArray(poolLog.topics) || poolLog.topics[0] !== SWAP_TOPIC ||
+                topicAddress(poolLog.topics[1]) !== P.router || topicAddress(poolLog.topics[2]) !== attempt.account)
+              fail('TRANSACTION_MISMATCH');
+            const poolData = hex(poolLog.data);
+            if (poolData.length < 130 || BigInt('0x' + poolData.slice(2, 66)) !== BigInt(attempt.authorizedInput) ||
+                signed(BigInt('0x' + poolData.slice(66, 130))) !== -quantity(outputLog.data))
+              fail('TRANSACTION_MISMATCH');
+          }
+        }
+        if (run.quote.ownerReview) {
+          const submitted = isObject(tx) ? tx : fail('TRANSACTION_MISMATCH');
+          const offeredFee = submitted.maxFeePerGas === undefined ? quantity(submitted.gasPrice) : quantity(submitted.maxFeePerGas);
+          if (!direct || nonce !== BigInt(attempt.tx.nonce!) || quantity(submitted.gas) > BigInt(attempt.tx.gas) || offeredFee > BigInt(attempt.tx.maxFeePerGas!) ||
+              gasUsed > BigInt(attempt.tx.gas) || effectiveGasPrice > BigInt(attempt.tx.maxFeePerGas!))
+            return save({ ...run, divergence: 'TRANSACTION_BOUNDS_MISMATCH' });
+        }
+        const executionGasCost = gasUsed * effectiveGasPrice;
+        const receipt: PublicReceipt = { transactionHash: attempt.txHash, status: status as 0 | 1,
+          blockNumber, blockHash: hex(raw.blockHash), from: txFrom, to: txTo,
+          gasUsed: gasUsed.toString(), effectiveGasPrice: effectiveGasPrice.toString(),
+          executionGasCostWei: executionGasCost.toString(), l1FeeWei: l1Fee.toString(),
+          gasCostWei: (executionGasCost + l1Fee).toString(), gasPayer: txFrom,
+          nonce: nonce.toString(), value: '0',
+          submissionKind: delegated ? 'DELEGATED_SINGLE' : 'DIRECT', executionTarget: attempt.tx.to,
+          delegationDepth,
+          outerCalldataDigest: digest(txInput), executionCalldataDigest: attempt.calldataDigest };
+        const changed: PublicAttempt = { ...attempt, state: status === 1 ? 'CONFIRMED' : 'REVERTED', receipt };
+        run = await save({ ...run, attempts: run.attempts.map(a => a.attemptId === attempt.attemptId ? changed : a) });
+        if (status === 0) return run;
+        const at = blockHex(blockNumber);
+        if (attempt.step === 'approval') {
+          const [observed, inputAfter, outputAfter, nativeAfter] = await Promise.all([
+            allowance(rpc, P, run.quote.inputToken, attempt.account, at),
+            balance(rpc, run.quote.inputToken, attempt.account, at), balance(rpc, run.quote.outputToken, attempt.account, at),
+            rpc('eth_getBalance', [attempt.account, at]).then(quantity),
+          ]);
+          if (observed !== BigInt(attempt.authorizedInput) || inputAfter !== BigInt(attempt.inputBefore) ||
+              outputAfter !== BigInt(attempt.outputBefore) ||
+              (direct && BigInt(attempt.nativeBefore) - nativeAfter < BigInt(receipt.gasCostWei)) ||
+              (delegated && nativeAfter !== BigInt(attempt.nativeBefore)))
+            fail('APPROVAL_NOT_EFFECTIVE');
+          return await save({ ...run, attempts: run.attempts.map(a => a.attemptId === attempt.attemptId ?
+            { ...a, nativeAfter: nativeAfter.toString() } : a) });
+        }
+        const [inputAfter, outputAfter, allowanceAfter, nativeAfter] = await Promise.all([
+          balance(rpc, run.quote.inputToken, attempt.account, at), balance(rpc, run.quote.outputToken, attempt.account, at),
+          allowance(rpc, P, run.quote.inputToken, attempt.account, at), rpc('eth_getBalance', [attempt.account, at]).then(quantity),
+        ]);
+        const spent = BigInt(attempt.inputBefore) - inputAfter;
+        const received = outputAfter - BigInt(attempt.outputBefore);
+        const approvalGasCost = run.attempts.filter(a => a.step === 'approval' && a.state === 'CONFIRMED').reduce((sum, a) => {
+          if (a.nativeAfter === null || a.receipt === null) fail('APPROVAL_GAS_UNKNOWN');
+          return sum + BigInt(a.receipt.gasCostWei);
+        }, 0n);
+        const actualGasCost = BigInt(receipt.gasCostWei) + approvalGasCost;
+        if (spent !== BigInt(run.quote.amountIn) || received < BigInt(run.quote.minimumOut) ||
+            (direct && BigInt(attempt.nativeBefore) - nativeAfter < BigInt(receipt.gasCostWei)) ||
+            (delegated && nativeAfter !== BigInt(attempt.nativeBefore))) fail('RECONCILIATION_MISMATCH');
+        const explorer = explorerUrl(attempt.txHash, P);
+        run = { ...run, attempts: run.attempts.map(a => a.attemptId === attempt.attemptId ?
+          { ...a, nativeAfter: nativeAfter.toString() } : a) };
+        const journalHeadHash = digest(canonical(run));
+        const receiptHash = digest(canonical(raw));
+        const inputAsset = { chainId: P.chainRef, address: run.quote.inputToken, decimals: quoteDecimals(run.quote, 'input') };
+        const outputAsset = { chainId: P.chainRef, address: run.quote.outputToken, decimals: quoteDecimals(run.quote, 'output') };
+        const nativeAsset = { chainId: P.chainRef, nativeId: 'ETH', decimals: 18 };
+        const reconciliation = { balances: [{ asset: inputAsset, amount: inputAfter.toString() },
+          { asset: outputAsset, amount: outputAfter.toString() }],
+          allowances: [{ asset: inputAsset, amount: allowanceAfter.toString() }], debt: [], positions: [],
+          fees: [{ asset: nativeAsset, amount: actualGasCost.toString() }],
+          residualAssets: [{ asset: inputAsset, amount: inputAfter.toString() }, { asset: outputAsset, amount: outputAfter.toString() }],
+          ownership: [{ chainId: P.chainRef, address: attempt.account }],
+          limitations: P.kind === 'CATALOG' ? ['OWNER_WALLET_MAINNET', ...run.quote.provenance === 'MOCKED' ? ['MOCKED_LOOPBACK_CHAIN'] : []] : ['PUBLIC_TESTNET_ONLY'] };
+        const bundle = validateArtifact('evidence-bundle', { schemaVersion: '1.0.0',
+          evidenceBundleId: id + '.evidence', version: 1, supersedes: null,
+          semanticWorkflowHash: run.quote.workflowHash, artifactSetHash: digest(canonical(run.quote)),
+          simulationHash: digest(canonical({ expected: run.quote.expectedOut, minimum: run.quote.minimumOut, pool: run.quote.pool })),
+          policyHash: digest(canonical({ amount: run.quote.amountIn, slippageBps: run.quote.slippageBps })),
+          manifestHash: run.quote.manifestHash, executionPlanHash: digest(canonical(attempt.tx)),
+          journalHeadHash, observedAt: now().toISOString(),
+          // A MOCKED loopback run is never labeled as public execution.
+          environment: P.kind === 'CATALOG' ? run.quote.provenance === 'PUBLIC_MAINNET' ? 'MAINNET_EXECUTED' : 'MOCKED' : 'TESTNET_EXECUTED', outcome: 'RECONCILED',
+          receipts: [{ receiptId: attempt.txHash, contentHash: receiptHash }], differences: [], reconciliation,
+          evidence: [{ evidenceId: 'public-explorer', kind: 'EXTERNAL_REFERENCE', contentHash: digest(explorer) },
+            { evidenceId: 'transaction-readback', kind: 'EXTERNAL_REFERENCE', contentHash: digest(canonical(tx)) },
+            { evidenceId: 'balance-reconciliation', kind: 'EXTERNAL_REFERENCE', contentHash: digest(canonical(reconciliation)) }],
+        }) as EvidenceBundle;
+        const evidenceBundleHash = hashArtifactBytes('evidence-bundle', new TextEncoder().encode(JSON.stringify(bundle)));
+        const outcome: PublicOutcome = { inputSpent: spent.toString(), outputReceived: received.toString(),
+          inputAfter: inputAfter.toString(), outputAfter: outputAfter.toString(), allowanceAfter: allowanceAfter.toString(),
+          nativeAfter: nativeAfter.toString(), gasCostWei: actualGasCost.toString(), explorer, evidence: bundle, evidenceBundleHash };
+        return await save({ ...run, outcome });
+      } catch (cause) {
+        // Persist proven semantic mismatches so neither refresh nor a restarted worker can revive this authority.
+        // Provider outages and incomplete reads remain retriable observations.
+        if (run.quote.ownerReview && cause instanceof Error &&
+            ['TRANSACTION_MISMATCH', 'APPROVAL_NOT_EFFECTIVE', 'RECONCILIATION_MISMATCH'].includes(cause.message))
+          return save({ ...run, divergence: cause.message, reviewedManifestHash: null });
         throw cause;
       }
-      const { direct, delegated, delegationDepth, txFrom, txTo, txInput, status, blockNumber, gasUsed, effectiveGasPrice, l1Fee, nonce } = verified;
-      if (delegated && status === 1) {
-        if (!Array.isArray(raw.logs)) fail('RECEIPT_INVALID');
-        if (attempt.step === 'approval') {
-          const tokenLogs = raw.logs.filter(log => isObject(log) &&
-            [run.quote.inputToken, run.quote.outputToken].includes(address(log.address)));
-          if (tokenLogs.length !== 1 || !isObject(tokenLogs[0]) ||
-              address(tokenLogs[0].address) !== run.quote.inputToken || !Array.isArray(tokenLogs[0].topics) ||
-              tokenLogs[0].topics[0] !== APPROVAL_TOPIC ||
-              topicAddress(tokenLogs[0].topics[1]) !== attempt.account ||
-              topicAddress(tokenLogs[0].topics[2]) !== P.router ||
-              quantity(tokenLogs[0].data) !== BigInt(attempt.authorizedInput)) fail('TRANSACTION_MISMATCH');
-        } else {
-          const tokenLogs = raw.logs.filter(log => isObject(log) &&
-            [run.quote.inputToken, run.quote.outputToken].includes(address(log.address)));
-          const poolLogs = raw.logs.filter(log => isObject(log) && address(log.address) === run.quote.pool);
-          if (tokenLogs.length !== 2 || poolLogs.length !== 1) fail('TRANSACTION_MISMATCH');
-          const inputLog = tokenLogs.find(log => isObject(log) && address(log.address) === run.quote.inputToken);
-          const outputLog = tokenLogs.find(log => isObject(log) && address(log.address) === run.quote.outputToken);
-          const poolLog = poolLogs[0];
-          if (!isObject(inputLog) || !Array.isArray(inputLog.topics) || inputLog.topics[0] !== TRANSFER_TOPIC ||
-              topicAddress(inputLog.topics[1]) !== attempt.account || topicAddress(inputLog.topics[2]) !== run.quote.pool ||
-              quantity(inputLog.data) !== BigInt(attempt.authorizedInput) ||
-              !isObject(outputLog) || !Array.isArray(outputLog.topics) || outputLog.topics[0] !== TRANSFER_TOPIC ||
-              topicAddress(outputLog.topics[1]) !== run.quote.pool || topicAddress(outputLog.topics[2]) !== attempt.account ||
-              !isObject(poolLog) || !Array.isArray(poolLog.topics) || poolLog.topics[0] !== SWAP_TOPIC ||
-              topicAddress(poolLog.topics[1]) !== P.router || topicAddress(poolLog.topics[2]) !== attempt.account)
-            fail('TRANSACTION_MISMATCH');
-          const poolData = hex(poolLog.data);
-          if (poolData.length < 130 || BigInt('0x' + poolData.slice(2, 66)) !== BigInt(attempt.authorizedInput) ||
-              signed(BigInt('0x' + poolData.slice(66, 130))) !== -quantity(outputLog.data))
-            fail('TRANSACTION_MISMATCH');
-        }
-      }
-      const executionGasCost = gasUsed * effectiveGasPrice;
-      const receipt: PublicReceipt = { transactionHash: attempt.txHash, status: status as 0 | 1,
-        blockNumber, blockHash: hex(raw.blockHash), from: txFrom, to: txTo,
-        gasUsed: gasUsed.toString(), effectiveGasPrice: effectiveGasPrice.toString(),
-        executionGasCostWei: executionGasCost.toString(), l1FeeWei: l1Fee.toString(),
-        gasCostWei: (executionGasCost + l1Fee).toString(), gasPayer: txFrom,
-        nonce: nonce.toString(), value: '0',
-        submissionKind: delegated ? 'DELEGATED_SINGLE' : 'DIRECT', executionTarget: attempt.tx.to,
-        delegationDepth,
-        outerCalldataDigest: digest(txInput), executionCalldataDigest: attempt.calldataDigest };
-      const changed: PublicAttempt = { ...attempt, state: status === 1 ? 'CONFIRMED' : 'REVERTED', receipt };
-      run = await save({ ...run, attempts: run.attempts.map(a => a.attemptId === attempt.attemptId ? changed : a) });
-      if (status === 0) return run;
-      const at = blockHex(blockNumber);
-      if (attempt.step === 'approval') {
-        const [observed, inputAfter, outputAfter, nativeAfter] = await Promise.all([
-          allowance(rpc, P, run.quote.inputToken, attempt.account, at),
-          balance(rpc, run.quote.inputToken, attempt.account, at), balance(rpc, run.quote.outputToken, attempt.account, at),
-          rpc('eth_getBalance', [attempt.account, at]).then(quantity),
-        ]);
-        if (observed !== BigInt(attempt.authorizedInput) || inputAfter !== BigInt(attempt.inputBefore) ||
-            outputAfter !== BigInt(attempt.outputBefore) ||
-            (direct && BigInt(attempt.nativeBefore) - nativeAfter < BigInt(receipt.gasCostWei)) ||
-            (delegated && nativeAfter !== BigInt(attempt.nativeBefore)))
-          fail('APPROVAL_NOT_EFFECTIVE');
-        return await save({ ...run, attempts: run.attempts.map(a => a.attemptId === attempt.attemptId ?
-          { ...a, nativeAfter: nativeAfter.toString() } : a) });
-      }
-      const [inputAfter, outputAfter, allowanceAfter, nativeAfter] = await Promise.all([
-        balance(rpc, run.quote.inputToken, attempt.account, at), balance(rpc, run.quote.outputToken, attempt.account, at),
-        allowance(rpc, P, run.quote.inputToken, attempt.account, at), rpc('eth_getBalance', [attempt.account, at]).then(quantity),
-      ]);
-      const spent = BigInt(attempt.inputBefore) - inputAfter;
-      const received = outputAfter - BigInt(attempt.outputBefore);
-      const approvalGasCost = run.attempts.filter(a => a.step === 'approval' && a.state === 'CONFIRMED').reduce((sum, a) => {
-        if (a.nativeAfter === null || a.receipt === null) fail('APPROVAL_GAS_UNKNOWN');
-        return sum + BigInt(a.receipt.gasCostWei);
-      }, 0n);
-      const actualGasCost = BigInt(receipt.gasCostWei) + approvalGasCost;
-      if (spent !== BigInt(run.quote.amountIn) || received < BigInt(run.quote.minimumOut) ||
-          (direct && BigInt(attempt.nativeBefore) - nativeAfter < BigInt(receipt.gasCostWei)) ||
-          (delegated && nativeAfter !== BigInt(attempt.nativeBefore))) fail('RECONCILIATION_MISMATCH');
-      const explorer = explorerUrl(attempt.txHash, P);
-      run = { ...run, attempts: run.attempts.map(a => a.attemptId === attempt.attemptId ?
-        { ...a, nativeAfter: nativeAfter.toString() } : a) };
-      const journalHeadHash = digest(canonical(run));
-      const receiptHash = digest(canonical(raw));
-      const inputAsset = { chainId: P.chainRef, address: run.quote.inputToken, decimals: quoteDecimals(run.quote, 'input') };
-      const outputAsset = { chainId: P.chainRef, address: run.quote.outputToken, decimals: quoteDecimals(run.quote, 'output') };
-      const nativeAsset = { chainId: P.chainRef, nativeId: 'ETH', decimals: 18 };
-      const reconciliation = { balances: [{ asset: inputAsset, amount: inputAfter.toString() },
-        { asset: outputAsset, amount: outputAfter.toString() }],
-        allowances: [{ asset: inputAsset, amount: allowanceAfter.toString() }], debt: [], positions: [],
-        fees: [{ asset: nativeAsset, amount: actualGasCost.toString() }],
-        residualAssets: [{ asset: inputAsset, amount: inputAfter.toString() }, { asset: outputAsset, amount: outputAfter.toString() }],
-        ownership: [{ chainId: P.chainRef, address: attempt.account }],
-        limitations: P.kind === 'CATALOG' ? ['OWNER_WALLET_MAINNET', ...run.quote.provenance === 'MOCKED' ? ['MOCKED_LOOPBACK_CHAIN'] : []] : ['PUBLIC_TESTNET_ONLY'] };
-      const bundle = validateArtifact('evidence-bundle', { schemaVersion: '1.0.0',
-        evidenceBundleId: id + '.evidence', version: 1, supersedes: null,
-        semanticWorkflowHash: run.quote.workflowHash, artifactSetHash: digest(canonical(run.quote)),
-        simulationHash: digest(canonical({ expected: run.quote.expectedOut, minimum: run.quote.minimumOut, pool: run.quote.pool })),
-        policyHash: digest(canonical({ amount: run.quote.amountIn, slippageBps: run.quote.slippageBps })),
-        manifestHash: run.quote.manifestHash, executionPlanHash: digest(canonical(attempt.tx)),
-        journalHeadHash, observedAt: now().toISOString(),
-        // A MOCKED loopback run is never labeled as public execution.
-        environment: P.kind === 'CATALOG' ? run.quote.provenance === 'PUBLIC_MAINNET' ? 'MAINNET_EXECUTED' : 'MOCKED' : 'TESTNET_EXECUTED', outcome: 'RECONCILED',
-        receipts: [{ receiptId: attempt.txHash, contentHash: receiptHash }], differences: [], reconciliation,
-        evidence: [{ evidenceId: 'public-explorer', kind: 'EXTERNAL_REFERENCE', contentHash: digest(explorer) },
-          { evidenceId: 'transaction-readback', kind: 'EXTERNAL_REFERENCE', contentHash: digest(canonical(tx)) },
-          { evidenceId: 'balance-reconciliation', kind: 'EXTERNAL_REFERENCE', contentHash: digest(canonical(reconciliation)) }],
-      }) as EvidenceBundle;
-      const evidenceBundleHash = hashArtifactBytes('evidence-bundle', new TextEncoder().encode(JSON.stringify(bundle)));
-      const outcome: PublicOutcome = { inputSpent: spent.toString(), outputReceived: received.toString(),
-        inputAfter: inputAfter.toString(), outputAfter: outputAfter.toString(), allowanceAfter: allowanceAfter.toString(),
-        nativeAfter: nativeAfter.toString(), gasCostWei: actualGasCost.toString(), explorer, evidence: bundle, evidenceBundleHash };
-      return await save({ ...run, outcome });
     });
   }
   return { prepare, refresh, begin, observe };

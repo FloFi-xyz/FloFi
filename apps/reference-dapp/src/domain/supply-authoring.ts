@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { createSupplyNode, readSupplyNode, createBorrowNode, readBorrowNode, createRepayNode, readRepayNode, createWithdrawNode, readWithdrawNode, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { AAVE_V3_BASE_SEPOLIA, AAVE_V3_LENDING_PROFILES, type AaveLendingProfile } from '@defi-workflow-engine/action-registry';
+import type { SupplyReview } from '@defi-workflow-engine/reference-compiler';
+import { authoringAssetSymbol } from './asset-catalogs';
+import { networkIdentity } from './network-registry';
 /**
  * Aave V3 authoring for each registered lending profile: Base Sepolia USDC and (BUILD-ETHEREUM-001) Ethereum Sepolia WBTC.
  * The named network selects the profile, and the asset must be that profile's one verified asset. A symbol never selects
@@ -13,7 +16,11 @@ export const LENDING_NETWORKS: readonly LendingNetwork[] = Object.freeze(AAVE_V3
 /** The profile for an authored network and asset pair; any other pair is unsupported. */
 export function lendingProfileFor(network: string, asset: string, code = 'SUPPLY_DEPLOYMENT_UNSUPPORTED'): AaveLendingProfile {
   const profile = AAVE_V3_LENDING_PROFILES.find(item => item.network === network);
-  if (!profile || profile.symbol !== asset) throw new Error(code);
+  if (!profile) throw new Error(code);
+  let symbol: string;
+  try { symbol = networkIdentity(network)?.catalog ? authoringAssetSymbol(profile.chain, asset) : asset.toUpperCase(); }
+  catch { throw new Error(code); }
+  if (profile.symbol !== symbol) throw new Error(code);
   return profile;
 }
 /** The one verified Aave asset of a lending network. */
@@ -63,6 +70,14 @@ export function supplyWalletTransaction(prepared:Record<string,string>):Record<s
     if(transaction[field]!==undefined&&!/^0x(?:0|[1-9a-f][0-9a-f]*)$/i.test(transaction[field]))throw new Error('SUPPLY_WALLET_QUANTITY_INVALID');
   }
   return transaction;
+}
+/** The connected owner submits only the exact reviewed call and frozen fee envelope. */
+export function assertSupplyWalletTransaction(prepared:Record<string,string>,review:SupplyReview,step:string):void {
+  const index=step==='APPROVAL'?0:review.transactions.length-1,expected=review.transactions[index];
+  if(!expected||Object.keys(prepared).some(key=>!['from','to','data','value','chainId','nonce','gas','gasPrice'].includes(key))||
+      (['from','to','data','value','chainId'] as const).some(key=>prepared[key]!==expected[key])||
+      prepared.gas!==`0x${BigInt(review.gasLimits[index]!).toString(16)}`||prepared.gasPrice!==`0x${BigInt(review.gasPrice).toString(16)}`)
+    throw new Error('SUPPLY_WALLET_TRANSACTION_MISMATCH');
 }
 
 export function createAuthoredBorrow(nodeId:string,input:SupplyInput):SemanticWorkflow['nodes'][number]{

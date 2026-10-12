@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from 'vitest';
 import { baseAssetRegistry, referenceRegistry } from '@defi-workflow-engine/action-registry';
-import { createReviewContext } from '@defi-workflow-engine/reference-linter';
+import { createReviewContext, validateAuthoringWorkflow } from '@defi-workflow-engine/reference-linter';
 import { readConcentratedLiquidity } from '@defi-workflow-engine/workflow-contracts';
 import { commandIsValid, parseLocalCommand, summarize } from './commands';
 import { editorReducer, initialEditor } from './editor';
@@ -46,7 +46,9 @@ describe('Solana Devnet liquidity chat/canvas authoring', () => {
     expect(commandIsValid({ type: 'ADD_SOLANA_LIQUIDITY', input: canvas, source: 'CANVAS', baseRevision: 0 })).toBe(true);
     expect(commandIsValid({ type: 'ADD_SOLANA_LIQUIDITY', input: { ...canvas, owner: 'x' }, source: 'CANVAS', baseRevision: 0 })).toBe(false);
     const withSwap = editorReducer(initialEditor(), { type: 'ADD_SOLANA_SWAP', input: { network: 'Solana Devnet', from: 'SOL', to: 'devUSDC', amount: '0.1', slippage: '50' }, source: 'CANVAS', baseRevision: 0 }, context);
-    expect(editorReducer(withSwap, { type: 'ADD_SOLANA_LIQUIDITY', input: canvas, source: 'CANVAS', baseRevision: withSwap.workflow.revision }, context).error).toMatch(/ISOLATED_ONLY/);
+    const composed = editorReducer(withSwap, { type: 'ADD_SOLANA_LIQUIDITY', input: canvas, source: 'CANVAS', baseRevision: withSwap.workflow.revision }, context);
+    expect(composed.error).toBeNull(); expect(composed.workflow.nodes.filter(n => !n.actionType.startsWith('mock-'))).toHaveLength(2);
+    expect(() => validateAuthoringWorkflow(composed.workflow, context)).toThrow();
   });
   it('leaves the BUILD-006 Uniswap v3 authoring bytes unchanged and readable by the neutral reader', () => {
     const evm = createLiquidityNode('node-002', { weth: '0.1', usdc: '200', minimumWeth: '0', minimumUsdc: '0', tickLower: '-100', tickUpper: '100',

@@ -5,7 +5,7 @@ import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts'
 import { catalogSwapAvailability, publicAvailability, publicBegin, publicObserve, publicPrepare, publicRefresh, publicReport, publicReview, publicStatus } from '../app/public-testnet-action';
 import { CATALOG_NETWORK_IDENTITIES } from '../domain/network-registry';
 import type { PublicRun } from '../server/public-testnet-service';
-import { swapProfile } from '../domain/public-testnet-swap';
+import { ownerBoundSwapReview, swapProfile } from '../domain/public-testnet-swap';
 import { injected, useBuild009Wallet } from './build009-wallet-store';
 import { useWorkflow } from './workflow-store';
 
@@ -94,7 +94,7 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
       if (cancelled || !result.ok) return;
       let recovered = result.value;
       const last = recovered.attempts.at(-1);
-      if (last?.state === 'PREPARED') {
+      if (last && ['PREPARED', 'UNKNOWN'].includes(last.state)) {
         const hash = localStorage.getItem(KEY + ':' + last.attemptId);
         if (hash && /^0x[0-9a-f]{64}$/.test(hash)) {
           const reported = await publicReport(id, last.attemptId, { kind: 'HASH', txHash: hash });
@@ -113,17 +113,21 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
   }, []);
   const simulate = useCallback(() => guarded(`Reading ${swapProfile(authoredChain)?.network ?? 'Base Sepolia'}`, async () => {
     const profile = swapProfile(authoredChain);
-    if (!available) throw new Error(profile?.kind === 'CATALOG' ? profile.runPrefix === 'bas' ? 'BASE_MAINNET_NOT_ENABLED' : 'ROBINHOOD_MAINNET_NOT_ENABLED' : 'PUBLIC_RECORDING_OFF');
+    if (!available) throw new Error(profile?.kind === 'CATALOG' ? 'PUBLIC_NETWORK_UNAVAILABLE' : 'PUBLIC_RECORDING_OFF');
     if (run?.attempts.some(a => ['PREPARED', 'HASH', 'PENDING', 'UNKNOWN'].includes(a.state))) throw new Error('ATTEMPT_ALREADY_ACTIVE');
     const workflow = workflowRef.current;
     const approval = run?.attempts.at(-1);
     const resumeApproval = Boolean(run && !run.outcome && approval?.step === 'approval' &&
       approval.state === 'CONFIRMED' && (recoveryOnly || source === workflow));
+    const owner = profile && ownerBoundSwapReview(profile) ? await wallet.session() : null;
+    if (profile && ownerBoundSwapReview(profile) && !owner) throw new Error('WALLET_NOT_CONNECTED');
+    if (owner && owner.chainId !== profile?.chainHex) throw new Error('WRONG_WALLET_CHAIN');
+    if (resumeApproval && run?.quote.ownerReview && owner?.account !== run.quote.ownerReview.account) throw new Error('OWNER_REVIEW_MISMATCH');
     const prepared = unwrap(resumeApproval ? await publicRefresh(run!.quote.executionId) :
-      await publicPrepare(workflow as unknown as SemanticWorkflow));
+      await publicPrepare(workflow as unknown as SemanticWorkflow, owner?.account));
     localStorage.setItem(KEY, prepared.quote.executionId);
     setSource(workflow as unknown as SemanticWorkflow); setRecoveryOnly(false); setRun(prepared);
-  }), [guarded, available, run, recoveryOnly, source, authoredChain]);
+  }), [guarded, available, run, recoveryOnly, source, authoredChain, wallet]);
   const review = useCallback(() => guarded('Reviewing swap', async () => {
     if (!run || retired) throw new Error('REVIEW_REQUIRED');
     setRun(unwrap(await publicReview(run.quote.executionId, run.quote.manifestHash)));

@@ -13,6 +13,7 @@
  * section from here, so a network or action added to the registries (and its canonical example) is described everywhere at once. Nothing
  * here grants authority or decides deployment enablement: the owner's Review and wallet signature remain the only way anything executes.
  */
+import { AAVE_V3_AMOUNT_POLICY } from '@defi-workflow-engine/action-registry';
 import type { StrategyAction, StrategySpec } from '../engine/strategy-spec';
 export type { StrategyAction };
 import { STRATEGY_EXAMPLES } from '../engine/strategy-examples';
@@ -46,7 +47,8 @@ export const bridgeOffers = (): readonly { readonly source: NetworkIdentity; rea
   AUTHORING_CAPABILITIES.filter(capability => capability.action === 'bridge').map(capability => ({ source: capability.network, destination: capability.destination!, asset: capability.asset! }));
 /** Networks whose swaps, transfers and pools take any asset of their validated official catalog. */
 export const catalogCapabilityNetworks = (): readonly NetworkIdentity[] =>
-  NETWORKS.filter(network => network.catalog && AUTHORING_CAPABILITIES.some(capability => capability.network === network));
+  NETWORKS.filter(network => network.catalog && (['swap', 'transfer', 'add_liquidity'] as const)
+    .every(action => AUTHORING_CAPABILITIES.some(capability => capability.network === network && capability.action === action)));
 
 type Language = 'EN' | 'PT';
 const join = (items: readonly string[], language: Language) => items.length < 2 ? items.join('') : `${items.slice(0, -1).join(', ')} ${language === 'PT' ? 'e' : 'and'} ${items.at(-1)}`;
@@ -80,17 +82,23 @@ export function capabilityText(language: Language): string {
   const catalog = catalogCapabilityNetworks();
   if (language === 'PT') return `O Flofi Copilot pode criar: swaps na ${names(capabilityNetworks('swap'), 'PT')}; transferências na ${names(capabilityNetworks('transfer'), 'PT')}; ` +
     `bridges pelo Cross-chain Router ${join(routes(), 'PT')}; Supply, Borrow, Repay e Withdraw na Aave V3 de ${lendingText('PT')}; liquidez na ` +
-    `${names(capabilityNetworks('add_liquidity'), 'PT')}; e ${compositionText('PT')}. Na ${names(catalog, 'PT')}, swaps, transferências e liquidez aceitam qualquer token ` +
+    `${names(capabilityNetworks('add_liquidity'), 'PT')}; e ${compositionText('PT')}. ${lendingAmountScopeText('PT')} Na ${names(catalog, 'PT')}, swaps, transferências e liquidez aceitam qualquer token ` +
     `do catálogo oficial da rede, pelo símbolo ou pelo nome. Usam fundos reais: ${names(realFunds(), 'PT')}.`;
   return `Flofi Copilot can author: swaps on ${names(capabilityNetworks('swap'), 'EN')}; transfers on ${names(capabilityNetworks('transfer'), 'EN')}; ` +
     `Cross-chain Router bridges ${join(routes(), 'EN')}; Aave V3 Supply, Borrow, Repay and Withdraw of ${lendingText('EN')}; liquidity on ` +
-    `${names(capabilityNetworks('add_liquidity'), 'EN')}; and ${compositionText('EN')}. On ${names(catalog, 'EN')}, swaps, transfers and liquidity take any token ` +
+    `${names(capabilityNetworks('add_liquidity'), 'EN')}; and ${compositionText('EN')}. ${lendingAmountScopeText('EN')} On ${names(catalog, 'EN')}, swaps, transfers and liquidity take any token ` +
     `of the network's official catalog, by symbol or name. Real funds: ${names(realFunds(), 'EN')}.`;
 }
 /** The lending refusal: the one asset of each Aave network (`mainnets`: false leaves out real-funds networks, as CopilotIntent V1 does). */
 export function lendingOnlyText(language: Language, mainnets: boolean): string {
   const text = lendingText(language, mainnets);
   return language === 'PT' ? `O Flofi suporta a Aave V3 apenas com ${text}.` : `Flofi supports Aave V3 with ${text} only.`;
+}
+/** Amount variants come from the existing Aave engine policy, never an independent support list. */
+export function lendingAmountScopeText(language: Language): string {
+  const operations = Object.entries(AAVE_V3_AMOUNT_POLICY).filter(([, policy]) => policy === 'PARTIAL_ONLY').map(([action]) => action);
+  return language === 'PT' ? `Apenas valores parciais para ${join(operations, language)}; operações totais ou máximas não estão disponíveis.`
+    : `Partial amounts only for ${join(operations, language)}; full or maximum operations are unavailable.`;
 }
 /** Every Router route, for the bridge refusal. */
 export const routeLabels = (): readonly string[] => bridgeOffers().map(route => `${route.source.name} → ${route.destination.name}`);

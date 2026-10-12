@@ -75,10 +75,10 @@ describe('BUILD-RH-002 Robinhood Chain strategies', () => {
     expect(composeStrategy({ ...BUY_TSLA, outputAsset: 'WETH' })).toMatchObject({ ok: true });
     registerNetworkCatalog(officialCatalog());
     expect(composeStrategy({ ...BUY_TSLA, outputAsset: 'NOTREAL' })).toMatchObject({ ok: false });
-    // BUILD-BASE-001: Base is a catalog network too; a Robinhood symbol is not in its catalog and fails closed (never mapped to something nearby).
-    expect(composeStrategy({ ...BUY_TSLA, network: 'base' })).toMatchObject({ ok: false, code: 'ACTION_ASSETS_UNSUPPORTED' });
-    expect(composeStrategy({ ...BRIDGE_IN, asset: 'USDG' })).toMatchObject({ ok: false, code: 'ROUTER_PAIR_UNSUPPORTED' });
-    expect(composeStrategy({ ...BRIDGE_IN, sourceNetwork: 'robinhood' })).toMatchObject({ ok: false, code: 'ROUTER_PAIR_UNSUPPORTED' });
+    // BUILD-ARB-001: catalog references resolve before composition; an unresolved foreign symbol still fails closed.
+    expect(composeStrategy({ ...BUY_TSLA, network: 'base' })).toMatchObject({ ok: false, code: 'ASSET_CATALOG_UNAVAILABLE' });
+    expect(composeStrategy({ ...BRIDGE_IN, asset: 'USDG' })).toMatchObject({ ok: false, code: 'ASSET_CATALOG_UNAVAILABLE' });
+    expect(composeStrategy({ ...BRIDGE_IN, sourceNetwork: 'robinhood' })).toMatchObject({ ok: false, code: 'ASSET_CATALOG_UNAVAILABLE' });
     // BUILD-BASE-001 (intentional change): Arbitrum One → Base is now a Router route.
     expect(composeStrategy({ ...BRIDGE_IN, sourceNetwork: 'arbitrum-one', destinationNetwork: 'base' })).toMatchObject({ ok: true });
     expect(composeStrategy({ ...BRIDGE_IN, sourceNetwork: 'arbitrum-one', destinationNetwork: 'arbitrum-one' })).toMatchObject({ ok: false, code: 'ROUTER_PAIR_UNSUPPORTED' });

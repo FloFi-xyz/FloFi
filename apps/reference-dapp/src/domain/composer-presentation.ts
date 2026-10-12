@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { ReviewContext, ReviewResult } from '@defi-workflow-engine/reference-linter';
 import { liquidityDetails } from '@defi-workflow-engine/reference-linter';
+import { workflowDependencyOrder } from '@defi-workflow-engine/workflow-contracts';
 import type { Workflow } from './initial-workflow';
 import type { Command } from './commands';
 import { shellChainLabel } from './product-shell';
@@ -18,7 +19,7 @@ import { catalogSwapDetails } from './catalog-swap-authoring';
 
 /** Display projections only. No editable values, validation rules or execution states live here. */
 export function composerActions(workflow: Workflow) {
-  return workflow.nodes.filter(node => !node.actionType.startsWith('mock-'));
+  return workflowDependencyOrder(workflow.nodes).filter(node => !node.actionType.startsWith('mock-'));
 }
 /** Identify the card for an existing Supply edit without changing proposal acceptance. */
 export function supplyProposalTarget(workflow: Workflow, command: Command): string | null {
@@ -47,7 +48,7 @@ export function singleAmountProposalTarget(workflow: Workflow, command: Command,
 const actionLabels: Record<string, string> = {
   'asset.swap.exact-input': 'Swap', 'asset.bridge': 'Bridge',
   'asset.liquidity.concentrated': 'Pool / Liquidity', 'asset.liquidity.uniswap-v3': 'Pool / Liquidity',
-  'asset.liquidity.prepare': 'Prepare liquidity', 'asset.transfer': 'Transfer',
+  'asset.liquidity.prepare': 'Prepare liquidity', 'asset.transfer': 'Send',
   supply: 'Supply', borrow: 'Borrow', repay: 'Repay', withdraw: 'Withdraw',
 };
 const providerLabels: Record<string, string> = {

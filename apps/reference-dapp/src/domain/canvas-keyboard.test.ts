@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { canvasShortcut, canDeleteCanvasEdge, canDeleteCanvasNode } from './canvas-keyboard';
 import { editorReducer, initialEditor } from './editor';
 import { parseMockCommand } from './commands';
+import { createAuthoredLending } from './lending-authoring';
 
 describe('canvas keyboard semantic deletion', () => {
   it('deletes a selected node through REMOVE for both keys and clears selection on Escape', () => {
@@ -45,5 +46,14 @@ describe('canvas keyboard semantic deletion', () => {
     const added = editorReducer(initialEditor(), parseMockCommand('add transform', 0));
     expect(canvasShortcut('Delete', true, 'node-002', added.workflow)).toBeNull();
     expect(canvasShortcut('Backspace', true, 'node-002', added.workflow)).toBeNull();
+  });
+  it('protects both mandatory lending links, including the health-check dependency', () => {
+    const workflow = createAuthoredLending('protected-lending', 0, { supply: '1', borrow: '0.1', slippage: '50', owner: '0x1111111111111111111111111111111111111111' });
+    for (const [from, to] of [['lending-supply', 'lending-borrow'], ['lending-borrow', 'lending-swap']]) {
+      expect(canDeleteCanvasEdge(workflow, from!, to!)).toBe(false);
+      const rejected = editorReducer({ workflow, error: null }, { type: 'DISCONNECT', from: from!, to: to!, source: 'CANVAS', baseRevision: 0 });
+      expect(rejected.workflow).toBe(workflow);
+      expect(rejected.error).toMatch(/PROTECTED_CONNECTION/);
+    }
   });
 });

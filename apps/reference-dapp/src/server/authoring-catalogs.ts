@@ -6,8 +6,9 @@
  */
 import { prepareCatalogsForText } from '../platform/catalogs.ts';
 import { robinhoodAuthoringCatalog } from './robinhood-mainnet.ts';
+import { arbitrumAuthoringCatalog } from './arbitrum-mainnet.ts';
 import { baseAuthoringCatalog } from './base-mainnet.ts';
 
 export function authoringCatalogPreparer(env: Readonly<Record<string, string | undefined>>): (text: string, intent?: unknown) => Promise<void> {
-  return (text, intent) => prepareCatalogsForText(text, { robinhood: () => robinhoodAuthoringCatalog(null, env), base: () => baseAuthoringCatalog(null, env) }, intent);
+  return (text, intent) => prepareCatalogsForText(text, { robinhood: () => robinhoodAuthoringCatalog(null, env), base: () => baseAuthoringCatalog(null, env), 'arbitrum-one': () => arbitrumAuthoringCatalog(null, env) }, intent);
 }

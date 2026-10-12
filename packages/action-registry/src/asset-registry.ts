@@ -11,6 +11,7 @@
  */
 import { keccak_256 } from '@noble/hashes/sha3.js';
 import { sha256 } from '@noble/hashes/sha2.js';
+import { ARBITRUM_ONE } from './arbitrum-chain.js';
 
 export type AssetKind = 'NATIVE' | 'ERC20';
 /** `TOKEN` (BUILD-BASE-001): a listed ERC-20 of a curated token list; its listing proves nothing about liquidity or lending support. */
@@ -222,8 +223,7 @@ export function formatAssetAmount(units: string, decimals: number): string {
 }
 
 // -------------------------------------------------------------------------------------------------------------------
-// Static, code-pinned base assets (one provider per network). Base and Arbitrum carry only their bridge-relevant assets;
-// their full catalogs are a later build and plug into the same registry.
+// Static, code-pinned base assets (one provider per network). Curated providers merge these identities without rebinding them.
 // -------------------------------------------------------------------------------------------------------------------
 type StaticAsset = { symbol: string; name: string; assetClass: AssetClass; address: string | null; decimals: number };
 function staticCatalog(chain: string, network: string, provider: string, url: string, items: readonly StaticAsset[]): AssetCatalog {
@@ -248,7 +248,7 @@ export const BASE_BASE_ASSETS = staticCatalog('eip155:8453', 'Base', 'flofi.pinn
   { symbol: 'WETH', name: 'Wrapped Ether', assetClass: 'WRAPPED_NATIVE', address: '0x4200000000000000000000000000000000000006', decimals: 18 },
 ]);
 /** Arbitrum One: the pinned assets FloFi already uses (Circle USDC, canonical WETH). */
-export const ARBITRUM_BASE_ASSETS = staticCatalog('eip155:42161', 'Arbitrum One', 'flofi.pinned', 'https://developers.circle.com/stablecoins/usdc-contract-addresses', [
+export const ARBITRUM_BASE_ASSETS = staticCatalog(ARBITRUM_ONE.chain, ARBITRUM_ONE.name, 'flofi.pinned', 'https://developers.circle.com/stablecoins/usdc-contract-addresses', [
   { symbol: 'ETH', name: 'Ether', assetClass: 'NATIVE', address: null, decimals: 18 },
   { symbol: 'USDC', name: 'USD Coin', assetClass: 'STABLECOIN', address: '0xaf88d065e77c8cc2239327c5edb3a432268e5831', decimals: 6 },
   { symbol: 'WETH', name: 'Wrapped Ether', assetClass: 'WRAPPED_NATIVE', address: '0x82af49447d8a07e3bd95bd0d56f35241523fbab1', decimals: 18 },

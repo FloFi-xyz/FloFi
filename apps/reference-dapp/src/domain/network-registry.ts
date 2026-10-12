@@ -5,7 +5,7 @@
  * It carries identity only (names, environment, local mark, the identifiers each surface uses); what a network supports stays in the
  * capability and profile registries. Nothing here grants authority: a mainnet entry only marks real funds.
  */
-import { BASE_MAINNET, ETHEREUM_SEPOLIA, ROBINHOOD_CHAIN_MAINNET, ROBINHOOD_CHAIN_TESTNET, SOLANA_DEVNET_CHAIN } from '@defi-workflow-engine/action-registry';
+import { ARBITRUM_ONE, BASE_MAINNET, ETHEREUM_SEPOLIA, ROBINHOOD_CHAIN_MAINNET, ROBINHOOD_CHAIN_TESTNET, SOLANA_DEVNET_CHAIN } from '@defi-workflow-engine/action-registry';
 
 export type NetworkEnvironment = 'MAINNET' | 'TESTNET';
 /**
@@ -20,6 +20,9 @@ export type NetworkIdentity = {
   readonly chain: string; readonly name: string;
   /** Other labels surfaces already show for this network ("Arbitrum", "Base (8453)"); never parsed as authority. */ readonly aliases: readonly string[];
   readonly environment: NetworkEnvironment;
+  /** Canonical EVM metadata when registered; presentation fields never flow into workflow semantics. */
+  readonly evm?: { readonly chainId: number; readonly chainHex: string; readonly rpc: string; readonly explorer: string;
+    readonly nativeCurrency: { readonly name: string; readonly symbol: string; readonly decimals: number } };
   /** A local, license-recorded network mark under `public/brand`, or null (a generated monogram is used). */ readonly mark: string | null;
   /** Assets come from a validated official catalog (search reaches the whole catalog; pinned assets always resolve). */ readonly catalog: boolean;
   readonly copilot: CopilotNetworkId | null;
@@ -37,8 +40,11 @@ export const NETWORKS: readonly NetworkIdentity[] = Object.freeze([
     catalog: true, copilot: 'BASE', family: 'base', mention: /\bbase\b(?![\s-]*sepolia)/i, chatName: /Base(?![\s-]*Sepolia)/ }),
   network({ key: 'base-sepolia', chain: 'eip155:84532', name: 'Base Sepolia', aliases: [], environment: 'TESTNET', mark: '/brand/crypto/base.svg', catalog: false,
     copilot: 'BASE_SEPOLIA', family: 'base', mention: /\bbase[\s-]*sepolia\b/i, chatName: null }),
-  network({ key: 'arbitrum-one', chain: 'eip155:42161', name: 'Arbitrum One', aliases: ['Arbitrum', 'Arbitrum (42161)'], environment: 'MAINNET',
-    mark: '/brand/crypto/arbitrum.png', catalog: false, copilot: 'ARBITRUM', family: 'arbitrum', mention: /\barbitrum\b(?![\s-]*sepolia)/i, chatName: null }),
+  network({ key: 'arbitrum-one', chain: ARBITRUM_ONE.chain, name: ARBITRUM_ONE.name, aliases: ['Arbitrum', 'Arbitrum (42161)', 'ARB network', 'ARB rede'], environment: ARBITRUM_ONE.environment,
+    evm: ARBITRUM_ONE, mark: '/brand/crypto/arbitrum.png', catalog: true, copilot: 'ARBITRUM', family: 'arbitrum',
+    // ARB alone is a token. Only an explicit network/rede phrase names the mainnet; Sepolia never does.
+    mention: /\barbitrum\b(?![\s-]*(?:one[\s-]*)?sepolia)|\barb\s+(?:network|rede)\b(?![\s-]*sepolia)/i,
+    chatName: /(?:Arbitrum(?: One)?|ARB (?:network|rede))(?![\s-]*(?:One[\s-]*)?Sepolia)/ }),
   network({ key: 'arbitrum-sepolia', chain: 'eip155:421614', name: 'Arbitrum Sepolia', aliases: [], environment: 'TESTNET', mark: '/brand/crypto/arbitrum.png',
     catalog: false, copilot: 'ARBITRUM_SEPOLIA', family: 'arbitrum', mention: /\barbitrum[\s-]*sepolia\b/i, chatName: null }),
   network({ key: 'ethereum-sepolia', chain: ETHEREUM_SEPOLIA.chain, name: 'Ethereum Sepolia', aliases: ['Ethereum Sepolia (11155111)'], environment: 'TESTNET',
@@ -69,7 +75,7 @@ export function networkIdentity(value: string | null | undefined): NetworkIdenti
 export const networkOfCopilot = (id: CopilotNetworkId): NetworkIdentity => ALL.find(n => n.copilot === id)!;
 /** The Copilot networks a message names (each by its registry `mention`), in `COPILOT_NETWORK_IDS` order. */
 export const copilotNetworksMentioned = (text: string): CopilotNetworkId[] => COPILOT_NETWORK_IDS.filter(id => networkOfCopilot(id).mention!.test(text));
-/** Catalog networks (official asset catalog): Robinhood Chain and Base. */
+/** Catalog visibility is independent of runtime capabilities. */
 export const CATALOG_NETWORK_IDENTITIES: readonly NetworkIdentity[] = Object.freeze(NETWORKS.filter(n => n.catalog));
 /** The catalog network named after "on" in a chat sentence (`on Base`, `on Robinhood Chain`), or null. */
 export function catalogNetworkOfChatName(text: string): NetworkIdentity | null {

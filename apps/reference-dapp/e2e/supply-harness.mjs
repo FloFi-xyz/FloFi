@@ -11,12 +11,13 @@ const fixtureKey=new Uint8Array(32).fill(0x43),fixturePublic=secp256k1.getPublic
 export function mockAllowanceSlot(owner,p=AAVE_V3_BASE_SEPOLIA){const h=v=>toHex(keccak_256(fromHex(v)));return h('0x'+supplyWord(p.pool)+h('0x'+supplyWord(owner)+supplyWord(1n)).slice(2));}
 export const REPAY_OWNER=toHex(keccak_256(fixturePublic.slice(1)).slice(12));
 export function signMockTransaction(tx){
-  const fields=[rlpInteger(BigInt(tx.chainId)),rlpInteger(BigInt(tx.nonce)),rlpInteger(1000000n),rlpInteger(BigInt(tx.gasPrice)),rlpInteger(BigInt(tx.gas)),fromHex(tx.to),rlpInteger(0n),fromHex(tx.data),[]];
+  const priority=BigInt(tx.chainId)===42161n?0n:1000000n;
+  const fields=[rlpInteger(BigInt(tx.chainId)),rlpInteger(BigInt(tx.nonce)),rlpInteger(priority),rlpInteger(BigInt(tx.gasPrice)),rlpInteger(BigInt(tx.gas)),fromHex(tx.to),rlpInteger(0n),fromHex(tx.data),[]];
   const digest=keccak_256(fromHex('0x02'+toHex(rlpEncode(fields)).slice(2))),sig=secp256k1.sign(digest,fixtureKey,{prehash:false});
   const parity=[0,1].find(i=>toHex(secp256k1.Signature.fromBytes(sig).addRecoveryBit(i).recoverPublicKey(digest).toBytes(false))===toHex(fixturePublic));
   if(parity===undefined)throw Error('MOCK_SIGNATURE_FAILED');
   const r=BigInt(toHex(sig.slice(0,32))),s=BigInt(toHex(sig.slice(32)));
-  return {type:'0x2',maxFeePerGas:tx.gasPrice,maxPriorityFeePerGas:'0xf4240',accessList:[],yParity:supplyHex(parity),r:supplyHex(r),s:supplyHex(s),hash:toHex(keccak_256(fromHex('0x02'+toHex(rlpEncode([...fields,rlpInteger(BigInt(parity)),rlpInteger(r),rlpInteger(s)])).slice(2))))};
+  return {type:'0x2',maxFeePerGas:tx.gasPrice,maxPriorityFeePerGas:supplyHex(priority),accessList:[],yParity:supplyHex(parity),r:supplyHex(r),s:supplyHex(s),hash:toHex(keccak_256(fromHex('0x02'+toHex(rlpEncode([...fields,rlpInteger(BigInt(parity)),rlpInteger(r),rlpInteger(s)])).slice(2))))};
 }
 const hash=n=>'0x'+BigInt(n).toString(16).padStart(64,'0');
 const word=n=>'0x'+supplyWord(BigInt(n));
@@ -26,22 +27,29 @@ export function createSupplyHarness(p=AAVE_V3_BASE_SEPOLIA){
   // Reserve id selects the user-configuration bits; decimals select the base-currency scale. No L1 data fee on Ethereum L1.
   const shift=2n*BigInt(p.reserveId),scale=10n**BigInt(p.decimals);
   const state={owner:OWNER,allowanceSlot:mockAllowanceSlot(OWNER,p),block:10,nonce:0,allowance:0n,balance:100_000_000n,nativeBalance:10n**18n,scaled:8_000_000n,index:125n*10n**25n,chain:p.chainHex,scaledDebt:0n,debtIndex:125n*10n**25n,price:100000000n,userConfig:2n<<shift,reserveConfig:(1n<<56n)|(1n<<58n)|(BigInt(p.decimals)<<48n)|8250n|(8600n<<16n),liquidity:1000000000000n,revert:false,mismatch:false,ignoreOverride:false,previousIndex:125n*10n**25n};
+  const ray=10n**27n;
+  const aBalance=s=>(s.scaled*s.index+('poolRevision' in p?0n:ray/2n))/ray;
+  const vBalance=s=>(s.scaledDebt*s.debtIndex+('poolRevision' in p?ray-1n:ray/2n))/ray;
   const transactions=[],receipts=new Map(),history=new Map();
   const snapshot=()=>({...state});history.set(10,snapshot());
-  const at=tag=>{const n=tag==='latest'||tag==='pending'?state.block:Number(BigInt(tag));if(n>=state.block)return snapshot();return [...history.entries()].filter(([b])=>b<=n).at(-1)?.[1]??snapshot();};
+  const at=tag=>{const n=tag==='latest'||tag==='pending'||tag==='safe'?state.block:Number(BigInt(tag));if(n>=state.block)return snapshot();return [...history.entries()].filter(([b])=>b<=n).at(-1)?.[1]??snapshot();};
   const call=(tx,tag,override)=>{
     const s=at(tag),data=tx.data.toLowerCase(),to=tx.to.toLowerCase();
     const effectiveAllowance=!state.ignoreOverride&&override?.[p.asset]?.stateDiff?.[s.allowanceSlot]!==undefined?BigInt(override[p.asset].stateDiff[s.allowanceSlot]):s.allowance;
+    if(data===supplyCall('ADDRESSES_PROVIDER()')&&to===p.pool)return word(p.provider);
+    if(data===supplyCall('POOL_REVISION()')&&to===p.pool)return word('poolRevision' in p?p.poolRevision:11);
     if(data===supplyCall('getPool()')&&to===p.provider)return word(p.pool);
     if(data===supplyCall('getReserveData(address)',p.asset)&&to===p.pool){const words=Array.from({length:15},()=>supplyWord(0n));words[0]=supplyWord(s.reserveConfig);words[7]=supplyWord(BigInt(p.reserveId));words[10]=supplyWord(p.variableDebtToken);words[1]=supplyWord(s.index);words[8]=supplyWord(p.aToken);return '0x'+words.join('');}
-    const debt=(s.scaledDebt*s.debtIndex+10n**27n/2n)/10n**27n;
-    const collateral=((s.scaled*s.index+10n**27n/2n)/10n**27n)*s.price/scale,debtBase=debt*s.price/scale;
+    const debt=vBalance(s);
+    const collateral=aBalance(s)*s.price/scale,debtBase=debt*s.price/scale;
     if(data===supplyCall('getPriceOracle()')&&to===p.provider)return word(p.oracle);
     if(data===supplyCall('getAssetPrice(address)',p.asset)&&to===p.oracle)return word(s.price);
     if(data===supplyCall('BASE_CURRENCY_UNIT()')&&to===p.oracle)return word(100000000n);
     if(data===supplyCall('getUserConfiguration(address)',state.owner)&&to===p.pool)return word(s.userConfig);
     if(data===supplyCall('getUserEMode(address)',state.owner)&&to===p.pool)return word(0n);
-    if(data===supplyCall('getUserAccountData(address)',state.owner)&&to===p.pool)return '0x'+[collateral,debtBase,(collateral*8250n+5000n)/10000n-debtBase,8600n,8250n,debtBase?collateral*8600n*10n**18n/(10000n*debtBase):(1n<<256n)-1n].map(supplyWord).join('');
+    // Keep the established Base/Ethereum test fixture semantics; the new Arbitrum profile models account-weighted risk.
+    if(data===supplyCall('getUserAccountData(address)',state.owner)&&to===p.pool&&!('poolRevision' in p))return '0x'+[collateral,debtBase,(collateral*8250n+5000n)/10000n-debtBase,8600n,8250n,debtBase?collateral*8600n*10n**18n/(10000n*debtBase):(1n<<256n)-1n].map(supplyWord).join('');
+    if(data===supplyCall('getUserAccountData(address)',state.owner)&&to===p.pool){const enabled=Boolean(s.userConfig&(2n<<shift)),c=enabled?collateral:0n,lt=c?(s.reserveConfig>>16n)&65535n:0n,ltv=c?s.reserveConfig&65535n:0n,capacity=(c*ltv+5000n)/10000n-debtBase;return '0x'+[c,debtBase,capacity>0n?capacity:0n,lt,ltv,debtBase?c*lt*10n**18n/(10000n*debtBase):(1n<<256n)-1n].map(supplyWord).join('');}
     if(data===supplyCall('balanceOf(address)',p.aToken)&&to===p.asset)return word(s.liquidity);
     if(data===supplyCall('POOL()')&&to===p.variableDebtToken)return word(p.pool);
     if(data===supplyCall('UNDERLYING_ASSET_ADDRESS()')&&to===p.variableDebtToken)return word(p.asset);
@@ -50,7 +58,7 @@ export function createSupplyHarness(p=AAVE_V3_BASE_SEPOLIA){
     if(data===supplyCall('totalSupply()')&&to===p.variableDebtToken)return word(debt);
     if(data===supplyCall('getReserveNormalizedVariableDebt(address)',p.asset)&&to===p.pool)return word(s.debtIndex);
     if(data.startsWith(supplyCall('borrow(address,uint256,uint256,uint16,address)').slice(0,10))&&to===p.pool)return '0x';
-    if(data.startsWith(supplyCall('withdraw(address,uint256,address)').slice(0,10))&&to===p.pool){const amount=BigInt('0x'+data.slice(74,138));if(amount>=(s.scaled*s.index+10n**27n/2n)/10n**27n)throw Error('MOCK_WITHDRAW_REVERT');return word(amount);}
+    if(data.startsWith(supplyCall('withdraw(address,uint256,address)').slice(0,10))&&to===p.pool){const amount=BigInt('0x'+data.slice(74,138));if(amount>=aBalance(s))throw Error('MOCK_WITHDRAW_REVERT');return word(amount);}
     if(data.startsWith(supplyCall('repay(address,uint256,uint256,address)').slice(0,10))&&to===p.pool){const amount=BigInt('0x'+data.slice(74,138));if(effectiveAllowance<amount||s.balance<amount||debt<=amount)throw new Error('MOCK_REPAY_REVERT');return word(amount);}
     if(data===supplyCall('decimals()')&&to===p.asset)return word(p.decimals);
     if(data===supplyCall('getPreviousIndex(address)',state.owner)&&to===p.aToken)return word(s.previousIndex);
@@ -59,7 +67,7 @@ export function createSupplyHarness(p=AAVE_V3_BASE_SEPOLIA){
     if(data===supplyCall('allowance(address,address)',state.owner,p.pool)&&to===p.asset)return word(effectiveAllowance);
     if(data.startsWith(supplyCall('allowance(address,address)').slice(0,10))&&to===p.asset)return word(0);
     if(data===supplyCall('balanceOf(address)',state.owner)&&to===p.asset)return word(s.balance);
-    if(data.startsWith(supplyCall('balanceOf(address)').slice(0,10))&&to===p.aToken)return word((s.scaled*s.index+10n**27n/2n)/10n**27n);
+    if(data.startsWith(supplyCall('balanceOf(address)').slice(0,10))&&to===p.aToken)return word(aBalance(s));
     if(data.startsWith(supplyCall('scaledBalanceOf(address)').slice(0,10))&&to===p.aToken)return word(s.scaled);
     if(data===supplyCall('getReserveNormalizedIncome(address)',p.asset)&&to===p.pool)return word(s.index);
     if(data.startsWith(supplyCall('approve(address,uint256)').slice(0,10))&&to===p.asset)return word(1);
@@ -70,10 +78,11 @@ export function createSupplyHarness(p=AAVE_V3_BASE_SEPOLIA){
     if(method==='eth_chainId')return state.chain;
     if(method==='eth_blockNumber')return supplyHex(state.block);
     if(method==='eth_getBlockByNumber'){
-      const tag=params[0],n=tag==='latest'||tag==='pending'?state.block:Number(BigInt(tag));
+      const tag=params[0],n=tag==='latest'||tag==='pending'||tag==='safe'?state.block:Number(BigInt(tag));
       return {number:supplyHex(n),hash:hash(n+1000),parentHash:hash(n+999),transactions:tag==='pending'?[]:transactions.filter(t=>Number(BigInt(t.blockNumber))===n).map(t=>params[1]?t:t.hash)};
     }
     if(method==='eth_getCode')return '0x60016000';
+    if(method==='eth_getStorageAt'&&params[0]===p.pool&&params[1]==='0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc'&&'poolImplementation' in p)return word(p.poolImplementation);
     if(method==='eth_getBalance')return supplyHex(at(params[1]).nativeBalance);
     if(method==='eth_getTransactionCount')return supplyHex(at(params[1]).nonce);
     if(method==='eth_gasPrice')return supplyHex(1_000_000n);
@@ -92,14 +101,14 @@ export function createSupplyHarness(p=AAVE_V3_BASE_SEPOLIA){
           logs.push({address:p.asset,topics:[supplyTopic('Approval(address,address,uint256)'),topicAddress(state.owner),topicAddress(p.pool)],data:word(amount)});
         }else if(tx.data.startsWith(supplyCall('borrow(address,uint256,uint256,uint16,address)').slice(0,10))){
           if(tx.data!==supplyCall('borrow(address,uint256,uint256,uint16,address)',p.asset,amount,2n,0n,state.owner))throw new Error('MOCK_BORROW_DENIED');
-          state.balance+=amount;state.userConfig|=1n<<shift;state.scaledDebt+=(amount*10n**27n+state.debtIndex/2n)/state.debtIndex+(state.mismatch?100n:0n);state.liquidity-=amount;
+          state.balance+=amount;state.userConfig|=1n<<shift;state.scaledDebt+=(amount*10n**27n+('poolRevision' in p?state.debtIndex-1n:state.debtIndex/2n))/state.debtIndex+(state.mismatch?100n:0n);state.liquidity-=amount;
           logs.push({address:p.pool,topics:[supplyTopic('Borrow(address,address,address,uint256,uint8,uint256,uint16)'),topicAddress(p.asset),topicAddress(state.owner),word(0)],data:'0x'+supplyWord(state.owner)+supplyWord(amount)+supplyWord(2n)+supplyWord(100000000n)},
             {address:p.asset,topics:[supplyTopic('Transfer(address,address,uint256)'),topicAddress(p.aToken),topicAddress(state.owner)],data:word(amount)});
         }else if(tx.data.startsWith(supplyCall('withdraw(address,uint256,address)').slice(0,10))){
           call({to:p.pool,data:tx.data},'latest');
           if(tx.data!==supplyCall('withdraw(address,uint256,address)',p.asset,amount,state.owner))throw Error('MOCK_WITHDRAW_DENIED');
-          const interest=(state.scaled*state.index+10n**27n/2n)/10n**27n-(state.scaled*state.previousIndex+10n**27n/2n)/10n**27n,net=amount>interest?amount-interest:interest-amount,mint=interest>amount;state.previousIndex=state.index;
-          state.balance+=amount;state.scaled-=(amount*10n**27n+state.index/2n)/state.index+(state.mismatch?100n:0n);state.liquidity-=amount;
+          const interest=aBalance(state)-aBalance({...state,index:state.previousIndex}),net=amount>interest?amount-interest:interest-amount,mint=interest>amount;state.previousIndex=state.index;
+          state.balance+=amount;state.scaled-=(amount*10n**27n+('poolRevision' in p?state.index-1n:state.index/2n))/state.index+(state.mismatch?100n:0n);state.liquidity-=amount;
           logs.push({address:p.pool,topics:[supplyTopic('Withdraw(address,address,address,uint256)'),topicAddress(p.asset),topicAddress(state.owner),topicAddress(state.owner)],data:word(amount)},
             {address:p.asset,topics:[supplyTopic('Transfer(address,address,uint256)'),topicAddress(p.aToken),topicAddress(state.owner)],data:word(amount)},
             {address:p.aToken,topics:[supplyTopic('Transfer(address,address,uint256)'),mint?word(0):topicAddress(state.owner),mint?topicAddress(state.owner):word(0)],data:word(net)},
@@ -107,12 +116,13 @@ export function createSupplyHarness(p=AAVE_V3_BASE_SEPOLIA){
         }else if(tx.data.startsWith(supplyCall('repay(address,uint256,uint256,address)').slice(0,10))){
           call({to:p.pool,data:tx.data},'latest');
           if(tx.data!==supplyCall('repay(address,uint256,uint256,address)',p.asset,amount,2n,state.owner))throw new Error('MOCK_REPAY_DENIED');
-          state.balance-=amount;state.allowance-=amount;state.scaledDebt-=(amount*10n**27n+state.debtIndex/2n)/state.debtIndex+(state.mismatch?100n:0n);state.liquidity+=amount;
+          state.balance-=amount;state.allowance-=amount;state.scaledDebt-=(amount*10n**27n+('poolRevision' in p?0n:state.debtIndex/2n))/state.debtIndex+(state.mismatch?100n:0n);state.liquidity+=amount;
           logs.push({address:p.pool,topics:[supplyTopic('Repay(address,address,address,uint256,bool)'),topicAddress(p.asset),topicAddress(state.owner),topicAddress(state.owner)],data:'0x'+supplyWord(amount)+supplyWord(0n)},
             {address:p.asset,topics:[supplyTopic('Transfer(address,address,uint256)'),topicAddress(state.owner),topicAddress(p.aToken)],data:word(amount)});
         }else{
           const beneficiary='0x'+tx.data.slice(162,202);if(tx.data!==supplyCall('supply(address,uint256,address,uint16)',p.asset,amount,beneficiary,0n)||state.allowance<amount||state.balance<amount)throw new Error('MOCK_SUPPLY_DENIED');
-          state.balance-=amount;state.allowance-=amount;state.scaled+=(amount*10n**27n+state.index/2n)/state.index+(state.mismatch?100n:0n);
+          const firstSupply=state.scaled===0n;state.balance-=amount;state.allowance-=amount;state.scaled+=(amount*10n**27n+('poolRevision' in p?0n:state.index/2n))/state.index+(state.mismatch?100n:0n);
+          if(firstSupply)state.userConfig|=2n<<shift;
           logs.push({address:p.pool,topics:[supplyTopic('Supply(address,address,address,uint256,uint16)'),topicAddress(p.asset),topicAddress(beneficiary),word(0)],data:'0x'+supplyWord(state.owner)+supplyWord(amount)},
             {address:p.asset,topics:[supplyTopic('Transfer(address,address,uint256)'),topicAddress(state.owner),topicAddress(p.aToken)],data:word(amount)});
         }

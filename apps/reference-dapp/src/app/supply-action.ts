@@ -3,9 +3,9 @@
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { createSupplyService, type SupplyWalletDiagnostic, type SupplyService } from '../server/supply-service';
 import { join } from 'node:path';
-import { createBaseLendingReadRpc, createLendingReadRpcs } from '../server/supply-rpc';
+import { createCatalogLendingReadRpc, createLendingReadRpcs } from '../server/supply-rpc';
 import { cloudFlow } from '../server/flow-runtime';
-import { CATALOG_NETWORKS, localCatalogNetworkMode } from '../server/catalog-networks';
+import { catalogNetworkOfRun, catalogNetworkOfWorkflow, localCatalogNetworkMode, type CatalogNetworkRuntime } from '../server/catalog-networks';
 let service:SupplyService|null=null;
 function current():SupplyService {
   const harness=process.env.GRYLOO_SUPPLY_HARNESS==='MOCKED_LOOPBACK_ONLY';
@@ -17,31 +17,29 @@ function current():SupplyService {
   return service;
 }
 /**
- * BUILD-BASE-001: Base mainnet Aave (real funds, `baave-` runs at `$GRYLOO_BASE_JOURNAL/aave`) on the same service: `GRYLOO_BASE_MAINNET=live`
- * in local development (hosted deployments use the cloud flow) or the loopback harness; owner execution additionally needs
- * `GRYLOO_BASE_OWNER_EXECUTION=MAINNET_OWNER_APPROVED`.
+ * Catalog mainnet lending reuses the network's gate, owner opt-in, journal and read-only RPC.
+ * Hosted deployments use the shared cloud flow; local journals use the network's `aave` subdirectory.
  */
-const BASE=CATALOG_NETWORKS.base;
-let baseService:SupplyService|null=null;
-function base():SupplyService{
-  const mode=localCatalogNetworkMode(BASE,process.env);
-  if(mode==='off')throw new Error(BASE.disabledCode);
-  const journalDir=process.env[BASE.journalEnv];
+const catalogServices=new Map<string,SupplyService>();
+function catalog(network:CatalogNetworkRuntime):SupplyService{
+  const mode=localCatalogNetworkMode(network,process.env);
+  if(mode==='off'||!network.prefixes.lending)throw new Error(network.disabledCode);
+  const journalDir=process.env[network.journalEnv];
   if(!journalDir)throw new Error('SUPPLY_STORAGE_NOT_CONFIGURED');
-  baseService??=createSupplyService({journalDir:join(journalDir,'aave'),idPrefix:'baave',provenance:mode==='harness'?'MOCKED':'PUBLIC_MAINNET',
-    rpc:async()=>{throw new Error('SUPPLY_NETWORK_UNAVAILABLE');},rpcs:{[BASE.chain]:createBaseLendingReadRpc(mode==='harness',process.env)},
-    executionEnabled:BASE.ownerExecutionEnabled(mode,process.env)});
-  return baseService;
+  let instance=catalogServices.get(network.id);
+  if(!instance){instance=createSupplyService({journalDir:join(journalDir,'aave'),idPrefix:network.prefixes.lending,provenance:mode==='harness'?'MOCKED':'PUBLIC_MAINNET',
+    rpc:async()=>{throw new Error('SUPPLY_NETWORK_UNAVAILABLE');},rpcs:{[network.chain]:createCatalogLendingReadRpc(network,mode==='harness',process.env)},
+    executionEnabled:network.ownerExecutionEnabled(mode,process.env)});catalogServices.set(network.id,instance);}
+  return instance;
 }
 const LENDING_ACTIONS=['supply','borrow','repay','withdraw'];
-/** A call addresses Base mainnet when it names a `baave-` run or a workflow whose lending step is on Base. */
-const baseCall=(args:readonly unknown[])=>typeof args[0]==='string'?args[0].startsWith('baave-'):Boolean(args[0]&&typeof args[0]==='object'&&
-  Array.isArray((args[0] as SemanticWorkflow).nodes)&&(args[0] as SemanticWorkflow).nodes.some(node=>LENDING_ACTIONS.includes(node.actionType)&&node.chainId===BASE.chain));
+const catalogCall=(args:readonly unknown[])=>typeof args[0]==='string'?catalogNetworkOfRun(args[0],'lending'):
+  LENDING_ACTIONS.map(action=>catalogNetworkOfWorkflow(args[0],action)).find(network=>network?.flows.lending)??null;
 async function run<T>(method:string,args:readonly unknown[],action:(service:SupplyService)=>Promise<T>):Promise<{ok:true;value:T}|{ok:false;code:string}>{
-  const onBase=baseCall(args);
+  const network=catalogCall(args);
   // Cloud deployment: the remote Flofi API or the embedded PostgreSQL runtime (BUILD-CLOUD-PARITY-001); never a local journal.
-  const cloud=await cloudFlow<T>(onBase?'base-aave':'aave-supply',method,args);if(cloud)return cloud;
-  try{return{ok:true,value:await action(onBase?base():current())};}catch(cause){const code=cause instanceof Error?cause.message:'';return{ok:false,code:/^[A-Z][A-Z0-9_]{2,80}$/.test(code)?code:'SUPPLY_SERVICE_UNAVAILABLE'};}
+  const cloud=await cloudFlow<T>(network?.flows.lending??'aave-supply',method,args);if(cloud)return cloud;
+  try{return{ok:true,value:await action(network?catalog(network):current())};}catch(cause){const code=cause instanceof Error?cause.message:'';return{ok:false,code:/^[A-Z][A-Z0-9_]{2,80}$/.test(code)?code:'SUPPLY_SERVICE_UNAVAILABLE'};}
 }
 
 export async function supplySimulate(workflow:SemanticWorkflow,account:string){return run('simulate',[workflow,account],service=>service.simulate(workflow,account));}

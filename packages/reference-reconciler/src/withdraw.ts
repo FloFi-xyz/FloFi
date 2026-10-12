@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { lendingProfile,reserveBits,readWithdrawState,compileWithdrawCalls,estimateWithdraw,borrowHealthFactor,supplyHex,supplyWord,supplyTopic,supplyHash,supplyArtifactHash,rpcUint,rpcRecord,rpcHash,SUPPLY_METAMASK,type AaveLendingProfile,type SupplyReview,type SupplyState,type SupplyRpc } from '@defi-workflow-engine/reference-compiler';
 import { hashJournalBytes,type EvidenceBundle,type ExecutionJournal } from '@defi-workflow-engine/workflow-contracts';
-import { verifySupplyWalletEnvelope,logMatches,addressTopic,type SupplyChainAttempt,type SupplyObservation } from './supply.js';
+import { lendingTransactionCost, verifySupplyWalletEnvelope,logMatches,addressTopic,type SupplyChainAttempt,type SupplyObservation } from './supply.js';
 import { verifyRepayOwnerSignature,type RepayOwnerProof } from './repay.js';
 const ray=10n**27n,abs=(n:bigint)=>n<0n?-n:n;
 export type WithdrawObservation=SupplyObservation & {ownerAuthorization?:RepayOwnerProof;walletDelta?:string;collateralDelta?:string;normalizedWithdrawal?:string;roundingBound?:string;withdrawEvent?:unknown};
@@ -81,7 +81,7 @@ export async function reconcileWithdrawAttempt(review:SupplyReview,attempt:Suppl
     const final=rpcRecord(await rpc('eth_getBlockByNumber',[supplyHex(block),false]));if(rpcHash(final.hash)!==post.blockHash)throw new Error('WITHDRAW_REORG');
     // OP Stack receipts must carry the L1 data fee; an L1 receipt must not. Either way the cost is fully explained.
     if((receipt.l1Fee===undefined)===p.l1DataFee)throw new Error('WITHDRAW_NETWORK_COST_MISMATCH');
-    base.cost=(rpcUint(receipt.gasUsed)*rpcUint(receipt.effectiveGasPrice)+(p.l1DataFee?rpcUint(receipt.l1Fee):0n)).toString();
+    base.cost=lendingTransactionCost(review,tx,receipt,0);
     if(!wrapped){
       const [beforeNonce,afterNonce]=await Promise.all([rpc('eth_getTransactionCount',[review.account,supplyHex(block-1)]),rpc('eth_getTransactionCount',[review.account,supplyHex(block)])]);
       if(rpcUint(beforeNonce)!==BigInt(attempt.nonce)||rpcUint(afterNonce)!==rpcUint(beforeNonce)+1n)throw new Error('WITHDRAW_OWNER_NONCE_MISMATCH');

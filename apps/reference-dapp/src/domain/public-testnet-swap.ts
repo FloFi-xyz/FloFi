@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { isCatalogSwapNode } from '@defi-workflow-engine/workflow-contracts';
-import { UNISWAP_V3_BASE as base, UNISWAP_V3_ETHEREUM_SEPOLIA as ethereum, UNISWAP_V3_ROBINHOOD as robinhood } from '@defi-workflow-engine/action-registry';
+import { UNISWAP_V3_ARBITRUM as arbitrum, UNISWAP_V3_BASE as base, UNISWAP_V3_ETHEREUM_SEPOLIA as ethereum, UNISWAP_V3_ROBINHOOD as robinhood } from '@defi-workflow-engine/action-registry';
 /** Pinned Base Sepolia Uniswap v3 profile; verified again against public chain state before use. */
 export const BASE_SEPOLIA = Object.freeze({
   chainId: 84532, chainHex: '0x14a34', chainRef: 'eip155:84532', network: 'Base Sepolia',
@@ -54,8 +54,18 @@ export const BASE_MAINNET_SWAP = Object.freeze({
   l1DataFee: true, gasPriceOracle: base.gasPriceOracle, kind: 'CATALOG', environment: 'MAINNET',
   runPrefix: 'bas', pinnedTokens: { [base.weth]: 'weth', [base.usdc]: 'usdc' }, listedTokens: 'CODE_AND_DECIMALS', referencePair: [base.usdc, base.weth],
 } as const);
+/** Arbitrum Nitro: standard estimates and receipts already include parent posting gas. Strict owner-bound Review. */
+export const ARBITRUM_MAINNET_SWAP = Object.freeze({
+  chainId: arbitrum.chainId, chainHex: arbitrum.chainHex, chainRef: arbitrum.chain, network: arbitrum.network,
+  rpcUrl: arbitrum.rpc, explorer: `${arbitrum.explorer}tx/`, factory: arbitrum.factory, router: arbitrum.router, quoter: arbitrum.quoter,
+  weth: arbitrum.weth, usdc: arbitrum.usdc, poolInitCodeHash: arbitrum.poolInitCodeHash, feeTiers: arbitrum.feeTiers,
+  codeSha256: arbitrum.codeSha256, reviewTtlSeconds: arbitrum.reviewTtlSeconds, l1DataFee: false, kind: 'CATALOG', environment: 'MAINNET',
+  runPrefix: 'ars', pinnedTokens: { [arbitrum.weth]: 'weth', [arbitrum.usdc]: 'usdc' }, listedTokens: 'CODE_AND_DECIMALS', referencePair: null,
+  ownerBoundReview: true,
+} as const);
+export const ownerBoundSwapReview = (profile: SwapProfile) => 'ownerBoundReview' in profile && profile.ownerBoundReview;
 export type PairSwapProfile = typeof BASE_SEPOLIA | typeof ETHEREUM_SEPOLIA_SWAP;
-export type CatalogSwapProfile = typeof ROBINHOOD_MAINNET_SWAP | typeof BASE_MAINNET_SWAP;
+export type CatalogSwapProfile = typeof ROBINHOOD_MAINNET_SWAP | typeof BASE_MAINNET_SWAP | typeof ARBITRUM_MAINNET_SWAP;
 /** The exact USDC/WETH public-testnet pair profiles (unchanged by BUILD-RH-002). */
 export type PublicSwapProfile = PairSwapProfile;
 export const PUBLIC_SWAP_PROFILES: readonly PublicSwapProfile[] = Object.freeze([BASE_SEPOLIA, ETHEREUM_SEPOLIA_SWAP]);
@@ -65,7 +75,7 @@ export function publicSwapProfile(chain: string | number | null | undefined): Pu
 }
 /** Every profile the shared owner-wallet Uniswap swap service serves: the testnet pairs and the catalog networks (BUILD-RH-002, BUILD-BASE-001). */
 export type SwapProfile = PairSwapProfile | CatalogSwapProfile;
-export const SWAP_PROFILES: readonly SwapProfile[] = Object.freeze([...PUBLIC_SWAP_PROFILES, ROBINHOOD_MAINNET_SWAP, BASE_MAINNET_SWAP]);
+export const SWAP_PROFILES: readonly SwapProfile[] = Object.freeze([...PUBLIC_SWAP_PROFILES, ROBINHOOD_MAINNET_SWAP, BASE_MAINNET_SWAP, ARBITRUM_MAINNET_SWAP]);
 export function swapProfile(chain: string | number | null | undefined): SwapProfile | null {
   return SWAP_PROFILES.find(profile => profile.chainRef === chain || profile.chainId === chain) ?? null;
 }

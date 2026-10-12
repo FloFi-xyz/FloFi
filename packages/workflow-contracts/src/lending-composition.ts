@@ -10,8 +10,8 @@ export type LendingCompositionFields = {
   supplyAmount: string; borrowAmount: string; slippageBps: number; owner: string;
 };
 export const LENDING_NODE_IDS = ['lending-supply', 'lending-borrow', 'lending-swap'] as const;
-export function isLendingComposition(workflow: {readonly nodes:readonly {readonly actionType:string}[]}): boolean {
-  return workflow.nodes.some(n => n.actionType === 'supply') && workflow.nodes.some(n => n.actionType === 'borrow');
+export function isLendingComposition(workflow: {readonly nodes:readonly {readonly actionType:string; readonly nodeId?:string}[]}): boolean {
+  return workflow.nodes.length === 3 && [['lending-supply', 'supply'], ['lending-borrow', 'borrow'], ['lending-swap', 'asset.swap.exact-input']].every(([id, action]) => workflow.nodes.some(n => n.nodeId === id && n.actionType === action));
 }
 /** A finite three-node graph; the health check is a policy checkpoint, never a transaction. */
 export function createLendingCompositionWorkflow(workflowId: string, revision: number, f: LendingCompositionFields): SemanticWorkflow {

@@ -13,7 +13,7 @@
  * validated when the log is extended, and terminal phases never change.
  */
 import { createHash, randomBytes } from 'node:crypto';
-import { CROSSCHAIN_ROUTER_BASE_ARBITRUM as MAINNET, resolveWorkflowCapability, type RouterProfile } from '@defi-workflow-engine/action-registry';
+import { ARBITRUM_ONE, CROSSCHAIN_ROUTER_BASE_ARBITRUM as MAINNET, resolveWorkflowCapability, type RouterProfile } from '@defi-workflow-engine/action-registry';
 import { createBaseSepoliaReviewContext, validateAuthoringWorkflow, validateRouterBridgeWorkflow } from '@defi-workflow-engine/reference-linter';
 import { compileRouterArtifacts, decodeErc20Approval, decodeErc20Transfer, decodeFilledRelay, decodeFundsDeposited, decodeRouterApprove, encodeRouterApprove,
   EIP1967_IMPLEMENTATION_SLOT, ROUTER_SELECTORS as SEL, ROUTER_TOPICS as TOPIC, type FilledRelay, type FundsDeposited, type RouterArtifacts,
@@ -23,6 +23,7 @@ import { assertRouterTransition, compareRoutes, hashArtifactBytes, routeCommitme
 import { validateArtifact } from '@defi-workflow-engine/workflow-contracts/schemas';
 import { utf8, type ExecutionStorage } from '@defi-workflow-engine/reference-executor';
 import { verifyOwnerSubmission, type Rpc } from './public-testnet-service.ts';
+import { nitroGasLimit, nitroMaxFeePerGas, nitroPostingGas } from './arbitrum-fees.ts';
 import type { RouteProvider, RouteRequest, TransferHint } from './router-providers.ts';
 
 export const ROUTER_RUN_ID = /^xroute-[a-f0-9]{32}$/;
@@ -31,7 +32,8 @@ export type RouterAttemptState = 'PREPARED' | 'CANCELLED' | 'SUBMITTING' | 'SUBM
   'RECONCILIATION_REQUIRED';
 export type RouterTx = { readonly chainId: string; readonly from: string; readonly to: string; readonly data: string; readonly value: '0x0'; readonly gas: string;
   readonly maxFeePerGas: string; readonly maxPriorityFeePerGas: string };
-export type RouterCall = { readonly purpose: 'APPROVAL' | 'BRIDGE_DEPOSIT'; readonly to: string; readonly data: string; readonly gasUsed: string; readonly gasLimit: string };
+export type RouterCall = { readonly purpose: 'APPROVAL' | 'BRIDGE_DEPOSIT'; readonly to: string; readonly data: string; readonly gasUsed: string; readonly gasLimit: string;
+  /** Per-call OP Stack bound; absent on older durable Reviews. Nitro posting gas is already in gasLimit. */ readonly l1FeeUpperBoundWei?: string | null };
 export type ProviderConsideration = { readonly provider: RoutingProvider; readonly outcome: 'SELECTED' | 'AVAILABLE' | 'REFUSED' | 'UNAVAILABLE';
   readonly code: string | null; readonly minimumOutput: string | null; readonly feeTotal: string | null; readonly routeCommitment: string | null };
 export type RouterReview = {
@@ -75,7 +77,8 @@ export type RouterReceipt = { readonly transactionHash: string; readonly status:
 export type RouterAttempt = { readonly attemptId: string; readonly step: RouterStep; readonly state: RouterAttemptState; readonly reviewCommitment: string;
   readonly nonce: string; readonly preparedAtBlock: number; readonly createdAt: string; readonly tx: RouterTx;
   readonly transactionHash: string | null; readonly replacementHash: string | null; readonly receipt: RouterReceipt | null; readonly reconciled: boolean;
-  readonly note: string | null };
+  readonly note: string | null;
+  /** Durable source log cursor; absence in older runs starts at preparedAtBlock. */ readonly depositScanFrom?: number };
 export type SourceSettlement = { readonly transactionHash: string; readonly blockNumber: number; readonly blockHash: string; readonly timestamp: number;
   readonly spokePool: string; readonly depositId: string; readonly depositor: string; readonly recipient: string; readonly inputAmount: string; readonly outputAmount: string;
   readonly quoteTimestamp: number; readonly fillDeadline: number; readonly ownerDebit: string; readonly safe: boolean };
@@ -169,6 +172,7 @@ export function validateRouterLog(bytes: Uint8Array, profile: RouterProfile = MA
         new Set(run.attempts.map(a => a.attemptId)).size !== run.attempts.length ||
         run.attempts.some(a => !isObject(a as unknown) || !a.attemptId.startsWith(run.id + '.') || a.tx.from !== run.owner || a.tx.chainId !== SRC.chainHex ||
           (a.transactionHash !== null && !HASH.test(a.transactionHash)) || (a.replacementHash !== null && !HASH.test(a.replacementHash)) ||
+          (a.depositScanFrom !== undefined && (!Number.isSafeInteger(a.depositScanFrom) || a.depositScanFrom < a.preparedAtBlock)) ||
           (a.reconciled && (a.state !== 'CONFIRMED' || a.transactionHash === null))) ||
         run.attempts.filter(a => ACTIVE.includes(a.state)).length > 1 || run.attempts.filter(a => a.step === 'DEPOSIT' && a.state === 'CONFIRMED').length > 1 ||
         (run.verdict === 'RECONCILED') !== (run.evidence !== null) || (run.verdict === 'RECONCILED') !== (run.phase === 'RECONCILED') ||
@@ -196,6 +200,7 @@ export function validateRouterLog(bytes: Uint8Array, profile: RouterProfile = MA
         const after = run.attempts[index]!;
         if (after.attemptId !== before.attemptId || after.step !== before.step || after.nonce !== before.nonce || !same(after.tx, before.tx) ||
             after.reviewCommitment !== before.reviewCommitment || after.preparedAtBlock !== before.preparedAtBlock ||
+            (before.depositScanFrom !== undefined && (after.depositScanFrom ?? 0) < before.depositScanFrom) ||
             (before.transactionHash !== null && after.transactionHash !== before.transactionHash) ||
             (before.replacementHash !== null && after.replacementHash !== before.replacementHash) ||
             (TERMINAL.includes(before.state) && (after.state !== before.state || !same(after.receipt, before.receipt))))
@@ -339,6 +344,35 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
     if (!SRC.l1DataFee) return 0n;
     try { return wordAt(await call(rpc, '0x420000000000000000000000000000000000000f', '0xf1c7a58b' + word(BigInt(dataBytes + 120)), at), 0); } catch { return null; }
   }
+  const nitroSource = SRC.chainId === ARBITRUM_ONE.chainId;
+  const postingGas = (owner: string, call: { to: string; data: string }, at: string) =>
+    nitroPostingGas(rpc, owner, call, at, 'ROUTER_NITRO_FEE_UNAVAILABLE');
+  async function feePrice(baseFee: bigint): Promise<{ priority: bigint; maximum: bigint }> {
+    if (nitroSource) {
+      const price = quantity(await rpc('eth_gasPrice', []));
+      if (price <= 0n || price >= 1n << 128n) fail('ROUTER_FEE_INVALID');
+      return { priority: 0n, maximum: nitroMaxFeePerGas(price) };
+    }
+    const priority = quantity(await rpc('eth_maxPriorityFeePerGas', []));
+    return { priority, maximum: baseFee * 2n + priority };
+  }
+  async function assertRequestFees(review: RouterReview, tx: RouterTx, at: string, invalid: (code: string) => Promise<never>): Promise<void> {
+    if (quantity(await rpc('eth_chainId', [])) !== BigInt(SRC.chainId)) fail('ROUTER_WRONG_SOURCE_CHAIN');
+    const block = await rpc('eth_getBlockByNumber', [at, false]);
+    if (!isObject(block)) fail('ROUTER_RPC_INVALID');
+    const price = nitroSource ? quantity(await rpc('eth_gasPrice', [])) : quantity(block.baseFeePerGas) + BigInt(tx.maxPriorityFeePerGas);
+    if (price <= 0n || price > BigInt(tx.maxFeePerGas) || BigInt(tx.maxFeePerGas) > BigInt(review.fees.maxFeePerGas))
+      return invalid('ROUTER_FEES_CHANGED_REVIEW_REQUIRED');
+    const estimate = quantity(await rpc('eth_estimateGas', [{ from: tx.from, to: tx.to, value: tx.value, data: tx.data }, at]));
+    if (estimate <= 0n || estimate > BigInt(tx.gas)) return invalid('ROUTER_GAS_CHANGED_REVIEW_REQUIRED');
+    const l1 = await l1FeeUpperBound((tx.data.length - 2) / 2, at);
+    const reviewedCall = review.calls.find(c => c.to === tx.to && c.data === tx.data);
+    const l1Bound = reviewedCall?.l1FeeUpperBoundWei === undefined ? review.fees.l1FeeUpperBoundWei : reviewedCall.l1FeeUpperBoundWei;
+    if (!reviewedCall || l1 === null || l1Bound === null || l1 > BigInt(l1Bound))
+      return invalid('ROUTER_L1_FEES_CHANGED_REVIEW_REQUIRED');
+    const balance = quantity(await rpc('eth_getBalance', [tx.from, at]));
+    if (balance < BigInt(tx.gas) * BigInt(tx.maxFeePerGas) + l1) fail('ROUTER_INSUFFICIENT_GAS_ETH');
+  }
   function intentOf(workflow: SemanticWorkflow) {
     const checked = validateAuthoringWorkflow(workflow, createBaseSepoliaReviewContext()) as SemanticWorkflow;
     const fields = validateRouterBridgeWorkflow(checked);
@@ -361,6 +395,8 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
     for (const id of f.providers) {
       try {
         const route = await providers[id].quote(routeRequest(owner, recipient, f.amount, f.slippageBps, probe.depositQuoteTimeBuffer));
+        if (route.routingProvider !== id || route.sourceChain !== SRC.chain || route.destinationChain !== DST.chain ||
+            route.inputToken.address !== SRC.token || route.outputToken.address !== DST.token) fail('ROUTER_ROUTE_INTENT_MISMATCH');
         considered.push({ provider: id, outcome: selected ? 'AVAILABLE' : 'SELECTED', code: null, minimumOutput: route.minimumOutput, feeTotal: route.feeTotal,
           routeCommitment: routeCommitment(route) });
         selected ??= route;
@@ -381,10 +417,15 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
       { purpose: 'BRIDGE_DEPOSIT' as const, to: route.deposit.to, data: route.deposit.data }];
     const simulated = await simulate(owner, plan, source.block.number);
     const { deposit, ownerDebit } = depositMatches(route, simulated.at(-1)!.logs, owner);
-    const priority = quantity(await rpc('eth_maxPriorityFeePerGas', [])), maxFeePerGas = source.block.baseFee * 2n + priority;
-    const calls: RouterCall[] = plan.map((c, i) => ({ ...c, gasUsed: simulated[i]!.gasUsed.toString(), gasLimit: (simulated[i]!.gasUsed * 13n / 10n + 25_000n).toString() }));
+    const { priority, maximum: maxFeePerGas } = await feePrice(source.block.baseFee);
+    const calls: RouterCall[] = await Promise.all(plan.map(async (c, i) => {
+      const gas = simulated[i]!.gasUsed;
+      const gasLimit = nitroSource ? nitroGasLimit(gas + await postingGas(owner, c, at)) : gas * 13n / 10n + 25_000n;
+      const l1 = await l1FeeUpperBound((c.data.length - 2) / 2, at);
+      return { ...c, gasUsed: gas.toString(), gasLimit: gasLimit.toString(), l1FeeUpperBoundWei: l1?.toString() ?? null };
+    }));
     const gasLimitTotal = calls.reduce((sum, c) => sum + BigInt(c.gasLimit), 0n), execution = gasLimitTotal * maxFeePerGas;
-    const l1 = await Promise.all(calls.map(c => l1FeeUpperBound((c.data.length - 2) / 2, at)));
+    const l1 = calls.map(c => c.l1FeeUpperBoundWei === null ? null : BigInt(c.l1FeeUpperBoundWei!));
     const l1Total = l1.every(v => v !== null) ? l1.reduce((sum, v) => sum + v!, 0n) : null;
     if (source.native < execution + (l1Total ?? 0n)) fail('ROUTER_INSUFFICIENT_GAS_ETH');
     const observed = now(), depositMustLandBy = route.bridge.quoteTimestamp + source.depositQuoteTimeBuffer;
@@ -393,7 +434,7 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
     const expiresAt = new Date(expiresMs).toISOString(), commitment = routeCommitment(route);
     const artifacts = compileRouterArtifacts({ workflow, nodeId: f.nodeId, route, routeCommitment: commitment, owner, calls,
       simulation: { block: source.block.number, observedAt: observed.toISOString(), gasLimitTotal: gasLimitTotal.toString(), executionFeeUpperBoundWei: execution.toString(),
-        depositId: deposit.depositId.toString() }, expiresAt });
+        depositId: deposit.depositId.toString(), ...l1Total !== null ? { totalFeeUpperBoundWei: (execution + l1Total).toString() } : {} }, expiresAt });
     const review: Omit<RouterReview, 'commitment'> = {
       format: 'flofi.router-review.v1', owner, recipient, recipientKind: f.recipient === 'CONNECTED_OWNER' ? 'CONNECTED_OWNER' : 'EXPLICIT',
       workflowHash: hashArtifactBytes('semantic-workflow', new TextEncoder().encode(JSON.stringify(workflow))), revision: workflow.revision, nodeId: f.nodeId,
@@ -479,22 +520,38 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
    * when its hash was lost and the owner's nonce never moved (a relayed MetaMask redemption). Only blocks in which the deposit
    * could still land (before the SpokePool quote window closes) are scanned.
    */
-  async function discoverDeposit(record: RouterRecord, attempt: RouterAttempt): Promise<string | null> {
-    const b = record.review.route.bridge, latest = Number(quantity(await rpc('eth_blockNumber', [])));
-    const window = Math.max(0, Math.min(4_000, Math.ceil((record.review.deadlines.depositMustLandBy * 1000 - Date.parse(attempt.createdAt)) / 2_000) + 60));
-    const last = Math.min(latest, attempt.preparedAtBlock + window);
-    for (let from = attempt.preparedAtBlock; from <= last; from += 1_000) {
-      const logs = await rpc('eth_getLogs', [{ address: SRC.spokePool, fromBlock: tag(from), toBlock: tag(Math.min(from + 999, last)),
+  async function discoverDeposit(record: RouterRecord, attempt: RouterAttempt): Promise<{ hash: string | null; nextBlock: number; complete: boolean }> {
+    const b = record.review.route.bridge, latest = await head(rpc, SRC.chainId, 'ROUTER_WRONG_SOURCE_CHAIN');
+    const safeNumber = await safeHead(rpc), safeBlock = await rpc('eth_getBlockByNumber', [tag(safeNumber), false]);
+    if (!isObject(safeBlock)) fail('ROUTER_RPC_INVALID');
+    // Locate the last eligible source block by timestamp. Never assume Base's block interval on Nitro.
+    // Persist only safe ranges: an unsafe empty block can be reorganized to contain this deposit.
+    let last = Math.min(latest.number, safeNumber);
+    if (last >= attempt.preparedAtBlock && Number(quantity(safeBlock.timestamp)) > record.review.deadlines.depositMustLandBy) {
+      let low = attempt.preparedAtBlock, high = last;
+      while (high - low > 1) {
+        const middle = low + Math.floor((high - low) / 2), block = await rpc('eth_getBlockByNumber', [tag(middle), false]);
+        if (!isObject(block)) fail('ROUTER_RPC_INVALID');
+        if (Number(quantity(block.timestamp)) <= record.review.deadlines.depositMustLandBy) low = middle; else high = middle;
+      }
+      last = low;
+    }
+    let from = attempt.depositScanFrom ?? attempt.preparedAtBlock;
+    for (let window = 0; from <= last && window < SCAN_WINDOWS_PER_OBSERVATION; window++) {
+      const to = Math.min(from + 999, last);
+      const logs = await rpc('eth_getLogs', [{ address: SRC.spokePool, fromBlock: tag(from), toBlock: tag(to),
         topics: [TOPIC.fundsDeposited, '0x' + word(BigInt(DST.chainId)), null, '0x' + addrWord(b.depositor)] }]);
       if (!Array.isArray(logs)) fail('ROUTER_RPC_INVALID');
       for (const entry of logs) {
         if (!isObject(entry) || typeof entry.transactionHash !== 'string') fail('ROUTER_RPC_INVALID');
         const d = decodeFundsDeposited(entry as unknown as RouterLog);
         if (d.recipient === record.review.route.recipient && d.inputAmount === BigInt(b.inputAmount) && d.outputAmount === BigInt(b.outputAmount) &&
-            d.quoteTimestamp === b.quoteTimestamp && d.fillDeadline === b.fillDeadline && d.outputToken === DST.token) return entry.transactionHash.toLowerCase();
+            d.quoteTimestamp === b.quoteTimestamp && d.fillDeadline === b.fillDeadline && d.outputToken === DST.token)
+          return { hash: entry.transactionHash.toLowerCase(), nextBlock: from, complete: true };
       }
+      from = to + 1;
     }
-    return null;
+    return { hash: null, nextBlock: from, complete: from > last };
   }
   const sameIntent = (attempt: RouterAttempt, tx: Record<string, unknown>) => typeof tx.to === 'string' && tx.to.toLowerCase() === attempt.tx.to &&
     typeof tx.input === 'string' && tx.input.toLowerCase() === attempt.tx.data && quantity(tx.value) === 0n && quantity(tx.chainId) === BigInt(SRC.chainId);
@@ -512,6 +569,14 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
           { ...attempt, state: 'RECONCILIATION_REQUIRED', note: 'ROUTER_TRANSACTION_MISMATCH' }));
       throw cause;
     }
+    const reviewedCall = record.review.calls.find(c => c.to === attempt.tx.to && c.data === attempt.tx.data);
+    const l1Bound = reviewedCall?.l1FeeUpperBoundWei === undefined ? record.review.fees.l1FeeUpperBoundWei : reviewedCall.l1FeeUpperBoundWei;
+    if (verified.direct && (!isObject(tx) || quantity(tx.nonce) !== BigInt(attempt.nonce) || quantity(tx.gas) > BigInt(attempt.tx.gas) ||
+        quantity(tx.maxFeePerGas ?? tx.gasPrice) > BigInt(attempt.tx.maxFeePerGas) || verified.gasUsed > BigInt(attempt.tx.gas) ||
+        quantity(tx.maxPriorityFeePerGas ?? '0x0') > BigInt(attempt.tx.maxPriorityFeePerGas) ||
+        verified.effectiveGasPrice > BigInt(attempt.tx.maxFeePerGas) || verified.l1Fee > BigInt(l1Bound ?? '0')))
+      return save(replaceAttempt({ ...transition(record, 'RECONCILIATION_REQUIRED'), verdict: 'DIVERGENT', authorization: null, error: 'ROUTER_TRANSACTION_FEE_BOUNDS_MISMATCH' },
+        { ...attempt, state: 'RECONCILIATION_REQUIRED', note: 'ROUTER_TRANSACTION_FEE_BOUNDS_MISMATCH' }));
     const receipt: RouterReceipt = { transactionHash: hash, status: verified.status, blockNumber: verified.blockNumber, blockHash: hex(raw.blockHash), from: verified.txFrom,
       gasCostWei: (verified.gasUsed * verified.effectiveGasPrice + verified.l1Fee).toString(), submissionKind: verified.delegated ? 'DELEGATED_SINGLE' : 'DIRECT', contentHash: digest(raw) };
     if (verified.status === 0) {
@@ -546,7 +611,9 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
         { ...attempt, state: 'RECONCILIATION_REQUIRED', receipt, note: code }));
     }
   }
-  async function observeAttempt(record: RouterRecord, attempt: RouterAttempt): Promise<RouterRecord> {
+  async function observeAttempt(recordInput: RouterRecord, attemptInput: RouterAttempt): Promise<RouterRecord> {
+    let record = recordInput, attempt = attemptInput;
+    let depositScanComplete = true;
     if (attempt.state === 'PREPARED') {
       // The browser stopped before the durable handoff: no wallet request can exist for this attempt.
       return save(replaceAttempt(deauthorized(record, 'ROUTER_WALLET_NOT_SUBMITTED'), { ...attempt, state: 'CANCELLED', note: 'ROUTER_WALLET_NOT_SUBMITTED' }));
@@ -554,7 +621,12 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
     let hash = attempt.replacementHash ?? attempt.transactionHash;
     let raw = hash ? await rpc('eth_getTransactionReceipt', [hash]) : null;
     if (raw === null && attempt.step === 'DEPOSIT') {
-      const logged = await discoverDeposit(record, attempt);
+      const scan = await discoverDeposit(record, attempt), logged = scan.hash;
+      depositScanComplete = scan.complete;
+      if (scan.nextBlock > (attempt.depositScanFrom ?? attempt.preparedAtBlock)) {
+        attempt = { ...attempt, depositScanFrom: scan.nextBlock };
+        record = await save(replaceAttempt(record, attempt));
+      }
       if (logged && logged !== hash) {
         const current: RouterAttempt = { ...attempt, state: 'PENDING', transactionHash: attempt.transactionHash ?? logged,
           replacementHash: attempt.transactionHash !== null && attempt.transactionHash !== logged ? logged : attempt.replacementHash };
@@ -566,10 +638,11 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
     if (raw === null) {
       const found = await discoverByNonce(attempt);
       if (!found.consumed) {
-        const latest = await head(rpc, SRC.chainId, 'ROUTER_WRONG_SOURCE_CHAIN');
+        await head(rpc, SRC.chainId, 'ROUTER_WRONG_SOURCE_CHAIN');
         const pending = quantity(await rpc('eth_getTransactionCount', [record.owner, 'pending']));
         // A deposit can no longer move funds once the SpokePool's quote-time window has passed; an abandoned approval is dropped.
-        const expired = attempt.step === 'DEPOSIT' ? latest.timestamp > record.review.deadlines.depositMustLandBy
+        const safe = attempt.step === 'DEPOSIT' ? await rpc('eth_getBlockByNumber', [profile.finality, false]) : null;
+        const expired = attempt.step === 'DEPOSIT' ? depositScanComplete && isObject(safe) && Number(quantity(safe.timestamp)) > record.review.deadlines.depositMustLandBy
           : now().getTime() - Date.parse(attempt.createdAt) > APPROVAL_ABANDON_MS && pending === BigInt(attempt.nonce);
         if (expired) {
           const next = { ...attempt, state: 'NOT_FOUND' as const, note: 'ROUTER_SUBMISSION_EXPIRED_NOT_EXECUTED' };
@@ -632,6 +705,7 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
       return { ok: false, divergent: 'ROUTER_FILL_MISMATCH' };
     if (f.updatedRecipient !== route.recipient) return { ok: false, divergent: 'ROUTER_FILL_RECIPIENT_MISMATCH' };
     if (f.updatedOutputAmount < BigInt(route.minimumOutput)) return { ok: false, divergent: 'ROUTER_FILL_BELOW_MINIMUM' };
+    if (f.updatedOutputAmount > BigInt(route.expectedOutput)) return { ok: false, divergent: 'ROUTER_FILL_ABOVE_MAXIMUM' };
     const transfers = logs.filter(l => String(l.address).toLowerCase() === DST.token && String(l.topics?.[0]).toLowerCase() === TOPIC.transfer).map(decodeErc20Transfer)
       .filter(t => t.to === route.recipient);
     if (transfers.length !== 1 || transfers[0]!.amount !== f.updatedOutputAmount) return { ok: false, divergent: 'ROUTER_FILL_TRANSFER_MISMATCH' };
@@ -662,7 +736,7 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
     }
     // 2. Destination fill: provider hint verified on chain, else a durable log scan by (origin chain, deposit id).
     let lastHint = record.lastHint;
-    if (!record.destination && record.phase !== 'RECOVERY_REQUIRED') {
+    if (!record.destination) {
       const h = await hint(record);
       if (h && !sameHint(h, lastHint)) lastHint = h;
       let found: DestinationFill | null = null;
@@ -672,7 +746,7 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
         else if (check.divergent) return save({ ...transition(record, 'RECONCILIATION_REQUIRED'), verdict: 'DIVERGENT', lastHint, error: check.divergent });
       }
       let scanFrom = record.scanFrom;
-      const latest = Number(quantity(await drpc('eth_blockNumber', [])));
+      const latest = await safeHead(drpc);
       for (let window = 0; !found && window < SCAN_WINDOWS_PER_OBSERVATION && scanFrom <= latest; window++) {
         const to = Math.min(scanFrom + profile.destinationScanBlocks - 1, latest);
         const logs = await drpc('eth_getLogs', [{ address: DST.spokePool, fromBlock: tag(scanFrom), toBlock: tag(to),
@@ -695,13 +769,14 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
       const durableScan = found || scanFrom - record.scanFrom >= SCAN_PERSIST_BLOCKS ? scanFrom : record.scanFrom;
       const scannedTo = scanFrom - 1;
       record = { ...record, scanFrom: durableScan, lastHint };
-      if (found) record = { ...transition(record, 'DESTINATION_OBSERVED'), destination: found, error: null };
+      if (found) record = await save({ ...transition(record, 'DESTINATION_OBSERVED'), destination: found, error: null });
       else {
         // No fill can land after the fill deadline: once the scan has covered a destination block past it, recovery is required.
         const covered = scannedTo >= 0 ? await drpc('eth_getBlockByNumber', [tag(Math.min(scannedTo, latest)), false]) : null;
         const pastDeadline = isObject(covered) && Number(quantity(covered.timestamp)) > record.source!.fillDeadline;
-        if (pastDeadline) return save({ ...transition(record, 'RECOVERY_REQUIRED'), scanFrom, error: 'ROUTER_FILL_DEADLINE_PASSED_REFUND_EXPECTED' });
-        return save({ ...record, error: 'ROUTER_DESTINATION_PENDING' });
+        if (pastDeadline && record.phase !== 'RECOVERY_REQUIRED')
+          return save({ ...transition(record, 'RECOVERY_REQUIRED'), scanFrom, error: 'ROUTER_FILL_DEADLINE_PASSED_REFUND_EXPECTED' });
+        if (record.phase !== 'RECOVERY_REQUIRED') return save({ ...record, error: 'ROUTER_DESTINATION_PENDING' });
       }
     }
     // 3. Recovery: a refund to the refund address on the source chain, verified on chain from a provider hint.
@@ -859,11 +934,13 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
       if (state.nonce !== state.pendingNonce) fail('ROUTER_PENDING_TRANSACTION');
       if (step === 'DEPOSIT' && state.block.timestamp + 120 > review.deadlines.depositMustLandBy - profile.depositSafetyMarginSeconds) return invalidate('ROUTER_REVIEW_EXPIRED');
       const reviewed = review.calls[index]!;
-      const priority = BigInt(review.fees.maxPriorityFeePerGas), maxFeePerGas = state.block.baseFee * 2n + priority;
+      const priority = BigInt(review.fees.maxPriorityFeePerGas), maxFeePerGas = BigInt(review.fees.maxFeePerGas);
+      if (simulated.some((c, i) => c.gasUsed > BigInt(remaining[i]!.gasLimit))) return invalidate('ROUTER_GAS_CHANGED_REVIEW_REQUIRED');
       if (state.native < BigInt(reviewed.gasLimit) * maxFeePerGas) fail('ROUTER_INSUFFICIENT_GAS_ETH');
       const attemptId = `${id}.${step.toLowerCase()}.${record.attempts.length + 1}`;
       const tx: RouterTx = { chainId: SRC.chainHex, from: owner, to: reviewed.to, data: reviewed.data, value: '0x0', gas: tag(BigInt(reviewed.gasLimit)),
         maxFeePerGas: tag(maxFeePerGas), maxPriorityFeePerGas: tag(priority) };
+      await assertRequestFees(review, tx, tag(state.block.number), invalidate);
       const attempt: RouterAttempt = { attemptId, step, state: 'PREPARED', reviewCommitment: review.commitment, nonce: state.nonce.toString(), preparedAtBlock: state.block.number,
         createdAt: now().toISOString(), tx, transactionHash: null, replacementHash: null, receipt: null, reconciled: false, note: null };
       record = await prepareAttempt(record, attempt);
@@ -877,6 +954,10 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
       const [latest, pending] = await Promise.all([rpc('eth_getTransactionCount', [record.owner, 'latest']).then(quantity),
         rpc('eth_getTransactionCount', [record.owner, 'pending']).then(quantity)]);
       if (latest !== BigInt(attempt.nonce) || pending !== BigInt(attempt.nonce)) fail('ROUTER_NONCE_CHANGED');
+      await assertRequestFees(record.review, attempt.tx, 'latest', async code => {
+        await save(replaceAttempt(deauthorized(record, code, [], true), { ...attempt, state: 'CANCELLED', note: code }));
+        return fail(code);
+      });
       const next = replaceAttempt(record, { ...attempt, state: 'SUBMITTING' });
       return save(attempt.step === 'DEPOSIT' ? transition(next, 'SOURCE_SUBMITTED') : next);
     }); },

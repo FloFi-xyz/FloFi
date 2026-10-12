@@ -32,3 +32,5 @@ export * from './uniswap-liquidity.js';
 
 export * from './lending-composition.js';
 export * from './catalog-swap.js';
+
+export { validateWorkflowDraft } from './workflow-draft.js';

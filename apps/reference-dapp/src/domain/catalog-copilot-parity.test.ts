@@ -76,7 +76,7 @@ describe('BUILD-BASE-001 Copilot parity on catalog networks', () => {
   });
   it('never infers real funds: an unnamed or test-worded mainnet is asked, not chosen', () => {
     const unnamed = new CopilotSession().say('Send 5 USDC to ' + RECIPIENT, intent.action(act.transfer({ asset: 'USDC', amount: '5', recipient: RECIPIENT })))!;
-    expect(unnamed).toMatchObject({ kind: 'CLARIFICATION', options: ['Base', 'Robinhood Chain'] });
+    expect(unnamed).toMatchObject({ kind: 'CLARIFICATION', options: ['Base', 'Arbitrum One', 'Robinhood Chain'] });
     const testWords = new CopilotSession().say('Swap 10 USDC for cbBTC on the Base test network', intent.action(act.swap({ network: 'BASE', inputAsset: 'USDC', outputAsset: 'cbBTC', amount: '10' })))!;
     expect(testWords).toMatchObject({ kind: 'CLARIFICATION' });
     expect(testWords.text).toContain('uses real funds');
@@ -109,7 +109,7 @@ describe('BUILD-BASE-001 Copilot parity on catalog networks', () => {
     expectParity(s, supply.command!, supply.sentence!);
     const bridge = new CopilotSession().say('Move 20 USDC from Arbitrum over to Base', intent.action(act.bridge({ sourceNetwork: 'ARBITRUM', destinationNetwork: 'BASE', asset: 'USDC', amount: '20' })))!;
     expect(bridge).toMatchObject({ kind: 'PROPOSAL', sentence: 'bridge 20 USDC from Arbitrum to Base via auto slippage 50 bps', command: { type: 'ADD_ROUTER_BRIDGE' } });
-    const out = new CopilotSession().say('Move 5 USDG from Robinhood to Base', intent.action(act.bridge({ sourceNetwork: 'ROBINHOOD', destinationNetwork: 'BASE', asset: 'USDG', amount: '5' })))!;
+    const out = new CopilotSession().say('Please move 5 USDG from Robinhood to Base', intent.action(act.bridge({ sourceNetwork: 'ROBINHOOD', destinationNetwork: 'BASE', asset: 'USDG', amount: '5' })))!;
     expect(out).toMatchObject({ kind: 'PROPOSAL', sentence: 'bridge 5 USDG from Robinhood Chain to Base via auto slippage 50 bps' });
     const wrongToken = new CopilotSession().say('Bridge 5 USDC from Robinhood to Base', intent.action(act.bridge({ sourceNetwork: 'ROBINHOOD', destinationNetwork: 'BASE', asset: 'USDC', amount: '5' })))!;
     expect(wrongToken).toMatchObject({ kind: 'UNSUPPORTED' });

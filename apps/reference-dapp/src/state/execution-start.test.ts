@@ -66,6 +66,14 @@ describe('existing initial execution capabilities', () => {
     const result = useExecutionStart('public', wallet()); expect(result.ready).toBe(true); expect(result.prompt).toContain('only if');
     runtime.recoveryOnly = true; expect(useExecutionStart('public', wallet()).ready).toBe(false);
   });
+  it.each(['PREPARED', 'UNKNOWN', 'PENDING', 'DIVERGENT'] as const)('refuses a new wallet request for an unresolved %s owner swap', state => {
+    const runtime = f.stores.public!;
+    runtime.available = true;
+    runtime.run = { reviewedManifestHash: 'hash', quote: { manifestHash: 'hash' },
+      attempts: [{ state }], outcome: null, ...(state === 'DIVERGENT' ? { divergence: 'TRANSACTION_MISMATCH' } : {}) };
+    expect(useExecutionStart('public', wallet())).toMatchObject({ ready: false, started: true });
+    expect(runtime.execute).not.toHaveBeenCalled();
+  });
   it.each(['unavailable', 'across'] as const)('keeps %s preview paths fail-closed without a callable start', kind => {
     expect(useExecutionStart(kind, wallet())).toMatchObject({ ready: false, start: null });
   });

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { editorReducer } from './editor';
 import { describe, expect, it } from 'vitest';
 import { createBaseSepoliaReviewContext, validateAuthoringWorkflow } from '@defi-workflow-engine/reference-linter';
 import { canvasAddCommand } from './canvas-authoring';
@@ -172,11 +173,15 @@ describe('zero-based product authoring without invalid executable IR', () => {
     expect(financial(applied)[0]!.inputs.find(field => field.kind === 'QUANTITY')).toMatchObject({ value: { amount: '3000000' } });
   });
 
-  it('refuses a new isolated Bridge when its constructor would replace already-authored actions', () => {
+  it('adds a Bridge instance while preserving already-authored actions for generic sequencing', () => {
     const configured = apply(input(start('swap'), '2'));
     const adding = editorHistoryReducer(configured, { type: 'START_ACTION_SETUP', action: 'bridge', position: { x: 360, y: 90 } });
     const entered = input(adding, '3');
-    expect(() => canvasAmountCommand(entered.editor, entered.actionSetup, entered.amountInputs, entered.actionSetup!.id, context)).toThrow('ACTION_REQUIRES_SEPARATE_WORKFLOW');
+    const command = canvasAmountCommand(entered.editor, entered.actionSetup, entered.amountInputs, entered.actionSetup!.id, context);
+    const applied = editorReducer(entered.editor, command, context);
+    expect(applied.error).toBeNull();
+    expect(applied.workflow.nodes.filter(n => !n.actionType.startsWith('mock-'))).toHaveLength(2);
+    expect(applied.workflow.nodes).toContainEqual(configured.editor.workflow.nodes.find(n => !n.actionType.startsWith('mock-')));
     expect(entered.editor.workflow).toBe(configured.editor.workflow);
     expect(incomplete(entered)).toBe(true);
   });

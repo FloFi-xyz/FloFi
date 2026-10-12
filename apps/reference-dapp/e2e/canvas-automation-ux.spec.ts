@@ -6,11 +6,12 @@ import { configureCanvasAction, configureCanvasPool } from './composer-authoring
 for (const action of ['swap', 'bridge', 'supply', 'borrow', 'repay', 'withdraw', 'pool', 'lending', 'transfer']) test(`Canvas parity without Advanced action setup: ${action}`, async ({ page }) => {
   await installSupplyWallet(page); await page.goto('/app');
   await expect(page.getByText('Advanced action setup', { exact: true })).toHaveCount(0);
-  await page.getByRole('button', { name: action === 'lending' ? 'Add Supply → Borrow → Swap' : `Add ${action}`, exact: true }).click();
+  // UX-005: the canonical `transfer` action is presented as Send.
+  await page.getByRole('button', { name: action === 'lending' ? 'Add Supply → Borrow → Swap' : action === 'transfer' ? 'Add send' : `Add ${action}`, exact: true }).click();
   const card = page.locator('.build-flow-surface .composer-card').last();
   if (action === 'transfer') {
     await card.getByRole('textbox', { name: 'Source amount (ETH)', exact: true }).fill('0.000001');
-    await card.getByRole('button', { name: 'Review Transfer change', exact: true }).click();
+    await card.getByRole('button', { name: 'Review Send change', exact: true }).click();
     await card.getByRole('button', { name: 'Apply proposal', exact: true }).click();
   } else if (action === 'pool') await configureCanvasPool(page);
   else if (action === 'lending') await applyPendingProposal(page);
@@ -63,7 +64,7 @@ test('engineering harness is explicitly invoked separately from the normal works
 
 for (const network of ['Robinhood Chain Testnet', 'Ethereum Sepolia']) test(`Canvas native transfer authors and edits the supported self-transfer on ${network}`, async ({ page }) => {
   await installSupplyWallet(page); await page.goto('/app');
-  await page.getByRole('button', { name: 'Add transfer', exact: true }).click();
+  await page.getByRole('button', { name: 'Add send', exact: true }).click();
   const card = page.locator('.build-flow-surface .composer-card');
   await card.getByRole('button', { name: 'Select source token', exact: true }).click();
   const picker = page.getByRole('region', { name: 'Source asset picker', exact: true });
@@ -72,7 +73,7 @@ for (const network of ['Robinhood Chain Testnet', 'Ethereum Sepolia']) test(`Can
   const amount = card.getByRole('textbox', { name: 'Source amount (ETH)', exact: true });
   for (const [index, value] of ['0.000001', '0.000002'].entries()) {
     await amount.fill(value);
-    await card.getByRole('button', { name: 'Review Transfer change', exact: true }).click();
+    await card.getByRole('button', { name: 'Review Send change', exact: true }).click();
     await card.getByRole('button', { name: 'Apply proposal', exact: true }).click();
     await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', String(index + 1));
     await expect(card.getByRole('button', { name: 'Select source token', exact: true })).toHaveAttribute('title', `ETH on ${network} (${network === 'Ethereum Sepolia' ? '11155111' : '46630'})`);
@@ -82,7 +83,7 @@ for (const network of ['Robinhood Chain Testnet', 'Ethereum Sepolia']) test(`Can
   expect(transfer).toMatchObject({ actionType: 'asset.transfer', chainId: network === 'Ethereum Sepolia' ? 'eip155:11155111' : 'eip155:46630' });
   await card.getByRole('button', { name: 'Advanced Settings', exact: true }).click();
   const inspector = page.getByRole('region', { name: 'Action inspector', exact: true });
-  await expect(inspector.getByRole('heading', { name: 'Transfer settings', exact: true })).toBeVisible();
+  await expect(inspector.getByRole('heading', { name: 'Send settings', exact: true })).toBeVisible();
   await expect(inspector).toContainText('Recipient: your connected owner wallet');
   await expect(page.getByText('Advanced action setup', { exact: true })).toHaveCount(0);
 });
@@ -107,16 +108,16 @@ for (const action of ['swap', 'pool']) test(`Solana Devnet ${action} remains aut
   await expect(page.locator('.canvas-primary-action').getByRole('button', { name: 'Simulate workflow', exact: true })).toBeVisible();
 });
 
-test('new Transfer authoring controls and lifecycle copy use Portuguese', async ({ page }) => {
+test('new Send authoring controls and lifecycle copy use Portuguese', async ({ page }) => {
   await installSupplyWallet(page);
   await page.addInitScript(() => localStorage.setItem('flofi.language', 'PT'));
   await page.goto('/app');
-  await page.getByRole('button', { name: 'Adicionar transferência', exact: true }).click();
+  await page.getByRole('button', { name: 'Adicionar envio', exact: true }).click();
   const card = page.locator('.build-flow-surface .composer-card');
   await card.getByRole('textbox', { name: 'Valor de origem (ETH)', exact: true }).fill('0.000001');
-  await card.getByRole('button', { name: 'Rever alteração da transferência', exact: true }).click();
+  await card.getByRole('button', { name: 'Rever alteração do envio', exact: true }).click();
   await card.getByRole('button', { name: 'Aplicar proposta', exact: true }).click();
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '1');
   await expect(page.locator('.canvas-primary-action button')).toHaveText('Simular fluxo');
-  await expect(page.getByText('Review Transfer change', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('Review Send change', { exact: true })).toHaveCount(0);
 });

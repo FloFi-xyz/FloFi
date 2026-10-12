@@ -118,11 +118,15 @@ export function projectExecutionLifecycle(currentWorkflow: Workflow, context: Re
     }
     case 'public': {
       const r = source.state.run; if (!r) break;
-      select(r.workflow, r.quote.executionId, 'PUBLIC_TESTNET', source.state.recoveryOnly);
+      select(r.workflow, r.quote.executionId, r.quote.provenance ?? 'PUBLIC_TESTNET', source.state.recoveryOnly);
       const nodeId = r.quote.nodeId, chain = `eip155:${r.quote.chainId}`;
       const approve = r.attempts.filter(a => a.step === 'approval').at(-1), swap = r.attempts.filter(a => a.step === 'swap').at(-1);
-      if (approve) add('approval', nodeId, `Approve ${r.quote.inputSymbol}`, chain, approve.state, approve.txHash, false, true, simulationAmount(approve.receipt?.gasCostWei, 18, 'ETH'));
-      add('swap', nodeId, 'Swap', chain, swap?.state ?? null, swap?.txHash ?? null, false, false, simulationAmount(swap?.receipt?.gasCostWei, 18, 'ETH')); break;
+      const last = r.attempts.at(-1);
+      if (approve) add('approval', nodeId, `Approve ${r.quote.inputSymbol}`, chain, r.divergence && last === approve ? 'DIVERGENT' :
+        r.quote.ownerReview && approve.state === 'CONFIRMED' && approve.nativeAfter === null ? 'PENDING' : approve.state,
+        approve.txHash, false, true, simulationAmount(approve.receipt?.gasCostWei, 18, 'ETH'));
+      add('swap', nodeId, 'Swap', chain, r.divergence ? 'DIVERGENT' : r.quote.ownerReview && swap?.state === 'CONFIRMED' && !r.outcome ? 'PENDING' : swap?.state ?? null,
+        swap?.txHash ?? null, false, false, simulationAmount(swap?.receipt?.gasCostWei, 18, 'ETH')); break;
     }
     case 'router': {
       const r = source.state.record; if (!r) break;
@@ -156,7 +160,7 @@ export function projectExecutionLifecycle(currentWorkflow: Workflow, context: Re
     case 'transfer': {
       const r = source.state.record; if (!r) break;
       select(r.review.workflow, r.id, r.provenance);
-      const a = r.attempt; add('transfer', composerActions(workflow)[0]?.nodeId ?? '', 'Transfer', r.review.chain, a?.state ?? null, a?.transactionHash ?? null, Boolean(a?.reconciled));
+      const a = r.attempt; add('transfer', composerActions(workflow)[0]?.nodeId ?? '', 'Send', r.review.chain, a?.state ?? null, a?.transactionHash ?? null, Boolean(a?.reconciled));
       if (a && r.notSubmitted && !a.reconciled) { const op = operations.at(-1)!; op.state = 'not-submitted'; op.label = labels['not-submitted']; } break;
     }
     case 'fork-swap': {

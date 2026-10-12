@@ -5,7 +5,9 @@ import { validateAuthoringWorkflow, createBaseSepoliaReviewContext } from '@defi
 import { simulateSupply, assertSupplyReview, readSupplyState, readBorrowState, readWithdrawState, readSupplyLatestNonce, lendingProfile, rpcHash, supplyHex, supplyHash, AAVE_V3_BASE_SEPOLIA, type SupplyRpc, type SupplyReview } from '@defi-workflow-engine/reference-compiler';
 import { createSupplyRun, prepareSupplyAttempt, supplyTransition, discoverSupplyTransaction, validateSupplyRun, createFileExecutionStorage,
   reserveEconomicIntentIn, logMissing, utf8, SUPPLY_RUN_ID, type ExecutionStorage, type SupplyRun, type SupplyAttempt } from '@defi-workflow-engine/reference-executor';
-import { AAVE_V3_BASE } from '@defi-workflow-engine/action-registry';
+import { aaveEnvironment } from '@defi-workflow-engine/action-registry';
+import { catalogNetworkOfChain } from './catalog-networks.ts';
+import { nitroGasLimit, nitroMaxFeePerGas } from './arbitrum-fees.ts';
 import { reconcileSupplyAttempt, buildSupplyEvidence, type SupplyObservation } from '@defi-workflow-engine/reference-reconciler';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 export type SupplyWalletDiagnostic = { invoked:boolean; rejectionCode?:number; transaction:Record<string,string>|null; calls:{method:string;submission?:boolean;params:unknown[];result?:unknown;error?:unknown}[]; error:unknown; code:string };
@@ -25,14 +27,14 @@ function recoveredRepayApproval(record:SupplyRecord):boolean {
 }
 /**
  * `rpc` is the Base Sepolia read client; `rpcs` adds one chain-bound read client per further Aave profile (CAIP-2 keyed).
- * BUILD-BASE-001: with `idPrefix: 'baave'` the same service is the Base mainnet Aave runtime (real funds, PUBLIC_MAINNET or MOCKED, only chain
- * 8453); `begin` then needs the deployment's real-funds owner-execution opt-in (`executionEnabled`). Simulate and Review stay available without it.
+ * Catalog mainnets use their registered lending namespace (`baave-` Base, `araave-` Arbitrum), profile and chain-bound RPC.
+ * Mainnet execution defaults off and needs the network's owner-execution opt-in; Simulate and Review remain read-only.
  */
 export function createSupplyService(input:{rpc:SupplyRpc;rpcs?:Readonly<Partial<Record<string,SupplyRpc>>>;journalDir?:string;storage?:ExecutionStorage;provenance:'PUBLIC_TESTNET'|'PUBLIC_MAINNET'|'MOCKED';
-  idPrefix?:'supply'|'baave';executionEnabled?:boolean}) {
-  const idPrefix=input.idPrefix??'supply',executionEnabled=input.executionEnabled!==false;
+  idPrefix?:'supply'|'baave'|'araave';executionEnabled?:boolean}) {
+  const idPrefix=input.idPrefix??'supply',executionEnabled=input.executionEnabled??(idPrefix==='supply');
   // A mainnet service is never labelled as a testnet one, and a testnet service never as mainnet.
-  if(input.provenance===(idPrefix==='baave'?'PUBLIC_TESTNET':'PUBLIC_MAINNET'))throw new Error('SUPPLY_PROVENANCE_INVALID');
+  if(input.provenance===(idPrefix!=='supply'?'PUBLIC_TESTNET':'PUBLIC_MAINNET'))throw new Error('SUPPLY_PROVENANCE_INVALID');
   const ownId=(id:string)=>{idCheck(id);if(!id.startsWith(idPrefix+'-'))throw new Error('SUPPLY_ID_INVALID');return id;};
   const newId=()=>idPrefix+'-'+randomBytes(16).toString('hex');
   // Local mode keeps the original journal directory; cloud mode supplies shared durable storage instead.
@@ -42,7 +44,20 @@ export function createSupplyService(input:{rpc:SupplyRpc;rpcs?:Readonly<Partial<
   // The authored or reviewed chain selects the Aave profile and its own read client. No chain falls back to another.
   const rpcFor=(chain:string):SupplyRpc=>{const rpc=input.rpcs?.[chain]??(chain===AAVE_V3_BASE_SEPOLIA.chain?input.rpc:undefined);if(!rpc)throw new Error('SUPPLY_NETWORK_UNAVAILABLE');return rpc;};
   const rpcOf=(review:SupplyReview)=>rpcFor(review.chain);
-  const readState=(review:SupplyReview,account:string)=>(review.withdraw?readWithdrawState:review.borrow||review.repay?readBorrowState:readSupplyState)(rpcOf(review),lendingProfile(review.chain,'SUPPLY_DEPLOYMENT_UNSUPPORTED'),account,review.beneficiary);
+  const profileOf=(review:SupplyReview)=>lendingProfile(review.chain,'SUPPLY_DEPLOYMENT_UNSUPPORTED');
+  const readState=(review:SupplyReview,account:string)=>(review.withdraw?readWithdrawState:review.borrow||review.repay||'ownerBeneficiary' in profileOf(review)?readBorrowState:readSupplyState)(rpcOf(review),profileOf(review),account,review.beneficiary);
+  const simulate=(workflow:SemanticWorkflow,account:string,rpc:SupplyRpc)=>{
+    const chain=workflow.nodes.find(n=>['supply','borrow','repay','withdraw'].includes(n.actionType))?.chainId;
+    return simulateSupply(workflow,account,rpc,Date.now(),chain==='eip155:42161'?{gasLimit:nitroGasLimit,maxFeePerGas:nitroMaxFeePerGas}:undefined);
+  };
+  const feePreflight=async(review:SupplyReview,index:number,state:SupplyReview['state'])=>{
+    const tx=review.transactions[index]!,rpc=rpcOf(review);
+    const estimate=await rpc('eth_estimateGas',[{from:tx.from,to:tx.to,data:tx.data,value:tx.value},supplyHex(state.block)]);
+    if(typeof estimate!=='string'||!/^0x[0-9a-f]+$/i.test(estimate)||BigInt(estimate)<=0n||BigInt(estimate)>BigInt(review.gasLimits[index]!)||
+        BigInt(state.gasPrice)>BigInt(review.gasPrice))throw new Error('SUPPLY_FEE_BOUND_EXCEEDED');
+    const buffer=profileOf(review).l1DataFee?10_000_000_000_000n:0n;
+    if(BigInt(state.nativeBalance)<BigInt(review.gasLimits[index]!)*BigInt(review.gasPrice)+buffer)throw new Error('SUPPLY_INSUFFICIENT_ETH');
+  };
   const readLatestNonce=(review:SupplyReview,account:string)=>readSupplyLatestNonce(rpcOf(review),lendingProfile(review.chain,'SUPPLY_DEPLOYMENT_UNSUPPORTED'),account);
   // Owner nonces are per chain. Base Sepolia keeps its original lease names; any other chain is qualified by its CAIP-2 id.
   const nonceLease=(review:SupplyReview,nonce:string)=>review.chain===AAVE_V3_BASE_SEPOLIA.chain?`${review.account}-${nonce}`:`${review.chain.replace(':','-')}-${review.account}-${nonce}`;
@@ -69,6 +84,7 @@ export function createSupplyService(input:{rpc:SupplyRpc;rpcs?:Readonly<Partial<
           if(before.step!==after.step||before.nonce!==after.nonce||before.preparedAtBlock!==after.preparedAtBlock||
               JSON.stringify(before.transaction)!==JSON.stringify(after.transaction)||before.transactionHash&&before.transactionHash!==after.transactionHash||
               before.ownerNonceAfter&&before.ownerNonceAfter!==after.ownerNonceAfter||before.reconciled&&!after.reconciled||before.receipt&&JSON.stringify(before.receipt)!==JSON.stringify(after.receipt))throw new Error('SUPPLY_STORE_CORRUPT');
+          if(before.discoveryNextBlock!==undefined&&(after.discoveryNextBlock===undefined||after.discoveryNextBlock<before.discoveryNextBlock))throw new Error('SUPPLY_STORE_CORRUPT');
         }
       }
       prior=record;
@@ -95,9 +111,10 @@ export function createSupplyService(input:{rpc:SupplyRpc;rpcs?:Readonly<Partial<
       const workflow=validateAuthoringWorkflow(workflowInput,createBaseSepoliaReviewContext());
       const chain=workflow.nodes.find(n=>['supply','borrow','repay','withdraw'].includes(n.actionType))?.chainId;
       if(!chain)throw new Error('SUPPLY_REQUIRED');
-      // Each namespace serves its own networks: Base mainnet only in a `baave-` service, the testnets only in a `supply-` one.
-      if((idPrefix==='baave')!==(chain===AAVE_V3_BASE.chain))throw new Error('SUPPLY_NETWORK_UNAVAILABLE');
-      const review=await simulateSupply(workflow,account,rpcFor(chain));
+      // The registered catalog namespace binds each mainnet; testnet runs stay in `supply-`.
+      const profile=lendingProfile(chain,'SUPPLY_DEPLOYMENT_UNSUPPORTED');
+      if((aaveEnvironment(profile)==='MAINNET'?catalogNetworkOfChain(chain)?.prefixes.lending:'supply')!==idPrefix)throw new Error('SUPPLY_NETWORK_UNAVAILABLE');
+      const review=await simulate(workflow,account,rpcFor(chain));
       const id=newId();
       const record:SupplyRecord={...createSupplyRun(id,review,input.provenance),observations:[],evidence:null,error:null};
       await save(record);return record;
@@ -111,7 +128,7 @@ export function createSupplyService(input:{rpc:SupplyRpc;rpcs?:Readonly<Partial<
         const verifiedRecovery=recoveredRepayApproval(record);
         const completedApproval=record.attempts.length===1&&last?.step==='APPROVAL'&&(last.reconciled||verifiedRecovery);
         if(record.verdict!=='PENDING'&&!verifiedRecovery||!last||!completedApproval&&(!record.notSubmitted||last.reconciled||last.transactionHash))throw new Error('REPAY_RECOVERY_OBSERVE_ONLY');
-        const review=await simulateSupply(record.review.workflow,record.review.account,rpcOf(record.review));
+        const review=await simulate(record.review.workflow,record.review.account,rpcOf(record.review));
         if(!completedApproval&&review.state.nonce!==last.nonce||JSON.stringify(review.transactions.at(-1))!==JSON.stringify(record.review.transactions.at(-1))||!completedApproval&&last.step==='APPROVAL'&&JSON.stringify(review.transactions)!==JSON.stringify(record.review.transactions))throw new Error('REPAY_RECOVERY_STATE_CHANGED');
         const priorApproval=record.attempts.find(a=>a.step==='APPROVAL'&&(a.reconciled||verifiedRecovery));
         if(priorApproval&&review.approvalRequired)throw new Error('REPAY_APPROVAL_PROOF_STALE');
@@ -121,7 +138,7 @@ export function createSupplyService(input:{rpc:SupplyRpc;rpcs?:Readonly<Partial<
       }
       if(record.review.borrow||record.review.withdraw){
         if(!record.notSubmitted||record.verdict!=='PENDING'||record.attempts.length!==1||attempt?.step!==(record.review.withdraw?'WITHDRAW':'BORROW')||attempt.transactionHash)throw new Error('BORROW_RECOVERY_OBSERVE_ONLY');
-        const review=await simulateSupply(record.review.workflow,record.review.account,rpcOf(record.review));
+        const review=await simulate(record.review.workflow,record.review.account,rpcOf(record.review));
         if(review.state.nonce!==attempt.nonce||JSON.stringify(review.transactions)!==JSON.stringify(record.review.transactions))throw new Error('BORROW_RECOVERY_STATE_CHANGED');
         const fresh:SupplyRecord={...createSupplyRun(newId(),review,input.provenance),observations:[],evidence:null,error:null,recoveryOf:id};
         await save(fresh);return fresh;
@@ -129,14 +146,14 @@ export function createSupplyService(input:{rpc:SupplyRpc;rpcs?:Readonly<Partial<
       if(record.approvalProof){
         const proof=await reconcileSupplyAttempt(record.review,attempt!,rpcOf(record.review));
         if(proof.verdict!=='RECONCILED'||!proof.walletEnvelope||proof.receipt?.transactionHash!==record.approvalProof.hash)throw new Error('SUPPLY_APPROVAL_PROOF_STALE');
-        const review=await simulateSupply(record.review.workflow,record.review.account,rpcOf(record.review));
+        const review=await simulate(record.review.workflow,record.review.account,rpcOf(record.review));
         if(review.approvalRequired||review.account!==record.review.account||review.amount!==record.review.amount||review.pool!==record.review.pool||review.asset!==record.review.asset||review.beneficiary!==record.review.beneficiary||BigInt(review.allowance)<BigInt(review.amount))throw new Error('SUPPLY_APPROVAL_PROOF_STALE');
         const fresh:SupplyRecord={...createSupplyRun(newId(),review,input.provenance),observations:[],evidence:null,error:null,priorApproval:{runId:id,hash:record.approvalProof.hash}};
         await save(fresh);return fresh;
       }
       if(!(record.notSubmitted||!record.walletManagedNonce&&record.absence&&record.error==='SUPPLY_TRANSACTION_NOT_FOUND')||record.verdict!=='PENDING'||record.attempts.length!==1||
           attempt?.step!=='APPROVAL'||attempt.reconciled||attempt.transactionHash)throw new Error('SUPPLY_RECOVERY_NOT_AVAILABLE');
-      const review=await simulateSupply(record.review.workflow,record.review.account,rpcOf(record.review));
+      const review=await simulate(record.review.workflow,record.review.account,rpcOf(record.review));
       const latestNonce=await readLatestNonce(review,review.account);
       if(latestNonce!==attempt.nonce||review.state.nonce!==attempt.nonce||review.allowance!=='0'||
           JSON.stringify(review.transactions)!==JSON.stringify(record.review.transactions))throw new Error('SUPPLY_RECOVERY_STATE_CHANGED_OBSERVE_EXISTING');
@@ -163,7 +180,7 @@ export function createSupplyService(input:{rpc:SupplyRpc;rpcs?:Readonly<Partial<
       assertSupplyReview(review,workflow,account,state,Date.now(),approvalConfirmed);
       const index=approvalConfirmed?review.transactions.length-1:0;
       const gas=review.gasLimits[index]!;
-      if(BigInt(state.nativeBalance)<BigInt(gas)*BigInt(review.gasPrice)+10_000_000_000_000n||BigInt(state.gasPrice)>BigInt(review.gasPrice))throw new Error('SUPPLY_INSUFFICIENT_ETH');
+      await feePreflight(review,index,state);
       const prepared={...prepareSupplyAttempt(record,state.block,state.nonce,false),observations:record.observations,evidence:record.evidence,error:null};
       const attempt=prepared.attempts.at(-1)!;
       // Permanent nonce lease across runs/processes. Uncertainty never releases economic intent.
@@ -238,7 +255,9 @@ export function createSupplyService(input:{rpc:SupplyRpc;rpcs?:Readonly<Partial<
     });},
     async handoff(id:string,step:'APPROVAL'|'SUPPLY'|'BORROW'|'REPAY'|'WITHDRAW',walletManagedNonce=false):Promise<SupplyRecord>{return locked(idCheck(id),async()=>{
       const record=await load(id),attempt=record.attempts.find(a=>a.step===step);
-      if(record.review.borrow||record.review.repay||record.review.withdraw){const state=await readState(record.review,record.review.account);assertSupplyReview(record.review,record.review.workflow,record.review.account,state,Date.now(),record.attempts.some(a=>a.step==='APPROVAL'&&a.reconciled));}
+      const state=await readState(record.review,record.review.account);
+      assertSupplyReview(record.review,record.review.workflow,record.review.account,state,Date.now(),record.attempts.some(a=>a.step==='APPROVAL'&&a.reconciled));
+      await feePreflight(record.review,step==='APPROVAL'?0:record.review.transactions.length-1,state);
       if(!attempt||attempt.state!=='PREPARED'||record.authorization!==record.review.commitment||Date.now()>=Date.parse(record.review.expiresAt))throw new Error('SUPPLY_WALLET_HANDOFF_NOT_AUTHORIZED');
       if(walletManagedNonce&&record.recoveryOf&&!record.priorApproval&&!(await load(record.recoveryOf)).notSubmitted)throw new Error('SUPPLY_RECOVERY_NOT_AVAILABLE');
       const next={...record,...supplyTransition(record,attempt,'SUBMITTING'),...walletManagedNonce?{walletManagedNonce:true as const}:{}};await save(next);return next;
@@ -313,7 +332,7 @@ export function createSupplyService(input:{rpc:SupplyRpc;rpcs?:Readonly<Partial<
       const found=await discoverSupplyTransaction(attempt,rpcOf(record.review));
       if(found.mismatch){record={...record,verdict:'DIVERGENT',error:'SUPPLY_REPLACED_TRANSACTION_MISMATCH'};await save(record);return record;}
       if(!found.hash){
-        record={...record,error:found.exhausted?'SUPPLY_OBSERVATION_BOUND_REACHED':'SUPPLY_TRANSACTION_NOT_OBSERVED'};
+        record={...record,...found.nextBlock!==undefined?{attempts:record.attempts.map(a=>a.step===attempt.step?{...a,discoveryNextBlock:found.nextBlock!}:a)}:{},error:found.exhausted?'SUPPLY_OBSERVATION_BOUND_REACHED':'SUPPLY_TRANSACTION_NOT_OBSERVED'};
         if(!record.walletManagedNonce&&found.exhausted&&attempt.step==='APPROVAL'&&record.attempts.length===1){
           const state=await readState(record.review,record.review.account);
           const latestNonce=await readLatestNonce(record.review,state.account);

@@ -202,7 +202,7 @@ test('top toolbar stays in one row with every action reachable at narrow widths 
   const primary = toolbar.getByRole('group', { name: 'Workflow actions', exact: true });
   const utilities = toolbar.getByRole('group', { name: 'Workflow utilities', exact: true });
   const labels = ['Add swap', 'Add bridge', 'Add pool', 'Add supply', 'Add Supply → Borrow → Swap',
-    'Add borrow', 'Add repay', 'Add withdraw', 'Add transfer', 'Stocks', 'Privacy', 'Duplicate selection', 'Undo', 'Redo', 'Delete', 'Undock toolbar'];
+    'Add borrow', 'Add repay', 'Add withdraw', 'Add send', 'Stocks', 'Privacy', 'Duplicate selection', 'Undo', 'Redo', 'Delete', 'Undock toolbar'];
   async function checkRow() {
     expect(await toolbar.getByRole('button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label')))).toEqual(labels);
     const centers = await toolbar.getByRole('button').evaluateAll(buttons => buttons.map(button => {

@@ -25,6 +25,7 @@ import { supportedAssets, supportedNetworks } from '../engine/capability-catalog
 import { compileSchema, MAX_WORKFLOW_STEPS, NETWORK_IDS, STRATEGY_ACTIONS, strategyInputIssues, StrategyInputSchema } from '../engine/strategy-spec';
 import { prepareNetworkCatalogs } from '../platform/catalogs.ts';
 import { robinhoodAuthoringCatalog } from '../server/robinhood-mainnet.ts';
+import { arbitrumAuthoringCatalog } from '../server/arbitrum-mainnet.ts';
 import { baseAuthoringCatalog } from '../server/base-mainnet.ts';
 import { approvalForRequester, approvalProgress, capabilityFacts, composeWorkflowOrRefuse, evidenceView, executionStatusView, findOwnedRun, MULTI_STEP_PLAN,
   openApprovalSession, PlatformRefusal, refuse, requestApproval, reviewWorkflow, simulatePreview, stepViews, validateStrategy, type ApprovalDeps,
@@ -171,7 +172,8 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
         // BUILD-RH-002: a strategy naming Robinhood Chain composes against the validated official catalog (where this deployment enables it);
         // BUILD-BASE-001: so does one naming Base (its validated token list).
         if (args && typeof args === 'object' && 'strategy' in args) await prepareNetworkCatalogs((args as { strategy: unknown }).strategy, {
-          robinhood: async () => robinhoodAuthoringCatalog(await ctx.runtime.mode('robinhood-swap')), base: async () => baseAuthoringCatalog(await ctx.runtime.mode('base-swap')) });
+          robinhood: async () => robinhoodAuthoringCatalog(await ctx.runtime.mode('robinhood-swap')), base: async () => baseAuthoringCatalog(await ctx.runtime.mode('base-swap')),
+          'arbitrum-one': async () => arbitrumAuthoringCatalog(await ctx.runtime.mode('arbitrum-swap')) });
         const output = await run(args);
         assertSafeOutput(output);
         // MCP Apps tool-result _meta is delivered to the UI, outside model context. App visibility alone does not redact results.
@@ -199,7 +201,8 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
     'Derived from FloFi\'s registries.', Schemas.none, pure, () => ({ ok: true, networks: supportedNetworks() }));
 
   register('get_supported_assets', 'Supported assets', 'Assets a strategy may name, per network, with the exact token address or mint, decimals and the actions that use ' +
-    'each. One symbol can be two different tokens on one network (e.g. Base Sepolia Aave USDC vs Circle test USDC).', Schemas.assets, pure,
+    'each, from the currently loaded validated catalog or the pinned registry assets. Native currencies have a null token address. ' +
+    'One symbol can be two different tokens on one network (e.g. Base Sepolia Aave USDC vs Circle test USDC).', Schemas.assets, pure,
   args => ({ ok: true, assets: supportedAssets(args.network) }));
 
   register('get_capabilities', 'Capabilities', 'For each action × network: what FloFi code supports (from the execution capability registry on the composed IR), the evidence ' +

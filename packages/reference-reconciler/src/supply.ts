@@ -80,6 +80,16 @@ export async function verifySupplyWalletEnvelope(review:Pick<SupplyReview,'accou
     !receipt.logs.some(l=>logMatches(l,m.limited,[supplyTopic('IncreasedCount(address,address,bytes32,uint256,uint256)'),addressTopic(m.manager),addressTopic(redeemer),delegationHash],'0x'+supplyWord(1n)+supplyWord(1n))))throw new Error('SUPPLY_OWNER_AUTHORIZATION_MISMATCH');
   return {kind:'METAMASK_EIP7702',owner:review.account,outerSender:redeemer,outerDestination:m.manager,relayNonce:rpcUint(transaction.nonce).toString(),ownerAuthorizationNonce,ownerNonceBefore:rpcUint(preNonce).toString(),ownerNonceAfter:rpcUint(postNonce).toString(),implementation:m.implementation,delegationHash,signingDigest:digest,authorization:authorizations[0]??null,delegation:e,codeHashes:hashes,callCountBefore:before.toString(),callCountAfter:after.toString(),feePayer:redeemer,ownerNativeCost:'0'};
 }
+/** Chain-correct paid cost within the frozen per-call envelope. Nitro includes posting gas in gasUsed. */
+export function lendingTransactionCost(review:SupplyReview,tx:Record<string,unknown>,receipt:Record<string,unknown>,index:number):string {
+  const profile=lendingProfile(review.chain,'SUPPLY_WRONG_CHAIN');
+  if ((receipt.l1Fee===undefined)===profile.l1DataFee || profile.chainId===42161 &&
+      tx.maxPriorityFeePerGas!==undefined && rpcUint(tx.maxPriorityFeePerGas)!==0n) throw new Error('SUPPLY_NETWORK_COST_MISMATCH');
+  const l1=profile.l1DataFee?rpcUint(receipt.l1Fee):0n,buffer=profile.l1DataFee?10_000_000_000_000n:0n;
+  const paid=rpcUint(receipt.gasUsed)*rpcUint(receipt.effectiveGasPrice)+l1;
+  if(l1>buffer||paid>BigInt(review.gasLimits[index]!)*BigInt(review.gasPrice)+buffer)throw new Error('SUPPLY_NETWORK_COST_MISMATCH');
+  return paid.toString();
+}
 /** Independent public transaction, receipt, event and historical-state reads. */
 export async function reconcileSupplyAttempt(review: SupplyReview, attempt: SupplyChainAttempt, rpc: SupplyRpc): Promise<SupplyObservation> {
   if(review.withdraw) return reconcileWithdrawAttempt(review,attempt,rpc);
@@ -115,7 +125,7 @@ export async function reconcileSupplyAttempt(review: SupplyReview, attempt: Supp
     if (rpcUint(receipt.status)!==1n) return {...base,verdict:'DIVERGENT',reason:attempt.step==='APPROVAL'?'APPROVAL_REVERTED':'SUPPLY_REVERTED'};
     if(wrapped)base.walletEnvelope=await verifySupplyWalletEnvelope(review,attempt,transaction,receipt,rpc);
     if (!Array.isArray(receipt.logs)) throw new Error('SUPPLY_LOGS_INVALID');
-    base.cost=(rpcUint(receipt.gasUsed)*rpcUint(receipt.effectiveGasPrice)+(receipt.l1Fee===undefined?0n:rpcUint(receipt.l1Fee))).toString();
+    base.cost=lendingTransactionCost(review,transaction,receipt,gasIndex);
     const post=await readSupplyState(rpc,profile,review.account,review.beneficiary,supplyHex(block));
     if(post.blockHash!==rpcHash(receipt.blockHash))throw new Error('SUPPLY_REORG');
     if (post.deploymentHash!==review.state.deploymentHash) throw new Error('SUPPLY_DEPLOYMENT_MISMATCH');

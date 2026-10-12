@@ -14,9 +14,12 @@ import { ExecutionTimeline } from './execution-timeline';
 import { NetworkBrandIcon } from './brand-icon';
 import { SimulateWorkflowCanvas } from './simulate-workflow-canvas';
 import { ExecutionEvidenceDetails } from './execution-evidence-details';
+import { isFinalExecutionResult } from '../domain/execution-result';
 
 export type ExecuteWorkspaceProps = ExecutionWorkspaceState & {
   workflowName: string; backToBuild(): void; backToSimulate(): void; technicalDetails?: ReactNode; controls?: ExecutionControls; primaryAction?: ReactNode; progress?: ExecutionLifecycle; recovery?: ExecutionRecovery;
+  /** UX-004: start a clean workflow; offered only after a final result. "Return to Build" keeps editing this workflow. */
+  startNewWorkflow?: () => void;
 };
 export function ExecuteWorkspace(props: ExecuteWorkspaceProps) {
   const { t: tr } = useLocale();
@@ -70,6 +73,7 @@ export function ExecuteWorkspace(props: ExecuteWorkspaceProps) {
         {authorization.accepted && view.prompt && !execution.started && !requesting && <section className="execute-next" aria-label={tr("Next confirmation")}><h3>{tr("What happens next")}</h3><p>{tr(view.prompt)}</p><p>{tr("Only the next authorized request starts. Further wallet confirmations remain separate.")}</p></section>}
         <div className="execute-actions simulation-workspace-actions">
           {execution.connect && authorization.accepted && !wallet.changed && !execution.started && <button type="button" disabled={Boolean(props.source.state.busy)} onClick={execution.connect}>{tr("Connect execution wallet")}</button>}
+          {result && props.startNewWorkflow && isFinalExecutionResult(live) && <button type="button" className="primary execute-new-workflow" onClick={props.startNewWorkflow}>{tr("Create new workflow")}</button>}
           <button type="button" className="simulation-back" onClick={result || view.status === 'empty' ? backToBuild : backToSimulate}>{tr(result ? 'Return to Build' : view.status === 'empty' ? 'Create a workflow in Build' : view.label === 'Simulation expired' ? 'Simulate again' : 'Back to Simulate')}</button>
         </div>
         {live && live.state !== 'complete' && live.steps.some(step => step.operations.some(operation => operation.hash || operation.intent && ['posted', 'settling', 'partial'].includes(operation.state))) && <p className="execution-context execution-navigation-note">{tr("Leaving this view does not cancel submitted requests.")}</p>}

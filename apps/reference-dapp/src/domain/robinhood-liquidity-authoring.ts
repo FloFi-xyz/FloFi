@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { CONCENTRATED_LIQUIDITY_ACTION, createConcentratedLiquidityNode, readConcentratedLiquidity, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { catalogPoolOn, formatAssetAmount, parseAssetAmount, uniswapCatalogDeployment, uniswapLiquidityProfile, UNISWAP_V3_BASE_SEPOLIA_LIQUIDITY, UNISWAP_V3_ROBINHOOD,
-  type CanonicalAsset } from '@defi-workflow-engine/action-registry';
+  UNISWAP_CATALOG_DEPLOYMENTS, type CanonicalAsset } from '@defi-workflow-engine/action-registry';
 import { validateUniswapLiquidityNode } from '@defi-workflow-engine/reference-linter';
 import { uniswapQuotePriceAtTick } from '@defi-workflow-engine/reference-compiler';
-import { BASE_CHAIN, BASE_NETWORK, canonicalSymbol, resolveNetworkAsset, ROBINHOOD_CHAIN, ROBINHOOD_NETWORK } from './asset-catalogs';
-import { networkIdentity } from './network-registry';
+import { BASE_CHAIN, BASE_NETWORK, authoringAssetSymbol, canonicalSymbol, resolveNetworkAsset, ROBINHOOD_CHAIN, ROBINHOOD_NETWORK } from './asset-catalogs';
+import { CATALOG_CHAT_NETWORKS, catalogNetworkOfChatName, networkIdentity } from './network-registry';
 
 /**
  * BUILD-RH-002: concentrated liquidity on a catalog network through Uniswap v3 — any two catalog ERC-20s at a standard fee tier, authored
@@ -16,7 +16,8 @@ import { networkIdentity } from './network-registry';
  */
 type Node = SemanticWorkflow['nodes'][number];
 /** The catalog networks of the Pool card, by name. */
-export const CATALOG_LIQUIDITY_NETWORKS = Object.freeze({ [ROBINHOOD_NETWORK]: ROBINHOOD_CHAIN, [BASE_NETWORK]: BASE_CHAIN } as const);
+export const CATALOG_LIQUIDITY_NETWORKS: Readonly<Record<string, string>> = Object.freeze(Object.fromEntries(
+  UNISWAP_CATALOG_DEPLOYMENTS.map(deployment => [deployment.network, deployment.chain])));
 export type CatalogLiquidityNetwork = keyof typeof CATALOG_LIQUIDITY_NETWORKS;
 export const ROBINHOOD_LIQUIDITY_FEE_TIERS: readonly number[] = Object.freeze(UNISWAP_V3_ROBINHOOD.feeTiers.map(tier => tier.fee));
 /** 0.3%: the tier of the live Stock Token / USDG pools observed at discovery (and Base's deepest USDC/WETH tier); the owner may name another. */
@@ -27,7 +28,7 @@ export type RobinhoodLiquidityInput = { readonly network: CatalogLiquidityNetwor
   /** `FULL`: the widest usable range of the fee tier; `TICK`: explicit ticks on its spacing. */ readonly rangeUnit: 'FULL' | 'TICK';
   readonly lower?: string; readonly upper?: string; readonly slippage: string };
 const MAX_TICK = 887_272;
-const chainOf = (network: string): string => Object.hasOwn(CATALOG_LIQUIDITY_NETWORKS, network) ? CATALOG_LIQUIDITY_NETWORKS[network as CatalogLiquidityNetwork]
+const chainOf = (network: string): string => Object.hasOwn(CATALOG_LIQUIDITY_NETWORKS, network) ? CATALOG_LIQUIDITY_NETWORKS[network]!
   : (() => { throw new Error('UNISWAP_LIQUIDITY_NETWORK_UNSUPPORTED'); })();
 const spacingOf = (fee: number, chain: string = ROBINHOOD_CHAIN) => uniswapCatalogDeployment(chain)?.feeTiers.find(tier => tier.fee === fee)?.tickSpacing ?? null;
 /** The widest usable range of a fee tier (±887,220 at 0.3%); every catalog network uses the standard tiers. */
@@ -107,7 +108,7 @@ export function robinhoodLiquidityInputOf(details: RobinhoodLiquidityDetails): R
   return { network: details.network, tokenA: details.tokenA, tokenB: details.tokenB, amountA: details.amountA, amountB: details.amountB, fee: details.fee,
     ...details.fullRange ? { rangeUnit: 'FULL' as const } : { rangeUnit: 'TICK' as const, lower: String(details.tickLower), upper: String(details.tickUpper) }, slippage: details.slippage };
 }
-const N = '([0-9]+(?:\\.[0-9]+)?)', SYMBOL = '([A-Za-z][A-Za-z0-9.]{0,15})';
+const N = '([0-9]+(?:\\.[0-9]+)?)', SYMBOL = '([^\\x00-\\x1f\\x7f]{1,160}?)';
 const TAIL = `(?: (?:fee|at) (0\\.01|0\\.05|0\\.3|1)%)?(?: (?:full range|ticks (-?[0-9]+) to (-?[0-9]+)))?(?: (?:with )?slippage ([0-9]+) bps)?$`;
 export const ROBINHOOD_LIQUIDITY_PATTERN = new RegExp(`^(?:add|provide|create) (?:uniswap )?liquidity (?:with )?${N} ${SYMBOL} and ${N} ${SYMBOL} on Robinhood(?: Chain)?` + TAIL, 'i');
 /** BUILD-BASE-001: the same sentence on Base. */
@@ -128,6 +129,15 @@ export function parseRobinhoodLiquidityChat(text: string): RobinhoodLiquidityInp
 export function parseBaseLiquidityChat(text: string): RobinhoodLiquidityInput | null {
   const m = BASE_LIQUIDITY_PATTERN.exec(text.trim());
   return m ? fromMatch(m, BASE_NETWORK, symbol => canonicalSymbol(BASE_CHAIN, symbol) ?? symbol) : null;
+}
+/** Shared catalog grammar: network aliases come from the network registry; support comes from deployment profiles. */
+export function parseCatalogLiquidityChat(text: string): RobinhoodLiquidityInput | null {
+  const pattern = new RegExp(`^(?:add|provide|create) (?:uniswap )?liquidity (?:with )?${N} ${SYMBOL} and ${N} ${SYMBOL} on (${CATALOG_CHAT_NETWORKS})` + TAIL, 'i');
+  const match = pattern.exec(text.trim()), network = match ? catalogNetworkOfChatName(match[5]!) : null;
+  if (!match || !network || !uniswapCatalogDeployment(network.chain)) return null;
+  // fromMatch keeps the original closed grammar's group positions (the generic network occupies group 5).
+  const fields = [...match.slice(0, 5), ...match.slice(6)] as RegExpExecArray;
+  return fromMatch(fields, network.name, symbol => authoringAssetSymbol(network.chain, symbol));
 }
 
 /**

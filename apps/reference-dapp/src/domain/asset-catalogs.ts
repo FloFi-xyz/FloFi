@@ -3,12 +3,13 @@
  * BUILD-RH-002: the asset catalogs authoring reads (Canvas, Chat, MCP), one per network, through the generic asset registry.
  * Arbitrum and the base assets of each catalog network are code-pinned (Robinhood: ETH, WETH, USDG; BUILD-BASE-001 Base: ETH, USDC, WETH).
  * The rest of a catalog network comes only from its official source as validated by the server (`registerNetworkCatalog`): Robinhood
- * Stock Tokens from the official registry, Base tokens from the Uniswap Labs Default Token List. Before that, or after the source fails,
+ * Stock Tokens from the official registry, Base and Arbitrum tokens from the Uniswap Labs Default Token List. Before that, or after the source fails,
  * only the pinned assets resolve and authoring that needs another asset fails closed. Presentation only: Simulate re-validates every
  * identity against the official source and the chain.
  */
-import { ARBITRUM_BASE_ASSETS, BASE_BASE_ASSETS, BASE_FEATURED_ASSETS, BASE_MAINNET, BASE_TOKEN_LIST, ROBINHOOD_BASE_ASSETS, ROBINHOOD_CHAIN_MAINNET, ROBINHOOD_FEATURED_STOCKS,
-  catalogAsset, catalogAssetsByName, createAssetRegistry, featuredAssets, isBaseNetworkCatalog, searchAssets, type AssetCatalog, type AssetClass, type AssetReference,
+import { ARBITRUM_BASE_ASSETS, BASE_BASE_ASSETS, BASE_MAINNET, ROBINHOOD_BASE_ASSETS, ROBINHOOD_CHAIN_MAINNET, ROBINHOOD_FEATURED_STOCKS,
+  TOKEN_LIST_NETWORKS, UNISWAP_TOKEN_LIST, catalogAsset, catalogAssetsByName, createAssetCatalog, featuredAssets, isTokenListNetworkCatalog, searchAssets, tokenListNetwork,
+  type AssetCatalog, type AssetClass, type AssetReference,
   type CanonicalAsset } from '@defi-workflow-engine/action-registry';
 
 export const ROBINHOOD_NETWORK = 'Robinhood Chain';
@@ -17,7 +18,7 @@ export const ROBINHOOD_CHAIN = ROBINHOOD_CHAIN_MAINNET.chain;
 export const BASE_NETWORK = BASE_MAINNET.name;
 export const BASE_CHAIN = BASE_MAINNET.chain;
 /** Networks whose full catalog comes from an official source registered by the server; every other network is code-pinned. */
-export const OFFICIAL_CATALOG_CHAINS: readonly string[] = Object.freeze([ROBINHOOD_CHAIN, BASE_CHAIN]);
+export const OFFICIAL_CATALOG_CHAINS: readonly string[] = Object.freeze([ROBINHOOD_CHAIN, ...TOKEN_LIST_NETWORKS.map(profile => profile.pinned.chain)]);
 const pinned: Readonly<Record<string, AssetCatalog>> = Object.freeze({ [BASE_BASE_ASSETS.chain]: BASE_BASE_ASSETS,
   [ARBITRUM_BASE_ASSETS.chain]: ARBITRUM_BASE_ASSETS, [ROBINHOOD_BASE_ASSETS.chain]: ROBINHOOD_BASE_ASSETS });
 const official = new Map<string, AssetCatalog>();
@@ -27,15 +28,17 @@ const listeners = new Set<() => void>();
 function acceptable(catalog: AssetCatalog): boolean {
   if (catalog.format !== 'flofi.asset-catalog.v1') return false;
   if (catalog.chain === ROBINHOOD_CHAIN) return catalog.assets.some(asset => asset.assetClass === 'STOCK_TOKEN');
-  if (catalog.chain === BASE_CHAIN) return isBaseNetworkCatalog(catalog) && catalog.provenance.some(item => item.provider === BASE_TOKEN_LIST.provider);
+  const profile = tokenListNetwork(catalog.chain);
+  if (profile) return isTokenListNetworkCatalog(catalog, profile) && catalog.provenance.some(item => item.provider === UNISWAP_TOKEN_LIST.provider && item.source === UNISWAP_TOKEN_LIST.url);
   return false;
 }
-/** Registers the server-validated official catalog of a catalog network (Robinhood: base assets + Stock Tokens; Base: pinned assets + token list). */
+/** Registers a server-validated catalog (Robinhood: Stock Tokens; curated token-list profiles: pinned assets + list projection). */
 export function registerNetworkCatalog(catalog: AssetCatalog): void {
   if (!acceptable(catalog)) throw new Error('ASSET_CATALOG_INVALID');
-  // Revalidate shape and uniqueness through the registry itself (it throws on duplicates or a second network catalog).
-  createAssetRegistry([catalog]);
-  official.set(catalog.chain, catalog); version += 1;
+  // A cross-network registry alone only checks duplicate chains. Validate every projected asset before registration as well.
+  const validated = createAssetCatalog({ chain: catalog.chain, network: catalog.network, assets: catalog.assets, provenance: catalog.provenance });
+  if (catalog.chainId !== validated.chainId || catalog.featured.some(id => !validated.assets.some(asset => asset.id === id))) throw new Error('ASSET_CATALOG_INVALID');
+  official.set(catalog.chain, Object.freeze({ ...validated, featured: Object.freeze([...catalog.featured]) })); version += 1;
   for (const listener of listeners) listener();
 }
 export function subscribeNetworkCatalogs(listener: () => void): () => void { listeners.add(listener); return () => { listeners.delete(listener); }; }
@@ -76,6 +79,15 @@ export function resolveAssetReference(chain: string, reference: string): AssetRe
   }
   return officialCatalogLoaded(chain) ? { kind: 'UNKNOWN' } : { kind: 'UNAVAILABLE' };
 }
+/** Shared whole-name/symbol resolution for canonical authoring. Structured and exact-grammar callers refuse
+ * ambiguity; the conversation planner asks for a symbol instead. No reference reaches another chain.
+ */
+export function authoringAssetSymbol(chain: string, reference: string): string {
+  const result = resolveAssetReference(chain, reference);
+  if (result.kind === 'AMBIGUOUS') throw new Error('ASSET_REFERENCE_AMBIGUOUS');
+  if (result.kind !== 'FOUND') throw new Error('ASSET_CATALOG_UNAVAILABLE');
+  return result.asset.symbol;
+}
 /** Featured Stock Tokens (shortcuts only): resolved from the official catalog, else the shortcut symbols themselves. */
 export function featuredStockSymbols(): readonly string[] {
   const robinhood = official.get(ROBINHOOD_CHAIN);
@@ -84,7 +96,8 @@ export function featuredStockSymbols(): readonly string[] {
 /** BUILD-BASE-001: the shortcuts of a network's pickers (featured assets; never the limit of its catalog). */
 export function featuredNetworkSymbols(chain: string): readonly string[] {
   if (chain === ROBINHOOD_CHAIN) return featuredStockSymbols();
-  if (chain === BASE_CHAIN) return BASE_FEATURED_ASSETS;
+  const profile = tokenListNetwork(chain);
+  if (profile) return profile.featured;
   const catalog = networkCatalog(chain);
   return catalog ? featuredAssets(catalog).map(asset => asset.symbol) : [];
 }
@@ -93,7 +106,7 @@ export function featuredNetworkSymbols(chain: string): readonly string[] {
  * the Copilot model instructions). Never the limit of the catalog.
  */
 export function declaredNetworkSymbols(chain: string): readonly string[] {
-  const featured = chain === ROBINHOOD_CHAIN ? ROBINHOOD_FEATURED_STOCKS : chain === BASE_CHAIN ? BASE_FEATURED_ASSETS : [];
+  const featured = chain === ROBINHOOD_CHAIN ? ROBINHOOD_FEATURED_STOCKS : tokenListNetwork(chain)?.featured ?? [];
   return [...new Set([...(pinned[chain]?.assets ?? []).filter(asset => asset.kind === 'ERC20').map(asset => asset.symbol), ...featured])];
 }
 /** The canonical symbol of a network asset (`cbbtc` → `cbBTC`), or null when this network's current catalog does not resolve it. */

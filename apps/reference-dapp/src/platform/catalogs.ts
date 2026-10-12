@@ -11,10 +11,10 @@
  */
 import type { AssetCatalog } from '@defi-workflow-engine/action-registry';
 import { registerNetworkCatalog } from '../domain/asset-catalogs';
-import { catalogNetworksNamed } from '../domain/network-registry';
+import { CATALOG_NETWORK_IDENTITIES, catalogNetworksNamed } from '../domain/network-registry';
 
 const isObject = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
-export type CatalogNetworkId = 'robinhood' | 'base';
+export type CatalogNetworkId = 'robinhood' | 'base' | 'arbitrum-one';
 /** Whether a v1 strategy or a v2 step list names a network anywhere (network, bridge source or destination). */
 export function strategyNamesNetwork(strategy: unknown, network: CatalogNetworkId): boolean {
   const steps = isObject(strategy) && strategy.version === 2 && Array.isArray(strategy.steps) ? strategy.steps : [strategy];
@@ -24,7 +24,8 @@ export function strategyNamesNetwork(strategy: unknown, network: CatalogNetworkI
 export const strategyNamesRobinhood = (strategy: unknown) => strategyNamesNetwork(strategy, 'robinhood');
 /** Registers the catalog of every named catalog network that has a loader. Never throws: a failure only leaves its listed symbols unresolvable. */
 export async function prepareNetworkCatalogs(strategy: unknown, loaders: Readonly<Partial<Record<CatalogNetworkId, () => Promise<AssetCatalog>>>>): Promise<void> {
-  for (const network of ['robinhood', 'base'] as const) {
+  for (const identity of CATALOG_NETWORK_IDENTITIES) {
+    const network = identity.key as CatalogNetworkId;
     const load = loaders[network];
     if (!load || !strategyNamesNetwork(strategy, network)) continue;
     try { registerNetworkCatalog(await load()); } catch { /* unavailable source: composition refuses that network's listed symbols */ }

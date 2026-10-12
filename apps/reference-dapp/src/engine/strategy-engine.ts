@@ -24,15 +24,16 @@ import { createAuthoredLending } from '../domain/lending-authoring';
 import { describeProposal } from '../domain/proposal';
 import { createRouterNode, routerNetworkOfInput, ROUTER_NETWORK_OPTIONS, type RouterBridgeInput, type RouterDestination, type RouterSource } from '../domain/router-authoring';
 import { networkIdentity } from '../domain/network-registry';
+import { authoringAssetSymbol } from '../domain/asset-catalogs';
 import { createCryptoActionNode, type CryptoActionInput } from '../domain/crypto-action-picker';
 import { createAuthoredTransfer, type RobinhoodTransferInput } from '../domain/robinhood-transfer-authoring';
 import { ROBINHOOD_LIQUIDITY_DEFAULT_FEE, ROBINHOOD_LIQUIDITY_DEFAULT_SLIPPAGE } from '../domain/robinhood-liquidity-authoring';
 import { createSolanaLiquidityNode, SOLANA_LIQUIDITY_DEFAULT_SLIPPAGE } from '../domain/solana-liquidity-authoring';
-import { createAuthoredBorrow, createAuthoredRepay, createAuthoredSupply, createAuthoredWithdraw, type LendingNetwork } from '../domain/supply-authoring';
+import { createAuthoredBorrow, createAuthoredRepay, createAuthoredSupply, createAuthoredWithdraw, lendingProfileFor } from '../domain/supply-authoring';
 import { createSwapNode, type Direction } from '../domain/swap-authoring';
 import { createUniswapLiquidityNode, uniswapLiquidityProfileFor, type UniswapLiquidityNetwork } from '../domain/uniswap-liquidity-authoring';
 import { workflowSteps, type WorkflowStep } from '../domain/workflow-steps';
-import { isStrategyInput, isStrategySpec, isStrategyWorkflow, strategyInputIssues, strategySpecIssues, type NetworkId, type SchemaIssue, type StrategyInput,
+import { isStrategyInput, isStrategySpec, isStrategyWorkflow, strategyInputIssues, strategySpecIssues, NETWORK_IDS, type NetworkId, type SchemaIssue, type StrategyInput,
   type StrategySpec } from './strategy-spec';
 
 /** The DApp's initial ReviewContext (`app/page.tsx`): Base mainnet assets from the reference registry. */
@@ -51,16 +52,12 @@ export function semanticWorkflowHash(workflow: Workflow): string {
 }
 
 /** Network facts the facade needs; labels are the authoring modules' own network names. */
-export const NETWORKS: Readonly<Record<NetworkId, { readonly label: string; readonly class: 'MAINNET' | 'TESTNET' | 'DEVNET'; readonly environment: ExecutionEnvironment }>> = Object.freeze({
-  'base': { label: 'Base', class: 'MAINNET', environment: 'MAINNET' },
-  'base-sepolia': { label: 'Base Sepolia', class: 'TESTNET', environment: 'PUBLIC_TESTNET' },
-  'arbitrum-one': { label: 'Arbitrum One', class: 'MAINNET', environment: 'MAINNET' },
-  'arbitrum-sepolia': { label: 'Arbitrum Sepolia', class: 'TESTNET', environment: 'PUBLIC_TESTNET' },
-  'ethereum-sepolia': { label: 'Ethereum Sepolia', class: 'TESTNET', environment: 'PUBLIC_TESTNET' },
-  'solana': { label: 'Solana', class: 'MAINNET', environment: 'MAINNET' },
-  'solana-devnet': { label: 'Solana Devnet', class: 'DEVNET', environment: 'PUBLIC_TESTNET' },
-  'robinhood': { label: 'Robinhood Chain', class: 'MAINNET', environment: 'MAINNET' },
-});
+export const NETWORKS: Readonly<Record<NetworkId, { readonly label: string; readonly class: 'MAINNET' | 'TESTNET' | 'DEVNET'; readonly environment: ExecutionEnvironment }>> = Object.freeze(
+  Object.fromEntries(NETWORK_IDS.map(key => {
+    const identity = networkIdentity(key)!;
+    return [key, { label: identity.name, class: key === 'solana-devnet' ? 'DEVNET' : identity.environment,
+      environment: identity.environment === 'MAINNET' ? 'MAINNET' : 'PUBLIC_TESTNET' }];
+  })) as Record<NetworkId, { label: string; class: 'MAINNET' | 'TESTNET' | 'DEVNET'; environment: ExecutionEnvironment }>);
 /**
  * BUILD-BASE-001: the catalog networks (official asset catalog: Robinhood Chain, Base) by strategy id → their authoring network name. Their
  * swaps, positions and transfers are the Canvas's catalog actions; Base's USDC ⇄ WETH swap keeps its BUILD-002 command (hash continuity).
@@ -69,8 +66,9 @@ const catalogNetworkName = (network: NetworkId): string | null => { const identi
 const referencePair = (spec: { readonly network: NetworkId; readonly inputAsset: string; readonly outputAsset: string }) => spec.network === 'base' &&
   new Set([spec.inputAsset, spec.outputAsset].map(s => s.toUpperCase())).size === 2 && [spec.inputAsset, spec.outputAsset].every(s => ['USDC', 'WETH'].includes(s.toUpperCase()));
 /** The router's chain names of a bridge's networks (BUILD-RH-002: Robinhood Chain in and out of Base and Arbitrum One). */
-const ROUTER_CHAIN: Readonly<Partial<Record<NetworkId, RouterSource & RouterDestination | 'Base Sepolia' | 'Arbitrum Sepolia'>>> =
-  Object.freeze({ 'base': 'Base', 'base-sepolia': 'Base Sepolia', 'arbitrum-one': 'Arbitrum', 'arbitrum-sepolia': 'Arbitrum Sepolia', 'robinhood': 'Robinhood Chain' });
+const ROUTER_CHAIN = Object.freeze(Object.fromEntries(Object.values(ROUTER_NETWORK_OPTIONS).flatMap(option => [
+  [networkIdentity(option.sourceLabel)!.key, option.source], [networkIdentity(option.destinationLabel)!.key, option.destination],
+])));
 const routerChains = (spec: Extract<StrategySpec, { action: 'bridge' }>) =>
   ({ source: ROUTER_CHAIN[spec.sourceNetwork] as RouterSource, destination: ROUTER_CHAIN[spec.destinationNetwork] as RouterDestination });
 const ROUTING = { auto: 'AUTO', lifi: 'LIFI', across: 'ACROSS' } as const;
@@ -90,31 +88,37 @@ export const strategyNetwork = (spec: StrategySpec): NetworkId => spec.action ==
 /** The spec with every default made explicit and addresses lower-cased: its canonical form. */
 export function normalizeStrategy(spec: StrategySpec): { readonly strategy: StrategySpec; readonly notes: readonly string[] } {
   const notes: string[] = [], lower = (value: string) => value.toLowerCase();
+  const symbol = (network: NetworkId, reference: string) => {
+    const identity = networkIdentity(network);
+    return identity?.catalog ? authoringAssetSymbol(identity.chain, reference) : reference;
+  };
   const slippage = 'slippageBps' in spec && spec.slippageBps !== undefined ? spec.slippageBps : defaultSlippageBps(spec);
   if (!('slippageBps' in spec && spec.slippageBps !== undefined) && slippage !== null) notes.push(`Default slippage ${slippage} bps applied.`);
   switch (spec.action) {
     case 'bridge': {
       if (spec.routing === undefined) notes.push('Default routing auto applied: LI.FI first, direct Across only if LI.FI has no reconcilable route.');
       if (spec.recipient === undefined) notes.push('No recipient given: the wallet that signs in the FloFi app receives the funds (bound at Review).');
-      return { notes, strategy: { version: 1, action: 'bridge', sourceNetwork: spec.sourceNetwork, destinationNetwork: spec.destinationNetwork, asset: spec.asset, amount: spec.amount,
+      return { notes, strategy: { version: 1, action: 'bridge', sourceNetwork: spec.sourceNetwork, destinationNetwork: spec.destinationNetwork, asset: symbol(spec.sourceNetwork, spec.asset), amount: spec.amount,
         routing: spec.routing ?? 'auto', slippageBps: slippage!, ...spec.recipient === undefined ? {} : { recipient: lower(spec.recipient) } } };
     }
-    case 'swap': return { notes, strategy: { version: 1, action: 'swap', network: spec.network, inputAsset: spec.inputAsset, outputAsset: spec.outputAsset, amount: spec.amount, slippageBps: slippage! } };
+    case 'swap': return { notes, strategy: { version: 1, action: 'swap', network: spec.network, inputAsset: symbol(spec.network, spec.inputAsset), outputAsset: symbol(spec.network, spec.outputAsset), amount: spec.amount, slippageBps: slippage! } };
     case 'supply': case 'borrow': case 'repay':
-      return { notes, strategy: { version: 1, action: spec.action, network: spec.network, asset: spec.asset, amount: spec.amount, beneficiary: lower(spec.beneficiary) } };
-    case 'withdraw': return { notes, strategy: { version: 1, action: 'withdraw', network: spec.network, asset: spec.asset, amount: spec.amount } };
+      return { notes, strategy: { version: 1, action: spec.action, network: spec.network, asset: symbol(spec.network, spec.asset), amount: spec.amount, beneficiary: lower(spec.beneficiary) } };
+    case 'withdraw': return { notes, strategy: { version: 1, action: 'withdraw', network: spec.network, asset: symbol(spec.network, spec.asset), amount: spec.amount } };
     case 'add_liquidity': {
       // BUILD-RH-002: a catalog-network position (Robinhood Chain, BUILD-BASE-001 Base) names its fee tier (default 0.3%); other networks have one pool each.
       const catalog = catalogNetworkName(spec.network) !== null;
       const feeTier = catalog ? spec.feeTier ?? ROBINHOOD_LIQUIDITY_DEFAULT_FEE : spec.feeTier;
       if (catalog && spec.feeTier === undefined) notes.push(`Default fee tier ${ROBINHOOD_LIQUIDITY_DEFAULT_FEE / 10_000}% applied.`);
-      return { notes, strategy: { version: 1, action: 'add_liquidity', network: spec.network, maxAmounts: { ...spec.maxAmounts },
+      const amounts = Object.entries(spec.maxAmounts).map(([reference, amount]) => [symbol(spec.network, reference), amount] as const);
+      if (new Set(amounts.map(([asset]) => asset)).size !== amounts.length) throw new Error('INVALID_ASSET_PAIR');
+      return { notes, strategy: { version: 1, action: 'add_liquidity', network: spec.network, maxAmounts: Object.fromEntries(amounts),
         range: spec.range.unit === 'full' ? { unit: 'full' } : { unit: spec.range.unit, lower: spec.range.lower, upper: spec.range.upper },
         ...feeTier === undefined ? {} : { feeTier }, slippageBps: slippage! } };
     }
     case 'transfer':
       if (spec.recipient === undefined) notes.push('No recipient given: the wallet that signs in the FloFi app receives the transfer (bound at Review).');
-      return { notes, strategy: { version: 1, action: 'transfer', network: spec.network, asset: spec.asset, amount: spec.amount,
+      return { notes, strategy: { version: 1, action: 'transfer', network: spec.network, asset: symbol(spec.network, spec.asset), amount: spec.amount,
         ...spec.recipient === undefined ? {} : { recipient: lower(spec.recipient) } } };
     case 'lending_composition': return { notes, strategy: { version: 1, action: 'lending_composition', network: 'base-sepolia', asset: 'USDC', supplyAmount: spec.supplyAmount,
       borrowAmount: spec.borrowAmount, outputAsset: 'WETH', slippageBps: slippage!, owner: lower(spec.owner) } };
@@ -157,12 +161,14 @@ function build(spec: StrategySpec, context: ReviewContext): Built {
       return { command: { ...base, type, direction, amount: spec.amount, slippage }, check: () => createSwapNode('node-preview', direction, spec.amount, slippage, swapContext) };
     }
     case 'supply': case 'borrow': case 'repay': {
-      const input = { network: NETWORKS[spec.network].label as LendingNetwork, asset: spec.asset, amount: spec.amount, beneficiary: spec.beneficiary };
+      const profile = lendingProfileFor(NETWORKS[spec.network].label, spec.asset);
+      const input = { network: profile.network, asset: profile.symbol, amount: spec.amount, beneficiary: spec.beneficiary };
       const create = spec.action === 'supply' ? createAuthoredSupply : spec.action === 'borrow' ? createAuthoredBorrow : createAuthoredRepay;
       return { command: { ...base, type: spec.action === 'supply' ? 'ADD_SUPPLY' : spec.action === 'borrow' ? 'ADD_BORROW' : 'ADD_REPAY', input }, check: () => create('node-preview', input) };
     }
     case 'withdraw': {
-      const input = { network: NETWORKS[spec.network].label as LendingNetwork, asset: spec.asset, amount: spec.amount, recipient: 'CONNECTED_OWNER' as const };
+      const profile = lendingProfileFor(NETWORKS[spec.network].label, spec.asset);
+      const input = { network: profile.network, asset: profile.symbol, amount: spec.amount, recipient: 'CONNECTED_OWNER' as const };
       return { command: { ...base, type: 'ADD_WITHDRAW', input }, check: () => createAuthoredWithdraw('node-preview', input) };
     }
     case 'add_liquidity': {
@@ -217,7 +223,9 @@ const codeOf = (cause: unknown, fallback: string) => cause instanceof Error && C
  */
 export function composeStrategy(input: unknown): Composition | ComposeFailure {
   if (!isStrategySpec(input)) return { ok: false, code: 'STRATEGY_SCHEMA_INVALID', issues: strategySpecIssues(input) };
-  const { strategy, notes } = normalizeStrategy(input), context = dappReviewContext(), initial: EditorState = initialEditor();
+  let normalized: ReturnType<typeof normalizeStrategy>;
+  try { normalized = normalizeStrategy(input); } catch (cause) { return { ok: false, code: codeOf(cause, 'STRATEGY_UNSUPPORTED'), issues: [] }; }
+  const { strategy, notes } = normalized, context = dappReviewContext(), initial: EditorState = initialEditor();
   let built: Built;
   try { built = build(strategy, context); built.check(); }
   catch (cause) { return { ok: false, code: cause instanceof Refusal ? cause.message : codeOf(cause, 'STRATEGY_UNSUPPORTED'), issues: [] }; }

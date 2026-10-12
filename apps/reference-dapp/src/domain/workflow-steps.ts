@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { reviewContextForChain, type ReviewContext } from '@defi-workflow-engine/reference-linter';
-import { isLendingComposition, LENDING_NODE_IDS } from '@defi-workflow-engine/workflow-contracts';
+import { isLendingComposition, LENDING_NODE_IDS, workflowDependencyOrder } from '@defi-workflow-engine/workflow-contracts';
 import type { Workflow } from './initial-workflow';
 import { canDeleteCanvasNode } from './canvas-keyboard';
 import { SWAP_ACTION, swapDetails } from './swap-authoring';
@@ -114,7 +114,8 @@ function describe(node: Node, workflow: Workflow, context: ReviewContext): Descr
 
 /** Steps in canonical IR order, numbered from 1, as the canvas and the Copilot present them. */
 export function workflowSteps(workflow: Workflow, context: ReviewContext): readonly WorkflowStep[] {
-  return Object.freeze(workflow.nodes.map((node, index) => Object.freeze({ index: index + 1, nodeId: node.nodeId, ...describe(node, workflow, context),
+  const ordered = workflowDependencyOrder(workflow.nodes), actions = ordered.filter(node => !node.actionType.startsWith('mock-'));
+  return Object.freeze((actions.length ? actions : ordered).map((node, index) => Object.freeze({ index: index + 1, nodeId: node.nodeId, ...describe(node, workflow, context),
     failurePolicy: node.failurePolicy, authorization: node.requiredAuthorizationClass, dependencies: [...node.dependencies],
     removable: canDeleteCanvasNode(workflow, node.nodeId) })));
 }

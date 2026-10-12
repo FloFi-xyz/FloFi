@@ -12,7 +12,7 @@ import type { Command } from '../domain/commands';
 import type { Direction } from '../domain/swap-authoring';
 import type { UniswapLiquidityInput } from '../domain/uniswap-liquidity-authoring';
 import type {SemanticWorkflow} from '@defi-workflow-engine/workflow-contracts';
-import { amountCommandTarget, canvasAmountCommand, canvasAmountMessage, canvasAuthoringIncomplete, type CanvasActionSetup, type CanvasAmountInputs, type CanvasBridgeNetworks, type CanvasBridgeNetworkInputs } from '../domain/canvas-action-setup';
+import { amountCommandTarget, canvasAmountCommand, canvasAmountMessage, canvasAuthoringIncomplete, type CanvasActionSetup, type CanvasAmountInputs, type CanvasBridgeNetworks, type CanvasBridgeNetworkInputs, type CanvasRecipientInputs } from '../domain/canvas-action-setup';
 import { readBaseQuote } from '../app/observation-action';
 import { browserFailureMessage, initialObservationState, observationReducer, receiveObservation, type ObservationState } from '../domain/base-observation';
 import { actionReviewValue } from '../domain/canvas-action-setup';
@@ -28,10 +28,16 @@ type Store = { restorationEpoch: number; state: EditorState; dispatch: Dispatch<
   /** BUILD-RH-002: the Stocks card, a Robinhood Chain catalog swap (USDG → Stock Token). */
   startStocksSetup(position: { x: number; y: number }): string;
   editCanvasAmount(id: string, amount: string): void; cancelCanvasAmount(id: string): void;
+  /** UX-001: the Send card's "To" draft; Apply commits it to the transfer's canonical `recipient`. */
+  recipientInputs: CanvasRecipientInputs; editCanvasRecipient(id: string, recipient: string): void;
   editPoolSetup(id: string, input: UniswapLiquidityInput): void;
   editSwapSetupDirection(id: string, direction: Direction): void;
   reviewCanvasAmount(id: string, poolInput?: UniswapLiquidityInput): string | null; removeActionSetup(): void;
   restoreLendingCanvas(workflow:SemanticWorkflow):void; restoreWorkflow(workflow: SemanticWorkflow): void; adoptDraftIdentity(workflowId: string): void;
+  /** UX-004: start a genuinely clean workflow (fresh draft identity; prior Review/proposal retired). Wallet and session are untouched. */
+  createNewWorkflow(): void;
+  /** UX-004: true once the owner created a new workflow in this visit; a persisted run is recovered only into the visit's initial draft. */
+  newWorkflow: boolean;
   canvasLayout: CanvasLayout; canUndo: boolean; canRedo: boolean; undo(): void; redo(): void;
   moveCanvasNodes(positions: Readonly<Record<string, { x: number; y: number }>>): void;
   addCanvasCommand(command: Command, position: { x: number; y: number }): void;
@@ -48,6 +54,7 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
   });
   const state = history.editor;
   const [restorationEpoch, setRestorationEpoch] = useState(0);
+  const [newWorkflow, setNewWorkflow] = useState(false);
   const authoringIncomplete = canvasAuthoringIncomplete(history.actionSetup, history.amountInputs);
   const incompleteRef = useRef(authoringIncomplete);
   incompleteRef.current = authoringIncomplete;
@@ -78,10 +85,10 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
     // History/restoration can change a reviewed field without invoking its input handler.
     setPending(current => {
       if (!current?.authoringId) return current;
-      const amount = actionReviewValue(history.actionSetup, current.authoringId, history.amountInputs[current.authoringId], history.bridgeNetworkInputs[current.authoringId], history.cryptoSelections[current.authoringId]);
+      const amount = actionReviewValue(history.actionSetup, current.authoringId, history.amountInputs[current.authoringId], history.bridgeNetworkInputs[current.authoringId], history.cryptoSelections[current.authoringId], history.recipientInputs[current.authoringId]);
       return amount === current.authoringAmount && current.command.baseRevision === state.workflow.revision ? current : null;
     });
-  }, [history.actionSetup, history.amountInputs, history.bridgeNetworkInputs, history.cryptoSelections, state.workflow.revision]);
+  }, [history.actionSetup, history.amountInputs, history.bridgeNetworkInputs, history.cryptoSelections, history.recipientInputs, state.workflow.revision]);
   const [chain, dispatchChain] = useReducer(chainReducer, undefined, initialChainState);
   const workflowRef = useRef(state.workflow);
   const chainRef = useRef(chain);
@@ -129,7 +136,7 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
     const networks = target ? history.bridgeNetworkInputs[target.id] : undefined;
     const networkMatches = !networks || (command.type === 'SET_ROUTER_BRIDGE' && command.input.source === networks.source && command.input.destination === networks.destination);
     if (target && command.type === 'SET_CRYPTO_ACTION' && history.amountInputs[target.id] === undefined) dispatchHistory({ type: 'EDIT_CANVAS_AMOUNT', id: target.id, amount: target.amount, context });
-    const amountEdit = target && (history.amountInputs[target.id] === target.amount || command.type === 'SET_CRYPTO_ACTION' && history.amountInputs[target.id] === undefined) ? { authoringId: target.id, authoringAmount: actionReviewValue(null, target.id, target.amount, networks, history.cryptoSelections[target.id])! } : undefined;
+    const amountEdit = target && (history.amountInputs[target.id] === target.amount || command.type === 'SET_CRYPTO_ACTION' && history.amountInputs[target.id] === undefined) ? { authoringId: target.id, authoringAmount: actionReviewValue(null, target.id, target.amount, networks, history.cryptoSelections[target.id], history.recipientInputs[target.id])! } : undefined;
     setPending({ valid: !preview.error && networkMatches, command, diff, review, ...(authoring ?? amountEdit) });
   }
   function applyProposal() {
@@ -169,6 +176,10 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
     setPending(current => current?.authoringId === id || (current?.command.type === 'SET_ROUTER_BRIDGE' && current.command.nodeId === id) ? null : current);
   }
   function cancelCanvasAmount(id: string) { dispatchHistory({ type: 'CANCEL_CANVAS_AMOUNT', id }); setPending(current => current?.authoringId === id ? null : current); }
+  function editCanvasRecipient(id: string, recipient: string) {
+    dispatchHistory({ type: 'EDIT_CANVAS_RECIPIENT', id, recipient, context });
+    setPending(current => current?.authoringId === id ? null : current);
+  }
   function reviewCryptoPool(id: string, input: CryptoActionInput) {
     try {
       createCryptoActionNode('node-preview', input);
@@ -187,9 +198,9 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
     try {
       const setup = poolInput && history.actionSetup?.id === id && history.actionSetup.action === 'pool'
         ? { ...history.actionSetup, input: poolInput } : history.actionSetup;
-      const command = canvasAmountCommand(state, setup, history.amountInputs, id, context, history.bridgeNetworkInputs, history.cryptoSelections);
+      const command = canvasAmountCommand(state, setup, history.amountInputs, id, context, history.bridgeNetworkInputs, history.cryptoSelections, history.recipientInputs);
       if (poolInput && setup?.action === 'pool') dispatchHistory({ type: 'EDIT_POOL_SETUP', id, input: poolInput });
-      const amount = actionReviewValue(setup, id, history.amountInputs[id], history.bridgeNetworkInputs[id], history.cryptoSelections[id])!;
+      const amount = actionReviewValue(setup, id, history.amountInputs[id], history.bridgeNetworkInputs[id], history.cryptoSelections[id], history.recipientInputs[id])!;
       propose(command, { authoringId: id, authoringAmount: amount });
       return null;
     } catch (cause) { return canvasAmountMessage(cause, (history.cryptoSelections[id] ?? history.actionSetup?.cryptoSelection)?.network); }
@@ -215,10 +226,12 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
     if (!checkChainAccess(chainRef.current, workflowRef.current, Date.now(), performance.now()).ok) { accessCheck(); return; }
     generateArtifacts();
   }, [accessCheck, generateArtifacts]);
-  return <Context.Provider value={{ restorationEpoch, state, dispatch, context, restoreLendingCanvas, adoptDraftIdentity: workflowId => dispatchHistory({ type: 'ADOPT_DRAFT_IDENTITY', workflowId }), restoreWorkflow: workflow => { setRestorationEpoch(n => n + 1); setPending(null); dispatchHistory({ type: 'RESTORE_WORKFLOW', workflow }); }, canvasLayout: history.layout, canUndo: history.past.length > 0,
+  return <Context.Provider value={{ restorationEpoch, state, dispatch, context, restoreLendingCanvas, adoptDraftIdentity: workflowId => dispatchHistory({ type: 'ADOPT_DRAFT_IDENTITY', workflowId }), restoreWorkflow: workflow => { setRestorationEpoch(n => n + 1); setPending(null); dispatchHistory({ type: 'RESTORE_WORKFLOW', workflow }); },
+    createNewWorkflow: () => { setRestorationEpoch(n => n + 1); setNewWorkflow(true); setPending(null); dispatchHistory({ type: 'NEW_WORKFLOW', workflowId: `workflow-${crypto.randomUUID()}` }); }, newWorkflow, canvasLayout: history.layout, canUndo: history.past.length > 0,
     actionSetup: history.actionSetup, amountInputs: history.amountInputs, authoringIncomplete,
     bridgeNetworkInputs: history.bridgeNetworkInputs, editBridgeNetworks, cryptoSelections: history.cryptoSelections, editCryptoSelection, reviewCryptoPool,
     startActionSetup, startStocksSetup, editCanvasAmount, editPoolSetup, editSwapSetupDirection, cancelCanvasAmount, reviewCanvasAmount, removeActionSetup,
+    recipientInputs: history.recipientInputs, editCanvasRecipient,
     canRedo: history.future.length > 0, undo, redo, moveCanvasNodes, addCanvasCommand, duplicateCanvasNodes,
     pending, propose, applyProposal, dismissProposal: () => setPending(null), ...reviewState,
     chain, eligibility, generateArtifacts, refreshArtifacts, accessCheck }}>

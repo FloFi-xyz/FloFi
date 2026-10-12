@@ -1,0 +1,152 @@
+{
+  "verifiedAt": "2026-10-11T23:39:06.376Z",
+  "evidence": "PUBLIC_READ_ONLY",
+  "chain": "eip155:42161",
+  "rpcUrl": "https://arb1.arbitrum.io/rpc",
+  "block": 513958416,
+  "blockHash": "0x3e522155550f1839f8ad3003905bc9c8eab817b0bca108b64b25786459d95246",
+  "addresses": {
+    "pool": "0x794a61358d6845594f94dc1db02a252b5b4814ad",
+    "provider": "0xa97684ead0e402dc232d5a977953df7ecbab3cdb",
+    "oracle": "0xb56c2f0b653b2e0b10c9b928c8580ac5df02c7c7",
+    "asset": "0xaf88d065e77c8cc2239327c5edb3a432268e5831",
+    "aToken": "0x724dc807b04555b71ed48a6896b6f41593b8c637",
+    "variableDebtToken": "0xf611aeb5013fd2c0511c9cd55c7dc5c1140741a6",
+    "poolImplementation": "0xf05fd3cc911b4c5e36e53c00354f645e22922c9a",
+    "protocolDataProvider": "0x243aa95cac2a25651eda86e80bee66114413c43b",
+    "uiPoolDataProvider": "0x91e04cf78e53aebe609e8a7f2003e7eecd743f2b"
+  },
+  "sources": [
+    {
+      "url": "https://raw.githubusercontent.com/aave-dao/aave-address-book/main/src/AaveV3Arbitrum.sol",
+      "sha256": "ae36f8f66ad46f4b4924a2d085c48065ebf0bde901eaa444b0cfd2172d7afa28"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/aave-dao/aave-v3-origin/main/src/contracts/interfaces/IPool.sol",
+      "sha256": "ee58bacafc0b033adeaf673da3b08130d9f3a9a3eb563f7f19a03240e488eba7"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/aave-dao/aave-v3-origin/main/src/contracts/protocol/libraries/logic/BorrowLogic.sol",
+      "sha256": "daf57b87b1f9b669b7103c156ac6ae192b31ec74a60d57dc69e63730345d30bc"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/aave-dao/aave-v3-origin/main/src/contracts/protocol/libraries/logic/SupplyLogic.sol",
+      "sha256": "51a8ed9ed08bbe673809dd09af698f8a3f8de1f4aef9c83a04ae2fcfa62161a6"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/aave-dao/aave-v3-origin/main/src/contracts/protocol/tokenization/VariableDebtToken.sol",
+      "sha256": "244dea7e12ca08807e0718accece159867d9be8435808d5b495667e34ee50233"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/aave-dao/aave-v3-origin/main/src/contracts/protocol/libraries/helpers/TokenMath.sol",
+      "sha256": "11ef1a7ea98b3fe23ff54a0de7b70e53a637ec40d74a7babcf3db89476d3c859"
+    }
+  ],
+  "decoded": {
+    "reserveId": 12,
+    "decimals": 6,
+    "active": true,
+    "frozen": false,
+    "paused": false,
+    "borrowingEnabled": true,
+    "ltvBps": 7500,
+    "liquidationThresholdBps": 7800,
+    "liquidationBonusBps": 10500,
+    "borrowCap": "225000000",
+    "supplyCap": "250000000",
+    "debtCeiling": "0",
+    "liquidityRateRay": "31852579982654521284491490",
+    "variableBorrowRateRay": "39660698585674878971156202",
+    "aToken": "0x724dc807b04555b71ed48a6896b6f41593b8c637",
+    "variableDebtToken": "0xf611aeb5013fd2c0511c9cd55c7dc5c1140741a6"
+  },
+  "reads": {
+    "providerPool": "0x000000000000000000000000794a61358d6845594f94dc1db02a252b5b4814ad",
+    "providerOracle": "0x000000000000000000000000b56c2f0b653b2e0b10c9b928c8580ac5df02c7c7",
+    "poolProvider": "0x000000000000000000000000a97684ead0e402dc232d5a977953df7ecbab3cdb",
+    "poolRevision": "0x000000000000000000000000000000000000000000000000000000000000000b",
+    "reserve": "0x100000000000000000000103e800ee6b28000d693a4003e8850629041e781d4c000000000000000000000000000000000000000003d0f8a3db49b0ea5a7027890000000000000000000000000000000000000000001a590bd22176b7b0c3f8e2000000000000000000000000000000000000000004068588dae3456e7303f41400000000000000000000000000000000000000000020ce7ac7481c5eed1a16ea0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000006acc1ce9000000000000000000000000000000000000000000000000000000000000000c000000000000000000000000724dc807b04555b71ed48a6896b6f41593b8c637000000000000000000000000d94112b5b62d53c9402e7a60289c6810def1dc9b000000000000000000000000f611aeb5013fd2c0511c9cd55c7dc5c1140741a6000000000000000000000000429f16dba3b9e1900087cbaa7b50d38bc60fb73f00000000000000000000000000000000000000000000000000000019381a62d900000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+    "decimals": "0x0000000000000000000000000000000000000000000000000000000000000006",
+    "aTokenUnderlying": "0x000000000000000000000000af88d065e77c8cc2239327c5edb3a432268e5831",
+    "aTokenPool": "0x000000000000000000000000794a61358d6845594f94dc1db02a252b5b4814ad",
+    "aTokenDecimals": "0x0000000000000000000000000000000000000000000000000000000000000006",
+    "debtUnderlying": "0x000000000000000000000000af88d065e77c8cc2239327c5edb3a432268e5831",
+    "debtPool": "0x000000000000000000000000794a61358d6845594f94dc1db02a252b5b4814ad",
+    "debtDecimals": "0x0000000000000000000000000000000000000000000000000000000000000006",
+    "incomeIndex": "0x000000000000000000000000000000000000000003d0f8b77392fc5e56ab6067",
+    "debtIndex": "0x0000000000000000000000000000000000000000040685a297307634cdaf9f3e",
+    "price": "0x0000000000000000000000000000000000000000000000000000000005f5b393",
+    "baseCurrencyUnit": "0x0000000000000000000000000000000000000000000000000000000005f5e100",
+    "suppliedTotal": "0x0000000000000000000000000000000000000000000000000000a2da8665542a",
+    "debtTotal": "0x0000000000000000000000000000000000000000000000000000916dad6e2480",
+    "liquidity": "0x0000000000000000000000000000000000000000000000000000118a881fc700",
+    "poolImplementationSlot": "0x000000000000000000000000f05fd3cc911b4c5e36e53c00354f645e22922c9a"
+  },
+  "code": {
+    "pool": {
+      "address": "0x794a61358d6845594f94dc1db02a252b5b4814ad",
+      "bytes": 2400,
+      "sha256": "9190cf493c3977b5ca8b163bf77a661de34a4be1e410751e62bd8777e25a65b8"
+    },
+    "provider": {
+      "address": "0xa97684ead0e402dc232d5a977953df7ecbab3cdb",
+      "bytes": 9846,
+      "sha256": "b4425bc332855de6a03cf64a0fe385bbf06d6a8cbe7b3c10edcae0ed5c6c3def"
+    },
+    "oracle": {
+      "address": "0xb56c2f0b653b2e0b10c9b928c8580ac5df02c7c7",
+      "bytes": 3405,
+      "sha256": "d8042018e943c3d32d19fb54de61d2b99d1ecf8b8c126f3ccd5d83a87c06516a"
+    },
+    "asset": {
+      "address": "0xaf88d065e77c8cc2239327c5edb3a432268e5831",
+      "bytes": 1852,
+      "sha256": "2806ceef5f6fb4b4dd8630deb055a197dcab2ec729936d35845627faed23a5a3"
+    },
+    "aToken": {
+      "address": "0x724dc807b04555b71ed48a6896b6f41593b8c637",
+      "bytes": 2015,
+      "sha256": "15aadf6a6a7de455913ec6be109a1b22531a50e5c7fe4fe0ffae47295eb96eae"
+    },
+    "variableDebtToken": {
+      "address": "0xf611aeb5013fd2c0511c9cd55c7dc5c1140741a6",
+      "bytes": 2015,
+      "sha256": "15aadf6a6a7de455913ec6be109a1b22531a50e5c7fe4fe0ffae47295eb96eae"
+    },
+    "poolImplementation": {
+      "address": "0xf05fd3cc911b4c5e36e53c00354f645e22922c9a",
+      "bytes": 22442,
+      "sha256": "f3b3d13e1ed0f2268fb115d41ec2e2f0108547927585b2ab454633fe88762bc1"
+    },
+    "protocolDataProvider": {
+      "address": "0x243aa95cac2a25651eda86e80bee66114413c43b",
+      "bytes": 7435,
+      "sha256": "65fd4a8893fcbf425c91bf9677c858478d3c770fe6f6c0ca5ecf5068937764fb"
+    },
+    "uiPoolDataProvider": {
+      "address": "0x91e04cf78e53aebe609e8a7f2003e7eecd743f2b",
+      "bytes": 10339,
+      "sha256": "8e0343f589a80dafb2e814fc5168246945a15b34ca6735f2c8673fff5fcf6505"
+    }
+  },
+  "notUsedByRuntime": [
+    "protocolDataProvider",
+    "uiPoolDataProvider"
+  ],
+  "financialExecution": "NONE",
+  "accounting": {
+    "aTokenMint": "floor(amount / liquidityIndex)",
+    "aTokenBurn": "ceil(amount / liquidityIndex)",
+    "aTokenBalance": "floor(scaled * liquidityIndex)",
+    "variableDebtMint": "ceil(amount / variableBorrowIndex)",
+    "variableDebtBurn": "floor(amount / variableBorrowIndex)",
+    "variableDebtBalance": "ceil(scaled * variableBorrowIndex)",
+    "interestRateMode": 2,
+    "ABI": "getReserveData(address): 15 static words; runtime normalized indexes used for principal/effect verification"
+  },
+  "proxy": {
+    "slot": "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc",
+    "block": 513958416,
+    "source": "https://github.com/aave-dao/aave-v3-origin/blob/main/src/contracts/dependencies/openzeppelin/upgradeability/BaseUpgradeabilityProxy.sol"
+  }
+}

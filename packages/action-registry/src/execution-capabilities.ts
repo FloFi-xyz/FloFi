@@ -122,7 +122,14 @@ for (const [action, adapter] of [['asset.swap.exact-input', 'uniswap.v3'], ['ass
   ['asset.transfer', 'evm.native-transfer'], ['asset.transfer', 'evm.token-transfer'],
   ['supply', 'aave-v3'], ['borrow', 'aave-v3'], ['repay', 'aave-v3'], ['withdraw', 'aave-v3']] as const)
   add(action, adapter, 'eip155:8453', 'MAINNET', fork, null, 'DIRECT_TRANSACTION', ['INJECTED_WALLET', 'QUOTE_PROVIDER', 'REVIEWED_ARTIFACTS'], ['A']);
-// Public execution and demonstrated evidence are limited to the exact Base Sepolia Uniswap swap profile.
+// BUILD-ARB-001 phase 2: shared owner-wallet swaps and transfers; no demonstrated mainnet execution.
+for (const [action, adapter] of [['asset.swap.exact-input', 'uniswap.v3'], ['asset.transfer', 'evm.native-transfer'], ['asset.transfer', 'evm.token-transfer']] as const)
+  add(action, adapter, 'eip155:42161', 'MAINNET', fork, null, 'DIRECT_TRANSACTION', ['INJECTED_WALLET', 'QUOTE_PROVIDER', 'REVIEWED_ARTIFACTS'], ['A']);
+// BUILD-ARB-001 phase 4: existing catalog Uniswap v3 mint path, owner wallet only; no demonstrated public execution.
+add('asset.liquidity.concentrated', 'uniswap.v3', 'eip155:42161', 'MAINNET', fork, null, 'DIRECT_TRANSACTION', ['INJECTED_WALLET', 'QUOTE_PROVIDER', 'REVIEWED_ARTIFACTS'], ['A']);
+// BUILD-ARB-001 phase 5: the shared one-reserve Aave runtime; connected owner wallet, gates default off.
+for (const action of ['supply', 'borrow', 'repay', 'withdraw'] as const)
+  add(action, 'aave-v3', 'eip155:42161', 'MAINNET', fork, null, 'DIRECT_TRANSACTION', ['INJECTED_WALLET', 'QUOTE_PROVIDER', 'REVIEWED_ARTIFACTS'], ['A']);
 export const executionCapabilityRegistry: readonly ExecutionCapabilityProfile[] = Object.freeze(rows);
 
 export type CapabilityRuntime = {

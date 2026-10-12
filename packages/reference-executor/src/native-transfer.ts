@@ -22,7 +22,7 @@ const entity = (run: Pick<TransferRun, 'id'>) => `${run.id}.TRANSFER`;
  * `rhx-`: public-testnet transfer runs (RH-DEMO-001, Ethereum Sepolia); `rht-` (BUILD-RH-002): Robinhood Chain mainnet runs; `bat-`
  * (BUILD-BASE-001): Base mainnet runs.
  */
-export const TRANSFER_RUN_ID = /^(rhx|rht|bat)-[a-f0-9]{32}$/;
+export const TRANSFER_RUN_ID = /^(rhx|rht|bat|art)-[a-f0-9]{32}$/;
 
 export function createTransferRun(id: string, review: NativeTransferReview, provenance: TransferRun['provenance'], now = new Date()): TransferRun {
   if (!TRANSFER_RUN_ID.test(id)) throw new Error('TRANSFER_RUN_ID_INVALID');
@@ -92,7 +92,8 @@ export function validateTransferRun(run: TransferRun): void {
   const { commitment, ...review } = run.review;
   // A mainnet run lives only in a mainnet namespace (rht-, BUILD-BASE-001 bat-); a testnet run never does (BUILD-RH-002). A Base run is a Base review.
   if (run.format !== 'gryloo.native-transfer-run.v1' || !TRANSFER_RUN_ID.test(run.id) || !['PUBLIC_TESTNET', 'PUBLIC_MAINNET', 'MOCKED'].includes(run.provenance) ||
-      (run.provenance === 'PUBLIC_MAINNET' && !run.id.startsWith('rht-') && !run.id.startsWith('bat-')) || (run.provenance === 'PUBLIC_TESTNET' && !run.id.startsWith('rhx-')) ||
+      (run.provenance === 'PUBLIC_MAINNET' && !run.id.startsWith('rht-') && !run.id.startsWith('bat-') && !run.id.startsWith('art-')) || (run.provenance === 'PUBLIC_TESTNET' && !run.id.startsWith('rhx-')) ||
+      run.id.startsWith('art-') !== (run.review.chain === 'eip155:42161') ||
       run.id.startsWith('bat-') !== (run.review.chain === 'eip155:8453') ||
       supplyHash(review) !== commitment || supplyArtifactHash('execution-plan', run.review.plan) !== run.journal.executionPlanHash ||
       supplyArtifactHash('strategy-manifest', run.review.manifest) !== run.journal.manifestHash || run.journal.journalId !== run.id ||

@@ -1,0 +1,184 @@
+{
+  "fetchedAt": "2026-10-11T21:36:16.041Z",
+  "chain": "0xa4b1",
+  "block": "0x1ea207b2",
+  "blockNumber": 513935282,
+  "contracts": {
+    "UniswapV3Factory": {
+      "address": "0x1F98431c8aD98523631AE4a59f267346ea31F984",
+      "codePresent": true,
+      "codeSha256": "fd5e0ec0633afeb92b2f6b6cac36e13a9732bd1914f8158a78f127d51d54a572"
+    },
+    "NonfungiblePositionManager": {
+      "address": "0xC36442b4a4522E871399CD717aBDD847Ab11FE88",
+      "codePresent": true,
+      "codeSha256": "b64e5e5cd16edcf933484038d9f5a0de0c5c70fd5c03c1f92673c6cfdc74d538"
+    },
+    "QuoterV2": {
+      "address": "0x61fFE014bA17989E743c5F6cB21bF9697530B21e",
+      "codePresent": true,
+      "codeSha256": "606e62b332f9d979e27593eb38e3e214d22f08e1502b3ded0bd32c4fa81398ea"
+    },
+    "SwapRouter02": {
+      "address": "0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45",
+      "codePresent": true,
+      "codeSha256": "e1d11180e845c882d04df87f009d45061fdf1115ef607b734cbf6d3da9a58d86"
+    },
+    "USDC": {
+      "address": "0xaf88d065e77c8cc2239327c5edb3a432268e5831",
+      "codePresent": true,
+      "codeSha256": "b46445c0c96a50cd0ae6245d2ceb5058fbbcd24afad9cb878974d8f17b4655c8"
+    },
+    "WETH": {
+      "address": "0x82af49447d8a07e3bd95bd0d56f35241523fbab1",
+      "codePresent": true,
+      "codeSha256": "cbbb906270e2b7c031e119ec2f41a8d73d3e14ab437075760adc735e38edd888"
+    },
+    "SpokePool": {
+      "address": "0xe35e9842fceaca96570b734083f4a58e8f7c5f2a",
+      "codePresent": true,
+      "codeSha256": "3cc5e539eb61133fec38655ae3f55d8e1f944fce2cbc02e151972cf9c9880545"
+    },
+    "AaveProvider": {
+      "address": "0xa97684ead0e402dc232d5a977953df7ecbab3cdb",
+      "codePresent": true,
+      "codeSha256": "db390744f7a018b432019a61c995c4931d9c5e5f4e71ae5d06214f160a4906fc"
+    },
+    "AavePool": {
+      "address": "0x794a61358d6845594f94dc1db02a252b5b4814ad",
+      "codePresent": true,
+      "codeSha256": "7a042f7fd7d51b45273edcfe5ff9984c73410e01fd41e7f0fcef2b51e1a8f610"
+    },
+    "AaveOracle": {
+      "address": "0xb56c2f0b653b2e0b10c9b928c8580ac5df02c7c7",
+      "codePresent": true,
+      "codeSha256": "b4177b507e06d3d88230a239a357ac23a08ef3df07b864a32571b54a2dfe4555"
+    },
+    "AaveAToken": {
+      "address": "0x724dc807b04555b71ed48a6896b6f41593b8c637",
+      "codePresent": true,
+      "codeSha256": "ddb262703c2bac236cf5e11077cd24a08e205cb73a73972bab194037dcba6eeb"
+    },
+    "AaveDebtToken": {
+      "address": "0xf611aeb5013fd2c0511c9cd55c7dc5c1140741a6",
+      "codePresent": true,
+      "codeSha256": "ddb262703c2bac236cf5e11077cd24a08e205cb73a73972bab194037dcba6eeb"
+    }
+  },
+  "relationships": {
+    "SwapRouter02": {
+      "factory": "0x0000000000000000000000001f98431c8ad98523631ae4a59f267346ea31f984",
+      "weth": "0x00000000000000000000000082af49447d8a07e3bd95bd0d56f35241523fbab1"
+    },
+    "QuoterV2": {
+      "factory": "0x0000000000000000000000001f98431c8ad98523631ae4a59f267346ea31f984",
+      "weth": "0x00000000000000000000000082af49447d8a07e3bd95bd0d56f35241523fbab1"
+    },
+    "NonfungiblePositionManager": {
+      "factory": "0x0000000000000000000000001f98431c8ad98523631ae4a59f267346ea31f984",
+      "weth": "0x00000000000000000000000082af49447d8a07e3bd95bd0d56f35241523fbab1"
+    },
+    "pool": "0x000000000000000000000000c6962004f452be9203591991d15f6b388e09e8d0",
+    "aave": {
+      "provider": "0xa97684ead0e402dc232d5a977953df7ecbab3cdb",
+      "pool": "0x794a61358d6845594f94dc1db02a252b5b4814ad",
+      "oracle": "0xb56c2f0b653b2e0b10c9b928c8580ac5df02c7c7",
+      "providerPool": "0x000000000000000000000000794a61358d6845594f94dc1db02a252b5b4814ad",
+      "providerOracle": "0x000000000000000000000000b56c2f0b653b2e0b10c9b928c8580ac5df02c7c7",
+      "poolProvider": "0x000000000000000000000000a97684ead0e402dc232d5a977953df7ecbab3cdb",
+      "revision": "0x000000000000000000000000000000000000000000000000000000000000000b",
+      "reserve": "0x100000000000000000000103e800ee6b28000d693a4003e8850629041e781d4c000000000000000000000000000000000000000003d0f6d29471b79c5c1a74390000000000000000000000000000000000000000001a4d57031f69a240de6a1d0000000000000000000000000000000000000000040683254a451ab983ed6a5b00000000000000000000000000000000000000000020c730414b0c84c37b3b570000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000006acc00c3000000000000000000000000000000000000000000000000000000000000000c000000000000000000000000724dc807b04555b71ed48a6896b6f41593b8c637000000000000000000000000d94112b5b62d53c9402e7a60289c6810def1dc9b000000000000000000000000f611aeb5013fd2c0511c9cd55c7dc5c1140741a6000000000000000000000000429f16dba3b9e1900087cbaa7b50d38bc60fb73f0000000000000000000000000000000000000000000000000000001930ca530e00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "spoke": {
+      "chain": "0x000000000000000000000000000000000000000000000000000000000000a4b1",
+      "depositsPaused": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "fillsPaused": "0x0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  },
+  "additional": {
+    "base": {
+      "chain": "0x2105",
+      "spokePool": "0x09aea4b2242abc8bb4bb78d537a67a245a7bec64",
+      "codeSha256": "3cc5e539eb61133fec38655ae3f55d8e1f944fce2cbc02e151972cf9c9880545"
+    },
+    "liquidity": {
+      "pool": "0xc6962004f452be9203591991d15f6b388e09e8d0",
+      "liquidity": "0x0000000000000000000000000000000000000000000000002c81a78999abf31f",
+      "quote10Usdc": "0x000000000000000000000000000000000000000000000000000e1019d639b033000000000000000000000000000000000000000000034b0d28fd646f53456aa400000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000016f1b"
+    },
+    "lending": {
+      "aTokenUnderlying": "0x000000000000000000000000af88d065e77c8cc2239327c5edb3a432268e5831",
+      "aTokenPool": "0x000000000000000000000000794a61358d6845594f94dc1db02a252b5b4814ad",
+      "debtUnderlying": "0x000000000000000000000000af88d065e77c8cc2239327c5edb3a432268e5831",
+      "debtPool": "0x000000000000000000000000794a61358d6845594f94dc1db02a252b5b4814ad",
+      "aTokenSupply": "0x0000000000000000000000000000000000000000000000000000a2e25ac72323",
+      "debtSupply": "0x000000000000000000000000000000000000000000000000000091544e451f86",
+      "availableUsdc": "0x000000000000000000000000000000000000000000000000000011abb2c83242",
+      "price": "0x0000000000000000000000000000000000000000000000000000000005f5b393"
+    }
+  },
+  "evidenceLevel": "PUBLIC_READ_ONLY",
+  "methods": [
+    "eth_chainId",
+    "eth_blockNumber",
+    "eth_getCode",
+    "eth_call"
+  ],
+  "rpc": "https://arb1.arbitrum.io/rpc",
+  "catalogVerification": {
+    "source": "https://tokens.uniswap.org",
+    "version": "22.26.0",
+    "upstreamTimestamp": "2026-10-08T17:54:32.750Z",
+    "arbitrumRecords": 204,
+    "codePresent": 204,
+    "decimalsMatched": 203,
+    "mismatches": [
+      {
+        "address": "0x63806C056Fa458c548Fb416B15E358A9D685710A",
+        "symbol": "FLUX",
+        "listedDecimals": 18,
+        "chainDecimals": 8,
+        "codePresent": true
+      }
+    ],
+    "excludedSymbols": [
+      "1INCH"
+    ],
+    "policyAssetCount": 203
+  },
+  "sources": {
+    "tokenList": {
+      "url": "https://tokens.uniswap.org",
+      "sha256": "aaf0c47f30ec22cb70231143ad7e83539693eeb21b75466652d730f74b95296e"
+    },
+    "uniswapDeployments": {
+      "url": "https://developers.uniswap.org/deployments.json",
+      "sha256": "221f66d3f58524462f7e7f49173aee1bbebbaa97d3f6502d099bace3085b4070"
+    },
+    "aaveAddressBook": {
+      "url": "https://github.com/aave-dao/aave-address-book/blob/4250a79306a1de2a98aa3f60bb42fbfcfc612ec7/src/AaveV3Arbitrum.sol",
+      "sha256": "ae36f8f66ad46f4b4924a2d085c48065ebf0bde901eaa444b0cfd2172d7afa28"
+    },
+    "acrossRoutes": {
+      "url": "https://app.across.to/api/available-routes",
+      "sha256": "0574cfebcf9650a35dbbaf1361f102fbcc118febab4498320a4343eb035e8105"
+    }
+  },
+  "aaveReserve": {
+    "symbol": "USDC",
+    "address": "0xaf88d065e77c8cc2239327c5edb3a432268e5831",
+    "reserveId": 12,
+    "decimals": 6,
+    "active": true,
+    "frozen": false,
+    "borrowingEnabled": true,
+    "paused": false,
+    "supplyCap": 250000000,
+    "borrowCap": 225000000,
+    "poolRevision": 11,
+    "aTokenSupplyUnits": "179093069308707",
+    "debtSupplyUnits": "159791276433286",
+    "availableUsdcUnits": "19429136544322",
+    "priceUnits": "99988371"
+  }
+}

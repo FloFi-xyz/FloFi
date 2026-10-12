@@ -31,7 +31,7 @@ export const FLOWS_WITH_EXECUTION_SWITCH: readonly FlowName[] = Object.freeze(['
   'crosschain-router-base-to-robinhood', 'crosschain-router-robinhood-to-base', 'crosschain-router-arbitrum-to-robinhood', 'crosschain-router-robinhood-to-arbitrum',
   'robinhood-liquidity',
   // BUILD-BASE-001: Base mainnet liquidity (Base real-funds approval) and the Router's Arbitrum One → Base route (Router approval).
-  'base-liquidity', 'crosschain-router-arbitrum-to-base']);
+  'base-liquidity', 'arbitrum-liquidity', 'crosschain-router-arbitrum-to-base']);
 
 /**
  * Review findings that are not defects but the owner's own pre-execution steps in FloFi: every executable flow quotes, simulates

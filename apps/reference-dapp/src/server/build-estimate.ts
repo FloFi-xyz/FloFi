@@ -7,14 +7,27 @@ import { readBaseQuoteOnServer } from './base-rpc.ts';
 import { publicSwapProfile } from '../domain/public-testnet-swap.ts';
 import { simulationAmount } from '../domain/simulation-presentation.ts';
 import type { BuildEstimateResult } from '../domain/build-estimate.ts';
-import { createPublicSwapQuoteReader, type Rpc } from './public-testnet-service.ts';
+import { createPublicSwapQuoteReader, type CatalogSwapRuntime, type Rpc } from './public-testnet-service.ts';
+import { catalogNetworkOfChain, localCatalogNetworkMode, type CatalogNetworkId } from './catalog-networks.ts';
 import { baseSepoliaSwapRpc, ethereumSepoliaSwapRpc } from './public-testnet-rpc.ts';
 import { createSolanaRpc, solanaRpcOverride } from './solana-rpc.ts';
 import { createJupiterHttp } from './jupiter-http.ts';
 
+type Env = Readonly<Record<string, string | undefined>>;
+type QuoteReader = ReturnType<typeof createPublicSwapQuoteReader>;
+// UX-007: per catalog network and mode, one reused read client, swap runtime and process-wide validated catalog (stable metadata that
+// need not be rebuilt on every keystroke). Quote outputs are never cached here: every request reads the chain again.
+const catalogReaders = new Map<string, QuoteReader>();
+function catalogReader(id: CatalogNetworkId, mode: 'live' | 'harness', build: () => QuoteReader): QuoteReader {
+  const key = `${id}:${mode}`;
+  let reader = catalogReaders.get(key);
+  if (!reader) { reader = build(); catalogReaders.set(key, reader); }
+  return reader;
+}
+
 /** Adapter/profile selected reads; no execution store, session, Review, signature or submission port. */
-export async function readBuildEstimate(input: unknown, env: Readonly<Record<string, string | undefined>> = process.env,
-  seams: { rpc?: Rpc; http?: ReturnType<typeof createJupiterHttp>; now?: () => Date } = {}): Promise<BuildEstimateResult> {
+export async function readBuildEstimate(input: unknown, env: Env = process.env,
+  seams: { rpc?: Rpc; http?: ReturnType<typeof createJupiterHttp>; now?: () => Date; catalog?: CatalogSwapRuntime } = {}): Promise<BuildEstimateResult> {
   try {
     if (!input || typeof input !== 'object') throw Error('ESTIMATE_INVALID');
     const { workflow: raw, nodeId, owner } = input as { workflow?: unknown; nodeId?: unknown; owner?: unknown };
@@ -33,9 +46,23 @@ export async function readBuildEstimate(input: unknown, env: Readonly<Record<str
         expected: simulationAmount(q.expectedOut, decimals)!, minimum: simulationAmount(q.minimumOut, decimals), symbol: q.outputSymbol,
         slippageBps: q.slippageBps, expiresAt: q.expiresAt } };
     }
+    const catalogNetwork = uniswap ? catalogNetworkOfChain(node.chainId) : null;
+    const catalogEstimate = async (): Promise<BuildEstimateResult> => {
+      const mode = catalogNetwork ? localCatalogNetworkMode(catalogNetwork, env) : 'off';
+      if (!catalogNetwork || mode === 'off') return { ok: false, code: 'ESTIMATE_UNAVAILABLE' };
+      const build = () => createPublicSwapQuoteReader(() => seams.rpc ?? catalogNetwork.rpc(mode, env), now,
+        seams.catalog ?? catalogNetwork.swapRuntime(mode, env, catalogNetwork.catalogFor(mode)));
+      const reader = env === process.env && !seams.rpc && !seams.catalog ? catalogReader(catalogNetwork.id, mode, build) : build();
+      const q = await reader(workflow, 'read-only');
+      if (q.outputDecimals === undefined) return { ok: false, code: 'ESTIMATE_UNAVAILABLE' };
+      return { ok: true, estimate: { workflowHash, nodeId: node.nodeId, chain: node.chainId, provider: 'Uniswap V3',
+        expected: simulationAmount(q.expectedOut, q.outputDecimals)!, minimum: simulationAmount(q.minimumOut, q.outputDecimals), symbol: q.outputSymbol,
+        slippageBps: q.slippageBps, expiresAt: q.expiresAt } };
+    };
     if (node.chainId === 'eip155:8453' && uniswap) {
       const read = await readBaseQuoteOnServer({ workflow, nodeId }, { env });
-      if (!read.ok) return { ok: false, code: 'ESTIMATE_UNAVAILABLE' };
+      // UX-007: a Base pair the reference observation does not serve uses the shared catalog quote below, like every catalog network.
+      if (!read.ok) return catalogNetwork ? await catalogEstimate() : { ok: false, code: 'ESTIMATE_UNAVAILABLE' };
       const artifact = validateArtifact('quote-state-artifact', JSON.parse(read.artifact));
       if (!artifact.normalizedValues.some(v => v.name === 'observation-mode' && v.value === 'LIVE_READ_ONLY'))
         return { ok: false, code: 'ESTIMATE_UNAVAILABLE' };
@@ -49,6 +76,9 @@ export async function readBuildEstimate(input: unknown, env: Readonly<Record<str
         symbol: amount?.kind === 'QUANTITY' && amount.value.asset.decimals === 6 ? 'WETH' : 'USDC',
         slippageBps: slip?.kind === 'MAXIMUM_SLIPPAGE_BPS' ? slip.maximumBps : 0, expiresAt: artifact.freshness.expiresAt } };
     }
+    // UX-007: catalog networks (Base, Arbitrum One, Robinhood Chain) quote through the one shared read-only swap quote reader that
+    // Simulate uses, under the network's own deployment gate (off: no estimate). No owner binding, approval state or Review is produced.
+    if (catalogNetwork) return await catalogEstimate();
     if (node.chainId === JUPITER_SOLANA_MAINNET.chain && typeof owner === 'string') {
       // The taker is an untrusted quote parameter only; this read never binds ownership or grants authority.
       const intent = jupiterIntent(workflow, owner), http = seams.http ?? createJupiterHttp(JUPITER_SOLANA_MAINNET.api + JUPITER_SOLANA_MAINNET.endpoint, env.JUPITER_API_KEY);

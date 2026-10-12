@@ -21,7 +21,7 @@ import { useExecutionEnvironment } from './capability-store';
 import { reviewedManifest, reviewApprovalCall, type ReviewAuthorization, type ReviewWallet } from '../domain/review-presentation';
 import { simulationAmount, type SimulationSource } from '../domain/simulation-presentation';
 import { walletChainRef } from '../wallet/evm-networks';
-import { quoteDecimals } from '../domain/public-testnet-swap';
+import { ownerBoundSwapReview, quoteDecimals, swapProfile } from '../domain/public-testnet-swap';
 import { solanaWalletChainRef } from '../wallet/environment';
 
 /** Review callbacks only: no install, request, begin, submit or execute method crosses this boundary. */
@@ -131,8 +131,12 @@ export function useReviewAuthorization(kind: SimulationSource['kind']): { author
       const r = publicSwap.run, q = r?.quote; if (!r || !q) break;
       // A refreshed quote reuses the durable run after approval. Bind the fresh Review
       // to that quote, and permit only confirmed approvals before the unattempted swap.
-      attach(`${q.executionId}:${q.manifestHash}`, null, null, r.reviewedManifestHash === q.manifestHash, publicSwap.review,
-        !publicSwap.busy && !publicSwap.retired && !publicSwap.recoveryOnly && r.attempts.every(a => a.step === 'approval' && a.state === 'CONFIRMED'), q);
+      const profile = swapProfile(q.chainId), strict = profile ? ownerBoundSwapReview(profile) : false;
+      attach(`${q.executionId}:${q.manifestHash}`, null, null, r.reviewedManifestHash === q.manifestHash && !r.divergence, publicSwap.review,
+        !publicSwap.busy && !publicSwap.retired && !publicSwap.recoveryOnly && !r.divergence &&
+        (!strict || Boolean(q.ownerReview)) &&
+        r.attempts.every(a => a.step === 'approval' && a.state === 'CONFIRMED' && (!strict || a.nativeAfter !== null)), q);
+      authorization.owner = q.ownerReview?.account ?? null;
       authorization.chain = `eip155:${q.chainId}`;
       authorization.limits.push({ label: 'Max spend', value: simulationAmount(q.amountIn, quoteDecimals(q, 'input'), q.inputSymbol)! }, { label: 'Max slippage', value: `${(q.slippageBps / 100).toFixed(2)}%` }, { label: 'Minimum received', value: simulationAmount(q.minimumOut, quoteDecimals(q, 'output'), q.outputSymbol)! });
       break;

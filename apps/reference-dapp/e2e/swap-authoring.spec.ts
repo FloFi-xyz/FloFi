@@ -10,7 +10,7 @@ test.afterEach(async ({ page }) => { await assertPassiveWallet(page); });
 const prompt = (page: Page) => page.getByLabel('Describe your flow');
 const send = async (page: Page, text: string) => {
   await prompt(page).fill(text);
-  await page.getByRole('button', { name: 'Send' }).click();
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
 };
 const apply = applyPendingProposal;
 const selectSwap = openFirstActionSettings;
@@ -137,6 +137,8 @@ test('proposal and blocked review snapshots show unquoted unavailable state', as
   expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(page.viewportSize()!.width);
   expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(page.viewportSize()!.height);
   await expect(page.getByRole('button', { name: 'Simulate workflow' })).toBeEnabled();
+  // UX-007: capture the completed unavailable quote state, after the debounced read settles.
+  await expect(page.locator('.build-flow-surface .composer-quote-note')).toHaveText('Quote unavailable');
   await readyForVisualCapture(page);
   await expect(page).toHaveScreenshot('review-blocked.png', { fullPage: true, maxDiffPixels: 0, mask: [page.locator('[data-workflow-ir]')] });
 });

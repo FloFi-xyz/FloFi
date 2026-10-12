@@ -263,7 +263,8 @@ test.describe('BUILD-AUTOMATION-002 delegated execution (MOCKED loopback chains,
       await page.getByRole('button', { name: 'Send', exact: true }).click();
       await applyPendingProposal(page);
     }
-    await page.locator('.canvas-automate-action').getByRole('button', { name: 'Automate this workflow', exact: true }).click();
+    // UX-002: the existing action is the clock icon beside the workflow name's rename/save controls.
+    await page.locator('.build-canvas-head .canvas-name').getByRole('button', { name: 'Automate this workflow', exact: true }).click();
 
     // Automations opens on THIS workflow: its steps are re-derived from the Canvas document, never re-entered or re-interpreted.
     await expect(page).toHaveURL(/\/app\/automations$/);

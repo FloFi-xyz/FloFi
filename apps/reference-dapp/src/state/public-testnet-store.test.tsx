@@ -2,17 +2,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { PublicTestnetProvider, usePublicTestnet } from './public-testnet-store';
-import { publicAvailability, publicBegin, publicPrepare, publicRefresh, publicReview, publicStatus } from '../app/public-testnet-action';
+import { catalogSwapAvailability, publicAvailability, publicBegin, publicPrepare, publicRefresh, publicReport, publicReview, publicStatus } from '../app/public-testnet-action';
 import type { PublicRun } from '../server/public-testnet-service';
 import type { Workflow } from '../domain/initial-workflow';
 import { initialEditor } from '../domain/editor';
 import { deferred, HookHarness } from '../test-utils/hook-harness';
 import { reviewFixture } from '../test-utils/review-fixture';
+import { composeStrategy } from '../engine/strategy-engine';
 
 vi.mock('react', async original => ({ ...await original<typeof import('react')>(), ...(await import('../test-utils/hook-harness')).hookMocks }));
-const f = vi.hoisted(() => ({ workflow: null as Workflow | null, restore: vi.fn() }));
+const f = vi.hoisted(() => ({ workflow: null as Workflow | null, restore: vi.fn(), session: vi.fn() }));
 vi.mock('./workflow-store', () => ({ useWorkflow: () => ({ state: { workflow: f.workflow }, restoreWorkflow: f.restore }) }));
-vi.mock('./build009-wallet-store', () => ({ useBuild009Wallet: () => ({}), injected: () => null }));
+vi.mock('./build009-wallet-store', () => ({ useBuild009Wallet: () => ({ session: f.session }), injected: () => null }));
 vi.mock('../app/public-testnet-action', () => ({ publicAvailability: vi.fn(), publicStatus: vi.fn(), publicPrepare: vi.fn(), publicRefresh: vi.fn(),
   publicReview: vi.fn(), publicBegin: vi.fn(), publicObserve: vi.fn(), publicReport: vi.fn(), catalogSwapAvailability: vi.fn(async () => false) }));
 let host: HookHarness, store: ReturnType<typeof usePublicTestnet>, run: PublicRun;
@@ -28,6 +29,7 @@ beforeEach(() => {
   const values = new Map([['gryloo:public-testnet-execution-id', run.quote.executionId]]);
   vi.stubGlobal('localStorage', { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => values.set(key, value) });
   vi.mocked(publicAvailability).mockResolvedValue(true);
+  vi.mocked(catalogSwapAvailability).mockResolvedValue(false);
   vi.mocked(publicStatus).mockResolvedValue({ ok: true, value: run });
   vi.mocked(publicRefresh).mockResolvedValue({ ok: true, value: { ...run, quote: { ...run.quote, manifestHash: 'fresh-manifest' }, reviewedManifestHash: null } });
   vi.mocked(publicReview).mockImplementation(async () => ({ ok: true, value: { ...run, reviewedManifestHash: 'fresh-manifest' } }));
@@ -35,6 +37,30 @@ beforeEach(() => {
 afterEach(() => { host.unmount(); vi.unstubAllGlobals(); });
 
 describe('public swap durable recovery and explicit fresh Review', () => {
+  it('prepares Arbitrum through the existing server action with the connected owner, without requesting a signature', async () => {
+    const composed = composeStrategy({ action: 'swap', network: 'arbitrum-one', inputAsset: 'USDC', outputAsset: 'WETH', amount: '10' });
+    if (!composed.ok) throw Error(composed.code);
+    const workflow = composed.workflow as PublicRun['workflow'];
+    f.workflow = workflow as Workflow;
+    vi.mocked(publicStatus).mockResolvedValue({ ok: false, code: 'EXECUTION_NOT_FOUND' });
+    vi.mocked(catalogSwapAvailability).mockResolvedValue(true);
+    f.session.mockResolvedValue({ account: '0x1111111111111111111111111111111111111111', chainId: '0xa4b1' });
+    vi.mocked(publicPrepare).mockResolvedValue({ ok: true, value: { ...run, workflow, quote: { ...run.quote, chainId: 42161 } } });
+    read(); await settle(); store.simulate(); await settle();
+    expect(publicPrepare).toHaveBeenCalledExactlyOnceWith(composed.workflow, '0x1111111111111111111111111111111111111111');
+    expect(publicBegin).not.toHaveBeenCalled(); expect(publicReport).not.toHaveBeenCalled();
+  });
+  it('reports a browser-saved hash after an UNKNOWN wallet result during recovery', async () => {
+    const attemptId = run.quote.executionId + '.swap.1', hash = '0x' + 'a'.repeat(64);
+    run = { ...run, attempts: [{ step: 'swap', state: 'UNKNOWN', attemptId, txHash: null }] } as unknown as PublicRun;
+    vi.mocked(publicStatus).mockResolvedValue({ ok: true, value: run });
+    const saved = new Map([['gryloo:public-testnet-execution-id', run.quote.executionId], ['gryloo:public-testnet-execution-id:' + attemptId, hash]]);
+    vi.stubGlobal('localStorage', { getItem: (key: string) => saved.get(key) ?? null, setItem: vi.fn() });
+    vi.mocked(publicReport).mockResolvedValue({ ok: true, value: run });
+    read(); await settle();
+    expect(publicReport).toHaveBeenCalledExactlyOnceWith(run.quote.executionId, attemptId, { kind: 'HASH', txHash: hash });
+    expect(publicBegin).not.toHaveBeenCalled();
+  });
   it('restores the recorded canonical workflow over the untouched template without granting execution authority', async () => {
     read(); await settle();
     expect(f.restore).toHaveBeenCalledExactlyOnceWith(run.workflow);

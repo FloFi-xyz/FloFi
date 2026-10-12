@@ -5,7 +5,8 @@ import { useLocale } from '../i18n/locale';
 import { useEffect, useRef, useState } from 'react';
 
 /** Session identity only: renaming does not edit the canonical workflow or its revision. */
-export function WorkflowName({ name, rename, onSave }: { name: string; rename: (name: string) => void; onSave?: (() => void) | undefined }) {
+/** UX-002: `onAutomate` is the existing "Automate this workflow" action, offered here beside rename/save. */
+export function WorkflowName({ name, rename, onSave, onAutomate }: { name: string; rename: (name: string) => void; onSave?: (() => void) | undefined; onAutomate?: (() => void) | undefined }) {
   const { t: tr } = useLocale();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(name);
@@ -35,6 +36,9 @@ export function WorkflowName({ name, rename, onSave }: { name: string; rename: (
       </button></>}
     {onSave && <button type="button" className="workflow-save" aria-label={tr("Save workflow")} title={tr("Save workflow")} onClick={onSave}>
       <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h12l4 4v12a2 2 0 0 1-2 2Z"/><path d="M17 21v-8H7v8M7 3v5h8V3"/></svg>
+    </button>}
+    {onAutomate && <button type="button" className="workflow-automate" aria-label={tr("Automate this workflow")} title={tr("Automate this workflow")} onClick={onAutomate}>
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
     </button>}
   </div>;
 }

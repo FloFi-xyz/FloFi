@@ -1,0 +1,504 @@
+{
+  "baseline": "4df974f6ae6ae1d22b86f220db6281294cd20035",
+  "method": "Git-archived baseline app and packages; workflow-contracts, action-registry, reference-linter and reference-compiler rebuilt in isolated /tmp directories. Only installed locked third-party dependencies were reused.",
+  "entries": [
+    {
+      "id": "bridge-base-sepolia-arbitrum-sepolia",
+      "strategy": {
+        "action": "bridge",
+        "sourceNetwork": "base-sepolia",
+        "destinationNetwork": "arbitrum-sepolia",
+        "asset": "USDC",
+        "amount": "5",
+        "routing": "auto"
+      },
+      "workflowHash": "0xc852593b4181d8c0ab7aa0e41e8b2166c0e1c8a25fb52d70f15368e12061296d"
+    },
+    {
+      "id": "bridge-base-arbitrum-one",
+      "strategy": {
+        "action": "bridge",
+        "sourceNetwork": "base",
+        "destinationNetwork": "arbitrum-one",
+        "asset": "USDC",
+        "amount": "5",
+        "routing": "auto"
+      },
+      "workflowHash": "0x501f0f6838011ee014a159a85d6a19a3d959fae9b5205b391156e0089c253c4d"
+    },
+    {
+      "id": "swap-base",
+      "strategy": {
+        "action": "swap",
+        "network": "base",
+        "inputAsset": "USDC",
+        "outputAsset": "WETH",
+        "amount": "2",
+        "slippageBps": 50
+      },
+      "workflowHash": "0x747634a76aa445ec993325bbb638f4d5b5103d59267314b54d30db1bc79e3d49"
+    },
+    {
+      "id": "swap-base-sepolia",
+      "strategy": {
+        "action": "swap",
+        "network": "base-sepolia",
+        "inputAsset": "USDC",
+        "outputAsset": "WETH",
+        "amount": "1",
+        "slippageBps": 50
+      },
+      "workflowHash": "0x847da38bf7ad969cf7e0cb0f330c78a3cbe2a657019d838496ad0283058873d0"
+    },
+    {
+      "id": "swap-ethereum-sepolia",
+      "strategy": {
+        "action": "swap",
+        "network": "ethereum-sepolia",
+        "inputAsset": "USDC",
+        "outputAsset": "WETH",
+        "amount": "1",
+        "slippageBps": 50
+      },
+      "workflowHash": "0x3e24f95d4f86468e6ed40cf83fa382d7c78ed992baf6564f35d7132f2dd428b7"
+    },
+    {
+      "id": "swap-solana",
+      "strategy": {
+        "action": "swap",
+        "network": "solana",
+        "inputAsset": "USDC",
+        "outputAsset": "SOL",
+        "amount": "1",
+        "slippageBps": 50
+      },
+      "workflowHash": "0x9a5f65c80fe85286182a1730522a812bb283dd983008f02a1f4112010e91124d"
+    },
+    {
+      "id": "swap-solana-devnet",
+      "strategy": {
+        "action": "swap",
+        "network": "solana-devnet",
+        "inputAsset": "devUSDC",
+        "outputAsset": "SOL",
+        "amount": "1",
+        "slippageBps": 50
+      },
+      "workflowHash": "0x9c5dedb2e40ec49ac3d3bf3c1b094ab68b74f95f2e940ef81299944f64b54739"
+    },
+    {
+      "id": "supply-base-sepolia",
+      "strategy": {
+        "action": "supply",
+        "network": "base-sepolia",
+        "asset": "USDC",
+        "amount": "1",
+        "beneficiary": "0x0000000000000000000000000000000000000001"
+      },
+      "workflowHash": "0xbc1b05c63aacb66141ac1ea868f6e7152615007cc14448443a346b4e67f76755"
+    },
+    {
+      "id": "supply-ethereum-sepolia",
+      "strategy": {
+        "action": "supply",
+        "network": "ethereum-sepolia",
+        "asset": "WBTC",
+        "amount": "0.001",
+        "beneficiary": "0x0000000000000000000000000000000000000001"
+      },
+      "workflowHash": "0x1e42cfa3589b2637dfc27d0f5dbf97a6cab036f62f86613809a05be988df8b50"
+    },
+    {
+      "id": "borrow-base-sepolia",
+      "strategy": {
+        "action": "borrow",
+        "network": "base-sepolia",
+        "asset": "USDC",
+        "amount": "1",
+        "beneficiary": "0x0000000000000000000000000000000000000001"
+      },
+      "workflowHash": "0x6d5b3980ae4ba70f06caf06c5c3e77bf6f498b8637bd6dcd827757f8c059568d"
+    },
+    {
+      "id": "borrow-ethereum-sepolia",
+      "strategy": {
+        "action": "borrow",
+        "network": "ethereum-sepolia",
+        "asset": "WBTC",
+        "amount": "0.001",
+        "beneficiary": "0x0000000000000000000000000000000000000001"
+      },
+      "workflowHash": "0x5f2c8327d98b10546af08f78c1104d602f09b5eabf5ba5c7f42b7494ac6d5562"
+    },
+    {
+      "id": "repay-base-sepolia",
+      "strategy": {
+        "action": "repay",
+        "network": "base-sepolia",
+        "asset": "USDC",
+        "amount": "1",
+        "beneficiary": "0x0000000000000000000000000000000000000001"
+      },
+      "workflowHash": "0x7421fccef1f565009a92189c8c7ccdf5512bd752130a1db01a2df2560d361040"
+    },
+    {
+      "id": "repay-ethereum-sepolia",
+      "strategy": {
+        "action": "repay",
+        "network": "ethereum-sepolia",
+        "asset": "WBTC",
+        "amount": "0.001",
+        "beneficiary": "0x0000000000000000000000000000000000000001"
+      },
+      "workflowHash": "0x0cafcfe7355b37df9ae293ab26e109f4662eea0e823717b565f07f4b7320c9ed"
+    },
+    {
+      "id": "withdraw-base-sepolia",
+      "strategy": {
+        "action": "withdraw",
+        "network": "base-sepolia",
+        "asset": "USDC",
+        "amount": "1"
+      },
+      "workflowHash": "0x3aa0a43b198e5a65cf0c83699888648e6ce63d68b1a0a2e23054b6d44b9c9dac"
+    },
+    {
+      "id": "withdraw-ethereum-sepolia",
+      "strategy": {
+        "action": "withdraw",
+        "network": "ethereum-sepolia",
+        "asset": "WBTC",
+        "amount": "0.001"
+      },
+      "workflowHash": "0x68def59d3f6009e6163b6d597dccba46d010adbc8f25c41352d3e28f7485bd95"
+    },
+    {
+      "id": "add-liquidity-base-sepolia",
+      "strategy": {
+        "action": "add_liquidity",
+        "network": "base-sepolia",
+        "maxAmounts": {
+          "USDC": "10",
+          "WETH": "0.005"
+        },
+        "range": {
+          "unit": "tick",
+          "lower": "189960",
+          "upper": "200040"
+        }
+      },
+      "workflowHash": "0x4a9715cf0548495aafb8e6cd033514ebf04d98ed458e5d157a0f27d6c884648d"
+    },
+    {
+      "id": "add-liquidity-ethereum-sepolia",
+      "strategy": {
+        "action": "add_liquidity",
+        "network": "ethereum-sepolia",
+        "maxAmounts": {
+          "USDC": "10",
+          "WETH": "0.005"
+        },
+        "range": {
+          "unit": "tick",
+          "lower": "189960",
+          "upper": "200040"
+        }
+      },
+      "workflowHash": "0xb710548468e6869cbd323fbcf0598aa355025854743d7e8bc2f8123f6eb1212d"
+    },
+    {
+      "id": "add-liquidity-solana-devnet",
+      "strategy": {
+        "action": "add_liquidity",
+        "network": "solana-devnet",
+        "maxAmounts": {
+          "SOL": "0.01",
+          "devUSDC": "0.3"
+        },
+        "range": {
+          "unit": "tick",
+          "lower": "-29952",
+          "upper": "-25600"
+        }
+      },
+      "workflowHash": "0x0f52f1793c663f6f512a2d97b71116289e243b8791b6809d374b8decf44b7257"
+    },
+    {
+      "id": "lending-composition-base-sepolia",
+      "strategy": {
+        "action": "lending_composition",
+        "network": "base-sepolia",
+        "asset": "USDC",
+        "supplyAmount": "10",
+        "borrowAmount": "2",
+        "outputAsset": "WETH",
+        "owner": "0x0000000000000000000000000000000000000001"
+      },
+      "workflowHash": "0x52a2ab3359fad9ef5fe926dae10de6d87689831f726010686e5415016852571c"
+    },
+    {
+      "id": "bridge-base-robinhood",
+      "strategy": {
+        "action": "bridge",
+        "sourceNetwork": "base",
+        "destinationNetwork": "robinhood",
+        "asset": "USDC",
+        "amount": "5",
+        "routing": "auto"
+      },
+      "workflowHash": "0x5a64a7e12b4ab3e4e7b296342d771d1b35a0c05256ee9980500f53f2a93a5631"
+    },
+    {
+      "id": "bridge-robinhood-base",
+      "strategy": {
+        "action": "bridge",
+        "sourceNetwork": "robinhood",
+        "destinationNetwork": "base",
+        "asset": "USDG",
+        "amount": "5",
+        "routing": "auto"
+      },
+      "workflowHash": "0xe393fcf6a24bb1fbc0b3104d5a2a823fb30498f1ff41be7968025597d3da3f90"
+    },
+    {
+      "id": "bridge-arbitrum-robinhood",
+      "strategy": {
+        "action": "bridge",
+        "sourceNetwork": "arbitrum-one",
+        "destinationNetwork": "robinhood",
+        "asset": "USDC",
+        "amount": "5",
+        "routing": "auto"
+      },
+      "workflowHash": "0x3aa475f08aea8af7eb2ec9c2ba21a87d2e08e423a98467730990f79aceb22aaa"
+    },
+    {
+      "id": "bridge-robinhood-arbitrum",
+      "strategy": {
+        "action": "bridge",
+        "sourceNetwork": "robinhood",
+        "destinationNetwork": "arbitrum-one",
+        "asset": "USDG",
+        "amount": "5",
+        "routing": "auto"
+      },
+      "workflowHash": "0xd0177f9abc765a4dbb48fb56bb1a8e0c5e700321a3853c184ca3b968a0e68a67"
+    },
+    {
+      "id": "swap-robinhood",
+      "strategy": {
+        "action": "swap",
+        "network": "robinhood",
+        "inputAsset": "USDG",
+        "outputAsset": "WETH",
+        "amount": "10",
+        "slippageBps": 50
+      },
+      "workflowHash": "0xf45e71df1407588c0e5d2a1662bdbcde45a7fd94f4109a3b34f91a75e858cfdc"
+    },
+    {
+      "id": "add-liquidity-robinhood",
+      "strategy": {
+        "action": "add_liquidity",
+        "network": "robinhood",
+        "maxAmounts": {
+          "USDG": "10",
+          "WETH": "0.003"
+        },
+        "range": {
+          "unit": "full"
+        },
+        "feeTier": 100
+      },
+      "workflowHash": "0x3446e85ecdbe366ba1c5aefa82d596b32fc95de81c56d4d656f12ebd6dd5be51"
+    },
+    {
+      "id": "transfer-robinhood",
+      "strategy": {
+        "action": "transfer",
+        "network": "robinhood",
+        "asset": "USDG",
+        "amount": "1"
+      },
+      "workflowHash": "0xa73fff6402f0ae03142f3bc1fc24f079745b702dcb2d0ac8ce87950dbc0570c0"
+    },
+    {
+      "id": "bridge-arbitrum-base",
+      "strategy": {
+        "action": "bridge",
+        "sourceNetwork": "arbitrum-one",
+        "destinationNetwork": "base",
+        "asset": "USDC",
+        "amount": "5",
+        "routing": "auto"
+      },
+      "workflowHash": "0x352ce9f158bb46741918af01f5ec7e147d430fd9b35a88f4792c5b2a6d4caec1"
+    },
+    {
+      "id": "add-liquidity-base",
+      "strategy": {
+        "action": "add_liquidity",
+        "network": "base",
+        "maxAmounts": {
+          "USDC": "10",
+          "WETH": "0.003"
+        },
+        "range": {
+          "unit": "full"
+        },
+        "feeTier": 500
+      },
+      "workflowHash": "0xec14b47cd224c2e819b30a2da8bbbd3f0fe5993f68feb5276f41af560aac61f2"
+    },
+    {
+      "id": "transfer-base",
+      "strategy": {
+        "action": "transfer",
+        "network": "base",
+        "asset": "USDC",
+        "amount": "1"
+      },
+      "workflowHash": "0x256d8563f0294f965ad7382f5dcb7e4e8dee37eccf4022323dd4bac10241ef76"
+    },
+    {
+      "id": "supply-base",
+      "strategy": {
+        "action": "supply",
+        "network": "base",
+        "asset": "USDC",
+        "amount": "1",
+        "beneficiary": "0x0000000000000000000000000000000000000001"
+      },
+      "workflowHash": "0x2512c2a8f086089bff689584c06dc137817c64e8e0b9a147b685ad3bbabb3f8d"
+    },
+    {
+      "id": "borrow-base",
+      "strategy": {
+        "action": "borrow",
+        "network": "base",
+        "asset": "USDC",
+        "amount": "1",
+        "beneficiary": "0x0000000000000000000000000000000000000001"
+      },
+      "workflowHash": "0xb174e8b9eb493cd13012300b363cd886d70b26e4e70d97861b83d687d061a651"
+    },
+    {
+      "id": "repay-base",
+      "strategy": {
+        "action": "repay",
+        "network": "base",
+        "asset": "USDC",
+        "amount": "1",
+        "beneficiary": "0x0000000000000000000000000000000000000001"
+      },
+      "workflowHash": "0xd113323ca735c075439954c66fa278db5702dd3f58a59540abc53d322296503a"
+    },
+    {
+      "id": "withdraw-base",
+      "strategy": {
+        "action": "withdraw",
+        "network": "base",
+        "asset": "USDC",
+        "amount": "1"
+      },
+      "workflowHash": "0xe3b6caf7ba66cc83c7dd37e40e20ec7e4ba07b81039f88596020fc0461bae854"
+    },
+    {
+      "id": "rh-stock-swap-0",
+      "strategy": {
+        "action": "swap",
+        "network": "robinhood",
+        "inputAsset": "USDG",
+        "outputAsset": "TSLA",
+        "amount": "50",
+        "slippageBps": 50
+      },
+      "workflowHash": "0x298d2f440611adfbb5cd3dd4ba9429f12d5cb7bf76a8aede96ee7b5019261a40"
+    },
+    {
+      "id": "rh-stock-swap-1",
+      "strategy": {
+        "action": "swap",
+        "network": "robinhood",
+        "inputAsset": "AAPL",
+        "outputAsset": "USDG",
+        "amount": "2",
+        "slippageBps": 50
+      },
+      "workflowHash": "0xa881ff1d8ae72c6373439c5eaa1294860a8c3101f23d37e5f326377a7f5ab353"
+    },
+    {
+      "id": "rh-stock-swap-2",
+      "strategy": {
+        "action": "swap",
+        "network": "robinhood",
+        "inputAsset": "PLTR",
+        "outputAsset": "WETH",
+        "amount": "1",
+        "slippageBps": 50
+      },
+      "workflowHash": "0x1ebb25d66825f13e53b34899a697a5f122c37206a61eb1cb29d894a9c2d6121f"
+    },
+    {
+      "id": "rh-stock-transfer",
+      "strategy": {
+        "action": "transfer",
+        "network": "robinhood",
+        "asset": "TSLA",
+        "amount": "1"
+      },
+      "workflowHash": "0x3e1366fb903bf8122371694ebf24e43b4d1695025c8f0cd8432fad5ddbde7ae0"
+    },
+    {
+      "id": "rh-native-recipient",
+      "strategy": {
+        "action": "transfer",
+        "network": "robinhood",
+        "asset": "ETH",
+        "amount": "0.01",
+        "recipient": "0x3333333333333333333333333333333333333333"
+      },
+      "workflowHash": "0x63da1c343a800b7a5ebd35d2d3d621534b0d6931d2dd7085123bbb5e25762972"
+    },
+    {
+      "id": "rh-stock-pool-full",
+      "strategy": {
+        "action": "add_liquidity",
+        "network": "robinhood",
+        "maxAmounts": {
+          "USDG": "10",
+          "TSLA": "0.01"
+        },
+        "range": {
+          "unit": "full"
+        },
+        "feeTier": 100
+      },
+      "workflowHash": "0x8ca1bcf51060c82ef3456a665b91d17252b0a7eab9f9d419c168d3bb007cc44d"
+    },
+    {
+      "id": "rh-stock-pool-ticks",
+      "strategy": {
+        "action": "add_liquidity",
+        "network": "robinhood",
+        "maxAmounts": {
+          "USDG": "10",
+          "NVDA": "0.01"
+        },
+        "range": {
+          "unit": "tick",
+          "lower": "-887270",
+          "upper": "887270"
+        },
+        "feeTier": 500
+      },
+      "workflowHash": "0xd8e220fea0fa25f556223520e238e1481ae061812736cfe30ce650e3a1a6fc63"
+    }
+  ],
+  "packageSourceTrees": {
+    "workflow-contracts": "6ca90d07201506a09c7f05479a90d95ecd4318af",
+    "action-registry": "cd6f913aaca9df05ece5580048fb9bf7e12bb944",
+    "reference-linter": "e5f2e703557646f1e17c9ff37052eeeee186ceaa",
+    "reference-compiler": "b2736f920021a9405de6423aa3cf69e218ef5cac"
+  }
+}

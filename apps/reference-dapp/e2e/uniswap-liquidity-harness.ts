@@ -7,7 +7,7 @@
  * BUILD-RH-002: `profile` may be a Robinhood Chain pool (any catalog pair and fee tier); `stocks` makes a token a Stock Token (official
  * beacon proxy code, beacon slot, uid and multiplier reads) and `catalogPins` are the synthetic pins of its USDG/WETH/Stock Token code.
  */
-import { UNISWAP_V3_BASE, UNISWAP_V3_BASE_SEPOLIA_LIQUIDITY, UNISWAP_V3_ROBINHOOD, type UniswapPoolProfile } from '@defi-workflow-engine/action-registry';
+import { ARBITRUM_ONE, UNISWAP_V3_ARBITRUM, UNISWAP_V3_BASE, UNISWAP_V3_BASE_SEPOLIA_LIQUIDITY, UNISWAP_V3_ROBINHOOD, type UniswapPoolProfile } from '@defi-workflow-engine/action-registry';
 import { uniMockCode, uniMockCodePin, UNI_MOCK_CODE_PINS, UNI_MOCK_STOCK_PROXY_CODE } from '../src/server/uniswap-liquidity-mock.ts';
 import { UNISWAP_SELECTORS as SEL, UNISWAP_TOPICS as TOPIC, decodeUniswapApprove, decodeUniswapMint, sqrtRatioAtTick, uniswapComposition } from '@defi-workflow-engine/reference-compiler';
 
@@ -17,7 +17,8 @@ export { UNI_MOCK_CODE_PINS };
 type Snapshot = { balances: Record<string, Record<string, bigint>>; allowances: Record<string, bigint>; native: Record<string, bigint>; nonces: Record<string, bigint>;
   owners: Record<string, string>; positions: Record<string, { liquidity: bigint; tickLower: number; tickUpper: number }>; sqrtPriceX96: bigint; tick: number };
 type Inner = { readonly to: string; readonly input: string };
-type MinedTx = { hash: string; from: string; to: string; input: string; nonce: bigint; block: number; status: 0 | 1; logs: unknown[]; gasUsed: bigint; inner?: Inner };
+type WalletFees = { gas?: string; maxFeePerGas?: string; maxPriorityFeePerGas?: string };
+type MinedTx = { hash: string; from: string; to: string; input: string; nonce: bigint; block: number; status: 0 | 1; logs: unknown[]; gasUsed: bigint; inner?: Inner; fees?: WalletFees };
 /** MetaMask Delegation Framework v1.3.0 on Base Sepolia, as observed in 0x8248b684…5ccc. */
 export const UNI_DELEGATION_MANAGER = '0xdb9b1e94b5b69df7e401ddbede43491141047db3';
 export const UNI_DELEGATOR_IMPL = '0x63c0c19a282a1b52b07dd5a65b58948a07dae32b';
@@ -55,7 +56,9 @@ export function createUniswapLiquidityChain(options: { owner?: string; usdc?: bi
     ...[t0, t1].includes(UNISWAP_V3_ROBINHOOD.weth) ? { weth: uniMockCodePin(CODE[UNISWAP_V3_ROBINHOOD.weth]!) } : {},
     // BUILD-BASE-001: Base's pinned USDC and WETH (listed Base tokens carry no pin: code presence and decimals() only).
     ...[t0, t1].includes(UNISWAP_V3_BASE.usdc) ? { usdc: uniMockCodePin(CODE[UNISWAP_V3_BASE.usdc]!) } : {},
-    ...[t0, t1].includes(UNISWAP_V3_BASE.weth) ? { weth: uniMockCodePin(CODE[UNISWAP_V3_BASE.weth]!) } : {} };
+    ...[t0, t1].includes(UNISWAP_V3_BASE.weth) ? { weth: uniMockCodePin(CODE[UNISWAP_V3_BASE.weth]!) } : {},
+    ...[t0, t1].includes(UNISWAP_V3_ARBITRUM.usdc) ? { usdc: uniMockCodePin(CODE[UNISWAP_V3_ARBITRUM.usdc]!) } : {},
+    ...[t0, t1].includes(UNISWAP_V3_ARBITRUM.weth) ? { weth: uniMockCodePin(CODE[UNISWAP_V3_ARBITRUM.weth]!) } : {} };
   const owner = options.owner ?? UNI_OWNER;
   const tick = options.tick ?? 225_600;
   let head = 1_000;
@@ -65,9 +68,10 @@ export function createUniswapLiquidityChain(options: { owner?: string; usdc?: bi
     sqrtPriceX96: sqrtRatioAtTick(tick) + 123_456_789n, tick };
   const history = new Map<number, Snapshot>([[head, clone(state)]]);
   const mined = new Map<string, MinedTx>(), blocks = new Map<number, string[]>();
-  const pendingTxs: { hash: string; from: string; to: string; input: string; nonce: bigint; inner?: Inner }[] = [];
+  const pendingTxs: { hash: string; from: string; to: string; input: string; nonce: bigint; inner?: Inner; fees?: WalletFees }[] = [];
   let nextTokenId = 9_001n, hashSeq = 0;
   const gasPrice = 1_000_000n, baseFee = 500_000n;
+  const postingGas = profile.chain === ARBITRUM_ONE.chain ? 20_000n : 0n;
   const counters = { simulate: 0, sends: 0 };
   /** Base Flashblocks-style preconfirmation: receipt reads left that return a zero block hash for a block not sealed yet. */
   const preconfirmed = new Map<string, number>();
@@ -121,12 +125,15 @@ export function createUniswapLiquidityChain(options: { owner?: string; usdc?: bi
     const sel = data.slice(0, 10), arg = (i: number) => '0x' + data.slice(10 + i * 64 + 24, 10 + (i + 1) * 64);
     if (to === NPM && sel === SEL.factory) return '0x' + aw(profile.factory);
     if (to === NPM && sel === SEL.weth9) return '0x' + aw(profile.weth ?? t1);
+    if (to === '0x00000000000000000000000000000000000000c8' && sel === '0x77d488a2') return '0x' + w(postingGas) + w(baseFee) + w(10_000_000_000n);
     const stock = stocks.get(to);
     if (stock && sel === '0xf514ce36') return stock.uid;
     if (stock && sel === '0xa60bf13d') return '0x' + w(stock.multiplierWad);
     if (stock && sel === '0xdc767007') return '0x' + w(stock.scheduledWad ?? stock.multiplierWad);
     if (stock && sel === '0x97a4064f') return '0x' + w(BigInt(stock.effectiveAt ?? 0));
     if (to === profile.factory && sel === SEL.getPool) return '0x' + aw(arg(0) === t0 && arg(1) === t1 ? POOL : '0x' + '0'.repeat(40));
+    if (to === profile.factory && sel === SEL.feeAmountTickSpacing) return '0x' + w(BigInt(profile.feeTier) === BigInt('0x' + data.slice(10)) ? BigInt(profile.tickSpacing) : 0n);
+    if (to === POOL && sel === SEL.factory) return '0x' + aw(profile.factory);
     if (to === POOL && sel === SEL.token0) return '0x' + aw(t0);
     if (to === POOL && sel === SEL.token1) return '0x' + aw(t1);
     if (to === POOL && sel === SEL.fee) return '0x' + w(BigInt(profile.feeTier));
@@ -149,7 +156,9 @@ export function createUniswapLiquidityChain(options: { owner?: string; usdc?: bi
   const blockOf = (n: number, full: boolean) => ({ number: hx(n), hash: '0x' + n.toString(16).padStart(64, 'b'), timestamp: hx(n === head ? timestamp : timestamp - (head - n) * 2),
     baseFeePerGas: hx(baseFee), transactions: full ? (blocks.get(n) ?? []).map(h => txView(mined.get(h)!)) : blocks.get(n) ?? [] });
   const txView = (tx: MinedTx | (typeof pendingTxs)[number]) => ({ hash: tx.hash, from: tx.from, to: tx.to, input: tx.input, nonce: hx(tx.nonce), value: '0x0',
-    chainId: profile.chainHex, type: '0x2', blockNumber: 'block' in tx ? hx(tx.block) : null });
+    chainId: profile.chainHex, type: '0x2', gas: tx.fees?.gas ?? hx('gasUsed' in tx ? tx.gasUsed : 0n),
+    maxFeePerGas: tx.fees?.maxFeePerGas ?? hx(gasPrice), maxPriorityFeePerGas: tx.fees?.maxPriorityFeePerGas ?? '0x0',
+    blockNumber: 'block' in tx ? hx(tx.block) : null });
   function mine(txs: (typeof pendingTxs)[number][], options: { revert?: boolean } = {}) {
     head += 1; timestamp += 2;
     const hashes: string[] = [];
@@ -160,9 +169,9 @@ export function createUniswapLiquidityChain(options: { owner?: string; usdc?: bi
           return r.ok ? { ...r, logs: [...r.logs, { address: UNI_DELEGATION_MANAGER, topics: [REDEEMED_TOPIC, '0x' + aw(owner), '0x' + aw(tx.from)], data: '0x' + w(32n) }] } : r; })()
         : execute(state, tx.from, tx.to, tx.input, timestamp);
       state.nonces[tx.from] = (state.nonces[tx.from] ?? 0n) + 1n;
-      state.native[tx.from] = (state.native[tx.from] ?? 0n) - result.gas * gasPrice;
+      state.native[tx.from] = (state.native[tx.from] ?? 0n) - (result.gas + postingGas) * gasPrice;
       const logs = result.ok ? result.logs.map((l, i) => ({ ...(l as object), logIndex: hx(i) })) : [];
-      mined.set(tx.hash, { ...tx, block: head, status: result.ok ? 1 : 0, logs, gasUsed: result.gas });
+      mined.set(tx.hash, { ...tx, block: head, status: result.ok ? 1 : 0, logs, gasUsed: result.gas + postingGas });
       hashes.push(tx.hash);
     }
     blocks.set(head, hashes);
@@ -188,6 +197,13 @@ export function createUniswapLiquidityChain(options: { owner?: string; usdc?: bi
         return hx(params[1] === 'pending' ? base + BigInt(pendingTxs.filter(p => p.from === who).length) : base);
       }
       case 'eth_maxPriorityFeePerGas': return hx(gasPrice - baseFee);
+      case 'eth_gasPrice': return hx(gasPrice);
+      case 'eth_estimateGas': {
+        const c = params[0] as { from: string; to: string; data: string };
+        const result = execute(clone(at(params[1])), c.from, c.to, c.data, timestamp + 2);
+        if (!result.ok) throw new Error('MOCK_ESTIMATE_REVERTED');
+        return hx(result.gas + postingGas);
+      }
       case 'eth_call': { const r = params[0] as { to: string; data: string }; return read(at(params[1]), r.to.toLowerCase(), r.data.toLowerCase()); }
       case 'eth_simulateV1': {
         if (options.simulateV1 === false) throw new Error('MOCK_METHOD_NOT_FOUND');
@@ -213,10 +229,11 @@ export function createUniswapLiquidityChain(options: { owner?: string; usdc?: bi
   const newHash = () => '0x' + (++hashSeq).toString(16).padStart(64, 'e');
   /** The owner's browser wallet: the ONLY place a transaction is sent. */
   const wallet = {
-    send(tx: { from: string; to: string; data: string; chainId: string }, mode: { hold?: boolean; revert?: boolean } = {}): string {
+    send(tx: { from: string; to: string; data: string; chainId: string } & WalletFees, mode: { hold?: boolean; revert?: boolean } = {}): string {
       if (tx.from !== owner || tx.chainId !== profile.chainHex) throw new Error('MOCK_WRONG_SIGNER');
       counters.sends += 1;
-      const queued = { hash: newHash(), from: owner, to: tx.to.toLowerCase(), input: tx.data.toLowerCase(), nonce: (state.nonces[owner] ?? 0n) + BigInt(pendingTxs.length) };
+      const queued = { hash: newHash(), from: owner, to: tx.to.toLowerCase(), input: tx.data.toLowerCase(), fees: tx,
+        nonce: (state.nonces[owner] ?? 0n) + BigInt(pendingTxs.length) };
       if (mode.hold) { pendingTxs.push(queued); return queued.hash; }
       mine([queued], mode); return queued.hash;
     },

@@ -51,6 +51,14 @@ const SENTENCES: Readonly<Record<string, string>> = {
   'borrow-base': `borrow 1 USDC from Aave on Base beneficiary ${OWNER}`,
   'repay-base': `repay 1 USDC to Aave on Base beneficiary ${OWNER}`,
   'withdraw-base': 'withdraw 1 USDC from Aave on Base',
+  // BUILD-ARB-001 Phase 6: append the seven completed canonical examples; previous sentences remain unchanged.
+  'swap-arbitrum': 'swap 10 USDC to WETH on Arbitrum One slippage 50 bps',
+  'transfer-arbitrum': 'transfer 5 USDC on Arbitrum One',
+  'add-liquidity-arbitrum': 'add liquidity 10 USDC and 0.003 WETH on Arbitrum One fee 0.05% full range slippage 100 bps',
+  'supply-arbitrum': 'supply 1 USDC to Aave on Arbitrum One beneficiary 0x0000000000000000000000000000000000000001',
+  'borrow-arbitrum': 'borrow 1 USDC from Aave on Arbitrum One beneficiary 0x0000000000000000000000000000000000000001',
+  'repay-arbitrum': 'repay 1 USDC to Aave on Arbitrum One beneficiary 0x0000000000000000000000000000000000000001',
+  'withdraw-arbitrum': 'withdraw 1 USDC from Aave on Arbitrum One',
 };
 const base = initialEditor().workflow, context = dappReviewContext();
 const chat = (sentence: string) => parseLocalCommand(sentence, base, context, null);

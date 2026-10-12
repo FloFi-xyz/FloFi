@@ -1,20 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { createNativeTransferNode, createTokenTransferNode, readTransferNode, TRANSFER_ACTION, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
-import { BASE_MAINNET_TRANSFER, ETHEREUM_SEPOLIA_TRANSFER, ROBINHOOD_MAINNET_TRANSFER, ROBINHOOD_TESTNET_TRANSFER, formatAssetAmount, parseAssetAmount, transferAllowsRecipients,
+import { NATIVE_TRANSFER_PROFILES, ROBINHOOD_TESTNET_TRANSFER, formatAssetAmount, parseAssetAmount, transferAllowsRecipients,
   transferAllowsTokens, type NativeTransferProfile } from '@defi-workflow-engine/action-registry';
-import { resolveNetworkAsset } from './asset-catalogs';
+import { authoringAssetSymbol, resolveNetworkAsset } from './asset-catalogs';
 /**
  * The transfer networks: the native test-ETH self-transfers of RH-DEMO-001 Robinhood Testnet and BUILD-ETHEREUM-001 Ethereum
  * Sepolia, and (BUILD-RH-002) Robinhood Chain mainnet — native ETH or a catalog asset (USDG, WETH, Stock Tokens), to the
  * connected owner or an explicit recipient. BUILD-BASE-001: Base mainnet on the same terms (ETH or a Base catalog token; the OP Stack L1 fee
  * is part of the reviewed fee budget).
  */
-export type TransferNetwork = 'Robinhood Chain Testnet' | 'Ethereum Sepolia' | 'Robinhood Chain' | 'Base';
+export type TransferNetwork = NativeTransferProfile['network'];
 /** `asset`: 'ETH' or a catalog symbol; `recipient`: the connected owner or an explicit lower-case address. */
 export type RobinhoodTransferInput = { network: TransferNetwork; asset: string; amount: string; recipient: 'CONNECTED_OWNER' | string };
-export const TRANSFER_NETWORKS: Readonly<Record<TransferNetwork, NativeTransferProfile>> = Object.freeze({
-  'Robinhood Chain Testnet': ROBINHOOD_TESTNET_TRANSFER, 'Ethereum Sepolia': ETHEREUM_SEPOLIA_TRANSFER, 'Robinhood Chain': ROBINHOOD_MAINNET_TRANSFER,
-  'Base': BASE_MAINNET_TRANSFER });
+export const TRANSFER_NETWORKS: Readonly<Record<TransferNetwork, NativeTransferProfile>> = Object.freeze(Object.fromEntries(NATIVE_TRANSFER_PROFILES.map(profile => [profile.network, profile])) as Record<TransferNetwork, NativeTransferProfile>);
 const WEI = 10n ** 18n;
 /** Exact decimal ETH to wei; at most 18 decimals and never above the profile's cap. */
 export function parseTransferAmount(value: string, profile: NativeTransferProfile = ROBINHOOD_TESTNET_TRANSFER): string {
@@ -40,9 +38,10 @@ export function createAuthoredTransfer(nodeId: string, input: RobinhoodTransferI
   const profile = transferProfileFor(input.network);
   const recipient = input.recipient === 'CONNECTED_OWNER' ? 'CONNECTED_OWNER' : typeof input.recipient === 'string' && RECIPIENT.test(input.recipient) ? input.recipient.toLowerCase() : null;
   if (!recipient || (recipient !== 'CONNECTED_OWNER' && !transferAllowsRecipients(profile))) throw new Error('TRANSFER_PROFILE_UNSUPPORTED');
-  if (input.asset === 'ETH') return createNativeTransferNode(nodeId, { chain: profile.chain, amount: parseTransferAmount(input.amount, profile), recipient });
+  const symbol = transferAllowsTokens(profile) ? authoringAssetSymbol(profile.chain, input.asset) : input.asset;
+  if (symbol === 'ETH') return createNativeTransferNode(nodeId, { chain: profile.chain, amount: parseTransferAmount(input.amount, profile), recipient });
   if (!transferAllowsTokens(profile)) throw new Error('TRANSFER_PROFILE_UNSUPPORTED');
-  const token = resolveNetworkAsset(profile.chain, { symbol: input.asset });
+  const token = resolveNetworkAsset(profile.chain, { symbol });
   if (!token) throw new Error('ASSET_CATALOG_UNAVAILABLE');
   if (token.kind !== 'ERC20') throw new Error('TRANSFER_PROFILE_UNSUPPORTED');
   let amount: string;
@@ -53,8 +52,8 @@ export function createAuthoredTransfer(nodeId: string, input: RobinhoodTransferI
 export function transferDetails(node: SemanticWorkflow['nodes'][number]): RobinhoodTransferInput | null {
   if (node.actionType !== TRANSFER_ACTION) return null;
   try {
-    const read = readTransferNode(node);
-    const network = (Object.keys(TRANSFER_NETWORKS) as TransferNetwork[]).find(name => TRANSFER_NETWORKS[name].chain === read.fields.chain);
+    const read = readTransferNode({ ...node, dependencies: [] });
+    const network = (Object.keys(TRANSFER_NETWORKS) as TransferNetwork[]).find(name => TRANSFER_NETWORKS[name]?.chain === read.fields.chain);
     if (!network) return null;
     if (read.kind === 'NATIVE') return { network, asset: 'ETH', amount: formatEth(read.fields.amount), recipient: read.fields.recipient };
     const token = resolveNetworkAsset(read.fields.chain, { address: read.fields.token.address });
