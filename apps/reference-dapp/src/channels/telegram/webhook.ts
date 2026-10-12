@@ -50,7 +50,7 @@ function person(from: unknown, chat: unknown): Person | null {
 }
 
 /** One Update → Channel Core events. Anything that is not an Update, or not from a private chat with a person, is only counted. */
-export function parseUpdate(body: unknown, config: Pick<TelegramConfig, 'botId' | 'allowedUsers'>, receivedAt: Date): NormalizedInbound | null {
+export function parseUpdate(body: unknown, config: Pick<TelegramConfig, 'botId' | 'allowedUsers' | 'accessMode'>, receivedAt: Date): NormalizedInbound | null {
   if (!plain(body) || typeof body.update_id !== 'number' || !Number.isSafeInteger(body.update_id) || body.update_id < 0) return null;
   const eventId = `update:${body.update_id}`, none = { messages: [], deliveries: [], ignored: 1, acknowledgements: [] };
   const event = (who: Person, content: InboundContent, sentAt: Date): InboundMessage => ({ channel: TELEGRAM_CHANNEL, eventId,

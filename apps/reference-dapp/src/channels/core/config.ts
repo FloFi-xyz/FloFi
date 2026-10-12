@@ -16,6 +16,8 @@
  *                                           MAINNET_HANDOFF_DISABLED_BY_POLICY); every mainnet a workflow touches must be listed
  *   FLOFI_CHANNEL_DISPATCH_TOKEN_SHA256     optional: SHA-256 hex of the scheduler's bearer for `/api/channels/dispatch` (Vercel Cron:
  *                                           the digest of CRON_SECRET); without it the endpoint does not exist (404)
+ *   FLOFI_CHANNEL_MODEL_BUDGET_HOURLY       BUILD-TELEGRAM-PUBLIC-001: interpreter (model) calls per hour across every conversation, channel and
+ *   FLOFI_CHANNEL_MODEL_BUDGET_DAILY        instance (PostgreSQL windows; defaults 300 and 2000, 1–100000). Spent: exact commands only.
  *
  * None of this is financial authority. The channel's approval links carry none, and its policy only decides which proposals FloFi
  * will even hand to an owner for review.
@@ -35,6 +37,8 @@ export type ChannelCoreConfig = {
   readonly hosted: boolean;
   /** SHA-256 of the scheduler bearer for the dispatch endpoint; null = no endpoint. */
   readonly dispatchTokenDigest: Buffer | null;
+  /** Global model-call budget (cost guard), shared by every instance through the store's fixed windows. */
+  readonly modelBudget: { readonly hourly: number; readonly daily: number };
 };
 export type ChannelCoreConfigResult = ChannelCoreConfig | { readonly enabled: false; readonly code: 'CHANNEL_CONFIGURATION_INVALID'; readonly reason: string };
 
@@ -54,6 +58,11 @@ const httpsUrl = (raw: string | undefined) => {
   catch { return null; }
 };
 const EMAIL = /^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,190}\.[A-Za-z]{2,24}$/;
+/** A positive whole-number limit (1–100000), the fallback when unset, or null when malformed (the configuration is then invalid). */
+export const limitOf = (value: string | undefined, fallback: number) => {
+  const v = value === undefined || value.trim() === '' ? String(fallback) : value.trim();
+  return /^[1-9][0-9]{0,5}$/.test(v) && Number(v) <= 100_000 ? Number(v) : null;
+};
 
 /** The channel handoff policy: test funds and each mainnet explicitly. Any malformed value invalidates the configuration. */
 export function readChannelHandoffPolicy(env: Env): Extract<HandoffPolicy, { ok: true }> | null {
@@ -88,6 +97,9 @@ export function readChannelCoreConfig(env: Env, providerSecrets: readonly string
   if (!policy) return invalid('FLOFI_CHANNEL_HANDOFF_POLICY');
   const dispatch = (env.FLOFI_CHANNEL_DISPATCH_TOKEN_SHA256 ?? '').trim().toLowerCase();
   if (dispatch !== '' && !/^[0-9a-f]{64}$/.test(dispatch)) return invalid('FLOFI_CHANNEL_DISPATCH_TOKEN_SHA256');
+  const hourly = limitOf(env.FLOFI_CHANNEL_MODEL_BUDGET_HOURLY, 300), daily = limitOf(env.FLOFI_CHANNEL_MODEL_BUDGET_DAILY, 2_000);
+  if (hourly === null) return invalid('FLOFI_CHANNEL_MODEL_BUDGET_HOURLY');
+  if (daily === null || daily < hourly) return invalid('FLOFI_CHANNEL_MODEL_BUDGET_DAILY');
   return Object.freeze({ enabled: true, tenantId, origin, keys: channelKeys(secret), policy, copilot, simulation, language, supportContact, privacyUrl,
-    hosted: isHostedDeployment(env), dispatchTokenDigest: dispatch === '' ? null : Buffer.from(dispatch, 'hex') });
+    hosted: isHostedDeployment(env), dispatchTokenDigest: dispatch === '' ? null : Buffer.from(dispatch, 'hex'), modelBudget: Object.freeze({ hourly, daily }) });
 }

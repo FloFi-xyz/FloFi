@@ -41,7 +41,7 @@ export type ChannelContext = { readonly core: ChannelCoreConfig; readonly store:
   /** BUILD-BASE-001: registers the validated catalogs of the catalog networks a message names (the deployment's own gates); none = pinned assets only. */
   readonly catalogs?: ((text: string, intent?: unknown) => Promise<void>) | null };
 export const LEASE_SECONDS = 300;
-export const LIMITS = Object.freeze({ inbound: [20, 600] as const, model: [30, 3_600] as const, preview: [10, 3_600] as const });
+export const LIMITS = Object.freeze({ inbound: [20, 600] as const, model: [30, 3_600] as const, modelDaily: [100, 86_400] as const, preview: [10, 3_600] as const });
 const MAX_EVENT_ATTEMPTS = 3;
 type Payload = { readonly content: TurnContent; readonly sendTo: ChannelAddress };
 const text = (value: string): ChannelReply => ({ text: shorten(value), choices: [], link: null });
@@ -58,6 +58,16 @@ export function createChannelService(ctx: ChannelContext) {
   const fitted = (reply: ChannelReply, language: ChannelLanguage): ChannelReply => !reply.choices.length || adapter.choicesFit(reply.choices) ? reply
     : { ...reply, text: `${reply.text}\n${reply.choices.map((c, i) => `${i + 1}. ${c.label}`).join('\n')}\n${channelCopy(language).choose}` };
 
+  /**
+   * BUILD-TELEGRAM-PUBLIC-001: one model call needs this conversation's hourly and daily allowance, then the deployment's global budget
+   * (every conversation, channel and instance share it through the store's atomic windows). Spent: COPILOT_BUSY, exact commands still work.
+   */
+  async function modelAllowed(conversationId: string, now: Date) {
+    return await store.allow(`channel:model:${conversationId}`, LIMITS.model[0], LIMITS.model[1], now)
+      && await store.allow(`channel:model:day:${conversationId}`, LIMITS.modelDaily[0], LIMITS.modelDaily[1], now)
+      && await store.allow('channel:model:global:hour', core.modelBudget.hourly, 3_600, now)
+      && await store.allow('channel:model:global:day', core.modelBudget.daily, 86_400, now);
+  }
   /** Records authenticated provider events; returns the conversations with new work. Duplicate deliveries record nothing. */
   async function ingest(messages: readonly InboundMessage[], deliveries: readonly DeliveryUpdate[] = []) {
     const now = ctx.now(), touched = new Set<string>();
@@ -145,7 +155,7 @@ export function createChannelService(ctx: ChannelContext) {
       await commit('RATE_LIMITED', notice ? [text(m.busy)] : [], undefined); return { address: null, language: state.language };
     }
     const interpret: ChannelInterpreter | null = ctx.interpreter && core.copilot ? async request =>
-      await store.allow(`channel:model:${conversationId}`, LIMITS.model[0], LIMITS.model[1], now) ? ctx.interpreter!(request) : { ok: false, code: 'COPILOT_BUSY' } : null;
+      await modelAllowed(conversationId, now) ? ctx.interpreter!(request) : { ok: false, code: 'COPILOT_BUSY' } : null;
     const prior = state, decision = await decideTurn({ content: payload.content, state, optedOut: !active, interpret, support: core.supportContact, privacy: core.privacyUrl,
       catalogs: ctx.catalogs ?? null });
     state = decision.state;

@@ -73,3 +73,39 @@ through the production adapter. It never runs in `pnpm test` or CI and touches n
 
 The URL button opens the link in Telegram's or the phone's browser, which has no injected wallet: copy it into a wallet's in-app
 browser, or open it on a desktop with a wallet extension. The link works once for 15 minutes; send `LINK` for a fresh one.
+
+## 7. Public access (BUILD-TELEGRAM-PUBLIC-001)
+
+With `FLOFI_TELEGRAM_ACCESS_MODE=public` anyone who opens the bot in a **private chat** can use it: no allowlist, sign-up or manual
+approval. Groups, channels and bots are still ignored, and the allowlist remains the default (unset or `allowlist`). Public access
+changes who may *talk* to the bot, never what the bot may do: it still has zero financial authority. A proposal becomes a one-time
+`/approve` link to `FLOFI_PUBLIC_ORIGIN`; there the person proves **their own** wallet (only the wallet named in their request may claim
+it), FloFi simulates again, they review the Strategy Manifest and sign in their wallet. Telegram never signs or moves funds.
+
+Enabling public mode is the owner's decision after the review in §1 (Telegram's bot terms, regulated-services clauses, and the
+classification of chat-originated DeFi proposals). Keep `FLOFI_CHANNEL_HANDOFF_MAINNET_NETWORKS` empty to keep proposals on test networks.
+
+| Variable | Value |
+| --- | --- |
+| `FLOFI_TELEGRAM_ACCESS_MODE` | `public` (exact, lower case; anything else fails closed) |
+| `FLOFI_TELEGRAM_PUBLIC_GLOBAL_LIMIT` | updates admitted per 10 minutes across all senders (default `300`) |
+| `FLOFI_TELEGRAM_PUBLIC_SENDER_LIMIT` | updates admitted per 10 minutes per sender (default `30`, at most the global limit). The conversation's own limiter (20 per 10 min) answers "busy" first; this backstop drops silently |
+| `FLOFI_CHANNEL_MODEL_BUDGET_HOURLY` / `_DAILY` | model calls across every conversation, channel and instance (defaults `300` / `2000`). Per conversation: 30/hour and 100/day. When spent, natural language is answered "busy" and exact commands keep working |
+| `FLOFI_CHANNEL_COPILOT` | `enabled` (default) |
+| `FLOFI_COPILOT`, `OPENAI_API_KEY`, `OPENAI_COPILOT_MODEL` | `live`, the key, the model: the conversational Copilot (without them: exact commands only) |
+
+All limits are PostgreSQL fixed windows (`mcp_rate_limits`), atomic across instances, checked **before** a conversation, an encrypted
+payload, a model call or an approval is allocated. A limited update is acknowledged (HTTP 200), so Telegram never retries it.
+Duplicate deliveries never run a second turn. Logs are content-free (`channel.public_rate_limited` with `kind: sender|global` only).
+
+**Owner-run steps (credentials stay in your shell and Vercel; never in Git or a chat):**
+
+1. In Vercel → Production, set the §2 variables plus the table above, and redeploy. Vercel Authentication must not cover
+   `/api/channels/telegram`.
+2. In your shell: `$CLI telegram-me` (token OK), then `$CLI telegram-set-webhook` and `$CLI telegram-webhook-info` (no delivery error).
+3. Acceptance with **two Telegram accounts**, at least one never used with FloFi before. For each, in a private chat with the bot:
+   `/start` (greeting and capabilities), then a natural request (e.g. "I want to earn yield on 5 USDC on Base Sepolia"), then the guided
+   answers until "Strategy ready". Open the button on the device, connect **that person's own** wallet, and confirm that FloFi
+   simulates, shows the Strategy Manifest and asks for the wallet signature. Confirm each account sees only its own conversation and
+   that "yes" in the chat authorizes nothing.
+4. Watch `telegram-webhook-info` (no `last_error_message`) and the logs for `channel.public_rate_limited`.
