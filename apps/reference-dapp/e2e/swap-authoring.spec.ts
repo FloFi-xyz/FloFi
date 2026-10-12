@@ -26,14 +26,13 @@ const createCanvas = async (page: Page, direction: 'USDC_TO_WETH' | 'WETH_TO_USD
     await picker.locator('label', { has: page.getByRole('radio', { name: 'WETH', exact: true }) }).click();
     await page.getByRole('button', { name: 'Hide token picker', exact: true }).click();
   }
-  await card.getByRole('textbox', { name: `Source amount (${direction === 'USDC_TO_WETH' ? 'USDC' : 'WETH'})`, exact: true }).fill(amount);
-  await card.getByRole('button', { name: 'Review amount', exact: true }).click();
-  await card.getByRole('button', { name: 'Apply amount', exact: true }).click();
-  if (slippage !== '50') {
+  // BUILD-FIX-UX-001: the amount applies on Enter; a new Canvas swap starts at 100 bps, and another limit is one direct settings edit.
+  const input = card.getByRole('textbox', { name: `Source amount (${direction === 'USDC_TO_WETH' ? 'USDC' : 'WETH'})`, exact: true });
+  await input.fill(amount); await input.press('Enter');
+  if (slippage !== '100') {
     await selectSwap(page);
     await page.locator('.inspector').getByLabel('Slippage (bps)', { exact: true }).fill(slippage);
-    await page.getByRole('button', { name: 'Review Swap settings' }).click();
-    await card.getByRole('button', { name: 'Apply amount', exact: true }).click();
+    await page.getByRole('button', { name: 'Apply slippage', exact: true }).click();
   }
 };
 
@@ -43,7 +42,7 @@ for (const [direction, from, to, amount] of [
 ] as const) {
   test(`${from} to ${to}: actual chat and canvas inputs yield equal semantic hashes`, async ({ page }) => {
     await page.goto('/app');
-    await send(page, `swap ${amount} ${from} to ${to} on Base slippage 50 bps`);
+    await send(page, `swap ${amount} ${from} to ${to} on Base slippage 100 bps`);
     await openProposalReview(page);
     await expect(page.getByRole('dialog', { name: 'Proposed change' })).toContainText(`${from}`);
     await expect(page.getByRole('dialog', { name: 'Proposed change' })).toContainText(`${to}`);
@@ -54,7 +53,7 @@ for (const [direction, from, to, amount] of [
     await expect(page.getByRole('region', { name: 'Deterministic review findings' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Execute workflow', exact: true })).toHaveCount(0);
     await page.reload();
-    await createCanvas(page, direction, amount, '50');
+    await createCanvas(page, direction, amount, '100');
     const canvas = await workflow(page);
     expect(canvas.revision).toBe(1);
     expect(canvas.workflowId).not.toBe(chat.workflowId);
@@ -75,22 +74,22 @@ test('mixed surface edits, dismissal, locks and stale proposals preserve revisio
   await selectSwap(page);
   const card = page.locator('.build-flow-surface .composer-card').first();
   await card.getByRole('textbox', { name: 'Source amount (USDC)' }).fill('3');
-  await card.getByRole('button', { name: 'Review amount', exact: true }).click();
-  await card.getByRole('button', { name: 'Apply amount', exact: true }).click();
-  await send(page, 'set node-002 slippage 100 bps');
+  await card.getByRole('textbox', { name: 'Source amount (USDC)' }).press('Enter');
+  await send(page, 'set node-002 slippage 75 bps');
   await apply(page);
   const chatCanvasChat = await workflow(page);
   expect(chatCanvasChat.revision).toBe(3);
 
   await page.reload();
-  await createCanvas(page, 'USDC_TO_WETH', '2', '50');
+  await createCanvas(page, 'USDC_TO_WETH', '2', '100');
   await send(page, 'set node-002 amount 3');
   await apply(page);
   await selectSwap(page);
-  await page.locator('.inspector').getByLabel('Slippage (bps)', { exact: true }).fill('100');
-  await page.getByRole('button', { name: 'Review Swap settings' }).click();
-  await expect(card.getByRole('button', { name: 'Apply amount', exact: true })).toBeEnabled();
-  await card.getByRole('button', { name: 'Apply amount', exact: true }).click();
+  // BUILD-FIX-UX-001: a slippage edit applies directly (no proposal and no unrelated "Apply amount"), and Advanced Settings shows it.
+  await page.locator('.inspector').getByLabel('Slippage (bps)', { exact: true }).fill('75');
+  await page.getByRole('button', { name: 'Apply slippage', exact: true }).click();
+  await expect(page.locator('.inspector')).toContainText('Applied limit: 75 bps (0.75%)');
+  await expect(card.getByRole('button', { name: /^(Review|Apply) amount$/ })).toHaveCount(0);
   const canvasChatCanvas = await workflow(page);
   expect(canvasChatCanvas.workflowId).not.toBe(chatCanvasChat.workflowId);
   const reconstructed = { ...canvasChatCanvas, workflowId: chatCanvasChat.workflowId };

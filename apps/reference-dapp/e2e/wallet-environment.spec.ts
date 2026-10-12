@@ -73,18 +73,18 @@ test('header and Bridge use the actual EVM wallet chain, update live, and keep u
     }
     await expect(card.getByRole('textbox')).toHaveValue('2.5');
   }
-  await card.getByRole('button', { name: 'Review amount', exact: true }).click();
-  await expect(card.getByRole('button', { name: 'Apply amount', exact: true })).toBeEnabled();
+  // BUILD-FIX-UX-001: no reviewed proposal exists to go stale; the draft applies on Enter only while the wallet's network supports the
+  // bridge, and an unsupported or unknown network is explained without changing the workflow.
+  const amount = card.getByRole('textbox'), revision = page.locator('.summary-bar');
+  await expect(card.getByRole('button', { name: /^(Review|Apply) amount$/ })).toHaveCount(0);
   await setChain(page, '0x14a34');
-  await expect(card.getByRole('button', { name: 'Apply amount', exact: true })).toBeDisabled();
-  await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '0');
-  await card.getByRole('button', { name: 'Review amount', exact: true }).click();
-  await expect(card.getByRole('button', { name: 'Apply amount', exact: true })).toBeEnabled();
+  await expect(revision).toHaveAttribute('data-workflow-revision', '0');
   await setChain(page, '0x89');
   await expect(indicator).toHaveAttribute('data-environment', 'unknown');
   await expect(environment).toHaveText('Network'); await expect(indicator.locator('.header-mainnet-dot')).toHaveCount(0);
-  await expect(card.getByRole('button', { name: 'Review amount', exact: true })).toBeDisabled();
-  await expect(card.getByRole('button', { name: 'Apply amount', exact: true })).toBeDisabled();
+  await amount.press('Enter');
+  await expect(card.getByRole('alert')).toContainText('Choose matching networks.');
+  await expect(revision).toHaveAttribute('data-workflow-revision', '0');
   await expect(page.getByRole('group', { name: 'Wallet connection' })).toContainText('Other chain (0x89)');
   await card.getByRole('button', { name: 'Configure source asset', exact: true }).click();
   const unknown = page.getByRole('region', { name: 'Source network picker', exact: true });
@@ -92,18 +92,17 @@ test('header and Bridge use the actual EVM wallet chain, update live, and keep u
   await expect(unknown.getByRole('button', { name: 'Solana', exact: true })).toBeDisabled();
   await page.getByRole('button', { name: 'Hide bridge picker', exact: true }).click();
   await setChain(page, '0x2105'); await expect(indicator).toHaveAttribute('data-environment', 'mainnet');
-  await expect(card.getByRole('button', { name: 'Apply amount', exact: true })).toBeDisabled();
-  await card.getByRole('button', { name: 'Review amount', exact: true }).click();
-  await expect(card.getByRole('button', { name: 'Apply amount', exact: true })).toBeEnabled();
   await page.evaluate(() => (window as unknown as { walletEnvironmentTest: WalletControls }).walletEnvironmentTest.disconnect());
   await expect(environment).toHaveText('Network'); await expect(indicator.locator('.header-mainnet-dot')).toHaveCount(0);
   await expect(environment).toBeDisabled();
-  await expect(card.getByRole('button', { name: 'Review amount', exact: true })).toBeDisabled();
-  await expect(card.getByRole('button', { name: 'Apply amount', exact: true })).toBeDisabled();
+  await amount.press('Enter');
+  await expect(card.getByRole('alert')).toContainText('Choose matching networks.');
+  await expect(revision).toHaveAttribute('data-workflow-revision', '0');
   await page.getByRole('button', { name: 'Connect Wallet', exact: true }).click();
   await chooseWallet(page, 'Browser wallet');
   await expect(environment).toHaveText('Mainnet');
-  await expect(card.getByRole('button', { name: 'Apply amount', exact: true })).toBeDisabled();
+  // Nothing was applied while the wallet was disconnected or on an unsupported network.
+  await expect(revision).toHaveAttribute('data-workflow-revision', '0');
 });
 
 test('Network control waits for actual wallet confirmation and never fabricates a successful switch', async ({ page }) => {

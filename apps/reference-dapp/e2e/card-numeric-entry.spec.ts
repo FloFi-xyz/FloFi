@@ -13,8 +13,19 @@ for (const action of ['swap', 'bridge', 'supply', 'borrow', 'repay', 'withdraw']
   const revision = page.locator('.summary-bar');
   const single = ['supply', 'borrow', 'repay', 'withdraw'].includes(action);
   const actionName = action[0]!.toUpperCase() + action.slice(1);
-  const review = card.getByRole('button', { name: single ? `Review ${actionName} change` : 'Review amount', exact: true });
-  const apply = card.getByRole('button', { name: single ? 'Apply proposal' : 'Apply amount', exact: true });
+  const review = card.getByRole('button', { name: `Review ${actionName} change`, exact: true });
+  const apply = card.getByRole('button', { name: 'Apply proposal', exact: true });
+  // BUILD-FIX-UX-001: Swap and Bridge apply a valid amount on Enter (an invalid one is refused inline, unchanged); the lending cards keep
+  // their whole-form Review proposal.
+  const submit = async () => { if (single) await review.click(); else await source.press('Enter'); };
+  const refused = async () => {
+    if (single) await expect(apply).toHaveCount(0);
+    else { await expect(card.getByRole('alert')).toBeVisible(); await expect(card.getByRole('button', { name: /^(Review|Apply) amount$/ })).toHaveCount(0); }
+  };
+  const accept = async (from: string) => {
+    if (single) { await review.click(); await expect(apply).toBeEnabled(); await expect(revision).toHaveAttribute('data-workflow-revision', from); await apply.click(); }
+    else await source.press('Enter');
+  };
   await expect(source).toHaveValue('0'); await expect(source).toHaveAttribute('placeholder', '0');
   await expect(revision).toHaveAttribute('data-workflow-revision', '0');
   await expect(page.getByRole('button', { name: 'Simulate workflow', exact: true })).toBeDisabled();
@@ -39,8 +50,8 @@ for (const action of ['swap', 'bridge', 'supply', 'borrow', 'repay', 'withdraw']
   await expect(panel.locator('.inspector-toggle')).toHaveAttribute('aria-expanded', 'false');
 
   await source.fill('1e2'); await expect(source).toHaveValue('1e2');
-  await review.click();
-  if (single) await expect(apply).toHaveCount(0); else await expect(apply).toBeDisabled();
+  await submit(); await refused();
+  await expect(source).toHaveValue('1e2');
   await expect(revision).toHaveAttribute('data-workflow-revision', '0');
 
   await openCanvasSettings(page);
@@ -52,27 +63,25 @@ for (const action of ['swap', 'bridge', 'supply', 'borrow', 'repay', 'withdraw']
   await panel.getByRole('button', { name: 'Advanced Settings', exact: true }).click();
 
   if (action === 'swap' || action === 'bridge') {
-    await card.locator('.composer-amount').getByRole('button', { name: 'Show fiat amount first (estimate unavailable)', exact: true }).click();
+    // BUILD-FIX-UX-001: without a verified USD price the line says why, and no USD-first mode is offered for a missing value.
+    await expect(card.locator('.composer-amount .composer-fiat-value')).toHaveText(/^(Test token · no USD value|USD price unavailable)$/);
+    await expect(card.getByRole('button', { name: 'Show USD value first', exact: true })).toHaveCount(0);
     await source.fill('000.05'); await expect(source).toHaveValue('0.05');
-    await expect(card.locator('.composer-amount .composer-primary-fiat')).toHaveText('USD value unavailable');
-    await card.locator('.composer-amount .composer-primary-fiat').click();
   }
   await source.fill(''); await source.press('Tab'); await expect(source).toHaveValue('0');
-  await review.click();
-  if (single) await expect(apply).toHaveCount(0); else await expect(apply).toBeDisabled();
+  await submit(); await refused();
   await expect(page.getByRole('button', { name: 'Simulate workflow', exact: true })).toBeDisabled();
 
   // The Router's existing minimum is unchanged: decimal entry must not bypass it.
   if (action === 'bridge') {
     await source.fill('000.05'); await expect(source).toHaveValue('0.05');
-    await review.click(); await expect(apply).toBeDisabled();
+    await submit(); await refused();
     await expect(revision).toHaveAttribute('data-workflow-revision', '0');
   }
   const firstAccepted = action === 'bridge' ? '2.5' : '0.05';
   await source.fill(`000${firstAccepted}`); await expect(source).toHaveValue(firstAccepted);
-  await review.click(); await expect(apply).toBeEnabled();
   await expect(revision).toHaveAttribute('data-workflow-revision', '0');
-  await apply.click(); await expect(source).toHaveValue(firstAccepted);
+  await accept('0'); await expect(source).toHaveValue(firstAccepted);
   await expect(revision).toHaveAttribute('data-workflow-revision', '1');
 
   // The accepted value remains editable with identical normalization and explicit acceptance.
@@ -82,9 +91,8 @@ for (const action of ['swap', 'bridge', 'supply', 'borrow', 'repay', 'withdraw']
   await expect(page.getByRole('button', { name: 'Simulate workflow', exact: true })).toBeDisabled();
   const replacement = action === 'bridge' ? '3.05' : '0.5';
   await source.click(); await source.pressSequentially(replacement); await expect(source).toHaveValue(replacement);
-  await review.click(); await expect(apply).toBeEnabled();
   await expect(revision).toHaveAttribute('data-workflow-revision', '1');
-  await apply.click(); await expect(source).toHaveValue(replacement);
+  await accept('1'); await expect(source).toHaveValue(replacement);
   await expect(revision).toHaveAttribute('data-workflow-revision', '2');
   await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Simulate', exact: true }).click();
   await expect(page.locator('.simulate-flow-surface .composer-amount')).toHaveText(`${replacement} USDC`);

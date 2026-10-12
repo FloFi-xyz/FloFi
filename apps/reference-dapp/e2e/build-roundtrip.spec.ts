@@ -15,8 +15,7 @@ test('chat and canvas round-trip through the same semantic revision', async ({ p
   const card = page.locator('.build-flow-surface .composer-card');
   await expect(card).toHaveCount(1);
   await card.getByRole('textbox', { name: 'Source amount (USDC)' }).fill('2.5');
-  await card.getByRole('button', { name: 'Review amount', exact: true }).click();
-  await card.getByRole('button', { name: 'Apply amount', exact: true }).click();
+  await card.getByRole('textbox', { name: 'Source amount (USDC)' }).press('Enter');
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '2');
   const edited = JSON.parse(await readWorkflowIr(page)) as SemanticWorkflow;
   expect(edited.nodes.find(node => node.nodeId === 'node-002')?.inputs.find(input => input.name === 'amount-in')).toMatchObject({ kind: 'QUANTITY', value: { amount: '2500000' } });

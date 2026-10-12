@@ -108,9 +108,9 @@ test('accepted Build edits refresh Simulate while current diagnostic artifacts a
   expect(await page.getByRole('main', { name: 'Simulation workspace', exact: true }).innerText()).not.toMatch(/MOCK|SYNTHETIC|Artifact Set|LOCAL/);
   await graph(page).getByRole('button', { name: 'Back to Build', exact: true }).click();
   await openCanvasSettings(page);
-  await page.getByRole('region', { name: 'Action inspector' }).getByLabel('Input amount (USDC)').fill('2.5');
-  await page.locator('.build-flow-surface .composer-card').getByRole('button', { name: 'Review amount', exact: true }).click();
-  await page.getByRole('button', { name: 'Apply amount', exact: true }).click();
+  const inspectorAmount = page.getByRole('region', { name: 'Action inspector' }).getByLabel('Input amount (USDC)');
+  // BUILD-FIX-UX-001: Enter in Advanced Settings applies the amount directly.
+  await inspectorAmount.fill('2.5'); await inspectorAmount.press('Enter');
   await rename(page, 'Updated Strategy');
   await stages(page).getByRole('button', { name: 'Simulate', exact: true }).click();
   await expect(graph(page).locator('.composer-amount')).toHaveText('2.5 USDC');

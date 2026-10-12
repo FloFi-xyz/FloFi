@@ -43,15 +43,16 @@ for (const action of ['swap', 'bridge', 'supply', 'borrow', 'repay', 'withdraw',
 test('Swap token selection synchronizes both pills and settings, invalidates review, and applies the selected supported direction', async ({ page }) => {
   await installSupplyWallet(page, { chain: '0x2105' }); await page.goto('/app'); await expect(page.getByRole('combobox', { name: 'Environment', exact: true })).toHaveText('Mainnet'); await page.getByRole('button', { name: 'Add swap', exact: true }).click();
   const card = page.locator('.build-flow-surface .composer-card');
+  const revision = page.locator('.summary-bar');
   await card.getByRole('textbox').fill('0.25');
-  await card.getByRole('button', { name: 'Review amount', exact: true }).click();
-  await expect(card.getByRole('button', { name: 'Apply amount', exact: true })).toBeEnabled();
+  // BUILD-FIX-UX-001: amount and token choices stay one draft until Enter applies them together; nothing is applied meanwhile.
+  await expect(card.getByRole('button', { name: /^(Review|Apply) amount$/ })).toHaveCount(0);
   await card.getByRole('button', { name: 'Select source token', exact: true }).click();
   const picker = page.getByRole('region', { name: 'Source token picker', exact: true });
   await picker.locator('label').filter({ hasText: 'WETH' }).click();
   await expect(card.getByRole('button', { name: 'Select source token', exact: true })).toContainText('WETH');
   await expect(card.getByRole('button', { name: 'Select destination token', exact: true })).toContainText('USDC');
-  await expect(card.getByRole('button', { name: 'Apply amount', exact: true })).toBeDisabled();
+  await expect(revision).toHaveAttribute('data-workflow-revision', '0');
   await expect(picker.getByRole('radio', { name: 'WETH', exact: true })).toBeChecked();
   await page.getByRole('region', { name: 'Source asset picker', exact: true }).getByRole('button', { name: 'Hide token picker', exact: true }).click();
   await card.getByRole('button', { name: 'Advanced Settings', exact: true }).click();
@@ -62,8 +63,9 @@ test('Swap token selection synchronizes both pills and settings, invalidates rev
   await expect(card.getByRole('textbox', { name: 'Source amount (USDC)', exact: true })).toHaveValue('0.25');
   await destination.locator('label').filter({ hasText: 'USDC' }).click();
   await page.getByRole('region', { name: 'Destination asset picker', exact: true }).getByRole('button', { name: 'Hide token picker', exact: true }).click();
-  await card.getByRole('button', { name: 'Review amount', exact: true }).click();
-  await card.getByRole('button', { name: 'Apply amount', exact: true }).click();
+  await expect(revision).toHaveAttribute('data-workflow-revision', '0');
+  await card.getByRole('textbox', { name: 'Source amount (WETH)', exact: true }).press('Enter');
+  await expect(revision).toHaveAttribute('data-workflow-revision', '1');
   await expect(card.getByRole('textbox', { name: 'Source amount (WETH)', exact: true })).toHaveValue('0.25');
   const advanced = page.locator('details.library[aria-label="Advanced action setup"]');
   await advanced.locator(':scope > summary').click(); await advanced.getByText('Workflow IR', { exact: true }).click();
@@ -71,15 +73,17 @@ test('Swap token selection synchronizes both pills and settings, invalidates rev
   const node = workflow.nodes.find((node: { actionType: string }) => node.actionType === 'asset.swap.exact-input');
   expect(node.inputs.find((input: { kind: string }) => input.kind === 'QUANTITY').value.amount).toBe('250000000000000000');
   await card.getByRole('button', { name: 'Advanced Settings', exact: true }).click();
-  const settings = page.getByRole('form', { name: 'Edit Swap', exact: true });
+  // BUILD-FIX-UX-001: slippage is an ordinary edit: typing applies nothing, Enter applies exactly the typed value.
+  const settings = page.getByRole('form', { name: 'Swap slippage', exact: true });
+  await expect(settings).toContainText('Applied limit: 100 bps (1.00%)');
   await settings.getByLabel('Slippage (bps)', { exact: true }).fill('75');
-  await settings.getByRole('button', { name: 'Review Swap settings', exact: true }).click();
-  await expect(card.getByRole('button', { name: 'Apply amount', exact: true })).toBeEnabled();
   await settings.getByLabel('Slippage (bps)', { exact: true }).fill('80');
-  await expect(card.getByRole('button', { name: 'Apply amount', exact: true })).toBeDisabled();
-  await settings.getByRole('button', { name: 'Review Swap settings', exact: true }).click();
-  await card.getByRole('button', { name: 'Apply amount', exact: true }).click();
-  await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '2');
+  await expect(revision).toHaveAttribute('data-workflow-revision', '1');
+  await settings.getByLabel('Slippage (bps)', { exact: true }).press('Enter');
+  await expect(revision).toHaveAttribute('data-workflow-revision', '2');
+  await expect(settings).toContainText('Applied limit: 80 bps (0.80%)');
+  const applied = JSON.parse(await advanced.locator('[data-workflow-ir]').innerText()).nodes.find((node: { actionType: string }) => node.actionType === 'asset.swap.exact-input');
+  expect(applied.userConstraints.find((c: { kind: string }) => c.kind === 'MAXIMUM_SLIPPAGE_BPS').maximumBps).toBe(80);
   // Authored assets remain editable within the shared action network.
   await card.getByRole('button', { name: 'Select source token', exact: true }).click();
   await expect(page.getByRole('region', { name: 'Source token picker', exact: true }).getByRole('radio')).toHaveCount(2);

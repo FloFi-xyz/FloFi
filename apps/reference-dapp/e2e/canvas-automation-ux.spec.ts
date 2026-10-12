@@ -98,8 +98,11 @@ for (const action of ['swap', 'pool']) test(`Solana Devnet ${action} remains aut
   await picker.getByRole('button', { name: 'Hide token picker', exact: true }).click();
   await card.getByRole('textbox').first().fill('0.1');
   if (action === 'pool') await card.getByRole('textbox').nth(1).fill('2');
-  await card.getByRole('button', { name: action === 'pool' ? 'Review' : 'Review amount', exact: true }).click();
-  await card.getByRole('button', { name: action === 'pool' ? 'Apply' : 'Apply amount', exact: true }).click();
+  // BUILD-FIX-UX-001: a swap amount applies on Enter; the Pool card keeps its own Review/Apply of the whole position.
+  if (action === 'pool') {
+    await card.getByRole('button', { name: 'Review', exact: true }).click();
+    await card.getByRole('button', { name: 'Apply', exact: true }).click();
+  } else await card.getByRole('textbox').first().press('Enter');
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '1');
   const workflow = JSON.parse(await readWorkflowIr(page));
   const node = workflow.nodes.find((node: { actionType: string }) => node.actionType === (action === 'swap' ? 'asset.swap.exact-input' : 'asset.liquidity.concentrated'));
