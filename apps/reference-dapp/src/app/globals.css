@@ -1731,10 +1731,12 @@ button.wallet-option .wallet-option-status{border-color:var(--accent-line);backg
 .delegation-flow{display:grid;gap:12px}
 .copilot-automation-proposal .delegation-flow .automation-pair{grid-template-columns:minmax(0,1fr)}
 @media(max-width:480px){.delegation-budget{font-size:12px}.delegation-budget :is(th,td){padding:5px 4px}.delegation-preview{padding:10px}}
-/* BUILD-FIX-UX-001: Canvas connections. The visible handle stays small; its hit area is larger (and grows when zoomed out, see
-   handleHitScale) so a link starts without pixel-perfect aiming. During a drag only inputs the workflow accepts turn valid. */
+/* BUILD-FIX-UX-001: Canvas connections. The visible handle stays small with a slightly larger hit area; over its card (and during a drag)
+   that area grows, zoom-compensated (handleHitScale), so a link starts without pixel-perfect aiming while short edges between cards stay
+   selectable. During a drag only inputs the workflow accepts turn valid. */
 .build-flow-surface .composer-card .react-flow__handle{width:13px;height:13px;border:2px solid var(--paper);background:var(--blue);transition:scale 120ms ease,box-shadow 120ms ease,background-color 120ms ease}
-.build-flow-surface .composer-card .react-flow__handle::before{content:"";position:absolute;left:50%;top:50%;width:calc(34px * var(--canvas-handle-scale,1));height:calc(34px * var(--canvas-handle-scale,1));border-radius:50%;transform:translate(-50%,-50%)}
+.build-flow-surface .composer-card .react-flow__handle::before{content:"";position:absolute;left:50%;top:50%;width:19px;height:19px;border-radius:50%;transform:translate(-50%,-50%)}
+.build-flow-surface .react-flow__node:hover .composer-card .react-flow__handle::before,.build-flow-surface .react-flow:has(.react-flow__connection-path) .composer-card .react-flow__handle::before{width:calc(34px * var(--canvas-handle-scale,1));height:calc(34px * var(--canvas-handle-scale,1))}
 .build-flow-surface .composer-card .react-flow__handle.connectionindicator{cursor:crosshair}
 .build-flow-surface .react-flow__node:hover .composer-card .react-flow__handle.connectionindicator,.build-flow-surface .composer-card .react-flow__handle.connectionindicator:hover{scale:1.35;box-shadow:0 0 0 5px color-mix(in srgb,var(--blue) 22%,transparent)}
 .build-flow-surface .react-flow:has(.react-flow__connection-path) .composer-card .react-flow__handle.target.connectionindicator{scale:1.35;box-shadow:0 0 0 5px color-mix(in srgb,var(--blue) 22%,transparent)}

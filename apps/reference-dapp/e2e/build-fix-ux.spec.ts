@@ -51,6 +51,8 @@ async function drag(page: Page, from: { x: number; y: number }, to: { x: number;
   if (via) await page.mouse.move(via.x, via.y, { steps: 12 });
   await page.mouse.move(to.x, to.y, { steps: 12 }); await page.mouse.up();
 }
+/** The Canvas zoom (the React Flow viewport scale). */
+const zoomOf = (page: Page) => page.locator('.build-flow-surface .react-flow__viewport').evaluate(element => new DOMMatrixReadOnly(getComputedStyle(element).transform).a);
 const underPointer = (page: Page, point: { x: number; y: number }) => page.evaluate(({ x, y }) => {
   const element = document.elementFromPoint(x, y)?.closest('.react-flow__handle');
   return element ? `${element.closest('.react-flow__node')?.getAttribute('data-id')}:${element.classList.contains('source') ? 'output' : 'input'}` : null;
@@ -58,9 +60,15 @@ const underPointer = (page: Page, point: { x: number; y: number }) => page.evalu
 
 test('a connection starts from near the output, is released anywhere on the next card, and invalid links are explained', async ({ page, networkGuard }) => {
   await twoSwaps(page);
-  const start = await ir(page), from = await center(output(page, 'node-002'));
-  // The visible dot is small; the area around it (outside the dot) still starts a connection, and hovering shows it.
-  const near = { x: from.x + 9, y: from.y + 7 };
+  const start = await ir(page), from = await center(output(page, 'node-002')), zoom = await zoomOf(page);
+  // Between the resting hit area (19 px) and the area over the card (34 px), both drawn inside the zoomed viewport (zoom ≥ 1 here).
+  const distance = (9.5 + 17) / 2 * zoom, near = { x: from.x + distance * 0.8, y: from.y + distance * 0.6 };
+  // Away from the card the hit area stays modest, so short edges between cards remain selectable.
+  const pane = (await page.locator('.build-flow-surface').boundingBox())!;
+  await page.mouse.move(pane.x + 10, pane.y + pane.height - 10);
+  expect(await underPointer(page, near)).toBeNull();
+  // Over its card the output's connectable area grows and shows: outside the small dot it still starts a connection.
+  await page.mouse.move(from.x - 30, from.y);
   expect(await underPointer(page, near)).toBe('node-002:output');
   await page.mouse.move(near.x, near.y);
   await expect.poll(() => output(page, 'node-002').evaluate(element => getComputedStyle(element).scale)).not.toBe('none');
@@ -88,7 +96,6 @@ test('a connection starts from near the output, is released anywhere on the next
   await expect(page.locator('.build-flow-surface .react-flow__edge')).toHaveCount(1);
   expect(await dependencies(page, 'node-003')).toEqual(['node-002']);
   // Released on the empty canvas: nothing happens.
-  const pane = (await page.locator('.build-flow-surface').boundingBox())!;
   await drag(page, await center(output(page, 'node-003')), { x: pane.x + 20, y: pane.y + pane.height - 20 });
   expect(await readWorkflowIr(page)).toBe(linked);
   // Selecting and dragging a card still work and never connect anything.
@@ -108,7 +115,8 @@ test('handles stay easy to target when the Canvas is zoomed out', async ({ page,
   const flow = page.locator('.build-flow-surface .react-flow');
   await expect.poll(() => flow.evaluate(element => Number(getComputedStyle(element).getPropertyValue('--canvas-handle-scale')))).toBeGreaterThan(1);
   const from = await center(output(page, 'node-002'));
-  // At this zoom the visible dot is a few pixels wide; the compensated area still answers 8 px away.
+  // At this zoom the visible dot is a few pixels wide; over its card the compensated area still answers 8 px away.
+  await page.mouse.move(from.x - 15, from.y);
   expect(await underPointer(page, { x: from.x + 8, y: from.y })).toBe('node-002:output');
   await drag(page, { x: from.x + 8, y: from.y }, await center(node(page, 'node-003').locator('.composer-action-title')), { x: from.x + 30, y: from.y });
   await expect.poll(() => dependencies(page, 'node-003')).toEqual(['node-002']);
