@@ -2298,17 +2298,10 @@
                     ]
                   },
                   "asset": {
-                    "description": "The source token: USDC, or USDG when leaving robinhood. The destination asset follows the pair (USDC → USDG into robinhood).",
-                    "anyOf": [
-                      {
-                        "const": "USDC",
-                        "type": "string"
-                      },
-                      {
-                        "const": "USDG",
-                        "type": "string"
-                      }
-                    ]
+                    "pattern": "^(?!0[xX][0-9a-fA-F])[^\\x00-\\x1f\\x7f]{1,160}$",
+                    "maxLength": 160,
+                    "description": "A symbol or whole name of the selected network's validated official catalog, matched case-insensitively; unknown, ambiguous and foreign-chain references are refused. Never a contract address.",
+                    "type": "string"
                   },
                   "amount": {
                     "pattern": "^(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
@@ -2369,7 +2362,7 @@
                     "type": "string"
                   },
                   "network": {
-                    "description": "base-sepolia and ethereum-sepolia swap USDC/WETH on Uniswap v3; solana swaps SOL/USDC/USDT via Jupiter; solana-devnet swaps SOL/devUSDC on Orca; base and robinhood swap any two official catalog assets on Uniswap v3 (real funds).",
+                    "description": "Swap network. Assets, protocols and runtime support are validated against the shared registries; mainnet uses real funds.",
                     "anyOf": [
                       {
                         "const": "base",
@@ -2393,6 +2386,10 @@
                       },
                       {
                         "const": "robinhood",
+                        "type": "string"
+                      },
+                      {
+                        "const": "arbitrum-one",
                         "type": "string"
                       }
                     ]
@@ -2429,9 +2426,9 @@
                         ]
                       },
                       {
-                        "pattern": "^[A-Za-z][A-Za-z0-9.]{0,15}$",
-                        "maxLength": 16,
-                        "description": "On robinhood or base: a symbol of that network's official catalog (robinhood: USDG, WETH or a Stock Token such as TSLA; base: USDC, WETH or a token-list symbol such as cbBTC), matched case-insensitively.",
+                        "pattern": "^(?!0[xX][0-9a-fA-F])[^\\x00-\\x1f\\x7f]{1,160}$",
+                        "maxLength": 160,
+                        "description": "A symbol or whole name of the selected network's validated official catalog, matched case-insensitively; unknown, ambiguous and foreign-chain references are refused. Never a contract address.",
                         "type": "string"
                       }
                     ]
@@ -2468,9 +2465,9 @@
                         ]
                       },
                       {
-                        "pattern": "^[A-Za-z][A-Za-z0-9.]{0,15}$",
-                        "maxLength": 16,
-                        "description": "On robinhood or base: a symbol of that network's official catalog (robinhood: USDG, WETH or a Stock Token such as TSLA; base: USDC, WETH or a token-list symbol such as cbBTC), matched case-insensitively.",
+                        "pattern": "^(?!0[xX][0-9a-fA-F])[^\\x00-\\x1f\\x7f]{1,160}$",
+                        "maxLength": 160,
+                        "description": "A symbol or whole name of the selected network's validated official catalog, matched case-insensitively; unknown, ambiguous and foreign-chain references are refused. Never a contract address.",
                         "type": "string"
                       }
                     ]
@@ -2510,7 +2507,7 @@
                     "type": "string"
                   },
                   "network": {
-                    "description": "Aave V3 network: base-sepolia lends test USDC, ethereum-sepolia lends test WBTC, base lends USDC (real funds).",
+                    "description": "Aave V3 network: base-sepolia lends test USDC, ethereum-sepolia lends test WBTC, base and arbitrum-one lend native USDC (real funds).",
                     "anyOf": [
                       {
                         "const": "base-sepolia",
@@ -2523,21 +2520,18 @@
                       {
                         "const": "base",
                         "type": "string"
+                      },
+                      {
+                        "const": "arbitrum-one",
+                        "type": "string"
                       }
                     ]
                   },
                   "asset": {
-                    "description": "Must be the network's one Aave asset.",
-                    "anyOf": [
-                      {
-                        "const": "USDC",
-                        "type": "string"
-                      },
-                      {
-                        "const": "WBTC",
-                        "type": "string"
-                      }
-                    ]
+                    "pattern": "^(?!0[xX][0-9a-fA-F])[^\\x00-\\x1f\\x7f]{1,160}$",
+                    "maxLength": 160,
+                    "description": "A symbol or whole name of the selected network's validated official catalog, matched case-insensitively; unknown, ambiguous and foreign-chain references are refused. Never a contract address.",
+                    "type": "string"
                   },
                   "amount": {
                     "pattern": "^(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
@@ -2575,7 +2569,7 @@
                     "type": "string"
                   },
                   "network": {
-                    "description": "Aave V3 network: base-sepolia lends test USDC, ethereum-sepolia lends test WBTC, base lends USDC (real funds).",
+                    "description": "Aave V3 network: base-sepolia lends test USDC, ethereum-sepolia lends test WBTC, base and arbitrum-one lend native USDC (real funds).",
                     "anyOf": [
                       {
                         "const": "base-sepolia",
@@ -2588,21 +2582,18 @@
                       {
                         "const": "base",
                         "type": "string"
+                      },
+                      {
+                        "const": "arbitrum-one",
+                        "type": "string"
                       }
                     ]
                   },
                   "asset": {
-                    "description": "Must be the network's one Aave asset.",
-                    "anyOf": [
-                      {
-                        "const": "USDC",
-                        "type": "string"
-                      },
-                      {
-                        "const": "WBTC",
-                        "type": "string"
-                      }
-                    ]
+                    "pattern": "^(?!0[xX][0-9a-fA-F])[^\\x00-\\x1f\\x7f]{1,160}$",
+                    "maxLength": 160,
+                    "description": "A symbol or whole name of the selected network's validated official catalog, matched case-insensitively; unknown, ambiguous and foreign-chain references are refused. Never a contract address.",
+                    "type": "string"
                   },
                   "amount": {
                     "pattern": "^(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
@@ -2640,7 +2631,7 @@
                     "type": "string"
                   },
                   "network": {
-                    "description": "Aave V3 network: base-sepolia lends test USDC, ethereum-sepolia lends test WBTC, base lends USDC (real funds).",
+                    "description": "Aave V3 network: base-sepolia lends test USDC, ethereum-sepolia lends test WBTC, base and arbitrum-one lend native USDC (real funds).",
                     "anyOf": [
                       {
                         "const": "base-sepolia",
@@ -2653,21 +2644,18 @@
                       {
                         "const": "base",
                         "type": "string"
+                      },
+                      {
+                        "const": "arbitrum-one",
+                        "type": "string"
                       }
                     ]
                   },
                   "asset": {
-                    "description": "Must be the network's one Aave asset.",
-                    "anyOf": [
-                      {
-                        "const": "USDC",
-                        "type": "string"
-                      },
-                      {
-                        "const": "WBTC",
-                        "type": "string"
-                      }
-                    ]
+                    "pattern": "^(?!0[xX][0-9a-fA-F])[^\\x00-\\x1f\\x7f]{1,160}$",
+                    "maxLength": 160,
+                    "description": "A symbol or whole name of the selected network's validated official catalog, matched case-insensitively; unknown, ambiguous and foreign-chain references are refused. Never a contract address.",
+                    "type": "string"
                   },
                   "amount": {
                     "pattern": "^(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
@@ -2704,7 +2692,7 @@
                     "type": "string"
                   },
                   "network": {
-                    "description": "Aave V3 network (base: real funds).",
+                    "description": "Aave V3 network (base and arbitrum-one: real funds).",
                     "anyOf": [
                       {
                         "const": "base-sepolia",
@@ -2717,21 +2705,18 @@
                       {
                         "const": "base",
                         "type": "string"
+                      },
+                      {
+                        "const": "arbitrum-one",
+                        "type": "string"
                       }
                     ]
                   },
                   "asset": {
-                    "description": "The network's one Aave asset.",
-                    "anyOf": [
-                      {
-                        "const": "USDC",
-                        "type": "string"
-                      },
-                      {
-                        "const": "WBTC",
-                        "type": "string"
-                      }
-                    ]
+                    "pattern": "^(?!0[xX][0-9a-fA-F])[^\\x00-\\x1f\\x7f]{1,160}$",
+                    "maxLength": 160,
+                    "description": "A symbol or whole name of the selected network's validated official catalog, matched case-insensitively; unknown, ambiguous and foreign-chain references are refused. Never a contract address.",
+                    "type": "string"
                   },
                   "amount": {
                     "pattern": "^(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
@@ -2761,7 +2746,7 @@
                     "type": "string"
                   },
                   "network": {
-                    "description": "Uniswap v3 USDC/WETH on base-sepolia or ethereum-sepolia; Orca SOL/devUSDC on solana-devnet; on robinhood or base, Uniswap v3 on any two official catalog assets (e.g. USDG and a Stock Token; USDC and cbBTC) at feeTier (real funds).",
+                    "description": "Uniswap v3 USDC/WETH on base-sepolia or ethereum-sepolia; Orca SOL/devUSDC on solana-devnet; on catalog networks, Uniswap v3 on two catalog ERC-20 assets at feeTier (real funds), only when the factory pool exists.",
                     "anyOf": [
                       {
                         "const": "base-sepolia",
@@ -2782,16 +2767,20 @@
                       {
                         "const": "base",
                         "type": "string"
+                      },
+                      {
+                        "const": "arbitrum-one",
+                        "type": "string"
                       }
                     ]
                   },
                   "maxAmounts": {
                     "minProperties": 2,
                     "maxProperties": 2,
-                    "description": "Maximum deposit of each pool asset (limits, not amounts to spend); exactly the pool's two assets by symbol: USDC and WETH, SOL and devUSDC, or two official catalog symbols on robinhood or base.",
+                    "description": "Maximum deposit of each pool asset (limits, not amounts to spend); exactly the pool's two assets by symbol or whole catalog name: USDC and WETH, SOL and devUSDC, or two official catalog symbols on a supported catalog network.",
                     "type": "object",
                     "patternProperties": {
-                      "^[A-Za-z][A-Za-z0-9.]{0,15}$": {
+                      "^(?!0[xX][0-9a-fA-F])[^\\x00-\\x1f\\x7f]{1,160}$": {
                         "pattern": "^(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
                         "maxLength": 48,
                         "description": "Maximum deposit of this asset.",
@@ -2843,7 +2832,7 @@
                         ],
                         "properties": {
                           "unit": {
-                            "description": "robinhood and base only: the widest usable range of the fee tier.",
+                            "description": "Catalog networks: the widest usable range of the selected fee tier.",
                             "const": "full",
                             "type": "string"
                           }
@@ -2852,7 +2841,7 @@
                     ]
                   },
                   "feeTier": {
-                    "description": "robinhood and base only: the Uniswap v3 fee tier in hundredths of a basis point (3000 = 0.3%). Default 3000.",
+                    "description": "Catalog networks: the Uniswap v3 fee tier in hundredths of a basis point (3000 = 0.3%). Default 3000; a missing pool is refused.",
                     "anyOf": [
                       {
                         "const": 100,
@@ -2964,7 +2953,7 @@
                     "type": "string"
                   },
                   "network": {
-                    "description": "Robinhood Chain or Base mainnet (real funds).",
+                    "description": "The registered mainnet for this same-chain transfer (real funds).",
                     "anyOf": [
                       {
                         "const": "robinhood",
@@ -2973,20 +2962,24 @@
                       {
                         "const": "base",
                         "type": "string"
+                      },
+                      {
+                        "const": "arbitrum-one",
+                        "type": "string"
                       }
                     ]
                   },
                   "asset": {
-                    "description": "ETH, or a symbol of the network's official catalog (robinhood: USDG, WETH, a Stock Token; base: USDC, WETH, a token-list symbol).",
+                    "description": "Native ETH, or a symbol or whole name of the selected network's validated official catalog.",
                     "anyOf": [
                       {
                         "const": "ETH",
                         "type": "string"
                       },
                       {
-                        "pattern": "^[A-Za-z][A-Za-z0-9.]{0,15}$",
-                        "maxLength": 16,
-                        "description": "On robinhood or base: a symbol of that network's official catalog (robinhood: USDG, WETH or a Stock Token such as TSLA; base: USDC, WETH or a token-list symbol such as cbBTC), matched case-insensitively.",
+                        "pattern": "^(?!0[xX][0-9a-fA-F])[^\\x00-\\x1f\\x7f]{1,160}$",
+                        "maxLength": 160,
+                        "description": "A symbol or whole name of the selected network's validated official catalog, matched case-insensitively; unknown, ambiguous and foreign-chain references are refused. Never a contract address.",
                         "type": "string"
                       }
                     ]
@@ -3089,17 +3082,10 @@
                               ]
                             },
                             "asset": {
-                              "description": "The source token: USDC, or USDG when leaving robinhood. The destination asset follows the pair (USDC → USDG into robinhood).",
-                              "anyOf": [
-                                {
-                                  "const": "USDC",
-                                  "type": "string"
-                                },
-                                {
-                                  "const": "USDG",
-                                  "type": "string"
-                                }
-                              ]
+                              "pattern": "^(?!0[xX][0-9a-fA-F])[^\\x00-\\x1f\\x7f]{1,160}$",
+                              "maxLength": 160,
+                              "description": "A symbol or whole name of the selected network's validated official catalog, matched case-insensitively; unknown, ambiguous and foreign-chain references are refused. Never a contract address.",
+                              "type": "string"
                             },
                             "amount": {
                               "pattern": "^(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
@@ -3160,7 +3146,7 @@
                               "type": "string"
                             },
                             "network": {
-                              "description": "base-sepolia and ethereum-sepolia swap USDC/WETH on Uniswap v3; solana swaps SOL/USDC/USDT via Jupiter; solana-devnet swaps SOL/devUSDC on Orca; base and robinhood swap any two official catalog assets on Uniswap v3 (real funds).",
+                              "description": "Swap network. Assets, protocols and runtime support are validated against the shared registries; mainnet uses real funds.",
                               "anyOf": [
                                 {
                                   "const": "base",
@@ -3184,6 +3170,10 @@
                                 },
                                 {
                                   "const": "robinhood",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "arbitrum-one",
                                   "type": "string"
                                 }
                               ]
@@ -3220,9 +3210,9 @@
                                   ]
                                 },
                                 {
-                                  "pattern": "^[A-Za-z][A-Za-z0-9.]{0,15}$",
-                                  "maxLength": 16,
-                                  "description": "On robinhood or base: a symbol of that network's official catalog (robinhood: USDG, WETH or a Stock Token such as TSLA; base: USDC, WETH or a token-list symbol such as cbBTC), matched case-insensitively.",
+                                  "pattern": "^(?!0[xX][0-9a-fA-F])[^\\x00-\\x1f\\x7f]{1,160}$",
+                                  "maxLength": 160,
+                                  "description": "A symbol or whole name of the selected network's validated official catalog, matched case-insensitively; unknown, ambiguous and foreign-chain references are refused. Never a contract address.",
                                   "type": "string"
                                 }
                               ]
@@ -3259,9 +3249,9 @@
                                   ]
                                 },
                                 {
-                                  "pattern": "^[A-Za-z][A-Za-z0-9.]{0,15}$",
-                                  "maxLength": 16,
-                                  "description": "On robinhood or base: a symbol of that network's official catalog (robinhood: USDG, WETH or a Stock Token such as TSLA; base: USDC, WETH or a token-list symbol such as cbBTC), matched case-insensitively.",
+                                  "pattern": "^(?!0[xX][0-9a-fA-F])[^\\x00-\\x1f\\x7f]{1,160}$",
+                                  "maxLength": 160,
+                                  "description": "A symbol or whole name of the selected network's validated official catalog, matched case-insensitively; unknown, ambiguous and foreign-chain references are refused. Never a contract address.",
                                   "type": "string"
                                 }
                               ]
@@ -3301,7 +3291,7 @@
                               "type": "string"
                             },
                             "network": {
-                              "description": "Aave V3 network: base-sepolia lends test USDC, ethereum-sepolia lends test WBTC, base lends USDC (real funds).",
+                              "description": "Aave V3 network: base-sepolia lends test USDC, ethereum-sepolia lends test WBTC, base and arbitrum-one lend native USDC (real funds).",
                               "anyOf": [
                                 {
                                   "const": "base-sepolia",
@@ -3314,21 +3304,18 @@
                                 {
                                   "const": "base",
                                   "type": "string"
+                                },
+                                {
+                                  "const": "arbitrum-one",
+                                  "type": "string"
                                 }
                               ]
                             },
                             "asset": {
-                              "description": "Must be the network's one Aave asset.",
-                              "anyOf": [
-                                {
-                                  "const": "USDC",
-                                  "type": "string"
-                                },
-                                {
-                                  "const": "WBTC",
-                                  "type": "string"
-                                }
-                              ]
+                              "pattern": "^(?!0[xX][0-9a-fA-F])[^\\x00-\\x1f\\x7f]{1,160}$",
+                              "maxLength": 160,
+                              "description": "A symbol or whole name of the selected network's validated official catalog, matched case-insensitively; unknown, ambiguous and foreign-chain references are refused. Never a contract address.",
+                              "type": "string"
                             },
                             "amount": {
                               "pattern": "^(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
@@ -3366,7 +3353,7 @@
                               "type": "string"
                             },
                             "network": {
-                              "description": "Aave V3 network: base-sepolia lends test USDC, ethereum-sepolia lends test WBTC, base lends USDC (real funds).",
+                              "description": "Aave V3 network: base-sepolia lends test USDC, ethereum-sepolia lends test WBTC, base and arbitrum-one lend native USDC (real funds).",
                               "anyOf": [
                                 {
                                   "const": "base-sepolia",
@@ -3379,21 +3366,18 @@
                                 {
                                   "const": "base",
                                   "type": "string"
+                                },
+                                {
+                                  "const": "arbitrum-one",
+                                  "type": "string"
                                 }
                               ]
                             },
                             "asset": {
-                              "description": "Must be the network's one Aave asset.",
-                              "anyOf": [
-                                {
-                                  "const": "USDC",
-                                  "type": "string"
-                                },
-                                {
-                                  "const": "WBTC",
-                                  "type": "string"
-                                }
-                              ]
+                              "pattern": "^(?!0[xX][0-9a-fA-F])[^\\x00-\\x1f\\x7f]{1,160}$",
+                              "maxLength": 160,
+                              "description": "A symbol or whole name of the selected network's validated official catalog, matched case-insensitively; unknown, ambiguous and foreign-chain references are refused. Never a contract address.",
+                              "type": "string"
                             },
                             "amount": {
                               "pattern": "^(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
@@ -3431,7 +3415,7 @@
                               "type": "string"
                             },
                             "network": {
-                              "description": "Aave V3 network: base-sepolia lends test USDC, ethereum-sepolia lends test WBTC, base lends USDC (real funds).",
+                              "description": "Aave V3 network: base-sepolia lends test USDC, ethereum-sepolia lends test WBTC, base and arbitrum-one lend native USDC (real funds).",
                               "anyOf": [
                                 {
                                   "const": "base-sepolia",
@@ -3444,21 +3428,18 @@
                                 {
                                   "const": "base",
                                   "type": "string"
+                                },
+                                {
+                                  "const": "arbitrum-one",
+                                  "type": "string"
                                 }
                               ]
                             },
                             "asset": {
-                              "description": "Must be the network's one Aave asset.",
-                              "anyOf": [
-                                {
-                                  "const": "USDC",
-                                  "type": "string"
-                                },
-                                {
-                                  "const": "WBTC",
-                                  "type": "string"
-                                }
-                              ]
+                              "pattern": "^(?!0[xX][0-9a-fA-F])[^\\x00-\\x1f\\x7f]{1,160}$",
+                              "maxLength": 160,
+                              "description": "A symbol or whole name of the selected network's validated official catalog, matched case-insensitively; unknown, ambiguous and foreign-chain references are refused. Never a contract address.",
+                              "type": "string"
                             },
                             "amount": {
                               "pattern": "^(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
@@ -3495,7 +3476,7 @@
                               "type": "string"
                             },
                             "network": {
-                              "description": "Aave V3 network (base: real funds).",
+                              "description": "Aave V3 network (base and arbitrum-one: real funds).",
                               "anyOf": [
                                 {
                                   "const": "base-sepolia",
@@ -3508,21 +3489,18 @@
                                 {
                                   "const": "base",
                                   "type": "string"
+                                },
+                                {
+                                  "const": "arbitrum-one",
+                                  "type": "string"
                                 }
                               ]
                             },
                             "asset": {
-                              "description": "The network's one Aave asset.",
-                              "anyOf": [
-                                {
-                                  "const": "USDC",
-                                  "type": "string"
-                                },
-                                {
-                                  "const": "WBTC",
-                                  "type": "string"
-                                }
-                              ]
+                              "pattern": "^(?!0[xX][0-9a-fA-F])[^\\x00-\\x1f\\x7f]{1,160}$",
+                              "maxLength": 160,
+                              "description": "A symbol or whole name of the selected network's validated official catalog, matched case-insensitively; unknown, ambiguous and foreign-chain references are refused. Never a contract address.",
+                              "type": "string"
                             },
                             "amount": {
                               "pattern": "^(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
@@ -3552,7 +3530,7 @@
                               "type": "string"
                             },
                             "network": {
-                              "description": "Uniswap v3 USDC/WETH on base-sepolia or ethereum-sepolia; Orca SOL/devUSDC on solana-devnet; on robinhood or base, Uniswap v3 on any two official catalog assets (e.g. USDG and a Stock Token; USDC and cbBTC) at feeTier (real funds).",
+                              "description": "Uniswap v3 USDC/WETH on base-sepolia or ethereum-sepolia; Orca SOL/devUSDC on solana-devnet; on catalog networks, Uniswap v3 on two catalog ERC-20 assets at feeTier (real funds), only when the factory pool exists.",
                               "anyOf": [
                                 {
                                   "const": "base-sepolia",
@@ -3573,16 +3551,20 @@
                                 {
                                   "const": "base",
                                   "type": "string"
+                                },
+                                {
+                                  "const": "arbitrum-one",
+                                  "type": "string"
                                 }
                               ]
                             },
                             "maxAmounts": {
                               "minProperties": 2,
                               "maxProperties": 2,
-                              "description": "Maximum deposit of each pool asset (limits, not amounts to spend); exactly the pool's two assets by symbol: USDC and WETH, SOL and devUSDC, or two official catalog symbols on robinhood or base.",
+                              "description": "Maximum deposit of each pool asset (limits, not amounts to spend); exactly the pool's two assets by symbol or whole catalog name: USDC and WETH, SOL and devUSDC, or two official catalog symbols on a supported catalog network.",
                               "type": "object",
                               "patternProperties": {
-                                "^[A-Za-z][A-Za-z0-9.]{0,15}$": {
+                                "^(?!0[xX][0-9a-fA-F])[^\\x00-\\x1f\\x7f]{1,160}$": {
                                   "pattern": "^(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
                                   "maxLength": 48,
                                   "description": "Maximum deposit of this asset.",
@@ -3634,7 +3616,7 @@
                                   ],
                                   "properties": {
                                     "unit": {
-                                      "description": "robinhood and base only: the widest usable range of the fee tier.",
+                                      "description": "Catalog networks: the widest usable range of the selected fee tier.",
                                       "const": "full",
                                       "type": "string"
                                     }
@@ -3643,7 +3625,7 @@
                               ]
                             },
                             "feeTier": {
-                              "description": "robinhood and base only: the Uniswap v3 fee tier in hundredths of a basis point (3000 = 0.3%). Default 3000.",
+                              "description": "Catalog networks: the Uniswap v3 fee tier in hundredths of a basis point (3000 = 0.3%). Default 3000; a missing pool is refused.",
                               "anyOf": [
                                 {
                                   "const": 100,
@@ -3755,7 +3737,7 @@
                               "type": "string"
                             },
                             "network": {
-                              "description": "Robinhood Chain or Base mainnet (real funds).",
+                              "description": "The registered mainnet for this same-chain transfer (real funds).",
                               "anyOf": [
                                 {
                                   "const": "robinhood",
@@ -3764,20 +3746,24 @@
                                 {
                                   "const": "base",
                                   "type": "string"
+                                },
+                                {
+                                  "const": "arbitrum-one",
+                                  "type": "string"
                                 }
                               ]
                             },
                             "asset": {
-                              "description": "ETH, or a symbol of the network's official catalog (robinhood: USDG, WETH, a Stock Token; base: USDC, WETH, a token-list symbol).",
+                              "description": "Native ETH, or a symbol or whole name of the selected network's validated official catalog.",
                               "anyOf": [
                                 {
                                   "const": "ETH",
                                   "type": "string"
                                 },
                                 {
-                                  "pattern": "^[A-Za-z][A-Za-z0-9.]{0,15}$",
-                                  "maxLength": 16,
-                                  "description": "On robinhood or base: a symbol of that network's official catalog (robinhood: USDG, WETH or a Stock Token such as TSLA; base: USDC, WETH or a token-list symbol such as cbBTC), matched case-insensitively.",
+                                  "pattern": "^(?!0[xX][0-9a-fA-F])[^\\x00-\\x1f\\x7f]{1,160}$",
+                                  "maxLength": 160,
+                                  "description": "A symbol or whole name of the selected network's validated official catalog, matched case-insensitively; unknown, ambiguous and foreign-chain references are refused. Never a contract address.",
                                   "type": "string"
                                 }
                               ]

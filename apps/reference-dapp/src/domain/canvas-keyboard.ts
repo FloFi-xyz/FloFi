@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { Workflow } from './initial-workflow';
+import { isLendingComposition } from '@defi-workflow-engine/workflow-contracts';
 export function isTextEntry(target: EventTarget | null): boolean {
   if (typeof Element === 'undefined' || !(target instanceof Element)) return false;
   return Boolean(target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"], [role="combobox"], [role="searchbox"], [role="spinbutton"], [aria-multiline="true"]'));
@@ -28,7 +29,9 @@ export function deletableCanvasNodes(workflow: Workflow, selectedIds: readonly s
 export function canDeleteCanvasEdge(workflow: Workflow, from: string, to: string): boolean {
   const source = workflow.nodes.find(node => node.nodeId === from);
   const target = workflow.nodes.find(node => node.nodeId === to);
-  return Boolean(source && target && target.dependencies.includes(from)
+  // The canonical lending composition also requires its Supply → Borrow health
+  // checkpoint dependency, even though that link carries no asset output.
+  return Boolean(source && target && !isLendingComposition(workflow) && target.dependencies.includes(from)
     && (!workflow.resourceEdges.some(edge => edge.fromNodeId === from && edge.toNodeId === to)
       || source.actionType.startsWith('mock-') && target.actionType.startsWith('mock-')));
 }

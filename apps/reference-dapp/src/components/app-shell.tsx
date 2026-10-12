@@ -182,7 +182,10 @@ function AppShellContent({ engineering = false, pathname, navigate, simulationRe
   // The shared owner-wallet Uniswap swap: the testnet pairs and (BUILD-RH-002, BUILD-BASE-001) catalog-network swaps. Base USDC ⇄ WETH joins it
   // only where Base mainnet swaps are enabled and no local fork runtime is available; otherwise it keeps its BUILD-002 paths.
   const baseReferenceServed = publicTestnet.catalogAvailable(BASE_MAINNET.chain) && !info?.available;
-  const testnetWorkflow = state.workflow.nodes.some(node => ownerWalletSwapServes(node, baseReferenceServed));
+  // The existing engineering compositions own their full graph; adding an
+  // Arbitrum swap profile must not route their destination swap as an isolated run.
+  const legacyComposition = state.workflow.nodes.some(node => node.nodeId === 'build009-bridge' || node.actionType === 'asset.liquidity.prepare');
+  const testnetWorkflow = !legacyComposition && state.workflow.nodes.some(node => ownerWalletSwapServes(node, baseReferenceServed));
   const publicRecovery = Boolean(recoveryShell && publicTestnet.recoveryOnly && publicTestnet.run);
   const continuedApproval = Boolean(publicTestnet.run && !publicTestnet.retired &&
     publicTestnet.run.attempts.at(-1)?.step === 'approval' &&

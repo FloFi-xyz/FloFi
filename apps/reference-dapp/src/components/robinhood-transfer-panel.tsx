@@ -80,7 +80,7 @@ export function RobinhoodTransferPanel({ view }: { view: 'simulate' | 'execute' 
   const { state } = useWorkflow(), run = useRobinhoodTransfer(), wallet = useBuild009Wallet(), record = run.record, review = record?.review;
   const node = state.workflow.nodes.find(n => n.actionType === 'asset.transfer'), fields = node ? transferDetails(node as Parameters<typeof transferDetails>[0]) : null;
   // The reviewed chain (else the authored one) names the network; Robinhood Testnet before anything is authored, as before.
-  const network: TransferNetwork = (Object.keys(TRANSFER_NETWORKS) as TransferNetwork[]).find(name => TRANSFER_NETWORKS[name].chain === (review?.chain ?? node?.chainId)) ?? 'Robinhood Chain Testnet';
+  const network: TransferNetwork = (Object.keys(TRANSFER_NETWORKS) as TransferNetwork[]).find(name => TRANSFER_NETWORKS[name]?.chain === (review?.chain ?? node?.chainId)) ?? 'Robinhood Chain Testnet';
   const profile = transferProfileFor(network);
   const attempt = record?.attempt, info = run.error ?? record?.error, observation = record?.observations.at(-1);
   const observing = Boolean(attempt && !attempt.reconciled && !record?.notSubmitted && record?.verdict === 'PENDING');

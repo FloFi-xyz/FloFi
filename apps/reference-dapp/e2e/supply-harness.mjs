@@ -47,6 +47,8 @@ export function createSupplyHarness(p=AAVE_V3_BASE_SEPOLIA){
     if(data===supplyCall('BASE_CURRENCY_UNIT()')&&to===p.oracle)return word(100000000n);
     if(data===supplyCall('getUserConfiguration(address)',state.owner)&&to===p.pool)return word(s.userConfig);
     if(data===supplyCall('getUserEMode(address)',state.owner)&&to===p.pool)return word(0n);
+    // Keep the established Base/Ethereum test fixture semantics; the new Arbitrum profile models account-weighted risk.
+    if(data===supplyCall('getUserAccountData(address)',state.owner)&&to===p.pool&&!('poolRevision' in p))return '0x'+[collateral,debtBase,(collateral*8250n+5000n)/10000n-debtBase,8600n,8250n,debtBase?collateral*8600n*10n**18n/(10000n*debtBase):(1n<<256n)-1n].map(supplyWord).join('');
     if(data===supplyCall('getUserAccountData(address)',state.owner)&&to===p.pool){const enabled=Boolean(s.userConfig&(2n<<shift)),c=enabled?collateral:0n,lt=c?(s.reserveConfig>>16n)&65535n:0n,ltv=c?s.reserveConfig&65535n:0n,capacity=(c*ltv+5000n)/10000n-debtBase;return '0x'+[c,debtBase,capacity>0n?capacity:0n,lt,ltv,debtBase?c*lt*10n**18n/(10000n*debtBase):(1n<<256n)-1n].map(supplyWord).join('');}
     if(data===supplyCall('balanceOf(address)',p.aToken)&&to===p.asset)return word(s.liquidity);
     if(data===supplyCall('POOL()')&&to===p.variableDebtToken)return word(p.pool);
