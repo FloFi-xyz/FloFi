@@ -15,6 +15,7 @@ import { createBaseSepoliaReviewContext, createEthereumSepoliaReviewContext } fr
 import { ROUTER_PAIRS } from '@defi-workflow-engine/workflow-contracts';
 import { composeStrategy, dappReviewContext, NETWORKS, strategyNetwork } from './strategy-engine';
 import { STRATEGY_EXAMPLES } from './strategy-examples';
+import { networkCatalog } from '../domain/asset-catalogs';
 import { NETWORK_IDS, type NetworkId, type StrategyAction, type StrategySpec } from './strategy-spec';
 
 /** CAIP-2 identity of each network, read from the registries that serve it. */
@@ -36,9 +37,10 @@ export function supportedNetworks(): readonly NetworkInfo[] {
     funds: NETWORKS[id].class === 'MAINNET' ? 'REAL_FUNDS' : 'TEST_FUNDS', actions: actionsOn(id) }));
 }
 
-export type AssetInfo = { readonly network: NetworkId; readonly chainId: string; readonly symbol: string; readonly address: string; readonly decimals: number;
+/** A null address is the chain's native currency, never an ERC-20 identity. */
+export type AssetInfo = { readonly network: NetworkId; readonly chainId: string; readonly symbol: string; readonly address: string | null; readonly decimals: number;
   readonly actions: readonly StrategyAction[]; readonly sources: readonly string[] };
-type Entry = { chain: string; symbol: string; address: string; decimals: number; action: StrategyAction; source: string };
+type Entry = { chain: string; symbol: string; address: string | null; decimals: number; action: StrategyAction; source: string };
 function assetEntries(): Entry[] {
   const out: Entry[] = [];
   for (const pair of ROUTER_PAIRS) for (const t of [pair.source, pair.destination])
@@ -57,13 +59,13 @@ function assetEntries(): Entry[] {
       out.push({ chain, symbol: t.symbol, address: t.mint, decimals: t.decimals, action: 'swap', source });
   for (const t of [ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY.token0, ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY.token1])
     out.push({ chain: ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY.chain, symbol: t.symbol, address: t.mint, decimals: t.decimals, action: 'add_liquidity', source: 'orca-whirlpools-liquidity:Solana Devnet' });
-  // BUILD-RH-002: Robinhood Chain's code-pinned base assets. Its Stock Tokens come only from the official registry at composition time
-  // (`prepareStrategyCatalogs`), so they are not listed here; any official symbol may be named. BUILD-BASE-001: likewise Base's pinned
-  // USDC and WETH; its token-list assets come only from the validated list.
+  // Discover the same currently loaded, validated catalog authoring reads. Without an official source, pinned assets alone
+  // remain; no recorded catalog is substituted. Native currencies have transfer support only. Aave and Router membership above
+  // remains narrower than catalog membership.
   for (const [catalog, name] of [[ROBINHOOD_BASE_ASSETS, 'robinhood'], [BASE_BASE_ASSETS, 'base'], [ARBITRUM_BASE_ASSETS, 'arbitrum-one']] as const)
-    for (const t of catalog.assets.filter(a => a.kind === 'ERC20' && a.address))
-      for (const action of (['swap', 'add_liquidity', 'transfer'] as const).filter(action => actionsOn(name).includes(action)))
-        out.push({ chain: catalog.chain, symbol: t.symbol, address: t.address!, decimals: t.decimals, action, source: `${name}-catalog:${action}` });
+    for (const t of (networkCatalog(catalog.chain) ?? catalog).assets)
+      for (const action of (t.kind === 'NATIVE' ? ['transfer'] as const : ['swap', 'add_liquidity', 'transfer'] as const).filter(action => actionsOn(name).includes(action)))
+        out.push({ chain: catalog.chain, symbol: t.symbol, address: t.address, decimals: t.decimals, action, source: `${name}-catalog:${action}` });
   const aave = AAVE_V3_LENDING_PROFILES.find(p => p.network === 'Base Sepolia')!;
   out.push({ chain: aave.chain, symbol: aave.symbol, address: aave.asset, decimals: aave.decimals, action: 'lending_composition', source: 'lending-composition:Base Sepolia' });
   out.push({ chain: aave.chain, symbol: 'WETH', address: LENDING_BASE_SEPOLIA.weth, decimals: 18, action: 'lending_composition', source: 'lending-composition:Base Sepolia' });
@@ -71,7 +73,7 @@ function assetEntries(): Entry[] {
 }
 /** Every asset a strategy can name, grouped by chain and address (one symbol can be two tokens on one network). */
 export function supportedAssets(network?: NetworkId): readonly AssetInfo[] {
-  const merged = new Map<string, { network: NetworkId; chainId: string; symbol: string; address: string; decimals: number; actions: Set<StrategyAction>; sources: Set<string> }>();
+  const merged = new Map<string, { network: NetworkId; chainId: string; symbol: string; address: string | null; decimals: number; actions: Set<StrategyAction>; sources: Set<string> }>();
   for (const e of assetEntries()) {
     const id = networkOfChain(e.chain);
     if (!id || (network && id !== network)) continue;

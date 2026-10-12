@@ -12,7 +12,7 @@ describe('bounded multi-turn conversation', () => {
     const session = new CopilotSession();
     const asked = session.say('Quero colocar 5 USDC na Aave.', intent.action(supply5, 'PT'))!;
     // BUILD-BASE-001: Aave USDC also runs on Base mainnet; real funds are offered, never chosen for the user.
-    expect(asked).toMatchObject({ kind: 'CLARIFICATION', options: ['Base Sepolia', 'Base'] });
+    expect(asked).toMatchObject({ kind: 'CLARIFICATION', options: ['Base Sepolia', 'Base', 'Arbitrum One'] });
     expect(asked.text).toContain('Em qual rede?');
     expect(session.pending).toBeNull();
     const proposed = session.say('Base Sepolia')!;

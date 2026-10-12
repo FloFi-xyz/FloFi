@@ -79,6 +79,15 @@ export function resolveAssetReference(chain: string, reference: string): AssetRe
   }
   return officialCatalogLoaded(chain) ? { kind: 'UNKNOWN' } : { kind: 'UNAVAILABLE' };
 }
+/** Shared whole-name/symbol resolution for canonical authoring. Structured and exact-grammar callers refuse
+ * ambiguity; the conversation planner asks for a symbol instead. No reference reaches another chain.
+ */
+export function authoringAssetSymbol(chain: string, reference: string): string {
+  const result = resolveAssetReference(chain, reference);
+  if (result.kind === 'AMBIGUOUS') throw new Error('ASSET_REFERENCE_AMBIGUOUS');
+  if (result.kind !== 'FOUND') throw new Error('ASSET_CATALOG_UNAVAILABLE');
+  return result.asset.symbol;
+}
 /** Featured Stock Tokens (shortcuts only): resolved from the official catalog, else the shortcut symbols themselves. */
 export function featuredStockSymbols(): readonly string[] {
   const robinhood = official.get(ROBINHOOD_CHAIN);

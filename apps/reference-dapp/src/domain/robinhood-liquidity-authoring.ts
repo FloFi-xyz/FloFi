@@ -4,7 +4,7 @@ import { catalogPoolOn, formatAssetAmount, parseAssetAmount, uniswapCatalogDeplo
   UNISWAP_CATALOG_DEPLOYMENTS, type CanonicalAsset } from '@defi-workflow-engine/action-registry';
 import { validateUniswapLiquidityNode } from '@defi-workflow-engine/reference-linter';
 import { uniswapQuotePriceAtTick } from '@defi-workflow-engine/reference-compiler';
-import { BASE_CHAIN, BASE_NETWORK, canonicalSymbol, resolveNetworkAsset, ROBINHOOD_CHAIN, ROBINHOOD_NETWORK } from './asset-catalogs';
+import { BASE_CHAIN, BASE_NETWORK, authoringAssetSymbol, canonicalSymbol, resolveNetworkAsset, ROBINHOOD_CHAIN, ROBINHOOD_NETWORK } from './asset-catalogs';
 import { CATALOG_CHAT_NETWORKS, catalogNetworkOfChatName, networkIdentity } from './network-registry';
 
 /**
@@ -108,7 +108,7 @@ export function robinhoodLiquidityInputOf(details: RobinhoodLiquidityDetails): R
   return { network: details.network, tokenA: details.tokenA, tokenB: details.tokenB, amountA: details.amountA, amountB: details.amountB, fee: details.fee,
     ...details.fullRange ? { rangeUnit: 'FULL' as const } : { rangeUnit: 'TICK' as const, lower: String(details.tickLower), upper: String(details.tickUpper) }, slippage: details.slippage };
 }
-const N = '([0-9]+(?:\\.[0-9]+)?)', SYMBOL = '([A-Za-z][A-Za-z0-9.]{0,15})';
+const N = '([0-9]+(?:\\.[0-9]+)?)', SYMBOL = '([^\\x00-\\x1f\\x7f]{1,160}?)';
 const TAIL = `(?: (?:fee|at) (0\\.01|0\\.05|0\\.3|1)%)?(?: (?:full range|ticks (-?[0-9]+) to (-?[0-9]+)))?(?: (?:with )?slippage ([0-9]+) bps)?$`;
 export const ROBINHOOD_LIQUIDITY_PATTERN = new RegExp(`^(?:add|provide|create) (?:uniswap )?liquidity (?:with )?${N} ${SYMBOL} and ${N} ${SYMBOL} on Robinhood(?: Chain)?` + TAIL, 'i');
 /** BUILD-BASE-001: the same sentence on Base. */
@@ -137,7 +137,7 @@ export function parseCatalogLiquidityChat(text: string): RobinhoodLiquidityInput
   if (!match || !network || !uniswapCatalogDeployment(network.chain)) return null;
   // fromMatch keeps the original closed grammar's group positions (the generic network occupies group 5).
   const fields = [...match.slice(0, 5), ...match.slice(6)] as RegExpExecArray;
-  return fromMatch(fields, network.name, symbol => canonicalSymbol(network.chain, symbol) ?? symbol);
+  return fromMatch(fields, network.name, symbol => authoringAssetSymbol(network.chain, symbol));
 }
 
 /**

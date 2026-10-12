@@ -102,7 +102,7 @@ describe('BUILD-BASE-001 one capability truth for Canvas, Chat, Copilot and MCP'
     });
   it('is pure data like the Copilot modules that read it: the canonical examples and registries only, no state, server, wallet or network', () => {
     const text = readFileSync(join(__dirname, 'authoring-capabilities.ts'), 'utf8');
-    expect([...text.matchAll(/from '([^']+)'/g)].map(match => match[1]).sort()).toEqual(['../engine/strategy-examples', '../engine/strategy-spec', './network-registry']);
+    expect([...text.matchAll(/from '([^']+)'/g)].map(match => match[1]).sort()).toEqual(['../engine/strategy-examples', '../engine/strategy-spec', './network-registry', '@defi-workflow-engine/action-registry']);
     expect(text).not.toMatch(/\bfetch\(|window\.|localStorage|sessionStorage|eth_sendTransaction|eth_sign|personal_sign|signTransaction|sendTransaction|process\.env/);
     const examples = readFileSync(join(__dirname, '../engine/strategy-examples.ts'), 'utf8');
     expect([...examples.matchAll(/^import (?!type )/gm)]).toEqual([]);

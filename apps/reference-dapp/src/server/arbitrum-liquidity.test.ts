@@ -151,6 +151,15 @@ describe('Arbitrum liquidity deployments, discovery, ordering and ranges', () =>
 });
 
 describe('Arbitrum liquidity Review, fees, approvals and owner boundary', () => {
+  it('refuses a missing catalog pool before simulation, Review or a wallet request', async () => {
+    let missingPool = '';
+    const s = await setup({ fault(method, params, value) {
+      return method === 'eth_getCode' && params[0] === missingPool ? '0x' : value;
+    } });
+    missingPool = s.profile.pool;
+    await expect(s.service.simulate(workflow(), UNI_OWNER)).rejects.toThrow('UNISWAP_CONTRACT_CODE_MISSING');
+    expect(s.chain.counters).toEqual({ sends: 0, simulate: 0 });
+  });
   it('binds exact canonical assets, range, pool, NPM, minimums, expiry, value, approvals and Nitro budget', async () => {
     const s = await setup(), run = await reviewed(s), r = run.review;
     expect(run.id).toMatch(/^arlp-[a-f0-9]{32}$/); expect(catalogNetworkOfRun(run.id, 'liquidity')?.id).toBe('arbitrum-one');

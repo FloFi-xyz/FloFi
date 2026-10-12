@@ -1,5 +1,315 @@
 # BUILD-ARB-001 Handoff
 
+## Final Phase 6 checkpoint — 2026-10-12
+
+- CURRENT HEAD: the Phase 6 commit containing this checkpoint; resolve its exact SHA with
+  `git log -1 --format=%H -- docs/builds/BUILD-ARB-001-HANDOFF.md`.
+  Exact recovered/start HEAD: `c82722ed5c57bd5fadf4d001ba81a89283233cef` (Phase 5, clean).
+- CURRENT PHASE: **Phase 6 COMPLETE — final authoring / capability parity certification only; stop here**.
+- Branch/worktree: `codex/build-arb-001-network-ux`, `/home/asus/projects/flofi-arb`.
+- COMPLETED: Phases 1–6. Every implemented capability independently certified on Canvas, deterministic Chat,
+  direct EN/PT natural Copilot and actual MCP; normal product Copilot proposals applied to Canvas.
+- IN PROGRESS: none. REMAINING: explicitly owner-defined UX phases, then separately authorized final integration/full CI.
+  **BUILD-ARB-001 is not final.** No UX phase or full CI was started.
+- TESTS PASSED: **36 distinct focused Vitest files / 965 tests**, no skips; **18 normal product browser cases**, no skips;
+  independent archived-baseline hash probe (40 vectors); strict pure authoring TypeScript including dependency declarations;
+  strict broader source graph with the prior `--skipLibCheck` declaration limit; ESLint on **30** code files;
+  governance-lite / **19** self-tests; `git diff --check`. Registry dependency export and local app compile-only prerequisites pass.
+- TESTS FAILING: none in final focused checks. Earlier iteration failures are described below; no assertion was dropped/weakened.
+- OWNER-APPROVED UX CHANGES: **none yet**. New financial capabilities / UX / Production / real-money transactions / push / PR: **NONE**.
+- Integration report: [BUILD-ARB-001-NETWORK-INTEGRATION-REPORT.md](BUILD-ARB-001-NETWORK-INTEGRATION-REPORT.md), begun but explicitly non-final.
+
+### Capability certification matrix
+
+Each PASS includes registry membership, Canvas reducer/builder, exact Chat, direct natural EN/PT intent handling,
+actual authenticated MCP gateway composition, equal chain/assets/amounts/protocol/recipient meaning, stable hash and scope/refusal checks.
+All ten also reach the actual normal product Copilot and Canvas in the scoped browser spec.
+
+| Capability | Registry | Canvas | Chat | Copilot EN/PT | MCP compose | Canonical IR/hash |
+| --- | --- | --- | --- | --- | --- | --- |
+| Swap | PASS | PASS | PASS | PASS | PASS | PASS |
+| Native ETH Transfer | PASS | PASS | PASS | PASS | PASS | PASS |
+| ERC-20 Transfer | PASS | PASS | PASS | PASS | PASS | PASS |
+| Bridge Base → Arbitrum | PASS | PASS | PASS | PASS | PASS | PASS |
+| Bridge Arbitrum → Base | PASS | PASS | PASS | PASS | PASS | PASS |
+| Pool / Liquidity | PASS | PASS | PASS | PASS | PASS | PASS |
+| Aave Supply | PASS | PASS | PASS | PASS | PASS | PASS |
+| Aave Borrow | PASS | PASS | PASS | PASS | PASS | PASS |
+| Aave Repay | PASS | PASS | PASS | PASS | PASS | PASS |
+| Aave Withdraw | PASS | PASS | PASS | PASS | PASS | PASS |
+
+### Authoring, assets, network and hash parity
+
+- Reuse Network/Asset/Capability registries, canonical examples, typed commands/reducer and existing IR.
+  Shared engine network/route labels now derive from registered identities/routes; no Arbitrum Copilot support list.
+- Shared whole-name/symbol resolution now serves bounded Chat/MCP/Canvas references as well as Copilot.
+  All supported symbols/cases/names bind exact chain/address/decimals. Examples: USDC / USD Coin, WETH / Wrapped Ether,
+  ARB / Arbitrum and WBTC / Wrapped BTC. Asset-name ambiguity asks in Copilot and refuses composition elsewhere.
+- Arbitrum / Arbitrum One / explicit ARB network or ARB rede → `eip155:42161`.
+  Sepolia wording fails mainnet grounding even against a guessed intent; ARB in asset context supplies no network.
+  A network alias or chain name cannot ground an ARB token the user did not request; an asset named Arbitrum cannot select its chain alone.
+- MCP discovery reads the loaded validated catalog, including native ETH (null token address, Transfer only),
+  with pinned assets alone when a catalog is unavailable. Catalog membership grants no bridge/lending eligibility.
+  MCP composition is implemented; MCP itself never executes. Transfer simulation requires the owner browser;
+  deployment/cloud/policy enablement remains separate and is honestly reported.
+- At a common initial workflow identity: identical full canonical IR/raw hash on all four surfaces for all ten capabilities.
+  Authoring source, interpretation notes, logos and brand metadata change no financial semantics.
+- **Product hash exception:** normal `/app` creates a durable workspace UUID; standalone MCP uses `workflow-local`.
+  The workflow ID is hash-bound. Browser tests preserve the initial UUID, compare all nodes/edges/revision/schema,
+  then verify the complete hash at that same ID and explicitly assert the raw standalone hash differs.
+  No hash algorithm/production identity was rewritten; no dynamic quote/hash equality was manufactured.
+- **Base/Robinhood continuity:** all **33** canonical examples at Base HEAD `4df974f6ae6ae1d22b86f220db6281294cd20035`
+  plus **7** additional Robinhood Stock Token scenarios retain independently rebuilt hashes (**40** vectors).
+  Archived app and four archived package dependencies were built in isolated /tmp directories with locked third-party dependencies.
+  Provenance/source-tree hashes and vectors: `src/domain/arbitrum-hash-baseline.fixture.json`.
+  Published Base reference hash remains `0x747634a76aa445ec993325bbb638f4d5b5103d59267314b54d30db1bc79e3d49`.
+
+### Unsupported cases and normal Copilot UI
+
+- PASS: ETH/WETH/ARB/USDC.e Base ⇄ Arbitrum bridges; unsupported Aave reserves; full/max/all Repay/Withdraw;
+  mainnet lending composition; unsupported fee tier; aliases naming one duplicate pool asset; foreign/excluded/unavailable tokens.
+- Existing partial-only Aave policy is shared registry metadata, used by generated capability text and deterministic full/max refusal.
+  The model cannot turn a full request into a numeric partial proposal. Live debt/balance/HF validation remains the existing runtime's job.
+- Missing pool PASS: existing read preflight refuses absent code before simulation/Review/wallet calls. Pure authoring can only
+  derive an expected CREATE2 address; it cannot certify current existence. No fallback pool/tier or new financial capability.
+- Incomplete EN/PT liquidity requests ask for both maximum deposits; explicit unsupported fees cannot silently become the default.
+  Normal Copilot refusal/clarification text contains no implementation error codes.
+- Scoped Chromium 1243 on **normal `/app`**, production compiled source, real server action / committed V2 replay / passive wallet:
+  **18 PASS**. Ten EN capability proposals explicitly applied to Canvas, three PT requests, four refusals/clarifications,
+  one generic network-picker/assets/mark case. Model replay is interpretation only; registry support remains deterministic authority.
+- Browser sentences: “Please Swap 10 USDC for WETH on Arbitrum”; “Please Send 5 USDC on Arbitrum to 0x333…333”;
+  “Please Send 0.01 ETH on Arbitrum to 0x333…333”; both 100-USDC bridge directions; 10-USDC/0.005-WETH liquidity at 0.05%;
+  Supply 100, Borrow 20, Repay 10, Withdraw 50 USDC. PT: “Por favor, troca 10 USDC por WETH na Arbitrum”;
+  “Por favor, mande 0.01 ETH na Arbitrum para 0x333…333”; “Por favor, quero colocar 100 USDC no Aave da Arbitrum”.
+  Exact full sentences/actions are in `arbitrum-certification.cases.ts` and committed replay.
+- Browser guard clean; logos answered by closed local replay. Wallet methods are **eth_accounts / eth_chainId only**.
+  No live model, quote, approval, sign or send in browser acceptance. Financial service regression evidence stays MOCKED.
+  Existing cosmetic liquidity-provider preview buttons leave authored protocol/IR unchanged; no component or layout edit.
+
+### Gates, scope and iteration findings
+
+- Arbitrum: reuse `GRYLOO_ARBITRUM_MAINNET=live` and `GRYLOO_ARBITRUM_OWNER_EXECUTION=MAINNET_OWNER_APPROVED`.
+  Router: reuse `GRYLOO_ROUTER=live` and `GRYLOO_ROUTER_OWNER_EXECUTION=MAINNET_OWNER_APPROVED`.
+  **All remain OFF / not enabled or set by this build**; current-process checks are false and MCP deployment reports disabled.
+- Aave profile/reserve/risk, exact approval model, Nitro fees, connected owner wallet and durable recovery from Phases 2–5 remain intact.
+  No new reserve/protocol/financial operation, financial gate, signer, custody, wallet allowlist or risk model.
+- Updated stale test-only support tables/corpus to append already completed liquidity/lending/transfers. Retained every prior example,
+  every safety assertion and existing refusal codes where applicable. Schema now accepts bounded whole asset references;
+  unsupported bridge assets refuse through canonical route validation, while malformed/address/injected inputs still fail schema.
+- Initial browser mismatch was the legitimate workspace UUID; final tests retain that ID rather than force raw standalone equality.
+  Initial badge assertions wrongly expected visible network text in every card; final tests inspect existing accessible badges.
+  PT tests now wait for hydration/readiness before the existing read-only workflow probe. No product fix/UX change was needed.
+- Sandbox font retrieval and local loopback binding required outside-sandbox reruns; read-only Google fonts and local server only.
+  App compile-only bundle is a browser prerequisite, not final full-build/CI acceptance. Broader Next bundled declaration limits
+  remain for final integration; source checks retain the previously documented `--skipLibCheck` there only.
+- No full pnpm check, full browser/PostgreSQL/fork/Anvil/live-model matrix, Production mutation, push or PR.
+
+### Reproducible focused commands
+
+Repository root. Dependency exports only: `pnpm --filter @defi-workflow-engine/action-registry build`.
+Archived baseline probe additionally builds only its four dependency packages under /tmp; it changes no worktree/branch/dependency lockfile.
+
+### Authoring batch: 18 files / 524 tests
+
+```sh
+pnpm exec vitest run \
+  apps/reference-dapp/src/engine/capability-catalog.test.ts \
+  apps/reference-dapp/src/engine/strategy-engine.test.ts \
+  apps/reference-dapp/src/domain/arbitrum-authoring.test.ts \
+  apps/reference-dapp/src/domain/arbitrum-bridge-parity.test.ts \
+  apps/reference-dapp/src/domain/arbitrum-certification.test.ts \
+  apps/reference-dapp/src/domain/arbitrum-core.test.ts \
+  apps/reference-dapp/src/domain/arbitrum-lending-parity.test.ts \
+  apps/reference-dapp/src/domain/arbitrum-liquidity-parity.test.ts \
+  apps/reference-dapp/src/domain/authoring-capabilities.test.ts \
+  apps/reference-dapp/src/domain/canvas-transfer.test.ts \
+  apps/reference-dapp/src/domain/catalog-copilot-parity.test.ts \
+  apps/reference-dapp/src/domain/copilot-authoring.test.ts \
+  apps/reference-dapp/src/domain/copilot-conversation.test.ts \
+  apps/reference-dapp/src/domain/copilot-eval.test.ts \
+  apps/reference-dapp/src/domain/crypto-action-picker.test.ts \
+  apps/reference-dapp/src/domain/robinhood-authoring.test.ts \
+  apps/reference-dapp/src/domain/router-authoring.test.ts \
+  apps/reference-dapp/src/mcp/gateway.test.ts --maxWorkers=4
+```
+
+### Runtime batch: 12 files / 327 tests
+
+```sh
+pnpm exec vitest run \
+  packages/action-registry/test/arbitrum-network.test.ts \
+  packages/action-registry/test/base-network.test.ts \
+  packages/action-registry/test/execution-capabilities.test.ts \
+  packages/reference-compiler/test/repay.test.ts \
+  packages/reference-compiler/test/withdraw.test.ts \
+  apps/reference-dapp/src/server/arbitrum-lending.test.ts \
+  apps/reference-dapp/src/server/arbitrum-liquidity.test.ts \
+  apps/reference-dapp/src/server/arbitrum-runtime.test.ts \
+  apps/reference-dapp/src/server/base-lending.test.ts \
+  apps/reference-dapp/src/server/base-mainnet.test.ts \
+  apps/reference-dapp/src/server/router-arbitrum-base.test.ts \
+  apps/reference-dapp/src/server/router-arbitrum-certification.test.ts --maxWorkers=4
+```
+
+### Additional batch: 6 files / 114 tests
+
+```sh
+pnpm exec vitest run \
+  packages/action-registry/test/asset-registry.test.ts \
+  packages/action-registry/test/robinhood-chain.test.ts \
+  apps/reference-dapp/src/channels/boundaries.test.ts \
+  apps/reference-dapp/src/domain/asset-identity.test.ts \
+  apps/reference-dapp/src/server/copilot-service-v2.test.ts \
+  apps/reference-dapp/src/channels/core/strategy.test.ts --maxWorkers=4
+```
+
+### Strict scoped TypeScript
+
+Pure authoring graph, including dependency declarations:
+
+```sh
+pnpm exec tsc --noEmit --strict --target ES2024 --module ESNext --moduleResolution Bundler --jsx react-jsx --esModuleInterop --resolveJsonModule --allowImportingTsExtensions --exactOptionalPropertyTypes --noUncheckedIndexedAccess \
+  apps/reference-dapp/src/domain/asset-catalogs.ts \
+  apps/reference-dapp/src/domain/network-registry.ts \
+  apps/reference-dapp/src/domain/crypto-action-picker.ts \
+  apps/reference-dapp/src/domain/authoring-capabilities.ts \
+  apps/reference-dapp/src/domain/copilot-authoring.ts \
+  apps/reference-dapp/src/engine/strategy-engine.ts \
+  apps/reference-dapp/src/engine/capability-catalog.ts \
+  apps/reference-dapp/src/engine/strategy-spec.ts
+```
+
+Broader strict source graph (existing declaration limitation):
+
+```sh
+pnpm exec tsc --noEmit --strict --skipLibCheck --target ES2024 --module ESNext --moduleResolution Bundler --jsx react-jsx --esModuleInterop --resolveJsonModule --allowImportingTsExtensions --exactOptionalPropertyTypes --noUncheckedIndexedAccess \
+  apps/reference-dapp/src/domain/arbitrum-certification.test.ts \
+  apps/reference-dapp/e2e/arbitrum-authoring-certification.spec.ts \
+  apps/reference-dapp/playwright.arbitrum-authoring.config.ts \
+  apps/reference-dapp/src/engine/strategy-engine.test.ts \
+  apps/reference-dapp/src/server/arbitrum-liquidity.test.ts \
+  apps/reference-dapp/src/channels/core/strategy.test.ts
+```
+
+### Scoped browser (18 tests, no retries/skips)
+
+Compile-only local prerequisite (read-only fonts may require network access):
+
+```sh
+NEXT_TELEMETRY_DISABLED=1 PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 pnpm --filter @defi-workflow-engine/reference-dapp exec next build --experimental-build-mode compile
+NEXT_TELEMETRY_DISABLED=1 PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 BUILD002_BROWSER_CACHE=/home/asus/.cache/ms-playwright/chromium_headless_shell-1243 FLOFI_E2E_APP_PORT=3116 pnpm --filter @defi-workflow-engine/reference-dapp exec playwright test --config playwright.arbitrum-authoring.config.ts
+```
+
+The config rejects enabled financial mainnet gates, serves loopback only, uses committed Copilot replay and the passive wallet.
+It starts no fork/Anvil/financial harness or database. The later guarded browser runner includes this one profile;
+that full runner was **not** executed here. This phase ran only the spec above.
+
+### Scoped lint, governance and whitespace
+
+```sh
+pnpm exec eslint \
+  apps/reference-dapp/e2e/arbitrum-authoring-certification.spec.ts \
+  apps/reference-dapp/playwright.arbitrum-authoring.config.ts \
+  apps/reference-dapp/src/channels/core/strategy.test.ts \
+  apps/reference-dapp/src/domain/arbitrum-certification.cases.ts \
+  apps/reference-dapp/src/domain/arbitrum-certification.test.ts \
+  apps/reference-dapp/src/domain/asset-catalogs.ts \
+  apps/reference-dapp/src/domain/authoring-capabilities.test.ts \
+  apps/reference-dapp/src/domain/authoring-capabilities.ts \
+  apps/reference-dapp/src/domain/canvas-transfer.test.ts \
+  apps/reference-dapp/src/domain/commands.ts \
+  apps/reference-dapp/src/domain/copilot-authoring.ts \
+  apps/reference-dapp/src/domain/copilot-conversation.test.ts \
+  apps/reference-dapp/src/domain/copilot-eval.corpus.ts \
+  apps/reference-dapp/src/domain/copilot-messages.ts \
+  apps/reference-dapp/src/domain/crypto-action-picker.test.ts \
+  apps/reference-dapp/src/domain/crypto-action-picker.ts \
+  apps/reference-dapp/src/domain/network-registry.ts \
+  apps/reference-dapp/src/domain/robinhood-liquidity-authoring.ts \
+  apps/reference-dapp/src/domain/robinhood-transfer-authoring.ts \
+  apps/reference-dapp/src/domain/router-authoring.ts \
+  apps/reference-dapp/src/domain/supply-authoring.ts \
+  apps/reference-dapp/src/engine/capability-catalog.ts \
+  apps/reference-dapp/src/engine/strategy-engine.test.ts \
+  apps/reference-dapp/src/engine/strategy-engine.ts \
+  apps/reference-dapp/src/engine/strategy-spec.ts \
+  apps/reference-dapp/src/mcp/tools.ts \
+  apps/reference-dapp/src/server/arbitrum-liquidity.test.ts \
+  apps/reference-dapp/src/server/copilot-capabilities.ts \
+  packages/action-registry/src/aave-v3-testnet.ts \
+  scripts/guarded-release-browser.mjs
+python3 scripts/governance_lite.py
+python3 scripts/test_governance_lite.py
+git diff --check
+```
+
+### Files touched
+
+- `apps/reference-dapp/e2e/arbitrum-authoring-certification.spec.ts`
+- `apps/reference-dapp/e2e/copilot/replay-v2.json`
+- `apps/reference-dapp/playwright.arbitrum-authoring.config.ts`
+- `apps/reference-dapp/src/channels/core/strategy.test.ts`
+- `apps/reference-dapp/src/domain/arbitrum-certification.cases.ts`
+- `apps/reference-dapp/src/domain/arbitrum-certification.test.ts`
+- `apps/reference-dapp/src/domain/arbitrum-hash-baseline.fixture.json`
+- `apps/reference-dapp/src/domain/asset-catalogs.ts`
+- `apps/reference-dapp/src/domain/authoring-capabilities.test.ts`
+- `apps/reference-dapp/src/domain/authoring-capabilities.ts`
+- `apps/reference-dapp/src/domain/canvas-transfer.test.ts`
+- `apps/reference-dapp/src/domain/commands.ts`
+- `apps/reference-dapp/src/domain/copilot-authoring.ts`
+- `apps/reference-dapp/src/domain/copilot-conversation.test.ts`
+- `apps/reference-dapp/src/domain/copilot-eval.corpus.ts`
+- `apps/reference-dapp/src/domain/copilot-messages.ts`
+- `apps/reference-dapp/src/domain/crypto-action-picker.test.ts`
+- `apps/reference-dapp/src/domain/crypto-action-picker.ts`
+- `apps/reference-dapp/src/domain/network-registry.ts`
+- `apps/reference-dapp/src/domain/robinhood-liquidity-authoring.ts`
+- `apps/reference-dapp/src/domain/robinhood-transfer-authoring.ts`
+- `apps/reference-dapp/src/domain/router-authoring.ts`
+- `apps/reference-dapp/src/domain/supply-authoring.ts`
+- `apps/reference-dapp/src/engine/capability-catalog.ts`
+- `apps/reference-dapp/src/engine/strategy-engine.test.ts`
+- `apps/reference-dapp/src/engine/strategy-engine.ts`
+- `apps/reference-dapp/src/engine/strategy-spec.ts`
+- `apps/reference-dapp/src/mcp/tools.ts`
+- `apps/reference-dapp/src/server/arbitrum-liquidity.test.ts`
+- `apps/reference-dapp/src/server/copilot-capabilities.ts`
+- `docs/builds/BUILD-ARB-001-HANDOFF.md`
+- `docs/builds/BUILD-ARB-001-NETWORK-INTEGRATION-REPORT.md`
+- `docs/builds/BUILD-ARB-001-PLAN.md`
+- `packages/action-registry/src/aave-v3-testnet.ts`
+- `scripts/guarded-release-browser.mjs`
+
+### Stop / next exact action
+
+- DO NOT REDO Phases 1–6. Preserve intervening work; no reset/clean/stash/rebase/worktree recreation.
+- No temp/generated junk is committed; task-owned /tmp baseline/reports and scoped browser outputs are removed after verification.
+  The deliberate hash-vector fixture and model replay are retained. Existing ignored package exports remain for imports.
+- BLOCKERS BEFORE UX PHASE: no outstanding Phase 6 implementation/focused-test blocker.
+  Broader dependency declarations / full CI remain for the separately authorized final integration phase.
+- NEXT EXACT ACTION: **stop at the local Phase 6 commit and wait for the owner's explicit UX scope**.
+  OWNER-APPROVED UX CHANGES: **none yet**. Do not start UX, run full CI, enable gates, transact, push or open a PR automatically.
+
+
+## Archived Phase 6 recovered starting state — 2026-10-12
+
+- CURRENT HEAD: `c82722ed5c57bd5fadf4d001ba81a89283233cef`, exact expected Phase 5 commit.
+- CURRENT PHASE: **Phase 6 IN PROGRESS — final authoring / capability parity certification only**, owner-authorized.
+- Branch/worktree: `codex/build-arb-001-network-ux`, `/home/asus/projects/flofi-arb`.
+- Recovery: handoff, discovery, plan and Base integration report read first; pwd/status/branch/HEAD/log inspected.
+  Worktree and index were clean; no intervening work to reconstruct. Phases 1–5 remain completed.
+- Architecture: Network/Asset/Capability registries, canonical examples and shared authoring/reducer produce SemanticWorkflow IR.
+  Existing profiles serve Swap, native/ERC-20 Transfer, both Base Router directions, liquidity mint and native-USDC Aave actions.
+- Prior validation: Phase 5 recorded 43 focused Vitest files / 747 passing tests, scoped TypeScript/lint/governance and whitespace checks.
+- IN PROGRESS: cross-surface certification matrix, registry/name/refusal audit, stable hash continuity and normal Copilot UI acceptance.
+- REMAINING: focused certification/regression/browser tests, scoped checks, integration report, final handoff/plan and local Phase 6 commit.
+- TESTS FAILING: none established. Existing broader Next dependency declaration limitation remains for final integration.
+- OWNER-APPROVED UX CHANGES: **none yet**. No new financial capability, UX work, gate/configuration change, real-money transaction,
+  full CI, push or PR is authorized. Do not redo Phases 1–5 or proceed automatically to UX work.
+- NEXT EXACT ACTION: certify all ten implemented capabilities on Canvas, deterministic Chat, natural-language Copilot and actual MCP,
+  including incomplete/unsupported requests and replay-driven normal product Copilot proposals applied to Canvas.
+
 ## Final Phase 5 checkpoint — 2026-10-12
 
 - CURRENT HEAD: Phase 5 commit containing this checkpoint; resolve its exact SHA with

@@ -39,6 +39,8 @@ const profiles = phase === 'composition' ? [
   ['robinhood-mainnet-authoring', ['robinhood-stocks.spec.ts'], { GRYLOO_ROBINHOOD_MAINNET_E2E: 'MOCKED_LOOPBACK_ONLY', FLOFI_COPILOT: 'replay' }],
   // BUILD-BASE-001: Base as a catalog network in the existing cards (shortcuts, search, a non-featured token, provider logos through a closed
   // replay) and in the natural-language Copilot (committed replay answers), MOCKED list only.
+  // BUILD-ARB-001 Phase 6: one authoring-only product profile, replay model and passive wallet; every financial gate stays off.
+  ['arbitrum-authoring-certification', ['--config', 'playwright.arbitrum-authoring.config.ts'], {}],
   ['base-mainnet-authoring', ['base-mainnet-authoring.spec.ts'], { GRYLOO_BASE_MAINNET_E2E: 'MOCKED_LOOPBACK_ONLY', FLOFI_COPILOT: 'replay' }],
   ['uniswap-provenance', [boundary], { FLOFI_RELEASE_PROVENANCE_PROFILE: 'uniswap', GRYLOO_UNISWAP_LIQUIDITY_E2E: 'MOCKED_LOOPBACK_ONLY' }],
   ['router-provenance', [boundary], { FLOFI_RELEASE_PROVENANCE_PROFILE: 'router', GRYLOO_ROUTER_E2E: 'MOCKED_LOOPBACK_ONLY' }],

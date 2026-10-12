@@ -2,6 +2,8 @@
 import { createRouterBridgeNode, isRouterBridgeNode, readRouterBridgeNode, routerPair, ROUTER_PAIRS, type RoutingProvider, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { CROSSCHAIN_ROUTER_ARBITRUM_BASE, CROSSCHAIN_ROUTER_ARBITRUM_ROBINHOOD, CROSSCHAIN_ROUTER_BASE_ARBITRUM, CROSSCHAIN_ROUTER_BASE_ROBINHOOD, CROSSCHAIN_ROUTER_BASE_SEPOLIA_ARBITRUM_SEPOLIA,
   CROSSCHAIN_ROUTER_ROBINHOOD_ARBITRUM, CROSSCHAIN_ROUTER_ROBINHOOD_BASE, type RouterProfile } from '@defi-workflow-engine/action-registry';
+import { authoringAssetSymbol } from './asset-catalogs';
+import { catalogNetworkOfChatName, networkIdentity } from './network-registry';
 import { formatTokenAmount, parseTokenAmount } from './jupiter-authoring';
 
 /**
@@ -80,7 +82,12 @@ const routingOf = (providers: readonly string[]): RouterRouting | null =>
 
 export function createRouterNode(nodeId: string, input: RouterBridgeInput): SemanticWorkflow['nodes'][number] {
   const network = routerNetworkOfInput(input);
-  if (!network || input.token !== ROUTER_NETWORK_OPTIONS[network].pair.source.symbol) throw new Error('ROUTER_PAIR_UNSUPPORTED');
+  if (!network) throw new Error('ROUTER_PAIR_UNSUPPORTED');
+  const source = ROUTER_NETWORK_OPTIONS[network].pair.source;
+  let symbol: string;
+  try { symbol = networkIdentity(source.chainId)?.catalog ? authoringAssetSymbol(source.chainId, input.token) : input.token; }
+  catch { throw new Error('ROUTER_PAIR_UNSUPPORTED'); }
+  if (symbol !== source.symbol) throw new Error('ROUTER_PAIR_UNSUPPORTED');
   const pair = ROUTER_NETWORK_OPTIONS[network].pair;
   if (!Object.hasOwn(ROUTER_ROUTING, input.routing)) throw new Error('ROUTER_PROVIDER_POLICY_INVALID');
   if (!/^[1-9][0-9]{0,3}$/.test(input.slippage)) throw new Error('ROUTER_SLIPPAGE_OUT_OF_RANGE');
@@ -113,9 +120,16 @@ export function routerNetworkOf(workflow: { readonly nodes: readonly (SemanticWo
 /** Editing input that reproduces the node exactly. */
 export const routerInputOf = (d: RouterDetails): RouterBridgeInput =>
   ({ source: d.source, destination: d.destination, token: d.token, amount: d.amount, recipient: d.recipient, slippage: d.slippage, routing: d.routing });
-export const ROUTER_CHAT_PATTERN = /^(?:bridge|move|manda|traga) ([0-9]+(?:\.[0-9]+)?) (USDC|USDG) (?:from|da|de|do) (Base Sepolia|Base|Arbitrum|Robinhood(?: Chain)?) (?:to|para) (?:a |o )?(Arbitrum Sepolia|Arbitrum|Base|Robinhood(?: Chain)?)(?: (?:to|recipient) (0x[0-9a-fA-F]{40}))?(?: via (LI\.FI|LIFI|Across|auto))?(?: (?:with )?slippage ([0-9]+) bps)?$/i;
-const chainName = (text: string) => /sepolia/i.test(text) ? text.replace(/\s+/g, ' ').replace(/^base sepolia$/i, 'Base Sepolia').replace(/^arbitrum sepolia$/i, 'Arbitrum Sepolia')
-  : /^robinhood/i.test(text) ? 'Robinhood Chain' : /^arbitrum/i.test(text) ? 'Arbitrum' : 'Base';
+const routerChatNetworks = [...new Set(Object.values(ROUTER_NETWORK_OPTIONS).flatMap(option => [option.sourceLabel, option.destinationLabel]))]
+  .map(label => `(?:${networkIdentity(label)?.chatName?.source ?? label})`).join('|');
+export const ROUTER_CHAT_PATTERN = new RegExp(String.raw`^(?:bridge|move|manda|traga) ([0-9]+(?:\.[0-9]+)?) ([^\x00-\x1f\x7f]{1,160}?) (?:from|da|de|do) (${routerChatNetworks}) (?:to|para) (?:a |o )?(${routerChatNetworks})(?: (?:to|recipient) (0x[0-9a-fA-F]{40}))?(?: via (LI\.FI|LIFI|Across|auto))?(?: (?:with )?slippage ([0-9]+) bps)?$`, 'i');
+const chainName = (text: string) => {
+  const identity = catalogNetworkOfChatName(text) ?? Object.values(ROUTER_NETWORK_OPTIONS)
+    .flatMap(option => [option.sourceLabel, option.destinationLabel]).map(networkIdentity)
+    .find(network => network?.name.toLowerCase() === text.toLowerCase());
+  const option = Object.values(ROUTER_NETWORK_OPTIONS).find(option => networkIdentity(option.sourceLabel) === identity);
+  return option?.source ?? Object.values(ROUTER_NETWORK_OPTIONS).find(option => networkIdentity(option.destinationLabel) === identity)?.destination;
+};
 /**
  * "Bridge 5 USDC from Base [Sepolia] to Arbitrum [Sepolia] [to 0x…] [via LI.FI|Across|auto] [slippage 50 bps]"; BUILD-RH-002 adds
  * "Bridge 100 USDC from Base to Robinhood" and "Bridge 50 USDG from Robinhood to Arbitrum". The pair must exist and the token must be
@@ -127,8 +141,12 @@ export function parseRouterChat(text: string): RouterBridgeInput | null {
   if (!m) return null;
   const input = { source: chainName(m[3]!) as RouterSource, destination: chainName(m[4]!) as RouterDestination };
   const network = routerNetworkOfInput(input);
-  if (!network || ROUTER_NETWORK_OPTIONS[network].pair.source.symbol !== m[2]!.toUpperCase()) return null;
+  if (!network) return null;
+  const source = ROUTER_NETWORK_OPTIONS[network].pair.source;
+  let token: string;
+  try { token = networkIdentity(source.chainId)?.catalog ? authoringAssetSymbol(source.chainId, m[2]!) : m[2]!.toUpperCase(); } catch { return null; }
+  if (source.symbol !== token) return null;
   const via = (m[6] ?? 'auto').toLowerCase();
-  return { ...input, token: m[2]!.toUpperCase(), amount: m[1]!, recipient: m[5]?.toLowerCase() ?? '', slippage: m[7] ?? ROUTER_DEFAULT_SLIPPAGE,
+  return { ...input, token, amount: m[1]!, recipient: m[5]?.toLowerCase() ?? '', slippage: m[7] ?? ROUTER_DEFAULT_SLIPPAGE,
     routing: via === 'across' ? 'ACROSS' : via === 'auto' ? 'AUTO' : 'LIFI' };
 }

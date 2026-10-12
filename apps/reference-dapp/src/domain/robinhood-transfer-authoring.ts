@@ -2,7 +2,7 @@
 import { createNativeTransferNode, createTokenTransferNode, readTransferNode, TRANSFER_ACTION, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { NATIVE_TRANSFER_PROFILES, ROBINHOOD_TESTNET_TRANSFER, formatAssetAmount, parseAssetAmount, transferAllowsRecipients,
   transferAllowsTokens, type NativeTransferProfile } from '@defi-workflow-engine/action-registry';
-import { resolveNetworkAsset } from './asset-catalogs';
+import { authoringAssetSymbol, resolveNetworkAsset } from './asset-catalogs';
 /**
  * The transfer networks: the native test-ETH self-transfers of RH-DEMO-001 Robinhood Testnet and BUILD-ETHEREUM-001 Ethereum
  * Sepolia, and (BUILD-RH-002) Robinhood Chain mainnet — native ETH or a catalog asset (USDG, WETH, Stock Tokens), to the
@@ -38,9 +38,10 @@ export function createAuthoredTransfer(nodeId: string, input: RobinhoodTransferI
   const profile = transferProfileFor(input.network);
   const recipient = input.recipient === 'CONNECTED_OWNER' ? 'CONNECTED_OWNER' : typeof input.recipient === 'string' && RECIPIENT.test(input.recipient) ? input.recipient.toLowerCase() : null;
   if (!recipient || (recipient !== 'CONNECTED_OWNER' && !transferAllowsRecipients(profile))) throw new Error('TRANSFER_PROFILE_UNSUPPORTED');
-  if (input.asset === 'ETH') return createNativeTransferNode(nodeId, { chain: profile.chain, amount: parseTransferAmount(input.amount, profile), recipient });
+  const symbol = transferAllowsTokens(profile) ? authoringAssetSymbol(profile.chain, input.asset) : input.asset;
+  if (symbol === 'ETH') return createNativeTransferNode(nodeId, { chain: profile.chain, amount: parseTransferAmount(input.amount, profile), recipient });
   if (!transferAllowsTokens(profile)) throw new Error('TRANSFER_PROFILE_UNSUPPORTED');
-  const token = resolveNetworkAsset(profile.chain, { symbol: input.asset });
+  const token = resolveNetworkAsset(profile.chain, { symbol });
   if (!token) throw new Error('ASSET_CATALOG_UNAVAILABLE');
   if (token.kind !== 'ERC20') throw new Error('TRANSFER_PROFILE_UNSUPPORTED');
   let amount: string;

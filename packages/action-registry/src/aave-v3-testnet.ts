@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+/** Existing engine scope, shared by capability wording and deterministic authoring. Amounts still require live debt/balance preflight. */
+export const AAVE_V3_AMOUNT_POLICY = Object.freeze({ repay: 'PARTIAL_ONLY', withdraw: 'PARTIAL_ONLY' } as const);
 /** Verified from Aave's current DAO address book and interface; only this runtime profile. */
 export const AAVE_V3_BASE_SEPOLIA = Object.freeze({
   network: 'Base Sepolia', chainId: 84532, chain: 'eip155:84532', chainHex: '0x14a34', protocol: 'aave-v3',

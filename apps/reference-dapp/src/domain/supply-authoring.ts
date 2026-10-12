@@ -2,6 +2,8 @@
 import { createSupplyNode, readSupplyNode, createBorrowNode, readBorrowNode, createRepayNode, readRepayNode, createWithdrawNode, readWithdrawNode, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { AAVE_V3_BASE_SEPOLIA, AAVE_V3_LENDING_PROFILES, type AaveLendingProfile } from '@defi-workflow-engine/action-registry';
 import type { SupplyReview } from '@defi-workflow-engine/reference-compiler';
+import { authoringAssetSymbol } from './asset-catalogs';
+import { networkIdentity } from './network-registry';
 /**
  * Aave V3 authoring for each registered lending profile: Base Sepolia USDC and (BUILD-ETHEREUM-001) Ethereum Sepolia WBTC.
  * The named network selects the profile, and the asset must be that profile's one verified asset. A symbol never selects
@@ -14,7 +16,11 @@ export const LENDING_NETWORKS: readonly LendingNetwork[] = Object.freeze(AAVE_V3
 /** The profile for an authored network and asset pair; any other pair is unsupported. */
 export function lendingProfileFor(network: string, asset: string, code = 'SUPPLY_DEPLOYMENT_UNSUPPORTED'): AaveLendingProfile {
   const profile = AAVE_V3_LENDING_PROFILES.find(item => item.network === network);
-  if (!profile || profile.symbol !== asset) throw new Error(code);
+  if (!profile) throw new Error(code);
+  let symbol: string;
+  try { symbol = networkIdentity(network)?.catalog ? authoringAssetSymbol(profile.chain, asset) : asset.toUpperCase(); }
+  catch { throw new Error(code); }
+  if (profile.symbol !== symbol) throw new Error(code);
   return profile;
 }
 /** The one verified Aave asset of a lending network. */

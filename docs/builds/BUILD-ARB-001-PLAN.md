@@ -254,9 +254,31 @@ No data/UI provider enters runtime; their official identities/code are recorded 
 Phase 5 is complete. **Stop at the local Phase 5 commit; no push/PR or automatic Phase 6.** Discovery assumptions remain valid,
 so DISCOVERY is unchanged. Recommended next owner-authorized scope: final authoring/capability parity certification.
 
+## Phase 6 — final authoring / capability parity certification (completed, build is not final)
+
+Recovered the clean expected Phase 5 HEAD `c82722ed5c57bd5fadf4d001ba81a89283233cef` on the existing branch/worktree.
+Certified all ten implemented capabilities on the shared registry/authoring path: Canvas, exact Chat, direct EN/PT natural Copilot
+and actual MCP gateway. Equal canonical IR/hashes at a common workflow identity; 18 normal `/app` browser cases cover proposals
+applied to Canvas, EN/PT requests, refusals and the existing Arbitrum picker/badges. Product UUIDs remain hash-bound;
+standalone MCP's `workflow-local` has a legitimately different raw hash, with every financial semantic field equal.
+
+Narrow shared fixes: whole-name/case resolution for bounded Chat/MCP/Canvas references; registry-derived engine network/route labels;
+MCP discovery of the loaded chain catalog/native ETH; explicit ARB network aliases without asset/network confusion;
+existing partial-only lending policy in generated support text and early full/max refusals; explicit unsupported fees cannot become defaults.
+No new financial capability, reserve, risk model, authoring surface or component/control/layout/UX change.
+All 33 Base-baseline canonical examples and seven additional Robinhood Stock Token scenarios retain independently rebuilt hashes.
+
+Focused validation: **36 files / 965 Vitest tests** and **18 browser cases**, no failures/skips; scoped strict TypeScript, lint on 30 code
+files, governance-lite / 19 self-tests and whitespace checks. Broader Next dependency declaration limitations remain for final CI;
+source checks use the previously documented `--skipLibCheck` there only. No full CI/browser/PostgreSQL/fork/Anvil matrix run.
+
+The [integration report](BUILD-ARB-001-NETWORK-INTEGRATION-REPORT.md) begins the build-wide record; **BUILD-ARB-001 is not final**.
+Arbitrum/Router deployment gates were not enabled/set. Production, real-money transactions, push and PR: **NONE**.
+**OWNER-APPROVED UX CHANGES: none yet.** Stop at the local Phase 6 commit; wait for an explicit owner-defined UX phase.
+
 ## Recommended later phases — proposals only
 
-1. **Final authoring/capability parity certification.** Confirm shared registry/IR truth across the supported channels; owner authorization required.
+1. **Owner-approved UX phases.** Scope and approval must come from the owner; no UX change is approved yet. Do not start automatically.
 2. **Final integration and full CI.** Confirm registry parity across all surfaces, existing Base/Robinhood behavior,
    execution gates, recovery/reconciliation and hash continuity; run the full required CI only here. Delivery/PR remains owner-directed.
 

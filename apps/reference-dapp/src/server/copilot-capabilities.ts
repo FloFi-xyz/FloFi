@@ -7,7 +7,7 @@
  */
 import { COPILOT_FEE_TIERS } from '../domain/copilot-intent';
 import { COPILOT_POOLS } from '../domain/copilot-authoring';
-import { AUTHORING_CAPABILITIES, bridgeOffers, capabilityNetworks, catalogCapabilityNetworks, lendingOffers } from '../domain/authoring-capabilities';
+import { AUTHORING_CAPABILITIES, bridgeOffers, capabilityNetworks, catalogCapabilityNetworks, lendingAmountScopeText, lendingOffers } from '../domain/authoring-capabilities';
 import { declaredNetworkSymbols } from '../domain/asset-catalogs';
 import { COPILOT_NETWORK_IDS, networkIdentity, networkOfCopilot, type NetworkIdentity } from '../domain/network-registry';
 import { ROUTER_NETWORK_OPTIONS } from '../domain/router-authoring';
@@ -56,7 +56,7 @@ export function copilotSupportsSection(): string {
     `- SWAP: ${swap.join('; ')}.`,
     `- TRANSFER: ETH or any token of the official catalog on ${names(capabilityNetworks('transfer'))}, to the connected wallet or a 0x address the user typed.`,
     `- BRIDGE (Cross-chain Router): ${join(bridgeOffers().map(routeText), 'or')}; optional LI.FI or Across preference and recipient.`,
-    `- SUPPLY, BORROW, REPAY, WITHDRAW on Aave V3: ${[...lending].map(([asset, networks]) => `${asset} on ${names(networks)}`).join('; ')}; nothing else.`,
+    `- SUPPLY, BORROW, REPAY, WITHDRAW on Aave V3: ${[...lending].map(([asset, networks]) => `${asset} on ${names(networks)}`).join('; ')}; nothing else. ${lendingAmountScopeText('EN')}`,
     `- LIQUIDITY: ${[...pools, catalogPools].join('; ')}.`,
     '- AUTOMATION: SCHEDULED_DCA, PRICE_TRIGGER (USD below/above), DAILY_WATCH using the existing owner-confirmed Automation domain.',
     `- COMPOSITION: only ${join(composition, 'or')}.`,

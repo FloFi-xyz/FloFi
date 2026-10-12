@@ -201,7 +201,8 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
     'Derived from FloFi\'s registries.', Schemas.none, pure, () => ({ ok: true, networks: supportedNetworks() }));
 
   register('get_supported_assets', 'Supported assets', 'Assets a strategy may name, per network, with the exact token address or mint, decimals and the actions that use ' +
-    'each. One symbol can be two different tokens on one network (e.g. Base Sepolia Aave USDC vs Circle test USDC).', Schemas.assets, pure,
+    'each, from the currently loaded validated catalog or the pinned registry assets. Native currencies have a null token address. ' +
+    'One symbol can be two different tokens on one network (e.g. Base Sepolia Aave USDC vs Circle test USDC).', Schemas.assets, pure,
   args => ({ ok: true, assets: supportedAssets(args.network) }));
 
   register('get_capabilities', 'Capabilities', 'For each action × network: what FloFi code supports (from the execution capability registry on the composed IR), the evidence ' +

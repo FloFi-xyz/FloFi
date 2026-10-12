@@ -10,7 +10,7 @@ import { createSolanaSwapNode, solanaSwapDetails, type SolanaSwapInput } from '.
 import { createUniswapLiquidityNode, uniswapLiquidityDetails } from './uniswap-liquidity-authoring';
 import { createSolanaLiquidityNode, solanaLiquidityDetails } from './solana-liquidity-authoring';
 import { createAuthoredSupply, createAuthoredBorrow, createAuthoredRepay, createAuthoredWithdraw, supplyDetails, borrowDetails, repayDetails, withdrawDetails, lendingProfileFor } from './supply-authoring';
-import { BASE_CHAIN, BASE_NETWORK, ROBINHOOD_CHAIN, ROBINHOOD_NETWORK, featuredNetworkSymbols, featuredStockSymbols, resolveNetworkAsset } from './asset-catalogs';
+import { BASE_CHAIN, BASE_NETWORK, ROBINHOOD_CHAIN, ROBINHOOD_NETWORK, authoringAssetSymbol, featuredNetworkSymbols, featuredStockSymbols, resolveNetworkAsset } from './asset-catalogs';
 import { CATALOG_SWAP_NETWORKS, catalogSwapDetails, createCatalogSwapAuthoringNode, type CatalogSwapNetwork } from './catalog-swap-authoring';
 import { networkIdentity } from './network-registry';
 import { CATALOG_LIQUIDITY_NETWORKS, createCatalogLiquidityNode, catalogLiquidityDetails, robinhoodFullRange, ROBINHOOD_LIQUIDITY_DEFAULT_FEE, type CatalogLiquidityNetwork } from './robinhood-liquidity-authoring';
@@ -102,6 +102,13 @@ export function cryptoTokenOptions(selection: CryptoSelection, side: 'source' | 
 }
 export function selectCryptoToken(selection: CryptoSelection, side: 'source' | 'destination', token: string): CryptoSelection {
   const found = cryptoProfile(selection);
+  if (found?.catalog) {
+    try { token = authoringAssetSymbol(found.chain, token); }
+    catch (cause) {
+      if (cause instanceof Error && cause.message === 'ASSET_REFERENCE_AMBIGUOUS') throw cause;
+      throw new Error('ACTION_TOKEN_UNSUPPORTED', { cause });
+    }
+  }
   // BUILD-BASE-001: on a catalog network a searched asset is valid for transfers too (their source asset), not only swaps and pools.
   const searchable = found?.catalog && (erc20Only(selection.action) || (selection.action === 'transfer' && side === 'source'));
   if (!found || (!cryptoTokenOptions(selection, side).includes(token) && !(searchable && profileHasToken(found, token, selection.action))))
@@ -157,7 +164,10 @@ export function defaultPoolRange(network: string): { readonly rangeUnit: 'TICK';
   return catalog?.catalog ? full(robinhoodFullRange(ROBINHOOD_LIQUIDITY_DEFAULT_FEE, catalog.chain).tickUpper) : full(887270);
 }
 export function createCryptoActionNode(id: string, input: CryptoActionInput): SemanticWorkflow['nodes'][number] {
-  const { selection: selection, amount, slippage } = input;
+  const { amount, slippage } = input;
+  const identity = networkIdentity(input.selection.network);
+  const selection = identity?.catalog ? { ...input.selection, from: authoringAssetSymbol(identity.chain, input.selection.from),
+    ...input.selection.to === undefined ? {} : { to: authoringAssetSymbol(identity.chain, input.selection.to) } } : input.selection;
   if (!validCryptoSelection(selection)) throw new Error('ACTION_ASSETS_UNSUPPORTED');
   if (selection.action === 'swap') {
     if (selection.network === 'Solana' || selection.network === 'Solana Devnet') return createSolanaSwapNode(id, { network: selection.network, from: selection.from, to: selection.to, amount, slippage } as SolanaSwapInput);

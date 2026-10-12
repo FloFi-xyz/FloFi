@@ -7,14 +7,14 @@ import { formatTokenAmount } from './jupiter-authoring';
 import { UNISWAP_LIQUIDITY_DEFAULT_SLIPPAGE } from './uniswap-liquidity-authoring';
 import { ROBINHOOD_LIQUIDITY_DEFAULT_SLIPPAGE } from './robinhood-liquidity-authoring';
 import { SOLANA_LIQUIDITY_DEFAULT_SLIPPAGE } from './solana-liquidity-authoring';
-import { COPILOT_LIMITS, CopilotIntentError, parseCopilotIntent, safeCopilotProse, type CopilotAction, type CopilotAsset, type CopilotBridgeAction,
+import { COPILOT_FEE_TIERS, COPILOT_LIMITS, CopilotIntentError, parseCopilotIntent, safeCopilotProse, type CopilotAction, type CopilotAsset, type CopilotBridgeAction,
   type CopilotLegacyAsset, type CopilotLendingAction, type CopilotLiquidityAction, type CopilotMissingField, type CopilotNetwork, type CopilotSwapAction,
   type CopilotTransferAction } from './copilot-intent';
 import { copilotCopy, type CopilotCopy, type CopilotLanguage, type NetworkSubject, type Subject } from './copilot-messages';
-import { assetDisplayName, type CanonicalAsset } from '@defi-workflow-engine/action-registry';
+import { AAVE_V3_AMOUNT_POLICY, assetDisplayName, type CanonicalAsset } from '@defi-workflow-engine/action-registry';
 import { copilotNetworksFor, lendingOffers, routeLabels, type StrategyAction } from './authoring-capabilities';
 import { resolveAssetReference } from './asset-catalogs';
-import { COPILOT_NETWORK_IDS, copilotNetworksMentioned, networkIdentity, networkOfCopilot, type CopilotNetworkId } from './network-registry';
+import { COPILOT_NETWORK_IDS, copilotNetworksMentioned, catalogNetworkOfChatName, networkIdentity, networkOfCopilot, type CopilotNetworkId } from './network-registry';
 import { routerNetworksOf } from './router-authoring';
 
 /**
@@ -91,7 +91,16 @@ const ASSET_MENTIONS: Readonly<Record<Exclude<CopilotLegacyAsset, 'OTHER'>, RegE
 };
 
 /** Networks the user named, in any language that uses the network names (each by its network registry `mention`). */
-export function mentionedNetworks(text: string): Network[] { return copilotNetworksMentioned(text); }
+export function mentionedNetworks(text: string): Network[] {
+  return copilotNetworksMentioned(text).filter(id => {
+    const identity = networkOfCopilot(id);
+    // Catalog names can equal a chain alias (ARB is named Arbitrum). Asset context alone cannot choose a mainnet.
+    const collision = identity.catalog && [identity.name, ...identity.aliases].some(label => resolveAssetReference(identity.chain, label).kind === 'FOUND');
+    if (!collision || !identity.chatName) return true;
+    const explicit = new RegExp(`(?:^|\\b(?:on|na|no|da|de|do|from|to|para|network|rede|chain)\\s+(?:(?:the|a|o)\\s+)?)(?:${identity.chatName.source})(?![A-Za-z0-9])`, 'im');
+    return explicit.test(text);
+  });
+}
 export const canonicalDecimal = (value: string): string => {
   const [whole, fraction = ''] = value.split('.');
   const trimmed = fraction.replace(/0+$/, '');
@@ -142,11 +151,14 @@ const assetNamed = (text: string, asset: Exclude<CopilotAsset, 'OTHER'>) => Obje
   ? ASSET_MENTIONS[asset as Exclude<CopilotLegacyAsset, 'OTHER'>].test(text) : symbolNamed(text, asset);
 const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 /** A catalog symbol written as a word (case-insensitive): "cbbtc" grounds cbBTC; "ETHx" does not ground ETH. */
-const symbolNamed = (text: string, symbol: string) => new RegExp(`(?<![A-Za-z0-9.])${escapeRegExp(symbol)}(?![A-Za-z0-9])`, 'i').test(text);
+const symbolNamed = (text: string, symbol: string) => new RegExp(`(?<![A-Za-z0-9.])${escapeRegExp(symbol)}(?![A-Za-z0-9]|\\s+(?:network|rede)\\b)`, 'i').test(text);
 /** The catalog's display name written in full ("Coinbase Wrapped BTC", "Tesla"); never a fragment of it. */
 const nameNamed = (text: string, asset: CanonicalAsset) => {
   const name = assetDisplayName(asset).trim();
-  return name.length >= 3 && new RegExp(`(?<![A-Za-z0-9])${escapeRegExp(name)}(?![A-Za-z0-9])`, 'i').test(text);
+  if (name.length < 3) return false;
+  const matches = [...text.matchAll(new RegExp(`(?<![A-Za-z0-9])${escapeRegExp(name)}(?![A-Za-z0-9])`, 'gi'))];
+  // A token name equal to a network label (e.g. ARB's name Arbitrum) must occur in asset context, not only after 'on'.
+  return matches.some(match => !(networkIdentity(name) || catalogNetworkOfChatName(name)) || !/(?:\b(?:on|na|no|da|de|do|from|to|para|network|rede|chain))\s+(?:(?:the|a|o)\s+)?$/i.test(text.slice(0, match.index)));
 };
 
 class Stop { constructor(readonly outcome: CopilotOutcome) {} }
@@ -317,7 +329,10 @@ function planRoute(a: CopilotBridgeAction, g: Grounding): Plan {
   if (!route) return ask(['sourceNetwork', 'destinationNetwork'], m.whichRoute, EXTENDED_ROUTES.filter(r => r.src === source || r.dst === destination)
     .map(r => `${r.option.sourceLabel} → ${r.option.destinationLabel}`));
   if (TESTNET_WORDS.test(text)) ask(['sourceNetwork', 'destinationNetwork'], m.routeRealFunds(`${route.option.sourceLabel} → ${route.option.destinationLabel}`), options);
-  const asset = needAsset(a.asset, g, 'bridge', 'asset');
+  const reference = needAsset(a.asset, g, 'bridge', 'asset');
+  // Known symbols retain the route-specific refusal; whole names resolve within the route's source catalog.
+  const asset = g.policy.catalog && !/^[A-Za-z][A-Za-z0-9.]{0,15}$/.test(reference)
+    ? catalogToken(reference, route.src, g, 'bridge', 'asset', 'ANY', notes).asset.symbol : reference;
   if (asset.toUpperCase() !== route.token) refuse(m.routerTokenOnly(route.token, route.option.sourceLabel));
   const amount = amountOf(a.amount, g, 'bridge');
   const slippage = slippageOf(a.slippageBps, ROUTER_DEFAULT_SLIPPAGE, g, notes, route.option.profile.maximumSlippageBps);
@@ -364,8 +379,8 @@ function planBridge(a: CopilotBridgeAction, g: Grounding): Plan {
   if (!network) return ask(['sourceNetwork', 'destinationNetwork'], m.routerMixed, pairs);
   if (network === 'mainnet' && (!named.includes('BASE') || !named.includes('ARBITRUM') || TESTNET_WORDS.test(text))) ask(['sourceNetwork', 'destinationNetwork'], m.routerRealFunds, pairs);
   if (network === 'testnet' && !named.includes(src) && !named.includes(dst)) ask(['sourceNetwork', 'destinationNetwork'], m.whichRoute, pairs);
-  const asset = needAsset(a.asset, g, 'bridge', 'asset');
-  if (asset !== 'USDC') refuse(m.routerUsdcOnly);
+  const asset = g.policy.catalog && network === 'mainnet' ? catalogToken(a.asset, src, g, 'bridge', 'asset', 'ANY', notes).asset.symbol : needAsset(a.asset, g, 'bridge', 'asset');
+  if (asset !== ROUTER_NETWORK_OPTIONS[network].pair.source.symbol) refuse(m.routerUsdcOnly);
   const amount = amountOf(a.amount, g, 'bridge');
   const profile = ROUTER_NETWORK_OPTIONS[network].profile;
   const slippage = slippageOf(a.slippageBps, ROUTER_DEFAULT_SLIPPAGE, g, notes, profile.maximumSlippageBps);
@@ -410,15 +425,21 @@ function lendingNetworks(asset: CopilotAsset | null, g: Grounding): Network[] {
 }
 function planLending(a: CopilotLendingAction, g: Grounding, wallet: string | null): Plan {
   const m = copyOf(g), notes: string[] = [], subject = LENDING_SUBJECT[a.type];
+  const amountPolicy = a.type === 'REPAY' ? AAVE_V3_AMOUNT_POLICY.repay : a.type === 'WITHDRAW' ? AAVE_V3_AMOUNT_POLICY.withdraw : null;
+  if (amountPolicy === 'PARTIAL_ONLY' && /\b(?:all|full|max(?:imum)?|entire|tudo|todos?|total|integral|máximo|maximo)\b/i.test(g.latest ?? g.text))
+    refuse(m.partialLendingOnly(a.type === 'REPAY' ? 'repay' : 'withdraw'));
   const missing: CopilotMissingField[] = [...(a.amount === null ? ['amount' as const] : []), ...(a.asset === null ? ['asset' as const] : [])];
   // BUILD-ETHEREUM-001: each Aave asset has its own deployments (USDC on Base Sepolia — and, BUILD-BASE-001, Base mainnet — WBTC on Ethereum
   // Sepolia), so the asset bounds the network.
   if (missing.length) ask(missing, stillNeeds(m, missing, subject), !missing.includes('asset') ? [] : a.network === 'ETHEREUM_SEPOLIA' ? ['WBTC']
     : a.network === 'BASE_SEPOLIA' || a.network === 'BASE' ? ['USDC'] : ['USDC', 'WBTC']);
-  const supported = lendingNetworks(a.asset === 'WBTC' ? 'WBTC' : 'USDC', g);
+  const namedCatalog = g.policy.catalog && mentionedNetworks(g.text).some(isCatalogNetwork);
+  const supported = lendingNetworks(namedCatalog ? null : a.asset === 'WBTC' ? 'WBTC' : 'USDC', g);
   const network = resolveNetwork(a.network, supported, g, 'aave', notes);
-  const asset = needAsset(a.asset, g, subject, 'asset');
-  if (asset !== 'USDC' && asset !== 'WBTC') refuse(g.policy.catalog ? m.aaveOnlyCatalog : m.aaveOnly);
+  const catalog = g.policy.catalog && isCatalogNetwork(network);
+  const asset = catalog ? catalogToken(a.asset, network, g, subject, 'asset', 'ERC20', notes).asset.symbol : needAsset(a.asset, g, subject, 'asset');
+  if (!lendingOffers(subject).some(offer => offer.network.copilot === network && offer.asset === asset))
+    refuse(g.policy.catalog ? m.aaveOnlyCatalog : m.aaveOnly);
   const amount = amountOf(a.amount, g, subject), on = COPILOT_NETWORK_LABEL[network];
   if (MAINNETS.has(network)) notes.push(m.catalogFundsNote(on));
   if (a.type === 'WITHDRAW') {
@@ -501,6 +522,10 @@ function planCatalogLiquidity(a: CopilotLiquidityAction, g: Grounding, network: 
   });
   if (tokens[0]!.address === tokens[1]!.address) reject('COPILOT_DUPLICATE_DEPOSIT', m.poolTokenOnce(tokens[0]!.symbol, tokens[1]!.symbol));
   const fee = a.feeTier ?? null;
+  const writtenFee = /\b(?:fee(?: tier)?|taxa|at)\s+(?:(?:of|de)\s+)?([0-9]+(?:[.,][0-9]+)?)\s*%/i.exec(g.latest ?? text)?.[1]?.replace(',', '.');
+  if (writtenFee && !COPILOT_FEE_TIERS.some(tier => canonicalDecimal(tier) === canonicalDecimal(writtenFee)))
+    refuse(m.catalogFeeUnsupported(COPILOT_FEE_TIERS));
+  if (writtenFee && fee === null && !g.carried.has('feeTier')) ask(['range'], m.feeNotFound(writtenFee));
   if (fee !== null && !g.carried.has('feeTier') && !groundedFee(text, fee)) ask(['range'], m.feeNotFound(fee));
   let range = '';
   if (a.rangeUnit === 'TICK') {

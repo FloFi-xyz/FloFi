@@ -13,13 +13,13 @@ import type { CrossChainLiquidityInput } from './cross-chain-liquidity';
 import { liquidityDetails, parseTick } from '@defi-workflow-engine/reference-linter';
 
 import { createAuthoredTransfer, transferDetails, type RobinhoodTransferInput } from './robinhood-transfer-authoring';
-import { createAuthoredSupply, supplyDetails, createAuthoredBorrow, borrowDetails, createAuthoredRepay, repayDetails, createAuthoredWithdraw, withdrawDetails, LENDING_NETWORKS, type WithdrawInput, type SupplyInput } from './supply-authoring';
+import { createAuthoredSupply, supplyDetails, createAuthoredBorrow, borrowDetails, createAuthoredRepay, repayDetails, createAuthoredWithdraw, withdrawDetails, lendingProfileFor, LENDING_NETWORKS, type WithdrawInput, type SupplyInput } from './supply-authoring';
 import { createSolanaSwapNode, parseSolanaSwapChat, solanaSwapDetails, solanaSwapLabels, type SolanaSwapInput } from './jupiter-authoring';
 import { createSolanaLiquidityNode, parseSolanaLiquidityChat, solanaLiquidityDetails, type SolanaLiquidityInput } from './solana-liquidity-authoring';
 import { createUniswapLiquidityNode, parseUniswapLiquidityChat, uniswapLiquidityDetails, type UniswapLiquidityInput } from './uniswap-liquidity-authoring';
 import { createRouterNode, parseRouterChat, routerDetails, ROUTER_ROUTING_LABEL, type RouterBridgeInput } from './router-authoring';
 import { createCryptoActionNode, type CryptoActionInput } from './crypto-action-picker';
-import { BASE_CHAIN, canonicalSymbol } from './asset-catalogs';
+import { BASE_CHAIN, authoringAssetSymbol } from './asset-catalogs';
 import { catalogSwapDetails } from './catalog-swap-authoring';
 import { parseCatalogLiquidityChat, robinhoodLiquidityDetails } from './robinhood-liquidity-authoring';
 import { CATALOG_CHAT_NETWORKS, catalogNetworkOfChatName, networkIdentity } from './network-registry';
@@ -32,7 +32,9 @@ const lendingNetwork = (text: string): SupplyInput['network'] => {
   if (!network) throw new Error('SUPPLY_DEPLOYMENT_UNSUPPORTED');
   return network;
 };
-const lendingAsset = (text: string): SupplyInput['asset'] => text.toUpperCase() === 'WBTC' ? 'WBTC' : 'USDC';
+const assetReference = '([^\\x00-\\x1f\\x7f]{1,160}?)';
+const lendingAsset = (network: SupplyInput['network'], text: string): SupplyInput['asset'] =>
+  lendingProfileFor(network, text).symbol;
 export type Command = Base & (
   | { readonly type: 'ADD_CRYPTO_ACTION'; readonly input: CryptoActionInput }
   | { readonly type: 'SET_CRYPTO_ACTION'; readonly nodeId: string; readonly input: CryptoActionInput }
@@ -95,29 +97,29 @@ export function parseLocalCommand(text: string, workflow: Workflow, context: Rev
   if(lending){const owner=lending[4]??defaultBeneficiary;if(!owner)throw Error('LENDING_OWNER_REQUIRED');const fields={supply:lending[1]!,borrow:lending[2]!,slippage:lending[3]!,owner};createAuthoredLending(workflow.workflowId,workflow.revision+1,fields);return {type:'AUTHOR_LENDING',input:fields,source:'CHAT',baseRevision:workflow.revision};}
   // Aave V3: each network has exactly one verified asset (Base Sepolia USDC, Ethereum Sepolia WBTC; BUILD-BASE-001 Base mainnet USDC, real
   // funds). The pair is checked against the profile, so a symbol can never carry one network's asset onto another.
-  const withdraw = new RegExp(String.raw`^withdraw ([0-9]+(?:\.[0-9]+)?) (USDC|WBTC) from Aave on (${lendingChatNetworks})$`, 'i').exec(input);
-  if(withdraw){const fields:WithdrawInput={network:lendingNetwork(withdraw[3]!),asset:lendingAsset(withdraw[2]!),amount:withdraw[1]!,recipient:'CONNECTED_OWNER'};createAuthoredWithdraw('node-preview',fields);return {type:'ADD_WITHDRAW',input:fields,source:'CHAT',baseRevision:workflow.revision};}
-  const repay = new RegExp(String.raw`^repay ([0-9]+(?:\.[0-9]+)?) (USDC|WBTC)(?: to Aave)? on (${lendingChatNetworks})(?: (?:beneficiary|on behalf of) (0x[0-9a-fA-F]{40}))?$`, 'i').exec(input);
+  const withdraw = new RegExp(String.raw`^withdraw ([0-9]+(?:\.[0-9]+)?) ${assetReference} from Aave on (${lendingChatNetworks})$`, 'i').exec(input);
+  if(withdraw){const fields:WithdrawInput={network:lendingNetwork(withdraw[3]!),asset:lendingAsset(lendingNetwork(withdraw[3]!), withdraw[2]!),amount:withdraw[1]!,recipient:'CONNECTED_OWNER'};createAuthoredWithdraw('node-preview',fields);return {type:'ADD_WITHDRAW',input:fields,source:'CHAT',baseRevision:workflow.revision};}
+  const repay = new RegExp(String.raw`^repay ([0-9]+(?:\.[0-9]+)?) ${assetReference}(?: to Aave)? on (${lendingChatNetworks})(?: (?:beneficiary|on behalf of) (0x[0-9a-fA-F]{40}))?$`, 'i').exec(input);
   if (repay) {
     const beneficiary=repay[4]??defaultBeneficiary;
     if(!beneficiary)throw new Error('REPAY_BENEFICIARY_REQUIRED');
-    const fields:SupplyInput={network:lendingNetwork(repay[3]!),asset:lendingAsset(repay[2]!),amount:repay[1]!,beneficiary};
+    const fields:SupplyInput={network:lendingNetwork(repay[3]!),asset:lendingAsset(lendingNetwork(repay[3]!), repay[2]!),amount:repay[1]!,beneficiary};
     createAuthoredRepay('node-preview',fields);
     return {type:'ADD_REPAY',input:fields,source:'CHAT',baseRevision:workflow.revision};
   }
-  const borrow = new RegExp(String.raw`^borrow ([0-9]+(?:\.[0-9]+)?) (USDC|WBTC)(?: from Aave)? on (${lendingChatNetworks})(?: (?:beneficiary|on behalf of) (0x[0-9a-fA-F]{40}))?$`, 'i').exec(input);
+  const borrow = new RegExp(String.raw`^borrow ([0-9]+(?:\.[0-9]+)?) ${assetReference}(?: from Aave)? on (${lendingChatNetworks})(?: (?:beneficiary|on behalf of) (0x[0-9a-fA-F]{40}))?$`, 'i').exec(input);
   if (borrow) {
     const beneficiary=borrow[4]??defaultBeneficiary;
     if(!beneficiary)throw new Error('BORROW_BENEFICIARY_REQUIRED');
-    const fields:SupplyInput={network:lendingNetwork(borrow[3]!),asset:lendingAsset(borrow[2]!),amount:borrow[1]!,beneficiary};
+    const fields:SupplyInput={network:lendingNetwork(borrow[3]!),asset:lendingAsset(lendingNetwork(borrow[3]!), borrow[2]!),amount:borrow[1]!,beneficiary};
     createAuthoredBorrow('node-preview',fields);
     return {type:'ADD_BORROW',input:fields,source:'CHAT',baseRevision:workflow.revision};
   }
-  const supply = new RegExp(String.raw`^(?:supply|deposit|quero colocar) ([0-9]+(?:\.[0-9]+)?) (USDC|WBTC)(?: (?:to|into|no) Aave)? (?:on|na|da) (${lendingChatNetworks})(?: (?:beneficiary|on behalf of) (0x[0-9a-fA-F]{40}))?$`, 'i').exec(input);
+  const supply = new RegExp(String.raw`^(?:supply|deposit|quero colocar) ([0-9]+(?:\.[0-9]+)?) ${assetReference}(?: (?:to|into|no) Aave)? (?:on|na|da) (${lendingChatNetworks})(?: (?:beneficiary|on behalf of) (0x[0-9a-fA-F]{40}))?$`, 'i').exec(input);
   if (supply) {
     const beneficiary = supply[4] ?? defaultBeneficiary;
     if (!beneficiary) throw new Error('SUPPLY_BENEFICIARY_REQUIRED');
-    const fields: SupplyInput = { network: lendingNetwork(supply[3]!), asset: lendingAsset(supply[2]!), amount: supply[1]!, beneficiary };
+    const fields: SupplyInput = { network: lendingNetwork(supply[3]!), asset: lendingAsset(lendingNetwork(supply[3]!), supply[2]!), amount: supply[1]!, beneficiary };
     createAuthoredSupply('node-preview', fields);
     return { type: 'ADD_SUPPLY', input: fields, source: 'CHAT', baseRevision: workflow.revision };
   }
@@ -125,10 +127,10 @@ export function parseLocalCommand(text: string, workflow: Workflow, context: Rev
   // in the validated catalog (USDG, WETH, Stock Tokens); an unknown or ambiguous symbol fails closed, never maps to something nearby.
   // BUILD-BASE-001: the same sentences on every catalog network (Base: pinned USDC/WETH and the validated token list); a symbol takes the
   // catalog's own spelling (cbbtc → cbBTC). Base's USDC ⇄ WETH swap keeps its BUILD-002 sentence and command (handled below).
-  const SYMBOL = '([A-Za-z][A-Za-z0-9.]{0,15})';
+  const SYMBOL = assetReference;
   const catalogSwap = new RegExp(`^swap ([0-9]+(?:\\.[0-9]+)?) ${SYMBOL} (?:for|to) ${SYMBOL} on (${CATALOG_CHAT_NETWORKS})(?: (?:with )?slippage ([0-9]+) bps)?$`, 'i').exec(input);
   const swapNetwork = catalogSwap ? catalogNetworkOfChatName(catalogSwap[4]!) : null;
-  const symbolOn = (chain: string, text: string) => canonicalSymbol(chain, text) ?? text.toUpperCase();
+  const symbolOn = (chain: string, text: string) => authoringAssetSymbol(chain, text);
   const referencePair = (from: string, to: string) => new Set([from, to].map(s => s.toUpperCase())).size === 2 && [from, to].every(s => ['USDC', 'WETH'].includes(s.toUpperCase()));
   if (catalogSwap && swapNetwork && !(swapNetwork.chain === BASE_CHAIN && referencePair(catalogSwap[2]!, catalogSwap[3]!))) {
     const fields: CryptoActionInput = { selection: { action: 'swap', network: swapNetwork.name, from: symbolOn(swapNetwork.chain, catalogSwap[2]!),

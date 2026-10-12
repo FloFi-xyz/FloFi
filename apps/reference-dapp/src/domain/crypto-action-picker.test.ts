@@ -32,7 +32,7 @@ describe('one network per crypto action', () => {
   // BUILD-BASE-001 (intentional change): Base mainnet USDC (real funds) joins the two test deployments.
   it.each(['supply', 'borrow', 'repay', 'withdraw'] as const)('%s exposes the pinned Aave deployments', action => {
     expect(cryptoNetworks(action, 'testnet').map(profile => [profile.network, profile.tokens])).toEqual([['Base Sepolia', ['USDC']], ['Ethereum Sepolia', ['WBTC']]]);
-    expect(cryptoNetworks(action, 'mainnet').map(profile => [profile.network, profile.tokens])).toEqual([['Base', ['USDC']]]);
+    expect(cryptoNetworks(action, 'mainnet').map(profile => [profile.network, profile.tokens])).toEqual([['Base', ['USDC']], ['Arbitrum One', ['USDC']]]);
     const base = createCryptoActionNode('base', input(action, 'Base'));
     expect(base.chainId).toBe('eip155:8453');
     expect(cryptoInputOf(base)?.selection).toEqual(selectCryptoNetwork(action, 'Base'));
@@ -69,7 +69,7 @@ describe('one network per crypto action', () => {
   it('advertises registered Arbitrum swaps without advertising unsupported pool adapters and pairs', () => {
     expect(cryptoNetworks('swap', 'mainnet').map(profile => profile.network)).toEqual(['Base', 'Solana', 'Robinhood Chain', 'Arbitrum One']);
     // BUILD-RH-002: Robinhood Chain pools (official catalog pairs) join Base on mainnet.
-    expect(cryptoNetworks('pool', 'mainnet').map(profile => profile.network)).toEqual(['Base', 'Robinhood Chain']);
+    expect(cryptoNetworks('pool', 'mainnet').map(profile => profile.network)).toEqual(['Base', 'Robinhood Chain', 'Arbitrum One']);
     expect(() => selectCryptoNetwork('pool', 'Solana')).toThrow('ACTION_NETWORK_UNSUPPORTED');
     expect(validCryptoSelection({ action: 'pool', network: 'Base Sepolia', from: 'WETH', to: 'USDC' })).toBe(false);
   });
