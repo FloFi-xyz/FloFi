@@ -62,6 +62,9 @@ describe('BUILD-AUTOMATION-001 Telegram notifications through Channel Core', () 
     await d.say(command);
     expect(d.api.texts().at(-1)).toMatch(/^That code is not valid/);
 
+    // Run the scheduled scenario from a fixed pre-slot clock. Link tokens above are created
+    // at real time; keeping rule creation independent of the CI run date prevents drift.
+    d.set('2026-10-08T10:00:00Z');
     const rule = await d.service.create(OWNER_A, weeklyDca());
     d.set('2026-10-12T08:00:30Z');
     await d.dispatch();
@@ -94,6 +97,7 @@ describe('BUILD-AUTOMATION-001 Telegram notifications through Channel Core', () 
     const d = deployment(call => call.method === 'sendMessage' && String(call.params.text).startsWith('FloFi automation') ? botError(403, 'Forbidden: bot was blocked by the user') : null);
     const { command } = await d.service.telegramLinkCode(OWNER_A);
     await d.say(command);
+    d.set('2026-10-08T10:00:00Z');
     await d.service.create(OWNER_A, weeklyDca());
     d.set('2026-10-12T08:00:30Z');
     await d.dispatch();
