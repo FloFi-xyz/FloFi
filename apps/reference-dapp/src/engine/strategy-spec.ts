@@ -54,14 +54,14 @@ const Swap = Type.Object({
 }, strict);
 const Lending = (action: 'supply' | 'borrow' | 'repay', who: string) => Type.Object({
   version: Type.Optional(Version), action: Type.Literal(action),
-  network: enumOf(['base-sepolia', 'ethereum-sepolia', 'base'] as const, 'Aave V3 network: base-sepolia lends test USDC, ethereum-sepolia lends test WBTC, base lends USDC (real funds).'),
+  network: enumOf(['base-sepolia', 'ethereum-sepolia', 'base', 'arbitrum-one'] as const, 'Aave V3 network: base-sepolia lends test USDC, ethereum-sepolia lends test WBTC, base and arbitrum-one lend native USDC (real funds).'),
   asset: enumOf(['USDC', 'WBTC'] as const, 'Must be the network\'s one Aave asset.'),
   amount: Decimal('Amount as a decimal string.'),
   beneficiary: EvmAddress(who),
 }, strict);
 const Withdraw = Type.Object({
   version: Type.Optional(Version), action: Type.Literal('withdraw'),
-  network: enumOf(['base-sepolia', 'ethereum-sepolia', 'base'] as const, 'Aave V3 network (base: real funds).'), asset: enumOf(['USDC', 'WBTC'] as const, 'The network\'s one Aave asset.'),
+  network: enumOf(['base-sepolia', 'ethereum-sepolia', 'base', 'arbitrum-one'] as const, 'Aave V3 network (base and arbitrum-one: real funds).'), asset: enumOf(['USDC', 'WBTC'] as const, 'The network\'s one Aave asset.'),
   amount: Decimal('Amount as a decimal string. The recipient is always the wallet that signs.'),
 }, strict);
 const Bound = Type.String({ pattern: '^-?(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$', maxLength: 48 });

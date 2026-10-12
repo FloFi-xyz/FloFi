@@ -40,7 +40,7 @@ export const capabilityDiscoveryRegistry: readonly NetworkCapabilityDiscovery[] 
     destinationSpokePool: CROSSCHAIN_ROUTER_ARBITRUM_BASE.destination.spokePool }), 'https://app.across.to/api/available-routes', 'Existing Arbitrum USDC → Base USDC route', 'EXISTING'),
   row('LIQUIDITY', 'uniswap.v3', 'Uniswap v3', ARBITRUM_PROTOCOL_DEPLOYMENTS.uniswap, uniSource, 'Concentrated positions, existing pools only; no new pool creation', 'EXISTING'),
   ...(['SUPPLY', 'BORROW', 'REPAY', 'WITHDRAW'] as const).map(capability => row(capability, 'aave-v3', 'Aave V3', ARBITRUM_PROTOCOL_DEPLOYMENTS.aave,
-    aaveSource, 'Native Circle USDC reserve id 12, 6 decimals; one-reserve engine profile still required')),
+    aaveSource, 'Native Circle USDC reserve id 12, 6 decimals; shared owner-wallet lending profile', 'EXISTING')),
 ]);
 /** Exact CAIP-2 lookup, with no inference from symbols, sibling chains or protocol deployment on another network. */
 export const discoverNetworkCapabilities = (chain: string): readonly NetworkCapabilityDiscovery[] => capabilityDiscoveryRegistry.filter(row => row.chain === chain);

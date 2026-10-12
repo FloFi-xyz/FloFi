@@ -1,5 +1,367 @@
 # BUILD-ARB-001 Handoff
 
+## Final Phase 5 checkpoint — 2026-10-12
+
+- CURRENT HEAD: Phase 5 commit containing this checkpoint; resolve its exact SHA with
+  `git log -1 --format=%H -- docs/builds/BUILD-ARB-001-HANDOFF.md`. Exact recovered/start HEAD:
+  `212d1e447901bd4f11e2ff74235a3903e8b0fb44` (Phase 4, clean).
+- CURRENT PHASE: **Phase 5 COMPLETE — Arbitrum Aave V3 lending only; stop here**.
+- Branch/worktree: `codex/build-arb-001-network-ux`, `/home/asus/projects/flofi-arb`.
+- COMPLETED: Phases 1–5, including native USDC Supply, variable Borrow, partial Repay and partial Withdraw
+  through the existing canonical lending architecture. No preceding phase was restarted.
+- IN PROGRESS: none. REMAINING: separately authorized final authoring/capability parity certification;
+  final integration/full CI remains outside Phase 5. No Phase 6 work performed.
+- TESTS PASSED: **43 distinct focused Vitest files / 747 tests**, no skips; strict scoped runtime/registry
+  TypeScript including dependency declarations; broader strict server-action/store/MCP graph with
+  `--skipLibCheck`; ESLint on **33** changed/new code files; governance-lite and **19** self-tests;
+  `git diff --check`. Registry/compiler/executor/reconciler/linter dependency builds pass.
+- TESTS FAILING: none in final focused checks. No full CI/browser/PostgreSQL/fork/Anvil/live-model suite run.
+- OWNER-APPROVED UX CHANGES: **none yet**. UX/Production/real-money transactions/push/PR: **NONE**.
+
+### Aave deployment verification and reserve policy
+
+Fresh [Aave DAO address book](https://github.com/aave-dao/aave-address-book/blob/main/src/AaveV3Arbitrum.sol),
+[Aave proxy source](https://github.com/aave-dao/aave-v3-origin/blob/main/src/contracts/dependencies/openzeppelin/upgradeability/BaseUpgradeabilityProxy.sol),
+[Pool interface](https://github.com/aave-dao/aave-v3-origin/blob/main/src/contracts/interfaces/IPool.sol),
+[Supply/Borrow logic](https://github.com/aave-dao/aave-v3-origin/tree/main/src/contracts/protocol/libraries/logic), and
+[TokenMath](https://github.com/aave-dao/aave-v3-origin/blob/main/src/contracts/protocol/libraries/helpers/TokenMath.sol)
+were checked. Public reads at Arbitrum block **513958416** verify all used identities, code, provider/Pool/oracle relationships,
+reserve id/configuration/decimals and token Pool/underlying relationships. Source hashes, observed reserve/cap/liquidity/index/rate
+state, code hashes and the actual EIP-1967 Pool implementation slot are retained in
+[Phase 5 read verification](BUILD-ARB-001-PHASE-5-READ-VERIFICATION.json). Evidence ceiling: **PUBLIC_READ_ONLY**.
+
+| Contract | Address bound to `eip155:42161` |
+| --- | --- |
+| Pool | `0x794a61358d6845594f94dc1db02a252b5b4814ad` |
+| PoolAddressesProvider | `0xa97684ead0e402dc232d5a977953df7ecbab3cdb` |
+| Oracle | `0xb56c2f0b653b2e0b10c9b928c8580ac5df02c7c7` |
+| Pool implementation (revision 11) | `0xf05fd3cc911b4c5e36e53c00354f645e22922c9a` |
+| Native USDC | `0xaf88d065e77c8cc2239327c5edb3a432268e5831` |
+| Native USDC aToken | `0x724dc807b04555b71ed48a6896b6f41593b8c637` |
+| Native USDC variable-debt token | `0xf611aeb5013fd2c0511c9cd55c7dc5c1140741a6` |
+
+- RESERVE POLICY: **native USDC only**, reserve id **12**, **6** decimals. Exclude USDC.e, WETH, ARB, other
+  Aave-listed reserves, native wrapping, eMode, isolation and mixed-reserve account positions. Every Arbitrum
+  lending action remains isolated under the existing canonical composition restrictions. Owner is the beneficiary/recipient.
+- At the read block: active, unfrozen, unpaused, borrowing enabled; LTV **7500 bps**, liquidation threshold **7800 bps**,
+  supply cap **250M**, borrow cap **225M**, no debt ceiling. About 179.059M USDC supplied, 159.900M variable debt,
+  19.287M USDC liquidity. These are observations; runtime re-reads current relevant state and exact protocol calls.
+- Runtime verifies chain before state, canonical reserve/address/decimals/id, Pool/provider/oracle, token relationships,
+  code existence and the verified Pool implementation/revision. Upgrade/mismatch fails closed pending renewed verification.
+- Protocol data provider `0x243aa95cac2a25651eda86e80bee66114413c43b` and UI Pool data provider
+  `0x91e04cf78e53aebe609e8a7f2003e7eecd743f2b` have code and match the address book; **neither is used** by FloFi lending.
+  Reads come directly from Pool, provider, oracle, underlying, aToken and variable-debt token.
+
+### Shared runtime, health/risk, approvals and Review
+
+- Reuse the existing Supply/Borrow/Repay/Withdraw SemanticWorkflow IR, linter/compiler, Review/Strategy Manifest,
+  MODE_A owner authorization, Supply service, browser store, durable execution storage, workers, reconcilers and Evidence.
+  Register one frozen profile, `araave-` namespace and `arbitrum-aave` instance of the existing cloud flow factory.
+  Catalog runtime registrations choose chain/gates/RPC/journal/flow; no separate Canvas, Copilot or lending engine.
+- SUPPLY: PASS. Exact positive native-unit amount, owner beneficiary, current balance, verified Pool, allowance,
+  reserve configuration, supplied shares and relevant account risk bind Review. Exact read-only protocol call
+  validates supply availability/caps. Fresh reads and exact call estimates run before preparation and wallet handoff.
+  Empty-account Supply followed by Borrow against that same reserve is covered.
+- BORROW: PASS. Existing variable mode **2** only. Require enabled nonzero eligible collateral, current one-reserve
+  account/debt consistency, ordinary mode, active/unfrozen/unpaused borrow reserve, cap/liquidity/available capacity.
+  Existing deterministic base-currency/threshold calculation requires **HF before and projected after ≥ 2.0**.
+  No asset/amount/debt-mode/collateral substitution and no AI-derived risk authority.
+- REPAY: PASS. Existing **partial variable-debt repayment only**: amount > 0 and strictly below current debt,
+  with a nonzero scaled burn and positive remaining debt. Zero, full/max, and over-repay are refused rather than
+  clamped or silently overpaid. Current debt/shares/index, reserve/owner and exact approval/call bind Review.
+  Repay retains its existing ability to improve an account below HF 2.0; no new minimum HF is imposed on Repay.
+- WITHDRAW: PASS. Existing **partial withdrawal only**, with positive remaining supplied shares. Owner recipient,
+  supplied balance, current debt, remaining collateral, reserve availability/liquidity and deterministic projected
+  HF are checked before Review/execution. **HF before and after ≥ 2.0** where debt exists (no debt uses uint256 max).
+  Unsafe/full/over-withdraw is refused without relying solely on transaction revert.
+- HEALTH / RISK POLICY: retain the existing integer model, conservative value/share rounding, **0.1%** bounded
+  oracle/interest/account drift and ray tolerances. Fixed reserve/user configuration, material principal changes,
+  supplied shares, wallet balance, relevant allowance and implementation changes invalidate stale Review.
+  Borrow additionally binds exact debt shares and LTV/threshold. Review expires after **120 seconds**.
+- APPROVAL MODEL: Supply/Repay approve **the exact finite amount** only to the verified Pool when allowance is
+  insufficient. No unrelated/unlimited approval. Separate owner requests; confirmed approval is independently
+  reconciled and its exact resulting allowance rechecked. Borrow/Withdraw create no approvals. Existing sufficient
+  allowance is read and bound; fresh required approval is never silently introduced after Review.
+- SIMULATE / REVIEW: PASS. Bind owner, chain, canonical asset/decimals, reserve/Pool/deployment identity, amount,
+  debt mode, before/projected risk facts, allowance/spender/calls, gas/price/budget, workflow revision and expiry.
+  Simulation stays read-only: the established proven single allowance-slot override supplies ephemeral allowance
+  to exact `eth_call`/`eth_estimateGas`; no broad storage override or broadcast. Invalid/unsupported state refuses honestly.
+- OWNER-WALLET EXECUTION: PASS in MOCKED lifecycle. Only the connected owner's Execute path invokes the wallet.
+  Browser verifies full reviewed target/calldata/value/chain/owner/gas/price envelope before durable handoff.
+  Mainnet service execution now defaults off unless explicitly enabled through the existing network owner gate.
+  No project/operator/AI signer, custody, delegated authority or wallet allowlist was added. Arbitrum has no newly
+  enabled EIP-7702 envelope pins; direct connected-wallet semantics are tested with the disposable signed fixture.
+
+### Nitro fees and durable recovery/reconciliation
+
+- ARBITRUM FEES: PASS. Reuse Phase 2/4 `arbitrum-fees.ts` **150% gas margin / 2× gas-price ceiling**.
+  Here exact `eth_estimateGas`, including the proved allowance override when needed, already estimates total Nitro
+  execution plus posting gas; the sequential-simulation NodeInterface supplement is unnecessary for this engine.
+  Freeze whole-sequence budget in Review/Manifest; re-estimate the exact current call at begin/handoff and refuse
+  over-bound gas/price. Legacy gasPrice carries no priority fee; zero priority is required on observed Nitro EIP-1559 calls.
+  Receipt cost is **gasUsed × effectiveGasPrice**. An OP Stack `l1Fee` on Arbitrum is rejected. Base retains its existing
+  separate L1 fee buffer/model, now checked by the shared paid-cost helper. No Base oracle path is used on Arbitrum.
+- RECOVERY MODEL: reuse PREPARED → SUBMITTING → PENDING → CONFIRMED / RECONCILED; uncertainty becomes
+  SUBMISSION_RESULT_UNKNOWN, failure receipt REVERTED, proven mismatch RECONCILIATION_REQUIRED / DIVERGENT.
+  Durable owner nonce/economic intent remains reserved; workers observe only. No blind resend after ambiguity.
+- Supply / Borrow / Repay / Withdraw: **PASS** for ambiguous submission, process restart, financial-state
+  readback and idempotence. Receipts/events/owner/canonical reserve and historical account state must agree.
+  Supply verifies scaled supplied-principal increase; Borrow verifies scaled debt increase and exact wallet credit;
+  Repay verifies scaled debt reduction and exact wallet debit; Withdraw verifies scaled supplied-principal reduction,
+  wallet credit, unchanged debt and safe remaining health. Successful receipts alone never establish success.
+- Deployed floor/ceil token rules are independently represented in the MOCKED harness; odd-principal tests retain
+  the existing engine's ray-rounding bounds. Wrong owner/reserve or inconsistent principal becomes sticky DIVERGENT,
+  without successful evidence. Supply/Repay lost approval responses recover without approving again.
+- Arbitrum nonce discovery persists **128-block per-pass** progress through the **safe** chain head, including
+  inclusion beyond the old 128-block lifetime horizon. UNKNOWN with no hash/receipt remains under observation;
+  scan exhaustion does not prove absence or authorize another transaction. Known receipts retain the established
+  two-L2-confirmation policy; this does not claim Ethereum L1 finality.
+- Evidence remains **MOCKED** for all financial tests. The public proof is read-only, with no MAINNET_EXECUTED evidence.
+  Existing public Evidence machinery is reused; no real wallet execution/certification is claimed.
+
+### Authoring parity, deployment gates and focused validation
+
+- Canvas builders, deterministic Chat, direct natural-language Copilot intent engine (scripted EN/PT provider),
+  canonical channel conversion and actual MCP `compose_strategy`: **PASS**, equal stable IR/hashes for all six owner
+  requests: Supply 100, Deposit 100, Portuguese “quero colocar 100 USDC no Aave da Arbitrum”, Borrow 20, Repay 10,
+  Withdraw 50. Profiles/Network/Asset/Capability registries supply identities and support truth; no prompt/list fork.
+- Reuse **GRYLOO_ARBITRUM_MAINNET=live** and
+  **GRYLOO_ARBITRUM_OWNER_EXECUTION=MAINNET_OWNER_APPROVED**. **Neither set/enabled**; current-process read shows
+  both false. No lending owner gate, deployment change, Railway/Vercel/Neon access or secret change.
+- Final validation: lending **20 files / 399 tests**, regressions/parity **18 files / 316 tests**, additional
+  existing lending authoring **4 files / 30 tests**, backend imports **1 file / 2 tests**: **43 distinct files / 747 tests**.
+  The supplementary command also reran the 11 registry Ethereum tests; they are counted only once.
+- Regression PASS: Phase 2 Swap/Transfer, both Phase 3 Router directions, Phase 4 Liquidity, Base Aave and Base/Ethereum
+  Sepolia lending. Old “unbuilt lending” expectations now assert the Phase 5 registrations without weakening unrelated checks.
+- During iteration, corrected fixture-kind/unsafe-amount expectations, a fixture rounding helper typo, required backend
+  `.ts` extensions and a pre-existing test asset-union narrowing. All final tests pass; none removed/skipped.
+- The backend smoke rerun passed outside the sandbox: as recorded in Phase 4, sandboxed environment-cleared Node subprocesses
+  suppress stdout. The rerun used local imports only, no network/database/deployment. Strict source checking of the broader
+  Next graph uses `--skipLibCheck` for the previously recorded bundled dependency declaration limitations; repository
+  configuration/dependencies were not weakened. Full CI remains separately authorized.
+
+### Files touched
+
+- `apps/reference-dapp/backend/entrypoint.test.ts`
+- `apps/reference-dapp/backend/flows.ts`
+- `apps/reference-dapp/backend/preview.ts`
+- `apps/reference-dapp/e2e/supply-harness.mjs`
+- `apps/reference-dapp/src/app/supply-action.ts`
+- `apps/reference-dapp/src/channels/core/strategy.ts`
+- `apps/reference-dapp/src/domain/arbitrum-authoring.test.ts`
+- `apps/reference-dapp/src/domain/arbitrum-core.test.ts`
+- `apps/reference-dapp/src/domain/arbitrum-lending-parity.test.ts`
+- `apps/reference-dapp/src/domain/commands.ts`
+- `apps/reference-dapp/src/domain/supply-authoring.ts`
+- `apps/reference-dapp/src/engine/strategy-examples.ts`
+- `apps/reference-dapp/src/engine/strategy-spec.ts`
+- `apps/reference-dapp/src/mcp/simulation.ts`
+- `apps/reference-dapp/src/server/arbitrum-lending.test.ts`
+- `apps/reference-dapp/src/server/arbitrum-runtime.test.ts`
+- `apps/reference-dapp/src/server/catalog-networks.ts`
+- `apps/reference-dapp/src/server/supply-rpc.ts`
+- `apps/reference-dapp/src/server/supply-service.ts`
+- `apps/reference-dapp/src/state/supply-store.tsx`
+- `docs/builds/BUILD-ARB-001-HANDOFF.md`
+- `docs/builds/BUILD-ARB-001-PHASE-5-READ-VERIFICATION.json`
+- `docs/builds/BUILD-ARB-001-PLAN.md`
+- `packages/action-registry/src/aave-v3-testnet.ts`
+- `packages/action-registry/src/capability-discovery.ts`
+- `packages/action-registry/src/execution-capabilities.ts`
+- `packages/action-registry/test/arbitrum-network.test.ts`
+- `packages/action-registry/test/ethereum-sepolia.test.ts`
+- `packages/reference-compiler/src/borrow.ts`
+- `packages/reference-compiler/src/supply.ts`
+- `packages/reference-compiler/test/ethereum-sepolia.test.ts`
+- `packages/reference-executor/src/supply.ts`
+- `packages/reference-reconciler/src/borrow.ts`
+- `packages/reference-reconciler/src/repay.ts`
+- `packages/reference-reconciler/src/supply.ts`
+- `packages/reference-reconciler/src/withdraw.ts`
+
+### Reproducible Phase 5 focused commands
+
+Run from the repository root. Package dependency exports only (no app build or full CI):
+
+```sh
+pnpm --filter @defi-workflow-engine/reference-reconciler... build
+pnpm --filter @defi-workflow-engine/reference-executor... build
+pnpm --filter @defi-workflow-engine/reference-linter build
+```
+
+Lending batch: 20 files / 399 tests.
+
+```sh
+pnpm exec vitest run \
+  packages/reference-compiler/test/borrow.test.ts \
+  packages/reference-compiler/test/ethereum-sepolia.test.ts \
+  packages/reference-compiler/test/repay.test.ts \
+  packages/reference-compiler/test/supply.test.ts \
+  packages/reference-compiler/test/withdraw.test.ts \
+  packages/reference-executor/test/supply.test.ts \
+  packages/reference-linter/test/ethereum-sepolia.test.ts \
+  packages/reference-linter/test/supply.test.ts \
+  packages/reference-reconciler/test/repay.test.ts \
+  packages/reference-reconciler/test/supply.test.ts \
+  packages/reference-reconciler/test/withdraw.test.ts \
+  apps/reference-dapp/src/server/arbitrum-lending.test.ts \
+  apps/reference-dapp/src/server/base-lending.test.ts \
+  apps/reference-dapp/src/server/borrow-service.test.ts \
+  apps/reference-dapp/src/server/ethereum-sepolia-lending.test.ts \
+  apps/reference-dapp/src/server/lending-fee-budgets.test.ts \
+  apps/reference-dapp/src/server/repay-service.test.ts \
+  apps/reference-dapp/src/server/supply-rpc.test.ts \
+  apps/reference-dapp/src/server/supply-service.test.ts \
+  apps/reference-dapp/src/server/withdraw-service.test.ts --maxWorkers=4
+```
+
+Regression batch: 18 files / 316 tests.
+
+```sh
+pnpm exec vitest run \
+  apps/reference-dapp/backend/preview.test.ts \
+  packages/action-registry/test/arbitrum-network.test.ts \
+  packages/action-registry/test/ethereum-sepolia.test.ts \
+  packages/action-registry/test/execution-capabilities.test.ts \
+  apps/reference-dapp/src/domain/arbitrum-authoring.test.ts \
+  apps/reference-dapp/src/domain/arbitrum-bridge-parity.test.ts \
+  apps/reference-dapp/src/domain/arbitrum-core.test.ts \
+  apps/reference-dapp/src/domain/arbitrum-lending-parity.test.ts \
+  apps/reference-dapp/src/domain/arbitrum-liquidity-parity.test.ts \
+  apps/reference-dapp/src/domain/authoring-capabilities.test.ts \
+  apps/reference-dapp/src/domain/catalog-copilot-parity.test.ts \
+  apps/reference-dapp/src/mcp/execution.test.ts \
+  apps/reference-dapp/src/mcp/simulation.test.ts \
+  apps/reference-dapp/src/server/arbitrum-liquidity.test.ts \
+  apps/reference-dapp/src/server/arbitrum-runtime.test.ts \
+  apps/reference-dapp/src/server/base-mainnet.test.ts \
+  apps/reference-dapp/src/server/router-arbitrum-base.test.ts \
+  apps/reference-dapp/src/server/router-arbitrum-certification.test.ts --maxWorkers=4
+```
+
+Authoring batch: 5 files / 41 tests.
+
+```sh
+pnpm exec vitest run \
+  packages/action-registry/test/ethereum-sepolia.test.ts \
+  apps/reference-dapp/src/domain/borrow-authoring.test.ts \
+  apps/reference-dapp/src/domain/repay-authoring.test.ts \
+  apps/reference-dapp/src/domain/supply-authoring.test.ts \
+  apps/reference-dapp/src/domain/withdraw-authoring.test.ts --maxWorkers=4
+```
+
+Backend imports (**2 tests**, local-only outside-sandbox rerun described above):
+
+```sh
+pnpm exec vitest run apps/reference-dapp/backend/entrypoint.test.ts --maxWorkers=1
+```
+
+Strict runtime/registry graph (dependency declarations checked):
+
+```sh
+pnpm exec tsc --noEmit --strict --target ES2024 --module ESNext --moduleResolution Bundler --jsx react-jsx --esModuleInterop --resolveJsonModule --allowImportingTsExtensions --exactOptionalPropertyTypes --noUncheckedIndexedAccess \
+  apps/reference-dapp/src/server/supply-service.ts \
+  apps/reference-dapp/src/domain/supply-authoring.ts \
+  packages/reference-compiler/test/ethereum-sepolia.test.ts \
+  packages/action-registry/test/arbitrum-network.test.ts \
+  packages/action-registry/test/ethereum-sepolia.test.ts
+```
+
+Broader strict source graph (existing dependency declaration limitation):
+
+```sh
+pnpm exec tsc --noEmit --strict --skipLibCheck --target ES2024 --module ESNext --moduleResolution Bundler --jsx react-jsx --esModuleInterop --resolveJsonModule --allowImportingTsExtensions --exactOptionalPropertyTypes --noUncheckedIndexedAccess \
+  apps/reference-dapp/src/server/arbitrum-lending.test.ts \
+  apps/reference-dapp/src/domain/arbitrum-lending-parity.test.ts \
+  apps/reference-dapp/src/state/supply-store.tsx \
+  apps/reference-dapp/src/app/supply-action.ts \
+  apps/reference-dapp/src/mcp/simulation.ts \
+  apps/reference-dapp/backend/flows.ts \
+  apps/reference-dapp/backend/preview.ts
+```
+
+Scoped lint (**33 files**):
+
+```sh
+pnpm exec eslint \
+  apps/reference-dapp/backend/entrypoint.test.ts \
+  apps/reference-dapp/backend/flows.ts \
+  apps/reference-dapp/backend/preview.ts \
+  apps/reference-dapp/e2e/supply-harness.mjs \
+  apps/reference-dapp/src/app/supply-action.ts \
+  apps/reference-dapp/src/channels/core/strategy.ts \
+  apps/reference-dapp/src/domain/arbitrum-authoring.test.ts \
+  apps/reference-dapp/src/domain/arbitrum-core.test.ts \
+  apps/reference-dapp/src/domain/arbitrum-lending-parity.test.ts \
+  apps/reference-dapp/src/domain/commands.ts \
+  apps/reference-dapp/src/domain/supply-authoring.ts \
+  apps/reference-dapp/src/engine/strategy-examples.ts \
+  apps/reference-dapp/src/engine/strategy-spec.ts \
+  apps/reference-dapp/src/mcp/simulation.ts \
+  apps/reference-dapp/src/server/arbitrum-lending.test.ts \
+  apps/reference-dapp/src/server/arbitrum-runtime.test.ts \
+  apps/reference-dapp/src/server/catalog-networks.ts \
+  apps/reference-dapp/src/server/supply-rpc.ts \
+  apps/reference-dapp/src/server/supply-service.ts \
+  apps/reference-dapp/src/state/supply-store.tsx \
+  packages/action-registry/src/aave-v3-testnet.ts \
+  packages/action-registry/src/capability-discovery.ts \
+  packages/action-registry/src/execution-capabilities.ts \
+  packages/action-registry/test/arbitrum-network.test.ts \
+  packages/action-registry/test/ethereum-sepolia.test.ts \
+  packages/reference-compiler/src/borrow.ts \
+  packages/reference-compiler/src/supply.ts \
+  packages/reference-compiler/test/ethereum-sepolia.test.ts \
+  packages/reference-executor/src/supply.ts \
+  packages/reference-reconciler/src/borrow.ts \
+  packages/reference-reconciler/src/repay.ts \
+  packages/reference-reconciler/src/supply.ts \
+  packages/reference-reconciler/src/withdraw.ts
+python3 scripts/governance_lite.py
+python3 scripts/test_governance_lite.py
+git diff --check
+```
+
+### Stop / next exact action
+
+- DO NOT REDO Phases 1–5; preserve future intervening work. No reset/clean/stash/rebase/worktree recreation.
+- No generated/temp junk is committed. Disposable scripts/downloads/results lived under /tmp; intentional read proof only
+  is retained. Test directories self-clean; ignored dependency exports remain for package imports.
+- BLOCKERS FOR PHASE 6: no outstanding Phase 5 implementation/focused-test blocker. Broader previously documented Next
+  dependency declarations remain for final integration; public owner execution and live-model/browser acceptance are unclaimed.
+- NEXT EXACT ACTION: stop after the Phase 5 commit. **Do not push/open PR, enable gates or execute Phase 6.**
+  Recommended next separately authorized phase: **final authoring/capability parity certification**.
+
+## Archived Phase 5 recovered starting state
+
+### Phase 5 recovered starting state — 2026-10-12
+
+- CURRENT HEAD: `212d1e447901bd4f11e2ff74235a3903e8b0fb44`, exact Phase 4 commit.
+- CURRENT PHASE: **Phase 5 IN PROGRESS — Arbitrum Aave V3 lending only**, explicitly authorized by owner.
+- Branch/worktree: `codex/build-arb-001-network-ux`, `/home/asus/projects/flofi-arb`.
+- Recovery: required handoff/discovery/plan read first; pwd/status/branch/HEAD/log/unstaged/staged diffs inspected.
+  Worktree and index clean; no intervening work to reconstruct.
+- COMPLETED: Phases 1–4. Phase 4 shared catalog liquidity mint, Nitro fees, owner Review, durable recovery and
+  registry authoring are committed. Recorded validation: 29 files / 443 tests, scoped TypeScript/lint,
+  governance-lite / 19 self-tests and whitespace checks; no outstanding focused failure.
+- Architecture: reuse canonical Aave Supply/Borrow/Repay/Withdraw IR, one-reserve lending profiles,
+  shared Simulate/Review/Manifest, connected owner-wallet execution, durable stores/reconciliation/Evidence.
+  Arbitrum differences belong below that layer; reuse shared Nitro fees and Phase 2 network/owner gates.
+- Phase 5 discovery: native USDC reserve id 12, 6 decimals, was verified active in Phase 1; Pool revision 11.
+  This historical observation needs fresh official deployment and public read-only reserve/risk/ABI verification.
+- IN PROGRESS: deployment verification and existing lending architecture audit.
+- REMAINING: bounded profile/registrations, shared correctness fixes if demonstrated, focused tests,
+  final handoff/plan and local Phase 5 commit. Do not begin Phase 6.
+- FILES TOUCHED: this recovered checkpoint only. TESTS PASSED: recovery checks; Phase 5 tests pending.
+- TESTS FAILING: none established. Broader existing Next dependency declaration limitation remains as recorded.
+- RESERVE POLICY: start with native USDC only; no unverified expansion.
+- DEPLOYMENT GATES: reuse `GRYLOO_ARBITRUM_MAINNET=live` and
+  `GRYLOO_ARBITRUM_OWNER_EXECUTION=MAINNET_OWNER_APPROVED`; do not enable/set either.
+- OWNER-APPROVED UX CHANGES: **none yet**. Production/real-money transactions/push/PR: prohibited.
+- DO NOT REDO: Phases 1–4; no reset/clean/stash/rebase/recreation/full CI.
+- NEXT EXACT ACTION: freshly verify official Aave deployment sources and relevant on-chain identities/state,
+  inspect shared lending runtime safety/fees/recovery, then implement Phase 5 within that architecture.
+
 ## Final Phase 4 checkpoint — 2026-10-12
 
 - CURRENT HEAD: the Phase 4 commit containing this checkpoint; resolve its exact SHA with

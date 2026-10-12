@@ -5,15 +5,15 @@
  * and every `eth_chainId` it returns must be that chain. Public reads are paced and serialized; only bounded provider
  * throttling is retried. No mutation method is permitted and no network falls back to another.
  */
-import { AAVE_V3_BASE, AAVE_V3_BASE_SEPOLIA, AAVE_V3_ETHEREUM_SEPOLIA, type AaveLendingProfile } from '@defi-workflow-engine/action-registry';
+import { aaveLendingProfile, AAVE_V3_BASE, AAVE_V3_BASE_SEPOLIA, AAVE_V3_ETHEREUM_SEPOLIA, type AaveLendingProfile } from '@defi-workflow-engine/action-registry';
 import type { SupplyRpc } from '@defi-workflow-engine/reference-compiler';
 
-const methods = new Set(['eth_chainId', 'eth_blockNumber', 'eth_getBlockByNumber', 'eth_getCode', 'eth_call', 'eth_simulateV1',
+const methods = new Set(['eth_chainId', 'eth_blockNumber', 'eth_getBlockByNumber', 'eth_getCode', 'eth_getStorageAt', 'eth_call', 'eth_simulateV1',
   'eth_getBalance', 'eth_getTransactionCount', 'eth_estimateGas', 'eth_gasPrice', 'eth_getTransactionByHash', 'eth_getTransactionReceipt']);
 /** Loopback MOCKED harness endpoints (e2e/supply-harness.mjs; BUILD-BASE-001 the Base mainnet harness); never a public provider. */
 const HARNESS: Readonly<Record<AaveLendingProfile['chain'], string>> = Object.freeze({
   [AAVE_V3_BASE_SEPOLIA.chain]: 'http://127.0.0.1:8549', [AAVE_V3_ETHEREUM_SEPOLIA.chain]: 'http://127.0.0.1:8549/ethereum-sepolia',
-  [AAVE_V3_BASE.chain]: 'http://127.0.0.1:8562/rpc' });
+  [AAVE_V3_BASE.chain]: 'http://127.0.0.1:8562/rpc', 'eip155:42161': 'http://127.0.0.1:8564/rpc' });
 /** The public-testnet Aave profiles served by the `aave-supply` flow (Base mainnet has its own flow and gates). */
 type TestnetLendingChain = typeof AAVE_V3_BASE_SEPOLIA.chain | typeof AAVE_V3_ETHEREUM_SEPOLIA.chain;
 /** Optional HTTPS override for a profile's public RPC (for example a keyed provider); anything else is a configuration error. */
@@ -67,4 +67,11 @@ export function createLendingReadRpcs(harness: boolean, env: Readonly<Record<str
  */
 export function createBaseLendingReadRpc(harness: boolean, env: Readonly<Record<string, string | undefined>> = {}): SupplyRpc {
   return createSupplyReadRpc(harness, AAVE_V3_BASE, env.GRYLOO_BASE_RPC_URL);
+}
+
+/** Catalog mainnet lending uses the network's existing chain and RPC override; no lending-specific gate. */
+export function createCatalogLendingReadRpc(network: { chain: string; id: string }, harness: boolean, env: Readonly<Record<string, string | undefined>> = {}): SupplyRpc {
+  const profile = aaveLendingProfile(network.chain);
+  const override = network.id === 'base' ? env.GRYLOO_BASE_RPC_URL : env.GRYLOO_ARBITRUM_RPC_URL;
+  return createSupplyReadRpc(harness, profile, override);
 }

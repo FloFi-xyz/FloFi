@@ -6,7 +6,7 @@ Inputs: [discovery and capability matrix](BUILD-ARB-001-DISCOVERY.md), [read ver
 [persistent handoff](BUILD-ARB-001-HANDOFF.md), BASE-001 shared architecture and existing Router.
 
 The owner authorized and completed **Phase 1**, **Phase 2: Swap + Transfer runtime only**, **Phase 3: existing Router Bridge certification only**,
-and **Phase 4: Arbitrum Pool / Liquidity runtime only**.
+**Phase 4: Arbitrum Pool / Liquidity runtime only**, and **Phase 5: Arbitrum Aave V3 lending only**.
 Phase 2 starts at `87f4a7a575ff10f5b8e7c05e56af4fa0bc335bce`. Every phase requires focused checks, an updated handoff and a commit.
 Do not start later phases automatically. Full CI belongs at the end of BUILD-ARB-001; no PR or push in this checkpoint.
 
@@ -211,11 +211,53 @@ whitespace checks pass; the broader server-action graph retains the documented d
 `--skipLibCheck` for source checking. No full CI/browser/fork/PostgreSQL matrix, live model or public owner execution was run.
 UX changes, Production changes, real-money transactions, push and PR: **NONE**. Phase 5 has not started.
 
+## Phase 5 — shared Arbitrum Aave V3 lending (completed, gates remain off)
+
+Recovered clean exact Phase 4 HEAD `212d1e447901bd4f11e2ff74235a3903e8b0fb44` on the existing branch/worktree.
+Fresh official Aave DAO deployment/interface/logic/token-math sources and public reads at Arbitrum block **513958416**
+verify Pool/provider/oracle, actual Pool proxy implementation/revision 11, native USDC reserve id 12 (6 decimals), aToken,
+variable-debt token, active/unfrozen/unpaused borrow-enabled state, collateral parameters, caps, liquidity and normalized indexes.
+[Phase 5 read proof](BUILD-ARB-001-PHASE-5-READ-VERIFICATION.json) retains source/code hashes and raw observations.
+No data/UI provider enters runtime; their official identities/code are recorded as unused.
+
+- Reuse canonical Supply/Borrow/Repay/Withdraw IR, one-reserve profiles, shared linter/compiler/service, Simulate,
+  Review/Manifest, connected owner wallet, durable storage/leases/discovery/workers, reconcilers and Evidence.
+  One frozen Arbitrum profile and registered `araave-` / `arbitrum-aave` namespace/flow serve **native USDC only**.
+  No USDC.e/additional reserve, mixed-reserve/eMode/isolation position, mainnet composition or separate product.
+- Supply verifies owner, amount, canonical reserve/Pool, balance/allowance/configuration and exact protocol call.
+  Borrow is variable mode 2 with collateral/capacity/cap/liquidity checks and existing deterministic **HF ≥ 2.0** before/after.
+  Repay retains bounded **partial variable repayment** only; full/max/over-repay is refused, never silently clamped.
+  Withdraw retains **partial withdrawal** only with positive remaining shares and existing projected **HF ≥ 2.0**.
+  No new risk model or AI authority; current state, integer math, 0.1% drift policy and ray tolerances govern.
+- Review binds deployment including implementation slot/revision, owner/chain/asset/amount, reserve/account risk,
+  exact Pool approvals/calls, fees and 120-second freshness. Material principal/configuration/balance/allowance/debt/
+  identity changes invalidate Review. Shared preparation and handoff recheck state and exact-call gas. Browser verifies
+  the frozen transaction envelope. New exact finite approvals go only to Pool for Supply/Repay; Borrow/Withdraw need none.
+- Reuse `arbitrum-fees.ts`: 150% total gas estimate, 2× price bound, zero priority, paid cost gasUsed × effectiveGasPrice.
+  Existing lending's proved allowance override permits exact total `eth_estimateGas`, so no sequential NodeInterface supplement
+  is needed. Arbitrum refuses OP Stack l1Fee. Base keeps its separate L1 model/buffer under shared cost verification.
+- Durable uncertainty never authorizes resend. All four actions recover submission ambiguity/restarts and reconcile actual
+  shares/debt/wallet effects, events, canonical owner/reserve and cost; inconsistency is sticky DIVERGENT, success idempotent.
+  Arbitrum advances persisted bounded 128-block scans through the safe head beyond the former lifetime cap. Known receipts
+  keep existing two-L2-confirmation policy, without an L1-finality claim. Lost Supply/Repay approval responses recover once.
+- Registry-derived Canvas, exact EN/PT Chat aliases, direct scripted natural-language Copilot and actual MCP compose equal
+  stable IR/hashes for all six owner representative requests. Shared channel lending network mapping now derives from profiles.
+  No handwritten capability prompt/list, component/layout/control change or health visualization.
+- Reuse `GRYLOO_ARBITRUM_MAINNET=live` and `GRYLOO_ARBITRUM_OWNER_EXECUTION=MAINNET_OWNER_APPROVED`; both remain off/unset.
+  No lending-specific gate, operator/AI signer, custody, wallet allowlist, Production/service configuration or real-money transaction.
+  All financial tests/evidence are **MOCKED**; public verification is **PUBLIC_READ_ONLY**; no MAINNET_EXECUTED claim.
+- Focused validation: **43 distinct files / 747 Vitest tests**, scoped strict TypeScript, broader source graph with the already
+  documented dependency-declaration `--skipLibCheck` limit, lint on 33 code files, governance-lite / 19 self-tests and whitespace pass.
+  Phase 2/3/4 and Base/Base-Sepolia/Ethereum-Sepolia lending regressions pass. Backend imports pass in local-only outside-sandbox rerun.
+  Full CI/browser/PostgreSQL/fork/Anvil/live-model matrices were not run. Exact commands/files/results are in the handoff.
+
+Phase 5 is complete. **Stop at the local Phase 5 commit; no push/PR or automatic Phase 6.** Discovery assumptions remain valid,
+so DISCOVERY is unchanged. Recommended next owner-authorized scope: final authoring/capability parity certification.
+
 ## Recommended later phases — proposals only
 
-1. **Phase 5: Aave native USDC reserve.** Add a one-reserve Arbitrum profile for id 12 after fresh deployment, reserve, cap, liquidity
-   and ABI verification; test supply/borrow/repay/withdraw lifecycle. Do not infer multi-reserve or composition support.
-2. **Final phase: end-to-end integration and full CI.** Confirm registry parity across all surfaces, existing Base/Robinhood behavior,
+1. **Final authoring/capability parity certification.** Confirm shared registry/IR truth across the supported channels; owner authorization required.
+2. **Final integration and full CI.** Confirm registry parity across all surfaces, existing Base/Robinhood behavior,
    execution gates, recovery/reconciliation and hash continuity; run the full required CI only here. Delivery/PR remains owner-directed.
 
 The owner may reorder or narrow these phases and will supply any future UX changes explicitly.

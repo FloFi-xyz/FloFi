@@ -2,7 +2,7 @@
 'use client';
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
-import { lendingProfileOfChain, supplyWalletNonce, supplyWalletTransaction } from '../domain/supply-authoring';
+import { lendingProfileOfChain, supplyWalletNonce, supplyWalletTransaction, assertSupplyWalletTransaction } from '../domain/supply-authoring';
 import { useWorkflow } from './workflow-store';
 import { injected, useBuild009Wallet } from './build009-wallet-store';
 import { supplySimulate, supplyReview, supplyBegin, supplyReport, supplyObserve, supplyStatus, supplyInvalidate, supplyRecoverReview, supplyWalletFailure, supplyWalletTrace, supplyHandoff } from '../app/supply-action';
@@ -54,7 +54,7 @@ export function SupplyProvider({children}:{children:ReactNode}){
   useEffect(()=>{
     let mounted=true;
     try{const pointer=JSON.parse(window.localStorage.getItem(key)??'null') as {id?:unknown;step?:unknown;hash?:unknown}|null;
-      if(pointer&&typeof pointer.id==='string'&&/^(?:supply|baave)-[a-f0-9]{32}$/.test(pointer.id))(async()=>{
+      if(pointer&&typeof pointer.id==='string'&&/^(?:supply|baave|araave)-[a-f0-9]{32}$/.test(pointer.id))(async()=>{
         if(typeof pointer.hash==='string'&&/^0x[0-9a-f]{64}$/.test(pointer.hash)&&(pointer.step==='APPROVAL'||pointer.step==='SUPPLY'||pointer.step==='BORROW'||pointer.step==='REPAY'||pointer.step==='WITHDRAW'))
           await supplyReport(pointer.id as string,pointer.step,{kind:'HASH',hash:pointer.hash}).catch(()=>undefined);
         return supplyStatus(pointer.id as string);
@@ -118,6 +118,8 @@ export function SupplyProvider({children}:{children:ReactNode}){
       await validateSession(expectedNonce); // Read-only provider failures never create an economic attempt.
       const begin=await supplyBegin(record.id,session.account,executionWorkflow);if(!begin.ok)throw new Error(begin.code);
       accept(begin.value.record);step=begin.value.step;
+      if(begin.value.record.review.commitment!==record.review.commitment)throw new Error('SUPPLY_AUTHORIZATION_REPLACED');
+      assertSupplyWalletTransaction(begin.value.transaction,record.review,step);
       const transaction=supplyWalletTransaction(begin.value.transaction);diagnostic.transaction=transaction;
       await validateSession(begin.value.record.attempts.at(-1)!.nonce); // Fail closed if session changes during durable preparation.
       const handoff=await supplyHandoff(record.id,step,true);if(!handoff.ok)throw new Error(handoff.code);

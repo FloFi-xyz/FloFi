@@ -20,7 +20,7 @@ import { JUPITER_SOLANA_MAINNET, ORCA_WHIRLPOOLS_DEVNET, ORCA_WHIRLPOOLS_DEVNET_
 import { CATALOG_NETWORKS, type CatalogNetworkRuntime } from '../src/server/catalog-networks.ts';
 import type { JupiterHttp } from '@defi-workflow-engine/reference-compiler';
 import { nativeTransferReadRpcs } from '../src/server/robinhood-rpc.ts';
-import { createBaseLendingReadRpc, createLendingReadRpcs } from '../src/server/supply-rpc.ts';
+import { createCatalogLendingReadRpc, createLendingReadRpcs } from '../src/server/supply-rpc.ts';
 import { baseSepoliaSwapRpc, ethereumSepoliaSwapRpc } from '../src/server/public-testnet-rpc.ts';
 import { createSolanaRpc, solanaRpcOverride } from '../src/server/solana-rpc.ts';
 import { createJupiterHttp } from '../src/server/jupiter-http.ts';
@@ -46,7 +46,7 @@ export type FlowName = 'robinhood-transfer' | 'aave-supply' | 'base-sepolia-swap
   | 'crosschain-router-testnet' | 'lending-composition' | 'pix-payment' | 'robinhood-swap' | 'robinhood-mainnet-transfer' | 'robinhood-liquidity'
   | 'crosschain-router-base-to-robinhood' | 'crosschain-router-robinhood-to-base' | 'crosschain-router-arbitrum-to-robinhood' | 'crosschain-router-robinhood-to-arbitrum'
   /** BUILD-BASE-001: Base mainnet (real funds) as a catalog network, and the Router's Arbitrum One → Base route. */
-  | 'arbitrum-swap' | 'arbitrum-mainnet-transfer' | 'arbitrum-liquidity' | 'base-swap' | 'base-mainnet-transfer' | 'base-liquidity' | 'base-aave' | 'crosschain-router-arbitrum-to-base';
+  | 'arbitrum-swap' | 'arbitrum-mainnet-transfer' | 'arbitrum-liquidity' | 'base-swap' | 'base-mainnet-transfer' | 'base-liquidity' | 'base-aave' | 'arbitrum-aave' | 'crosschain-router-arbitrum-to-base';
 export type Rpc = (method: string, params: readonly unknown[]) => Promise<unknown>;
 /** Network transport for one flow. Built from configuration in production; replaced by MOCKED chains in tests. */
 export type FlowDeps = { readonly rpc: Rpc; readonly mode: 'live' | 'harness'; readonly env: Readonly<Record<string, string | undefined>>; readonly http?: JupiterHttp;
@@ -197,12 +197,12 @@ const supplyNeedsObservation = (value: unknown) => {
   return record.verdict === 'PENDING' && !record.notSubmitted && record.attempts.some(a => !a.reconciled && OBSERVABLE.includes(a.state));
 };
 /**
- * The Aave V3 lending service as a cloud flow. `aave-supply`: the public-testnet profiles (`supply-` runs). BUILD-BASE-001 `base-aave`:
- * Base mainnet (real funds) USDC on the same service in its own `baave-` namespace, behind the Base gates (owner execution needs the
- * real-funds opt-in); its owner-nonce and economic-intent reservations live in that namespace.
+ * The shared Aave lending service: testnets use `aave-supply`; catalog mainnets bind the network's registered
+ * flow, namespace, owner gate and read client. Durable reservations and observation-only workers are shared.
  */
-function supplyFlow(name: 'aave-supply' | 'base-aave'): FlowDefinition {
-  const base = name === 'base-aave', SUPPLY_ID = base ? /^baave-[a-f0-9]{32}$/ : /^supply-[a-f0-9]{32}$/;
+function supplyFlow(name: 'aave-supply' | 'base-aave' | 'arbitrum-aave'): FlowDefinition {
+  const network = Object.values(CATALOG_NETWORKS).find(n => n.flows.lending === name);
+  const SUPPLY_ID = new RegExp(`^${network?.prefixes.lending ?? 'supply'}-[a-f0-9]{32}$`);
   return {
   name, busyCode: 'SUPPLY_BUSY', runId: SUPPLY_ID, unavailableCode: 'SUPPLY_SERVICE_UNAVAILABLE',
   methods: {
@@ -218,11 +218,11 @@ function supplyFlow(name: 'aave-supply' | 'base-aave'): FlowDefinition {
     walletTrace: { mutates: true, validate: shape(id(SUPPLY_ID), diagnostic) },
     handoff: { mutates: true, validate: optionalShape(2, id(SUPPLY_ID), step, v => typeof v === 'boolean') },
   },
-  transport: base ? (mode, env) => ({ rpc: createBaseLendingReadRpc(mode === 'harness', env) })
+  transport: network ? (mode, env) => ({ rpc: createCatalogLendingReadRpc(network, mode === 'harness', env) })
     : (mode, env) => { const rpcs = createLendingReadRpcs(mode === 'harness', env); return { rpc: rpcs['eip155:84532'], chains: { rpcs } }; },
   create(storage, { rpc, mode, env, chains }) {
-    const s = base ? createSupplyService({ storage, rpc: networkNotEnabled('SUPPLY_NETWORK_UNAVAILABLE'), rpcs: { [CATALOG_NETWORKS.base.chain]: rpc }, idPrefix: 'baave',
-      provenance: mode === 'harness' ? 'MOCKED' : 'PUBLIC_MAINNET', executionEnabled: CATALOG_NETWORKS.base.ownerExecutionEnabled(mode, env) })
+    const s = network ? createSupplyService({ storage, rpc: networkNotEnabled('SUPPLY_NETWORK_UNAVAILABLE'), rpcs: { [network.chain]: rpc }, idPrefix: network.prefixes.lending!,
+      provenance: mode === 'harness' ? 'MOCKED' : 'PUBLIC_MAINNET', executionEnabled: network.ownerExecutionEnabled(mode, env) })
       : createSupplyService({ storage, rpc, ...chains ? { rpcs: chains.rpcs } : {}, provenance: mode === 'harness' ? 'MOCKED' : 'PUBLIC_TESTNET' });
     const table: Record<string, (args: Args) => Promise<unknown>> = {
       simulate: ([w, a]) => s.simulate(w, a as string),
@@ -256,7 +256,7 @@ function supplyFlow(name: 'aave-supply' | 'base-aave'): FlowDefinition {
   evidence: record => evidenceOf(record as SupplyRecord),
   };
 }
-const supply = supplyFlow('aave-supply'), baseAave = supplyFlow('base-aave');
+const supply = supplyFlow('aave-supply'), baseAave = supplyFlow('base-aave'), arbitrumAave = supplyFlow('arbitrum-aave');
 
 /**
  * The existing exact-profile Base Sepolia Uniswap v3 swap (USDC <-> WETH). Read-only public preflight (pinned
@@ -787,7 +787,7 @@ export const FLOWS: Readonly<Record<FlowName, FlowDefinition>> = Object.freeze({
   'crosschain-router-arbitrum-to-robinhood': routerFlow('crosschain-router-arbitrum-to-robinhood', 'arbitrum-to-robinhood'),
   'crosschain-router-robinhood-to-arbitrum': routerFlow('crosschain-router-robinhood-to-arbitrum', 'robinhood-to-arbitrum'),
   'arbitrum-swap': arbitrumSwap, 'arbitrum-mainnet-transfer': arbitrumMainnetTransfer, 'arbitrum-liquidity': arbitrumLiquidity,
-  'base-swap': baseSwap, 'base-mainnet-transfer': baseMainnetTransfer, 'base-liquidity': baseLiquidity, 'base-aave': baseAave,
+  'base-swap': baseSwap, 'base-mainnet-transfer': baseMainnetTransfer, 'base-liquidity': baseLiquidity, 'base-aave': baseAave, 'arbitrum-aave': arbitrumAave,
   'crosschain-router-arbitrum-to-base': routerFlow('crosschain-router-arbitrum-to-base', 'arbitrum-to-base') });
 export const isFlowName = (value: string): value is FlowName => Object.hasOwn(FLOWS, value);
 
@@ -828,7 +828,7 @@ function configuredFlowMode(flow: FlowName, env: Readonly<Record<string, string 
   if (flow.startsWith('crosschain-router-') && flow.includes('robinhood')) return routerNetworkMode(flow.slice('crosschain-router-'.length) as RouterNetwork, env);
   // BUILD-BASE-001 Base mainnet: `GRYLOO_BASE_MAINNET=live` enables the catalog, quotes, simulation and Review; owner execution additionally
   // needs GRYLOO_BASE_OWNER_EXECUTION. The MOCKED loopback harness wins. Arbitrum One → Base is the Router's own route and gates.
-  if (flow === 'arbitrum-swap' || flow === 'arbitrum-mainnet-transfer' || flow === 'arbitrum-liquidity') return CATALOG_NETWORKS['arbitrum-one'].mode(env);
+  if (flow === 'arbitrum-swap' || flow === 'arbitrum-mainnet-transfer' || flow === 'arbitrum-liquidity' || flow === 'arbitrum-aave') return CATALOG_NETWORKS['arbitrum-one'].mode(env);
   if (flow === 'base-swap' || flow === 'base-mainnet-transfer' || flow === 'base-liquidity' || flow === 'base-aave') return CATALOG_NETWORKS.base.mode(env);
   if (flow === 'crosschain-router-arbitrum-to-base') return routerNetworkMode('arbitrum-to-base', env);
   if (flow === 'robinhood-transfer') {
@@ -848,5 +848,5 @@ const DISABLED: Readonly<Record<FlowName, string>> = { 'robinhood-transfer': 'TR
   'crosschain-router-arbitrum-to-robinhood': 'ROBINHOOD_MAINNET_NOT_ENABLED', 'crosschain-router-robinhood-to-arbitrum': 'ROBINHOOD_MAINNET_NOT_ENABLED',
   'arbitrum-swap': 'ARBITRUM_MAINNET_NOT_ENABLED', 'arbitrum-mainnet-transfer': 'ARBITRUM_MAINNET_NOT_ENABLED', 'arbitrum-liquidity': 'ARBITRUM_MAINNET_NOT_ENABLED',
   'base-swap': 'BASE_MAINNET_NOT_ENABLED', 'base-mainnet-transfer': 'BASE_MAINNET_NOT_ENABLED', 'base-liquidity': 'BASE_MAINNET_NOT_ENABLED',
-  'base-aave': 'BASE_MAINNET_NOT_ENABLED', 'crosschain-router-arbitrum-to-base': 'ROUTER_NOT_ENABLED' };
+  'base-aave': 'BASE_MAINNET_NOT_ENABLED', 'arbitrum-aave': 'ARBITRUM_MAINNET_NOT_ENABLED', 'crosschain-router-arbitrum-to-base': 'ROUTER_NOT_ENABLED' };
 export const disabledCode = (flow: FlowName) => DISABLED[flow];

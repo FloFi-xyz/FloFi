@@ -5,7 +5,7 @@ import { lendingProfile, reserveBits, readBorrowState, compileRepayCalls, borrow
   supplyTopic, supplyHash, supplyArtifactHash, rpcUint, rpcRecord, rpcHash, rpcHex, SUPPLY_METAMASK,
   rlpEncode, rlpInteger, fromHex, toHex, type AaveLendingProfile, type RlpValue, type SupplyReview, type SupplyState, type SupplyRpc } from '@defi-workflow-engine/reference-compiler';
 import { hashJournalBytes, type EvidenceBundle, type ExecutionJournal } from '@defi-workflow-engine/workflow-contracts';
-import { verifySupplyWalletEnvelope, logMatches, addressTopic, type SupplyChainAttempt, type SupplyObservation } from './supply.js';
+import { lendingTransactionCost, verifySupplyWalletEnvelope, logMatches, addressTopic, type SupplyChainAttempt, type SupplyObservation } from './supply.js';
 const ray=10n**27n,abs=(v:bigint)=>v<0n?-v:v;
 export type RepayOwnerProof={kind:'DIRECT_EIP1559';owner:string;signingDigest:string;wireTransactionHash:string};
 export type RepayObservation=SupplyObservation & {ownerAuthorization?:RepayOwnerProof;walletDelta?:string;debtDelta?:string;normalizedRepayment?:string;roundingBound?:string;repayEvent?:unknown};
@@ -84,7 +84,7 @@ export async function reconcileRepayAttempt(review:SupplyReview,attempt:SupplyCh
     const pre=await readBorrowState(rpc,p,review.account,review.account,supplyHex(block-1)),post=await readBorrowState(rpc,p,review.account,review.account,supplyHex(block));base.prePosition=pre;base.postPosition=post;
     if(pre.blockHash!==rpcHash(canonical.parentHash)||post.blockHash!==rpcHash(receipt.blockHash)||pre.deploymentHash!==review.state.deploymentHash||post.deploymentHash!==review.state.deploymentHash)throw new Error('REPAY_DEPLOYMENT_MISMATCH');
     const final=rpcRecord(await rpc('eth_getBlockByNumber',[supplyHex(block),false]));if(rpcHash(final.hash)!==post.blockHash)throw new Error('REPAY_REORG');
-    base.cost=(rpcUint(receipt.gasUsed)*rpcUint(receipt.effectiveGasPrice)+(receipt.l1Fee===undefined?0n:rpcUint(receipt.l1Fee))).toString();
+    base.cost=lendingTransactionCost(review,tx,receipt,gasIndex);
     if(!wrapped){
       const [beforeNonce,afterNonce]=await Promise.all([rpc('eth_getTransactionCount',[review.account,supplyHex(block-1)]),rpc('eth_getTransactionCount',[review.account,supplyHex(block)])]);
       if(rpcUint(beforeNonce)!==BigInt(attempt.nonce)||rpcUint(afterNonce)!==rpcUint(beforeNonce)+1n)throw new Error('REPAY_OWNER_NONCE_MISMATCH');

@@ -60,6 +60,17 @@ export async function readBorrowState(rpc:SupplyRpc,profileInput:AaveLendingProf
   if(r[7]!==BigInt(p.reserveId))throw new Error('BORROW_RESERVE_UNSUPPORTED');
   if (r[10]!==BigInt(p.variableDebtToken) || rpcUint(oracle)!==BigInt(p.oracle) || rpcUint(underlying)!==BigInt(p.asset) || rpcUint(pool)!==BigInt(p.pool) || rpcUint(baseUnit)!==100000000n || rpcHex(code).length<4 || rpcUint(index)<10n**27n) throw new Error('BORROW_DEPLOYMENT_MISMATCH');
   const borrow:BorrowState={collateralBase:a[0]!.toString(),debtBase:a[1]!.toString(),availableBorrowBase:a[2]!.toString(),liquidationThresholdBps:a[3]!.toString(),ltvBps:a[4]!.toString(),healthFactor:a[5]!.toString(),price:rpcUint(price).toString(),baseCurrencyUnit:rpcUint(baseUnit).toString(),reserveConfiguration:r[0]!.toString(),userConfiguration:rpcUint(user).toString(),liquidity:rpcUint(liquidity).toString(),debt:rpcUint(debt).toString(),scaledDebt:rpcUint(scaled).toString(),debtIndex:rpcUint(index).toString(),variableDebtToken:p.variableDebtToken,eMode:rpcUint(eMode).toString(),debtTotalSupply:rpcUint(total).toString(),codeHash:supplyHash(rpcHex(code))};
+  if ('ownerBeneficiary' in p) {
+    const {mask,collateral,scale}=reserveBits(p),config=r[0]!,ray=10n**27n;
+    if (rpcUint(user)&~mask || rpcUint(eMode)!==0n || rpcUint(price)<=0n) throw new Error('BORROW_STATE_UNSUPPORTED');
+    const collateralEnabled=Boolean(rpcUint(user)&collateral),position=BigInt(state.position);
+    const expectedCollateral=collateralEnabled?position*rpcUint(price)/scale:0n,expectedDebt=rpcUint(debt)*rpcUint(price)/scale;
+    const abs=(n:bigint)=>n<0n?-n:n;
+    if (abs(a[0]!-expectedCollateral)>2n || abs(a[1]!-expectedDebt)>2n ||
+        abs(rpcUint(debt)-(rpcUint(scaled)*rpcUint(index)+ray/2n)/ray)>1n ||
+        a[3]!== (collateralEnabled&&position>0n?(config>>16n)&65535n:0n) ||
+        a[4]!== (collateralEnabled&&position>0n?config&65535n:0n)) throw new Error('BORROW_STATE_INVALID');
+  }
   if (rpcHash(rpcRecord(await rpc('eth_getBlockByNumber',[blockTag,false])).hash)!==state.blockHash) throw new Error('BORROW_REORG');
   return {...state,borrow};
 }
@@ -73,7 +84,7 @@ export function compileBorrowCalls(workflow:SemanticWorkflow,account:string):Sup
 }
 /** Fixed configuration; bounded 0.1% drift for prices, interest and account values. */
 export function assertBorrowFresh(amount:string,before:BorrowState,after:BorrowState,profile:AaveLendingProfile):void {
-  for(const k of ['reserveConfiguration','userConfiguration','variableDebtToken','baseCurrencyUnit','eMode','codeHash'] as const)if(before[k]!==after[k])throw new Error('BORROW_AUTHORIZATION_STALE');
+  for(const k of ['reserveConfiguration','userConfiguration','variableDebtToken','baseCurrencyUnit','eMode','codeHash','scaledDebt','liquidationThresholdBps','ltvBps'] as const)if(before[k]!==after[k])throw new Error('BORROW_AUTHORIZATION_STALE');
   const abs=(n:bigint)=>n<0n?-n:n;
   for(const k of ['collateralBase','debtBase','availableBorrowBase','price','healthFactor','debt'] as const){
     const a=units(before[k]),b=units(after[k]);

@@ -36,7 +36,7 @@ export function previewPlan(spec: StrategySpec): PreviewPlan | { readonly code: 
       if (spec.network === 'solana') return { flow: 'jupiter-swap', subject: 'SOLANA' };
       if (spec.network === 'solana-devnet') return { flow: 'solana-devnet-swap', subject: 'SOLANA' };
       return { flow: 'base-sepolia-swap', subject: 'NONE' };
-    case 'supply': case 'borrow': case 'repay': case 'withdraw': return { flow: spec.network === 'base' ? 'base-aave' : 'aave-supply', subject: 'EVM' };
+    case 'supply': case 'borrow': case 'repay': case 'withdraw': return { flow: catalogNetworkOfChain(networkIdentity(spec.network)?.chain)?.flows.lending ?? 'aave-supply', subject: 'EVM' };
     // Orca positions need a position-mint key generated in the owner's browser; there is nothing to preview without it.
     case 'add_liquidity': return spec.network === 'solana-devnet' ? { code: 'SIMULATION_REQUIRES_OWNER_BROWSER' }
       : { flow: spec.network === 'robinhood' ? 'robinhood-liquidity' : catalogNetworkOfChain(networkIdentity(spec.network)?.chain)?.flows.liquidity ?? 'uniswap-liquidity', subject: 'EVM' };
@@ -101,7 +101,7 @@ export function projectSimulation(flow: FlowName, value: unknown): SimulationVie
           deadlines: pick(r.deadlines, ['reviewExpiresAt', 'quoteExpiresAt', 'depositMustLandBy', 'fillDeadline']) },
         canonicalArtifacts: canonicalArtifacts(r.artifacts) };
     }
-    case 'aave-supply': case 'base-aave': {
+    case 'aave-supply': case 'base-aave': case 'arbitrum-aave': {
       const r = obj(record.review), operation = r.withdraw ? 'WITHDRAW' : r.repay ? 'REPAY' : r.borrow ? 'BORROW' : 'SUPPLY';
       return { kind: 'AAVE_V3', provenance: String(record.provenance), observedAt: String(obj(r.state).observedAt), expiresAt: String(r.expiresAt),
         facts: { operation, ...pick(r, ['chain', 'pool', 'asset', 'aToken', 'amount', 'beneficiary', 'approvalRequired', 'allowance', 'gasPrice']),

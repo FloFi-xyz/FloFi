@@ -3,11 +3,11 @@ import { createJournal, appendJournalState } from './journal.js';
 import { supplyHash, supplyArtifactHash, SUPPLY_METAMASK, decodeSupplyWalletEnvelope, rpcRecord, rpcUint, rpcHash, supplyHex, type SupplyReview, type SupplyRpc, type SupplyTransaction } from '@defi-workflow-engine/reference-compiler';
 import { hashJournalBytes, type ExecutionJournal } from '@defi-workflow-engine/workflow-contracts';
 export type SupplyAttempt = { step: 'APPROVAL' | 'SUPPLY' | 'BORROW' | 'REPAY' | 'WITHDRAW'; state: 'PREPARED' | 'CANCELLED' | 'NOT_FOUND' | 'SUBMITTING' | 'SUBMISSION_RESULT_UNKNOWN' | 'PENDING' | 'CONFIRMED' | 'REVERTED' | 'RECONCILIATION_REQUIRED';
-  nonce: string; preparedAtBlock: number; transaction: SupplyTransaction; transactionHash: string | null; receipt: Record<string, unknown> | null; reconciled: boolean; ownerNonceAfter?:string };
+  nonce: string; preparedAtBlock: number; transaction: SupplyTransaction; transactionHash: string | null; receipt: Record<string, unknown> | null; reconciled: boolean; ownerNonceAfter?:string; discoveryNextBlock?:number };
 export type SupplyRun = { format: 'gryloo.supply-run.v1'; id: string; review: SupplyReview; provenance: 'PUBLIC_TESTNET' | 'PUBLIC_MAINNET' | 'MOCKED';
   authorization: string | null; attempts: SupplyAttempt[]; journal: ExecutionJournal; verdict: 'PENDING' | 'RECONCILED' | 'DIVERGENT' | 'INCONCLUSIVE'; ownerInitiated: boolean };
-/** `supply-`: the public-testnet Aave runs; `baave-` (BUILD-BASE-001): Base mainnet Aave runs. */
-export const SUPPLY_RUN_ID = /^(supply|baave)-[a-f0-9]{32}$/;
+/** `supply-`: public testnets; `baave-`: Base mainnet; `araave-`: Arbitrum One mainnet. */
+export const SUPPLY_RUN_ID = /^(supply|baave|araave)-[a-f0-9]{32}$/;
 export function createSupplyRun(id: string, review: SupplyReview, provenance: SupplyRun['provenance']): SupplyRun {
   let journal=createJournal({journalId:id,workflowId:review.workflow.workflowId,executionPlanHash:supplyArtifactHash('execution-plan',review.plan),manifestHash:supplyArtifactHash('strategy-manifest',review.manifest)});
   const append=(level:'workflow'|'segment'|'step',entityId:string,toState:'DRAFT'|'PLANNED'|'REVIEWED'|'SIMULATED',stepId:string|null)=>{
@@ -54,13 +54,21 @@ export function matchSupplyTransaction(attempt: SupplyAttempt, transaction: unkn
   catch{return false;}
 }
 /** Bounded discovery of the SAME account/nonce. No send function exists in recovery. */
-export async function discoverSupplyTransaction(attempt: SupplyAttempt, rpc: SupplyRpc): Promise<{ hash: string | null; mismatch: boolean; exhausted: boolean }> {
+export async function discoverSupplyTransaction(attempt: SupplyAttempt, rpc: SupplyRpc): Promise<{ hash: string | null; mismatch: boolean; exhausted: boolean; nextBlock?:number }> {
   if (rpcUint(await rpc('eth_chainId',[]))!==BigInt(attempt.transaction.chainId)) throw new Error('SUPPLY_WRONG_CHAIN');
   if (attempt.transactionHash) return {hash:attempt.transactionHash,mismatch:false,exhausted:false};
   const latest = Number(rpcUint(await rpc('eth_blockNumber',[])));
   if (!Number.isSafeInteger(latest) || latest<attempt.preparedAtBlock) throw new Error('SUPPLY_RPC_INVALID');
-  const end = Math.min(latest,attempt.preparedAtBlock+128);
-  for (let n=attempt.preparedAtBlock;n<=end;n++) {
+  // Nitro blocks arrive much faster than the testnets. Persist bounded scan progress;
+  // the old 128-block horizon must never prove absence or allow another submission.
+  const nitro=BigInt(attempt.transaction.chainId)===42161n;
+  const safe=nitro?rpcRecord(await rpc('eth_getBlockByNumber',['safe',false])):null;
+  const scanHead=safe?Number(rpcUint(safe.number)):latest;
+  if(!Number.isSafeInteger(scanHead)||scanHead>latest||scanHead<0)throw new Error('SUPPLY_RPC_INVALID');
+  if(safe)rpcHash(safe.hash);
+  const start=nitro?attempt.discoveryNextBlock??attempt.preparedAtBlock:attempt.preparedAtBlock;
+  const end = Math.min(scanHead,nitro?start+127:attempt.preparedAtBlock+128);
+  for (let n=start;n<=end;n++) {
     const block = rpcRecord(await rpc('eth_getBlockByNumber',[supplyHex(n),true]));
     if (!Array.isArray(block.transactions)) throw new Error('SUPPLY_RPC_INVALID');
     for (const value of block.transactions) {
@@ -79,7 +87,7 @@ export async function discoverSupplyTransaction(attempt: SupplyAttempt, rpc: Sup
         return {hash:rpcHash(tx.hash),mismatch:!matchSupplyTransaction(attempt,tx),exhausted:false};
     }
   }
-  return {hash:null,mismatch:false,exhausted:latest>attempt.preparedAtBlock+128};
+  return {hash:null,mismatch:false,exhausted:!nitro&&latest>attempt.preparedAtBlock+128,...nitro?{nextBlock:Math.max(start,end+1)}:{}};
 }
 export type SupplyPersistence = { read: () => Promise<SupplyRun>; write: (next: SupplyRun) => Promise<void> };
 export async function persistSupplyPreparation(store: SupplyPersistence, block: number, nonce: string): Promise<SupplyRun> {
@@ -88,9 +96,9 @@ export async function persistSupplyPreparation(store: SupplyPersistence, block: 
   return run;
 }
 export function validateSupplyRun(run: SupplyRun): void {
-  // BUILD-BASE-001: Base mainnet lending runs live only in the `baave-` namespace (PUBLIC_MAINNET or MOCKED) and only on Base; testnet runs stay `supply-`.
+  // Mainnet namespaces are strictly chain-bound (PUBLIC_MAINNET or MOCKED); public testnets stay `supply-`.
   if (run.format!=='gryloo.supply-run.v1'||!SUPPLY_RUN_ID.test(run.id)||!['PUBLIC_TESTNET','PUBLIC_MAINNET','MOCKED'].includes(run.provenance)||
-      run.id.startsWith('baave-')!==(run.review.chain==='eip155:8453')||(run.provenance==='PUBLIC_MAINNET')&&!run.id.startsWith('baave-')||(run.provenance==='PUBLIC_TESTNET')&&!run.id.startsWith('supply-')||
+      run.id.startsWith('baave-')!==(run.review.chain==='eip155:8453')||run.id.startsWith('araave-')!==(run.review.chain==='eip155:42161')||(run.provenance==='PUBLIC_MAINNET')&&run.id.startsWith('supply-')||(run.provenance==='PUBLIC_TESTNET')&&!run.id.startsWith('supply-')||
       new Set(run.attempts.map(a=>a.step)).size!==run.attempts.length||run.attempts.length>2) throw new Error('SUPPLY_STORE_CORRUPT');
   const {commitment,...review}=run.review;
   if (supplyHash(review)!==commitment || supplyArtifactHash('execution-plan',run.review.plan)!==run.journal.executionPlanHash ||
@@ -103,7 +111,8 @@ export function validateSupplyRun(run: SupplyRun): void {
     const expectedStep=run.review.approvalRequired&&index===0?'APPROVAL':run.review.withdraw?'WITHDRAW':run.review.repay?'REPAY':run.review.borrow?'BORROW':'SUPPLY';
     const expectedTx=run.review.transactions[attempt.step==='APPROVAL'?0:run.review.transactions.length-1];
     const entry=[...run.journal.entries].reverse().find(e=>e.entityId===`${run.id}.${attempt.step}`);
-    if(attempt.ownerNonceAfter!==undefined&&(!run.review.repay||!attempt.reconciled||!/^(0|[1-9][0-9]*)$/.test(attempt.ownerNonceAfter)) || attempt.step!==expectedStep || JSON.stringify(attempt.transaction)!==JSON.stringify(expectedTx) ||
+    if(attempt.discoveryNextBlock!==undefined&&(!Number.isSafeInteger(attempt.discoveryNextBlock)||attempt.discoveryNextBlock<attempt.preparedAtBlock||run.review.chain!=='eip155:42161') ||
+        attempt.ownerNonceAfter!==undefined&&(!run.review.repay||!attempt.reconciled||!/^(0|[1-9][0-9]*)$/.test(attempt.ownerNonceAfter)) || attempt.step!==expectedStep || JSON.stringify(attempt.transaction)!==JSON.stringify(expectedTx) ||
         BigInt(attempt.nonce)!==(run.review.repay&&index>0&&run.attempts[index-1]?.ownerNonceAfter?BigInt(run.attempts[index-1]!.ownerNonceAfter!):BigInt(run.review.state.nonce)+BigInt(index)) || !Number.isSafeInteger(attempt.preparedAtBlock) ||
         attempt.preparedAtBlock<run.review.state.block || entry?.toState!==attempt.state || typeof attempt.reconciled!=='boolean' ||
         attempt.transactionHash!==null&&!/^0x[0-9a-f]{64}$/.test(attempt.transactionHash) ||

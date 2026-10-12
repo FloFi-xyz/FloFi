@@ -127,6 +127,9 @@ for (const [action, adapter] of [['asset.swap.exact-input', 'uniswap.v3'], ['ass
   add(action, adapter, 'eip155:42161', 'MAINNET', fork, null, 'DIRECT_TRANSACTION', ['INJECTED_WALLET', 'QUOTE_PROVIDER', 'REVIEWED_ARTIFACTS'], ['A']);
 // BUILD-ARB-001 phase 4: existing catalog Uniswap v3 mint path, owner wallet only; no demonstrated public execution.
 add('asset.liquidity.concentrated', 'uniswap.v3', 'eip155:42161', 'MAINNET', fork, null, 'DIRECT_TRANSACTION', ['INJECTED_WALLET', 'QUOTE_PROVIDER', 'REVIEWED_ARTIFACTS'], ['A']);
+// BUILD-ARB-001 phase 5: the shared one-reserve Aave runtime; connected owner wallet, gates default off.
+for (const action of ['supply', 'borrow', 'repay', 'withdraw'] as const)
+  add(action, 'aave-v3', 'eip155:42161', 'MAINNET', fork, null, 'DIRECT_TRANSACTION', ['INJECTED_WALLET', 'QUOTE_PROVIDER', 'REVIEWED_ARTIFACTS'], ['A']);
 export const executionCapabilityRegistry: readonly ExecutionCapabilityProfile[] = Object.freeze(rows);
 
 export type CapabilityRuntime = {

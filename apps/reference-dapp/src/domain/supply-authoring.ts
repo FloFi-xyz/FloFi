@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { createSupplyNode, readSupplyNode, createBorrowNode, readBorrowNode, createRepayNode, readRepayNode, createWithdrawNode, readWithdrawNode, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { AAVE_V3_BASE_SEPOLIA, AAVE_V3_LENDING_PROFILES, type AaveLendingProfile } from '@defi-workflow-engine/action-registry';
+import type { SupplyReview } from '@defi-workflow-engine/reference-compiler';
 /**
  * Aave V3 authoring for each registered lending profile: Base Sepolia USDC and (BUILD-ETHEREUM-001) Ethereum Sepolia WBTC.
  * The named network selects the profile, and the asset must be that profile's one verified asset. A symbol never selects
@@ -63,6 +64,14 @@ export function supplyWalletTransaction(prepared:Record<string,string>):Record<s
     if(transaction[field]!==undefined&&!/^0x(?:0|[1-9a-f][0-9a-f]*)$/i.test(transaction[field]))throw new Error('SUPPLY_WALLET_QUANTITY_INVALID');
   }
   return transaction;
+}
+/** The connected owner submits only the exact reviewed call and frozen fee envelope. */
+export function assertSupplyWalletTransaction(prepared:Record<string,string>,review:SupplyReview,step:string):void {
+  const index=step==='APPROVAL'?0:review.transactions.length-1,expected=review.transactions[index];
+  if(!expected||Object.keys(prepared).some(key=>!['from','to','data','value','chainId','nonce','gas','gasPrice'].includes(key))||
+      (['from','to','data','value','chainId'] as const).some(key=>prepared[key]!==expected[key])||
+      prepared.gas!==`0x${BigInt(review.gasLimits[index]!).toString(16)}`||prepared.gasPrice!==`0x${BigInt(review.gasPrice).toString(16)}`)
+    throw new Error('SUPPLY_WALLET_TRANSACTION_MISMATCH');
 }
 
 export function createAuthoredBorrow(nodeId:string,input:SupplyInput):SemanticWorkflow['nodes'][number]{

@@ -3,7 +3,7 @@ import { lendingProfile, reserveBits, readBorrowState, compileBorrowCalls, borro
   supplyHex, supplyWord, supplyTopic, supplyHash, supplyArtifactHash, rpcUint, rpcRecord, rpcHash, SUPPLY_METAMASK,
   type AaveLendingProfile, type SupplyReview, type SupplyState, type SupplyRpc } from '@defi-workflow-engine/reference-compiler';
 import { hashJournalBytes, type EvidenceBundle, type ExecutionJournal } from '@defi-workflow-engine/workflow-contracts';
-import { verifySupplyWalletEnvelope, verifySupplyPosition, logMatches, addressTopic, type SupplyChainAttempt, type SupplyObservation } from './supply.js';
+import { lendingTransactionCost, verifySupplyWalletEnvelope, verifySupplyPosition, logMatches, addressTopic, type SupplyChainAttempt, type SupplyObservation } from './supply.js';
 export type BorrowObservation = SupplyObservation & { walletDelta?:string; debtDelta?:string; preHealthFactor?:string; postHealthFactor?:string; borrowEvent?:unknown };
 const abs=(v:bigint)=>v<0n?-v:v;
 export function verifyBorrowEffects(amount:string,pre:SupplyState,post:SupplyState,profile:AaveLendingProfile):{walletDelta:string;debtDelta:string;delta:string;scaledDelta:string;preHealthFactor:string;postHealthFactor:string} {
@@ -58,7 +58,7 @@ export async function reconcileBorrowAttempt(review:SupplyReview,attempt:SupplyC
     if(pre.blockHash!==rpcHash(canonical.parentHash)||post.blockHash!==rpcHash(receipt.blockHash)||post.deploymentHash!==review.state.deploymentHash)throw new Error('BORROW_REORG');
     const final=rpcRecord(await rpc('eth_getBlockByNumber',[supplyHex(block),false]));
     if(rpcHash(final.hash)!==post.blockHash)throw new Error('BORROW_REORG');
-    base.cost=(rpcUint(receipt.gasUsed)*rpcUint(receipt.effectiveGasPrice)+(receipt.l1Fee===undefined?0n:rpcUint(receipt.l1Fee))).toString();
+    base.cost=lendingTransactionCost(review,tx,receipt,0);
     const effects=verifyBorrowEffects(review.amount,pre,post,p);
     return {...base,...effects,borrowEvent:event,verdict:'RECONCILED',reason:'BORROW_TRANSACTION_DEBT_BALANCE_AND_HEALTH_VERIFIED'};
   }catch(cause){const reason=cause instanceof Error?cause.message:'BORROW_OBSERVATION_FAILED';return {...base,reason,verdict:/MISMATCH|WRONG_CHAIN|REORG|INVALID|UNSUPPORTED/.test(reason)?'DIVERGENT':'INCONCLUSIVE'};}

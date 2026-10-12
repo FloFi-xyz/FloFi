@@ -89,7 +89,8 @@ describe('Ethereum Sepolia state reads fail closed', () => {
       const call = params[0] as { to?: string; data?: string } | undefined, result = await (ethereum().rpc)(method, params) as string;
       return method === 'eth_call' && call?.to === eth.pool && call.data === supplyCall('getReserveData(address)', eth.asset) ? result.slice(0, 2 + 7 * 64) + word(0n) + result.slice(2 + 8 * 64) : result;
     };
-    await expect(readBorrowState(wrongId, eth, OWNER, OWNER)).rejects.toThrow('BORROW_RESERVE_UNSUPPORTED');
+    // The shared base reader now verifies the reserve id before the Borrow augmentation.
+    await expect(readBorrowState(wrongId, eth, OWNER, OWNER)).rejects.toThrow('SUPPLY_DEPLOYMENT_MISMATCH');
     const sixDecimals = ethereum();
     const rpc: Rpc = async (method, params) => (params[0] as { data?: string })?.data === supplyCall('decimals()') ? '0x' + word(6n) : sixDecimals.rpc(method, params);
     await expect(readSupplyState(rpc, eth, OWNER, OWNER)).rejects.toThrow('SUPPLY_DEPLOYMENT_MISMATCH');

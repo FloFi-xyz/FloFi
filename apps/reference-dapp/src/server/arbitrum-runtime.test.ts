@@ -77,7 +77,7 @@ describe('Arbitrum live catalog and deployment profiles', () => {
     expect(arbitrumOwnerExecutionEnabled('live', { GRYLOO_ARBITRUM_OWNER_EXECUTION: 'MAINNET_OWNER_APPROVED' })).toBe(true);
     expect(flowMode('arbitrum-swap', {})).toBe('off'); expect(flowMode('arbitrum-mainnet-transfer', {})).toBe('off');
     expect(CATALOG_NETWORKS['arbitrum-one'].flows.liquidity).toBe('arbitrum-liquidity');
-    expect(CATALOG_NETWORKS['arbitrum-one'].flows.lending).toBeNull();
+    expect(CATALOG_NETWORKS['arbitrum-one'].flows.lending).toBe('arbitrum-aave');
     expect(arbitrumRpcUrl(undefined)).toBe(ARBITRUM_ONE.rpc);
     expect(() => arbitrumRpcUrl('http://localhost:8545')).toThrow('ARBITRUM_RPC_CONFIGURATION_INVALID');
   });

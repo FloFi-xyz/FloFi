@@ -13,7 +13,7 @@ import type { CrossChainLiquidityInput } from './cross-chain-liquidity';
 import { liquidityDetails, parseTick } from '@defi-workflow-engine/reference-linter';
 
 import { createAuthoredTransfer, transferDetails, type RobinhoodTransferInput } from './robinhood-transfer-authoring';
-import { createAuthoredSupply, supplyDetails, createAuthoredBorrow, borrowDetails, createAuthoredRepay, repayDetails, createAuthoredWithdraw, withdrawDetails, type WithdrawInput, type SupplyInput } from './supply-authoring';
+import { createAuthoredSupply, supplyDetails, createAuthoredBorrow, borrowDetails, createAuthoredRepay, repayDetails, createAuthoredWithdraw, withdrawDetails, LENDING_NETWORKS, type WithdrawInput, type SupplyInput } from './supply-authoring';
 import { createSolanaSwapNode, parseSolanaSwapChat, solanaSwapDetails, solanaSwapLabels, type SolanaSwapInput } from './jupiter-authoring';
 import { createSolanaLiquidityNode, parseSolanaLiquidityChat, solanaLiquidityDetails, type SolanaLiquidityInput } from './solana-liquidity-authoring';
 import { createUniswapLiquidityNode, parseUniswapLiquidityChat, uniswapLiquidityDetails, type UniswapLiquidityInput } from './uniswap-liquidity-authoring';
@@ -25,7 +25,13 @@ import { parseCatalogLiquidityChat, robinhoodLiquidityDetails } from './robinhoo
 import { CATALOG_CHAT_NETWORKS, catalogNetworkOfChatName, networkIdentity } from './network-registry';
 
 type Base = { readonly baseRevision: number; readonly source: 'CHAT' | 'CANVAS' };
-const lendingNetwork = (text: string): SupplyInput['network'] => /^base sepolia$/i.test(text) ? 'Base Sepolia' : /^base$/i.test(text) ? 'Base' : 'Ethereum Sepolia';
+const lendingChatNetworks = LENDING_NETWORKS.map(name => networkIdentity(name)?.chatName?.source ?? name).map(name => `(?:${name})`).join('|');
+const lendingNetwork = (text: string): SupplyInput['network'] => {
+  const name = catalogNetworkOfChatName(text)?.name ?? text;
+  const network = LENDING_NETWORKS.find(item => item.toLowerCase() === name.toLowerCase());
+  if (!network) throw new Error('SUPPLY_DEPLOYMENT_UNSUPPORTED');
+  return network;
+};
 const lendingAsset = (text: string): SupplyInput['asset'] => text.toUpperCase() === 'WBTC' ? 'WBTC' : 'USDC';
 export type Command = Base & (
   | { readonly type: 'ADD_CRYPTO_ACTION'; readonly input: CryptoActionInput }
@@ -89,9 +95,9 @@ export function parseLocalCommand(text: string, workflow: Workflow, context: Rev
   if(lending){const owner=lending[4]??defaultBeneficiary;if(!owner)throw Error('LENDING_OWNER_REQUIRED');const fields={supply:lending[1]!,borrow:lending[2]!,slippage:lending[3]!,owner};createAuthoredLending(workflow.workflowId,workflow.revision+1,fields);return {type:'AUTHOR_LENDING',input:fields,source:'CHAT',baseRevision:workflow.revision};}
   // Aave V3: each network has exactly one verified asset (Base Sepolia USDC, Ethereum Sepolia WBTC; BUILD-BASE-001 Base mainnet USDC, real
   // funds). The pair is checked against the profile, so a symbol can never carry one network's asset onto another.
-  const withdraw = /^withdraw ([0-9]+(?:\.[0-9]+)?) (USDC|WBTC) from Aave on (Base Sepolia|Ethereum Sepolia|Base)$/i.exec(input);
+  const withdraw = new RegExp(String.raw`^withdraw ([0-9]+(?:\.[0-9]+)?) (USDC|WBTC) from Aave on (${lendingChatNetworks})$`, 'i').exec(input);
   if(withdraw){const fields:WithdrawInput={network:lendingNetwork(withdraw[3]!),asset:lendingAsset(withdraw[2]!),amount:withdraw[1]!,recipient:'CONNECTED_OWNER'};createAuthoredWithdraw('node-preview',fields);return {type:'ADD_WITHDRAW',input:fields,source:'CHAT',baseRevision:workflow.revision};}
-  const repay = /^repay ([0-9]+(?:\.[0-9]+)?) (USDC|WBTC) to Aave on (Base Sepolia|Ethereum Sepolia|Base)(?: (?:beneficiary|on behalf of) (0x[0-9a-fA-F]{40}))?$/i.exec(input);
+  const repay = new RegExp(String.raw`^repay ([0-9]+(?:\.[0-9]+)?) (USDC|WBTC)(?: to Aave)? on (${lendingChatNetworks})(?: (?:beneficiary|on behalf of) (0x[0-9a-fA-F]{40}))?$`, 'i').exec(input);
   if (repay) {
     const beneficiary=repay[4]??defaultBeneficiary;
     if(!beneficiary)throw new Error('REPAY_BENEFICIARY_REQUIRED');
@@ -99,7 +105,7 @@ export function parseLocalCommand(text: string, workflow: Workflow, context: Rev
     createAuthoredRepay('node-preview',fields);
     return {type:'ADD_REPAY',input:fields,source:'CHAT',baseRevision:workflow.revision};
   }
-  const borrow = /^borrow ([0-9]+(?:\.[0-9]+)?) (USDC|WBTC) from Aave on (Base Sepolia|Ethereum Sepolia|Base)(?: (?:beneficiary|on behalf of) (0x[0-9a-fA-F]{40}))?$/i.exec(input);
+  const borrow = new RegExp(String.raw`^borrow ([0-9]+(?:\.[0-9]+)?) (USDC|WBTC)(?: from Aave)? on (${lendingChatNetworks})(?: (?:beneficiary|on behalf of) (0x[0-9a-fA-F]{40}))?$`, 'i').exec(input);
   if (borrow) {
     const beneficiary=borrow[4]??defaultBeneficiary;
     if(!beneficiary)throw new Error('BORROW_BENEFICIARY_REQUIRED');
@@ -107,7 +113,7 @@ export function parseLocalCommand(text: string, workflow: Workflow, context: Rev
     createAuthoredBorrow('node-preview',fields);
     return {type:'ADD_BORROW',input:fields,source:'CHAT',baseRevision:workflow.revision};
   }
-  const supply = /^supply ([0-9]+(?:\.[0-9]+)?) (USDC|WBTC) to Aave on (Base Sepolia|Ethereum Sepolia|Base)(?: (?:beneficiary|on behalf of) (0x[0-9a-fA-F]{40}))?$/i.exec(input);
+  const supply = new RegExp(String.raw`^(?:supply|deposit|quero colocar) ([0-9]+(?:\.[0-9]+)?) (USDC|WBTC)(?: (?:to|into|no) Aave)? (?:on|na|da) (${lendingChatNetworks})(?: (?:beneficiary|on behalf of) (0x[0-9a-fA-F]{40}))?$`, 'i').exec(input);
   if (supply) {
     const beneficiary = supply[4] ?? defaultBeneficiary;
     if (!beneficiary) throw new Error('SUPPLY_BENEFICIARY_REQUIRED');

@@ -64,9 +64,26 @@ export const AAVE_V3_BASE = Object.freeze({
   l1DataFee: true,
   environment: 'MAINNET',
 } as const);
-export type AaveLendingProfile = typeof AAVE_V3_BASE_SEPOLIA | typeof AAVE_V3_ETHEREUM_SEPOLIA | typeof AAVE_V3_BASE;
+/** BUILD-ARB-001 Phase 5: freshly verified native USDC reserve id 12 at Arbitrum block 513958416.
+ * Pool revision 11, provider/Pool/oracle and reserve token relationships verified against the Aave DAO address book.
+ * One owner reserve, variable debt and ordinary collateral only. Nitro posting cost is included in total gas.
+ */
+export const AAVE_V3_ARBITRUM = Object.freeze({
+  network: 'Arbitrum One', chainId: 42161, chain: 'eip155:42161', chainHex: '0xa4b1', protocol: 'aave-v3',
+  pool: '0x794a61358d6845594f94dc1db02a252b5b4814ad',
+  poolImplementation: '0xf05fd3cc911b4c5e36e53c00354f645e22922c9a',
+  provider: '0xa97684ead0e402dc232d5a977953df7ecbab3cdb',
+  asset: '0xaf88d065e77c8cc2239327c5edb3a432268e5831', decimals: 6, symbol: 'USDC', reserveId: 12,
+  aToken: '0x724dc807b04555b71ed48a6896b6f41593b8c637',
+  variableDebtToken: '0xf611aeb5013fd2c0511c9cd55c7dc5c1140741a6',
+  oracle: '0xb56c2f0b653b2e0b10c9b928c8580ac5df02c7c7',
+  faucet: null, explorer: 'https://arbiscan.io', rpc: 'https://arb1.arbitrum.io/rpc',
+  officialSource: 'https://github.com/aave-dao/aave-address-book/blob/main/src/AaveV3Arbitrum.sol',
+  l1DataFee: false, environment: 'MAINNET', poolRevision: 11, ownerBeneficiary: true,
+} as const);
+export type AaveLendingProfile = typeof AAVE_V3_BASE_SEPOLIA | typeof AAVE_V3_ETHEREUM_SEPOLIA | typeof AAVE_V3_BASE | typeof AAVE_V3_ARBITRUM;
 /** One verified asset per network. Profiles are chosen by the authored or reviewed chain, never by symbol. */
-export const AAVE_V3_LENDING_PROFILES: readonly AaveLendingProfile[] = Object.freeze([AAVE_V3_BASE_SEPOLIA, AAVE_V3_ETHEREUM_SEPOLIA, AAVE_V3_BASE]);
+export const AAVE_V3_LENDING_PROFILES: readonly AaveLendingProfile[] = Object.freeze([AAVE_V3_BASE_SEPOLIA, AAVE_V3_ETHEREUM_SEPOLIA, AAVE_V3_BASE, AAVE_V3_ARBITRUM]);
 /** The deployment environment of a lending profile (the testnet profiles predate the field). */
 export const aaveEnvironment = (profile: AaveLendingProfile): 'PUBLIC_TESTNET' | 'MAINNET' => 'environment' in profile ? profile.environment : 'PUBLIC_TESTNET';
 export function aaveLendingProfile(chain: string): AaveLendingProfile {

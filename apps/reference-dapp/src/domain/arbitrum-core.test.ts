@@ -98,21 +98,21 @@ describe('BUILD-ARB-001 shared first-class recognition through shared runtime re
     expect(assets.map(workflowAsset)).toEqual(original.assets);
     expect(JSON.stringify(original.workflow)).not.toMatch(/logoUrl|\/brand\/|coingecko|Presentation changed/);
   });
-  it('keeps runtime capability truth generated, including Phase 4 liquidity; unbuilt lending stays refused', () => {
+  it('keeps runtime capability truth generated, including Phase 5 lending', () => {
     registerNetworkCatalog(catalog());
     expect(discoverNetworkCapabilities(chain)).toHaveLength(10);
-    expect(supportedNetworks().find(n => n.id === 'arbitrum-one')).toMatchObject({ class: 'MAINNET', funds: 'REAL_FUNDS', actions: ['bridge', 'swap', 'transfer', 'add_liquidity'] });
-    expect(AUTHORING_CAPABILITIES.filter(c => c.network.chain === chain).every(c => ['bridge', 'swap', 'transfer', 'add_liquidity'].includes(c.action))).toBe(true);
+    expect(supportedNetworks().find(n => n.id === 'arbitrum-one')).toMatchObject({ class: 'MAINNET', funds: 'REAL_FUNDS', actions: ['bridge', 'supply', 'borrow', 'repay', 'withdraw', 'swap', 'transfer', 'add_liquidity'] });
+    expect(AUTHORING_CAPABILITIES.filter(c => c.network.chain === chain).every(c => ['bridge', 'swap', 'transfer', 'add_liquidity', 'supply', 'borrow', 'repay', 'withdraw'].includes(c.action))).toBe(true);
     expect(bridgeOffers().some(r => r.source.chain === chain && r.destination.key === 'base')).toBe(true);
     expect(bridgeOffers().some(r => r.destination.chain === chain && r.source.key === 'base')).toBe(true);
     expect(catalogCapabilityNetworks().map(n => n.key)).toEqual(['base', 'arbitrum-one', 'robinhood']);
     const supports = copilotSupportsSection();
     expect(supports).toContain('from Arbitrum One to Base');
     expect(supports.split('\n').find(line => /^- LIQUIDITY\b/.test(line))).toContain('Arbitrum');
-    for (const line of supports.split('\n').filter(line => /^- SUPPLY\b/.test(line))) expect(line).not.toContain('Arbitrum');
+    for (const line of supports.split('\n').filter(line => /^- SUPPLY\b/.test(line))) expect(line).toContain('Arbitrum');
     for (const action of ['supply', 'borrow', 'repay', 'withdraw'] as const) {
-      expect(capabilityNetworks(action).some(n => n.chain === chain)).toBe(false);
-      expect(cryptoProfiles(action).some(p => p.chain === chain)).toBe(false);
+      expect(capabilityNetworks(action).some(n => n.chain === chain)).toBe(true);
+      expect(cryptoProfiles(action).some(p => p.chain === chain)).toBe(true);
     }
   });
 });

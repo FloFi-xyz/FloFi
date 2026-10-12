@@ -35,10 +35,10 @@ export type CatalogNetworkRuntime = {
   /** The local journal root of the in-process actions (each capability has its own subdirectory). */
   readonly journalEnv: string;
   /** Run namespaces; `lending` is null where the network has no Aave profile. */
-  readonly prefixes: { readonly swap: 'rhs' | 'bas' | 'ars'; readonly transfer: 'rht' | 'bat' | 'art'; readonly liquidity: 'rhlp' | 'balp' | 'arlp'; readonly lending: 'baave' | null };
+  readonly prefixes: { readonly swap: 'rhs' | 'bas' | 'ars'; readonly transfer: 'rht' | 'bat' | 'art'; readonly liquidity: 'rhlp' | 'balp' | 'arlp'; readonly lending: 'baave' | 'araave' | null };
   /** Cloud flow names of each capability. */
   readonly flows: { readonly swap: 'robinhood-swap' | 'base-swap' | 'arbitrum-swap'; readonly transfer: 'robinhood-mainnet-transfer' | 'base-mainnet-transfer' | 'arbitrum-mainnet-transfer';
-    readonly liquidity: 'robinhood-liquidity' | 'base-liquidity' | 'arbitrum-liquidity'; readonly lending: 'base-aave' | null };
+    readonly liquidity: 'robinhood-liquidity' | 'base-liquidity' | 'arbitrum-liquidity'; readonly lending: 'base-aave' | 'arbitrum-aave' | null };
 };
 
 export const CATALOG_NETWORKS = Object.freeze({
@@ -58,8 +58,8 @@ export const CATALOG_NETWORKS = Object.freeze({
     mode: arbitrumMainnetMode, ownerExecutionEnabled: arbitrumOwnerExecutionEnabled, rpc: arbitrumMainnetRpc,
     rpcMethods: ARBITRUM_MAINNET_RPC_METHODS, liquidityRpcMethods: ARBITRUM_LIQUIDITY_RPC_METHODS, catalogFor: arbitrumCatalogFor, swapRuntime: arbitrumSwapRuntime,
     disabledCode: 'ARBITRUM_MAINNET_NOT_ENABLED', storageCode: 'ARBITRUM_STORAGE_NOT_CONFIGURED', catalogUnavailableCode: 'ARBITRUM_TOKEN_LIST_UNAVAILABLE',
-    journalEnv: 'GRYLOO_ARBITRUM_JOURNAL', prefixes: Object.freeze({ swap: 'ars', transfer: 'art', liquidity: 'arlp', lending: null }),
-    flows: Object.freeze({ swap: 'arbitrum-swap', transfer: 'arbitrum-mainnet-transfer', liquidity: 'arbitrum-liquidity', lending: null }) }),
+    journalEnv: 'GRYLOO_ARBITRUM_JOURNAL', prefixes: Object.freeze({ swap: 'ars', transfer: 'art', liquidity: 'arlp', lending: 'araave' }),
+    flows: Object.freeze({ swap: 'arbitrum-swap', transfer: 'arbitrum-mainnet-transfer', liquidity: 'arbitrum-liquidity', lending: 'arbitrum-aave' }) }),
 } satisfies Readonly<Record<CatalogNetworkId, CatalogNetworkRuntime>>);
 export const CATALOG_NETWORK_IDS: readonly CatalogNetworkId[] = Object.freeze(Object.keys(CATALOG_NETWORKS) as CatalogNetworkId[]);
 
