@@ -88,6 +88,18 @@ export async function handleChannelWebhook(route: ChannelRoute, request: Request
   const host = await channelHost(env, core, options.host);
   if ('code' in host) return answer(503, host.code);
   const { store, platform } = channelRuntime(env, core, host, options.runtime);
+  // Public Telegram admission is globally bounded BEFORE a sender's conversation,
+  // encrypted payload, model call, or approval handoff is allocated. PostgreSQL
+  // fixed-window increments are atomic across Vercel instances.
+  if (route === 'telegram' && result.deployment.telegram?.accessMode === 'public' && parsed.messages.length > 0) {
+    const message = parsed.messages[0]!;
+    const globalOk = await store.allow('channel:public:global:10m', 120, 600, now());
+    const senderDigest = core.keys.subject;
+    const { keyedDigest } = await import('./core/crypto.ts');
+    const senderBucket = keyedDigest(senderDigest, 'telegram:' + message.subject.business + ':' + message.subject.user).toString('hex');
+    const senderOk = globalOk && await store.allow('channel:public:sender:' + senderBucket, 12, 600, now());
+    if (!globalOk || !senderOk) return answer(429, 'TELEGRAM_PUBLIC_RATE_LIMITED');
+  }
   const service = createChannelService({ core, store, log, now, platform, previewTimeoutMs: options.previewTimeoutMs ?? 60_000, adapter: provider.adapter,
     interpreter: options.interpreter !== undefined ? options.interpreter : channelInterpreter(env, { enabled: core.copilot }), subscriptions: channelSubscriptions(env, host),
     visuals: options.visuals !== undefined ? options.visuals : channelVisualRenderer, catalogs: authoringCatalogPreparer(env),
