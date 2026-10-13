@@ -1,77 +1,409 @@
-# This config was automatically generated from your source code
-# Stacks detected: cicd:github-actions:.github/workflows,deps:node:.
+# CircleCI manual-only FloFi backup; intentionally no deployment jobs.
+# Mirror source: .github/workflows/governance.yml and contracts.yml.
+# Refresh the mirror when the Actions contracts workflow changes.
 version: 2.1
-orbs:
-  node: circleci/node@5
 jobs:
-  test-node:
-    # Install node dependencies and run tests
-    executor: node/default
-    steps:
-      - checkout
-      - node/install-packages:
-          cache-path: ~/project/node_modules
-          override-ci-command: npm install
-      - run:
-          name: Run tests
-          command: npm test --passWithNoTests
-  build-node:
-    # Build node project
-    executor: node/default
-    steps:
-      - checkout
-      - node/install-packages:
-          cache-path: ~/project/node_modules
-          override-ci-command: npm install
-      - run:
-          command: npm run build
-      - run:
-          name: Create the ~/artifacts directory if it doesn't exist
-          command: mkdir -p ~/artifacts
-      # Copy output to artifacts dir
-      - run:
-          name: Copy artifacts
-          command: cp -R build dist public .output .next .docusaurus ~/artifacts 2>/dev/null || true
-      - store_artifacts:
-          path: ~/artifacts
-          destination: node-build
-  deploy:
-    # This is an example deploy job, not actually used by the workflow
+  governance:
     docker:
-      - image: cimg/base:stable
+      - image: cimg/node:24.21.0
+    resource_class: small
     steps:
+      - checkout
       - run:
-          name: Plan deployment
-          command: |-
-            circleci run release plan deploy \
-              --environment-name="default" \
-              --component-name="deploy" \
-              --target-version="1.0.${CIRCLE_BUILD_NUM}-${CIRCLE_SHA1:0:7}"
-      # Replace this with steps to deploy to users
+          name: "Governance gate"
+          command: |
+            set -euo pipefail
+            export GOVERNANCE_BRANCH="${CIRCLE_BRANCH:-circleci-project-setup}"
+            export GOVERNANCE_EVENT=push
+            export PYTHONDONTWRITEBYTECODE=1
+            python3 -m unittest discover -s scripts -p 'test_governance_lite.py'
+            python3 -m unittest discover -s scripts -p 'test_ci_*.py'
+            python3 scripts/governance_lite.py
+            git diff --check
+            if ! git rev-parse HEAD^1 >/dev/null 2>&1; then git fetch --deepen=2 origin || true; fi
+            git diff --check HEAD^1 HEAD
+  certification:
+    docker:
+      - image: cimg/node:24.21.0-browsers
+      - image: postgres:18.6-bookworm@sha256:3725f4e2499eef5134592b3b4ab79a543ed7f8e533b05b5b637af926630f6650
+        environment:
+          POSTGRES_USER: flofi
+          POSTGRES_HOST_AUTH_METHOD: trust
+    resource_class: large
+    environment:
+      RUNNER_TEMP: /tmp/flofi-ci
+      FLOFI_CI_ARCHIVE_CACHE: /tmp/flofi-ci/archives
+      GITHUB_PATH: /tmp/flofi-ci/github-path
+      GITHUB_ENV: /tmp/flofi-ci/github-env
+      GITHUB_STEP_SUMMARY: /tmp/flofi-ci/summary.md
+      GITHUB_RUN_ID: circleci
+      GITHUB_RUN_ATTEMPT: "1"
+      TURBO_TELEMETRY_DISABLED: "1"
+      DO_NOT_TRACK: "1"
+      COREPACK_ENABLE_AUTO_PIN: "0"
+      COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+      NEXT_TELEMETRY_DISABLED: "1"
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+      FLOFI_E2E_APP_PORT: "3100"
+    steps:
+      - checkout
       - run:
-          name: deploy
-          command: '#e.g. ./deploy.sh'
+          name: "Prepare disposable workspace and PostgreSQL"
+          command: |
+            set -euo pipefail
+            mkdir -p "$RUNNER_TEMP" "$FLOFI_CI_ARCHIVE_CACHE"
+            touch "$GITHUB_PATH" "$GITHUB_ENV" "$GITHUB_STEP_SUMMARY"
+            for attempt in $(seq 1 60); do
+              if (echo >/dev/tcp/127.0.0.1/5432) >/dev/null 2>&1; then break; fi
+              sleep 1
+            done
+            (echo >/dev/tcp/127.0.0.1/5432) >/dev/null 2>&1 || { echo 'PostgreSQL unavailable' >&2; exit 1; }
+      - restore_cache:
+          keys:
+            - flofi-circleci-archives-v1-{{ checksum "scripts/bootstrap-ci.py" }}
       - run:
-          name: found github actions config
-          command: ':'
+          name: "Bootstrap exact approved Node and pnpm"
+          command: |
+            set -euo pipefail
+            source scripts/ci-observe.sh 'Toolchain bootstrap'
+            python3 scripts/bootstrap-ci.py
+            toolbin="$(tail -n 1 "$GITHUB_PATH")"
+            test -x "$toolbin/node"
+            test -x "$toolbin/pnpm"
+            export PATH="$toolbin:$PATH"
+            printf 'export PATH="%s:$PATH"\n' "$toolbin" >> "$BASH_ENV"
+            test "$(node --version)" = "v24.21.0"
+            test "$(pnpm --version)" = "11.22.0"
+
       - run:
-          name: Update deployment status to running
-          command: circleci run release update deploy --status=RUNNING
+          name: "Print exact verified toolchain before installation"
+          command: |
+            set -euo pipefail
+            source scripts/ci-observe.sh 'Toolchain identity'
+            git --version
+            python3 --version
+            node --version
+            node -p "process.platform+' '+process.arch"
+            pnpm --version
+            node -p "JSON.parse(require('fs').readFileSync('package.json')).packageManager"
+            test "$(node --version)" = "v24.21.0"
+            test "$(pnpm --version)" = "11.22.0"
       - run:
-          name: Update deployment status to success
-          command: circleci run release update deploy --status=SUCCESS
-          when: on_success
+          name: "Frozen install without lifecycle scripts"
+          command: |
+            set -euo pipefail
+            source scripts/ci-observe.sh 'Frozen dependency install'
+            pnpm install --frozen-lockfile --ignore-scripts
       - run:
-          name: Update deployment status to failed
-          command: circleci run release update deploy --status=FAILED
+          name: "Verify every registry integrity, license and release age"
+          command: |
+            set -euo pipefail
+            source scripts/ci-observe.sh 'Dependency integrity license and age'
+            python3 scripts/bootstrap-ci.py --verify-dependencies
+      - run:
+          name: "Dependency audit"
+          command: |
+            set -euo pipefail
+            source scripts/ci-observe.sh 'Dependency audit'
+            pnpm audit --audit-level low
+      - run:
+          name: "Typecheck"
+          command: |
+            set -euo pipefail
+            source scripts/ci-observe.sh Typecheck
+            # Keep Turbo concurrency at 2 on the shared 8 GiB runner.
+            pnpm typecheck
+      - run:
+          name: "Lint"
+          command: |
+            set -euo pipefail
+            source scripts/ci-observe.sh Lint
+            pnpm lint
+            pnpm exec eslint scripts/guarded-release-browser.mjs
+      - run:
+          name: "Production build"
+          command: |
+            set -euo pipefail
+            source scripts/ci-observe.sh 'Production build'
+            pnpm build
+      - run:
+          name: "Schema drift"
+          command: |
+            set -euo pipefail
+            source scripts/ci-observe.sh 'Schema drift'
+            pnpm schemas:check
+      - run:
+          name: "Unit and contract tests and exported API checks"
+          command: |
+            set -euo pipefail
+            source scripts/ci-observe.sh 'Unit and contract tests'
+            pnpm test
+            python3 scripts/summarize-screenshot-diffs.py --self-test
+            test -f packages/reference-linter/dist/index.js
+            test -f packages/reference-linter/dist/index.d.ts
+            pnpm --filter @defi-workflow-engine/reference-linter exec node --input-type=module -e "const m = await import('@defi-workflow-engine/reference-linter'); for (const key of ['lintWorkflow','validateAuthoringWorkflow','createReviewContext','digestArtifact','digestRawResponse','digestSelfCheck','reviewMockedArtifactChain','mockedSwapOutputs','mockedFixtureBytes','collectBaseTranscript','deriveBaseObservation','reviewBaseObservation']) if (typeof m[key] !== 'function') throw new Error('Missing linter export: '+key); if (!Object.isFrozen(m.MOCKED_CHAIN_PROFILE)) throw new Error('Mocked chain profile must be frozen'); if (!Object.isFrozen(m.BASE_OBSERVATION_PROFILE)) throw new Error('Base observation profile must be frozen'); await m.digestSelfCheck()"
+      - run:
+          name: "PostgreSQL durability, concurrency, recovery and tenant-isolation suites (disposable loopback database)"
+          command: |
+            set -euo pipefail
+            source scripts/ci-observe.sh 'PostgreSQL'
+            export TEST_DATABASE_URL="postgres://flofi@127.0.0.1:5432/postgres"
+            pnpm test:postgres
+      - run:
+          name: "Bootstrap exact approved anvil"
+          command: |
+            set -euo pipefail
+            source scripts/ci-observe.sh 'Anvil bootstrap'
+            python3 scripts/bootstrap-anvil.py "$RUNNER_TEMP/gryloo-anvil/foundry-v1.8.3"
+      - run:
+          name: "Offline compatibility gate and fork suite"
+          command: |
+            set -euo pipefail
+            source scripts/ci-observe.sh 'Anvil and offline forks'
+            export GRYLOO_ANVIL_BIN="$RUNNER_TEMP/gryloo-anvil/foundry-v1.8.3/anvil"
+            # DEC-0026/DEC-0027: pure G1 checks run; owner-secret pinned-account cases are owner-only local F2 gates.
+            pnpm test:anvil
+            pnpm test:fork --testTimeout=30000
+            # BUILD-003F F1: five fresh-process synthetic rehearsals (MOCKED engineering evidence, loopback only).
+            node apps/reference-dapp/e2e/fork/offline-rehearsal.mjs > "$RUNNER_TEMP/build-003f-f1.json"
+            node -e "const r=JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')); if (r.status!=='PASS'||r.passes.length!==5) process.exit(1); console.log('F1 five-pass', r.status, r.passes.map(p=>p.providerEquivalentRequests).join(','))" "$RUNNER_TEMP/build-003f-f1.json"
+            # BUILD-003F F4 static check: the committed transcript's structure, digests and identity, never its secret inputs.
+            if [ -f apps/reference-dapp/e2e/fork/base-fork-transcript.json ]; then
+              node --input-type=module -e "import { readFileSync } from 'node:fs'; import { verifyTranscriptDocument } from './apps/reference-dapp/e2e/fork/replay-upstream.mjs'; import { transcriptIdentity } from './apps/reference-dapp/e2e/fork/harness.mjs'; const t = JSON.parse(readFileSync('apps/reference-dapp/e2e/fork/base-fork-transcript.json', 'utf8')); const counts = verifyTranscriptDocument(t, { accounts: t.identity.accounts }); if (transcriptIdentity({ sourceBlockNumber: t.sourceBlockNumber, sourceBlockHash: t.sourceBlockHash, accounts: t.identity.accounts }).identityHash !== t.identityHash) process.exit(1); console.log('Transcript verified', JSON.stringify(counts));"
+            fi
+            # BUILD-006: a distinct complete transcript is mandatory for the fork evidence gate.
+            # Static validation runs in CI without owner material, provider credentials or external RPC.
+            test -f apps/reference-dapp/e2e/fork/liquidity-transcript.json
+            node --input-type=module -e "import { readFileSync } from 'node:fs'; import { verifyLiquidityTranscript } from './apps/reference-dapp/e2e/fork/liquidity-replay-upstream.mjs'; const t=JSON.parse(readFileSync('apps/reference-dapp/e2e/fork/liquidity-transcript.json','utf8')); const r=verifyLiquidityTranscript(t,t.identity.accounts); if (t.sourceChainId!==8453 || r.providerRequests<1) process.exit(1); console.log('BUILD-006 closed transcript verified',r.providerRequests,r.localReplies);"
+            # BUILD-007 has a separate complete source recording and cannot reuse BUILD-003F or BUILD-006 evidence.
+            test -f apps/reference-dapp/e2e/fork/composition-transcript.json
+            node --input-type=module -e "import { readFileSync } from 'node:fs'; import { verifyCompositionTranscript } from './apps/reference-dapp/e2e/fork/composition-replay-upstream.mjs'; const t=JSON.parse(readFileSync('apps/reference-dapp/e2e/fork/composition-transcript.json','utf8')); const r=verifyCompositionTranscript(t,t.identity.accounts); if(t.sourceChainId!==8453||r.providerRequests<1||t.codeFingerprints.composition.syntheticCodePins) process.exit(1); console.log('BUILD-007 closed transcript verified',r.providerRequests,r.localReplies);"
+      - run:
+          name: "Bootstrap exact approved headless shell"
+          command: |
+            set -euo pipefail
+            source scripts/ci-observe.sh 'Browser bootstrap'
+            export BUILD002_BROWSER_CACHE="$RUNNER_TEMP/gryloo-playwright/chromium_headless_shell-1243"
+            python3 scripts/bootstrap-playwright.py "$BUILD002_BROWSER_CACHE"
+      - run:
+          name: "Run guarded browser suite"
+          no_output_timeout: 30m
+          command: |
+            set -euo pipefail
+            source scripts/ci-observe.sh 'Guarded browser suites'
+            export BUILD002_BROWSER_CACHE="$RUNNER_TEMP/gryloo-playwright/chromium_headless_shell-1243"
+            # BUILD-003F: the browser suite drives the MOCKED synthetic local fork on loopback chain 31337.
+            export GRYLOO_ANVIL_BIN="$RUNNER_TEMP/gryloo-anvil/foundry-v1.8.3/anvil"
+            export GRYLOO_MODE_A_RUNTIME="$RUNNER_TEMP/gryloo-mode-a-e2e"
+            # Approved production Review rejects MOCKED financial authority. Run the current
+            # product paths and explicit provenance boundaries in the same profiles as local verification.
+            # Positive local financial lifecycle/recovery remains enforced by pnpm test, PostgreSQL
+            # and the pinned offline fork gates above; historical browser diagnostics remain intact.
+            export GRYLOO_COW_RUNTIME="$RUNNER_TEMP/gryloo-cow-e2e"
+            node scripts/guarded-release-browser.mjs product
+            pnpm --filter @defi-workflow-engine/reference-dapp exec playwright test mcp-route-presentation.spec.ts
+            # BUILD-DEVELOPER-001: a third-party server integrates with the SDK alone (operator CLI key, strategy, approval, signed loopback
+            # webhooks) and the end user reaches FloFi's Review, where MOCKED financial authority stays blocked (no wallet transaction), on the
+            # same embedded loopback harness (no public network, no real transaction). The full lifecycle is proven by journey.pg.test.ts.
+            GRYLOO_MCP_E2E=EMBEDDED_LOOPBACK_ONLY TEST_DATABASE_URL="postgres://flofi@127.0.0.1:5432/postgres" pnpm --filter @defi-workflow-engine/reference-dapp exec playwright test developer-journey.spec.ts
+            # BUILD-MCP-002: consumer OAuth and in-chat approval on disposable loopback infrastructure.
+            GRYLOO_MCP_E2E=EMBEDDED_LOOPBACK_ONLY TEST_DATABASE_URL="postgres://flofi@127.0.0.1:5432/postgres" pnpm --filter @defi-workflow-engine/reference-dapp exec playwright test mcp-in-chat.spec.ts mcp-route-presentation.spec.ts
+            # Each invocation gets a fresh disposable database; keep the production OAuth registration rate limit intact.
+            GRYLOO_MCP_E2E=EMBEDDED_LOOPBACK_ONLY TEST_DATABASE_URL="postgres://flofi@127.0.0.1:5432/postgres" pnpm --filter @defi-workflow-engine/reference-dapp exec playwright test channel-signing.spec.ts
+            # BUILD-CHANNELS-001: the channels' /approve paths on the same embedded loopback harness — WhatsApp with the FIXTURE provider (nothing
+            # is sent to Meta) and Telegram against the loopback Bot API double (nothing reaches Telegram): the real webhook routes, the
+            # intended-wallet rule, the owner's Review where MOCKED authority stays blocked, the status ping and the scheduled dispatch.
+            GRYLOO_MCP_E2E=EMBEDDED_LOOPBACK_ONLY GRYLOO_CHANNEL_E2E=FIXTURE_LOOPBACK_ONLY TEST_DATABASE_URL="postgres://flofi@127.0.0.1:5432/postgres" pnpm --filter @defi-workflow-engine/reference-dapp exec playwright test whatsapp-approve.spec.ts telegram-approve.spec.ts
+            # BUILD-007: only official digest-pinned test-time artifacts are downloaded, outside Git.
+            export GRYLOO_B007_INPUTS="$RUNNER_TEMP/gryloo-build-007-inputs"
+            mkdir -p "$GRYLOO_B007_INPUTS"
+            python3 - <<'PYCODE'
+            import hashlib, os, pathlib, re, tarfile, urllib.request
+            root=pathlib.Path(os.environ['GRYLOO_B007_INPUTS'])
+            sources={
+              'safe':('https://registry.npmjs.org/@safe-global/safe-contracts/-/safe-contracts-1.4.1.tgz','8803f7cf26e2c58300b8136342faa7b8bce59436e300f52115fa25b095e0bf79'),
+              'roles':('https://raw.githubusercontent.com/gnosisguild/zodiac-modifier-roles/main/packages/evm/mastercopies.json','a80d737a2b5394897fad0aa290b129bc446fdb1736efc3e1ad06edcd2d8ea224'),
+            }
+            for name,(url,expected) in sources.items():
+              raw=urllib.request.urlopen(url,timeout=60).read()
+              if hashlib.sha256(raw).hexdigest()!=expected: raise SystemExit('BUILD-007 official artifact digest changed: '+name)
+              (root/({'safe':'safe.tgz','roles':'roles-mastercopies.json'}[name])).write_bytes(raw)
+            with tarfile.open(root/'safe.tgz','r:gz') as archive:
+              archive.extractall(root/'safe',filter='data')
+            source=urllib.request.urlopen('https://raw.githubusercontent.com/ethereum/ercs/master/ERCS/erc-2470.md',timeout=60).read().decode()
+            matches=[bytes.fromhex(value[2:]) for value in re.findall(r'0x[0-9a-fA-F]{680}',source)]
+            init=next((value for value in matches if hashlib.sha256(value).hexdigest()=='dae33ba7a8745a325d78fd9dbf4585b47524070f5c8b73c84bf373e91a24fff6'),None)
+            if init is None or len(init)!=340: raise SystemExit('BUILD-007 ERC-2470 initcode pin changed')
+            (root/'erc2470-initcode.bin').write_bytes(init)
+            PYCODE
+            # The disposable executor key must stay under /tmp/ (enforced by the harness and the composition service);
+            # it is a few small files and is removed when this step exits so the persistent runner's tmpfs does not fill.
+            export GRYLOO_MODE_B_RUNTIME="/tmp/gryloo-b007-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+            export GRYLOO_MODE_B_SAFE_PACKAGE="$GRYLOO_B007_INPUTS/safe/package"
+            export GRYLOO_MODE_B_ROLES_MASTERCOPIES="$GRYLOO_B007_INPUTS/roles-mastercopies.json"
+            export GRYLOO_MODE_B_EIP2470_INITCODE="$GRYLOO_B007_INPUTS/erc2470-initcode.bin"
+            export GRYLOO_COMPOSITION_INTERIM_TRANSCRIPT_PATH="$PWD/apps/reference-dapp/e2e/fork/composition-transcript.json"
+            export GRYLOO_COMPOSITION_INTERIM_TRANSCRIPT_SHA256="$(sha256sum "$GRYLOO_COMPOSITION_INTERIM_TRANSCRIPT_PATH" | cut -d' ' -f1)"
+            node apps/reference-dapp/e2e/fork/composition-harness.mjs serve > "$RUNNER_TEMP/gryloo-b007-harness.log" 2>&1 &
+            b007_pid=$!
+            flofi_ci_cleanup() {
+              kill "$b007_pid" 2>/dev/null || true
+              rm -rf "$GRYLOO_MODE_B_RUNTIME"
+            }
+            for attempt in $(seq 1 120); do
+              if [ -s "$GRYLOO_MODE_B_RUNTIME/profile.json" ] && [ -s "$GRYLOO_MODE_B_RUNTIME/mode-b-keys.json" ]; then break; fi
+              if ! kill -0 "$b007_pid" 2>/dev/null; then cat "$RUNNER_TEMP/gryloo-b007-harness.log"; exit 1; fi
+              sleep 1
+            done
+            test -s "$GRYLOO_MODE_B_RUNTIME/profile.json"
+            export GRYLOO_COMPOSITION_PROFILE="$GRYLOO_MODE_B_RUNTIME/profile.json"
+            export GRYLOO_COMPOSITION_EXECUTOR_KEY_FILE="$GRYLOO_MODE_B_RUNTIME/mode-b-keys.json"
+            export GRYLOO_COMPOSITION_SMOKE_PROFILE="$GRYLOO_COMPOSITION_PROFILE"
+            export GRYLOO_COMPOSITION_MODE=fork
+            # The three files share one Anvil fork; the compiler file temporarily replaces Position Manager code inside a
+            # snapshot, so the reconciler's code-identity read must not run concurrently with it.
+            pnpm exec vitest run packages/reference-compiler/test/composition.fork.test.ts packages/reference-executor/test/composition.fork.test.ts packages/reference-reconciler/test/composition.fork.test.ts --no-file-parallelism --testTimeout=120000
+            node scripts/guarded-release-browser.mjs composition
+      - store_artifacts:
+          path: apps/reference-dapp/test-results
+          destination: playwright-results
+      - run:
+          name: "Summarize screenshot differences after a browser failure"
           when: on_fail
+          command: |
+            set -euo pipefail
+            python3 scripts/summarize-screenshot-diffs.py apps/reference-dapp/test-results
+      - run:
+          name: "Validate and remove ephemeral CycloneDX 1.6 SBOM"
+          command: |
+            set -euo pipefail
+            source scripts/ci-observe.sh 'SBOM'
+            pnpm sbom --sbom-format cyclonedx --sbom-spec-version 1.6 --lockfile-only --out "$RUNNER_TEMP/build-003a.cdx.json"
+            python3 - <<'PYCODE'
+            import hashlib, json, os, pathlib, sys
+            path=pathlib.Path(os.environ['RUNNER_TEMP'])/'build-003a.cdx.json'
+            try:
+                document=json.loads(path.read_text())
+                if document.get('bomFormat')!='CycloneDX' or document.get('specVersion')!='1.6':
+                    raise SystemExit('Unexpected SBOM format or version')
+                evidence=json.loads((path.parent/'build-002-dependencies.json').read_text())
+                expected={(r['name'],r['version']):r['license'] for r in evidence}
+                if len(evidence)!=265 or len(expected)!=265:
+                    raise SystemExit('Dependency evidence count changed')
+                components=document.get('components')
+                if not isinstance(components,list):
+                    raise SystemExit('SBOM components missing')
+                seen=set()
+                for component in components:
+                    name=(component.get('group')+'/' if component.get('group') else '')+component.get('name','')
+                    identity=(name,component.get('version'))
+                    if identity not in expected or identity in seen:
+                        raise SystemExit('Unreviewed or duplicate SBOM component: '+repr(identity))
+                    seen.add(identity)
+                    expression=expected[identity]
+                    if ' AND ' in expression:
+                        component['licenses']=[{'expression':expression}]
+                    else:
+                        component['licenses']=[{'license':{'id':expression}}]
+                if seen!=set(expected):
+                    raise SystemExit('SBOM omits reviewed lock components')
+                root_component=document.get('metadata',{}).get('component',{})
+                if (root_component.get('name')!='defi-workflow-engine' or
+                        root_component.get('version')!='0.1.0' or
+                        root_component.get('licenses')!=[{'license':{'id':'Apache-2.0'}}]):
+                    raise SystemExit('SBOM root identity or license differs')
+                workspace={
+                    'package.json':('defi-workflow-engine','Apache-2.0'),
+                    'packages/workflow-contracts/package.json':('@defi-workflow-engine/workflow-contracts','Apache-2.0'),
+                    'packages/action-registry/package.json':('@defi-workflow-engine/action-registry','Apache-2.0'),
+                    'packages/reference-linter/package.json':('@defi-workflow-engine/reference-linter','AGPL-3.0-only'),
+                    'packages/reference-compiler/package.json':('@defi-workflow-engine/reference-compiler','AGPL-3.0-only'),
+                    'packages/reference-executor/package.json':('@defi-workflow-engine/reference-executor','AGPL-3.0-only'),
+                    'packages/reference-reconciler/package.json':('@defi-workflow-engine/reference-reconciler','AGPL-3.0-only'),
+                    'packages/cloud-runtime/package.json':('@defi-workflow-engine/cloud-runtime','AGPL-3.0-only'),
+                    # BUILD-DEVELOPER-001: the thin Developer API client (zero dependencies, empty lock importer).
+                    'packages/developer-sdk/package.json':('@defi-workflow-engine/developer-sdk','Apache-2.0'),
+                    'apps/reference-dapp/package.json':('@defi-workflow-engine/reference-dapp','AGPL-3.0-only'),
+                }
+                for manifest_path,(name,license_id) in workspace.items():
+                    manifest=json.loads(pathlib.Path(manifest_path).read_text())
+                    expected_version='0.3.0' if manifest_path=='packages/workflow-contracts/package.json' else '0.1.0'
+                    if (manifest.get('name'),manifest.get('version'),manifest.get('private'),manifest.get('license'))!=(name,expected_version,True,license_id):
+                        raise SystemExit('Workspace manifest inventory differs: '+manifest_path)
+                lock=pathlib.Path('pnpm-lock.yaml').read_text()
+                importer_section=lock.split('\nimporters:\n',1)[1].split('\npackages:\n',1)[0]
+                import re
+                # An importer without dependencies is written on one line (`  path: {}`).
+                importer_paths=set(re.findall(r'(?m)^  (\S[^\n:]*):(?: \{\})?$',importer_section))
+                if importer_paths!={'.','packages/workflow-contracts','packages/action-registry','packages/reference-linter','packages/reference-compiler','packages/reference-executor','packages/reference-reconciler','packages/cloud-runtime','packages/developer-sdk','apps/reference-dapp'}:
+                    raise SystemExit('Workspace lock importer inventory differs')
+                component_refs={component['bom-ref'] for component in components}
+                if len(component_refs)!=265 or root_component.get('bom-ref') in component_refs:
+                    raise SystemExit('SBOM component references differ')
+                dependencies=document.get('dependencies')
+                if not isinstance(dependencies,list):
+                    raise SystemExit('SBOM dependency graph missing')
+                graph_refs=[entry.get('ref') for entry in dependencies]
+                all_refs=component_refs|{root_component['bom-ref']}
+                if len(graph_refs)!=len(set(graph_refs)) or set(graph_refs)!=all_refs:
+                    raise SystemExit('SBOM dependency reference inventory differs')
+                for entry in dependencies:
+                    targets=entry.get('dependsOn',[])
+                    if not isinstance(targets,list) or len(targets)!=len(set(targets)) or set(targets)-all_refs:
+                        raise SystemExit('Invalid SBOM dependency references')
+                # pnpm 11.22.0 omits workspace components; the exact ten local
+                # manifests and lock importers above are checked independently.
+                if re.search(r'(?m)^  packages/developer-sdk: \{\}$',importer_section) is None:
+                    raise SystemExit('Developer SDK must have no dependencies')
+            
+                reviewed={
+                    '@img/sharp-libvips-darwin-arm64','@img/sharp-libvips-darwin-x64',
+                    '@img/sharp-libvips-linux-arm','@img/sharp-libvips-linux-arm64',
+                    '@img/sharp-libvips-linux-ppc64','@img/sharp-libvips-linux-riscv64',
+                    '@img/sharp-libvips-linux-s390x','@img/sharp-libvips-linux-x64',
+                    '@img/sharp-libvips-linuxmusl-arm64','@img/sharp-libvips-linuxmusl-x64',
+                    '@img/sharp-wasm32','@img/sharp-win32-arm64',
+                    '@img/sharp-win32-ia32','@img/sharp-win32-x64',
+                    'caniuse-lite','tslib'}
+                if {name for name,version in seen if name in reviewed}!=reviewed:
+                    raise SystemExit('Reviewed exception package set changed in SBOM')
+                raw=(json.dumps(document,indent=2,sort_keys=True)+'\n').encode()
+                path.write_bytes(raw)
+                checked=json.loads(path.read_text())
+                for component in checked['components']:
+                    name=(component.get('group')+'/' if component.get('group') else '')+component['name']
+                    license_value=component['licenses'][0]
+                    actual=license_value.get('expression',license_value.get('license',{}).get('id'))
+                    if actual!=expected[(name,component['version'])]:
+                        raise SystemExit('SBOM license expression changed: '+name)
+                message='Ephemeral CycloneDX 1.6 SBOM: 265 exact registry components, zero workspace components (ten exact manifests and importers checked separately), 16 reviewed exceptions with actual licenses, SHA-256 '+hashlib.sha256(raw).hexdigest()
+                print(message)
+                with open(os.environ['GITHUB_STEP_SUMMARY'],'a',encoding='utf-8') as summary:
+                    summary.write(message+'\n')
+            finally:
+                path.unlink(missing_ok=True)
+            PYCODE
+      - run:
+          name: "CI timing summary after failure"
+          when: on_fail
+          command: |
+            set -euo pipefail
+            python3 scripts/ci-observe.py summary
+      - run:
+          name: "CI timing summary after success"
+          when: on_success
+          command: |
+            set -euo pipefail
+            python3 scripts/ci-observe.py summary
+      - save_cache:
+          key: flofi-circleci-archives-v1-{{ checksum "scripts/bootstrap-ci.py" }}
+          paths:
+            - /tmp/flofi-ci/archives
 workflows:
-  build-and-test:
+  manual-backup-certification:
     jobs:
-      - test-node
-      - build-node:
+      - governance
+      - certification:
           requires:
-            - test-node
-    # - deploy:
-    #     requires:
-    #       - build-node
+            - governance
