@@ -45,7 +45,7 @@ for (const width of widths) {
     await page.setViewportSize({ width, height: 900 });
     await page.goto('/');
     await expect(page.getByRole('heading', { level: 1 })).toContainText('Many ways in.');
-    await expect(page.getByRole('link', { name: 'Launch FloFi', exact: true }).first()).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Launch Beta FloFi', exact: true })).toBeVisible();
     if (!enabled) {
       await expect(page.locator('[data-mascot-dock], [data-mascot-journey]')).toHaveCount(0);
       await page.getByRole('link', { name: 'Networks', exact: true }).first().click();
@@ -62,7 +62,7 @@ for (const width of widths) {
     await expect.poll(() => introBody.evaluate(element => getComputedStyle(element).transform)).not.toBe(firstPose);
     expect(await page.getByRole('heading', { level: 1 }).boundingBox()).toEqual(headlineBox);
     // Navigation and CTAs remain available during the intro; no dialog or loading screen.
-    const launch = page.getByRole('link', { name: 'Launch FloFi', exact: true }).first();
+    const launch = page.getByRole('link', { name: 'Launch Beta FloFi', exact: true });
     await launch.focus();
     await expect(launch).toBeFocused();
     await expect(page.getByRole('dialog')).toHaveCount(0);
