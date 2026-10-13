@@ -25,6 +25,9 @@ export { ROBINHOOD_CHAIN_MAINNET, ROBINHOOD_CHAIN_TESTNET, ROBINHOOD_NETWORKS, R
   robinhoodNetwork, robinhoodDeploymentStatus, robinhoodAddChainParameters, robinhoodExpectedCode, ROBINHOOD_TESTNET_TRANSFER, ROBINHOOD_MAINNET_TRANSFER } from "./robinhood-chain.js";
 export type { RobinhoodNetwork, RobinhoodNetworkKey, RobinhoodContract, RobinhoodDeploymentStatus,
   RobinhoodProtocolAvailability } from "./robinhood-chain.js";
+export { COMPOSITION_BINDINGS, SOLANA_DEVNET_SWAP_LIQUIDITY, compositionBindingFor, readBoundComposition, isBoundComposition, bindCompositionConsumer,
+  unbindCompositionConsumer, projectCompositionProducer, projectCompositionConsumer, compositionCap } from "./composition-bindings.js";
+export type { CompositionBinding, BoundComposition } from "./composition-bindings.js";
 export { executionCapabilityRegistry, executionEnvironments, capabilityDimensions,
   resolveNodeCapability, resolveWorkflowCapability } from "./execution-capabilities.js";
 export type { ExecutionCapabilityProfile, ExecutionEnvironment, CapabilityDimension, CapabilityFlags,

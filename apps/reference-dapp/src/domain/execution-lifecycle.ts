@@ -14,6 +14,7 @@ import type { useRouter } from '../state/router-store';
 import type { usePublicTestnet } from '../state/public-testnet-store';
 import type { useJupiter } from '../state/jupiter-store';
 import type { useSolanaLiquidity } from '../state/solana-liquidity-store';
+import type { useSolanaComposition } from '../state/solana-composition-store';
 import type { useUniswapLiquidity } from '../state/uniswap-liquidity-store';
 import type { useRobinhoodTransfer } from '../state/robinhood-transfer-store';
 import type { useModeA } from '../state/mode-a-store';
@@ -30,6 +31,7 @@ export type ExecutionLifecycleSource =
   | { kind: 'public'; state: ReadonlyStore<ReturnType<typeof usePublicTestnet>> }
   | { kind: 'solana-swap'; state: ReadonlyStore<ReturnType<typeof useJupiter>> }
   | { kind: 'solana-pool'; state: ReadonlyStore<ReturnType<typeof useSolanaLiquidity>> }
+  | { kind: 'solana-composition'; state: ReadonlyStore<ReturnType<typeof useSolanaComposition>> }
   | { kind: 'uniswap-pool'; state: ReadonlyStore<ReturnType<typeof useUniswapLiquidity>> }
   | { kind: 'transfer'; state: ReadonlyStore<ReturnType<typeof useRobinhoodTransfer>> }
   | { kind: 'fork-swap'; state: ReadonlyStore<ReturnType<typeof useModeA>> }
@@ -155,6 +157,24 @@ export function projectExecutionLifecycle(currentWorkflow: Workflow, context: Re
       const a = r.attempt; add('transaction', composerActions(workflow)[0]?.nodeId ?? '', source.kind === 'solana-swap' ? 'Swap' : 'Liquidity transaction', r.review.chain, a?.state ?? null, a?.signature ?? null, Boolean(a?.reconciled));
       if (a && r.verdict === 'NOT_EXECUTED') { const op = operations.at(-1)!; op.state = 'expired'; op.label = labels.expired; }
       if (a?.state === 'SUBMITTING' && a.signature) { const op = operations.at(-1)!; op.state = 'submitting'; op.label = labels.submitting; }
+      break;
+    }
+    case 'solana-composition': {
+      const v = source.state.record; if (!v) break;
+      const q = v.record.review, chain = q.chain;
+      select(q.workflow, v.record.id, v.record.provenance, source.state.recovered);
+      const solanaOp = (id: string, nodeId: string, title: string, run: { attempt: { state: string; signature: string | null; reconciled: boolean } | null; verdict: string } | null) => {
+        const a = run?.attempt ?? null;
+        add(id, nodeId, title, chain, a?.state ?? null, a?.signature ?? null, Boolean(a?.reconciled));
+        const op = operations.at(-1)!;
+        if (a && run?.verdict === 'NOT_EXECUTED') { op.state = 'expired'; op.label = labels.expired; }
+        if (a?.state === 'SUBMITTING' && a.signature) { op.state = 'submitting'; op.label = labels.submitting; }
+      };
+      solanaOp('swap', q.swap.nodeId, 'Swap', v.swap);
+      // After a position attempt ends without a position, the step waits for a new reviewed preparation; earlier attempts stay recorded.
+      const active = ['CONSUMING', 'COMPLETED', 'ATTENTION'].includes(v.phase) && v.record.binding;
+      solanaOp('position', q.liquidity.nodeId, 'Add liquidity', active ? v.liquidity : null);
+      if (v.phase === 'PARTIAL') { const op = operations.at(-1)!; op.state = 'cancelled'; op.label = 'Ended: swapped tokens kept'; }
       break;
     }
     case 'transfer': {

@@ -18,7 +18,7 @@ export async function jupiterControl(body: Record<string, unknown>): Promise<unk
   const response = await fetch('http://127.0.0.1:8551/control', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
   return (await response.json() as { result: unknown }).result;
 }
-export async function installSolanaWallet(page: Page, wallet: ReturnType<typeof createMockedSolanaWallet>, behavior: { reject?: boolean; modify?: string; pause?: boolean; chains?: string[]; decoys?: { name: string; chains: string[] }[];
+export async function installSolanaWallet(page: Page, wallet: ReturnType<typeof createMockedSolanaWallet>, behavior: { reject?: boolean; rejectAfter?: number; modify?: string; pause?: boolean; chains?: string[]; decoys?: { name: string; chains: string[] }[];
   signMessage?: boolean } = {}) {
   await page.exposeFunction('grylooJupiterTestSign', async (unsigned: string) => behavior.modify ? wallet.sign(behavior.modify) : wallet.sign(unsigned));
   // BUILD-MCP-002: optional Sign-In With Solana support (Wallet Standard `solana:signMessage`), signed in this test process only.
@@ -47,7 +47,8 @@ export async function installSolanaWallet(page: Page, wallet: ReturnType<typeof 
         'solana:signTransaction': { version: '1.0.0', supportedTransactionVersions: [0], signTransaction: async (...inputs: { transaction: Uint8Array; chain?: string }[]) => {
           w.solanaSignRequests++; w.solanaSignChains.push(String(inputs[0]?.chain));
           if (behavior.pause) await new Promise<void>(resolve => { w.releaseSolanaSignature = resolve; });
-          if (behavior.reject) throw Object.assign(new Error('User rejected the request.'), { code: 4001 });
+          // `rejectAfter`: the owner confirms the first N requests of this page load and declines every later one.
+          if (behavior.reject || behavior.rejectAfter !== null && w.solanaSignRequests > behavior.rejectAfter) throw Object.assign(new Error('User rejected the request.'), { code: 4001 });
           const signed = await w.grylooJupiterTestSign(toB64(inputs[0]!.transaction));
           return [{ signedTransaction: Uint8Array.from(atob(signed), c => c.charCodeAt(0)) }];
         } }, ...signMessageFeature,
@@ -55,7 +56,7 @@ export async function installSolanaWallet(page: Page, wallet: ReturnType<typeof 
     const register = (api: { register: (w: unknown) => void }) => { for (const decoy of decoys) api.register(decoy); api.register(wallet); };
     window.addEventListener('wallet-standard:app-ready', event => register((event as CustomEvent).detail));
     window.dispatchEvent(new CustomEvent('wallet-standard:register-wallet', { detail: register }));
-  }, { owner: wallet.owner, behavior: { reject: Boolean(behavior.reject), pause: Boolean(behavior.pause), chains: behavior.chains ?? ['solana:mainnet'], decoys: behavior.decoys ?? [],
+  }, { owner: wallet.owner, behavior: { reject: Boolean(behavior.reject), rejectAfter: behavior.rejectAfter ?? null, pause: Boolean(behavior.pause), chains: behavior.chains ?? ['solana:mainnet'], decoys: behavior.decoys ?? [],
     signMessage: Boolean(behavior.signMessage) } });
 }
 export async function authorSolanaSwap(page: Page, via: 'canvas' | 'chat' = 'canvas') {

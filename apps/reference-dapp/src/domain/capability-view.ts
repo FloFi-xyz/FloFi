@@ -20,6 +20,7 @@ const reasons: Record<CapabilityBlockerCode, string> = {
   AUTHORIZATION_REQUIRED: 'Review and authorize the exact action before execution.',
   CAPABILITY_NOT_IMPLEMENTED: 'Execution is not implemented for this action here.',
   PROTOCOL_NOT_DEPLOYED: 'The selected protocol has no canonical deployment on this network.',
+  COMPOSITION_UNSUPPORTED: 'These steps cannot execute together. Only a Solana Devnet swap linked to an Orca position can; other Solana steps run one at a time.',
 };
 export function primaryExecutionBlocker(result: WorkflowCapability, selectedNodeId?: string | null): CapabilityBlocker | undefined {
   const relevant = result.blockers.filter(item => item.dimension === 'EXECUTE' || item.dimension === 'AUTHORIZE')

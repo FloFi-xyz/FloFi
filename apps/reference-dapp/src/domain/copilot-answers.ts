@@ -182,6 +182,8 @@ const BLOCKER: Readonly<Record<string, readonly [string, string]>> = {
   AUTHORIZATION_REQUIRED: ['Review and authorize the exact action before execution.', 'Revise e autorize a ação exata antes de executar.'],
   CAPABILITY_NOT_IMPLEMENTED: ['Execution is not implemented for this action here.', 'A execução não está implementada para esta ação aqui.'],
   PROTOCOL_NOT_DEPLOYED: ['The selected protocol has no canonical deployment on this network.', 'O protocolo escolhido não tem deployment canônico nesta rede.'],
+  COMPOSITION_UNSUPPORTED: ['These steps cannot execute together. Only a Solana Devnet swap linked to an Orca position can; other Solana steps run one at a time.',
+    'Estes passos não podem executar juntos. Só um swap na Solana Devnet ligado a uma posição Orca pode; os outros passos Solana executam um de cada vez.'],
 };
 const uniq = <T>(values: readonly T[]) => [...new Set(values)];
 

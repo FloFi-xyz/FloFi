@@ -7,6 +7,15 @@ BUILD-013 remains OPEN on `codex/build-013-lending-composition` at
 `6cd675e41c0838fa8ac9cf3ec8e90de9442da3b9`; PR #48 remains open and unmerged.
 This separate branding build does not resume its execution work. BUILD-CLOUD-001 (below) does not touch BUILD-013 either.
 
+## BUILD-SOLANA-COMPOSITION-001 — Solana Devnet Swap → Orca liquidity composition
+
+**Status: READY FOR OWNER REVIEW — MOCKED (loopback) evidence only; no public transaction was signed or sent.** A Canvas link from a Solana
+Devnet Orca swap to an Orca Whirlpools position is now a typed binding that executes as two separately reviewed and wallet-signed
+transactions on the existing, unchanged isolated engines: the swap runs at most once, and the position is prepared after the swap reconciles
+with `min(owner cap, reconciled swap output)` and fresh pool state, then reviewed again. Other multi-step Solana workflows are reported as not
+executable instead of failing at Simulate. Copilot changes (PR B) are not part of this build. See the [plan](builds/BUILD-SOLANA-COMPOSITION-001-PLAN.md)
+and [report](builds/BUILD-SOLANA-COMPOSITION-001-REPORT.md).
+
 ## BUILD-AUTOMATION-002 — Generic delegated execution ("Automatic within limits")
 
 **Status: READY_FOR_OWNER_PUSH — implementation and the local gates pass on MOCKED/loopback evidence only; NO PUBLIC-CHAIN TRANSACTION, NO

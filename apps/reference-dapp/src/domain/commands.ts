@@ -419,7 +419,7 @@ export function summarize(workflow: Workflow, context?: ReviewContext): string {
     const uni = uniswapLiquidityDetails(node);
     if (uni) return `${node.nodeId}: Concentrated liquidity on ${uni.network} via ${uni.provider}, up to ${uni.maxUsdc} USDC and ${uni.maxWeth} WETH, ${uni.lowerPrice}–${uni.upperPrice} USDC per WETH (ticks ${uni.tickLower} to ${uni.tickUpper}, fee 0.05%), ${uni.slippage} bps, simulation required.`;
     const orca = solanaLiquidityDetails(node);
-    if (orca) return `${node.nodeId}: Concentrated liquidity on ${orca.network} via ${orca.provider}, up to ${orca.maxSol} SOL and ${orca.maxDevUsdc} devUSDC, ${orca.lowerPrice}–${orca.upperPrice} devUSDC per SOL (ticks ${orca.tickLower} to ${orca.tickUpper}), ${orca.slippage} bps, simulation required.`;
+    if (orca) return `${node.nodeId}: Concentrated liquidity on ${orca.network} via ${orca.provider}, up to ${orca.maxSol} SOL and ${orca.maxDevUsdc} devUSDC, ${orca.lowerPrice}–${orca.upperPrice} devUSDC per SOL (ticks ${orca.tickLower} to ${orca.tickUpper}), ${orca.slippage} bps, simulation required.${orca.source ? ` The ${orca.source.token === 1 ? 'devUSDC' : 'SOL'} maximum is capped by the actual reconciled output of ${orca.source.nodeId}${orca.source.fullOutput ? ' (100% of it)' : ''}.` : ''}`;
     const borrowed = borrowDetails(node as Parameters<typeof borrowDetails>[0]);
     if(borrowed)return `${node.nodeId}: Borrow ${borrowed.amount} ${borrowed.asset} from Aave V3 on ${borrowed.network}, variable rate, borrower ${borrowed.beneficiary}.`;
     const supply = supplyDetails(node as Parameters<typeof supplyDetails>[0]);

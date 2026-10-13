@@ -13,6 +13,7 @@ vi.mock('./router-store', () => ({ useRouter: () => f.stores.router }));
 vi.mock('./public-testnet-store', () => ({ usePublicTestnet: () => f.stores.public }));
 vi.mock('./jupiter-store', () => ({ useJupiter: () => f.stores.jupiter }));
 vi.mock('./solana-liquidity-store', () => ({ useSolanaLiquidity: () => f.stores.solanaPool }));
+vi.mock('./solana-composition-store', () => ({ useSolanaComposition: () => ({ record: null, busy: false, error: null, retired: false, recovered: false, executionEnabled: false, signing: false, owner: null, authorized: false }) }));
 vi.mock('./uniswap-liquidity-store', () => ({ useUniswapLiquidity: () => f.stores.uniswapPool }));
 vi.mock('./robinhood-transfer-store', () => ({ useRobinhoodTransfer: () => f.stores.transfer }));
 

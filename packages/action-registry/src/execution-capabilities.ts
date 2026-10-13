@@ -6,6 +6,7 @@ import {LENDING_BASE_SEPOLIA as lendingUni} from './lending-base-sepolia.js';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import type { AuthorizationMode, ExecutionKind } from './capabilities.js';
 import { robinhoodDeploymentStatus } from './robinhood-chain.js';
+import { isBoundComposition } from './composition-bindings.js';
 
 export const executionEnvironments = ['MOCK', 'LOCAL_FORK', 'PUBLIC_TESTNET', 'MAINNET'] as const;
 export type ExecutionEnvironment = typeof executionEnvironments[number];
@@ -16,7 +17,7 @@ export type CapabilityBlockerCode = 'UNKNOWN_ACTION' | 'ADAPTER_NOT_AVAILABLE' |
   'CHAIN_NOT_SUPPORTED' | 'ENVIRONMENT_NOT_SUPPORTED' | 'ACTION_TEMPLATE_ONLY' | 'PUBLIC_EXECUTION_NOT_ENABLED' |
   'MAINNET_EXECUTION_NOT_ENABLED' | 'RUNTIME_UNAVAILABLE' | 'AUTHORIZATION_MODE_UNSUPPORTED' |
   'WALLET_NOT_CONNECTED' | 'WRONG_WALLET_CHAIN' | 'ARTIFACTS_MISSING' | 'ARTIFACTS_STALE' |
-  'SIMULATION_REQUIRED' | 'AUTHORIZATION_REQUIRED' | 'CAPABILITY_NOT_IMPLEMENTED' | 'PROTOCOL_NOT_DEPLOYED';
+  'SIMULATION_REQUIRED' | 'AUTHORIZATION_REQUIRED' | 'CAPABILITY_NOT_IMPLEMENTED' | 'PROTOCOL_NOT_DEPLOYED' | 'COMPOSITION_UNSUPPORTED';
 export type CapabilityBlocker = { readonly nodeId: string; readonly dimension: CapabilityDimension; readonly code: CapabilityBlockerCode };
 export type CapabilityFlags = Readonly<Record<CapabilityDimension, boolean>>;
 export type CapabilityRequirement = 'FORK_RUNTIME' | 'INJECTED_WALLET' | 'QUOTE_PROVIDER' | 'REVIEWED_ARTIFACTS';
@@ -31,7 +32,7 @@ export type ExecutionCapabilityProfile = {
 type DeepReadonly<T> = T extends readonly (infer U)[] ? readonly DeepReadonly<U>[] :
   T extends object ? { readonly [K in keyof T]: DeepReadonly<T[K]> } : T;
 type Node = DeepReadonly<SemanticWorkflow['nodes'][number]>;
-type WorkflowLike = { readonly nodes: readonly Node[] };
+type WorkflowLike = { readonly nodes: readonly Node[]; readonly resourceEdges?: readonly DeepReadonly<SemanticWorkflow['resourceEdges'][number]>[] };
 const flags = (enabled: readonly CapabilityDimension[]): CapabilityFlags => Object.freeze(Object.fromEntries(
   capabilityDimensions.map(dimension => [dimension, enabled.includes(dimension)])) as Record<CapabilityDimension, boolean>);
 const author = flags(['AUTHOR']);
@@ -218,7 +219,12 @@ export function resolveWorkflowCapability(workflow: WorkflowLike, request: Capab
   if(lending){let exact:boolean;try{const f=readLendingComposition(workflow as unknown as SemanticWorkflow);exact=f.chain===lendingAave.chain&&f.collateral.address===lendingAave.asset&&f.borrowed.address===lendingAave.asset&&f.output.address===lendingUni.weth;}catch{exact=false;}
     if(!exact||!request.runtime?.lendingCompositionViable)blockers.push({nodeId:nodes[0]!.nodeId,dimension:'EXECUTE',code:'RUNTIME_UNAVAILABLE'});
   }
-  const executionSupported = financial.length > 0 && financial.every(node => node.capabilities.EXECUTE &&
+  // A Solana action runs in isolation unless the exact pair is a registered bound composition (composition-bindings.ts):
+  // any other combination is authorable but never presented as executable.
+  const financialNodes = workflow.nodes.filter(node => !node.actionType.startsWith('mock-') && node.actionType !== 'asset.liquidity.prepare');
+  const compositionBlocked = financialNodes.length > 1 && financialNodes.some(node => node.chainId.startsWith('solana:')) && !isBoundComposition(workflow as never);
+  if (compositionBlocked) blockers.push({ nodeId: financialNodes[1]!.nodeId, dimension: 'EXECUTE', code: 'COMPOSITION_UNSUPPORTED' });
+  const executionSupported = !compositionBlocked && financial.length > 0 && financial.every(node => node.capabilities.EXECUTE &&
     !node.blockers.some(blocker => ['AUTHORIZATION_MODE_UNSUPPORTED', 'RUNTIME_UNAVAILABLE', 'ACTION_TEMPLATE_ONLY'].includes(blocker.code)));
   for (const node of financial) {
     if (!node.capabilities.EXECUTE && !node.blockers.some(blocker => blocker.dimension === 'EXECUTE'))

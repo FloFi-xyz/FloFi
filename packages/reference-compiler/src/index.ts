@@ -58,6 +58,7 @@ export * from './repay.js';
 
 export type { RlpValue } from './rlp.js';
 export * from './orca-liquidity.js';
+export * from './solana-composition.js';
 
 export * from './withdraw.js';
 

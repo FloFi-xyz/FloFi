@@ -8,6 +8,7 @@ import type { useRouter } from '../state/router-store';
 import type { usePublicTestnet } from '../state/public-testnet-store';
 import type { useJupiter } from '../state/jupiter-store';
 import type { useSolanaLiquidity } from '../state/solana-liquidity-store';
+import type { useSolanaComposition } from '../state/solana-composition-store';
 import type { useUniswapLiquidity } from '../state/uniswap-liquidity-store';
 import type { useRobinhoodTransfer } from '../state/robinhood-transfer-store';
 import type { useModeA } from '../state/mode-a-store';
@@ -28,6 +29,7 @@ export type SimulationSource =
   | { kind: 'public'; state: Snapshot<ReturnType<typeof usePublicTestnet>> }
   | { kind: 'solana-swap'; state: Snapshot<ReturnType<typeof useJupiter>> }
   | { kind: 'solana-pool'; state: Snapshot<ReturnType<typeof useSolanaLiquidity>> }
+  | { kind: 'solana-composition'; state: Snapshot<ReturnType<typeof useSolanaComposition>> }
   | { kind: 'uniswap-pool'; state: Snapshot<ReturnType<typeof useUniswapLiquidity>> }
   | { kind: 'transfer'; state: Snapshot<ReturnType<typeof useRobinhoodTransfer>> }
   | { kind: 'fork-swap'; state: Snapshot<ReturnType<typeof useModeA>> }
@@ -282,6 +284,37 @@ export function projectSimulation(workflow: Workflow, context: ReviewContext, so
       if (s) s.resultLabel = opening ? 'Expected pool contribution' : 'Expected withdrawal';
       range(s, q.range, 'devUSDC per SOL'); fee('Estimated network fee', q.estimatedFeeLamports, 9, 'SOL');
       if (BigInt(sim.rentPaidLamports) > 0n) fee('Account deposits', sim.rentPaidLamports, 9, 'SOL', 'Account rent, separate from network fees.');
+      break;
+    }
+    case 'solana-composition': {
+      const v = source.state.record; if (!v) break; const q = v.record.review, lp = q.liquidity;
+      if (['FAILED', 'NOT_EXECUTED', 'ATTENTION', 'EXPIRED'].includes(v.phase)) { stop('The previous result cannot be used to continue. Simulate again before continuing.'); break; }
+      // Before the swap the composed Review is the result; after it, the position's fresh Review (when prepared).
+      const position = v.phase === 'CONSUMING' && v.liquidity && !v.liquidity.attempt ? v.liquidity.review : null, planned = ['SIMULATED', 'AUTHORIZED'].includes(v.phase);
+      const provenance = v.record.provenance === 'MOCKED' ? 'MOCKED' : 'PUBLIC_DEVNET';
+      if (!planned && !position) {
+        if (!same(q.workflow)) { stop('The workflow has changed. Simulate again before continuing.'); break; }
+        view.status = 'attention'; view.message = v.phase === 'BOUND' ? 'The swap is reconciled. Prepare the position with the received amount.' : 'This run has finished. Simulate again to start a new one.';
+      } else if (!guard(same(q.workflow), provenance, iso(position?.expiresAt ?? q.expiresAt), null)) break;
+      const swapStep = step(q.swap.nodeId), poolStep = step(lp.nodeId), token = (t: 0 | 1) => t === 0 ? 'SOL' : 'devUSDC', dec = (t: 0 | 1) => t === 0 ? 9 : 6;
+      const inToken = q.swap.input.symbol === 'SOL' ? 0 : 1;
+      result(swapStep, simulationAmount(q.swap.amount, dec(inToken), token(inToken)), simulationAmount(v.record.binding?.received ?? q.swap.expectedOutput, dec(lp.boundToken), token(lp.boundToken)),
+        'Orca Whirlpools', simulationAmount(q.swap.minimumOutput, dec(lp.boundToken), token(lp.boundToken)), q.swap.slippageBps);
+      if (swapStep) swapStep.resultLabel = v.record.binding ? 'Reconciled output' : 'Simulated output';
+      const contribution = position ? [position.expected.amountA, position.expected.amountB] : [lp.expected.amount0, lp.expected.amount1];
+      const amounts = [simulationAmount(contribution[0], 9, 'SOL'), simulationAmount(contribution[1], 6, 'devUSDC')];
+      result(poolStep, null, amounts.every(Boolean) ? amounts.join(' + ') : null, 'Orca Whirlpools', null, lp.slippageBps);
+      if (poolStep) {
+        poolStep.resultLabel = position ? 'Expected pool contribution' : 'Projected pool contribution';
+        poolStep.details.push({ label: 'Funded by', value: lp.capIsFullOutput ? '100% of the swap’s reconciled output' : `The swap’s reconciled output, up to ${simulationAmount(lp.cap, dec(lp.boundToken), token(lp.boundToken))}` });
+        if (v.record.binding) poolStep.details.push({ label: 'Bound amount', value: simulationAmount(v.record.binding.bound, dec(lp.boundToken), token(lp.boundToken)) ?? '—' });
+      }
+      range(poolStep, position?.range ?? { lowerPrice: lp.lowerPrice, upperPrice: lp.upperPrice, state: lp.expected.state }, 'devUSDC per SOL');
+      fee('Estimated swap network fee', v.swap.review.estimatedFeeLamports, 9, 'SOL');
+      if (position) fee('Estimated position network fee', position.estimatedFeeLamports, 9, 'SOL');
+      for (const check of lp.preflight) if (!check.ok && !check.blocking) warn('attention', 'With this range, the position would not use any of the swap output.');
+      warn('attention', 'The swap and the position are separate transactions. If the position is not opened, the swapped tokens stay in your wallet; the swap is never repeated.');
+      if (!position && planned) warn('info', 'Position amounts are a projection. The position is simulated with the actual swap output and reviewed again after the swap.');
       break;
     }
     case 'transfer': {

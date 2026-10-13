@@ -181,6 +181,29 @@ export function projectExecutionEvidence(source: ExecutionLifecycleSource, progr
         amount('transaction', 'Account rent refunded', effects.rentRefundedLamports, 9, 'SOL');
       } break;
     }
+    case 'solana-composition': {
+      const v = source.state.record; if (!v) break;
+      const q = v.record.review, chain = q.chain, symbol = (s: string) => s === 'USDC' ? 'devUSDC' : s;
+      evidence.wallet = q.owner; bundle(v.record.evidence?.bundle, v.record.evidence?.bundleHash);
+      const swapObserved = v.swap.observations?.findLast(item => item.signature === v.swap.attempt?.signature);
+      if (v.swap.attempt) failure('swap', v.swap.attempt.state, v.swap.attempt.signature, v.swap.notSubmitted ? v.swap.walletDiagnostic?.code : undefined);
+      fee('swap', chain, swapObserved?.signature, swapObserved?.feeLamports, 9, 'SOL');
+      if (v.swap.attempt?.reconciled && swapObserved?.verdict === 'RECONCILED') {
+        amount('swap', 'Executed input', swapObserved.inputSpent, q.swap.input.decimals, symbol(q.swap.input.symbol), q.swap.amount);
+        amount('swap', 'Actual received', swapObserved.outputReceived, q.swap.output.decimals, symbol(q.swap.output.symbol), q.swap.expectedOutput);
+      }
+      if (v.record.binding) amount('position', 'Bound from the swap', v.record.binding.bound, q.liquidity.boundToken === 0 ? 9 : 6, q.liquidity.boundToken === 0 ? 'SOL' : 'devUSDC');
+      const lp = v.liquidity, lpObserved = lp?.observations?.findLast(item => item.signature === lp.attempt?.signature);
+      if (lp?.attempt && v.phase !== 'BOUND') failure('position', lp.attempt.state, lp.attempt.signature, lp.notSubmitted ? lp.walletDiagnostic?.code : undefined);
+      fee('position', chain, lpObserved?.signature, lpObserved?.feeLamports, 9, 'SOL');
+      if (lp?.attempt?.reconciled && lpObserved?.verdict === 'RECONCILED' && lpObserved.effects) {
+        amount('position', 'Actual liquidity deposited · Token 1', lpObserved.effects.depositedA, lp.review.token0.decimals, lp.review.token0.symbol);
+        amount('position', 'Actual liquidity deposited · Token 2', lpObserved.effects.depositedB, lp.review.token1.decimals, symbol(lp.review.token1.symbol));
+        amount('position', 'Account rent paid', lpObserved.effects.rentPaidLamports, 9, 'SOL');
+      }
+      if (v.phase === 'PARTIAL') evidence.attention.push('The run ended after the swap. The swapped tokens stayed in your wallet; no position was opened by this run.');
+      break;
+    }
     case 'transfer': {
       const record = source.state.record; if (!record) break;
       evidence.wallet = record.review.account; bundle(record.evidence?.bundle, record.evidence?.bundleHash);

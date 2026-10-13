@@ -65,7 +65,9 @@ export function createBackend(options: BackendOptions) {
     const key = `${tenantId}\0${flow}\0${observer}`;
     let value = services.get(key);
     if (!value) {
-      value = FLOWS[flow].create(storage(flow, tenantId), depsFor(flow, observer));
+      // A composed flow receives exactly the storage of the flows it declares, in the same tenant (never another tenant or flow).
+      const related = Object.fromEntries((FLOWS[flow].uses ?? []).map(name => [name, storage(name, tenantId)]));
+      value = FLOWS[flow].create(storage(flow, tenantId), depsFor(flow, observer), related);
       services.set(key, value);
     }
     return value;
@@ -115,7 +117,7 @@ export function createBackend(options: BackendOptions) {
     if (!definition.methods[method]!.validate(args)) throw new HttpError(400, 'ARGUMENTS_INVALID');
     if (flowMode(flow, env) === 'off') return { ok: false, code: disabledCode(flow) };
     return withSpan(logger, 'flow.preview', { flow, action: method }, async () => {
-      try { return { ok: true, value: await definition.create(previewStorage(), depsFor(flow, true)).call(method, args) } as const; }
+      try { return { ok: true, value: await definition.create(previewStorage(), depsFor(flow, true), {}).call(method, args) } as const; }
       catch (error) {
         if (!(error instanceof Error && CODE.test(error.message))) logger.warn('flow.unclassified_error', { flow, action: method });
         return { ok: false, code: error instanceof Error && CODE.test(error.message) ? error.message : definition.unavailableCode } as const;

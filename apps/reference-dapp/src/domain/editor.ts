@@ -13,6 +13,8 @@ import { createBridgeSwapWorkflow } from './bridge-swap-authoring';
 import { createAcrossWorkflow } from './across-authoring';
 import { createCrossChainLiquidityWorkflow } from './cross-chain-liquidity';
 import { canDeleteCanvasEdge, canDeleteCanvasNode, deletableCanvasNodes } from './canvas-keyboard';
+import { bindCompositionConsumer, compositionBindingFor, unbindCompositionConsumer } from '@defi-workflow-engine/action-registry';
+import { readConcentratedLiquiditySource } from '@defi-workflow-engine/workflow-contracts';
 
 import { createAuthoredSupply, createAuthoredBorrow, createAuthoredRepay, createAuthoredWithdraw } from './supply-authoring';
 import { createAuthoredTransfer } from './robinhood-transfer-authoring';
@@ -88,7 +90,8 @@ export function editorReducer(state: EditorState, command: Command, context?: Re
       let replacement = createSolanaSwapNode(id, command.input);
       if (command.type === 'SET_SOLANA_SWAP') replacement = { ...replacement, dependencies: [...current.nodes.find(n => n.nodeId === id)!.dependencies] };
       if (command.type === 'SET_SOLANA_SWAP' && JSON.stringify(replacement) === JSON.stringify(current.nodes.find(n => n.nodeId === id))) return { workflow: current, error: null };
-      const workflow = { ...current, revision: current.revision + 1, nodes: command.type === 'ADD_SOLANA_SWAP' ? [...current.nodes, replacement] : current.nodes.map(n => n.nodeId === id ? replacement : n) };
+      let workflow: Workflow = { ...current, revision: current.revision + 1, nodes: command.type === 'ADD_SOLANA_SWAP' ? [...current.nodes, replacement] : current.nodes.map(n => n.nodeId === id ? replacement : n) };
+      if (command.type === 'SET_SOLANA_SWAP') workflow = rebindConsumers(workflow, replacement);
       if (!context) return reject('REVIEW_CONTEXT_REQUIRED');
       validateWorkflowDraft(workflow, context); return { workflow: freeze(workflow), error: null };
     } catch (cause) { return reject(cause instanceof Error ? cause.message : 'SOLANA_SWAP_INPUT_INVALID'); }
@@ -98,7 +101,11 @@ export function editorReducer(state: EditorState, command: Command, context?: Re
       if (command.type === 'SET_SOLANA_LIQUIDITY' && !current.nodes.some(n => n.nodeId === command.nodeId && solanaLiquidityDetails(n))) return reject('UNKNOWN_SOLANA_LIQUIDITY_NODE');
       const id = command.type === 'SET_SOLANA_LIQUIDITY' ? command.nodeId : `node-${String(current.revision + 2).padStart(3, '0')}`;
       let replacement = createSolanaLiquidityNode(id, command.input);
-      if (command.type === 'SET_SOLANA_LIQUIDITY') replacement = { ...replacement, dependencies: [...current.nodes.find(n => n.nodeId === id)!.dependencies] };
+      if (command.type === 'SET_SOLANA_LIQUIDITY') {
+        const old = current.nodes.find(n => n.nodeId === id)!, source = readConcentratedLiquiditySource(old as never).source, producer = current.nodes.find(n => n.nodeId === source?.nodeId);
+        // A bound position stays bound to its swap output; its token side follows the swap, never the edit.
+        replacement = source && producer ? bindCompositionConsumer(replacement, producer) : { ...replacement, dependencies: [...old.dependencies] };
+      }
       if (command.type === 'SET_SOLANA_LIQUIDITY' && JSON.stringify(replacement) === JSON.stringify(current.nodes.find(n => n.nodeId === id))) return { workflow: current, error: null };
       const workflow = { ...current, revision: current.revision + 1, nodes: command.type === 'ADD_SOLANA_LIQUIDITY' ? [...current.nodes, replacement] : current.nodes.map(n => n.nodeId === id ? replacement : n) };
       if (!context) return reject('REVIEW_CONTEXT_REQUIRED');
@@ -210,18 +217,24 @@ export function editorReducer(state: EditorState, command: Command, context?: Re
       return nodes.find(n => n.nodeId === id)!.dependencies.some(parent => ancestors(parent, seen));
     };
     if (ancestors(command.from)) return reject('CYCLIC_CONNECTION');
-    const mockLink = nodes.find(n => n.nodeId === command.from)!.actionType.startsWith('mock-') && target.actionType.startsWith('mock-');
+    const producer = nodes.find(n => n.nodeId === command.from)!;
+    const mockLink = producer.actionType.startsWith('mock-') && target.actionType.startsWith('mock-');
     if (mockLink && target.inputs.some(input => input.name === 'source')) return reject('INPUT_ALREADY_CONNECTED');
-    nodes = nodes.map(n => n.nodeId === command.to ? { ...n, dependencies: [...n.dependencies, command.from],
+    // A registered composition pair links typed: the position's maximum for the swapped token becomes min(cap, the swap's
+    // actual reconciled output). Any other link stays an ordering dependency, as before.
+    const composition = !mockLink && !target.dependencies.length && !target.inputs.some(input => input.kind === 'OUTPUT_REFERENCE') ? compositionBindingFor(producer, target) : null;
+    const bound = composition ? bindCompositionConsumer(target, producer) : null;
+    nodes = nodes.map(n => n.nodeId === command.to ? bound ?? { ...n, dependencies: [...n.dependencies, command.from],
       inputs: mockLink ? [...n.inputs, { name: 'source' as const, kind: 'OUTPUT_REFERENCE' as const,
         value: { nodeId: command.from, outputId: 'result' } }] : n.inputs,
     } : n);
     if (mockLink) resourceEdges.push({ fromNodeId: command.from, outputId: 'result', toNodeId: command.to, inputName: 'source' });
+    if (bound && composition) resourceEdges.push({ fromNodeId: command.from, outputId: composition.binding.producer.outputId, toNodeId: command.to, inputName: bound.inputs.at(-1)!.name });
   } else if (command.type === 'DISCONNECT') {
     if (!current.nodes.some(node => node.nodeId === command.to && node.dependencies.includes(command.from))) return reject('UNKNOWN_CONNECTION');
     if (!canDeleteCanvasEdge(current, command.from, command.to)) return reject('PROTECTED_CONNECTION: this connection is required by the workflow.');
     resourceEdges = resourceEdges.filter(edge => !(edge.fromNodeId === command.from && edge.toNodeId === command.to));
-    nodes = nodes.map(node => node.nodeId === command.to ? { ...node,
+    nodes = nodes.map(node => node.nodeId === command.to && boundTo(node, command.from) ? unbindCompositionConsumer(node) : node.nodeId === command.to ? { ...node,
       dependencies: node.dependencies.filter(id => id !== command.from),
       inputs: node.inputs.filter(input => !(input.name === 'source' && input.kind === 'OUTPUT_REFERENCE'
         && input.value.nodeId === command.from)),
@@ -297,4 +310,23 @@ export function editorReducer(state: EditorState, command: Command, context?: Re
     catch (cause) { return reject(cause instanceof Error ? cause.message : 'INVALID_WORKFLOW'); }
   } else if (nodes.some(n => [SWAP_ACTION, LIQUIDITY_ACTION].includes(n.actionType))) return reject('REVIEW_CONTEXT_REQUIRED');
   return { workflow: freeze(candidate), error: null };
+}
+
+/** A position bound to `producer`'s output (composition-bindings.ts). */
+function boundTo(node: Workflow['nodes'][number], producer: string): boolean {
+  try { return readConcentratedLiquiditySource(node as never).source?.nodeId === producer; } catch { return false; }
+}
+/** After a swap edit, each position bound to it is re-bound to the swap's (possibly changed) output token, or left as an ordering link. */
+function rebindConsumers(workflow: Workflow, producer: Workflow['nodes'][number]): Workflow {
+  let resourceEdges = [...workflow.resourceEdges];
+  const nodes = workflow.nodes.map(node => {
+    if (!boundTo(node, producer.nodeId)) return node;
+    resourceEdges = resourceEdges.filter(edge => !(edge.fromNodeId === producer.nodeId && edge.toNodeId === node.nodeId));
+    const isolated = unbindCompositionConsumer(node), match = compositionBindingFor(producer, isolated);
+    if (!match) return { ...isolated, dependencies: [producer.nodeId] };
+    const bound = bindCompositionConsumer(isolated, producer);
+    resourceEdges.push({ fromNodeId: producer.nodeId, outputId: match.binding.producer.outputId, toNodeId: node.nodeId, inputName: bound.inputs.at(-1)!.name });
+    return bound;
+  });
+  return { ...workflow, nodes, resourceEdges };
 }

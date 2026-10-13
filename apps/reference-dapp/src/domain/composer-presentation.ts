@@ -83,7 +83,7 @@ export function composerSummary(workflow: Workflow, node: Workflow['nodes'][numb
   const amount = lending ? `${node.actionType === 'supply' ? lending.supply : lending.borrow} USDC` : money ? `${money.amount} ${money.asset}` :
     transfer ? `${transfer.amount} ${transfer.asset}` : router ? `${router.amount} ${router.token}` : bridge ? `${bridge.amount} USDC` :
     solana ? `${solana.amount} ${solana.from}` : swap ? `${swap.amount} ${swap.from}` : catalogSwap ? `${catalogSwap.amount} ${catalogSwap.from}` :
-    uni ? `${uni.maxUsdc} USDC + ${uni.maxWeth} WETH` : rhPool ? `${rhPool.amountA} ${rhPool.tokenA} + ${rhPool.amountB} ${rhPool.tokenB}` : orca ? `${orca.maxSol} SOL + ${orca.maxDevUsdc} devUSDC` :
+    uni ? `${uni.maxUsdc} USDC + ${uni.maxWeth} WETH` : rhPool ? `${rhPool.amountA} ${rhPool.tokenA} + ${rhPool.amountB} ${rhPool.tokenB}` : orca ? orcaAmount(orca) :
     position ? `${formatHumanAmount(position.amountWeth, 'WETH', context)} WETH + ${formatHumanAmount(position.amountUsdc, 'USDC', context)} USDC` :
     linked ? 'Amount from linked step' : 'Amount not available';
   const detail = solana ? `${solana.from} → ${solana.to}` : swap ? `${swap.from} → ${swap.to}` : catalogSwap ? `${catalogSwap.from} → ${catalogSwap.to}` :
@@ -133,4 +133,11 @@ export function composerConnections(workflow: Workflow) {
       label: previous && previous.label !== 'After previous step' ? `${previous.label} · ${label}` : label });
   }
   return [...pairs.values()];
+}
+
+/** A bound position names where the swapped token comes from: the swap's reconciled output, capped by the owner's maximum. */
+function orcaAmount(orca: NonNullable<ReturnType<typeof solanaLiquidityDetails>>): string {
+  const fromSwap = (cap: string, symbol: string) => orca.source!.fullOutput ? `all ${symbol} from the swap` : `up to ${cap} ${symbol} from the swap`;
+  if (!orca.source) return `${orca.maxSol} SOL + ${orca.maxDevUsdc} devUSDC`;
+  return orca.source.token === 1 ? `${orca.maxSol} SOL + ${fromSwap(orca.maxDevUsdc, 'devUSDC')}` : `${fromSwap(orca.maxSol, 'SOL')} + ${orca.maxDevUsdc} devUSDC`;
 }

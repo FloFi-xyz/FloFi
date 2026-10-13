@@ -34,6 +34,7 @@ vi.mock('./router-store', () => ({ useRouter: () => f.router }));
 vi.mock('./public-testnet-store', () => ({ usePublicTestnet: () => ({}) }));
 vi.mock('./jupiter-store', () => ({ useJupiter: () => ({}) }));
 vi.mock('./solana-liquidity-store', () => ({ useSolanaLiquidity: () => ({}) }));
+vi.mock('./solana-composition-store', () => ({ useSolanaComposition: () => ({ record: null, busy: false, error: null, retired: false, recovered: false, executionEnabled: false, signing: false, owner: null, authorized: false }) }));
 vi.mock('./uniswap-liquidity-store', () => ({ useUniswapLiquidity: () => ({}) }));
 vi.mock('./robinhood-transfer-store', () => ({ useRobinhoodTransfer: () => ({}) }));
 vi.mock('./across-store', () => ({ useAcross: () => ({}) }));

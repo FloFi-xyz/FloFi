@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { openProposalReview, openSimulationDetails, acceptProductReview } from './fixtures';
+import { expect, openProposalReview, openSimulationDetails, acceptProductReview } from './fixtures';
 import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -45,4 +45,27 @@ export async function reviewDevnetSwap(page: Page) {
   await devnetPanel(page).getByRole('button', { name: 'Simulate swap' }).click();
   await devnetPanel(page).getByRole('definition').filter({ hasText: '→ expected' }).waitFor();
   await acceptProductReview(page);
+}
+
+/** The Canvas re-fits after each edit; positions are read only once its viewport transform has stopped changing. */
+async function settledViewport(page: Page) {
+  let last: string | null = null, stable = 0;
+  await expect.poll(async () => {
+    const current = await page.locator('.build-flow-surface .react-flow__viewport').getAttribute('style');
+    stable = current === last ? stable + 1 : 0; last = current;
+    return stable;
+  }, { intervals: [100] }).toBeGreaterThanOrEqual(3);
+}
+/** Drags the swap's output onto the position's input (after moving the position card clear of the swap; layout only). */
+export async function linkSwapToPosition(page: Page, swap = 'node-002', position = 'node-003') {
+  const node = (id: string) => page.locator(`.build-flow-surface .react-flow__node[data-id="${id}"]`);
+  await settledViewport(page);
+  const title = (await node(position).locator('.composer-action-title').boundingBox())!;
+  await page.mouse.move(title.x + 10, title.y + title.height / 2); await page.mouse.down();
+  await page.mouse.move(title.x + 360, title.y + 220, { steps: 12 }); await page.mouse.up();
+  await settledViewport(page);
+  const a = (await node(swap).locator('.react-flow__handle.source').boundingBox())!, b = (await node(position).locator('.react-flow__handle.target').boundingBox())!;
+  await page.mouse.move(a.x + a.width / 2, a.y + a.height / 2); await page.mouse.down();
+  await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 16 }); await page.mouse.up();
+  await expect(page.locator(`.build-flow-surface .react-flow__edge[data-id="${swap}-${position}"]`)).toBeVisible();
 }

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { Workflow } from './initial-workflow';
-import { isLendingComposition } from '@defi-workflow-engine/workflow-contracts';
+import { isLendingComposition, readConcentratedLiquiditySource } from '@defi-workflow-engine/workflow-contracts';
+import { compositionBindingFor } from '@defi-workflow-engine/action-registry';
+const boundSource = (node: Workflow['nodes'][number]) => { try { return readConcentratedLiquiditySource(node as never).source?.nodeId ?? null; } catch { return null; } };
 export function isTextEntry(target: EventTarget | null): boolean {
   if (typeof Element === 'undefined' || !(target instanceof Element)) return false;
   return Boolean(target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"], [role="combobox"], [role="searchbox"], [role="spinbutton"], [aria-multiline="true"]'));
@@ -33,7 +35,9 @@ export function canDeleteCanvasEdge(workflow: Workflow, from: string, to: string
   // checkpoint dependency, even though that link carries no asset output.
   return Boolean(source && target && !isLendingComposition(workflow) && target.dependencies.includes(from)
     && (!workflow.resourceEdges.some(edge => edge.fromNodeId === from && edge.toNodeId === to)
-      || source.actionType.startsWith('mock-') && target.actionType.startsWith('mock-')));
+      || source.actionType.startsWith('mock-') && target.actionType.startsWith('mock-')
+      // A swap → position binding can be unlinked; the position returns to its isolated form.
+      || compositionBindingFor(source, target) !== null && boundSource(target) === from));
 }
 export function canvasShortcut(key: string, textEntry: boolean, selectedId: string | null,
   workflow: Workflow): 'REMOVE' | 'CLEAR' | null {
