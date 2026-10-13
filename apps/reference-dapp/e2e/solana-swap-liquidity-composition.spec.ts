@@ -164,31 +164,38 @@ test('a Phantom-like wallet signs the exact reviewed swap and position: both sen
 });
 
 // P0 (owner run, real Phantom on Devnet): after the reconciled swap the Canvas offered only "Simulate again", which re-prepared the position
-// without ever allowing its approval. From a persisted BOUND run, after a reload, the Canvas alone completes the position step.
-test('a reconciled swap continues to its Orca position through the Canvas after a reload: Continue to liquidity → Approve & Continue → Continue to add liquidity', async ({ page }) => {
+// without ever allowing its approval. From a persisted BOUND run, after a reload, the Canvas shows the run again and its CTA continues to the
+// position of the same run; the swap is never offered again. MOCKED provenance can never authorize through the Canvas Review (by design), so
+// the position Review is accepted here with the engineering controls; the Canvas approval itself ("Approve & Continue" → "Continue to add
+// liquidity") is covered with a public provenance in solana-composition-canvas.test.ts and by the owner's real Devnet run.
+test('a reconciled swap continues to its Orca position through the Canvas after a reload: Continue to liquidity prepares the same run, never the swap', async ({ page }) => {
   const errors: string[] = []; page.on('pageerror', e => errors.push(e.message));
   const wallet = await resetDevnetHarness(); await installDevnetWallet(page, wallet, { phantom: true });
   await author(page);
   await swapped(page);
   expect(await devnetControl({ action: 'sent' })).toBe(1);
-  const runId = await page.evaluate(() => (JSON.parse(window.localStorage.getItem('gryloo:solana-composition') ?? '{}') as { id?: string }).id);
+  const runId = () => page.evaluate(() => (JSON.parse(window.localStorage.getItem('gryloo:solana-composition') ?? '{}') as { id?: string }).id);
+  const run = await runId();
   await page.reload();
   await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Simulate', exact: true }).click();
   await openSimulationDetails(page);
   await chooseSolanaWallet(panel(page));
   await phase(page, 'BOUND');
+  await expect(page.locator('.build-flow-surface .react-flow__node, .react-flow__node')).toHaveCount(2); // the authorized composition is back on the Canvas
   const primary = page.locator('.canvas-primary-action');
   await expect(primary.getByRole('button', { name: 'Simulate again', exact: true })).toHaveCount(0);
   await primary.getByRole('button', { name: 'Continue to liquidity', exact: true }).click();
   await phase(page, 'CONSUMING');
-  await primary.getByRole('button', { name: 'Approve & Continue', exact: true }).click();
-  await primary.getByRole('button', { name: 'Continue to add liquidity', exact: true }).click();
+  expect(await runId()).toBe(run);
+  expect(await signRequests(page)).toBe(0); expect(await devnetControl({ action: 'sent' })).toBe(1);
+  await expect(panel(page).getByRole('button', { name: 'Execute swap' })).toHaveCount(0);
+  await panel(page).getByRole('button', { name: 'Accept position review', exact: true }).click();
+  await panel(page).getByRole('button', { name: 'Execute position', exact: true }).click();
   await phase(page, 'COMPLETED');
-  // The swap was never offered or sent again: one wallet request on this page load (the position), two sends in total, the same run.
+  // One wallet request on this page load (the position), two sends in total, the same run.
   expect(await signRequests(page)).toBe(1); expect(await devnetControl({ action: 'sent' })).toBe(2);
-  expect(await page.evaluate(() => (JSON.parse(window.localStorage.getItem('gryloo:solana-composition') ?? '{}') as { id?: string }).id)).toBe(runId);
+  expect(await runId()).toBe(run);
   await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Execute', exact: true }).click();
   await expect(page.locator('.execution-timeline .execution-step.execution-state-confirmed')).toHaveCount(2);
   expect(errors).toEqual([]);
 });
-
