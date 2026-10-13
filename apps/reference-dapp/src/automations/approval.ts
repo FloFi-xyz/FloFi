@@ -56,10 +56,13 @@ export function automationClaimPolicy(store: Pick<AutomationStore, 'ruleById' | 
   };
 }
 
-/** Automations' contribution to /approve, or null while they are not enabled on this deployment. No viewer requester: sharing stays the owner's choice. */
-export function automationApprovalContributor(env: Env, config: AutomationConfig | null = null): ApprovalContributor | null {
+/**
+ * Automations' contribution to /approve, or null while they are not enabled on this deployment. No viewer requester: sharing stays the owner's choice.
+ * `now` is the clock the deployment's approval routes pass to the shared functions, so the claim policy decides expiry on that same clock.
+ */
+export function automationApprovalContributor(env: Env, config: AutomationConfig | null = null, now: () => Date = () => new Date()): ApprovalContributor | null {
   const resolved = config ?? readAutomationConfig(env);
   if (!resolved.enabled) return null;
   return host => ({ scheme: automationApprovalScheme(resolved.keys),
-    profiles: { AUTOMATION_RULE: { policy: resolved.policy, claimPolicy: automationClaimPolicy(createPgAutomationStore(host.db, host.tenantId)) } } });
+    profiles: { AUTOMATION_RULE: { policy: resolved.policy, claimPolicy: automationClaimPolicy(createPgAutomationStore(host.db, host.tenantId), now) } } });
 }

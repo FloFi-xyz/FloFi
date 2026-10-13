@@ -17,12 +17,15 @@
  *   FLOFI_AUTOMATION_CHAINLINK_RPC_URL         Base mainnet JSON-RPC (https; default GRYLOO_BASE_RPC_URL, else https://mainnet.base.org)
  *   FLOFI_AUTOMATION_CHAINLINK_FEEDS           `ETH=0x…,BTC=0x…,SOL=0x…` — Chainlink USD proxy addresses on Base mainnet (verified on-chain)
  *   FLOFI_AUTOMATION_PRICE_MAX_AGE_SECONDS     an observation older than this is stale (default 3600; 60–86400)
- *   FLOFI_AUTOMATION_PRICE_FIXTURE             fixture source only: absolute path under /tmp/ (refused on a hosted deployment)
+ *   FLOFI_AUTOMATION_PRICE_FIXTURE             fixture source only: absolute path under /tmp/ or the process's own TMPDIR (refused on a hosted
+ *                                              deployment)
  *   FLOFI_AUTOMATION_TEST_CLOCK                enabled: the bearer dispatch accepts `x-flofi-automation-now` (refused on a hosted deployment)
  *
  * None of this is financial authority: the policy only decides which proposals FloFi will even hand to their owner for review.
  */
 import { createHash, hkdfSync, timingSafeEqual } from 'node:crypto';
+import { tmpdir } from 'node:os';
+import { isAbsolute, join } from 'node:path';
 import { NETWORKS } from '../engine/strategy-engine';
 import { NETWORK_IDS, type NetworkId } from '../engine/strategy-spec';
 import type { HandoffPolicy } from '../platform/index.ts';
@@ -98,6 +101,12 @@ export function readAutomationConfig(env: Env): AutomationConfigResult {
     dispatchTokenDigest: dispatch === '' ? null : Buffer.from(dispatch, 'hex'), price, testClock, hosted });
 }
 
+/** A fixture file lives in a disposable temporary directory: /tmp/ or this process's own TMPDIR (absolute, never the filesystem root). */
+function temporaryPath(path: string): boolean {
+  const own = tmpdir();
+  return path.startsWith('/tmp/') || (isAbsolute(own) && own !== '/' && path.startsWith(join(own, '/')));
+}
+
 /** The price source settings (shared by the web deployment and the Railway worker); `reason` names the invalid variable. */
 function readPriceSourceConfig(env: Env, hosted: boolean): PriceSourceConfig | { readonly reason: string } {
   const maxAgeSeconds = env.FLOFI_AUTOMATION_PRICE_MAX_AGE_SECONDS === undefined || env.FLOFI_AUTOMATION_PRICE_MAX_AGE_SECONDS === '' ? 3_600
@@ -114,7 +123,7 @@ function readPriceSourceConfig(env: Env, hosted: boolean): PriceSourceConfig | {
   }
   if (kind === 'fixture') {
     const path = env.FLOFI_AUTOMATION_PRICE_FIXTURE ?? '';
-    if (hosted || !path.startsWith('/tmp/') || path.includes('..') || path.length > 256) return { reason: 'FLOFI_AUTOMATION_PRICE_FIXTURE' };
+    if (hosted || !temporaryPath(path) || path.includes('..') || path.length > 256) return { reason: 'FLOFI_AUTOMATION_PRICE_FIXTURE' };
     return { kind: 'fixture', path, maxAgeMs: maxAgeSeconds * 1000 };
   }
   return { reason: 'FLOFI_AUTOMATION_PRICE_SOURCE' };
