@@ -11,7 +11,7 @@ import { editCommandFor, removeCommandFor } from './workflow-edits';
 import { COPILOT_AUTHORING_COMMANDS, COPILOT_NETWORK_LABEL, COPILOT_POOLS, amountReadings, canonicalDecimal, copilotRejection, groundedAmount, planCopilotActions,
   proposalFromPlan, type CarriedField, type CopilotOutcome, type Grounding, type SwapSource } from './copilot-authoring';
 import { SOLANA_LIQUIDITY_DEFAULT_SLIPPAGE, solanaLiquidityDetails, type SolanaLiquidityInput } from './solana-liquidity-authoring';
-import { formatTokenAmount } from './jupiter-authoring';
+import { formatTokenAmount, parseTokenAmount } from './jupiter-authoring';
 import { ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY } from '@defi-workflow-engine/action-registry';
 import { orcaLiquidityAmounts, orcaSqrtPriceAtTick } from '@defi-workflow-engine/reference-compiler';
 import { COPILOT_LIMITS, hasUnsafeCharacters, safeCopilotProse, type CopilotAction, type CopilotFeeTier, type CopilotLendingAction, type CopilotNetwork,
@@ -34,7 +34,7 @@ import { answerQuestion, stepSummary, type CopilotFacts } from './copilot-answer
 export type TranscriptEntry = { readonly role: 'user' | 'assistant'; readonly text: string };
 /** A proposal Flofi showed, as Flofi recorded it from the Command and its editor preview (never as the model described it). */
 export type CopilotReferent = { readonly command: Command; readonly sentence: string; readonly step: WorkflowStep };
-export type ContextSnapshot = { readonly workflow: Workflow; readonly pending: object | null; readonly wallet: string | null; readonly walletChainId: string | null };
+export type ContextSnapshot = { readonly workflow: Workflow; readonly pending: object | null; readonly wallet: string | null; readonly walletChainId: string | null; readonly solanaOwner?: string | null };
 type Resolved =
   | { readonly source: 'PENDING'; readonly step: WorkflowStep; readonly command: Command }
   | { readonly source: 'NODE'; readonly step: WorkflowStep }
@@ -90,12 +90,12 @@ export const COPILOT_V2_COMMANDS: ReadonlySet<string> = new Set([...COPILOT_AUTH
   'MANAGE_SOLANA_POSITION']);
 export const emptyConversation = (): CopilotConversation => ({ transcript: [], segment: [], clarifications: 0, draft: null, referents: [], language: 'EN' });
 export const snapshotOf = (env: CopilotEnvironment): ContextSnapshot =>
-  ({ workflow: env.workflow, pending: env.pending, wallet: env.wallet, walletChainId: env.walletChainId });
+  ({ workflow: env.workflow, pending: env.pending, wallet: env.wallet, walletChainId: env.walletChainId, solanaOwner: env.verified?.solanaOwner ?? null });
 /** What changed between two snapshots, by identity: the IR and the pending proposal are immutable objects replaced on every change. */
 export function contextChange(a: ContextSnapshot, b: ContextSnapshot): 'WORKFLOW' | 'PROPOSAL' | 'WALLET' | null {
   if (a.workflow !== b.workflow) return 'WORKFLOW';
   if (a.pending !== b.pending) return 'PROPOSAL';
-  return a.wallet !== b.wallet || a.walletChainId !== b.walletChainId ? 'WALLET' : null;
+  return a.wallet !== b.wallet || a.walletChainId !== b.walletChainId || (a.solanaOwner ?? null) !== (b.solanaOwner ?? null) ? 'WALLET' : null;
 }
 
 // A private key, seed phrase or other 64-hex secret is refused locally: it is never sent to the model and never stored.
@@ -570,7 +570,13 @@ function resolveIntent(intent: CopilotIntentV2, state: CopilotConversation, env:
         const remaining = env.verified?.remaining ?? [];
         if (!remaining.length) return question(state, m, m.remainingUnavailable, [], null);
         const deposits = [...liquidity.deposits.filter(deposit => !remaining.some(item => COPILOT_POOLS.ORCA.symbol(deposit.asset) === item.token)),
-          ...remaining.map(item => ({ asset: item.token === 'SOL' ? 'SOL' : 'DEVUSDC', maxAmount: item.amount }))];
+          ...remaining.map(item => {
+            const explicit = liquidity.deposits.find(deposit => COPILOT_POOLS.ORCA.symbol(deposit.asset) === item.token);
+            const decimals = item.token === 'SOL' ? 9 : 6;
+            const cap = explicit && groundedAmount(segmentText(state), explicit.maxAmount) ? BigInt(parseTokenAmount(explicit.maxAmount, decimals)) : null;
+            const received = BigInt(parseTokenAmount(item.amount, decimals));
+            return { asset: item.token === 'SOL' ? 'SOL' : 'DEVUSDC', maxAmount: cap !== null && cap < received ? explicit!.maxAmount : item.amount };
+          })];
         actions = [{ ...liquidity, protocol: 'ORCA', network: 'SOLANA_DEVNET', deposits, funding: null }];
         for (const field of ['protocol', 'network', ...remaining.map(item => `deposit:${item.token}`)] as CarriedField[]) carried.add(field);
         notes = [...notes, ...remaining.map(item => m.remainingNote(item.amount, item.token))];

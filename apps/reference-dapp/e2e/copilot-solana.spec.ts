@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { Page } from '@playwright/test';
-import { test, expect, applyPendingProposal } from './fixtures';
+import { test, expect, applyPendingProposal, openSimulationDetails } from './fixtures';
+import { seedCopilotPosition } from './copilot-solana-fixtures';
+import { assertSimulationReviewBlocked } from './release-safety-fixtures';
 import { chooseSolanaWallet, signRequests } from './jupiter-fixtures';
 import { devnetControl, installDevnetWallet, resetDevnetHarness } from './solana-devnet-fixtures';
 
@@ -57,29 +59,44 @@ test('"these tokens" links a position to the applied swap; Flofi asks for the ot
   await revision(page, 3);
 });
 
-test('partial removal from chat selects the verified FloFi position; the owner still simulates and signs', async ({ page }) => {
-  const wallet = await resetDevnetHarness(); await installDevnetWallet(page, wallet);
+test('chat selects the second registered position for partial removal and exit; MOCKED Review stays blocked', async ({ page }) => {
+  const wallet = await resetDevnetHarness();
+  await seedCopilotPosition(wallet);
+  const selected = await seedCopilotPosition(wallet);
+  await installDevnetWallet(page, wallet);
   await page.goto('/app');
   await ask(page, 'Add liquidity 0.01 SOL and 0.30 devUSDC ticks -39104 to -36992 on Solana Devnet');
   await applyPendingProposal(page);
   await page.getByRole('button', { name: 'Simulate workflow' }).click();
+  await openSimulationDetails(page);
   await chooseSolanaWallet(liquidityPanel(page));
-  await liquidityPanel(page).getByRole('button', { name: 'Simulate position' }).click();
-  await page.getByRole('button', { name: 'Review position', exact: true }).click();
-  await liquidityPanel(page).getByRole('button', { name: 'Accept liquidity review' }).click();
-  await liquidityPanel(page).getByRole('button', { name: 'Execute position' }).click();
-  await expect(liquidityPanel(page).getByRole('region', { name: 'Liquidity result' }).getByRole('heading', { name: 'Success' })).toBeVisible();
-  expect(await signRequests(page)).toBe(1);
+  await expect(liquidityPanel(page).getByRole('region', { name: 'Your Flofi positions' })).toContainText(selected);
   await stage(page, 'Build');
   await ask(page, 'Remove 25% of my liquidity');
+  await expect(copilotSays(page)).toContainText('Which position do you mean?');
+  await ask(page, `Position ${selected.slice(0, 4)}…${selected.slice(-4)} · ticks -39104 to -36992`);
   await expect(copilotSays(page)).toContainText('Remove 25% of the liquidity of your Flofi position');
-  await expect(copilotSays(page)).toContainText('Nothing is removed until you simulate, review and sign.');
   await applyPendingProposal(page);
   await stage(page, 'Simulate');
+  await openSimulationDetails(page);
   await expect(liquidityPanel(page).locator('#orca-operation')).toHaveValue('DECREASE_PARTIAL');
   await expect(liquidityPanel(page).getByLabel('Portion to remove (bps)')).toHaveValue('2500');
   await liquidityPanel(page).getByRole('button', { name: 'Simulate removal' }).click();
   await expect(liquidityPanel(page).getByRole('term').filter({ hasText: /^Expected principal returned$/ })).toBeVisible();
-  // Nothing was signed or sent by the chat: still only the owner's one position transaction.
-  expect(await signRequests(page)).toBe(1); expect(await devnetControl({ action: 'sent' })).toBe(1);
+  await expect(liquidityPanel(page).getByRole('definition').filter({ hasText: selected })).toBeVisible();
+  await expect(page.locator('.canvas-primary-action').getByRole('button', { name: 'Approve & Continue', exact: true })).toBeDisabled();
+  await stage(page, 'Build');
+  await ask(page, 'Close my position');
+  await expect(copilotSays(page)).toContainText('Which position do you mean?');
+  await ask(page, `Position ${selected.slice(0, 4)}…${selected.slice(-4)} · ticks -39104 to -36992`);
+  await applyPendingProposal(page);
+  await stage(page, 'Simulate');
+  await openSimulationDetails(page);
+  await expect(liquidityPanel(page).locator('#orca-operation')).toHaveValue('EXIT');
+  await liquidityPanel(page).getByRole('button', { name: 'Simulate removal' }).click();
+  await expect(liquidityPanel(page).getByRole('definition').filter({ hasText: selected })).toBeVisible();
+  await assertSimulationReviewBlocked(page, () => signRequests(page));
+  expect(await signRequests(page)).toBe(0);
+  // Only the two explicitly seeded fixture transactions exist; chat never signs or sends.
+  expect(await devnetControl({ action: 'sent' })).toBe(2);
 });

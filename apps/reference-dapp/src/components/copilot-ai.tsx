@@ -10,8 +10,7 @@ import { buildCopilotFacts, simulationFlowOf, type CopilotFacts, type Simulation
 import { closeSegment, emptyConversation, finishTurn, recordProposal, startTurn, type CopilotConversation, type CopilotEnvironment, type CopilotReply,
   type CopilotResultV2, type CopilotVerified } from '../domain/copilot-conversation';
 import { solanaLiquidityPositions, solanaLiquidityPrice } from '../app/solana-liquidity-action';
-import { ORCA_WHIRLPOOLS_DEVNET } from '@defi-workflow-engine/action-registry';
-import { formatTokenAmount } from '../domain/jupiter-authoring';
+import { reconciledRemaining } from '../domain/copilot-reconciled-context';
 import { useSolanaComposition } from '../state/solana-composition-store';
 import { workflowSteps } from '../domain/workflow-steps';
 import { catalogNetworksNamed } from '../domain/network-registry';
@@ -41,26 +40,6 @@ import { useWorkflow } from '../state/workflow-store';
  */
 export type { CopilotReply };
 type Record_ = { readonly record?: unknown; readonly run?: unknown; readonly retired: boolean } | null;
-type SwapRecord = ReturnType<typeof useJupiter>['record'];
-type CompositionView = ReturnType<typeof useSolanaComposition>['record'];
-/**
- * PR B: swap output that a reconciled execution left in the wallet — a reconciled Solana Devnet swap's output, or the part of a composition's
- * reconciled swap output its position did not deposit (all of it when the run ended after the swap). Nothing else counts as "remaining tokens".
- */
-function reconciledRemaining(swap: SwapRecord, composition: CompositionView): CopilotVerified['remaining'] {
-  const symbol = (token: 0 | 1) => token === 0 ? 'SOL' as const : 'devUSDC' as const, decimals = (token: 0 | 1) => token === 0 ? 9 : 6;
-  const binding = composition?.record.binding;
-  if (binding && (composition.phase === 'COMPLETED' || composition.phase === 'PARTIAL')) {
-    const effects = composition.phase === 'COMPLETED' ? composition.liquidity?.observations.at(-1)?.effects : null;
-    if (composition.phase === 'COMPLETED' && !effects) return [];
-    const left = BigInt(binding.received) - (effects ? BigInt(binding.token === 0 ? effects.depositedA : effects.depositedB) : 0n);
-    return left > 0n ? [{ token: symbol(binding.token), amount: formatTokenAmount(left.toString(), decimals(binding.token)) }] : [];
-  }
-  const observed = swap?.evidence ? swap.observations.at(-1) : null;
-  const output = swap?.review.output.symbol.toUpperCase();
-  if (!swap || swap.review.chain !== ORCA_WHIRLPOOLS_DEVNET.chain || observed?.verdict !== 'RECONCILED' || !observed.outputReceived || (output !== 'SOL' && output !== 'DEVUSDC')) return [];
-  return BigInt(observed.outputReceived) > 0n ? [{ token: output === 'SOL' ? 'SOL' : 'devUSDC', amount: formatTokenAmount(observed.outputReceived, swap.review.output.decimals) }] : [];
-}
 const authorized = (value: unknown) => {
   const record = value as { authorization?: unknown; reviewedManifestHash?: unknown } | null;
   return Boolean(record && (record.authorization || record.reviewedManifestHash));
@@ -105,7 +84,7 @@ export function useCopilotInterpreter() {
       simulation, walletConnected: Boolean(now.wallet.account) });
     const solanaOwner = now.orca.owner, loaded = fetched.current;
     const verified: CopilotVerified = { orcaPrice: loaded.price, solanaOwner, orcaPositions: solanaOwner && loaded.owner === solanaOwner ? loaded.positions : null,
-      remaining: reconciledRemaining(now.jupiter.record, now.composition.record) };
+      remaining: reconciledRemaining(solanaOwner, now.jupiter.record, now.composition.record) };
     return { timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, workflow: current, context: store.context, wallet: now.wallet.account, walletChainId: now.wallet.chainId, pending: store.pending, facts,
       verified };
   }, []);

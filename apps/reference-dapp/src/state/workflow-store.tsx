@@ -252,7 +252,7 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
     generateArtifacts();
   }, [accessCheck, generateArtifacts]);
   return <Context.Provider value={{ restorationEpoch, state, dispatch, context, restoreLendingCanvas, adoptDraftIdentity: workflowId => dispatchHistory({ type: 'ADOPT_DRAFT_IDENTITY', workflowId }), restoreWorkflow: workflow => { setRestorationEpoch(n => n + 1); setPending(null); dispatchHistory({ type: 'RESTORE_WORKFLOW', workflow }); },
-    createNewWorkflow: () => { setRestorationEpoch(n => n + 1); setNewWorkflow(true); setPending(null); dispatchHistory({ type: 'NEW_WORKFLOW', workflowId: `workflow-${crypto.randomUUID()}` }); }, newWorkflow, canvasLayout: history.layout, canUndo: history.past.length > 0,
+    createNewWorkflow: () => { setRestorationEpoch(n => n + 1); setNewWorkflow(true); setPending(null); setStagedPosition(null); dispatchHistory({ type: 'NEW_WORKFLOW', workflowId: `workflow-${crypto.randomUUID()}` }); }, newWorkflow, canvasLayout: history.layout, canUndo: history.past.length > 0,
     actionSetup: history.actionSetup, amountInputs: history.amountInputs, authoringIncomplete,
     bridgeNetworkInputs: history.bridgeNetworkInputs, editBridgeNetworks, cryptoSelections: history.cryptoSelections, editCryptoSelection, reviewCryptoPool,
     startActionSetup, startStocksSetup, editCanvasAmount, editPoolSetup, editSwapSetupDirection, cancelCanvasAmount, reviewCanvasAmount, commitCanvasAmount, removeActionSetup,

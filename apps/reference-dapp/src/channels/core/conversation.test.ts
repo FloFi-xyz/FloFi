@@ -149,3 +149,13 @@ describe('BUILD-CHANNELS-001 channel conversation', () => {
     expect(parseState('not json', 'EN')).toEqual(freshState('EN'));
   });
 });
+
+it('does not enable DApp-only Solana composition or position management in channels', async () => {
+  const c = chat({ interpreter: false });
+  const exact = await c.say('swap 0.1 SOL to devUSDC on Solana Devnet slippage 50 bps then add liquidity all swapped devUSDC and 0.05 SOL ticks -39104 to -36992 slippage 100 bps');
+  expect(exact).toMatchObject({ action: 'REPLY', command: null });
+  expect(c.state.pending).toBeNull();
+  const ai = chat({ script: [intent.position('EXIT')] });
+  expect(await ai.say('close my position')).toMatchObject({ action: 'REPLY', command: null });
+  expect(ai.state.pending).toBeNull();
+});

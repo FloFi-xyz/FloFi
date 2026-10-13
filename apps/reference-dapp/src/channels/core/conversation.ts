@@ -60,7 +60,7 @@ export type TurnInput = { readonly content: TurnContent; readonly state: Channel
 
 const BASE: Workflow = initialEditor().workflow;
 const CONTEXT = dappReviewContext();
-const AUTHORING: ReadonlySet<string> = new Set(COPILOT_AUTHORING_COMMANDS);
+const AUTHORING: ReadonlySet<string> = new Set(COPILOT_AUTHORING_COMMANDS.filter(command => command !== 'ADD_SOLANA_COMPOSITION')); // DApp-only composition; no channel StrategySpec.
 const text = (value: string): ChannelReply => ({ text: value, choices: [], link: null });
 
 const words = (value: string) => value.trim().toLowerCase().replace(/[.!?¡¿]+$/g, '').replace(/\s+/g, ' ');

@@ -261,3 +261,40 @@ describe('exact grammar and commands', () => {
     expect(applyCommand(workflow, { ...base, operation: 'EXIT', partBps: null, baseRevision: workflow.revision } as Command).nodes.some(node => node.nodeId === 'node-002')).toBe(false);
   });
 });
+
+describe('Solana wallet context and explicit remaining-token caps', () => {
+  it('discards a position answer when the connected Solana wallet changes during interpretation', () => {
+    const session = new CopilotSession();
+    session.verified = verified({ orcaPositions: [position()] });
+    const reply = session.say('remove 50% of my liquidity', intent.position('DECREASE', '50'), s => {
+      s.verified = verified({ solanaOwner: OTHER_MINT, orcaPositions: [position(OTHER_MINT)] });
+    });
+    expect(reply).toMatchObject({ kind: 'FAILED', text: expect.stringContaining('wallet or its network changed') });
+    expect(session.pending).toBeNull();
+  });
+  it('invalidates a position-selection clarification after switching Solana wallets', () => {
+    const session = new CopilotSession();
+    session.verified = verified({ orcaPositions: [position(), position(OTHER_MINT)] });
+    const asked = session.say('close my position', intent.position('EXIT'))!;
+    session.verified = verified({ solanaOwner: OTHER_MINT, orcaPositions: [position(OTHER_MINT)] });
+    expect(session.say(asked.options[1]!)).toMatchObject({ kind: 'FAILED' });
+    expect(session.pending).toBeNull();
+  });
+  it.each([['2', '2'], ['10', '4.5']])('keeps the lesser of explicit cap %s and reconciled output', (cap, expected) => {
+    const session = new CopilotSession();
+    session.verified = verified({ remaining: [{ token: 'devUSDC', amount: '4.5' }] });
+    expect(session.say(`add the remaining tokens, at most ${cap} devUSDC and 0.05 SOL, in a 10% range`, intent.action(act.liquidity({
+      deposits: [{ asset: 'DEVUSDC', maxAmount: cap }, { asset: 'SOL', maxAmount: '0.05' }], ...tenPercent, funding: 'REMAINING'
+    })))).toMatchObject({ kind: 'PROPOSAL', command: { input: { maxDevUsdc: expected } } });
+  });
+  it.each(['devUSDC', 'DEVUSDC', 'DevUSDC', 'devusdc'])('normalizes %s without allowing it on mainnet', asset => {
+    const session = new CopilotSession();
+    expect(session.say(`please swap 0.1 SOL for ${asset} on Solana Devnet`, intent.action(act.swap({
+      network: 'SOLANA_DEVNET', inputAsset: 'SOL', outputAsset: asset, amount: '0.1'
+    })))).toMatchObject({ kind: 'PROPOSAL', command: { input: { network: 'Solana Devnet', to: 'devUSDC' } } });
+    session.dismiss();
+    expect(session.say(`please swap 0.1 SOL for ${asset} on Solana`, intent.action(act.swap({
+      network: 'SOLANA', inputAsset: 'SOL', outputAsset: asset, amount: '0.1'
+    })))?.kind).not.toBe('PROPOSAL');
+  });
+});
