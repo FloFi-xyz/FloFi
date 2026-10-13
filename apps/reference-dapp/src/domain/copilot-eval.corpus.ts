@@ -280,9 +280,11 @@ export const COPILOT_EVAL_CASES: readonly EvalCase[] = [
   { id: 'R23', category: 'reference-edit', language: 'EN', setup: [FIXTURE.supply], turns: [
     { user: 'remove the last step', model: intent.remove({ ordinal: 'LAST' }), expect: P('REMOVE', { nodeId: 'node-002', contains: ['Interpreted as removing step 1'] }) }] },
   { id: 'R24', category: 'reference-edit', language: 'EN', setup: [FIXTURE.bridge], turns: [
-    { user: 'remove the bridge', model: intent.remove({ step: 'BRIDGE' }), expect: U(['is the only step']) }] },
+    // BUILD-SOLANA-MAINNET-001 (intentional change, requirement D): the only step is removable (a reviewable proposal); the Canvas is then empty.
+    { user: 'remove the bridge', model: intent.remove({ step: 'BRIDGE' }), expect: P('REMOVE', { nodeId: 'node-002', contains: ['Interpreted as removing step 1'] }) }] },
   { id: 'R25', category: 'reference-edit', language: 'EN', setup: [FIXTURE.lending], turns: [
-    { user: 'remove the borrow', model: intent.remove({ step: 'BORROW' }), expect: U(['part of the Supply → Borrow → Swap composition']) }] },
+    // BUILD-SOLANA-MAINNET-001 (intentional change, requirement D): a composition step is removable; the Swap that spends its output goes with it.
+    { user: 'remove the borrow', model: intent.remove({ step: 'BORROW' }), expect: P('REMOVE', { nodeId: 'lending-borrow' }) }] },
   { id: 'R26', category: 'reference-edit', language: 'EN', setup: [], turns: [
     { user: 'remove the first step', model: intent.remove({ ordinal: 'FIRST' }), expect: U(['starting template and cannot be removed']) }] },
   { id: 'R27', category: 'reference-edit', language: 'EN', turns: [
@@ -307,7 +309,7 @@ export const COPILOT_EVAL_CASES: readonly EvalCase[] = [
   { id: 'R36', category: 'reference-edit', language: 'PT', setup: [FIXTURE.supply], turns: [
     { user: 'troca esse supply para 2 USDC', model: intent.edit({ amount: '2' }, { step: 'SUPPLY' }, 'PT'), expect: P('SET_SUPPLY', { contains: ['Interpretado como uma mudança no passo 1'] }) }] },
   { id: 'R37', category: 'reference-edit', language: 'PT', setup: [FIXTURE.bridge], turns: [
-    { user: 'remove a bridge', model: intent.remove({ step: 'BRIDGE' }, 'PT'), expect: U(['é o único passo']) }] },
+    { user: 'remove a bridge', model: intent.remove({ step: 'BRIDGE' }, 'PT'), expect: P('REMOVE', { nodeId: 'node-002', contains: ['Interpretado como remover o passo 1'] }) }] },
 
   // ── Read-only questions ────────────────────────────────────────────────────────────────────────────────────────────
   { id: 'Q01', category: 'read-only', language: 'EN', setup: [FIXTURE.supply], turns: [{ user: 'What does this workflow do?', model: intent.question('WORKFLOW_OVERVIEW'),

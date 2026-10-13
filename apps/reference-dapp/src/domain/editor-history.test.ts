@@ -126,10 +126,11 @@ describe('canvas edit history', () => {
     expect(editorHistoryReducer(state, { type: 'REDO' })).toBe(state);
   });
 
-  it('keeps a selected source when its selected dependent is protected', () => {
+  // BUILD-SOLANA-MAINNET-001 (intentional change, requirement D): a locked amount protects the amount from edits, not the step from deletion.
+  it('deletes selected connected steps even when one has a locked amount', () => {
     let state = add(add(initialEditorHistory()), 'condition');
     state = edit(state, { type: 'CONNECT', from: 'node-002', to: 'node-003', source: 'CANVAS' });
     state = edit(state, { type: 'LOCK', nodeId: 'node-003', locked: true, source: 'CANVAS' });
-    expect(deletableCanvasNodes(state.editor.workflow, ['node-002', 'node-003'])).toEqual([]);
+    expect(deletableCanvasNodes(state.editor.workflow, ['node-002', 'node-003'])).toEqual(['node-002', 'node-003']);
   });
 });

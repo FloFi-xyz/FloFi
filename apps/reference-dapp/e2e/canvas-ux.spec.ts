@@ -104,17 +104,18 @@ test('node and edge selection, deletion, text entry and composition guards', asy
   await page.goto('/app');
   await addFromToolbox(page, 'swap');
   const second = page.locator('.react-flow__node[data-id="node-002"]');
-  await second.locator('.composer-card').click();
+  // BUILD-SOLANA-MAINNET-001 (intentional change): a Swap card's center arrow is now the From/To switch, so the card is selected by its title.
+  await second.locator('.composer-action-title').click();
   await expect(second.locator('.composer-card')).toHaveClass(/active/);
   await page.keyboard.press('Escape');
   await expect(second.locator('.composer-card')).not.toHaveClass(/active/);
-  await second.locator('.composer-card').click();
+  await second.locator('.composer-action-title').click();
   const chat = page.locator('#mock-prompt');
   await chat.focus(); await page.keyboard.press('Delete');
   await expect(second).toBeVisible();
   await page.evaluate(() => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true, isComposing: true })); });
   await expect(second).toBeVisible();
-  await second.locator('.composer-card').click(); await page.keyboard.press('Backspace');
+  await second.locator('.composer-action-title').click(); await page.keyboard.press('Backspace');
   await expect(second).toHaveCount(0);
   await expect(page.locator('.build-flow-surface .react-flow__node')).toHaveCount(0);
   const source = await addFromToolbox(page, 'swap');
@@ -176,8 +177,8 @@ test('duplicate selection copies independent swaps in one undoable edit', async 
   await addFromToolbox(page, 'swap');
   await addFromToolbox(page, 'swap');
   await addFromToolbox(page, 'swap');
-  await page.locator('.react-flow__node[data-id="node-002"] .composer-card').click();
-  await page.locator('.react-flow__node[data-id="node-003"] .composer-card').click({ modifiers: ['Shift'] });
+  await page.locator('.react-flow__node[data-id="node-002"] .composer-action-title').click();
+  await page.locator('.react-flow__node[data-id="node-003"] .composer-action-title').click({ modifiers: ['Shift'] });
   await page.getByRole('button', { name: 'Duplicate selection' }).click();
   await expect(page.getByRole('region', { name: 'Workflow graph' }).locator('.react-flow__node')).toHaveCount(5);
   await expect(page.getByRole('region', { name: 'Workflow graph' }).locator('.react-flow__edge')).toHaveCount(0);

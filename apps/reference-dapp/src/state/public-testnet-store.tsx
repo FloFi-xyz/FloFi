@@ -10,6 +10,16 @@ import { injected, useBuild009Wallet } from './build009-wallet-store';
 import { useWorkflow } from './workflow-store';
 
 const KEY = 'gryloo:public-testnet-execution-id';
+/**
+ * BUILD-SOLANA-MAINNET-001 (requirement E): this browser tab's own run (sessionStorage survives a reload of the tab, not a new visit). A new visit
+ * starts with an empty Canvas; only an execution that still needs the owner (in progress or uncertain) is brought back to continue or observe.
+ */
+const TAB_KEY = KEY + ':tab';
+const markTab = (id: string) => { try { sessionStorage.setItem(TAB_KEY, id); } catch { /* the tab marker is a convenience only */ } };
+const tabRun = () => { try { return sessionStorage.getItem(TAB_KEY); } catch { return null; } };
+/** An execution the owner must still continue or observe: no settled outcome yet, and an attempt that was prepared, sent or confirmed. */
+export const publicRunInProgress = (run: Pick<PublicRun, 'outcome' | 'attempts'>) =>
+  !run.outcome && run.attempts.some(attempt => ['PREPARED', 'HASH', 'PENDING', 'UNKNOWN', 'CONFIRMED'].includes(attempt.state));
 type Store = { readonly available: boolean;
   /** BUILD-BASE-001: whether this instance serves a catalog network's mainnet swaps (live or the MOCKED loopback harness). */
   readonly catalogAvailable: (chain: string) => boolean;
@@ -107,6 +117,8 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
         }
       }
       if (!cancelled) {
+        // A finished or never-executed run stays in the Dashboard; a new visit does not put it back on the Canvas.
+        if (!publicRunInProgress(recovered) && tabRun() !== id) return;
         // Recover the canonical workflow only over the untouched initial template.
         // Recovery remains observation-only until fresh simulation and owner Review.
         if (workflowRef.current === initialWorkflow.current && initialWorkflow.current.revision === 0 &&
@@ -130,7 +142,7 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
     if (resumeApproval && run?.quote.ownerReview && owner?.account !== run.quote.ownerReview.account) throw new Error('OWNER_REVIEW_MISMATCH');
     const prepared = unwrap(resumeApproval ? await publicRefresh(run!.quote.executionId) :
       await publicPrepare(workflow as unknown as SemanticWorkflow, owner?.account));
-    localStorage.setItem(KEY, prepared.quote.executionId);
+    localStorage.setItem(KEY, prepared.quote.executionId); markTab(prepared.quote.executionId);
     setSource(workflow as unknown as SemanticWorkflow); setRecoveryOnly(false); setRun(prepared);
   }), [guarded, available, run, recoveryOnly, source, authoredChain, wallet]);
   const review = useCallback(() => guarded('Reviewing swap', async () => {

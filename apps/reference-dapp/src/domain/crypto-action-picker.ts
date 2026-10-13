@@ -118,6 +118,16 @@ export function counterpartSelection(selection: CryptoSelection, environment: Wa
   const next: CryptoSelection = { action: selection.action, network: profile.network, from, ...(to === undefined ? {} : { to }) };
   return validCryptoSelection(next) ? next : null;
 }
+/**
+ * BUILD-SOLANA-MAINNET-001 (requirement C): the Swap card's arrow exchanges From and To on the same network; the new From is the spending
+ * asset. Null for anything that is not a two-token swap, or when the reversed pair is not available on that network. The amount the owner typed
+ * stays the owner's input (now in the new From token, re-validated against its decimals and limits); an estimated output is never used.
+ */
+export function invertCryptoSelection(selection: CryptoSelection): CryptoSelection | null {
+  if (selection.action !== 'swap' || !selection.to || selection.to === selection.from) return null;
+  const inverted: CryptoSelection = { action: 'swap', network: selection.network, from: selection.to, to: selection.from };
+  return validCryptoSelection(inverted) ? inverted : null;
+}
 export function cryptoTokenOptions(selection: CryptoSelection, side: 'source' | 'destination') {
   const profile = cryptoProfile(selection);
   if (selection.action === 'pool' && !profile?.catalog) return [side === 'source' ? profile?.pair?.[0] : profile?.pair?.[1]].filter((token): token is string => Boolean(token));

@@ -511,6 +511,9 @@
 .build-flow-surface .composer-value-pair .composer-amount-box{margin:0}
 .composer-value-arrow{position:relative;z-index:1;grid-row:2;align-self:center;justify-self:center;display:flex;align-items:center;justify-content:center;width:26px;height:26px;border:1px solid var(--accent-line);border-radius:50%;background:var(--paper);box-shadow:0 2px 5px rgba(24,59,104,.1);color:var(--blue);pointer-events:none}
 .composer-value-arrow svg{flex:none}
+/* BUILD-SOLANA-MAINNET-001: on a Swap card the same arrow is the From/To switch; it keeps the arrow's exact geometry and look. */
+.composer-value-invert{pointer-events:auto;cursor:pointer;padding:0;margin:0;font:inherit;appearance:none}
+.composer-value-invert:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
 .composer-pool-provider{align-self:flex-start;max-width:100%;margin-bottom:2px}
 .composer-pool-custom{display:flex;flex-direction:column;align-items:flex-start;gap:3px;margin:2px 0}
 .composer-pool-controls{display:flex;flex-direction:column;gap:5px;margin-top:3px}

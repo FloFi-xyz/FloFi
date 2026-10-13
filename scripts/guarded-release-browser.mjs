@@ -36,6 +36,8 @@ const profiles = phase === 'composition' ? [
   // BUILD-SOLANA-MAINNET-001: the Solana Mainnet/Testnet header switch, family-preserving re-networking and Orca mainnet liquidity authoring on the
   // MOCKED loopback (the Devnet harness also serves a MOCKED copy of the mainnet-beta pool); MOCKED cannot authorize, nothing is signed or sent.
   ['solana-mainnet-network', ['solana-mainnet-network.spec.ts'], { GRYLOO_SOLANA_DEVNET_E2E: 'MOCKED_LOOPBACK_ONLY' }],
+  // BUILD-SOLANA-MAINNET-001 PR B: empty Canvas on Launch App, unrestricted card deletion, and the Swap arrow's From/To inversion (MOCKED estimates).
+  ['canvas-corrections', ['canvas-corrections.spec.ts'], {}],
   ['lending-provenance', [boundary], { FLOFI_RELEASE_PROVENANCE_PROFILE: 'lending', GRYLOO_LENDING_E2E: 'MOCKED_LOOPBACK_ONLY' }],
   ['jupiter-provenance', [boundary], { FLOFI_RELEASE_PROVENANCE_PROFILE: 'jupiter', GRYLOO_JUPITER_E2E: 'MOCKED_LOOPBACK_ONLY' }],
   ['devnet-provenance', [boundary], { FLOFI_RELEASE_PROVENANCE_PROFILE: 'solana-devnet', GRYLOO_SOLANA_DEVNET_E2E: 'MOCKED_LOOPBACK_ONLY' }],

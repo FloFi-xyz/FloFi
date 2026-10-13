@@ -22,7 +22,7 @@ import { solanaLiquidityDetails } from '../domain/solana-liquidity-authoring';
 import { uniswapLiquidityDetails } from '../domain/uniswap-liquidity-authoring';
 import { routerChainChoices, routerDetails, routerNetworkOfInput, routerTokensOf, ROUTER_NETWORK_OPTIONS, ROUTER_ROUTING_LABEL } from '../domain/router-authoring';
 import { useWorkflow } from '../state/workflow-store';
-import { editorReducer } from '../domain/editor';
+import { editorReducer, resolveCanvasRemoval } from '../domain/editor';
 import { checkConnection, connectionEnd, handleHitScale } from '../domain/canvas-connect';
 import { CANVAS_ACTIONS, canvasAddCommand, type CanvasAction } from '../domain/canvas-authoring';
 import { shellChainLabel } from '../domain/product-shell';
@@ -35,11 +35,11 @@ import { canEditCanvasAmount, canvasAmountCommand, setupSummary, bridgePairLabel
 import { ActionIcon } from './action-icon';
 import { ensureNetworkCatalog, useNetworkCatalog } from '../state/asset-catalog-store';
 import { CATALOG_NETWORK_IDENTITIES } from '../domain/network-registry';
-import { counterpartSelection, cryptoNetworks, cryptoSelectionOf, cryptoProfile, cryptoTokenOptions, selectCryptoNetwork, selectCryptoToken, canSelectCryptoAssets, type CryptoSelection, type CryptoAction } from '../domain/crypto-action-picker';
+import { counterpartSelection, invertCryptoSelection, cryptoNetworks, cryptoSelectionOf, cryptoProfile, cryptoTokenOptions, selectCryptoNetwork, selectCryptoToken, canSelectCryptoAssets, type CryptoSelection, type CryptoAction } from '../domain/crypto-action-picker';
 import { actionReviewValue } from '../domain/canvas-action-setup';
 import { SimulateWorkflowCanvas } from './simulate-workflow-canvas';
 import { composerActions, composerSummary, composerNodeState, composerConnections, singleAmountProposalTarget } from '../domain/composer-presentation';
-import { canDeleteCanvasEdge, canDeleteCanvasNode, deletableCanvasNodes, isTextEntry } from '../domain/canvas-keyboard';
+import { canDeleteCanvasEdge, canDeleteCanvasNode, isTextEntry } from '../domain/canvas-keyboard';
 import { canvasPosition, defaultCanvasPosition, readToolboxMode, saveToolboxMode, type ToolboxMode } from '../domain/canvas-layout';
 import { canvasMarquee, marqueeIntersects } from '../domain/canvas-marquee';
 import { planCanvasDuplicate } from '../domain/editor-history';
@@ -129,6 +129,9 @@ function InsertionViewport({ workflowId, ids }: { workflowId: string; ids: reado
   return null;
 }
 const actions = [...CANVAS_ACTIONS, 'stocks'] as const;
+/** BUILD-SOLANA-MAINNET-001: the owner is told about every linked step a deletion also removed; undo restores them. */
+const removalFeedback = (count: number) => count === 1 ? 'Also removed 1 linked step that cannot run without the deleted one. Undo restores it.'
+  : 'Also removed the linked steps that cannot run without the deleted one. Undo restores them.';
 // UX-005: the canonical transfer action is presented as Send; its action id and IR stay `transfer` / `asset.transfer`.
 function actionLabel(action: typeof actions[number]) { return action === 'lending' ? 'Lending' : action === 'pool' ? 'Pool / Liquidity' : action === 'transfer' ? 'Send' : action[0]!.toUpperCase() + action.slice(1); }
 function HistoryIcon({ direction }: { direction: 'undo' | 'redo' }) {
@@ -364,22 +367,18 @@ function BuildCanvas({ environment, selectedId, select, openSettings, workflowNa
       const selected = selectedIdsRef.current;
       if (!selected.length) return;
       event.preventDefault();
+      // BUILD-SOLANA-MAINNET-001 (requirement D): every selected card is deleted; linked steps that cannot run without it go too, and are named.
       const removingSetup = Boolean(actionSetup && selected.includes(actionSetup.id));
-      const canonicalSelection = selected.filter(id => id !== actionSetup?.id);
-      const removable = deletableCanvasNodes(workflow, canonicalSelection);
+      const canonicalSelection = selected.filter(id => id !== actionSetup?.id && workflow.nodes.some(node => node.nodeId === id));
+      const plan = canonicalSelection.length ? resolveCanvasRemoval(workflow, canonicalSelection, context) : null;
       if (removingSetup) removeActionSetup();
-      if (removable.length) {
-        dispatch({ type: 'REMOVE_MANY', nodeIds: removable, source: 'CANVAS', baseRevision: workflow.revision });
-        selectNodes(selected.filter(id => !removable.includes(id)), null);
-      }
-      if (removingSetup && !removable.length) selectNodes([], null);
-      if (removable.length !== canonicalSelection.length) setFeedback(removable.length
-        ? 'Some selected steps are required by another step or are protected.'
-        : 'This step is required by another step or is protected.');
+      if (plan) dispatch({ type: 'REMOVE_MANY', nodeIds: canonicalSelection, source: 'CANVAS', baseRevision: workflow.revision });
+      selectNodes([], null);
+      if (plan?.cascaded.length) setFeedback(removalFeedback(plan.cascaded.length));
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [dispatch, workflow, actionSetup, removeActionSetup, selectedEdge, select, undo, redo]);
+  }, [dispatch, workflow, context, actionSetup, removeActionSetup, selectedEdge, select, undo, redo]);
   const previousEnvironment = useRef(environment);
   useEffect(() => {
     if (previousEnvironment.current === environment) return;
@@ -448,6 +447,8 @@ function BuildCanvas({ environment, selectedId, select, openSettings, workflowNa
         tokens: { source: valid ? editable ? cryptoTokenOptions(selection, 'source') : [selection.from] : [], destination: valid ? editable ? cryptoTokenOptions(selection, 'destination') : selection.to ? [selection.to] : [] : [] },
         onNetwork: (network: string) => { if (editable && profiles.some(profile => profile.network === network)) editCryptoSelection(id, selectCryptoNetwork(selection.action, network, selection), wallet.account ?? undefined); },
         onToken: (side: 'source' | 'destination', token: string) => { if (editable) editCryptoSelection(id, selectCryptoToken(selection, side, token)); },
+        // BUILD-SOLANA-MAINNET-001 (requirement C): the arrow exchanges From and To as a draft (the old estimate is dropped and the draft re-quoted).
+        ...(editable && invertCryptoSelection(selection) ? { onInvert: () => { const inverted = invertCryptoSelection(selection); if (inverted) editCryptoSelection(id, inverted); } } : {}),
       };
     };
     // BUILD-RH-002: the Stocks card edits the destination Stock Token of its Robinhood Chain swap (featured shortcut or search result).
@@ -705,8 +706,10 @@ function BuildCanvas({ environment, selectedId, select, openSettings, workflowNa
   function deleteSelectedCard() {
     if (!selectedId || !deleteAllowed) return;
     if (selectedId === actionSetup?.id) { removeActionSetup(); selectNodes([], null); return; }
+    const plan = resolveCanvasRemoval(workflow, [selectedId], context);
     dispatch({ type: 'REMOVE', nodeId: selectedId, source: 'CANVAS', baseRevision: workflow.revision });
-    selectNodes(selectedIdsRef.current.filter(id => id !== selectedId), null);
+    selectNodes([], null);
+    if (plan?.cascaded.length) setFeedback(removalFeedback(plan.cascaded.length));
   }
   const dockButton = <button type="button" className="toolbox-mode-toggle" title={tr(toolboxMode === 'top' ? 'Undock toolbar' : 'Dock toolbar')} aria-label={tr(toolboxMode === 'top' ? 'Undock toolbar' : 'Dock toolbar')} aria-pressed={toolboxMode === 'floating'} onClick={() => changeToolboxMode(toolboxMode === 'top' ? 'floating' : 'top')}><DockIcon floating={toolboxMode === 'floating'}/></button>;
   const toolbox = <div className="canvas-toolbox" role="toolbar" aria-label={tr("Canvas tools")}>
@@ -723,7 +726,7 @@ function BuildCanvas({ environment, selectedId, select, openSettings, workflowNa
     <button type="button" title={tr("Duplicate selection")} aria-label={tr("Duplicate selection")} disabled={!duplicatePlan} onClick={duplicateSelection}><DuplicateIcon/><span>{tr("Duplicate")}</span></button>
     <button type="button" title={tr("Undo (Ctrl+Z)")} aria-label={tr("Undo")} disabled={!canUndo} onClick={undo}><HistoryIcon direction="undo"/><span>{tr("Undo")}</span></button>
     <button type="button" title={tr("Redo (Ctrl+Shift+Z or Ctrl+Y)")} aria-label={tr("Redo")} disabled={!canRedo} onClick={redo}><HistoryIcon direction="redo"/><span>{tr("Redo")}</span></button>
-    <button type="button" aria-label={tr("Delete")} title={tr(deleteAllowed ? 'Delete' : selectedId ? 'This card is required by the workflow or protected.' : 'Select a card to delete')} disabled={!deleteAllowed} onClick={deleteSelectedCard}>
+    <button type="button" aria-label={tr("Delete")} title={tr(deleteAllowed ? 'Delete' : 'Select a card to delete')} disabled={!deleteAllowed} onClick={deleteSelectedCard}>
       <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7m4-7v7"/></svg><span>{tr("Delete")}</span>
     </button>
     {tr(toolboxMode === 'top' && dockButton)}

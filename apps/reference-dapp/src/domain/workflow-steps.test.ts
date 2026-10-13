@@ -30,7 +30,8 @@ describe('workflow steps (read-only descriptors of the canonical IR)', () => {
   it('reads the Router bridge, Solana swaps and both liquidity pools', () => {
     const [bridge, ...none] = steps([FIXTURE.bridge]);
     expect(none).toEqual([]);
-    expect(bridge).toMatchObject({ kind: 'BRIDGE', network: 'Base Sepolia → Arbitrum Sepolia', testFunds: true, removable: false,
+    // BUILD-SOLANA-MAINNET-001 (intentional change, requirement D): the only action is removable; the Canvas is then empty.
+    expect(bridge).toMatchObject({ kind: 'BRIDGE', network: 'Base Sepolia → Arbitrum Sepolia', testFunds: true, removable: true,
       detail: { type: 'ROUTER', network: 'testnet', input: { source: 'Base Sepolia', destination: 'Arbitrum Sepolia', amount: '1', recipient: '', routing: 'AUTO' } } });
     expect(steps([FIXTURE.mainnetBridge])[0]).toMatchObject({ network: 'Base → Arbitrum One', testFunds: false });
     expect(steps([FIXTURE.solanaSwap])[0]).toMatchObject({ kind: 'SWAP', protocol: 'Jupiter', testFunds: false, detail: { type: 'SOLANA_SWAP', input: { from: 'SOL', to: 'USDC' } } });
@@ -38,10 +39,11 @@ describe('workflow steps (read-only descriptors of the canonical IR)', () => {
     expect(steps([FIXTURE.uniswap])[0]).toMatchObject({ kind: 'LIQUIDITY', detail: { type: 'UNISWAP_LIQUIDITY', input: { maxUsdc: '100', maxWeth: '0.05', slippage: '100' } } });
     expect(steps([FIXTURE.orca])[0]).toMatchObject({ kind: 'LIQUIDITY', detail: { type: 'ORCA_LIQUIDITY', input: { maxSol: '1', lower: '-1024', upper: '1024' } } });
   });
-  it('presents the lending composition as three protected steps that share one input', () => {
+  // BUILD-SOLANA-MAINNET-001 (intentional change, requirement D): composition steps are removable; what cannot run alone goes with them.
+  it('presents the lending composition as three removable steps that share one input', () => {
     const composition = steps([FIXTURE.lending]);
     expect(composition.map(step => step.kind)).toEqual(['SUPPLY', 'BORROW', 'SWAP']);
-    expect(composition.every(step => !step.removable && step.detail.type === 'LENDING_COMPOSITION')).toBe(true);
+    expect(composition.every(step => step.removable && step.detail.type === 'LENDING_COMPOSITION')).toBe(true);
     expect(composition[2]).toMatchObject({ protocol: 'Uniswap v3', detail: { role: 'SWAP', input: { supply: '10', borrow: '4', slippage: '50', owner: TEST_WALLET } } });
   });
   it('describes legacy actions without typing them as editable steps', () => {

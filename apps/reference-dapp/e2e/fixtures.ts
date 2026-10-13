@@ -153,7 +153,8 @@ export async function readWorkflowIr(page: Page): Promise<string> {
 /** Select an authored action and open its existing Advanced Settings. */
 export async function openFirstActionSettings(page: Page): Promise<void> {
   const card = page.locator('.build-flow-surface .composer-card').first();
-  await card.click();
+  // BUILD-SOLANA-MAINNET-001: a Swap card's center arrow switches From and To, so the card is selected by its title.
+  await card.locator('.composer-action-title').click();
   const settings = card.getByRole('button', { name: 'Advanced Settings', exact: true });
   if (await settings.getAttribute('aria-expanded') !== 'true') await settings.click();
 }

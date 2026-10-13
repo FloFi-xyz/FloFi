@@ -55,7 +55,8 @@ describe('Canvas authoring of Solana Devnet Swap → Orca liquidity', () => {
     const before = state.workflow.nodes.find(n => n.nodeId === poolId);
     const linked = apply(state, { type: 'CONNECT', from: swapId, to: poolId });
     expect(canDeleteCanvasEdge(linked.workflow, swapId, poolId)).toBe(true);
-    expect(canDeleteCanvasNode(linked.workflow, swapId)).toBe(false);
+    // BUILD-SOLANA-MAINNET-001 (intentional change, requirement D): the linked swap is deletable; its position returns to the isolated form.
+    expect(canDeleteCanvasNode(linked.workflow, swapId)).toBe(true);
     const unlinked = apply(linked, { type: 'DISCONNECT', from: swapId, to: poolId });
     expect(unlinked.workflow.nodes.find(n => n.nodeId === poolId)).toEqual(before);
     expect(unlinked.workflow.resourceEdges).toEqual([]);

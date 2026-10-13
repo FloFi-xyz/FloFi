@@ -242,7 +242,6 @@ function CanonicalArtifactInspector({ selectedId, select, expanded = false, onEx
       {error && <p role="alert" className="form-error">{tr(error)}{tr(". Check the parameters and try again.")}</p>}
       <div className="inspector-actions">{(swap || template) && <button type="button" onClick={() => dispatch({ type: 'LOCK', nodeId: node.nodeId, locked: !locked, source: 'CANVAS', baseRevision: state.workflow.revision })}>{tr(locked ? 'Unlock amount' : 'Lock amount')}</button>}
         <button type="button" className="quiet" disabled={!deletable} onClick={() => { dispatch({ type: 'REMOVE', nodeId: node.nodeId, source: 'CANVAS', baseRevision: state.workflow.revision }); select(null); }}>{tr("Remove step")}</button></div>
-      {!deletable && <p className="muted">{tr("This step is required by the workflow or protected.")}</p>}
     </> : null}
     {cross && node && <form className="inspector-fields" onSubmit={saveCross} aria-label={tr("Compose cross-chain liquidity")}>
       <p className="eyebrow">{tr("BASE → ARBITRUM · UNISWAP V3")}</p>

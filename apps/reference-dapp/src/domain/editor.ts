@@ -12,7 +12,7 @@ import { createBridgeNode } from './bridge-authoring';
 import { createBridgeSwapWorkflow } from './bridge-swap-authoring';
 import { createAcrossWorkflow } from './across-authoring';
 import { createCrossChainLiquidityWorkflow } from './cross-chain-liquidity';
-import { canDeleteCanvasEdge, canDeleteCanvasNode, deletableCanvasNodes } from './canvas-keyboard';
+import { canDeleteCanvasEdge, planCanvasRemoval, type CanvasRemoval } from './canvas-keyboard';
 import { bindCompositionConsumer, compositionBindingFor, unbindCompositionConsumer } from '@defi-workflow-engine/action-registry';
 import { readConcentratedLiquiditySource } from '@defi-workflow-engine/workflow-contracts';
 
@@ -209,15 +209,13 @@ export function editorReducer(state: EditorState, command: Command, context?: Re
   }
   let nodes = [...current.nodes];
   let resourceEdges = [...current.resourceEdges];
-  if (command.type === 'REMOVE_MANY') {
-    const deletable = deletableCanvasNodes(current, command.nodeIds);
-    if (deletable.length !== command.nodeIds.length || current.nodes.length <= deletable.length) return reject('PROTECTED_NODE: this node is required by the workflow.');
-    const removed = new Set(deletable);
-    nodes = nodes.filter(node => !removed.has(node.nodeId)).map(node => ({ ...node,
-      dependencies: node.dependencies.filter(id => !removed.has(id)),
-      inputs: node.inputs.filter(input => !(input.kind === 'OUTPUT_REFERENCE' && removed.has(input.value.nodeId))),
-    }));
-    resourceEdges = resourceEdges.filter(edge => !removed.has(edge.fromNodeId) && !removed.has(edge.toNodeId));
+  if (command.type === 'REMOVE_MANY' || command.type === 'REMOVE') {
+    // BUILD-SOLANA-MAINNET-001 (requirement D): any action can be deleted (canvas-keyboard.ts `planCanvasRemoval`). Deleting the last action
+    // leaves the canonical empty draft — the hidden template step every new workflow starts with — and no card; nothing replaces the deleted one.
+    const selected = command.type === 'REMOVE' ? [command.nodeId] : command.nodeIds;
+    const plan = resolveCanvasRemoval(current, selected, context);
+    if (!plan || selected.some(id => !plan.removed.includes(id))) return reject('UNKNOWN_NODE');
+    ({ nodes, resourceEdges } = applyCanvasRemoval(current, plan));
   } else if (command.type === 'ADD' || command.type === 'ADD_SWAP' || command.type === 'ADD_TESTNET_SWAP' || command.type === 'ADD_ETHEREUM_SEPOLIA_SWAP' || command.type === 'ADD_COW_SWAP' || command.type === 'ADD_LIQUIDITY') {
     if (nodes.length >= 1024) return reject('NODE_LIMIT');
     const id = `node-${String(current.revision + 2).padStart(3, '0')}`;
@@ -275,11 +273,7 @@ export function editorReducer(state: EditorState, command: Command, context?: Re
   } else {
     const node = nodes.find(n => n.nodeId === command.nodeId);
     if (!node) return reject('UNKNOWN_NODE');
-    if (command.type === 'REMOVE') {
-      if (!canDeleteCanvasNode(current, node.nodeId)) return reject('PROTECTED_NODE: this node is required by the workflow.');
-      nodes = nodes.filter(n => n.nodeId !== node.nodeId).map(n => ({ ...n, dependencies: n.dependencies.filter(id => id !== node.nodeId) }));
-      resourceEdges = resourceEdges.filter(edge => edge.fromNodeId !== node.nodeId && edge.toNodeId !== node.nodeId);
-    } else if (['supply','borrow','repay','withdraw','asset.transfer'].includes(node.actionType)) { return reject('SUPPLY_REVIEWED_EDIT_REQUIRED');
+    if (['supply','borrow','repay','withdraw','asset.transfer'].includes(node.actionType)) { return reject('SUPPLY_REVIEWED_EDIT_REQUIRED');
     } else if (node.actionType === LIQUIDITY_ACTION) {
       if (command.type !== 'SET_LIQUIDITY' || !context) return reject('INVALID_LIQUIDITY_COMMAND');
       try {
@@ -345,6 +339,47 @@ export function editorReducer(state: EditorState, command: Command, context?: Re
   return { workflow: freeze(candidate), error: null };
 }
 
+/** The graph after a Canvas removal plan: links into removed steps are dropped and unbound consumers return to their isolated form. */
+function applyCanvasRemoval(current: Workflow, plan: CanvasRemoval) {
+  const removed = new Set(plan.removed), unbound = new Set(plan.unbound);
+  const nodes = current.nodes.filter(node => !removed.has(node.nodeId)).map(node => {
+    const own = unbound.has(node.nodeId) ? unbindCompositionConsumer(node) : node;
+    return { ...own, dependencies: own.dependencies.filter(id => !removed.has(id)),
+      inputs: own.inputs.filter(input => !(input.kind === 'OUTPUT_REFERENCE' && removed.has(input.value.nodeId))) };
+  });
+  return { nodes: nodes.length ? nodes : [...initialWorkflow().nodes], resourceEdges: current.resourceEdges.filter(edge => !removed.has(edge.fromNodeId) && !removed.has(edge.toNodeId)) };
+}
+/** The steps linked to `ids` by dependencies, output references or resource edges, in either direction (a whole composition). */
+function connectedSteps(workflow: Workflow, ids: readonly string[]): Set<string> {
+  const links = new Map<string, Set<string>>(workflow.nodes.map(node => [node.nodeId, new Set<string>()]));
+  const link = (a: string, b: string) => { links.get(a)?.add(b); links.get(b)?.add(a); };
+  for (const node of workflow.nodes) {
+    for (const parent of node.dependencies) link(node.nodeId, parent);
+    for (const input of node.inputs) if (input.kind === 'OUTPUT_REFERENCE') link(node.nodeId, input.value.nodeId);
+  }
+  for (const edge of workflow.resourceEdges) link(edge.fromNodeId, edge.toNodeId);
+  const found = new Set(ids), queue = [...ids];
+  while (queue.length) for (const next of links.get(queue.pop()!) ?? []) if (!found.has(next)) { found.add(next); queue.push(next); }
+  return found;
+}
+/**
+ * BUILD-SOLANA-MAINNET-001 (requirement D): what deleting `ids` removes. The plan of `planCanvasRemoval`; when the steps it leaves are not a valid
+ * draft — the steps of a fixed composition (Supply → Borrow → Swap, a BUILD-009 bridge → swap, a cross-chain bridge → liquidity) only run
+ * together — the deletion removes that whole composition instead of refusing. The Canvas names every additional step it removes; undo restores all.
+ */
+export function resolveCanvasRemoval(current: Workflow, ids: readonly string[], context?: ReviewContext): CanvasRemoval | null {
+  const first = planCanvasRemoval(current, ids);
+  if (!first || !context) return first;
+  const valid = (plan: CanvasRemoval) => {
+    const candidate = { ...current, revision: current.revision + 1, ...applyCanvasRemoval(current, plan) };
+    const swapChain = candidate.nodes.find(n => n.actionType === SWAP_ACTION && (n.chainId === 'eip155:84532' || n.chainId === 'eip155:11155111'))?.chainId;
+    try { validateWorkflowDraft(candidate, swapChain ? reviewContextForChain(swapChain, context) : context); return true; } catch { return false; }
+  };
+  if (valid(first)) return first;
+  const whole = connectedSteps(current, first.removed);
+  const removed = current.nodes.filter(node => whole.has(node.nodeId)).map(node => node.nodeId);
+  return { removed, cascaded: removed.filter(id => !ids.includes(id)), unbound: [] };
+}
 /** A position bound to `producer`'s output (composition-bindings.ts). */
 function boundTo(node: Workflow['nodes'][number], producer: string): boolean {
   try { return readConcentratedLiquiditySource(node as never).source?.nodeId === producer; } catch { return false; }
