@@ -17,6 +17,7 @@ import { createSolanaSwapNode } from './jupiter-authoring';
 import { createSolanaLiquidityNode } from './solana-liquidity-authoring';
 import { projectExecutionLifecycle, type ExecutionLifecycleSource } from './execution-lifecycle';
 import { projectReview, reviewedManifest, type ReviewAuthorization } from './review-presentation';
+import type { SimulationSource } from './simulation-presentation';
 import { projectCanvasAction } from './canvas-lifecycle';
 import type { Workflow } from './initial-workflow';
 import { editorHistoryReducer, initialEditorHistory } from './editor-history';
@@ -51,6 +52,8 @@ async function boundRun() {
 const live = (view: SolanaCompositionView): SolanaCompositionView => ({ ...view, record: { ...view.record, provenance: 'PUBLIC_DEVNET' } });
 const source = (record: SolanaCompositionView, authorized = false): ExecutionLifecycleSource => ({ kind: 'solana-composition',
   state: { record, busy: false, error: null, retired: false, recovered: false, executionEnabled: true, signing: false, owner: record.record.review.owner, authorized } });
+/** The same composition store snapshot, as the Review projection reads it. */
+const reviewSource = (record: SolanaCompositionView, authorized = false) => source(record, authorized) as unknown as SimulationSource;
 /** Exactly what useReviewAuthorization attaches for the composition's position step. */
 function positionAuthorization(view: SolanaCompositionView, bound: boolean): ReviewAuthorization {
   const q = view.liquidity!.review, manifest = reviewedManifest(q.manifest);
@@ -80,18 +83,18 @@ describe('P0: the Canvas continues a reconciled Solana composition to its Orca p
     expect(prepared.record.id).toBe(id);
     expect(prepared.phase).toBe('CONSUMING');
     // The defect: compared with the composed Canvas workflow, the position manifest always mismatched.
-    expect(projectReview(workflow as unknown as Workflow, context, source(prepared), positionAuthorization(prepared, false), wallet(prepared), NOW + 1_000))
+    expect(projectReview(workflow as unknown as Workflow, context, reviewSource(prepared), positionAuthorization(prepared, false), wallet(prepared), NOW + 1_000))
       .toMatchObject({ status: 'invalidated', canApprove: false });
     expect(canvasAction(prepared, positionAuthorization(prepared, false))).toMatchObject({ kind: 'simulate' });
     // The fix: the position manifest is checked against the workflow it binds; the owner can approve it.
-    expect(projectReview(workflow as unknown as Workflow, context, source(prepared), positionAuthorization(prepared, true), wallet(prepared), NOW + 1_000))
+    expect(projectReview(workflow as unknown as Workflow, context, reviewSource(prepared), positionAuthorization(prepared, true), wallet(prepared), NOW + 1_000))
       .toMatchObject({ status: 'ready', canApprove: true });
     expect(canvasAction(prepared, positionAuthorization(prepared, true))).toEqual({ kind: 'approve', label: 'Approve & Continue', disabled: false });
 
     const reviewed = live(await service.reviewLiquidity(id, prepared.liquidity!.review.commitment, workflow));
     const accepted = positionAuthorization(reviewed, true);
     expect(accepted.accepted).toBe(true);
-    expect(projectReview(workflow as unknown as Workflow, context, source(reviewed, true), accepted, wallet(reviewed), NOW + 1_000)).toMatchObject({ status: 'approved', bindingValid: true });
+    expect(projectReview(workflow as unknown as Workflow, context, reviewSource(reviewed, true), accepted, wallet(reviewed), NOW + 1_000)).toMatchObject({ status: 'approved', bindingValid: true });
     expect(canvasAction(reviewed, accepted, true)).toEqual({ kind: 'continue', label: 'Continue to add liquidity', disabled: false });
   });
 
@@ -100,11 +103,11 @@ describe('P0: the Canvas continues a reconciled Solana composition to its Orca p
     const key = await createPositionMintSigner();
     const prepared = live(await service.prepareLiquidity(id, owner.owner, workflow, key.address));
     const edited = { ...workflow, revision: 3, nodes: [swap, { ...position, inputs: position.inputs.map(input => input) }] } as unknown as Workflow;
-    expect(projectReview(edited, context, source(prepared), positionAuthorization(prepared, true), wallet(prepared), NOW + 1_000)).toMatchObject({ canApprove: false });
+    expect(projectReview(edited, context, reviewSource(prepared), positionAuthorization(prepared, true), wallet(prepared), NOW + 1_000)).toMatchObject({ canApprove: false });
     const retired = { ...source(prepared), state: { ...source(prepared).state, retired: true } } as never;
     expect(projectReview(workflow as unknown as Workflow, context, retired, positionAuthorization(prepared, true), wallet(prepared), NOW + 1_000)).toMatchObject({ canApprove: false });
     // An expired position Review is prepared again (still the position, never the swap).
-    expect(projectReview(workflow as unknown as Workflow, context, source(prepared), positionAuthorization(prepared, true), wallet(prepared), NOW + 120_000)).toMatchObject({ status: 'expired' });
+    expect(projectReview(workflow as unknown as Workflow, context, reviewSource(prepared), positionAuthorization(prepared, true), wallet(prepared), NOW + 120_000)).toMatchObject({ status: 'expired' });
   });
 
   it('a recovered run that still owes its position shows its authorized workflow on the untouched Canvas again, and nothing else', () => {
