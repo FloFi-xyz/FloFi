@@ -7,6 +7,26 @@ BUILD-013 remains OPEN on `codex/build-013-lending-composition` at
 `6cd675e41c0838fa8ac9cf3ec8e90de9442da3b9`; PR #48 remains open and unmerged.
 This separate branding build does not resume its execution work. BUILD-CLOUD-001 (below) does not touch BUILD-013 either.
 
+## BUILD-SOLANA-MAINNET-001 — Solana Mainnet, Mainnet/Testnet consistency and Canvas UX corrections
+
+**Status: READY_FOR_OWNER_REVIEW. Evidence: `PUBLIC_READ_ONLY` on Solana mainnet-beta and MOCKED loopback. No transaction was signed or sent;
+Mainnet execution is not certified.** There are two stacked PRs, neither merged nor deployed.
+
+PR A (`claude/build-solana-mainnet-001`):
+- The header Mainnet/Testnet control works for Solana sessions, so Jupiter mainnet swaps are reachable from the Canvas.
+- Orca Whirlpools liquidity runs on mainnet-beta on the verified SOL/USDC 0.30% pool, through the same engine as Devnet, gated by
+  `GRYLOO_ORCA_MAINNET` and the owner-only `GRYLOO_ORCA_MAINNET_OWNER_EXECUTION`.
+- An environment change moves a step only to its own family's counterpart (Solana Devnet ↔ Solana, Base Sepolia ↔ Base, Robinhood Chain
+  Testnet ↔ Robinhood Chain); steps without one stay where they are, blocked.
+
+PR B (`claude/build-solana-mainnet-001-canvas-ux`):
+- The existing Swap arrow switches From and To, as a re-validated, re-quoted draft.
+- Any action card can be deleted. Dependants that cannot stand alone go with it and are named; undo restores them.
+- Launch App starts with an empty Canvas; only a run that still needs the owner is restored.
+
+See the [plan](builds/BUILD-SOLANA-MAINNET-001-PLAN.md) and the [report](builds/BUILD-SOLANA-MAINNET-001-REPORT.md), which has the
+certification matrix and the list of what is not yet verified.
+
 ## BUILD-SOLANA-COMPOSITION-001 — Solana Devnet Swap → Orca liquidity composition
 
 **Status: READY FOR OWNER REVIEW — MOCKED (loopback) evidence only; no public transaction was signed or sent.** A Canvas link from a Solana
