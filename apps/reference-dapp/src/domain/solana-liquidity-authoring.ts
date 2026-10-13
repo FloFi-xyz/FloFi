@@ -2,7 +2,7 @@
 import { CONCENTRATED_LIQUIDITY_ACTION, createConcentratedLiquidityNode, readConcentratedLiquidity, readConcentratedLiquiditySource, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY as profile } from '@defi-workflow-engine/action-registry';
 import { orcaAlignPriceRange, orcaPriceFromSqrtPrice, orcaSqrtPriceAtTick } from '@defi-workflow-engine/reference-compiler';
-import { formatTokenAmount, parseTokenAmount } from './jupiter-authoring';
+import { formatTokenAmount, parseTokenAmount, type SolanaSwapInput } from './jupiter-authoring';
 
 /**
  * Chat and canvas author the same canonical `asset.liquidity.concentrated` node. The network selects the runtime below
@@ -68,4 +68,33 @@ export function parseSolanaLiquidityChat(text: string): SolanaLiquidityInput | n
   const price = match[3] !== undefined;
   return { network: 'Solana Devnet', maxSol: match[1]!, maxDevUsdc: match[2]!, rangeUnit: price ? 'PRICE' : 'TICK', lower: price ? match[3]! : match[5]!,
     upper: price ? match[4]! : match[6]!, slippage: match[7] ?? SOLANA_LIQUIDITY_DEFAULT_SLIPPAGE };
+}
+
+/**
+ * The position funded by a Solana Devnet swap's output, as one sentence: a new swap ("swap 0.1 SOL to devUSDC on Solana Devnet slippage 50 bps then
+ * add liquidity all swapped devUSDC and 0.05 SOL from 20.1 to 24.5 devUSDC per SOL slippage 100 bps") or an existing swap step ("add liquidity all
+ * devUSDC from node-002 and 0.05 SOL … on Solana Devnet slippage 100 bps"). `all` is 100% of the actual reconciled output (the token's Devnet maximum
+ * as the cap); a number caps it. The other token always has an explicit maximum. `bound` is the swapped token.
+ */
+export type SolanaCompositionChat = { swap: SolanaSwapInput | null; from: string | null; bound: 'SOL' | 'devUSDC'; liquidity: SolanaLiquidityInput };
+const TOKEN = '(SOL|devUSDC)', CAP = '(all|[0-9]+(?:\\.[0-9]+)?)', RANGE = `(?:from ${N} to ${N} devUSDC per SOL|ticks ${T} to ${T})`;
+const NEW_SWAP = new RegExp(`^swap ${N} ${TOKEN} to ${TOKEN} on Solana Devnet slippage ([0-9]+) bps then add liquidity ${CAP} swapped ${TOKEN} and ${N} ${TOKEN} ${RANGE}` +
+  ` slippage ([0-9]+) bps$`, 'i');
+const FROM_STEP = new RegExp(`^add liquidity ${CAP} ${TOKEN} from (node-[0-9]{3,16}) and ${N} ${TOKEN} ${RANGE} on Solana Devnet slippage ([0-9]+) bps$`, 'i');
+const devnetToken = (text: string): 'SOL' | 'devUSDC' => text.toUpperCase() === 'SOL' ? 'SOL' : 'devUSDC';
+export function parseSolanaCompositionChat(text: string): SolanaCompositionChat | null {
+  const input = text.trim(), created = NEW_SWAP.exec(input), linked = created ? null : FROM_STEP.exec(input);
+  if (!created && !linked) return null;
+  // Groups after the swap: cap, bound token, other maximum, other token, price bounds or tick bounds, slippage.
+  const g = created ? created.slice(5) : [linked![1], linked![2], linked![4], linked![5], ...linked!.slice(6)];
+  const [cap, boundText, other, otherText, lowPrice, highPrice, lowTick, highTick, slippage] = g as string[];
+  const bound = devnetToken(boundText!), otherToken = devnetToken(otherText!);
+  if (bound === otherToken) throw new Error('INVALID_ASSET_PAIR');
+  if (created && (devnetToken(created[2]!) === devnetToken(created[3]!) || devnetToken(created[3]!) !== bound)) throw new Error('COMPOSITION_TOKEN_MISMATCH');
+  const boundMax = cap!.toLowerCase() === 'all' ? fullOutputCap(bound === 'SOL' ? 0 : 1) : cap!;
+  const price = lowPrice !== undefined;
+  const liquidity: SolanaLiquidityInput = { network: 'Solana Devnet', maxSol: bound === 'SOL' ? boundMax : other!, maxDevUsdc: bound === 'SOL' ? other! : boundMax,
+    rangeUnit: price ? 'PRICE' : 'TICK', lower: price ? lowPrice! : lowTick!, upper: price ? highPrice! : highTick!, slippage: slippage! };
+  const swap: SolanaSwapInput | null = created ? { network: 'Solana Devnet', from: devnetToken(created[2]!), to: devnetToken(created[3]!), amount: created[1]!, slippage: created[4]! } : null;
+  return { swap, from: linked ? linked[3]! : null, bound, liquidity };
 }

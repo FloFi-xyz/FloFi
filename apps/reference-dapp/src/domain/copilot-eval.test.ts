@@ -5,6 +5,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { commandIsValid, type Command } from './commands';
 import { editorReducer } from './editor';
 import { amountReadings, canonicalDecimal } from './copilot-authoring';
+import { priceBoundsAround } from './pool-price-bounds';
 import { COPILOT_V2_COMMANDS, type CopilotReply } from './copilot-conversation';
 import { COPILOT_V2_LIMITS } from './copilot-intent-v2';
 import { COPILOT_EVAL_CASES, type Category, type EvalCase, type Expect, type Turn } from './copilot-eval.corpus';
@@ -64,7 +65,12 @@ function checkInvariants(c: EvalCase, turn: Turn, record: TurnRecord, session: C
     // Every number and address in the proposal comes from the user's words, the setup the user authored, or a Flofi default.
     // Provenance sources: the user's words, the setup they authored, the canonical workflow and visible proposal, Flofi defaults.
     const canonical = JSON.stringify({ steps: session.currentFacts().steps, pending: session.currentFacts().pending });
-    const allowedNumbers = new Set([...userTexts, ...(c.setup ?? []), canonical].flatMap(text => [...readingsOf(text)]).concat(['50', '100']));
+    // PR B: verified Solana Devnet facts FloFi read itself, and the percentage bounds it derives from the verified pool price.
+    const price = session.verified?.orcaPrice?.price;
+    const bounds = price ? userTexts.flatMap(text => numberTokens(text).flatMap(token => amountReadings(token)).filter(value => Number(value) > 0 && Number(value) <= 90)
+      .flatMap(value => Object.values(priceBoundsAround(price, -Number(value), Number(value))).slice(1))) : [];
+    const allowedNumbers = new Set([...userTexts, ...(c.setup ?? []), canonical, JSON.stringify(session.verified ?? null)].flatMap(text => [...readingsOf(text)])
+      .concat(['50', '100'], bounds.map(value => canonicalDecimal(value))));
     const sentence = reply.sentence ?? '';
     const ungrounded = numberTokens(sentence).filter(token => !allowedNumbers.has(canonicalDecimal(token)));
     const allowedAddresses = new Set([...[...userTexts, ...(c.setup ?? [])].flatMap(text => [...addressesOf(text)]), TEST_WALLET.toLowerCase()]);
@@ -101,6 +107,7 @@ function checkExpectation(expected: Expect, record: TurnRecord, where: string) {
 function runCase(c: EvalCase) {
   const session = new CopilotSession(c.setup ?? [], c.wallet === undefined ? TEST_WALLET : c.wallet);
   if (c.facts) session.facts = c.facts;
+  if (c.verified) session.verified = c.verified;
   const userTexts: string[] = [];
   c.turns.forEach((turn, index) => {
     const where = `${c.id}#${index + 1} “${turn.user.slice(0, 60)}”`;

@@ -113,7 +113,7 @@ test('unsupported requests are explained, not invented', async ({ page }) => {
   await page.goto('/app');
   await ask(page, 'Stake 10 ETH on Lido');
   await expect(copilotSays(page)).toContainText('Staking is not supported by Flofi.');
-  await expect(copilotSays(page)).toContainText('Flofi Copilot can author:');
+  await expect(copilotSays(page)).not.toContainText('Flofi Copilot can author:');
   await ask(page, 'Tenho 500 USDC. Coloca 300 na Aave e troca 200 por ETH.');
   await expect(copilotSays(page)).toContainText('O Flofi só combina passos como Supply de USDC → Borrow de USDC → Swap do USDC emprestado para WETH');
   await expect(proposal(page)).toHaveCount(0);

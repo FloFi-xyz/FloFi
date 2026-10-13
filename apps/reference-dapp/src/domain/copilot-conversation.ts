@@ -8,8 +8,12 @@ import type { Workflow } from './initial-workflow';
 import { lendingDetails } from './lending-authoring';
 import { workflowSteps, type WorkflowStep } from './workflow-steps';
 import { editCommandFor, removeCommandFor } from './workflow-edits';
-import { COPILOT_AUTHORING_COMMANDS, COPILOT_NETWORK_LABEL, COPILOT_POOLS, amountReadings, copilotRejection, planCopilotActions, proposalFromPlan,
-  type CarriedField, type CopilotOutcome, type Grounding } from './copilot-authoring';
+import { COPILOT_AUTHORING_COMMANDS, COPILOT_NETWORK_LABEL, COPILOT_POOLS, amountReadings, canonicalDecimal, copilotRejection, groundedAmount, planCopilotActions,
+  proposalFromPlan, type CarriedField, type CopilotOutcome, type Grounding, type SwapSource } from './copilot-authoring';
+import { SOLANA_LIQUIDITY_DEFAULT_SLIPPAGE, solanaLiquidityDetails, type SolanaLiquidityInput } from './solana-liquidity-authoring';
+import { formatTokenAmount, parseTokenAmount } from './jupiter-authoring';
+import { ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY } from '@defi-workflow-engine/action-registry';
+import { orcaLiquidityAmounts, orcaSqrtPriceAtTick } from '@defi-workflow-engine/reference-compiler';
 import { COPILOT_LIMITS, hasUnsafeCharacters, safeCopilotProse, type CopilotAction, type CopilotFeeTier, type CopilotLendingAction, type CopilotNetwork,
   type CopilotSwapAction } from './copilot-intent';
 import { canonicalSymbol } from './asset-catalogs';
@@ -30,15 +34,21 @@ import { answerQuestion, stepSummary, type CopilotFacts } from './copilot-answer
 export type TranscriptEntry = { readonly role: 'user' | 'assistant'; readonly text: string };
 /** A proposal Flofi showed, as Flofi recorded it from the Command and its editor preview (never as the model described it). */
 export type CopilotReferent = { readonly command: Command; readonly sentence: string; readonly step: WorkflowStep };
-export type ContextSnapshot = { readonly workflow: Workflow; readonly pending: object | null; readonly wallet: string | null; readonly walletChainId: string | null };
+export type ContextSnapshot = { readonly workflow: Workflow; readonly pending: object | null; readonly wallet: string | null; readonly walletChainId: string | null; readonly solanaOwner?: string | null };
 type Resolved =
   | { readonly source: 'PENDING'; readonly step: WorkflowStep; readonly command: Command }
   | { readonly source: 'NODE'; readonly step: WorkflowStep }
   | { readonly source: 'REFERENT'; readonly step: WorkflowStep; readonly referent: CopilotReferent };
-type DraftFill = { readonly kind: 'TARGET'; readonly target: Resolved } | { readonly kind: 'ACTION'; readonly patch: Readonly<Record<string, unknown>> };
+type DraftFill = { readonly kind: 'TARGET'; readonly target: Resolved } | { readonly kind: 'ACTION'; readonly patch: Readonly<Record<string, unknown>> }
+  | { readonly kind: 'EXTRAS'; readonly extras: Extras };
 /** Flofi's own open question: each button has a deterministic meaning, so answering it needs no model. */
 type Draft = { readonly intent: CopilotIntentV2; readonly options: readonly { readonly label: string; readonly fill: DraftFill }[]; readonly amountFill: boolean;
-  readonly snapshot: ContextSnapshot };
+  readonly snapshot: ContextSnapshot;
+  /** A bare amount answers Flofi's question for this pool token's maximum (FloFi's own question named it). */ readonly depositFill?: 'SOL' | 'devUSDC';
+  /** What resolving the open request already settled (a chosen swap or position). */ readonly extras?: Extras;
+  /** The question and the buttons shown, so "yes" never guesses among several. */ readonly question?: string; readonly shown?: readonly string[] };
+/** Values Flofi settled itself while resolving one request: values it carried, the swap whose output funds a position, a position and its portion. */
+type Extras = { readonly carried?: readonly CarriedField[]; readonly swap?: SwapSource; readonly position?: string; readonly portion?: string };
 export type CopilotConversation = {
   readonly transcript: readonly TranscriptEntry[]; readonly segment: readonly string[]; readonly clarifications: number;
   readonly draft: Draft | null; readonly referents: readonly CopilotReferent[]; readonly language: CopilotLanguage;
@@ -46,6 +56,19 @@ export type CopilotConversation = {
 export type CopilotEnvironment = {
   readonly timezone?: string; readonly workflow: Workflow; readonly context: ReviewContext; readonly wallet: string | null; readonly walletChainId: string | null;
   readonly pending: { readonly command: Command; readonly diff: readonly string[] } | null; readonly facts: CopilotFacts;
+  /** Read-only Solana Devnet facts FloFi read itself (never the model's or the user's words); absent when not loaded. */
+  readonly verified?: CopilotVerified;
+};
+/** One FloFi-registered Orca position of the connected Solana Devnet wallet, as the position registry and the chain report it. */
+export type CopilotPosition = { readonly positionMint: string; readonly status: string; readonly tickLower: number | null; readonly tickUpper: number | null;
+  readonly liquidity: string | null };
+export type CopilotVerified = {
+  /** The Orca SOL/devUSDC pool price (devUSDC per SOL) and current tick, read from Solana Devnet. */
+  readonly orcaPrice: { readonly price: string; readonly tickCurrentIndex: number } | null;
+  /** The connected Solana Devnet wallet and its FloFi positions on that pool (null: not loaded). */
+  readonly solanaOwner: string | null; readonly orcaPositions: readonly CopilotPosition[] | null;
+  /** Swap output a reconciled execution left in the wallet: a reconciled Devnet swap's output, or a composition's undeposited swap output. */
+  readonly remaining: readonly { readonly token: 'SOL' | 'devUSDC'; readonly amount: string }[];
 };
 export type CopilotReply = {
   readonly kind: 'PROPOSAL' | 'AUTOMATION_PROPOSAL' | 'ANSWER' | 'CLARIFICATION' | 'UNSUPPORTED' | 'FAILED'; readonly text: string; readonly notes: readonly string[];
@@ -62,15 +85,17 @@ type Result = { readonly reply: CopilotReply; readonly next: CopilotConversation
 export const COPILOT_V2_COMMANDS: ReadonlySet<string> = new Set([...COPILOT_AUTHORING_COMMANDS, 'SET_SUPPLY', 'SET_BORROW', 'SET_REPAY', 'SET_WITHDRAW',
   'SET_SOLANA_SWAP', 'SET_ROUTER_BRIDGE', 'SET_UNISWAP_LIQUIDITY', 'SET_SOLANA_LIQUIDITY', 'SET_SWAP_AMOUNT', 'SET_SLIPPAGE', 'REMOVE',
   // BUILD-BASE-001: edits of catalog-network swaps, positions and transfers, with the same commands the Canvas uses.
-  'SET_CRYPTO_ACTION', 'SET_RH_TRANSFER']);
+  'SET_CRYPTO_ACTION', 'SET_RH_TRANSFER',
+  // PR B: preparing a verified FloFi position for removal or exit (the owner still simulates, reviews and signs).
+  'MANAGE_SOLANA_POSITION']);
 export const emptyConversation = (): CopilotConversation => ({ transcript: [], segment: [], clarifications: 0, draft: null, referents: [], language: 'EN' });
 export const snapshotOf = (env: CopilotEnvironment): ContextSnapshot =>
-  ({ workflow: env.workflow, pending: env.pending, wallet: env.wallet, walletChainId: env.walletChainId });
+  ({ workflow: env.workflow, pending: env.pending, wallet: env.wallet, walletChainId: env.walletChainId, solanaOwner: env.verified?.solanaOwner ?? null });
 /** What changed between two snapshots, by identity: the IR and the pending proposal are immutable objects replaced on every change. */
 export function contextChange(a: ContextSnapshot, b: ContextSnapshot): 'WORKFLOW' | 'PROPOSAL' | 'WALLET' | null {
   if (a.workflow !== b.workflow) return 'WORKFLOW';
   if (a.pending !== b.pending) return 'PROPOSAL';
-  return a.wallet !== b.wallet || a.walletChainId !== b.walletChainId ? 'WALLET' : null;
+  return a.wallet !== b.wallet || a.walletChainId !== b.walletChainId || (a.solanaOwner ?? null) !== (b.solanaOwner ?? null) ? 'WALLET' : null;
 }
 
 // A private key, seed phrase or other 64-hex secret is refused locally: it is never sent to the model and never stored.
@@ -109,7 +134,8 @@ const refused = (state: CopilotConversation, m: CopilotCopy, message: string): R
 function question(state: CopilotConversation, m: CopilotCopy, text: string, options: readonly string[], draft: Draft | null): Result {
   if (state.clarifications >= COPILOT_V2_LIMITS.maxClarifications) return failed(state, m, m.tooManyClarifications);
   return { reply: reply('CLARIFICATION', text, { options }),
-    next: { ...state, clarifications: state.clarifications + 1, draft, transcript: bounded([...state.transcript, { role: 'assistant', text: COPILOT_TRANSCRIPT.asked + text }]) } };
+    next: { ...state, clarifications: state.clarifications + 1, draft: draft && { ...draft, question: text, shown: options },
+      transcript: bounded([...state.transcript, { role: 'assistant', text: COPILOT_TRANSCRIPT.asked + text }]) } };
 }
 export const failureText = (code: string, language: CopilotLanguage, retryAfterSeconds?: number): string => {
   const m = copilotCopy(language);
@@ -275,7 +301,8 @@ const CARRIED_LABEL: Readonly<Record<string, CarriedLabel>> = { network: 'networ
   inputAsset: 'token', outputAsset: 'token', amount: 'amount', supplyAmount: 'amount', borrowAmount: 'amount', slippage: 'slippage', recipient: 'recipient',
   beneficiary: 'beneficiary', routing: 'routing', range: 'range' };
 const carriedLabels = (m: CopilotCopy, carried: ReadonlySet<CarriedField>) =>
-  [...new Set([...carried].flatMap(field => field.startsWith('deposit:') ? ['maxima' as const] : CARRIED_LABEL[field] ? [CARRIED_LABEL[field]!] : []))].map(label => m.carriedLabel[label]);
+  [...new Set([...carried].flatMap(field => field.startsWith('deposit:') ? ['maxima' as const] : field.startsWith('asset:') ? ['token' as const]
+    : CARRIED_LABEL[field] ? [CARRIED_LABEL[field]!] : []))].map(label => m.carriedLabel[label]);
 
 type Applied = { readonly ok: true; readonly base: Base; readonly carried: Set<CarriedField>; readonly changed: readonly string[] } | { readonly ok: false; readonly field: ChangeField };
 /** Only the changed fields leave the carried set; each of them must then be grounded in the open request by the planners. */
@@ -354,7 +381,14 @@ function applyReuse(action: CopilotAction, from: Base, fields: readonly CopilotR
     if (field === 'network' && action.type === 'BRIDGE') fill('sourceNetwork', source.type === 'BRIDGE' ? source.sourceNetwork : sourceNetwork(), 'sourceNetwork');
     else if (field === 'network') fill('network', sourceNetwork(), 'network');
     if (field === 'destination' && action.type === 'BRIDGE' && source.type === 'BRIDGE') fill('destinationNetwork', source.destinationNetwork, 'destinationNetwork');
-    if (field === 'asset') {
+    if (field === 'asset' && action.type === 'LIQUIDITY' && source.type === 'SWAP') {
+      // "Add liquidity with the same tokens": the swap's pair names the pool (Orca SOL/devUSDC on Solana Devnet, Uniswap v3 USDC/WETH on a test network).
+      const pair = [source.inputAsset, source.outputAsset].map(asset => (asset ?? '').toUpperCase()).sort().join('/');
+      const pool = source.network === 'SOLANA_DEVNET' && pair === 'DEVUSDC/SOL' ? { protocol: 'ORCA', network: source.network, symbols: ['SOL', 'devUSDC'] }
+        : (source.network === 'BASE_SEPOLIA' || source.network === 'ETHEREUM_SEPOLIA') && ['USDC/WETH', 'ETH/USDC'].includes(pair)
+          ? { protocol: 'UNISWAP_V3', network: source.network, symbols: ['USDC', 'WETH'] } : null;
+      if (pool) { fill('protocol', pool.protocol, 'protocol'); fill('network', pool.network, 'network'); pool.symbols.forEach(symbol => carried.add(`asset:${symbol}`)); }
+    } else if (field === 'asset') {
       if (action.type === 'SWAP' && source.type === 'SWAP') { fill('inputAsset', source.inputAsset, 'inputAsset'); fill('outputAsset', source.outputAsset, 'outputAsset'); }
       else if (action.type === 'SWAP') fill('inputAsset', sourceAsset(), 'inputAsset');
       else fill('asset', sourceAsset(), 'asset');
@@ -407,6 +441,30 @@ function bareAmount(text: string): string | null {
   const readings = match ? amountReadings(match[1]!) : [];
   return readings.length === 1 && /^(0|[1-9][0-9]*)(\.[0-9]+)?$/.test(readings[0]!) && readings[0]!.length <= COPILOT_LIMITS.maxValueLength ? readings[0]! : null;
 }
+/** A bare amount that answers Flofi's question for one pool token's maximum becomes that deposit of the request's liquidity step. */
+function patchDeposit(intent: CopilotIntentV2, asset: 'SOL' | 'devUSDC', maxAmount: string): CopilotIntentV2 {
+  const add = (action: CopilotAction): CopilotAction => action.type !== 'LIQUIDITY' ? action
+    : { ...action, deposits: [...action.deposits.filter(d => COPILOT_POOLS.ORCA.symbol(d.asset) !== asset), { asset: asset === 'SOL' ? 'SOL' : 'DEVUSDC', maxAmount }] };
+  return intent.kind === 'ACTION' ? { ...intent, action: add(intent.action) } : intent.kind === 'COMPOSITION' ? { ...intent, actions: intent.actions.map(add) } : intent;
+}
+// "yes"/"no" as a whole message. Flofi never applies, signs or guesses from them: yes picks the single deterministic answer to Flofi's own open question.
+const YES = /^\s*(?:yes|yeah|yep|yup|sure|ok(?:ay)?|confirm(?:ed)?|go ahead|do it|sim|claro|pode(?: ser)?|isso|confirmo|beleza|manda)\s*[.!]?\s*$/i;
+const NO = /^\s*(?:no|nope|nah|cancel|stop|n[ãa]o|cancela(?:r)?|deixa(?: pra l[áa])?)\s*[.!]?\s*$/i;
+function yesOrNo(state: CopilotConversation, text: string, env: CopilotEnvironment, m: CopilotCopy): TurnStart | { readonly pick: string } | null {
+  const yes = YES.test(text), no = !yes && NO.test(text);
+  if (!yes && !no) return null;
+  const local = (value: CopilotReply, next: CopilotConversation): TurnStart => ({ kind: 'LOCAL', reply: value, next });
+  const draft = state.draft;
+  if (draft) {
+    if (no) return local(reply('ANSWER', m.noDropped), closeSegment(state));
+    const shown = draft.shown ?? draft.options.map(option => option.label);
+    if (draft.options.length === 1 && shown.length === 1 && !draft.amountFill) return { pick: draft.options[0]!.label };
+    return local(reply('CLARIFICATION', shown.length ? m.yesWhich : draft.question ?? m.yesWhich, { options: shown }), state);
+  }
+  // The model asked its own question: it reads the answer in context.
+  if (state.clarifications > 0) return null;
+  return local(reply('ANSWER', yes ? env.pending ? m.yesPending : m.yesNothingOpen : env.pending ? m.noPending : m.noDropped), closeSegment(state));
+}
 function patchIntent(intent: CopilotIntentV2, patch: Readonly<Record<string, unknown>>): CopilotIntentV2 {
   if (intent.kind !== 'ACTION') return intent;
   const action = { ...intent.action } as Record<string, unknown>;
@@ -423,16 +481,22 @@ export function startTurn(state: CopilotConversation, raw: string, env: CopilotE
   // No model runs for a secret, so its language comes from the conversation or from the Portuguese wording that matched.
   if (looksSecret(text)) return { kind: 'LOCAL', reply: reply('UNSUPPORTED', /chaves?\s+privad|frases?\s+(?:semente|secreta|de\s+recupera)|palavras\s+secretas/i.test(text)
     ? copilotCopy('PT').secret : m.secret), next: state };
-  const draft = state.draft;
+  const answered = yesOrNo(state, text, env, m);
+  if (answered && !('pick' in answered)) return answered;
+  const draft = state.draft, picked = answered ? answered.pick : text;
   if (draft) {
-    const option = draft.options.find(item => normalize(item.label) === normalize(text));
-    const amount = !option && draft.amountFill ? bareAmount(text) : null;
+    const option = draft.options.find(item => normalize(item.label) === normalize(picked));
+    const amount = !option && (draft.amountFill || draft.depositFill) ? bareAmount(text) : null;
     if (option || amount) {
       if (contextChange(draft.snapshot, snapshotOf(env))) return { kind: 'LOCAL', ...failed(closeSegment(state), m, m.draftStale) };
-      const next = withUser(state, text);
-      if (option?.fill.kind === 'TARGET') return { kind: 'LOCAL', ...resolveIntent(draft.intent, next, env, option.fill.target) };
+      // "Yes" to a question with exactly one offered answer is that answer, in Flofi's own words.
+      const next = withUser(state, picked), extras = draft.extras ?? {};
+      if (option?.fill.kind === 'TARGET') return { kind: 'LOCAL', ...resolveIntent(draft.intent, next, env, option.fill.target, extras) };
+      if (option?.fill.kind === 'EXTRAS') return { kind: 'LOCAL', ...resolveIntent(draft.intent, next, env, null, { ...extras, ...option.fill.extras }) };
+      if (!option && draft.depositFill) return { kind: 'LOCAL', ...resolveIntent(patchDeposit(draft.intent, draft.depositFill, amount!), next, env, null,
+        { ...extras, carried: [...extras.carried ?? [], `asset:${draft.depositFill}`] }) };
       const intent = option?.fill.kind === 'ACTION' ? patchIntent(draft.intent, option.fill.patch) : patchIntent(draft.intent, { amount });
-      return { kind: 'LOCAL', ...resolveIntent(intent, next, env, null) };
+      return { kind: 'LOCAL', ...resolveIntent(intent, next, env, null, extras) };
     }
   }
   const next = withUser(state, text);
@@ -447,11 +511,11 @@ export function finishTurn(turn: PendingTurn, result: CopilotResultV2, env: Copi
   let intent: CopilotIntentV2;
   try { intent = parseCopilotIntentV2(result.intent); }
   catch (cause) { return { reply: reply('FAILED', failureText(isCopilotIntentError(cause) && cause.message === 'COPILOT_TOO_MANY_ACTIONS' ? cause.message : 'COPILOT_INTENT_INVALID', language)), next: rollback }; }
-  return resolveIntent(intent, { ...turn.state, language: intent.language }, env, null);
+  return resolveIntent(intent, { ...turn.state, language: intent.language }, env, null, {});
 }
 
 /** One validated intent → reply and next state. `forced` is a step the user picked from Flofi's own buttons. */
-function resolveIntent(intent: CopilotIntentV2, state: CopilotConversation, env: CopilotEnvironment, forced: Resolved | null): Result {
+function resolveIntent(intent: CopilotIntentV2, state: CopilotConversation, env: CopilotEnvironment, forced: Resolved | null, extras: Extras): Result {
   const language = intent.language, m = copilotCopy(language);
   const target = (value: CopilotTarget, purpose: Purpose): Resolution => forced ? { ok: true, resolved: forced } : resolveTarget(value, purpose, intent, state, env);
   switch (intent.kind) {
@@ -462,10 +526,9 @@ function resolveIntent(intent: CopilotIntentV2, state: CopilotConversation, env:
       return refused(state, m, automation.message);
     }
 
-    case 'UNSUPPORTED': {
-      const message = safeCopilotProse(intent.reason) ?? m.cannotAuthor;
-      return refused(state, m, message.includes(m.capabilities) ? message : `${message} ${m.capabilities}`);
-    }
+    // PR B: a short, contextual reason; the full capability list is only the answer to a CAPABILITIES question.
+    case 'UNSUPPORTED': return refused(state, m, safeCopilotProse(intent.reason) ?? m.cannotAuthor);
+    case 'POSITION': return resolvePosition(intent, state, env, extras);
     case 'CLARIFICATION_REQUIRED': {
       const text = safeCopilotProse(intent.question) ?? m.stillNeeds(m.subject.request, intent.missing.filter(field => field !== 'target').map(field => m.field[field as keyof typeof m.field]));
       return question(state, m, text, intent.options.flatMap(option => safeCopilotProse(option) ?? []), null);
@@ -482,18 +545,43 @@ function resolveIntent(intent: CopilotIntentV2, state: CopilotConversation, env:
     }
     case 'ACTION': case 'COMPOSITION': {
       let actions = intent.kind === 'ACTION' ? [intent.action] : intent.actions;
-      let carried = new Set<CarriedField>(), notes: string[] = [];
+      const carried = new Set<CarriedField>(extras.carried ?? []);
+      let notes: string[] = [];
       if (intent.kind === 'ACTION' && intent.reuse && REUSE_CUE.test(segmentText(state))) {
         const resolution = target(intent.reuse.from, 'REUSE');
         if (!resolution.ok) return resolution.result;
         const from = stepAction(resolution.resolved.step);
         if (from) {
           const reused = applyReuse(intent.action, from, intent.reuse.fields);
-          actions = [reused.action]; carried = reused.carried;
-          if (carried.size) notes = [m.carried(sourceLabel(m, resolution.resolved, language), carriedLabels(m, carried))];
+          actions = [reused.action]; reused.carried.forEach(field => carried.add(field));
+          if (reused.carried.size) notes = [m.carried(sourceLabel(m, resolution.resolved, language), carriedLabels(m, reused.carried))];
         }
       }
-      return author(intent, actions, intent.kind === 'COMPOSITION', carried, state, env, notes, sentence => m.interpreted(sentence), m.subject.composition);
+      const liquidity = intent.kind === 'ACTION' && intent.action.type === 'LIQUIDITY' ? intent.action : null;
+      // "With these tokens": the swap whose actual output funds the position, resolved from FloFi's own state (a visible swap proposal or a swap step).
+      let swap: SwapSource | null = extras.swap ?? null;
+      if (liquidity?.funding === 'SWAP_OUTPUT' && !swap) {
+        const found = swapSourceFor(intent, state, env, extras);
+        if (!found.ok) return found.result;
+        swap = found.source;
+      }
+      // "The remaining tokens": only what a reconciled execution left over; never a balance or an estimate.
+      if (liquidity?.funding === 'REMAINING') {
+        const remaining = env.verified?.remaining ?? [];
+        if (!remaining.length) return question(state, m, m.remainingUnavailable, [], null);
+        const deposits = [...liquidity.deposits.filter(deposit => !remaining.some(item => COPILOT_POOLS.ORCA.symbol(deposit.asset) === item.token)),
+          ...remaining.map(item => {
+            const explicit = liquidity.deposits.find(deposit => COPILOT_POOLS.ORCA.symbol(deposit.asset) === item.token);
+            const decimals = item.token === 'SOL' ? 9 : 6;
+            const cap = explicit && groundedAmount(segmentText(state), explicit.maxAmount) ? BigInt(parseTokenAmount(explicit.maxAmount, decimals)) : null;
+            const received = BigInt(parseTokenAmount(item.amount, decimals));
+            return { asset: item.token === 'SOL' ? 'SOL' : 'DEVUSDC', maxAmount: cap !== null && cap < received ? explicit!.maxAmount : item.amount };
+          })];
+        actions = [{ ...liquidity, protocol: 'ORCA', network: 'SOLANA_DEVNET', deposits, funding: null }];
+        for (const field of ['protocol', 'network', ...remaining.map(item => `deposit:${item.token}`)] as CarriedField[]) carried.add(field);
+        notes = [...notes, ...remaining.map(item => m.remainingNote(item.amount, item.token))];
+      }
+      return author(intent, actions, intent.kind === 'COMPOSITION', carried, state, env, notes, sentence => m.interpreted(sentence), m.subject.composition, null, swap, extras);
     }
     case 'EDIT': case 'REPEAT': {
       if (intent.kind === 'REPEAT' && !REPEAT_CUE.test(segmentText(state))) return refused(state, m, m.repeatNeedsCue);
@@ -509,7 +597,7 @@ function resolveIntent(intent: CopilotIntentV2, state: CopilotConversation, env:
       if (intent.kind === 'REPEAT') return author(intent, applied.base.actions, applied.base.composition, applied.carried, state, env, notes, sentence => m.interpreted(sentence), label);
       const revising = resolved.source === 'PENDING' && (resolved.command.type.startsWith('ADD_') || resolved.command.type === 'AUTHOR_LENDING');
       return author(intent, applied.base.actions, applied.base.composition, applied.carried, state, env, notes,
-        sentence => revising ? m.interpretedRevision(sentence) : m.interpretedEdit(label, sentence), label, revising ? null : resolved.step.nodeId);
+        sentence => revising ? m.interpretedRevision(sentence) : m.interpretedEdit(label, sentence), label, revising ? null : resolved.step.nodeId, null, extras);
     }
     case 'REMOVE': {
       const resolution = target(intent.target, 'REMOVE');
@@ -528,16 +616,109 @@ function resolveIntent(intent: CopilotIntentV2, state: CopilotConversation, env:
   }
 }
 
+// ── PR B: the swap behind "these tokens", and FloFi-registered positions ─────────────────────────────────────────────
+type SwapFound = { readonly ok: true; readonly source: SwapSource } | { readonly ok: false; readonly result: Result };
+/**
+ * "With these tokens": the Solana Devnet swap whose actual output funds the position — the visible swap proposal (authored again together with the
+ * position) or a swap step that does not fund a position yet. The step the user saw last wins; otherwise one candidate, or Flofi's buttons.
+ */
+function swapSourceFor(intent: CopilotIntentV2, state: CopilotConversation, env: CopilotEnvironment, extras: Extras): SwapFound {
+  const m = copilotCopy(intent.language);
+  const pending = env.pending?.command.type === 'ADD_SOLANA_SWAP' && env.pending.command.input.network === 'Solana Devnet' ? env.pending.command.input : null;
+  if (pending) return { ok: true, source: { kind: 'NEW', input: pending } };
+  const funded = new Set(env.workflow.nodes.flatMap(node => { const source = solanaLiquidityDetails(node)?.source; return source ? [source.nodeId] : []; }));
+  const swaps = workflowSteps(env.workflow, env.context).flatMap(step => step.detail.type === 'SOLANA_SWAP' && step.detail.input.network === 'Solana Devnet' ? [step] : []);
+  const open = swaps.filter(step => !funded.has(step.nodeId)).map(step => ({ step, source: { kind: 'STEP' as const, nodeId: step.nodeId,
+    input: (step.detail as Extract<WorkflowStep['detail'], { type: 'SOLANA_SWAP' }>).input } }));
+  const last = state.referents[0], recent = last && open.find(item => item.step.nodeId === last.step.nodeId && JSON.stringify(item.step.detail) === JSON.stringify(last.step.detail));
+  if (recent) return { ok: true, source: recent.source };
+  if (open.length === 1) return { ok: true, source: open[0]!.source };
+  if (!open.length) return { ok: false, result: refused(state, m, swaps.length ? m.swapAlreadyLinked : m.noSwapForTokens) };
+  const options = open.slice(0, COPILOT_LIMITS.maxOptions).map(item => ({ label: m.stepOption(item.step.index, stepSummary(item.step, intent.language)),
+    fill: { kind: 'EXTRAS' as const, extras: { ...extras, swap: item.source } } }));
+  return { ok: false, result: question(state, m, m.whichSwap, options.map(option => option.label), { intent, options, amountFill: false, snapshot: snapshotOf(env), extras }) };
+}
+
+const ORCA = ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY;
+/** A position's principal at the verified current tick, rounded up and bounded at both ends of that tick, within the Devnet token maxima. */
+function positionPrincipal(position: CopilotPosition, tick: number): { readonly maxSol: string; readonly maxDevUsdc: string } {
+  const liquidity = BigInt(position.liquidity ?? '0');
+  const at = (t: number) => orcaLiquidityAmounts({ tickCurrentIndex: t, sqrtPrice: orcaSqrtPriceAtTick(t) }, position.tickLower!, position.tickUpper!, liquidity, true);
+  const [low, high] = [at(tick), at(tick + 1)];
+  const bound = (a: bigint, b: bigint, max: string) => { const value = a > b ? a : b; return value > BigInt(max) ? BigInt(max) : value; };
+  let sol = bound(low.amount0, high.amount0, ORCA.token0.maximumAmount);
+  const usdc = bound(low.amount1, high.amount1, ORCA.token1.maximumAmount);
+  if (sol === 0n && usdc === 0n) sol = 1n;
+  return { maxSol: formatTokenAmount(sol.toString(), ORCA.token0.decimals), maxDevUsdc: formatTokenAmount(usdc.toString(), ORCA.token1.decimals) };
+}
+/** "Remove 50% of my liquidity", "exit my position": a FloFi-registered Orca position of the connected Solana Devnet wallet, verified on chain. */
+function resolvePosition(intent: Extract<CopilotIntentV2, { kind: 'POSITION' }>, state: CopilotConversation, env: CopilotEnvironment, extras: Extras): Result {
+  const m = copilotCopy(intent.language), verified = env.verified, text = segmentText(state);
+  if ((intent.protocol !== null && intent.protocol !== 'ORCA') || (intent.network !== null && intent.network !== 'SOLANA_DEVNET')) return refused(state, m, m.positionOnlyOrca);
+  if (!verified?.solanaOwner) return refused(state, m, m.positionWalletRequired);
+  if (!verified.orcaPositions) return failed(state, m, m.positionsUnavailable);
+  const draft = (options: Draft['options']): Draft => ({ intent, options, amountFill: false, snapshot: snapshotOf(env), extras });
+  const half = /\b(?:half|metade)\b/i.test(text);
+  // The portion is the user's own words ("50%", "half"), EXIT, or one of Flofi's buttons; never a guess.
+  const exitNamed = /\b(?:close|exit|fechar|feche|fecha|encerrar|encerre|encerra)\b|\b(?:remove|withdraw)\s+all\b|\b(?:retir\w*|remov\w*)\s+(?:tud[oa]|100\s*%)\b/i.test(text);
+  let portion: string | null = extras.portion ?? (intent.operation === 'EXIT' && exitNamed ? 'EXIT' : null);
+  if (portion === null && intent.percent !== null) {
+    const wanted = canonicalDecimal(intent.percent);
+    if ((wanted === '50' && half) || (groundedAmount(text, wanted) && new RegExp(`(?<![\\d.,])${wanted.replace('.', '\\.')}\\s*(?:%|percent|per\\s?cent|por\\s?cento)`, 'i').test(text)))
+      portion = wanted;
+  }
+  if (portion === null && half && intent.operation === 'DECREASE') portion = '50';
+  const exiting = portion === 'EXIT';
+  const eligible = verified.orcaPositions.filter(p => p.tickLower !== null && p.tickUpper !== null && (p.status === 'ACTIVE' || (exiting && p.status === 'EMPTY')));
+  if (!eligible.length) return refused(state, m, m.positionNone);
+  const chosen = extras.position ? eligible.find(p => p.positionMint === extras.position) : eligible.length === 1 ? eligible[0] : undefined;
+  if (extras.position && !chosen) return failed(closeSegment(state), m, m.draftStale);
+  if (!chosen) {
+    const options = eligible.slice(0, COPILOT_LIMITS.maxOptions).map(p => ({ label: m.positionOption(p.positionMint, p.tickLower!, p.tickUpper!),
+      fill: { kind: 'EXTRAS' as const, extras: { ...extras, position: p.positionMint, ...portion ? { portion } : {} } } }));
+    return question(state, m, m.positionWhich, options.map(option => option.label), draft(options));
+  }
+  if (portion === null) {
+    const options = ['25', '50', '75', 'EXIT'].map((value, index) => ({ label: m.positionPortionOptions[index]!,
+      fill: { kind: 'EXTRAS' as const, extras: { ...extras, position: chosen.positionMint, portion: value } } }));
+    return question(state, m, m.positionPortion, options.map(option => option.label), draft(options));
+  }
+  let exit = portion === 'EXIT', partBps: number | null = null;
+  if (!exit) {
+    const value = Number(portion), bps = Math.round(value * 100);
+    if (bps === 10_000) exit = true;
+    else if (!Number.isFinite(value) || bps < 1 || bps > 9_999 || Math.abs(value * 100 - bps) > 1e-9) return refused(state, m, m.positionPercentInvalid);
+    else partBps = bps;
+  }
+  if (!exit && chosen.status !== 'ACTIVE') return refused(state, m, m.positionNone);
+  // The position step keeps an existing position step's maxima and slippage (they only limit adding liquidity); otherwise its own principal.
+  const existing = env.workflow.nodes.map(node => solanaLiquidityDetails(node)).find(details => details !== null) ?? null, notes = [m.positionNote];
+  let maxima: { readonly maxSol: string; readonly maxDevUsdc: string }, slippage = SOLANA_LIQUIDITY_DEFAULT_SLIPPAGE;
+  if (existing) { maxima = { maxSol: existing.maxSol, maxDevUsdc: existing.maxDevUsdc }; slippage = existing.slippage; }
+  else {
+    if (!verified.orcaPrice) return failed(state, m, m.positionsUnavailable);
+    maxima = positionPrincipal(chosen, verified.orcaPrice.tickCurrentIndex); notes.push(m.positionMaximaNote);
+  }
+  const input: SolanaLiquidityInput = { network: 'Solana Devnet', ...maxima, rangeUnit: 'TICK', lower: String(chosen.tickLower), upper: String(chosen.tickUpper), slippage };
+  const command: Command = { type: 'MANAGE_SOLANA_POSITION', input, positionMint: chosen.positionMint, operation: exit ? 'EXIT' : 'DECREASE_PARTIAL', partBps,
+    source: 'CHAT', baseRevision: env.workflow.revision };
+  if (previewOf(env, command).error?.startsWith('POSITION_WORKFLOW_HAS_OTHER_STEPS')) return refused(state, m, m.positionOtherSteps);
+  const sentence = exit ? 'exit the Flofi Orca position on Solana Devnet' : `remove ${portion}% of the liquidity of the Flofi Orca position on Solana Devnet`;
+  return propose(state, env, command, sentence, m.positionProposal(exit, portion, chosen.positionMint), notes, m.positionWhich);
+}
+
 /** Planners → exact grammar → (for an existing step) the typed edit command → editor preview → proposal. */
 function author(intent: CopilotIntentV2, actions: readonly CopilotAction[], composition: boolean, carried: ReadonlySet<CarriedField>, state: CopilotConversation,
-  env: CopilotEnvironment, notes: readonly string[], describe: (sentence: string) => string, label: string, editNodeId: string | null = null): Result {
+  env: CopilotEnvironment, notes: readonly string[], describe: (sentence: string) => string, label: string, editNodeId: string | null = null,
+  swap: SwapSource | null = null, extras: Extras = {}): Result {
   const language = intent.language, m = copilotCopy(language);
-  // BUILD-BASE-001: the conversation (CopilotIntentV2) authors on the catalog networks too.
-  const grounding: Grounding = { text: segmentText(state), carried, policy: { language, networkDefaults: false, catalog: true }, latest: state.segment.at(-1) ?? '' };
+  // BUILD-BASE-001: the conversation (CopilotIntentV2) authors on the catalog networks too. PR B: with the verified Orca price and the funding swap.
+  const grounding: Grounding = { text: segmentText(state), carried, policy: { language, networkDefaults: false, catalog: true }, latest: state.segment.at(-1) ?? '',
+    solana: { price: env.verified?.orcaPrice?.price ?? null, swap } };
   const planned = planCopilotActions(actions, composition, grounding, env.wallet);
-  if (planned.kind !== 'PLAN') return stopped(planned, intent, state, env, m);
+  if (planned.kind !== 'PLAN') return stopped(planned, intent, state, env, m, { ...extras, carried: [...carried], ...swap ? { swap } : {} });
   const outcome = proposalFromPlan(planned.plan, env, language);
-  if (outcome.kind !== 'PROPOSAL') return stopped(outcome, intent, state, env, m);
+  if (outcome.kind !== 'PROPOSAL') return stopped(outcome, intent, state, env, m, { ...extras, carried: [...carried], ...swap ? { swap } : {} });
   let command = outcome.command;
   if (editNodeId) {
     const edit = editCommandFor(env.workflow, env.context, editNodeId, command);
@@ -547,12 +728,16 @@ function author(intent: CopilotIntentV2, actions: readonly CopilotAction[], comp
   }
   return propose(state, env, command, outcome.sentence, describe(outcome.sentence), [...notes, ...outcome.notes], label);
 }
-function stopped(outcome: Exclude<CopilotOutcome, { kind: 'PROPOSAL' }>, intent: CopilotIntentV2, state: CopilotConversation, env: CopilotEnvironment, m: CopilotCopy): Result {
-  if (outcome.kind === 'UNSUPPORTED') return refused(state, m, outcome.message.includes(m.capabilities) ? outcome.message : `${outcome.message} ${m.capabilities}`);
+function stopped(outcome: Exclude<CopilotOutcome, { kind: 'PROPOSAL' }>, intent: CopilotIntentV2, state: CopilotConversation, env: CopilotEnvironment, m: CopilotCopy,
+  extras: Extras = {}): Result {
+  if (outcome.kind === 'UNSUPPORTED') return refused(state, m, outcome.message);
   if (outcome.kind === 'REJECTED') return failed(state, m, outcome.message);
-  const draft: Draft = { intent, options: actionFills(intent, outcome.missing, outcome.options), snapshot: snapshotOf(env),
-    amountFill: intent.kind === 'ACTION' && outcome.missing.includes('amount') && intent.action.type !== 'LIQUIDITY' };
-  return question(state, m, outcome.question, outcome.options, draft.options.length || draft.amountFill ? draft : null);
+  // Flofi's question for the other pool token's maximum (a position funded by a swap's output) is answered by a bare amount.
+  const otherToken = outcome.deposit;
+  const draft: Draft = { intent, options: actionFills(intent, outcome.missing, outcome.options), snapshot: snapshotOf(env), extras,
+    amountFill: intent.kind === 'ACTION' && outcome.missing.includes('amount') && intent.action.type !== 'LIQUIDITY',
+    ...otherToken && outcome.missing.includes('amount') ? { depositFill: otherToken } : {} };
+  return question(state, m, outcome.question, outcome.options, draft.options.length || draft.amountFill || draft.depositFill ? draft : null);
 }
 /** Defense in depth, then the editor preview: an unappliable or empty edit is explained instead of shown as a proposal. */
 function propose(state: CopilotConversation, env: CopilotEnvironment, command: Command, sentence: string, text: string, notes: readonly string[], label: string): Result {
@@ -561,8 +746,9 @@ function propose(state: CopilotConversation, env: CopilotEnvironment, command: C
     return failed(state, m, copilotRejection('COPILOT_COMMAND_MISMATCH', state.language).message);
   const preview = previewOf(env, command);
   if (preview.error) return failed(state, m, copilotRejection(preview.error.split(':')[0]!.trim(), state.language).message);
-  const unchanged = preview.workflow === env.workflow || (command.type === 'AUTHOR_LENDING' && lendingDetails(env.workflow) !== null &&
-    JSON.stringify(lendingDetails(preview.workflow)) === JSON.stringify(lendingDetails(env.workflow)));
+  // A position-management proposal may leave the IR as it is (the workflow already holds that position's step): Apply still prepares the operation.
+  const unchanged = command.type !== 'MANAGE_SOLANA_POSITION' && (preview.workflow === env.workflow || (command.type === 'AUTHOR_LENDING' && lendingDetails(env.workflow) !== null &&
+    JSON.stringify(lendingDetails(preview.workflow)) === JSON.stringify(lendingDetails(env.workflow))));
   if (unchanged) return refused(state, m, m.refusal.NO_CHANGE(label));
   return terminal(recordProposal(state, env, command, sentence), reply('PROPOSAL', text, { notes: [...new Set(notes)], command, sentence }),
     COPILOT_TRANSCRIPT.proposed + sentence);

@@ -7,6 +7,8 @@ import { formatTokenAmount } from './jupiter-authoring';
 import { UNISWAP_LIQUIDITY_DEFAULT_SLIPPAGE } from './uniswap-liquidity-authoring';
 import { ROBINHOOD_LIQUIDITY_DEFAULT_SLIPPAGE } from './robinhood-liquidity-authoring';
 import { SOLANA_LIQUIDITY_DEFAULT_SLIPPAGE } from './solana-liquidity-authoring';
+import type { SolanaSwapInput } from './jupiter-authoring';
+import { priceBoundsAround } from './pool-price-bounds';
 import { COPILOT_FEE_TIERS, COPILOT_LIMITS, CopilotIntentError, parseCopilotIntent, safeCopilotProse, type CopilotAction, type CopilotAsset, type CopilotBridgeAction,
   type CopilotLegacyAsset, type CopilotLendingAction, type CopilotLiquidityAction, type CopilotMissingField, type CopilotNetwork, type CopilotSwapAction,
   type CopilotTransferAction } from './copilot-intent';
@@ -32,7 +34,8 @@ import { checkRecipient } from './recipient-address';
  */
 export type CopilotOutcome =
   | { readonly kind: 'PROPOSAL'; readonly command: Command; readonly sentence: string; readonly notes: readonly string[] }
-  | { readonly kind: 'CLARIFICATION'; readonly missing: readonly CopilotMissingField[]; readonly question: string; readonly options: readonly string[] }
+  | { readonly kind: 'CLARIFICATION'; readonly missing: readonly CopilotMissingField[]; readonly question: string; readonly options: readonly string[];
+      /** PR B: the pool token whose maximum the question asks for, so a bare amount can answer it. */ readonly deposit?: 'SOL' | 'devUSDC' }
   | { readonly kind: 'UNSUPPORTED'; readonly message: string }
   | { readonly kind: 'REJECTED'; readonly code: string; readonly message: string };
 export type CopilotConversion = { readonly userText: string; readonly workflow: Workflow; readonly context: ReviewContext; readonly wallet: string | null };
@@ -42,7 +45,9 @@ export const COPILOT_AUTOMATION_AUTHORING_INTENT = 'AUTOMATION' as const;
 export const COPILOT_AUTHORING_COMMANDS = Object.freeze(['ADD_SWAP', 'ADD_TESTNET_SWAP', 'ADD_ETHEREUM_SEPOLIA_SWAP', 'ADD_SOLANA_SWAP', 'ADD_ROUTER_BRIDGE', 'ADD_SUPPLY', 'ADD_BORROW',
   'ADD_REPAY', 'ADD_WITHDRAW', 'ADD_UNISWAP_LIQUIDITY', 'ADD_SOLANA_LIQUIDITY', 'AUTHOR_LENDING',
   // BUILD-BASE-001: catalog-network swaps and positions (the Canvas action command) and catalog-network transfers, as the exact grammar authors them.
-  'ADD_CRYPTO_ACTION', 'ADD_RH_TRANSFER'] as const);
+  'ADD_CRYPTO_ACTION', 'ADD_RH_TRANSFER',
+  // PR B: a Solana Devnet swap's output funding an Orca position, added and linked exactly as the Canvas does.
+  'ADD_SOLANA_COMPOSITION'] as const);
 export type CopilotAuthoringCommand = (typeof COPILOT_AUTHORING_COMMANDS)[number];
 export const COPILOT_CAPABILITIES = copilotCopy('EN').capabilities;
 
@@ -54,10 +59,17 @@ export type PlanningPolicy = { readonly language: CopilotLanguage; readonly netw
 export const V1_POLICY: PlanningPolicy = Object.freeze({ language: 'EN', networkDefaults: true });
 /** A field whose value Flofi carried from a resolved referent rather than read from the open request. */
 export type CarriedField = 'network' | 'sourceNetwork' | 'destinationNetwork' | 'inputAsset' | 'outputAsset' | 'asset' | 'amount' | 'supplyAmount' | 'borrowAmount'
-  | 'slippage' | 'recipient' | 'beneficiary' | 'routing' | 'protocol' | 'range' | 'feeTier' | `deposit:${string}`;
+  | 'slippage' | 'recipient' | 'beneficiary' | 'routing' | 'protocol' | 'range' | 'feeTier' | `deposit:${string}` | `asset:${string}`;
+/**
+ * The swap whose actual output funds a position ("with these tokens"), resolved by FloFi from its own state: a swap proposal not yet applied (it is
+ * authored again with the position) or an existing swap step (the position links to it).
+ */
+export type SwapSource = { readonly kind: 'NEW'; readonly input: SolanaSwapInput } | { readonly kind: 'STEP'; readonly nodeId: string; readonly input: SolanaSwapInput };
 export type Grounding = { readonly text: string; readonly carried: ReadonlySet<CarriedField>; readonly policy: PlanningPolicy;
   /** V2: the latest user message alone, so an explicit answer to Flofi's own question can settle a choice the request left open. */
-  readonly latest?: string };
+  readonly latest?: string;
+  /** V2: verified Solana Devnet context FloFi read itself — the Orca pool price for percentage ranges, and the swap a position may be funded by. */
+  readonly solana?: { readonly price: string | null; readonly swap: SwapSource | null } };
 const NOTHING_CARRIED: ReadonlySet<CarriedField> = new Set();
 
 type Network = Exclude<CopilotNetwork, 'OTHER'>;
@@ -152,8 +164,12 @@ export function groundedAddress(text: string, address: string): boolean {
 function typedAddress(text: string, address: string): string {
   return [...text.matchAll(/(?<![0-9a-fA-Fx])0x[0-9a-fA-F]{40}(?![0-9a-fA-F])/g)].map(match => match[0]).find(match => match.toLowerCase() === address.toLowerCase()) ?? address;
 }
-const assetNamed = (text: string, asset: Exclude<CopilotAsset, 'OTHER'>) => Object.hasOwn(ASSET_MENTIONS, asset)
-  ? ASSET_MENTIONS[asset as Exclude<CopilotLegacyAsset, 'OTHER'>].test(text) : symbolNamed(text, asset);
+/** The fixed-vocabulary key of a token in any case ("devusdc", "DevUSDC" → DEVUSDC); null for catalog symbols. */
+const legacyAsset = (asset: string): Exclude<CopilotLegacyAsset, 'OTHER'> | null => {
+  const key = asset.toUpperCase() === 'TESTUSDC' ? 'DEVUSDC' : asset.toUpperCase();
+  return Object.hasOwn(ASSET_MENTIONS, key) ? key as Exclude<CopilotLegacyAsset, 'OTHER'> : null;
+};
+const assetNamed = (text: string, asset: Exclude<CopilotAsset, 'OTHER'>) => { const key = legacyAsset(asset); return key ? ASSET_MENTIONS[key].test(text) : symbolNamed(text, asset); };
 const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 /** A catalog symbol written as a word (case-insensitive): "cbbtc" grounds cbBTC; "ETHx" does not ground ETH. */
 const symbolNamed = (text: string, symbol: string) => new RegExp(`(?<![A-Za-z0-9.])${escapeRegExp(symbol)}(?![A-Za-z0-9]|\\s+(?:network|rede)\\b)`, 'i').test(text);
@@ -167,8 +183,8 @@ const nameNamed = (text: string, asset: CanonicalAsset) => {
 };
 
 class Stop { constructor(readonly outcome: CopilotOutcome) {} }
-const ask = (missing: CopilotMissingField[], question: string, options: readonly string[] = []): never => {
-  throw new Stop({ kind: 'CLARIFICATION', missing, question, options });
+const ask = (missing: CopilotMissingField[], question: string, options: readonly string[] = [], deposit?: 'SOL' | 'devUSDC'): never => {
+  throw new Stop({ kind: 'CLARIFICATION', missing, question, options, ...deposit ? { deposit } : {} });
 };
 const refuse = (message: string): never => { throw new Stop({ kind: 'UNSUPPORTED', message }); };
 const reject = (code: string, message: string): never => { throw new Stop({ kind: 'REJECTED', code, message }); };
@@ -263,15 +279,24 @@ function catalogToken(value: CopilotAsset | null, network: Network, g: Grounding
 
 export type Plan = { readonly sentence: string; readonly expect: CopilotAuthoringCommand; readonly notes: string[] };
 
+/**
+ * V2: devUSDC exists only on Solana Devnet, so a request that names devUSDC (in any case) and no network is Solana Devnet, with a note. Test-token
+ * wording never resolves to a mainnet; any named network still goes through `resolveNetwork`.
+ */
+const impliesDevnet = (g: Grounding, assets: readonly (CopilotAsset | null)[]) => g.policy.catalog === true &&
+  assets.some(asset => asset !== null && legacyAsset(asset) === 'DEVUSDC') && ASSET_MENTIONS.DEVUSDC.test(g.text);
+function devnetByAsset(g: Grounding, notes: string[]): Network { notes.push(copyOf(g).devUsdcNetworkNote); return 'SOLANA_DEVNET'; }
+
 function planSwap(a: CopilotSwapAction, g: Grounding): Plan {
   const m = copyOf(g), notes: string[] = [];
   const supported = actionNetworks('swap', g);
   // A generic "Ethereum" is left to resolveNetwork, which explains that Ethereum Mainnet is never used.
   const named = mentionedNetworks(g.text);
+  const devnetImplied = a.network === null && !named.length && impliesDevnet(g, [a.inputAsset, a.outputAsset]);
   const missing: CopilotMissingField[] = [...(a.amount === null ? ['amount' as const] : []), ...(a.inputAsset === null || a.outputAsset === null ? ['asset' as const] : []),
-    ...(a.network === null && !supported.some(n => named.includes(n)) && !named.includes('ETHEREUM') ? ['network' as const] : [])];
+    ...(a.network === null && !devnetImplied && !supported.some(n => named.includes(n)) && !named.includes('ETHEREUM') ? ['network' as const] : [])];
   if (missing.length) ask(missing, stillNeeds(m, missing, 'swap'), missing.length === 1 && missing[0] === 'network' ? labels(supported) : []);
-  const network = resolveNetwork(a.network, supported, g, 'swap', notes);
+  const network = devnetImplied ? devnetByAsset(g, notes) : resolveNetwork(a.network, supported, g, 'swap', notes);
   // BUILD-BASE-001: on a catalog network any two catalog ERC-20s; Base's USDC ⇄ WETH keeps its BUILD-002 sentence and command.
   if (g.policy.catalog && isCatalogNetwork(network)) {
     const input = catalogToken(a.inputAsset, network, g, 'swap', 'inputAsset', 'ERC20', notes), output = catalogToken(a.outputAsset, network, g, 'swap', 'outputAsset', 'ERC20', notes);
@@ -289,16 +314,17 @@ function planSwap(a: CopilotSwapAction, g: Grounding): Plan {
   const amount = amountOf(a.amount, g, 'swap');
   const slippage = slippageOf(a.slippageBps, '50', g, notes);
   if (FAMILY[network] === 'base' || FAMILY[network] === 'ethereum') {
-    const evm = (asset: string) => asset === 'USDC' ? 'USDC' : asset === 'WETH' || asset === 'ETH' ? 'WETH' : refuse(m.evmSwapTokens);
+    const evm = (written: string) => { const asset = written.toUpperCase(); return asset === 'USDC' ? 'USDC' : asset === 'WETH' || asset === 'ETH' ? 'WETH' : refuse(m.evmSwapTokens); };
     const from = evm(input), to = evm(output);
     if (from === to) reject('INVALID_ASSET_PAIR', m.differentTokens);
-    if (input === 'ETH' || output === 'ETH') notes.push(m.wethNote);
+    if (input.toUpperCase() === 'ETH' || output.toUpperCase() === 'ETH') notes.push(m.wethNote);
     return { sentence: `swap ${amount} ${from} to ${to} on ${COPILOT_NETWORK_LABEL[network]} slippage ${slippage} bps`,
       expect: network === 'BASE_SEPOLIA' ? 'ADD_TESTNET_SWAP' : network === 'ETHEREUM_SEPOLIA' ? 'ADD_ETHEREUM_SEPOLIA_SWAP' : 'ADD_SWAP', notes };
   }
   const devnet = network === 'SOLANA_DEVNET';
-  const solana = (asset: string) => asset === 'SOL' ? 'SOL' : devnet ? (asset === 'DEVUSDC' || asset === 'USDC' ? 'devUSDC' : refuse(m.devnetSwapTokens))
-    : asset === 'USDC' || asset === 'USDT' ? asset : refuse(m.solanaSwapTokens);
+  const solana = (written: string) => { const asset = legacyAsset(written) ?? written.toUpperCase();
+    return asset === 'SOL' ? 'SOL' : devnet ? (asset === 'DEVUSDC' || asset === 'USDC' ? 'devUSDC' : refuse(m.devnetSwapTokens))
+      : asset === 'USDC' || asset === 'USDT' ? asset : refuse(m.solanaSwapTokens); };
   const from = solana(input), to = solana(output);
   if (from === to) reject('INVALID_ASSET_PAIR', m.differentTokens);
   return { sentence: `swap ${amount} ${from} to ${to} on ${devnet ? 'Solana Devnet' : 'Solana'} slippage ${slippage} bps`, expect: 'ADD_SOLANA_SWAP', notes };
@@ -475,9 +501,9 @@ function planLending(a: CopilotLendingAction, g: Grounding, wallet: string | nul
 
 export const COPILOT_POOLS = Object.freeze({
   UNISWAP_V3: { network: 'BASE_SEPOLIA' as const, base: 'WETH', quote: 'USDC', first: 'USDC', second: 'WETH', expect: 'ADD_UNISWAP_LIQUIDITY' as const,
-    slippage: UNISWAP_LIQUIDITY_DEFAULT_SLIPPAGE, symbol: (asset: string) => asset === 'USDC' ? 'USDC' : asset === 'WETH' || asset === 'ETH' ? 'WETH' : null },
+    slippage: UNISWAP_LIQUIDITY_DEFAULT_SLIPPAGE, symbol: (asset: string) => { const a = asset.toUpperCase(); return a === 'USDC' ? 'USDC' : a === 'WETH' || a === 'ETH' ? 'WETH' : null; } },
   ORCA: { network: 'SOLANA_DEVNET' as const, base: 'SOL', quote: 'devUSDC', first: 'SOL', second: 'devUSDC', expect: 'ADD_SOLANA_LIQUIDITY' as const,
-    slippage: SOLANA_LIQUIDITY_DEFAULT_SLIPPAGE, symbol: (asset: string) => asset === 'SOL' ? 'SOL' : asset === 'DEVUSDC' || asset === 'USDC' ? 'devUSDC' : null },
+    slippage: SOLANA_LIQUIDITY_DEFAULT_SLIPPAGE, symbol: (asset: string) => { const a = legacyAsset(asset) ?? asset.toUpperCase(); return a === 'SOL' ? 'SOL' : a === 'DEVUSDC' || a === 'USDC' ? 'devUSDC' : null; } },
 });
 function planLiquidity(a: CopilotLiquidityAction, g: Grounding): Plan {
   const m = copyOf(g), notes: string[] = [], text = g.text;
@@ -492,14 +518,14 @@ function planLiquidity(a: CopilotLiquidityAction, g: Grounding): Plan {
   // The pool networks come from the capability truth; Orca serves its own network and Uniswap v3 every other one.
   const pools = actionNetworks('add_liquidity', g), orca = pools.filter(n => n === COPILOT_POOLS.ORCA.network), uniswap = pools.filter(n => n !== COPILOT_POOLS.ORCA.network);
   const supported: Network[] = namedProtocols.length ? namedProtocols[0] === 'UNISWAP_V3' ? uniswap : orca : pools;
-  const network = resolveNetwork(a.network, supported, g, 'liquidity', notes);
+  const devnetImplied = a.network === null && namedProtocols[0] !== 'UNISWAP_V3' && !mentionedNetworks(text).length && impliesDevnet(g, a.deposits.map(d => d.asset));
+  const network = devnetImplied ? devnetByAsset(g, notes) : resolveNetwork(a.network, supported, g, 'liquidity', notes);
   if (g.policy.catalog && isCatalogNetwork(network)) {
     if (a.protocol === 'ORCA' || namedProtocols[0] === 'ORCA') ask(['protocol'], m.whichPool, m.poolOptions);
     return planCatalogLiquidity(a, g, network, notes);
   }
-  if (a.rangeUnit === 'FULL' || a.feeTier) ask(['range'], m.rangeNotFound(COPILOT_POOLS[network === COPILOT_POOLS.ORCA.network ? 'ORCA' : 'UNISWAP_V3'].quote,
-    COPILOT_POOLS[network === COPILOT_POOLS.ORCA.network ? 'ORCA' : 'UNISWAP_V3'].base));
   const protocol = network === COPILOT_POOLS.ORCA.network ? 'ORCA' : 'UNISWAP_V3';
+  if (a.rangeUnit === 'FULL' || a.feeTier) ask(['range'], m.rangeNotFound(COPILOT_POOLS[protocol].quote, COPILOT_POOLS[protocol].base));
   if (a.protocol !== null && a.protocol !== protocol) ask(['protocol'], m.whichPool, m.poolOptions);
   const pool = COPILOT_POOLS[protocol];
   const deposits = new Map<string, string>();
@@ -507,20 +533,94 @@ function planLiquidity(a: CopilotLiquidityAction, g: Grounding): Plan {
     const symbol = pool.symbol(deposit.asset);
     if (!symbol) refuse(m.poolTokens(pool.first, pool.second));
     if (deposits.has(symbol!)) reject('COPILOT_DUPLICATE_DEPOSIT', m.poolTokenOnce(pool.first, pool.second));
-    needAsset(deposit.asset, g, 'liquidity', `deposit:${symbol}`);
+    // "The same tokens" carries the token names from a swap step (`asset:`); the amounts must still be the user's own words.
+    needAsset(deposit.asset, g, 'liquidity', g.carried.has(`asset:${symbol}`) ? `asset:${symbol}` : `deposit:${symbol}`);
     deposits.set(symbol!, amountOf(deposit.maxAmount, g, 'liquidity', `deposit:${symbol}`));
   }
   const missing: CopilotMissingField[] = [...(deposits.size < 2 ? ['amount' as const] : []),
-    ...(a.rangeUnit === null || a.lower === null || a.upper === null ? ['range' as const] : [])];
+    ...(a.rangeUnit === null || (a.rangeUnit !== 'PERCENT' && a.lower === null) || a.upper === null ? ['range' as const] : [])];
   if (missing.length) ask(missing, m.liquidityNeeds(pool.first, pool.second, pool.quote, pool.base));
-  const lower = a.lower!, upper = a.upper!;
+  if (a.rangeUnit === 'PERCENT' && protocol !== 'ORCA') ask(['range'], m.percentRangeOrcaOnly);
+  const range = protocol === 'ORCA' ? orcaRange(a, g, notes) : (() => {
+    const lower = a.lower!, upper = a.upper!;
+    const grounded = g.carried.has('range') ? true : a.rangeUnit === 'PRICE' ? !lower.startsWith('-') && !upper.startsWith('-') && groundedAmount(text, lower) && groundedAmount(text, upper)
+      : /^-?\d+$/.test(lower) && /^-?\d+$/.test(upper) && groundedSigned(text, lower) && groundedSigned(text, upper);
+    if (!grounded) ask(['range'], m.rangeNotFound(pool.quote, pool.base));
+    return a.rangeUnit === 'PRICE' ? `from ${lower} to ${upper} ${pool.quote} per ${pool.base}` : `ticks ${lower} to ${upper}`;
+  })();
+  const slippage = slippageOf(a.slippageBps, pool.slippage, g, notes);
+  return { sentence: `add liquidity ${deposits.get(pool.first)} ${pool.first} and ${deposits.get(pool.second)} ${pool.second} ${range} on ` +
+    `${COPILOT_NETWORK_LABEL[network]} slippage ${slippage} bps`, expect: pool.expect, notes };
+}
+
+/** A percentage written as such: "10%", "10 %", "10 percent", "10 por cento". */
+function groundedPercent(text: string, percent: string): boolean {
+  const wanted = canonicalDecimal(percent);
+  return numbersIn(text).some(reading => reading.value === wanted && reading.percent && !reading.negative) ||
+    new RegExp(`(?<![\\d.,])${escapeRegExp(wanted)}\\s*(?:percent|per\\s?cent|por\\s?cento)\\b`, 'i').test(text);
+}
+/**
+ * The Orca SOL/devUSDC range as exact-grammar words. A percentage ("a 10% range") is ±that percent around the verified pool price FloFi read itself
+ * (`g.solana.price`), through the same bounds as the Canvas range control; without a verified price nothing is proposed.
+ */
+function orcaRange(a: CopilotLiquidityAction, g: Grounding, notes: string[]): string {
+  const m = copyOf(g), pool = COPILOT_POOLS.ORCA, text = g.text;
+  if (a.rangeUnit === 'PERCENT') {
+    const percent = a.upper;
+    if (percent === null || a.lower !== null) return ask(['range'], m.rangeNotFound(pool.quote, pool.base));
+    if (!g.carried.has('range') && !groundedPercent(text, percent)) return ask(['range'], m.percentNotFound(percent));
+    const value = Number(percent), bps = Math.round(value * 100);
+    if (!Number.isFinite(value) || bps < 1 || bps > 9_000) return reject('COPILOT_RANGE_OUT_OF_RANGE', m.percentRangeInvalid);
+    const price = g.solana?.price ?? null;
+    if (!price) return reject('COPILOT_POOL_PRICE_UNAVAILABLE', m.priceUnavailable);
+    const bounds = priceBoundsAround(price, -value, value);
+    notes.push(m.percentRangeNote(canonicalDecimal(percent), price, bounds.lower, bounds.upper));
+    return `from ${bounds.lower} to ${bounds.upper} ${pool.quote} per ${pool.base}`;
+  }
+  if (a.rangeUnit === null || a.rangeUnit === 'FULL' || a.lower === null || a.upper === null) return ask(['range'], m.rangeNotFound(pool.quote, pool.base));
+  const lower = a.lower, upper = a.upper;
   const grounded = g.carried.has('range') ? true : a.rangeUnit === 'PRICE' ? !lower.startsWith('-') && !upper.startsWith('-') && groundedAmount(text, lower) && groundedAmount(text, upper)
     : /^-?\d+$/.test(lower) && /^-?\d+$/.test(upper) && groundedSigned(text, lower) && groundedSigned(text, upper);
   if (!grounded) ask(['range'], m.rangeNotFound(pool.quote, pool.base));
+  return a.rangeUnit === 'PRICE' ? `from ${lower} to ${upper} ${pool.quote} per ${pool.base}` : `ticks ${lower} to ${upper}`;
+}
+
+/**
+ * A position funded by a Solana Devnet swap's actual output (PR A's executable composition): a new swap in the same request, or the swap FloFi
+ * resolved for "these tokens" (`g.solana.swap`). The swapped token's maximum is 100% of the actual reconciled output unless the user named a cap; a
+ * pre-existing balance of it is never used. The other pool token needs an explicit maximum. Both steps stay separately simulated, reviewed and signed.
+ */
+function planSolanaComposition(swapAction: CopilotSwapAction | null, a: CopilotLiquidityAction, g: Grounding): Plan {
+  const m = copyOf(g), notes: string[] = [], pool = COPILOT_POOLS.ORCA, source = swapAction ? null : g.solana?.swap ?? null;
+  if (a.protocol === 'UNISWAP_V3' || (a.network !== null && a.network !== 'SOLANA_DEVNET') || a.rangeUnit === 'FULL' || a.feeTier) return refuse(m.swapOutputUnsupported);
+  let swap: Pick<SolanaSwapInput, 'from' | 'to'>, swapSentence: string | null = null;
+  if (swapAction) {
+    const planned = planSwap(swapAction, g), words = /^swap \S+ (SOL|devUSDC) to (SOL|devUSDC) on Solana Devnet /.exec(planned.sentence);
+    if (planned.expect !== 'ADD_SOLANA_SWAP' || !words) return refuse(m.swapOutputUnsupported);
+    notes.push(...planned.notes);
+    swap = { from: words[1] as 'SOL', to: words[2] as 'SOL' }; swapSentence = planned.sentence;
+  } else if (source) {
+    if (source.input.network !== 'Solana Devnet') return refuse(m.swapOutputUnsupported);
+    swap = source.input;
+    if (source.kind === 'NEW') swapSentence = `swap ${source.input.amount} ${source.input.from} to ${source.input.to} on Solana Devnet slippage ${source.input.slippage} bps`;
+  } else return refuse(m.noSwapForTokens);
+  const bound = swap.to === 'SOL' ? 'SOL' : 'devUSDC', other = bound === 'SOL' ? 'devUSDC' : 'SOL';
+  let cap = 'all', otherMax: string | null = null;
+  for (const deposit of a.deposits) {
+    const symbol = pool.symbol(deposit.asset);
+    if (!symbol) refuse(m.poolTokens(pool.first, pool.second));
+    needAsset(deposit.asset, g, 'liquidity', g.carried.has(`asset:${symbol}`) ? `asset:${symbol}` : `deposit:${symbol}`);
+    const value = amountOf(deposit.maxAmount, g, 'liquidity', `deposit:${symbol}`);
+    if (symbol === bound) cap = value; else otherMax = value;
+  }
+  if (otherMax === null) return ask(['amount'], m.otherTokenMaximum(other, bound), [], other);
+  const range = orcaRange(a, g, notes);
   const slippage = slippageOf(a.slippageBps, pool.slippage, g, notes);
-  const range = a.rangeUnit === 'PRICE' ? `from ${lower} to ${upper} ${pool.quote} per ${pool.base}` : `ticks ${lower} to ${upper}`;
-  return { sentence: `add liquidity ${deposits.get(pool.first)} ${pool.first} and ${deposits.get(pool.second)} ${pool.second} ${range} on ` +
-    `${COPILOT_NETWORK_LABEL[network]} slippage ${slippage} bps`, expect: pool.expect, notes };
+  notes.push(cap === 'all' ? m.swapOutputNote(bound) : m.swapOutputCapNote(bound, cap), m.twoTransactionsNote);
+  return swapSentence ? { sentence: `${swapSentence} then add liquidity ${cap} swapped ${bound} and ${otherMax} ${other} ${range} slippage ${slippage} bps`,
+    expect: 'ADD_SOLANA_COMPOSITION', notes }
+    : { sentence: `add liquidity ${cap} ${bound} from ${(source as Extract<SwapSource, { kind: 'STEP' }>).nodeId} and ${otherMax} ${other} ${range} on Solana Devnet slippage ${slippage} bps`,
+      expect: 'ADD_SOLANA_COMPOSITION', notes };
 }
 
 /** "0.05%" written as a fee percentage (the tier must be the user's own words, or carried). */
@@ -562,6 +662,7 @@ function planCatalogLiquidity(a: CopilotLiquidityAction, g: Grounding, network: 
 
 function planComposition(actions: readonly CopilotAction[], g: Grounding, wallet: string | null): Plan {
   const m = copyOf(g);
+  if (g.policy.catalog && actions.map(a => a.type).join('>') === 'SWAP>LIQUIDITY') return planSolanaComposition(actions[0] as CopilotSwapAction, actions[1] as CopilotLiquidityAction, g);
   if (actions.map(a => a.type).join('>') !== 'SUPPLY>BORROW>SWAP') return refuse(m.compositionUnsupported);
   const [supply, borrow, swap] = actions as [CopilotLendingAction, CopilotLendingAction, CopilotSwapAction];
   const notes: string[] = [];
@@ -569,9 +670,9 @@ function planComposition(actions: readonly CopilotAction[], g: Grounding, wallet
     ...(supply.asset === null || borrow.asset === null || swap.outputAsset === null ? ['asset' as const] : [])];
   if (missing.length) ask(missing, stillNeeds(m, missing, 'composition'));
   for (const network of new Set([supply.network, borrow.network, swap.network])) resolveNetwork(network, actionNetworks('lending_composition', g), g, 'composition', notes);
-  if (needAsset(supply.asset, g, 'composition', 'asset') !== 'USDC' || needAsset(borrow.asset, g, 'composition', 'asset') !== 'USDC' ||
-    (swap.inputAsset !== null && needAsset(swap.inputAsset, g, 'composition', 'inputAsset') !== 'USDC')) refuse(m.compositionUnsupported);
-  if (!['WETH', 'ETH'].includes(needAsset(swap.outputAsset, g, 'composition', 'outputAsset'))) refuse(m.compositionUnsupported);
+  if (needAsset(supply.asset, g, 'composition', 'asset').toUpperCase() !== 'USDC' || needAsset(borrow.asset, g, 'composition', 'asset').toUpperCase() !== 'USDC' ||
+    (swap.inputAsset !== null && needAsset(swap.inputAsset, g, 'composition', 'inputAsset').toUpperCase() !== 'USDC')) refuse(m.compositionUnsupported);
+  if (!['WETH', 'ETH'].includes(needAsset(swap.outputAsset, g, 'composition', 'outputAsset').toUpperCase())) refuse(m.compositionUnsupported);
   const supplied = amountOf(supply.amount, g, 'composition', 'supplyAmount'), borrowed = amountOf(borrow.amount, g, 'composition', 'borrowAmount');
   if (swap.amount !== null && canonicalDecimal(swap.amount) !== canonicalDecimal(borrowed)) refuse(m.swapUsesBorrowed);
   const slippage = slippageOf(swap.slippageBps, '50', g, notes);
@@ -579,7 +680,7 @@ function planComposition(actions: readonly CopilotAction[], g: Grounding, wallet
   if (owners.length > 1) reject('COPILOT_OWNER_CONFLICT', m.sameOwner);
   if (!owners.length && !wallet) ask(['beneficiary'], stillNeeds(m, ['beneficiary'], 'composition'));
   if (!owners.length) notes.push(m.ownerNote(wallet!));
-  if (swap.outputAsset === 'ETH') notes.push(m.compositionWethNote);
+  if (swap.outputAsset?.toUpperCase() === 'ETH') notes.push(m.compositionWethNote);
   notes.push(m.debtNote);
   return { sentence: `compose supply ${supplied} USDC to Aave then borrow ${borrowed} USDC then swap borrowed USDC to WETH on Base Sepolia slippage ${slippage} bps` +
     `${owners.length ? ' owner ' + owners[0] : ''}`, expect: 'AUTHOR_LENDING', notes };
@@ -604,6 +705,7 @@ export function planCopilotActions(actions: readonly CopilotAction[], compositio
   try {
     if (composition) return { kind: 'PLAN', plan: planComposition(actions, g, wallet) };
     const action = actions[0]!;
+    if (g.policy.catalog && action.type === 'LIQUIDITY' && action.funding === 'SWAP_OUTPUT') return { kind: 'PLAN', plan: planSolanaComposition(null, action, g) };
     return { kind: 'PLAN', plan: action.type === 'SWAP' ? planSwap(action, g) : action.type === 'BRIDGE' ? planBridge(action, g)
       : action.type === 'LIQUIDITY' ? planLiquidity(action, g) : action.type === 'TRANSFER' ? planTransfer(action, g) : planLending(action, g, wallet) };
   } catch (cause) {

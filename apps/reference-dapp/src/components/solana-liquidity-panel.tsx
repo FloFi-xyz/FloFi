@@ -108,13 +108,21 @@ const labels: Record<LiquidityOperation, string> = { OPEN: 'Open position and ad
 
 export function SolanaLiquidityPanel({ view }: { view: 'simulate' | 'execute' }) {
   const { t: tr } = useLocale();
-  const { state } = useWorkflow(), jupiter = useJupiter(), liquidity = useSolanaLiquidity();
+  const { state, stagedPosition } = useWorkflow(), jupiter = useJupiter(), liquidity = useSolanaLiquidity();
   const node = state.workflow.nodes.find(n => solanaLiquidityDetails(n)), fields = node ? solanaLiquidityDetails(node) : null;
   const record = liquidity.record, review = record?.review, attempt = record?.attempt, sim = review?.simulationResult;
-  const active = liquidity.positions?.find(p => ['ACTIVE', 'EMPTY', 'OPEN_PENDING'].includes(p.status)) ?? null;
+  // An applied chat selection must stay on that mint; a missing selection never falls back to another position.
+  const active = liquidity.positions?.find(p => ['ACTIVE', 'EMPTY', 'OPEN_PENDING'].includes(p.status) &&
+    (!stagedPosition || p.positionMint === stagedPosition.positionMint)) ?? null;
   const [operation, setOperation] = useState<LiquidityOperation>('OPEN'), [part, setPart] = useState('5000'), [clock, setClock] = useState(() => Date.now());
   useEffect(() => { const timer = setInterval(() => setClock(Date.now()), 1000); return () => clearInterval(timer); }, []);
   useEffect(() => { setOperation(active && active.status !== 'OPEN_PENDING' ? 'DECREASE_PARTIAL' : 'OPEN'); }, [active?.positionMint, active?.status]);
+  // A position-management proposal the owner applied (from the Copilot) only preselects its operation for this position; nothing is simulated.
+  useEffect(() => {
+    if (!stagedPosition || !active || active.positionMint !== stagedPosition.positionMint || active.status === 'OPEN_PENDING') return;
+    setOperation(stagedPosition.operation);
+    if (stagedPosition.partBps !== null) setPart(String(stagedPosition.partBps));
+  }, [stagedPosition, active?.positionMint, active?.status]);
   const fresh = review ? Math.max(0, Math.round((Date.parse(review.expiresAt) - clock) / 1000)) : 0;
   const pending = Boolean(attempt && record?.verdict === 'PENDING' && ['SUBMITTING', 'SUBMISSION_RESULT_UNKNOWN', 'PENDING'].includes(attempt.state));
   const canExecute = Boolean(record?.authorization && !liquidity.retired && !attempt && record.verdict === 'PENDING' && fresh > 0 && liquidity.executionEnabled);
@@ -124,6 +132,7 @@ export function SolanaLiquidityPanel({ view }: { view: 'simulate' | 'execute' })
     {fields && <p>{tr("Concentrated liquidity on Solana Devnet via Orca Whirlpools: up to ")}{tr(fields.maxSol)}{tr(" Devnet SOL and ")}{tr(fields.maxDevUsdc)}{tr(" devUSDC between ")}{tr(fields.lowerPrice)}{tr(" and ")}{tr(fields.upperPrice)}{tr(" devUSDC per SOL.")}</p>}
     <p role="note">{tr("Solana Devnet test tokens only. They have no value, and no real funds are used.")}</p>
     {liquidity.retired && <p role="alert">{tr("The workflow changed. Prior authorization is invalid. Simulate the current position again.")}</p>}
+    {stagedPosition && liquidity.positions && !active && <p role="alert">{tr('The selected position is unavailable for this wallet. Choose a position again in Build.')}</p>}
     {!liquidity.owner && <button type="button" disabled={jupiter.busy} onClick={() => void jupiter.connect('solana:devnet')}>{tr("Connect Solana wallet")}</button>}
     {liquidity.owner && <p>{tr("Wallet connected · Solana Devnet: ")}<span>{tr(liquidity.owner)}</span></p>}
     {jupiter.error && !liquidity.owner && <p role="status">{tr(jupiter.error)}</p>}
@@ -144,7 +153,7 @@ export function SolanaLiquidityPanel({ view }: { view: 'simulate' | 'execute' })
         </select>
         {operation === 'DECREASE_PARTIAL' && <label>{tr("Portion to remove (basis points, 1–9999)")}<input aria-label={tr("Portion to remove (bps)")} inputMode="numeric" maxLength={4} value={part} onChange={e => setPart(e.target.value)}/></label>}
       </div>
-      <button type="button" disabled={liquidity.busy || pending || !liquidity.owner} onClick={() => void liquidity.simulate(operation, operation === 'OPEN' ? undefined : active?.positionMint,
+      <button type="button" disabled={liquidity.busy || pending || !liquidity.owner || Boolean(stagedPosition && !active)} onClick={() => void liquidity.simulate(operation, operation === 'OPEN' ? undefined : active?.positionMint,
         operation === 'DECREASE_PARTIAL' ? Number(part) : undefined)}>{tr("Simulate ")}{tr(operation === 'OPEN' ? 'position' : 'removal')}</button>
       {review && sim && !liquidity.retired && <dl className="swap-summary" aria-label={tr("Liquidity simulation")}>
         <dt>{tr("Operation")}</dt><dd>{tr(labels[review.operation])}{tr(" (1 transaction; the full lifecycle is open, partial removal, then exit)")}</dd>

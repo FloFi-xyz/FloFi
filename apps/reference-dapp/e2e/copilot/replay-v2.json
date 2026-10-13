@@ -1527,6 +1527,110 @@
      }
     }
    }
+  },
+  {
+   "user": [
+    "Swap 0.1 SOL to devUSDC on Solana Devnet and add liquidity with these tokens and at most 0.05 SOL in a 10% range"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "EN",
+      "kind": "COMPOSITION",
+      "actions": [
+       {
+        "type": "SWAP",
+        "network": "SOLANA_DEVNET",
+        "inputAsset": "SOL",
+        "outputAsset": "DEVUSDC",
+        "amount": "0.1",
+        "slippageBps": null
+       },
+       {
+        "type": "LIQUIDITY",
+        "protocol": null,
+        "network": null,
+        "deposits": [
+         {
+          "asset": "SOL",
+          "maxAmount": "0.05"
+         }
+        ],
+        "rangeUnit": "PERCENT",
+        "lower": null,
+        "upper": "10",
+        "slippageBps": null,
+        "feeTier": null,
+        "funding": "SWAP_OUTPUT"
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "add liquidity with these tokens in a 10% range"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "EN",
+      "kind": "ACTION",
+      "action": {
+       "type": "LIQUIDITY",
+       "protocol": null,
+       "network": null,
+       "deposits": [],
+       "rangeUnit": "PERCENT",
+       "lower": null,
+       "upper": "10",
+       "slippageBps": null,
+       "feeTier": null,
+       "funding": "SWAP_OUTPUT"
+      },
+      "reuse": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "Remove 25% of my liquidity"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "EN",
+      "kind": "POSITION",
+      "operation": "DECREASE",
+      "protocol": null,
+      "network": null,
+      "percent": "25"
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "Close my position"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "EN",
+      "kind": "POSITION",
+      "operation": "EXIT",
+      "protocol": null,
+      "network": null,
+      "percent": null
+     }
+    }
+   }
   }
  ]
 }
