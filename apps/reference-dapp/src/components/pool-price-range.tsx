@@ -8,6 +8,7 @@ import { useUniswapLiquidity } from '../state/uniswap-liquidity-store';
 import { useSolanaLiquidity } from '../state/solana-liquidity-store';
 import { uniswapBandInput, uniswapLiquidityDetails, uniswapLiquidityProfileFor, type UniswapLiquidityNetwork } from '../domain/uniswap-liquidity-authoring';
 import { solanaLiquidityDetails } from '../domain/solana-liquidity-authoring';
+import { priceBoundsAround, validPoolPrice } from '../domain/pool-price-bounds';
 
 export const poolPricePresets = {
   'Estável': { lower: -0.03, upper: 0.03, extent: 0.15 },
@@ -33,7 +34,7 @@ type RangeContext = {
   reset(nodeId: string): void;
 };
 const Context = createContext<RangeContext | null>(null);
-const validPrice = (price?: string) => Boolean(price && /^\d+(?:\.\d+)?$/.test(price) && /[1-9]/.test(price));
+const validPrice = validPoolPrice;
 
 /** A shared UI editing buffer, never a second workflow or an executable range. */
 export function PoolPriceRangeProvider({ children }: { children: ReactNode }) {
@@ -104,15 +105,8 @@ export function poolPriceBounds(reference: RangeReference | null, percent: numbe
     const { rangeUnit, lower, upper } = uniswapBandInput(reference.sqrtPriceX96, bps, reference.network);
     return { rangeUnit, lower, upper };
   }
-  const [integer = '0', fraction = ''] = reference.price.split('.');
-  const raw = BigInt(integer + fraction);
-  function boundary(multiplier: number) {
-    const digits = (raw * BigInt(multiplier)).toString().padStart(fraction.length + 5, '0');
-    const decimals = fraction.length + 4;
-    return `${digits.slice(0, -decimals)}.${digits.slice(-decimals)}`.replace(/0+$/, '').replace(/\.$/, '');
-  }
   const offsets = poolRangeOffsets(percent, preset);
-  return { rangeUnit: 'PRICE' as const, lower: boundary(10000 + Math.round(offsets.lower * 100)), upper: boundary(10000 + Math.round(offsets.upper * 100)) };
+  return priceBoundsAround(reference.price, offsets.lower, offsets.upper);
 }
 
 export function PoolPriceRange({ percent, preset = null, extent = 100, reference, onChange }: { percent: number; preset?: PoolPricePreset | null; extent?: number; reference: RangeReference | null; onChange(percent: number, extent?: number): void }) {

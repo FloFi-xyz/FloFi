@@ -22,7 +22,12 @@ export const COPILOT_RANGE_UNITS = ['PRICE', 'TICK'] as const;
  */
 /** The network registry's Copilot identifiers, plus OTHER for any network FloFi does not know. */
 export const COPILOT_V2_NETWORKS = Object.freeze([...COPILOT_NETWORK_IDS, 'OTHER'] as const);
-export const COPILOT_V2_RANGE_UNITS = ['PRICE', 'TICK', 'FULL'] as const;
+export const COPILOT_V2_RANGE_UNITS = ['PRICE', 'TICK', 'FULL', 'PERCENT'] as const;
+/**
+ * V2 liquidity funding the user named: SWAP_OUTPUT ("with these tokens", "com esses tokens") is a swap's actual output; REMAINING ("the remaining
+ * tokens") is a reconciled execution's leftover. FloFi resolves both against its own state, never the model.
+ */
+export const COPILOT_FUNDING = ['SWAP_OUTPUT', 'REMAINING'] as const;
 export const COPILOT_FEE_TIERS = ['0.01', '0.05', '0.3', '1'] as const;
 /** The asset symbol grammar of every catalog (`ASSET_SYMBOL`), case as written: `cbBTC`, `TSLA`, `USDbC`. */
 export const COPILOT_SYMBOL = /^[A-Za-z][A-Za-z0-9.]{0,15}$/;
@@ -61,7 +66,9 @@ export type CopilotDeposit = { readonly asset: CopilotAsset; readonly maxAmount:
 export type CopilotLiquidityAction = { readonly type: 'LIQUIDITY'; readonly protocol: (typeof COPILOT_LIQUIDITY_PROTOCOLS)[number] | null;
   readonly network: CopilotNetwork | null; readonly deposits: readonly CopilotDeposit[]; readonly rangeUnit: (typeof COPILOT_V2_RANGE_UNITS)[number] | null;
   readonly lower: string | null; readonly upper: string | null; readonly slippageBps: string | null;
-  /** V2, catalog pools only: the fee tier the user named (null: Flofi's default tier). Absent in V1 intents. */ readonly feeTier?: CopilotFeeTier | null };
+  /** V2, catalog pools only: the fee tier the user named (null: Flofi's default tier). Absent in V1 intents. */ readonly feeTier?: CopilotFeeTier | null;
+  /** V2: where the deposits come from, when the user said so (absent in V1 intents and recorded answers). PERCENT ranges carry the percent in `upper`. */
+  readonly funding?: (typeof COPILOT_FUNDING)[number] | null };
 export type CopilotAction = CopilotSwapAction | CopilotBridgeAction | CopilotLendingAction | CopilotLiquidityAction | CopilotTransferAction;
 export type CopilotIntentV1 =
   | { readonly version: '1'; readonly kind: 'ACTION'; readonly action: CopilotAction }
@@ -182,15 +189,17 @@ function parseActionV2(value: unknown): CopilotAction {
   }
   if (type === 'LIQUIDITY') {
     const keys = ['type', 'protocol', 'network', 'deposits', 'rangeUnit', 'lower', 'upper', 'slippageBps'];
-    const withTier = !!value && typeof value === 'object' && Object.hasOwn(value, 'feeTier');
-    const v = exact(value, withTier ? [...keys, 'feeTier'] : keys);
+    const has = (key: string) => !!value && typeof value === 'object' && Object.hasOwn(value, key);
+    const withTier = has('feeTier'), withFunding = has('funding');
+    const v = exact(value, [...keys, ...withTier ? ['feeTier'] : [], ...withFunding ? ['funding'] : []]);
     const deposits = list(v.deposits, 2).map(item => {
       const d = exact(item, ['asset', 'maxAmount']);
       return { asset: symbol(d.asset) ?? fail(), maxAmount: pattern(d.maxAmount, AMOUNT, false)! };
     });
     return { type, protocol: nullableOneOf(COPILOT_LIQUIDITY_PROTOCOLS, v.protocol), network: network(v.network), deposits,
       rangeUnit: nullableOneOf(COPILOT_V2_RANGE_UNITS, v.rangeUnit), lower: pattern(v.lower, SIGNED_DECIMAL, true), upper: pattern(v.upper, SIGNED_DECIMAL, true),
-      slippageBps: bps(v.slippageBps), ...withTier ? { feeTier: nullableOneOf(COPILOT_FEE_TIERS, v.feeTier) } : {} };
+      slippageBps: bps(v.slippageBps), ...withTier ? { feeTier: nullableOneOf(COPILOT_FEE_TIERS, v.feeTier) } : {},
+      ...withFunding ? { funding: nullableOneOf(COPILOT_FUNDING, v.funding) } : {} };
   }
   return fail();
 }
@@ -294,10 +303,13 @@ const actionSchemasV2 = [
   object({ type: constant('LIQUIDITY'), protocol: nullableChoice(COPILOT_LIQUIDITY_PROTOCOLS, 'Pool protocol only if the user named it; null otherwise.'),
     network: nullableChoice(COPILOT_V2_NETWORKS, NETWORK_V2_TEXT),
     deposits: { type: 'array', description: 'Maximum amount of each token the user named (at most 2).', items: object({ asset: string(SYMBOL_TEXT), maxAmount: string(AMOUNT_TEXT) }) },
-    rangeUnit: nullableChoice(COPILOT_V2_RANGE_UNITS, 'PRICE for a price range (quote token per base token), TICK for tick indexes, FULL for "full range"; null if not stated.'),
+    rangeUnit: nullableChoice(COPILOT_V2_RANGE_UNITS, 'PRICE for a price range (quote token per base token), TICK for tick indexes, FULL for "full range", ' +
+      'PERCENT for a range of plus or minus a percentage around the current pool price ("a 10% range": upper "10", lower null); null if not stated.'),
     lower: nullableString('Lower range bound exactly as written; null if not stated.'), upper: nullableString('Upper range bound exactly as written; null if not stated.'),
     slippageBps: nullableString(SLIPPAGE_TEXT),
-    feeTier: nullableChoice(COPILOT_FEE_TIERS, 'Pool fee tier in percent only if the user named it (0.01, 0.05, 0.3 or 1); null otherwise.') }),
+    feeTier: nullableChoice(COPILOT_FEE_TIERS, 'Pool fee tier in percent only if the user named it (0.01, 0.05, 0.3 or 1); null otherwise.'),
+    funding: nullableChoice(COPILOT_FUNDING, 'SWAP_OUTPUT when the user funds the position with a swap\'s tokens ("with these tokens", "with the swapped devUSDC", ' +
+      '"com esses tokens"); REMAINING for "the remaining tokens" / "o que sobrou"; null otherwise. Leave that token\'s deposit out unless the user named a cap.') }),
 ];
 export const COPILOT_OUTPUT_SCHEMA = Object.freeze(object({ intent: { anyOf: [
   object({ version: constant('1'), kind: constant('ACTION'), action: { anyOf: actionSchemas } }),

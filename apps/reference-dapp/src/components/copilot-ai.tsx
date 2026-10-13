@@ -8,7 +8,11 @@ import type { Command } from '../domain/commands';
 import { chainStatus } from '../domain/artifact-chain';
 import { buildCopilotFacts, simulationFlowOf, type CopilotFacts, type SimulationFlow } from '../domain/copilot-answers';
 import { closeSegment, emptyConversation, finishTurn, recordProposal, startTurn, type CopilotConversation, type CopilotEnvironment, type CopilotReply,
-  type CopilotResultV2 } from '../domain/copilot-conversation';
+  type CopilotResultV2, type CopilotVerified } from '../domain/copilot-conversation';
+import { solanaLiquidityPositions, solanaLiquidityPrice } from '../app/solana-liquidity-action';
+import { ORCA_WHIRLPOOLS_DEVNET } from '@defi-workflow-engine/action-registry';
+import { formatTokenAmount } from '../domain/jupiter-authoring';
+import { useSolanaComposition } from '../state/solana-composition-store';
 import { workflowSteps } from '../domain/workflow-steps';
 import { catalogNetworksNamed } from '../domain/network-registry';
 import { ensureNetworkCatalog } from '../state/asset-catalog-store';
@@ -37,6 +41,26 @@ import { useWorkflow } from '../state/workflow-store';
  */
 export type { CopilotReply };
 type Record_ = { readonly record?: unknown; readonly run?: unknown; readonly retired: boolean } | null;
+type SwapRecord = ReturnType<typeof useJupiter>['record'];
+type CompositionView = ReturnType<typeof useSolanaComposition>['record'];
+/**
+ * PR B: swap output that a reconciled execution left in the wallet — a reconciled Solana Devnet swap's output, or the part of a composition's
+ * reconciled swap output its position did not deposit (all of it when the run ended after the swap). Nothing else counts as "remaining tokens".
+ */
+function reconciledRemaining(swap: SwapRecord, composition: CompositionView): CopilotVerified['remaining'] {
+  const symbol = (token: 0 | 1) => token === 0 ? 'SOL' as const : 'devUSDC' as const, decimals = (token: 0 | 1) => token === 0 ? 9 : 6;
+  const binding = composition?.record.binding;
+  if (binding && (composition.phase === 'COMPLETED' || composition.phase === 'PARTIAL')) {
+    const effects = composition.phase === 'COMPLETED' ? composition.liquidity?.observations.at(-1)?.effects : null;
+    if (composition.phase === 'COMPLETED' && !effects) return [];
+    const left = BigInt(binding.received) - (effects ? BigInt(binding.token === 0 ? effects.depositedA : effects.depositedB) : 0n);
+    return left > 0n ? [{ token: symbol(binding.token), amount: formatTokenAmount(left.toString(), decimals(binding.token)) }] : [];
+  }
+  const observed = swap?.evidence ? swap.observations.at(-1) : null;
+  const output = swap?.review.output.symbol.toUpperCase();
+  if (!swap || swap.review.chain !== ORCA_WHIRLPOOLS_DEVNET.chain || observed?.verdict !== 'RECONCILED' || !observed.outputReceived || (output !== 'SOL' && output !== 'DEVUSDC')) return [];
+  return BigInt(observed.outputReceived) > 0n ? [{ token: output === 'SOL' ? 'SOL' : 'devUSDC', amount: formatTokenAmount(observed.outputReceived, swap.review.output.decimals) }] : [];
+}
 const authorized = (value: unknown) => {
   const record = value as { authorization?: unknown; reviewedManifestHash?: unknown } | null;
   return Boolean(record && (record.authorization || record.reviewedManifestHash));
@@ -46,16 +70,19 @@ export function useCopilotInterpreter() {
   const workflow = useWorkflow();
   const wallet = useBuild009Wallet();
   const { environment, result: capability } = useWorkflowCapability();
+  const jupiter = useJupiter(), orca = useSolanaLiquidity(), composition = useSolanaComposition();
   const flows: Readonly<Record<Exclude<SimulationFlow, 'MOCKED_CHAIN'>, Record_>> = { SUPPLY: useSupply(), LENDING: useLending(), ROUTER: useRouter(),
-    SOLANA_SWAP: useJupiter(), ORCA: useSolanaLiquidity(), UNISWAP: useUniswapLiquidity(), PUBLIC_TESTNET: usePublicTestnet(), TRANSFER: useRobinhoodTransfer() };
+    SOLANA_SWAP: jupiter, ORCA: orca, UNISWAP: useUniswapLiquidity(), PUBLIC_TESTNET: usePublicTestnet(), TRANSFER: useRobinhoodTransfer() };
   // `loading` renders exactly like `off`; text sent before the status arrives waits for it rather than guessing.
   const [mode, setMode] = useState<CopilotMode | 'loading'>('loading');
   const status = useRef<Promise<CopilotMode> | null>(null);
   const [busy, setBusy] = useState(false);
   const conversation = useRef<CopilotConversation>(emptyConversation());
   const proposals = useRef(new WeakMap<Command, string>());
-  const latest = useRef({ workflow, wallet, environment, capability, flows });
-  latest.current = { workflow, wallet, environment, capability, flows };
+  const latest = useRef({ workflow, wallet, environment, capability, flows, jupiter, orca, composition });
+  latest.current = { workflow, wallet, environment, capability, flows, jupiter, orca, composition };
+  // Read-only Solana Devnet facts fetched for the last turn that needed them (pool price, the wallet's FloFi positions): never the model's words.
+  const fetched = useRef<{ readonly owner: string | null; readonly price: CopilotVerified['orcaPrice']; readonly positions: CopilotVerified['orcaPositions'] }>({ owner: null, price: null, positions: null });
   useEffect(() => {
     let stopped = false;
     const pending = copilotStatus().then(result => result.mode, () => 'off' as const);
@@ -76,7 +103,21 @@ export function useCopilotInterpreter() {
       capability: { environment: now.environment, executionSupported: now.capability.executionSupported, executionReady: now.capability.executionReady,
         evidenceCeiling: now.capability.evidenceCeiling, blockers: now.capability.blockers.filter(item => item.dimension === 'EXECUTE' || item.dimension === 'AUTHORIZE') },
       simulation, walletConnected: Boolean(now.wallet.account) });
-    return { timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, workflow: current, context: store.context, wallet: now.wallet.account, walletChainId: now.wallet.chainId, pending: store.pending, facts };
+    const solanaOwner = now.orca.owner, loaded = fetched.current;
+    const verified: CopilotVerified = { orcaPrice: loaded.price, solanaOwner, orcaPositions: solanaOwner && loaded.owner === solanaOwner ? loaded.positions : null,
+      remaining: reconciledRemaining(now.jupiter.record, now.composition.record) };
+    return { timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, workflow: current, context: store.context, wallet: now.wallet.account, walletChainId: now.wallet.chainId, pending: store.pending, facts,
+      verified };
+  }, []);
+  /** Reads the Orca pool price and the connected wallet's FloFi positions when the interpreted request needs them (a percentage range, a position). */
+  const loadVerified = useCallback(async (intent: unknown) => {
+    const shape = JSON.stringify(intent) ?? '';
+    if (!/"rangeUnit":"PERCENT"|"kind":"POSITION"/.test(shape)) return;
+    const owner = latest.current.orca.owner;
+    const [price, positions] = await Promise.all([solanaLiquidityPrice().catch(() => null), owner && /"kind":"POSITION"/.test(shape) ? solanaLiquidityPositions(owner).catch(() => null) : null]);
+    fetched.current = { owner, price: price?.ok ? { price: price.value.price, tickCurrentIndex: price.value.tickCurrentIndex } : null,
+      positions: positions?.ok ? positions.value.map(p => ({ positionMint: p.positionMint, status: p.status, tickLower: p.tickLower, tickUpper: p.tickUpper, liquidity: p.liquidity }))
+        : owner === fetched.current.owner && !/"kind":"POSITION"/.test(shape) ? fetched.current.positions : null };
   }, []);
   // Every proposal the user can see becomes a referent, including exact-grammar proposals ("make it 2" after one).
   const pendingCommand = workflow.pending?.command;
@@ -95,12 +136,13 @@ export function useCopilotInterpreter() {
       let result: CopilotResultV2;
       try { result = await copilotInterpret(start.request) as CopilotResultV2; } catch { result = { ok: false, code: 'COPILOT_UNAVAILABLE' }; }
       // BUILD-BASE-001: catalog-network symbols resolve only in validated catalogs: load those this request or its intent names (where enabled).
-      if (result.ok) await Promise.all(catalogNetworksNamed(start.turn.state.segment.join('\n'), result.intent).map(n => ensureNetworkCatalog(false, n.chain)));
+      if (result.ok) await Promise.all([...catalogNetworksNamed(start.turn.state.segment.join('\n'), result.intent).map(n => ensureNetworkCatalog(false, n.chain)),
+        loadVerified(result.intent)]);
       const finished = finishTurn(start.turn, result, environmentNow());
       conversation.current = finished.next;
       return show(finished.reply);
     } finally { setBusy(false); }
-  }, [environmentNow, show]);
+  }, [environmentNow, show, loadVerified]);
   /** The Copilot's reply, or null when it is not enabled on this server (the caller shows its exact-grammar guidance). */
   const respond = useCallback(async (text: string): Promise<CopilotReply | null> => {
     const resolved = await (status.current ?? Promise.resolve<CopilotMode>('off'));

@@ -15,7 +15,7 @@ import { liquidityDetails, parseTick } from '@defi-workflow-engine/reference-lin
 import { createAuthoredTransfer, transferDetails, type RobinhoodTransferInput } from './robinhood-transfer-authoring';
 import { createAuthoredSupply, supplyDetails, createAuthoredBorrow, borrowDetails, createAuthoredRepay, repayDetails, createAuthoredWithdraw, withdrawDetails, lendingProfileFor, LENDING_NETWORKS, type WithdrawInput, type SupplyInput } from './supply-authoring';
 import { createSolanaSwapNode, parseSolanaSwapChat, solanaSwapDetails, solanaSwapLabels, type SolanaSwapInput } from './jupiter-authoring';
-import { createSolanaLiquidityNode, parseSolanaLiquidityChat, solanaLiquidityDetails, type SolanaLiquidityInput } from './solana-liquidity-authoring';
+import { createSolanaLiquidityNode, parseSolanaCompositionChat, parseSolanaLiquidityChat, solanaLiquidityDetails, type SolanaLiquidityInput } from './solana-liquidity-authoring';
 import { createUniswapLiquidityNode, parseUniswapLiquidityChat, uniswapLiquidityDetails, type UniswapLiquidityInput } from './uniswap-liquidity-authoring';
 import { createRouterNode, parseRouterChat, routerDetails, ROUTER_ROUTING_LABEL, type RouterBridgeInput } from './router-authoring';
 import { createCryptoActionNode, type CryptoActionInput } from './crypto-action-picker';
@@ -52,6 +52,11 @@ export type Command = Base & (
   | { readonly type: 'SET_SOLANA_SWAP'; readonly nodeId: string; readonly input: SolanaSwapInput }
   | { readonly type: 'ADD_SOLANA_LIQUIDITY'; readonly input: SolanaLiquidityInput }
   | { readonly type: 'SET_SOLANA_LIQUIDITY'; readonly nodeId: string; readonly input: SolanaLiquidityInput }
+  /** A position funded by a Solana Devnet swap's output: the new swap (`swap`) or an existing swap step (`from`), added and linked exactly as the Canvas does. */
+  | { readonly type: 'ADD_SOLANA_COMPOSITION'; readonly swap: SolanaSwapInput | null; readonly from: string | null; readonly liquidity: SolanaLiquidityInput }
+  /** Prepares one verified FloFi position for removal or exit: the workflow becomes that position's isolated step; the owner still simulates, reviews and signs. */
+  | { readonly type: 'MANAGE_SOLANA_POSITION'; readonly input: SolanaLiquidityInput; readonly positionMint: string; readonly operation: 'DECREASE_PARTIAL' | 'EXIT';
+      readonly partBps: number | null }
   | { readonly type: 'ADD_UNISWAP_LIQUIDITY'; readonly input: UniswapLiquidityInput }
   | { readonly type: 'SET_UNISWAP_LIQUIDITY'; readonly nodeId: string; readonly input: UniswapLiquidityInput }
   | { readonly type: 'ADD_ROUTER_BRIDGE'; readonly input: RouterBridgeInput }
@@ -158,6 +163,19 @@ export function parseLocalCommand(text: string, workflow: Workflow, context: Rev
   if (router) { createRouterNode('node-preview', router); return { type: 'ADD_ROUTER_BRIDGE', input: router, source: 'CHAT', baseRevision: workflow.revision }; }
   const uniswapLiquidity = parseUniswapLiquidityChat(input);
   if (uniswapLiquidity) { createUniswapLiquidityNode('node-preview', uniswapLiquidity); return { type: 'ADD_UNISWAP_LIQUIDITY', input: uniswapLiquidity, source: 'CHAT', baseRevision: workflow.revision }; }
+  // A Solana Devnet swap whose output funds an Orca position: "swap … then add liquidity all swapped devUSDC and 0.05 SOL …", or the output of an
+  // existing swap step. The editor adds and links the steps exactly as the Canvas does.
+  const composed = parseSolanaCompositionChat(input);
+  if (composed) {
+    if (composed.swap) createSolanaSwapNode('node-preview', composed.swap);
+    else {
+      const step = workflow.nodes.find(node => node.nodeId === composed.from), producer = step ? solanaSwapDetails(step) : null;
+      if (!producer || producer.network !== 'Solana Devnet') throw new Error('UNKNOWN_SOLANA_SWAP_NODE');
+      if (producer.to !== composed.bound) throw new Error('COMPOSITION_TOKEN_MISMATCH');
+    }
+    createSolanaLiquidityNode('node-preview', composed.liquidity);
+    return { type: 'ADD_SOLANA_COMPOSITION', swap: composed.swap, from: composed.from, liquidity: composed.liquidity, source: 'CHAT', baseRevision: workflow.revision };
+  }
   const solanaLiquidity = parseSolanaLiquidityChat(input);
   if (solanaLiquidity) { createSolanaLiquidityNode('node-preview', solanaLiquidity); return { type: 'ADD_SOLANA_LIQUIDITY', input: solanaLiquidity, source: 'CHAT', baseRevision: workflow.revision }; }
   const solana = parseSolanaSwapChat(input);
@@ -240,6 +258,17 @@ export function parseLocalCommand(text: string, workflow: Workflow, context: Rev
   }
   return parseMockCommand(input.toLowerCase(), workflow.revision);
 }
+const plainFields = (fields: unknown, keys: readonly string[], max: number) => !!fields && typeof fields === 'object' && !Array.isArray(fields) &&
+  Object.getPrototypeOf(fields) === Object.prototype && Reflect.ownKeys(fields).sort().join() === [...keys].sort().join() &&
+  Object.values(fields).every(v => typeof v === 'string' && v.length <= max);
+function solanaSwapInputValid(fields: unknown): boolean {
+  if (!plainFields(fields, ['network', 'from', 'to', 'amount', 'slippage'], 40)) return false;
+  try { createSolanaSwapNode('node-preview', fields as SolanaSwapInput); return true; } catch { return false; }
+}
+function solanaLiquidityInputValid(fields: unknown): boolean {
+  if (!plainFields(fields, ['network', 'maxSol', 'maxDevUsdc', 'rangeUnit', 'lower', 'upper', 'slippage'], 40)) return false;
+  try { createSolanaLiquidityNode('node-preview', fields as SolanaLiquidityInput); return true; } catch { return false; }
+}
 export function commandIsValid(input: unknown): input is Command {
   try {
   if (!input || typeof input !== 'object' || Array.isArray(input) || Object.getPrototypeOf(input) !== Object.prototype) return false;
@@ -253,7 +282,7 @@ export function commandIsValid(input: unknown): input is Command {
       || !['CHAT', 'CANVAS'].includes(command.source as string)) return false;
   const fields: Record<string, string[]> = {
     ADD_CRYPTO_ACTION: ['input'], SET_CRYPTO_ACTION: ['nodeId', 'input'],
-    AUTHOR_LENDING:['input'], ADD_RH_TRANSFER: ['input'], SET_RH_TRANSFER: ['nodeId','input'], ADD_WITHDRAW: ['input'], SET_WITHDRAW: ['nodeId','input'], ADD_REPAY: ['input'], SET_REPAY: ['nodeId','input'], ADD_BORROW: ['input'], SET_BORROW: ['nodeId','input'], ADD_SUPPLY: ['input'], SET_SUPPLY: ['nodeId','input'], ADD_SOLANA_SWAP: ['input'], SET_SOLANA_SWAP: ['nodeId','input'], ADD_SOLANA_LIQUIDITY: ['input'], SET_SOLANA_LIQUIDITY: ['nodeId','input'], ADD_UNISWAP_LIQUIDITY: ['input'], SET_UNISWAP_LIQUIDITY: ['nodeId','input'], ADD_ROUTER_BRIDGE: ['input'], SET_ROUTER_BRIDGE: ['nodeId','input'], ADD: ['kind'], AUTHOR_CROSS_CHAIN_LIQUIDITY: ['input'], AUTHOR_BRIDGE_SWAP: ['input'], AUTHOR_ACROSS: ['input'], ADD_BRIDGE: ['input'], SET_BRIDGE: ['nodeId', 'input'], SET_AMOUNT: ['nodeId', 'amount'], LOCK: ['nodeId', 'locked'], AUTHOR_COMPOSITION: ['safe', 'input'], ADD_LIQUIDITY: ['input'], SET_LIQUIDITY: ['nodeId', 'input'],
+    AUTHOR_LENDING:['input'], ADD_RH_TRANSFER: ['input'], SET_RH_TRANSFER: ['nodeId','input'], ADD_WITHDRAW: ['input'], SET_WITHDRAW: ['nodeId','input'], ADD_REPAY: ['input'], SET_REPAY: ['nodeId','input'], ADD_BORROW: ['input'], SET_BORROW: ['nodeId','input'], ADD_SUPPLY: ['input'], SET_SUPPLY: ['nodeId','input'], ADD_SOLANA_SWAP: ['input'], SET_SOLANA_SWAP: ['nodeId','input'], ADD_SOLANA_LIQUIDITY: ['input'], SET_SOLANA_LIQUIDITY: ['nodeId','input'], ADD_SOLANA_COMPOSITION: ['swap', 'from', 'liquidity'], MANAGE_SOLANA_POSITION: ['input', 'positionMint', 'operation', 'partBps'], ADD_UNISWAP_LIQUIDITY: ['input'], SET_UNISWAP_LIQUIDITY: ['nodeId','input'], ADD_ROUTER_BRIDGE: ['input'], SET_ROUTER_BRIDGE: ['nodeId','input'], ADD: ['kind'], AUTHOR_CROSS_CHAIN_LIQUIDITY: ['input'], AUTHOR_BRIDGE_SWAP: ['input'], AUTHOR_ACROSS: ['input'], ADD_BRIDGE: ['input'], SET_BRIDGE: ['nodeId', 'input'], SET_AMOUNT: ['nodeId', 'amount'], LOCK: ['nodeId', 'locked'], AUTHOR_COMPOSITION: ['safe', 'input'], ADD_LIQUIDITY: ['input'], SET_LIQUIDITY: ['nodeId', 'input'],
     CONNECT: ['from', 'to'], DISCONNECT: ['from', 'to'], REMOVE: ['nodeId'], REMOVE_MANY: ['nodeIds'], ADD_SWAP: ['direction', 'amount', 'slippage'], ADD_TESTNET_SWAP: ['direction', 'amount', 'slippage'], ADD_ETHEREUM_SEPOLIA_SWAP: ['direction', 'amount', 'slippage'], ADD_COW_SWAP: ['direction', 'amount', 'slippage'],
     SET_SWAP_AMOUNT: ['nodeId', 'amount'], SET_SLIPPAGE: ['nodeId', 'slippage'],
   };
@@ -298,21 +327,19 @@ export function commandIsValid(input: unknown): input is Command {
     case 'ADD_SOLANA_SWAP':
     case 'SET_SOLANA_SWAP': {
       if (command.type === 'SET_SOLANA_SWAP' && !id(command.nodeId)) return false;
-      const fields = command.input;
-      if (!fields || typeof fields !== 'object' || Array.isArray(fields) || Object.getPrototypeOf(fields) !== Object.prototype ||
-          Reflect.ownKeys(fields).sort().join() !== ['network','from','to','amount','slippage'].sort().join() ||
-          !Object.values(fields).every(v => typeof v === 'string' && v.length <= 40)) return false;
-      try { createSolanaSwapNode('node-preview', fields as SolanaSwapInput); return true; } catch { return false; }
+      return solanaSwapInputValid(command.input);
     }
     case 'ADD_SOLANA_LIQUIDITY':
     case 'SET_SOLANA_LIQUIDITY': {
       if (command.type === 'SET_SOLANA_LIQUIDITY' && !id(command.nodeId)) return false;
-      const fields = command.input;
-      if (!fields || typeof fields !== 'object' || Array.isArray(fields) || Object.getPrototypeOf(fields) !== Object.prototype ||
-          Reflect.ownKeys(fields).sort().join() !== ['network','maxSol','maxDevUsdc','rangeUnit','lower','upper','slippage'].sort().join() ||
-          !Object.values(fields).every(v => typeof v === 'string' && v.length <= 40)) return false;
-      try { createSolanaLiquidityNode('node-preview', fields as SolanaLiquidityInput); return true; } catch { return false; }
+      return solanaLiquidityInputValid(command.input);
     }
+    case 'ADD_SOLANA_COMPOSITION':
+      return (command.swap === null ? id(command.from) : command.from === null && solanaSwapInputValid(command.swap)) && solanaLiquidityInputValid(command.liquidity);
+    case 'MANAGE_SOLANA_POSITION':
+      return solanaLiquidityInputValid(command.input) && typeof command.positionMint === 'string' && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(command.positionMint) &&
+        (command.operation === 'EXIT' ? command.partBps === null
+          : command.operation === 'DECREASE_PARTIAL' && Number.isSafeInteger(command.partBps) && (command.partBps as number) >= 1 && (command.partBps as number) <= 9_999);
     case 'ADD_UNISWAP_LIQUIDITY':
     case 'SET_UNISWAP_LIQUIDITY': {
       if (command.type === 'SET_UNISWAP_LIQUIDITY' && !id(command.nodeId)) return false;

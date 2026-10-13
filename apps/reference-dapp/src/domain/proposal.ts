@@ -14,6 +14,29 @@ import { routerDetails, ROUTER_NETWORK_OPTIONS, ROUTER_ROUTING_LABEL } from './r
 
 export function describeProposal(before: EditorState, after: EditorState, command: Command, context: ReviewContext): readonly string[] {
   if (after.error) return [after.error];
+  if (command.type === 'ADD_SOLANA_COMPOSITION') {
+    // The swap (new, or the existing step) and the position it funds, added and linked as the Canvas does.
+    const added = after.workflow.nodes.filter(node => !before.workflow.nodes.some(old => old.nodeId === node.nodeId));
+    const swapNode = command.swap ? added.find(node => solanaSwapDetails(node)) : before.workflow.nodes.find(node => node.nodeId === command.from);
+    const swap = swapNode && solanaSwapDetails(swapNode), poolNode = added.find(node => solanaLiquidityDetails(node)), pool = poolNode && solanaLiquidityDetails(poolNode);
+    if (swap && pool?.source) {
+      const bound = pool.source.token === 0 ? 'SOL' : 'devUSDC', boundMax = pool.source.token === 0 ? pool.maxSol : pool.maxDevUsdc;
+      return Object.freeze([`Revision ${before.workflow.revision} → ${after.workflow.revision}`,
+        `${command.swap ? 'New' : 'Existing'} node ${swapNode!.nodeId}: Swap ${swap.amount} ${swap.from} → ${swap.to} on Solana Devnet via Orca Whirlpools; slippage ${swap.slippage} bps`,
+        `Node ${poolNode!.nodeId}: Orca SOL/devUSDC position funded by that swap's output: ${pool.source.fullOutput ? `100% of the actual reconciled ${bound}` : `the actual reconciled ${bound}, up to ${boundMax}`}` +
+          ` plus at most ${pool.source.token === 0 ? `${pool.maxDevUsdc} devUSDC` : `${pool.maxSol} SOL`}`,
+        `Range: ${pool.lowerPrice}–${pool.upperPrice} devUSDC per SOL (ticks ${pool.tickLower} to ${pool.tickUpper}); slippage ${pool.slippage} bps`,
+        'Two transactions, each simulated, reviewed and signed in your wallet. The swap never repeats; the position is prepared again from the reconciled output. Valueless Devnet test tokens.']);
+    }
+  }
+  if (command.type === 'MANAGE_SOLANA_POSITION') {
+    const removed = before.workflow.nodes.filter(node => !node.actionType.startsWith('mock-') && !after.workflow.nodes.some(next => next.nodeId === node.nodeId));
+    return Object.freeze([after.workflow === before.workflow ? `Revision ${before.workflow.revision} (workflow unchanged)` : `Revision ${before.workflow.revision} → ${after.workflow.revision}`,
+      `FloFi position ${command.positionMint}: ${command.operation === 'EXIT' ? 'remove all liquidity, collect fees and close it' : `remove ${command.partBps! / 100}% of its liquidity and collect fees`}`,
+      `Position step: ticks ${command.input.lower} to ${command.input.upper} on Solana Devnet (Orca), its only financial step` +
+        (removed.length ? `; removed steps: ${removed.map(node => node.nodeId).join(', ')}` : ''),
+      'Applying only prepares the operation in Simulate. Nothing is removed until you simulate, review and sign in your wallet.']);
+  }
   if(command.type==='AUTHOR_LENDING')return [`Revision ${before.workflow.revision} → ${after.workflow.revision}`,`Supply ${command.input.supply} Aave USDC → health checkpoint HF ≥ 2.0 → Borrow ${command.input.borrow} Aave USDC → Swap exactly borrowed USDC to WETH`, `Owner ${command.input.owner}; Base Sepolia; slippage ${command.input.slippage} bps`, 'Debt remains after Swap. If Swap fails, borrowed USDC and debt remain; no automatic repayment or retry.', 'Acceptance replaces the workflow and invalidates previous simulation, Manifest and Review. Full public path must pass before any transaction.'];
   if (command.type === 'AUTHOR_CROSS_CHAIN_LIQUIDITY') return Object.freeze([
     `Revision ${before.workflow.revision} → ${after.workflow.revision}`,

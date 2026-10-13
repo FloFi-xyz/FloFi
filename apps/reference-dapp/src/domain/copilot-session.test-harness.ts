@@ -5,7 +5,7 @@ import type { Workflow } from './initial-workflow';
 import { describeProposal } from './proposal';
 import { buildCopilotFacts, type CopilotFacts, type CopilotFactsInput } from './copilot-answers';
 import { closeSegment, emptyConversation, finishTurn, recordProposal, startTurn, type CopilotConversation, type CopilotEnvironment, type CopilotReply,
-  type CopilotRequestV2, type CopilotResultV2 } from './copilot-conversation';
+  type CopilotRequestV2, type CopilotResultV2, type CopilotVerified } from './copilot-conversation';
 import { applyCommand, buildWorkflow, contextFor, TEST_WALLET } from './copilot-test-fixtures';
 
 /**
@@ -22,6 +22,8 @@ export class CopilotSession {
   wallet: string | null;
   walletChainId: string | null = 'eip155:84532';
   facts: Partial<Omit<CopilotFactsInput, 'workflow' | 'context' | 'pending'>> = {};
+  /** PR B: the verified Solana Devnet facts the browser hook would read (pool price, the wallet's FloFi positions, reconciled leftovers). */
+  verified: CopilotVerified | undefined = undefined;
   readonly turns: TurnRecord[] = [];
   constructor(setup: readonly string[] | Workflow = [], wallet: string | null = TEST_WALLET) {
     this.wallet = wallet;
@@ -30,7 +32,8 @@ export class CopilotSession {
   get context() { return contextFor(this.workflow); }
   currentFacts(): CopilotFacts { return buildCopilotFacts({ workflow: this.workflow, context: this.context, pending: this.pending, ...this.facts }); }
   env(): CopilotEnvironment {
-    return { workflow: this.workflow, context: this.context, wallet: this.wallet, walletChainId: this.walletChainId, pending: this.pending, facts: this.currentFacts() };
+    return { workflow: this.workflow, context: this.context, wallet: this.wallet, walletChainId: this.walletChainId, pending: this.pending, facts: this.currentFacts(),
+      ...this.verified ? { verified: this.verified } : {} };
   }
   propose(command: Command) {
     const before = { workflow: this.workflow, error: null };
@@ -85,6 +88,9 @@ export const intent = {
   question: (topic: string, target: Record<string, unknown> | null = null, language: L = 'EN') => ({ ...head('QUESTION', language), topic, target: target ? { ...NO_TARGET, ...target } : null }),
   clarify: (missing: string[], question: string, options: string[] = [], language: L = 'EN') => ({ ...head('CLARIFICATION_REQUIRED', language), missing, question, options }),
   unsupported: (reason: string, language: L = 'EN') => ({ ...head('UNSUPPORTED', language), reason }),
+  /** PR B: managing an existing FloFi position. */
+  position: (operation: 'DECREASE' | 'EXIT', percent: string | null = null, language: L = 'EN', fields: Record<string, unknown> = {}) =>
+    ({ ...head('POSITION', language), operation, protocol: null, network: null, percent, ...fields }),
 };
 export const act = {
   swap: (fields: Record<string, unknown> = {}) => ({ type: 'SWAP', network: null, inputAsset: null, outputAsset: null, amount: null, slippageBps: null, ...fields }),

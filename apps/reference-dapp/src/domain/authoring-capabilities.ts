@@ -64,15 +64,19 @@ function lendingText(language: Language, mainnets = true): string {
 const routes = () => bridgeOffers().map(route => `${route.source.name} → ${route.destination.name} (${route.asset})`);
 const compositions = () => AUTHORING_CAPABILITIES.filter(capability => capability.action === 'lending_composition');
 function compositionText(language: Language): string {
-  return join(compositions().map(capability => language === 'PT'
+  return join([...compositions().map(capability => language === 'PT'
     ? `Supply → Borrow → Swap do ${capability.asset} emprestado para ${capability.outputAsset} na ${capability.network.name}`
-    : `Supply → Borrow → Swap the borrowed ${capability.asset} to ${capability.outputAsset} on ${capability.network.name}`), language);
+    : `Supply → Borrow → Swap the borrowed ${capability.asset} to ${capability.outputAsset} on ${capability.network.name}`),
+    language === 'PT' ? 'Swap → liquidez Orca com o resultado do swap na Solana Devnet' : 'Swap → Orca liquidity funded by the swap output on Solana Devnet'], language);
 }
 /** The one step combination a workflow may hold (the composition refusal). */
 export function compositionOnlyText(language: Language): string {
-  return join(compositions().map(capability => language === 'PT'
+  return ([...compositions().map(capability => language === 'PT'
     ? `Supply de ${capability.asset} → Borrow de ${capability.asset} → Swap do ${capability.asset} emprestado para ${capability.outputAsset} (Aave V3, ${capability.network.name})`
-    : `Supply ${capability.asset} → Borrow ${capability.asset} → Swap the borrowed ${capability.asset} to ${capability.outputAsset} (Aave V3, ${capability.network.name})`), language);
+    : `Supply ${capability.asset} → Borrow ${capability.asset} → Swap the borrowed ${capability.asset} to ${capability.outputAsset} (Aave V3, ${capability.network.name})`),
+    // The registered bound composition (action-registry COMPOSITION_BINDINGS): a Solana Devnet swap whose actual output funds an Orca position.
+    language === 'PT' ? 'Swap SOL ⇄ devUSDC → liquidez Orca SOL/devUSDC com o resultado do swap (Solana Devnet)'
+      : 'Swap SOL ⇄ devUSDC → Orca SOL/devUSDC liquidity funded by the swap output (Solana Devnet)']).join(language === 'PT' ? ' ou ' : ' or ');
 }
 const realFunds = () => unique(AUTHORING_CAPABILITIES.flatMap(capability => [capability.network, ...capability.destination ? [capability.destination] : []]))
   .filter(network => network.environment === 'MAINNET');

@@ -31,6 +31,8 @@ const profiles = phase === 'composition' ? [
   ['supply-provenance', ['release-provenance.spec.ts'], { GRYLOO_SUPPLY_E2E: 'MOCKED_LOOPBACK_ONLY' }],
   ['unsafe-lending-simulations', ['borrow.spec.ts', 'repay.spec.ts', '--grep', 'read-only simulation blocks unsafe Borrow before Review|insufficient debt blocks read-only simulation'], { GRYLOO_SUPPLY_E2E: 'MOCKED_LOOPBACK_ONLY' }],
   ['copilot', ['copilot.spec.ts', 'copilot-conversation.spec.ts'], { FLOFI_COPILOT: 'replay', GRYLOO_SUPPLY_E2E: 'MOCKED_LOOPBACK_ONLY' }],
+  // PR B: context-aware Solana Devnet authoring (swap → position, "these tokens", yes/no, chat position management) on replay answers and the MOCKED Devnet loopback.
+  ['copilot-solana', ['copilot-solana.spec.ts'], { FLOFI_COPILOT: 'replay', GRYLOO_SOLANA_DEVNET_E2E: 'MOCKED_LOOPBACK_ONLY' }],
   ['lending-provenance', [boundary], { FLOFI_RELEASE_PROVENANCE_PROFILE: 'lending', GRYLOO_LENDING_E2E: 'MOCKED_LOOPBACK_ONLY' }],
   ['jupiter-provenance', [boundary], { FLOFI_RELEASE_PROVENANCE_PROFILE: 'jupiter', GRYLOO_JUPITER_E2E: 'MOCKED_LOOPBACK_ONLY' }],
   ['devnet-provenance', [boundary], { FLOFI_RELEASE_PROVENANCE_PROFILE: 'solana-devnet', GRYLOO_SOLANA_DEVNET_E2E: 'MOCKED_LOOPBACK_ONLY' }],

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { COPILOT_FEE_TIERS, COPILOT_LIMITS, COPILOT_MISSING_FIELDS, COPILOT_ROUTING, COPILOT_V1_PARTS, COPILOT_V2_NETWORKS, COPILOT_V2_RANGE_UNITS,
+import { COPILOT_FEE_TIERS, COPILOT_LIMITS, COPILOT_LIQUIDITY_PROTOCOLS, COPILOT_MISSING_FIELDS, COPILOT_ROUTING, COPILOT_V1_PARTS, COPILOT_V2_NETWORKS, COPILOT_V2_RANGE_UNITS,
   CopilotIntentError, type CopilotAction, type CopilotAsset, type CopilotDeposit, type CopilotFeeTier, type CopilotMissingField, type CopilotNetwork,
   type CopilotRouting } from './copilot-intent';
 import { parseAutomationDraft, AUTOMATION_DRAFT_SCHEMA, type AutomationDraft } from './copilot-automation';
@@ -20,6 +20,8 @@ export const COPILOT_REUSE_FIELDS = ['network', 'asset', 'amount', 'destination'
 export const COPILOT_QUESTION_TOPICS = ['WORKFLOW_OVERVIEW', 'STEP_COUNT', 'STEP_DETAIL', 'PROTOCOLS', 'NETWORKS', 'APPROVALS', 'EXECUTION_FLOW',
   'EXECUTION_BLOCKERS', 'MANIFEST', 'SIMULATION', 'FAILURE', 'PROPOSAL', 'REVIEW_FINDINGS', 'CAPABILITIES', 'MARKET_DATA', 'OTHER'] as const;
 export const COPILOT_V2_MISSING_FIELDS = [...COPILOT_MISSING_FIELDS, 'target'] as const;
+/** Managing an existing FloFi-registered position: remove part of its liquidity, or all of it and close it. */
+export const COPILOT_POSITION_OPERATIONS = ['DECREASE', 'EXIT'] as const;
 export const COPILOT_V2_LIMITS = Object.freeze({ ...COPILOT_LIMITS, maxDeposits: 2, maxReuseFields: COPILOT_REUSE_FIELDS.length,
   maxTranscriptMessages: 16, maxUserTurns: 8, maxSegmentUserTurns: 6, maxClarifications: 3, maxReferents: 4, maxRequestCharacters: 12_000 });
 
@@ -41,6 +43,9 @@ export type CopilotChanges = {
   /** BUILD-BASE-001: a new catalog-pool fee tier; absent when the model's shape omits it. */ readonly feeTier?: CopilotFeeTier | null;
 };
 export type CopilotReuse = { readonly from: CopilotTarget; readonly fields: readonly CopilotReuseField[] };
+/** "Remove 50% of my liquidity", "exit my position": FloFi selects the position from the connected wallet's verified FloFi positions. */
+export type CopilotPositionRequest = { readonly operation: (typeof COPILOT_POSITION_OPERATIONS)[number]; readonly protocol: (typeof COPILOT_LIQUIDITY_PROTOCOLS)[number] | null;
+  readonly network: CopilotNetwork | null; readonly percent: string | null };
 type Common = { readonly version: '2'; readonly language: CopilotLanguage };
 export type CopilotIntentV2 = Common & (
   | { readonly kind: 'AUTOMATION'; readonly draft: AutomationDraft }
@@ -51,6 +56,7 @@ export type CopilotIntentV2 = Common & (
   | { readonly kind: 'REMOVE'; readonly target: CopilotTarget }
   | { readonly kind: 'INSERT'; readonly position: 'BEFORE' | 'AFTER'; readonly anchor: CopilotTarget; readonly action: CopilotAction }
   | { readonly kind: 'QUESTION'; readonly topic: CopilotQuestionTopic; readonly target: CopilotTarget | null }
+  | ({ readonly kind: 'POSITION' } & CopilotPositionRequest)
   | { readonly kind: 'CLARIFICATION_REQUIRED'; readonly missing: readonly CopilotV2MissingField[]; readonly question: string; readonly options: readonly string[] }
   | { readonly kind: 'UNSUPPORTED'; readonly reason: string });
 
@@ -76,7 +82,8 @@ function parseChanges(value: unknown, requireOne: boolean): CopilotChanges {
     ...withTier ? { feeTier: nullableOneOf(COPILOT_FEE_TIERS, v.feeTier) } : {} };
   // A range is one change: unit and both bounds together (the full range has none), or none of them.
   const range = [changes.rangeUnit, changes.lower, changes.upper].filter(item => item !== null).length;
-  if (changes.rangeUnit === 'FULL' ? range !== 1 : range !== 0 && range !== 3) return fail();
+  // A percentage range is the unit and the percent (in `upper`) only.
+  if (changes.rangeUnit === 'FULL' ? range !== 1 : changes.rangeUnit === 'PERCENT' ? range !== 2 || changes.lower !== null : range !== 0 && range !== 3) return fail();
   if (requireOne && !CHANGE_KEYS.some(key => key === 'deposits' ? deposits.length > 0 : changes[key] !== null) && !changes.feeTier) return fail();
   return changes;
 }
@@ -122,6 +129,11 @@ export function parseCopilotIntentV2(value: unknown): CopilotIntentV2 {
       const v = keys(['topic', 'target']);
       return { ...common(v), kind, topic: oneOf(COPILOT_QUESTION_TOPICS, v.topic), target: v.target === null ? null : parseTarget(v.target) };
     }
+    case 'POSITION': {
+      const v = keys(['operation', 'protocol', 'network', 'percent']);
+      return { ...common(v), kind, operation: oneOf(COPILOT_POSITION_OPERATIONS, v.operation), protocol: nullableOneOf(COPILOT_LIQUIDITY_PROTOCOLS, v.protocol),
+        network: nullableOneOf(COPILOT_V2_NETWORKS, v.network), percent: amount(v.percent) };
+    }
     case 'CLARIFICATION_REQUIRED': {
       const v = keys(['missing', 'question', 'options']);
       const missing = list(v.missing, COPILOT_V2_MISSING_FIELDS.length).map(item => oneOf(COPILOT_V2_MISSING_FIELDS, item));
@@ -160,7 +172,7 @@ const CHANGES = object({
   routing: nullableChoice(COPILOT_ROUTING, 'New bridge provider preference only if the user named LI.FI, Across or automatic; null otherwise.'),
   deposits: { type: 'array', description: 'New liquidity maximum for each token the user named (at most 2); empty if unchanged.',
     items: object({ asset: string(symbolText), maxAmount: string(AMOUNT_TEXT) }) },
-  rangeUnit: nullableChoice(COPILOT_V2_RANGE_UNITS, 'PRICE or TICK (with both bounds) or FULL (no bounds) for a new liquidity range; null if unchanged.'),
+  rangeUnit: nullableChoice(COPILOT_V2_RANGE_UNITS, 'PRICE or TICK (with both bounds), FULL (no bounds) or PERCENT (the percent in upper, lower null) for a new liquidity range; null if unchanged.'),
   lower: nullableString('New lower range bound exactly as written; null if unchanged.'), upper: nullableString('New upper range bound exactly as written; null if unchanged.'),
   feeTier: nullableChoice(COPILOT_FEE_TIERS, 'New catalog-pool fee tier in percent only if the user named it; null otherwise.'),
 });
@@ -177,6 +189,10 @@ export const COPILOT_OUTPUT_SCHEMA_V2 = Object.freeze(object({ intent: { anyOf: 
   object({ ...head('REPEAT'), target: TARGET, changes: CHANGES }),
   object({ ...head('REMOVE'), target: TARGET }),
   object({ ...head('INSERT'), position: choice(['BEFORE', 'AFTER'], 'Where the new step goes relative to the anchor.'), anchor: TARGET, action: ACTION }),
+  object({ ...head('POSITION'), operation: choice(COPILOT_POSITION_OPERATIONS, 'DECREASE to remove part of an existing position\'s liquidity, EXIT to remove all of it and close the position.'),
+    protocol: nullableChoice(COPILOT_LIQUIDITY_PROTOCOLS, 'The pool protocol only if the user named it; null otherwise.'),
+    network: nullableChoice(COPILOT_V2_NETWORKS, 'The network only if the user named it; null otherwise.'),
+    percent: nullableString('For DECREASE: the percentage to remove exactly as written ("50" for 50%, "50" for half); null if not stated, and null for EXIT.') }),
   object({ ...head('QUESTION'), topic: choice(COPILOT_QUESTION_TOPICS, 'What the read-only question is about.'),
     target: { anyOf: [TARGET, { type: 'null' }], description: 'The step the question is about, if any.' } }),
   object({ ...head('CLARIFICATION_REQUIRED'), missing: { type: 'array', items: choice(COPILOT_V2_MISSING_FIELDS, 'Missing field.') },

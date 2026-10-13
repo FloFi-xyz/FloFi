@@ -50,8 +50,11 @@ type Store = { restorationEpoch: number; state: EditorState; dispatch: Dispatch<
   addCanvasCommand(command: Command, position: { x: number; y: number }): void;
   duplicateCanvasNodes(nodeIds: readonly string[]): void;
   pending: Pending | null; propose(command: Command): void; applyProposal(): void; dismissProposal(): void;
+  /** The position operation an applied position-management proposal prepared for the Simulate panel (never simulated, reviewed or signed here). */
+  stagedPosition: StagedPosition | null;
   review: ReviewResult | null; reviewError: string | null;
   chain: ChainState; eligibility: Eligibility; generateArtifacts(): void; refreshArtifacts(): void; accessCheck(): void };
+export type StagedPosition = { readonly positionMint: string; readonly operation: 'DECREASE_PARTIAL' | 'EXIT'; readonly partBps: number | null; readonly serial: number };
 const Context = createContext<Store | null>(null);
 
 export function WorkflowProvider({ children, initialContext, initialWorkflowId = 'workflow-local' }: { children: ReactNode; initialContext: unknown; initialWorkflowId?: string }) {
@@ -88,6 +91,7 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
   const undo = useCallback(() => dispatchHistory({ type: 'UNDO' }), []);
   const redo = useCallback(() => dispatchHistory({ type: 'REDO' }), []);
   const [pending, setPending] = useState<Pending | null>(null);
+  const [stagedPosition, setStagedPosition] = useState<StagedPosition | null>(null);
   useEffect(() => {
     // History/restoration can change a reviewed field without invoking its input handler.
     setPending(current => {
@@ -150,6 +154,9 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
     if (!pending || !pending.valid) return;
     dispatchHistory({ type: 'COMMAND', command: pending.command, context,
       ...(pending.authoringId ? { authoringId: pending.authoringId, authoringAmount: pending.authoringAmount! } : {}) });
+    const command = pending.command;
+    if (command.type === 'MANAGE_SOLANA_POSITION') setStagedPosition(current => ({ positionMint: command.positionMint, operation: command.operation, partBps: command.partBps,
+      serial: (current?.serial ?? 0) + 1 }));
     setPending(null);
   }
   function startActionSetup(action: CanvasActionSetup['action'], position: { x: number; y: number }, beneficiary?: string) {
@@ -251,7 +258,7 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
     startActionSetup, startStocksSetup, editCanvasAmount, editPoolSetup, editSwapSetupDirection, cancelCanvasAmount, reviewCanvasAmount, commitCanvasAmount, removeActionSetup,
     recipientInputs: history.recipientInputs, editCanvasRecipient,
     canRedo: history.future.length > 0, undo, redo, moveCanvasNodes, addCanvasCommand, duplicateCanvasNodes,
-    pending, propose, applyProposal, dismissProposal: () => setPending(null), ...reviewState,
+    pending, propose, applyProposal, dismissProposal: () => setPending(null), stagedPosition, ...reviewState,
     chain, eligibility, generateArtifacts, refreshArtifacts, accessCheck }}>
     <BaseObservationProvider>{children}</BaseObservationProvider>
   </Context.Provider>;

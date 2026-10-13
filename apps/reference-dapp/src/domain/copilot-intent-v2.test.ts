@@ -74,4 +74,19 @@ describe('CopilotIntentV2 strict parsing', () => {
     rejects(intent.clarify(['amount', 'amount'], 'How much?'));
     expect(v1MissingFields(['target', 'amount', 'network'])).toEqual(['amount', 'network']);
   });
+  it('PR B: takes funding and percentage ranges as optional keys, and the position kind, strictly', () => {
+    const percent = act.liquidity({ deposits: [{ asset: 'SOL', maxAmount: '0.05' }], rangeUnit: 'PERCENT', lower: null, upper: '10' });
+    accepts(intent.action(percent));
+    accepts(intent.action({ ...percent, funding: 'SWAP_OUTPUT' }));
+    accepts(intent.action({ ...percent, funding: null, feeTier: null }));
+    rejects(intent.action({ ...percent, funding: 'WALLET_BALANCE' }));
+    accepts(intent.edit({ rangeUnit: 'PERCENT', upper: '5' }));
+    rejects(intent.edit({ rangeUnit: 'PERCENT', lower: '-5', upper: '5' }));
+    rejects(intent.edit({ rangeUnit: 'PERCENT' }));
+    accepts(intent.position('DECREASE', '50'));
+    accepts(intent.position('EXIT', null, 'PT', { protocol: 'ORCA', network: 'SOLANA_DEVNET' }));
+    rejects(intent.position('DECREASE', '-5'));
+    rejects(intent.position('OPEN' as 'EXIT'));
+    rejects({ ...intent.position('EXIT'), positionMint: '7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU' });
+  });
 });

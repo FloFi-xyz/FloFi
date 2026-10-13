@@ -112,6 +112,39 @@ export function editorReducer(state: EditorState, command: Command, context?: Re
       validateWorkflowDraft(workflow, context); return { workflow: freeze(workflow), error: null };
     } catch (cause) { return reject(cause instanceof Error ? cause.message : 'SOLANA_LIQUIDITY_INPUT_INVALID'); }
   }
+  if (command.type === 'ADD_SOLANA_COMPOSITION') {
+    // Exactly the Canvas path, one reducer step at a time: add the swap (unless it exists), add the position, then link them; the link must bind.
+    const step = (from: EditorState, next: Record<string, unknown>) => editorReducer(from, { ...next, source: command.source, baseRevision: from.workflow.revision } as Command, context);
+    let next: EditorState = { workflow: current, error: null }, producer = command.from;
+    if (command.swap) { next = step(next, { type: 'ADD_SOLANA_SWAP', input: command.swap }); producer = next.workflow.nodes.at(-1)!.nodeId; }
+    else if (current.nodes.some(node => boundTo(node, command.from!))) return reject('COMPOSITION_PRODUCER_ALREADY_BOUND');
+    if (next.error) return reject(next.error);
+    next = step(next, { type: 'ADD_SOLANA_LIQUIDITY', input: command.liquidity });
+    if (next.error) return reject(next.error);
+    const consumer = next.workflow.nodes.at(-1)!.nodeId;
+    next = step(next, { type: 'CONNECT', from: producer, to: consumer });
+    if (next.error) return reject(next.error);
+    if (!boundTo(next.workflow.nodes.find(node => node.nodeId === consumer)!, producer!)) return reject('COMPOSITION_UNSUPPORTED');
+    return next;
+  }
+  if (command.type === 'MANAGE_SOLANA_POSITION') {
+    // The Orca runtime manages a position from a workflow whose only financial step is that position: the existing position step keeps its id and is
+    // set to the position's verified range (unlinked); other Solana Devnet swap or position steps are removed. Any other step blocks the proposal.
+    if (!context) return reject('REVIEW_CONTEXT_REQUIRED');
+    const financial = current.nodes.filter(node => !node.actionType.startsWith('mock-'));
+    if (financial.some(node => !solanaLiquidityDetails(node) && solanaSwapDetails(node)?.network !== 'Solana Devnet')) return reject('POSITION_WORKFLOW_HAS_OTHER_STEPS');
+    try {
+      const keep = financial.find(node => solanaLiquidityDetails(node));
+      const id = keep?.nodeId ?? `node-${String(current.revision + 2).padStart(3, '0')}`;
+      const position = createSolanaLiquidityNode(id, command.input);
+      const removed = new Set(financial.map(node => node.nodeId).filter(nodeId => nodeId !== id));
+      const nodes = [...current.nodes.filter(node => !removed.has(node.nodeId) && node.nodeId !== id).map(node => ({ ...node, dependencies: node.dependencies.filter(dep => !removed.has(dep)) })), position];
+      const resourceEdges = current.resourceEdges.filter(edge => !removed.has(edge.fromNodeId) && !removed.has(edge.toNodeId) && edge.toNodeId !== id);
+      if (JSON.stringify(nodes) === JSON.stringify(current.nodes) && JSON.stringify(resourceEdges) === JSON.stringify(current.resourceEdges)) return { workflow: current, error: null };
+      const workflow = { ...current, revision: current.revision + 1, nodes, resourceEdges };
+      validateWorkflowDraft(workflow, context); return { workflow: freeze(workflow), error: null };
+    } catch (cause) { return reject(cause instanceof Error ? cause.message : 'SOLANA_LIQUIDITY_INPUT_INVALID'); }
+  }
   if (command.type === 'ADD_UNISWAP_LIQUIDITY' || command.type === 'SET_UNISWAP_LIQUIDITY') {
     try {
       if (command.type === 'SET_UNISWAP_LIQUIDITY' && !current.nodes.some(n => n.nodeId === command.nodeId && uniswapLiquidityDetails(n))) return reject('UNKNOWN_UNISWAP_LIQUIDITY_NODE');

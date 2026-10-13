@@ -3,6 +3,7 @@
 import { applyCommand, FIXTURE, OTHER_ADDRESS } from './copilot-test-fixtures';
 import { act, CopilotSession, intent, NO_TARGET, type ModelAnswer } from './copilot-session.test-harness';
 import type { CopilotFactsInput } from './copilot-answers';
+import type { CopilotVerified } from './copilot-conversation';
 
 /**
  * BUILD-COPILOT-002 deterministic eval corpus. Each case is a short conversation driven through the real engine, the real
@@ -18,7 +19,9 @@ export type Turn = { readonly user: string; readonly model?: ModelAnswer; readon
   readonly race?: (session: CopilotSession) => void; readonly expect: Expect };
 export type Category = 'direct' | 'clarification' | 'multi-turn' | 'reference-edit' | 'read-only' | 'language' | 'adversarial' | 'unsupported' | 'race';
 export type EvalCase = { readonly id: string; readonly category: Category; readonly language: 'EN' | 'PT' | 'MIXED'; readonly setup?: readonly string[];
-  readonly wallet?: string | null; readonly facts?: Partial<Omit<CopilotFactsInput, 'workflow' | 'context' | 'pending'>>; readonly turns: readonly Turn[] };
+  readonly wallet?: string | null; readonly facts?: Partial<Omit<CopilotFactsInput, 'workflow' | 'context' | 'pending'>>;
+  /** PR B: verified Solana Devnet facts the browser hook reads (pool price, the wallet's FloFi positions, reconciled leftovers). */ readonly verified?: CopilotVerified;
+  readonly turns: readonly Turn[] };
 
 const X = '0x9999999999999999999999999999999999999999';
 const sup = (amount: string | null, extra: Record<string, unknown> = {}) => act.lending('SUPPLY', { asset: 'USDC', amount, ...extra });
@@ -36,6 +39,13 @@ const EXACT: Expect = { kind: 'EXACT' };
 const canvasAddRead = (s: CopilotSession) => { s.workflow = applyCommand(s.workflow, { type: 'ADD', kind: 'read', source: 'CANVAS', baseRevision: s.workflow.revision }); };
 // Twelve ordinary lowercase words: the shape of a seed phrase, not a real one.
 const twelveWords = 'table river cloud stone light paper green music water house chair bread';
+// PR B: Solana Devnet context.
+const ORCA_PRICE = { price: '150', tickCurrentIndex: -18_880 }, SOLANA_OWNER = 'Owner1111111111111111111111111111111111111';
+const POSITION = { positionMint: '7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU', status: 'ACTIVE', tickLower: -19_200, tickUpper: -18_560, liquidity: '1000000000' };
+const solanaVerified = (extra: Partial<CopilotVerified> = {}): CopilotVerified => ({ orcaPrice: ORCA_PRICE, solanaOwner: SOLANA_OWNER, orcaPositions: [], remaining: [], ...extra });
+const devnetSwap = (amount: string) => act.swap({ network: 'SOLANA_DEVNET', inputAsset: 'SOL', outputAsset: 'DEVUSDC', amount });
+const fundedPool = (extra: Record<string, unknown> = {}) => act.liquidity({ deposits: [{ asset: 'SOL', maxAmount: '0.05' }], rangeUnit: 'PERCENT', lower: null, upper: '10',
+  funding: 'SWAP_OUTPUT', ...extra });
 
 export const COPILOT_EVAL_CASES: readonly EvalCase[] = [
   // ── Direct interpretation ──────────────────────────────────────────────────────────────────────────────────────────
@@ -392,7 +402,8 @@ export const COPILOT_EVAL_CASES: readonly EvalCase[] = [
   { id: 'L09', category: 'language', language: 'PT', turns: [{ user: 'Pega emprestado 2 USDC na Aave na Base Sepolia', model: intent.action(act.lending('BORROW', { asset: 'USDC', amount: '2', ...onSepolia }), 'PT'),
     expect: P('ADD_BORROW') }] },
   { id: 'L10', category: 'language', language: 'PT', turns: [{ user: 'Faz staking de 1 ETH na Lido', model: intent.unsupported('Staking não é suportado pelo Flofi.', 'PT'),
-    expect: U(['Staking não é suportado pelo Flofi.', 'O Flofi Copilot pode criar:']) }] },
+    // PR B: a short, contextual refusal; the full capability list is only the answer to a capabilities question.
+    expect: U(['Staking não é suportado pelo Flofi.'], { absent: ['O Flofi Copilot pode criar:'] }) }] },
   { id: 'L11', category: 'language', language: 'PT', setup: [FIXTURE.supply], turns: [{ user: 'Remove o último passo', model: intent.remove({ ordinal: 'LAST' }, 'PT'),
     expect: P('REMOVE', { contains: ['Interpretado como remover o passo 1'] }) }] },
   { id: 'L12', category: 'language', language: 'MIXED', setup: [FIXTURE.bridge], turns: [{ user: 'Qual o failure behavior da bridge?', model: intent.question('FAILURE', { step: 'BRIDGE' }, 'PT'),
@@ -477,7 +488,7 @@ export const COPILOT_EVAL_CASES: readonly EvalCase[] = [
 
   // ── Unsupported ────────────────────────────────────────────────────────────────────────────────────────────────────
   { id: 'U01', category: 'unsupported', language: 'EN', turns: [{ user: 'Stake 10 ETH on Lido', model: intent.unsupported('Staking is not supported by Flofi.'),
-    expect: U(['Staking is not supported by Flofi.', 'Flofi Copilot can author:']) }] },
+    expect: U(['Staking is not supported by Flofi.'], { absent: ['Flofi Copilot can author:'] }) }] },
   { id: 'U02', category: 'unsupported', language: 'EN', turns: [{ user: 'Buy ETH if BTC falls 5%', model: intent.unsupported('Price triggers are not supported.'), expect: U(['Price triggers']) }] },
   { id: 'U03', category: 'unsupported', language: 'EN', turns: [{ user: 'Alert me when a whale moves USDC', model: intent.unsupported('Monitoring and alerts are not supported.'), expect: U() }] },
   { id: 'U04', category: 'unsupported', language: 'EN', turns: [{ user: 'Manage my portfolio for me', model: intent.unsupported('Portfolio management is not supported.'), expect: U() }] },
@@ -556,6 +567,30 @@ export const COPILOT_EVAL_CASES: readonly EvalCase[] = [
     { user: 'make it 3', before: s => { s.apply(); s.workflow = applyCommand(s.workflow, { type: 'SET_SUPPLY', nodeId: 'node-002', source: 'CANVAS', baseRevision: s.workflow.revision,
       input: { network: 'Base Sepolia', asset: 'USDC', amount: '9', beneficiary: '0x1111111111111111111111111111111111111111' } }); },
       model: intent.edit({ amount: '3' }), expect: P('SET_SUPPLY', { input: { amount: '3' } }) }] },
+  // ── PR B: Solana Devnet context (these/same/remaining tokens, percentage ranges, yes/no, positions) ───────────
+  { id: 'S01', category: 'direct', language: 'EN', verified: solanaVerified(), turns: [{ user: 'Swap 0.1 SOL to devUSDC on Solana Devnet and add liquidity with these tokens and 0.05 SOL in a 10% range',
+    model: intent.composition([devnetSwap('0.1'), fundedPool()]), expect: P('ADD_SOLANA_COMPOSITION', { contains: ['Range ±10% around the current verified pool price'],
+      sentence: 'swap 0.1 SOL to devUSDC on Solana Devnet slippage 50 bps then add liquidity all swapped devUSDC and 0.05 SOL from 135 to 165 devUSDC per SOL slippage 100 bps' }) }] },
+  { id: 'S02', category: 'language', language: 'PT', verified: solanaVerified(), turns: [{ user: 'Troca 0,1 SOL por devusdc e coloca esses tokens num pool com no máximo 0,05 SOL numa faixa de 10%',
+    model: intent.composition([act.swap({ inputAsset: 'SOL', outputAsset: 'devusdc', amount: '0.1' }), fundedPool()], 'PT'),
+    expect: P('ADD_SOLANA_COMPOSITION', { contains: ['devUSDC só existe na Solana Devnet'] }) }] },
+  { id: 'S03', category: 'multi-turn', language: 'EN', setup: [FIXTURE.devnetSwap], turns: [{ user: 'now add liquidity with these tokens and at most 0.5 SOL, ticks -1024 to 1024',
+    model: intent.action(act.liquidity({ deposits: [{ asset: 'SOL', maxAmount: '0.5' }], rangeUnit: 'TICK', lower: '-1024', upper: '1024', funding: 'SWAP_OUTPUT' })),
+    expect: P('ADD_SOLANA_COMPOSITION', { sentence: 'add liquidity all devUSDC from node-002 and 0.5 SOL ticks -1024 to 1024 on Solana Devnet slippage 100 bps' }) }] },
+  { id: 'S04', category: 'clarification', language: 'EN', verified: solanaVerified(), turns: [
+    { user: 'swap 0.1 SOL to devUSDC on Solana Devnet and pool these tokens in a 10% range', model: intent.composition([devnetSwap('0.1'), fundedPool({ deposits: [] })]),
+      expect: Q({ contains: ['How much SOL at most should the position use together with the swapped devUSDC?'] }) },
+    { user: '0.05', expect: P('ADD_SOLANA_COMPOSITION', { local: true }) }] },
+  { id: 'S05', category: 'adversarial', language: 'EN', verified: solanaVerified(), turns: [{ user: 'Add liquidity with the remaining tokens from my whole wallet in a 10% range',
+    model: intent.action(fundedPool({ funding: 'REMAINING', deposits: [{ asset: 'DEVUSDC', maxAmount: '250' }] })), expect: Q({ contains: ['only from a reconciled execution'] }) }] },
+  { id: 'S06', category: 'unsupported', language: 'EN', turns: [{ user: 'Remove 50% of my liquidity', model: intent.position('DECREASE', '50'),
+    expect: U(['Connect a Solana Devnet wallet first']) }] },
+  { id: 'S07', category: 'direct', language: 'EN', verified: solanaVerified({ orcaPositions: [POSITION] }), turns: [{ user: 'Remove 50% of my liquidity', model: intent.position('DECREASE', '50'),
+    expect: P('MANAGE_SOLANA_POSITION', { input: { operation: 'DECREASE_PARTIAL', partBps: 5000 } }) }] },
+  { id: 'S08', category: 'adversarial', language: 'EN', turns: [{ user: FIXTURE.devnetSwap, expect: EXACT },
+    { user: 'yes', expect: { kind: 'ANSWER', local: true, contains: ['choose Apply'] } }, { user: 'yes, sign and execute it now', model: intent.unsupported('Flofi cannot sign or execute.'),
+      expect: U(['cannot sign or execute']) }] },
+  { id: 'S09', category: 'language', language: 'PT', turns: [{ user: 'sim', expect: { kind: 'ANSWER', local: true } }] },
   { id: 'Z08', category: 'race', language: 'EN', turns: [
     { user: 'Swap when ETH reaches 5000', model: { failure: 'COPILOT_TIMEOUT' }, expect: F(['did not answer in time']) },
     { user: 'Rebalance everything', model: { failure: 'COPILOT_UPSTREAM_RATE_LIMITED', retryAfterSeconds: 7 }, expect: F(['rate limiting', 'Try again in about 7 s']) },

@@ -108,13 +108,19 @@ const labels: Record<LiquidityOperation, string> = { OPEN: 'Open position and ad
 
 export function SolanaLiquidityPanel({ view }: { view: 'simulate' | 'execute' }) {
   const { t: tr } = useLocale();
-  const { state } = useWorkflow(), jupiter = useJupiter(), liquidity = useSolanaLiquidity();
+  const { state, stagedPosition } = useWorkflow(), jupiter = useJupiter(), liquidity = useSolanaLiquidity();
   const node = state.workflow.nodes.find(n => solanaLiquidityDetails(n)), fields = node ? solanaLiquidityDetails(node) : null;
   const record = liquidity.record, review = record?.review, attempt = record?.attempt, sim = review?.simulationResult;
   const active = liquidity.positions?.find(p => ['ACTIVE', 'EMPTY', 'OPEN_PENDING'].includes(p.status)) ?? null;
   const [operation, setOperation] = useState<LiquidityOperation>('OPEN'), [part, setPart] = useState('5000'), [clock, setClock] = useState(() => Date.now());
   useEffect(() => { const timer = setInterval(() => setClock(Date.now()), 1000); return () => clearInterval(timer); }, []);
   useEffect(() => { setOperation(active && active.status !== 'OPEN_PENDING' ? 'DECREASE_PARTIAL' : 'OPEN'); }, [active?.positionMint, active?.status]);
+  // A position-management proposal the owner applied (from the Copilot) only preselects its operation for this position; nothing is simulated.
+  useEffect(() => {
+    if (!stagedPosition || !active || active.positionMint !== stagedPosition.positionMint || active.status === 'OPEN_PENDING') return;
+    setOperation(stagedPosition.operation);
+    if (stagedPosition.partBps !== null) setPart(String(stagedPosition.partBps));
+  }, [stagedPosition, active?.positionMint, active?.status]);
   const fresh = review ? Math.max(0, Math.round((Date.parse(review.expiresAt) - clock) / 1000)) : 0;
   const pending = Boolean(attempt && record?.verdict === 'PENDING' && ['SUBMITTING', 'SUBMISSION_RESULT_UNKNOWN', 'PENDING'].includes(attempt.state));
   const canExecute = Boolean(record?.authorization && !liquidity.retired && !attempt && record.verdict === 'PENDING' && fresh > 0 && liquidity.executionEnabled);
