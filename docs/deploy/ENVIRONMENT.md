@@ -254,7 +254,7 @@ Preview) the web deployment holds the API's column and, without a worker, the op
 | `FLOFI_AUTOMATION_CHAINLINK_FEEDS` | `ETH=0x…,BTC=0x…,SOL=0x…`: Chainlink USD proxy addresses on **Base mainnet**, copied from data.chain.link; each is verified on-chain (chain 8453, `description()` = `<ASSET> / USD`, decimals) before use | no | with `chainlink` | with `chainlink` | with `chainlink` | — |
 | `FLOFI_AUTOMATION_CHAINLINK_RPC_URL` | Base mainnet JSON-RPC (`https://`, no userinfo); only `eth_chainId` and `eth_call` are ever sent | if keyed | with `chainlink` | recommended (keyed) | optional | `GRYLOO_BASE_RPC_URL`, else `https://mainnet.base.org` |
 | `FLOFI_AUTOMATION_PRICE_MAX_AGE_SECONDS` | an observation older than this (by the feed's own `updatedAt`) is stale and ignored | no | same as worker | optional | optional | `3600` |
-| `FLOFI_AUTOMATION_PRICE_FIXTURE` | fixture source: absolute path under `/tmp/` | no | **never** | **never** | **never** | — |
+| `FLOFI_AUTOMATION_PRICE_FIXTURE` | fixture source: absolute path under `/tmp/` or the process's own absolute `TMPDIR` (never `/`) | no | **never** | **never** | **never** | — |
 | `FLOFI_AUTOMATION_TEST_CLOCK` | `enabled`: the bearer dispatch accepts `x-flofi-automation-now` (browser tests) | no | — | — | **never** (refused when hosted) | off |
 | Channels Telegram variables (§5e) | Telegram notifications through Channel Core in the processes that serve automations | as §5e | — (not set in standard production: Telegram stays unavailable for automations, although PR #71 runs Channel Core on Vercel) | only to deliver notifications for an embedded web runtime | as §5e | no Telegram |
 

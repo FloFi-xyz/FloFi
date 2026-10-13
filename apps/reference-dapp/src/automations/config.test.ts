@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { createHash, randomBytes } from 'node:crypto';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { outputSafe } from '../channels/core/delivery.ts';
 import { readAutomationConfig, parseFeeds } from './config.ts';
 import { notificationText } from './copy.ts';
@@ -46,6 +46,24 @@ describe('BUILD-AUTOMATION-001 configuration (fail closed)', () => {
     expect(reason(base({ FLOFI_AUTOMATION_PRICE_SOURCE: 'fixture', FLOFI_AUTOMATION_PRICE_FIXTURE: '/tmp/prices.json', FLOFI_DEPLOYMENT: 'hosted' }))).toBe('FLOFI_AUTOMATION_PRICE_FIXTURE');
     expect(reason(base({ FLOFI_AUTOMATION_TEST_CLOCK: 'enabled', FLOFI_DEPLOYMENT: 'hosted' }))).toBe('FLOFI_AUTOMATION_TEST_CLOCK');
     expect(reason(base({ FLOFI_AUTOMATION_PRICE_MAX_AGE_SECONDS: '5' }))).toBe('FLOFI_AUTOMATION_PRICE_MAX_AGE_SECONDS');
+  });
+
+  it('accepts the fixture file only in a disposable temporary directory: /tmp/ or the process’s own absolute TMPDIR, never when hosted', () => {
+    const fixture = (path: string, patch: Record<string, string> = {}) => reason(base({ FLOFI_AUTOMATION_PRICE_SOURCE: 'fixture', FLOFI_AUTOMATION_PRICE_FIXTURE: path, ...patch }));
+    try {
+      vi.stubEnv('TMPDIR', '/srv/runner/_temp');
+      expect(fixture('/srv/runner/_temp/flofi-automation-production-x/prices.json')).toBe('ENABLED');
+      expect(fixture('/tmp/prices.json')).toBe('ENABLED');
+      expect(fixture('/srv/runner/_temp-other/prices.json')).toBe('FLOFI_AUTOMATION_PRICE_FIXTURE');
+      expect(fixture('/srv/runner/_temp/../../../home/prices.json')).toBe('FLOFI_AUTOMATION_PRICE_FIXTURE');
+      expect(fixture('/srv/runner/_temp/prices.json', { FLOFI_DEPLOYMENT: 'hosted' })).toBe('FLOFI_AUTOMATION_PRICE_FIXTURE');
+      // A root or relative TMPDIR widens nothing: only /tmp/ remains.
+      for (const own of ['/', 'relative/tmp']) {
+        vi.stubEnv('TMPDIR', own);
+        expect([own, fixture('/srv/prices.json'), fixture('relative/tmp/prices.json'), fixture('/tmp/prices.json')])
+          .toEqual([own, 'FLOFI_AUTOMATION_PRICE_FIXTURE', 'FLOFI_AUTOMATION_PRICE_FIXTURE', 'ENABLED']);
+      }
+    } finally { vi.unstubAllEnvs(); }
   });
 });
 

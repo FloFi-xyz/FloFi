@@ -95,7 +95,8 @@ export function automationApiRoutes(env: Env, deps: AutomationApiDeps): Route[] 
       const secret = args[0];
       try {
         const { config: enabled, host: resolved } = await host();
-        const contributor = automationApprovalContributor(env, enabled)!;
+        // The automation claim policy decides expiry on the same clock as view, claim, apply and share below.
+        const contributor = automationApprovalContributor(env, enabled, now)!;
         const surface = assembleApprovalSurface([contributor(resolved, () => undefined)], createPgHandoffStore(resolved.db, resolved.tenantId), engine);
         if (method === 'view' && args.length === 1) return { status: 200, body: { ok: true, value: await viewApproval(surface, secret, wallets, now()) } };
         if (method === 'claim' && args.length === 2) return { status: 200, body: { ok: true, value: await claimApproval(surface, secret, wallets, args[1] === true, now()) } };

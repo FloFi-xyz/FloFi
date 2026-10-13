@@ -3,8 +3,8 @@
  * BUILD-AUTOMATION-001: production's own entry points, as production runs them — `node backend/main.ts api` and `node backend/main.ts
  * worker`, plain Node with no bundler — on a disposable loopback PostgreSQL, driven by the web deployment's BFF in REMOTE mode
  * (`API_BASE_URL`; the web process needs no database and no automation variable for automations — PR #71's platform-state
- * DATABASE_URL is not used by them). The fixture price source (MOCKED, a file under /tmp) stands in for Chainlink; nothing reaches a
- * price provider, a chat or a chain.
+ * DATABASE_URL is not used by them). The fixture price source (MOCKED, a file in this run's own TMPDIR, removed afterwards) stands in for
+ * Chainlink; nothing reaches a price provider, a chat or a chain.
  *
  *   BFF → API process: create a price trigger → the worker process's own startup sweep evaluates it (armed above the threshold) →
  *   the price falls and the 15-minute cadence is compressed → a second worker sweep proposes ONCE → the owner sees it through the API
@@ -13,6 +13,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -23,19 +24,22 @@ import { automationAvailability, automationOperation, remoteApproval } from '../
 
 const cwd = fileURLToPath(new URL('..', import.meta.url));
 const TOKEN = 'production-api-token-'.padEnd(48, 'x');
-const dir = mkdtempSync('/tmp/flofi-automation-production-'), PRICES = join(dir, 'prices.json');
-let t: TestDatabase, api: ChildProcess | null = null, base = '';
+// The run's configured temporary directory (CI points TMPDIR at the runner's own storage), never a hardcoded /tmp; both processes get it.
+const dir = mkdtempSync(join(tmpdir(), 'flofi-automation-production-')), PRICES = join(dir, 'prices.json');
+let t: TestDatabase, base = '';
+const children = new Set<ChildProcess>();
 const logs: Record<'api' | 'worker', string[]> = { api: [], worker: [] };
 
 const freePort = () => new Promise<number>(resolve => { const s = createServer().listen(0, '127.0.0.1', () => { const { port } = s.address() as { port: number }; s.close(() => resolve(port)); }); });
-const common = () => ({ PATH: process.env.PATH ?? '', NODE_ENV: 'test' as const, DATABASE_URL: t.url, TENANT_ID: 'default', FLOFI_AUTOMATIONS: 'enabled',
+const common = () => ({ PATH: process.env.PATH ?? '', TMPDIR: tmpdir(), NODE_ENV: 'test' as const, DATABASE_URL: t.url, TENANT_ID: 'default', FLOFI_AUTOMATIONS: 'enabled',
   FLOFI_PUBLIC_ORIGIN: 'http://127.0.0.1:3999', FLOFI_AUTOMATION_PRICE_SOURCE: 'fixture', FLOFI_AUTOMATION_PRICE_FIXTURE: PRICES });
 function start(role: 'api' | 'worker', env: Record<string, string>): ChildProcess {
   const child = spawn(process.execPath, ['backend/main.ts', role], { cwd, env: { ...common(), ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
   child.stdout!.on('data', (chunk: Buffer) => logs[role].push(...chunk.toString('utf8').split('\n').filter(Boolean)));
+  children.add(child);
   return child;
 }
-const stop = (child: ChildProcess) => new Promise<void>(resolve => { if (child.exitCode !== null) { resolve(); return; } child.once('exit', () => resolve()); child.kill('SIGTERM'); });
+const stop = (child: ChildProcess) => new Promise<void>(resolve => { if (child.exitCode !== null || child.signalCode !== null) { resolve(); return; } child.once('exit', () => resolve()); child.kill('SIGTERM'); });
 async function until<T>(probe: () => Promise<T | null | undefined | false>, ms = 45_000): Promise<T> {
   const deadline = Date.now() + ms;
   for (;;) {
@@ -52,11 +56,12 @@ beforeAll(async () => {
   t = await createTestDatabase();
   const port = await freePort();
   base = `http://127.0.0.1:${port}`; web.env.API_BASE_URL = base;
-  api = start('api', { PORT: String(port), HOST: '127.0.0.1', API_AUTH_TOKEN: TOKEN, FLOFI_AUTOMATION_SECRET: 'production-automation-secret-'.padEnd(64, 's'),
+  start('api', { PORT: String(port), HOST: '127.0.0.1', API_AUTH_TOKEN: TOKEN, FLOFI_AUTOMATION_SECRET: 'production-automation-secret-'.padEnd(64, 's'),
     GRYLOO_PUBLIC_TESTNET: 'record' });
   await until(async () => (await fetch(`${base}/readyz`)).ok);
 }, 90_000);
-afterAll(async () => { if (api) await stop(api); await t?.drop(); rmSync(dir, { recursive: true, force: true }); });
+// Every API and worker process stops (even after a failed step) before its temporary directory is removed.
+afterAll(async () => { try { await Promise.all([...children].map(stop)); await t?.drop(); } finally { rmSync(dir, { recursive: true, force: true }); } });
 
 describe('BUILD-AUTOMATION-001 production entry points (main.ts api + main.ts worker, plain Node)', () => {
   it('BFF → Railway API → PostgreSQL, and the Railway worker’s own sweep proposes once — no cron, no dispatch', async () => {

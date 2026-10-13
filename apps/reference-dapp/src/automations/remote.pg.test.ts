@@ -17,6 +17,7 @@ import { createBackend, type Backend } from '../../backend/app.ts';
 import { composeStrategy } from '../engine/strategy-engine';
 import type { WorkflowOwner } from '../domain/saved-workflow';
 import { automationAvailability, automationOperation, remoteApproval, remoteAutomationApproval, remoteAutomationRecovery } from '../server/automation-operation';
+import { APPROVAL_PRINCIPALS_HEADER } from './api-headers.ts';
 import { automationApiRoutes } from './api.ts';
 import { automationHarness, OWNER_A, OWNER_B, weeklyDca } from './automation.test-harness.ts';
 import { dispatchAutomations } from './dispatch.ts';
@@ -184,6 +185,48 @@ describe('BUILD-AUTOMATION-001 on the remote runtime (Vercel BFF → Railway API
     // simulation, run, record, signature or submission.
     expect(flowCalls).toContain('mode');
     expect([...new Set(flowCalls)].filter(m => m !== 'mode' && m !== 'info')).toEqual([]);
+  });
+});
+
+// FIX-CI-AUTOMATION-CLOCK-001: the API decides an automation claim on its own clock — the one its approval routes pass to the shared
+// functions — never on the wall clock, so the remote flow behaves the same whatever the calendar date of the run. A week long past fails
+// "claimable" on a wall-clock policy; a week far ahead fails "refused".
+describe.each(['2026-10-12', '2099-06-08'])('the API decides an automation claim on its own clock, whatever the date of the run (the week of Monday %s)', monday => {
+  /** That Monday's occurrence, swept by the Railway worker and opened on the API five minutes before it expires (24 hours after its slot). */
+  async function openedBeforeExpiry() {
+    clock = new Date(Date.parse(`${monday}T10:00:00Z`) - 4 * 86_400_000);
+    value(await op<RuleView>(OWNER_A, 'create', [weeklyDca()]));
+    clock = new Date(`${monday}T08:00:40Z`);
+    await railwayWorker()();
+    const occurrence = value(await op<OverviewView>(OWNER_A, 'overview', [])).pending[0]!, expiresAt = Date.parse(occurrence.expiresAt);
+    expect(expiresAt).toBe(Date.parse(`${monday}T08:00:00Z`) + 86_400_000);
+    clock = new Date(expiresAt - 300_000);
+    const opened = value(await op<{ approvalUrl: string }>(OWNER_A, 'open', [occurrence.occurrenceId]));
+    return { secret: decodeURIComponent(new URL(opened.approvalUrl).hash.slice(1)), expiresAt };
+  }
+  const handoffs = () => t.db.query<{ status: string }>('SELECT status FROM mcp_handoffs').then(r => r.rows.map(row => row.status));
+
+  it('an opened occurrence is still claimable by its owner a second before it expires', async () => {
+    const { secret, expiresAt } = await openedBeforeExpiry();
+    clock = new Date(expiresAt - 1_000);
+    expect(await remoteApproval('claim', [secret, false], as(OWNER_A))).toMatchObject({ view: { status: 'CLAIMED' }, command: { type: 'ADD_TESTNET_SWAP', amount: '50' } });
+    expect(await handoffs()).toEqual(['CLAIMED']);
+  });
+
+  it('once the occurrence expires its link is refused on the API — no request can move the API’s clock — and the handoff stays unclaimed', async () => {
+    const { secret, expiresAt } = await openedBeforeExpiry();
+    for (const at of [expiresAt, expiresAt + 60_000]) {
+      clock = new Date(at);
+      expect(await refusal(remoteApproval('claim', [secret, false], as(OWNER_A)))).toBe('AUTOMATION_OCCURRENCE_NOT_OPEN');
+    }
+    // Straight to the API with its bearer and the owner's proven wallet: neither the bearer dispatch's test-clock header nor an extra
+    // argument carrying an earlier time reaches the clock the claim is decided on.
+    const earlier = new Date(expiresAt - 60_000).toISOString();
+    const claim = (args: unknown[], headers: Record<string, string> = {}) => fetch(`${base}/v1/approvals/claim`, { method: 'POST', headers: { 'content-type': 'application/json',
+      authorization: `Bearer ${TOKEN}`, [APPROVAL_PRINCIPALS_HEADER]: `eip155:${OWNER_A.address}`, ...headers }, body: JSON.stringify({ args }) }).then(r => r.json());
+    expect(await claim([secret, false], { 'x-flofi-automation-now': earlier })).toEqual({ ok: false, code: 'AUTOMATION_OCCURRENCE_NOT_OPEN' });
+    expect(await claim([secret, false, earlier])).toEqual({ ok: false, code: 'APPROVAL_REQUEST_INVALID' });
+    expect(await handoffs()).toEqual(['PENDING']);
   });
 });
 
