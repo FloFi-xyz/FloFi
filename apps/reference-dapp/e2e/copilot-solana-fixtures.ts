@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { mkdir, mkdtemp, readdir, readFile, writeFile, appendFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { createMockedSolanaWallet, fromBase64, parseTransaction, serializeSignedTransaction, toBase64 } from '@defi-workflow-engine/reference-compiler';
 import { createPositionMintSigner } from '../src/wallet/position-mint-signer';
 import { createOrcaLiquidityService } from '../src/server/orca-liquidity-service';
@@ -11,7 +12,7 @@ import { createSolanaLiquidityNode } from '../src/domain/solana-liquidity-author
  */
 export async function seedCopilotPosition(wallet: ReturnType<typeof createMockedSolanaWallet>) {
   const journal = process.env.GRYLOO_SOLANA_DEVNET_JOURNAL;
-  if (process.env.GRYLOO_SOLANA_DEVNET_E2E !== 'MOCKED_LOOPBACK_ONLY' || !journal?.startsWith('/tmp/gryloo-demo001-')) throw new Error('MOCK_SEED_DENIED');
+  if (process.env.GRYLOO_SOLANA_DEVNET_E2E !== 'MOCKED_LOOPBACK_ONLY' || !journal?.startsWith(join(tmpdir(), 'gryloo-demo001-'))) throw new Error('MOCK_SEED_DENIED');
   await mkdir(journal, { recursive: true });
   const dir = await mkdtemp(join(journal + '-position-fixture-'));
   const service = createOrcaLiquidityService({ journalDir: dir, rpc: createSolanaRpc('http://127.0.0.1:8552/rpc', true), provenance: 'MOCKED', executionEnabled: true });
