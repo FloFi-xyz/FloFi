@@ -12,9 +12,10 @@ test('the landing header CTA reads Launch Beta FloFi on yellow and still opens t
   expect(await cta.evaluate(element => [getComputedStyle(element).backgroundColor, getComputedStyle(element).color])).toEqual(['rgb(250, 204, 21)', 'rgb(4, 27, 61)']);
   // The hero and closing Launch buttons are separate and unchanged.
   await expect(page.locator('main').getByRole('link', { name: 'Launch FloFi', exact: true })).toHaveCount(2);
+  await expect(page.locator('main').getByRole('link', { name: 'Launch Beta FloFi', exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'PT', exact: true }).click();
   await expect(header.getByRole('link', { name: 'Abrir FloFi Beta', exact: true })).toHaveAttribute('href', '/app');
-  await expect(page.locator('main').getByRole('link', { name: 'Abrir FloFi', exact: true })).toHaveCount(2);
+  await expect(page.locator('main').getByRole('link', { name: 'Abrir FloFi Beta', exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'EN', exact: true }).click();
   await cta.click();
   await expect(page).toHaveURL('/app');

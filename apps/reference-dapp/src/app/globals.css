@@ -1668,8 +1668,8 @@ button.wallet-option .wallet-option-status{border-color:var(--accent-line);backg
 .automation-history-list{list-style:none;padding:0;margin:8px 0 16px;display:grid;gap:6px;font-size:13px;line-height:1.5}
 .automation-history h3{font-size:14px;margin:16px 0 6px}
 .automation-archived summary{cursor:pointer;color:var(--muted);font-size:13px;margin:14px 0}
-.beta-notice{margin:0;padding:7px 16px;border-bottom:1px solid #f2c94c;background:#fde68a;color:#14233a;font-size:13px;line-height:1.45;text-align:center;text-wrap:balance}
-@media(max-width:700px){.beta-notice{padding:6px 15px;font-size:12px}}
+.beta-notice{margin:0;padding:7px 16px;border-bottom:1px solid #f2c94c;background:#fde68a;color:#14233a;font-size:13px;line-height:19px;text-align:center;text-wrap:balance}
+@media(max-width:700px){.beta-notice{padding:6px 15px;font-size:12px;line-height:18px}}
 .automation-inbox{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:12px;padding:8px 16px;border-bottom:1px solid var(--line);background:var(--soft);font-size:13px}
 .automation-inbox .workspace-action{display:inline-flex;align-items:center;min-height:30px;padding:4px 10px;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:var(--ink);font-weight:500}
 :root[data-theme="dark"] :is(.automation-card,.automation-form){background:var(--surface-raised)}
