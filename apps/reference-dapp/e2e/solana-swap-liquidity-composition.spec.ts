@@ -162,4 +162,3 @@ test('a Phantom-like wallet signs the exact reviewed swap and position: both sen
   await expect(page.locator('.execution-timeline .execution-step.execution-state-confirmed')).toHaveCount(2);
   expect(errors).toEqual([]);
 });
-

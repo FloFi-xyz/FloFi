@@ -216,4 +216,3 @@ describe('P0: a wallet that changes the reviewed Solana Devnet swap (MOCKED loop
     expect(presented(done).steps.map(([step, state]) => [step, state])).toEqual([['node-002', 'confirmed'], ['node-003', 'confirmed']]);
   });
 });
-
