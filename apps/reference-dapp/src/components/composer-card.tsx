@@ -44,11 +44,19 @@ const actionIcons: Record<string, CanvasAction | 'stocks' | 'transfer'> = {
   Supply: 'supply', Lending: 'lending', Borrow: 'borrow', Repay: 'repay', Withdraw: 'withdraw', Send: 'transfer', Stocks: 'stocks',
 };
 
-/** Contributions supply both assets together; only conversions show direction. */
-function ValuePair({ relationship, className = '', children }: { relationship: 'directional' | 'contribution'; className?: string; children: ReactNode }) {
+/**
+ * Contributions supply both assets together; only conversions show direction. BUILD-SOLANA-MAINNET-001 (requirement C): on a Swap card the same
+ * arrow, unchanged in place and look, is the control that exchanges From and To (`onInvert`); elsewhere it stays decorative.
+ */
+function ValuePair({ relationship, className = '', onInvert, children }: { relationship: 'directional' | 'contribution'; className?: string; onInvert?: (() => void) | undefined; children: ReactNode }) {
+  const { t: tr } = useLocale();
+  const arrow = <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 5v14m-5-5 5 5 5-5"/></svg>;
   return <div className={`composer-value-pair${className ? ` ${className}` : ''}`} data-relationship={relationship}>
     {children}
-    {relationship === 'directional' && <span className="composer-value-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14m-5-5 5 5 5-5"/></svg></span>}
+    {relationship === 'directional' && (onInvert
+      ? <button type="button" className="composer-value-arrow composer-value-invert nodrag nopan" aria-label={tr('Switch From and To tokens')} title={tr('Switch From and To tokens')}
+        onClick={onInvert}>{arrow}</button>
+      : <span className="composer-value-arrow" aria-hidden="true">{arrow}</span>)}
   </div>;
 }
 
@@ -296,7 +304,9 @@ function ValueBox({ amount, token, network, source, label, hint, editor, inputLa
 
 export type ComposerCardData = {
   connectable?: boolean;
-  actionSelection?: { selection: CryptoSelection; networks: readonly string[]; valid: boolean; tokens: { source: readonly string[]; destination: readonly string[] }; onNetwork(network: string): void; onToken(side: 'source' | 'destination', token: string): void };
+  actionSelection?: { selection: CryptoSelection; networks: readonly string[]; valid: boolean; tokens: { source: readonly string[]; destination: readonly string[] }; onNetwork(network: string): void; onToken(side: 'source' | 'destination', token: string): void;
+    /** BUILD-SOLANA-MAINNET-001: exchanges From and To (Swap cards only; absent where the reversed pair is unavailable or the step is not editable). */
+    onInvert?: () => void };
   composer: true; step: number; selected: boolean; vertical: boolean;
   summary: ReturnType<typeof composerSummary>;
   estimateWorkflow?: SemanticWorkflow; estimateNodeId?: string; estimateOwner?: string | null;
@@ -417,7 +427,7 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
           const next = event.relatedTarget, node = event.currentTarget.closest('.react-flow__node');
           if (directCommit && editor?.changed && !(next instanceof Node && (poolNodeRef.current?.contains(next) || node?.contains(next)))) commitAmount();
         }}>
-        <ValuePair relationship="directional">
+        <ValuePair relationship="directional" onInvert={card.summary.action === 'Swap' && !stocksCard ? card.actionSelection?.onInvert : undefined}>
         <ValueBox source amount={amountParts?.[1]} token={amountParts?.[2] ?? pairSource ?? '—'} {...stocksCard ? { label: 'Stocks amount', inputLabel: `Stocks amount (${amountParts?.[2] ?? pairSource ?? 'USDG'})` } : {}}
           network={sourceNetwork} editor={editor && directCommit && editor.changed && editor.onCancel ? { ...editor, onEscape: () => { setAmountError(null); editor.onCancel!(); } } : editor} invalid={Boolean(amountError)} {...stocksCard ? {} : { picker: picker('source') }} hint={editor ? 'Enter the source amount' : card.summary.amount} fiatFirst={fiatFirst} onFiatFirstChange={setFiatFirst}
           usd={usdLine(sourceNetwork, estimate?.usd?.input, usdState)}/>

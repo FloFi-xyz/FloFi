@@ -41,4 +41,8 @@ export const portugueseSolanaMainnet: Readonly<Record<string, string>> = {
   'The Solana network provider is not on Solana Mainnet. Nothing was simulated or sent.': 'O fornecedor de rede Solana não está na Solana Mainnet. Nada foi simulado nem enviado.',
   'This Solana wallet could not connect on Solana Mainnet.': 'Esta carteira Solana não conseguiu ligar-se à Solana Mainnet.',
   'This Solana wallet could not connect on Solana Devnet.': 'Esta carteira Solana não conseguiu ligar-se à Solana Devnet.',
+  // Canvas corrections (PR B).
+  'Switch From and To tokens': 'Inverter tokens de origem e destino',
+  'Also removed 1 linked step that cannot run without the deleted one. Undo restores it.': 'Também foi removida 1 etapa ligada que não funciona sem a etapa excluída. Desfazer a restaura.',
+  'Also removed the linked steps that cannot run without the deleted one. Undo restores them.': 'Também foram removidas as etapas ligadas que não funcionam sem a etapa excluída. Desfazer as restaura.',
 };

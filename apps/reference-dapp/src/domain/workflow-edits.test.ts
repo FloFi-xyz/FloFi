@@ -63,16 +63,17 @@ describe('edit commands for existing steps', () => {
 });
 
 describe('remove commands', () => {
-  it('removes only what the canvas could delete, and says why otherwise', () => {
+  // BUILD-SOLANA-MAINNET-001 (intentional change, requirement D): the only step and a composition step are removable like on the Canvas.
+  it('removes what the canvas can delete — every action — and refuses only the starting template', () => {
     const workflow = buildWorkflow([FIXTURE.supply]);
     expect(removeCommandFor(workflow, contextFor(workflow), 'node-002', 1)).toEqual({ ok: true, command: { type: 'REMOVE', nodeId: 'node-002', source: 'CHAT', baseRevision: 1 } });
     expect(removeCommandFor(workflow, contextFor(workflow), 'node-001', 1)).toEqual({ ok: false, code: 'UNKNOWN_STEP' });
     const template = initialEditor().workflow;
     expect(removeCommandFor(template, contextFor(template), 'node-001', 0)).toEqual({ ok: false, code: 'FIRST_STEP_PROTECTED' });
     const bridge = buildWorkflow([FIXTURE.bridge]);
-    expect(removeCommandFor(bridge, contextFor(bridge), 'node-002', 1)).toEqual({ ok: false, code: 'LAST_STEP_PROTECTED' });
+    expect(removeCommandFor(bridge, contextFor(bridge), 'node-002', 1)).toEqual({ ok: true, command: { type: 'REMOVE', nodeId: 'node-002', source: 'CHAT', baseRevision: 1 } });
     const lending = buildWorkflow([FIXTURE.lending]);
-    expect(removeCommandFor(lending, contextFor(lending), 'lending-borrow', 1)).toEqual({ ok: false, code: 'COMPOSITION_STEP_PROTECTED' });
+    expect(removeCommandFor(lending, contextFor(lending), 'lending-borrow', 1)).toEqual({ ok: true, command: { type: 'REMOVE', nodeId: 'lending-borrow', source: 'CHAT', baseRevision: 1 } });
     expect(removeCommandFor(workflow, contextFor(workflow), 'node-009', 1)).toEqual({ ok: false, code: 'UNKNOWN_STEP' });
   });
 });

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, applyPendingProposal } from './fixtures';
 
+// BUILD-SOLANA-MAINNET-001 (intentional change): a Swap card's center arrow is now the From/To switch, so the card is selected by its title.
 test('canvas Delete, Backspace, Escape and text-entry guards use semantic IR', async ({ page }) => {
   await page.goto('/app');
   const prompt = page.getByLabel('Describe your flow');
@@ -12,11 +13,11 @@ test('canvas Delete, Backspace, Escape and text-entry guards use semantic IR', a
   await addSwap();
   const cards = page.locator('.build-flow-surface .composer-card');
   await expect(cards).toHaveCount(1);
-  await cards.first().click();
+  await cards.first().locator('.composer-action-title').click();
   await expect(cards.first()).toHaveClass(/active/);
   await page.keyboard.press('Escape');
   await expect(cards.first()).not.toHaveClass(/active/);
-  await cards.first().click();
+  await cards.first().locator('.composer-action-title').click();
   await prompt.focus(); await page.keyboard.press('Backspace');
   await expect(cards).toHaveCount(1);
   await page.evaluate(() => {
@@ -25,11 +26,11 @@ test('canvas Delete, Backspace, Escape and text-entry guards use semantic IR', a
   });
   await page.keyboard.press('Delete');
   await expect(cards).toHaveCount(1);
-  await cards.first().click(); await page.keyboard.press('Delete');
+  await cards.first().locator('.composer-action-title').click(); await page.keyboard.press('Delete');
   await expect(cards).toHaveCount(0);
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '2');
   await addSwap();
-  await cards.first().click(); await page.keyboard.press('Backspace');
+  await cards.first().locator('.composer-action-title').click(); await page.keyboard.press('Backspace');
   await expect(cards).toHaveCount(0);
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '4');
 });

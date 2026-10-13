@@ -7,26 +7,43 @@ export function isTextEntry(target: EventTarget | null): boolean {
   if (typeof Element === 'undefined' || !(target instanceof Element)) return false;
   return Boolean(target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"], [role="combobox"], [role="searchbox"], [role="spinbutton"], [aria-multiline="true"]'));
 }
+/**
+ * BUILD-SOLANA-MAINNET-001 (requirement D): every action on the Canvas can be deleted — whatever its id, a locked amount, a dependant or being
+ * the last one. Deleting is an authoring edit of the draft only: it never cancels, hides or changes a transaction already submitted, and every
+ * Review and authorization bound to the previous revision is retired by the new revision as for any edit.
+ */
 export function canDeleteCanvasNode(workflow: Workflow, nodeId: string | null): boolean {
-  if (!nodeId || nodeId === 'node-001' || !/^node-\d{3,16}$/.test(nodeId) || workflow.nodes.length <= 1) return false;
-  const node = workflow.nodes.find(item => item.nodeId === nodeId);
-  return Boolean(node && !node.lockedParameters.length
-    && !workflow.nodes.some(item => item.dependencies.includes(nodeId)));
+  // The hidden starting template step of every new workflow is not an action and never shown as a card.
+  return Boolean(nodeId && workflow.nodes.some(node => node.nodeId === nodeId && !(node.nodeId === 'node-001' && node.actionType.startsWith('mock-'))));
 }
-export function deletableCanvasNodes(workflow: Workflow, selectedIds: readonly string[]): string[] {
-  const selected = new Set(selectedIds);
-  const candidates = new Set(workflow.nodes.filter(node => selected.has(node.nodeId) && node.nodeId !== 'node-001'
-    && /^node-\d{3,16}$/.test(node.nodeId) && !node.lockedParameters.length).map(node => node.nodeId));
-  // Keep removing sources with a dependant that cannot be deleted in this same edit.
-  let changed: boolean;
-  do {
+/**
+ * The exact effect of deleting `selectedIds`: the selected steps; dependants that read a deleted step's output and cannot stand alone
+ * (`cascaded`, removed with it and reported to the owner); and bound composition consumers that return to their isolated form (`unbound`).
+ * Steps that only depended on a deleted step's ordering keep their own values and lose that link.
+ */
+export type CanvasRemoval = { readonly removed: readonly string[]; readonly cascaded: readonly string[]; readonly unbound: readonly string[] };
+export function planCanvasRemoval(workflow: Workflow, selectedIds: readonly string[]): CanvasRemoval | null {
+  const selected = selectedIds.filter(id => workflow.nodes.some(node => node.nodeId === id));
+  if (!selected.length) return null;
+  const removed = new Set(selected), unbound = new Set<string>();
+  for (let changed = true; changed;) {
     changed = false;
-    for (const id of candidates) if (workflow.nodes.some(node => !candidates.has(node.nodeId) && node.dependencies.includes(id))) {
-      candidates.delete(id);
-      changed = true;
+    for (const node of workflow.nodes) {
+      if (removed.has(node.nodeId) || unbound.has(node.nodeId)) continue;
+      const source = boundSource(node);
+      if (source && removed.has(source)) { unbound.add(node.nodeId); continue; }
+      // A financial step whose input is the deleted step's output has no value of its own to keep; template steps only lose the link.
+      if (!node.actionType.startsWith('mock-') && node.inputs.some(input => input.kind === 'OUTPUT_REFERENCE' && removed.has(input.value.nodeId))) {
+        removed.add(node.nodeId); changed = true;
+      }
     }
-  } while (changed);
-  return workflow.nodes.filter(node => candidates.has(node.nodeId)).map(node => node.nodeId);
+  }
+  const order = (ids: Set<string>) => workflow.nodes.filter(node => ids.has(node.nodeId)).map(node => node.nodeId);
+  return { removed: order(removed), cascaded: order(removed).filter(id => !selected.includes(id)), unbound: order(unbound) };
+}
+/** Backwards-compatible view of the plan: the steps a deletion of `selectedIds` removes. */
+export function deletableCanvasNodes(workflow: Workflow, selectedIds: readonly string[]): string[] {
+  return [...planCanvasRemoval(workflow, selectedIds)?.removed ?? []];
 }
 export function canDeleteCanvasEdge(workflow: Workflow, from: string, to: string): boolean {
   const source = workflow.nodes.find(node => node.nodeId === from);

@@ -245,7 +245,10 @@ describe('UX-002 canonical composer projections', () => {
     const before = JSON.stringify(workflow);
     const build = renderToStaticMarkup(createElement(WorkflowCanvas, { selectedId: node.nodeId, select: vi.fn() }));
     const inspection = renderToStaticMarkup(createElement(ComposerCard, { data: { inspection: true, composer: true, selected: false, vertical: false, step: 1, summary: composerSummary(workflow, node, fixture.store.context) } }));
-    for (const html of [build, inspection]) expect(html.match(/class="composer-value-arrow"/g)).toHaveLength(1);
+    // BUILD-SOLANA-MAINNET-001 (intentional change, requirement C): on an editable Swap card in Build the same arrow is the From/To switch.
+    expect(build.match(/class="composer-value-arrow[^"]*"/g)).toHaveLength(1);
+    expect(build.includes('aria-label="Switch From and To tokens"')).toBe(action === 'swap');
+    expect(inspection.match(/class="composer-value-arrow"/g)).toHaveLength(1);
     expect(build).toContain('data-relationship="directional"');
     expect(JSON.stringify(workflow)).toBe(before);
     expect(fixture.store.dispatch).not.toHaveBeenCalled();

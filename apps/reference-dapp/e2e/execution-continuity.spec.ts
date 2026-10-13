@@ -11,7 +11,7 @@ import { validatePublicRunLog, type PublicRun } from '../src/server/public-testn
 
 test.skip(process.env.FLOFI_SWAP_EXECUTION_E2E !== 'MOCKED_LOOPBACK_ONLY', 'Requires the opt-in loopback swap execution harness');
 test.setTimeout(90_000);
-const stage = (page: Page, name: 'Simulate' | 'Execute') => page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name, exact: true }).click();
+const stage = (page: Page, name: 'Build' | 'Simulate' | 'Execute') => page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name, exact: true }).click();
 const summary = (page: Page) => page.locator('.execution-summary');
 const falseWalletChange = 'Wallet changed. Simulate and review this workflow again with the connected wallet.';
 const pointer = (page: Page) => page.evaluate(() => localStorage.getItem('gryloo:public-testnet-execution-id'));
@@ -125,6 +125,15 @@ test('production regression: same MetaMask/account/Base Sepolia → approval CON
   await expect(summary(page)).toContainText('Execution completed');
   await expect(page.locator('.execution-evidence-restored')).toHaveText('This step’s saved result was restored.');
   expect(await pointer(page)).toBe(id); expect(await owner.sends()).toBe(2); expect(owner.requested()).toBe(2);
+  // BUILD-SOLANA-MAINNET-001 (requirement E): a new visit (this tab's session gone) starts with an empty Canvas; the finished run is not put back
+  // as a card. Its durable record and pointer are untouched (the Dashboard keeps it), and nothing is resent.
+  await page.evaluate(() => sessionStorage.clear()); await page.reload();
+  await stage(page, 'Build');
+  await expect(page.locator('.build-flow-surface .canvas-empty')).toContainText('Start your workflow');
+  await page.waitForTimeout(2_000);
+  await expect(page.locator('.build-flow-surface .composer-card')).toHaveCount(0);
+  expect(await pointer(page)).toBe(id); expect(await owner.sends()).toBe(2); expect(owner.requested()).toBe(2);
+  expect((await durable(id!)).runs).toEqual([{ status: 'RECONCILED', has_evidence: true }]);
   expect(errors).toEqual([]); networkGuard.assertClean();
 });
 
@@ -157,6 +166,8 @@ test('lost second wallet response stays uncertain across sync and reload and nev
   await expect(page.locator('.canvas-primary-action').getByRole('button', { name: /Continue to|Execute workflow|Retry|Try again/ })).toHaveCount(0);
   expect((await durable(id!)).attempts).toMatchObject([{ step: 'APPROVAL', state: 'CONFIRMED' }, { step: 'SWAP', state: 'UNKNOWN' }]);
   expect(await owner.sends()).toBe(2); expect(owner.requested()).toBe(2);
+  // BUILD-SOLANA-MAINNET-001 (requirement E): even on a new visit (no tab session), an execution that still needs the owner is brought back to observe.
+  await page.evaluate(() => sessionStorage.clear());
   await page.reload(); await stage(page, 'Execute');
   await expect(summary(page)).toContainText('Execution status unresolved');
   expect(await pointer(page)).toBe(id); expect(await owner.sends()).toBe(2); expect(owner.requested()).toBe(2);

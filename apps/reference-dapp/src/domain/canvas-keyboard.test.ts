@@ -14,7 +14,9 @@ describe('canvas keyboard semantic deletion', () => {
     const removed = editorReducer(added, { type: 'REMOVE', nodeId: 'node-002', source: 'CANVAS', baseRevision: 1 });
     expect(removed.workflow.nodes.map(node => node.nodeId)).toEqual(['node-001']);
   });
-  it('protects required nodes and dependents but removes incoming edges with a deleted node', () => {
+  // BUILD-SOLANA-MAINNET-001 (intentional change, requirement D): a step with a dependant is deletable; the dependant keeps its own values and loses
+  // only the link. The hidden starting template stays non-deletable (it is not an action card).
+  it('deletes a step with dependants (they only lose the link) and removes incoming edges with a deleted node', () => {
     const added = editorReducer(initialEditor(), parseMockCommand('add transform', 0));
     expect(canDeleteCanvasNode(added.workflow, 'node-001')).toBe(false);
     const connected = editorReducer(added, { type: 'CONNECT', from: 'node-001', to: 'node-002', source: 'CANVAS', baseRevision: 1 });
@@ -25,8 +27,12 @@ describe('canvas keyboard semantic deletion', () => {
     expect(removed.workflow.nodes.map(node => node.nodeId)).toEqual(['node-001']);
     const third = editorReducer(connected, parseMockCommand('add condition', 2));
     const dependent = editorReducer(third, { type: 'CONNECT', from: 'node-002', to: 'node-004', source: 'CANVAS', baseRevision: 3 });
-    expect(canDeleteCanvasNode(dependent.workflow, 'node-002')).toBe(false);
-    expect(editorReducer(dependent, { type: 'REMOVE', nodeId: 'node-002', source: 'CANVAS', baseRevision: 4 }).error).toMatch(/PROTECTED_NODE/);
+    expect(canDeleteCanvasNode(dependent.workflow, 'node-002')).toBe(true);
+    const middle = editorReducer(dependent, { type: 'REMOVE', nodeId: 'node-002', source: 'CANVAS', baseRevision: 4 });
+    expect(middle.error).toBeNull();
+    expect(middle.workflow.nodes.map(node => node.nodeId)).toEqual(['node-001', 'node-004']);
+    expect(middle.workflow.nodes.find(node => node.nodeId === 'node-004')).toMatchObject({ dependencies: [] });
+    expect(middle.workflow.resourceEdges).toEqual([]);
   });
   it('disconnects editable edges and protects required typed edges', () => {
     const added = editorReducer(initialEditor(), parseMockCommand('add transform', 0));

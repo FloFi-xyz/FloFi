@@ -11,6 +11,11 @@ import type { LendingRecord } from '../server/lending-composition-service';
 type State={record:LendingRecord|null;busy:boolean;signing:boolean;error:string|null;retired:boolean;recovered:boolean;
   simulate():Promise<void>;review():Promise<void>;execute():Promise<void>;observe():Promise<void>;refresh():Promise<void>;cancelPrepared():Promise<void>};
 const Context=createContext<State|null>(null),key='gryloo.lending-composition.v1';
+// BUILD-SOLANA-MAINNET-001 (requirement E): a new visit starts with an empty Canvas. Only an execution that still needs the owner, or this tab's
+// own run after a reload (sessionStorage), is brought back; a finished or never-executed run stays in the Dashboard.
+const tabKey=key+':tab';
+const tabRun=()=>{try{return window.sessionStorage.getItem(tabKey);}catch{return null;}};
+export const lendingRunInProgress=(r:Pick<LendingRecord,'attempts'|'status'>)=>r.attempts.length>0&&!['COMPLETED','FAILED'].includes(r.status);
 export function LendingProvider({children}:{children:ReactNode}){
   const {state,restoreLendingCanvas}=useWorkflow(),wallet=useBuild009Wallet(),workflow=state.workflow as SemanticWorkflow;
   const [record,setRecord]=useState<LendingRecord|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState<string|null>(null),[recovered,setRecovered]=useState(false),[signing,setSigning]=useState(false);
@@ -19,14 +24,15 @@ export function LendingProvider({children}:{children:ReactNode}){
   const retired=Boolean(record&&JSON.stringify(workflow)!==JSON.stringify(record.reviews[0]!.workflow)&&!pristine);
   const accept=(r:LendingRecord)=>{setRecord(r);let prior:{id?:string;attempt?:string;hash?:string}|null=null;try{prior=JSON.parse(window.localStorage.getItem(key)??'null');}catch{ /* Durable server history remains authoritative. */ }
     const pending=r.attempts.find(a=>!a.reconciled&&!a.notSubmitted);
-    window.localStorage.setItem(key,JSON.stringify({id:r.id,...pending&&prior?.id===r.id&&prior.attempt===pending.id&&prior.hash?{attempt:pending.id,hash:pending.hash??prior.hash}:{}}));};
+    window.localStorage.setItem(key,JSON.stringify({id:r.id,...pending&&prior?.id===r.id&&prior.attempt===pending.id&&prior.hash?{attempt:pending.id,hash:pending.hash??prior.hash}:{}}));
+    try{window.sessionStorage.setItem(tabKey,r.id);}catch{ /* the tab marker is a convenience only */ }};
   useEffect(()=>{
     let live=true;
     try {const pointer=JSON.parse(window.localStorage.getItem(key)??'null');
       if(typeof pointer?.id==='string'&&/^lending-[a-f0-9]{32}$/.test(pointer.id))(async()=>{
         if(typeof pointer.attempt==='string'&&typeof pointer.hash==='string'&&/^0x[0-9a-f]{64}$/.test(pointer.hash))await lendingReport(pointer.id,pointer.attempt,{kind:'HASH',hash:pointer.hash}).catch(()=>undefined);
         return lendingStatus(pointer.id);
-      })().then(result=>{if(live&&result.ok){setRecord(result.value);setRecovered(true);restoreLendingCanvas(result.value.reviews[0]!.workflow);}}).catch(()=>undefined);
+      })().then(result=>{if(live&&result.ok&&(lendingRunInProgress(result.value)||tabRun()===result.value.id)){setRecord(result.value);setRecovered(true);restoreLendingCanvas(result.value.reviews[0]!.workflow);}}).catch(()=>undefined);
     }catch{setError('LENDING_RECOVERY_POINTER_INVALID');}
     return()=>{live=false;};
   },[restoreLendingCanvas]);

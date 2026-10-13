@@ -14,6 +14,15 @@ import { routerDetails, ROUTER_NETWORK_OPTIONS, ROUTER_ROUTING_LABEL } from './r
 
 export function describeProposal(before: EditorState, after: EditorState, command: Command, context: ReviewContext): readonly string[] {
   if (after.error) return [after.error];
+  if (command.type === 'REMOVE' || command.type === 'REMOVE_MANY') {
+    // BUILD-SOLANA-MAINNET-001 (requirement D): a removal names every step it removes, including linked steps that cannot run without it.
+    const selected = command.type === 'REMOVE' ? [command.nodeId] : command.nodeIds;
+    const gone = before.workflow.nodes.filter(node => !node.actionType.startsWith('mock-') && !after.workflow.nodes.some(kept => kept.nodeId === node.nodeId));
+    const linked = gone.filter(node => !selected.includes(node.nodeId)).map(node => node.nodeId);
+    return Object.freeze([`Revision ${before.workflow.revision} → ${after.workflow.revision}`, `Remove: ${selected.join(', ')}`,
+      ...linked.length ? [`Also removed (cannot run without it): ${linked.join(', ')}`] : [],
+      'Removing a step changes only the draft. A transaction already submitted is not cancelled; prior reviews are retired.']);
+  }
   if (command.type === 'ADD_SOLANA_COMPOSITION') {
     // The swap (new, or the existing step) and the position it funds, added and linked as the Canvas does.
     const added = after.workflow.nodes.filter(node => !before.workflow.nodes.some(old => old.nodeId === node.nodeId));

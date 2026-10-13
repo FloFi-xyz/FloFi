@@ -289,6 +289,7 @@ export function commandIsValid(input: unknown): input is Command {
   if (typeof command.type !== 'string' || !fields[command.type]
       || (keys as string[]).sort().join() !== ['type', 'source', 'baseRevision', ...fields[command.type]!].sort().join()) return false;
   const id = (value: unknown) => typeof value === 'string' && /^node-\d{3,16}$/.test(value);
+  const nodeRef = (value: unknown) => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value);
   switch (command.type) {
     case 'ADD_CRYPTO_ACTION':
     case 'SET_CRYPTO_ACTION': {
@@ -363,10 +364,11 @@ export function commandIsValid(input: unknown): input is Command {
     case 'LOCK': return id(command.nodeId) && typeof command.locked === 'boolean' && command.source === 'CANVAS';
     case 'CONNECT':
     case 'DISCONNECT': return [command.from, command.to].every(value => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value));
-    case 'REMOVE': return id(command.nodeId);
+    // BUILD-SOLANA-MAINNET-001 (requirement D): any action can be deleted, whatever its identifier (authored, Copilot, lending or BUILD-009 ids).
+    case 'REMOVE': return nodeRef(command.nodeId);
     case 'REMOVE_MANY': return command.source === 'CANVAS' && Array.isArray(command.nodeIds)
       && command.nodeIds.length > 0 && command.nodeIds.length <= 1024
-      && command.nodeIds.every(id) && new Set(command.nodeIds).size === command.nodeIds.length;
+      && command.nodeIds.every(nodeRef) && new Set(command.nodeIds).size === command.nodeIds.length;
     case 'AUTHOR_COMPOSITION': {
       if (typeof command.safe !== 'string' || !/^0x[0-9a-f]{40}$/.test(command.safe)) return false;
       const value = command.input;

@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { createBaseSepoliaReviewContext, type ReviewContext } from '@defi-workflow-engine/reference-linter';
-import { LENDING_NODE_IDS } from '@defi-workflow-engine/workflow-contracts';
 import type { Command } from './commands';
 import type { Workflow } from './initial-workflow';
 import { parseHumanAmount } from './swap-authoring';
@@ -64,14 +63,13 @@ function evmSwapEdit(step: WorkflowStep, detail: Extract<WorkflowStep['detail'],
   return refuse('NO_CHANGE');
 }
 
-/** `REMOVE` for a step the canvas could delete, or the reason it cannot be removed. */
+/**
+ * `REMOVE` for a step the canvas could delete, or the reason it cannot be removed. BUILD-SOLANA-MAINNET-001 (requirement D): every action can be
+ * removed, as on the Canvas (linked steps that cannot run without it go with it, and Undo restores them); only the starting template is not an action.
+ */
 export function removeCommandFor(workflow: Workflow, context: ReviewContext, nodeId: string, baseRevision: number): EditPlan {
   const step = workflowSteps(workflow, context).find(item => item.nodeId === nodeId);
   if (!step) return refuse('UNKNOWN_STEP');
   if (step.removable) return { ok: true, command: { type: 'REMOVE', nodeId, source: 'CHAT', baseRevision } };
-  if ((LENDING_NODE_IDS as readonly string[]).includes(nodeId)) return refuse('COMPOSITION_STEP_PROTECTED');
-  if (nodeId === 'node-001') return refuse('FIRST_STEP_PROTECTED');
-  if (workflow.nodes.length <= 1) return refuse('LAST_STEP_PROTECTED');
-  if (workflow.nodes.some(node => node.dependencies.includes(nodeId))) return refuse('STEP_HAS_DEPENDANTS');
-  return refuse('STEP_LOCKED');
+  return refuse('FIRST_STEP_PROTECTED');
 }

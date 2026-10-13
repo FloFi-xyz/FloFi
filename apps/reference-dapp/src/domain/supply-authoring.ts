@@ -86,7 +86,9 @@ export function createAuthoredBorrow(nodeId:string,input:SupplyInput):SemanticWo
 }
 export function borrowDetails(node:SemanticWorkflow['nodes'][number]):SupplyInput|null{
   if(node.actionType!=='borrow')return null;
-  const fields=readBorrowNode(node),shown=details(fields);
+  // A composition Borrow (Supply → Borrow → Swap) is not a standalone declaration: it has no standalone details.
+  let fields:ReturnType<typeof readBorrowNode>;try{fields=readBorrowNode(node);}catch{return null;}
+  const shown=details(fields);
   return shown&&{...shown,beneficiary:fields.beneficiary};
 }
 
