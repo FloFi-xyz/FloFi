@@ -1,6 +1,8 @@
 /* SPDX-License-Identifier: AGPL-3.0-only */
 :root{color-scheme:light;--ink:#14233a;--muted:#52627a;--line:#dce4ef;--soft:#f4f7fb;--paper:#fff;--blue:#1d5fca;--blue-soft:#eaf2ff;--grid:#dae4f1;--amber:#915e08;--amber-soft:#fff5de;--red:#a11c29;--on-accent:#fff;--page:#f8fafd;--canvas-start:#fbfdff;--canvas-end:#f4f8ff;--flow-line:#b5c8e6;--card-line:#bdcadb;--accent-line:#c9ddff;--accent-ink:#174d9f;--accent-border:#8db5ff;--accent-hover:#dce9ff;--accent-selected:#edf4ff;--accent-quiet:#f8fbff;--accent-review:#e6efff;--message-line:#d2e2ff;--warning-line:#f2dfb3;--warning-border:#e6cf9c;--warning-paper:#fffcf4;--danger-soft:#fff1f2;--danger-line:#edc4c9;--neutral-soft:#eef1f6;--neutral-line:#c7d0dd;--neutral-ink:#334155;--neutral-paper:#f5f7fa;--range-line:#93a7c4;--range-track:#d9e2ef;--range-handle:#7ba7ed;--edge-active:#2466c2;--edge-line:#6b809b;--edge-label:#536780;}
 :root{--primary:var(--blue);--success:#22c55e}
+/* BUILD-BETA-UI-001: the beta notice stays yellow with dark ink in both themes (not redefined for dark). */
+:root{--beta-notice-bg:#fde68a;--beta-notice-line:#f2c94c;--beta-notice-ink:#14233a}
 /* Animate the canvas gradient's colors without changing its approved final appearance. */
 @property --canvas-start{syntax:"<color>";inherits:true;initial-value:#fbfdff}
 @property --canvas-end{syntax:"<color>";inherits:true;initial-value:#f4f8ff}
@@ -1668,7 +1670,7 @@ button.wallet-option .wallet-option-status{border-color:var(--accent-line);backg
 .automation-history-list{list-style:none;padding:0;margin:8px 0 16px;display:grid;gap:6px;font-size:13px;line-height:1.5}
 .automation-history h3{font-size:14px;margin:16px 0 6px}
 .automation-archived summary{cursor:pointer;color:var(--muted);font-size:13px;margin:14px 0}
-.beta-notice{margin:0;padding:7px 16px;border-bottom:1px solid #f2c94c;background:#fde68a;color:#14233a;font-size:13px;line-height:19px;text-align:center;text-wrap:balance}
+.beta-notice{margin:0;padding:7px 16px;border-bottom:1px solid var(--beta-notice-line);background:var(--beta-notice-bg);color:var(--beta-notice-ink);font-size:13px;line-height:19px;text-align:center;text-wrap:balance}
 @media(max-width:700px){.beta-notice{padding:6px 15px;font-size:12px;line-height:18px}}
 .automation-inbox{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:12px;padding:8px 16px;border-bottom:1px solid var(--line);background:var(--soft);font-size:13px}
 .automation-inbox .workspace-action{display:inline-flex;align-items:center;min-height:30px;padding:4px 10px;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:var(--ink);font-weight:500}
