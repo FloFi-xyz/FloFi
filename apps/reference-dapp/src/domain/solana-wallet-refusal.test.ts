@@ -158,4 +158,31 @@ describe('P0: a wallet that changes the reviewed Solana Devnet swap (MOCKED loop
     expect(translate('PT', shown.progress.evidence.operations.swap!.note!)).toMatch(/^A cotação revista expirou/);
     expect(shown.action()).toMatchObject({ kind: 'simulate', label: 'Simulate again' });
   });
+
+  it('the standalone Devnet swap shows the same reason and the same fresh-simulation recovery', async () => {
+    const { env, wallet } = await run();
+    const dir = await mkdtemp(join(tmpdir(), 'gryloo-devnet-refusal-'));
+    const swaps = createSolanaDevnetService({ rpc: env.rpc, journalDir: dir, provenance: 'MOCKED', executionEnabled: true, now: () => Date.parse('2026-10-01T12:00:00.000Z') });
+    const single = { ...workflow, nodes: [swap], resourceEdges: [] };
+    const simulated = await swaps.simulate(single, wallet.owner);
+    await swaps.review(simulated.id, simulated.review.commitment, single);
+    const begin = await swaps.begin(simulated.id, wallet.owner, single);
+    const refused = await swaps.submit(simulated.id, wallet.sign(appendMockedWalletGuards(begin.unsignedTransaction, 3)));
+    expect(env.state.sent).toHaveLength(0);
+    const swapSource = { kind: 'solana-swap', state: { record: refused, busy: false, error: null, retired: false, recovered: false } } as unknown as ExecutionLifecycleSource;
+    const lifecycle = projectExecutionLifecycle(single as unknown as Workflow, context, swapSource);
+    const progress = { ...lifecycle, evidence: projectExecutionEvidence(swapSource, lifecycle) };
+    expect(progress.steps.map(step => step.state)).toEqual(['not-submitted']);
+    expect(progress.evidence.operations.transaction).toMatchObject({ noteArgs: ['3', 'Lighthouse'] });
+    expect(projectExecutionResult(progress)).toMatchObject({ label: 'Transaction not submitted' });
+    expect(projectCanvasAction({ progress, source: swapSource, invalidWorkflow: false, recovery: null } as unknown as ExecutionControlsState,
+      { requesting: false, verifying: false, canContinue: false, canCheck: false })).toEqual({ kind: 'simulate', label: 'Simulate again', disabled: false });
+    // A fresh run sends the exact reviewed swap once.
+    const fresh = await swaps.simulate(single, wallet.owner);
+    await swaps.review(fresh.id, fresh.review.commitment, single);
+    const again = await swaps.begin(fresh.id, wallet.owner, single);
+    expect((await swaps.submit(fresh.id, wallet.sign(again.unsignedTransaction))).attempt?.signature).toMatch(/^[1-9A-HJ-NP-Za-km-z]{64,88}$/);
+    expect(env.state.sent).toHaveLength(1);
+  });
 });
+
