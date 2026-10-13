@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { ORCA_LIQUIDITY_INNER_PROGRAMS, ORCA_LIQUIDITY_TOP_LEVEL_PROGRAMS, ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY as profile, assessOrcaLiquidityEffects, base58Encode, decompileMessageV0, fromBase64,
-  parseMessageV0, parseTransaction, solanaSwapArtifactHash, solanaSwapHash, summarizeOrcaLiquidityInstructions, verifyEd25519, verifySolanaCluster,
+import { ORCA_LIQUIDITY_INNER_PROGRAMS, ORCA_LIQUIDITY_TOP_LEVEL_PROGRAMS, ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY as program, assessOrcaLiquidityEffects, base58Encode, decompileMessageV0,
+  fromBase64, parseMessageV0, parseTransaction, requireOrcaLiquidityProfile, solanaSwapArtifactHash, solanaSwapHash, summarizeOrcaLiquidityInstructions, verifyEd25519, verifySolanaCluster,
   type OrcaLiquidityBalances, type OrcaLiquidityEvent, type OrcaLiquidityReview, type OrcaLiquiditySimulation, type SolanaRpc } from '@defi-workflow-engine/reference-compiler';
 import { hashJournalBytes, type EvidenceBundle, type ExecutionJournal } from '@defi-workflow-engine/workflow-contracts';
 
@@ -21,13 +21,14 @@ function tokenBalances(v: unknown): TokenBalance[] {
   if (!Array.isArray(v)) fail('SOLANA_RPC_INVALID');
   return (v as unknown[]).map(item => {
     const b = record(item), ui = record(b.uiTokenAmount);
-    const programId = b.programId === undefined ? profile.programs.token : b.programId;
+    const programId = b.programId === undefined ? program.programs.token : b.programId;
     if (!Number.isSafeInteger(b.accountIndex) || typeof b.mint !== 'string' || typeof b.owner !== 'string' || typeof ui.amount !== 'string' ||
-        !/^(0|[1-9][0-9]{0,19})$/.test(ui.amount) || programId !== profile.programs.token && programId !== profile.programs.token2022) fail('SOLANA_TOKEN_BALANCE_INVALID');
+        !/^(0|[1-9][0-9]{0,19})$/.test(ui.amount) || programId !== program.programs.token && programId !== program.programs.token2022) fail('SOLANA_TOKEN_BALANCE_INVALID');
     return { index: b.accountIndex as number, mint: b.mint as string, owner: b.owner as string, amount: BigInt(ui.amount as string), programId: programId as string };
   });
 }
-export const orcaLiquidityExplorer = (signature: string) => `${profile.explorer}/tx/${signature}?cluster=devnet`;
+/** The reviewed cluster's explorer link (Devnet links carry `?cluster=devnet`). */
+export const orcaLiquidityExplorer = (signature: string, chain: string = program.chain) => requireOrcaLiquidityProfile(chain).explorerTx(signature);
 
 /**
  * Independent finalized reconciliation of one liquidity operation. RPC success alone never reconciles: the transaction must
@@ -38,9 +39,11 @@ export async function reconcileOrcaLiquidityAttempt(review: OrcaLiquidityReview,
   rpc: SolanaRpc): Promise<OrcaLiquidityObservation> {
   const base: OrcaLiquidityObservation = { verdict: 'INCONCLUSIVE', reason: 'TRANSACTION_NOT_OBSERVED', found: false, signature: attempt.signature, confirmation: null,
     slot: null, blockTime: null, feeLamports: null, transactionFailed: false, owner: null, vaults: null, positionAuthority: null, effects: null, events: [],
-    instructions: [], programs: [], innerPrograms: [], signers: review.signers, explorer: attempt.signature ? orcaLiquidityExplorer(attempt.signature) : null };
+    instructions: [], programs: [], innerPrograms: [], signers: review.signers, explorer: attempt.signature ? orcaLiquidityExplorer(attempt.signature, review.chain) : null };
   if (!attempt.signature || !attempt.transaction) return base;
   try {
+    // The Review's own cluster: a Devnet Review is never reconciled against mainnet-beta, nor the reverse.
+    const profile = requireOrcaLiquidityProfile(review.chain);
     await verifySolanaCluster(rpc, profile.genesisHash);
     const signed = fromBase64(attempt.transaction, 2048), parsedSigned = parseTransaction(signed);
     if (base58Encode(parsedSigned.signatures[0]!) !== attempt.signature) fail('ORCA_LIQUIDITY_SIGNATURE_MISMATCH');
@@ -73,7 +76,7 @@ export async function reconcileOrcaLiquidityAttempt(review: OrcaLiquidityReview,
     base.programs = [...new Set(instructions.map(i => i.programId))];
     base.innerPrograms = Array.isArray(meta.innerInstructions) ? [...new Set((meta.innerInstructions as unknown[]).flatMap(group =>
       Array.isArray(record(group).instructions) ? (record(group).instructions as unknown[]).map(i => keys[record(i).programIdIndex as number] ?? fail('SOLANA_RPC_INVALID')) : []))] : [];
-    if (!base.programs.includes(profile.programs.whirlpool) || base.programs.some(p => !ORCA_LIQUIDITY_TOP_LEVEL_PROGRAMS.includes(p)) ||
+    if (!base.programs.includes(program.programs.whirlpool) || base.programs.some(p => !ORCA_LIQUIDITY_TOP_LEVEL_PROGRAMS.includes(p)) ||
         base.innerPrograms.some(p => !ORCA_LIQUIDITY_INNER_PROGRAMS.includes(p))) fail('ORCA_LIQUIDITY_UNEXPECTED_PROGRAM');
     const fee = typeof meta.fee === 'number' && Number.isSafeInteger(meta.fee) ? BigInt(meta.fee) : fail('SOLANA_RPC_INVALID');
     base.feeLamports = fee.toString();
@@ -107,7 +110,7 @@ export async function reconcileOrcaLiquidityAttempt(review: OrcaLiquidityReview,
     // Position authority at transaction time: the owner holds exactly one position token (OPEN) or held it until the burn (EXIT).
     const positionToken = (list: TokenBalance[]) => list.find(b => b.index === at(a.positionTokenAccount)) ?? null;
     const authority = review.operation === 'EXIT' ? positionToken(preTokens) : positionToken(postTokens);
-    if (!authority || authority.programId !== profile.programs.token2022 || authority.owner !== review.owner || authority.mint !== a.positionMint || authority.amount !== 1n)
+    if (!authority || authority.programId !== program.programs.token2022 || authority.owner !== review.owner || authority.mint !== a.positionMint || authority.amount !== 1n)
       return fail('ORCA_POSITION_AUTHORITY_MISMATCH');
     if (review.operation === 'EXIT' && positionToken(postTokens)) fail('ORCA_POSITION_NOT_CLOSED');
     base.positionAuthority = { tokenAccount: a.positionTokenAccount, owner: authority.owner, amount: authority.amount.toString() };
@@ -115,7 +118,7 @@ export async function reconcileOrcaLiquidityAttempt(review: OrcaLiquidityReview,
     base.vaults = { aBefore: before.vaultA, aAfter: after.vaultA, bBefore: before.vaultB, bAfter: after.vaultB };
     const logs = Array.isArray(meta.logMessages) ? (meta.logMessages as unknown[]).filter((l): l is string => typeof l === 'string') : fail('SOLANA_RPC_INVALID');
     const effects = assessOrcaLiquidityEffects({ operation: review.operation, plan: review.operationPlan, accounts: a, pre: before, post: after, logs,
-      feeLamports: fee, owner: review.owner, positionState: false });
+      feeLamports: fee, owner: review.owner, positionState: false, profile });
     base.effects = effects; base.events = effects.events;
     return { ...base, verdict: 'RECONCILED', reason: 'ORCA_LIQUIDITY_TRANSACTION_AND_BALANCES_VERIFIED' };
   } catch (cause) {
@@ -125,20 +128,27 @@ export async function reconcileOrcaLiquidityAttempt(review: OrcaLiquidityReview,
   }
 }
 
-export type OrcaLiquidityEvidenceClass = 'MOCKED' | 'PUBLIC_READ_ONLY' | 'DEVNET_EXECUTED';
-/** Only an owner-initiated, independently reconciled public Devnet run is DEVNET_EXECUTED. Never mainnet evidence. */
-export function classifyOrcaLiquidityEvidence(input: { provenance: 'PUBLIC_DEVNET' | 'MOCKED'; ownerInitiated: boolean; observation: OrcaLiquidityObservation | null }): OrcaLiquidityEvidenceClass {
+export type OrcaLiquidityEvidenceClass = 'MOCKED' | 'PUBLIC_READ_ONLY' | 'DEVNET_EXECUTED' | 'PUBLIC_EXECUTED';
+export type OrcaLiquidityEvidenceProvenance = 'PUBLIC_DEVNET' | 'PUBLIC_MAINNET' | 'MOCKED';
+/**
+ * Only an owner-initiated, independently reconciled public run is executed evidence: DEVNET_EXECUTED on Solana Devnet (valueless test tokens),
+ * PUBLIC_EXECUTED on Solana mainnet-beta (BUILD-SOLANA-MAINNET-001, real funds). A MOCKED run is never either.
+ */
+export function classifyOrcaLiquidityEvidence(input: { provenance: OrcaLiquidityEvidenceProvenance; ownerInitiated: boolean; observation: OrcaLiquidityObservation | null }): OrcaLiquidityEvidenceClass {
   if (input.provenance === 'MOCKED') return 'MOCKED';
-  return input.ownerInitiated && input.observation?.verdict === 'RECONCILED' ? 'DEVNET_EXECUTED' : 'PUBLIC_READ_ONLY';
+  if (!input.ownerInitiated || input.observation?.verdict !== 'RECONCILED') return 'PUBLIC_READ_ONLY';
+  return input.provenance === 'PUBLIC_MAINNET' ? 'PUBLIC_EXECUTED' : 'DEVNET_EXECUTED';
 }
-export function buildOrcaLiquidityEvidence(input: { id: string; review: OrcaLiquidityReview; journal: ExecutionJournal; provenance: 'PUBLIC_DEVNET' | 'MOCKED';
+export function buildOrcaLiquidityEvidence(input: { id: string; review: OrcaLiquidityReview; journal: ExecutionJournal; provenance: OrcaLiquidityEvidenceProvenance;
   ownerInitiated: boolean; observation: OrcaLiquidityObservation; lifecycle: unknown }) {
-  const o = input.observation, review = input.review, effects = o.effects;
+  const o = input.observation, review = input.review, effects = o.effects, profile = requireOrcaLiquidityProfile(review.chain);
   if (o.verdict !== 'RECONCILED' || !effects || !o.owner || !input.ownerInitiated) return fail('ORCA_LIQUIDITY_EVIDENCE_NOT_RECONCILED');
+  // A public provenance must match the reviewed cluster: Devnet evidence is never mainnet evidence, nor the reverse.
+  if (input.provenance !== 'MOCKED' && input.provenance !== profile.provenance) return fail('ORCA_LIQUIDITY_EVIDENCE_CLUSTER_MISMATCH');
   const evidenceClass = classifyOrcaLiquidityEvidence(input);
   const asset = (t: OrcaLiquidityReview['token0']) => ({ chainId: review.chain, address: t.mint, decimals: t.decimals });
-  const publicExecution = { environment: evidenceClass, network: 'Solana Devnet', cluster: 'devnet', chain: review.chain, genesisHash: profile.genesisHash,
-    provider: 'Orca Whirlpools (Solana Devnet)', program: profile.programs.whirlpool, officialSource: profile.officialSource, explorer: o.explorer,
+  const publicExecution = { environment: evidenceClass, network: profile.network, cluster: profile.cluster, chain: review.chain, genesisHash: profile.genesisHash,
+    provider: `Orca Whirlpools (${profile.network})`, program: program.programs.whirlpool, officialSource: profile.officialSource, explorer: o.explorer,
     operation: review.operation, owner: review.owner, pool: review.pool.address, whirlpoolsConfig: review.whirlpoolsConfig, token0: review.token0, token1: review.token1,
     positionMint: review.accounts.positionMint, position: review.accounts.position, positionTokenAccount: review.accounts.positionTokenAccount,
     positionAuthority: o.positionAuthority, tickLower: review.range.tickLower, tickUpper: review.range.tickUpper, lowerPrice: review.range.lowerPrice, upperPrice: review.range.upperPrice,
@@ -149,21 +159,22 @@ export function buildOrcaLiquidityEvidence(input: { id: string; review: OrcaLiqu
     createdAccounts: effects.createdAccounts, closedAccounts: effects.closedAccounts, events: o.events, signature: o.signature, signers: o.signers, slot: o.slot,
     blockTime: o.blockTime, confirmation: o.confirmation, feeLamports: o.feeLamports, ownerBalances: o.owner, vaults: o.vaults, instructions: o.instructions,
     programs: o.programs, innerPrograms: o.innerPrograms, messageHash: review.messageHash, lifecycle: input.lifecycle, verdict: o.verdict, reason: o.reason,
-    provenance: input.provenance, evidenceClass, ownerInitiated: input.ownerInitiated, realFunds: false };
+    provenance: input.provenance, evidenceClass, ownerInitiated: input.ownerInitiated, realFunds: profile.realFunds && input.provenance !== 'MOCKED' };
   const head = hashJournalBytes(new TextEncoder().encode(JSON.stringify(input.journal))).at(-1) ?? fail('ORCA_LIQUIDITY_JOURNAL_EMPTY');
-  // The frozen v1 environment enum has no Devnet member: Devnet maps to TESTNET_EXECUTED, never MAINNET_EXECUTED.
-  const environment = input.provenance === 'MOCKED' ? 'MOCKED' as const : 'TESTNET_EXECUTED' as const;
+  // The frozen v1 environment enum has no Devnet member: Devnet maps to TESTNET_EXECUTED, mainnet-beta to MAINNET_EXECUTED.
+  const environment = input.provenance === 'MOCKED' ? 'MOCKED' as const : profile.bundleEnvironment;
   const limitations = ['Balances are finalized transaction metadata for the exact fully signed reviewed bytes.',
     'Withdrawn principal is taken from Orca LiquidityDecreased events; collected fees are the remaining vault outflow. Principal is never counted as fees.',
     'Native SOL deltas exclude the network fee and refundable account deposits, which are reported separately.',
-    'Solana Devnet with valueless test tokens (Gryloo evidence class DEVNET_EXECUTED). Not mainnet execution and not real funds.'];
+    profile.realFunds ? 'Solana mainnet-beta with real funds (Gryloo evidence class PUBLIC_EXECUTED).'
+      : 'Solana Devnet with valueless test tokens (Gryloo evidence class DEVNET_EXECUTED). Not mainnet execution and not real funds.'];
   const bundle: EvidenceBundle = { schemaVersion: '1.0.0', evidenceBundleId: input.id, version: 1, supersedes: null,
     semanticWorkflowHash: review.manifest.semanticWorkflowHash, artifactSetHash: review.manifest.artifactSetHash, simulationHash: review.manifest.simulationHash,
     policyHash: review.manifest.policyHash, manifestHash: solanaSwapArtifactHash('strategy-manifest', review.manifest), executionPlanHash: solanaSwapArtifactHash('execution-plan', review.plan),
     journalHeadHash: head, observedAt: new Date().toISOString(), environment, outcome: 'RECONCILED',
     receipts: [{ receiptId: `orca-liquidity-${review.operation.toLowerCase()}-transaction`, contentHash: solanaSwapHash(o) }], differences: [],
     reconciliation: { balances: [{ asset: asset(review.token1), amount: o.owner.tokenBAfter ?? '0' }], allowances: [], debt: [],
-      positions: review.operation === 'EXIT' ? [] : [{ asset: { chainId: review.chain, address: profile.programs.whirlpool, decimals: 0 }, amount: '1' }],
+      positions: review.operation === 'EXIT' ? [] : [{ asset: { chainId: review.chain, address: program.programs.whirlpool, decimals: 0 }, amount: '1' }],
       fees: [{ asset: { chainId: review.chain, nativeId: 'SOL', decimals: 9 }, amount: o.feeLamports ?? '0' }], residualAssets: [],
       ownership: [{ chainId: review.chain, address: review.owner }], limitations },
     evidence: [{ evidenceId: 'orca-liquidity-public-observations', kind: 'EXTERNAL_REFERENCE', contentHash: solanaSwapHash(publicExecution) }] };

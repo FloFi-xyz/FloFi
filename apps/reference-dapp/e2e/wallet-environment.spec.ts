@@ -159,7 +159,9 @@ for (const cluster of ['solana:devnet', 'solana:mainnet']) test(`${cluster} conn
   await chooseWallet(page, 'Environment test wallet', 'Solana');
   const mainnet = cluster === 'solana:mainnet';
   await expect(environment).toHaveText(mainnet ? 'Mainnet' : 'Testnet');
-  await expect(environment).toBeDisabled();
+  // BUILD-SOLANA-MAINNET-001 (intentional change): a Solana session's Mainnet/Testnet control is enabled; choosing it asks the same wallet for a
+  // session on the other cluster (solana-mainnet-network.spec.ts covers the switch). It used to be disabled, which left no Canvas path to mainnet-beta.
+  await expect(environment).toBeEnabled();
   await expect(page.locator('.header-mainnet-dot')).toHaveCount(mainnet ? 1 : 0);
   await page.getByRole('button', { name: 'Build', exact: true }).click();
   await page.getByRole('button', { name: 'Add bridge', exact: true }).click();

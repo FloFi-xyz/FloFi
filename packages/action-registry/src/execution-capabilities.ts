@@ -46,7 +46,7 @@ const definedActions = new Set(['asset.transfer', 'withdraw', 'repay', 'borrow',
 const adapterVersions: Readonly<Record<string, string>> = Object.freeze({
   'aave-v3': '1.0.0', 'uniswap.v3': '1.0.0', 'cow.protocol': '1.0.0', 'lifi.rest': '1.0.0', 'across.direct': '1.0.0',
   'gryloo.calculated-split': '1.0.0', 'gryloo.template': '1.0.0', 'jupiter.swap-v2': '1.0.0',
-  'orca.whirlpools-devnet': '1.0.0', 'orca.whirlpools-devnet-liquidity': '1.0.0', 'evm.native-transfer': '1.0.0',
+  'orca.whirlpools-devnet': '1.0.0', 'orca.whirlpools-devnet-liquidity': '1.0.0', 'orca.whirlpools-mainnet-liquidity': '1.0.0', 'evm.native-transfer': '1.0.0',
   'flofi.router': '1.0.0', 'evm.token-transfer': '1.0.0',
 });
 const rows: ExecutionCapabilityProfile[] = [];
@@ -83,6 +83,9 @@ add('asset.swap.exact-input', 'jupiter.swap-v2', 'solana:5eykt4UsFv8P8NJdTREpY1v
 add('asset.swap.exact-input', 'orca.whirlpools-devnet', 'solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1', 'PUBLIC_TESTNET', fork, null, 'DIRECT_TRANSACTION', ['INJECTED_WALLET', 'QUOTE_PROVIDER', 'REVIEWED_ARTIFACTS'], ['A']);
 // The canonical concentrated-liquidity action on Solana Devnet via Orca Whirlpools (valueless test tokens). Owner execution is implemented; none is demonstrated yet.
 add('asset.liquidity.concentrated', 'orca.whirlpools-devnet-liquidity', 'solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1', 'PUBLIC_TESTNET', fork, null, 'DIRECT_TRANSACTION', ['INJECTED_WALLET', 'QUOTE_PROVIDER', 'REVIEWED_ARTIFACTS'], ['A']);
+// BUILD-SOLANA-MAINNET-001: the same action on Solana mainnet-beta via Orca Whirlpools (SOL/USDC 0.30%, real funds), signed only by the owner's
+// wallet and gated by an explicit deployment opt-in. Owner execution is implemented; none is demonstrated yet, so no evidence ceiling is claimed.
+add('asset.liquidity.concentrated', 'orca.whirlpools-mainnet-liquidity', 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp', 'MAINNET', fork, null, 'DIRECT_TRANSACTION', ['INJECTED_WALLET', 'QUOTE_PROVIDER', 'REVIEWED_ARTIFACTS'], ['A']);
 // BUILD-UNISWAP-LIQUIDITY-PUBLIC: the canonical concentrated-liquidity action on Base Sepolia via Uniswap v3, signed and sent
 // by the owner's browser wallet. Owner execution is implemented; none is demonstrated yet, so no evidence ceiling is
 // claimed. The BUILD-006 `asset.liquidity.uniswap-v3` LOCAL_FORK row keeps its FORK_REPRODUCED evidence unchanged.
@@ -158,7 +161,7 @@ function selectedAdapter(node: Node): { id: string; version: string } | null {
   if (node.actionType === 'asset.liquidity.uniswap-v3') return node.adapterConstraints.protocols.includes('uniswap-v3') ? { id: 'uniswap.v3', version: '1.0.0' } : null;
   if (node.actionType === 'asset.liquidity.concentrated') {
     if (node.adapterConstraints.protocols.length !== 1) return null;
-    if (node.adapterConstraints.protocols[0] === 'orca-whirlpools') return { id: 'orca.whirlpools-devnet-liquidity', version: '1.0.0' };
+    if (node.adapterConstraints.protocols[0] === 'orca-whirlpools') return { id: node.chainId === 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp' ? 'orca.whirlpools-mainnet-liquidity' : 'orca.whirlpools-devnet-liquidity', version: '1.0.0' };
     return node.adapterConstraints.protocols[0] === 'uniswap-v3' ? { id: 'uniswap.v3', version: '1.0.0' } : null;
   }
   if (node.actionType === 'asset.swap.exact-input') {

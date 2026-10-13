@@ -16,7 +16,8 @@ import type { Projection, Projector, WorkRequest } from '@defi-workflow-engine/c
 import { createRobinhoodTransferService, type TransferRecord, type TransferWalletDiagnostic } from '../src/server/robinhood-transfer-service.ts';
 import { createSupplyService, type SupplyRecord, type SupplyWalletDiagnostic } from '../src/server/supply-service.ts';
 import { createDurablePublicTestnetService, type PublicRun } from '../src/server/public-testnet-service.ts';
-import { JUPITER_SOLANA_MAINNET, ORCA_WHIRLPOOLS_DEVNET, ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY, type AssetCatalog } from '@defi-workflow-engine/action-registry';
+import { JUPITER_SOLANA_MAINNET, ORCA_WHIRLPOOLS_DEVNET, ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY, ORCA_WHIRLPOOLS_MAINNET_LIQUIDITY, type AssetCatalog,
+  type OrcaLiquidityProfile } from '@defi-workflow-engine/action-registry';
 import { CATALOG_NETWORKS, type CatalogNetworkRuntime } from '../src/server/catalog-networks.ts';
 import type { JupiterHttp } from '@defi-workflow-engine/reference-compiler';
 import { nativeTransferReadRpcs } from '../src/server/robinhood-rpc.ts';
@@ -44,6 +45,8 @@ import { paymentMode, paymentRuntime } from '../src/server/payment-runtime.ts';
 import { MAX_LOG_BYTES } from '@defi-workflow-engine/cloud-runtime';
 
 export type FlowName = 'robinhood-transfer' | 'aave-supply' | 'base-sepolia-swap' | 'solana-devnet-swap' | 'orca-liquidity' | 'jupiter-swap' | 'uniswap-liquidity' | 'crosschain-router'
+  /** BUILD-SOLANA-MAINNET-001: Orca Whirlpools liquidity on Solana mainnet-beta (real funds), the same service as `orca-liquidity` on its own storage. */
+  | 'orca-liquidity-mainnet'
   | 'crosschain-router-testnet' | 'lending-composition' | 'pix-payment' | 'robinhood-swap' | 'robinhood-mainnet-transfer' | 'robinhood-liquidity'
   | 'crosschain-router-base-to-robinhood' | 'crosschain-router-robinhood-to-base' | 'crosschain-router-arbitrum-to-robinhood' | 'crosschain-router-robinhood-to-arbitrum'
   /** BUILD-BASE-001: Base mainnet (real funds) as a catalog network, and the Router's Arbitrum One → Base route. */
@@ -473,18 +476,22 @@ const jupiterSwap: FlowDefinition = {
   needsObservation: solanaNeedsObservation, projector: solanaProjector('jupiter-swap', () => 'SWAP'), evidence: record => evidenceOf(record as JupiterRecord),
 };
 const ORCA_LP_ID = /^orcalp-[a-f0-9]{32}$/;
-const orcaLiquidity: FlowDefinition = {
-  name: 'orca-liquidity', busyCode: 'ORCA_LIQUIDITY_BUSY', runId: ORCA_LP_ID, unavailableCode: 'ORCA_LIQUIDITY_SERVICE_UNAVAILABLE',
+/** Orca Whirlpools liquidity on one Solana cluster: Devnet (`orca-liquidity`) or mainnet-beta (`orca-liquidity-mainnet`, BUILD-SOLANA-MAINNET-001). */
+const orcaLiquidityFlow = (name: 'orca-liquidity' | 'orca-liquidity-mainnet', profile: OrcaLiquidityProfile): FlowDefinition => ({
+  name, busyCode: 'ORCA_LIQUIDITY_BUSY', runId: ORCA_LP_ID, unavailableCode: 'ORCA_LIQUIDITY_SERVICE_UNAVAILABLE',
   methods: { ...solanaSwapMethods(ORCA_LP_ID),
     simulate: { mutates: true, validate: shape(workflow, solanaOwner, liquidityRequest) },
     price: { mutates: false, validate: shape() },
     positions: { mutates: false, validate: shape(solanaOwner) },
     inspect: { mutates: false, validate: shape(solanaOwner, solanaOwner) } },
-  transport: (mode, env) => ({ rpc: createSolanaRpc(mode === 'harness' ? 'http://127.0.0.1:8552/rpc'
-    : solanaRpcOverride(env.GRYLOO_SOLANA_DEVNET_RPC_URL, 'ORCA_LIQUIDITY_RPC_CONFIGURATION_INVALID') ?? ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY.rpc, mode === 'harness') }),
+  transport: (mode, env) => ({ rpc: createSolanaRpc(mode === 'harness' ? `http://127.0.0.1:8552/${profile.realFunds ? 'mainnet-rpc' : 'rpc'}`
+    : (profile.realFunds ? solanaRpcOverride(env.GRYLOO_SOLANA_RPC_URL, 'ORCA_LIQUIDITY_RPC_CONFIGURATION_INVALID')
+      : solanaRpcOverride(env.GRYLOO_SOLANA_DEVNET_RPC_URL, 'ORCA_LIQUIDITY_RPC_CONFIGURATION_INVALID')) ?? profile.rpc, mode === 'harness') }),
   create(storage, { rpc, mode, env }) {
-    const s = createOrcaLiquidityService({ storage, rpc, provenance: mode === 'harness' ? 'MOCKED' : 'PUBLIC_DEVNET',
-      executionEnabled: env.GRYLOO_SOLANA_DEVNET_EXECUTION !== 'DISABLED' });
+    // Devnet execution is on unless disabled; mainnet-beta owner execution (real funds) is an explicit opt-in, like Jupiter's.
+    const s = createOrcaLiquidityService({ storage, rpc, profile, provenance: mode === 'harness' ? 'MOCKED' : profile.provenance,
+      executionEnabled: profile.realFunds ? mode === 'harness' || env.GRYLOO_ORCA_MAINNET_OWNER_EXECUTION === 'MAINNET_OWNER_APPROVED'
+        : env.GRYLOO_SOLANA_DEVNET_EXECUTION !== 'DISABLED' });
     const table: Record<string, (args: Args) => Promise<unknown>> = {
       info: async () => ({ executionEnabled: s.executionEnabled }),
       price: () => s.price(),
@@ -502,9 +509,10 @@ const orcaLiquidity: FlowDefinition = {
     return { call: (method, args) => table[method]!(args), load: runId => s.load(runId), observe: runId => s.observe(runId) };
   },
   needsObservation: solanaNeedsObservation,
-  projector: solanaProjector('orca-liquidity', record => (record as unknown as OrcaLiquidityRecord).operation),
+  projector: solanaProjector(name, record => (record as unknown as OrcaLiquidityRecord).operation),
   evidence: record => evidenceOf(record as OrcaLiquidityRecord),
-};
+});
+const orcaLiquidity = orcaLiquidityFlow('orca-liquidity', ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY);
 
 const SOLANA_COMPOSITION_ID = /^solcomp-[a-f0-9]{32}$/;
 const positionMint = (value: unknown) => typeof value === 'string' && SOLANA_ADDRESS.test(value);
@@ -862,6 +870,7 @@ const pixPayment: FlowDefinition = {
 
 export const FLOWS: Readonly<Record<FlowName, FlowDefinition>> = Object.freeze({ 'robinhood-transfer': robinhood, 'aave-supply': supply, 'base-sepolia-swap': swap,
   'solana-devnet-swap': solanaDevnetSwap, 'orca-liquidity': orcaLiquidity, 'jupiter-swap': jupiterSwap, 'uniswap-liquidity': uniswapLiquidity,
+  'orca-liquidity-mainnet': orcaLiquidityFlow('orca-liquidity-mainnet', ORCA_WHIRLPOOLS_MAINNET_LIQUIDITY),
   'crosschain-router': crosschainRouter, 'crosschain-router-testnet': crosschainRouterTestnet, 'lending-composition': lendingComposition,
   'pix-payment': pixPayment, 'robinhood-swap': robinhoodSwap, 'robinhood-mainnet-transfer': robinhoodMainnetTransfer, 'robinhood-liquidity': robinhoodLiquidity,
   'crosschain-router-base-to-robinhood': routerFlow('crosschain-router-base-to-robinhood', 'base-to-robinhood'),
@@ -891,6 +900,9 @@ function configuredFlowMode(flow: FlowName, env: Readonly<Record<string, string 
     return env.GRYLOO_SOLANA_DEVNET_HARNESS === 'MOCKED_LOOPBACK_ONLY' ? 'harness' : env.GRYLOO_SOLANA_DEVNET === 'live' ? 'live' : 'off';
   // Jupiter mainnet-beta: `live` enables read-only Simulate/Review; real-funds execution additionally needs GRYLOO_JUPITER_OWNER_EXECUTION.
   if (flow === 'jupiter-swap') return env.GRYLOO_JUPITER_HARNESS === 'MOCKED_LOOPBACK_ONLY' ? 'harness' : env.GRYLOO_JUPITER === 'live' ? 'live' : 'off';
+  // BUILD-SOLANA-MAINNET-001 Orca mainnet-beta liquidity: `live` enables read-only Simulate/Review; real-funds execution additionally needs
+  // GRYLOO_ORCA_MAINNET_OWNER_EXECUTION. The MOCKED loopback harness wins.
+  if (flow === 'orca-liquidity-mainnet') return env.GRYLOO_ORCA_MAINNET_HARNESS === 'MOCKED_LOOPBACK_ONLY' ? 'harness' : env.GRYLOO_ORCA_MAINNET === 'live' ? 'live' : 'off';
   // Base Sepolia Uniswap v3 liquidity (test tokens): explicit backend enablement; the MOCKED loopback harness wins.
   if (flow === 'uniswap-liquidity')
     return env.GRYLOO_UNISWAP_LIQUIDITY_HARNESS === 'MOCKED_LOOPBACK_ONLY' ? 'harness' : env.GRYLOO_UNISWAP_LIQUIDITY_TESTNET === 'live' ? 'live' : 'off';
@@ -922,7 +934,7 @@ function configuredFlowMode(flow: FlowName, env: Readonly<Record<string, string 
 }
 const DISABLED: Readonly<Record<FlowName, string>> = { 'robinhood-transfer': 'TRANSFER_PUBLIC_TESTNET_NOT_ENABLED', 'aave-supply': 'SUPPLY_PUBLIC_TESTNET_NOT_ENABLED',
   'base-sepolia-swap': 'PUBLIC_RECORDING_OFF', 'solana-devnet-swap': 'DEVNET_SWAP_PUBLIC_DEVNET_NOT_ENABLED', 'orca-liquidity': 'ORCA_LIQUIDITY_PUBLIC_DEVNET_NOT_ENABLED',
-  'jupiter-swap': 'JUPITER_PUBLIC_MAINNET_NOT_ENABLED', 'uniswap-liquidity': 'UNISWAP_LIQUIDITY_PUBLIC_TESTNET_NOT_ENABLED',
+  'jupiter-swap': 'JUPITER_PUBLIC_MAINNET_NOT_ENABLED', 'uniswap-liquidity': 'UNISWAP_LIQUIDITY_PUBLIC_TESTNET_NOT_ENABLED', 'orca-liquidity-mainnet': 'ORCA_LIQUIDITY_PUBLIC_MAINNET_NOT_ENABLED',
   'crosschain-router': 'ROUTER_NOT_ENABLED', 'crosschain-router-testnet': 'ROUTER_TESTNET_NOT_ENABLED', 'lending-composition': 'LENDING_PUBLIC_TESTNET_NOT_ENABLED',
   'pix-payment': 'PAYMENT_NOT_ENABLED', 'robinhood-swap': 'ROBINHOOD_MAINNET_NOT_ENABLED', 'robinhood-mainnet-transfer': 'ROBINHOOD_MAINNET_NOT_ENABLED',
   'robinhood-liquidity': 'ROBINHOOD_MAINNET_NOT_ENABLED',

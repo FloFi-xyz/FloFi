@@ -40,6 +40,11 @@ type Store = { record: JupiterRecord | null; owner: string | null; network: Sola
   connectWith(name: string, chain: SolanaWalletChain): Promise<SolanaSession | null>;
   /** Ends FloFi's use of the Solana session (and asks the wallet to forget it when supported). */
   disconnect(): Promise<void>;
+  /**
+   * BUILD-SOLANA-MAINNET-001: the owner's Mainnet/Testnet choice asks the same chosen wallet for a session on `chain` (Wallet Standard connect only;
+   * nothing is signed). Returns null on success, else the failure code; the current session is kept when the wallet cannot connect there.
+   */
+  switchCluster(chain: SolanaWalletChain): Promise<string | null>;
   simulate(): Promise<void>; review(): Promise<void>; execute(): Promise<void>; observe(): Promise<void> };
 const Context = createContext<Store | null>(null);
 const unresolved = (record: JupiterRecord | null) => Boolean(record?.attempt && record.verdict === 'PENDING' && ['SUBMITTING', 'SUBMISSION_RESULT_UNKNOWN', 'PENDING'].includes(record.attempt.state));
@@ -59,8 +64,8 @@ export function JupiterProvider({ children }: { children: ReactNode }) {
   const latest = useRef(workflow); latest.current = workflow;
   const busyRef = useRef(false);
   const authored = workflow.nodes.map(node => solanaSwapDetails(node)).find(Boolean) ?? null;
-  // A Solana Devnet liquidity position uses the same Devnet wallet session as the Devnet swap.
-  const network: SolanaNetwork = authored?.network ?? (workflow.nodes.some(node => solanaLiquidityDetails(node)) ? 'Solana Devnet' : record ? networkOfRecord(record) : 'Solana');
+  // A Solana liquidity position uses the same wallet session as the swap on its own cluster (Devnet or, BUILD-SOLANA-MAINNET-001, mainnet-beta).
+  const network: SolanaNetwork = authored?.network ?? workflow.nodes.map(node => solanaLiquidityDetails(node)?.network).find(Boolean) ?? (record ? networkOfRecord(record) : 'Solana');
   const runtime = runtimes[network];
   const pristineRecovery = recovered && workflow.revision === 0 && workflow.nodes.length === 1 && workflow.nodes[0]?.actionType === 'mock-read';
   const retired = Boolean(record && JSON.stringify(record.review.workflow) !== JSON.stringify(workflow) && !pristineRecovery);
@@ -114,6 +119,15 @@ export function JupiterProvider({ children }: { children: ReactNode }) {
       setSession(next); connected = next;
     });
     return connected;
+  }
+  async function switchCluster(chain: SolanaWalletChain): Promise<string | null> {
+    const current = session;
+    if (!current) return `${runtime.prefix}_SOLANA_WALLET_SELECTION_REQUIRED`;
+    if (current.chain === chain || busyRef.current) return null;
+    busyRef.current = true; setBusy(true);
+    try { setSession(await connectSolanaWallet(current.wallet.name, chain, runtime.prefix)); return null; }
+    catch (cause) { return cause instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(cause.message) ? cause.message : `${runtime.prefix}_SOLANA_WALLET_REQUIRED`; }
+    finally { busyRef.current = false; setBusy(false); }
   }
   async function disconnect() {
     const current = session;
@@ -170,7 +184,7 @@ export function JupiterProvider({ children }: { children: ReactNode }) {
   }); }
   async function observe() { await operation(async () => { if (!record) throw new Error(`${runtime.prefix}_RUN_MISSING`); await poll(record.id); }); }
   return <Context.Provider value={{ record, owner: session && session.chain === runtime.walletChain ? session.account.address : null, network, session, codePrefix: runtime.prefix,
-    busy, error, retired, recovered, executionEnabled: enabled[network], walletChain: runtime.walletChain, connect, connectWith, disconnect, simulate, review, execute, observe }}>
+    busy, error, retired, recovered, executionEnabled: enabled[network], walletChain: runtime.walletChain, connect, connectWith, disconnect, switchCluster, simulate, review, execute, observe }}>
     {signing && <p role="status">Confirm or reject the pending request in your Solana wallet.</p>}
     <div inert={signing} data-jupiter-wallet-pending={signing ? 'true' : undefined}>{children}</div></Context.Provider>;
 }

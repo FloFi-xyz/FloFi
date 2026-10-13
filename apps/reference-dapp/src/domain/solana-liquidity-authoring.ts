@@ -1,61 +1,70 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { CONCENTRATED_LIQUIDITY_ACTION, createConcentratedLiquidityNode, readConcentratedLiquidity, readConcentratedLiquiditySource, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
-import { ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY as profile } from '@defi-workflow-engine/action-registry';
+import { ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY as profile, ORCA_WHIRLPOOLS_MAINNET_LIQUIDITY, orcaLiquidityProfile, type OrcaLiquidityProfile } from '@defi-workflow-engine/action-registry';
 import { orcaAlignPriceRange, orcaPriceFromSqrtPrice, orcaSqrtPriceAtTick } from '@defi-workflow-engine/reference-compiler';
 import { formatTokenAmount, parseTokenAmount, type SolanaSwapInput } from './jupiter-authoring';
 
 /**
  * Chat and canvas author the same canonical `asset.liquidity.concentrated` node. The network selects the runtime below
- * the IR: Solana Devnet → Orca Whirlpools (the verified SOL/devUSDC test pool). A price range is aligned to usable
- * ticks deterministically (lower bound down, upper bound up), so the IR always stores immutable ticks.
+ * the IR: Solana Devnet → Orca Whirlpools (the verified SOL/devUSDC test pool); Solana (mainnet-beta, BUILD-SOLANA-MAINNET-001) → the verified
+ * Orca SOL/USDC 0.30% pool (real funds). A price range is aligned to usable ticks deterministically (lower bound down, upper bound up), so the
+ * IR always stores immutable ticks.
  */
-export type SolanaLiquidityInput = { network: 'Solana Devnet'; maxSol: string; maxDevUsdc: string;
-  /** Prices in devUSDC per SOL (`PRICE`) or tick indexes (`TICK`). */
+export type SolanaLiquidityNetwork = 'Solana Devnet' | 'Solana';
+/** `maxDevUsdc` is the pool's token B maximum: devUSDC on Solana Devnet, USDC on Solana mainnet-beta. */
+export type SolanaLiquidityInput = { network: SolanaLiquidityNetwork; maxSol: string; maxDevUsdc: string;
+  /** Prices in token B per SOL (`PRICE`) or tick indexes (`TICK`). */
   rangeUnit: 'PRICE' | 'TICK'; lower: string; upper: string; slippage: string };
 export const SOLANA_LIQUIDITY_DEFAULT_SLIPPAGE = '100';
-const token = (t: typeof profile.token0) => ({ chainId: profile.chain, address: t.mint, decimals: t.decimals });
+/** The Orca liquidity profile of a Solana liquidity network. */
+export const solanaLiquidityProfileOf = (network: SolanaLiquidityNetwork): OrcaLiquidityProfile => network === 'Solana' ? ORCA_WHIRLPOOLS_MAINNET_LIQUIDITY : profile;
 const amount = (text: string, decimals: number) => text === '0' ? '0' : parseTokenAmount(text, decimals);
-export function solanaLiquidityTicks(input: Pick<SolanaLiquidityInput, 'rangeUnit' | 'lower' | 'upper'>): { tickLower: number; tickUpper: number } {
-  if (input.rangeUnit === 'PRICE') return orcaAlignPriceRange(input.lower.trim(), input.upper.trim());
+export function solanaLiquidityTicks(input: Pick<SolanaLiquidityInput, 'rangeUnit' | 'lower' | 'upper'> & { network?: SolanaLiquidityNetwork }): { tickLower: number; tickUpper: number } {
+  const runtime = solanaLiquidityProfileOf(input.network ?? 'Solana Devnet');
+  if (input.rangeUnit === 'PRICE') return orcaAlignPriceRange(input.lower.trim(), input.upper.trim(), runtime.pool.tickSpacing, runtime.token0.decimals, runtime.token1.decimals);
   if (!/^-?(0|[1-9][0-9]{0,5})$/.test(input.lower.trim()) || !/^-?(0|[1-9][0-9]{0,5})$/.test(input.upper.trim())) throw new Error('SOLANA_LIQUIDITY_RANGE_INVALID');
   const tickLower = Number(input.lower.trim()), tickUpper = Number(input.upper.trim());
-  if (tickLower >= tickUpper || tickLower % profile.pool.tickSpacing || tickUpper % profile.pool.tickSpacing) throw new Error('SOLANA_LIQUIDITY_RANGE_INVALID');
+  if (tickLower >= tickUpper || tickLower % runtime.pool.tickSpacing || tickUpper % runtime.pool.tickSpacing) throw new Error('SOLANA_LIQUIDITY_RANGE_INVALID');
   return { tickLower, tickUpper };
 }
 export function createSolanaLiquidityNode(nodeId: string, input: SolanaLiquidityInput): SemanticWorkflow['nodes'][number] {
-  if (input.network !== 'Solana Devnet') throw new Error('SOLANA_CLUSTER_UNSUPPORTED');
-  if (!/^[1-9][0-9]{0,3}$/.test(input.slippage) || Number(input.slippage) > profile.maximumSlippageBps) throw new Error('SOLANA_SLIPPAGE_OUT_OF_RANGE');
-  const amount0Max = amount(input.maxSol, profile.token0.decimals), amount1Max = amount(input.maxDevUsdc, profile.token1.decimals);
+  if (input.network !== 'Solana Devnet' && input.network !== 'Solana') throw new Error('SOLANA_CLUSTER_UNSUPPORTED');
+  const runtime = solanaLiquidityProfileOf(input.network);
+  if (!/^[1-9][0-9]{0,3}$/.test(input.slippage) || Number(input.slippage) > runtime.maximumSlippageBps) throw new Error('SOLANA_SLIPPAGE_OUT_OF_RANGE');
+  const amount0Max = amount(input.maxSol, runtime.token0.decimals), amount1Max = amount(input.maxDevUsdc, runtime.token1.decimals);
   if (amount0Max === '0' && amount1Max === '0') throw new Error('SOLANA_LIQUIDITY_ZERO');
-  if (BigInt(amount0Max) > BigInt(profile.token0.maximumAmount) || BigInt(amount1Max) > BigInt(profile.token1.maximumAmount)) throw new Error('AMOUNT_OUT_OF_RANGE');
+  if (BigInt(amount0Max) > BigInt(runtime.token0.maximumAmount) || BigInt(amount1Max) > BigInt(runtime.token1.maximumAmount)) throw new Error('AMOUNT_OUT_OF_RANGE');
   const { tickLower, tickUpper } = solanaLiquidityTicks(input);
-  return createConcentratedLiquidityNode(nodeId, { chain: profile.chain, token0: token(profile.token0), token1: token(profile.token1), amount0Max, amount1Max,
-    amount0Min: '0', amount1Min: '0', tickLower, tickUpper, feeTier: profile.feeTier, slippageBps: Number(input.slippage), protocols: [profile.protocol], recipient: null,
-    positionAsset: { chainId: profile.chain, address: profile.programs.whirlpool, decimals: 0 } });
+  const token = (t: OrcaLiquidityProfile['token0']) => ({ chainId: runtime.chain, address: t.mint, decimals: t.decimals });
+  return createConcentratedLiquidityNode(nodeId, { chain: runtime.chain, token0: token(runtime.token0), token1: token(runtime.token1), amount0Max, amount1Max,
+    amount0Min: '0', amount1Min: '0', tickLower, tickUpper, feeTier: runtime.feeTier, slippageBps: Number(input.slippage), protocols: [runtime.protocol], recipient: null,
+    positionAsset: { chainId: runtime.chain, address: runtime.programs.whirlpool, decimals: 0 } });
 }
-export type SolanaLiquidityDetails = { network: 'Solana Devnet'; maxSol: string; maxDevUsdc: string; tickLower: number; tickUpper: number; lowerPrice: string;
+export type SolanaLiquidityDetails = { network: SolanaLiquidityNetwork;
+  /** The pool's token B symbol: devUSDC (Devnet) or USDC (mainnet-beta). */ tokenB: string; maxSol: string; maxDevUsdc: string; tickLower: number; tickUpper: number; lowerPrice: string;
   upperPrice: string; slippage: string; provider: string;
   /** Set when the position is bound to a swap's output: that token's maximum is the cap on the actual reconciled swap output. */
   source: { nodeId: string; token: 0 | 1; fullOutput: boolean } | null };
 /** The bound token's cap that means "100% of the swap output": the Devnet token maximum (the swap output is the real limit). */
 export const fullOutputCap = (token: 0 | 1) => formatTokenAmount(token === 0 ? profile.token0.maximumAmount : profile.token1.maximumAmount, token === 0 ? profile.token0.decimals : profile.token1.decimals);
 export function solanaLiquidityDetails(node: SemanticWorkflow['nodes'][number] | { readonly actionType: string; readonly chainId: string }): SolanaLiquidityDetails | null {
-  if (node.actionType !== CONCENTRATED_LIQUIDITY_ACTION || node.chainId !== profile.chain) return null;
+  const runtime = orcaLiquidityProfile(node.chainId);
+  if (node.actionType !== CONCENTRATED_LIQUIDITY_ACTION || !runtime) return null;
   try {
     // Display reads a bound position too (the runtime readers stay strict and reject it outside its composition).
     const { node: isolated, source } = readConcentratedLiquiditySource(node as SemanticWorkflow['nodes'][number]);
     const f = readConcentratedLiquidity(isolated);
-    if (f.token0.address !== profile.token0.mint || f.token1.address !== profile.token1.mint || f.protocols.join() !== profile.protocol) return null;
-    const price = (tick: number) => orcaPriceFromSqrtPrice(orcaSqrtPriceAtTick(tick), profile.token0.decimals, profile.token1.decimals);
-    return { network: 'Solana Devnet', maxSol: formatTokenAmount(f.amount0Max, profile.token0.decimals), maxDevUsdc: formatTokenAmount(f.amount1Max, profile.token1.decimals),
+    if (f.token0.address !== runtime.token0.mint || f.token1.address !== runtime.token1.mint || f.protocols.join() !== runtime.protocol) return null;
+    const price = (tick: number) => orcaPriceFromSqrtPrice(orcaSqrtPriceAtTick(tick), runtime.token0.decimals, runtime.token1.decimals);
+    return { network: runtime.network, tokenB: runtime.token1.symbol, maxSol: formatTokenAmount(f.amount0Max, runtime.token0.decimals), maxDevUsdc: formatTokenAmount(f.amount1Max, runtime.token1.decimals),
       tickLower: f.tickLower, tickUpper: f.tickUpper, lowerPrice: price(f.tickLower), upperPrice: price(f.tickUpper), slippage: String(f.slippageBps ?? ''),
-      provider: profile.providerLabel, source: source ? { nodeId: source.nodeId, token: source.token,
-        fullOutput: (source.token === 0 ? f.amount0Max : f.amount1Max) === (source.token === 0 ? profile.token0.maximumAmount : profile.token1.maximumAmount) } : null };
+      provider: runtime.providerLabel, source: source ? { nodeId: source.nodeId, token: source.token,
+        fullOutput: (source.token === 0 ? f.amount0Max : f.amount1Max) === (source.token === 0 ? runtime.token0.maximumAmount : runtime.token1.maximumAmount) } : null };
   } catch { return null; }
 }
 /** Editing input that reproduces the node exactly (ticks are already aligned). */
 export function solanaLiquidityInputOf(details: SolanaLiquidityDetails): SolanaLiquidityInput {
-  return { network: 'Solana Devnet', maxSol: details.maxSol, maxDevUsdc: details.maxDevUsdc, rangeUnit: 'TICK', lower: String(details.tickLower), upper: String(details.tickUpper),
+  return { network: details.network, maxSol: details.maxSol, maxDevUsdc: details.maxDevUsdc, rangeUnit: 'TICK', lower: String(details.tickLower), upper: String(details.tickUpper),
     slippage: details.slippage };
 }
 const N = '([0-9]+(?:\\.[0-9]+)?)', T = '(-?[0-9]+)';

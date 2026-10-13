@@ -43,10 +43,17 @@ export function PoolPriceRangeProvider({ children }: { children: ReactNode }) {
   const [entries, setEntries] = useState<Record<string, RangeEdit>>({});
   function protocol(nodeId: string) {
     const selected = actionSetup?.id === nodeId ? actionSetup.cryptoSelection : cryptoSelections[nodeId];
-    if (selected?.action === 'pool') return selected.network === 'Solana Devnet' ? 'solana' : ['Base Sepolia', 'Ethereum Sepolia'].includes(selected.network) ? 'uniswap' : null;
+    if (selected?.action === 'pool') return selected.network === 'Solana Devnet' || selected.network === 'Solana' ? 'solana' : ['Base Sepolia', 'Ethereum Sepolia'].includes(selected.network) ? 'uniswap' : null;
     if (actionSetup?.id === nodeId && actionSetup.action === 'pool') return 'uniswap';
     const node = state.workflow.nodes.find(node => node.nodeId === nodeId);
     return node && uniswapLiquidityDetails(node) ? 'uniswap' : node && solanaLiquidityDetails(node) ? 'solana' : null;
+  }
+  /** BUILD-SOLANA-MAINNET-001: the Solana cluster of an Orca draft or position (its own pool's price, never the other cluster's). */
+  function solanaNetwork(nodeId: string): 'Solana Devnet' | 'Solana' | null {
+    const selected = actionSetup?.id === nodeId ? actionSetup.cryptoSelection : cryptoSelections[nodeId];
+    if (selected?.action === 'pool') return selected.network === 'Solana Devnet' || selected.network === 'Solana' ? selected.network : null;
+    const node = state.workflow.nodes.find(node => node.nodeId === nodeId);
+    return node ? solanaLiquidityDetails(node)?.network ?? null : null;
   }
   function network(nodeId: string): UniswapLiquidityNetwork | null {
     const selected = actionSetup?.id === nodeId ? actionSetup.cryptoSelection : cryptoSelections[nodeId];
@@ -57,14 +64,18 @@ export function PoolPriceRangeProvider({ children }: { children: ReactNode }) {
   }
   function reference(nodeId: string): RangeReference | null {
     const selectedNetwork = network(nodeId);
-    const price = protocol(nodeId) === 'uniswap' ? selectedNetwork && uniswap.priceChain === uniswapLiquidityProfileFor(selectedNetwork).chain ? uniswap.price : null : protocol(nodeId) === 'solana' ? solana.price : null;
-    return price && validPrice(price.price) ? { ...(selectedNetwork ? { network: selectedNetwork } : {}), price: price.price, quoteToken: protocol(nodeId) === 'uniswap' ? 'USDC' : 'devUSDC', ...('sqrtPriceX96' in price ? { sqrtPriceX96: price.sqrtPriceX96 } : {}) } : null;
+    const orca = solanaNetwork(nodeId);
+    const price = protocol(nodeId) === 'uniswap' ? selectedNetwork && uniswap.priceChain === uniswapLiquidityProfileFor(selectedNetwork).chain ? uniswap.price : null
+      : protocol(nodeId) === 'solana' ? solana.price && (solana.price.network ?? 'Solana Devnet') === orca ? solana.price : null : null;
+    // BUILD-SOLANA-MAINNET-001: an Orca position quotes in its own pool's token B (devUSDC on Devnet, USDC on mainnet-beta).
+    const quoteToken = protocol(nodeId) === 'uniswap' || orca === 'Solana' ? 'USDC' : 'devUSDC';
+    return price && validPrice(price.price) ? { ...(selectedNetwork ? { network: selectedNetwork } : {}), price: price.price, quoteToken, ...('sqrtPriceX96' in price ? { sqrtPriceX96: price.sqrtPriceX96 } : {}) } : null;
   }
   return <Context.Provider value={{ entries, reference,
     async refresh(nodeId) {
       if (reference(nodeId)) return;
       if (protocol(nodeId) === 'uniswap' && !uniswap.busy) await uniswap.fetchPrice(uniswapLiquidityProfileFor(network(nodeId) ?? 'Base Sepolia').chain);
-      if (protocol(nodeId) === 'solana' && !solana.busy) await solana.fetchPrice();
+      if (protocol(nodeId) === 'solana' && !solana.busy) await solana.fetchPrice(solanaNetwork(nodeId) ?? undefined);
     },
     edit(nodeId, percent, extent = 100) {
       if (!Number.isFinite(percent)) return;

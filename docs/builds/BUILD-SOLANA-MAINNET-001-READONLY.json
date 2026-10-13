@@ -1,0 +1,185 @@
+{
+  "evidence": "PUBLIC_READ_ONLY",
+  "broadcast": false,
+  "signed": false,
+  "endpoint": "https://api.mainnet-beta.solana.com",
+  "jupiter": {
+    "owner": "ED3dr9zwBeyP9PuJpeDwhvctAnUcbJHWR2Eikj9RyYbu",
+    "request": "1 USDC \u2192 SOL, 50 bps",
+    "route": [
+      "Byreal",
+      "TesseraV"
+    ],
+    "quotedOut": "9249813",
+    "minimumOut": "9203564",
+    "simulated": {
+      "inputSpent": "1000000",
+      "outputReceived": "9254515"
+    },
+    "feeLamports": "5301",
+    "messageHash": "0x6cc46b5fa7084d9069d72d6e014e8e79f455d348f01158a1011d5f4227738379",
+    "instructions": null
+  },
+  "checkedAt": "2026-10-13T07:04:45.757Z",
+  "checks": [
+    "cluster genesis 5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d = Solana mainnet-beta",
+    "Jupiter v6 and Orca Whirlpools programs are deployed and executable on mainnet-beta",
+    "SOL (wrapped), USDC and USDT mints are classic SPL Token mints with the profile decimals",
+    "pool HJPjoWUrhoZzkNfRpHuieeFk9WcZWjwy6PBjZ81ngndJ matches config, SOL/USDC mints, vaults, tick spacing 64, fee 3000; 1 initialized reward slot(s), none emitting",
+    "\u00b110% band 97.491164\u2013119.155868 USDC/SOL aligned outward to ticks -23296..-21248",
+    "\u00b110% and full-range tick arrays initialized (fixed-size)",
+    "Jupiter /build route for 1 USDC \u2192 SOL compiled into the exact Gryloo message and simulated; Review guard PASS",
+    "exact Orca OPEN message simulated: deposit 8480406 lamports + 1000000 USDC units, liquidity 58403850; Review guard PASS",
+    "all five Orca lifecycle instructions accepted by the deployed mainnet program in one read-only simulation; the position closes"
+  ],
+  "programs": {
+    "jupiter": {
+      "id": "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4",
+      "programData": "4Ec7ZxZS6Sbdg5UGSLHbAnM7GQHp2eFd4KYWRexAipQT",
+      "lastDeploySlot": 454465850
+    },
+    "whirlpool": {
+      "id": "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc",
+      "programData": "CtXfPzz36dH5Ws4UYKZvrQ1Xqzn42ecDW6y8NKuiN8nD",
+      "lastDeploySlot": 440170207
+    }
+  },
+  "mints": {
+    "SOL": {
+      "mint": "So11111111111111111111111111111111111111112",
+      "decimals": 9,
+      "program": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+    },
+    "USDC": {
+      "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      "decimals": 6,
+      "program": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+    },
+    "USDT": {
+      "mint": "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
+      "decimals": 6,
+      "program": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+    }
+  },
+  "pool": {
+    "address": "HJPjoWUrhoZzkNfRpHuieeFk9WcZWjwy6PBjZ81ngndJ",
+    "config": "2LecshUwdy9xi7meFgHtFJQNSKk4KdTrcpvaB56dP2NQ",
+    "tokenMintA": "So11111111111111111111111111111111111111112",
+    "tokenMintB": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    "tokenVaultA": "3YQm7ujtXWJU2e9jhp2QGHpnn1ShXn12QjvzMvDgabpX",
+    "tokenVaultB": "2JTw1fE2wz1SymWUQ7UqpVtrTuKjcd6mWwYwUJUCh2rq",
+    "tickSpacing": 64,
+    "feeRate": 3000,
+    "liquidity": "481626558727",
+    "sqrtPrice": "6071291670620740374",
+    "tickCurrentIndex": -22228,
+    "slot": 456353088,
+    "rewardMints": [
+      "orcaEKTdK7LKz57vaAYr9QeNsVEPfiu6QeMU1kektZE"
+    ],
+    "emittingRewardMints": []
+  },
+  "range": {
+    "pool": "HJPjoWUrhoZzkNfRpHuieeFk9WcZWjwy6PBjZ81ngndJ",
+    "slot": 456353094,
+    "tickCurrentIndex": -22228,
+    "tickSpacing": 64,
+    "price": "108.323516",
+    "lowerPrice": "97.491164",
+    "upperPrice": "119.155868",
+    "tickLower": -23296,
+    "tickUpper": -21248
+  },
+  "tickArrays": [
+    "A2W6hiA2nf16iqtbZt9vX8FJbiXjv3DBUG3DgTja61HT",
+    "CEstjhG1v4nUgvGDyFruYEbJ18X8XeN4sX1WFCLt4D5c",
+    "5qLbnQ6GQVcG8xCJTpAP1oUTwAVKGihidoaNLkSQztDC",
+    "3CHNtXvVWSpjR2sbK4S4HpyahV9UwC6nzLBT75eNfF5X"
+  ],
+  "orcaOpen": {
+    "owner": "ED3dr9zwBeyP9PuJpeDwhvctAnUcbJHWR2Eikj9RyYbu",
+    "profile": {
+      "maxSol": "0.01",
+      "maxUsdc": "1",
+      "rangeBps": 1000,
+      "slippageBps": 100
+    },
+    "rangeState": "IN_RANGE",
+    "alignedRange": {
+      "tickLower": -23296,
+      "tickUpper": -21248,
+      "lowerPrice": "97.346010",
+      "upperPrice": "119.469548"
+    },
+    "expected": {
+      "liquidity": "58403850",
+      "amountA": "8480406",
+      "amountB": "1000000",
+      "positionLiquidityAfter": "58403850"
+    },
+    "tokenBounds": {
+      "maxA": "8565211",
+      "maxB": "1000000"
+    },
+    "simulatedDeposit": {
+      "a": "8480406",
+      "b": "1000000"
+    },
+    "rentPaidLamports": "7143520",
+    "feeLamports": "10000",
+    "unitsConsumed": 92177,
+    "computeUnitLimit": 120613,
+    "messageBytes": 857,
+    "signers": 2,
+    "programs": [
+      "ComputeBudget111111111111111111111111111111",
+      "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+      "11111111111111111111111111111111",
+      "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc"
+    ],
+    "instructions": [
+      "set_compute_unit_limit",
+      "create_idempotent",
+      "transfer",
+      "sync_native",
+      "create_idempotent",
+      "open_position_with_token_extensions",
+      "increase_liquidity_v2",
+      "close_account"
+    ],
+    "messageHash": "0xf50baf874c9f6980af73784fac28ea97d3d7cfb568fc502ffeaaf71be15c3f9d"
+  },
+  "orcaLifecycle": {
+    "instructions": [
+      "open_position_with_token_extensions",
+      "increase_liquidity_v2",
+      "decrease_liquidity_v2",
+      "collect_fees_v2",
+      "close_position_with_token_extensions"
+    ],
+    "events": [
+      {
+        "kind": "PositionOpened",
+        "liquidity": null,
+        "tokenA": null,
+        "tokenB": null
+      },
+      {
+        "kind": "LiquidityIncreased",
+        "liquidity": "58403850",
+        "tokenA": "8480406",
+        "tokenB": "1000000"
+      },
+      {
+        "kind": "LiquidityDecreased",
+        "liquidity": "58403850",
+        "tokenA": "8480405",
+        "tokenB": "999999"
+      }
+    ],
+    "unitsConsumed": 139194,
+    "messageBytes": 968
+  },
+  "note": "PUBLIC_READ_ONLY: a public mainnet address was used only as the hypothetical taker / fee payer of signature-verification-off simulations. Nothing was signed or broadcast; no transaction exists. Not PUBLIC_EXECUTED."
+}

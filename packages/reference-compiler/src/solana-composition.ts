@@ -68,7 +68,7 @@ export async function simulateSolanaComposition(workflow: SemanticWorkflow, owne
   if (s.output.mint !== (token === 0 ? fields.token0.address : fields.token1.address)) fail('SOLANA_COMPOSITION_SWAP_REVIEW_MISMATCH');
   const cap = BigInt(compositionCap(workflow)), other = BigInt(token === 0 ? fields.amount1Max : fields.amount0Max), slippageBps = fields.slippageBps!;
   await verifySolanaCluster(rpc, profile.genesisHash);
-  const pool = await readOrcaLiquidityPool(rpc);
+  const pool = await readOrcaLiquidityPool(rpc, profile);
   const arrays = [orcaLiquidityTickArray(POOL.address, fields.tickLower), orcaLiquidityTickArray(POOL.address, fields.tickUpper)];
   const { accounts } = await readSolanaAccounts(rpc, arrays);
   const preflight: CompositionPreflight[] = [];

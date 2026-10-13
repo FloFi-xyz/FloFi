@@ -112,11 +112,11 @@ export function describeProposal(before: EditorState, after: EditorState, comman
     'Maxima are limits, not amounts to spend. A read-only Base Sepolia simulation computes the actual deposit; each approval and the mint need their own wallet signature. Test tokens only.']);
   const oldPosition = oldNode && solanaLiquidityDetails(oldNode), newPosition = newNode && solanaLiquidityDetails(newNode);
   if (newPosition) return Object.freeze([`Revision ${before.workflow.revision} → ${after.workflow.revision}`,
-    `Node ${newNode?.nodeId}: Concentrated liquidity on ${newPosition.network} via ${newPosition.provider} (Devnet SOL / devUSDC test pool)`,
-    `Maximum inputs: ${oldPosition ? `${oldPosition.maxSol} SOL + ${oldPosition.maxDevUsdc} devUSDC` : 'none'} → ${newPosition.maxSol} SOL + ${newPosition.maxDevUsdc} devUSDC`,
-    `Range: ${oldPosition ? `${oldPosition.lowerPrice}–${oldPosition.upperPrice}` : 'none'} → ${newPosition.lowerPrice}–${newPosition.upperPrice} devUSDC per SOL (ticks ${newPosition.tickLower} to ${newPosition.tickUpper}, aligned to spacing 64)`,
+    `Node ${newNode?.nodeId}: Concentrated liquidity on ${newPosition.network} via ${newPosition.provider} (${newPosition.network === 'Solana' ? 'SOL / USDC pool, fee 0.30%' : 'Devnet SOL / devUSDC test pool'})`,
+    `Maximum inputs: ${oldPosition ? `${oldPosition.maxSol} SOL + ${oldPosition.maxDevUsdc} ${oldPosition.tokenB}` : 'none'} → ${newPosition.maxSol} SOL + ${newPosition.maxDevUsdc} ${newPosition.tokenB}`,
+    `Range: ${oldPosition ? `${oldPosition.lowerPrice}–${oldPosition.upperPrice}` : 'none'} → ${newPosition.lowerPrice}–${newPosition.upperPrice} ${newPosition.tokenB} per SOL (ticks ${newPosition.tickLower} to ${newPosition.tickUpper}, aligned to spacing 64)`,
     `Slippage: ${oldPosition?.slippage ?? 'none'} → ${newPosition.slippage} bps; position owner: your connected wallet`,
-    'Maxima are limits, not amounts to spend. A read-only simulation computes the actual deposit; every position transaction needs its own exact review and wallet signature. Valueless Devnet test tokens.']);
+    `Maxima are limits, not amounts to spend. A read-only simulation computes the actual deposit; every position transaction needs its own exact review and wallet signature. ${newPosition.network === 'Solana' ? 'Real funds on Solana mainnet.' : 'Valueless Devnet test tokens.'}`]);
   const oldSolana = oldNode && solanaSwapDetails(oldNode), newSolana = newNode && solanaSwapDetails(newNode);
   if (newSolana) { const labels = solanaSwapLabels(newSolana.network); return Object.freeze([`Revision ${before.workflow.revision} → ${after.workflow.revision}`,
     `Node ${newNode?.nodeId}: Swap ${newSolana.from} → ${newSolana.to} on ${labels.network} via ${labels.provider}`,

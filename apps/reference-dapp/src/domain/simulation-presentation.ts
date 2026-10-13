@@ -282,7 +282,7 @@ export function projectSimulation(workflow: Workflow, context: ReviewContext, so
       const amounts = [simulationAmount(opening ? sim.depositedA : sim.withdrawnPrincipalA, q.token0.decimals, solanaSymbol(q.token0.symbol, q.cluster)), simulationAmount(opening ? sim.depositedB : sim.withdrawnPrincipalB, q.token1.decimals, solanaSymbol(q.token1.symbol, q.cluster))];
       result(s, null, amounts.every(Boolean) ? amounts.join(' + ') : null, 'Orca Whirlpools', null, q.intent.slippageBps);
       if (s) s.resultLabel = opening ? 'Expected pool contribution' : 'Expected withdrawal';
-      range(s, q.range, 'devUSDC per SOL'); fee('Estimated network fee', q.estimatedFeeLamports, 9, 'SOL');
+      range(s, q.range, `${solanaSymbol(q.token1.symbol, q.cluster)} per SOL`); fee('Estimated network fee', q.estimatedFeeLamports, 9, 'SOL');
       if (BigInt(sim.rentPaidLamports) > 0n) fee('Account deposits', sim.rentPaidLamports, 9, 'SOL', 'Account rent, separate from network fees.');
       break;
     }

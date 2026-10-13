@@ -4,7 +4,7 @@ import { ORCA_WHIRLPOOLS_DEVNET as profile, solanaDevnetTokenByMint } from '@def
 import { associatedTokenAddress, base58Encode, decompileMessageV0, fromBase64, parseMessageV0, parseTransaction, publicKeyBytes, readU64, toBase64,
   u64Bytes, verifyEd25519, type SolanaInstruction } from './solana.js';
 import { decodeOrcaSwapV2, orcaOracleAddress, orcaTickArrayAddress, orcaTickArrayStarts } from './orca-whirlpool.js';
-import { ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY as lp } from '@defi-workflow-engine/action-registry';
+import { ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY as devnetLiquidity, type OrcaLiquidityProfile } from '@defi-workflow-engine/action-registry';
 import { decodeOrcaModifyLiquidity, decodeOrcaOpenPosition, orcaLiquidityAmounts, orcaSqrtPriceAtTick, orcaTickArrayStart, orcaLiquidityTickArray } from './orca-liquidity.js';
 
 /**
@@ -19,9 +19,14 @@ const MICRO_USDC_PER_SOL = 22_300_000n;
 export type MockedOrcaOptions = { actualOutput?: (quoted: bigint) => bigint; failSwap?: boolean; extraInputDebit?: bigint; extraOwnerDebit?: bigint;
   send?: 'OK' | 'RPC_ERROR_AFTER_LANDING' | 'RPC_ERROR_DROPPED' | 'DROPPED'; confirmationDelay?: number; cluster?: string; poolConfig?: string; noTradeEvent?: boolean;
   /** BUILD-015 liquidity: synthetic trading fees credited to a position when it is next modified or collected. */
-  accrueFees?: { a: string; b: string }; failLiquidity?: boolean; poolRewardMint?: string; poolFeeRate?: number; extraVaultOutflowB?: bigint;
+  accrueFees?: { a: string; b: string }; failLiquidity?: boolean; poolRewardMint?: string; poolRewardEmissionsX64?: bigint; poolFeeRate?: number; extraVaultOutflowB?: bigint;
   /** Shift the pool price between simulation and execution (price movement), in ticks. */
-  priceShiftTicks?: number };
+  priceShiftTicks?: number;
+  /**
+   * BUILD-SOLANA-MAINNET-001: serve this Orca liquidity profile's cluster (genesis), pool, mints, vaults and fee rate instead of Devnet's — a MOCKED
+   * loopback of the mainnet-beta pool. The synthetic price is unchanged. Nothing here is public, Devnet or mainnet evidence.
+   */
+  liquidityProfile?: OrcaLiquidityProfile };
 type Position = { mint: string; liquidity: bigint; lower: number; upper: number; feeOwedA: bigint; feeOwedB: bigint };
 type Token = { mint: string; owner: string; amount: bigint };
 type Snapshot = { lamports: Map<string, bigint>; tokens: Map<string, Token>; lamportsOf: Map<string, bigint>; positions: Map<string, Position>; tokens2022: Map<string, Token>;
@@ -30,11 +35,15 @@ const POSITION_RENT = 2_885_440n, MINT_RENT = 1_676_400n, POSITION_TOKEN_RENT = 
 type Landed = { signature: string; slot: number; bytes: string; err: unknown; fee: bigint; keys: string[]; pre: bigint[]; post: bigint[];
   preTokens: unknown[]; postTokens: unknown[]; logs: string[]; finalizedAt: number };
 
-export function encodeMockedWhirlpool(config: string = profile.whirlpoolsConfig, options: { rewardMint?: string | undefined; feeRate?: number | undefined } = {}): Uint8Array {
+export function encodeMockedWhirlpool(config: string = profile.whirlpoolsConfig, options: { rewardMint?: string | undefined; rewardEmissionsX64?: bigint | undefined; feeRate?: number | undefined;
+  pool?: OrcaLiquidityProfile['pool'] | undefined } = {}): Uint8Array {
+  const POOL = options.pool ?? profile.pool;
   const data = new Uint8Array(653), view = new DataView(data.buffer);
   data.set(Buffer.from('3f95d10ce1806309', 'hex'), 0); data.set(publicKeyBytes(config), 8); data[40] = 255;
   view.setUint16(41, POOL.tickSpacing, true); view.setUint16(45, options.feeRate ?? Number(FEE_PPM), true); view.setUint16(47, 300, true);
   if (options.rewardMint) data.set(publicKeyBytes(options.rewardMint), 269);
+  // reward_infos[0].emissions_per_second_x64 (u128 at 269 + 96).
+  if (options.rewardEmissionsX64) { view.setBigUint64(365, options.rewardEmissionsX64 & ((1n << 64n) - 1n), true); view.setBigUint64(373, options.rewardEmissionsX64 >> 64n, true); }
   view.setBigUint64(49, 811_988_777_984n, true); view.setBigUint64(65, SQRT_PRICE & ((1n << 64n) - 1n), true); view.setBigUint64(73, SQRT_PRICE >> 64n, true);
   view.setInt32(81, TICK, true);
   data.set(publicKeyBytes(POOL.tokenMintA), 101); data.set(publicKeyBytes(POOL.tokenVaultA), 133); data.set(publicKeyBytes(POOL.tokenMintB), 181); data.set(publicKeyBytes(POOL.tokenVaultB), 213);
@@ -49,6 +58,7 @@ function tradedLog(aToB: boolean, input: bigint, output: bigint): string {
   return 'Program data: ' + toBase64(data);
 }
 export function createMockedSolanaDevnetOrca(options: MockedOrcaOptions = {}) {
+  const lp = options.liquidityProfile ?? devnetLiquidity, POOL = lp.pool;
   const state = { slot: 400_000_000, blockHeight: 380_000_000, lamports: new Map<string, bigint>(), tokens: new Map<string, Token>(), lamportsOf: new Map<string, bigint>(),
     positions: new Map<string, Position>(), tokens2022: new Map<string, Token>(), mints: new Set<string>(), accrued: new Set<string>(),
     transactions: new Map<string, Landed>(), sent: [] as string[] };
@@ -180,7 +190,8 @@ export function createMockedSolanaDevnetOrca(options: MockedOrcaOptions = {}) {
     return { err: null, fee, units: 68_000, logs };
   }
   const accountValue = (s: Snapshot, k: string) => {
-    if (k === POOL.address) { const data = encodeMockedWhirlpool(options.poolConfig, { rewardMint: options.poolRewardMint, feeRate: options.poolFeeRate });
+    if (k === POOL.address) { const data = encodeMockedWhirlpool(options.poolConfig ?? lp.whirlpoolsConfig, { rewardMint: options.poolRewardMint, rewardEmissionsX64: options.poolRewardEmissionsX64,
+        feeRate: options.poolFeeRate ?? lp.feeTier, pool: POOL });
       if (options.priceShiftTicks) { const view = new DataView(data.buffer), sqrt = poolSqrt(); view.setBigUint64(65, sqrt & ((1n << 64n) - 1n), true); view.setBigUint64(73, sqrt >> 64n, true); view.setInt32(81, poolTick(), true); }
       return { lamports: 5_000_000, owner: P.whirlpool, data: [toBase64(data), 'base64'], executable: false, rentEpoch: 0, space: data.length }; }
     const position = s.positions.get(k);
@@ -235,7 +246,7 @@ export function createMockedSolanaDevnetOrca(options: MockedOrcaOptions = {}) {
   const value = (v: unknown) => ({ context: { slot: state.slot, apiVersion: 'mocked' }, value: v });
   async function rpc(method: string, params: readonly unknown[]): Promise<unknown> {
     switch (method) {
-      case 'getGenesisHash': return options.cluster ?? profile.genesisHash;
+      case 'getGenesisHash': return options.cluster ?? lp.genesisHash;
       case 'getMultipleAccounts': return value((params[0] as string[]).map(k => accountValue(snapshot(), k)));
       case 'getLatestBlockhash': { const hash = blockhash(state.blockHeight); issued.set(hash, state.blockHeight + 150); return value({ blockhash: hash, lastValidBlockHeight: state.blockHeight + 150 }); }
       case 'getBlockHeight': return state.blockHeight;

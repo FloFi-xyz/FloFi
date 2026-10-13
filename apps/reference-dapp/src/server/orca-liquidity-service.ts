@@ -2,8 +2,8 @@
 import { randomBytes } from 'node:crypto';
 import { isAbsolute } from 'node:path';
 import { validateAuthoringWorkflow, createBaseSepoliaReviewContext } from '@defi-workflow-engine/reference-linter';
-import { ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY as profile, assertOrcaLiquidityReview, inspectOrcaPosition, readOrcaLiquidityPrice, simulateOrcaLiquidity,
-  solanaAddress, verifySignedOrcaLiquidityTransaction, type OrcaLiquidityOperation, type SolanaRpc } from '@defi-workflow-engine/reference-compiler';
+import { ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY, assertOrcaLiquidityReview, inspectOrcaPosition, orcaLiquidityIntentProfile, readOrcaLiquidityPrice, simulateOrcaLiquidity,
+  solanaAddress, verifySignedOrcaLiquidityTransaction, type OrcaLiquidityOperation, type OrcaLiquidityProfile, type SolanaRpc } from '@defi-workflow-engine/reference-compiler';
 import { createOrcaLiquidityRun, orcaLiquidityAttemptResolved, orcaLiquidityTransition, prepareOrcaLiquidityAttempt, recordOrcaLiquiditySignature,
   solanaSwapObservationDecision, validateOrcaLiquidityRun, createFileExecutionStorage, logMissing, utf8, ORCA_LIQUIDITY_ID, type ExecutionStorage, type OrcaLiquidityRun,
   type OrcaLiquidityProvenance } from '@defi-workflow-engine/reference-executor';
@@ -12,7 +12,8 @@ import { buildOrcaLiquidityEvidence, classifyOrcaLiquidityEvidence, reconcileOrc
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 
 /**
- * BUILD-015 Orca Whirlpools liquidity on Solana Devnet. Simulation and Review are read-only. Each lifecycle operation
+ * BUILD-015 Orca Whirlpools liquidity on Solana Devnet; BUILD-SOLANA-MAINNET-001: one service instance per cluster (`profile`), each on its own
+ * storage. A service refuses any workflow, record or Review of another cluster. Simulation and Review are read-only. Each lifecycle operation
  * (OPEN, DECREASE_PARTIAL, EXIT) is one reviewed transaction that needs the owner's Execute click and wallet signature;
  * OPEN also carries the client-side position-mint signature, whose secret never reaches this server.
  *
@@ -31,7 +32,10 @@ type RegistryLine = { positionMint: string; id: string; operation: OrcaLiquidity
 const code = (cause: unknown, fallback: string) => cause instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(cause.message) ? cause.message : fallback;
 const X = 'ORCA_LIQUIDITY';
 
-export function createOrcaLiquidityService(input: { rpc: SolanaRpc; journalDir?: string; storage?: ExecutionStorage; provenance: OrcaLiquidityProvenance; executionEnabled: boolean; now?: () => number }) {
+export function createOrcaLiquidityService(input: { rpc: SolanaRpc; journalDir?: string; storage?: ExecutionStorage; provenance: OrcaLiquidityProvenance; executionEnabled: boolean; now?: () => number;
+  /** The cluster this service serves; Devnet unless stated. */ profile?: OrcaLiquidityProfile }) {
+  const profile = input.profile ?? ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY;
+  if (input.provenance !== 'MOCKED' && input.provenance !== profile.provenance) throw new Error(`ORCA_LIQUIDITY_STORAGE_INVALID`);
   // Local mode keeps the original journal directory; cloud mode supplies shared durable storage instead.
   if (!input.storage && (!input.journalDir || !isAbsolute(input.journalDir) || input.journalDir.includes('/.git/'))) throw new Error(`${X}_STORAGE_INVALID`);
   const { log, leases } = input.storage ?? createFileExecutionStorage(input.journalDir!, `${X}_BUSY`);
@@ -48,7 +52,7 @@ export function createOrcaLiquidityService(input: { rpc: SolanaRpc; journalDir?:
     for (const line of text.trimEnd().split('\n')) {
       const record = JSON.parse(line) as OrcaLiquidityRecord;
       validateOrcaLiquidityRun(record);
-      if (record.provenance !== input.provenance || record.evidenceClass !== classify(record) ||
+      if (record.review.chain !== profile.chain || record.provenance !== input.provenance || record.evidenceClass !== classify(record) ||
           record.notSubmitted && (record.attempt?.signature || record.attempt && record.attempt.state !== 'CANCELLED')) throw new Error(`${X}_STORE_CORRUPT`);
       if (prior) {
         const prefix = (a: unknown[], b: unknown[]) => b.length >= a.length && JSON.stringify(b.slice(0, a.length)) === JSON.stringify(a);
@@ -115,7 +119,7 @@ export function createOrcaLiquidityService(input: { rpc: SolanaRpc; journalDir?:
         const r = await load(l.id);
         return { id: r.id, operation: r.operation, state: r.attempt?.state ?? null, verdict: r.verdict, signature: r.attempt?.signature ?? null, record: r };
       }));
-      const chain = await inspectOrcaPosition(input.rpc, owner, positionMint);
+      const chain = await inspectOrcaPosition(input.rpc, owner, positionMint, profile);
       const open = runs.find(r => r.operation === 'OPEN');
       const pendingOpen = open && !orcaLiquidityAttemptResolved(open.record);
       const status: OrcaPositionEntry['status'] = chain.exists ? BigInt(chain.position.liquidity) > 0n ? 'ACTIVE' : 'EMPTY'
@@ -131,11 +135,13 @@ export function createOrcaLiquidityService(input: { rpc: SolanaRpc; journalDir?:
       return { id: r.id, operation: r.operation, verdict: r.verdict, state: r.attempt?.state ?? null, signature: r.attempt?.signature ?? null }; })) });
   return {
     load, positions, executionEnabled: input.executionEnabled,
-    async price() { return readOrcaLiquidityPrice(input.rpc); },
-    async inspect(owner: string, positionMint: string) { return inspectOrcaPosition(input.rpc, solanaAddress(owner), solanaAddress(positionMint)); },
+    async price() { return readOrcaLiquidityPrice(input.rpc, profile); },
+    async inspect(owner: string, positionMint: string) { return inspectOrcaPosition(input.rpc, solanaAddress(owner), solanaAddress(positionMint), profile); },
     async simulate(workflowInput: unknown, ownerInput: string, request: { operation: OrcaLiquidityOperation; positionMint: string; partBps?: number }): Promise<OrcaLiquidityRecord> {
       const workflow = validateAuthoringWorkflow(workflowInput, createBaseSepoliaReviewContext());
       const owner = solanaAddress(ownerInput), positionMint = solanaAddress(request.positionMint);
+      // This service's cluster only: a position on another cluster belongs to that cluster's service, storage and wallet chain.
+      if (orcaLiquidityIntentProfile(workflow, owner).profile.chain !== profile.chain) throw new Error('SOLANA_CLUSTER_UNSUPPORTED');
       const known = await positions(owner);
       if (request.operation === 'OPEN') {
         // Recover the real position rather than create another: one Gryloo position per owner on this pool.

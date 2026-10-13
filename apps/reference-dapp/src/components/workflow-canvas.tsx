@@ -35,7 +35,7 @@ import { canEditCanvasAmount, canvasAmountCommand, setupSummary, bridgePairLabel
 import { ActionIcon } from './action-icon';
 import { ensureNetworkCatalog, useNetworkCatalog } from '../state/asset-catalog-store';
 import { CATALOG_NETWORK_IDENTITIES } from '../domain/network-registry';
-import { cryptoNetworks, cryptoSelectionOf, cryptoProfile, cryptoTokenOptions, selectCryptoNetwork, selectCryptoToken, canSelectCryptoAssets, type CryptoSelection, type CryptoAction } from '../domain/crypto-action-picker';
+import { counterpartSelection, cryptoNetworks, cryptoSelectionOf, cryptoProfile, cryptoTokenOptions, selectCryptoNetwork, selectCryptoToken, canSelectCryptoAssets, type CryptoSelection, type CryptoAction } from '../domain/crypto-action-picker';
 import { actionReviewValue } from '../domain/canvas-action-setup';
 import { SimulateWorkflowCanvas } from './simulate-workflow-canvas';
 import { composerActions, composerSummary, composerNodeState, composerConnections, singleAmountProposalTarget } from '../domain/composer-presentation';
@@ -230,7 +230,7 @@ function ReadonlyWorkflowCanvas({ mode, workflowName, overlay, primaryAction }: 
       minimum: `${formatHumanAmount(current.minimum, current.symbol, context)} ${current.symbol}`,
     } : null;
     return { id: node.nodeId, type: 'workflow', position: lending?{x:180,y:35+index*230}:{ x: 60 + index * 280, y: 70 + (index % 2) * 40 },
-      data: { chain: shellChainLabel(node.chainId), risk: node.actionType === 'borrow' ? 'Variable debt' : node.actionType === 'withdraw' ? 'Collateral change' : undefined, lending:Boolean(lending), title: lending?(node.nodeId==='lending-supply'?'Aave Supply':node.nodeId==='lending-borrow'?'Aave Borrow':'Uniswap Swap'):node.actionType==='asset.transfer'?'Self-transfer test ETH':lending&&node.actionType==='asset.swap.exact-input'?'Borrowed Aave USDC → WETH':node.actionType==='withdraw'?'Withdraw from Aave V3':node.actionType==='repay'?'Repay to Aave V3':node.actionType==='borrow'?'Borrow from Aave V3':node.actionType === 'supply' ? 'Supply to Aave V3' : crossChain ? (crossBridge ? 'Bridge USDC' : preparation ? 'Calculate destination split' : crossSwap ? 'Swap selected USDC for WETH' : 'Mint Uniswap v3 position') : routed ? (routed.network === 'testnet' ? 'Base Sepolia → Arbitrum Sepolia USDC' : 'Base → Arbitrum USDC') : across ? 'Base → Arbitrum USDC' : bridgeSwap ? (bridge ? 'Base → Arbitrum USDC' : 'Arbitrum USDC → WETH') : bridge ? 'Base → Optimism USDC' : isLiquidity ? 'WETH/USDC v3 position' : orcaPosition ? 'SOL/devUSDC position' : uniPosition ? 'USDC/WETH v3 position' : solana ? `${solana.from} → ${solana.to}` : swap ? `${swap.from} → ${swap.to}` : node.actionType.startsWith('mock-') ? node.actionType.slice(5).replace(/^./, letter => letter.toUpperCase()) : node.actionType, amount: node.actionType==='asset.transfer'?transferCardLabel(node as Parameters<typeof transferCardLabel>[0]):lending?(node.actionType==='supply'?`${lending.supply} USDC collateral`:node.actionType==='borrow'?`${lending.borrow} USDC · HF checkpoint ≥ 2.0`:`Exactly ${lending.borrow} borrowed USDC`):['withdraw','repay','borrow','supply'].includes(node.actionType)?lendingAmountLabel(node as Parameters<typeof lendingAmountLabel>[0])??'' : crossChain ? (crossBridge ? 'Base USDC → Arbitrum USDC' : preparation ? 'Reconciled amount → range ratio' : crossSwap ? 'Calculated partial USDC input' : `Ticks ${range} · fee 500`) : routed ? `${routed.amount} USDC → ${routed.recipient ? routed.recipient.slice(0, 8) + '…' : 'your wallet'} · ${routed.slippage} bps` : bridgeSwap && !bridge ? 'Reconciled USDC input' : bridge ? `${bridge.amount} USDC · ${bridge.slippageBps} bps` : isLiquidity ? `Ticks ${range} · fee 500` : orcaPosition ? `${orcaPosition.lowerPrice}–${orcaPosition.upperPrice} devUSDC/SOL · ${orcaPosition.network}` : uniPosition ? `${uniPosition.lowerPrice}–${uniPosition.upperPrice} USDC/WETH · ${uniPosition.network}` : solana ? `${solana.amount} ${solana.from} · ${solana.network} · ${solana.slippage} bps` : swap ? `${swap.amount} ${swap.from} · ${swap.slippage ?? 'missing'} bps` : `${amountOf(node)} sample units`, locked: node.lockedParameters.length > 0, selected: false, supply: ['supply','borrow','repay','withdraw'].includes(node.actionType), swap: node.actionType === SWAP_ACTION, solana: Boolean(solana || orcaPosition || uniPosition || routed), solanaKind: solana ? solanaSwapLabels(solana.network).kind : orcaPosition ? 'SOLANA DEVNET · ORCA' : uniPosition ? `${uniPosition.network.toUpperCase()} · UNISWAP V3` : routed ? (routed.network === 'testnet' ? 'TESTNET · BASE SEPOLIA → ARBITRUM SEPOLIA · CROSS-CHAIN ROUTER' : 'BASE → ARBITRUM · CROSS-CHAIN ROUTER') : undefined, solanaProvider: solana ? solanaSwapLabels(solana.network).provider : orcaPosition ? orcaPosition.provider : uniPosition ? uniPosition.provider : routed ? ROUTER_ROUTING_LABEL[routed.routing] : undefined, bridge: Boolean(bridge) || crossBridge, liquidity: isLiquidity, composition, bridgeSwap, across, crossChain, preparation, simulate },
+      data: { chain: shellChainLabel(node.chainId), risk: node.actionType === 'borrow' ? 'Variable debt' : node.actionType === 'withdraw' ? 'Collateral change' : undefined, lending:Boolean(lending), title: lending?(node.nodeId==='lending-supply'?'Aave Supply':node.nodeId==='lending-borrow'?'Aave Borrow':'Uniswap Swap'):node.actionType==='asset.transfer'?'Self-transfer test ETH':lending&&node.actionType==='asset.swap.exact-input'?'Borrowed Aave USDC → WETH':node.actionType==='withdraw'?'Withdraw from Aave V3':node.actionType==='repay'?'Repay to Aave V3':node.actionType==='borrow'?'Borrow from Aave V3':node.actionType === 'supply' ? 'Supply to Aave V3' : crossChain ? (crossBridge ? 'Bridge USDC' : preparation ? 'Calculate destination split' : crossSwap ? 'Swap selected USDC for WETH' : 'Mint Uniswap v3 position') : routed ? (routed.network === 'testnet' ? 'Base Sepolia → Arbitrum Sepolia USDC' : 'Base → Arbitrum USDC') : across ? 'Base → Arbitrum USDC' : bridgeSwap ? (bridge ? 'Base → Arbitrum USDC' : 'Arbitrum USDC → WETH') : bridge ? 'Base → Optimism USDC' : isLiquidity ? 'WETH/USDC v3 position' : orcaPosition ? `SOL/${orcaPosition.tokenB} position` : uniPosition ? 'USDC/WETH v3 position' : solana ? `${solana.from} → ${solana.to}` : swap ? `${swap.from} → ${swap.to}` : node.actionType.startsWith('mock-') ? node.actionType.slice(5).replace(/^./, letter => letter.toUpperCase()) : node.actionType, amount: node.actionType==='asset.transfer'?transferCardLabel(node as Parameters<typeof transferCardLabel>[0]):lending?(node.actionType==='supply'?`${lending.supply} USDC collateral`:node.actionType==='borrow'?`${lending.borrow} USDC · HF checkpoint ≥ 2.0`:`Exactly ${lending.borrow} borrowed USDC`):['withdraw','repay','borrow','supply'].includes(node.actionType)?lendingAmountLabel(node as Parameters<typeof lendingAmountLabel>[0])??'' : crossChain ? (crossBridge ? 'Base USDC → Arbitrum USDC' : preparation ? 'Reconciled amount → range ratio' : crossSwap ? 'Calculated partial USDC input' : `Ticks ${range} · fee 500`) : routed ? `${routed.amount} USDC → ${routed.recipient ? routed.recipient.slice(0, 8) + '…' : 'your wallet'} · ${routed.slippage} bps` : bridgeSwap && !bridge ? 'Reconciled USDC input' : bridge ? `${bridge.amount} USDC · ${bridge.slippageBps} bps` : isLiquidity ? `Ticks ${range} · fee 500` : orcaPosition ? `${orcaPosition.lowerPrice}–${orcaPosition.upperPrice} ${orcaPosition.tokenB}/SOL · ${orcaPosition.network}` : uniPosition ? `${uniPosition.lowerPrice}–${uniPosition.upperPrice} USDC/WETH · ${uniPosition.network}` : solana ? `${solana.amount} ${solana.from} · ${solana.network} · ${solana.slippage} bps` : swap ? `${swap.amount} ${swap.from} · ${swap.slippage ?? 'missing'} bps` : `${amountOf(node)} sample units`, locked: node.lockedParameters.length > 0, selected: false, supply: ['supply','borrow','repay','withdraw'].includes(node.actionType), swap: node.actionType === SWAP_ACTION, solana: Boolean(solana || orcaPosition || uniPosition || routed), solanaKind: solana ? solanaSwapLabels(solana.network).kind : orcaPosition ? `${orcaPosition.network.toUpperCase()} · ORCA` : uniPosition ? `${uniPosition.network.toUpperCase()} · UNISWAP V3` : routed ? (routed.network === 'testnet' ? 'TESTNET · BASE SEPOLIA → ARBITRUM SEPOLIA · CROSS-CHAIN ROUTER' : 'BASE → ARBITRUM · CROSS-CHAIN ROUTER') : undefined, solanaProvider: solana ? solanaSwapLabels(solana.network).provider : orcaPosition ? orcaPosition.provider : uniPosition ? uniPosition.provider : routed ? ROUTER_ROUTING_LABEL[routed.routing] : undefined, bridge: Boolean(bridge) || crossBridge, liquidity: isLiquidity, composition, bridgeSwap, across, crossChain, preparation, simulate },
     };
   }).map(node => mode === 'execute' ? { ...node, data: { ...node.data, overview: true } } : node), [workflow, overlay, context, mode]);
   const edges = useMemo(() => (lendingCanvasEdges(workflow)??workflow.resourceEdges.map(edge => ({
@@ -387,23 +387,41 @@ function BuildCanvas({ environment, selectedId, select, openSettings, workflowNa
     if (pending?.command.type === 'ADD_ROUTER_BRIDGE' || pending?.command.type === 'SET_ROUTER_BRIDGE') dismissProposal();
     else if (pending && ['ADD_CRYPTO_ACTION', 'SET_CRYPTO_ACTION', 'ADD_UNISWAP_LIQUIDITY', 'SET_UNISWAP_LIQUIDITY', 'ADD_SOLANA_LIQUIDITY', 'SET_SOLANA_LIQUIDITY', 'ADD_SUPPLY', 'SET_SUPPLY', 'ADD_BORROW', 'SET_BORROW', 'ADD_REPAY', 'SET_REPAY', 'ADD_WITHDRAW', 'SET_WITHDRAW'].includes(pending.command.type)) dismissProposal();
   }, [environment, pending, dismissProposal]);
+  // BUILD-SOLANA-MAINNET-001: a step changes network only when the wallet's environment changes between Mainnet and Testnet, and then only to
+  // its own network family's counterpart (Solana Devnet → Solana, never to another chain); a step without one stays as it is, blocked. Opening a
+  // saved or handed-off workflow never re-networks it. A new draft that has no network yet starts on the environment's first network.
+  const settledEnvironment = useRef<WalletEnvironment | null>(null);
+  const environmentTransitions = useRef(0), assetTransitions = useRef(0), routeTransitions = useRef(0);
   useEffect(() => {
     if (!environment || environment === 'unknown') return;
+    const previous = settledEnvironment.current;
+    settledEnvironment.current = environment;
+    if (previous && previous !== environment) environmentTransitions.current += 1;
+  }, [environment]);
+  useEffect(() => {
+    if (!environment || environment === 'unknown') return;
+    const transition = assetTransitions.current !== environmentTransitions.current;
+    assetTransitions.current = environmentTransitions.current;
     // The Stocks card is Robinhood Chain only: it never moves to another network with the wallet environment.
     if (actionSetup && actionSetup.action !== 'bridge' && !(actionSetup.action === 'swap' && actionSetup.stocks)) {
       const available = cryptoNetworks(actionSetup.action, environment);
       const selection = actionSetup.cryptoSelection;
-      if (available.length && !available.some(profile => profile.network === selection?.network)) editCryptoSelection(actionSetup.id, selectCryptoNetwork(actionSetup.action, available[0]!.network, selection), wallet.account ?? undefined);
+      const next = !available.length || available.some(profile => profile.network === selection?.network) ? null
+        : selection ? counterpartSelection(selection, environment) : selectCryptoNetwork(actionSetup.action, available[0]!.network);
+      if (next) editCryptoSelection(actionSetup.id, next, wallet.account ?? undefined);
     }
+    if (!transition) return;
     for (const node of workflow.nodes) {
       const selection = cryptoSelections[node.nodeId] ?? cryptoSelectionOf(node);
       if (!selection || !canSelectCryptoAssets(node, workflow) || composerSummary(workflow, node, context).action === 'Stocks') continue;
-      const available = cryptoNetworks(selection.action, environment);
-      if (available.length && !available.some(profile => profile.network === selection.network)) editCryptoSelection(node.nodeId, selectCryptoNetwork(selection.action, available[0]!.network, selection), wallet.account ?? undefined);
+      const next = counterpartSelection(selection, environment);
+      if (next && next !== selection) editCryptoSelection(node.nodeId, next, wallet.account ?? undefined);
     }
   }, [environment, actionSetup, workflow, cryptoSelections, editCryptoSelection, wallet.account, context]);
   useEffect(() => {
     if (environment !== 'mainnet' && environment !== 'testnet') return;
+    const transition = routeTransitions.current !== environmentTransitions.current;
+    routeTransitions.current = environmentTransitions.current;
     const option = ROUTER_NETWORK_OPTIONS[environment];
     const alignNetworks = (id: string, current: CanvasBridgeNetworks) => {
       // BUILD-RH-002: any route of the wallet's environment stays (mainnet: Base → Arbitrum One and the Robinhood Chain routes).
@@ -417,7 +435,7 @@ function BuildCanvas({ environment, selectedId, select, openSettings, workflowNa
       if (Object.keys(patch).length) editBridgeNetworks(id, patch);
     };
     if (actionSetup?.action === 'bridge') alignNetworks(actionSetup.id, bridgeSetupNetworks(actionSetup));
-    for (const node of workflow.nodes) {
+    if (transition) for (const node of workflow.nodes) {
       const details = routerDetails(node);
       if (details && canEditCanvasAmount(node, context, workflow)) alignNetworks(node.nodeId, bridgeNetworkInputs[node.nodeId] ?? details);
     }

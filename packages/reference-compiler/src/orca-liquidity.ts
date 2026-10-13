@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY as profile, type OrcaLiquidityOperation } from '@defi-workflow-engine/action-registry';
-export { ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY, ORCA_LIQUIDITY_OPERATIONS } from '@defi-workflow-engine/action-registry';
-export type { OrcaLiquidityOperation } from '@defi-workflow-engine/action-registry';
+import { ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY as program, orcaLiquidityProfile, type OrcaLiquidityOperation, type OrcaLiquidityProfile } from '@defi-workflow-engine/action-registry';
+export { ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY, ORCA_WHIRLPOOLS_MAINNET_LIQUIDITY, ORCA_LIQUIDITY_OPERATIONS, ORCA_LIQUIDITY_PROFILES, orcaLiquidityProfile } from '@defi-workflow-engine/action-registry';
+export type { OrcaLiquidityOperation, OrcaLiquidityProfile } from '@defi-workflow-engine/action-registry';
 import { CONCENTRATED_LIQUIDITY_ACTION, readConcentratedLiquidity, type SemanticWorkflow, type ArtifactSet, type SimulationBundle,
   type AuthorizationPolicy, type StrategyManifest, type ExecutionPlan } from '@defi-workflow-engine/workflow-contracts';
 import { associatedTokenAddress, base58Encode, compileMessageV0, decompileMessageV0, findProgramAddress, fromBase64, parseMessageV0, parseTransaction,
@@ -12,7 +12,9 @@ import { readSolanaAccounts, rpcContextValue, setComputeUnitLimit, solanaSwapArt
 import { decodeWhirlpool, type OrcaPool } from './orca-whirlpool.js';
 
 /**
- * BUILD-015: the canonical `asset.liquidity.concentrated` action on Solana Devnet through Orca Whirlpools.
+ * BUILD-015: the canonical `asset.liquidity.concentrated` action on Solana Devnet through Orca Whirlpools; BUILD-SOLANA-MAINNET-001: the same
+ * engine on Solana mainnet-beta. The workflow's (or the Review's) chain selects the profile — pool, mints, vaults, fee tier, evidence — and an
+ * unknown chain fails closed. Program constants (instructions, events, discriminators, tick bounds) are the program's own and equal on both.
  * Gryloo reads and verifies the pool and position, computes liquidity with the program's own integer math, builds every
  * instruction itself, compiles the exact v0 message and simulates it read-only. Nothing here signs or sends.
  *
@@ -22,8 +24,13 @@ import { decodeWhirlpool, type OrcaPool } from './orca-whirlpool.js';
  *  - DECREASE_PARTIAL: decrease_liquidity_v2 (part of the liquidity) + collect_fees_v2. Signer: owner.
  *  - EXIT: decrease_liquidity_v2 (all remaining) + collect_fees_v2 + close_position_with_token_extensions. Signer: owner.
  */
-const P = profile.programs, POOL = profile.pool;
+/** Program constants, equal on every cluster's deployment (pinned by the registry tests). */
+const P = program.programs;
 const fail = (code: string): never => { throw new Error(code); };
+/** The Orca liquidity profile of a chain; any other chain fails closed. */
+export function requireOrcaLiquidityProfile(chain: string): OrcaLiquidityProfile {
+  return orcaLiquidityProfile(chain) ?? fail('SOLANA_CLUSTER_UNSUPPORTED');
+}
 const hex = (bytes: Uint8Array) => Buffer.from(bytes).toString('hex');
 const utf8 = (text: string) => new TextEncoder().encode(text);
 const u128 = (data: Uint8Array, at: number): bigint => readU64(data, at) + (readU64(data, at + 8) << 64n);
@@ -31,7 +38,7 @@ const i32 = (data: Uint8Array, at: number): number => new DataView(data.buffer, 
 const i32Bytes = (value: number): number[] => { const b = new Uint8Array(4); new DataView(b.buffer).setInt32(0, value, true); return [...b]; };
 const u128Bytes = (value: bigint): number[] => { if (value < 0n || value >= 1n << 128n) fail('ORCA_LIQUIDITY_INTEGER_INVALID'); return [...u64Bytes(value & (1n << 64n) - 1n), ...u64Bytes(value >> 64n)]; };
 const U64_MAX = (1n << 64n) - 1n;
-const disc = (name: keyof typeof profile.instructions) => [...Buffer.from(profile.instructions[name], 'hex')];
+const disc = (name: keyof typeof program.instructions) => [...Buffer.from(program.instructions[name], 'hex')];
 
 // ---------------------------------------------------------------------------------------------------------------
 // Exact Orca integer math (math/tick_math.rs, math/token_math.rs, manager/liquidity_manager.rs).
@@ -48,7 +55,7 @@ const NEGATIVE: readonly bigint[] = [18445821805675392311n, 18444899583751176498
 export const ORCA_MIN_SQRT_PRICE = 4295048016n, ORCA_MAX_SQRT_PRICE = 79226673515401279992447579055n;
 /** sqrt_price_from_tick_index: Q64.64 sqrt(1.0001^tick), bit-identical to the program. */
 export function orcaSqrtPriceAtTick(tick: number): bigint {
-  if (!Number.isSafeInteger(tick) || tick < profile.minTick || tick > profile.maxTick) fail('ORCA_TICK_INVALID');
+  if (!Number.isSafeInteger(tick) || tick < program.minTick || tick > program.maxTick) fail('ORCA_TICK_INVALID');
   if (tick >= 0) {
     let ratio = tick & 1 ? POSITIVE[0]! : 79228162514264337593543950336n;
     for (let bit = 1; bit < 19; bit++) if (tick & (1 << bit)) ratio = ratio * POSITIVE[bit]! >> 96n;
@@ -62,7 +69,7 @@ export function orcaSqrtPriceAtTick(tick: number): bigint {
 /** The largest tick whose sqrt price is at or below `sqrtPrice` (exact; binary search over the program's own table). */
 export function orcaTickAtSqrtPrice(sqrtPrice: bigint): number {
   if (sqrtPrice < ORCA_MIN_SQRT_PRICE || sqrtPrice > ORCA_MAX_SQRT_PRICE) fail('ORCA_PRICE_OUT_OF_RANGE');
-  let lo: number = profile.minTick, hi: number = profile.maxTick;
+  let lo: number = program.minTick, hi: number = program.maxTick;
   while (lo < hi) { const mid = Math.floor((lo + hi + 1) / 2); if (orcaSqrtPriceAtTick(mid) <= sqrtPrice) lo = mid; else hi = mid - 1; }
   return lo;
 }
@@ -142,18 +149,18 @@ const alignUp = (tick: number, spacing: number) => Math.ceil(tick / spacing) * s
  * Deterministic alignment of a human price range to usable ticks: the lower bound rounds down and the upper bound rounds
  * up to the tick spacing, so the aligned range always contains the requested one. Integer-only; no floating point.
  */
-export function orcaAlignPriceRange(lowerPrice: string, upperPrice: string, spacing = POOL.tickSpacing, decimals0 = profile.token0.decimals,
-  decimals1 = profile.token1.decimals): { tickLower: number; tickUpper: number } {
+export function orcaAlignPriceRange(lowerPrice: string, upperPrice: string, spacing: number = program.pool.tickSpacing, decimals0: number = program.token0.decimals,
+  decimals1: number = program.token1.decimals): { tickLower: number; tickUpper: number } {
   const lo = orcaSqrtPriceFromPrice(lowerPrice, decimals0, decimals1), hi = orcaSqrtPriceFromPrice(upperPrice, decimals0, decimals1);
   if (lo >= hi) fail('ORCA_PRICE_RANGE_INVALID');
   const rawLower = orcaTickAtSqrtPrice(lo), atUpper = orcaTickAtSqrtPrice(hi);
   const rawUpper = orcaSqrtPriceAtTick(atUpper) === hi ? atUpper : atUpper + 1;
   const tickLower = alignDown(rawLower, spacing), tickUpper = alignUp(rawUpper, spacing);
-  if (tickLower < alignUp(profile.minTick, spacing) || tickUpper > alignDown(profile.maxTick, spacing) || tickLower >= tickUpper) fail('ORCA_PRICE_RANGE_INVALID');
+  if (tickLower < alignUp(program.minTick, spacing) || tickUpper > alignDown(program.maxTick, spacing) || tickLower >= tickUpper) fail('ORCA_PRICE_RANGE_INVALID');
   return { tickLower, tickUpper };
 }
 /** Bounds `bps` below and above the pool price, as human prices (6 decimals, outward-rounded by the alignment). */
-export function orcaPriceBandAround(sqrtPrice: bigint, bps: number, decimals0 = profile.token0.decimals, decimals1 = profile.token1.decimals) {
+export function orcaPriceBandAround(sqrtPrice: bigint, bps: number, decimals0: number = program.token0.decimals, decimals1: number = program.token1.decimals) {
   if (!Number.isSafeInteger(bps) || bps < 1 || bps >= 10_000) fail('ORCA_PRICE_RANGE_INVALID');
   const square = sqrtPrice * sqrtPrice;
   const lower = isqrt(square * BigInt(10_000 - bps) / 10_000n), upper = isqrt(square * BigInt(10_000 + bps) / 10_000n) + 1n;
@@ -165,8 +172,8 @@ export function orcaPriceBandAround(sqrtPrice: bigint, bps: number, decimals0 = 
 // ---------------------------------------------------------------------------------------------------------------
 export const orcaPositionAddress = (mint: string) => findProgramAddress([utf8('position'), publicKeyBytes(mint)], P.whirlpool);
 export const orcaPositionTokenAccount = (owner: string, mint: string) => associatedTokenAddress(owner, mint, P.token2022, P.associatedToken);
-export const orcaTickArrayStart = (tick: number, spacing = POOL.tickSpacing) => Math.floor(tick / (profile.tickArraySize * spacing)) * profile.tickArraySize * spacing;
-export const orcaLiquidityTickArray = (pool: string, tick: number, spacing = POOL.tickSpacing) =>
+export const orcaTickArrayStart = (tick: number, spacing: number = program.pool.tickSpacing) => Math.floor(tick / (program.tickArraySize * spacing)) * program.tickArraySize * spacing;
+export const orcaLiquidityTickArray = (pool: string, tick: number, spacing: number = program.pool.tickSpacing) =>
   findProgramAddress([utf8('tick_array'), publicKeyBytes(pool), utf8(String(orcaTickArrayStart(tick, spacing)))], P.whirlpool);
 const ownerAta = (owner: string, mint: string) => associatedTokenAddress(owner, mint, P.token, P.associatedToken);
 
@@ -174,7 +181,7 @@ export type OrcaPosition = { address: string; whirlpool: string; positionMint: s
   feeOwedA: string; feeOwedB: string; rewardOwed: string[] };
 /** Position account (state/position.rs, 216 bytes). */
 export function decodeOrcaPosition(address: string, data: Uint8Array): OrcaPosition {
-  if (data.length !== 216 || hex(data.slice(0, 8)) !== profile.positionDiscriminator) fail('ORCA_POSITION_INVALID');
+  if (data.length !== 216 || hex(data.slice(0, 8)) !== program.positionDiscriminator) fail('ORCA_POSITION_INVALID');
   return { address, whirlpool: base58Encode(data.slice(8, 40)), positionMint: base58Encode(data.slice(40, 72)), liquidity: u128(data, 72).toString(),
     tickLowerIndex: i32(data, 88), tickUpperIndex: i32(data, 92), feeOwedA: readU64(data, 112).toString(), feeOwedB: readU64(data, 136).toString(),
     rewardOwed: [0, 1, 2].map(i => readU64(data, 160 + i * 24).toString()) };
@@ -190,11 +197,20 @@ export function orcaPoolRewardMints(data: Uint8Array): string[] {
   if (data.length < 269 + 3 * 128) fail('ORCA_POOL_INVALID');
   return [0, 1, 2].map(i => base58Encode(data.slice(269 + i * 128, 301 + i * 128))).filter(mint => mint !== P.system);
 }
+/**
+ * BUILD-SOLANA-MAINNET-001: initialized reward emitters whose emission rate (reward_infos[i].emissions_per_second_x64) is not zero. A slot that
+ * emits nothing never grows its global reward growth, so no position can accrue a reward from it; only an emitting slot needs reward modeling.
+ */
+export function orcaPoolEmittingRewardMints(data: Uint8Array): string[] {
+  if (data.length < 269 + 3 * 128) fail('ORCA_POOL_INVALID');
+  return [0, 1, 2].filter(i => base58Encode(data.slice(269 + i * 128, 301 + i * 128)) !== P.system && u128(data, 269 + i * 128 + 96) !== 0n)
+    .map(i => base58Encode(data.slice(269 + i * 128, 301 + i * 128)));
+}
 export function encodeOrcaOpenPosition(tickLower: number, tickUpper: number): Uint8Array {
   return Uint8Array.from([...disc('openPositionWithTokenExtensions'), ...i32Bytes(tickLower), ...i32Bytes(tickUpper), 0]);
 }
 export function decodeOrcaOpenPosition(data: Uint8Array): { tickLower: number; tickUpper: number; withTokenMetadata: boolean } {
-  if (data.length !== 17 || hex(data.slice(0, 8)) !== profile.instructions.openPositionWithTokenExtensions || data[16]! > 1) fail('ORCA_INSTRUCTION_UNSUPPORTED');
+  if (data.length !== 17 || hex(data.slice(0, 8)) !== program.instructions.openPositionWithTokenExtensions || data[16]! > 1) fail('ORCA_INSTRUCTION_UNSUPPORTED');
   return { tickLower: i32(data, 8), tickUpper: i32(data, 12), withTokenMetadata: data[16] === 1 };
 }
 /** increase_liquidity_v2(liquidity u128, token_max_a u64, token_max_b u64, None) / decrease_liquidity_v2(liquidity, token_min_a, token_min_b, None). */
@@ -204,7 +220,7 @@ export function encodeOrcaModifyLiquidity(kind: 'increase' | 'decrease', liquidi
 }
 export function decodeOrcaModifyLiquidity(data: Uint8Array): { kind: 'increase' | 'decrease'; liquidity: string; tokenA: string; tokenB: string } {
   const d = hex(data.slice(0, 8));
-  const kind = d === profile.instructions.increaseLiquidityV2 ? 'increase' : d === profile.instructions.decreaseLiquidityV2 ? 'decrease' : fail('ORCA_INSTRUCTION_UNSUPPORTED');
+  const kind = d === program.instructions.increaseLiquidityV2 ? 'increase' : d === program.instructions.decreaseLiquidityV2 ? 'decrease' : fail('ORCA_INSTRUCTION_UNSUPPORTED');
   if (data.length !== 41 || data[40] !== 0) fail('ORCA_INSTRUCTION_UNSUPPORTED');
   return { kind, liquidity: u128(data, 8).toString(), tokenA: readU64(data, 24).toString(), tokenB: readU64(data, 32).toString() };
 }
@@ -219,10 +235,10 @@ export function parseOrcaLiquidityEvents(logs: readonly string[]): OrcaLiquidity
     if (!match) return [];
     const data = Uint8Array.from(Buffer.from(match[1]!, 'base64')), d = hex(data.slice(0, 8));
     const head = () => ({ whirlpool: base58Encode(data.slice(8, 40)), position: base58Encode(data.slice(40, 72)), tickLower: i32(data, 72), tickUpper: i32(data, 76) });
-    if (d === profile.events.positionOpened && data.length === 80)
+    if (d === program.events.positionOpened && data.length === 80)
       return [{ kind: 'PositionOpened' as const, ...head(), liquidity: null, tokenA: null, tokenB: null, tokenATransferFee: null, tokenBTransferFee: null }];
-    if ((d === profile.events.liquidityIncreased || d === profile.events.liquidityDecreased) && data.length === 128)
-      return [{ kind: d === profile.events.liquidityIncreased ? 'LiquidityIncreased' as const : 'LiquidityDecreased' as const, ...head(), liquidity: u128(data, 80).toString(),
+    if ((d === program.events.liquidityIncreased || d === program.events.liquidityDecreased) && data.length === 128)
+      return [{ kind: d === program.events.liquidityIncreased ? 'LiquidityIncreased' as const : 'LiquidityDecreased' as const, ...head(), liquidity: u128(data, 80).toString(),
         tokenA: readU64(data, 96).toString(), tokenB: readU64(data, 104).toString(), tokenATransferFee: readU64(data, 112).toString(), tokenBTransferFee: readU64(data, 120).toString() }];
     return [];
   });
@@ -234,12 +250,13 @@ function createAtaIdempotent(owner: string, account: string, mint: string): Sola
 }
 export type OrcaLiquidityAccounts = { owner: string; ownerTokenA: string; ownerTokenB: string; positionMint: string; position: string; positionTokenAccount: string;
   tickArrayLower: string; tickArrayUpper: string };
-export function orcaLiquidityAccounts(owner: string, positionMint: string, tickLower: number, tickUpper: number): OrcaLiquidityAccounts {
+export function orcaLiquidityAccounts(owner: string, positionMint: string, tickLower: number, tickUpper: number, profile: OrcaLiquidityProfile): OrcaLiquidityAccounts {
+  const POOL = profile.pool;
   return { owner, ownerTokenA: ownerAta(owner, POOL.tokenMintA), ownerTokenB: ownerAta(owner, POOL.tokenMintB), positionMint, position: orcaPositionAddress(positionMint),
-    positionTokenAccount: orcaPositionTokenAccount(owner, positionMint), tickArrayLower: orcaLiquidityTickArray(POOL.address, tickLower),
-    tickArrayUpper: orcaLiquidityTickArray(POOL.address, tickUpper) };
+    positionTokenAccount: orcaPositionTokenAccount(owner, positionMint), tickArrayLower: orcaLiquidityTickArray(POOL.address, tickLower, POOL.tickSpacing),
+    tickArrayUpper: orcaLiquidityTickArray(POOL.address, tickUpper, POOL.tickSpacing) };
 }
-function modifyLiquidity(a: OrcaLiquidityAccounts, data: Uint8Array): SolanaInstruction {
+function modifyLiquidity(a: OrcaLiquidityAccounts, data: Uint8Array, POOL: OrcaLiquidityProfile['pool']): SolanaInstruction {
   return { programId: P.whirlpool, data, accounts: [m(POOL.address, true), m(P.token, false), m(P.token, false), m(P.memo, false), m(a.owner, false, true),
     m(a.position, true), m(a.positionTokenAccount, false), m(POOL.tokenMintA, false), m(POOL.tokenMintB, false), m(a.ownerTokenA, true), m(a.ownerTokenB, true),
     m(POOL.tokenVaultA, true), m(POOL.tokenVaultB, true), m(a.tickArrayLower, true), m(a.tickArrayUpper, true)] };
@@ -250,7 +267,8 @@ export type OrcaLiquidityPlan = { operation: OrcaLiquidityOperation; liquidityDe
  * Every instruction is Gryloo-built. Signers: the owner and, for OPEN only, the new position mint (account creation only).
  * Token accounts are the owner's own; the temporary wrapped-SOL account is opened and closed in the same transaction.
  */
-export function orcaLiquidityInstructions(a: OrcaLiquidityAccounts, plan: OrcaLiquidityPlan, units: number): SolanaInstruction[] {
+export function orcaLiquidityInstructions(a: OrcaLiquidityAccounts, plan: OrcaLiquidityPlan, units: number, profile: OrcaLiquidityProfile): SolanaInstruction[] {
+  const POOL = profile.pool;
   const unwrap: SolanaInstruction = { programId: P.token, data: Uint8Array.of(9), accounts: [m(a.ownerTokenA, true), m(a.owner, true), m(a.owner, false, true)] };
   const head = [setComputeUnitLimit(units), createAtaIdempotent(a.owner, a.ownerTokenA, POOL.tokenMintA)];
   if (plan.operation === 'OPEN') {
@@ -262,11 +280,11 @@ export function orcaLiquidityInstructions(a: OrcaLiquidityAccounts, plan: OrcaLi
       { programId: P.whirlpool, data: encodeOrcaOpenPosition(plan.tickLower, plan.tickUpper), accounts: [m(a.owner, true, true), m(a.owner, false), m(a.position, true),
         m(a.positionMint, true, true), m(a.positionTokenAccount, true), m(POOL.address, false), m(P.token2022, false), m(P.system, false), m(P.associatedToken, false),
         m(profile.metadataUpdateAuth, false)] },
-      modifyLiquidity(a, encodeOrcaModifyLiquidity('increase', BigInt(plan.liquidityDelta), BigInt(plan.tokenA), BigInt(plan.tokenB))),
+      modifyLiquidity(a, encodeOrcaModifyLiquidity('increase', BigInt(plan.liquidityDelta), BigInt(plan.tokenA), BigInt(plan.tokenB)), POOL),
       unwrap];
   }
   return [...head, createAtaIdempotent(a.owner, a.ownerTokenB, POOL.tokenMintB),
-    ...plan.decrease ? [modifyLiquidity(a, encodeOrcaModifyLiquidity('decrease', BigInt(plan.liquidityDelta), BigInt(plan.tokenA), BigInt(plan.tokenB)))] : [],
+    ...plan.decrease ? [modifyLiquidity(a, encodeOrcaModifyLiquidity('decrease', BigInt(plan.liquidityDelta), BigInt(plan.tokenA), BigInt(plan.tokenB)), POOL)] : [],
     { programId: P.whirlpool, data: encodeOrcaCollectFees(), accounts: [m(POOL.address, false), m(a.owner, false, true), m(a.position, true), m(a.positionTokenAccount, false),
       m(POOL.tokenMintA, false), m(POOL.tokenMintB, false), m(a.ownerTokenA, true), m(POOL.tokenVaultA, true), m(a.ownerTokenB, true), m(POOL.tokenVaultB, true),
       m(P.token, false), m(P.token, false), m(P.memo, false)] },
@@ -297,13 +315,18 @@ export function assertLiquidityMessageRoundTrip(bytes: Uint8Array, instructions:
 // ---------------------------------------------------------------------------------------------------------------
 export type OrcaLiquidityIntent = { nodeId: string; owner: string; amount0Max: string; amount1Max: string; amount0Min: string; amount1Min: string;
   tickLower: number; tickUpper: number; slippageBps: number; feeTier: number };
-/** Read the canonical action and resolve it against the exact Orca Devnet liquidity profile (defense in depth; the linter checks the same). */
-export function orcaLiquidityIntent(workflow: SemanticWorkflow, owner: string): OrcaLiquidityIntent {
+/** Read the canonical action and resolve it against the exact Orca liquidity profile of its chain (defense in depth; the linter checks the same). */
+export function orcaLiquidityIntent(workflow: SemanticWorkflow, owner: string): OrcaLiquidityIntent { return liquidityIntent(workflow, owner).intent; }
+/** The intent with the profile its chain selects. */
+export function orcaLiquidityIntentProfile(workflow: SemanticWorkflow, owner: string): { intent: OrcaLiquidityIntent; profile: OrcaLiquidityProfile } {
+  return liquidityIntent(workflow, owner);
+}
+function liquidityIntent(workflow: SemanticWorkflow, owner: string): { intent: OrcaLiquidityIntent; profile: OrcaLiquidityProfile } {
   const nodes = workflow.nodes.filter(n => n.actionType === CONCENTRATED_LIQUIDITY_ACTION);
   if (nodes.length !== 1 || workflow.nodes.some(n => n !== nodes[0] && !n.actionType.startsWith('mock-'))) fail('SOLANA_LIQUIDITY_ISOLATED_ONLY');
   let f: ReturnType<typeof readConcentratedLiquidity>;
   try { f = readConcentratedLiquidity(nodes[0]!); } catch { return fail('SOLANA_LIQUIDITY_DECLARATION_INVALID'); }
-  if (f.chain !== profile.chain) fail('SOLANA_CLUSTER_UNSUPPORTED');
+  const profile = requireOrcaLiquidityProfile(f.chain), POOL = profile.pool;
   if (f.token0.address !== profile.token0.mint || f.token1.address !== profile.token1.mint || f.token0.decimals !== profile.token0.decimals ||
       f.token1.decimals !== profile.token1.decimals) fail('SOLANA_MINT_UNSUPPORTED');
   if (f.protocols.join() !== profile.protocol) fail('SOLANA_LIQUIDITY_PROVIDER_UNSUPPORTED');
@@ -312,12 +335,16 @@ export function orcaLiquidityIntent(workflow: SemanticWorkflow, owner: string): 
   if (f.slippageBps === null || f.slippageBps < 1 || f.slippageBps > profile.maximumSlippageBps) fail('SOLANA_SLIPPAGE_OUT_OF_RANGE');
   if (BigInt(f.amount0Max) > BigInt(profile.token0.maximumAmount) || BigInt(f.amount1Max) > BigInt(profile.token1.maximumAmount)) fail('AMOUNT_OUT_OF_RANGE');
   if (f.recipient !== null) fail('SOLANA_LIQUIDITY_DECLARATION_INVALID');
-  return { nodeId: nodes[0]!.nodeId, owner: solanaAddress(owner), amount0Max: f.amount0Max, amount1Max: f.amount1Max, amount0Min: f.amount0Min,
-    amount1Min: f.amount1Min, tickLower: f.tickLower, tickUpper: f.tickUpper, slippageBps: f.slippageBps!, feeTier: f.feeTier };
+  return { profile, intent: { nodeId: nodes[0]!.nodeId, owner: solanaAddress(owner), amount0Max: f.amount0Max, amount1Max: f.amount1Max, amount0Min: f.amount0Min,
+    amount1Min: f.amount1Min, tickLower: f.tickLower, tickUpper: f.tickUpper, slippageBps: f.slippageBps!, feeTier: f.feeTier } };
 }
 export type OrcaLiquidityPool = OrcaPool & { rewardMints: string[] };
-/** The verified Devnet test pool with the profile's fee tier and no reward emitters (rewards are out of scope). */
-export async function readOrcaLiquidityPool(rpc: SolanaRpc): Promise<OrcaLiquidityPool> {
+/**
+ * The profile's verified pool with its fee tier and no emitting reward slot (reward accrual is out of scope; a slot whose emission rate is zero
+ * can never accrue, BUILD-SOLANA-MAINNET-001).
+ */
+export async function readOrcaLiquidityPool(rpc: SolanaRpc, profile: OrcaLiquidityProfile): Promise<OrcaLiquidityPool> {
+  const POOL = profile.pool;
   const { slot, accounts } = await readSolanaAccounts(rpc, [POOL.address]);
   const account = accounts[0];
   if (!account || account.owner !== P.whirlpool) fail('ORCA_POOL_MISMATCH');
@@ -326,16 +353,16 @@ export async function readOrcaLiquidityPool(rpc: SolanaRpc): Promise<OrcaLiquidi
       pool.tokenVaultA !== POOL.tokenVaultA || pool.tokenVaultB !== POOL.tokenVaultB || pool.tickSpacing !== POOL.tickSpacing || pool.feeRate !== profile.feeTier) fail('ORCA_POOL_MISMATCH');
   if (BigInt(pool.sqrtPrice) === 0n) fail('ORCA_POOL_NO_LIQUIDITY');
   const rewardMints = orcaPoolRewardMints(account!.data);
-  if (rewardMints.length) fail('ORCA_POOL_REWARDS_UNSUPPORTED');
+  if (orcaPoolEmittingRewardMints(account!.data).length) fail('ORCA_POOL_REWARDS_UNSUPPORTED');
   return { ...pool, rewardMints };
 }
 export type OrcaPositionState = { position: OrcaPosition; tokenAccount: { address: string; owner: string; amount: string; delegate: string | null } };
 /** The position must be a Whirlpools position on the verified pool whose single position token the owner holds (the position authority). */
-export function verifyOrcaPosition(owner: string, mint: string, positionAccount: RawSolanaAccount, tokenAccount: RawSolanaAccount): OrcaPositionState {
+export function verifyOrcaPosition(owner: string, mint: string, positionAccount: RawSolanaAccount, tokenAccount: RawSolanaAccount, profile: OrcaLiquidityProfile): OrcaPositionState {
   if (!positionAccount) fail('ORCA_POSITION_NOT_FOUND');
   if (positionAccount!.owner !== P.whirlpool) fail('ORCA_POSITION_INVALID');
   const position = decodeOrcaPosition(orcaPositionAddress(mint), positionAccount!.data);
-  if (position.whirlpool !== POOL.address || position.positionMint !== mint) fail('ORCA_POSITION_POOL_MISMATCH');
+  if (position.whirlpool !== profile.pool.address || position.positionMint !== mint) fail('ORCA_POSITION_POOL_MISMATCH');
   if (!tokenAccount || tokenAccount.owner !== P.token2022) fail('ORCA_POSITION_AUTHORITY_MISMATCH');
   const token = decodeToken2022Account(tokenAccount!.data);
   if (token.mint !== mint || token.owner !== owner || token.amount !== 1n || token.delegate !== null) fail('ORCA_POSITION_AUTHORITY_MISMATCH');
@@ -353,7 +380,7 @@ export type OrcaLiquiditySimulation = { slot: number; unitsConsumed: number; log
 export type OrcaLiquidityArtifacts = { artifactSet: ArtifactSet; simulation: SimulationBundle; policy: AuthorizationPolicy; manifest: StrategyManifest; plan: ExecutionPlan };
 export type OrcaLiquidityReview = OrcaLiquidityArtifacts & {
   format: 'gryloo.orca-liquidity-review.v1'; operation: OrcaLiquidityOperation; provider: 'Orca Whirlpools'; workflow: SemanticWorkflow; nodeId: string;
-  chain: string; cluster: 'devnet'; genesisHash: string; owner: string; program: string; whirlpoolsConfig: string;
+  chain: string; cluster: 'devnet' | 'mainnet-beta'; genesisHash: string; owner: string; program: string; whirlpoolsConfig: string;
   token0: { symbol: string; mint: string; decimals: number }; token1: { symbol: string; mint: string; decimals: number };
   intent: OrcaLiquidityIntent; partBps: number | null;
   pool: { address: string; tickSpacing: number; feeRate: number; liquidity: string; sqrtPrice: string; tickCurrentIndex: number; slot: number; price: string };
@@ -374,21 +401,23 @@ function tokenAmount(a: RawSolanaAccount, owner: string, mint: string): string |
   if (a.owner !== P.token || a.data.length !== 165 || t.owner !== owner || t.mint !== mint) fail('SOLANA_TOKEN_ACCOUNT_MISMATCH');
   return t.amount.toString();
 }
-function vaultAmount(a: RawSolanaAccount, mint: string): string {
+function vaultAmount(a: RawSolanaAccount, mint: string, pool: string): string {
   if (!a || a.owner !== P.token) fail('ORCA_POOL_MISMATCH');
   const t = decodeToken2022Account(a!.data);
-  if (t.mint !== mint || t.owner !== POOL.address) fail('ORCA_POOL_MISMATCH');
+  if (t.mint !== mint || t.owner !== pool) fail('ORCA_POOL_MISMATCH');
   return t.amount.toString();
 }
 /** Balances of every account the reviewed transaction may touch, in one read (or one simulation post-state). */
-const balanceKeys = (a: OrcaLiquidityAccounts) => [a.owner, a.ownerTokenA, a.ownerTokenB, a.position, a.positionMint, a.positionTokenAccount, POOL.tokenVaultA, POOL.tokenVaultB];
-function readBalances(slot: number, a: OrcaLiquidityAccounts, accounts: RawSolanaAccount[]): OrcaLiquidityBalances {
+const balanceKeys = (a: OrcaLiquidityAccounts, POOL: OrcaLiquidityProfile['pool']) => [a.owner, a.ownerTokenA, a.ownerTokenB, a.position, a.positionMint, a.positionTokenAccount,
+  POOL.tokenVaultA, POOL.tokenVaultB];
+function readBalances(slot: number, a: OrcaLiquidityAccounts, accounts: RawSolanaAccount[], POOL: OrcaLiquidityProfile['pool']): OrcaLiquidityBalances {
   const [owner, tokenA, tokenB, position, mint, positionToken, vaultA, vaultB] = accounts;
   const live = (x: RawSolanaAccount | undefined) => x && !(x.lamports === 0n && x.data.length === 0) ? x : null;
   return { slot, ownerLamports: (owner?.lamports ?? 0n).toString(), tokenA: tokenAmount(tokenA ?? null, a.owner, POOL.tokenMintA), tokenB: tokenAmount(tokenB ?? null, a.owner, POOL.tokenMintB),
     position: live(position) && position!.owner === P.whirlpool ? decodeOrcaPosition(a.position, position!.data) : null,
     positionLamports: (live(position)?.lamports ?? 0n).toString(), positionMintLamports: (live(mint)?.lamports ?? 0n).toString(),
-    positionTokenLamports: (live(positionToken)?.lamports ?? 0n).toString(), vaultA: vaultAmount(vaultA ?? null, POOL.tokenMintA), vaultB: vaultAmount(vaultB ?? null, POOL.tokenMintB) };
+    positionTokenLamports: (live(positionToken)?.lamports ?? 0n).toString(), vaultA: vaultAmount(vaultA ?? null, POOL.tokenMintA, POOL.address),
+    vaultB: vaultAmount(vaultB ?? null, POOL.tokenMintB, POOL.address) };
 }
 /** Read-only simulateTransaction of the exact unsigned multi-signer message; nothing is signed. */
 async function simulateMessage(rpc: SolanaRpc, message: Uint8Array, signers: number, addresses: string[]) {
@@ -402,10 +431,10 @@ async function simulateMessage(rpc: SolanaRpc, message: Uint8Array, signers: num
     fail('ORCA_LIQUIDITY_SIMULATION_INVALID');
   return { unitsConsumed: value.unitsConsumed as number, logs, allLogs: allLogs.slice(-300), accounts: (value.accounts as unknown[]).map(decodeRpcAccount) };
 }
-export const orcaLiquidityFee = (signers: number) => (BigInt(profile.baseFeeLamports) * BigInt(signers)).toString();
-const NAMES: Record<string, string> = { [profile.instructions.openPositionWithTokenExtensions]: 'open_position_with_token_extensions',
-  [profile.instructions.increaseLiquidityV2]: 'increase_liquidity_v2', [profile.instructions.decreaseLiquidityV2]: 'decrease_liquidity_v2',
-  [profile.instructions.collectFeesV2]: 'collect_fees_v2', [profile.instructions.closePositionWithTokenExtensions]: 'close_position_with_token_extensions' };
+export const orcaLiquidityFee = (signers: number) => (BigInt(program.baseFeeLamports) * BigInt(signers)).toString();
+const NAMES: Record<string, string> = { [program.instructions.openPositionWithTokenExtensions]: 'open_position_with_token_extensions',
+  [program.instructions.increaseLiquidityV2]: 'increase_liquidity_v2', [program.instructions.decreaseLiquidityV2]: 'decrease_liquidity_v2',
+  [program.instructions.collectFeesV2]: 'collect_fees_v2', [program.instructions.closePositionWithTokenExtensions]: 'close_position_with_token_extensions' };
 /** Human-readable decoding of every reviewed instruction; unknown instructions fail closed. */
 export function summarizeOrcaLiquidityInstructions(instructions: SolanaInstruction[]): { programId: string; name: string; args: unknown }[] {
   return instructions.map(ix => {
@@ -436,7 +465,7 @@ const min = (a: bigint, b: bigint) => a < b ? a : b;
  */
 export async function simulateOrcaLiquidity(workflow: SemanticWorkflow, ownerInput: string, request: OrcaLiquidityRequest, rpc: SolanaRpc,
   now = Date.now()): Promise<OrcaLiquidityReview> {
-  const intent = orcaLiquidityIntent(workflow, ownerInput), owner = intent.owner, operation = request.operation;
+  const { intent, profile } = liquidityIntent(workflow, ownerInput), owner = intent.owner, operation = request.operation, POOL = profile.pool;
   if (!['OPEN', 'DECREASE_PARTIAL', 'EXIT'].includes(operation)) fail('ORCA_LIQUIDITY_OPERATION_INVALID');
   const positionMint = solanaAddress(request.positionMint);
   if (positionMint === owner || ([P.whirlpool, P.system, POOL.address, POOL.tokenMintA, POOL.tokenMintB] as string[]).includes(positionMint)) fail('ORCA_POSITION_MINT_INVALID');
@@ -444,14 +473,14 @@ export async function simulateOrcaLiquidity(workflow: SemanticWorkflow, ownerInp
   if (partBps !== null && (!Number.isSafeInteger(partBps) || partBps < 1 || partBps > 9_999)) fail('ORCA_LIQUIDITY_PART_INVALID');
   await verifySolanaCluster(rpc, profile.genesisHash);
   const observedAt = new Date(now).toISOString();
-  const pool = await readOrcaLiquidityPool(rpc);
-  const accounts = orcaLiquidityAccounts(owner, positionMint, intent.tickLower, intent.tickUpper);
-  const { slot, accounts: read } = await readSolanaAccounts(rpc, [...balanceKeys(accounts), accounts.tickArrayLower, accounts.tickArrayUpper]);
+  const pool = await readOrcaLiquidityPool(rpc, profile);
+  const accounts = orcaLiquidityAccounts(owner, positionMint, intent.tickLower, intent.tickUpper, profile);
+  const { slot, accounts: read } = await readSolanaAccounts(rpc, [...balanceKeys(accounts, POOL), accounts.tickArrayLower, accounts.tickArrayUpper]);
   // Tick arrays must already be initialized by the program; initializing new arrays is out of scope.
   if ([read[8], read[9]].some(t => !t || t.owner !== P.whirlpool)) fail('ORCA_TICK_ARRAY_UNINITIALIZED');
   // Fixed-size tick arrays only: dynamic arrays move tick rent between the position and the array, which reconciliation does not model.
   if ([read[8], read[9]].some(t => hex(t!.data.slice(0, 8)) !== profile.tickArrayDiscriminator)) fail('ORCA_TICK_ARRAY_DYNAMIC_UNSUPPORTED');
-  const pre = readBalances(slot, accounts, read.slice(0, 8));
+  const pre = readBalances(slot, accounts, read.slice(0, 8), POOL);
   if (pre.tokenA !== null) fail('ORCA_LIQUIDITY_WRAPPED_SOL_ACCOUNT_PRESENT');
   const sqrtPrice = BigInt(pool.sqrtPrice), poolState = { tickCurrentIndex: pool.tickCurrentIndex, sqrtPrice };
   let plan: OrcaLiquidityPlan, expected: OrcaLiquidityReview['expected'];
@@ -462,12 +491,12 @@ export async function simulateOrcaLiquidity(workflow: SemanticWorkflow, ownerInp
     if (composition.amount0 < BigInt(intent.amount0Min) || composition.amount1 < BigInt(intent.amount1Min)) fail('ORCA_LIQUIDITY_BELOW_MINIMUM');
     // Fixed liquidity; the token maxima bound adverse price movement and never exceed the authored maxima.
     const maxA = min(BigInt(intent.amount0Max), slipUp(composition.amount0, intent.slippageBps)), maxB = min(BigInt(intent.amount1Max), slipUp(composition.amount1, intent.slippageBps));
-    if (BigInt(pre.tokenB ?? '0') < maxB) fail('ORCA_LIQUIDITY_INSUFFICIENT_DEVUSDC');
+    if (BigInt(pre.tokenB ?? '0') < maxB) fail(`ORCA_LIQUIDITY_INSUFFICIENT_${profile.token1.symbol.toUpperCase()}`);
     plan = { operation, liquidityDelta: composition.liquidity.toString(), tokenA: maxA.toString(), tokenB: maxB.toString(), wrapLamports: maxA.toString(),
       tickLower: intent.tickLower, tickUpper: intent.tickUpper, decrease: false, close: false };
     expected = { liquidity: composition.liquidity.toString(), amountA: composition.amount0.toString(), amountB: composition.amount1.toString(), positionLiquidityAfter: composition.liquidity.toString() };
   } else {
-    const state = verifyOrcaPosition(owner, positionMint, read[3] ?? null, read[5] ?? null);
+    const state = verifyOrcaPosition(owner, positionMint, read[3] ?? null, read[5] ?? null, profile);
     if (state.position.tickLowerIndex !== intent.tickLower || state.position.tickUpperIndex !== intent.tickUpper) fail('ORCA_POSITION_RANGE_MISMATCH');
     if (state.position.rewardOwed.some(r => r !== '0')) fail('ORCA_POSITION_REWARDS_UNSUPPORTED');
     const liquidity = BigInt(state.position.liquidity);
@@ -483,23 +512,23 @@ export async function simulateOrcaLiquidity(workflow: SemanticWorkflow, ownerInp
   const blockhash = solanaAddress(latest.blockhash), lastValidBlockHeight = latest.lastValidBlockHeight;
   if (!Number.isSafeInteger(lastValidBlockHeight)) fail('SOLANA_RPC_INVALID');
   const build = (units: number) => {
-    const instructions = orcaLiquidityInstructions(accounts, plan, units);
+    const instructions = orcaLiquidityInstructions(accounts, plan, units, profile);
     const compiled = compileMessageV0(owner, instructions, blockhash, {});
     if (compiled.header[0] !== signers.length || signers.some((s, i) => compiled.staticKeys[i] !== s)) fail('ORCA_LIQUIDITY_UNEXPECTED_SIGNER');
     const bytes = serializeMessageV0(compiled);
     if (bytes.length > 1_232 - 1 - 64 * signers.length) fail('SOLANA_TRANSACTION_TOO_LARGE');
     return { instructions, bytes };
   };
-  const addresses = balanceKeys(accounts);
+  const addresses = balanceKeys(accounts, POOL);
   const probe = await simulateMessage(rpc, build(profile.maximumComputeUnits).bytes, signers.length, addresses);
   const units = Math.min(profile.maximumComputeUnits, Math.ceil(probe.unitsConsumed * 1.2) + 10_000);
   const final = build(units);
   assertLiquidityMessageRoundTrip(final.bytes, final.instructions, signers);
   const instructionSummary = summarizeOrcaLiquidityInstructions(final.instructions);
   const simulated = await simulateMessage(rpc, final.bytes, signers.length, addresses);
-  const post = readBalances(slot, accounts, simulated.accounts);
+  const post = readBalances(slot, accounts, simulated.accounts, POOL);
   const fee = BigInt(orcaLiquidityFee(signers.length));
-  const result = assessOrcaLiquidityEffects({ operation, plan, accounts, pre, post, logs: simulated.allLogs, feeLamports: fee, owner });
+  const result = assessOrcaLiquidityEffects({ operation, plan, accounts, pre, post, logs: simulated.allLogs, feeLamports: fee, owner, profile });
   // The program's own amounts must equal Gryloo's independent integer math against the same pool state.
   if (operation === 'OPEN' ? result.depositedA !== expected.amountA || result.depositedB !== expected.amountB
       : result.withdrawnPrincipalA !== expected.amountA || result.withdrawnPrincipalB !== expected.amountB) fail('ORCA_LIQUIDITY_MATH_MISMATCH');
@@ -515,9 +544,9 @@ export async function simulateOrcaLiquidity(workflow: SemanticWorkflow, ownerInp
   const poolView = { address: pool.address, tickSpacing: pool.tickSpacing, feeRate: pool.feeRate, liquidity: pool.liquidity, sqrtPrice: pool.sqrtPrice,
     tickCurrentIndex: pool.tickCurrentIndex, slot: pool.slot, price: orcaPriceFromSqrtPrice(sqrtPrice, token0.decimals, token1.decimals) };
   const artifacts = buildOrcaLiquidityArtifacts({ workflow, intent, operation, plan, pool: poolView, messageHash, observedAt, expiresAt, lastValidBlockHeight: lastValidBlockHeight as number,
-    maximumNetworkCostLamports: fee + rent, positionMint });
+    maximumNetworkCostLamports: fee + rent, positionMint, profile });
   const review: Omit<OrcaLiquidityReview, 'commitment'> = { format: 'gryloo.orca-liquidity-review.v1', operation, provider: 'Orca Whirlpools', workflow, nodeId: intent.nodeId,
-    chain: profile.chain, cluster: 'devnet', genesisHash: profile.genesisHash, owner, program: P.whirlpool, whirlpoolsConfig: profile.whirlpoolsConfig, token0, token1, intent, partBps,
+    chain: profile.chain, cluster: profile.cluster, genesisHash: profile.genesisHash, owner, program: P.whirlpool, whirlpoolsConfig: profile.whirlpoolsConfig, token0, token1, intent, partBps,
     pool: poolView, range, operationPlan: plan, expected,
     accounts: { ...accounts, tokenProgramPosition: P.token2022, vaultA: POOL.tokenVaultA, vaultB: POOL.tokenVaultB,
       mayBeCreated: operation === 'OPEN' ? [accounts.ownerTokenA, ...pre.tokenB === null ? [accounts.ownerTokenB] : [], accounts.position, positionMint, accounts.positionTokenAccount]
@@ -534,10 +563,10 @@ export async function simulateOrcaLiquidity(workflow: SemanticWorkflow, ownerInp
  * principal comes from Liquidity* events, collected fees are the remaining vault outflow, and no other owner asset moves.
  */
 export function assessOrcaLiquidityEffects(input: { operation: OrcaLiquidityOperation; plan: OrcaLiquidityPlan; accounts: OrcaLiquidityAccounts;
-  pre: OrcaLiquidityBalances; post: OrcaLiquidityBalances; logs: readonly string[]; feeLamports: bigint; owner: string;
+  pre: OrcaLiquidityBalances; post: OrcaLiquidityBalances; logs: readonly string[]; feeLamports: bigint; owner: string; profile: OrcaLiquidityProfile;
   /** False for finalized-transaction reconciliation, where only transaction-time facts (events, meta balances) are used. */
   positionState?: boolean }): Omit<OrcaLiquiditySimulation, 'slot' | 'unitsConsumed' | 'logs' | 'pre' | 'post'> {
-  const { operation, plan, accounts: a, pre, post } = input;
+  const { operation, plan, accounts: a, pre, post } = input, POOL = input.profile.pool;
   const events = parseOrcaLiquidityEvents(input.logs).filter(e => e.whirlpool === POOL.address);
   const foreign = parseOrcaLiquidityEvents(input.logs).filter(e => e.whirlpool !== POOL.address || e.position !== a.position);
   if (foreign.length) fail('ORCA_LIQUIDITY_EVENT_MISMATCH');
@@ -595,12 +624,12 @@ export function assessOrcaLiquidityEffects(input: { operation: OrcaLiquidityOper
 /** The frozen v1 artifact chain for one liquidity operation. */
 export function buildOrcaLiquidityArtifacts(input: { workflow: SemanticWorkflow; intent: OrcaLiquidityIntent; operation: OrcaLiquidityOperation; plan: OrcaLiquidityPlan;
   pool: OrcaLiquidityReview['pool']; messageHash: string; observedAt: string; expiresAt: string; lastValidBlockHeight: number; maximumNetworkCostLamports: bigint;
-  positionMint: string }): OrcaLiquidityArtifacts {
-  const { workflow, intent, plan } = input, chain = profile.chain, prefix = 'orca-liquidity', adapter = { id: profile.adapterId, version: '1.0.0' };
+  positionMint: string; profile: OrcaLiquidityProfile }): OrcaLiquidityArtifacts {
+  const { workflow, intent, plan, profile } = input, chain = profile.chain, prefix = 'orca-liquidity', adapter = { id: profile.adapterId, version: '1.0.0' };
   const semanticHash = solanaSwapArtifactHash('semantic-workflow', workflow);
   const asset0 = { chainId: chain, address: profile.token0.mint, decimals: profile.token0.decimals }, asset1 = { chainId: chain, address: profile.token1.mint, decimals: profile.token1.decimals };
   const positionAsset = { chainId: chain, address: P.whirlpool, decimals: 0 };
-  const contract = { chainId: chain, address: P.whirlpool, version: 'orca-whirlpools-devnet' };
+  const contract = { chainId: chain, address: P.whirlpool, version: profile.contractVersion };
   const artifactSet: ArtifactSet = { schemaVersion: '1.0.0', artifactSetId: `${prefix}-artifacts`, semanticWorkflowHash: semanticHash,
     artifacts: [{ artifactId: `${prefix}-pool-state`, nodeId: intent.nodeId, artifactHash: solanaSwapHash({ pool: input.pool, plan, positionMint: input.positionMint, messageHash: input.messageHash }) }] };
   const artifactHash = solanaSwapArtifactHash('artifact-set', artifactSet);
@@ -643,14 +672,15 @@ export function buildOrcaLiquidityArtifacts(input: { workflow: SemanticWorkflow;
  * still decode to exactly the planned Orca instructions on the verified pool for this owner and position.
  */
 export function assertOrcaLiquidityReview(review: OrcaLiquidityReview, workflow: SemanticWorkflow, owner: string, blockHeight: number, now = Date.now()): void {
-  const { commitment, ...content } = review;
-  if (review.format !== 'gryloo.orca-liquidity-review.v1' || review.chain !== profile.chain || solanaSwapHash(content) !== commitment) fail('ORCA_LIQUIDITY_AUTHORIZATION_INVALID');
+  const { commitment, ...content } = review, profile = orcaLiquidityProfile(review.chain);
+  if (review.format !== 'gryloo.orca-liquidity-review.v1' || !profile || review.cluster !== profile.cluster || review.genesisHash !== profile.genesisHash ||
+      solanaSwapHash(content) !== commitment) fail('ORCA_LIQUIDITY_AUTHORIZATION_INVALID');
   if (solanaSwapArtifactHash('semantic-workflow', workflow) !== review.manifest.semanticWorkflowHash) fail('ORCA_LIQUIDITY_SEMANTIC_REVISION_CHANGED');
   if (owner !== review.owner) fail('ORCA_LIQUIDITY_WRONG_OWNER');
   if (now >= Date.parse(review.expiresAt) || now < Date.parse(review.observedAt)) fail('ORCA_LIQUIDITY_REVIEW_STALE');
   if (!Number.isSafeInteger(blockHeight) || blockHeight >= review.lastValidBlockHeight - 20) fail('ORCA_LIQUIDITY_REVIEW_STALE');
-  const intent = orcaLiquidityIntent(workflow, owner);
-  if (JSON.stringify(intent) !== JSON.stringify(review.intent)) fail('ORCA_LIQUIDITY_SEMANTIC_REVISION_CHANGED');
+  const { intent, profile: workflowProfile } = liquidityIntent(workflow, owner);
+  if (workflowProfile.chain !== profile!.chain || JSON.stringify(intent) !== JSON.stringify(review.intent)) fail('ORCA_LIQUIDITY_SEMANTIC_REVISION_CHANGED');
   const bytes = fromBase64(review.message);
   const step = review.plan.segments[0]?.steps[0];
   if (sha256Hex(bytes) !== review.messageHash || step?.executionKind !== 'DIRECT_TRANSACTION' || step.payloadHash !== review.messageHash ||
@@ -658,11 +688,11 @@ export function assertOrcaLiquidityReview(review: OrcaLiquidityReview, workflow:
   const expectedSigners = review.operation === 'OPEN' ? [review.owner, review.accounts.positionMint] : [review.owner];
   if (JSON.stringify(review.signers) !== JSON.stringify(expectedSigners)) fail('ORCA_LIQUIDITY_TRANSACTION_CHANGED');
   // Defense in depth: rebuild the planned instructions and require byte-identical decoded instructions.
-  const accounts = orcaLiquidityAccounts(review.owner, review.accounts.positionMint, intent.tickLower, intent.tickUpper);
+  const accounts = orcaLiquidityAccounts(review.owner, review.accounts.positionMint, intent.tickLower, intent.tickUpper, profile!);
   if (JSON.stringify(accounts) !== JSON.stringify({ owner: review.accounts.owner, ownerTokenA: review.accounts.ownerTokenA, ownerTokenB: review.accounts.ownerTokenB,
       positionMint: review.accounts.positionMint, position: review.accounts.position, positionTokenAccount: review.accounts.positionTokenAccount,
       tickArrayLower: review.accounts.tickArrayLower, tickArrayUpper: review.accounts.tickArrayUpper })) fail('ORCA_LIQUIDITY_TRANSACTION_CHANGED');
-  try { assertLiquidityMessageRoundTrip(bytes, orcaLiquidityInstructions(accounts, review.operationPlan, review.computeUnitLimit), expectedSigners); }
+  try { assertLiquidityMessageRoundTrip(bytes, orcaLiquidityInstructions(accounts, review.operationPlan, review.computeUnitLimit, profile!), expectedSigners); }
   catch { fail('ORCA_LIQUIDITY_TRANSACTION_CHANGED'); }
   if (parseMessageV0(bytes).blockhash !== review.blockhash) fail('ORCA_LIQUIDITY_TRANSACTION_CHANGED');
 }
@@ -679,19 +709,19 @@ export function verifySignedOrcaLiquidityTransaction(review: Pick<OrcaLiquidityR
   return { signature: base58Encode(parsed.signatures[0]!), transaction: toBase64(bytes) };
 }
 /** Pool price for the authoring helper (read-only). */
-export async function readOrcaLiquidityPrice(rpc: SolanaRpc, bandBps = 1_000) {
+export async function readOrcaLiquidityPrice(rpc: SolanaRpc, profile: OrcaLiquidityProfile, bandBps = 1_000) {
   await verifySolanaCluster(rpc, profile.genesisHash);
-  const pool = await readOrcaLiquidityPool(rpc), sqrtPrice = BigInt(pool.sqrtPrice);
-  const band = orcaPriceBandAround(sqrtPrice, bandBps);
+  const pool = await readOrcaLiquidityPool(rpc, profile), sqrtPrice = BigInt(pool.sqrtPrice), { decimals: d0 } = profile.token0, { decimals: d1 } = profile.token1;
+  const band = orcaPriceBandAround(sqrtPrice, bandBps, d0, d1);
   return { pool: pool.address, slot: pool.slot, tickCurrentIndex: pool.tickCurrentIndex, tickSpacing: pool.tickSpacing,
-    price: orcaPriceFromSqrtPrice(sqrtPrice, profile.token0.decimals, profile.token1.decimals), ...band, ...orcaAlignPriceRange(band.lowerPrice, band.upperPrice) };
+    price: orcaPriceFromSqrtPrice(sqrtPrice, d0, d1), ...band, ...orcaAlignPriceRange(band.lowerPrice, band.upperPrice, profile.pool.tickSpacing, d0, d1) };
 }
 /** Read the owner's position and authority (read-only), for Inspect and recovery. */
-export async function inspectOrcaPosition(rpc: SolanaRpc, owner: string, positionMint: string) {
+export async function inspectOrcaPosition(rpc: SolanaRpc, owner: string, positionMint: string, profile: OrcaLiquidityProfile) {
   await verifySolanaCluster(rpc, profile.genesisHash);
-  const accounts = orcaLiquidityAccounts(solanaAddress(owner), solanaAddress(positionMint), 0, 64);
+  const accounts = orcaLiquidityAccounts(solanaAddress(owner), solanaAddress(positionMint), 0, profile.pool.tickSpacing, profile);
   const { slot, accounts: read } = await readSolanaAccounts(rpc, [accounts.position, accounts.positionTokenAccount, positionMint]);
   if (!read[0] && !read[1] && !read[2]) return { slot, exists: false as const, position: null, tokenAccount: null };
-  const state = verifyOrcaPosition(owner, positionMint, read[0] ?? null, read[1] ?? null);
+  const state = verifyOrcaPosition(owner, positionMint, read[0] ?? null, read[1] ?? null, profile);
   return { slot, exists: true as const, ...state };
 }

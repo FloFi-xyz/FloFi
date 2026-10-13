@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
 import { useMemo } from 'react';
-import { JUPITER_SOLANA_MAINNET, ORCA_WHIRLPOOLS_DEVNET, resolveWorkflowCapability, type ExecutionEnvironment } from '@defi-workflow-engine/action-registry';
+import { JUPITER_SOLANA_MAINNET, ORCA_WHIRLPOOLS_DEVNET, orcaLiquidityProfile, resolveWorkflowCapability, type ExecutionEnvironment } from '@defi-workflow-engine/action-registry';
 import { chainStatus } from '../domain/artifact-chain';
 import { useWorkflow } from './workflow-store';
 import { useModeA } from './mode-a-store';
@@ -45,7 +45,7 @@ export function useWorkflowCapability() {
   const supply = useSupply(), supplyPath = state.workflow.nodes.some(n => ['supply','borrow','repay','withdraw'].includes(n.actionType));
   const transfer = useRobinhoodTransfer(), transferPath = state.workflow.nodes.some(n => n.actionType === 'asset.transfer');
   const jupiter = useJupiter(), orca = useSolanaLiquidity();
-  const positionPath = state.workflow.nodes.some(n => n.actionType === 'asset.liquidity.concentrated' && n.chainId === ORCA_WHIRLPOOLS_DEVNET.chain);
+  const positionPath = state.workflow.nodes.some(n => n.actionType === 'asset.liquidity.concentrated' && orcaLiquidityProfile(n.chainId) !== null);
   const solanaPath = positionPath || state.workflow.nodes.some(n => n.actionType === 'asset.swap.exact-input' && n.chainId.startsWith('solana:'));
   // The Solana liquidity flow has its own reviewed record; the wallet session is shared with the Solana swap.
   const solanaRecord = positionPath ? orca.record : jupiter.record, solanaRetired = positionPath ? orca.retired : jupiter.retired;

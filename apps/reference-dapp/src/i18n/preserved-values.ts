@@ -8,6 +8,7 @@ export const preservedValues = new Set<string>([
   "Base",
   "Solana",
   "Solana Devnet",
+  "SOL",
   "Base → Arbitrum → WETH",
   "LI.FI",
   "USDC → WETH",

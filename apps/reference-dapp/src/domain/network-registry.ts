@@ -73,6 +73,15 @@ export function networkIdentity(value: string | null | undefined): NetworkIdenti
   return ALL.find(n => n.chain === value || n.name === value || n.key === value || n.aliases.includes(value)) ?? null;
 }
 export const networkOfCopilot = (id: CopilotNetworkId): NetworkIdentity => ALL.find(n => n.copilot === id)!;
+/**
+ * BUILD-SOLANA-MAINNET-001: the authoring network of the same family in `environment` (Base ↔ Base Sepolia, Solana ↔ Solana Devnet,
+ * Robinhood Chain ↔ Robinhood Chain Testnet), the network itself when it is already there, or null when its family has none.
+ */
+export function familyCounterpart(value: string | null | undefined, environment: NetworkEnvironment): NetworkIdentity | null {
+  const current = networkIdentity(value);
+  if (!current) return null;
+  return current.environment === environment ? current : NETWORKS.find(n => n.family === current.family && n.environment === environment) ?? null;
+}
 /** The Copilot networks a message names (each by its registry `mention`), in `COPILOT_NETWORK_IDS` order. */
 export const copilotNetworksMentioned = (text: string): CopilotNetworkId[] => COPILOT_NETWORK_IDS.filter(id => networkOfCopilot(id).mention!.test(text));
 /** Catalog visibility is independent of runtime capabilities. */
