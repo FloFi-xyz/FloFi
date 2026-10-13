@@ -41,6 +41,8 @@ export const ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY = Object.freeze({
   tickArrayDiscriminator: '4561bdbe6e0742bb',
   tickArraySize: 88, minTick: -443_636, maxTick: 443_636,
   maximumSlippageBps: 300, reviewTtlSeconds: 60, baseFeeLamports: '5000', maximumComputeUnits: 400_000,
+  /** P0: a reviewed compute-unit price, so a wallet does not add its own priority fee to the reviewed transaction (see ORCA_WHIRLPOOLS_DEVNET). */
+  computeUnitPriceMicroLamports: '100000',
   /** BUILD-SOLANA-MAINNET-001: evidence and presentation identity of this runtime (valueless Devnet test tokens). */
   environment: 'PUBLIC_TESTNET', provenance: 'PUBLIC_DEVNET', executedEvidence: 'DEVNET_EXECUTED', bundleEnvironment: 'TESTNET_EXECUTED', realFunds: false,
   contractVersion: 'orca-whirlpools-devnet', explorerTx: (signature: string) => `${ORCA_WHIRLPOOLS_DEVNET.explorer}/tx/${signature}?cluster=devnet`,

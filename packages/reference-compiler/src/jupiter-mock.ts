@@ -197,3 +197,16 @@ export function appendMockedWalletGuards(unsignedBase64: string, count = 2, tabl
   const changed = serializeMessageV0(compileMessageV0(owner, [...decompileMessageV0(parsed, tables), ...guards], parsed.blockhash, tables));
   return toBase64(signatures.length === 1 ? serializeTransaction(null, changed) : serializeSignedTransaction(signatures.map(() => null), changed));
 }
+/**
+ * MOCKED reproduction of the modification captured from Phantom on Solana Devnet (owner test, 2026-10-13): when the transaction sets no
+ * compute-unit price, the wallet inserts SetComputeUnitPrice (opcode 3, 375,000 micro-lamports per CU) as instruction 0 before signing and
+ * leaves the compute-unit limit and every other instruction as they are. A transaction that already sets a price is returned unchanged.
+ */
+export function applyMockedPhantomPriorityFee(unsignedBase64: string, microLamports = 375_000n, tables: LookupTables = {}): string {
+  const { signatures, message } = parseTransaction(fromBase64(unsignedBase64, 2048));
+  const parsed = parseMessageV0(message), owner = parsed.staticKeys[0]!, instructions = decompileMessageV0(parsed, tables);
+  if (instructions.some(ix => ix.programId === 'ComputeBudget111111111111111111111111111111' && ix.data[0] === 3)) return unsignedBase64;
+  const price: SolanaInstruction = { programId: 'ComputeBudget111111111111111111111111111111', accounts: [], data: Uint8Array.from([3, ...u64Bytes(microLamports)]) };
+  const changed = serializeMessageV0(compileMessageV0(owner, [price, ...instructions], parsed.blockhash, tables));
+  return toBase64(signatures.length === 1 ? serializeTransaction(null, changed) : serializeSignedTransaction(signatures.map(() => null), changed));
+}

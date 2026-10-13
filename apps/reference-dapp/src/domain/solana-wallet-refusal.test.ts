@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { bindCompositionConsumer } from '@defi-workflow-engine/action-registry';
 import { createBaseSepoliaReviewContext } from '@defi-workflow-engine/reference-linter';
-import { appendMockedWalletGuards, createMockedSolanaDevnetOrca, createMockedSolanaWallet, fromBase64, LIGHTHOUSE_PROGRAM, parseTransaction, serializeSignedTransaction,
+import { appendMockedWalletGuards, applyMockedPhantomPriorityFee, createMockedSolanaDevnetOrca, createMockedSolanaWallet, fromBase64, LIGHTHOUSE_PROGRAM, parseTransaction, serializeSignedTransaction,
   toBase64 } from '@defi-workflow-engine/reference-compiler';
 import { createFileExecutionStorage } from '@defi-workflow-engine/reference-executor';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
@@ -183,6 +183,37 @@ describe('P0: a wallet that changes the reviewed Solana Devnet swap (MOCKED loop
     const again = await swaps.begin(fresh.id, wallet.owner, single);
     expect((await swaps.submit(fresh.id, wallet.sign(again.unsignedTransaction))).attempt?.signature).toMatch(/^[1-9A-HJ-NP-Za-km-z]{64,88}$/);
     expect(env.state.sent).toHaveLength(1);
+  });
+
+  it('a wallet that behaves exactly like the captured Phantom completes swap → position: exact reviewed bytes, two sends, both independently reconciled', async () => {
+    const { env, wallet, service } = await run();
+    const phantom = (unsigned: string) => wallet.sign(applyMockedPhantomPriorityFee(unsigned));
+    const simulated = await service.simulate(workflow, wallet.owner), id = simulated.record.id;
+    expect(simulated.swap.review).toMatchObject({ computeUnitPrice: '100000' });
+    await service.review(id, simulated.record.review.commitment, workflow);
+    const begin = await service.beginSwap(id, wallet.owner, workflow);
+    expect(applyMockedPhantomPriorityFee(begin.unsignedTransaction)).toBe(begin.unsignedTransaction); // nothing for the wallet to add
+    await service.submitSwap(id, phantom(begin.unsignedTransaction));
+    const bound = await service.observe(id);
+    expect(bound.phase).toBe('BOUND');
+    expect(bound.swap).toMatchObject({ verdict: 'RECONCILED', attempt: { reconciled: true } });
+    expect(bound.swap.observations.at(-1)?.feeLamports).toBe(bound.swap.review.estimatedFeeLamports);
+    const key = await createPositionMintSigner();
+    const prepared = await service.prepareLiquidity(id, wallet.owner, workflow, key.address);
+    expect(prepared.liquidity!.review.instructionSummary.map(ix => ix.name).slice(0, 2)).toEqual(['set_compute_unit_limit', 'set_compute_unit_price']);
+    await service.reviewLiquidity(id, prepared.liquidity!.review.commitment, workflow);
+    const lp = await service.beginLiquidity(id, wallet.owner, workflow);
+    // The wallet signs first, then the one-time position key signs the same exact message.
+    const signed = await signOrcaLiquidityTransaction({ ...guardingSession(wallet), wallet: { ...guardingSession(wallet).wallet, features: { 'solana:signTransaction': {
+      signTransaction: async (input: { transaction: Uint8Array }) => [{ signedTransaction: fromBase64(phantom(toBase64(input.transaction)), 2048) }] } } } },
+      lp.unsignedTransaction, lp.view.liquidity!.review.message, lp.signers, key);
+    await service.submitLiquidity(id, signed);
+    const done = await service.observe(id);
+    expect(done.phase).toBe('COMPLETED');
+    expect(done.liquidity).toMatchObject({ verdict: 'RECONCILED', attempt: { reconciled: true } });
+    expect(env.state.sent).toHaveLength(2);
+    expect(done.record.evidence?.evidenceClass).toBe('MOCKED');
+    expect(presented(done).steps.map(([step, state]) => [step, state])).toEqual([['node-002', 'confirmed'], ['node-003', 'confirmed']]);
   });
 });
 

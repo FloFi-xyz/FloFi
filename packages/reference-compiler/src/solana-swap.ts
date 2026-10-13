@@ -2,7 +2,7 @@
 import { solanaSwapRuntime, type SolanaSwapRuntime, type SolanaSwapToken } from '@defi-workflow-engine/action-registry';
 import { hashArtifactBytes, hashSupplyValue, type SemanticWorkflow, type ArtifactSet, type SimulationBundle, type AuthorizationPolicy,
   type StrategyManifest, type ExecutionPlan } from '@defi-workflow-engine/workflow-contracts';
-import { base58Encode, decodeTokenAccount, decompileMessageV0, fromBase64, parseMessageV0, parseTransaction, serializeTransaction, sha256Hex, solanaAddress, toBase64, u32Bytes, verifyEd25519,
+import { base58Encode, decodeTokenAccount, decompileMessageV0, fromBase64, parseMessageV0, parseTransaction, serializeTransaction, sha256Hex, solanaAddress, toBase64, u32Bytes, u64Bytes, verifyEd25519,
   type LookupTables, type SolanaInstruction } from './solana.js';
 
 /**
@@ -90,6 +90,12 @@ export function assertMessageRoundTrip(messageBytes: Uint8Array, instructions: S
 }
 export function setComputeUnitLimit(units: number): SolanaInstruction {
   return { programId: COMPUTE_BUDGET_PROGRAM, accounts: [], data: Uint8Array.from([2, ...u32Bytes(units)]) };
+}
+/** ComputeBudget SetComputeUnitPrice (micro-lamports per compute unit); none when the price is zero. */
+export function setComputeUnitPrice(microLamports: string): SolanaInstruction[] {
+  const price = BigInt(microLamports);
+  if (price < 0n || price > 0xffff_ffff_ffff_ffffn) throw new Error('SOLANA_COMPUTE_UNIT_PRICE_INVALID');
+  return price === 0n ? [] : [{ programId: COMPUTE_BUDGET_PROGRAM, accounts: [], data: Uint8Array.from([3, ...u64Bytes(price)]) }];
 }
 /** Read-only `simulateTransaction` of the exact unsigned message; nothing is signed. Returns post-states of `addresses`. */
 export async function simulateSolanaMessage(rpc: SolanaRpc, message: Uint8Array, addresses: string[], prefix = 'JUPITER') {

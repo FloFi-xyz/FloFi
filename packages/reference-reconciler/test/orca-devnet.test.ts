@@ -27,7 +27,7 @@ describe('independent Solana Devnet reconciliation (MOCKED Devnet loopback)', ()
     const { env, review, attempt } = await executed('SOL', '100000000', {}, {}, 0n);
     const o = await reconcileSolanaSwapAttempt(review, attempt, env.rpc);
     expect(o).toMatchObject({ verdict: 'RECONCILED', reason: 'DEVNET_SWAP_TRANSACTION_AND_BALANCES_VERIFIED', inputSpent: '100000000', outputReceived: review.quote.outAmount,
-      feeLamports: '5000', confirmation: 'finalized', accountCreationLamports: '2039280', minimumOutput: review.quote.otherAmountThreshold,
+      feeLamports: review.estimatedFeeLamports, confirmation: 'finalized', accountCreationLamports: '2039280', minimumOutput: review.quote.otherAmountThreshold,
       explorer: `https://explorer.solana.com/tx/${attempt.signature}?cluster=devnet` });
     expect(o.programs).toContain(profile.programs.whirlpool);
     expect(o.innerPrograms).toContain(profile.programs.token);
@@ -41,7 +41,7 @@ describe('independent Solana Devnet reconciliation (MOCKED Devnet loopback)', ()
   });
   it('a failed Devnet transaction is divergent and moves only the fee', async () => {
     const { env, review, attempt } = await executed('devUSDC', '10000000', {}, { failSwap: true });
-    expect(await reconcileSolanaSwapAttempt(review, attempt, env.rpc)).toMatchObject({ verdict: 'DIVERGENT', reason: 'DEVNET_SWAP_SWAP_FAILED', found: true, feeLamports: '5000' });
+    expect(await reconcileSolanaSwapAttempt(review, attempt, env.rpc)).toMatchObject({ verdict: 'DIVERGENT', reason: 'DEVNET_SWAP_SWAP_FAILED', found: true, feeLamports: review.estimatedFeeLamports });
     expect(env.state.tokens.get(env.ata(review.owner, T.devUSDC.mint))!.amount).toBe(50_000_000n);
   });
   it('fails closed on input or owner SOL balance mismatch, minimum-output violation and a mismatched Traded event', async () => {
@@ -80,7 +80,7 @@ describe('independent Solana Devnet reconciliation (MOCKED Devnet loopback)', ()
     expect(evidence.evidenceClass).toBe('DEVNET_EXECUTED');
     expect(evidence.bundle.environment).toBe('TESTNET_EXECUTED');
     expect(evidence.publicExecution).toMatchObject({ environment: 'DEVNET_EXECUTED', cluster: 'devnet', network: 'Solana Devnet', provider: 'Orca Whirlpools swap_v2 (Solana Devnet)',
-      providerProgram: profile.programs.whirlpool, pool: profile.pool.address, realFunds: false, signature: attempt.signature, slot: observation.slot, feeLamports: '5000',
+      providerProgram: profile.programs.whirlpool, pool: profile.pool.address, realFunds: false, signature: attempt.signature, slot: observation.slot, feeLamports: review.estimatedFeeLamports,
       inputMint: T.SOL.mint, outputMint: T.devUSDC.mint, requestedInput: '100000000', expectedOutput: review.quote.outAmount, minimumOutput: review.quote.otherAmountThreshold,
       actualInputDelta: '100000000', actualOutputDelta: review.quote.outAmount, verdict: 'RECONCILED' });
     expect(JSON.stringify(evidence)).not.toContain('MAINNET_EXECUTED');

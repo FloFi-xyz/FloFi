@@ -6,7 +6,7 @@ import { readExactInputSwap, EXACT_INPUT_SWAP_ACTION, type SemanticWorkflow } fr
 import { associatedTokenAddress, base58Encode, compileMessageV0, decompileMessageV0, findProgramAddress, fromBase64, parseMessageV0, publicKeyBytes, readU64, serializeMessageV0, serializeTransaction,
   sha256Hex, solanaAddress, toBase64, u32Bytes, u64Bytes, type SolanaInstruction } from './solana.js';
 import { assertMessageRoundTrip, assertSolanaSwapReview, buildSolanaSwapArtifacts, estimateFee, readSolanaAccounts, readSolanaSwapBalances, requireSolanaSwapRuntime,
-  rpcContextValue, setComputeUnitLimit, simulateSolanaMessage, solanaSwapDeltas, solanaSwapHash, solanaTokenAmount, verifySignedSolanaSwap, verifySolanaCluster,
+  rpcContextValue, setComputeUnitLimit, setComputeUnitPrice, simulateSolanaMessage, solanaSwapDeltas, solanaSwapHash, solanaTokenAmount, verifySignedSolanaSwap, verifySolanaCluster,
   type SolanaBalances, type SolanaRpc, type SolanaSwapQuote, type SolanaSwapReviewCore, type SolanaSwapSimulation } from './solana-swap.js';
 
 /**
@@ -129,14 +129,15 @@ export function orcaSwapInstructions(intent: OrcaIntent, pool: OrcaPool, thresho
     m(pool.address, true), m(pool.tokenMintA, false), m(pool.tokenMintB, false), m(ownerA, true), m(pool.tokenVaultA, true), m(ownerB, true), m(pool.tokenVaultB, true),
     ...tickArrays.map(t => m(t, true)), m(oracle, true)] };
   const ensured = [wrapped, ...output.native ? [] : [outputAccount]];
-  const instructions: SolanaInstruction[] = [setComputeUnitLimit(units), createAta(owner, wrapped, profile.pool.tokenMintA),
+  // The reviewed compute-unit price is part of the message, so a wallet has no priority fee to add (P0: Phantom).
+  const instructions: SolanaInstruction[] = [setComputeUnitLimit(units), ...setComputeUnitPrice(profile.computeUnitPriceMicroLamports), createAta(owner, wrapped, profile.pool.tokenMintA),
     ...input.native ? [{ programId: P.system, data: Uint8Array.from([...u32Bytes(2), ...u64Bytes(BigInt(intent.amount))]), accounts: [m(owner, true, true), m(wrapped, true)] },
       { programId: P.token, data: Uint8Array.of(17), accounts: [m(wrapped, true)] }] : [],
     ...output.native ? [] : [createAta(owner, outputAccount, output.mint)],
     swapIx,
     { programId: P.token, data: Uint8Array.of(9), accounts: [m(wrapped, true), m(owner, true), m(owner, false, true)] }];
   if (instructions.some(ix => ix.accounts.some(a => a.isSigner && a.pubkey !== owner))) fail('DEVNET_SWAP_UNEXPECTED_SIGNER');
-  return { instructions, inspection: { programs: [...new Set(instructions.map(ix => ix.programId))], computeUnitPrice: '0', ownerInputAccount: inputAccount,
+  return { instructions, inspection: { programs: [...new Set(instructions.map(ix => ix.programId))], computeUnitPrice: profile.computeUnitPriceMicroLamports, ownerInputAccount: inputAccount,
     ownerOutputAccount: outputAccount, wrappedSolAccount: wrapped, ensuredAccounts: ensured, swap, tickArraysInitialized: [] } };
 }
 /** Exact-amount spot-relative price impact in percent (fee included), from the pre-swap sqrt price. */
@@ -160,8 +161,9 @@ export async function simulateOrcaDevnetSwap(workflow: SemanticWorkflow, ownerIn
   const pre = await readSolanaSwapBalances(rpc, intent, draft.inspection);
   if ((intent.input.native ? pre.input : pre.output) !== null) fail('DEVNET_SWAP_WRAPPED_SOL_ACCOUNT_PRESENT');
   if (!intent.input.native && BigInt(pre.input ?? '0') < BigInt(intent.amount)) fail(`DEVNET_SWAP_INSUFFICIENT_${intent.input.symbol.toUpperCase()}`);
-  // SOL needed: any native input, the temporary wrapped-SOL deposit (refunded in the same transaction), a new devUSDC account deposit and the base fee.
-  const required = (intent.input.native ? BigInt(intent.amount) : 0n) + TOKEN_ACCOUNT_RENT + (!intent.output.native && pre.output === null ? TOKEN_ACCOUNT_RENT : 0n) + BigInt(profile.baseFeeLamports);
+  // SOL needed: any native input, the temporary wrapped-SOL deposit (refunded in the same transaction), a new devUSDC account deposit and the fee (base + reviewed priority).
+  const required = (intent.input.native ? BigInt(intent.amount) : 0n) + TOKEN_ACCOUNT_RENT + (!intent.output.native && pre.output === null ? TOKEN_ACCOUNT_RENT : 0n) +
+    BigInt(estimateFee(profile.maximumComputeUnits, profile.computeUnitPriceMicroLamports, profile.baseFeeLamports));
   if (BigInt(pre.ownerLamports) < required) fail('DEVNET_SWAP_INSUFFICIENT_SOL');
   const latest = rpcContextValue(await rpc('getLatestBlockhash', [{ commitment: 'confirmed' }]));
   const blockhash = solanaAddress(latest.blockhash), lastValidBlockHeight = latest.lastValidBlockHeight;
@@ -187,7 +189,7 @@ export async function simulateOrcaDevnetSwap(workflow: SemanticWorkflow, ownerIn
   assertMessageRoundTrip(final.bytes, final.instructions, intent.owner, {}, 'DEVNET_SWAP');
   const simulated = await simulateSolanaMessage(rpc, final.bytes, addresses, 'DEVNET_SWAP');
   const simulatedTrade = trade(simulated.allLogs);
-  const fee = BigInt(estimateFee(units, '0', profile.baseFeeLamports));
+  const fee = BigInt(estimateFee(units, profile.computeUnitPriceMicroLamports, profile.baseFeeLamports));
   const [ownerAfter, inAfter, outAfter] = simulated.accounts;
   const post: SolanaBalances = { slot: pre.slot, ownerLamports: ownerAfter?.lamports.toString() ?? '0',
     input: solanaTokenAmount(inAfter!, intent.owner, intent.input.mint), output: solanaTokenAmount(outAfter!, intent.owner, intent.output.mint) };
@@ -215,7 +217,7 @@ export async function simulateOrcaDevnetSwap(workflow: SemanticWorkflow, ownerIn
     owner: intent.owner, input: { symbol: intent.input.symbol, mint: intent.input.mint, decimals: intent.input.decimals },
     output: { symbol: intent.output.symbol, mint: intent.output.mint, decimals: intent.output.decimals }, amount: intent.amount, slippageBps: intent.slippageBps,
     quote, routeCommitment, inspection, pool, simulatedTrade, lookupTables: {}, blockhash, lastValidBlockHeight: lastValidBlockHeight as number, computeUnitLimit: units,
-    computeUnitPrice: '0', estimatedFeeLamports: fee.toString(), message, messageHash, unsignedTransaction: toBase64(serializeTransaction(null, final.bytes)),
+    computeUnitPrice: profile.computeUnitPriceMicroLamports, estimatedFeeLamports: fee.toString(), message, messageHash, unsignedTransaction: toBase64(serializeTransaction(null, final.bytes)),
     simulationResult, expiresAt, ...artifacts };
   return { ...review, commitment: solanaSwapHash(review) };
 }

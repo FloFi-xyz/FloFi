@@ -32,6 +32,8 @@ export const ORCA_WHIRLPOOLS_MAINNET_LIQUIDITY = Object.freeze({
   positionDiscriminator: devnet.positionDiscriminator, tickArrayDiscriminator: devnet.tickArrayDiscriminator,
   tickArraySize: devnet.tickArraySize, minTick: devnet.minTick, maxTick: devnet.maxTick,
   maximumSlippageBps: 300, reviewTtlSeconds: 60, baseFeeLamports: '5000', maximumComputeUnits: 400_000,
+  /** Unchanged mainnet bytes: a mainnet priority-fee policy is an owner decision (the Devnet profile sets one; see the P0 report). */
+  computeUnitPriceMicroLamports: '0',
   environment: 'MAINNET', provenance: 'PUBLIC_MAINNET', executedEvidence: 'PUBLIC_EXECUTED', bundleEnvironment: 'MAINNET_EXECUTED', realFunds: true,
   contractVersion: 'orca-whirlpools-mainnet', explorerTx: (signature: string) => `${JUPITER_SOLANA_MAINNET.explorer}/tx/${signature}`,
 });

@@ -143,3 +143,23 @@ test('a wallet that changes the reviewed swap is refused before broadcast; Execu
   await expect(page.locator('.execution-timeline .execution-step.execution-state-confirmed')).toHaveCount(2);
   expect(errors).toEqual([]);
 });
+
+// P0: the wallet behaviour captured from Phantom (it inserts a compute-unit price when the transaction sets none). FloFi's reviewed swap and
+// position now set their own price, so the wallet signs the exact reviewed bytes and the composition completes.
+test('a Phantom-like wallet signs the exact reviewed swap and position: both sent once and reconciled', async ({ page }) => {
+  const errors: string[] = []; page.on('pageerror', e => errors.push(e.message));
+  const wallet = await resetDevnetHarness(); await installDevnetWallet(page, wallet, { phantom: true });
+  await author(page);
+  await swapped(page);
+  expect(await signRequests(page)).toBe(1); expect(await devnetControl({ action: 'sent' })).toBe(1);
+  await panel(page).getByRole('button', { name: 'Prepare position with the received amount', exact: true }).click();
+  await phase(page, 'CONSUMING');
+  await panel(page).getByRole('button', { name: 'Accept position review', exact: true }).click();
+  await panel(page).getByRole('button', { name: 'Execute position', exact: true }).click();
+  await phase(page, 'COMPLETED');
+  expect(await signRequests(page)).toBe(2); expect(await devnetControl({ action: 'sent' })).toBe(2);
+  await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Execute', exact: true }).click();
+  await expect(page.locator('.execution-timeline .execution-step.execution-state-confirmed')).toHaveCount(2);
+  expect(errors).toEqual([]);
+});
+
