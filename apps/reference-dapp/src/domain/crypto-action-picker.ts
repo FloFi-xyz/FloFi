@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { AAVE_V3_LENDING_PROFILES, ASSET_SYMBOL, transferAllowsTokens, UNISWAP_LIQUIDITY_PROFILES, baseAssetRegistry, SOLANA_SWAP_RUNTIMES, ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY } from '@defi-workflow-engine/action-registry';
+import { AAVE_V3_LENDING_PROFILES, ASSET_SYMBOL, transferAllowsTokens, UNISWAP_LIQUIDITY_PROFILES, baseAssetRegistry, SOLANA_SWAP_RUNTIMES, ORCA_LIQUIDITY_PROFILES } from '@defi-workflow-engine/action-registry';
 import { createBaseSepoliaReviewContext, createEthereumSepoliaReviewContext, createReviewContext } from '@defi-workflow-engine/reference-linter';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { createAuthoredTransfer, transferDetails, TRANSFER_NETWORKS, type TransferNetwork } from './robinhood-transfer-authoring';
@@ -56,8 +56,9 @@ const pools: readonly CryptoPickerProfile[] = [
   // BUILD-BASE-001: any two Base catalog ERC-20s at a standard tier (the canonical, owner-executable position), replacing the fork-only pair.
   baseCatalog('Uniswap v3'),
   ...UNISWAP_LIQUIDITY_PROFILES.map(profile => ({ network: profile.network, chain: profile.chain, provider: 'Uniswap v3', tokens: [profile.token0.symbol, profile.token1.symbol], pair: [profile.token0.symbol, profile.token1.symbol] as const })),
-  { network: ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY.network, chain: ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY.chain, provider: ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY.providerLabel,
-    tokens: [ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY.token0.symbol, ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY.token1.symbol], pair: [ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY.token0.symbol, ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY.token1.symbol] },
+  // Orca Whirlpools: Solana Devnet (SOL/devUSDC test pool) and, BUILD-SOLANA-MAINNET-001, Solana mainnet-beta (SOL/USDC 0.30%, real funds).
+  ...ORCA_LIQUIDITY_PROFILES.map(profile => ({ network: profile.network, chain: profile.chain, provider: profile.providerLabel,
+    tokens: [profile.token0.symbol, profile.token1.symbol], pair: [profile.token0.symbol, profile.token1.symbol] as const })),
   // BUILD-RH-002: any two Robinhood Chain catalog ERC-20s (USDG, WETH, Stock Tokens); the pool follows the pair and fee tier.
   { network: ROBINHOOD_NETWORK, chain: ROBINHOOD_CHAIN, provider: 'Uniswap v3', get tokens() { return ['USDG', 'WETH', ...featuredStockSymbols()]; }, catalog: true },
   ...Object.entries(CATALOG_LIQUIDITY_NETWORKS).filter(([network]) => network !== BASE_NETWORK && network !== ROBINHOOD_NETWORK)
@@ -92,6 +93,30 @@ export function selectCryptoNetwork(action: CryptoAction, network: string, curre
     : (from === 'USDG' ? featuredStockSymbols()[0] : 'USDG') : undefined;
   const to = profile.pair?.[1] ?? (erc20Only(action) ? current?.to && current.to !== from && profile.tokens.includes(current.to) ? current.to : pooled ?? profile.tokens.find(token => token !== from) : undefined);
   return { action, network, from, ...(to ? { to } : {}) };
+}
+/** A test token and its mainnet asset, as one step moves between its network family's environments; any other token keeps its symbol. */
+const TOKEN_COUNTERPARTS: readonly (readonly [string, string])[] = [['devUSDC', 'USDC']];
+function counterpartToken(symbol: string, profile: CryptoPickerProfile, action: CryptoAction): string | null {
+  if (profileHasToken(profile, symbol, action)) return symbol;
+  const mapped = TOKEN_COUNTERPARTS.find(pair => pair.includes(symbol))?.find(token => token !== symbol);
+  return mapped && profileHasToken(profile, mapped, action) ? mapped : null;
+}
+/**
+ * BUILD-SOLANA-MAINNET-001: the same step on its own network family's counterpart in `environment` (Base Sepolia ↔ Base, Solana Devnet ↔
+ * Solana, Robinhood Chain Testnet ↔ Robinhood Chain), each token kept or mapped to its explicit test/mainnet counterpart. Null when the family
+ * has no such network there or a token has no counterpart: the step then stays as it is (blocked) instead of moving to another chain or asset.
+ */
+export function counterpartSelection(selection: CryptoSelection, environment: WalletEnvironment): CryptoSelection | null {
+  const available = cryptoNetworks(selection.action, environment);
+  if (available.some(profile => profile.network === selection.network)) return selection;
+  const family = networkIdentity(cryptoProfile(selection)?.chain)?.family;
+  const profile = family ? available.find(candidate => networkIdentity(candidate.chain)?.family === family) : undefined;
+  if (!profile) return null;
+  const from = counterpartToken(selection.from, profile, selection.action);
+  const to = selection.to === undefined ? undefined : counterpartToken(selection.to, profile, selection.action);
+  if (!from || to === null) return null;
+  const next: CryptoSelection = { action: selection.action, network: profile.network, from, ...(to === undefined ? {} : { to }) };
+  return validCryptoSelection(next) ? next : null;
 }
 export function cryptoTokenOptions(selection: CryptoSelection, side: 'source' | 'destination') {
   const profile = cryptoProfile(selection);
@@ -158,7 +183,7 @@ export type CryptoActionInput = { selection: CryptoSelection; amount: string; se
  */
 export function defaultPoolRange(network: string): { readonly rangeUnit: 'TICK'; readonly lower: string; readonly upper: string } {
   const full = (tick: number) => ({ rangeUnit: 'TICK' as const, lower: String(-tick), upper: String(tick) });
-  if (network === 'Solana Devnet') return full(443584);
+  if (network === 'Solana Devnet' || network === 'Solana') return full(443584);
   if (network === 'Ethereum Sepolia') return full(887220);
   const catalog = networkIdentity(network);
   return catalog?.catalog ? full(robinhoodFullRange(ROBINHOOD_LIQUIDITY_DEFAULT_FEE, catalog.chain).tickUpper) : full(887270);
@@ -185,7 +210,7 @@ export function createCryptoActionNode(id: string, input: CryptoActionInput): Se
   }
   if (selection.action === 'pool') {
     const range = { rangeUnit: input.rangeUnit ?? 'TICK', lower: input.lower ?? defaultPoolRange(selection.network).lower, upper: input.upper ?? defaultPoolRange(selection.network).upper, slippage };
-    if (selection.network === 'Solana Devnet') return createSolanaLiquidityNode(id, { ...range, network: 'Solana Devnet', maxSol: amount, maxDevUsdc: input.secondAmount ?? '0' });
+    if (selection.network === 'Solana Devnet' || selection.network === 'Solana') return createSolanaLiquidityNode(id, { ...range, network: selection.network, maxSol: amount, maxDevUsdc: input.secondAmount ?? '0' });
     if (selection.network === 'Base Sepolia' || selection.network === 'Ethereum Sepolia') return createUniswapLiquidityNode(id, { ...range, network: selection.network, maxUsdc: amount, maxWeth: input.secondAmount ?? '0' });
     throw new Error('ACTION_NETWORK_UNSUPPORTED');
   }

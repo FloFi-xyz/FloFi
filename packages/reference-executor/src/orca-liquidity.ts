@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { createJournal, appendJournalState } from './journal.js';
-import { solanaSwapArtifactHash, solanaSwapHash, type OrcaLiquidityReview } from '@defi-workflow-engine/reference-compiler';
+import { orcaLiquidityProfile, solanaSwapArtifactHash, solanaSwapHash, type OrcaLiquidityReview } from '@defi-workflow-engine/reference-compiler';
 import { hashJournalBytes, type ExecutionJournal } from '@defi-workflow-engine/workflow-contracts';
 import type { SolanaSwapAttempt, SolanaSwapAttemptState } from './jupiter.js';
 import { SOLANA_SWAP_TERMINAL_STATES } from './jupiter.js';
@@ -14,7 +14,8 @@ import { SOLANA_SWAP_TERMINAL_STATES } from './jupiter.js';
  */
 export type OrcaLiquidityAttemptState = SolanaSwapAttemptState;
 export type OrcaLiquidityAttempt = SolanaSwapAttempt;
-export type OrcaLiquidityProvenance = 'PUBLIC_DEVNET' | 'MOCKED';
+/** BUILD-SOLANA-MAINNET-001: PUBLIC_MAINNET runs are Solana mainnet-beta (real funds); a public provenance always matches the reviewed cluster. */
+export type OrcaLiquidityProvenance = 'PUBLIC_DEVNET' | 'PUBLIC_MAINNET' | 'MOCKED';
 export type OrcaLiquidityRun = { format: 'gryloo.orca-liquidity-run.v1'; id: string; operation: OrcaLiquidityReview['operation']; positionMint: string;
   review: OrcaLiquidityReview; provenance: OrcaLiquidityProvenance; authorization: string | null; attempt: OrcaLiquidityAttempt | null; journal: ExecutionJournal;
   verdict: 'PENDING' | 'RECONCILED' | 'DIVERGENT' | 'INCONCLUSIVE' | 'NOT_EXECUTED'; ownerInitiated: boolean };
@@ -27,6 +28,7 @@ const names = (run: Pick<OrcaLiquidityRun, 'id' | 'operation'>) => {
 
 export function createOrcaLiquidityRun(id: string, review: OrcaLiquidityReview, provenance: OrcaLiquidityProvenance): OrcaLiquidityRun {
   if (!ORCA_LIQUIDITY_ID.test(id)) fail('ORCA_LIQUIDITY_ID_INVALID');
+  if (provenance !== 'MOCKED' && orcaLiquidityProfile(review.chain)?.provenance !== provenance) fail('ORCA_LIQUIDITY_AUTHORIZATION_INVALID');
   const base = { id, operation: review.operation };
   const { segment, step } = names(base);
   if (review.plan.segments[0]?.steps[0]?.stepId !== step) fail('ORCA_LIQUIDITY_AUTHORIZATION_INVALID');
@@ -77,7 +79,8 @@ export function orcaLiquidityAttemptResolved(run: OrcaLiquidityRun): boolean {
 }
 export function validateOrcaLiquidityRun(run: OrcaLiquidityRun): void {
   const corrupt = 'ORCA_LIQUIDITY_STORE_CORRUPT';
-  if (!run || run.format !== 'gryloo.orca-liquidity-run.v1' || !ORCA_LIQUIDITY_ID.test(run.id) || !['MOCKED', 'PUBLIC_DEVNET'].includes(run.provenance) ||
+  if (!run || run.format !== 'gryloo.orca-liquidity-run.v1' || !ORCA_LIQUIDITY_ID.test(run.id) || !['MOCKED', 'PUBLIC_DEVNET', 'PUBLIC_MAINNET'].includes(run.provenance) ||
+      run.provenance !== 'MOCKED' && orcaLiquidityProfile(run.review?.chain)?.provenance !== run.provenance ||
       run.review?.format !== 'gryloo.orca-liquidity-review.v1' || run.operation !== run.review.operation || run.positionMint !== run.review.accounts.positionMint) fail(corrupt);
   const { commitment, ...review } = run.review;
   if (solanaSwapHash(review) !== commitment || solanaSwapArtifactHash('execution-plan', run.review.plan) !== run.journal.executionPlanHash ||

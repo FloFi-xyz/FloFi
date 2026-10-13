@@ -36,7 +36,8 @@ describe('Solana Devnet liquidity chat/canvas authoring', () => {
     expect(JSON.stringify(node)).not.toMatch(/recipient|owner/);
   });
   it('rejects unsupported networks, zero or excessive maxima, unaligned ticks, bad prices and slippage; commands are validated closed', () => {
-    expect(() => createSolanaLiquidityNode('n', { ...canvas, network: 'Solana' as 'Solana Devnet' })).toThrow('SOLANA_CLUSTER_UNSUPPORTED');
+    // BUILD-SOLANA-MAINNET-001 (intentional change): 'Solana' (mainnet-beta) is a supported cluster now; any other network is not.
+    expect(() => createSolanaLiquidityNode('n', { ...canvas, network: 'Solana Testnet' as 'Solana Devnet' })).toThrow('SOLANA_CLUSTER_UNSUPPORTED');
     expect(() => createSolanaLiquidityNode('n', { ...canvas, maxSol: '0', maxDevUsdc: '0' })).toThrow('SOLANA_LIQUIDITY_ZERO');
     expect(() => createSolanaLiquidityNode('n', { ...canvas, maxSol: '11' })).toThrow('AMOUNT_OUT_OF_RANGE');
     expect(() => createSolanaLiquidityNode('n', { ...canvas, rangeUnit: 'TICK', lower: '-39100', upper: '-36992' })).toThrow('SOLANA_LIQUIDITY_RANGE_INVALID');

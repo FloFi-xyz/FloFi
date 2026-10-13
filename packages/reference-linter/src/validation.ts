@@ -115,7 +115,7 @@ export function validateAuthoringWorkflow(input: unknown, context: ReviewContext
   // The canonical swap on Solana: same action and ports, chain-specific asset and provider profile.
   if (workflow.nodes.some(isSolanaSwapNode)) { validateSolanaSwapWorkflow(workflow); return workflow; }
   // The canonical concentrated-liquidity action: Uniswap v3 on Base Sepolia (owner wallet) or Orca Whirlpools on Solana
-  // Devnet. Any other chain stays unsupported (the Solana validator rejects it as LIQUIDITY_RUNTIME_UNSUPPORTED).
+  // Devnet or mainnet-beta. Any other chain stays unsupported (the Solana validator rejects it as LIQUIDITY_RUNTIME_UNSUPPORTED).
   if (workflow.nodes.some(isUniswapLiquidityNode)) { validateUniswapLiquidityWorkflow(workflow); return workflow; }
   if (workflow.nodes.some(isConcentratedLiquidityNode)) { validateSolanaLiquidityWorkflow(workflow); return workflow; }
   unique(workflow.nodes.map(node => node.nodeId), 'DUPLICATE_NODE');

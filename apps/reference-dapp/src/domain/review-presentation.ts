@@ -81,7 +81,7 @@ export function projectReview(workflow: Workflow, context: ReviewContext, source
     }
     limits.push({ label: 'Max slippage', value: `${(manifest.maximumSlippageBps / 100).toFixed(2)}%` });
     const providers = manifest.providers.kind === 'FIXED' ? [manifest.providers.providerId] : manifest.providers.providerIds;
-    const names: Record<string, string> = { 'aave-v3': 'Aave V3', 'uniswap.v3': 'Uniswap V3', 'uniswap-500': 'Uniswap V3', 'uniswap-v3.swap-router-02': 'Uniswap V3', 'uniswap-v3.position-manager': 'Uniswap V3', 'jupiter.swap-v2': 'Jupiter', 'orca.whirlpools-devnet': 'Orca Whirlpools', 'orca.whirlpools-devnet-liquidity': 'Orca Whirlpools', 'evm.native-transfer': 'Wallet send' };
+    const names: Record<string, string> = { 'aave-v3': 'Aave V3', 'uniswap.v3': 'Uniswap V3', 'uniswap-500': 'Uniswap V3', 'uniswap-v3.swap-router-02': 'Uniswap V3', 'uniswap-v3.position-manager': 'Uniswap V3', 'jupiter.swap-v2': 'Jupiter', 'orca.whirlpools-devnet': 'Orca Whirlpools', 'orca.whirlpools-devnet-liquidity': 'Orca Whirlpools', 'orca.whirlpools-mainnet-liquidity': 'Orca Whirlpools', 'evm.native-transfer': 'Wallet send' };
     const labels = providers.map(id => simulationProvider(id) ?? names[id] ?? id.split(':').map(part => simulationProvider(part) ?? names[part]).filter(Boolean).join(' · ')).filter((name): name is string => Boolean(name));
     if (labels.length) limits.push({ label: 'Allowed providers', value: labels.join(' · ') });
     for (const [label, budgets] of [['Max network cost', manifest.gasBudgets], ['Max provider fees', manifest.feeBudgets]] as const) for (const budget of budgets) {

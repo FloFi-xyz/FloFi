@@ -88,12 +88,12 @@ export function composerSummary(workflow: Workflow, node: Workflow['nodes'][numb
     linked ? 'Amount from linked step' : 'Amount not available';
   const detail = solana ? `${solana.from} → ${solana.to}` : swap ? `${swap.from} → ${swap.to}` : catalogSwap ? `${catalogSwap.from} → ${catalogSwap.to}` :
     lending && node.actionType === 'asset.swap.exact-input' ? 'Borrowed USDC → WETH' :
-    uni ? 'USDC / WETH' : rhPool ? `${rhPool.tokenA} / ${rhPool.tokenB}` : orca ? 'SOL / devUSDC' : position ? 'WETH / USDC' : undefined;
+    uni ? 'USDC / WETH' : rhPool ? `${rhPool.tokenA} / ${rhPool.tokenB}` : orca ? `SOL / ${orca.tokenB}` : position ? 'WETH / USDC' : undefined;
   // The router pair names both assets (BUILD-RH-002: USDC → USDG into Robinhood Chain); legacy bridge readers describe USDC on both ends.
   const bridgePair = router ? `${router.token} → ${router.destinationToken}` : bridge ? 'USDC → USDC' : undefined;
   const liquidityValues = uni ? [{ amount: uni.maxUsdc, token: 'USDC' }, { amount: uni.maxWeth, token: 'WETH' }]
     : rhPool ? [{ amount: rhPool.amountA, token: rhPool.tokenA }, { amount: rhPool.amountB, token: rhPool.tokenB }]
-    : orca ? [{ amount: orca.maxSol, token: 'SOL' }, { amount: orca.maxDevUsdc, token: 'devUSDC' }]
+    : orca ? [{ amount: orca.maxSol, token: 'SOL' }, { amount: orca.maxDevUsdc, token: orca.tokenB }]
     : position ? [{ amount: formatHumanAmount(position.amountWeth, 'WETH', context), token: 'WETH' }, { amount: formatHumanAmount(position.amountUsdc, 'USDC', context), token: 'USDC' }] : undefined;
   return { action, provider, chain, amount, detail, bridgePair, linked, ...(liquidityValues ? { liquidityValues } : {}),
     risk: node.actionType === 'borrow' ? 'Variable debt' : node.actionType === 'withdraw' ? 'Collateral change' : undefined };
@@ -138,6 +138,6 @@ export function composerConnections(workflow: Workflow) {
 /** A bound position names where the swapped token comes from: the swap's reconciled output, capped by the owner's maximum. */
 function orcaAmount(orca: NonNullable<ReturnType<typeof solanaLiquidityDetails>>): string {
   const fromSwap = (cap: string, symbol: string) => orca.source!.fullOutput ? `all ${symbol} from the swap` : `up to ${cap} ${symbol} from the swap`;
-  if (!orca.source) return `${orca.maxSol} SOL + ${orca.maxDevUsdc} devUSDC`;
+  if (!orca.source) return `${orca.maxSol} SOL + ${orca.maxDevUsdc} ${orca.tokenB}`;
   return orca.source.token === 1 ? `${orca.maxSol} SOL + ${fromSwap(orca.maxDevUsdc, 'devUSDC')}` : `${fromSwap(orca.maxSol, 'SOL')} + ${orca.maxDevUsdc} devUSDC`;
 }

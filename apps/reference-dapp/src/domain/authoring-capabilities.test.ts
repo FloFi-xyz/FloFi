@@ -83,7 +83,9 @@ describe('BUILD-BASE-001 one capability truth for Canvas, Chat, Copilot and MCP'
   });
   it('agrees with the Canvas pickers (the Canvas also keeps its two testnet native self-transfers, which MCP and the Copilot never offered)', () => {
     expect(names(capabilityNetworks('swap'))).toEqual(canvasNetworks('swap'));
-    expect(names(capabilityNetworks('add_liquidity'))).toEqual(canvasNetworks('pool'));
+    // BUILD-SOLANA-MAINNET-001 (intentional, owner review): Orca liquidity on Solana mainnet-beta is Canvas-only for now; its Copilot and MCP
+    // exposure (a canonical strategy example) is deferred, so it is the one Canvas pool network the Copilot and MCP do not offer yet.
+    expect(names(capabilityNetworks('add_liquidity'))).toEqual(canvasNetworks('pool').filter(network => network !== 'Solana'));
     for (const action of ['supply', 'borrow', 'repay', 'withdraw'] as const) expect(names(capabilityNetworks(action))).toEqual(canvasNetworks(action));
     const transfers = names(capabilityNetworks('transfer'));
     expect(canvasNetworks('transfer').filter(network => !transfers.includes(network))).toEqual(['Ethereum Sepolia', 'Robinhood Chain Testnet']);

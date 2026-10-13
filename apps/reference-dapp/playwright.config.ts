@@ -59,6 +59,10 @@ const devnetHarness = process.env.GRYLOO_SOLANA_DEVNET_E2E === 'MOCKED_LOOPBACK_
 if (process.env.GRYLOO_SOLANA_DEVNET_E2E && !devnetHarness) throw new Error('Solana Devnet E2E permits only the MOCKED loopback harness');
 const devnetJournal = process.env.GRYLOO_SOLANA_DEVNET_JOURNAL ?? join(tmpdir(), 'gryloo-demo001-' + Date.now() + '-' + process.pid);
 if (devnetHarness) process.env.GRYLOO_SOLANA_DEVNET_JOURNAL = devnetJournal;
+// BUILD-SOLANA-MAINNET-001: the same loopback harness also serves a MOCKED copy of the mainnet-beta Orca SOL/USDC pool (`/mainnet-rpc`); its runs use
+// their own journal. Nothing reaches a public network; MOCKED evidence only.
+const orcaMainnetJournal = process.env.GRYLOO_ORCA_MAINNET_JOURNAL ?? join(tmpdir(), 'gryloo-orca-mainnet-' + Date.now() + '-' + process.pid);
+if (devnetHarness) process.env.GRYLOO_ORCA_MAINNET_JOURNAL = orcaMainnetJournal;
 
 // RH-DEMO-001: Robinhood Testnet self-transfer browser tests use only the MOCKED loopback chain; never the public network or a broadcast.
 const robinhoodHarness = process.env.GRYLOO_ROBINHOOD_E2E === 'MOCKED_LOOPBACK_ONLY';
@@ -256,7 +260,8 @@ export default defineConfig({
       ...(supplyHarness ? { GRYLOO_SUPPLY_HARNESS: 'MOCKED_LOOPBACK_ONLY', GRYLOO_SUPPLY_JOURNAL: supplyJournal } : {}),
       ...(lendingHarness ? { GRYLOO_LENDING_HARNESS: 'MOCKED_LOOPBACK_ONLY', GRYLOO_SUPPLY_JOURNAL: lendingJournal } : {}),
       ...(jupiterHarness ? { GRYLOO_JUPITER_HARNESS: 'MOCKED_LOOPBACK_ONLY', GRYLOO_JUPITER_JOURNAL: jupiterJournal } : {}),
-      ...(devnetHarness ? { GRYLOO_SOLANA_DEVNET_HARNESS: 'MOCKED_LOOPBACK_ONLY', GRYLOO_SOLANA_DEVNET_JOURNAL: devnetJournal } : {}),
+      ...(devnetHarness ? { GRYLOO_SOLANA_DEVNET_HARNESS: 'MOCKED_LOOPBACK_ONLY', GRYLOO_SOLANA_DEVNET_JOURNAL: devnetJournal,
+        GRYLOO_ORCA_MAINNET_HARNESS: 'MOCKED_LOOPBACK_ONLY', GRYLOO_ORCA_MAINNET_JOURNAL: orcaMainnetJournal } : {}),
       ...(robinhoodHarness ? { GRYLOO_ROBINHOOD_HARNESS: 'MOCKED_LOOPBACK_ONLY', GRYLOO_ROBINHOOD_JOURNAL: robinhoodJournal } : {}),
       ...(robinhoodMainnetHarness ? { GRYLOO_ROBINHOOD_MAINNET_HARNESS: 'MOCKED_LOOPBACK_ONLY', GRYLOO_ROBINHOOD_JOURNAL: robinhoodMainnetJournal } : {}),
       ...(baseMainnetHarness ? { GRYLOO_BASE_MAINNET_HARNESS: 'MOCKED_LOOPBACK_ONLY', GRYLOO_BASE_JOURNAL: baseMainnetJournal } : {}),

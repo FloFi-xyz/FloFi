@@ -68,9 +68,11 @@ describe('one network per crypto action', () => {
   });
   it('advertises registered Arbitrum swaps without advertising unsupported pool adapters and pairs', () => {
     expect(cryptoNetworks('swap', 'mainnet').map(profile => profile.network)).toEqual(['Base', 'Solana', 'Robinhood Chain', 'Arbitrum One']);
-    // BUILD-RH-002: Robinhood Chain pools (official catalog pairs) join Base on mainnet.
-    expect(cryptoNetworks('pool', 'mainnet').map(profile => profile.network)).toEqual(['Base', 'Robinhood Chain', 'Arbitrum One']);
-    expect(() => selectCryptoNetwork('pool', 'Solana')).toThrow('ACTION_NETWORK_UNSUPPORTED');
+    // BUILD-RH-002: Robinhood Chain pools (official catalog pairs) join Base on mainnet. BUILD-SOLANA-MAINNET-001 (intentional change): Orca Whirlpools
+    // SOL/USDC 0.30% on Solana mainnet-beta joins them; it is the one verified pair there.
+    expect(cryptoNetworks('pool', 'mainnet').map(profile => profile.network)).toEqual(['Base', 'Solana', 'Robinhood Chain', 'Arbitrum One']);
+    expect(selectCryptoNetwork('pool', 'Solana')).toEqual({ action: 'pool', network: 'Solana', from: 'SOL', to: 'USDC' });
+    expect(validCryptoSelection({ action: 'pool', network: 'Solana', from: 'SOL', to: 'devUSDC' })).toBe(false);
     expect(validCryptoSelection({ action: 'pool', network: 'Base Sepolia', from: 'WETH', to: 'USDC' })).toBe(false);
   });
   it('rejects per-asset networks instead of allowing a hidden cross-chain swap', () => {

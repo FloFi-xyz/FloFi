@@ -145,13 +145,19 @@ describe('Orca liquidity simulation and Review binding (MOCKED Devnet loopback)'
     ['a non-Devnet cluster', { cluster: '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d' }, {}, 'SOLANA_WRONG_CLUSTER'],
     ['a pool under another config', { poolConfig: '11111111111111111111111111111112' }, {}, 'ORCA_POOL_MISMATCH'],
     ['a changed pool fee tier', { poolFeeRate: 3000 }, {}, 'ORCA_POOL_MISMATCH'],
-    ['pool reward emitters', { poolRewardMint: 'BRjpCHtyQLNCo8gqRUr8jtdAj5AjPYQaoqbvcZiHok1k' }, {}, 'ORCA_POOL_REWARDS_UNSUPPORTED'],
+    ['an emitting pool reward slot', { poolRewardMint: 'BRjpCHtyQLNCo8gqRUr8jtdAj5AjPYQaoqbvcZiHok1k', poolRewardEmissionsX64: 1n << 64n }, {}, 'ORCA_POOL_REWARDS_UNSUPPORTED'],
     ['a range on uninitialized tick arrays', {}, { tickLower: -64_000, tickUpper: -63_936 }, 'ORCA_TICK_ARRAY_UNINITIALIZED'],
     ['maxima too small for any liquidity', {}, { amount0Max: '1', amount1Max: '0' }, 'ORCA_LIQUIDITY_ZERO'],
     ['a deposit below the authored minimum', {}, { amount1Min: '299999' }, 'ORCA_LIQUIDITY_BELOW_MINIMUM'],
   ])('fails closed on %s', async (_n, options, patch, code) => {
     const s = setup(options as MockedOrcaOptions);
     await expect(simulateOrcaLiquidity(workflow(patch as Partial<ConcentratedLiquidityFields>), s.wallet.owner, { operation: 'OPEN', positionMint: mintKey().address }, s.env.rpc, NOW)).rejects.toThrow(code);
+  });
+  // BUILD-SOLANA-MAINNET-001: an initialized reward slot whose emission rate is zero (the mainnet SOL/USDC pool's ORCA slot) can never accrue.
+  it('accepts an initialized reward slot that emits nothing, and records its mint', async () => {
+    const s = setup({ poolRewardMint: 'BRjpCHtyQLNCo8gqRUr8jtdAj5AjPYQaoqbvcZiHok1k' } as MockedOrcaOptions);
+    const review = await simulateOrcaLiquidity(workflow(), s.wallet.owner, { operation: 'OPEN', positionMint: mintKey().address }, s.env.rpc, NOW);
+    expect(review.operation).toBe('OPEN');
   });
   it('requires the owner to be the position authority and the workflow range to match the position', async () => {
     const s = setup(), { mint } = await landOpen(s);

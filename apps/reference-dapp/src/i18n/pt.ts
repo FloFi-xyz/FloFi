@@ -18,6 +18,7 @@ import { portugueseDelegation } from './pt-delegation';
 import { portugueseRobinhood } from './pt-robinhood';
 import { portugueseBase } from './pt-base';
 import { portugueseSolanaComposition } from './pt-solana-composition';
+import { portugueseSolanaMainnet } from './pt-solana-mainnet';
 /** English source messages are stable presentation keys. Technical identifiers never enter this catalog. */
 export const portuguese: Readonly<Record<string, string>> = {
   // BUILD-AUTOMATION-001/002: first, so an existing product translation of a shared word keeps precedence.
@@ -26,6 +27,7 @@ export const portuguese: Readonly<Record<string, string>> = {
   ...portugueseRobinhood,
   ...portugueseBase,
   ...portugueseSolanaComposition,
+  ...portugueseSolanaMainnet,
   'Automation workflow': 'Fluxo da automação',
   'Prepared by your FloFi automation. Simulate and review before executing.': 'Preparado pela sua automação FloFi. Simule e revise antes de executar.',
   'Loading your exact automation workflow…': 'Carregando o fluxo exato da sua automação…',

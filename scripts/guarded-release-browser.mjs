@@ -33,6 +33,9 @@ const profiles = phase === 'composition' ? [
   ['copilot', ['copilot.spec.ts', 'copilot-conversation.spec.ts'], { FLOFI_COPILOT: 'replay', GRYLOO_SUPPLY_E2E: 'MOCKED_LOOPBACK_ONLY' }],
   // PR B: context-aware Solana Devnet authoring (swap → position, "these tokens", yes/no, chat position management) on replay answers and the MOCKED Devnet loopback.
   ['copilot-solana', ['copilot-solana.spec.ts'], { FLOFI_COPILOT: 'replay', GRYLOO_SOLANA_DEVNET_E2E: 'MOCKED_LOOPBACK_ONLY' }],
+  // BUILD-SOLANA-MAINNET-001: the Solana Mainnet/Testnet header switch, family-preserving re-networking and Orca mainnet liquidity authoring on the
+  // MOCKED loopback (the Devnet harness also serves a MOCKED copy of the mainnet-beta pool); MOCKED cannot authorize, nothing is signed or sent.
+  ['solana-mainnet-network', ['solana-mainnet-network.spec.ts'], { GRYLOO_SOLANA_DEVNET_E2E: 'MOCKED_LOOPBACK_ONLY' }],
   ['lending-provenance', [boundary], { FLOFI_RELEASE_PROVENANCE_PROFILE: 'lending', GRYLOO_LENDING_E2E: 'MOCKED_LOOPBACK_ONLY' }],
   ['jupiter-provenance', [boundary], { FLOFI_RELEASE_PROVENANCE_PROFILE: 'jupiter', GRYLOO_JUPITER_E2E: 'MOCKED_LOOPBACK_ONLY' }],
   ['devnet-provenance', [boundary], { FLOFI_RELEASE_PROVENANCE_PROFILE: 'solana-devnet', GRYLOO_SOLANA_DEVNET_E2E: 'MOCKED_LOOPBACK_ONLY' }],

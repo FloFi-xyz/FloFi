@@ -10,8 +10,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createFilesystemEvidenceStore, createLogger, createPostgresWorkQueue, createWorker, type Database } from '@defi-workflow-engine/cloud-runtime';
-import { createMockedSolanaDevnetOrca, createMockedSolanaJupiter, createMockedSolanaWallet, fromBase64, parseTransaction, serializeSignedTransaction,
-  toBase64 } from '@defi-workflow-engine/reference-compiler';
+import { ORCA_WHIRLPOOLS_MAINNET_LIQUIDITY, createMockedSolanaDevnetOrca, createMockedSolanaJupiter, createMockedSolanaWallet, fromBase64, parseTransaction,
+  serializeSignedTransaction, toBase64 } from '@defi-workflow-engine/reference-compiler';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { createTestDatabase, type TestDatabase } from '../../../packages/cloud-runtime/test/pg-harness.ts';
 import { createSolanaSwapNode } from '../src/domain/jupiter-authoring.ts';
@@ -23,7 +23,7 @@ import { createBackend, observeOnly, type FlowResult } from './app.ts';
 import type { FlowName, Rpc } from './flows.ts';
 
 const quiet = createLogger({ service: 'test', sink: () => undefined });
-const env = { GRYLOO_SOLANA_DEVNET_HARNESS: 'MOCKED_LOOPBACK_ONLY', GRYLOO_JUPITER_HARNESS: 'MOCKED_LOOPBACK_ONLY' } as const;
+const env = { GRYLOO_SOLANA_DEVNET_HARNESS: 'MOCKED_LOOPBACK_ONLY', GRYLOO_JUPITER_HARNESS: 'MOCKED_LOOPBACK_ONLY', GRYLOO_ORCA_MAINNET_HARNESS: 'MOCKED_LOOPBACK_ONLY' } as const;
 function ok<T>(result: FlowResult): T { if (!result.ok) throw new Error(result.code); return result.value as T; }
 const swapWorkflow = (network: 'Solana Devnet' | 'Solana', from: string, to: string, amount: string): SemanticWorkflow => ({ schemaVersion: '1.0.0',
   workflowId: network === 'Solana' ? 'jupiter-cloud' : 'devnet-cloud', revision: 1, resourceEdges: [],
@@ -126,5 +126,34 @@ describe('BUILD-CLOUD-001 Solana flows on durable cloud state (MOCKED Solana env
       rpc: { 'jupiter-swap': chain.rpc }, http: chain.http });
     expect(await live.callFlow('jupiter-swap', 'info', [])).toEqual({ ok: true, value: { executionEnabled: false } });
     expect(await live.callFlow('jupiter-swap', 'mode', [])).toEqual({ ok: true, value: 'live' });
+  });
+
+  // BUILD-SOLANA-MAINNET-001: the same Orca service on mainnet-beta, as its own flow and storage; a worker reconciles, and a live backend keeps
+  // real-funds execution off without its own owner opt-in.
+  it('Orca mainnet-beta liquidity flow is cloud-durable, cluster-bound, and real-funds execution needs the separate owner opt-in', async () => {
+    const chain = createMockedSolanaDevnetOrca({ liquidityProfile: ORCA_WHIRLPOOLS_MAINNET_LIQUIDITY }), wallet = createMockedSolanaWallet();
+    chain.fund(wallet.owner, 3_000_000_000n, 50_000_000n);
+    const mainnetWorkflow: SemanticWorkflow = { ...liquidityWorkflow, nodes: [createSolanaLiquidityNode('node-002', { ...liquidityInput, network: 'Solana' })] };
+    const api = await deployment({ 'orca-liquidity-mainnet': chain.rpc }), key = await createPositionMintSigner();
+    // A Devnet position is not this flow's: each cluster has its own flow, storage and wallet chain.
+    expect(await api.call('orca-liquidity-mainnet', 'simulate', liquidityWorkflow, wallet.owner, { operation: 'OPEN', positionMint: key.address }))
+      .toMatchObject({ ok: false });
+    let record = ok<OrcaLiquidityRecord>(await api.call('orca-liquidity-mainnet', 'simulate', mainnetWorkflow, wallet.owner, { operation: 'OPEN', positionMint: key.address }));
+    expect(record.review).toMatchObject({ chain: ORCA_WHIRLPOOLS_MAINNET_LIQUIDITY.chain, cluster: 'mainnet-beta' });
+    record = ok<OrcaLiquidityRecord>(await api.call('orca-liquidity-mainnet', 'review', record.id, record.review.commitment, mainnetWorkflow));
+    const begin = ok<{ unsignedTransaction: string; signers: string[]; walletChain: string }>(await api.call('orca-liquidity-mainnet', 'begin', record.id, wallet.owner, mainnetWorkflow));
+    expect(begin.walletChain).toBe('solana:mainnet');
+    const walletSigned = wallet.sign(begin.unsignedTransaction), { signatures, message } = parseTransaction(fromBase64(walletSigned, 2048));
+    ok(await api.call('orca-liquidity-mainnet', 'submit', record.id, toBase64(serializeSignedTransaction([signatures[0]!, await key.sign(message)], message))));
+    const worker = await deployment({ 'orca-liquidity-mainnet': chain.rpc }, { evidenceDir: api.evidenceDir });
+    await due(worker.db); await worker.worker.drainOnce(); await worker.worker.drainOnce();
+    expect(ok<OrcaLiquidityRecord>(await worker.call('orca-liquidity-mainnet', 'status', record.id))).toMatchObject({ verdict: 'RECONCILED', evidenceClass: 'MOCKED' });
+    expect(chain.state.sent).toHaveLength(1);
+    const live = createBackend({ db: t.db, env: { GRYLOO_ORCA_MAINNET: 'live' }, logger: quiet, tenantId: 'default', holderId: 'live-orca', evidenceStore: null,
+      rpc: { 'orca-liquidity-mainnet': chain.rpc } });
+    expect(await live.callFlow('orca-liquidity-mainnet', 'info', [])).toEqual({ ok: true, value: { executionEnabled: false } });
+    expect(await live.callFlow('orca-liquidity-mainnet', 'mode', [])).toEqual({ ok: true, value: 'live' });
+    const off = createBackend({ db: t.db, env: {}, logger: quiet, tenantId: 'default', holderId: 'off-orca', evidenceStore: null, rpc: { 'orca-liquidity-mainnet': chain.rpc } });
+    expect(await off.callFlow('orca-liquidity-mainnet', 'info', [])).toEqual({ ok: false, code: 'ORCA_LIQUIDITY_PUBLIC_MAINNET_NOT_ENABLED' });
   });
 });
