@@ -11,7 +11,7 @@
  *    PREPARED attempt cancels it and the owner's browser may be between `begin` and `handoff`.
  */
 import { hashJournalBytes, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
-import type { ExecutionStorage } from '@defi-workflow-engine/reference-executor';
+import { boundCompositionNeedsObservation, boundCompositionPhase, type ExecutionStorage } from '@defi-workflow-engine/reference-executor';
 import type { Projection, Projector, WorkRequest } from '@defi-workflow-engine/cloud-runtime';
 import { createRobinhoodTransferService, type TransferRecord, type TransferWalletDiagnostic } from '../src/server/robinhood-transfer-service.ts';
 import { createSupplyService, type SupplyRecord, type SupplyWalletDiagnostic } from '../src/server/supply-service.ts';
@@ -26,6 +26,7 @@ import { createSolanaRpc, solanaRpcOverride } from '../src/server/solana-rpc.ts'
 import { createJupiterHttp } from '../src/server/jupiter-http.ts';
 import { createJupiterService, createSolanaDevnetService, type JupiterRecord, type JupiterWalletDiagnostic } from '../src/server/jupiter-service.ts';
 import { createOrcaLiquidityService, type OrcaLiquidityRecord, type OrcaLiquidityWalletDiagnostic } from '../src/server/orca-liquidity-service.ts';
+import { createSolanaCompositionService, type SolanaCompositionDiagnostic, type SolanaCompositionRecord } from '../src/server/solana-composition-service.ts';
 import { createUniswapLiquidityService, uniswapNeedsObservation, type UniswapLiquidityRecord,
   type UniswapWalletDiagnostic } from '../src/server/uniswap-liquidity-service.ts';
 import { baseSepoliaLiquidityRpc, createBaseSepoliaReadRpc, UNISWAP_LIQUIDITY_RPC_METHODS } from '../src/server/public-testnet-rpc.ts';
@@ -46,7 +47,9 @@ export type FlowName = 'robinhood-transfer' | 'aave-supply' | 'base-sepolia-swap
   | 'crosschain-router-testnet' | 'lending-composition' | 'pix-payment' | 'robinhood-swap' | 'robinhood-mainnet-transfer' | 'robinhood-liquidity'
   | 'crosschain-router-base-to-robinhood' | 'crosschain-router-robinhood-to-base' | 'crosschain-router-arbitrum-to-robinhood' | 'crosschain-router-robinhood-to-arbitrum'
   /** BUILD-BASE-001: Base mainnet (real funds) as a catalog network, and the Router's Arbitrum One → Base route. */
-  | 'arbitrum-swap' | 'arbitrum-mainnet-transfer' | 'arbitrum-liquidity' | 'base-swap' | 'base-mainnet-transfer' | 'base-liquidity' | 'base-aave' | 'arbitrum-aave' | 'crosschain-router-arbitrum-to-base';
+  | 'arbitrum-swap' | 'arbitrum-mainnet-transfer' | 'arbitrum-liquidity' | 'base-swap' | 'base-mainnet-transfer' | 'base-liquidity' | 'base-aave' | 'arbitrum-aave' | 'crosschain-router-arbitrum-to-base'
+  /** Solana Devnet Swap → Orca liquidity, composed from the two Solana Devnet flows above. */
+  | 'solana-devnet-composition';
 export type Rpc = (method: string, params: readonly unknown[]) => Promise<unknown>;
 /** Network transport for one flow. Built from configuration in production; replaced by MOCKED chains in tests. */
 export type FlowDeps = { readonly rpc: Rpc; readonly mode: 'live' | 'harness'; readonly env: Readonly<Record<string, string | undefined>>; readonly http?: JupiterHttp;
@@ -63,7 +66,7 @@ export type FlowService = { readonly call: (method: string, args: Args) => Promi
 export type FlowDefinition = {
   readonly name: FlowName; readonly busyCode: string; readonly runId: RegExp; readonly unavailableCode: string;
   readonly methods: Readonly<Record<string, { readonly mutates: boolean; readonly validate: (args: Args) => boolean }>>;
-  readonly create: (storage: ExecutionStorage, deps: FlowDeps) => FlowService;
+  readonly create: (storage: ExecutionStorage, deps: FlowDeps, related?: Readonly<Partial<Record<FlowName, ExecutionStorage>>>) => FlowService;
   readonly transport: (mode: 'live' | 'harness', env: Readonly<Record<string, string | undefined>>) => Omit<FlowDeps, 'mode' | 'env'>;
   readonly needsObservation: (record: unknown) => boolean;
   readonly projector: Projector;
@@ -79,6 +82,12 @@ export type FlowDefinition = {
    * journal directory. Each flow still writes and projects only its own run logs.
    */
   readonly namespace?: FlowName;
+  /**
+   * A composed flow runs its steps on other flows' UNCHANGED services. `uses` names exactly those flows: the backend hands
+   * `create` their storage (same tenant, their own namespaces, so owner leases and registries stay shared with their
+   * isolated runs) and nothing else. Their runs are still projected and observed by their own flows.
+   */
+  readonly uses?: readonly FlowName[];
 };
 
 /** The read client of a network this deployment has not enabled: every call fails closed with the flow's disabled code. */
@@ -497,6 +506,79 @@ const orcaLiquidity: FlowDefinition = {
   evidence: record => evidenceOf(record as OrcaLiquidityRecord),
 };
 
+const SOLANA_COMPOSITION_ID = /^solcomp-[a-f0-9]{32}$/;
+const positionMint = (value: unknown) => typeof value === 'string' && SOLANA_ADDRESS.test(value);
+const compositionDiagnostic = (value: unknown) => isObject(value) && Object.keys(value).length === 2 && ['SWAP', 'LIQUIDITY'].includes(String(value.step)) &&
+  solanaDiagnostic(value.diagnostic);
+/**
+ * Solana Devnet Swap → Orca liquidity: the composition coordinator over the `solana-devnet-swap` and `orca-liquidity` services,
+ * each on its own durable namespace of the same tenant. The coordinator signs and sends nothing; its runs are projected for
+ * history, and a worker observes a run only once one of its steps has a signed transaction (never a prepared, unsigned one).
+ */
+const solanaComposition: FlowDefinition = {
+  name: 'solana-devnet-composition', busyCode: 'SOLANA_COMPOSITION_BUSY', runId: SOLANA_COMPOSITION_ID, unavailableCode: 'SOLANA_COMPOSITION_SERVICE_UNAVAILABLE',
+  uses: ['solana-devnet-swap', 'orca-liquidity'],
+  methods: {
+    info: { mutates: false, validate: shape() },
+    simulate: { mutates: true, validate: shape(workflow, solanaOwner) },
+    review: { mutates: true, validate: shape(id(SOLANA_COMPOSITION_ID), commitment, workflow) },
+    invalidate: { mutates: true, validate: shape(id(SOLANA_COMPOSITION_ID)) },
+    beginSwap: { mutates: true, validate: shape(id(SOLANA_COMPOSITION_ID), solanaOwner, workflow) },
+    submitSwap: { mutates: true, validate: shape(id(SOLANA_COMPOSITION_ID), signedTransaction) },
+    prepareLiquidity: { mutates: true, validate: shape(id(SOLANA_COMPOSITION_ID), solanaOwner, workflow, positionMint) },
+    reviewLiquidity: { mutates: true, validate: shape(id(SOLANA_COMPOSITION_ID), commitment, workflow) },
+    beginLiquidity: { mutates: true, validate: shape(id(SOLANA_COMPOSITION_ID), solanaOwner, workflow) },
+    submitLiquidity: { mutates: true, validate: shape(id(SOLANA_COMPOSITION_ID), signedTransaction) },
+    walletFailure: { mutates: true, validate: shape(id(SOLANA_COMPOSITION_ID), compositionDiagnostic) },
+    observe: { mutates: true, validate: shape(id(SOLANA_COMPOSITION_ID)) },
+    end: { mutates: true, validate: shape(id(SOLANA_COMPOSITION_ID)) },
+    status: { mutates: false, validate: shape(id(SOLANA_COMPOSITION_ID)) },
+  },
+  transport: (mode, env) => solanaDevnetSwap.transport(mode, env),
+  create(storage, { rpc, mode, env }, related) {
+    const swapStorage = related?.['solana-devnet-swap'], liquidityStorage = related?.['orca-liquidity'];
+    if (!swapStorage || !liquidityStorage) throw new Error('SOLANA_COMPOSITION_CONFIGURATION_INVALID');
+    const provenance = mode === 'harness' ? 'MOCKED' as const : 'PUBLIC_DEVNET' as const, executionEnabled = env.GRYLOO_SOLANA_DEVNET_EXECUTION !== 'DISABLED';
+    const s = createSolanaCompositionService({ rpc, storage, provenance, executionEnabled,
+      swap: createSolanaDevnetService({ storage: swapStorage, rpc, provenance, executionEnabled }),
+      liquidity: createOrcaLiquidityService({ storage: liquidityStorage, rpc, provenance, executionEnabled }) });
+    const table: Record<string, (args: Args) => Promise<unknown>> = {
+      info: async () => ({ executionEnabled: s.executionEnabled }),
+      simulate: ([w, o]) => s.simulate(w, o as string),
+      review: ([i, c, w]) => s.review(i as string, c as string, w as SemanticWorkflow),
+      invalidate: ([i]) => s.invalidate(i as string),
+      beginSwap: ([i, o, w]) => s.beginSwap(i as string, o as string, w as SemanticWorkflow),
+      submitSwap: ([i, t]) => s.submitSwap(i as string, t as string),
+      prepareLiquidity: ([i, o, w, m]) => s.prepareLiquidity(i as string, o as string, w as SemanticWorkflow, m as string),
+      reviewLiquidity: ([i, c, w]) => s.reviewLiquidity(i as string, c as string, w as SemanticWorkflow),
+      beginLiquidity: ([i, o, w]) => s.beginLiquidity(i as string, o as string, w as SemanticWorkflow),
+      submitLiquidity: ([i, t]) => s.submitLiquidity(i as string, t as string),
+      walletFailure: ([i, d]) => s.walletFailure(i as string, d as SolanaCompositionDiagnostic),
+      observe: ([i]) => s.observe(i as string),
+      end: ([i]) => s.end(i as string),
+      status: ([i]) => s.status(i as string),
+    };
+    return { call: (method, args) => table[method]!(args), load: runId => s.load(runId), observe: runId => s.observe(runId) };
+  },
+  needsObservation: record => boundCompositionNeedsObservation(record as SolanaCompositionRecord),
+  projector: (name, bytes) => {
+    if (!name.endsWith('.jsonl')) return null;
+    const record = lastRecord<SolanaCompositionRecord>(bytes), observe = boundCompositionNeedsObservation(record), evidence = compositionEvidence(record);
+    return { run: { runId: record.id, workflowId: record.review.workflow.workflowId, flow: 'solana-devnet-composition', status: boundCompositionPhase(record),
+      provenance: record.provenance, ownerAccount: record.review.owner, recoveryOf: null, errorCode: errorCode(record.error), needsObservation: observe,
+      hasEvidence: evidence !== null, attempts: [], journal: journalRows(record.journal) },
+      work: work('solana-devnet-composition', record.id, observe, 5_000, evidence !== null) };
+  },
+  // Like the two Solana Devnet flows it composes: tenant-scoped storage and unguessable run ids (wallet-session principals are EVM only).
+  // Clients address only composition runs; the step runs are reached solely through the composition record.
+  evidence: record => compositionEvidence(record as SolanaCompositionRecord),
+};
+function compositionEvidence(record: SolanaCompositionRecord) {
+  const evidence = record.evidence;
+  if (!evidence || boundCompositionPhase(record) !== 'COMPLETED') return null;
+  return { bundleHash: evidence.bundleHash, environment: evidence.bundle.environment, outcome: evidence.bundle.outcome, bytes: new TextEncoder().encode(JSON.stringify(evidence)) };
+}
+
 /**
  * BUILD-UNISWAP-LIQUIDITY-PUBLIC: the canonical concentrated-liquidity action on Base Sepolia through Uniswap v3. Read-only
  * public simulation and Review; the owner's browser wallet sends each exact approval and the mint. The API records the
@@ -788,7 +870,7 @@ export const FLOWS: Readonly<Record<FlowName, FlowDefinition>> = Object.freeze({
   'crosschain-router-robinhood-to-arbitrum': routerFlow('crosschain-router-robinhood-to-arbitrum', 'robinhood-to-arbitrum'),
   'arbitrum-swap': arbitrumSwap, 'arbitrum-mainnet-transfer': arbitrumMainnetTransfer, 'arbitrum-liquidity': arbitrumLiquidity,
   'base-swap': baseSwap, 'base-mainnet-transfer': baseMainnetTransfer, 'base-liquidity': baseLiquidity, 'base-aave': baseAave, 'arbitrum-aave': arbitrumAave,
-  'crosschain-router-arbitrum-to-base': routerFlow('crosschain-router-arbitrum-to-base', 'arbitrum-to-base') });
+  'crosschain-router-arbitrum-to-base': routerFlow('crosschain-router-arbitrum-to-base', 'arbitrum-to-base'), 'solana-devnet-composition': solanaComposition });
 export const isFlowName = (value: string): value is FlowName => Object.hasOwn(FLOWS, value);
 
 /**
@@ -805,7 +887,7 @@ function configuredFlowMode(flow: FlowName, env: Readonly<Record<string, string 
   // The existing public-swap gate value; in the separately deployed backend it does not also require NODE_ENV=development.
   if (flow === 'base-sepolia-swap') return env.GRYLOO_PUBLIC_TESTNET === 'record' ? 'live' : 'off';
   // Solana Devnet (valueless test tokens): explicit backend enablement; the MOCKED loopback harness wins.
-  if (flow === 'solana-devnet-swap' || flow === 'orca-liquidity')
+  if (flow === 'solana-devnet-swap' || flow === 'orca-liquidity' || flow === 'solana-devnet-composition')
     return env.GRYLOO_SOLANA_DEVNET_HARNESS === 'MOCKED_LOOPBACK_ONLY' ? 'harness' : env.GRYLOO_SOLANA_DEVNET === 'live' ? 'live' : 'off';
   // Jupiter mainnet-beta: `live` enables read-only Simulate/Review; real-funds execution additionally needs GRYLOO_JUPITER_OWNER_EXECUTION.
   if (flow === 'jupiter-swap') return env.GRYLOO_JUPITER_HARNESS === 'MOCKED_LOOPBACK_ONLY' ? 'harness' : env.GRYLOO_JUPITER === 'live' ? 'live' : 'off';
@@ -848,5 +930,6 @@ const DISABLED: Readonly<Record<FlowName, string>> = { 'robinhood-transfer': 'TR
   'crosschain-router-arbitrum-to-robinhood': 'ROBINHOOD_MAINNET_NOT_ENABLED', 'crosschain-router-robinhood-to-arbitrum': 'ROBINHOOD_MAINNET_NOT_ENABLED',
   'arbitrum-swap': 'ARBITRUM_MAINNET_NOT_ENABLED', 'arbitrum-mainnet-transfer': 'ARBITRUM_MAINNET_NOT_ENABLED', 'arbitrum-liquidity': 'ARBITRUM_MAINNET_NOT_ENABLED',
   'base-swap': 'BASE_MAINNET_NOT_ENABLED', 'base-mainnet-transfer': 'BASE_MAINNET_NOT_ENABLED', 'base-liquidity': 'BASE_MAINNET_NOT_ENABLED',
-  'base-aave': 'BASE_MAINNET_NOT_ENABLED', 'arbitrum-aave': 'ARBITRUM_MAINNET_NOT_ENABLED', 'crosschain-router-arbitrum-to-base': 'ROUTER_NOT_ENABLED' };
+  'base-aave': 'BASE_MAINNET_NOT_ENABLED', 'arbitrum-aave': 'ARBITRUM_MAINNET_NOT_ENABLED', 'crosschain-router-arbitrum-to-base': 'ROUTER_NOT_ENABLED',
+  'solana-devnet-composition': 'SOLANA_COMPOSITION_PUBLIC_DEVNET_NOT_ENABLED' };
 export const disabledCode = (flow: FlowName) => DISABLED[flow];

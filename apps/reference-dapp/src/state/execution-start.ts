@@ -13,6 +13,7 @@ import { useRouter } from './router-store';
 import { usePublicTestnet } from './public-testnet-store';
 import { useJupiter } from './jupiter-store';
 import { useSolanaLiquidity } from './solana-liquidity-store';
+import { useSolanaComposition } from './solana-composition-store';
 import { useUniswapLiquidity } from './uniswap-liquidity-store';
 import { useRobinhoodTransfer } from './robinhood-transfer-store';
 
@@ -20,7 +21,7 @@ import { useRobinhoodTransfer } from './robinhood-transfer-store';
 export function useExecutionStart(kind: SimulationSource['kind'], wallet: ReviewWallet): ExecutionStart {
   const modeA = useModeA(), modeB = useModeB(), composition = useComposition(), liquidity = useLiquidity();
   const supply = useSupply(), lending = useLending(), router = useRouter(), publicSwap = usePublicTestnet();
-  const jupiter = useJupiter(), solanaPool = useSolanaLiquidity(), uniswapPool = useUniswapLiquidity(), transfer = useRobinhoodTransfer();
+  const jupiter = useJupiter(), solanaPool = useSolanaLiquidity(), uniswapPool = useUniswapLiquidity(), transfer = useRobinhoodTransfer(), solanaComposition = useSolanaComposition();
   const result: ExecutionStart = { ready: false, started: false, start: null, prompt: null, expiresAt: null, requiresMainnetAcknowledgement: false };
   const attach = (ready: boolean, started: boolean, start: () => void | Promise<void>, prompt = 'Confirm the next transaction in your wallet.') => Object.assign(result, { ready, started, start, prompt });
   const localWallet = (session: { account: string } | null, connect: () => void) => {
@@ -63,6 +64,13 @@ export function useExecutionStart(kind: SimulationSource['kind'], wallet: Review
       const r = solanaPool.record;
       attach(Boolean(r?.authorization && !solanaPool.retired && !solanaPool.busy && !r.attempt && r.verdict === 'PENDING' && solanaPool.executionEnabled), Boolean(r?.attempt), solanaPool.execute, 'Sign the reviewed liquidity transaction in your wallet.');
       if (!solanaPool.executionEnabled) result.reason = 'Execution is unavailable on this network.'; break;
+    }
+    case 'solana-composition': {
+      // Each step is its own wallet request after its own accepted Review: the swap first, then (after a fresh position Review) the position.
+      const v = solanaComposition.record;
+      attach(Boolean(v && !solanaComposition.retired && !solanaComposition.busy && solanaComposition.authorized && solanaComposition.executionEnabled), Boolean(v?.swap.attempt),
+        solanaComposition.execute, v?.phase === 'CONSUMING' ? 'Sign the reviewed position transaction in your wallet.' : 'Sign the reviewed swap transaction in your wallet.');
+      if (!solanaComposition.executionEnabled) result.reason = 'Execution is unavailable on this network.'; break;
     }
     case 'uniswap-pool': {
       const r = uniswapPool.record, last = r?.attempts.at(-1);
@@ -125,6 +133,12 @@ export function useExecutionStart(kind: SimulationSource['kind'], wallet: Review
         safeNext = attempts.length > 0 && attempts.every(a => a.step === 'approval' && a.state === 'CONFIRMED');
         result.nextLabel = 'Continue to swap'; break;
       }
+      case 'solana-composition': {
+        // Only a freshly prepared, never-begun position whose Review the owner accepted; the swap never continues again.
+        const v = solanaComposition.record;
+        safeNext = Boolean(v?.phase === 'CONSUMING' && v.liquidity && !v.liquidity.attempt && solanaComposition.authorized);
+        result.nextLabel = 'Continue to add liquidity'; break;
+      }
       case 'uniswap-pool': {
         const r = uniswapPool.record, next = r?.review.calls.find(c => !r.attempts.some(a => a.step === c.step && a.state === 'CONFIRMED'));
         safeNext = Boolean(r && next && !r.attempts.some(a => a.step === next.step));
@@ -150,7 +164,7 @@ export function useExecutionStart(kind: SimulationSource['kind'], wallet: Review
     result.next = result.ready && safeNext ? result.start : null;
   }
   result.check = kind === 'supply' ? supply.observe : kind === 'lending' ? lending.observe : kind === 'router' ? router.observe : kind === 'public' ? publicSwap.observe
-    : kind === 'solana-swap' ? jupiter.observe : kind === 'solana-pool' ? solanaPool.observe : kind === 'uniswap-pool' ? uniswapPool.observe : kind === 'transfer' ? transfer.observe
+    : kind === 'solana-swap' ? jupiter.observe : kind === 'solana-pool' ? solanaPool.observe : kind === 'solana-composition' ? solanaComposition.observe : kind === 'uniswap-pool' ? uniswapPool.observe : kind === 'transfer' ? transfer.observe
     : kind === 'fork-swap' ? () => { const a = modeA.execution?.attempts.at(-1); if (a && (a.stepId === 'step-approve' || a.stepId === 'step-swap')) modeA.observe(a.stepId); }
     : kind === 'delegated-swap' ? modeB.refresh : kind === 'composition' ? composition.refresh : null;
   return result;

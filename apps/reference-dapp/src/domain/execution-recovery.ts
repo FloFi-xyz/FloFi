@@ -31,6 +31,11 @@ export function projectExecutionRecovery(source: ExecutionLifecycleSource, progr
     }
     case 'uniswap-pool': { const r = source.state.record; owner = r?.owner ?? null; chain = r ? `eip155:${r.review.chainId}` : null; if (r?.verdict === 'PENDING' && unresolved && ['PREPARED', 'SUBMITTING', 'SUBMISSION_RESULT_UNKNOWN', 'PENDING'].includes(r.attempts.at(-1)?.state ?? '')) action = 'observe'; break; }
     case 'solana-swap': case 'solana-pool': { const r = source.state.record; owner = r?.review.owner ?? null; chain = r?.review.chain ?? null; if (r?.attempt && r.verdict === 'PENDING' && !r.notSubmitted && unresolved) action = 'observe'; break; }
+    case 'solana-composition': {
+      const v = source.state.record; owner = v?.record.review.owner ?? null; chain = v?.record.review.chain ?? null;
+      const run = v?.phase === 'PRODUCING' ? v.swap : v?.phase === 'CONSUMING' || v?.phase === 'ATTENTION' ? v.liquidity ?? v.swap : null;
+      if (run?.attempt?.signature && run.verdict === 'PENDING' && unresolved) action = 'observe'; break;
+    }
     case 'transfer': { const r = source.state.record; owner = r?.review.account ?? null; chain = r?.review.chain ?? null; if (r?.attempt && r.verdict === 'PENDING' && !r.notSubmitted && unresolved) action = 'observe'; break; }
     case 'fork-swap': {
       const s = source.state, r = s.execution; owner = s.prepared?.owner ?? null; chain = 'eip155:31337';

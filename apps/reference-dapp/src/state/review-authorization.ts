@@ -13,6 +13,7 @@ import { useRouter } from './router-store';
 import { usePublicTestnet } from './public-testnet-store';
 import { useJupiter } from './jupiter-store';
 import { useSolanaLiquidity } from './solana-liquidity-store';
+import { useSolanaComposition } from './solana-composition-store';
 import { useUniswapLiquidity } from './uniswap-liquidity-store';
 import { useRobinhoodTransfer } from './robinhood-transfer-store';
 import { useAcross } from './across-store';
@@ -29,7 +30,7 @@ export function useReviewAuthorization(kind: SimulationSource['kind']): { author
   const modeA = useModeA(), modeB = useModeB(), composition = useComposition(), liquidity = useLiquidity();
   const supply = useSupply(), lending = useLending(), router = useRouter(), publicSwap = usePublicTestnet();
   const jupiter = useJupiter(), solanaPool = useSolanaLiquidity(), uniswapPool = useUniswapLiquidity(), transfer = useRobinhoodTransfer(), across = useAcross();
-  const sharedWallet = useBuild009Wallet(), environment = useExecutionEnvironment();
+  const sharedWallet = useBuild009Wallet(), environment = useExecutionEnvironment(), solanaComposition = useSolanaComposition();
   const { restorationEpoch } = useWorkflow();
   const authorization: ReviewAuthorization = { key: null, manifest: null, owner: null, chain: null, ready: false, accepted: false, approve: null, approvals: [], tokens: [], limits: [], technical: null };
   const attach = (key: string, manifest: unknown, policy: unknown, accepted: boolean, approve: (() => void | Promise<void>) | null, ready: boolean, technical: unknown) => {
@@ -68,6 +69,20 @@ export function useReviewAuthorization(kind: SimulationSource['kind']): { author
       const r = solanaPool.record, q = r?.review; if (!r || !q) break;
       attach(q.commitment, q.manifest, q.policy, r.authorization === q.commitment, solanaPool.review, !solanaPool.busy && !solanaPool.retired && !r.attempt && r.verdict === 'PENDING', q);
       for (const token of [q.token0, q.token1]) authorization.tokens.push({ address: token.mint, chain: q.chain, symbol: token.symbol === 'USDC' ? 'devUSDC' : token.symbol, decimals: token.decimals });
+      break;
+    }
+    case 'solana-composition': {
+      // Before the swap: the composed plan (its acceptance also accepts the exact swap Review). After the swap: the position's own fresh Review.
+      // In between (swap reconciled, no position prepared) there is no Review to approve: the next step is a fresh read-only simulation.
+      const v = solanaComposition.record; if (!v) break;
+      const position = v.phase === 'CONSUMING' && v.liquidity && !v.liquidity.attempt ? v.liquidity : null, idle = !solanaComposition.busy && !solanaComposition.retired;
+      if (position) attach(`${v.record.id}:${position.review.commitment}`, position.review.manifest, position.review.policy, position.authorization === position.review.commitment,
+        solanaComposition.review, idle, position.review);
+      else if (['SIMULATED', 'AUTHORIZED', 'PRODUCING'].includes(v.phase)) attach(`${v.record.id}:${v.record.review.commitment}`, v.record.review.manifest, v.record.review.policy,
+        v.record.authorization === v.record.review.commitment, solanaComposition.review, idle && ['SIMULATED', 'AUTHORIZED'].includes(v.phase), v.record.review);
+      else break;
+      for (const token of [v.record.review.swap.input, v.record.review.swap.output])
+        authorization.tokens.push({ address: token.mint, chain: v.record.review.chain, symbol: token.symbol === 'USDC' ? 'devUSDC' : token.symbol, decimals: token.decimals });
       break;
     }
     case 'transfer': {

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { CONCENTRATED_LIQUIDITY_ACTION, createConcentratedLiquidityNode, readConcentratedLiquidity, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
+import { CONCENTRATED_LIQUIDITY_ACTION, createConcentratedLiquidityNode, readConcentratedLiquidity, readConcentratedLiquiditySource, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY as profile } from '@defi-workflow-engine/action-registry';
 import { orcaAlignPriceRange, orcaPriceFromSqrtPrice, orcaSqrtPriceAtTick } from '@defi-workflow-engine/reference-compiler';
 import { formatTokenAmount, parseTokenAmount } from './jupiter-authoring';
@@ -34,16 +34,23 @@ export function createSolanaLiquidityNode(nodeId: string, input: SolanaLiquidity
     positionAsset: { chainId: profile.chain, address: profile.programs.whirlpool, decimals: 0 } });
 }
 export type SolanaLiquidityDetails = { network: 'Solana Devnet'; maxSol: string; maxDevUsdc: string; tickLower: number; tickUpper: number; lowerPrice: string;
-  upperPrice: string; slippage: string; provider: string };
+  upperPrice: string; slippage: string; provider: string;
+  /** Set when the position is bound to a swap's output: that token's maximum is the cap on the actual reconciled swap output. */
+  source: { nodeId: string; token: 0 | 1; fullOutput: boolean } | null };
+/** The bound token's cap that means "100% of the swap output": the Devnet token maximum (the swap output is the real limit). */
+export const fullOutputCap = (token: 0 | 1) => formatTokenAmount(token === 0 ? profile.token0.maximumAmount : profile.token1.maximumAmount, token === 0 ? profile.token0.decimals : profile.token1.decimals);
 export function solanaLiquidityDetails(node: SemanticWorkflow['nodes'][number] | { readonly actionType: string; readonly chainId: string }): SolanaLiquidityDetails | null {
   if (node.actionType !== CONCENTRATED_LIQUIDITY_ACTION || node.chainId !== profile.chain) return null;
   try {
-    const f = readConcentratedLiquidity(node as SemanticWorkflow['nodes'][number]);
+    // Display reads a bound position too (the runtime readers stay strict and reject it outside its composition).
+    const { node: isolated, source } = readConcentratedLiquiditySource(node as SemanticWorkflow['nodes'][number]);
+    const f = readConcentratedLiquidity(isolated);
     if (f.token0.address !== profile.token0.mint || f.token1.address !== profile.token1.mint || f.protocols.join() !== profile.protocol) return null;
     const price = (tick: number) => orcaPriceFromSqrtPrice(orcaSqrtPriceAtTick(tick), profile.token0.decimals, profile.token1.decimals);
     return { network: 'Solana Devnet', maxSol: formatTokenAmount(f.amount0Max, profile.token0.decimals), maxDevUsdc: formatTokenAmount(f.amount1Max, profile.token1.decimals),
       tickLower: f.tickLower, tickUpper: f.tickUpper, lowerPrice: price(f.tickLower), upperPrice: price(f.tickUpper), slippage: String(f.slippageBps ?? ''),
-      provider: profile.providerLabel };
+      provider: profile.providerLabel, source: source ? { nodeId: source.nodeId, token: source.token,
+        fullOutput: (source.token === 0 ? f.amount0Max : f.amount1Max) === (source.token === 0 ? profile.token0.maximumAmount : profile.token1.maximumAmount) } : null };
   } catch { return null; }
 }
 /** Editing input that reproduces the node exactly (ticks are already aligned). */

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from 'vitest';
-import { CONCENTRATED_LIQUIDITY_ACTION, createConcentratedLiquidityNode, hashArtifactBytes, readConcentratedLiquidity, type ConcentratedLiquidityFields,
-  type ConcentratedLiquidityNode } from '../src/index.js';
+import { bindConcentratedLiquidityNode, CONCENTRATED_LIQUIDITY_ACTION, createConcentratedLiquidityNode, createExactInputSwapNode, hashArtifactBytes,
+  readConcentratedLiquidity, readConcentratedLiquiditySource, type ConcentratedLiquidityFields, type ConcentratedLiquidityNode } from '../src/index.js';
 
 const devnet = 'solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1', base = 'eip155:8453';
 const orca: ConcentratedLiquidityFields = { chain: devnet, token0: { chainId: devnet, address: 'So11111111111111111111111111111111111111112', decimals: 9 },
@@ -61,5 +61,45 @@ describe('canonical concentrated-liquidity semantics', () => {
     const extra = createConcentratedLiquidityNode('n', orca);
     extra.inputs.push({ name: 'recipient', kind: 'ACCOUNT', value: { chainId: devnet, address: 'x' } });
     expect(() => readConcentratedLiquidity(extra)).toThrow('LIQUIDITY_PORTS_INVALID');
+  });
+});
+
+describe('bound concentrated-liquidity maximum (swap output → position)', () => {
+  const swap = createExactInputSwapNode('node-002', { chain: devnet, input: orca.token0, output: orca.token1, amount: '100000000', slippageBps: 50,
+    protocols: ['orca-whirlpools'], maximumAmount: '10000000000' });
+  const isolated = createConcentratedLiquidityNode('node-003', orca);
+  const bound = bindConcentratedLiquidityNode(isolated, { token: 1, nodeId: 'node-002', outputId: 'amount-out' });
+  const workflow = (nodes: ConcentratedLiquidityNode[], resourceEdges: { fromNodeId: string; outputId: string; toNodeId: string; inputName: string }[]) =>
+    new TextEncoder().encode(JSON.stringify({ schemaVersion: '1.0.0', workflowId: 'w', revision: 1, nodes, resourceEdges }));
+  it('appends exactly one typed reference and one dependency, and round-trips to the byte-identical isolated node', () => {
+    expect(bound.inputs.at(-1)).toEqual({ name: 'amount1-source', kind: 'OUTPUT_REFERENCE', value: { nodeId: 'node-002', outputId: 'amount-out' } });
+    expect(bound.dependencies).toEqual(['node-002']);
+    const read = readConcentratedLiquiditySource(bound);
+    expect(read.source).toEqual({ token: 1, nodeId: 'node-002', outputId: 'amount-out' });
+    expect(JSON.stringify(read.node)).toBe(JSON.stringify(isolated));
+    expect(readConcentratedLiquiditySource(isolated)).toEqual({ node: isolated, source: null });
+    expect(hash(read.node)).toBe(hash(isolated));
+  });
+  it('keeps the strict reader closed: an isolated runtime never reads a bound position', () => {
+    expect(() => readConcentratedLiquidity(bound)).toThrow('LIQUIDITY_PORTS_INVALID');
+  });
+  it('is schema-valid only together with the declared dependency and a matching resource edge', () => {
+    const edge = { fromNodeId: 'node-002', outputId: 'amount-out', toNodeId: 'node-003', inputName: 'amount1-source' };
+    expect(hashArtifactBytes('semantic-workflow', workflow([swap, bound], [edge]))).toMatch(/^0x[0-9a-f]{64}$/);
+    expect(() => hashArtifactBytes('semantic-workflow', workflow([swap, bound], [{ ...edge, inputName: 'amount0-source' }]))).toThrow('resource edge does not match target input reference');
+    expect(() => hashArtifactBytes('semantic-workflow', workflow([swap, { ...bound, dependencies: [] }], [edge]))).toThrow('output reference must declare dependency');
+  });
+  it('rejects malformed bindings instead of guessing', () => {
+    expect(() => bindConcentratedLiquidityNode(bound, { token: 0, nodeId: 'node-002', outputId: 'amount-out' })).toThrow('LIQUIDITY_SOURCE_INVALID');
+    expect(() => bindConcentratedLiquidityNode(isolated, { token: 1, nodeId: 'node-003', outputId: 'amount-out' })).toThrow('LIQUIDITY_SOURCE_INVALID');
+    expect(() => bindConcentratedLiquidityNode(isolated, { token: 2 as 0, nodeId: 'node-002', outputId: 'amount-out' })).toThrow('LIQUIDITY_SOURCE_INVALID');
+    expect(() => bindConcentratedLiquidityNode(uniswap, { token: 1, nodeId: 'node-001', outputId: 'amount-out' })).toThrow('LIQUIDITY_SOURCE_INVALID');
+    const misplaced = { ...bound, inputs: [bound.inputs.at(-1)!, ...bound.inputs.slice(0, -1)] };
+    expect(() => readConcentratedLiquiditySource(misplaced)).toThrow('LIQUIDITY_SOURCE_INVALID');
+    const renamed = { ...bound, inputs: [...bound.inputs.slice(0, -1), { ...bound.inputs.at(-1)!, name: 'source' }] };
+    expect(() => readConcentratedLiquiditySource(renamed)).toThrow('LIQUIDITY_SOURCE_INVALID');
+    expect(() => readConcentratedLiquiditySource({ ...bound, dependencies: ['node-002', 'node-001'] })).toThrow('LIQUIDITY_SOURCE_INVALID');
+    const twice = { ...bound, inputs: [...bound.inputs, { name: 'amount0-source', kind: 'OUTPUT_REFERENCE' as const, value: { nodeId: 'node-002', outputId: 'amount-out' } }] };
+    expect(() => readConcentratedLiquiditySource(twice)).toThrow('LIQUIDITY_SOURCE_INVALID');
   });
 });

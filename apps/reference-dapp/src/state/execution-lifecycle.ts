@@ -17,6 +17,7 @@ import { useRouter } from './router-store';
 import { usePublicTestnet } from './public-testnet-store';
 import { useJupiter } from './jupiter-store';
 import { useSolanaLiquidity } from './solana-liquidity-store';
+import { useSolanaComposition } from './solana-composition-store';
 import { useUniswapLiquidity } from './uniswap-liquidity-store';
 import { useRobinhoodTransfer } from './robinhood-transfer-store';
 import { useCow } from './cow-store';
@@ -25,11 +26,12 @@ export function useExecutionLifecycle(kind: SimulationSource['kind'], wallet: Re
   const { state, context } = useWorkflow();
   const modeA = useModeA(), modeB = useModeB(), composition = useComposition(), liquidity = useLiquidity();
   const supply = useSupply(), lending = useLending(), router = useRouter(), publicSwap = usePublicTestnet();
+  const solanaComposition = useSolanaComposition();
   const jupiter = useJupiter(), solanaPool = useSolanaLiquidity(), uniswapPool = useUniswapLiquidity(), transfer = useRobinhoodTransfer(), cow = useCow();
   const source: ExecutionLifecycleSource = kind === 'supply' ? { kind, state: supply }
     : kind === 'lending' ? { kind, state: lending } : kind === 'router' ? { kind, state: router }
     : kind === 'public' ? { kind, state: publicSwap } : kind === 'solana-swap' ? { kind, state: jupiter }
-    : kind === 'solana-pool' ? { kind, state: solanaPool } : kind === 'uniswap-pool' ? { kind, state: uniswapPool }
+    : kind === 'solana-pool' ? { kind, state: solanaPool } : kind === 'solana-composition' ? { kind, state: solanaComposition } : kind === 'uniswap-pool' ? { kind, state: uniswapPool }
     : kind === 'transfer' ? { kind, state: transfer } : kind === 'fork-swap' ? { kind, state: modeA }
     : kind === 'fork-pool' ? { kind, state: liquidity } : kind === 'delegated-swap' ? { kind, state: modeB }
     : kind === 'composition' ? { kind, state: composition }
@@ -41,7 +43,7 @@ export function useExecutionLifecycle(kind: SimulationSource['kind'], wallet: Re
   const check = view.action === null ? null
     : source.kind === 'supply' ? supply.observe : source.kind === 'lending' ? lending.observe
     : source.kind === 'router' ? router.observe : source.kind === 'public' ? publicSwap.observe
-    : source.kind === 'solana-swap' ? jupiter.observe : source.kind === 'solana-pool' ? solanaPool.observe
+    : source.kind === 'solana-swap' ? jupiter.observe : source.kind === 'solana-pool' ? solanaPool.observe : source.kind === 'solana-composition' ? solanaComposition.observe
     : source.kind === 'uniswap-pool' ? uniswapPool.observe : source.kind === 'transfer' ? transfer.observe
     : source.kind === 'fork-swap' ? view.action === 'reconcile' ? modeA.reconcile : () => modeA.observe(view.operationId as 'step-approve' | 'step-swap')
     : source.kind === 'fork-pool' ? view.action === 'recover-unknown' ? liquidity.recoverUnknown : liquidity.observe

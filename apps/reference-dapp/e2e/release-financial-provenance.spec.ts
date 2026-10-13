@@ -5,7 +5,7 @@ import { test, expect, applyPendingProposal, openSimulationDetails } from './fix
 import { assertSimulationReviewBlocked } from './release-safety-fixtures';
 import { resetLending, installLendingWallet, lendingSends, LENDING_OWNER } from './lending-fixtures';
 import { resetJupiterHarness, installSolanaWallet, authorSolanaSwap, chooseSolanaWallet, signRequests, jupiterControl } from './jupiter-fixtures';
-import { resetDevnetHarness, installDevnetWallet, authorDevnetSwap, devnetControl } from './solana-devnet-fixtures';
+import { resetDevnetHarness, installDevnetWallet, authorDevnetSwap, devnetControl, linkSwapToPosition } from './solana-devnet-fixtures';
 import { resetTransferHarness, installTransferWallet, sendRequests, chainBroadcasts, transferHarnessRpc } from './robinhood-transfer-fixtures';
 import { resetUniswapHarness, installUniswapWallet, walletSends } from './uniswap-liquidity-fixtures';
 import { resetRouterHarness, installRouterWallet, routerWalletSends } from './router-fixtures';
@@ -16,7 +16,7 @@ import { createTestWallet } from '../../../packages/reference-reconciler/test/te
 // financial lifecycle assertions remain in the original diagnostic specs and in
 // the mandatory service/executor/reconciler suites; MOCKED cannot authorize UI.
 const profile = process.env.FLOFI_RELEASE_PROVENANCE_PROFILE;
-const profiles = ['lending', 'jupiter', 'solana-devnet', 'solana-liquidity', 'transfer', 'uniswap', 'router', 'journey', 'cloud'] as const;
+const profiles = ['lending', 'jupiter', 'solana-devnet', 'solana-liquidity', 'solana-composition', 'transfer', 'uniswap', 'router', 'journey', 'cloud'] as const;
 if (!profiles.some(value => value === profile)) throw new Error('An exact FLOFI_RELEASE_PROVENANCE_PROFILE is required');
 
 async function chat(page: Page, text: string) {
@@ -66,6 +66,25 @@ if (profile === 'solana-liquidity') test('MOCKED Orca liquidity retains exact ti
   await panel.getByRole('button', { name: 'Simulate position', exact: true }).click();
   await expect(panel).toContainText('aligned ticks -39104 to -36992');
   await expect(panel.getByRole('term').filter({ hasText: /^Expected contribution$/ })).toBeVisible();
+  await assertSimulationReviewBlocked(page, () => signRequests(page));
+  expect(await devnetControl({ action: 'sent' })).toBe(0);
+});
+
+if (profile === 'solana-composition') test('MOCKED Solana Devnet Swap → Orca liquidity binds the swap output on the Canvas and keeps the composed plan without authority', async ({ page }) => {
+  const wallet = await resetDevnetHarness(); await installDevnetWallet(page, wallet);
+  await chat(page, 'swap 0.1 SOL to devUSDC on Solana Devnet slippage 50 bps');
+  await page.getByLabel('Describe your flow').fill('add liquidity 0.05 SOL and 1000 devUSDC ticks -39104 to -36992 on Solana Devnet slippage 100 bps');
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await applyPendingProposal(page);
+  // The Canvas link is a typed binding: the position's devUSDC maximum reads the swap's actual reconciled output.
+  await linkSwapToPosition(page);
+  await simulate(page);
+  const panel = page.getByRole('region', { name: 'Solana Devnet swap and liquidity', exact: true });
+  await chooseSolanaWallet(panel);
+  await panel.getByRole('button', { name: 'Simulate swap and liquidity', exact: true }).click();
+  await expect(panel.getByRole('region', { name: 'Composition plan' }).or(panel.getByLabel('Composition plan'))).toContainText('100% of the swap’s reconciled output');
+  await expect(panel).toContainText('Risk reduction only');
+  await expect(panel.locator('[data-composition-phase="SIMULATED"]')).toBeVisible();
   await assertSimulationReviewBlocked(page, () => signRequests(page));
   expect(await devnetControl({ action: 'sent' })).toBe(0);
 });

@@ -105,3 +105,31 @@ export function readConcentratedLiquidity(node: ConcentratedLiquidityNode): Conc
     feeTier: fee.value, slippageBps: slip?.kind === 'MAXIMUM_SLIPPAGE_BPS' ? slip.maximumBps : null, protocols: [...node.adapterConstraints.protocols],
     recipient: recipient?.kind === 'ACCOUNT' ? { ...recipient.value } : null, positionAsset: { ...output.asset as TokenAsset } };
 }
+
+/**
+ * A bound maximum: the neutral position may name one upstream output whose actual, reconciled amount caps one token's
+ * maximum. The authored QUANTITY maximum stays in the node as the owner's cap; the effective maximum is
+ * min(cap, reconciled output), so a pre-existing balance of that token is never spent. The binding is one extra
+ * OUTPUT_REFERENCE input, last, with exactly one dependency on the producer. A node without it is byte-identical to the
+ * isolated position, and the strict reader above rejects a bound node, so isolated runtimes never accept one.
+ */
+export const LIQUIDITY_SOURCE_INPUTS = ['amount0-source', 'amount1-source'] as const;
+export type ConcentratedLiquiditySource = { readonly token: 0 | 1; readonly nodeId: string; readonly outputId: string };
+export function bindConcentratedLiquidityNode(node: ConcentratedLiquidityNode, source: ConcentratedLiquiditySource): ConcentratedLiquidityNode {
+  if (node.actionType !== CONCENTRATED_LIQUIDITY_ACTION || node.dependencies.length !== 0 || node.inputs.some(input => input.kind === 'OUTPUT_REFERENCE') ||
+      (source.token !== 0 && source.token !== 1) || typeof source.nodeId !== 'string' || !source.nodeId || source.nodeId === node.nodeId ||
+      typeof source.outputId !== 'string' || !source.outputId) throw new Error('LIQUIDITY_SOURCE_INVALID');
+  return { ...node, inputs: [...node.inputs, { name: LIQUIDITY_SOURCE_INPUTS[source.token], kind: 'OUTPUT_REFERENCE', value: { nodeId: source.nodeId, outputId: source.outputId } }],
+    dependencies: [source.nodeId] };
+}
+/** Splits a neutral position into its isolated node (no binding, no dependency) and its binding, if any. Malformed bindings fail closed. */
+export function readConcentratedLiquiditySource(node: ConcentratedLiquidityNode): { readonly node: ConcentratedLiquidityNode; readonly source: ConcentratedLiquiditySource | null } {
+  const references = node.inputs.filter(input => input.kind === 'OUTPUT_REFERENCE');
+  if (!references.length) return { node, source: null };
+  const last = node.inputs.at(-1);
+  if (node.actionType !== CONCENTRATED_LIQUIDITY_ACTION || references.length !== 1 || last?.kind !== 'OUTPUT_REFERENCE' ||
+      !(LIQUIDITY_SOURCE_INPUTS as readonly string[]).includes(last.name) || node.dependencies.length !== 1 || node.dependencies[0] !== last.value.nodeId)
+    throw new Error('LIQUIDITY_SOURCE_INVALID');
+  const source: ConcentratedLiquiditySource = { token: last.name === LIQUIDITY_SOURCE_INPUTS[0] ? 0 : 1, nodeId: last.value.nodeId, outputId: last.value.outputId };
+  return { node: { ...node, inputs: node.inputs.slice(0, -1), dependencies: [] }, source };
+}

@@ -83,6 +83,14 @@ export function projectExecutionStepEvidence(source: ExecutionLifecycleSource, p
       add('transaction', Boolean(record?.attempt?.reconciled), journalRecovery(record?.journal));
       break;
     }
+    case 'solana-composition': {
+      const v = source.state.record;
+      add('swap', Boolean(v?.swap.attempt?.reconciled), journalRecovery(v?.swap.journal),
+        v?.swap.attempt?.reconciled ? comparison('Swap output', v.record.review.swap.expectedOutput, v.record.binding?.received, v.record.review.swap.output.decimals,
+          v.record.review.swap.output.symbol === 'USDC' ? 'devUSDC' : v.record.review.swap.output.symbol) : []);
+      add('position', Boolean(v?.liquidity?.attempt?.reconciled && v.phase === 'COMPLETED'), journalRecovery(v?.liquidity?.journal));
+      break;
+    }
     case 'transfer': {
       const record = source.state.record;
       add('transfer', Boolean(record?.attempt?.reconciled), journalRecovery(record?.journal));
