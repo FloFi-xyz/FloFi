@@ -38,6 +38,9 @@ const profiles = phase === 'composition' ? [
   ['solana-mainnet-network', ['solana-mainnet-network.spec.ts'], { GRYLOO_SOLANA_DEVNET_E2E: 'MOCKED_LOOPBACK_ONLY' }],
   // BUILD-SOLANA-MAINNET-001 PR B: empty Canvas on Launch App, unrestricted card deletion, and the Swap arrow's From/To inversion (MOCKED estimates).
   ['canvas-corrections', ['canvas-corrections.spec.ts'], {}],
+  // P0: a wallet that changes the reviewed Solana Devnet swap (Phantom appends Lighthouse guards) is refused before broadcast, Execute says
+  // why, and Simulate again runs the swap once and the position. MOCKED Devnet loopback; only this recovery case of the diagnostic spec.
+  ['solana-wallet-refusal', ['solana-swap-liquidity-composition.spec.ts', '--grep', 'a wallet that changes the reviewed swap'], { GRYLOO_SOLANA_DEVNET_E2E: 'MOCKED_LOOPBACK_ONLY' }],
   ['lending-provenance', [boundary], { FLOFI_RELEASE_PROVENANCE_PROFILE: 'lending', GRYLOO_LENDING_E2E: 'MOCKED_LOOPBACK_ONLY' }],
   ['jupiter-provenance', [boundary], { FLOFI_RELEASE_PROVENANCE_PROFILE: 'jupiter', GRYLOO_JUPITER_E2E: 'MOCKED_LOOPBACK_ONLY' }],
   ['devnet-provenance', [boundary], { FLOFI_RELEASE_PROVENANCE_PROFILE: 'solana-devnet', GRYLOO_SOLANA_DEVNET_E2E: 'MOCKED_LOOPBACK_ONLY' }],
