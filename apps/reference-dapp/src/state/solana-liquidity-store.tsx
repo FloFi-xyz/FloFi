@@ -2,6 +2,7 @@
 'use client';
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
+import type { SolanaWalletChange } from '@defi-workflow-engine/reference-compiler';
 import { useWorkflow } from './workflow-store';
 import { useJupiter } from './jupiter-store';
 import { solanaLiquidityDetails } from '../domain/solana-liquidity-authoring';
@@ -48,6 +49,8 @@ function walletCode(cause: unknown): string {
   return value && (value.code === 4001 || /reject|declin|denied|cancel/i.test(String(value.name ?? '') + String(value.message ?? ''))) ? 'ORCA_LIQUIDITY_WALLET_REJECTED' : 'ORCA_LIQUIDITY_WALLET_SIGN_FAILED';
 }
 const bounded = (cause: unknown) => { try { const v = cause as Record<string, unknown>; return { name: String(v?.name ?? ''), code: typeof v?.code === 'number' ? v.code : null, message: String(v?.message ?? cause).slice(0, 500) }; } catch { return { message: 'unreadable' }; } };
+/** The wallet-change summary a refusal may carry (ORCA_LIQUIDITY_TRANSACTION_CHANGED from the position signer). */
+const walletChange = (cause: unknown) => { const change = (cause as { change?: { format?: unknown } } | null)?.change; return change?.format === 'flofi.solana-wallet-change.v1' ? { change: change as SolanaWalletChange } : {}; };
 
 export function SolanaLiquidityProvider({ children }: { children: ReactNode }) {
   const { state } = useWorkflow();
@@ -157,7 +160,7 @@ export function SolanaLiquidityProvider({ children }: { children: ReactNode }) {
       signed = await signOrcaLiquidityTransaction(session, begin.value.unsignedTransaction, record.review.message, begin.value.signers, needsKey ? mintSigner.current : null);
     } catch (cause) {
       const failure = cause instanceof Error && /^ORCA_LIQUIDITY_[A-Z_]+$/.test(cause.message) ? cause.message : walletCode(cause);
-      const recorded = await api.walletFailure(record.id, { stage: 'SIGN', code: failure, error: bounded(cause) });
+      const recorded = await api.walletFailure(record.id, { stage: 'SIGN', code: failure, error: bounded(cause), ...walletChange(cause) });
       if (recorded.ok) accept(recorded.value);
       throw new Error(failure, { cause });
     } finally { setSigning(false); if (needsKey) mintSigner.current = null; }

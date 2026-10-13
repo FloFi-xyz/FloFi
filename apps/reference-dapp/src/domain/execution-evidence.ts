@@ -8,10 +8,13 @@ import { simulationAmount } from './simulation-presentation';
 import { quoteDecimals } from './public-testnet-swap';
 import { resolveNetworkAsset } from './asset-catalogs';
 import { shellChainLabel } from './product-shell';
+import { solanaNotSubmittedReason } from './solana-refusal';
+import type { SolanaWalletChange } from '@defi-workflow-engine/reference-compiler';
 
 export type EvidenceIdentifier = { label: string; value: string; kind: 'transaction' | 'order' | 'reference'; chain?: string; explorer?: string | null; status?: string };
 export type EvidenceValue = { label: string; value: string };
-export type OperationResultEvidence = { identifiers: EvidenceIdentifier[]; values: EvidenceValue[]; comparisons: EvidenceComparison[]; fees: EvidenceValue[]; failure?: 'reverted' | 'declined' | 'failed'; note?: string };
+export type OperationResultEvidence = { identifiers: EvidenceIdentifier[]; values: EvidenceValue[]; comparisons: EvidenceComparison[]; fees: EvidenceValue[]; failure?: 'reverted' | 'declined' | 'failed'; note?: string;
+  /** Values of `note` when it is a catalog message with placeholders. */ noteArgs?: string[] };
 export type ExecutionEvidence = { operations: Record<string, OperationResultEvidence>; wallet: string | null; knownCosts: EvidenceValue[]; details: (EvidenceValue & { copy?: boolean })[]; limitations: string[]; attention: string[] };
 const validUnits = (value: unknown): value is string => typeof value === 'string' && /^(0|[1-9][0-9]*)$/.test(value);
 
@@ -54,6 +57,19 @@ export function projectExecutionEvidence(source: ExecutionLifecycleSource, progr
     detail('Reconciliation outcome', value.outcome); detail('Evidence observed at', value.observedAt); detail('Evidence environment', value.environment);
     evidence.limitations.push(...(value.reconciliation?.limitations ?? []));
     for (const receipt of value.receipts ?? []) detail('Receipt content hash', receipt.contentHash, true);
+  };
+  // A Solana request refused before any broadcast: the owner-facing reason, plus what the wallet changed for technical details.
+  const refused = (id: string, run: { attempt: { signature: string | null } | null; notSubmitted?: boolean; walletDiagnostic?: { code: string; change?: SolanaWalletChange } } | null | undefined) => {
+    if (!run?.attempt || !run.notSubmitted || run.attempt.signature) return;
+    const reason = solanaNotSubmittedReason(run.walletDiagnostic?.code, run.walletDiagnostic?.change);
+    if (reason) { op(id).note = reason.text; op(id).noteArgs = reason.args; }
+    detail('Wallet result', run.walletDiagnostic?.code);
+    const change = run.walletDiagnostic?.change;
+    if (change?.parseable && !change.sameMessage) {
+      detail('Instructions added by the wallet', change.added.map(ix => ix.programId).join(', ') || 'none');
+      if (change.missing.length) detail('Reviewed instructions changed or missing', change.missing.map(ix => `#${ix.index} ${ix.programId}`).join(', '));
+      detail('Reviewed message hash', change.reviewedMessageHash, true); detail('Wallet message hash', change.returnedMessageHash, true);
+    }
   };
   const allowance = (units: unknown) => { if (validUnits(units) && BigInt(units) > 0n && !evidence.attention.length) evidence.attention.push('A token allowance remains in the execution record. Review it before authorizing another workflow.'); };
   detail('Run ID', progress.runKey, true);
@@ -158,6 +174,7 @@ export function projectExecutionEvidence(source: ExecutionLifecycleSource, progr
       const record = source.state.record; if (!record) break;
       evidence.wallet = record.review.owner; bundle(record.evidence?.bundle, record.evidence?.bundleHash);
       if (record.attempt) failure('transaction', record.attempt.state, record.attempt.signature, record.notSubmitted ? record.walletDiagnostic?.code : undefined);
+      refused('transaction', record);
       const observed = record.observations?.findLast(item => item.signature === record.attempt?.signature);
       fee('transaction', record.review.chain, observed?.signature, observed?.feeLamports, 9, 'SOL');
       if (record.attempt?.reconciled && observed?.verdict === 'RECONCILED') {
@@ -169,6 +186,7 @@ export function projectExecutionEvidence(source: ExecutionLifecycleSource, progr
     case 'solana-pool': {
       const record = source.state.record; if (!record) break;
       evidence.wallet = record.review.owner; bundle(record.evidence?.bundle, record.evidence?.bundleHash);
+      refused('transaction', record);
       const observed = record.observations?.findLast(item => item.signature === record.attempt?.signature);
       fee('transaction', record.review.chain, observed?.signature, observed?.feeLamports, 9, 'SOL');
       if (record.attempt?.reconciled && observed?.verdict === 'RECONCILED' && observed.effects) {
@@ -187,6 +205,7 @@ export function projectExecutionEvidence(source: ExecutionLifecycleSource, progr
       evidence.wallet = q.owner; bundle(v.record.evidence?.bundle, v.record.evidence?.bundleHash);
       const swapObserved = v.swap.observations?.findLast(item => item.signature === v.swap.attempt?.signature);
       if (v.swap.attempt) failure('swap', v.swap.attempt.state, v.swap.attempt.signature, v.swap.notSubmitted ? v.swap.walletDiagnostic?.code : undefined);
+      refused('swap', v.swap);
       fee('swap', chain, swapObserved?.signature, swapObserved?.feeLamports, 9, 'SOL');
       if (v.swap.attempt?.reconciled && swapObserved?.verdict === 'RECONCILED') {
         amount('swap', 'Executed input', swapObserved.inputSpent, q.swap.input.decimals, symbol(q.swap.input.symbol), q.swap.amount);
@@ -194,7 +213,7 @@ export function projectExecutionEvidence(source: ExecutionLifecycleSource, progr
       }
       if (v.record.binding) amount('position', 'Bound from the swap', v.record.binding.bound, q.liquidity.boundToken === 0 ? 9 : 6, q.liquidity.boundToken === 0 ? 'SOL' : 'devUSDC');
       const lp = v.liquidity, lpObserved = lp?.observations?.findLast(item => item.signature === lp.attempt?.signature);
-      if (lp?.attempt && v.phase !== 'BOUND') failure('position', lp.attempt.state, lp.attempt.signature, lp.notSubmitted ? lp.walletDiagnostic?.code : undefined);
+      if (lp?.attempt && v.phase !== 'BOUND') { failure('position', lp.attempt.state, lp.attempt.signature, lp.notSubmitted ? lp.walletDiagnostic?.code : undefined); refused('position', lp); }
       fee('position', chain, lpObserved?.signature, lpObserved?.feeLamports, 9, 'SOL');
       if (lp?.attempt?.reconciled && lpObserved?.verdict === 'RECONCILED' && lpObserved.effects) {
         amount('position', 'Actual liquidity deposited · Token 1', lpObserved.effects.depositedA, lp.review.token0.decimals, lp.review.token0.symbol);

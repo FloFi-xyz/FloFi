@@ -157,18 +157,22 @@ export function projectExecutionLifecycle(currentWorkflow: Workflow, context: Re
       const a = r.attempt; add('transaction', composerActions(workflow)[0]?.nodeId ?? '', source.kind === 'solana-swap' ? 'Swap' : 'Liquidity transaction', r.review.chain, a?.state ?? null, a?.signature ?? null, Boolean(a?.reconciled));
       if (a && r.verdict === 'NOT_EXECUTED') { const op = operations.at(-1)!; op.state = 'expired'; op.label = labels.expired; }
       if (a?.state === 'SUBMITTING' && a.signature) { const op = operations.at(-1)!; op.state = 'submitting'; op.label = labels.submitting; }
+      // Refused before any broadcast (declined, wallet error, changed or stale bytes): no transaction exists for this attempt.
+      if (a && r.notSubmitted && !a.signature && !a.reconciled) { const op = operations.at(-1)!; op.state = 'not-submitted'; op.label = labels['not-submitted']; }
       break;
     }
     case 'solana-composition': {
       const v = source.state.record; if (!v) break;
       const q = v.record.review, chain = q.chain;
       select(q.workflow, v.record.id, v.record.provenance, source.state.recovered);
-      const solanaOp = (id: string, nodeId: string, title: string, run: { attempt: { state: string; signature: string | null; reconciled: boolean } | null; verdict: string } | null) => {
+      const solanaOp = (id: string, nodeId: string, title: string, run: { attempt: { state: string; signature: string | null; reconciled: boolean } | null; verdict: string; notSubmitted?: boolean } | null) => {
         const a = run?.attempt ?? null;
         add(id, nodeId, title, chain, a?.state ?? null, a?.signature ?? null, Boolean(a?.reconciled));
         const op = operations.at(-1)!;
         if (a && run?.verdict === 'NOT_EXECUTED') { op.state = 'expired'; op.label = labels.expired; }
         if (a?.state === 'SUBMITTING' && a.signature) { op.state = 'submitting'; op.label = labels.submitting; }
+        // Refused before any broadcast (declined, wallet error, changed or stale bytes): no transaction exists for this attempt.
+        if (a && run?.notSubmitted && !a.signature && !a.reconciled) { op.state = 'not-submitted'; op.label = labels['not-submitted']; }
       };
       solanaOp('swap', q.swap.nodeId, 'Swap', v.swap);
       // After a position attempt ends without a position, the step waits for a new reviewed preparation; earlier attempts stay recorded.

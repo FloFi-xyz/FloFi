@@ -26,7 +26,7 @@ function StepEvidence({ evidence, action, values, facts }: { evidence: Execution
     <p>{tr(message)}</p>
     {evidence.restored && !evidence.recovered && <p className="execution-evidence-restored">{tr("This step’s saved result was restored.")}</p>}
     {values.length > 0 && <dl className="execution-actual-values">{values.map((item, index) => <div key={`${item.label}-${index}`}><dt>{tr(item.label)}</dt><dd>{tr(item.value)}</dd></div>)}</dl>}
-    {facts.filter(item => item.note).map((item, index) => <p key={index}>{tr(item.note)}</p>)}
+    {facts.filter(item => item.note).map((item, index) => <p key={index}>{tr(item.note, ...item.noteArgs ?? [])}</p>)}
     {comparisons.length > 0 && <div className="execution-evidence-comparison" role="group" aria-label={tr("Planned and actual values")}>
       <div className="execution-evidence-comparison-head"><span/><span>{tr("Planned")}</span><span>{tr("Actual")}</span></div>
       {comparisons.map((comparison, index) => <div key={`${comparison.label}-${index}`} className="execution-evidence-comparison-row"><span>{tr(comparison.label)}</span><span>{tr(comparison.planned)}</span><strong>{tr(comparison.actual)}</strong></div>)}
@@ -64,7 +64,7 @@ export function ExecutionTimeline({ progress, result, workflowName, backToBuild,
           {fact ? fact.identifiers.map(identifier => <ExecutionIdentifier key={`${identifier.kind}-${identifier.value}`} identifier={identifier}/>) : <Transaction operation={operation}/>}
           {fact ? fact.fees.map((fee, index) => <p key={index} className="execution-operation-fee">{tr(fee.label)} · {tr(fee.value)}</p>) : operation.fee && <p className="execution-operation-fee">{tr("Actual network fee · ")}{tr(operation.fee)}</p>}
           {!showEvidence && fact && fact.values.length > 0 && <dl className="execution-actual-values">{fact.values.map((value, index) => <div key={index}><dt>{tr(value.label)}</dt><dd>{tr(value.value)}</dd></div>)}</dl>}
-          {!showEvidence && fact?.note && <p className="execution-context">{tr(fact.note)}</p>}
+          {!showEvidence && fact?.note && <p className="execution-context">{tr(fact.note, ...fact.noteArgs ?? [])}</p>}
         </li>; })}</ul>
       </div>
     </li>; })}</ol>

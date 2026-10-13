@@ -34,9 +34,12 @@ export function projectExecutionResult(progress: ExecutionLifecycle | null | und
   const declined = incomplete.length > 0 && incomplete.every(operation => !operation.hash && (operation.label === 'Wallet request declined' || progress.evidence?.operations[operation.id]?.failure === 'declined'));
   const definitiveFailure = failed.some(operation => operation.label !== 'Wallet request declined');
   const confirmedActions = operations.some(operation => !operation.approval && operation.state === 'confirmed');
+  // Every incomplete request ended before submission (recorded as not submitted): nothing of this run reached the network.
+  const nothingSent = !(completed > 0 || confirmedActions) && incomplete.length > 0 && incomplete.every(operation => !operation.hash && operation.state === 'not-submitted');
   return {
-    label: completed > 0 || confirmedActions ? 'Execution partially completed' : declined ? 'Transaction not submitted' : definitiveFailure ? 'Execution failed' : 'Execution needs attention',
-    message: declined ? 'Wallet confirmation was declined. Earlier confirmed requests remain recorded.' : definitiveFailure ? 'A recorded action failed. Earlier confirmed actions remain recorded.' : 'The run has an incomplete action. Any confirmed actions remain recorded.',
+    label: completed > 0 || confirmedActions ? 'Execution partially completed' : declined || nothingSent ? 'Transaction not submitted' : definitiveFailure ? 'Execution failed' : 'Execution needs attention',
+    message: declined ? 'Wallet confirmation was declined. Earlier confirmed requests remain recorded.' : definitiveFailure ? 'A recorded action failed. Earlier confirmed actions remain recorded.'
+      : nothingSent ? 'No transaction from this run was sent, so nothing reached the network. The step result explains why.' : 'The run has an incomplete action. Any confirmed actions remain recorded.',
     tone: 'attention', completed, total, countLabel, networks,
   };
 }

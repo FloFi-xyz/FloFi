@@ -3,6 +3,7 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { isBoundComposition } from '@defi-workflow-engine/action-registry';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
+import type { SolanaWalletChange } from '@defi-workflow-engine/reference-compiler';
 import { useWorkflow } from './workflow-store';
 import { useJupiter } from './jupiter-store';
 import { signWithSolanaWallet } from '../wallet/solana-wallet';
@@ -41,6 +42,8 @@ function walletCode(cause: unknown, prefix: string): string {
   return value && (value.code === 4001 || /reject|declin|denied|cancel/i.test(String(value.name ?? '') + String(value.message ?? ''))) ? `${prefix}_WALLET_REJECTED` : `${prefix}_WALLET_SIGN_FAILED`;
 }
 const bounded = (cause: unknown) => { try { const v = cause as Record<string, unknown>; return { name: String(v?.name ?? ''), code: typeof v?.code === 'number' ? v.code : null, message: String(v?.message ?? cause).slice(0, 500) }; } catch { return { message: 'unreadable' }; } };
+/** The wallet-change summary a refusal may carry (ORCA_LIQUIDITY_TRANSACTION_CHANGED from the position signer). */
+const walletChange = (cause: unknown) => { const change = (cause as { change?: { format?: unknown } } | null)?.change; return change?.format === 'flofi.solana-wallet-change.v1' ? { change: change as SolanaWalletChange } : {}; };
 
 export function SolanaCompositionProvider({ children }: { children: ReactNode }) {
   const { state } = useWorkflow();
@@ -142,7 +145,7 @@ export function SolanaCompositionProvider({ children }: { children: ReactNode })
       signed = swap ? await signWithSolanaWallet(session, unsigned, prefix) : await signOrcaLiquidityTransaction(session, unsigned, message, signers, mintSigner.current);
     } catch (cause) {
       const failure = cause instanceof Error && new RegExp(`^${prefix}_[A-Z_]+$`).test(cause.message) ? cause.message : walletCode(cause, prefix);
-      const diagnostic = { stage: 'SIGN' as const, code: failure, error: bounded(cause) };
+      const diagnostic = { stage: 'SIGN' as const, code: failure, error: bounded(cause), ...walletChange(cause) };
       const recorded = await solanaCompositionWalletFailure(id, swap ? { step: 'SWAP', diagnostic } : { step: 'LIQUIDITY', diagnostic });
       if (recorded.ok) accept(recorded.value);
       throw new Error(failure, { cause });
