@@ -113,7 +113,7 @@ export default function LandingPage() {
     <header className={styles.siteHeader}><div className={styles.headerInner}>
       <a href="/" className={styles.brandLink} aria-label={t.brandHome}><Brand /></a>
       <nav aria-label={t.mainNavigation}><a href="#workflow">{t.navProduct}</a><a href="#networks">{t.navNetworks}</a><a href="#developers">{t.navDevelopers}</a><a href="/docs">{t.navDocs}</a></nav>
-      <div className={styles.headerActions}><div className={styles.languageSwitch} role="group" aria-label={t.language}><button type="button" lang="pt-BR" aria-pressed={locale === 'pt'} onClick={() => changeLocale('pt')}>PT</button><span aria-hidden="true">/</span><button type="button" lang="en" aria-pressed={locale === 'en'} onClick={() => changeLocale('en')}>EN</button></div><a className={styles.headerCta} href="/app">{t.launch} <Arrow /></a></div>
+      <div className={styles.headerActions}><div className={styles.languageSwitch} role="group" aria-label={t.language}><button type="button" lang="pt-BR" aria-pressed={locale === 'pt'} onClick={() => changeLocale('pt')}>PT</button><span aria-hidden="true">/</span><button type="button" lang="en" aria-pressed={locale === 'en'} onClick={() => changeLocale('en')}>EN</button></div><a className={styles.headerCta} href="/app">{t.headerLaunch} <Arrow /></a></div>
     </div></header>
 
     <main id="main" tabIndex={-1}>
