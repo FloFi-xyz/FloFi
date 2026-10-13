@@ -41,7 +41,7 @@ const profiles = phase === 'composition' ? [
   // P0: a wallet that changes the reviewed Solana Devnet swap is refused before broadcast, Execute says why, and Simulate again runs the swap
   // once and the position; a wallet behaving like the captured Phantom (adds a compute-unit price when none is set) signs the reviewed bytes
   // and completes both steps. MOCKED Devnet loopback; only these cases of the diagnostic spec.
-  ['solana-wallet-refusal', ['solana-swap-liquidity-composition.spec.ts', '--grep', 'a wallet that changes the reviewed swap|a Phantom-like wallet signs the exact reviewed swap'], { GRYLOO_SOLANA_DEVNET_E2E: 'MOCKED_LOOPBACK_ONLY' }],
+  ['solana-wallet-refusal', ['solana-swap-liquidity-composition.spec.ts', '--grep', 'a wallet that changes the reviewed swap|a Phantom-like wallet signs the exact reviewed swap|a reconciled swap continues to its Orca position'], { GRYLOO_SOLANA_DEVNET_E2E: 'MOCKED_LOOPBACK_ONLY' }],
   ['lending-provenance', [boundary], { FLOFI_RELEASE_PROVENANCE_PROFILE: 'lending', GRYLOO_LENDING_E2E: 'MOCKED_LOOPBACK_ONLY' }],
   ['jupiter-provenance', [boundary], { FLOFI_RELEASE_PROVENANCE_PROFILE: 'jupiter', GRYLOO_JUPITER_E2E: 'MOCKED_LOOPBACK_ONLY' }],
   ['devnet-provenance', [boundary], { FLOFI_RELEASE_PROVENANCE_PROFILE: 'solana-devnet', GRYLOO_SOLANA_DEVNET_E2E: 'MOCKED_LOOPBACK_ONLY' }],

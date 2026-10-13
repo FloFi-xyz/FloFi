@@ -40,7 +40,7 @@ type Store = { restorationEpoch: number; state: EditorState; dispatch: Dispatch<
    * Returns the validation message, or null once applied.
    */
   commitCanvasAmount(id: string): string | null;
-  restoreLendingCanvas(workflow:SemanticWorkflow):void; restoreWorkflow(workflow: SemanticWorkflow): void; adoptDraftIdentity(workflowId: string): void;
+  restoreLendingCanvas(workflow:SemanticWorkflow):void; restoreSolanaCompositionCanvas(workflow: SemanticWorkflow): void; restoreWorkflow(workflow: SemanticWorkflow): void; adoptDraftIdentity(workflowId: string): void;
   /** UX-004: start a genuinely clean workflow (fresh draft identity; prior Review/proposal retired). Wallet and session are untouched. */
   createNewWorkflow(): void;
   /** UX-004: true once the owner created a new workflow in this visit; a persisted run is recovered only into the visit's initial draft. */
@@ -77,6 +77,7 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
     dispatchHistory({ type: 'COMMAND', command, context });
   }, [context]);
   const restoreLendingCanvas=useCallback((workflow:SemanticWorkflow)=>dispatchHistory({type:'RESTORE_LENDING_CANVAS',workflow}),[]);
+  const restoreSolanaCompositionCanvas = useCallback((workflow: SemanticWorkflow) => dispatchHistory({ type: 'RESTORE_SOLANA_COMPOSITION_CANVAS', workflow }), []);
   const addCanvasCommand = useCallback((command: Command, position: { x: number; y: number }) => {
     dispatchHistory({ type: 'COMMAND', command, position, context });
   }, [context]);
@@ -252,7 +253,7 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
     if (!checkChainAccess(chainRef.current, workflowRef.current, Date.now(), performance.now()).ok) { accessCheck(); return; }
     generateArtifacts();
   }, [accessCheck, generateArtifacts]);
-  return <Context.Provider value={{ restorationEpoch, state, dispatch, context, restoreLendingCanvas, adoptDraftIdentity: workflowId => dispatchHistory({ type: 'ADOPT_DRAFT_IDENTITY', workflowId }), restoreWorkflow: workflow => { setRestorationEpoch(n => n + 1); setPending(null); dispatchHistory({ type: 'RESTORE_WORKFLOW', workflow }); },
+  return <Context.Provider value={{ restorationEpoch, state, dispatch, context, restoreLendingCanvas, restoreSolanaCompositionCanvas, adoptDraftIdentity: workflowId => dispatchHistory({ type: 'ADOPT_DRAFT_IDENTITY', workflowId }), restoreWorkflow: workflow => { setRestorationEpoch(n => n + 1); setPending(null); dispatchHistory({ type: 'RESTORE_WORKFLOW', workflow }); },
     createNewWorkflow: () => { setRestorationEpoch(n => n + 1); setNewWorkflow(true); setPending(null); setStagedPosition(null); dispatchHistory({ type: 'NEW_WORKFLOW', workflowId: `workflow-${crypto.randomUUID()}` }); }, newWorkflow, canvasLayout: history.layout, canUndo: history.past.length > 0,
     actionSetup: history.actionSetup, amountInputs: history.amountInputs, authoringIncomplete,
     bridgeNetworkInputs: history.bridgeNetworkInputs, editBridgeNetworks, cryptoSelections: history.cryptoSelections, editCryptoSelection, reviewCryptoPool,

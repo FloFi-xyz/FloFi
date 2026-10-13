@@ -3,6 +3,7 @@ import { ROBINHOOD_NETWORK, featuredStockSymbols } from './asset-catalogs';
 import { createBaseSepoliaReviewContext, validateWorkflowDraft, type ReviewContext } from '@defi-workflow-engine/reference-linter';
 import { validateSavedWorkflow } from './saved-workflow';
 import {isLendingComposition,workflowDependencyOrder,type SemanticWorkflow} from '@defi-workflow-engine/workflow-contracts';
+import { isBoundComposition } from '@defi-workflow-engine/action-registry';
 import type { Command } from './commands';
 import { directions, type Direction } from './swap-authoring';
 import { routerDetails } from './router-authoring';
@@ -31,6 +32,8 @@ export type HistoryAction =
   /** UX-004: "Create new workflow": the empty initial draft under a fresh draft identity (no actions, drafts, layout or history). */
   | { readonly type: 'NEW_WORKFLOW'; readonly workflowId: string }
   | { readonly type: 'RESTORE_LENDING_CANVAS'; readonly workflow: SemanticWorkflow }
+  /** P0: a recovered Solana Swap → liquidity run that still needs the owner (its position is owed) shows its authorized workflow again. */
+  | { readonly type: 'RESTORE_SOLANA_COMPOSITION_CANVAS'; readonly workflow: SemanticWorkflow }
   | { readonly type: 'COMMAND'; readonly command: Command; readonly context: ReviewContext; readonly position?: { x: number; y: number }; readonly authoringId?: string; readonly authoringAmount?: string }
   | { readonly type: 'START_ACTION_SETUP'; readonly action: CanvasActionSetup['action']; readonly position: { x: number; y: number }; readonly beneficiary?: string }
   /** BUILD-RH-002: the Stocks card — a Robinhood Chain catalog swap from USDG into the first featured Stock Token. */
@@ -200,6 +203,15 @@ export function editorHistoryReducer(state: EditorHistory, action: HistoryAction
       const workflow = validateSavedWorkflow(action.workflow);
       return { ...initialEditorHistory(), editor: { workflow: freeze(structuredClone(workflow)), error: null } };
     } catch { return state; }
+  }
+  if(action.type==='RESTORE_SOLANA_COMPOSITION_CANVAS') {
+    // Same rule as the lending restore: only the untouched initial Canvas, the exact IR/revision of a validated durable run, no authority.
+    if(state.actionSetup||Object.keys(state.amountInputs).length||state.editor.workflow.revision!==0||state.past.length||!state.editor.workflow.nodes.every(n=>n.actionType.startsWith('mock-')))return state;
+    try {
+      const workflow=validateWorkflowDraft(action.workflow,createBaseSepoliaReviewContext());
+      if(!isBoundComposition(workflow))return state;
+      return {...state,editor:{workflow:freeze(workflow),error:null},layout:{},past:[],future:[]};
+    } catch {return state;}
   }
   if(action.type==='RESTORE_LENDING_CANVAS') {
     // Restore only the untouched initial Canvas from a validated durable run.

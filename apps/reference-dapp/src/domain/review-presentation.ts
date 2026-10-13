@@ -16,6 +16,12 @@ export type ReviewAuthorization = {
   key: string | null; manifest: unknown; policy?: unknown; owner: string | null; chain: string | null;
   ready: boolean; accepted: boolean; approve: (() => void | Promise<void>) | null;
   approvals: ReviewApproval[]; tokens: ReviewToken[]; limits: SimulationLine[]; technical: unknown;
+  /**
+   * The workflow the manifest binds when it is not the Canvas workflow itself. P0: the position step of a Solana Swap → liquidity
+   * composition is reviewed against the server-derived position workflow (the authorized composition with the reconciled swap output
+   * bound); the Canvas must still equal the authorized composition, which the simulation guard and the run's retirement check enforce.
+   */
+  boundWorkflow?: unknown;
 };
 export type ReviewWallet = { account: string | null; chain: string | null; environment: 'mainnet' | 'testnet' | 'unknown'; changed: boolean };
 
@@ -113,7 +119,8 @@ export function projectReview(workflow: Workflow, context: ReviewContext, source
   const networkMismatch = Boolean(authorization.chain && wallet.chain !== authorization.chain);
   let manifestMismatch = false;
   if (manifest) {
-    try { manifestMismatch = manifest.semanticWorkflowRevision !== workflow.revision || manifest.semanticWorkflowHash !== hashArtifactBytes('semantic-workflow', new TextEncoder().encode(JSON.stringify(workflow))); }
+    const bound = (authorization.boundWorkflow ?? workflow) as Workflow;
+    try { manifestMismatch = manifest.semanticWorkflowRevision !== bound.revision || manifest.semanticWorkflowHash !== hashArtifactBytes('semantic-workflow', new TextEncoder().encode(JSON.stringify(bound))); }
     catch { manifestMismatch = true; }
   }
   const policyMismatch = Boolean(authorization.policy && (!policy || manifest && hashArtifactBytes('authorization-policy', new TextEncoder().encode(JSON.stringify(policy))) !== manifest.policyHash));
