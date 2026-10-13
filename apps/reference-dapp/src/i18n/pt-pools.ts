@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 export const portuguesePools: Readonly<Record<string, string>> = {
+  "The selected position is unavailable for this wallet. Choose a position again in Build.": "A posição selecionada não está disponível para esta carteira. Escolha novamente uma posição em Build.",
   "Edit Solana Devnet liquidity position": "Editar posição de liquidez Solana Devnet",
   "Create Solana Devnet liquidity position": "Criar posição de liquidez Solana Devnet",
   "Orca Whirlpools · Devnet SOL / devUSDC (test) · fee 0.20% · tick spacing 64. Maxima are limits, not amounts to spend.": "Orca Whirlpools · Devnet SOL / devUSDC (teste) · comissão de 0,20% · espaçamento de ticks 64. Os máximos são limites, não montantes a gastar.",

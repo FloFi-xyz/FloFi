@@ -660,7 +660,8 @@ function resolvePosition(intent: Extract<CopilotIntentV2, { kind: 'POSITION' }>,
   const draft = (options: Draft['options']): Draft => ({ intent, options, amountFill: false, snapshot: snapshotOf(env), extras });
   const half = /\b(?:half|metade)\b/i.test(text);
   // The portion is the user's own words ("50%", "half"), EXIT, or one of Flofi's buttons; never a guess.
-  let portion: string | null = extras.portion ?? (intent.operation === 'EXIT' ? 'EXIT' : null);
+  const exitNamed = /\b(?:close|exit|fechar|feche|fecha|encerrar|encerre|encerra)\b|\b(?:remove|withdraw)\s+all\b|\b(?:retir\w*|remov\w*)\s+(?:tud[oa]|100\s*%)\b/i.test(text);
+  let portion: string | null = extras.portion ?? (intent.operation === 'EXIT' && exitNamed ? 'EXIT' : null);
   if (portion === null && intent.percent !== null) {
     const wanted = canonicalDecimal(intent.percent);
     if ((wanted === '50' && half) || (groundedAmount(text, wanted) && new RegExp(`(?<![\\d.,])${wanted.replace('.', '\\.')}\\s*(?:%|percent|per\\s?cent|por\\s?cento)`, 'i').test(text)))

@@ -157,6 +157,7 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
     const command = pending.command;
     if (command.type === 'MANAGE_SOLANA_POSITION') setStagedPosition(current => ({ positionMint: command.positionMint, operation: command.operation, partBps: command.partBps,
       serial: (current?.serial ?? 0) + 1 }));
+    else setStagedPosition(null);
     setPending(null);
   }
   function startActionSetup(action: CanvasActionSetup['action'], position: { x: number; y: number }, beneficiary?: string) {

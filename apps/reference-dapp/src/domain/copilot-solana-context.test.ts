@@ -287,7 +287,7 @@ describe('Solana wallet context and explicit remaining-token caps', () => {
       deposits: [{ asset: 'DEVUSDC', maxAmount: cap }, { asset: 'SOL', maxAmount: '0.05' }], ...tenPercent, funding: 'REMAINING'
     })))).toMatchObject({ kind: 'PROPOSAL', command: { input: { maxDevUsdc: expected } } });
   });
-  it.each(['devUSDC', 'DEVUSDC', 'DevUSDC', 'devusdc'])('normalizes %s without allowing it on mainnet', asset => {
+  it.each(['devUSDC', 'DEVUSDC', 'DevUSDC', 'devusdc', 'testUSDC', 'TESTUSDC'])('normalizes %s without allowing it on mainnet', asset => {
     const session = new CopilotSession();
     expect(session.say(`please swap 0.1 SOL for ${asset} on Solana Devnet`, intent.action(act.swap({
       network: 'SOLANA_DEVNET', inputAsset: 'SOL', outputAsset: asset, amount: '0.1'
@@ -297,4 +297,18 @@ describe('Solana wallet context and explicit remaining-token caps', () => {
       network: 'SOLANA', inputAsset: 'SOL', outputAsset: asset, amount: '0.1'
     })))?.kind).not.toBe('PROPOSAL');
   });
+});
+
+it.each(['dev USDC', 'test USDC'])('grounds the %s wording as the Devnet asset without defaulting to mainnet', wording => {
+  const session = new CopilotSession();
+  expect(session.say(`please swap 0.1 SOL for ${wording}`, intent.action(act.swap({ inputAsset: 'SOL', outputAsset: 'DEVUSDC', amount: '0.1' }))))
+    .toMatchObject({ kind: 'PROPOSAL', command: { input: { network: 'Solana Devnet', to: 'devUSDC' } } });
+});
+
+it('does not invent a full exit when the model supplies EXIT for an unspecified removal', () => {
+  const session = new CopilotSession();
+  session.verified = verified({ orcaPositions: [position()] });
+  expect(session.say('remove some of my liquidity', intent.position('EXIT'))).toMatchObject({ kind: 'CLARIFICATION', text: 'How much of the position should Flofi remove?' });
+  expect(session.pending).toBeNull();
+  expect(session.say('All (exit)')).toMatchObject({ kind: 'PROPOSAL', command: { operation: 'EXIT' } });
 });

@@ -165,8 +165,10 @@ function typedAddress(text: string, address: string): string {
   return [...text.matchAll(/(?<![0-9a-fA-Fx])0x[0-9a-fA-F]{40}(?![0-9a-fA-F])/g)].map(match => match[0]).find(match => match.toLowerCase() === address.toLowerCase()) ?? address;
 }
 /** The fixed-vocabulary key of a token in any case ("devusdc", "DevUSDC" → DEVUSDC); null for catalog symbols. */
-const legacyAsset = (asset: string): Exclude<CopilotLegacyAsset, 'OTHER'> | null =>
-  Object.hasOwn(ASSET_MENTIONS, asset.toUpperCase()) ? asset.toUpperCase() as Exclude<CopilotLegacyAsset, 'OTHER'> : null;
+const legacyAsset = (asset: string): Exclude<CopilotLegacyAsset, 'OTHER'> | null => {
+  const key = asset.toUpperCase() === 'TESTUSDC' ? 'DEVUSDC' : asset.toUpperCase();
+  return Object.hasOwn(ASSET_MENTIONS, key) ? key as Exclude<CopilotLegacyAsset, 'OTHER'> : null;
+};
 const assetNamed = (text: string, asset: Exclude<CopilotAsset, 'OTHER'>) => { const key = legacyAsset(asset); return key ? ASSET_MENTIONS[key].test(text) : symbolNamed(text, asset); };
 const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 /** A catalog symbol written as a word (case-insensitive): "cbbtc" grounds cbBTC; "ETHx" does not ground ETH. */
@@ -282,7 +284,7 @@ export type Plan = { readonly sentence: string; readonly expect: CopilotAuthorin
  * wording never resolves to a mainnet; any named network still goes through `resolveNetwork`.
  */
 const impliesDevnet = (g: Grounding, assets: readonly (CopilotAsset | null)[]) => g.policy.catalog === true &&
-  assets.some(asset => asset !== null && asset.toUpperCase() === 'DEVUSDC') && ASSET_MENTIONS.DEVUSDC.test(g.text);
+  assets.some(asset => asset !== null && legacyAsset(asset) === 'DEVUSDC') && ASSET_MENTIONS.DEVUSDC.test(g.text);
 function devnetByAsset(g: Grounding, notes: string[]): Network { notes.push(copyOf(g).devUsdcNetworkNote); return 'SOLANA_DEVNET'; }
 
 function planSwap(a: CopilotSwapAction, g: Grounding): Plan {
@@ -320,7 +322,7 @@ function planSwap(a: CopilotSwapAction, g: Grounding): Plan {
       expect: network === 'BASE_SEPOLIA' ? 'ADD_TESTNET_SWAP' : network === 'ETHEREUM_SEPOLIA' ? 'ADD_ETHEREUM_SEPOLIA_SWAP' : 'ADD_SWAP', notes };
   }
   const devnet = network === 'SOLANA_DEVNET';
-  const solana = (written: string) => { const asset = written.toUpperCase();
+  const solana = (written: string) => { const asset = legacyAsset(written) ?? written.toUpperCase();
     return asset === 'SOL' ? 'SOL' : devnet ? (asset === 'DEVUSDC' || asset === 'USDC' ? 'devUSDC' : refuse(m.devnetSwapTokens))
       : asset === 'USDC' || asset === 'USDT' ? asset : refuse(m.solanaSwapTokens); };
   const from = solana(input), to = solana(output);
@@ -501,7 +503,7 @@ export const COPILOT_POOLS = Object.freeze({
   UNISWAP_V3: { network: 'BASE_SEPOLIA' as const, base: 'WETH', quote: 'USDC', first: 'USDC', second: 'WETH', expect: 'ADD_UNISWAP_LIQUIDITY' as const,
     slippage: UNISWAP_LIQUIDITY_DEFAULT_SLIPPAGE, symbol: (asset: string) => { const a = asset.toUpperCase(); return a === 'USDC' ? 'USDC' : a === 'WETH' || a === 'ETH' ? 'WETH' : null; } },
   ORCA: { network: 'SOLANA_DEVNET' as const, base: 'SOL', quote: 'devUSDC', first: 'SOL', second: 'devUSDC', expect: 'ADD_SOLANA_LIQUIDITY' as const,
-    slippage: SOLANA_LIQUIDITY_DEFAULT_SLIPPAGE, symbol: (asset: string) => { const a = asset.toUpperCase(); return a === 'SOL' ? 'SOL' : a === 'DEVUSDC' || a === 'USDC' ? 'devUSDC' : null; } },
+    slippage: SOLANA_LIQUIDITY_DEFAULT_SLIPPAGE, symbol: (asset: string) => { const a = legacyAsset(asset) ?? asset.toUpperCase(); return a === 'SOL' ? 'SOL' : a === 'DEVUSDC' || a === 'USDC' ? 'devUSDC' : null; } },
 });
 function planLiquidity(a: CopilotLiquidityAction, g: Grounding): Plan {
   const m = copyOf(g), notes: string[] = [], text = g.text;

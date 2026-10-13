@@ -132,6 +132,7 @@ export function SolanaLiquidityPanel({ view }: { view: 'simulate' | 'execute' })
     {fields && <p>{tr("Concentrated liquidity on Solana Devnet via Orca Whirlpools: up to ")}{tr(fields.maxSol)}{tr(" Devnet SOL and ")}{tr(fields.maxDevUsdc)}{tr(" devUSDC between ")}{tr(fields.lowerPrice)}{tr(" and ")}{tr(fields.upperPrice)}{tr(" devUSDC per SOL.")}</p>}
     <p role="note">{tr("Solana Devnet test tokens only. They have no value, and no real funds are used.")}</p>
     {liquidity.retired && <p role="alert">{tr("The workflow changed. Prior authorization is invalid. Simulate the current position again.")}</p>}
+    {stagedPosition && liquidity.positions && !active && <p role="alert">{tr('The selected position is unavailable for this wallet. Choose a position again in Build.')}</p>}
     {!liquidity.owner && <button type="button" disabled={jupiter.busy} onClick={() => void jupiter.connect('solana:devnet')}>{tr("Connect Solana wallet")}</button>}
     {liquidity.owner && <p>{tr("Wallet connected · Solana Devnet: ")}<span>{tr(liquidity.owner)}</span></p>}
     {jupiter.error && !liquidity.owner && <p role="status">{tr(jupiter.error)}</p>}

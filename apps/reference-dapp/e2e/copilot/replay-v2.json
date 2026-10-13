@@ -1613,6 +1613,24 @@
      }
     }
    }
+  },
+  {
+   "user": [
+    "Close my position"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "EN",
+      "kind": "POSITION",
+      "operation": "EXIT",
+      "protocol": null,
+      "network": null,
+      "percent": null
+     }
+    }
+   }
   }
  ]
 }
