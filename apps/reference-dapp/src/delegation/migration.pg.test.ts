@@ -32,15 +32,16 @@ const OWNER = '0x' + 'c3'.repeat(20);
 
 describe('BUILD-AUTOMATION-002 migration 0011', () => {
   it('follows 0010 in the gapless shipped sequence and is pinned', async () => {
-    const all = await loadMigrations();
+    // Bounded to the first eleven migrations: 0012 (BUILD-ADMIN-001) has its own suite, as 0011 bounded the 0010 suite.
+    const all = (await loadMigrations()).slice(0, 11);
     expect(all.map(m => [m.version, m.name]).slice(-2)).toEqual([[10, 'automations'], [11, 'delegated_execution']]);
-    expect(SHIPPED_MIGRATIONS.at(-1)).toEqual({ version: 11, name: 'delegated_execution', sha256: all.at(-1)!.sha256 });
+    expect(SHIPPED_MIGRATIONS[10]).toEqual({ version: 11, name: 'delegated_execution', sha256: all.at(-1)!.sha256 });
   });
 
   it('upgrades a populated 0010 database additively; existing rules keep CONFIRM_EACH_TIME and cannot be upgraded in place', async () => {
     const t = await createTestDatabase({ migrated: false });
     try {
-      const all = await loadMigrations();
+      const all = (await loadMigrations()).slice(0, 11);
       await migrate(t.db, all.slice(0, 10));
       const rule = id('aut');
       await t.db.query(`INSERT INTO automation_rules (tenant_id, rule_id, owner_namespace, owner_account, display_name, kind, state, definition, action_strategy,
@@ -50,7 +51,7 @@ describe('BUILD-AUTOMATION-002 migration 0011', () => {
         VALUES ('default', $1, $2, 'eip155', $3, 'slot:2026-10-12T09:00', 'SCHEDULE', 'PENDING_OWNER', now(), now() + interval '1 day')`, [id('occ'), rule, OWNER]);
       const before = await shape(t.db);
       expect(await migrate(t.db, all)).toEqual([11]);
-      expect(await assertSchemaCurrent(t.db, SHIPPED_MIGRATIONS)).toBe(11);
+      expect(await assertSchemaCurrent(t.db, SHIPPED_MIGRATIONS.slice(0, 11))).toBe(11);
       expect(await migrate(t.db, all)).toEqual([]);
       const after = await shape(t.db);
       expect(Object.keys(after).filter(name => !(name in before)).sort()).toEqual(DELEGATION_TABLES);

@@ -23,7 +23,9 @@ const config: NextConfig = {
       { key: 'Referrer-Policy', value: 'no-referrer' }, { key: 'X-Robots-Tag', value: 'noindex, nofollow' }, { key: 'Cache-Control', value: 'no-store' }];
     const cardProvider = 'https://api.mercadopago.com https://api-static.mercadopago.com https://secure-fields.mercadopago.com';
     return [{ source: '/:path*', headers: [{ key: 'Content-Security-Policy', value: `connect-src 'self' ${cardProvider}` }] },
-      { source: '/approve', headers: sensitive }, { source: '/connections', headers: sensitive }];
+      { source: '/approve', headers: sensitive }, { source: '/connections', headers: sensitive },
+      // BUILD-ADMIN-001: the private console and its APIs are never framed, cached, indexed or referred either.
+      { source: '/admin', headers: sensitive }, { source: '/admin/:path*', headers: sensitive }];
   },
 };
 
