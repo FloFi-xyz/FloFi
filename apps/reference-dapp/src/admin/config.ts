@@ -11,8 +11,11 @@ import { hkdfSync } from 'node:crypto';
 type Env = Readonly<Record<string, string | undefined>>;
 export type AdminConfig = { readonly enabled: true; readonly key: Buffer } | { readonly enabled: false; readonly code: string };
 
-const OTHER_SECRETS = ['FLOFI_SESSION_SECRET', 'API_AUTH_TOKEN', 'FLOFI_CHANNEL_SECRET', 'FLOFI_AUTOMATION_SECRET', 'FLOFI_DEVELOPER_SECRET',
-  'FLOFI_MCP_OAUTH_SECRET', 'FLOFI_DELEGATION_SECRET', 'OPENAI_API_KEY'] as const;
+/** Every other secret FloFi reads; the admin key must equal none of them. */
+const OTHER_SECRETS = ['FLOFI_SESSION_SECRET', 'API_AUTH_TOKEN', 'FLOFI_CHANNEL_SECRET', 'FLOFI_AUTOMATION_SECRET', 'FLOFI_DEVELOPER_SECRET', 'FLOFI_MCP_OAUTH_SECRET',
+  'FLOFI_WEBHOOK_SECRET', 'FLOFI_API_KEY', 'OPENAI_API_KEY', 'TELEGRAM_BOT_TOKEN', 'TELEGRAM_WEBHOOK_SECRET', 'WHATSAPP_ACCESS_TOKEN', 'WHATSAPP_APP_SECRET',
+  'WHATSAPP_APP_SECRET_PREVIOUS', 'WHATSAPP_WEBHOOK_VERIFY_TOKEN', 'OBJECT_STORE_SECRET_ACCESS_KEY', 'LIFI_API_KEY', 'ACROSS_API_KEY',
+  'JUPITER_API_KEY', 'GRYLOO_ALCHEMY_API_KEY', 'VERCEL_AUTOMATION_BYPASS_SECRET', 'CRON_SECRET'] as const;
 
 export function adminConfig(env: Env): AdminConfig {
   if (env.FLOFI_ADMIN !== 'enabled') return { enabled: false, code: 'ADMIN_NOT_ENABLED' };

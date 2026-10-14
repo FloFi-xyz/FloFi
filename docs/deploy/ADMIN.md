@@ -23,7 +23,7 @@ strict output schema, grounding and every later Simulate/Review/signature step a
 | Variable | Value |
 | --- | --- |
 | `FLOFI_ADMIN` | `enabled` (anything else: `/admin` answers 404) |
-| `FLOFI_ADMIN_SESSION_SECRET` | `openssl rand -hex 32`, **dedicated**: 32–512 characters, refused if equal to `FLOFI_SESSION_SECRET`, `API_AUTH_TOKEN`, a channel, automation, developer, MCP or delegation secret, or `OPENAI_API_KEY` |
+| `FLOFI_ADMIN_SESSION_SECRET` | `openssl rand -hex 32`, **dedicated**: 32–512 characters, refused if equal to any other secret FloFi reads (`FLOFI_SESSION_SECRET`, `API_AUTH_TOKEN`, channel, automation, developer, MCP, webhook, provider, object-store or cron secrets, `OPENAI_API_KEY`) |
 | `DATABASE_URL` | already required for platform state (pooled Neon URL); without it the console reports `ADMIN_STORE_NOT_CONFIGURED` |
 | `FLOFI_COPILOT_RUNTIME_CONFIG` | optional break-glass: `disabled` ignores stored Copilot settings and uses `OPENAI_COPILOT_*` only |
 
