@@ -20,6 +20,7 @@ export type OrcaLiquidityProfile = {
   readonly instructions: typeof ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY.instructions; readonly events: typeof ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY.events;
   readonly positionDiscriminator: string; readonly tickArrayDiscriminator: string; readonly tickArraySize: number; readonly minTick: number; readonly maxTick: number;
   readonly maximumSlippageBps: number; readonly reviewTtlSeconds: number; readonly baseFeeLamports: string; readonly maximumComputeUnits: number;
+  /** Reviewed compute-unit price (micro-lamports per CU) set in the transaction; '0' sets none. */ readonly computeUnitPriceMicroLamports: string;
   readonly environment: 'MAINNET' | 'PUBLIC_TESTNET'; readonly provenance: 'PUBLIC_MAINNET' | 'PUBLIC_DEVNET';
   readonly executedEvidence: 'PUBLIC_EXECUTED' | 'DEVNET_EXECUTED'; readonly bundleEnvironment: 'MAINNET_EXECUTED' | 'TESTNET_EXECUTED';
   readonly realFunds: boolean; readonly contractVersion: string; explorerTx(signature: string): string };

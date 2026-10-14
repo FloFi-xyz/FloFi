@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { base58Encode, parseTransaction, serializeSignedTransaction } from '@defi-workflow-engine/reference-compiler';
+import { base58Encode, describeSolanaWalletChange, parseTransaction, serializeSignedTransaction, type SolanaWalletChange } from '@defi-workflow-engine/reference-compiler';
 import { base64ToBytes, bytesToBase64, signWithSolanaWallet, type SolanaSession } from './solana-wallet';
 
 /**
@@ -35,7 +35,12 @@ export async function signOrcaLiquidityTransaction(session: SolanaSession, unsig
   signers: readonly string[], mintSigner: PositionMintSigner | null): Promise<string> {
   const walletSigned = await signWithSolanaWallet(session, unsignedTransaction, 'ORCA_LIQUIDITY');
   const parsed = parseTransaction(base64ToBytes(walletSigned));
-  if (parsed.signatures.length !== signers.length || !sameBytes(parsed.message, base64ToBytes(reviewedMessage))) throw new Error('ORCA_LIQUIDITY_TRANSACTION_CHANGED');
+  if (parsed.signatures.length !== signers.length || !sameBytes(parsed.message, base64ToBytes(reviewedMessage))) {
+    // Refused before the position key signs. The diagnostic says what the wallet changed (keys, counts, hashes; never the bytes).
+    let change: SolanaWalletChange | undefined;
+    try { change = describeSolanaWalletChange(reviewedMessage, walletSigned); } catch { change = undefined; }
+    throw Object.assign(new Error('ORCA_LIQUIDITY_TRANSACTION_CHANGED'), change ? { change } : {});
+  }
   if (signers.length === 1) return walletSigned;
   if (signers.length !== 2 || !mintSigner || mintSigner.address !== signers[1]) throw new Error('ORCA_LIQUIDITY_POSITION_KEY_UNAVAILABLE');
   const signature = await mintSigner.sign(parsed.message);

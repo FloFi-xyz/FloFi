@@ -109,10 +109,11 @@ describe('Orca liquidity simulation and Review binding (MOCKED Devnet loopback)'
     const s = setup(), mint = mintKey();
     const review = await simulateOrcaLiquidity(workflow(), s.wallet.owner, { operation: 'OPEN', positionMint: mint.address }, s.env.rpc, NOW);
     expect(review.signers).toEqual([s.wallet.owner, mint.address]);
-    expect(review.instructionSummary.map(i => i.name)).toEqual(['set_compute_unit_limit', 'create_idempotent', 'transfer', 'sync_native', 'create_idempotent',
+    expect(review.instructionSummary.map(i => i.name)).toEqual(['set_compute_unit_limit', 'set_compute_unit_price', 'create_idempotent', 'transfer', 'sync_native', 'create_idempotent',
       'open_position_with_token_extensions', 'increase_liquidity_v2', 'close_account']);
     expect(review.simulationResult).toMatchObject({ depositedA: review.expected.amountA, depositedB: review.expected.amountB, collectedFeesA: '0' });
-    expect(review.estimatedFeeLamports).toBe('10000');
+    // Two signatures plus the reviewed priority fee (100,000 micro-lamports per CU) on the requested compute-unit limit, rounded up.
+    expect(review.estimatedFeeLamports).toBe((10_000n + (BigInt(review.computeUnitLimit) * 100_000n + 999_999n) / 1_000_000n).toString());
     expect(sha256Hex(fromBase64(review.message))).toBe(review.messageHash);
     expect(review.plan.segments[0]!.steps[0]).toMatchObject({ stepId: 'orca-liquidity-open', payloadHash: review.messageHash });
     expect(() => assertOrcaLiquidityReview(review, workflow(), s.wallet.owner, 380_000_000, NOW + 1000)).not.toThrow();
@@ -169,7 +170,8 @@ describe('Orca liquidity simulation and Review binding (MOCKED Devnet loopback)'
     await expect(simulateOrcaLiquidity(workflow(), s.wallet.owner, { operation: 'OPEN', positionMint: mint.address }, s.env.rpc, NOW)).rejects.toThrow('ORCA_POSITION_MINT_IN_USE');
     const exit = await simulateOrcaLiquidity(workflow(), s.wallet.owner, { operation: 'EXIT', positionMint: mint.address }, s.env.rpc, NOW);
     expect(exit.signers).toEqual([s.wallet.owner]);
-    expect(exit.instructionSummary.map(i => i.name)).toEqual(['set_compute_unit_limit', 'create_idempotent', 'create_idempotent', 'decrease_liquidity_v2', 'collect_fees_v2',
+    expect(exit.instructionSummary[1]).toEqual({ programId: 'ComputeBudget111111111111111111111111111111', name: 'set_compute_unit_price', args: { microLamports: '100000' } });
+    expect(exit.instructionSummary.map(i => i.name)).toEqual(['set_compute_unit_limit', 'set_compute_unit_price', 'create_idempotent', 'create_idempotent', 'decrease_liquidity_v2', 'collect_fees_v2',
       'close_position_with_token_extensions', 'close_account']);
     expect(exit.simulationResult.closedAccounts).toHaveLength(3);
   });

@@ -3,6 +3,7 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { isBoundComposition } from '@defi-workflow-engine/action-registry';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
+import type { SolanaWalletChange } from '@defi-workflow-engine/reference-compiler';
 import { useWorkflow } from './workflow-store';
 import { useJupiter } from './jupiter-store';
 import { signWithSolanaWallet } from '../wallet/solana-wallet';
@@ -41,9 +42,11 @@ function walletCode(cause: unknown, prefix: string): string {
   return value && (value.code === 4001 || /reject|declin|denied|cancel/i.test(String(value.name ?? '') + String(value.message ?? ''))) ? `${prefix}_WALLET_REJECTED` : `${prefix}_WALLET_SIGN_FAILED`;
 }
 const bounded = (cause: unknown) => { try { const v = cause as Record<string, unknown>; return { name: String(v?.name ?? ''), code: typeof v?.code === 'number' ? v.code : null, message: String(v?.message ?? cause).slice(0, 500) }; } catch { return { message: 'unreadable' }; } };
+/** The wallet-change summary a refusal may carry (ORCA_LIQUIDITY_TRANSACTION_CHANGED from the position signer). */
+const walletChange = (cause: unknown) => { const change = (cause as { change?: { format?: unknown } } | null)?.change; return change?.format === 'flofi.solana-wallet-change.v1' ? { change: change as SolanaWalletChange } : {}; };
 
 export function SolanaCompositionProvider({ children }: { children: ReactNode }) {
-  const { state } = useWorkflow();
+  const { state, restoreSolanaCompositionCanvas } = useWorkflow();
   const jupiter = useJupiter();
   const session = jupiter.session && jupiter.session.chain === 'solana:devnet' ? jupiter.session : null;
   const owner = session?.account.address ?? null;
@@ -65,10 +68,16 @@ export function SolanaCompositionProvider({ children }: { children: ReactNode })
     try {
       const pointer = JSON.parse(window.localStorage.getItem(key) ?? 'null') as { id?: unknown } | null;
       if (pointer && typeof pointer.id === 'string' && /^solcomp-[a-f0-9]{32}$/.test(pointer.id))
-        solanaCompositionStatus(pointer.id).then(result => { if (mounted && result.ok) { setRecord(result.value); setRecovered(true); } }).catch(() => undefined);
+        solanaCompositionStatus(pointer.id).then(result => {
+          if (!mounted || !result.ok) return;
+          setRecord(result.value); setRecovered(true);
+          // P0: a run that still needs the owner (a step in flight, or the swap reconciled and its position owed) shows its authorized
+          // workflow on the untouched Canvas again, so its next step can be reviewed and approved there. Finished runs stay in the Dashboard.
+          if (['PRODUCING', 'BOUND', 'CONSUMING', 'ATTENTION'].includes(result.value.phase)) restoreSolanaCompositionCanvas(result.value.record.review.workflow);
+        }).catch(() => undefined);
     } catch { setError(`${X}_RECOVERY_POINTER_INVALID`); }
     return () => { mounted = false; };
-  }, []);
+  }, [restoreSolanaCompositionCanvas]);
   // An edit before the swap starts retires the composed Review; after it starts, the run is only followed (never re-planned).
   useEffect(() => {
     if (record && retired && ['SIMULATED', 'AUTHORIZED'].includes(record.phase))
@@ -142,7 +151,7 @@ export function SolanaCompositionProvider({ children }: { children: ReactNode })
       signed = swap ? await signWithSolanaWallet(session, unsigned, prefix) : await signOrcaLiquidityTransaction(session, unsigned, message, signers, mintSigner.current);
     } catch (cause) {
       const failure = cause instanceof Error && new RegExp(`^${prefix}_[A-Z_]+$`).test(cause.message) ? cause.message : walletCode(cause, prefix);
-      const diagnostic = { stage: 'SIGN' as const, code: failure, error: bounded(cause) };
+      const diagnostic = { stage: 'SIGN' as const, code: failure, error: bounded(cause), ...walletChange(cause) };
       const recorded = await solanaCompositionWalletFailure(id, swap ? { step: 'SWAP', diagnostic } : { step: 'LIQUIDITY', diagnostic });
       if (recorded.ok) accept(recorded.value);
       throw new Error(failure, { cause });

@@ -7,7 +7,7 @@ import { CONCENTRATED_LIQUIDITY_ACTION, readConcentratedLiquidity, type Semantic
 import { associatedTokenAddress, base58Encode, compileMessageV0, decompileMessageV0, findProgramAddress, fromBase64, parseMessageV0, parseTransaction,
   publicKeyBytes, readU64, serializeMessageV0, serializeSignedTransaction, sha256Hex, solanaAddress, toBase64, u32Bytes, u64Bytes, verifyEd25519,
   type SolanaInstruction } from './solana.js';
-import { readSolanaAccounts, rpcContextValue, setComputeUnitLimit, solanaSwapArtifactHash, solanaSwapHash, verifySolanaCluster, decodeRpcAccount,
+import { readSolanaAccounts, rpcContextValue, setComputeUnitLimit, setComputeUnitPrice, solanaSwapArtifactHash, solanaSwapHash, verifySolanaCluster, decodeRpcAccount,
   type RawSolanaAccount, type SolanaRpc } from './solana-swap.js';
 import { decodeWhirlpool, type OrcaPool } from './orca-whirlpool.js';
 
@@ -270,7 +270,8 @@ export type OrcaLiquidityPlan = { operation: OrcaLiquidityOperation; liquidityDe
 export function orcaLiquidityInstructions(a: OrcaLiquidityAccounts, plan: OrcaLiquidityPlan, units: number, profile: OrcaLiquidityProfile): SolanaInstruction[] {
   const POOL = profile.pool;
   const unwrap: SolanaInstruction = { programId: P.token, data: Uint8Array.of(9), accounts: [m(a.ownerTokenA, true), m(a.owner, true), m(a.owner, false, true)] };
-  const head = [setComputeUnitLimit(units), createAtaIdempotent(a.owner, a.ownerTokenA, POOL.tokenMintA)];
+  // The reviewed compute-unit price is part of the message, so a wallet has no priority fee to add (P0: Phantom).
+  const head = [setComputeUnitLimit(units), ...setComputeUnitPrice(profile.computeUnitPriceMicroLamports), createAtaIdempotent(a.owner, a.ownerTokenA, POOL.tokenMintA)];
   if (plan.operation === 'OPEN') {
     const wrap = BigInt(plan.wrapLamports);
     return [...head,
@@ -431,7 +432,9 @@ async function simulateMessage(rpc: SolanaRpc, message: Uint8Array, signers: num
     fail('ORCA_LIQUIDITY_SIMULATION_INVALID');
   return { unitsConsumed: value.unitsConsumed as number, logs, allLogs: allLogs.slice(-300), accounts: (value.accounts as unknown[]).map(decodeRpcAccount) };
 }
-export const orcaLiquidityFee = (signers: number) => (BigInt(program.baseFeeLamports) * BigInt(signers)).toString();
+/** Base fee per signature plus the reviewed priority fee, charged on the requested compute-unit limit (rounded up, as the runtime does). */
+export const orcaLiquidityFee = (signers: number, units = 0, microLamports = '0') =>
+  (BigInt(program.baseFeeLamports) * BigInt(signers) + (BigInt(units) * BigInt(microLamports) + 999_999n) / 1_000_000n).toString();
 const NAMES: Record<string, string> = { [program.instructions.openPositionWithTokenExtensions]: 'open_position_with_token_extensions',
   [program.instructions.increaseLiquidityV2]: 'increase_liquidity_v2', [program.instructions.decreaseLiquidityV2]: 'decrease_liquidity_v2',
   [program.instructions.collectFeesV2]: 'collect_fees_v2', [program.instructions.closePositionWithTokenExtensions]: 'close_position_with_token_extensions' };
@@ -439,6 +442,7 @@ const NAMES: Record<string, string> = { [program.instructions.openPositionWithTo
 export function summarizeOrcaLiquidityInstructions(instructions: SolanaInstruction[]): { programId: string; name: string; args: unknown }[] {
   return instructions.map(ix => {
     if (ix.programId === P.computeBudget && ix.data[0] === 2 && ix.data.length === 5) return { programId: ix.programId, name: 'set_compute_unit_limit', args: { units: new DataView(ix.data.buffer, ix.data.byteOffset).getUint32(1, true) } };
+    if (ix.programId === P.computeBudget && ix.data[0] === 3 && ix.data.length === 9) return { programId: ix.programId, name: 'set_compute_unit_price', args: { microLamports: readU64(ix.data, 1).toString() } };
     if (ix.programId === P.associatedToken && ix.data.length === 1 && ix.data[0] === 1) return { programId: ix.programId, name: 'create_idempotent', args: { account: ix.accounts[1]?.pubkey, mint: ix.accounts[3]?.pubkey } };
     if (ix.programId === P.system && ix.data.length === 12 && ix.data[0] === 2) return { programId: ix.programId, name: 'transfer', args: { to: ix.accounts[1]?.pubkey, lamports: readU64(ix.data, 4).toString() } };
     if (ix.programId === P.token && ix.data.length === 1 && ix.data[0] === 17) return { programId: ix.programId, name: 'sync_native', args: { account: ix.accounts[0]?.pubkey } };
@@ -527,7 +531,7 @@ export async function simulateOrcaLiquidity(workflow: SemanticWorkflow, ownerInp
   const instructionSummary = summarizeOrcaLiquidityInstructions(final.instructions);
   const simulated = await simulateMessage(rpc, final.bytes, signers.length, addresses);
   const post = readBalances(slot, accounts, simulated.accounts, POOL);
-  const fee = BigInt(orcaLiquidityFee(signers.length));
+  const fee = BigInt(orcaLiquidityFee(signers.length, units, profile.computeUnitPriceMicroLamports));
   const result = assessOrcaLiquidityEffects({ operation, plan, accounts, pre, post, logs: simulated.allLogs, feeLamports: fee, owner, profile });
   // The program's own amounts must equal Gryloo's independent integer math against the same pool state.
   if (operation === 'OPEN' ? result.depositedA !== expected.amountA || result.depositedB !== expected.amountB

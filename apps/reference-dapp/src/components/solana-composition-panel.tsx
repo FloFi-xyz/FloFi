@@ -4,6 +4,7 @@ import { useLocale } from '../i18n/locale';
 import { useJupiter } from '../state/jupiter-store';
 import { useSolanaComposition } from '../state/solana-composition-store';
 import { formatTokenAmount } from '../domain/jupiter-authoring';
+import { solanaNotSubmittedReason } from '../domain/solana-refusal';
 
 const sol = (raw: string | null | undefined) => raw == null ? '—' : `${formatTokenAmount(raw, 9)} SOL`;
 const usdc = (raw: string | null | undefined) => raw == null ? '—' : `${formatTokenAmount(raw, 6)} devUSDC`;
@@ -34,6 +35,9 @@ export function SolanaCompositionPanel({ view }: { view: 'simulate' | 'execute' 
   const jupiter = useJupiter(), c = useSolanaComposition();
   const v = c.record, q = v?.record.review, lp = q?.liquidity, binding = v?.record.binding, position = v?.liquidity;
   const info = c.error ?? v?.record.error ?? null;
+  // A step refused before broadcast says why (for example, the wallet changed the reviewed transaction).
+  const refused = [v?.swap, position].find(run => run?.notSubmitted && run.attempt && !run.attempt.signature && run.error === info);
+  const refusal = info && !MESSAGES[info] && refused ? solanaNotSubmittedReason(info, refused.walletDiagnostic?.change) : null;
   const preparable = Boolean(v && !c.retired && (v.phase === 'BOUND' || v.phase === 'CONSUMING' && !position?.attempt));
   const reviewable = Boolean(v && !c.retired && !c.authorized && (v.phase === 'SIMULATED' || v.phase === 'CONSUMING' && position && !position.attempt));
   const executable = Boolean(v && !c.retired && c.authorized && c.executionEnabled);
@@ -77,7 +81,7 @@ export function SolanaCompositionPanel({ view }: { view: 'simulate' | 'execute' 
     </div>
     {v?.record.evidence && <p>{tr('Evidence: ')}{tr(v.record.evidence.evidenceClass)} · <a download="flofi-solana-devnet-composition-evidence.json"
       href={'data:application/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(v.record.evidence, null, 2))}>{tr('Download Evidence Bundle')}</a></p>}
-    {info && <p role="status">{tr(MESSAGES[info] ?? info)}</p>}
+    {info && <p role="status">{refusal ? tr(refusal.text, ...refusal.args) : tr(MESSAGES[info] ?? info)}</p>}
     <details><summary>{tr('Show technical details')}</summary><pre>{JSON.stringify({ phase: v?.phase, error: info, record: v?.record.id, swapRun: v?.swap.id,
       liquidityRuns: v?.record.consumerRunIds, binding, manifest: q?.manifest, plan: q?.plan, journal: v?.record.journal.entries.length }, null, 2)}</pre></details>
   </section>;
