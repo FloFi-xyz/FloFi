@@ -144,7 +144,8 @@ released strict rule when no certificate applies, over 200+ ledger shapes), `pac
 `apps/reference-dapp/backend/schema-compatibility.pg.test.ts` (API/worker continuity, real process cold starts, Vercel paths).
 
 **Notes for BUILD-ADMIN-001** (read-only findings, nothing changed there): the 0012 header and `docs/deploy/ADMIN.md` §7 say the index
-build holds only worker evaluation writes; API owner automation/delegation routes also wait (bounded, see above). With this build
+build holds only worker evaluation writes; API owner automation/delegation routes also wait (bounded, see above). Correct `ADMIN.md`,
+not the SQL: the comment is part of the certified bytes, and any edit to 0012 needs a new certificate and a new Release A. With this build
 deployed, `ADMIN.md` §7's "a pre-0012 build refuses the newer schema on every cold start" applies only to builds older than this one,
 and `src/admin/rollout.pg.test.ts`'s "previous build refuses on a cold start" checks the strict `assertSchemaCurrent` (still true), not
 what a deployed compatibility build does.
