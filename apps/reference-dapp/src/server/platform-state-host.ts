@@ -15,8 +15,9 @@ async function openHost(config: ReturnType<typeof serverlessPostgresConfig>): Pr
   const runtime = await import('@defi-workflow-engine/cloud-runtime');
   const db = runtime.createDatabase({ connectionString: config.databaseUrl, maxConnections: config.maxConnections, applicationName: 'flofi-platform-state' });
   try {
-    // Bundled functions check shipped identities without reading migration files or applying migrations.
-    await runtime.assertSchemaCurrent(db, runtime.SHIPPED_MIGRATIONS);
+    // Bundled functions check shipped identities without reading migration files or applying migrations; a newer schema is served
+    // only under this build's forward-compatibility certificate (BUILD-DB-COMPAT-001).
+    await runtime.assertSchemaCompatible(db, runtime.SHIPPED_MIGRATIONS);
     await runtime.ensureTenant(db, config.tenantId);
     return { db, tenantId: config.tenantId };
   } catch (error) { await db.close().catch(() => undefined); throw error; }

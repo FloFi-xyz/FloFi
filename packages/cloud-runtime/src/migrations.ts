@@ -3,13 +3,19 @@
  * Version-controlled schema migrations. Files `migrations/NNNN_name.sql` apply in numeric order, each in its
  * own transaction, serialized across concurrent runners by a transaction-scoped advisory lock. The SHA-256 of
  * every applied file is recorded; an edited, missing or reordered migration fails closed. Application
- * processes never migrate implicitly: they call `assertSchemaCurrent` and refuse to start when behind.
+ * processes never migrate implicitly: they call `assertSchemaCompatible` and refuse to start when behind.
+ *
+ * BUILD-DB-COMPAT-001: a database AHEAD of a build is served only under an explicit forward-compatibility
+ * certificate of that build (`CERTIFIED_FORWARD_MIGRATIONS`), which pins every newer migration to its exact
+ * identity. Nothing is inferred from a version number or from SQL: an unknown, edited or reordered newer
+ * migration fails closed exactly as before, and a runner never changes a database that is ahead of it.
+ * See docs/deploy/SCHEMA-COMPATIBILITY.md.
  */
 import { createHash } from 'node:crypto';
 import { readdir, readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { Database } from './db.js';
+import type { Database, Queryable } from './db.js';
 
 export type Migration = { readonly version: number; readonly name: string; readonly sql: string; readonly sha256: string };
 /** What the schema check compares: a migration's identity without its SQL. */
@@ -34,6 +40,32 @@ export const SHIPPED_MIGRATIONS: readonly MigrationIdentity[] = Object.freeze([
   { version: 10, name: 'automations', sha256: '33eabd57e662b422243305c7fb64580f37a86c314c34990a370a214837d1fa12' },
   { version: 11, name: 'delegated_execution', sha256: '0c6572af43ffe278df7724241ae30b1d1c15ab59b85941e2266b1b3294220202' },
 ].map(migration => Object.freeze(migration)));
+
+/**
+ * BUILD-DB-COMPAT-001: a reviewed statement that an application build whose shipped history ends exactly at `base` keeps working,
+ * unchanged, on a database that also has `migrations` applied (contiguous from `base.version + 1`). Each identity is the exact
+ * migration that will be released: a certificate is written one release before its migration ships, because an old build can only
+ * verify bytes it knew when it was built. `assessment` names the evidence a reviewer checked.
+ */
+export type ForwardCompatibilityCertificate = {
+  readonly base: MigrationIdentity; readonly migrations: readonly MigrationIdentity[]; readonly assessment: string };
+/**
+ * The certificates this package carries. Only the one whose `base` is a build's newest shipped migration applies to that build;
+ * the others are the record of earlier releases (a unit test proves every certified migration that has since shipped is
+ * byte-identical to what was certified).
+ */
+export const CERTIFIED_FORWARD_MIGRATIONS: readonly ForwardCompatibilityCertificate[] = Object.freeze([
+  {
+    base: { version: 11, name: 'delegated_execution', sha256: '0c6572af43ffe278df7724241ae30b1d1c15ab59b85941e2266b1b3294220202' },
+    // BUILD-ADMIN-001 at 53b1a8b: five new admin_* tables and one new index on automation_evaluations; no existing object changes.
+    migrations: [{ version: 12, name: 'admin_control_plane', sha256: '25556fbfd8e45acf0e692fc340eee56fa2f064f4106225960d63e3da9c303af2' }],
+    assessment: 'docs/deploy/SCHEMA-COMPATIBILITY.md#3-certificate-0012_admin_control_plane',
+  },
+].map(certificate => Object.freeze({ base: Object.freeze(certificate.base),
+  migrations: Object.freeze(certificate.migrations.map(migration => Object.freeze(migration))), assessment: certificate.assessment })));
+
+/** What a schema check established: the database's version, this build's, and the certified newer migrations in between. */
+export type SchemaCompatibility = { readonly version: number; readonly application: number; readonly forward: readonly MigrationIdentity[] };
 const FILE = /^(\d{4})_([a-z0-9_]+)\.sql$/;
 const LOCK_ID = 7_340_032_001; // Constant advisory lock key for migration runners.
 
@@ -61,8 +93,44 @@ function verifyPrefix(applied: readonly Applied[], migrations: readonly Migratio
   }
 }
 
-/** Applies every pending migration. Safe to run concurrently and repeatedly; returns the versions applied now. */
-export async function migrate(db: Database, migrations?: readonly Migration[]): Promise<readonly number[]> {
+const SHA256 = /^[0-9a-f]{64}$/, NAME = /^[a-z0-9_]+$/;
+const sameIdentity = (a: MigrationIdentity, b: MigrationIdentity) => a.version === b.version && a.name === b.name && a.sha256 === b.sha256;
+const wellFormed = (m: MigrationIdentity) => Number.isSafeInteger(m.version) && m.version >= 1 && NAME.test(m.name) && SHA256.test(m.sha256);
+/** The one certificate for the build whose newest shipped migration is `head`, if any. A malformed or ambiguous manifest fails closed. */
+function certificateFor(head: MigrationIdentity | undefined, certificates: readonly ForwardCompatibilityCertificate[]): ForwardCompatibilityCertificate | undefined {
+  if (!head) return undefined;
+  const matching = certificates.filter(certificate => sameIdentity(certificate.base, head));
+  if (matching.length > 1) throw new Error('MIGRATION_CERTIFICATE_INVALID');
+  const certificate = matching[0];
+  if (certificate && (!wellFormed(certificate.base) || !certificate.migrations.length
+    || certificate.migrations.some((m, index) => !wellFormed(m) || m.version !== certificate.base.version + index + 1)))
+    throw new Error('MIGRATION_CERTIFICATE_INVALID');
+  return certificate;
+}
+
+/**
+ * Whether a build that ships `shipped` may serve on a database whose ledger (ordered by version) is `applied`. Its known history must
+ * match exactly (version, name, SHA-256). Behind it: `SCHEMA_NOT_MIGRATED`. Ahead of it: only when this build's certificate names
+ * every newer row exactly and in order; any other newer row — unknown, edited, renamed, out of sequence — is `MIGRATION_HISTORY_MISMATCH`.
+ * With no applicable certificate this is exactly `assertSchemaCurrent`'s rule.
+ */
+export function schemaCompatibility(applied: readonly MigrationIdentity[], shipped: readonly MigrationIdentity[],
+  certificates: readonly ForwardCompatibilityCertificate[] = CERTIFIED_FORWARD_MIGRATIONS): SchemaCompatibility {
+  verifyPrefix(applied.slice(0, shipped.length), shipped);
+  if (applied.length < shipped.length) throw new Error('SCHEMA_NOT_MIGRATED');
+  const newer = applied.slice(shipped.length);
+  if (newer.length) verifyPrefix(newer, certificateFor(shipped.at(-1), certificates)?.migrations ?? []);
+  return Object.freeze({ version: applied.length, application: shipped.length,
+    forward: Object.freeze(newer.map(({ version, name, sha256 }) => Object.freeze({ version, name, sha256 }))) });
+}
+
+/**
+ * Applies every pending migration. Safe to run concurrently and repeatedly; returns the versions applied now. A database ahead of
+ * this runner is never changed: it is left untouched when this build is certified for every newer migration (nothing to apply; a
+ * rollback to this build can still run its deploy step), and fails closed with `MIGRATION_HISTORY_MISMATCH` otherwise.
+ */
+export async function migrate(db: Database, migrations?: readonly Migration[],
+  certificates: readonly ForwardCompatibilityCertificate[] = CERTIFIED_FORWARD_MIGRATIONS): Promise<readonly number[]> {
   const all = migrations ?? await loadMigrations();
   const appliedNow: number[] = [];
   for (;;) {
@@ -70,6 +138,7 @@ export async function migrate(db: Database, migrations?: readonly Migration[]): 
       await tx.query('SELECT pg_advisory_xact_lock($1)', [LOCK_ID]);
       await tx.query(LEDGER);
       const applied = (await tx.query<Applied>('SELECT version, name, sha256 FROM schema_migrations ORDER BY version')).rows;
+      if (applied.length > all.length) { schemaCompatibility(applied, all, certificates); return true; }
       verifyPrefix(applied, all);
       const next = all[applied.length];
       if (!next) return true;
@@ -91,4 +160,18 @@ export async function assertSchemaCurrent(db: Database, migrations?: readonly Mi
   verifyPrefix(applied, all);
   if (applied.length !== all.length) throw new Error('SCHEMA_NOT_MIGRATED');
   return applied.length;
+}
+
+/**
+ * BUILD-DB-COMPAT-001: the application readiness check. Fails closed unless the database has exactly the migrations this build ships,
+ * or those followed only by newer migrations this build's certificate names exactly (`schemaCompatibility`). It reads the ledger and
+ * never changes the database.
+ */
+export async function assertSchemaCompatible(db: Queryable, migrations?: readonly MigrationIdentity[],
+  certificates: readonly ForwardCompatibilityCertificate[] = CERTIFIED_FORWARD_MIGRATIONS): Promise<SchemaCompatibility> {
+  const all = migrations ?? await loadMigrations();
+  let applied: Applied[];
+  try { applied = (await db.query<Applied>('SELECT version, name, sha256 FROM schema_migrations ORDER BY version')).rows; }
+  catch (cause) { throw new Error('SCHEMA_NOT_MIGRATED', { cause }); }
+  return schemaCompatibility(applied, all, certificates);
 }

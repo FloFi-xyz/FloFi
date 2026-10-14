@@ -9,12 +9,13 @@
  *                                                            copy one validated local run log into PostgreSQL
  *
  * Configuration is environment-only (see docs/deploy/CLOUD.md). The backend holds no key, signs nothing and
- * has no transaction submission path; API and worker refuse to start against an unmigrated schema.
+ * has no transaction submission path; API and worker refuse to start against an unmigrated schema, and serve a newer one only
+ * under this build's forward-compatibility certificate (BUILD-DB-COMPAT-001, docs/deploy/SCHEMA-COMPATIBILITY.md).
  */
 import { readFile } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
-import { assertSchemaCurrent, createDatabase, createHttpServer, createLogger, createPostgresWorkQueue, createWorker, migrate,
-  readEvidenceStore, readRuntimeConfig, sweep, type WorkHandler } from '@defi-workflow-engine/cloud-runtime';
+import { assertSchemaCompatible, createDatabase, createHttpServer, createLogger, createPostgresWorkQueue, createWorker, migrate,
+  readEvidenceStore, readRuntimeConfig, sweep, type SchemaCompatibility, type WorkHandler } from '@defi-workflow-engine/cloud-runtime';
 import { createFileLogStore, utf8 } from '@defi-workflow-engine/reference-executor';
 import { createRobinhoodTransferService } from '../src/server/robinhood-transfer-service.ts';
 import { createSupplyService } from '../src/server/supply-service.ts';
@@ -26,6 +27,9 @@ const [command, ...rest] = process.argv.slice(2);
 const logger = createLogger({ service: `flofi-${command ?? 'backend'}` });
 // Startup stage reported by `backend.failed`: a fixed label, never configuration or exception text.
 let stage = 'command';
+// BUILD-DB-COMPAT-001: the database's schema version, plus this build's and the certified newer migrations when the database is ahead.
+const schemaFields = (schema: SchemaCompatibility) => ({ schema_version: schema.version, ...schema.forward.length
+  ? { application_schema_version: schema.application, forward_migrations: schema.forward.map(m => `${m.version}_${m.name}`).join(',') } : {} });
 
 async function main(): Promise<void> {
   if (command === 'migrate') {
@@ -33,7 +37,8 @@ async function main(): Promise<void> {
     const config = readRuntimeConfig(process.env, 'migrate');
     stage = 'migrate';
     const db = createDatabase({ connectionString: config.migrationDatabaseUrl, maxConnections: 1, applicationName: 'flofi-migrate' });
-    try { logger.info('migrate.applied', { versions: (await migrate(db)).join(',') || 'none', schema_version: await assertSchemaCurrent(db) }); }
+    // A database ahead of this build is never changed: certified, nothing is applied and the check below reports it; otherwise both fail closed.
+    try { logger.info('migrate.applied', { versions: (await migrate(db)).join(',') || 'none', ...schemaFields(await assertSchemaCompatible(db)) }); }
     finally { await db.close(); }
     return;
   }
@@ -59,7 +64,7 @@ async function main(): Promise<void> {
     const source: Uint8Array = bytes;
     const db = createDatabase({ connectionString: config.databaseUrl, maxConnections: 2, applicationName: 'flofi-import' });
     try {
-      await assertSchemaCurrent(db);
+      await assertSchemaCompatible(db);
       const backend = createBackend({ db, env: process.env, logger, tenantId: config.tenantId, holderId: config.workerId, evidenceStore: null });
       const { log } = backend.storage(flow, config.tenantId);
       // Byte-identical copy; projections and required work are derived in the same transaction.
@@ -74,14 +79,14 @@ async function main(): Promise<void> {
   stage = 'database';
   const db = createDatabase({ connectionString: config.databaseUrl, maxConnections: config.databasePoolMax, applicationName: `flofi-${command}` });
   stage = 'schema';
-  const schema = await assertSchemaCurrent(db);
+  const schema = await assertSchemaCompatible(db);
   stage = 'evidence_store';
   const evidenceStore = readEvidenceStore(process.env);
   stage = 'backend';
   const backend = createBackend({ db, env: process.env, logger, tenantId: config.tenantId, holderId: config.workerId, evidenceStore });
   stage = 'flow_modes';
   const modes = Object.fromEntries((Object.keys(FLOWS) as FlowName[]).map(flow => [flow, flowMode(flow, process.env)]));
-  logger.info(`${command}.starting`, { schema_version: schema, tenant_id: config.tenantId, worker_id: config.workerId,
+  logger.info(`${command}.starting`, { ...schemaFields(schema), tenant_id: config.tenantId, worker_id: config.workerId,
     evidence_store: evidenceStore?.id ?? 'none', flows: JSON.stringify(modes) });
   stage = command;
 

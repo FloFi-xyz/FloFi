@@ -60,7 +60,8 @@ export async function createEmbeddedRuntime(env: Env, seams: EmbeddedSeams = {})
   const db = runtime.createDatabase({ connectionString: databaseUrl, maxConnections, applicationName: 'flofi-web' });
   let schemaVersion: number;
   try {
-    schemaVersion = await runtime.assertSchemaCurrent(db, runtime.SHIPPED_MIGRATIONS);
+    // The database's version: this build's, or newer under its forward-compatibility certificate (BUILD-DB-COMPAT-001).
+    schemaVersion = (await runtime.assertSchemaCompatible(db, runtime.SHIPPED_MIGRATIONS)).version;
     await runtime.ensureTenant(db, tenantId);
   } catch (error) { await db.close().catch(() => undefined); throw error; }
   const instance = (env.VERCEL_DEPLOYMENT_ID ?? 'local').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40) || 'local';

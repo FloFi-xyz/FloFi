@@ -81,8 +81,11 @@ export type RunQueries = ReturnType<typeof createRunQueries>;
 /**
  * BUILD-CLOUD-PARITY-001: registers a deployment-scoped tenant (e.g. one per Vercel Preview branch) before its first write.
  * Idempotent and concurrency-safe; the identifier is validated here and again by the table's CHECK constraint.
+ * BUILD-DB-COMPAT-001: an existing tenant is only read. Its INSERT would take ROW EXCLUSIVE on `tenants`, which waits for any migration
+ * that adds a foreign key to `tenants` (SHARE ROW EXCLUSIVE until it commits): every cold start would stall for the whole migration.
  */
 export async function ensureTenant(db: Database, tenantId: string): Promise<void> {
   if (!/^[a-z0-9][a-z0-9_-]{0,62}$/.test(tenantId)) throw new Error('TENANT_ID_INVALID');
+  if ((await db.query('SELECT 1 FROM tenants WHERE tenant_id = $1', [tenantId])).rowCount) return;
   await db.query('INSERT INTO tenants (tenant_id) VALUES ($1) ON CONFLICT (tenant_id) DO NOTHING', [tenantId]);
 }
