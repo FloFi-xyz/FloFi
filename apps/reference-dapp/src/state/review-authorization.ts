@@ -76,8 +76,13 @@ export function useReviewAuthorization(kind: SimulationSource['kind']): { author
       // In between (swap reconciled, no position prepared) there is no Review to approve: the next step is a fresh read-only simulation.
       const v = solanaComposition.record; if (!v) break;
       const position = v.phase === 'CONSUMING' && v.liquidity && !v.liquidity.attempt ? v.liquidity : null, idle = !solanaComposition.busy && !solanaComposition.retired;
-      if (position) attach(`${v.record.id}:${position.review.commitment}`, position.review.manifest, position.review.policy, position.authorization === position.review.commitment,
-        solanaComposition.review, idle, position.review);
+      if (position) {
+        attach(`${v.record.id}:${position.review.commitment}`, position.review.manifest, position.review.policy, position.authorization === position.review.commitment,
+          solanaComposition.review, idle, position.review);
+        // The position Review binds the server-derived position workflow, not the composed Canvas workflow (P0: without this the Canvas
+        // saw a workflow mismatch, never offered approval and only re-prepared the position).
+        authorization.boundWorkflow = v.liquidityWorkflow;
+      }
       else if (['SIMULATED', 'AUTHORIZED', 'PRODUCING'].includes(v.phase)) attach(`${v.record.id}:${v.record.review.commitment}`, v.record.review.manifest, v.record.review.policy,
         v.record.authorization === v.record.review.commitment, solanaComposition.review, idle && ['SIMULATED', 'AUTHORIZED'].includes(v.phase), v.record.review);
       else break;

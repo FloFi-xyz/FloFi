@@ -16,7 +16,7 @@ const profiles = phase === 'composition' ? [
     'canvas-keyboard.spec.ts', 'canvas-ux.spec.ts', 'contextual-proposals.spec.ts', 'cross-chain-liquidity-recovery.spec.ts',
     'cross-chain-liquidity.spec.ts', 'execution-capabilities.spec.ts', 'interface-honesty.spec.ts', 'mock-artifact-chain.spec.ts',
     'network-isolation.spec.ts', 'public-testnet.spec.ts', 'robinhood-network.spec.ts', 'swap-authoring.spec.ts', 'visual-shell.spec.ts', 'credentials.spec.ts',
-    'build-fix-ux.spec.ts'], {}],
+    'build-fix-ux.spec.ts', 'beta-ui.spec.ts'], {}],
   ['review-execute-recovery-components', ['simulate-review-acceptance.spec.ts', 'execute-product-workspace.spec.ts', 'execute-workflow.spec.ts'], {}],
   ['workflow-acceptance', ['acceptance-workflows.spec.ts'], { GRYLOO_CLOUD_RUNTIME_E2E: 'EMBEDDED_LOOPBACK_ONLY', GRYLOO_ROUTER_TESTNET_E2E: 'MOCKED_LOOPBACK_ONLY', TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres' }],
   ['swap-read-acceptance', ['acceptance-swap-read.spec.ts'], { GRYLOO_CLOUD_RUNTIME_E2E: 'EMBEDDED_LOOPBACK_ONLY', FLOFI_SWAP_READ_E2E: 'MOCKED_LOOPBACK_ONLY', TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres' }],
@@ -38,6 +38,10 @@ const profiles = phase === 'composition' ? [
   ['solana-mainnet-network', ['solana-mainnet-network.spec.ts'], { GRYLOO_SOLANA_DEVNET_E2E: 'MOCKED_LOOPBACK_ONLY' }],
   // BUILD-SOLANA-MAINNET-001 PR B: empty Canvas on Launch App, unrestricted card deletion, and the Swap arrow's From/To inversion (MOCKED estimates).
   ['canvas-corrections', ['canvas-corrections.spec.ts'], {}],
+  // P0: a wallet that changes the reviewed Solana Devnet swap is refused before broadcast, Execute says why, and Simulate again runs the swap
+  // once and the position; a wallet behaving like the captured Phantom (adds a compute-unit price when none is set) signs the reviewed bytes
+  // and completes both steps. MOCKED Devnet loopback; only these cases of the diagnostic spec.
+  ['solana-wallet-refusal', ['solana-swap-liquidity-composition.spec.ts', '--grep', 'a wallet that changes the reviewed swap|a Phantom-like wallet signs the exact reviewed swap|a reconciled swap continues to its Orca position'], { GRYLOO_SOLANA_DEVNET_E2E: 'MOCKED_LOOPBACK_ONLY' }],
   ['lending-provenance', [boundary], { FLOFI_RELEASE_PROVENANCE_PROFILE: 'lending', GRYLOO_LENDING_E2E: 'MOCKED_LOOPBACK_ONLY' }],
   ['jupiter-provenance', [boundary], { FLOFI_RELEASE_PROVENANCE_PROFILE: 'jupiter', GRYLOO_JUPITER_E2E: 'MOCKED_LOOPBACK_ONLY' }],
   ['devnet-provenance', [boundary], { FLOFI_RELEASE_PROVENANCE_PROFILE: 'solana-devnet', GRYLOO_SOLANA_DEVNET_E2E: 'MOCKED_LOOPBACK_ONLY' }],

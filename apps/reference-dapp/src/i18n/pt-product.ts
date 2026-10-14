@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /** Product copy only. Names, protocol IDs, assets and wallet identifiers are interpolation values. */
 export const productPortuguese: Readonly<Record<string, string>> = {
+  "FloFi is currently in beta testing. Do not use real funds until the official launch announcement is published in the app and on FloFi's official social media channels.": 'O FloFi está em fase de testes beta. Não utilize fundos reais até que o anúncio oficial de lançamento seja publicado no app e nos canais oficiais do FloFi nas redes sociais.',
   'Base → Arbitrum → Uniswap v3 position': 'Base → Arbitrum → posição Uniswap v3',
   'USD value unavailable': 'Valor USD indisponível',
   'Your workflows': 'Seus workflows',

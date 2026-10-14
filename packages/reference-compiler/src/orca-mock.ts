@@ -153,7 +153,11 @@ export function createMockedSolanaDevnetOrca(options: MockedOrcaOptions = {}) {
   }
   /** Execute against a snapshot; returns an error object instead of throwing on program failure. */
   function execute(s: Snapshot, instructions: SolanaInstruction[], payer: string, signers = 1): { err: unknown; fee: bigint; units: number; logs: string[] } {
-    const fee = 5000n * BigInt(signers), logs: string[] = [];
+    // Like the runtime: 5,000 lamports per signature plus the priority fee, compute-unit price × requested limit (rounded up).
+    const budget = (op: number, size: number) => instructions.find(i => i.programId === P.computeBudget && i.data[0] === op && i.data.length === size);
+    const limitIx = budget(2, 5), priceIx = budget(3, 9);
+    const limit = limitIx ? BigInt(new DataView(limitIx.data.buffer, limitIx.data.byteOffset).getUint32(1, true)) : 200_000n * BigInt(instructions.filter(i => i.programId !== P.computeBudget).length);
+    const fee = 5000n * BigInt(signers) + (priceIx ? (limit * readU64(priceIx.data, 1) + 999_999n) / 1_000_000n : 0n), logs: string[] = [];
     if ((s.lamports.get(payer) ?? 0n) < fee) return { err: 'InsufficientFundsForFee', fee, units: 0, logs };
     s.lamports.set(payer, s.lamports.get(payer)! - fee - (options.extraOwnerDebit ?? 0n));
     const debit = (k: string, n: bigint) => { const v = s.lamports.get(k) ?? 0n; if (v < n) throw Object.assign(new Error('lamports'), { custom: { InstructionError: [0, { Custom: 1 }] } }); s.lamports.set(k, v - n); };

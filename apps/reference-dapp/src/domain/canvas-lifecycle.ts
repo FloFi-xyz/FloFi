@@ -3,6 +3,13 @@ import { projectReview } from './review-presentation';
 import { currentExecution, isFinalExecutionResult, nothingSubmitted } from './execution-result';
 import type { ExecutionControlsState } from '../state/execution-controls';
 
+const FRESH_SIMULATION_AFTER_NOTHING_SENT: readonly string[] = ['public', 'solana-swap', 'solana-pool', 'solana-composition'];
+/** A Solana composition whose swap is reconciled and bound, and whose position has no transaction yet. */
+function awaitsPosition(source: ExecutionControlsState['source']): boolean {
+  if (source.kind !== 'solana-composition') return false;
+  const v = source.state.record;
+  return Boolean(v && v.record.binding && (v.phase === 'BOUND' || v.phase === 'CONSUMING' && !v.liquidity?.attempt));
+}
 /** `processing` (UX-003): simulating or waiting for the wallet; the CTA stays in place as a locked, active button. */
 export type CanvasAction = { kind: 'simulate' | 'approve' | 'execute' | 'continue' | 'recover' | 'status'; label: string; disabled: boolean; processing?: true };
 /** Presentation only. Authority remains in Review and the existing execution/recovery capabilities. */
@@ -19,15 +26,17 @@ export function projectCanvasAction(props: ExecutionControlsState, controls: {
     if (controls.canContinue) return { kind: 'continue', label: props.execution.nextLabel ?? 'Continue to wallet', disabled: false };
     if (controls.canCheck) return { kind: 'recover', label: progress.restored || progress.state === 'uncertain' ? 'Recover execution' : props.recovery?.recordOnly ? 'Refresh status' : props.recovery ? 'Check status' : 'Check confirmation', disabled: false };
     // BUILD-FIX-UX-001: a public swap whose wallet request was declined before submission submitted nothing; starting over needs a fresh
-    // quote, Review and wallet confirmation and cannot repeat anything (its record stays saved).
-    if (props.source.kind === 'public' && nothingSubmitted(progress)) return { kind: 'simulate', label: 'Simulate again', disabled: Boolean(props.invalidWorkflow || props.source.state.busy) };
+    // quote, Review and wallet confirmation and cannot repeat anything (its record stays saved). The Solana runs record the same
+    // pre-submission outcome (declined, wallet error, changed or stale bytes refused before any broadcast) and recover the same way.
+    if (FRESH_SIMULATION_AFTER_NOTHING_SENT.includes(props.source.kind) && nothingSubmitted(progress)) return { kind: 'simulate', label: 'Simulate again', disabled: Boolean(props.invalidWorkflow || props.source.state.busy) };
     // A confirmed prefix can need a fresh quote/Review before its still-unattempted suffix.
     // Never offer simulation as a retry for an unresolved submitted operation.
     const unresolved = progress.steps.some(step => step.operations.some(operation => !['waiting', 'confirmed', 'cancelled'].includes(operation.state)));
     if (progress.state === 'active' && !progress.busy && !unresolved && !props.recovery?.contextIssue) {
       const review = projectReview(props.workflow, props.context, props.source, props.authorization, props.wallet, now, props.invalidWorkflow);
       if (review.canApprove) return { kind: 'approve', label: 'Approve & Continue', disabled: false };
-      if (review.status !== 'approved') return { kind: 'simulate', label: 'Simulate again', disabled: Boolean(props.invalidWorkflow) };
+      // P0: after a reconciled swap, the composition's next action prepares the position's own fresh Review (read-only); the swap is never offered again.
+      if (review.status !== 'approved') return { kind: 'simulate', label: awaitsPosition(props.source) ? 'Continue to liquidity' : 'Simulate again', disabled: Boolean(props.invalidWorkflow) };
     }
     return { kind: 'status', label: progress.state === 'complete' ? 'Execution completed' : progress.state === 'uncertain' || progress.restored && !isFinalExecutionResult(progress) ? 'Recover execution' : progress.busy ? 'Reconciling…' : progress.label, disabled: true };
   }

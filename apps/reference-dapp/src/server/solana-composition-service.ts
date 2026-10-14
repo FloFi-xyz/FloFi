@@ -191,8 +191,9 @@ export function createSolanaCompositionService(input: { rpc: SolanaRpc; storage:
     async submitSwap(id: string, signedTransaction: string): Promise<SolanaCompositionView> { return locked(idCheck(id), async () => {
       const record = await sync(await load(id));
       if (boundCompositionPhase(record) !== 'PRODUCING') fail(`${X}_WALLET_HANDOFF_NOT_AUTHORIZED`);
-      await input.swap.submit(record.producerRunId, signedTransaction);
-      return settle(record);
+      const swap = await input.swap.submit(record.producerRunId, signedTransaction);
+      // A refused handoff (changed, mis-signed or stale bytes) sent nothing; the run keeps the step's reason for the owner.
+      return settle(record, swap.attempt?.state === 'CANCELLED' ? swap.error : null);
     }); },
     /** Position step: a fresh simulation with the verified bound amount and fresh pool state, as its own Review. */
     async prepareLiquidity(id: string, ownerInput: string, workflow: SemanticWorkflow, positionMint: string): Promise<SolanaCompositionView> { return locked(idCheck(id), async () => {
@@ -228,8 +229,8 @@ export function createSolanaCompositionService(input: { rpc: SolanaRpc; storage:
     async submitLiquidity(id: string, signedTransaction: string): Promise<SolanaCompositionView> { return locked(idCheck(id), async () => {
       const record = await sync(await load(id));
       if (boundCompositionPhase(record) !== 'CONSUMING') fail(`${X}_WALLET_HANDOFF_NOT_AUTHORIZED`);
-      await input.liquidity.submit(latestLiquidity(record)!, signedTransaction);
-      return settle(record);
+      const lp = await input.liquidity.submit(latestLiquidity(record)!, signedTransaction);
+      return settle(record, lp.attempt?.state === 'CANCELLED' ? lp.error : null);
     }); },
     /** The wallet returned no signed bytes for the current step: no transaction can exist for it. */
     async walletFailure(id: string, failure: SolanaCompositionDiagnostic): Promise<SolanaCompositionView> { return locked(idCheck(id), async () => {

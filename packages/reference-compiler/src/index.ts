@@ -48,6 +48,7 @@ export * from './supply.js';
 
 export * from './solana.js';
 export * from './solana-swap.js';
+export * from './solana-wallet-change.js';
 export * from './jupiter.js';
 export * from './jupiter-mock.js';
 export * from './borrow.js';

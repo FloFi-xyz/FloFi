@@ -4,7 +4,7 @@ import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Locator, Page } from '@playwright/test';
-import { createMockedSolanaWallet } from '@defi-workflow-engine/reference-compiler';
+import { appendMockedWalletGuards, applyMockedPhantomPriorityFee, createMockedSolanaWallet } from '@defi-workflow-engine/reference-compiler';
 
 /** MOCKED Wallet Standard wallet. Its disposable key lives only in this test process's memory. */
 export async function resetJupiterHarness(options: Record<string, unknown> = {}, funding: { lamports?: string; usdc?: string } = {}) {
@@ -18,9 +18,18 @@ export async function jupiterControl(body: Record<string, unknown>): Promise<unk
   const response = await fetch('http://127.0.0.1:8551/control', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
   return (await response.json() as { result: unknown }).result;
 }
+/**
+ * `guard`: the wallet appends Lighthouse guard instructions to its first `guard` transactions before signing them (an unknown modification).
+ * `phantom`: the modification captured from Phantom on Devnet: SetComputeUnitPrice inserted when the transaction sets no price.
+ */
 export async function installSolanaWallet(page: Page, wallet: ReturnType<typeof createMockedSolanaWallet>, behavior: { reject?: boolean; rejectAfter?: number; modify?: string; pause?: boolean; chains?: string[]; decoys?: { name: string; chains: string[] }[];
-  signMessage?: boolean } = {}) {
-  await page.exposeFunction('grylooJupiterTestSign', async (unsigned: string) => behavior.modify ? wallet.sign(behavior.modify) : wallet.sign(unsigned));
+  signMessage?: boolean; guard?: number; phantom?: boolean } = {}) {
+  let guarded = 0;
+  await page.exposeFunction('grylooJupiterTestSign', async (unsigned: string) => {
+    if (behavior.modify) return wallet.sign(behavior.modify);
+    if (guarded < (behavior.guard ?? 0)) { guarded++; return wallet.sign(appendMockedWalletGuards(unsigned)); }
+    return wallet.sign(behavior.phantom ? applyMockedPhantomPriorityFee(unsigned) : unsigned);
+  });
   // BUILD-MCP-002: optional Sign-In With Solana support (Wallet Standard `solana:signMessage`), signed in this test process only.
   if (behavior.signMessage) await page.exposeFunction('grylooSolanaTestSignMessage', async (base64: string) =>
     Buffer.from(wallet.signMessage(Uint8Array.from(Buffer.from(base64, 'base64')))).toString('base64'));

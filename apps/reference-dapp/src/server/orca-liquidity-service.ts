@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { isAbsolute } from 'node:path';
 import { validateAuthoringWorkflow, createBaseSepoliaReviewContext } from '@defi-workflow-engine/reference-linter';
 import { ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY, assertOrcaLiquidityReview, inspectOrcaPosition, orcaLiquidityIntentProfile, readOrcaLiquidityPrice, simulateOrcaLiquidity,
-  solanaAddress, verifySignedOrcaLiquidityTransaction, type OrcaLiquidityOperation, type OrcaLiquidityProfile, type SolanaRpc } from '@defi-workflow-engine/reference-compiler';
+  describeSolanaWalletChange, solanaAddress, verifySignedOrcaLiquidityTransaction, type OrcaLiquidityOperation, type OrcaLiquidityProfile, type SolanaRpc, type SolanaWalletChange } from '@defi-workflow-engine/reference-compiler';
 import { createOrcaLiquidityRun, orcaLiquidityAttemptResolved, orcaLiquidityTransition, prepareOrcaLiquidityAttempt, recordOrcaLiquiditySignature,
   solanaSwapObservationDecision, validateOrcaLiquidityRun, createFileExecutionStorage, logMissing, utf8, ORCA_LIQUIDITY_ID, type ExecutionStorage, type OrcaLiquidityRun,
   type OrcaLiquidityProvenance } from '@defi-workflow-engine/reference-executor';
@@ -22,7 +22,8 @@ import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts'
  * creates a second one; the fully signed bytes are persisted before the single broadcast; ambiguous submissions are
  * only ever observed, never resubmitted.
  */
-export type OrcaLiquidityWalletDiagnostic = { stage: 'CONNECT' | 'SIGN' | 'PREFLIGHT'; code: string; error: unknown };
+/** `change`: what the wallet altered in a refused transaction (public keys, counts and hashes only; never its bytes or signatures). */
+export type OrcaLiquidityWalletDiagnostic = { stage: 'CONNECT' | 'SIGN' | 'PREFLIGHT'; code: string; error: unknown; change?: SolanaWalletChange };
 export type OrcaLiquidityRecord = OrcaLiquidityRun & { observations: OrcaLiquidityObservation[]; evidence: ReturnType<typeof buildOrcaLiquidityEvidence> | null;
   error: string | null; evidenceClass: OrcaLiquidityEvidenceClass; notSubmitted?: boolean; submissionError?: string; walletDiagnostic?: OrcaLiquidityWalletDiagnostic };
 export type OrcaPositionEntry = { positionMint: string; runs: { id: string; operation: OrcaLiquidityOperation; state: string | null; verdict: string; signature: string | null }[];
@@ -205,8 +206,11 @@ export function createOrcaLiquidityService(input: { rpc: SolanaRpc; journalDir?:
       } catch (cause) {
         const failure = code(cause, `${X}_TRANSACTION_CHANGED`);
         // Gryloo never broadcasts modified, mis-signed or stale bytes; the reviewed blockhash bounds any copy's validity.
+        // The refusal keeps a description of what the wallet changed, so the owner sees the real reason; the bytes are not kept.
+        let change: SolanaWalletChange | undefined;
+        if (failure === `${X}_TRANSACTION_CHANGED`) try { change = describeSolanaWalletChange(record.review.message, signedTransaction); } catch { change = undefined; }
         return save({ ...record, ...orcaLiquidityTransition(record, 'CANCELLED'), authorization: null, notSubmitted: true, error: failure, submissionError: failure,
-          walletDiagnostic: { stage: 'SIGN', code: failure, error: { message: failure } } });
+          walletDiagnostic: { stage: 'SIGN', code: failure, error: { message: failure }, ...change ? { change } : {} } });
       }
       const submitting = await save({ ...record, ...recordOrcaLiquiditySignature(record, signed), error: null });
       try {

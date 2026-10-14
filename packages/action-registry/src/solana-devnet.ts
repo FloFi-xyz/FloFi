@@ -40,6 +40,11 @@ export const ORCA_WHIRLPOOLS_DEVNET = Object.freeze({
   /** Anchor sha256("global:swap_v2")[0..8] and sha256("event:Traded")[0..8]. */
   swapV2Discriminator: '2b04ed0b1ac91e62', tradedEventDiscriminator: 'e1ca49af932ba096',
   maximumSlippageBps: 300, reviewTtlSeconds: 60, baseFeeLamports: '5000', maximumComputeUnits: 400_000,
+  /**
+   * P0: the swap carries its own reviewed compute-unit price. A transaction without one is changed by wallets that add a priority fee
+   * before signing (observed: Phantom inserts SetComputeUnitPrice), and the exact-byte check then refuses it. Micro-lamports per compute unit.
+   */
+  computeUnitPriceMicroLamports: '100000',
 });
 export function solanaDevnetTokenByMint(mint: string): SolanaDevnetToken | null {
   return Object.values(SOLANA_DEVNET_TOKENS).find(token => token.mint === mint) ?? null;

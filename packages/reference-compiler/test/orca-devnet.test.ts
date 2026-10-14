@@ -72,12 +72,15 @@ describe('Orca Devnet simulation, Review and signature binding (MOCKED loopback)
     const { env, wallet } = setup(), wf = workflow('SOL', '100000000', 50);
     const review = await simulateOrcaDevnetSwap(wf, wallet.owner, env.rpc, Date.parse('2026-10-01T18:00:00Z'));
     const quoted = env.quoteFor(true, 100_000_000n);
-    expect(review).toMatchObject({ format: 'gryloo.orca-devnet-review.v1', cluster: 'devnet', provider: 'Orca Whirlpools', amount: '100000000', estimatedFeeLamports: '5000',
+    // P0: the reviewed message sets its own compute-unit price, so the fee is the base fee plus that priority fee on the requested limit.
+    const fee = (5000n + (BigInt(review.computeUnitLimit) * 100_000n + 999_999n) / 1_000_000n).toString();
+    expect(review).toMatchObject({ format: 'gryloo.orca-devnet-review.v1', cluster: 'devnet', provider: 'Orca Whirlpools', amount: '100000000', estimatedFeeLamports: fee, computeUnitPrice: '100000',
       quote: { outAmount: quoted.toString(), otherAmountThreshold: (quoted * 9_950n / 10_000n).toString(), slippageBps: 50 } });
-    expect(review.simulationResult).toMatchObject({ inputSpent: '100000000', outputReceived: quoted.toString(), feeLamports: '5000' });
+    expect(review.simulationResult).toMatchObject({ inputSpent: '100000000', outputReceived: quoted.toString(), feeLamports: fee });
     expect(review.simulatedTrade).toMatchObject({ whirlpool: profile.pool.address, aToB: true, inputAmount: '100000000', outputAmount: quoted.toString() });
     const instructions = decompileMessageV0(parseMessageV0(fromBase64(review.message)), {});
-    expect(instructions.map(i => i.programId)).toEqual([profile.programs.computeBudget, profile.programs.associatedToken, profile.programs.system, profile.programs.token,
+    expect(instructions.slice(0, 2).map(i => [...i.data])).toEqual([[2, ...new Uint8Array(new Uint32Array([review.computeUnitLimit]).buffer)], [3, 0xa0, 0x86, 0x01, 0, 0, 0, 0, 0]]);
+    expect(instructions.map(i => i.programId)).toEqual([profile.programs.computeBudget, profile.programs.computeBudget, profile.programs.associatedToken, profile.programs.system, profile.programs.token,
       profile.programs.associatedToken, profile.programs.whirlpool, profile.programs.token]);
     const swap = instructions.find(i => i.programId === profile.programs.whirlpool)!;
     expect(decodeOrcaSwapV2(swap.data)).toMatchObject({ amount: '100000000', otherAmountThreshold: review.quote.otherAmountThreshold, amountSpecifiedIsInput: true, aToB: true });

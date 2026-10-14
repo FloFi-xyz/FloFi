@@ -3,14 +3,15 @@ import { randomBytes } from 'node:crypto';
 import { isAbsolute } from 'node:path';
 import { validateAuthoringWorkflow, createBaseSepoliaReviewContext } from '@defi-workflow-engine/reference-linter';
 import { simulateJupiterSwap, assertJupiterReview, verifySignedJupiterTransaction, simulateOrcaDevnetSwap, assertOrcaDevnetReview, verifySignedOrcaDevnetTransaction,
-  requireSolanaSwapRuntime, solanaAddress, type JupiterHttp, type JupiterReview, type OrcaDevnetReview, type SolanaRpc, type SolanaSwapReview } from '@defi-workflow-engine/reference-compiler';
+  describeSolanaWalletChange, requireSolanaSwapRuntime, solanaAddress, type JupiterHttp, type SolanaWalletChange, type JupiterReview, type OrcaDevnetReview, type SolanaRpc, type SolanaSwapReview } from '@defi-workflow-engine/reference-compiler';
 import { JUPITER_SOLANA_MAINNET, ORCA_WHIRLPOOLS_DEVNET, type SolanaSwapRuntime } from '@defi-workflow-engine/action-registry';
 import { createSolanaSwapRun, prepareSolanaSwapAttempt, recordSolanaSwapSignature, solanaSwapTransition, solanaSwapObservationDecision, solanaSwapAttemptResolved,
   validateSolanaSwapRun, createFileExecutionStorage, logMissing, utf8, type ExecutionStorage, type SolanaSwapProvenance, type SolanaSwapRun } from '@defi-workflow-engine/reference-executor';
 import { reconcileSolanaSwapAttempt, buildSolanaSwapEvidence, classifySolanaSwapEvidence, type JupiterObservation, type SolanaSwapEvidenceClass } from '@defi-workflow-engine/reference-reconciler';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 
-export type JupiterWalletDiagnostic = { stage: 'CONNECT' | 'SIGN' | 'PREFLIGHT'; code: string; error: unknown };
+/** `change`: what the wallet altered in a refused transaction (public keys, counts and hashes only; never its bytes or signatures). */
+export type JupiterWalletDiagnostic = { stage: 'CONNECT' | 'SIGN' | 'PREFLIGHT'; code: string; error: unknown; change?: SolanaWalletChange };
 export type SolanaSwapWalletDiagnostic = JupiterWalletDiagnostic;
 export type JupiterRecord = SolanaSwapRun & { observations: JupiterObservation[]; evidence: ReturnType<typeof buildSolanaSwapEvidence> | null; error: string | null;
   evidenceClass: SolanaSwapEvidenceClass; notSubmitted?: boolean; submissionError?: string; walletDiagnostic?: JupiterWalletDiagnostic };
@@ -153,8 +154,11 @@ export function createSolanaSwapService(input: { adapter: SolanaSwapAdapter; rpc
       } catch (cause) {
         const failure = code(cause, `${X}_TRANSACTION_CHANGED`);
         // Gryloo never broadcasts modified, mis-signed or stale bytes; the reviewed blockhash bounds any copy's validity.
+        // The refusal keeps a description of what the wallet changed, so the owner sees the real reason; the bytes are not kept.
+        let change: SolanaWalletChange | undefined;
+        if (failure === `${X}_TRANSACTION_CHANGED`) try { change = describeSolanaWalletChange(record.review.message, signedTransaction, record.review.lookupTables); } catch { change = undefined; }
         return save({ ...record, ...solanaSwapTransition(record, 'CANCELLED'), authorization: null, notSubmitted: true, error: failure, submissionError: failure,
-          walletDiagnostic: { stage: 'SIGN', code: failure, error: { message: failure } } });
+          walletDiagnostic: { stage: 'SIGN', code: failure, error: { message: failure }, ...change ? { change } : {} } });
       }
       const submitting = await save({ ...record, ...recordSolanaSwapSignature(record, signed), error: null });
       try {
