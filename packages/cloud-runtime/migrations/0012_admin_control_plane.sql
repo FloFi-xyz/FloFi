@@ -1,8 +1,8 @@
 -- SPDX-License-Identifier: AGPL-3.0-only
 -- BUILD-ADMIN-001 0012: the private FloFi Admin control plane, additive. Nothing here is financial authority: an administrator can read
 -- operational data and tune the Copilot interpreter; no table below can sign, submit, approve or change an execution. Every row is
--- tenant-scoped. No key, signature, secret, prompt or transcript is stored. Existing tables keep their meaning; the only change to an
--- existing table is one read index on execution_runs for time-ranged analytics.
+-- tenant-scoped. No key, signature, secret, prompt or transcript is stored. Existing tables keep their meaning; the only changes to
+-- existing tables are two read indexes for time-ranged analytics (execution_runs, automation_evaluations).
 
 -- 1. Administrators: explicit grants to a proven EVM wallet, made only by the operator CLI (database access). A wallet session never
 --    implies a grant. Identity and role never change; a grant only moves ACTIVE → REVOKED (re-granting creates a new principal).
@@ -135,5 +135,6 @@ CREATE TABLE admin_run_facts (
 );
 CREATE INDEX admin_run_facts_composition ON admin_run_facts (tenant_id, composition_of) WHERE composition_of IS NOT NULL;
 
--- 6. Time-ranged analytics read the run projection by creation time.
+-- 6. Time-ranged analytics read the run projection by creation time and the (high-volume) automation evaluation history by time.
 CREATE INDEX execution_runs_created ON execution_runs (tenant_id, created_at);
+CREATE INDEX automation_evaluations_at ON automation_evaluations (tenant_id, at);

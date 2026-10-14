@@ -116,6 +116,10 @@ The Robinhood Chain Testnet endpoint has no override.
 | `OPENAI_COPILOT_TEMPERATURE`, `OPENAI_COPILOT_TIMEOUT_MS`, `OPENAI_COPILOT_MAX_OUTPUT_TOKENS`, `OPENAI_COPILOT_REASONING_EFFORT` | Tuning (an invalid value makes the Copilot unavailable) | no | optional | optional | 0 / 20000 / 4096 / unset |
 | `FLOFI_COPILOT_TELEMETRY` | `log` / `off`: one metadata line per live request, never content | no | optional | optional | `log` |
 | `FLOFI_COPILOT_LIVE_SMOKE` | Owner-only local smoke test of a live model | no | — | — | — |
+| `FLOFI_COPILOT_RUNTIME_CONFIG` | BUILD-ADMIN-001 break-glass: `disabled` ignores the administrator's versioned Copilot settings and uses only `OPENAI_COPILOT_*` | no | optional | optional | runtime settings apply where platform state exists |
+
+BUILD-ADMIN-001: where PostgreSQL platform state exists, an administrator's versioned settings (`/admin` → AI Settings) override the
+`OPENAI_COPILOT_*` tuning and model per request without a redeploy; mode and key stay environment-only. See [ADMIN.md](ADMIN.md).
 
 ## 5b. Remote MCP gateway (BUILD-MCP-001 / BUILD-MCP-002, `POST /api/mcp`, OAuth, `/approve`)
 
@@ -283,6 +287,16 @@ value disables the feature (`DELEGATION_CONFIGURATION_INVALID`); nothing falls b
 The executor is a separate durable work kind (`delegation.execute`). It never shares the AUTOMATION-001 dispatch or the existing
 flows' worker, which keep `WORKER_SUBMISSION_FORBIDDEN`. Startup logs: `delegation.api_enabled` / `delegation.api_disabled` and
 `delegation.worker_enabled` / `delegation.worker_disabled`.
+
+## 5h. Admin console (BUILD-ADMIN-001, `/admin`, `/admin/api/*`) — guide: [ADMIN.md](ADMIN.md)
+
+| Variable | Purpose | Secret | Preview | Prod | Default |
+| --- | --- | --- | --- | --- | --- |
+| `FLOFI_ADMIN` | `enabled` serves the private console (needs `DATABASE_URL` platform state) | no | optional | as chosen | off (`/admin` answers 404) |
+| `FLOFI_ADMIN_SESSION_SECRET` | dedicated key for admin session references and CSRF tokens (32–512 characters); refused when equal to any other FloFi secret | **yes** | with `FLOFI_ADMIN` | with `FLOFI_ADMIN` | — (console off: `ADMIN_SESSION_SECRET_INVALID`) |
+
+Administrators are granted only by the operator CLI (`apps/reference-dapp/backend/admin-cli.ts`, needs `DATABASE_URL` in the operator's
+shell). No Railway variable is needed.
 
 ## 6. Platform-provided (read, never set by hand)
 

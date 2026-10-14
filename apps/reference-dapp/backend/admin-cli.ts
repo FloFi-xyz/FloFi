@@ -10,6 +10,7 @@
  *   list                                                                  every grant (ids, wallet, role, state)
  *   end-sessions                                                          ends every open admin session (grants stay)
  *   audit         [--limit 50]                                            the latest admin audit events (closed codes and ids only)
+ *   index         [--limit 2000]                                          fills the analytics facts cache from executed runs' records (read-only on runs)
  *
  * Environment: DATABASE_URL (the deployment's database). The tenant is explicit: production/local `--tenant default`, a Vercel Preview
  * `--preview-branch <git branch>`. No secret is read or printed. Like `main.ts`, it runs on plain Node: every module it reaches imports

@@ -6,7 +6,10 @@ import { AdminSignOut } from './admin-sign-out';
 /** BUILD-ADMIN-001: the console frame (server component). Navigation is the same for every role; pages enforce permissions themselves. */
 export const ADMIN_NAV = [
   { id: 'overview', href: '/admin', label: 'Overview' },
+  { id: 'workflows', href: '/admin/workflows', label: 'Workflows' },
+  { id: 'automations', href: '/admin/automations', label: 'Automations' },
   { id: 'ai-settings', href: '/admin/ai-settings', label: 'AI Settings' },
+  { id: 'health', href: '/admin/health', label: 'System Health' },
   { id: 'access', href: '/admin/access', label: 'Access & audit' },
 ] as const;
 export type AdminNavId = (typeof ADMIN_NAV)[number]['id'];

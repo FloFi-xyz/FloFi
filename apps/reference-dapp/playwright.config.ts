@@ -106,7 +106,11 @@ if (process.env.GRYLOO_CARD_E2E && !cardHarness) throw new Error('Card E2E permi
 // server gets no journal directory.
 const cloudRuntime = process.env.GRYLOO_CLOUD_RUNTIME_E2E === 'EMBEDDED_LOOPBACK_ONLY';
 if (process.env.GRYLOO_CLOUD_RUNTIME_E2E && !cloudRuntime) throw new Error('Cloud runtime E2E permits only the embedded loopback runtime');
-if (cloudRuntime && !process.env.FLOFI_E2E_DATABASE_URL) {
+// BUILD-ADMIN-001: the private Admin console on the same kind of disposable LOOPBACK database (platform state only; flows stay local). Its
+// session key is random per run; the spec grants administrators through the operator CLI's commands, never through the console.
+const adminHarness = process.env.FLOFI_ADMIN_E2E === 'LOOPBACK_ONLY';
+if (process.env.FLOFI_ADMIN_E2E && !adminHarness) throw new Error('Admin E2E permits only the loopback database');
+if ((cloudRuntime || adminHarness) && !process.env.FLOFI_E2E_DATABASE_URL) {
   const server = new URL(process.env.TEST_DATABASE_URL ?? 'invalid:');
   if (!['127.0.0.1', 'localhost', '[::1]'].includes(server.hostname)) throw new Error('Cloud runtime E2E needs a loopback TEST_DATABASE_URL');
   server.pathname = `/flofi_e2e_${Date.now()}_${process.pid}`;
@@ -210,7 +214,7 @@ if (copilot !== undefined && copilot !== 'off' && copilot !== 'replay') throw ne
 
 export default defineConfig({
   testDir: './e2e',
-  ...(cloudRuntime || mcpHarness ? { globalSetup: './e2e/cloud-runtime-setup.ts' } : {}),
+  ...(cloudRuntime || mcpHarness || adminHarness ? { globalSetup: './e2e/cloud-runtime-setup.ts' } : {}),
   workers: 1,
   fullyParallel: false,
   retries: 0,
@@ -272,6 +276,7 @@ export default defineConfig({
       // The payment provider's server-only App ID is present (payments stay off) so the card spec can prove it is never served.
       ...(cardHarness ? { GRYLOO_CARD_HARNESS: 'MOCKED_LOOPBACK_ONLY', WOOVI_APP_ID: SERVER_ONLY_WOOVI_APP_ID, WOOVI_ENVIRONMENT: 'sandbox' } : {}),
       ...(cloudRuntime ? { FLOFI_RUNTIME: 'embedded', DATABASE_URL: process.env.FLOFI_E2E_DATABASE_URL!, GRYLOO_ROBINHOOD_HARNESS: 'MOCKED_LOOPBACK_ONLY' } : {}),
+      ...(adminHarness ? { DATABASE_URL: process.env.FLOFI_E2E_DATABASE_URL!, FLOFI_ADMIN: 'enabled', FLOFI_ADMIN_SESSION_SECRET: randomBytes(32).toString('hex') } : {}),
       ...mcpServerEnv, ...swapReadEnv,
       ...channelServerEnv, ...automationServerEnv, ...delegationServerEnv,
       GRYLOO_MODE_A: 'fork', GRYLOO_MODE_A_PROFILE: join(runtime, 'profile.json'), GRYLOO_MODE_A_JOURNAL: join(runtime, 'journal') },

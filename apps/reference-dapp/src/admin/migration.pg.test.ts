@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /**
  * BUILD-ADMIN-001: migration 0012 in the shipped sequence. A populated 0011 database reaches the current schema with the normal runner;
- * 0012 is additive — every earlier table keeps its columns, constraints, indexes and triggers, except one new read index on
- * execution_runs; existing rows survive; a second run applies nothing. The database itself enforces the console's invariants: grants
+ * 0012 is additive — every earlier table keeps its columns, constraints, indexes and triggers; only two read indexes are added
+ * (execution_runs, automation_evaluations); existing rows survive; a second run applies nothing. The database itself enforces the console's invariants: grants
  * are permanent and only move ACTIVE → REVOKED, one ACTIVE grant per wallet, sessions only end once, audit events and settings versions
  * are append-only, settings versions are gapless.
  */
@@ -35,7 +35,7 @@ describe('BUILD-ADMIN-001 migration 0012 (shipped)', () => {
     expect(SHIPPED_MIGRATIONS.at(-1)).toEqual({ version: 12, name: 'admin_control_plane', sha256: all.at(-1)!.sha256 });
   });
 
-  it('upgrades a populated 0011 database additively; only one read index is added to an existing table', async () => {
+  it('upgrades a populated 0011 database additively; only two read indexes are added to existing tables', async () => {
     const t = await createTestDatabase({ migrated: false });
     try {
       const all = await loadMigrations();
@@ -55,7 +55,9 @@ describe('BUILD-ADMIN-001 migration 0012 (shipped)', () => {
         const added = after[table]!.filter(item => !items.includes(item)), removed = items.filter(item => !after[table]!.includes(item));
         expect(removed, table).toEqual([]);
         expect(added, table).toEqual(table === 'execution_runs'
-          ? ['index execution_runs_created CREATE INDEX execution_runs_created ON public.execution_runs USING btree (tenant_id, created_at)'] : []);
+          ? ['index execution_runs_created CREATE INDEX execution_runs_created ON public.execution_runs USING btree (tenant_id, created_at)']
+          : table === 'automation_evaluations'
+            ? ['index automation_evaluations_at CREATE INDEX automation_evaluations_at ON public.automation_evaluations USING btree (tenant_id, at)'] : []);
       }
       expect((await t.db.query(`SELECT status FROM execution_runs WHERE run_id = 'run-1'`)).rows).toEqual([{ status: 'RECONCILED' }]);
     } finally { await t.drop(); }
