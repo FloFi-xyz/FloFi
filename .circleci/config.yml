@@ -1,0 +1,207 @@
+# CircleCI manual-only FloFi backup; intentionally no deployment jobs.
+# Mirror source: .github/workflows/governance.yml and contracts.yml.
+# Refresh the mirror when the Actions contracts workflow changes.
+version: 2.1
+jobs:
+  governance:
+    docker:
+      - image: cimg/node:24.21.0
+    resource_class: small
+    steps:
+      - checkout
+      - run:
+          name: "Governance gate"
+          command: |
+            set -euo pipefail
+            export GOVERNANCE_BRANCH="${CIRCLE_BRANCH:-circleci-project-setup}"
+            export GOVERNANCE_EVENT=push
+            export PYTHONDONTWRITEBYTECODE=1
+            python3 -m unittest discover -s scripts -p 'test_governance_lite.py'
+            python3 -m unittest discover -s scripts -p 'test_ci_*.py'
+            python3 scripts/governance_lite.py
+            git diff --check
+            if ! git rev-parse HEAD^1 >/dev/null 2>&1; then git fetch --deepen=2 origin || true; fi
+            git diff --check HEAD^1 HEAD
+  certification:
+    docker:
+      - image: cimg/node:24.21.0-browsers
+      - image: postgres:18.6-bookworm@sha256:3725f4e2499eef5134592b3b4ab79a543ed7f8e533b05b5b637af926630f6650
+        environment:
+          POSTGRES_USER: flofi
+          POSTGRES_HOST_AUTH_METHOD: trust
+    resource_class: large
+    environment:
+      RUNNER_TEMP: /tmp/flofi-ci
+      FLOFI_CI_ARCHIVE_CACHE: /tmp/flofi-ci/archives
+      GITHUB_PATH: /tmp/flofi-ci/github-path
+      GITHUB_ENV: /tmp/flofi-ci/github-env
+      GITHUB_STEP_SUMMARY: /tmp/flofi-ci/summary.md
+      GITHUB_RUN_ID: circleci
+      GITHUB_RUN_ATTEMPT: "1"
+      TURBO_TELEMETRY_DISABLED: "1"
+      DO_NOT_TRACK: "1"
+      COREPACK_ENABLE_AUTO_PIN: "0"
+      COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+      NEXT_TELEMETRY_DISABLED: "1"
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+      FLOFI_E2E_APP_PORT: "3100"
+    steps:
+      - checkout
+      - run:
+          name: "Prepare disposable workspace and PostgreSQL"
+          command: |
+            set -euo pipefail
+            mkdir -p "$RUNNER_TEMP" "$FLOFI_CI_ARCHIVE_CACHE"
+            touch "$GITHUB_PATH" "$GITHUB_ENV" "$GITHUB_STEP_SUMMARY"
+            for attempt in $(seq 1 60); do
+              if (echo >/dev/tcp/127.0.0.1/5432) >/dev/null 2>&1; then break; fi
+              sleep 1
+            done
+            (echo >/dev/tcp/127.0.0.1/5432) >/dev/null 2>&1 || { echo 'PostgreSQL unavailable' >&2; exit 1; }
+      - restore_cache:
+          keys:
+            - flofi-circleci-archives-v1-{{ checksum "scripts/bootstrap-ci.py" }}
+      - run:
+          name: "Bootstrap exact approved Node and pnpm"
+          command: |
+            set -euo pipefail
+            source scripts/ci-observe.sh 'Toolchain bootstrap'
+            python3 scripts/bootstrap-ci.py
+            toolbin="$(tail -n 1 "$GITHUB_PATH")"
+            test -x "$toolbin/node"
+            test -x "$toolbin/pnpm"
+            export PATH="$toolbin:$PATH"
+            printf 'export PATH="%s:$PATH"\n' "$toolbin" >> "$BASH_ENV"
+            test "$(node --version)" = "v24.21.0"
+            test "$(pnpm --version)" = "11.22.0"
+
+      - run:
+          name: "Print exact verified toolchain before installation"
+          command: |
+            set -euo pipefail
+            source scripts/ci-observe.sh 'Toolchain identity'
+            git --version
+            python3 --version
+            node --version
+            node -p "process.platform+' '+process.arch"
+            pnpm --version
+            node -p "JSON.parse(require('fs').readFileSync('package.json')).packageManager"
+            test "$(node --version)" = "v24.21.0"
+            test "$(pnpm --version)" = "11.22.0"
+      - run:
+          name: "Frozen install without lifecycle scripts"
+          command: |
+            set -euo pipefail
+            source scripts/ci-observe.sh 'Frozen dependency install'
+            pnpm install --frozen-lockfile --ignore-scripts
+      - run:
+          name: "Verify every registry integrity, license and release age"
+          command: |
+            set -euo pipefail
+            source scripts/ci-observe.sh 'Dependency integrity license and age'
+            python3 scripts/bootstrap-ci.py --verify-dependencies
+      - run:
+          name: "Dependency audit"
+          command: |
+            set -euo pipefail
+            source scripts/ci-observe.sh 'Dependency audit'
+            pnpm audit --audit-level low
+      - run:
+          name: "Typecheck"
+          command: |
+            set -euo pipefail
+            source scripts/ci-observe.sh Typecheck
+            # Keep Turbo concurrency at 2 on the shared 8 GiB runner.
+            pnpm typecheck
+      - run:
+          name: "Lint"
+          command: |
+            set -euo pipefail
+            source scripts/ci-observe.sh Lint
+            pnpm lint
+            pnpm exec eslint scripts/guarded-release-browser.mjs
+      - run:
+          name: "Production build"
+          command: |
+            set -euo pipefail
+            source scripts/ci-observe.sh 'Production build'
+            pnpm build
+      - run:
+          name: "Schema drift"
+          command: |
+            set -euo pipefail
+            source scripts/ci-observe.sh 'Schema drift'
+            pnpm schemas:check
+      - run:
+          name: "Unit and contract tests and exported API checks"
+          command: |
+            set -euo pipefail
+            source scripts/ci-observe.sh 'Unit and contract tests'
+            pnpm test
+            python3 scripts/summarize-screenshot-diffs.py --self-test
+            test -f packages/reference-linter/dist/index.js
+            test -f packages/reference-linter/dist/index.d.ts
+            pnpm --filter @defi-workflow-engine/reference-linter exec node --input-type=module -e "const m = await import('@defi-workflow-engine/reference-linter'); for (const key of ['lintWorkflow','validateAuthoringWorkflow','createReviewContext','digestArtifact','digestRawResponse','digestSelfCheck','reviewMockedArtifactChain','mockedSwapOutputs','mockedFixtureBytes','collectBaseTranscript','deriveBaseObservation','reviewBaseObservation']) if (typeof m[key] !== 'function') throw new Error('Missing linter export: '+key); if (!Object.isFrozen(m.MOCKED_CHAIN_PROFILE)) throw new Error('Mocked chain profile must be frozen'); if (!Object.isFrozen(m.BASE_OBSERVATION_PROFILE)) throw new Error('Base observation profile must be frozen'); await m.digestSelfCheck()"
+      - run:
+          name: "PostgreSQL durability, concurrency, recovery and tenant-isolation suites (disposable loopback database)"
+          command: |
+            set -euo pipefail
+            source scripts/ci-observe.sh 'PostgreSQL'
+            export TEST_DATABASE_URL="postgres://flofi@127.0.0.1:5432/postgres"
+            pnpm test:postgres
+      - run:
+          name: "Bootstrap exact approved anvil"
+          command: |
+            set -euo pipefail
+            source scripts/ci-observe.sh 'Anvil bootstrap'
+            python3 scripts/bootstrap-anvil.py "$RUNNER_TEMP/gryloo-anvil/foundry-v1.8.3"
+      - run:
+          name: "Offline compatibility gate and fork suite"
+          command: bash .circleci/scripts/ci-fork.sh
+      - run:
+          name: "Bootstrap exact approved headless shell"
+          command: |
+            set -euo pipefail
+            source scripts/ci-observe.sh 'Browser bootstrap'
+            export BUILD002_BROWSER_CACHE="$RUNNER_TEMP/gryloo-playwright/chromium_headless_shell-1243"
+            python3 scripts/bootstrap-playwright.py "$BUILD002_BROWSER_CACHE"
+      - run:
+          name: "Run guarded browser suite"
+          no_output_timeout: 30m
+          command: bash .circleci/scripts/ci-browser.sh
+      - store_artifacts:
+          path: apps/reference-dapp/test-results
+          destination: playwright-results
+      - run:
+          name: "Summarize screenshot differences after a browser failure"
+          when: on_fail
+          command: |
+            set -euo pipefail
+            python3 scripts/summarize-screenshot-diffs.py apps/reference-dapp/test-results
+      - run:
+          name: "Validate and remove ephemeral CycloneDX 1.6 SBOM"
+          command: bash .circleci/scripts/ci-sbom.sh
+      - run:
+          name: "CI timing summary after failure"
+          when: on_fail
+          command: |
+            set -euo pipefail
+            python3 scripts/ci-observe.py summary
+      - run:
+          name: "CI timing summary after success"
+          when: on_success
+          command: |
+            set -euo pipefail
+            python3 scripts/ci-observe.py summary
+      - save_cache:
+          key: flofi-circleci-archives-v1-{{ checksum "scripts/bootstrap-ci.py" }}
+          paths:
+            - /tmp/flofi-ci/archives
+workflows:
+  manual-backup-certification:
+    jobs:
+      - governance
+      - certification:
+          requires:
+            - governance
