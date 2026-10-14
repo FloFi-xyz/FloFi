@@ -5,7 +5,8 @@
  * unreadable store or an invalid stored document fails closed and never falls back to another model.
  */
 import { describe, expect, it } from 'vitest';
-import { channelLiveCopilot, environmentCopilot, publicCopilotCode, resolveCopilotLive, runtimeSettingsEnabled, type CopilotSettingsReader } from './copilot-runtime.ts';
+import { channelLiveCopilot, connectionDropped, environmentCopilot, publicCopilotCode, resolveCopilotLive, runtimeSettingsEnabled,
+  type CopilotSettingsReader } from './copilot-runtime.ts';
 import { COPILOT_SETTINGS_SCHEMA, type CopilotRuntimeSettings } from './copilot-settings.ts';
 
 const env = { FLOFI_COPILOT: 'live', OPENAI_API_KEY: 'sk-test-key', OPENAI_COPILOT_MODEL: 'gpt-4.1-mini', DATABASE_URL: 'postgres://127.0.0.1:1/x' };
@@ -44,6 +45,34 @@ describe('BUILD-ADMIN-001 Copilot settings resolution', () => {
     expect(await resolveCopilotLive(env, 'WEB', version(5, { schema: 'x' }))).toEqual({ ok: false, code: 'COPILOT_CONFIG_INVALID' });
     expect(publicCopilotCode('COPILOT_CONFIG_UNAVAILABLE')).toBe('COPILOT_UNAVAILABLE');
     expect(publicCopilotCode('COPILOT_CONFIG_INVALID')).toBe('COPILOT_NOT_CONFIGURED');
+  });
+  it('repeats a read once, at once, only when its connection dropped — never caching or substituting an answer', async () => {
+    const reads: string[] = [];
+    const flaky = (first: unknown): CopilotSettingsReader => async () => {
+      reads.push('read');
+      if (reads.length === 1) throw first;
+      return version(7, document)();
+    };
+    const dropped = Object.assign(new Error('terminating connection due to administrator command'), { code: '57P01' });
+    expect(await resolveCopilotLive(env, 'WEB', flaky(dropped))).toMatchObject({ ok: true, source: 'RUNTIME', version: 7, settings: { model: 'gpt-5-mini' } });
+    expect(reads.length).toBe(2);
+    reads.length = 0;
+    expect(await resolveCopilotLive(env, 'WEB', flaky(new Error('Connection terminated unexpectedly')))).toMatchObject({ ok: true, version: 7 });
+    reads.length = 0;
+    // A query that failed on a live connection (a missing table, a timeout, a permission) is not repeated.
+    expect(await resolveCopilotLive(env, 'WEB', flaky(Object.assign(new Error('relation does not exist'), { code: '42P01' })))).toEqual({ ok: false, code: 'COPILOT_CONFIG_UNAVAILABLE' });
+    expect(reads.length).toBe(1);
+    reads.length = 0;
+    expect(await resolveCopilotLive(env, 'WEB', flaky(Object.assign(new Error('canceling statement due to statement timeout'), { code: '57014' }))))
+      .toEqual({ ok: false, code: 'COPILOT_CONFIG_UNAVAILABLE' });
+    expect(reads.length).toBe(1);
+    // Two drops in a row fail closed.
+    const down: CopilotSettingsReader = async () => { throw Object.assign(new Error('reset'), { code: 'ECONNRESET' }); };
+    expect(await resolveCopilotLive(env, 'WEB', down)).toEqual({ ok: false, code: 'COPILOT_CONFIG_UNAVAILABLE' });
+    expect([{ code: '08006' }, { code: '08003' }, { code: '57P03' }, { code: 'EPIPE' }, new Error('Client has encountered a connection error and is not queryable')]
+      .map(connectionDropped)).toEqual([true, true, true, true, true]);
+    expect([{ code: 'ECONNREFUSED' }, { code: '28P01' }, { code: '42501' }, new Error('Connection terminated by policy'), null, 'x'].map(connectionDropped))
+      .toEqual([false, false, false, false, false, false]);
   });
   it('applies runtime settings only where platform state exists and the operator has not disabled them', () => {
     expect(runtimeSettingsEnabled(env)).toBe(true);

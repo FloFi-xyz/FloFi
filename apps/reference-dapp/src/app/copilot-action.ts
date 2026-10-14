@@ -4,8 +4,8 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { COPILOT_REPLAY_FORMAT_V2, copilotConfig, copilotTelemetrySink, createCopilotLimiter, createOpenAITransport, createReplayTransport, interpretCopilot,
   interpretCopilotV2, parseCopilotReplay, COPILOT_SERVER_LIMITS, COPILOT_TUNING_DEFAULTS, type CopilotLimiter, type CopilotMode, type CopilotResult, type CopilotResultV2 } from '../server/copilot-service';
-import { hostSettingsReader, logCopilotSettingsFailure, publicCopilotCode, resolveCopilotLive, runtimeSettingsEnabled } from '../server/copilot-runtime';
-import { platformStateHost } from '../server/platform-state-host';
+import { logCopilotSettingsFailure, publicCopilotCode, resolveCopilotLive, runtimeSettingsEnabled } from '../server/copilot-runtime';
+import { webCopilotSettingsReader } from '../server/copilot-settings-source';
 
 /**
  * BUILD-COPILOT-001: Flofi Copilot interpretation. The browser sends only its short clarification thread and receives
@@ -17,7 +17,8 @@ import { platformStateHost } from '../server/platform-state-host';
  * keep the V1 protocol and replay file.
  *
  * BUILD-ADMIN-001: live model settings are resolved per request (`copilot-runtime.ts`): an administrator's versioned settings when
- * this deployment has platform state, otherwise the unchanged `OPENAI_COPILOT_*` bootstrap. Mode and key stay environment-only.
+ * this deployment has platform state, otherwise the unchanged `OPENAI_COPILOT_*` bootstrap. Mode and key stay environment-only. The read
+ * survives a rolling deployment's schema window (`copilot-settings-source.ts`).
  */
 const REPLAY_FILE = join('e2e', 'copilot', 'replay.json');
 const REPLAY_FILE_V2 = join('e2e', 'copilot', 'replay-v2.json');
@@ -31,7 +32,7 @@ function limiter(): CopilotLimiter {
 /** Live settings for this request; invalid tuning or unreadable runtime settings make the Copilot unavailable, never silently different. */
 async function live() {
   // The platform-state pool opens only when a live request needs it (the same pool MCP, Developer and Channels use).
-  const reader = runtimeSettingsEnabled(process.env) ? async () => hostSettingsReader(await platformStateHost(process.env))() : null;
+  const reader = runtimeSettingsEnabled(process.env) ? webCopilotSettingsReader(process.env) : null;
   const resolved = await resolveCopilotLive(process.env, 'WEB', reader);
   if (!resolved.ok) logCopilotSettingsFailure(process.env, resolved.code, 'WEB');
   return resolved;

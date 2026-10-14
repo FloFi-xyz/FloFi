@@ -11,7 +11,9 @@
  *      the environment bootstrap (`OPENAI_COPILOT_*`, unchanged semantics: no default model, invalid tuning → not configured).
  *
  * A stored document that fails validation, or a database that cannot be read, fails closed (the exact grammar keeps working); it never
- * falls back to the environment, because that would silently swap the model an administrator chose.
+ * falls back to the environment, because that would silently swap the model an administrator chose. A read that failed only because its
+ * pooled connection dropped (a restarting or scaled-to-zero server) is repeated once at once, on a fresh connection: the same read, the
+ * same answer, never a cached or different one.
  */
 import { copilotConfig, copilotTuning } from './copilot-service.ts';
 import { effectiveSettings, environmentSettings, validateSettingsDocument, type CopilotRuntimeSettings, type CopilotScope } from './copilot-settings.ts';
@@ -42,13 +44,24 @@ export function environmentCopilot(env: Env): ResolvedCopilot {
     maxOutputTokens: tuning.maxOutputTokens, reasoningEffort: tuning.reasoningEffort, timeoutMs: tuning.timeoutMs }) };
 }
 
+/** A failure of the connection itself (dropped, reset, server restarting), not of the query: worth exactly one immediate second read. */
+export function connectionDropped(error: unknown): boolean {
+  const code = error && typeof error === 'object' ? (error as { code?: unknown }).code : undefined;
+  if (typeof code === 'string') return /^08[0-9A-Z]{3}$/.test(code) || /^57P0[1-3]$/.test(code) || code === 'ECONNRESET' || code === 'EPIPE';
+  return error instanceof Error && /^(?:Connection terminated(?: unexpectedly)?|Client has encountered a connection error and is not queryable)$/.test(error.message);
+}
+
 /** The settings for one live request in `scope`. Call it per request; it holds no state. */
 export async function resolveCopilotLive(env: Env, scope: CopilotScope, reader: CopilotSettingsReader | null): Promise<ResolvedCopilot> {
   const apiKey = copilotApiKey(env);
   if (!apiKey) return { ok: false, code: 'COPILOT_NOT_CONFIGURED' };
   if (!reader || env.FLOFI_COPILOT_RUNTIME_CONFIG === 'disabled') return environmentCopilot(env);
   let active: SettingsVersion | null;
-  try { active = await reader(); } catch { return { ok: false, code: 'COPILOT_CONFIG_UNAVAILABLE' }; }
+  try { active = await reader(); }
+  catch (error) {
+    if (!connectionDropped(error)) return { ok: false, code: 'COPILOT_CONFIG_UNAVAILABLE' };
+    try { active = await reader(); } catch { return { ok: false, code: 'COPILOT_CONFIG_UNAVAILABLE' }; }
+  }
   if (!active || active.document === null) {
     const bootstrap = environmentCopilot(env);
     return bootstrap.ok ? { ...bootstrap, version: active?.version ?? null } : bootstrap;
