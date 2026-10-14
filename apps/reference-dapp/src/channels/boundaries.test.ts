@@ -100,10 +100,14 @@ describe('BUILD-CHANNELS-001 channel boundaries', () => {
       expect(text, file).not.toMatch(/\b(?:claimApproval|applyApproval|shareApproval)\(|runtime\.(?:run|journal)\(|callFlow\(/);
     }
     // Channel code reaches no execution service: only the copilot boundary, the runtime host, the deployment facts, (BUILD-WORKFLOW-
-    // VISUAL-PRESENTATION-001) FloFi's shared workflow renderer and (BUILD-BASE-001) the read-only authoring catalogs.
+    // VISUAL-PRESENTATION-001) FloFi's shared workflow renderer, (BUILD-BASE-001) the read-only authoring catalogs and (BUILD-ADMIN-001)
+    // the Copilot's runtime model-settings lookup, which the wiring passes to the interpreter (a read of `admin_settings_versions`; no flow).
     const servers = [...channelFiles].flatMap(file => importsOf(join(app, file)).map(([, s]) => s.startsWith('.') ? target(join(app, file), s) : s)).filter(t => t.startsWith('src/server/'));
-    expect([...new Set(servers)].sort()).toEqual(['src/server/authoring-catalogs.ts', 'src/server/copilot-service.ts', 'src/server/deployment.ts',
-      'src/server/platform-state-host.ts', 'src/server/workflow-visual-image.ts']);
+    expect([...new Set(servers)].sort()).toEqual(['src/server/authoring-catalogs.ts', 'src/server/copilot-runtime.ts', 'src/server/copilot-service.ts',
+      'src/server/deployment.ts', 'src/server/platform-state-host.ts', 'src/server/workflow-visual-image.ts']);
+    // BUILD-ADMIN-001: that lookup reaches only the settings store, its validation and the copilot boundary — no flow, runtime, handoff or wallet.
+    const settings = closure(join(app, 'src/server/copilot-runtime.ts')).files;
+    expect(settings.filter(f => /^backend\/|^src\/app\/|^src\/mcp\/|flow-runtime|cloud-api|handoff|approval|wallet-session|session-principal|platform-state-host/.test(f))).toEqual([]);
     // BUILD-BASE-001: the authoring catalogs only read and validate the official asset catalogs (where the deployment enables each network).
     // Nothing they reach runs a flow, calls the cloud API, is a server action, or touches a handoff, an approval or a wallet session.
     const catalogs = closure(join(app, 'src/server/authoring-catalogs.ts')).files;
