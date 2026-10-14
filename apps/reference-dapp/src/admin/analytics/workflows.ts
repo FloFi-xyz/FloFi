@@ -7,7 +7,14 @@
  *   execution  a root run: not a recovery (`recovery_of` folds into its root) and not a composition step run (`composition_of`, or named
  *              by an indexed composition record). Re-simulations create runs that never start, so they never count as executions;
  *              observations and reconciliation passes update the one projection row of a run, so they never add anything;
- *   action     one node of the execution's canonical workflow (`admin_run_facts`), with its own network and outcome.
+ *   action     one financial node of the execution's canonical workflow (`admin_run_facts`), with its own network and outcome.
+ *
+ * An execution belongs to the range its root run was created in. Its recovery runs and composition step runs are folded into it wherever
+ * they were created (later ones are loaded too); a recovery whose root was created before the range is part of that earlier execution and is
+ * never counted again here. Runs that cannot have started (no evidence, no attempt past PREPARED/CANCELLED, not a composition or recovery)
+ * only ever count as simulated (and maybe authorized): they are counted in SQL by the facts the classifier reads, never loaded. The runs that
+ * may have started are loaded in full, at most ANALYTICS_ROW_LIMIT per view, newest first: when a range holds more, every figure covers only
+ * the newest part (`coverage`), and the page says so.
  *
  * Delegated executions (automations) are separate records and are reported in the Automations section, never added here.
  */
@@ -52,36 +59,89 @@ export function bucketsOf(range: AnalyticsRange): number[] {
   return out;
 }
 
-type FactRow = { readonly state: 'INDEXED' | 'UNINDEXABLE'; readonly code: string | null; readonly actions: readonly FactAction[]; readonly compositionOf: string | null };
+type FactRow = { readonly state: 'INDEXED' | 'UNINDEXABLE'; readonly code: string | null; readonly actions: readonly FactAction[]; readonly compositionOf: string | null;
+  readonly skipped?: number };
 export type LoadedRun = { readonly runId: string; readonly workflowId: string; readonly flow: string; readonly status: string; readonly provenance: string;
   readonly recoveryOf: string | null; readonly errorCode: string | null; readonly needsObservation: boolean; readonly attentionRequired: boolean;
   readonly hasEvidence: boolean; readonly createdAt: Date; readonly updatedAt: Date; readonly attempts: readonly AttemptFact[]; readonly journalAuthorized: boolean;
   readonly fact: FactRow | null };
 type Row = { run_id: string; workflow_id: string; flow: string; status: string; provenance: string; recovery_of: string | null; error_code: string | null;
   needs_observation: boolean; attention_required: boolean; has_evidence: boolean; created_at: Date; updated_at: Date; attempts: AttemptFact[]; journal_authorized: boolean;
-  fact_state: FactRow['state'] | null; fact_code: string | null; fact_actions: FactAction[] | null; composition_of: string | null };
+  fact_state: FactRow['state'] | null; fact_code: string | null; fact_actions: FactAction[] | null; composition_of: string | null; skipped_nodes: number | null };
 const SELECT_RUNS = `SELECT r.run_id, r.workflow_id, r.flow, r.status, r.provenance, r.recovery_of, r.error_code, r.needs_observation, r.attention_required, r.has_evidence,
     r.created_at, r.updated_at,
     coalesce((SELECT json_agg(json_build_object('step', a.step, 'state', a.state, 'hash', a.transaction_hash IS NOT NULL, 'reconciled', a.reconciled)
       ORDER BY a.created_at, a.attempt_id) FROM execution_attempts a WHERE a.tenant_id = r.tenant_id AND a.run_id = r.run_id), '[]'::json) AS attempts,
     EXISTS (SELECT 1 FROM journal_entries j WHERE j.tenant_id = r.tenant_id AND j.run_id = r.run_id AND j.to_state = 'AUTHORIZED') AS journal_authorized,
-    f.state AS fact_state, f.code AS fact_code, f.actions AS fact_actions, f.composition_of
+    f.state AS fact_state, f.code AS fact_code, f.actions AS fact_actions, f.composition_of, f.skipped_nodes
   FROM execution_runs r LEFT JOIN admin_run_facts f ON f.tenant_id = r.tenant_id AND f.run_id = r.run_id`;
+/**
+ * Every ranged read is bounded by the existing (tenant_id, updated_at) index — migration 0012 adds no index to execution_runs. A projection
+ * row is written with updated_at = created_at and only moves updated_at forward, so a run created (or recovered) since `from` was updated since
+ * then; the hour of slack absorbs transaction-start skew between concurrent writers. `$2` is the range start.
+ */
+const UPDATED_SINCE = `r.updated_at >= $2::timestamptz - interval '1 hour'`;
 const loaded = (row: Row): LoadedRun => ({ runId: row.run_id, workflowId: row.workflow_id, flow: row.flow, status: row.status, provenance: row.provenance,
   recoveryOf: row.recovery_of, errorCode: row.error_code, needsObservation: row.needs_observation, attentionRequired: row.attention_required,
   hasEvidence: row.has_evidence, createdAt: row.created_at, updatedAt: row.updated_at, attempts: row.attempts, journalAuthorized: row.journal_authorized,
-  fact: row.fact_state ? { state: row.fact_state, code: row.fact_code, actions: row.fact_actions ?? [], compositionOf: row.composition_of } : null });
+  fact: row.fact_state ? { state: row.fact_state, code: row.fact_code, actions: row.fact_actions ?? [], compositionOf: row.composition_of,
+    skipped: row.skipped_nodes ?? 0 } : null });
+
+/**
+ * What one view's figures cover: all runs created in the range, or (truncated) only those created from `coveredFrom` on. `runsInRange` counts
+ * the runs that may have started (the ones the row limit applies to).
+ */
+export type Coverage = { readonly truncated: boolean; readonly runsInRange: number; readonly coveredFrom: Date | null };
+export const FULL_COVERAGE: Coverage = Object.freeze({ truncated: false, runsInRange: 0, coveredFrom: null });
+/** Runs in range that never started, grouped by the only facts the classifier reads for them. Each group counts `count` simulated executions. */
+export type IdleRuns = { readonly flow: string; readonly provenance: string; readonly status: string; readonly journalAuthorized: boolean; readonly hasAttempts: boolean;
+  readonly count: number };
+
+/** `$4` is the composition flows. A run outside this set cannot have started: the classifier's `started` needs one of these facts. */
+const MAY_HAVE_STARTED = `(r.has_evidence OR r.flow = ANY($4::text[]) OR r.recovery_of IS NOT NULL OR EXISTS (SELECT 1 FROM execution_attempts a
+    WHERE a.tenant_id = r.tenant_id AND a.run_id = r.run_id AND a.state NOT IN ('PREPARED', 'CANCELLED')))`;
+const COMPOSITIONS = [...COMPOSITION_FLOWS];
 
 export async function loadRuns(db: Database, tenantId: string, range: { readonly from: Date; readonly to: Date }, limit = ANALYTICS_ROW_LIMIT):
-  Promise<{ readonly runs: LoadedRun[]; readonly truncated: boolean }> {
-  const { rows } = await db.query<Row>(`${SELECT_RUNS} WHERE r.tenant_id = $1 AND r.created_at >= $2 AND r.created_at < $3 ORDER BY r.created_at DESC, r.run_id DESC
-    LIMIT $4`, [tenantId, range.from, range.to, limit + 1]);
-  const runs = rows.slice(0, limit).map(loaded);
+  Promise<{ readonly runs: LoadedRun[]; readonly idle: readonly IdleRuns[]; readonly truncated: boolean; readonly coverage: Coverage }> {
+  const { rows } = await db.query<Row>(`${SELECT_RUNS} WHERE r.tenant_id = $1 AND ${UPDATED_SINCE} AND r.created_at >= $2 AND r.created_at < $3 AND ${MAY_HAVE_STARTED}
+    ORDER BY r.created_at DESC, r.run_id DESC LIMIT $5`, [tenantId, range.from, range.to, COMPOSITIONS, limit + 1]);
+  const truncated = rows.length > limit, runs = rows.slice(0, limit).map(loaded), coveredFrom = truncated ? rows[limit - 1]!.created_at : null;
+  const have = new Set(runs.map(run => run.runId)), add = (more: readonly LoadedRun[]) => { for (const run of more) if (!have.has(run.runId)) { have.add(run.runId); runs.push(run); } };
+  // Recovery runs created after the range: they fold into an execution whose root may be in it (the others are dropped by `executionsOf`).
+  add((await db.query<Row>(`${SELECT_RUNS} WHERE r.tenant_id = $1 AND ${UPDATED_SINCE} AND r.created_at >= $3 AND r.recovery_of IS NOT NULL
+    ORDER BY r.created_at LIMIT 5000`, [tenantId, range.from, range.to])).rows.map(loaded));
+  // The covered roots of loaded recoveries, should one of them never have started itself. Every run loaded by id is kept out of the idle
+  // count below, so none is counted twice.
+  const byId: string[] = [];
+  for (let hops = 0; hops < 4; hops++) {
+    const ids = [...new Set(runs.flatMap(run => run.recoveryOf && !have.has(run.recoveryOf) ? [run.recoveryOf] : []))];
+    if (!ids.length) break;
+    const found = (await db.query<Row>(`${SELECT_RUNS} WHERE r.tenant_id = $1 AND r.run_id = ANY($4::text[]) AND r.created_at >= $2 AND r.created_at < $3`,
+      [tenantId, coveredFrom ?? range.from, range.to, ids])).rows.map(loaded);
+    byId.push(...found.map(run => run.runId)); add(found);
+    if (found.length < ids.length) break;
+  }
   // Step runs of compositions in range that were created just outside it.
-  const have = new Set(runs.map(run => run.runId));
   const missing = [...new Set(runs.flatMap(run => COMPOSITION_FLOWS.has(run.flow) ? (run.fact?.actions ?? []).flatMap(a => a.runs ?? []) : []))].filter(id => !have.has(id));
-  if (missing.length) runs.push(...(await db.query<Row>(`${SELECT_RUNS} WHERE r.tenant_id = $1 AND r.run_id = ANY($2::text[])`, [tenantId, missing.slice(0, 5_000)])).rows.map(loaded));
-  return { runs, truncated: rows.length > limit };
+  if (missing.length) { const steps = await loadRunsById(db, tenantId, missing); byId.push(...steps.map(run => run.runId)); add(steps); }
+  // Every other run of the covered range never started: count it, grouped by what the classifier reads (composition steps excluded).
+  const idle = (await db.query<{ flow: string; provenance: string; status: string; journal_authorized: boolean; has_attempts: boolean; n: number }>(`SELECT r.flow, r.provenance,
+      r.status, EXISTS (SELECT 1 FROM journal_entries j WHERE j.tenant_id = r.tenant_id AND j.run_id = r.run_id AND j.to_state = 'AUTHORIZED') AS journal_authorized,
+      EXISTS (SELECT 1 FROM execution_attempts a WHERE a.tenant_id = r.tenant_id AND a.run_id = r.run_id) AS has_attempts, count(*)::int AS n
+    FROM execution_runs r LEFT JOIN admin_run_facts f ON f.tenant_id = r.tenant_id AND f.run_id = r.run_id
+    WHERE r.tenant_id = $1 AND ${UPDATED_SINCE} AND r.created_at >= $2 AND r.created_at < $3 AND NOT ${MAY_HAVE_STARTED} AND f.composition_of IS NULL
+      AND NOT (r.run_id = ANY($5::text[]))
+    GROUP BY 1, 2, 3, 4, 5`, [tenantId, coveredFrom ?? range.from, range.to, COMPOSITIONS, byId])).rows
+    .map(row => ({ flow: row.flow, provenance: row.provenance, status: row.status, journalAuthorized: row.journal_authorized, hasAttempts: row.has_attempts, count: row.n }));
+  const runsInRange = truncated ? (await db.query<{ n: number }>(`SELECT count(*)::int AS n FROM execution_runs r WHERE r.tenant_id = $1 AND ${UPDATED_SINCE}
+    AND r.created_at >= $2 AND r.created_at < $3 AND ${MAY_HAVE_STARTED}`, [tenantId, range.from, range.to, COMPOSITIONS])).rows[0]?.n ?? rows.length : rows.length;
+  return { runs, idle, truncated, coverage: { truncated, runsInRange, coveredFrom } };
+}
+/** Runs by id (no range), e.g. the runs an approval handoff links to. */
+export async function loadRunsById(db: Database, tenantId: string, ids: readonly string[]): Promise<LoadedRun[]> {
+  if (!ids.length) return [];
+  return (await db.query<Row>(`${SELECT_RUNS} WHERE r.tenant_id = $1 AND r.run_id = ANY($2::text[])`, [tenantId, ids.slice(0, 5_000)])).rows.map(loaded);
 }
 
 export type ActionOutcome = { readonly kind: ActionKind; readonly type: string; readonly chain: string; readonly to: string | null; readonly executed: boolean;
@@ -90,7 +150,9 @@ export type Execution = { readonly rootId: string; readonly runIds: readonly str
   readonly environment: AnalyticsEnvironment | null; readonly createdAt: Date; readonly updatedAt: Date; readonly status: string; readonly errorCode: string | null;
   readonly classification: RunClassification; readonly executed: boolean; readonly hasEvidence: boolean;
   /** null when the canonical record has not been indexed (or could not be read): the reason is in `factCode`. */
-  readonly actions: readonly ActionOutcome[] | null; readonly factCode: string | null };
+  readonly actions: readonly ActionOutcome[] | null; readonly factCode: string | null;
+  /** Financial workflow nodes of the indexed record that name no recognizable network: missing from the distribution, never guessed. */
+  readonly skippedActions: number };
 
 const LENDING_STEP: Readonly<Record<string, string>> = { supply: 'SUPPLY', borrow: 'BORROW', 'asset.swap.exact-input': 'SWAP' };
 const TERMINAL: ReadonlySet<ExecutionOutcome> = new Set(['COMPLETED', 'FAILED', 'PARTIAL', 'UNCERTAIN', 'NOT_EXECUTED']);
@@ -108,17 +170,22 @@ function actionOutcomes(latest: LoadedRun, whole: RunClassification, wholeExecut
       return { ...base, executed: classes.some(executed), outcome: last.outcome };
     }
     if (latest.flow === 'lending-composition') {
+      // A step may hold several attempts (cancelled ones, retries): it executed once any put a transaction on chain, and its latest live attempt
+      // decides — an earlier reverted attempt followed by a retry is not a failure yet, and a retry never counts as a second action.
       const step = LENDING_STEP[action.type], attempts = latest.attempts.filter(a => a.step === step);
       if (attempts.some(a => a.reconciled)) return { ...base, executed: true, outcome: 'COMPLETED' };
-      if (attempts.some(a => a.state === 'REVERTED')) return { ...base, executed: true, outcome: 'FAILED' };
-      if (attempts.some(attemptSubmitted)) return { ...base, executed: true, outcome: whole.outcome === 'IN_PROGRESS' || whole.outcome === 'COMPLETED' ? whole.outcome : 'UNCERTAIN' };
-      return { ...base, executed: false, outcome: idle(whole) };
+      if (!attempts.some(attemptSubmitted)) return { ...base, executed: false, outcome: idle(whole) };
+      if (attempts.filter(a => a.state !== 'CANCELLED').at(-1)?.state === 'REVERTED') return { ...base, executed: true, outcome: 'FAILED' };
+      return { ...base, executed: true, outcome: whole.outcome === 'IN_PROGRESS' || whole.outcome === 'COMPLETED' ? whole.outcome : 'UNCERTAIN' };
     }
     return { ...base, executed: wholeExecuted, outcome: whole.outcome };
   });
 }
 
-/** Folds runs into executions: recoveries into their root, composition step runs into their composition. */
+/**
+ * Folds runs into executions: recoveries into their root, composition step runs into their composition. A recovery whose root is not among
+ * `runs` (created before the range, or before the covered part of it) belongs to that earlier execution and is dropped, never counted twice.
+ */
 export function executionsOf(runs: readonly LoadedRun[]): Execution[] {
   const byId = new Map(runs.map(run => [run.runId, run]));
   const steps = new Set<string>();
@@ -131,6 +198,7 @@ export function executionsOf(runs: readonly LoadedRun[]): Execution[] {
     if (steps.has(run.runId)) continue;
     let root = run;
     for (let hops = 0; root.recoveryOf && byId.has(root.recoveryOf) && hops < 32; hops++) root = byId.get(root.recoveryOf)!;
+    if (root.recoveryOf) continue;
     const group = groups.get(root.runId) ?? [];
     group.push(run);
     groups.set(root.runId, group);
@@ -151,7 +219,8 @@ export function executionsOf(runs: readonly LoadedRun[]): Execution[] {
     return { rootId, runIds: group.map(run => run.runId), workflowId: root.workflowId, flow: latest.flow, environment: environmentOf(latest.provenance),
       createdAt: root.createdAt, updatedAt: latest.updatedAt, status: latest.status, errorCode: latest.errorCode, classification, executed: isExecuted,
       hasEvidence: group.some(run => run.hasEvidence), actions: actionOutcomes(latest, classification, isExecuted, byId),
-      factCode: latest.fact?.state === 'UNINDEXABLE' ? latest.fact.code : latest.fact ? null : 'NOT_INDEXED' };
+      factCode: latest.fact?.state === 'UNINDEXABLE' ? latest.fact.code : latest.fact ? null : 'NOT_INDEXED',
+      skippedActions: latest.fact?.state === 'INDEXED' ? latest.fact.skipped ?? 0 : 0 };
   });
 }
 
@@ -172,7 +241,11 @@ const tally = (counts: OutcomeCounts, outcome: ExecutionOutcome) => { if (outcom
 export type NetworkRow = NetworkInfo & OutcomeCounts & { readonly actions: number; readonly share: number; readonly workflowsInvolved: number;
   readonly workflowsCompleted: number; readonly asDestination: number };
 export type WorkflowAnalytics = {
-  readonly environment: AnalyticsEnvironment; readonly truncated: boolean;
+  readonly environment: AnalyticsEnvironment; readonly truncated: boolean; readonly coverage: Coverage;
+  /** Composition executions whose record is not indexed yet: their step runs cannot be recognized, so they may be counted on their own. */
+  readonly compositionsWithoutRecord: number;
+  /** Executed actions missing from the network distribution because their indexed record names no recognizable network. */
+  readonly skippedActions: number;
   readonly executedByEnvironment: Readonly<Record<AnalyticsEnvironment, number>>; readonly unknownProvenance: number;
   readonly funnel: { readonly simulated: number; readonly authorized: number; readonly started: number; readonly executed: number; readonly completed: number };
   readonly outcomes: OutcomeCounts; readonly notExecuted: number; readonly awaitingSignature: number; readonly attention: number;
@@ -192,15 +265,25 @@ export type WorkflowAnalytics = {
   readonly fees: { readonly eligibleCompleted: number; readonly byNetwork: readonly { readonly network: NetworkInfo; readonly completed: number }[] };
 };
 
-/** Every Overview and Workflows metric for one environment; action/outcome filters narrow the action-level (network) section only. */
+/**
+ * Every Overview and Workflows metric for one environment; action/outcome filters narrow the action-level (network) section only. A truncated
+ * view's activity series starts at the bucket it covers, so the uncovered part of the range is never drawn as zero activity.
+ */
 export function summarize(executions: readonly Execution[], range: AnalyticsRange, environment: AnalyticsEnvironment,
-  filter: { readonly action: ActionKind | 'ALL'; readonly outcome: OutcomeFilter }, truncated = false): WorkflowAnalytics {
+  filter: { readonly action: ActionKind | 'ALL'; readonly outcome: OutcomeFilter }, coverage: Coverage = FULL_COVERAGE, idle: readonly IdleRuns[] = []): WorkflowAnalytics {
+  const truncated = coverage.truncated;
+  // Runs that never started: simulated executions (authorized when the classifier says so), in their own environment; nothing else.
+  const idleHere = idle.filter(group => environmentOf(group.provenance) === environment);
+  const idleAuthorized = idleHere.reduce((n, group) => n + (classifyRun({ flow: group.flow, status: group.status, needsObservation: false, attentionRequired: false,
+    hasEvidence: false, journalAuthorized: group.journalAuthorized, attempts: group.hasAttempts ? [{ step: 'X', state: 'PREPARED', hash: false, reconciled: false }] : [] })
+    .authorized ? group.count : 0), 0);
   const executedByEnvironment = Object.fromEntries(ENVIRONMENTS.map(env => [env, executions.filter(e => e.environment === env && e.executed).length])) as Record<AnalyticsEnvironment, number>;
   const scoped = executions.filter(e => e.environment === environment), done = scoped.filter(e => e.executed);
   const outcomes = outcomeCounts();
   for (const e of done) tally(outcomes, e.classification.outcome);
   const denominator = [...RATE_OUTCOMES].reduce((n, outcome) => n + (outcomes[outcome as keyof OutcomeCounts] ?? 0), 0);
-  const buckets = bucketsOf(range), series = new Map(buckets.map(at => [at, outcomeCounts()]));
+  const first = coverage.coveredFrom ? bucketStart(coverage.coveredFrom, range.bucket) : -Infinity;
+  const buckets = bucketsOf(range).filter(at => at >= first), series = new Map(buckets.map(at => [at, outcomeCounts()]));
   for (const e of done) { const counts = series.get(bucketStart(e.createdAt, range.bucket)); if (counts) tally(counts, e.classification.outcome); }
 
   const utilization = ACTION_KINDS.map(kind => ({ kind, executedActions: 0, completedActions: 0, failedActions: 0, executions: 0, executionsWithoutRecord: 0 }));
@@ -262,8 +345,12 @@ export function summarize(executions: readonly Execution[], range: AnalyticsRang
   const completedDone = done.filter(e => e.classification.outcome === 'COMPLETED');
   for (const e of completedDone) { const chain = e.actions?.[0]?.chain ?? 'unattributed'; fees.set(chain, (fees.get(chain) ?? 0) + 1); }
   return {
-    environment, truncated, executedByEnvironment, unknownProvenance: executions.filter(e => e.environment === null).length,
-    funnel: { simulated: scoped.length, authorized: scoped.filter(e => e.classification.authorized).length, started: scoped.filter(e => e.classification.started).length,
+    environment, truncated, coverage, executedByEnvironment,
+    unknownProvenance: executions.filter(e => e.environment === null).length + idle.filter(g => environmentOf(g.provenance) === null).reduce((n, g) => n + g.count, 0),
+    compositionsWithoutRecord: scoped.filter(e => COMPOSITION_FLOWS.has(e.flow) && !e.actions).length,
+    skippedActions: done.reduce((n, e) => n + (e.actions ? e.skippedActions : 0), 0),
+    funnel: { simulated: scoped.length + idleHere.reduce((n, group) => n + group.count, 0), authorized: scoped.filter(e => e.classification.authorized).length + idleAuthorized,
+      started: scoped.filter(e => e.classification.started).length,
       executed: done.length, completed: outcomes.COMPLETED },
     outcomes, notExecuted: scoped.filter(e => e.classification.started && e.classification.outcome === 'NOT_EXECUTED').length,
     awaitingSignature: scoped.filter(e => e.classification.started && !e.classification.submitted && e.classification.outcome === 'IN_PROGRESS').length,

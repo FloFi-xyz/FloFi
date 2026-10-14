@@ -7,7 +7,7 @@
 import { describe, expect, it } from 'vitest';
 import type { FactAction } from './actions.ts';
 import type { AttemptFact } from './classify.ts';
-import { analyticsRange, bucketStart, bucketsOf, executionsOf, summarize, type LoadedRun } from './workflows.ts';
+import { analyticsRange, bucketStart, bucketsOf, executionsOf, summarize, type Coverage, type LoadedRun } from './workflows.ts';
 
 const now = new Date('2026-10-14T12:00:00.000Z'), range = analyticsRange({ range: '7d' }, now);
 const BASE = 'eip155:8453', ARB = 'eip155:42161', BASE_SEP = 'eip155:84532', ARB_SEP = 'eip155:421614', SOL_DEV = 'solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1';
@@ -79,6 +79,55 @@ describe('BUILD-ADMIN-001 workflow analytics', () => {
     // The action/outcome filters narrow the network section only.
     expect(summarize(executions, range, 'TESTNET', { action: 'LIQUIDITY', outcome: 'ALL' }).networks.totalActions).toBe(1);
     expect(summarize(executions, range, 'TESTNET', { action: 'ALL', outcome: 'COMPLETED' }).networks.rows[0]).toMatchObject({ actions: 1, COMPLETED: 1 });
+  });
+
+  it('attributes an execution to the range its root started in: a recovery of an earlier run is never counted again', () => {
+    // The root started before the range (not loaded); its recovery happened inside it. A later recovery of an in-range root is folded in.
+    const lateRecovery = run({ runId: 'rec-of-old', workflowId: 'wf-old', recoveryOf: 'old-root', status: 'RECONCILED', createdAt: new Date('2026-10-13T09:00:00Z') });
+    const root = run({ runId: 'new-root', workflowId: 'wf-new', status: 'INCONCLUSIVE', hasEvidence: false, attempts: [{ step: 'SWAP', state: 'HASH', hash: true, reconciled: false }] });
+    const afterRange = run({ runId: 'rec-after', workflowId: 'wf-new', recoveryOf: 'new-root', status: 'RECONCILED', createdAt: new Date('2026-10-15T09:00:00Z') });
+    const executions = executionsOf([lateRecovery, root, afterRange]);
+    expect(executions.map(e => [e.rootId, e.runIds, e.classification.outcome])).toEqual([['new-root', ['new-root', 'rec-after'], 'COMPLETED']]);
+  });
+
+  it('a step retried inside one run is one action, decided by its latest live attempt', () => {
+    const retried = (attempts: AttemptFact[], status = 'EXECUTING') => executionsOf([run({ flow: 'lending-composition', status, hasEvidence: false, attempts,
+      actions: [{ i: 0, kind: 'LENDING', type: 'supply', chain: BASE }] })])[0]!.actions![0]!;
+    const reverted: AttemptFact = { step: 'SUPPLY', state: 'REVERTED', hash: true, reconciled: false };
+    expect(retried([reverted, { step: 'SUPPLY', state: 'PENDING', hash: true, reconciled: false }])).toMatchObject({ executed: true, outcome: 'IN_PROGRESS' });
+    expect(retried([reverted, { step: 'SUPPLY', state: 'CANCELLED', hash: false, reconciled: false }], 'FAILED')).toMatchObject({ executed: true, outcome: 'FAILED' });
+    expect(retried([reverted, { ...done, step: 'SUPPLY' }], 'COMPLETED')).toMatchObject({ executed: true, outcome: 'COMPLETED' });
+    expect(retried([{ step: 'SUPPLY', state: 'CANCELLED', hash: false, reconciled: false }], 'AUTHORIZED')).toMatchObject({ executed: false });
+    const a = summarize(executionsOf([run({ flow: 'lending-composition', status: 'COMPLETED', attempts: [reverted, { ...done, step: 'SUPPLY' }],
+      actions: [{ i: 0, kind: 'LENDING', type: 'supply', chain: BASE }] })]), range, 'MAINNET', all);
+    expect(a.networks.totalActions).toBe(1);
+  });
+
+  it('says what it cannot count: unindexed compositions, unattributable actions, and a truncated range drawn only where covered', () => {
+    const composition = run({ runId: 'solcomp-x', flow: 'solana-devnet-composition', provenance: 'PUBLIC_DEVNET', status: 'CONSUMING', attempts: [], hasEvidence: false, actions: null });
+    const partial = run({ provenance: 'PUBLIC_DEVNET', fact: { state: 'INDEXED', code: null, compositionOf: null, skipped: 2,
+      actions: [{ i: 0, kind: 'SWAP', type: 'asset.swap.exact-input', chain: SOL_DEV }] } });
+    const a = summarize(executionsOf([composition, partial]), range, 'TESTNET', all);
+    expect([a.compositionsWithoutRecord, a.skippedActions, a.networks.totalActions]).toEqual([1, 2, 1]);
+    const coverage: Coverage = { truncated: true, runsInRange: 25_000, coveredFrom: new Date('2026-10-12T15:00:00Z') };
+    const t = summarize(executionsOf([run({})]), range, 'MAINNET', all, coverage);
+    expect(t).toMatchObject({ truncated: true, coverage });
+    expect(t.series[0]!.at).toBe(Date.parse('2026-10-12T00:00:00Z'));
+    expect(t.networkTrend.points[0]!.at).toBe(Date.parse('2026-10-12T00:00:00Z'));
+    expect(summarize(executionsOf([run({})]), range, 'MAINNET', all).series[0]!.at).toBe(Date.parse('2026-10-07T00:00:00Z'));
+  });
+
+  it('counts runs that never started as simulated (authorized only when the classifier says so), in their own environment, without loading them', () => {
+    const idle = [{ flow: 'base-swap', provenance: 'PUBLIC_MAINNET', status: 'SIMULATED', journalAuthorized: false, hasAttempts: false, count: 40 },
+      { flow: 'base-swap', provenance: 'PUBLIC_MAINNET', status: 'SIMULATED', journalAuthorized: true, hasAttempts: false, count: 3 },
+      { flow: 'base-swap', provenance: 'PUBLIC_MAINNET', status: 'PREPARED', journalAuthorized: false, hasAttempts: true, count: 2 },
+      { flow: 'base-swap', provenance: 'PUBLIC_MAINNET', status: 'PREPARED', journalAuthorized: false, hasAttempts: false, count: 5 },
+      { flow: 'base-swap', provenance: 'PUBLIC_TESTNET', status: 'SIMULATED', journalAuthorized: false, hasAttempts: false, count: 7 },
+      { flow: 'base-swap', provenance: 'SOMETHING_NEW', status: 'SIMULATED', journalAuthorized: false, hasAttempts: false, count: 1 }];
+    const a = summarize(executionsOf([run({})]), range, 'MAINNET', all, undefined, idle);
+    expect(a.funnel).toMatchObject({ simulated: 51, authorized: 1 + 3 + 2, started: 1, executed: 1 });
+    expect(a.unknownProvenance).toBe(1);
+    expect(summarize([], range, 'TESTNET', all, undefined, idle).funnel).toMatchObject({ simulated: 7, authorized: 0, executed: 0 });
   });
 
   it('never mixes mainnet, testnet/devnet and mocked activity', () => {

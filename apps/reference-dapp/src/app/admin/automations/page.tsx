@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { automationAnalytics } from '../../../admin/analytics/automations';
-import { networkInfo } from '../../../admin/analytics/networks';
+import { automationAnalytics, HANDOFF_RETENTION_DAYS } from '../../../admin/analytics/automations';
+import { ENVIRONMENT_LABELS, ENVIRONMENTS, networkInfo } from '../../../admin/analytics/networks';
 import { param } from '../../../admin/analytics/view';
 import { analyticsRange } from '../../../admin/analytics/workflows';
 import { adminPage } from '../../../admin/page-context';
@@ -55,8 +55,25 @@ export default async function AdminAutomationsPage({ searchParams }: { searchPar
         <section className="admin-card"><header><h2>Occurrences in range</h2></header>
           <CountTable rows={data.occurrences.byState} labels={OCCURRENCE_STATES} empty="No occurrences in range." keyLabel="State"/></section>
       </div>
+      <section className="admin-card" aria-labelledby="admin-proposal-executions"><header><h2 id="admin-proposal-executions">From proposal to execution</h2>
+        <p>owner-confirmed proposals created in range</p></header>
+        <div className="admin-table-wrap"><table className="admin-table"><tbody>
+          <tr><th scope="row">Proposals sent to their owner for approval</th><td className="num">{fmt(data.proposals.withApproval)}</td></tr>
+          <tr><th scope="row">Applied by the owner (taken into FloFi to Review and sign)</th><td className="num">{fmt(data.proposals.applied)}</td></tr>
+          <tr><th scope="row">Executions linked to an applied proposal (verified lower bound)</th><td className="num">{fmt(data.proposals.linkedExecutions)}
+            {data.proposals.linkedExecutions ? <span className="admin-diff"> · {fmt(data.proposals.linkedCompleted)} completed · {ENVIRONMENTS
+              .filter(env => data.proposals.linkedByEnvironment[env]).map(env => `${ENVIRONMENT_LABELS[env]} ${fmt(data.proposals.linkedByEnvironment[env])}`).join(' · ')}</span> : null}</td></tr>
+        </tbody></table></div>
+        <p className="admin-diff">FloFi links a run to a proposal only after verifying it is the owner&rsquo;s own run, started after applying it, that reviewed exactly
+          the proposed workflow; the link is recorded when the owner reopens the occurrence. An applied proposal without a linked execution may not have been executed,
+          or may not have been linked yet. These are standard owner-signed executions, already counted on the Overview.
+          {data.proposals.approvalDeleted ? ` ${fmt(data.proposals.approvalDeleted)} applied proposals are older than the ${HANDOFF_RETENTION_DAYS}-day approval retention: ` +
+            'their executions can no longer be linked.' : ''}</p>
+      </section>
       <div className="admin-grid admin-grid-2">
         <section className="admin-card"><header><h2>Evaluation outcomes</h2><p>closed scheduler codes, in range</p></header>
+          {data.evaluationsRetainedFrom ? <p className="admin-note">Evaluation history is kept 90 days: evaluations before {data.evaluationsRetainedFrom.slice(0, 10)} were
+            already deleted and are missing from these counts.</p> : null}
           <CountTable rows={data.evaluations.byOutcome} empty="No evaluations in range." keyLabel="Outcome"/></section>
         <section className="admin-card"><header><h2>Delegated executions</h2><p>in range, by state machine group</p></header>
           {!data.delegated.installed ? <p className="admin-note">The delegated-execution schema is not installed.</p> : <>

@@ -105,6 +105,8 @@ test('admin console: refusal until granted, overview with network distribution, 
     for (const [label, heading] of [['Workflows', 'Workflows'], ['Automations', 'Automations'], ['System Health', 'System Health'], ['Access & audit', 'Access & audit']] as const) {
       await nav.getByRole('link', { name: label }).click();
       await expect(page.getByRole('heading', { name: heading, level: 1 })).toBeVisible();
+      if (label === 'Workflows') await expect(page.getByRole('heading', { name: 'By flow' })).toBeVisible();
+      if (label === 'Automations') await expect(page.getByRole('heading', { name: 'From proposal to execution' })).toBeVisible();
     }
     await expect(page.getByRole('table').last()).toContainText('ADMIN_COPILOT_SETTINGS_SAVED');
 

@@ -39,7 +39,7 @@ export const SHIPPED_MIGRATIONS: readonly MigrationIdentity[] = Object.freeze([
   { version: 9, name: 'channel_conversations', sha256: '4bd8e0659f7465bc67ede38621770959f43b6e2b20ddf113fbc01c21b9f0b8f1' },
   { version: 10, name: 'automations', sha256: '33eabd57e662b422243305c7fb64580f37a86c314c34990a370a214837d1fa12' },
   { version: 11, name: 'delegated_execution', sha256: '0c6572af43ffe278df7724241ae30b1d1c15ab59b85941e2266b1b3294220202' },
-  { version: 12, name: 'admin_control_plane', sha256: '83f447dff182823bd64ed53c5070fd3adbefdb1360448d04c46916069bc9fa9f' },
+  { version: 12, name: 'admin_control_plane', sha256: '25556fbfd8e45acf0e692fc340eee56fa2f064f4106225960d63e3da9c303af2' },
 ].map(migration => Object.freeze(migration)));
 
 /**

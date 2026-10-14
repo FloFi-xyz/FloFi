@@ -6,6 +6,7 @@ import { OUTCOME_FILTERS, type WorkflowAnalytics } from '../../admin/analytics/w
 import { adminPage } from '../../admin/page-context';
 import { AnalyticsFilters } from '../../components/admin/analytics-filters';
 import { AdminShell, AdminUnavailable } from '../../components/admin/admin-shell';
+import { DataNotes } from '../../components/admin/data-notes';
 import { Donut, fmt, NetworkMark, OUTCOME_KEYS, OUTCOME_META, OutcomeLegend, pct, seriesColor, StackedBars, StackedColumns, TrendLines,
   type DonutSegment } from '../../components/admin/charts';
 
@@ -167,9 +168,9 @@ export default async function AdminOverviewPage({ searchParams }: { searchParams
             <td className="num">{fmt(u.executedActions)}</td><td className="num">{fmt(u.completedActions)}</td><td className="num">{fmt(u.failedActions)}</td></tr>)}</tbody>
         </table></div>
         {a.utilization.every(u => !u.executions) ? <p className="admin-empty">No executed workflows in this range.</p> : null}
-        <p className="admin-diff">Automations are reported on the <a href="/admin/automations">Automations</a> page: delegated executions are separate records and are not
-          counted here. Standard executions that started from an automation proposal cannot be attributed to it from current records. † attributed by flow only
-          (no indexed canonical record), counted as executions but not as actions.</p>
+        <p className="admin-diff">Executions an owner started from an automation proposal are standard, owner-signed executions and are counted here; the{' '}
+          <a href="/admin/automations">Automations</a> page shows how many FloFi has linked to their proposal (a verified lower bound). Delegated executions are
+          separate records and are not counted here. † attributed by flow only (no indexed canonical record), counted as executions but not as actions.</p>
       </section>
       <section className="admin-card" aria-labelledby="admin-fees">
         <header><h2 id="admin-fees">Platform fee observability</h2><p>Intended model: 0.1% per completed workflow</p></header>
@@ -196,19 +197,4 @@ export default async function AdminOverviewPage({ searchParams }: { searchParams
       <p className="admin-diff"><a href={withParams('/admin/workflows', params, {})}>Open Workflows</a> for the executions behind these figures. System incidents are on <a href="/admin/health">System Health</a>.</p>
     </section>
   </AdminShell>;
-}
-
-function DataNotes({ view }: { view: Extract<Awaited<ReturnType<typeof workflowView>>, { ok: true }> }) {
-  const notes: string[] = [];
-  if (view.analytics.truncated) notes.push('This range holds more runs than one view reads (20,000): figures cover the most recent ones. Narrow the range.');
-  if (view.indexingCode) notes.push('Action and network facts could not be refreshed now; the figures use what is already indexed.');
-  if (view.indexing?.pending) notes.push(`${fmt(view.indexing.pending)} started runs in this range are not indexed yet, so their actions and networks are missing below. ` +
-    'They are indexed in small batches on each visit; `admin-cli index` completes it at once.');
-  const missing = view.analytics.networks.withoutRecordCodes.filter(code => code.code !== 'NOT_INDEXED');
-  if (missing.length) notes.push(`${fmt(missing.reduce((n, c) => n + c.count, 0))} executions have no readable canonical record (${missing.map(c => c.code).join(', ')}): ` +
-    'they are counted as executions, never assigned a network.');
-  if (view.analytics.unclassified.length) notes.push(`Unclassified statuses (shown as their own bucket, never as success): ${view.analytics.unclassified
-    .map(u => `${u.flow}/${u.status} ×${u.count}`).join(', ')}.`);
-  if (view.analytics.unknownProvenance) notes.push(`${fmt(view.analytics.unknownProvenance)} runs carry an unknown provenance and are excluded from every environment.`);
-  return notes.length ? <div className="admin-note" role="note">{notes.map(note => <p key={note}>{note}</p>)}</div> : null;
 }

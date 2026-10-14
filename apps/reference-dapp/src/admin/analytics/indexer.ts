@@ -5,8 +5,13 @@
  * locking them, and writes only the derived cache. Executions never read it; deleting it only costs a re-index.
  *
  * Only runs that started executing are indexed (an attempt past PREPARED/CANCELLED, evidence, or a composition). Composition records
- * are indexed first: they name their step runs, which are then marked `composition_of` so they are counted inside the composition.
+ * are indexed first: they name their step runs, which are then marked `composition_of` so they are counted inside the composition. A
+ * composition created before the range is still (re)indexed while it grows, so a step run inside the range is never counted on its own.
  * A record that cannot be read or has no recognizable workflow is stored as UNINDEXABLE with a closed code and reported, never guessed.
+ *
+ * Ranged reads use the existing (tenant_id, updated_at) index of `execution_runs` (migration 0012 adds no index there): a projection row is
+ * written with updated_at = created_at and only moves updated_at forward, so every run created (or composition grown) since `from` was
+ * updated since then; the hour of slack absorbs transaction-start skew between concurrent writers.
  */
 import type { Database } from '@defi-workflow-engine/cloud-runtime';
 import { COMPOSITION_FLOWS } from './classify.ts';
@@ -19,7 +24,8 @@ export type IndexSummary = { readonly indexed: number; readonly unindexable: num
 export type IndexOptions = { readonly from?: Date | null; readonly to?: Date | null; readonly limit: number; readonly budgetMs: number; readonly now?: () => number };
 
 const CANDIDATES = `FROM execution_runs r LEFT JOIN admin_run_facts f ON f.tenant_id = r.tenant_id AND f.run_id = r.run_id
-  WHERE r.tenant_id = $1 AND ($2::timestamptz IS NULL OR r.created_at >= $2) AND ($3::timestamptz IS NULL OR r.created_at < $3)
+  WHERE r.tenant_id = $1 AND ($2::timestamptz IS NULL OR (r.updated_at >= $2::timestamptz - interval '1 hour' AND (r.created_at >= $2 OR r.flow = ANY($5::text[]))))
+    AND ($3::timestamptz IS NULL OR r.created_at < $3)
     AND (r.has_evidence OR r.flow = ANY($5::text[]) OR EXISTS (SELECT 1 FROM execution_attempts a WHERE a.tenant_id = r.tenant_id AND a.run_id = r.run_id
       AND a.state NOT IN ('PREPARED', 'CANCELLED')))
     AND (f.run_id IS NULL OR f.indexer_version < $4 OR (r.flow = ANY($5::text[]) AND f.indexed_log_version < r.log_version))`;
@@ -47,10 +53,12 @@ export async function indexRunFacts(db: Database, tenantId: string, options: Ind
     let facts: ReturnType<typeof recordFacts>;
     try { facts = recordFacts(run.flow, await readRecord(db, tenantId, run.namespace, run.log_name)); }
     catch (error) { facts = { ok: false, code: error instanceof Error && /^RUN_[A-Z_]+$/.test(error.message) ? error.message : 'RUN_RECORD_UNREADABLE' }; }
-    await db.query(`INSERT INTO admin_run_facts (tenant_id, run_id, indexer_version, indexed_log_version, state, code, actions) VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+    await db.query(`INSERT INTO admin_run_facts (tenant_id, run_id, indexer_version, indexed_log_version, state, code, actions, skipped_nodes)
+        VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)
       ON CONFLICT (tenant_id, run_id) DO UPDATE SET indexer_version = EXCLUDED.indexer_version, indexed_log_version = EXCLUDED.indexed_log_version,
-        state = EXCLUDED.state, code = EXCLUDED.code, actions = EXCLUDED.actions, indexed_at = now()`,
-    [tenantId, run.run_id, INDEXER_VERSION, run.log_version, facts.ok ? 'INDEXED' : 'UNINDEXABLE', facts.ok ? null : facts.code, JSON.stringify(facts.ok ? facts.actions : [])]);
+        state = EXCLUDED.state, code = EXCLUDED.code, actions = EXCLUDED.actions, skipped_nodes = EXCLUDED.skipped_nodes, indexed_at = now()`,
+    [tenantId, run.run_id, INDEXER_VERSION, run.log_version, facts.ok ? 'INDEXED' : 'UNINDEXABLE', facts.ok ? null : facts.code, JSON.stringify(facts.ok ? facts.actions : []),
+      facts.ok ? facts.skipped : 0]);
     if (facts.ok && facts.children.length) {
       // Step runs of a composition: counted inside it. Their own record is not needed for that, so an empty fact suffices.
       await db.query(`INSERT INTO admin_run_facts (tenant_id, run_id, indexer_version, indexed_log_version, state, composition_of)

@@ -6,6 +6,7 @@ import { OUTCOME_FILTERS, type Execution } from '../../../admin/analytics/workfl
 import { adminPage } from '../../../admin/page-context';
 import { AnalyticsFilters } from '../../../components/admin/analytics-filters';
 import { AdminShell, AdminUnavailable } from '../../../components/admin/admin-shell';
+import { DataNotes } from '../../../components/admin/data-notes';
 import { fmt, OUTCOME_KEYS, OUTCOME_META, OutcomeBadge } from '../../../components/admin/charts';
 
 type Search = Promise<Record<string, string | string[] | undefined>>;
@@ -47,6 +48,7 @@ export default async function AdminWorkflowsPage({ searchParams }: { searchParam
   return <AdminShell active="workflows" context={page.context} title="Workflows" description="Started executions, their outcomes and what needs attention.">
     <AnalyticsFilters base="/admin/workflows" params={params} range={view.range} environment={view.environment} executedByEnvironment={a.executedByEnvironment}
       defaulted={view.environmentDefaulted}/>
+    <DataNotes view={view}/>
     <section className="admin-card" aria-labelledby="admin-flows">
       <header><h2 id="admin-flows">By flow</h2><p>{ENVIRONMENT_LABELS[view.environment]} · executed workflows</p></header>
       {a.flows.length === 0 ? <p className="admin-empty">No executed workflows in this range.</p> : <div className="admin-table-wrap"><table className="admin-table">

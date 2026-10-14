@@ -4,8 +4,19 @@
  * UI labels. Rule states and open items are current snapshots; evaluations, occurrences and delegated executions are counted in the range.
  * Delegated executions are their own records: they are never added to the standard execution totals (no double count). No owner address
  * leaves this module.
+ *
+ * Proposal → execution: an owner-confirmed proposal becomes a standard execution through the shared approval handoff (`mcp_handoffs`). FloFi
+ * links a run to the handoff (`run_ids`) only after verifying it is the claimant's own run, started after the claim, that reviewed exactly
+ * the proposed workflow (`platform/approvals.ts` `sharedRuns`), and it records the link when the owner reopens the occurrence. Linked
+ * executions are therefore a verified lower bound, and approval handoffs are deleted after 30 days, so older links are gone: both are
+ * reported. These executions are owner-signed standard executions, already in the Overview totals.
  */
 import type { Database } from '@defi-workflow-engine/cloud-runtime';
+import { ENVIRONMENTS, type AnalyticsEnvironment } from './networks.ts';
+import { executionsOf, loadRunsById } from './workflows.ts';
+
+/** How long the scheduler keeps evaluation history (`automations/pg-store.ts` purge) and the platform keeps approval handoffs. */
+export const EVALUATION_RETENTION_DAYS = 90, HANDOFF_RETENTION_DAYS = 30;
 
 /** Evaluation outcomes that are the scheduler working as designed; anything else in the range is surfaced as an automation issue. */
 export const ROUTINE_EVALUATIONS = new Set(['TRIGGERED', 'WATCH_REPORTED', 'CONDITION_NOT_MET', 'CONDITION_STILL_MET', 'COOLDOWN', 'REARMED', 'MISSED', 'LIMIT_BLOCKED',
@@ -25,6 +36,10 @@ export type AutomationAnalytics = {
     readonly stepsByState: readonly Count[]; readonly stepsByChain: readonly Count[]; readonly openNow: number; readonly attentionNow: number;
     readonly activeAuthorizations: number };
   readonly issues: readonly { readonly source: 'EVALUATION' | 'DELEGATED_EXECUTION'; readonly code: string; readonly count: number; readonly lastAt: string }[];
+  readonly proposals: { readonly withApproval: number; readonly applied: number; readonly approvalDeleted: number; readonly linkedExecutions: number;
+    readonly linkedCompleted: number; readonly linkedByEnvironment: Readonly<Record<AnalyticsEnvironment, number>> };
+  /** Evaluations before this instant were already deleted by the scheduler's retention (null: the range is fully retained). */
+  readonly evaluationsRetainedFrom: string | null;
 };
 
 const counts = (rows: readonly { key: string; n: string }[]): Count[] => rows.map(row => ({ key: row.key, count: Number(row.n) })).sort((a, b) => b.count - a.count);
@@ -37,8 +52,12 @@ export async function automationAnalytics(db: Database, tenantId: string, range:
   const one = async (sql: string, extra: unknown[] = []) => Number((await db.query<{ n: string }>(sql, [tenantId, ...extra])).rows[0]?.n ?? 0);
   const inRange = [range.from, range.to];
   const empty = { byState: [], byKind: [], byMode: [], createdInRange: 0, needRebind: 0 };
+  const noEnvironments = Object.fromEntries(ENVIRONMENTS.map(env => [env, 0])) as Record<AnalyticsEnvironment, number>;
+  const retainedFrom = new Date(now.getTime() - EVALUATION_RETENTION_DAYS * 86_400_000);
+  const evaluationsRetainedFrom = range.from < retainedFrom ? retainedFrom.toISOString() : null;
   if (!await installed(db, 'automation_rules')) return { installed: false, rules: empty, evaluations: { total: 0, byOutcome: [] },
-    occurrences: { created: 0, byState: [], pendingOwnerNow: 0 }, notifications: [], issues: [],
+    occurrences: { created: 0, byState: [], pendingOwnerNow: 0 }, notifications: [], issues: [], evaluationsRetainedFrom,
+    proposals: { withApproval: 0, applied: 0, approvalDeleted: 0, linkedExecutions: 0, linkedCompleted: 0, linkedByEnvironment: noEnvironments },
     delegated: { installed: false, created: 0, byGroup: [], byState: [], stepsByState: [], stepsByChain: [], openNow: 0, attentionNow: 0, activeAuthorizations: 0 } };
   const [byState, byKind, byMode, createdInRange, needRebind, evaluations, occurrences, pendingOwnerNow, notifications] = await Promise.all([
     q(`SELECT state AS key, count(*)::text AS n FROM automation_rules WHERE tenant_id = $1 GROUP BY state`),
@@ -80,7 +99,19 @@ export async function automationAnalytics(db: Database, tenantId: string, range:
       GROUP BY code ORDER BY max(updated_at) DESC LIMIT 20`, [tenantId, ...inRange])).rows
       .map(row => ({ source: 'DELEGATED_EXECUTION' as const, code: row.code, count: Number(row.n), lastAt: row.last.toISOString() }));
   }
-  return { installed: true, rules: { byState, byKind, byMode, createdInRange, needRebind },
+  // Owner-confirmed proposals in range → their approval handoff → the runs FloFi verified as started from it.
+  const linked = (await db.query<{ with_approval: number; applied: number; deleted: number; runs: string[] }>(`SELECT count(DISTINCT o.occurrence_id)::int AS with_approval,
+      count(DISTINCT o.occurrence_id) FILTER (WHERE o.state = 'COMPLETED' OR h.status = 'APPLIED')::int AS applied,
+      count(DISTINCT o.occurrence_id) FILTER (WHERE o.state = 'COMPLETED' AND h.handoff_id IS NULL)::int AS deleted,
+      coalesce(array_agg(DISTINCT r.run_id) FILTER (WHERE r.run_id IS NOT NULL), '{}') AS runs
+    FROM automation_occurrences o LEFT JOIN mcp_handoffs h ON h.tenant_id = o.tenant_id AND h.handoff_id = o.handoff_id
+      LEFT JOIN LATERAL unnest(CASE WHEN h.status = 'APPLIED' THEN h.run_ids END) AS r(run_id) ON true
+    WHERE o.tenant_id = $1 AND o.handoff_id IS NOT NULL AND o.created_at >= $2 AND o.created_at < $3`, [tenantId, ...inRange])).rows[0]!;
+  const linkedExecutions = executionsOf(await loadRunsById(db, tenantId, linked.runs)).filter(e => e.executed);
+  const proposals = { withApproval: linked.with_approval, applied: linked.applied, approvalDeleted: linked.deleted, linkedExecutions: linkedExecutions.length,
+    linkedCompleted: linkedExecutions.filter(e => e.classification.outcome === 'COMPLETED').length,
+    linkedByEnvironment: Object.fromEntries(ENVIRONMENTS.map(env => [env, linkedExecutions.filter(e => e.environment === env).length])) as Record<AnalyticsEnvironment, number> };
+  return { installed: true, rules: { byState, byKind, byMode, createdInRange, needRebind }, proposals, evaluationsRetainedFrom,
     evaluations: { total: evaluations.reduce((n, row) => n + row.count, 0), byOutcome: evaluations },
     occurrences: { created: occurrences.reduce((n, row) => n + row.count, 0), byState: occurrences, pendingOwnerNow }, notifications,
     delegated, issues: [...evaluationIssues, ...delegatedIssues].sort((a, b) => b.lastAt.localeCompare(a.lastAt)) };

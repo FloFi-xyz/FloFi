@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /**
  * BUILD-ADMIN-001: migration 0012 in the shipped sequence. A populated 0011 database reaches the current schema with the normal runner;
- * 0012 is additive — every earlier table keeps its columns, constraints, indexes and triggers; only two read indexes are added
- * (execution_runs, automation_evaluations); existing rows survive; a second run applies nothing. The database itself enforces the console's invariants: grants
+ * 0012 is additive — every earlier table keeps its columns, constraints, indexes and triggers; only one read index is added
+ * (automation_evaluations; execution_runs is left untouched so the migration never queues the API's run writes); existing rows survive;
+ * a second run applies nothing. (Rolling-deployment behavior and the migration's lock timeout: `rollout.pg.test.ts`.) The database itself enforces the console's invariants: grants
  * are permanent and only move ACTIVE → REVOKED, one ACTIVE grant per wallet, sessions only end once, audit events and settings versions
  * are append-only, settings versions are gapless.
  */
@@ -35,7 +36,7 @@ describe('BUILD-ADMIN-001 migration 0012 (shipped)', () => {
     expect(SHIPPED_MIGRATIONS.at(-1)).toEqual({ version: 12, name: 'admin_control_plane', sha256: all.at(-1)!.sha256 });
   });
 
-  it('upgrades a populated 0011 database additively; only two read indexes are added to existing tables', async () => {
+  it('upgrades a populated 0011 database additively; only one read index is added to an existing table', async () => {
     const t = await createTestDatabase({ migrated: false });
     try {
       const all = await loadMigrations();
@@ -54,10 +55,8 @@ describe('BUILD-ADMIN-001 migration 0012 (shipped)', () => {
       for (const [table, items] of Object.entries(before)) {
         const added = after[table]!.filter(item => !items.includes(item)), removed = items.filter(item => !after[table]!.includes(item));
         expect(removed, table).toEqual([]);
-        expect(added, table).toEqual(table === 'execution_runs'
-          ? ['index execution_runs_created CREATE INDEX execution_runs_created ON public.execution_runs USING btree (tenant_id, created_at)']
-          : table === 'automation_evaluations'
-            ? ['index automation_evaluations_at CREATE INDEX automation_evaluations_at ON public.automation_evaluations USING btree (tenant_id, at)'] : []);
+        expect(added, table).toEqual(table === 'automation_evaluations'
+          ? ['index automation_evaluations_at CREATE INDEX automation_evaluations_at ON public.automation_evaluations USING btree (tenant_id, at)'] : []);
       }
       expect((await t.db.query(`SELECT status FROM execution_runs WHERE run_id = 'run-1'`)).rows).toEqual([{ status: 'RECONCILED' }]);
     } finally { await t.drop(); }
@@ -114,6 +113,8 @@ describe('BUILD-ADMIN-001 migration 0012 (shipped)', () => {
       await rejects(db.query(`INSERT INTO admin_run_facts (tenant_id, run_id, indexer_version, indexed_log_version, state) VALUES ('default', 'r', 1, 1, 'UNINDEXABLE')`),
         /admin_run_facts_check/);
       await db.query(`INSERT INTO admin_run_facts (tenant_id, run_id, indexer_version, indexed_log_version, state, code) VALUES ('default', 'r', 1, 1, 'UNINDEXABLE', 'LOG_MISSING')`);
+      await rejects(db.query(`INSERT INTO admin_run_facts (tenant_id, run_id, indexer_version, indexed_log_version, state, skipped_nodes) VALUES ('default', 's', 1, 1, 'INDEXED', -1)`),
+        /admin_run_facts_skipped_nodes_check/);
       await db.query(`DELETE FROM admin_run_facts`); // a derived cache: rebuildable by design
     } finally { await t.drop(); }
   });

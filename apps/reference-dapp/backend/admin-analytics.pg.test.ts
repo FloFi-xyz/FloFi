@@ -8,6 +8,9 @@
  *  - Seeded projections exercise what one journey cannot: a Solana composition and its step runs (counted once, re-indexed when the
  *    composition record grows), an unreadable record (reported, never guessed), and the indexer's batch limits.
  *  - Automation metrics, health and the CLI `index` command read the same database.
+ *  - Range edges (pre-PR hardening): a composition that started before the range still claims its step runs, a recovery belongs to the
+ *    execution it recovers (never counted twice across ranges), a truncated range reports what it covers, and owner-confirmed proposals are
+ *    linked to the executions FloFi verified through their approval handoff.
  */
 import { createHash } from 'node:crypto';
 import { mkdtemp } from 'node:fs/promises';
@@ -28,6 +31,7 @@ import { createRouterHarness, type RouterHarness } from '../e2e/router-harness.t
 import { automationAnalytics } from '../src/admin/analytics/automations.ts';
 import { indexRunFacts } from '../src/admin/analytics/indexer.ts';
 import { workflowView } from '../src/admin/analytics/view.ts';
+import { loadRuns } from '../src/admin/analytics/workflows.ts';
 import { runAdminCommand } from '../src/admin/cli-commands.ts';
 import { apiReadiness, healthReport } from '../src/admin/health.ts';
 import { createBackend, type FlowResult } from './app.ts';
@@ -86,7 +90,8 @@ async function extend(db: Database, flow: string, runId: string, record: unknown
     [flow, name, whole.length, sha(whole)]);
   await db.query(`INSERT INTO execution_log_segments (tenant_id, namespace, name, seq, bytes, segment_sha256, content_sha256) VALUES ('default', $1, $2, 1, $3, $4, $5)`,
     [flow, name, segment, sha(segment), sha(whole)]);
-  await db.query(`UPDATE execution_runs SET log_version = 2 WHERE tenant_id = 'default' AND run_id = $1`, [runId]);
+  // As the real projection does: a new log version moves updated_at forward (created_at never moves).
+  await db.query(`UPDATE execution_runs SET log_version = 2, updated_at = now() WHERE tenant_id = 'default' AND run_id = $1`, [runId]);
 }
 const SOL_DEV = 'solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1', SIG = (c: string) => c.repeat(88).slice(0, 88);
 const swapNode = { nodeId: 'swap', actionType: 'asset.swap.exact-input', chainId: SOL_DEV }, lpNode = { nodeId: 'lp', actionType: 'asset.liquidity.concentrated', chainId: SOL_DEV };
@@ -193,6 +198,89 @@ describe('BUILD-ADMIN-001 admin analytics (PostgreSQL, genuine records)', () => 
     expect(health.scheduler).toMatchObject({ ok: true, value: { installed: true, overdueRules: 1 } });
     expect(health.api).toEqual({ topology: 'embedded-or-local', readiness: null });
     expect(health.queue.ok).toBe(true);
+  });
+
+  it('a composition that started before the range still claims its step runs; a recovery belongs to the execution it recovers', async () => {
+    const DAY = 86_400_000, ago = (days: number) => new Date(Date.now() - days * DAY);
+    // The composition started 10 days ago; its liquidity step ran yesterday, when the composition record grew to name it.
+    await seed(t.db, { runId: 'solcomp-old', flow: 'solana-devnet-composition', status: 'CONSUMING', workflowId: 'wf-old-comp', createdAt: ago(10),
+      record: { review: { workflow: { nodes: [swapNode, lpNode] } }, producerRunId: 'sdx-old', consumerRunIds: [] } });
+    await seed(t.db, { runId: 'sdx-old', flow: 'solana-devnet-swap', status: 'RECONCILED', hasEvidence: true, workflowId: 'wf-old-comp', createdAt: ago(10),
+      record: { review: { workflow: { nodes: [swapNode] } } }, attempts: [{ step: 'SWAP', state: 'CONFIRMED', hash: SIG('c'), reconciled: true }] });
+    await seed(t.db, { runId: 'olp-new', flow: 'orca-liquidity', status: 'PENDING', workflowId: 'wf-old-comp', createdAt: ago(1), record: { review: { workflow: { nodes: [lpNode] } } },
+      attempts: [{ step: 'OPEN', state: 'PENDING', hash: SIG('d') }] });
+    await extend(t.db, 'solana-devnet-composition', 'solcomp-old', { review: { workflow: { nodes: [swapNode, lpNode] } }, producerRunId: 'sdx-old', consumerRunIds: ['olp-new'] });
+    // A run that started 10 days ago and was recovered yesterday; and one that started inside the range and was recovered inside it.
+    const swap = (runId: string, createdAt: Date, status: string, recoveryOf?: string) => seed(t.db, { runId, flow: 'robinhood-transfer', status, provenance: 'PUBLIC_TESTNET',
+      createdAt, workflowId: `wf-${recoveryOf ?? runId}`, hasEvidence: status === 'RECONCILED', record: { review: { workflow: { nodes: [{ actionType: 'asset.transfer', chainId: 'eip155:46630' }] } } },
+      attempts: [{ step: 'TRANSFER', state: status === 'RECONCILED' ? 'CONFIRMED' : 'HASH', hash: '0x' + runId.length.toString(16).repeat(64).slice(0, 64), reconciled: status === 'RECONCILED' }] })
+      .then(() => recoveryOf ? t.db.query(`UPDATE execution_runs SET recovery_of = $2 WHERE tenant_id = 'default' AND run_id = $1`, [runId, recoveryOf]) : undefined);
+    await swap('rh-old', ago(10), 'INCONCLUSIVE'); await swap('rh-old-rec', ago(1), 'RECONCILED', 'rh-old');
+    await swap('rh-new', ago(3), 'INCONCLUSIVE'); await swap('rh-new-rec', ago(2), 'RECONCILED', 'rh-new');
+
+    const week = await workflowView({ db: t.db, tenantId: 'default' }, { range: '7d', env: 'TESTNET' }, new Date());
+    if (!week.ok) throw new Error(week.code);
+    expect(week.indexing).toMatchObject({ pending: 0 });
+    expect((await t.db.query(`SELECT composition_of FROM admin_run_facts WHERE run_id = 'olp-new'`)).rows).toEqual([{ composition_of: 'solcomp-old' }]);
+    const ids = week.executions.map(e => e.rootId);
+    expect(ids).not.toContain('olp-new'); // a step of a composition counted in its own (earlier) range
+    expect(ids).not.toContain('rh-old-rec'); // part of an execution that started before the range
+    expect(week.executions.find(e => e.rootId === 'rh-new')).toMatchObject({ runIds: ['rh-new', 'rh-new-rec'], classification: { outcome: 'COMPLETED' } });
+    const month = await workflowView({ db: t.db, tenantId: 'default' }, { range: '30d', env: 'TESTNET' }, new Date());
+    if (!month.ok) throw new Error(month.code);
+    expect(month.executions.find(e => e.rootId === 'rh-old')).toMatchObject({ runIds: ['rh-old', 'rh-old-rec'], classification: { outcome: 'COMPLETED' } });
+    expect(month.executions.find(e => e.rootId === 'solcomp-old')!.actions!.map(a => [a.kind, a.outcome])).toEqual([['SWAP', 'COMPLETED'], ['LIQUIDITY', 'IN_PROGRESS']]);
+    expect(month.delegatedInRange).toBe(0);
+  });
+
+  it('a truncated range covers only its newest runs and says how many it holds', async () => {
+    const range = { from: new Date(Date.now() - 30 * 86_400_000), to: new Date(Date.now() + 60_000) };
+    const all = await loadRuns(t.db, 'default', range);
+    const cut = await loadRuns(t.db, 'default', range, 3);
+    expect(all.coverage).toMatchObject({ truncated: false, coveredFrom: null });
+    expect(cut.coverage).toMatchObject({ truncated: true, runsInRange: all.coverage.runsInRange });
+    expect(cut.coverage.coveredFrom).toEqual(cut.runs[2]!.createdAt); // the oldest of the three newest runs that may have started
+    expect(all.coverage.runsInRange).toBeGreaterThan(3);
+    // A simulation that never started is never loaded: it is counted by the facts the classifier reads.
+    expect(all.runs.some(r => r.flow === FLOW && r.attempts.length === 0)).toBe(false);
+    expect(all.idle).toContainEqual({ flow: FLOW, provenance: 'MOCKED', status: 'PREPARED', journalAuthorized: false, hasAttempts: false, count: 1 });
+    // 0012 adds no (tenant_id, created_at) index to execution_runs: ranged reads are bounded by the existing (tenant_id, updated_at) one.
+    expect((await t.db.query(`SELECT indexname FROM pg_indexes WHERE tablename = 'execution_runs' AND indexdef LIKE '%(tenant_id, created_at)%'`)).rows).toEqual([]);
+  });
+
+  it('links owner-confirmed proposals to the executions FloFi verified through their approval handoff', async () => {
+    const owner = '0x' + 'ef'.repeat(20), rule = 'aut_' + 'c'.repeat(26), now = new Date();
+    await t.db.query(`INSERT INTO automation_rules (tenant_id, rule_id, owner_namespace, owner_account, display_name, kind, state, definition, action_strategy, action_workflow_hash,
+      engine_version, timezone, next_evaluation_at) VALUES ('default', $1, 'eip155', $2, 'DCA', 'SCHEDULED_DCA', 'ACTIVE', '{}', '{"a":1}', $3, 'flofi-engine-2', 'UTC', now())`,
+    [rule, owner, '0x' + 'd'.repeat(64)]);
+    const handoff = async (id: string, status: 'PENDING' | 'APPLIED', runIds: string[]) => t.db.query(`INSERT INTO mcp_handoffs (tenant_id, handoff_id, requester_kind,
+        requester_id, client_id, client_name, secret_digest, strategy, workflow_hash, engine_version, network_environment, funds_class, plan, status, claimed_namespace,
+        claimed_address, claimed_at, claim_expires_at, applied_at, run_ids, expires_at)
+      VALUES ('default', $1, 'AUTOMATION_RULE', $2, 'flofi-automations', 'FloFi Automations', $3, '{"a":1}', $4, 'flofi-engine-2', 'PUBLIC_TESTNET', 'TEST_FUNDS', '{"kind":"x"}',
+        $5, $6, $7, $8, $8, $9, $10, now() + interval '1 day')`,
+    [id, `automation:${rule}`, Buffer.alloc(32, id.charCodeAt(4)), '0x' + 'd'.repeat(64), status, status === 'APPLIED' ? 'eip155' : null, status === 'APPLIED' ? owner : null,
+      status === 'APPLIED' ? now : null, status === 'APPLIED' ? now : null, runIds]);
+    const occurrence = (id: string, slot: string, state: string, handoffId: string) => t.db.query(`INSERT INTO automation_occurrences (tenant_id, occurrence_id, rule_id,
+        owner_namespace, owner_account, trigger_key, kind, state, strategy, workflow_hash, due_at, expires_at, handoff_id, decided_at)
+      VALUES ('default', $1, $2, 'eip155', $3, $4, 'SCHEDULE', $5, '{"a":1}', $6, now(), now() + interval '1 day', $7, $8)`,
+    [id, rule, owner, `slot:${slot}`, state, '0x' + 'd'.repeat(64), handoffId, state === 'COMPLETED' ? now : null]);
+    await seed(t.db, { runId: 'auto-run-1', flow: 'robinhood-transfer', status: 'RECONCILED', provenance: 'PUBLIC_TESTNET', hasEvidence: true,
+      record: { review: { workflow: { nodes: [{ actionType: 'asset.transfer', chainId: 'eip155:46630' }] } } },
+      attempts: [{ step: 'TRANSFER', state: 'CONFIRMED', hash: '0x' + '7'.repeat(64), reconciled: true }] });
+    await handoff('apr_' + 'a'.repeat(26), 'APPLIED', ['auto-run-1']);
+    await handoff('apr_' + 'b'.repeat(26), 'APPLIED', []); // applied, its execution not linked (yet)
+    await handoff('apr_' + 'c'.repeat(26), 'PENDING', []);
+    await occurrence('occ_' + 'e'.repeat(26), '2026-10-14T03:00', 'COMPLETED', 'apr_' + 'a'.repeat(26));
+    await occurrence('occ_' + 'f'.repeat(26), '2026-10-14T04:00', 'APPROVAL_CREATED', 'apr_' + 'b'.repeat(26));
+    await occurrence('occ_' + 'g'.repeat(26), '2026-10-14T05:00', 'APPROVAL_CREATED', 'apr_' + 'c'.repeat(26));
+    await occurrence('occ_' + 'h'.repeat(26), '2026-10-14T06:00', 'COMPLETED', 'apr_' + 'd'.repeat(26)); // its handoff was purged (30-day retention)
+    const data = await automationAnalytics(t.db, 'default', { from: new Date(now.getTime() - 86_400_000), to: new Date(now.getTime() + 60_000) }, now);
+    expect(data.proposals).toEqual({ withApproval: 4, applied: 3, approvalDeleted: 1, linkedExecutions: 1, linkedCompleted: 1,
+      linkedByEnvironment: { MAINNET: 0, TESTNET: 1, MOCKED: 0 } });
+    expect(data.evaluationsRetainedFrom).toBeNull();
+    const longAgo = await automationAnalytics(t.db, 'default', { from: new Date(now.getTime() - 200 * 86_400_000), to: now }, now);
+    expect(longAgo.evaluationsRetainedFrom).toBe(new Date(now.getTime() - 90 * 86_400_000).toISOString());
+    expect(JSON.stringify(data)).not.toContain(owner.slice(2));
   });
 
   it('checks the Railway API readiness endpoint with a bounded request and closed codes', async () => {

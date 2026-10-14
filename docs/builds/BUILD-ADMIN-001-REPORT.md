@@ -32,8 +32,9 @@ adoption trend; utilization; fee observability), Workflows, Automations, System 
 ## 2. Files and migrations
 
 Migration `packages/cloud-runtime/migrations/0012_admin_control_plane.sql` (+ `SHIPPED_MIGRATIONS`): `admin_principals`,
-`admin_sessions`, `admin_audit_events`, `admin_settings_versions`, `admin_run_facts`; indexes `execution_runs_created`,
-`automation_evaluations_at`. No earlier migration edited.
+`admin_sessions`, `admin_audit_events`, `admin_settings_versions`, `admin_run_facts`; index `automation_evaluations_at`; a 5 s lock timeout.
+No earlier migration edited. (0012 was revised by the pre-PR hardening below, before it was ever pushed or applied outside disposable
+local databases: see §6.)
 
 New: `apps/reference-dapp/src/admin/**`, `src/app/admin/**`, `src/components/admin/**`, `src/server/copilot-settings.ts`,
 `copilot-runtime.ts`, `runtime-settings-store.ts`, `backend/admin-cli.ts`, tests, `e2e/admin-console.spec.ts`, `docs/deploy/ADMIN.md`.
@@ -71,10 +72,12 @@ Responses endpoint. A live probe from `/admin` → AI Settings is the owner's ac
 ## 4. Known limitations
 
 - Unsaved Canvas drafts never reach the server: "created" is reported as saved workflows plus simulated runs.
-- Standard executions that started from an automation proposal cannot be attributed to the automation (no durable link today).
-- Delegated execution records carry no provenance flag, so they are kept out of the network distribution and standard totals.
+- Standard executions started from an automation proposal are linked only where FloFi recorded the link (verified lower bound; see §6).
+- Delegated execution records carry no provenance flag, so they are kept out of the network distribution and standard totals (the
+  Overview says how many exist in the range).
 - Runs not yet indexed (or with unreadable records) count as executions without a network; history fills in on visits or via
-  `admin-cli index`. One view reads at most 20,000 runs per range (flagged when truncated).
+  `admin-cli index`. One view loads at most 20,000 runs that may have started (never-started simulations are counted in SQL); a truncated
+  view states the instant it covers from.
 - "Reviewed & authorized" is derived from journal entries/status where a flow projects them; flows without a projected journal rely on
   their current status.
 - Fees: none is charged on `main`; only eligibility is counted. Revenue, notional volume and USD values are not available.
@@ -88,3 +91,75 @@ Responses endpoint. A live probe from `/admin` → AI Settings is the owner's ac
 See [ADMIN.md §7](../deploy/ADMIN.md#7-production-rollout-owner-actions-in-order): migrate (Railway pre-deploy) → deploy API/worker →
 deploy Vercel promptly (every process verifies the exact shipped migration set) → set `FLOFI_ADMIN` and `FLOFI_ADMIN_SESSION_SECRET` on
 Vercel → grant the first administrator with the CLI → optional `admin-cli index` backfill.
+
+## 6. Pre-PR hardening (2026-10-14)
+
+Review of rollout compatibility, analytics completeness and Copilot resilience before the PR. Local commits only; nothing pushed, merged
+or deployed. Scenario evidence comes from the real migration runner, schema checks, admin host and web chat server action against a
+disposable loopback PostgreSQL (CI image), with a 200,000-run / 400,000-evaluation fixture for timings.
+
+**P0 — migration and rolling deployment.**
+
+| Finding (measured on the previous `0012`) | Change |
+| --- | --- |
+| `CREATE INDEX execution_runs_created` waited for an open API write transaction and queued every later run write behind it (3.5 s stall with a 3 s writer; unbounded by anything but the pool's 30 s statement timeout). | Index removed. Ranged analytics reads are bounded by the existing `execution_runs_history (tenant_id, updated_at)` index (`updated_at ≥ created_at` holds for every projection write; 1 h slack for transaction-start skew). Measured: 0012 applies in < 0.5 s with an API transaction open; the next run write is not delayed; 24 h analytics read uses `execution_runs_history` (1 ms). |
+| No bound on lock waits inside the migration. | `SET LOCAL lock_timeout = '5s'`: a long writer on the evaluation history makes 0012 fail with `55P03` and roll back entirely (tested), instead of queueing writers. |
+| Web chat Copilot became dependent on the exact schema: with `DATABASE_URL` set (production Vercel), a new build live before the Railway pre-deploy, or this build after any *later* migration, answered `COPILOT_CONFIG_UNAVAILABLE` on every cold instance. On `main` it never touched the database. | `server/copilot-settings-source.ts`: when platform state refuses the schema, the settings read checks only the migration that created the table (exact identities up to `admin_control_plane`). Not applied → environment bootstrap (no settings can exist); applied → the administrator's version; any other history → fail closed. Measured: bootstrap before 0012, administrator's model with a later migration applied, `unavailable` on a tampered history. |
+| Strict schema check (pre-existing, every migration): old builds' cold starts refuse after migrate; new builds refuse before it. MCP/Developer/Channels/approvals/`/admin` are affected in that window. | Not changed (platform-wide policy; see escalations). Rollout procedure rewritten to stage the Vercel production deployment and promote it right after the Railway pre-deploy (`ADMIN.md` §7, Vercel staged deployments), and to set the admin variables before merging (no extra redeploy). Rolling back below 0012 is documented as breaking cold starts. |
+
+**P1 — analytics completeness.**
+
+- *20,000-run limit:* the limit now applies only to runs that may have started; never-started runs are counted in SQL by the facts the
+  classifier reads (grouped, then classified by the same `classifyRun`). With 80 % simulations at ~3,500 runs/day a 7-day view went from
+  truncated (20,000 of 24,191) to complete (4,838 loaded + 19,353 counted, 97 ms). A truncated view reports `runsInRange`, the instant it
+  covers from, and draws the activity series only where covered; Overview **and Workflows** say so.
+- *Range edges / retries:* an execution belongs to the range its root started in. Recoveries created after the range are loaded and
+  folded in; a recovery of a run that started before the range is no longer counted as a new execution (it was, and was double counted
+  across adjacent ranges). Lending step retries: the latest live attempt decides (a reverted attempt followed by a pending retry is no
+  longer a failure); still one action.
+- *Compositions:* a composition created before the range is still (re)indexed while it grows, so its step runs inside the range are
+  never counted on their own; unindexed compositions are reported (their steps may be counted separately until indexed).
+- *Network distribution:* the derived `asset.liquidity.prepare` node was counted as a second Liquidity action; template and derived nodes
+  are now excluded (the engine's own financial-node rule). Financial nodes with no recognizable type/network, or beyond 16, are stored as
+  `skipped_nodes` and reported instead of silently dropped.
+- *Delegated executions:* the Overview and Workflows notes give the number created in the range and say they are not in the figures.
+- *Automation → execution:* the console claimed no link exists. Approval handoffs do record verified run ids (`sharedRuns`: claimant's
+  own run, after the claim, exactly the proposed workflow hash; recorded when the owner reopens the occurrence). The Automations page now
+  shows proposals sent, applied, and linked executions (with outcomes and environments) as a lower bound, plus approvals already deleted
+  by the 30-day handoff retention, and flags evaluation counts older than the 90-day retention.
+
+**P1 — Copilot resilience.** Fail-closed semantics are unchanged: no environment fallback once settings may exist, no cache. Added: the
+schema-window source above, and one immediate re-read when the failure is the connection itself (`08xxx`, `57P01–57P03`, `ECONNRESET`,
+`EPIPE`, pg's terminated-connection errors) — the same read on a fresh connection, never a different answer. Remaining dependency compared
+with `main`: when runtime settings are enabled (default wherever `DATABASE_URL` is set) and the database is unreachable, the web Copilot
+is unavailable (the exact grammar keeps working; Simulate/Execute need the database through the Railway API anyway).
+
+**Escalated to the owner (not implemented — policy decisions):**
+
+1. *Last-known-good settings.* A per-instance cache of the last verified version, served for at most N seconds when the read fails, would
+   mask transient outages on warm instances (cold instances gain nothing). Cost: during an outage an instance may keep a model an
+   administrator just replaced (e.g. for cost or safety) for up to N seconds, which contradicts "effective on the next request,
+   everywhere". Recommendation: do not add it now; revisit with N ≤ 60 s and a logged `STALE` outcome if outages are observed.
+2. *Default-on runtime settings.* Alternative: opt-in (`FLOFI_COPILOT_RUNTIME_CONFIG=enabled`) so web Copilot never depends on the
+   database until the owner enables the console's AI Settings. Recommendation: keep default-on (the schema-window dependency is removed;
+   what remains is database reachability).
+3. *Forward-compatible schema checks.* Letting builds accept a database ahead by migrations declared backward compatible would close
+   the platform-state window of every future migration, but it changes the fail-closed schema contract of every process. Recommendation:
+   separate build with its own review; until then use the staged-promotion procedure.
+
+Verification of the hardening (local, Node 24.21.0 / pnpm 11.22.0, disposable loopback PostgreSQL `postgres:18.6-bookworm`, loopback
+harnesses only; no provider, public RPC or chain contacted):
+
+| Gate | Result |
+| --- | --- |
+| `pnpm check` | **passed** — 377 files, 4,276 tests, 2 skipped (the same pre-existing `skipIf` cases in `mode-b-service` / `composition-service`) |
+| `pnpm test:postgres` | **passed** — 60 files, 377 tests, none skipped (new: `rollout.pg.test.ts` 4; analytics +3) |
+| Browser profiles (headless shell 1243) | **passed** — `admin-console` 1 (now also asserts the Workflows and Automations sections), `copilot` 13, `chat-automations` 8 |
+| Rollout probe (scratch, not committed) | 0011 → 0012 phases at 200,000 runs / 400,000 evaluations, before and after the change (figures above) |
+
+Not run (unchanged from §3): the full guarded `product`/`composition` phases, fork suites, MCP browser suites, `pnpm audit`,
+`bootstrap-ci.py --verify-dependencies`, SBOM. No dependency, lockfile, workflow or executor/compiler/reconciler file changed.
+
+Intentional test changes for review: `src/admin/migration.pg.test.ts` now expects one added index (not two) and the `skipped_nodes`
+check; the analytics test helper `extend()` moves `updated_at` forward as the real projection does. New suites:
+`src/admin/rollout.pg.test.ts`, `src/server/copilot-settings-source.test.ts`.

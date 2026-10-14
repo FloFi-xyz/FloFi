@@ -15,20 +15,30 @@ describe('BUILD-ADMIN-001 canonical action facts', () => {
   });
   it('reads the workflow wherever each record format keeps it', () => {
     expect(recordFacts('robinhood-transfer', { review: { workflow: { nodes: [node('asset.transfer', 'eip155:11155111')] } } }))
-      .toEqual({ ok: true, children: [], actions: [{ i: 0, kind: 'TRANSFER', type: 'asset.transfer', chain: 'eip155:11155111' }] });
+      .toEqual({ ok: true, children: [], skipped: 0, actions: [{ i: 0, kind: 'TRANSFER', type: 'asset.transfer', chain: 'eip155:11155111' }] });
     expect(recordFacts('crosschain-router-testnet', { workflow: { nodes: [bridge] } }))
-      .toEqual({ ok: true, children: [], actions: [{ i: 0, kind: 'BRIDGE', type: 'asset.bridge', chain: 'eip155:84532', to: 'eip155:421614' }] });
+      .toEqual({ ok: true, children: [], skipped: 0, actions: [{ i: 0, kind: 'BRIDGE', type: 'asset.bridge', chain: 'eip155:84532', to: 'eip155:421614' }] });
     const lending = recordFacts('lending-composition', { reviews: [{ workflow: { nodes: [node('supply', 'eip155:84532')] } },
       { workflow: { nodes: [node('supply', 'eip155:84532'), node('borrow', 'eip155:84532'), node('asset.swap.exact-input', 'eip155:84532')] } }] });
     expect(lending.ok && lending.actions.map(a => [a.i, a.kind])).toEqual([[0, 'LENDING'], [1, 'LENDING'], [2, 'SWAP']]);
     expect(recordFacts('pix-payment', { node: node('payment.pix', 'eip155:8453') })).toMatchObject({ ok: true, actions: [{ kind: 'PAYMENT', chain: 'eip155:8453' }] });
     expect(recordFacts('base-sepolia-swap', { workflow: { nodes: [node('mock-start', 'mock:local'), node('asset.swap.exact-input', 'eip155:84532')] } }))
-      .toMatchObject({ ok: true, actions: [{ i: 0, kind: 'SWAP' }] });
+      .toMatchObject({ ok: true, actions: [{ i: 0, kind: 'SWAP' }], skipped: 0 });
+  });
+  it('never counts a derived preparation node as an action, and reports financial nodes it cannot attribute instead of dropping them silently', () => {
+    const prepared = recordFacts('cross-chain-liquidity', { workflow: { nodes: [bridge, node('asset.liquidity.prepare', 'eip155:42161'),
+      node('asset.liquidity.uniswap-v3', 'eip155:42161')] } });
+    expect(prepared.ok && prepared.actions.map(a => a.kind)).toEqual(['BRIDGE', 'LIQUIDITY']);
+    expect(prepared).toMatchObject({ skipped: 0 });
+    expect(recordFacts('x', { workflow: { nodes: [node('asset.transfer', 'eip155:11155111'), node('asset.swap.exact-input', 'not a chain'), { actionType: 7 }] } }))
+      .toMatchObject({ ok: true, actions: [{ kind: 'TRANSFER' }], skipped: 2 });
+    const many = recordFacts('x', { workflow: { nodes: Array.from({ length: 18 }, () => node('asset.transfer', 'eip155:11155111')) } });
+    expect(many.ok && [many.actions.length, many.skipped]).toEqual([16, 2]);
   });
   it('names a Solana composition’s step runs so they are counted inside it', () => {
     const facts = recordFacts('solana-devnet-composition', { review: { workflow: { nodes: [node('asset.swap.exact-input', 'solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1'),
       node('asset.liquidity.concentrated', 'solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1')] } }, producerRunId: 'sdx-a', consumerRunIds: ['olp-b', 'olp-c'] });
-    expect(facts).toEqual({ ok: true, children: ['sdx-a', 'olp-b', 'olp-c'], actions: [
+    expect(facts).toEqual({ ok: true, children: ['sdx-a', 'olp-b', 'olp-c'], skipped: 0, actions: [
       { i: 0, kind: 'SWAP', type: 'asset.swap.exact-input', chain: 'solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1', runs: ['sdx-a'] },
       { i: 1, kind: 'LIQUIDITY', type: 'asset.liquidity.concentrated', chain: 'solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1', runs: ['olp-b', 'olp-c'] }] });
   });

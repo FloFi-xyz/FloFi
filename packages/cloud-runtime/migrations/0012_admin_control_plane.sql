@@ -1,8 +1,13 @@
 -- SPDX-License-Identifier: AGPL-3.0-only
 -- BUILD-ADMIN-001 0012: the private FloFi Admin control plane, additive. Nothing here is financial authority: an administrator can read
 -- operational data and tune the Copilot interpreter; no table below can sign, submit, approve or change an execution. Every row is
--- tenant-scoped. No key, signature, secret, prompt or transcript is stored. Existing tables keep their meaning; the only changes to
--- existing tables are two read indexes for time-ranged analytics (execution_runs, automation_evaluations).
+-- tenant-scoped. No key, signature, secret, prompt or transcript is stored. Existing tables keep their meaning; the only change to an
+-- existing table is one read index on the automation evaluation history. execution_runs gets no new index: analytics bound their reads
+-- by the existing (tenant_id, updated_at) index, so this migration never takes a lock that would queue the API's run writes.
+--
+-- Rolling deployments: if any lock below cannot be taken within 5 s (a long writer transaction), the migration fails and rolls back
+-- entirely — the pre-deploy then fails and the previous deployment keeps serving — instead of queueing every later writer behind it.
+SET LOCAL lock_timeout = '5s';
 
 -- 1. Administrators: explicit grants to a proven EVM wallet, made only by the operator CLI (database access). A wallet session never
 --    implies a grant. Identity and role never change; a grant only moves ACTIVE → REVOKED (re-granting creates a new principal).
@@ -129,12 +134,14 @@ CREATE TABLE admin_run_facts (
   code text CHECK (code IS NULL OR code ~ '^[A-Z][A-Z0-9_]{2,80}$'),
   composition_of text CHECK (composition_of IS NULL OR composition_of ~ '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$'),
   actions jsonb NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(actions) = 'array' AND octet_length(actions::text) <= 16384),
+  -- Workflow nodes the record holds but the indexer could not attribute to a network (reported as missing, never guessed).
+  skipped_nodes integer NOT NULL DEFAULT 0 CHECK (skipped_nodes >= 0),
   indexed_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (tenant_id, run_id),
   CHECK ((state = 'UNINDEXABLE') = (code IS NOT NULL))
 );
 CREATE INDEX admin_run_facts_composition ON admin_run_facts (tenant_id, composition_of) WHERE composition_of IS NOT NULL;
 
--- 6. Time-ranged analytics read the run projection by creation time and the (high-volume) automation evaluation history by time.
-CREATE INDEX execution_runs_created ON execution_runs (tenant_id, created_at);
+-- 6. Time-ranged analytics read the (high-volume, 90-day) automation evaluation history by time. Building it briefly holds the worker's
+--    evaluation inserts (never an API request); the lock timeout above bounds the wait for it.
 CREATE INDEX automation_evaluations_at ON automation_evaluations (tenant_id, at);
