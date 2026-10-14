@@ -17,7 +17,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { assertSchemaCompatible, CERTIFIED_FORWARD_MIGRATIONS, createDatabase, createFilesystemEvidenceStore, createHttpServer, createLogger,
   createPostgresWorkQueue, createWorker, loadMigrations, migrate, SHIPPED_MIGRATIONS, sweep, type Database, type Migration, type Queryable } from '@defi-workflow-engine/cloud-runtime';
 import { createNativeTransferNode, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
@@ -66,7 +66,8 @@ beforeAll(async () => {
   }));
   NEXT = [...THIS, ...certified];
 });
-afterAll(async () => { for (const step of cleanup.reverse()) await step().catch(() => undefined); });
+// Each test's servers, pools, databases and directories are released after it, newest first (bounded: a DROP DATABASE waits for a checkpoint).
+afterEach(async () => { for (const step of cleanup.splice(0).reverse()) await step().catch(() => undefined); }, 60_000);
 
 async function database(migrations: readonly Migration[]): Promise<TestDatabase> {
   const t = await createTestDatabase({ migrated: false });

@@ -9,7 +9,7 @@
  */
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { assertSchemaCompatible, assertSchemaCurrent, CERTIFIED_FORWARD_MIGRATIONS, createPostgresLogStore, createPostgresWorkQueue, ensureTenant,
   loadMigrations, migrate, SHIPPED_MIGRATIONS, sweep, type Database, type Migration, type MigrationIdentity, type Queryable } from '../src/index.js';
 import * as unpatched from './baseline/migrations-fa7816b.js';
@@ -26,7 +26,8 @@ beforeAll(async () => {
   V11 = (await loadMigrations()).slice(0, ADMIN.base.version);
   V12 = [...V11, M12];
 });
-afterAll(async () => { await Promise.allSettled(dropped.map(t => t.drop())); });
+// Each test's databases are dropped after it (a DROP DATABASE waits for a checkpoint: dozens at once can outlast a default hook timeout).
+afterEach(async () => { await Promise.allSettled(dropped.splice(0).map(t => t.drop())); }, 60_000);
 
 async function database(migrations: readonly Migration[]): Promise<TestDatabase> {
   const t = await createTestDatabase({ migrated: false });
