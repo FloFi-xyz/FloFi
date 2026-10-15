@@ -25,6 +25,7 @@ steps:
     name: 'cimg/node:24.21.0-browsers'
     entrypoint: bash
     args: ['scripts/gcp-ci-full.sh']
+    env: ['FLOFI_SOURCE_SHA=$COMMIT_SHA']
     waitFor: ['disposable-postgres']
 timeout: '5400s'
 serviceAccount: 'projects/celtic-volt-418819/serviceAccounts/flofi-ci-runner@celtic-volt-418819.iam.gserviceaccount.com'
