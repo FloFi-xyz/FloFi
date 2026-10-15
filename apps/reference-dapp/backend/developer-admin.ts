@@ -20,7 +20,7 @@
  */
 import { open, rm } from 'node:fs/promises';
 import { parseArgs } from 'node:util';
-import { assertSchemaCurrent, createDatabase, ensureTenant, SHIPPED_MIGRATIONS } from '@defi-workflow-engine/cloud-runtime';
+import { assertSchemaCompatible, createDatabase, ensureTenant, SHIPPED_MIGRATIONS } from '@defi-workflow-engine/cloud-runtime';
 import { createPgHandoffStore } from '../src/platform/handoff-store.ts';
 import { deploymentTenant } from '../src/server/deployment.ts';
 import { createProject, disableProject, issueSandboxKey, listDeliveries, listKeys, revokeKey, type AdminDeps } from '../src/developer/admin.ts';
@@ -46,7 +46,7 @@ async function main(): Promise<void> {
   if (secret.length < 32 || secret.length > 512) throw new Error('FLOFI_DEVELOPER_SECRET_INVALID');
   const db = createDatabase({ connectionString: databaseUrl, maxConnections: 2, applicationName: 'flofi-developer-admin' });
   try {
-    await assertSchemaCurrent(db, SHIPPED_MIGRATIONS);
+    await assertSchemaCompatible(db, SHIPPED_MIGRATIONS);
     await ensureTenant(db, tenantId);
     const deps: AdminDeps = { store: createPgDeveloperStore(db, tenantId), handoffs: createPgHandoffStore(db, tenantId),
       config: { keys: { apiKey: developerKey(secret, 'api-key') } }, now: () => new Date() };

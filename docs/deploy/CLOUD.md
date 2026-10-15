@@ -227,8 +227,11 @@ These steps need the owner's accounts. The repository already contains everythin
 ## Operations
 
 * **Migrations** are explicit (`migrate`), serialized by an advisory lock, checksum-verified and recorded in
-  `schema_migrations`. API and worker refuse to start when the schema is behind (`SCHEMA_NOT_MIGRATED`).
-  Use the direct URL for migrations behind a transaction pooler.
+  `schema_migrations`. API and worker refuse to start when the schema is behind (`SCHEMA_NOT_MIGRATED`) or has a newer
+  migration their build holds no forward-compatibility certificate for (`MIGRATION_HISTORY_MISMATCH`); a certified newer
+  schema is served, and `migrate` never changes a database that is ahead of its build. Rolling deployments, certificates
+  and rollback limits: [SCHEMA-COMPATIBILITY.md](SCHEMA-COMPATIBILITY.md). Use the direct URL for migrations behind a
+  transaction pooler.
 * **Scaling**: add API or worker replicas freely. Workers claim with `SKIP LOCKED`; runs are protected by fenced
   leases; API instances share nothing but the database.
 * **Restarts**: SIGTERM stops claiming and drains in-flight items (Railway `drainingSeconds` 90). A killed worker's
