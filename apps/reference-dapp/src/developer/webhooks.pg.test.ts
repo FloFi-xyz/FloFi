@@ -123,11 +123,14 @@ describe('BUILD-DEVELOPER-001 webhook delivery', () => {
       // Other links are not the developer hook's business.
       await developerApprovalChanged(env, 'flofi_hs_' + 'a'.repeat(43));
       await developerApprovalChanged({ ...env, FLOFI_DEVELOPER: 'disabled' }, secret);
-      // Once due, the retry carries the same webhook-id and succeeds.
+      // Once due, the retry carries the same webhook-id and succeeds. Due by the dispatcher's own clock, as the store records it: PostgreSQL's
+      // now() has microseconds and a JavaScript Date only milliseconds, so a row stamped now() can still lie in the dispatcher's future.
       answer = 204;
-      await t.db.query(`UPDATE developer_webhook_deliveries SET next_attempt_at = now() WHERE endpoint_id = $1`, [endpoint.id]);
+      const due = new Date();
+      await t.db.query(`UPDATE developer_webhook_deliveries SET next_attempt_at = $2 WHERE endpoint_id = $1`, [endpoint.id, due]);
       const store = createPgDeveloperStore(t.db, 'default');
-      expect(await dispatchDeliveries({ config: developerConfig(LOOPBACK_ENV), tenantId: 'default', store }, {}, 10)).toEqual({ attempted: 2, succeeded: 2, retrying: 0, dead: 0 });
+      expect(await dispatchDeliveries({ config: developerConfig(LOOPBACK_ENV), tenantId: 'default', store, now: () => due },
+        { scope: { projectId: p.projectId, environment: 'sandbox' } }, 10)).toEqual({ attempted: 2, succeeded: 2, retrying: 0, dead: 0 });
       expect(received.slice(2).map(r => r.headers['webhook-id']).sort()).toEqual(received.slice(0, 2).map(r => r.headers['webhook-id']).sort());
       expect(received.slice(2).every(r => r.headers['flofi-delivery-attempt'] === '2')).toBe(true);
     } finally { await new Promise(resolve => server.close(resolve)); }
@@ -161,7 +164,9 @@ describe('BUILD-DEVELOPER-001 webhook delivery', () => {
     const fresh = (await api<{ id: string; secret: string; url: string }>('POST', '/webhook-endpoints', { url: 'https://hooks.example.com/new' })).body;
     const first = await claimedApproval(api, false, runtime);
     const deps = { config: developerConfig(LOOPBACK_ENV), tenantId: 'default', store, handoffs: createPgHandoffStore(t.db, 'default'), runtime, transport: box.transport };
-    await syncAndDispatch(deps, { handoffId: first.approval.id }, { approvals: 1, deliveries: 10 });
+    // Scoped like the /approve hook: this approval's events, then only this project's due deliveries (the scheduler sweeps every project).
+    const scope = { projectId: p.projectId, environment: 'sandbox' } as const;
+    await syncAndDispatch(deps, { handoffId: first.approval.id, scope }, { approvals: 1, deliveries: 10 });
     const claimed = box.received.filter(r => JSON.parse(r.body).type === 'approval.claimed');
     expect(claimed.map(r => r.url).sort()).toEqual([fresh.url, old.url].sort());
     expect(new Set(claimed.map(r => r.headers['webhook-id'])).size).toBe(1);
@@ -169,7 +174,7 @@ describe('BUILD-DEVELOPER-001 webhook delivery', () => {
 
     expect((await api('DELETE', `/webhook-endpoints/${old.id}`)).status).toBe(200);
     const second = await claimedApproval(api, false, runtime);
-    await syncAndDispatch(deps, { handoffId: second.approval.id }, { approvals: 1, deliveries: 10 });
+    await syncAndDispatch(deps, { handoffId: second.approval.id, scope }, { approvals: 1, deliveries: 10 });
     expect(box.received.filter(r => r.body.includes(second.approval.id)).map(r => r.url)).toEqual([fresh.url, fresh.url]);
   });
 
@@ -204,10 +209,11 @@ describe('BUILD-DEVELOPER-001 webhook delivery', () => {
     const { approval, secret, surface } = await claimedApproval(api, false, runtime);
     claimedAt = Date.now();
     const deps = { config: developerConfig(LOOPBACK_ENV), tenantId: 'default', store, handoffs: createPgHandoffStore(t.db, 'default'), runtime, transport: box.transport };
-    await syncAndDispatch(deps, { handoffId: approval.id }, { approvals: 1, deliveries: 10 });
+    const scope = { projectId: p.projectId, environment: 'sandbox' } as const;
+    await syncAndDispatch(deps, { handoffId: approval.id, scope }, { approvals: 1, deliveries: 10 });
     expect(box.received).toEqual([]);
     await shareApproval(surface, secret, [WALLET], true);
-    await syncAndDispatch(deps, { handoffId: approval.id }, { approvals: 1, deliveries: 10 });
+    await syncAndDispatch(deps, { handoffId: approval.id, scope }, { approvals: 1, deliveries: 10 });
     expect(box.received.map(r => JSON.parse(r.body)).map(e => [e.type, e.data.executionId])).toEqual(expect.arrayContaining([['execution.started', 'run-hook-1'],
       ['execution.reconciled', 'run-hook-1']]));
     expect(box.received).toHaveLength(2);
