@@ -126,7 +126,19 @@ bash .circleci/scripts/ci-sbom.sh
 )
 (
   source scripts/ci-observe.sh 'Unit and contract tests'
-  pnpm test
+  # PNG rasterization is CPU-intensive. On the 2-vCPU Cloud Build worker,
+  # four concurrent Vitest workers can starve the 120-second render test.
+  # Run that exact spec first with an exclusive worker, then the rest of the
+  # unchanged unit inventory with two workers. No tests are skipped.
+  png_spec=apps/reference-dapp/src/server/workflow-visual-image.test.ts
+  pnpm exec vitest run "$png_spec" --maxWorkers=1 --testTimeout=30000
+  pnpm exec vitest run packages apps/reference-dapp/src apps/reference-dapp/backend \
+    --exclude '**/*.fork.test.ts' \
+    --exclude '**/*.pg.test.ts' \
+    --exclude '**/*.live.test.ts' \
+    --exclude '**/*.remote.test.ts' \
+    --exclude "$png_spec" \
+    --maxWorkers=2 --testTimeout=30000
   python3 scripts/summarize-screenshot-diffs.py --self-test
   test -f packages/reference-linter/dist/index.js
   test -f packages/reference-linter/dist/index.d.ts
