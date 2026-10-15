@@ -6,15 +6,17 @@
  *
  *   before   this build is live, the database is still behind it   → platform state (MCP, Developer, Channels, approvals, /admin) refuses to
  *            open, as for every earlier migration; the web Copilot keeps working on its environment bootstrap (no settings can exist yet);
- *   during   0012 applies while the API writes runs                  → it takes no lock on execution_runs, so no API write waits for it; a lock
- *            it does need (the automation evaluation history) is waited for at most 5 s, then the migration rolls back entirely;
- *   after    the previous build still serves                         → warm instances keep working; a cold one refuses the newer schema
- *            (`MIGRATION_HISTORY_MISMATCH`), as for every earlier migration;
+ *   during   0012 applies while the API writes runs                  → it takes no lock on execution_runs, so no API run write waits for it; a
+ *            lock it does need (the automation evaluation history) is waited for at most 5 s, then the migration rolls back entirely
+ *            (while it is open, evaluation writes wait for it: the worker's, and the API's automation/delegation owner routes);
+ *   after    the previous build still serves                         → it is BUILD-DB-COMPAT-001 (Release A), whose certificate names this exact
+ *            0012: warm and cold instances keep serving and its pre-deploy (a rollback) changes nothing; only a build older than Release A
+ *            refuses the newer schema on a cold start (`MIGRATION_HISTORY_MISMATCH`);
  *   next     a later migration is applied while this build serves    → this build refuses platform state, but its web Copilot keeps the
  *            administrator's settings (never the environment model, never unavailable); a tampered history still fails closed.
  */
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { assertSchemaCurrent, loadMigrations, migrate, SHIPPED_MIGRATIONS, type Database, type Migration } from '@defi-workflow-engine/cloud-runtime';
+import { assertSchemaCompatible, assertSchemaCurrent, loadMigrations, migrate, SHIPPED_MIGRATIONS, type Database, type Migration } from '@defi-workflow-engine/cloud-runtime';
 import { createTestDatabase, type TestDatabase } from '../../../../packages/cloud-runtime/test/pg-harness.ts';
 import { resolveCopilotLive } from '../server/copilot-runtime.ts';
 import { COPILOT_SETTINGS_SCHEMA } from '../server/copilot-settings.ts';
@@ -110,15 +112,23 @@ describe('BUILD-ADMIN-001 rolling deployment of 0012 (PostgreSQL)', () => {
     } finally { await t.drop(); }
   });
 
-  it('after the migration: the previous build keeps its warm pool, refuses on a cold start; this build opens', async () => {
+  it('after the migration: the previous build (Release A) keeps serving and cold-starting, its rollback pre-deploy changes nothing; an older build refuses; this build opens', async () => {
     const t = await database(ADMIN);
     try {
       const warm = t.open(2);
       opened.push(warm);
-      expect(await assertSchemaCurrent(warm, PREVIOUS)).toBe(ADMIN); // a previous-build instance that started before the migration
+      expect(await assertSchemaCompatible(warm, PREVIOUS)).toEqual({ version: ADMIN, application: ADMIN, forward: [] }); // started before 0012
       await migrate(t.db, all.slice(0, ADMIN + 1));
       expect((await warm.query(`SELECT count(*)::int AS n FROM execution_runs`)).rows).toEqual([{ n: 0 }]); // additive: it keeps working
-      await expect(assertSchemaCurrent(t.db, PREVIOUS)).rejects.toThrow('MIGRATION_HISTORY_MISMATCH'); // a previous-build cold start
+      // A previous-build cold start: BUILD-DB-COMPAT-001's certificate names the 0012 this build ships, byte for byte, so it serves.
+      expect(await assertSchemaCompatible(t.db, PREVIOUS)).toEqual({ version: ADMIN + 1, application: ADMIN, forward: [SHIPPED_MIGRATIONS[ADMIN]] });
+      // Its runner — the pre-deploy of a rollback to it — applies nothing and changes nothing on the newer schema.
+      const ledger = async () => (await t.db.query(`SELECT version, name, sha256, applied_at FROM schema_migrations ORDER BY version`)).rows;
+      const before = await ledger();
+      expect(await migrate(t.db, all.slice(0, ADMIN))).toEqual([]);
+      expect(await ledger()).toEqual(before);
+      // A build older than Release A checks the exact history only: it refuses on a cold start.
+      await expect(assertSchemaCurrent(t.db, PREVIOUS)).rejects.toThrow('MIGRATION_HISTORY_MISMATCH');
       if (ADMIN + 1 === SHIPPED_MIGRATIONS.length) {
         expect((await platformStateHost(env(t))).tenantId).toBe('default');
         expect(await web(t)).toMatchObject({ ok: true, source: 'ENVIRONMENT', version: null });

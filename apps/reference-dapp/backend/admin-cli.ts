@@ -17,7 +17,7 @@
  * with explicit extensions (`backend/admin-cli.test.ts`).
  */
 import { parseArgs } from 'node:util';
-import { assertSchemaCurrent, createDatabase, ensureTenant, SHIPPED_MIGRATIONS } from '@defi-workflow-engine/cloud-runtime';
+import { assertSchemaCompatible, createDatabase, ensureTenant, SHIPPED_MIGRATIONS } from '@defi-workflow-engine/cloud-runtime';
 import { deploymentTenant } from '../src/server/deployment.ts';
 import { ADMIN_COMMANDS, runAdminCommand, type AdminCommand } from '../src/admin/cli-commands.ts';
 
@@ -35,7 +35,7 @@ async function main(): Promise<void> {
   if (!/^postgres(ql)?:\/\//.test(databaseUrl)) throw new Error('DATABASE_URL_REQUIRED');
   const db = createDatabase({ connectionString: databaseUrl, maxConnections: 2, applicationName: 'flofi-admin-cli' });
   try {
-    await assertSchemaCurrent(db, SHIPPED_MIGRATIONS);
+    await assertSchemaCompatible(db, SHIPPED_MIGRATIONS);
     await ensureTenant(db, tenantId);
     const out = await runAdminCommand(command as AdminCommand, values, db, tenantId);
     process.stdout.write(JSON.stringify({ tenantId, ...out }, null, 2) + '\n');

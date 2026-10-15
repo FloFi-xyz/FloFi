@@ -4,10 +4,11 @@
  * exactly this build's schema version.
  *
  * Normally the settings are read through the platform-state pool (`platformStateHost`), which opens only on exactly the migrations this build
- * ships. During a rolling deployment the database is briefly one migration behind or ahead of a serving build — a new Vercel build live
- * before the Railway pre-deploy migrated, or the previous build after it did — and platform state refuses every cold instance
- * (`SCHEMA_NOT_MIGRATED`, `MIGRATION_HISTORY_MISMATCH`). The settings table needs only the migration that created it, so this source then
- * checks exactly that, on its own one-connection pool:
+ * ships, or on newer ones this build's forward-compatibility certificate names (BUILD-DB-COMPAT-001; none exists yet for this build).
+ * During a rolling deployment the database can be one migration behind this build (a new Vercel build live before the Railway pre-deploy
+ * migrated) or ahead of it by a migration it is not certified for (a later migration applied while this build still serves), and platform
+ * state refuses every cold instance (`SCHEMA_NOT_MIGRATED`, `MIGRATION_HISTORY_MISMATCH`). The settings table needs only the migration that
+ * created it, so this source then checks exactly that, on its own one-connection pool:
  *
  *   - the applied history matches this build's shipped identities up to `admin_control_plane` → the active version is read as usual (and
  *     validated by the resolver as always);

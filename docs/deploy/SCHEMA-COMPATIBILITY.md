@@ -39,8 +39,8 @@ Where the check runs:
 | `backend/main.ts` `api`, `worker`, `import-journal` | Railway API, Railway worker, operator import |
 | `backend/main.ts migrate` | Railway API pre-deploy; Vercel Preview `FLOFI_MIGRATE_ON_BUILD=preview` |
 | `src/server/flow-runtime.ts` (embedded runtime) | Vercel embedded flows, MCP tools, `/api/readiness` |
-| `src/server/platform-state-host.ts` | MCP OAuth, Developer API, Channels, approvals (and Admin, once it ships) |
-| `backend/developer-admin.ts` | Developer operator CLI |
+| `src/server/platform-state-host.ts` | MCP OAuth, Developer API, Channels, approvals, Admin (BUILD-ADMIN-001) |
+| `backend/developer-admin.ts`, `backend/admin-cli.ts` | Developer and Admin operator CLIs |
 
 **Observability.** On a certified newer schema `main.ts` logs, on `migrate.applied`, `api.starting` and `worker.starting`:
 `schema_version` (the database's), `application_schema_version` (the build's) and `forward_migrations` (e.g. `12_admin_control_plane`).
@@ -148,7 +148,8 @@ build holds only worker evaluation writes; API owner automation/delegation route
 not the SQL: the comment is part of the certified bytes, and any edit to 0012 needs a new certificate and a new Release A. With this build
 deployed, `ADMIN.md` §7's "a pre-0012 build refuses the newer schema on every cold start" applies only to builds older than this one,
 and `src/admin/rollout.pg.test.ts`'s "previous build refuses on a cold start" checks the strict `assertSchemaCurrent` (still true), not
-what a deployed compatibility build does.
+what a deployed compatibility build does. (Addressed when BUILD-ADMIN-001 was rebased onto this build: `ADMIN.md` §7.2 lists the API
+owner routes, §7.4 the rollback rule, and `rollout.pg.test.ts` asserts that the certified build serves and cold-starts after 0012.)
 
 ## 4. Rollout
 
@@ -172,6 +173,8 @@ what a deployed compatibility build does.
    `admin-console`, governance). `schema-compatibility.pg.test.ts` skips itself in the combined build (no certificate for v12 yet).
    If Preview builds migrate (`FLOFI_MIGRATE_ON_BUILD=preview`), the PR's own Preview build applies 0012 to the shared Preview
    database as soon as it builds: Previews of branches without Release A then refuse platform state on cold starts — rebase them.
+   From BUILD-ADMIN-001 on, a Preview build refuses, changing nothing, to migrate a database holding non-Preview state
+   (`PREVIEW_DATABASE_NOT_DEDICATED`, `ADMIN.md` §7.5), so a Preview pointed at Production's database by mistake cannot apply 0012 there.
 2. Prepare without exposing: Vercel Production env per `ADMIN.md` §2; turn off *Auto-assign Custom Production Domains* (or deploy with
    `vercel deploy --prod --skip-domain`) so the merge builds a staged deployment. Recommended: turn off auto-deploy on `flofi-worker`
    for this release so the new worker starts after the migration (otherwise it exits `SCHEMA_NOT_MIGRATED` and restarts until 0012 is
