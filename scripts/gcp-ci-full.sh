@@ -8,6 +8,15 @@ root="$(mktemp -d /tmp/flofi-gcp-ci.XXXXXX)"
 trap 'rm -rf "$root"' EXIT
 cp -a /workspace "$root/source"
 cd "$root/source"
+# Cloud Build checks out source without full parent history. Fetch only the
+# exact build commit and immediate parent into the disposable workspace.
+# Do not edit /workspace or any existing repository outside this job.
+test -n "${FLOFI_SOURCE_SHA:-}" || { echo "Missing exact Cloud Build source SHA"; exit 1; }
+git init -q
+git remote add origin https://github.com/alrimarleskovar/FloFi.git
+git fetch --quiet --depth=2 origin "$FLOFI_SOURCE_SHA"
+test "$(git rev-parse FETCH_HEAD)" = "$FLOFI_SOURCE_SHA"
+git checkout --detach -q FETCH_HEAD
 export RUNNER_TEMP="$root/temp"
 export FLOFI_CI_ARCHIVE_CACHE="$RUNNER_TEMP/archives"
 export GITHUB_PATH="$RUNNER_TEMP/github-path"
