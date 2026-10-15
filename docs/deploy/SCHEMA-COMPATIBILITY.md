@@ -341,3 +341,99 @@ COMMIT;
 
 `forward-compatibility.pg.test.ts` runs exactly this block (read from this document): on 0013 it restores the v12 catalog exactly, the v12 build
 then sees its exact schema, and 0013 can be applied again; on a tampered or later ledger it refuses and changes nothing.
+
+## 8. Certificate 0014_learning_automatic
+
+The third certificate, written by BUILD-CHAT-LEARNING-002 one release ahead of its migration. **Release A** is the certificate alone (no feature,
+no schema change); **Release B** ships the migration and invisible Copilot learning (persistent automatic learning off by default).
+
+**Identity.** `packages/cloud-runtime/migrations/0014_learning_automatic.sql` of BUILD-CHAT-LEARNING-002 (Release B): 3,642 bytes, git blob
+`a5652964`, SHA-256 `624884d98407383c7093f6a56885ec13001614ddb9e2dcc2ac203451b519314e`. Fixture: `packages/cloud-runtime/test/fixtures/0014_learning_automatic.sql`.
+Assessed against the v13 build at `4f377df` (`base`: `13 copilot_learning 109be0d3…`, BUILD-CHAT-LEARNING-001 as merged).
+
+**What it creates** (proven by the catalog diff in `forward-compatibility.pg.test.ts`; nothing pre-existing is removed or redefined):
+
+* tables `learning_automatic_settings` (each verified identity's choice about automatic learning, with the legal basis and notice version it was
+  recorded under) and `learning_evidence` (bounded counters of what the identity's own interaction showed about a word), with their keys, checks
+  and one index;
+* **one addition to an existing relation**: each table has a foreign key `(tenant_id, subject_id) → learning_subjects` with `ON DELETE CASCADE`, which
+  adds PostgreSQL's internal referential triggers on `learning_subjects` (four: cascade-delete and no-action-update, per key). No column, index,
+  constraint or function of `learning_subjects` changes. The cascade is deliberate: every erasure of a subject — including a v13 process's plain
+  `DELETE` on STOP or "delete all" — also erases its 0014 rows.
+
+**Why the v13 build is unaffected.**
+
+* v13 code never names a 0014 object, runs no DDL at runtime and enumerates no catalog.
+* Its reads and writes of `learning_subjects` keep their meaning; a `DELETE` now also removes the subject's 0014 rows (its intent: erasure). Its
+  retention purge may delete an idle subject that only holds a choice about automatic learning — the same 30-day rule it already applies to subjects
+  without consent; the v14 build keeps such subjects (an objection must be honoured), so the window is limited to processes still on Release A.
+* Authentication, approvals, executions, Channels, Developer, MCP, Admin and BUILD-CHAT-LEARNING-001 state are untouched.
+
+**Locks while it is open** (observed with `pg_locks` in `forward-compatibility.pg.test.ts`): on committed relations, the ledger (`schema_migrations`)
+and `learning_subjects` in `AccessShareLock` and `ShareRowExclusiveLock` (taken by `CREATE TABLE … REFERENCES`). So, for the migration's transaction only, **v13 writes
+that create or change a learning subject wait** (an `INSERT`/`UPDATE`/`DELETE` of `learning_subjects`: a first "Remember", a settings change,
+`last_seen_at` refresh, an erasure) and proceed when it commits; v13 learning is fail-soft, so a wait is at worst a slower request. Everything else
+proceeds while it is open: v13 cold starts, `ensureTenant` (existing or new), runs, journals, the queue, evaluations, admin writes, reading learning
+contexts, saving a meaning of an existing subject (its foreign-key check takes a compatible row lock) and feedback events. Its own waits are bounded by
+`SET LOCAL lock_timeout = '5s'`.
+
+**Duration.** 12.0–12.6 ms with the real runner on loopback PostgreSQL 18.6 (five runs, a v13 database with 20,000 learning subjects): it creates two
+empty tables and their foreign keys (validating a new, empty referencing table does not scan `learning_subjects`), so the size of existing data does
+not matter — and it is also the longest a learning-subject write waits.
+
+**Evidence.** `forward-compatibility.test.ts` (manifest, fixture identity, decision rule for v13/v14 ledgers), `forward-compatibility.pg.test.ts` (real
+ledgers and runners, catalog and data diff, the cascade under a v13 erasure, lock window, the reversal below) and
+`apps/reference-dapp/backend/schema-compatibility.pg.test.ts`, which runs automatically for this certificate in Release A: API/worker continuity, real
+`main.ts` and CLI cold starts and the Vercel paths on the v14 schema.
+
+### 8.1 Rollout
+
+**Release A — this certificate (database stays at 0013).** Owner merges; Railway `flofi-api` pre-deploy logs `migrate.applied versions=none
+schema_version=13`; API, worker and Vercel serve as before. Make sure every process that can reach the production database runs Release A or later
+before 0014 is applied (Railway `flofi-api` and `flofi-worker`; the Vercel Production deployment, `/api/flofi/readiness` → `deployment.commit`; any
+Preview whose `DATABASE_URL` is production's — rebuild it from Release A or later; operator CLIs from a Release A checkout). Soak with readiness `READY`.
+
+**Release B — BUILD-CHAT-LEARNING-002.** Rebased on Release A, `forward-compatibility.test.ts` proves the shipped 0014 is the certified one. Railway's
+pre-deploy applies 0014 (`migrate.applied versions=14 schema_version=14`); from that commit on, Release A processes keep serving and cold-starting
+(`forward_migrations=14_learning_automatic`). Persistent automatic learning stays **off** until the owner sets `FLOFI_LEARNING_AUTOMATIC` after the
+legal decision (`docs/deploy/LEARNING.md`).
+
+### 8.2 Recovery and rollback
+
+| Situation | Safe action |
+| --- | --- |
+| Before 0014 is applied | Any rollback to Release A or later is safe. |
+| 0014 applied; Release B misbehaves | Unset `FLOFI_LEARNING_AUTOMATIC` (nothing more is stored) or `FLOFI_LEARNING` (the Copilot as before), or roll the application back to **Release A** (it serves on 0014; its pre-deploy `migrate` succeeds with `versions=none`). |
+| 0014 applied; a build **older than Release A** | **Unsafe**: it refuses the database on every cold start (`MIGRATION_HISTORY_MISMATCH`). |
+| 0014 applied; 0014 itself must go (last resort) | §8.3, only with Release A (or a later build without automatic learning) serving everywhere. |
+
+### 8.3 Emergency reversal of 0014 (last resort)
+
+Destroys every automatic-learning choice and all evidence (BUILD-CHAT-LEARNING-001's memories, subjects, glossary and history stay; meanings that were
+learned automatically remain as saved meanings — erase them first in `/admin/ai-learning` with *Erase automatic-learning data the current basis does
+not cover* under `FLOFI_LEARNING_AUTOMATIC=off` if they must go too). Preconditions: every process runs Release A (which serves on 0013 and 0014 —
+never run this while a Release B process serves); owner decision; a backup. One transaction with bounded locks, run with
+`psql -v ON_ERROR_STOP=1 -f <file>` on the direct (unpooled) URL; it refuses — changing nothing — unless 0014 is the newest migration and exactly the
+certified one:
+
+```sql
+BEGIN;
+SET LOCAL lock_timeout = '5s';
+DO $$
+BEGIN
+  IF (SELECT count(*) FROM schema_migrations WHERE version >= 14) <> 1 THEN
+    RAISE EXCEPTION 'REVERSAL_REFUSED: 0014 is not the newest migration';
+  END IF;
+  DELETE FROM schema_migrations WHERE version = 14 AND name = 'learning_automatic'
+    AND sha256 = '624884d98407383c7093f6a56885ec13001614ddb9e2dcc2ac203451b519314e';
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'REVERSAL_REFUSED: not the certified 0014';
+  END IF;
+END $$;
+DROP TABLE learning_evidence, learning_automatic_settings;
+COMMIT;
+```
+
+`forward-compatibility.pg.test.ts` runs exactly this block (read from this document): on 0014 it restores the v13 catalog exactly (the referential
+triggers on `learning_subjects` go with the tables), the v13 build then sees its exact schema, and 0014 can be applied again; on a tampered or later
+ledger it refuses and changes nothing.

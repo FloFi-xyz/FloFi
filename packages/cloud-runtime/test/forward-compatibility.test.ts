@@ -79,6 +79,24 @@ describe('BUILD-DB-COMPAT-001 forward-compatibility manifest', () => {
     expect(code(() => schemaCompatibility([...v12, v13], v12.slice(0, 11)))).toEqual({ error: 'MIGRATION_HISTORY_MISMATCH' });
   });
 
+  it('BUILD-CHAT-LEARNING-002: certifies the exact 0014 for the v13 build; every later build ships or certifies it', async () => {
+    const automatic = CERTIFIED_FORWARD_MIGRATIONS.find(c => c.migrations.some(m => m.name === 'learning_automatic'))!;
+    expect(automatic.base).toEqual({ version: 13, name: 'copilot_learning', sha256: '109be0d34ea5b21ae42b1fda2c4e7fe87254a21ef1264a8235d57e8f1823bfc0' });
+    expect(automatic.migrations).toEqual([{ version: 14, name: 'learning_automatic', sha256: '624884d98407383c7093f6a56885ec13001614ddb9e2dcc2ac203451b519314e' }]);
+    expect(sha256(await readFile(new URL('./fixtures/0014_learning_automatic.sql', import.meta.url), 'utf8'))).toBe(automatic.migrations[0]!.sha256);
+    const head = SHIPPED_MIGRATIONS.at(-1)!;
+    expect(SHIPPED_MIGRATIONS.length >= 14 || JSON.stringify(head) === JSON.stringify(automatic.base)).toBe(true);
+    // The v13 build serves exactly the certified v14 ledger; anything else newer is refused, and without this certificate v14 is refused too.
+    const v13 = SHIPPED_MIGRATIONS.slice(0, 13), v14 = automatic.migrations[0]!;
+    expect(schemaCompatibility([...v13, v14], v13)).toEqual({ version: 14, application: 13, forward: [v14] });
+    for (const applied of [[...v13, edit(v14, { sha256: 'f'.repeat(64) })], [...v13, edit(v14, { name: 'learning_automatic_v2' })],
+      [...v13, v14, { version: 15, name: 'later', sha256: 'e'.repeat(64) }], [...v13.slice(0, 12), edit(v14, { version: 13 })]])
+      expect(code(() => schemaCompatibility(applied, v13))).toEqual({ error: 'MIGRATION_HISTORY_MISMATCH' });
+    expect(code(() => schemaCompatibility([...v13, v14], v13, CERTIFIED_FORWARD_MIGRATIONS.filter(c => c !== automatic)))).toEqual({ error: 'MIGRATION_HISTORY_MISMATCH' });
+    // The v12 build's certificate names 0013 only: a v14 database is not certified for it.
+    expect(code(() => schemaCompatibility([...v13, v14], v13.slice(0, 12)))).toEqual({ error: 'MIGRATION_HISTORY_MISMATCH' });
+  });
+
   it('the vendored unpatched module is the released fa7816b file, byte for byte', async () => {
     const vendored = await readFile(new URL('./baseline/migrations-fa7816b.ts', import.meta.url), 'utf8');
     const header = vendored.split('\n').slice(1, 4).join('\n') + '\n';
