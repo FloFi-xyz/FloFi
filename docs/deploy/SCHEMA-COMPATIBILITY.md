@@ -251,3 +251,93 @@ whole (no partial schema), which would need a separate decision (e.g. building t
 writes); objects created outside migrations are invisible to the check; query-plan changes from a new index are performance, not
 correctness. Zero downtime is demonstrated on loopback PostgreSQL for the API, worker, process cold starts and Vercel code paths; it is
 not a measurement of Railway's or Vercel's deployment orchestration, Neon's pooler, or production data volumes.
+
+## 7. Certificate 0013_copilot_learning
+
+The second certificate, written by BUILD-CHAT-LEARNING-001 one release ahead of its migration. **Release A** is the certificate alone (no
+feature, no schema change); **Release B** ships the migration and the Copilot learning feature.
+
+**Identity.** `packages/cloud-runtime/migrations/0013_copilot_learning.sql` of BUILD-CHAT-LEARNING-001 (Release B): 12,076 bytes, git blob
+`13cbc1e5`, SHA-256 `109be0d34ea5b21ae42b1fda2c4e7fe87254a21ef1264a8235d57e8f1823bfc0`. Fixture: `packages/cloud-runtime/test/fixtures/0013_copilot_learning.sql`.
+Assessed against the v12 build at `c46b563` (`base`: `12 admin_control_plane 25556fbf…`, BUILD-ADMIN-001 as merged).
+
+**What it creates** (proven by the catalog diff in `forward-compatibility.pg.test.ts`; nothing pre-existing is removed, redefined or added to):
+
+* tables `learning_subjects`, `learning_memories`, `learning_feedback_events` (+ identity sequence), `learning_candidates`, `learning_candidate_support`,
+  `learning_evaluations` (+ identity sequence), `learning_knowledge_versions`, with their keys, checks, indexes and foreign keys **among themselves only**;
+* functions `learning_candidate_transition()`, `learning_knowledge_admission()`, and triggers on the new tables only; the existing
+  `reject_append_only_mutation()` is referenced by three of them, not changed;
+* **nothing on a pre-existing relation**: no foreign key to `tenants` (the tenant id is checked by a `CHECK` instead, so no trigger is added to
+  `tenants`), no index, trigger, column or constraint on any existing table.
+
+**Why the v12 build is unaffected.**
+
+* v12 code never names a `learning_*` object, runs no DDL at runtime and enumerates no catalog (its only catalog reads are `to_regclass` checks of
+  its own tables).
+* No existing table, index, trigger, function or row changes, so every v12 read and write keeps its meaning and its plan.
+* Authentication, approvals, executions, Channels, Developer, MCP and Admin state live in untouched tables.
+
+**Locks while it is open** (observed with `pg_locks` in `forward-compatibility.pg.test.ts`): on committed relations, only the ledger
+(`schema_migrations`), plus the migration runner's advisory lock and its own new objects. **Nothing waits for it**: v12 cold starts,
+`ensureTenant` of an existing **or a brand-new** tenant, run, journal, queue, evaluation, automation and admin writes all proceed while it is open
+(unlike 0012, it adds no foreign key to `tenants` and no index on an existing table). Its own waits are bounded by `SET LOCAL lock_timeout = '5s'`.
+
+**Duration.** 21–23 ms with the real runner on loopback PostgreSQL 18.6 (five runs, a v12 database with 400,000 evaluation rows): it creates
+empty tables only, so the size of existing data does not matter.
+
+**Evidence.** `forward-compatibility.test.ts` (manifest, fixture identity, decision rule for v12/v13 ledgers),
+`forward-compatibility.pg.test.ts` (real ledgers and runners, catalog and data diff, lock window, the reversal below) and
+`apps/reference-dapp/backend/schema-compatibility.pg.test.ts`, which runs automatically for this certificate in Release A: API/worker continuity,
+real `main.ts` and CLI cold starts and the Vercel paths on the v13 schema.
+
+### 7.1 Rollout
+
+**Release A — this certificate (database stays at 0012).** Owner merges; Railway `flofi-api` pre-deploy logs `migrate.applied versions=none
+schema_version=12`; API, worker and Vercel serve as before. Make sure every process that can reach the production database runs Release A or later
+before 0013 is applied (Railway `flofi-api` and `flofi-worker` deployments; the Vercel Production deployment, `/api/flofi/readiness` →
+`deployment.commit`; any Preview whose `DATABASE_URL` is production's — rebuild it from Release A or later; operator CLIs from a Release A
+checkout). Soak with readiness `READY`.
+
+**Release B — BUILD-CHAT-LEARNING-001.** Rebased on Release A, `forward-compatibility.test.ts` proves the shipped 0013 is the certified one.
+Railway's pre-deploy applies 0013 (`migrate.applied versions=13 schema_version=13`); from that commit on, Release A processes keep serving and
+cold-starting (`forward_migrations=13_copilot_learning`). Learning stays **off** until the owner sets `FLOFI_LEARNING=enabled` and a dedicated
+`FLOFI_LEARNING_SECRET` on Vercel (`docs/deploy/LEARNING.md`, Release B).
+
+### 7.2 Recovery and rollback
+
+| Situation | Safe action |
+| --- | --- |
+| Before 0013 is applied | Any rollback to Release A or later is safe. |
+| 0013 applied; Release B misbehaves | Turn learning off (`FLOFI_LEARNING` unset: no memory, glossary or feedback; the Copilot as before), or roll the application back to **Release A** (it serves on 0013; its pre-deploy `migrate` succeeds with `versions=none`). |
+| 0013 applied; a build **older than Release A** | **Unsafe**: it refuses the database on every cold start (`MIGRATION_HISTORY_MISMATCH`). |
+| 0013 applied; 0013 itself must go (last resort) | §7.3, only with Release A (or a later build without learning) serving everywhere. |
+
+### 7.3 Emergency reversal of 0013 (last resort)
+
+Destroys every learning subject, private memory, feedback event, candidate, evaluation and glossary version. Preconditions: every process runs
+Release A (which serves on both 0012 and 0013 — never run this while a Release B process serves); owner decision; a backup. One transaction with
+bounded locks, run with `psql -v ON_ERROR_STOP=1 -f <file>` on the direct (unpooled) URL; it refuses — changing nothing — unless 0013 is the newest
+migration and exactly the certified one:
+
+```sql
+BEGIN;
+SET LOCAL lock_timeout = '5s';
+DO $$
+BEGIN
+  IF (SELECT count(*) FROM schema_migrations WHERE version >= 13) <> 1 THEN
+    RAISE EXCEPTION 'REVERSAL_REFUSED: 0013 is not the newest migration';
+  END IF;
+  DELETE FROM schema_migrations WHERE version = 13 AND name = 'copilot_learning'
+    AND sha256 = '109be0d34ea5b21ae42b1fda2c4e7fe87254a21ef1264a8235d57e8f1823bfc0';
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'REVERSAL_REFUSED: not the certified 0013';
+  END IF;
+END $$;
+DROP TABLE learning_knowledge_versions, learning_evaluations, learning_candidate_support, learning_candidates, learning_feedback_events,
+  learning_memories, learning_subjects;
+DROP FUNCTION learning_candidate_transition(), learning_knowledge_admission();
+COMMIT;
+```
+
+`forward-compatibility.pg.test.ts` runs exactly this block (read from this document): on 0013 it restores the v12 catalog exactly, the v12 build
+then sees its exact schema, and 0013 can be applied again; on a tampered or later ledger it refuses and changes nothing.

@@ -61,6 +61,24 @@ describe('BUILD-DB-COMPAT-001 forward-compatibility manifest', () => {
     expect(SHIPPED_MIGRATIONS.length >= V12.version || JSON.stringify(head) === JSON.stringify(ADMIN.base)).toBe(true);
   });
 
+  it('BUILD-CHAT-LEARNING-001: certifies the exact 0013 for the v12 build; every later build ships or certifies it', async () => {
+    const learning = CERTIFIED_FORWARD_MIGRATIONS.find(c => c.migrations.some(m => m.name === 'copilot_learning'))!;
+    expect(learning.base).toEqual({ version: 12, name: 'admin_control_plane', sha256: '25556fbfd8e45acf0e692fc340eee56fa2f064f4106225960d63e3da9c303af2' });
+    expect(learning.migrations).toEqual([{ version: 13, name: 'copilot_learning', sha256: '109be0d34ea5b21ae42b1fda2c4e7fe87254a21ef1264a8235d57e8f1823bfc0' }]);
+    expect(sha256(await readFile(new URL('./fixtures/0013_copilot_learning.sql', import.meta.url), 'utf8'))).toBe(learning.migrations[0]!.sha256);
+    const head = SHIPPED_MIGRATIONS.at(-1)!;
+    expect(SHIPPED_MIGRATIONS.length >= 13 || JSON.stringify(head) === JSON.stringify(learning.base)).toBe(true);
+    // The v12 build serves exactly the certified v13 ledger; anything else newer is refused, and without this certificate v13 is refused too.
+    const v12 = SHIPPED_MIGRATIONS.slice(0, 12), v13 = learning.migrations[0]!;
+    expect(schemaCompatibility([...v12, v13], v12)).toEqual({ version: 13, application: 12, forward: [v13] });
+    for (const applied of [[...v12, edit(v13, { sha256: 'f'.repeat(64) })], [...v12, edit(v13, { name: 'copilot_learning_v2' })], [...v12, v13, { version: 14, name: 'later', sha256: 'e'.repeat(64) }],
+      [...v12.slice(0, 11), edit(v13, { version: 12 })]])
+      expect(code(() => schemaCompatibility(applied, v12))).toEqual({ error: 'MIGRATION_HISTORY_MISMATCH' });
+    expect(code(() => schemaCompatibility([...v12, v13], v12, CERTIFIED_FORWARD_MIGRATIONS.filter(c => c !== learning)))).toEqual({ error: 'MIGRATION_HISTORY_MISMATCH' });
+    // The v11 build's certificate names 0012 only: a v13 database is not certified for it.
+    expect(code(() => schemaCompatibility([...v12, v13], v12.slice(0, 11)))).toEqual({ error: 'MIGRATION_HISTORY_MISMATCH' });
+  });
+
   it('the vendored unpatched module is the released fa7816b file, byte for byte', async () => {
     const vendored = await readFile(new URL('./baseline/migrations-fa7816b.ts', import.meta.url), 'utf8');
     const header = vendored.split('\n').slice(1, 4).join('\n') + '\n';
@@ -99,9 +117,12 @@ describe('BUILD-DB-COMPAT-001 schema decision rule', () => {
     expect(code(() => schemaCompatibility(PREVIOUS, next))).toEqual({ error: 'SCHEMA_NOT_MIGRATED' });
     // The v11 build's certificate says nothing about the v12 build, nor about 0013.
     expect(code(() => schemaCompatibility([...next, v13], next))).toEqual({ error: 'MIGRATION_HISTORY_MISMATCH' });
+    // (BUILD-CHAT-LEARNING-001 added the real v12 certificate for its 0013: the synthetic one replaces it here — one certificate per build.)
     const for12: ForwardCompatibilityCertificate = { base: V12, migrations: [v13], assessment: 'test' };
-    expect(schemaCompatibility([...next, v13], next, [...CERTIFIED_FORWARD_MIGRATIONS, for12])).toEqual({ version: 13, application: 12, forward: [v13] });
-    expect(code(() => schemaCompatibility([...next, v13], PREVIOUS, [...CERTIFIED_FORWARD_MIGRATIONS, for12]))).toEqual({ error: 'MIGRATION_HISTORY_MISMATCH' });
+    const others = CERTIFIED_FORWARD_MIGRATIONS.filter(c => JSON.stringify(c.base) !== JSON.stringify(V12));
+    expect(schemaCompatibility([...next, v13], next, [...others, for12])).toEqual({ version: 13, application: 12, forward: [v13] });
+    expect(code(() => schemaCompatibility([...next, v13], PREVIOUS, [...others, for12]))).toEqual({ error: 'MIGRATION_HISTORY_MISMATCH' });
+    expect(code(() => schemaCompatibility([...next, v13], next, [...CERTIFIED_FORWARD_MIGRATIONS, for12]))).toEqual({ error: 'MIGRATION_CERTIFICATE_INVALID' });
     // A chain certified for the v11 build admits a prefix of it, never more.
     const chain: ForwardCompatibilityCertificate = { base: ADMIN.base, migrations: [V12, v13], assessment: 'test' };
     expect(schemaCompatibility([...next, v13], PREVIOUS, [chain]).forward).toEqual([V12, v13]);

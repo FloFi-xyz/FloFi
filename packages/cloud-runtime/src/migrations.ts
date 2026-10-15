@@ -62,6 +62,12 @@ export const CERTIFIED_FORWARD_MIGRATIONS: readonly ForwardCompatibilityCertific
     migrations: [{ version: 12, name: 'admin_control_plane', sha256: '25556fbfd8e45acf0e692fc340eee56fa2f064f4106225960d63e3da9c303af2' }],
     assessment: 'docs/deploy/SCHEMA-COMPATIBILITY.md#3-certificate-0012_admin_control_plane',
   },
+  {
+    base: { version: 12, name: 'admin_control_plane', sha256: '25556fbfd8e45acf0e692fc340eee56fa2f064f4106225960d63e3da9c303af2' },
+    // BUILD-CHAT-LEARNING-001: seven new learning_* tables with their own functions and triggers; nothing on any pre-existing relation.
+    migrations: [{ version: 13, name: 'copilot_learning', sha256: '109be0d34ea5b21ae42b1fda2c4e7fe87254a21ef1264a8235d57e8f1823bfc0' }],
+    assessment: 'docs/deploy/SCHEMA-COMPATIBILITY.md#7-certificate-0013_copilot_learning',
+  },
 ].map(certificate => Object.freeze({ base: Object.freeze(certificate.base),
   migrations: Object.freeze(certificate.migrations.map(migration => Object.freeze(migration))), assessment: certificate.assessment })));
 
