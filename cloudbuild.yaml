@@ -1,0 +1,32 @@
+# BUILD-CI-GCP-001 — Cloud Build manual bootstrap.
+# First-stage governance smoke gate only. NOT equivalent to the full
+# GitHub Actions/CircleCI certification (fork, PostgreSQL, browser, SBOM).
+# No deployment steps, credentials, or automatic triggers are configured here.
+steps:
+  - id: governance-smoke
+    name: 'cimg/node:24.21.0'
+    entrypoint: bash
+    args:
+      - '-euo'
+      - 'pipefail'
+      - '-c'
+      - |
+        export PYTHONDONTWRITEBYTECODE=1
+        python3 --version
+        git --version
+        python3 -m unittest discover -s scripts -p 'test_governance_lite.py'
+        python3 -m unittest discover -s scripts -p 'test_ci_*.py'
+        # Cloud Build's source archive may omit .git metadata.
+        # Create an ephemeral index only for governance_lite's tracked-file scan.
+        if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+          git init -q
+          git add -A
+        fi
+        export GOVERNANCE_BRANCH="${BRANCH_NAME:-cloudbuild-manual}"
+        export GOVERNANCE_EVENT=push
+        python3 scripts/governance_lite.py
+timeout: '900s'
+serviceAccount: 'projects/celtic-volt-418819/serviceAccounts/flofi-ci-runner@celtic-volt-418819.iam.gserviceaccount.com'
+options:
+  machineType: E2_STANDARD_2
+  logging: CLOUD_LOGGING_ONLY
