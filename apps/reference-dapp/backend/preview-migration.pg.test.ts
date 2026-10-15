@@ -59,13 +59,15 @@ describe('BUILD-ADMIN-001 Preview builds never migrate a non-Preview database (P
     const shared = await database(HEAD - 1);
     await previewState(shared.db);
     await shared.db.query(`INSERT INTO workflows (tenant_id, workflow_id) VALUES ('default', 'wf-production')`);
-    const before = await versions(shared.db);
+    // Nothing changes: neither the ledger nor the catalog (the newest migration's tables are not created).
+    const tables = async () => (await shared.db.query(`SELECT string_agg(tablename, ',' ORDER BY tablename) AS t FROM pg_tables WHERE schemaname = 'public'`)).rows;
+    const before = await versions(shared.db), catalog = await tables();
     const refused = await migrateProcess({ ...PREVIEW, DATABASE_URL: shared.url });
     expect([refused.code, event(refused.stdout, 'backend.failed')])
       .toEqual([1, expect.objectContaining({ command: 'migrate', stage: 'preview_database', error_code: 'PREVIEW_DATABASE_NOT_DEDICATED' })]);
     expect(event(refused.stdout, 'migrate.applied')).toBeUndefined();
     expect(await versions(shared.db)).toEqual(before);
-    expect((await shared.db.query(`SELECT to_regclass('public.admin_settings_versions') IS NULL AS absent`)).rows).toEqual([{ absent: true }]);
+    expect(await tables()).toEqual(catalog);
 
     // The same command and database outside a Vercel Preview: the production migration path is unchanged.
     const production = await migrateProcess({ DATABASE_URL: shared.url });

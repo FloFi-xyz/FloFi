@@ -267,8 +267,10 @@ export function createChannelService(ctx: ChannelContext) {
     }
     const used = decision.learning?.used ?? [], own = used.filter(entry => entry.source !== 'GLOBAL'), shared = used.length - own.length;
     await session.used(own).catch(() => undefined);
-    await learning.record([{ kind: 'TURN', outcome: decision.outcome, language, privateEntries: own.length, globalEntries: shared,
-      knowledgeVersion: session.learning.globalVersion }, ...(decision.learning?.signals ?? []).map(kind => ({ kind })), ...own.length ? [{ kind: 'MEMORY_USED' as const }] : [],
+    // A Copilot turn's outcome, as the web chat reports it (the reply kind); local commands and exact-grammar proposals are not interpretation.
+    const copilotOutcome = decision.outcome === 'PROPOSED_INTERPRETED' ? 'PROPOSAL' : /^COPILOT_[A-Z_]+$/.test(decision.outcome) ? decision.outcome.slice('COPILOT_'.length) : null;
+    await learning.record([...copilotOutcome ? [{ kind: 'TURN', outcome: copilotOutcome, language, privateEntries: own.length, globalEntries: shared,
+      knowledgeVersion: session.learning.globalVersion }] : [], ...(decision.learning?.signals ?? []).map(kind => ({ kind })), ...own.length ? [{ kind: 'MEMORY_USED' as const }] : [],
     ...shared ? [{ kind: 'KNOWLEDGE_USED' as const, knowledgeVersion: session.learning.globalVersion }] : []], session.subjectId).catch(() => undefined);
     return out;
   }

@@ -32,8 +32,9 @@ const rejects = (promise: Promise<unknown>, code: string | RegExp) => expect(pro
 describe('BUILD-ADMIN-001 migration 0012 (shipped)', () => {
   it('follows 0011 in the gapless shipped sequence and is pinned', async () => {
     const all = await loadMigrations();
-    expect(all.map(m => [m.version, m.name]).slice(-2)).toEqual([[11, 'delegated_execution'], [12, 'admin_control_plane']]);
-    expect(SHIPPED_MIGRATIONS.at(-1)).toEqual({ version: 12, name: 'admin_control_plane', sha256: all.at(-1)!.sha256 });
+    // BUILD-CHAT-LEARNING-001: later migrations follow it; 0012 itself keeps its place and its bytes.
+    expect(all.map(m => [m.version, m.name]).slice(10, 12)).toEqual([[11, 'delegated_execution'], [12, 'admin_control_plane']]);
+    expect(SHIPPED_MIGRATIONS[11]).toEqual({ version: 12, name: 'admin_control_plane', sha256: all[11]!.sha256 });
   });
 
   it('upgrades a populated 0011 database additively; only one read index is added to an existing table', async () => {
@@ -47,9 +48,11 @@ describe('BUILD-ADMIN-001 migration 0012 (shipped)', () => {
       await t.db.query(`INSERT INTO execution_runs (tenant_id, run_id, namespace, log_name, workflow_id, flow, status, provenance, needs_observation, has_evidence, log_version)
         VALUES ('default', 'run-1', 'aave-supply', 'run-1.jsonl', 'wf-1', 'aave-supply', 'RECONCILED', 'PUBLIC_TESTNET', false, true, 1)`);
       const before = await shape(t.db);
-      expect(await migrate(t.db, all)).toEqual([12]);
-      expect(await assertSchemaCurrent(t.db, SHIPPED_MIGRATIONS)).toBe(12);
-      expect(await migrate(t.db, all)).toEqual([]);
+      // Exactly 0012 on top of 0011 (BUILD-CHAT-LEARNING-001 ships later migrations; each has its own suite).
+      const through12 = all.slice(0, 12);
+      expect(await migrate(t.db, through12)).toEqual([12]);
+      expect(await assertSchemaCurrent(t.db, SHIPPED_MIGRATIONS.slice(0, 12))).toBe(12);
+      expect(await migrate(t.db, through12)).toEqual([]);
       const after = await shape(t.db);
       expect(Object.keys(after).filter(name => !(name in before)).sort()).toEqual(ADMIN_TABLES);
       for (const [table, items] of Object.entries(before)) {
