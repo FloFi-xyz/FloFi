@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use server';
 import { applyAction, applySettings, parseClientEvents, statusView, type LearningActionResult, type LearningStatusView } from '../learning/web-actions';
+import { createCopilotLimiter, type CopilotLimiter } from '../server/copilot-service';
 import { namespaceOf, webLearningService } from '../server/learning-web';
 import { currentWalletPrincipals } from '../server/session-principal';
 
@@ -27,9 +28,20 @@ export async function learningSettings(change: unknown, identity?: unknown): Pro
 export async function learningErase(identity?: unknown): Promise<LearningActionResult> {
   return applyAction(await webLearningService(process.env), await principals(), namespaceOf(identity), { op: 'FORGET_ALL' });
 }
+/** Feedback is best effort: a per-process admission window bounds the database work an anonymous caller can cause (before any query). */
+function feedbackLimiter(): CopilotLimiter {
+  const key = Symbol.for('flofi.learning.feedback-limiter'), holder = globalThis as unknown as Record<symbol, CopilotLimiter | undefined>;
+  holder[key] ??= createCopilotLimiter({ windowMs: 60_000, maxConcurrent: 4, maxPerWindow: 240 });
+  return holder[key];
+}
 /** Content-free feedback the chat observed (closed kinds and codes, counts); never text. Best effort. */
 export async function learningFeedback(events: unknown): Promise<void> {
-  const service = await webLearningService(process.env), parsed = parseClientEvents(events);
-  if (typeof service === 'string' || !parsed.length) return;
-  await service.record('WEB', parsed);
+  const parsed = parseClientEvents(events);
+  if (!parsed.length) return;
+  const release = feedbackLimiter().acquire();
+  if (!release) return;
+  try {
+    const service = await webLearningService(process.env);
+    if (typeof service !== 'string') await service.record('WEB', parsed);
+  } finally { release(); }
 }
