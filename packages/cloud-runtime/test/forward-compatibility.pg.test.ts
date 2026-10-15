@@ -344,3 +344,132 @@ describe('BUILD-DB-COMPAT-001 what 0012 does to a v11 database (PostgreSQL)', ()
     } finally { decide(false); await migration.catch(() => undefined); }
   });
 });
+
+/**
+ * BUILD-CHAT-LEARNING-001: the second certificate. The v12 build (BUILD-ADMIN-001 as merged) with its certificate for 0013 — the exact bytes
+ * BUILD-CHAT-LEARNING-001 releases (a SHA-256-pinned fixture) — on real ledgers, runners and the real lock window.
+ */
+describe('BUILD-CHAT-LEARNING-001 what 0013 does to a v12 database (PostgreSQL)', () => {
+  const LEARNING = CERTIFIED_FORWARD_MIGRATIONS.find(c => c.migrations.some(m => m.name === 'copilot_learning'))!;
+  const V12_BUILD = SHIPPED_MIGRATIONS.slice(0, 12);
+  let V12M: readonly Migration[], M13: Migration, V13M: readonly Migration[];
+  beforeAll(async () => {
+    const sql = await readFile(new URL('./fixtures/0013_copilot_learning.sql', import.meta.url), 'utf8');
+    M13 = { version: 13, name: 'copilot_learning', sql, sha256: createHash('sha256').update(sql).digest('hex') };
+    V12M = (await loadMigrations()).slice(0, 12);
+    V13M = [...V12M, M13];
+  });
+  /** v12 data next to which 0013 lands: v11's kinds, plus admin settings and audit rows. */
+  async function seed12(db: Database) {
+    await seed(db);
+    await db.query(`INSERT INTO admin_settings_versions (tenant_id, setting_key, version, document, created_by) VALUES ('default', 'copilot', 1, NULL, 'cli')`);
+    await db.query(`INSERT INTO admin_audit_events (tenant_id, actor, kind, outcome) VALUES ('default', 'cli', 'ADMIN_GRANTED', 'OK')`);
+  }
+
+  it('the v12 build serves the certified 0013 schema; the strict check and a build without the certificate refuse; a runner never changes it', async () => {
+    expect(identity(M13)).toEqual(LEARNING.migrations[0]);
+    const t = await database(V13M), shape = await catalog(t.db), history = await ledger(t.db);
+    expect(await assertSchemaCompatible(t.db, V12_BUILD)).toEqual({ version: 13, application: 12, forward: [identity(M13)] });
+    expect(await outcome(assertSchemaCurrent(t.db, V12_BUILD))).toEqual(MISMATCH);
+    expect(await outcome(assertSchemaCompatible(t.db, V12_BUILD, CERTIFIED_FORWARD_MIGRATIONS.filter(c => c !== LEARNING)))).toEqual(MISMATCH);
+    expect(await migrate(t.db, V12M)).toEqual([]);           // the v12 build's deploy step on a v13 database: nothing to apply
+    expect(await catalog(t.db)).toEqual(shape);
+    expect(await ledger(t.db)).toEqual(history);
+    await t.db.query(`UPDATE schema_migrations SET sha256 = repeat('f', 64) WHERE version = 13`);
+    expect(await outcome(assertSchemaCompatible(t.db, V12_BUILD))).toEqual(MISMATCH);
+    expect(await outcome(migrate(t.db, V12M))).toEqual(MISMATCH);
+    // A v12 database is exact for the v12 build and behind for a build that ships 0013.
+    const at12 = await database(V12M);
+    expect(await assertSchemaCompatible(at12.db, V12_BUILD)).toEqual({ version: 12, application: 12, forward: [] });
+    expect(await outcome(assertSchemaCompatible(at12.db, V13M))).toEqual(BEHIND);
+  });
+
+  it('is purely additive: nothing pre-existing is removed, redefined or added to; no existing row changes', async () => {
+    const t = await database(V12M);
+    await seed12(t.db);
+    const before = await catalog(t.db);
+    const tables = [...before.keys()].filter(k => k.startsWith('relation:') && before.get(k)!.startsWith('r ')).map(k => k.slice('relation:'.length))
+      .filter(table => table !== 'schema_migrations');
+    const rows = await data(t.db, tables), history = await ledger(t.db);
+    expect(await migrate(t.db, V13M)).toEqual([13]);
+    expect((await ledger(t.db)).slice(0, -1)).toEqual(history);
+    const after = await catalog(t.db);
+    expect([...before.keys()].filter(key => !after.has(key))).toEqual([]);
+    expect([...before.keys()].filter(key => after.has(key) && after.get(key) !== before.get(key))).toEqual([]);
+    expect(await data(t.db, tables)).toEqual(rows);
+    const added = [...after.keys()].filter(key => !before.has(key)).sort();
+    const own = (key: string) => /^(relation|index|function):learning_/.test(key) || /^(column|constraint|trigger):learning_[a-z_]+\./.test(key);
+    // Unlike 0012: not even a foreign-key trigger on `tenants` or an index on an existing table.
+    expect(added.filter(key => !own(key))).toEqual([]);
+    expect(added.filter(key => key.startsWith('relation:'))).toEqual(['relation:learning_candidate_support', 'relation:learning_candidates', 'relation:learning_evaluations',
+      'relation:learning_evaluations_evaluation_id_seq', 'relation:learning_feedback_events', 'relation:learning_feedback_events_event_id_seq',
+      'relation:learning_knowledge_versions', 'relation:learning_memories', 'relation:learning_subjects']);
+    expect(added.filter(key => key.startsWith('function:'))).toEqual(['function:learning_candidate_transition()', 'function:learning_knowledge_admission()']);
+  });
+
+  it('while 0013 is open it locks no pre-existing table: v12 cold starts, a brand-new tenant, runs, journals, the queue, evaluations and admin writes never wait', async () => {
+    const t = await database(V12M);
+    await seed12(t.db);
+    const runner = t.open(1), app = t.open(6);
+    let decide!: (commit: boolean) => void, ready!: (pid: number) => void;
+    const opened = new Promise<number>(resolve => { ready = resolve; }), decision = new Promise<boolean>(resolve => { decide = resolve; });
+    const migration = runner.transaction(async tx => {
+      await tx.query('SELECT pg_advisory_xact_lock($1)', [7_340_032_001]);
+      await tx.query('SELECT version, name, sha256 FROM schema_migrations ORDER BY version');
+      await tx.query(M13.sql);
+      await tx.query('INSERT INTO schema_migrations (version, name, sha256) VALUES ($1, $2, $3)', [M13.version, M13.name, M13.sha256]);
+      ready((await tx.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')).rows[0]!.pid);
+      if (!await decision) throw new Error('ROLLED_BACK');
+    });
+    const pid = await opened;
+    try {
+      const { rows: locks } = await app.query<{ relname: string; relkind: string; mode: string }>(`SELECT c.relname, c.relkind::text, l.mode
+        FROM pg_locks l JOIN pg_class c ON c.oid = l.relation WHERE l.pid = $1 AND l.granted AND c.relnamespace = 'public'::regnamespace ORDER BY 1, 3`, [pid]);
+      expect(locks.filter(l => l.relkind === 'r').map(({ relname, mode }) => ({ relname, mode }))).toEqual([
+        { relname: 'schema_migrations', mode: 'AccessShareLock' }, { relname: 'schema_migrations', mode: 'RowExclusiveLock' }]);
+      expect(locks.filter(l => l.relkind === 'i').every(l => l.relname.startsWith('schema_migrations'))).toBe(true);
+
+      const fresh = t.open(2), log = createPostgresLogStore({ db: fresh, tenantId: 'default', namespace: 'compat' });
+      const queue = createPostgresWorkQueue({ db: fresh, ownerId: 'window', tenantId: 'default' });
+      expect(await within(assertSchemaCompatible(fresh, V12_BUILD), 2_000)).toEqual({ version: 12, application: 12, forward: [] });
+      expect(await within(ensureTenant(fresh, 'default'), 2_000)).toBeUndefined();
+      expect(await within(ensureTenant(fresh, 'preview-new'), 2_000)).toBeUndefined();   // 0012 made this wait; 0013 does not
+      expect(await within(log.create('window.jsonl', bytes('{"a":1}\n')), 2_000)).toBe(true);
+      expect(await within(queue.enqueue('default', 'compat-window', 'w', null), 2_000)).toBe(true);
+      expect(await within(sweep(fresh, { tenantId: 'default' }), 2_000)).not.toBe('TIMEOUT');
+      expect(await probe(app, `UPDATE execution_runs SET status = 'AUTHORIZED', updated_at = now() WHERE run_id = 'run-1'`)).toBe('OK');
+      expect(await probe(app, `INSERT INTO automation_evaluations (tenant_id, rule_id, at, outcome) VALUES ('default', $1, now(), 'AUTOMATION_CREATED')`, [RULE])).toBe('OK');
+      expect(await probe(app, `INSERT INTO admin_settings_versions (tenant_id, setting_key, version, document, created_by) VALUES ('default', 'copilot', 2, NULL, 'cli')`)).toBe('OK');
+      expect(await probe(app, `INSERT INTO admin_audit_events (tenant_id, actor, kind, outcome) VALUES ('default', 'cli', 'ADMIN_WINDOW', 'OK')`)).toBe('OK');
+      expect(await probe(app, `INSERT INTO tenants (tenant_id) VALUES ('another-new') ON CONFLICT (tenant_id) DO NOTHING`)).toBe('OK');
+      decide(true);
+      await migration;
+      expect(await assertSchemaCompatible(fresh, V12_BUILD)).toEqual({ version: 13, application: 12, forward: [identity(M13)] });
+      expect(await outcome(unpatched.assertSchemaCurrent(fresh, V12_BUILD))).toEqual(MISMATCH);
+    } finally { decide(false); await migration.catch(() => undefined); }
+  });
+
+  it('the documented emergency reversal restores the exact v12 catalog and refuses, unchanged, anything but the certified 0013 as newest', async () => {
+    const doc = await readFile(new URL('../../../docs/deploy/SCHEMA-COMPATIBILITY.md', import.meta.url), 'utf8');
+    const section = doc.slice(doc.indexOf('### 7.3')), start = section.indexOf('```sql\n') + '```sql\n'.length;
+    const reversal = section.slice(start, section.indexOf('\n```', start));
+    expect(reversal).toMatch(/^BEGIN;[\s\S]*COMMIT;$/);
+    const v12 = await catalog((await database(V12M)).db);
+    for (const tamper of [`UPDATE schema_migrations SET sha256 = repeat('f', 64) WHERE version = 13`,
+      `INSERT INTO schema_migrations (version, name, sha256) VALUES (14, 'later_change', repeat('e', 64))`]) {
+      const t = await database(V13M), session = t.open(1);
+      await t.db.query(tamper);
+      const before = { shape: await catalog(t.db), history: await ledger(t.db) };
+      expect(await outcome(session.query(reversal))).toEqual({ error: 'P0001' });
+      await session.close();
+      expect({ shape: await catalog(t.db), history: await ledger(t.db) }).toEqual(before);
+    }
+    const t = await database(V13M);
+    await t.db.query(`INSERT INTO learning_subjects (tenant_id, subject_id, kind, subject_digest) VALUES ('default', $1, 'WALLET', $2)`, ['lsb_' + 'a'.repeat(26), Buffer.alloc(32, 1)]);
+    await t.db.query(`INSERT INTO learning_memories (tenant_id, subject_id, term, target) VALUES ('default', $1, 'arb', 'network:ARBITRUM')`, ['lsb_' + 'a'.repeat(26)]);
+    await t.db.query(reversal);
+    expect(await catalog(t.db)).toEqual(v12);
+    expect(await assertSchemaCompatible(t.db, V12_BUILD)).toEqual({ version: 12, application: 12, forward: [] });
+    expect(await migrate(t.db, V13M)).toEqual([13]);
+  });
+});
