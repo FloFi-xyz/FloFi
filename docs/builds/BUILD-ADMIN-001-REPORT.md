@@ -88,9 +88,10 @@ Responses endpoint. A live probe from `/admin` → AI Settings is the owner's ac
 
 ## 5. Production rollout (not executed)
 
-See [ADMIN.md §7](../deploy/ADMIN.md#7-production-rollout-owner-actions-in-order): migrate (Railway pre-deploy) → deploy API/worker →
-deploy Vercel promptly (every process verifies the exact shipped migration set) → set `FLOFI_ADMIN` and `FLOFI_ADMIN_SESSION_SECRET` on
-Vercel → grant the first administrator with the CLI → optional `admin-cli index` backfill.
+See [ADMIN.md §7](../deploy/ADMIN.md#7-production-rollout-owner-actions-in-order) (revised in §7 below): Release A (BUILD-DB-COMPAT-001)
+everywhere → admin variables set and the Vercel production deployment staged → merge → Railway pre-deploy applies 0012 (Release A keeps
+serving on it) → API, then worker → promote the staged Vercel deployment → validate → grant the first administrator with the CLI → optional
+`admin-cli index` backfill. Rollback after 0012: to Release A or later only.
 
 ## 6. Pre-PR hardening (2026-10-14)
 
@@ -163,3 +164,73 @@ Not run (unchanged from §3): the full guarded `product`/`composition` phases, f
 Intentional test changes for review: `src/admin/migration.pg.test.ts` now expects one added index (not two) and the `skipped_nodes`
 check; the analytics test helper `extend()` moves `updated_at` forward as the real projection does. New suites:
 `src/admin/rollout.pg.test.ts`, `src/server/copilot-settings-source.test.ts`.
+
+## 7. Integration onto `main` after BUILD-DB-COMPAT-001 (2026-10-15)
+
+BUILD-DB-COMPAT-001 (Release A) was merged into `main` as `23783f1` and deployed to Vercel and Railway with the production schema at
+`0011`. This build was rebased onto it locally; nothing was pushed, merged, deployed or migrated.
+
+**Rebase.** The six commits replayed onto `23783f1` without conflicts. The only file both sides changed,
+`packages/cloud-runtime/src/migrations.ts`, merged cleanly (this build adds its `SHIPPED_MIGRATIONS` row; `main` added the certificate
+below it). Every rebased commit has the same diff as before (only hunk context differs); the pre-rebase tip `53b1a8b` is kept locally
+as branch `claude/build-admin-001-pre-rebase-53b1a8b`. Commits A–C still carry the earlier, never-shipped drafts of `0012`, so
+`forward-compatibility.test.ts` fails on those three commits taken alone; the branch head (what CI tests and a merge ships) passes.
+
+**0012 is byte-identical** to the certified version: SHA-256 `25556fbfd8e45acf0e692fc340eee56fa2f064f4106225960d63e3da9c303af2`, git
+blob `50c4c92c`, identical (`cmp`) to `packages/cloud-runtime/test/fixtures/0012_admin_control_plane.sql`, and equal to the certificate
+in `CERTIFIED_FORWARD_MIGRATIONS` (asserted by `forward-compatibility.test.ts`).
+
+**Changes made during integration** (one commit):
+
+| Change | Why |
+| --- | --- |
+| `backend/preview-migration.ts` + `main.ts migrate` | In a Vercel Preview, the runner first refuses, changing nothing, a database that a non-Preview deployment writes to (`PREVIEW_DATABASE_NOT_DEDICATED`, stage `preview_database`): any tenant-scoped row outside the Preview `pv-…` tenants, or a tenant other than the `default` that migration 0001 seeds everywhere. A Preview whose `DATABASE_URL` is Production's by mistake can no longer apply 0012 (or any later migration) to Production. Railway's pre-deploy path is unchanged. |
+| `backend/admin-cli.ts` | `assertSchemaCompatible`, like every other production caller since Release A. No certificate exists for the v12 build, so its decision equals the strict check today. |
+| `src/admin/rollout.pg.test.ts` | The "after" phase asserted that the previous build refuses on a cold start — no longer what the deployed previous build (Release A) does. It now asserts Release A serves and cold-starts on 0012 and that its runner (a rollback's pre-deploy) applies and changes nothing; the strict, pre-Release-A refusal is still asserted. |
+| `docs/deploy/ADMIN.md` §1, §5, §7 | §7 rewritten: Release A preconditions, 0012's locks and what waits for them (including the API owner automation/delegation routes BUILD-DB-COMPAT-001 found; the 0012 comment that says otherwise is part of the certified bytes and stays), deployment order, safe rollback, Preview builds. |
+| `SCHEMA-COMPATIBILITY.md`, `ENVIRONMENT.md`, `CLOUD.md`, `deploy/vercel/build.sh`, `server/copilot-settings-source.ts` | Callers table (Admin, `admin-cli.ts`), Release B Preview note, the Preview guard, comments matching the certificate world. |
+
+Escalation 3 of §6 (forward-compatible schema checks) is now answered by BUILD-DB-COMPAT-001: builds serve a newer schema only under a
+certificate pinned to exact migration identities, one release ahead.
+
+**Combined forward-compatibility contract, verified.**
+
+| Property | Evidence |
+| --- | --- |
+| Shipped 0012 = certified 0012; the v12 build has no certificate of its own, so it is strict for itself | `forward-compatibility.test.ts` (7 tests) on the combined tree |
+| 0012 additive on a v11 catalog; its locks; emergency reversal | `forward-compatibility.pg.test.ts` (7 tests) on the combined tree (fixture = shipped bytes) |
+| Release A serves, cold-starts and rolls back onto 0012; pre-Release-A refuses | `src/admin/rollout.pg.test.ts` (4 tests) |
+| Release A's own API/worker continuity, real cold starts and every Vercel path on 0012 | `backend/schema-compatibility.pg.test.ts` run in a detached worktree at `23783f1`: 3 passed. In the combined tree this suite **skips itself** (3 skipped: no certificate for the v12 build) — not counted as a pass here |
+| The combined build's real runner and Release A's real processes | scratch cross-build check (not committed), loopback PostgreSQL: Release A `main.ts migrate` → 1–11; combined `api` on 11 → `SCHEMA_NOT_MIGRATED`; combined `migrate` → `versions=12`, ledger row `12 admin_control_plane 25556fbf…`; Release A `migrate` → `versions=none schema_version=12 application_schema_version=11 forward_migrations=12_admin_control_plane`, ledger unchanged; Release A `api` (`/readyz` 200) and `worker` start with `forward_migrations=12_admin_control_plane`; Release A `developer-admin.ts create-project` works; combined `api`, `worker` and `admin-cli list` start on 12 |
+| Preview guard | `backend/preview-migration.pg.test.ts` (3 tests, real `main.ts migrate` processes); fails as expected with the guard disabled |
+
+**Gates on the integrated head** (local, Node 24.21.0 / pnpm 11.22.0, disposable loopback PostgreSQL `postgres:18.6-bookworm`, loopback
+and MOCKED harnesses only; no provider, public RPC or chain contacted):
+
+| Gate | Result |
+| --- | --- |
+| `pnpm check` | **passed** — 378 files passed, 2 skipped; 4,283 tests passed, 2 skipped (the pre-existing fork-artifact `skipIf` cases in `mode-b-service` and `composition-service`) |
+| `pnpm test:postgres` | **passed** — 62 files passed, 1 skipped; 387 tests passed, 3 skipped (`schema-compatibility.pg.test.ts`, by design, see above) |
+| `python3 scripts/governance_lite.py` + `test_governance_lite.py` + `test_ci_*.py` | **passed** (19 + 22 self-tests); `git diff --check origin/main..HEAD` clean |
+| Browser profiles (headless shell 1243, loopback) | **passed** — `admin-console` 1, `copilot` 13, `chat-automations` 8, `workflow-acceptance` 5, `execution-continuity` 9, `cloud-provenance` 1 (each profile's spec set and environment taken from `scripts/guarded-release-browser.mjs`; none skipped) |
+
+Not run (as in §3): the full guarded `product`/`composition` phases, fork suites, MCP browser suites, `pnpm audit`,
+`bootstrap-ci.py --verify-dependencies`, SBOM. No dependency, lockfile, workflow or executor/compiler/reconciler file changed.
+
+**Remaining deployment risks** (see `ADMIN.md` §7):
+
+1. Anything still older than Release A when 0012 commits refuses the database on cold start: older Vercel deployments (they stay in the
+   rollback list), Previews or other environments sharing the production database, operator CLIs from old checkouts.
+2. While 0012 is open (≈ 0.3–1.6 s measured on loopback for 0.4–2 M evaluations), new tenants and every evaluation write wait, API owner
+   automation/delegation routes included. A lock it cannot take in 5 s, or an index build over 30 s, rolls it back whole (redeploy).
+   Production's evaluation history has not been sized (owner, read-only).
+3. Release B promoted (or auto-assigned) before the pre-deploy applied 0012: its platform state refuses until then. Stage the Vercel
+   deployment; promote after `migrate.applied versions=12`. A Release A image's pre-deploy also "succeeds" (`versions=none`) on 0012.
+4. Rolling back to Release A drops `/admin` and returns the Copilot to the environment bootstrap; rolling forward reactivates the latest
+   stored settings version.
+5. The Preview guard fails Preview builds closed on any database that holds non-Preview rows — including a copy of Production (e.g. a
+   Neon branch) or a Preview database once used with `TENANT_ID=default`. It assumes no production deployment uses a `pv-…` `TENANT_ID`
+   (free-form, `default` per the docs). With `FLOFI_MIGRATE_ON_BUILD=preview`, this PR's Preview build migrates the shared Preview
+   database: Previews of branches older than Release A then refuse platform state.
+6. Zero downtime is demonstrated for code paths on loopback PostgreSQL, not for Railway/Vercel orchestration, Neon's pooler or
+   production volumes.
