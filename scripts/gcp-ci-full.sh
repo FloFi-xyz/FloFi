@@ -6,14 +6,22 @@ set -euo pipefail
 # CircleCI's cimg image runs unprivileged; Cloud Build's /workspace is root-owned.
 root="$(mktemp -d /tmp/flofi-gcp-ci.XXXXXX)"
 trap 'rm -rf "$root"' EXIT
-cp -a /workspace "$root/source"
+# Do not preserve root ownership from Cloud Build's /workspace mount.
+# The CircleCI image runs as an unprivileged user.
+cp -R /workspace "$root/source"
 cd "$root/source"
-# Cloud Build checks out source without full parent history. Fetch only the
-# exact build commit and immediate parent into the disposable workspace.
-# Do not edit /workspace or any existing repository outside this job.
+# Cloud Build normally provides an existing .git repository and origin.
+# Fetch the exact triggering commit with its immediate parent if needed,
+# without assuming that the checkout is a pristine source archive.
 test -n "${FLOFI_SOURCE_SHA:-}" || { echo "Missing exact Cloud Build source SHA"; exit 1; }
-git init -q
-git remote add origin https://github.com/alrimarleskovar/FloFi.git
+if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  git init -q
+fi
+if git remote get-url origin >/dev/null 2>&1; then
+  git remote set-url origin https://github.com/alrimarleskovar/FloFi.git
+else
+  git remote add origin https://github.com/alrimarleskovar/FloFi.git
+fi
 git fetch --quiet --depth=2 origin "$FLOFI_SOURCE_SHA"
 test "$(git rev-parse FETCH_HEAD)" = "$FLOFI_SOURCE_SHA"
 git checkout --detach -q FETCH_HEAD
