@@ -15,7 +15,6 @@ import { completeSendDestination, sendDestinationIssue, SEND_DESTINATION_INVALID
 
 import { useBuild009Wallet } from '../state/build009-wallet-store';
 import { CopilotMessage, COPILOT_PLACEHOLDER, copilotHelp, copilotIntro, copilotLabel, useCopilotInterpreter, useFollowLatest } from './copilot-ai';
-import { CopilotMemory } from './copilot-memory';
 
 type Message = { role: 'system' | 'you' | 'ai'; text: string; notes?: readonly string[]; options?: readonly string[] };
 export function CopilotPanel({ interactive = true, owner = null, proof }: { interactive?: boolean; owner?: WorkflowOwner | null; proof?: ReturnType<typeof useWalletProof> }) {
@@ -84,7 +83,6 @@ export function CopilotPanel({ interactive = true, owner = null, proof }: { inte
   }
   return <aside className="copilot panel" aria-label={tr("Workflow assistant")}>
     <div className="copilot-head"><div><p className="eyebrow">{tr("ASSISTANT")}</p><h2>{tr("Copilot")}</h2></div></div>
-    {copilot.enabled && copilot.learning?.enabled && <CopilotMemory view={copilot.learning} onChange={copilot.refreshLearning} proof={proof}/>}
     <div ref={log} className="chat-messages" role="log" aria-live="polite" aria-label={tr("Conversation")}>{messages.map((message, index) =>
       <div key={index} className={`message ${message.role}`}>{(message.role === 'you' || copilot.enabled) && <small>{tr(message.role === 'you' ? 'YOU' : copilotLabel(message.role, copilot.mode))}</small>}{message.role === 'ai'
         ? <CopilotMessage text={message.text} notes={message.notes} options={message.options} disabled={copilot.busy} onPick={send}/>

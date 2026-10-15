@@ -2,8 +2,8 @@
 /**
  * BUILD-CHAT-LEARNING-001: WhatsApp with learning enabled, end to end at the signed webhook (PostgreSQL, fixture transport, MOCKED engine,
  * scripted interpreter that records the glossary it receives — no model, nothing leaves the process). Same Channel Core path as Telegram: a
- * sender is its own learning identity (never a wallet, never a Telegram sender), the offer is answered by the number of its choice, MEMORY lists
- * the sender's own meanings, and STOP erases them.
+ * sender is its own learning identity (never a wallet, never a Telegram sender), nothing offers to remember (BUILD-CHAT-LEARNING-002: a statement is
+ * kept under the deployment's basis), MEMORY lists the sender's own meanings, and STOP erases them.
  */
 import { randomBytes } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -19,6 +19,7 @@ const UNSUPPORTED = { version: '2', language: 'PT', kind: 'UNSUPPORTED', reason:
 let t: TestDatabase, d: ReturnType<typeof deployment>;
 function deployment() {
   const fixture = whatsAppEnv({ FLOFI_LEARNING: 'enabled', FLOFI_LEARNING_SECRET: randomBytes(32).toString('hex'), FLOFI_CHANNEL_COPILOT: 'enabled',
+    FLOFI_LEARNING_AUTOMATIC: 'legitimate_interest',
     FLOFI_WHATSAPP_ALLOWED_SENDERS: [USER_BSUID, OTHER_BSUID].map(sha256Hex).join(',') });
   const sent: FixtureRecord[] = [], glossaries: (string | null)[] = [], calls: string[] = [];
   const interpreter: ChannelInterpreter = async (_request, options) => { glossaries.push(options?.glossary ?? null); return { ok: true, intent: UNSUPPORTED }; };
@@ -33,16 +34,14 @@ const rows = async (sql: string) => (await t.db.query(sql)).rows;
 beforeAll(async () => { t = await createTestDatabase(); d = deployment(); });
 afterAll(async () => { await t?.drop(); });
 
-describe('BUILD-CHAT-LEARNING-001 WhatsApp learning (PostgreSQL, fixture transport)', () => {
-  it('a sender keeps a meaning by choosing it; only that sender’s interpreter requests carry it; MEMORY lists it; STOP erases it', async () => {
+describe('BUILD-CHAT-LEARNING-002 WhatsApp learning (PostgreSQL, fixture transport)', () => {
+  it('a sender’s answer to FloFi’s question and their statements adapt the conversation; what is kept reaches only that sender; MEMORY lists it; STOP erases it', async () => {
     await d.say('ajuda');
     await d.say('Sempre que eu disser arb, quero dizer Arbitrum');
-    expect(d.texts().at(-1)).toMatch(/Nesta conversa, vou entender “arb” como Arbitrum One \(fundos reais\)\. Quer que eu lembre disso para esta conta do WhatsApp/);
+    expect(d.texts().at(-1)).toBe('Entendi — a partir de agora, vou entender “arb” como Arbitrum One (fundos reais).');
+    expect(d.texts().join('\n')).not.toMatch(/Lembrar|Quer que eu lembre/);
     expect(d.glossaries).toEqual([]);
-    expect(await rows(`SELECT count(*)::int AS n FROM learning_subjects`)).toEqual([{ n: 0 }]);
-    await d.say('1');
-    expect(d.texts().at(-1)).toMatch(/^Salvo: “arb” = Arbitrum One/);
-    expect(await rows(`SELECT kind, memory_enabled FROM learning_subjects`)).toEqual([{ kind: 'CHANNEL', memory_enabled: true }]);
+    expect(await rows(`SELECT kind, memory_consent_at FROM learning_subjects`)).toEqual([{ kind: 'CHANNEL', memory_consent_at: null }]);
 
     await d.say('novo');
     await d.say('faz bridge de 10 USDC da Base pra arb');
@@ -53,11 +52,15 @@ describe('BUILD-CHAT-LEARNING-001 WhatsApp learning (PostgreSQL, fixture transpo
     await d.say('memória');
     expect(d.texts().at(-1)).toMatch(/^O FloFi lembra para esta conta do chat:\n• arb → Arbitrum One \(fundos reais\)/);
     await d.say('memória', true);
-    expect(d.texts().at(-1)).toMatch(/^O FloFi ainda não lembra nada para esta conta do chat/);
+    expect(d.texts().at(-1)).toBe('O FloFi não guarda nada para esta conta do chat.');
     expect(JSON.stringify(await rows(`SELECT * FROM learning_subjects`))).not.toMatch(/5511900000001|FLOFITESTUSER/);
+    expect(JSON.stringify(await rows(`SELECT * FROM learning_evidence`))).not.toMatch(/5511900000001|FLOFITESTUSER/);
 
+    // The other sender is learned too (the language of their own messages): STOP erases exactly this sender, with every observation.
+    const subjects = Number((await rows(`SELECT count(*)::int AS n FROM learning_subjects`))[0]!.n);
     await d.say('parar');
     expect(await rows(`SELECT count(*)::int AS n FROM learning_memories`)).toEqual([{ n: 0 }]);
-    expect(await rows(`SELECT count(*)::int AS n FROM learning_subjects`)).toEqual([{ n: 0 }]);
+    expect(await rows(`SELECT count(*)::int AS n FROM learning_subjects`)).toEqual([{ n: subjects - 1 }]);
+    expect(await rows(`SELECT count(*)::int AS n FROM learning_evidence WHERE term <> ''`)).toEqual([{ n: 0 }]);
   });
 });

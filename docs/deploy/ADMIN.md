@@ -101,6 +101,13 @@ PT-BR/EN starter set (as PENDING candidates), evaluate (dry run), **evaluate and
 database re-checks it), re-evaluate and roll back, disable, run retention. Operations guide: [LEARNING.md](LEARNING.md); privacy:
 [LEARNING-PRIVACY.md](../security/LEARNING-PRIVACY.md).
 
+BUILD-CHAT-LEARNING-002 adds **Invisible learning**: effectiveness (inferred readings applied unchanged / applied or corrected), false positives
+(inferred readings corrected / used), corrections per proposal by source (chat, canvas), ignored signals by reason, what the persistent tier did
+with each observation, identities' choices by legal basis and evidence counts — counts only. A contributed candidate is listed individually only once
+3 distinct pseudonymous contributors support it. OPERATOR action **Erase automatic-learning data the current basis does not cover**
+(`purge-automatic`, audited as `ADMIN_LEARNING_AUTOMATIC_PURGED`). User-facing controls are not here: they live in the product under Settings →
+Privacy & memory (`/app/privacy`).
+
 ## 6. Analytics semantics
 
 * **Workflow / execution / action.** A workflow is a `workflow_id`. An execution is a root run: recovery runs fold into the run they

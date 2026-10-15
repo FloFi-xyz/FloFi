@@ -1679,6 +1679,75 @@
      }
     }
    }
+  },
+  {
+   "user": [
+    "Swap 0.1 SOL to devUSDC on sol dev"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "EN",
+      "kind": "ACTION",
+      "action": {
+       "type": "SWAP",
+       "network": "SOLANA_DEVNET",
+       "inputAsset": "SOL",
+       "outputAsset": "DEVUSDC",
+       "amount": "0.1",
+       "slippageBps": null
+      },
+      "reuse": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "Swap 0.2 SOL to devUSDC on sol dev"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "EN",
+      "kind": "ACTION",
+      "action": {
+       "type": "SWAP",
+       "network": "SOLANA_DEVNET",
+       "inputAsset": "SOL",
+       "outputAsset": "DEVUSDC",
+       "amount": "0.2",
+       "slippageBps": null
+      },
+      "reuse": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "Swap 0.3 SOL to devUSDC on sol dev"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "EN",
+      "kind": "ACTION",
+      "action": {
+       "type": "SWAP",
+       "network": "SOLANA_DEVNET",
+       "inputAsset": "SOL",
+       "outputAsset": "DEVUSDC",
+       "amount": "0.3",
+       "slippageBps": null
+      },
+      "reuse": null
+     }
+    }
+   }
   }
  ]
 }

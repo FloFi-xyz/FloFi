@@ -13,6 +13,8 @@
  *   rollback  `{ action, expectedVersion, toVersion, reason? }`    re-evaluates an older version today; appends it again only if it still passes
  *   disable   `{ action, expectedVersion, reason? }`               appends an empty (NULL) version: no global glossary is served
  *   retention `{ action }`                                           runs the learning retention purge now
+ *   purge-automatic `{ action }`                                     BUILD-CHAT-LEARNING-002: erases the automatic-learning data of identities the deployment's
+ *                                                                   current basis no longer covers (e.g. after switching from legitimate interest to consent)
  *
  * Every evaluation is recorded, passed or not. Repetition by users never publishes anything: publication needs this operator action and a
  * passing deterministic evaluation.
@@ -22,6 +24,7 @@ import { evaluateKnowledge } from '../learning/evaluation.ts';
 import { LEARNING_CORPUS_ID } from '../learning/eval-corpus.ts';
 import { CANDIDATE_ID, KNOWLEDGE_LANGUAGES, KNOWLEDGE_SCHEMA, KnowledgeError, STARTER_CANDIDATES, validateKnowledgeDocument, type KnowledgeDocument,
   type KnowledgeLanguage } from '../learning/knowledge.ts';
+import { learningConfig } from '../learning/config.ts';
 import { createLearningStore, type Candidate, type LearningStore } from '../learning/store.ts';
 import { adminMutation, codeOf, json, readJsonObject, type AdminHttpOptions } from './http.ts';
 
@@ -158,6 +161,12 @@ export async function handleLearningAdmin(request: Request, options: AdminHttpOp
         const purged = await store.purge(now);
         await audit('ADMIN_LEARNING_RETENTION', 'OK', null, 'learning:retention', purged);
         return json(200, { ok: true, purged });
+      }
+      case 'purge-automatic': {
+        const config = learningConfig(options.env ?? process.env), mode = config.enabled ? config.automatic : 'OFF';
+        const subjects = await store.purgeAutomatic(mode);
+        await audit('ADMIN_LEARNING_AUTOMATIC_PURGED', 'OK', null, 'learning:automatic', { mode, subjects });
+        return json(200, { ok: true, mode, subjects });
       }
       default: return json(400, { ok: false, code: 'ADMIN_REQUEST_INVALID' });
     }

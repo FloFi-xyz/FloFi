@@ -111,6 +111,7 @@ export function OperatorTools({ csrf, canWrite }: { csrf: string; canWrite: bool
       <button type="button" disabled={disabled || !term.trim()} onClick={() => void action.run({ action: 'add', term: term.trim().toLowerCase(), target, language })}>Add candidate</button>
       <button type="button" disabled={disabled} onClick={() => void action.run({ action: 'starter' })}>Load reviewed PT-BR/EN starter set</button>
       <button type="button" disabled={disabled} onClick={() => void action.run({ action: 'retention' })}>Run retention now</button>
+      <button type="button" disabled={disabled} onClick={() => void action.run({ action: 'purge-automatic' })}>Erase automatic-learning data the current basis does not cover</button>
     </div>
     {action.error && <p className="admin-alert" data-tone="bad" role="alert">{action.error}</p>}
   </div>;

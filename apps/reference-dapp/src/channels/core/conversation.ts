@@ -13,6 +13,8 @@
  * BUILD-CHAT-LEARNING-001: with learning enabled for the deployment, the turn receives the sender's learning context (their own saved meanings,
  * the global glossary; `learning`), MEMORY / MEMORY OFF / MEMORY ON are local commands, and a memory action the user confirmed is returned
  * for the service to perform on the sender's own channel identity. Without it, nothing here changes.
+ * BUILD-CHAT-LEARNING-002: no offer to remember; the engine adapts the conversation to the sender's answers and corrections and returns its
+ * observations (stored by the service only when permitted). MEMORY commands remain the channel's privacy controls where anything can be stored.
  *
  * The channel never has a canvas: its environment is the editor's initial workflow plus, as the visible pending proposal, the
  * channel's current authoring command. A correction of that proposal is therefore a revision producing a fresh authoring command,
@@ -39,7 +41,8 @@ import type { ChannelReply, InboundContent, ReplyChoice } from './types.ts';
  * a turn passes this conversation's own `aliases` (a hint the service re-validates); the service passes the interpreter the rendered `glossary`
  * data for the request (`server/copilot-glossary.ts`). Both are optional: without them the request is exactly as before.
  */
-export type ChannelInterpreter = (request: CopilotRequestV2, options?: { readonly glossary?: string | null; readonly aliases?: readonly LexiconEntry[] }) =>
+export type ChannelInterpreter = (request: CopilotRequestV2, options?: { readonly glossary?: string | null; readonly aliases?: readonly LexiconEntry[];
+  /** BUILD-CHAT-LEARNING-002: this conversation's adapted meanings (a hint the service re-validates). */ readonly adapted?: readonly LexiconEntry[] }) =>
   Promise<CopilotResultV2>;
 export type TurnInterpreter = ChannelInterpreter;
 /** Bounded, encrypted at rest, erased after 30 minutes of inactivity. */
@@ -54,6 +57,8 @@ export type ChannelState = {
   /** The choices FloFi offered last (answerable by number or by tapping). */
   readonly choices: readonly ReplyChoice[];
   readonly greeted: boolean;
+  /** BUILD-CHAT-LEARNING-002: how many Copilot requests this conversation made (an observation counts once per request). */
+  readonly requests?: number;
 };
 export const freshState = (language: ChannelLanguage): ChannelState =>
   ({ v: 1, language, copilot: null, pending: null, approvalId: null, lastApprovalId: null, choices: [], greeted: false });
@@ -157,7 +162,9 @@ export async function decideTurn(input: TurnInput): Promise<TurnDecision> {
   const numbered = /^\s*([1-9])\s*$/.exec(raw);
   if (numbered && state.choices[Number(numbered[1]) - 1]) raw = state.choices[Number(numbered[1]) - 1]!.label;
   const normalized = words(raw), local = COMMANDS.find(([, pattern]) => pattern.test(normalized));
-  const memoryCommand = input.learning && !local ? MEMORY_COMMANDS.find(([, pattern]) => pattern.test(normalized)) : undefined;
+  // BUILD-CHAT-LEARNING-002: where nothing can be stored (session-only adaptation), MEMORY words are ordinary text.
+  const storable = !!input.learning && input.learning.memory !== 'SESSION';
+  const memoryCommand = storable && !local ? MEMORY_COMMANDS.find(([, pattern]) => pattern.test(normalized)) : undefined;
   if (local?.[2]) state = { ...state, language: local[2] };
   if (memoryCommand) state = { ...state, language: memoryCommand[2] };
   const m = channelCopy(state.language), greet = (replies: ChannelReply[]) => state.greeted ? replies : [text(m.firstContact(input.support, input.privacy)), ...replies];
@@ -168,7 +175,7 @@ export async function decideTurn(input: TurnInput): Promise<TurnDecision> {
     const [kind] = local;
     // HELP and START answer with the help text, preceded by the first-contact notice when this is the conversation's first exchange
     // (Telegram's /start is how every Telegram conversation begins).
-    if (kind === 'HELP' || kind === 'OPT_IN') return decision('REPLY', 'HELP', greet([text(input.learning
+    if (kind === 'HELP' || kind === 'OPT_IN') return decision('REPLY', 'HELP', greet([text(storable
       ? `${m.help(input.support, input.privacy)}\n${channelLearningCopy(state.language).help}` : m.help(input.support, input.privacy))]), greeted);
     if (kind === 'OPT_OUT') return decision('OPT_OUT', 'OPTED_OUT', [text(m.optedOut)], freshState(state.language));
     // NEW/CANCEL also forgets the open question; the service revokes the live approval link.
@@ -198,19 +205,20 @@ export async function decideTurn(input: TurnInput): Promise<TurnDecision> {
   if (start.kind === 'LOCAL') ({ reply, next } = start);
   else {
     let result: CopilotResultV2;
-    try { result = await input.interpret(start.request, { aliases: start.turn.state.aliases ?? [] }); } catch { result = { ok: false, code: 'COPILOT_UNAVAILABLE' }; }
+    try { result = await input.interpret(start.request, { aliases: start.turn.state.aliases ?? [], adapted: start.turn.state.adapted ?? [] }); }
+    catch { result = { ok: false, code: 'COPILOT_UNAVAILABLE' }; }
     if (result.ok) await input.catalogs?.([...conversation.segment, raw].join('\n'), result.intent);
     ({ reply, next } = finishTurn(start.turn, result, env));
   }
-  const lm = channelCopy(next.language), learned = reply.learning ? { learning: reply.learning } : {};
+  const lm = channelCopy(next.language), learned = reply.learning ? { learning: reply.learning } : {}, requests = (state.requests ?? 0) + 1;
   if (reply.command && AUTHORING.has(reply.command.type)) {
-    const proposed = withCopilot({ ...greeted, language: next.language }, next, environment(reply.command, learning), { pending: reply.command });
+    const proposed = withCopilot({ ...greeted, language: next.language, requests }, next, environment(reply.command, learning), { pending: reply.command });
     return decision('PROPOSE', 'PROPOSED_INTERPRETED', [], proposed, { command: reply.command, aiInterpreted: true, notes: reply.notes, ...learned });
   }
   // BUILD-CHAT-LEARNING-001: FloFi's memory offer is answered like its questions (buttons, or the number of the choice).
   const choices = reply.kind === 'CLARIFICATION' || reply.kind === 'MEMORY' ? choicesOf(reply.options) : [];
   const body = [reply.text, ...reply.notes].filter(Boolean).join('\n') || failureText('COPILOT_UNAVAILABLE', next.language);
-  const after = withCopilot({ ...greeted, language: next.language, choices }, next, env);
+  const after = withCopilot({ ...greeted, language: next.language, choices, requests }, next, env);
   const replies = [{ text: body, choices, link: null }];
   return decision('REPLY', `COPILOT_${reply.kind}`, state.greeted ? replies : [text(lm.firstContact(input.support, input.privacy)), ...replies], after,
     { ...reply.memory ? { memory: reply.memory } : {}, ...learned });

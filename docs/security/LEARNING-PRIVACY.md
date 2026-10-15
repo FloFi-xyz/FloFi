@@ -1,101 +1,143 @@
-# Copilot learning — privacy, identity boundaries and data protection (BUILD-CHAT-LEARNING-001)
+# Copilot learning — privacy, identity boundaries and data protection (BUILD-CHAT-LEARNING-001, -002)
 
-Scope: FloFi's Copilot learning — private memory per verified identity, the shared global glossary, and content-free feedback — on the web chat,
-Telegram and WhatsApp. Brazil is the primary market: this is written against the **LGPD** (Lei 13.709/2018) first and kept compatible with the
-**GDPR**. It describes what the code does; the legal basis for each purpose is an **open decision for the owner and counsel** (§5), not an
-assumption of this build.
+Scope: how FloFi's Copilot learns — in a conversation, for one verified identity, and for everyone — on the web chat, Telegram and WhatsApp. Brazil is
+the primary market: this is written against the **LGPD** (Lei 13.709/2018) first and kept compatible with the **GDPR**. It describes what the code
+does. The legal basis of each stored purpose is an **open decision for the owner and counsel** (§6); the code ships every stored purpose **off** and
+lets the owner select the basis once decided — it does not assume one.
 
-## 1. Purposes (two, separately controlled)
+BUILD-CHAT-LEARNING-002 removed the explicit learning UX from the chat (the Memory panel, the "Remember / Not now" offer and every prompt inviting
+users to teach FloFi). Learning now comes from natural interaction, under the three separately switched tiers below. Privacy controls moved
+outside the chat: Settings → **Privacy & memory** (`/app/privacy`) on the web; `MEMORY` commands on channels (the only surface a chat account has).
 
-| Purpose | What FloFi keeps | When | Control |
-| --- | --- | --- | --- |
-| **P1 Private memory** — understand the user's own words and reply language in later sessions | short term → closed target pairs (`arb → network:ARBITRUM`), a reply language, the consent time and notice version | only after the user clicks **Remember** (web) / taps it (channel) | Memory panel (web) or `memory`, `memory off/on`, `forget X`, `forget everything` (channels); pausing keeps entries unused; deleting is immediate |
-| **P2 Contribution to the shared glossary** — improve understanding for everyone | a generalized term → target pair as a *candidate*, with a pseudonymous contributor digest (counts distinct contributors) | only with the separate **Help improve FloFi's shared glossary** switch on (default **off**) | the same switch: turning it off withdraws past contributions; "delete all" erases them |
-| Content-free feedback (operational statistics) | event kind, closed outcome code, scope (web/Telegram/WhatsApp), language, small counts, glossary version | when learning is enabled on the deployment | not linked to any person (no subject, no text): aggregates only |
+## 1. Three tiers, separately switched
 
-Nothing is learned while the deployment has learning **off** (`FLOFI_LEARNING` unset, the default). Global knowledge is never published by
-repetition: only an operator's approval followed by a passing deterministic evaluation publishes a glossary version (`docs/deploy/LEARNING.md`).
+| Tier | What | Where it lives | Switch | Proposed basis (§6) |
+| --- | --- | --- | --- | --- |
+| **T1 In-session adaptation** | The rest of a conversation uses what the user said or chose in it: a stated meaning ("whenever I say arb…"), the answer to FloFi's question about a word it did not know, a correction of a reading FloFi made on its own | the conversation state only: browser memory (web), the encrypted channel state erased after 30 idle minutes (channels) — **nothing new is stored** | `FLOFI_LEARNING=session` (adaptation only) or `enabled` | performance of the service requested (LGPD art. 7 V; GDPR art. 6(1)(b)) |
+| **T2 Persistent individual memory** | After repeated, high-confidence evidence in the user's own interactions, a word's meaning (and the language they usually write in) is kept for that verified identity and used in later sessions | `learning_evidence`, `learning_automatic_settings` (0014), `learning_memories`, `learning_subjects` (0013) | `FLOFI_LEARNING=enabled` **and** `FLOFI_LEARNING_AUTOMATIC=consent \| legitimate_interest` (default `off`) **and** the identity's own choice | **pending**: consent (opt-in) or legitimate interest (opt-out) |
+| **T3 Aggregated / global** | Opted-in contributors' learned meanings become pending candidates; operators review, evaluate, publish versioned, reversible glossary versions | 0013 candidate, support, evaluation and version tables | the separate contribution opt-in (default off) + operator action; `FLOFI_LEARNING_GLOBAL` break-glass | separate consent (unchanged from BUILD-CHAT-LEARNING-001) |
+| Content-free statistics | which signal was classified or why it was ignored, inferred readings used/confirmed/corrected, what T2 did with an observation — closed codes and counts | `learning_feedback_events` (no subject, no text, no word) | with `FLOFI_LEARNING=enabled` | anonymised data (art. 12) or legitimate interest — §6 |
 
-## 2. What is never stored or derived
+Meanings a user saved with BUILD-CHAT-LEARNING-001's "Remember" (consent recorded with notice v1) are **preserved and keep their purpose**: they are
+still used while their memory is on, still listed, still deletable. They are never relabelled as learned, never erased by turning automatic
+learning off, and never repurposed: automatic learning needs its own consent under notice v2 (or the legitimate-interest basis with notice).
 
-* Message text, transcripts, model prompts or responses (the existing channel retention rules are unchanged: encrypted transient payloads,
-  30-minute state, erased bodies).
-* Secrets: private keys, seed phrases and 64-hex secrets are refused **before** any learning parser runs (`looksSecret`, unchanged).
-* Financial values: amounts, addresses, slippage, ranges, balances, transactions. A memory target is a closed vocabulary (network id, pinned
-  token symbol, operation) — validation refuses anything else.
-* Wallet addresses or channel sender ids: a learning subject is `HMAC-SHA256(FLOFI_LEARNING_SECRET-derived key, principal)`; the database alone
-  cannot tell whose memory a row is. Contributor digests use a second derived key.
-* Previously collected data: nothing reads existing conversations, runs, channel records or analytics. Learning starts from new, explicit
-  statements after the owner enables it.
+## 2. Which interactions are evidence (deterministic)
 
-## 3. Identity boundaries
+Grounding never lets the interpreter choose a real-funds network or a token the user did not name — FloFi asks instead
+(`domain/copilot-authoring.ts`). So the reliable signals are few and explicit (`domain/copilot-adaptation.ts`):
+
+| Signal | When | Effect |
+| --- | --- | --- |
+| **Clarified** | FloFi asked for a network/token the request left unresolved; the answer named one; exactly one word group of the request has *lexical affinity* with it (prefix "arb" of Arbitrum, abbreviation with test wording "arb sep", small typo "solona") and is a valid entry | T1: the word means it for the conversation. T2: one observation |
+| **Corrected / contradicted** | Only a value FloFi read **on its own** (an adapted, learned or glossary term; the interpreter's unprompted test network or operation) — in chat with a correction cue ("no, I meant…", "não, eu quis dizer…"), or on the canvas by changing exactly that one field of the applied step | the inferred meaning is withdrawn (T1), removed if learned (T2); the word is learned for the new value only if it has affinity with it |
+| **Confirmed** | A proposal FloFi read on its own was applied with that field unchanged | T2: one observation |
+| **Stated** | An explicit statement (EN/PT parser of BUILD-CHAT-LEARNING-001) | T1 at once; T2 at once (the user's own declared meaning) |
+| **Language** | A message unmistakably in one language (function words) on which the interpreter agrees, once per conversation | T2 evidence for the *starting* language only |
+
+**Never evidence** (content-free reason code only): a value the user named or chose themselves (changing it is changing their objective), an
+objective-change cue ("actually, let's…", "mudei de ideia", "em vez disso"), several fields changed at once on the canvas, any edit that also changes
+an amount, slippage, address, range, fee or routing, a removed step, a layout move, a dismissed proposal, a failed or unsuccessful execution.
+
+**Promotion (T2, `learning/automatic.ts`)**: a stated meaning is kept at once (the latest statement for a word replaces any other). Otherwise a
+meaning needs a weight ≥ 2 (each clarification, correction or confirmation counts 1, each from a different request — the server counts a request once
+using keyed digests of a random conversation id and the request's ordinal), at least twice the combined weight of every other meaning observed for the
+word and at least 2 more. Conflicts never learn. A correction of a learned meaning removes it at once; a stated or remembered meaning is never
+replaced by inference. Bounds: 4 meanings per word, 128 evidence rows and 64 meanings per identity.
+
+## 3. What is never stored or derived
+
+* Message text, transcripts, model prompts or responses (channel retention unchanged: encrypted transient payloads, 30-minute state).
+* Secrets: refused **before** any learning parser runs (`looksSecret`).
+* Financial values or decisions: amounts, addresses, recipients, slippage, ranges, fees, balances, signatures, transaction authorizations,
+  investment decisions. An observation is one validated short word and one closed-vocabulary target (network id, pinned token, operation, or
+  `language:EN|PT`); words naming a financial parameter ("slippage", "valor", "endereço"…) are reserved and can never be learned. The database
+  enforces the closed vocabulary with `CHECK` constraints.
+* Wallet addresses or channel sender ids: a subject is `HMAC(FLOFI_LEARNING_SECRET-derived key, principal)`; request/conversation digests use a
+  third derived key over a random id, so the database cannot link evidence to a person or a conversation.
+* Previously collected data: nothing reads existing conversations, runs, channel records or analytics; existing BUILD-CHAT-LEARNING-001 memories
+  are not converted into evidence.
+
+## 4. Identity boundaries (unchanged)
 
 | Principal | Established by | Learning subject |
 | --- | --- | --- |
-| EVM wallet (web) | SIWE signature → sealed HttpOnly `flofi_wallet_session` cookie, read on the server | `wallet:eip155:<address>` |
+| EVM wallet (web) | SIWE signature → sealed HttpOnly `flofi_wallet_session` cookie | `wallet:eip155:<address>` |
 | Solana wallet (web) | SIWS signature → sealed HttpOnly `flofi_solana_session` cookie | `wallet:solana:<address>` |
-| Telegram sender | Bot API webhook secret token, keyed sender digest (Channel Core) | `channel:TELEGRAM:<bot>:<sender digest>` |
+| Telegram sender | Bot API webhook secret, keyed sender digest | `channel:TELEGRAM:<bot>:<sender digest>` |
 | WhatsApp sender | Meta webhook signature, keyed sender digest | `channel:WHATSAPP:<phone number id>:<sender digest>` |
-| Anonymous web visitor | none | none — what they say lasts for the conversation only |
+| Anonymous web visitor | none | none — T1 only |
 
-* The browser can only **choose** which of its proven wallets (EVM or Solana) a request concerns; it can never name an address. A requested
-  namespace that is not proven in that browser is treated as anonymous — never silently replaced by the other wallet.
-* EVM and Solana memories are separate even when both are proven in one browser (that is not an account link). A channel sender is never a
-  wallet and never a sender on another channel. There is no cross-identity merge in this build; a future merge would need verified linkage.
-* Rotating `FLOFI_LEARNING_SECRET` detaches every stored memory (a documented reset); rotating `FLOFI_CHANNEL_SECRET` does the same for channel
-  senders (their digests change).
-* Tenants: every query is scoped to the deployment tenant; the PostgreSQL suites prove another tenant reads nothing.
+Different wallets, the EVM and Solana wallets of one browser, a wallet and a chat account, two chat accounts — never the same person. The browser can
+only choose *which* of its proven wallets a request concerns, never name an address; the server re-checks every observation's permission. Tenants are
+isolated in every query (proven by the PostgreSQL suites).
 
-## 4. Safety of learned language
+## 5. Safety of learned language
 
-* Learned vocabulary only changes **which networks or tokens the user named**; it never supplies a number, an address, a slippage or a range, and
-  never overrides a value the user wrote. A user's own meaning (this conversation's, or saved) may name a network or token; the shared glossary may
-  name **test networks only** — for a real-funds network it can only offer that option first in FloFi's own question, and the user decides.
-* Every use is shown on the proposal ("“arb” read as Arbitrum One — your saved meaning"); the proposal still needs the user's Apply, the fresh
-  simulation, the Strategy Manifest review and the wallet signature, exactly as before.
-* Canonical vocabulary cannot be redefined (registry network names, pinned tokens, protocols, commands, authority and instruction words), and a
-  term with test-network wording can only name a test network or test token (and vice versa).
-* The interpreter receives at most 8 matched entries as quoted data in one extra `developer` input item; instructions, schema and `store: false`
-  are unchanged. The model remains untrusted: grounding decides.
+* Only what the user **stated** (in the conversation, or saved) may select a real-funds network or a token. Whatever FloFi **inferred** (adapted in
+  the conversation, learned for the identity) or reviewed globally grounds test networks only; for real funds it is offered first in FloFi's own
+  question, with a note ("You used “arb” for Arbitrum One before… choose it only if that is what you mean"); for tokens and operations it is
+  interpreter context only.
+* Learned preferences never override the current request: the user's own words and this conversation's statements take precedence over saved and
+  learned meanings, which take precedence over the glossary; a mainnet meaning never applies next to test-network wording; nothing learned supplies a
+  value. Every use is a visible note on the proposal, which still needs Apply, a fresh simulation, the Strategy Manifest review and the wallet
+  signature. No execution authority, approval, network support, wallet authentication, workflow creation, automation or the 0.1% fee changed.
+* The interpreter receives at most 8 matched entries as quoted data, labelled by source; instructions, schema, `store: false` unchanged. Model
+  weights are never trained; prompts are never changed by user data; the global glossary changes only by operator approval and a passing evaluation.
+* Learning failures never block a turn: every learning path is fail-soft (no context, observations dropped).
 
-## 5. Legal basis — decision required (owner + counsel)
+## 6. Legal basis and compliance — decisions required (owner + counsel)
 
-This build **does not assume** a legal basis. Proposed, for review:
+This build ships T2 **off** (`FLOFI_LEARNING_AUTOMATIC` unset). Decisions to take before enabling:
 
-* **P1 Private memory — consent** (LGPD art. 7, I; GDPR art. 6(1)(a)): specific (one meaning or the reply language at a time), informed (the
-  offer says what and for whom, and links to this notice), unambiguous (an explicit click), revocable at any time (pause, forget, delete all),
-  recorded (consent time + notice version `LEARNING_NOTICE_VERSION = 1`). Alternative to assess: performance of the service the user requested
-  (art. 7, V) — weaker, because remembering is not necessary to provide the chat.
-* **P2 Contribution — separate consent**, default off; withdrawal deletes the contributor's support. Published glossary entries are generalized
-  language (no personal data) once approved; whether a published entry derived from contributions needs further treatment is part of the review.
-* **Feedback statistics** — content-free and unlinked; assess whether they are anonymized data (LGPD art. 12) or legitimate interest (art. 7, IX)
-  with a balancing test; they are kept 90 days.
-* **International transfer**: the interpreter is OpenAI's Responses API (already the case for every Copilot message). A saved term is sent to it
-  only inside the glossary of a request whose own text contains that term. Review the existing transfer basis (LGPD art. 33) for this added data.
-* **Children**: no age verification exists; the product is not directed at children. Assess LGPD art. 14 obligations.
-* **DPIA/RIPD**: recommended before enabling in production (new purpose, pseudonymous profiling of vocabulary).
+1. **T2 basis.** (a) **Consent** (LGPD art. 7 I, 8; GDPR art. 6(1)(a), 7): opt-in in Privacy & memory or `memory on` on a channel, recorded with
+   basis, notice version (`LEARNING_NOTICE_VERSION = 2`) and time; withdrawal erases what it produced. Lowest risk; few users will opt in. (b)
+   **Legitimate interest** (LGPD art. 7 IX, 10; GDPR art. 6(1)(f)): on for verified identities unless they object; requires a documented legitimate
+   interest assessment (LIA — purpose: understand the user's own vocabulary; necessity; balancing: pseudonymous, closed vocabulary, no values, no
+   decisions, transparent notes, easy objection, short retention), the notice update below, and the right to object honoured immediately (implemented:
+   turning it off erases and records the objection). Counsel should also confirm whether learned vocabulary is "profiling" under LGPD art. 20 /
+   GDPR art. 22 — the code takes no decision with legal or similarly significant effect: every proposal is reviewed and signed by the user.
+2. **Notice.** `/privacy#memoria-copilot` / `#copilot-memory` (PT/EN) now describes the three tiers, what is kept, both bases, the controls and
+   retention. Counsel to approve the final wording and the controller identity (`FLOFI_PRIVACY_CONTROLLER_NAME`) and contact before enabling T2.
+3. **Statistics.** Content-free events: confirm anonymised (art. 12) or legitimate interest with a balancing test (90-day retention).
+4. **International transfer.** The interpreter is OpenAI's Responses API (already used for every Copilot message). A learned word is sent only inside the
+   glossary of a request whose own text contains it. Review the transfer mechanism (LGPD art. 33; ANPD Resolution 19/2024 standard clauses).
+5. **RIPD/DPIA** before enabling T2 (new purpose, systematic pseudonymous processing of user behaviour).
+6. **Children** (LGPD art. 14): no age verification; the product is not directed at children — confirm.
+7. **Existing data.** BUILD-CHAT-LEARNING-001 memories (consent v1) stay under their original purpose; if counsel decides v1 consent does not cover
+   continued use under the new notice, re-consent can be requested in Privacy & memory (no code change needed: pause them or delete).
+8. **Changing basis later.** Switching legitimate interest → consent leaves data collected under LI without a basis: run *Erase automatic-learning data the
+   current basis does not cover* in `/admin/ai-learning` (audited).
 
-## 6. Retention and erasure
+T1 is proposed under performance of the requested service: nothing is stored beyond the conversation state FloFi already keeps for the chat itself.
+
+## 7. Retention and erasure
 
 | Data | Kept | Erased |
 | --- | --- | --- |
-| Private memory entry | while used | 365 days after last save/use; on forget, pause does not erase; on delete all |
-| Learning subject (no memory, no consent) | — | 30 days idle |
-| Any learning subject | while seen | 24 months idle (with its memory) |
-| Contribution support | until decided or withdrawn | 180 days; on opt-out; on delete all |
-| Pending contributed candidate | — | 180 days without new support |
-| Feedback event | 90 days | then deleted |
-| Glossary versions and evaluations | permanently (append-only audit of what was served) | — (no personal data) |
-| Learning rate-limit windows | 2 days | then deleted |
+| T1 adaptation | the conversation | when the conversation ends (page reload; channel state after 30 idle min; `new` / STOP) |
+| Unlearned evidence (T2) | while observed | 90 days after the last observation; on forget of the word; on turning automatic learning off; on delete all / STOP |
+| Learned meaning (T2) | while used | 365 days after last use; on correction (demoted); on forget; on turning automatic learning off; on delete all / STOP |
+| Starting-language evidence | while observed | 365 days after the last observation; on turning off; on delete all / STOP |
+| Automatic-learning choice (consent or objection) | while the subject exists | with the subject (an objection keeps the subject beyond the 30-day idle rule so it is honoured); 24 months idle |
+| Remembered / stated meanings, language, settings | as in BUILD-CHAT-LEARNING-001 | as before |
+| Contribution support / pending candidates | 180 days | on opt-out, delete all |
+| Feedback events | 90 days | — |
+| Glossary versions and evaluations | permanently (append-only record of what was served; no personal data) | — |
 
-Purges are bounded batches run opportunistically by the web/channel processes (at most every 10 minutes per instance) and from the admin console.
-**STOP** on a channel also erases that sender's learning data.
+Every erasure path deletes 0014 rows through `ON DELETE CASCADE`, including a plain `DELETE` of the subject by an older build (proven in
+`automatic.pg.test.ts`). Purges are bounded batches (opportunistic every ~10 minutes per instance, or from the console).
 
-**Data-subject requests.** Access/portability: the Memory panel or `memory` lists everything stored about the user's own vocabulary; deletion: "Delete
-all memory" / `forget everything` / STOP. An operator-side lookup by wallet requires the learning secret (HMAC of the principal) — documented for
-a support process, never exposed in the console, which shows aggregates only.
+## 8. Data-subject rights (LGPD art. 18; GDPR arts. 15–21)
 
-## 7. Product notice
+| Right | Web (Settings → Privacy & memory) | Channels |
+| --- | --- | --- |
+| Confirmation and access | list of kept meanings with origin (you told FloFi / learned from your choices / saved with Remember), observed-not-used evidence, choices, languages | `MEMORY` |
+| Portability | **Download my data** (JSON) | `MEMORY` (text) |
+| Correction | forget a word, or state the right meaning | `forget X`, a statement |
+| Deletion | Forget, Delete everything | `forget everything`, `STOP` |
+| Withdrawal of consent / objection | **Learn from how I use the Copilot** off (erases what it learned) | `memory off` |
+| Information on sharing | the notice: no sharing except the interpreter request in §6.4 | the notice |
 
-The in-app privacy page (`/privacy#copilot-memory`) and the Memory panel describe P1 and P2 in plain EN/PT. Copy must stay consistent with this
-document; change both together.
+An operator cannot look a person up in the console (aggregates only); a support request for a wallet requires the learning secret to compute the
+digest — a documented manual procedure, never exposed in the product.
