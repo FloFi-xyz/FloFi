@@ -59,7 +59,7 @@ Local, loopback PostgreSQL 18.6 (CI image), no public network, no model, no real
 | --- | --- |
 | `pnpm check` (Release B: typecheck, lint, build, schema drift, unit) | **passed** — 382 files, 4,332 tests (2 skipped, pre-existing) |
 | `pnpm test:postgres` (Release B, full) | **passed** — 66 files, 419 tests (3 skipped: `schema-compatibility.pg.test.ts` skips by design in Release B) |
-| Learning-specific suites inside those | lexicon 16, engine 21 (incl. the whole eval corpus replayed with learning on: identical replies), evaluation 8, glossary 4; PostgreSQL store/service 14, web path 5, admin AI Learning 6, Telegram learning 3 |
+| Learning-specific suites inside those | lexicon 16, engine 21 (incl. the whole eval corpus replayed with learning on: identical replies), evaluation 8, glossary 4; PostgreSQL store/service 14, web path 5, admin AI Learning 6, Telegram learning 3, WhatsApp learning 1 (end to end at the signed webhook) |
 | Release A tree: cloud-runtime suites / backend `schema-compatibility.pg.test.ts` (runs for the new certificate) | 48 passed / 3 passed |
 | Browser: `copilot-learning` (new) / `copilot` / `admin-console` (+ AI Learning) | 1 / 13 / 1 passed |
 | governance-lite; self-tests; `git diff --check` | passed; 19 + 22 OK; clean |
@@ -72,7 +72,7 @@ Local, loopback PostgreSQL 18.6 (CI image), no public network, no model, no real
 
 | Criterion | Evidence |
 | --- | --- |
-| User A establishes a persistent private language preference | engine (`copilot-learning.test.ts`), PostgreSQL (`learning.pg.test.ts`, `web-actions.pg.test.ts`), Telegram (`learning.pg.test.ts`), browser (`copilot-learning-memory.spec.ts`) |
+| User A establishes a persistent private language preference | engine (`copilot-learning.test.ts`), PostgreSQL (`learning.pg.test.ts`, `web-actions.pg.test.ts`), Telegram and WhatsApp (`channels/*/learning.pg.test.ts`), browser (`copilot-learning-memory.spec.ts`) |
 | User B cannot read or inherit it | same suites: B's session, model request body and proposal carry nothing of A's; separate wallets, namespaces, channel senders, tenants |
 | A verified and approved global improvement reaches both | admin API publishes only after a passing evaluation (`learning-http.pg.test.ts`); both users' sessions, requests and proposals carry it (`web-actions.pg.test.ts`, browser spec) |
 | Ordinary interpretation, review and wallet authorization unchanged | the eval corpus replayed with learning on and nothing learned gives identical replies; Copilot/admin browser profiles pass; only Apply changes a workflow; no new signature path |
@@ -84,7 +84,6 @@ Local, loopback PostgreSQL 18.6 (CI image), no public network, no model, no real
   effects (test-network terms, user meanings, mainnet suggestions) are measured.
 * **Legal basis** for both purposes is an open owner/counsel decision ([LEARNING-PRIVACY.md §5](../security/LEARNING-PRIVACY.md)); the existing
   privacy page names the Portuguese CNPD while Brazil is the primary market — review whether ANPD should be named (not changed here).
-* WhatsApp uses the same Channel Core path as Telegram; only Telegram has an end-to-end learning test.
 * A global meaning for a real-funds network only reorders FloFi's question; it never grounds the network (by design, safety first).
 * Feedback outcomes are observed behaviour, not ground truth; client-reported events are bounded but can be inflated by a hostile client (they
   only affect aggregates).
