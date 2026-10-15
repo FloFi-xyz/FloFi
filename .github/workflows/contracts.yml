@@ -25,6 +25,9 @@ jobs:
       NEXT_TELEMETRY_DISABLED: "1"
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
       PYTHONDONTWRITEBYTECODE: "1"
+      # The self-hosted runner may host another app server on 3000; the browser suites (critical, guarded and composition steps)
+      # serve the reference app on an isolated loopback port (validated by apps/reference-dapp/e2e/app-origin.ts).
+      FLOFI_E2E_APP_PORT: '3100'
     # BUILD-CLOUD-001: a disposable PostgreSQL bound to the runner's loopback interface, pinned by digest.
     # Test-only trust authentication; it holds no data beyond the suites' own throwaway databases.
     services:
@@ -179,10 +182,6 @@ jobs:
       - name: Run critical browser regressions first (Copilot learning, wallet isolation, Canvas basics, financial Review)
         id: browser-critical
         shell: bash
-        env:
-          # The self-hosted runner may host another app server on 3000; the browser suites serve the reference app on
-          # an isolated loopback port (validated by apps/reference-dapp/e2e/app-origin.ts).
-          FLOFI_E2E_APP_PORT: '3100'
         run: |
           set -euo pipefail
           source scripts/ci-observe.sh 'Critical browser regressions'
@@ -239,10 +238,6 @@ jobs:
       - name: Run guarded browser suite
         id: browser
         shell: bash
-        env:
-          # The self-hosted runner may host another app server on 3000; the browser suites serve the reference app on
-          # an isolated loopback port (validated by apps/reference-dapp/e2e/app-origin.ts).
-          FLOFI_E2E_APP_PORT: '3100'
         run: |
           set -euo pipefail
           source scripts/ci-observe.sh 'Guarded browser suites'
@@ -261,10 +256,6 @@ jobs:
       - name: Composition fork and browser suites
         id: composition
         shell: bash
-        env:
-          # The self-hosted runner may host another app server on 3000; the browser suites serve the reference app on
-          # an isolated loopback port (validated by apps/reference-dapp/e2e/app-origin.ts).
-          FLOFI_E2E_APP_PORT: '3100'
         run: |
           set -euo pipefail
           source scripts/ci-observe.sh 'Composition fork and browser'

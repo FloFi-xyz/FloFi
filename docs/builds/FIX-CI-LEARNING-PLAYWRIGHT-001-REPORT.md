@@ -49,6 +49,10 @@ Critical tier (`node scripts/guarded-release-browser.mjs critical`): `copilot-le
 (Canvas basics), `solana-wallet-refusal` (P0 reviewed-bytes refusal), `supply-provenance` (MOCKED never authorizes) and
 `review-execute-recovery-components` (Simulate/Review/Execute). It takes about 3.5 min on CircleCI (168 s locally).
 
+CircleCI run 1 (`bd35569`): `copilot-learning` finished **≈197 s** after the workflow was created (baseline: the regression surfaced
+after 1,630 s), and the whole critical tier by ≈377 s. Both browser jobs finished 946 s after creation (browser-1: build 112 s,
+critical 204 s, part 1/2 543 s; browser-2: build 120 s, part 2/2 749 s, composition 19 s); profile seconds matched jobs 53/55 within noise.
+
 ## 3. Playwright and runner improvements
 
 - One plan, validated at start-up (`critical`, `extended [--shard n/2]`, `product` = both, `composition`, `profile <name>`, `list`): every
@@ -80,7 +84,9 @@ Critical tier (`node scripts/guarded-release-browser.mjs critical`): `copilot-le
 | Test count of every locally run profile (40 of 41) vs main's CircleCI job 55 | identical (MCP group 11/1/21/6/2) |
 | `test_ci_optimization.py` (40 tests) and 14 deliberate breakages | 40 pass; 14/14 breakages caught |
 | `test_governance_lite.py`, `governance_lite.py`, eslint, app typecheck | pass |
-| CircleCI certification (new structure) | see PR |
+| CircleCI run 1 (`bd35569`, workflow `d4f50d82`) | browser-1 PASS 895 s, browser-2 PASS 920 s; checks FAILED in units (below); `certification` not run, its status never reported |
+| Fix for run 1 | `e2e-app-origin.test.ts` requires one `FLOFI_E2E_APP_PORT` setting in the Actions workflow: moved from three steps to job env (as CircleCI) |
+| CircleCI final run | see PR #105 |
 
 Not run locally: `default-product` (BUILD-009 requests a real read-only quote server-side) and the BUILD-007 composition step (digest-pinned
 public downloads). Both are unchanged and run in CI. Local and mock evidence does not prove public execution.
