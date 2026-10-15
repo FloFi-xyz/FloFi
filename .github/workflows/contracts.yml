@@ -161,6 +161,38 @@ jobs:
           source scripts/ci-observe.sh 'Schema drift'
           pnpm schemas:check
 
+      - name: Bootstrap exact approved anvil
+        shell: bash
+        run: |
+          set -euo pipefail
+          source scripts/ci-observe.sh 'Anvil bootstrap'
+          python3 scripts/bootstrap-anvil.py "$RUNNER_TEMP/gryloo-anvil/foundry-v1.8.3"
+
+      - name: Bootstrap exact approved headless shell
+        shell: bash
+        run: |
+          set -euo pipefail
+          source scripts/ci-observe.sh 'Browser bootstrap'
+          export BUILD002_BROWSER_CACHE="$RUNNER_TEMP/gryloo-playwright/chromium_headless_shell-1243"
+          python3 scripts/bootstrap-playwright.py "$BUILD002_BROWSER_CACHE"
+
+      - name: Run critical browser regressions first (Copilot learning, wallet isolation, Canvas basics, financial Review)
+        id: browser-critical
+        shell: bash
+        env:
+          # The self-hosted runner may host another app server on 3000; the browser suites serve the reference app on
+          # an isolated loopback port (validated by apps/reference-dapp/e2e/app-origin.ts).
+          FLOFI_E2E_APP_PORT: '3100'
+        run: |
+          set -euo pipefail
+          source scripts/ci-observe.sh 'Critical browser regressions'
+          export BUILD002_BROWSER_CACHE="$RUNNER_TEMP/gryloo-playwright/chromium_headless_shell-1243"
+          export GRYLOO_ANVIL_BIN="$RUNNER_TEMP/gryloo-anvil/foundry-v1.8.3/anvil"
+          export GRYLOO_MODE_A_RUNTIME="$RUNNER_TEMP/gryloo-mode-a-e2e"
+          export GRYLOO_COW_RUNTIME="$RUNNER_TEMP/gryloo-cow-e2e"
+          # Fail fast: the critical profiles run right after the build, before the unit, PostgreSQL and fork suites.
+          node scripts/guarded-release-browser.mjs critical
+
       - name: Unit and contract tests and exported API checks
         shell: bash
         run: |
@@ -179,13 +211,6 @@ jobs:
           source scripts/ci-observe.sh 'PostgreSQL'
           export TEST_DATABASE_URL="postgres://flofi@127.0.0.1:5432/postgres"
           pnpm test:postgres
-
-      - name: Bootstrap exact approved anvil
-        shell: bash
-        run: |
-          set -euo pipefail
-          source scripts/ci-observe.sh 'Anvil bootstrap'
-          python3 scripts/bootstrap-anvil.py "$RUNNER_TEMP/gryloo-anvil/foundry-v1.8.3"
 
       - name: Offline compatibility gate and fork suite
         shell: bash
@@ -211,14 +236,6 @@ jobs:
           test -f apps/reference-dapp/e2e/fork/composition-transcript.json
           node --input-type=module -e "import { readFileSync } from 'node:fs'; import { verifyCompositionTranscript } from './apps/reference-dapp/e2e/fork/composition-replay-upstream.mjs'; const t=JSON.parse(readFileSync('apps/reference-dapp/e2e/fork/composition-transcript.json','utf8')); const r=verifyCompositionTranscript(t,t.identity.accounts); if(t.sourceChainId!==8453||r.providerRequests<1||t.codeFingerprints.composition.syntheticCodePins) process.exit(1); console.log('BUILD-007 closed transcript verified',r.providerRequests,r.localReplies);"
 
-      - name: Bootstrap exact approved headless shell
-        shell: bash
-        run: |
-          set -euo pipefail
-          source scripts/ci-observe.sh 'Browser bootstrap'
-          export BUILD002_BROWSER_CACHE="$RUNNER_TEMP/gryloo-playwright/chromium_headless_shell-1243"
-          python3 scripts/bootstrap-playwright.py "$BUILD002_BROWSER_CACHE"
-
       - name: Run guarded browser suite
         id: browser
         shell: bash
@@ -238,20 +255,23 @@ jobs:
           # Positive local financial lifecycle/recovery remains enforced by pnpm test, PostgreSQL
           # and the pinned offline fork gates above; historical browser diagnostics remain intact.
           export GRYLOO_COW_RUNTIME="$RUNNER_TEMP/gryloo-cow-e2e"
-          node scripts/guarded-release-browser.mjs product
-          pnpm --filter @defi-workflow-engine/reference-dapp exec playwright test mcp-route-presentation.spec.ts
-          # BUILD-DEVELOPER-001: a third-party server integrates with the SDK alone (operator CLI key, strategy, approval, signed loopback
-          # webhooks) and the end user reaches FloFi's Review, where MOCKED financial authority stays blocked (no wallet transaction), on the
-          # same embedded loopback harness (no public network, no real transaction). The full lifecycle is proven by journey.pg.test.ts.
-          GRYLOO_MCP_E2E=EMBEDDED_LOOPBACK_ONLY TEST_DATABASE_URL="postgres://flofi@127.0.0.1:5432/postgres" pnpm --filter @defi-workflow-engine/reference-dapp exec playwright test developer-journey.spec.ts
-          # BUILD-MCP-002: consumer OAuth and in-chat approval on disposable loopback infrastructure.
-          GRYLOO_MCP_E2E=EMBEDDED_LOOPBACK_ONLY TEST_DATABASE_URL="postgres://flofi@127.0.0.1:5432/postgres" pnpm --filter @defi-workflow-engine/reference-dapp exec playwright test mcp-in-chat.spec.ts mcp-route-presentation.spec.ts
-          # Each invocation gets a fresh disposable database; keep the production OAuth registration rate limit intact.
-          GRYLOO_MCP_E2E=EMBEDDED_LOOPBACK_ONLY TEST_DATABASE_URL="postgres://flofi@127.0.0.1:5432/postgres" pnpm --filter @defi-workflow-engine/reference-dapp exec playwright test channel-signing.spec.ts
-          # BUILD-CHANNELS-001: the channels' /approve paths on the same embedded loopback harness — WhatsApp with the FIXTURE provider (nothing
-          # is sent to Meta) and Telegram against the loopback Bot API double (nothing reaches Telegram): the real webhook routes, the
-          # intended-wallet rule, the owner's Review where MOCKED authority stays blocked, the status ping and the scheduled dispatch.
-          GRYLOO_MCP_E2E=EMBEDDED_LOOPBACK_ONLY GRYLOO_CHANNEL_E2E=FIXTURE_LOOPBACK_ONLY TEST_DATABASE_URL="postgres://flofi@127.0.0.1:5432/postgres" pnpm --filter @defi-workflow-engine/reference-dapp exec playwright test whatsapp-approve.spec.ts telegram-approve.spec.ts
+          # Every other product profile, including the MCP, developer and channel suites (profiles in the same runner).
+          node scripts/guarded-release-browser.mjs extended
+
+      - name: Composition fork and browser suites
+        id: composition
+        shell: bash
+        env:
+          # The self-hosted runner may host another app server on 3000; the browser suites serve the reference app on
+          # an isolated loopback port (validated by apps/reference-dapp/e2e/app-origin.ts).
+          FLOFI_E2E_APP_PORT: '3100'
+        run: |
+          set -euo pipefail
+          source scripts/ci-observe.sh 'Composition fork and browser'
+          export BUILD002_BROWSER_CACHE="$RUNNER_TEMP/gryloo-playwright/chromium_headless_shell-1243"
+          export GRYLOO_ANVIL_BIN="$RUNNER_TEMP/gryloo-anvil/foundry-v1.8.3/anvil"
+          export GRYLOO_MODE_A_RUNTIME="$RUNNER_TEMP/gryloo-mode-a-e2e"
+          export GRYLOO_COW_RUNTIME="$RUNNER_TEMP/gryloo-cow-e2e"
           # BUILD-007: only official digest-pinned test-time artifacts are downloaded, outside Git.
           export GRYLOO_B007_INPUTS="$RUNNER_TEMP/gryloo-build-007-inputs"
           mkdir -p "$GRYLOO_B007_INPUTS"
@@ -311,8 +331,8 @@ jobs:
           set -euo pipefail
           python3 scripts/summarize-screenshot-diffs.py apps/reference-dapp/test-results
 
-      - name: Upload browser screenshot mismatch images
-        if: ${{ failure() && steps.browser.outcome == 'failure' }}
+      - name: Upload browser failure artifacts (screenshots, error context, diagnostic traces, JUnit, profile timings)
+        if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: build-005-visual-failure-${{ github.run_id }}-${{ github.run_attempt }}
@@ -320,6 +340,11 @@ jobs:
             apps/reference-dapp/test-results/**/*-actual.png
             apps/reference-dapp/test-results/**/*-expected.png
             apps/reference-dapp/test-results/**/*-diff.png
+            apps/reference-dapp/test-results/**/test-failed-*.png
+            apps/reference-dapp/test-results/**/error-context.md
+            apps/reference-dapp/test-results/**/trace.zip
+            apps/reference-dapp/test-results/junit/*.xml
+            apps/reference-dapp/test-results/guarded-*.json
           if-no-files-found: ignore
           retention-days: 7
 
@@ -433,6 +458,12 @@ jobs:
           finally:
               path.unlink(missing_ok=True)
           PYCODE
+
+      - name: Verify the certification ledger (every required stage and planned browser profile passed)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/ci-observe.py verify
 
       - name: CI timing summary after failure
         if: failure()

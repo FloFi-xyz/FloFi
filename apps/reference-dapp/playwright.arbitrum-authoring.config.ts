@@ -16,7 +16,7 @@ export default defineConfig({
   testDir: './e2e', testMatch: 'arbitrum-authoring-certification.spec.ts', workers: 1, fullyParallel: false, retries: 0,
   timeout: 30_000, expect: { timeout: 10_000 }, reporter: 'list',
   use: { baseURL: E2E_APP_ORIGIN, browserName: 'chromium', headless: true, launchOptions: { executablePath },
-    serviceWorkers: 'block', trace: 'off', screenshot: 'off', video: 'off' },
+    serviceWorkers: 'block', trace: 'off', screenshot: 'only-on-failure', video: 'off' },
   webServer: { command: 'pnpm --filter @defi-workflow-engine/reference-dapp start', url: E2E_APP_ORIGIN, reuseExistingServer: false, timeout: 60_000,
     env: { PORT: String(E2E_APP_PORT), FLOFI_ENGINEERING_UI: 'LOOPBACK_ONLY', FLOFI_COPILOT: 'replay',
       NEXT_TELEMETRY_DISABLED: '1', PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1' } },

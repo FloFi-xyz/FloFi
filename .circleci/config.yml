@@ -1,27 +1,14 @@
-# CircleCI manual-only FloFi backup; intentionally no deployment jobs.
-# Mirror source: .github/workflows/governance.yml and contracts.yml.
-# Refresh the mirror when the Actions contracts workflow changes.
+# FloFi certification on CircleCI; intentionally no deployment jobs.
+# Mirror source: .github/workflows/governance.yml and contracts.yml, which run the same commands in one sequential job.
+# scripts/test_ci_optimization.py keeps both at equal coverage; refresh this file when the Actions contracts workflow changes.
+#
+# After governance, certification fans out into three jobs of about equal duration, each in its own container with its own
+# loopback ports, disposable PostgreSQL and build: static and unit checks with the PostgreSQL and fork suites, and two browser
+# jobs (critical regressions first). It fans in at `certification`, which runs only when all three passed and then verifies the
+# ledger: every required stage and every planned browser profile (each exactly once) succeeded. When any job fails,
+# `certification` never runs, so its required status is not reported and a merge stays blocked.
 version: 2.1
-jobs:
-  governance:
-    docker:
-      - image: cimg/node:24.21.0
-    resource_class: small
-    steps:
-      - checkout
-      - run:
-          name: "Governance gate"
-          command: |
-            set -euo pipefail
-            export GOVERNANCE_BRANCH="${CIRCLE_BRANCH:-circleci-project-setup}"
-            export GOVERNANCE_EVENT=push
-            export PYTHONDONTWRITEBYTECODE=1
-            python3 -m unittest discover -s scripts -p 'test_governance_lite.py'
-            python3 -m unittest discover -s scripts -p 'test_ci_*.py'
-            python3 scripts/governance_lite.py
-            git diff --check
-            if ! git rev-parse HEAD^1 >/dev/null 2>&1; then git fetch --deepen=2 origin || true; fi
-            git diff --check HEAD^1 HEAD
+executors:
   certification:
     docker:
       - image: cimg/node:24.21.0-browsers
@@ -46,6 +33,9 @@ jobs:
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
       PYTHONDONTWRITEBYTECODE: "1"
       FLOFI_E2E_APP_PORT: "3100"
+commands:
+  prepare-certification:
+    description: "Disposable workspace, loopback PostgreSQL, the exact approved Node and pnpm, and the frozen install"
     steps:
       - checkout
       - run:
@@ -75,7 +65,6 @@ jobs:
             printf 'export PATH="%s:$PATH"\n' "$toolbin" >> "$BASH_ENV"
             test "$(node --version)" = "v24.21.0"
             test "$(pnpm --version)" = "11.22.0"
-
       - run:
           name: "Print exact verified toolchain before installation"
           command: |
@@ -95,6 +84,85 @@ jobs:
             set -euo pipefail
             source scripts/ci-observe.sh 'Frozen dependency install'
             pnpm install --frozen-lockfile --ignore-scripts
+  prepare-browser:
+    description: "Production build and the exact approved anvil and headless shell"
+    steps:
+      - run:
+          name: "Production build"
+          command: |
+            set -euo pipefail
+            source scripts/ci-observe.sh 'Production build'
+            pnpm build
+      - run:
+          name: "Bootstrap exact approved anvil"
+          command: |
+            set -euo pipefail
+            source scripts/ci-observe.sh 'Anvil bootstrap'
+            python3 scripts/bootstrap-anvil.py "$RUNNER_TEMP/gryloo-anvil/foundry-v1.8.3"
+      - run:
+          name: "Bootstrap exact approved headless shell"
+          command: |
+            set -euo pipefail
+            source scripts/ci-observe.sh 'Browser bootstrap'
+            export BUILD002_BROWSER_CACHE="$RUNNER_TEMP/gryloo-playwright/chromium_headless_shell-1243"
+            python3 scripts/bootstrap-playwright.py "$BUILD002_BROWSER_CACHE"
+  browser-results:
+    description: "Per-test JUnit results, failure artifacts (screenshots, error context, diagnostic traces) and browser timings"
+    steps:
+      - store_test_results:
+          path: apps/reference-dapp/test-results/junit
+      - store_artifacts:
+          path: apps/reference-dapp/test-results
+          destination: playwright-results
+      - run:
+          name: "Summarize screenshot differences after a browser failure"
+          when: on_fail
+          command: |
+            set -euo pipefail
+            python3 scripts/summarize-screenshot-diffs.py apps/reference-dapp/test-results
+  record-certification:
+    description: "This job's stage timings, and its ledger for the certification fan-in (persisted only when the job passed)"
+    steps:
+      - run:
+          name: "CI timing summary after failure"
+          when: on_fail
+          command: |
+            set -euo pipefail
+            python3 scripts/ci-observe.py summary
+      - run:
+          name: "CI timing summary after success"
+          when: on_success
+          command: |
+            set -euo pipefail
+            python3 scripts/ci-observe.py summary
+      - persist_to_workspace:
+          root: /tmp/flofi-ci
+          paths:
+            - flofi-ci-metrics
+jobs:
+  governance:
+    docker:
+      - image: cimg/node:24.21.0
+    resource_class: small
+    steps:
+      - checkout
+      - run:
+          name: "Governance gate"
+          command: |
+            set -euo pipefail
+            export GOVERNANCE_BRANCH="${CIRCLE_BRANCH:-circleci-project-setup}"
+            export GOVERNANCE_EVENT=push
+            export PYTHONDONTWRITEBYTECODE=1
+            python3 -m unittest discover -s scripts -p 'test_governance_lite.py'
+            python3 -m unittest discover -s scripts -p 'test_ci_*.py'
+            python3 scripts/governance_lite.py
+            git diff --check
+            if ! git rev-parse HEAD^1 >/dev/null 2>&1; then git fetch --deepen=2 origin || true; fi
+            git diff --check HEAD^1 HEAD
+  certification-checks:
+    executor: certification
+    steps:
+      - prepare-certification
       - run:
           name: "Verify every registry integrity, license and release age"
           command: |
@@ -107,6 +175,9 @@ jobs:
             set -euo pipefail
             source scripts/ci-observe.sh 'Dependency audit'
             pnpm audit --audit-level low
+      - run:
+          name: "Validate and remove ephemeral CycloneDX 1.6 SBOM"
+          command: bash .circleci/scripts/ci-sbom.sh
       - run:
           name: "Typecheck"
           command: |
@@ -121,12 +192,6 @@ jobs:
             source scripts/ci-observe.sh Lint
             pnpm lint
             pnpm exec eslint scripts/guarded-release-browser.mjs
-      - run:
-          name: "Production build"
-          command: |
-            set -euo pipefail
-            source scripts/ci-observe.sh 'Production build'
-            pnpm build
       - run:
           name: "Schema drift"
           command: |
@@ -159,49 +224,98 @@ jobs:
       - run:
           name: "Offline compatibility gate and fork suite"
           command: bash .circleci/scripts/ci-fork.sh
+      - record-certification
+  certification-browser-1:
+    executor: certification
+    steps:
+      - prepare-certification
+      - prepare-browser
       - run:
-          name: "Bootstrap exact approved headless shell"
-          command: |
-            set -euo pipefail
-            source scripts/ci-observe.sh 'Browser bootstrap'
-            export BUILD002_BROWSER_CACHE="$RUNNER_TEMP/gryloo-playwright/chromium_headless_shell-1243"
-            python3 scripts/bootstrap-playwright.py "$BUILD002_BROWSER_CACHE"
-      - run:
-          name: "Run guarded browser suite"
+          name: "Critical browser regressions first (Copilot learning, wallet isolation, Canvas basics, financial Review)"
           no_output_timeout: 30m
-          command: bash .circleci/scripts/ci-browser.sh
-      - store_artifacts:
-          path: apps/reference-dapp/test-results
-          destination: playwright-results
-      - run:
-          name: "Summarize screenshot differences after a browser failure"
-          when: on_fail
           command: |
             set -euo pipefail
-            python3 scripts/summarize-screenshot-diffs.py apps/reference-dapp/test-results
+            source scripts/ci-observe.sh 'Critical browser regressions'
+            export BUILD002_BROWSER_CACHE="$RUNNER_TEMP/gryloo-playwright/chromium_headless_shell-1243"
+            export GRYLOO_ANVIL_BIN="$RUNNER_TEMP/gryloo-anvil/foundry-v1.8.3/anvil"
+            export GRYLOO_MODE_A_RUNTIME="$RUNNER_TEMP/gryloo-mode-a-e2e"
+            export GRYLOO_COW_RUNTIME="$RUNNER_TEMP/gryloo-cow-e2e"
+            node scripts/guarded-release-browser.mjs critical
       - run:
-          name: "Validate and remove ephemeral CycloneDX 1.6 SBOM"
-          command: bash .circleci/scripts/ci-sbom.sh
-      - run:
-          name: "CI timing summary after failure"
-          when: on_fail
+          name: "Run guarded browser suite, part 1 of 2"
+          no_output_timeout: 30m
           command: |
             set -euo pipefail
-            python3 scripts/ci-observe.py summary
-      - run:
-          name: "CI timing summary after success"
-          when: on_success
-          command: |
-            set -euo pipefail
-            python3 scripts/ci-observe.py summary
+            source scripts/ci-observe.sh 'Guarded browser suites'
+            export BUILD002_BROWSER_CACHE="$RUNNER_TEMP/gryloo-playwright/chromium_headless_shell-1243"
+            export GRYLOO_ANVIL_BIN="$RUNNER_TEMP/gryloo-anvil/foundry-v1.8.3/anvil"
+            export GRYLOO_MODE_A_RUNTIME="$RUNNER_TEMP/gryloo-mode-a-e2e"
+            export GRYLOO_COW_RUNTIME="$RUNNER_TEMP/gryloo-cow-e2e"
+            node scripts/guarded-release-browser.mjs extended --shard 1/2
+      - browser-results
+      - record-certification
       - save_cache:
           key: flofi-circleci-archives-v1-{{ checksum "scripts/bootstrap-ci.py" }}
           paths:
             - /tmp/flofi-ci/archives
+  certification-browser-2:
+    executor: certification
+    steps:
+      - prepare-certification
+      - prepare-browser
+      - run:
+          name: "Run guarded browser suite, part 2 of 2"
+          no_output_timeout: 30m
+          command: |
+            set -euo pipefail
+            source scripts/ci-observe.sh 'Guarded browser suites'
+            export BUILD002_BROWSER_CACHE="$RUNNER_TEMP/gryloo-playwright/chromium_headless_shell-1243"
+            export GRYLOO_ANVIL_BIN="$RUNNER_TEMP/gryloo-anvil/foundry-v1.8.3/anvil"
+            export GRYLOO_MODE_A_RUNTIME="$RUNNER_TEMP/gryloo-mode-a-e2e"
+            export GRYLOO_COW_RUNTIME="$RUNNER_TEMP/gryloo-cow-e2e"
+            node scripts/guarded-release-browser.mjs extended --shard 2/2
+      - run:
+          name: "Composition fork and browser suites"
+          no_output_timeout: 30m
+          command: bash .circleci/scripts/ci-composition.sh
+      - browser-results
+      - record-certification
+      - save_cache:
+          key: flofi-circleci-archives-v1-{{ checksum "scripts/bootstrap-ci.py" }}
+          paths:
+            - /tmp/flofi-ci/archives
+  certification:
+    docker:
+      - image: cimg/node:24.21.0
+    resource_class: small
+    environment:
+      RUNNER_TEMP: /tmp/flofi-ci
+      PYTHONDONTWRITEBYTECODE: "1"
+    steps:
+      - checkout
+      - attach_workspace:
+          at: /tmp/flofi-ci
+      - run:
+          name: "Verify the certification ledger: every required stage and every planned browser profile passed"
+          command: |
+            set -euo pipefail
+            test "$(node --version)" = "v24.21.0"
+            python3 scripts/ci-observe.py verify
 workflows:
   manual-backup-certification:
     jobs:
       - governance
-      - certification:
+      - certification-checks:
           requires:
             - governance
+      - certification-browser-1:
+          requires:
+            - governance
+      - certification-browser-2:
+          requires:
+            - governance
+      - certification:
+          requires:
+            - certification-checks
+            - certification-browser-1
+            - certification-browser-2

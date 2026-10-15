@@ -5,8 +5,16 @@ import argparse
 import json
 import os
 from pathlib import Path
+import subprocess
 import time
 import uuid
+
+# Every certification stage (the `source scripts/ci-observe.sh '<label>'` labels in .circleci/config.yml and
+# .github/workflows/contracts.yml) must have completed successfully in some job before certification passes.
+REQUIRED_STAGES = ('Toolchain bootstrap', 'Toolchain identity', 'Frozen dependency install', 'Dependency integrity license and age',
+                   'Dependency audit', 'Typecheck', 'Lint', 'Production build', 'Schema drift', 'Unit and contract tests', 'PostgreSQL',
+                   'Anvil bootstrap', 'Anvil and offline forks', 'Browser bootstrap', 'Critical browser regressions',
+                   'Guarded browser suites', 'Composition fork and browser', 'SBOM')
 
 
 def resources():
@@ -28,7 +36,8 @@ def root():
 
 def begin(name):
     identity = uuid.uuid4().hex
-    record = {'name': name, 'start': time.monotonic(), 'before': resources(), 'outcome': 'incomplete'}
+    record = {'name': name, 'job': os.environ.get('CIRCLE_JOB') or os.environ.get('GITHUB_JOB') or 'local',
+              'start': time.monotonic(), 'before': resources(), 'outcome': 'incomplete'}
     (root() / (identity + '.json')).write_text(json.dumps(record))
     return identity
 
@@ -75,6 +84,7 @@ def summary():
                       f"System swap pages in/out during stages: {sum(row['after']['swap_in'] - row['before']['swap_in'] for row in completed)}/{sum(row['after']['swap_out'] - row['before']['swap_out'] for row in completed)}.",
                       f"System disk input/output during stages: {sum(row['after']['io_in_kib'] - row['before']['io_in_kib'] for row in completed) / 1024:.1f}/{sum(row['after']['io_out_kib'] - row['before']['io_out_kib'] for row in completed) / 1024:.1f} MiB.",
                       'Counters include other activity on this shared machine. Endpoint snapshots do not measure peak process RAM. Incomplete/cancelled stages are never successes.']
+    lines += browser_lines()
     content = '\n'.join(lines) + '\n'
     print(content)
     if os.environ.get('GITHUB_STEP_SUMMARY'):
@@ -82,9 +92,64 @@ def summary():
             stream.write(content)
 
 
+def browser_reports(base):
+    return [json.loads(path.read_text()) for path in sorted((base / 'browser').glob('*.json'))]
+
+
+def browser_lines():
+    """Per-profile browser timings of this job (written by scripts/guarded-release-browser.mjs), slowest first."""
+    rows = [(report['label'], row) for report in browser_reports(root()) for row in report['profiles']]
+    if not rows:
+        return []
+    lines = ['', '### Browser profile timings', '', '| Profile | Run | Seconds | Result |', '| --- | --- | ---: | --- |']
+    for label, row in sorted(rows, key=lambda item: -(item[1]['seconds'] or 0)):
+        seconds = f"{row['seconds']:.2f}" if row['seconds'] is not None else 'NOT RUN'
+        lines.append(f"| {row['name']} | {label} | {seconds} | {row['status']} |")
+    return lines
+
+
+def verify(base):
+    """Fail closed unless every required stage and every planned browser profile passed (each profile exactly once)."""
+    errors = []
+    stages = [json.loads(path.read_text()) for path in sorted(base.glob('*.json'))]
+    for row in stages:
+        if row.get('outcome') != 'success' or 'duration' not in row:
+            errors.append(f"stage {row.get('name')!r} in job {row.get('job')!r} did not succeed: {row.get('outcome')}")
+    passed = {row['name'] for row in stages if row.get('outcome') == 'success'}
+    errors += [f'required stage never ran: {name}' for name in REQUIRED_STAGES if name not in passed]
+    plan = json.loads(subprocess.run(['node', 'scripts/guarded-release-browser.mjs', 'list'], cwd=Path(__file__).resolve().parents[1],
+                                     check=True, capture_output=True, text=True).stdout)
+    expected = {'critical': plan['critical'], 'extended': plan['extended'], 'composition': plan['composition']}
+    seen = {phase: [] for phase in expected}
+    for report in browser_reports(base):
+        if report.get('kind') != 'guarded-browser' or report.get('phase') not in expected:
+            errors.append(f"unexpected browser report {report.get('label')!r} (phase {report.get('phase')!r})")
+            continue
+        if report.get('status') != 'PASS':
+            errors.append(f"browser run {report['label']} did not pass: {report.get('status')}")
+        for row in report['profiles']:
+            if row['status'] != 'PASS':
+                errors.append(f"browser profile {row['name']} ({report['label']}): {row['status']}")
+            seen[report['phase']].append(row['name'])
+    for phase, names in expected.items():
+        missing = [name for name in names if name not in seen[phase]]
+        extra = [name for name in seen[phase] if name not in names or seen[phase].count(name) > 1]
+        if missing:
+            errors.append(f"{phase} browser profiles never ran: {', '.join(missing)}")
+        if extra:
+            errors.append(f"{phase} browser profiles unplanned or repeated: {', '.join(sorted(set(extra)))}")
+    if errors:
+        print('Certification ledger: FAIL', *('  ' + error for error in errors), sep='\n', flush=True)
+        return 1
+    profiles = sum(len(names) for names in expected.values())
+    print(f'Certification ledger: PASS ({len(REQUIRED_STAGES)} required stages over {len({row["job"] for row in stages})} job(s), '
+          f'{profiles} browser profiles each exactly once)', flush=True)
+    return 0
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('operation', choices=['begin', 'finish', 'summary'])
+    parser.add_argument('operation', choices=['begin', 'finish', 'summary', 'verify'])
     parser.add_argument('value', nargs='?')
     parser.add_argument('status', nargs='?', type=int)
     args = parser.parse_args()
@@ -92,5 +157,7 @@ if __name__ == '__main__':
         print(begin(args.value))
     elif args.operation == 'finish':
         finish(args.value, args.status)
+    elif args.operation == 'verify':
+        raise SystemExit(verify(root()))
     else:
         summary()
