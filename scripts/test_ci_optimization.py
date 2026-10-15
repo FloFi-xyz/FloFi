@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import tempfile
 import tarfile
@@ -308,11 +309,11 @@ class WorkflowInvariants(unittest.TestCase):
 
     def test_all_extra_mandatory_suites_and_security_steps_are_unconditional(self):
         body = (ROOT / '.github/workflows/contracts.yml').read_text()
+        # The MCP, developer and channel browser suites are guarded-runner profiles now (BrowserPlan checks them).
         for command in ['pnpm test:postgres', 'pnpm exec eslint scripts/guarded-release-browser.mjs',
                         'pnpm sbom --sbom-format cyclonedx', 'pnpm exec vitest run packages/reference-compiler/test/composition.fork.test.ts',
-                        'playwright test developer-journey.spec.ts', 'playwright test mcp-in-chat.spec.ts mcp-route-presentation.spec.ts',
-                        'playwright test channel-signing.spec.ts',
-                        'playwright test whatsapp-approve.spec.ts telegram-approve.spec.ts']:
+                        'node scripts/guarded-release-browser.mjs critical', 'node scripts/guarded-release-browser.mjs extended',
+                        'node scripts/guarded-release-browser.mjs composition']:
             steps = [step for step in re.split(r'(?m)^      - name:', body) if command in step]
             self.assertEqual(len(steps), 1, command)
             self.assertNotRegex(steps[0], r'(?m)^\s*(if|continue-on-error):')
@@ -348,6 +349,448 @@ class StageReporting(unittest.TestCase):
             result = subprocess.run(['bash', '-c', command], cwd=ROOT, env=env, capture_output=True, text=True)
             self.assertEqual(result.returncode, 17)
             self.assertTrue((Path(scratch) / 'owned-cleanup').exists())
+
+
+
+NODE = shutil.which('node') or 'node'
+RUNNER = 'scripts/guarded-release-browser.mjs'
+# Every browser profile of main 65c929e (scripts/guarded-release-browser.mjs) with its exact specs and harness settings.
+MAIN_PROFILES = {
+    "default-product": (["brand-ux-001.spec.ts","base-observation.spec.ts","build-roundtrip.spec.ts","build009.spec.ts","across.spec.ts","canvas-keyboard.spec.ts","canvas-ux.spec.ts","contextual-proposals.spec.ts","cross-chain-liquidity-recovery.spec.ts","cross-chain-liquidity.spec.ts","execution-capabilities.spec.ts","interface-honesty.spec.ts","mock-artifact-chain.spec.ts","network-isolation.spec.ts","public-testnet.spec.ts","robinhood-network.spec.ts","swap-authoring.spec.ts","visual-shell.spec.ts","credentials.spec.ts","build-fix-ux.spec.ts","beta-ui.spec.ts"], {}),
+    "review-execute-recovery-components": (["simulate-review-acceptance.spec.ts","execute-product-workspace.spec.ts","execute-workflow.spec.ts"], {}),
+    "workflow-acceptance": (["acceptance-workflows.spec.ts"], {"GRYLOO_CLOUD_RUNTIME_E2E":"EMBEDDED_LOOPBACK_ONLY","GRYLOO_ROUTER_TESTNET_E2E":"MOCKED_LOOPBACK_ONLY","TEST_DATABASE_URL":"<TEST_DATABASE_URL>"}),
+    "swap-read-acceptance": (["acceptance-swap-read.spec.ts"], {"GRYLOO_CLOUD_RUNTIME_E2E":"EMBEDDED_LOOPBACK_ONLY","FLOFI_SWAP_READ_E2E":"MOCKED_LOOPBACK_ONLY","TEST_DATABASE_URL":"<TEST_DATABASE_URL>"}),
+    "execution-continuity": (["execution-continuity.spec.ts","workflow-ux-execution.spec.ts"], {"GRYLOO_CLOUD_RUNTIME_E2E":"EMBEDDED_LOOPBACK_ONLY","FLOFI_SWAP_READ_E2E":"MOCKED_LOOPBACK_ONLY","FLOFI_SWAP_EXECUTION_E2E":"MOCKED_LOOPBACK_ONLY","TEST_DATABASE_URL":"<TEST_DATABASE_URL>"}),
+    "automations": (["e2e/automations.spec.ts"], {"GRYLOO_CLOUD_RUNTIME_E2E":"EMBEDDED_LOOPBACK_ONLY","FLOFI_SWAP_READ_E2E":"MOCKED_LOOPBACK_ONLY","GRYLOO_AUTOMATION_E2E":"FIXTURE_LOOPBACK_ONLY","TEST_DATABASE_URL":"<TEST_DATABASE_URL>"}),
+    "canvas-automation-ux": (["canvas-automation-ux.spec.ts","canvas-cta.spec.ts"], {"GRYLOO_SUPPLY_E2E":"MOCKED_LOOPBACK_ONLY"}),
+    "chat-automations": (["copilot-automations.spec.ts"], {"FLOFI_COPILOT":"replay","GRYLOO_CLOUD_RUNTIME_E2E":"EMBEDDED_LOOPBACK_ONLY","FLOFI_SWAP_READ_E2E":"MOCKED_LOOPBACK_ONLY","GRYLOO_AUTOMATION_E2E":"FIXTURE_LOOPBACK_ONLY","TEST_DATABASE_URL":"<TEST_DATABASE_URL>"}),
+    "delegated-execution": (["e2e/delegated-execution.spec.ts"], {"FLOFI_COPILOT":"replay","GRYLOO_CLOUD_RUNTIME_E2E":"EMBEDDED_LOOPBACK_ONLY","FLOFI_SWAP_READ_E2E":"MOCKED_LOOPBACK_ONLY","GRYLOO_AUTOMATION_E2E":"FIXTURE_LOOPBACK_ONLY","GRYLOO_DELEGATION_E2E":"MOCKED_LOOPBACK_ONLY","TEST_DATABASE_URL":"<TEST_DATABASE_URL>"}),
+    "supply-provenance": (["release-provenance.spec.ts"], {"GRYLOO_SUPPLY_E2E":"MOCKED_LOOPBACK_ONLY"}),
+    "unsafe-lending-simulations": (["borrow.spec.ts","repay.spec.ts","--grep","read-only simulation blocks unsafe Borrow before Review|insufficient debt blocks read-only simulation"], {"GRYLOO_SUPPLY_E2E":"MOCKED_LOOPBACK_ONLY"}),
+    "copilot": (["copilot.spec.ts","copilot-conversation.spec.ts"], {"FLOFI_COPILOT":"replay","GRYLOO_SUPPLY_E2E":"MOCKED_LOOPBACK_ONLY"}),
+    "copilot-learning": (["copilot-learning-memory.spec.ts"], {"FLOFI_COPILOT":"replay","FLOFI_LEARNING_E2E":"LOOPBACK_ONLY","TEST_DATABASE_URL":"<TEST_DATABASE_URL>"}),
+    "copilot-solana": (["copilot-solana.spec.ts"], {"FLOFI_COPILOT":"replay","GRYLOO_SOLANA_DEVNET_E2E":"MOCKED_LOOPBACK_ONLY"}),
+    "solana-mainnet-network": (["solana-mainnet-network.spec.ts"], {"GRYLOO_SOLANA_DEVNET_E2E":"MOCKED_LOOPBACK_ONLY"}),
+    "canvas-corrections": (["canvas-corrections.spec.ts"], {}),
+    "solana-wallet-refusal": (["solana-swap-liquidity-composition.spec.ts","--grep","a wallet that changes the reviewed swap|a Phantom-like wallet signs the exact reviewed swap|a reconciled swap continues to its Orca position"], {"GRYLOO_SOLANA_DEVNET_E2E":"MOCKED_LOOPBACK_ONLY"}),
+    "lending-provenance": (["release-financial-provenance.spec.ts"], {"FLOFI_RELEASE_PROVENANCE_PROFILE":"lending","GRYLOO_LENDING_E2E":"MOCKED_LOOPBACK_ONLY"}),
+    "jupiter-provenance": (["release-financial-provenance.spec.ts"], {"FLOFI_RELEASE_PROVENANCE_PROFILE":"jupiter","GRYLOO_JUPITER_E2E":"MOCKED_LOOPBACK_ONLY"}),
+    "devnet-provenance": (["release-financial-provenance.spec.ts"], {"FLOFI_RELEASE_PROVENANCE_PROFILE":"solana-devnet","GRYLOO_SOLANA_DEVNET_E2E":"MOCKED_LOOPBACK_ONLY"}),
+    "orca-liquidity-provenance": (["release-financial-provenance.spec.ts"], {"FLOFI_RELEASE_PROVENANCE_PROFILE":"solana-liquidity","GRYLOO_SOLANA_DEVNET_E2E":"MOCKED_LOOPBACK_ONLY"}),
+    "solana-composition-provenance": (["release-financial-provenance.spec.ts"], {"FLOFI_RELEASE_PROVENANCE_PROFILE":"solana-composition","GRYLOO_SOLANA_DEVNET_E2E":"MOCKED_LOOPBACK_ONLY"}),
+    "transfer-provenance": (["release-financial-provenance.spec.ts"], {"FLOFI_RELEASE_PROVENANCE_PROFILE":"transfer","GRYLOO_ROBINHOOD_E2E":"MOCKED_LOOPBACK_ONLY"}),
+    "robinhood-mainnet-authoring": (["robinhood-stocks.spec.ts"], {"GRYLOO_ROBINHOOD_MAINNET_E2E":"MOCKED_LOOPBACK_ONLY","FLOFI_COPILOT":"replay"}),
+    "arbitrum-authoring-certification": (["--config","playwright.arbitrum-authoring.config.ts"], {}),
+    "workflow-ux-authoring": (["--config","playwright.workflow-ux.config.ts"], {}),
+    "canvas-workflow-ux": (["--config","playwright.canvas-workflow-ux.config.ts","canvas-workflow-ux.spec.ts"], {}),
+    "base-mainnet-authoring": (["base-mainnet-authoring.spec.ts"], {"GRYLOO_BASE_MAINNET_E2E":"MOCKED_LOOPBACK_ONLY","FLOFI_COPILOT":"replay"}),
+    "uniswap-provenance": (["release-financial-provenance.spec.ts"], {"FLOFI_RELEASE_PROVENANCE_PROFILE":"uniswap","GRYLOO_UNISWAP_LIQUIDITY_E2E":"MOCKED_LOOPBACK_ONLY"}),
+    "router-provenance": (["release-financial-provenance.spec.ts"], {"FLOFI_RELEASE_PROVENANCE_PROFILE":"router","GRYLOO_ROUTER_E2E":"MOCKED_LOOPBACK_ONLY"}),
+    "journey-provenance": (["release-financial-provenance.spec.ts"], {"FLOFI_RELEASE_PROVENANCE_PROFILE":"journey","GRYLOO_ROUTER_TESTNET_E2E":"MOCKED_LOOPBACK_ONLY"}),
+    "admin-console": (["admin-console.spec.ts"], {"FLOFI_ADMIN_E2E":"LOOPBACK_ONLY","TEST_DATABASE_URL":"<TEST_DATABASE_URL>"}),
+    "cloud-provenance": (["release-financial-provenance.spec.ts"], {"FLOFI_RELEASE_PROVENANCE_PROFILE":"cloud","GRYLOO_CLOUD_RUNTIME_E2E":"EMBEDDED_LOOPBACK_ONLY","TEST_DATABASE_URL":"<TEST_DATABASE_URL>"}),
+    "synthetic-fork-provenance": (["release-fork-provenance.spec.ts"], {"GRYLOO_MODE_A_E2E":"synthetic"}),
+    "cow-loopback": (["cow-intent.spec.ts","cow-recovery.spec.ts"], {"GRYLOO_COW":"loopback"}),
+    "card-provider-loopback": (["card-provider.spec.ts"], {"GRYLOO_CARD_E2E":"MOCKED_LOOPBACK_ONLY"}),
+    "composition-provenance": (["release-composition-provenance.spec.ts"], {}),
+}
+# main ran these as separate Playwright commands after the product phase; they are profiles of the same runner now.
+MAIN_SEPARATE_SUITES = {
+    'mcp-routes-oauth-disabled': (['mcp-route-presentation.spec.ts'], {}),
+    'developer-journey': (['developer-journey.spec.ts'], {'GRYLOO_MCP_E2E': 'EMBEDDED_LOOPBACK_ONLY', 'TEST_DATABASE_URL': '<TEST_DATABASE_URL>'}),
+    'mcp-in-chat': (['mcp-in-chat.spec.ts', 'mcp-route-presentation.spec.ts'], {'GRYLOO_MCP_E2E': 'EMBEDDED_LOOPBACK_ONLY', 'TEST_DATABASE_URL': '<TEST_DATABASE_URL>'}),
+    'channel-signing': (['channel-signing.spec.ts'], {'GRYLOO_MCP_E2E': 'EMBEDDED_LOOPBACK_ONLY', 'TEST_DATABASE_URL': '<TEST_DATABASE_URL>'}),
+    'channel-approve': (['whatsapp-approve.spec.ts', 'telegram-approve.spec.ts'], {'GRYLOO_MCP_E2E': 'EMBEDDED_LOOPBACK_ONLY',
+                        'GRYLOO_CHANNEL_E2E': 'FIXTURE_LOOPBACK_ONLY', 'TEST_DATABASE_URL': '<TEST_DATABASE_URL>'}),
+}
+CRITICAL = ['copilot-learning', 'canvas-corrections', 'solana-wallet-refusal', 'supply-provenance', 'review-execute-recovery-components']
+
+
+def browser_plan():
+    return json.loads(subprocess.run([NODE, RUNNER, 'list'], cwd=ROOT, check=True, capture_output=True, text=True).stdout)
+
+
+def actions_steps():
+    body = (ROOT / '.github/workflows/contracts.yml').read_text()
+    return [(re.match(r'      - name: (.+)', step).group(1), step) for step in re.split(r'(?m)^(?=      - name: )', body)[1:]]
+
+
+def run_body(text, indent):
+    """The shell lines of a `run: |` / `command: |` block (or of the script it runs), without the YAML indentation."""
+    match = re.search(r'(?m)^ +(?:run|command): \|\n((?:' + ' ' * indent + r'.*\n|\n)+)', text)
+    if match:
+        return [line[indent:] for line in match.group(1).rstrip('\n').split('\n')]
+    script = re.search(r'(?m)^ +command: bash (\.circleci/scripts/[\w-]+\.sh)$', text)
+    return (ROOT / script.group(1)).read_text().rstrip('\n').split('\n') if script else []
+
+
+def circleci():
+    """CircleCI jobs as {name: [(step name, step text, shell lines)]}, with reusable commands expanded in place."""
+    body = (ROOT / '.circleci/config.yml').read_text()
+    def blocks(section):
+        text = body.split('\n' + section + ':\n', 1)[1]
+        text = re.split(r'(?m)^\S', text, maxsplit=1)[0]
+        return {match.group(1): match.group(2) for match in re.finditer(r'(?m)^  ([\w-]+):\n((?:   .*\n|\n)*)', text)}
+    commands = blocks('commands')
+    def steps(text, indent):
+        result = []
+        for step in re.split(r'(?m)^(?=' + ' ' * indent + '- )', text.split('steps:\n', 1)[1])[1:]:
+            name = step.strip()[2:].split(':', 1)[0].strip()
+            if name in commands:
+                result += steps(commands[name], 6)
+            else:
+                label = re.search(r'name: "([^"]+)"', step)
+                result.append((label.group(1) if label else name, step, run_body(step, indent + 6)))
+        return result
+    return {name: steps(text, 6) for name, text in blocks('jobs').items()}, body
+
+
+class BrowserPlan(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.plan = browser_plan()
+
+    def test_every_main_suite_still_runs_with_the_same_specs_and_harness(self):
+        profiles = self.plan['profiles']
+        for name, (specs, settings) in {**MAIN_PROFILES, **MAIN_SEPARATE_SUITES}.items():
+            with self.subTest(profile=name):
+                self.assertIn(name, profiles)
+                self.assertEqual(profiles[name]['specs'], specs)
+                self.assertEqual(profiles[name]['settings'], settings)
+        # The OAuth-disabled route presentation is a distinct mode of the same spec, not a duplicate run.
+        self.assertNotIn('GRYLOO_MCP_E2E', profiles['mcp-routes-oauth-disabled']['settings'])
+
+    def test_each_profile_runs_exactly_once_in_every_ci_plan(self):
+        plan = self.plan
+        self.assertEqual(plan['product'], plan['critical'] + plan['extended'])
+        self.assertEqual(plan['extended'], [name for shard in plan['shards'] for name in shard])
+        self.assertEqual(len(plan['product']), len(set(plan['product'])))
+        self.assertEqual(sorted(plan['product'] + plan['composition']), sorted(plan['profiles']))
+        self.assertEqual(plan['composition'], ['composition-provenance'])
+
+    def test_critical_regressions_run_first(self):
+        self.assertEqual(self.plan['critical'], CRITICAL)
+        self.assertEqual(self.plan['product'][:len(CRITICAL)], CRITICAL)
+        specs = {spec for name in CRITICAL for spec in self.plan['profiles'][name]['specs']}
+        for spec in ['copilot-learning-memory.spec.ts', 'canvas-corrections.spec.ts', 'solana-swap-liquidity-composition.spec.ts',
+                     'release-provenance.spec.ts', 'simulate-review-acceptance.spec.ts', 'execute-product-workspace.spec.ts']:
+            self.assertIn(spec, specs)
+
+    def test_every_spec_filter_selects_exactly_one_file(self):
+        # Playwright reads a CLI filter as a regular expression over the file path: a filter that also matches a newer
+        # spec would silently run (or, with --grep, hide) more than the profile intends.
+        app = ROOT / 'apps/reference-dapp'
+        files = [str(path) for path in (app / 'e2e').rglob('*.spec.ts')]
+        for name, profile in self.plan['profiles'].items():
+            args = profile['specs']
+            for index, arg in enumerate(args):
+                if arg.startswith('--'):
+                    continue
+                if index and args[index - 1] == '--config':
+                    self.assertTrue((app / arg).is_file(), arg)
+                elif not index or args[index - 1] != '--grep':
+                    with self.subTest(profile=name, filter=arg):
+                        self.assertEqual(len([path for path in files if re.search(arg, path)]), 1)
+
+
+class CiParity(unittest.TestCase):
+    # Gates both CI systems run unconditionally (GitHub Actions in one job, CircleCI across the certification jobs).
+    MANDATORY = ['python3 scripts/bootstrap-ci.py', 'pnpm install --frozen-lockfile --ignore-scripts', 'python3 scripts/bootstrap-ci.py --verify-dependencies',
+                 'pnpm audit --audit-level low', 'pnpm typecheck', 'pnpm lint', 'pnpm exec eslint scripts/guarded-release-browser.mjs', 'pnpm build',
+                 'pnpm schemas:check', 'pnpm test', 'python3 scripts/summarize-screenshot-diffs.py --self-test', 'pnpm test:postgres',
+                 'python3 scripts/bootstrap-anvil.py "$RUNNER_TEMP/gryloo-anvil/foundry-v1.8.3"', 'pnpm test:anvil', 'pnpm test:fork --testTimeout=30000',
+                 'node apps/reference-dapp/e2e/fork/offline-rehearsal.mjs > "$RUNNER_TEMP/build-003f-f1.json"',
+                 'python3 scripts/bootstrap-playwright.py "$BUILD002_BROWSER_CACHE"', 'node scripts/guarded-release-browser.mjs critical',
+                 'node scripts/guarded-release-browser.mjs composition', 'node apps/reference-dapp/e2e/fork/composition-harness.mjs serve > "$RUNNER_TEMP/gryloo-b007-harness.log" 2>&1 &',
+                 'pnpm sbom --sbom-format cyclonedx --sbom-spec-version 1.6 --lockfile-only --out "$RUNNER_TEMP/build-003a.cdx.json"']
+    CONDITIONAL = {'Summarize screenshot differences after a browser failure', 'CI timing summary after failure', 'CI timing summary after success'}
+
+    @classmethod
+    def setUpClass(cls):
+        cls.plan = browser_plan()
+        cls.jobs, cls.circle = circleci()
+        cls.actions = actions_steps()
+        cls.certification = {name: steps for name, steps in cls.jobs.items() if name.startswith('certification-')}
+
+    def circle_lines(self):
+        return [(job, name, step, lines) for job, steps in self.certification.items() for name, step, lines in steps]
+
+    def test_mandatory_gates_run_unconditionally_in_both_systems(self):
+        for command in self.MANDATORY:
+            with self.subTest(command=command):
+                actions = [step for _, step in self.actions if command in run_body(step, 10)]
+                self.assertEqual(len(actions), 1)
+                self.assertNotRegex(actions[0], r'(?m)^\s*(if|continue-on-error):')
+                circle = [(job, step, lines) for job, _, step, lines in self.circle_lines() if command in lines]
+                self.assertTrue(circle)
+                for job, step, lines in circle:
+                    self.assertNotIn('when:', step)
+                    self.assertEqual(lines[0] if lines[0] != '#!/usr/bin/env bash' else lines[3], 'set -euo pipefail')
+                    self.assertFalse([line for line in lines if command in line and re.search(r'\|\|\s*(true|exit 0)', line)])
+                    self.assertNotIn('set +e', lines)
+        self.assertEqual(len([1 for _, _, _, lines in self.circle_lines() if 'node scripts/guarded-release-browser.mjs critical' in lines]), 1)
+
+    def test_extended_profiles_run_once_per_system(self):
+        actions = [line for _, step in self.actions for line in run_body(step, 10) if line.startswith('node scripts/guarded-release-browser.mjs extended')]
+        self.assertEqual(actions, ['node scripts/guarded-release-browser.mjs extended'])
+        circle = sorted(line for _, _, _, lines in self.circle_lines() for line in lines if line.startswith('node scripts/guarded-release-browser.mjs extended'))
+        total = len(self.plan['shards'])
+        self.assertEqual(circle, [f'node scripts/guarded-release-browser.mjs extended --shard {index}/{total}' for index in range(1, total + 1)])
+
+    def test_circleci_scripts_are_exact_copies_of_the_actions_steps(self):
+        steps = dict(self.actions)
+        for script, name in [('ci-fork.sh', 'Offline compatibility gate and fork suite'), ('ci-sbom.sh', 'Validate and remove ephemeral CycloneDX 1.6 SBOM'),
+                             ('ci-composition.sh', 'Composition fork and browser suites')]:
+            lines = (ROOT / '.circleci/scripts' / script).read_text().rstrip('\n').split('\n')
+            self.assertEqual(lines[:4], ['#!/usr/bin/env bash', '# Exact CircleCI backup copy of the approved GitHub Actions certification command.',
+                                         '# Keep aligned with .github/workflows/contracts.yml; fail closed on any error.', 'set -euo pipefail'])
+            self.assertEqual(lines[3:], run_body(steps[name], 10), script)
+
+    def test_certification_fans_in_every_parallel_job_and_verifies_the_ledger(self):
+        workflow = self.circle.split('\nworkflows:\n', 1)[1]
+        requires = {match.group(1): re.findall(r'(?m)^            - ([\w-]+)$', match.group(2) or '')
+                    for match in re.finditer(r'(?m)^      - ([\w-]+)(?::\n((?:        .*\n)*))?', workflow)}
+        self.assertEqual(set(requires), {'governance', 'certification', *self.certification})
+        self.assertEqual(set(self.certification), {'certification-checks', 'certification-browser-1', 'certification-browser-2'})
+        for job in self.certification:
+            self.assertEqual(requires[job], ['governance'])
+        self.assertEqual(sorted(requires['certification']), sorted(self.certification))
+        verify = [lines for _, _, lines in self.jobs['certification'] if 'python3 scripts/ci-observe.py verify' in lines]
+        self.assertEqual(verify, [['set -euo pipefail', 'test "$(node --version)" = "v24.21.0"', 'python3 scripts/ci-observe.py verify']])
+        self.assertIn('python3 scripts/ci-observe.py verify', [line for _, step in self.actions for line in run_body(step, 10)])
+        for job, steps in self.certification.items():
+            names = [name for name, _, _ in steps]
+            self.assertIn('persist_to_workspace', names, job)
+            self.assertNotIn('when: always', ''.join(step for _, step, _ in steps))
+            for name, step, _ in steps:
+                if 'when:' in step:
+                    self.assertIn(name, self.CONDITIONAL, job)
+
+    def test_critical_browser_regressions_run_before_the_slow_suites(self):
+        def position(command):
+            return next(index for index, (_, step) in enumerate(self.actions) if command in run_body(step, 10))
+        self.assertLess(position('pnpm build'), position('node scripts/guarded-release-browser.mjs critical'))
+        for later in ['pnpm test', 'pnpm test:postgres', 'pnpm test:fork --testTimeout=30000', 'node scripts/guarded-release-browser.mjs extended']:
+            self.assertLess(position('node scripts/guarded-release-browser.mjs critical'), position(later), later)
+        browser = [lines for _, _, lines in self.jobs['certification-browser-1'] if any(line.startswith('node scripts/guarded-release-browser.mjs') for line in lines)]
+        self.assertEqual([line for lines in browser for line in lines if line.startswith('node scripts/')],
+                         ['node scripts/guarded-release-browser.mjs critical', 'node scripts/guarded-release-browser.mjs extended --shard 1/2'])
+
+    def test_failure_artifacts_test_reports_and_timings_are_kept(self):
+        for job in ['certification-browser-1', 'certification-browser-2']:
+            names = [name for name, _, _ in self.jobs[job]]
+            self.assertIn('store_test_results', names)
+            self.assertIn('store_artifacts', names)
+            self.assertIn('Summarize screenshot differences after a browser failure', names)
+        self.assertIn('path: apps/reference-dapp/test-results/junit', self.circle)
+        upload = dict(self.actions)['Upload browser failure artifacts (screenshots, error context, diagnostic traces, JUnit, profile timings)']
+        for path in ['**/trace.zip', '**/test-failed-*.png', '**/*-diff.png', 'junit/*.xml', 'guarded-*.json']:
+            self.assertIn('apps/reference-dapp/test-results/' + path, upload)
+        runner = (ROOT / RUNNER).read_text()
+        for marker in ["'--output', output, '--add-reporter', 'junit'", 'PLAYWRIGHT_JUNIT_OUTPUT_FILE: junit', "'--last-failed', '--last-failed-file', lastRun",
+                       "'--trace', 'on'"]:
+            self.assertIn(marker, runner)
+        config = (ROOT / 'apps/reference-dapp/playwright.config.ts').read_text()
+        self.assertIn("video: 'off', trace: 'off', screenshot: 'only-on-failure',", config)
+        self.assertIn('retries: 0,', config)
+
+
+FAKE_PNPM = r"""#!/usr/bin/env bash
+# Stand-in for `pnpm --filter … exec playwright test …`: records the call, fails the configured spec.
+printf '%s\t%s\n' "$*" "${PLAYWRIGHT_JUNIT_OUTPUT_FILE:-}" >> "$FAKE_LOG"
+out=""; prev=""
+for arg in "$@"; do [ "$prev" = "--output" ] && out="$arg"; prev="$arg"; done
+mkdir -p "$out"
+if [ -n "${FAKE_JUNIT:-}" ] && [ -n "${PLAYWRIGHT_JUNIT_OUTPUT_FILE:-}" ]; then
+  mkdir -p "$(dirname "$PLAYWRIGHT_JUNIT_OUTPUT_FILE")"; printf '%s' "$FAKE_JUNIT" > "$PLAYWRIGHT_JUNIT_OUTPUT_FILE"
+fi
+case " $* " in *" --last-failed "*) exit "${FAKE_RERUN_STATUS:-1}";; esac
+if [ -n "${FAKE_FAIL:-}" ] && [[ " $* " == *" $FAKE_FAIL "* ]]; then
+  tests='["t1"]'; [ -n "${FAKE_NO_TESTS:-}" ] && tests='[]'
+  printf '{"status":"failed","failedTests":%s}\n' "$tests" > "$out/.last-run.json"
+  exit "${FAKE_STATUS:-1}"
+fi
+exit 0
+"""
+
+
+class GuardedRunner(unittest.TestCase):
+    """The real runner against a stand-in Playwright: failures keep their exit code and are never swallowed."""
+    def setUp(self):
+        scratch = tempfile.TemporaryDirectory()
+        self.addCleanup(scratch.cleanup)
+        self.root = Path(scratch.name)
+        (self.root / 'scripts').mkdir()
+        shutil.copy(ROOT / RUNNER, self.root / RUNNER)
+        bin_dir = self.root / 'bin'
+        bin_dir.mkdir()
+        (bin_dir / 'pnpm').write_text(FAKE_PNPM)
+        (bin_dir / 'pnpm').chmod(0o755)
+        self.log = self.root / 'calls.log'
+        self.env = {key: value for key, value in os.environ.items() if key != 'RUNNER_TEMP'}
+        self.env.update(PATH=f"{bin_dir}:{os.environ['PATH']}", FAKE_LOG=str(self.log), RUNNER_TEMP=str(self.root / 'runner'))
+
+    def run_phase(self, *args, **env):
+        return subprocess.run([NODE, RUNNER, *args], cwd=self.root, env={**self.env, **env}, capture_output=True, text=True)
+
+    def calls(self):
+        return [line.split('\t') for line in self.log.read_text().splitlines()] if self.log.exists() else []
+
+    def report(self, label):
+        return json.loads((self.root / 'runner/flofi-ci-metrics/browser' / (label + '.json')).read_text())
+
+    def test_passing_phase_records_timings_junit_and_isolated_artifacts(self):
+        result = self.run_phase('critical')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = self.calls()
+        self.assertEqual(len(calls), len(CRITICAL))
+        results = self.root / 'apps/reference-dapp/test-results'
+        for (args, junit), name in zip(calls, CRITICAL):
+            self.assertIn(f'--output {results / name} --add-reporter junit', args)
+            self.assertEqual(junit, str(results / 'junit' / (name + '.xml')))
+        report = self.report('critical')
+        self.assertEqual(report['status'], 'PASS')
+        self.assertEqual([row['name'] for row in report['profiles']], CRITICAL)
+        self.assertTrue(all(row['status'] == 'PASS' and row['seconds'] >= 0 for row in report['profiles']))
+        self.assertIn('Guarded release critical: PASS (5 profiles)', result.stdout)
+        self.assertEqual(json.loads((results / 'guarded-critical.json').read_text()), report)
+
+    def test_ci_test_report_names_the_profile_and_keeps_failure_output(self):
+        junit = ('<testsuites><testsuite name="a.spec.ts" tests="3">\n'
+                 '<testcase name="passes" classname="a.spec.ts" time="1">\n<system-out>\n<![CDATA[server log]]>\n</system-out>\n</testcase>\n'
+                 '<testcase name="fails" classname="a.spec.ts" time="1">\n<failure message="boom"/>\n<system-out>\n<![CDATA[evidence]]>\n</system-out>\n</testcase>\n'
+                 '<testcase name="plain" classname="a.spec.ts" time="1"/>\n</testsuite></testsuites>')
+        result = self.run_phase('profile', 'copilot-learning', FAKE_JUNIT=junit)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        report = (self.root / 'apps/reference-dapp/test-results/junit/copilot-learning.xml').read_text()
+        self.assertIn('<testsuite name="copilot-learning › a.spec.ts"', report)
+        self.assertEqual(report.count('classname="copilot-learning › a.spec.ts"'), 3)
+        self.assertNotIn('server log', report)  # a passing case's output would make CircleCI list it as "system-out"
+        self.assertIn('<failure message="boom"/>', report)
+        self.assertIn('evidence', report)
+        self.assertEqual(report.count('</testcase>'), 2)
+
+    def test_failing_profile_keeps_its_exit_code_and_stops_the_phase(self):
+        result = self.run_phase('critical', FAKE_FAIL='canvas-corrections.spec.ts', FAKE_STATUS='7', FAKE_RERUN_STATUS='0')
+        self.assertEqual(result.returncode, 7)
+        calls = [args for args, _ in self.calls()]
+        self.assertEqual(len([args for args in calls if '--last-failed' not in args]), 2)  # later profiles never start
+        rerun = [args for args in calls if '--last-failed' in args]
+        self.assertEqual(len(rerun), 1)
+        self.assertIn('--trace on', rerun[0])
+        self.assertNotIn('--add-reporter junit', rerun[0])  # a diagnostic rerun never reaches the CI test report
+        for text in ['Guarded release FAIL: profile canvas-corrections (critical), exit code 7.', 'Specs: canvas-corrections.spec.ts',
+                     'Reproduce: node scripts/guarded-release-browser.mjs profile canvas-corrections',
+                     'Not run (never counted as passes): solana-wallet-refusal, supply-provenance, review-execute-recovery-components',
+                     'Diagnostic trace rerun passed: the failure is intermittent; the profile stays FAILED']:
+            self.assertIn(text, result.stderr)
+        report = self.report('critical')
+        self.assertEqual(report['status'], 'FAIL')
+        self.assertEqual([row['status'] for row in report['profiles']], ['PASS', 'FAIL', 'NOT_RUN', 'NOT_RUN', 'NOT_RUN'])
+        self.assertEqual(report['profiles'][1]['diagnostic']['rerunExitCode'], 0)
+
+    def test_failure_outside_a_test_and_disabled_trace_still_fail(self):
+        result = self.run_phase('profile', 'copilot-learning', FAKE_FAIL='copilot-learning-memory.spec.ts', FAKE_NO_TESTS='1')
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('no failed test was recorded', result.stderr)
+        result = self.run_phase('profile', 'copilot-learning', FAKE_FAIL='copilot-learning-memory.spec.ts', FLOFI_BROWSER_FAILURE_TRACE='off')
+        self.assertEqual(result.returncode, 1)
+        self.assertFalse([args for args, _ in self.calls() if '--last-failed' in args])
+
+    def test_missing_playwright_and_invalid_selections_fail_closed(self):
+        result = self.run_phase('critical', PATH='/nonexistent')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.report('critical')['status'], 'FAIL')
+        for args in [[], ['product', 'extra'], ['extended', '--shard', '3/2'], ['extended', '--shard', '1/3'], ['profile', 'unknown'], ['all']]:
+            with self.subTest(args=args):
+                self.assertNotEqual(self.run_phase(*args).returncode, 0)
+        self.assertFalse(self.calls())
+
+    def test_a_plan_that_drops_or_repeats_a_profile_refuses_to_run(self):
+        source = (self.root / RUNNER).read_text()
+        for broken in [source.replace("'canvas-workflow-ux'],", "],", 1), source.replace("'channel-approve'],", "'channel-approve', 'copilot'],", 1)]:
+            with self.subTest():
+                self.assertNotEqual(broken, source)
+                (self.root / RUNNER).write_text(broken)
+                result = self.run_phase('list')
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('Guarded browser plan must place every product profile exactly once', result.stderr)
+
+
+class CertificationLedger(unittest.TestCase):
+    """`ci-observe.py verify` (the CircleCI fan-in and the last Actions step) fails closed on any missing or failed suite."""
+    observe = load_script('ci-observe')
+
+    def setUp(self):
+        scratch = tempfile.TemporaryDirectory()
+        self.addCleanup(scratch.cleanup)
+        self.metrics = Path(scratch.name) / 'flofi-ci-metrics'
+        (self.metrics / 'browser').mkdir(parents=True)
+        self.env = patch.dict(os.environ, {'RUNNER_TEMP': scratch.name})
+        self.env.start()
+        self.addCleanup(self.env.stop)
+        for index, name in enumerate(self.observe.REQUIRED_STAGES):
+            self.write(f'{index:032x}.json', {'name': name, 'job': 'certification-checks', 'start': index, 'outcome': 'success', 'duration': 1.0})
+        plan = browser_plan()
+        shards = [('critical', None, plan['critical']), *[('extended', f'{i}/{len(plan["shards"])}', names) for i, names in enumerate(plan['shards'], 1)],
+                  ('composition', None, plan['composition'])]
+        for phase, shard, names in shards:
+            self.write_report(f'{phase}-{shard or "all"}'.replace('/', '-'), phase, shard, names)
+
+    def write(self, name, record):
+        (self.metrics / name).write_text(json.dumps(record))
+
+    def write_report(self, label, phase, shard, names, status='PASS'):
+        rows = [{'name': name, 'specs': [], 'status': status, 'seconds': 1.0, 'exitCode': 0} for name in names]
+        (self.metrics / 'browser' / (label + '.json')).write_text(json.dumps({'kind': 'guarded-browser', 'phase': phase, 'shard': shard, 'label': label,
+                                                                               'status': status, 'profiles': rows}))
+
+    def verify(self):
+        with redirect_stdout(io.StringIO()) as output:
+            return self.observe.verify(self.metrics), output.getvalue()
+
+    def test_complete_ledger_passes(self):
+        status, output = self.verify()
+        self.assertEqual(status, 0, output)
+        self.assertIn('Certification ledger: PASS', output)
+
+    def test_missing_failed_or_incomplete_stage_fails(self):
+        for mutation in ['missing', 'failure', 'incomplete']:
+            with self.subTest(mutation=mutation):
+                path = self.metrics / f'{9:032x}.json'
+                saved = path.read_text()
+                record = json.loads(saved)
+                if mutation == 'missing':
+                    path.unlink()
+                elif mutation == 'failure':
+                    path.write_text(json.dumps({**record, 'outcome': 'failure'}))
+                else:
+                    path.write_text(json.dumps({key: value for key, value in record.items() if key != 'duration'} | {'outcome': 'incomplete'}))
+                status, output = self.verify()
+                self.assertEqual(status, 1)
+                self.assertIn(record['name'], output)
+                path.write_text(saved)
+
+    def test_missing_repeated_failed_or_unplanned_profiles_fail(self):
+        plan = browser_plan()
+        cases = {
+            'missing': lambda: self.write_report('extended-2-2', 'extended', '2/2', plan['shards'][1][1:]),
+            'repeated': lambda: self.write_report('extended-again', 'extended', None, plan['shards'][0][:1]),
+            'failed': lambda: self.write_report('critical-all', 'critical', None, plan['critical'], status='FAIL'),
+            'running': lambda: self.write_report('composition-all', 'composition', None, plan['composition'], status='RUNNING'),
+            'unplanned': lambda: self.write_report('profile-copilot', 'profile', None, ['copilot']),
+        }
+        for mutation, apply in cases.items():
+            with self.subTest(mutation=mutation):
+                saved = {path: path.read_text() for path in (self.metrics / 'browser').glob('*.json')}
+                apply()
+                status, output = self.verify()
+                self.assertEqual(status, 1, output)
+                for path in (self.metrics / 'browser').glob('*.json'):
+                    if path not in saved:
+                        path.unlink()
+                for path, text in saved.items():
+                    path.write_text(text)
 
 
 if __name__ == '__main__':

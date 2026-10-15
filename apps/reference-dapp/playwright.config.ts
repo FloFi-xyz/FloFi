@@ -236,7 +236,9 @@ export default defineConfig({
     reducedMotion: 'reduce',
     locale: 'en-US',
     serviceWorkers: 'block',
-    video: 'off', trace: 'off', screenshot: 'off',
+    // A failing test leaves a screenshot (no cost on a pass). Traces stay off: recording them on every run costs ~26% browser time; the
+    // guarded runner re-runs a failed test once with a trace instead (scripts/guarded-release-browser.mjs).
+    video: 'off', trace: 'off', screenshot: 'only-on-failure',
   },
   projects: [{ name: 'chromium' }],
   webServer: [...(swapReadHarness ? [{ command: 'node e2e/public-swap-read-serve.ts', url: 'https://127.0.0.1:8558', ignoreHTTPSErrors: true, reuseExistingServer: false, timeout: 30_000 }] : []),

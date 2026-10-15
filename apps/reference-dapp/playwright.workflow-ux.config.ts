@@ -23,7 +23,7 @@ export default defineConfig({
   testDir: './e2e', testMatch: 'workflow-ux-authoring.spec.ts', workers: 1, fullyParallel: false, retries: 0,
   timeout: 45_000, expect: { timeout: 10_000 }, reporter: 'list',
   use: { baseURL: E2E_APP_ORIGIN, browserName: 'chromium', headless: true, launchOptions: { executablePath },
-    serviceWorkers: 'block', trace: 'off', screenshot: 'off', video: 'off' },
+    serviceWorkers: 'block', trace: 'off', screenshot: 'only-on-failure', video: 'off' },
   webServer: [
     { command: 'node e2e/robinhood-mainnet-serve.ts', url: 'http://127.0.0.1:8561', reuseExistingServer: false, timeout: 30_000 },
     { command: 'pnpm --filter @defi-workflow-engine/reference-dapp start', url: E2E_APP_ORIGIN, reuseExistingServer: false, timeout: 60_000,

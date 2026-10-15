@@ -2,30 +2,11 @@
 # Exact CircleCI backup copy of the approved GitHub Actions certification command.
 # Keep aligned with .github/workflows/contracts.yml; fail closed on any error.
 set -euo pipefail
-source scripts/ci-observe.sh 'Guarded browser suites'
+source scripts/ci-observe.sh 'Composition fork and browser'
 export BUILD002_BROWSER_CACHE="$RUNNER_TEMP/gryloo-playwright/chromium_headless_shell-1243"
-# BUILD-003F: the browser suite drives the MOCKED synthetic local fork on loopback chain 31337.
 export GRYLOO_ANVIL_BIN="$RUNNER_TEMP/gryloo-anvil/foundry-v1.8.3/anvil"
 export GRYLOO_MODE_A_RUNTIME="$RUNNER_TEMP/gryloo-mode-a-e2e"
-# Approved production Review rejects MOCKED financial authority. Run the current
-# product paths and explicit provenance boundaries in the same profiles as local verification.
-# Positive local financial lifecycle/recovery remains enforced by pnpm test, PostgreSQL
-# and the pinned offline fork gates above; historical browser diagnostics remain intact.
 export GRYLOO_COW_RUNTIME="$RUNNER_TEMP/gryloo-cow-e2e"
-node scripts/guarded-release-browser.mjs product
-pnpm --filter @defi-workflow-engine/reference-dapp exec playwright test mcp-route-presentation.spec.ts
-# BUILD-DEVELOPER-001: a third-party server integrates with the SDK alone (operator CLI key, strategy, approval, signed loopback
-# webhooks) and the end user reaches FloFi's Review, where MOCKED financial authority stays blocked (no wallet transaction), on the
-# same embedded loopback harness (no public network, no real transaction). The full lifecycle is proven by journey.pg.test.ts.
-GRYLOO_MCP_E2E=EMBEDDED_LOOPBACK_ONLY TEST_DATABASE_URL="postgres://flofi@127.0.0.1:5432/postgres" pnpm --filter @defi-workflow-engine/reference-dapp exec playwright test developer-journey.spec.ts
-# BUILD-MCP-002: consumer OAuth and in-chat approval on disposable loopback infrastructure.
-GRYLOO_MCP_E2E=EMBEDDED_LOOPBACK_ONLY TEST_DATABASE_URL="postgres://flofi@127.0.0.1:5432/postgres" pnpm --filter @defi-workflow-engine/reference-dapp exec playwright test mcp-in-chat.spec.ts mcp-route-presentation.spec.ts
-# Each invocation gets a fresh disposable database; keep the production OAuth registration rate limit intact.
-GRYLOO_MCP_E2E=EMBEDDED_LOOPBACK_ONLY TEST_DATABASE_URL="postgres://flofi@127.0.0.1:5432/postgres" pnpm --filter @defi-workflow-engine/reference-dapp exec playwright test channel-signing.spec.ts
-# BUILD-CHANNELS-001: the channels' /approve paths on the same embedded loopback harness — WhatsApp with the FIXTURE provider (nothing
-# is sent to Meta) and Telegram against the loopback Bot API double (nothing reaches Telegram): the real webhook routes, the
-# intended-wallet rule, the owner's Review where MOCKED authority stays blocked, the status ping and the scheduled dispatch.
-GRYLOO_MCP_E2E=EMBEDDED_LOOPBACK_ONLY GRYLOO_CHANNEL_E2E=FIXTURE_LOOPBACK_ONLY TEST_DATABASE_URL="postgres://flofi@127.0.0.1:5432/postgres" pnpm --filter @defi-workflow-engine/reference-dapp exec playwright test whatsapp-approve.spec.ts telegram-approve.spec.ts
 # BUILD-007: only official digest-pinned test-time artifacts are downloaded, outside Git.
 export GRYLOO_B007_INPUTS="$RUNNER_TEMP/gryloo-build-007-inputs"
 mkdir -p "$GRYLOO_B007_INPUTS"

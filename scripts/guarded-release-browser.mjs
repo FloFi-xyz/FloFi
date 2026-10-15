@@ -1,17 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 import { spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join, relative, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { performance } from 'node:perf_hooks';
 
 // The same explicit profiles run locally and in CI. Financial diagnostic specs
 // remain available independently; none of their results are counted as passes.
-const phase = process.argv[2];
-if (!['product', 'composition'].includes(phase) || process.argv.length !== 3) {
-  throw new Error('Usage: node scripts/guarded-release-browser.mjs product|composition');
-}
+const usage = 'Usage: node scripts/guarded-release-browser.mjs critical | extended [--shard <n>/<total>] | product | composition | profile <name> | list';
+const [phase, ...rest] = process.argv.slice(2);
 const boundary = 'release-financial-provenance.spec.ts';
-const profiles = phase === 'composition' ? [
-  ['composition-provenance', ['release-composition-provenance.spec.ts'], {}],
-] : [
+const definitions = [
   ['default-product', ['brand-ux-001.spec.ts', 'base-observation.spec.ts', 'build-roundtrip.spec.ts', 'build009.spec.ts', 'across.spec.ts',
     'canvas-keyboard.spec.ts', 'canvas-ux.spec.ts', 'contextual-proposals.spec.ts', 'cross-chain-liquidity-recovery.spec.ts',
     'cross-chain-liquidity.spec.ts', 'execution-capabilities.spec.ts', 'interface-honesty.spec.ts', 'mock-artifact-chain.spec.ts',
@@ -72,20 +71,147 @@ const profiles = phase === 'composition' ? [
   ['synthetic-fork-provenance', ['release-fork-provenance.spec.ts'], { GRYLOO_MODE_A_E2E: 'synthetic' }],
   ['cow-loopback', ['cow-intent.spec.ts', 'cow-recovery.spec.ts'], { GRYLOO_COW: 'loopback' }],
   ['card-provider-loopback', ['card-provider.spec.ts'], { GRYLOO_CARD_E2E: 'MOCKED_LOOPBACK_ONLY' }],
+  // MCP route presentation runs twice on purpose: here with OAuth disabled (no MCP harness), below with OAuth enabled on the embedded harness.
+  ['mcp-routes-oauth-disabled', ['mcp-route-presentation.spec.ts'], {}],
+  // BUILD-DEVELOPER-001: a third-party server integrates with the SDK alone (operator CLI key, strategy, approval, signed loopback
+  // webhooks) and the end user reaches FloFi's Review, where MOCKED financial authority stays blocked (no wallet transaction), on the
+  // same embedded loopback harness (no public network, no real transaction). The full lifecycle is proven by journey.pg.test.ts.
+  ['developer-journey', ['developer-journey.spec.ts'], { GRYLOO_MCP_E2E: 'EMBEDDED_LOOPBACK_ONLY', TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres' }],
+  // BUILD-MCP-002: consumer OAuth and in-chat approval on disposable loopback infrastructure.
+  ['mcp-in-chat', ['mcp-in-chat.spec.ts', 'mcp-route-presentation.spec.ts'], { GRYLOO_MCP_E2E: 'EMBEDDED_LOOPBACK_ONLY', TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres' }],
+  // Each invocation gets a fresh disposable database; keep the production OAuth registration rate limit intact.
+  ['channel-signing', ['channel-signing.spec.ts'], { GRYLOO_MCP_E2E: 'EMBEDDED_LOOPBACK_ONLY', TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres' }],
+  // BUILD-CHANNELS-001: the channels' /approve paths on the same embedded loopback harness — WhatsApp with the FIXTURE provider (nothing
+  // is sent to Meta) and Telegram against the loopback Bot API double (nothing reaches Telegram): the real webhook routes, the
+  // intended-wallet rule, the owner's Review where MOCKED authority stays blocked, the status ping and the scheduled dispatch.
+  ['channel-approve', ['whatsapp-approve.spec.ts', 'telegram-approve.spec.ts'], { GRYLOO_MCP_E2E: 'EMBEDDED_LOOPBACK_ONLY', GRYLOO_CHANNEL_E2E: 'FIXTURE_LOOPBACK_ONLY', TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres' }],
 ];
+const composition = [['composition-provenance', ['release-composition-provenance.spec.ts'], {}]];
 
-for (const [name, specs, settings] of profiles) {
+// Fail-fast tier, run before every other browser profile in both CI systems (GitHub Actions: right after the build, before the unit,
+// PostgreSQL and fork suites; CircleCI: at the head of browser job 1): Copilot learning and wallet isolation, Canvas basics, the P0
+// wallet refusal and the financial Review/Execute boundaries.
+const critical = ['copilot-learning', 'canvas-corrections', 'solana-wallet-refusal', 'supply-provenance', 'review-execute-recovery-components'];
+// The other product profiles, as CircleCI's parallel browser jobs (each its own container, loopback ports and PostgreSQL; ~13 min each
+// with critical in job 1, from CircleCI jobs 53/55 profile seconds). Each list runs in order: fast financial boundaries before long suites.
+const shards = [
+  ['default-product', 'lending-provenance', 'jupiter-provenance', 'devnet-provenance', 'orca-liquidity-provenance', 'solana-composition-provenance',
+    'transfer-provenance', 'uniswap-provenance', 'router-provenance', 'unsafe-lending-simulations', 'copilot', 'copilot-solana', 'solana-mainnet-network',
+    'robinhood-mainnet-authoring', 'base-mainnet-authoring', 'arbitrum-authoring-certification', 'workflow-ux-authoring', 'canvas-workflow-ux'],
+  ['cloud-provenance', 'journey-provenance', 'synthetic-fork-provenance', 'execution-continuity', 'workflow-acceptance', 'swap-read-acceptance',
+    'automations', 'chat-automations', 'delegated-execution', 'canvas-automation-ux', 'admin-console', 'cow-loopback', 'card-provider-loopback',
+    'mcp-routes-oauth-disabled', 'developer-journey', 'mcp-in-chat', 'channel-signing', 'channel-approve'],
+];
+// Fail closed on any plan drift: every product profile runs in exactly one place, and every name in the plan exists.
+const names = definitions.map(([name]) => name), planned = [...critical, ...shards.flat()];
+if (new Set(names).size !== names.length || planned.length !== names.length || new Set(planned).size !== planned.length
+  || !planned.every(name => names.includes(name))) throw new Error('Guarded browser plan must place every product profile exactly once');
+
+const byName = new Map([...definitions, ...composition].map(entry => [entry[0], entry]));
+const extended = shards.flat();
+let selection, shard = null;
+if (phase === 'critical' && !rest.length) selection = critical;
+else if (phase === 'extended' && !rest.length) selection = extended;
+else if (phase === 'extended' && rest.length === 2 && rest[0] === '--shard' && /^\d+\/\d+$/.test(rest[1])) {
+  const [index, total] = rest[1].split('/').map(Number);
+  if (total !== shards.length || index < 1 || index > total) throw new Error(`Guarded browser shard must be 1/${shards.length} … ${shards.length}/${shards.length}`);
+  selection = shards[index - 1];
+  shard = rest[1];
+} else if (phase === 'product' && !rest.length) selection = [...critical, ...extended];
+else if (phase === 'composition' && !rest.length) selection = composition.map(([name]) => name);
+else if (phase === 'profile' && rest.length === 1 && byName.has(rest[0])) selection = rest;
+else if (phase === 'list' && !rest.length) {
+  // The plan only (no command runs); the database URL is shown as a placeholder.
+  const profiles = Object.fromEntries([...byName.values()].map(([name, specs, settings]) => [name, { specs, settings: Object.fromEntries(
+    Object.entries(settings).map(([key, value]) => [key, key === 'TEST_DATABASE_URL' ? '<TEST_DATABASE_URL>' : value])) }]));
+  console.log(JSON.stringify({ critical, shards, extended, product: [...critical, ...extended], composition: composition.map(([name]) => name), profiles }, null, 2));
+  process.exit(0);
+} else throw new Error(usage);
+const label = shard ? `${phase}-shard-${shard.replace('/', '-of-')}` : phase === 'profile' ? `profile-${rest[0]}` : phase;
+
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const results = join(root, 'apps/reference-dapp/test-results');
+const report = { kind: 'guarded-browser', phase, shard, label, status: 'RUNNING',
+  profiles: selection.map(name => ({ name, specs: byName.get(name)[1], status: 'NOT_RUN', seconds: null, exitCode: null })) };
+const reportFiles = [join(results, `guarded-${label}.json`), ...(process.env.RUNNER_TEMP ? [join(process.env.RUNNER_TEMP, 'flofi-ci-metrics', 'browser', `${label}.json`)] : [])];
+function writeReport() {
+  for (const file of reportFiles) { mkdirSync(dirname(file), { recursive: true }); writeFileSync(file, JSON.stringify(report, null, 2) + '\n'); }
+}
+function printTimings() {
+  const ran = report.profiles.filter(row => row.seconds !== null);
+  console.log(`Guarded release ${label} timings (slowest first; total ${ran.reduce((sum, row) => sum + row.seconds, 0).toFixed(2)}s):`);
+  for (const row of [...ran].sort((a, b) => b.seconds - a.seconds)) console.log(`  ${row.seconds.toFixed(2).padStart(8)}s  ${row.status}  ${row.name}`);
+}
+const rel = path => relative(root, path);
+writeReport();
+console.log(`Guarded release ${label}: ${selection.length} profiles: ${selection.join(', ')}`);
+
+for (const [index, name] of selection.entries()) {
+  const [, specs, settings] = byName.get(name), row = report.profiles[index];
   const env = { ...process.env, GRYLOO_MODE_A_E2E: 'synthetic' };
   for (const key of ['FLOFI_COPILOT', 'FLOFI_RELEASE_PROVENANCE_PROFILE', 'GRYLOO_SUPPLY_E2E', 'GRYLOO_LENDING_E2E',
     'GRYLOO_JUPITER_E2E', 'GRYLOO_SOLANA_DEVNET_E2E', 'GRYLOO_ROBINHOOD_E2E', 'GRYLOO_ROBINHOOD_MAINNET_E2E', 'GRYLOO_BASE_MAINNET_E2E', 'GRYLOO_UNISWAP_LIQUIDITY_E2E',
     'GRYLOO_ROUTER_E2E', 'GRYLOO_ROUTER_TESTNET_E2E', 'GRYLOO_CLOUD_RUNTIME_E2E', 'FLOFI_SWAP_READ_E2E', 'FLOFI_SWAP_EXECUTION_E2E', 'GRYLOO_COW', 'GRYLOO_CARD_E2E', 'GRYLOO_AUTOMATION_E2E', 'GRYLOO_DELEGATION_E2E',
-    'FLOFI_ADMIN_E2E']) delete env[key];
+    'FLOFI_ADMIN_E2E', 'FLOFI_LEARNING_E2E', 'GRYLOO_MCP_E2E', 'GRYLOO_CHANNEL_E2E', 'FLOFI_E2E_DATABASE_URL']) delete env[key];
   Object.assign(env, settings);
+  // Each profile keeps its own artifacts (a later profile never wipes them) and its own JUnit file for the CI test report.
+  const output = join(results, name), junit = join(results, 'junit', `${name}.xml`);
   console.log(`Guarded release profile: ${name}`);
   const started = performance.now();
-  const result = spawnSync('pnpm', ['--filter', '@defi-workflow-engine/reference-dapp', 'exec', 'playwright', 'test', ...specs], { env, stdio: 'inherit' });
-  console.log(`Guarded release profile duration: ${name}: ${((performance.now() - started) / 1000).toFixed(2)}s; ${result.error || result.status !== 0 ? 'FAIL' : 'PASS'}`);
+  const result = spawnSync('pnpm', ['--filter', '@defi-workflow-engine/reference-dapp', 'exec', 'playwright', 'test', ...specs, '--output', output, '--add-reporter', 'junit'],
+    { env: { ...env, PLAYWRIGHT_JUNIT_OUTPUT_FILE: junit }, stdio: 'inherit' });
+  Object.assign(row, { seconds: (performance.now() - started) / 1000, exitCode: result.status, status: result.error || result.status !== 0 ? 'FAIL' : 'PASS' });
+  if (existsSync(junit)) writeFileSync(junit, ciTestReport(readFileSync(junit, 'utf8'), name));
+  console.log(`Guarded release profile duration: ${name}: ${row.seconds.toFixed(2)}s; ${row.status}`);
+  if (row.status === 'FAIL') {
+    report.status = 'FAIL';
+    writeReport();
+    const shown = Object.entries(settings).map(([key, value]) => `${key}=${key === 'TEST_DATABASE_URL' ? '<loopback>' : value}`).join(' ') || '(none)';
+    console.error([`Guarded release FAIL: profile ${name} (${label}), ${result.error ? `could not start: ${result.error.message}` : `exit code ${result.status ?? `signal ${result.signal}`}`}.`,
+      `  Specs: ${specs.join(' ')}`, `  Settings: ${shown}`, `  Artifacts: ${rel(output)} (failure screenshots, error context), JUnit ${rel(junit)}`,
+      `  Reproduce: node scripts/guarded-release-browser.mjs profile ${name}`,
+      `  Not run (never counted as passes): ${report.profiles.filter(other => other.status === 'NOT_RUN').map(other => other.name).join(', ') || 'none'}`].join('\n'));
+    diagnose(name, specs, env, output);
+    printTimings();
+  }
   if (result.error) throw result.error;
   if (result.status !== 0) process.exit(result.status ?? 1);
 }
-console.log(`Guarded release ${phase}: PASS (${profiles.length} profiles)`);
+report.status = 'PASS';
+writeReport();
+printTimings();
+console.log(`Guarded release ${label}: PASS (${selection.length} profiles)`);
+
+/**
+ * The profile's JUnit for the CI test report. One spec can run in several profiles (the financial boundary runs in ten), so the profile
+ * names each suite and class. A passing test's captured output (already in the step log) is dropped: CircleCI lists a passing test case
+ * that carries output as "system-out" instead of a pass. Failing and skipped cases keep everything.
+ */
+function ciTestReport(xml, name) {
+  return xml.replaceAll('<testsuite name="', `<testsuite name="${name} › `).replaceAll(' classname="', ` classname="${name} › `)
+    .replace(/<testcase\b[^>]*[^/]>[\s\S]*?<\/testcase>/g, testcase => /<(failure|error|skipped)\b/.test(testcase) ? testcase
+      : testcase.replace(/\s*<system-(out|err)>[\s\S]*?<\/system-\1>/g, ''));
+}
+
+/**
+ * After a profile has already failed, re-runs only its failed tests once with a full trace, for diagnosis. Its outcome never changes the
+ * profile's result or the exit code (a pass here only reports that the failure is intermittent). Tracing every run instead would cost
+ * about a quarter more browser time (measured +26% on review-execute-recovery-components). FLOFI_BROWSER_FAILURE_TRACE=off skips it.
+ */
+function diagnose(name, specs, env, output) {
+  if (process.env.FLOFI_BROWSER_FAILURE_TRACE === 'off') return;
+  const lastRun = join(output, '.last-run.json');
+  let failed = [];
+  try { failed = JSON.parse(readFileSync(lastRun, 'utf8')).failedTests ?? []; } catch { /* no test recorded */ }
+  if (!existsSync(lastRun) || !failed.length) {
+    console.error('  Diagnostic trace: no failed test was recorded (the failure is outside a test: configuration, global setup or a server start); see the log above.');
+    return;
+  }
+  const traces = `${output}-trace`;
+  console.error(`  Diagnostic trace rerun of ${failed.length} failed test(s), never counted as a pass: ${rel(traces)}`);
+  const rerun = spawnSync('pnpm', ['--filter', '@defi-workflow-engine/reference-dapp', 'exec', 'playwright', 'test', ...specs, '--last-failed', '--last-failed-file', lastRun,
+    '--trace', 'on', '--output', traces, '--max-failures', '3', '--global-timeout', '300000'], { env, stdio: 'inherit' });
+  console.error(`  Diagnostic trace rerun ${rerun.status === 0 ? 'passed: the failure is intermittent; the profile stays FAILED' : 'failed again'}; traces in ${rel(traces)} (open with \`pnpm exec playwright show-trace <trace.zip>\`).`);
+  report.profiles.find(row => row.name === name).diagnostic = { rerunExitCode: rerun.status, traces: rel(traces) };
+  writeReport();
+}

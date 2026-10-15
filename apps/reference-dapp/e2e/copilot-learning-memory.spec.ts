@@ -20,6 +20,11 @@ test.beforeAll(() => {
 const send = async (page: Page, text: string) => { await page.locator('#mock-prompt').fill(text); await page.locator('.chat-form button[type=submit]').click(); };
 const lastAi = (page: Page) => page.locator('.message.ai').last();
 const meanings = () => query("SELECT term, target FROM learning_memories ORDER BY term");
+const subjects = () => query<{ subject_id: string }>('SELECT subject_id FROM learning_subjects ORDER BY subject_id');
+/** Every per-identity learning record (0013 + 0014): erasure must leave none of them behind. */
+const personalRecords = () => query(`SELECT (SELECT count(*) FROM learning_subjects)::int AS subjects, (SELECT count(*) FROM learning_memories)::int AS memories,
+  (SELECT count(*) FROM learning_evidence)::int AS evidence, (SELECT count(*) FROM learning_automatic_settings)::int AS settings,
+  (SELECT count(*) FROM learning_candidate_support)::int AS support`);
 /** Asks about "sol dev" and answers FloFi's question with its own button. */
 async function answerSolDev(page: Page, amount: string) {
   await send(page, `Swap ${amount} SOL to devUSDC on sol dev`);
@@ -62,6 +67,9 @@ test('invisible learning: adapted in the conversation, learned after consent and
   await learn.click();
   await expect(learn).toBeChecked();
   expect(await query('SELECT enabled, basis, notice_version FROM learning_automatic_settings')).toEqual([{ enabled: true, basis: 'CONSENT', notice_version: 2 }]);
+  // The consent created A's subject: the only one so far.
+  const subjectA = await subjects();
+  expect(subjectA).toHaveLength(1);
 
   // A new conversation: one answer is evidence, not yet a meaning; applying a proposal FloFi read on its own confirms it — then it is learned.
   await page.goto('/app');
@@ -90,6 +98,8 @@ test('invisible learning: adapted in the conversation, learned after consent and
   await send(pageB, 'Swap 0.3 SOL to devUSDC on sol dev');
   await expect(lastAi(pageB).getByRole('group', { name: 'Suggested answers' })).toBeVisible();
   await expect(lastAi(pageB)).not.toContainText('learned');
+  // Proving B, reading B's memory and chatting stored nothing for B (no subject is created by reading): A's subject is still the only one.
+  expect(await subjects()).toEqual(subjectA);
 
   // Collective knowledge stays reviewed: after an evaluated publication both users get "eth sepolia", with the glossary named.
   const db = createDatabase({ connectionString: process.env.FLOFI_E2E_DATABASE_URL!, maxConnections: 1 });
@@ -123,10 +133,22 @@ test('invisible learning: adapted in the conversation, learned after consent and
   await expect(page.getByText('FloFi keeps no meanings for this wallet.')).toBeVisible();
   expect(await meanings()).toEqual([]);
   expect(await query('SELECT * FROM learning_evidence')).toEqual([]);
+  // Turning learning off keeps A's subject, its recorded choice and the memory consent (the "Use my saved meanings" switch); only deletion removes them.
+  const useSaved = page.getByRole('checkbox', { name: 'Use my saved meanings' });
+  await expect(useSaved).toBeVisible();
+  expect(await subjects()).toEqual(subjectA);
+  expect(await query('SELECT enabled, basis, notice_version FROM learning_automatic_settings')).toEqual([{ enabled: false, basis: 'CONSENT', notice_version: 2 }]);
   await page.getByRole('button', { name: 'Delete everything', exact: true }).click();
   await page.getByRole('button', { name: 'Confirm: delete everything', exact: true }).click();
-  await expect(page.getByText('FloFi keeps no meanings for this wallet.')).toBeVisible();
-  expect((await query('SELECT count(*)::int AS n FROM learning_subjects'))[0]).toEqual({ n: 1 }); // B's own row only
+  // "FloFi keeps no meanings" was already shown before the deletion, so it proves nothing: wait until the page reloaded the erased status (the
+  // consent switch is gone and the two-step button is back). The erase deletes A's subject; its memories, evidence and settings cascade.
+  await expect(useSaved).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Delete everything', exact: true })).toBeVisible();
+  await expect(page.getByRole('checkbox', { name: /Learn from how I use the Copilot/ })).not.toBeChecked();
+  // Nothing personal remains for either wallet: A's records are erased and B never had any.
+  expect(await personalRecords()).toEqual([{ subjects: 0, memories: 0, evidence: 0, settings: 0, support: 0 }]);
+  // The reviewed global glossary is not personal data and stays published.
+  expect(await query('SELECT version FROM learning_knowledge_versions')).toEqual([{ version: 1 }]);
   // The only wallet requests were the sign-in: nothing signed or sent a transaction.
   expect((await walletRequests(page)).filter(method => /sendTransaction|signTypedData|eth_sign$/i.test(method))).toEqual([]);
   networkGuard.assertClean();

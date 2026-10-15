@@ -156,7 +156,8 @@ class GovernanceLite(unittest.TestCase):
         for command in ("pnpm typecheck", "pnpm lint", "pnpm build", "pnpm schemas:check", "pnpm test",
                         "pnpm install --frozen-lockfile --ignore-scripts", "pnpm audit --audit-level low",
                         "python3 scripts/bootstrap-ci.py --verify-dependencies",
-                        "node scripts/guarded-release-browser.mjs product",
+                        "node scripts/guarded-release-browser.mjs critical",
+                        "node scripts/guarded-release-browser.mjs extended",
                         "node scripts/guarded-release-browser.mjs composition"):
             files = dict(self.files)
             files[CONTRACTS] = files[CONTRACTS].replace("          " + command + "\n", "")

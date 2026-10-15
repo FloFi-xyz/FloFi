@@ -92,7 +92,8 @@ def control_errors(files):
                     "python3 scripts/bootstrap-ci.py --verify-dependencies", "pnpm typecheck", "pnpm lint",
                     "pnpm build", "pnpm schemas:check", "pnpm test", "pnpm test:anvil",
                     "pnpm test:fork --testTimeout=30000", "pnpm audit --audit-level low",
-                    "node scripts/guarded-release-browser.mjs product",
+                    "node scripts/guarded-release-browser.mjs critical",
+                    "node scripts/guarded-release-browser.mjs extended",
                     "node scripts/guarded-release-browser.mjs composition"),
     }.items():
         body = files.get(path, "")
