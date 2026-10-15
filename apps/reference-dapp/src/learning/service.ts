@@ -11,7 +11,7 @@
  */
 import type { Database } from '@defi-workflow-engine/cloud-runtime';
 import type { CopilotLearning, MemoryAction } from '../domain/copilot-conversation.ts';
-import { glossaryEntries, parseLexicon, validateLexiconEntry, type LexiconEntry } from '../domain/copilot-lexicon.ts';
+import { parseLexicon, validateLexiconEntry, type LexiconEntry } from '../domain/copilot-lexicon.ts';
 import type { CopilotLanguage } from '../domain/copilot-messages.ts';
 import { fixedWindow } from '../platform/fixed-window.ts';
 import { LEARNING_NOTICE_VERSION, type LearningConfig } from './config.ts';
@@ -80,8 +80,6 @@ export function createLearningService(input: { readonly config: Extract<Learning
           language: subject?.memoryEnabled ? subject.language : null }, principal, subject };
       } catch { warn('LEARNING_CONTEXT_UNAVAILABLE'); return { learning: UNAVAILABLE, principal, subject: null }; }
     },
-    /** The glossary entries a model request may show for the open request (`text`), the user's own first. */
-    glossary: (text: string, session: LearningSession): LexiconEntry[] => glossaryEntries(text, [...session.learning.private, ...session.learning.global]),
     /** Performs a memory action the engine described after the user's explicit statement or click, on the verified principal only. */
     async apply(principal: LearningPrincipal | null, action: MemoryAction, scope: LearningScope): Promise<LearningResult> {
       if (!principal) return { ok: false, code: 'LEARNING_IDENTITY_REQUIRED' };

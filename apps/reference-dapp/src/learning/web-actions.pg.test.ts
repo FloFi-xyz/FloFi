@@ -70,7 +70,7 @@ describe('BUILD-CHAT-LEARNING-001 web chat learning (PostgreSQL)', () => {
     const bodies: Record<string, string> = {};
     for (const [name, principals] of [['A', [EVM_A]], ['B', [EVM_B]], ['anonymous', []]] as const) {
       const session = await service.session(pickPrincipal(principals, null));
-      const { glossary } = requestGlossary(service, session, messages, []);
+      const { glossary } = requestGlossary(session, messages, []);
       const replay = createReplayTransport({ format: 'flofi.copilot-replay.v2', entries: [{ user: [messages[0]!.text], answer: { output: { intent: {
         version: '2', language: 'EN', kind: 'UNSUPPORTED', reason: 'x' } } } }] }, 'segment');
       await interpretCopilotV2({ version: '2', messages }, { mode: 'replay', glossary, settings: { model: 'replay', temperature: 0, maxOutputTokens: 4096, reasoningEffort: null },

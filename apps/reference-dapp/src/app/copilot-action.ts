@@ -61,7 +61,7 @@ async function learningFor(input: unknown, options: unknown) {
     const parsed = parseInterpretOptions(options), principal = pickPrincipal(await currentWalletPrincipals().catch(() => []), parsed.identity);
     const session = await service.session(principal);
     const messages = (input as { messages?: unknown }).messages;
-    const { glossary, entries } = requestGlossary(service, session, Array.isArray(messages) ? messages.filter((m): m is { role: string; text: string } =>
+    const { glossary, entries } = requestGlossary(session, Array.isArray(messages) ? messages.filter((m): m is { role: string; text: string } =>
       !!m && typeof m === 'object' && typeof (m as { role?: unknown }).role === 'string' && typeof (m as { text?: unknown }).text === 'string') : [], parsed.aliases);
     const record = (result: CopilotResultV2) => service.record('WEB', [{ kind: 'INTERPRETED', outcome: result.ok ? 'OK' : result.code,
       language: result.ok ? result.intent.language : null, privateEntries: entries.filter(e => e.source !== 'GLOBAL').length,

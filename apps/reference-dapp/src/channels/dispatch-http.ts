@@ -21,6 +21,7 @@ import { channelSubscriptions } from './subscriptions.ts';
 import { channelProviders, type ProviderSeams } from './providers.ts';
 import { channelProviderStatus, readChannelDeployment } from './registry.ts';
 import { channelHost, channelRuntime, type ChannelHost } from './runtime.ts';
+import { channelLearning } from './learning-runtime.ts';
 import { channelVisualRenderer } from './visuals.ts';
 import { authoringCatalogPreparer } from '../server/authoring-catalogs.ts';
 
@@ -59,7 +60,7 @@ export async function handleChannelDispatch(request: Request, options: ChannelOp
   const services = new Map([...providers.adapters.values()].map(adapter => [adapter.channel, createChannelService({ core, store, log, now, platform, adapter,
     interpreter: interpreterFor(adapter.channel),
     previewTimeoutMs: 30_000, subscriptions: channelSubscriptions(env, host), visuals: options.visuals !== undefined ? options.visuals : channelVisualRenderer,
-    catalogs: authoringCatalogPreparer(env),
+    catalogs: authoringCatalogPreparer(env), learning: channelLearning(env, host, adapter.channel),
     ...options.sleep ? { sleep: options.sleep } : {}, ...options.random ? { random: options.random } : {} })]));
   try {
     const summary = await dispatchChannels({ core, store, platform, log, now, adapters: providers.adapters, services, ...options.sleep ? { sleep: options.sleep } : {},

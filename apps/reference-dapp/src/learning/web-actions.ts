@@ -5,13 +5,12 @@
  * here; every memory change is on the principal the server verified.
  */
 import type { CopilotLearning, MemoryAction } from '../domain/copilot-conversation.ts';
-import { glossaryEntries, parseLexicon, validateLexiconEntry, type LexiconEntry } from '../domain/copilot-lexicon.ts';
-import { renderGlossary } from '../server/copilot-glossary.ts';
-import { replaySegment } from '../server/copilot-service.ts';
+import { parseLexicon, validateLexiconEntry, type LexiconEntry } from '../domain/copilot-lexicon.ts';
 import { pickPrincipal, type LearningNamespace } from '../server/learning-web.ts';
 import type { WalletPrincipal } from '../server/session-principal.ts';
 import { LEARNING_NOTICE_VERSION } from './config.ts';
-import { CLIENT_FEEDBACK_KINDS, type FeedbackKind, type LearningCode, type LearningService, type LearningSession } from './service.ts';
+import { CLIENT_FEEDBACK_KINDS, type FeedbackKind, type LearningCode, type LearningService } from './service.ts';
+export { requestGlossary } from './glossary.ts';
 
 type Service = LearningService | 'OFF' | 'UNAVAILABLE';
 export type LearningStatusView = { readonly enabled: false } | {
@@ -90,12 +89,4 @@ export function parseClientEvents(raw: unknown): ClientEvent[] {
 export function parseInterpretOptions(raw: unknown): { readonly identity: LearningNamespace | null; readonly aliases: LexiconEntry[] } {
   if (!plain(raw)) return { identity: null, aliases: [] };
   return { identity: raw.identity === 'eip155' || raw.identity === 'solana' ? raw.identity : null, aliases: parseLexicon(raw.aliases, 'SESSION') };
-}
-/** The glossary for one V2 request: entries matched in its open request (`replaySegment`), the user's own first, rendered as data. */
-export function requestGlossary(service: LearningService, session: LearningSession, messages: readonly { readonly role: string; readonly text: string }[],
-  aliases: readonly LexiconEntry[]): { readonly glossary: string | null; readonly entries: readonly LexiconEntry[] } {
-  const segment = replaySegment(messages.map(message => ({ role: message.role, content: message.text }))).join('\n');
-  const entries = [...glossaryEntries(segment, aliases), ...service.glossary(segment, session)].filter((entry, index, all) => all.findIndex(e => e.term === entry.term) === index)
-    .slice(0, 8);
-  return { glossary: renderGlossary(entries, session.learning.language), entries };
 }
