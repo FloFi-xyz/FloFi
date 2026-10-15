@@ -14,10 +14,15 @@ steps:
         export PYTHONDONTWRITEBYTECODE=1
         python3 --version
         git --version
+        # cimg/node runs as an unprivileged user, whereas Cloud Build mounts
+        # /workspace as root-owned. A source archive can also omit .git.
+        # Keep source immutable and use a writable disposable copy for tests.
+        workdir="$(mktemp -d /tmp/flofi-governance.XXXXXX)"
+        trap 'rm -rf "$workdir"' EXIT
+        cp -R /workspace "$workdir/source"
+        cd "$workdir/source"
         python3 -m unittest discover -s scripts -p 'test_governance_lite.py'
         python3 -m unittest discover -s scripts -p 'test_ci_*.py'
-        # Cloud Build's source archive may omit .git metadata.
-        # Create an ephemeral index only for governance_lite's tracked-file scan.
         if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
           git init -q
           git add -A
