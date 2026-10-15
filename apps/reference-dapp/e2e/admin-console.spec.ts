@@ -61,7 +61,7 @@ test('admin console: refusal until granted, overview with network distribution, 
     await page.waitForURL(url => url.pathname === '/admin');
     await expect(page.getByRole('heading', { name: 'Overview', level: 1 })).toBeVisible();
     const nav = page.getByRole('navigation', { name: 'Admin' });
-    for (const label of ['Overview', 'Workflows', 'Automations', 'AI Settings', 'System Health', 'Access & audit']) await expect(nav.getByRole('link', { name: label })).toBeVisible();
+    for (const label of ['Overview', 'Workflows', 'Automations', 'AI Settings', 'AI Learning', 'System Health', 'Access & audit']) await expect(nav.getByRole('link', { name: label })).toBeVisible();
 
     // Testnet/Devnet is chosen automatically (no mainnet activity); MOCKED and mainnet are separate views.
     await expect(page.getByRole('navigation', { name: 'Environment' }).getByRole('link', { name: 'Testnet / Devnet · 3' })).toHaveAttribute('aria-current', 'true');
@@ -101,6 +101,16 @@ test('admin console: refusal until granted, overview with network distribution, 
     const tokenless = await page.request.post('/admin/api/settings/copilot', { data: { action: 'reset', expectedVersion: 1 }, headers: { origin: new URL(page.url()).origin } });
     expect([tokenless.status(), (await tokenless.json()).code]).toEqual([403, 'ADMIN_CSRF_INVALID']);
     expect((await db.query(`SELECT count(*)::int AS n FROM admin_settings_versions`)).rows).toEqual([{ n: 1 }]);
+
+    // BUILD-CHAT-LEARNING-001: AI Learning renders aggregates only (learning is off in this harness) and its API keeps the same CSRF rule.
+    await nav.getByRole('link', { name: 'AI Learning' }).click();
+    await expect(page.getByRole('heading', { name: 'AI Learning', level: 1 })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Learning on this deployment' })).toBeVisible();
+    await expect(page.getByText('off (FLOFI_LEARNING not enabled)')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Load reviewed PT-BR/EN starter set' })).toBeVisible();
+    const learningTokenless = await page.request.post('/admin/api/learning', { data: { action: 'starter' }, headers: { origin: new URL(page.url()).origin } });
+    expect([learningTokenless.status(), (await learningTokenless.json()).code]).toEqual([403, 'ADMIN_CSRF_INVALID']);
+    expect((await db.query(`SELECT count(*)::int AS n FROM learning_candidates`)).rows).toEqual([{ n: 0 }]);
 
     for (const [label, heading] of [['Workflows', 'Workflows'], ['Automations', 'Automations'], ['System Health', 'System Health'], ['Access & audit', 'Access & audit']] as const) {
       await nav.getByRole('link', { name: label }).click();

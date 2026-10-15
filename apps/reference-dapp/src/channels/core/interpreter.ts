@@ -36,31 +36,32 @@ export function channelInterpreter(env: Env, options: { readonly enabled: boolea
   if (!options.enabled) return null;
   if (options.transport) {
     const transport = options.transport;
-    return request => interpretCopilotV2(request, { transport, mode: 'replay', limiter: sharedLimiter(),
+    return (request, options) => interpretCopilotV2(request, { transport, mode: 'replay', limiter: sharedLimiter(), glossary: options?.glossary ?? null,
       settings: { model: 'replay', temperature: 0, maxOutputTokens: COPILOT_TUNING_DEFAULTS.maxOutputTokens, reasoningEffort: null } });
   }
   const config = copilotConfig(env), tuning = copilotTuning(env), live = options.live;
   if (config.mode === 'off') return null;
   if (live && env.FLOFI_COPILOT === 'live') {
-    return async request => {
+    return async (request, options) => {
       const resolved = await live();
       if (!resolved.ok) return { ok: false, code: resolved.code };
       const { apiKey, settings } = resolved;
       return interpretCopilotV2(request, { transport: createOpenAITransport(apiKey, fetch, { timeoutMs: settings.timeoutMs, maxResponseBytes: COPILOT_SERVER_LIMITS.maxResponseBytes }),
-        mode: 'live', limiter: sharedLimiter(), telemetry: copilotTelemetrySink(env, 'live'),
+        mode: 'live', limiter: sharedLimiter(), telemetry: copilotTelemetrySink(env, 'live'), glossary: options?.glossary ?? null,
         settings: { model: settings.model, temperature: settings.temperature, maxOutputTokens: settings.maxOutputTokens, reasoningEffort: settings.reasoningEffort } });
     };
   }
   if (config.mode === 'unavailable' || (config.mode === 'live' && !tuning)) return async () => ({ ok: false, code: 'COPILOT_NOT_CONFIGURED' });
   if (config.mode === 'live' && tuning) {
     const transport = createOpenAITransport(config.apiKey, fetch, { timeoutMs: tuning.timeoutMs, maxResponseBytes: COPILOT_SERVER_LIMITS.maxResponseBytes });
-    return request => interpretCopilotV2(request, { transport, mode: 'live', limiter: sharedLimiter(), telemetry: copilotTelemetrySink(env, 'live'),
+    return (request, options) => interpretCopilotV2(request, { transport, mode: 'live', limiter: sharedLimiter(), telemetry: copilotTelemetrySink(env, 'live'),
+      glossary: options?.glossary ?? null,
       settings: { model: config.model, temperature: config.temperature, maxOutputTokens: tuning.maxOutputTokens, reasoningEffort: tuning.reasoningEffort } });
   }
-  return async request => {
+  return async (request, options) => {
     try {
       const replay = parseCopilotReplay(JSON.parse(await readFile(REPLAY_FILE_V2, 'utf8')), COPILOT_REPLAY_FORMAT_V2);
-      return interpretCopilotV2(request, { transport: createReplayTransport(replay, 'segment'), mode: 'replay', limiter: sharedLimiter(),
+      return interpretCopilotV2(request, { transport: createReplayTransport(replay, 'segment'), mode: 'replay', limiter: sharedLimiter(), glossary: options?.glossary ?? null,
         settings: { model: 'replay', temperature: 0, maxOutputTokens: COPILOT_TUNING_DEFAULTS.maxOutputTokens, reasoningEffort: null } });
     } catch { return { ok: false, code: 'COPILOT_REPLAY_INVALID' }; }
   };

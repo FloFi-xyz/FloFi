@@ -8,8 +8,8 @@ import type { Workflow } from './initial-workflow';
 import { lendingDetails } from './lending-authoring';
 import { workflowSteps, type WorkflowStep } from './workflow-steps';
 import { editCommandFor, removeCommandFor } from './workflow-edits';
-import { COPILOT_AUTHORING_COMMANDS, COPILOT_NETWORK_LABEL, COPILOT_POOLS, amountReadings, canonicalDecimal, copilotRejection, groundedAmount, planCopilotActions,
-  proposalFromPlan, type CarriedField, type CopilotOutcome, type Grounding, type SwapSource } from './copilot-authoring';
+import { COPILOT_AUTHORING_COMMANDS, COPILOT_NETWORK_LABEL, COPILOT_POOLS, amountReadings, canonicalDecimal, copilotRejection, groundedAmount, mentionedNetworks,
+  planCopilotActions, proposalFromPlan, type CarriedField, type CopilotOutcome, type Grounding, type SwapSource } from './copilot-authoring';
 import { SOLANA_LIQUIDITY_DEFAULT_SLIPPAGE, solanaLiquidityDetails, type SolanaLiquidityInput } from './solana-liquidity-authoring';
 import { formatTokenAmount, parseTokenAmount } from './jupiter-authoring';
 import { ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY } from '@defi-workflow-engine/action-registry';
@@ -23,6 +23,10 @@ import { COPILOT_TRANSCRIPT, COPILOT_V2_LIMITS, isCopilotIntentError, parseCopil
   type CopilotReuseField, type CopilotTarget } from './copilot-intent-v2';
 import { copilotCopy, type CarriedLabel, type CopilotCopy, type CopilotLanguage } from './copilot-messages';
 import { answerQuestion, stepSummary, type CopilotFacts } from './copilot-answers';
+import { copilotNetworksMentioned, type CopilotNetworkId } from './network-registry';
+import { lexiconAssets, lexiconNetworks, lexiconSuggestions, LEXICON_LIMITS, mergeLexicon, parseLexicon, parseMemoryStatement, type LexiconEntry,
+  type MemoryStatement } from './copilot-lexicon';
+import { learningCopy, MEMORY_NO, MEMORY_YES, refusalFor, targetLabel, targetName, usedNote } from './copilot-learning-copy';
 
 /**
  * BUILD-COPILOT-002: the conversation engine. Pure: no React, no network, no wallet, no execution. It keeps a bounded
@@ -46,18 +50,47 @@ type Draft = { readonly intent: CopilotIntentV2; readonly options: readonly { re
   readonly snapshot: ContextSnapshot;
   /** A bare amount answers Flofi's question for this pool token's maximum (FloFi's own question named it). */ readonly depositFill?: 'SOL' | 'devUSDC';
   /** What resolving the open request already settled (a chosen swap or position). */ readonly extras?: Extras;
-  /** The question and the buttons shown, so "yes" never guesses among several. */ readonly question?: string; readonly shown?: readonly string[] };
+  /** The question and the buttons shown, so "yes" never guesses among several. */ readonly question?: string; readonly shown?: readonly string[];
+  /** BUILD-CHAT-LEARNING-001: a mainnet FloFi's glossary suggested, offered first (picking it or another option is a feedback signal). */
+  readonly suggestion?: CopilotNetworkId };
 /** Values Flofi settled itself while resolving one request: values it carried, the swap whose output funds a position, a position and its portion. */
 type Extras = { readonly carried?: readonly CarriedField[]; readonly swap?: SwapSource; readonly position?: string; readonly portion?: string };
 export type CopilotConversation = {
   readonly transcript: readonly TranscriptEntry[]; readonly segment: readonly string[]; readonly clarifications: number;
   readonly draft: Draft | null; readonly referents: readonly CopilotReferent[]; readonly language: CopilotLanguage;
+  /** BUILD-CHAT-LEARNING-001: meanings the user stated in this conversation (never stored unless they accept FloFi's offer). */
+  readonly aliases?: readonly LexiconEntry[];
+  /** FloFi's open memory offer: its two buttons (or yes/no) answer it; anything else drops it. */
+  readonly offer?: MemoryOffer | null;
+  /** A reply language the user asked for in this conversation (wins over a saved preference). */
+  readonly languageSet?: CopilotLanguage | null;
+  /** Consecutive turns that ended without a proposal or an answer (a repeated failure is signalled once, at two). */
+  readonly failures?: number;
 };
+/**
+ * BUILD-CHAT-LEARNING-001: what the caller knows about this user's learning. It never decides grounding by itself: the engine validates every
+ * entry again and applies the source rules of `copilot-lexicon.ts`. Absent = learning is not enabled: the engine behaves exactly as before.
+ */
+export type CopilotLearning = {
+  /** AVAILABLE: a verified identity whose memory can be written. PAUSED: verified, memory turned off. ANONYMOUS: no verified identity. */
+  readonly memory: 'AVAILABLE' | 'PAUSED' | 'ANONYMOUS' | 'UNAVAILABLE';
+  /** How an offer names whose memory it is, per reply language ("your wallet 0x12…ab", "esta conta do Telegram"); null when anonymous. */
+  readonly owner: Readonly<Record<CopilotLanguage, string>> | null;
+  readonly private: readonly LexiconEntry[]; readonly global: readonly LexiconEntry[]; readonly globalVersion: number | null;
+  readonly language: CopilotLanguage | null;
+};
+/** A memory change the engine only describes; the caller performs it on the user's verified identity (and reports a failure). */
+export type MemoryAction = { readonly op: 'SAVE'; readonly entry: LexiconEntry } | { readonly op: 'FORGET'; readonly term: string } | { readonly op: 'FORGET_ALL' }
+  | { readonly op: 'LANGUAGE'; readonly language: CopilotLanguage };
+export type LearningSignal = 'CORRECTION' | 'CLARIFICATION_ANSWERED' | 'REPEATED_FAILURE' | 'SUGGESTION_CONFIRMED' | 'SUGGESTION_REJECTED';
+type MemoryOffer = { readonly action: MemoryAction; readonly declined: string };
 export type CopilotEnvironment = {
   readonly timezone?: string; readonly workflow: Workflow; readonly context: ReviewContext; readonly wallet: string | null; readonly walletChainId: string | null;
   readonly pending: { readonly command: Command; readonly diff: readonly string[] } | null; readonly facts: CopilotFacts;
   /** Read-only Solana Devnet facts FloFi read itself (never the model's or the user's words); absent when not loaded. */
   readonly verified?: CopilotVerified;
+  /** BUILD-CHAT-LEARNING-001: the user's learning context; absent when learning is not enabled on this deployment. */
+  readonly learning?: CopilotLearning;
 };
 /** One FloFi-registered Orca position of the connected Solana Devnet wallet, as the position registry and the chain report it. */
 export type CopilotPosition = { readonly positionMint: string; readonly status: string; readonly tickLower: number | null; readonly tickUpper: number | null;
@@ -71,8 +104,12 @@ export type CopilotVerified = {
   readonly remaining: readonly { readonly token: 'SOL' | 'devUSDC'; readonly amount: string }[];
 };
 export type CopilotReply = {
-  readonly kind: 'PROPOSAL' | 'AUTOMATION_PROPOSAL' | 'ANSWER' | 'CLARIFICATION' | 'UNSUPPORTED' | 'FAILED'; readonly text: string; readonly notes: readonly string[];
+  readonly kind: 'PROPOSAL' | 'AUTOMATION_PROPOSAL' | 'ANSWER' | 'CLARIFICATION' | 'UNSUPPORTED' | 'FAILED' | 'MEMORY'; readonly text: string; readonly notes: readonly string[];
   readonly options: readonly string[]; readonly automation?: AutomationInput; readonly command?: Command; readonly sentence?: string; readonly topic?: CopilotQuestionTopic;
+  /** BUILD-CHAT-LEARNING-001: a memory change for the caller to perform (only after the user's own click or explicit statement). */
+  readonly memory?: MemoryAction;
+  /** Learned entries FloFi used to read this request (each also shown as a note) and content-free feedback signals. */
+  readonly learning?: { readonly used: readonly LexiconEntry[]; readonly signals: readonly LearningSignal[] };
 };
 export type CopilotRequestV2 = { readonly version: '2'; readonly messages: readonly TranscriptEntry[] };
 export type CopilotResultV2 = { readonly ok: true; readonly intent: unknown } | { readonly ok: false; readonly code: string; readonly retryAfterSeconds?: number };
@@ -131,9 +168,9 @@ const failed = (state: CopilotConversation, m: CopilotCopy, message: string): Re
 const refused = (state: CopilotConversation, m: CopilotCopy, message: string): Result =>
   terminal(state, reply('UNSUPPORTED', message), COPILOT_TRANSCRIPT.declined + message);
 /** A question keeps the request open, up to the clarification budget. */
-function question(state: CopilotConversation, m: CopilotCopy, text: string, options: readonly string[], draft: Draft | null): Result {
+function question(state: CopilotConversation, m: CopilotCopy, text: string, options: readonly string[], draft: Draft | null, notes: readonly string[] = []): Result {
   if (state.clarifications >= COPILOT_V2_LIMITS.maxClarifications) return failed(state, m, m.tooManyClarifications);
-  return { reply: reply('CLARIFICATION', text, { options }),
+  return { reply: reply('CLARIFICATION', text, { options, ...notes.length ? { notes } : {} }),
     next: { ...state, clarifications: state.clarifications + 1, draft: draft && { ...draft, question: text, shown: options },
       transcript: bounded([...state.transcript, { role: 'assistant', text: COPILOT_TRANSCRIPT.asked + text }]) } };
 }
@@ -141,6 +178,96 @@ export const failureText = (code: string, language: CopilotLanguage, retryAfterS
   const m = copilotCopy(language);
   return `${m.failures[code] ?? m.failureDefault}${retryAfterSeconds ? m.retryAfter(retryAfterSeconds) : ''}${m.failureSuffix}`;
 };
+
+// ── BUILD-CHAT-LEARNING-001: learned vocabulary and memory ───────────────────────────────────────────────────────────────────────────
+/** The lexicon a turn grounds with — this conversation's meanings, the user's saved ones, FloFi's glossary — re-validated, one per term. */
+export const lexiconOf = (state: CopilotConversation, env: CopilotEnvironment): LexiconEntry[] => !env.learning ? []
+  : mergeLexicon(parseLexicon(state.aliases ?? [], 'SESSION'), parseLexicon(env.learning.private, 'PRIVATE'), parseLexicon(env.learning.global, 'GLOBAL'));
+/** The reply language the user chose (in this conversation, else saved); null = the language of their message, as before. */
+export const preferredLanguage = (state: CopilotConversation, env: CopilotEnvironment): CopilotLanguage | null =>
+  !env.learning ? null : state.languageSet ?? env.learning.language ?? null;
+function withLearning(result: Result, env: CopilotEnvironment, signals: readonly LearningSignal[], used: readonly LexiconEntry[] = []): Result {
+  if (!env.learning || (!signals.length && !used.length)) return result;
+  const prior = result.reply.learning;
+  return { ...result, reply: { ...result.reply, learning: { used: [...new Set([...prior?.used ?? [], ...used])], signals: [...new Set([...prior?.signals ?? [], ...signals])] } } };
+}
+/** Turns that ended without a proposal or answer, in a row; the second one is signalled (content-free) as a repeated failure. */
+function tallied(result: Result, env: CopilotEnvironment): Result {
+  if (!env.learning) return result;
+  const kind = result.reply.kind;
+  if (kind !== 'FAILED' && kind !== 'UNSUPPORTED') return kind === 'CLARIFICATION' ? result : { ...result, next: { ...result.next, failures: 0 } };
+  const failures = (result.next.failures ?? 0) + 1;
+  return withLearning({ ...result, next: { ...result.next, failures } }, env, failures === 2 ? ['REPEATED_FAILURE'] : []);
+}
+/** Learned entries that made the difference in a proposal: their target is in the proposal, and the user's words did not name it otherwise. */
+function usedEntries(text: string, lexicon: readonly LexiconEntry[], sentence: string): LexiconEntry[] {
+  if (!lexicon.length) return [];
+  const canonical = mentionedNetworks(text), proposed = copilotNetworksMentioned(sentence);
+  const word = (symbol: string) => new RegExp(`(?<![A-Za-z0-9])${symbol}(?![A-Za-z0-9])`, 'i');
+  return [...new Set([...lexiconNetworks(text, lexicon).filter(({ network }) => proposed.includes(network) && !canonical.includes(network)).map(match => match.entry),
+    ...lexiconAssets(text, lexicon).filter(({ asset }) => word(asset === 'DEVUSDC' ? 'devUSDC' : asset).test(sentence) && !word(asset).test(text)).map(match => match.entry)])];
+}
+const isYes = (text: string) => MEMORY_YES.has(normalize(text).replace(/[.!]+$/, '')) || YES.test(text);
+const isNo = (text: string) => MEMORY_NO.has(normalize(text).replace(/[.!]+$/, '')) || NO.test(text);
+/** The user's answer to FloFi's memory offer: only now does the reply carry the memory action, for the caller to perform. */
+function answerOffer(state: CopilotConversation, offer: MemoryOffer, yes: boolean, language: CopilotLanguage): Result {
+  const next = { ...state, offer: null };
+  if (!yes) return { reply: reply('ANSWER', offer.declined), next };
+  const l = learningCopy(language), action = offer.action;
+  const text = action.op === 'SAVE' ? l.saved(action.entry.term, targetLabel(action.entry.target, language)) : action.op === 'LANGUAGE'
+    ? learningCopy(action.language).languageSaved(action.language) : action.op === 'FORGET_ALL' ? l.deletedAll : l.forgotten(action.term);
+  return { reply: reply('MEMORY', text, { memory: action }), next };
+}
+/** A statement about the user's own vocabulary or reply language. Deterministic and local: never sent to the model, never a workflow change. */
+function memoryTurn(state: CopilotConversation, statement: MemoryStatement, learning: CopilotLearning, language: CopilotLanguage): Result {
+  const l = learningCopy(language), aliases = state.aliases ?? [], durable = learning.memory === 'AVAILABLE', stored = durable || learning.memory === 'PAUSED';
+  const local = (value: CopilotReply, next: CopilotConversation = state): Result => ({ reply: value, next: { ...next, offer: null } });
+  const offer = (text: string, action: MemoryAction, declined: string, options: readonly string[], next: CopilotConversation): Result =>
+    ({ reply: reply('MEMORY', text, { options }), next: { ...next, offer: { action, declined } } });
+  const unsaved = learning.memory === 'PAUSED' ? l.paused : learning.memory === 'ANONYMOUS' ? l.signIn : l.unavailable;
+  switch (statement.kind) {
+    case 'REMEMBER': {
+      if (!statement.term) return local(reply('UNSUPPORTED', l.invalidTerm));
+      if (!statement.target) return local(reply('UNSUPPORTED', l.unknownTarget));
+      if (!statement.validation?.ok) return local(reply('UNSUPPORTED', refusalFor(statement.validation?.code ?? 'LEARNING_TERM_INVALID', statement.term, statement.target, language)));
+      const { term, target } = statement.validation, label = targetLabel(target, language), said = l.sessionAlias(term, label);
+      const next = { ...state, aliases: [{ term, target, source: 'SESSION' as const }, ...aliases.filter(alias => alias.term !== term)].slice(0, LEXICON_LIMITS.maxSession) };
+      if (!durable) return local(reply('ANSWER', `${said} ${unsaved}`), next);
+      const saved = learning.private.find(entry => entry.term === term);
+      if (saved?.target === target) return local(reply('ANSWER', l.saved(term, label)), next);
+      return offer([said, l.offer(learning.owner?.[language] ?? ''), ...saved ? [l.replaces(targetLabel(saved.target, language))] : []].join(' '),
+        { op: 'SAVE', entry: { term, target, source: 'PRIVATE' } }, l.notSaved(term, label), l.options, next);
+    }
+    case 'FORGET': {
+      if (!statement.term) return local(reply('UNSUPPORTED', l.invalidTerm));
+      const term = statement.term, next = { ...state, aliases: aliases.filter(alias => alias.term !== term) };
+      if (stored && learning.private.some(entry => entry.term === term)) return local(reply('MEMORY', l.forgotten(term), { memory: { op: 'FORGET', term } }), next);
+      return local(reply('ANSWER', aliases.some(alias => alias.term === term) ? l.forgotten(term) : l.notKnown(term)), next);
+    }
+    case 'FORGET_ALL': {
+      const next = { ...state, aliases: [], languageSet: null };
+      if (stored) return offer(l.forgetAllOffer, { op: 'FORGET_ALL' }, l.kept, l.forgetAllOptions, next);
+      return local(reply('ANSWER', aliases.length ? l.deletedAll : l.nothingToDelete), next);
+    }
+    case 'LANGUAGE': {
+      const chosen = statement.language, c = learningCopy(chosen), next = { ...state, languageSet: chosen, language: chosen };
+      if (durable && learning.language === chosen) return local(reply('ANSWER', c.languageSaved(chosen)), next);
+      if (!durable) return local(reply('ANSWER', learning.memory === 'UNAVAILABLE' ? c.language(chosen) : `${c.language(chosen)} ${learningCopy(chosen)[learning.memory === 'PAUSED' ? 'paused' : 'signIn']}`), next);
+      return offer(`${c.language(chosen)} ${c.offer(learning.owner?.[chosen] ?? '')}`, { op: 'LANGUAGE', language: chosen }, c.language(chosen), c.options, next);
+    }
+  }
+}
+/** FloFi's glossary suggested a mainnet for a word the user wrote: offer that option first and say why; the user still decides. */
+function withSuggestion(state: CopilotConversation, env: CopilotEnvironment, options: readonly string[], language: CopilotLanguage):
+  { readonly options: readonly string[]; readonly notes: readonly string[]; readonly suggestion?: CopilotNetworkId } {
+  const lexicon = lexiconOf(state, env);
+  if (!lexicon.length || !options.length) return { options, notes: [] };
+  const mentions = (option: string, network: CopilotNetworkId) => copilotNetworksMentioned(option).includes(network);
+  const found = lexiconSuggestions(segmentText(state), lexicon).find(match => options.some(option => mentions(option, match.network)));
+  if (!found) return { options, notes: [] };
+  return { options: [...options.filter(option => mentions(option, found.network)), ...options.filter(option => !mentions(option, found.network))],
+    notes: [learningCopy(language).suggestion(found.entry.term, targetName(found.entry.target))], suggestion: found.network };
+}
 
 // ── Steps, previews and referents ────────────────────────────────────────────────────────────────────────────────────
 const editable = (step: WorkflowStep) => step.kind !== 'TEMPLATE' && step.kind !== 'OTHER';
@@ -474,13 +601,27 @@ function patchIntent(intent: CopilotIntentV2, patch: Readonly<Record<string, unk
 
 // ── Turns ────────────────────────────────────────────────────────────────────────────────────────────────────────────
 /** Starts a user turn: a local answer (input refused, secret, or a reply to Flofi's own question) or a request for the model. */
-export function startTurn(state: CopilotConversation, raw: string, env: CopilotEnvironment): TurnStart {
-  const text = typeof raw === 'string' ? raw.trim() : '', m = copilotCopy(state.language);
+export function startTurn(current: CopilotConversation, raw: string, env: CopilotEnvironment): TurnStart {
+  let state = current;
+  const language = preferredLanguage(state, env) ?? state.language;
+  const text = typeof raw === 'string' ? raw.trim() : '', m = copilotCopy(language);
   if (!text || text.length > COPILOT_LIMITS.maxUserMessageLength || hasUnsafeCharacters(text))
-    return { kind: 'LOCAL', reply: reply('FAILED', failureText('COPILOT_INPUT_INVALID', state.language)), next: state };
+    return { kind: 'LOCAL', reply: reply('FAILED', failureText('COPILOT_INPUT_INVALID', language)), next: state };
   // No model runs for a secret, so its language comes from the conversation or from the Portuguese wording that matched.
   if (looksSecret(text)) return { kind: 'LOCAL', reply: reply('UNSUPPORTED', /chaves?\s+privad|frases?\s+(?:semente|secreta|de\s+recupera)|palavras\s+secretas/i.test(text)
     ? copilotCopy('PT').secret : m.secret), next: state };
+  // BUILD-CHAT-LEARNING-001: FloFi's memory offer, then statements about the user's own vocabulary — deterministic, local, never sent to the model.
+  if (env.learning) {
+    if (state.offer) {
+      const yes = isYes(text) ? true : isNo(text) ? false : null;
+      if (yes !== null) return { kind: 'LOCAL', ...answerOffer(state, state.offer, yes, language) };
+      state = { ...state, offer: null };
+    }
+    const statement = parseMemoryStatement(text);
+    // FloFi answers in the language the statement was written in, unless the user chose a reply language (a language statement: the new one).
+    if (statement) return { kind: 'LOCAL', ...memoryTurn(state, statement, env.learning, statement.kind === 'LANGUAGE' ? statement.language
+      : preferredLanguage(state, env) ?? statement.said) };
+  }
   const answered = yesOrNo(state, text, env, m);
   if (answered && !('pick' in answered)) return answered;
   const draft = state.draft, picked = answered ? answered.pick : text;
@@ -491,12 +632,16 @@ export function startTurn(state: CopilotConversation, raw: string, env: CopilotE
       if (contextChange(draft.snapshot, snapshotOf(env))) return { kind: 'LOCAL', ...failed(closeSegment(state), m, m.draftStale) };
       // "Yes" to a question with exactly one offered answer is that answer, in Flofi's own words.
       const next = withUser(state, picked), extras = draft.extras ?? {};
-      if (option?.fill.kind === 'TARGET') return { kind: 'LOCAL', ...resolveIntent(draft.intent, next, env, option.fill.target, extras) };
-      if (option?.fill.kind === 'EXTRAS') return { kind: 'LOCAL', ...resolveIntent(draft.intent, next, env, null, { ...extras, ...option.fill.extras }) };
-      if (!option && draft.depositFill) return { kind: 'LOCAL', ...resolveIntent(patchDeposit(draft.intent, draft.depositFill, amount!), next, env, null,
-        { ...extras, carried: [...extras.carried ?? [], `asset:${draft.depositFill}`] }) };
+      // BUILD-CHAT-LEARNING-001: answering FloFi's own question is a content-free clarification signal (and says whether a glossary suggestion held).
+      const signals: LearningSignal[] = ['CLARIFICATION_ANSWERED', ...option && draft.suggestion
+        ? [copilotNetworksMentioned(option.label).includes(draft.suggestion) ? 'SUGGESTION_CONFIRMED' as const : 'SUGGESTION_REJECTED' as const] : []];
+      const local = (result: Result): TurnStart => ({ kind: 'LOCAL', ...withLearning(tallied(result, env), env, signals) });
+      if (option?.fill.kind === 'TARGET') return local(resolveIntent(draft.intent, next, env, option.fill.target, extras));
+      if (option?.fill.kind === 'EXTRAS') return local(resolveIntent(draft.intent, next, env, null, { ...extras, ...option.fill.extras }));
+      if (!option && draft.depositFill) return local(resolveIntent(patchDeposit(draft.intent, draft.depositFill, amount!), next, env, null,
+        { ...extras, carried: [...extras.carried ?? [], `asset:${draft.depositFill}`] }));
       const intent = option?.fill.kind === 'ACTION' ? patchIntent(draft.intent, option.fill.patch) : patchIntent(draft.intent, { amount });
-      return { kind: 'LOCAL', ...resolveIntent(intent, next, env, null, extras) };
+      return local(resolveIntent(intent, next, env, null, extras));
     }
   }
   const next = withUser(state, text);
@@ -504,14 +649,16 @@ export function startTurn(state: CopilotConversation, raw: string, env: CopilotE
 }
 /** Finishes a model turn against the current state. A changed workflow, proposal or wallet discards the answer. */
 export function finishTurn(turn: PendingTurn, result: CopilotResultV2, env: CopilotEnvironment): Result {
-  const language = turn.state.language, m = copilotCopy(language), rollback = closeSegment(turn.before);
+  // BUILD-CHAT-LEARNING-001: a reply language the user chose wins over the language of their message (display copy only).
+  const preferred = preferredLanguage(turn.state, env), language = preferred ?? turn.state.language, m = copilotCopy(language), rollback = closeSegment(turn.before);
   const change = contextChange(turn.snapshot, snapshotOf(env));
   if (change) return { reply: reply('FAILED', change === 'WORKFLOW' ? m.workflowChanged : change === 'PROPOSAL' ? m.proposalChanged : m.walletChanged), next: rollback };
-  if (!result.ok) return { reply: reply('FAILED', failureText(result.code, language, result.retryAfterSeconds)), next: rollback };
+  if (!result.ok) return tallied({ reply: reply('FAILED', failureText(result.code, language, result.retryAfterSeconds)), next: rollback }, env);
   let intent: CopilotIntentV2;
   try { intent = parseCopilotIntentV2(result.intent); }
-  catch (cause) { return { reply: reply('FAILED', failureText(isCopilotIntentError(cause) && cause.message === 'COPILOT_TOO_MANY_ACTIONS' ? cause.message : 'COPILOT_INTENT_INVALID', language)), next: rollback }; }
-  return resolveIntent(intent, { ...turn.state, language: intent.language }, env, null, {});
+  catch (cause) { return tallied({ reply: reply('FAILED', failureText(isCopilotIntentError(cause) && cause.message === 'COPILOT_TOO_MANY_ACTIONS' ? cause.message : 'COPILOT_INTENT_INVALID', language)), next: rollback }, env); }
+  if (preferred && intent.language !== preferred) intent = { ...intent, language: preferred };
+  return tallied(resolveIntent(intent, { ...turn.state, language: intent.language }, env, null, {}), env);
 }
 
 /** One validated intent → reply and next state. `forced` is a step the user picked from Flofi's own buttons. */
@@ -596,8 +743,10 @@ function resolveIntent(intent: CopilotIntentV2, state: CopilotConversation, env:
       const notes = applied.carried.size ? [m.carried(sourceLabel(m, resolved, language), carriedLabels(m, applied.carried))] : [];
       if (intent.kind === 'REPEAT') return author(intent, applied.base.actions, applied.base.composition, applied.carried, state, env, notes, sentence => m.interpreted(sentence), label);
       const revising = resolved.source === 'PENDING' && (resolved.command.type.startsWith('ADD_') || resolved.command.type === 'AUTHOR_LENDING');
-      return author(intent, applied.base.actions, applied.base.composition, applied.carried, state, env, notes,
+      const edited = author(intent, applied.base.actions, applied.base.composition, applied.carried, state, env, notes,
         sentence => revising ? m.interpretedRevision(sentence) : m.interpretedEdit(label, sentence), label, revising ? null : resolved.step.nodeId, null, extras);
+      // BUILD-CHAT-LEARNING-001: the user revised the proposal FloFi had just shown — a correction signal (observed, never ground truth).
+      return revising ? withLearning(edited, env, ['CORRECTION']) : edited;
     }
     case 'REMOVE': {
       const resolution = target(intent.target, 'REMOVE');
@@ -713,8 +862,10 @@ function author(intent: CopilotIntentV2, actions: readonly CopilotAction[], comp
   swap: SwapSource | null = null, extras: Extras = {}): Result {
   const language = intent.language, m = copilotCopy(language);
   // BUILD-BASE-001: the conversation (CopilotIntentV2) authors on the catalog networks too. PR B: with the verified Orca price and the funding swap.
+  // BUILD-CHAT-LEARNING-001: learned vocabulary may only widen which networks/tokens the user named (see `Grounding.lexicon`).
+  const lexicon = lexiconOf(state, env);
   const grounding: Grounding = { text: segmentText(state), carried, policy: { language, networkDefaults: false, catalog: true }, latest: state.segment.at(-1) ?? '',
-    solana: { price: env.verified?.orcaPrice?.price ?? null, swap } };
+    solana: { price: env.verified?.orcaPrice?.price ?? null, swap }, ...lexicon.length ? { lexicon } : {} };
   const planned = planCopilotActions(actions, composition, grounding, env.wallet);
   if (planned.kind !== 'PLAN') return stopped(planned, intent, state, env, m, { ...extras, carried: [...carried], ...swap ? { swap } : {} });
   const outcome = proposalFromPlan(planned.plan, env, language);
@@ -726,7 +877,10 @@ function author(intent: CopilotIntentV2, actions: readonly CopilotAction[], comp
       return refused(state, m, m.refusal[edit.code as keyof typeof m.refusal]?.(label ? stepLabel(m, label, language) : editNodeId) ?? m.rejectedCode(edit.code)); }
     command = edit.command;
   }
-  return propose(state, env, command, outcome.sentence, describe(outcome.sentence), [...notes, ...outcome.notes], label);
+  // Every learned entry that made the difference is named in the proposal, so the user reviews how their words were read.
+  const used = usedEntries(segmentText(state), lexicon, outcome.sentence);
+  const proposed = propose(state, env, command, outcome.sentence, describe(outcome.sentence), [...notes, ...outcome.notes, ...used.map(entry => usedNote(entry, language))], label);
+  return proposed.reply.kind === 'PROPOSAL' ? withLearning(proposed, env, [], used) : proposed;
 }
 function stopped(outcome: Exclude<CopilotOutcome, { kind: 'PROPOSAL' }>, intent: CopilotIntentV2, state: CopilotConversation, env: CopilotEnvironment, m: CopilotCopy,
   extras: Extras = {}): Result {
@@ -734,10 +888,12 @@ function stopped(outcome: Exclude<CopilotOutcome, { kind: 'PROPOSAL' }>, intent:
   if (outcome.kind === 'REJECTED') return failed(state, m, outcome.message);
   // Flofi's question for the other pool token's maximum (a position funded by a swap's output) is answered by a bare amount.
   const otherToken = outcome.deposit;
-  const draft: Draft = { intent, options: actionFills(intent, outcome.missing, outcome.options), snapshot: snapshotOf(env), extras,
+  // BUILD-CHAT-LEARNING-001: a glossary suggestion for a mainnet only puts that option first, with a note; the user still picks.
+  const suggested = withSuggestion(state, env, outcome.options, intent.language);
+  const draft: Draft = { intent, options: actionFills(intent, outcome.missing, suggested.options), snapshot: snapshotOf(env), extras,
     amountFill: intent.kind === 'ACTION' && outcome.missing.includes('amount') && intent.action.type !== 'LIQUIDITY',
-    ...otherToken && outcome.missing.includes('amount') ? { depositFill: otherToken } : {} };
-  return question(state, m, outcome.question, outcome.options, draft.options.length || draft.amountFill || draft.depositFill ? draft : null);
+    ...otherToken && outcome.missing.includes('amount') ? { depositFill: otherToken } : {}, ...suggested.suggestion ? { suggestion: suggested.suggestion } : {} };
+  return question(state, m, outcome.question, suggested.options, draft.options.length || draft.amountFill || draft.depositFill ? draft : null, suggested.notes);
 }
 /** Defense in depth, then the editor preview: an unappliable or empty edit is explained instead of shown as a proposal. */
 function propose(state: CopilotConversation, env: CopilotEnvironment, command: Command, sentence: string, text: string, notes: readonly string[], label: string): Result {

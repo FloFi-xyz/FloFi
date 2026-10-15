@@ -298,6 +298,16 @@ flows' worker, which keep `WORKER_SUBMISSION_FORBIDDEN`. Startup logs: `delegati
 Administrators are granted only by the operator CLI (`apps/reference-dapp/backend/admin-cli.ts`, needs `DATABASE_URL` in the operator's
 shell). No Railway variable is needed.
 
+## 5i. Copilot learning (BUILD-CHAT-LEARNING-001, Memory, `/admin/ai-learning`) — guide: [LEARNING.md](LEARNING.md)
+
+| Variable | Purpose | Secret | Preview | Prod | Default |
+| --- | --- | --- | --- | --- | --- |
+| `FLOFI_LEARNING` | `enabled`: private memory (after the user's explicit "Remember"), the reviewed global glossary and content-free feedback, for the web chat and Channel Core; needs `DATABASE_URL` platform state | no | optional | as chosen | off (the Copilot exactly as before) |
+| `FLOFI_LEARNING_SECRET` | dedicated key for the pseudonymous learning identities (≥ 32 characters, `openssl rand -hex 32`); refused when equal to `API_AUTH_TOKEN`, `FLOFI_SESSION_SECRET`, `FLOFI_CHANNEL_SECRET`, `FLOFI_MCP_OAUTH_SECRET` or `FLOFI_ADMIN_SESSION_SECRET`. Rotating it detaches every stored memory | **yes** | with `FLOFI_LEARNING` | with `FLOFI_LEARNING` | — (learning off) |
+| `FLOFI_LEARNING_GLOBAL` | break-glass: `disabled` stops serving the global glossary without a database change (private memory unaffected) | no | optional | optional | `enabled` |
+
+Vercel only (the web chat, Channel Core and the console run there); nothing on Railway. Any misconfiguration turns learning off — never on.
+
 ## 6. Platform-provided (read, never set by hand)
 
 `VERCEL` (`1`: hosted), `VERCEL_ENV` (`production`/`preview`/`development`), `VERCEL_GIT_COMMIT_REF` (Preview tenant derivation),

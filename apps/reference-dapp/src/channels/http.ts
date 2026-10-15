@@ -24,6 +24,7 @@ import { channelSubscriptions } from './subscriptions.ts';
 import { channelProviders, type ProviderSeams } from './providers.ts';
 import { readChannelDeployment, type ChannelRoute } from './registry.ts';
 import { channelHost, channelRuntime, type ChannelHost } from './runtime.ts';
+import { channelLearning } from './learning-runtime.ts';
 import { channelVisualRenderer } from './visuals.ts';
 import { authoringCatalogPreparer } from '../server/authoring-catalogs.ts';
 
@@ -110,7 +111,7 @@ export async function handleChannelWebhook(route: ChannelRoute, request: Request
   const service = createChannelService({ core, store, log, now, platform, previewTimeoutMs: options.previewTimeoutMs ?? 60_000, adapter: provider.adapter,
     interpreter: options.interpreter !== undefined ? options.interpreter
       : channelInterpreter(env, { enabled: core.copilot, live: channelLiveCopilot(env, route === 'whatsapp' ? 'WHATSAPP' : 'TELEGRAM', host) }), subscriptions: channelSubscriptions(env, host),
-    visuals: options.visuals !== undefined ? options.visuals : channelVisualRenderer, catalogs: authoringCatalogPreparer(env),
+    visuals: options.visuals !== undefined ? options.visuals : channelVisualRenderer, catalogs: authoringCatalogPreparer(env), learning: channelLearning(env, host, provider.adapter.channel),
     ...options.sleep ? { sleep: options.sleep } : {}, ...options.random ? { random: options.random } : {} });
   let ingested;
   try { ingested = await service.ingest(parsed.messages, parsed.deliveries); }

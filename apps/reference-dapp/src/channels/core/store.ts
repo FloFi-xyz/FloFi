@@ -15,6 +15,8 @@ import type { ChannelId, ReplyKind } from './types.ts';
 export type ConversationStatus = 'ACTIVE' | 'OPTED_OUT';
 export type ConversationRecord = {
   readonly conversationId: string; readonly channel: ChannelId; readonly businessId: string; readonly status: ConversationStatus;
+  /** The keyed digest of the sender's provider id (never the id): BUILD-CHAT-LEARNING-001 keys the sender's own learning identity on it. */
+  readonly subjectDigest: Buffer;
   readonly addressSealed: Buffer | null; readonly stateSealed: Buffer | null; readonly lastInboundAt: Date | null; readonly lastActivityAt: Date;
   readonly createdAt: Date;
 };

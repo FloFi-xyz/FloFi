@@ -19,6 +19,7 @@ import { resolveAssetReference } from './asset-catalogs';
 import { COPILOT_NETWORK_IDS, copilotNetworksMentioned, catalogNetworkOfChatName, networkIdentity, networkOfCopilot, type CopilotNetworkId } from './network-registry';
 import { routerNetworksOf } from './router-authoring';
 import { checkRecipient } from './recipient-address';
+import { lexiconAssets, lexiconNamedNetworkIds, lexiconNetworks, targetEnvironment, type LexiconEntry } from './copilot-lexicon';
 
 /**
  * BUILD-COPILOT-001: the deterministic boundary between an untrusted AI intent and the existing authoring path.
@@ -69,7 +70,13 @@ export type Grounding = { readonly text: string; readonly carried: ReadonlySet<C
   /** V2: the latest user message alone, so an explicit answer to Flofi's own question can settle a choice the request left open. */
   readonly latest?: string;
   /** V2: verified Solana Devnet context FloFi read itself — the Orca pool price for percentage ranges, and the swap a position may be funded by. */
-  readonly solana?: { readonly price: string | null; readonly swap: SwapSource | null } };
+  readonly solana?: { readonly price: string | null; readonly swap: SwapSource | null };
+  /**
+   * BUILD-CHAT-LEARNING-001: learned vocabulary (`copilot-lexicon.ts`). It only widens which networks and tokens the user *named*: the user's
+   * own meanings (this conversation's, or saved for their verified identity) name networks and tokens; FloFi's reviewed glossary names test
+   * networks only. It never grounds an amount, a slippage, a range, a fee or an address.
+   */
+  readonly lexicon?: readonly LexiconEntry[] };
 const NOTHING_CARRIED: ReadonlySet<CarriedField> = new Set();
 
 type Network = Exclude<CopilotNetwork, 'OTHER'>;
@@ -114,6 +121,18 @@ export function mentionedNetworks(text: string): Network[] {
     return explicit.test(text);
   });
 }
+/** BUILD-CHAT-LEARNING-001: networks the user named — by the registry's own names, or through a lexicon term allowed to ground one. */
+function namedNetworks(g: Grounding): Network[] {
+  const named = mentionedNetworks(g.text);
+  if (!g.lexicon?.length) return named;
+  return [...new Set([...named, ...lexiconNamedNetworkIds(g.text, g.lexicon).filter((id): id is Network => Object.hasOwn(FAMILY, id))])];
+}
+/** Test-network wording, including a lexicon term for a test network ("arb sep"): it rules out a real-funds reading just like "Sepolia". */
+const testWording = (g: Grounding): boolean => TESTNET_WORDS.test(g.text) ||
+  (!!g.lexicon?.length && lexiconNetworks(g.text, g.lexicon).some(match => targetEnvironment(match.entry.target) === 'TESTNET'));
+/** A pinned token the user named through their own (session or saved) term, e.g. "dólar digital" for USDC. */
+const lexiconNamesAsset = (g: Grounding, value: string): boolean =>
+  !!g.lexicon?.length && lexiconAssets(g.text, g.lexicon).some(match => match.asset === value.toUpperCase());
 export const canonicalDecimal = (value: string): string => {
   const [whole, fraction = ''] = value.split('.');
   const trimmed = fraction.replace(/0+$/, '');
@@ -193,12 +212,12 @@ const copyOf = (g: Grounding): CopilotCopy => copilotCopy(g.policy.language);
 const stillNeeds = (m: CopilotCopy, missing: readonly CopilotMissingField[], subject: Subject) => m.stillNeeds(m.subject[subject], missing.map(field => m.field[field]));
 
 /** A network can only default when it is the action's single, test-token deployment and the user named no other network of that family. */
-function defaultNetwork(supported: readonly Network[], text: string): Network | null {
+function defaultNetwork(supported: readonly Network[], g: Grounding): Network | null {
   const only = supported.length === 1 ? supported[0]! : null;
-  return only && !MAINNETS.has(only) && !mentionedNetworks(text).some(n => FAMILY[n] === FAMILY[only]) ? only : null;
+  return only && !MAINNETS.has(only) && !namedNetworks(g).some(n => FAMILY[n] === FAMILY[only]) ? only : null;
 }
 function resolveNetwork(value: CopilotNetwork | null, supported: readonly Network[], g: Grounding, subject: NetworkSubject, notes: string[]): Network {
-  const m = copyOf(g), what = m.networkSubject[subject], named = mentionedNetworks(g.text), options = labels(supported);
+  const m = copyOf(g), what = m.networkSubject[subject], named = namedNetworks(g), options = labels(supported);
   const carried = value !== null && value !== 'OTHER' && g.carried.has('network');
   if (value === 'OTHER') return ask(['network'], m.networkOnlyOn(what, options), options);
   // "Ethereum" without Sepolia never means Ethereum Mainnet (not executable in Flofi) nor silently Ethereum Sepolia: Flofi asks.
@@ -208,7 +227,7 @@ function resolveNetwork(value: CopilotNetwork | null, supported: readonly Networ
   let network: Network | null = value;
   if (network === null) { const candidates = supported.filter(n => named.includes(n)); network = candidates.length === 1 ? candidates[0]! : null; }
   if (network === null) {
-    const fallback = g.policy.networkDefaults ? defaultNetwork(supported, g.text) : null;
+    const fallback = g.policy.networkDefaults ? defaultNetwork(supported, g) : null;
     if (!fallback) return ask(['network'], m.whichNetwork(what), options);
     notes.push(m.defaultNetworkNote(what, COPILOT_NETWORK_LABEL[fallback]));
     return fallback;
@@ -216,11 +235,11 @@ function resolveNetwork(value: CopilotNetwork | null, supported: readonly Networ
   if (!supported.includes(network)) return ask(['network'], m.networkOnlyOn(what, options), options);
   if (MAINNETS.has(network)) {
     // Real funds are never inferred: the user must name the mainnet (or it is carried from a step they authored) and use no test-network wording.
-    if ((!named.includes(network) && !carried) || TESTNET_WORDS.test(g.text)) return ask(['network'], m.realFundsWhichNetwork(COPILOT_NETWORK_LABEL[network]), options);
+    if ((!named.includes(network) && !carried) || testWording(g)) return ask(['network'], m.realFundsWhichNetwork(COPILOT_NETWORK_LABEL[network]), options);
     return network;
   }
   if (named.includes(network) || carried) return network;
-  if (!g.policy.networkDefaults || defaultNetwork(supported, g.text) !== network) return ask(['network'], m.whichNetwork(what), options);
+  if (!g.policy.networkDefaults || defaultNetwork(supported, g) !== network) return ask(['network'], m.whichNetwork(what), options);
   notes.push(m.defaultNetworkNote(what, COPILOT_NETWORK_LABEL[network]));
   return network;
 }
@@ -245,7 +264,7 @@ function needAsset(value: CopilotAsset | null, g: Grounding, subject: Subject, f
   const m = copyOf(g);
   if (value === null) return ask(['asset'], stillNeeds(m, ['asset'], subject));
   if (value === 'OTHER') return refuse(m.tokenUnsupported(m.tokenSubject[subject]));
-  if (!g.carried.has(field) && !assetNamed(g.text, value)) return ask(['asset'], m.tokenNotFound(value));
+  if (!g.carried.has(field) && !assetNamed(g.text, value) && !lexiconNamesAsset(g, value)) return ask(['asset'], m.tokenNotFound(value));
   return value;
 }
 /**
@@ -270,7 +289,7 @@ function catalogToken(value: CopilotAsset | null, network: Network, g: Grounding
   }
   const asset = found.asset;
   if (kinds === 'ERC20' && asset.kind !== 'ERC20') return refuse(m.catalogTokenUnknown(value, label));
-  const grounded = g.carried.has(field) || (found.by === 'SYMBOL' && symbolNamed(g.text, value)) || (/^eth$/i.test(value) && ASSET_MENTIONS.ETH.test(g.text)) ||
+  const grounded = g.carried.has(field) || lexiconNamesAsset(g, value) || (found.by === 'SYMBOL' && symbolNamed(g.text, value)) || (/^eth$/i.test(value) && ASSET_MENTIONS.ETH.test(g.text)) ||
     nameNamed(g.text, asset);
   if (!grounded) return ask(['asset'], m.tokenNotFound(value));
   if (found.by === 'NAME' && notes) notes.push(m.catalogNameNote(value, asset.symbol, assetDisplayName(asset), label));
@@ -291,7 +310,7 @@ function planSwap(a: CopilotSwapAction, g: Grounding): Plan {
   const m = copyOf(g), notes: string[] = [];
   const supported = actionNetworks('swap', g);
   // A generic "Ethereum" is left to resolveNetwork, which explains that Ethereum Mainnet is never used.
-  const named = mentionedNetworks(g.text);
+  const named = namedNetworks(g);
   const devnetImplied = a.network === null && !named.length && impliesDevnet(g, [a.inputAsset, a.outputAsset]);
   const missing: CopilotMissingField[] = [...(a.amount === null ? ['amount' as const] : []), ...(a.inputAsset === null || a.outputAsset === null ? ['asset' as const] : []),
     ...(a.network === null && !devnetImplied && !supported.some(n => named.includes(n)) && !named.includes('ETHEREUM') ? ['network' as const] : [])];
@@ -341,10 +360,10 @@ const EXTENDED_ROUTES = routerNetworksOf('mainnet').filter(key => key !== 'mainn
   return { key, option, src: routeCopilot(option.sourceLabel)!, dst: routeCopilot(option.destinationLabel)!, token: option.pair.source.symbol };
 });
 const extendedRoute = (a: CopilotBridgeAction, g: Grounding) => g.policy.catalog === true && (a.sourceNetwork === 'ROBINHOOD' || a.destinationNetwork === 'ROBINHOOD' ||
-  a.sourceNetwork === 'ARBITRUM' || a.destinationNetwork === 'BASE' || /^usdg$/i.test(a.asset ?? '') || mentionedNetworks(g.text).includes('ROBINHOOD'));
+  a.sourceNetwork === 'ARBITRUM' || a.destinationNetwork === 'BASE' || /^usdg$/i.test(a.asset ?? '') || namedNetworks(g).includes('ROBINHOOD'));
 function planRoute(a: CopilotBridgeAction, g: Grounding): Plan {
   const m = copyOf(g), notes: string[] = [], text = g.text;
-  const named = [...mentionedNetworks(text), ...(['sourceNetwork', 'destinationNetwork'] as const).flatMap(field => {
+  const named = [...namedNetworks(g), ...(['sourceNetwork', 'destinationNetwork'] as const).flatMap(field => {
     const value = a[field]; return value !== null && value !== 'OTHER' && g.carried.has(field) ? [value] : []; })];
   // A side counts only when the user named that network (or it was carried): a mainnet is never inferred.
   const side = (value: CopilotNetwork | null): Network | null | 'OTHER' => value === null ? null : value === 'OTHER' ? 'OTHER' : named.includes(value) ? value : null;
@@ -359,7 +378,7 @@ function planRoute(a: CopilotBridgeAction, g: Grounding): Plan {
   const route = EXTENDED_ROUTES.find(r => r.src === source && r.dst === destination);
   if (!route) return ask(['sourceNetwork', 'destinationNetwork'], m.whichRoute, EXTENDED_ROUTES.filter(r => r.src === source || r.dst === destination)
     .map(r => `${r.option.sourceLabel} → ${r.option.destinationLabel}`));
-  if (TESTNET_WORDS.test(text)) ask(['sourceNetwork', 'destinationNetwork'], m.routeRealFunds(`${route.option.sourceLabel} → ${route.option.destinationLabel}`), options);
+  if (testWording(g)) ask(['sourceNetwork', 'destinationNetwork'], m.routeRealFunds(`${route.option.sourceLabel} → ${route.option.destinationLabel}`), options);
   const reference = needAsset(a.asset, g, 'bridge', 'asset');
   // Known symbols retain the route-specific refusal; whole names resolve within the route's source catalog.
   const asset = g.policy.catalog && !/^[A-Za-z][A-Za-z0-9.]{0,15}$/.test(reference)
@@ -383,7 +402,7 @@ function planBridge(a: CopilotBridgeAction, g: Grounding): Plan {
   if (extendedRoute(a, g)) return planRoute(a, g);
   const m = copyOf(g), notes: string[] = [], text = g.text;
   const carriedSide = (value: CopilotNetwork | null, field: CarriedField): Network[] => value !== null && value !== 'OTHER' && g.carried.has(field) ? [value] : [];
-  const named = [...mentionedNetworks(text), ...carriedSide(a.sourceNetwork, 'sourceNetwork'), ...carriedSide(a.destinationNetwork, 'destinationNetwork')];
+  const named = [...namedNetworks(g), ...carriedSide(a.sourceNetwork, 'sourceNetwork'), ...carriedSide(a.destinationNetwork, 'destinationNetwork')];
   // A side is the network the user named in that family; an unnamed test network is only a candidate, an unnamed mainnet is dropped.
   const side = (value: CopilotNetwork | null, family: Family): Network | null | 'OTHER' | 'CONFLICT' => {
     const inFamily = [...new Set(named.filter(n => FAMILY[n] === family))];
@@ -408,7 +427,7 @@ function planBridge(a: CopilotBridgeAction, g: Grounding): Plan {
   const src = source as Network, dst = destination as Network;
   const network = src === 'BASE' && dst === 'ARBITRUM' ? 'mainnet' : src === 'BASE_SEPOLIA' && dst === 'ARBITRUM_SEPOLIA' ? 'testnet' : null;
   if (!network) return ask(['sourceNetwork', 'destinationNetwork'], m.routerMixed, pairs);
-  if (network === 'mainnet' && (!named.includes('BASE') || !named.includes('ARBITRUM') || TESTNET_WORDS.test(text))) ask(['sourceNetwork', 'destinationNetwork'], m.routerRealFunds, pairs);
+  if (network === 'mainnet' && (!named.includes('BASE') || !named.includes('ARBITRUM') || testWording(g))) ask(['sourceNetwork', 'destinationNetwork'], m.routerRealFunds, pairs);
   if (network === 'testnet' && !named.includes(src) && !named.includes(dst)) ask(['sourceNetwork', 'destinationNetwork'], m.whichRoute, pairs);
   const asset = g.policy.catalog && network === 'mainnet' ? catalogToken(a.asset, src, g, 'bridge', 'asset', 'ANY', notes).asset.symbol : needAsset(a.asset, g, 'bridge', 'asset');
   if (asset !== ROUTER_NETWORK_OPTIONS[network].pair.source.symbol) refuse(m.routerUsdcOnly);
@@ -438,7 +457,7 @@ function planTransfer(a: CopilotTransferAction, g: Grounding): Plan {
   const m = copyOf(g), notes: string[] = [];
   if (!g.policy.catalog) return refuse(m.cannotAuthor);
   const TRANSFER_COPILOT_NETWORKS = actionNetworks('transfer', g);
-  const named = mentionedNetworks(g.text);
+  const named = namedNetworks(g);
   // UX-001: the destination is a required slot. It is a typed address, or the connected owner only when the user says so ("to me",
   // "to my own wallet", "para mim"); otherwise Flofi asks — it never defaults a Send to the connected wallet.
   const self = a.recipient === null && (SELF_RECIPIENT.test(g.text) || SELF_ANSWER.test((g.latest ?? '').trim()));
@@ -476,7 +495,7 @@ function planLending(a: CopilotLendingAction, g: Grounding, wallet: string | nul
   // Sepolia), so the asset bounds the network.
   if (missing.length) ask(missing, stillNeeds(m, missing, subject), !missing.includes('asset') ? [] : a.network === 'ETHEREUM_SEPOLIA' ? ['WBTC']
     : a.network === 'BASE_SEPOLIA' || a.network === 'BASE' ? ['USDC'] : ['USDC', 'WBTC']);
-  const namedCatalog = g.policy.catalog && mentionedNetworks(g.text).some(isCatalogNetwork);
+  const namedCatalog = g.policy.catalog && namedNetworks(g).some(isCatalogNetwork);
   const supported = lendingNetworks(namedCatalog ? null : a.asset === 'WBTC' ? 'WBTC' : 'USDC', g);
   const network = resolveNetwork(a.network, supported, g, 'aave', notes);
   const catalog = g.policy.catalog && isCatalogNetwork(network);
@@ -518,7 +537,7 @@ function planLiquidity(a: CopilotLiquidityAction, g: Grounding): Plan {
   // The pool networks come from the capability truth; Orca serves its own network and Uniswap v3 every other one.
   const pools = actionNetworks('add_liquidity', g), orca = pools.filter(n => n === COPILOT_POOLS.ORCA.network), uniswap = pools.filter(n => n !== COPILOT_POOLS.ORCA.network);
   const supported: Network[] = namedProtocols.length ? namedProtocols[0] === 'UNISWAP_V3' ? uniswap : orca : pools;
-  const devnetImplied = a.network === null && namedProtocols[0] !== 'UNISWAP_V3' && !mentionedNetworks(text).length && impliesDevnet(g, a.deposits.map(d => d.asset));
+  const devnetImplied = a.network === null && namedProtocols[0] !== 'UNISWAP_V3' && !namedNetworks(g).length && impliesDevnet(g, a.deposits.map(d => d.asset));
   const network = devnetImplied ? devnetByAsset(g, notes) : resolveNetwork(a.network, supported, g, 'liquidity', notes);
   if (g.policy.catalog && isCatalogNetwork(network)) {
     if (a.protocol === 'ORCA' || namedProtocols[0] === 'ORCA') ask(['protocol'], m.whichPool, m.poolOptions);

@@ -105,7 +105,10 @@ describe('BUILD-DB-COMPAT-001 schema checks and runners on real ledgers (Postgre
     expect(await unpatched.assertSchemaCurrent(at11.db, PREVIOUS)).toBe(11);
     // 2. The real 0012, applied by the real runner: the v11 build serves on it, and says so.
     expect(await assertSchemaCompatible(at12.db, PREVIOUS)).toEqual({ version: 12, application: 11, forward: [identity(M12)] });
-    expect((await assertSchemaCompatible(at12.db)).version).toBe(12); // the backend's default: this build's migration files
+    // The backend's default (this build's migration files): on a build that ships at most 0012 the v12 database is served; a build that
+    // ships later migrations (BUILD-CHAT-LEARNING-001: 0013) sees it as simply behind.
+    if (SHIPPED_MIGRATIONS.length <= 12) expect((await assertSchemaCompatible(at12.db)).version).toBe(12);
+    else expect(await outcome(assertSchemaCompatible(at12.db))).toEqual(BEHIND);
     // 3. The released (unpatched) build refuses it on every cold start, as before; so does the strict check, which is unchanged.
     expect(await outcome(unpatched.assertSchemaCurrent(at12.db, PREVIOUS))).toEqual(MISMATCH);
     expect(await outcome(assertSchemaCurrent(at12.db, PREVIOUS))).toEqual(MISMATCH);
@@ -171,7 +174,9 @@ describe('BUILD-DB-COMPAT-001 schema checks and runners on real ledgers (Postgre
     const t = await database(V12), shape = await catalog(t.db), original = await ledger(t.db);
     const unchanged = async () => { expect(await catalog(t.db)).toEqual(shape); expect(await ledger(t.db)).toEqual(original); };
     expect(await migrate(t.db, V11)).toEqual([]);            // the v11 build's deploy step (Railway pre-deploy) on a v12 database
-    expect(await migrate(t.db)).toEqual([]);                 // the same with this build's migration files, as `main.ts migrate` runs it
+    // The same with this build's migration files, as `main.ts migrate` runs it — when they are not newer than the database (a build that
+    // ships later migrations applies them: that is not a runner facing a database ahead of it).
+    if (SHIPPED_MIGRATIONS.length <= 12) expect(await migrate(t.db)).toEqual([]);
     expect(await migrate(t.db, V12)).toEqual([]);            // the v12 runner: exact
     await unchanged();
     expect(await outcome(unpatched.migrate(t.db, V11))).toEqual(MISMATCH); // the released runner refuses it (a rollback below 0012 cannot deploy)

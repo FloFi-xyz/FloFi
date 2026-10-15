@@ -92,6 +92,15 @@ Recovery: set `FLOFI_COPILOT_RUNTIME_CONFIG=disabled` and redeploy, or use *Retu
 changes `admin_settings_versions` must keep the previous build's read meaningful (append-only, latest version active, a document the
 previous build either validates or refuses).
 
+## 5b. AI Learning (BUILD-CHAT-LEARNING-001)
+
+`/admin/ai-learning`: what the Copilot learns — counts of private memories (never a term, a message or an identity), content-free turn, correction
+and clarification rates, glossary candidates with pseudonymous support, every evaluation and the published glossary versions. OPERATOR actions
+(each CSRF-checked and audited as `ADMIN_LEARNING_*`): approve / reject / retract / reopen a candidate, add an operator candidate, load the reviewed
+PT-BR/EN starter set (as PENDING candidates), evaluate (dry run), **evaluate and publish** (only a passing evaluation appends a version; the
+database re-checks it), re-evaluate and roll back, disable, run retention. Operations guide: [LEARNING.md](LEARNING.md); privacy:
+[LEARNING-PRIVACY.md](../security/LEARNING-PRIVACY.md).
+
 ## 6. Analytics semantics
 
 * **Workflow / execution / action.** A workflow is a `workflow_id`. An execution is a root run: recovery runs fold into the run they

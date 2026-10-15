@@ -17,7 +17,7 @@ import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createFilesystemEvidenceStore, createLogger, createPostgresWorkQueue, createWorker, HttpError, type Database } from '@defi-workflow-engine/cloud-runtime';
+import { createFilesystemEvidenceStore, createLogger, createPostgresWorkQueue, createWorker, HttpError, SHIPPED_MIGRATIONS, type Database } from '@defi-workflow-engine/cloud-runtime';
 import { CROSSCHAIN_ROUTER_BASE_SEPOLIA_ARBITRUM_SEPOLIA as TESTNET } from '@defi-workflow-engine/action-registry';
 import { createBaseSepoliaReviewContext } from '@defi-workflow-engine/reference-linter';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
@@ -194,7 +194,8 @@ describe('BUILD-ADMIN-001 admin analytics (PostgreSQL, genuine records)', () => 
     expect(data.delegated).toMatchObject({ installed: true, created: 0, openNow: 0, attentionNow: 0 });
     expect(JSON.stringify(data)).not.toContain(owner.slice(2));
     const health = await healthReport({}, { db: t.db, tenantId: 'default' }, now);
-    expect(health.database).toMatchObject({ ok: true, value: { appliedMigrations: 12, shippedMigrations: 12, tenantId: 'default' } });
+    // Every shipped migration is applied (BUILD-CHAT-LEARNING-001: the count follows the shipped manifest, 13 with 0013_copilot_learning).
+    expect(health.database).toMatchObject({ ok: true, value: { appliedMigrations: SHIPPED_MIGRATIONS.length, shippedMigrations: SHIPPED_MIGRATIONS.length, tenantId: 'default' } });
     expect(health.scheduler).toMatchObject({ ok: true, value: { installed: true, overdueRules: 1 } });
     expect(health.api).toEqual({ topology: 'embedded-or-local', readiness: null });
     expect(health.queue.ok).toBe(true);

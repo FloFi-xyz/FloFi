@@ -1631,6 +1631,54 @@
      }
     }
    }
+  },
+  {
+   "user": [
+    "Bridge 10 USDC from Base to Arb"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "EN",
+      "kind": "ACTION",
+      "action": {
+       "type": "BRIDGE",
+       "sourceNetwork": "BASE",
+       "destinationNetwork": "ARBITRUM",
+       "asset": "USDC",
+       "amount": "10",
+       "slippageBps": null,
+       "routing": null,
+       "recipient": null
+      },
+      "reuse": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "Swap 0.001 WETH to USDC on eth sepolia"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "EN",
+      "kind": "ACTION",
+      "action": {
+       "type": "SWAP",
+       "network": "ETHEREUM_SEPOLIA",
+       "inputAsset": "WETH",
+       "outputAsset": "USDC",
+       "amount": "0.001",
+       "slippageBps": null
+      },
+      "reuse": null
+     }
+    }
+   }
   }
  ]
 }

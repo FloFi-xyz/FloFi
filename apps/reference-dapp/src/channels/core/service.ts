@@ -11,6 +11,11 @@
  *
  * The approval link is created by the platform, attached to the outgoing message in memory and never stored or logged. Nothing here
  * signs, submits, claims or authorizes; no message is ever authorization.
+ *
+ * BUILD-CHAT-LEARNING-001: with a learning service, each turn of an ACTIVE conversation loads the sender's learning context — the sender is a
+ * learning identity of its own (channel, business, keyed sender digest), never a wallet and never another channel — adds the bounded glossary to
+ * the interpreter request, performs a memory action only after the sender's own statement or click, answers MEMORY commands, records
+ * content-free feedback, and erases the sender's learning data on STOP. Learning problems never fail a turn.
  */
 import { looksSecret } from '../../domain/copilot-conversation';
 import { stepSummary } from '../../domain/copilot-answers';
@@ -18,7 +23,10 @@ import type { Command } from '../../domain/commands';
 import { PlatformRefusal, previewPlan, simulatePreview } from '../../platform/index.ts';
 import { channelRequester, createChannelApproval, revokeChannelApproval, channelApprovalProgress, type ChannelPlatform } from './approval.ts';
 import type { ChannelCoreConfig, ChannelLanguage } from './config.ts';
-import { decideTurn, parseState, type ChannelInterpreter, type ChannelState, type TurnContent } from './conversation.ts';
+import { decideTurn, parseState, type ChannelInterpreter, type ChannelState, type TurnContent, type TurnDecision, type TurnInterpreter } from './conversation.ts';
+import { learningCopy } from '../../domain/copilot-learning-copy.ts';
+import type { ChannelLearning, ChannelLearningPrincipal, ChannelLearningSession } from './learning.ts';
+import { channelLearningCopy } from './learning-copy.ts';
 import { channelCopy, readyText, shorten, type PreviewNote } from './copy.ts';
 import { channelRowId, keyedDigest, leaseToken, open, seal, sealContext } from './crypto.ts';
 import { addressContext, deliverConversation, newOutboxId, sealReply, type DeliveryContext } from './delivery.ts';
@@ -39,7 +47,9 @@ export type ChannelContext = { readonly core: ChannelCoreConfig; readonly store:
   /** BUILD-WORKFLOW-VISUAL-PRESENTATION-001: the shared workflow renderer; none = proposals are sent as text only. */
   readonly visuals?: ChannelVisualRenderer | null;
   /** BUILD-BASE-001: registers the validated catalogs of the catalog networks a message names (the deployment's own gates); none = pinned assets only. */
-  readonly catalogs?: ((text: string, intent?: unknown) => Promise<void>) | null };
+  readonly catalogs?: ((text: string, intent?: unknown) => Promise<void>) | null;
+  /** BUILD-CHAT-LEARNING-001: learning for this provider's senders (`learning.ts`, implemented by the wiring); none = learning off (turns as before). */
+  readonly learning?: ChannelLearning | null };
 export const LEASE_SECONDS = 300;
 export const LIMITS = Object.freeze({ inbound: [20, 600] as const, model: [30, 3_600] as const, modelDaily: [100, 86_400] as const, preview: [10, 3_600] as const });
 const MAX_EVENT_ATTEMPTS = 3;
@@ -49,6 +59,7 @@ const PORTUGUESE_SECRET = /chaves?\s+privad|frases?\s+(?:semente|secreta|de\s+re
 
 export function createChannelService(ctx: ChannelContext) {
   const { core, store, adapter, log } = ctx, keys = core.keys, tenant = core.tenantId;
+  const languageOf = (intent: unknown): 'EN' | 'PT' | null => { const value = (intent as { language?: unknown } | null)?.language; return value === 'EN' || value === 'PT' ? value : null; };
   const stateContext = (conversationId: string) => sealContext(tenant, 'channel_conversations', conversationId, 'state');
   const payloadContext = (digest: Buffer) => sealContext(tenant, 'channel_events', digest.toString('hex'), 'payload');
   const delivery: DeliveryContext = { tenantId: tenant, origin: core.origin, keys, store, adapter, handoffs: ctx.platform.handoffs, log, now: ctx.now,
@@ -154,10 +165,22 @@ export function createChannelService(ctx: ChannelContext) {
       const notice = await store.allow(`channel:busy:${conversationId}`, 1, LIMITS.inbound[1], now);
       await commit('RATE_LIMITED', notice ? [text(m.busy)] : [], undefined); return { address: null, language: state.language };
     }
-    const interpret: ChannelInterpreter | null = ctx.interpreter && core.copilot ? async request =>
-      await modelAllowed(conversationId, now) ? ctx.interpreter!(request) : { ok: false, code: 'COPILOT_BUSY' } : null;
-    const prior = state, decision = await decideTurn({ content: payload.content, state, optedOut: !active, interpret, support: core.supportContact, privacy: core.privacyUrl,
-      catalogs: ctx.catalogs ?? null });
+    // BUILD-CHAT-LEARNING-001: the sender's own learning identity and context (only for an ACTIVE conversation; never fails the turn).
+    const principal: ChannelLearningPrincipal | null = ctx.learning && conversation.subjectDigest.length === 32
+      ? { kind: 'CHANNEL', channel: conversation.channel, business: conversation.businessId, sender: conversation.subjectDigest } : null;
+    const session: ChannelLearningSession | null = principal && active ? await ctx.learning!.session(principal) : null;
+    const interpret: TurnInterpreter | null = ctx.interpreter && core.copilot ? async (request, hints) => {
+      if (!await modelAllowed(conversationId, now)) return { ok: false, code: 'COPILOT_BUSY' };
+      const glossary = session ? ctx.learning!.glossary(session, request.messages, hints?.aliases ?? []) : null;
+      const result = await ctx.interpreter!(request, glossary?.glossary ? { glossary: glossary.glossary } : undefined);
+      if (session && glossary) await ctx.learning!.record([{ kind: 'INTERPRETED', outcome: result.ok ? 'OK' : result.code, language: result.ok ? languageOf(result.intent) : null,
+        privateEntries: glossary.privateEntries, globalEntries: glossary.globalEntries, knowledgeVersion: session.learning.globalVersion }], session.subjectId);
+      return result;
+    } : null;
+    const prior = state;
+    let decision = await decideTurn({ content: payload.content, state, optedOut: !active, interpret, support: core.supportContact, privacy: core.privacyUrl,
+      catalogs: ctx.catalogs ?? null, ...session && session.learning.memory !== 'UNAVAILABLE' ? { learning: session.learning } : {} });
+    if (session) decision = await learn(decision, principal!, session);
     state = decision.state;
     const lm = channelCopy(state.language);
     switch (decision.action) {
@@ -165,6 +188,8 @@ export function createChannelService(ctx: ChannelContext) {
       case 'OPT_OUT': {
         // Opting out withdraws the live approval link too: nothing from this conversation stays claimable.
         await revokeChannelApproval(ctx.platform, conversationId, prior.approvalId, now).catch(() => false);
+        // BUILD-CHAT-LEARNING-001: ...and erases what FloFi remembers for this sender (memory, settings, contributions).
+        if (principal) await ctx.learning!.erase(principal).catch(() => undefined);
         // ...and ends a link to automation notifications (BUILD-AUTOMATION-001).
         await ctx.subscriptions?.unlink(conversationId).catch(() => false);
         await commit(decision.outcome, decision.replies, null, { conversationStatus: 'OPTED_OUT' });
@@ -213,6 +238,43 @@ export function createChannelService(ctx: ChannelContext) {
       default: await commit(decision.outcome, decision.replies, state); return { address: null, language: state.language };
     }
   }
+  /**
+   * BUILD-CHAT-LEARNING-001: the learning part of a decided turn — the memory action the sender confirmed (its failure replaces the reply), a
+   * MEMORY command's answer, the used saved meanings (retention restarts) and the content-free feedback. Never throws.
+   */
+  async function learn(decision: TurnDecision, principal: ChannelLearningPrincipal, session: ChannelLearningSession): Promise<TurnDecision> {
+    const learning = ctx.learning!, language = decision.state.language;
+    let out = decision;
+    if (decision.memory) {
+      const result = await learning.apply(principal, decision.memory);
+      if (!result.ok) {
+        const l = learningCopy(language);
+        out = { ...out, replies: [text(result.code === 'LEARNING_RATE_LIMITED' ? l.limited : result.code === 'LEARNING_MEMORY_FULL' ? l.full : l.failed)] };
+      }
+    }
+    if (decision.memoryCommand) {
+      const m = channelLearningCopy(language);
+      let reply = m.unavailable;
+      if (session.learning.memory !== 'UNAVAILABLE') {
+        try {
+          if (decision.memoryCommand === 'SHOW') {
+            const status = await learning.status(principal);
+            reply = status.entries.length ? m.list(status.entries, status.paused, language) : m.empty;
+          } else reply = (await learning.settings(principal, { memory: decision.memoryCommand === 'ON' })).ok ? decision.memoryCommand === 'ON' ? m.resumed : m.paused : m.unavailable;
+        } catch { reply = m.unavailable; }
+      }
+      out = { ...out, replies: [...decision.replies, text(reply)] };
+    }
+    const used = decision.learning?.used ?? [], own = used.filter(entry => entry.source !== 'GLOBAL'), shared = used.length - own.length;
+    await session.used(own).catch(() => undefined);
+    // A Copilot turn's outcome, as the web chat reports it (the reply kind); local commands and exact-grammar proposals are not interpretation.
+    const copilotOutcome = decision.outcome === 'PROPOSED_INTERPRETED' ? 'PROPOSAL' : /^COPILOT_[A-Z_]+$/.test(decision.outcome) ? decision.outcome.slice('COPILOT_'.length) : null;
+    await learning.record([...copilotOutcome ? [{ kind: 'TURN', outcome: copilotOutcome, language, privateEntries: own.length, globalEntries: shared,
+      knowledgeVersion: session.learning.globalVersion }] : [], ...(decision.learning?.signals ?? []).map(kind => ({ kind })), ...own.length ? [{ kind: 'MEMORY_USED' as const }] : [],
+    ...shared ? [{ kind: 'KNOWLEDGE_USED' as const, knowledgeVersion: session.learning.globalVersion }] : []], session.subjectId).catch(() => undefined);
+    return out;
+  }
+
   /**
    * The pending proposal → canonical strategy → (previous link revoked) → a new approval handoff on the shared platform → optional
    * read-only preview → the "strategy ready" reply carrying the link in memory and the canonical workflow's visual (presentation only:

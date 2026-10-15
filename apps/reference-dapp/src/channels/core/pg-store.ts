@@ -14,7 +14,7 @@ const maybeDate = (value: unknown) => value === null || value === undefined ? nu
 const buffer = (value: unknown) => value === null || value === undefined ? null : Buffer.from(value as Uint8Array);
 function conversationOf(row: Row): ConversationRecord {
   return { conversationId: String(row.conversation_id), channel: String(row.channel), businessId: String(row.business_id),
-    status: row.status as ConversationRecord['status'], addressSealed: buffer(row.address_ciphertext), stateSealed: buffer(row.state_ciphertext),
+    status: row.status as ConversationRecord['status'], subjectDigest: buffer(row.subject_digest) ?? Buffer.alloc(0), addressSealed: buffer(row.address_ciphertext), stateSealed: buffer(row.state_ciphertext),
     lastInboundAt: maybeDate(row.last_inbound_at), lastActivityAt: date(row.last_activity_at), createdAt: date(row.created_at) };
 }
 function outboxOf(row: Row): OutboxRecord {

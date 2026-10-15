@@ -304,8 +304,13 @@ export function validateCopilotRequestV2(input: unknown): CopilotThreadMessage[]
   return out;
 }
 export type CopilotModelSettings = { readonly model: string; readonly temperature: number | null; readonly maxOutputTokens: number; readonly reasoningEffort: CopilotReasoningEffort | null };
-export function buildCopilotRequestV2(settings: CopilotModelSettings, messages: readonly CopilotThreadMessage[]): Record<string, unknown> {
-  return { model: settings.model, instructions: COPILOT_INSTRUCTIONS_V2, input: messages.map(message => ({ role: message.role, content: message.text })),
+/**
+ * BUILD-CHAT-LEARNING-001: `glossary` (`copilot-glossary.ts`) is one optional `developer` input item of code-rendered reference data placed before
+ * the transcript; everything else — instructions, schema, `store: false`, limits — is unchanged, and without it the request is byte-identical.
+ */
+export function buildCopilotRequestV2(settings: CopilotModelSettings, messages: readonly CopilotThreadMessage[], glossary: string | null = null): Record<string, unknown> {
+  return { model: settings.model, instructions: COPILOT_INSTRUCTIONS_V2, input: [...glossary ? [{ role: 'developer', content: glossary }] : [],
+    ...messages.map(message => ({ role: message.role, content: message.text }))],
     text: { format: { type: 'json_schema', name: 'flofi_copilot_intent_v2', strict: true, schema: COPILOT_OUTPUT_SCHEMA_V2 } },
     max_output_tokens: settings.maxOutputTokens, store: false, ...(settings.temperature === null ? {} : { temperature: settings.temperature }),
     ...(settings.reasoningEffort === null ? {} : { reasoning: { effort: settings.reasoningEffort } }) };
@@ -341,21 +346,24 @@ export function retryAfterSeconds(value: string | null | undefined, now: number 
 /** Metadata only: never the prompt, the transcript, addresses, cookies or the key. */
 export type CopilotTelemetry = { readonly event: 'flofi.copilot.interpret'; readonly protocol: 'v2'; readonly mode: 'live' | 'replay'; readonly model: string;
   readonly outcome: string; readonly intentKind: string | null; readonly topic: string | null; readonly durationMs: number; readonly messages: number; readonly userTurns: number;
-  readonly inputTokens: number | null; readonly outputTokens: number | null; readonly reasoningTokens: number | null; readonly responseModel: string | null };
+  readonly inputTokens: number | null; readonly outputTokens: number | null; readonly reasoningTokens: number | null; readonly responseModel: string | null;
+  /** BUILD-CHAT-LEARNING-001: how many glossary lines the request carried (present only when it carried some). */ readonly glossaryLines?: number };
 export type CopilotResultV2 = { readonly ok: true; readonly intent: CopilotIntentV2 } | { readonly ok: false; readonly code: string; readonly retryAfterSeconds?: number };
 export async function interpretCopilotV2(input: unknown, deps: { readonly transport: CopilotTransport; readonly settings: CopilotModelSettings; readonly mode: 'live' | 'replay';
-  readonly limiter?: CopilotLimiter; readonly telemetry?: ((record: CopilotTelemetry) => void) | undefined; readonly now?: () => number }): Promise<CopilotResultV2> {
-  const now = deps.now ?? (() => performance.now()), started = now();
+  readonly limiter?: CopilotLimiter; readonly telemetry?: ((record: CopilotTelemetry) => void) | undefined; readonly now?: () => number;
+  /** BUILD-CHAT-LEARNING-001: the rendered glossary for this request (`copilot-glossary.ts`), or none. */ readonly glossary?: string | null }): Promise<CopilotResultV2> {
+  const now = deps.now ?? (() => performance.now()), started = now(), glossary = deps.glossary ?? null;
   let messages: CopilotThreadMessage[] = [];
   const report = (outcome: string, extra: Partial<CopilotTelemetry> = {}) => deps.telemetry?.({ event: 'flofi.copilot.interpret', protocol: 'v2', mode: deps.mode,
     model: deps.settings.model, outcome, intentKind: null, topic: null, durationMs: Math.max(0, Math.round(now() - started)), messages: messages.length,
-    userTurns: messages.filter(message => message.role === 'user').length, inputTokens: null, outputTokens: null, reasoningTokens: null, responseModel: null, ...extra });
+    userTurns: messages.filter(message => message.role === 'user').length, inputTokens: null, outputTokens: null, reasoningTokens: null, responseModel: null,
+    ...glossary ? { glossaryLines: glossary.split('\n').length - 1 } : {}, ...extra });
   try { messages = validateCopilotRequestV2(input); } catch { report('COPILOT_INPUT_INVALID'); return { ok: false, code: 'COPILOT_INPUT_INVALID' }; }
   const release = deps.limiter ? deps.limiter.acquire() : () => undefined;
   if (!release) { report('COPILOT_BUSY'); return { ok: false, code: 'COPILOT_BUSY' }; }
   let response: CopilotHttpResponse | null = null;
   try {
-    response = await deps.transport({ body: JSON.stringify(buildCopilotRequestV2(deps.settings, messages)) });
+    response = await deps.transport({ body: JSON.stringify(buildCopilotRequestV2(deps.settings, messages, glossary)) });
     const { intent, usage, responseModel } = readCopilotResponseV2(response);
     report('OK', { intentKind: intent.kind, topic: intent.kind === 'QUESTION' ? intent.topic : null, ...usage, responseModel });
     return { ok: true, intent };

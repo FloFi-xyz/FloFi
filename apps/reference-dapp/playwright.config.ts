@@ -110,7 +110,12 @@ if (process.env.GRYLOO_CLOUD_RUNTIME_E2E && !cloudRuntime) throw new Error('Clou
 // session key is random per run; the spec grants administrators through the operator CLI's commands, never through the console.
 const adminHarness = process.env.FLOFI_ADMIN_E2E === 'LOOPBACK_ONLY';
 if (process.env.FLOFI_ADMIN_E2E && !adminHarness) throw new Error('Admin E2E permits only the loopback database');
-if ((cloudRuntime || adminHarness) && !process.env.FLOFI_E2E_DATABASE_URL) {
+// BUILD-CHAT-LEARNING-001: the Copilot's learning (private memory, global glossary) on the same kind of disposable LOOPBACK database, with a
+// random per-run learning secret; the Copilot answers only from committed replay recordings.
+const learningHarness = process.env.FLOFI_LEARNING_E2E === 'LOOPBACK_ONLY';
+if (process.env.FLOFI_LEARNING_E2E && !learningHarness) throw new Error('Learning E2E permits only the loopback database');
+if (learningHarness && process.env.FLOFI_COPILOT !== 'replay') throw new Error('Learning E2E needs FLOFI_COPILOT=replay');
+if ((cloudRuntime || adminHarness || learningHarness) && !process.env.FLOFI_E2E_DATABASE_URL) {
   const server = new URL(process.env.TEST_DATABASE_URL ?? 'invalid:');
   if (!['127.0.0.1', 'localhost', '[::1]'].includes(server.hostname)) throw new Error('Cloud runtime E2E needs a loopback TEST_DATABASE_URL');
   server.pathname = `/flofi_e2e_${Date.now()}_${process.pid}`;
@@ -214,7 +219,7 @@ if (copilot !== undefined && copilot !== 'off' && copilot !== 'replay') throw ne
 
 export default defineConfig({
   testDir: './e2e',
-  ...(cloudRuntime || mcpHarness || adminHarness ? { globalSetup: './e2e/cloud-runtime-setup.ts' } : {}),
+  ...(cloudRuntime || mcpHarness || adminHarness || learningHarness ? { globalSetup: './e2e/cloud-runtime-setup.ts' } : {}),
   workers: 1,
   fullyParallel: false,
   retries: 0,
@@ -277,6 +282,7 @@ export default defineConfig({
       ...(cardHarness ? { GRYLOO_CARD_HARNESS: 'MOCKED_LOOPBACK_ONLY', WOOVI_APP_ID: SERVER_ONLY_WOOVI_APP_ID, WOOVI_ENVIRONMENT: 'sandbox' } : {}),
       ...(cloudRuntime ? { FLOFI_RUNTIME: 'embedded', DATABASE_URL: process.env.FLOFI_E2E_DATABASE_URL!, GRYLOO_ROBINHOOD_HARNESS: 'MOCKED_LOOPBACK_ONLY' } : {}),
       ...(adminHarness ? { DATABASE_URL: process.env.FLOFI_E2E_DATABASE_URL!, FLOFI_ADMIN: 'enabled', FLOFI_ADMIN_SESSION_SECRET: randomBytes(32).toString('hex') } : {}),
+      ...(learningHarness ? { DATABASE_URL: process.env.FLOFI_E2E_DATABASE_URL!, FLOFI_LEARNING: 'enabled', FLOFI_LEARNING_SECRET: randomBytes(32).toString('hex') } : {}),
       ...mcpServerEnv, ...swapReadEnv,
       ...channelServerEnv, ...automationServerEnv, ...delegationServerEnv,
       GRYLOO_MODE_A: 'fork', GRYLOO_MODE_A_PROFILE: join(runtime, 'profile.json'), GRYLOO_MODE_A_JOURNAL: join(runtime, 'journal') },

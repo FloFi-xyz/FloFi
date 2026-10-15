@@ -4,8 +4,8 @@ import { editorReducer, initialEditor } from './editor';
 import type { Workflow } from './initial-workflow';
 import { describeProposal } from './proposal';
 import { buildCopilotFacts, type CopilotFacts, type CopilotFactsInput } from './copilot-answers';
-import { closeSegment, emptyConversation, finishTurn, recordProposal, startTurn, type CopilotConversation, type CopilotEnvironment, type CopilotReply,
-  type CopilotRequestV2, type CopilotResultV2, type CopilotVerified } from './copilot-conversation';
+import { closeSegment, emptyConversation, finishTurn, recordProposal, startTurn, type CopilotConversation, type CopilotEnvironment, type CopilotLearning,
+  type CopilotReply, type CopilotRequestV2, type CopilotResultV2, type CopilotVerified } from './copilot-conversation';
 import { applyCommand, buildWorkflow, contextFor, TEST_WALLET } from './copilot-test-fixtures';
 
 /**
@@ -24,6 +24,8 @@ export class CopilotSession {
   facts: Partial<Omit<CopilotFactsInput, 'workflow' | 'context' | 'pending'>> = {};
   /** PR B: the verified Solana Devnet facts the browser hook would read (pool price, the wallet's FloFi positions, reconciled leftovers). */
   verified: CopilotVerified | undefined = undefined;
+  /** BUILD-CHAT-LEARNING-001: the learning context the caller would pass (absent: learning disabled, the engine as before). */
+  learning: CopilotLearning | undefined = undefined;
   readonly turns: TurnRecord[] = [];
   constructor(setup: readonly string[] | Workflow = [], wallet: string | null = TEST_WALLET) {
     this.wallet = wallet;
@@ -33,7 +35,7 @@ export class CopilotSession {
   currentFacts(): CopilotFacts { return buildCopilotFacts({ workflow: this.workflow, context: this.context, pending: this.pending, ...this.facts }); }
   env(): CopilotEnvironment {
     return { workflow: this.workflow, context: this.context, wallet: this.wallet, walletChainId: this.walletChainId, pending: this.pending, facts: this.currentFacts(),
-      ...this.verified ? { verified: this.verified } : {} };
+      ...this.verified ? { verified: this.verified } : {}, ...this.learning ? { learning: this.learning } : {} };
   }
   propose(command: Command) {
     const before = { workflow: this.workflow, error: null };
