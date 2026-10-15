@@ -1,0 +1,33 @@
+# BUILD-CI-GCP-002 — full manual backup certification, pinned to the 105-era CI coverage.
+# One 2-vCPU / 8-GiB Cloud Build worker: stages run SEQUENTIALLY, not concurrently.
+# No deploy, registry push, production secrets, automation, or PR-merge authority.
+# The full signed-off CircleCI/GitHub checks remain required until separately reviewed.
+steps:
+  - id: disposable-postgres
+    name: 'gcr.io/cloud-builders/docker'
+    entrypoint: bash
+    args:
+      - '-euo'
+      - 'pipefail'
+      - '-c'
+      - |
+        docker run --detach --rm --name flofi-gcp-postgres --network cloudbuild           -e POSTGRES_USER=flofi -e POSTGRES_HOST_AUTH_METHOD=trust           postgres:18.6-bookworm@sha256:3725f4e2499eef5134592b3b4ab79a543ed7f8e533b05b5b637af926630f6650
+        for attempt in $(seq 1 60); do
+          if docker exec flofi-gcp-postgres pg_isready -U flofi -d postgres > /dev/null 2>&1; then
+            echo 'Disposable PostgreSQL ready'
+            exit 0
+          fi
+          sleep 1
+        done
+        docker logs flofi-gcp-postgres
+        exit 1
+  - id: full-certification
+    name: 'cimg/node:24.21.0-browsers'
+    entrypoint: bash
+    args: ['scripts/gcp-ci-full.sh']
+    waitFor: ['disposable-postgres']
+timeout: '5400s'
+serviceAccount: 'projects/celtic-volt-418819/serviceAccounts/flofi-ci-runner@celtic-volt-418819.iam.gserviceaccount.com'
+options:
+  machineType: E2_STANDARD_2
+  logging: CLOUD_LOGGING_ONLY
