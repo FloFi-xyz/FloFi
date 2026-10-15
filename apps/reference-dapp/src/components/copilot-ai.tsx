@@ -4,6 +4,9 @@ import { useLocale } from '../i18n/locale';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { copilotInterpret, copilotStatus } from '../app/copilot-action';
+import { learningApply, learningFeedback, learningStatus } from '../app/learning-action';
+import { learningCopy } from '../domain/copilot-learning-copy';
+import type { LearningStatusView } from '../learning/web-actions';
 import type { Command } from '../domain/commands';
 import { chainStatus } from '../domain/artifact-chain';
 import { buildCopilotFacts, simulationFlowOf, type CopilotFacts, type SimulationFlow } from '../domain/copilot-answers';
@@ -37,7 +40,14 @@ import { useWorkflow } from '../state/workflow-store';
  * BUILD-COPILOT-002: the hook drives the pure conversation engine. It hands the engine a read-only snapshot of state
  * Flofi already holds (canonical IR, pending proposal, lint review, capability blockers, the active flow's own record)
  * and passes at most one resulting Command to `propose`. It never dispatches, signs, simulates or executes.
+ *
+ * BUILD-CHAT-LEARNING-001: when the deployment enables learning, the hook also loads this browser's learning context (its proven wallet's
+ * own memory and the active global glossary, from the server), performs a memory action only after the user's own click or statement, and
+ * reports content-free feedback (reply kinds, signals, proposal applied/dismissed). Learning off or unavailable: exactly the previous behaviour.
  */
+type LearningNamespace = 'eip155' | 'solana';
+type FeedbackEvent = { readonly kind: string; readonly outcome?: string; readonly language?: string | null; readonly privateEntries?: number; readonly globalEntries?: number;
+  readonly knowledgeVersion?: number | null };
 export type { CopilotReply };
 type Record_ = { readonly record?: unknown; readonly run?: unknown; readonly retired: boolean } | null;
 const authorized = (value: unknown) => {
@@ -60,6 +70,20 @@ export function useCopilotInterpreter() {
   const proposals = useRef(new WeakMap<Command, string>());
   const latest = useRef({ workflow, wallet, environment, capability, flows, jupiter, orca, composition });
   latest.current = { workflow, wallet, environment, capability, flows, jupiter, orca, composition };
+  // BUILD-CHAT-LEARNING-001: this browser's learning context (null until loaded, or when learning is off).
+  const [learning, setLearning] = useState<LearningStatusView | null>(null);
+  const learningView = useRef<LearningStatusView | null>(null), identity = useRef<LearningNamespace | null>(null);
+  const refreshLearning = useCallback(async (namespace?: LearningNamespace | null) => {
+    if (namespace !== undefined) identity.current = namespace;
+    const view = await learningStatus(identity.current ?? undefined).catch(() => null);
+    learningView.current = view; setLearning(view);
+    return view;
+  }, []);
+  useEffect(() => { void refreshLearning(); }, [refreshLearning]);
+  const report = useCallback((events: readonly FeedbackEvent[]) => {
+    const view = learningView.current;
+    if (view?.enabled && view.learning.memory !== 'UNAVAILABLE' && events.length) void learningFeedback(events).catch(() => undefined);
+  }, []);
   // Read-only Solana Devnet facts fetched for the last turn that needed them (pool price, the wallet's FloFi positions): never the model's words.
   const fetched = useRef<{ readonly owner: string | null; readonly price: CopilotVerified['orcaPrice']; readonly positions: CopilotVerified['orcaPositions'] }>({ owner: null, price: null, positions: null });
   useEffect(() => {
@@ -85,8 +109,9 @@ export function useCopilotInterpreter() {
     const solanaOwner = now.orca.owner, loaded = fetched.current;
     const verified: CopilotVerified = { orcaPrice: loaded.price, solanaOwner, orcaPositions: solanaOwner && loaded.owner === solanaOwner ? loaded.positions : null,
       remaining: reconciledRemaining(solanaOwner, now.jupiter.record, now.composition.record) };
+    const view = learningView.current;
     return { timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, workflow: current, context: store.context, wallet: now.wallet.account, walletChainId: now.wallet.chainId, pending: store.pending, facts,
-      verified };
+      verified, ...view?.enabled ? { learning: view.learning } : {} };
   }, []);
   /** Reads the Orca pool price and the connected wallet's FloFi positions when the interpreted request needs them (a percentage range, a position). */
   const loadVerified = useCallback(async (intent: unknown) => {
@@ -101,27 +126,58 @@ export function useCopilotInterpreter() {
   // Every proposal the user can see becomes a referent, including exact-grammar proposals ("make it 2" after one).
   const pendingCommand = workflow.pending?.command;
   useEffect(() => { if (pendingCommand) conversation.current = recordProposal(conversation.current, environmentNow(), pendingCommand); }, [pendingCommand, environmentNow]);
+  // BUILD-CHAT-LEARNING-001: what became of a Copilot proposal — observed behaviour only, never proof that the interpretation was right.
+  const watched = useRef<{ readonly command: Command; readonly revision: number } | null>(null);
+  useEffect(() => {
+    const prior = watched.current, revision = latest.current.workflow.state.workflow.revision;
+    if (prior && prior.command !== pendingCommand) report([{ kind: pendingCommand && proposals.current.has(pendingCommand) ? 'PROPOSAL_REVISED'
+      : !pendingCommand && revision > prior.revision ? 'PROPOSAL_APPLIED' : 'PROPOSAL_DISMISSED' }]);
+    watched.current = pendingCommand && proposals.current.has(pendingCommand) ? { command: pendingCommand, revision } : null;
+  }, [pendingCommand, report]);
   /** The exact grammar handled a message: Flofi's open question, if any, is over. */
   const reset = useCallback(() => { conversation.current = closeSegment(conversation.current); }, []);
   const show = useCallback((reply: CopilotReply) => {
     if (reply.command) { proposals.current.set(reply.command, reply.sentence ?? reply.command.type); latest.current.workflow.propose(reply.command); }
     return reply;
   }, []);
+  /** BUILD-CHAT-LEARNING-001: performs the memory action the user just confirmed, and reports the turn's content-free feedback. */
+  const settle = useCallback(async (reply: CopilotReply): Promise<CopilotReply> => {
+    const view = learningView.current;
+    if (!view?.enabled) return reply;
+    let out = reply;
+    if (reply.memory) {
+      const result = await learningApply(reply.memory, identity.current ?? undefined).catch(() => ({ ok: false as const, code: 'LEARNING_UNAVAILABLE' as const }));
+      if (!result.ok) {
+        const l = learningCopy(conversation.current.language);
+        const { memory: _failed, ...rest } = reply;
+        void _failed;
+        out = { ...rest, text: result.code === 'LEARNING_RATE_LIMITED' ? l.limited : result.code === 'LEARNING_MEMORY_FULL' ? l.full : l.failed };
+      }
+      void refreshLearning();
+    }
+    const used = reply.learning?.used ?? [], own = used.filter(entry => entry.source !== 'GLOBAL').length, shared = used.length - own;
+    report([{ kind: 'TURN', outcome: out.kind, language: conversation.current.language, privateEntries: own, globalEntries: shared, knowledgeVersion: view.learning.globalVersion },
+      ...(reply.learning?.signals ?? []).map(kind => ({ kind })), ...own ? [{ kind: 'MEMORY_USED' }] : [],
+      ...shared ? [{ kind: 'KNOWLEDGE_USED', knowledgeVersion: view.learning.globalVersion }] : []]);
+    return out;
+  }, [refreshLearning, report]);
   const interpret = useCallback(async (text: string): Promise<CopilotReply> => {
     const start = startTurn(conversation.current, text, environmentNow());
-    if (start.kind === 'LOCAL') { conversation.current = start.next; return show(start.reply); }
+    if (start.kind === 'LOCAL') { conversation.current = start.next; return show(await settle(start.reply)); }
     setBusy(true);
     try {
       let result: CopilotResultV2;
-      try { result = await copilotInterpret(start.request) as CopilotResultV2; } catch { result = { ok: false, code: 'COPILOT_UNAVAILABLE' }; }
+      // BUILD-CHAT-LEARNING-001: which proven wallet's memory, and this conversation's own aliases (a glossary hint the server re-validates).
+      const options = learningView.current?.enabled ? { identity: identity.current, aliases: start.turn.state.aliases ?? [] } : undefined;
+      try { result = await copilotInterpret(start.request, options) as CopilotResultV2; } catch { result = { ok: false, code: 'COPILOT_UNAVAILABLE' }; }
       // BUILD-BASE-001: catalog-network symbols resolve only in validated catalogs: load those this request or its intent names (where enabled).
       if (result.ok) await Promise.all([...catalogNetworksNamed(start.turn.state.segment.join('\n'), result.intent).map(n => ensureNetworkCatalog(false, n.chain)),
         loadVerified(result.intent)]);
       const finished = finishTurn(start.turn, result, environmentNow());
       conversation.current = finished.next;
-      return show(finished.reply);
+      return show(await settle(finished.reply));
     } finally { setBusy(false); }
-  }, [environmentNow, show, loadVerified]);
+  }, [environmentNow, show, settle, loadVerified]);
   /** The Copilot's reply, or null when it is not enabled on this server (the caller shows its exact-grammar guidance). */
   const respond = useCallback(async (text: string): Promise<CopilotReply | null> => {
     const resolved = await (status.current ?? Promise.resolve<CopilotMode>('off'));
@@ -132,7 +188,7 @@ export function useCopilotInterpreter() {
   }, [interpret]);
   const proposalSentence = useCallback((command: Command | undefined) => command ? proposals.current.get(command) ?? null : null, []);
   return { mode, enabled: mode === 'live' || mode === 'replay', mayInterpret: mode === 'loading' || mode === 'live' || mode === 'replay', busy, respond,
-    reset, proposalSentence };
+    reset, proposalSentence, learning, refreshLearning };
 }
 
 export const COPILOT_PLACEHOLDER = 'Put 1 USDC into Aave on Base Sepolia';

@@ -154,7 +154,9 @@ describe('Copilot eval corpus', () => {
 describe('the Copilot has no path to authority', () => {
   const source = (path: string) => readFileSync(join(__dirname, '..', path), 'utf8');
   const PURE = ['domain/copilot-conversation.ts', 'domain/copilot-answers.ts', 'domain/copilot-intent-v2.ts', 'domain/copilot-intent.ts', 'domain/copilot-authoring.ts',
-    'domain/copilot-messages.ts', 'domain/workflow-steps.ts', 'domain/workflow-edits.ts'];
+    'domain/copilot-messages.ts', 'domain/workflow-steps.ts', 'domain/workflow-edits.ts',
+    // BUILD-CHAT-LEARNING-001: learned vocabulary and its copy are pure too.
+    'domain/copilot-lexicon.ts', 'domain/copilot-learning-copy.ts'];
   it('keeps the interpretation, resolution and answer modules pure: no state, server, wallet, network or storage access', () => {
     for (const path of PURE) {
       const text = source(path);
