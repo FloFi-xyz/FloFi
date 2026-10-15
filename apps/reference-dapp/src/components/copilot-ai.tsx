@@ -163,7 +163,13 @@ export function useCopilotInterpreter() {
   }, [refreshLearning, report]);
   const interpret = useCallback(async (text: string): Promise<CopilotReply> => {
     const start = startTurn(conversation.current, text, environmentNow());
-    if (start.kind === 'LOCAL') { conversation.current = start.next; return show(await settle(start.reply)); }
+    if (start.kind === 'LOCAL') {
+      conversation.current = start.next;
+      if (!start.reply.memory) return show(await settle(start.reply));
+      // A confirmed memory change is one server action: the chat stays busy until it settled (no double submission).
+      setBusy(true);
+      try { return show(await settle(start.reply)); } finally { setBusy(false); }
+    }
     setBusy(true);
     try {
       let result: CopilotResultV2;

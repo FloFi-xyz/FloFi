@@ -4,6 +4,10 @@ import { COPILOT_EVAL_CASES } from './copilot-eval.corpus';
 import type { CopilotLearning, CopilotReply } from './copilot-conversation';
 import type { LexiconEntry, LexiconTarget } from './copilot-lexicon';
 import { act, CopilotSession, intent } from './copilot-session.test-harness';
+import { parseLocalCommand } from './commands';
+import { initialEditor } from './editor';
+import { BASE_CONTEXT, TEST_WALLET } from './copilot-test-fixtures';
+import { learningCopy } from './copilot-learning-copy';
 
 /**
  * BUILD-CHAT-LEARNING-001: the conversation engine with learned vocabulary. Same harness as the eval corpus: the real engine, exact grammar
@@ -200,6 +204,14 @@ describe('BUILD-CHAT-LEARNING-001 safety of learned vocabulary', () => {
     s.say('stake my tokens', intent.unsupported('Staking is not supported.'));
     const second = s.say('stake them anyway', intent.unsupported('Staking is not supported.'));
     expect(second!.learning?.signals).toEqual(['REPEATED_FAILURE']);
+  });
+});
+
+describe('BUILD-CHAT-LEARNING-001 the exact grammar never captures a memory button or statement', () => {
+  it('every offer label and memory statement reaches the engine (the panel and channels try the exact grammar first)', () => {
+    const labels = (['EN', 'PT'] as const).flatMap(language => [...learningCopy(language).options, ...learningCopy(language).forgetAllOptions]);
+    for (const text of [...labels, 'Whenever I say Arb, I mean Arbitrum', 'forget arb', 'forget everything', 'esqueça tudo', 'Responda sempre em português', 'memory'])
+      expect(() => parseLocalCommand(text, initialEditor().workflow, BASE_CONTEXT, TEST_WALLET), text).toThrow();
   });
 });
 
