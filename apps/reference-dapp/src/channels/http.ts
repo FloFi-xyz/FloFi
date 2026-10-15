@@ -15,6 +15,7 @@
 import type { EngineRuntime } from '../platform/index.ts';
 import type { ChannelInterpreter } from './core/conversation.ts';
 import { channelInterpreter } from './core/interpreter.ts';
+import { channelLiveCopilot } from '../server/copilot-runtime.ts';
 import { keyedDigest } from './core/crypto.ts';
 import { channelLogger, type ChannelLogSink } from './core/log.ts';
 import { createChannelService } from './core/service.ts';
@@ -107,7 +108,8 @@ export async function handleChannelWebhook(route: ChannelRoute, request: Request
     }
   }
   const service = createChannelService({ core, store, log, now, platform, previewTimeoutMs: options.previewTimeoutMs ?? 60_000, adapter: provider.adapter,
-    interpreter: options.interpreter !== undefined ? options.interpreter : channelInterpreter(env, { enabled: core.copilot }), subscriptions: channelSubscriptions(env, host),
+    interpreter: options.interpreter !== undefined ? options.interpreter
+      : channelInterpreter(env, { enabled: core.copilot, live: channelLiveCopilot(env, route === 'whatsapp' ? 'WHATSAPP' : 'TELEGRAM', host) }), subscriptions: channelSubscriptions(env, host),
     visuals: options.visuals !== undefined ? options.visuals : channelVisualRenderer, catalogs: authoringCatalogPreparer(env),
     ...options.sleep ? { sleep: options.sleep } : {}, ...options.random ? { random: options.random } : {} });
   let ingested;

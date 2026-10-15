@@ -24,7 +24,10 @@ export async function currentWalletPrincipal(): Promise<string | null> {
 }
 /** The origin the browser used (EIP-4361 domain and URI) and whether cookies must be `Secure`. */
 export async function requestOrigin(): Promise<{ domain: string; uri: string; secure: boolean }> {
-  const h = await headers();
+  return originFromHeaders(await headers());
+}
+/** BUILD-ADMIN-001: the same derivation for a route handler's own request headers. */
+export function originFromHeaders(h: { get(name: string): string | null }): { domain: string; uri: string; secure: boolean } {
   const domain = (h.get('x-forwarded-host') ?? h.get('host') ?? '').split(',')[0]!.trim();
   const loopback = /^(?:127\.0\.0\.1|localhost|\[::1\])(?::\d+)?$/.test(domain);
   const proto = (h.get('x-forwarded-proto') ?? '').split(',')[0]!.trim() || (loopback ? 'http' : 'https');

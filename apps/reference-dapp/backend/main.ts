@@ -18,10 +18,12 @@ import { assertSchemaCompatible, createDatabase, createHttpServer, createLogger,
   readEvidenceStore, readRuntimeConfig, sweep, type SchemaCompatibility, type WorkHandler } from '@defi-workflow-engine/cloud-runtime';
 import { createFileLogStore, utf8 } from '@defi-workflow-engine/reference-executor';
 import { createRobinhoodTransferService } from '../src/server/robinhood-transfer-service.ts';
+import { deploymentEnvironment } from '../src/server/deployment.ts';
 import { createSupplyService } from '../src/server/supply-service.ts';
 import { validatePublicRunLog } from '../src/server/public-testnet-service.ts';
 import { createBackend } from './app.ts';
 import { flowMode, FLOWS, isFlowName, type FlowName } from './flows.ts';
+import { assertDedicatedPreviewDatabase } from './preview-migration.ts';
 
 const [command, ...rest] = process.argv.slice(2);
 const logger = createLogger({ service: `flofi-${command ?? 'backend'}` });
@@ -37,9 +39,12 @@ async function main(): Promise<void> {
     const config = readRuntimeConfig(process.env, 'migrate');
     stage = 'migrate';
     const db = createDatabase({ connectionString: config.migrationDatabaseUrl, maxConnections: 1, applicationName: 'flofi-migrate' });
-    // A database ahead of this build is never changed: certified, nothing is applied and the check below reports it; otherwise both fail closed.
-    try { logger.info('migrate.applied', { versions: (await migrate(db)).join(',') || 'none', ...schemaFields(await assertSchemaCompatible(db)) }); }
-    finally { await db.close(); }
+    try {
+      // BUILD-ADMIN-001: a Vercel Preview build never migrates a database that a non-Preview deployment (Production) writes to.
+      if (deploymentEnvironment(process.env) === 'preview') { stage = 'preview_database'; await assertDedicatedPreviewDatabase(db); stage = 'migrate'; }
+      // A database ahead of this build is never changed: certified, nothing is applied and the check below reports it; otherwise both fail closed.
+      logger.info('migrate.applied', { versions: (await migrate(db)).join(',') || 'none', ...schemaFields(await assertSchemaCompatible(db)) });
+    } finally { await db.close(); }
     return;
   }
   if (command === 'import-journal') {

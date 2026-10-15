@@ -7,14 +7,21 @@
  * the conversation engine grounds every value in the user's own words and authors only through the exact grammar.
  *
  * `FLOFI_CHANNEL_COPILOT=disabled` (or `FLOFI_COPILOT` off) means no interpreter at all: exact commands only, no model call.
+ *
+ * BUILD-ADMIN-001: the wiring may pass `live`, which resolves the model settings for each turn (an administrator's versioned settings for the
+ * channel's scope, else the environment bootstrap — `server/copilot-runtime.ts`). Without it, the environment settings below apply unchanged.
  */
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { COPILOT_REPLAY_FORMAT_V2, COPILOT_SERVER_LIMITS, COPILOT_TUNING_DEFAULTS, copilotConfig, copilotTelemetrySink, copilotTuning, createCopilotLimiter,
-  createOpenAITransport, createReplayTransport, interpretCopilotV2, parseCopilotReplay, type CopilotLimiter, type CopilotTransport } from '../../server/copilot-service.ts';
+  createOpenAITransport, createReplayTransport, interpretCopilotV2, parseCopilotReplay, type CopilotLimiter, type CopilotModelSettings,
+  type CopilotTransport } from '../../server/copilot-service.ts';
 import type { ChannelInterpreter } from './conversation.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
+/** One turn's live settings, or the browser-safe code to answer with. */
+export type ChannelLiveCopilot = () => Promise<{ readonly ok: true; readonly apiKey: string; readonly settings: CopilotModelSettings & { readonly timeoutMs: number } }
+  | { readonly ok: false; readonly code: string }>;
 const REPLAY_FILE_V2 = join('e2e', 'copilot', 'replay-v2.json');
 /** The process-wide admission limiter FloFi's chat uses (`copilot-action.ts` holds it under the same key). */
 function sharedLimiter(): CopilotLimiter {
@@ -24,15 +31,26 @@ function sharedLimiter(): CopilotLimiter {
 }
 
 /** The interpreter this deployment allows for channels, or null (exact commands only). `transport` is a test seam for replayed answers. */
-export function channelInterpreter(env: Env, options: { readonly enabled: boolean; readonly transport?: CopilotTransport } = { enabled: true }): ChannelInterpreter | null {
+export function channelInterpreter(env: Env, options: { readonly enabled: boolean; readonly transport?: CopilotTransport; readonly live?: ChannelLiveCopilot } =
+  { enabled: true }): ChannelInterpreter | null {
   if (!options.enabled) return null;
   if (options.transport) {
     const transport = options.transport;
     return request => interpretCopilotV2(request, { transport, mode: 'replay', limiter: sharedLimiter(),
       settings: { model: 'replay', temperature: 0, maxOutputTokens: COPILOT_TUNING_DEFAULTS.maxOutputTokens, reasoningEffort: null } });
   }
-  const config = copilotConfig(env), tuning = copilotTuning(env);
+  const config = copilotConfig(env), tuning = copilotTuning(env), live = options.live;
   if (config.mode === 'off') return null;
+  if (live && env.FLOFI_COPILOT === 'live') {
+    return async request => {
+      const resolved = await live();
+      if (!resolved.ok) return { ok: false, code: resolved.code };
+      const { apiKey, settings } = resolved;
+      return interpretCopilotV2(request, { transport: createOpenAITransport(apiKey, fetch, { timeoutMs: settings.timeoutMs, maxResponseBytes: COPILOT_SERVER_LIMITS.maxResponseBytes }),
+        mode: 'live', limiter: sharedLimiter(), telemetry: copilotTelemetrySink(env, 'live'),
+        settings: { model: settings.model, temperature: settings.temperature, maxOutputTokens: settings.maxOutputTokens, reasoningEffort: settings.reasoningEffort } });
+    };
+  }
   if (config.mode === 'unavailable' || (config.mode === 'live' && !tuning)) return async () => ({ ok: false, code: 'COPILOT_NOT_CONFIGURED' });
   if (config.mode === 'live' && tuning) {
     const transport = createOpenAITransport(config.apiKey, fetch, { timeoutMs: tuning.timeoutMs, maxResponseBytes: COPILOT_SERVER_LIMITS.maxResponseBytes });

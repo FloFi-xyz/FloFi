@@ -2,8 +2,10 @@
 'use server';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { COPILOT_REPLAY_FORMAT_V2, copilotConfig, copilotTelemetrySink, copilotTuning, createCopilotLimiter, createOpenAITransport, createReplayTransport, interpretCopilot,
+import { COPILOT_REPLAY_FORMAT_V2, copilotConfig, copilotTelemetrySink, createCopilotLimiter, createOpenAITransport, createReplayTransport, interpretCopilot,
   interpretCopilotV2, parseCopilotReplay, COPILOT_SERVER_LIMITS, COPILOT_TUNING_DEFAULTS, type CopilotLimiter, type CopilotMode, type CopilotResult, type CopilotResultV2 } from '../server/copilot-service';
+import { logCopilotSettingsFailure, publicCopilotCode, resolveCopilotLive, runtimeSettingsEnabled } from '../server/copilot-runtime';
+import { webCopilotSettingsReader } from '../server/copilot-settings-source';
 
 /**
  * BUILD-COPILOT-001: Flofi Copilot interpretation. The browser sends only its short clarification thread and receives
@@ -13,6 +15,10 @@ import { COPILOT_REPLAY_FORMAT_V2, copilotConfig, copilotTelemetrySink, copilotT
  * BUILD-COPILOT-002: a request with `version: '2'` carries a bounded transcript and receives a CopilotIntentV2. The
  * browser resolves it against its own state; nothing here sees, stores or trusts a workflow. Requests without a version
  * keep the V1 protocol and replay file.
+ *
+ * BUILD-ADMIN-001: live model settings are resolved per request (`copilot-runtime.ts`): an administrator's versioned settings when
+ * this deployment has platform state, otherwise the unchanged `OPENAI_COPILOT_*` bootstrap. Mode and key stay environment-only. The read
+ * survives a rolling deployment's schema window (`copilot-settings-source.ts`).
  */
 const REPLAY_FILE = join('e2e', 'copilot', 'replay.json');
 const REPLAY_FILE_V2 = join('e2e', 'copilot', 'replay-v2.json');
@@ -23,33 +29,44 @@ function limiter(): CopilotLimiter {
   holder[key] ??= createCopilotLimiter();
   return holder[key];
 }
-/** Invalid live tuning makes the Copilot unavailable rather than silently using other limits. */
-function mode(): CopilotMode {
+/** Live settings for this request; invalid tuning or unreadable runtime settings make the Copilot unavailable, never silently different. */
+async function live() {
+  // The platform-state pool opens only when a live request needs it (the same pool MCP, Developer and Channels use).
+  const reader = runtimeSettingsEnabled(process.env) ? webCopilotSettingsReader(process.env) : null;
+  const resolved = await resolveCopilotLive(process.env, 'WEB', reader);
+  if (!resolved.ok) logCopilotSettingsFailure(process.env, resolved.code, 'WEB');
+  return resolved;
+}
+async function mode(): Promise<CopilotMode> {
   const config = copilotConfig(process.env);
-  return config.mode === 'live' && !copilotTuning(process.env) ? 'unavailable' : config.mode;
+  if (config.mode === 'off' || config.mode === 'replay' || process.env.FLOFI_COPILOT !== 'live') return config.mode;
+  return (await live()).ok ? 'live' : 'unavailable';
 }
 export async function copilotStatus(): Promise<{ mode: CopilotMode }> {
-  return { mode: mode() };
+  return { mode: await mode() };
 }
 const isV2 = (input: unknown) => !!input && typeof input === 'object' && (input as { version?: unknown }).version === '2';
 export async function copilotInterpret(input: unknown): Promise<CopilotResult | CopilotResultV2> {
-  const config = copilotConfig(process.env), tuning = copilotTuning(process.env);
+  const config = copilotConfig(process.env);
   if (config.mode === 'off') return { ok: false, code: 'COPILOT_OFF' };
-  if (config.mode === 'unavailable' || (config.mode === 'live' && !tuning)) return { ok: false, code: 'COPILOT_NOT_CONFIGURED' };
-  if (isV2(input)) {
-    if (config.mode === 'live' && tuning) {
-      return interpretCopilotV2(input, { transport: createOpenAITransport(config.apiKey, fetch, { timeoutMs: tuning.timeoutMs, maxResponseBytes: COPILOT_SERVER_LIMITS.maxResponseBytes }),
-        settings: { model: config.model, temperature: config.temperature, maxOutputTokens: tuning.maxOutputTokens, reasoningEffort: tuning.reasoningEffort },
+  if (process.env.FLOFI_COPILOT === 'live') {
+    const resolved = await live();
+    if (!resolved.ok) return { ok: false, code: publicCopilotCode(resolved.code) };
+    const { apiKey, settings } = resolved;
+    if (isV2(input)) {
+      return interpretCopilotV2(input, { transport: createOpenAITransport(apiKey, fetch, { timeoutMs: settings.timeoutMs, maxResponseBytes: COPILOT_SERVER_LIMITS.maxResponseBytes }),
+        settings: { model: settings.model, temperature: settings.temperature, maxOutputTokens: settings.maxOutputTokens, reasoningEffort: settings.reasoningEffort },
         mode: 'live', limiter: limiter(), telemetry: copilotTelemetrySink(process.env, 'live') });
     }
+    return interpretCopilot(input, { transport: createOpenAITransport(apiKey), model: settings.model, temperature: settings.temperature, limiter: limiter() });
+  }
+  if (config.mode === 'unavailable') return { ok: false, code: 'COPILOT_NOT_CONFIGURED' };
+  if (isV2(input)) {
     try {
       const replay = parseCopilotReplay(JSON.parse(await readFile(REPLAY_FILE_V2, 'utf8')), COPILOT_REPLAY_FORMAT_V2);
       return interpretCopilotV2(input, { transport: createReplayTransport(replay, 'segment'), settings: { model: 'replay', temperature: 0,
         maxOutputTokens: COPILOT_TUNING_DEFAULTS.maxOutputTokens, reasoningEffort: null }, mode: 'replay', limiter: limiter(), telemetry: copilotTelemetrySink(process.env, 'replay') });
     } catch { return { ok: false, code: 'COPILOT_REPLAY_INVALID' }; }
-  }
-  if (config.mode === 'live') {
-    return interpretCopilot(input, { transport: createOpenAITransport(config.apiKey), model: config.model, temperature: config.temperature, limiter: limiter() });
   }
   try {
     const replay = parseCopilotReplay(JSON.parse(await readFile(REPLAY_FILE, 'utf8')));

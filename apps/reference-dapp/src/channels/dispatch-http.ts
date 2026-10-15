@@ -13,6 +13,7 @@ import type { EngineRuntime } from '../platform/index.ts';
 import type { ChannelInterpreter } from './core/conversation.ts';
 import { dispatchChannels, DISPATCH_LIMITS, type DispatchLimits } from './core/dispatch.ts';
 import { channelInterpreter } from './core/interpreter.ts';
+import { channelLiveCopilot } from '../server/copilot-runtime.ts';
 import { channelLogger, type ChannelLogSink } from './core/log.ts';
 import { createChannelService } from './core/service.ts';
 import type { ChannelVisualRenderer } from './core/types.ts';
@@ -52,8 +53,11 @@ export async function handleChannelDispatch(request: Request, options: ChannelOp
   if ('code' in host) return json(503, { ok: false, code: host.code });
   const { store, platform } = channelRuntime(env, core, host, options.runtime);
   const providers = channelProviders(result.deployment, options.seams);
-  const interpreter = options.interpreter !== undefined ? options.interpreter : channelInterpreter(env, { enabled: core.copilot });
-  const services = new Map([...providers.adapters.values()].map(adapter => [adapter.channel, createChannelService({ core, store, log, now, platform, adapter, interpreter,
+  // BUILD-ADMIN-001: each channel's service interprets with that channel's Copilot settings scope.
+  const interpreterFor = (channel: string) => options.interpreter !== undefined ? options.interpreter
+    : channelInterpreter(env, { enabled: core.copilot, live: channelLiveCopilot(env, channel === 'WHATSAPP' ? 'WHATSAPP' : 'TELEGRAM', host) });
+  const services = new Map([...providers.adapters.values()].map(adapter => [adapter.channel, createChannelService({ core, store, log, now, platform, adapter,
+    interpreter: interpreterFor(adapter.channel),
     previewTimeoutMs: 30_000, subscriptions: channelSubscriptions(env, host), visuals: options.visuals !== undefined ? options.visuals : channelVisualRenderer,
     catalogs: authoringCatalogPreparer(env),
     ...options.sleep ? { sleep: options.sleep } : {}, ...options.random ? { random: options.random } : {} })]));

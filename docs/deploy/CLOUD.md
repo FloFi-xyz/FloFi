@@ -110,7 +110,9 @@ Owner setup, once (Vercel → Project `flofi` → Settings):
 
 1. **Database**: a PostgreSQL database that is **not** Production's (for example the Neon integration, which creates a
    branch per Preview). Environment Variables → *Preview* only: `DATABASE_URL` (pooled), optionally `DATABASE_MIGRATION_URL`
-   (direct), and `FLOFI_MIGRATE_ON_BUILD=preview` so each Preview build applies the shipped migrations itself.
+   (direct), and `FLOFI_MIGRATE_ON_BUILD=preview` so each Preview build applies the shipped migrations itself. A Preview
+   build refuses, changing nothing, to migrate a database holding any non-Preview state — Production's, or a copy of it
+   (`PREVIEW_DATABASE_NOT_DEDICATED`, BUILD-ADMIN-001): only Previews' `pv-…` tenants may have rows there.
 2. **Session**: `FLOFI_SESSION_SECRET` (Preview only; `openssl rand -hex 32`).
 3. **Capabilities** (Preview only): `GRYLOO_PUBLIC_TESTNET=record`, `GRYLOO_UNISWAP_LIQUIDITY_TESTNET=live`,
    `GRYLOO_SUPPLY_TESTNET=live`, `GRYLOO_ETHEREUM_SEPOLIA_TRANSFER=live`, `GRYLOO_ROBINHOOD_TESTNET=live`,
