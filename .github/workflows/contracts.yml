@@ -258,9 +258,10 @@ jobs:
           python3 - <<'PYCODE'
           import hashlib, os, pathlib, re, tarfile, urllib.request
           root=pathlib.Path(os.environ['GRYLOO_B007_INPUTS'])
+          # Roles mastercopies: upstream removed this file from main in d50a1b2 (2026-10-15); fetch the exact bytes from the commit that last changed it (1ddde84db902), digest unchanged.
           sources={
             'safe':('https://registry.npmjs.org/@safe-global/safe-contracts/-/safe-contracts-1.4.1.tgz','8803f7cf26e2c58300b8136342faa7b8bce59436e300f52115fa25b095e0bf79'),
-            'roles':('https://raw.githubusercontent.com/gnosisguild/zodiac-modifier-roles/main/packages/evm/mastercopies.json','a80d737a2b5394897fad0aa290b129bc446fdb1736efc3e1ad06edcd2d8ea224'),
+            'roles':('https://raw.githubusercontent.com/gnosisguild/zodiac-modifier-roles/1ddde84db9024c6c1898d1f4cf5dabded3e824f1/packages/evm/mastercopies.json','a80d737a2b5394897fad0aa290b129bc446fdb1736efc3e1ad06edcd2d8ea224'),
           }
           for name,(url,expected) in sources.items():
             raw=urllib.request.urlopen(url,timeout=60).read()
