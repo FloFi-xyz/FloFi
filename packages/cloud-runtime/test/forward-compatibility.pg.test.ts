@@ -478,3 +478,152 @@ describe('BUILD-CHAT-LEARNING-001 what 0013 does to a v12 database (PostgreSQL)'
     expect(await migrate(t.db, V13M)).toEqual([13]);
   });
 });
+
+/**
+ * BUILD-CHAT-LEARNING-002: the third certificate. The v13 build (BUILD-CHAT-LEARNING-001 as merged) with its certificate for 0014 — the exact bytes
+ * BUILD-CHAT-LEARNING-002 releases (a SHA-256-pinned fixture) — on real ledgers, runners and the real lock window. Unlike 0013, 0014 references an
+ * existing relation: its two foreign keys to learning_subjects (ON DELETE CASCADE, so every erasure by any build also erases the new rows).
+ */
+describe('BUILD-CHAT-LEARNING-002 what 0014 does to a v13 database (PostgreSQL)', () => {
+  const AUTOMATIC = CERTIFIED_FORWARD_MIGRATIONS.find(c => c.migrations.some(m => m.name === 'learning_automatic'))!;
+  const V13_BUILD = SHIPPED_MIGRATIONS.slice(0, 13);
+  const SUBJECT = 'lsb_' + 'a'.repeat(26);
+  let V13M: readonly Migration[], M14: Migration, V14M: readonly Migration[];
+  beforeAll(async () => {
+    const sql = await readFile(new URL('./fixtures/0014_learning_automatic.sql', import.meta.url), 'utf8');
+    M14 = { version: 14, name: 'learning_automatic', sql, sha256: createHash('sha256').update(sql).digest('hex') };
+    V13M = (await loadMigrations()).slice(0, 13);
+    V14M = [...V13M, M14];
+  });
+  /** v13 data next to which 0014 lands: v12's kinds, plus a learning subject with a private memory, a candidate and a feedback event. */
+  async function seed13(db: Database) {
+    await seed(db);
+    await db.query(`INSERT INTO admin_settings_versions (tenant_id, setting_key, version, document, created_by) VALUES ('default', 'copilot', 1, NULL, 'cli')`);
+    await db.query(`INSERT INTO learning_subjects (tenant_id, subject_id, kind, subject_digest, memory_enabled, memory_consent_at, notice_version)
+      VALUES ('default', $1, 'WALLET', $2, true, now(), 1)`, [SUBJECT, Buffer.alloc(32, 1)]);
+    await db.query(`INSERT INTO learning_memories (tenant_id, subject_id, term, target) VALUES ('default', $1, 'arb', 'network:ARBITRUM')`, [SUBJECT]);
+    await db.query(`INSERT INTO learning_candidates (tenant_id, candidate_id, term, target, language, origin, created_by) VALUES ('default', $1, 'arb sep',
+      'network:ARBITRUM_SEPOLIA', 'ANY', 'OPERATOR', 'cli')`, ['lkc_' + 'b'.repeat(26)]);
+    await db.query(`INSERT INTO learning_feedback_events (tenant_id, scope, kind, evidence) VALUES ('default', 'WEB', 'TURN', 'OBSERVED')`);
+  }
+
+  it('the v13 build serves the certified 0014 schema; the strict check and a build without the certificate refuse; a runner never changes it', async () => {
+    expect(identity(M14)).toEqual(AUTOMATIC.migrations[0]);
+    const t = await database(V14M), shape = await catalog(t.db), history = await ledger(t.db);
+    expect(await assertSchemaCompatible(t.db, V13_BUILD)).toEqual({ version: 14, application: 13, forward: [identity(M14)] });
+    expect(await outcome(assertSchemaCurrent(t.db, V13_BUILD))).toEqual(MISMATCH);
+    expect(await outcome(assertSchemaCompatible(t.db, V13_BUILD, CERTIFIED_FORWARD_MIGRATIONS.filter(c => c !== AUTOMATIC)))).toEqual(MISMATCH);
+    expect(await migrate(t.db, V13M)).toEqual([]);           // the v13 build's deploy step on a v14 database: nothing to apply
+    expect(await catalog(t.db)).toEqual(shape);
+    expect(await ledger(t.db)).toEqual(history);
+    await t.db.query(`UPDATE schema_migrations SET sha256 = repeat('f', 64) WHERE version = 14`);
+    expect(await outcome(assertSchemaCompatible(t.db, V13_BUILD))).toEqual(MISMATCH);
+    expect(await outcome(migrate(t.db, V13M))).toEqual(MISMATCH);
+    // A v13 database is exact for the v13 build and behind for a build that ships 0014.
+    const at13 = await database(V13M);
+    expect(await assertSchemaCompatible(at13.db, V13_BUILD)).toEqual({ version: 13, application: 13, forward: [] });
+    expect(await outcome(assertSchemaCompatible(at13.db, V14M))).toEqual(BEHIND);
+  });
+
+  it('is additive: nothing pre-existing is removed or redefined; the only addition to an existing relation is the foreign-key triggers on learning_subjects', async () => {
+    const t = await database(V13M);
+    await seed13(t.db);
+    const before = await catalog(t.db);
+    const tables = [...before.keys()].filter(k => k.startsWith('relation:') && before.get(k)!.startsWith('r ')).map(k => k.slice('relation:'.length))
+      .filter(table => table !== 'schema_migrations');
+    const rows = await data(t.db, tables), history = await ledger(t.db);
+    expect(await migrate(t.db, V14M)).toEqual([14]);
+    expect((await ledger(t.db)).slice(0, -1)).toEqual(history);
+    const after = await catalog(t.db);
+    expect([...before.keys()].filter(key => !after.has(key))).toEqual([]);
+    expect([...before.keys()].filter(key => after.has(key) && after.get(key) !== before.get(key))).toEqual([]);
+    expect(await data(t.db, tables)).toEqual(rows);
+    const added = [...after.keys()].filter(key => !before.has(key)).sort();
+    const own = (key: string) => /^(relation|index):learning_(automatic_settings|evidence)/.test(key) || /^(column|constraint|trigger):learning_(automatic_settings|evidence)\./.test(key);
+    expect(added.filter(key => !own(key))).toEqual([
+      'trigger:learning_subjects.internal:learning_automatic_settings_tenant_id_subject_id_fkey:RI_FKey_cascade_del',
+      'trigger:learning_subjects.internal:learning_automatic_settings_tenant_id_subject_id_fkey:RI_FKey_noaction_upd',
+      'trigger:learning_subjects.internal:learning_evidence_tenant_id_subject_id_fkey:RI_FKey_cascade_del',
+      'trigger:learning_subjects.internal:learning_evidence_tenant_id_subject_id_fkey:RI_FKey_noaction_upd']);
+    expect(added.filter(key => key.startsWith('relation:'))).toEqual(['relation:learning_automatic_settings', 'relation:learning_evidence']);
+    // The v13 build's erasure (a plain DELETE of the subject) now also erases the new rows.
+    await t.db.query(`INSERT INTO learning_evidence (tenant_id, subject_id, term, target) VALUES ('default', $1, 'arb', 'network:ARBITRUM')`, [SUBJECT]);
+    await t.db.query(`INSERT INTO learning_automatic_settings (tenant_id, subject_id, enabled, basis, notice_version, decided_at) VALUES ('default', $1, true, 'CONSENT', 2, now())`, [SUBJECT]);
+    await t.db.query(`DELETE FROM learning_subjects WHERE subject_id = $1`, [SUBJECT]);
+    expect((await t.db.query(`SELECT (SELECT count(*) FROM learning_evidence)::int AS e, (SELECT count(*) FROM learning_automatic_settings)::int AS s`)).rows)
+      .toEqual([{ e: 0, s: 0 }]);
+  });
+
+  it('while 0014 is open, only learning-subject writes wait for it (bounded by its transaction); cold starts, runs, the queue, admin and learning reads never wait', async () => {
+    const t = await database(V13M);
+    await seed13(t.db);
+    const runner = t.open(1), app = t.open(6);
+    let decide!: (commit: boolean) => void, ready!: (pid: number) => void;
+    const opened = new Promise<number>(resolve => { ready = resolve; }), decision = new Promise<boolean>(resolve => { decide = resolve; });
+    const migration = runner.transaction(async tx => {
+      await tx.query('SELECT pg_advisory_xact_lock($1)', [7_340_032_001]);
+      await tx.query('SELECT version, name, sha256 FROM schema_migrations ORDER BY version');
+      await tx.query(M14.sql);
+      await tx.query('INSERT INTO schema_migrations (version, name, sha256) VALUES ($1, $2, $3)', [M14.version, M14.name, M14.sha256]);
+      ready((await tx.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')).rows[0]!.pid);
+      if (!await decision) throw new Error('ROLLED_BACK');
+    });
+    const pid = await opened;
+    try {
+      const { rows: locks } = await app.query<{ relname: string; relkind: string; mode: string }>(`SELECT c.relname, c.relkind::text, l.mode
+        FROM pg_locks l JOIN pg_class c ON c.oid = l.relation WHERE l.pid = $1 AND l.granted AND c.relnamespace = 'public'::regnamespace ORDER BY 1, 3`, [pid]);
+      const committed = locks.filter(l => l.relkind === 'r' && !/^learning_(automatic_settings|evidence)$/.test(l.relname)).map(({ relname, mode }) => ({ relname, mode }));
+      expect(committed).toEqual([{ relname: 'learning_subjects', mode: 'AccessShareLock' }, { relname: 'learning_subjects', mode: 'ShareRowExclusiveLock' },
+        { relname: 'schema_migrations', mode: 'AccessShareLock' }, { relname: 'schema_migrations', mode: 'RowExclusiveLock' }]);
+
+      const fresh = t.open(2), log = createPostgresLogStore({ db: fresh, tenantId: 'default', namespace: 'compat' });
+      const queue = createPostgresWorkQueue({ db: fresh, ownerId: 'window', tenantId: 'default' });
+      expect(await within(assertSchemaCompatible(fresh, V13_BUILD), 2_000)).toEqual({ version: 13, application: 13, forward: [] });
+      expect(await within(ensureTenant(fresh, 'default'), 2_000)).toBeUndefined();
+      expect(await within(ensureTenant(fresh, 'preview-new'), 2_000)).toBeUndefined();
+      expect(await within(log.create('window.jsonl', bytes('{"a":1}\n')), 2_000)).toBe(true);
+      expect(await within(queue.enqueue('default', 'compat-window', 'w', null), 2_000)).toBe(true);
+      expect(await within(sweep(fresh, { tenantId: 'default' }), 2_000)).not.toBe('TIMEOUT');
+      expect(await probe(app, `UPDATE execution_runs SET status = 'AUTHORIZED', updated_at = now() WHERE run_id = 'run-1'`)).toBe('OK');
+      expect(await probe(app, `INSERT INTO admin_audit_events (tenant_id, actor, kind, outcome) VALUES ('default', 'cli', 'ADMIN_WINDOW', 'OK')`)).toBe('OK');
+      // The v13 learning service: reading a context and saving a meaning of an existing subject proceed; creating or changing a subject waits.
+      expect(await probe(app, `SELECT * FROM learning_subjects s JOIN learning_memories m USING (tenant_id, subject_id)`)).toBe('OK');
+      expect(await probe(app, `INSERT INTO learning_memories (tenant_id, subject_id, term, target) VALUES ('default', $1, 'sol dev', 'network:SOLANA_DEVNET')`, [SUBJECT])).toBe('OK');
+      expect(await probe(app, `INSERT INTO learning_feedback_events (tenant_id, scope, kind, evidence) VALUES ('default', 'WEB', 'TURN', 'OBSERVED')`)).toBe('OK');
+      expect(await probe(app, `UPDATE learning_subjects SET last_seen_at = now() WHERE subject_id = $1`, [SUBJECT])).toBe('55P03');
+      const waiting = probe(app, `INSERT INTO learning_subjects (tenant_id, subject_id, kind, subject_digest) VALUES ('default', $1, 'WALLET', $2)`,
+        ['lsb_' + 'c'.repeat(26), Buffer.alloc(32, 3)], 5_000);
+      decide(true);
+      await migration;
+      expect(await waiting).toBe('OK');
+      expect(await assertSchemaCompatible(fresh, V13_BUILD)).toEqual({ version: 14, application: 13, forward: [identity(M14)] });
+      expect(await outcome(unpatched.assertSchemaCurrent(fresh, V13_BUILD))).toEqual(MISMATCH);
+    } finally { decide(false); await migration.catch(() => undefined); }
+  });
+
+  it('the documented emergency reversal restores the exact v13 catalog and refuses, unchanged, anything but the certified 0014 as newest', async () => {
+    const doc = await readFile(new URL('../../../docs/deploy/SCHEMA-COMPATIBILITY.md', import.meta.url), 'utf8');
+    const section = doc.slice(doc.indexOf('### 8.3')), start = section.indexOf('```sql\n') + '```sql\n'.length;
+    const reversal = section.slice(start, section.indexOf('\n```', start));
+    expect(reversal).toMatch(/^BEGIN;[\s\S]*COMMIT;$/);
+    const v13 = await catalog((await database(V13M)).db);
+    for (const tamper of [`UPDATE schema_migrations SET sha256 = repeat('f', 64) WHERE version = 14`,
+      `INSERT INTO schema_migrations (version, name, sha256) VALUES (15, 'later_change', repeat('e', 64))`]) {
+      const t = await database(V14M), session = t.open(1);
+      await t.db.query(tamper);
+      const before = { shape: await catalog(t.db), history: await ledger(t.db) };
+      expect(await outcome(session.query(reversal))).toEqual({ error: 'P0001' });
+      await session.close();
+      expect({ shape: await catalog(t.db), history: await ledger(t.db) }).toEqual(before);
+    }
+    const t = await database(V14M);
+    await seed13(t.db);
+    await t.db.query(`INSERT INTO learning_evidence (tenant_id, subject_id, term, target) VALUES ('default', $1, 'arb', 'network:ARBITRUM')`, [SUBJECT]);
+    await t.db.query(reversal);
+    expect(await catalog(t.db)).toEqual(v13);
+    expect(await assertSchemaCompatible(t.db, V13_BUILD)).toEqual({ version: 13, application: 13, forward: [] });
+    // BUILD-CHAT-LEARNING-001 data stays: only what 0014 added is removed.
+    expect((await t.db.query(`SELECT term FROM learning_memories`)).rows).toEqual([{ term: 'arb' }]);
+    expect(await migrate(t.db, V14M)).toEqual([14]);
+  });
+});
