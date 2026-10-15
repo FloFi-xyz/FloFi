@@ -57,17 +57,16 @@ Local, loopback PostgreSQL 18.6 (CI image), no public network, no model, no real
 
 | Gate | Result |
 | --- | --- |
-| Lexicon / engine / evaluation / glossary unit suites | 16 + 21 (incl. the whole eval corpus replayed with learning on: identical replies) + 8 + 4 passed |
-| Copilot, channel-core, i18n catalog, panel, authority-boundary suites | 255 passed (with the existing Copilot suites) |
-| PostgreSQL: learning store/service 14, web path 5, admin AI Learning 6, Telegram learning 3 | all passed |
-| Channels (unit + PostgreSQL) | 187 passed, 3 skipped (pre-existing skips) |
-| Compatibility, admin, learning, preview-migration (combined Release B tree) | 137 passed, 3 skipped (`schema-compatibility` skips by design in Release B) |
+| `pnpm check` (Release B: typecheck, lint, build, schema drift, unit) | **passed** — 382 files, 4,332 tests (2 skipped, pre-existing) |
+| `pnpm test:postgres` (Release B, full) | **passed** — 66 files, 419 tests (3 skipped: `schema-compatibility.pg.test.ts` skips by design in Release B) |
+| Learning-specific suites inside those | lexicon 16, engine 21 (incl. the whole eval corpus replayed with learning on: identical replies), evaluation 8, glossary 4; PostgreSQL store/service 14, web path 5, admin AI Learning 6, Telegram learning 3 |
 | Release A tree: cloud-runtime suites / backend `schema-compatibility.pg.test.ts` (runs for the new certificate) | 48 passed / 3 passed |
 | Browser: `copilot-learning` (new) / `copilot` / `admin-console` (+ AI Learning) | 1 / 13 / 1 passed |
 | governance-lite; self-tests; `git diff --check` | passed; 19 + 22 OK; clean |
-| `pnpm check` (Release B) | typecheck, lint, build, schema drift **passed**; the unit phase was **still running when the usage limit was reached — result not confirmed** |
+| CircleCI Release A (#99) | certification (unit, PostgreSQL, offline compatibility + fork suite, full guarded browser suite, SBOM) and governance **passed** |
+| CircleCI Release B (#100) | first run: governance passed; certification **failed** on `backend/admin-analytics.pg.test.ts`, which asserted 12 migrations (a stale "0012 is newest" literal this build missed locally). Fixed to follow the shipped manifest; the full local PostgreSQL run above includes the fix. See the PR for the re-run. |
 
-**Not run:** the full `pnpm test:postgres`, fork suites, the full guarded browser phases, `pnpm check` on the Release A tree, audit/SBOM, CircleCI.
+**Not run locally:** fork suites, the full guarded browser phases and audit/SBOM for Release B (CircleCI certification runs them).
 
 ## 4. Acceptance (final criteria)
 
