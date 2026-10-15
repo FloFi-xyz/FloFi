@@ -171,16 +171,19 @@ export function createChannelService(ctx: ChannelContext) {
     const session: ChannelLearningSession | null = principal && active ? await ctx.learning!.session(principal) : null;
     const interpret: TurnInterpreter | null = ctx.interpreter && core.copilot ? async (request, hints) => {
       if (!await modelAllowed(conversationId, now)) return { ok: false, code: 'COPILOT_BUSY' };
-      const glossary = session ? ctx.learning!.glossary(session, request.messages, hints?.aliases ?? []) : null;
+      const glossary = session ? ctx.learning!.glossary(session, request.messages, hints?.aliases ?? [], hints?.adapted ?? []) : null;
       const result = await ctx.interpreter!(request, glossary?.glossary ? { glossary: glossary.glossary } : undefined);
       if (session && glossary) await ctx.learning!.record([{ kind: 'INTERPRETED', outcome: result.ok ? 'OK' : result.code, language: result.ok ? languageOf(result.intent) : null,
         privateEntries: glossary.privateEntries, globalEntries: glossary.globalEntries, knowledgeVersion: session.learning.globalVersion }], session.subjectId);
       return result;
     } : null;
+    // BUILD-CHAT-LEARNING-002: a new conversation starts in the language this sender usually writes in (learned only where permitted).
+    const hint = session?.learning.languageHint;
+    if (hint && !state.greeted && state.copilot === null && state.language !== hint) state = { ...state, language: hint };
     const prior = state;
     let decision = await decideTurn({ content: payload.content, state, optedOut: !active, interpret, support: core.supportContact, privacy: core.privacyUrl,
       catalogs: ctx.catalogs ?? null, ...session && session.learning.memory !== 'UNAVAILABLE' ? { learning: session.learning } : {} });
-    if (session) decision = await learn(decision, principal!, session);
+    if (session) decision = await learn(decision, principal!, session, conversationId);
     state = decision.state;
     const lm = channelCopy(state.language);
     switch (decision.action) {
@@ -242,7 +245,7 @@ export function createChannelService(ctx: ChannelContext) {
    * BUILD-CHAT-LEARNING-001: the learning part of a decided turn — the memory action the sender confirmed (its failure replaces the reply), a
    * MEMORY command's answer, the used saved meanings (retention restarts) and the content-free feedback. Never throws.
    */
-  async function learn(decision: TurnDecision, principal: ChannelLearningPrincipal, session: ChannelLearningSession): Promise<TurnDecision> {
+  async function learn(decision: TurnDecision, principal: ChannelLearningPrincipal, session: ChannelLearningSession, conversationId: string): Promise<TurnDecision> {
     const learning = ctx.learning!, language = decision.state.language;
     let out = decision;
     if (decision.memory) {
@@ -271,7 +274,12 @@ export function createChannelService(ctx: ChannelContext) {
     const copilotOutcome = decision.outcome === 'PROPOSED_INTERPRETED' ? 'PROPOSAL' : /^COPILOT_[A-Z_]+$/.test(decision.outcome) ? decision.outcome.slice('COPILOT_'.length) : null;
     await learning.record([...copilotOutcome ? [{ kind: 'TURN', outcome: copilotOutcome, language, privateEntries: own.length, globalEntries: shared,
       knowledgeVersion: session.learning.globalVersion }] : [], ...(decision.learning?.signals ?? []).map(kind => ({ kind })), ...own.length ? [{ kind: 'MEMORY_USED' as const }] : [],
-    ...shared ? [{ kind: 'KNOWLEDGE_USED' as const, knowledgeVersion: session.learning.globalVersion }] : []], session.subjectId).catch(() => undefined);
+    ...shared ? [{ kind: 'KNOWLEDGE_USED' as const, knowledgeVersion: session.learning.globalVersion }] : [],
+    // BUILD-CHAT-LEARNING-002: the engine's content-free signal outcomes (which signal, or why it was ignored).
+    ...(decision.learning?.events ?? []).map(event => ({ kind: event.kind, outcome: event.outcome }))], session.subjectId).catch(() => undefined);
+    // ...and its observations of the sender's own words, stored only where persistent automatic learning is permitted for the sender.
+    if (decision.learning?.observations?.length && session.learning.automatic === 'ON')
+      await learning.observe(principal, decision.learning.observations, { conversation: conversationId, request: decision.state.requests ?? 0 }).catch(() => undefined);
     return out;
   }
 

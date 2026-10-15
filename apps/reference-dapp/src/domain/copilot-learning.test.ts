@@ -25,15 +25,14 @@ const ETH_SEPOLIA_SWAP = intent.action(act.swap({ network: 'ETHEREUM_SEPOLIA', i
 const text = (reply: CopilotReply | null) => reply ? [reply.text, ...reply.notes, ...reply.options].join('\n') : '';
 
 describe('BUILD-CHAT-LEARNING-001 acceptance: private meaning, no inheritance, shared approved glossary', () => {
-  it('User A states and keeps “arb” = Arbitrum One; it grounds A’s later request with a visible note', () => {
-    const a = session(learning('AVAILABLE'));
-    const offer = a.say('Whenever I say Arb, I mean Arbitrum.');
-    expect(offer).toMatchObject({ kind: 'MEMORY', options: ['Remember', 'Not now'] });
-    expect(offer!.text).toContain('In this conversation, I\'ll read “arb” as Arbitrum One (real funds).');
-    expect(offer!.memory).toBeUndefined(); // nothing is stored before the click
+  it('User A states “arb” = Arbitrum One (no offer, no click); it grounds A’s later request with a visible note', () => {
+    // BUILD-CHAT-LEARNING-002: with persistent automatic learning permitted for A, the statement is answered in one sentence and observed.
+    const a = session(learning('AVAILABLE', { automatic: 'ON' }));
+    const stated = a.say('Whenever I say Arb, I mean Arbitrum.');
+    expect(stated).toMatchObject({ kind: 'ANSWER', text: 'Got it — from now on I\'ll read “arb” as Arbitrum One (real funds).', options: [] });
+    expect(stated!.memory).toBeUndefined();
+    expect(stated!.learning?.observations).toEqual([{ kind: 'STATED', term: 'arb', target: 'network:ARBITRUM', via: 'CHAT' }]);
     expect(a.turns.at(-1)!.request).toBeNull(); // never sent to the model
-    const kept = a.say('Remember');
-    expect(kept).toMatchObject({ kind: 'MEMORY', memory: { op: 'SAVE', entry: { term: 'arb', target: 'network:ARBITRUM', source: 'PRIVATE' } } });
 
     // A later session: the saved meaning comes back through A's verified identity.
     const later = session(learning('AVAILABLE', { private: [saved('arb', 'network:ARBITRUM')] }));
@@ -71,12 +70,12 @@ describe('BUILD-CHAT-LEARNING-001 memory controls in the conversation', () => {
     expect(s.turns.at(-1)!.request).not.toBeNull();
   });
 
-  it('anonymous: the meaning applies to this conversation only, and FloFi says how to keep it', () => {
+  it('anonymous: the meaning applies to this conversation only, and FloFi invites nothing (no sign-in, no teaching prompt)', () => {
     const s = session(learning('ANONYMOUS'));
     const reply = s.say('Whenever I say Arb, I mean Arbitrum');
-    expect(reply).toMatchObject({ kind: 'ANSWER' });
-    expect(reply!.text).toContain('Prove your wallet');
+    expect(reply).toMatchObject({ kind: 'ANSWER', text: 'Got it — in this conversation I\'ll read “arb” as Arbitrum One (real funds).' });
     expect(reply!.memory).toBeUndefined();
+    expect(reply!.learning?.observations).toEqual([]);
     const used = s.say('Bridge 10 USDC from Base to Arb', BASE_TO_ARB);
     expect(used).toMatchObject({ kind: 'PROPOSAL' });
     expect(used!.notes).toContain('“arb” read as Arbitrum One — as you said in this conversation.');
@@ -84,22 +83,22 @@ describe('BUILD-CHAT-LEARNING-001 memory controls in the conversation', () => {
     expect(session(learning('ANONYMOUS')).say('Bridge 10 USDC from Base to Arb', BASE_TO_ARB)!.kind).toBe('CLARIFICATION');
   });
 
-  it('paused memory never offers to save; “Not now” stores nothing', () => {
-    expect(session(learning('PAUSED')).say('Whenever I say Arb, I mean Arbitrum')).toMatchObject({ kind: 'ANSWER', text: expect.stringContaining('paused') });
-    const s = session(learning('AVAILABLE'));
-    s.say('Whenever I say Arb, I mean Arbitrum');
-    const declined = s.say('Not now');
-    expect(declined).toMatchObject({ kind: 'ANSWER' });
-    expect(declined!.memory).toBeUndefined();
-    expect(declined!.text).toContain('Not saved');
+  it('without persistent automatic learning (paused, not permitted) a statement is never observed; nothing offers to save it', () => {
+    for (const context of [learning('PAUSED'), learning('AVAILABLE', { automatic: 'OFF' }), learning('AVAILABLE')]) {
+      const reply = session(context).say('Whenever I say Arb, I mean Arbitrum');
+      expect(reply).toMatchObject({ kind: 'ANSWER', text: 'Got it — in this conversation I\'ll read “arb” as Arbitrum One (real funds).', options: [] });
+      expect(reply!.learning?.observations).toEqual([]);
+      expect(reply!.memory).toBeUndefined();
+    }
   });
 
-  it('any other message drops the offer and continues normally', () => {
-    const s = session(learning('AVAILABLE'));
+  it('“Remember” is no longer a button: after a statement it is ordinary text for the interpreter', () => {
+    const s = session(learning('AVAILABLE', { automatic: 'ON' }));
     s.say('Whenever I say Arb, I mean Arbitrum');
+    expect(s.say('Remember', intent.unsupported('Not a request.'))!.memory).toBeUndefined();
+    expect(s.turns.at(-1)!.request).not.toBeNull();
     const reply = s.say('Bridge 10 USDC from Base to Arb', BASE_TO_ARB);
     expect(reply!.kind).toBe('PROPOSAL');
-    expect(s.say('Remember', intent.unsupported('Not a request.'))!.memory).toBeUndefined();
   });
 
   it('forget, forget everything (confirmed) and reply language are typed memory actions', () => {
@@ -109,9 +108,10 @@ describe('BUILD-CHAT-LEARNING-001 memory controls in the conversation', () => {
     expect(all).toMatchObject({ kind: 'MEMORY', options: ['Delete all', 'Keep'] });
     expect(all!.memory).toBeUndefined();
     expect(s.say('Delete all')).toMatchObject({ kind: 'MEMORY', memory: { op: 'FORGET_ALL' } });
-    const pt = s.say('Responda sempre em português');
-    expect(pt).toMatchObject({ kind: 'MEMORY', options: ['Lembrar', 'Agora não'] });
-    expect(s.say('Lembrar')).toMatchObject({ memory: { op: 'LANGUAGE', language: 'PT' } });
+    // A reply language applies at once; it is observed (stated) only where persistent automatic learning is permitted.
+    expect(s.say('Responda sempre em português')).toMatchObject({ kind: 'ANSWER', text: 'A partir de agora, respondo em português.', options: [] });
+    const observed = session(learning('AVAILABLE', { automatic: 'ON' })).say('Responda sempre em português');
+    expect(observed!.learning?.observations).toEqual([{ kind: 'LANGUAGE', language: 'PT', stated: true }]);
   });
 
   it('a saved reply language is used for FloFi’s own words, even for an English message', () => {
@@ -121,11 +121,11 @@ describe('BUILD-CHAT-LEARNING-001 memory controls in the conversation', () => {
     expect(reply!.text).toMatch(/Entendi|Interpretei|proposta/i);
   });
 
-  it('offers to replace a different saved meaning and says so', () => {
-    const s = session(learning('AVAILABLE', { private: [saved('grana', 'asset:USDT')] }));
-    const offer = s.say('Lembre que grana é USDC');
-    expect(offer!.text).toContain('substitui');
-    expect(s.say('Lembrar')).toMatchObject({ memory: { op: 'SAVE', entry: { term: 'grana', target: 'asset:USDC' } } });
+  it('a new statement for a word saved differently applies at once and is observed (the store keeps the latest statement)', () => {
+    const s = session(learning('AVAILABLE', { automatic: 'ON', private: [saved('grana', 'asset:USDT')] }));
+    const reply = s.say('Lembre que grana é USDC');
+    expect(reply).toMatchObject({ kind: 'ANSWER', text: 'Entendi — a partir de agora, vou entender “grana” como USDC.' });
+    expect(reply!.learning?.observations).toEqual([{ kind: 'STATED', term: 'grana', target: 'asset:USDC', via: 'CHAT' }]);
   });
 });
 
@@ -183,7 +183,6 @@ describe('BUILD-CHAT-LEARNING-001 safety of learned vocabulary', () => {
   it('this conversation’s meaning wins over a saved one for the same word', () => {
     const s = session(learning('AVAILABLE', { private: [saved('grana', 'asset:USDT')] }));
     s.say('Lembre que grana é USDC');
-    s.say('Agora não');
     const reply = s.say('Swap 5 grana to WETH on Base Sepolia', intent.action(act.swap({ network: 'BASE_SEPOLIA', inputAsset: 'USDC', outputAsset: 'WETH', amount: '5' })));
     expect(reply!.kind).toBe('PROPOSAL');
     expect(reply!.notes).toContain('“grana” read as USDC — as you said in this conversation.');
@@ -207,9 +206,158 @@ describe('BUILD-CHAT-LEARNING-001 safety of learned vocabulary', () => {
   });
 });
 
+describe('BUILD-CHAT-LEARNING-002 invisible learning in the conversation', () => {
+  const SOL_DEV = (amount: string) => intent.action(act.swap({ network: 'SOLANA_DEVNET', inputAsset: 'SOL', outputAsset: 'DEVUSDC', amount }));
+  const ETH_SEP = (amount: string) => intent.action(act.swap({ network: 'ETHEREUM_SEPOLIA', inputAsset: 'WETH', outputAsset: 'USDC', amount }));
+  const events = (reply: CopilotReply | null) => reply?.learning?.events ?? [];
+
+  it('an answer to FloFi’s question adapts the word for the rest of the conversation (test network: it then grounds, with a note)', () => {
+    const s = session(learning('AVAILABLE', { automatic: 'ON' }));
+    expect(s.say('Swap 0.1 SOL to devUSDC on sol dev', SOL_DEV('0.1'))).toMatchObject({ kind: 'CLARIFICATION', options: expect.arrayContaining(['Solana Devnet']) });
+    const answered = s.say('Solana Devnet');
+    expect(answered).toMatchObject({ kind: 'PROPOSAL', sentence: 'swap 0.1 SOL to devUSDC on Solana Devnet slippage 50 bps' });
+    expect(answered!.learning?.observations).toEqual([{ kind: 'CLARIFIED', term: 'sol dev', target: 'network:SOLANA_DEVNET', via: 'CHAT' }]);
+    expect(events(answered)).toContainEqual({ kind: 'ADAPTATION', outcome: 'CLARIFIED_NETWORK' });
+    s.dismiss();
+    const next = s.say('Troca 0,2 SOL por devUSDC na sol dev', SOL_DEV('0.2'));
+    expect(next).toMatchObject({ kind: 'PROPOSAL', sentence: 'swap 0.2 SOL to devUSDC on Solana Devnet slippage 50 bps' });
+    expect(next!.notes).toContain('“sol dev” read as Solana Devnet — as you chose earlier in this conversation.');
+    expect(events(next)).toContainEqual({ kind: 'INFERRED_USED', outcome: 'ADAPTED' });
+    // A new conversation starts without it: in-session adaptation is never stored.
+    expect(session(learning('AVAILABLE', { automatic: 'ON' })).say('Swap 0.2 SOL to devUSDC on sol dev', SOL_DEV('0.2'))!.kind).toBe('CLARIFICATION');
+  });
+
+  it('a real-funds answer is only offered first next time, never proposed from the inference', () => {
+    const s = session(learning('ANONYMOUS'));
+    s.say('Bridge de 10 USDC da Base pra arb', BASE_TO_ARB);
+    expect(s.say('Arbitrum One')).toMatchObject({ kind: 'PROPOSAL' });
+    s.dismiss();
+    const again = s.say('Bridge 5 USDC from Base to arb', intent.action(act.bridge({ sourceNetwork: 'BASE', destinationNetwork: 'ARBITRUM', asset: 'USDC', amount: '5' })));
+    expect(again).toMatchObject({ kind: 'CLARIFICATION', options: ['Arbitrum One'] });
+    expect(again!.notes).toEqual(['You used “arb” for Arbitrum One before. It uses real funds, so it is first below — choose it only if that is what you mean.']);
+  });
+
+  it('a correction of a reading FloFi made on its own withdraws it; the word is asked about again', () => {
+    const s = session(learning('AVAILABLE', { automatic: 'ON', learned: [{ term: 'eth sep', target: 'network:ETHEREUM_SEPOLIA', source: 'LEARNED' }] }));
+    const read = s.say('Swap 0.002 WETH to USDC on eth sep', ETH_SEP('0.002'));
+    expect(read).toMatchObject({ kind: 'PROPOSAL', sentence: 'swap 0.002 WETH to USDC on Ethereum Sepolia slippage 50 bps' });
+    expect(read!.notes).toContain('“eth sep” read as Ethereum Sepolia — learned from your earlier choices.');
+    const corrected = s.say('no, I meant Base Sepolia', intent.edit({ network: 'BASE_SEPOLIA' }));
+    expect(corrected).toMatchObject({ kind: 'PROPOSAL', sentence: 'swap 0.002 WETH to USDC on Base Sepolia slippage 50 bps' });
+    expect(corrected!.learning?.observations).toEqual([{ kind: 'CONTRADICTED', term: 'eth sep', target: 'network:ETHEREUM_SEPOLIA', via: 'CHAT' }]);
+    expect(events(corrected)).toEqual(expect.arrayContaining([{ kind: 'ADAPTATION', outcome: 'CORRECTED_NETWORK_CHAT' }, { kind: 'INFERRED_CORRECTED', outcome: 'LEARNED' }]));
+    s.dismiss();
+    expect(s.say('Swap 0.003 WETH to USDC on eth sep', ETH_SEP('0.003'))!.kind).toBe('CLARIFICATION');
+  });
+
+  it('a change of objective is not a correction (PT and EN); nothing is observed', () => {
+    for (const [text, language] of [['na verdade, vamos fazer na Base Sepolia', 'PT'], ['actually, let’s use Base Sepolia instead', 'EN']] as const) {
+      const s = session(learning('AVAILABLE', { automatic: 'ON', learned: [{ term: 'eth sep', target: 'network:ETHEREUM_SEPOLIA', source: 'LEARNED' }] }));
+      s.say('Swap 0.002 WETH to USDC on eth sep', ETH_SEP('0.002'));
+      const changed = s.say(text, intent.edit({ network: 'BASE_SEPOLIA' }, {}, language));
+      expect(changed!.kind).toBe('PROPOSAL');
+      expect(changed!.learning?.observations ?? []).toEqual([]);
+      expect(events(changed)).toContainEqual({ kind: 'CORRECTION_IGNORED', outcome: 'OBJECTIVE_CHANGED' });
+    }
+  });
+
+  it('changing a value the user named, or an amount, is never a correction', () => {
+    const s = session(learning('AVAILABLE', { automatic: 'ON' }));
+    s.say('Swap 0.002 WETH to USDC on Ethereum Sepolia', ETH_SEP('0.002'));
+    expect(events(s.say('no, I meant Base Sepolia', intent.edit({ network: 'BASE_SEPOLIA' })))).toContainEqual({ kind: 'CORRECTION_IGNORED', outcome: 'CANONICAL' });
+    const t = session(learning('AVAILABLE', { automatic: 'ON', learned: [{ term: 'eth sep', target: 'network:ETHEREUM_SEPOLIA', source: 'LEARNED' }] }));
+    t.say('Swap 0.002 WETH to USDC on eth sep', ETH_SEP('0.002'));
+    const mixed = t.say('no, I meant 0.003 on Base Sepolia', intent.edit({ network: 'BASE_SEPOLIA', amount: '0.003' }));
+    expect(mixed!.learning?.observations ?? []).toEqual([]);
+    expect(events(mixed)).toContainEqual({ kind: 'CORRECTION_IGNORED', outcome: 'FINANCIAL_FIELD' });
+  });
+
+  it('applying a proposal FloFi read on its own confirms it; editing exactly that value on the canvas corrects it', () => {
+    const s = session(learning('AVAILABLE', { automatic: 'ON', learned: [{ term: 'sol dev', target: 'network:SOLANA_DEVNET', source: 'LEARNED' }] }));
+    const proposed = s.say('Swap 0.1 SOL to devUSDC on sol dev', SOL_DEV('0.1'));
+    expect(proposed!.kind).toBe('PROPOSAL');
+    expect(s.apply()).toMatchObject({ observations: [{ kind: 'CONFIRMED', term: 'sol dev', target: 'network:SOLANA_DEVNET', via: 'CHAT' }],
+      events: [{ kind: 'INFERRED_CONFIRMED', outcome: 'LEARNED' }] });
+    const node = s.workflow.nodes.find(n => n.actionType !== 'mock-trigger' && !n.actionType.startsWith('mock-'))!;
+    // A layout move or any change that leaves the step as it was is nothing.
+    expect(s.canvas(workflow => ({ ...workflow }))).toBeNull();
+    const edited = s.canvas({ type: 'SET_SOLANA_SWAP', nodeId: node.nodeId, input: { network: 'Solana', from: 'SOL', to: 'USDC', amount: '0.1', slippage: '50' } as never,
+      source: 'CANVAS', baseRevision: s.workflow.revision });
+    // Network and token changed together: a new objective, not a correction of how FloFi read one word.
+    expect(edited).toMatchObject({ observations: [], events: [{ kind: 'CORRECTION_IGNORED', outcome: 'SEVERAL_FIELDS' }] });
+  });
+
+  it('a canvas change of exactly the network FloFi inferred corrects it; a named value, several fields or a removed step are not corrections', () => {
+    const SUPPLY = intent.action(act.lending('SUPPLY', { network: 'BASE_SEPOLIA', asset: 'USDC', amount: '5' }));
+    // Grounding lets FloFi infer only test networks, and the canvas switches a step's network only where the same tokens exist on both (Aave:
+    // Base Sepolia ⇄ Base). So the applied step's network reading is marked as inferred here, as the engine marks a word it read on its own.
+    const applied = (inferred: boolean) => {
+      const s = session(learning('AVAILABLE', { automatic: 'ON' }));
+      expect(s.say('Put 5 USDC into Aave on Base Sepolia', SUPPLY)).toMatchObject({ kind: 'PROPOSAL', sentence: 'supply 5 USDC to Aave on Base Sepolia' });
+      s.apply();
+      if (inferred) s.state = { ...s.state, referents: s.state.referents.map(r => !r.applied ? r : { ...r, readings: r.readings!.map(x => x.field !== 'network' ? x
+        : { ...x, via: 'INFERRED' as const, term: 'bsep', source: 'LEARNED' as const }) }) };
+      const step = s.state.referents.find(r => r.applied)!.step;
+      const edit = (change: Record<string, string>) => s.canvas({ type: 'SET_SUPPLY', nodeId: step.nodeId, input: { ...(step.detail as { input: object }).input, ...change } as never,
+        source: 'CANVAS', baseRevision: s.workflow.revision });
+      return { s, step, edit };
+    };
+    const inferred = applied(true);
+    expect(inferred.edit({ network: 'Base' })).toMatchObject({ observations: [{ kind: 'CONTRADICTED', term: 'bsep', target: 'network:BASE_SEPOLIA', via: 'CANVAS' }],
+      events: expect.arrayContaining([{ kind: 'ADAPTATION', outcome: 'CORRECTED_NETWORK_CANVAS' }, { kind: 'INFERRED_CORRECTED', outcome: 'LEARNED' }]) });
+    expect(inferred.s.state.suppressed).toEqual([{ term: 'bsep', target: 'network:BASE_SEPOLIA' }]);
+    // A step is evaluated once: a later change of it is not observed again.
+    expect(inferred.edit({ network: 'Base Sepolia' })).toBeNull();
+    expect(applied(false).edit({ network: 'Base' })).toMatchObject({ observations: [], events: [{ kind: 'CORRECTION_IGNORED', outcome: 'CANONICAL' }] });
+    expect(applied(true).edit({ network: 'Base', amount: '7' })).toMatchObject({ observations: [], events: [{ kind: 'CORRECTION_IGNORED', outcome: 'FINANCIAL_FIELD' }] });
+    const removed = applied(true);
+    expect(removed.s.canvas(workflow => ({ ...workflow, revision: workflow.revision + 1, nodes: workflow.nodes.filter(n => n.nodeId !== removed.step.nodeId) }))?.events)
+      .toEqual([{ kind: 'CORRECTION_IGNORED', outcome: 'STEP_REMOVED' }]);
+  });
+
+  it('learned meanings never override the current request: a stated meaning in this conversation and the user’s own words win', () => {
+    const s = session(learning('AVAILABLE', { automatic: 'ON', learned: [{ term: 'grana', target: 'asset:USDT', source: 'LEARNED' }] }));
+    s.say('Lembre que grana é USDC');
+    const reply = s.say('Swap 5 grana to WETH on Base Sepolia', intent.action(act.swap({ network: 'BASE_SEPOLIA', inputAsset: 'USDC', outputAsset: 'WETH', amount: '5' })));
+    expect(reply!.notes).toContain('“grana” read as USDC — as you said in this conversation.');
+    const named = session(learning('AVAILABLE', { learned: [{ term: 'eth sep', target: 'network:ETHEREUM_SEPOLIA', source: 'LEARNED' }] }));
+    const own = named.say('Swap 0.001 WETH to USDC on Base Sepolia', intent.action(act.swap({ network: 'BASE_SEPOLIA', inputAsset: 'WETH', outputAsset: 'USDC', amount: '0.001' })));
+    expect(own).toMatchObject({ kind: 'PROPOSAL', sentence: 'swap 0.001 WETH to USDC on Base Sepolia slippage 50 bps' });
+    expect(own!.notes.join('\n')).not.toContain('learned');
+  });
+
+  it('nothing learned ever supplies a value: an amount the user did not write is asked for', () => {
+    const s = session(learning('AVAILABLE', { automatic: 'ON', learned: [{ term: 'sol dev', target: 'network:SOLANA_DEVNET', source: 'LEARNED' }] }));
+    const reply = s.say('Swap SOL to devUSDC on sol dev', SOL_DEV('0.1'));
+    expect(reply!.kind).toBe('CLARIFICATION');
+    expect(reply!.command).toBeUndefined();
+  });
+
+  it('observations need persistent learning to be permitted; content-free events do not', () => {
+    const s = session(learning('AVAILABLE', { automatic: 'OFF' }));
+    s.say('Swap 0.1 SOL to devUSDC on sol dev', SOL_DEV('0.1'));
+    const answered = s.say('Solana Devnet');
+    expect(answered!.learning?.observations).toEqual([]);
+    expect(events(answered)).toContainEqual({ kind: 'ADAPTATION', outcome: 'CLARIFIED_NETWORK' });
+    // Session-only deployments adapt the same way and have nothing to store.
+    const only = session(learning('SESSION'));
+    only.say('Swap 0.1 SOL to devUSDC on sol dev', SOL_DEV('0.1'));
+    only.say('Solana Devnet');
+    only.dismiss();
+    expect(only.say('Swap 0.2 SOL to devUSDC on sol dev', SOL_DEV('0.2'))!.kind).toBe('PROPOSAL');
+  });
+
+  it('the learned starting language is only a starting point: the user’s own words decide', () => {
+    const s = session(learning('AVAILABLE', { languageHint: 'PT' }));
+    expect(s.say('my private key is 0x' + 'a'.repeat(64))!.text).toMatch(/chave|nunca|não/i);
+    const english = s.say('Put 10 USDC into Aave on Base Sepolia', intent.action(act.lending('SUPPLY', { asset: 'USDC', amount: '10', network: 'BASE_SEPOLIA' })));
+    expect(english!.text).toMatch(/^Interpreted as/);
+  });
+});
+
 describe('BUILD-CHAT-LEARNING-001 the exact grammar never captures a memory button or statement', () => {
   it('every offer label and memory statement reaches the engine (the panel and channels try the exact grammar first)', () => {
-    const labels = (['EN', 'PT'] as const).flatMap(language => [...learningCopy(language).options, ...learningCopy(language).forgetAllOptions]);
+    const labels = (['EN', 'PT'] as const).flatMap(language => [...learningCopy(language).forgetAllOptions]);
     for (const text of [...labels, 'Whenever I say Arb, I mean Arbitrum', 'forget arb', 'forget everything', 'esqueça tudo', 'Responda sempre em português', 'memory'])
       expect(() => parseLocalCommand(text, initialEditor().workflow, BASE_CONTEXT, TEST_WALLET), text).toThrow();
   });

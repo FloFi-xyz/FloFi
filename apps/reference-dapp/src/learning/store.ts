@@ -7,6 +7,8 @@
 import { isUniqueViolation, type Database, type Queryable } from '@defi-workflow-engine/cloud-runtime';
 import { LEXICON_LIMITS, type LexiconTarget } from '../domain/copilot-lexicon.ts';
 import { typedId } from '../platform/ids.ts';
+import { AUTOMATIC_NOTICE_VERSION, AUTOMATIC_RULES, decideLanguage, decideTerm, type AutomaticBasis, type AutomaticSetting, type EvidenceCounts } from './automatic.ts';
+import type { AutomaticMode } from './config.ts';
 
 export type SubjectKind = 'WALLET' | 'CHANNEL';
 export type LearningLanguage = 'EN' | 'PT';
@@ -26,7 +28,26 @@ export type FeedbackEvent = { readonly scope: 'WEB' | 'TELEGRAM' | 'WHATSAPP'; r
   readonly knowledgeVersion?: number | null };
 
 export const LEARNING_RETENTION = Object.freeze({ eventsDays: 90, supportDays: 180, pendingCandidateDays: 180, memoryDays: 365, unconsentedSubjectDays: 30,
-  subjectDays: 730, rateWindowDays: 2, batch: 1_000 });
+  subjectDays: 730, rateWindowDays: 2, batch: 1_000,
+  /** BUILD-CHAT-LEARNING-002: unlearned evidence, and the evidence behind an identity's starting language. */ evidenceDays: AUTOMATIC_RULES.evidenceDays, languageDays: 365 });
+/** BUILD-CHAT-LEARNING-002: how a saved meaning came to be — the user's "Remember" (BUILD-CHAT-LEARNING-001), their statement, or learned from evidence. */
+export type MemoryOrigin = 'REMEMBERED' | 'STATED' | 'LEARNED';
+export type OriginMemoryRow = MemoryRow & { readonly origin: MemoryOrigin };
+export type EvidenceRow = EvidenceCounts & { readonly term: string; readonly firstSeenAt: string; readonly lastSeenAt: string; readonly promotedAt: string | null };
+export type StoreObservation = { readonly kind: 'STATED' | 'CLARIFIED' | 'CORRECTED' | 'CONFIRMED' | 'CONTRADICTED'; readonly term: string; readonly target: LexiconTarget }
+  | { readonly kind: 'LANGUAGE'; readonly language: LearningLanguage; readonly stated: boolean };
+/** What one observation did: counted, learned, kept (a stated meaning is never overridden by inference), withdrawn, demoted, or nothing. */
+export type ObserveOutcome = 'DUPLICATE' | 'OBSERVED' | 'LEARNED' | 'ALREADY' | 'KEPT' | 'CONFLICT' | 'FULL' | 'DEMOTED' | 'WITHDRAWN' | 'IGNORED';
+const COUNTER = { STATED: 'stated', CLARIFIED: 'clarified', CORRECTED: 'corrected', CONFIRMED: 'confirmed' } as const;
+type EvidenceRecord = { term: string; target: string; stated: number; clarified: number; corrected: number; confirmed: number; conversations: number; last_request: Buffer | null;
+  last_conversation: Buffer | null; first_seen_at: Date; last_seen_at: Date; promoted_at: Date | null };
+const EVIDENCE_COLUMNS = 'term, target, stated, clarified, corrected, confirmed, conversations, last_request, last_conversation, first_seen_at, last_seen_at, promoted_at';
+const evidenceOf = (row: EvidenceRecord): EvidenceRow => ({ term: row.term, target: row.target, stated: row.stated, clarified: row.clarified, corrected: row.corrected,
+  confirmed: row.confirmed, conversations: row.conversations, firstSeenAt: row.first_seen_at.toISOString(), lastSeenAt: row.last_seen_at.toISOString(),
+  promotedAt: row.promoted_at?.toISOString() ?? null });
+/** The SQL condition (over `s`, a LEFT JOINed learning_automatic_settings row) under which a mode permits automatic learning for a subject. */
+const PERMITTED: Readonly<Record<AutomaticMode, string>> = { OFF: 'false',
+  CONSENT: `coalesce(s.enabled AND s.basis = 'CONSENT' AND s.notice_version >= ${AUTOMATIC_NOTICE_VERSION}, false)`, LEGITIMATE_INTEREST: '(s.subject_id IS NULL OR s.enabled)' };
 export const LEARNING_STORE_LIMITS = Object.freeze({ maxMemories: LEXICON_LIMITS.maxPrivate, maxPendingContributions: 1_000, maxEventsPerWrite: 8, seenEveryMs: 3_600_000 });
 const KIND = /^[A-Z][A-Z_]{2,40}$/, OUTCOME = /^[A-Z][A-Z0-9_]{1,60}$/, ACTOR = /^(adm_[a-z2-7]{26}|cli)$/, REASON = /^[^\p{Cc}]{1,200}$/u;
 
@@ -99,9 +120,13 @@ export function createLearningStore(db: Database, tenantId: string) {
         return 'SAVED';
       });
     },
+    /** Forgets one word: its saved meaning and (BUILD-CHAT-LEARNING-002) everything observed about it. */
     async forget(subjectId: string, term: string): Promise<boolean> {
-      const { rowCount } = await db.query(`DELETE FROM learning_memories WHERE tenant_id = $1 AND subject_id = $2 AND term = $3`, [tenantId, subjectId, term]);
-      return rowCount === 1;
+      return db.transaction(async tx => {
+        const { rowCount } = await tx.query(`DELETE FROM learning_memories WHERE tenant_id = $1 AND subject_id = $2 AND term = $3`, [tenantId, subjectId, term]);
+        await tx.query(`DELETE FROM learning_evidence WHERE tenant_id = $1 AND subject_id = $2 AND term = $3`, [tenantId, subjectId, term]);
+        return rowCount === 1;
+      });
     },
     /** Marks entries a turn used (their retention restarts). Bounded to the subject's own terms. */
     async touch(subjectId: string, terms: readonly string[], now: Date): Promise<void> {
@@ -144,6 +169,163 @@ export function createLearningStore(db: Database, tenantId: string) {
         await withdrawSupport(tx, contributor);
         const { rowCount } = await tx.query(`DELETE FROM learning_subjects WHERE tenant_id = $1 AND subject_id = $2`, [tenantId, subjectId]);
         return rowCount === 1;
+      });
+    },
+
+    // ── BUILD-CHAT-LEARNING-002: automatic learning (0014) ───────────────────────────────────────────────────────────────────────────
+    async automaticSetting(subjectId: string): Promise<AutomaticSetting | null> {
+      const { rows } = await db.query<{ enabled: boolean; basis: AutomaticBasis; notice_version: number; decided_at: Date }>(`SELECT enabled, basis, notice_version, decided_at
+        FROM learning_automatic_settings WHERE tenant_id = $1 AND subject_id = $2`, [tenantId, subjectId]);
+      const row = rows[0];
+      return row ? { enabled: row.enabled, basis: row.basis, noticeVersion: row.notice_version, decidedAt: row.decided_at.toISOString() } : null;
+    },
+    /**
+     * Records the identity's choice about automatic learning under `basis`. Turning it on under consent is also consent to keep the learned meanings
+     * (memory). Turning it off stops it and erases what it produced: every observation and every meaning learned or saved from a statement through it
+     * (meanings the user saved with BUILD-CHAT-LEARNING-001's "Remember" stay, governed by their own consent).
+     */
+    async setAutomatic(subjectId: string, enabled: boolean, basis: AutomaticBasis, noticeVersion: number, now: Date): Promise<void> {
+      await db.transaction(async tx => {
+        const locked = await tx.query(`SELECT 1 FROM learning_subjects WHERE tenant_id = $1 AND subject_id = $2 FOR UPDATE`, [tenantId, subjectId]);
+        if (!locked.rowCount) throw new Error('LEARNING_SUBJECT_INVALID');
+        await tx.query(`INSERT INTO learning_automatic_settings (tenant_id, subject_id, enabled, basis, notice_version, decided_at) VALUES ($1, $2, $3, $4, $5, $6)
+          ON CONFLICT (tenant_id, subject_id) DO UPDATE SET enabled = EXCLUDED.enabled, basis = EXCLUDED.basis, notice_version = EXCLUDED.notice_version,
+          decided_at = EXCLUDED.decided_at`, [tenantId, subjectId, enabled, basis, noticeVersion, now]);
+        if (enabled && basis === 'CONSENT') await tx.query(`UPDATE learning_subjects SET memory_enabled = true, memory_consent_at = coalesce(memory_consent_at, $3),
+          notice_version = coalesce(notice_version, $4), updated_at = $3 WHERE tenant_id = $1 AND subject_id = $2`, [tenantId, subjectId, now, noticeVersion]);
+        if (!enabled) await eraseAutomatic(tx, [subjectId]);
+        await tx.query(`UPDATE learning_subjects SET updated_at = $3 WHERE tenant_id = $1 AND subject_id = $2`, [tenantId, subjectId, now]);
+      });
+    },
+    /** The identity's saved meanings with how each came to be (bounded like `memories`). */
+    async memoriesWithOrigin(subjectId: string): Promise<OriginMemoryRow[]> {
+      const { rows } = await db.query<{ term: string; target: string; created_at: Date; touched_at: Date; stated: number | null }>(`SELECT m.term, m.target, m.created_at,
+          m.touched_at, e.stated FROM learning_memories m LEFT JOIN learning_evidence e ON e.tenant_id = m.tenant_id AND e.subject_id = m.subject_id AND e.term = m.term
+          AND e.target = m.target AND e.promoted_at IS NOT NULL WHERE m.tenant_id = $1 AND m.subject_id = $2 ORDER BY m.term LIMIT $3`,
+      [tenantId, subjectId, LEARNING_STORE_LIMITS.maxMemories]);
+      return rows.map(row => ({ term: row.term, target: row.target, createdAt: row.created_at.toISOString(), touchedAt: row.touched_at.toISOString(),
+        origin: row.stated === null ? 'REMEMBERED' : row.stated > 0 ? 'STATED' : 'LEARNED' }));
+    },
+    /** The language the identity's conversations were learned to start in (BUILD-CHAT-LEARNING-002), or null. */
+    async languageHint(subjectId: string): Promise<LearningLanguage | null> {
+      const { rows } = await db.query<{ target: string }>(`SELECT target FROM learning_evidence WHERE tenant_id = $1 AND subject_id = $2 AND term = '' AND promoted_at IS NOT NULL
+        LIMIT 1`, [tenantId, subjectId]);
+      return rows[0]?.target === 'language:PT' ? 'PT' : rows[0]?.target === 'language:EN' ? 'EN' : null;
+    },
+    /** Everything observed for the identity (its own view and export; bounded). */
+    async evidence(subjectId: string): Promise<EvidenceRow[]> {
+      const { rows } = await db.query<EvidenceRecord>(`SELECT ${EVIDENCE_COLUMNS} FROM learning_evidence WHERE tenant_id = $1 AND subject_id = $2
+        ORDER BY last_seen_at DESC, term, target LIMIT $3`, [tenantId, subjectId, AUTOMATIC_RULES.maxEvidence]);
+      return rows.map(evidenceOf);
+    },
+    /**
+     * Counts one observation for the identity, under its row lock, and applies the promotion rule (`automatic.ts`). A request is counted once per
+     * meaning (`request`), conversations once (`conversation`). A correction of a meaning that was learned automatically removes it; a meaning
+     * the user stated or saved is never replaced by inference. Bounded: at most `maxEvidence` rows per identity and `maxTargetsPerTerm` per word
+     * (the oldest unlearned evidence makes room), and the memory cap of `remember`.
+     */
+    async observe(subjectId: string, observation: StoreObservation, digests: { readonly request: Buffer; readonly conversation: Buffer }, now: Date): Promise<ObserveOutcome> {
+      if (digests.request.length !== 32 || digests.conversation.length !== 32) throw new Error('LEARNING_EVIDENCE_INVALID');
+      return db.transaction(async tx => {
+        const locked = await tx.query(`SELECT 1 FROM learning_subjects WHERE tenant_id = $1 AND subject_id = $2 FOR UPDATE`, [tenantId, subjectId]);
+        if (!locked.rowCount) throw new Error('LEARNING_SUBJECT_INVALID');
+        const termRows = async (term: string) => (await tx.query<EvidenceRecord>(`SELECT ${EVIDENCE_COLUMNS} FROM learning_evidence WHERE tenant_id = $1 AND subject_id = $2
+          AND term = $3 ORDER BY target`, [tenantId, subjectId, term])).rows;
+        const drop = (term: string, target: string) => tx.query(`DELETE FROM learning_evidence WHERE tenant_id = $1 AND subject_id = $2 AND term = $3 AND target = $4`,
+          [tenantId, subjectId, term, target]);
+        if (observation.kind === 'LANGUAGE') {
+          if (observation.stated) {
+            await tx.query(`UPDATE learning_subjects SET language = $3, updated_at = $4 WHERE tenant_id = $1 AND subject_id = $2`, [tenantId, subjectId, observation.language, now]);
+            return 'LEARNED';
+          }
+          const target = `language:${observation.language}`, before = await termRows('');
+          if (before.find(row => row.target === target)?.last_conversation?.equals(digests.conversation)) return 'DUPLICATE';
+          await tx.query(`INSERT INTO learning_evidence (tenant_id, subject_id, term, target, conversations, last_conversation, first_seen_at, last_seen_at)
+            VALUES ($1, $2, '', $3, 1, $4, $5, $5) ON CONFLICT (tenant_id, subject_id, term, target) DO UPDATE SET conversations = least(learning_evidence.conversations + 1, 100000),
+            last_conversation = EXCLUDED.last_conversation, last_seen_at = EXCLUDED.last_seen_at`, [tenantId, subjectId, target, digests.conversation, now]);
+          const after = (await termRows('')).map(evidenceOf), winner = decideLanguage(after), was = after.find(row => row.promotedAt)?.target ?? null;
+          await tx.query(`UPDATE learning_evidence SET promoted_at = CASE WHEN target = $3 THEN coalesce(promoted_at, $4) ELSE NULL END WHERE tenant_id = $1 AND subject_id = $2
+            AND term = ''`, [tenantId, subjectId, winner ? `language:${winner}` : null, now]);
+          return winner && was !== `language:${winner}` ? 'LEARNED' : 'OBSERVED';
+        }
+        const { term, target } = observation;
+        let rows = await termRows(term);
+        const memory = (await tx.query<{ target: string }>(`SELECT target FROM learning_memories WHERE tenant_id = $1 AND subject_id = $2 AND term = $3`,
+          [tenantId, subjectId, term])).rows[0]?.target ?? null;
+        const automaticMemory = (value: string | null) => { const row = rows.find(item => item.target === value); return !!row?.promoted_at && row.stated === 0; };
+        if (observation.kind === 'CONTRADICTED') {
+          if (memory === target) {
+            if (!automaticMemory(target)) return 'KEPT';
+            await tx.query(`DELETE FROM learning_memories WHERE tenant_id = $1 AND subject_id = $2 AND term = $3`, [tenantId, subjectId, term]);
+            await drop(term, target);
+            return 'DEMOTED';
+          }
+          const row = rows.find(item => item.target === target);
+          if (!row || row.stated > 0) return 'IGNORED';
+          await drop(term, target);
+          return 'WITHDRAWN';
+        }
+        // A learned meaning whose memory is gone (the user forgot it, or it expired) starts over: its old evidence is never reused.
+        for (const row of rows.filter(item => item.promoted_at && item.target !== memory)) await drop(term, row.target);
+        rows = rows.filter(item => !item.promoted_at || item.target === memory);
+        // A meaning saved with BUILD-CHAT-LEARNING-001's "Remember" has no learned evidence: it stays the user's own and is never relabelled as learned.
+        const remembered = memory !== null && !rows.some(item => item.target === memory && item.promoted_at);
+        const existing = rows.find(item => item.target === target);
+        if (existing?.last_request?.equals(digests.request)) return 'DUPLICATE';
+        // The user's latest statement defines the word: whatever else was observed for it is dropped.
+        if (observation.kind === 'STATED') for (const row of rows.filter(item => item.target !== target)) await drop(term, row.target);
+        if (!existing) {
+          const room = async (scope: string, args: unknown[], limit: number) => {
+            const { rows: count } = await tx.query<{ n: number }>(`SELECT count(*)::int AS n FROM learning_evidence WHERE tenant_id = $1 AND subject_id = $2 ${scope}`, args);
+            if ((count[0]?.n ?? 0) < limit) return true;
+            const freed = await tx.query(`DELETE FROM learning_evidence WHERE tenant_id = $1 AND subject_id = $2 AND (term, target) IN (SELECT term, target FROM learning_evidence
+              WHERE tenant_id = $1 AND subject_id = $2 AND promoted_at IS NULL AND stated = 0 ${scope} ORDER BY last_seen_at, term, target LIMIT 1)`, args);
+            return freed.rowCount === 1;
+          };
+          if (!await room('AND term = $3', [tenantId, subjectId, term], AUTOMATIC_RULES.maxTargetsPerTerm)
+            || !await room('', [tenantId, subjectId], AUTOMATIC_RULES.maxEvidence)) return 'FULL';
+        }
+        const counter = COUNTER[observation.kind];
+        await tx.query(`INSERT INTO learning_evidence (tenant_id, subject_id, term, target, ${counter}, conversations, last_request, last_conversation, first_seen_at, last_seen_at)
+          VALUES ($1, $2, $3, $4, 1, 1, $5, $6, $7, $7) ON CONFLICT (tenant_id, subject_id, term, target) DO UPDATE SET
+          ${counter} = least(learning_evidence.${counter} + 1, ${AUTOMATIC_RULES.counterCap}),
+          conversations = least(learning_evidence.conversations + CASE WHEN learning_evidence.last_conversation IS DISTINCT FROM EXCLUDED.last_conversation THEN 1 ELSE 0 END, 100000),
+          last_request = EXCLUDED.last_request, last_conversation = EXCLUDED.last_conversation, last_seen_at = EXCLUDED.last_seen_at`,
+        [tenantId, subjectId, term, target, digests.request, digests.conversation, now]);
+        rows = await termRows(term);
+        const decision = decideTerm(rows.map(evidenceOf));
+        if (!decision.target) return decision.reason === 'CONFLICT' ? 'CONFLICT' : 'OBSERVED';
+        if (memory === decision.target) {
+          if (remembered) return 'ALREADY';
+          const marked = await tx.query(`UPDATE learning_evidence SET promoted_at = $5 WHERE tenant_id = $1 AND subject_id = $2 AND term = $3 AND target = $4
+            AND promoted_at IS NULL`, [tenantId, subjectId, term, decision.target, now]);
+          return marked.rowCount ? 'LEARNED' : 'ALREADY';
+        }
+        // A different saved meaning is replaced only by the user's own statement, or when it was itself learned automatically.
+        if (memory !== null && decision.reason !== 'STATED' && !automaticMemory(memory)) return 'KEPT';
+        if (memory === null) {
+          const { rows: count } = await tx.query<{ n: number }>(`SELECT count(*)::int AS n FROM learning_memories WHERE tenant_id = $1 AND subject_id = $2`, [tenantId, subjectId]);
+          if ((count[0]?.n ?? 0) >= LEARNING_STORE_LIMITS.maxMemories) return 'FULL';
+        }
+        await tx.query(`INSERT INTO learning_memories (tenant_id, subject_id, term, target, created_at, touched_at) VALUES ($1, $2, $3, $4, $5, $5)
+          ON CONFLICT (tenant_id, subject_id, term) DO UPDATE SET target = EXCLUDED.target, created_at = EXCLUDED.created_at, touched_at = EXCLUDED.touched_at`,
+        [tenantId, subjectId, term, decision.target, now]);
+        await tx.query(`UPDATE learning_evidence SET promoted_at = CASE WHEN target = $4 THEN coalesce(promoted_at, $5) ELSE NULL END WHERE tenant_id = $1 AND subject_id = $2
+          AND term = $3`, [tenantId, subjectId, term, decision.target, now]);
+        return 'LEARNED';
+      });
+    },
+    /**
+     * Operator action (BUILD-CHAT-LEARNING-002): erases the automatic-learning data of identities the current mode no longer covers (for example,
+     * after the basis changed from legitimate interest to consent). Bounded; returns how many identities were erased.
+     */
+    async purgeAutomatic(mode: AutomaticMode): Promise<number> {
+      return db.transaction(async tx => {
+        const { rows } = await tx.query<{ subject_id: string }>(`SELECT DISTINCT e.subject_id FROM learning_evidence e LEFT JOIN learning_automatic_settings s
+          ON s.tenant_id = e.tenant_id AND s.subject_id = e.subject_id WHERE e.tenant_id = $1 AND NOT ${PERMITTED[mode]} ORDER BY e.subject_id LIMIT $2`,
+        [tenantId, LEARNING_RETENTION.batch]);
+        await eraseAutomatic(tx, rows.map(row => row.subject_id));
+        return rows.length;
       });
     },
 
@@ -285,16 +467,25 @@ export function createLearningStore(db: Database, tenantId: string) {
 
     // ── Aggregates for the admin console (counts only: no term of a private memory, no subject) ────────────────────────────────────────
     async metrics(since: Date): Promise<LearningMetrics> {
-      const [subjects, memories, events, candidates] = await Promise.all([
+      const [subjects, memories, events, candidates, automatic, evidence] = await Promise.all([
         db.query<{ kind: SubjectKind; memory: number; contribute: number; total: number }>(`SELECT kind, count(*) FILTER (WHERE memory_enabled)::int AS memory,
           count(*) FILTER (WHERE contribute_enabled)::int AS contribute, count(*)::int AS total FROM learning_subjects WHERE tenant_id = $1 GROUP BY kind`, [tenantId]),
         db.query<{ n: number; subjects: number }>(`SELECT count(*)::int AS n, count(DISTINCT subject_id)::int AS subjects FROM learning_memories WHERE tenant_id = $1`, [tenantId]),
         db.query<{ scope: string; kind: string; outcome: string | null; n: number }>(`SELECT scope, kind, outcome, count(*)::int AS n FROM learning_feedback_events
           WHERE tenant_id = $1 AND at >= $2 GROUP BY scope, kind, outcome ORDER BY n DESC LIMIT 400`, [tenantId, since]),
         db.query<{ state: CandidateState; n: number }>(`SELECT state, count(*)::int AS n FROM learning_candidates WHERE tenant_id = $1 GROUP BY state`, [tenantId]),
+        // BUILD-CHAT-LEARNING-002: choices about automatic learning by basis, and evidence (counts only: no word, no subject).
+        db.query<{ enabled: boolean; basis: AutomaticBasis; n: number }>(`SELECT enabled, basis, count(*)::int AS n FROM learning_automatic_settings WHERE tenant_id = $1
+          GROUP BY enabled, basis`, [tenantId]),
+        db.query<{ rows: number; promoted: number; subjects: number; learned: number; stated: number; languages: number }>(`SELECT count(*) FILTER (WHERE term <> '')::int AS rows,
+          count(*) FILTER (WHERE term <> '' AND promoted_at IS NOT NULL)::int AS promoted, count(DISTINCT subject_id)::int AS subjects,
+          count(*) FILTER (WHERE term <> '' AND promoted_at IS NOT NULL AND stated = 0)::int AS learned,
+          count(*) FILTER (WHERE term <> '' AND promoted_at IS NOT NULL AND stated > 0)::int AS stated,
+          count(*) FILTER (WHERE term = '' AND promoted_at IS NOT NULL)::int AS languages FROM learning_evidence WHERE tenant_id = $1`, [tenantId]),
       ]);
       return { subjects: subjects.rows, memories: memories.rows[0] ?? { n: 0, subjects: 0 }, events: events.rows,
-        candidates: Object.fromEntries(candidates.rows.map(row => [row.state, row.n])) as Partial<Record<CandidateState, number>> };
+        candidates: Object.fromEntries(candidates.rows.map(row => [row.state, row.n])) as Partial<Record<CandidateState, number>>,
+        automatic: { settings: automatic.rows, evidence: evidence.rows[0] ?? { rows: 0, promoted: 0, subjects: 0, learned: 0, stated: 0, languages: 0 } } };
     },
 
     // ── Retention (bounded batches; run opportunistically and from the admin console) ───────────────────────────────────────────────
@@ -305,9 +496,17 @@ export function createLearningStore(db: Database, tenantId: string) {
         WHERE tenant_id = $1 AND at < $2 ORDER BY at LIMIT $3)`, [tenantId, days(LEARNING_RETENTION.eventsDays), batch])).rowCount;
       counts.memories = (await db.query(`DELETE FROM learning_memories WHERE tenant_id = $1 AND (subject_id, term) IN (SELECT subject_id, term FROM learning_memories
         WHERE tenant_id = $1 AND touched_at < $2 ORDER BY touched_at LIMIT $3)`, [tenantId, days(LEARNING_RETENTION.memoryDays), batch])).rowCount;
+      // BUILD-CHAT-LEARNING-002: unlearned evidence expires; the evidence behind a meaning the user forgot (or that expired) goes with it.
+      counts.evidence = (await db.query(`DELETE FROM learning_evidence WHERE tenant_id = $1 AND (subject_id, term, target) IN (SELECT subject_id, term, target
+        FROM learning_evidence x WHERE x.tenant_id = $1 AND ((x.promoted_at IS NULL AND x.term <> '' AND x.last_seen_at < $2) OR (x.term = '' AND x.last_seen_at < $3)
+          OR (x.promoted_at IS NOT NULL AND x.term <> '' AND NOT EXISTS (SELECT 1 FROM learning_memories m WHERE m.tenant_id = x.tenant_id AND m.subject_id = x.subject_id
+            AND m.term = x.term AND m.target = x.target))) ORDER BY x.last_seen_at LIMIT $4)`,
+      [tenantId, days(LEARNING_RETENTION.evidenceDays), days(LEARNING_RETENTION.languageDays), batch])).rowCount;
+      // A subject with no memory, no consent and no recorded choice about automatic learning (an objection must be honoured) goes after 30 idle days.
       counts.subjects = (await db.query(`DELETE FROM learning_subjects s WHERE s.tenant_id = $1 AND s.subject_id IN (SELECT subject_id FROM learning_subjects x
         WHERE x.tenant_id = $1 AND ((x.last_seen_at < $2 AND NOT x.memory_enabled AND NOT x.contribute_enabled AND x.language IS NULL
-          AND NOT EXISTS (SELECT 1 FROM learning_memories m WHERE m.tenant_id = x.tenant_id AND m.subject_id = x.subject_id)) OR x.last_seen_at < $3)
+          AND NOT EXISTS (SELECT 1 FROM learning_memories m WHERE m.tenant_id = x.tenant_id AND m.subject_id = x.subject_id)
+          AND NOT EXISTS (SELECT 1 FROM learning_automatic_settings a WHERE a.tenant_id = x.tenant_id AND a.subject_id = x.subject_id)) OR x.last_seen_at < $3)
         ORDER BY x.last_seen_at LIMIT $4)`, [tenantId, days(LEARNING_RETENTION.unconsentedSubjectDays), days(LEARNING_RETENTION.subjectDays), batch])).rowCount;
       await db.transaction(async tx => {
         const expired = await tx.query<{ candidate_id: string }>(`DELETE FROM learning_candidate_support WHERE tenant_id = $1 AND (candidate_id, contributor_digest) IN (
@@ -324,6 +523,13 @@ export function createLearningStore(db: Database, tenantId: string) {
       return counts;
     },
   };
+  /** BUILD-CHAT-LEARNING-002: erases what automatic learning produced for subjects: every observation and every meaning it saved. */
+  async function eraseAutomatic(tx: Queryable, subjectIds: readonly string[]): Promise<void> {
+    if (!subjectIds.length) return;
+    await tx.query(`DELETE FROM learning_memories m USING learning_evidence e WHERE m.tenant_id = $1 AND m.subject_id = ANY($2) AND e.tenant_id = m.tenant_id
+      AND e.subject_id = m.subject_id AND e.term = m.term AND e.target = m.target AND e.promoted_at IS NOT NULL`, [tenantId, subjectIds]);
+    await tx.query(`DELETE FROM learning_evidence WHERE tenant_id = $1 AND subject_id = ANY($2)`, [tenantId, subjectIds]);
+  }
   /** Removes a contributor's support everywhere and recounts the candidates it touched. */
   async function withdrawSupport(tx: Queryable, contributor: Buffer): Promise<void> {
     const removed = await tx.query<{ candidate_id: string }>(`DELETE FROM learning_candidate_support WHERE tenant_id = $1 AND contributor_digest = $2 RETURNING candidate_id`,
@@ -336,4 +542,6 @@ export type LearningStore = ReturnType<typeof createLearningStore>;
 export type LearningMetrics = { readonly subjects: readonly { readonly kind: SubjectKind; readonly memory: number; readonly contribute: number; readonly total: number }[];
   readonly memories: { readonly n: number; readonly subjects: number };
   readonly events: readonly { readonly scope: string; readonly kind: string; readonly outcome: string | null; readonly n: number }[];
-  readonly candidates: Partial<Record<CandidateState, number>> };
+  readonly candidates: Partial<Record<CandidateState, number>>;
+  readonly automatic: { readonly settings: readonly { readonly enabled: boolean; readonly basis: AutomaticBasis; readonly n: number }[];
+    readonly evidence: { readonly rows: number; readonly promoted: number; readonly subjects: number; readonly learned: number; readonly stated: number; readonly languages: number } } };

@@ -41,7 +41,8 @@ describe('BUILD-CHAT-LEARNING-001 deterministic evaluation (publication gate)', 
     expect(result).toMatchObject({ passed: true, entries: 0, regressions: [], safetyViolations: [], document: { code: null } });
     expect(result.cases.failed).toEqual([]);
     expect(result.cases.baseline).toBe(LEARNING_EVAL_CASES.length);
-    expect(Object.keys(result.metrics).sort()).toEqual(['adversarial', 'ambiguity', 'correction', 'intent', 'mainnet-guard', 'memory', 'private', 'unsupported']);
+    // BUILD-CHAT-LEARNING-002 (corpus v2): in-conversation adaptation is a category of its own.
+    expect(Object.keys(result.metrics).sort()).toEqual(['adaptation', 'adversarial', 'ambiguity', 'correction', 'intent', 'mainnet-guard', 'memory', 'private', 'unsupported']);
     expect(result.byLanguage.PT!.total).toBeGreaterThanOrEqual(12);
     expect(result.byLanguage.EN!.total).toBeGreaterThanOrEqual(12);
   });

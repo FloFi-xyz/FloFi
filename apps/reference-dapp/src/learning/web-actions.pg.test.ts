@@ -12,7 +12,7 @@ import type { WalletPrincipal } from '../server/session-principal.ts';
 import { evaluateKnowledge } from './evaluation.ts';
 import { KNOWLEDGE_SCHEMA, validateKnowledgeDocument } from './knowledge.ts';
 import { createLearningStore } from './store.ts';
-import { applyAction, applySettings, parseClientEvents, parseInterpretOptions, parseMemoryAction, requestGlossary, statusView } from './web-actions.ts';
+import { applyAction, applyObservations, applySettings, parseClientEvents, parseInterpretOptions, parseMemoryAction, requestGlossary, statusView } from './web-actions.ts';
 
 const SECRET = randomBytes(32).toString('hex'), NOW = new Date('2026-10-15T12:00:00.000Z');
 const ENV = { FLOFI_LEARNING: 'enabled', FLOFI_LEARNING_SECRET: SECRET };
@@ -97,7 +97,47 @@ describe('BUILD-CHAT-LEARNING-001 web chat learning (PostgreSQL)', () => {
       { kind: 'TURN', outcome: 'PROPOSAL', language: 'PT', privateEntries: 1, globalEntries: 0, knowledgeVersion: null },
       { kind: 'PROPOSAL_APPLIED', outcome: null, language: null, privateEntries: 0, globalEntries: 0, knowledgeVersion: null }]);
     expect(parseInterpretOptions({ identity: 'solana', aliases: [{ term: 'arb', target: 'network:ARBITRUM' }, { term: 'base', target: 'network:BASE_SEPOLIA' }] }))
-      .toEqual({ identity: 'solana', aliases: [{ term: 'arb', target: 'network:ARBITRUM', source: 'SESSION' }] });
-    expect(parseInterpretOptions('x')).toEqual({ identity: null, aliases: [] });
+      .toEqual({ identity: 'solana', aliases: [{ term: 'arb', target: 'network:ARBITRUM', source: 'SESSION' }], adapted: [] });
+    expect(parseInterpretOptions({ adapted: [{ term: 'sol dev', target: 'network:SOLANA_DEVNET' }, { term: 'sol', target: 'network:SOLANA' }] }).adapted)
+      .toEqual([{ term: 'sol dev', target: 'network:SOLANA_DEVNET', source: 'ADAPTED' }]);
+    expect(parseInterpretOptions('x')).toEqual({ identity: null, aliases: [], adapted: [] });
+  });
+});
+
+describe('BUILD-CHAT-LEARNING-002 web chat automatic learning (PostgreSQL)', () => {
+  const LI = { ...ENV, FLOFI_LEARNING_AUTOMATIC: 'legitimate_interest' };
+  const OBSERVED = [{ kind: 'CLARIFIED', term: 'sol dev', target: 'network:SOLANA_DEVNET', via: 'CHAT' }];
+  async function setupWith(env: Record<string, string>) {
+    const t = await createTestDatabase();
+    opened.push(t);
+    const service = await webLearningService(env, async () => ({ db: t.db, tenantId: 'default' }));
+    if (typeof service === 'string') throw new Error(service);
+    return { t, service };
+  }
+  it('observations are stored only for the proven wallet the browser chose, with a valid context; the status shows provenance and what is pending', async () => {
+    const { t, service } = await setupWith(LI);
+    await applyObservations(service, [], null, OBSERVED, { conversation: 'c'.repeat(20), request: 0 });                       // anonymous: nothing
+    await applyObservations(service, [EVM_A], 'solana', OBSERVED, { conversation: 'c'.repeat(20), request: 0 });             // not proven here: nothing
+    await applyObservations(service, [EVM_A], null, OBSERVED, { conversation: 'x', request: 0 });                            // invalid context: nothing
+    await applyObservations(service, [EVM_A], null, [{ kind: 'CLARIFIED', term: '10', target: 'network:BASE' }], { conversation: 'c'.repeat(20), request: 0 });
+    expect((await t.db.query(`SELECT count(*)::int AS n FROM learning_evidence`)).rows).toEqual([{ n: 0 }]);
+    await applyObservations(service, [EVM_A, SOL_A], null, OBSERVED, { conversation: 'c'.repeat(20), request: 0 });
+    const pending = await statusView(service, [EVM_A, SOL_A], null);
+    expect(pending).toMatchObject({ enabled: true, identity: { namespace: 'eip155' }, automatic: { mode: 'LEGITIMATE_INTEREST', setting: null, permitted: true },
+      pending: [{ term: 'sol dev', target: 'network:SOLANA_DEVNET', weight: 1 }], entries: [], learning: { automatic: 'ON', learned: [] } });
+    await applyObservations(service, [EVM_A], null, OBSERVED, { conversation: 'd'.repeat(20), request: 0 });
+    const kept = await statusView(service, [EVM_A], null);
+    expect(kept).toMatchObject({ pending: [], entries: [{ term: 'sol dev', target: 'network:SOLANA_DEVNET', origin: 'LEARNED' }],
+      learning: { learned: [{ term: 'sol dev', target: 'network:SOLANA_DEVNET', source: 'LEARNED' }] } });
+    // The Solana wallet proven in the same browser is a separate identity: it has nothing.
+    expect(await statusView(service, [EVM_A, SOL_A], 'solana')).toMatchObject({ entries: [], pending: [] });
+    // The browser's choice: off erases what was learned for this wallet.
+    expect(await applySettings(service, [EVM_A], null, { automatic: false })).toEqual({ ok: true });
+    expect(await statusView(service, [EVM_A], null)).toMatchObject({ entries: [], automatic: { permitted: false, setting: { enabled: false, basis: 'LEGITIMATE_INTEREST' } } });
+  });
+  it('session-only: the browser adapts within the conversation; nothing can be read, set or stored', async () => {
+    expect(await statusView('SESSION', [EVM_A], null)).toMatchObject({ enabled: true, identity: null, learning: { memory: 'SESSION' }, entries: [] });
+    expect(await applySettings('SESSION', [EVM_A], null, { automatic: true })).toEqual({ ok: false, code: 'LEARNING_OFF' });
+    await expect(applyObservations('SESSION', [EVM_A], null, OBSERVED, { conversation: 'c'.repeat(20), request: 0 })).resolves.toBeUndefined();
   });
 });

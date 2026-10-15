@@ -3,6 +3,8 @@
 import { useLocale } from '../i18n/locale';
 
 import { useEffect, useId, useRef, useState } from 'react';
+import Link from 'next/link';
+import { learningAvailability } from '../app/learning-action';
 
 export function HeaderSettings({ onDisconnect, disconnectDisabled, onSupport }: { onDisconnect: () => void; disconnectDisabled: boolean; onSupport?: () => void }) {
   const { t: tr } = useLocale();
@@ -14,6 +16,13 @@ export function HeaderSettings({ onDisconnect, disconnectDisabled, onSupport }: 
   const toggle = useRef<HTMLButtonElement>(null);
   const themeTransition = useRef<ReturnType<typeof setTimeout> | null>(null);
   const menuId = useId();
+  // BUILD-CHAT-LEARNING-002: Privacy & memory is listed only where the deployment keeps learning data (checked when the menu first opens).
+  const [privacy, setPrivacy] = useState(false), checked = useRef(false);
+  useEffect(() => {
+    if (!open || checked.current) return;
+    checked.current = true;
+    void learningAvailability().then(tier => setPrivacy(tier === 'ENABLED'), () => undefined);
+  }, [open]);
   const languageDescriptionId = useId(), themeDescriptionId = useId();
   useEffect(() => {
     let saved: 'light' | 'dark' = 'light';
@@ -82,6 +91,9 @@ export function HeaderSettings({ onDisconnect, disconnectDisabled, onSupport }: 
         <span id={themeDescriptionId} className="sr-only">{tr("Current theme: ")}{tr(theme === 'dark' ? 'Dark' : 'Light')}</span>
       </div>
       <hr className="header-settings-separator"/>
+      {privacy && <Link href="/app/privacy" className="header-settings-action" onClick={() => setOpen(false)}>
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3 5 6v5c0 4.5 3 8.3 7 10 4-1.7 7-5.5 7-10V6Z"/><path d="m9 12 2 2 4-4"/></svg><span>{tr("Privacy & memory")}</span>
+      </Link>}
       <button type="button" className="header-settings-action" onClick={() => { onSupport?.(); setOpen(false); toggle.current?.focus(); }}>
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><path d="m5.6 5.6 3.6 3.6m5.6 5.6 3.6 3.6M5.6 18.4l3.6-3.6m5.6-5.6 3.6-3.6"/></svg><span>{tr("Support")}</span>
       </button>

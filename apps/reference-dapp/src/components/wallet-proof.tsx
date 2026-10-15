@@ -16,6 +16,8 @@ import { useWalletSelector } from './wallet-selector';
 import { useLocale } from '../i18n/locale';
 
 export type Namespace = 'eip155' | 'solana';
+/** BUILD-CHAT-LEARNING-002: dispatched on `window` when the proven wallet or a Privacy & memory choice changed. */
+export const LEARNING_CHANGED = 'flofi:learning-changed';
 const utf8Hex = (text: string) => '0x' + Array.from(new TextEncoder().encode(text), b => b.toString(16).padStart(2, '0')).join('');
 function unwrap<T>(result: { ok: true; value: T } | { ok: false; code: string }): T { if (!result.ok) throw new Error(result.code); return result.value; }
 const codeOf = (cause: unknown) => cause instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(cause.message) ? cause.message : 'WALLET_REQUEST_FAILED';
@@ -32,7 +34,11 @@ export function useWalletProof(namespace: Namespace | null, chain: SolanaWalletC
   useEffect(() => { void refresh(); }, [refresh]);
   async function run(action: () => Promise<string | null>) {
     if (busy) return; setBusy(true); setError(null);
-    try { const account = await action(); if (account) setProven(account); } catch (cause) { setError(codeOf(cause)); } finally { setBusy(false); }
+    try {
+      const account = await action();
+      // BUILD-CHAT-LEARNING-002: a newly proven wallet changes whose Copilot memory applies; the Copilot reloads its learning context.
+      if (account) { setProven(account); window.dispatchEvent(new Event(LEARNING_CHANGED)); }
+    } catch (cause) { setError(codeOf(cause)); } finally { setBusy(false); }
   }
   const proveEvm = () => run(async () => {
     const choice = await selector.choose({ ecosystems: ['evm'], title: 'Choose a wallet to prove ownership' });

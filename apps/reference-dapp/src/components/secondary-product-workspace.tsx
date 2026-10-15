@@ -8,6 +8,7 @@ import { useBuild009Wallet } from '../state/build009-wallet-store';
 import { YourWorkflows, type WorkflowNavigation } from './saved-workflows';
 import { AutomationsWorkspace, type AutomationNavigation } from './automations-workspace';
 import { ExecutionCredentials, PasskeysPanel, type DelegationAccess } from './delegation-credentials';
+import { PrivacyControls } from './privacy-controls';
 import { useJupiter } from '../state/jupiter-store';
 import { brandLabel, LABEL_MAX, networkLabel, type SavedCard, type SavedWallet } from '../domain/credentials';
 import { removeSavedCredential, renameSavedCredential, saveCardReference, saveWalletReference, useCredentials } from '../state/credentials-store';
@@ -370,5 +371,7 @@ export function SecondaryProductWorkspace({ workspace, workflows, automations }:
   automations?: AutomationNavigation | undefined }) {
   const access: DelegationAccess | undefined = automations?.proof ? { owner: automations.owner ?? null, proof: automations.proof } : undefined;
   return workspace === 'workflows' ? <YourWorkflows {...workflows}/> : workspace === 'automations' ? <AutomationsWorkspace {...automations}/>
-    : workspace === 'credentials' ? <CredentialsWorkspace access={access}/> : workspace === 'agents' ? <AgentsWorkspace/> : <PasskeysWorkspace access={access}/>;
+    : workspace === 'credentials' ? <CredentialsWorkspace access={access}/> : workspace === 'agents' ? <AgentsWorkspace/>
+      // BUILD-CHAT-LEARNING-002: the Copilot's privacy controls, reached from Settings.
+      : workspace === 'privacy' ? <PrivacyControls proof={automations?.proof}/> : <PasskeysWorkspace access={access}/>;
 }

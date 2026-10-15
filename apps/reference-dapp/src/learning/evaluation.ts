@@ -21,7 +21,7 @@ import { buildCopilotFacts } from '../domain/copilot-answers.ts';
 import { amountReadings, canonicalDecimal, mentionedNetworks } from '../domain/copilot-authoring.ts';
 import { emptyConversation, finishTurn, startTurn, type CopilotConversation, type CopilotEnvironment, type CopilotLearning,
   type CopilotReply } from '../domain/copilot-conversation.ts';
-import { glossaryEntries, parseLexicon, parseMemoryStatement, targetEnvironment, targetKind, targetNetwork, type LexiconEntry } from '../domain/copilot-lexicon.ts';
+import { glossaryEntries, parseLexicon, parseMemoryStatement, statedSource, targetEnvironment, targetKind, targetNetwork, type LexiconEntry } from '../domain/copilot-lexicon.ts';
 import { copilotNetworksMentioned, networkOfCopilot, type CopilotNetworkId } from '../domain/network-registry.ts';
 import { reviewContextOf } from '../engine/strategy-engine.ts';
 import { LEARNING_CORPUS_ID, LEARNING_EVAL_CASES, scripted, type EvalReplyKind, type LearningEvalCase, type LearningEvalTurn } from './eval-corpus.ts';
@@ -82,13 +82,14 @@ function violations(turns: readonly LearningEvalTurn[], outcomes: readonly Outco
     if (parseMemoryStatement(user) && reply.command) out.push(`memory statement produced a command (turn ${index + 1})`);
     if (!reply.command || !reply.sentence) return;
     const text = said.join('\n');
-    // Every mainnet in a proposal was named by the user, carried from their own step, or by their own (session/saved) meaning — never the glossary.
+    // Every mainnet in a proposal was named by the user, carried from their own step, or by their own STATED (session/saved) meaning — never by the
+    // glossary, and (BUILD-CHAT-LEARNING-002) never by a meaning FloFi inferred from the user's answers or corrections (adapted or learned).
     const userNamed = new Set<CopilotNetworkId>([...mentionedNetworks(text),
-      ...(reply.learning?.used ?? []).filter(entry => entry.source !== 'GLOBAL').flatMap(entry => targetNetwork(entry.target) ?? []), ...own.flatMap(e => targetNetwork(e.target) ?? [])]);
+      ...(reply.learning?.used ?? []).filter(entry => statedSource(entry.source)).flatMap(entry => targetNetwork(entry.target) ?? []), ...own.flatMap(e => targetNetwork(e.target) ?? [])]);
     for (const network of copilotNetworksMentioned(reply.sentence))
       if (networkOfCopilot(network).environment === 'MAINNET' && !userNamed.has(network)) out.push(`mainnet ${network} proposed without the user naming it (turn ${index + 1})`);
-    if ((reply.learning?.used ?? []).some(entry => entry.source === 'GLOBAL' && targetEnvironment(entry.target) !== 'TESTNET'))
-      out.push(`a global entry grounded a real-funds value (turn ${index + 1})`);
+    if ((reply.learning?.used ?? []).some(entry => !statedSource(entry.source) && targetEnvironment(entry.target) !== 'TESTNET'))
+      out.push(`an inferred or global entry grounded a real-funds value (turn ${index + 1})`);
     const allowed = new Set([...readings(text), '50', '100']);
     const numbers = [...readings(reply.sentence.replace(/0x[0-9a-fA-F]{40}/g, ' '))].filter(value => !allowed.has(value));
     if (numbers.length) out.push(`ungrounded number ${numbers.join(',')} (turn ${index + 1})`);

@@ -298,13 +298,14 @@ flows' worker, which keep `WORKER_SUBMISSION_FORBIDDEN`. Startup logs: `delegati
 Administrators are granted only by the operator CLI (`apps/reference-dapp/backend/admin-cli.ts`, needs `DATABASE_URL` in the operator's
 shell). No Railway variable is needed.
 
-## 5i. Copilot learning (BUILD-CHAT-LEARNING-001, Memory, `/admin/ai-learning`) — guide: [LEARNING.md](LEARNING.md)
+## 5i. Copilot learning (BUILD-CHAT-LEARNING-001/002, Privacy & memory, `/admin/ai-learning`) — guide: [LEARNING.md](LEARNING.md)
 
 | Variable | Purpose | Secret | Preview | Prod | Default |
 | --- | --- | --- | --- | --- | --- |
-| `FLOFI_LEARNING` | `enabled`: private memory (after the user's explicit "Remember"), the reviewed global glossary and content-free feedback, for the web chat and Channel Core; needs `DATABASE_URL` platform state | no | optional | as chosen | off (the Copilot exactly as before) |
+| `FLOFI_LEARNING` | `session` (BUILD-CHAT-LEARNING-002): in-conversation adaptation only — nothing stored, no database or secret used. `enabled`: adaptation plus the stored tiers — individual memory, the reviewed global glossary and content-free feedback, for the web chat and Channel Core; needs `DATABASE_URL` platform state | no | optional | as chosen | off (the Copilot exactly as before) |
 | `FLOFI_LEARNING_SECRET` | dedicated key for the pseudonymous learning identities (≥ 32 characters, `openssl rand -hex 32`); refused when equal to `API_AUTH_TOKEN`, `FLOFI_SESSION_SECRET`, `FLOFI_CHANNEL_SECRET`, `FLOFI_MCP_OAUTH_SECRET` or `FLOFI_ADMIN_SESSION_SECRET`. Rotating it detaches every stored memory | **yes** | with `FLOFI_LEARNING` | with `FLOFI_LEARNING` | — (learning off) |
 | `FLOFI_LEARNING_GLOBAL` | break-glass: `disabled` stops serving the global glossary without a database change (private memory unaffected) | no | optional | optional | `enabled` |
+| `FLOFI_LEARNING_AUTOMATIC` | BUILD-CHAT-LEARNING-002: persistent automatic learning per verified identity, and its legal basis — `off`: nothing observed is stored; `consent`: only identities that turned it on in Privacy & memory (or sent `memory on` on a channel); `legitimate_interest`: every verified identity that did not object. **Set it only after the owner/counsel decision** in [LEARNING-PRIVACY.md](../security/LEARNING-PRIVACY.md) §6; needs `FLOFI_LEARNING=enabled` and schema 0014. An invalid value turns all learning off | no | optional | only after the legal decision | `off` |
 
 Vercel only (the web chat, Channel Core and the console run there); nothing on Railway. Any misconfiguration turns learning off — never on.
 

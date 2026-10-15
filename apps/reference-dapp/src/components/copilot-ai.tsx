@@ -4,14 +4,15 @@ import { useLocale } from '../i18n/locale';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { copilotInterpret, copilotStatus } from '../app/copilot-action';
-import { learningApply, learningFeedback, learningStatus } from '../app/learning-action';
+import { learningApply, learningFeedback, learningObserve, learningStatus } from '../app/learning-action';
 import { learningCopy } from '../domain/copilot-learning-copy';
 import type { LearningStatusView } from '../learning/web-actions';
+import { LEARNING_CHANGED } from './wallet-proof';
 import type { Command } from '../domain/commands';
 import { chainStatus } from '../domain/artifact-chain';
 import { buildCopilotFacts, simulationFlowOf, type CopilotFacts, type SimulationFlow } from '../domain/copilot-answers';
-import { closeSegment, emptyConversation, finishTurn, recordProposal, startTurn, type CopilotConversation, type CopilotEnvironment, type CopilotReply,
-  type CopilotResultV2, type CopilotVerified } from '../domain/copilot-conversation';
+import { closeSegment, emptyConversation, finishTurn, observeWorkflow, proposalApplied, recordProposal, startTurn, type CopilotConversation, type CopilotEnvironment,
+  type CopilotReply, type CopilotResultV2, type CopilotVerified, type ReplyLearning } from '../domain/copilot-conversation';
 import { solanaLiquidityPositions, solanaLiquidityPrice } from '../app/solana-liquidity-action';
 import { reconciledRemaining } from '../domain/copilot-reconciled-context';
 import { useSolanaComposition } from '../state/solana-composition-store';
@@ -44,12 +45,20 @@ import { useWorkflow } from '../state/workflow-store';
  * BUILD-CHAT-LEARNING-001: when the deployment enables learning, the hook also loads this browser's learning context (its proven wallet's
  * own memory and the active global glossary, from the server), performs a memory action only after the user's own click or statement, and
  * reports content-free feedback (reply kinds, signals, proposal applied/dismissed). Learning off or unavailable: exactly the previous behaviour.
+ *
+ * BUILD-CHAT-LEARNING-002: learning is invisible. The hook tells the engine when the user applied a Copilot proposal and when the workflow changed
+ * outside the chat (the canvas), and hands the server the engine's observations about the user's words — only when persistent automatic learning
+ * is permitted for the proven wallet (the server checks again) — with a random id of this conversation and the request's ordinal, never text.
  */
 type LearningNamespace = 'eip155' | 'solana';
 type FeedbackEvent = { readonly kind: string; readonly outcome?: string; readonly language?: string | null; readonly privateEntries?: number; readonly globalEntries?: number;
   readonly knowledgeVersion?: number | null };
 export type { CopilotReply };
 type Record_ = { readonly record?: unknown; readonly run?: unknown; readonly retired: boolean } | null;
+/** A random id of this browser conversation (it only lets the server count a request once; it identifies nobody). */
+const conversationId = () => typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function' ? crypto.randomUUID()
+  : `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`;
+const TERMINAL: ReadonlySet<string> = new Set(['PROPOSAL', 'AUTOMATION_PROPOSAL', 'ANSWER', 'UNSUPPORTED', 'FAILED']);
 const authorized = (value: unknown) => {
   const record = value as { authorization?: unknown; reviewedManifestHash?: unknown } | null;
   return Boolean(record && (record.authorization || record.reviewedManifestHash));
@@ -79,11 +88,29 @@ export function useCopilotInterpreter() {
     learningView.current = view; setLearning(view);
     return view;
   }, []);
-  useEffect(() => { void refreshLearning(); }, [refreshLearning]);
+  useEffect(() => {
+    void refreshLearning();
+    // BUILD-CHAT-LEARNING-002: a wallet proven or a Privacy & memory choice made elsewhere in FloFi applies to the next turn.
+    const changed = () => void refreshLearning();
+    window.addEventListener(LEARNING_CHANGED, changed);
+    return () => window.removeEventListener(LEARNING_CHANGED, changed);
+  }, [refreshLearning]);
   const report = useCallback((events: readonly FeedbackEvent[]) => {
     const view = learningView.current;
-    if (view?.enabled && view.learning.memory !== 'UNAVAILABLE' && events.length) void learningFeedback(events).catch(() => undefined);
+    if (view?.enabled && view.learning.memory !== 'UNAVAILABLE' && view.learning.memory !== 'SESSION' && events.length) void learningFeedback(events).catch(() => undefined);
   }, []);
+  // BUILD-CHAT-LEARNING-002: this conversation's random id and the ordinal of its current request (a request counts once as evidence).
+  const conversationKey = useRef<string | null>(null), requestSeq = useRef(0), proposalSeq = useRef(new WeakMap<Command, number>());
+  /** Content-free events of a signal, and its observations for the server when persistent learning is permitted (best effort, never awaited by the chat). */
+  const deliver = useCallback((learned: ReplyLearning | null | undefined, request: number) => {
+    const view = learningView.current;
+    if (!learned || !view?.enabled) return;
+    report((learned.events ?? []).map(event => ({ kind: event.kind, outcome: event.outcome })));
+    if (learned.observations?.length && view.learning.automatic === 'ON') {
+      conversationKey.current ??= conversationId();
+      void learningObserve(learned.observations, { conversation: conversationKey.current, request }, identity.current ?? undefined).catch(() => undefined);
+    }
+  }, [report]);
   // Read-only Solana Devnet facts fetched for the last turn that needed them (pool price, the wallet's FloFi positions): never the model's words.
   const fetched = useRef<{ readonly owner: string | null; readonly price: CopilotVerified['orcaPrice']; readonly positions: CopilotVerified['orcaPositions'] }>({ owner: null, price: null, positions: null });
   useEffect(() => {
@@ -128,12 +155,30 @@ export function useCopilotInterpreter() {
   useEffect(() => { if (pendingCommand) conversation.current = recordProposal(conversation.current, environmentNow(), pendingCommand); }, [pendingCommand, environmentNow]);
   // BUILD-CHAT-LEARNING-001: what became of a Copilot proposal — observed behaviour only, never proof that the interpretation was right.
   const watched = useRef<{ readonly command: Command; readonly revision: number } | null>(null);
+  // BUILD-CHAT-LEARNING-002: the workflow change that applying a proposal made is not a canvas edit.
+  const appliedWorkflow = useRef<unknown>(null);
   useEffect(() => {
     const prior = watched.current, revision = latest.current.workflow.state.workflow.revision;
-    if (prior && prior.command !== pendingCommand) report([{ kind: pendingCommand && proposals.current.has(pendingCommand) ? 'PROPOSAL_REVISED'
-      : !pendingCommand && revision > prior.revision ? 'PROPOSAL_APPLIED' : 'PROPOSAL_DISMISSED' }]);
+    const outcome = prior && prior.command !== pendingCommand ? pendingCommand && proposals.current.has(pendingCommand) ? 'PROPOSAL_REVISED'
+      : !pendingCommand && revision > prior.revision ? 'PROPOSAL_APPLIED' : 'PROPOSAL_DISMISSED' : null;
+    if (outcome) report([{ kind: outcome }]);
+    if (prior && outcome === 'PROPOSAL_APPLIED') {
+      appliedWorkflow.current = latest.current.workflow.state.workflow;
+      const applied = proposalApplied(conversation.current, environmentNow(), prior.command);
+      conversation.current = applied.next;
+      deliver(applied.learning, proposalSeq.current.get(prior.command) ?? requestSeq.current);
+    }
     watched.current = pendingCommand && proposals.current.has(pendingCommand) ? { command: pendingCommand, revision } : null;
-  }, [pendingCommand, report]);
+  }, [pendingCommand, report, environmentNow, deliver]);
+  // BUILD-CHAT-LEARNING-002: a change of the workflow outside the chat may correct a value FloFi read on its own in a step the user applied.
+  const ir = workflow.state.workflow;
+  useEffect(() => {
+    if (!learningView.current?.enabled) return;
+    const applying = appliedWorkflow.current === ir;
+    const observed = observeWorkflow(conversation.current, environmentNow(), applying ? 'APPLIED' : 'CANVAS');
+    conversation.current = observed.next;
+    if (!applying) deliver(observed.learning, requestSeq.current);
+  }, [ir, environmentNow, deliver]);
   /** The exact grammar handled a message: Flofi's open question, if any, is over. */
   const reset = useCallback(() => { conversation.current = closeSegment(conversation.current); }, []);
   const show = useCallback((reply: CopilotReply) => {
@@ -159,8 +204,12 @@ export function useCopilotInterpreter() {
     report([{ kind: 'TURN', outcome: out.kind, language: conversation.current.language, privateEntries: own, globalEntries: shared, knowledgeVersion: view.learning.globalVersion },
       ...(reply.learning?.signals ?? []).map(kind => ({ kind })), ...own ? [{ kind: 'MEMORY_USED' }] : [],
       ...shared ? [{ kind: 'KNOWLEDGE_USED', knowledgeVersion: view.learning.globalVersion }] : []]);
+    // BUILD-CHAT-LEARNING-002: the turn's signals; a proposal remembers its request's ordinal (applying it later is evidence about that request).
+    deliver(reply.learning, requestSeq.current);
+    if (reply.command) proposalSeq.current.set(reply.command, requestSeq.current);
+    if (TERMINAL.has(reply.kind)) requestSeq.current += 1;
     return out;
-  }, [refreshLearning, report]);
+  }, [refreshLearning, report, deliver]);
   const interpret = useCallback(async (text: string): Promise<CopilotReply> => {
     const start = startTurn(conversation.current, text, environmentNow());
     if (start.kind === 'LOCAL') {
@@ -174,7 +223,7 @@ export function useCopilotInterpreter() {
     try {
       let result: CopilotResultV2;
       // BUILD-CHAT-LEARNING-001: which proven wallet's memory, and this conversation's own aliases (a glossary hint the server re-validates).
-      const options = learningView.current?.enabled ? { identity: identity.current, aliases: start.turn.state.aliases ?? [] } : undefined;
+      const options = learningView.current?.enabled ? { identity: identity.current, aliases: start.turn.state.aliases ?? [], adapted: start.turn.state.adapted ?? [] } : undefined;
       try { result = await copilotInterpret(start.request, options) as CopilotResultV2; } catch { result = { ok: false, code: 'COPILOT_UNAVAILABLE' }; }
       // BUILD-BASE-001: catalog-network symbols resolve only in validated catalogs: load those this request or its intent names (where enabled).
       if (result.ok) await Promise.all([...catalogNetworksNamed(start.turn.state.segment.join('\n'), result.intent).map(n => ensureNetworkCatalog(false, n.chain)),

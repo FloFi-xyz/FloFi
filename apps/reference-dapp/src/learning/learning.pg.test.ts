@@ -8,7 +8,7 @@ import { randomBytes } from 'node:crypto';
 import { afterEach, describe, expect, it } from 'vitest';
 import { loadMigrations, migrate } from '@defi-workflow-engine/cloud-runtime';
 import { createTestDatabase, type TestDatabase } from '../../../../packages/cloud-runtime/test/pg-harness.ts';
-import { learningConfig } from './config.ts';
+import { LEARNING_NOTICE_VERSION, learningConfig } from './config.ts';
 import { evaluateKnowledge } from './evaluation.ts';
 import { contributorDigest, subjectDigest, type LearningPrincipal } from './identity.ts';
 import { KNOWLEDGE_SCHEMA, validateKnowledgeDocument } from './knowledge.ts';
@@ -90,7 +90,8 @@ describe('BUILD-CHAT-LEARNING-001 memory controls', () => {
     const { t, service } = await setup();
     await service.apply(A, ARB, 'WEB');
     const row = (await t.db.query(`SELECT memory_enabled, memory_consent_at, contribute_enabled, contribute_consent_at, notice_version FROM learning_subjects`)).rows[0]!;
-    expect(row).toMatchObject({ memory_enabled: true, contribute_enabled: false, contribute_consent_at: null, notice_version: 1 });
+    // The notice in force when the user saves (BUILD-CHAT-LEARNING-002: v2, which also describes automatic learning).
+    expect(row).toMatchObject({ memory_enabled: true, contribute_enabled: false, contribute_consent_at: null, notice_version: LEARNING_NOTICE_VERSION });
     expect(row.memory_consent_at).toEqual(NOW);
   });
 
@@ -219,7 +220,7 @@ describe('BUILD-CHAT-LEARNING-001 feedback, retention and fail-soft', () => {
     expect(c).toBe('COUNTED');
     await t.db.query(`INSERT INTO mcp_rate_limits (tenant_id, bucket, window_start, count) VALUES ('default', 'learning:write:x', $1, 1), ('default', 'channel:keep', $1, 1)`, [days(3)]);
     const purged = await store.purge(NOW);
-    expect(purged).toEqual({ events: 1, memories: 1, subjects: 2, support: 1, candidates: 1, rateWindows: 1 });
+    expect(purged).toEqual({ events: 1, memories: 1, evidence: 0, subjects: 2, support: 1, candidates: 1, rateWindows: 1 });
     expect((await t.db.query(`SELECT term FROM learning_memories`)).rows).toEqual([{ term: 'arb' }]);
     expect(await count(t, 'learning_subjects')).toBe(1);
     expect(await count(t, 'learning_feedback_events')).toBe(1);

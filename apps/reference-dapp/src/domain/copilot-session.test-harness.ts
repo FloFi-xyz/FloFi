@@ -4,8 +4,8 @@ import { editorReducer, initialEditor } from './editor';
 import type { Workflow } from './initial-workflow';
 import { describeProposal } from './proposal';
 import { buildCopilotFacts, type CopilotFacts, type CopilotFactsInput } from './copilot-answers';
-import { closeSegment, emptyConversation, finishTurn, recordProposal, startTurn, type CopilotConversation, type CopilotEnvironment, type CopilotLearning,
-  type CopilotReply, type CopilotRequestV2, type CopilotResultV2, type CopilotVerified } from './copilot-conversation';
+import { closeSegment, emptyConversation, finishTurn, observeWorkflow, proposalApplied, recordProposal, startTurn, type CopilotConversation, type CopilotEnvironment,
+  type CopilotLearning, type CopilotReply, type CopilotRequestV2, type CopilotResultV2, type CopilotVerified, type ReplyLearning } from './copilot-conversation';
 import { applyCommand, buildWorkflow, contextFor, TEST_WALLET } from './copilot-test-fixtures';
 
 /**
@@ -69,7 +69,22 @@ export class CopilotSession {
     this.turns.push({ text, reply, local: start.kind === 'LOCAL' ? 'ENGINE' : null, request, workflowBefore, workflowAfter: this.workflow });
     return reply;
   }
-  apply() { if (!this.pending) throw new Error('nothing to apply'); this.workflow = applyCommand(this.workflow, this.pending.command); this.pending = null; }
+  apply(): ReplyLearning | null {
+    if (!this.pending) throw new Error('nothing to apply');
+    const command = this.pending.command;
+    this.workflow = applyCommand(this.workflow, command); this.pending = null;
+    // BUILD-CHAT-LEARNING-002: as the browser hook does — the engine hears that the user applied the proposal, then sees the workflow change.
+    const applied = proposalApplied(this.state, this.env(), command);
+    this.state = observeWorkflow(applied.next, this.env(), 'APPLIED').next;
+    return applied.learning;
+  }
+  /** BUILD-CHAT-LEARNING-002: an edit on the canvas (not through the chat): the workflow changes and the engine observes it. */
+  canvas(command: Command | ((workflow: Workflow) => Workflow)): ReplyLearning | null {
+    this.workflow = typeof command === 'function' ? command(this.workflow) : applyCommand(this.workflow, command);
+    const observed = observeWorkflow(this.state, this.env(), 'CANVAS');
+    this.state = observed.next;
+    return observed.learning;
+  }
   dismiss() { this.pending = null; }
   reset() { this.workflow = initialEditor().workflow; this.pending = null; }
 }

@@ -11,16 +11,21 @@ import { hasUnsafeCharacters } from './copilot-intent';
  * may count as the user *naming* something is decided by its source:
  *
  *   SESSION  the user said it in this conversation ("whenever I say arb I mean Arbitrum")     names networks and tokens
- *   PRIVATE  the user's own saved meaning, bound to their verified identity                  names networks and tokens
- *   GLOBAL   FloFi's reviewed, evaluated, versioned glossary                                 names TEST networks only; for a mainnet it only
- *                                                                                              suggests (FloFi still asks), never a token
+ *   ADAPTED  BUILD-CHAT-LEARNING-002: inferred in this conversation from the user's answers   names TEST networks only; for a mainnet it only
+ *            to FloFi's questions and corrections (`copilot-adaptation.ts`)                   suggests (FloFi still asks), never a token
+ *   PRIVATE  the user's own stated meaning, saved for their verified identity                names networks and tokens
+ *   LEARNED  BUILD-CHAT-LEARNING-002: inferred from repeated evidence, saved for the identity  as ADAPTED
+ *   GLOBAL   FloFi's reviewed, evaluated, versioned glossary                                 as ADAPTED
+ *
+ * Only what the user *stated* (SESSION, PRIVATE) may select a real-funds network or a token; whatever FloFi inferred is offered first in FloFi's
+ * own question instead, and the user decides.
  *
  * Validation keeps the canonical vocabulary fixed (a registry network name, a pinned token symbol, a protocol, a command word or an
  * instruction-like word can never be redefined) and keeps environments apart: a term with test-network wording can only name a test network
  * or test token, a term without it never can. Matching is deterministic: longest term first, whole words, no overlaps; an alias of a mainnet
  * never matches right before test-network wording ("arb sepolia") or right after a number ("10 arb" is an amount of a token).
  */
-export const LEXICON_LIMITS = Object.freeze({ minTermLength: 2, maxTermLength: 32, maxTermWords: 3, maxSession: 8, maxPrivate: 64, maxGlobal: 200,
+export const LEXICON_LIMITS = Object.freeze({ minTermLength: 2, maxTermLength: 32, maxTermWords: 3, maxSession: 8, maxAdapted: 8, maxPrivate: 64, maxGlobal: 200,
   maxGlossary: 8 });
 export const LEXICON_OPERATIONS = Object.freeze(['SWAP', 'BRIDGE', 'SUPPLY', 'BORROW', 'REPAY', 'WITHDRAW', 'LIQUIDITY', 'TRANSFER'] as const);
 /** Pinned, network-independent token symbols a term may stand for (catalog tokens are always resolved by FloFi from the named network). */
@@ -28,7 +33,7 @@ export const LEXICON_ASSETS = Object.freeze(['USDC', 'WETH', 'ETH', 'SOL', 'USDT
 export type LexiconOperation = (typeof LEXICON_OPERATIONS)[number];
 export type LexiconAsset = (typeof LEXICON_ASSETS)[number];
 export type LexiconTarget = `network:${CopilotNetworkId}` | `asset:${LexiconAsset}` | `operation:${LexiconOperation}`;
-export type LexiconSource = 'SESSION' | 'PRIVATE' | 'GLOBAL';
+export type LexiconSource = 'SESSION' | 'ADAPTED' | 'PRIVATE' | 'LEARNED' | 'GLOBAL';
 export type LexiconEntry = { readonly term: string; readonly target: LexiconTarget; readonly source: LexiconSource;
   /** GLOBAL only: the knowledge version the entry was published in. */ readonly version?: number };
 export type LexiconCode = 'LEARNING_TERM_INVALID' | 'LEARNING_TERM_RESERVED' | 'LEARNING_TARGET_INVALID' | 'LEARNING_ENVIRONMENT_CONFLICT';
@@ -53,6 +58,10 @@ const RESERVED_WORDS = new Set([
   'ignore', 'ignorar', 'ignora', 'system', 'sistema', 'prompt', 'instruction', 'instructions', 'instrução', 'instrucao', 'instruções', 'rule', 'rules',
   'regra', 'regras', 'assistant', 'assistente', 'developer', 'model', 'modelo', 'schema', 'json', 'flofi', 'gryloo', 'copilot',
   'aave', 'uniswap', 'orca', 'jupiter', 'whirlpool', 'lifi', 'li.fi', 'across', 'cow', 'chainlink',
+  // BUILD-CHAT-LEARNING-002: words naming a financial parameter never become vocabulary (nothing learned may even appear to stand for a value).
+  'amount', 'amounts', 'slippage', 'recipient', 'address', 'balance', 'fee', 'fees', 'gas', 'price', 'range', 'max', 'maximum', 'minimum',
+  'valor', 'valores', 'quantia', 'quantidade', 'deslizamento', 'destinatário', 'destinatario', 'endereço', 'endereco', 'saldo', 'taxa', 'taxas', 'preço', 'preco',
+  'faixa', 'máximo', 'maximo', 'mínimo', 'minimo',
 ]);
 /** Canonical operation words: never a term on their own; inside a phrase ("fazer bridge") only for an operation. */
 const OPERATION_TERMS = new Set(['swap', 'bridge', 'supply', 'borrow', 'repay', 'withdraw', 'liquidity', 'transfer', 'deposit', 'send']);
@@ -114,7 +123,7 @@ export function validateLexiconEntry(rawTerm: unknown, rawTarget: unknown): Lexi
 }
 /** Untrusted entries (a persisted channel state, a server response, a stored document) → the valid ones, deduplicated, bounded. */
 export function parseLexicon(value: unknown, source: LexiconSource, limit: number = source === 'GLOBAL' ? LEXICON_LIMITS.maxGlobal
-  : source === 'PRIVATE' ? LEXICON_LIMITS.maxPrivate : LEXICON_LIMITS.maxSession): LexiconEntry[] {
+  : source === 'PRIVATE' || source === 'LEARNED' ? LEXICON_LIMITS.maxPrivate : source === 'ADAPTED' ? LEXICON_LIMITS.maxAdapted : LEXICON_LIMITS.maxSession): LexiconEntry[] {
   if (!Array.isArray(value)) return [];
   const out: LexiconEntry[] = [], seen = new Set<string>();
   for (const item of value.slice(0, limit)) {
@@ -129,8 +138,8 @@ export function parseLexicon(value: unknown, source: LexiconSource, limit: numbe
   return out;
 }
 
-const PRECEDENCE: Readonly<Record<LexiconSource, number>> = { SESSION: 0, PRIVATE: 1, GLOBAL: 2 };
-/** One entry per term: the user's own words in this conversation, then their saved meaning, then FloFi's glossary. */
+const PRECEDENCE: Readonly<Record<LexiconSource, number>> = { SESSION: 0, ADAPTED: 1, PRIVATE: 2, LEARNED: 3, GLOBAL: 4 };
+/** One entry per term: this conversation (stated, then adapted), then the identity's saved meanings (stated, then learned), then FloFi's glossary. */
 export function mergeLexicon(...lists: readonly (readonly LexiconEntry[])[]): LexiconEntry[] {
   const best = new Map<string, LexiconEntry>();
   for (const entry of lists.flat()) {
@@ -160,20 +169,22 @@ export function lexiconMatches(text: string, lexicon: readonly LexiconEntry[]): 
   }
   return out.sort((a, b) => a.index - b.index);
 }
+/** The user stated this meaning (in this conversation, or saved for their identity); anything else FloFi inferred or reviewed globally. */
+export const statedSource = (source: LexiconSource): boolean => source === 'SESSION' || source === 'PRIVATE';
 /** Whether an entry may count as the user naming its target (see the module comment). */
-export const grounds = (entry: LexiconEntry): boolean => entry.source !== 'GLOBAL' || (targetKind(entry.target) === 'network' && targetEnvironment(entry.target) === 'TESTNET');
+export const grounds = (entry: LexiconEntry): boolean => statedSource(entry.source) || (targetKind(entry.target) === 'network' && targetEnvironment(entry.target) === 'TESTNET');
 const unique = <T>(values: readonly T[]) => [...new Set(values)];
 /** Networks the user named through a lexicon term that may ground them, with the entry that did. */
 export function lexiconNetworks(text: string, lexicon: readonly LexiconEntry[]): { readonly network: CopilotNetworkId; readonly entry: LexiconEntry }[] {
   return lexiconMatches(text, lexicon).flatMap(({ entry }) => { const network = targetNetwork(entry.target); return network && grounds(entry) ? [{ network, entry }] : []; });
 }
-/** Mainnets a GLOBAL term suggests: never grounded, only offered first in FloFi's own question. */
+/** Mainnets an inferred or global term suggests: never grounded, only offered first in FloFi's own question. */
 export function lexiconSuggestions(text: string, lexicon: readonly LexiconEntry[]): { readonly network: CopilotNetworkId; readonly entry: LexiconEntry }[] {
   return lexiconMatches(text, lexicon).flatMap(({ entry }) => { const network = targetNetwork(entry.target); return network && !grounds(entry) ? [{ network, entry }] : []; });
 }
-/** Pinned tokens the user named through their own (session or private) terms. */
+/** Pinned tokens the user named through their own stated (session or saved) terms. */
 export function lexiconAssets(text: string, lexicon: readonly LexiconEntry[]): { readonly asset: LexiconAsset; readonly entry: LexiconEntry }[] {
-  return lexiconMatches(text, lexicon).flatMap(({ entry }) => { const asset = targetAsset(entry.target); return asset && entry.source !== 'GLOBAL' ? [{ asset, entry }] : []; });
+  return lexiconMatches(text, lexicon).flatMap(({ entry }) => { const asset = targetAsset(entry.target); return asset && statedSource(entry.source) ? [{ asset, entry }] : []; });
 }
 export const lexiconNamedNetworkIds = (text: string, lexicon: readonly LexiconEntry[]): CopilotNetworkId[] => unique(lexiconNetworks(text, lexicon).map(item => item.network));
 /** The entries a model request may show as glossary data: matched in the open request, the user's own first, bounded. */

@@ -1,13 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { adminPermits } from '../../../admin/guard';
-import { learningAdminView, LEARNING_WINDOW_DAYS, type Rate } from '../../../admin/learning-view';
+import { CONTRIBUTOR_THRESHOLD, learningAdminView, LEARNING_WINDOW_DAYS, type Rate } from '../../../admin/learning-view';
 import { adminPage } from '../../../admin/page-context';
 import { AdminShell, AdminUnavailable } from '../../../components/admin/admin-shell';
 import { CandidateActions, KnowledgeControls, OperatorTools } from '../../../components/admin/learning-console';
 
-const REASON: Record<string, string> = { OFF: 'off (FLOFI_LEARNING not enabled)', INVALID: 'misconfigured', SECRET_MISSING: 'FLOFI_LEARNING_SECRET missing',
+const REASON: Record<string, string> = { OFF: 'off (FLOFI_LEARNING not enabled)', SESSION_ONLY: 'in-conversation adaptation only (FLOFI_LEARNING=session)', INVALID: 'misconfigured',
+  SECRET_MISSING: 'FLOFI_LEARNING_SECRET missing',
   SECRET_INVALID: 'FLOFI_LEARNING_SECRET too short', SECRET_REUSED: 'FLOFI_LEARNING_SECRET reuses another secret' };
 const pct = (r: Rate) => r.rate === null ? '—' : `${Math.round(r.rate * 1000) / 10}%`;
+const AUTOMATIC: Record<string, string> = { OFF: 'Off — nothing observed is stored (FLOFI_LEARNING_AUTOMATIC unset)', CONSENT: 'Consent — only identities that turned it on',
+  LEGITIMATE_INTEREST: 'Legitimate interest — every verified identity that did not object' };
+const counts = (record: Readonly<Record<string, number>>) => Object.entries(record).sort((a, b) => b[1] - a[1]).map(([code, n]) => `${code} ${n}`).join(' · ') || '—';
 function Kpi({ label, value, note, tone }: { label: string; value: string; note?: string | undefined; tone?: string | undefined }) {
   return <div className="admin-kpi" data-tone={tone}><span>{label}</span><strong>{value}</strong>{note ? <small>{note}</small> : null}</div>;
 }
@@ -29,11 +33,12 @@ export default async function AdminAiLearningPage() {
         <tr><th scope="row">Copilot learning (FLOFI_LEARNING)</th><td><span className="admin-badge" data-tone={view.deployment.enabled ? 'ok' : undefined}>
           {view.deployment.enabled ? 'Enabled' : REASON[view.deployment.reason ?? 'OFF'] ?? 'Off'}</span></td></tr>
         <tr><th scope="row">Global glossary served (FLOFI_LEARNING_GLOBAL)</th><td>{view.deployment.global ? 'Yes, the active version below' : 'No (break-glass disabled)'}</td></tr>
+        <tr><th scope="row">Persistent automatic learning (FLOFI_LEARNING_AUTOMATIC)</th><td>{AUTOMATIC[view.deployment.automatic]}</td></tr>
         <tr><th scope="row">Active glossary</th><td>{!view.active ? 'None published' : view.active.disabled ? `v${view.active.version}: disabled (no glossary)`
           : view.active.invalid ? <span className="admin-badge" data-tone="bad">v{view.active.version} no longer validates: not served</span>
             : `v${view.active.version}: ${view.active.entries} entries${view.active.restoredFrom ? ` (restored from v${view.active.restoredFrom})` : ''}`}</td></tr>
         <tr><th scope="row">Retention</th><td>feedback {view.retention.eventsDays} d · unused memory {view.retention.memoryDays} d · contributions {view.retention.supportDays} d ·
-          subjects without consent {view.retention.unconsentedSubjectDays} d</td></tr>
+          subjects without consent {view.retention.unconsentedSubjectDays} d · unlearned evidence {view.retention.evidenceDays} d</td></tr>
       </tbody></table></div>
       {view.storeError ? <p className="admin-alert" data-tone="bad">The learning tables could not be read ({view.storeError}).</p> : null}
     </section>
@@ -60,9 +65,31 @@ export default async function AdminAiLearningPage() {
       </tbody></table></div>
     </section>
 
+    <section className="admin-card" aria-labelledby="learning-invisible">
+      <header><h2 id="learning-invisible">Invisible learning (last {LEARNING_WINDOW_DAYS} days)</h2>
+        <p>Signals the Copilot classified in natural use; readings FloFi made on its own and what users did with them. Closed codes and counts only.</p></header>
+      <div className="admin-kpis">
+        <Kpi label="Effectiveness" value={pct(view.automatic.inferred.effectiveness)} note={`${view.automatic.inferred.confirmed} inferred readings applied unchanged`}/>
+        <Kpi label="False positives" value={pct(view.automatic.inferred.falsePositives)} tone={view.automatic.inferred.corrected ? 'warn' : undefined}
+          note={`${view.automatic.inferred.corrected} of ${view.automatic.inferred.used} inferred readings corrected`}/>
+        <Kpi label="Corrections" value={pct(view.automatic.corrections.rate)} note={`chat ${view.automatic.corrections.chat} · canvas ${view.automatic.corrections.canvas} per proposal`}/>
+        <Kpi label="Learned meanings" value={String(view.automatic.evidence.learned)} note={`${view.automatic.evidence.stated} stated · ${view.automatic.evidence.rows - view.automatic.evidence.promoted} observed, not used`}/>
+      </div>
+      <div className="admin-table-wrap"><table className="admin-table"><tbody>
+        <tr><th scope="row">Signals adapted</th><td>{counts(view.automatic.adaptations)}</td></tr>
+        <tr><th scope="row">Signals ignored (by reason)</th><td>{counts(view.automatic.ignored)}</td></tr>
+        <tr><th scope="row">Inferred readings by source</th><td>{Object.entries(view.automatic.inferred.bySource).map(([source, n]) =>
+          `${source}: used ${n.used}, applied ${n.confirmed}, corrected ${n.corrected}`).join(' · ') || '—'}</td></tr>
+        <tr><th scope="row">Persistent tier (observation → outcome)</th><td>{counts(view.automatic.store)}</td></tr>
+        <tr><th scope="row">Identities' choices</th><td>{view.automatic.choices.map(c => `${c.basis} ${c.enabled ? 'on' : 'off'} ${c.n}`).join(' · ') || '—'}
+          {' '}· {view.automatic.evidence.subjects} identities with evidence · {view.automatic.evidence.languages} learned starting languages</td></tr>
+      </tbody></table></div>
+    </section>
+
     <section className="admin-card" aria-labelledby="learning-candidates">
       <header><h2 id="learning-candidates">Candidates awaiting review</h2>
-        <p>Generalized meanings from opted-in users (support = distinct pseudonymous contributors) and operators. Support never publishes anything.</p></header>
+        <p>Generalized meanings from opted-in users (support = distinct pseudonymous contributors) and operators. Support never publishes anything.
+          {view.candidates.belowThreshold ? ` ${view.candidates.belowThreshold} contributed candidates have fewer than ${CONTRIBUTOR_THRESHOLD} contributors and are not listed.` : ''}</p></header>
       {view.candidates.pending.length ? <div className="admin-table-wrap"><table className="admin-table">
         <thead><tr><th>Term</th><th>Means</th><th>Lang</th><th>Origin</th><th className="num">Support</th><th>Last seen</th><th>Decision</th></tr></thead>
         <tbody>{view.candidates.pending.map(c => <tr key={c.candidateId}><td><code>{c.term}</code></td><td><code>{c.target}</code></td><td>{c.language}</td><td>{c.origin}</td>

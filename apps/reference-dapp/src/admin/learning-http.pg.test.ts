@@ -131,4 +131,38 @@ describe('BUILD-CHAT-LEARNING-001 admin AI Learning API', () => {
       turns: { total: 2, proposals: { count: 1, rate: 0.5 } }, corrections: { count: 1, of: 1 } });
     expect(JSON.stringify(view)).not.toMatch(/minhagrana|cccccccccc/);
   });
+
+  it('BUILD-CHAT-LEARNING-002: invisible-learning metrics, contributed candidates only above the contributor threshold, the purge by basis', async () => {
+    const li = learningConfig({ ...learningEnv, FLOFI_LEARNING_AUTOMATIC: 'legitimate_interest' });
+    if (!li.enabled) throw new Error('config');
+    const service = createLearningService({ config: li, host: { db: t.db, tenantId: 'default' }, now: () => now, log: () => undefined });
+    const user = (c: string) => ({ kind: 'WALLET' as const, namespace: 'eip155' as const, account: '0x' + c.repeat(40) });
+    await service.record('WEB', [{ kind: 'ADAPTATION', outcome: 'CLARIFIED_NETWORK' }, { kind: 'ADAPTATION', outcome: 'CORRECTED_NETWORK_CANVAS' },
+      { kind: 'CORRECTION_IGNORED', outcome: 'OBJECTIVE_CHANGED' }, { kind: 'INFERRED_USED', outcome: 'LEARNED' }, { kind: 'INFERRED_USED', outcome: 'ADAPTED' },
+      { kind: 'INFERRED_CONFIRMED', outcome: 'LEARNED' }, { kind: 'INFERRED_CORRECTED', outcome: 'ADAPTED' }]);
+    // One contributor's learned meaning: a candidate below the threshold is counted, never listed.
+    await service.settings(user('d'), { contribute: true });
+    for (const n of [1, 2]) await service.observe(user('d'), [{ kind: 'CLARIFIED', term: 'zzsol', target: 'network:SOLANA', via: 'CHAT' }],
+      { conversation: `conversation-admin-${n}`, request: 0 }, 'WEB');
+    await service.settings(user('e'), { automatic: false });
+    const view = await learningAdminView({ ...learningEnv, FLOFI_LEARNING_AUTOMATIC: 'legitimate_interest' }, { db: t.db, tenantId: 'default' }, now);
+    expect(view.deployment.automatic).toBe('LEGITIMATE_INTEREST');
+    expect(view.automatic).toMatchObject({ adaptations: { CLARIFIED_NETWORK: 1, CORRECTED_NETWORK_CANVAS: 1 }, ignored: { OBJECTIVE_CHANGED: 1 },
+      inferred: { used: 2, confirmed: 1, corrected: 1, effectiveness: { count: 1, of: 2, rate: 0.5 }, falsePositives: { count: 1, of: 2, rate: 0.5 },
+        bySource: { LEARNED: { used: 1, confirmed: 1, corrected: 0 }, ADAPTED: { used: 1, confirmed: 0, corrected: 1 } } }, corrections: { chat: 0, canvas: 1 },
+      store: { CLARIFIED_OBSERVED: 1, CLARIFIED_LEARNED: 1 }, evidence: { rows: 1, promoted: 1, learned: 1 } });
+    expect(view.automatic.choices).toEqual([{ basis: 'LEGITIMATE_INTEREST', enabled: false, n: 1 }]);
+    expect(view.candidates.pending.some(c => c.term === 'zzsol')).toBe(false);
+    expect(view.candidates.belowThreshold).toBe(1);
+    expect(JSON.stringify(view)).not.toMatch(/zzsol|dddddddddd/);
+
+    // The purge follows the deployment's current basis: under consent, every identity without a consent loses what automatic learning produced.
+    const purge = await handleLearningAdmin(new Request(`${ORIGIN}/admin/api/learning`, { method: 'POST', body: JSON.stringify({ action: 'purge-automatic' }),
+      headers: { host: DOMAIN, 'x-forwarded-proto': 'https', origin: ORIGIN, 'content-type': 'application/json', cookie: operator.cookie, 'x-flofi-admin-csrf': operator.csrf } }),
+    { ...options(), env: { ...adminEnv, ...learningEnv, FLOFI_LEARNING_AUTOMATIC: 'consent' } });
+    expect(await purge.json()).toEqual({ ok: true, mode: 'CONSENT', subjects: 1 });
+    expect((await t.db.query(`SELECT count(*)::int AS n FROM learning_evidence`)).rows).toEqual([{ n: 0 }]);
+    expect((await t.db.query(`SELECT count(*)::int AS n FROM learning_memories WHERE term = 'zzsol'`)).rows).toEqual([{ n: 0 }]);
+    expect((await audit('ADMIN_LEARNING_AUTOMATIC_PURGED')).map(r => [r.outcome, r.detail])).toEqual([['OK', { mode: 'CONSENT', subjects: 1 }]]);
+  });
 });

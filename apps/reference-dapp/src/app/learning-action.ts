@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use server';
-import { applyAction, applySettings, parseClientEvents, statusView, type LearningActionResult, type LearningStatusView } from '../learning/web-actions';
+import { learningConfig, sessionAdaptation } from '../learning/config';
+import { applyAction, applyObservations, applySettings, parseClientEvents, statusView, type LearningActionResult, type LearningStatusView } from '../learning/web-actions';
 import { createCopilotLimiter, type CopilotLimiter } from '../server/copilot-service';
 import { namespaceOf, webLearningService } from '../server/learning-web';
 import { currentWalletPrincipals } from '../server/session-principal';
@@ -12,9 +13,25 @@ import { currentWalletPrincipals } from '../server/session-principal';
  */
 const principals = () => currentWalletPrincipals().catch(() => []);
 
-/** This browser's learning context: its own memory (for its verified wallet), the active global glossary, and its settings. */
+/**
+ * This browser's learning context: its own memory (for its verified wallet), the active global glossary, and its settings. BUILD-CHAT-LEARNING-002:
+ * with FLOFI_LEARNING=session, only in-conversation adaptation (nothing is read or stored).
+ */
 export async function learningStatus(identity?: unknown): Promise<LearningStatusView> {
-  return statusView(await webLearningService(process.env), await principals(), namespaceOf(identity));
+  const service = await webLearningService(process.env);
+  if (service === 'OFF' && sessionAdaptation(process.env)) return statusView('SESSION', [], null);
+  return statusView(service, await principals(), namespaceOf(identity));
+}
+/** BUILD-CHAT-LEARNING-002: which learning tier this deployment runs (no database read): what Settings links to. */
+export async function learningAvailability(): Promise<'OFF' | 'SESSION' | 'ENABLED'> {
+  return learningConfig(process.env).enabled ? 'ENABLED' : sessionAdaptation(process.env) ? 'SESSION' : 'OFF';
+}
+/** BUILD-CHAT-LEARNING-002: what the Copilot observed about the user's own words; stored only when permitted for the chosen proven wallet. Best effort. */
+export async function learningObserve(observations: unknown, context: unknown, identity?: unknown): Promise<void> {
+  const release = feedbackLimiter().acquire();
+  if (!release) return;
+  try { await applyObservations(await webLearningService(process.env), await principals(), namespaceOf(identity), observations, context); }
+  catch { /* learning never fails the chat */ } finally { release(); }
 }
 /** Performs a memory action the user just confirmed (Remember, forget, delete all, reply language). */
 export async function learningApply(action: unknown, identity?: unknown): Promise<LearningActionResult> {

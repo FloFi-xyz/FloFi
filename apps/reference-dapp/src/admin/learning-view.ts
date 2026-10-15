@@ -1,19 +1,26 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /**
- * BUILD-CHAT-LEARNING-001: what the AI Learning page shows — aggregates only. Counts of private memories (never a term, a target or an identity
+ * BUILD-CHAT-LEARNING-001: what the AI Learning page shows — aggregates only. BUILD-CHAT-LEARNING-002: plus invisible learning's effectiveness and false
+ * positives, corrections by source, ignored signals by reason, what the persistent tier did, identities' choices by basis; contributed candidates
+ * appear individually only above the contributor threshold. Counts of private memories (never a term, a target or an identity
  * of a private memory), content-free feedback rates, the generalized candidates of the global glossary with their pseudonymous support, the
  * published versions and every evaluation. No message, transcript, address or subject is ever read here.
  */
-import { learningConfig } from '../learning/config.ts';
+import { learningConfig, type AutomaticMode } from '../learning/config.ts';
 import { LEARNING_RETENTION, createLearningStore, type Candidate, type EvaluationRow, type KnowledgeVersion, type LearningMetrics } from '../learning/store.ts';
 import { validateKnowledgeDocument } from '../learning/knowledge.ts';
 import type { AdminHost } from './host.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
 export const LEARNING_WINDOW_DAYS = 30;
+/**
+ * BUILD-CHAT-LEARNING-002: a contributed candidate is listed individually only once this many distinct pseudonymous contributors support it; below,
+ * only counted (one person's vocabulary is never shown on its own). Operator candidates are always listed.
+ */
+export const CONTRIBUTOR_THRESHOLD = 3;
 export type Rate = { readonly count: number; readonly of: number; readonly rate: number | null };
 export type LearningAdminView = {
-  readonly deployment: { readonly enabled: boolean; readonly reason: string | null; readonly global: boolean };
+  readonly deployment: { readonly enabled: boolean; readonly reason: string | null; readonly global: boolean; readonly automatic: AutomaticMode };
   readonly storeError: string | null; readonly since: string;
   readonly memory: { readonly entries: number; readonly subjects: number; readonly walletSubjects: number; readonly channelSubjects: number; readonly contributors: number };
   readonly turns: { readonly total: number; readonly proposals: Rate; readonly answers: Rate; readonly clarifications: Rate; readonly refusals: Rate; readonly failures: Rate;
@@ -24,7 +31,18 @@ export type LearningAdminView = {
   readonly interpreter: { readonly ok: number; readonly failed: number; readonly failures: readonly { readonly code: string; readonly n: number }[] };
   readonly usage: { readonly memoryUsed: number; readonly knowledgeUsed: number };
   readonly candidates: { readonly pending: readonly Candidate[]; readonly approved: readonly Candidate[]; readonly rejected: readonly Candidate[];
-    readonly counts: LearningMetrics['candidates'] };
+    readonly counts: LearningMetrics['candidates']; /** BUILD-CHAT-LEARNING-002: contributed candidates below the contributor threshold. */ readonly belowThreshold: number };
+  /** BUILD-CHAT-LEARNING-002: invisible learning — signals, inferred readings and their outcomes, the persistent tier and identities' choices. */
+  readonly automatic: {
+    readonly adaptations: Readonly<Record<string, number>>; readonly ignored: Readonly<Record<string, number>>;
+    /** Inferred readings used in proposals, applied unchanged, and corrected (false positives), by source (ADAPTED, LEARNED, GLOBAL). */
+    readonly inferred: { readonly used: number; readonly confirmed: number; readonly corrected: number; readonly effectiveness: Rate; readonly falsePositives: Rate;
+      readonly bySource: Readonly<Record<string, { readonly used: number; readonly confirmed: number; readonly corrected: number }>> };
+    readonly corrections: { readonly chat: number; readonly canvas: number; readonly rate: Rate };
+    readonly store: Readonly<Record<string, number>>;
+    readonly choices: readonly { readonly basis: string; readonly enabled: boolean; readonly n: number }[];
+    readonly evidence: LearningMetrics['automatic']['evidence'];
+  };
   readonly active: { readonly version: number; readonly entries: number | null; readonly disabled: boolean; readonly restoredFrom: number | null; readonly invalid: boolean } | null;
   readonly history: readonly (Omit<KnowledgeVersion, 'document'> & { readonly entries: number | null; readonly terms: readonly string[] })[];
   readonly evaluations: readonly (Omit<EvaluationRow, 'result'> & { readonly summary: EvaluationSummary })[];
@@ -46,12 +64,15 @@ function summarize(result: unknown): EvaluationSummary {
 
 export async function learningAdminView(env: Env, host: AdminHost, now: Date): Promise<LearningAdminView> {
   const config = learningConfig(env), since = new Date(now.getTime() - LEARNING_WINDOW_DAYS * 86_400_000), store = createLearningStore(host.db, host.tenantId);
-  const deployment = { enabled: config.enabled, reason: config.enabled ? null : config.reason, global: config.enabled ? config.global : true };
+  const deployment = { enabled: config.enabled, reason: config.enabled ? null : config.reason, global: config.enabled ? config.global : true,
+    automatic: config.enabled ? config.automatic : 'OFF' as const };
   const empty: LearningAdminView = { deployment, storeError: null, since: since.toISOString(),
     memory: { entries: 0, subjects: 0, walletSubjects: 0, channelSubjects: 0, contributors: 0 },
     turns: { total: 0, proposals: rate(0, 0), answers: rate(0, 0), clarifications: rate(0, 0), refusals: rate(0, 0), failures: rate(0, 0), memoryTurns: rate(0, 0), byScope: {} },
     corrections: rate(0, 0), clarificationAnswers: 0, repeatedFailures: 0, proposals: { applied: 0, dismissed: 0, revised: 0 }, suggestions: { confirmed: 0, rejected: 0 },
-    interpreter: { ok: 0, failed: 0, failures: [] }, usage: { memoryUsed: 0, knowledgeUsed: 0 }, candidates: { pending: [], approved: [], rejected: [], counts: {} },
+    interpreter: { ok: 0, failed: 0, failures: [] }, usage: { memoryUsed: 0, knowledgeUsed: 0 }, candidates: { pending: [], approved: [], rejected: [], counts: {}, belowThreshold: 0 },
+    automatic: { adaptations: {}, ignored: {}, inferred: { used: 0, confirmed: 0, corrected: 0, effectiveness: rate(0, 0), falsePositives: rate(0, 0), bySource: {} },
+      corrections: { chat: 0, canvas: 0, rate: rate(0, 0) }, store: {}, choices: [], evidence: { rows: 0, promoted: 0, subjects: 0, learned: 0, stated: 0, languages: 0 } },
     active: null, history: [], evaluations: [], retention: LEARNING_RETENTION };
   let metrics: LearningMetrics, pending: Candidate[], approved: Candidate[], rejected: Candidate[], history: KnowledgeVersion[], evaluations: EvaluationRow[];
   try {
@@ -75,6 +96,13 @@ export async function learningAdminView(env: Env, host: AdminHost, now: Date): P
     return { ...rest, entries, terms };
   };
   const latest = history[0];
+  // BUILD-CHAT-LEARNING-002: outcome counts of one event kind (closed codes only).
+  const byOutcome = (kind: string) => { const out: Record<string, number> = {}; for (const e of metrics.events.filter(e => e.kind === kind)) out[e.outcome ?? 'NONE'] = (out[e.outcome ?? 'NONE'] ?? 0) + e.n; return out; };
+  const adaptations = byOutcome('ADAPTATION'), inferredUsed = byOutcome('INFERRED_USED'), inferredConfirmed = byOutcome('INFERRED_CONFIRMED'), inferredCorrected = byOutcome('INFERRED_CORRECTED');
+  const sum = (record: Readonly<Record<string, number>>) => Object.values(record).reduce((t, n) => t + n, 0);
+  const sources = [...new Set([...Object.keys(inferredUsed), ...Object.keys(inferredConfirmed), ...Object.keys(inferredCorrected)])];
+  const corrected = (via: string) => Object.entries(adaptations).filter(([code]) => code.startsWith('CORRECTED_') && code.endsWith(`_${via}`)).reduce((t, [, n]) => t + n, 0);
+  const contributed = (c: Candidate) => c.origin === 'CONTRIBUTION' && c.support < CONTRIBUTOR_THRESHOLD;
   return { ...empty,
     memory: { entries: metrics.memories.n, subjects: metrics.subjects.reduce((t, s) => t + s.memory, 0),
       walletSubjects: metrics.subjects.find(s => s.kind === 'WALLET')?.memory ?? 0, channelSubjects: metrics.subjects.find(s => s.kind === 'CHANNEL')?.memory ?? 0,
@@ -87,7 +115,14 @@ export async function learningAdminView(env: Env, host: AdminHost, now: Date): P
     interpreter: { ok: interpreted.filter(e => e.outcome === 'OK').reduce((t, e) => t + e.n, 0), failed: failures.reduce((t, e) => t + e.n, 0),
       failures: [...failureCodes].map(([code, n]) => ({ code, n })).sort((a, b) => b.n - a.n).slice(0, 8) },
     usage: { memoryUsed: events('MEMORY_USED'), knowledgeUsed: events('KNOWLEDGE_USED') },
-    candidates: { pending, approved, rejected, counts: metrics.candidates },
+    candidates: { pending: pending.filter(c => !contributed(c)), approved, rejected: rejected.filter(c => !contributed(c)), counts: metrics.candidates,
+      belowThreshold: [...pending, ...rejected].filter(contributed).length },
+    automatic: { adaptations, ignored: byOutcome('CORRECTION_IGNORED'),
+      inferred: { used: sum(inferredUsed), confirmed: sum(inferredConfirmed), corrected: sum(inferredCorrected),
+        effectiveness: rate(sum(inferredConfirmed), sum(inferredConfirmed) + sum(inferredCorrected)), falsePositives: rate(sum(inferredCorrected), sum(inferredUsed)),
+        bySource: Object.fromEntries(sources.map(source => [source, { used: inferredUsed[source] ?? 0, confirmed: inferredConfirmed[source] ?? 0, corrected: inferredCorrected[source] ?? 0 }])) },
+      corrections: { chat: corrected('CHAT'), canvas: corrected('CANVAS'), rate: rate(corrected('CHAT') + corrected('CANVAS'), proposals) },
+      store: byOutcome('AUTOMATIC'), choices: metrics.automatic.settings.map(row => ({ basis: row.basis, enabled: row.enabled, n: row.n })), evidence: metrics.automatic.evidence },
     active: latest ? { version: latest.version, entries: versionView(latest).entries, disabled: latest.document === null, restoredFrom: latest.restoredFrom,
       invalid: latest.document !== null && versionView(latest).entries === null } : null,
     history: history.map(versionView),
