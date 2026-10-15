@@ -24,7 +24,7 @@ function getContact(): { label: string; href: string } | null {
   return null;
 }
 
-type Paragraphs = { title: string; paragraphs: readonly string[] };
+type Paragraphs = { title: string; paragraphs: readonly string[]; id?: string };
 const sectionsPT: readonly Paragraphs[] = [
   { title: 'Dados e finalidades', paragraphs: [
     'Quando envia uma mensagem privada a @FloFiAppBot, a FloFi recebe do Telegram o identificador da conta, identificador da atualização, hora e conteúdo enviado. Utilizamos estes dados para responder, compor uma proposta DeFi, evitar mensagens duplicadas, aplicar limites de utilização e manter temporariamente o contexto da conversa. Os identificadores de fornecedor armazenados são protegidos com resumos criptográficos e os dados temporários são cifrados.',
@@ -47,11 +47,16 @@ const sectionsPT: readonly Paragraphs[] = [
     'Sujeito à legislação aplicável, pode pedir acesso, retificação, eliminação, limitação, portabilidade ou opor-se ao tratamento. Para exercer os direitos, utilize o contacto indicado nesta página. Pode reclamar junto da Comissão Nacional de Proteção de Dados (CNPD), em www.cnpd.pt, ou da autoridade competente.',
     'Para deixar de receber mensagens da FloFi no Telegram, envie STOP. O estado da conversa e o endereço para resposta são apagados, mas certos registos técnicos sem conteúdo podem permanecer até ao fim do prazo indicado.'
   ] },
+  { title: 'Memória do Copilot (opcional)', id: 'memoria-copilot', paragraphs: [
+    'Quando o operador ativa esta funcionalidade, o Copilot pode lembrar palavras que você usa (por exemplo, “arb” para Arbitrum) e o idioma das respostas — somente depois que você clicar em “Lembrar” e somente para a carteira comprovada nesta sessão (ou para esta conta do Telegram/WhatsApp). Guardamos o termo curto e o que ele significa no vocabulário fechado da FloFi, a data do consentimento e a versão deste aviso; nunca mensagens, valores, endereços ou chaves. A identidade é guardada apenas como um resumo criptográfico. Sem carteira comprovada, o que você diz vale só para a conversa atual.',
+    'Separadamente, e só se você ativar “Ajudar a melhorar o glossário compartilhado”, um termo generalizado (como “arb → Arbitrum”) pode ser sugerido a um operador, sem a sua identidade. Nada é publicado por repetição: cada entrada é revista por uma pessoa e só entra em vigor depois de passar numa avaliação automática.',
+    'Pode ver, pausar e apagar a memória a qualquer momento no painel Memória do Copilot ou, nos canais, com MEMÓRIA, “esqueça arb”, “esqueça tudo” ou STOP. Uma entrada não usada é apagada após 365 dias; os eventos estatísticos sem conteúdo após 90 dias. A memória nunca preenche valores nem autoriza operações: cada proposta mostra como as suas palavras foram lidas e continua exigindo simulação, revisão e a assinatura da sua carteira.'
+  ] },
   { title: 'Segurança e autorização financeira', paragraphs: [
     'O bot apenas prepara propostas. Uma operação exige que o utilizador aceda à FloFi, comprove o controlo da carteira, obtenha uma simulação atualizada, reveja o Strategy Manifest e assine explicitamente na própria carteira. Nenhuma mensagem de Telegram autoriza movimentação de fundos. A partilha do estado de execução de volta ao chat é opcional.'
   ] },
   { title: 'Atualizações', paragraphs: [
-    'Esta informação poderá ser atualizada quando mudarem de forma relevante as funcionalidades ou os tratamentos. Revisão: 12 de outubro de 2026.'
+    'Esta informação poderá ser atualizada quando mudarem de forma relevante as funcionalidades ou os tratamentos. Revisão: 15 de outubro de 2026.'
   ] },
 ];
 const sectionsEN: readonly Paragraphs[] = [
@@ -76,18 +81,23 @@ const sectionsEN: readonly Paragraphs[] = [
     'Subject to applicable law, you may request access, correction, erasure, restriction, portability or object to processing. Use the contact on this page. You may lodge a complaint with the Portuguese data protection authority (CNPD), at www.cnpd.pt, or another competent authority.',
     'Send STOP to stop Telegram messaging. Conversation state and the reply address are erased, but certain content-free technical records may remain until the stated retention deadlines.'
   ] },
+  { title: 'Copilot memory (optional)', id: 'copilot-memory', paragraphs: [
+    'When the operator enables it, the Copilot can remember words you use (for example “arb” for Arbitrum) and your reply language — only after you click “Remember”, and only for the wallet you proved in this session (or for this Telegram/WhatsApp account). We keep the short term and what it means in FloFi’s closed vocabulary, the time of your consent and the version of this notice; never messages, amounts, addresses or keys. Your identity is stored only as a cryptographic digest. Without a proven wallet, what you say lasts for the current conversation only.',
+    'Separately, and only if you turn on “Help improve FloFi’s shared glossary”, a generalized term (such as “arb → Arbitrum”) may be suggested to an operator without your identity. Nothing is published by repetition: every entry is reviewed by a person and takes effect only after passing an automated evaluation.',
+    'You can view, pause and delete your memory at any time in the Copilot’s Memory panel or, on channels, with MEMORY, “forget arb”, “forget everything” or STOP. An unused entry is deleted after 365 days; content-free statistical events after 90 days. Memory never fills in amounts or authorizes anything: every proposal shows how your words were read and still needs a simulation, your review and your wallet’s signature.'
+  ] },
   { title: 'Wallet security and financial authorization', paragraphs: [
     'The bot only prepares proposals. Any operation requires the user to open FloFi, prove wallet control, obtain a fresh simulation, review the Strategy Manifest and explicitly sign using their own wallet. No Telegram message can authorize a transfer. Sharing execution status with the chat is optional.'
   ] },
   { title: 'Updates', paragraphs: [
-    'This notice may be updated when features or processing change materially. Reviewed 12 October 2026.'
+    'This notice may be updated when features or processing change materially. Reviewed 15 October 2026.'
   ] },
 ];
 function Policy({ lang, heading, sections }: { lang: 'pt' | 'en'; heading: string; sections: readonly Paragraphs[] }) {
   return <section id={lang} className={styles.language} lang={lang} aria-labelledby={'heading-' + lang}>
     <span className={styles.languageTag}>{lang === 'pt' ? 'PORTUGUÊS' : 'ENGLISH'}</span>
     <h2 id={'heading-' + lang} className={styles.languageTitle}>{heading}</h2>
-    {sections.map((section, i) => <section key={section.title}>
+    {sections.map((section, i) => <section key={section.title} {...section.id ? { id: section.id } : {}}>
       <h3 className={styles.sectionTitle}>{i + 2}. {section.title}</h3>
       {section.paragraphs.map((paragraph, j) => <p key={j}>{paragraph}</p>)}
     </section>)}

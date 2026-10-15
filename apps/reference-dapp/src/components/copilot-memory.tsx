@@ -66,7 +66,7 @@ export function CopilotMemory({ view, onChange, proof }: { view: LearningStatusV
           </div>
         </>}
       {error && <p role="alert">{tr(error)}</p>}
-      <p className="muted"><a href="/privacy#copilot-memory">{tr('How FloFi uses memory')}</a></p>
+      <p className="muted"><a href={language === 'PT' ? '/privacy#memoria-copilot' : '/privacy#copilot-memory'}>{tr('How FloFi uses memory')}</a></p>
     </div>
   </details>;
 }
