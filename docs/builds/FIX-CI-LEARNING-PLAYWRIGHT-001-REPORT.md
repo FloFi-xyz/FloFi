@@ -49,9 +49,22 @@ Critical tier (`node scripts/guarded-release-browser.mjs critical`): `copilot-le
 (Canvas basics), `solana-wallet-refusal` (P0 reviewed-bytes refusal), `supply-provenance` (MOCKED never authorizes) and
 `review-execute-recovery-components` (Simulate/Review/Execute). It takes about 3.5 min on CircleCI (168 s locally).
 
-CircleCI run 1 (`bd35569`): `copilot-learning` finished **≈197 s** after the workflow was created (baseline: the regression surfaced
-after 1,630 s), and the whole critical tier by ≈377 s. Both browser jobs finished 946 s after creation (browser-1: build 112 s,
-critical 204 s, part 1/2 543 s; browser-2: build 120 s, part 2/2 749 s, composition 19 s); profile seconds matched jobs 53/55 within noise.
+Measured on CircleCI (workflow created → stopped; `large` = 4 vCPU / 8 GB; credits at 20/min large, 5/min small):
+
+| | Before: jobs 53 / 55 | After: run 2 (`0f45a88`, workflow `4f4137e1`) | Change |
+| --- | ---: | ---: | ---: |
+| Green certification workflow | 2,416 s / 2,377 s (≈40 min) | **912 s (15m12s)** | **−62%** |
+| Learning regression detected | 1,630 s (main job 57, job failed) | ≈225 s profile result (≈197 s in run 1); a failing job adds its ≈25 s diagnostic trace rerun → ≈250 s | ≈**−85%** |
+| Whole critical tier done | ≈1,800 s (estimated from job 55: its last critical profile was the 17th) | ≈392 s (≈377 s in run 1) | ≈−78% |
+| Unit-test failure reported | ≈590 s (estimated from job 55 step times) | 497 s (run 1, measured) | ≈−16% |
+| `large` job seconds | 2,396 / 2,356 | 2,372 (checks 632, browser-1 861, browser-2 880) | −1.0% / +0.7% |
+| Credits (small + large) | ≈800 / ≈787 | ≈793 | −0.9% / +0.7% |
+
+Per job in run 2: checks 632 s (typecheck 94, units 266, PostgreSQL 156, forks 38); browser-1 861 s (build 125, critical 192, part 1/2
+489); browser-2 880 s (build 126, part 2/2 697, composition 19); fan-in 8 s. Structurally the new layout adds about 4 `large` minutes per
+run: two more job set-ups and one more production build. In run 2 that was offset by browser profiles running ≈10% faster than in jobs 53/55
+(1,242 s vs 1,381 s for the same 37 profiles), which is host variance, not something this PR causes; run 1 was ≈4% faster. CircleCI also
+lists every browser test now (319 test cases in run 2; previously none).
 
 ## 3. Playwright and runner improvements
 
@@ -86,7 +99,9 @@ critical 204 s, part 1/2 543 s; browser-2: build 120 s, part 2/2 749 s, composit
 | `test_governance_lite.py`, `governance_lite.py`, eslint, app typecheck | pass |
 | CircleCI run 1 (`bd35569`, workflow `d4f50d82`) | browser-1 PASS 895 s, browser-2 PASS 920 s; checks FAILED in units (below); `certification` not run, its status never reported |
 | Fix for run 1 | `e2e-app-origin.test.ts` requires one `FLOFI_E2E_APP_PORT` setting in the Actions workflow: moved from three steps to job env (as CircleCI) |
-| CircleCI final run | see PR #105 |
+| CircleCI run 2 (`0f45a88`, workflow `4f4137e1`) | **all green**: checks, browser-1, browser-2, `certification` ledger "PASS (18 required stages over 3 job(s), 42 browser profiles each exactly once)" |
+| `pnpm test` (CircleCI job env) and `pnpm test:postgres` on disposable PostgreSQL 18.6, local | 4,392 / 442 tests pass (the skipped pg file is the certificate-only `schema-compatibility` suite, as on main) |
+| JUnit: one passing case carried server output and CircleCI listed it as "system-out" | passing cases' captured output dropped (failing and skipped cases keep it); regression test added |
 
 Not run locally: `default-product` (BUILD-009 requests a real read-only quote server-side) and the BUILD-007 composition step (digest-pinned
 public downloads). Both are unchanged and run in CI. Local and mock evidence does not prove public execution.

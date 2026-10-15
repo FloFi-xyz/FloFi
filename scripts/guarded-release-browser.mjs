@@ -161,8 +161,7 @@ for (const [index, name] of selection.entries()) {
   const result = spawnSync('pnpm', ['--filter', '@defi-workflow-engine/reference-dapp', 'exec', 'playwright', 'test', ...specs, '--output', output, '--add-reporter', 'junit'],
     { env: { ...env, PLAYWRIGHT_JUNIT_OUTPUT_FILE: junit }, stdio: 'inherit' });
   Object.assign(row, { seconds: (performance.now() - started) / 1000, exitCode: result.status, status: result.error || result.status !== 0 ? 'FAIL' : 'PASS' });
-  // One spec can run in several profiles (the financial boundary runs in ten): name the profile in the CI test report.
-  if (existsSync(junit)) writeFileSync(junit, readFileSync(junit, 'utf8').replaceAll('<testsuite name="', `<testsuite name="${name} › `).replaceAll(' classname="', ` classname="${name} › `));
+  if (existsSync(junit)) writeFileSync(junit, ciTestReport(readFileSync(junit, 'utf8'), name));
   console.log(`Guarded release profile duration: ${name}: ${row.seconds.toFixed(2)}s; ${row.status}`);
   if (row.status === 'FAIL') {
     report.status = 'FAIL';
@@ -182,6 +181,17 @@ report.status = 'PASS';
 writeReport();
 printTimings();
 console.log(`Guarded release ${label}: PASS (${selection.length} profiles)`);
+
+/**
+ * The profile's JUnit for the CI test report. One spec can run in several profiles (the financial boundary runs in ten), so the profile
+ * names each suite and class. A passing test's captured output (already in the step log) is dropped: CircleCI lists a passing test case
+ * that carries output as "system-out" instead of a pass. Failing and skipped cases keep everything.
+ */
+function ciTestReport(xml, name) {
+  return xml.replaceAll('<testsuite name="', `<testsuite name="${name} › `).replaceAll(' classname="', ` classname="${name} › `)
+    .replace(/<testcase\b[^>]*[^/]>[\s\S]*?<\/testcase>/g, testcase => /<(failure|error|skipped)\b/.test(testcase) ? testcase
+      : testcase.replace(/\s*<system-(out|err)>[\s\S]*?<\/system-\1>/g, ''));
+}
 
 /**
  * After a profile has already failed, re-runs only its failed tests once with a full trace, for diagnosis. Its outcome never changes the

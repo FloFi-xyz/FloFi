@@ -601,6 +601,9 @@ printf '%s\t%s\n' "$*" "${PLAYWRIGHT_JUNIT_OUTPUT_FILE:-}" >> "$FAKE_LOG"
 out=""; prev=""
 for arg in "$@"; do [ "$prev" = "--output" ] && out="$arg"; prev="$arg"; done
 mkdir -p "$out"
+if [ -n "${FAKE_JUNIT:-}" ] && [ -n "${PLAYWRIGHT_JUNIT_OUTPUT_FILE:-}" ]; then
+  mkdir -p "$(dirname "$PLAYWRIGHT_JUNIT_OUTPUT_FILE")"; printf '%s' "$FAKE_JUNIT" > "$PLAYWRIGHT_JUNIT_OUTPUT_FILE"
+fi
 case " $* " in *" --last-failed "*) exit "${FAKE_RERUN_STATUS:-1}";; esac
 if [ -n "${FAKE_FAIL:-}" ] && [[ " $* " == *" $FAKE_FAIL "* ]]; then
   tests='["t1"]'; [ -n "${FAKE_NO_TESTS:-}" ] && tests='[]'
@@ -651,6 +654,21 @@ class GuardedRunner(unittest.TestCase):
         self.assertTrue(all(row['status'] == 'PASS' and row['seconds'] >= 0 for row in report['profiles']))
         self.assertIn('Guarded release critical: PASS (5 profiles)', result.stdout)
         self.assertEqual(json.loads((results / 'guarded-critical.json').read_text()), report)
+
+    def test_ci_test_report_names_the_profile_and_keeps_failure_output(self):
+        junit = ('<testsuites><testsuite name="a.spec.ts" tests="3">\n'
+                 '<testcase name="passes" classname="a.spec.ts" time="1">\n<system-out>\n<![CDATA[server log]]>\n</system-out>\n</testcase>\n'
+                 '<testcase name="fails" classname="a.spec.ts" time="1">\n<failure message="boom"/>\n<system-out>\n<![CDATA[evidence]]>\n</system-out>\n</testcase>\n'
+                 '<testcase name="plain" classname="a.spec.ts" time="1"/>\n</testsuite></testsuites>')
+        result = self.run_phase('profile', 'copilot-learning', FAKE_JUNIT=junit)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        report = (self.root / 'apps/reference-dapp/test-results/junit/copilot-learning.xml').read_text()
+        self.assertIn('<testsuite name="copilot-learning › a.spec.ts"', report)
+        self.assertEqual(report.count('classname="copilot-learning › a.spec.ts"'), 3)
+        self.assertNotIn('server log', report)  # a passing case's output would make CircleCI list it as "system-out"
+        self.assertIn('<failure message="boom"/>', report)
+        self.assertIn('evidence', report)
+        self.assertEqual(report.count('</testcase>'), 2)
 
     def test_failing_profile_keeps_its_exit_code_and_stops_the_phase(self):
         result = self.run_phase('critical', FAKE_FAIL='canvas-corrections.spec.ts', FAKE_STATUS='7', FAKE_RERUN_STATUS='0')
