@@ -39,8 +39,12 @@ NODE
 node "$RUNNER_TEMP/pg-proxy.cjs" &
 pg_proxy_pid=$!
 cleanup() {
+  original_status=$?
+  trap - EXIT
   kill "$pg_proxy_pid" 2>/dev/null || true
   python3 scripts/ci-observe.py summary || true
+  rm -rf "$root"
+  exit "$original_status"
 }
 trap cleanup EXIT
 for attempt in $(seq 1 60); do
