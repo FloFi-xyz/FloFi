@@ -1,6 +1,7 @@
 # BUILD-CHAT-LEARNING-001 — FloFi hybrid continuous learning: report
 
-Plan: [BUILD-CHAT-LEARNING-001-PLAN.md](BUILD-CHAT-LEARNING-001-PLAN.md). Baseline `c46b563` (= `origin/main` on 2026-10-15; PR #96 and #97 included).
+Plan: [BUILD-CHAT-LEARNING-001-PLAN.md](BUILD-CHAT-LEARNING-001-PLAN.md). Baseline `c46b563` (= `origin/main` on 2026-10-15; PR #96 and #97 included);
+both branches later merged `main` at `92ffc75` (PR #98).
 Owner authorization: implement, test, open PRs for review. Not done by this build: merge, deploy, production variables, production database,
 real transactions, public model calls.
 
@@ -11,9 +12,10 @@ real transactions, public model calls.
 | 1 | `claude/build-chat-learning-001-release-a` | Release A | certificate for the exact `0013_copilot_learning` (v12 build), fixture, §7 assessment, compatibility tests — no feature, no schema change |
 | 2 | `claude/build-chat-learning-001` (stacked on 1) | Release B | migration 0013 + the feature (off by default) + docs |
 
-Deploy Release A everywhere before merging Release B ([LEARNING.md §2](../deploy/LEARNING.md)). **Dependency:** PR #98 (FIX-CI-WEBHOOK-001, test-only)
-was still **open** and `origin/main` unchanged at `c46b563` when this build was delivered, so it is **not** integrated here; the CircleCI
-certification job of these PRs can still hit the `webhooks.pg.test.ts` race that #98 fixes. When #98 merges, rebase both branches on `main`.
+Deploy Release A everywhere before merging Release B ([LEARNING.md §2](../deploy/LEARNING.md)). **Dependency, resolved:** PR #98
+(FIX-CI-WEBHOOK-001, test-only: the `webhooks.pg.test.ts` clock and dispatch scope) was still open at delivery and merged into `main` as
+`92ffc75` afterwards. `main` was merged into Release A and the updated Release A into Release B: merge commits, no rewritten history, no
+conflict (neither branch touches that file). Release B's diff over Release A is byte-identical to the delivered one apart from this report.
 
 ## 2. What was built
 
@@ -63,8 +65,9 @@ Local, loopback PostgreSQL 18.6 (CI image), no public network, no model, no real
 | Release A tree: cloud-runtime suites / backend `schema-compatibility.pg.test.ts` (runs for the new certificate) | 48 passed / 3 passed |
 | Browser: `copilot-learning` (new) / `copilot` / `admin-console` (+ AI Learning) | 1 / 13 / 1 passed |
 | governance-lite; self-tests; `git diff --check` | passed; 19 + 22 OK; clean |
-| CircleCI Release A (#99) | certification (unit, PostgreSQL, offline compatibility + fork suite, full guarded browser suite, SBOM) and governance **passed** |
-| CircleCI Release B (#100) | first run: governance passed; certification **failed** on `backend/admin-analytics.pg.test.ts`, which asserted 12 migrations (a stale "0012 is newest" literal this build missed locally). Fixed to follow the shipped manifest; the full local PostgreSQL run above includes the fix. See the PR for the re-run. |
+| CircleCI Release A (#99) | `b8b4235`: certification (unit, PostgreSQL, offline compatibility + fork suite, full guarded browser suite, SBOM) and governance **passed** |
+| CircleCI Release B (#100) | `58a5c37`: certification **failed** on `backend/admin-analytics.pg.test.ts`, which asserted 12 migrations (a stale "0012 is newest" literal this build missed locally) → fixed to follow the shipped manifest in `1f14e05`, whose certification **passed in full** (including the new `copilot-learning` browser profile). `fc68772` failed only on the two `webhooks.pg.test.ts` tests that PR #98 fixes. |
+| After merging `main` (`92ffc75`) | CircleCI results of the integrated heads: on PR #99 and PR #100 |
 
 **Not run locally:** fork suites, the full guarded browser phases and audit/SBOM for Release B (CircleCI certification runs them).
 
