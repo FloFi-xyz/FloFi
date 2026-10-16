@@ -12,8 +12,9 @@ steps:
       - '-c'
       - |
         docker run --detach --rm --name flofi-gcp-postgres --network cloudbuild           -e POSTGRES_USER=flofi -e POSTGRES_HOST_AUTH_METHOD=trust           postgres:18.6-bookworm@sha256:3725f4e2499eef5134592b3b4ab79a543ed7f8e533b05b5b637af926630f6650
+        # Over TCP: the image's init-time server listens only on its Unix socket and is then restarted.
         for attempt in $(seq 1 60); do
-          if docker exec flofi-gcp-postgres pg_isready -U flofi -d postgres > /dev/null 2>&1; then
+          if docker exec flofi-gcp-postgres pg_isready -h 127.0.0.1 -U flofi -d postgres > /dev/null 2>&1; then
             echo 'Disposable PostgreSQL ready'
             exit 0
           fi
@@ -25,9 +26,11 @@ steps:
     name: 'cimg/node:24.21.0-browsers'
     entrypoint: bash
     args: ['scripts/gcp-ci-full.sh']
-    env: ['FLOFI_SOURCE_SHA=$COMMIT_SHA']
+    # Substitutions are not step environment variables: pass the triggering branch for governance explicitly.
+    env: ['FLOFI_SOURCE_SHA=$COMMIT_SHA', 'BRANCH_NAME=$BRANCH_NAME']
     waitFor: ['disposable-postgres']
-timeout: '5400s'
+# The stages take about 36 min on CircleCI's 4-vCPU jobs and ran about 3x slower here: expect 85-125 min sequentially.
+timeout: '10800s'
 serviceAccount: 'projects/celtic-volt-418819/serviceAccounts/flofi-ci-runner@celtic-volt-418819.iam.gserviceaccount.com'
 options:
   machineType: E2_STANDARD_2

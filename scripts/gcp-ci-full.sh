@@ -36,6 +36,8 @@ export TURBO_TELEMETRY_DISABLED=1 DO_NOT_TRACK=1
 export COREPACK_ENABLE_AUTO_PIN=0 COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 export NEXT_TELEMETRY_DISABLED=1 PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 export PYTHONDONTWRITEBYTECODE=1 FLOFI_E2E_APP_PORT=3100
+# CircleCI sets CI=true and Cloud Build does not. Without it Vitest accepts `.only` and writes missing snapshots instead of failing.
+export CI=true
 export TEST_DATABASE_URL='postgres://flofi@127.0.0.1:5432/postgres'
 mkdir -p "$RUNNER_TEMP" "$FLOFI_CI_ARCHIVE_CACHE"
 touch "$GITHUB_PATH" "$GITHUB_ENV" "$GITHUB_STEP_SUMMARY"
@@ -59,17 +61,23 @@ cleanup() {
   original_status=$?
   trap - EXIT
   kill "$pg_proxy_pid" 2>/dev/null || true
+  # CircleCI's on_fail step: make a screenshot failure diagnosable from the log before the workspace is deleted.
+  if [ "$original_status" -ne 0 ]; then python3 scripts/summarize-screenshot-diffs.py apps/reference-dapp/test-results || true; fi
   python3 scripts/ci-observe.py summary || true
   rm -rf "$root"
   exit "$original_status"
 }
 trap cleanup EXIT
+# The proxy accepts connections even when PostgreSQL is down: require PostgreSQL's own answer to an SSLRequest through it.
+pg_answers() {
+  node -e "const s=require('node:net').connect(5432,'127.0.0.1');s.setTimeout(2000,()=>process.exit(1));s.on('error',()=>process.exit(1));s.on('close',()=>process.exit(1));s.on('connect',()=>s.write(Buffer.from([0,0,0,8,4,210,22,47])));s.on('data',d=>process.exit(d[0]===78||d[0]===83?0:1))"
+}
 for attempt in $(seq 1 60); do
-  if (echo >/dev/tcp/127.0.0.1/5432) >/dev/null 2>&1; then break; fi
+  if pg_answers; then break; fi
   if ! kill -0 "$pg_proxy_pid" 2>/dev/null; then echo 'PostgreSQL proxy stopped'; exit 1; fi
   sleep 1
 done
-(echo >/dev/tcp/127.0.0.1/5432) >/dev/null 2>&1 || { echo 'PostgreSQL proxy unavailable'; exit 1; }
+pg_answers || { echo 'PostgreSQL unavailable through the proxy'; exit 1; }
 
 # Governance is required even if the rest of the suite is subsequently red.
 python3 -m unittest discover -s scripts -p 'test_governance_lite.py'

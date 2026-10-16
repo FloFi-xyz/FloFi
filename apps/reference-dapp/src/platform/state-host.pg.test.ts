@@ -175,7 +175,10 @@ describe('BUILD-PLATFORM-STATE-001 direct durable state with remote flows', () =
         headers: { 'content-type': 'application/x-www-form-urlencoded' } }), { env: oauthEnv(env) });
       expect([oauth.status, await oauth.json()]).toEqual([503, { error: 'temporarily_unavailable', code: 'MCP_OAUTH_STORE_UNAVAILABLE' }]);
       expect((await behind.db.query('SELECT tenant_id FROM tenants WHERE tenant_id = $1', [env.TENANT_ID])).rows).toEqual([]);
-      expect((await behind.db.query("SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND application_name = 'flofi-platform-state'")).rows[0]!.n).toBe(0);
+      // Database.close() (pg-pool end()) sends each session Terminate without waiting for its backend to exit, so a closed pool's session
+      // can stay listed for a moment on a busy runner. A pool left open keeps its idle session for its 30 s idle timeout and still fails.
+      await vi.waitFor(async () => expect((await behind.db.query("SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND application_name = 'flofi-platform-state'")).rows[0]!.n).toBe(0),
+        { timeout: 10_000, interval: 25 });
       const last = SHIPPED_MIGRATIONS.at(-1)!;
       await behind.db.query('INSERT INTO schema_migrations(version, name, sha256) VALUES ($1, $2, $3)', [last.version, last.name, last.sha256]);
       const recovered = await platformStateHost(env);
