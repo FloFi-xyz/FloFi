@@ -37,7 +37,8 @@ async function latestRun(flow: string, owner: string): Promise<string> {
     return row.run_id;
   } finally { await db.close(); }
 }
-const approval = (page: Page) => page.getByRole('region', { name: 'External proposal' });
+// BUILD-FLOFI-UX-UI-002: the proposal's compact notice inside the normal workspace (no separate proposal panel or Load step).
+const approval = (page: Page) => page.getByRole('region', { name: `Proposal from ${CLIENT_NAME}` });
 const bridge = (page: Page) => page.getByRole('region', { name: 'Cross-chain bridge' });
 async function simulateStage(page: Page) {
   await page.getByRole('button', { name: 'Simulate workflow', exact: true }).click();
@@ -53,11 +54,13 @@ async function assertHandoffReviewBlocked(page: Page, requests: () => Promise<nu
   // The signing-session link stays consumed. Its proven claimant may restore the authoring proposal, with no prior Review authority.
   // Diagnostics explicitly enter engineering; restore the external approval URL
   // for the same full-document owner restoration check.
+  // An applied proposal is never restored silently (an interrupted run's recovery must not be replaced): one explicit Restore.
   await page.goto(proposalUrl);
   await expect(approval(page)).toContainText('Nothing is authorized yet.');
-  await expect(approval(page).getByRole('button', { name: 'Load proposal' })).toBeVisible();
-  await approval(page).getByRole('button', { name: 'Load proposal' }).click();
-  await expect(approval(page).getByRole('status')).toContainText('Ready for your review.');
+  await expect(approval(page)).toContainText('This proposal is already in a FloFi workflow for your wallet.');
+  await expect(approval(page).getByRole('button', { name: 'Load proposal' })).toHaveCount(0);
+  await approval(page).getByRole('button', { name: 'Restore proposal' }).click();
+  await expect(approval(page).getByRole('status')).toContainText('Proposal restored for its proven owner.');
   await assertExecutionBlocked(page, requests);
 }
 
@@ -97,18 +100,29 @@ async function proposalIntoWorkflow(signing: Page, url: string, wallet: 'evm' | 
   expect(response?.headers()['content-security-policy']).toContain("frame-ancestors 'none'");
   await expect(signing.locator('.app-shell')).toHaveCount(1);
   const region = approval(signing);
-  await expect(region).toContainText(`EXTERNAL PROPOSAL · FROM ${CLIENT_NAME.toUpperCase()}`);
+  await expect(region).toContainText(`From ${CLIENT_NAME}`);
   await expect(region).toContainText('Nothing is authorized yet.');
   await expect(region).toContainText('Test funds');
   await expect(region).toContainText('not financial advice');
+  // BUILD-FLOFI-UX-UI-002: the normal Canvas already shows the proposal's action cards; no separate panel, no Load step, and Simulate stays
+  // closed until a proven wallet has loaded the proposal.
+  await expect(signing.locator('.approval-page, .approval-handoff')).toHaveCount(0);
+  await expect(signing.getByRole('region', { name: 'Workflow canvas', exact: true })).toBeVisible();
+  await expect(signing.locator('.build-flow-surface .composer-card').first()).toBeVisible();
+  await expect(signing.locator('.canvas-primary-action button')).toBeDisabled();
+  await expect(region.getByRole('button', { name: 'Load proposal' })).toHaveCount(0);
   // The secret left the address bar; the account consented in this browser, so status sharing is on by default.
   expect(signing.url()).not.toContain('flofi_hs_');
   await expect(region.getByRole('checkbox')).toBeChecked();
+  // The journey wallet records its requests; the Solana and lending fixtures keep their own logs.
+  const signIns = await walletRequests(signing).then(requests => requests.filter(method => method === 'personal_sign').length).catch(() => null);
   if (wallet === 'evm') { await region.getByRole('button', { name: 'Connect wallet and prove ownership' }).click(); await chooseWallet(signing, 'Browser wallet'); }
   else { await region.getByRole('button', { name: 'Connect Solana wallet and prove ownership' }).click(); await chooseWallet(signing, MOCKED_SOLANA_WALLET, 'Solana'); }
-  await expect(region).toContainText(`Signed in as ${account ?? ''}`);
-  await region.getByRole('button', { name: 'Load proposal' }).click();
+  // The proof itself loads the proposal: one sign-in message, then the exact proposal, with no further approval step.
   await expect(region.getByRole('status')).toContainText('Ready for your review.');
+  if (signIns !== null) expect((await walletRequests(signing)).filter(method => method === 'personal_sign')).toHaveLength(signIns + 1);
+  await expect(signing.locator('.canvas-primary-action button')).toBeEnabled();
+  if (account) await expect(region.getByRole('checkbox')).toBeChecked();
 }
 
 test.describe('BUILD-MCP-002 in-chat execution (mocked MCP Apps host)', () => {
@@ -208,8 +222,9 @@ test.describe('BUILD-MCP-002 in-chat execution (mocked MCP Apps host)', () => {
     // link no longer resolves at all (it reveals nothing about the proposal).
     await approval(stranger).getByRole('button', { name: 'Connect wallet and prove ownership' }).click();
     await chooseWallet(stranger, 'Browser wallet');
-    await approval(stranger).getByRole('button', { name: 'Load proposal' }).click();
-    await expect(approval(stranger).getByRole('alert')).toContainText(/^(HANDOFF_ALREADY_CLAIMED|HANDOFF_NOT_FOUND)$/);
+    await expect(approval(stranger)).toContainText(/Another wallet already opened this proposal|HANDOFF_NOT_FOUND/);
+    await expect(approval(stranger).getByRole('status')).toHaveCount(0);
+    await expect(stranger.locator('.canvas-primary-action button')).toBeDisabled();
     // The owner's simulation creates a durable run owned by their wallet; the account cannot read it until the wallet is linked.
     await simulateStage(signing);
     await expect(bridge(signing)).toContainText(`Owner ${owner.address}`);

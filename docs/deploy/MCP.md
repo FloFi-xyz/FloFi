@@ -112,12 +112,13 @@ the existing lending composition. Any other sequence is composed and reviewed pe
    signing window. MetaMask's mobile link carries the private capability in the fragment. Phantom opens the public FloFi
    landing page; the owner pastes the private approval link into its browser. The model-visible fallback (`/approve#apr_…`)
    requires the requesting account's existing browser cookie or an already-proven owner resuming an applied proposal.
-4. `/approve` shows that the proposal is external, from which client, its network, funds class, steps, summary, workflow hash,
-   the REAL_FUNDS warning when relevant, the AI disclosure, and that nothing is authorized. The owner proves a wallet
-   (EIP-4361 or Sign-In With Solana), loads the proposal (FloFi re-composes it and re-checks hash, engine, deployment and
-   policy) and restores it to their workflow with one explicit **Load proposal** action. **Continue to simulation** opens
-   FloFi's existing flow: fresh simulation, Strategy Manifest Review,
-   explicit approval, the wallet's own signature, reconciliation, evidence.
+4. `/approve` opens FloFi's normal Canvas with the proposal's action cards already on it (BUILD-FLOFI-UX-UI-002) and a compact
+   notice: from which client, that nothing is authorized, the REAL_FUNDS warning when relevant, the AI disclosure, the sharing
+   choice and (under **Proposal details**) network, funds class and workflow hash. Proving a wallet (EIP-4361 or Sign-In With
+   Solana, or an existing FloFi sign-in session) loads the exact proposal: FloFi re-composes it, re-checks hash, engine,
+   deployment, policy and the claim rule, restores it and marks it applied by hash. Simulate and Execute stay closed until then.
+   From there it is FloFi's existing flow: fresh simulation, Strategy Manifest Review, explicit approval, the wallet's own
+   signature, reconciliation, evidence. A proposal that is already applied (a reload) is restored only with **Restore proposal**.
 5. The panel follows the run (`get_execution_progress`) and, once reconciled, puts the status and the evidence environment and
    bundle hash into the model's context. Status is shared with the requesting account only while the owner leaves the
    **Share** box checked (default: checked only in the browser that holds that account).

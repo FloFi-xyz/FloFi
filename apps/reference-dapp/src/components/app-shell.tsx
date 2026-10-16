@@ -7,7 +7,7 @@ import { useLocale } from '../i18n/locale';
 import { WithdrawPanel } from './withdraw-panel';
 import { RobinhoodTransferPanel } from './robinhood-transfer-panel';
 import { useRobinhoodTransfer } from '../state/robinhood-transfer-store';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { ToolboxMode } from '../domain/canvas-layout';
 import { CowPanel } from './cow-panel';
 import { useCow } from '../state/cow-store';
@@ -88,10 +88,13 @@ import { useBuild009Wallet } from '../state/build009-wallet-store';
 import { useWalletProof } from './wallet-proof';
 import { WorkflowVerification } from './saved-workflows';
 
-type ProductNavigation = { engineering?: boolean; pathname?: string | null; navigate?: (path: string) => void; simulationRequest?: number };
+/** `approvalSlot`/`approvalGate` (BUILD-FLOFI-UX-UI-002, `/approve` only): where the proposal's notice renders, and whether Simulate and
+ * Execute stay closed until the proposal is loaded for the proven wallet. */
+type ProductNavigation = { engineering?: boolean; pathname?: string | null; navigate?: (path: string) => void;
+  approvalSlot?: ((element: HTMLDivElement | null) => void) | undefined; approvalGate?: boolean };
 export function AppShell(props: ProductNavigation = {}) { return <ModeBProvider><CompositionProvider><CanvasCardInputsProvider><PoolPriceRangeProvider><AppShellContent {...props}/></PoolPriceRangeProvider></CanvasCardInputsProvider></CompositionProvider></ModeBProvider>; }
 
-function AppShellContent({ engineering = false, pathname, navigate, simulationRequest = 0 }: ProductNavigation) {
+function AppShellContent({ engineering = false, pathname, navigate, approvalSlot, approvalGate = false }: ProductNavigation) {
   const { t: tr } = useLocale();
   // Server HTML is visible before handlers and initial canvas preferences are ready.
   const [interactive, setInteractive] = useState(false);
@@ -113,15 +116,11 @@ function AppShellContent({ engineering = false, pathname, navigate, simulationRe
   const secondaryRoute = secondaryWorkspaceRoute(pathname);
   const tab = dashboardRoute ? 'Dashboard' : section;
   const setTab = useCallback((section: ProductSection) => {
-    if (authoringIncomplete && (section === 'Simulate' || section === 'Execute')) return;
+    if ((authoringIncomplete || approvalGate) && (section === 'Simulate' || section === 'Execute')) return;
     if (navigate && section === 'Dashboard') { navigate('/app/dashboard'); return; }
     setSection(section);
     if (navigate && (dashboardRoute || secondaryRoute)) navigate('/app');
-  }, [authoringIncomplete, navigate, dashboardRoute, secondaryRoute]);
-  const lastSimulationRequest = useRef(0);
-  useEffect(() => {
-    if (simulationRequest > lastSimulationRequest.current) { lastSimulationRequest.current = simulationRequest; setTab('Simulate'); }
-  }, [simulationRequest, setTab]);
+  }, [authoringIncomplete, approvalGate, navigate, dashboardRoute, secondaryRoute]);
   const [workflowName, setWorkflowName] = useState('Your Workflow');
   const connectedWallet = useBuild009Wallet();
   const walletIdentity = useExecutionEnvironment();
@@ -273,7 +272,7 @@ function AppShellContent({ engineering = false, pathname, navigate, simulationRe
     : simulationSource.kind === 'composition' ? composition.prepare
     : openSimulationControls;
   const embeddedReview = <ReviewAuthorizationDetails workflowName={workflowName} workflow={state.workflow} context={context} source={simulationSource} authorization={reviewBinding.authorization} wallet={reviewBinding.wallet} invalidWorkflow={Boolean(reviewError)} backToBuild={() => setTab('Build')}/>;
-  const simulationDisabled = authoringIncomplete || simulationSource.kind === 'unavailable' ||
+  const simulationDisabled = authoringIncomplete || approvalGate || simulationSource.kind === 'unavailable' ||
     ('available' in simulationSource.state && simulationSource.state.available === false) ||
     ('info' in simulationSource.state && simulationSource.state.info?.available === false);
   const lifecycleState = { workflow: state.workflow, context, source: simulationSource, authorization: reviewBinding.authorization,
@@ -316,6 +315,7 @@ function AppShellContent({ engineering = false, pathname, navigate, simulationRe
           <><ExecutionPanel/><ModeBPanel view="execute"/><CompositionPanel view="execute"/><CowPanel view="execute"/><LiquidityPanel view="execute"/></>
         : null;
   return <div className="app-shell" inert={!interactive}><a className="skip-link" href="#workspace">{tr("Skip to workspace")}</a><TopBar tab={tab} setTab={setTab} pathname={pathname ?? null} engineering={engineering}/>{betaNotice}
+    {approvalSlot && <div className="approval-notice-slot" ref={approvalSlot}/>}
     <AutomationInbox owner={owner} proven={Boolean(owner && proof.proven === owner.address)} open={() => navigate?.('/app/automations')}/>
     <main id="workspace" className={`main workflow-workspace${tab === 'Build' ? ' build-workspace' : ''}`} data-workspace-toolbox={workspaceToolboxMode} tabIndex={-1} aria-label={tr(tab === 'Build' ? 'Workflow workspace' : tab === 'Simulate' ? 'Simulation workspace' : 'Execution workspace')}>
       {tab === 'Execute' ? <ExecuteWorkspace controls={lifecycleControls} primaryAction={simulateAction} workflowName={workflowName} workflow={state.workflow} context={context} source={simulationSource} authorization={reviewBinding.authorization} wallet={reviewBinding.wallet} execution={executionStart} progress={executionProgress} recovery={executionProgress.recovery} invalidWorkflow={Boolean(reviewError || authoringIncomplete)} backToBuild={() => setTab('Build')} backToSimulate={() => setTab('Simulate')} startNewWorkflow={startNewWorkflow} technicalDetails={executionStart.started || executionProgress.started || recoveryPath || localCowIntent ? stageContent : undefined}/> : tab === 'Simulate' ?

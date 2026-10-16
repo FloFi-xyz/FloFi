@@ -1484,6 +1484,21 @@
 .approval-mobile input{display:block;width:100%;min-width:0;margin-top:8px}.approval-mobile a{display:inline-flex;align-items:center;min-height:40px;padding:0 14px;border-radius:6px;background:var(--primary);color:var(--on-accent)}
 .approval-share{display:flex;gap:8px;align-items:flex-start;font-size:12px;line-height:1.5}
 @media (max-width:640px){.approval-page{padding:12px 16px 0}}
+/* BUILD-FLOFI-UX-UI-002: the proposal's compact notice inside the normal workspace on /approve (no separate proposal panel). */
+.approval-notice{display:grid;gap:8px;padding:10px 24px;border-bottom:1px solid var(--accent-line);background:var(--blue-soft);color:var(--ink);font-size:13px;line-height:1.5}
+.approval-notice>*{width:100%;max-width:1800px;margin-inline:auto;min-width:0}
+.approval-notice p{margin:0}
+.approval-notice-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px}
+.approval-notice-row>p:not(.approval-notice-source){flex:1 1 360px;min-width:0}
+.approval-notice-source{display:inline-flex;align-items:center;gap:8px;flex:none}
+.approval-notice-source .eyebrow{margin:0}
+.approval-notice .approval-actions{align-items:center}
+.approval-notice .approval-actions button.secondary{border:1px solid var(--line);background:var(--paper);color:var(--ink);font-weight:600}
+.approval-notice .approval-real,.approval-notice .error-banner{margin:0;padding:8px 12px}
+.approval-notice details summary{cursor:pointer;font-size:12px;font-weight:600}
+.approval-notice .approval-mobile{padding:0;border:0;border-radius:0}
+.approval-notice .approval-facts{margin-top:8px}
+@media (max-width:640px){.approval-notice{padding:10px 16px}}
 .main.mcp-route-main{max-width:960px}
 .mcp-route-centered{display:flex;align-items:center;justify-content:center}
 .mcp-route-state{width:100%;max-width:560px}

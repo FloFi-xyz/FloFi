@@ -28,9 +28,9 @@ Configure only the testnet flow being used (for example the existing Base Sepoli
 Shared owner sequence:
 
 1. Ask for `bridge 1 USDC from Base Sepolia to Arbitrum Sepolia via auto slippage 50 bps`. Inspect the proposal and its network/test-funds label.
-2. Open FloFi. Check its origin and the external requester's name, steps, workflow hash and **Nothing is authorized yet**. Choose whether to share run status; sharing is off for messaging channels by default.
-3. Prove wallet ownership with a sign-in message. Reject a first proof prompt as a negative check, then retry. This step must create no transaction.
-4. Click **Load proposal** once. Confirm **Ready for your review**. Click **Continue to simulation** and obtain a fresh testnet simulation.
+2. Open FloFi. Check its origin, that the Canvas already shows the proposal's action cards, the requester's name, **Nothing is authorized yet**, and (under **Proposal details**) the workflow hash. Simulate is closed. Choose whether to share run status; sharing is off for messaging channels by default.
+3. Prove wallet ownership with a sign-in message. Reject a first proof prompt as a negative check, then retry. This step must create no transaction. An owner already signed in to FloFi with the right wallet sees no prompt.
+4. The proof loads the exact proposal: confirm **Ready for your review** without any further click, then **Simulate workflow** for a fresh testnet simulation. Reload once: the notice offers **Restore proposal** instead of loading it silently.
 5. Read the Strategy Manifest: owner, chain, recipient, amount, spend limits, exact approvals/calls, validity/deadlines and fees. Use FloFi's explicit **Approve & Continue**, then **Execute workflow**. Review and sign each transaction in your wallet.
 6. Follow the existing run through reconciliation. If a submission response is lost, reopen **Your runs** and observe/reconcile that same attempt. Never start a new execution to recover an unknown submission. A missing chat notification says nothing about execution success.
 7. With sharing enabled, confirm the original conversation receives the loaded/progress/reconciled state and evidence environment/bundle hash. Without sharing, it must not receive run details. Reject optimistic success without reconciliation.
@@ -47,7 +47,7 @@ Follow the same [MCP setup](MCP.md) with the owner's Claude client and FloFi OAu
 
 ## Telegram
 
-Follow [the existing Telegram owner runbook](CHANNELS-OWNER-E2E.md) for bot creation, webhook registration, user allowlist, privacy/support settings, scheduler and reachable Preview. It remains authoritative for provider setup; replace its former **Load proposal → Add to my workflow** steps with this build's single **Load proposal** and **Continue to simulation**. Channels may now host state on the shared PostgreSQL platform host alongside a remote financial runtime.
+Follow [the existing Telegram owner runbook](CHANNELS-OWNER-E2E.md) for bot creation, webhook registration, user allowlist, privacy/support settings, scheduler and reachable Preview. It remains authoritative for provider setup; replace its former **Load proposal → Add to my workflow** steps with this sequence: the Canvas opens populated and the wallet proof loads the proposal (BUILD-FLOFI-UX-UI-002). Channels may now host state on the shared PostgreSQL platform host alongside a remote financial runtime.
 
 Send the shared test strategy to the bot, tap **Open FloFi**, then perform the shared owner sequence. Send `yes, execute it` and duplicate the incoming callback as negative checks: neither can move funds. Test `LINK` replacing the old request, `STATUS`, sharing off/on and `STOP` revoking the pending journey. Record real inbound webhook and bot messages, testnet explorer links and reconciled evidence, with the approval secret redacted. If the browser is closed, invoke the configured authenticated dispatch/scheduler to obtain the final status.
 

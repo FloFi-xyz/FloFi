@@ -17,7 +17,8 @@
 import { cookies } from 'next/headers';
 import { after } from 'next/server';
 import { developerApprovalChanged } from '../developer/dispatch';
-import { applyApproval, claimApproval, openBrowserApproval, resumeApproval, shareApproval, viewApproval, type ApprovalView, type ClaimedProposal } from '../platform/index';
+import { applyApproval, claimApproval, openBrowserApproval, previewApproval, resumeApproval, shareApproval, viewApproval, type ApprovalPreview, type ApprovalView,
+  type ClaimedProposal } from '../platform/index';
 import { approvalSurface } from '../server/approval-surface';
 import { remoteApproval, remoteAutomationApproval, remoteAutomationRecovery } from '../server/automation-operation';
 import { currentWalletPrincipals } from '../server/session-principal';
@@ -54,6 +55,18 @@ export async function approvalHandoffView(secret: string): Promise<Result<Approv
   try {
     if (remoteAutomationApproval(secret)) return { ok: true, value: await remoteApproval<ApprovalView>('view', [secret]) };
     return { ok: true, value: await viewApproval(await surface(), secret, await currentWalletPrincipals()) };
+  } catch (cause) { return failure(cause); }
+}
+
+/**
+ * BUILD-FLOFI-UX-UI-002: an open proposal's canonical workflow, re-verified now, so FloFi can show it on the normal Canvas while the owner
+ * connects a wallet. Seeing it grants nothing; it is not the claim. An automation link's state lives on the remote runtime's API, so its
+ * proposal keeps loading after the owner's proof, as before.
+ */
+export async function approvalHandoffPreview(secret: string): Promise<Result<ApprovalPreview>> {
+  try {
+    if (remoteAutomationApproval(secret)) return { ok: false, code: 'APPROVAL_PREVIEW_UNAVAILABLE' };
+    return { ok: true, value: await previewApproval(await surface(), secret) };
   } catch (cause) { return failure(cause); }
 }
 

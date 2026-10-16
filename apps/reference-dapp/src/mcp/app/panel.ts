@@ -237,7 +237,7 @@ export function panelMain(settings: PanelSettings): void {
       root.append(fallback);
       if (!a.approvalUrl.includes('flofi_')) root.append(el('p', 'Use the same browser you used to connect FloFi to your assistant.', 'muted'));
     }
-    if (view.opened) root.append(el('p', 'FloFi is open. Prove your wallet, run the fresh simulation, review the Strategy Manifest and sign there. This panel follows the result.', 'muted'));
+    if (view.opened) root.append(el('p', 'FloFi is open with this workflow on its Canvas. Connect your wallet there, run the fresh simulation, review the Strategy Manifest and sign. This panel follows the result.', 'muted'));
     if (settings.inFrameProbeHosts.includes(view.host)) {
       root.append(button('Check this chat environment (diagnostics)', probe));
       if (view.probe) root.append(el('pre', JSON.stringify(view.probe, null, 1)));

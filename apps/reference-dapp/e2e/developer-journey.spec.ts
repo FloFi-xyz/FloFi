@@ -32,7 +32,7 @@ import { assertExecutionBlocked } from './release-safety-fixtures';
 import { routerControl } from './router-fixtures';
 
 const STRATEGY = { action: 'bridge', sourceNetwork: 'base-sepolia', destinationNetwork: 'arbitrum-sepolia', asset: 'USDC', amount: '1' };
-const approval = (page: Page) => page.getByRole('region', { name: 'External proposal' });
+const approval = (page: Page) => page.getByRole('region', { name: 'Proposal from Acme Wallet' });
 const bridge = (page: Page) => page.getByRole('region', { name: 'Cross-chain bridge' });
 
 /** The operator's CLI against the run's disposable database: one project, one sandbox key written to a new mode-0600 file. */
@@ -86,7 +86,7 @@ test.describe('BUILD-DEVELOPER-001 third-party integration (SDK → FloFi /appro
       expect(response?.headers()['content-security-policy']).toContain("connect-src 'self'");
       expect(response?.headers()['content-security-policy']).toContain("frame-ancestors 'none'");
       const region = approval(page);
-      await expect(region).toContainText('EXTERNAL PROPOSAL · FROM ACME WALLET');
+      await expect(region).toContainText('From Acme Wallet');
       await expect(region).toContainText('Nothing is authorized yet.');
       await expect(region).toContainText('Created by Acme Wallet, a third-party app registered with FloFi, not by FloFi.');
       await expect(region).not.toContainText('AI assistant');
@@ -96,9 +96,9 @@ test.describe('BUILD-DEVELOPER-001 third-party integration (SDK → FloFi /appro
       await region.getByRole('checkbox').check();
       await region.getByRole('button', { name: 'Connect wallet and prove ownership' }).click();
       await chooseWallet(page, 'Browser wallet');
-      await expect(region).toContainText(`Signed in as ${owner.address}`);
-      await region.getByRole('button', { name: 'Load proposal' }).click();
+      // BUILD-FLOFI-UX-UI-002: the proof loads the exact proposal; no separate Load step.
       await expect(region.getByRole('status')).toContainText('Ready for your review.');
+      await expect(region.getByRole('button', { name: 'Load proposal' })).toHaveCount(0);
       // The authoritative product's simulation and Review; a MOCKED route cannot authorize execution.
       await simulateStage(page);
       await expect(bridge(page)).toContainText('Strategy Manifest');
