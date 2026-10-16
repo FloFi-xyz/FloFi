@@ -27,7 +27,10 @@
 .admin-layout{display:grid;grid-template-columns:220px minmax(0,1fr);min-height:100vh}
 .admin-nav{background:var(--a-paper);border-right:1px solid var(--a-line);padding:20px 14px;display:flex;flex-direction:column;gap:18px}
 .admin-brand{display:flex;align-items:center;gap:10px;font-weight:600}
-.admin-brand img{width:28px;height:28px}
+.admin-brand picture,.admin-brand img{display:block;flex:none}
+.admin-brand-symbol img{width:auto;height:28px}
+.admin-brand-name{display:flex;align-items:center;gap:6px}
+.admin-brand-name img{width:auto;height:19px}
 .admin-brand small{display:block;color:var(--a-muted);font-weight:400;font-size:.78rem}
 .admin-nav ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px}
 .admin-nav a{display:block;padding:8px 10px;border-radius:8px;color:var(--a-ink);text-decoration:none}

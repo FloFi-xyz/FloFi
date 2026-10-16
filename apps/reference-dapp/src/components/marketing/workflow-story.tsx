@@ -7,6 +7,7 @@ import styles from './landing.module.css';
 import type { LandingCopy, LandingLocale } from './landing-copy';
 import { MascotDock } from './mascot-journey';
 import { WorkflowChannelIcon, workflowChannels } from './workflow-channel-icon';
+import { SocialLinks } from './social-links';
 
 function FlowIcon({ kind }: { kind: 'workflow' | 'review' | 'wallet' }) {
   return <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -41,9 +42,12 @@ export function WorkflowStory({ t, locale = 'en' }: { t: LandingCopy; locale?: L
           <p className={styles.kicker}>{t.heroEyebrow}</p>
           <h1 id="workflow-title" data-mascot-headline>{t.storyTitleFirst}<br/><span>{t.storyTitleSecond}</span></h1>
           <p>{t.storyBody}</p>
-          <div className={styles.heroActions}>
-            <a className={styles.primaryButton} href="/app" data-mascot-cta>{t.launch} <span aria-hidden="true">→</span></a>
-            <a className={styles.secondaryButton} href="/docs">{t.exploreDocs} <span aria-hidden="true">→</span></a>
+          <div className={styles.heroCtaRow}>
+            <div className={styles.heroActions}>
+              <a className={styles.primaryButton} href="/app" data-mascot-cta>{t.launch} <span aria-hidden="true">→</span></a>
+              <a className={styles.secondaryButton} href="/docs">{t.exploreDocs} <span aria-hidden="true">→</span></a>
+            </div>
+            <SocialLinks t={t} variant="hero"/>
           </div>
         </div>
         <div className={styles.workflowHeroMascot}><MascotDock scene="hero"/></div>
