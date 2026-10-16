@@ -49,9 +49,9 @@ All runs local, on this machine (WSL, Node 24.21.0, pnpm 11.22.0, Chromium headl
 | Landing/motion suite, `playwright --config playwright.motion.config.ts` against `next start` of the branch build | 63/63 (brand-motion-001, brand-visual-refinement, workflow-story ×8, landing-structure ×9, earth-footer ×7, ux-ui-002-landing ×13) |
 | Main CI config: `playwright test brand-ux-001.spec.ts ux-ui-002-landing.spec.ts` | 28/28 |
 | `node scripts/guarded-release-browser.mjs profile admin-console` | 1/1 (light and dark identity asserted) |
-| `python3 scripts/governance_lite.py` + 19 self-tests; `git diff --check 14255c3..HEAD` | PASS |
+| `python3 scripts/governance_lite.py` + 19 self-tests; `python3 -m unittest discover -s scripts -p 'test_ci_*.py'` (41 CI-plan tests); `git diff --check 14255c3..HEAD` | PASS |
 
-Iteration failures, all fixed before the final runs: the new spec expected the onboarding chat to play while it was offscreen at 390 px (test corrected: it plays when seen); the hero height budget in `workflow-story.spec` failed at 320/1024/1440/1920 px after adding the community row — the links now sit beside the CTAs on wide layouts (desktop budget unchanged at 1,100 px) and the narrow budget is 2,100 px instead of 2,000 px (the wrapped 44 px row); a scratch `pkill -f` matched its own shell and stopped one rebuild (rerun).
+Iteration failures, all fixed before the final runs: the new spec expected the onboarding chat to play while it was offscreen at 390 px (test corrected: it plays when seen); the hero height budget in `workflow-story.spec` failed at 320/1024/1440/1920 px after adding the community row — the links now sit beside the CTAs on wide layouts (desktop budget unchanged at 1,100 px) and the narrow budget is 2,100 px instead of 2,000 px (the wrapped 44 px row); a scratch `pkill -f` matched its own shell and stopped one rebuild (rerun). CircleCI's first governance run on this PR failed `test_ci_optimization.py`, which pins every profile's spec list: the new spec in `default-product` needed the pin updated too (I had run only the governance-lite self-tests locally). Fixed in the following commit; the CI-plan suite now passes locally.
 
 **PR 2 ([#107](https://github.com/alrimarleskovar/FloFi/pull/107), `claude/build-flofi-ux-ui-002-omnichannel`)**
 
