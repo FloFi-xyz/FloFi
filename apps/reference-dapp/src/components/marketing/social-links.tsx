@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import Image from 'next/image';
-import { useId } from 'react';
 import type { LandingCopy } from './landing-copy';
 import styles from './landing.module.css';
 
@@ -14,14 +13,12 @@ export const SOCIAL_LINKS = [
 export type SocialId = typeof SOCIAL_LINKS[number]['id'];
 
 /**
- * Small round community links, deliberately unlike the product CTAs: a mono label, no button styling, each with a descriptive name,
- * a 44 px target and a new tab without opener or referrer.
+ * Small round community links, deliberately unlike the product CTAs: icons only (the list keeps a localized accessible name), no button
+ * styling, each with a descriptive name, a 44 px target and a new tab without opener or referrer.
  */
 export function SocialLinks({ t, variant }: { t: LandingCopy; variant: 'hero' | 'footer' }) {
-  const id = useId();
   return <div className={`${styles.socialLinks} ${variant === 'footer' ? styles.footerSocial : ''}`} data-social-links={variant}>
-    <p id={id}>{t.socialLabel}</p>
-    <ul aria-labelledby={id}>
+    <ul aria-label={t.socialLabel}>
       {SOCIAL_LINKS.map(link => <li key={link.id}>
         <a href={link.href} target="_blank" rel="noopener noreferrer" aria-label={t[link.label]} title={link.name} data-social={link.id}>
           <span className={styles.socialMark} data-social-mark={link.id} aria-hidden="true">

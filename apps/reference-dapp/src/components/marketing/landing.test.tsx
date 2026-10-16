@@ -9,7 +9,7 @@ import { landingText } from './landing-copy';
 import { SOCIAL_LINKS, SocialLinks } from './social-links';
 import { ConversationDemo, DEMO_PROTOCOL, DEMO_WORKFLOW } from './conversation-demo';
 import { DEMO_CUES, DEMO_END, DEMO_TICKS, demoCue, demoFrame } from './demo-timeline';
-import { ASSISTANT_HOSTS, AssistantOnboarding, FLOFI_MCP_URL, ILLUSTRATED_TOOLS } from './assistant-onboarding';
+import { ASSISTANT_HOSTS, AssistantOnboarding, FLOFI_MCP_URL } from './assistant-onboarding';
 import { APPROVAL_TOOL_NAMES, MCP_TOOL_NAMES } from '../../mcp/tools';
 import { articles } from '../docs/content';
 
@@ -35,13 +35,15 @@ describe('BUILD-FLOFI-UX-UI-002 landing', () => {
         expect(html.match(/<a /g)).toHaveLength(4);
         expect(html.match(/target="_blank" rel="noopener noreferrer"/g)).toHaveLength(4);
         for (const label of [t.socialX, t.socialDiscord, t.socialLinkedIn, t.socialTelegram]) expect(html).toContain(`aria-label="${label}"`);
-        expect(html).toContain(t.socialLabel);
-        // The list is named by its visible label; marks are decorative.
-        expect(html).toMatch(/<p id="([^"]+)">[^<]+<\/p><ul aria-labelledby="\1">/);
+        // Icons only: no visible label, but the list keeps its localized accessible name; marks are decorative.
+        expect(plain(html).trim()).toBe('');
+        expect(html).not.toMatch(/<p\b/);
+        expect(html).toContain(`<ul aria-label="${t.socialLabel}">`);
         expect(html.match(/alt=""/g)).toHaveLength(4);
       }
     }
     expect(landingText.pt.socialX).toContain('abre em nova aba');
+    expect([landingText.en.socialLabel, landingText.pt.socialLabel]).toEqual(['FloFi community', 'Comunidade FloFi']);
   });
 
   it('renders the restored mascot journey by default, the new sections in order, and community links near the hero CTAs and in the footer', () => {
@@ -147,26 +149,46 @@ describe('BUILD-FLOFI-UX-UI-002 landing', () => {
     expect(end.focus).toEqual({ supply: false, borrow: false });
   });
 
-  it('the MCP onboarding names the deployed endpoint, real tools and the docs guide, without one-click or in-chat signing claims', () => {
+  it('the MCP section is connect once, then ask: the deployed endpoint, short accurate setup, no tool names, no repeated safety copy (EN/PT)', () => {
     expect(FLOFI_MCP_URL).toBe('https://flofi.xyz/api/mcp');
-    for (const tool of ILLUSTRATED_TOOLS) expect([...MCP_TOOL_NAMES, ...APPROVAL_TOOL_NAMES] as string[]).toContain(tool);
+    // The full instructions stay in the docs article; the landing no longer links a guide or explains "what happens where".
     expect(articles.some(article => article.slug === 'mcp-integrations')).toBe(true);
     expect(ASSISTANT_HOSTS.map(host => host.name)).toEqual(['Claude', 'ChatGPT']);
+    const tools = [...MCP_TOOL_NAMES, ...APPROVAL_TOOL_NAMES] as string[];
+    expect(tools).toContain('compose_strategy');
     for (const locale of ['en', 'pt'] as const) {
       const t = landingText[locale];
       const html = renderToStaticMarkup(createElement(AssistantOnboarding, { t }));
-      expect(html).toContain('href="/docs/mcp-integrations"');
+      const text = plain(html);
       expect(html).toContain(FLOFI_MCP_URL);
       expect(html).toContain('role="tablist"');
       expect(html.match(/role="tab"/g)).toHaveLength(2);
-      expect(html).toContain(t.assistantsSafety);
-      expect(html).toContain(t.assistantsNotOneClick);
-      expect(html).not.toMatch(/one-click install(?!:)|sign (?:in|inside) (?:the )?chat/i);
+      expect(html).not.toMatch(/<a\b/);
+      // Two buttons for the assistants, one to copy the URL: nothing else to operate.
+      expect(html.match(/<button /g)).toHaveLength(3);
+      for (const key of ['assistantsTitleFirst', 'assistantsTitleSecond', 'assistantsConnect', 'claudeOpen', 'claudeAdd', 'assistantsNote', 'assistantsUse',
+        'assistantsPrompt', 'assistantsReply', 'assistantsContinue', 'assistantsAuthorize'] as const) expect(text).toContain(t[key]);
+      expect(t.assistantsPrompt).toMatch(locale === 'en' ? /^Swap 0\.5 ETH to USDC on Base\.$/ : /^Troque 0,5 ETH por USDC na Base\.$/);
+      // Marketing, not developer documentation: no MCP tool name appears.
+      for (const tool of tools) expect(text).not.toContain(tool);
+      // One safety sentence, said once; no install, in-chat signing or automatic execution claim.
+      expect(text.split(t.assistantsAuthorize)).toHaveLength(2);
+      expect(text).not.toMatch(/one.click|um clique|sign(?:s|ed)? (?:in|inside) (?:the )?chat|automatic|automátic|never sign|nunca assinam|confirmed|confirmad|executed|executad/i);
+      // Every bit of copy that used to explain the same thing again is gone.
+      expect(Object.keys(t).filter(key => /^assistants(?:Where|InChat|InFloFi|Guide|Safety|NotOneClick|Step|Body)/.test(key))).toEqual([]);
     }
-    // The connector paths are the operator guide's (docs/deploy/MCP.md §2).
+    expect(landingText.en.assistantsAuthorize).toBe('Review and authorize transactions with your wallet in FloFi.');
+    expect(landingText.pt.assistantsAuthorize).toBe('Revise e autorize as transações com a sua carteira no FloFi.');
+    // The shortened connector paths are still the operator guide's (docs/deploy/MCP.md §2), including ChatGPT's OAuth choice.
     const guide = read('../../../../../docs/deploy/MCP.md').toString();
     expect(guide).toContain('Settings → Connectors → Add custom connector');
-    expect(guide).toContain('Settings → Apps & Connectors → Advanced → Developer mode');
+    expect(landingText.en.claudeOpen).toContain('Settings → Connectors → Add custom connector');
+    expect(guide).toContain('Settings → Apps & Connectors → Advanced → Developer mode → Create');
+    expect(landingText.en.chatgptOpen).toMatch(/Developer mode in Settings → Apps & Connectors → Advanced, then choose Create/);
+    expect(guide).toContain('authentication OAuth');
+    expect(landingText.en.chatgptAdd).toContain('OAuth');
+    expect(guide).toMatch(/invite code/);
+    expect(landingText.en.assistantsNote).toContain('invite code');
   });
 
   it('scrolling never hides an Earth layer: it only pauses the clocks of the original artwork passes', () => {

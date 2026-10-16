@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /**
- * BUILD-FLOFI-UX-UI-002: community links, the "How it works" story, the assistant onboarding and the restored mascot journey on the real
+ * BUILD-FLOFI-UX-UI-002: community links, the "How it works" story, the "connect once, then ask" MCP section and the restored mascot journey on the real
  * landing. Read-only: every request outside the app origin is refused, nothing connects a wallet and nothing is sent.
  */
 import { test, expect, type Page } from '@playwright/test';
@@ -102,7 +102,10 @@ for (const width of [320, 375, 390, 768, 1024, 1440, 1920]) {
       for (const area of ['hero', 'footer'] as const) {
         const group = page.locator(`[data-social-links="${area}"]`);
         await group.scrollIntoViewIfNeeded();
-        await expect(group.getByRole('list', { name: locale === 'en' ? 'Community' : 'Comunidade', exact: true })).toBeVisible();
+        // Icons only: no visible label and no space left for one, but the list keeps its localized accessible name.
+        await expect(group.getByRole('list', { name: locale === 'en' ? 'FloFi community' : 'Comunidade FloFi', exact: true })).toBeVisible();
+        expect((await group.innerText()).trim()).toBe('');
+        await expect(group.locator(':scope > :not(ul)')).toHaveCount(0);
         for (const [id, href, en, pt] of SOCIAL) {
           const link = group.getByRole('link', { name: locale === 'en' ? en : pt, exact: true });
           await expect(link).toHaveAttribute('href', href);
@@ -118,17 +121,77 @@ for (const width of [320, 375, 390, 768, 1024, 1440, 1920]) {
         // Distinct from the product CTAs: no button styling, never inside the CTA row.
         expect(await group.evaluate(element => !element.closest('[class*="heroActions"]') && !element.querySelector('[class*="primaryButton"], [class*="secondaryButton"]'))).toBe(true);
       }
+      // Balanced beside the hero CTAs: centred on them when on one line; when wrapped below, the first mark lines up with their edge.
+      const balance = await page.locator('#workflow [class*="heroCtaRow"]').evaluate(row => {
+        const actions = row.querySelector('[class*="heroActions"]')!.getBoundingClientRect(), list = row.querySelector('[data-social-links] ul')!.getBoundingClientRect();
+        const mark = row.querySelector('[data-social-mark="x"]')!.getBoundingClientRect();
+        return { wrapped: list.top >= actions.bottom, centre: Math.abs((list.top + list.bottom) / 2 - (actions.top + actions.bottom) / 2), gap: mark.left - actions.right, edge: Math.abs(mark.left - actions.left) };
+      });
+      if (balance.wrapped) expect(balance.edge, JSON.stringify(balance)).toBeLessThanOrEqual(1);
+      else { expect(balance.centre, JSON.stringify(balance)).toBeLessThanOrEqual(2); expect(balance.gap, JSON.stringify(balance)).toBeGreaterThanOrEqual(20); expect(balance.gap, JSON.stringify(balance)).toBeLessThanOrEqual(40); }
       // Keyboard order: the hero CTAs, then the community links.
       await page.locator('#workflow').getByRole('link', { name: locale === 'en' ? /Explore Docs/ : /Explorar Docs/ }).focus();
       await page.keyboard.press('Tab');
       await expect(page.locator('[data-social-links="hero"] a[data-social="x"]')).toBeFocused();
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
       if (evidence && [390, 1440].includes(width)) {
+        await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
         await page.locator('#workflow').screenshot({ path: `${evidence}/hero-social-${locale}-${width}.png`, animations: 'disabled' });
         await page.locator('footer').screenshot({ path: `${evidence}/footer-social-${locale}-${width}.png`, animations: 'disabled' });
       }
     }
     expect(seen.external).toEqual([]); expect(seen.errors).toEqual([]);
+  });
+}
+
+for (const width of [320, 375, 390, 768, 1024, 1440, 1920]) {
+  test(`the MCP section is one compact card, connect beside ask, readable with usable controls at ${width}px (EN/PT, Claude and ChatGPT)`, async ({ page, baseURL }) => {
+    const seen = await guard(page, baseURL);
+    // The complete final frame (reduced motion) so every message is laid out.
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.setViewportSize({ width, height: width < 600 ? 844 : 900 });
+    await page.goto('/'); await page.evaluate(() => document.fonts.ready);
+    const section = page.locator('#assistants');
+    for (const locale of ['en', 'pt'] as const) {
+      await page.getByRole('button', { name: locale.toUpperCase(), exact: true }).click();
+      for (const host of ['Claude', 'ChatGPT'] as const) {
+        await section.getByRole('tab', { name: host }).click();
+        await section.evaluate(element => element.scrollIntoView({ block: 'start', behavior: 'instant' }));
+        await expect(section.locator('[data-assistant-step]')).toHaveAttribute('data-assistant-step', '4');
+        const layout = await section.evaluate(element => {
+          const panel = element.querySelector('[class*="assistantPanel"]')!.getBoundingClientRect();
+          const connect = element.querySelector('[class*="assistantConnect"]')!.getBoundingClientRect(), chat = element.querySelector('[data-assistant-step]')!.getBoundingClientRect();
+          const shown = [...element.querySelectorAll<HTMLElement>('[class*="assistantPanel"] :is(h3, p, li, button, code, strong, span)')].filter(item => item.getBoundingClientRect().width > 0 && item.closest('[data-shown="false"]') === null);
+          const outside = shown.filter(item => { const box = item.getBoundingClientRect(); return box.left < panel.left - 1 || box.right > panel.right + 1 || box.top < panel.top - 1 || box.bottom > panel.bottom + 1; }).map(item => item.textContent!.slice(0, 40));
+          const clipped = shown.filter(item => item.scrollWidth > item.clientWidth + 1 && getComputedStyle(item).overflowX !== 'visible').map(item => item.textContent!.slice(0, 40));
+          const code = element.querySelector('code')!;
+          const title = element.querySelector('h2')!.getBoundingClientRect(), dock = element.querySelector('[data-mascot-dock]')?.getBoundingClientRect();
+          const targets = [...element.querySelectorAll<HTMLElement>('[role="tab"], [class*="assistantUrl"] button')].map(item => {
+            const box = item.getBoundingClientRect();
+            return box.height >= 44 && box.width >= 44 && item.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2));
+          });
+          return { outside, clipped, targets, height: element.getBoundingClientRect().height, cards: element.querySelectorAll('[class*="assistantPanel"]').length,
+            url: code.textContent, urlOneLine: code.getBoundingClientRect().height < 40, sideBySide: connect.right <= chat.left + 1 && Math.abs(connect.top - chat.top) < 2,
+            stacked: connect.bottom <= chat.top + 1, mascotClear: !dock || dock.width === 0 || dock.right <= title.left || dock.left >= title.right || dock.bottom <= title.top || dock.top >= title.bottom,
+            mascotInside: !dock || (dock.left >= 0 && dock.right <= innerWidth), overflow: document.documentElement.scrollWidth > innerWidth };
+        });
+        const label = `${locale} ${host}`;
+        expect(layout.outside, label).toEqual([]);
+        expect(layout.clipped, label).toEqual([]);
+        expect(layout.targets, label).toEqual([true, true, true]);
+        expect(layout.cards, label).toBe(1);
+        expect(layout.url, label).toBe('https://flofi.xyz/api/mcp');
+        expect(layout.urlOneLine, label).toBe(true);
+        expect(width >= 1024 ? layout.sideBySide : layout.stacked, label).toBe(true);
+        expect(layout.mascotClear && layout.mascotInside, label).toBe(true);
+        expect(layout.overflow, label).toBe(false);
+        // Much shorter than the documentation-style section it replaces (1,425px at 1440px; 2,171px at 390px).
+        expect(layout.height, label).toBeLessThanOrEqual(width >= 1024 ? 760 : width >= 600 ? 1_050 : 1_250);
+        if (evidence && [390, 1440].includes(width) && (locale === 'en' || host === 'Claude')) await section.screenshot({ path: `${evidence}/assistants-${host.toLowerCase()}${locale === 'pt' ? '-pt' : ''}-${width}.png` });
+        if (evidence && width === 320 && locale === 'en' && host === 'ChatGPT') await section.screenshot({ path: `${evidence}/assistants-chatgpt-320.png` });
+      }
+    }
+    expect(seen.actions).toEqual([]); expect(seen.external).toEqual([]); expect(seen.errors).toEqual([]);
   });
 }
 
@@ -184,46 +247,76 @@ test.describe('motion allowed', () => {
       expect(seen.external).toEqual([]); expect(seen.errors).toEqual([]);
     });
 
-    test(`assistant onboarding shows the documented Claude and ChatGPT connection, then the illustrated tool sequence at ${width}px`, async ({ page, context, baseURL }) => {
+    test(`the MCP section plays its short conversation once, switches assistants by keyboard and copies the real URL at ${width}px`, async ({ page, context, baseURL }) => {
       const seen = await guard(page, baseURL);
       await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: baseURL! });
-      await page.setViewportSize({ width, height: 900 });
+      await page.setViewportSize({ width, height: width < 600 ? 844 : 900 });
       await page.goto('/'); await page.evaluate(() => document.fonts.ready);
-      const section = page.locator('#assistants');
-      await section.scrollIntoViewIfNeeded();
+      const section = page.locator('#assistants'), chat = section.locator('[data-assistant-step]');
+      await expect(chat).toHaveAttribute('data-assistant-step', '0');
+      // Record every step with whether the "working" dots and the answer are shown, to prove one ordered, finite sequence.
+      await page.evaluate(() => {
+        const store = window as unknown as { __steps: string[] };
+        const element = document.querySelector<HTMLElement>('#assistants [data-assistant-step]')!;
+        store.__steps = [];
+        const take = () => {
+          const shown = [...element.querySelectorAll<HTMLElement>('ol > li, ol > li > span')].filter(item => item.dataset.shown === 'true').map(item => item.className.match(/(demoUser|demoThinking|assistantReply|assistantHandoff)/)?.[1]).filter(Boolean).join('+');
+          const entry = `${element.dataset.assistantStep}:${shown}`;
+          if (store.__steps.at(-1) !== entry) store.__steps.push(entry);
+        };
+        take();
+        new MutationObserver(take).observe(element, { subtree: true, attributes: true, attributeFilter: ['data-assistant-step', 'data-shown'] });
+      });
+      await chat.scrollIntoViewIfNeeded();
+      await expect(chat).toHaveAttribute('data-assistant-step', '4', { timeout: 6_000 });
+      expect(await page.evaluate(() => (window as unknown as { __steps: string[] }).__steps)).toEqual(['0:', '1:demoUser', '2:demoUser+demoThinking', '3:demoUser+assistantReply', '4:demoUser+assistantReply+assistantHandoff']);
+      // It ends on a clear final state and never loops.
+      await page.waitForTimeout(1_500);
+      await expect(chat).toHaveAttribute('data-assistant-step', '4');
+      await expect(chat).toContainText('Swap 0.5 ETH to USDC on Base.');
+      await expect(chat).toContainText('Your workflow is ready to review.');
+      await expect(chat).toContainText('Continue in FloFi');
+      await expect(chat).toContainText('Review and authorize transactions with your wallet in FloFi.');
       const tabs = section.getByRole('tablist', { name: 'Choose your assistant' });
       const claude = tabs.getByRole('tab', { name: 'Claude' }), chatgpt = tabs.getByRole('tab', { name: 'ChatGPT' });
       await expect(claude).toHaveAttribute('aria-selected', 'true');
-      const panel = section.getByRole('tabpanel');
-      await expect(panel).toContainText('Settings → Connectors → Add custom connector');
+      const panel = section.getByRole('tabpanel', { name: 'Claude' });
+      await expect(panel).toContainText('Open Settings → Connectors → Add custom connector.');
+      await expect(panel).toContainText('Paste the URL and authorize the connection.');
       await expect(panel).toContainText('https://flofi.xyz/api/mcp');
-      await expect(panel).toContainText('There is no one-click install');
-      const chat = panel.locator('[data-assistant-step]');
-      await chat.scrollIntoViewIfNeeded();
-      await expect(chat).toHaveAttribute('data-assistant-step', '5', { timeout: 6_000 });
-      for (const tool of ['compose_strategy', 'simulate_strategy', 'request_user_approval']) await expect(chat).toContainText(tool);
-      await expect(chat).toContainText('connect your wallet, run a fresh simulation, review the Strategy Manifest and sign');
-      if (evidence) await section.screenshot({ path: `${evidence}/assistants-claude-${width}.png` });
-      // Arrow keys move between tabs (WAI-ARIA tabs); the sequence replays for the selected assistant.
+      await expect(panel).toContainText('FloFi may ask for an invite code');
+      // Arrow keys, Home and End move between tabs (WAI-ARIA tabs); the conversation replays for the selected assistant.
       await claude.focus(); await page.keyboard.press('ArrowRight');
       await expect(chatgpt).toBeFocused(); await expect(chatgpt).toHaveAttribute('aria-selected', 'true');
-      await expect(panel).toContainText('Developer mode');
-      // On one column the chat sits below the steps: the replay waits until it is actually seen.
+      await expect(claude).toHaveAttribute('tabindex', '-1');
+      const chatgptPanel = section.getByRole('tabpanel', { name: 'ChatGPT' });
+      await expect(chatgptPanel).toContainText('Turn on Developer mode in Settings → Apps & Connectors → Advanced, then choose Create.');
+      await expect(chatgptPanel).toContainText('Paste the URL, choose OAuth and authorize the connection.');
+      await expect(section.getByRole('group', { name: 'Illustrative conversation · ChatGPT' })).toBeVisible();
       await chat.scrollIntoViewIfNeeded();
-      await expect(chat).toHaveAttribute('data-assistant-step', '5', { timeout: 6_000 });
-      if (evidence) await section.screenshot({ path: `${evidence}/assistants-chatgpt-${width}.png` });
-      await panel.getByRole('button', { name: 'Copy URL' }).click();
-      await expect(panel.getByRole('button', { name: 'Copied' })).toBeVisible();
+      await expect(chat).toHaveAttribute('data-assistant-step', '4', { timeout: 6_000 });
+      await page.keyboard.press('Home'); await expect(claude).toBeFocused();
+      await page.keyboard.press('End'); await expect(chatgpt).toBeFocused();
+      await page.keyboard.press('ArrowRight'); await expect(claude).toBeFocused();
+      await page.keyboard.press('ArrowLeft'); await expect(chatgpt).toBeFocused();
+      // From the selected tab, Tab reaches the copy button; Enter copies the exact endpoint.
+      await page.keyboard.press('Tab');
+      await expect(section.getByRole('button', { name: 'Copy URL' })).toBeFocused();
+      await page.keyboard.press('Enter');
+      await expect(section.getByRole('button', { name: 'Copied' })).toBeVisible();
       expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('https://flofi.xyz/api/mcp');
-      await expect(section).toContainText('Assistants never sign or move funds.');
+      // Marketing, not developer documentation: no tool names, no guide button, no "what happens where", said once.
+      const text = await section.innerText();
+      expect(text).not.toMatch(/compose_strategy|simulate_strategy|request_user_approval|validate_strategy|review_strategy|_status|What happens where|MCP guide/);
+      expect(text.split('Review and authorize transactions with your wallet in FloFi.')).toHaveLength(2);
+      await expect(section.getByRole('link')).toHaveCount(0);
       await page.getByRole('button', { name: 'PT', exact: true }).click();
       await expect(section.getByRole('tablist', { name: 'Escolha seu assistente' })).toBeVisible();
-      await expect(section).toContainText('Não há instalação com um clique');
-      expect(seen.actions).toEqual([]);
-      const guide = section.getByRole('link', { name: /Ler o guia MCP/ });
-      await expect(guide).toHaveAttribute('href', '/docs/mcp-integrations');
-      await guide.click();
-      await expect(page).toHaveURL(/\/docs\/mcp-integrations$/);
+      await expect(section).toContainText('Revise e autorize as transações com a sua carteira no FloFi.');
+      await expect(section).toContainText('O FloFi pode pedir um código de convite');
+      expect(seen.actions).toEqual([]); expect(new Set(await writes(page))).toEqual(new Set(['flofi-landing-language']));
+      // The full instructions stay where they were: the docs route is unchanged.
+      await page.goto('/docs/mcp-integrations');
       await expect(page.getByRole('heading', { level: 1, name: 'MCP Integrations' })).toBeVisible();
       expect(seen.external).toEqual([]); expect(seen.errors).toEqual([]);
     });
@@ -405,7 +498,7 @@ test('reduced motion shows the complete How it works story and the onboarding at
   await page.goto('/');
   await expect(page.locator('[data-mascot-motion]')).toHaveAttribute('data-alive', 'still');
   const demo = page.locator('#demo'), stage = demo.locator('[data-demo-cue]');
-  for (const [selector, attribute, value] of [['#demo [data-demo-cue]', 'data-demo-cue', 'done'], ['#assistants [data-assistant-step]', 'data-assistant-step', '5']] as const) {
+  for (const [selector, attribute, value] of [['#demo [data-demo-cue]', 'data-demo-cue', 'done'], ['#assistants [data-assistant-step]', 'data-assistant-step', '4']] as const) {
     await expect(page.locator(selector)).toHaveAttribute(attribute, value);
     await page.locator(selector).scrollIntoViewIfNeeded();
     await expect(page.locator(selector)).toHaveAttribute(attribute, value);
