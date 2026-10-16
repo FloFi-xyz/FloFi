@@ -94,12 +94,22 @@ for (const width of [390, 768, 1440, 1920]) {
       window.addEventListener('flofi-test-scroll-finished', finish);
       frame = requestAnimationFrame(sample);
     }));
-    for (let index = 0; index < 10; index++) {
-      await page.mouse.wheel(0, 20);
+    // BUILD-FLOFI-UX-UI-002 (UX/UI-007): scrolling pauses the clocks but keeps every lit layer painted at its current opacity, so the
+    // planet's luminance cannot jump while scrolling down, reversing or resuming (the reported flicker hid these layers while scrolling).
+    const layers = () => earth.evaluate(element => [...element.querySelectorAll('[data-earth-surface], [data-earth-surface-secondary], [data-earth-lighting], [data-earth-atmosphere]')]
+      .map(layer => ({ visibility: getComputedStyle(layer).visibility, opacity: Number(getComputedStyle(layer).opacity) })));
+    const idle = await layers();
+    expect(idle.map(layer => layer.visibility)).toEqual(['visible', 'visible', 'visible', 'visible']);
+    for (const direction of [1, 1, 1, 1, 1, 1, 1, -1, -1, 1]) {
+      await page.mouse.wheel(0, 20 * direction);
       await expect(earth).toHaveAttribute('data-earth-active', 'false');
+      const scrolling = await layers();
+      expect(scrolling.map(layer => layer.visibility)).toEqual(['visible', 'visible', 'visible', 'visible']);
+      // Slow 60 s cycles move opacity by well under 0.05 in the few hundred milliseconds of this loop.
+      scrolling.forEach((layer, i) => expect(Math.abs(layer.opacity - idle[i]!.opacity)).toBeLessThan(.05));
       await page.waitForTimeout(80);
     }
-    await expect.poll(() => page.evaluate(() => scrollY)).toBeGreaterThan(beforeWheel + 140);
+    await expect.poll(() => page.evaluate(() => scrollY)).toBeGreaterThan(beforeWheel + 100);
     await page.evaluate(() => window.dispatchEvent(new Event('flofi-test-scroll-finished')));
     const frames = (await frameTimes).sort((a, b) => a - b);
     await expect(earth).toHaveAttribute('data-earth-active', 'true');

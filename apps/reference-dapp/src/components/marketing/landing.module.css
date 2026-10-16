@@ -427,7 +427,6 @@
   .earthSurfaceSecond { animation-delay: -30s; }
   .earthLighting { animation: earthLightRotation 60s ease-in-out infinite; animation-play-state: paused; }
   .earthAtmosphere { animation: atmosphereOrbit 60s ease-in-out infinite; animation-play-state: paused; }
-  .horizon[data-earth-active="false"] :is(.earthSurface, .earthLighting, .earthAtmosphere) { visibility: hidden; }
   .horizon[data-earth-active="true"] :is(.earthSurface, .earthLighting, .earthAtmosphere) { animation-play-state: running; }
   .root[data-mascot-motion="true"] [data-flow-visible="true"][data-flow-ready="true"] .flowSignal { animation: routeSignal 2.4s 1 ease-in-out both; }
   .root[data-mascot-motion="true"] [data-flow-visible="true"][data-flow-ready="true"] .flowSignal[data-flow-signal="output"] { animation-delay: 2.6s; }
