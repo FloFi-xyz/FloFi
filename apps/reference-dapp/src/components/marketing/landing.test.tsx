@@ -7,7 +7,8 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import LandingPage from './page';
 import { landingText } from './landing-copy';
 import { SOCIAL_LINKS, SocialLinks } from './social-links';
-import { ConversationDemo, DEMO_SCENARIOS } from './conversation-demo';
+import { ConversationDemo, DEMO_PROTOCOL, DEMO_WORKFLOW } from './conversation-demo';
+import { DEMO_CUES, DEMO_END, DEMO_TICKS, demoCue, demoFrame } from './demo-timeline';
 import { ASSISTANT_HOSTS, AssistantOnboarding, FLOFI_MCP_URL, ILLUSTRATED_TOOLS } from './assistant-onboarding';
 import { APPROVAL_TOOL_NAMES, MCP_TOOL_NAMES } from '../../mcp/tools';
 import { articles } from '../docs/content';
@@ -15,6 +16,7 @@ import { articles } from '../docs/content';
 const read = (path: string) => readFileSync(new URL(path, import.meta.url));
 const publicFile = (path: string) => read(`../../../public${path}`);
 const between = (html: string, start: string, end: string) => html.slice(html.indexOf(start), html.indexOf(end, html.indexOf(start)));
+const plain = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/&#x27;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, '&');
 
 describe('BUILD-FLOFI-UX-UI-002 landing', () => {
   afterEach(() => { vi.unstubAllEnvs(); vi.resetModules(); });
@@ -46,8 +48,9 @@ describe('BUILD-FLOFI-UX-UI-002 landing', () => {
     const html = renderToStaticMarkup(createElement(LandingPage));
     expect(html).toContain('data-mascot-motion="true"');
     expect(html).toContain('data-mascot-journey');
-    for (const scene of ['hero', 'demo', 'assistants', 'networks', 'infrastructure', 'cta']) expect(html).toContain(`data-mascot-dock="${scene}"`);
-    expect([...html.matchAll(/<section[^>]* id="([a-z]+)"/g)].map(match => match[1])).toEqual(['workflow', 'demo', 'assistants', 'networks', 'developers', 'about']);
+    // Owner order: hero, Supported Networks, How it works, MCP, developers, closing.
+    expect([...html.matchAll(/<section[^>]* id="([a-z]+)"/g)].map(match => match[1])).toEqual(['workflow', 'networks', 'demo', 'assistants', 'developers', 'about']);
+    expect([...html.matchAll(/data-mascot-dock="([a-z]+)"/g)].map(match => match[1]).filter(scene => scene !== 'workflow')).toEqual(['hero', 'networks', 'demo', 'assistants', 'infrastructure', 'cta']);
     const hero = between(html, 'id="workflow"', '</section>');
     expect(hero.indexOf('href="/docs"')).toBeLessThan(hero.indexOf('data-social-links="hero"'));
     expect(between(html, '<footer', '</footer>')).toContain('data-social-links="footer"');
@@ -62,22 +65,86 @@ describe('BUILD-FLOFI-UX-UI-002 landing', () => {
     expect(mascotMotionEnabled).toBe(false);
   });
 
-  it('the conversation demo is a bounded illustration: fixed requests, no input, no fabricated results (EN/PT)', () => {
+  it('How it works is one bounded illustration of the owner example: no input or choices, no fabricated results (EN/PT)', () => {
+    expect(DEMO_WORKFLOW.map(step => [step.action, step.amount, step.asset])).toEqual([['supply', '1', 'ETH'], ['borrow', '500', 'USDC']]);
+    expect(DEMO_PROTOCOL).toEqual({ name: 'Aave', network: 'Ethereum' });
+    expect(landingText.en.demoPrompt).toBe('Supply 1 ETH on Aave and borrow 500 USDC');
     for (const locale of ['en', 'pt'] as const) {
       const t = landingText[locale];
-      const html = renderToStaticMarkup(createElement(ConversationDemo, { t, locale }));
-      expect(html).not.toMatch(/<(input|textarea|form)\b/);
-      expect(html.match(/<button /g)).toHaveLength(DEMO_SCENARIOS.length);
-      expect(html).toContain(t.demoIllustration);
-      expect(html).toContain(t.demoFinal);
-      expect(html).toContain(t.demoNote);
-      // Server HTML is the complete final state; motion only replays it.
-      expect(html).toContain(`data-demo-step="5"`);
-      const text = html.replace(/<[^>]+>/g, ' ');
-      expect(text).not.toMatch(/0x[0-9a-f]{6,}|\bAPY\b|%|confirmed|confirmad|success|sucesso|\bexecuted\b|executad[oa] com|balance|saldo|\d{1,2}:\d{2}/i);
+      const html = renderToStaticMarkup(createElement(ConversationDemo, { t }));
+      expect(html).not.toMatch(/<(input|textarea|form|select)\b/);
+      // No scenario selector: the only button is the pause/replay control (hidden in the static frame), the only link the closing CTA.
+      expect(html.match(/<button /g)).toHaveLength(1);
+      expect(html).toMatch(/<button [^>]*hidden=""/);
+      expect(html.match(/<a /g)).toHaveLength(1);
+      expect(html).toContain('href="/app"');
+      const text = plain(html);
+      for (const key of ['demoEyebrow', 'demoTitle', 'demoBody', 'demoIllustration', 'demoNote', 'demoCta'] as const) expect(text).toContain(t[key]);
+      // Server HTML is the complete final frame: both cards, every message, Simulate and Execute.
+      expect(html).toContain('data-demo-stage="execute"');
+      expect(html).toContain('data-demo-cue="done"');
+      expect(html.match(/data-demo-card="(?:supply|borrow)" data-state="shown"/g)).toHaveLength(2);
+      for (const key of ['demoPrompt', 'demoReply', 'demoAddSupply', 'demoAddBorrow', 'demoReady', 'demoSimulating', 'demoHandoff', 'demoCheckWorkflow',
+        'demoCheckCollateral', 'demoCheckCosts', 'demoCheckManifest', 'demoStepReview', 'demoStepWallet', 'demoStepRun', 'demoStepStatus', 'demoBorrowNote'] as const) expect(text).toContain(t[key]);
+      // The moving picture is decorative for assistive technology; one summary carries the whole story.
+      expect(html.match(/aria-hidden="true"/g)!.length).toBeGreaterThanOrEqual(4);
+      expect(text).toContain(t.demoSummary.replace('{0}', t.demoPrompt));
+      expect(t.demoSummary).toContain('{0}');
+      expect(text).not.toMatch(/0x[0-9a-f]{6,}|\bAPY\b|%|confirmed|confirmad|success|sucesso|\bexecuted\b|executad[oa]|\bcompleted?\b|conclu[ií]d|receipt|recibo|\bhash\b|balance|saldo|health factor|\$\s?\d|\d{1,2}:\d{2}/i);
+      // Only the visitor's own amounts and the stage/step ordinals appear: no quote, rate, fee, limit or result.
+      const numbers = new Set([...text.replace(t.demoSummary.replace('{0}', t.demoPrompt), '').matchAll(/\d+(?:[.,]\d+)?/g)].map(match => match[0]));
+      expect([...numbers].every(value => ['1', '2', '3', '4', '500'].includes(value)), [...numbers].join(' ')).toBe(true);
     }
-    // Only the visitor's own example amounts appear.
-    expect(DEMO_SCENARIOS.flatMap(s => s.cards.flatMap(c => c.amount ? [c.amount[0]] : []))).toEqual(['0.5', '0.5', '1', '500']);
+  });
+
+  it('one deterministic timeline drives the chat and the Canvas in the owner order', () => {
+    expect(DEMO_TICKS[0]).toBe(0);
+    expect(DEMO_TICKS.at(-1)).toBe(DEMO_END);
+    expect(DEMO_TICKS.every((tick, i) => i === 0 || tick > DEMO_TICKS[i - 1]!)).toBe(true);
+    expect(Object.values(DEMO_CUES).every((at, i, all) => i === 0 || at > all[i - 1]!)).toBe(true);
+    for (const at of Object.values(DEMO_CUES)) expect(DEMO_TICKS).toContain(at);
+    expect(DEMO_END).toBeLessThan(20_000);
+    const start = demoFrame(0);
+    expect(start).toMatchObject({ cue: 'idle', stage: 'build', composing: false, sent: false, empty: true, supply: 'hidden', borrow: 'hidden', connector: false, done: false });
+    expect(start.stages).toEqual({ build: 'active', simulate: 'pending', execute: 'pending' });
+    // The request is typed character by character, then sent.
+    const typing = DEMO_TICKS.filter(tick => tick >= DEMO_CUES.typing && tick < DEMO_CUES.sent).map(tick => demoFrame(tick));
+    const prompt = landingText.en.demoPrompt;
+    const lengths = typing.map(frame => Math.ceil(prompt.length * frame.typed));
+    expect(typing.every(frame => frame.composing && !frame.sent)).toBe(true);
+    expect(lengths[0]).toBe(1);
+    expect(lengths.at(-1)).toBe(prompt.length);
+    expect(lengths.every((length, i) => i === 0 || length >= lengths[i - 1]!)).toBe(true);
+    expect(new Set(lengths).size).toBeGreaterThan(30);
+    const frames = DEMO_TICKS.map(tick => demoFrame(tick));
+    for (const [i, f] of frames.entries()) {
+      // Synchronized: each chat update and its Canvas change share one cue.
+      expect(f.supplyLine !== 'pending').toBe(f.supply !== 'hidden');
+      expect(f.borrowLine !== 'pending').toBe(f.borrow !== 'hidden');
+      expect(f.supplyLine === 'visited').toBe(f.borrow !== 'hidden');
+      expect(f.borrowLine === 'visited').toBe(f.ready);
+      if (f.ready) expect(f.connector && f.supply === 'shown' && f.borrow === 'shown').toBe(true);
+      expect(f.simulateLine === 'active').toBe(f.stage === 'simulate');
+      expect(f.handoff).toBe(f.stage === 'execute');
+      expect(f.thinking && f.reply).toBe(false);
+      expect(f.checks.filter(status => status === 'active').length).toBe(f.stage === 'simulate' ? 1 : 0);
+      expect(f.steps.filter(status => status === 'active').length).toBe(f.stage === 'execute' && !f.done ? 1 : 0);
+      // Nothing that appeared goes away again (the thinking dots give way to the reply; the composer clears when sent).
+      const previous = frames[i - 1];
+      if (previous) for (const key of ['sent', 'reply', 'ready', 'handoff', 'connector', 'done'] as const) if (previous[key]) expect(f[key]).toBe(true);
+    }
+    const sequence = DEMO_TICKS.map(demoCue).filter((cue, i, all) => cue !== all[i - 1]);
+    expect(sequence).toEqual(['idle', ...Object.keys(DEMO_CUES)]);
+    expect(frames.findIndex(f => f.supply === 'shown')).toBeLessThan(frames.findIndex(f => f.borrow === 'shown'));
+    expect(frames.findIndex(f => f.borrow === 'shown')).toBeLessThan(frames.findIndex(f => f.connector));
+    expect(frames.findIndex(f => f.connector)).toBeLessThan(frames.findIndex(f => f.stage === 'simulate'));
+    expect(frames.findIndex(f => f.stage === 'simulate')).toBeLessThan(frames.findIndex(f => f.stage === 'execute'));
+    // The final frame reaches Execute but marks nothing as a result: every check and step is only "visited".
+    const end = demoFrame(DEMO_END);
+    expect(end).toMatchObject({ stage: 'execute', done: true, connector: true, supply: 'shown', borrow: 'shown' });
+    expect(end.stages).toEqual({ build: 'visited', simulate: 'visited', execute: 'active' });
+    expect([...end.checks, ...end.steps].every(status => status === 'visited')).toBe(true);
+    expect(end.focus).toEqual({ supply: false, borrow: false });
   });
 
   it('the MCP onboarding names the deployed endpoint, real tools and the docs guide, without one-click or in-chat signing claims', () => {

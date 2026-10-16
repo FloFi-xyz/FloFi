@@ -87,7 +87,7 @@ export function AssistantOnboarding({ t }: { t: LandingCopy }) {
         <h3>{t.assistantsWhere}</h3>
         <div>
           <div data-where="chat"><strong>{t.assistantsInChat}</strong><ul><li>{t.assistantsWhereCompose}</li><li>{t.assistantsWherePreview}</li><li>{t.assistantsWhereStatus}</li></ul></div>
-          <div data-where="flofi"><strong>{t.assistantsInFloFi}</strong><ul><li>{t.assistantsWhereWallet}</li><li>{t.demoStepSimulate}</li><li>{t.demoStepReview}</li><li>{t.assistantsWhereSign}</li></ul></div>
+          <div data-where="flofi"><strong>{t.assistantsInFloFi}</strong><ul><li>{t.assistantsWhereWallet}</li><li>{t.assistantsWhereSimulate}</li><li>{t.assistantsWhereReview}</li><li>{t.assistantsWhereSign}</li></ul></div>
         </div>
       </div>
       <div className={styles.assistantActions}><a className={styles.primaryButton} href="/docs/mcp-integrations">{t.assistantsGuide} <span aria-hidden="true">→</span></a></div>

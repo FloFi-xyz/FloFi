@@ -1,92 +1,121 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import Image from 'next/image';
+import { useEffect, useRef } from 'react';
 import styles from './landing.module.css';
-import type { LandingCopy, LandingLocale } from './landing-copy';
+import type { LandingCopy } from './landing-copy';
 import { CryptoMark, type CryptoName } from './crypto-visuals';
-import { MascotDock, MASCOT_REACT_EVENT, type MascotReaction } from './mascot-journey';
-import { useScriptedSteps } from './scripted-steps';
+import { MascotDock, MASCOT_REACT_EVENT, mascotMotionEnabled, type MascotReaction } from './mascot-journey';
+import { ActionIcon } from '../action-icon';
+import { useTimeline, type TimelineState } from './scripted-steps';
+import { DEMO_REACTIONS, DEMO_TICKS, demoFrame, type CardState, type Status } from './demo-timeline';
 
-type Copy = keyof LandingCopy;
-type Card = { readonly label: Copy; readonly assets: readonly CryptoName[]; readonly network: string; readonly amount: readonly [string, string] | null };
-type Scenario = { readonly id: string; readonly chip: Copy; readonly prompt: Copy; readonly route: string; readonly guard: 'minimum' | 'limit'; readonly cards: readonly Card[] };
+/** The owner's single example. Only the visitor's own amounts appear: no quote, rate, fee, balance, limit, hash or outcome. */
+export const DEMO_WORKFLOW = [
+  { action: 'supply', label: 'demoCardSupply', valueLabel: 'demoAmount', amount: '1', asset: 'ETH', note: null },
+  { action: 'borrow', label: 'demoCardBorrow', valueLabel: 'demoRequested', amount: '500', asset: 'USDC', note: 'demoBorrowNote' },
+] as const satisfies readonly { action: 'supply' | 'borrow'; label: keyof LandingCopy; valueLabel: keyof LandingCopy; amount: string; asset: CryptoName; note: keyof LandingCopy | null }[];
+export const DEMO_PROTOCOL = { name: 'Aave', network: 'Ethereum' } as const;
+
+function ControlIcon({ state }: { state: TimelineState }) {
+  return <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    {state === 'done' ? <path d="M3 8a5 5 0 1 0 1.5-3.5M3 2.5v2.8h2.8"/> : state === 'paused' ? <path d="M5 3.5v9l7-4.5-7-4.5Z" fill="currentColor"/> : <path d="M5.5 3.5v9M10.5 3.5v9"/>}
+  </svg>;
+}
+
+function DemoCard({ t, index, item, state, focus }: { t: LandingCopy; index: number; item: typeof DEMO_WORKFLOW[number]; state: CardState; focus: boolean }) {
+  return <div className={styles.demoCard} data-demo-card={item.action} data-state={state} data-focus={focus || undefined}>
+    <div className={styles.demoCardBody}>
+      <p className={styles.demoCardTitle}><strong>{index + 1}. {t[item.label]}</strong><ActionIcon action={item.action}/></p>
+      <p className={styles.demoCardProvider}><b>{DEMO_PROTOCOL.name}</b> · {DEMO_PROTOCOL.network}</p>
+      <div className={styles.demoValue}>
+        <small>{t[item.valueLabel]}</small>
+        <span><strong>{item.amount}</strong><span className={styles.demoToken}><CryptoMark name={item.asset}/>{item.asset}</span></span>
+      </div>
+      {item.note && <p className={styles.demoCardNote}>{t[item.note]}</p>}
+    </div>
+  </div>;
+}
+
+function Progress({ status, line, children }: { status: Status; line?: string; children: string }) {
+  return <li data-status={status} data-demo-line={line}><i aria-hidden="true"/><span>{children}</span></li>;
+}
 
 /**
- * BUILD-FLOFI-UX-UI-002 (UX/UI-006): a scripted, bounded illustration. The visitor picks one of three fixed requests; each plays the same
- * honest sequence — request → mascot reaction → workflow cards → preview → execution journey — and stops before any signature. Only the
- * visitor's own example amounts appear: no quote, output, fee, APY, balance, hash, timestamp or confirmation is shown, and nothing is
- * fetched, stored or sent.
+ * BUILD-FLOFI-UX-UI-002 "How it works" (owner revision): one guided story on one timeline — the visitor's request is typed and sent,
+ * the mascot reacts and FloFi answers while the Canvas builds Supply → Borrow, then Simulate and Execute unfold in the same Canvas. It
+ * is a scripted illustration: no input, request, wallet, signature, storage or financial value. The animated picture is decorative for
+ * assistive technology, which reads the equivalent summary; the pause control and the closing link stay operable.
  */
-export const DEMO_SCENARIOS: readonly Scenario[] = [
-  { id: 'swap', chip: 'demoSwapChip', prompt: 'demoSwapPrompt', route: 'Uniswap · Base', guard: 'minimum',
-    cards: [{ label: 'demoCardSwap', assets: ['ETH', 'USDC'], network: 'Base', amount: ['0.5', 'ETH → USDC'] }] },
-  { id: 'bridge', chip: 'demoBridgeChip', prompt: 'demoBridgePrompt', route: 'Uniswap · Across / LI.FI', guard: 'minimum',
-    cards: [{ label: 'demoCardSwap', assets: ['ETH', 'USDC'], network: 'Base', amount: ['0.5', 'ETH → USDC'] },
-      { label: 'demoCardBridge', assets: ['Base', 'Arbitrum'], network: 'Base → Arbitrum', amount: null }] },
-  { id: 'lend', chip: 'demoLendChip', prompt: 'demoLendPrompt', route: 'Aave · Ethereum', guard: 'limit',
-    cards: [{ label: 'demoCardSupply', assets: ['ETH'], network: 'Ethereum', amount: ['1', 'ETH'] },
-      { label: 'demoCardBorrow', assets: ['USDC'], network: 'Ethereum', amount: ['500', 'USDC'] }] },
-];
-export const DEMO_LAST_STEP = 5;
-const amountText = ([value, unit]: readonly [string, string], locale: LandingLocale) => `${locale === 'pt' ? value.replace('.', ',') : value} ${unit}`;
-
-export function ConversationDemo({ t, locale }: { t: LandingCopy; locale: LandingLocale }) {
-  const [index, setIndex] = useState(0), [run, setRun] = useState(0);
+export function ConversationDemo({ t }: { t: LandingCopy }) {
   const stageRef = useRef<HTMLDivElement>(null);
-  const step = useScriptedSteps(stageRef, DEMO_LAST_STEP, `${index}:${run}`);
-  const scenario = DEMO_SCENARIOS[index]!;
-  // The existing mascot controller answers only while this section's dock is its active dock.
+  const timeline = useTimeline(stageRef, DEMO_TICKS);
+  const f = demoFrame(DEMO_TICKS[timeline.index]!);
+  const playing = timeline.state === 'playing';
+  // The existing journey controller answers only while this section's dock is its active dock.
   useEffect(() => {
-    if (step !== 2 && step !== 3) return;
-    window.dispatchEvent(new CustomEvent<MascotReaction>(MASCOT_REACT_EVENT, { detail: { scene: 'demo', state: step === 2 ? 'look' : 'jump' } }));
-  }, [step]);
-  const shown = (from: number) => step >= from ? 'true' : 'false';
-  const journey = [t.demoStepOpen, t.demoStepWallet, t.demoStepSimulate, t.demoStepReview, t.demoStepSign, t.demoStepTrack];
+    const state = DEMO_REACTIONS[f.cue];
+    if (!playing || !state) return;
+    window.dispatchEvent(new CustomEvent<MascotReaction>(MASCOT_REACT_EVENT, { detail: { scene: 'demo', state } }));
+  }, [f.cue, playing]);
+  const typed = t.demoPrompt.slice(0, Math.ceil(t.demoPrompt.length * f.typed));
+  const control = timeline.state === 'done' ? [t.demoReplay, t.demoReplayLabel] : timeline.state === 'paused' ? [t.demoPlay, t.demoPlayLabel] : [t.demoPause, t.demoPauseLabel];
+  const stages = [[t.demoStageBuild, f.stages.build], [t.demoStageSimulate, f.stages.simulate], [t.demoStageExecute, f.stages.execute]] as const;
+  const checks = [t.demoCheckWorkflow, t.demoCheckCollateral, t.demoCheckCosts, t.demoCheckManifest];
+  const steps = [t.demoStepReview, t.demoStepWallet, t.demoStepRun, t.demoStepStatus];
   return <section id="demo" className={styles.demoSection} aria-labelledby="demo-title">
     <div className={styles.container}>
       <div className={styles.scenariosHeading}><div><p className={styles.kicker}>{t.demoEyebrow}</p><h2 id="demo-title">{t.demoTitle}</h2></div><p>{t.demoBody}</p></div>
-      <div ref={stageRef} className={styles.demoStage} data-demo={scenario.id} data-demo-step={step}>
-        <div className={styles.demoChat} role="group" aria-label={t.demoChatLabel}>
-          <div className={styles.demoChatHead}><MascotDock scene="demo" compact/><div><strong>{t.demoAssistant}</strong><span className={styles.demoBadge}>{t.demoIllustration}</span></div></div>
-          <ol className={styles.demoMessages}>
-            <li className={`${styles.demoUser} ${styles.reveal}`} data-shown={shown(1)}>{t[scenario.prompt]}</li>
-            <li className={`${styles.demoThinking} ${styles.reveal}`} data-shown={step === 2 ? 'true' : 'false'} aria-hidden="true"><i/><i/><i/><span>{t.demoThinking}</span></li>
-            <li className={`${styles.demoReply} ${styles.reveal}`} data-shown={shown(3)}>{t.demoReply}</li>
+      <p className={styles.srOnly}>{t.demoSummary.replace('{0}', t.demoPrompt)}</p>
+      <div ref={stageRef} className={styles.demoStage} data-demo-cue={f.cue} data-demo-stage={f.stage} data-demo-state={timeline.state}>
+        <div className={styles.demoChat} data-demo-chat>
+          <div className={styles.demoChatHead}>
+            {mascotMotionEnabled ? <MascotDock scene="demo" compact/> : <span className={styles.demoAvatar}><Image src="/brand/flofi-symbol-light.svg" alt="" width={370} height={345} unoptimized/></span>}
+            <div><strong>FloFi</strong><span className={styles.demoBadge}>{t.demoIllustration}</span></div>
+            <button type="button" className={styles.demoControl} data-demo-control={timeline.state} aria-label={control[1]} hidden={timeline.state === 'static'} onClick={timeline.toggle}>
+              <ControlIcon state={timeline.state}/><span>{control[0]}</span>
+            </button>
+          </div>
+          <ol className={styles.demoThread} aria-hidden="true">
+            <li className={styles.demoUser} data-shown={f.sent} data-demo-message="user">{t.demoPrompt}</li>
+            <li className={styles.demoSlot}>
+              <span className={styles.demoThinking} data-shown={f.thinking} data-demo-thinking><i/><i/><i/></span>
+              <span className={styles.demoReply} data-shown={f.reply} data-demo-message="reply">{t.demoReply}</span>
+            </li>
+            <li className={styles.demoProgress}><ul><Progress status={f.supplyLine} line="supply">{t.demoAddSupply}</Progress><Progress status={f.borrowLine} line="borrow">{t.demoAddBorrow}</Progress></ul></li>
+            <li className={styles.demoReply} data-shown={f.ready} data-demo-message="ready">{t.demoReady}</li>
+            <li className={styles.demoProgress}><ul><Progress status={f.simulateLine} line="simulate">{t.demoSimulating}</Progress></ul></li>
+            <li className={styles.demoReply} data-shown={f.handoff} data-demo-message="handoff">{t.demoHandoff}</li>
           </ol>
-          <div className={styles.demoChoices} role="group" aria-labelledby="demo-choices">
-            <span id="demo-choices">{t.demoChoose}</span>
-            {DEMO_SCENARIOS.map((item, i) => <button type="button" key={item.id} aria-pressed={i === index} data-demo-choice={item.id}
-              onClick={() => { setIndex(i); setRun(n => n + 1); }}>{t[item.chip]}</button>)}
+          <div className={styles.demoComposer} aria-hidden="true" data-composing={f.composing} data-sending={f.sending} data-demo-composer>
+            <span className={styles.demoComposerText}>{f.composing ? <>{typed}<i className={styles.demoCaret}/></> : <span>{t.demoComposer}</span>}</span>
+            <span className={styles.demoSend}><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M8 13V3m-4 4 4-4 4 4"/></svg></span>
           </div>
         </div>
-        <div className={styles.demoCanvas} role="group" aria-label={`${t.demoWorkflow} · ${t.demoIllustration}`}>
-          <p className={styles.demoPanelTitle}>{t.demoWorkflow}</p>
-          <ol className={`${styles.demoCards} ${styles.reveal}`} data-shown={shown(3)}>
-            {scenario.cards.map((card, i) => <li key={`${scenario.id}-${i}`} data-demo-card={i + 1}>
-              <span className={styles.demoCardIcons}>{card.assets.map(asset => <CryptoMark key={asset} name={asset}/>)}</span>
-              <span><strong>{t[card.label]}</strong><small>{card.network}</small></span>
-              {card.amount ? <span className={styles.demoAmount}>{amountText(card.amount, locale)}</span> : <span className={styles.demoAmount}>USDC</span>}
-            </li>)}
+        <div className={styles.demoCanvas} data-demo-canvas>
+          <ol className={styles.demoStages} aria-hidden="true">
+            {stages.map(([label, status], i) => <li key={i} data-status={status}><span>{i + 1}</span>{label}</li>)}
           </ol>
-          {scenario.guard === 'minimum' && <p className={`${styles.demoSlippage} ${styles.reveal}`} data-shown={shown(3)}>{t.demoSlippage}</p>}
-          <div className={`${styles.demoPreview} ${styles.reveal}`} data-shown={shown(4)}>
-            <p className={styles.demoPanelTitle}>{t.demoPreview}</p>
-            <dl>
-              <div><dt>{t.demoRoute}</dt><dd>{scenario.route}</dd></div>
-              <div><dt>{scenario.guard === 'limit' ? t.demoLimit : t.demoMinimum}</dt><dd>{scenario.guard === 'limit' ? t.demoLimitValue : t.demoMinimumValue}</dd></div>
-              <div><dt>{t.demoCost}</dt><dd>{t.demoCostValue}</dd></div>
-              <div><dt>{t.demoPermissions}</dt><dd>{t.demoPermissionsValue}</dd></div>
-            </dl>
+          <div className={styles.demoSurface} aria-hidden="true">
+            <p className={styles.demoEmpty} data-shown={f.empty}>{t.demoCanvasEmpty}</p>
+            <div className={styles.demoFlow}>
+              <DemoCard t={t} index={0} item={DEMO_WORKFLOW[0]} state={f.supply} focus={f.focus.supply}/>
+              <div className={styles.demoConnector} data-shown={f.connector} data-demo-connector><span>{t.demoAfterPrevious}</span><i/></div>
+              <DemoCard t={t} index={1} item={DEMO_WORKFLOW[1]} state={f.borrow} focus={f.focus.borrow}/>
+            </div>
+            <div className={styles.demoPanels} data-stage={f.stage}>
+              <div data-panel="build"><span className={styles.demoSimulateButton} data-state={f.simulateButton}>{t.demoSimulateButton}</span></div>
+              <div data-panel="simulate"><p className={styles.demoPanelTitle}>{t.demoSimulation}</p><ul className={styles.demoChecks}>{checks.map((label, i) => <Progress key={i} status={f.checks[i]!}>{label}</Progress>)}</ul></div>
+              <div data-panel="execute"><p className={styles.demoPanelTitle}>{t.demoExecution}</p><ol className={styles.demoSteps}>{steps.map((label, i) => <li key={i} data-status={f.steps[i]}><span>{i + 1}</span>{label}</li>)}</ol></div>
+            </div>
           </div>
-          <div className={`${styles.demoJourney} ${styles.reveal}`} data-shown={shown(5)}>
-            <p className={styles.demoPanelTitle}>{t.demoJourney}</p>
-            <ol>{journey.map((label, i) => <li key={i} data-sign={i === 4 || undefined}><span aria-hidden="true">{i + 1}</span>{label}</li>)}</ol>
-            <p className={styles.demoFinal}>{t.demoFinal}</p>
+          <div className={styles.demoOutro}>
+            <p>{t.demoNote}</p>
+            <a href="/app" data-shown={f.done}>{t.demoCta} <span aria-hidden="true">→</span></a>
           </div>
         </div>
       </div>
-      <p className={styles.scenariosNote}>{t.demoNote}</p>
     </div>
   </section>;
 }

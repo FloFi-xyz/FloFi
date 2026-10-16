@@ -121,9 +121,9 @@ export default function LandingPage() {
 
     <main id="main" tabIndex={-1}>
       <WorkflowStory t={t} locale={locale}/>
-      <ConversationDemo t={t} locale={locale}/>
-      <AssistantOnboarding t={t}/>
       <SupportedNetworks t={t}/>
+      <ConversationDemo t={t}/>
+      <AssistantOnboarding t={t}/>
 
       <section className={styles.developerSection} id="developers" aria-labelledby="developers-title" data-landing-reveal><div className={styles.container}>
         <div className={styles.centerHeading}><SectionKicker>{t.buildersEyebrow}</SectionKicker><h2 id="developers-title">{t.buildersTitleFirst}<br />{t.buildersTitleSecond}</h2><p>{t.buildersBody}</p></div>
