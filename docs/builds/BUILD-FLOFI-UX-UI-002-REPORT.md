@@ -61,8 +61,11 @@ Iteration failures, all fixed before the final runs: the new spec expected the o
 | `pnpm test:postgres` | PASS — 68 files / 443 tests passed, 3 skipped (forward-schema certificate suite, `runIf(CERTIFICATE)`, same on main) |
 | Guarded profiles on `7999cad`: channel-approve, mcp-in-chat, channel-signing, developer-journey, mcp-routes-oauth-disabled, automations, and the CI critical tier (copilot-learning, canvas-corrections, solana-wallet-refusal, supply-provenance, review-execute-recovery-components) | 3, 21, 6, 1, 11, 2, 1, 5, 3, 5 and 39 passed; none failed or skipped |
 | governance-lite + 19 self-tests; `git diff --check` | PASS |
+| CircleCI (governance, certification-checks, browser shards 1–2, certification) | first run on `7999cad`: `automations` failed — the spec snapshotted the handoff row before polling for `APPLIED`, a race exposed because the workspace now appears before apply; fixed in `3e76c72` (3/3 local reruns); rerun on `3e76c72`: all jobs PASS |
 
 Iteration failures, all fixed: a spec forced expiry by SQL, which the handoff immutability trigger rightly refuses (`MCP_HANDOFF_IMMUTABLE`) — expiry stays in the PostgreSQL test, the browser checks a replaced link; the WhatsApp owner tab inherited a sign-in session the router store then ended, and the notice kept the stale account — fixed in the product (re-read the session on `*_WALLET_PROOF_REQUIRED`); interruption specs matched the workspace's own workflow requests instead of the apply call (narrowed to requests carrying the link secret); the automation spec read the Canvas before the automatic reload restore (now waits for the notice's `loaded` state).
+
+**CircleCI on PR 1:** first run failed governance (the CI-plan pin above); after the fix every job passed (governance, certification-checks, both browser shards, certification).
 
 Not run: the other ~30 guarded product profiles (provenance, fork, composition, CoW, card, BUILD-009 with a live LI.FI quote). They do not exercise the changed code paths; CircleCI runs them on both PRs.
 
