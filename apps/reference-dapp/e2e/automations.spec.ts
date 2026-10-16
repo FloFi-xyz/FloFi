@@ -90,8 +90,9 @@ test.describe('BUILD-AUTOMATION-001 Automations (fixture prices, test clock, loo
     expect(page.url()).not.toContain('flofi_auhs_');
     const handoffOf = () => query<{ handoff_id: string; status: string; requester_kind: string }>('SELECT handoff_id, status, requester_kind FROM mcp_handoffs WHERE handoff_id = (SELECT handoff_id FROM automation_occurrences WHERE occurrence_id = $1)',
       [occurrence!.occurrence_id]);
-    const applied = (await handoffOf())[0]!;
+    // BUILD-FLOFI-UX-UI-002: the workspace now shows before the proposal is applied, so the row is read once it is.
     await expect.poll(async () => (await handoffOf())[0]?.status).toBe('APPLIED');
+    const applied = (await handoffOf())[0]!;
     await expect(page.getByRole('region', { name: 'Automation workflow', exact: true })).toHaveAttribute('data-approval-state', 'loaded');
     const exactWorkflow = await readWorkflowIr(page);
     const workflowHash = hashArtifactBytes('semantic-workflow', new TextEncoder().encode(exactWorkflow));
