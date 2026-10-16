@@ -37,7 +37,7 @@ const serverEnv = () => ({ FLOFI_RUNTIME: 'embedded', DATABASE_URL: process.env.
   GRYLOO_LENDING_HARNESS: 'MOCKED_LOOPBACK_ONLY', ...channelE2eEnv() });
 const texts = (sent: readonly FixtureRecord[]) => sent.map(r => { const b = r.body as { text?: { body: string }; interactive?: { body: { text: string } } };
   return b.text?.body ?? b.interactive?.body.text ?? ''; });
-const approval = (page: Page) => page.getByRole('region', { name: 'External proposal' });
+const approval = (page: Page) => page.getByRole('region', { name: 'Proposal from WhatsApp' });
 
 test.describe('BUILD-CHANNELS-001 WhatsApp → /approve (fixture provider, MOCKED lending chain; MOCKED execution blocked)', () => {
   test.beforeAll(() => { assertMcpHarness(); if (process.env.GRYLOO_CHANNEL_E2E !== CHANNEL_E2E) throw new Error('MOCK_RESET_DENIED'); });
@@ -94,14 +94,17 @@ test.describe('BUILD-CHANNELS-001 WhatsApp → /approve (fixture provider, MOCKE
     const other = await context.newPage();
     await installJourneyWallet(other, [stranger]);
     await other.goto(url);
-    await expect(approval(other)).toContainText('EXTERNAL PROPOSAL · FROM WHATSAPP');
+    await expect(approval(other)).toContainText('From WhatsApp');
     await expect(approval(other)).toContainText('Nothing is authorized yet.');
     await expect(approval(other).getByRole('checkbox')).not.toBeChecked();
     await approval(other).getByRole('button', { name: 'Connect wallet and prove ownership' }).click();
     await chooseWallet(other, 'Browser wallet');
     await expect(approval(other)).toContainText(`Signed in as ${stranger.address}`);
-    await approval(other).getByRole('button', { name: 'Load proposal' }).click();
-    await expect(approval(other)).toContainText('CHANNEL_INTENDED_WALLET_MISMATCH');
+    // BUILD-FLOFI-UX-UI-002: the proof triggers the claim at once; the server's intended-wallet rule refuses it, Simulate stays closed.
+    await expect(approval(other).getByRole('alert')).toContainText('This proposal was prepared for another wallet.');
+    await expect(approval(other).getByRole('button', { name: 'Use another wallet' })).toBeVisible();
+    await expect(other.locator('.canvas-primary-action button')).toBeDisabled();
+    expect((await handoffOfLink(url)).status).toBe('PENDING');
     await other.close();
 
     // 4. The owner's browser: prove the intended wallet, opt in to sharing (off by default for a channel), load and apply.
@@ -110,16 +113,18 @@ test.describe('BUILD-CHANNELS-001 WhatsApp → /approve (fixture provider, MOCKE
     await installLendingWallet(signing, { signer: fixtureOwner });
     await signing.goto(url);
     const region = approval(signing);
-    await expect(region).toContainText('EXTERNAL PROPOSAL · FROM WHATSAPP');
+    await expect(region).toContainText('From WhatsApp');
     // The secret left the address bar for this tab's session storage (where the ping reads it too).
     await expect(signing).not.toHaveURL(/flofi_chs_/);
+    // The normal Canvas already shows the three action cards; Simulate waits for the intended wallet.
+    await expect(signing.locator('.build-flow-surface .composer-card')).toHaveCount(3);
+    await expect(signing.locator('.canvas-primary-action button')).toBeDisabled();
     await expect(region.getByRole('checkbox')).not.toBeChecked();
     await region.getByRole('checkbox').check();
     await region.getByRole('button', { name: 'Connect wallet and prove ownership' }).click();
     await chooseWallet(signing, 'Browser wallet');
-    await expect(region).toContainText(`Signed in as ${LENDING_OWNER}`);
-    await region.getByRole('button', { name: 'Load proposal' }).click();
     await expect(region.getByRole('status')).toContainText('Ready for your review.');
+    await expect(region.getByRole('button', { name: 'Load proposal' })).toHaveCount(0);
     const handoff = await handoffOfLink(url);
     expect(handoff).toMatchObject({ handoff_id: linked.handoff_id, status: 'APPLIED', share_status: true });
     const notification = (suffix: string) => query<{ status: string; body: boolean }>(`SELECT status, body_ciphertext IS NOT NULL AS body FROM channel_outbox

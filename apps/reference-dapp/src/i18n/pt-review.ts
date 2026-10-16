@@ -63,4 +63,15 @@ export const portugueseReview: Readonly<Record<string, string>> = {
   'Open the FloFi approval link again from the app that sent it. If the link has expired, ask that app for a new one.': 'Abra novamente a ligação de aprovação FloFi a partir da aplicação que a enviou. Se a ligação tiver expirado, peça uma nova a essa aplicação.',
   'Ask your connected assistant to prepare a new FloFi approval link.': 'Peça ao seu assistente ligado que prepare uma nova ligação de aprovação FloFi.',
   'Ask the app that sent this link to prepare a new FloFi approval link.': 'Peça à aplicação que enviou esta ligação que prepare uma nova ligação de aprovação FloFi.',
+  // BUILD-FLOFI-UX-UI-002: the compact /approve notice inside the workspace.
+  'From {0}': 'De {0}', 'Proposal details': 'Detalhes da proposta', 'Use another wallet': 'Usar outra carteira', 'Restore proposal': 'Restaurar proposta',
+  'Close approval': 'Fechar aprovação', 'Loading your exact proposal…': 'A carregar a sua proposta exata…',
+  'Simulate the workflow, review the Strategy Manifest, then sign each transaction in your wallet.': 'Simule o fluxo, reveja o Strategy Manifest e assine cada transação na sua carteira.',
+  'The proposal is on your Canvas. Connect your wallet to load it for a fresh simulation, your review and your signature.': 'A proposta já está no seu Canvas. Ligue a sua carteira para a carregar para uma nova simulação, a sua revisão e a sua assinatura.',
+  'Connect your wallet to load this proposal into your Canvas for a fresh simulation, your review and your signature.': 'Ligue a sua carteira para carregar esta proposta no seu Canvas para uma nova simulação, a sua revisão e a sua assinatura.',
+  'This proposal is already in a FloFi workflow for your wallet. Restore it to the Canvas to continue. An interrupted run stays in Your runs: reconcile it before starting again.': 'Esta proposta já está num fluxo FloFi da sua carteira. Restaure-a no Canvas para continuar. Uma execução interrompida continua em As suas execuções: reconcilie-a antes de recomeçar.',
+  'Another wallet already opened this proposal. If it was yours, connect that wallet; otherwise ask for a new proposal.': 'Outra carteira já abriu esta proposta. Se foi a sua, ligue essa carteira; caso contrário, peça uma nova proposta.',
+  'Proposal restored for its proven owner. Run a fresh simulation before approval. Existing runs remain available in Your runs; reconcile an interrupted run before starting again.': 'Proposta restaurada para o titular verificado. Faça uma nova simulação antes da aprovação. As execuções existentes continuam em As suas execuções; reconcilie uma execução interrompida antes de recomeçar.',
+  'This proposal was prepared for another wallet. Connect the wallet it names to load it.': 'Esta proposta foi preparada para outra carteira. Ligue a carteira indicada para a carregar.',
+  'This automation belongs to another wallet. Connect the wallet that owns it.': 'Esta automação pertence a outra carteira. Ligue a carteira que a detém.',
 };

@@ -97,7 +97,7 @@ test.describe(`MCP route presentation (OAuth ${enabled ? 'enabled' : 'disabled'}
         await expect(page.getByRole('heading', { name: 'Opening your approval' })).toBeVisible();
         await expectDedicatedRoute(page, 'Approval');
       } finally { release(); }
-      await expect(page.getByRole('region', { name: 'External proposal' })).toContainText('Nothing is authorized yet.');
+      await expect(page.getByRole('region', { name: /^Proposal from / })).toContainText('Nothing is authorized yet.');
       await expect(stages(page)).toBeVisible();
       await expect(page.locator('.app-shell')).toHaveCount(1);
       await expect(page.locator('.mcp-route-main')).toHaveCount(0);
@@ -106,7 +106,7 @@ test.describe(`MCP route presentation (OAuth ${enabled ? 'enabled' : 'disabled'}
       // Leaving a validated approval resets its gate before another approval is resolved.
       await stages(page).getByRole('button', { name: 'Dashboard', exact: true }).click();
       await expect(page).toHaveURL(/\/dashboard$/);
-      await expect(page.getByRole('region', { name: 'External proposal' })).toHaveCount(0);
+      await expect(page.getByRole('region', { name: /^Proposal from / })).toHaveCount(0);
       await page.evaluate(() => { sessionStorage.removeItem('flofi.approval.secret'); history.pushState(null, '', '/approve'); });
       await expect(page.getByRole('heading', { name: 'Open this link from your assistant' })).toBeVisible();
       await expectDedicatedRoute(page, 'Approval');
@@ -138,7 +138,7 @@ test.describe(`MCP route presentation (OAuth ${enabled ? 'enabled' : 'disabled'}
       await response;
       await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
       await expectDedicatedRoute(page, 'Approval');
-      await expect(page.getByRole('region', { name: 'External proposal' })).toHaveCount(0);
+      await expect(page.getByRole('region', { name: /^Proposal from / })).toHaveCount(0);
     });
     test('connections with a consented account stays in its dedicated route', async ({ page }) => {
       await connectViaBrowser(page, page.context().request);

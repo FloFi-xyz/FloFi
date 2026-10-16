@@ -83,7 +83,7 @@ test.describe('BUILD-AUTOMATION-001 Automations (fixture prices, test clock, loo
 
     // 6–7. Review in FloFi enters the shared approval flow.
     await pending.getByRole('button', { name: 'Review in FloFi', exact: true }).click();
-    await expect(page.getByRole('region', { name: 'External proposal', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('region', { name: /^Proposal from / })).toHaveCount(0);
     await expect(page.getByRole('region', { name: 'Workflow canvas', exact: true })).toBeVisible();
     await expect(page.locator('.canvas-primary-action button')).toHaveText('Simulate workflow');
     expect(new URL(page.url()).pathname).toBe('/approve');
@@ -92,6 +92,7 @@ test.describe('BUILD-AUTOMATION-001 Automations (fixture prices, test clock, loo
       [occurrence!.occurrence_id]);
     const applied = (await handoffOf())[0]!;
     await expect.poll(async () => (await handoffOf())[0]?.status).toBe('APPLIED');
+    await expect(page.getByRole('region', { name: 'Automation workflow', exact: true })).toHaveAttribute('data-approval-state', 'loaded');
     const exactWorkflow = await readWorkflowIr(page);
     const workflowHash = hashArtifactBytes('semantic-workflow', new TextEncoder().encode(exactWorkflow));
     const provenance = page.getByRole('region', { name: 'Automation workflow', exact: true });
@@ -109,11 +110,14 @@ test.describe('BUILD-AUTOMATION-001 Automations (fixture prices, test clock, loo
     };
     await page.reload();
     await expect(page.getByRole('region', { name: 'Workflow canvas', exact: true })).toBeVisible();
+    // BUILD-FLOFI-UX-UI-002: the workspace shows at once; the owner's own automation proposal is re-loaded into it automatically.
+    await expect(page.getByRole('region', { name: 'Automation workflow', exact: true })).toHaveAttribute('data-approval-state', 'loaded');
     expect(hashArtifactBytes('semantic-workflow', new TextEncoder().encode(await readWorkflowIr(page)))).toBe(workflowHash);
     await unchanged();
     await page.goto(new URL(`/approve#${applied.handoff_id}`, page.url()).href);
     await expect(page.getByRole('region', { name: 'Workflow canvas', exact: true })).toBeVisible();
-    await expect(page.getByRole('region', { name: 'External proposal', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('region', { name: 'Automation workflow', exact: true })).toHaveAttribute('data-approval-state', 'loaded');
+    await expect(page.getByRole('region', { name: /^Proposal from / })).toHaveCount(0);
     await unchanged();
     await page.locator('.canvas-primary-action').getByRole('button', { name: 'Simulate workflow', exact: true }).click();
     const summary = page.getByRole('complementary', { name: 'Simulation Summary', exact: true });
