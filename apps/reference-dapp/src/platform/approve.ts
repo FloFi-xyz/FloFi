@@ -106,6 +106,24 @@ export async function viewApproval(surface: ApprovalSurface, secret: unknown, wa
   return approvalView(h, verified, await viewerOf(profile, wallets));
 }
 
+/** BUILD-FLOFI-UX-UI-002: what FloFi needs to show an open proposal on its normal Canvas before the owner proves a wallet. */
+export type ApprovalPreview = { readonly approvalId: string; readonly workflow: Workflow; readonly workflowHash: string };
+/**
+ * The canonical workflow of an open (PENDING) proposal, for whoever holds its secret — the cards FloFi shows on the Canvas while the
+ * owner connects a wallet. It is re-composed now and must reproduce the stored hash under the current deployment and policy (as `view`
+ * and `claim` do). Previewing changes no state and grants nothing: claiming still needs the proven wallet and the requester's claim rule,
+ * applying still needs the exact hash, and the fresh simulation, Review and signatures stay separate. A claimed, applied or ended
+ * proposal is refused (`APPROVAL_PREVIEW_CLAIMED`, `APPROVAL_<STATUS>`): from then on only its proven claimant loads it, through claim
+ * or recovery.
+ */
+export async function previewApproval(surface: ApprovalSurface, secret: unknown, now = new Date()): Promise<ApprovalPreview> {
+  const { handoff: h, profile } = await locate(surface, secret, now);
+  if (h.status !== 'PENDING') return refuse(h.status === 'CLAIMED' || h.status === 'APPLIED' ? 'APPROVAL_PREVIEW_CLAIMED' : `APPROVAL_${h.status}`);
+  const verified = await verifyHandoff(h, surface.runtime, profile.policy);
+  if (!verified.ok) return refuse(verified.code);
+  return { approvalId: h.handoffId, workflow: verified.composition.workflow, workflowHash: verified.composition.workflowHash };
+}
+
 /**
  * Claims the proposal for the wallet this browser proved (the namespace the workflow needs) and returns the re-composed authoring
  * command. `share` is the owner's choice to let the requester see the status of runs started from it.

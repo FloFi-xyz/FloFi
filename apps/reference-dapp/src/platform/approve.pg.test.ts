@@ -11,10 +11,10 @@ import { randomBytes } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createTestDatabase, type TestDatabase } from '../../../../packages/cloud-runtime/test/pg-harness.ts';
 import type { FlowName } from '../../backend/flows.ts';
-import { composeWorkflow } from '../engine/strategy-engine';
+import { composeWorkflow, semanticWorkflowHash } from '../engine/strategy-engine';
 import { readHandoffPolicy } from '../mcp/execution.ts';
 import type { McpRuntime } from '../mcp/runtime.ts';
-import { applyApproval, approvalLinkScheme, approvalSecretDigest, assembleApprovalSurface, claimApproval, createPgHandoffStore, newId, openApprovalSession, PlatformRefusal, requestApproval,
+import { applyApproval, approvalLinkScheme, approvalSecretDigest, assembleApprovalSurface, claimApproval, createPgHandoffStore, newId, openApprovalSession, PlatformRefusal, previewApproval, requestApproval,
   resumeApproval, shareApproval, viewApproval, type ApprovalDeps, type ApprovalRequester, type ClaimPolicy, type HandoffPolicy, type HandoffRules, type WalletRef } from './index.ts';
 
 const ORIGIN = 'https://flofi.test';
@@ -177,6 +177,43 @@ describe('BUILD-DEVELOPER-001 /approve for any requester kind', () => {
     for (const contributions of [[{ scheme, profiles: {} }, { scheme, profiles: {} }], [{ scheme, profiles: {} }, { scheme: approvalLinkScheme('flofi_xhs_', randomBytes(32),
       ['CHANNEL_CONVERSATION']), profiles: {} }], [{ scheme: other, profiles: { CHANNEL_CONVERSATION: { policy: readHandoffPolicy({}) } } }]])
       expect(() => assembleApprovalSurface(contributions, handoffs, rt)).toThrow('APPROVAL_SURFACE_INVALID');
+  });
+
+  it('BUILD-FLOFI-UX-UI-002: previews an open proposal for the Canvas without changing it, and never once it is claimed or has ended', async () => {
+    const { surface, request, handoffs, calls } = setup({ claimPolicy: intendedWallet }), a = await request(BRIDGE, { intendedWallet: evm(1) });
+    const row = async (id: string) => (await t.db.query<{ row: string }>(`SELECT row_to_json(h)::text AS row FROM mcp_handoffs h WHERE handoff_id = $1`, [id])).rows[0]!.row;
+    const before = await row(a.approvalId);
+    const preview = await previewApproval(surface, a.secret);
+    expect(preview).toEqual({ approvalId: a.approvalId, workflow: a.workflow, workflowHash: a.workflowHash });
+    expect(semanticWorkflowHash(preview.workflow)).toBe(a.workflowHash);
+    expect(JSON.stringify(preview)).not.toMatch(/flofi_chs_|"signature"|calldata|"transaction"|intendedWallet/i);
+    // Previewing is not claiming: the row is untouched and the requester's claim rule still decides who may load it.
+    expect(await row(a.approvalId)).toBe(before);
+    expect(await refusal(claimApproval(surface, a.secret, [evm(2)], false))).toBe('HANDOFF_WALLET_NOT_INTENDED');
+    const claimed = await claimApproval(surface, a.secret, [evm(1)], false);
+    expect(claimed.workflow).toEqual(preview.workflow);
+    expect(await refusal(previewApproval(surface, a.secret))).toBe('APPROVAL_PREVIEW_CLAIMED');
+    await applyApproval(surface, a.secret, [evm(1)], claimed.workflow);
+    expect(await refusal(previewApproval(surface, a.secret))).toBe('APPROVAL_PREVIEW_CLAIMED');
+    // Ended, expired, superseded, modified or another tenant's links preview nothing.
+    const revoked = await request();
+    await handoffs.revokeForRequester(revoked.approvalId, { kind: 'CHANNEL_CONVERSATION', ref: revoked.requester.ref }, new Date());
+    expect(await refusal(previewApproval(surface, revoked.secret))).toBe('APPROVAL_REVOKED');
+    const superseded = await request();
+    await t.db.query(`UPDATE mcp_handoffs SET status = 'SUPERSEDED', ended_at = now() WHERE handoff_id = $1`, [superseded.approvalId]);
+    expect(await refusal(previewApproval(surface, superseded.secret))).toBe('APPROVAL_SUPERSEDED');
+    const lapsing = await request();
+    expect(await refusal(previewApproval(surface, lapsing.secret, new Date(Date.now() + 16 * 60_000)))).toBe('APPROVAL_EXPIRED');
+    const open = await request(), tampered = open.secret.slice(0, -2) + (open.secret.endsWith('AA') ? 'BB' : 'AA');
+    expect(await refusal(previewApproval(surface, tampered))).toBe('HANDOFF_NOT_FOUND');
+    expect(await refusal(previewApproval(surface, 'flofi_chs_' + 'x'.repeat(43)))).toBe('HANDOFF_NOT_FOUND');
+    const elsewhere = assembleApprovalSurface([{ scheme, profiles: surface.profiles }], createPgHandoffStore(t.db, 'another-tenant'), surface.runtime);
+    expect(await refusal(previewApproval(elsewhere, open.secret))).toBe('HANDOFF_NOT_FOUND');
+    // Deployment and policy are re-checked now, as for view and claim.
+    const later = setup({ policy: readHandoffPolicy({ FLOFI_MCP_HANDOFF_TEST_FUNDS: 'disabled' }) });
+    expect(await refusal(previewApproval(later.surface, open.secret))).toBe('TEST_FUNDS_HANDOFF_DISABLED_BY_POLICY');
+    expect((await viewApproval(surface, open.secret, [])).status).toBe('PENDING');
+    expect(calls.every(c => c.startsWith('mode:') || c.startsWith('info:'))).toBe(true);
   });
 
   it('mints approval sessions per requester and stores neither the approval nor the session secret', async () => {
