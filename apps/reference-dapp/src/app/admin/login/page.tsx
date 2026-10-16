@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { redirect } from 'next/navigation';
 import { adminSignInState } from '../../../admin/page-context';
+import { AdminBrand } from '../../../components/admin/admin-brand';
 import { AdminSignIn } from '../../../components/admin/admin-sign-in';
 import { AdminUnavailable } from '../../../components/admin/admin-shell';
 
@@ -10,7 +11,7 @@ export default async function AdminLoginPage() {
   if (!state.available) return <AdminUnavailable code={state.code}/>;
   if (state.signedIn) redirect('/admin');
   return <div className="admin-sign-in">
-    <div className="admin-brand"><img src="/flofi-logo.png" alt="" width={28} height={28}/><div>FloFi Admin<small>Private console</small></div></div>
+    <AdminBrand/>
     <AdminSignIn/>
   </div>;
 }

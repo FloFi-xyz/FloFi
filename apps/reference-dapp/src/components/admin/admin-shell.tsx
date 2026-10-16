@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { ReactNode } from 'react';
 import type { AdminContext } from '../../admin/guard';
+import { AdminBrand } from './admin-brand';
 import { AdminSignOut } from './admin-sign-out';
 
 /** BUILD-ADMIN-001: the console frame (server component). Navigation is the same for every role; pages enforce permissions themselves. */
@@ -20,7 +21,7 @@ export function AdminShell({ active, context, title, description, actions, child
   description?: string; actions?: ReactNode; children: ReactNode }) {
   return <div className="admin-layout">
     <nav className="admin-nav" aria-label="Admin">
-      <div className="admin-brand"><img src="/flofi-logo.png" alt=""/><div>FloFi Admin<small>Private console</small></div></div>
+      <AdminBrand/>
       <ul>{ADMIN_NAV.map(item => <li key={item.id}><a href={item.href} aria-current={item.id === active ? 'page' : undefined}>{item.label}</a></li>)}</ul>
       <div className="admin-nav-foot">
         <span><code title={context.principal.account}>{short(context.principal.account)}</code>{' '}
