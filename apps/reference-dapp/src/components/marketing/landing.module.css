@@ -524,6 +524,116 @@
   .root *, .root *::before, .root *::after { animation: none !important; transition: none !important; }
 }
 
+/* Community links: small round marks with a mono label, never styled like a product CTA. Marks keep their supplied colors. */
+.socialLinks { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; }
+/* Beside the hero CTAs on wide layouts (spacing and round marks set them apart), wrapping below them on narrow ones. */
+.heroCtaRow { display: flex; flex-wrap: wrap; align-items: center; gap: 14px 28px; margin-top: 30px; }
+.heroCtaRow > .heroActions { margin-top: 0; }
+@media (max-width: 599px) { .heroCtaRow > .heroActions { flex: 1 1 100%; } }
+.socialLinks p { color: var(--muted); font: 500 11px var(--font-ibm-plex-mono), monospace; letter-spacing: .12em; text-transform: uppercase; }
+.socialLinks ul { display: flex; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.socialLinks a { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; }
+.socialMark { display: grid; place-items: center; width: 36px; height: 36px; overflow: hidden; border: 1px solid var(--line); border-radius: 50%; background: #fff; }
+.socialMark img { display: block; width: 20px; height: 20px; object-fit: contain; }
+.socialMark[data-social-mark="x"] { border-color: #000; background: #000; }
+.socialMark[data-social-mark="x"] img { width: 15px; height: 15px; }
+.socialMark[data-social-mark="linkedin"] img { width: 22px; height: 22px; }
+.socialMark[data-social-mark="telegram"] { border: 0; background: transparent; }
+.socialMark[data-social-mark="telegram"] img { width: 36px; height: 36px; }
+.socialLinks a:hover .socialMark { border-color: #93A6FF; box-shadow: 0 0 0 3px rgba(147,166,255,.25); }
+.footerSocial p { color: #93A6FF; }
+.footerSocial .socialMark { border-color: rgba(201,210,248,.4); }
+.footerSocial .socialMark[data-social-mark="x"] { border-color: rgba(201,210,248,.4); }
+
+/* BUILD-FLOFI-UX-UI-002: the conversation demo (#demo) and assistant onboarding (#assistants). Illustrative, local and finite. */
+.reveal { transition: opacity .35s ease, translate .35s ease; }
+.reveal[data-shown="false"] { opacity: 0; translate: 0 6px; }
+.demoSection { padding: 96px 0; background: #fff; }
+.demoStage { display: grid; grid-template-columns: minmax(0, .92fr) minmax(0, 1.08fr); gap: 20px; align-items: stretch; }
+.demoChat, .demoCanvas, .assistantChat { display: flex; flex-direction: column; gap: 14px; min-width: 0; padding: 22px; border: 1px solid var(--line); border-radius: 20px; background: linear-gradient(160deg, #fff, var(--pale)); box-shadow: 0 12px 30px rgba(4,27,61,.04); }
+.demoChatHead, .assistantChatHead { display: flex; align-items: center; gap: 12px; min-height: 48px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+.demoChatHead > div:last-child { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.demoChatHead strong, .assistantChatHead strong { font-size: 15px; }
+.demoChatHead [data-mascot-dock] { flex: none; width: 72px; min-height: 64px; margin: 0; padding: 0; }
+.demoChatHead [data-mascot-dock] [data-mascot-perch] { width: 56px; height: 56px; }
+.demoChatHead [data-mascot-dock] [data-mascot-perch] + span { width: 72px; height: 18px; left: 0; bottom: 2px; }
+.demoBadge { display: inline-flex; align-items: center; min-height: 22px; padding: 2px 9px; border: 1px solid #C9D2F8; border-radius: 99px; background: #E9EDFD; color: #2343D9; font: 500 10px var(--font-ibm-plex-mono), monospace; letter-spacing: .08em; text-transform: uppercase; }
+.demoMessages, .assistantChat ol { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.demoUser { justify-self: end; max-width: 88%; padding: 11px 14px; border-radius: 16px 16px 4px 16px; background: #2343D9; color: #fff; font-size: 14px; line-height: 1.45; }
+.demoReply { justify-self: start; max-width: 92%; padding: 11px 14px; border: 1px solid var(--line); border-radius: 16px 16px 16px 4px; background: #fff; font-size: 14px; line-height: 1.45; }
+.demoThinking { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-size: 12px; }
+.demoThinking i { width: 6px; height: 6px; border-radius: 50%; background: #93A6FF; }
+.demoThinking span { margin-left: 4px; }
+.demoChoices { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: auto; padding-top: 12px; border-top: 1px solid var(--line); }
+.demoChoices > span { width: 100%; color: var(--muted); font: 500 11px var(--font-ibm-plex-mono), monospace; letter-spacing: .1em; text-transform: uppercase; }
+.demoChoices button { min-height: 44px; padding: 0 16px; border: 1px solid var(--line); border-radius: 99px; background: #fff; color: var(--navy); font-size: 13px; cursor: pointer; }
+.demoChoices button:hover { border-color: #93A6FF; }
+.demoChoices button[aria-pressed="true"] { border-color: #2343D9; background: #E9EDFD; color: #2343D9; font-weight: 600; }
+.demoPanelTitle { color: var(--muted); font: 500 11px var(--font-ibm-plex-mono), monospace; letter-spacing: .12em; text-transform: uppercase; }
+.demoCards { position: relative; display: grid; gap: 22px; margin: 0; padding: 0; list-style: none; }
+.demoCards > li { position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 14px; border: 1px solid #C9D2F8; border-radius: 14px; background: #fff; box-shadow: 0 8px 22px rgba(4,27,61,.06); }
+.demoCards > li + li::before { content: ''; position: absolute; left: 32px; top: -23px; height: 22px; border-left: 2px solid #93A6FF; }
+.demoCards strong { display: block; font-size: 14px; }
+.demoCards small { color: var(--muted); font-size: 12px; }
+.demoCardIcons { display: flex; }
+.demoCardIcons > span + span { margin-left: -8px; }
+.demoAmount { color: var(--navy); font: 500 12px var(--font-ibm-plex-mono), monospace; white-space: nowrap; }
+.demoSlippage { color: var(--muted); font-size: 12px; }
+.demoPreview dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 8px 0 0; }
+.demoPreview dl > div { min-width: 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
+.demoPreview dt { color: var(--muted); font-size: 11px; }
+.demoPreview dd { margin: 2px 0 0; font-size: 13px; font-weight: 500; overflow-wrap: anywhere; }
+.demoJourney ol { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 8px 0 0; padding: 0; list-style: none; }
+.demoJourney li { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: #fff; font-size: 12px; line-height: 1.3; }
+.demoJourney li > span { display: grid; place-items: center; flex: none; width: 22px; height: 22px; border-radius: 50%; background: #E9EDFD; color: #2343D9; font-size: 11px; font-weight: 600; }
+.demoJourney li[data-sign] { border-color: #2343D9; background: #E9EDFD; color: #2343D9; font-weight: 600; }
+.demoJourney li[data-sign] > span { background: #2343D9; color: #fff; }
+.demoFinal { margin-top: 10px !important; color: var(--navy); font-size: 13px; font-weight: 600; }
+.assistantsSection { padding: 96px 0; background: linear-gradient(180deg, #fff, var(--pale)); border-top: 1px solid var(--line); }
+.assistantTabs { display: flex; justify-content: center; gap: 8px; margin: 0 0 24px; }
+.assistantTabs button { display: inline-flex; align-items: center; justify-content: center; gap: 10px; min-height: 48px; padding: 0 22px; border: 1px solid var(--line); border-radius: 99px; background: #fff; color: var(--navy); font-size: 15px; font-weight: 500; cursor: pointer; }
+.assistantTabs button:hover { border-color: #93A6FF; }
+.assistantTabs button[aria-selected="true"] { border-color: #2343D9; box-shadow: 0 0 0 3px rgba(35,67,217,.12); color: #2343D9; font-weight: 600; }
+.assistantTabs img, .assistantChatHead img { display: block; width: 20px; height: 20px; object-fit: contain; }
+/* The supplied OpenAI canvas includes clear space: retain it, with a 20px visible mark. */
+.assistantTabs [data-host="chatgpt"] img, .assistantChatHead img[data-host="chatgpt"] { width: 40px; height: 40px; margin: -10px; }
+.assistantPanel { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; }
+.assistantConnect { min-width: 0; padding: 26px; border: 1px solid var(--line); border-radius: 20px; background: #fff; }
+.assistantConnect h3, .assistantWhere h3 { margin-bottom: 14px; font-size: 20px; letter-spacing: -.02em; }
+.assistantConnect ol { display: grid; gap: 14px; margin: 0; padding: 0; list-style: none; counter-reset: connect; }
+.assistantConnect li { position: relative; min-width: 0; padding-left: 40px; color: var(--navy-soft); font-size: 15px; line-height: 1.5; counter-increment: connect; }
+.assistantConnect li::before { content: counter(connect); position: absolute; left: 0; top: 0; display: grid; place-items: center; width: 28px; height: 28px; border: 1px solid #C9D2F8; border-radius: 9px; background: #E9EDFD; color: #2343D9; font: 600 12px var(--font-ibm-plex-mono), monospace; }
+.assistantUrl { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
+.assistantUrl code { min-width: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--pale); font: 500 13px var(--font-ibm-plex-mono), monospace; overflow-wrap: anywhere; }
+.assistantUrl button { min-height: 44px; padding: 0 14px; border: 1px solid var(--line); border-radius: 99px; background: #fff; color: #2343D9; font-size: 13px; font-weight: 600; cursor: pointer; }
+.assistantUrl button:hover { border-color: #93A6FF; }
+.assistantNote { margin-top: 16px !important; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.assistantTool { display: grid; gap: 4px; justify-self: start; max-width: 94%; padding: 10px 12px; border: 1px dashed #C9D2F8; border-radius: 12px; background: #fff; font-size: 13px; line-height: 1.4; }
+.assistantTool code { color: #2343D9; font: 500 11px var(--font-ibm-plex-mono), monospace; overflow-wrap: anywhere; }
+.assistantApproval { border-style: solid; border-color: #2343D9; }
+.assistantPanelButton { justify-self: start; margin-top: 6px; padding: 7px 12px; border: 1px solid #2343D9; border-radius: 99px; color: #2343D9; font-size: 12px; font-weight: 600; }
+.assistantOpen { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 4px 12px; align-items: start; padding: 12px; border-radius: 12px; background: #041B3D; color: #fff; font-size: 13px; line-height: 1.5; }
+.assistantOpen img { grid-row: span 2; width: 32px; height: auto; }
+.assistantOpen small { color: #C9D2F8; font-size: 12px; }
+.assistantWhere { margin-top: 20px; padding: 22px; border: 1px solid var(--line); border-radius: 20px; background: #fff; }
+.assistantWhere > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.assistantWhere > div > div { display: grid; gap: 10px; align-content: start; padding: 16px 18px; border: 1px solid #E9EDFD; border-radius: 14px; background: var(--pale); }
+.assistantWhere strong { color: #2343D9; font: 500 11px var(--font-ibm-plex-mono), monospace; letter-spacing: .12em; text-transform: uppercase; }
+.assistantWhere ul { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.assistantWhere li { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.assistantWhere li::before { content: '◇'; color: #2343D9; }
+.assistantActions { display: flex; justify-content: center; margin-top: 28px; }
+@media (max-width: 1023px) { .demoStage, .assistantPanel { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 599px) {
+  .demoSection, .assistantsSection { padding: 64px 0; }
+  .demoChat, .demoCanvas, .assistantChat, .assistantConnect, .assistantWhere { padding: 18px; border-radius: 18px; }
+  .demoPreview dl, .assistantWhere > div { grid-template-columns: minmax(0, 1fr); }
+  .demoJourney ol { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .assistantTabs button { flex: 1 1 0; padding: 0 12px; }
+  .assistantConnect li { padding-left: 36px; font-size: 14px; }
+}
+@media (max-width: 389px) { .demoJourney ol { grid-template-columns: minmax(0, 1fr); } .demoCards > li { grid-template-columns: auto minmax(0, 1fr); } .demoAmount { grid-column: 2; } }
+
 /* Product illustrations use real assets; execution availability is checked in the app. */
 .cryptoMark { display: inline-grid; place-items: center; width: 36px; height: 36px; flex: none; border: 1px solid var(--line); border-radius: 50%; background: #fff; box-shadow: 0 2px 5px rgba(4,27,61,.04); }
 .cryptoMark img { width: 24px; height: 24px; object-fit: contain; }

@@ -30,7 +30,7 @@ for (const width of [390, 768, 1440, 1920]) {
     await expect(earth.locator('[data-earth-original]')).toHaveAttribute('href', '/flofi/closing-horizon-v2.png');
     await expect(footer.getByRole('img', { name: 'FloFi', exact: true })).toBeVisible();
     await expect(footer.getByRole('heading')).toHaveCount(0);
-    expect(await page.locator('main > section').evaluateAll(items => items.map(item => item.id))).toEqual(['workflow', 'networks', 'developers', 'about']);
+    expect(await page.locator('main > section').evaluateAll(items => items.map(item => item.id))).toEqual(['workflow', 'demo', 'assistants', 'networks', 'developers', 'about']);
     expect(await page.locator('main').evaluate(element => element.nextElementSibling?.tagName)).toBe('FOOTER');
     for (const locale of ['en', 'pt'] as const) {
       await page.getByRole('button', { name: locale.toUpperCase(), exact: true }).click();
