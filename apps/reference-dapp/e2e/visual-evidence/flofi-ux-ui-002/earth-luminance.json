@@ -1,0 +1,42 @@
+{
+  "new-1440": {
+    "activeBefore": "true",
+    "scrollingState": "false",
+    "idleBefore": 24.89,
+    "scrolling": 24.91,
+    "resumed": 24.92,
+    "scrollingVsIdlePercent": 0.05,
+    "maxTileChangeScrollingVsIdlePercent": 0.49,
+    "maxTileChangeResumedVsScrollingPercent": 0.81
+  },
+  "old-rule-reinjected-1440": {
+    "activeBefore": "true",
+    "scrollingState": "false",
+    "idleBefore": 24.88,
+    "scrolling": 23.31,
+    "resumed": 24.93,
+    "scrollingVsIdlePercent": -6.33,
+    "maxTileChangeScrollingVsIdlePercent": 50.15,
+    "maxTileChangeResumedVsScrollingPercent": 100.73
+  },
+  "new-390": {
+    "activeBefore": "true",
+    "scrollingState": "false",
+    "idleBefore": 19.74,
+    "scrolling": 19.74,
+    "resumed": 19.76,
+    "scrollingVsIdlePercent": 0.01,
+    "maxTileChangeScrollingVsIdlePercent": 0.11,
+    "maxTileChangeResumedVsScrollingPercent": 0.73
+  },
+  "old-rule-reinjected-390": {
+    "activeBefore": "true",
+    "scrollingState": "false",
+    "idleBefore": 19.74,
+    "scrolling": 20.07,
+    "resumed": 19.75,
+    "scrollingVsIdlePercent": 1.67,
+    "maxTileChangeScrollingVsIdlePercent": 16.76,
+    "maxTileChangeResumedVsScrollingPercent": 20.98
+  }
+}

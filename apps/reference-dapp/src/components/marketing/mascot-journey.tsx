@@ -7,14 +7,22 @@ import { FloFiMascot } from './flofi-mascot';
 import { characterMotion, type MascotState } from './mascot-animations';
 import styles from './mascot-motion.module.css';
 
-const enabled = process.env.NEXT_PUBLIC_FLOFI_MASCOT_MOTION === 'true';
+/**
+ * BUILD-FLOFI-UX-UI-002: the approved mascot journey is the landing's default (production had lost it because this build-time flag was
+ * never set). `NEXT_PUBLIC_FLOFI_MASCOT_MOTION=false` remains an explicit off switch; reduced motion always shows the still landing.
+ */
+export const mascotMotionEnabled = process.env.NEXT_PUBLIC_FLOFI_MASCOT_MOTION !== 'false';
+const enabled = mascotMotionEnabled;
+/** A section's own scripted scene (the conversation demo) asks the existing controller for a reaction while its dock is active. */
+export const MASCOT_REACT_EVENT = 'flofi:mascot-react';
+export type MascotReaction = { readonly scene: Scene; readonly state: 'jump' | 'look' | 'celebrate' };
 const introKey = 'flofi-alive-intro-v1';
 const text = {
   en: { skip: 'Skip intro' },
   pt: { skip: 'Pular introdução' },
 };
 
-type Scene = 'hero' | 'swap' | 'bridge' | 'lending' | 'automate' | 'multichain' | 'networks' | 'workflow' | 'review' | 'infrastructure' | 'cta';
+export type Scene = 'hero' | 'swap' | 'bridge' | 'lending' | 'automate' | 'multichain' | 'networks' | 'workflow' | 'review' | 'infrastructure' | 'cta' | 'demo' | 'assistants';
 
 /** Space is reserved in the first render, so enabling motion never shifts content on hydration. */
 export function MascotDock({ scene, compact = false, white = false, local = false }: { scene: Scene; compact?: boolean; white?: boolean; local?: boolean; locale?: LandingLocale }) {
@@ -171,6 +179,8 @@ function JourneyController({ locale }: { locale: LandingLocale }) {
         // Upcoming Tempo is intentionally excluded from the supported-network reaction.
         section?.querySelectorAll<HTMLElement>('[data-network-current] [data-crypto]').forEach((mark, i) => animate(mark, [{ transform: 'translateY(0)' }, { transform: `translateY(-${mobile.matches ? 3 : 6}px)`, offset: .35 + i * .07 }, { transform: 'translateY(0)' }], 950));
       } else if (scene === 'cta') { react('celebrate', true); pulse(section?.querySelector<HTMLElement>('[data-mascot-cta]') ?? null, true); }
+      else if (scene === 'demo') react('look', true);
+      else if (scene === 'assistants') { react('jump', true); pulse(section?.querySelector<HTMLElement>('[role="tablist"]') ?? null); }
       else react('jump', true);
     };
     const update = () => {
@@ -225,6 +235,12 @@ function JourneyController({ locale }: { locale: LandingLocale }) {
       if (!document.hidden) schedule();
     };
     document.addEventListener('visibilitychange', visibility);
+    // Scripted section scenes request reactions; only the dock that is currently active answers, so nothing moves offscreen.
+    const requested = (event: Event) => {
+      const detail = (event as CustomEvent<MascotReaction>).detail;
+      if (detail && active?.dataset.mascotDock === detail.scene && !movement) react(detail.state, true);
+    };
+    window.addEventListener(MASCOT_REACT_EVENT, requested);
 
     // Deliberate local pointer responses, never global cursor chasing. Touch devices use scroll choreography.
     root.querySelectorAll<HTMLElement>('article, [data-mascot-cta], [data-mascot-dock]:not([data-mascot-local])').forEach(element => {
@@ -316,6 +332,7 @@ function JourneyController({ locale }: { locale: LandingLocale }) {
       window.removeEventListener('resize', schedule);
       root.removeEventListener('animationend', schedule);
       document.removeEventListener('visibilitychange', visibility);
+      window.removeEventListener(MASCOT_REACT_EVENT, requested);
       docks.forEach(dock => { delete dock.dataset.active; dock.querySelectorAll<HTMLElement>('[data-mascot-character]').forEach(item => { item.dataset.state = 'idle'; item.style.removeProperty('--look'); }); });
       delete root.dataset.alive;
       delete root.dataset.aliveHidden;

@@ -48,6 +48,17 @@ test('admin console: refusal until granted, overview with network distribution, 
     expect(first!.headers()['x-frame-options']).toBe('DENY');
     expect(first!.headers()['cache-control']).toContain('no-store');
     expect(first!.headers()['x-robots-tag']).toBe('noindex, nofollow');
+    // BUILD-FLOFI-UX-UI-002: the approved FloFi symbol and wordmark (never the legacy Gryloo artwork) in both console themes.
+    for (const colorScheme of ['dark', 'light'] as const) {
+      await page.emulateMedia({ colorScheme });
+      const brand = page.locator('.admin-sign-in .admin-brand');
+      await expect(brand.getByRole('img', { name: 'FloFi', exact: true })).toBeVisible();
+      await expect.poll(() => brand.locator('img').evaluateAll(images => images.map(image => {
+        const img = image as HTMLImageElement;
+        return img.complete && img.naturalWidth > 0 ? new URL(img.currentSrc).pathname : null;
+      }))).toEqual([`/brand/flofi-symbol-${colorScheme}.svg`, `/brand/flofi-wordmark-${colorScheme}.png`]);
+    }
+    await expect(page.locator('img[src="/flofi-logo.png"]')).toHaveCount(0);
 
     // A verified wallet is not an administrator.
     await page.getByRole('listitem').filter({ hasText: 'Browser wallet' }).click();
@@ -62,6 +73,12 @@ test('admin console: refusal until granted, overview with network distribution, 
     await expect(page.getByRole('heading', { name: 'Overview', level: 1 })).toBeVisible();
     const nav = page.getByRole('navigation', { name: 'Admin' });
     for (const label of ['Overview', 'Workflows', 'Automations', 'AI Settings', 'AI Learning', 'System Health', 'Access & audit']) await expect(nav.getByRole('link', { name: label })).toBeVisible();
+    await expect(nav.locator('.admin-brand').getByRole('img', { name: 'FloFi', exact: true })).toHaveAttribute('src', '/brand/flofi-wordmark-light.png');
+    if (process.env.FLOFI_ADMIN_EVIDENCE) for (const colorScheme of ['light', 'dark'] as const) {
+      await page.emulateMedia({ colorScheme }); await page.waitForTimeout(150);
+      await nav.locator('.admin-brand').screenshot({ path: `e2e/visual-evidence/flofi-ux-ui-002/admin-nav-${colorScheme}.png` });
+      if (colorScheme === 'dark') await page.emulateMedia({ colorScheme: 'light' });
+    }
 
     // Testnet/Devnet is chosen automatically (no mainnet activity); MOCKED and mainnet are separate views.
     await expect(page.getByRole('navigation', { name: 'Environment' }).getByRole('link', { name: 'Testnet / Devnet · 3' })).toHaveAttribute('aria-current', 'true');

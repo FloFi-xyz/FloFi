@@ -20,7 +20,9 @@ for (const width of [320, 375, 390, 430, 768, 1024, 1440, 1920]) {
       await expect(story.locator('[aria-hidden="true"] h3')).toHaveCount(0);
       await expect(story.locator('[data-story-stage], [data-story-panel]')).toHaveCount(0);
       const layout = await story.evaluate(element => ({ height: element.getBoundingClientRect().height, pinned: [...element.querySelectorAll('*')].filter(item => ['sticky', 'fixed'].includes(getComputedStyle(item).position)).length }));
-      expect(layout.pinned).toBe(0); expect(layout.height).toBeLessThan(width >= 1024 ? 1100 : 2000);
+      // BUILD-FLOFI-UX-UI-002: below 1024px the owner-requested community links wrap under the hero CTAs (+44px row); wide layouts keep
+      // them beside the CTAs within the original budget. Either bound still rules out the former pinned scroll story.
+      expect(layout.pinned).toBe(0); expect(layout.height).toBeLessThan(width >= 1024 ? 1100 : 2100);
       for (const name of ['Chat', 'Canvas', 'GPT', 'Claude', 'WhatsApp', 'Telegram']) await expect(cards.first()).toContainText(name);
       await cards.first().scrollIntoViewIfNeeded();
       await expect.poll(() => cards.first().locator('[data-channel-icon] img').evaluateAll(images => images.every(element => {

@@ -19,7 +19,8 @@ export function EarthAtmosphere() {
       const active = String(inView && !document.hidden && !scrolling);
       if (element.dataset.earthActive !== active) element.dataset.earthActive = active;
     };
-    // Keep masked surface painting out of native scroll frames; preserve the animation clock.
+    // Native scroll frames pause the animation clocks (no masked repaint while scrolling) but never hide a layer: a paused pass keeps
+    // its current transform and opacity, so the planet's luminance is the same while scrolling, idle, reversing or resuming.
     const onScroll = () => {
       scrolling = true;
       update();

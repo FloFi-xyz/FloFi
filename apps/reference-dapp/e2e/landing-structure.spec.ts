@@ -20,7 +20,7 @@ for (const width of [320, 375, 390, 430, 768, 1024, 1440, 1920]) {
       const headline = page.getByRole('heading', { level: 1 });
       await expect(headline).toHaveCount(1);
       await expect(headline).toContainText(locale === 'en' ? 'Many ways in.' : 'Várias entradas.');
-      expect(await page.locator('main > section').evaluateAll(items => items.map(item => item.id))).toEqual(['workflow', 'networks', 'developers', 'about']);
+      expect(await page.locator('main > section').evaluateAll(items => items.map(item => item.id))).toEqual(['workflow', 'networks', 'demo', 'assistants', 'developers', 'about']);
       expect(await page.locator('main').evaluate(element => element.nextElementSibling?.tagName)).toBe('FOOTER');
       await expect(page.locator('#product, #scenarios, #review, [data-story-stage]')).toHaveCount(0);
       await expect(page.locator('#about [data-earth]')).toHaveCount(1);
@@ -84,7 +84,7 @@ for (const width of [320, 375, 390, 430, 768, 1024, 1440, 1920]) {
       await page.locator('footer').scrollIntoViewIfNeeded();
       await expect(page.locator('footer')).toBeInViewport();
       if (process.env.FLOFI_LANDING_EVIDENCE) {
-        for (const id of ['workflow', 'networks', 'developers', 'about']) {
+        for (const id of ['workflow', 'networks', 'demo', 'assistants', 'developers', 'about']) {
           const section = page.locator(`#${id}`); await section.scrollIntoViewIfNeeded();
           await section.screenshot({ path: `${evidence}/${id}-${locale}-${width}.png`, animations: 'disabled' });
         }
@@ -107,7 +107,7 @@ test('original Earth artwork backs the complete closing section immediately befo
   const asset = await request.get('/flofi/closing-horizon-v2.png');
   expect(asset.ok()).toBe(true); expect(asset.headers()['content-type']).toContain('image/png');
   await page.goto('/');
-  await expect(page.locator('main > section')).toHaveCount(4);
+  await expect(page.locator('main > section')).toHaveCount(6);
   await expect(page.locator('main > section:last-child')).toHaveAttribute('id', 'about');
   await expect(page.locator('footer [data-earth]')).toHaveCount(0);
   await expect(page.locator('#about [data-earth-original]')).toHaveAttribute('href', '/flofi/closing-horizon-v2.png');
