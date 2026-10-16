@@ -6,8 +6,9 @@ Every conversation reaches the same FloFi `/approve` page and existing financial
 flowchart LR
     C[ChatGPT / Claude / WhatsApp / Telegram] --> P[Canonical proposal and workflow hash]
     P --> H[Secure handoff to FloFi]
-    H --> W[Owner wallet proof]
-    W --> L[Owner loads exact proposal]
+    H --> C[FloFi Canvas shows the proposal's cards]
+    C --> W[Owner wallet proof]
+    W --> L[Exact proposal loaded for that wallet]
     L --> S[Fresh simulation]
     S --> M[Strategy Manifest Review]
     M --> A[Explicit transaction authorization]
@@ -17,7 +18,7 @@ flowchart LR
     R --> N[Status to original conversation with owner consent]
 ```
 
-Wallet proof is a sign-in message (EIP-4361 or Sign-In With Solana), verified server-side through existing HttpOnly sessions. It is never authorization to spend. Loading the proposal is one explicit owner click after the external summary, steps, network, funds class and workflow hash are visible. The server re-composes and rechecks the proposal, then the existing validated workflow restoration path loads its canonical authoring workflow and invalidates previous Review authority, even if the hash is unchanged. **Continue to simulation** selects FloFi's existing simulation workspace. Simulation, Manifest Review, explicit approval and wallet transaction signatures remain separate mandatory actions. No provider, model or MCP tool receives transaction submission authority.
+Wallet proof is a sign-in message (EIP-4361 or Sign-In With Solana), verified server-side through existing HttpOnly sessions. It is never authorization to spend. BUILD-FLOFI-UX-UI-002: the link opens FloFi's normal Canvas with the proposal's cards already placed (the server's re-composed canonical workflow for the link holder; previewing changes no state and grants nothing) and a compact notice inside the workspace. The owner's wallet proof — one sign-in message, or an existing FloFi sign-in — is the owner action that loads it; there is no separate Load step, and Simulate/Execute stay closed until the proposal is applied for the proven wallet. An already applied proposal (a reload) is restored only with an explicit **Restore proposal**, so an interrupted run's recovery is never replaced silently. The server re-composes and rechecks the proposal, then the existing validated workflow restoration path loads its canonical authoring workflow and invalidates previous Review authority, even if the hash is unchanged. The Canvas's own **Simulate workflow** then opens FloFi's existing simulation workspace. Simulation, Manifest Review, explicit approval and wallet transaction signatures remain separate mandatory actions. No provider, model or MCP tool receives transaction submission authority.
 
 MCP uses `request_user_approval`, the existing MCP App, `open_approval_session` and progress tools. Capability URLs are only in tool-result `_meta['flofi/approval']`, delivered to the UI. Model-visible `content` and `structuredContent` expose `/approve#apr_…`: a nonsecret reference usable only through the creating account's existing OAuth browser cookie. A new browser cannot exchange that reference. The panel's wallet action opens a short-lived capability for another browser. App-only visibility is not a substitute for result redaction. The MCP SDK describes `_meta` as client data outside the model answer. [MCP SDK result channels](https://py.sdk.modelcontextprotocol.io/advanced/low-level-server/)
 
@@ -37,6 +38,7 @@ Telegram and WhatsApp keep Channel Core, authenticated webhooks, durable dedupli
 | Wrong wallet/namespace | Server-derived proof, immutable claimed wallet and channel intended-wallet rule. Solana base58 keys compare case-sensitively; EVM address case is normalized. |
 | Wrong chain, changed amounts/recipient or stale simulation | Canonical workflow/hash checks plus existing network/owner/Manifest/exact-payload/freshness checks at the financial boundary. Changing an editor draft invalidates its Review. |
 | Expired/revoked/superseded/stale link | Existing lazy expiry/revocation and re-composition; owner page rechecks an unclaimed link every 30 seconds and on claim. It never revives ended handoffs. |
+| Link holder sees the workflow before proof (BUILD-FLOFI-UX-UI-002) | Only a PENDING proposal is previewed, re-composed now under the current engine, deployment and policy, for whoever holds its secret (as the view's summary already was). Previewing writes nothing; claimed, applied, ended or modified links preview nothing. Claiming still requires the proven wallet and the requester's claim rule (e.g. the channel's intended wallet), applying still requires the exact hash, and Simulate/Execute stay closed on /approve until then. |
 | Duplicate clicks/callbacks | Local opening/claim locks; PostgreSQL handoff transitions and provider event deduplication. A new signing session replaces its predecessor; an applied session remains consumed. |
 | Cancellation/rejected sign-in | Close clears this tab's capability/recovery hint and grants nothing; it does not withdraw the request. Reopen an unused link or request a new one. Rejected proof allows retry. Withdrawal still uses Connections (MCP) or STOP/new proposal (channels). |
 | Interrupted apply response/reload | Public approval-id hint plus the exact claimant's proven wallet permits read-only reconstruction of an APPLIED proposal across store instances. No capability, Review, signature or transaction authority is renewed. If proof expired, use the existing FloFi sign-in/Connections or obtain a fresh handoff; the page does not infer ownership from its recovery hint. |

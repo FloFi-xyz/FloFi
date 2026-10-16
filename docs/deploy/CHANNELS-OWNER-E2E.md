@@ -140,10 +140,13 @@ previous link stops working. `STATUS` → `Proposal waiting for you to open it i
 
 1. Open the **Open FloFi** link **in the desktop browser that has your wallet** (on a phone, copy it into the wallet's in-app
    browser). It works once, for 15 minutes; `LINK` gives a fresh one.
-2. The page shows `EXTERNAL PROPOSAL · FROM TELEGRAM` and `Nothing is authorized yet.` The link's secret leaves the address bar.
-3. Tick **Share run status and evidence with Telegram** (off by default — without it, the chat learns nothing about the run).
-4. **Connect wallet and prove ownership**: one sign-in message (EIP-4361, `personal_sign`), which authorizes no transaction.
-5. **Load proposal** → `Ready for your review.` → **Continue to simulation** — within ~20 s Telegram receives
+2. FloFi's normal Canvas opens with the proposal's action card already on it, and a compact notice shows `From Telegram` and
+   `Nothing is authorized yet.` Simulate stays closed. The link's secret leaves the address bar.
+3. Tick **Share the status and evidence of runs started from this proposal with Telegram** (off by default — without it, the chat
+   learns nothing about the run).
+4. **Connect wallet and prove ownership**: one sign-in message (EIP-4361, `personal_sign`), which authorizes no transaction. If
+   you are already signed in to FloFi with the intended wallet there is no prompt.
+5. The proof loads the proposal: `Ready for your review.`, and **Simulate workflow** opens. Within ~20 s Telegram receives
    `Your proposal is loaded in FloFi for the connected wallet. Nothing is signed yet: …`
 
 ### 6.4 Simulate, review, execute on testnet (FloFi, your wallet)
