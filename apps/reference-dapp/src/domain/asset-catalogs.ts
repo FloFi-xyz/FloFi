@@ -7,7 +7,7 @@
  * only the pinned assets resolve and authoring that needs another asset fails closed. Presentation only: Simulate re-validates every
  * identity against the official source and the chain.
  */
-import { ARBITRUM_BASE_ASSETS, BASE_BASE_ASSETS, BASE_MAINNET, ROBINHOOD_BASE_ASSETS, ROBINHOOD_CHAIN_MAINNET, ROBINHOOD_FEATURED_STOCKS,
+import { ARBITRUM_BASE_ASSETS, ETHEREUM_BASE_ASSETS, BASE_BASE_ASSETS, BASE_MAINNET, ROBINHOOD_BASE_ASSETS, ROBINHOOD_CHAIN_MAINNET, ROBINHOOD_FEATURED_STOCKS,
   TOKEN_LIST_NETWORKS, UNISWAP_TOKEN_LIST, catalogAsset, catalogAssetsByName, createAssetCatalog, featuredAssets, isTokenListNetworkCatalog, searchAssets, tokenListNetwork,
   type AssetCatalog, type AssetClass, type AssetReference,
   type CanonicalAsset } from '@defi-workflow-engine/action-registry';
@@ -19,7 +19,7 @@ export const BASE_NETWORK = BASE_MAINNET.name;
 export const BASE_CHAIN = BASE_MAINNET.chain;
 /** Networks whose full catalog comes from an official source registered by the server; every other network is code-pinned. */
 export const OFFICIAL_CATALOG_CHAINS: readonly string[] = Object.freeze([ROBINHOOD_CHAIN, ...TOKEN_LIST_NETWORKS.map(profile => profile.pinned.chain)]);
-const pinned: Readonly<Record<string, AssetCatalog>> = Object.freeze({ [BASE_BASE_ASSETS.chain]: BASE_BASE_ASSETS,
+const pinned: Readonly<Record<string, AssetCatalog>> = Object.freeze({ [ETHEREUM_BASE_ASSETS.chain]: ETHEREUM_BASE_ASSETS, [BASE_BASE_ASSETS.chain]: BASE_BASE_ASSETS,
   [ARBITRUM_BASE_ASSETS.chain]: ARBITRUM_BASE_ASSETS, [ROBINHOOD_BASE_ASSETS.chain]: ROBINHOOD_BASE_ASSETS });
 const official = new Map<string, AssetCatalog>();
 let version = 0;

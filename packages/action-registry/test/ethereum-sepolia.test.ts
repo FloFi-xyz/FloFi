@@ -24,8 +24,8 @@ describe('Ethereum Sepolia network identity', () => {
       nativeCurrency: { name: 'Sepolia Ether', symbol: 'ETH', decimals: 18 }, rpcUrls: [ETHEREUM_SEPOLIA.rpc], blockExplorerUrls: ['https://sepolia.etherscan.io'] });
     expect(ETHEREUM_SEPOLIA.rpc).not.toMatch(/key|token|\/v[23]\//i);
   });
-  it('recognises Ethereum Mainnet as a distinct, non-executable network', () => {
-    expect(ETHEREUM_MAINNET).toMatchObject({ chain: 'eip155:1', chainHex: '0x1', environment: 'MAINNET', executable: false });
+  it('recognises Ethereum Mainnet as a distinct mainnet identity', () => {
+    expect(ETHEREUM_MAINNET).toMatchObject({ chain: 'eip155:1', chainHex: '0x1', environment: 'MAINNET', funds: 'REAL_FUNDS' });
     expect(ETHEREUM_MAINNET.chain).not.toBe(ETHEREUM_SEPOLIA.chain);
   });
 });

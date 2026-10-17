@@ -5,7 +5,7 @@
  * It carries identity only (names, environment, local mark, the identifiers each surface uses); what a network supports stays in the
  * capability and profile registries. Nothing here grants authority: a mainnet entry only marks real funds.
  */
-import { ARBITRUM_ONE, BASE_MAINNET, ETHEREUM_SEPOLIA, ROBINHOOD_CHAIN_MAINNET, ROBINHOOD_CHAIN_TESTNET, SOLANA_DEVNET_CHAIN } from '@defi-workflow-engine/action-registry';
+import { ARBITRUM_ONE, BASE_MAINNET, ETHEREUM_MAINNET, ETHEREUM_SEPOLIA, ROBINHOOD_CHAIN_MAINNET, ROBINHOOD_CHAIN_TESTNET, SOLANA_DEVNET_CHAIN } from '@defi-workflow-engine/action-registry';
 
 export type NetworkEnvironment = 'MAINNET' | 'TESTNET';
 /**
@@ -47,6 +47,9 @@ export const NETWORKS: readonly NetworkIdentity[] = Object.freeze([
     chatName: /(?:Arbitrum(?: One)?|ARB (?:network|rede))(?![\s-]*(?:One[\s-]*)?Sepolia)/ }),
   network({ key: 'arbitrum-sepolia', chain: 'eip155:421614', name: 'Arbitrum Sepolia', aliases: [], environment: 'TESTNET', mark: '/brand/crypto/arbitrum.png',
     catalog: false, copilot: 'ARBITRUM_SEPOLIA', family: 'arbitrum', mention: /\barbitrum[\s-]*sepolia\b/i, chatName: null }),
+  network({ key: 'ethereum', chain: ETHEREUM_MAINNET.chain, name: ETHEREUM_MAINNET.name, aliases: ['Ethereum Mainnet', 'Ethereum Mainnet (1)'], environment: 'MAINNET',
+    evm: ETHEREUM_MAINNET, mark: '/brand/crypto/ethereum.svg', catalog: true, copilot: 'ETHEREUM', family: 'ethereum',
+    mention: /\bethereum\b(?![\s-]*sepolia)/i, chatName: /Ethereum(?: Mainnet)?(?![\s-]*Sepolia)/ }),
   network({ key: 'ethereum-sepolia', chain: ETHEREUM_SEPOLIA.chain, name: 'Ethereum Sepolia', aliases: ['Ethereum Sepolia (11155111)'], environment: 'TESTNET',
     mark: '/brand/crypto/ethereum.svg', catalog: false, copilot: 'ETHEREUM_SEPOLIA', family: 'ethereum', mention: /\bethereum[\s-]*sepolia\b/i, chatName: null }),
   network({ key: 'solana', chain: SOLANA_MAINNET_CHAIN, name: 'Solana', aliases: ['Solana Mainnet'], environment: 'MAINNET', mark: '/brand/crypto/solana.svg',
@@ -60,8 +63,6 @@ export const NETWORKS: readonly NetworkIdentity[] = Object.freeze([
 ]);
 /** Networks FloFi only names (to explain or refuse), never authors on. */
 const NAMED_ONLY: readonly NetworkIdentity[] = Object.freeze([
-  network({ key: 'ethereum', chain: 'eip155:1', name: 'Ethereum', aliases: ['Ethereum Mainnet', 'Ethereum Mainnet (1)'], environment: 'MAINNET',
-    mark: '/brand/crypto/ethereum.svg', catalog: false, copilot: 'ETHEREUM', family: 'ethereum', mention: /\bethereum\b(?![\s-]*sepolia)/i, chatName: null }),
   network({ key: 'optimism', chain: 'eip155:10', name: 'Optimism', aliases: ['OP Mainnet'], environment: 'MAINNET', mark: '/brand/crypto/optimism.png',
     catalog: false, copilot: null, family: 'optimism', mention: null, chatName: null }),
 ]);
