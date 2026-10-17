@@ -1,6 +1,6 @@
 # BUILD-ETHEREUM-MAINNET-001
 
-Status: implementation in progress. No production configuration, deployment, signature or public transaction is authorized by this build.
+Status: implementation complete; local regression/security checks passed. Owner review and production release decisions remain pending. No production configuration, deployment, signature or public transaction was performed. The absent baseline workflow-fee collection/ledger remains a production blocker.
 
 ## Discovery baseline (2026-10-17)
 
@@ -121,3 +121,51 @@ Namespaces/flows: swap `ets-` / `ethereum-swap`; transfer `ett-` / `ethereum-mai
 - `pnpm check` and final relevant browser profiles are being completed. Their definitive results and implementation commit will be appended before delivery.
 
 Remaining production boundaries: owner review/merge and authorized production configuration; absent baseline 0.1% fee collection/ledger; no owner-signed Ethereum mainnet execution evidence. Cloud certification was inspected but not started. No deployment, merge, configuration activation or real-funds transaction is part of this delivery.
+
+
+## Commit and file inventory
+
+- `63c3852` — phase 1: canonical identity, validated catalog, wallet/environment integration.
+- `ca94c82` — phase 2: shared swap/transfer execution and durable runtime, protocol/token public-read-only evidence.
+- `38f0c45` — phases 3/4: recovered lending/liquidity/Router/product implementation completed, MCP preview/plan gaps repaired, confirmation-mode automation parity and security regressions added; 95 files in that checkpoint.
+- Final certification/report-only commit is reported in the delivery message. The complete diff from baseline is indexed in [BUILD-ETHEREUM-MAINNET-001-FILES.txt](BUILD-ETHEREUM-MAINNET-001-FILES.txt). Git remains authoritative: `git diff --stat 50bb7b824aeaef0ab43fe93114552ac9aaaff668 HEAD` and `git log --oneline 50bb7b8..HEAD`.
+- [Proposed pull request](BUILD-ETHEREUM-MAINNET-001-PR.md): `feat: add Ethereum Mainnet through shared FloFi engines`, base `main`, head `codex/build-ethereum-mainnet-001`. No push/open operation is needed for local owner review; none has been performed, so no remote CI spending was initiated.
+
+
+## Final phase 5 checkpoint — local verification complete (2026-10-17)
+
+The definitive check ran on implementation commit `38f0c45`; subsequent changes are delivery documentation only. All recovered implementation is preserved. The original baseline and freshly fetched remote main remain `50bb7b824aeaef0ab43fe93114552ac9aaaff668`; no branch/worktree was replaced.
+
+| Verification | Definitive result | Local log |
+| --- | --- | --- |
+| `CI=true pnpm check` | PASS: typecheck, lint, production build, 11 schema exports; 393 unit files passed / two skipped, 4,545 tests passed / two skipped | `/tmp/ethereum-recovery-check-final.log` |
+| Affected PostgreSQL automation/delegation/preview suites | 11 files / 80 tests passed, zero skipped | `/tmp/ethereum-recovery-postgres.log` |
+| Ethereum guarded authoring browser profile | 18/18 passed, MOCKED | `/tmp/ethereum-recovery-browser-ethereum-authoring-certification.log` |
+| Arbitrum guarded authoring browser profile | 18/18 passed, MOCKED | `/tmp/ethereum-recovery-browser-arbitrum-authoring-certification.log` |
+| Base guarded authoring browser profile | 4/4 passed, MOCKED | `/tmp/ethereum-recovery-browser-base-mainnet-authoring.log` |
+| Automation guarded browser profile | 2/2 passed, MOCKED | `/tmp/ethereum-recovery-browser-automations.log` |
+| Canvas automation UX guarded browser profile | 18/18 passed, MOCKED | `/tmp/ethereum-recovery-browser-canvas-automation-ux.log` |
+| `python3 scripts/bootstrap-ci.py --verify-dependencies` | PASS: 265 locked versions, integrity/license/release-age review, existing exceptions preserved | `/tmp/ethereum-recovery-dependencies-final.log` |
+| `pnpm audit --audit-level low` | PASS: no known vulnerabilities | `/tmp/ethereum-recovery-audit.log` |
+| Existing ephemeral CycloneDX SBOM gate | PASS: 265 exact registry components, ten workspace manifests/importers | `/tmp/ethereum-recovery-sbom.log` |
+| Governance safety and self-tests; CI self-tests | PASS: safety gate, 19 governance tests, 41 CI tests and whitespace checks | `/tmp/ethereum-recovery-governance-final.log`, `/tmp/ethereum-recovery-governance-tests.log`, `/tmp/ethereum-recovery-ci-tests.log` |
+| `pnpm test:anvil` | PASS selection: four passed; ten owner-secret cases skipped | `/tmp/ethereum-recovery-anvil-final.log` |
+| `pnpm test:fork --testTimeout=30000` | PASS selection: 31 passed; 29 skipped | `/tmp/ethereum-recovery-fork.log` |
+
+Browser total: **60 passed / zero skipped across five relevant profiles**. They ran sequentially using the pinned Chromium cache, `FLOFI_E2E_APP_PORT=3119`, `TEST_DATABASE_URL=postgres://flofi@127.0.0.1:7096/postgres`, existing pinned Anvil, `NEXT_TELEMETRY_DISABLED=1` and `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1`, with `node scripts/guarded-release-browser.mjs profile <name>`. No public signer or provider was substituted for their loopback/replay fixtures.
+
+Exact affected database selection:
+`TEST_DATABASE_URL=postgres://flofi@127.0.0.1:7096/postgres pnpm exec vitest run apps/reference-dapp/src/automations/*.pg.test.ts apps/reference-dapp/src/delegation/*.pg.test.ts apps/reference-dapp/backend/preview.pg.test.ts --maxWorkers=2 --testTimeout=120000`.
+
+The two unit skips require the existing external profiles `GRYLOO_MODE_B_SMOKE_PROFILE` and `GRYLOO_COMPOSITION_SMOKE_PROFILE`. Owner-secret Anvil cases and other skipped fork suites were not run and are not passes. The recovered full PostgreSQL run (443 passed / three skipped) and five-pass synthetic offline rehearsal are retained as earlier-session evidence; the new 80-test affected database run is separate. The complete guarded browser inventory, public live-model tests and remote CI were not rerun. No full-public-execution certification is claimed.
+
+Failures resolved during this continuation: obsolete network/flow expectations; missing MCP preview registration, bridge flow planning, projection and switch discovery; incomplete automation routes/binding/grounding; the confirmation/delegation input type mismatch; cap-test fixture isolation. Sandbox-only DNS/empty child-process failures were rerun successfully with the required host/network permissions. No application failure remains in the definitive checks above. Security protections, skipped-suite selection and evidence classes were preserved.
+
+## Exact next owner steps and unresolved issues
+
+1. Review this branch, the capability matrix, changed-file inventory and concrete proposed PR. Publish the branch/open the proposed PR when desired; normal remote CI and the complete guarded browser matrix remain separate review evidence. No push, PR, merge or Cloud Build was initiated here.
+2. Resolve the existing missing 0.1% completed-workflow fee collection and ledger before production release. Preserve one platform fee per completed workflow and keep network/protocol charges separate; this integration does not invent a replacement model.
+3. Authorize production deployment/configuration through the existing process, using the variables above and durable execution/evidence storage. The build leaves all financial gates and hosting configuration untouched.
+4. If the owner wants public Ethereum execution evidence, explicitly authorize a bounded wallet-controlled certification run; obtain fresh protocol/catalog/provider state, simulate the exact calls, Review, sign through the owner's wallet, then independently verify receipts and reconcile. An implementation approval or passing mock test is not that authorization.
+
+There is no `MAINNET_EXECUTED` evidence, no successful real-funds Ethereum execution claim, and no autonomous deployment or merge. Implementation is ready for owner code review with the production limitations above made explicit.
