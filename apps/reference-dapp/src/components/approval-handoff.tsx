@@ -47,7 +47,12 @@ const CLAIM_TEXT: Record<string, string> = {
   AUTOMATION_OWNER_MISMATCH: 'This automation belongs to another wallet. Connect the wallet that owns it.',
 };
 function unwrap<T>(result: { ok: true; value: T } | { ok: false; code: string }): T { if (!result.ok) throw new Error(result.code); return result.value; }
-/** The handoff secret travels only in the URL fragment; it is moved to this tab's session storage and removed from the address bar. */
+/**
+ * The handoff secret travels only in the URL fragment; it is moved to this tab's session storage and removed from the address bar.
+ * The removal must reach Next's router, whose `history.replaceState` patch is installed by its own mount effect, after this component's
+ * (React runs an ancestor's effects after its descendants'). Removed before that, the router kept the secret in its URL and wrote it back
+ * into the address bar on its next update (e.g. the refresh after a wallet sign-in sets a cookie), so it waits for this commit's effects.
+ */
 function takeSecret(): string | null {
   let fromHash: string;
   try { fromHash = typeof window === 'undefined' ? '' : decodeURIComponent(window.location.hash.slice(1)); } catch { return null; }
@@ -58,7 +63,8 @@ function takeSecret(): string | null {
       if (sessionStorage.getItem(STORAGE_KEY) !== fromHash) sessionStorage.removeItem(RECOVERY_KEY);
       sessionStorage.setItem(STORAGE_KEY, fromHash);
     } catch { /* storage may be unavailable; the page still works until reload */ }
-    window.history.replaceState(null, '', window.location.pathname);
+    const presented = window.location.hash;
+    queueMicrotask(() => { if (window.location.hash === presented) window.history.replaceState(null, '', window.location.pathname); });
     return fromHash;
   }
   if (fromHash) return null;

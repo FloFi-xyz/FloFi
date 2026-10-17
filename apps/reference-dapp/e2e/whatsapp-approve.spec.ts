@@ -131,6 +131,8 @@ test.describe('BUILD-CHANNELS-001 WhatsApp → /approve (fixture provider, MOCKE
       WHERE kind = 'NOTIFICATION' AND dedupe_key LIKE $1`, [`notify:${handoff.handoff_id}:${suffix}`]);
     // The ping on the open page tells the chat the proposal is loaded (once; the message body is erased once sent).
     await expect.poll(() => notification('loaded'), { timeout: 45_000 }).toEqual([{ status: 'SENT', body: false }]);
+    // The sign-in's cookie made Next's router refresh the page; the router's own URL never held the secret, so it stays out of the bar.
+    await expect(signing).not.toHaveURL(/flofi_chs_/);
 
     // 5. The product's own simulation and Review of the lending composition; MOCKED financial authority cannot be approved or executed.
     const lending = signing.getByRole('region', { name: 'Lending composition' });
