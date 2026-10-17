@@ -34,3 +34,20 @@ Status: implementation in progress. No production configuration, deployment, sig
 ## Evidence and handoff
 
 All new test evidence remains MOCKED unless explicitly classified PUBLIC_READ_ONLY. No MAINNET_EXECUTED evidence exists. Protocol source and on-chain verification, per-phase commits, exact commands, results, remaining limits and owner-wallet certification steps will be appended here.
+
+## Phase 1 checkpoint
++
++Commit `63c3852`: identity, catalog, wallet switching and environment counterpart registration. Focused command:
++`pnpm exec vitest run packages/action-registry/test/ethereum-mainnet.test.ts packages/action-registry/test/base-network.test.ts packages/action-registry/test/arbitrum-network.test.ts apps/reference-dapp/src/wallet/evm-networks.test.ts --maxWorkers=2`
++— **4 files / 50 tests passed**, MOCKED; `/tmp/ethereum-phase1-tests.log`.
++
++## Phase 2 checkpoint
++
++Shared catalog runtime and cloud flow registration; Ethereum swap (`ets-`) and native/ERC-20 transfer (`ett-`) namespaces, exact simulation/Review, durable nonce and recovery, deployment-wide gates, and state recovery pointers. No wallet allowlist. Chain 1 uses L1 accounting; transfer evidence now describes L1 correctly instead of inheriting the historical catalog L2 wording. Existing chain evidence wording is preserved.
++
++`pnpm exec vitest run apps/reference-dapp/src/server/ethereum-runtime.test.ts apps/reference-dapp/src/server/arbitrum-runtime.test.ts apps/reference-dapp/src/server/ethereum-lending.test.ts apps/reference-dapp/src/server/base-swap.test.ts --maxWorkers=2`
++— **4 files / 114 tests passed**, MOCKED; `/tmp/ethereum-phases23.log`. The Ethereum swap/transfer suite alone passes **48 tests**. Initial runs exposed missing profile registration and package-build prerequisites, resolved before this checkpoint.
++
++Read-only discovery: Ethereum safe block 26110356; 413 chain-1 source records, all contracts have code. FLUX at `0x720cd16b011b987da3518fbf38c3071d4f0d1495` declares 18 decimals but returns 8 and is excluded. Both LIT identities are excluded as ambiguous. Numeric-leading symbols are accepted on Ethereum without changing Base/Arbitrum provider inclusion policies. The eligible catalog therefore contains **410 ERC-20s plus native ETH**. No upstream source bytes are committed. See `BUILD-ETHEREUM-MAINNET-001-READONLY.json` for source hashes, runtime pins, reserve state and real read-only quotes at all four standard tiers. This snapshot is not executable authority; runtime revalidates.
++
++Fee audit finding: current `main` implements **no FloFi fee collection or ledger** (explicit in `src/app/admin/page.tsx`, platform fee observability). The intended model is 0.1% per complete workflow; network/protocol costs remain separate. This build preserves that state and adds no per-operation fees. Complete fee execution/accounting/reconciliation cannot be certified from an absent baseline implementation and remains a production blocker; no pricing exception or alternative charging model is introduced.

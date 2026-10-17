@@ -6,7 +6,7 @@
  * capability of that network needs — its gates, chain-bound read client, catalog loader, run namespaces, journal and cloud flow
  * names — so no flow or action branches per network. Nothing here signs, sends or holds a key.
  */
-import { ARBITRUM_ONE, BASE_MAINNET, ROBINHOOD_CHAIN_MAINNET, type AssetCatalog } from '@defi-workflow-engine/action-registry';
+import { ETHEREUM_MAINNET, ARBITRUM_ONE, BASE_MAINNET, ROBINHOOD_CHAIN_MAINNET, type AssetCatalog } from '@defi-workflow-engine/action-registry';
 import type { CatalogSwapRuntime, Rpc } from './public-testnet-service.ts';
 import { robinhoodCatalogFor, robinhoodMainnetMode, robinhoodMainnetRpc, robinhoodOwnerExecutionEnabled, robinhoodSwapRuntime,
   ROBINHOOD_LIQUIDITY_RPC_METHODS, ROBINHOOD_MAINNET_RPC_METHODS } from './robinhood-mainnet.ts';
@@ -14,9 +14,10 @@ import { baseCatalogFor, baseMainnetMode, baseMainnetRpc, baseOwnerExecutionEnab
   BASE_MAINNET_RPC_METHODS } from './base-mainnet.ts';
 
 import { arbitrumMainnetMode, arbitrumOwnerExecutionEnabled, arbitrumMainnetRpc, arbitrumCatalogFor, arbitrumSwapRuntime, ARBITRUM_MAINNET_RPC_METHODS, ARBITRUM_LIQUIDITY_RPC_METHODS } from './arbitrum-mainnet.ts';
+import { ethereumMainnetMode, ethereumOwnerExecutionEnabled, ethereumMainnetRpc, ethereumCatalogFor, ethereumSwapRuntime, ETHEREUM_MAINNET_RPC_METHODS, ETHEREUM_LIQUIDITY_RPC_METHODS } from './ethereum-mainnet.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
-export type CatalogNetworkId = 'robinhood' | 'base' | 'arbitrum-one';
+export type CatalogNetworkId = 'robinhood' | 'base' | 'arbitrum-one' | 'ethereum';
 export type CatalogNetworkMode = 'live' | 'harness' | 'off';
 export type CatalogNetworkRuntime = {
   readonly id: CatalogNetworkId; readonly name: string; readonly chain: string; readonly chainId: number;
@@ -35,10 +36,10 @@ export type CatalogNetworkRuntime = {
   /** The local journal root of the in-process actions (each capability has its own subdirectory). */
   readonly journalEnv: string;
   /** Run namespaces; `lending` is null where the network has no Aave profile. */
-  readonly prefixes: { readonly swap: 'rhs' | 'bas' | 'ars'; readonly transfer: 'rht' | 'bat' | 'art'; readonly liquidity: 'rhlp' | 'balp' | 'arlp'; readonly lending: 'baave' | 'araave' | null };
+  readonly prefixes: { readonly swap: 'rhs' | 'bas' | 'ars' | 'ets'; readonly transfer: 'rht' | 'bat' | 'art' | 'ett'; readonly liquidity: 'rhlp' | 'balp' | 'arlp' | 'etlp'; readonly lending: 'baave' | 'araave' | 'etaave' | null };
   /** Cloud flow names of each capability. */
-  readonly flows: { readonly swap: 'robinhood-swap' | 'base-swap' | 'arbitrum-swap'; readonly transfer: 'robinhood-mainnet-transfer' | 'base-mainnet-transfer' | 'arbitrum-mainnet-transfer';
-    readonly liquidity: 'robinhood-liquidity' | 'base-liquidity' | 'arbitrum-liquidity'; readonly lending: 'base-aave' | 'arbitrum-aave' | null };
+  readonly flows: { readonly swap: 'robinhood-swap' | 'base-swap' | 'arbitrum-swap' | 'ethereum-swap'; readonly transfer: 'robinhood-mainnet-transfer' | 'base-mainnet-transfer' | 'arbitrum-mainnet-transfer' | 'ethereum-mainnet-transfer';
+    readonly liquidity: 'robinhood-liquidity' | 'base-liquidity' | 'arbitrum-liquidity' | 'ethereum-liquidity'; readonly lending: 'base-aave' | 'arbitrum-aave' | 'ethereum-aave' | null };
 };
 
 export const CATALOG_NETWORKS = Object.freeze({
@@ -60,6 +61,12 @@ export const CATALOG_NETWORKS = Object.freeze({
     disabledCode: 'ARBITRUM_MAINNET_NOT_ENABLED', storageCode: 'ARBITRUM_STORAGE_NOT_CONFIGURED', catalogUnavailableCode: 'ARBITRUM_TOKEN_LIST_UNAVAILABLE',
     journalEnv: 'GRYLOO_ARBITRUM_JOURNAL', prefixes: Object.freeze({ swap: 'ars', transfer: 'art', liquidity: 'arlp', lending: 'araave' }),
     flows: Object.freeze({ swap: 'arbitrum-swap', transfer: 'arbitrum-mainnet-transfer', liquidity: 'arbitrum-liquidity', lending: 'arbitrum-aave' }) }),
+  'ethereum': Object.freeze({ id: 'ethereum', name: ETHEREUM_MAINNET.name, chain: ETHEREUM_MAINNET.chain, chainId: ETHEREUM_MAINNET.chainId,
+    mode: ethereumMainnetMode, ownerExecutionEnabled: ethereumOwnerExecutionEnabled, rpc: ethereumMainnetRpc,
+    rpcMethods: ETHEREUM_MAINNET_RPC_METHODS, liquidityRpcMethods: ETHEREUM_LIQUIDITY_RPC_METHODS, catalogFor: ethereumCatalogFor, swapRuntime: ethereumSwapRuntime,
+    disabledCode: 'ETHEREUM_MAINNET_NOT_ENABLED', storageCode: 'ETHEREUM_STORAGE_NOT_CONFIGURED', catalogUnavailableCode: 'ETHEREUM_TOKEN_LIST_UNAVAILABLE',
+    journalEnv: 'GRYLOO_ETHEREUM_JOURNAL', prefixes: Object.freeze({ swap: 'ets', transfer: 'ett', liquidity: 'etlp', lending: 'etaave' }),
+    flows: Object.freeze({ swap: 'ethereum-swap', transfer: 'ethereum-mainnet-transfer', liquidity: 'ethereum-liquidity', lending: 'ethereum-aave' }) }),
 } satisfies Readonly<Record<CatalogNetworkId, CatalogNetworkRuntime>>);
 export const CATALOG_NETWORK_IDS: readonly CatalogNetworkId[] = Object.freeze(Object.keys(CATALOG_NETWORKS) as CatalogNetworkId[]);
 

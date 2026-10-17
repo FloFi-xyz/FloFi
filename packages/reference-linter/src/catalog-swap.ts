@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { isCatalogSwapNode, readCatalogSwapNode, type CatalogAssetRef, type CatalogSwapFields, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
-import { ARBITRUM_BASE_ASSETS, BASE_BASE_ASSETS, ROBINHOOD_BASE_ASSETS, type AssetCatalog } from '@defi-workflow-engine/action-registry';
+import { ETHEREUM_BASE_ASSETS, ARBITRUM_BASE_ASSETS, BASE_BASE_ASSETS, ROBINHOOD_BASE_ASSETS, type AssetCatalog } from '@defi-workflow-engine/action-registry';
 export { isCatalogSwapNode };
 /** The code-pinned base assets of each catalog network. */
 const BASE_ASSETS: Readonly<Record<string, AssetCatalog>> = Object.freeze({ [ROBINHOOD_BASE_ASSETS.chain]: ROBINHOOD_BASE_ASSETS,
-  [BASE_BASE_ASSETS.chain]: BASE_BASE_ASSETS, [ARBITRUM_BASE_ASSETS.chain]: ARBITRUM_BASE_ASSETS });
+  [BASE_BASE_ASSETS.chain]: BASE_BASE_ASSETS, [ARBITRUM_BASE_ASSETS.chain]: ARBITRUM_BASE_ASSETS, [ETHEREUM_BASE_ASSETS.chain]: ETHEREUM_BASE_ASSETS });
 /** Networks whose other catalog assets are issuer-registered (official id, 18 decimals): Robinhood Chain Stock Tokens. */
 const ISSUER_REGISTERED: ReadonlySet<string> = new Set([ROBINHOOD_BASE_ASSETS.chain]);
 /**

@@ -14,7 +14,7 @@ export const ROBINHOOD_TESTNET_HEX = '0xb626';
 export const ETHEREUM_SEPOLIA_HEX = '0xaa36a7';
 /** BUILD-RH-002: Robinhood Chain mainnet (4663), a first-class network and switch target. */
 export const ROBINHOOD_HEX = '0x1237';
-type Chain = typeof BASE_HEX | typeof ARBITRUM_HEX | typeof BASE_SEPOLIA_HEX | typeof ROBINHOOD_TESTNET_HEX | typeof ETHEREUM_SEPOLIA_HEX | typeof ROBINHOOD_HEX;
+type Chain = '0x1' | typeof BASE_HEX | typeof ARBITRUM_HEX | typeof BASE_SEPOLIA_HEX | typeof ROBINHOOD_TESTNET_HEX | typeof ETHEREUM_SEPOLIA_HEX | typeof ROBINHOOD_HEX;
 export type WalletSession = { readonly account: string; readonly chainId: string };
 type Wallet = { readonly available: boolean; readonly account: string | null; readonly chainId: string | null;
   /** Public identity of the provider in use (explicit choice, or the passive provider of an already-authorized wallet). */

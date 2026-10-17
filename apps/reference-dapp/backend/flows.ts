@@ -50,7 +50,7 @@ export type FlowName = 'robinhood-transfer' | 'aave-supply' | 'base-sepolia-swap
   | 'crosschain-router-testnet' | 'lending-composition' | 'pix-payment' | 'robinhood-swap' | 'robinhood-mainnet-transfer' | 'robinhood-liquidity'
   | 'crosschain-router-base-to-robinhood' | 'crosschain-router-robinhood-to-base' | 'crosschain-router-arbitrum-to-robinhood' | 'crosschain-router-robinhood-to-arbitrum'
   /** BUILD-BASE-001: Base mainnet (real funds) as a catalog network, and the Router's Arbitrum One → Base route. */
-  | 'arbitrum-swap' | 'arbitrum-mainnet-transfer' | 'arbitrum-liquidity' | 'base-swap' | 'base-mainnet-transfer' | 'base-liquidity' | 'base-aave' | 'arbitrum-aave' | 'crosschain-router-arbitrum-to-base'
+  | 'ethereum-swap' | 'ethereum-mainnet-transfer' | 'ethereum-liquidity' | 'ethereum-aave' | 'arbitrum-swap' | 'arbitrum-mainnet-transfer' | 'arbitrum-liquidity' | 'base-swap' | 'base-mainnet-transfer' | 'base-liquidity' | 'base-aave' | 'arbitrum-aave' | 'ethereum-aave' | 'crosschain-router-arbitrum-to-base'
   /** Solana Devnet Swap → Orca liquidity, composed from the two Solana Devnet flows above. */
   | 'solana-devnet-composition';
 export type Rpc = (method: string, params: readonly unknown[]) => Promise<unknown>;
@@ -202,6 +202,7 @@ function transferFlow(name: 'robinhood-transfer' | CatalogNetworkRuntime['flows'
 const robinhood = transferFlow('robinhood-transfer');
 const robinhoodMainnetTransfer = transferFlow('robinhood-mainnet-transfer', CATALOG_NETWORKS.robinhood);
 const baseMainnetTransfer = transferFlow('base-mainnet-transfer', CATALOG_NETWORKS.base);
+const ethereumMainnetTransfer = transferFlow('ethereum-mainnet-transfer', CATALOG_NETWORKS.ethereum);
 const arbitrumMainnetTransfer = transferFlow('arbitrum-mainnet-transfer', CATALOG_NETWORKS['arbitrum-one']);
 
 const supplyNeedsObservation = (value: unknown) => {
@@ -212,7 +213,7 @@ const supplyNeedsObservation = (value: unknown) => {
  * The shared Aave lending service: testnets use `aave-supply`; catalog mainnets bind the network's registered
  * flow, namespace, owner gate and read client. Durable reservations and observation-only workers are shared.
  */
-function supplyFlow(name: 'aave-supply' | 'base-aave' | 'arbitrum-aave'): FlowDefinition {
+function supplyFlow(name: 'aave-supply' | 'base-aave' | 'arbitrum-aave' | 'ethereum-aave'): FlowDefinition {
   const network = Object.values(CATALOG_NETWORKS).find(n => n.flows.lending === name);
   const SUPPLY_ID = new RegExp(`^${network?.prefixes.lending ?? 'supply'}-[a-f0-9]{32}$`);
   return {
@@ -268,6 +269,7 @@ function supplyFlow(name: 'aave-supply' | 'base-aave' | 'arbitrum-aave'): FlowDe
   evidence: record => evidenceOf(record as SupplyRecord),
   };
 }
+const ethereumAave = supplyFlow('ethereum-aave');
 const supply = supplyFlow('aave-supply'), baseAave = supplyFlow('base-aave'), arbitrumAave = supplyFlow('arbitrum-aave');
 
 /**
@@ -381,6 +383,7 @@ function catalogSwapFlow(network: CatalogNetworkRuntime): FlowDefinition {
   evidence: run => swapEvidence(run),
   };
 }
+const ethereumSwap = catalogSwapFlow(CATALOG_NETWORKS.ethereum);
 const robinhoodSwap = catalogSwapFlow(CATALOG_NETWORKS.robinhood), baseSwap = catalogSwapFlow(CATALOG_NETWORKS.base), arbitrumSwap = catalogSwapFlow(CATALOG_NETWORKS['arbitrum-one']);
 
 /**
@@ -670,6 +673,7 @@ function liquidityFlow(name: 'uniswap-liquidity' | NonNullable<CatalogNetworkRun
   };
 }
 const uniswapLiquidity = liquidityFlow('uniswap-liquidity'), robinhoodLiquidity = liquidityFlow('robinhood-liquidity', CATALOG_NETWORKS.robinhood),
+  ethereumLiquidity = liquidityFlow('ethereum-liquidity', CATALOG_NETWORKS.ethereum),
   baseLiquidity = liquidityFlow('base-liquidity', CATALOG_NETWORKS.base), arbitrumLiquidity = liquidityFlow('arbitrum-liquidity', CATALOG_NETWORKS['arbitrum-one']);
 
 /**
@@ -877,6 +881,7 @@ export const FLOWS: Readonly<Record<FlowName, FlowDefinition>> = Object.freeze({
   'crosschain-router-robinhood-to-base': routerFlow('crosschain-router-robinhood-to-base', 'robinhood-to-base'),
   'crosschain-router-arbitrum-to-robinhood': routerFlow('crosschain-router-arbitrum-to-robinhood', 'arbitrum-to-robinhood'),
   'crosschain-router-robinhood-to-arbitrum': routerFlow('crosschain-router-robinhood-to-arbitrum', 'robinhood-to-arbitrum'),
+  'ethereum-swap': ethereumSwap, 'ethereum-mainnet-transfer': ethereumMainnetTransfer, 'ethereum-liquidity': ethereumLiquidity, 'ethereum-aave': ethereumAave,
   'arbitrum-swap': arbitrumSwap, 'arbitrum-mainnet-transfer': arbitrumMainnetTransfer, 'arbitrum-liquidity': arbitrumLiquidity,
   'base-swap': baseSwap, 'base-mainnet-transfer': baseMainnetTransfer, 'base-liquidity': baseLiquidity, 'base-aave': baseAave, 'arbitrum-aave': arbitrumAave,
   'crosschain-router-arbitrum-to-base': routerFlow('crosschain-router-arbitrum-to-base', 'arbitrum-to-base'), 'solana-devnet-composition': solanaComposition });
@@ -922,6 +927,7 @@ function configuredFlowMode(flow: FlowName, env: Readonly<Record<string, string 
   if (flow.startsWith('crosschain-router-') && flow.includes('robinhood')) return routerNetworkMode(flow.slice('crosschain-router-'.length) as RouterNetwork, env);
   // BUILD-BASE-001 Base mainnet: `GRYLOO_BASE_MAINNET=live` enables the catalog, quotes, simulation and Review; owner execution additionally
   // needs GRYLOO_BASE_OWNER_EXECUTION. The MOCKED loopback harness wins. Arbitrum One → Base is the Router's own route and gates.
+  if (flow === 'ethereum-swap' || flow === 'ethereum-mainnet-transfer' || flow === 'ethereum-liquidity' || flow === 'ethereum-aave') return CATALOG_NETWORKS.ethereum.mode(env);
   if (flow === 'arbitrum-swap' || flow === 'arbitrum-mainnet-transfer' || flow === 'arbitrum-liquidity' || flow === 'arbitrum-aave') return CATALOG_NETWORKS['arbitrum-one'].mode(env);
   if (flow === 'base-swap' || flow === 'base-mainnet-transfer' || flow === 'base-liquidity' || flow === 'base-aave') return CATALOG_NETWORKS.base.mode(env);
   if (flow === 'crosschain-router-arbitrum-to-base') return routerNetworkMode('arbitrum-to-base', env);
@@ -940,6 +946,7 @@ const DISABLED: Readonly<Record<FlowName, string>> = { 'robinhood-transfer': 'TR
   'robinhood-liquidity': 'ROBINHOOD_MAINNET_NOT_ENABLED',
   'crosschain-router-base-to-robinhood': 'ROBINHOOD_MAINNET_NOT_ENABLED', 'crosschain-router-robinhood-to-base': 'ROBINHOOD_MAINNET_NOT_ENABLED',
   'crosschain-router-arbitrum-to-robinhood': 'ROBINHOOD_MAINNET_NOT_ENABLED', 'crosschain-router-robinhood-to-arbitrum': 'ROBINHOOD_MAINNET_NOT_ENABLED',
+  'ethereum-swap': 'ETHEREUM_MAINNET_NOT_ENABLED', 'ethereum-mainnet-transfer': 'ETHEREUM_MAINNET_NOT_ENABLED', 'ethereum-liquidity': 'ETHEREUM_MAINNET_NOT_ENABLED', 'ethereum-aave': 'ETHEREUM_MAINNET_NOT_ENABLED',
   'arbitrum-swap': 'ARBITRUM_MAINNET_NOT_ENABLED', 'arbitrum-mainnet-transfer': 'ARBITRUM_MAINNET_NOT_ENABLED', 'arbitrum-liquidity': 'ARBITRUM_MAINNET_NOT_ENABLED',
   'base-swap': 'BASE_MAINNET_NOT_ENABLED', 'base-mainnet-transfer': 'BASE_MAINNET_NOT_ENABLED', 'base-liquidity': 'BASE_MAINNET_NOT_ENABLED',
   'base-aave': 'BASE_MAINNET_NOT_ENABLED', 'arbitrum-aave': 'ARBITRUM_MAINNET_NOT_ENABLED', 'crosschain-router-arbitrum-to-base': 'ROUTER_NOT_ENABLED',

@@ -1,0 +1,32 @@
+{
+  "name": "Uniswap Labs Default",
+  "timestamp": "2026-10-11T00:00:00.000Z",
+  "version": {
+    "major": 1,
+    "minor": 0,
+    "patch": 0
+  },
+  "tokens": [
+    {
+      "chainId": 1,
+      "symbol": "USDC",
+      "name": "USD Coin",
+      "address": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+      "decimals": 6
+    },
+    {
+      "chainId": 1,
+      "symbol": "WETH",
+      "name": "Wrapped Ether",
+      "address": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+      "decimals": 18
+    },
+    {
+      "chainId": 1,
+      "symbol": "LINK",
+      "name": "Chainlink",
+      "address": "0x514910771AF9Ca656af840dff83E8264EcF986CA",
+      "decimals": 18
+    }
+  ]
+}

@@ -51,7 +51,7 @@ async function run<T>(method: string, args: readonly unknown[], action: (service
   try { return { ok: true, value: await action(network ? catalogService(network) : current()) }; }
   catch (error) { return { ok: false, code: code(error) }; }
 }
-const id = (value: unknown) => typeof value === 'string' && /^(pub|rhs|bas|ars)-[0-9a-f]{24}$/.test(value) ? value : (() => { throw new Error('INPUT_INVALID'); })();
+const id = (value: unknown) => typeof value === 'string' && /^(pub|rhs|bas|ars|ets)-[0-9a-f]{24}$/.test(value) ? value : (() => { throw new Error('INPUT_INVALID'); })();
 export async function publicPrepare(workflow: SemanticWorkflow, account?: string): Promise<PublicResult<PublicRun>> {
   // The authored swap's chain selects the deployment: a catalog network (Base's USDC ⇄ WETH reference swap included), else the testnets.
   return run('prepare', account ? [workflow, account] : [workflow], service => service.prepare(workflow, account), catalogNetworkOfWorkflow(workflow, 'asset.swap.exact-input'));
