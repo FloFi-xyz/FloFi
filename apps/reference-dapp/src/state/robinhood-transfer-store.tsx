@@ -43,7 +43,7 @@ export function RobinhoodTransferProvider({ children }: { children: ReactNode })
     let mounted = true;
     try {
       const pointer = JSON.parse(window.localStorage.getItem(key) ?? 'null') as { id?: unknown; hash?: unknown } | null;
-      if (pointer && typeof pointer.id === 'string' && /^(rhx|rht|bat|art)-[a-f0-9]{32}$/.test(pointer.id)) (async () => {
+      if (pointer && typeof pointer.id === 'string' && /^(rhx|rht|bat|art|ett)-[a-f0-9]{32}$/.test(pointer.id)) (async () => {
         if (typeof pointer.hash === 'string' && /^0x[0-9a-f]{64}$/.test(pointer.hash)) await transferReport(pointer.id as string, { kind: 'HASH', hash: pointer.hash }).catch(() => undefined);
         return transferStatus(pointer.id as string);
       })().then(result => { if (mounted && result.ok) setRecord(result.value); }).catch(() => undefined);

@@ -78,7 +78,7 @@ describe('BUILD-CHANNELS-001 channel conversation', () => {
     ] });
     const asked = await c.say('Supply 100 USDC.');
     expect(asked).toMatchObject({ action: 'REPLY', outcome: 'COPILOT_CLARIFICATION' });
-    expect(asked.replies.at(-1)!.choices.map(o => o.label)).toEqual(['Base Sepolia', 'Base', 'Arbitrum One']);
+    expect(asked.replies.at(-1)!.choices.map(o => o.label)).toEqual(['Base Sepolia', 'Base', 'Arbitrum One', 'Ethereum']);
     // "1" answers FloFi's own question deterministically (no model call), and FloFi then asks for the owner's public address.
     const address = await c.say('1');
     expect(address).toMatchObject({ action: 'REPLY', outcome: 'COPILOT_CLARIFICATION' });

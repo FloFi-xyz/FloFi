@@ -75,8 +75,8 @@ const HASH = /^0x[0-9a-f]{64}$/;
  * (BUILD-BASE-001) for Base mainnet swaps, so a run id alone routes to its deployment and a testnet journal can never hold a mainnet
  * run (or the reverse), nor one network's run another's.
  */
-export type SwapRunPrefix = 'pub' | 'rhs' | 'bas' | 'ars';
-export const SWAP_RUN_ID = /^(pub|rhs|bas|ars)-[0-9a-f]{24}$/;
+export type SwapRunPrefix = 'pub' | 'rhs' | 'bas' | 'ars' | 'ets';
+export const SWAP_RUN_ID = /^(pub|rhs|bas|ars|ets)-[0-9a-f]{24}$/;
 const runIdPattern = (prefix: SwapRunPrefix) => new RegExp(`^${prefix}-[0-9a-f]{24}$`);
 /** A run's namespace must match its network: each catalog (mainnet) network has its own, testnet pair runs are `pub-`. */
 const prefixFor = (profile: SwapProfile): SwapRunPrefix => profile.kind === 'CATALOG' ? profile.runPrefix : 'pub';

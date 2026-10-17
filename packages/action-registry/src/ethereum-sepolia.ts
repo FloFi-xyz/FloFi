@@ -7,8 +7,7 @@
  * defers chain IDs to that registry). The public RPC below is listed there and returned `eth_chainId` 0xaa36a7,
  * `net_version` 11155111 and the genesis hash below. See docs/builds/BUILD-ETHEREUM-001-READONLY.json.
  *
- * Ethereum Mainnet is recognised only so a wallet on it can be named and refused. It is never a switch target and has
- * no execution capability: a public testnet is not Mainnet.
+ * Ethereum Mainnet has its own identity and deployment profiles; no Sepolia setting grants Mainnet authority.
  */
 export const ETHEREUM_SEPOLIA = Object.freeze({
   name: 'Ethereum Sepolia', chain: 'eip155:11155111', chainId: 11155111, chainHex: '0xaa36a7', environment: 'PUBLIC_TESTNET',
@@ -16,9 +15,6 @@ export const ETHEREUM_SEPOLIA = Object.freeze({
   rpc: 'https://ethereum-sepolia-rpc.publicnode.com', explorer: 'https://sepolia.etherscan.io',
   genesisHash: '0x25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9',
   officialSource: 'https://github.com/ethereum-lists/chains/blob/master/_data/chains/eip155-11155111.json',
-});
-export const ETHEREUM_MAINNET = Object.freeze({
-  name: 'Ethereum Mainnet', chain: 'eip155:1', chainId: 1, chainHex: '0x1', environment: 'MAINNET', executable: false,
 });
 /** EIP-3085 parameters from the official network record; used only after the wallet reports the chain unknown. */
 export function ethereumSepoliaAddChainParameters() {

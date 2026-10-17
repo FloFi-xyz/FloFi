@@ -44,7 +44,7 @@ export async function readSupplyLatestNonce(rpc:SupplyRpc,profileInput:AaveLendi
   if(rpcUint(await rpc('eth_chainId',[]))!==BigInt(profile.chainId))throw new Error('SUPPLY_WRONG_CHAIN');
   return rpcUint(await rpc('eth_getTransactionCount',[normalized,'latest'])).toString();
 }
-export type SupplyState = { reserveConfiguration?:string; withdrawState?: {previousIndex:string}; borrow?: BorrowState; block: number; blockHash: string; account: string; allowance: string; balance: string; nativeBalance: string;
+export type SupplyState = { readonly supplyCapUsage?: string; reserveConfiguration?:string; withdrawState?: {previousIndex:string}; borrow?: BorrowState; block: number; blockHash: string; account: string; allowance: string; balance: string; nativeBalance: string;
   nonce: string; gasPrice: string; scaledPosition: string; position: string; index: string; deploymentHash: string; observedAt: string };
 export async function readSupplyState(rpc: SupplyRpc, profileInput: AaveLendingProfile, accountInput: string, beneficiaryInput: string, blockTag = 'latest'): Promise<SupplyState> {
   const profile = assertAaveLendingProfile(profileInput), account = supplyAddress(accountInput), beneficiary = supplyAddress(beneficiaryInput);
@@ -80,11 +80,14 @@ export async function readSupplyState(rpc: SupplyRpc, profileInput: AaveLendingP
         rpcUint(implementation) !== BigInt(profile.poolImplementation) || rpcHex(implementationCode).length < 4) throw new Error('SUPPLY_DEPLOYMENT_MISMATCH');
     codes.push(provider,revision,oracle,oracleCode,implementation,implementationCode);
   }
+  // Aave cap accounting includes accrued-to-treasury scaled supply, not only minted aToken balances.
+  const supplyCapUsage = 'validateSupplyCap' in profile ? ((rpcUint(await call(profile.aToken, supplyCall('scaledTotalSupply()'))) +
+    BigInt('0x'+reserveHex.slice(12*64,13*64))) * rpcUint(index) + 10n**27n/2n) / 10n**27n : undefined;
   const verifiedBlock = rpcRecord(await rpc('eth_getBlockByNumber',[tag,false]));
   if (rpcHash(verifiedBlock.hash) !== blockHash) throw new Error('SUPPLY_REORG');
   const blockNumber = Number(rpcUint(tag));
   if (!Number.isSafeInteger(blockNumber)) throw new Error('SUPPLY_BLOCK_INVALID');
-  return { block: blockNumber, blockHash, account, allowance: rpcUint(allowance).toString(), balance: rpcUint(balance).toString(),
+  return { ...supplyCapUsage === undefined ? {} : { supplyCapUsage: supplyCapUsage.toString() }, block: blockNumber, blockHash, account, allowance: rpcUint(allowance).toString(), balance: rpcUint(balance).toString(),
     nativeBalance: rpcUint(nativeBalance).toString(), nonce: rpcUint(nonce).toString(), gasPrice: rpcUint(gasPrice).toString(),
     scaledPosition: rpcUint(scaled).toString(), position: rpcUint(position).toString(), index: rpcUint(index).toString(),
     reserveConfiguration:config.toString(),deploymentHash: supplyHash(codes), observedAt: new Date().toISOString() };
@@ -163,6 +166,7 @@ export async function simulateSupply(workflow: SemanticWorkflow, accountInput: s
   const profile = lendingProfile(fields.chain, 'SUPPLY_DEPLOYMENT_UNSUPPORTED');
   compileSupplyCalls(workflow,account,'0');
   const state = await (withdrawing ? readWithdrawState : borrowing || repaying || 'ownerBeneficiary' in profile ? readBorrowState : readSupplyState)(rpc,profile,account,fields.beneficiary);
+  if (!borrowing && !repaying && !withdrawing) assertSupplyCap(profile, state, fields.amount);
   const estimate = borrowing ? estimateBorrow(fields.amount,state.borrow!,profile) : null;
   const repayment = repaying ? estimateRepay(fields.amount,state.borrow!,profile) : null;
   const withdrawal = withdrawing ? estimateWithdraw(fields.amount,state,profile) : null;
@@ -231,6 +235,7 @@ export function assertSupplyReview(review: SupplyReview, workflow: SemanticWorkf
       now >= Date.parse(review.expiresAt) || now < Date.parse(review.simulation.freshness.observedAt) ||
       (!approvalConfirmed && ((!review.borrow && state.allowance !== review.allowance) || state.nonce !== review.state.nonce)) ||
       (approvalConfirmed && state.allowance !== review.amount) || !review.borrow && !review.withdraw && BigInt(state.balance) < BigInt(review.amount)) throw new Error('SUPPLY_AUTHORIZATION_STALE');
+  if (!review.borrow && !review.repay && !review.withdraw) assertSupplyCap(profile, state, review.amount);
   if ('ownerBeneficiary' in profile && !review.borrow && !review.repay && !review.withdraw) {
     if (!state.borrow || !review.state.borrow) throw new Error('SUPPLY_AUTHORIZATION_STALE');
     for (const key of ['userConfiguration','eMode','scaledDebt','reserveConfiguration','codeHash'] as const)
@@ -335,4 +340,12 @@ async function simulateWithdrawCall(rpc:SupplyRpc,tx:SupplyTransaction,state:Sup
   if(gas<=0n||gas>1000000n)throw new Error('WITHDRAW_GAS_INVALID');
   if(rpcHash(rpcRecord(await rpc('eth_getBlockByNumber',[tag,false])).hash)!==state.blockHash)throw new Error('WITHDRAW_REORG');
   return {gasLimits:[fees.gasLimit(gas).toString()],observation:{method:'eth_call',result}};
+}
+
+/** A profile may require a fresh, exact Aave supply-cap observation at simulation and every financial preflight. */
+function assertSupplyCap(profile: AaveLendingProfile, state: SupplyState, amount: string): void {
+  if (!('validateSupplyCap' in profile)) return;
+  if (state.supplyCapUsage === undefined || state.reserveConfiguration === undefined) throw new Error('SUPPLY_CAP_STATE_UNAVAILABLE');
+  const cap = (BigInt(state.reserveConfiguration) >> 116n) & ((1n << 36n) - 1n);
+  if (cap && BigInt(state.supplyCapUsage) + BigInt(amount) > cap * 10n ** BigInt(profile.decimals)) throw new Error('SUPPLY_CAP_EXCEEDED');
 }

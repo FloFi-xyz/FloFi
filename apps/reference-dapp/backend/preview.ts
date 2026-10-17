@@ -9,6 +9,7 @@
  * flow's `review` needs a durable run). The owner re-simulates in the DApp under their wallet session before any Review.
  */
 import { assertLogName, reentrantLeases, utf8, type ExecutionStorage } from '@defi-workflow-engine/reference-executor';
+import { ETHEREUM_ROUTER_NETWORKS } from '@defi-workflow-engine/action-registry';
 import type { FlowName } from './flows.ts';
 
 /** The one preview method per flow. A flow missing here has no preview (e.g. Orca liquidity needs a browser-generated key). */
@@ -20,6 +21,8 @@ export const PREVIEW_METHODS: Readonly<Partial<Record<FlowName, 'simulate' | 'pr
   'crosschain-router-arbitrum-to-robinhood': 'simulate', 'crosschain-router-robinhood-to-arbitrum': 'simulate',
   // BUILD-BASE-001: Base mainnet (real funds) previews, likewise read-only.
   'arbitrum-swap': 'prepare', 'arbitrum-liquidity': 'simulate', 'base-swap': 'prepare', 'base-liquidity': 'simulate', 'base-aave': 'simulate', 'arbitrum-aave': 'simulate', 'crosschain-router-arbitrum-to-base': 'simulate',
+  'ethereum-swap': 'prepare', 'ethereum-liquidity': 'simulate', 'ethereum-aave': 'simulate',
+  ...Object.fromEntries(ETHEREUM_ROUTER_NETWORKS.map(route => [`crosschain-router-${route}`, 'simulate' as const])),
 });
 
 /**

@@ -70,10 +70,10 @@ describe('BUILD-BASE-001 one capability truth for Canvas, Chat, Copilot and MCP'
     for (const capability of AUTHORING_CAPABILITIES) for (const network of [capability.network, capability.destination].filter(Boolean))
       expect(NETWORKS, `${capability.action} ${network!.key}`).toContain(network);
     for (const id of COPILOT_NETWORK_IDS) {
-      expect(NETWORKS.concat(networkIdentity('ethereum')!).filter(network => network.copilot === id)).toHaveLength(1);
+      expect(NETWORKS.filter(network => network.copilot === id)).toHaveLength(1);
       expect(networkOfCopilot(id).mention!.test(networkOfCopilot(id).name)).toBe(true);
     }
-    expect(names(catalogCapabilityNetworks())).toEqual(['Arbitrum One', 'Base', 'Robinhood Chain']);
+    expect(names(catalogCapabilityNetworks())).toEqual(['Arbitrum One', 'Base', 'Ethereum', 'Robinhood Chain']);
   });
   it('agrees with the Aave and Router registries the engine executes', () => {
     for (const action of ['supply', 'borrow', 'repay', 'withdraw'] as const)

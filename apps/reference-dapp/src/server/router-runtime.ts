@@ -15,8 +15,9 @@
  * deployment, so it follows the Router's own gates (`GRYLOO_ROUTER`, `GRYLOO_ROUTER_OWNER_EXECUTION`, `GRYLOO_ROUTER_HARNESS`) as its own flow
  * and storage.
  */
-import { CROSSCHAIN_ROUTER_ARBITRUM_BASE, CROSSCHAIN_ROUTER_ARBITRUM_ROBINHOOD, CROSSCHAIN_ROUTER_BASE_ARBITRUM as profile, CROSSCHAIN_ROUTER_BASE_ROBINHOOD, CROSSCHAIN_ROUTER_BASE_SEPOLIA_ARBITRUM_SEPOLIA as TESTNET,
+import { ETHEREUM_ROUTER_DEPLOYMENTS, ETHEREUM_ROUTER_NETWORKS, type EthereumRouterNetwork, CROSSCHAIN_ROUTER_ARBITRUM_BASE, CROSSCHAIN_ROUTER_ARBITRUM_ROBINHOOD, CROSSCHAIN_ROUTER_BASE_ARBITRUM as profile, CROSSCHAIN_ROUTER_BASE_ROBINHOOD, CROSSCHAIN_ROUTER_BASE_SEPOLIA_ARBITRUM_SEPOLIA as TESTNET,
   CROSSCHAIN_ROUTER_ROBINHOOD_ARBITRUM, CROSSCHAIN_ROUTER_ROBINHOOD_BASE, type RouterProfile } from '@defi-workflow-engine/action-registry';
+import { ethereumMainnetMode, ethereumOwnerExecutionEnabled } from './ethereum-mainnet.ts';
 import { robinhoodMainnetMode, robinhoodOwnerExecutionEnabled, robinhoodRpcUrl } from './robinhood-mainnet.ts';
 import { chainBoundRpc } from './public-testnet-rpc.ts';
 import type { RoutingProvider } from '@defi-workflow-engine/workflow-contracts';
@@ -36,16 +37,17 @@ export type RobinhoodRouterNetwork = typeof ROBINHOOD_ROUTER_NETWORKS[number];
 /** BUILD-BASE-001: the Router's further Base routes, each its own deployment, flow and storage under the Router's gates. */
 export const BASE_ROUTER_NETWORKS = Object.freeze(['arbitrum-to-base'] as const);
 export type BaseRouterNetwork = typeof BASE_ROUTER_NETWORKS[number];
-export type RouterNetwork = 'mainnet' | 'testnet' | RobinhoodRouterNetwork | BaseRouterNetwork;
-export const ROUTER_NETWORKS: readonly RouterNetwork[] = Object.freeze(['mainnet', 'testnet', ...ROBINHOOD_ROUTER_NETWORKS, ...BASE_ROUTER_NETWORKS]);
+export type RouterNetwork = EthereumRouterNetwork | 'mainnet' | 'testnet' | RobinhoodRouterNetwork | BaseRouterNetwork;
+export const ROUTER_NETWORKS: readonly RouterNetwork[] = Object.freeze(['mainnet', 'testnet', ...ROBINHOOD_ROUTER_NETWORKS, ...BASE_ROUTER_NETWORKS, ...ETHEREUM_ROUTER_NETWORKS]);
 const BASE_ROUTER_PROFILES: Readonly<Record<BaseRouterNetwork, RouterProfile>> = Object.freeze({ 'arbitrum-to-base': CROSSCHAIN_ROUTER_ARBITRUM_BASE });
 export const isBaseRouterNetwork = (network: RouterNetwork): network is BaseRouterNetwork => (BASE_ROUTER_NETWORKS as readonly string[]).includes(network);
 export const ROBINHOOD_ROUTER_PROFILES: Readonly<Record<RobinhoodRouterNetwork, RouterProfile>> = Object.freeze({
   'base-to-robinhood': CROSSCHAIN_ROUTER_BASE_ROBINHOOD, 'robinhood-to-base': CROSSCHAIN_ROUTER_ROBINHOOD_BASE,
   'arbitrum-to-robinhood': CROSSCHAIN_ROUTER_ARBITRUM_ROBINHOOD, 'robinhood-to-arbitrum': CROSSCHAIN_ROUTER_ROBINHOOD_ARBITRUM });
 export const isRobinhoodRouterNetwork = (network: RouterNetwork): network is RobinhoodRouterNetwork => (ROBINHOOD_ROUTER_NETWORKS as readonly string[]).includes(network);
+const isEthereumRouterNetwork = (network: RouterNetwork): network is EthereumRouterNetwork => (ETHEREUM_ROUTER_NETWORKS as readonly string[]).includes(network);
 /** The router profile a network key serves. */
-export const routerNetworkProfile = (network: RouterNetwork): RouterProfile => isRobinhoodRouterNetwork(network) ? ROBINHOOD_ROUTER_PROFILES[network]
+export const routerNetworkProfile = (network: RouterNetwork): RouterProfile => isEthereumRouterNetwork(network) ? ETHEREUM_ROUTER_DEPLOYMENTS[network] : isRobinhoodRouterNetwork(network) ? ROBINHOOD_ROUTER_PROFILES[network]
   : isBaseRouterNetwork(network) ? BASE_ROUTER_PROFILES[network] : network === 'testnet' ? TESTNET : profile;
 type Env = Readonly<Record<string, string | undefined>>;
 export const ROUTER_BASE_RPC_METHODS = Object.freeze(['eth_chainId', 'eth_blockNumber', 'eth_getBlockByNumber', 'eth_getCode', 'eth_call', 'eth_getBalance',
@@ -61,7 +63,7 @@ export function routerTestnetMode(env: Env): RouterMode {
   return env.GRYLOO_ROUTER_TESTNET === 'live' ? 'live' : 'off';
 }
 /** Robinhood routes follow the Robinhood Chain mainnet gates (`GRYLOO_ROBINHOOD_MAINNET`, its loopback harness), like every Robinhood capability. */
-export const routerNetworkMode = (network: RouterNetwork, env: Env): RouterMode => isRobinhoodRouterNetwork(network) ? robinhoodMainnetMode(env)
+export const routerNetworkMode = (network: RouterNetwork, env: Env): RouterMode => isEthereumRouterNetwork(network) ? (ethereumMainnetMode(env) === 'live' && routerMode(env) === 'live' ? 'live' : 'off') : isRobinhoodRouterNetwork(network) ? robinhoodMainnetMode(env)
   : network === 'testnet' ? routerTestnetMode(env) : routerMode(env);
 /** The Router's own real-funds owner-execution opt-in (Base ↔ Arbitrum); the MOCKED harness always allows it (loopback only). */
 const routerOwnerExecutionEnabled = (mode: 'live' | 'harness', env: Env) => mode === 'harness' || env.GRYLOO_ROUTER_OWNER_EXECUTION === 'MAINNET_OWNER_APPROVED';
@@ -121,7 +123,8 @@ export function baseRouterRuntime(network: BaseRouterNetwork, mode: 'live' | 'ha
 function pairRouterRuntime(route: RouterProfile, mode: 'live' | 'harness', env: Env, executionEnabled: boolean, harnessPort: number): RouterRuntime {
   const http = createRouterHttp();
   const url = (chainId: number) => mode === 'harness' ? `http://127.0.0.1:${harnessPort}/router/${chainId}` : chainId === 4663 ? robinhoodRpcUrl(env.GRYLOO_ROBINHOOD_RPC_URL)
-    : routerRpcUrl(chainId === 8453 ? env.GRYLOO_BASE_RPC_URL : env.GRYLOO_ARBITRUM_RPC_URL, chainId === 8453 ? profile.source.rpc : profile.destination.rpc);
+    : routerRpcUrl(chainId === 1 ? env.GRYLOO_ETHEREUM_RPC_URL : chainId === 8453 ? env.GRYLOO_BASE_RPC_URL : env.GRYLOO_ARBITRUM_RPC_URL,
+      (route.source.chainId === chainId ? route.source : route.destination).rpc);
   const client = (chainId: number, methods: readonly string[]) => chainBoundRpc(mode === 'harness' ? createBaseSepoliaReadRpc(url(chainId), methods)
     : pacedReadRpc(createBaseSepoliaReadRpc(url(chainId), methods)), chainId);
   return { sourceRpc: client(route.source.chainId, ROUTER_BASE_RPC_METHODS), destinationRpc: client(route.destination.chainId, ROUTER_ARBITRUM_RPC_METHODS),
@@ -131,5 +134,12 @@ function pairRouterRuntime(route: RouterProfile, mode: 'live' | 'harness', env: 
     provenance: mode === 'harness' ? 'MOCKED' : 'PUBLIC_MAINNET', executionEnabled, profile: route };
 }
 export const routerNetworkRuntime = (network: RouterNetwork, mode: 'live' | 'harness', env: Env): RouterRuntime =>
-  isRobinhoodRouterNetwork(network) ? robinhoodRouterRuntime(network, mode, env) : isBaseRouterNetwork(network) ? baseRouterRuntime(network, mode, env)
+  isEthereumRouterNetwork(network) ? ethereumRouterRuntime(network, mode, env) : isRobinhoodRouterNetwork(network) ? robinhoodRouterRuntime(network, mode, env) : isBaseRouterNetwork(network) ? baseRouterRuntime(network, mode, env)
     : network === 'testnet' ? routerTestnetRuntime(mode, env) : routerRuntime(mode, env);
+
+/** Same Router and receipt reconciler, with independent deployment-wide Ethereum and Router opt-ins. */
+function ethereumRouterRuntime(network: EthereumRouterNetwork, mode: 'live' | 'harness', env: Env): RouterRuntime {
+  if (mode !== 'live') throw new Error('ETHEREUM_MAINNET_NOT_ENABLED');
+  const enabled = ethereumMainnetMode(env) === 'live' && ethereumOwnerExecutionEnabled(mode, env) && routerOwnerExecutionEnabled(mode, env);
+  return pairRouterRuntime(ETHEREUM_ROUTER_DEPLOYMENTS[network], mode, env, enabled, 8565);
+}

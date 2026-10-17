@@ -11,7 +11,7 @@ describe('shared Uniswap owner-wallet envelope', () => {
   it('uses each reviewed chain profile; no Base or testnet fallback for Arbitrum', () => {
     for (const [chain, expected] of [[42161, '0xa4b1'], ['eip155:42161', '0xa4b1'], [8453, '0x2105'], [4663, '0x1237'],
       [84532, '0x14a34'], [11155111, '0xaa36a7']] as const) expect(uniswapLiquidityChainHex(chain)).toBe(expected);
-    expect(uniswapLiquidityChainHex('eip155:1')).toBeUndefined(); expect(uniswapLiquidityChainHex(undefined)).toBeUndefined();
+    expect(uniswapLiquidityChainHex('eip155:1')).toBe('0x1'); expect(uniswapLiquidityChainHex(undefined)).toBeUndefined();
     expect(uniswapLiquidityWalletTransactionMatches(review, 'MINT', tx)).toBe(true);
   });
   it.each([

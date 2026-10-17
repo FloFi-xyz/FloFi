@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from 'vitest';
 import { createBorrowNode, createLendingCompositionWorkflow, createNativeTransferNode, createSupplyNode, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
-import { AAVE_V3_ARBITRUM, AAVE_V3_BASE, AAVE_V3_BASE_SEPOLIA, AAVE_V3_ETHEREUM_SEPOLIA, AAVE_V3_LENDING_PROFILES, ETHEREUM_MAINNET, ETHEREUM_SEPOLIA, ETHEREUM_SEPOLIA_ASSETS,
+import { AAVE_V3_ETHEREUM, AAVE_V3_ARBITRUM, AAVE_V3_BASE, AAVE_V3_BASE_SEPOLIA, AAVE_V3_ETHEREUM_SEPOLIA, AAVE_V3_LENDING_PROFILES, ETHEREUM_MAINNET, ETHEREUM_SEPOLIA, ETHEREUM_SEPOLIA_ASSETS,
   ETHEREUM_SEPOLIA_TRANSFER, NATIVE_TRANSFER_PROFILES, ROBINHOOD_TESTNET_TRANSFER, aaveLendingProfile, assertAaveLendingProfile, baseAssetRegistry,
   ethereumSepoliaAddChainParameters, executionCapabilityRegistry, nativeTransferProfile, resolveWorkflowCapability, LENDING_BASE_SEPOLIA } from '../src/index.js';
 
@@ -24,8 +24,8 @@ describe('Ethereum Sepolia network identity', () => {
       nativeCurrency: { name: 'Sepolia Ether', symbol: 'ETH', decimals: 18 }, rpcUrls: [ETHEREUM_SEPOLIA.rpc], blockExplorerUrls: ['https://sepolia.etherscan.io'] });
     expect(ETHEREUM_SEPOLIA.rpc).not.toMatch(/key|token|\/v[23]\//i);
   });
-  it('recognises Ethereum Mainnet as a distinct, non-executable network', () => {
-    expect(ETHEREUM_MAINNET).toMatchObject({ chain: 'eip155:1', chainHex: '0x1', environment: 'MAINNET', executable: false });
+  it('recognises Ethereum Mainnet as a distinct mainnet identity', () => {
+    expect(ETHEREUM_MAINNET).toMatchObject({ chain: 'eip155:1', chainHex: '0x1', environment: 'MAINNET', funds: 'REAL_FUNDS' });
     expect(ETHEREUM_MAINNET.chain).not.toBe(ETHEREUM_SEPOLIA.chain);
   });
 });
@@ -49,7 +49,7 @@ describe('Ethereum Sepolia assets', () => {
 describe('Aave V3 lending profiles', () => {
   it('select by CAIP-2 chain: Base Sepolia USDC (reserve 0) and Ethereum Sepolia WBTC (reserve 3, 8 decimals)', () => {
     // BUILD-BASE-001 appends Base mainnet (USDC); the testnet profiles keep their order and identity.
-    expect(AAVE_V3_LENDING_PROFILES).toEqual([AAVE_V3_BASE_SEPOLIA, AAVE_V3_ETHEREUM_SEPOLIA, AAVE_V3_BASE, AAVE_V3_ARBITRUM]);
+    expect(AAVE_V3_LENDING_PROFILES).toEqual([AAVE_V3_BASE_SEPOLIA, AAVE_V3_ETHEREUM_SEPOLIA, AAVE_V3_BASE, AAVE_V3_ARBITRUM, AAVE_V3_ETHEREUM]);
     expect(aaveLendingProfile('eip155:84532')).toBe(AAVE_V3_BASE_SEPOLIA);
     expect(aaveLendingProfile(ETH)).toBe(AAVE_V3_ETHEREUM_SEPOLIA);
     expect(AAVE_V3_BASE_SEPOLIA).toMatchObject({ reserveId: 0, decimals: 6, symbol: 'USDC', l1DataFee: true });
@@ -59,17 +59,17 @@ describe('Aave V3 lending profiles', () => {
       oracle: '0x2da88497588bf89281816106c7259e31af45a663' });
     expect(AAVE_V3_ETHEREUM_SEPOLIA.asset).toBe(ETHEREUM_SEPOLIA_ASSETS.WBTC.address);
   });
-  it('refuses Mainnet, unknown chains and look-alike profile objects', () => {
-    for (const chain of ['eip155:1', 'eip155:421614', 'eip155:4663', 'eip155:11155112', '']) expect(() => aaveLendingProfile(chain)).toThrow('AAVE_PROFILE_UNSUPPORTED');
+  it('refuses unregistered chains and look-alike profile objects', () => {
+    for (const chain of ['eip155:137', 'eip155:421614', 'eip155:4663', 'eip155:11155112', '']) expect(() => aaveLendingProfile(chain)).toThrow('AAVE_PROFILE_UNSUPPORTED');
     expect(() => assertAaveLendingProfile({ ...AAVE_V3_ETHEREUM_SEPOLIA })).toThrow('AAVE_PROFILE_UNSUPPORTED');
     expect(assertAaveLendingProfile(AAVE_V3_ETHEREUM_SEPOLIA)).toBe(AAVE_V3_ETHEREUM_SEPOLIA);
   });
-  it('transfer profiles cover the two testnets and (BUILD-RH-002) Robinhood Chain mainnet, never Ethereum Mainnet', () => {
-    expect(NATIVE_TRANSFER_PROFILES.map(profile => profile.chain)).toEqual([ROBINHOOD_TESTNET_TRANSFER.chain, ETHEREUM_SEPOLIA_TRANSFER.chain, 'eip155:4663', 'eip155:8453', 'eip155:42161']);
+  it('transfer profiles cover the two testnets and (BUILD-RH-002) Robinhood Chain mainnet, and Ethereum Mainnet separately', () => {
+    expect(NATIVE_TRANSFER_PROFILES.map(profile => profile.chain)).toEqual([ROBINHOOD_TESTNET_TRANSFER.chain, ETHEREUM_SEPOLIA_TRANSFER.chain, 'eip155:4663', 'eip155:8453', 'eip155:42161', 'eip155:1']);
     expect(NATIVE_TRANSFER_PROFILES.slice(0, 2)).toEqual([ROBINHOOD_TESTNET_TRANSFER, ETHEREUM_SEPOLIA_TRANSFER]);
     expect(nativeTransferProfile(ETH)).toMatchObject({ chainHex: '0xaa36a7', settlement: 'L1', minimumConfirmations: 3, adapterId: 'evm.native-transfer' });
     expect(nativeTransferProfile('eip155:46630')).toMatchObject({ settlement: 'L2' });
-    expect(() => nativeTransferProfile('eip155:1')).toThrow('TRANSFER_NETWORK_UNSUPPORTED');
+    expect(nativeTransferProfile('eip155:1')).toMatchObject({ settlement: 'L1', chainHex: '0x1', environment: 'MAINNET' });
   });
 });
 
@@ -85,12 +85,12 @@ describe('Ethereum Sepolia capability registry', () => {
       expect(row.requirements).toContain('REVIEWED_ARTIFACTS');
     }
   });
-  it('has no Ethereum Mainnet row of any kind', () => {
-    expect(executionCapabilityRegistry.filter(row => row.chainId === 'eip155:1')).toEqual([]);
-    const mainnet = resolveWorkflowCapability(flow(createSupplyNode('s', { chain: 'eip155:1', asset: { ...wbtc, chainId: 'eip155:1' }, amount: '1', beneficiary: owner })),
-      { environment: 'MAINNET' });
-    expect(mainnet.executionSupported).toBe(false);
-    expect(mainnet.blockers[0]).toMatchObject({ code: 'CHAIN_NOT_SUPPORTED' });
+  it('keeps Ethereum Mainnet capabilities separate from Sepolia testnet authorization and demonstrated evidence', () => {
+    const mainnet = executionCapabilityRegistry.filter(row => row.chainId === 'eip155:1');
+    expect(mainnet).toHaveLength(9);
+    expect(mainnet.every(row => row.environment === 'MAINNET' && row.evidenceMaturity === null)).toBe(true);
+    const sepolia = flow(createSupplyNode('s', { chain: ETH, asset: wbtc, amount: '1', beneficiary: owner }));
+    expect(resolveWorkflowCapability(sepolia, { environment: 'MAINNET' }).executionSupported).toBe(false);
   });
   it('supports Supply and the native transfer on Ethereum Sepolia only with the owner wallet on that chain', () => {
     const supply = flow(createSupplyNode('s', { chain: ETH, asset: wbtc, amount: '100000', beneficiary: owner }));

@@ -5,7 +5,7 @@
  * official parameters after the wallet reports it unknown (EIP-1193 code 4902). Switching never
  * signs, sends or retries a transaction.
  */
-import { ARBITRUM_ONE, ETHEREUM_MAINNET, ETHEREUM_SEPOLIA, ROBINHOOD_CHAIN_MAINNET, ROBINHOOD_CHAIN_TESTNET, baseAddChainParameters, ethereumSepoliaAddChainParameters,
+import { ARBITRUM_ONE, ETHEREUM_MAINNET, ETHEREUM_SEPOLIA, ROBINHOOD_CHAIN_MAINNET, ROBINHOOD_CHAIN_TESTNET, baseAddChainParameters, ethereumAddChainParameters, ethereumSepoliaAddChainParameters,
   robinhoodAddChainParameters } from '@defi-workflow-engine/action-registry';
 
 export type AddChainParameters = { readonly chainId: string; readonly chainName: string;
@@ -31,8 +31,8 @@ export const EVM_WALLET_NETWORKS: readonly EvmWalletNetwork[] = Object.freeze(([
   // BUILD-RH-002: a first-class mainnet. A switch target; added only from the official network record after the wallet reports 4902.
   { hex: ROBINHOOD_CHAIN_MAINNET.chainHex, chain: ROBINHOOD_CHAIN_MAINNET.chain, label: 'Robinhood Chain (4663)',
     environment: 'mainnet', switchable: true, add: robinhoodAddChainParameters(ROBINHOOD_CHAIN_MAINNET) },
-  // Ethereum Mainnet is named so a wallet on it is recognized and refused. Sepolia support never implies Mainnet: no switch, no add.
-  { hex: ETHEREUM_MAINNET.chainHex, chain: ETHEREUM_MAINNET.chain, label: 'Ethereum Mainnet (1)', environment: 'mainnet', switchable: false, add: null },
+  // Mainnet and Sepolia remain separate explicit switch targets. Switching never signs or submits.
+  { hex: ETHEREUM_MAINNET.chainHex, chain: ETHEREUM_MAINNET.chain, label: 'Ethereum Mainnet (1)', environment: 'mainnet', switchable: true, add: ethereumAddChainParameters() },
 ] satisfies EvmWalletNetwork[]).map(network => Object.freeze(network)));
 
 export function walletNetwork(hex: string | null | undefined): EvmWalletNetwork | null {

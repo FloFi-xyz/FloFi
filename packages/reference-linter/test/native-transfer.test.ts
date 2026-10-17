@@ -12,7 +12,7 @@ describe('RH-DEMO-001 authoring validation', () => {
   it('refuses other networks, oversize values and composition', () => {
     const context = createBaseSepoliaReviewContext();
     expect(() => validateAuthoringWorkflow(workflow(node('eip155:84532')), context)).toThrow('TRANSFER_NETWORK_UNSUPPORTED');
-    expect(() => validateAuthoringWorkflow(workflow(node('eip155:1')), context)).toThrow('TRANSFER_NETWORK_UNSUPPORTED');
+    expect(() => validateAuthoringWorkflow(workflow(node('eip155:137')), context)).toThrow('TRANSFER_NETWORK_UNSUPPORTED');
     expect(() => validateAuthoringWorkflow(workflow(node('eip155:46630', '1000000000000001')), context)).toThrow('TRANSFER_AMOUNT_OUT_OF_RANGE');
     expect(() => validateAuthoringWorkflow(workflow(node(), node(undefined, undefined, 'node-003')), context)).toThrow('TRANSFER_ISOLATED_ONLY');
   });

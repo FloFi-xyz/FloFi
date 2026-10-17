@@ -338,8 +338,8 @@ describe('Bridge card networks use existing router authoring capabilities', () =
   it('rejects unsupported endpoints, wrong-side choices and network edits on other actions', () => {
     const initial = start('bridge');
     // BUILD-RH-002: Arbitrum is now a source (→ Robinhood Chain) and Base a destination (Robinhood Chain →); other chains stay unsupported.
-    for (const source of ['Ethereum', 'Optimism', 'Solana']) expect(choose(initial, { source: source as 'Base' })).toBe(initial);
-    for (const destination of ['Ethereum', 'Optimism']) expect(choose(initial, { destination: destination as 'Arbitrum' })).toBe(initial);
+    for (const source of ['Optimism', 'Solana']) expect(choose(initial, { source: source as 'Base' })).toBe(initial);
+    for (const destination of ['Optimism']) expect(choose(initial, { destination: destination as 'Arbitrum' })).toBe(initial);
     const other = start('swap'); expect(choose(other, { source: 'Base' })).toBe(other);
     expect(choose(initial, { source: 'Base' }, 'other-card')).toBe(initial);
   });

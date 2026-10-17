@@ -83,9 +83,22 @@ export const AAVE_V3_ARBITRUM = Object.freeze({
   officialSource: 'https://github.com/aave-dao/aave-address-book/blob/main/src/AaveV3Arbitrum.sol',
   l1DataFee: false, environment: 'MAINNET', poolRevision: 11, ownerBeneficiary: true,
 } as const);
-export type AaveLendingProfile = typeof AAVE_V3_BASE_SEPOLIA | typeof AAVE_V3_ETHEREUM_SEPOLIA | typeof AAVE_V3_BASE | typeof AAVE_V3_ARBITRUM;
+/** Ethereum Aave V3 USDC reserve, verified PUBLIC_READ_ONLY against the DAO address book and block 26208660.
+ * Current one-reserve engine: ordinary owner collateral, variable-rate debt, partial Repay/Withdraw. No native gateway.
+ */
+export const AAVE_V3_ETHEREUM = Object.freeze({
+  network: 'Ethereum', chainId: 1, chain: 'eip155:1', chainHex: '0x1', protocol: 'aave-v3',
+  pool: '0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2', poolImplementation: '0x728a138a4823392c2efa55e028d434f526fe03cf', provider: '0x2f39d218133afab8f2b819b1066c7e434ad94e9e',
+  asset: '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', decimals: 6, symbol: 'USDC', reserveId: 3,
+  aToken: '0x98c23e9d8f34fefb1b7bd6a91b7ff122f4e16f5c', variableDebtToken: '0x72e95b8931767c79ba4eee721354d6e99a61d004',
+  oracle: '0x54586be62e3c3580375ae3723c145253060ca0c2', faucet: null,
+  explorer: 'https://etherscan.io', rpc: 'https://ethereum-rpc.publicnode.com',
+  officialSource: 'https://github.com/aave-dao/aave-address-book/blob/main/src/AaveV3Ethereum.sol',
+  l1DataFee: false, environment: 'MAINNET', poolRevision: 11, ownerBeneficiary: true, validateSupplyCap: true,
+} as const);
+export type AaveLendingProfile = typeof AAVE_V3_BASE_SEPOLIA | typeof AAVE_V3_ETHEREUM_SEPOLIA | typeof AAVE_V3_BASE | typeof AAVE_V3_ARBITRUM | typeof AAVE_V3_ETHEREUM;
 /** One verified asset per network. Profiles are chosen by the authored or reviewed chain, never by symbol. */
-export const AAVE_V3_LENDING_PROFILES: readonly AaveLendingProfile[] = Object.freeze([AAVE_V3_BASE_SEPOLIA, AAVE_V3_ETHEREUM_SEPOLIA, AAVE_V3_BASE, AAVE_V3_ARBITRUM]);
+export const AAVE_V3_LENDING_PROFILES: readonly AaveLendingProfile[] = Object.freeze([AAVE_V3_BASE_SEPOLIA, AAVE_V3_ETHEREUM_SEPOLIA, AAVE_V3_BASE, AAVE_V3_ARBITRUM, AAVE_V3_ETHEREUM]);
 /** The deployment environment of a lending profile (the testnet profiles predate the field). */
 export const aaveEnvironment = (profile: AaveLendingProfile): 'PUBLIC_TESTNET' | 'MAINNET' => 'environment' in profile ? profile.environment : 'PUBLIC_TESTNET';
 export function aaveLendingProfile(chain: string): AaveLendingProfile {

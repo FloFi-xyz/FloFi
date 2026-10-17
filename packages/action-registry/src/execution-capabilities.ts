@@ -99,7 +99,7 @@ add('asset.bridge', 'flofi.router', 'eip155:8453', 'MAINNET', fork, null, 'DIREC
 add('asset.bridge', 'flofi.router', 'eip155:84532', 'PUBLIC_TESTNET', fork, null, 'DIRECT_TRANSACTION', ['INJECTED_WALLET', 'QUOTE_PROVIDER', 'REVIEWED_ARTIFACTS'], ['A']);
 // BUILD-ETHEREUM-001: Ethereum Sepolia (eip155:11155111), a public testnet. Aave V3 WBTC Supply/Borrow/Repay/Withdraw and a
 // native test-ETH self-transfer, each signed and sent only by the owner's browser wallet. Owner execution is implemented;
-// none is demonstrated yet, so no evidence ceiling is claimed. Ethereum Mainnet (eip155:1) has no row of any kind.
+// none is demonstrated yet, so no evidence ceiling is claimed. Mainnet capabilities have independent profiles below.
 for (const action of ['supply', 'borrow', 'repay', 'withdraw'])
   add(action, 'aave-v3', 'eip155:11155111', 'PUBLIC_TESTNET', fork, null, 'DIRECT_TRANSACTION', ['INJECTED_WALLET', 'QUOTE_PROVIDER', 'REVIEWED_ARTIFACTS'], ['A']);
 add('asset.transfer', 'evm.native-transfer', 'eip155:11155111', 'PUBLIC_TESTNET', fork, null, 'DIRECT_TRANSACTION', ['INJECTED_WALLET', 'QUOTE_PROVIDER', 'REVIEWED_ARTIFACTS'], ['A']);
@@ -134,6 +134,10 @@ add('asset.liquidity.concentrated', 'uniswap.v3', 'eip155:42161', 'MAINNET', for
 // BUILD-ARB-001 phase 5: the shared one-reserve Aave runtime; connected owner wallet, gates default off.
 for (const action of ['supply', 'borrow', 'repay', 'withdraw'] as const)
   add(action, 'aave-v3', 'eip155:42161', 'MAINNET', fork, null, 'DIRECT_TRANSACTION', ['INJECTED_WALLET', 'QUOTE_PROVIDER', 'REVIEWED_ARTIFACTS'], ['A']);
+// Ethereum L1: shared catalog swap/transfer; evidence remains undemonstrated and execution stays deployment-gated.
+for (const [action, adapter] of [['asset.swap.exact-input', 'uniswap.v3'], ['asset.transfer', 'evm.native-transfer'], ['asset.transfer', 'evm.token-transfer'], ['asset.bridge', 'flofi.router'], ['asset.liquidity.concentrated', 'uniswap.v3'],
+  ['supply', 'aave-v3'], ['borrow', 'aave-v3'], ['repay', 'aave-v3'], ['withdraw', 'aave-v3']] as const)
+  add(action, adapter, 'eip155:1', 'MAINNET', fork, null, 'DIRECT_TRANSACTION', ['INJECTED_WALLET', 'QUOTE_PROVIDER', 'REVIEWED_ARTIFACTS'], ['A']);
 export const executionCapabilityRegistry: readonly ExecutionCapabilityProfile[] = Object.freeze(rows);
 
 export type CapabilityRuntime = {

@@ -23,13 +23,13 @@ export type RouterRunSummary = { runId: string; status: string; hasEvidence: boo
 // BUILD-BASE-001: Arbitrum → Base is the Router's own route, under `$GRYLOO_ROUTER_JOURNAL/router-arbitrum-to-base`.
 const FLOW = { mainnet: 'crosschain-router', testnet: 'crosschain-router-testnet', 'base-to-robinhood': 'crosschain-router-base-to-robinhood',
   'robinhood-to-base': 'crosschain-router-robinhood-to-base', 'arbitrum-to-robinhood': 'crosschain-router-arbitrum-to-robinhood',
-  'robinhood-to-arbitrum': 'crosschain-router-robinhood-to-arbitrum', 'arbitrum-to-base': 'crosschain-router-arbitrum-to-base' } as const satisfies Readonly<Record<RouterNetwork, string>>;
+  'robinhood-to-arbitrum': 'crosschain-router-robinhood-to-arbitrum', 'arbitrum-to-base': 'crosschain-router-arbitrum-to-base', 'ethereum-to-base': 'crosschain-router-ethereum-to-base', 'base-to-ethereum': 'crosschain-router-base-to-ethereum', 'ethereum-to-arbitrum': 'crosschain-router-ethereum-to-arbitrum', 'arbitrum-to-ethereum': 'crosschain-router-arbitrum-to-ethereum', 'ethereum-to-robinhood': 'crosschain-router-ethereum-to-robinhood', 'robinhood-to-ethereum': 'crosschain-router-robinhood-to-ethereum' } as const satisfies Readonly<Record<RouterNetwork, string>>;
 const DISABLED: Readonly<Record<RouterNetwork, string>> = { mainnet: 'ROUTER_NOT_ENABLED', testnet: 'ROUTER_TESTNET_NOT_ENABLED', 'base-to-robinhood': 'ROBINHOOD_MAINNET_NOT_ENABLED',
   'robinhood-to-base': 'ROBINHOOD_MAINNET_NOT_ENABLED', 'arbitrum-to-robinhood': 'ROBINHOOD_MAINNET_NOT_ENABLED', 'robinhood-to-arbitrum': 'ROBINHOOD_MAINNET_NOT_ENABLED',
-  'arbitrum-to-base': 'ROUTER_NOT_ENABLED' };
+  'arbitrum-to-base': 'ROUTER_NOT_ENABLED', 'ethereum-to-base': 'ETHEREUM_MAINNET_NOT_ENABLED', 'base-to-ethereum': 'ETHEREUM_MAINNET_NOT_ENABLED', 'ethereum-to-arbitrum': 'ETHEREUM_MAINNET_NOT_ENABLED', 'arbitrum-to-ethereum': 'ETHEREUM_MAINNET_NOT_ENABLED', 'ethereum-to-robinhood': 'ETHEREUM_MAINNET_NOT_ENABLED', 'robinhood-to-ethereum': 'ETHEREUM_MAINNET_NOT_ENABLED' };
 const JOURNAL: Readonly<Record<RouterNetwork, string>> = { mainnet: 'GRYLOO_ROUTER_JOURNAL', testnet: 'GRYLOO_ROUTER_TESTNET_JOURNAL', 'base-to-robinhood': 'GRYLOO_ROBINHOOD_JOURNAL',
   'robinhood-to-base': 'GRYLOO_ROBINHOOD_JOURNAL', 'arbitrum-to-robinhood': 'GRYLOO_ROBINHOOD_JOURNAL', 'robinhood-to-arbitrum': 'GRYLOO_ROBINHOOD_JOURNAL',
-  'arbitrum-to-base': 'GRYLOO_ROUTER_JOURNAL' };
+  'arbitrum-to-base': 'GRYLOO_ROUTER_JOURNAL', 'ethereum-to-base': 'GRYLOO_ETHEREUM_JOURNAL', 'base-to-ethereum': 'GRYLOO_ETHEREUM_JOURNAL', 'ethereum-to-arbitrum': 'GRYLOO_ETHEREUM_JOURNAL', 'arbitrum-to-ethereum': 'GRYLOO_ETHEREUM_JOURNAL', 'ethereum-to-robinhood': 'GRYLOO_ETHEREUM_JOURNAL', 'robinhood-to-ethereum': 'GRYLOO_ETHEREUM_JOURNAL' };
 const isNetwork = (value: unknown): value is RouterNetwork => (ROUTER_NETWORKS as readonly unknown[]).includes(value);
 const services = new Map<RouterNetwork, RouterService>();
 function journalDir(network: RouterNetwork): string {

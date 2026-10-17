@@ -31,7 +31,7 @@ function recoveredRepayApproval(record:SupplyRecord):boolean {
  * Mainnet execution defaults off and needs the network's owner-execution opt-in; Simulate and Review remain read-only.
  */
 export function createSupplyService(input:{rpc:SupplyRpc;rpcs?:Readonly<Partial<Record<string,SupplyRpc>>>;journalDir?:string;storage?:ExecutionStorage;provenance:'PUBLIC_TESTNET'|'PUBLIC_MAINNET'|'MOCKED';
-  idPrefix?:'supply'|'baave'|'araave';executionEnabled?:boolean}) {
+  idPrefix?:'supply'|'baave'|'araave'|'etaave';executionEnabled?:boolean}) {
   const idPrefix=input.idPrefix??'supply',executionEnabled=input.executionEnabled??(idPrefix==='supply');
   // A mainnet service is never labelled as a testnet one, and a testnet service never as mainnet.
   if(input.provenance===(idPrefix!=='supply'?'PUBLIC_TESTNET':'PUBLIC_MAINNET'))throw new Error('SUPPLY_PROVENANCE_INVALID');

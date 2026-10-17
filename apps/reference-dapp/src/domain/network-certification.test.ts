@@ -23,15 +23,15 @@ const owner = '0x1111111111111111111111111111111111111111';
 /** The verified matrix: action → environment → [network, chain]. Arbitrum Sepolia is a Router route only; Robinhood Chain Testnet is Send only. */
 const MATRIX: Readonly<Record<CryptoAction, Readonly<Record<'testnet' | 'mainnet', readonly (readonly [string, string])[]>>>> = {
   swap: { testnet: [['Base Sepolia', 'eip155:84532'], ['Ethereum Sepolia', 'eip155:11155111'], ['Solana Devnet', ORCA_WHIRLPOOLS_DEVNET.chain]],
-    mainnet: [['Base', 'eip155:8453'], ['Solana', JUPITER_SOLANA_MAINNET.chain], ['Robinhood Chain', 'eip155:4663'], ['Arbitrum One', 'eip155:42161']] },
+    mainnet: [['Base', 'eip155:8453'], ['Solana', JUPITER_SOLANA_MAINNET.chain], ['Robinhood Chain', 'eip155:4663'], ['Arbitrum One', 'eip155:42161'], ['Ethereum', 'eip155:1']] },
   pool: { testnet: [['Base Sepolia', 'eip155:84532'], ['Ethereum Sepolia', 'eip155:11155111'], ['Solana Devnet', ORCA_WHIRLPOOLS_DEVNET.chain]],
-    mainnet: [['Base', 'eip155:8453'], ['Solana', JUPITER_SOLANA_MAINNET.chain], ['Robinhood Chain', 'eip155:4663'], ['Arbitrum One', 'eip155:42161']] },
+    mainnet: [['Base', 'eip155:8453'], ['Solana', JUPITER_SOLANA_MAINNET.chain], ['Robinhood Chain', 'eip155:4663'], ['Arbitrum One', 'eip155:42161'], ['Ethereum', 'eip155:1']] },
   transfer: { testnet: [['Robinhood Chain Testnet', 'eip155:46630'], ['Ethereum Sepolia', 'eip155:11155111']],
-    mainnet: [['Robinhood Chain', 'eip155:4663'], ['Base', 'eip155:8453'], ['Arbitrum One', 'eip155:42161']] },
-  supply: { testnet: [['Base Sepolia', 'eip155:84532'], ['Ethereum Sepolia', 'eip155:11155111']], mainnet: [['Base', 'eip155:8453'], ['Arbitrum One', 'eip155:42161']] },
-  borrow: { testnet: [['Base Sepolia', 'eip155:84532'], ['Ethereum Sepolia', 'eip155:11155111']], mainnet: [['Base', 'eip155:8453'], ['Arbitrum One', 'eip155:42161']] },
-  repay: { testnet: [['Base Sepolia', 'eip155:84532'], ['Ethereum Sepolia', 'eip155:11155111']], mainnet: [['Base', 'eip155:8453'], ['Arbitrum One', 'eip155:42161']] },
-  withdraw: { testnet: [['Base Sepolia', 'eip155:84532'], ['Ethereum Sepolia', 'eip155:11155111']], mainnet: [['Base', 'eip155:8453'], ['Arbitrum One', 'eip155:42161']] },
+    mainnet: [['Robinhood Chain', 'eip155:4663'], ['Base', 'eip155:8453'], ['Arbitrum One', 'eip155:42161'], ['Ethereum', 'eip155:1']] },
+  supply: { testnet: [['Base Sepolia', 'eip155:84532'], ['Ethereum Sepolia', 'eip155:11155111']], mainnet: [['Base', 'eip155:8453'], ['Arbitrum One', 'eip155:42161'], ['Ethereum', 'eip155:1']] },
+  borrow: { testnet: [['Base Sepolia', 'eip155:84532'], ['Ethereum Sepolia', 'eip155:11155111']], mainnet: [['Base', 'eip155:8453'], ['Arbitrum One', 'eip155:42161'], ['Ethereum', 'eip155:1']] },
+  repay: { testnet: [['Base Sepolia', 'eip155:84532'], ['Ethereum Sepolia', 'eip155:11155111']], mainnet: [['Base', 'eip155:8453'], ['Arbitrum One', 'eip155:42161'], ['Ethereum', 'eip155:1']] },
+  withdraw: { testnet: [['Base Sepolia', 'eip155:84532'], ['Ethereum Sepolia', 'eip155:11155111']], mainnet: [['Base', 'eip155:8453'], ['Arbitrum One', 'eip155:42161'], ['Ethereum', 'eip155:1']] },
 };
 const actions = Object.keys(MATRIX) as CryptoAction[];
 const cases = actions.flatMap(action => (['testnet', 'mainnet'] as const).flatMap(environment => MATRIX[action][environment].map(([network, chain]) => [action, environment, network, chain] as const)));
@@ -117,7 +117,7 @@ describe('changing environment re-networks a step only within its own family', (
     [{ action: 'swap', network: 'Base', from: 'WETH', to: 'USDC' }, 'testnet', { action: 'swap', network: 'Base Sepolia', from: 'WETH', to: 'USDC' }],
     // Families without a network in the other environment never move to another chain.
     [{ action: 'swap', network: 'Arbitrum One', from: 'USDC', to: 'WETH' }, 'testnet', null],
-    [{ action: 'swap', network: 'Ethereum Sepolia', from: 'USDC', to: 'WETH' }, 'mainnet', null],
+    [{ action: 'swap', network: 'Ethereum Sepolia', from: 'USDC', to: 'WETH' }, 'mainnet', { action: 'swap', network: 'Ethereum', from: 'USDC', to: 'WETH' }],
     [{ action: 'pool', network: 'Solana Devnet', from: 'SOL', to: 'devUSDC' }, 'mainnet', { action: 'pool', network: 'Solana', from: 'SOL', to: 'USDC' }],
     [{ action: 'pool', network: 'Solana', from: 'SOL', to: 'USDC' }, 'testnet', { action: 'pool', network: 'Solana Devnet', from: 'SOL', to: 'devUSDC' }],
     [{ action: 'supply', network: 'Base Sepolia', from: 'USDC' }, 'mainnet', { action: 'supply', network: 'Base', from: 'USDC' }],
@@ -139,7 +139,7 @@ describe('changing environment re-networks a step only within its own family', (
     expect(familyCounterpart('eip155:84532', 'MAINNET')?.chain).toBe('eip155:8453');
     expect(familyCounterpart('eip155:42161', 'TESTNET')?.name).toBe('Arbitrum Sepolia');
     expect(familyCounterpart('eip155:4663', 'TESTNET')?.chain).toBe('eip155:46630');
-    expect(familyCounterpart('eip155:11155111', 'MAINNET')).toBeNull();
+    expect(familyCounterpart('eip155:11155111', 'MAINNET')?.chain).toBe('eip155:1');
     expect(familyCounterpart('eip155:8453', 'MAINNET')?.chain).toBe('eip155:8453');
   });
 });

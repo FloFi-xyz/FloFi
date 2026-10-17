@@ -12,7 +12,7 @@ import type { SemanticWorkflow } from './semantic-workflow.js';
 type Node = SemanticWorkflow['nodes'][number];
 export const CATALOG_SWAP_ACTION = 'asset.swap.exact-input';
 /** Networks whose swaps are authored from the official asset catalog (Robinhood Chain; BUILD-BASE-001 Base). */
-export const CATALOG_SWAP_CHAINS: readonly string[] = Object.freeze(['eip155:4663', 'eip155:8453', 'eip155:42161']);
+export const CATALOG_SWAP_CHAINS: readonly string[] = Object.freeze(['eip155:4663', 'eip155:8453', 'eip155:42161', 'eip155:1']);
 const BASE_USDC = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913', BASE_WETH = '0x4200000000000000000000000000000000000006';
 /**
  * BUILD-BASE-001: Base's reference pair. USDC ⇄ WETH on Base keeps its BUILD-002 declaration (the reference registry swap, authored by

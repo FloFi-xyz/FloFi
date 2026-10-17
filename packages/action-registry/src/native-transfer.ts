@@ -2,14 +2,15 @@
 import { ROBINHOOD_MAINNET_TRANSFER, ROBINHOOD_TESTNET_TRANSFER } from './robinhood-chain.js';
 import { ETHEREUM_SEPOLIA_TRANSFER } from './ethereum-sepolia.js';
 import { ARBITRUM_ONE_TRANSFER } from './arbitrum-chain.js';
+import { ETHEREUM_MAINNET_TRANSFER } from './ethereum-chain.js';
 import { BASE_MAINNET_TRANSFER } from './base-chain.js';
 /**
  * The transfer profiles: the native test-ETH self-transfers on public testnets (RH-DEMO-001, BUILD-ETHEREUM-001), Robinhood Chain mainnet
  * since BUILD-RH-002 and Base mainnet since BUILD-BASE-001 (native ETH and catalog ERC-20s, explicit recipients allowed).
  */
-export type NativeTransferProfile = typeof ROBINHOOD_TESTNET_TRANSFER | typeof ETHEREUM_SEPOLIA_TRANSFER | typeof ROBINHOOD_MAINNET_TRANSFER | typeof BASE_MAINNET_TRANSFER | typeof ARBITRUM_ONE_TRANSFER;
+export type NativeTransferProfile = typeof ROBINHOOD_TESTNET_TRANSFER | typeof ETHEREUM_SEPOLIA_TRANSFER | typeof ROBINHOOD_MAINNET_TRANSFER | typeof BASE_MAINNET_TRANSFER | typeof ARBITRUM_ONE_TRANSFER | typeof ETHEREUM_MAINNET_TRANSFER;
 export const NATIVE_TRANSFER_PROFILES: readonly NativeTransferProfile[] = Object.freeze([ROBINHOOD_TESTNET_TRANSFER, ETHEREUM_SEPOLIA_TRANSFER, ROBINHOOD_MAINNET_TRANSFER,
-  BASE_MAINNET_TRANSFER, ARBITRUM_ONE_TRANSFER]);
+  BASE_MAINNET_TRANSFER, ARBITRUM_ONE_TRANSFER, ETHEREUM_MAINNET_TRANSFER]);
 /** Explicit recipients and ERC-20 transfers are a profile capability (the mainnet profiles: Robinhood Chain and Base). */
 export const transferAllowsRecipients = (profile: NativeTransferProfile) => 'recipients' in profile && profile.recipients === 'ANY';
 /** Value-only sends can target code when the profile binds that code into Review and checks the exact owner debit. */

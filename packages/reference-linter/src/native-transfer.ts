@@ -6,7 +6,7 @@ import { validateCatalogAssetIdentity } from './catalog-swap.js';
  * One isolated transfer on a network with a transfer profile; templates may coexist, nothing may connect. The testnet profiles
  * (RH-DEMO-001 Robinhood Testnet, BUILD-ETHEREUM-001 Ethereum Sepolia) remain native self-transfers only. BUILD-RH-002: Robinhood
  * Chain mainnet also accepts an explicit recipient and catalog ERC-20s (pinned base assets, or issuer-registered assets bound by
- * their official id). Any other chain, Ethereum Mainnet included, is refused.
+ * their official id). Networks without a registered transfer profile are refused.
  */
 export function validateNativeTransferWorkflow(workflow: SemanticWorkflow): TransferFields {
   const nodes = workflow.nodes.filter(n => n.actionType === TRANSFER_ACTION);

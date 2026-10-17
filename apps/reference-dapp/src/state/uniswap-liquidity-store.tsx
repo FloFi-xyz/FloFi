@@ -68,7 +68,7 @@ export function UniswapLiquidityProvider({ children }: { children: ReactNode }) 
       }).catch(() => undefined);
     try {
       const pointer = JSON.parse(window.localStorage.getItem(KEY) ?? 'null') as { id?: unknown; hash?: unknown } | null;
-      if (pointer && typeof pointer.id === 'string' && /^(?:unilp|rhlp|balp|arlp)-[a-f0-9]{32}$/.test(pointer.id)) (async () => {
+      if (pointer && typeof pointer.id === 'string' && /^(?:unilp|rhlp|balp|arlp|etlp)-[a-f0-9]{32}$/.test(pointer.id)) (async () => {
         // A hash saved before the browser closed reaches the server first; it is never resent to a wallet.
         if (typeof pointer.hash === 'string' && /^0x[0-9a-f]{64}$/.test(pointer.hash))
           await uniswapLiquidityReport(pointer.id as string, { kind: 'HASH', hash: pointer.hash }).catch(() => undefined);

@@ -25,7 +25,7 @@ const Iso = Type.String({ maxLength: 40, pattern: '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:
 const Period = literalUnion(['DAY', 'WEEK', 'MONTH'] as const);
 const Asset = literalUnion(['ETH', 'BTC', 'SOL'] as const);
 const Step = Type.Object({ asset: Asset, side: literalUnion(['BUY', 'SELL'] as const),
-  network: literalUnion(['base', 'base-sepolia', 'ethereum-sepolia', 'solana', 'solana-devnet'] as const), amount: Decimal,
+  network: literalUnion(['base', 'base-sepolia', 'ethereum-sepolia', 'solana', 'solana-devnet', 'ethereum'] as const), amount: Decimal,
   slippageBps: Type.Integer({ minimum: 0, maximum: 1_000 }) }, strict);
 const Schedule = Type.Object({ frequency: literalUnion(['DAILY', 'WEEKLY'] as const), weekday: Type.Union([Type.Integer({ minimum: 1, maximum: 7 }), Type.Null()]),
   time: Type.String({ pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$' }), timezone: Type.String({ minLength: 1, maxLength: 64 }) }, strict);

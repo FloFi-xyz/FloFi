@@ -18,7 +18,7 @@ import { useLocale } from '../i18n/locale';
 import { DELEGATION_ERROR_TEXT, DelegatedLimitsFlow, ScheduleFields, scheduleTrigger, useDelegationRunner, type ScheduleDraft } from './delegated-automations';
 
 export type CanvasAutomationDraft = { readonly workflow: unknown; readonly name: string; readonly dismiss: () => void };
-const NETWORK_LABEL: Readonly<Record<string, string>> = { 'base-sepolia': 'Base Sepolia', 'ethereum-sepolia': 'Ethereum Sepolia', 'solana-devnet': 'Solana Devnet', base: 'Base', solana: 'Solana' };
+const NETWORK_LABEL: Readonly<Record<string, string>> = { 'base-sepolia': 'Base Sepolia', 'ethereum-sepolia': 'Ethereum Sepolia', 'solana-devnet': 'Solana Devnet', base: 'Base', solana: 'Solana', ethereum: 'Ethereum' };
 const MAINNET_CHAINS = new Set(['eip155:1', 'eip155:8453', 'eip155:42161', 'eip155:10', 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d']);
 const REFUSAL_TEXT: Readonly<Record<string, string>> = {
   AUTOMATION_WORKFLOW_NOT_REPRESENTABLE: 'Some steps cannot run as an automation yet.', AUTOMATION_WORKFLOW_EMPTY: 'Add an action to the Canvas first.',

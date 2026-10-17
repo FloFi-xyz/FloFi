@@ -17,6 +17,10 @@ export type TokenListNetwork = {
   /** Keeps existing provider error codes stable across the shared refactor. */ readonly errorPrefix: string;
   /** Reviewed chain-bound exclusions, such as a known on-chain decimals mismatch. Never repaired by symbol. */
   readonly excludedAddresses?: readonly string[];
+  /** Provider-specific grammar; existing providers keep ASSET_SYMBOL for compatibility. */
+  readonly symbolPattern?: RegExp;
+  /** Reviewed ambiguous symbols: exclude every matching identity, never choose a winner or rename a token. */
+  readonly excludedAmbiguousSymbols?: readonly string[];
 };
 const isRecord = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
 const hasControlCharacter = (text: string) => Array.from(text).some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127);
@@ -45,11 +49,13 @@ export function uniswapTokenListProvider(profile: TokenListNetwork): AssetProvid
       if (typeof symbol !== 'string' || symbol.length < 1 || symbol.length > 32 || hasControlCharacter(symbol)) return fail('SYMBOL_INVALID');
       const lower = address.toLowerCase();
       records.push({ address: lower, symbol, name: name.trim(), decimals,
-        included: ASSET_SYMBOL.test(symbol) && !profile.excludedAddresses?.includes(lower), logoUrl: acceptAssetLogo(raw.logoURI, profile.logos, lower) });
+        included: (profile.symbolPattern ?? ASSET_SYMBOL).test(symbol) && !profile.excludedAddresses?.includes(lower) &&
+          !profile.excludedAmbiguousSymbols?.includes(symbol.toUpperCase()), logoUrl: acceptAssetLogo(raw.logoURI, profile.logos, lower) });
     }
     // Excluded twins still make an identity ambiguous. Check all records before filtering.
     for (const key of ['address', 'symbol'] as const) {
-      const values = records.map(record => key === 'symbol' ? record.symbol.toUpperCase() : record.address);
+      const values = records.filter(record => key !== 'symbol' || !profile.excludedAmbiguousSymbols?.includes(record.symbol.toUpperCase()))
+        .map(record => key === 'symbol' ? record.symbol.toUpperCase() : record.address);
       if (new Set(values).size !== values.length) fail('DUPLICATE_ASSET');
     }
     for (const record of records) {
@@ -74,5 +80,6 @@ export function isTokenListNetworkCatalog(catalog: AssetCatalog, profile: TokenL
   return catalog.format === 'flofi.asset-catalog.v1' && catalog.chain === profile.pinned.chain && catalog.chainId === profile.pinned.chainId && catalog.network === profile.pinned.network &&
     profile.pinned.assets.every(pinned => catalog.assets.some(asset => asset.id === pinned.id && asset.decimals === pinned.decimals && asset.symbol === pinned.symbol)) &&
     catalog.assets.every(asset => asset.assetClass !== 'STOCK_TOKEN' && asset.stock === null && !profile.excludedAddresses?.includes(asset.address ?? '') &&
+      !profile.excludedAmbiguousSymbols?.includes(asset.symbol.toUpperCase()) &&
       (profile.pinned.assets.some(pinned => pinned.id === asset.id) || (asset.source.provider === UNISWAP_TOKEN_LIST.provider && asset.source.url === UNISWAP_TOKEN_LIST.url)));
 }

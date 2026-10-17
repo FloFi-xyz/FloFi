@@ -62,7 +62,7 @@ describe('BUILD-CLOUD-PARITY-001 readiness', () => {
   it('lists every supported network once with its expected chain', () => {
     expect(readinessProbes({}).map(p => `${p.name}=${p.chain}`)).toEqual(['base-sepolia=eip155:84532', 'base-sepolia-aave=eip155:84532', 'ethereum-sepolia=eip155:11155111',
       'arbitrum-sepolia=eip155:421614', 'robinhood-testnet=eip155:46630', 'solana-devnet=solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1', 'base=eip155:8453',
-      'arbitrum=eip155:42161', 'solana=solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp']);
+      'ethereum=eip155:1', 'arbitrum=eip155:42161', 'solana=solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp']);
   });
   it('local development is reported as such, with no flow probing through a cloud runtime', async () => {
     const report = await readiness({ env: {}, fetcher: chains({}).fetcher });

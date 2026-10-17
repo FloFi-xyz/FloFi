@@ -5,6 +5,7 @@
  * policy lists the network, REAL_FUNDS survives, and evidence is reported but never a gate.
  */
 import { describe, expect, it } from 'vitest';
+import { PREVIEW_METHODS } from '../../backend/preview.ts';
 import { FLOWS, type FlowName } from '../../backend/flows.ts';
 import { composeStrategy, type Composition } from '../engine/strategy-engine';
 import { STRATEGY_EXAMPLES } from '../engine/strategy-examples';
@@ -29,8 +30,12 @@ describe('BUILD-MCP-002 handoff policy', () => {
   });
   it('fails closed on anything malformed, including a testnet listed as a mainnet', () => {
     for (const env of [{ FLOFI_MCP_HANDOFF_TEST_FUNDS: 'yes' }, { FLOFI_MCP_HANDOFF_MAINNET_NETWORKS: 'base-sepolia' }, { FLOFI_MCP_HANDOFF_MAINNET_NETWORKS: 'solana-devnet' },
-      { FLOFI_MCP_HANDOFF_MAINNET_NETWORKS: 'ethereum' }, { FLOFI_MCP_HANDOFF_MAINNET_NETWORKS: 'all' }])
+      { FLOFI_MCP_HANDOFF_MAINNET_NETWORKS: 'ethereum-sepolia' }, { FLOFI_MCP_HANDOFF_MAINNET_NETWORKS: 'all' }])
       expect(readHandoffPolicy(env), JSON.stringify(env)).toEqual({ ok: false, code: 'MCP_HANDOFF_POLICY_INVALID' });
+  });
+  it('accepts Ethereum only when explicitly listed in the mainnet handoff policy', () => {
+    expect(readHandoffPolicy({ FLOFI_MCP_HANDOFF_MAINNET_NETWORKS: 'ethereum' }))
+      .toEqual({ ok: true, testFunds: true, mainnetNetworks: ['ethereum'] });
   });
 });
 
@@ -48,6 +53,27 @@ describe('BUILD-MCP-002 execution plans', () => {
       if (plan.kind === 'SINGLE_FLOW') expect(plan.steps, id).toHaveLength(1);
       // Steps never include the editor's authoring-only template node.
       expect(plan.steps.flatMap(s => s.nodeIds), id).not.toContain('node-001');
+    }
+  });
+  it.each([
+    ['supply-ethereum', 'ethereum-aave'], ['borrow-ethereum', 'ethereum-aave'], ['repay-ethereum', 'ethereum-aave'], ['withdraw-ethereum', 'ethereum-aave'],
+    ['swap-ethereum', 'ethereum-swap'], ['transfer-ethereum', 'ethereum-mainnet-transfer'], ['add-liquidity-ethereum', 'ethereum-liquidity'],
+    ['bridge-ethereum-base', 'crosschain-router-ethereum-to-base'], ['bridge-base-ethereum', 'crosschain-router-base-to-ethereum'],
+    ['bridge-ethereum-arbitrum', 'crosschain-router-ethereum-to-arbitrum'], ['bridge-arbitrum-ethereum', 'crosschain-router-arbitrum-to-ethereum'],
+    ['bridge-ethereum-robinhood', 'crosschain-router-ethereum-to-robinhood'], ['bridge-robinhood-ethereum', 'crosschain-router-robinhood-to-ethereum'],
+  ] as const)('%s selects its chain-bound flow and keeps deployment/policy authorization independent', async (id, flow) => {
+    const composition = compose(example(id));
+    expect(executionPlan(composition)).toMatchObject({ kind: 'SINGLE_FLOW', flow, fundsClass: 'REAL_FUNDS' });
+    if (flow !== 'ethereum-mainnet-transfer') expect(PREVIEW_METHODS[flow]).toBe(flow === 'ethereum-swap' ? 'prepare' : 'simulate');
+    const policy = readHandoffPolicy({ FLOFI_MCP_HANDOFF_MAINNET_NETWORKS: 'ethereum,base,arbitrum-one,robinhood' });
+    const enabledRuntime = runtime({ [flow]: 'live' }, { [flow]: true });
+    const enabled = await evaluateGates(composition, enabledRuntime, policy);
+    expect(enabled).toMatchObject({ supportedByCode: { execute: true }, enabledByDeployment: { enabled: true }, enabledByPolicy: { enabled: true } });
+    expect((await evaluateGates(composition, enabledRuntime, DEFAULT)).enabledByPolicy.enabled).toBe(false);
+    expect((await evaluateGates(composition, runtime({}), policy)).enabledByDeployment.enabled).toBe(false);
+    if (FLOWS_WITH_EXECUTION_SWITCH.includes(flow)) {
+      expect((await evaluateGates(composition, runtime({ [flow]: 'live' }, { [flow]: false }), policy)).enabledByDeployment)
+        .toMatchObject({ enabled: false, reason: 'OWNER_EXECUTION_NOT_ENABLED_IN_DEPLOYMENT' });
     }
   });
   it('keeps the list of flows with an owner-execution switch equal to the flow registry', () => {

@@ -129,6 +129,7 @@ export function createDelegationService(deps: DelegationServiceDeps) {
     const rows: CapabilityRowView[] = [];
     const examples: readonly StrategySpec[] = [
       { action: 'swap', network: 'base-sepolia', inputAsset: 'USDC', outputAsset: 'WETH', amount: '1' }, { action: 'swap', network: 'ethereum-sepolia', inputAsset: 'USDC', outputAsset: 'WETH', amount: '1' },
+      { action: 'swap', network: 'ethereum', inputAsset: 'USDC', outputAsset: 'WETH', amount: '1' },
       { action: 'swap', network: 'base', inputAsset: 'USDC', outputAsset: 'WETH', amount: '1' }, { action: 'swap', network: 'solana-devnet', inputAsset: 'devUSDC', outputAsset: 'SOL', amount: '1' },
       { action: 'swap', network: 'solana-devnet', inputAsset: 'SOL', outputAsset: 'devUSDC', amount: '1' },
       { action: 'supply', network: 'base-sepolia', asset: 'USDC', amount: '1', beneficiary: '0x' + '1'.repeat(40) },

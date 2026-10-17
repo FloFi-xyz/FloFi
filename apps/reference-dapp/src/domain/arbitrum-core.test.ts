@@ -105,7 +105,7 @@ describe('BUILD-ARB-001 shared first-class recognition through shared runtime re
     expect(AUTHORING_CAPABILITIES.filter(c => c.network.chain === chain).every(c => ['bridge', 'swap', 'transfer', 'add_liquidity', 'supply', 'borrow', 'repay', 'withdraw'].includes(c.action))).toBe(true);
     expect(bridgeOffers().some(r => r.source.chain === chain && r.destination.key === 'base')).toBe(true);
     expect(bridgeOffers().some(r => r.destination.chain === chain && r.source.key === 'base')).toBe(true);
-    expect(catalogCapabilityNetworks().map(n => n.key)).toEqual(['base', 'arbitrum-one', 'robinhood']);
+    expect(catalogCapabilityNetworks().map(n => n.key)).toEqual(['base', 'arbitrum-one', 'ethereum', 'robinhood']);
     const supports = copilotSupportsSection();
     expect(supports).toContain('from Arbitrum One to Base');
     expect(supports.split('\n').find(line => /^- LIQUIDITY\b/.test(line))).toContain('Arbitrum');

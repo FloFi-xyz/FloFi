@@ -7,7 +7,7 @@ export type SupplyAttempt = { step: 'APPROVAL' | 'SUPPLY' | 'BORROW' | 'REPAY' |
 export type SupplyRun = { format: 'gryloo.supply-run.v1'; id: string; review: SupplyReview; provenance: 'PUBLIC_TESTNET' | 'PUBLIC_MAINNET' | 'MOCKED';
   authorization: string | null; attempts: SupplyAttempt[]; journal: ExecutionJournal; verdict: 'PENDING' | 'RECONCILED' | 'DIVERGENT' | 'INCONCLUSIVE'; ownerInitiated: boolean };
 /** `supply-`: public testnets; `baave-`: Base mainnet; `araave-`: Arbitrum One mainnet. */
-export const SUPPLY_RUN_ID = /^(supply|baave|araave)-[a-f0-9]{32}$/;
+export const SUPPLY_RUN_ID = /^(supply|baave|araave|etaave)-[a-f0-9]{32}$/;
 export function createSupplyRun(id: string, review: SupplyReview, provenance: SupplyRun['provenance']): SupplyRun {
   let journal=createJournal({journalId:id,workflowId:review.workflow.workflowId,executionPlanHash:supplyArtifactHash('execution-plan',review.plan),manifestHash:supplyArtifactHash('strategy-manifest',review.manifest)});
   const append=(level:'workflow'|'segment'|'step',entityId:string,toState:'DRAFT'|'PLANNED'|'REVIEWED'|'SIMULATED',stepId:string|null)=>{
@@ -98,7 +98,7 @@ export async function persistSupplyPreparation(store: SupplyPersistence, block: 
 export function validateSupplyRun(run: SupplyRun): void {
   // Mainnet namespaces are strictly chain-bound (PUBLIC_MAINNET or MOCKED); public testnets stay `supply-`.
   if (run.format!=='gryloo.supply-run.v1'||!SUPPLY_RUN_ID.test(run.id)||!['PUBLIC_TESTNET','PUBLIC_MAINNET','MOCKED'].includes(run.provenance)||
-      run.id.startsWith('baave-')!==(run.review.chain==='eip155:8453')||run.id.startsWith('araave-')!==(run.review.chain==='eip155:42161')||(run.provenance==='PUBLIC_MAINNET')&&run.id.startsWith('supply-')||(run.provenance==='PUBLIC_TESTNET')&&!run.id.startsWith('supply-')||
+      run.id.startsWith('baave-')!==(run.review.chain==='eip155:8453')||run.id.startsWith('araave-')!==(run.review.chain==='eip155:42161')||run.id.startsWith('etaave-')!==(run.review.chain==='eip155:1')||(run.provenance==='PUBLIC_MAINNET')&&run.id.startsWith('supply-')||(run.provenance==='PUBLIC_TESTNET')&&!run.id.startsWith('supply-')||
       new Set(run.attempts.map(a=>a.step)).size!==run.attempts.length||run.attempts.length>2) throw new Error('SUPPLY_STORE_CORRUPT');
   const {commitment,...review}=run.review;
   if (supplyHash(review)!==commitment || supplyArtifactHash('execution-plan',run.review.plan)!==run.journal.executionPlanHash ||

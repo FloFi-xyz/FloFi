@@ -87,7 +87,7 @@ const FAMILY: Readonly<Record<Network, Family>> = Object.freeze(Object.fromEntri
 /** Display labels from the network registry (Base, Arbitrum One, Robinhood Chain, …). */
 export const COPILOT_NETWORK_LABEL: Readonly<Record<Network, string>> = Object.freeze(Object.fromEntries(NETWORK_IDS.map(id => [id, networkOfCopilot(id as CopilotNetworkId).name])) as
   Record<Network, string>);
-// BUILD-ETHEREUM-001: ETHEREUM ("Ethereum" without Sepolia) is in no action's supported list, so it never resolves; it is always clarified.
+// Explicit Ethereum names ground Mainnet; Sepolia/test wording never grants Mainnet authority.
 // BUILD-BASE-001: real-funds networks come from the network registry (Base, Arbitrum One, Ethereum, Solana, Robinhood Chain).
 const MAINNETS: ReadonlySet<CopilotNetwork> = new Set(NETWORK_IDS.filter(id => networkOfCopilot(id as CopilotNetworkId).environment === 'MAINNET'));
 /** The catalog networks (official asset catalog) and their CAIP-2 chains. */
@@ -220,10 +220,9 @@ function resolveNetwork(value: CopilotNetwork | null, supported: readonly Networ
   const m = copyOf(g), what = m.networkSubject[subject], named = namedNetworks(g), options = labels(supported);
   const carried = value !== null && value !== 'OTHER' && g.carried.has('network');
   if (value === 'OTHER') return ask(['network'], m.networkOnlyOn(what, options), options);
-  // "Ethereum" without Sepolia never means Ethereum Mainnet (not executable in Flofi) nor silently Ethereum Sepolia: Flofi asks.
-  const ethereumOnly = named.includes('ETHEREUM') && !named.includes('ETHEREUM_SEPOLIA') && !carried;
-  if (value === 'ETHEREUM' || (ethereumOnly && (value === 'ETHEREUM_SEPOLIA' || (value === null && !supported.some(n => named.includes(n))))))
-    return ask(['network'], m.ethereumWhichNetwork(what, options), options);
+  // A model cannot reinterpret an explicitly named Ethereum Mainnet as Sepolia.
+  if (named.includes('ETHEREUM') && !named.includes('ETHEREUM_SEPOLIA') && !carried && value === 'ETHEREUM_SEPOLIA')
+    return ask(['network'], m.realFundsWhichNetwork(COPILOT_NETWORK_LABEL.ETHEREUM), options);
   let network: Network | null = value;
   if (network === null) { const candidates = supported.filter(n => named.includes(n)); network = candidates.length === 1 ? candidates[0]! : null; }
   if (network === null) {
@@ -309,7 +308,7 @@ function devnetByAsset(g: Grounding, notes: string[]): Network { notes.push(copy
 function planSwap(a: CopilotSwapAction, g: Grounding): Plan {
   const m = copyOf(g), notes: string[] = [];
   const supported = actionNetworks('swap', g);
-  // A generic "Ethereum" is left to resolveNetwork, which explains that Ethereum Mainnet is never used.
+  // Ethereum and Ethereum Sepolia are grounded independently through the shared network registry.
   const named = namedNetworks(g);
   const devnetImplied = a.network === null && !named.length && impliesDevnet(g, [a.inputAsset, a.outputAsset]);
   const missing: CopilotMissingField[] = [...(a.amount === null ? ['amount' as const] : []), ...(a.inputAsset === null || a.outputAsset === null ? ['asset' as const] : []),
@@ -360,7 +359,7 @@ const EXTENDED_ROUTES = routerNetworksOf('mainnet').filter(key => key !== 'mainn
   return { key, option, src: routeCopilot(option.sourceLabel)!, dst: routeCopilot(option.destinationLabel)!, token: option.pair.source.symbol };
 });
 const extendedRoute = (a: CopilotBridgeAction, g: Grounding) => g.policy.catalog === true && (a.sourceNetwork === 'ROBINHOOD' || a.destinationNetwork === 'ROBINHOOD' ||
-  a.sourceNetwork === 'ARBITRUM' || a.destinationNetwork === 'BASE' || /^usdg$/i.test(a.asset ?? '') || namedNetworks(g).includes('ROBINHOOD'));
+  a.sourceNetwork === 'ETHEREUM' || a.destinationNetwork === 'ETHEREUM' || a.sourceNetwork === 'ARBITRUM' || a.destinationNetwork === 'BASE' || /^usdg$/i.test(a.asset ?? '') || namedNetworks(g).includes('ROBINHOOD'));
 function planRoute(a: CopilotBridgeAction, g: Grounding): Plan {
   const m = copyOf(g), notes: string[] = [], text = g.text;
   const named = [...namedNetworks(g), ...(['sourceNetwork', 'destinationNetwork'] as const).flatMap(field => {
@@ -499,6 +498,9 @@ function planLending(a: CopilotLendingAction, g: Grounding, wallet: string | nul
   const supported = lendingNetworks(namedCatalog ? null : a.asset === 'WBTC' ? 'WBTC' : 'USDC', g);
   const network = resolveNetwork(a.network, supported, g, 'aave', notes);
   const catalog = g.policy.catalog && isCatalogNetwork(network);
+  // A known unsupported reserve can be refused from protocol profiles even before the token catalog is available.
+  const legacy = a.asset === null ? null : legacyAsset(a.asset);
+  if (catalog && legacy && !lendingOffers(subject).some(offer => offer.network.copilot === network && offer.asset === legacy)) refuse(m.aaveOnlyCatalog);
   const asset = catalog ? catalogToken(a.asset, network, g, subject, 'asset', 'ERC20', notes).asset.symbol : needAsset(a.asset, g, subject, 'asset');
   if (!lendingOffers(subject).some(offer => offer.network.copilot === network && offer.asset === asset))
     refuse(g.policy.catalog ? m.aaveOnlyCatalog : m.aaveOnly);

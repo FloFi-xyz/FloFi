@@ -61,6 +61,8 @@ export function readinessProbes(env: Env): readonly Probe[] {
       url: () => solana(env.GRYLOO_SOLANA_DEVNET_RPC_URL, ORCA_WHIRLPOOLS_DEVNET.rpc) },
     // Mainnets are probed read-only because their flows offer read-only Simulate/Review; nothing here enables execution.
     { name: 'base', chain: ROUTER.source.chain, kind: 'evm', chainId: ROUTER.source.chainId, override: env.GRYLOO_BASE_RPC_URL, url: () => routerRpcUrl(env.GRYLOO_BASE_RPC_URL, ROUTER.source.rpc) },
+    { name: 'ethereum', chain: 'eip155:1', kind: 'evm', chainId: 1, override: env.GRYLOO_ETHEREUM_RPC_URL,
+      url: () => routerRpcUrl(env.GRYLOO_ETHEREUM_RPC_URL, 'https://ethereum-rpc.publicnode.com') },
     { name: 'arbitrum', chain: ROUTER.destination.chain, kind: 'evm', chainId: ROUTER.destination.chainId, override: env.GRYLOO_ARBITRUM_RPC_URL,
       url: () => routerRpcUrl(env.GRYLOO_ARBITRUM_RPC_URL, ROUTER.destination.rpc) },
     { name: 'solana', chain: JUPITER_SOLANA_MAINNET.chain, kind: 'solana', genesisHash: JUPITER_SOLANA_MAINNET.genesisHash, override: env.GRYLOO_SOLANA_RPC_URL,

@@ -155,10 +155,11 @@ export function buildNativeTransferEvidence(input: { id: string; review: NativeT
           : 'Self-transfer: the value leg nets to zero; the owner balance moved by exactly the fee.',
         'The fee is gasUsed × effectiveGasPrice plus the OP Stack L1 data fee (l1Fee) of the receipt.']
         : review.asset || review.recipient !== review.account ? [
-        `Inclusion is verified at ${profile.network} (L2) sequencer level after confirmations; L1 finality is not claimed.`,
+        profile.settlement === 'L1' ? `Inclusion is verified on ${profile.network} (L1) after ${profile.minimumConfirmations} confirmations; finalized-checkpoint status is not claimed.`
+          : `Inclusion is verified at ${profile.network} (L2) sequencer level after confirmations; L1 finality is not claimed.`,
         review.asset ? 'Token transfer: exact transfer(recipient, amount) call, its transfer log(s) and both token balances; ETH moved by exactly the fee.'
           : 'Native transfer to an explicit recipient: the exact value-only call and owner debit (value plus fee) are verified; contract recipients may execute their receive/fallback code.',
-        'The fee is gasUsed × effectiveGasPrice, which includes Arbitrum Nitro L1 data gas.'] : profile.settlement === 'L2' ? [`Inclusion is verified at ${profile.network} (L2) sequencer level after confirmations; L1 finality is not claimed.`,
+        profile.settlement === 'L1' ? 'The network fee is gasUsed × effectiveGasPrice.' : 'The fee is gasUsed × effectiveGasPrice, which includes Arbitrum Nitro L1 data gas.'] : profile.settlement === 'L2' ? [`Inclusion is verified at ${profile.network} (L2) sequencer level after confirmations; L1 finality is not claimed.`,
         'Self-transfer: the value leg nets to zero; the fee is gasUsed × effectiveGasPrice, which includes Arbitrum Nitro L1 data gas.',
         'This is a chain execution proof, not a DeFi capability.'] :
         [`Inclusion is verified at ${profile.network} block level after ${profile.minimumConfirmations} confirmations; finalized-checkpoint status is not claimed.`,

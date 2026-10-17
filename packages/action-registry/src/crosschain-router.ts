@@ -18,6 +18,7 @@
  * network. BUILD-RH-002: a side's token is generic (`token`, `symbol`, `decimals`) because a route may map assets across chains
  * (Base or Arbitrum USDC → Robinhood USDG); `l1DataFee` says whether the source chain's receipts carry an OP Stack `l1Fee`.
  */
+import { ETHEREUM_MAINNET } from './ethereum-chain.js';
 import { ARBITRUM_ONE } from './arbitrum-chain.js';
 export type RouterProfile = {
   readonly id: string; readonly adapterId: 'flofi.router'; readonly underlyingProtocol: 'across';
@@ -119,10 +120,17 @@ const ROBINHOOD_SIDE: RouterProfile['source'] = Object.freeze({ network: 'Robinh
   lifiFeeForwarder: '0xf4bffe4dfc693f37715a47c15bda8af9ed8f7cf1', l1DataFee: false });
 const ARBITRUM_SIDE: RouterProfile['source'] = Object.freeze({ ...CROSSCHAIN_ROUTER_BASE_ARBITRUM.destination, lifiDiamond: '0x1231deb6f5749ef6ce6943a275a1d3e7486f4eae',
   lifiFeeForwarder: '0xce40449b773a3e6e5e769adb4e567179d4828cbd', l1DataFee: false });
+const ETHEREUM_SIDE: RouterProfile['source'] = Object.freeze({ network: ETHEREUM_MAINNET.name, chain: ETHEREUM_MAINNET.chain,
+  chainId: 1, chainHex: '0x1', rpc: ETHEREUM_MAINNET.rpc, explorer: 'https://etherscan.io/',
+  token: '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', symbol: 'USDC', decimals: 6,
+  spokePool: '0x5c7bcd6e7de5423a257d81b442095a1a6ced35c5', lifiDiamond: '0x1231deb6f5749ef6ce6943a275a1d3e7486f4eae',
+  lifiFeeForwarder: '0xce40449b773a3e6e5e769adb4e567179d4828cbd', l1DataFee: false });
 const BASE_SIDE: RouterProfile['source'] = CROSSCHAIN_ROUTER_BASE_ARBITRUM.source;
 const destinationOf = (side: RouterProfile['source']): RouterProfile['destination'] => Object.freeze({ network: side.network, chain: side.chain, chainId: side.chainId,
   chainHex: side.chainHex, rpc: side.rpc, explorer: side.explorer, token: side.token, symbol: side.symbol, decimals: side.decimals, spokePool: side.spokePool });
 const PINS = Object.freeze({
+  ethereum: { spokePool: '3cc5e539eb61133fec38655ae3f55d8e1f944fce2cbc02e151972cf9c9880545', lifiDiamond: '72211202d3d54f9e8b4590855d8f8390f1fad2d55c2472a3e488b58ccb61c2e9',
+    lifiFeeForwarder: '8e1f9e10378ce2648b2d1cb2c7a4a061058bf202b2e7b8d68a70a17082728981', token: 'c1bcd4dc4f30c4dcf6c9fe462abeaf2efefc065dcb4dec74996e471f1ce219b4' },
   base: { spokePool: '3cc5e539eb61133fec38655ae3f55d8e1f944fce2cbc02e151972cf9c9880545', lifiDiamond: 'a5f481fb142b210db0011bacc8dafa949714aa3a56ab4377efc1a080f987a296',
     lifiFeeForwarder: '8e1f9e10378ce2648b2d1cb2c7a4a061058bf202b2e7b8d68a70a17082728981', token: '98d785fcb1bf847f287adc2310759fd94cc13e754b974bc72131382e8266f607' },
   arbitrum: { spokePool: '3cc5e539eb61133fec38655ae3f55d8e1f944fce2cbc02e151972cf9c9880545', lifiDiamond: '72211202d3d54f9e8b4590855d8f8390f1fad2d55c2472a3e488b58ccb61c2e9',
@@ -131,7 +139,7 @@ const PINS = Object.freeze({
     lifiFeeForwarder: '8e1f9e10378ce2648b2d1cb2c7a4a061058bf202b2e7b8d68a70a17082728981', token: 'c85d18dc1e49769e01f9f88981176e213b2bc24d2f14d33a81d54bc06579f6db' },
 });
 type Side = keyof typeof PINS;
-const SIDES = Object.freeze({ base: BASE_SIDE, arbitrum: ARBITRUM_SIDE, robinhood: ROBINHOOD_SIDE });
+const SIDES = Object.freeze({ ethereum: ETHEREUM_SIDE, base: BASE_SIDE, arbitrum: ARBITRUM_SIDE, robinhood: ROBINHOOD_SIDE });
 /** A route between two verified sides (BUILD-RH-002; BUILD-BASE-001 reuses it for Arbitrum → Base). */
 function routeBetween(id: string, from: Side, to: Side): RouterProfile {
   return Object.freeze({ id, adapterId: 'flofi.router', underlyingProtocol: 'across', network: 'MAINNET', environment: 'MAINNET',
@@ -153,9 +161,22 @@ export const CROSSCHAIN_ROUTER_ROBINHOOD_ARBITRUM = routeBetween('robinhood-usdg
  * input − output. Both sides reuse the pins verified for the existing routes (identical runtime code on 2026-10-11).
  */
 export const CROSSCHAIN_ROUTER_ARBITRUM_BASE = routeBetween('arbitrum-usdc-to-base-usdc', 'arbitrum', 'base');
+/** Ethereum routes verified against Across available-routes and exact-input quotes; on-chain code and chainId verified.
+ * Uses the existing Router only; native bridging and unregistered tokens remain unsupported.
+ */
+export const ETHEREUM_ROUTER_DEPLOYMENTS = Object.freeze({
+  'ethereum-to-base': routeBetween('ethereum-usdc-to-base-usdc', 'ethereum', 'base'),
+  'base-to-ethereum': routeBetween('base-usdc-to-ethereum-usdc', 'base', 'ethereum'),
+  'ethereum-to-arbitrum': routeBetween('ethereum-usdc-to-arbitrum-usdc', 'ethereum', 'arbitrum'),
+  'arbitrum-to-ethereum': routeBetween('arbitrum-usdc-to-ethereum-usdc', 'arbitrum', 'ethereum'),
+  'ethereum-to-robinhood': routeBetween('ethereum-usdc-to-robinhood-usdg', 'ethereum', 'robinhood'),
+  'robinhood-to-ethereum': routeBetween('robinhood-usdg-to-ethereum-usdc', 'robinhood', 'ethereum'),
+});
+export type EthereumRouterNetwork = keyof typeof ETHEREUM_ROUTER_DEPLOYMENTS;
+export const ETHEREUM_ROUTER_NETWORKS = Object.freeze(Object.keys(ETHEREUM_ROUTER_DEPLOYMENTS) as EthereumRouterNetwork[]);
 export type CrossChainRouterProfile = RouterProfile;
 export const CROSSCHAIN_ROUTER_PROFILES: readonly RouterProfile[] = Object.freeze([CROSSCHAIN_ROUTER_BASE_ARBITRUM, CROSSCHAIN_ROUTER_BASE_SEPOLIA_ARBITRUM_SEPOLIA,
-  CROSSCHAIN_ROUTER_BASE_ROBINHOOD, CROSSCHAIN_ROUTER_ROBINHOOD_BASE, CROSSCHAIN_ROUTER_ARBITRUM_ROBINHOOD, CROSSCHAIN_ROUTER_ROBINHOOD_ARBITRUM, CROSSCHAIN_ROUTER_ARBITRUM_BASE]);
+  CROSSCHAIN_ROUTER_BASE_ROBINHOOD, CROSSCHAIN_ROUTER_ROBINHOOD_BASE, CROSSCHAIN_ROUTER_ARBITRUM_ROBINHOOD, CROSSCHAIN_ROUTER_ROBINHOOD_ARBITRUM, CROSSCHAIN_ROUTER_ARBITRUM_BASE, ...Object.values(ETHEREUM_ROUTER_DEPLOYMENTS)]);
 /** The profile serving one canonical pair (source and destination CAIP-2 chains), or null. */
 export function routerProfileFor(sourceChain: string, destinationChain: string): RouterProfile | null {
   return CROSSCHAIN_ROUTER_PROFILES.find(p => p.source.chain === sourceChain && p.destination.chain === destinationChain) ?? null;

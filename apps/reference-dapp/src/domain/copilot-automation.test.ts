@@ -11,6 +11,21 @@ describe('Copilot Automation interpretation and grounding', () => {
     expect(parseCopilotIntentV2({ version: '2', language: 'PT', kind: 'AUTOMATION', draft: draft() })).toMatchObject({ kind: 'AUTOMATION', draft: draft() });
     for (const key of ['execute', 'sign', 'executionMode', 'owner', 'transaction', 'signature']) expect(() => parseAutomationDraft({ ...draft(), [key]: true })).toThrow();
   });
+  it.each([
+    'Buy 10 USDC of ETH every day at 9:00 on Ethereum.',
+    'Compra 10 USDC de ETH todos os dias às 9h na Ethereum.',
+  ])('grounds an explicitly named Ethereum automation with owner confirmation: %s', text => {
+    const result = groundAutomationDraft(draft({ network: 'ETHEREUM' }), text, 'Europe/Lisbon');
+    expect(result).toMatchObject({ kind: 'PROPOSAL', input: { action: { network: 'ethereum', amount: '10' } } });
+    if (result.kind !== 'PROPOSAL') throw Error(result.message);
+    expect(validateAutomationInput(result.input, Date.now()).ok).toBe(true);
+    expect(result.input).not.toHaveProperty('executionMode');
+  });
+  it('does not infer Ethereum Mainnet from an absent network or testnet wording', () => {
+    for (const text of ['Buy 10 USDC of ETH every day at 9:00.', 'Buy 10 USDC of ETH every day at 9:00 on Ethereum testnet.']) {
+      expect(groundAutomationDraft(draft({ network: 'ETHEREUM' }), text, 'UTC').kind).toBe('CLARIFICATION');
+    }
+  });
   it.each(['Buy 10 USDC of ETH every day at 9:00 on Base Sepolia.', 'Todo dia às 9:00 compre 10 USDC de ETH na Base Sepolia.', 'Compra 10 USDC de ETH todos os dias às 9h na Base Sepolia.'])('grounds daily DCA: %s', text => {
     const result = groundAutomationDraft(draft(), text, 'Europe/Lisbon');
     expect(result.kind).toBe('PROPOSAL');

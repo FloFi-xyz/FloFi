@@ -51,7 +51,7 @@ describe('shared EVM wallet networks', () => {
     expect(walletNetwork('0x66eee')).toMatchObject({ environment: 'testnet', switchable: false, add: null });
     const { provider, calls } = wallet({ chain: '0x14a34' });
     await expect(switchWalletNetwork(provider, '0x66eee')).rejects.toThrow('WALLET_NETWORK_NOT_SWITCHABLE');
-    await expect(switchWalletNetwork(provider, '0x1')).rejects.toThrow('WALLET_NETWORK_NOT_SWITCHABLE');
+    await expect(switchWalletNetwork(provider, '0xdead')).rejects.toThrow('WALLET_NETWORK_NOT_SWITCHABLE');
     expect(calls).toEqual([]);
   });
   // BUILD-RH-002: Robinhood Chain mainnet is a first-class network (it was recognized-only in BUILD-RH-001).
@@ -117,12 +117,12 @@ describe('shared EVM wallet networks', () => {
     expect(walletChainLabel('0xaa36a7')).toBe('Ethereum Sepolia (11155111)');
     expect(walletChainLabel('0x1')).toBe('Ethereum Mainnet (1)');
   });
-  it('never offers Ethereum Mainnet as a switch target or adds it, so Sepolia support has no path to Mainnet', async () => {
-    expect(walletNetwork('0x1')).toMatchObject({ chain: 'eip155:1', switchable: false, add: null });
+  it('switches explicitly to Ethereum Mainnet and verifies the returned chain without requesting signatures', async () => {
+    expect(walletNetwork('0x1')).toMatchObject({ chain: 'eip155:1', switchable: true, add: { chainId: '0x1' } });
     const { provider, calls } = wallet({ chain: '0xaa36a7', known: ['0x1', '0xaa36a7'] });
-    await expect(switchWalletNetwork(provider, '0x1')).rejects.toThrow('WALLET_NETWORK_NOT_SWITCHABLE');
+    await switchWalletNetwork(provider, '0x1');
+    expect(calls.map(call => call.method)).toEqual(['wallet_switchEthereumChain', 'eth_chainId']);
     await expect(switchWalletNetwork(provider, '0x01')).rejects.toThrow('WALLET_NETWORK_NOT_SWITCHABLE');
-    expect(calls).toEqual([]);
   });
   it('switches to Ethereum Sepolia directly when the wallet knows it, and reads the chain back', async () => {
     const { provider, calls } = wallet({ chain: '0x1', known: ['0xaa36a7'] });

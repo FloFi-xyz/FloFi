@@ -12,7 +12,7 @@ const swap = (input: CatalogAssetRef, output: CatalogAssetRef, amount = '1000000
 
 describe('BUILD-BASE-001 catalog swaps on Base', () => {
   it('declares Base a catalog-swap network next to Robinhood Chain', () => {
-    expect(CATALOG_SWAP_CHAINS).toEqual(['eip155:4663', 'eip155:8453', 'eip155:42161']);
+    expect(CATALOG_SWAP_CHAINS).toEqual(['eip155:4663', 'eip155:8453', 'eip155:42161', 'eip155:1']);
     expect(CATALOG_SWAP_REFERENCE_PAIRS[BASE]).toEqual([usdc.address, weth.address]);
     expect(CATALOG_SWAP_REFERENCE_PAIRS['eip155:4663']).toBeUndefined();
   });
@@ -44,7 +44,7 @@ describe('BUILD-BASE-001 catalog swaps on Base', () => {
   it('is a closed declaration: tampering with the bound, chain or ports fails closed', () => {
     const node = swap(usdc, cbbtc);
     expect(() => readCatalogSwapNode({ ...node, editableBounds: [{ ...node.editableBounds[0]!, maximumAmount: '1000000000000000' }] })).toThrow('CATALOG_SWAP_DECLARATION_INVALID');
-    expect(() => createCatalogSwapNode('node-002', { chain: 'eip155:1', input: usdc, output: cbbtc, amount: '1', slippageBps: 50 })).toThrow('CATALOG_SWAP_NETWORK_UNSUPPORTED');
+    expect(() => createCatalogSwapNode('node-002', { chain: 'eip155:137', input: usdc, output: cbbtc, amount: '1', slippageBps: 50 })).toThrow('CATALOG_SWAP_NETWORK_UNSUPPORTED');
     expect(() => createCatalogSwapNode('node-002', { chain: 'eip155:42161', input: usdc, output: cbbtc, amount: '1', slippageBps: 50 })).toThrow('CATALOG_SWAP_ASSET_INVALID');
     expect(() => swap(usdc, { ...cbbtc, chain: 'eip155:4663' })).toThrow('CATALOG_SWAP_ASSET_INVALID');
     expect(canonicalJson(swap(usdc, cbbtc))).toBe(canonicalJson(node));

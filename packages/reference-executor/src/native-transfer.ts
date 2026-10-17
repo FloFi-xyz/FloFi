@@ -22,7 +22,7 @@ const entity = (run: Pick<TransferRun, 'id'>) => `${run.id}.TRANSFER`;
  * `rhx-`: public-testnet transfer runs (RH-DEMO-001, Ethereum Sepolia); `rht-` (BUILD-RH-002): Robinhood Chain mainnet runs; `bat-`
  * (BUILD-BASE-001): Base mainnet runs.
  */
-export const TRANSFER_RUN_ID = /^(rhx|rht|bat|art)-[a-f0-9]{32}$/;
+export const TRANSFER_RUN_ID = /^(rhx|rht|bat|art|ett)-[a-f0-9]{32}$/;
 
 export function createTransferRun(id: string, review: NativeTransferReview, provenance: TransferRun['provenance'], now = new Date()): TransferRun {
   if (!TRANSFER_RUN_ID.test(id)) throw new Error('TRANSFER_RUN_ID_INVALID');

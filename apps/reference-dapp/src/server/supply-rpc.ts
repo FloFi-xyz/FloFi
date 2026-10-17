@@ -11,7 +11,7 @@ import type { SupplyRpc } from '@defi-workflow-engine/reference-compiler';
 const methods = new Set(['eth_chainId', 'eth_blockNumber', 'eth_getBlockByNumber', 'eth_getCode', 'eth_getStorageAt', 'eth_call', 'eth_simulateV1',
   'eth_getBalance', 'eth_getTransactionCount', 'eth_estimateGas', 'eth_gasPrice', 'eth_getTransactionByHash', 'eth_getTransactionReceipt']);
 /** Loopback MOCKED harness endpoints (e2e/supply-harness.mjs; BUILD-BASE-001 the Base mainnet harness); never a public provider. */
-const HARNESS: Readonly<Record<AaveLendingProfile['chain'], string>> = Object.freeze({
+const HARNESS: Readonly<Partial<Record<AaveLendingProfile['chain'], string>>> = Object.freeze({
   [AAVE_V3_BASE_SEPOLIA.chain]: 'http://127.0.0.1:8549', [AAVE_V3_ETHEREUM_SEPOLIA.chain]: 'http://127.0.0.1:8549/ethereum-sepolia',
   [AAVE_V3_BASE.chain]: 'http://127.0.0.1:8562/rpc', 'eip155:42161': 'http://127.0.0.1:8564/rpc' });
 /** The public-testnet Aave profiles served by the `aave-supply` flow (Base mainnet has its own flow and gates). */
@@ -26,6 +26,7 @@ export function supplyRpcUrl(profile: AaveLendingProfile, override: string | und
 }
 export function createSupplyReadRpc(harness: boolean, profile: AaveLendingProfile, endpointOverride?: string): SupplyRpc {
   const endpoint = harness ? HARNESS[profile.chain] : supplyRpcUrl(profile, endpointOverride);
+  if (!endpoint) throw new Error('SUPPLY_NETWORK_UNAVAILABLE');
   const expectedChain = BigInt(profile.chainId);
   let queue: Promise<unknown> = Promise.resolve();
   const read = async (method: string, params: readonly unknown[]) => {
@@ -72,6 +73,6 @@ export function createBaseLendingReadRpc(harness: boolean, env: Readonly<Record<
 /** Catalog mainnet lending uses the network's existing chain and RPC override; no lending-specific gate. */
 export function createCatalogLendingReadRpc(network: { chain: string; id: string }, harness: boolean, env: Readonly<Record<string, string | undefined>> = {}): SupplyRpc {
   const profile = aaveLendingProfile(network.chain);
-  const override = network.id === 'base' ? env.GRYLOO_BASE_RPC_URL : env.GRYLOO_ARBITRUM_RPC_URL;
+  const override = network.id === 'base' ? env.GRYLOO_BASE_RPC_URL : network.id === 'ethereum' ? env.GRYLOO_ETHEREUM_RPC_URL : env.GRYLOO_ARBITRUM_RPC_URL;
   return createSupplyReadRpc(harness, profile, override);
 }

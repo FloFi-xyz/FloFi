@@ -12,6 +12,7 @@
 import { keccak_256 } from '@noble/hashes/sha3.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { ARBITRUM_ONE } from './arbitrum-chain.js';
+import { ETHEREUM_MAINNET } from './ethereum-chain.js';
 
 export type AssetKind = 'NATIVE' | 'ERC20';
 /** `TOKEN` (BUILD-BASE-001): a listed ERC-20 of a curated token list; its listing proves nothing about liquidity or lending support. */
@@ -74,7 +75,9 @@ const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
  * case-insensitively inside a catalog, so a symbol always resolves to exactly one asset of its network.
  */
 export const ASSET_SYMBOL = /^[A-Za-z][A-Za-z0-9.]{0,15}$/;
-const SYMBOL = ASSET_SYMBOL;
+/** Safe catalog metadata, including numeric-leading ERC-20 symbols. Existing providers retain their inclusion grammar. */
+export const CATALOG_ASSET_SYMBOL = /^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$/;
+const SYMBOL = CATALOG_ASSET_SYMBOL;
 function fail(code: string): never { throw new Error(code); }
 const hex = (bytes: Uint8Array) => Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
 const deepFreeze = <T>(value: T): T => {
@@ -173,9 +176,11 @@ export function catalogAssetsByName(catalog: AssetCatalog, name: string): readon
  */
 export function searchAssets(catalog: AssetCatalog, query: string, options: { readonly limit?: number; readonly assetClass?: AssetClass } = {}): readonly CanonicalAsset[] {
   const limit = Math.max(1, Math.min(options.limit ?? 20, 200));
-  const text = typeof query === 'string' ? query.normalize('NFKC').trim().toUpperCase().slice(0, 64) : '';
+  const text = typeof query === 'string' ? query.normalize('NFKC').trim().toUpperCase().slice(0, 160) : '';
   const pool = catalog.assets.filter(asset => !options.assetClass || asset.assetClass === options.assetClass);
   if (!text) return pool.slice(0, limit);
+  // Identity queries never degrade into a cross-chain symbol/name match.
+  if (/^(?:0X|EIP155:)/.test(text)) return pool.filter(asset => asset.address?.toUpperCase() === text || asset.id.toUpperCase() === text).slice(0, limit);
   const rank = (asset: CanonicalAsset): number => {
     const symbol = asset.symbol.toUpperCase(), name = assetDisplayName(asset).toUpperCase();
     if (symbol === text) return 0;
@@ -252,4 +257,10 @@ export const ARBITRUM_BASE_ASSETS = staticCatalog(ARBITRUM_ONE.chain, ARBITRUM_O
   { symbol: 'ETH', name: 'Ether', assetClass: 'NATIVE', address: null, decimals: 18 },
   { symbol: 'USDC', name: 'USD Coin', assetClass: 'STABLECOIN', address: '0xaf88d065e77c8cc2239327c5edb3a432268e5831', decimals: 6 },
   { symbol: 'WETH', name: 'Wrapped Ether', assetClass: 'WRAPPED_NATIVE', address: '0x82af49447d8a07e3bd95bd0d56f35241523fbab1', decimals: 18 },
+]);
+/** Ethereum native ETH is distinct from canonical WETH9. Circle USDC is never a Sepolia token. */
+export const ETHEREUM_BASE_ASSETS = staticCatalog(ETHEREUM_MAINNET.chain, ETHEREUM_MAINNET.name, 'flofi.pinned', 'https://developers.circle.com/stablecoins/usdc-contract-addresses', [
+  { symbol: 'ETH', name: 'Ether', assetClass: 'NATIVE', address: null, decimals: 18 },
+  { symbol: 'USDC', name: 'USD Coin', assetClass: 'STABLECOIN', address: '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', decimals: 6 },
+  { symbol: 'WETH', name: 'Wrapped Ether', assetClass: 'WRAPPED_NATIVE', address: '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2', decimals: 18 },
 ]);

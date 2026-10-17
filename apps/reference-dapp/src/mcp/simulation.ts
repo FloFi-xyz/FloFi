@@ -10,6 +10,7 @@
  * value shaped like a transaction, calldata, signature or key fails the call closed.
  */
 import { hashArtifactBytes } from '@defi-workflow-engine/workflow-contracts';
+import { ETHEREUM_ROUTER_NETWORKS } from '@defi-workflow-engine/action-registry';
 import { validateArtifact } from '@defi-workflow-engine/workflow-contracts/schemas';
 import type { FlowName } from '../../backend/flows.ts';
 import { catalogNetworkOfChain } from '../server/catalog-networks.ts';
@@ -21,6 +22,12 @@ export type PreviewPlan = { readonly flow: FlowName; readonly subject: 'EVM' | '
 export function previewPlan(spec: StrategySpec): PreviewPlan | { readonly code: string } {
   switch (spec.action) {
     case 'bridge': {
+      const ethereumRoute = ETHEREUM_ROUTER_NETWORKS.find(route => {
+        const [source, destination] = route.split('-to-');
+        const key = (network: string) => network === 'arbitrum-one' ? 'arbitrum' : network;
+        return source === key(spec.sourceNetwork) && destination === key(spec.destinationNetwork);
+      });
+      if (ethereumRoute) return { flow: `crosschain-router-${ethereumRoute}`, subject: 'EVM' };
       // BUILD-RH-002: each Robinhood Chain route is its own router flow; BUILD-BASE-001 so is Arbitrum One → Base.
       const robinhood = { 'base>robinhood': 'crosschain-router-base-to-robinhood', 'robinhood>base': 'crosschain-router-robinhood-to-base',
         'arbitrum-one>robinhood': 'crosschain-router-arbitrum-to-robinhood', 'robinhood>arbitrum-one': 'crosschain-router-robinhood-to-arbitrum',
@@ -86,7 +93,10 @@ export function projectSimulation(flow: FlowName, value: unknown): SimulationVie
   const record = obj(value);
   switch (flow) {
     case 'crosschain-router': case 'crosschain-router-testnet': case 'crosschain-router-base-to-robinhood': case 'crosschain-router-robinhood-to-base':
-    case 'crosschain-router-arbitrum-to-robinhood': case 'crosschain-router-robinhood-to-arbitrum': case 'crosschain-router-arbitrum-to-base': {
+    case 'crosschain-router-arbitrum-to-robinhood': case 'crosschain-router-robinhood-to-arbitrum': case 'crosschain-router-arbitrum-to-base':
+    case 'crosschain-router-ethereum-to-base': case 'crosschain-router-base-to-ethereum':
+    case 'crosschain-router-ethereum-to-arbitrum': case 'crosschain-router-arbitrum-to-ethereum':
+    case 'crosschain-router-ethereum-to-robinhood': case 'crosschain-router-robinhood-to-ethereum': {
       const r = obj(record.review), quote = obj(r.quote), route = obj(r.route), simulation = obj(r.simulation);
       return { kind: 'CROSS_CHAIN_ROUTE', provenance: String(record.provenance), observedAt: String(r.observedAt), expiresAt: String(r.expiresAt),
         facts: { recipient: String(r.recipient), recipientKind: String(r.recipientKind),
@@ -101,7 +111,7 @@ export function projectSimulation(flow: FlowName, value: unknown): SimulationVie
           deadlines: pick(r.deadlines, ['reviewExpiresAt', 'quoteExpiresAt', 'depositMustLandBy', 'fillDeadline']) },
         canonicalArtifacts: canonicalArtifacts(r.artifacts) };
     }
-    case 'aave-supply': case 'base-aave': case 'arbitrum-aave': {
+    case 'aave-supply': case 'base-aave': case 'arbitrum-aave': case 'ethereum-aave': {
       const r = obj(record.review), operation = r.withdraw ? 'WITHDRAW' : r.repay ? 'REPAY' : r.borrow ? 'BORROW' : 'SUPPLY';
       return { kind: 'AAVE_V3', provenance: String(record.provenance), observedAt: String(obj(r.state).observedAt), expiresAt: String(r.expiresAt),
         facts: { operation, ...pick(r, ['chain', 'pool', 'asset', 'aToken', 'amount', 'beneficiary', 'approvalRequired', 'allowance', 'gasPrice']),
@@ -110,7 +120,7 @@ export function projectSimulation(flow: FlowName, value: unknown): SimulationVie
           projected: pick(r.withdraw ?? r.repay ?? r.borrow ?? {}, ['expectedPostHealthFactor', 'debtAfter', 'debtAfterBase', 'collateralAfter', 'walletAfter']) },
         canonicalArtifacts: canonicalArtifacts(r) };
     }
-    case 'base-sepolia-swap': case 'robinhood-swap': case 'base-swap': case 'arbitrum-swap': {
+    case 'base-sepolia-swap': case 'robinhood-swap': case 'base-swap': case 'arbitrum-swap': case 'ethereum-swap': {
       const q = obj(record.quote);
       // BUILD-RH-002: a catalog-network quote (Robinhood Chain, BUILD-BASE-001 Base) carries its own provenance (PUBLIC_MAINNET or MOCKED) and decimals;
       // Robinhood Chain quotes also carry the Stock Token multipliers.
@@ -120,7 +130,7 @@ export function projectSimulation(flow: FlowName, value: unknown): SimulationVie
           ...flow === 'robinhood-swap' ? { stocks: list(q.stocks, ['side', 'symbol', 'officialId', 'multiplierWad', 'scheduledMultiplierWad', 'scheduledEffectiveAt']) } : {} },
         canonicalArtifacts: null };
     }
-    case 'uniswap-liquidity': case 'robinhood-liquidity': case 'base-liquidity': case 'arbitrum-liquidity': {
+    case 'uniswap-liquidity': case 'robinhood-liquidity': case 'base-liquidity': case 'arbitrum-liquidity': case 'ethereum-liquidity': {
       const r = obj(record.review);
       return { kind: 'CONCENTRATED_LIQUIDITY', provenance: String(record.provenance), observedAt: String(r.observedAt), expiresAt: String(r.expiresAt),
         facts: { ...pick(r, ['network', 'chainId', 'recipient', 'deadline']), pool: pick(r.pool, ['fee', 'tickSpacing', 'tick', 'price']),

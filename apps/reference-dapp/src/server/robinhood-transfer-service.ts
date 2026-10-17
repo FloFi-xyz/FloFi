@@ -46,7 +46,7 @@ const prefix = (before: readonly unknown[], after: readonly unknown[]) => after.
  */
 export function createRobinhoodTransferService(input: { rpc?: TransferRpc; rpcs?: Readonly<Partial<Record<string, TransferRpc>>>; journalDir?: string;
   storage?: ExecutionStorage; provenance: 'PUBLIC_TESTNET' | 'PUBLIC_MAINNET' | 'MOCKED'; now?: () => number;
-  /** BUILD-RH-002: `rht` for the Robinhood Chain mainnet deployment, BUILD-BASE-001 `bat` for Base mainnet (default `rhx`, the public-testnet runs). */ idPrefix?: 'rhx' | 'rht' | 'bat' | 'art';
+  /** BUILD-RH-002: `rht` for the Robinhood Chain mainnet deployment, BUILD-BASE-001 `bat` for Base mainnet (default `rhx`, the public-testnet runs). */ idPrefix?: 'rhx' | 'rht' | 'bat' | 'art' | 'ett';
   /** The official catalog of a catalog network; token transfers there fail closed without it. */ catalogFor?: (chain: string) => Promise<AssetCatalog>;
   /** Real-funds owner execution (mainnet only); Simulate and Review stay available without it. */ executionEnabled?: boolean }) {
   const idPrefix = input.idPrefix ?? 'rhx';

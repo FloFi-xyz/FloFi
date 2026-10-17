@@ -7,7 +7,7 @@
  */
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { catalogAsset, parseRobinhoodStockTokenRegistry, robinhoodNetworkCatalog, uniswapV3PoolAddress, UNISWAP_V3_ARBITRUM, UNISWAP_V3_BASE, UNISWAP_V3_ROBINHOOD,
+import { catalogAsset, parseRobinhoodStockTokenRegistry, robinhoodNetworkCatalog, uniswapV3PoolAddress, UNISWAP_V3_ETHEREUM, UNISWAP_V3_ARBITRUM, UNISWAP_V3_BASE, UNISWAP_V3_ROBINHOOD,
   type AssetCatalog, type CanonicalAsset } from '@defi-workflow-engine/action-registry';
 import type { CatalogSwapRuntime, Rpc } from './public-testnet-service.ts';
 
@@ -40,11 +40,11 @@ export type MockTx = { from: string; to: string; data: string; value: string; ga
 export function createRobinhoodMockChain(catalog: AssetCatalog, options: { readonly now: () => number;
   /** BUILD-BASE-001: the catalog network this chain plays (default Robinhood Chain): its Uniswap deployment, pinned tokens and OP Stack L1 fee. */
   readonly network?: 'robinhood' | 'base' }) {
-  const base = options.network === 'base', arb = catalog.chain === 'eip155:42161';
+  const base = options.network === 'base', eth = catalog.chain === 'eip155:1', arb = catalog.chain === 'eip155:42161';
   const UNI = { ...UNISWAP_V3_ROBINHOOD, ...base ? { factory: UNISWAP_V3_BASE.factory, router: UNISWAP_V3_BASE.router, quoter: UNISWAP_V3_BASE.quoter,
-    positionManager: UNISWAP_V3_BASE.positionManager, weth: UNISWAP_V3_BASE.weth, poolInitCodeHash: UNISWAP_V3_BASE.poolInitCodeHash } : arb ? UNISWAP_V3_ARBITRUM : {} };
+    positionManager: UNISWAP_V3_BASE.positionManager, weth: UNISWAP_V3_BASE.weth, poolInitCodeHash: UNISWAP_V3_BASE.poolInitCodeHash } : arb ? UNISWAP_V3_ARBITRUM : eth ? UNISWAP_V3_ETHEREUM : {} };
   const state = {
-    chainHex: base ? '0x2105' : arb ? '0xa4b1' : '0x1237', head: 1_000, hashes: new Map<number, string>(),
+    chainHex: eth ? '0x1' : base ? '0x2105' : arb ? '0xa4b1' : '0x1237', head: 1_000, hashes: new Map<number, string>(),
     /** OP Stack (Base): the L1 data fee the GasPriceOracle bounds and every receipt carries. */ l1Fee: base ? 25_000_000_000n : 0n,
     balances: new Map<string, bigint>(), allowances: new Map<string, bigint>(), native: new Map<string, bigint>(), nonces: new Map<string, number>(),
     stocks: new Map<string, MockStock>(), pools: new Map<string, { token0: string; token1: string } & MockPool>(),
@@ -64,9 +64,9 @@ export function createRobinhoodMockChain(catalog: AssetCatalog, options: { reado
   const allowanceKey = (token: string, owner: string, spender: string) => `${token.toLowerCase()}:${owner.toLowerCase()}:${spender.toLowerCase()}`;
   const blockHash = (n: number) => { if (!state.hashes.has(n)) state.hashes.set(n, '0x' + createHash('sha256').update('rh-block-' + n).digest('hex')); return state.hashes.get(n)!; };
   const roles: readonly (readonly [keyof typeof MOCK_CODE, string])[] = [['factory', UNI.factory], ['router', UNI.router], ['quoter', UNI.quoter],
-    ['positionManager', UNI.positionManager], ['weth', UNI.weth], base || arb ? ['usdc', arb ? UNISWAP_V3_ARBITRUM.usdc : UNISWAP_V3_BASE.usdc] : ['usdg', UNI.usdg]];
+    ['positionManager', UNI.positionManager], ['weth', UNI.weth], base || arb || eth ? ['usdc', eth ? UNISWAP_V3_ETHEREUM.usdc : arb ? UNISWAP_V3_ARBITRUM.usdc : UNISWAP_V3_BASE.usdc] : ['usdg', UNI.usdg]];
   for (const [role, address] of roles) state.code.set(address, MOCK_CODE[role]);
-  if (base || arb) for (const listed of catalog.assets.filter(a => a.kind === 'ERC20' && a.address && !state.code.has(a.address))) state.code.set(listed.address!, MOCK_CODE.listed);
+  if (base || arb || eth) for (const listed of catalog.assets.filter(a => a.kind === 'ERC20' && a.address && !state.code.has(a.address))) state.code.set(listed.address!, MOCK_CODE.listed);
   for (const stock of catalog.assets.filter(a => a.stock)) {
     state.code.set(stock.address!, MOCK_CODE.stockTokenProxy);
     state.stocks.set(stock.address!, { multiplierWad: BigInt(stock.stock!.multiplierWad) });

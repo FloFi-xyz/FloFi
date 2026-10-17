@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { createRouterBridgeNode, isRouterBridgeNode, readRouterBridgeNode, routerPair, ROUTER_PAIRS, type RoutingProvider, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
-import { CROSSCHAIN_ROUTER_ARBITRUM_BASE, CROSSCHAIN_ROUTER_ARBITRUM_ROBINHOOD, CROSSCHAIN_ROUTER_BASE_ARBITRUM, CROSSCHAIN_ROUTER_BASE_ROBINHOOD, CROSSCHAIN_ROUTER_BASE_SEPOLIA_ARBITRUM_SEPOLIA,
+import { ETHEREUM_ROUTER_DEPLOYMENTS, type EthereumRouterNetwork, CROSSCHAIN_ROUTER_ARBITRUM_BASE, CROSSCHAIN_ROUTER_ARBITRUM_ROBINHOOD, CROSSCHAIN_ROUTER_BASE_ARBITRUM, CROSSCHAIN_ROUTER_BASE_ROBINHOOD, CROSSCHAIN_ROUTER_BASE_SEPOLIA_ARBITRUM_SEPOLIA,
   CROSSCHAIN_ROUTER_ROBINHOOD_ARBITRUM, CROSSCHAIN_ROUTER_ROBINHOOD_BASE, type RouterProfile } from '@defi-workflow-engine/action-registry';
 import { authoringAssetSymbol } from './asset-catalogs';
 import { catalogNetworkOfChatName, networkIdentity } from './network-registry';
@@ -18,9 +18,9 @@ import { formatTokenAmount, parseTokenAmount } from './jupiter-authoring';
  * BUILD-BASE-001: Base bridge IN from Arbitrum One — Arbitrum USDC → Base USDC (real funds), the reverse of the Base → Arbitrum pair.
  */
 export type RouterRouting = 'AUTO' | 'LIFI' | 'ACROSS';
-export type RouterSource = 'Base' | 'Base Sepolia' | 'Arbitrum' | 'Robinhood Chain';
-export type RouterDestination = 'Arbitrum' | 'Arbitrum Sepolia' | 'Robinhood Chain' | 'Base';
-export type RouterNetwork = 'mainnet' | 'testnet' | 'base-to-robinhood' | 'robinhood-to-base' | 'arbitrum-to-robinhood' | 'robinhood-to-arbitrum' | 'arbitrum-to-base';
+export type RouterSource = 'Ethereum' | 'Base' | 'Base Sepolia' | 'Arbitrum' | 'Robinhood Chain';
+export type RouterDestination = 'Ethereum' | 'Arbitrum' | 'Arbitrum Sepolia' | 'Robinhood Chain' | 'Base';
+export type RouterNetwork = EthereumRouterNetwork | 'mainnet' | 'testnet' | 'base-to-robinhood' | 'robinhood-to-base' | 'arbitrum-to-robinhood' | 'robinhood-to-arbitrum' | 'arbitrum-to-base';
 export type RouterBridgeInput = { source: RouterSource; destination: RouterDestination; token: string; amount: string;
   /** '' = the connected wallet. */ recipient: string; slippage: string; routing: RouterRouting };
 export const ROUTER_ROUTING: Readonly<Record<RouterRouting, readonly RoutingProvider[]>> = Object.freeze({ AUTO: ['lifi', 'across'], LIFI: ['lifi'], ACROSS: ['across'] });
@@ -46,12 +46,16 @@ export const ROUTER_NETWORK_OPTIONS = Object.freeze({
   'robinhood-to-arbitrum': robinhoodOption('Robinhood Chain', 'Arbitrum', 'Robinhood Chain', 'Arbitrum One', CROSSCHAIN_ROUTER_ROBINHOOD_ARBITRUM),
   'arbitrum-to-base': Object.freeze({ source: 'Arbitrum' as const, destination: 'Base' as const, sourceLabel: 'Arbitrum One', destinationLabel: 'Base',
     pair: pairOf(CROSSCHAIN_ROUTER_ARBITRUM_BASE.id), profile: CROSSCHAIN_ROUTER_ARBITRUM_BASE, funds: 'Real funds: Arbitrum One and Base mainnet.', environment: 'mainnet' as const }),
+  ...Object.fromEntries(Object.entries(ETHEREUM_ROUTER_DEPLOYMENTS).map(([key, profile]) => [key,
+    robinhoodOption(profile.source.network === 'Arbitrum One' ? 'Arbitrum' : profile.source.network as RouterSource,
+      profile.destination.network === 'Arbitrum One' ? 'Arbitrum' : profile.destination.network as RouterDestination,
+      profile.source.network, profile.destination.network, profile)])) as Record<EthereumRouterNetwork, RouterOption>,
 }) satisfies Readonly<Record<RouterNetwork, RouterOption>>;
 /**
  * BUILD-BASE-001: the code a route reports while its deployment gate is off (as `app/router-action.ts` refuses it): the testnet Router, a
  * Robinhood Chain route (`GRYLOO_ROBINHOOD_MAINNET`), or the Router itself (`GRYLOO_ROUTER`: Base → Arbitrum One and Arbitrum One → Base).
  */
-export const routerDisabledCode = (network: RouterNetwork): string => network === 'testnet' ? 'ROUTER_TESTNET_NOT_ENABLED'
+export const routerDisabledCode = (network: RouterNetwork): string => network in ETHEREUM_ROUTER_DEPLOYMENTS ? 'ETHEREUM_MAINNET_NOT_ENABLED' : network === 'testnet' ? 'ROUTER_TESTNET_NOT_ENABLED'
   : [ROUTER_NETWORK_OPTIONS[network].source, ROUTER_NETWORK_OPTIONS[network].destination].includes('Robinhood Chain') ? 'ROBINHOOD_MAINNET_NOT_ENABLED' : 'ROUTER_NOT_ENABLED';
 /** The router networks (pairs) of a wallet environment: Base ⇄ Arbitrum and the Robinhood routes on mainnet, the test pair on testnet. */
 export const routerNetworksOf = (environment: 'mainnet' | 'testnet'): readonly RouterNetwork[] =>

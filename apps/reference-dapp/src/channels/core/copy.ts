@@ -10,7 +10,7 @@ import type { ChannelLanguage } from './config.ts';
 /** `0x1234…abcd` for every address or hash in a channel text. */
 export const shorten = (text: string) => text.replace(/0x([0-9a-fA-F]{4})[0-9a-fA-F]{32,60}([0-9a-fA-F]{4})(?![0-9a-fA-F])/g, '0x$1…$2');
 const NETWORK_LABEL: Readonly<Record<string, string>> = { 'base': 'Base', 'base-sepolia': 'Base Sepolia', 'arbitrum-one': 'Arbitrum One',
-  'arbitrum-sepolia': 'Arbitrum Sepolia', 'ethereum-sepolia': 'Ethereum Sepolia', 'solana': 'Solana', 'solana-devnet': 'Solana Devnet' };
+  'arbitrum-sepolia': 'Arbitrum Sepolia', 'ethereum': 'Ethereum', 'ethereum-sepolia': 'Ethereum Sepolia', 'solana': 'Solana', 'solana-devnet': 'Solana Devnet' };
 export const networkLabel = (id: string) => NETWORK_LABEL[id] ?? id;
 
 export type PreviewNote = { readonly kind: 'PASSED'; readonly provenance: string } | { readonly kind: 'FAILED'; readonly code: string }

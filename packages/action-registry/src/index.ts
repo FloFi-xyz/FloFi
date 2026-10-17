@@ -231,6 +231,8 @@ export * from './uniswap-v3-robinhood.js';
 export * from './base-chain.js';
 export * from './base-token-list.js';
 export * from './arbitrum-chain.js';
+export * from './ethereum-chain.js';
+export * from './ethereum-token-list.js';
 export * from './arbitrum-token-list.js';
 export * from './uniswap-token-list.js';
 export * from './token-list-networks.js';
@@ -241,3 +243,7 @@ export * from './uniswap-v3-catalog.js';
 export * from './uniswap-v3-base.js';
 export * from './uniswap-catalog-networks.js';
 export * from './uniswap-v3-arbitrum.js';
+
+export * from './uniswap-v3-ethereum.js';
+
+export { ETHEREUM_ROUTER_DEPLOYMENTS, ETHEREUM_ROUTER_NETWORKS, type EthereumRouterNetwork } from './crosschain-router.js';

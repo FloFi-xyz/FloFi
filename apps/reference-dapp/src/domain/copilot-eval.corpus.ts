@@ -102,15 +102,15 @@ export const COPILOT_EVAL_CASES: readonly EvalCase[] = [
 
   // ── Clarification ──────────────────────────────────────────────────────────────────────────────────────────────────
   { id: 'C01', category: 'clarification', language: 'EN', turns: [
-    { user: 'Put 5 USDC into Aave', model: intent.action(sup('5')), expect: Q({ contains: ['Which network should Flofi use for Aave V3?'], options: ['Base Sepolia', 'Base', 'Arbitrum One'] }) },
+    { user: 'Put 5 USDC into Aave', model: intent.action(sup('5')), expect: Q({ contains: ['Which network should Flofi use for Aave V3?'], options: ['Base Sepolia', 'Base', 'Arbitrum One', 'Ethereum'] }) },
     { user: 'Base Sepolia', expect: P('ADD_SUPPLY', { local: true, sentence: 'supply 5 USDC to Aave on Base Sepolia' }) }] },
   { id: 'C02', category: 'clarification', language: 'EN', turns: [
     { user: 'Supply USDC to Aave', model: intent.action(sup(null)), expect: Q({ contains: ['still needs the amount'] }) },
-    { user: '10', expect: Q({ local: true, options: ['Base Sepolia', 'Base', 'Arbitrum One'] }) },
+    { user: '10', expect: Q({ local: true, options: ['Base Sepolia', 'Base', 'Arbitrum One', 'Ethereum'] }) },
     { user: 'Base Sepolia', expect: P('ADD_SUPPLY', { local: true, sentence: 'supply 10 USDC to Aave on Base Sepolia' }) }] },
   { id: 'C03', category: 'clarification', language: 'EN', turns: [
     { user: 'Swap 5 USDC to ETH', model: intent.action(act.swap({ inputAsset: 'USDC', outputAsset: 'ETH', amount: '5' })),
-      expect: Q({ contains: ['still needs the network'], options: ['Base', 'Base Sepolia', 'Arbitrum One', 'Ethereum Sepolia', 'Solana', 'Solana Devnet', 'Robinhood Chain'] }) },
+      expect: Q({ contains: ['still needs the network'], options: ['Base', 'Base Sepolia', 'Arbitrum One', 'Ethereum', 'Ethereum Sepolia', 'Solana', 'Solana Devnet', 'Robinhood Chain'] }) },
     { user: 'Base Sepolia', expect: P('ADD_TESTNET_SWAP', { local: true }) }] },
   { id: 'C04', category: 'clarification', language: 'EN', turns: [
     { user: 'Swap USDC to WETH on Base Sepolia', model: intent.action(act.swap({ network: 'BASE_SEPOLIA', inputAsset: 'USDC', outputAsset: 'WETH' })), expect: Q() },
@@ -131,7 +131,7 @@ export const COPILOT_EVAL_CASES: readonly EvalCase[] = [
     { user: 'Arbitrum One', expect: P('ADD_ROUTER_BRIDGE', { local: true, contains: ['Real funds'] }) }] },
   { id: 'C09', category: 'clarification', language: 'EN', turns: [
     { user: 'Supply 5 to Aave', model: intent.action(act.lending('SUPPLY', { amount: '5' })), expect: Q({ options: ['USDC', 'WBTC'] }) },
-    { user: 'USDC', expect: Q({ local: true, options: ['Base Sepolia', 'Base', 'Arbitrum One'] }) },
+    { user: 'USDC', expect: Q({ local: true, options: ['Base Sepolia', 'Base', 'Arbitrum One', 'Ethereum'] }) },
     { user: 'Base Sepolia', expect: P('ADD_SUPPLY', { local: true }) }] },
   { id: 'C10', category: 'clarification', language: 'EN', turns: [
     { user: 'Add Uniswap liquidity 100 USDC and 0.05 WETH on Base Sepolia', model: intent.action(act.liquidity({ protocol: 'UNISWAP_V3', network: 'BASE_SEPOLIA',
@@ -170,7 +170,7 @@ export const COPILOT_EVAL_CASES: readonly EvalCase[] = [
     { user: `for ${OTHER_ADDRESS}`, model: intent.action(sup('5', { ...onSepolia, beneficiary: OTHER_ADDRESS })),
       expect: P('ADD_SUPPLY', { sentence: `supply 5 USDC to Aave on Base Sepolia beneficiary ${OTHER_ADDRESS}` }) }] },
   { id: 'C18', category: 'clarification', language: 'PT', turns: [
-    { user: 'Coloca 5 USDC na Aave', model: intent.action(sup('5'), 'PT'), expect: Q({ contains: ['Em qual rede?'], options: ['Base Sepolia', 'Base', 'Arbitrum One'] }) },
+    { user: 'Coloca 5 USDC na Aave', model: intent.action(sup('5'), 'PT'), expect: Q({ contains: ['Em qual rede?'], options: ['Base Sepolia', 'Base', 'Arbitrum One', 'Ethereum'] }) },
     { user: 'Base Sepolia', expect: P('ADD_SUPPLY', { local: true, contains: ['Interpretado como'] }) }] },
 
   // ── Multi-turn ─────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -203,7 +203,7 @@ export const COPILOT_EVAL_CASES: readonly EvalCase[] = [
       expect: P('ADD_SUPPLY', { sentence: 'supply 2 USDC to Aave on Base Sepolia', contains: ['Kept from your earlier proposal'] }) }] },
   { id: 'M08', category: 'multi-turn', language: 'EN', turns: [
     { user: FIXTURE.testnetSwap, expect: EXACT },
-    { user: 'Supply 2 USDC to Aave', before: s => s.dismiss(), model: intent.action(sup('2'), 'EN', { from: NO_TARGET, fields: ['network'] }), expect: Q({ options: ['Base Sepolia', 'Base', 'Arbitrum One'] }) }] },
+    { user: 'Supply 2 USDC to Aave', before: s => s.dismiss(), model: intent.action(sup('2'), 'EN', { from: NO_TARGET, fields: ['network'] }), expect: Q({ options: ['Base Sepolia', 'Base', 'Arbitrum One', 'Ethereum'] }) }] },
   { id: 'M09', category: 'multi-turn', language: 'EN', turns: [
     { user: FIXTURE.supply, expect: EXACT },
     { user: 'Swap the same amount of USDC to WETH on Base Sepolia', before: s => s.dismiss(),
@@ -389,7 +389,7 @@ export const COPILOT_EVAL_CASES: readonly EvalCase[] = [
   { id: 'L02', category: 'language', language: 'PT', turns: [{ user: 'Troca 5 USDC por ETH na Base Sepolia', model: intent.action(swapTestnet('5'), 'PT'),
     expect: P('ADD_TESTNET_SWAP', { contains: ['ETH embrulhado'] }) }] },
   { id: 'L03', category: 'language', language: 'MIXED', turns: [{ user: 'Swap 5 USDC pra ETH', model: intent.action(act.swap({ inputAsset: 'USDC', outputAsset: 'ETH', amount: '5' }), 'PT'),
-    expect: Q({ contains: ['o Flofi ainda precisa saber: a rede'], options: ['Base', 'Base Sepolia', 'Arbitrum One', 'Ethereum Sepolia', 'Solana', 'Solana Devnet', 'Robinhood Chain'] }) }] },
+    expect: Q({ contains: ['o Flofi ainda precisa saber: a rede'], options: ['Base', 'Base Sepolia', 'Arbitrum One', 'Ethereum', 'Ethereum Sepolia', 'Solana', 'Solana Devnet', 'Robinhood Chain'] }) }] },
   { id: 'L04', category: 'language', language: 'MIXED', setup: [FIXTURE.supply], turns: [{ user: 'Muda o amount para 3', model: intent.edit({ amount: '3' }, {}, 'PT'),
     expect: P('SET_SUPPLY', { input: { amount: '3' } }) }] },
   { id: 'L05', category: 'language', language: 'MIXED', turns: [
@@ -503,7 +503,7 @@ export const COPILOT_EVAL_CASES: readonly EvalCase[] = [
     expect: U(['That token is not supported']) }] },
   { id: 'U08', category: 'unsupported', language: 'EN', turns: [{ user: 'Supply 5 ETH to Aave on Base Sepolia', model: intent.action(act.lending('SUPPLY', { asset: 'ETH', amount: '5', ...onSepolia })),
     // BUILD-BASE-001: the conversation also lends USDC on Base mainnet (real funds); the refusal is generated from the Aave offers.
-    expect: U(['Aave V3 with USDC on Base Sepolia, Base and Arbitrum One, and WBTC on Ethereum Sepolia only']) }] },
+    expect: U(['Aave V3 with USDC on Base Sepolia, Base, Arbitrum One and Ethereum, and WBTC on Ethereum Sepolia only']) }] },
   { id: 'U09', category: 'unsupported', language: 'EN', turns: [{ user: 'Supply 5 USDC to Compound', model: intent.unsupported('Compound is not supported.'), expect: U() }] },
   { id: 'U10', category: 'unsupported', language: 'PT', turns: [{ user: 'Tenho 500 USDC. Coloca 300 na Aave e troca 200 por ETH.',
     model: intent.composition([sup('300'), act.swap({ inputAsset: 'USDC', outputAsset: 'ETH', amount: '200' })], 'PT'), expect: U(['O Flofi só combina passos']) }] },
@@ -521,18 +521,18 @@ export const COPILOT_EVAL_CASES: readonly EvalCase[] = [
       rangeUnit: 'PRICE', lower: '2000', upper: '4000' })),
     expect: P('ADD_UNISWAP_LIQUIDITY', { sentence: 'add liquidity 10 USDC and 0.005 WETH from 2000 to 4000 USDC per WETH on Ethereum Sepolia slippage 100 bps' }) }] },
   { id: 'E05', category: 'direct', language: 'EN', turns: [{ user: 'swap 2 USDC to WETH on Ethereum Sepolia slippage 50 bps', expect: EXACT }] },
-  // "Ethereum" alone is never Ethereum Mainnet and never silently Ethereum Sepolia.
+  // Explicit Ethereum grounds Mainnet; a model still cannot silently substitute Sepolia.
   { id: 'E06', category: 'clarification', language: 'EN', turns: [
     { user: 'Please swap 2 USDC for WETH on Ethereum', model: intent.action(act.swap({ network: 'ETHEREUM', inputAsset: 'USDC', outputAsset: 'WETH', amount: '2' })),
-      expect: Q({ contains: ['Flofi never uses Ethereum Mainnet'], absent: ['Ethereum Mainnet uses'] }) },
-    { user: 'Ethereum Sepolia', expect: P('ADD_ETHEREUM_SEPOLIA_SWAP', { local: true, sentence: 'swap 2 USDC to WETH on Ethereum Sepolia slippage 50 bps' }) }] },
+      expect: P('ADD_CRYPTO_ACTION', { sentence: 'swap 2 USDC to WETH on Ethereum slippage 50 bps' }) },
+    { user: 'Please swap 2 USDC for WETH on Ethereum Sepolia', model: intent.action(act.swap({ network: 'ETHEREUM_SEPOLIA', inputAsset: 'USDC', outputAsset: 'WETH', amount: '2' })), expect: P('ADD_ETHEREUM_SEPOLIA_SWAP', { sentence: 'swap 2 USDC to WETH on Ethereum Sepolia slippage 50 bps' }) }] },
   { id: 'E07', category: 'adversarial', language: 'EN', turns: [{ user: 'Please swap 2 USDC for WETH on Ethereum',
-    model: intent.action(act.swap({ network: 'ETHEREUM_SEPOLIA', inputAsset: 'USDC', outputAsset: 'WETH', amount: '2' })), expect: Q({ contains: ['Flofi never uses Ethereum Mainnet'] }) }] },
+    model: intent.action(act.swap({ network: 'ETHEREUM_SEPOLIA', inputAsset: 'USDC', outputAsset: 'WETH', amount: '2' })), expect: Q({ contains: ['real funds'] }) }] },
   { id: 'E08', category: 'clarification', language: 'EN', turns: [{ user: 'Put 0.001 WBTC into Aave on Ethereum mainnet',
     model: intent.action(act.lending('SUPPLY', { asset: 'WBTC', amount: '0.001', network: 'ETHEREUM' })),
-    expect: Q({ contains: ['Flofi never uses Ethereum Mainnet'], options: ['Ethereum Sepolia'] }) }] },
+    expect: U(['USDC']) }] },
   { id: 'E09', category: 'clarification', language: 'EN', turns: [{ user: 'Put 10 USDC into Aave on Ethereum Sepolia',
-    model: intent.action(sup('10', onEthereumSepolia)), expect: Q({ contains: ['on Base Sepolia, Base, Arbitrum One only'], options: ['Base Sepolia', 'Base', 'Arbitrum One'] }) }] },
+    model: intent.action(sup('10', onEthereumSepolia)), expect: Q({ contains: ['on Base Sepolia, Base, Arbitrum One, Ethereum only'], options: ['Base Sepolia', 'Base', 'Arbitrum One', 'Ethereum'] }) }] },
   { id: 'E10', category: 'clarification', language: 'EN', turns: [{ user: 'Put 0.001 WBTC into Aave on Base Sepolia',
     model: intent.action(act.lending('SUPPLY', { asset: 'WBTC', amount: '0.001', ...onSepolia })), expect: Q({ contains: ['on Ethereum Sepolia only'], options: ['Ethereum Sepolia'] }) }] },
   { id: 'E11', category: 'clarification', language: 'EN', turns: [
@@ -542,12 +542,12 @@ export const COPILOT_EVAL_CASES: readonly EvalCase[] = [
     { user: 'Provide Uniswap liquidity with up to 10 USDC and 0.005 WETH between 2000 and 4000 USDC per WETH', model: intent.action(act.liquidity({ protocol: 'UNISWAP_V3',
       deposits: [{ asset: 'USDC', maxAmount: '10' }, { asset: 'WETH', maxAmount: '0.005' }], rangeUnit: 'PRICE', lower: '2000', upper: '4000' })),
       // BUILD-BASE-001: the Uniswap v3 networks of the capability truth, in network registry order.
-      expect: Q({ options: ['Base', 'Base Sepolia', 'Arbitrum One', 'Ethereum Sepolia', 'Robinhood Chain'] }) },
+      expect: Q({ options: ['Base', 'Base Sepolia', 'Arbitrum One', 'Ethereum', 'Ethereum Sepolia', 'Robinhood Chain'] }) },
     { user: 'Ethereum Sepolia', expect: P('ADD_UNISWAP_LIQUIDITY', { local: true }) }] },
   { id: 'E13', category: 'language', language: 'PT', turns: [{ user: 'Faz swap de 2 USDC para WETH na Ethereum',
-    model: intent.action(act.swap({ network: 'ETHEREUM', inputAsset: 'USDC', outputAsset: 'WETH', amount: '2' }), 'PT'), expect: Q({ contains: ['O Flofi nunca usa a Ethereum Mainnet'] }) }] },
+    model: intent.action(act.swap({ network: 'ETHEREUM', inputAsset: 'USDC', outputAsset: 'WETH', amount: '2' }), 'PT'), expect: P('ADD_CRYPTO_ACTION', { sentence: 'swap 2 USDC to WETH on Ethereum slippage 50 bps' }) }] },
   { id: 'E14', category: 'unsupported', language: 'EN', turns: [{ user: 'Supply 1 WETH to Aave on Ethereum Sepolia',
-    model: intent.action(act.lending('SUPPLY', { asset: 'WETH', amount: '1', ...onEthereumSepolia })), expect: Q({ options: ['Base Sepolia', 'Base', 'Arbitrum One'] }) }] },
+    model: intent.action(act.lending('SUPPLY', { asset: 'WETH', amount: '1', ...onEthereumSepolia })), expect: Q({ options: ['Base Sepolia', 'Base', 'Arbitrum One', 'Ethereum'] }) }] },
 
   // ── Stale context and failures ─────────────────────────────────────────────────────────────────────────────────────
   { id: 'Z01', category: 'race', language: 'EN', setup: [FIXTURE.supply], turns: [{ user: 'make it 2', model: intent.edit({ amount: '2' }), race: canvasAddRead,
