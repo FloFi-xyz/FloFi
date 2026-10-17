@@ -1,0 +1,101 @@
+{
+  "evidence": "PUBLIC_READ_ONLY",
+  "verifiedAt": "2026-10-17T00:39:24.240Z",
+  "routes": [
+    {
+      "origin": 1,
+      "destination": 8453,
+      "sourceToken": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+      "destinationToken": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "sourceSpokePool": "0x5c7bcd6e7de5423a257d81b442095a1a6ced35c5",
+      "destinationSpokePool": null,
+      "spender": "0x5c7bcd6e7de5423a257d81b442095a1a6ced35c5",
+      "selector": "0xad5425c6",
+      "quoteOutput": "9995691"
+    },
+    {
+      "origin": 8453,
+      "destination": 1,
+      "sourceToken": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "destinationToken": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+      "sourceSpokePool": "0x09aea4b2242abc8bb4bb78d537a67a245a7bec64",
+      "destinationSpokePool": null,
+      "spender": "0x09aea4b2242abc8bb4bb78d537a67a245a7bec64",
+      "selector": "0xad5425c6",
+      "quoteOutput": "9980777"
+    },
+    {
+      "origin": 1,
+      "destination": 42161,
+      "sourceToken": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+      "destinationToken": "0xaf88d065e77c8cc2239327c5edb3a432268e5831",
+      "sourceSpokePool": "0x5c7bcd6e7de5423a257d81b442095a1a6ced35c5",
+      "destinationSpokePool": null,
+      "spender": "0x5c7bcd6e7de5423a257d81b442095a1a6ced35c5",
+      "selector": "0xad5425c6",
+      "quoteOutput": "9992118"
+    },
+    {
+      "origin": 42161,
+      "destination": 1,
+      "sourceToken": "0xaf88d065e77c8cc2239327c5edb3a432268e5831",
+      "destinationToken": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+      "sourceSpokePool": "0xe35e9842fceaca96570b734083f4a58e8f7c5f2a",
+      "destinationSpokePool": null,
+      "spender": "0xe35e9842fceaca96570b734083f4a58e8f7c5f2a",
+      "selector": "0xad5425c6",
+      "quoteOutput": "9980777"
+    },
+    {
+      "origin": 1,
+      "destination": 4663,
+      "sourceToken": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+      "destinationToken": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+      "sourceSpokePool": "0x5c7bcd6e7de5423a257d81b442095a1a6ced35c5",
+      "destinationSpokePool": null,
+      "spender": "0x5c7bcd6e7de5423a257d81b442095a1a6ced35c5",
+      "selector": "0xad5425c6",
+      "quoteOutput": "9985932"
+    },
+    {
+      "origin": 4663,
+      "destination": 1,
+      "sourceToken": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+      "destinationToken": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+      "sourceSpokePool": "0xd29c85f15df544ba632c9e25829fd29d767d7978",
+      "destinationSpokePool": null,
+      "spender": "0xd29c85f15df544ba632c9e25829fd29d767d7978",
+      "selector": "0xad5425c6",
+      "quoteOutput": "9974789"
+    }
+  ],
+  "contracts": {
+    "spokePool": {
+      "address": "0x5c7bcd6e7de5423a257d81b442095a1a6ced35c5",
+      "sha256": "3cc5e539eb61133fec38655ae3f55d8e1f944fce2cbc02e151972cf9c9880545",
+      "bytes": 680,
+      "chainId()": "1",
+      "pausedDeposits()": "0",
+      "pausedFills()": "0",
+      "depositQuoteTimeBuffer()": "3600",
+      "fillDeadlineBuffer()": "21600"
+    },
+    "lifiDiamond": {
+      "address": "0x1231deb6f5749ef6ce6943a275a1d3e7486f4eae",
+      "sha256": "72211202d3d54f9e8b4590855d8f8390f1fad2d55c2472a3e488b58ccb61c2e9",
+      "bytes": 5176
+    },
+    "lifiFeeForwarder": {
+      "address": "0xce40449b773a3e6e5e769adb4e567179d4828cbd",
+      "sha256": "8e1f9e10378ce2648b2d1cb2c7a4a061058bf202b2e7b8d68a70a17082728981",
+      "bytes": 3037
+    },
+    "aaveImplementation": {
+      "address": "0x728a138a4823392c2efa55e028d434f526fe03cf",
+      "sha256": "fbd5bf315821d290d18b3a06cafb2f69457075388eae50b6134f490cf83cb049",
+      "bytes": 21146
+    }
+  },
+  "block": "0x18fe9b4",
+  "aavePoolImplementation": "0x000000000000000000000000728a138a4823392c2efa55e028d434f526fe03cf"
+}

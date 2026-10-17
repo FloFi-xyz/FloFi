@@ -62,6 +62,7 @@
                 "base",
                 "base-sepolia",
                 "arbitrum-one",
+                "ethereum",
                 "arbitrum-sepolia",
                 "ethereum-sepolia",
                 "solana",
@@ -2273,6 +2274,10 @@
                       {
                         "const": "robinhood",
                         "type": "string"
+                      },
+                      {
+                        "const": "ethereum",
+                        "type": "string"
                       }
                     ]
                   },
@@ -2293,6 +2298,10 @@
                       },
                       {
                         "const": "base",
+                        "type": "string"
+                      },
+                      {
+                        "const": "ethereum",
                         "type": "string"
                       }
                     ]
@@ -2390,6 +2399,10 @@
                       },
                       {
                         "const": "arbitrum-one",
+                        "type": "string"
+                      },
+                      {
+                        "const": "ethereum",
                         "type": "string"
                       }
                     ]
@@ -2524,6 +2537,10 @@
                       {
                         "const": "arbitrum-one",
                         "type": "string"
+                      },
+                      {
+                        "const": "ethereum",
+                        "type": "string"
                       }
                     ]
                   },
@@ -2585,6 +2602,10 @@
                       },
                       {
                         "const": "arbitrum-one",
+                        "type": "string"
+                      },
+                      {
+                        "const": "ethereum",
                         "type": "string"
                       }
                     ]
@@ -2648,6 +2669,10 @@
                       {
                         "const": "arbitrum-one",
                         "type": "string"
+                      },
+                      {
+                        "const": "ethereum",
+                        "type": "string"
                       }
                     ]
                   },
@@ -2708,6 +2733,10 @@
                       },
                       {
                         "const": "arbitrum-one",
+                        "type": "string"
+                      },
+                      {
+                        "const": "ethereum",
                         "type": "string"
                       }
                     ]
@@ -2770,6 +2799,10 @@
                       },
                       {
                         "const": "arbitrum-one",
+                        "type": "string"
+                      },
+                      {
+                        "const": "ethereum",
                         "type": "string"
                       }
                     ]
@@ -2966,6 +2999,10 @@
                       {
                         "const": "arbitrum-one",
                         "type": "string"
+                      },
+                      {
+                        "const": "ethereum",
+                        "type": "string"
                       }
                     ]
                   },
@@ -3057,6 +3094,10 @@
                                 {
                                   "const": "robinhood",
                                   "type": "string"
+                                },
+                                {
+                                  "const": "ethereum",
+                                  "type": "string"
                                 }
                               ]
                             },
@@ -3077,6 +3118,10 @@
                                 },
                                 {
                                   "const": "base",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "ethereum",
                                   "type": "string"
                                 }
                               ]
@@ -3174,6 +3219,10 @@
                                 },
                                 {
                                   "const": "arbitrum-one",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "ethereum",
                                   "type": "string"
                                 }
                               ]
@@ -3308,6 +3357,10 @@
                                 {
                                   "const": "arbitrum-one",
                                   "type": "string"
+                                },
+                                {
+                                  "const": "ethereum",
+                                  "type": "string"
                                 }
                               ]
                             },
@@ -3369,6 +3422,10 @@
                                 },
                                 {
                                   "const": "arbitrum-one",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "ethereum",
                                   "type": "string"
                                 }
                               ]
@@ -3432,6 +3489,10 @@
                                 {
                                   "const": "arbitrum-one",
                                   "type": "string"
+                                },
+                                {
+                                  "const": "ethereum",
+                                  "type": "string"
                                 }
                               ]
                             },
@@ -3492,6 +3553,10 @@
                                 },
                                 {
                                   "const": "arbitrum-one",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "ethereum",
                                   "type": "string"
                                 }
                               ]
@@ -3554,6 +3619,10 @@
                                 },
                                 {
                                   "const": "arbitrum-one",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "ethereum",
                                   "type": "string"
                                 }
                               ]
@@ -3749,6 +3818,10 @@
                                 },
                                 {
                                   "const": "arbitrum-one",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "ethereum",
                                   "type": "string"
                                 }
                               ]

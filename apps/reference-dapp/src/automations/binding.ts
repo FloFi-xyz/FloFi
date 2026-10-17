@@ -20,6 +20,7 @@ import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts'
 import { reviewContextForChain } from '@defi-workflow-engine/reference-linter';
 import { savedWorkflowHash } from '../domain/saved-workflow.ts';
 import { SWAP_ACTION, swapDetails } from '../domain/swap-authoring';
+import { catalogSwapDetails } from '../domain/catalog-swap-authoring';
 import { composeWorkflowBound, dappReviewContext } from '../engine/strategy-engine';
 import { isStrategyWorkflow, type StrategyInput, type StrategySpec } from '../engine/strategy-spec';
 import { ENGINE_VERSION } from '../platform/index.ts';
@@ -51,7 +52,7 @@ export function sourceDrift(source: WorkflowSource | null, current: { readonly w
   return current && current.workflowHash === source.workflowHash && current.version === source.version ? null : 'WORKFLOW_CHANGED';
 }
 
-const SWAP_NETWORKS: Readonly<Record<string, Extract<StrategySpec, { action: 'swap' }>['network']>> = Object.freeze({ 'eip155:8453': 'base', 'eip155:84532': 'base-sepolia', 'eip155:11155111': 'ethereum-sepolia' });
+const SWAP_NETWORKS: Readonly<Record<string, Extract<StrategySpec, { action: 'swap' }>['network']>> = Object.freeze({ 'eip155:8453': 'base', 'eip155:84532': 'base-sepolia', 'eip155:11155111': 'ethereum-sepolia', 'eip155:1': 'ethereum' });
 /** Key-order-independent JSON (a stored document comes back from JSONB with its keys reordered). */
 const canonical = (value: unknown): string => JSON.stringify(value, (_key, v: unknown) => v && typeof v === 'object' && !Array.isArray(v)
   ? Object.fromEntries(Object.keys(v as object).sort().map(k => [k, (v as Record<string, unknown>)[k]])) : v);
@@ -71,7 +72,7 @@ export function strategyOfSavedWorkflow(workflow: SemanticWorkflow): { readonly 
   const network = SWAP_NETWORKS[node.chainId];
   if (!network) return { ok: false, code: 'AUTOMATION_WORKFLOW_NOT_REPRESENTABLE' };
   const context = network === 'base' ? dappReviewContext() : reviewContextForChain(node.chainId, dappReviewContext());
-  const details = swapDetails(node as Parameters<typeof swapDetails>[0], context);
+  const details = network === 'ethereum' ? catalogSwapDetails(node) : swapDetails(node as Parameters<typeof swapDetails>[0], context);
   if (!details || details.slippage === null) return { ok: false, code: 'AUTOMATION_WORKFLOW_NOT_REPRESENTABLE' };
   const strategy: StrategySpec = { version: 1, action: 'swap', network, inputAsset: details.from, outputAsset: details.to, amount: details.amount, slippageBps: details.slippage };
   const composed = composeWorkflowBound(strategy, undefined);

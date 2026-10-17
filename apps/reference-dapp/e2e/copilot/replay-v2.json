@@ -1748,6 +1748,470 @@
      }
     }
    }
+  },
+  {
+   "user": [
+    "Please Swap 10 USDC for WETH on Ethereum"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "EN",
+      "kind": "ACTION",
+      "action": {
+       "type": "SWAP",
+       "network": "ETHEREUM",
+       "inputAsset": "USDC",
+       "outputAsset": "WETH",
+       "amount": "10",
+       "slippageBps": null
+      },
+      "reuse": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "Por favor, troca 10 USDC por WETH na Ethereum"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "PT",
+      "kind": "ACTION",
+      "action": {
+       "type": "SWAP",
+       "network": "ETHEREUM",
+       "inputAsset": "USDC",
+       "outputAsset": "WETH",
+       "amount": "10",
+       "slippageBps": null
+      },
+      "reuse": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "Please Send 0.01 ETH on Ethereum to 0x3333333333333333333333333333333333333333"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "EN",
+      "kind": "ACTION",
+      "action": {
+       "type": "TRANSFER",
+       "network": "ETHEREUM",
+       "asset": "ETH",
+       "amount": "0.01",
+       "recipient": "0x3333333333333333333333333333333333333333"
+      },
+      "reuse": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "Por favor, mande 0.01 ETH na Ethereum para 0x3333333333333333333333333333333333333333"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "PT",
+      "kind": "ACTION",
+      "action": {
+       "type": "TRANSFER",
+       "network": "ETHEREUM",
+       "asset": "ETH",
+       "amount": "0.01",
+       "recipient": "0x3333333333333333333333333333333333333333"
+      },
+      "reuse": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "Please Send 5 USDC on Ethereum to 0x3333333333333333333333333333333333333333"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "EN",
+      "kind": "ACTION",
+      "action": {
+       "type": "TRANSFER",
+       "network": "ETHEREUM",
+       "asset": "USDC",
+       "amount": "5",
+       "recipient": "0x3333333333333333333333333333333333333333"
+      },
+      "reuse": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "Please Bridge 100 USDC from Base to Ethereum"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "EN",
+      "kind": "ACTION",
+      "action": {
+       "type": "BRIDGE",
+       "sourceNetwork": "BASE",
+       "destinationNetwork": "ETHEREUM",
+       "asset": "USDC",
+       "amount": "100",
+       "routing": null,
+       "slippageBps": null,
+       "recipient": null
+      },
+      "reuse": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "Please Move 100 USDC from Ethereum to Base"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "EN",
+      "kind": "ACTION",
+      "action": {
+       "type": "BRIDGE",
+       "sourceNetwork": "ETHEREUM",
+       "destinationNetwork": "BASE",
+       "asset": "USDC",
+       "amount": "100",
+       "routing": null,
+       "slippageBps": null,
+       "recipient": null
+      },
+      "reuse": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "Please Provide liquidity with 10 USDC and 0.005 WETH on Ethereum at 0.05% over the full range"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "EN",
+      "kind": "ACTION",
+      "action": {
+       "type": "LIQUIDITY",
+       "protocol": "UNISWAP_V3",
+       "network": "ETHEREUM",
+       "deposits": [
+        {
+         "asset": "USDC",
+         "maxAmount": "10"
+        },
+        {
+         "asset": "WETH",
+         "maxAmount": "0.005"
+        }
+       ],
+       "rangeUnit": "FULL",
+       "lower": null,
+       "upper": null,
+       "feeTier": "0.05",
+       "slippageBps": null
+      },
+      "reuse": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "Please supply 100 USDC on Ethereum"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "EN",
+      "kind": "ACTION",
+      "action": {
+       "type": "SUPPLY",
+       "protocol": "AAVE_V3",
+       "network": "ETHEREUM",
+       "asset": "USDC",
+       "amount": "100",
+       "beneficiary": null
+      },
+      "reuse": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "Por favor, quero colocar 100 USDC no Aave da Ethereum"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "PT",
+      "kind": "ACTION",
+      "action": {
+       "type": "SUPPLY",
+       "protocol": "AAVE_V3",
+       "network": "ETHEREUM",
+       "asset": "USDC",
+       "amount": "100",
+       "beneficiary": null
+      },
+      "reuse": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "Please borrow 20 USDC on Ethereum"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "EN",
+      "kind": "ACTION",
+      "action": {
+       "type": "BORROW",
+       "protocol": "AAVE_V3",
+       "network": "ETHEREUM",
+       "asset": "USDC",
+       "amount": "20",
+       "beneficiary": null
+      },
+      "reuse": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "Please repay 10 USDC on Ethereum"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "EN",
+      "kind": "ACTION",
+      "action": {
+       "type": "REPAY",
+       "protocol": "AAVE_V3",
+       "network": "ETHEREUM",
+       "asset": "USDC",
+       "amount": "10",
+       "beneficiary": null
+      },
+      "reuse": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "Please withdraw 50 USDC from Aave on Ethereum"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "EN",
+      "kind": "ACTION",
+      "action": {
+       "type": "WITHDRAW",
+       "protocol": "AAVE_V3",
+       "network": "ETHEREUM",
+       "asset": "USDC",
+       "amount": "50",
+       "beneficiary": null
+      },
+      "reuse": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "Please supply 1 WETH to Aave on Ethereum"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "EN",
+      "kind": "ACTION",
+      "action": {
+       "type": "SUPPLY",
+       "protocol": "AAVE_V3",
+       "network": "ETHEREUM",
+       "asset": "WETH",
+       "amount": "1",
+       "beneficiary": null
+      },
+      "reuse": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "Please repay all 10 USDC debt on Ethereum"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "EN",
+      "kind": "ACTION",
+      "action": {
+       "type": "REPAY",
+       "protocol": "AAVE_V3",
+       "network": "ETHEREUM",
+       "asset": "USDC",
+       "amount": "10",
+       "beneficiary": null
+      },
+      "reuse": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "Provide liquidity for USDC and WETH on Ethereum"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "EN",
+      "kind": "ACTION",
+      "action": {
+       "type": "LIQUIDITY",
+       "protocol": "UNISWAP_V3",
+       "network": "ETHEREUM",
+       "deposits": [],
+       "rangeUnit": null,
+       "lower": null,
+       "upper": null,
+       "feeTier": null,
+       "slippageBps": null
+      },
+      "reuse": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "Please provide 10 USDC and 0.005 WETH liquidity on Ethereum fee 0.02%"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "EN",
+      "kind": "ACTION",
+      "action": {
+       "type": "LIQUIDITY",
+       "protocol": "UNISWAP_V3",
+       "network": "ETHEREUM",
+       "deposits": [
+        {
+         "asset": "USDC",
+         "maxAmount": "10"
+        },
+        {
+         "asset": "WETH",
+         "maxAmount": "0.005"
+        }
+       ],
+       "rangeUnit": "FULL",
+       "lower": null,
+       "upper": null,
+       "feeTier": null,
+       "slippageBps": null
+      },
+      "reuse": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "Please send 5 USDC on Ethereum"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "EN",
+      "kind": "ACTION",
+      "action": {
+       "type": "TRANSFER",
+       "network": "ETHEREUM",
+       "asset": "USDC",
+       "amount": "5",
+       "recipient": null
+      },
+      "reuse": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "Please send 5 USDC on Ethereum",
+    "0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "EN",
+      "kind": "ACTION",
+      "action": {
+       "type": "TRANSFER",
+       "network": "ETHEREUM",
+       "asset": "USDC",
+       "amount": "5",
+       "recipient": "0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed"
+      },
+      "reuse": null
+     }
+    }
+   }
   }
  ]
 }

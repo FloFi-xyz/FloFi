@@ -5,8 +5,8 @@
  * Observation (read-only USD prices): ETH, BTC, SOL — when the deployment's price source serves them.
  * Execution (the action an automation proposes): FloFi's existing swap flows only, expressed as canonical StrategySpecs:
  *
- *   ETH   USDC ⇄ WETH on Base Sepolia and Ethereum Sepolia (Uniswap v3). Base mainnet composes and (BUILD-BASE-001) has the owner-wallet
- *         `base-swap` flow, behind its deployment gates; mainnet automations are disabled by policy by default
+ *   ETH   USDC ⇄ WETH on Base Sepolia and Ethereum Sepolia (Uniswap v3). Base and Ethereum mainnets compose and have their owner-wallet
+ *         catalog swap flows, behind their deployment gates; mainnet automations are disabled by policy by default
  *   SOL   devUSDC ⇄ SOL on Solana Devnet (Orca); USDC ⇄ SOL on Solana mainnet (Jupiter) exists in code, disabled by policy by default
  *   BTC   none: FloFi has no BTC/WBTC/cbBTC swap route (WBTC is Aave-only on Ethereum Sepolia) → BTC_EXECUTION_ROUTE_UNAVAILABLE
  *
@@ -21,7 +21,7 @@ export type SwapNetwork = Extract<StrategySpec, { action: 'swap' }>['network'];
 type Route = { readonly network: SwapNetwork; readonly quote: 'USDC' | 'devUSDC'; readonly base: 'WETH' | 'SOL' };
 export const EXECUTION_ROUTES: Readonly<Record<ObservedAsset, readonly Route[]>> = Object.freeze({
   ETH: [{ network: 'base-sepolia', quote: 'USDC', base: 'WETH' }, { network: 'ethereum-sepolia', quote: 'USDC', base: 'WETH' },
-    { network: 'base', quote: 'USDC', base: 'WETH' }],
+    { network: 'base', quote: 'USDC', base: 'WETH' }, { network: 'ethereum', quote: 'USDC', base: 'WETH' }],
   SOL: [{ network: 'solana-devnet', quote: 'devUSDC', base: 'SOL' }, { network: 'solana', quote: 'USDC', base: 'SOL' }],
   BTC: [],
 });

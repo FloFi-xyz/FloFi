@@ -289,13 +289,13 @@ describe('Ethereum Sepolia (BUILD-ETHEREUM-001)', () => {
     sameAsTyped(convert(action(liquidity()), 'Add Uniswap liquidity with 10 USDC and 0.005 WETH between 2000 and 3000 USDC per WETH on Ethereum Sepolia'),
       'add liquidity 10 USDC and 0.005 WETH from 2000 to 3000 USDC per WETH on Ethereum Sepolia slippage 100 bps');
   });
-  it('never reads "Ethereum" as Ethereum Mainnet, nor silently as Ethereum Sepolia', () => {
+  it('keeps the V1 vocabulary bounded and never silently substitutes Sepolia for Ethereum Mainnet', () => {
     for (const [network, text] of [['ETHEREUM', 'Please swap 2 USDC for WETH on Ethereum'], ['ETHEREUM', 'Please swap 2 USDC for WETH on Ethereum mainnet'],
       ['ETHEREUM_SEPOLIA', 'Please swap 2 USDC for WETH on Ethereum'], [null, 'Please swap 2 USDC for WETH on Ethereum']] as const) {
       const outcome = convert(action(swap({ network, outputAsset: 'WETH', amount: '2' })), text);
       expect(outcome, `${network} / ${text}`).toMatchObject({ kind: 'CLARIFICATION', missing: ['network'] });
       if (outcome.kind !== 'CLARIFICATION') throw new Error('unreachable');
-      expect(outcome.question).toContain('Flofi never uses Ethereum Mainnet');
+      expect(outcome.question).toMatch(/available|network|real funds/i);
       expect(outcome.options).not.toContain('Ethereum');
     }
     expect(convert(action(lending('SUPPLY', { network: 'ETHEREUM', asset: 'WBTC', amount: '0.001' })), 'Supply 0.001 WBTC to Aave on Ethereum'))

@@ -15,6 +15,7 @@
  * evidence. Nothing here authorizes anything: the owner still proves the wallet, re-simulates, reviews and signs in FloFi.
  */
 import type { EvidenceMaturity, ExecutionEnvironment } from '@defi-workflow-engine/action-registry';
+import { ETHEREUM_ROUTER_NETWORKS } from '@defi-workflow-engine/action-registry';
 import type { FlowName } from '../../backend/flows.ts';
 import { NETWORKS, reviewComposition, type Composition, type WorkflowComposition } from '../engine/strategy-engine';
 import { NETWORK_IDS, type NetworkId, type StrategyAction, type StrategySpec } from '../engine/strategy-spec';
@@ -31,7 +32,8 @@ export const FLOWS_WITH_EXECUTION_SWITCH: readonly FlowName[] = Object.freeze(['
   'crosschain-router-base-to-robinhood', 'crosschain-router-robinhood-to-base', 'crosschain-router-arbitrum-to-robinhood', 'crosschain-router-robinhood-to-arbitrum',
   'robinhood-liquidity',
   // BUILD-BASE-001: Base mainnet liquidity (Base real-funds approval) and the Router's Arbitrum One → Base route (Router approval).
-  'base-liquidity', 'arbitrum-liquidity', 'crosschain-router-arbitrum-to-base',
+  'base-liquidity', 'arbitrum-liquidity', 'ethereum-liquidity', 'crosschain-router-arbitrum-to-base',
+  ...ETHEREUM_ROUTER_NETWORKS.map(route => `crosschain-router-${route}` as const),
   // The Solana Devnet composition exposes the same switch; no MCP strategy plans it (MCP integration is deferred).
   'solana-devnet-composition',
   // BUILD-SOLANA-MAINNET-001: Orca liquidity on Solana mainnet-beta (real-funds owner execution switch); no MCP strategy plans it (MCP integration deferred).

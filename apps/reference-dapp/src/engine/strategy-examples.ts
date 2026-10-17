@@ -52,4 +52,16 @@ export const STRATEGY_EXAMPLES: readonly { readonly id: string; readonly strateg
   { id: 'swap-arbitrum', strategy: { action: 'swap', network: 'arbitrum-one', inputAsset: 'USDC', outputAsset: 'WETH', amount: '10', slippageBps: 50 } },
   { id: 'transfer-arbitrum', strategy: { action: 'transfer', network: 'arbitrum-one', asset: 'USDC', amount: '5' } },
   { id: 'add-liquidity-arbitrum', strategy: { action: 'add_liquidity', network: 'arbitrum-one', maxAmounts: { USDC: '10', WETH: '0.003' }, range: { unit: 'full' }, feeTier: 500 } },
+  ...(['supply', 'borrow', 'repay'] as const).map(action =>
+    ({ id: `${action}-ethereum`, strategy: { action, network: 'ethereum', asset: 'USDC', amount: '1', beneficiary: EXAMPLE_ACCOUNT } as StrategySpec })),
+  { id: 'withdraw-ethereum', strategy: { action: 'withdraw', network: 'ethereum', asset: 'USDC', amount: '1' } },
+  { id: 'swap-ethereum', strategy: { action: 'swap', network: 'ethereum', inputAsset: 'USDC', outputAsset: 'WETH', amount: '10', slippageBps: 50 } },
+  { id: 'transfer-ethereum', strategy: { action: 'transfer', network: 'ethereum', asset: 'USDC', amount: '5' } },
+  { id: 'add-liquidity-ethereum', strategy: { action: 'add_liquidity', network: 'ethereum', maxAmounts: { USDC: '10', WETH: '0.003' }, range: { unit: 'full' }, feeTier: 500 } },
+  { id: 'bridge-ethereum-base', strategy: { action: 'bridge', sourceNetwork: 'ethereum', destinationNetwork: 'base', asset: 'USDC', amount: '5', routing: 'auto' } },
+  { id: 'bridge-base-ethereum', strategy: { action: 'bridge', sourceNetwork: 'base', destinationNetwork: 'ethereum', asset: 'USDC', amount: '5', routing: 'auto' } },
+  { id: 'bridge-ethereum-arbitrum', strategy: { action: 'bridge', sourceNetwork: 'ethereum', destinationNetwork: 'arbitrum-one', asset: 'USDC', amount: '5', routing: 'auto' } },
+  { id: 'bridge-arbitrum-ethereum', strategy: { action: 'bridge', sourceNetwork: 'arbitrum-one', destinationNetwork: 'ethereum', asset: 'USDC', amount: '5', routing: 'auto' } },
+  { id: 'bridge-ethereum-robinhood', strategy: { action: 'bridge', sourceNetwork: 'ethereum', destinationNetwork: 'robinhood', asset: 'USDC', amount: '5', routing: 'auto' } },
+  { id: 'bridge-robinhood-ethereum', strategy: { action: 'bridge', sourceNetwork: 'robinhood', destinationNetwork: 'ethereum', asset: 'USDG', amount: '5', routing: 'auto' } },
 ]);

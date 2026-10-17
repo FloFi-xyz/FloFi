@@ -32,7 +32,7 @@ describe('one network per crypto action', () => {
   // BUILD-BASE-001 (intentional change): Base mainnet USDC (real funds) joins the two test deployments.
   it.each(['supply', 'borrow', 'repay', 'withdraw'] as const)('%s exposes the pinned Aave deployments', action => {
     expect(cryptoNetworks(action, 'testnet').map(profile => [profile.network, profile.tokens])).toEqual([['Base Sepolia', ['USDC']], ['Ethereum Sepolia', ['WBTC']]]);
-    expect(cryptoNetworks(action, 'mainnet').map(profile => [profile.network, profile.tokens])).toEqual([['Base', ['USDC']], ['Arbitrum One', ['USDC']]]);
+    expect(cryptoNetworks(action, 'mainnet').map(profile => [profile.network, profile.tokens])).toEqual([['Base', ['USDC']], ['Arbitrum One', ['USDC']], ['Ethereum', ['USDC']]]);
     const base = createCryptoActionNode('base', input(action, 'Base'));
     expect(base.chainId).toBe('eip155:8453');
     expect(cryptoInputOf(base)?.selection).toEqual(selectCryptoNetwork(action, 'Base'));
@@ -67,10 +67,10 @@ describe('one network per crypto action', () => {
     expect(reverse.from).toBe('USDT'); expect(reverse.to).toBe('SOL'); expect(reverse.network).toBe('Solana');
   });
   it('advertises registered Arbitrum swaps without advertising unsupported pool adapters and pairs', () => {
-    expect(cryptoNetworks('swap', 'mainnet').map(profile => profile.network)).toEqual(['Base', 'Solana', 'Robinhood Chain', 'Arbitrum One']);
+    expect(cryptoNetworks('swap', 'mainnet').map(profile => profile.network)).toEqual(['Base', 'Solana', 'Robinhood Chain', 'Arbitrum One', 'Ethereum']);
     // BUILD-RH-002: Robinhood Chain pools (official catalog pairs) join Base on mainnet. BUILD-SOLANA-MAINNET-001 (intentional change): Orca Whirlpools
     // SOL/USDC 0.30% on Solana mainnet-beta joins them; it is the one verified pair there.
-    expect(cryptoNetworks('pool', 'mainnet').map(profile => profile.network)).toEqual(['Base', 'Solana', 'Robinhood Chain', 'Arbitrum One']);
+    expect(cryptoNetworks('pool', 'mainnet').map(profile => profile.network)).toEqual(['Base', 'Solana', 'Robinhood Chain', 'Arbitrum One', 'Ethereum']);
     expect(selectCryptoNetwork('pool', 'Solana')).toEqual({ action: 'pool', network: 'Solana', from: 'SOL', to: 'USDC' });
     expect(validCryptoSelection({ action: 'pool', network: 'Solana', from: 'SOL', to: 'devUSDC' })).toBe(false);
     expect(validCryptoSelection({ action: 'pool', network: 'Base Sepolia', from: 'WETH', to: 'USDC' })).toBe(false);

@@ -54,7 +54,7 @@ export function SupplyProvider({children}:{children:ReactNode}){
   useEffect(()=>{
     let mounted=true;
     try{const pointer=JSON.parse(window.localStorage.getItem(key)??'null') as {id?:unknown;step?:unknown;hash?:unknown}|null;
-      if(pointer&&typeof pointer.id==='string'&&/^(?:supply|baave|araave)-[a-f0-9]{32}$/.test(pointer.id))(async()=>{
+      if(pointer&&typeof pointer.id==='string'&&/^(?:supply|baave|araave|etaave)-[a-f0-9]{32}$/.test(pointer.id))(async()=>{
         if(typeof pointer.hash==='string'&&/^0x[0-9a-f]{64}$/.test(pointer.hash)&&(pointer.step==='APPROVAL'||pointer.step==='SUPPLY'||pointer.step==='BORROW'||pointer.step==='REPAY'||pointer.step==='WITHDRAW'))
           await supplyReport(pointer.id as string,pointer.step,{kind:'HASH',hash:pointer.hash}).catch(()=>undefined);
         return supplyStatus(pointer.id as string);

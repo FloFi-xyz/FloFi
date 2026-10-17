@@ -55,6 +55,7 @@ export function createSupplyHarness(p=AAVE_V3_BASE_SEPOLIA){
     if(data===supplyCall('UNDERLYING_ASSET_ADDRESS()')&&to===p.variableDebtToken)return word(p.asset);
     if(data===supplyCall('balanceOf(address)',state.owner)&&to===p.variableDebtToken)return word(debt);
     if(data===supplyCall('scaledBalanceOf(address)',state.owner)&&to===p.variableDebtToken)return word(s.scaledDebt);
+    if(data===supplyCall('scaledTotalSupply()')&&to===p.aToken)return word(s.scaled);
     if(data===supplyCall('totalSupply()')&&to===p.variableDebtToken)return word(debt);
     if(data===supplyCall('getReserveNormalizedVariableDebt(address)',p.asset)&&to===p.pool)return word(s.debtIndex);
     if(data.startsWith(supplyCall('borrow(address,uint256,uint256,uint16,address)').slice(0,10))&&to===p.pool)return '0x';

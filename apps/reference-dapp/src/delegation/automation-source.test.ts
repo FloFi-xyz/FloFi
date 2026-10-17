@@ -7,6 +7,7 @@ import { composeWorkflowBound } from '../engine/strategy-engine.ts';
 import { buildWorkflow } from '../domain/copilot-test-fixtures.ts';
 import { delegatedInputOf, delegatedSourceFromAutomation, delegatedSourceFromWorkflow } from './automation-source.ts';
 import type { DelegatedAutomationInput, DelegationTerms } from './definition.ts';
+import { stepCapability } from './capabilities.ts';
 import { requirementOf } from './steps.ts';
 
 const NOW = Date.parse('2026-10-10T12:00:00Z');
@@ -45,6 +46,18 @@ describe('one authoring model: the canonical AutomationInput compiles to the del
       if (!requirement?.ok) return;
       expect(requirement.value.strategy).toEqual(confirm.binding.strategy);
       expect(requirement.value.workflowHash).toBe(confirm.binding.workflowHash);
+    }
+  });
+  it('represents Ethereum confirmation-mode actions without enabling mainnet delegation', () => {
+    const ethereum: AutomationInput = { ...dca, action: { kind: 'ROUTE', asset: 'ETH', side: 'BUY', network: 'ethereum', amount: '10', slippageBps: 50 } };
+    const source = delegatedSourceFromAutomation(ethereum, terms, NOW);
+    expect(source).toMatchObject({ ok: true, value: { steps: [{ network: 'ethereum' }] } });
+    const composed = composeWorkflowBound({ action: 'swap', network: 'ethereum', inputAsset: 'USDC', outputAsset: 'WETH', amount: '10' }, undefined);
+    if (!composed.ok) throw Error(composed.code);
+    const requirement = requirementOf(composed);
+    if (!requirement.ok) throw Error(requirement.code);
+    for (const mode of ['PRODUCTION', 'MOCKED_HARNESS'] as const) {
+      expect(stepCapability(requirement.value.steps[0]!, mode)).toMatchObject({ ok: false, code: 'MAINNET_DELEGATION_DISABLED' });
     }
   });
   it('keeps the trigger: a percent drop stays a price trigger on the same asset', () => {

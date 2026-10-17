@@ -130,6 +130,9 @@ const messages: Record<string, string> = {
   ROBINHOOD_MAINNET_NOT_ENABLED: 'Robinhood Chain liquidity is not enabled on this server.',
   // BUILD-BASE-001: Base positions (real funds; any two validated token-list ERC-20s).
   BASE_MAINNET_NOT_ENABLED: 'Base liquidity is not enabled on this server.', BASE_STORAGE_NOT_CONFIGURED: 'Base liquidity is not enabled on this server.',
+  ETHEREUM_MAINNET_NOT_ENABLED: 'Ethereum Mainnet liquidity is not enabled on this server.',
+  ETHEREUM_STORAGE_NOT_CONFIGURED: 'Ethereum Mainnet execution storage is not configured on this server.',
+  ETHEREUM_TOKEN_LIST_UNAVAILABLE: 'The Ethereum token list is unavailable. Try again later.',
   BASE_TOKEN_LIST_UNAVAILABLE: 'The Base token list is unavailable. Nothing was simulated or sent.',
   UNISWAP_INSUFFICIENT_TOKEN: 'Your wallet needs more of a deposited token for this position.',
   UNISWAP_POOL_MISMATCH: 'This pair has no live Uniswap v3 pool at this fee tier on Robinhood Chain. Choose another fee tier; nothing was signed.',

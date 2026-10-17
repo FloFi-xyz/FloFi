@@ -90,6 +90,13 @@ describe('Ethereum live catalog and deployment profiles', () => {
 });
 
 describe('Ethereum swaps on the shared owner runtime', () => {
+  it('prepares execution for an independent connected end user without a developer-wallet allowlist', async () => {
+    chain.fundNative(recipient, 10n ** 18n); chain.fund(UNI.usdc, recipient, 1_000_000_000n);
+    const s = swapService(), run = await s.prepare(swap(), recipient);
+    s.review(run.quote.executionId, run.quote.manifestHash);
+    const begun = await s.begin(run.quote.executionId, recipient);
+    expect(begun.tx).toMatchObject({ from: recipient, chainId: '0x1', to: UNI.usdc });
+  });
   it.each([['USDC', 'WETH', '10000000'], ['WETH', 'USDC', '10000000000000000']])('quotes %s → %s with chain-bound identities', async (input, output, amount) => {
     const run = await swapService().prepare(swap(input, output, amount), owner);
     expect(run.quote).toMatchObject({ chainId: 1, inputToken: asset(input).address, outputToken: asset(output).address, amountIn: amount,

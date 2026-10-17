@@ -42,7 +42,18 @@ Object.freeze({
   source: Object.freeze({ chainId: 'eip155:42161', address: '0xaf88d065e77c8cc2239327c5edb3a432268e5831', decimals: 6, symbol: 'USDC' }),
   destination: Object.freeze({ chainId: 'eip155:8453', address: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913', decimals: 6, symbol: 'USDC' }),
   minimumAmount: '100000', maximumAmount: '100000000',
-})]);
+}),
+// Ethereum routes retain the existing Router ceilings and source-asset floors; providers enforce live liquidity and minimums.
+...([
+  ['ethereum-usdc-to-base-usdc', 'eip155:1', '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', 'USDC', 'eip155:8453', '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913', 'USDC'],
+  ['base-usdc-to-ethereum-usdc', 'eip155:8453', '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913', 'USDC', 'eip155:1', '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', 'USDC'],
+  ['ethereum-usdc-to-arbitrum-usdc', 'eip155:1', '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', 'USDC', 'eip155:42161', '0xaf88d065e77c8cc2239327c5edb3a432268e5831', 'USDC'],
+  ['arbitrum-usdc-to-ethereum-usdc', 'eip155:42161', '0xaf88d065e77c8cc2239327c5edb3a432268e5831', 'USDC', 'eip155:1', '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', 'USDC'],
+  ['ethereum-usdc-to-robinhood-usdg', 'eip155:1', '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', 'USDC', 'eip155:4663', ROBINHOOD_USDG, 'USDG'],
+  ['robinhood-usdg-to-ethereum-usdc', 'eip155:4663', ROBINHOOD_USDG, 'USDG', 'eip155:1', '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', 'USDC'],
+] as const).map(([id, from, input, inputSymbol, to, output, outputSymbol]) => Object.freeze({ id,
+  source: Object.freeze({ chainId: from, address: input, decimals: 6, symbol: inputSymbol }),
+  destination: Object.freeze({ chainId: to, address: output, decimals: 6, symbol: outputSymbol }), minimumAmount: from === 'eip155:4663' || to === 'eip155:4663' ? '1000000' : '100000', maximumAmount: '100000000' }))]);
 export const ROUTER_MAXIMUM_SLIPPAGE_BPS = 300;
 export function routerPair(sourceChain: string, sourceToken: string, destinationChain: string, destinationToken: string): RouterPair | null {
   return ROUTER_PAIRS.find(p => p.source.chainId === sourceChain && p.source.address === sourceToken &&

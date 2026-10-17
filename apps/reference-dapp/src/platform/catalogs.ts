@@ -14,7 +14,7 @@ import { registerNetworkCatalog } from '../domain/asset-catalogs';
 import { CATALOG_NETWORK_IDENTITIES, catalogNetworksNamed } from '../domain/network-registry';
 
 const isObject = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
-export type CatalogNetworkId = 'robinhood' | 'base' | 'arbitrum-one';
+export type CatalogNetworkId = 'robinhood' | 'base' | 'arbitrum-one' | 'ethereum';
 /** Whether a v1 strategy or a v2 step list names a network anywhere (network, bridge source or destination). */
 export function strategyNamesNetwork(strategy: unknown, network: CatalogNetworkId): boolean {
   const steps = isObject(strategy) && strategy.version === 2 && Array.isArray(strategy.steps) ? strategy.steps : [strategy];

@@ -56,6 +56,7 @@ const definitions = [
   // BUILD-BASE-001: Base as a catalog network in the existing cards (shortcuts, search, a non-featured token, provider logos through a closed
   // replay) and in the natural-language Copilot (committed replay answers), MOCKED list only.
   // BUILD-ARB-001 Phase 6: one authoring-only product profile, replay model and passive wallet; every financial gate stays off.
+  ['ethereum-authoring-certification', ['--config', 'playwright.ethereum-authoring.config.ts'], {}],
   ['arbitrum-authoring-certification', ['--config', 'playwright.arbitrum-authoring.config.ts'], {}],
   // BUILD-ARB-001 Phase 7: owner-approved workflow UX (authoring only; replay Copilot, passive wallet, MOCKED registry harness).
   ['workflow-ux-authoring', ['--config', 'playwright.workflow-ux.config.ts'], {}],
@@ -97,7 +98,7 @@ const critical = ['copilot-learning', 'canvas-corrections', 'solana-wallet-refus
 const shards = [
   ['default-product', 'lending-provenance', 'jupiter-provenance', 'devnet-provenance', 'orca-liquidity-provenance', 'solana-composition-provenance',
     'transfer-provenance', 'uniswap-provenance', 'router-provenance', 'unsafe-lending-simulations', 'copilot', 'copilot-solana', 'solana-mainnet-network',
-    'robinhood-mainnet-authoring', 'base-mainnet-authoring', 'arbitrum-authoring-certification', 'workflow-ux-authoring', 'canvas-workflow-ux'],
+    'robinhood-mainnet-authoring', 'base-mainnet-authoring', 'arbitrum-authoring-certification', 'ethereum-authoring-certification', 'workflow-ux-authoring', 'canvas-workflow-ux'],
   ['cloud-provenance', 'journey-provenance', 'synthetic-fork-provenance', 'execution-continuity', 'workflow-acceptance', 'swap-read-acceptance',
     'automations', 'chat-automations', 'delegated-execution', 'canvas-automation-ux', 'admin-console', 'cow-loopback', 'card-provider-loopback',
     'mcp-routes-oauth-disabled', 'developer-journey', 'mcp-in-chat', 'channel-signing', 'channel-approve'],

@@ -36,7 +36,7 @@ const LimitsInput = Type.Object({
   maxSlippageBps: Type.Union([Type.Integer({ minimum: 0, maximum: 10_000 }), Type.Null()]),
 }, strict);
 const RouteAction = Type.Object({ kind: Type.Literal('ROUTE'), asset: Asset, side: literalUnion(['BUY', 'SELL'] as const),
-  network: literalUnion(['base', 'base-sepolia', 'ethereum-sepolia', 'solana', 'solana-devnet'] as const), amount: Decimal,
+  network: literalUnion(['base', 'base-sepolia', 'ethereum-sepolia', 'solana', 'solana-devnet', 'ethereum'] as const), amount: Decimal,
   slippageBps: Type.Integer({ minimum: 0, maximum: 10_000 }) }, strict);
 const SavedAction = Type.Object({ kind: Type.Literal('SAVED_WORKFLOW'), workflowId: Type.String({ pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$' }) }, strict);
 const ActionInput = Type.Union([RouteAction, SavedAction]);

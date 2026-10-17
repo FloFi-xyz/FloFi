@@ -9,7 +9,7 @@ import { editorHistoryReducer, initialEditorHistory } from './editor-history';
 describe('native self-transfer Canvas parity', () => {
   // BUILD-RH-002 adds Robinhood Chain mainnet (native ETH and catalog assets); the testnets stay native self-transfers. BUILD-BASE-001 adds Base.
   it('offers the two test networks and the registered mainnets', () => {
-    expect(cryptoProfiles('transfer' as CryptoAction).map(p => p.network)).toEqual(['Robinhood Chain Testnet', 'Ethereum Sepolia', 'Robinhood Chain', 'Base', 'Arbitrum One']);
+    expect(cryptoProfiles('transfer' as CryptoAction).map(p => p.network)).toEqual(['Robinhood Chain Testnet', 'Ethereum Sepolia', 'Robinhood Chain', 'Base', 'Arbitrum One', 'Ethereum']);
     expect(cryptoProfiles('transfer' as CryptoAction).slice(0, 2).every(p => p.tokens.join() === 'ETH')).toBe(true);
   });
   it.each(['Robinhood Chain Testnet', 'Ethereum Sepolia'])('uses the existing canonical self-transfer on %s', network => {

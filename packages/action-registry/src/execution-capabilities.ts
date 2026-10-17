@@ -135,7 +135,7 @@ add('asset.liquidity.concentrated', 'uniswap.v3', 'eip155:42161', 'MAINNET', for
 for (const action of ['supply', 'borrow', 'repay', 'withdraw'] as const)
   add(action, 'aave-v3', 'eip155:42161', 'MAINNET', fork, null, 'DIRECT_TRANSACTION', ['INJECTED_WALLET', 'QUOTE_PROVIDER', 'REVIEWED_ARTIFACTS'], ['A']);
 // Ethereum L1: shared catalog swap/transfer; evidence remains undemonstrated and execution stays deployment-gated.
-for (const [action, adapter] of [['asset.swap.exact-input', 'uniswap.v3'], ['asset.transfer', 'evm.native-transfer'], ['asset.transfer', 'evm.token-transfer'], ['asset.liquidity.concentrated', 'uniswap.v3'],
+for (const [action, adapter] of [['asset.swap.exact-input', 'uniswap.v3'], ['asset.transfer', 'evm.native-transfer'], ['asset.transfer', 'evm.token-transfer'], ['asset.bridge', 'flofi.router'], ['asset.liquidity.concentrated', 'uniswap.v3'],
   ['supply', 'aave-v3'], ['borrow', 'aave-v3'], ['repay', 'aave-v3'], ['withdraw', 'aave-v3']] as const)
   add(action, adapter, 'eip155:1', 'MAINNET', fork, null, 'DIRECT_TRANSACTION', ['INJECTED_WALLET', 'QUOTE_PROVIDER', 'REVIEWED_ARTIFACTS'], ['A']);
 export const executionCapabilityRegistry: readonly ExecutionCapabilityProfile[] = Object.freeze(rows);

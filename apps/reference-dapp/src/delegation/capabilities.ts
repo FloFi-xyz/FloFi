@@ -23,7 +23,7 @@ export type StepCapability = { readonly ok: true; readonly mechanism: Mechanism;
   | { readonly ok: false; readonly code: string; readonly mechanism: Mechanism | null };
 
 const WSOL = 'So11111111111111111111111111111111111111112';
-const MAINNET = new Set(['eip155:8453', 'eip155:42161', 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp']);
+const MAINNET = new Set(['eip155:1', 'eip155:8453', 'eip155:42161', 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp']);
 
 /** The delegated execution capability of one step. */
 export function stepCapability(step: StepRequirement, mode: CapabilityMode): StepCapability {

@@ -84,12 +84,12 @@ describe('BUILD-RH-002 Robinhood Chain bridge routes', () => {
   });
   it('Canvas choices: mainnet offers the Robinhood routes beside Base → Arbitrum One; the token follows the chosen pair', () => {
     // BUILD-BASE-001 (intentional change): Arbitrum One → Base joins the mainnet routes.
-    expect(routerNetworksOf('mainnet')).toEqual(['mainnet', 'base-to-robinhood', 'robinhood-to-base', 'arbitrum-to-robinhood', 'robinhood-to-arbitrum', 'arbitrum-to-base']);
+    expect(routerNetworksOf('mainnet')).toEqual(['mainnet', 'base-to-robinhood', 'robinhood-to-base', 'arbitrum-to-robinhood', 'robinhood-to-arbitrum', 'arbitrum-to-base', 'ethereum-to-base', 'base-to-ethereum', 'ethereum-to-arbitrum', 'arbitrum-to-ethereum', 'ethereum-to-robinhood', 'robinhood-to-ethereum']);
     expect(routerNetworksOf('testnet')).toEqual(['testnet']);
-    expect(routerChainChoices('mainnet')).toEqual({ sources: ['Base', 'Robinhood Chain', 'Arbitrum'], destinations: ['Arbitrum', 'Robinhood Chain', 'Base'] });
-    expect(routerChainChoices('mainnet', 'Base').destinations).toEqual(['Arbitrum', 'Robinhood Chain']);
-    expect(routerChainChoices('mainnet', 'Arbitrum').destinations).toEqual(['Robinhood Chain', 'Base']);
-    expect(routerChainChoices('mainnet', 'Robinhood Chain').destinations).toEqual(['Base', 'Arbitrum']);
+    expect(routerChainChoices('mainnet')).toEqual({ sources: ['Base', 'Robinhood Chain', 'Arbitrum', 'Ethereum'], destinations: ['Arbitrum', 'Robinhood Chain', 'Base', 'Ethereum'] });
+    expect(routerChainChoices('mainnet', 'Base').destinations).toEqual(['Arbitrum', 'Robinhood Chain', 'Ethereum']);
+    expect(routerChainChoices('mainnet', 'Arbitrum').destinations).toEqual(['Robinhood Chain', 'Base', 'Ethereum']);
+    expect(routerChainChoices('mainnet', 'Robinhood Chain').destinations).toEqual(['Base', 'Arbitrum', 'Ethereum']);
     expect(routerChainChoices('testnet')).toEqual({ sources: ['Base Sepolia'], destinations: ['Arbitrum Sepolia'] });
     expect(routerTokensOf({ source: 'Robinhood Chain', destination: 'Base' })).toEqual({ token: 'USDG', destinationToken: 'USDC' });
     // BUILD-BASE-001 (intentional change): Arbitrum One → Base is a USDC route.
@@ -104,6 +104,9 @@ describe('BUILD-RH-002 Robinhood Chain bridge routes', () => {
     expect(Object.fromEntries([...routerNetworksOf('mainnet'), ...routerNetworksOf('testnet')].map(network => [network, routerDisabledCode(network)]))).toEqual({
       mainnet: 'ROUTER_NOT_ENABLED', testnet: 'ROUTER_TESTNET_NOT_ENABLED', 'base-to-robinhood': 'ROBINHOOD_MAINNET_NOT_ENABLED',
       'robinhood-to-base': 'ROBINHOOD_MAINNET_NOT_ENABLED', 'arbitrum-to-robinhood': 'ROBINHOOD_MAINNET_NOT_ENABLED', 'robinhood-to-arbitrum': 'ROBINHOOD_MAINNET_NOT_ENABLED',
-      'arbitrum-to-base': 'ROUTER_NOT_ENABLED' });
+      'arbitrum-to-base': 'ROUTER_NOT_ENABLED',
+      'ethereum-to-base': 'ETHEREUM_MAINNET_NOT_ENABLED', 'base-to-ethereum': 'ETHEREUM_MAINNET_NOT_ENABLED',
+      'ethereum-to-arbitrum': 'ETHEREUM_MAINNET_NOT_ENABLED', 'arbitrum-to-ethereum': 'ETHEREUM_MAINNET_NOT_ENABLED',
+      'ethereum-to-robinhood': 'ETHEREUM_MAINNET_NOT_ENABLED', 'robinhood-to-ethereum': 'ETHEREUM_MAINNET_NOT_ENABLED' });
   });
 });

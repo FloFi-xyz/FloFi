@@ -26,7 +26,7 @@ describe('BUILD-ETHEREUM-001 authoring validation', () => {
   it('accepts the native transfer on Ethereum Sepolia and refuses Mainnet and amounts above the test cap', () => {
     const transfer = (chain: string, amount = '1000000000000') => flow(createNativeTransferNode('t', { chain, amount, recipient: 'CONNECTED_OWNER' }));
     expect(() => validateAuthoringWorkflow(transfer(eth.chain), context)).not.toThrow();
-    expect(() => validateAuthoringWorkflow(transfer('eip155:1'), context)).toThrow('TRANSFER_NETWORK_UNSUPPORTED');
+    expect(() => validateAuthoringWorkflow(transfer('eip155:137'), context)).toThrow('TRANSFER_NETWORK_UNSUPPORTED');
     expect(() => validateAuthoringWorkflow(transfer(eth.chain, '1000000000000001'), context)).toThrow('TRANSFER_AMOUNT_OUT_OF_RANGE');
   });
 });

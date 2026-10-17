@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { ARBITRUM_TOKEN_LIST_LOGOS, ASSET_LOGO_RULES, BASE_TOKEN_LIST_LOGOS, ROBINHOOD_STOCK_TOKEN_LOGOS, acceptAssetLogo, catalogAsset, catalogAssetsByName, parseBaseTokenList,
+import { ARBITRUM_TOKEN_LIST_LOGOS, ASSET_LOGO_RULES, BASE_TOKEN_LIST_LOGOS, ETHEREUM_TOKEN_LIST_LOGOS, ROBINHOOD_STOCK_TOKEN_LOGOS, acceptAssetLogo, catalogAsset, catalogAssetsByName, parseBaseTokenList,
   parseRobinhoodStockTokenRegistry, robinhoodNetworkCatalog, trustedAssetLogo, type CanonicalAsset } from '../src/index.js';
 
 /**
@@ -57,7 +57,7 @@ describe('BUILD-BASE-001 trusted asset logos', () => {
     expect(trustedAssetLogo({ ...tsla, logoUrl: cbbtc.logoUrl })).toBeNull();
     expect(trustedAssetLogo({ ...cbbtc, chain: tsla.chain })).toBeNull();
     expect(trustedAssetLogo({ ...cbbtc, source: { ...cbbtc.source, provider: 'someone.else' } })).toBeNull();
-    expect(ASSET_LOGO_RULES).toEqual([ROBINHOOD_STOCK_TOKEN_LOGOS, BASE_TOKEN_LIST_LOGOS, ARBITRUM_TOKEN_LIST_LOGOS]);
+    expect(ASSET_LOGO_RULES).toEqual([ROBINHOOD_STOCK_TOKEN_LOGOS, BASE_TOKEN_LIST_LOGOS, ARBITRUM_TOKEN_LIST_LOGOS, ETHEREUM_TOKEN_LIST_LOGOS]);
     expect(acceptAssetLogo(tsla.logoUrl, ROBINHOOD_STOCK_TOKEN_LOGOS, null)).toBeNull();
   });
 });

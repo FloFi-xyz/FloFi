@@ -27,6 +27,12 @@ const LABELS: Readonly<Record<RouterNetwork, Labels>> = {
   'arbitrum-to-robinhood': { src: 'Arbitrum One', dst: 'Robinhood Chain', dstShort: 'Robinhood Chain', srcScan: 'Arbiscan', dstScan: RH_SCAN, token: 'USDC' },
   'robinhood-to-arbitrum': { src: 'Robinhood Chain', dst: 'Arbitrum One', dstShort: 'Arbitrum', srcScan: RH_SCAN, dstScan: 'Arbiscan', token: 'USDG' },
   // BUILD-BASE-001: Base bridge IN from Arbitrum One.
+  'ethereum-to-base': { src: 'Ethereum', dst: 'Base', dstShort: 'Base', srcScan: 'Etherscan', dstScan: 'Basescan', token: 'USDC' },
+  'base-to-ethereum': { src: 'Base', dst: 'Ethereum', dstShort: 'Ethereum', srcScan: 'Basescan', dstScan: 'Etherscan', token: 'USDC' },
+  'ethereum-to-arbitrum': { src: 'Ethereum', dst: 'Arbitrum One', dstShort: 'Arbitrum One', srcScan: 'Etherscan', dstScan: 'Arbiscan', token: 'USDC' },
+  'arbitrum-to-ethereum': { src: 'Arbitrum One', dst: 'Ethereum', dstShort: 'Ethereum', srcScan: 'Arbiscan', dstScan: 'Etherscan', token: 'USDC' },
+  'ethereum-to-robinhood': { src: 'Ethereum', dst: 'Robinhood Chain', dstShort: 'Robinhood Chain', srcScan: 'Etherscan', dstScan: 'Robinhood Chain explorer', token: 'USDC' },
+  'robinhood-to-ethereum': { src: 'Robinhood Chain', dst: 'Ethereum', dstShort: 'Ethereum', srcScan: 'Robinhood Chain explorer', dstScan: 'Etherscan', token: 'USDG' },
   'arbitrum-to-base': { src: 'Arbitrum One', dst: 'Base', dstShort: 'Base', srcScan: 'Arbiscan', dstScan: 'Basescan', token: 'USDC' },
 };
 /** Whole-token bounds of a pair, e.g. "1" and "100". */
@@ -100,6 +106,7 @@ export function RouterForm({ nodeId, onDone, network: initialNetwork }: { nodeId
 }
 
 const messagesFor = (l: Labels): Record<string, string> => ({
+  ETHEREUM_MAINNET_NOT_ENABLED: 'Ethereum Mainnet routing is not enabled on this server.',
   ROUTER_NOT_ENABLED: 'The Cross-chain Router is not enabled on this server.', ROUTER_TESTNET_NOT_ENABLED: 'The testnet Cross-chain Router is not enabled on this server.',
   ROUTER_STORAGE_NOT_CONFIGURED: 'Execution storage is not configured on this server.',
   ROUTER_WALLET_REQUIRED: 'Connect a wallet first.', ROUTER_WRONG_CHAIN: `Switch your wallet to ${l.src}.`, ROUTER_WRONG_OWNER: 'Select the wallet account shown in Review.',

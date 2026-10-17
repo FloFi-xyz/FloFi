@@ -131,9 +131,9 @@ describe('Robinhood Chain catalog swap: authoring identity', () => {
     expect(() => validateAuthoringWorkflow(tampered, ctx)).toThrow('CATALOG_SWAP_DECLARATION_INVALID');
     expect(() => createCatalogSwapNode('n', { chain: 'eip155:4663', amount: '1', slippageBps: 301, input: { chain: 'eip155:4663', address: usdg.address!, decimals: 6, officialId: null },
       output: { chain: 'eip155:4663', address: tsla.address!, decimals: 18, officialId: tsla.stock!.officialId } })).toThrow('CATALOG_SWAP_SLIPPAGE_INVALID');
-    // Ethereum mainnet remains outside the closed catalog-swap network registry.
-    expect(() => createCatalogSwapNode('n', { chain: 'eip155:1', amount: '1', slippageBps: 50, input: { chain: 'eip155:1', address: usdg.address!, decimals: 6, officialId: null },
-      output: { chain: 'eip155:1', address: tsla.address!, decimals: 18, officialId: null } })).toThrow('CATALOG_SWAP_NETWORK_UNSUPPORTED');
+    // Unregistered Polygon remains outside the catalog-swap network registry.
+    expect(() => createCatalogSwapNode('n', { chain: 'eip155:137', amount: '1', slippageBps: 50, input: { chain: 'eip155:137', address: usdg.address!, decimals: 6, officialId: null },
+      output: { chain: 'eip155:137', address: tsla.address!, decimals: 18, officialId: null } })).toThrow('CATALOG_SWAP_NETWORK_UNSUPPORTED');
   });
   it('refuses composition: a catalog swap executes isolated', () => {
     const workflow = catalogSwapWorkflow(usdg, tsla, '1');

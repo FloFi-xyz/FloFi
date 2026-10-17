@@ -26,6 +26,9 @@ describe('BUILD-AUTOMATION-001 configuration (fail closed)', () => {
   it('keeps mainnet off by default and accepts only mainnet ids in the mainnet list', () => {
     const c = readAutomationConfig(base());
     expect(c.enabled && c.policy).toEqual({ ok: true, testFunds: true, mainnetNetworks: [] });
+    const ethereum = readAutomationConfig(base({ FLOFI_AUTOMATION_HANDOFF_MAINNET_NETWORKS: 'ethereum' }));
+    expect(ethereum.enabled && ethereum.policy.mainnetNetworks).toEqual(['ethereum']);
+    expect(reason(base({ FLOFI_AUTOMATION_HANDOFF_MAINNET_NETWORKS: 'ethereum-sepolia' }))).toBe('FLOFI_AUTOMATION_HANDOFF_MAINNET_NETWORKS');
     expect(reason(base({ FLOFI_AUTOMATION_HANDOFF_MAINNET_NETWORKS: 'base-sepolia' }))).toBe('FLOFI_AUTOMATION_HANDOFF_MAINNET_NETWORKS');
     expect(reason(base({ FLOFI_AUTOMATION_HANDOFF_TEST_FUNDS: 'maybe' }))).toBe('FLOFI_AUTOMATION_HANDOFF_TEST_FUNDS');
   });

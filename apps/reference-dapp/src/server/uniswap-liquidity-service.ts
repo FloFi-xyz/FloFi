@@ -104,7 +104,7 @@ export type UniswapWalletDiagnostic = { invoked: boolean; calls: { method: strin
   code: string; rejectionCode?: number };
 export type UniswapLiquidityPrice = { readonly sqrtPriceX96: string; readonly tick: number; readonly price: string; readonly blockNumber: number };
 
-export const UNISWAP_LIQUIDITY_RUN_ID = /^(?:unilp|rhlp|balp|arlp)-[a-f0-9]{32}$/;
+export const UNISWAP_LIQUIDITY_RUN_ID = /^(?:unilp|rhlp|balp|arlp|etlp)-[a-f0-9]{32}$/;
 const ADDRESS = /^0x[0-9a-f]{40}$/, HASH = /^0x[0-9a-f]{64}$/;
 const ACTIVE: readonly UniswapAttemptState[] = ['PREPARED', 'SUBMITTING', 'SUBMISSION_RESULT_UNKNOWN', 'PENDING'];
 export const UNISWAP_OBSERVABLE: readonly UniswapAttemptState[] = ['SUBMITTING', 'SUBMISSION_RESULT_UNKNOWN', 'PENDING'];
@@ -132,7 +132,7 @@ function profileOfReview(review: UniswapLiquidityReview): UniswapPoolProfile {
  * Testnet profiles run as `unilp-` with PUBLIC_TESTNET (or MOCKED) provenance; each catalog network has its own mainnet namespace with
  * PUBLIC_MAINNET (or MOCKED): `rhlp-` on Robinhood Chain, `balp-` on Base, `arlp-` on Arbitrum. A namespace never holds another chain's run.
  */
-const CATALOG_RUN_PREFIX: Readonly<Record<number, 'rhlp' | 'balp' | 'arlp'>> = Object.freeze({ [ROBINHOOD.chainId]: 'rhlp', 8453: 'balp', [ARBITRUM_ONE.chainId]: 'arlp' });
+const CATALOG_RUN_PREFIX: Readonly<Record<number, 'rhlp' | 'balp' | 'arlp' | 'etlp'>> = Object.freeze({ [ROBINHOOD.chainId]: 'rhlp', 8453: 'balp', [ARBITRUM_ONE.chainId]: 'arlp', 1: 'etlp' });
 const catalogRun = (id: string) => Object.values(CATALOG_RUN_PREFIX).some(prefix => id.startsWith(prefix + '-'));
 const runChainMatches = (id: string, chainId: number) => catalogRun(id) ? id.startsWith(`${CATALOG_RUN_PREFIX[chainId]}-`) : !uniswapCatalogDeployment(chainId);
 

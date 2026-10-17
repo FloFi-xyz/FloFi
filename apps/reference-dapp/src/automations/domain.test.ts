@@ -54,7 +54,7 @@ describe('BUILD-AUTOMATION-001 observation versus execution capability', () => {
     expect(routeStrategy({ asset: 'BTC', side: 'BUY', network: 'base-sepolia', amount: '50', slippageBps: 50 })).toEqual({ ok: false, code: 'BTC_EXECUTION_ROUTE_UNAVAILABLE' });
     expect(routeStrategy({ asset: 'ETH', side: 'BUY', network: 'solana-devnet', amount: '50', slippageBps: 50 })).toEqual({ ok: false, code: 'AUTOMATION_ROUTE_NETWORK_UNSUPPORTED' });
     // Every route composes on the canonical engine (the same IR and hash as every other FloFi surface).
-    for (const [asset, network] of [['ETH', 'base-sepolia'], ['ETH', 'ethereum-sepolia'], ['ETH', 'base'], ['SOL', 'solana-devnet'], ['SOL', 'solana']] as const)
+    for (const [asset, network] of [['ETH', 'base-sepolia'], ['ETH', 'ethereum-sepolia'], ['ETH', 'base'], ['ETH', 'ethereum'], ['SOL', 'solana-devnet'], ['SOL', 'solana']] as const)
       for (const side of ['BUY', 'SELL'] as const) {
         const route = routeStrategy({ asset, side, network, amount: '1', slippageBps: 50 });
         expect(route.ok && composeWorkflowBound(route.strategy, undefined).ok, `${asset} ${side} ${network}`).toBe(true);
@@ -70,6 +70,22 @@ describe('BUILD-AUTOMATION-001 observation versus execution capability', () => {
 });
 
 describe('BUILD-AUTOMATION-001 strategy and saved-workflow binding', () => {
+  it('binds Ethereum saved swaps by exact identity and refuses altered assets or protocols', () => {
+    const composed = composeWorkflowBound({ action: 'swap', network: 'ethereum', inputAsset: 'USDC', outputAsset: 'WETH', amount: '10' }, undefined);
+    if (!composed.ok) throw Error(composed.code);
+    const workflow = validateSavedWorkflow(composed.steps[0]!.workflow);
+    const derived = strategyOfSavedWorkflow(workflow);
+    expect(derived).toMatchObject({ ok: true, strategy: { action: 'swap', network: 'ethereum', inputAsset: 'USDC', outputAsset: 'WETH', amount: '10' } });
+    if (!derived.ok) throw Error(derived.code);
+    expect(bindStrategy(derived.strategy)).toMatchObject({ ok: true, binding: { workflowHash: composed.workflowHash } });
+    for (const change of ['decimals', 'chain', 'protocol'] as const) {
+      const altered = structuredClone(workflow), node = altered.nodes.find(n => n.actionType === 'asset.swap.exact-input')!;
+      const amount = node.inputs.find(p => p.kind === 'QUANTITY')!;
+      if (change === 'protocol') node.adapterConstraints = { adapters: [], protocols: ['uniswap', 'unreviewed'] };
+      else if (amount.kind === 'QUANTITY') amount.value.asset = { ...amount.value.asset, ...change === 'decimals' ? { decimals: 18 } : { chainId: 'eip155:8453' } };
+      expect(strategyOfSavedWorkflow(altered), change).toEqual({ ok: false, code: 'AUTOMATION_WORKFLOW_NOT_REPRESENTABLE' });
+    }
+  });
   it('binds one canonical swap with its workflow hash and engine version, and refuses other actions', () => {
     const bound = bindStrategy({ action: 'swap', network: 'base-sepolia', inputAsset: 'USDC', outputAsset: 'WETH', amount: '50' });
     expect(bound.ok && bound.binding).toMatchObject({ strategy: { slippageBps: 50, version: 1 }, workflowHash: expect.stringMatching(/^0x[0-9a-f]{64}$/), engineVersion: 'flofi-engine-2', source: null });

@@ -245,3 +245,5 @@ export * from './uniswap-catalog-networks.js';
 export * from './uniswap-v3-arbitrum.js';
 
 export * from './uniswap-v3-ethereum.js';
+
+export { ETHEREUM_ROUTER_DEPLOYMENTS, ETHEREUM_ROUTER_NETWORKS, type EthereumRouterNetwork } from './crosschain-router.js';

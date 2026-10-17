@@ -25,7 +25,7 @@ const CATALOG_NETWORK: Readonly<Record<string, NetworkId>> = Object.fromEntries(
 const SWAP_NETWORK: Readonly<Record<string, NetworkId>> = { ADD_SWAP: 'base', ADD_TESTNET_SWAP: 'base-sepolia', ADD_ETHEREUM_SEPOLIA_SWAP: 'ethereum-sepolia' };
 const ROUTING = { AUTO: 'auto', LIFI: 'lifi', ACROSS: 'across' } as const;
 /** The router's chain names as strategy networks (BUILD-RH-002 adds Robinhood Chain in and out of Base and Arbitrum One). */
-const ROUTER_NETWORK: Readonly<Record<string, NetworkId>> = { 'Base': 'base', 'Base Sepolia': 'base-sepolia', 'Arbitrum': 'arbitrum-one', 'Arbitrum Sepolia': 'arbitrum-sepolia',
+const ROUTER_NETWORK: Readonly<Record<string, NetworkId>> = { 'Ethereum': 'ethereum', 'Base': 'base', 'Base Sepolia': 'base-sepolia', 'Arbitrum': 'arbitrum-one', 'Arbitrum Sepolia': 'arbitrum-sepolia',
   'Robinhood Chain': 'robinhood' };
 const bps = (value: string) => /^(0|[1-9][0-9]{0,4})$/.test(value) ? Number(value) : NaN;
 

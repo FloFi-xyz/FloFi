@@ -8,7 +8,7 @@
  *    execution capability registry is resolved on that exact IR. "Supported by code" is the registry's verdict; demonstrated
  *    evidence is the registry's ceiling (often none). Deployment enablement is added by the caller from the runtime.
  */
-import { ARBITRUM_BASE_ASSETS, AAVE_V3_LENDING_PROFILES, executionCapabilityRegistry, LENDING_BASE_SEPOLIA, ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY, resolveNodeCapability, ROBINHOOD_BASE_ASSETS, BASE_BASE_ASSETS,
+import { ETHEREUM_BASE_ASSETS, ARBITRUM_BASE_ASSETS, AAVE_V3_LENDING_PROFILES, executionCapabilityRegistry, LENDING_BASE_SEPOLIA, ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY, resolveNodeCapability, ROBINHOOD_BASE_ASSETS, BASE_BASE_ASSETS,
   resolveWorkflowCapability, SOLANA_DEVNET_CHAIN, SOLANA_DEVNET_TOKENS, SOLANA_MAINNET_CHAIN, SOLANA_MAINNET_TOKENS, UNISWAP_LIQUIDITY_PROFILES,
   type CapabilityDimension, type EvidenceMaturity, type ExecutionEnvironment } from '@defi-workflow-engine/action-registry';
 import { createBaseSepoliaReviewContext, createEthereumSepoliaReviewContext } from '@defi-workflow-engine/reference-linter';
@@ -24,7 +24,7 @@ export const NETWORK_CHAINS: Readonly<Record<NetworkId, string>> = Object.freeze
   'base-sepolia': ROUTER_PAIRS[1]!.source.chainId, 'arbitrum-sepolia': ROUTER_PAIRS[1]!.destination.chainId,
   'ethereum-sepolia': AAVE_V3_LENDING_PROFILES.find(p => p.network === 'Ethereum Sepolia')!.chain,
   'solana': SOLANA_MAINNET_CHAIN, 'solana-devnet': SOLANA_DEVNET_CHAIN,
-  'robinhood': ROBINHOOD_BASE_ASSETS.chain,
+  'robinhood': ROBINHOOD_BASE_ASSETS.chain, 'ethereum': ETHEREUM_BASE_ASSETS.chain,
 });
 const networkOfChain = (chain: string): NetworkId | null => NETWORK_IDS.find(id => NETWORK_CHAINS[id] === chain) ?? null;
 const actionsOn = (network: NetworkId): StrategyAction[] => [...new Set(STRATEGY_EXAMPLES.filter(e => strategyNetwork(e.strategy) === network ||
@@ -62,7 +62,7 @@ function assetEntries(): Entry[] {
   // Discover the same currently loaded, validated catalog authoring reads. Without an official source, pinned assets alone
   // remain; no recorded catalog is substituted. Native currencies have transfer support only. Aave and Router membership above
   // remains narrower than catalog membership.
-  for (const [catalog, name] of [[ROBINHOOD_BASE_ASSETS, 'robinhood'], [BASE_BASE_ASSETS, 'base'], [ARBITRUM_BASE_ASSETS, 'arbitrum-one']] as const)
+  for (const [catalog, name] of [[ROBINHOOD_BASE_ASSETS, 'robinhood'], [BASE_BASE_ASSETS, 'base'], [ARBITRUM_BASE_ASSETS, 'arbitrum-one'], [ETHEREUM_BASE_ASSETS, 'ethereum']] as const)
     for (const t of (networkCatalog(catalog.chain) ?? catalog).assets)
       for (const action of (t.kind === 'NATIVE' ? ['transfer'] as const : ['swap', 'add_liquidity', 'transfer'] as const).filter(action => actionsOn(name).includes(action)))
         out.push({ chain: catalog.chain, symbol: t.symbol, address: t.address, decimals: t.decimals, action, source: `${name}-catalog:${action}` });

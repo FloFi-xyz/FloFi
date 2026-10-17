@@ -44,7 +44,7 @@ export const AUTOMATION_DRAFT_SCHEMA = s.object({
   percent: s.nullableString('Percentage of a stated price move ("drops 5%" = "5"); null otherwise.'),
 });
 export type AutomationGrounding = { kind: 'PROPOSAL'; input: AutomationInput } | { kind: 'CLARIFICATION' | 'UNSUPPORTED'; message: string };
-const NETWORK = { BASE: 'base', BASE_SEPOLIA: 'base-sepolia', ETHEREUM_SEPOLIA: 'ethereum-sepolia', SOLANA: 'solana', SOLANA_DEVNET: 'solana-devnet' } as const;
+const NETWORK = { ETHEREUM: 'ethereum', BASE: 'base', BASE_SEPOLIA: 'base-sepolia', ETHEREUM_SEPOLIA: 'ethereum-sepolia', SOLANA: 'solana', SOLANA_DEVNET: 'solana-devnet' } as const;
 const DAILY = /\b(?:daily|every day|each day|todos os dias|todo dia|diariamente)\b/i;
 const BUY = /\b(?:buy|purchase|compr\w*)\b/i, SELL = /\b(?:sell|vend\w*)\b/i;
 const BELOW = /\b(?:below|under|abaixo|menos de)\b/i, ABOVE = /\b(?:above|over|acima|mais de)\b/i;
@@ -67,7 +67,7 @@ export function groundAutomationDraft(raw: AutomationDraft, text: string, timezo
     if (!money.some(m => m[2]!.toUpperCase() === raw.spendAsset && groundedAmount(m[1]!, raw.amount!))) return ask('What amount and input asset should each proposal spend?');
     if (raw.network && !(raw.network in NETWORK) && (raw.network === 'OTHER' || mentionedNetworks(text).includes(raw.network))) return refuse('This automation route is not supported.');
     if (!raw.network || !(raw.network in NETWORK) || !mentionedNetworks(text).includes(raw.network as Exclude<AutomationDraft['network'], 'OTHER' | null>) ||
-      (['BASE', 'SOLANA'].includes(raw.network) && TESTNET_WORDS.test(text))) return ask('Which network should this automation use? Name the test network or mainnet explicitly.');
+      (['BASE', 'SOLANA', 'ETHEREUM'].includes(raw.network) && TESTNET_WORDS.test(text))) return ask('Which network should this automation use? Name the test network or mainnet explicitly.');
     network = NETWORK[raw.network as keyof typeof NETWORK];
     const expected = raw.side === 'BUY' ? network === 'solana-devnet' ? 'DEVUSDC' : 'USDC' : raw.asset === 'ETH' ? ['ETH', 'WETH'] : ['SOL'];
     if (!(Array.isArray(expected) ? expected.includes(raw.spendAsset) : expected === raw.spendAsset)) return refuse('The input asset does not match this automation route.');

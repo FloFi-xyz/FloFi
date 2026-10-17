@@ -11,6 +11,7 @@
  *    PREPARED attempt cancels it and the owner's browser may be between `begin` and `handoff`.
  */
 import { hashJournalBytes, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
+import type { EthereumRouterNetwork } from '@defi-workflow-engine/action-registry';
 import { boundCompositionNeedsObservation, boundCompositionPhase, type ExecutionStorage } from '@defi-workflow-engine/reference-executor';
 import type { Projection, Projector, WorkRequest } from '@defi-workflow-engine/cloud-runtime';
 import { createRobinhoodTransferService, type TransferRecord, type TransferWalletDiagnostic } from '../src/server/robinhood-transfer-service.ts';
@@ -44,13 +45,13 @@ import { createPaymentFlowService, PAYMENT_RUN_ID, paymentNeedsObservation, type
 import { paymentMode, paymentRuntime } from '../src/server/payment-runtime.ts';
 import { MAX_LOG_BYTES } from '@defi-workflow-engine/cloud-runtime';
 
-export type FlowName = 'robinhood-transfer' | 'aave-supply' | 'base-sepolia-swap' | 'solana-devnet-swap' | 'orca-liquidity' | 'jupiter-swap' | 'uniswap-liquidity' | 'crosschain-router'
+export type FlowName = `crosschain-router-${EthereumRouterNetwork}` | 'robinhood-transfer' | 'aave-supply' | 'base-sepolia-swap' | 'solana-devnet-swap' | 'orca-liquidity' | 'jupiter-swap' | 'uniswap-liquidity' | 'crosschain-router'
   /** BUILD-SOLANA-MAINNET-001: Orca Whirlpools liquidity on Solana mainnet-beta (real funds), the same service as `orca-liquidity` on its own storage. */
   | 'orca-liquidity-mainnet'
   | 'crosschain-router-testnet' | 'lending-composition' | 'pix-payment' | 'robinhood-swap' | 'robinhood-mainnet-transfer' | 'robinhood-liquidity'
   | 'crosschain-router-base-to-robinhood' | 'crosschain-router-robinhood-to-base' | 'crosschain-router-arbitrum-to-robinhood' | 'crosschain-router-robinhood-to-arbitrum'
   /** BUILD-BASE-001: Base mainnet (real funds) as a catalog network, and the Router's Arbitrum One → Base route. */
-  | 'ethereum-swap' | 'ethereum-mainnet-transfer' | 'ethereum-liquidity' | 'ethereum-aave' | 'arbitrum-swap' | 'arbitrum-mainnet-transfer' | 'arbitrum-liquidity' | 'base-swap' | 'base-mainnet-transfer' | 'base-liquidity' | 'base-aave' | 'arbitrum-aave' | 'ethereum-aave' | 'crosschain-router-arbitrum-to-base'
+  | 'ethereum-swap' | 'ethereum-mainnet-transfer' | 'ethereum-liquidity' | 'ethereum-aave' | 'arbitrum-swap' | 'arbitrum-mainnet-transfer' | 'arbitrum-liquidity' | 'base-swap' | 'base-mainnet-transfer' | 'base-liquidity' | 'base-aave' | 'arbitrum-aave' | 'crosschain-router-arbitrum-to-base'
   /** Solana Devnet Swap → Orca liquidity, composed from the two Solana Devnet flows above. */
   | 'solana-devnet-composition';
 export type Rpc = (method: string, params: readonly unknown[]) => Promise<unknown>;
@@ -884,6 +885,12 @@ export const FLOWS: Readonly<Record<FlowName, FlowDefinition>> = Object.freeze({
   'ethereum-swap': ethereumSwap, 'ethereum-mainnet-transfer': ethereumMainnetTransfer, 'ethereum-liquidity': ethereumLiquidity, 'ethereum-aave': ethereumAave,
   'arbitrum-swap': arbitrumSwap, 'arbitrum-mainnet-transfer': arbitrumMainnetTransfer, 'arbitrum-liquidity': arbitrumLiquidity,
   'base-swap': baseSwap, 'base-mainnet-transfer': baseMainnetTransfer, 'base-liquidity': baseLiquidity, 'base-aave': baseAave, 'arbitrum-aave': arbitrumAave,
+  'crosschain-router-ethereum-to-base': routerFlow('crosschain-router-ethereum-to-base', 'ethereum-to-base'),
+  'crosschain-router-base-to-ethereum': routerFlow('crosschain-router-base-to-ethereum', 'base-to-ethereum'),
+  'crosschain-router-ethereum-to-arbitrum': routerFlow('crosschain-router-ethereum-to-arbitrum', 'ethereum-to-arbitrum'),
+  'crosschain-router-arbitrum-to-ethereum': routerFlow('crosschain-router-arbitrum-to-ethereum', 'arbitrum-to-ethereum'),
+  'crosschain-router-ethereum-to-robinhood': routerFlow('crosschain-router-ethereum-to-robinhood', 'ethereum-to-robinhood'),
+  'crosschain-router-robinhood-to-ethereum': routerFlow('crosschain-router-robinhood-to-ethereum', 'robinhood-to-ethereum'),
   'crosschain-router-arbitrum-to-base': routerFlow('crosschain-router-arbitrum-to-base', 'arbitrum-to-base'), 'solana-devnet-composition': solanaComposition });
 export const isFlowName = (value: string): value is FlowName => Object.hasOwn(FLOWS, value);
 
@@ -930,6 +937,12 @@ function configuredFlowMode(flow: FlowName, env: Readonly<Record<string, string 
   if (flow === 'ethereum-swap' || flow === 'ethereum-mainnet-transfer' || flow === 'ethereum-liquidity' || flow === 'ethereum-aave') return CATALOG_NETWORKS.ethereum.mode(env);
   if (flow === 'arbitrum-swap' || flow === 'arbitrum-mainnet-transfer' || flow === 'arbitrum-liquidity' || flow === 'arbitrum-aave') return CATALOG_NETWORKS['arbitrum-one'].mode(env);
   if (flow === 'base-swap' || flow === 'base-mainnet-transfer' || flow === 'base-liquidity' || flow === 'base-aave') return CATALOG_NETWORKS.base.mode(env);
+  if (flow === 'crosschain-router-ethereum-to-base') return routerNetworkMode('ethereum-to-base', env);
+  if (flow === 'crosschain-router-base-to-ethereum') return routerNetworkMode('base-to-ethereum', env);
+  if (flow === 'crosschain-router-ethereum-to-arbitrum') return routerNetworkMode('ethereum-to-arbitrum', env);
+  if (flow === 'crosschain-router-arbitrum-to-ethereum') return routerNetworkMode('arbitrum-to-ethereum', env);
+  if (flow === 'crosschain-router-ethereum-to-robinhood') return routerNetworkMode('ethereum-to-robinhood', env);
+  if (flow === 'crosschain-router-robinhood-to-ethereum') return routerNetworkMode('robinhood-to-ethereum', env);
   if (flow === 'crosschain-router-arbitrum-to-base') return routerNetworkMode('arbitrum-to-base', env);
   if (flow === 'robinhood-transfer') {
     if (env.GRYLOO_ROBINHOOD_HARNESS === 'MOCKED_LOOPBACK_ONLY') return 'harness';
@@ -949,6 +962,12 @@ const DISABLED: Readonly<Record<FlowName, string>> = { 'robinhood-transfer': 'TR
   'ethereum-swap': 'ETHEREUM_MAINNET_NOT_ENABLED', 'ethereum-mainnet-transfer': 'ETHEREUM_MAINNET_NOT_ENABLED', 'ethereum-liquidity': 'ETHEREUM_MAINNET_NOT_ENABLED', 'ethereum-aave': 'ETHEREUM_MAINNET_NOT_ENABLED',
   'arbitrum-swap': 'ARBITRUM_MAINNET_NOT_ENABLED', 'arbitrum-mainnet-transfer': 'ARBITRUM_MAINNET_NOT_ENABLED', 'arbitrum-liquidity': 'ARBITRUM_MAINNET_NOT_ENABLED',
   'base-swap': 'BASE_MAINNET_NOT_ENABLED', 'base-mainnet-transfer': 'BASE_MAINNET_NOT_ENABLED', 'base-liquidity': 'BASE_MAINNET_NOT_ENABLED',
+  'crosschain-router-ethereum-to-base': 'ETHEREUM_MAINNET_NOT_ENABLED',
+  'crosschain-router-base-to-ethereum': 'ETHEREUM_MAINNET_NOT_ENABLED',
+  'crosschain-router-ethereum-to-arbitrum': 'ETHEREUM_MAINNET_NOT_ENABLED',
+  'crosschain-router-arbitrum-to-ethereum': 'ETHEREUM_MAINNET_NOT_ENABLED',
+  'crosschain-router-ethereum-to-robinhood': 'ETHEREUM_MAINNET_NOT_ENABLED',
+  'crosschain-router-robinhood-to-ethereum': 'ETHEREUM_MAINNET_NOT_ENABLED',
   'base-aave': 'BASE_MAINNET_NOT_ENABLED', 'arbitrum-aave': 'ARBITRUM_MAINNET_NOT_ENABLED', 'crosschain-router-arbitrum-to-base': 'ROUTER_NOT_ENABLED',
   'solana-devnet-composition': 'SOLANA_COMPOSITION_PUBLIC_DEVNET_NOT_ENABLED' };
 export const disabledCode = (flow: FlowName) => DISABLED[flow];

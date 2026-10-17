@@ -60,7 +60,7 @@ describe('Ethereum Sepolia native test-ETH self-transfer', () => {
     try {
       const robinhoodOnly = createRobinhoodTransferService({ rpc: createRobinhoodTransferChain().rpc, journalDir, provenance: 'MOCKED' });
       await expect(robinhoodOnly.simulate(workflow(), owner)).rejects.toThrow('TRANSFER_NETWORK_UNAVAILABLE');
-      await expect(robinhoodOnly.simulate(workflow('eip155:1'), owner)).rejects.toThrow('TRANSFER_NETWORK_UNSUPPORTED');
+      await expect(robinhoodOnly.simulate(workflow('eip155:137'), owner)).rejects.toThrow('TRANSFER_NETWORK_UNSUPPORTED');
     } finally { await rm(journalDir, { recursive: true, force: true }); }
   });
   it('enables each network only by its own flag; the harness serves both', () => {
