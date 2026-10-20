@@ -6,7 +6,8 @@
  * A future address family (e.g. Solana base58) adds one `RECIPIENT_FORMATS` entry keyed by its CAIP-2 namespace; no card changes.
  */
 import { isChecksumAddress, transferAllowsRecipients } from '@defi-workflow-engine/action-registry';
-import { transferProfileFor } from './robinhood-transfer-authoring';
+import { solanaAddress, solanaKeyOnCurve } from '@defi-workflow-engine/reference-compiler';
+import { isSolanaTransferNetwork, transferProfileFor } from './robinhood-transfer-authoring';
 
 export type RecipientFormat = { readonly label: string; readonly placeholder: string; normalize(value: string): string | null };
 const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
@@ -17,11 +18,18 @@ export const RECIPIENT_FORMATS: Readonly<Record<string, RecipientFormat>> = Obje
     const body = value.slice(2);
     return body === body.toLowerCase() || body === body.toUpperCase() || isChecksumAddress(value) ? value.toLowerCase() : null;
   } }),
+  // BUILD-SOLANA-TRANSFER-UX-001: a base58 Ed25519 wallet key of exactly 32 bytes (case-sensitive, kept as typed). A program-derived address has
+  // no private key and is not offered as a transfer destination.
+  solana: Object.freeze({ label: 'Solana', placeholder: 'Solana address', normalize(value: string) {
+    if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(value)) return null;
+    try { solanaAddress(value); return solanaKeyOnCurve(value) ? value : null; } catch { return null; }
+  } }),
 });
 
 /** `OWNER_ONLY`: the network's transfer profile sends only to the connected owner (test-ETH self-transfers). */
 export type RecipientPolicy = { readonly kind: 'OWNER_ONLY' } | { readonly kind: 'ADDRESS'; readonly format: RecipientFormat } | { readonly kind: 'UNSUPPORTED' };
 export function recipientPolicy(network: string): RecipientPolicy {
+  if (isSolanaTransferNetwork(network)) return { kind: 'ADDRESS', format: RECIPIENT_FORMATS.solana! };
   let profile;
   try { profile = transferProfileFor(network); } catch { return { kind: 'UNSUPPORTED' }; }
   if (!transferAllowsRecipients(profile)) return { kind: 'OWNER_ONLY' };

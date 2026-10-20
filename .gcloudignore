@@ -1,0 +1,10 @@
+# Direct certification upload; the signed-off manifest verifies the exact resulting inventory.
+.git
+#!include:.gitignore
+.agents/
+.codex/
+.aws/
+.vercel/
+**/.tmp/
+**/playwright-report/
+**/test-results/

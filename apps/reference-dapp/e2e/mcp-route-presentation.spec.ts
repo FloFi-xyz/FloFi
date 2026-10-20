@@ -6,6 +6,8 @@ import { connectViaBrowser, mcpClient } from './mcp-fixtures';
 const enabled = process.env.GRYLOO_MCP_E2E === 'EMBEDDED_LOOPBACK_ONLY';
 const unknownSecret = `flofi_hs_${'A'.repeat(43)}`;
 const stages = (page: Page) => page.getByRole('navigation', { name: 'Workflow stages' });
+/** BUILD-SOLANA-TRANSFER-UX-001: a validated proposal opens on the minimal signing surface of the same workspace (no stage navigation). */
+const signingSurface = (page: Page) => page.getByRole('main', { name: 'Authorize with your wallet', exact: true });
 async function expectDedicatedRoute(page: Page, label: string) {
   await expect(page.locator('.app-shell')).toHaveCount(1);
   await expect(page.getByRole('main', { name: label, exact: true })).toBeVisible();
@@ -98,22 +100,30 @@ test.describe(`MCP route presentation (OAuth ${enabled ? 'enabled' : 'disabled'}
         await expectDedicatedRoute(page, 'Approval');
       } finally { release(); }
       await expect(page.getByRole('region', { name: /^Proposal from / })).toContainText('Nothing is authorized yet.');
-      await expect(stages(page)).toBeVisible();
+      await expect(signingSurface(page)).toBeVisible();
+      await expect(stages(page)).toHaveCount(0);
       await expect(page.locator('.app-shell')).toHaveCount(1);
       await expect(page.locator('.mcp-route-main')).toHaveCount(0);
       expect(page.url()).not.toContain(secret);
       expect(await page.evaluate(() => sessionStorage.getItem('flofi.approval.secret'))).toMatch(/^flofi_hs_/);
       // Leaving a validated approval resets its gate before another approval is resolved.
-      await stages(page).getByRole('button', { name: 'Dashboard', exact: true }).click();
+      await page.getByRole('button', { name: 'Open navigation', exact: true }).click();
+      await page.getByRole('navigation', { name: 'Workspace navigation' }).getByRole('link', { name: 'Dashboard' }).click();
       await expect(page).toHaveURL(/\/dashboard$/);
       await expect(page.getByRole('region', { name: /^Proposal from / })).toHaveCount(0);
       await page.evaluate(() => { sessionStorage.removeItem('flofi.approval.secret'); history.pushState(null, '', '/approve'); });
       await expect(page.getByRole('heading', { name: 'Open this link from your assistant' })).toBeVisible();
       await expectDedicatedRoute(page, 'Approval');
     });
-    test('an explicit invalid fragment cannot reopen a stored valid approval', async ({ page }) => {
+    test('View in FloFi shows a stored valid approval on the Canvas; an explicit invalid fragment cannot reopen it', async ({ page }) => {
       await page.goto(await issueApproval(page));
+      await expect(signingSurface(page)).toBeVisible();
+      // The same validated proposal (this tab's stored link) on the Canvas of the same workspace.
+      await page.goto('/approve?view=canvas');
+      await expect(page.getByRole('region', { name: /^Proposal from / })).toContainText('Nothing is authorized yet.');
       await expect(stages(page)).toBeVisible();
+      await expect(page.getByRole('region', { name: 'Workflow canvas', exact: true })).toBeVisible();
+      await expect(signingSurface(page)).toHaveCount(0);
       await page.goto('/approve#incomplete');
       await expect(page.getByRole('heading', { name: 'Open this link from your assistant' })).toBeVisible();
       await expectDedicatedRoute(page, 'Approval');

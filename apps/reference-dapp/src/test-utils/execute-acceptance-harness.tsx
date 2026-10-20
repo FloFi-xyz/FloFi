@@ -78,7 +78,7 @@ function Harness() {
     }; });
   } } : undefined;
   return <ExecuteAcceptanceWorkflowProvider workflow={workflow} context={fixture.context}><ExecuteWorkspace {...fixture} workflow={workflow} workflowName={workflowName} {...(progress && recovery ? { progress, recovery } : {})} authorization={fixture.authorization}
-    execution={{ ready: true, started: started || Boolean(lifecycle), next: lifecycle === 'approval-confirmed' ? () => { counts.current.executed += 1; } : null, nextLabel: 'Continue to swap', check: () => {}, start: () => { counts.current.executed += 1; if (!holdStart.current) setStarted(true); }, prompt: 'Confirm the reviewed transaction in your wallet.', expiresAt: null, requiresMainnetAcknowledgement: false }}
+    execution={{ ready: true, started: started || Boolean(lifecycle), next: lifecycle === 'approval-confirmed' ? () => { counts.current.executed += 1; } : null, nextLabel: 'Continue to swap', check: () => {}, start: () => { counts.current.executed += 1; if (!holdStart.current) setStarted(true); }, prompt: 'Confirm the reviewed transaction in your wallet.', expiresAt: null }}
     backToBuild={() => { counts.current.edited += 1; }} backToSimulate={() => { counts.current.simulated += 1; }}/></ExecuteAcceptanceWorkflowProvider>
 }
 // Normalized recorded-data fixtures for presentation acceptance only. No RPC or

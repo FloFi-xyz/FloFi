@@ -99,7 +99,8 @@ describe('BUILD-MCP-002 in-chat execution journey (embedded runtime, MOCKED chai
     const progress = (await d.mcp(tokens.access_token, 'get_execution_progress', { approvalId: approval.approvalId })).output as { runs: Record<string, unknown>[] };
     expect(progress).toMatchObject({ ok: true, status: 'APPLIED', runsVisible: true });
     expect(progress.runs).toEqual([{ executionId: final.id, flow: FLOW, status: 'RECONCILED', reconciled: true, terminal: true, errorCode: null, evidenceEnvironment: 'MOCKED',
-      evidenceOutcome: 'RECONCILED', evidenceBundleHash: final.evidence!.bundleHash, updatedAt: expect.any(String) }]);
+      evidenceOutcome: 'RECONCILED', evidenceBundleHash: final.evidence!.bundleHash,
+      receiptUrl: `https://flofi.test/app/dashboard/runs/${final.id}`, updatedAt: expect.any(String) }]);
     expect(JSON.stringify(progress)).not.toMatch(/calldata|"transaction|signature"|flofi_hs_/);
     expect((await d.mcp(tokens.access_token, 'get_approval_status', { approvalId: approval.approvalId })).output).toMatchObject({ runs: [{ executionId: final.id }] });
     expect((await t.db.query<{ run_ids: string[] }>('SELECT run_ids FROM mcp_handoffs WHERE handoff_id = $1', [approval.approvalId])).rows[0]!.run_ids).toEqual([final.id]);

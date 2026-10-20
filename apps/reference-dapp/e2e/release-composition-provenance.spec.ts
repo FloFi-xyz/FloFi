@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { test, expect, applyPendingProposal, openSimulationDetails, assertNoFinancialCanvasAction } from './fixtures';
+import { test, expect, applyPendingProposal, openSimulationDetails, assertNoFinancialCanvasAction, AUTHORIZE_IN_WALLET } from './fixtures';
 import { profile, fork, snapshot } from './composition-fixtures';
 import { assertExecutionBlocked } from './release-safety-fixtures';
 
@@ -33,13 +33,21 @@ test('Pinned local composition requires shared Review without automatically inst
     await panel.getByRole('button', { name: 'Prepare chained review', exact: true }).click();
     await expect(panel).toContainText('Permission hash', { timeout: 30_000 });
     const requests = async () => calls.filter(method => method === 'eth_sendTransaction').length;
-    const approve = page.getByRole('button', { name: 'Approve & Continue', exact: true });
-    await expect(approve).toBeEnabled();
+    // BUILD-SOLANA-TRANSFER-UX-001: the one owner action ("Authorize in wallet": Review acceptance, then the wallet request when ready).
+    const authorize = page.locator('.canvas-primary-action').getByRole('button', { name: AUTHORIZE_IN_WALLET, exact: true });
+    await expect(authorize).toBeEnabled();
+    await expect(authorize).toHaveAttribute('data-lifecycle-action', 'approve');
     await expect(page.getByRole('region', { name: 'Authorization technical details', exact: true })).toContainText('Strategy Manifest');
-    await assertExecutionBlocked(page, requests);
+    // Before that action, Execute offers only the same unaccepted Review: nothing is executable, evidenced or requested.
+    await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Execute', exact: true }).click();
+    await expect(page.locator('.canvas-primary-action button[data-lifecycle-action="execute"]:enabled, .canvas-primary-action button[data-lifecycle-action="continue"]:enabled')).toHaveCount(0);
+    await expect(page.getByRole('link', { name: /Download.*Evidence Bundle/ })).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: 'Result Summary', exact: true })).toHaveCount(0);
+    expect(await requests()).toBe(0);
     await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Simulate', exact: true }).click();
-    await approve.click();
-    await expect(page.locator('.canvas-primary-action').getByRole('button', { name: 'Execute workflow', exact: true })).toBeDisabled();
+    // Authorize accepts the Review; this runtime has no connected execution wallet, so no wallet request follows.
+    await authorize.click();
+    await expect(page.locator('.canvas-primary-action button[data-lifecycle-action="execute"]')).toBeDisabled();
     expect(await requests()).toBe(0);
     await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Execute', exact: true }).click();
     // Shared Review must not silently connect the execution wallet or install

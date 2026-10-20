@@ -27,6 +27,8 @@ import { networkIdentity } from '../domain/network-registry';
 import { authoringAssetSymbol } from '../domain/asset-catalogs';
 import { createCryptoActionNode, type CryptoActionInput } from '../domain/crypto-action-picker';
 import { createAuthoredTransfer, type RobinhoodTransferInput } from '../domain/robinhood-transfer-authoring';
+import { solanaTransferProfileFor } from '../domain/solana-transfer-authoring';
+import { solanaTransferAsset } from '@defi-workflow-engine/action-registry';
 import { ROBINHOOD_LIQUIDITY_DEFAULT_FEE, ROBINHOOD_LIQUIDITY_DEFAULT_SLIPPAGE } from '../domain/robinhood-liquidity-authoring';
 import { createSolanaLiquidityNode, SOLANA_LIQUIDITY_DEFAULT_SLIPPAGE } from '../domain/solana-liquidity-authoring';
 import { createAuthoredBorrow, createAuthoredRepay, createAuthoredSupply, createAuthoredWithdraw, lendingProfileFor } from '../domain/supply-authoring';
@@ -77,7 +79,7 @@ export function defaultSlippageBps(spec: StrategySpec): number | null {
   switch (spec.action) {
     case 'bridge': return ROUTER_NETWORK_OPTIONS[routerNetworkOfInput(routerChains(spec)) ?? 'mainnet'].profile.defaultSlippageBps;
     case 'swap': case 'lending_composition': return 50;
-    case 'add_liquidity': return spec.network === 'solana-devnet' ? Number(SOLANA_LIQUIDITY_DEFAULT_SLIPPAGE)
+    case 'add_liquidity': return spec.network === 'solana-devnet' || spec.network === 'solana' ? Number(SOLANA_LIQUIDITY_DEFAULT_SLIPPAGE)
       : catalogNetworkName(spec.network) ? Number(ROBINHOOD_LIQUIDITY_DEFAULT_SLIPPAGE) : uniswapLiquidityProfileFor(NETWORKS[spec.network].label).defaultSlippageBps;
     default: return null;
   }
@@ -116,10 +118,28 @@ export function normalizeStrategy(spec: StrategySpec): { readonly strategy: Stra
         range: spec.range.unit === 'full' ? { unit: 'full' } : { unit: spec.range.unit, lower: spec.range.lower, upper: spec.range.upper },
         ...feeTier === undefined ? {} : { feeTier }, slippageBps: slippage! } };
     }
-    case 'transfer':
+    case 'transfer': {
+      // BUILD-SOLANA-TRANSFER-UX-001: a Solana transfer always names its destination wallet (kept case-sensitive); a mint states decimals and program.
+      if (spec.network === 'solana' || spec.network === 'solana-devnet') {
+        if (spec.recipient === undefined) throw new Error('SOLANA_TRANSFER_RECIPIENT_REQUIRED');
+        if (/^0x/i.test(spec.recipient)) throw new Error('SOLANA_TRANSFER_RECIPIENT_INVALID');
+        // A verified asset is canonical by symbol, whether named by symbol or by its mint (stated decimals/program must then match it).
+        const profile = solanaTransferProfileFor(NETWORKS[spec.network].label as 'Solana' | 'Solana Devnet'), known = solanaTransferAsset(profile, spec.asset);
+        if (known && known.mint === spec.asset && (spec.decimals !== undefined && spec.decimals !== known.decimals || spec.tokenProgram !== undefined && spec.tokenProgram !== known.program))
+          throw new Error('SOLANA_TRANSFER_MINT_DECIMALS_MISMATCH');
+        if (known && known.mint !== spec.asset && (spec.decimals !== undefined || spec.tokenProgram !== undefined)) throw new Error('SOLANA_TRANSFER_TOKEN_FIELDS_UNEXPECTED');
+        if (!known && (spec.decimals === undefined || spec.tokenProgram === undefined)) throw new Error('SOLANA_TRANSFER_TOKEN_FIELDS_REQUIRED');
+        const asset = known?.symbol ?? spec.asset;
+        if (known) return { notes, strategy: { version: 1, action: 'transfer', network: spec.network, asset, amount: spec.amount, recipient: spec.recipient } };
+        return { notes, strategy: { version: 1, action: 'transfer', network: spec.network, asset, amount: spec.amount, recipient: spec.recipient,
+          ...spec.decimals === undefined ? {} : { decimals: spec.decimals }, ...spec.tokenProgram === undefined ? {} : { tokenProgram: spec.tokenProgram } } };
+      }
+      if (spec.decimals !== undefined || spec.tokenProgram !== undefined) throw new Error('TRANSFER_PROFILE_UNSUPPORTED');
+      if (spec.recipient !== undefined && !/^0x[0-9a-fA-F]{40}$/.test(spec.recipient)) throw new Error('TRANSFER_RECIPIENT_INVALID');
       if (spec.recipient === undefined) notes.push('No recipient given: the wallet that signs in the FloFi app receives the transfer (bound at Review).');
       return { notes, strategy: { version: 1, action: 'transfer', network: spec.network, asset: symbol(spec.network, spec.asset), amount: spec.amount,
         ...spec.recipient === undefined ? {} : { recipient: lower(spec.recipient) } } };
+    }
     case 'lending_composition': return { notes, strategy: { version: 1, action: 'lending_composition', network: 'base-sepolia', asset: 'USDC', supplyAmount: spec.supplyAmount,
       borrowAmount: spec.borrowAmount, outputAsset: 'WETH', slippageBps: slippage!, owner: lower(spec.owner) } };
   }
@@ -187,9 +207,10 @@ function build(spec: StrategySpec, context: ReviewContext): Built {
       if (spec.feeTier !== undefined) refuse('LIQUIDITY_FEE_TIER_UNSUPPORTED');
       const range = spec.range as Extract<typeof spec.range, { lower: string }>;
       const rangeUnit = range.unit === 'price' ? 'PRICE' as const : 'TICK' as const, { lower, upper } = range;
-      if (spec.network === 'solana-devnet') {
-        if (keys !== 'SOL,devUSDC') refuse('LIQUIDITY_ASSET_PAIR_UNSUPPORTED');
-        const input = { network: 'Solana Devnet' as const, maxSol: amounts.SOL!, maxDevUsdc: amounts.devUSDC!, rangeUnit, lower, upper, slippage };
+      if (spec.network === 'solana-devnet' || spec.network === 'solana') {
+        const devnet = spec.network === 'solana-devnet', quote = devnet ? 'devUSDC' : 'USDC';
+        if (keys !== ['SOL', quote].sort().join()) refuse('LIQUIDITY_ASSET_PAIR_UNSUPPORTED');
+        const input = { network: devnet ? 'Solana Devnet' as const : 'Solana' as const, maxSol: amounts.SOL!, maxDevUsdc: amounts[quote]!, rangeUnit, lower, upper, slippage };
         return { command: { ...base, type: 'ADD_SOLANA_LIQUIDITY', input }, check: () => createSolanaLiquidityNode('node-preview', input) };
       }
       if (keys !== 'USDC,WETH') refuse('LIQUIDITY_ASSET_PAIR_UNSUPPORTED');
@@ -201,8 +222,13 @@ function build(spec: StrategySpec, context: ReviewContext): Built {
       return { command: { ...base, type: 'AUTHOR_LENDING', input }, check: () => createAuthoredLending('lending-preview', 1, input) };
     }
     case 'transfer': {
-      const input: RobinhoodTransferInput = { network: (catalogNetworkName(spec.network) ?? refuse('TRANSFER_PROFILE_UNSUPPORTED')) as RobinhoodTransferInput['network'],
-        asset: spec.asset, amount: spec.amount, recipient: spec.recipient ?? 'CONNECTED_OWNER' };
+      const solana = spec.network === 'solana' || spec.network === 'solana-devnet';
+      const input: RobinhoodTransferInput = solana ? { network: NETWORKS[spec.network].label as 'Solana' | 'Solana Devnet', asset: spec.asset, amount: spec.amount,
+        recipient: spec.recipient ?? refuse('SOLANA_TRANSFER_RECIPIENT_REQUIRED'), ...spec.decimals === undefined ? {} : { decimals: String(spec.decimals) },
+        ...spec.tokenProgram === undefined ? {} : { program: spec.tokenProgram } }
+        : { network: (spec.network === 'ethereum-sepolia' || spec.network === 'robinhood-testnet' ? NETWORKS[spec.network].label
+          : catalogNetworkName(spec.network) ?? refuse('TRANSFER_PROFILE_UNSUPPORTED')) as RobinhoodTransferInput['network'],
+          asset: spec.asset, amount: spec.amount, recipient: spec.recipient ?? 'CONNECTED_OWNER' };
       return { command: { ...base, type: 'ADD_RH_TRANSFER', input }, check: () => createAuthoredTransfer('node-preview', input) };
     }
   }

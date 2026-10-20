@@ -60,7 +60,7 @@ export type CopilotIntentV2 = Common & (
   | { readonly kind: 'CLARIFICATION_REQUIRED'; readonly missing: readonly CopilotV2MissingField[]; readonly question: string; readonly options: readonly string[] }
   | { readonly kind: 'UNSUPPORTED'; readonly reason: string });
 
-const { exact, list, oneOf, nullableOneOf, text, amount, bps, address, parseActionV2: parseAction, signedDecimal, depositAmount, fail, symbol } = COPILOT_V1_PARTS;
+const { exact, list, oneOf, nullableOneOf, text, amount, bps, transferAddress, parseActionV2: parseAction, signedDecimal, depositAmount, fail, symbol } = COPILOT_V1_PARTS;
 const CHANGE_KEYS = ['amount', 'slippageBps', 'network', 'destinationNetwork', 'inputAsset', 'outputAsset', 'recipient', 'routing', 'deposits', 'rangeUnit',
   'lower', 'upper'] as const;
 
@@ -77,7 +77,7 @@ function parseChanges(value: unknown, requireOne: boolean): CopilotChanges {
   });
   const changes: CopilotChanges = { amount: amount(v.amount), slippageBps: bps(v.slippageBps), network: nullableOneOf(COPILOT_V2_NETWORKS, v.network),
     destinationNetwork: nullableOneOf(COPILOT_V2_NETWORKS, v.destinationNetwork), inputAsset: symbol(v.inputAsset),
-    outputAsset: symbol(v.outputAsset), recipient: address(v.recipient), routing: nullableOneOf(COPILOT_ROUTING, v.routing), deposits,
+    outputAsset: symbol(v.outputAsset), recipient: transferAddress(v.recipient), routing: nullableOneOf(COPILOT_ROUTING, v.routing), deposits,
     rangeUnit: nullableOneOf(COPILOT_V2_RANGE_UNITS, v.rangeUnit), lower: signedDecimal(v.lower), upper: signedDecimal(v.upper),
     ...withTier ? { feeTier: nullableOneOf(COPILOT_FEE_TIERS, v.feeTier) } : {} };
   // A range is one change: unit and both bounds together (the full range has none), or none of them.

@@ -2,5 +2,10 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "nextjs",
   "installCommand": "sh ../../deploy/vercel/install.sh",
-  "buildCommand": "sh ../../deploy/vercel/build.sh"
+  "buildCommand": "sh ../../deploy/vercel/build.sh",
+  "git": {
+    "deploymentEnabled": {
+      "claude/build-solana-transfer-ux-001": false
+    }
+  }
 }

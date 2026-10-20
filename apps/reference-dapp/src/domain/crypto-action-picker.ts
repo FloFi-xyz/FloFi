@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { AAVE_V3_LENDING_PROFILES, ASSET_SYMBOL, transferAllowsTokens, UNISWAP_LIQUIDITY_PROFILES, baseAssetRegistry, SOLANA_SWAP_RUNTIMES, ORCA_LIQUIDITY_PROFILES } from '@defi-workflow-engine/action-registry';
+import { AAVE_V3_LENDING_PROFILES, ASSET_SYMBOL, transferAllowsTokens, UNISWAP_LIQUIDITY_PROFILES, baseAssetRegistry, SOLANA_SWAP_RUNTIMES, ORCA_LIQUIDITY_PROFILES, SOLANA_TRANSFER_PROFILES } from '@defi-workflow-engine/action-registry';
 import { createBaseSepoliaReviewContext, createEthereumSepoliaReviewContext, createReviewContext } from '@defi-workflow-engine/reference-linter';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { createAuthoredTransfer, transferDetails, TRANSFER_NETWORKS, type TransferNetwork } from './robinhood-transfer-authoring';
@@ -69,7 +69,9 @@ const transfers: readonly CryptoPickerProfile[] = Object.entries(TRANSFER_NETWOR
   ? { network, chain: profile.chain, provider: 'Send', get tokens() { return ['ETH', 'USDG', 'WETH', ...featuredStockSymbols()]; }, catalog: true }
   // BUILD-BASE-001: Base likewise (ETH, then its shortcuts; search reaches the validated token list).
   : transferAllowsTokens(profile) ? { network, chain: profile.chain, provider: 'Send', get tokens() { return ['ETH', ...featuredNetworkSymbols(profile.chain)]; }, catalog: true }
-  : { network, chain: profile.chain, provider: 'Native transfer', tokens: ['ETH'] });
+  : { network, chain: profile.chain, provider: 'Native transfer', tokens: ['ETH'] })
+  // BUILD-SOLANA-TRANSFER-UX-001: Solana mainnet-beta (SOL, USDC, USDT, real funds) and Devnet (SOL, devUSDC) on the same Send card.
+  .concat(SOLANA_TRANSFER_PROFILES.map(profile => ({ network: profile.network, chain: profile.chain, provider: 'Send', tokens: profile.assets.map(asset => asset.symbol) })));
 const lending: readonly CryptoPickerProfile[] = AAVE_V3_LENDING_PROFILES.map(profile => ({ network: profile.network, chain: profile.chain, provider: 'Aave V3', tokens: [profile.symbol] }));
 export function cryptoProfiles(action: CryptoAction): readonly CryptoPickerProfile[] { return action === 'swap' ? swaps : action === 'pool' ? pools : action === 'transfer' ? transfers : lending; }
 export function cryptoNetworks(action: CryptoAction, environment: WalletEnvironment) {
@@ -163,7 +165,8 @@ export function cryptoSelectionOf(node: Node): CryptoSelection | null {
   const network = [...swaps, ...pools, ...lending, ...transfers].find(profile => profile.chain === node.chainId)?.network;
   if (!network) return null;
   const transfer = transferDetails(node as Parameters<typeof transferDetails>[0]);
-  if (transfer) return transfer.asset === 'Token' || transfer.asset === 'Stock Token' ? null : { action: 'transfer', network, from: transfer.asset };
+  // A Solana SPL token named by mint (decimals/program stated) is shown on its card but not re-picked from the shortcut list.
+  if (transfer) return transfer.asset === 'Token' || transfer.asset === 'Stock Token' || transfer.decimals !== undefined ? null : { action: 'transfer', network, from: transfer.asset };
   if (node.actionType === 'asset.swap.exact-input') {
     const catalog = catalogSwapDetails(node);
     if (catalog) return catalog.fromAsset && catalog.toAsset ? { action: 'swap', network, from: catalog.from, to: catalog.to } : null;

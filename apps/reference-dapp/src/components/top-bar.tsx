@@ -7,7 +7,7 @@ import { product } from '../config/product';
 import { useModeB } from '../state/mode-b-store';
 import { useModeA } from '../state/mode-a-store';
 import { StatusBadge } from './status-badge';
-import { useBuild009Wallet, chainName, BASE_HEX, ARBITRUM_HEX, BASE_SEPOLIA_HEX, ROBINHOOD_TESTNET_HEX } from '../state/build009-wallet-store';
+import { useBuild009Wallet, chainName, BASE_HEX, BASE_SEPOLIA_HEX } from '../state/build009-wallet-store';
 import { isLendingComposition } from '@defi-workflow-engine/workflow-contracts';
 import { useLending } from '../state/lending-store';
 import { useBridgeSwap } from '../state/bridge-swap-store';
@@ -29,7 +29,9 @@ import { WalletMark } from './wallet-selector';
 
 export type Tab = WorkflowStage;
 export type ProductSection = Tab | 'Dashboard';
-export function TopBar({ tab, setTab, pathname, engineering = false }: { tab: ProductSection; setTab: (value: ProductSection) => void; pathname?: string | null; engineering?: boolean }) {
+/** `compact` (BUILD-SOLANA-TRANSFER-UX-001, the `/approve` signing surface): brand, wallet and settings only — no stage navigation and no
+ * Mainnet/Testnet switch, because the proposal fixes its own network. */
+export function TopBar({ tab, setTab, pathname, engineering = false, compact = false }: { tab: ProductSection; setTab: (value: ProductSection) => void; pathname?: string | null; engineering?: boolean; compact?: boolean }) {
   const { t: tr } = useLocale();
   const secondaryWorkspace = secondaryWorkspaceRoute(pathname);
   const { walletEnvironment, walletKind } = useExecutionEnvironment();
@@ -51,9 +53,8 @@ export function TopBar({ tab, setTab, pathname, engineering = false }: { tab: Pr
   const requiredChain = destination && build009Active ? 'eip155:42161' : context.requiredChain
     ?? (routerRecovery ? ROUTER_NETWORK_OPTIONS[router.network].pair.source.chainId : lendingActive ? 'eip155:84532'
       : pristine && jupiter.recovered && jupiter.record ? jupiter.record.review.chain : null);
-  const required = EVM_WALLET_NETWORKS.find(network => network.chain === requiredChain)?.hex;
   // This is only a shortcut to existing user-driven wallet switching, never a capability or execution decision.
-  const switchTarget = required === BASE_HEX || required === ARBITRUM_HEX || required === BASE_SEPOLIA_HEX || required === ROBINHOOD_TESTNET_HEX ? required : null;
+  const switchTarget = EVM_WALLET_NETWORKS.find(network => network.chain === requiredChain && network.switchable);
   const solanaActive = walletKind === 'solana';
   const connection = useWalletConnection();
   const solanaDisconnect = () => { void jupiter.disconnect(); };
@@ -79,14 +80,14 @@ export function TopBar({ tab, setTab, pathname, engineering = false }: { tab: Pr
   const provider = solanaActive ? jupiter.session ? { name: jupiter.session.wallet.name, icon: jupiter.session.wallet.icon ?? null } : null
     : build009.account ? build009.provider : null;
   const fork = info?.available ? info : null;
-  return <header className="top-bar">
+  return <header className={`top-bar${compact ? ' top-bar-compact' : ''}`}>
     <div className="brand"><NavigationDrawer pathname={pathname ?? null} section={tab} onBuild={() => setTab('Build')}
       onDisconnect={disconnect} disconnectDisabled={disconnectDisabled}/><FloFiLogo/></div>
-    <nav aria-label={tr("Workflow stages")} className="tabs"><button type="button" onClick={() => setTab('Dashboard')} aria-current={!secondaryWorkspace && tab === 'Dashboard' ? 'page' : undefined} className={!secondaryWorkspace && tab === 'Dashboard' ? 'selected' : ''}>{tr("Dashboard")}</button>{WORKFLOW_STAGES.map((value, index) =>
-      <button key={value} type="button" onClick={() => setTab(value)} disabled={Boolean(authoringIncomplete && value !== 'Build')} title={tr(authoringIncomplete && value !== 'Build' ? 'Configure the action amount in Build first' : undefined)} aria-current={!secondaryWorkspace && tab === value ? 'page' : undefined} className={!secondaryWorkspace && tab === value ? 'selected' : ''}><span className="stage-number" aria-hidden="true">{tr(index + 1)}</span>{tr(value)}</button>)}</nav>
+    {!compact && <nav aria-label={tr("Workflow stages")} className="tabs"><button type="button" onClick={() => setTab('Dashboard')} aria-current={!secondaryWorkspace && tab === 'Dashboard' ? 'page' : undefined} className={!secondaryWorkspace && tab === 'Dashboard' ? 'selected' : ''}>{tr("Dashboard")}</button>{WORKFLOW_STAGES.map((value, index) =>
+      <button key={value} type="button" onClick={() => setTab(value)} disabled={Boolean(authoringIncomplete && value !== 'Build')} title={tr(authoringIncomplete && value !== 'Build' ? 'Configure the action amount in Build first' : undefined)} aria-current={!secondaryWorkspace && tab === value ? 'page' : undefined} className={!secondaryWorkspace && tab === value ? 'selected' : ''}><span className="stage-number" aria-hidden="true">{tr(index + 1)}</span>{tr(value)}</button>)}</nav>}
     <div className="top-meta">
-      <HeaderEnvironment environment={walletEnvironment} disabled={solanaActive ? !jupiter.session || jupiter.busy : !build009.account || build009.busy}
-        onChange={switchEnvironment}/>
+      {!compact && <HeaderEnvironment environment={walletEnvironment} disabled={solanaActive ? !jupiter.session || jupiter.busy : !build009.account || build009.busy}
+        onChange={switchEnvironment}/>}
       <div className="header-wallet" role="group" aria-label={tr("Wallet connection")}>
       {provider && <span className="header-wallet-provider" title={provider.name}><WalletMark icon={provider.icon}/><span className="sr-only">{provider.name}</span></span>}
       {solanaActive && jupiter.session ? <span className="wallet-connection">{tr("Solana Default: ")}<span className="numeric wallet-address">{jupiter.session.account.address.slice(0, 6)}…{jupiter.session.account.address.slice(-4)}</span> · {tr(jupiter.session.chain === 'solana:devnet' ? 'Solana Devnet' : jupiter.session.chain === 'solana:mainnet' ? 'Solana mainnet-beta' : jupiter.session.chain)}</span>
@@ -95,9 +96,9 @@ export function TopBar({ tab, setTab, pathname, engineering = false }: { tab: Pr
       </div>
       <HeaderSettings onDisconnect={disconnect} disconnectDisabled={disconnectDisabled}/>
     </div>
-    <div className="shell-network-row">
+    {!compact && <div className="shell-network-row">
       {requiredChain && <span className="build009-required">{tr("Workflow network: ")}{tr(shellChainLabel(requiredChain))}</span>}
-      {!solanaActive && build009.account && switchTarget && build009.chainId !== switchTarget && <><span className="network-mismatch" role="status">{tr("Switch networks before execution")}</span><button type="button" onClick={() => void build009.switchTo(switchTarget)} disabled={build009.busy}>{tr("Switch to ")}{tr(chainName(switchTarget))}</button></>}
+      {!solanaActive && build009.account && switchTarget && build009.chainId !== switchTarget.hex && <><span className="network-mismatch" role="status">{tr("Switch networks before execution")}</span><button type="button" onClick={() => void connection.switchNetwork(switchTarget.chain)} disabled={build009.busy}>{tr("Switch to ")}{tr(chainName(switchTarget.hex))}</button></>}
       {!solanaActive && !build009.account && build009.providerError && <span role="status">{tr(build009.providerError)}</span>}
       {engineering && (fork || modeB.info?.available) && <details className="shell-technical"><summary>{tr("Technical connection details")}</summary><div>
         {fork && <span className="fork-badge"><StatusBadge label={`Local fork · ${fork.environment}`} tone="warning"/></span>}
@@ -105,7 +106,7 @@ export function TopBar({ tab, setTab, pathname, engineering = false }: { tab: Pr
         <span>{tr("EVM Default: ")}{tr(modeB.wallet ? `injected · ${modeB.wallet.account.slice(0, 6)}…${modeB.wallet.account.slice(-4)}` : wallet ? `injected · ${wallet.account.slice(0, 6)}…${wallet.account.slice(-4)}` : product.forkWallet)}</span>
         <span>{tr("Chain 31337 · local environment")}</span>
       </div></details>}
-    </div>
+    </div>}
     {walletError && <div role="alert" className="wallet-toast">{tr("Wallet: ")}{tr(walletError)}</div>}
   </header>;
 }

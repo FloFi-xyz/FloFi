@@ -77,7 +77,11 @@ test('a declined position keeps the swap and sends nothing again; after a reload
   await page.reload();
   await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Simulate', exact: true }).click();
   await openSimulationDetails(page);
-  await chooseSolanaWallet(panel(page));
+  // BUILD-SOLANA-TRANSFER-UX-001: the Solana wallet the owner already chose is recognized again after the reload without a prompt (a
+  // Wallet Standard silent connect: connection only, no transaction permission); no second connection is requested.
+  await expect(page.locator('.wallet-connection')).toContainText(`${wallet.owner.slice(0, 6)}…${wallet.owner.slice(-4)} · Solana Devnet`);
+  await expect(panel(page).getByRole('button', { name: 'Connect Solana wallet' })).toHaveCount(0);
+  expect(await signRequests(page)).toBe(0);
   await phase(page, 'BOUND');
   await expect(panel(page).getByRole('button', { name: 'Execute swap' })).toHaveCount(0);
   await panel(page).getByRole('button', { name: 'End and keep the swapped tokens', exact: true }).click();
@@ -166,7 +170,7 @@ test('a Phantom-like wallet signs the exact reviewed swap and position: both sen
 // P0 (owner run, real Phantom on Devnet): after the reconciled swap the Canvas offered only "Simulate again", which re-prepared the position
 // without ever allowing its approval. From a persisted BOUND run, after a reload, the Canvas shows the run again and its CTA continues to the
 // position of the same run; the swap is never offered again. MOCKED provenance can never authorize through the Canvas Review (by design), so
-// the position Review is accepted here with the engineering controls; the Canvas approval itself ("Approve & Continue" → "Continue to add
+// the position Review is accepted here with the engineering controls; the Canvas approval itself ("Authorize in wallet" → "Continue to add
 // liquidity") is covered with a public provenance in solana-composition-canvas.test.ts and by the owner's real Devnet run.
 test('a reconciled swap continues to its Orca position through the Canvas after a reload: Continue to liquidity prepares the same run, never the swap', async ({ page }) => {
   const errors: string[] = []; page.on('pageerror', e => errors.push(e.message));
@@ -179,7 +183,11 @@ test('a reconciled swap continues to its Orca position through the Canvas after 
   await page.reload();
   await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Simulate', exact: true }).click();
   await openSimulationDetails(page);
-  await chooseSolanaWallet(panel(page));
+  // BUILD-SOLANA-TRANSFER-UX-001: the Solana wallet the owner already chose is recognized again after the reload without a prompt (a
+  // Wallet Standard silent connect: connection only, no transaction permission); no second connection is requested.
+  await expect(page.locator('.wallet-connection')).toContainText(`${wallet.owner.slice(0, 6)}…${wallet.owner.slice(-4)} · Solana Devnet`);
+  await expect(panel(page).getByRole('button', { name: 'Connect Solana wallet' })).toHaveCount(0);
+  expect(await signRequests(page)).toBe(0);
   await phase(page, 'BOUND');
   await expect(page.locator('.build-flow-surface .react-flow__node, .react-flow__node')).toHaveCount(2); // the authorized composition is back on the Canvas
   const primary = page.locator('.canvas-primary-action');

@@ -20,7 +20,7 @@ import { createTestWallet } from '../../../packages/reference-reconciler/test/te
 import { E2E_APP_ORIGIN as APP_ORIGIN } from './app-origin';
 import { CHANNEL_E2E, CHANNEL_E2E_USER_POOL, channelE2eUsers, TELEGRAM_DOUBLE } from './channel-constants';
 import { handoffOfLink, query } from './channel-fixtures';
-import { chooseWallet, openSimulationDetails } from './fixtures';
+import { AUTHORIZE_IN_WALLET, openProposalSimulationDetails, proveConnectedEvmWallet, signingSurface } from './fixtures';
 import { guardedContext, installJourneyWallet, journeySends, walletRequests } from './journey-fixtures';
 import { assertMcpHarness } from './mcp-fixtures';
 import { assertExecutionBlocked } from './release-safety-fixtures';
@@ -87,10 +87,11 @@ test.describe('BUILD-CHANNELS-001 Telegram → /approve (loopback Bot API double
     await expect(region).toContainText('From Telegram');
     await expect(region).toContainText('Nothing is authorized yet.');
     expect(page.url()).not.toContain('flofi_chs_');
-    // BUILD-FLOFI-UX-UI-002: "Open FloFi" lands on the normal Canvas with the bridge card already there; no panel, no Load step.
+    // BUILD-FLOFI-UX-UI-002: no panel, no Load step. BUILD-SOLANA-TRANSFER-UX-001: "Open FloFi" lands on the minimal signing surface, which
+    // already lists the bridge; nothing can be simulated or authorized before the proof.
     await expect(page.locator('.approval-page, .approval-handoff')).toHaveCount(0);
-    await expect(page.locator('.build-flow-surface .composer-card').first()).toBeVisible();
-    await expect(page.locator('.canvas-primary-action button')).toBeDisabled();
+    await expect(signingSurface(page).getByRole('list', { name: 'Requested actions' })).toContainText('Base Sepolia');
+    await expect(page.locator('button[data-lifecycle-action]')).toHaveCount(0);
     const evidence = process.env.FLOFI_UX_EVIDENCE ? 'e2e/visual-evidence/flofi-ux-ui-002' : null;
     if (evidence) {
       mkdirSync(evidence, { recursive: true });
@@ -103,8 +104,7 @@ test.describe('BUILD-CHANNELS-001 Telegram → /approve (loopback Bot API double
     // Sharing with the chat stays the owner's opt-in.
     await expect(region.getByRole('checkbox')).not.toBeChecked();
     await region.getByRole('checkbox').check();
-    await region.getByRole('button', { name: 'Connect wallet and prove ownership' }).click();
-    await chooseWallet(page, 'Browser wallet');
+    await proveConnectedEvmWallet(page, region, owner.address);
     await expect(region.getByRole('status')).toContainText('Ready for your review.');
     await expect(region.getByRole('button', { name: 'Load proposal' })).toHaveCount(0);
     if (evidence) for (const [width, height] of [[1440, 900], [390, 844]] as const) {
@@ -116,10 +116,11 @@ test.describe('BUILD-CHANNELS-001 Telegram → /approve (loopback Bot API double
       .toEqual({ status: 'APPLIED', share_status: true });
 
     // 4. The product's own simulation and Strategy Manifest Review; MOCKED financial authority cannot be approved or executed.
-    await page.getByRole('button', { name: 'Simulate workflow', exact: true }).click();
-    await openSimulationDetails(page);
+    // FloFi prepares that simulation itself once the proposal is loaded; the one owner action stays disabled.
+    await expect(signingSurface(page).getByRole('button', { name: AUTHORIZE_IN_WALLET, exact: true })).toBeDisabled({ timeout: 30_000 });
+    await openProposalSimulationDetails(page);
     await expect(bridge(page)).toContainText('Strategy Manifest');
-    await expect(page.getByRole('button', { name: 'Approve & Continue', exact: true })).toBeDisabled();
+    await expect(page.locator('.canvas-primary-action').getByRole('button', { name: AUTHORIZE_IN_WALLET, exact: true })).toBeDisabled();
     await expect(page.locator('.review-authorization-details')).toContainText('A simulation that can authorize this workflow is required before approval.');
     await assertExecutionBlocked(page, journeySends);
     expect(await walletRequests(page)).not.toContain('eth_sendTransaction');
@@ -137,6 +138,10 @@ test.describe('BUILD-CHANNELS-001 Telegram → /approve (loopback Bot API double
     await expect.poll(loaded, { timeout: 30_000 }).toEqual([{ status: 'SENT', body: false }]);
     expect((await dispatch()).status).toBe(200);
     expect((await texts()).filter(t => /^Your proposal is loaded in FloFi/.test(t))).toHaveLength(1);
+    await expect.poll(texts, { timeout: 30_000 }).toEqual(expect.arrayContaining([
+      expect.stringMatching(/^(Simulation complete \(read-only\)|Transaction prepared)/),
+    ]));
+    expect((await texts()).join('\n')).not.toMatch(/Execution in progress|Execution reconciled|Receipt:/);
     await deliver('status');
     await expect.poll(async () => (await texts()).at(-1), { timeout: 30_000 }).toMatch(/^Proposal in a FloFi workflow/);
     // Nothing a chat received carries calldata, a full address, a key or the link's secret again.
@@ -145,7 +150,7 @@ test.describe('BUILD-CHANNELS-001 Telegram → /approve (loopback Bot API double
   });
 
   // BUILD-FLOFI-UX-UI-002: "Open FloFi" for an owner who is already signed in to FloFi; an expired link; a refresh after loading.
-  test('a signed-in owner lands on the populated Canvas and loads the proposal with no further signature; replaced links and refreshes stay safe', async ({ browser, request }) => {
+  test('a signed-in owner lands on the signing surface and loads the proposal with no further signature; replaced links and refreshes stay safe', async ({ browser, request }) => {
     test.setTimeout(120_000);
     // Its own allowlisted synthetic user (counted down from the pool's end), so this conversation never meets the first test's.
     const me = channelE2eUsers(CHANNEL_E2E_USER_POOL - 1 - test.info().repeatEachIndex).telegram;
@@ -168,9 +173,10 @@ test.describe('BUILD-CHANNELS-001 Telegram → /approve (loopback Bot API double
     await installJourneyWallet(page, [owner]);
     const response = await page.goto(first);
     expect(response?.headers()['referrer-policy']).toBe('no-referrer');
-    await approval(page).getByRole('button', { name: 'Connect wallet and prove ownership' }).click();
-    await chooseWallet(page, 'Browser wallet');
+    await proveConnectedEvmWallet(page, approval(page), owner.address);
     await expect(approval(page).getByRole('status')).toContainText('Ready for your review.');
+    // FloFi's prepared simulation reuses that sign-in: still exactly one wallet message.
+    await expect(signingSurface(page).getByRole('button', { name: AUTHORIZE_IN_WALLET, exact: true })).toBeDisabled({ timeout: 30_000 });
     expect(await signs(page)).toBe(1);
 
     // 2. A replaced link (the chat's newer proposal withdraws it) shows the unavailable state, never a Canvas. Expiry takes the same path
@@ -184,13 +190,14 @@ test.describe('BUILD-CHANNELS-001 Telegram → /approve (loopback Bot API double
     await expect(withdrawn.getByRole('region', { name: 'Workflow canvas', exact: true })).toHaveCount(0);
     await withdrawn.close();
 
-    // 3. The newest link, in a new tab of the signed-in browser: the Canvas shows the proposal and it loads with no wallet prompt at all.
+    // 3. The newest link, in a new tab of the signed-in browser: the signing surface shows the proposal, it loads and FloFi prepares its
+    // simulation with no wallet prompt at all.
     const second = await context.newPage();
     await installJourneyWallet(second, [owner]);
     await second.goto(next);
     await expect(approval(second).getByRole('status')).toContainText('Ready for your review.');
-    await expect(second.locator('.build-flow-surface .composer-card').first()).toBeVisible();
-    await expect(second.locator('.canvas-primary-action button')).toBeEnabled();
+    await expect(signingSurface(second).getByRole('list', { name: 'Requested actions' })).toContainText('Base Sepolia');
+    await expect(signingSurface(second).getByRole('button', { name: AUTHORIZE_IN_WALLET, exact: true })).toBeDisabled({ timeout: 30_000 });
     expect(await signs(second)).toBe(0);
     const loaded = await handoffOfLink(next);
     expect(loaded).toMatchObject({ status: 'APPLIED', share_status: false });
@@ -198,10 +205,11 @@ test.describe('BUILD-CHANNELS-001 Telegram → /approve (loopback Bot API double
     // 4. A refresh never restores silently or claims again: one explicit Restore, the same single claim, still nothing signed.
     await second.reload();
     await expect(approval(second)).toContainText('This proposal is already in a FloFi workflow for your wallet.');
-    await expect(second.locator('.build-flow-surface .composer-card')).toHaveCount(0);
+    await expect(signingSurface(second).getByRole('list', { name: 'Requested actions' })).not.toContainText('Base Sepolia');
+    await expect(second.locator('button[data-lifecycle-action]')).toHaveCount(0);
     await approval(second).getByRole('button', { name: 'Restore proposal' }).click();
     await expect(approval(second).getByRole('status')).toContainText('Ready for your review.');
-    await expect(second.locator('.canvas-primary-action button')).toBeEnabled();
+    await expect(signingSurface(second).getByRole('button', { name: AUTHORIZE_IN_WALLET, exact: true })).toBeDisabled({ timeout: 30_000 });
     expect(await query<{ claimed_at: string; status: string }>('SELECT claimed_at::text, status FROM mcp_handoffs WHERE handoff_id = $1', [loaded.handoff_id]))
       .toEqual([{ claimed_at: claimedAt, status: 'APPLIED' }]);
     expect(await signs(second)).toBe(0);

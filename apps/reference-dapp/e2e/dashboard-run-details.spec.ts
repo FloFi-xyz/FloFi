@@ -44,7 +44,7 @@ test('saved run summary, actual values, archive evidence and secondary technical
   const technical = page.getByText('View technical details', { exact: true });
   await technical.focus(); await technical.press('Enter');
   await expect(page.locator('.execution-evidence-details')).toContainText('Saved execution record');
-  await expect(page.getByRole('button', { name: 'Execute workflow', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Authorize in wallet', exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Back to Build', exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'Back to Dashboard' }).click();
   await expect(page.getByRole('heading', { name: 'Your execution workspace' })).toBeVisible();
@@ -55,7 +55,7 @@ test('partial, failed, declined, unresolved, and recovered records retain their 
   for (const [mode, label] of [['partial', 'Execution partially completed'], ['failed', 'Execution failed'], ['declined', 'Transaction not submitted'], ['unresolved', 'Execution status unresolved'], ['recovered', 'Execution completed']] as const) {
     await page.evaluate(value => window.flofiRunDetailAcceptance.show(value), mode);
     await expect(page.locator('.dashboard-final-result')).toHaveText(label);
-    await expect(page.getByRole('button', { name: /^(Retry|Execute workflow|Open current execution|Continue execution)$/ })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /^(Retry|Authorize in wallet|Open current execution|Continue execution)$/ })).toHaveCount(0);
   }
   await expect(page.locator('.dashboard-recovery-summary')).toContainText('Recovered');
   await page.evaluate(() => window.flofiRunDetailAcceptance.show('restored'));

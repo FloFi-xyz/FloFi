@@ -62,8 +62,12 @@ export function strategyOfCommand(command: Command): StrategySpec | null {
         slippageBps: bps(i.slippage) } as StrategySpec;
     }
     case 'ADD_RH_TRANSFER': {
-      const i = c.input as { network: string; asset: string; amount: string; recipient: string };
-      const network = CATALOG_NETWORK[i.network];
+      const i = c.input as { network: string; asset: string; amount: string; recipient: string; decimals?: string; program?: 'spl-token' | 'token-2022' };
+      // BUILD-SOLANA-TRANSFER-UX-001: a Solana transfer always carries its explicit recipient wallet (and, for a mint, its decimals and program).
+      if (i.network === 'Solana' || i.network === 'Solana Devnet') return i.recipient === 'CONNECTED_OWNER' ? null : { version: 1, action: 'transfer',
+        network: i.network === 'Solana' ? 'solana' : 'solana-devnet', asset: i.asset, amount: i.amount, recipient: i.recipient,
+        ...i.decimals === undefined ? {} : { decimals: Number(i.decimals) }, ...i.program === undefined ? {} : { tokenProgram: i.program } } as StrategySpec;
+      const network = i.network === 'Ethereum Sepolia' ? 'ethereum-sepolia' : i.network === 'Robinhood Chain Testnet' ? 'robinhood-testnet' : CATALOG_NETWORK[i.network];
       return !network ? null : { version: 1, action: 'transfer', network, asset: i.asset, amount: i.amount,
         ...i.recipient === 'CONNECTED_OWNER' ? {} : { recipient: i.recipient } } as StrategySpec;
     }
@@ -82,8 +86,9 @@ export function strategyOfCommand(command: Command): StrategySpec | null {
         range: { unit: i.rangeUnit === 'PRICE' ? 'price' : 'tick', lower: i.lower, upper: i.upper }, slippageBps: bps(i.slippage) } as StrategySpec;
     }
     case 'ADD_SOLANA_LIQUIDITY': {
-      const i = c.input as { maxSol: string; maxDevUsdc: string; rangeUnit: 'PRICE' | 'TICK'; lower: string; upper: string; slippage: string };
-      return { version: 1, action: 'add_liquidity', network: 'solana-devnet', maxAmounts: { SOL: i.maxSol, devUSDC: i.maxDevUsdc },
+      const i = c.input as { network: string; maxSol: string; maxDevUsdc: string; rangeUnit: 'PRICE' | 'TICK'; lower: string; upper: string; slippage: string };
+      const mainnet = i.network === 'Solana';
+      return { version: 1, action: 'add_liquidity', network: mainnet ? 'solana' : 'solana-devnet', maxAmounts: { SOL: i.maxSol, [mainnet ? 'USDC' : 'devUSDC']: i.maxDevUsdc },
         range: { unit: i.rangeUnit === 'PRICE' ? 'price' : 'tick', lower: i.lower, upper: i.upper }, slippageBps: bps(i.slippage) } as StrategySpec;
     }
     case 'AUTHOR_LENDING': {

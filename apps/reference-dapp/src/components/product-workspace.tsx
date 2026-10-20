@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { baseAssetRegistry, referenceRegistry } from '@defi-workflow-engine/action-registry';
 import { AppShell } from './app-shell';
@@ -15,6 +15,7 @@ import { SupplyProvider } from '../state/supply-store';
 import { LendingProvider } from '../state/lending-store';
 import { RobinhoodTransferProvider } from '../state/robinhood-transfer-store';
 import { JupiterProvider } from '../state/jupiter-store';
+import { SolanaTransferProvider } from '../state/solana-transfer-store';
 import { AcrossProvider } from '../state/across-store';
 import { BridgeSwapProvider } from '../state/bridge-swap-store';
 import { ModeAProvider } from '../state/mode-a-store';
@@ -40,5 +41,11 @@ export function ProductWorkspace({ initialWorkflowId, engineeringEnabled = false
   // closed until the proposal is loaded for the proven wallet.
   const approving = pathname === '/approve';
   const showWorkspace = pathname !== '/connections' && (!approving || approvalAvailable);
-  return <WalletSelectorProvider><WorkflowProvider initialContext={initialContext} initialWorkflowId={initialWorkflowId}><BridgeProvider><Build009WalletProvider><PublicTestnetProvider><SupplyProvider><LendingProvider><RobinhoodTransferProvider><JupiterProvider><AcrossProvider><BridgeSwapProvider><ModeAProvider><CowProvider><LiquidityProvider><SolanaLiquidityProvider><SolanaCompositionProvider><UniswapLiquidityProvider><RouterProvider>{engineeringEnabled && <EngineeringProbe/>}{approving && <><ApprovalHandoff slot={approvalSlot} onAvailabilityChange={setApprovalAvailable} onGateChange={setApprovalGate}/><ChannelProgressPing/></>}{showWorkspace && <AppShell engineering={engineeringEnabled && pathname === '/__engineering'} pathname={pathname} navigate={path => router.push(path)} approvalSlot={approving ? setApprovalSlot : undefined} approvalGate={approving && approvalGate}/>}</RouterProvider></UniswapLiquidityProvider></SolanaCompositionProvider></SolanaLiquidityProvider></LiquidityProvider></CowProvider></ModeAProvider></BridgeSwapProvider></AcrossProvider></JupiterProvider></RobinhoodTransferProvider></LendingProvider></SupplyProvider></PublicTestnetProvider></Build009WalletProvider></BridgeProvider></WorkflowProvider></WalletSelectorProvider>;
+  // BUILD-SOLANA-TRANSFER-UX-001: a proposal opens on the minimal signing surface ("Authorize"); `?view=canvas` or "View in FloFi" shows it on
+  // the Canvas instead. Both are the same stores and orchestration; only the presentation differs.
+  const [surface, setSurface] = useState<'signing' | 'canvas'>('signing');
+  const [approvalWallet, setApprovalWallet] = useState<string | null>(null);
+  useEffect(() => { if (approving) setSurface(new URLSearchParams(window.location.search).get('view') === 'canvas' ? 'canvas' : 'signing'); }, [approving]);
+  return <WalletSelectorProvider><WorkflowProvider initialContext={initialContext} initialWorkflowId={initialWorkflowId}><BridgeProvider><Build009WalletProvider><PublicTestnetProvider><SupplyProvider><LendingProvider><RobinhoodTransferProvider><JupiterProvider><SolanaTransferProvider><AcrossProvider><BridgeSwapProvider><ModeAProvider><CowProvider><LiquidityProvider><SolanaLiquidityProvider><SolanaCompositionProvider><UniswapLiquidityProvider><RouterProvider>{engineeringEnabled && <EngineeringProbe/>}{approving && <><ApprovalHandoff slot={approvalSlot} surface={surface} onSurfaceChange={setSurface} onAvailabilityChange={setApprovalAvailable} onGateChange={setApprovalGate} onClaimedWallet={setApprovalWallet}/><ChannelProgressPing/></>}{showWorkspace && <AppShell engineering={engineeringEnabled && pathname === '/__engineering'} pathname={pathname} navigate={path => router.push(path)} approvalSlot={approving ? setApprovalSlot : undefined} approvalGate={approving && approvalGate}
+  surface={approving && surface === 'signing' ? 'signing' : 'workspace'} approvalWallet={approving ? approvalWallet : null} autoPrepare={approving} onViewInFloFi={approving ? () => setSurface('canvas') : undefined}/>}</RouterProvider></UniswapLiquidityProvider></SolanaCompositionProvider></SolanaLiquidityProvider></LiquidityProvider></CowProvider></ModeAProvider></BridgeSwapProvider></AcrossProvider></SolanaTransferProvider></JupiterProvider></RobinhoodTransferProvider></LendingProvider></SupplyProvider></PublicTestnetProvider></Build009WalletProvider></BridgeProvider></WorkflowProvider></WalletSelectorProvider>;
 }

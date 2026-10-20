@@ -265,7 +265,7 @@ test('mocked numbers stay labelled and execution stays unavailable after generat
     expect(name).not.toMatch(/sign|approv|authori[sz]|submit|execut.*workflow/i);
   }
   await expect(page.getByRole('region', { name: 'Review & Authorization', exact: true })).toContainText('Review unavailable until simulation is ready.');
-  await expect(page.getByRole('button', { name: 'Approve & Continue', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Authorize in wallet', exact: true })).toHaveCount(0);
   await tab(page, 'Execute');
   await assertNoFinancialCanvasAction(page);
   await expect(page.getByRole('region', { name: 'Workflow execution workspace' })).toContainText('Connect the wallet that will authorize this workflow.');

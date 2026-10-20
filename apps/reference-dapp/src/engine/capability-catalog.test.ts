@@ -10,6 +10,7 @@ describe('BUILD-MCP-001 discovery derived from registries', () => {
     expect(networks['arbitrum-sepolia']).toMatchObject({ chainId: CROSSCHAIN_ROUTER_BASE_SEPOLIA_ARBITRUM_SEPOLIA.destination.chain, actions: ['bridge'] });
     expect(networks['base']).toMatchObject({ chainId: 'eip155:8453', class: 'MAINNET', funds: 'REAL_FUNDS' });
     expect(networks['solana-devnet']!.class).toBe('DEVNET');
+    expect(networks['robinhood-testnet']).toMatchObject({ chainId: 'eip155:46630', class: 'TESTNET', actions: ['transfer'] });
     expect(networks['ethereum-sepolia']!.actions).toEqual(expect.arrayContaining(['swap', 'supply', 'add_liquidity']));
   });
 
@@ -34,6 +35,9 @@ describe('BUILD-MCP-001 discovery derived from registries', () => {
     expect(rows['swap:base']).toMatchObject({ ownerWalletExecutionImplemented: true, demonstratedEvidence: null, funds: 'REAL_FUNDS' });
     expect(rows['swap:base']!.registryEnvironments).toEqual(expect.arrayContaining(['MOCK', 'LOCAL_FORK', 'MAINNET']));
     expect(rows['bridge:base']).toMatchObject({ publicEnvironment: 'MAINNET', funds: 'REAL_FUNDS' });
+    expect(rows['transfer:ethereum-sepolia']).toMatchObject({ ownerWalletExecutionImplemented: true, funds: 'TEST_FUNDS' });
+    expect(rows['transfer:robinhood-testnet']).toMatchObject({ ownerWalletExecutionImplemented: true, funds: 'TEST_FUNDS' });
+    expect(rows['add_liquidity:solana']).toMatchObject({ ownerWalletExecutionImplemented: true, funds: 'REAL_FUNDS' });
     for (const row of codeCapabilities()) expect(row.supportedByCode.AUTHOR).toBe(true);
   });
 });

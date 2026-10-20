@@ -35,7 +35,10 @@ export function previewPlan(spec: StrategySpec): PreviewPlan | { readonly code: 
       const route = robinhood[`${spec.sourceNetwork}>${spec.destinationNetwork}` as keyof typeof robinhood];
       return { flow: route ?? (spec.sourceNetwork === 'base' ? 'crosschain-router' : 'crosschain-router-testnet'), subject: 'EVM' };
     }
-    case 'transfer': return { code: 'SIMULATION_REQUIRES_OWNER_BROWSER' };
+    // BUILD-SOLANA-TRANSFER-UX-001: a Solana transfer previews against the sender's public balances (the simulation subject); FloFi re-simulates
+    // with the actual signing wallet before any Review. EVM transfers bind the connected owner, so they still need the owner's browser.
+    case 'transfer': return spec.network === 'solana' ? { flow: 'solana-transfer', subject: 'SOLANA' } : spec.network === 'solana-devnet'
+      ? { flow: 'solana-devnet-transfer', subject: 'SOLANA' } : { code: 'SIMULATION_REQUIRES_OWNER_BROWSER' };
     case 'swap':
       // BUILD-BASE-001: Base mainnet swaps (the USDC ⇄ WETH reference pair included) quote on the Base catalog-network swap flow.
       { const network = catalogNetworkOfChain(networkIdentity(spec.network)?.chain);
@@ -45,7 +48,7 @@ export function previewPlan(spec: StrategySpec): PreviewPlan | { readonly code: 
       return { flow: 'base-sepolia-swap', subject: 'NONE' };
     case 'supply': case 'borrow': case 'repay': case 'withdraw': return { flow: catalogNetworkOfChain(networkIdentity(spec.network)?.chain)?.flows.lending ?? 'aave-supply', subject: 'EVM' };
     // Orca positions need a position-mint key generated in the owner's browser; there is nothing to preview without it.
-    case 'add_liquidity': return spec.network === 'solana-devnet' ? { code: 'SIMULATION_REQUIRES_OWNER_BROWSER' }
+    case 'add_liquidity': return spec.network === 'solana-devnet' || spec.network === 'solana' ? { code: 'SIMULATION_REQUIRES_OWNER_BROWSER' }
       : { flow: spec.network === 'robinhood' ? 'robinhood-liquidity' : catalogNetworkOfChain(networkIdentity(spec.network)?.chain)?.flows.liquidity ?? 'uniswap-liquidity', subject: 'EVM' };
     case 'lending_composition': return { flow: 'lending-composition', subject: 'EVM' };
   }
@@ -54,7 +57,9 @@ export function previewPlan(spec: StrategySpec): PreviewPlan | { readonly code: 
 export function strategyFlow(spec: StrategySpec): FlowName | null {
   const plan = previewPlan(spec);
   if ('flow' in plan) return plan.flow;
-  return spec.action === 'add_liquidity' ? 'orca-liquidity' : spec.action === 'transfer' ? catalogNetworkOfChain(networkIdentity(spec.network)?.chain)?.flows.transfer ?? null : null;
+  return spec.action === 'add_liquidity' ? spec.network === 'solana' ? 'orca-liquidity-mainnet' : 'orca-liquidity' : spec.action === 'transfer'
+    ? spec.network === 'ethereum-sepolia' || spec.network === 'robinhood-testnet' ? 'robinhood-transfer'
+      : catalogNetworkOfChain(networkIdentity(spec.network)?.chain)?.flows.transfer ?? null : null;
 }
 
 type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
@@ -147,6 +152,17 @@ export function projectSimulation(flow: FlowName, value: unknown): SimulationVie
         facts: { ...pick(r, ['chain', 'cluster', 'amount', 'slippageBps', 'estimatedFeeLamports']), inputToken: pick(r.input, ['symbol', 'mint', 'decimals']),
           outputToken: pick(r.output, ['symbol', 'mint', 'decimals']), quote: pick(r.quote, ['inAmount', 'outAmount', 'otherAmountThreshold', 'priceImpactPct', 'slippageBps', 'fetchedAt']),
           simulation: pick(simulation, ['slot', 'unitsConsumed', 'inputSpent', 'outputReceived', 'accountCreationLamports', 'feeLamports']) },
+        canonicalArtifacts: canonicalArtifacts(r) };
+    }
+    case 'solana-transfer': case 'solana-devnet-transfer': {
+      const r = obj(record.review), simulation = obj(r.simulationResult);
+      return { kind: 'SOLANA_TRANSFER', provenance: String(record.provenance), observedAt: String(obj(obj(r.simulation).freshness).observedAt), expiresAt: String(r.expiresAt),
+        facts: { ...pick(r, ['chain', 'cluster', 'network', 'owner', 'recipient', 'amount', 'estimatedFeeLamports', 'accountCreationLamports', 'maximumAccountCreationLamports', 'maximumNetworkCostLamports']),
+          asset: pick(r.asset, ['symbol', 'mint', 'decimals', 'program', 'verified']),
+          token: r.token ? { ...pick(r.token, ['program', 'mint', 'decimals', 'createDestination', 'sourceAmount', 'destinationAmount']),
+            extensions: Array.isArray(obj(r.token).extensions) ? (obj(r.token).extensions as unknown[]).map(Number).slice(0, 32) : [] } : null,
+          simulation: pick(simulation, ['slot', 'unitsConsumed', 'ownerLamportsBefore', 'ownerLamportsAfter', 'recipientLamportsBefore', 'recipientLamportsAfter',
+            'sourceAmountBefore', 'sourceAmountAfter', 'destinationAmountBefore', 'destinationAmountAfter', 'accountCreationLamports', 'feeLamports']) },
         canonicalArtifacts: canonicalArtifacts(r) };
     }
     case 'lending-composition': {

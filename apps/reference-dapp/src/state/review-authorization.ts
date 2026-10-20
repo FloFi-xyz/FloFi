@@ -16,6 +16,7 @@ import { useSolanaLiquidity } from './solana-liquidity-store';
 import { useSolanaComposition } from './solana-composition-store';
 import { useUniswapLiquidity } from './uniswap-liquidity-store';
 import { useRobinhoodTransfer } from './robinhood-transfer-store';
+import { useSolanaTransfer } from './solana-transfer-store';
 import { useAcross } from './across-store';
 import { useBuild009Wallet } from './build009-wallet-store';
 import { useExecutionEnvironment } from './capability-store';
@@ -24,13 +25,14 @@ import { simulationAmount, type SimulationSource } from '../domain/simulation-pr
 import { walletChainRef } from '../wallet/evm-networks';
 import { ownerBoundSwapReview, quoteDecimals, swapProfile } from '../domain/public-testnet-swap';
 import { solanaWalletChainRef } from '../wallet/environment';
+import { solanaProviderIdentity } from '../wallet/solana-wallet';
 
 /** Review callbacks only: no install, request, begin, submit or execute method crosses this boundary. */
 export function useReviewAuthorization(kind: SimulationSource['kind']): { authorization: ReviewAuthorization; wallet: ReviewWallet } {
   const modeA = useModeA(), modeB = useModeB(), composition = useComposition(), liquidity = useLiquidity();
   const supply = useSupply(), lending = useLending(), router = useRouter(), publicSwap = usePublicTestnet();
   const jupiter = useJupiter(), solanaPool = useSolanaLiquidity(), uniswapPool = useUniswapLiquidity(), transfer = useRobinhoodTransfer(), across = useAcross();
-  const sharedWallet = useBuild009Wallet(), environment = useExecutionEnvironment(), solanaComposition = useSolanaComposition();
+  const sharedWallet = useBuild009Wallet(), environment = useExecutionEnvironment(), solanaComposition = useSolanaComposition(), solanaTransfer = useSolanaTransfer();
   const { restorationEpoch } = useWorkflow();
   const authorization: ReviewAuthorization = { key: null, manifest: null, owner: null, chain: null, ready: false, accepted: false, approve: null, approvals: [], tokens: [], limits: [], technical: null };
   const attach = (key: string, manifest: unknown, policy: unknown, accepted: boolean, approve: (() => void | Promise<void>) | null, ready: boolean, technical: unknown) => {
@@ -65,10 +67,16 @@ export function useReviewAuthorization(kind: SimulationSource['kind']): { author
       for (const token of [q.input, q.output]) authorization.tokens.push({ address: token.mint, chain: q.chain, symbol: token.symbol === 'USDC' && q.cluster === 'devnet' ? 'devUSDC' : token.symbol, decimals: token.decimals });
       break;
     }
+    case 'solana-transfer': {
+      const r = solanaTransfer.record, q = r?.review; if (!r || !q) break;
+      attach(q.commitment, q.manifest, q.policy, r.authorization === q.commitment, solanaTransfer.review, !solanaTransfer.busy && !solanaTransfer.retired && !r.attempt && r.verdict === 'PENDING', q);
+      if (q.asset.mint) authorization.tokens.push({ address: q.asset.mint, chain: q.chain, symbol: q.asset.symbol === 'SPL token' ? `${q.asset.mint.slice(0, 4)}…${q.asset.mint.slice(-4)}` : q.asset.symbol, decimals: q.asset.decimals });
+      break;
+    }
     case 'solana-pool': {
       const r = solanaPool.record, q = r?.review; if (!r || !q) break;
       attach(q.commitment, q.manifest, q.policy, r.authorization === q.commitment, solanaPool.review, !solanaPool.busy && !solanaPool.retired && !r.attempt && r.verdict === 'PENDING', q);
-      for (const token of [q.token0, q.token1]) authorization.tokens.push({ address: token.mint, chain: q.chain, symbol: token.symbol === 'USDC' ? 'devUSDC' : token.symbol, decimals: token.decimals });
+      for (const token of [q.token0, q.token1]) authorization.tokens.push({ address: token.mint, chain: q.chain, symbol: token.symbol === 'USDC' && q.cluster === 'devnet' ? 'devUSDC' : token.symbol, decimals: token.decimals });
       break;
     }
     case 'solana-composition': {
@@ -177,10 +185,10 @@ export function useReviewAuthorization(kind: SimulationSource['kind']): { author
   const chain = environment.walletKind === 'solana' ? solanaWalletChainRef(environment.walletChain) : sharedWallet.chainId === '0x7a69' ? 'eip155:31337' : walletChainRef(sharedWallet.chainId);
   // EVM signing-provider identity is tracked by object in the shared authority epoch.
   // Discovery can refine the same provider's display key/name without changing authority.
-  const providerKey = environment.walletKind === 'solana' ? jupiter.session?.wallet?.name ?? null : null;
+  const providerKey = environment.walletKind === 'solana' && jupiter.session?.wallet ? solanaProviderIdentity(jupiter.session.wallet) : null;
   // revision is the shared wallet's semantic authority epoch, never a read/event counter.
   // Keep it in the binding so even a batched identity round trip permanently retires this Review.
-  const identity = JSON.stringify([account, chain, environment.walletKind === 'evm' ? sharedWallet.revision : null, restorationEpoch,
+  const identity = JSON.stringify([account, chain, environment.walletKind === 'evm' ? sharedWallet.revision : jupiter.revision ?? 0, restorationEpoch,
     environment.walletKind === 'evm' ? sharedWallet.chainId : environment.walletChain, providerKey]);
   // Keep this guard mounted in the shell. Returning to the old wallet cannot revive the old Review.
   const [binding, setBinding] = useState({ key: authorization.key, identity, changed: false });

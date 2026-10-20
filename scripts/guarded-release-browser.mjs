@@ -7,8 +7,14 @@ import { performance } from 'node:perf_hooks';
 
 // The same explicit profiles run locally and in CI. Financial diagnostic specs
 // remain available independently; none of their results are counted as passes.
-const usage = 'Usage: node scripts/guarded-release-browser.mjs critical | extended [--shard <n>/<total>] | product | composition | profile <name> | list';
-const [phase, ...rest] = process.argv.slice(2);
+const usage = 'Usage: node scripts/guarded-release-browser.mjs critical | extended [--shard <n>/<total>] | product | composition | profile <name> | list [--collect-failures]';
+const [phase, ...args] = process.argv.slice(2);
+// Cloud Build collects independent failures on its single worker. Other callers
+// retain fail-fast behavior; neither mode can turn a failed profile into a pass.
+const collectFailures = args.includes('--collect-failures');
+if (args.filter(arg => arg === '--collect-failures').length > 1) throw new Error(usage);
+const rest = args.filter(arg => arg !== '--collect-failures');
+if (phase === 'list' && collectFailures) throw new Error(usage);
 const boundary = 'release-financial-provenance.spec.ts';
 const definitions = [
   ['default-product', ['brand-ux-001.spec.ts', 'base-observation.spec.ts', 'build-roundtrip.spec.ts', 'build009.spec.ts', 'across.spec.ts',
@@ -17,6 +23,8 @@ const definitions = [
     'network-isolation.spec.ts', 'public-testnet.spec.ts', 'robinhood-network.spec.ts', 'swap-authoring.spec.ts', 'visual-shell.spec.ts', 'credentials.spec.ts',
     'build-fix-ux.spec.ts', 'beta-ui.spec.ts', 'ux-ui-002-landing.spec.ts'], {}],
   ['review-execute-recovery-components', ['simulate-review-acceptance.spec.ts', 'execute-product-workspace.spec.ts', 'execute-workflow.spec.ts'], {}],
+  // Direct chat signing and optional Canvas, with no application server, RPC, wallet or database; requests are intercepted by the spec.
+  ['solana-transfer-ux', ['--config', 'playwright.transfer-ux.config.ts'], {}],
   ['workflow-acceptance', ['acceptance-workflows.spec.ts'], { GRYLOO_CLOUD_RUNTIME_E2E: 'EMBEDDED_LOOPBACK_ONLY', GRYLOO_ROUTER_TESTNET_E2E: 'MOCKED_LOOPBACK_ONLY', TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres' }],
   ['swap-read-acceptance', ['acceptance-swap-read.spec.ts'], { GRYLOO_CLOUD_RUNTIME_E2E: 'EMBEDDED_LOOPBACK_ONLY', FLOFI_SWAP_READ_E2E: 'MOCKED_LOOPBACK_ONLY', TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres' }],
   // BUILD-EXECUTION-CONTINUITY-001: production UI/API/durable lifecycle, isolated synthetic RPC and scripted owner wallet confirmations.
@@ -86,13 +94,18 @@ const definitions = [
   // is sent to Meta) and Telegram against the loopback Bot API double (nothing reaches Telegram): the real webhook routes, the
   // intended-wallet rule, the owner's Review where MOCKED authority stays blocked, the status ping and the scheduled dispatch.
   ['channel-approve', ['whatsapp-approve.spec.ts', 'telegram-approve.spec.ts'], { GRYLOO_MCP_E2E: 'EMBEDDED_LOOPBACK_ONLY', GRYLOO_CHANNEL_E2E: 'FIXTURE_LOOPBACK_ONLY', TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres' }],
+  // BUILD-SOLANA-TRANSFER-UX-001: both /approve journeys (chat-first signing surface and optional Canvas) from an MCP request through one
+  // Authorize in wallet, the wallet's confirmation, submission and reconciliation to the receipt in the chat: the MCP harness with the
+  // synthetic loopback swap RPC and scripted owner confirmations on disposable PostgreSQL (no public network or broadcast).
+  ['approve-authorize-journeys', ['approve-authorize-journeys.spec.ts'], { GRYLOO_MCP_E2E: 'EMBEDDED_LOOPBACK_ONLY', GRYLOO_CLOUD_RUNTIME_E2E: 'EMBEDDED_LOOPBACK_ONLY',
+    FLOFI_SWAP_READ_E2E: 'MOCKED_LOOPBACK_ONLY', FLOFI_SWAP_EXECUTION_E2E: 'MOCKED_LOOPBACK_ONLY', TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres' }],
 ];
 const composition = [['composition-provenance', ['release-composition-provenance.spec.ts'], {}]];
 
-// Fail-fast tier, run before every other browser profile in both CI systems (GitHub Actions: right after the build, before the unit,
+// Critical tier, run before every other browser profile in all CI systems (GitHub Actions: right after the build, before the unit,
 // PostgreSQL and fork suites; CircleCI: at the head of browser job 1): Copilot learning and wallet isolation, Canvas basics, the P0
 // wallet refusal and the financial Review/Execute boundaries.
-const critical = ['copilot-learning', 'canvas-corrections', 'solana-wallet-refusal', 'supply-provenance', 'review-execute-recovery-components'];
+const critical = ['copilot-learning', 'canvas-corrections', 'solana-wallet-refusal', 'supply-provenance', 'review-execute-recovery-components', 'solana-transfer-ux'];
 // The other product profiles, as CircleCI's parallel browser jobs (each its own container, loopback ports and PostgreSQL; ~13 min each
 // with critical in job 1, from CircleCI jobs 53/55 profile seconds). Each list runs in order: fast financial boundaries before long suites.
 const shards = [
@@ -101,7 +114,7 @@ const shards = [
     'robinhood-mainnet-authoring', 'base-mainnet-authoring', 'arbitrum-authoring-certification', 'ethereum-authoring-certification', 'workflow-ux-authoring', 'canvas-workflow-ux'],
   ['cloud-provenance', 'journey-provenance', 'synthetic-fork-provenance', 'execution-continuity', 'workflow-acceptance', 'swap-read-acceptance',
     'automations', 'chat-automations', 'delegated-execution', 'canvas-automation-ux', 'admin-console', 'cow-loopback', 'card-provider-loopback',
-    'mcp-routes-oauth-disabled', 'developer-journey', 'mcp-in-chat', 'channel-signing', 'channel-approve'],
+    'mcp-routes-oauth-disabled', 'developer-journey', 'mcp-in-chat', 'channel-signing', 'channel-approve', 'approve-authorize-journeys'],
 ];
 // Fail closed on any plan drift: every product profile runs in exactly one place, and every name in the plan exists.
 const names = definitions.map(([name]) => name), planned = [...critical, ...shards.flat()];
@@ -144,6 +157,7 @@ function printTimings() {
   for (const row of [...ran].sort((a, b) => b.seconds - a.seconds)) console.log(`  ${row.seconds.toFixed(2).padStart(8)}s  ${row.status}  ${row.name}`);
 }
 const rel = path => relative(root, path);
+let failureExitCode = 0;
 writeReport();
 console.log(`Guarded release ${label}: ${selection.length} profiles: ${selection.join(', ')}`);
 
@@ -163,6 +177,7 @@ for (const [index, name] of selection.entries()) {
     { env: { ...env, PLAYWRIGHT_JUNIT_OUTPUT_FILE: junit }, stdio: 'inherit' });
   Object.assign(row, { seconds: (performance.now() - started) / 1000, exitCode: result.status, status: result.error || result.status !== 0 ? 'FAIL' : 'PASS' });
   if (existsSync(junit)) writeFileSync(junit, ciTestReport(readFileSync(junit, 'utf8'), name));
+  writeReport();
   console.log(`Guarded release profile duration: ${name}: ${row.seconds.toFixed(2)}s; ${row.status}`);
   if (row.status === 'FAIL') {
     report.status = 'FAIL';
@@ -175,13 +190,19 @@ for (const [index, name] of selection.entries()) {
     diagnose(name, specs, env, output);
     printTimings();
   }
-  if (result.error) throw result.error;
-  if (result.status !== 0) process.exit(result.status ?? 1);
+  if (row.status === 'FAIL') {
+    failureExitCode ||= result.status || 1;
+    if (!collectFailures) {
+      if (result.error) throw result.error;
+      if (result.status !== 0) process.exit(result.status ?? 1);
+    }
+  }
 }
-report.status = 'PASS';
+report.status = failureExitCode ? 'FAIL' : 'PASS';
 writeReport();
 printTimings();
-console.log(`Guarded release ${label}: PASS (${selection.length} profiles)`);
+console.log(`Guarded release ${label}: ${report.status} (${selection.length} profiles)`);
+process.exitCode = failureExitCode;
 
 /**
  * The profile's JUnit for the CI test report. One spec can run in several profiles (the financial boundary runs in ten), so the profile

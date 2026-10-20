@@ -71,7 +71,7 @@ test('shared theme switching preserves runs, read state, navigation and the sing
   await expect(index.locator('.dashboard-final-result')).toHaveText('Completed');
   await theme(page, 'light');
   await expect(index.locator('.dashboard-final-result')).toHaveText('Completed');
-  await expect(index.getByRole('button', { name: /^(Execute workflow|Retry|Continue execution)$/ })).toHaveCount(0);
+  await expect(index.getByRole('button', { name: /^(Authorize in wallet|Retry|Continue execution)$/ })).toHaveCount(0);
   await index.getByRole('button', { name: 'Back to Dashboard' }).click();
   await expect(index.locator('.dashboard-run-card')).toHaveCount(4);
 });
@@ -150,7 +150,7 @@ for (const value of ['light', 'dark'] as const) {
       await page.evaluate(mode => window.flofiRunDetailAcceptance.show(mode), mode);
       await expect(workspace(page).locator('.dashboard-result-summary .dashboard-status')).toHaveText(status);
       await expect(workspace(page).locator(`.dashboard-result-summary .dashboard-status-${tone}`)).toHaveCount(1);
-      await expect(workspace(page).getByRole('button', { name: /^(Execute workflow|Retry|Continue execution)$/ })).toHaveCount(0);
+      await expect(workspace(page).getByRole('button', { name: /^(Authorize in wallet|Retry|Continue execution)$/ })).toHaveCount(0);
     }
   });
 
@@ -235,7 +235,7 @@ test('canonical Dashboard and Run Details routes retain the shell and privacy-sa
     await page.goto('/app/dashboard/runs/inaccessible-theme-check');
     await expect(page.getByRole('heading', { name: 'Connect the wallet used for this execution', exact: true })).toBeVisible();
     await expect(page.locator('.top-bar')).toHaveCount(1);
-    await expect(page.getByRole('button', { name: 'Execute workflow', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Authorize in wallet', exact: true })).toHaveCount(0);
     await expect(page.locator('.dashboard-run-detail')).not.toContainText('inaccessible-theme-check');
     await page.screenshot({ style: 'nextjs-portal{display:none}', path: `.tmp/ux006d-shell-run-disconnected-${value}.png`, fullPage: true });
     await page.getByRole('button', { name: 'Back to Dashboard' }).click();

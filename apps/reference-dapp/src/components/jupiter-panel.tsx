@@ -88,14 +88,14 @@ export function JupiterPanel({ view }: { view: 'simulate' | 'execute' }) {
   const node = state.workflow.nodes.find(n => solanaSwapDetails(n)), fields = node ? solanaSwapDetails(node) : null;
   const record = jupiter.record, review = record?.review, attempt = record?.attempt;
   const devnet = jupiter.network === 'Solana Devnet', labels = solanaSwapLabels(jupiter.network);
-  const [acknowledged, setAcknowledged] = useState(false), [clock, setClock] = useState(() => Date.now());
+  const [clock, setClock] = useState(() => Date.now());
   useEffect(() => { const timer = setInterval(() => setClock(Date.now()), 1000); return () => clearInterval(timer); }, []);
   const fresh = review ? Math.max(0, Math.round((Date.parse(review.expiresAt) - clock) / 1000)) : 0;
   const symbol = (side: 'input' | 'output') => review ? devnet ? solanaTokenLabel('Solana Devnet', review[side].symbol) : review[side].symbol : '';
   const amount = (units: string | null | undefined, side: 'input' | 'output') => review && units ? `${formatTokenAmount(units, review[side].decimals)} ${symbol(side)}` : '--';
   const sol = (lamports: string | null | undefined) => lamports ? `${formatTokenAmount(lamports, 9)} ${devnet ? 'Devnet SOL' : 'SOL'}` : '--';
   const mainnet = record?.provenance === 'PUBLIC_MAINNET';
-  const canExecute = Boolean(record?.authorization && !jupiter.retired && !attempt && record.verdict === 'PENDING' && fresh > 0 && jupiter.executionEnabled && (!mainnet || acknowledged));
+  const canExecute = Boolean(record?.authorization && !jupiter.retired && !attempt && record.verdict === 'PENDING' && fresh > 0 && jupiter.executionEnabled);
   const observation = record?.observations.at(-1), info = jupiter.error ?? record?.error;
   const pending = Boolean(attempt && record?.verdict === 'PENDING' && ['SUBMITTING', 'SUBMISSION_RESULT_UNKNOWN', 'PENDING'].includes(attempt.state));
   const notEnabled = devnet ? 'DEVNET_SWAP_EXECUTION_NOT_ENABLED' : 'JUPITER_MAINNET_EXECUTION_NOT_ENABLED';
@@ -128,7 +128,6 @@ export function JupiterPanel({ view }: { view: 'simulate' | 'execute' }) {
       {mainnet && !attempt && review && <p role="note">{tr("This swap uses real funds on Solana mainnet. Your wallet will ask you to sign one exact transaction; Flofi never signs for you.")}</p>}
       {devnet && !attempt && review && <p role="note">{tr("Your wallet will ask you to sign one exact Solana Devnet transaction; Flofi never signs for you.")}</p>}
       {record && !record.authorization && !attempt && !jupiter.retired && <button type="button" disabled={jupiter.busy || fresh === 0} onClick={() => void jupiter.review()}>{tr("Accept swap review")}</button>}
-      {mainnet && record?.authorization && !attempt && <label><input type="checkbox" checked={acknowledged} onChange={e => setAcknowledged(e.target.checked)}/>{tr(" I understand this executes on Solana mainnet with real funds")}</label>}
       {record?.authorization && !attempt && !jupiter.executionEnabled && <p role="status">{tr(message(notEnabled, devnet))}</p>}
       {canExecute && <button type="button" className="primary" disabled={jupiter.busy} onClick={() => void jupiter.execute()}>{tr("Execute swap")}</button>}
       {attempt && !record?.evidence && <p>{tr("Swap: ")}{tr(record?.notSubmitted ? 'not submitted' : attempt.state.toLowerCase().replaceAll('_', ' '))} {observation?.explorer && <a href={observation.explorer} target="_blank" rel="noreferrer">{tr("View transaction")}</a>}</p>}

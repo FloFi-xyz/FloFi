@@ -21,7 +21,7 @@ import { createLendingCompositionService } from '../server/lending-composition-s
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 
 vi.mock('react', async original => ({ ...await original<typeof import('react')>(), ...(await import('../test-utils/hook-harness')).hookMocks }));
-const f = vi.hoisted(() => ({ supply: {} as Record<string, unknown>, router: {} as Record<string, unknown>, lending: {} as Record<string, unknown>, kind: 'supply' as 'supply' | 'router' | 'lending', restorationEpoch: 0 }));
+const f = vi.hoisted(() => ({ supply: {} as Record<string, unknown>, router: {} as Record<string, unknown>, lending: {} as Record<string, unknown>, solanaPool: {} as Record<string, unknown>, kind: 'supply' as 'supply' | 'router' | 'lending' | 'solana-pool', restorationEpoch: 0 }));
 vi.mock('./workflow-store', () => ({ useWorkflow: () => ({ restorationEpoch: f.restorationEpoch }) }));
 vi.mock('./capability-store', () => ({ useExecutionEnvironment: () => ({ walletKind: 'evm', walletEnvironment: 'testnet' }) }));
 vi.mock('./supply-store', () => ({ useSupply: () => f.supply }));
@@ -33,10 +33,11 @@ vi.mock('./lending-store', () => ({ useLending: () => f.lending }));
 vi.mock('./router-store', () => ({ useRouter: () => f.router }));
 vi.mock('./public-testnet-store', () => ({ usePublicTestnet: () => ({}) }));
 vi.mock('./jupiter-store', () => ({ useJupiter: () => ({}) }));
-vi.mock('./solana-liquidity-store', () => ({ useSolanaLiquidity: () => ({}) }));
+vi.mock('./solana-liquidity-store', () => ({ useSolanaLiquidity: () => f.solanaPool }));
 vi.mock('./solana-composition-store', () => ({ useSolanaComposition: () => ({ record: null, busy: false, error: null, retired: false, recovered: false, executionEnabled: false, signing: false, owner: null, authorized: false }) }));
 vi.mock('./uniswap-liquidity-store', () => ({ useUniswapLiquidity: () => ({}) }));
 vi.mock('./robinhood-transfer-store', () => ({ useRobinhoodTransfer: () => ({}) }));
+vi.mock('./solana-transfer-store', () => ({ useSolanaTransfer: () => ({}) }));
 vi.mock('./across-store', () => ({ useAcross: () => ({}) }));
 vi.mock('../components/wallet-selector', async () => {
   const { evmWalletEntries } = await import('../wallet/evm-discovery');
@@ -64,7 +65,7 @@ function accept() {
 }
 const review = (now = reviewNow) => projectReview(fixture.workflow, fixture.context, fixture.source, binding.authorization, binding.wallet, now);
 beforeEach(async () => {
-  f.supply = {}; f.router = {}; f.lending = {}; f.kind = 'supply'; f.restorationEpoch = 0;
+  f.supply = {}; f.router = {}; f.lending = {}; f.solanaPool = {}; f.kind = 'supply'; f.restorationEpoch = 0;
   host = new HookHarness(); source = provider();
   target = Object.assign(new EventTarget(), { ethereum: source, setTimeout, clearTimeout }); vi.stubGlobal('window', target);
   read(); await settle(); accept(); expect(review().bindingValid).toBe(true);
@@ -72,6 +73,14 @@ beforeEach(async () => {
 afterEach(() => { host.unmount(); vi.unstubAllGlobals(); });
 
 describe('real shared wallet → accepted Review authority', () => {
+  it.each([['mainnet-beta', 'USDC'], ['devnet', 'devUSDC']])('preserves the %s token identity in Orca signing metadata', (cluster, symbol) => {
+    f.kind = 'solana-pool';
+    f.solanaPool = { record: { authorization: null, verdict: 'PENDING', review: { commitment: 'pool-review', cluster,
+      manifest: null, policy: null, chain: 'solana:chain', token0: { mint: 'sol-mint', symbol: 'SOL', decimals: 9 }, token1: { mint: 'usdc-mint', symbol: 'USDC', decimals: 6 } } } };
+    read();
+    expect(binding.authorization.tokens).toEqual([{ address: 'sol-mint', chain: 'solana:chain', symbol: 'SOL', decimals: 9 },
+      { address: 'usdc-mint', chain: 'solana:chain', symbol, decimals: 6 }]);
+  });
   it('preserves accepted Review across passive rereads and duplicate account/chain events', async () => {
     const revision = wallet.revision;
     for (let i = 0; i < 3; i++) {
@@ -88,7 +97,7 @@ describe('real shared wallet → accepted Review authority', () => {
     expect(binding.authorization.ready).toBe(false); expect(review().bindingValid).toBe(true);
     source.emit('accountsChanged', [reviewOwner]); source.emit('chainChanged', '0x14a34'); await settle();
     const next = vi.fn();
-    expect(canContinueExecution({ ...fixture, ...binding, execution: { started: true, ready: true, start: null, next, expiresAt: null, prompt: null, requiresMainnetAcknowledgement: false } }, reviewNow)).toBe(true);
+    expect(canContinueExecution({ ...fixture, ...binding, execution: { started: true, ready: true, start: null, next, expiresAt: null, prompt: null } }, reviewNow)).toBe(true);
     expect(next).not.toHaveBeenCalled();
   });
   it('preserves authority when discovery names the same provider and account/chain spelling is normalized', async () => {

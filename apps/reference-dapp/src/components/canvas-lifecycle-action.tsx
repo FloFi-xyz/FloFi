@@ -2,7 +2,6 @@
 'use client';
 import { projectCanvasAction } from '../domain/canvas-lifecycle';
 import type { ExecutionControls, ExecutionControlsState } from '../state/execution-controls';
-import { confirmReview } from './review-workspace';
 import { useLocale } from '../i18n/locale';
 
 export function CanvasLifecycleAction(props: ExecutionControlsState & {
@@ -17,12 +16,12 @@ export function CanvasLifecycleAction(props: ExecutionControlsState & {
     const next = projectCanvasAction(c.current, c);
     if (next.disabled || next.kind !== action.kind) return;
     if (next.kind === 'simulate' && !props.simulationDisabled) void props.simulate?.();
-    if (next.kind === 'approve') void confirmReview({ ...c.current, workflowName: props.workflowName ?? '', backToBuild: () => undefined });
-    if (next.kind === 'execute' || next.kind === 'continue') { c.request(next.kind === 'continue'); props.onExecute?.(); }
+    // BUILD-SOLANA-TRANSFER-UX-001: Authorize in wallet = accept this Review, then the first wallet request (one owner action).
+    if (next.kind === 'approve' || next.kind === 'execute') c.authorize(props.onExecute);
+    if (next.kind === 'continue') { c.request(true); props.onExecute?.(); }
     if (next.kind === 'recover') c.checkStatus();
   }
   return <div className="canvas-lifecycle-control">
-    {props.execution.requiresMainnetAcknowledgement && !props.execution.started && <label className="execute-acknowledgement"><input type="checkbox" checked={c.current.acknowledged} onChange={e => c.setAcknowledgement(e.target.checked ? c.acknowledgementKey : null)}/>{t('I understand this executes on Solana mainnet with real funds')}</label>}
     {/* UX-003: simulating / waiting for the wallet keep the CTA position as a locked, active button; a duplicate request cannot start. */}
     {action.processing ? <button data-lifecycle-action="processing" type="button" className="primary canvas-cta-processing" disabled aria-busy="true"><span className="canvas-cta-spinner" aria-hidden="true"/>{t(action.label)}</button>
       : action.kind === 'status' ? <span role="status" data-lifecycle-action="status">{t(action.label)}</span> : <button data-lifecycle-action={action.kind} type="button" className="primary" disabled={disabled} onClick={act}>{t(action.label)}</button>}

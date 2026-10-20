@@ -67,7 +67,8 @@
                 "ethereum-sepolia",
                 "solana",
                 "solana-devnet",
-                "robinhood"
+                "robinhood",
+                "robinhood-testnet"
               ]
             }
           },
@@ -2775,7 +2776,7 @@
                     "type": "string"
                   },
                   "network": {
-                    "description": "Uniswap v3 USDC/WETH on base-sepolia or ethereum-sepolia; Orca SOL/devUSDC on solana-devnet; on catalog networks, Uniswap v3 on two catalog ERC-20 assets at feeTier (real funds), only when the factory pool exists.",
+                    "description": "Uniswap v3 USDC/WETH on base-sepolia or ethereum-sepolia; Orca SOL/USDC on solana (real funds), SOL/devUSDC on solana-devnet; on catalog networks, Uniswap v3 on two catalog ERC-20 assets at feeTier (real funds), only when the factory pool exists.",
                     "anyOf": [
                       {
                         "const": "base-sepolia",
@@ -2783,6 +2784,10 @@
                       },
                       {
                         "const": "ethereum-sepolia",
+                        "type": "string"
+                      },
+                      {
+                        "const": "solana",
                         "type": "string"
                       },
                       {
@@ -2986,7 +2991,7 @@
                     "type": "string"
                   },
                   "network": {
-                    "description": "The registered mainnet for this same-chain transfer (real funds).",
+                    "description": "The network of this same-chain transfer. robinhood, base, arbitrum-one, ethereum and solana move real funds; solana-devnet moves valueless test tokens. ethereum-sepolia and robinhood-testnet support native test-ETH self-transfers only.",
                     "anyOf": [
                       {
                         "const": "robinhood",
@@ -3003,14 +3008,34 @@
                       {
                         "const": "ethereum",
                         "type": "string"
+                      },
+                      {
+                        "const": "solana",
+                        "type": "string"
+                      },
+                      {
+                        "const": "solana-devnet",
+                        "type": "string"
+                      },
+                      {
+                        "const": "ethereum-sepolia",
+                        "type": "string"
+                      },
+                      {
+                        "const": "robinhood-testnet",
+                        "type": "string"
                       }
                     ]
                   },
                   "asset": {
-                    "description": "Native ETH, or a symbol or whole name of the selected network's validated official catalog.",
+                    "description": "EVM: native ETH, or a symbol or whole name of the selected network's validated official catalog. Solana: SOL, USDC or USDT (solana-devnet: SOL or devUSDC), or an SPL token mint address together with decimals and tokenProgram.",
                     "anyOf": [
                       {
                         "const": "ETH",
+                        "type": "string"
+                      },
+                      {
+                        "const": "SOL",
                         "type": "string"
                       },
                       {
@@ -3028,11 +3053,42 @@
                     "type": "string"
                   },
                   "recipient": {
-                    "pattern": "^0x[0-9a-fA-F]{40}$",
-                    "minLength": 42,
-                    "maxLength": 42,
-                    "description": "Recipient. Omit to transfer to the wallet that signs in the FloFi app (bound at Review).",
-                    "type": "string"
+                    "description": "Recipient. EVM: omit to transfer to the wallet that signs in the FloFi app (bound at Review). Solana: required — the destination wallet; FloFi never substitutes the signing wallet.",
+                    "anyOf": [
+                      {
+                        "pattern": "^0x[0-9a-fA-F]{40}$",
+                        "minLength": 42,
+                        "maxLength": 42,
+                        "description": "EVM recipient.",
+                        "type": "string"
+                      },
+                      {
+                        "pattern": "^[1-9A-HJ-NP-Za-km-z]{32,44}$",
+                        "minLength": 32,
+                        "maxLength": 44,
+                        "description": "Solana recipient wallet address.",
+                        "type": "string"
+                      }
+                    ]
+                  },
+                  "decimals": {
+                    "minimum": 0,
+                    "maximum": 18,
+                    "description": "Solana SPL mint transfers only: the token's decimals (verified on chain).",
+                    "type": "integer"
+                  },
+                  "tokenProgram": {
+                    "description": "Solana SPL mint transfers only: the token program (verified on chain).",
+                    "anyOf": [
+                      {
+                        "const": "spl-token",
+                        "type": "string"
+                      },
+                      {
+                        "const": "token-2022",
+                        "type": "string"
+                      }
+                    ]
                   }
                 }
               },
@@ -3595,7 +3651,7 @@
                               "type": "string"
                             },
                             "network": {
-                              "description": "Uniswap v3 USDC/WETH on base-sepolia or ethereum-sepolia; Orca SOL/devUSDC on solana-devnet; on catalog networks, Uniswap v3 on two catalog ERC-20 assets at feeTier (real funds), only when the factory pool exists.",
+                              "description": "Uniswap v3 USDC/WETH on base-sepolia or ethereum-sepolia; Orca SOL/USDC on solana (real funds), SOL/devUSDC on solana-devnet; on catalog networks, Uniswap v3 on two catalog ERC-20 assets at feeTier (real funds), only when the factory pool exists.",
                               "anyOf": [
                                 {
                                   "const": "base-sepolia",
@@ -3603,6 +3659,10 @@
                                 },
                                 {
                                   "const": "ethereum-sepolia",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "solana",
                                   "type": "string"
                                 },
                                 {
@@ -3806,7 +3866,7 @@
                               "type": "string"
                             },
                             "network": {
-                              "description": "The registered mainnet for this same-chain transfer (real funds).",
+                              "description": "The network of this same-chain transfer. robinhood, base, arbitrum-one, ethereum and solana move real funds; solana-devnet moves valueless test tokens. ethereum-sepolia and robinhood-testnet support native test-ETH self-transfers only.",
                               "anyOf": [
                                 {
                                   "const": "robinhood",
@@ -3823,14 +3883,34 @@
                                 {
                                   "const": "ethereum",
                                   "type": "string"
+                                },
+                                {
+                                  "const": "solana",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "solana-devnet",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "ethereum-sepolia",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "robinhood-testnet",
+                                  "type": "string"
                                 }
                               ]
                             },
                             "asset": {
-                              "description": "Native ETH, or a symbol or whole name of the selected network's validated official catalog.",
+                              "description": "EVM: native ETH, or a symbol or whole name of the selected network's validated official catalog. Solana: SOL, USDC or USDT (solana-devnet: SOL or devUSDC), or an SPL token mint address together with decimals and tokenProgram.",
                               "anyOf": [
                                 {
                                   "const": "ETH",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "SOL",
                                   "type": "string"
                                 },
                                 {
@@ -3848,11 +3928,42 @@
                               "type": "string"
                             },
                             "recipient": {
-                              "pattern": "^0x[0-9a-fA-F]{40}$",
-                              "minLength": 42,
-                              "maxLength": 42,
-                              "description": "Recipient. Omit to transfer to the wallet that signs in the FloFi app (bound at Review).",
-                              "type": "string"
+                              "description": "Recipient. EVM: omit to transfer to the wallet that signs in the FloFi app (bound at Review). Solana: required — the destination wallet; FloFi never substitutes the signing wallet.",
+                              "anyOf": [
+                                {
+                                  "pattern": "^0x[0-9a-fA-F]{40}$",
+                                  "minLength": 42,
+                                  "maxLength": 42,
+                                  "description": "EVM recipient.",
+                                  "type": "string"
+                                },
+                                {
+                                  "pattern": "^[1-9A-HJ-NP-Za-km-z]{32,44}$",
+                                  "minLength": 32,
+                                  "maxLength": 44,
+                                  "description": "Solana recipient wallet address.",
+                                  "type": "string"
+                                }
+                              ]
+                            },
+                            "decimals": {
+                              "minimum": 0,
+                              "maximum": 18,
+                              "description": "Solana SPL mint transfers only: the token's decimals (verified on chain).",
+                              "type": "integer"
+                            },
+                            "tokenProgram": {
+                              "description": "Solana SPL mint transfers only: the token program (verified on chain).",
+                              "anyOf": [
+                                {
+                                  "const": "spl-token",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "token-2022",
+                                  "type": "string"
+                                }
+                              ]
                             }
                           }
                         }

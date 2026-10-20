@@ -1,0 +1,238 @@
+{
+  "buildId": "609a0156-d8b5-4afc-bac7-82ca65715638",
+  "url": "https://console.cloud.google.com/cloud-build/builds;region=europe-west1/609a0156-d8b5-4afc-bac7-82ca65715638?project=celtic-volt-418819",
+  "result": "FAILURE",
+  "completeGreenCertification": false,
+  "project": "celtic-volt-418819",
+  "region": "europe-west1",
+  "runner": "projects/celtic-volt-418819/serviceAccounts/flofi-ci-runner@celtic-volt-418819.iam.gserviceaccount.com",
+  "machineType": "E2_STANDARD_2",
+  "pool": "default",
+  "startedAt": "2026-10-19T23:09:58.239037570Z",
+  "finishedAt": "2026-10-19T23:46:23.971272Z",
+  "durationSeconds": 2185.732235,
+  "failureInfo": {
+    "type": "USER_BUILD_STEP",
+    "detail": "Build step failure: build step 1 \"cimg/node:24.21.0-browsers\" failed: step exited with non-zero status: 1"
+  },
+  "sourceSnapshotSha256": "e5ec97df6a3d7595a0eeb6f2d82fa2e84fc04d6520c7ead5d952220160d0b9f0",
+  "sourceFiles": 2505,
+  "sourceBytes": 115087810,
+  "source": {
+    "storageSource": {
+      "bucket": "flofi-ci-source-547158547199-europe-west1",
+      "object": "build-solana-transfer-ux-001-final/1792451297.978697-5a4cb104cad54a61b452ab0abd832429.tgz",
+      "generation": "1792451396675147"
+    }
+  },
+  "certification": {
+    "result": "FAILURE",
+    "ledger": [],
+    "stages": [
+      {
+        "name": "Toolchain bootstrap",
+        "outcome": "success",
+        "seconds": 7.61
+      },
+      {
+        "name": "Toolchain identity",
+        "outcome": "success",
+        "seconds": 0.99
+      },
+      {
+        "name": "Frozen dependency install",
+        "outcome": "success",
+        "seconds": 13.31
+      },
+      {
+        "name": "Dependency integrity license and age",
+        "outcome": "success",
+        "seconds": 9.4
+      },
+      {
+        "name": "Dependency audit",
+        "outcome": "success",
+        "seconds": 1.41
+      },
+      {
+        "name": "SBOM",
+        "outcome": "success",
+        "seconds": 1.25
+      },
+      {
+        "name": "Typecheck",
+        "outcome": "success",
+        "seconds": 235.45
+      },
+      {
+        "name": "Lint",
+        "outcome": "success",
+        "seconds": 54.71
+      },
+      {
+        "name": "Production build",
+        "outcome": "success",
+        "seconds": 154.69
+      },
+      {
+        "name": "Schema drift",
+        "outcome": "success",
+        "seconds": 1.85
+      },
+      {
+        "name": "Unit and contract tests",
+        "outcome": "success",
+        "seconds": 1046.82
+      },
+      {
+        "name": "PostgreSQL",
+        "outcome": "success",
+        "seconds": 377.54
+      },
+      {
+        "name": "Anvil bootstrap",
+        "outcome": "success",
+        "seconds": 6.42
+      },
+      {
+        "name": "Anvil and offline forks",
+        "outcome": "success",
+        "seconds": 64.81
+      },
+      {
+        "name": "Browser bootstrap",
+        "outcome": "success",
+        "seconds": 6.89
+      },
+      {
+        "name": "Critical browser regressions",
+        "outcome": "failure",
+        "seconds": 92.13
+      }
+    ],
+    "browserProfiles": [
+      {
+        "name": "copilot-learning",
+        "seconds": 49.28,
+        "status": "FAIL"
+      }
+    ],
+    "vitestSummaries": [
+      {
+        "afterStage": "Schema drift",
+        "result": "Test Files  1 passed (1)"
+      },
+      {
+        "afterStage": "Schema drift",
+        "result": "Tests  3 passed (3)"
+      },
+      {
+        "afterStage": "Schema drift",
+        "result": "Test Files  401 passed | 2 skipped (403)"
+      },
+      {
+        "afterStage": "Schema drift",
+        "result": "Tests  4757 passed | 2 skipped (4759)"
+      },
+      {
+        "afterStage": "Unit and contract tests",
+        "result": "Test Files  69 passed | 1 skipped (70)"
+      },
+      {
+        "afterStage": "Unit and contract tests",
+        "result": "Tests  445 passed | 3 skipped (448)"
+      },
+      {
+        "afterStage": "Anvil bootstrap",
+        "result": "Test Files  1 passed (1)"
+      },
+      {
+        "afterStage": "Anvil bootstrap",
+        "result": "Tests  4 passed | 10 skipped (14)"
+      },
+      {
+        "afterStage": "Anvil bootstrap",
+        "result": "Test Files  5 passed | 8 skipped (13)"
+      },
+      {
+        "afterStage": "Anvil bootstrap",
+        "result": "Tests  31 passed | 29 skipped (60)"
+      }
+    ],
+    "durationSeconds": 2185.732235,
+    "estimatedComputeUsdIgnoringFreeTier": 0.21857322350000002,
+    "attemptsThisTurn": 1,
+    "totalTaskCloudBuildAttempts": 3,
+    "retriesWithoutAuthorization": 0,
+    "localPostgres": {
+      "passed": 445,
+      "skipped": 3,
+      "failed": 0
+    },
+    "localFocusedTests": 59,
+    "sourceSnapshotSha256": "e5ec97df6a3d7595a0eeb6f2d82fa2e84fc04d6520c7ead5d952220160d0b9f0"
+  },
+  "remoteResults": {
+    "unitPassed": 4760,
+    "unitExistingSkipped": 2,
+    "postgresPassed": 445,
+    "postgresExistingSkipped": 3,
+    "postgresFailed": 0,
+    "whatsappJourneysPassed": 2,
+    "forkGate": "PASS (including five offline rehearsals and transcript verification)",
+    "securityAndGovernance": "PASS",
+    "browserProfilesPassed": 0,
+    "browserProfilesFailed": 1,
+    "browserProfilesNotRun": 44,
+    "composition": "NOT_RUN",
+    "finalLedger": "NOT_REACHED"
+  },
+  "postBuildLocalFix": {
+    "file": "apps/reference-dapp/e2e/copilot-learning-memory.spec.ts",
+    "cause": "The single multi-wallet, multi-session PostgreSQL browser journey exhausted its 30-second overall test deadline at different late steps: original consent-off assertion line 140; diagnostic privacy navigation line 136. Neither failure exhausted the individual 10-second assertion deadline.",
+    "change": "Set only this journey total timeout to 60 seconds; retain every assertion, 10-second assertion timeout, zero retries, database-erasure checks and no-signing checks.",
+    "localBaseline": "Unmodified test passed on two local CPU cores with trace: 1/1, 18.6s test / 27.8s run. Consent-off completed in 0.8s; full deletion assertions passed.",
+    "localFixedGuardedProfile": "PASS, 1/1, two local CPU cores, pinned disposable loopback PostgreSQL.",
+    "eslint": "PASS",
+    "productCodeChanged": false,
+    "includedInSubmittedCloudSnapshot": false,
+    "fixedFileSha256": "421c86043bce854fea0ba647fe9848603d794eb09d0381ea4f872ed0b64f567f"
+  },
+  "billing": {
+    "basis": "Official pricing: E2_STANDARD_2 default pool eligible for 2500 free build-minutes per billing account per month. No unavoidable extra compute charge identified before submission; actual invoice not available. Sibling projects Cloud Build API disabled, so their historical usage could not be read.",
+    "pricingSource": "https://cloud.google.com/build/pricing",
+    "knownMinutesBefore": 199.60265965,
+    "knownMinutesAfter": 236.03153023333334,
+    "computeUsdIfFreeTierUnavailable": 0.21857322350000002,
+    "projectAllowanceEur": 5,
+    "euroPerUsdReserve": 1.5,
+    "sourceLogStorageReserveEur": 0.5,
+    "remainingAllowanceEstimateEurIgnoringFreeTier": 2.3757162279,
+    "creditsPurchased": false,
+    "billingOrServiceUpgrade": false
+  },
+  "attemptsThisAuthorization": 1,
+  "totalTaskAttempts": 3,
+  "unauthorizedRetries": 0,
+  "restrictions": {
+    "githubPush": false,
+    "pr": false,
+    "merge": false,
+    "deployments": false,
+    "productionDatabaseAccess": false,
+    "realFunds": false,
+    "publicBroadcasts": false,
+    "productionChanges": false
+  },
+  "outstandingBlockers": [
+    "Complete green Cloud Build certification remains outstanding: copilot-learning failed remotely; the other 44 browser profiles, composition and final ledger were not reached.",
+    "The narrowly corrected current worktree needs a new full remote run. The one newly authorized attempt was consumed; another attempt requires fresh owner authorization.",
+    "The GREEN condition for PR preparation was not met. Branch remains uncommitted and unpushed; Preview exclusion/isolation and required GitHub statuses remain outstanding before release."
+  ],
+  "localEvidence": {
+    "baselineTrace": "/tmp/flofi-transfer-final-learning-baseline-results",
+    "baselineLog": "/tmp/flofi-transfer-final-learning-baseline-20261020.log",
+    "fixedProfileLog": "/tmp/flofi-transfer-final-learning-fixed-20261020.log",
+    "completeBuildLogs": "/tmp/flofi-transfer-final-logs-20261020.ndjson"
+  }
+}

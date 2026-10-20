@@ -63,8 +63,8 @@ export async function revokeChannelApproval(platform: Pick<ChannelPlatform, 'han
   return h?.status === 'REVOKED';
 }
 /** One of this conversation's handoffs with its shared run progress, or null when it is not this conversation's. */
-export async function channelApprovalProgress(platform: Pick<ChannelPlatform, 'handoffs' | 'runtime'>, conversationId: string, approvalId: string, now: Date):
+export async function channelApprovalProgress(platform: Pick<ChannelPlatform, 'handoffs' | 'runtime'> & Partial<Pick<ChannelPlatform, 'origin'>>, conversationId: string, approvalId: string, now: Date):
   Promise<{ readonly handoff: HandoffRecord; readonly progress: Awaited<ReturnType<typeof approvalProgress>> } | null> {
   const handoff = await platform.handoffs.forRequester(approvalId, conversationScope(conversationId), now);
-  return handoff ? { handoff, progress: await approvalProgress(handoff, platform.runtime, platform.handoffs) } : null;
+  return handoff ? { handoff, progress: await approvalProgress(handoff, platform.runtime, platform.handoffs, platform.origin) } : null;
 }

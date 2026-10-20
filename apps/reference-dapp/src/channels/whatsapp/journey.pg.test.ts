@@ -61,10 +61,11 @@ function deployment(harness: Record<string, string>, seams: EmbeddedSeams, inter
   const ping = (secret: string, wallets: readonly WalletRef[]) => within(i => pingChannelApproval(env, secret, wallets,
     { host: { db: i.db, tenantId: i.tenantId }, runtime: embeddedEngineRuntime(i), logger, seams: { whatsappTransport: fixtureTransport(sent) } }));
   const flow = <T>(name: FlowName, owner: string, method: string, ...args: unknown[]) => within(async i => ok<T>(await i.backend.callFlow(name, method, args, undefined, owner) as Result<T>));
+  const readRun = (id: string, owner: string) => within(i => i.run(id, owner));
   const texts = () => sent.map(r => { const b = r.body as { text?: { body: string }; interactive?: { body: { text: string } } }; return b.text?.body ?? b.interactive?.body.text ?? ''; });
   const link = () => { const b = [...sent].reverse().find(r => (r.body as { interactive?: { type?: string } }).interactive?.type === 'cta_url')?.body as
     { interactive: { action: { parameters: { url: string } } } } | undefined; return b ? decodeURIComponent(new URL(b.interactive.action.parameters.url).hash.slice(1)) : null; };
-  return { ...fixture, sent, logs, say, surface, ping, flow, texts, link };
+  return { ...fixture, sent, logs, say, surface, ping, flow, readRun, texts, link };
 }
 type Deployment = ReturnType<typeof deployment>;
 
@@ -86,6 +87,14 @@ function assertNoLeak(d: Deployment, values: readonly string[]) {
   const logs = d.logs.join('\n');
   for (const value of [d.appSecret, d.verifyToken, d.channelSecret, USER_BSUID, USER_PHONE, 'flofi_chs_', 'http://127.0.0.1:3100/approve', ...values])
     expect(logs, value).not.toContain(value);
+}
+const loadedNotice = 'Your proposal is loaded in FloFi for the connected wallet. Loading it does not authorize or submit a transaction. Check FloFi for the current workflow status.';
+function assertReceiptPrivacy(d: Deployment, receipt: string, secret: string) {
+  // The receipt URL contains only the run ID: no bearer credential, approval secret, wallet or signing authority.
+  const url = new URL(receipt);
+  expect([url.username, url.password, url.search, url.hash]).toEqual(['', '', '', '']);
+  for (const value of [secret, d.appSecret, d.verifyToken, d.channelSecret, 'flofi_chs_', 'calldata', 'signature'])
+    expect(receipt).not.toContain(value);
 }
 
 describe('BUILD-CHANNELS-001 MOCKED WhatsApp journeys (embedded runtime, MOCKED chains, fixture provider)', () => {
@@ -109,18 +118,29 @@ describe('BUILD-CHANNELS-001 MOCKED WhatsApp journeys (embedded runtime, MOCKED 
     const workflow = await approveInFloFi(d, secret, ROUTER_OWNER);
     const loaded = await pingUntilDone(d, secret, ROUTER_OWNER);
     expect(loaded.first).toEqual({ channel: true, active: true });
-    expect(loaded.delivered).toEqual([expect.stringMatching(/^Your proposal is loaded in FloFi for the connected wallet\. Nothing is signed yet/)]);
+    expect(loaded.delivered).toEqual([loadedNotice]);
+    expect(h.counters.sends).toBe(0);
     expect(await d.ping(secret, [evm('0x' + '9'.repeat(40))])).toEqual({ channel: true, active: true });
 
     // The owner's own, unchanged journey in FloFi: fresh simulation, Review, two wallet-signed transactions, reconciliation.
     const owner = <T>(method: string, ...args: unknown[]) => d.flow<T>(FLOW, ROUTER_OWNER, method, ...args);
     const run = await owner<RouterRecord>('simulate', workflow, ROUTER_OWNER);
+    expect((await pingUntilDone(d, secret, ROUTER_OWNER)).delivered).toEqual([
+      'Transaction prepared. Waiting for wallet authorization; submission is not confirmed.',
+    ]);
+    expect(h.counters.sends).toBe(0);
     await owner('review', run.id, run.review.commitment, workflow);
     for (const step of ['APPROVAL', 'DEPOSIT']) {
       const begun = await owner<RouterBegin>('begin', run.id, ROUTER_OWNER, workflow);
       expect(begun.attempt.step).toBe(step);
       await owner('handoff', run.id);
       await owner('report', run.id, { kind: 'HASH', hash: h.wallet.send(begun.transaction) });
+      if (step === 'APPROVAL') {
+        const pending = await pingUntilDone(d, secret, ROUTER_OWNER);
+        expect(pending.first).toEqual({ channel: true, active: true });
+        expect(pending.delivered).toHaveLength(1);
+        expect(pending.delivered[0]).not.toMatch(/Receipt:|Execution reconciled|✅/);
+      }
       await owner('observe', run.id);
     }
     let final = await owner<RouterRecord>('observe', run.id);
@@ -129,14 +149,21 @@ describe('BUILD-CHANNELS-001 MOCKED WhatsApp journeys (embedded runtime, MOCKED 
 
     const reconciled = await pingUntilDone(d, secret, ROUTER_OWNER);
     expect(reconciled.first).toEqual({ channel: true, active: false });
-    expect(reconciled.delivered).toEqual([`Execution reconciled ✅ · evidence: MOCKED · outcome: RECONCILED · bundle ${final.evidence!.bundleHash.slice(0, 6)}…${final.evidence!.bundleHash.slice(-4)}`]);
+    const receipt = `http://127.0.0.1:3100/app/dashboard/runs/${final.id}`;
+    expect(reconciled.delivered).toEqual([`Execution reconciled ✅ · evidence: MOCKED · outcome: RECONCILED · bundle ${final.evidence!.bundleHash.slice(0, 6)}…${final.evidence!.bundleHash.slice(-4)}\nReceipt: ${receipt}`]);
+    assertReceiptPrivacy(d, receipt, secret);
+    // Knowing the URL's run ID does not bypass the existing owner-scoped read boundary.
+    expect(await d.readRun(final.id, '0x' + '9'.repeat(40))).toBeNull();
+    expect(await d.readRun(final.id, ROUTER_OWNER)).toMatchObject({ runId: final.id, ownerAccount: ROUTER_OWNER });
     expect(reconciled.again).toEqual({ channel: true, active: false });
     await d.say('status');
     expect(d.texts().at(-1)).toMatch(/Execution reconciled ✅ · evidence: MOCKED/);
-    // The chat never received a transaction, calldata, a signature, the owner's wallet or the run id.
+    expect(d.texts().at(-1)).toContain(`Receipt: ${receipt}`);
+    // The run ID is shared only inside its owner-scoped receipt URL, never as a separate chat fact.
     const chat = d.texts().join('\n');
     expect(chat).not.toMatch(/0x[0-9a-fA-F]{20,}|calldata/i);
-    expect(chat).not.toContain(final.id);
+    expect(chat.split(receipt).join('')).not.toContain(final.id);
+    expect(reconciled.delivered[0]).not.toContain(secret);
     expect(h.counters.sends).toBe(2);
     assertNoLeak(d, [ROUTER_OWNER, final.id]);
   }, 240_000);
@@ -161,16 +188,27 @@ describe('BUILD-CHANNELS-001 MOCKED WhatsApp journeys (embedded runtime, MOCKED 
     // Only the wallet the strategy names may load it; the owner proves it, shares status and applies.
     expect(await d.surface(s => claimApproval(s, secret, [evm(ROUTER_OWNER)], true)).catch(e => e.message)).toBe('CHANNEL_INTENDED_WALLET_MISMATCH');
     const workflow = await approveInFloFi(d, secret, LENDING_OWNER);
-    expect((await pingUntilDone(d, secret, LENDING_OWNER)).delivered).toEqual([expect.stringMatching(/^Your proposal is loaded in FloFi/)]);
+    expect((await pingUntilDone(d, secret, LENDING_OWNER)).delivered).toEqual([loadedNotice]);
+    expect(model.transactions).toHaveLength(0);
 
     const owner = <T>(method: string, ...args: unknown[]) => d.flow<T>(FLOW, LENDING_OWNER, method, ...args);
     const simulated = await owner<LendingRecord>('simulate', workflow, LENDING_OWNER);
+    expect((await pingUntilDone(d, secret, LENDING_OWNER)).delivered).toEqual([
+      'Simulation complete (read-only). Waiting for your review and wallet authorization in FloFi.',
+    ]);
+    expect(model.transactions).toHaveLength(0);
     let r = await owner<LendingRecord>('review', simulated.id, simulated.reviews[0]!.commitment, workflow);
     for (let i = 0; i < 5; i++) {
       const begin = await owner<{ attemptId: string; transaction: Record<string, string> }>('begin', r.id, LENDING_OWNER, workflow);
       await owner('handoff', r.id, begin.attemptId);
       const hash = await model.rpc('MOCK_submit', [begin.transaction]) as string;     // the owner's wallet, the only submitter
       await owner('report', r.id, begin.attemptId, { kind: 'HASH', hash });
+      if (i === 0) {
+        const pending = await pingUntilDone(d, secret, LENDING_OWNER);
+        expect(pending.first).toEqual({ channel: true, active: true });
+        expect(pending.delivered).toHaveLength(1);
+        expect(pending.delivered[0]).not.toMatch(/Receipt:|Execution reconciled|✅/);
+      }
       r = await owner<LendingRecord>('observe', r.id);
       if (r.status !== 'COMPLETED') { r = await owner<LendingRecord>('refresh', r.id); r = await owner<LendingRecord>('review', r.id, r.reviews.at(-1)!.commitment, workflow); }
     }
@@ -179,7 +217,14 @@ describe('BUILD-CHANNELS-001 MOCKED WhatsApp journeys (embedded runtime, MOCKED 
 
     const reconciled = await pingUntilDone(d, secret, LENDING_OWNER);
     expect(reconciled.first).toEqual({ channel: true, active: false });
-    expect(reconciled.delivered).toEqual([expect.stringMatching(/^Execution reconciled ✅ · evidence: MOCKED · outcome: RECONCILED · bundle 0x[0-9a-f]{4}…[0-9a-f]{4}$/)]);
+    const receipt = `http://127.0.0.1:3100/app/dashboard/runs/${r.id}`;
+    expect(reconciled.delivered).toEqual([`Execution reconciled ✅ · evidence: MOCKED · outcome: RECONCILED · bundle ${r.evidence!.bundleHash.slice(0, 6)}…${r.evidence!.bundleHash.slice(-4)}\nReceipt: ${receipt}`]);
+    expect(reconciled.again).toEqual({ channel: true, active: false });
+    assertReceiptPrivacy(d, receipt, secret);
+    expect(await d.readRun(r.id, ROUTER_OWNER)).toBeNull();
+    expect(await d.readRun(r.id, LENDING_OWNER.toLowerCase())).toMatchObject({ runId: r.id, ownerAccount: LENDING_OWNER.toLowerCase() });
+    expect(reconciled.delivered[0]).not.toContain(secret);
+    expect(reconciled.delivered[0]!.split(receipt).join('')).not.toMatch(/0x[0-9a-fA-F]{20,}|calldata|signature/i);
     expect(model.transactions).toHaveLength(5);
     expect(ai.calls()).toBe(2);
     assertNoLeak(d, [LENDING_OWNER, LENDING_OWNER.toLowerCase(), r.id, 'Supply 0.1 USDC']);

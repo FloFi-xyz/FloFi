@@ -4,6 +4,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { ARBITRUM_ONE, parseArbitrumTokenList, toChecksumAddress } from '@defi-workflow-engine/action-registry';
 import { TRANSFER_ACTION } from '@defi-workflow-engine/workflow-contracts';
+import { createMockedSolanaWallet } from '@defi-workflow-engine/reference-compiler';
 import { checkRecipient, recipientPolicy, RECIPIENT_FORMATS } from './recipient-address';
 import { completeSendDestination, sendDestinationIssue, SEND_DESTINATION_QUESTION } from './send-destination';
 import { canvasAmountCommand, canvasAmountMessage, setupSummary, actionReviewValue } from './canvas-action-setup';
@@ -60,11 +61,18 @@ describe('UX-001 network-aware destination validation', () => {
       expect(recipientPolicy(network).kind).toBe('OWNER_ONLY');
       expect(checkRecipient(network, RECIPIENT)).toEqual({ ok: true, recipient: 'CONNECTED_OWNER' });
     }
-    expect(checkRecipient('Solana', RECIPIENT)).toEqual({ ok: false, code: 'TRANSFER_PROFILE_UNSUPPORTED' });
+    // BUILD-SOLANA-TRANSFER-UX-001: Solana is its own transfer family; an EVM address is never a Solana recipient, and a destination is required.
+    expect(checkRecipient('Solana', RECIPIENT)).toEqual({ ok: false, code: 'TRANSFER_RECIPIENT_INVALID' });
+    expect(checkRecipient('Solana Devnet', ' ')).toEqual({ ok: false, code: 'TRANSFER_RECIPIENT_REQUIRED' });
   });
   it('selects the address family from the CAIP-2 namespace of the transfer network, so a new family is one format entry', () => {
-    expect(Object.keys(RECIPIENT_FORMATS)).toEqual(['eip155']);
+    expect(Object.keys(RECIPIENT_FORMATS)).toEqual(['eip155', 'solana']);
     for (const network of ['Base', 'Arbitrum One', 'Robinhood Chain']) expect(recipientPolicy(network)).toMatchObject({ kind: 'ADDRESS', format: RECIPIENT_FORMATS.eip155 });
+    for (const network of ['Solana', 'Solana Devnet']) expect(recipientPolicy(network)).toMatchObject({ kind: 'ADDRESS', format: RECIPIENT_FORMATS.solana });
+    // A Solana wallet key is kept exactly as typed on Solana and refused on an EVM network.
+    const wallet = createMockedSolanaWallet().owner;
+    expect(checkRecipient('Solana', wallet)).toEqual({ ok: true, recipient: wallet });
+    expect(checkRecipient('Base', wallet)).toEqual({ ok: false, code: 'TRANSFER_RECIPIENT_INVALID' });
   });
 });
 

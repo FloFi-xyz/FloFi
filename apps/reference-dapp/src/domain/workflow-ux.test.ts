@@ -13,7 +13,7 @@ import type { ExecutionControlsState } from '../state/execution-controls';
 const controls = { requesting: false, verifying: false, canContinue: false, canCheck: false };
 describe('UX-003 processing states keep the CTA locked in place', () => {
   it('marks only Simulating and Waiting for wallet as processing; authority and labels are unchanged', () => {
-    const f: ExecutionControlsState = { ...reviewFixture(), execution: { ready: false, started: false, start: null, prompt: null, expiresAt: null, requiresMainnetAcknowledgement: false } };
+    const f: ExecutionControlsState = { ...reviewFixture(), execution: { ready: false, started: false, start: null, prompt: null, expiresAt: null } };
     if (f.source.kind !== 'public') throw new Error('Expected the public swap review fixture');
     expect(projectCanvasAction({ ...f, source: { ...f.source, state: { ...f.source.state, busy: 'simulation-request' } } }, controls, reviewNow))
       .toEqual({ kind: 'status', label: 'Simulating workflow…', disabled: true, processing: true });

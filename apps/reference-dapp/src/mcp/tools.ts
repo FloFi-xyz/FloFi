@@ -336,26 +336,26 @@ function registerApprovalTools(ctx: ToolContext, register: Register) {
 
   register('request_user_approval', 'Request the owner\'s approval', 'Hand a composed strategy (with its workflowHash) to its owner for execution in FloFi. ' +
     'FloFi re-composes and re-checks it, then returns an approval link with authority NONE. Nothing is authorized, signed or sent: the owner must open FloFi, ' +
-    'prove their wallet, run a fresh simulation, review the Strategy Manifest and sign with their own wallet. Show the user the approvalUrl (or the FloFi panel). ' +
+    'connect their wallet if needed, check FloFi\'s fresh simulation and choose Authorize in wallet. Their own wallet confirmation is mandatory. Canvas is optional. Show the approvalUrl (or FloFi panel). ' +
     'Mainnet may be disabled by policy; general multi-step sequences are not executable yet.', ApprovalSchemas.request,
   { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }, async args => {
     const result = await requestApproval(deps(), requester, args.strategy, args.workflowHash);
     if (!result.ok) return failWith(result.code, result.extra ?? {});
     // The picture of exactly the workflow the handoff holds: the same canonical composition, bound to the same hash.
     const visual = workflowVisualModel(composeWorkflowOrRefuse(args.strategy, result.value.workflowHash));
-    return { ok: true, ...result.value, visual, message: 'Nothing is authorized yet. Open the FloFi link to prove your wallet, re-simulate, review the Strategy Manifest ' +
-      'and sign with your own wallet. The link expires soon and works once.' };
+    return { ok: true, ...result.value, visual, message: 'Open the FloFi signing link, connect your wallet if needed, check the fresh simulation and choose Authorize in wallet. ' +
+      'Confirm the exact transaction in your wallet. Canvas is optional. Nothing is executed until chain confirmation and reconciliation. Retrieve get_approval_status for shared status and the verified receipt URL.' };
   }, ui ? { ui: { resourceUri: ui.resourceUri }, 'openai/outputTemplate': ui.resourceUri, 'openai/toolInvocation/invoking': 'Preparing approval…',
     'openai/toolInvocation/invoked': 'Approval ready' } : {});
 
   register('get_approval_status', 'Approval status', 'The status of an approval request this account created: PENDING, CLAIMED, APPLIED, EXPIRED, SUPERSEDED, ' +
-    'REVOKED or STALE. It never reveals the wallet that claimed it and never authorizes anything.', ApprovalSchemas.byId, { ...pure, idempotentHint: false },
-  async args => ({ ok: true, ...await approvalProgress(await owned(args.approvalId), ctx.runtime, state.handoffs) }));
+    'REVOKED or STALE. When the owner shares status, includes run status and the verified receipt URL after reconciliation. Poll this tool when asked; no callback or push is promised. It never reveals the claiming wallet or authorizes anything.', ApprovalSchemas.byId, { ...pure, idempotentHint: false },
+  async args => ({ ok: true, ...await approvalProgress(await owned(args.approvalId), ctx.runtime, state.handoffs, oauth.origin) }));
 
   register('open_approval_session', 'Open FloFi approval', 'App-only: a fresh, short-lived FloFi link for this approval (for the signing window or a wallet ' +
     'in-app browser). The link only shows the proposal; it authorizes nothing.', ApprovalSchemas.byId, { readOnlyHint: false, destructiveHint: false,
     idempotentHint: false, openWorldHint: false }, async args => ({ ok: true, ...await openApprovalSession(deps(), requester, args.approvalId) }), appOnly);
 
   register('get_execution_progress', 'Execution progress', 'App-only: the approval\'s state and, when its owner shares it, the status of the runs started from it.',
-    ApprovalSchemas.byId, { ...pure, idempotentHint: false }, async args => ({ ok: true, ...await approvalProgress(await owned(args.approvalId), ctx.runtime, state.handoffs) }), appOnly);
+    ApprovalSchemas.byId, { ...pure, idempotentHint: false }, async args => ({ ok: true, ...await approvalProgress(await owned(args.approvalId), ctx.runtime, state.handoffs, oauth.origin) }), appOnly);
 }

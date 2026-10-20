@@ -11,7 +11,7 @@ test('shows honest authorization and unavailable stage states', async ({ page })
   await expect(page.locator('.simulation-technical')).toContainText('Add a Base swap in Build before generating mocked artifacts.');
   await expect(page.locator('.simulation-technical')).toContainText('USD values: not modeled.');
   await expect(page.getByRole('region', { name: 'Review & Authorization' })).toContainText('Review unavailable until simulation is ready.');
-  await expect(page.getByRole('button', { name: 'Approve & Continue' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Authorize in wallet' })).toHaveCount(0);
   await page.getByRole('button', { name: 'Execute', exact: true }).click();
   await assertNoFinancialCanvasAction(page);
   await expect(page.getByRole('region', { name: 'Workflow execution workspace' })).toContainText('No workflow ready to execute');
@@ -25,6 +25,8 @@ test('provides semantic landmarks, labelled controls and keyboard access', async
   await expect(page.getByRole('main', { name: 'Workflow workspace' })).toBeVisible();
   await expect(page.getByRole('heading', { level: 1, name: 'Untitled workflow' })).toHaveCount(0);
   await expect(page.getByLabel('Describe your flow')).toBeVisible();
+  // Server HTML precedes hydration. focus() does not wait for a disabled input to become interactive.
+  await expect(page.getByLabel('Describe your flow')).toBeEnabled();
   await page.getByLabel('Describe your flow').focus();
   await expect(page.getByLabel('Describe your flow')).toBeFocused();
   await page.keyboard.type('swap 2 USDC to WETH on Base slippage 50 bps');
@@ -51,7 +53,7 @@ test('labels the local fork honestly and enables no execution without a reviewed
   await expect(fork).toContainText('Local-fork Mode A needs exactly one USDC/WETH swap in the workflow.');
   await expect(fork.getByRole('button', { name: 'Simulate on local fork for revision 0' })).toBeDisabled();
   await expect(page.getByRole('region', { name: 'Review & Authorization' })).toContainText('Review unavailable until simulation is ready.');
-  await expect(page.getByRole('button', { name: 'Approve & Continue' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Authorize in wallet' })).toHaveCount(0);
   await page.getByRole('button', { name: 'Execute', exact: true }).click();
   await assertNoFinancialCanvasAction(page);
   await expect(page.getByRole('region', { name: 'Workflow execution workspace' })).toContainText('No workflow ready to execute');

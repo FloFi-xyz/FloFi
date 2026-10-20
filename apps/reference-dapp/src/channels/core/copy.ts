@@ -18,7 +18,31 @@ export type PreviewNote = { readonly kind: 'PASSED'; readonly provenance: string
 export type ReadyFacts = { readonly lines: readonly string[]; readonly networks: readonly string[]; readonly fundsClass: 'TEST_FUNDS' | 'REAL_FUNDS';
   readonly notes: readonly string[]; readonly preview: PreviewNote; readonly intendedWallet: string | null; readonly aiInterpreted: boolean; readonly expiresMinutes: number };
 export type RunLine = { readonly status: string; readonly reconciled: boolean; readonly terminal: boolean; readonly errorCode: string | null;
-  readonly evidenceEnvironment: string | null; readonly evidenceOutcome: string | null; readonly evidenceBundleHash: string | null };
+  readonly evidenceEnvironment: string | null; readonly evidenceOutcome: string | null; readonly evidenceBundleHash: string | null; readonly receiptUrl?: string | null };
+
+/** Pre-submission records are created by preparation, without a wallet request or any movement of funds. */
+const RUN_EN: Readonly<Record<string, string>> = {
+  SIMULATED: 'Simulation complete (read-only). Waiting for your review and wallet authorization in FloFi.',
+  AUTHORIZED: 'Review accepted in FloFi. Wallet authorization is still required before submission.',
+  PREPARED: 'Transaction prepared. Waiting for wallet authorization; submission is not confirmed.',
+  SUBMITTING: 'Wallet authorization or submission is pending. No verified execution receipt is available.',
+  SUBMISSION_RESULT_UNKNOWN: 'Submission outcome is unknown. FloFi must check the existing attempt before any further action.',
+  HASH: 'Transaction reference recorded. Chain observation and independent reconciliation are still pending.',
+  PENDING: 'Waiting for chain observation and independent reconciliation. No verified execution receipt is available yet.',
+  CONFIRMED: 'Transaction confirmed. Independent reconciliation is still pending.',
+  RECONCILED: 'Checking reconciliation evidence. No verified execution receipt is available yet.',
+};
+const RUN_PT: Readonly<Record<string, string>> = {
+  SIMULATED: 'Simulação concluída (somente leitura). Aguardando sua revisão e autorização na carteira no FloFi.',
+  AUTHORIZED: 'Revisão aceita no FloFi. A autorização na carteira ainda é necessária antes do envio.',
+  PREPARED: 'Transação preparada. Aguardando autorização na carteira; o envio não está confirmado.',
+  SUBMITTING: 'Autorização na carteira ou envio pendente. Ainda não há recibo de execução verificado.',
+  SUBMISSION_RESULT_UNKNOWN: 'O resultado do envio é desconhecido. O FloFi precisa verificar a tentativa existente antes de qualquer outra ação.',
+  HASH: 'Referência da transação registrada. A observação na rede e a reconciliação independente ainda estão pendentes.',
+  PENDING: 'Aguardando observação na rede e reconciliação independente. Ainda não há recibo de execução verificado.',
+  CONFIRMED: 'Transação confirmada. A reconciliação independente ainda está pendente.',
+  RECONCILED: 'Verificando as evidências de reconciliação. Ainda não há recibo de execução verificado.',
+};
 
 const EN = {
   firstContact: (support: string, privacy: string) => `FloFi (automated assistant). I compose DeFi strategies for you to review and sign in FloFi. I can't sign, execute or move funds, and nothing you write here authorizes anything. Never send a private key or seed phrase. Human support: ${support}. Privacy: ${privacy}. Reply STOP to stop messages.`,
@@ -30,7 +54,7 @@ const EN = {
       : p.kind === 'SKIPPED' ? 'FloFi runs the simulation when you open it.' : 'FloFi runs the simulation when you open it.',
   authorize: (wallet: string | null, minutes: number) => `Nothing is authorized yet: open FloFi${wallet ? `, connect the wallet ${wallet}` : ', connect your wallet'}, review the Strategy Manifest and sign there. The link works once and expires in ${minutes} minutes.`,
   ai: 'Interpreted from your message with an AI assistant. It is not financial advice; you decide.',
-  linkLabel: 'Open FloFi',
+  linkLabel: 'Authorize',
   authority: 'Nothing can be authorized here — not with "yes", "confirm" or any other message. To execute, open FloFi with the approval link, connect your wallet, check the fresh simulation and the Strategy Manifest, and sign there. Send LINK for a fresh link.',
   refused: (code: string) => REFUSALS_EN[code] ?? `FloFi couldn't prepare an approval link (${code}). Nothing was proposed.`,
   noPending: 'There is no pending strategy. Tell me what you want to do.',
@@ -40,10 +64,11 @@ const EN = {
   noApproval: 'There is no proposal from this chat yet.',
   approval: (status: string, expires: string) => APPROVAL_EN[status]?.(expires) ?? `Proposal: ${status}.`,
   notShared: 'The wallet owner has not shared run status with this chat (it can be turned on in FloFi).',
-  noRuns: 'No execution has started from it yet.',
-  run: (r: RunLine) => r.reconciled ? `Execution reconciled ✅ · evidence: ${r.evidenceEnvironment ?? 'unknown'} · outcome: ${r.evidenceOutcome ?? 'unknown'}${r.evidenceBundleHash ? ` · bundle ${shorten(r.evidenceBundleHash)}` : ''}`
-    : r.terminal ? `Execution ended without success (${r.errorCode ?? r.status}). See FloFi for details.` : `Execution in progress (${r.status}).`,
-  loaded: 'Your proposal is loaded in FloFi for the connected wallet. Nothing is signed yet: FloFi simulates again and you review the Strategy Manifest before any signature.',
+  noRuns: 'No simulation or execution record is available from this proposal yet.',
+  run: (r: RunLine) => r.reconciled ? `Execution reconciled ✅ · evidence: ${r.evidenceEnvironment ?? 'unknown'} · outcome: ${r.evidenceOutcome ?? 'unknown'}${r.evidenceBundleHash ? ` · bundle ${shorten(r.evidenceBundleHash)}` : ''}${r.receiptUrl ? `\nReceipt: ${r.receiptUrl}` : ''}`
+    : r.terminal ? `Workflow ended without verified execution (${r.errorCode ?? r.status}). See FloFi for details.`
+      : RUN_EN[r.status] ?? `Workflow status: ${r.status}. No verified execution receipt is available yet.`,
+  loaded: 'Your proposal is loaded in FloFi for the connected wallet. Loading it does not authorize or submit a transaction. Check FloFi for the current workflow status.',
   secret: 'Never send a private key or seed phrase — FloFi never needs one. I did not store this message or send it to any AI, but it already reached the messaging provider: if it was real, treat it as compromised and move your funds to a new wallet.',
   unsupported: 'I can only read text messages. Please write what you want to do.',
   late: 'Your message reached FloFi late, so I did not act on it. Please send it again if you still want it.',
@@ -89,7 +114,7 @@ const PT: Copy = {
     : p.kind === 'FAILED' ? `A prévia da simulação não passou (${p.code}). O FloFi mostra os detalhes quando você abrir.` : 'O FloFi roda a simulação quando você abrir.',
   authorize: (wallet, minutes) => `Nada está autorizado ainda: abra o FloFi${wallet ? `, conecte a carteira ${wallet}` : ', conecte sua carteira'}, revise o Strategy Manifest e assine lá. O link funciona uma vez e expira em ${minutes} minutos.`,
   ai: 'Interpretado da sua mensagem com um assistente de IA. Não é recomendação financeira; a decisão é sua.',
-  linkLabel: 'Abrir no FloFi',
+  linkLabel: 'Autorizar',
   authority: 'Nada pode ser autorizado aqui — nem com "sim", "confirmo" ou qualquer outra mensagem. Para executar, abra o FloFi pelo link de aprovação, conecte sua carteira, confira a nova simulação e o Strategy Manifest e assine lá. Envie LINK para um novo link.',
   refused: code => REFUSALS_PT[code] ?? `O FloFi não conseguiu preparar um link de aprovação (${code}). Nada foi proposto.`,
   noPending: 'Não há estratégia pendente. Diga o que você quer fazer.',
@@ -99,10 +124,11 @@ const PT: Copy = {
   noApproval: 'Ainda não há proposta desta conversa.',
   approval: (status, expires) => APPROVAL_PT[status]?.(expires) ?? `Proposta: ${status}.`,
   notShared: 'O dono da carteira não compartilhou o status das execuções com esta conversa (dá para ativar no FloFi).',
-  noRuns: 'Nenhuma execução começou a partir dela ainda.',
-  run: r => r.reconciled ? `Execução reconciliada ✅ · evidência: ${r.evidenceEnvironment ?? 'desconhecida'} · resultado: ${r.evidenceOutcome ?? 'desconhecido'}${r.evidenceBundleHash ? ` · bundle ${shorten(r.evidenceBundleHash)}` : ''}`
-    : r.terminal ? `Execução terminou sem sucesso (${r.errorCode ?? r.status}). Veja os detalhes no FloFi.` : `Execução em andamento (${r.status}).`,
-  loaded: 'Sua proposta foi carregada no FloFi para a carteira conectada. Nada foi assinado ainda: o FloFi simula de novo e você revisa o Strategy Manifest antes de qualquer assinatura.',
+  noRuns: 'Ainda não há registro de simulação ou execução disponível para esta proposta.',
+  run: r => r.reconciled ? `Execução reconciliada ✅ · evidência: ${r.evidenceEnvironment ?? 'desconhecida'} · resultado: ${r.evidenceOutcome ?? 'desconhecido'}${r.evidenceBundleHash ? ` · bundle ${shorten(r.evidenceBundleHash)}` : ''}${r.receiptUrl ? `\nRecibo: ${r.receiptUrl}` : ''}`
+    : r.terminal ? `Workflow terminou sem execução verificada (${r.errorCode ?? r.status}). Veja os detalhes no FloFi.`
+      : RUN_PT[r.status] ?? `Estado do workflow: ${r.status}. Ainda não há recibo de execução verificado.`,
+  loaded: 'Sua proposta foi carregada no FloFi para a carteira conectada. Carregá-la não autoriza nem envia uma transação. Confira o estado atual do workflow no FloFi.',
   secret: 'Nunca envie chave privada ou frase-semente — o FloFi nunca precisa disso. Não guardei esta mensagem nem a enviei para nenhuma IA, mas ela já passou pelo provedor de mensagens: se era real, considere-a comprometida e mova seus fundos para uma nova carteira.',
   unsupported: 'Só consigo ler mensagens de texto. Escreva o que você quer fazer.',
   late: 'Sua mensagem chegou atrasada ao FloFi, então não agi sobre ela. Envie de novo se ainda quiser.',

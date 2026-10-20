@@ -32,8 +32,7 @@ test('an unprepared liquidity workflow cannot authorize or execute', async ({ pa
   await expect(stages.getByRole('button', { name: 'Simulate', exact: true })).toBeDisabled();
   await expect(stages.getByRole('button', { name: 'Execute', exact: true })).toBeDisabled();
   await expect(page.getByRole('button', { name: 'Simulate workflow', exact: true })).toBeDisabled();
-  await expect(page.getByRole('button', { name: 'Approve & Continue', exact: true })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Execute workflow', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Authorize in wallet', exact: true })).toHaveCount(0);
   await expect(page.getByRole('region', { name: 'Mode A execution' })).toHaveCount(0);
   await expect(page.getByRole('main', { name: 'Workflow workspace' })).toBeVisible();
 });

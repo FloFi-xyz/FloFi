@@ -7,6 +7,7 @@ import { buildCopilotFacts, type CopilotFacts, type CopilotFactsInput } from './
 import { closeSegment, emptyConversation, finishTurn, observeWorkflow, proposalApplied, recordProposal, startTurn, type CopilotConversation, type CopilotEnvironment,
   type CopilotLearning, type CopilotReply, type CopilotRequestV2, type CopilotResultV2, type CopilotVerified, type ReplyLearning } from './copilot-conversation';
 import { applyCommand, buildWorkflow, contextFor, TEST_WALLET } from './copilot-test-fixtures';
+import type { PendingAgentCapability } from './agent-rollout';
 
 /**
  * Test-only: drives the real conversation engine the way the Copilot panel does — "explain" and the exact grammar
@@ -26,6 +27,8 @@ export class CopilotSession {
   verified: CopilotVerified | undefined = undefined;
   /** BUILD-CHAT-LEARNING-001: the learning context the caller would pass (absent: learning disabled, the engine as before). */
   learning: CopilotLearning | undefined = undefined;
+  /** Audit A9: agent rollouts to evaluate as owner-approved (absent: the product's approvals, i.e. none). */
+  agentRollout: readonly PendingAgentCapability[] | undefined = undefined;
   readonly turns: TurnRecord[] = [];
   constructor(setup: readonly string[] | Workflow = [], wallet: string | null = TEST_WALLET) {
     this.wallet = wallet;
@@ -35,7 +38,7 @@ export class CopilotSession {
   currentFacts(): CopilotFacts { return buildCopilotFacts({ workflow: this.workflow, context: this.context, pending: this.pending, ...this.facts }); }
   env(): CopilotEnvironment {
     return { workflow: this.workflow, context: this.context, wallet: this.wallet, walletChainId: this.walletChainId, pending: this.pending, facts: this.currentFacts(),
-      ...this.verified ? { verified: this.verified } : {}, ...this.learning ? { learning: this.learning } : {} };
+      ...this.verified ? { verified: this.verified } : {}, ...this.learning ? { learning: this.learning } : {}, ...this.agentRollout ? { agentRollout: this.agentRollout } : {} };
   }
   propose(command: Command) {
     const before = { workflow: this.workflow, error: null };

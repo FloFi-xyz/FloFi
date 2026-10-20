@@ -32,7 +32,7 @@ export async function notifyChannelHandoff(ctx: NotifyContext, handoff: HandoffR
   if (!conversation || conversation.status !== 'ACTIVE' || !adapter) return { notified: 0, done: true };
   const state = open(ctx.core.keys.seal, conversation.stateSealed, sealContext(ctx.core.tenantId, 'channel_conversations', conversation.conversationId, 'state'));
   const language = parseStateLanguage(state, ctx.core.language);
-  const progress = await approvalProgress(handoff, ctx.platform.runtime, ctx.platform.handoffs);
+  const progress = await approvalProgress(handoff, ctx.platform.runtime, ctx.platform.handoffs, ctx.platform.origin);
   const { due, done } = plannedNotifications(language, handoff, progress);
   const deliveryCtx = { tenantId: ctx.core.tenantId, origin: ctx.core.origin, keys: ctx.core.keys, store: ctx.store, adapter,
     handoffs: ctx.platform.handoffs, log: ctx.log, now: ctx.now };

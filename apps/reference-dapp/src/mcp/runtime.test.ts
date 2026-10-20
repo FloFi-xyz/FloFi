@@ -21,6 +21,13 @@ function fakeApi(answer: (seen: Seen) => { status: number; body: unknown }) {
 }
 
 describe('BUILD-MCP-001 runtime selection for the gateway (BUILD-CLOUD-PARITY-001 runtimes, no second runtime)', () => {
+  it('preserves per-network transfer enablement from the runtime and discards malformed network facts', async () => {
+    for (const networks of [['ethereum-sepolia'], undefined, [1]]) {
+      fakeApi(() => ({ status: 200, body: { ok: true, value: { executionEnabled: true, networks } } }));
+      expect(await deploymentRuntime(REMOTE).info!('robinhood-transfer')).toEqual({ executionEnabled: true,
+        ...(networks?.[0] === 'ethereum-sepolia' ? { networks } : {}) });
+    }
+  });
   it.each([REMOTE, { ...REMOTE, DATABASE_URL: 'postgres://db/platform', VERCEL: '1', VERCEL_ENV: 'production' }])(
     'remote: previews and owner-scoped reads go to the Flofi API with the internal credential, including with DATABASE_URL (%j)', async env => {
     const seen = fakeApi(({ url }) => url.endsWith('/v1/previews/crosschain-router-testnet') ? { status: 200, body: { ok: false, code: 'ROUTER_NO_EXECUTABLE_ROUTE' } }

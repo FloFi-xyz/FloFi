@@ -70,12 +70,14 @@ export function solanaLiquidityInputOf(details: SolanaLiquidityDetails): SolanaL
 const N = '([0-9]+(?:\\.[0-9]+)?)', T = '(-?[0-9]+)';
 export const SOLANA_LIQUIDITY_PATTERN = new RegExp(`^(?:add|provide|create) (?:orca )?liquidity (?:with )?${N} (?:test )?SOL and ${N} (?:test USDC|devUSDC|USDC) ` +
   `(?:from ${N} to ${N} devUSDC per SOL|ticks ${T} to ${T}) on Solana Devnet(?: (?:with )?slippage ([0-9]+) bps)?$`, 'i');
+const SOLANA_MAINNET_LIQUIDITY_PATTERN = new RegExp(`^(?:add|provide|create) (?:orca )?liquidity (?:with )?${N} SOL and ${N} USDC ` +
+  `(?:from ${N} to ${N} USDC per SOL|ticks ${T} to ${T}) on Solana(?: (?:with )?slippage ([0-9]+) bps)?$`, 'i');
 /** "Add liquidity 0.01 SOL and 0.30 devUSDC from 20.12 to 24.59 devUSDC per SOL on Solana Devnet [slippage 100 bps]". */
 export function parseSolanaLiquidityChat(text: string): SolanaLiquidityInput | null {
-  const match = SOLANA_LIQUIDITY_PATTERN.exec(text.trim());
+  const mainnet = SOLANA_MAINNET_LIQUIDITY_PATTERN.exec(text.trim()), match = mainnet ?? SOLANA_LIQUIDITY_PATTERN.exec(text.trim());
   if (!match) return null;
   const price = match[3] !== undefined;
-  return { network: 'Solana Devnet', maxSol: match[1]!, maxDevUsdc: match[2]!, rangeUnit: price ? 'PRICE' : 'TICK', lower: price ? match[3]! : match[5]!,
+  return { network: mainnet ? 'Solana' : 'Solana Devnet', maxSol: match[1]!, maxDevUsdc: match[2]!, rangeUnit: price ? 'PRICE' : 'TICK', lower: price ? match[3]! : match[5]!,
     upper: price ? match[4]! : match[6]!, slippage: match[7] ?? SOLANA_LIQUIDITY_DEFAULT_SLIPPAGE };
 }
 

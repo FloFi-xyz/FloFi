@@ -49,6 +49,8 @@ export const sha256Hex = (bytes: Uint8Array): string => '0x' + Buffer.from(sha25
 function onCurve(bytes: Uint8Array): boolean {
   try { ed25519.Point.fromBytes(bytes); return true; } catch { return false; }
 }
+/** BUILD-SOLANA-TRANSFER-UX-001: whether a public key is an Ed25519 curve point (a wallet key) rather than a program-derived address. */
+export function solanaKeyOnCurve(address: string): boolean { return onCurve(publicKeyBytes(address)); }
 export function findProgramAddress(seeds: readonly Uint8Array[], programId: string): string {
   const program = publicKeyBytes(programId), marker = new TextEncoder().encode('ProgramDerivedAddress');
   for (let bump = 255; bump >= 0; bump--) {

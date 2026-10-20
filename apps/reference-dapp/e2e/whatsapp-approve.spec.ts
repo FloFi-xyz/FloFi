@@ -24,7 +24,7 @@ import { inbound, signed, webhookRequest } from '../src/channels/whatsapp/fixtur
 import { E2E_APP_ORIGIN as APP_ORIGIN } from './app-origin';
 import { CHANNEL_E2E, channelE2eEnv, channelE2eUsers } from './channel-constants';
 import { handoffIds, handoffOfLink, newHandoffs, query } from './channel-fixtures';
-import { chooseWallet, openSimulationDetails } from './fixtures';
+import { AUTHORIZE_IN_WALLET, openProposalSimulationDetails, proveConnectedEvmWallet, signingSurface } from './fixtures';
 import { guardedContext, installJourneyWallet } from './journey-fixtures';
 import { assertMcpHarness } from './mcp-fixtures';
 import { assertExecutionBlocked } from './release-safety-fixtures';
@@ -97,13 +97,12 @@ test.describe('BUILD-CHANNELS-001 WhatsApp → /approve (fixture provider, MOCKE
     await expect(approval(other)).toContainText('From WhatsApp');
     await expect(approval(other)).toContainText('Nothing is authorized yet.');
     await expect(approval(other).getByRole('checkbox')).not.toBeChecked();
-    await approval(other).getByRole('button', { name: 'Connect wallet and prove ownership' }).click();
-    await chooseWallet(other, 'Browser wallet');
+    await proveConnectedEvmWallet(other, approval(other), stranger.address);
     await expect(approval(other)).toContainText(`Signed in as ${stranger.address}`);
     // BUILD-FLOFI-UX-UI-002: the proof triggers the claim at once; the server's intended-wallet rule refuses it, Simulate stays closed.
     await expect(approval(other).getByRole('alert')).toContainText('This proposal was prepared for another wallet.');
     await expect(approval(other).getByRole('button', { name: 'Use another wallet' })).toBeVisible();
-    await expect(other.locator('.canvas-primary-action button')).toBeDisabled();
+    await expect(other.locator('button[data-lifecycle-action]:enabled')).toHaveCount(0);
     expect((await handoffOfLink(url)).status).toBe('PENDING');
     await other.close();
 
@@ -116,13 +115,13 @@ test.describe('BUILD-CHANNELS-001 WhatsApp → /approve (fixture provider, MOCKE
     await expect(region).toContainText('From WhatsApp');
     // The secret left the address bar for this tab's session storage (where the ping reads it too).
     await expect(signing).not.toHaveURL(/flofi_chs_/);
-    // The normal Canvas already shows the three action cards; Simulate waits for the intended wallet.
-    await expect(signing.locator('.build-flow-surface .composer-card')).toHaveCount(3);
-    await expect(signing.locator('.canvas-primary-action button')).toBeDisabled();
+    // BUILD-SOLANA-TRANSFER-UX-001: the signing surface already lists the three requested actions; nothing can be simulated or authorized
+    // before the intended wallet has loaded the proposal.
+    await expect(signingSurface(signing).getByRole('list', { name: 'Requested actions' }).getByRole('listitem')).toHaveCount(3);
+    await expect(signing.locator('button[data-lifecycle-action]')).toHaveCount(0);
     await expect(region.getByRole('checkbox')).not.toBeChecked();
     await region.getByRole('checkbox').check();
-    await region.getByRole('button', { name: 'Connect wallet and prove ownership' }).click();
-    await chooseWallet(signing, 'Browser wallet');
+    await proveConnectedEvmWallet(signing, region, fixtureOwner.address);
     await expect(region.getByRole('status')).toContainText('Ready for your review.');
     await expect(region.getByRole('button', { name: 'Load proposal' })).toHaveCount(0);
     const handoff = await handoffOfLink(url);
@@ -131,15 +130,17 @@ test.describe('BUILD-CHANNELS-001 WhatsApp → /approve (fixture provider, MOCKE
       WHERE kind = 'NOTIFICATION' AND dedupe_key LIKE $1`, [`notify:${handoff.handoff_id}:${suffix}`]);
     // The ping on the open page tells the chat the proposal is loaded (once; the message body is erased once sent).
     await expect.poll(() => notification('loaded'), { timeout: 45_000 }).toEqual([{ status: 'SENT', body: false }]);
+    await expect.poll(() => notification('run:%:state:simulated'), { timeout: 45_000 }).toEqual(expect.arrayContaining([{ status: 'SENT', body: false }]));
     // The sign-in's cookie made Next's router refresh the page; the router's own URL never held the secret, so it stays out of the bar.
     await expect(signing).not.toHaveURL(/flofi_chs_/);
 
     // 5. The product's own simulation and Review of the lending composition; MOCKED financial authority cannot be approved or executed.
+    // FloFi prepares that simulation itself once the proposal is loaded; the one owner action stays disabled.
     const lending = signing.getByRole('region', { name: 'Lending composition' });
-    await signing.getByRole('button', { name: 'Simulate workflow', exact: true }).click();
-    await openSimulationDetails(signing);
+    await expect(signingSurface(signing).getByRole('button', { name: AUTHORIZE_IN_WALLET, exact: true })).toBeDisabled({ timeout: 30_000 });
+    await openProposalSimulationDetails(signing);
     await expect(lending).toContainText('Expected output:');
-    await expect(signing.getByRole('button', { name: 'Approve & Continue', exact: true })).toBeDisabled();
+    await expect(signing.locator('.canvas-primary-action').getByRole('button', { name: AUTHORIZE_IN_WALLET, exact: true })).toBeDisabled();
     await expect(signing.locator('.review-authorization-details')).toContainText('A simulation that can authorize this workflow is required before approval.');
     await expect(signing.getByRole('button', { name: 'Review approved', exact: true })).toHaveCount(0);
     await assertExecutionBlocked(signing, () => lendingSends(signing));
@@ -149,8 +150,15 @@ test.describe('BUILD-CHANNELS-001 WhatsApp → /approve (fixture provider, MOCKE
     await say('status');
     expect(texts(sent).at(-1)).toMatch(/^Proposal in a FloFi workflow/);
     expect(texts(sent).join('\n')).not.toMatch(/0x[0-9a-fA-F]{20,}|calldata/i);
-    expect((await query<{ dedupe_key: string; status: string }>(`SELECT dedupe_key, status FROM channel_outbox WHERE kind = 'NOTIFICATION' AND conversation_id = $1`,
-      [first!.requester_ref])).map(r => [r.dedupe_key, r.status])).toEqual([[`notify:${handoff.handoff_id}:loaded`, 'SENT']]);
+    // BUILD-SOLANA-TRANSFER-UX-001: FloFi prepares the simulation as soon as the proposal loads, so the shared run's own status may already have
+    // been reported, exactly as recorded (SIMULATED): never an execution, signature, reconciliation or evidence claim.
+    const notified = (await query<{ dedupe_key: string; status: string }>(`SELECT dedupe_key, status FROM channel_outbox WHERE kind = 'NOTIFICATION' AND conversation_id = $1`,
+      [first!.requester_ref])).map(r => [r.dedupe_key, r.status]);
+    expect(notified).toContainEqual([`notify:${handoff.handoff_id}:loaded`, 'SENT']);
+    for (const [key] of notified.filter(([key]) => key !== `notify:${handoff.handoff_id}:loaded`)) expect(key).toMatch(new RegExp(`^notify:${handoff.handoff_id}:run:[0-9a-f]{16}:state:simulated$`));
+    // This in-process fixture captures STATUS; Next's notification delivery is proven by the SENT outbox row above.
+    expect(texts(sent).at(-1)).toContain('Simulation complete (read-only).');
+    expect(texts(sent).join('\n')).not.toMatch(/Execution in progress|Execution reconciled|Receipt:/);
     expect(unexpected).toEqual([]);
     expect(errors).toEqual([]);
     await context.close();

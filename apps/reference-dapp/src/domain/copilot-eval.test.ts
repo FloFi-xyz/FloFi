@@ -156,7 +156,9 @@ describe('the Copilot has no path to authority', () => {
   const PURE = ['domain/copilot-conversation.ts', 'domain/copilot-answers.ts', 'domain/copilot-intent-v2.ts', 'domain/copilot-intent.ts', 'domain/copilot-authoring.ts',
     'domain/copilot-messages.ts', 'domain/workflow-steps.ts', 'domain/workflow-edits.ts',
     // BUILD-CHAT-LEARNING-001: learned vocabulary and its copy are pure too.
-    'domain/copilot-lexicon.ts', 'domain/copilot-learning-copy.ts'];
+    'domain/copilot-lexicon.ts', 'domain/copilot-learning-copy.ts',
+    // BUILD-SOLANA-TRANSFER-UX-001: the agent rollout gate the Copilot reads (audit A9).
+    'domain/agent-rollout.ts'];
   it('keeps the interpretation, resolution and answer modules pure: no state, server, wallet, network or storage access', () => {
     for (const path of PURE) {
       const text = source(path);

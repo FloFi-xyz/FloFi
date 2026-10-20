@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /** Integrated acceptance on disposable PostgreSQL and MOCKED loopback chains. No public broadcasts. */
-import { test, expect, chooseWallet, openProposalReview, openSimulationDetails, readWorkflowIr } from './fixtures';
+import { test, expect, openProposalReview, openSimulationDetails, proveConnectedEvmWallet, readWorkflowIr } from './fixtures';
 import { CROSSCHAIN_ROUTER_BASE_SEPOLIA_ARBITRUM_SEPOLIA as TESTNET } from '@defi-workflow-engine/action-registry';
 import { createRouterHarness } from './router-harness';
 import type { Page } from '@playwright/test';
@@ -113,7 +113,7 @@ test('normal Build removes the entire QA panel, keeps the header wallet and auth
   await expect(bridge.getByRole('list', { name: 'Route steps' })).toBeVisible();
   await expect(bridge).toContainText('Base Sepolia'); await expect(bridge).toContainText('Arbitrum Sepolia');
   // MOCKED evidence must never authorize the normal product execution path.
-  await expect(page.getByRole('button', { name: 'Approve & Continue', exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Authorize in wallet', exact: true })).toBeDisabled();
   expect(await journeySends()).toBe(0); expect(await walletRequests(page)).not.toContain('eth_sendTransaction');
   networkGuard.assertClean();
 });
@@ -128,8 +128,8 @@ test('Save → Your workflows → exact Canvas restoration; grouped executions, 
   await page.getByRole('textbox', { name: 'Workflow name', exact: true }).fill(name);
   await page.getByRole('textbox', { name: 'Workflow name', exact: true }).press('Enter');
   await page.getByRole('button', { name: 'Save workflow', exact: true }).click();
-  await page.getByRole('button', { name: 'Connect wallet and prove ownership', exact: true }).click();
-  await chooseWallet(page, 'Browser wallet'); // The canonical selector (HOTFIX-WALLET-SELECTOR) asks which wallet proves ownership.
+  // BUILD-SOLANA-TRANSFER-UX-001: the proof reuses the wallet already connected (A); no selector opens and the wallet signs the sign-in message.
+  await proveConnectedEvmWallet(page, page.locator('body'), A.address);
   await expect(page.getByRole('button', { name: 'Connect wallet and prove ownership', exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'Save workflow', exact: true }).click();
   await expect(page.getByRole('status')).toContainText('Workflow saved.');
@@ -170,8 +170,7 @@ test('Save → Your workflows → exact Canvas restoration; grouped executions, 
   await review.locator('summary').click();
   await expect(review).toContainText(/Simulate.*again/);
   await expect(page.locator('.canvas-primary-action').getByRole('button', { name: 'Simulate workflow', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Approve & Continue', exact: true })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Execute workflow', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Authorize in wallet', exact: true })).toHaveCount(0);
   await expect(review).not.toContainText('Review approved');
   // Changing locale is presentation only; wallet identity and canonical IR remain unchanged.
   await stage(page, 'Build');
@@ -189,8 +188,10 @@ test('Save → Your workflows → exact Canvas restoration; grouped executions, 
   await switchAccount(page, B.address);
   library = await libraryWorkspace(page, 'PT');
   await expect(library.getByRole('button', { name, exact: true })).toHaveCount(0);
+  // The proof reuses the account the wallet now exposes (B), never A's earlier session; no selector opens.
+  await expect(page.locator('.build009-wallet-info')).toHaveAttribute('title', new RegExp(`^${B.address}$`, 'i'));
   await library.getByRole('button', { name: 'Ligar carteira e verificar titularidade', exact: true }).click();
-  await chooseWallet(page, 'Browser wallet', 'Ethereum', 'PT');
+  await expect(page.locator('dialog.wallet-selector[open]')).toHaveCount(0);
   await expect(library).toContainText('Ainda não há workflows.');
   expect(errors).toEqual([]); networkGuard.assertClean();
 });

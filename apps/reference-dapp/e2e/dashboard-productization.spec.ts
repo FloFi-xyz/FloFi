@@ -54,7 +54,7 @@ test('current execution and saved cards retain status, evidence and distinct rev
   await page.getByRole('link', { name: 'View Swap run fixture-completed', exact: true }).click();
   await expect(page.locator('.dashboard-result-summary')).toContainText('Completed');
   await expect(page.getByRole('button', { name: 'Open current execution', exact: true })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Execute workflow', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Authorize in wallet', exact: true })).toHaveCount(0);
 });
 
 test('loading, verification and unavailable history preserve the current execution and its attention', async ({ page }) => {

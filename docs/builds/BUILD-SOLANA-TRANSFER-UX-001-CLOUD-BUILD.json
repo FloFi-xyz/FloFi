@@ -1,0 +1,159 @@
+{
+  "id": "1b85bb9b-41ca-4b0c-9096-5a45abbc318f",
+  "projectId": "celtic-volt-418819",
+  "status": "FAILURE",
+  "createTime": "2026-10-19T01:40:11.746531302Z",
+  "startTime": "2026-10-19T01:40:12.675968910Z",
+  "finishTime": "2026-10-19T02:14:13.208341Z",
+  "failureInfo": {
+    "detail": "Build step failure: build step 1 \"cimg/node:24.21.0-browsers\" failed: step exited with non-zero status: 1",
+    "type": "USER_BUILD_STEP"
+  },
+  "logUrl": "https://console.cloud.google.com/cloud-build/builds;region=europe-west1/1b85bb9b-41ca-4b0c-9096-5a45abbc318f?project=547158547199",
+  "serviceAccount": "projects/celtic-volt-418819/serviceAccounts/flofi-ci-runner@celtic-volt-418819.iam.gserviceaccount.com",
+  "source": {
+    "storageSource": {
+      "bucket": "flofi-ci-source-547158547199-europe-west1",
+      "generation": "1792374011371016",
+      "object": "build-solana-transfer-ux-001/1792373959.261557-fe22eafc82204656b76123878a5cfd08.tgz"
+    }
+  },
+  "sourceProvenance": {
+    "fileHashes": {
+      "gs://flofi-ci-source-547158547199-europe-west1/build-solana-transfer-ux-001/1792373959.261557-fe22eafc82204656b76123878a5cfd08.tgz#1792374011371016": {
+        "fileHash": [
+          {
+            "type": "MD5",
+            "value": "TnRpne4kcnugHIg7Gy7I7A=="
+          },
+          {
+            "type": "SHA256",
+            "value": "RVxNTZauWlLEhIV-fPxJnBEhMeRyQTOOUCd1OH1Qlao="
+          }
+        ]
+      }
+    },
+    "resolvedStorageSource": {
+      "bucket": "flofi-ci-source-547158547199-europe-west1",
+      "generation": "1792374011371016",
+      "object": "build-solana-transfer-ux-001/1792373959.261557-fe22eafc82204656b76123878a5cfd08.tgz"
+    }
+  },
+  "substitutions": {
+    "_SNAPSHOT_SHA256": "3326ec102e2b37459d2967168189d2809093846f472e94739bf773367ccedf9c",
+    "_SOURCE_BRANCH": "claude/build-solana-transfer-ux-001"
+  },
+  "options": {
+    "logging": "CLOUD_LOGGING_ONLY",
+    "machineType": "E2_STANDARD_2",
+    "pool": {},
+    "workerRelease": "legacy"
+  },
+  "timeout": "10800s",
+  "steps": [
+    {
+      "args": [
+        "-euo",
+        "pipefail",
+        "-c",
+        "docker run --detach --rm --name flofi-gcp-postgres --network cloudbuild           -e POSTGRES_USER=flofi -e POSTGRES_HOST_AUTH_METHOD=trust           postgres:18.6-bookworm@sha256:3725f4e2499eef5134592b3b4ab79a543ed7f8e533b05b5b637af926630f6650\n# Over TCP: the image's init-time server listens only on its Unix socket and is then restarted.\nfor attempt in $(seq 1 60); do\n  if docker exec flofi-gcp-postgres pg_isready -h 127.0.0.1 -U flofi -d postgres > /dev/null 2>&1; then\n    echo 'Disposable PostgreSQL ready'\n    exit 0\n  fi\n  sleep 1\ndone\ndocker logs flofi-gcp-postgres\nexit 1\n"
+      ],
+      "entrypoint": "bash",
+      "id": "disposable-postgres",
+      "name": "gcr.io/cloud-builders/docker",
+      "pullTiming": {
+        "endTime": "2026-10-19T01:40:20.602793951Z",
+        "startTime": "2026-10-19T01:40:20.593272998Z"
+      },
+      "status": "SUCCESS",
+      "timing": {
+        "endTime": "2026-10-19T01:40:37.041046905Z",
+        "startTime": "2026-10-19T01:40:20.593272998Z"
+      }
+    },
+    {
+      "args": [
+        "scripts/gcp-ci-full.sh"
+      ],
+      "entrypoint": "bash",
+      "env": [
+        "FLOFI_SOURCE_SNAPSHOT_SHA256=3326ec102e2b37459d2967168189d2809093846f472e94739bf773367ccedf9c",
+        "BRANCH_NAME=claude/build-solana-transfer-ux-001"
+      ],
+      "exitCode": 1,
+      "id": "full-certification",
+      "name": "cimg/node:24.21.0-browsers",
+      "pullTiming": {
+        "endTime": "2026-10-19T01:41:21.267871877Z",
+        "startTime": "2026-10-19T01:40:37.041314902Z"
+      },
+      "status": "FAILURE",
+      "timing": {
+        "endTime": "2026-10-19T02:14:02.894235510Z",
+        "startTime": "2026-10-19T01:40:37.041314902Z"
+      },
+      "waitFor": [
+        "disposable-postgres"
+      ]
+    }
+  ],
+  "timing": {
+    "BUILD": {
+      "endTime": "2026-10-19T02:14:02.896047533Z",
+      "startTime": "2026-10-19T01:40:19.931130879Z"
+    },
+    "FETCHSOURCE": {
+      "endTime": "2026-10-19T01:40:19.930859037Z",
+      "startTime": "2026-10-19T01:40:13.032276053Z"
+    },
+    "STORAGE_SOURCE": {
+      "endTime": "2026-10-19T01:40:19.930859037Z",
+      "startTime": "2026-10-19T01:40:13.032276053Z"
+    }
+  },
+  "results": {
+    "buildStepImages": [
+      "sha256:f772ab459889c67835bd959c2b9e9351f2c0752c4f989710ecda20c229f0733e",
+      "sha256:7e52dee8e595008b20af17a38b141402bf6d8c9dee09c910c74e0cef61ce9879"
+    ],
+    "buildStepOutputs": [
+      "",
+      ""
+    ],
+    "buildStepResults": {
+      "disposable-postgres": {},
+      "full-certification": {}
+    }
+  },
+  "certificationSummary": {
+    "sourceFilesVerified": 2501,
+    "sourceBytesVerified": 115038287,
+    "snapshotSha256": "3326ec102e2b37459d2967168189d2809093846f472e94739bf773367ccedf9c",
+    "governanceTestsPassed": 19,
+    "ciTestsPassed": 45,
+    "unitTestsPassed": 4760,
+    "unitTestsSkipped": 2,
+    "postgresTestsPassed": 443,
+    "postgresTestsFailed": 2,
+    "postgresTestsSkipped": 3,
+    "postgresFilesPassed": 68,
+    "postgresFilesFailed": 1,
+    "postgresFilesSkipped": 1,
+    "failedFile": "apps/reference-dapp/src/channels/whatsapp/journey.pg.test.ts",
+    "failedAssertions": [
+      112,
+      182
+    ],
+    "notReached": [
+      "Anvil bootstrap",
+      "fork suites",
+      "browser bootstrap",
+      "44 guarded browser profiles",
+      "composition",
+      "strict certification ledger fan-in"
+    ],
+    "attemptsSubmitted": 1,
+    "retriesSubmitted": 0,
+    "deploymentCount": 0
+  }
+}

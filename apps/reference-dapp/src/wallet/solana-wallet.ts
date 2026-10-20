@@ -21,7 +21,10 @@ function register(...wallets: StandardWallet[]) {
   let added = false;
   for (const wallet of wallets) if (!registered.includes(wallet)) { registered.push(wallet); added = true; }
   if (added) for (const listener of registrationListeners) listener();
-  return () => undefined;
+  return () => {
+    for (const wallet of wallets) { const index = registered.indexOf(wallet); if (index >= 0) registered.splice(index, 1); }
+    for (const listener of registrationListeners) listener();
+  };
 }
 /** Wallet Standard app-ready / register-wallet handshake without an extra dependency. */
 function registeredWallets(): StandardWallet[] {
@@ -67,31 +70,80 @@ export function solanaWalletNames(chain: SolanaWalletChain = SOLANA_WALLET_CHAIN
 }
 /** One owner wallet session per cluster. `prefix` names the runtime in error codes (JUPITER on mainnet, DEVNET_SWAP on Devnet). */
 export type SolanaSession = { wallet: StandardWallet; account: SolanaWalletAccount; chain: SolanaWalletChain };
-/** Connects only the wallet the owner explicitly chose by name; there is no first-registered fallback. */
-export async function connectSolanaWallet(name: string, chain: SolanaWalletChain = SOLANA_WALLET_CHAIN, prefix = 'JUPITER'): Promise<SolanaSession> {
+/**
+ * Connects only the wallet the owner explicitly chose by name; there is no first-registered fallback. `silent`
+ * (BUILD-SOLANA-TRANSFER-UX-001) asks Wallet Standard's `connect({ silent: true })`: a wallet the owner already authorized for
+ * FloFi returns its account without a prompt; any other answer is `${prefix}_SOLANA_WALLET_NOT_AUTHORIZED` and nothing is retried.
+ * `account` pins an existing sender during cluster reuse; another authorized account never substitutes for it.
+ */
+export async function connectSolanaWallet(name: string, chain: SolanaWalletChain = SOLANA_WALLET_CHAIN, prefix = 'JUPITER', options: { silent?: boolean; account?: string | undefined } = {}): Promise<SolanaSession> {
   if (typeof name !== 'string' || !name) throw new Error(`${prefix}_SOLANA_WALLET_SELECTION_REQUIRED`);
   const matches = solanaWallets(chain).filter(w => w.name === name);
   if (matches.length > 1) throw new Error(`${prefix}_SOLANA_WALLET_AMBIGUOUS`);
   const wallet = matches[0];
   if (!wallet) throw new Error(`${prefix}_SOLANA_WALLET_REQUIRED`);
-  const { accounts } = await (wallet.features['standard:connect'] as ConnectFeature).connect();
-  const account = accounts.find(a => a.chains.includes(chain) && a.features.includes('solana:signTransaction')) ?? accounts[0];
+  const connect = wallet.features['standard:connect'] as ConnectFeature;
+  const { accounts } = options.silent ? await connect.connect({ silent: true }).catch(() => ({ accounts: [] as readonly SolanaWalletAccount[] })) : await connect.connect();
+  if (options.silent && !accounts?.length) throw new Error(`${prefix}_SOLANA_WALLET_NOT_AUTHORIZED`);
+  const account = accounts.find(a => (!options.account || a.address === options.account) && a.chains.includes(chain) && a.features.includes('solana:signTransaction'));
+  if (options.account && !account) throw new Error(`${prefix}_WALLET_CHANGED`);
   if (!account || typeof account.address !== 'string') throw new Error(`${prefix}_SOLANA_WALLET_REQUIRED`);
   return { wallet, account, chain };
+}
+/** Provider identity is the actual Wallet Standard object. Equal display names never confer equal signing authority. */
+const identities = new WeakMap<StandardWallet, number>();
+const invalidatedSessions = new WeakSet<SolanaSession>();
+let nextIdentity = 1;
+export function solanaProviderIdentity(wallet: StandardWallet): number {
+  const existing = identities.get(wallet); if (existing) return existing;
+  const id = nextIdentity++; identities.set(wallet, id); return id;
+}
+/** Keep the single operational session in sync with extension account/permission changes. */
+export function subscribeSolanaSession(session: SolanaSession, changed: (session: SolanaSession | null) => void): () => void {
+  type Events = { on(event: 'change', listener: (event: { accounts?: readonly SolanaWalletAccount[]; chains?: readonly string[] }) => void): () => void };
+  const events = session.wallet.features['standard:events'] as Events | undefined;
+  let current: SolanaSession | null = session;
+  const unsubscribeEvents = events?.on('change', event => {
+    if (event.chains && !event.chains.includes(session.chain)) { invalidatedSessions.add(session); current = null; changed(null); return; }
+    if (!event.accounts) return;
+    const compatible = event.accounts.filter(a => a.chains.includes(session.chain) && a.features.includes('solana:signTransaction'));
+    const account = compatible.find(a => a.address === current?.account.address) ?? compatible[0];
+    if (!account || account.address !== current?.account.address) {
+      invalidatedSessions.add(session);
+      current = account ? { ...session, account } : null;
+      changed(current);
+    }
+  });
+  // Unregistering/replacing a provider is an authority change even if no account-change event arrives.
+  // A new provider with the same display name never inherits this session's permission.
+  const unsubscribeDiscovery = subscribeSolanaDiscovery(() => {
+    if (registered.includes(session.wallet)) return;
+    invalidatedSessions.add(session);
+    if (current) { current = null; changed(null); }
+  });
+  return () => { unsubscribeEvents?.(); unsubscribeDiscovery(); };
 }
 type DisconnectFeature = { disconnect(): Promise<void> };
 /** Ends FloFi's use of the session. Wallets that implement `standard:disconnect` also forget the connection; it never prompts. */
 export async function disconnectSolanaWallet(session: SolanaSession): Promise<void> {
+  invalidatedSessions.add(session);
   const feature = session.wallet.features['standard:disconnect'] as DisconnectFeature | undefined;
   try { await feature?.disconnect(); } catch { /* the FloFi session is cleared regardless */ }
 }
 export const base64ToBytes = (text: string): Uint8Array => Uint8Array.from(atob(text), c => c.charCodeAt(0));
 export const bytesToBase64 = (bytes: Uint8Array): string => btoa(Array.from(bytes, b => String.fromCharCode(b)).join(''));
 /** Owner signature only. Any wallet error means no signed bytes exist in Gryloo and nothing was submitted. */
-export async function signWithSolanaWallet(session: SolanaSession, unsignedTransaction: string, prefix = 'JUPITER'): Promise<string> {
+export async function signWithSolanaWallet(session: SolanaSession, unsignedTransaction: string, prefix = 'JUPITER', assertCurrent?: () => void): Promise<string> {
+  const assertProvider = () => {
+    if (invalidatedSessions.has(session) || !registeredWallets().includes(session.wallet)) throw new Error(`${prefix}_WALLET_CHANGED`);
+  };
+  assertProvider();
+  assertCurrent?.();
   const feature = session.wallet.features['solana:signTransaction'] as SignFeature | undefined;
   if (!feature) throw new Error(`${prefix}_SOLANA_WALLET_REQUIRED`);
   const [result] = await feature.signTransaction({ account: session.account, transaction: base64ToBytes(unsignedTransaction), chain: session.chain });
+  assertProvider();
+  assertCurrent?.();
   // Extension wallets may return a typed array from another realm; copy the exact bytes.
   const signed = result?.signedTransaction as unknown;
   if (!ArrayBuffer.isView(signed) || signed.byteLength > 1232) throw new Error(`${prefix}_WALLET_RESPONSE_INVALID`);

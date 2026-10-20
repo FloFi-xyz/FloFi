@@ -12,18 +12,19 @@ vi.mock('./lending-store', () => ({ useLending: () => f.stores.lending }));
 vi.mock('./router-store', () => ({ useRouter: () => f.stores.router }));
 vi.mock('./public-testnet-store', () => ({ usePublicTestnet: () => f.stores.public }));
 vi.mock('./jupiter-store', () => ({ useJupiter: () => f.stores.jupiter }));
+vi.mock('./solana-transfer-store', () => ({ useSolanaTransfer: () => f.stores.solanaTransfer ?? {} }));
 vi.mock('./solana-liquidity-store', () => ({ useSolanaLiquidity: () => f.stores.solanaPool }));
 vi.mock('./solana-composition-store', () => ({ useSolanaComposition: () => ({ record: null, busy: false, error: null, retired: false, recovered: false, executionEnabled: false, signing: false, owner: null, authorized: false }) }));
 vi.mock('./uniswap-liquidity-store', () => ({ useUniswapLiquidity: () => f.stores.uniswapPool }));
 vi.mock('./robinhood-transfer-store', () => ({ useRobinhoodTransfer: () => f.stores.transfer }));
 
 beforeEach(() => {
-  f.stores = Object.fromEntries(['modeA', 'modeB', 'composition', 'liquidity', 'supply', 'lending', 'router', 'public', 'jupiter', 'solanaPool', 'uniswapPool', 'transfer'].map(key => [key, { record: null, run: null, prepared: null, status: null, info: null, busy: false, retired: false, execute: vi.fn(), connect: vi.fn(), requests: [], verified: {} }]));
+  f.stores = Object.fromEntries(['modeA', 'modeB', 'composition', 'liquidity', 'supply', 'lending', 'router', 'public', 'jupiter', 'solanaTransfer', 'solanaPool', 'uniswapPool', 'transfer'].map(key => [key, { record: null, run: null, prepared: null, status: null, info: null, busy: false, retired: false, execute: vi.fn(), connect: vi.fn(), requests: [], verified: {} }]));
 });
 const wallet = () => reviewFixture().wallet;
 describe('existing initial execution capabilities', () => {
-  it.each(['supply', 'transfer', 'solana-swap', 'solana-pool'] as const)('binds %s only to its existing explicit Execute handler', kind => {
-    const key = { supply: 'supply', transfer: 'transfer', 'solana-swap': 'jupiter', 'solana-pool': 'solanaPool' }[kind];
+  it.each(['supply', 'transfer', 'solana-swap', 'solana-transfer', 'solana-pool'] as const)('binds %s only to its existing explicit Execute handler', kind => {
+    const key = { supply: 'supply', transfer: 'transfer', 'solana-swap': 'jupiter', 'solana-transfer': 'solanaTransfer', 'solana-pool': 'solanaPool' }[kind];
     const runtime = f.stores[key]!;
     runtime.record = { authorization: 'accepted', verdict: 'PENDING', attempts: [], attempt: null }; runtime.executionEnabled = true;
     const result = useExecutionStart(kind, wallet());
@@ -56,10 +57,12 @@ describe('existing initial execution capabilities', () => {
     shared.account = '0x2222222222222222222222222222222222222222';
     expect(useExecutionStart('fork-swap', shared).ready).toBe(false);
   });
-  it('blocks disabled Solana execution and preserves the real-funds acknowledgement', () => {
+  it('blocks disabled Solana execution without a separate real-funds acknowledgement', () => {
     f.stores.jupiter!.record = { authorization: 'accepted', verdict: 'PENDING', provenance: 'PUBLIC_MAINNET' };
     f.stores.jupiter!.executionEnabled = false;
-    expect(useExecutionStart('solana-swap', wallet())).toMatchObject({ ready: false, requiresMainnetAcknowledgement: true });
+    const start = useExecutionStart('solana-swap', wallet());
+    expect(start).toMatchObject({ ready: false, reason: 'Execution is unavailable on this network.' });
+    expect(start).not.toHaveProperty('requiresMainnetAcknowledgement');
   });
   it('binds reviewed public swaps without fabricating an exact approval requirement', () => {
     const runtime = f.stores.public!;

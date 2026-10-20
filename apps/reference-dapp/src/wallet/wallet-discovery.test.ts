@@ -45,7 +45,7 @@ describe('canonical EVM discovery', () => {
     expect(chooseEvmWallet('evm:b')).toBe(rabby);
     expect(injected()).toBe(rabby); expect(chosenEvmProvider()).toBe(rabby);
     expect(evmWalletIdentity(injected())).toMatchObject({ key: 'io.rabby', name: 'Rabby Wallet' });
-    expect(walletPreference()).toEqual({ evm: 'io.rabby', solana: null, evmDisconnected: false });
+    expect(walletPreference()).toEqual({ evm: 'io.rabby', solana: null, evmDisconnected: false, solanaDisconnected: false });
     clearChosenEvmWallet();
     // The remembered wallet now drives the passive (silent-read) provider, still without any wallet request.
     expect(injected()).toBe(rabby); expect(chosenEvmProvider()).toBeNull();
@@ -70,8 +70,8 @@ describe('wallet identity model', () => {
   it('orders detected wallets with the remembered one first and keeps Phantom Solana and Phantom Ethereum distinct', () => {
     const choices = [choice('evm:a', 'evm', 'io.metamask', 'MetaMask'), choice('solana:Phantom', 'solana', 'Phantom', 'Phantom'),
       choice('evm:c', 'evm', 'app.phantom', 'Phantom'), choice('evm:b', 'evm', 'io.rabby', 'Rabby Wallet')];
-    expect(orderWalletChoices(choices, { evm: null, solana: null, evmDisconnected: false }).map(entry => entry.id)).toEqual(['evm:a', 'evm:c', 'solana:Phantom', 'evm:b']);
-    expect(orderWalletChoices(choices, { evm: 'io.rabby', solana: null, evmDisconnected: false })[0]!.id).toBe('evm:b');
+    expect(orderWalletChoices(choices, { evm: null, solana: null, evmDisconnected: false, solanaDisconnected: false }).map(entry => entry.id)).toEqual(['evm:a', 'evm:c', 'solana:Phantom', 'evm:b']);
+    expect(orderWalletChoices(choices, { evm: 'io.rabby', solana: null, evmDisconnected: false, solanaDisconnected: false })[0]!.id).toBe('evm:b');
     expect(undetectedWallets(choices, ['evm', 'solana']).map(known => `${known.ecosystem}:${known.name}`)).toEqual(['evm:Coinbase Wallet', 'solana:Backpack', 'solana:Solflare']);
     expect(undetectedWallets([], ['solana']).map(known => known.name)).toEqual(['Phantom', 'Backpack', 'Solflare']);
   });
@@ -80,12 +80,15 @@ describe('wallet identity model', () => {
     for (const bad of ['javascript:alert(1)', 'https://example.com/logo.svg', 'data:text/html,<script>', 'data:image/png;base64,' + 'A'.repeat(200_001), 42])
       expect(safeWalletIcon(bad)).toBeNull();
   });
-  it('stores only provider keys and a disconnect flag, never an address', () => {
+  it('stores only provider keys and disconnect flags, never an address', () => {
     browser();
     updateWalletPreference({ evm: 'io.metamask', solana: 'Phantom' });
     updateWalletPreference({ evmDisconnected: true });
-    expect(walletPreference()).toEqual({ evm: 'io.metamask', solana: 'Phantom', evmDisconnected: true });
+    expect(walletPreference()).toEqual({ evm: 'io.metamask', solana: 'Phantom', evmDisconnected: true, solanaDisconnected: false });
+    // BUILD-SOLANA-TRANSFER-UX-001: an explicit Solana disconnect is remembered the same way (no silent reconnect afterwards).
+    updateWalletPreference({ solanaDisconnected: true });
+    expect(walletPreference()).toEqual({ evm: 'io.metamask', solana: 'Phantom', evmDisconnected: true, solanaDisconnected: true });
     (window as unknown as { localStorage: Storage }).localStorage.setItem('flofi.wallet.preference.v1', JSON.stringify({ evm: '0x' + '1'.repeat(40) + '\n', solana: 7 }));
-    expect(walletPreference()).toEqual({ evm: null, solana: null, evmDisconnected: false });
+    expect(walletPreference()).toEqual({ evm: null, solana: null, evmDisconnected: false, solanaDisconnected: false });
   });
 });

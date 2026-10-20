@@ -20,6 +20,7 @@ import { portugueseBase } from './pt-base';
 import { portugueseSolanaComposition } from './pt-solana-composition';
 import { portugueseSolanaMainnet } from './pt-solana-mainnet';
 import { portugueseLearning } from './pt-learning';
+import { portugueseExecutionUx } from './pt-execution-ux';
 /** English source messages are stable presentation keys. Technical identifiers never enter this catalog. */
 export const portuguese: Readonly<Record<string, string>> = {
   // BUILD-AUTOMATION-001/002: first, so an existing product translation of a shared word keeps precedence.
@@ -30,6 +31,7 @@ export const portuguese: Readonly<Record<string, string>> = {
   ...portugueseSolanaComposition,
   ...portugueseSolanaMainnet,
   ...portugueseLearning,
+  ...portugueseExecutionUx,
   'Automation workflow': 'Fluxo da automação',
   'Prepared by your FloFi automation. Simulate and review before executing.': 'Preparado pela sua automação FloFi. Simule e revise antes de executar.',
   'Loading your exact automation workflow…': 'Carregando o fluxo exato da sua automação…',
@@ -141,7 +143,6 @@ export const portuguese: Readonly<Record<string, string>> = {
   'The available collateral or liquidity cannot support this action.': 'A garantia ou liquidez disponível não permite esta ação.',
   'Reconnect the wallet used for this workflow and simulate again.': 'Volte a ligar a carteira usada neste fluxo e simule novamente.',
   'The wallet request was cancelled. Try again when ready.': 'O pedido à carteira foi cancelado. Tente novamente quando estiver pronto.',
-  'Simulation could not be completed. Try again before continuing.': 'Não foi possível concluir a simulação. Tente novamente antes de continuar.',
   'Estimate unavailable': 'Estimativa indisponível', 'Output estimate unavailable': 'Estimativa de saída indisponível',
   'Approximate read-only output; simulate before review': 'Saída aproximada apenas para consulta; simule antes da revisão',
   'Approximate · {0} · Simulate before review': 'Aproximado · {0} · Simule antes da revisão',

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /** Product copy only. Names, protocol IDs, assets and wallet identifiers are interpolation values. */
 export const productPortuguese: Readonly<Record<string, string>> = {
-  "FloFi is currently in beta testing. Do not use real funds until the official launch announcement is published in the app and on FloFi's official social media channels.": 'O FloFi está em fase de testes beta. Não utilize fundos reais até que o anúncio oficial de lançamento seja publicado no app e nos canais oficiais do FloFi nas redes sociais.',
   'Base → Arbitrum → Uniswap v3 position': 'Base → Arbitrum → posição Uniswap v3',
   'USD value unavailable': 'Valor USD indisponível',
   'Your workflows': 'Seus workflows',
@@ -87,7 +86,6 @@ export const productPortuguese: Readonly<Record<string, string>> = {
   'The last request could not complete. Check the recorded status before taking another action.': 'Não foi possível concluir o último pedido. Verifique o estado registado antes de agir novamente.',
   'Local signed-order execution · scripted settlement. No public settlement or funds are observed.': 'Execução local de ordem assinada · liquidação de teste. Não se observa liquidação nem fundos numa rede pública.',
   'Unable to check execution status. The recorded result is unchanged; no transaction was resent.': 'Não foi possível verificar o estado da execução. O resultado registado mantém-se; nenhuma transação foi reenviada.',
-  'I understand this executes on Solana mainnet with real funds': 'Compreendo que esta execução usa fundos reais na rede principal Solana',
   'Execution blockers': 'Impedimentos à execução', 'Next confirmation': 'Próxima confirmação', 'What happens next': 'O que acontece a seguir',
   'Only the next authorized request starts. Further wallet confirmations remain separate.': 'Só é iniciado o próximo pedido autorizado. As confirmações seguintes na carteira são separadas.',
   'Connect execution wallet': 'Ligar carteira de execução', 'Continue to wallet': 'Continuar para a carteira', 'Updating status…': 'A atualizar o estado…',

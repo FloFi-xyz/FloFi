@@ -17,16 +17,16 @@
 import { hashArtifactBytes } from '@defi-workflow-engine/workflow-contracts';
 import { createTestWallet } from '../../../packages/reference-reconciler/test/test-wallet.ts';
 import { assertAutomationHarness, dispatch, occurrencesOf, query, ruleOf, setPrices } from './automation-fixtures';
-import { test, expect, chooseWallet, readWorkflowIr } from './fixtures';
+import { test, expect, proveConnectedEvmWallet, readWorkflowIr } from './fixtures';
 import { installJourneyWallet, walletRequests } from './journey-fixtures';
 import type { Page } from '@playwright/test';
 
 const SIGNING = ['eth_sendTransaction', 'eth_sendRawTransaction', 'eth_signTypedData_v4', 'eth_signTransaction'];
-async function proveOwner(page: Page) {
+/** BUILD-SOLANA-TRANSFER-UX-001: the proof reuses the wallet already connected in this browser (no selector); it signs the sign-in message. */
+async function proveOwner(page: Page, account: string) {
   await page.goto('/app/automations');
   const workspace = page.getByRole('region', { name: 'Automations', exact: true });
-  await workspace.getByRole('button', { name: 'Connect wallet and prove ownership', exact: true }).click();
-  await chooseWallet(page, 'Browser wallet');
+  await proveConnectedEvmWallet(page, workspace, account);
   await expect(workspace.getByRole('heading', { name: 'Create an automation', exact: true })).toBeVisible();
   return workspace;
 }
@@ -40,7 +40,7 @@ test.describe('BUILD-AUTOMATION-001 Automations (fixture prices, test clock, loo
     const owner = createTestWallet(), errors: string[] = [];
     page.on('pageerror', e => errors.push(e.message));
     await installJourneyWallet(page, [owner], { chain: '0x14a34' });
-    const workspace = await proveOwner(page);
+    const workspace = await proveOwner(page, owner.address);
 
     // 1–3. Create the weekly DCA; it is ACTIVE and asks before every execution.
     const f = form(page);
@@ -84,9 +84,12 @@ test.describe('BUILD-AUTOMATION-001 Automations (fixture prices, test clock, loo
     // 6–7. Review in FloFi enters the shared approval flow.
     await pending.getByRole('button', { name: 'Review in FloFi', exact: true }).click();
     await expect(page.getByRole('region', { name: /^Proposal from / })).toHaveCount(0);
-    await expect(page.getByRole('region', { name: 'Workflow canvas', exact: true })).toBeVisible();
-    await expect(page.locator('.canvas-primary-action button')).toHaveText('Simulate workflow');
-    expect(new URL(page.url()).pathname).toBe('/approve');
+    // BUILD-SOLANA-TRANSFER-UX-001: an automation's proposal keeps the Canvas presentation (never the minimal signing surface); once it is
+    // loaded for the proven owner, FloFi prepares its fresh read-only simulation on the Canvas's Simulate stage.
+    await expect(page).toHaveURL(/\/approve$/);
+    await expect(page.getByRole('region', { name: 'Automation workflow', exact: true })).toBeVisible();
+    await expect(page.getByRole('navigation', { name: 'Workflow stages' })).toBeVisible();
+    await expect(page.getByRole('main', { name: 'Authorize with your wallet', exact: true })).toHaveCount(0);
     expect(page.url()).not.toContain('flofi_auhs_');
     const handoffOf = () => query<{ handoff_id: string; status: string; requester_kind: string }>('SELECT handoff_id, status, requester_kind FROM mcp_handoffs WHERE handoff_id = (SELECT handoff_id FROM automation_occurrences WHERE occurrence_id = $1)',
       [occurrence!.occurrence_id]);
@@ -110,26 +113,28 @@ test.describe('BUILD-AUTOMATION-001 Automations (fixture prices, test clock, loo
       expect((await occurrencesOf(rule.rule_id)).map(o => o.occurrence_id)).toEqual([occurrence!.occurrence_id]);
     };
     await page.reload();
-    await expect(page.getByRole('region', { name: 'Workflow canvas', exact: true })).toBeVisible();
+    await expect(page.getByRole('navigation', { name: 'Workflow stages' })).toBeVisible();
     // BUILD-FLOFI-UX-UI-002: the workspace shows at once; the owner's own automation proposal is re-loaded into it automatically.
     await expect(page.getByRole('region', { name: 'Automation workflow', exact: true })).toHaveAttribute('data-approval-state', 'loaded');
     expect(hashArtifactBytes('semantic-workflow', new TextEncoder().encode(await readWorkflowIr(page)))).toBe(workflowHash);
     await unchanged();
     await page.goto(new URL(`/approve#${applied.handoff_id}`, page.url()).href);
-    await expect(page.getByRole('region', { name: 'Workflow canvas', exact: true })).toBeVisible();
+    await expect(page.getByRole('navigation', { name: 'Workflow stages' })).toBeVisible();
     await expect(page.getByRole('region', { name: 'Automation workflow', exact: true })).toHaveAttribute('data-approval-state', 'loaded');
     await expect(page.getByRole('region', { name: /^Proposal from / })).toHaveCount(0);
     await unchanged();
-    await page.locator('.canvas-primary-action').getByRole('button', { name: 'Simulate workflow', exact: true }).click();
+    // FloFi's own fresh simulation of the re-opened proposal (no owner click is needed for this read-only step).
+    await expect(page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Simulate', exact: true })).toHaveAttribute('aria-current', 'page');
     const summary = page.getByRole('complementary', { name: 'Simulation Summary', exact: true });
-    await expect(summary.getByRole('region', { name: 'Expected result' })).toContainText('0.025 WETH');
-    const approve = page.locator('.canvas-primary-action').getByRole('button', { name: 'Approve & Continue', exact: true });
-    await expect(approve).toBeEnabled();
-    await expect(page.getByRole('button', { name: 'Approve & Continue', exact: true })).toHaveCount(1);
-    await approve.click();
-    await expect(page.locator('.canvas-primary-action').getByRole('button', { name: 'Execute workflow', exact: true })).toBeVisible();
+    await expect(summary.getByRole('region', { name: 'Expected result' })).toContainText('0.025 WETH', { timeout: 30_000 });
+    // BUILD-SOLANA-TRANSFER-UX-001: the one owner action ("Authorize in wallet": Review acceptance, then the wallet request) is offered once and
+    // waits for the owner; this acceptance does not click it.
+    const authorize = page.locator('.canvas-primary-action').getByRole('button', { name: 'Authorize in wallet', exact: true });
+    await expect(authorize).toBeEnabled();
+    await expect(authorize).toHaveAttribute('data-lifecycle-action', 'approve');
+    await expect(page.getByRole('button', { name: 'Authorize in wallet', exact: true })).toHaveCount(1);
 
-    // 8. No automatic signature: on /approve, Simulate and Review nothing was signed or sent (the session was already proven).
+    // 8. No automatic signature: on /approve, through Simulate and the offered Review nothing was signed or sent (the session was already proven).
     const requests = await walletRequests(page);
     expect(requests.filter(m => SIGNING.includes(m) || m === 'personal_sign')).toEqual([]);
     // The scheduler marks the occurrence COMPLETED once the proposal is in the owner's workflow.
@@ -143,7 +148,7 @@ test.describe('BUILD-AUTOMATION-001 Automations (fixture prices, test clock, loo
     test.setTimeout(90_000);
     const owner = createTestWallet();
     await installJourneyWallet(page, [owner], { chain: '0x14a34' });
-    const workspace = await proveOwner(page);
+    const workspace = await proveOwner(page, owner.address);
     const f = form(page);
     // BTC can be watched, but FloFi has no BTC swap route: nothing is substituted and nothing can be created.
     await f.getByLabel('Asset', { exact: true }).selectOption('BTC');

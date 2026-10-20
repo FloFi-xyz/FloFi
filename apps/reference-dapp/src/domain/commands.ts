@@ -12,7 +12,8 @@ import type { BridgeSwapInput } from './bridge-swap-authoring';
 import type { CrossChainLiquidityInput } from './cross-chain-liquidity';
 import { liquidityDetails, parseTick } from '@defi-workflow-engine/reference-linter';
 
-import { createAuthoredTransfer, transferDetails, type RobinhoodTransferInput } from './robinhood-transfer-authoring';
+import { createAuthoredTransfer, transferDetails, type RobinhoodTransferInput, isSolanaTransferNetwork } from './robinhood-transfer-authoring';
+import { parseSolanaTransferChat } from './solana-transfer-authoring';
 import { createAuthoredSupply, supplyDetails, createAuthoredBorrow, borrowDetails, createAuthoredRepay, repayDetails, createAuthoredWithdraw, withdrawDetails, lendingProfileFor, LENDING_NETWORKS, type WithdrawInput, type SupplyInput } from './supply-authoring';
 import { createSolanaSwapNode, parseSolanaSwapChat, solanaSwapDetails, solanaSwapLabels, type SolanaSwapInput } from './jupiter-authoring';
 import { createSolanaLiquidityNode, parseSolanaCompositionChat, parseSolanaLiquidityChat, solanaLiquidityDetails, type SolanaLiquidityInput } from './solana-liquidity-authoring';
@@ -142,6 +143,20 @@ export function parseLocalCommand(text: string, workflow: Workflow, context: Rev
       to: symbolOn(swapNetwork.chain, catalogSwap[3]!) }, amount: catalogSwap[1]!, slippage: catalogSwap[5] ?? '50' };
     createCryptoActionNode('node-preview', fields);
     return { type: 'ADD_CRYPTO_ACTION', input: fields, source: 'CHAT', baseRevision: workflow.revision };
+  }
+  // BUILD-SOLANA-TRANSFER-UX-001: "send 0.5 SOL to <Solana address> on Solana [Devnet]" — always an explicit recipient, never a self-send.
+  const testTransfer = /^(?:transfer|send) ([0-9]+(?:\.[0-9]+)?) ETH on (Ethereum Sepolia|Robinhood(?: Chain)? Testnet)$/i.exec(input);
+  if (testTransfer) {
+    const fields: RobinhoodTransferInput = { network: /^Ethereum/i.test(testTransfer[2]!) ? 'Ethereum Sepolia' : 'Robinhood Chain Testnet',
+      asset: 'ETH', amount: testTransfer[1]!, recipient: 'CONNECTED_OWNER' };
+    createAuthoredTransfer('node-preview', fields);
+    return { type: 'ADD_RH_TRANSFER', input: fields, source: 'CHAT', baseRevision: workflow.revision };
+  }
+  const solanaTransfer = parseSolanaTransferChat(input);
+  if (solanaTransfer) {
+    const fields: RobinhoodTransferInput = { network: solanaTransfer.network, asset: solanaTransfer.asset, amount: solanaTransfer.amount, recipient: solanaTransfer.recipient };
+    createAuthoredTransfer('node-preview', fields);
+    return { type: 'ADD_RH_TRANSFER', input: fields, source: 'CHAT', baseRevision: workflow.revision };
   }
   const catalogTransfer = new RegExp(`^(?:transfer|send) ([0-9]+(?:\\.[0-9]+)?) ${SYMBOL} on (${CATALOG_CHAT_NETWORKS})(?: to (0x[0-9a-fA-F]{40}))?$`, 'i').exec(input);
   const transferNetwork = catalogTransfer ? catalogNetworkOfChatName(catalogTransfer[3]!) : null;
@@ -302,7 +317,9 @@ export function commandIsValid(input: unknown): input is Command {
       if(command.type==='SET_RH_TRANSFER'&&!id(command.nodeId))return false;
       const fields=command.input;
       // BUILD-RH-002: a recipient may be an explicit 42-character address on Robinhood Chain (BUILD-BASE-001: and Base).
-      if(!fields||typeof fields!=='object'||Array.isArray(fields)||Object.getPrototypeOf(fields)!==Object.prototype||Reflect.ownKeys(fields).sort().join()!==['network','asset','amount','recipient'].sort().join()||!Object.values(fields).every(v=>typeof v==='string'&&v.length<=64))return false;
+      // BUILD-SOLANA-TRANSFER-UX-001: a Solana SPL token named by mint also states its decimals and token program (no other optional field).
+      const keys=Reflect.ownKeys(fields??{}).sort().join(), base=['network','asset','amount','recipient'].sort().join(), mint=['network','asset','amount','recipient','decimals','program'].sort().join();
+      if(!fields||typeof fields!=='object'||Array.isArray(fields)||Object.getPrototypeOf(fields)!==Object.prototype||(keys!==base&&!(keys===mint&&isSolanaTransferNetwork(String((fields as {network?:unknown}).network))))||!Object.values(fields).every(v=>typeof v==='string'&&v.length<=64))return false;
       try{createAuthoredTransfer('node-preview',fields as RobinhoodTransferInput);return true;}catch{return false;}
     }
     case 'ADD_WITHDRAW':
@@ -431,10 +448,13 @@ export function amountOf(node: Workflow['nodes'][number]): string {
 export function summarize(workflow: Workflow, context?: ReviewContext): string {
   const lending=lendingDetails(workflow as SemanticWorkflow);
   if(lending)return `Revision ${workflow.revision}. Supply ${lending.supply} Aave USDC → HF ≥ 2.0 checkpoint → Borrow ${lending.borrow} Aave USDC → Swap exactly the borrowed Aave USDC to WETH on Base Sepolia; slippage ${lending.slippage} bps; owner ${lending.owner}. Debt remains after Swap.`;
-  return `Revision ${workflow.revision}. ` + workflow.nodes.map(node => {
+  // BUILD-SOLANA-TRANSFER-UX-001: template units (`mock-*`, `mock:local`, sample units) are never described as user actions.
+  return `Revision ${workflow.revision}. ` + workflow.nodes.filter(node => !node.actionType.startsWith('mock-')).map(node => {
     const solana = solanaSwapDetails(node);
     if (solana) return `${node.nodeId}: Swap ${solana.amount} ${solana.from} to ${solana.to} on ${solana.network} via ${solanaSwapLabels(solana.network).provider}, ${solana.slippage} bps, quote required.`;
     const transfer=transferDetails(node as Parameters<typeof transferDetails>[0]);
+    // BUILD-SOLANA-TRANSFER-UX-001: a Solana transfer always names its recipient; mainnet-beta moves real funds, Devnet test tokens.
+    if(transfer&&isSolanaTransferNetwork(transfer.network))return `${node.nodeId}: Send ${transfer.amount} ${transfer.decimals===undefined?transfer.asset:`SPL token ${transfer.asset}`} on ${transfer.network} to ${transfer.recipient}; ${transfer.network==='Solana'?'real funds':'test tokens'}, simulation and review required.`;
     if(transfer&&networkIdentity(transfer.network)?.environment==='MAINNET')return `${node.nodeId}: Transfer ${transfer.amount} ${transfer.asset} on ${transfer.network} to ${transfer.recipient==='CONNECTED_OWNER'?'the connected owner':transfer.recipient}; real funds, simulation and review required.`;
     if(transfer)return `${node.nodeId}: Self-transfer ${transfer.amount} test ETH on ${transfer.network} to the connected owner; chain execution proof, not DeFi.`;
     const catalogSwap=catalogSwapDetails(node);
@@ -461,7 +481,7 @@ export function summarize(workflow: Workflow, context?: ReviewContext): string {
     if (position) return `${node.nodeId}: Uniswap v3 Base WETH/USDC position, ${position.amountWeth} WETH units and ${position.amountUsdc} USDC units maximum, minimums ${position.minimumWeth} WETH and ${position.minimumUsdc} USDC units, ticks ${position.tickLower} to ${position.tickUpper}, recipient ${position.recipient}.`;
     const details = context && swapDetails(node, context);
     if (details) return `${node.nodeId}: ${directionLabel(details.from === 'USDC' ? 'USDC_TO_WETH' : 'WETH_TO_USDC')}, ${details.amount} ${details.from}, ${details.slippage} bps, unquoted on Base.`;
-    return `${node.nodeId}: ${node.actionType}, ${amountOf(node)} sample units on ${node.chainId}`
+    return `${node.nodeId}: ${node.actionType} on ${networkIdentity(node.chainId)?.name ?? node.chainId}`
       + `${node.lockedParameters.length ? ', amount locked' : ''}`
       + `${node.dependencies.length ? ', after ' + node.dependencies.join(', ') : ''}.`;
   }).join(' ');

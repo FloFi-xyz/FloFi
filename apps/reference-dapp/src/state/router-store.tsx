@@ -171,6 +171,10 @@ export function RouterProvider({ children }: { children: ReactNode }) {
   async function establishSession(): Promise<WalletSession> {
     const connected = await ownerSession();
     if (latestSession.current?.account === connected.account) return latestSession.current;
+    // BUILD-SOLANA-TRANSFER-UX-001: a sign-in this browser already completed for the same connected account (the approval proof just before
+    // FloFi prepares the proposal's simulation) is adopted, as at mount, instead of asking the wallet to sign again. The server verified it.
+    const existing = await walletSessionStatus().catch(() => null);
+    if (existing && existing.account === connected.account) { setSession(existing); latestSession.current = existing; setNotice(null); return existing; }
     const provider = injected(); if (!provider) throw new Error('ROUTER_WALLET_REQUIRED');
     const { message } = unwrap(await walletSignInChallenge(connected.account, Number.parseInt(connected.chainId, 16)));
     const signature = await provider.request({ method: 'personal_sign', params: [utf8Hex(message), connected.account] });

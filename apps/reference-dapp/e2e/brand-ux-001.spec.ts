@@ -202,7 +202,7 @@ test('all migrated product routes remain accessible and sensitive routes retain 
     expect(headers['cache-control']).toContain('no-store');
     await expect(page.getByRole('navigation', { name: 'Workflow stages' })).toHaveCount(0);
     await expect(page.getByRole('region', { name: 'Workflow canvas', exact: true })).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Execute workflow', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Authorize in wallet', exact: true })).toHaveCount(0);
   }
   expect(errors).toEqual([]);
 });

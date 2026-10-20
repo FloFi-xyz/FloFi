@@ -42,7 +42,8 @@ export async function installMultichainWallets(page: Page, options: { evmChain?:
     const chains = ['solana:mainnet', 'solana:devnet'];
     const account = { address: accounts.phantomSolana, publicKey: new Uint8Array(32), chains, features: ['solana:signTransaction', 'solana:signMessage'] };
     const phantom = { version: '1.0.0', name: 'Phantom', icon: icon('#ab9ff2'), chains, accounts: [account], features: {
-      'standard:connect': { version: '1.0.0', connect: async () => { calls.push({ wallet: 'Phantom Solana', method: 'standard:connect' }); return { accounts: [account] }; } },
+      // A silent connect (BUILD-SOLANA-TRANSFER-UX-001 reuse of an already-authorized wallet) never prompts; it is recorded separately.
+      'standard:connect': { version: '1.0.0', connect: async (input?: { silent?: boolean }) => { calls.push({ wallet: 'Phantom Solana', method: input?.silent ? 'standard:connect:silent' : 'standard:connect' }); return { accounts: [account] }; } },
       'standard:disconnect': { version: '1.0.0', disconnect: async () => { calls.push({ wallet: 'Phantom Solana', method: 'standard:disconnect' }); } },
       'solana:signTransaction': { version: '1.0.0', signTransaction: async () => { calls.push({ wallet: 'Phantom Solana', method: 'solana:signTransaction' }); throw new Error('MOCK_SIGN_DENIED'); } },
     } };
@@ -53,4 +54,4 @@ export async function installMultichainWallets(page: Page, options: { evmChain?:
 }
 export const walletCalls = (page: Page) => page.evaluate(() => (window as unknown as { walletCalls: WalletCall[] }).walletCalls.map(call => ({ ...call })));
 /** Calls that can open a wallet prompt, connect, sign or send (silent reads excluded). */
-export const promptingCalls = async (page: Page) => (await walletCalls(page)).filter(call => !['eth_accounts', 'eth_chainId'].includes(call.method));
+export const promptingCalls = async (page: Page) => (await walletCalls(page)).filter(call => !['eth_accounts', 'eth_chainId', 'standard:connect:silent'].includes(call.method));

@@ -14,19 +14,22 @@ import { usePublicTestnet } from './public-testnet-store';
 import { walletChainRef } from '../wallet/evm-networks';
 import { classifyWalletEnvironment, walletExecutionEnvironment } from '../wallet/environment';
 
-import {isLendingComposition} from '@defi-workflow-engine/workflow-contracts';
+import {isLendingComposition, isSolanaTransferNode} from '@defi-workflow-engine/workflow-contracts';
 import {useLending} from './lending-store';
 import { useSupply } from './supply-store';
 import { useRobinhoodTransfer } from './robinhood-transfer-store';
 import { useJupiter } from './jupiter-store';
 import { useSolanaLiquidity } from './solana-liquidity-store';
+import { useSolanaTransfer } from './solana-transfer-store';
 
 export function useExecutionEnvironment() {
   const wallet = useBuild009Wallet(), jupiter = useJupiter();
   const workflow = useWorkflow().state.workflow;
   const solanaWorkflow = workflow.nodes.some(node => node.chainId.startsWith('solana:')) ||
     Boolean(jupiter.recovered && jupiter.record && workflow.nodes.every(node => node.actionType.startsWith('mock-')));
-  const walletKind = jupiter.session && (solanaWorkflow || !wallet.account) ? 'solana' : 'evm';
+  // BUILD-SOLANA-TRANSFER-UX-001: a Solana workflow is always reviewed against the Solana session (or none): a connected EVM wallet never
+  // stands in for its signer.
+  const walletKind = solanaWorkflow || jupiter.session && !wallet.account ? 'solana' : 'evm';
   const walletChain = walletKind === 'solana'
     ? jupiter.session?.account.chains.includes(jupiter.session.chain) ? jupiter.session.chain : null
     : wallet.account ? wallet.chainId : null;
@@ -43,12 +46,15 @@ export function useWorkflowCapability() {
   const modeA = useModeA(), modeB = useModeB(), liquidity = useLiquidity(), composition = useComposition();
   const lending=useLending(),lendingPath=isLendingComposition(state.workflow);
   const supply = useSupply(), supplyPath = state.workflow.nodes.some(n => ['supply','borrow','repay','withdraw'].includes(n.actionType));
-  const transfer = useRobinhoodTransfer(), transferPath = state.workflow.nodes.some(n => n.actionType === 'asset.transfer');
+  // BUILD-SOLANA-TRANSFER-UX-001: a Solana transfer is a Solana path (shared Solana session, its own reviewed record), never the EVM transfer path.
+  const solanaTransferPath = state.workflow.nodes.some(isSolanaTransferNode), solanaTransfer = useSolanaTransfer();
+  const transfer = useRobinhoodTransfer(), transferPath = !solanaTransferPath && state.workflow.nodes.some(n => n.actionType === 'asset.transfer');
   const jupiter = useJupiter(), orca = useSolanaLiquidity();
   const positionPath = state.workflow.nodes.some(n => n.actionType === 'asset.liquidity.concentrated' && orcaLiquidityProfile(n.chainId) !== null);
-  const solanaPath = positionPath || state.workflow.nodes.some(n => n.actionType === 'asset.swap.exact-input' && n.chainId.startsWith('solana:'));
+  const solanaPath = solanaTransferPath || positionPath || state.workflow.nodes.some(n => n.actionType === 'asset.swap.exact-input' && n.chainId.startsWith('solana:'));
   // The Solana liquidity flow has its own reviewed record; the wallet session is shared with the Solana swap.
-  const solanaRecord = positionPath ? orca.record : jupiter.record, solanaRetired = positionPath ? orca.retired : jupiter.retired;
+  const solanaRecord = solanaTransferPath ? solanaTransfer.record : positionPath ? orca.record : jupiter.record;
+  const solanaRetired = solanaTransferPath ? solanaTransfer.retired : positionPath ? orca.retired : jupiter.retired;
   const cow = useCow(), wallet = useBuild009Wallet(), publicTestnet = usePublicTestnet();
   const forkAvailable = Boolean(modeA.info?.available || modeB.info?.available || liquidity.info?.available || composition.info?.available);
   const forkEvidence = modeA.info?.available ? modeA.info.environment : liquidity.info?.available ? liquidity.info.environment :

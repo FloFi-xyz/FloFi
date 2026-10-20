@@ -45,6 +45,6 @@ test('a three-step proposal applies atomically and grants no financial authoriza
   await expect(page.getByRole('button', { name: /^Review proposed change:/ })).toHaveCount(0);
   await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Execute', exact: true }).click();
   await assertNoFinancialCanvasAction(page);
-  await expect(page.getByRole('button', { name: 'Approve & Continue', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Authorize in wallet', exact: true })).toHaveCount(0);
   await expect(page.getByRole('link', { name: 'Download Evidence Bundle' })).toHaveCount(0);
 });

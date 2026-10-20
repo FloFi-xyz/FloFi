@@ -28,7 +28,7 @@ test('replay fails closed for an unrecorded swap and preserves the authority bou
   expect(await mocked.locator('[data-mocked-value]').count()).toBeGreaterThan(0);
   await expect(region.locator('[data-observation-json]')).toHaveCount(0);
   await expect(page.getByRole('region', { name: 'Review & Authorization', exact: true })).toContainText('Review unavailable until simulation is ready.');
-  await expect(page.getByRole('button', { name: 'Approve & Continue', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Authorize in wallet', exact: true })).toHaveCount(0);
   await expect(page.locator('.summary-bar[data-workflow-revision="1"]')).toBeVisible();
   networkGuard.assertClean();
 });
@@ -97,7 +97,7 @@ for (const [from, to, amount, at] of [
       .toBe(await digestRawResponse(new TextEncoder().encode(transcriptText!)));
     await region.getByRole('button', { name: 'Hide transcript · node-002' }).click();
     await expect(page.getByRole('region', { name: 'Review & Authorization', exact: true })).toContainText('Review unavailable until simulation is ready.');
-    await expect(page.getByRole('button', { name: 'Approve & Continue', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Authorize in wallet', exact: true })).toHaveCount(0);
     await expect(page.locator('.summary-bar[data-workflow-revision="1"]')).toBeVisible();
     if (from === 'WETH') {
       await expect(page.getByRole('region', { name: 'Simulation workflow graph' })).toHaveAttribute('data-viewport', 'fitted');

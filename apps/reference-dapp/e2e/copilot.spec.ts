@@ -55,7 +55,7 @@ test('natural language → proposal → explicit Apply → canonical workflow �
   await openSimulationDetails(page);
   await page.getByRole('button', { name: 'Simulate Supply', exact: true }).click();
   await expect(page.getByRole('region', { name: 'Aave Supply', exact: true })).toContainText('Approval required: Yes');
-  await expect(page.getByRole('button', { name: 'Approve & Continue', exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Authorize in wallet', exact: true })).toBeDisabled();
   await expect(page.locator('.review-authorization-details')).toContainText('A simulation that can authorize this workflow is required before approval.');
   expect(await supplySendCount(page)).toBe(0);
 });

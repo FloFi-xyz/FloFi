@@ -23,6 +23,10 @@ const SENTENCES: Readonly<Record<string, string>> = {
   'swap-ethereum-sepolia': 'swap 1 USDC to WETH on Ethereum Sepolia slippage 50 bps',
   'swap-solana': 'swap 1 USDC to SOL on Solana slippage 50 bps',
   'swap-solana-devnet': 'swap 1 devUSDC to SOL on Solana Devnet slippage 50 bps',
+  'transfer-solana': 'send 1 USDC to CtV2foUoy5uJaK5Wybz8Nf1xmC6TgDv93itdja7n9yvH on Solana',
+  'transfer-solana-devnet': 'send 0.01 SOL to CtV2foUoy5uJaK5Wybz8Nf1xmC6TgDv93itdja7n9yvH on Solana Devnet',
+  'transfer-ethereum-sepolia': 'transfer 0.000001 ETH on Ethereum Sepolia',
+  'transfer-robinhood-testnet': 'transfer 0.000001 ETH on Robinhood Chain Testnet',
   'supply-base-sepolia': `supply 1 USDC to Aave on Base Sepolia beneficiary ${OWNER}`,
   'supply-ethereum-sepolia': `supply 0.001 WBTC to Aave on Ethereum Sepolia beneficiary ${OWNER}`,
   'borrow-base-sepolia': `borrow 1 USDC from Aave on Base Sepolia beneficiary ${OWNER}`,
@@ -34,6 +38,7 @@ const SENTENCES: Readonly<Record<string, string>> = {
   'add-liquidity-base-sepolia': 'add liquidity 10 USDC and 0.005 WETH ticks 189960 to 200040 on Base Sepolia slippage 100 bps',
   'add-liquidity-ethereum-sepolia': 'add liquidity 10 USDC and 0.005 WETH ticks 189960 to 200040 on Ethereum Sepolia slippage 100 bps',
   'add-liquidity-solana-devnet': 'add liquidity 0.01 SOL and 0.3 devUSDC ticks -29952 to -25600 on Solana Devnet slippage 100 bps',
+  'add-liquidity-solana': 'add liquidity 0.01 SOL and 0.3 USDC ticks -29952 to -25600 on Solana slippage 100 bps',
   'lending-composition-base-sepolia': `compose supply 10 USDC to Aave then borrow 2 USDC then swap borrowed USDC to WETH on Base Sepolia slippage 50 bps owner ${OWNER}`,
   // BUILD-RH-002: Robinhood Chain (real funds).
   'bridge-base-robinhood': 'bridge 5 USDC from Base to Robinhood via auto slippage 50 bps',

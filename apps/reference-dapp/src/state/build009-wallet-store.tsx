@@ -184,3 +184,5 @@ export function Build009WalletProvider({ children }: { children: ReactNode }) {
   return <Context.Provider value={{ available, providerError, account, chainId, provider: identity, error, revision, busy, session, connect, connectWith, switchTo, reset }}>{children}</Context.Provider>;
 }
 export function useBuild009Wallet(): Wallet { const value = useContext(Context); if (!value) throw new Error('BUILD009_WALLET_MISSING'); return value; }
+/** The operational EVM wallet where the product shell provides one; null elsewhere (e.g. `/connections`, outside the shell). */
+export function useOptionalBuild009Wallet(): Wallet | null { return useContext(Context); }

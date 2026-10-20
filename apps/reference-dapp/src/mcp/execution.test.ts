@@ -11,11 +11,15 @@ import { composeStrategy, type Composition } from '../engine/strategy-engine';
 import { STRATEGY_EXAMPLES } from '../engine/strategy-examples';
 import type { StrategySpec } from '../engine/strategy-spec';
 import { evaluateGates, executionPlan, FLOWS_WITH_EXECUTION_SWITCH, policyGate, readHandoffPolicy, type HandoffPolicy } from './execution.ts';
+import { PENDING_AGENT_CAPABILITIES } from '../domain/agent-rollout';
 import type { McpRuntime } from './runtime.ts';
+import type { ExecutionStorage } from '@defi-workflow-engine/reference-executor';
 
 const compose = (spec: unknown): Composition => { const c = composeStrategy(spec); if (!c.ok) throw new Error(c.code); return c; };
 const example = (id: string) => STRATEGY_EXAMPLES.find(e => e.id === id)!.strategy;
 const DEFAULT = readHandoffPolicy({});
+/** Audit A9: the preserved implementation evaluated as if the owner had approved its agent rollout (no deployment can set this). */
+const rolledOut = (policy: HandoffPolicy): HandoffPolicy => policy.ok ? { ...policy, agentRollout: PENDING_AGENT_CAPABILITIES } : policy;
 function runtime(modes: Partial<Record<FlowName, 'live' | 'harness' | 'off'>>, switches: Partial<Record<FlowName, boolean>> = {}, kind: McpRuntime['kind'] = 'embedded'): McpRuntime {
   const never = async (): Promise<never> => { throw new Error('NOT_IN_THIS_TEST'); };
   return { kind, mode: async flow => modes[flow] ?? 'off', info: async flow => flow in switches ? { executionEnabled: switches[flow]! } : null,
@@ -85,6 +89,61 @@ describe('BUILD-MCP-002 execution plans', () => {
 describe('BUILD-MCP-002 handoff gates', () => {
   const testnetBridge = compose(example('bridge-base-sepolia-arbitrum-sepolia')), solanaSwap = compose(example('swap-solana'));
   const mainnetBridge = compose(example('bridge-base-arbitrum-one'));
+
+  it.each([
+    [{ GRYLOO_ROBINHOOD_TESTNET: 'live' }, 'robinhood-testnet'],
+    [{ GRYLOO_ETHEREUM_SEPOLIA_TRANSFER: 'live' }, 'ethereum-sepolia'],
+  ] as const)('the shared testnet transfer flow enables only its configured network (%j)', async (env, enabledNetwork) => {
+    const flow = FLOWS['robinhood-transfer'], never = async (): Promise<never> => { throw new Error('NO_RPC_OR_STORAGE'); };
+    const storage = { log: {}, leases: {} } as ExecutionStorage;
+    const service = flow.create(storage, { rpc: never, mode: 'live', env });
+    const info = await service.call('info', []) as { executionEnabled: boolean; networks: string[] };
+    expect(info.networks).toEqual([enabledNetwork]);
+    const deployment = { ...runtime({ 'robinhood-transfer': 'live' }), info: async () => info };
+    for (const network of ['robinhood-testnet', 'ethereum-sepolia']) {
+      const gates = await evaluateGates(compose(example(`transfer-${network}`)), deployment, rolledOut(DEFAULT));
+      expect(gates.supportedByCode.execute).toBe(true);
+      expect(gates.enabledByDeployment.enabled).toBe(network === enabledNetwork);
+      expect(gates.handoff).toEqual(network === enabledNetwork ? { allowed: true, reason: null }
+        : { allowed: false, reason: 'NETWORK_NOT_ENABLED_IN_DEPLOYMENT' });
+    }
+    // Without the owner's rollout approval the enabled network is still refused to every agent surface.
+    const unreleased = await evaluateGates(compose(example(`transfer-${enabledNetwork}`)), deployment, DEFAULT);
+    expect(unreleased.enabledByDeployment.enabled).toBe(true);
+    expect(unreleased.enabledByPolicy).toMatchObject({ enabled: false, reason: 'AGENT_ROLLOUT_NOT_APPROVED' });
+    expect(unreleased.handoff).toEqual({ allowed: false, reason: 'AGENT_ROLLOUT_NOT_APPROVED' });
+    const blocked = await evaluateGates(compose(example(`transfer-${enabledNetwork}`)), deployment,
+      rolledOut(readHandoffPolicy({ FLOFI_MCP_HANDOFF_TEST_FUNDS: 'disabled' })));
+    expect(blocked.handoff).toEqual({ allowed: false, reason: 'TEST_FUNDS_HANDOFF_DISABLED_BY_POLICY' });
+    expect(blocked.demonstratedEvidence).toBe(enabledNetwork === 'ethereum-sepolia' ? 'NONE_DEMONSTRATED' : 'TESTNET_EXECUTED');
+  });
+
+  it('refuses a testnet transfer when an older runtime cannot report its per-network enablement', async () => {
+    const gates = await evaluateGates(compose(example('transfer-ethereum-sepolia')),
+      runtime({ 'robinhood-transfer': 'live' }, { 'robinhood-transfer': true }), DEFAULT);
+    expect(gates.handoff).toEqual({ allowed: false, reason: 'EXECUTION_NETWORK_UNKNOWN' });
+  });
+
+  it('keeps inherited Orca Mainnet authoring while requiring runtime, deployment and policy independently', async () => {
+    const orca = compose(example('add-liquidity-solana')), flow = 'orca-liquidity-mainnet';
+    const listed = readHandoffPolicy({ FLOFI_MCP_HANDOFF_MAINNET_NETWORKS: 'solana' }), policy = rolledOut(listed);
+    for (const [deployment, handoffPolicy, reason] of [
+      [runtime({}, {}, 'local'), policy, 'MCP_CLOUD_RUNTIME_REQUIRED'],
+      [runtime({}), policy, 'FLOW_NOT_ENABLED_IN_DEPLOYMENT'],
+      [runtime({ [flow]: 'live' }), policy, 'EXECUTION_SWITCH_UNKNOWN'],
+      [runtime({ [flow]: 'live' }, { [flow]: false }), policy, 'OWNER_EXECUTION_NOT_ENABLED_IN_DEPLOYMENT'],
+      [runtime({ [flow]: 'live' }, { [flow]: true }), rolledOut(DEFAULT), 'MAINNET_HANDOFF_DISABLED_BY_POLICY'],
+      [runtime({ [flow]: 'live' }, { [flow]: true }), policy, null],
+      // Audit A9: runtime, owner-execution switch and a policy listing `solana` (as production has) do not release the agent rollout.
+      [runtime({ [flow]: 'live' }, { [flow]: true }), listed, 'AGENT_ROLLOUT_NOT_APPROVED'],
+    ] as const) {
+      const gates = await evaluateGates(orca, deployment, handoffPolicy);
+      expect(gates.supportedByCode).toMatchObject({ execute: true, flow });
+      expect(gates.handoff).toEqual({ allowed: reason === null, reason });
+      expect(gates.plan.fundsClass).toBe('REAL_FUNDS');
+      expect(gates.demonstratedEvidence).toBe('NONE_DEMONSTRATED');
+    }
+  });
 
   it('allows a public testnet path enabled by the deployment under the default policy', async () => {
     const gates = await evaluateGates(testnetBridge, runtime({ 'crosschain-router-testnet': 'live' }, { 'crosschain-router-testnet': true }), DEFAULT);

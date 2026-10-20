@@ -36,7 +36,7 @@ test('Simulate and Execute open directly on existing content without a workspace
   await expect(main.getByRole('button', { name: 'Simulate Supply', exact: true })).toBeHidden();
   await expect(main.locator('.simulation-technical')).toHaveCount(0);
   await expect(main.locator('.review-authorization-details')).toBeVisible();
-  await expect(main.locator('.canvas-primary-action').getByRole('button', { name: 'Approve & Continue', exact: true })).toBeDisabled();
+  await expect(main.locator('.canvas-primary-action').getByRole('button', { name: 'Authorize in wallet', exact: true })).toBeDisabled();
   await expect(main.locator(':scope > :first-child')).toHaveAttribute('aria-label', 'Workflow simulation workspace');
   await expect(main.getByRole('region', { name: 'Aave Supply', exact: true })).toHaveCount(0);
   await expect(main.getByRole('complementary', { name: 'Simulation Summary', exact: true }).getByRole('button', { name: 'Review Supply', exact: true })).toHaveCount(0);
@@ -48,12 +48,12 @@ test('Simulate and Execute open directly on existing content without a workspace
   expect(await execution.innerText()).not.toMatch(/Draft · Untitled workflow|EXECUTE \/ WORKFLOW|Current stage · Execute|Authorize and track execution|No chain selected|Revision 0/);
   await expect(execution.locator(':scope > :first-child')).toHaveAttribute('aria-label', 'Workflow execution workspace');
   await assertNoFinancialCanvasAction(page);
-  await expect(execution.locator('.canvas-primary-action').getByRole('button', { name: 'Approve & Continue', exact: true })).toBeDisabled();
+  await expect(execution.locator('.canvas-primary-action').getByRole('button', { name: 'Authorize in wallet', exact: true })).toBeDisabled();
   await expect(execution.getByRole('button', { name: 'Accept Supply review', exact: true })).toHaveCount(0);
   await expect(execution.getByRole('button', { name: /^(Execute|Execute Supply)$/ })).toHaveCount(0);
   await nav.getByRole('button', { name: 'Build', exact: true }).click();
   await expect(page.locator('.build-grid .canvas-head h2')).toBeVisible();
-  await expect(page.locator('.canvas-primary-action').getByRole('button', { name: 'Approve & Continue', exact: true })).toBeDisabled();
+  await expect(page.locator('.canvas-primary-action').getByRole('button', { name: 'Authorize in wallet', exact: true })).toBeDisabled();
   await expect(page.locator('.composer-card.active')).toHaveCount(1);
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '1');
 });

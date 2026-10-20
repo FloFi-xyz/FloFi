@@ -25,7 +25,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { FloFi, verifyWebhook, type WebhookEvent } from '../../../packages/developer-sdk/src/index.ts';
 import { createTestWallet } from '../../../packages/reference-reconciler/test/test-wallet.ts';
 import { E2E_APP_ORIGIN as APP_ORIGIN } from './app-origin';
-import { chooseWallet, openSimulationDetails } from './fixtures';
+import { AUTHORIZE_IN_WALLET, openProposalSimulationDetails, proveConnectedEvmWallet, signingSurface } from './fixtures';
 import { guardedContext, installJourneyWallet, journeySends, walletRequests } from './journey-fixtures';
 import { assertMcpHarness } from './mcp-fixtures';
 import { assertExecutionBlocked } from './release-safety-fixtures';
@@ -44,11 +44,6 @@ async function operatorKey(): Promise<{ key: string; cleanup: () => Promise<void
   const project = JSON.parse((await cli(['create-project', '--name', 'Acme Wallet'])).stdout) as { projectId: string };
   await cli(['create-key', '--project', project.projectId, '--key-file', keyFile]);
   return { key: (await readFile(keyFile, 'utf8')).trim(), cleanup: () => rm(dir, { recursive: true, force: true }) };
-}
-/** The authoritative product's simulation stage (as the MCP browser journey uses it). */
-async function simulateStage(page: Page) {
-  await page.getByRole('button', { name: 'Simulate workflow', exact: true }).click();
-  await openSimulationDetails(page);
 }
 
 test.describe('BUILD-DEVELOPER-001 third-party integration (SDK → FloFi /approve → owner Review; MOCKED execution blocked)', () => {
@@ -94,17 +89,22 @@ test.describe('BUILD-DEVELOPER-001 third-party integration (SDK → FloFi /appro
       // Status sharing with the app is OFF until the user turns it on.
       await expect(region.getByRole('checkbox')).not.toBeChecked();
       await region.getByRole('checkbox').check();
-      await region.getByRole('button', { name: 'Connect wallet and prove ownership' }).click();
-      await chooseWallet(page, 'Browser wallet');
+      // BUILD-SOLANA-TRANSFER-UX-001: the app's link opens the signing surface; the wallet already connected in this browser is recognized
+      // (no selector) and only signs FloFi's sign-in message.
+      await expect(signingSurface(page)).toBeVisible();
+      await proveConnectedEvmWallet(page, region, owner.address);
       // BUILD-FLOFI-UX-UI-002: the proof loads the exact proposal; no separate Load step.
       await expect(region.getByRole('status')).toContainText('Ready for your review.');
       await expect(region.getByRole('button', { name: 'Load proposal' })).toHaveCount(0);
+      // FloFi prepares the fresh simulation for that wallet; MOCKED evidence keeps the one owner action disabled.
+      await expect(signingSurface(page).getByRole('button', { name: AUTHORIZE_IN_WALLET, exact: true })).toBeDisabled({ timeout: 30_000 });
+      expect((await walletRequests(page)).filter(method => method === 'personal_sign')).toHaveLength(1);
       // The authoritative product's simulation and Review; a MOCKED route cannot authorize execution.
-      await simulateStage(page);
+      await openProposalSimulationDetails(page);
       await expect(bridge(page)).toContainText('Strategy Manifest');
       await expect(bridge(page)).toContainText(`Owner ${owner.address}`);
       expect(await walletRequests(page)).toContain('personal_sign');
-      await expect(page.getByRole('button', { name: 'Approve & Continue', exact: true })).toBeDisabled();
+      await expect(page.locator('.canvas-primary-action').getByRole('button', { name: AUTHORIZE_IN_WALLET, exact: true })).toBeDisabled();
       await expect(page.locator('.review-authorization-details')).toContainText('A simulation that can authorize this workflow is required before approval.');
       await expect(page.getByRole('region', { name: 'Authorization technical details', exact: true })).toContainText('Strategy Manifest');
       await expect(page.getByRole('button', { name: 'Review approved', exact: true })).toHaveCount(0);

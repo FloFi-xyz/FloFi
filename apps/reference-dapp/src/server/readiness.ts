@@ -27,7 +27,8 @@ type Env = Readonly<Record<string, string | undefined>>;
 const CODE = /^[A-Z][A-Z0-9_]{2,80}$/;
 const code = (error: unknown, fallback: string) => error instanceof Error && CODE.test(error.message) ? error.message : fallback;
 export const READINESS_FLOWS: readonly FlowName[] = Object.freeze(['base-sepolia-swap', 'uniswap-liquidity', 'aave-supply', 'robinhood-transfer',
-  'crosschain-router-testnet', 'solana-devnet-swap', 'orca-liquidity', 'lending-composition', 'crosschain-router', 'jupiter-swap', 'orca-liquidity-mainnet']);
+  'crosschain-router-testnet', 'solana-devnet-swap', 'orca-liquidity', 'lending-composition', 'crosschain-router', 'jupiter-swap', 'orca-liquidity-mainnet',
+  'solana-transfer', 'solana-devnet-transfer']);
 
 export type NetworkStatus = { readonly status: 'REACHABLE' | 'WRONG_CHAIN' | 'UNREACHABLE' | 'RATE_LIMITED' | 'CONFIGURATION_INVALID';
   readonly chain: string; readonly endpoint: 'PUBLIC_DEFAULT' | 'DEPLOYMENT_OVERRIDE'; readonly block?: number; readonly latencyMs?: number };

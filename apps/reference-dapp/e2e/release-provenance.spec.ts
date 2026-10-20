@@ -13,7 +13,7 @@ test('a valid MOCKED Supply simulation cannot grant production Review or submit 
   await page.getByRole('button', { name: 'Simulate Supply', exact: true }).click();
   const panel = page.getByRole('region', { name: 'Aave Supply', exact: true });
   await expect(panel).toContainText('Approval required: Yes');
-  await expect(page.getByRole('button', { name: 'Approve & Continue', exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Authorize in wallet', exact: true })).toBeDisabled();
   await expect(page.locator('.review-authorization-details')).toContainText('A simulation that can authorize this workflow is required before approval.');
   expect(await supplySendCount(page)).toBe(0);
   await expect(page.getByRole('link', { name: 'Download Evidence Bundle' })).toHaveCount(0);
@@ -49,7 +49,7 @@ for (const row of [
     const details = JSON.parse((await panel.locator('pre').innerText()));
     expect(details.review).toMatchObject({ amount: row.raw, chain: 'eip155:84532' });
     expect(details.attempts).toEqual([]);
-    await expect(page.getByRole('button', { name: 'Approve & Continue', exact: true })).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'Authorize in wallet', exact: true })).toBeDisabled();
     await expect(page.locator('.review-authorization-details')).toContainText('A simulation that can authorize this workflow is required before approval.');
     expect(await supplySendCount(page)).toBe(0);
     await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Execute', exact: true }).click();
@@ -86,7 +86,7 @@ test('Ethereum Sepolia WBTC retains the correct chain, asset and amount while MO
   const details = JSON.parse(await panel.locator('pre').innerText());
   expect(details.review).toMatchObject({ chain: 'eip155:11155111', asset: '0x29f2d40b0605204364af54ec677bd022da425d03', amount: '100000', beneficiary: SUPPLY_OWNER });
   expect(details.attempts).toEqual([]);
-  await expect(page.getByRole('button', { name: 'Approve & Continue', exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Authorize in wallet', exact: true })).toBeDisabled();
   await expect(page.locator('.review-authorization-details')).toContainText('A simulation that can authorize this workflow is required before approval.');
   expect(await supplySendCount(page)).toBe(0);
   await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Execute', exact: true }).click();

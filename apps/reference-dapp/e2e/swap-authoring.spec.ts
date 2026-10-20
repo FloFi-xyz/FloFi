@@ -51,7 +51,7 @@ for (const [direction, from, to, amount] of [
     const chat = await workflow(page);
     expect(chat.revision).toBe(1);
     await expect(page.getByRole('region', { name: 'Deterministic review findings' })).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Execute workflow', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Authorize in wallet', exact: true })).toHaveCount(0);
     await page.reload();
     await createCanvas(page, direction, amount, '100');
     const canvas = await workflow(page);
@@ -125,7 +125,7 @@ test('proposal and blocked review snapshots show unquoted unavailable state', as
   // The displayed IR carries this visit's own draft identity, so it is checked as text and masked in the screenshot below.
   expect((JSON.parse(await readWorkflowIr(page)) as SemanticWorkflow).workflowId).toMatch(/^workflow-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
   await expect(page.getByRole('region', { name: 'Deterministic review findings' })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Approve & Continue', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Authorize in wallet', exact: true })).toHaveCount(0);
   await page.locator('.build-flow-surface .composer-card').first().scrollIntoViewIfNeeded();
   // IntersectionObserver rounds a fully visible transformed card to 0.99999994.
   // Check its actual CSS bounds instead of comparing that floating-point ratio to 1.

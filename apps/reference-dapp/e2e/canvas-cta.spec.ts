@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect } from './fixtures';
-import { installSupplyWallet } from './supply-fixtures';
+import { installSupplyWallet, SUPPLY_OWNER } from './supply-fixtures';
 import { configureCanvasAction } from './composer-authoring-fixtures';
 
 test('Build CTA floats inside the wider canvas without colliding with existing controls', async ({ page }) => {
@@ -69,20 +69,22 @@ test('Build CTA floats inside the wider canvas without colliding with existing c
 test('Canvas simulation runs the shared Supply lifecycle with one guarded Review action', async ({ page }) => {
   await installSupplyWallet(page);
   await page.goto('/app');
+  // Supply binds the connected owner as beneficiary: wait for the wallet's passive reconnect before adding it.
+  await expect(page.locator('.build009-wallet-info')).toHaveAttribute('title', new RegExp(`^${SUPPLY_OWNER}$`, 'i'));
   await page.getByRole('button', { name: 'Add supply', exact: true }).click();
   await configureCanvasAction(page, '1');
   await page.getByRole('region', { name: 'Workflow graph', exact: true }).getByRole('button', { name: 'Simulate workflow', exact: true }).click();
   const nav = page.getByRole('navigation', { name: 'Workflow stages' });
   await expect(nav.getByRole('button', { name: 'Simulate', exact: true })).toHaveAttribute('aria-current', 'page');
   const primary = page.getByRole('region', { name: 'Simulation workflow graph', exact: true }).locator('.canvas-primary-action');
-  await expect(primary.getByRole('button', { name: 'Approve & Continue', exact: true })).toBeDisabled();
-  await expect(page.getByRole('button', { name: 'Approve & Continue', exact: true })).toHaveCount(1);
+  await expect(primary.getByRole('button', { name: 'Authorize in wallet', exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Authorize in wallet', exact: true })).toHaveCount(1);
   await expect(page.getByRole('button', { name: 'Simulate Supply', exact: true })).toHaveCount(0);
   await expect(page.locator('.summary-bar button')).toHaveCount(0);
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '1');
   await expect(page.getByRole('button', { name: 'Simulate workflow', exact: true })).toHaveCount(0);
   await nav.getByRole('button', { name: 'Build', exact: true }).click();
-  await expect(page.locator('.canvas-primary-action').getByRole('button', { name: 'Approve & Continue', exact: true })).toBeDisabled();
+  await expect(page.locator('.canvas-primary-action').getByRole('button', { name: 'Authorize in wallet', exact: true })).toBeDisabled();
   await expect(page.locator('.flow-card.active')).toHaveCount(1);
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '1');
 });

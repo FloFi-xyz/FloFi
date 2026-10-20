@@ -14,6 +14,7 @@ import { createOrcaLiquidityService } from '../server/orca-liquidity-service';
 import { createSolanaCompositionService, type SolanaCompositionView } from '../server/solana-composition-service';
 import { createPositionMintSigner, signOrcaLiquidityTransaction } from '../wallet/position-mint-signer';
 import type { SolanaSession } from '../wallet/solana-wallet';
+import { registeredSolanaSession } from '../test-utils/registered-solana-session';
 import type { ExecutionControlsState } from '../state/execution-controls';
 import { createSolanaSwapNode } from './jupiter-authoring';
 import { createSolanaLiquidityNode } from './solana-liquidity-authoring';
@@ -57,7 +58,7 @@ function presented(view: SolanaCompositionView) {
   return { progress, result: projectExecutionResult(progress), action, steps: progress.steps.map(step => [step.id, step.state, step.operations[0]?.label]) };
 }
 /** A Wallet Standard session whose wallet behaves like Phantom: it appends guard instructions, then signs. */
-const guardingSession = (wallet: ReturnType<typeof createMockedSolanaWallet>): SolanaSession => ({ chain: 'solana:devnet',
+const guardingSession = (wallet: ReturnType<typeof createMockedSolanaWallet>): SolanaSession => registeredSolanaSession({ chain: 'solana:devnet',
   account: { address: wallet.owner, chains: ['solana:devnet'], features: ['solana:signTransaction'] },
   wallet: { name: 'Guarding wallet', chains: ['solana:devnet'], accounts: [], features: { 'solana:signTransaction': { signTransaction: async (input: { transaction: Uint8Array }) =>
     [{ signedTransaction: fromBase64(wallet.sign(appendMockedWalletGuards(toBase64(input.transaction), 2)), 2048) }] } } } });
@@ -204,8 +205,8 @@ describe('P0: a wallet that changes the reviewed Solana Devnet swap (MOCKED loop
     await service.reviewLiquidity(id, prepared.liquidity!.review.commitment, workflow);
     const lp = await service.beginLiquidity(id, wallet.owner, workflow);
     // The wallet signs first, then the one-time position key signs the same exact message.
-    const signed = await signOrcaLiquidityTransaction({ ...guardingSession(wallet), wallet: { ...guardingSession(wallet).wallet, features: { 'solana:signTransaction': {
-      signTransaction: async (input: { transaction: Uint8Array }) => [{ signedTransaction: fromBase64(phantom(toBase64(input.transaction)), 2048) }] } } } },
+    const signed = await signOrcaLiquidityTransaction(registeredSolanaSession({ ...guardingSession(wallet), wallet: { ...guardingSession(wallet).wallet, features: { 'solana:signTransaction': {
+      signTransaction: async (input: { transaction: Uint8Array }) => [{ signedTransaction: fromBase64(phantom(toBase64(input.transaction)), 2048) }] } } } }),
       lp.unsignedTransaction, lp.view.liquidity!.review.message, lp.signers, key);
     await service.submitLiquidity(id, signed);
     const done = await service.observe(id);

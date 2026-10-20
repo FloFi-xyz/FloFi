@@ -2,7 +2,7 @@
 import type { SolanaRpc } from '@defi-workflow-engine/reference-compiler';
 
 /** Read methods for simulation/reconciliation. sendTransaction is reachable only from the owner-signed submit path. */
-const methods = new Set(['getGenesisHash', 'getMultipleAccounts', 'getLatestBlockhash', 'getBlockHeight', 'simulateTransaction',
+const methods = new Set(['getGenesisHash', 'getSlot', 'getMultipleAccounts', 'getTokenAccountsByOwner', 'getLatestBlockhash', 'getBlockHeight', 'getFeeForMessage', 'simulateTransaction', 'getMinimumBalanceForRentExemption',
   'getSignatureStatuses', 'getTransaction', 'sendTransaction']);
 
 /** An owner-chosen HTTPS RPC may carry its own credential in its path; it is never logged or returned. */

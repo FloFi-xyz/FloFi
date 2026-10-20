@@ -24,6 +24,7 @@ import { COPILOT_TRANSCRIPT, COPILOT_V2_LIMITS, isCopilotIntentError, parseCopil
 import { copilotCopy, type CarriedLabel, type CopilotCopy, type CopilotLanguage } from './copilot-messages';
 import { answerQuestion, stepSummary, type CopilotFacts } from './copilot-answers';
 import { copilotNetworksMentioned, type CopilotNetworkId } from './network-registry';
+import type { PendingAgentCapability } from './agent-rollout';
 import { lexiconAssets, lexiconNetworks, lexiconSuggestions, LEXICON_LIMITS, mergeLexicon, parseLexicon, parseMemoryStatement, statedSource, type LexiconEntry,
   type LexiconTarget, type MemoryStatement } from './copilot-lexicon';
 import { learningCopy, MEMORY_NO, MEMORY_YES, refusalFor, suggestionNote, targetLabel, usedNote } from './copilot-learning-copy';
@@ -107,6 +108,8 @@ export type CopilotEnvironment = {
   readonly verified?: CopilotVerified;
   /** BUILD-CHAT-LEARNING-001: the user's learning context; absent when learning is not enabled on this deployment. */
   readonly learning?: CopilotLearning;
+  /** Tests only: approved agent rollouts (audit A9). Absent in the product, where `AGENT_ROLLOUT_APPROVED` applies. */
+  readonly agentRollout?: readonly PendingAgentCapability[];
 };
 /** One FloFi-registered Orca position of the connected Solana Devnet wallet, as the position registry and the chain report it. */
 export type CopilotPosition = { readonly positionMint: string; readonly status: string; readonly tickLower: number | null; readonly tickUpper: number | null;
@@ -1005,7 +1008,8 @@ function author(intent: CopilotIntentV2, actions: readonly CopilotAction[], comp
   // BUILD-BASE-001: the conversation (CopilotIntentV2) authors on the catalog networks too. PR B: with the verified Orca price and the funding swap.
   // BUILD-CHAT-LEARNING-001: learned vocabulary may only widen which networks/tokens the user named (see `Grounding.lexicon`).
   const lexicon = lexiconOf(state, env);
-  const grounding: Grounding = { text: segmentText(state), carried, policy: { language, networkDefaults: false, catalog: true }, latest: state.segment.at(-1) ?? '',
+  const grounding: Grounding = { text: segmentText(state), carried, policy: { language, networkDefaults: false, catalog: true, ...env.agentRollout ? { agentRollout: env.agentRollout } : {} },
+    latest: state.segment.at(-1) ?? '',
     solana: { price: env.verified?.orcaPrice?.price ?? null, swap }, ...lexicon.length ? { lexicon } : {} };
   const planned = planCopilotActions(actions, composition, grounding, env.wallet);
   if (planned.kind !== 'PLAN') return stopped(planned, intent, state, env, m, { ...extras, carried: [...carried], ...swap ? { swap } : {} });

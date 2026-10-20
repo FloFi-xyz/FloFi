@@ -146,11 +146,10 @@ export function SolanaLiquidityPanel({ view }: { view: 'simulate' | 'execute' })
   const canExecute = Boolean(record?.authorization && !liquidity.retired && !attempt && record.verdict === 'PENDING' && fresh > 0 && liquidity.executionEnabled);
   const observation = record?.observations.at(-1), info = liquidity.error ?? record?.error, effects = observation?.effects;
   const created = review?.accounts.mayBeCreated ?? [];
-  // BUILD-SOLANA-MAINNET-001: the position's own cluster names every value; mainnet-beta is real funds and needs an explicit acknowledgement.
+  // BUILD-SOLANA-MAINNET-001: the position's own cluster names every value. BUILD-SOLANA-TRANSFER-UX-001: mainnet-beta real funds are stated in the
+  // review and confirmed in the wallet; there is no separate acknowledgement step.
   const devnet = liquidity.network === 'Solana Devnet', { sol, usdc } = amounts(devnet);
-  const [acknowledged, setAcknowledged] = useState(false);
-  useEffect(() => { setAcknowledged(false); }, [record?.id, record?.authorization]);
-  const canExecuteNow = canExecute && (devnet || acknowledged);
+  const canExecuteNow = canExecute;
   return <section className="panel" aria-label={tr(devnet ? "Solana Devnet liquidity" : "Solana liquidity")}><h2>{tr(view === 'simulate' ? 'Simulate liquidity position' : 'Review liquidity position')}</h2>
     {fields && (devnet ? <p>{tr("Concentrated liquidity on Solana Devnet via Orca Whirlpools: up to ")}{tr(fields.maxSol)}{tr(" Devnet SOL and ")}{tr(fields.maxDevUsdc)}{tr(" devUSDC between ")}{tr(fields.lowerPrice)}{tr(" and ")}{tr(fields.upperPrice)}{tr(" devUSDC per SOL.")}</p>
       : <p>{tr("Concentrated liquidity on Solana Mainnet via Orca Whirlpools: up to ")}{tr(fields.maxSol)}{tr(" SOL and ")}{tr(fields.maxDevUsdc)}{tr(" USDC between ")}{tr(fields.lowerPrice)}{tr(" and ")}{tr(fields.upperPrice)}{tr(" USDC per SOL.")}</p>)}
@@ -219,7 +218,6 @@ export function SolanaLiquidityPanel({ view }: { view: 'simulate' | 'execute' })
         : "This position uses real funds on Solana Mainnet. Your wallet will ask you to sign one exact transaction; Flofi never signs for you.")}</p>}
       {record && !record.authorization && !attempt && !liquidity.retired && <button type="button" disabled={liquidity.busy || fresh === 0} onClick={() => void liquidity.review()}>{tr("Accept liquidity review")}</button>}
       {record?.authorization && !attempt && !liquidity.executionEnabled && <p role="status">{tr(message('ORCA_LIQUIDITY_EXECUTION_NOT_ENABLED', devnet))}</p>}
-      {!devnet && canExecute && <label><input type="checkbox" checked={acknowledged} onChange={e => setAcknowledged(e.target.checked)}/>{tr(" I understand this executes on Solana mainnet with real funds")}</label>}
       {canExecuteNow && <button type="button" className="primary" disabled={liquidity.busy} onClick={() => void liquidity.execute()}>{tr("Execute ")}{tr(review?.operation === 'OPEN' ? 'position' : 'removal')}</button>}
       {attempt && !record?.evidence && <p>{tr("Transaction: ")}{tr(record?.notSubmitted ? 'not submitted' : attempt.state.toLowerCase().replaceAll('_', ' '))} {observation?.explorer && <a href={observation.explorer} target="_blank" rel="noreferrer">{tr("View transaction")}</a>}</p>}
       {pending && <button type="button" disabled={liquidity.busy} onClick={() => void liquidity.observe()}>{tr("Observe existing transaction")}</button>}

@@ -7,7 +7,7 @@
  */
 import { COPILOT_FEE_TIERS } from '../domain/copilot-intent';
 import { COPILOT_POOLS } from '../domain/copilot-authoring';
-import { AUTHORING_CAPABILITIES, bridgeOffers, capabilityNetworks, catalogCapabilityNetworks, lendingAmountScopeText, lendingOffers } from '../domain/authoring-capabilities';
+import { AUTHORING_CAPABILITIES, bridgeOffers, catalogCapabilityNetworks, copilotCapabilityNetworks, lendingAmountScopeText, lendingOffers } from '../domain/authoring-capabilities';
 import { declaredNetworkSymbols } from '../domain/asset-catalogs';
 import { COPILOT_NETWORK_IDS, networkIdentity, networkOfCopilot, type NetworkIdentity } from '../domain/network-registry';
 import { ROUTER_NETWORK_OPTIONS } from '../domain/router-authoring';
@@ -34,18 +34,18 @@ const examples = (network: NetworkIdentity): string => declaredNetworkSymbols(ne
 /** Rule 8: which network identifiers mean real funds and which are test networks. */
 export const copilotNetworkRule = (): string => `${ids('MAINNET')} are mainnets with real funds. ${ids('TESTNET')} are test networks.`;
 /** The transfer networks, for the UNSUPPORTED rule. */
-export const copilotTransferScope = (): string => names(capabilityNetworks('transfer'));
+export const copilotTransferScope = (): string => names(copilotCapabilityNetworks('transfer'));
 
 /** "What Flofi supports": one line per action, every network and route from the capability truth. */
 export function copilotSupportsSection(): string {
-  const catalog = catalogCapabilityNetworks(), plain = (action: StrategyAction) => capabilityNetworks(action).filter(network => !network.catalog);
-  const catalogLine = (action: StrategyAction) => catalog.filter(network => capabilityNetworks(action).includes(network));
+  const catalog = catalogCapabilityNetworks(), plain = (action: StrategyAction) => copilotCapabilityNetworks(action).filter(network => !network.catalog);
+  const catalogLine = (action: StrategyAction) => catalog.filter(network => copilotCapabilityNetworks(action).includes(network));
   const swap = [...plain('swap').map(network => `${join(tokensOf(network, 'swap'))} on ${network.name}`),
     `any two tokens of the official catalog on ${names(catalogLine('swap'))} (for example ${catalogLine('swap').map(network => `${examples(network)} on ${network.name}`).join('; ')})`];
   const lending = new Map<string, NetworkIdentity[]>();
   for (const offer of lendingOffers()) lending.set(offer.asset, [...lending.get(offer.asset) ?? [], offer.network]);
   const pools = plain('add_liquidity').map(network => {
-    const pool = network.copilot === COPILOT_POOLS.ORCA.network ? { name: 'Orca', ...COPILOT_POOLS.ORCA } : { name: 'Uniswap v3', ...COPILOT_POOLS.UNISWAP_V3 };
+    const pool = network.chain.startsWith('solana:') ? { name: 'Orca', ...COPILOT_POOLS.ORCA } : { name: 'Uniswap v3', ...COPILOT_POOLS.UNISWAP_V3 };
     return `${pool.name} ${join(tokensOf(network, 'add_liquidity'), '/')} on ${network.name} (price range in ${pool.quote} per ${pool.base}, or ticks)`;
   });
   const catalogPools = `Uniswap v3 with any two catalog tokens on ${names(catalogLine('add_liquidity'))} (fee tier ${join(COPILOT_FEE_TIERS.map(String), 'or')} percent; full range or ticks)`;
@@ -54,7 +54,8 @@ export function copilotSupportsSection(): string {
   return [
     'What Flofi supports (generated from Flofi\'s capability registry; anything else is UNSUPPORTED):',
     `- SWAP: ${swap.join('; ')}.`,
-    `- TRANSFER: ETH or any token of the official catalog on ${names(capabilityNetworks('transfer'))}, to the connected wallet or a 0x address the user typed.`,
+    `- TRANSFER: ETH or any official catalog token on ${names(copilotCapabilityNetworks('transfer').filter(network => network.chain.startsWith('eip155:')))}, to the connected wallet or an explicit 0x address. ` +
+      'Solana: SOL, USDC or USDT; Solana Devnet: SOL or devUSDC. Solana transfers require an explicit recipient wallet public key in base58, kept case-sensitive. Never substitute the connected wallet.',
     `- BRIDGE (Cross-chain Router): ${join(bridgeOffers().map(routeText), 'or')}; optional LI.FI or Across preference and recipient.`,
     `- SUPPLY, BORROW, REPAY, WITHDRAW on Aave V3: ${[...lending].map(([asset, networks]) => `${asset} on ${names(networks)}`).join('; ')}; nothing else. ${lendingAmountScopeText('EN')}`,
     `- LIQUIDITY: ${[...pools, catalogPools].join('; ')}.`,

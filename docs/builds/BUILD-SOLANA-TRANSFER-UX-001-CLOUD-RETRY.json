@@ -1,0 +1,349 @@
+{
+  "build": {
+    "id": "adf668d1-bbf1-4f21-94f4-d655ec4a4307",
+    "status": "FAILURE",
+    "source": {
+      "storageSource": {
+        "bucket": "flofi-ci-source-547158547199-europe-west1",
+        "object": "build-solana-transfer-ux-001-retry/1792446732.852893-c8bfdfda52dc4b948baacc3c4d71880a.tgz",
+        "generation": "1792446796077927"
+      }
+    },
+    "createTime": "2026-10-19T21:53:16.418106896Z",
+    "startTime": "2026-10-19T21:53:17.468611418Z",
+    "finishTime": "2026-10-19T22:44:47.598687Z",
+    "results": {
+      "buildStepImages": [
+        "sha256:f772ab459889c67835bd959c2b9e9351f2c0752c4f989710ecda20c229f0733e",
+        "sha256:7e52dee8e595008b20af17a38b141402bf6d8c9dee09c910c74e0cef61ce9879"
+      ],
+      "buildStepOutputs": [
+        "",
+        ""
+      ],
+      "buildStepResults": {
+        "disposable-postgres": {},
+        "full-certification": {}
+      }
+    },
+    "steps": [
+      {
+        "name": "gcr.io/cloud-builders/docker",
+        "args": [
+          "-euo",
+          "pipefail",
+          "-c",
+          "docker run --detach --rm --name flofi-gcp-postgres --network cloudbuild           -e POSTGRES_USER=flofi -e POSTGRES_HOST_AUTH_METHOD=trust           postgres:18.6-bookworm@sha256:3725f4e2499eef5134592b3b4ab79a543ed7f8e533b05b5b637af926630f6650\n# Over TCP: the image's init-time server listens only on its Unix socket and is then restarted.\nfor attempt in $(seq 1 60); do\n  if docker exec flofi-gcp-postgres pg_isready -h 127.0.0.1 -U flofi -d postgres > /dev/null 2>&1; then\n    echo 'Disposable PostgreSQL ready'\n    exit 0\n  fi\n  sleep 1\ndone\ndocker logs flofi-gcp-postgres\nexit 1\n"
+        ],
+        "id": "disposable-postgres",
+        "entrypoint": "bash",
+        "timing": {
+          "startTime": "2026-10-19T21:53:26.883191594Z",
+          "endTime": "2026-10-19T21:53:40.576280827Z"
+        },
+        "status": "SUCCESS",
+        "pullTiming": {
+          "startTime": "2026-10-19T21:53:26.883191594Z",
+          "endTime": "2026-10-19T21:53:26.890676564Z"
+        }
+      },
+      {
+        "name": "cimg/node:24.21.0-browsers",
+        "env": [
+          "FLOFI_SOURCE_SNAPSHOT_SHA256=f53a7b2ad733aea9a39cc44dc6a519ed22d365fdefb51314d689e82b1ccb2130",
+          "BRANCH_NAME=claude/build-solana-transfer-ux-001"
+        ],
+        "args": [
+          "scripts/gcp-ci-full.sh"
+        ],
+        "id": "full-certification",
+        "waitFor": [
+          "disposable-postgres"
+        ],
+        "entrypoint": "bash",
+        "timing": {
+          "startTime": "2026-10-19T21:53:40.576531283Z",
+          "endTime": "2026-10-19T22:44:37.192936700Z"
+        },
+        "status": "FAILURE",
+        "pullTiming": {
+          "startTime": "2026-10-19T21:53:40.576531283Z",
+          "endTime": "2026-10-19T21:54:22.349251265Z"
+        },
+        "exitCode": 1
+      }
+    ],
+    "timeout": "10800s",
+    "projectId": "celtic-volt-418819",
+    "sourceProvenance": {
+      "resolvedStorageSource": {
+        "bucket": "flofi-ci-source-547158547199-europe-west1",
+        "object": "build-solana-transfer-ux-001-retry/1792446732.852893-c8bfdfda52dc4b948baacc3c4d71880a.tgz",
+        "generation": "1792446796077927"
+      },
+      "fileHashes": {
+        "gs://flofi-ci-source-547158547199-europe-west1/build-solana-transfer-ux-001-retry/1792446732.852893-c8bfdfda52dc4b948baacc3c4d71880a.tgz#1792446796077927": {
+          "fileHash": [
+            {
+              "type": "MD5",
+              "value": "xa9bn4oZfcjytA2L9IkmDg=="
+            },
+            {
+              "type": "SHA256",
+              "value": "oNyDJ20cJbeFG7FRuzz9qtC/teH/yPT1kz+pD1I/lX0="
+            }
+          ]
+        }
+      }
+    },
+    "options": {
+      "machineType": "E2_STANDARD_2",
+      "logging": "CLOUD_LOGGING_ONLY",
+      "pool": {},
+      "workerRelease": "legacy"
+    },
+    "logUrl": "https://console.cloud.google.com/cloud-build/builds;region=europe-west1/adf668d1-bbf1-4f21-94f4-d655ec4a4307?project=547158547199",
+    "substitutions": {
+      "_SNAPSHOT_SHA256": "f53a7b2ad733aea9a39cc44dc6a519ed22d365fdefb51314d689e82b1ccb2130",
+      "_SOURCE_BRANCH": "claude/build-solana-transfer-ux-001"
+    },
+    "timing": {
+      "STORAGE_SOURCE": {
+        "startTime": "2026-10-19T21:53:20.602068233Z",
+        "endTime": "2026-10-19T21:53:26.318815493Z"
+      },
+      "FETCHSOURCE": {
+        "startTime": "2026-10-19T21:53:20.602068233Z",
+        "endTime": "2026-10-19T21:53:26.318815493Z"
+      },
+      "BUILD": {
+        "startTime": "2026-10-19T21:53:26.319010563Z",
+        "endTime": "2026-10-19T22:44:37.196777230Z"
+      }
+    },
+    "queueTtl": "3600s",
+    "serviceAccount": "projects/celtic-volt-418819/serviceAccounts/flofi-ci-runner@celtic-volt-418819.iam.gserviceaccount.com",
+    "name": "projects/547158547199/locations/europe-west1/builds/adf668d1-bbf1-4f21-94f4-d655ec4a4307",
+    "failureInfo": {
+      "type": "USER_BUILD_STEP",
+      "detail": "Build step failure: build step 1 \"cimg/node:24.21.0-browsers\" failed: step exited with non-zero status: 1"
+    }
+  },
+  "certification": {
+    "result": "FAILURE",
+    "ledger": [],
+    "stages": [
+      {
+        "name": "Toolchain bootstrap",
+        "outcome": "success",
+        "seconds": 7.36
+      },
+      {
+        "name": "Toolchain identity",
+        "outcome": "success",
+        "seconds": 0.97
+      },
+      {
+        "name": "Frozen dependency install",
+        "outcome": "success",
+        "seconds": 12.91
+      },
+      {
+        "name": "Dependency integrity license and age",
+        "outcome": "success",
+        "seconds": 9.13
+      },
+      {
+        "name": "Dependency audit",
+        "outcome": "success",
+        "seconds": 1.37
+      },
+      {
+        "name": "SBOM",
+        "outcome": "success",
+        "seconds": 1.21
+      },
+      {
+        "name": "Typecheck",
+        "outcome": "success",
+        "seconds": 222.72
+      },
+      {
+        "name": "Lint",
+        "outcome": "success",
+        "seconds": 49.24
+      },
+      {
+        "name": "Production build",
+        "outcome": "success",
+        "seconds": 153.13
+      },
+      {
+        "name": "Schema drift",
+        "outcome": "success",
+        "seconds": 1.98
+      },
+      {
+        "name": "Unit and contract tests",
+        "outcome": "success",
+        "seconds": 1022.76
+      },
+      {
+        "name": "PostgreSQL",
+        "outcome": "success",
+        "seconds": 384.01
+      },
+      {
+        "name": "Anvil bootstrap",
+        "outcome": "success",
+        "seconds": 6.84
+      },
+      {
+        "name": "Anvil and offline forks",
+        "outcome": "success",
+        "seconds": 63.34
+      },
+      {
+        "name": "Browser bootstrap",
+        "outcome": "success",
+        "seconds": 7.16
+      },
+      {
+        "name": "Critical browser regressions",
+        "outcome": "success",
+        "seconds": 394.7
+      },
+      {
+        "name": "Guarded browser suites",
+        "outcome": "failure",
+        "seconds": 644.02
+      }
+    ],
+    "browserProfiles": [
+      {
+        "name": "copilot-learning",
+        "seconds": 48.26,
+        "status": "PASS"
+      },
+      {
+        "name": "canvas-corrections",
+        "seconds": 38.21,
+        "status": "PASS"
+      },
+      {
+        "name": "solana-wallet-refusal",
+        "seconds": 46.95,
+        "status": "PASS"
+      },
+      {
+        "name": "supply-provenance",
+        "seconds": 42.57,
+        "status": "PASS"
+      },
+      {
+        "name": "review-execute-recovery-components",
+        "seconds": 192.72,
+        "status": "PASS"
+      },
+      {
+        "name": "solana-transfer-ux",
+        "seconds": 25.83,
+        "status": "PASS"
+      },
+      {
+        "name": "default-product",
+        "seconds": 623.61,
+        "status": "FAIL"
+      }
+    ],
+    "vitestSummaries": [
+      {
+        "afterStage": "Schema drift",
+        "result": "Test Files  1 passed (1)"
+      },
+      {
+        "afterStage": "Schema drift",
+        "result": "Tests  3 passed (3)"
+      },
+      {
+        "afterStage": "Schema drift",
+        "result": "Test Files  401 passed | 2 skipped (403)"
+      },
+      {
+        "afterStage": "Schema drift",
+        "result": "Tests  4757 passed | 2 skipped (4759)"
+      },
+      {
+        "afterStage": "Unit and contract tests",
+        "result": "Test Files  69 passed | 1 skipped (70)"
+      },
+      {
+        "afterStage": "Unit and contract tests",
+        "result": "Tests  445 passed | 3 skipped (448)"
+      },
+      {
+        "afterStage": "Anvil bootstrap",
+        "result": "Test Files  1 passed (1)"
+      },
+      {
+        "afterStage": "Anvil bootstrap",
+        "result": "Tests  4 passed | 10 skipped (14)"
+      },
+      {
+        "afterStage": "Anvil bootstrap",
+        "result": "Test Files  5 passed | 8 skipped (13)"
+      },
+      {
+        "afterStage": "Anvil bootstrap",
+        "result": "Tests  31 passed | 29 skipped (60)"
+      }
+    ],
+    "durationSeconds": 3090.130076,
+    "estimatedComputeUsdIgnoringFreeTier": 0.3090130076,
+    "attemptsThisTurn": 1,
+    "totalTaskCloudBuildAttempts": 2,
+    "retriesWithoutAuthorization": 0,
+    "localPostgres": {
+      "passed": 445,
+      "skipped": 3,
+      "failed": 0
+    },
+    "localFocusedTests": 59,
+    "sourceSnapshotSha256": "f53a7b2ad733aea9a39cc44dc6a519ed22d365fdefb51314d689e82b1ccb2130"
+  },
+  "postBuildLocalFix": {
+    "file": "apps/reference-dapp/e2e/interface-honesty.spec.ts",
+    "cause": "focus() ran against the disabled server-rendered prompt before hydration; it does not retry focus after enablement.",
+    "fix": "Require the prompt to become enabled before focus(), retaining focus, keyboard entry, proposal and revision assertions.",
+    "interfaceHonestyTestsPassed": 3,
+    "defaultProductTestsPassed": 113,
+    "defaultProductProfileResult": "PASS",
+    "typecheckTasksPassed": 16,
+    "eslint": "PASS",
+    "productCodeChanged": false,
+    "includedInSubmittedCloudSnapshot": false
+  },
+  "budget": {
+    "projectAllowanceEur": 5,
+    "totalPriorBuilds": 7,
+    "totalPriorBuildMinutes": 148.10049171666665,
+    "usdPerMinute": 0.006,
+    "priorComputeUsdIgnoringFreeTier": 0.8886029502999999,
+    "nextAttemptTimeoutMinutes": 180,
+    "nextAttemptMaxComputeUsd": 1.08,
+    "sourceLogStorageAndExchangeReserveEur": 0.5,
+    "conservativeEuroPerDollar": 2,
+    "remainingEurBeforeAttemptUsingConservativeConversion": 2.7227940994,
+    "remainingEurAfterMaximumAttemptUsingConservativeConversion": 0.5627940994000005,
+    "basis": "All regional/global project builds, no free-tier credit assumed; estimate, not final invoiced spending.",
+    "actualAttemptDurationSeconds": 3090.130076,
+    "estimatedAttemptComputeUsdIgnoringFreeTier": 0.3090130076,
+    "remainingEurUsingConservativeConversionAndReserve": 2.1047680842000003,
+    "finalInvoiceRead": false
+  },
+  "outstandingBlockers": [
+    "A further paid Google Cloud certification attempt requires explicit owner authorization; none was submitted.",
+    "The fixed current worktree still needs a complete green remote run: default-product, 37 remaining extended profiles, composition and the final ledger."
+  ],
+  "completeGreenCertification": false
+}

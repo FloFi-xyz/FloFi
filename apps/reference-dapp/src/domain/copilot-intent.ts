@@ -127,6 +127,7 @@ function pattern(value: unknown, shape: RegExp, nullable: boolean, max: number =
 const amount = (value: unknown) => pattern(value, AMOUNT, true);
 const bps = (value: unknown) => pattern(value, BPS, true);
 const address = (value: unknown) => { const found = pattern(value, ADDRESS, true, 42); return found && found.toLowerCase(); };
+const transferAddress = (value: unknown) => typeof value === 'string' && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(value) ? value : address(value);
 
 function parseAction(value: unknown): CopilotAction {
   const type = value && typeof value === 'object' ? (value as Record<string, unknown>).type : undefined;
@@ -175,7 +176,7 @@ function parseActionV2(value: unknown): CopilotAction {
   }
   if (type === 'TRANSFER') {
     const v = exact(value, ['type', 'network', 'asset', 'amount', 'recipient']);
-    return { type, network: network(v.network), asset: symbol(v.asset), amount: amount(v.amount), recipient: address(v.recipient) };
+    return { type, network: network(v.network), asset: symbol(v.asset), amount: amount(v.amount), recipient: transferAddress(v.recipient) };
   }
   if (type === 'BRIDGE') {
     const v = exact(value, ['type', 'sourceNetwork', 'destinationNetwork', 'asset', 'amount', 'slippageBps', 'routing', 'recipient']);
@@ -293,7 +294,7 @@ const actionSchemasV2 = [
   object({ type: constant('SWAP'), network: nullableChoice(COPILOT_V2_NETWORKS, NETWORK_V2_TEXT), inputAsset: nullableSymbol, outputAsset: nullableSymbol,
     amount: nullableString(AMOUNT_TEXT), slippageBps: nullableString(SLIPPAGE_TEXT) }),
   object({ type: constant('TRANSFER'), network: nullableChoice(COPILOT_V2_NETWORKS, NETWORK_V2_TEXT), asset: nullableSymbol, amount: nullableString(AMOUNT_TEXT),
-    recipient: nullableString(ADDRESS_TEXT) }),
+    recipient: nullableString('The recipient wallet the user typed: EVM 0x address or case-sensitive Solana base58 public key. Solana requires an explicit recipient; null if missing.') }),
   object({ type: constant('BRIDGE'), sourceNetwork: nullableChoice(COPILOT_V2_NETWORKS, NETWORK_V2_TEXT), destinationNetwork: nullableChoice(COPILOT_V2_NETWORKS, NETWORK_V2_TEXT),
     asset: nullableSymbol, amount: nullableString(AMOUNT_TEXT), slippageBps: nullableString(SLIPPAGE_TEXT),
     routing: nullableChoice(COPILOT_ROUTING, 'Provider preference only if the user named LI.FI or Across; null otherwise.'),
@@ -322,7 +323,7 @@ export const COPILOT_OUTPUT_SCHEMA = Object.freeze(object({ intent: { anyOf: [
 
 /** BUILD-COPILOT-002: the V1 building blocks that CopilotIntentV2 reuses unchanged (same checks, same closed error codes). */
 export const COPILOT_V1_PARTS = Object.freeze({
-  exact, list, oneOf, nullableOneOf, text, amount, bps, address, parseAction, signedDecimal: (value: unknown) => pattern(value, SIGNED_DECIMAL, true),
+  exact, list, oneOf, nullableOneOf, text, amount, bps, address, transferAddress, parseAction, signedDecimal: (value: unknown) => pattern(value, SIGNED_DECIMAL, true),
   depositAmount: (value: unknown) => pattern(value, AMOUNT, false)!, fail, symbol, parseActionV2,
   schema: Object.freeze({ string, nullableString, constant, choice, nullableChoice, object, actions: actionSchemas, actionsV2: actionSchemasV2, symbolText: SYMBOL_TEXT,
     networkV2Text: NETWORK_V2_TEXT }),

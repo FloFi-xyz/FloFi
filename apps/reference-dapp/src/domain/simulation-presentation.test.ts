@@ -110,7 +110,16 @@ describe('simulation financial presentation', () => {
       expect(JSON.stringify(result.warnings)).not.toMatch(/SUPPLY_|BORROW_|ROUTER_|JUPITER_|state.foo|0xdeadbeef|stack/);
     }
     expect(simulationError('BORROW_UNSAFE_HEALTH_FACTOR')).toContain('safety limit');
-    expect(simulationError('UNISWAP_LIQUIDITY_SIMULATION_FAILED')).toBe('Simulation could not be completed. Try again before continuing.');
+    expect(simulationError('UNISWAP_LIQUIDITY_SIMULATION_FAILED')).toBe('The network rejected this transaction in simulation, so nothing was sent. Check the amounts and your balances, then simulate again.');
+    // BUILD-SOLANA-TRANSFER-UX-001: specific, readable meanings instead of one generic failure.
+    expect(simulationError('SOLANA_TRANSFER_RECIPIENT_IS_TOKEN_ACCOUNT')).toContain('destination address');
+    expect(simulationError('SOLANA_TRANSFER_TOKEN_EXTENSION_UNSUPPORTED')).toContain('cannot verify safely');
+    expect(simulationError('SOLANA_TRANSFER_MINT_DECIMALS_MISMATCH')).toContain('token details do not match');
+    expect(simulationError('JUPITER_SOLANA_WALLET_SELECTION_REQUIRED')).toContain('Connect the wallet');
+    expect(simulationError('REPAY_PARTIAL_DEBT_REQUIRED')).toContain('current debt is lower');
+    expect(simulationError('SOLANA_TRANSFER_EXECUTION_NOT_ENABLED')).toContain('not available on this FloFi server');
+    expect(simulationError('SOMETHING_NEW')).toBe('FloFi could not complete this simulation, and nothing was sent. Check the workflow in Build, then simulate again.');
+    for (const code of ['SOLANA_TRANSFER_RECIPIENT_INVALID', 'UNKNOWN_FAILURE', 'X_SIMULATION_FAILED']) expect(simulationError(code)).not.toMatch(/Simulation could not be completed/);
     expect(simulationError('SUPPLY_STORAGE_NOT_CONFIGURED')).toContain('currently unavailable');
   });
 });

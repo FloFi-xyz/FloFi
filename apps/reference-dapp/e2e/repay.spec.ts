@@ -8,7 +8,7 @@ async function author(page:Page,options:Parameters<typeof installSupplyWallet>[1
   await installSupplyWallet(page,{account:REPAY_OWNER,...options});await page.goto('/app');await page.getByRole('button',{name:'Add repay',exact:true}).click();
   await configureCanvasAction(page,'0.005');
   await expect(page.locator('.react-flow__node[data-id="node-002"]')).toContainText('1. Repay');
-  await page.getByRole('button',{name:'Simulate workflow'}).click(); await openSimulationDetails(page);await page.getByRole('button',{name:'Simulate Repay',exact:true}).click();await expect(page.getByRole('button',{name:'Approve & Continue',exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'Simulate workflow'}).click(); await openSimulationDetails(page);await page.getByRole('button',{name:'Simulate Repay',exact:true}).click();await expect(page.getByRole('button',{name:'Authorize in wallet',exact:true})).toBeVisible();
 }
 async function review(page:Page){await acceptProductReview(page);}
 const region=(page:Page)=>page.getByRole('region',{name:'Aave Repay'});
@@ -51,10 +51,9 @@ test('insufficient debt blocks read-only simulation',async({page})=>{
   await expect(region(page)).toContainText('Current variable debt must exceed');
   const details = page.locator('.review-authorization-details');
   await details.locator('summary').click();
-  await expect(page.getByRole('region',{name:'Risk and attention',exact:true})).toContainText('Simulation could not be completed. Try again before continuing.');
+  await expect(page.getByRole('region',{name:'Risk and attention',exact:true})).toContainText('Your current debt is lower than this repayment. Reduce the amount and simulate again.');
   await expect(details).toContainText('requires a fresh Review');
   await expect(page.locator('.canvas-primary-action').getByRole('button',{name:'Simulate workflow',exact:true})).toBeVisible();
-  await expect(page.getByRole('button',{name:'Approve & Continue',exact:true})).toHaveCount(0);
-  await expect(page.getByRole('button',{name:'Execute workflow',exact:true})).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Authorize in wallet', exact: true })).toHaveCount(0);
   expect(await supplySendCount(page)).toBe(0);
 });

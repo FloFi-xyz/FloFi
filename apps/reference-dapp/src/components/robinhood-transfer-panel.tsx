@@ -4,7 +4,9 @@ import { useLocale } from '../i18n/locale';
 
 import { useState, type FormEvent } from 'react';
 import { formatAssetAmount } from '@defi-workflow-engine/action-registry';
-import { createAuthoredTransfer, formatEth, transferDetails, transferProfileFor, TRANSFER_NETWORKS, type RobinhoodTransferInput, type TransferNetwork } from '../domain/robinhood-transfer-authoring';
+import { createAuthoredTransfer, formatEth, isSolanaTransferNetwork, SOLANA_TRANSFER_NETWORKS, transferDetails, transferProfileFor, TRANSFER_NETWORKS, type RobinhoodTransferInput,
+  type TransferNetwork } from '../domain/robinhood-transfer-authoring';
+import { solanaTransferSymbols } from '../domain/solana-transfer-authoring';
 import { BASE_CHAIN, featuredNetworkSymbols, featuredStockSymbols, resolveNetworkAsset } from '../domain/asset-catalogs';
 import { networkIdentity } from '../domain/network-registry';
 import { useWorkflow } from '../state/workflow-store';
@@ -24,28 +26,46 @@ export function RobinhoodTransferAuthoringForm({ nodeId, onDone, direct = false 
   const [amount, setAmount] = useState(existing?.amount ?? '0.000001'), [error, setError] = useState('');
   const [network, setNetwork] = useState<TransferNetwork>(existing?.network ?? 'Robinhood Chain Testnet');
   // BUILD-RH-002: Robinhood Chain mainnet moves native ETH or a catalog asset, to the owner or an explicit recipient (BUILD-BASE-001: so does Base).
-  const mainnet = networkIdentity(network)?.catalog === true;
-  const [asset, setAsset] = useState(existing?.asset ?? 'ETH');
+  // BUILD-SOLANA-TRANSFER-UX-001: Solana (SOL, USDC, USDT) and Solana Devnet (SOL, devUSDC) always name an explicit recipient wallet.
+  const solana = isSolanaTransferNetwork(network), mainnet = solana || networkIdentity(network)?.catalog === true;
+  const [asset, setAsset] = useState(existing?.asset ?? (solana ? 'SOL' : 'ETH'));
+  const [customToken, setCustomToken] = useState(Boolean(existing?.decimals !== undefined));
+  const [mint, setMint] = useState(existing?.decimals !== undefined ? existing.asset : '');
+  const [decimals, setDecimals] = useState(existing?.decimals ?? '6');
+  const [program, setProgram] = useState<'spl-token' | 'token-2022'>(existing?.program ?? 'spl-token');
   const [recipient, setRecipient] = useState(existing && existing.recipient !== 'CONNECTED_OWNER' ? existing.recipient : '');
-  const assets = network === 'Base' ? [...new Set(['ETH', ...featuredNetworkSymbols(BASE_CHAIN), asset])]
+  const assets = solana ? [...new Set([...solanaTransferSymbols(network), asset])] : network === 'Base' ? [...new Set(['ETH', ...featuredNetworkSymbols(BASE_CHAIN), asset])]
     : mainnet ? [...new Set(['ETH', 'USDG', 'WETH', ...featuredStockSymbols(), asset])] : ['ETH'];
   function submit(event: FormEvent) { event.preventDefault(); try {
-    const input: RobinhoodTransferInput = { network, asset: mainnet ? asset : 'ETH', amount, recipient: mainnet && recipient.trim() ? recipient.trim() : 'CONNECTED_OWNER' };
+    const input: RobinhoodTransferInput = solana ? { network, asset: customToken ? mint.trim() : asset, amount, recipient: recipient.trim(),
+      ...customToken ? { decimals, program } : {} }
+      : { network, asset: mainnet ? asset : 'ETH', amount, recipient: mainnet && recipient.trim() ? recipient.trim() : 'CONNECTED_OWNER' };
     createAuthoredTransfer(nodeId ?? 'node-preview', input);
     const command = nodeId ? { type: 'SET_RH_TRANSFER' as const, nodeId, input, source: 'CANVAS' as const, baseRevision: state.workflow.revision }
       : { type: 'ADD_RH_TRANSFER' as const, input, source: 'CANVAS' as const, baseRevision: state.workflow.revision };
     if (direct) dispatch(command); else propose(command); onDone?.();
   } catch (cause) { setError(cause instanceof Error && cause.message === 'ASSET_CATALOG_UNAVAILABLE' ? network === 'Robinhood Chain'
       ? 'Robinhood assets are unavailable right now. Try again in a moment.' : `${network} tokens are unavailable right now. Try again in a moment.`
+    : solana ? 'Enter an exact positive amount and the recipient\'s Solana wallet address.'
     : mainnet ? 'Enter an exact positive amount for the selected asset and, optionally, a valid recipient address.' : 'Enter an exact positive test-ETH amount up to 0.001 with at most 18 decimal places.'); } }
   return <form className="inspector-fields" aria-label={tr(nodeId ? 'Edit Robinhood transfer' : 'Create Robinhood transfer')} onSubmit={submit}>
     <strong>{tr(mainnet ? `${network} transfer` : transferCopy('Robinhood Testnet test-ETH self-transfer', network))}</strong>
-    <label>{tr("Transfer network")}<select aria-label={tr("Transfer network")} value={network} onChange={e => setNetwork(e.target.value as TransferNetwork)}>
-      {(Object.keys(TRANSFER_NETWORKS) as TransferNetwork[]).map(name => <option key={name}>{name}</option>)}</select></label>
-    {mainnet && <label>{tr("Asset")}<select aria-label={tr("Transfer asset")} value={asset} onChange={e => setAsset(e.target.value)}>
-      {assets.map(symbol => <option key={symbol}>{symbol}</option>)}</select></label>}
+    <label>{tr("Transfer network")}<select aria-label={tr("Transfer network")} value={network} onChange={e => { const next = e.target.value as TransferNetwork; setNetwork(next);
+      if (isSolanaTransferNetwork(next) !== solana) setAsset(isSolanaTransferNetwork(next) ? 'SOL' : 'ETH'); }}>
+      {([...Object.keys(TRANSFER_NETWORKS), ...SOLANA_TRANSFER_NETWORKS] as TransferNetwork[]).map(name => <option key={name}>{name}</option>)}</select></label>
+    {mainnet && <label>{tr("Asset")}<select aria-label={tr("Transfer asset")} value={solana && customToken ? 'CUSTOM_SPL' : asset} onChange={e => {
+      setCustomToken(e.target.value === 'CUSTOM_SPL'); if (e.target.value !== 'CUSTOM_SPL') setAsset(e.target.value);
+    }}>
+      {assets.map(symbol => <option key={symbol}>{symbol}</option>)}{solana && <option value="CUSTOM_SPL">{tr('Other SPL token')}</option>}</select></label>}
+    {solana && customToken && <>
+      <label>{tr('Token mint')}<input aria-label={tr('Token mint')} required value={mint} maxLength={44} spellCheck={false} autoComplete="off" onChange={event => setMint(event.target.value)}/></label>
+      <label>{tr('Token decimals')}<input aria-label={tr('Token decimals')} required type="number" min={0} max={18} step={1} value={decimals} onChange={event => setDecimals(event.target.value)}/></label>
+      <label>{tr('Token program')}<select aria-label={tr('Token program')} value={program} onChange={event => setProgram(event.target.value as typeof program)}><option value="spl-token">SPL Token</option><option value="token-2022">Token-2022</option></select></label>
+      <p>{tr('FloFi verifies the mint, decimals, token program and supported extensions on chain before signing.')}</p>
+    </>}
     <label>{tr(mainnet ? 'Transfer amount' : 'Transfer amount (test ETH)')}<input aria-label={tr(mainnet ? 'Transfer amount' : 'Transfer amount (test ETH)')} inputMode="decimal" value={amount} maxLength={40} onChange={e => setAmount(e.target.value)}/></label>
-    {mainnet ? <label>{tr("Recipient (optional)")}<input aria-label={tr("Transfer recipient")} placeholder={tr("Your connected wallet")} autoComplete="off" spellCheck={false} value={recipient} maxLength={42} onChange={e => setRecipient(e.target.value)}/></label>
+    {solana ? <label>{tr("Recipient")}<input aria-label={tr("Transfer recipient")} placeholder={tr("Solana address")} autoComplete="off" spellCheck={false} required value={recipient} maxLength={44} onChange={e => setRecipient(e.target.value)}/></label>
+      : mainnet ? <label>{tr("Recipient (optional)")}<input aria-label={tr("Transfer recipient")} placeholder={tr("Your connected wallet")} autoComplete="off" spellCheck={false} value={recipient} maxLength={42} onChange={e => setRecipient(e.target.value)}/></label>
       : <p>{tr("Recipient: your connected owner wallet (a self-transfer), bound at Review. Only the network fee is spent. A chain execution proof, not a DeFi action.")}</p>}
     {error && <p role="alert">{tr(error)}</p>}
     <button type="submit">{tr(nodeId ? 'Review transfer change' : direct ? 'Add transfer' : 'Review transfer proposal')}</button>

@@ -55,6 +55,8 @@ const providerLabels: Record<string, string> = {
   'aave-v3': 'Aave V3', uniswap: 'Uniswap', 'uniswap-v3': 'Uniswap V3',
   'lifi.rest': 'LI.FI', lifi: 'LI.FI', 'across.direct': 'Across',
   'flofi.router': 'Cross-chain Router', 'cow-protocol': 'CoW Protocol',
+  'solana.system-transfer': 'System Program', 'solana.spl-transfer': 'SPL Token',
+  'evm.native-transfer': 'Wallet send', 'evm.token-transfer': 'Token transfer',
 };
 export function composerSummary(workflow: Workflow, node: Workflow['nodes'][number], context: ReviewContext) {
   // BUILD-RH-002: a catalog swap reads its assets from the network catalog; buying a Stock Token with USDG is the Stocks card.

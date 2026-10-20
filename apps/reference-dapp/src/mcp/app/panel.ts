@@ -103,6 +103,11 @@ export function panelMain(settings: PanelSettings): void {
   const isApproval = (value: unknown): value is Approval => !!value && typeof value === 'object' && typeof (value as Json).approvalId === 'string' &&
     /^apr_[a-z2-7]{26}$/.test(String((value as Json).approvalId)) && Array.isArray((value as Json).steps);
   const terminal = (status: unknown) => ['EXPIRED', 'SUPERSEDED', 'REVOKED', 'STALE'].includes(String(status));
+  const receipt = (run: Json): string | null => {
+    if (run.reconciled !== true || typeof run.receiptUrl !== 'string' || typeof run.executionId !== 'string') return null;
+    try { const url = new URL(run.receiptUrl); return url.origin === settings.origin && !url.search && !url.hash &&
+      url.pathname === `/app/dashboard/runs/${encodeURIComponent(run.executionId)}` ? url.href : null; } catch { return null; }
+  };
 
   /** Opens a FloFi URL through the host (MCP Apps `ui/open-link`; ChatGPT's `openExternal` when the standard call is refused). */
   async function openLink(url: string) {
@@ -114,7 +119,7 @@ export function panelMain(settings: PanelSettings): void {
       throw new Error('OPEN_LINK_REFUSED');
     }
   }
-  async function connect(target: 'window' | 'phantom' | 'metamask') {
+  async function connect(target: 'window' | 'phantom' | 'metamask', canvas = false) {
     if (!view.approval || opening) return;
     const approvalId = view.approval.approvalId;
     opening = true; view.error = null; render();
@@ -131,7 +136,8 @@ export function panelMain(settings: PanelSettings): void {
         : `https://phantom.com/ul/browse/${encodeURIComponent(approval.origin + '/approve')}?ref=${encodeURIComponent(settings.origin)}`;
       if (url !== expected) throw new Error('APPROVAL_LINK_INVALID');
       view.approval.approvalUrl = String(session.approvalUrl);
-      await openLink(url);
+      if (canvas && target === 'window') approval.searchParams.set('view', 'canvas');
+      await openLink(canvas && target === 'window' ? approval.href : url);
       view.opened = target;
       schedule(2_000);
     } catch (error) { view.error = error instanceof Error ? error.message : 'OPEN_FAILED'; }
@@ -182,13 +188,13 @@ export function panelMain(settings: PanelSettings): void {
     const hash = (v: unknown) => typeof v === 'string' && /^0x[0-9a-f]{64}$/.test(v) ? v : null;
     const runs = (Array.isArray(progress.runs) ? progress.runs as Json[] : []).filter(r => r && typeof r === 'object').map(r => ({
       executionId: token(r.executionId), flow: token(r.flow), status: token(r.status), reconciled: r.reconciled === true,
-      terminal: r.terminal === true, evidenceEnvironment: token(r.evidenceEnvironment), evidenceBundleHash: hash(r.evidenceBundleHash) }));
+      terminal: r.terminal === true, evidenceEnvironment: token(r.evidenceEnvironment), evidenceBundleHash: hash(r.evidenceBundleHash), receiptUrl: receipt(r) }));
     const status = token(progress.status);
     const summary = JSON.stringify({ status, runs });
     if (summary === view.reported) return;
     view.reported = summary;
     const lines = [`FloFi approval ${view.approval?.approvalId}: ${String(status)}.`, ...runs.map(r =>
-      `Run ${String(r.executionId)} (${String(r.flow)}): ${String(r.status)}${r.evidenceEnvironment ? `, evidence ${String(r.evidenceEnvironment)} ${String(r.evidenceBundleHash ?? '')}` : ''}.`)];
+      `Run ${String(r.executionId)} (${String(r.flow)}): ${String(r.status)}${r.evidenceEnvironment ? `, evidence ${String(r.evidenceEnvironment)} ${String(r.evidenceBundleHash ?? '')}` : ''}.${r.receiptUrl ? ` Receipt: ${r.receiptUrl}` : ''}`)];
     void request('ui/update-model-context', { content: [{ type: 'text', text: lines.join(' ') }],
       structuredContent: { flofiApproval: { approvalId: view.approval?.approvalId, status, runs } } }).catch(() => undefined);
   }
@@ -217,12 +223,16 @@ export function panelMain(settings: PanelSettings): void {
     const runs = Array.isArray(view.progress?.runs) ? view.progress!.runs as Json[] : [];
     if (runs.length) {
       const list = el('ul', undefined, 'runs');
-      for (const r of runs) list.append(el('li', `${String(r.flow)} · ${String(r.status)}${r.evidenceEnvironment ? ` · evidence ${String(r.evidenceEnvironment)}` : ''}`));
+      for (const r of runs) {
+        const row = el('li', `${String(r.flow)} · ${String(r.status)}${r.evidenceEnvironment ? ` · evidence ${String(r.evidenceEnvironment)}` : ''}`), link = receipt(r);
+        if (link) row.append(button('View receipt', () => { void openLink(link).catch(() => { view.error = 'OPEN_LINK_REFUSED'; render(); }); }));
+        list.append(row);
+      }
       root.append(el('h2', 'Execution'), list);
     }
     if (!terminal(status) && status !== 'APPLIED') {
       const actions = el('div', undefined, 'actions');
-      actions.append(button('Review with your wallet in FloFi', () => void connect('window'), true));
+      actions.append(button('Authorize', () => void connect('window'), true), button('View in FloFi', () => void connect('window', true)));
       root.append(actions);
       const mobile = el('div', undefined, 'actions');
       mobile.append(el('span', 'On your phone:', 'muted'), a.walletNamespace === 'solana'
@@ -237,7 +247,7 @@ export function panelMain(settings: PanelSettings): void {
       root.append(fallback);
       if (!a.approvalUrl.includes('flofi_')) root.append(el('p', 'Use the same browser you used to connect FloFi to your assistant.', 'muted'));
     }
-    if (view.opened) root.append(el('p', 'FloFi is open with this workflow on its Canvas. Connect your wallet there, run the fresh simulation, review the Strategy Manifest and sign. This panel follows the result.', 'muted'));
+    if (view.opened) root.append(el('p', 'FloFi prepares a fresh simulation for your wallet. Check the details and choose Authorize in wallet, then confirm in your wallet. Canvas is optional. This panel checks the recorded result.', 'muted'));
     if (settings.inFrameProbeHosts.includes(view.host)) {
       root.append(button('Check this chat environment (diagnostics)', probe));
       if (view.probe) root.append(el('pre', JSON.stringify(view.probe, null, 1)));

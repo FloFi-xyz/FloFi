@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# BUILD-CI-GCP-002. Fail-closed manual certification mirror of CircleCI #105.
+# BUILD-SOLANA-TRANSFER-UX-001. Full current certification from uploaded source.
 # No production accounts, keys, wallet RPCs or deployment.
 set -euo pipefail
 
@@ -10,21 +10,10 @@ trap 'rm -rf "$root"' EXIT
 # The CircleCI image runs as an unprivileged user.
 cp -R /workspace "$root/source"
 cd "$root/source"
-# Cloud Build normally provides an existing .git repository and origin.
-# Fetch the exact triggering commit with its immediate parent if needed,
-# without assuming that the checkout is a pristine source archive.
-test -n "${FLOFI_SOURCE_SHA:-}" || { echo "Missing exact Cloud Build source SHA"; exit 1; }
-if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  git init -q
-fi
-if git remote get-url origin >/dev/null 2>&1; then
-  git remote set-url origin https://github.com/alrimarleskovar/FloFi.git
-else
-  git remote add origin https://github.com/alrimarleskovar/FloFi.git
-fi
-git fetch --quiet --depth=2 origin "$FLOFI_SOURCE_SHA"
-test "$(git rev-parse FETCH_HEAD)" = "$FLOFI_SOURCE_SHA"
-git checkout --detach -q FETCH_HEAD
+export PYTHONDONTWRITEBYTECODE=1
+# Archive submission includes the uncommitted and untracked work. Never replace
+# it with a Git revision. Verify every uploaded byte before installing anything.
+python3 scripts/gcp-source-snapshot.py verify --initialize-git
 export RUNNER_TEMP="$root/temp"
 export FLOFI_CI_ARCHIVE_CACHE="$RUNNER_TEMP/archives"
 export GITHUB_PATH="$RUNNER_TEMP/github-path"
@@ -85,7 +74,8 @@ python3 -m unittest discover -s scripts -p 'test_ci_*.py'
 export GOVERNANCE_BRANCH="${BRANCH_NAME:-build/ci-gcp-002-full-cert}" GOVERNANCE_EVENT=push
 python3 scripts/governance_lite.py
 git diff --check
-git diff --check HEAD^1 HEAD
+# There is no parent commit in an uploaded worktree. The snapshot verifier checks
+# whitespace across every changed/new text file instead of inventing a Git diff.
 
 (
   source scripts/ci-observe.sh 'Toolchain bootstrap'
@@ -116,51 +106,13 @@ export PATH="$toolbin:$PATH"
 )
 bash .circleci/scripts/ci-sbom.sh
 (
-  source scripts/ci-observe.sh Typecheck
-  pnpm typecheck
-)
-(
-  source scripts/ci-observe.sh Lint
-  pnpm lint
-  pnpm exec eslint scripts/guarded-release-browser.mjs
-)
-(
   source scripts/ci-observe.sh 'Production build'
   pnpm build
-)
-(
-  source scripts/ci-observe.sh 'Schema drift'
-  pnpm schemas:check
-)
-(
-  source scripts/ci-observe.sh 'Unit and contract tests'
-  # PNG rasterization is CPU-intensive. On the 2-vCPU Cloud Build worker,
-  # four concurrent Vitest workers can starve the 120-second render test.
-  # Run that exact spec first with an exclusive worker, then the rest of the
-  # unchanged unit inventory with two workers. No tests are skipped.
-  png_spec=apps/reference-dapp/src/server/workflow-visual-image.test.ts
-  pnpm exec vitest run "$png_spec" --maxWorkers=1 --testTimeout=30000
-  pnpm exec vitest run packages apps/reference-dapp/src apps/reference-dapp/backend \
-    --exclude '**/*.fork.test.ts' \
-    --exclude '**/*.pg.test.ts' \
-    --exclude '**/*.live.test.ts' \
-    --exclude '**/*.remote.test.ts' \
-    --exclude "$png_spec" \
-    --maxWorkers=2 --testTimeout=30000
-  python3 scripts/summarize-screenshot-diffs.py --self-test
-  test -f packages/reference-linter/dist/index.js
-  test -f packages/reference-linter/dist/index.d.ts
-  pnpm --filter @defi-workflow-engine/reference-linter exec node --input-type=module -e "const m = await import('@defi-workflow-engine/reference-linter'); for (const key of ['lintWorkflow','validateAuthoringWorkflow','createReviewContext','digestArtifact','digestRawResponse','digestSelfCheck','reviewMockedArtifactChain','mockedSwapOutputs','mockedFixtureBytes','collectBaseTranscript','deriveBaseObservation','reviewBaseObservation']) if (typeof m[key] !== 'function') throw new Error('Missing linter export: '+key); if (!Object.isFrozen(m.MOCKED_CHAIN_PROFILE)) throw new Error('Mocked chain profile must be frozen'); if (!Object.isFrozen(m.BASE_OBSERVATION_PROFILE)) throw new Error('BASE_OBSERVATION_PROFILE must be frozen'); await m.digestSelfCheck()"
-)
-(
-  source scripts/ci-observe.sh PostgreSQL
-  pnpm test:postgres
 )
 (
   source scripts/ci-observe.sh 'Anvil bootstrap'
   python3 scripts/bootstrap-anvil.py "$RUNNER_TEMP/gryloo-anvil/foundry-v1.8.3"
 )
-bash .circleci/scripts/ci-fork.sh
 (
   source scripts/ci-observe.sh 'Browser bootstrap'
   export BUILD002_BROWSER_CACHE="$RUNNER_TEMP/gryloo-playwright/chromium_headless_shell-1243"
@@ -170,17 +122,4 @@ export BUILD002_BROWSER_CACHE="$RUNNER_TEMP/gryloo-playwright/chromium_headless_
 export GRYLOO_ANVIL_BIN="$RUNNER_TEMP/gryloo-anvil/foundry-v1.8.3/anvil"
 export GRYLOO_MODE_A_RUNTIME="$RUNNER_TEMP/gryloo-mode-a-e2e"
 export GRYLOO_COW_RUNTIME="$RUNNER_TEMP/gryloo-cow-e2e"
-(
-  source scripts/ci-observe.sh 'Critical browser regressions'
-  node scripts/guarded-release-browser.mjs critical
-)
-(
-  source scripts/ci-observe.sh 'Guarded browser suites'
-  node scripts/guarded-release-browser.mjs extended --shard 1/2
-  node scripts/guarded-release-browser.mjs extended --shard 2/2
-)
-bash .circleci/scripts/ci-composition.sh
-
-# Strict fan-in; omitted/repeated tests are FAIL, not green.
-python3 scripts/ci-observe.py verify
-python3 scripts/ci-observe.py summary
+bash scripts/gcp-ci-certify.sh

@@ -9,6 +9,9 @@ export const preservedValues = new Set<string>([
   "Solana",
   "Solana Devnet",
   "SOL",
+  // BUILD-SOLANA-TRANSFER-UX-001: Solana token program names.
+  "Token-2022",
+  "SPL Token",
   "Base → Arbitrum → WETH",
   "LI.FI",
   "USDC → WETH",

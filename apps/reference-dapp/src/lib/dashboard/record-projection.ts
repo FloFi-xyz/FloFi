@@ -13,7 +13,8 @@ export function projectDashboardRecord(detail: DashboardRunDetail, context: Revi
   if (!object(record)) return null;
   const kinds: Record<string, ExecutionLifecycleSource['kind']> = { 'aave-supply': 'supply', 'base-sepolia-swap': 'public',
     'crosschain-router': 'router', 'crosschain-router-testnet': 'router', 'robinhood-transfer': 'transfer',
-    'solana-devnet-swap': 'solana-swap', 'jupiter-swap': 'solana-swap', 'orca-liquidity': 'solana-pool', 'orca-liquidity-mainnet': 'solana-pool', 'uniswap-liquidity': 'uniswap-pool' };
+    'solana-devnet-swap': 'solana-swap', 'jupiter-swap': 'solana-swap', 'orca-liquidity': 'solana-pool', 'orca-liquidity-mainnet': 'solana-pool', 'uniswap-liquidity': 'uniswap-pool',
+    'solana-transfer': 'solana-transfer', 'solana-devnet-transfer': 'solana-transfer' };
   const kind = kinds[detail.run.flow];
   if (!kind) return null;
   const review = object(record.review) ? record.review : null;
