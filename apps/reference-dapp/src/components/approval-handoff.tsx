@@ -58,9 +58,9 @@ function unwrap<T>(result: { ok: true; value: T } | { ok: false; code: string })
  * (React runs an ancestor's effects after its descendants'). Removed before that, the router kept the secret in its URL and wrote it back
  * into the address bar on its next update (e.g. the refresh after a wallet sign-in sets a cookie), so it waits for this commit's effects.
  */
-function takeSecret(): string | null {
+function takeSecret(presented = typeof window === 'undefined' ? '' : window.location.hash): string | null {
   let fromHash: string;
-  try { fromHash = typeof window === 'undefined' ? '' : decodeURIComponent(window.location.hash.slice(1)); } catch { return null; }
+  try { fromHash = decodeURIComponent(presented.slice(1)); } catch { return null; }
   if (SECRET.test(fromHash) || REFERENCE.test(fromHash)) {
     try {
       // History restoration may present the same consumed fragment again. Keep its owner-only recovery hint;
@@ -68,7 +68,6 @@ function takeSecret(): string | null {
       if (sessionStorage.getItem(STORAGE_KEY) !== fromHash) sessionStorage.removeItem(RECOVERY_KEY);
       sessionStorage.setItem(STORAGE_KEY, fromHash);
     } catch { /* storage may be unavailable; the page still works until reload */ }
-    const presented = window.location.hash;
     // The non-secret `?view=` presentation choice survives; only the fragment is removed.
     queueMicrotask(() => { if (window.location.hash === presented) window.history.replaceState(null, '', window.location.pathname + window.location.search); });
     return fromHash;
@@ -112,8 +111,8 @@ export function ApprovalHandoff({ slot = null, surface = 'canvas', onSurfaceChan
 
   useEffect(() => {
     let request = 0;
-    const load = async () => {
-      const current = ++request, found = takeSecret();
+    const load = async (presented?: string) => {
+      const current = ++request, found = takeSecret(presented);
       generation.current++;
       onAvailabilityChange?.(false);
       setSecret(found); setView(null); setPreview(null); setResolved(false); setError(null); setClaimed(false); setShare(null); setRecovery(null); setClosed(false); setClaimedBy(null);
@@ -151,8 +150,12 @@ export function ApprovalHandoff({ slot = null, surface = 'canvas', onSurfaceChan
       } catch (cause) { if (current === request) setError(cause instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(cause.message) ? cause.message : 'APPROVAL_UNAVAILABLE'); }
       finally { if (current === request) setResolved(true); }
     };
-    // The product's skip link is a local anchor, not a new approval handoff.
-    const hashChanged = () => { if (window.location.hash !== '#workspace') void load(); };
+    // The product's skip link is a local anchor, not a new approval handoff. A fragment change is read from its event: by the time the
+    // event is handled, Next's router may already have rewritten the address bar to its canonical URL, which drops the fragment.
+    const hashChanged = (event: Event) => {
+      const presented = event instanceof HashChangeEvent ? new URL(event.newURL).hash : window.location.hash;
+      if (presented !== '#workspace') void load(presented);
+    };
     void load();
     window.addEventListener('hashchange', hashChanged);
     window.addEventListener('popstate', hashChanged);
