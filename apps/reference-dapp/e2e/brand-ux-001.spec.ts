@@ -4,7 +4,8 @@ import { assertConnectedFlow } from './connected-flow-assertions';
 
 const widths = [320, 375, 390, 430, 768, 1024, 1440];
 async function noOverflow(page: import('@playwright/test').Page) {
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  // Right after a client-side navigation one frame can still be mid-transition; the settled layout must not overflow.
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 }
 
 async function connectedInfrastructure(page: import('@playwright/test').Page) {
