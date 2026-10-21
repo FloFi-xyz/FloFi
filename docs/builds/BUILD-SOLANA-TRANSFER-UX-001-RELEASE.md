@@ -211,3 +211,41 @@ governance-lite and whitespace pass. The temporary stress spec used for this was
 `main` requires `ci/circleci: governance` and `ci/circleci: certification`. The existing config already keeps JUnit, screenshots,
 error context and diagnostic traces as artifacts. The CircleCI result is recorded on the pull request rather than in a later commit,
 so the required statuses stay on the certified head.
+
+**CircleCI pipeline 59** (head `f9acdb5`, [PR #112](https://github.com/alrimarleskovar/FloFi/pull/112)): `governance` and
+`certification-checks` passed, covering dependency integrity, the audit, SBOM, typecheck, lint, schemas, units, PostgreSQL and forks.
+Each browser job failed one test, and the automatic diagnostic rerun passed both times. Fail-fast left the profiles after each failure
+unrun. `cow-loopback` passed with the new helper.
+
+- `default-product`: `brand-ux-001.spec.ts:72` measured horizontal overflow once, immediately after the client-side navigation to `/app`
+  at 375 px. The teardown screenshot shows a fitting layout. 18 local frame-sampled runs at 320, 375 and 390 px, including with web fonts
+  blocked, never overflowed. The check now polls the same `scrollWidth <= innerWidth` condition until the layout settles; a persistent
+  overflow still fails.
+- `mcp-in-chat`: the superseded approval lookup stayed on "Opening your approval" after the test set `#incomplete`. The gate removes the
+  secret through Next's patched `history.replaceState`, which dispatches a router transition. When it commits, Next writes its canonical
+  URL without a fragment. If that commit lands between a fragment change and its `hashchange` handler, the handler reads an empty
+  fragment and reloads the stored secret. The same race could show a user the previous proposal instead of a newly opened link in the
+  same tab. The gate now reads the fragment from the `hashchange` event's `newURL`; the initial load and `popstate` still read the address
+  bar. Under 8× CPU throttling the unchanged gate failed this journey 9/10 times and the fixed gate passed 10/10.
+
+On the rebuilt app, every browser profile that opens `/approve` or the MCP gateway passed (44/44), and so did `cow-loopback` (9/9) and
+`brand-ux-001.spec.ts` (15/15). ESLint, TypeScript, governance 19, CI 54, governance-lite and whitespace pass. The temporary stress and
+diagnostic specs were deleted.
+
+**Continuation preflight, 2026-10-21 09:03 UTC.** The actual local and remote branch head is `f9acdb50068ec1c6c2e9c925afa1824cc7ad41c7`;
+`main` and PR #112's base remain `616598fe3cce44dc6d48444753d6b70886873c1d`. All implementation and the CoW helper are already committed.
+The only inherited pending files are the two fixes above and these release/handoff records. Their browser logs and stress evidence remain
+in `/tmp/flofi-solana-transfer-ux-001-cow-fix-20261021/`; the historical final-cert2 directory also exists. No temporary diagnostic spec
+is present in the tracked or untracked source inventory. Targeted ESLint, app TypeScript and whitespace checks pass again.
+
+Authenticated Vercel metadata again confirms Root Directory `apps/reference-dapp`, production branch `main`, no ignore command and no deploy
+hooks. The database variable still targets both Production and Preview; its value was not decrypted, printed or used. The branch exclusion
+remains present, and the deployments API returns no deployment for this branch. Sanitized preflight evidence is
+`/tmp/flofi-transfer-release-review-20261021/publication-preflight.json`. No production settings or database were changed.
+
+The existing failed CircleCI pipeline 59 is the only branch pipeline before this continuation's push. Required certification will run on
+the consolidated head, with no manual duplicate trigger. An authenticated CircleCI credit balance is unavailable in this session; no
+CircleCI credential is configured in the environment or standard CLI location. Pipeline admission and concrete job results remain the
+release gate. Final results will be recorded on PR #112 so the required statuses remain attached to the certified commit. Merge and
+deployment still require explicit owner authorization; real-wallet, external MCP-host interoperability and production validation remain
+outstanding even after CI passes.
