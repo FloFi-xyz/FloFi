@@ -321,11 +321,13 @@ BUILDCLOUD001_DIRECT_VERSIONS = {
 BUILDCLOUD001_CLOUD_RUNTIME = ("packages/cloud-runtime/package.json", "@defi-workflow-engine/cloud-runtime",
                                {"@defi-workflow-engine/reference-executor": "workspace:0.1.0", "pg": "8.23.0"},
                                {"@types/pg": "8.23.1"})
-# BUILD-MCP-001 exact direct pin for the official MCP TypeScript SDK v2 server (MIT). Its only registry
-# dependencies are @modelcontextprotocol/core@2.2.0 and zod@4.6.5 (both MIT, no license exception). The
-# reference app also links the already approved BUILD-001 pins @sinclair/typebox and ajv for tool schemas.
+# BUILD-MCP-001 exact direct pin for the official MCP TypeScript SDK v2 server. Its only registry
+# dependencies are @modelcontextprotocol/core@2.3.0 and zod@4.6.5 (no license exception). From 2.3.0 the
+# SDK's manifests declare Apache-2.0 (MIT through 2.2.0); zod remains MIT. The reference app also links the
+# already approved BUILD-001 pins @sinclair/typebox and ajv for tool schemas.
 BUILDMCP001_DIRECT_VERSIONS = {
-    "@modelcontextprotocol/server": "2.2.0",
+    # Security patch for GHSA-jm63-cq47-j5jp, GHSA-46jr-4wx8-v453 and GHSA-rvq5-wwqv-78pq (server/core only move).
+    "@modelcontextprotocol/server": "2.3.0",
 }
 # BUILD-CLOUD-001 adds 15 registry packages (pg, @types/pg and their MIT/ISC dependencies) to the 247;
 # Current main retains 262 after the Colosseum security updates; BUILD-MCP-001 adds
@@ -378,7 +380,7 @@ def verify_dependencies():
     if lock.count("\npackages:\n") != 1 or lock.count("\nsnapshots:\n") != 1:
         raise RuntimeError("Unrecognized lockfile sections")
     resolved_sections = "packages:\n" + lock.split("\npackages:\n", 1)[1]
-    if hashlib.sha256(resolved_sections.encode()).hexdigest() != "ece43a6d43b1f7201cc936011d3b9d274d211aeae639561f7a7fb71329b5e97d":
+    if hashlib.sha256(resolved_sections.encode()).hexdigest() != "63b1d131ebad9589386f70938033c006f335a4f2859f8b098b10159399a7d688":
         errors.append("Baseline registry packages/snapshots or peer resolutions changed")
     packages_text = lock.split("\npackages:\n", 1)[1].split("\nsnapshots:\n", 1)[0]
     snapshots_text = lock.split("\nsnapshots:\n", 1)[1]

@@ -455,12 +455,18 @@ I queried the official npm registry’s version metadata and publication history
 | `typescript` | `5.9.3` | 2025-09-30 21:19 | `>=14.17` | Apache-2.0 | `sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==` |
 | `turbo` | `2.10.12` | 2026-08-25 18:38 | — | MIT | `sha512-AswgMPnpOoaVZHrrSBejETzEbuIA69OVGwfkHwfrY0A23VjWXBANzgq9+OymWOHAIArB7D1+1z498WY8fGg1Jw==` |
 | `vitest` | `5.0.0` | 2026-09-03 12:24 | `^22.12.0 \|\| ^24.0.0 \|\| >=26.0.0` | MIT | `sha512-gpsMNoRhMjMktVxPtstOH4/PJuPyovVaMDr4oDilXaGH1EcqM2OE96SoHT2VIQ6fTGtTjqmHDrEu2X9RQiXf8Q==` |
-| `vite` | `8.3.0` | 2026-09-10 11:30 | `^20.19.0 \|\| >=22.12.0` | MIT | `sha512-lhZBVvEHefgE+HQZC9O7EBJgCU/nVzFNl7vkS4RE0APtWLP02/8QVIkQtzBxPquh7lq5/78NHipTj7ODQ6XuyQ==` |
+| `vite` | `8.3.3` | 2026-10-06 04:10 | `^20.19.0 \|\| >=22.12.0` | MIT | `sha512-cTAldKPImjg6c+gk48U19POPn3GCBzZwpdsN8ZMEEcbpes+6/wvfqUd0C2y3qYY4wsj8PwgFwrZ/1jBPVttMSg==` |
 | `eslint` | `10.10.0` | 2026-09-04 14:34 | `^20.19.0 \|\| ^22.13.0 \|\| >=24` | MIT | `sha512-NPXn6r5zl4uET1DAVPaOwzX3rut4c0wcmw3dWJAfOsTM5+TogXo0DDjz8pwm/hL8cyVNpHqeK4JpN0NjnyFFNw==` |
 | `@eslint/js` | `10.0.1` | 2026-02-06 22:34 | `^20.19.0 \|\| ^22.13.0 \|\| >=24` | MIT | `sha512-zeR9k5pd4gxjZ0abRoIaxdc7I3nDktoXZk2qOv9gCNWx3mVwEn32VRhyLaRsDiJjTs0xq/T8mfPtyuXu7GWBcA==` |
 | `typescript-eslint` | `8.70.0` | 2026-09-07 18:18 | `^18.18.0 \|\| ^20.9.0 \|\| >=21.1.0` | MIT | `sha512-P/W5cz70/cQAuKfY3xwQMWWTV7BvJ0mAQmi+9mBcsVPaBUpd6Ohpa+fECv9rBFrQcig86jAiNBFNWUqnTjr4pw==` |
 | `@types/node` | `24.13.4` | 2026-09-09 18:10 | — | MIT | `sha512-YJ7EqCstVTzIr0fMr7qul/977en+pQHrfmuKIo6Zr9i75Be21dr3MovcfvGtyvi2HAUrRerWps5sMO9I7WaxDw==` |
 | `pnpm` toolchain | `11.22.0` | 2026-08-15 17:15 | `>=22.13` | MIT | `sha512-H/hwxMYTPf2I+yr8Rt0T1H8JyXlLQ4xv20fKmMrzvBY4HuC+k6CRuOOCTPAfiJ9G19niCRD7C+GrD7W6qA3WIQ==` |
+
+Security update of 21 October 2026: the `vite` row supersedes the planning-time `8.3.0` (2026-09-10 11:30,
+`sha512-lhZBVvEHefgE+HQZC9O7EBJgCU/nVzFNl7vkS4RE0APtWLP02/8QVIkQtzBxPquh7lq5/78NHipTj7ODQ6XuyQ==`). Its bundled
+`launch-editor` advisories GHSA-587h-7wmj-h5pm, GHSA-698v-4r3x-3vcv and GHSA-r825-w8mm-5pxw fail the dependency audit.
+`8.3.3` predates that update's seven-day cutoff and keeps the engine range, license and Vitest peer compatibility; only `rolldown`
+1.2.13 with its platform bindings and `@oxc-project/types` 0.153.0 move transitively. No waiver or override is added.
 
 Registry peer checks resolve the earlier plan’s errors:
 

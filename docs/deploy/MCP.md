@@ -6,7 +6,7 @@ The public fallback requires the browser that completed FloFi OAuth. See [univer
 [host/wallet capability matrix and four owner E2E procedures](UNIVERSAL-SIGNING-OWNER-E2E.md). In-frame signing remains disabled.
 
 The gateway is `POST /api/mcp` on the FloFi web deployment (Next.js route, Vercel function). It speaks the Model Context
-Protocol over Streamable HTTP through the official TypeScript SDK v2 (`@modelcontextprotocol/server` 2.2.0): the 2026-07-28
+Protocol over Streamable HTTP through the official TypeScript SDK v2 (`@modelcontextprotocol/server` 2.3.0): the 2026-07-28
 revision and, statelessly, the 2025-era revisions current clients use (2025-11-25, 2025-06-18, 2025-03-26). Each request gets
 a fresh server instance; nothing is kept in memory between requests. Design and evidence: [MCP-001 plan](../builds/BUILD-MCP-001-PLAN.md)
 and [report](../builds/BUILD-MCP-001-REPORT.md); [MCP-002 plan](../builds/BUILD-MCP-002-PLAN.md) and [report](../builds/BUILD-MCP-002-REPORT.md).
