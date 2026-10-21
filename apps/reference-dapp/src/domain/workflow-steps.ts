@@ -94,7 +94,7 @@ function describe(node: Node, workflow: Workflow, context: ReviewContext): Descr
     upperPrice: rhPool.upperPrice, priceUnit: rhPool.priceUnit, fullRange: rhPool.fullRange }, protocol: rhPool.provider, network: rhPool.network, testFunds: false };
   const orca = read(() => solanaLiquidityDetails(node));
   if (orca) return { kind: 'LIQUIDITY', detail: { type: 'ORCA_LIQUIDITY', input: solanaLiquidityInputOf(orca), lowerPrice: orca.lowerPrice, upperPrice: orca.upperPrice },
-    protocol: orca.provider, network: orca.network, testFunds: true };
+    protocol: orca.provider, network: orca.network, testFunds: orca.network === 'Solana Devnet' };
   const network = CHAIN_LABEL[node.chainId] ?? node.chainId;
   const testFunds = TEST_CHAINS.has(node.chainId) ? true : MAIN_CHAINS.has(node.chainId) ? false : null;
   // BUILD-BASE-001: transfers are typed steps (the Copilot refers to and re-authors catalog-network transfers like any other step).

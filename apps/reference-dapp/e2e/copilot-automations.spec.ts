@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { test, expect, chooseWallet } from './fixtures';
+import { test, expect, proveConnectedEvmWallet } from './fixtures';
 import { createTestWallet } from '../../../packages/reference-reconciler/test/test-wallet';
 import { installJourneyWallet, walletRequests } from './journey-fixtures';
 import { assertAutomationHarness, query } from './automation-fixtures';
@@ -19,8 +19,8 @@ for (const [text, interpretation, language] of cases) test(`explicit chat confir
   const owner = createTestWallet();
   await installJourneyWallet(page, [owner], { chain: '0x14a34' });
   await page.goto('/app/automations');
-  await page.getByRole('button', { name: 'Connect wallet and prove ownership', exact: true }).click();
-  await chooseWallet(page, 'Browser wallet');
+  // BUILD-SOLANA-TRANSFER-UX-001: the proof reuses the wallet already connected in this browser (no selector); it signs the sign-in message.
+  await proveConnectedEvmWallet(page, page.locator('body'), owner.address);
   await expect(page.getByRole('heading', { name: 'Create an automation', exact: true })).toBeVisible();
   if (language === 'PT') await page.evaluate(() => localStorage.setItem('flofi.language', 'PT'));
   await page.goto('/app');

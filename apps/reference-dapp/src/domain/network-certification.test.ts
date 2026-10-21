@@ -26,8 +26,8 @@ const MATRIX: Readonly<Record<CryptoAction, Readonly<Record<'testnet' | 'mainnet
     mainnet: [['Base', 'eip155:8453'], ['Solana', JUPITER_SOLANA_MAINNET.chain], ['Robinhood Chain', 'eip155:4663'], ['Arbitrum One', 'eip155:42161'], ['Ethereum', 'eip155:1']] },
   pool: { testnet: [['Base Sepolia', 'eip155:84532'], ['Ethereum Sepolia', 'eip155:11155111'], ['Solana Devnet', ORCA_WHIRLPOOLS_DEVNET.chain]],
     mainnet: [['Base', 'eip155:8453'], ['Solana', JUPITER_SOLANA_MAINNET.chain], ['Robinhood Chain', 'eip155:4663'], ['Arbitrum One', 'eip155:42161'], ['Ethereum', 'eip155:1']] },
-  transfer: { testnet: [['Robinhood Chain Testnet', 'eip155:46630'], ['Ethereum Sepolia', 'eip155:11155111']],
-    mainnet: [['Robinhood Chain', 'eip155:4663'], ['Base', 'eip155:8453'], ['Arbitrum One', 'eip155:42161'], ['Ethereum', 'eip155:1']] },
+  transfer: { testnet: [['Robinhood Chain Testnet', 'eip155:46630'], ['Ethereum Sepolia', 'eip155:11155111'], ['Solana Devnet', ORCA_WHIRLPOOLS_DEVNET.chain]],
+    mainnet: [['Robinhood Chain', 'eip155:4663'], ['Base', 'eip155:8453'], ['Arbitrum One', 'eip155:42161'], ['Ethereum', 'eip155:1'], ['Solana', JUPITER_SOLANA_MAINNET.chain]] },
   supply: { testnet: [['Base Sepolia', 'eip155:84532'], ['Ethereum Sepolia', 'eip155:11155111']], mainnet: [['Base', 'eip155:8453'], ['Arbitrum One', 'eip155:42161'], ['Ethereum', 'eip155:1']] },
   borrow: { testnet: [['Base Sepolia', 'eip155:84532'], ['Ethereum Sepolia', 'eip155:11155111']], mainnet: [['Base', 'eip155:8453'], ['Arbitrum One', 'eip155:42161'], ['Ethereum', 'eip155:1']] },
   repay: { testnet: [['Base Sepolia', 'eip155:84532'], ['Ethereum Sepolia', 'eip155:11155111']], mainnet: [['Base', 'eip155:8453'], ['Arbitrum One', 'eip155:42161'], ['Ethereum', 'eip155:1']] },
@@ -36,7 +36,8 @@ const MATRIX: Readonly<Record<CryptoAction, Readonly<Record<'testnet' | 'mainnet
 const actions = Object.keys(MATRIX) as CryptoAction[];
 const cases = actions.flatMap(action => (['testnet', 'mainnet'] as const).flatMap(environment => MATRIX[action][environment].map(([network, chain]) => [action, environment, network, chain] as const)));
 // Native test-ETH transfers have small per-network caps; 0.001 is within every profile.
-function inputOf(selection: CryptoSelection) { return { selection, amount: selection.action === 'transfer' ? '0.001' : '0.1', secondAmount: '0.01', slippage: '50', beneficiary: owner }; }
+function inputOf(selection: CryptoSelection) { return { selection, amount: selection.action === 'transfer' ? '0.001' : '0.1', secondAmount: '0.01', slippage: '50', beneficiary: owner,
+  ...selection.action === 'transfer' && selection.network.startsWith('Solana') ? { recipient: 'CtV2foUoy5uJaK5Wybz8Nf1xmC6TgDv93itdja7n9yvH' } : {} }; }
 function assetChains(value: unknown): string[] {
   const chains: string[] = [];
   const visit = (item: unknown) => { if (!item || typeof item !== 'object') return; for (const [key, nested] of Object.entries(item)) { if (key === 'chainId' && typeof nested === 'string') chains.push(nested); else visit(nested); } };

@@ -11,6 +11,7 @@ import type { useSolanaLiquidity } from '../state/solana-liquidity-store';
 import type { useSolanaComposition } from '../state/solana-composition-store';
 import type { useUniswapLiquidity } from '../state/uniswap-liquidity-store';
 import type { useRobinhoodTransfer } from '../state/robinhood-transfer-store';
+import type { useSolanaTransfer } from '../state/solana-transfer-store';
 import type { useModeA } from '../state/mode-a-store';
 import type { useModeB } from '../state/mode-b-store';
 import type { useComposition } from '../state/composition-store';
@@ -32,6 +33,7 @@ export type SimulationSource =
   | { kind: 'solana-composition'; state: Snapshot<ReturnType<typeof useSolanaComposition>> }
   | { kind: 'uniswap-pool'; state: Snapshot<ReturnType<typeof useUniswapLiquidity>> }
   | { kind: 'transfer'; state: Snapshot<ReturnType<typeof useRobinhoodTransfer>> }
+  | { kind: 'solana-transfer'; state: Snapshot<ReturnType<typeof useSolanaTransfer>> }
   | { kind: 'fork-swap'; state: Snapshot<ReturnType<typeof useModeA>> }
   | { kind: 'delegated-swap'; state: Snapshot<ReturnType<typeof useModeB>> }
   | { kind: 'composition'; state: Snapshot<ReturnType<typeof useComposition>> }
@@ -60,7 +62,9 @@ export function simulationStatusPresentation(view: SimulationPresentation, inval
   if (/changed/i.test(view.message)) return { label: 'Review required again', message: view.message, tone: 'blocked' };
   if (/balance.*low|Add funds for the network fee/i.test(view.message)) return { label: 'Insufficient balance', message: view.message, tone: 'blocked' };
   if (/Simulation is (?:currently unavailable|not available)/i.test(view.message)) return { label: 'Simulation unavailable', message: view.message, tone: 'blocked' };
-  if (/Simulation could not be completed/i.test(view.message)) return { label: 'Simulation failed', message: view.message, tone: 'blocked' };
+  if (/could not complete this simulation|rejected this transaction in simulation/i.test(view.message)) return { label: 'Simulation failed', message: view.message, tone: 'blocked' };
+  if (/Connect the wallet that will sign/i.test(view.message)) return { label: 'Connect your wallet', message: view.message, tone: 'blocked' };
+  if (/destination address|token details do not match|token feature FloFi cannot verify|Check the amount/i.test(view.message)) return { label: 'Check the workflow', message: view.message, tone: 'blocked' };
   if (/route is not available/i.test(view.message)) return { label: 'Route unavailable', message: view.message, tone: 'blocked' };
   return { label: view.status === 'ready' ? 'Ready' : view.status === 'blocked' ? 'Cannot proceed' : 'Needs attention', message: view.message, tone: view.status };
 }
@@ -96,13 +100,24 @@ export function simulationError(error: string): string {
   if (/INSUFFICIENT|BALANCE_TOO_LOW|exceeds.*balance/i.test(error)) return 'Your available balance is too low for this workflow.';
   if (/HEALTH_FACTOR|UNSAFE_HEALTH|UNSAFE_POSITION/i.test(error)) return 'This action would leave the lending position below its required safety limit.';
   if (/EXPIRED|STALE|REQUOTE|quote.*expired/i.test(error)) return 'This result has expired. Refresh the simulation before continuing.';
-  if (/SERVICE_UNAVAILABLE|STORAGE_NOT_CONFIGURED|RPC_(?:ERROR|RATE_LIMITED|UNAVAILABLE)|_OFF$/i.test(error)) return 'Simulation is currently unavailable. Try again before continuing.';
+  if (/SERVICE_UNAVAILABLE|STORAGE_NOT_CONFIGURED|RPC_(?:ERROR|RATE_LIMITED|UNAVAILABLE)|_OFF$|_RATE_LIMITED$/i.test(error)) return 'Simulation is currently unavailable. Try again before continuing.';
+  // BUILD-SOLANA-TRANSFER-UX-001: specific meanings before the broad route and fallback messages (nothing here echoes provider text).
+  if (/WALLET_SELECTION_REQUIRED|_WALLET_REQUIRED$|WALLET_NOT_CONNECTED|OWNER_REQUIRED|WALLET_PROOF_REQUIRED/i.test(error)) return 'Connect the wallet that will sign this workflow, then simulate again.';
+  if (/RECIPIENT_(?:REQUIRED|INVALID|NOT_EOA|NOT_WALLET|IS_TOKEN_ACCOUNT|IS_PROGRAM|OFF_CURVE|IS_SENDER|UNSUPPORTED)/i.test(error)) return 'Check the destination address. It must be a valid wallet address on this network, not a token or program account.';
+  if (/EXTENSION/i.test(error)) return 'This token uses a token feature FloFi cannot verify safely. Nothing was simulated or sent.';
+  if (/MINT_(?:MISMATCH|NOT_FOUND|INVALID)|DECIMALS_MISMATCH|TOKEN_(?:METADATA|IDENTITY|PROGRAM)_MISMATCH|ASSET_IDENTITY|TOKEN_ACCOUNT_(?:MISMATCH|FROZEN)/i.test(error)) return 'The token details do not match what is on the network. Check the token in Build and simulate again.';
+  if (/AMOUNT_(?:TOO_SMALL|OUT_OF_RANGE|INVALID|BELOW_RENT)|BELOW_RENT_EXEMPT/i.test(error)) return 'Check the amount. It is outside what this network or token accepts.';
+  if (/PARTIAL_DEBT_REQUIRED|NO_DEBT|DEBT_TOO_LOW/i.test(error)) return 'Your current debt is lower than this repayment. Reduce the amount and simulate again.';
+  if (/PENDING_TRANSACTION|OWNER_ATTEMPT_IN_PROGRESS|EXISTING_ATTEMPT/i.test(error)) return 'A previous transaction from this wallet is still being confirmed. Wait for it to finish, then simulate again.';
+  if (/OWNER_NOT_EOA/i.test(error)) return 'This wallet is a smart contract account. Use a standard wallet account to sign this workflow.';
+  if (/EXECUTION_NOT_ENABLED|NETWORK_UNAVAILABLE|NETWORK_UNSUPPORTED|PROFILE_UNSUPPORTED|_NOT_ENABLED$/i.test(error)) return 'This action is not available on this FloFi server right now. Nothing was simulated or sent.';
   if (/NO_ROUTE|ROUTE_UNAVAILABLE|ROUTE_REFUSED|UNSUPPORTED/i.test(error)) return 'A route is not available for this workflow. Check its tokens and networks in Build.';
   if (/APPROVAL|ALLOWANCE/i.test(error)) return 'The required token approval could not be verified. Simulate again before continuing.';
   if (/CAPACITY_EXCEEDED|INSUFFICIENT_COLLATERAL|NO_COLLATERAL|BORROW_CAPACITY|COLLATERAL_REQUIRED|RESERVE_(PAUSED|INACTIVE|FROZEN|UNAVAILABLE)|LIQUIDITY_(UNAVAILABLE|INSUFFICIENT)|INSUFFICIENT_LIQUIDITY/i.test(error)) return 'The available collateral or liquidity cannot support this action.';
-  if (/WRONG_CHAIN|WRONG_CLUSTER|WRONG_WALLET|WALLET_MISMATCH/i.test(error)) return 'Reconnect the wallet used for this workflow and simulate again.';
+  if (/WRONG_CHAIN|WRONG_CLUSTER|WRONG_WALLET|WRONG_OWNER|WALLET_MISMATCH/i.test(error)) return 'Reconnect the wallet used for this workflow and simulate again.';
   if (/REJECTED|CANCELLED|USER_REFUSAL/i.test(error)) return 'The wallet request was cancelled. Try again when ready.';
-  return 'Simulation could not be completed. Try again before continuing.';
+  if (/SIMULATION_FAILED|SIMULATION_UNEXPECTED|SIMULATED_[A-Z_]*MISMATCH|SIMULATED_[A-Z_]*BELOW|SIMULATION_INVALID/i.test(error)) return 'The network rejected this transaction in simulation, so nothing was sent. Check the amounts and your balances, then simulate again.';
+  return 'FloFi could not complete this simulation, and nothing was sent. Check the workflow in Build, then simulate again.';
 }
 const iso = (value: string) => Date.parse(value);
 const seconds = (value: string | number) => Number(value) * 1000;
@@ -329,6 +344,22 @@ export function projectSimulation(workflow: Workflow, context: ReviewContext, so
       if (q.asset?.multiplierWad) warn('attention', `${symbol}: ${simulationAmount(q.asset.multiplierWad, 18)} underlying shares per token (Robinhood corporate-action multiplier).`);
       if (!self) warn('attention', 'Funds go to an address other than the signing wallet. Confirm it belongs to the intended recipient.');
       warn('info', self && !q.asset ? 'Sending to the same wallet returns the funds; only the network fee is spent.' : 'Only the reviewed amount moves; the network fee is paid in ETH.'); break;
+    }
+    case 'solana-transfer': {
+      // BUILD-SOLANA-TRANSFER-UX-001: the exact amount to the explicit recipient, the reviewed fee and any recipient token-account deposit.
+      const r = source.state.record; if (!r) break; const q = r.review;
+      if (!guard(same(q.workflow), r.provenance, iso(q.expiresAt), r.error)) break;
+      const symbol = q.asset.mint === null ? 'SOL' : q.asset.symbol === 'SPL token' ? `${q.asset.mint.slice(0, 4)}…${q.asset.mint.slice(-4)}` : q.asset.symbol;
+      const amount = simulationAmount(q.amount, q.asset.decimals, symbol), s = step();
+      result(s, amount, amount ? `Send ${amount} to ${q.recipient}` : null, 'Wallet send');
+      if (s) { s.resultLabel = 'Expected action'; if (q.asset.mint) s.details.push({ label: 'Token mint', value: q.asset.mint }); }
+      fee('Estimated network fee', q.estimatedFeeLamports, 9, 'SOL');
+      if (BigInt(q.accountCreationLamports) > 0n) fee('Recipient token account deposit', q.accountCreationLamports, 9, 'SOL', 'Opens the recipient\'s token account; paid once, separate from the network fee.');
+      else if (q.token) fee('Maximum token account deposit', q.maximumAccountCreationLamports, 9, 'SOL', 'Only paid if the recipient token account must be recreated before this transfer lands.');
+      if (!q.asset.verified) warn('attention', 'This token is not on FloFi\'s verified list. Its mint, decimals and token program were checked on chain; confirm it is the token you intend to send.');
+      if (q.token?.program === 'token-2022') warn('info', 'Token-2022 token: only extensions FloFi can verify were found, and the recipient receives exactly the amount sent.');
+      warn('attention', 'Funds go to an address other than the signing wallet. Confirm it belongs to the intended recipient.');
+      break;
     }
     case 'fork-swap': {
       const q = source.state.prepared; if (!q) break;

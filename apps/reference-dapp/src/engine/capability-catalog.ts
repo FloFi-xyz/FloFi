@@ -8,8 +8,9 @@
  *    execution capability registry is resolved on that exact IR. "Supported by code" is the registry's verdict; demonstrated
  *    evidence is the registry's ceiling (often none). Deployment enablement is added by the caller from the runtime.
  */
-import { ETHEREUM_BASE_ASSETS, ARBITRUM_BASE_ASSETS, AAVE_V3_LENDING_PROFILES, executionCapabilityRegistry, LENDING_BASE_SEPOLIA, ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY, resolveNodeCapability, ROBINHOOD_BASE_ASSETS, BASE_BASE_ASSETS,
-  resolveWorkflowCapability, SOLANA_DEVNET_CHAIN, SOLANA_DEVNET_TOKENS, SOLANA_MAINNET_CHAIN, SOLANA_MAINNET_TOKENS, UNISWAP_LIQUIDITY_PROFILES,
+import { ETHEREUM_BASE_ASSETS, ARBITRUM_BASE_ASSETS, AAVE_V3_LENDING_PROFILES, executionCapabilityRegistry, LENDING_BASE_SEPOLIA, resolveNodeCapability, ROBINHOOD_BASE_ASSETS, BASE_BASE_ASSETS,
+  resolveWorkflowCapability, SOLANA_DEVNET_CHAIN, SOLANA_DEVNET_TOKENS, SOLANA_MAINNET_CHAIN, SOLANA_MAINNET_TOKENS, SOLANA_TRANSFER_PROFILES, UNISWAP_LIQUIDITY_PROFILES,
+  NATIVE_TRANSFER_PROFILES, ORCA_LIQUIDITY_PROFILES, ROBINHOOD_TESTNET_TRANSFER,
   type CapabilityDimension, type EvidenceMaturity, type ExecutionEnvironment } from '@defi-workflow-engine/action-registry';
 import { createBaseSepoliaReviewContext, createEthereumSepoliaReviewContext } from '@defi-workflow-engine/reference-linter';
 import { ROUTER_PAIRS } from '@defi-workflow-engine/workflow-contracts';
@@ -24,7 +25,7 @@ export const NETWORK_CHAINS: Readonly<Record<NetworkId, string>> = Object.freeze
   'base-sepolia': ROUTER_PAIRS[1]!.source.chainId, 'arbitrum-sepolia': ROUTER_PAIRS[1]!.destination.chainId,
   'ethereum-sepolia': AAVE_V3_LENDING_PROFILES.find(p => p.network === 'Ethereum Sepolia')!.chain,
   'solana': SOLANA_MAINNET_CHAIN, 'solana-devnet': SOLANA_DEVNET_CHAIN,
-  'robinhood': ROBINHOOD_BASE_ASSETS.chain, 'ethereum': ETHEREUM_BASE_ASSETS.chain,
+  'robinhood': ROBINHOOD_BASE_ASSETS.chain, 'robinhood-testnet': ROBINHOOD_TESTNET_TRANSFER.chain, 'ethereum': ETHEREUM_BASE_ASSETS.chain,
 });
 const networkOfChain = (chain: string): NetworkId | null => NETWORK_IDS.find(id => NETWORK_CHAINS[id] === chain) ?? null;
 const actionsOn = (network: NetworkId): StrategyAction[] => [...new Set(STRATEGY_EXAMPLES.filter(e => strategyNetwork(e.strategy) === network ||
@@ -57,8 +58,14 @@ function assetEntries(): Entry[] {
   for (const [chain, tokens, source] of [[SOLANA_MAINNET_CHAIN, SOLANA_MAINNET_TOKENS, 'jupiter:Solana'], [SOLANA_DEVNET_CHAIN, SOLANA_DEVNET_TOKENS, 'orca-whirlpools:Solana Devnet']] as const)
     for (const t of Object.values(tokens) as { symbol: string; mint: string; decimals: number }[])
       out.push({ chain, symbol: t.symbol, address: t.mint, decimals: t.decimals, action: 'swap', source });
-  for (const t of [ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY.token0, ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY.token1])
-    out.push({ chain: ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY.chain, symbol: t.symbol, address: t.mint, decimals: t.decimals, action: 'add_liquidity', source: 'orca-whirlpools-liquidity:Solana Devnet' });
+  // BUILD-SOLANA-TRANSFER-UX-001: the verified transfer assets of each cluster (native SOL has a null address). Any other SPL mint is named by
+  // address with its decimals and token program, and verified on chain.
+  for (const profile of SOLANA_TRANSFER_PROFILES) for (const a of profile.assets)
+    out.push({ chain: profile.chain, symbol: a.symbol, address: a.mint, decimals: a.decimals, action: 'transfer', source: `solana-transfer:${profile.network}` });
+  for (const profile of ORCA_LIQUIDITY_PROFILES) for (const t of [profile.token0, profile.token1])
+    out.push({ chain: profile.chain, symbol: t.symbol, address: t.mint, decimals: t.decimals, action: 'add_liquidity', source: `orca-whirlpools-liquidity:${profile.network}` });
+  for (const profile of NATIVE_TRANSFER_PROFILES)
+    out.push({ chain: profile.chain, symbol: 'ETH', address: null, decimals: 18, action: 'transfer', source: `native-transfer:${profile.network}` });
   // Discover the same currently loaded, validated catalog authoring reads. Without an official source, pinned assets alone
   // remain; no recorded catalog is substituted. Native currencies have transfer support only. Aave and Router membership above
   // remains narrower than catalog membership.

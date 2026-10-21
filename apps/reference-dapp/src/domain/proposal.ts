@@ -1,5 +1,5 @@
 import { supplyDetails, borrowDetails, repayDetails, withdrawDetails } from './supply-authoring';
-import { transferDetails } from './robinhood-transfer-authoring';
+import { transferDetails, isSolanaTransferNetwork } from './robinhood-transfer-authoring';
 import { solanaSwapDetails, solanaSwapLabels, solanaTokenMint } from './jupiter-authoring';
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { ReviewContext } from '@defi-workflow-engine/reference-linter';
@@ -104,6 +104,8 @@ export function describeProposal(before: EditorState, after: EditorState, comman
     'Pool state and position outcome are unobserved. Every liquidity wallet operation needs separate exact Mode A review.',
   ]);
   const oldTransfer=oldNode&&transferDetails(oldNode as Parameters<typeof transferDetails>[0]),newTransfer=newNode&&transferDetails(newNode as Parameters<typeof transferDetails>[0]);
+  if(newTransfer&&isSolanaTransferNetwork(newTransfer.network))return [`Send ${newTransfer.amount} ${newTransfer.asset} on ${newTransfer.network}`,`Amount: ${oldTransfer?.amount??'none'} → ${newTransfer.amount}`,
+    `Recipient: ${newTransfer.recipient}`,'The exact amount, recipient, network fee and any recipient token account deposit are bound at Review.'];
   if(newTransfer)return [`Self-transfer test ETH on ${newTransfer.network}`,`Amount: ${oldTransfer?.amount??'none'} → ${newTransfer.amount} ETH`,'Recipient: connected owner bound at Review','Chain execution proof, not a DeFi action'];
   const oldWithdraw=oldNode&&withdrawDetails(oldNode as Parameters<typeof withdrawDetails>[0]),newWithdraw=newNode&&withdrawDetails(newNode as Parameters<typeof withdrawDetails>[0]);
   if(newWithdraw)return [`Withdraw from Aave V3 on ${newWithdraw.network}`,`Amount: ${oldWithdraw?.amount??'none'} → ${newWithdraw.amount} ${newWithdraw.asset}`,'Recipient: connected owner bound at Review'];

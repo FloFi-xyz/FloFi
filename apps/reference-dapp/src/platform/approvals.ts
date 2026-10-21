@@ -186,7 +186,7 @@ function reviewedWorkflows(record: unknown): unknown[] {
 }
 export type RunProgress = { readonly executionId: string; readonly flow: string; readonly status: string; readonly reconciled: boolean; readonly terminal: boolean;
   readonly errorCode: string | null; readonly evidenceEnvironment: string | null; readonly evidenceOutcome: string | null; readonly evidenceBundleHash: string | null;
-  readonly updatedAt: string };
+  readonly updatedAt: string; readonly receiptUrl?: string | null };
 /**
  * The runs started from an APPLIED handoff whose owner chose to share them: runs of the claimant wallet, on the plan's flow, created
  * after the claim, whose reviewed workflow hashes EXACTLY to the handoff's workflow hash (an edited strategy is not this proposal).
@@ -205,8 +205,13 @@ export async function sharedRuns(h: HandoffRecord, runtime: EngineRuntime, hando
     if (!record.ok || !reviewedWorkflows(record.value).some(w => { try { return semanticWorkflowHash(w as Workflow) === h.workflowHash; } catch { return false; } })) continue;
     let evidence: { environment: string; outcome: string; bundleHash: string } | null = null;
     if (run.value.hasEvidence) { const e = await runtime.evidence(flow, candidate.runId, owner); if (e.ok && e.value) evidence = { environment: e.value.environment, outcome: e.value.outcome, bundleHash: e.value.bundleHash }; }
-    out.push({ executionId: run.value.runId, flow: run.value.flow, status: run.value.status, reconciled: run.value.hasEvidence, errorCode: run.value.errorCode,
-      terminal: !run.value.needsObservation && (run.value.hasEvidence || run.value.errorCode !== null), evidenceEnvironment: evidence?.environment ?? null,
+    // A read-model flag is not reconciliation. Read the flow's independently reconciled evidence as the owner;
+    // absent, failed or divergent evidence must never produce an execution receipt, even if the summary is ahead.
+    const reconciled = !run.value.needsObservation && run.value.errorCode === null && Boolean(evidence?.bundleHash && evidence.environment &&
+      (evidence.outcome === 'RECONCILED' && ['RECONCILED', 'COMPLETED'].includes(run.value.status)
+        || run.value.flow === 'pix-payment' && evidence.outcome === 'PAYMENT_SETTLED' && run.value.status === 'PAYMENT_SETTLED'));
+    out.push({ executionId: run.value.runId, flow: run.value.flow, status: run.value.status, reconciled, errorCode: run.value.errorCode,
+      terminal: !run.value.needsObservation && (reconciled || run.value.errorCode !== null), evidenceEnvironment: evidence?.environment ?? null,
       evidenceOutcome: evidence?.outcome ?? null, evidenceBundleHash: evidence?.bundleHash ?? null, updatedAt: run.value.updatedAt });
   }
   const known = new Set(h.runIds), fresh = out.map(r => r.executionId).filter(id => !known.has(id));
@@ -214,8 +219,10 @@ export async function sharedRuns(h: HandoffRecord, runtime: EngineRuntime, hando
   return out;
 }
 /** The approval's status for its requester, with the shared runs when the owner shares them. */
-export async function approvalProgress(h: HandoffRecord, runtime: EngineRuntime, handoffs: HandoffStore) {
-  const runs = await sharedRuns(h, runtime, handoffs);
-  return { ...approvalStatus(h), runs: runs ?? [], runsVisible: runs !== null,
+export async function approvalProgress(h: HandoffRecord, runtime: EngineRuntime, handoffs: HandoffStore, origin?: string) {
+  const shared = await sharedRuns(h, runtime, handoffs);
+  // A receipt link grants no read access: the existing Dashboard still requires the execution owner's authenticated wallet.
+  const runs = shared?.map(run => origin ? { ...run, receiptUrl: run.reconciled ? `${origin}/app/dashboard/runs/${encodeURIComponent(run.executionId)}` : null } : run);
+  return { ...approvalStatus(h), runs: runs ?? [], runsVisible: shared !== null,
     note: h.status === 'APPLIED' && !h.shareStatus ? 'The owner has not shared the status of runs started from this proposal.' : null };
 }

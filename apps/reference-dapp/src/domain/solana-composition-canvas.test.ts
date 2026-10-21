@@ -66,12 +66,12 @@ function canvasAction(view: SolanaCompositionView, authorization: ReviewAuthoriz
   const s = source(view, authorization.accepted);
   const props = { workflow: workflow as unknown as Workflow, context, source: s, authorization, wallet: wallet(view), invalidWorkflow: false,
     progress: projectExecutionLifecycle(workflow as unknown as Workflow, context, s), recovery: null,
-    execution: { ready: true, started: true, start: vi.fn(), prompt: '', expiresAt: null, requiresMainnetAcknowledgement: false, nextLabel: 'Continue to add liquidity' } };
+    execution: { ready: true, started: true, start: vi.fn(), prompt: '', expiresAt: null, nextLabel: 'Continue to add liquidity' } };
   return projectCanvasAction(props as unknown as ExecutionControlsState, { requesting: false, verifying: false, canContinue, canCheck: false }, NOW + 1_000);
 }
 
 describe('P0: the Canvas continues a reconciled Solana composition to its Orca position', () => {
-  it('reproduces the stuck state, then offers Continue to liquidity → Approve & Continue → Continue to add liquidity on the same run', async () => {
+  it('reproduces the stuck state, then offers Continue to liquidity → Authorize in wallet → Continue to add liquidity on the same run', async () => {
     const { wallet: owner, service, id, bound } = await boundRun();
     expect(bound.phase).toBe('BOUND');
     // After the reconciled swap: one clear next action, which prepares the position (read-only), never the swap.
@@ -89,7 +89,7 @@ describe('P0: the Canvas continues a reconciled Solana composition to its Orca p
     // The fix: the position manifest is checked against the workflow it binds; the owner can approve it.
     expect(projectReview(workflow as unknown as Workflow, context, reviewSource(prepared), positionAuthorization(prepared, true), wallet(prepared), NOW + 1_000))
       .toMatchObject({ status: 'ready', canApprove: true });
-    expect(canvasAction(prepared, positionAuthorization(prepared, true))).toEqual({ kind: 'approve', label: 'Approve & Continue', disabled: false });
+    expect(canvasAction(prepared, positionAuthorization(prepared, true))).toEqual({ kind: 'approve', label: 'Authorize in wallet', disabled: false });
 
     const reviewed = live(await service.reviewLiquidity(id, prepared.liquidity!.review.commitment, workflow));
     const accepted = positionAuthorization(reviewed, true);

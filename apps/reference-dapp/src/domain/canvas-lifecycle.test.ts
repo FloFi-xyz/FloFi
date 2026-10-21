@@ -32,7 +32,7 @@ function fixture(kind: 'public' | 'router' | 'supply' | 'solana-swap'): Executio
     router: { record: { workflow: f.workflow, provenance: 'PUBLIC_TESTNET', verdict: 'PENDING', error: null, requote: false, review: { workflowHash: f.manifest.semanticWorkflowHash, revision: f.workflow.revision, nodeId: f.workflow.nodes.at(-1)!.nodeId, expiresAt: reviewExpiry, selection: { selected: 'lifi' }, route: { inputToken: { symbol: 'USDC', decimals: 6 }, outputToken: { symbol: 'USDC', decimals: 6 }, inputAmount: '100000000', underlyingProtocol: 'across', slippageBps: 50, fees: [] }, quote: { expectedOutput: '99000000', minimumOutput: '98500000', feeTotal: '1000000', expiresAt: reviewExpiry }, deadlines: { depositMustLandBy: (reviewNow + 100000) / 1000 }, approvals: [], fees: { totalUpperBoundWei: '1', executionFeeUpperBoundWei: '1', l1FeeUpperBoundWei: '0' } } } },
   };
   return { ...f, source: { kind, state: { busy: false, error: null, retired: false, ...states[kind] } } as unknown as SimulationSource,
-    execution: { ready: true, started: false, start: vi.fn(), prompt: '', expiresAt: null, requiresMainnetAcknowledgement: false } };
+    execution: { ready: true, started: false, start: vi.fn(), prompt: '', expiresAt: null } };
 }
 describe('shared Canvas lifecycle across runtime projections', () => {
   // BUILD-FIX-UX-001: (1) declined before submission, (2) submitted and failed, (3) confirmed, (4) unknown outcome.
@@ -117,14 +117,14 @@ describe('shared Canvas lifecycle across runtime projections', () => {
     expect(projectCanvasAction(f, { ...controls, canCheck: true }, reviewNow)).toEqual({ kind: 'recover', label: 'Recover execution', disabled: false });
     expect(projectCanvasAction(f, controls, reviewNow)).toEqual({ kind: 'status', label: 'Recover execution', disabled: true });
   });
-  it.each(['public', 'router', 'supply', 'solana-swap'] as const)('%s uses Simulate → Approve → Execute without invoking authority', kind => {
+  it.each(['public', 'router', 'supply', 'solana-swap'] as const)('%s uses Simulate → Authorize in wallet without invoking authority', kind => {
     const f = fixture(kind), approve = vi.fn(); f.authorization.approve = approve;
     const key = f.authorization.key; f.authorization.key = null;
     expect(projectCanvasAction(f, controls, reviewNow)).toMatchObject({ kind: 'simulate', label: 'Simulate workflow', disabled: false });
     f.authorization.key = key;
-    expect(projectCanvasAction(f, controls, reviewNow), projectReview(f.workflow, f.context, f.source, f.authorization, f.wallet, reviewNow).message).toEqual({ kind: 'approve', label: 'Approve & Continue', disabled: false });
+    expect(projectCanvasAction(f, controls, reviewNow), projectReview(f.workflow, f.context, f.source, f.authorization, f.wallet, reviewNow).message).toEqual({ kind: 'approve', label: 'Authorize in wallet', disabled: false });
     f.authorization.accepted = true;
-    expect(projectCanvasAction(f, controls, reviewNow)).toEqual({ kind: 'execute', label: 'Execute workflow', disabled: false });
+    expect(projectCanvasAction(f, controls, reviewNow)).toEqual({ kind: 'execute', label: 'Authorize in wallet', disabled: false });
     expect(projectCanvasAction(f, { ...controls, requesting: true }, reviewNow)).toMatchObject({ kind: 'status', label: 'Waiting for wallet…' });
     expect(projectCanvasAction(f, { ...controls, verifying: true }, reviewNow)).toMatchObject({ kind: 'status', label: 'Reconciling…' });
     expect(projectCanvasAction(f, controls, reviewNow + 120001)).toMatchObject({ kind: 'simulate', label: 'Simulate again' });

@@ -4,8 +4,8 @@
  *
  * The approval's state is always visible to the conversation that created it. Runs started from it are visible ONLY while the wallet
  * owner shares them (their explicit choice on /approve, default off for channels), and then only as public facts: the run id is not
- * even shown — just its status, whether it reconciled, the evidence environment and outcome exactly as FloFi recorded them (MOCKED
- * stays MOCKED), and the bundle hash, shortened. Never the claiming wallet, a transaction, calldata or a signature.
+ * exposed as a separate fact — its owner-scoped receipt link, status, reconciliation, evidence environment and outcome are shared
+ * exactly as FloFi recorded them (MOCKED stays MOCKED). Never the claiming wallet, transaction bytes, calldata or a signature.
  */
 import { createHash } from 'node:crypto';
 import type { HandoffRecord } from '../../platform/index.ts';
@@ -35,7 +35,7 @@ export function statusReplies(language: ChannelLanguage, found: { readonly hando
 export type PlannedNotification = { readonly key: string; readonly text: string };
 /**
  * Notifications due for a handoff's progress, each with a stable key (so a repeated check never sends twice): "loaded in FloFi" once
- * the owner claimed it and shares status, then per run "in progress" once and its terminal outcome once. `done` once nothing more can
+ * the owner claimed it and shares status, then each recorded lifecycle state once and its terminal outcome once. `done` once nothing more can
  * follow.
  */
 export function plannedNotifications(language: ChannelLanguage, handoff: HandoffRecord, progress: Progress): { readonly due: readonly PlannedNotification[]; readonly done: boolean } {
@@ -45,8 +45,8 @@ export function plannedNotifications(language: ChannelLanguage, handoff: Handoff
   due.push({ key: `notify:${handoff.handoffId}:loaded`, text: m.loaded });
   for (const run of progress.runs) {
     const id = createHash('sha256').update(run.executionId).digest('hex').slice(0, 16);
-    // Execution started (once, while it runs), then its outcome once it is terminal: reconciled with its evidence, or ended.
-    if (!run.terminal) due.push({ key: `notify:${handoff.handoffId}:run:${id}:started`, text: shorten(m.run(run)) });
+    // Preparation creates a run too. Keep its notice distinct so it cannot consume a later authorization/submission notice.
+    if (!run.terminal) due.push({ key: `notify:${handoff.handoffId}:run:${id}:state:${run.status.toLowerCase()}`, text: shorten(m.run(run)) });
     else due.push({ key: `notify:${handoff.handoffId}:run:${id}:${run.reconciled ? 'reconciled' : 'ended'}`, text: shorten(m.run(run)) });
   }
   return { due, done: progress.runs.length > 0 && progress.runs.every(r => r.terminal) };

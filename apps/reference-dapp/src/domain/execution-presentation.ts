@@ -6,11 +6,11 @@ import type { SimulationSource } from './simulation-presentation';
 
 export type ExecutionStart = {
   ready: boolean; started: boolean; start: (() => void | Promise<void>) | null; prompt: string | null;
-  expiresAt: number | null; requiresMainnetAcknowledgement: boolean; reason?: string; connect?: () => void; next?: (() => void | Promise<void>) | null; nextLabel?: string; check?: (() => void | Promise<void>) | null;
+  expiresAt: number | null; reason?: string; connect?: () => void; next?: (() => void | Promise<void>) | null; nextLabel?: string; check?: (() => void | Promise<void>) | null;
 };
 export type ExecutionWorkspaceState = {
   workflow: Workflow; context: ReviewContext; source: SimulationSource; authorization: ReviewAuthorization;
-  wallet: ReviewWallet; execution: ExecutionStart; invalidWorkflow?: boolean; acknowledged?: boolean;
+  wallet: ReviewWallet; execution: ExecutionStart; invalidWorkflow?: boolean;
 };
 /** Additional presentation gates never grant authority that the selected runtime does not have. */
 export function projectExecution(props: ExecutionWorkspaceState, now = Date.now()) {
@@ -30,9 +30,6 @@ export function projectExecution(props: ExecutionWorkspaceState, now = Date.now(
   if (!authorization.key) {
     status = 'blocked';
     if (review.status !== 'invalidated' && review.label !== 'Connect your wallet') { label = 'Review required'; message = 'Simulate and review this workflow before execution.'; }
-  }
-  if (execution.requiresMainnetAcknowledgement && !props.acknowledged && status === 'ready') {
-    status = 'blocked'; label = 'Confirmation required'; message = 'Confirm that this swap uses real funds on Solana mainnet before executing.';
   }
   if (source.state.busy) { status = 'loading'; label = 'Preparing execution…'; message = 'Checking the workflow and wallet authorization. Complete any open wallet confirmation.'; }
   if (expiresAt !== null && now >= expiresAt || review.status === 'expired') { status = 'blocked'; label = 'Simulation expired'; message = 'Simulate again and review the refreshed workflow before execution.'; }

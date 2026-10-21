@@ -25,11 +25,20 @@ export function ReviewTechnicalDetails({ authorization }: { authorization: Revie
   const { t: tr } = useLocale();
   return <section className="review-technical" aria-label={tr("Authorization technical details")}><h3>{tr("Strategy Manifest")}</h3><pre>{JSON.stringify({ manifest: authorization.manifest, policy: authorization.policy, review: authorization.technical }, null, 2)}</pre></section>;
 }
+/** Allowance amounts and spenders stay visible at the shared authorization point on every presentation. */
+export function ReviewTokenPermissions({ review }: { review: ReturnType<typeof projectReview> }) {
+  const { t } = useLocale();
+  if (!review.approvals.length) return null;
+  return <section className="signing-permissions" aria-label={t('Token approvals')}><h2>{t('Token approvals')}</h2>
+    {review.approvals.map((approval, index) => <div key={index}><p>{t(approval.symbol)} · {t(approval.value)} · {t(approval.network)}</p><p>{t('Spender')}: {approval.address}</p>
+      {approval.unlimited && <p>{t('This allowance has no spending cap. It remains available to the spender until changed or revoked.')}</p>}</div>)}
+  </section>;
+}
 /** Normal product audit details: the same validated Review projection, without raw artifacts or another action workspace. */
 export function ReviewAuthorizationDetails(props: ReviewWorkspaceProps) {
   const { t } = useLocale();
   const review = projectReview(props.workflow, props.context, props.source, props.authorization, props.wallet, Date.now(), props.invalidWorkflow);
-  return <details id="simulation-review" className="review-authorization-details" aria-label={t('Review & Authorization')}>
+  return <><ReviewTokenPermissions review={review}/><details id="simulation-review" className="review-authorization-details" aria-label={t('Review & Authorization')}>
     <summary>{t('Review & Authorization')}</summary>
     <p role="status">{t(review.message)}</p>
     <dl className="simulation-summary-values">
@@ -44,7 +53,7 @@ export function ReviewAuthorizationDetails(props: ReviewWorkspaceProps) {
     <p>{t('Changing the workflow, wallet, network or authorization limits requires a fresh Review. An expired simulation must be run again.')}</p>
     <p>{t('Confirms this Review. No transaction is submitted. Required wallet confirmations remain separate.')}</p>
     {review.manifest?.enforcement === 'NOT_ENFORCED' && <p>{t('FloFi checks these limits before requesting execution. The chain enforces the signed transaction fields; the Manifest itself is not enforced by an on-chain contract.')}</p>}
-  </details>;
+  </details></>;
 }
 function ReviewTokenAmount({ value }: { value: string }) {
   const { t: tr } = useLocale();

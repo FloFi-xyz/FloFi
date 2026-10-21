@@ -358,6 +358,8 @@ RUNNER = 'scripts/guarded-release-browser.mjs'
 MAIN_PROFILES = {
     "default-product": (["brand-ux-001.spec.ts","base-observation.spec.ts","build-roundtrip.spec.ts","build009.spec.ts","across.spec.ts","canvas-keyboard.spec.ts","canvas-ux.spec.ts","contextual-proposals.spec.ts","cross-chain-liquidity-recovery.spec.ts","cross-chain-liquidity.spec.ts","execution-capabilities.spec.ts","interface-honesty.spec.ts","mock-artifact-chain.spec.ts","network-isolation.spec.ts","public-testnet.spec.ts","robinhood-network.spec.ts","swap-authoring.spec.ts","visual-shell.spec.ts","credentials.spec.ts","build-fix-ux.spec.ts","beta-ui.spec.ts","ux-ui-002-landing.spec.ts"], {}),
     "review-execute-recovery-components": (["simulate-review-acceptance.spec.ts","execute-product-workspace.spec.ts","execute-workflow.spec.ts"], {}),
+    "solana-transfer-ux": (["--config", "playwright.transfer-ux.config.ts"], {}),
+    "approve-authorize-journeys": (["approve-authorize-journeys.spec.ts"], {"GRYLOO_MCP_E2E":"EMBEDDED_LOOPBACK_ONLY","GRYLOO_CLOUD_RUNTIME_E2E":"EMBEDDED_LOOPBACK_ONLY","FLOFI_SWAP_READ_E2E":"MOCKED_LOOPBACK_ONLY","FLOFI_SWAP_EXECUTION_E2E":"MOCKED_LOOPBACK_ONLY","TEST_DATABASE_URL":"<TEST_DATABASE_URL>"}),
     "workflow-acceptance": (["acceptance-workflows.spec.ts"], {"GRYLOO_CLOUD_RUNTIME_E2E":"EMBEDDED_LOOPBACK_ONLY","GRYLOO_ROUTER_TESTNET_E2E":"MOCKED_LOOPBACK_ONLY","TEST_DATABASE_URL":"<TEST_DATABASE_URL>"}),
     "swap-read-acceptance": (["acceptance-swap-read.spec.ts"], {"GRYLOO_CLOUD_RUNTIME_E2E":"EMBEDDED_LOOPBACK_ONLY","FLOFI_SWAP_READ_E2E":"MOCKED_LOOPBACK_ONLY","TEST_DATABASE_URL":"<TEST_DATABASE_URL>"}),
     "execution-continuity": (["execution-continuity.spec.ts","workflow-ux-execution.spec.ts"], {"GRYLOO_CLOUD_RUNTIME_E2E":"EMBEDDED_LOOPBACK_ONLY","FLOFI_SWAP_READ_E2E":"MOCKED_LOOPBACK_ONLY","FLOFI_SWAP_EXECUTION_E2E":"MOCKED_LOOPBACK_ONLY","TEST_DATABASE_URL":"<TEST_DATABASE_URL>"}),
@@ -403,7 +405,7 @@ MAIN_SEPARATE_SUITES = {
     'channel-approve': (['whatsapp-approve.spec.ts', 'telegram-approve.spec.ts'], {'GRYLOO_MCP_E2E': 'EMBEDDED_LOOPBACK_ONLY',
                         'GRYLOO_CHANNEL_E2E': 'FIXTURE_LOOPBACK_ONLY', 'TEST_DATABASE_URL': '<TEST_DATABASE_URL>'}),
 }
-CRITICAL = ['copilot-learning', 'canvas-corrections', 'solana-wallet-refusal', 'supply-provenance', 'review-execute-recovery-components']
+CRITICAL = ['copilot-learning', 'canvas-corrections', 'solana-wallet-refusal', 'supply-provenance', 'review-execute-recovery-components', 'solana-transfer-ux']
 
 
 def browser_plan():
@@ -605,11 +607,13 @@ if [ -n "${FAKE_JUNIT:-}" ] && [ -n "${PLAYWRIGHT_JUNIT_OUTPUT_FILE:-}" ]; then
   mkdir -p "$(dirname "$PLAYWRIGHT_JUNIT_OUTPUT_FILE")"; printf '%s' "$FAKE_JUNIT" > "$PLAYWRIGHT_JUNIT_OUTPUT_FILE"
 fi
 case " $* " in *" --last-failed "*) exit "${FAKE_RERUN_STATUS:-1}";; esac
-if [ -n "${FAKE_FAIL:-}" ] && [[ " $* " == *" $FAKE_FAIL "* ]]; then
+for spec in "${FAKE_FAIL:-}" "${FAKE_FAIL_2:-}" "${FAKE_FAIL_3:-}" "${FAKE_FAIL_4:-}"; do
+if [ -n "$spec" ] && [[ " $* " == *" $spec "* ]]; then
   tests='["t1"]'; [ -n "${FAKE_NO_TESTS:-}" ] && tests='[]'
   printf '{"status":"failed","failedTests":%s}\n' "$tests" > "$out/.last-run.json"
   exit "${FAKE_STATUS:-1}"
 fi
+done
 exit 0
 """
 
@@ -652,7 +656,7 @@ class GuardedRunner(unittest.TestCase):
         self.assertEqual(report['status'], 'PASS')
         self.assertEqual([row['name'] for row in report['profiles']], CRITICAL)
         self.assertTrue(all(row['status'] == 'PASS' and row['seconds'] >= 0 for row in report['profiles']))
-        self.assertIn('Guarded release critical: PASS (5 profiles)', result.stdout)
+        self.assertIn('Guarded release critical: PASS (6 profiles)', result.stdout)
         self.assertEqual(json.loads((results / 'guarded-critical.json').read_text()), report)
 
     def test_ci_test_report_names_the_profile_and_keeps_failure_output(self):
@@ -681,12 +685,12 @@ class GuardedRunner(unittest.TestCase):
         self.assertNotIn('--add-reporter junit', rerun[0])  # a diagnostic rerun never reaches the CI test report
         for text in ['Guarded release FAIL: profile canvas-corrections (critical), exit code 7.', 'Specs: canvas-corrections.spec.ts',
                      'Reproduce: node scripts/guarded-release-browser.mjs profile canvas-corrections',
-                     'Not run (never counted as passes): solana-wallet-refusal, supply-provenance, review-execute-recovery-components',
+                     'Not run (never counted as passes): solana-wallet-refusal, supply-provenance, review-execute-recovery-components, solana-transfer-ux',
                      'Diagnostic trace rerun passed: the failure is intermittent; the profile stays FAILED']:
             self.assertIn(text, result.stderr)
         report = self.report('critical')
         self.assertEqual(report['status'], 'FAIL')
-        self.assertEqual([row['status'] for row in report['profiles']], ['PASS', 'FAIL', 'NOT_RUN', 'NOT_RUN', 'NOT_RUN'])
+        self.assertEqual([row['status'] for row in report['profiles']], ['PASS', 'FAIL', 'NOT_RUN', 'NOT_RUN', 'NOT_RUN', 'NOT_RUN'])
         self.assertEqual(report['profiles'][1]['diagnostic']['rerunExitCode'], 0)
 
     def test_failure_outside_a_test_and_disabled_trace_still_fail(self):
@@ -696,6 +700,27 @@ class GuardedRunner(unittest.TestCase):
         result = self.run_phase('profile', 'copilot-learning', FAKE_FAIL='copilot-learning-memory.spec.ts', FLOFI_BROWSER_FAILURE_TRACE='off')
         self.assertEqual(result.returncode, 1)
         self.assertFalse([args for args, _ in self.calls() if '--last-failed' in args])
+
+    def test_collected_failures_run_every_profile_and_keep_original_failure(self):
+        result = self.run_phase('critical', '--collect-failures', FAKE_FAIL='copilot-learning-memory.spec.ts',
+                                FAKE_FAIL_2='canvas-corrections.spec.ts', FAKE_STATUS='7', FAKE_RERUN_STATUS='0')
+        self.assertEqual(result.returncode, 7, result.stderr)
+        calls = [args for args, _ in self.calls()]
+        self.assertEqual(len([args for args in calls if '--last-failed' not in args]), len(CRITICAL))
+        self.assertEqual(len([args for args in calls if '--last-failed' in args]), 2)
+        report = self.report('critical')
+        self.assertEqual(report['status'], 'FAIL')
+        self.assertEqual([row['status'] for row in report['profiles']], ['FAIL', 'FAIL', 'PASS', 'PASS', 'PASS', 'PASS'])
+        for row in report['profiles'][:2]:
+            self.assertEqual(row['exitCode'], 7)
+            self.assertEqual(row['diagnostic']['rerunExitCode'], 0)
+
+    def test_collected_start_errors_are_failures_for_every_profile(self):
+        result = self.run_phase('critical', '--collect-failures', PATH='/nonexistent', FLOFI_BROWSER_FAILURE_TRACE='off')
+        self.assertEqual(result.returncode, 1)
+        report = self.report('critical')
+        self.assertEqual(report['status'], 'FAIL')
+        self.assertEqual([row['status'] for row in report['profiles']], ['FAIL'] * len(CRITICAL))
 
     def test_missing_playwright_and_invalid_selections_fail_closed(self):
         result = self.run_phase('critical', PATH='/nonexistent')
@@ -708,7 +733,7 @@ class GuardedRunner(unittest.TestCase):
 
     def test_a_plan_that_drops_or_repeats_a_profile_refuses_to_run(self):
         source = (self.root / RUNNER).read_text()
-        for broken in [source.replace("'canvas-workflow-ux'],", "],", 1), source.replace("'channel-approve'],", "'channel-approve', 'copilot'],", 1)]:
+        for broken in [source.replace("'canvas-workflow-ux'],", "],", 1), source.replace("'approve-authorize-journeys'],", "'approve-authorize-journeys', 'copilot'],", 1)]:
             with self.subTest():
                 self.assertNotEqual(broken, source)
                 (self.root / RUNNER).write_text(broken)

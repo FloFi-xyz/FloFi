@@ -14,7 +14,10 @@ export type CowWallet = { readonly owner: string; readonly calls: { method: stri
 export const cowPanel = (page: Page, stage: 'simulation' | 'execution') =>
   page.getByRole('region', { name: 'CoW signed-intent ' + stage });
 export async function stage(page: Page, name: 'Build' | 'Simulate' | 'Execute'): Promise<void> {
-  await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name, exact: true }).click();
+  const tab = page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name, exact: true });
+  // Selecting the current stage is a no-op in the app; clicking it anyway only waits for the header to become actionable.
+  if (await tab.getAttribute('aria-current') !== 'page') await tab.click();
+  await expect(tab).toHaveAttribute('aria-current', 'page');
   if (name === 'Execute') {
     const details = page.locator('.execute-technical');
     await expect(details).toBeVisible();

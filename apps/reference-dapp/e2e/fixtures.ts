@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { test as base, expect, type BrowserContext, type Page } from '@playwright/test';
+import { test as base, expect, type BrowserContext, type Locator, type Page } from '@playwright/test';
 import { E2E_APP_ORIGIN as APP_ORIGIN } from './app-origin';
 
 export const SYNTHETIC_GUARD_URL = 'https://example.invalid/gryloo-guard-self-test';
@@ -118,20 +118,57 @@ export async function openSimulationDetails(page: Page): Promise<void> {
   if (!(await details.evaluate(element => (element as HTMLDetailsElement).open))) await details.locator('> summary').click();
 }
 
-/** Use the shared product Review. MOCKED results must fail this authorization boundary. */
+/**
+ * BUILD-SOLANA-TRANSFER-UX-001: the one shared owner action after a simulation, on every network and action. It accepts the current Review
+ * and then makes the first wallet request (there is no separate Execute click); the wallet's own confirmation stays separate.
+ */
+export const AUTHORIZE_IN_WALLET = 'Authorize in wallet';
+/** Every Canvas CTA that can lead to a wallet request: an unaccepted Review ("approve") is one too, because it requests the wallet next. */
+export const FINANCIAL_CANVAS_ACTIONS = ['approve', 'execute', 'continue'].map(kind => `button[data-lifecycle-action="${kind}"]:enabled`).join(', ');
+
+/**
+ * Use the shared product Review. MOCKED results must fail this authorization boundary. The single "Authorize in wallet" click accepts the
+ * Review and, when the reviewed runtime is ready, makes the first wallet request (the caller's wallet fixture answers it); the workspace
+ * then shows Execute.
+ */
 export async function acceptProductReview(page: Page): Promise<void> {
-  const approve = page.locator('.canvas-primary-action').getByRole('button', { name: 'Approve & Continue', exact: true });
-  await expect(approve).toBeEnabled();
-  await approve.click();
-  await expect(page.locator('.canvas-primary-action').getByRole('button', { name: 'Execute workflow', exact: true })).toBeVisible();
-  await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Execute', exact: true }).click();
+  const authorize = page.locator('.canvas-primary-action').getByRole('button', { name: AUTHORIZE_IN_WALLET, exact: true });
+  await expect(authorize).toBeEnabled();
+  await expect(authorize).toHaveAttribute('data-lifecycle-action', 'approve');
+  await authorize.click();
+  await expect(page.locator('.canvas-primary-action button[data-lifecycle-action="approve"]')).toHaveCount(0);
+  const execute = page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Execute', exact: true });
+  if (await execute.getAttribute('aria-current') !== 'page') await execute.click();
 }
 
-/** A blocked workflow may offer simulation, but never an enabled financial CTA. */
+/** BUILD-SOLANA-TRANSFER-UX-001: the minimal signing surface `/approve` opens on (chat-first; the Canvas is optional, "View in FloFi"). */
+export const signingSurface = (page: Page) => page.getByRole('main', { name: 'Authorize with your wallet', exact: true });
+/**
+ * BUILD-SOLANA-TRANSFER-UX-001: the EVM wallet already connected in this browser is recognized: the proposal's proof opens no wallet selector
+ * (no Credentials step) and only asks that wallet to sign FloFi's sign-in message.
+ */
+export async function proveConnectedEvmWallet(page: Page, region: Locator, account: string): Promise<void> {
+  await expect(page.locator('.build009-wallet-info')).toHaveAttribute('title', new RegExp(`^${account}$`, 'i'));
+  await region.getByRole('button', { name: 'Connect wallet and prove ownership' }).click();
+  await expect(page.locator('dialog.wallet-selector[open]')).toHaveCount(0);
+}
+
+/**
+ * The fresh simulation FloFi prepared itself for a loaded proposal, read on the Canvas ("View in FloFi" from the signing surface) with the
+ * opted-in engineering diagnostics. Read-only: it never simulates, accepts or signs anything itself.
+ */
+export async function openProposalSimulationDetails(page: Page): Promise<void> {
+  if (await signingSurface(page).count()) await page.getByRole('button', { name: 'View in FloFi', exact: true }).click();
+  await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Simulate', exact: true }).click();
+  await openSimulationDetails(page);
+}
+
+/** A blocked workflow may offer simulation, but never an enabled financial CTA (including an "Authorize in wallet" Review acceptance). */
 export async function assertNoFinancialCanvasAction(page: Page): Promise<void> {
   const primary = page.locator('.canvas-primary-action');
   await expect(primary).toHaveCount(1);
-  await expect(primary.locator('button[data-lifecycle-action="execute"]:enabled, button[data-lifecycle-action="continue"]:enabled')).toHaveCount(0);
+  await expect(primary.locator(FINANCIAL_CANVAS_ACTIONS)).toHaveCount(0);
+  await expect(page.getByRole('button', { name: AUTHORIZE_IN_WALLET, exact: true }).and(page.locator(':enabled'))).toHaveCount(0);
   await expect(page.locator('.execution-summary button.primary')).toHaveCount(0);
 }
 

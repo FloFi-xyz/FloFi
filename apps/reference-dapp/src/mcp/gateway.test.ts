@@ -92,8 +92,9 @@ describe('BUILD-MCP-001 gateway: protocol and tool surface', () => {
     expect((discover.result as { supportedVersions: string[] }).supportedVersions).toContain('2026-07-28');
     expect(((await client().request('tools/list', {}, { modern: true })).result as { tools: unknown[] }).tools).toHaveLength(9);
     const call = await client().request('tools/call', { name: 'get_supported_networks', arguments: {} }, { modern: true });
-    // BUILD-RH-002 adds Robinhood Chain mainnet (`robinhood`).
-    expect((call.result as { structuredContent: { networks: unknown[] } }).structuredContent.networks.length).toBe(9);
+    // BUILD-RH-002 adds Robinhood Chain mainnet (`robinhood`); BUILD-SOLANA-TRANSFER-UX-001 its testnet (`robinhood-testnet`, native self-transfer).
+    expect((call.result as { structuredContent: { networks: { id: string }[] } }).structuredContent.networks.map(network => network.id)).toContain('robinhood-testnet');
+    expect((call.result as { structuredContent: { networks: unknown[] } }).structuredContent.networks.length).toBe(10);
   });
 
   it('exposes no input field for calldata, contract targets, chain ids, keys, signatures or transactions', async () => {

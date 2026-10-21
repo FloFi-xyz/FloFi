@@ -7,6 +7,8 @@
 import type { StrategySpec } from './strategy-spec';
 
 const EXAMPLE_ACCOUNT = '0x0000000000000000000000000000000000000001';
+/** BUILD-SOLANA-TRANSFER-UX-001: a valid Ed25519 wallet key (sha256("flofi-example-recipient") seed) used only to compose; never simulated. */
+const EXAMPLE_SOLANA_RECIPIENT = 'CtV2foUoy5uJaK5Wybz8Nf1xmC6TgDv93itdja7n9yvH';
 export const STRATEGY_EXAMPLES: readonly { readonly id: string; readonly strategy: StrategySpec }[] = Object.freeze([
   { id: 'bridge-base-sepolia-arbitrum-sepolia', strategy: { action: 'bridge', sourceNetwork: 'base-sepolia', destinationNetwork: 'arbitrum-sepolia', asset: 'USDC', amount: '5', routing: 'auto' } },
   { id: 'bridge-base-arbitrum-one', strategy: { action: 'bridge', sourceNetwork: 'base', destinationNetwork: 'arbitrum-one', asset: 'USDC', amount: '5', routing: 'auto' } },
@@ -15,6 +17,10 @@ export const STRATEGY_EXAMPLES: readonly { readonly id: string; readonly strateg
   { id: 'swap-ethereum-sepolia', strategy: { action: 'swap', network: 'ethereum-sepolia', inputAsset: 'USDC', outputAsset: 'WETH', amount: '1', slippageBps: 50 } },
   { id: 'swap-solana', strategy: { action: 'swap', network: 'solana', inputAsset: 'USDC', outputAsset: 'SOL', amount: '1', slippageBps: 50 } },
   { id: 'swap-solana-devnet', strategy: { action: 'swap', network: 'solana-devnet', inputAsset: 'devUSDC', outputAsset: 'SOL', amount: '1', slippageBps: 50 } },
+  { id: 'transfer-solana', strategy: { action: 'transfer', network: 'solana', asset: 'USDC', amount: '1', recipient: EXAMPLE_SOLANA_RECIPIENT } },
+  { id: 'transfer-solana-devnet', strategy: { action: 'transfer', network: 'solana-devnet', asset: 'SOL', amount: '0.01', recipient: EXAMPLE_SOLANA_RECIPIENT } },
+  { id: 'transfer-ethereum-sepolia', strategy: { action: 'transfer', network: 'ethereum-sepolia', asset: 'ETH', amount: '0.000001' } },
+  { id: 'transfer-robinhood-testnet', strategy: { action: 'transfer', network: 'robinhood-testnet', asset: 'ETH', amount: '0.000001' } },
   ...(['supply', 'borrow', 'repay'] as const).flatMap(action => [
     { id: `${action}-base-sepolia`, strategy: { action, network: 'base-sepolia', asset: 'USDC', amount: '1', beneficiary: EXAMPLE_ACCOUNT } as StrategySpec },
     { id: `${action}-ethereum-sepolia`, strategy: { action, network: 'ethereum-sepolia', asset: 'WBTC', amount: '0.001', beneficiary: EXAMPLE_ACCOUNT } as StrategySpec }]),
@@ -25,6 +31,8 @@ export const STRATEGY_EXAMPLES: readonly { readonly id: string; readonly strateg
   { id: 'add-liquidity-ethereum-sepolia', strategy: { action: 'add_liquidity', network: 'ethereum-sepolia', maxAmounts: { USDC: '10', WETH: '0.005' },
     range: { unit: 'tick', lower: '189960', upper: '200040' } } },
   { id: 'add-liquidity-solana-devnet', strategy: { action: 'add_liquidity', network: 'solana-devnet', maxAmounts: { SOL: '0.01', devUSDC: '0.3' },
+    range: { unit: 'tick', lower: '-29952', upper: '-25600' } } },
+  { id: 'add-liquidity-solana', strategy: { action: 'add_liquidity', network: 'solana', maxAmounts: { SOL: '0.01', USDC: '0.3' },
     range: { unit: 'tick', lower: '-29952', upper: '-25600' } } },
   { id: 'lending-composition-base-sepolia', strategy: { action: 'lending_composition', network: 'base-sepolia', asset: 'USDC', supplyAmount: '10', borrowAmount: '2',
     outputAsset: 'WETH', owner: EXAMPLE_ACCOUNT } },

@@ -13,6 +13,11 @@ import { useLocale } from '../i18n/locale';
  * flow: fresh simulation, Strategy Manifest Review, explicit approval, wallet signatures. An already applied proposal (a reload, another
  * tab) is restored only on the owner's explicit choice, so an interrupted run's recovery is never replaced silently. This component
  * never builds, signs or sends a transaction.
+ *
+ * BUILD-SOLANA-TRANSFER-UX-001: one compact notice for both presentations of `/approve` — the minimal signing surface (default) and the
+ * Canvas ("View in FloFi"). One row (source, status, the wallet action), the status-sharing choice, and everything else (facts, workflow
+ * hash, disclosures, mobile wallet handoff) in a collapsed details element. The proven wallet that loaded the proposal is reported so the
+ * workspace only authorizes with that same signer (a different connected wallet needs its own proof and a fresh simulation).
  */
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
@@ -53,9 +58,9 @@ function unwrap<T>(result: { ok: true; value: T } | { ok: false; code: string })
  * (React runs an ancestor's effects after its descendants'). Removed before that, the router kept the secret in its URL and wrote it back
  * into the address bar on its next update (e.g. the refresh after a wallet sign-in sets a cookie), so it waits for this commit's effects.
  */
-function takeSecret(): string | null {
+function takeSecret(presented = typeof window === 'undefined' ? '' : window.location.hash): string | null {
   let fromHash: string;
-  try { fromHash = typeof window === 'undefined' ? '' : decodeURIComponent(window.location.hash.slice(1)); } catch { return null; }
+  try { fromHash = decodeURIComponent(presented.slice(1)); } catch { return null; }
   if (SECRET.test(fromHash) || REFERENCE.test(fromHash)) {
     try {
       // History restoration may present the same consumed fragment again. Keep its owner-only recovery hint;
@@ -63,8 +68,8 @@ function takeSecret(): string | null {
       if (sessionStorage.getItem(STORAGE_KEY) !== fromHash) sessionStorage.removeItem(RECOVERY_KEY);
       sessionStorage.setItem(STORAGE_KEY, fromHash);
     } catch { /* storage may be unavailable; the page still works until reload */ }
-    const presented = window.location.hash;
-    queueMicrotask(() => { if (window.location.hash === presented) window.history.replaceState(null, '', window.location.pathname); });
+    // The non-secret `?view=` presentation choice survives; only the fragment is removed.
+    queueMicrotask(() => { if (window.location.hash === presented) window.history.replaceState(null, '', window.location.pathname + window.location.search); });
     return fromHash;
   }
   if (fromHash) return null;
@@ -74,10 +79,11 @@ function takeSecret(): string | null {
 /**
  * `slot`: the workspace element the notice is rendered into (AppShell's notice slot). `onAvailabilityChange`: the workspace may show
  * (a usable proposal was resolved). `onGateChange`: Simulate and Execute must stay closed (the proposal is not yet loaded for the proven
- * wallet).
+ * wallet). `onClaimedWallet`: the proven wallet the loaded proposal belongs to (null until loaded).
  */
-export function ApprovalHandoff({ slot = null, onAvailabilityChange, onGateChange }: { slot?: HTMLElement | null; onAvailabilityChange?: (available: boolean) => void;
-  onGateChange?: (blocked: boolean) => void }) {
+export function ApprovalHandoff({ slot = null, surface = 'canvas', onSurfaceChange, onAvailabilityChange, onGateChange, onClaimedWallet }: { slot?: HTMLElement | null;
+  surface?: 'signing' | 'canvas'; onSurfaceChange?: (surface: 'signing' | 'canvas') => void; onAvailabilityChange?: (available: boolean) => void;
+  onGateChange?: (blocked: boolean) => void; onClaimedWallet?: (wallet: string | null) => void }) {
   const { t: tr } = useLocale();
   const { state, restoreWorkflow } = useWorkflow();
   const [secret, setSecret] = useState<string | null>(null);
@@ -92,6 +98,7 @@ export function ApprovalHandoff({ slot = null, onAvailabilityChange, onGateChang
   const [closed, setClosed] = useState(false);
   const [reload, setReload] = useState(0);
   const [copied, setCopied] = useState(false);
+  const [claimedBy, setClaimedBy] = useState<string | null>(null);
   const applying = useRef<number | null>(null);
   const acting = useRef(false);
   const generation = useRef(0);
@@ -104,11 +111,11 @@ export function ApprovalHandoff({ slot = null, onAvailabilityChange, onGateChang
 
   useEffect(() => {
     let request = 0;
-    const load = async () => {
-      const current = ++request, found = takeSecret();
+    const load = async (presented?: string) => {
+      const current = ++request, found = takeSecret(presented);
       generation.current++;
       onAvailabilityChange?.(false);
-      setSecret(found); setView(null); setPreview(null); setResolved(false); setError(null); setClaimed(false); setShare(null); setRecovery(null); setClosed(false);
+      setSecret(found); setView(null); setPreview(null); setResolved(false); setError(null); setClaimed(false); setShare(null); setRecovery(null); setClosed(false); setClaimedBy(null);
       if (!found) { setResolved(true); return; }
       try {
         let capability = found;
@@ -143,8 +150,12 @@ export function ApprovalHandoff({ slot = null, onAvailabilityChange, onGateChang
       } catch (cause) { if (current === request) setError(cause instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(cause.message) ? cause.message : 'APPROVAL_UNAVAILABLE'); }
       finally { if (current === request) setResolved(true); }
     };
-    // The product's skip link is a local anchor, not a new approval handoff.
-    const hashChanged = () => { if (window.location.hash !== '#workspace') void load(); };
+    // The product's skip link is a local anchor, not a new approval handoff. A fragment change is read from its event: by the time the
+    // event is handled, Next's router may already have rewritten the address bar to its canonical URL, which drops the fragment.
+    const hashChanged = (event: Event) => {
+      const presented = event instanceof HashChangeEvent ? new URL(event.newURL).hash : window.location.hash;
+      if (presented !== '#workspace') void load(presented);
+    };
     void load();
     window.addEventListener('hashchange', hashChanged);
     window.addEventListener('popstate', hashChanged);
@@ -193,10 +204,10 @@ export function ApprovalHandoff({ slot = null, onAvailabilityChange, onGateChang
     finally { acting.current = false; setBusy(false); }
   }
   const claim = () => run(async () => {
-    const current = generation.current;
+    const current = generation.current, claimant = proof.proven;
     const result = recovery ?? unwrap(await claimApprovalHandoff(secret!, share === true));
     if (current !== generation.current) return;
-    setView(result.view); setClaimed(true);
+    setView(result.view); setClaimed(true); setClaimedBy(claimant);
     // Reuse the existing validated workflow restoration path, which invalidates prior Review authority even if the hash is unchanged.
     // Simulation, Manifest Review and transaction signatures remain separate actions.
     restoreWorkflow(result.workflow as SemanticWorkflow);
@@ -230,7 +241,8 @@ export function ApprovalHandoff({ slot = null, onAvailabilityChange, onGateChang
   // A proposal already applied for this wallet is restored only when its owner chooses to.
   const recoverable = !internal && !claimed && (recovery !== null || view?.status === 'APPLIED' && view.claimedByYou);
   const loaded = claimed && view?.status === 'APPLIED';
-  const blocked = available && !loaded && !recoverable;
+  const loadedFor = loaded ? claimedBy : null;
+  const blocked = available && !loaded;
   useEffect(() => {
     onGateChange?.(blocked);
     return () => onGateChange?.(false);
@@ -246,14 +258,18 @@ export function ApprovalHandoff({ slot = null, onAvailabilityChange, onGateChang
   const close = () => {
     generation.current++;
     try { sessionStorage.removeItem(STORAGE_KEY); sessionStorage.removeItem(RECOVERY_KEY); } catch { /* tab only */ }
-    setClosed(true); setSecret(null); setView(null); setPreview(null); setClaimed(false);
+    setClosed(true); setSecret(null); setView(null); setPreview(null); setClaimed(false); setClaimedBy(null);
   };
+  useEffect(() => { onClaimedWallet?.(loadedFor); }, [loadedFor, onClaimedWallet]);
+  useEffect(() => () => onClaimedWallet?.(null), [onClaimedWallet]);
 
   // BUILD-DEVELOPER-001: who sent the link, where the page knows it (the resolved proposal, else the link's own tag). Only the wording
   // follows it; the route states, their headings and every check are the same for every requester.
   const fromApp = view ? view.requesterKind === 'DEVELOPER_PROJECT' : secret?.startsWith(DEVELOPER_LINK_PREFIX) === true;
   // BUILD-AUTOMATION-001: a proposal the owner's own automation prepared, opened from FloFi → Automations.
   const fromAutomation = view ? view.requesterKind === 'AUTOMATION_RULE' : secret?.startsWith(AUTOMATION_LINK_PREFIX) === true;
+  // An automation's proposal is opened from inside FloFi (Automations) and keeps the Canvas presentation.
+  useEffect(() => { if (fromAutomation && surface === 'signing') onSurfaceChange?.('canvas'); }, [fromAutomation, surface, onSurfaceChange]);
   if (closed) return <McpRouteState label="Approval" title="Approval closed" description={fromAutomation
     ? 'Closing this page grants no transaction authority. While the proposal is still waiting for you, open it again from FloFi → Automations.'
     : 'Return to the conversation that sent you here. Closing this page grants no transaction authority. You can reopen an unused link; ask for a new link if it has expired.'}/>;
@@ -276,7 +292,7 @@ export function ApprovalHandoff({ slot = null, onAvailabilityChange, onGateChang
   const errorText = shown === 'APPROVALS_NOT_ENABLED' || shown === 'MCP_OAUTH_NOT_ENABLED'
     ? fromApp ? 'Approvals are unavailable right now. Return to the app that sent this link and try again later.' : 'Approvals are unavailable right now. Return to your assistant and try again later.'
     : shown ? CLAIM_TEXT[shown] ?? shown : null;
-  const prove = () => void (view.walletNamespace === 'solana' ? proof.proveSolana() : proof.proveEvm());
+  const prove = () => void (view.walletNamespace === 'solana' ? proof.proveSolana(true) : proof.proveEvm(true));
   const facts = <dl className="approval-facts">
     <div><dt>{tr("Network")}</dt><dd>{tr(view.networkEnvironment === 'MAINNET' ? 'Mainnet' : 'Public testnet')} · {tr([...new Set(view.steps.flatMap(s => [s.network, s.destinationNetwork].filter(Boolean)))].join(' → '))}</dd></div>
     <div><dt>{tr("Funds")}</dt><dd>{tr(real ? 'Real funds' : 'Test funds')}</dd></div>
@@ -294,19 +310,19 @@ export function ApprovalHandoff({ slot = null, onAvailabilityChange, onGateChang
   const fullLink = secret && SECRET.test(secret) ? `${window.location.origin}/approve#${secret}` : null;
   const links = fullLink ? walletDeepLinks(fullLink, window.location.origin) : null;
   const wrongWallet = Boolean(proven && error && CLAIM_TEXT[error] && !claimed);
+  const networks = [...new Set(view.steps.flatMap(s => [s.network, s.destinationNetwork].filter(Boolean)))].join(' → ');
   let message: ReactNode;
   if (loaded) message = <p role="status">{recovery ? tr('Proposal restored for its proven owner. Run a fresh simulation before approval. Existing runs remain available in Your runs; reconcile an interrupted run before starting again.')
-    : <><strong>{tr("Ready for your review.")}</strong>{tr(" Simulate the workflow, review the Strategy Manifest, then sign each transaction in your wallet.")}</>}</p>;
+    : <><strong>{tr("Ready for your review.")}</strong>{tr(" FloFi prepares a fresh simulation for this wallet. Check it, then authorize in your wallet.")}</>}</p>;
   else if (claimed || busy) message = <p role="status"><strong>{tr("Nothing is authorized yet.")}</strong> {tr('Loading your exact proposal…')}</p>;
-  else if (recoverable) message = <p><strong>{tr("Nothing is authorized yet.")}</strong>{tr(" This proposal is already in a FloFi workflow for your wallet. Restore it to the Canvas to continue. An interrupted run stays in Your runs: reconcile it before starting again.")}</p>;
+  else if (recoverable) message = <p><strong>{tr("Nothing is authorized yet.")}</strong>{tr(" This proposal is already in a FloFi workflow for your wallet. Restore it to continue. An interrupted run stays in Your runs: reconcile it before starting again.")}</p>;
   else if (view.claimedByAnotherWallet) message = <p><strong>{tr("Nothing is authorized yet.")}</strong>{tr(" Another wallet already opened this proposal. If it was yours, connect that wallet; otherwise ask for a new proposal.")}</p>;
-  else message = <p><strong>{tr("Nothing is authorized yet.")}</strong>{tr(preview
-    ? " The proposal is on your Canvas. Connect your wallet to load it for a fresh simulation, your review and your signature."
-    : " Connect your wallet to load this proposal into your Canvas for a fresh simulation, your review and your signature.")}</p>;
-  return createPortal(<section className="approval-notice" aria-label={tr('Proposal from {0}', view.clientName)} data-approval-state={loaded ? 'loaded' : recoverable ? 'recoverable' : 'waiting'}>
+  else message = <p><strong>{tr("Nothing is authorized yet.")}</strong>{tr(" Connect your wallet to load this proposal for a fresh simulation and your signature.")}</p>;
+  return createPortal(<section className="approval-notice approval-compact" data-surface={surface} aria-label={tr('Proposal from {0}', view.clientName)} data-approval-state={loaded ? 'loaded' : recoverable ? 'recoverable' : 'waiting'}>
     <div className="approval-notice-row">
       <p className="approval-notice-source"><span className="eyebrow">{tr('From {0}', view.clientName)}</span>
-        <span className="status-badge info" aria-label={tr("Approval status")}>{tr(STATUS_TEXT[view.status] ?? view.status)}</span></p>
+        <span className="status-badge info" aria-label={tr("Approval status")}>{tr(STATUS_TEXT[view.status] ?? view.status)}</span>
+        <span className="approval-network">{tr(view.networkEnvironment === 'MAINNET' ? 'Mainnet' : 'Public testnet')} · {tr(networks)}{real ? <> · <strong>{tr('Real funds')}</strong></> : null}</span></p>
       {message}
       <div className="approval-actions">
         {!loaded && !claimed && <WalletProof namespace={view.walletNamespace} proof={proof}/>}
@@ -315,18 +331,17 @@ export function ApprovalHandoff({ slot = null, onAvailabilityChange, onGateChang
         {error && !wrongWallet && !loaded && proven && !recoverable && <button type="button" className="secondary" disabled={busy} onClick={() => void (claimed
           ? run(async () => { const current = generation.current, result = unwrap(await markApprovalApplied(secret!, state.workflow)); if (current === generation.current) setView(result); })
           : claim())}>{tr('Retry loading proposal')}</button>}
-        {!claimed && <button type="button" className="secondary" disabled={busy} onClick={close}>{tr('Close approval')}</button>}
+        {!claimed && <button type="button" className="quiet" disabled={busy} onClick={close}>{tr('Close approval')}</button>}
       </div>
     </div>
-    {real && <p className="approval-real" role="alert"><strong>{tr("Real funds.")}</strong>{tr(" This strategy uses a mainnet. Every transaction spends real assets once you sign it.")}</p>}
+    {errorText && <p className="error-banner" role="alert">{tr(errorText)}</p>}
     {!fromAutomation && <label className="approval-share"><input type="checkbox" disabled={busy || Boolean(recovery)} checked={claimed ? view.statusShared : share === true}
       onChange={e => toggleShare(e.target.checked)}/>{tr("Share the status and evidence of runs started from this proposal with ")}{tr(view.clientName)}</label>}
-    <p className="muted approval-ai">{view.requesterKind === 'DEVELOPER_PROJECT'
-      ? tr("Created by {0}, a third-party app registered with FloFi, not by FloFi. It is not financial advice; you decide, and only your wallet can sign.", view.clientName)
-      : tr("Proposed with an AI assistant from your conversation. It is not financial advice; you decide, and only your wallet can sign.")}</p>
-    {errorText && <p className="error-banner" role="alert">{tr(errorText)}</p>}
     <details className="approval-details"><summary>{tr('Proposal details')}</summary>
       {facts}
+      <p className="muted approval-ai">{view.requesterKind === 'DEVELOPER_PROJECT'
+        ? tr("Created by {0}, a third-party app registered with FloFi, not by FloFi. It is not financial advice; you decide, and only your wallet can sign.", view.clientName)
+        : tr("Proposed with an AI assistant from your conversation. It is not financial advice; you decide, and only your wallet can sign.")}</p>
       {view.summary && <p className="approval-summary">{tr(view.summary)}</p>}
       {view.explanation.length > 0 && <ul className="approval-explanation">{view.explanation.map((line, i) => <li key={i}>{tr(line)}</li>)}</ul>}
     </details>

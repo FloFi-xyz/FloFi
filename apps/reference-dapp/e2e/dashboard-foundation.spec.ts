@@ -46,10 +46,13 @@ test('Build, Simulate and Execute retain their current workflow through Dashboar
   await expect(page.getByRole('button', { name: 'Verify wallet for history', exact: true })).toBeVisible();
   await expect(page.locator('.dashboard-run-list')).toHaveCount(0);
   await page.getByRole('button', { name: 'Build workflow', exact: true }).click();
-  await expect(page).toHaveURL(/\/$/);
+  await expect(page).toHaveURL(/\/app$/);
   await expect(amount).toHaveValue('2.5');
-  await page.getByRole('button', { name: 'Simulate workflow', exact: true }).click();
+  // This navigation fixture configures no swap runtime. Keep its simulation gate closed and visit the stage without executing it.
+  await expect(page.getByRole('button', { name: 'Simulate workflow', exact: true })).toBeDisabled();
+  await nav.getByRole('button', { name: 'Simulate', exact: true }).click();
   await expect(page.locator('#simulation-review')).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Simulation workflow graph', exact: true }).locator('.composer-amount')).toHaveText('2.5 USDC');
   await nav.getByRole('button', { name: 'Dashboard', exact: true }).click();
   await nav.getByRole('button', { name: 'Simulate', exact: true }).click();
   await expect(page.locator('#simulation-review')).toBeVisible();
@@ -68,7 +71,7 @@ test('run-detail deep links and refresh stay inside the canonical wallet-scoped 
   await expect(page.locator('.top-bar')).toHaveCount(1);
   await page.reload();
   await expect(page.getByRole('heading', { name: 'Connect the wallet used for this execution' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Execute workflow', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Authorize in wallet', exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'Back to Dashboard' }).click();
   await expect(page).toHaveURL(/\/app\/dashboard$/);
   await expect(page.getByRole('heading', { name: 'Your execution workspace' })).toBeVisible();

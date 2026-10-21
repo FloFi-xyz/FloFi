@@ -11,7 +11,7 @@ import { useWorkflow } from '../state/workflow-store';
 import type { Tab } from './top-bar';
 import { workflowShellContext } from '../domain/product-shell';
 
-import {isLendingComposition} from '@defi-workflow-engine/workflow-contracts';
+import {isLendingComposition, isSolanaTransferNode} from '@defi-workflow-engine/workflow-contracts';
 import {useLending} from '../state/lending-store';
 import { useSupply } from '../state/supply-store';
 import { useRobinhoodTransfer } from '../state/robinhood-transfer-store';
@@ -26,7 +26,7 @@ export function SummaryBar({ tab, setTab, simulationActionHost, reviewAvailable,
   const supply = useSupply(),lending=useLending();
   const lendingPath=isLendingComposition(state.workflow)||Boolean(lending.recovered&&lending.record&&!lending.retired);
   const supplyPath = state.workflow.nodes.some(n => ['supply','borrow','repay','withdraw'].includes(n.actionType)) || Boolean(supply.recovered && supply.record);
-  const transfer = useRobinhoodTransfer(), transferPath = state.workflow.nodes.some(n => n.actionType === 'asset.transfer');
+  const transfer = useRobinhoodTransfer(), transferPath = state.workflow.nodes.some(n => n.actionType === 'asset.transfer' && !isSolanaTransferNode(n));
   const jupiter = useJupiter();
   const solanaLiquidity = useSolanaLiquidity();
   const solanaLiquidityPath = !supplyPath && (state.workflow.nodes.some(n => n.actionType === 'asset.liquidity.concentrated') || Boolean(solanaLiquidity.recovered && solanaLiquidity.record));

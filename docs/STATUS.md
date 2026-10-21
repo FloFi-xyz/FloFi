@@ -143,7 +143,7 @@ acceptance. See the [plan](builds/BUILD-MCP-002-PLAN.md), [report](builds/BUILD-
 
 **Status: IMPLEMENTATION COMPLETE — NO LIVE THIRD-PARTY CLIENT CONNECTED YET; NO TRANSACTION.** Branch
 `claude/build-mcp-001` from main `bf84bbd` (BUILD-CLOUD-PARITY-001 merged). `POST /api/mcp` is a stateless Streamable HTTP
-MCP server (official SDK v2, `@modelcontextprotocol/server` 2.2.0) with nine read-only tools: networks, assets and
+MCP server (official SDK v2, `@modelcontextprotocol/server` 2.3.0) with nine read-only tools: networks, assets and
 capabilities derived from the registries; `compose_strategy` / `validate_strategy` / `review_strategy` through a pure engine
 facade (`src/engine`) over the DApp's own commands, reducer, linter and capability registry (MCP IR byte-identical to DApp
 chat authoring); `simulate_strategy` as a read-only preview of each flow's unchanged simulation (nothing persisted, not

@@ -5,7 +5,7 @@
 // under Privacy & memory (Settings), repeated evidence is learned for that wallet only and used in a later session; another wallet never inherits it;
 // a published global entry reaches both; turning learning off and deleting everything erase it; an exact command is unchanged.
 import { createTestWallet } from '../../../packages/reference-reconciler/test/test-wallet';
-import { test, expect, applyPendingProposal, chooseWallet } from './fixtures';
+import { test, expect, applyPendingProposal } from './fixtures';
 import { installJourneyWallet, walletRequests } from './journey-fixtures';
 import { query } from './automation-fixtures';
 import { createDatabase } from '@defi-workflow-engine/cloud-runtime';
@@ -31,14 +31,27 @@ async function answerSolDev(page: Page, amount: string) {
   await lastAi(page).getByRole('button', { name: 'Solana Devnet', exact: true }).click();
   await expect(lastAi(page)).toContainText(`swap ${amount} SOL to devUSDC on Solana Devnet`);
 }
+/**
+ * BUILD-SOLANA-TRANSFER-UX-001: proving reuses the already connected operational wallet (no second connection, no wallet selector); the
+ * wallet still signs the server's sign-in message, and that signature alone proves it.
+ */
+async function proveConnectedWallet(page: Page) {
+  await expect(page.getByRole('group', { name: 'Wallet connection' })).toContainText('Base Sepolia');
+  const signIns = async () => (await walletRequests(page)).filter(method => method === 'personal_sign').length, before = await signIns();
+  await page.getByRole('button', { name: 'Prove an EVM wallet', exact: true }).click();
+  await expect(page.getByText(/Memory for wallet/)).toBeVisible();
+  await expect(page.locator('dialog.wallet-selector[open]')).toHaveCount(0);
+  expect(await signIns()).toBe(before + 1);
+}
 async function provePrivacy(page: Page) {
   await page.goto('/app/privacy');
-  await page.getByRole('button', { name: 'Prove an EVM wallet', exact: true }).click();
-  await chooseWallet(page, 'Browser wallet');
-  await expect(page.getByText(/Memory for wallet/)).toBeVisible();
+  await proveConnectedWallet(page);
 }
 
 test('invisible learning: adapted in the conversation, learned after consent and repeated evidence, never inherited, erased on request', async ({ browser, page, networkGuard }) => {
+  // Two wallets, multiple sessions and durable consent/erasure share one acceptance journey. The 2-vCPU Cloud Build
+  // runner exhausted the default 30-second total at different late steps; keep each assertion's 10-second limit.
+  test.setTimeout(60_000);
   const a = createTestWallet(), b = createTestWallet();
   await installJourneyWallet(page, [a], { chain: '0x14a34' });
   await page.goto('/app');
@@ -58,9 +71,7 @@ test('invisible learning: adapted in the conversation, learned after consent and
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await page.getByRole('link', { name: 'Privacy & memory', exact: true }).click();
   await expect(page).toHaveURL(/\/app\/privacy$/);
-  await page.getByRole('button', { name: 'Prove an EVM wallet', exact: true }).click();
-  await chooseWallet(page, 'Browser wallet');
-  await expect(page.getByText(/Memory for wallet/)).toBeVisible();
+  await proveConnectedWallet(page);
   const learn = page.getByRole('checkbox', { name: /Learn from how I use the Copilot/ });
   await expect(learn).not.toBeChecked();
   // The switch reflects the recorded choice: it turns on once the server has recorded the consent.

@@ -3,13 +3,14 @@ import { describe, expect, it } from 'vitest';
 import { base58Decode, createMockedSolanaWallet, fromBase64, parseTransaction, serializeSignedTransaction, toBase64, verifyEd25519 } from '@defi-workflow-engine/reference-compiler';
 import { createPositionMintSigner, signOrcaLiquidityTransaction } from './position-mint-signer';
 import type { SolanaSession, StandardWallet } from './solana-wallet';
+import { registeredSolanaSession } from '../test-utils/registered-solana-session';
 
 const message = Uint8Array.from([0x80, 2, 0, 0, ...new Array<number>(40).fill(7)]);
 function session(sign: (unsigned: string) => string): SolanaSession {
   const account = { address: 'owner', chains: ['solana:devnet'], features: ['solana:signTransaction'] };
   const wallet: StandardWallet = { name: 'Mock', chains: ['solana:devnet'], accounts: [account], features: { 'standard:connect': {}, 'solana:signTransaction': {
     signTransaction: async ({ transaction }: { transaction: Uint8Array }) => [{ signedTransaction: fromBase64(sign(toBase64(transaction)), 4096) }] } } };
-  return { wallet, account, chain: 'solana:devnet' };
+  return registeredSolanaSession({ wallet, account, chain: 'solana:devnet' });
 }
 describe('client-side position-mint key (non-extractable WebCrypto Ed25519)', () => {
   it('cannot be exported, signs exactly once, and its public key is the mint address', async () => {

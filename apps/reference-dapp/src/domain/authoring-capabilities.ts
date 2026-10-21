@@ -18,6 +18,7 @@ import type { StrategyAction, StrategySpec } from '../engine/strategy-spec';
 export type { StrategyAction };
 import { STRATEGY_EXAMPLES } from '../engine/strategy-examples';
 import { NETWORKS, networkIdentity, type CopilotNetworkId, type NetworkIdentity } from './network-registry';
+import { agentRolloutAllows, type PendingAgentCapability } from './agent-rollout';
 
 export type AuthoringCapability = { readonly action: StrategyAction; readonly network: NetworkIdentity; readonly destination: NetworkIdentity | null;
   /** The example's asset where the action binds one (lending, bridge, transfer, composition); null where any supported pair may be used. */
@@ -36,9 +37,12 @@ const unique = <T>(values: readonly T[]): T[] => [...new Set(values)];
 /** The networks an action can be authored on, in network registry order. */
 export const capabilityNetworks = (action: StrategyAction): readonly NetworkIdentity[] =>
   NETWORKS.filter(network => AUTHORING_CAPABILITIES.some(capability => capability.action === action && capability.network === network));
+/** The networks the Copilot may author an action on: the capability truth without agent rollouts awaiting owner approval (audit A9). */
+export const copilotCapabilityNetworks = (action: StrategyAction, approved?: readonly PendingAgentCapability[]): readonly NetworkIdentity[] =>
+  capabilityNetworks(action).filter(network => agentRolloutAllows(action, network.key, approved));
 /** The same networks as Copilot identifiers (networks the Copilot cannot name are left out). */
-export const copilotNetworksFor = (action: StrategyAction): readonly CopilotNetworkId[] =>
-  capabilityNetworks(action).map(network => network.copilot).filter((id): id is CopilotNetworkId => id !== null);
+export const copilotNetworksFor = (action: StrategyAction, approved?: readonly PendingAgentCapability[]): readonly CopilotNetworkId[] =>
+  copilotCapabilityNetworks(action, approved).map(network => network.copilot).filter((id): id is CopilotNetworkId => id !== null);
 /** Aave lending offers: the one asset of each network, in first-example order. */
 export const lendingOffers = (action: 'supply' | 'borrow' | 'repay' | 'withdraw' = 'supply'): readonly { readonly network: NetworkIdentity; readonly asset: string }[] =>
   AUTHORING_CAPABILITIES.filter(capability => capability.action === action && capability.asset !== null).map(capability => ({ network: capability.network, asset: capability.asset! }));
@@ -84,13 +88,13 @@ const realFunds = () => unique(AUTHORING_CAPABILITIES.flatMap(capability => [cap
 /** The Copilot's in-app answer to "what can you do", generated from the capability truth. Display copy only. */
 export function capabilityText(language: Language): string {
   const catalog = catalogCapabilityNetworks();
-  if (language === 'PT') return `O Flofi Copilot pode criar: swaps na ${names(capabilityNetworks('swap'), 'PT')}; transferências na ${names(capabilityNetworks('transfer'), 'PT')}; ` +
+  if (language === 'PT') return `O Flofi Copilot pode criar: swaps na ${names(copilotCapabilityNetworks('swap'), 'PT')}; transferências na ${names(copilotCapabilityNetworks('transfer'), 'PT')}; ` +
     `bridges pelo Cross-chain Router ${join(routes(), 'PT')}; Supply, Borrow, Repay e Withdraw na Aave V3 de ${lendingText('PT')}; liquidez na ` +
-    `${names(capabilityNetworks('add_liquidity'), 'PT')}; e ${compositionText('PT')}. ${lendingAmountScopeText('PT')} Na ${names(catalog, 'PT')}, swaps, transferências e liquidez aceitam qualquer token ` +
+    `${names(copilotCapabilityNetworks('add_liquidity'), 'PT')}; e ${compositionText('PT')}. ${lendingAmountScopeText('PT')} Na ${names(catalog, 'PT')}, swaps, transferências e liquidez aceitam qualquer token ` +
     `do catálogo oficial da rede, pelo símbolo ou pelo nome. Usam fundos reais: ${names(realFunds(), 'PT')}.`;
-  return `Flofi Copilot can author: swaps on ${names(capabilityNetworks('swap'), 'EN')}; transfers on ${names(capabilityNetworks('transfer'), 'EN')}; ` +
+  return `Flofi Copilot can author: swaps on ${names(copilotCapabilityNetworks('swap'), 'EN')}; transfers on ${names(copilotCapabilityNetworks('transfer'), 'EN')}; ` +
     `Cross-chain Router bridges ${join(routes(), 'EN')}; Aave V3 Supply, Borrow, Repay and Withdraw of ${lendingText('EN')}; liquidity on ` +
-    `${names(capabilityNetworks('add_liquidity'), 'EN')}; and ${compositionText('EN')}. ${lendingAmountScopeText('EN')} On ${names(catalog, 'EN')}, swaps, transfers and liquidity take any token ` +
+    `${names(copilotCapabilityNetworks('add_liquidity'), 'EN')}; and ${compositionText('EN')}. ${lendingAmountScopeText('EN')} On ${names(catalog, 'EN')}, swaps, transfers and liquidity take any token ` +
     `of the network's official catalog, by symbol or name. Real funds: ${names(realFunds(), 'EN')}.`;
 }
 /** The lending refusal: the one asset of each Aave network (`mainnets`: false leaves out real-funds networks, as CopilotIntent V1 does). */

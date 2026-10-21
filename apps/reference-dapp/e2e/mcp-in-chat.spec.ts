@@ -4,9 +4,10 @@
  * MOCKED loopback router and Solana Devnet harnesses (never a public network, never a real transaction):
  *
  *   consumer OAuth (consent page, invite) → compose_strategy → request_user_approval → the FloFi panel in an MCP Apps host →
- *   "Review with your wallet in FloFi" (ui/open-link to a fresh FloFi approval session) → the FloFi signing window → wallet proof
- *   (EIP-4361 / Sign-In With Solana) → load the exact proposal into the workflow → the owner's flow (fresh simulation,
- *   Review) → current main blocks MOCKED financial authority → prepared status back in the panel and model context.
+ *   "Authorize" (ui/open-link to a fresh FloFi approval session on the minimal signing surface) or "View in FloFi" (the same session
+ *   on the Canvas) → wallet proof (EIP-4361 / Sign-In With Solana; an already connected EVM wallet is recognized, no selector) →
+ *   the exact proposal loaded for that wallet → FloFi's own fresh simulation → one "Authorize in wallet" action, which current main
+ *   keeps disabled for MOCKED evidence → prepared status back in the panel and model context.
  *   The separate PostgreSQL journey retains the positive owner-driven lifecycle and reconciled evidence coverage.
  *
  * The test host is minimal and honest about what it is: it proves FloFi's side of the MCP Apps contract, not any vendor's host.
@@ -17,8 +18,8 @@ import { createDatabase } from '@defi-workflow-engine/cloud-runtime';
 import { createMockedSolanaWallet } from '@defi-workflow-engine/reference-compiler';
 import { createTestWallet } from '../../../packages/reference-reconciler/test/test-wallet.ts';
 import { E2E_APP_ORIGIN as APP_ORIGIN } from './app-origin';
-import { chooseSolanaWallet, MOCKED_SOLANA_WALLET, signRequests } from './jupiter-fixtures';
-import { chooseWallet, openSimulationDetails } from './fixtures';
+import { MOCKED_SOLANA_WALLET, signRequests } from './jupiter-fixtures';
+import { AUTHORIZE_IN_WALLET, chooseWallet, openProposalSimulationDetails, proveConnectedEvmWallet, signingSurface } from './fixtures';
 import { assertExecutionBlocked } from './release-safety-fixtures';
 import { guardedContext, installJourneyWallet, journeySends, walletRequests } from './journey-fixtures';
 import { assertMcpHarness, CLIENT_NAME, connectViaBrowser, hostLog, mcpClient, openHost, panelHtmlOf } from './mcp-fixtures';
@@ -40,12 +41,17 @@ async function latestRun(flow: string, owner: string): Promise<string> {
 // BUILD-FLOFI-UX-UI-002: the proposal's compact notice inside the normal workspace (no separate proposal panel or Load step).
 const approval = (page: Page) => page.getByRole('region', { name: `Proposal from ${CLIENT_NAME}` });
 const bridge = (page: Page) => page.getByRole('region', { name: 'Cross-chain bridge' });
-async function simulateStage(page: Page) {
-  await page.getByRole('button', { name: 'Simulate workflow', exact: true }).click();
-  await openSimulationDetails(page);
+type Presentation = 'signing' | 'canvas';
+/** On the signing surface nothing financial is enabled and no result or evidence exists. */
+async function assertSigningBlocked(page: Page, requests: () => Promise<number>) {
+  await expect(signingSurface(page)).toBeVisible();
+  await expect(signingSurface(page).getByRole('button', { name: AUTHORIZE_IN_WALLET, exact: true }).and(page.locator(':enabled'))).toHaveCount(0);
+  await expect(signingSurface(page).locator(['approve', 'execute', 'continue'].map(kind => `button[data-lifecycle-action="${kind}"]:enabled`).join(', '))).toHaveCount(0);
+  await expect(page.getByRole('link', { name: /Download.*Evidence Bundle|View receipt and evidence/ })).toHaveCount(0);
+  expect(await requests()).toBe(0);
 }
 async function assertHandoffReviewBlocked(page: Page, requests: () => Promise<number>, proposalUrl: string) {
-  await expect(page.getByRole('button', { name: 'Approve & Continue', exact: true })).toBeDisabled();
+  await expect(page.locator('.canvas-primary-action').getByRole('button', { name: AUTHORIZE_IN_WALLET, exact: true })).toBeDisabled();
   await expect(page.locator('.review-authorization-details')).toContainText('A simulation that can authorize this workflow is required before approval.');
   await expect(page.getByRole('region', { name: 'Authorization technical details', exact: true })).toContainText('Strategy Manifest');
   await expect(page.getByRole('button', { name: 'Review approved', exact: true })).toHaveCount(0);
@@ -61,10 +67,11 @@ async function assertHandoffReviewBlocked(page: Page, requests: () => Promise<nu
   await expect(approval(page).getByRole('button', { name: 'Load proposal' })).toHaveCount(0);
   await approval(page).getByRole('button', { name: 'Restore proposal' }).click();
   await expect(approval(page).getByRole('status')).toContainText('Proposal restored for its proven owner.');
-  await assertExecutionBlocked(page, requests);
+  if (new URL(proposalUrl).searchParams.get('view') === 'canvas') await assertExecutionBlocked(page, requests);
+  else await assertSigningBlocked(page, requests);
 }
 
-async function chatToSigningWindow(context: BrowserContext, strategy: Record<string, unknown>) {
+async function chatToSigningWindow(context: BrowserContext, strategy: Record<string, unknown>, presentation: Presentation = 'signing') {
   const consent = await context.newPage();
   const { accessToken } = await connectViaBrowser(consent, context.request);
   const client = mcpClient(context.request, accessToken);
@@ -87,14 +94,17 @@ async function chatToSigningWindow(context: BrowserContext, strategy: Record<str
   await expect(panel.getByRole('img', { name: /^FloFi workflow: / })).toBeVisible();
   await expect(panel.getByText(String(composed.workflowHash))).toBeVisible();
   await expect(panel.getByRole('button', { name: 'Check this chat environment (diagnostics)' })).toBeVisible();
-  await panel.getByRole('button', { name: 'Review with your wallet in FloFi' }).click();
+  // BUILD-SOLANA-TRANSFER-UX-001: "Authorize" opens the minimal signing surface; "View in FloFi" opens the same session on the Canvas.
+  await expect(panel.getByRole('button', { name: 'Authorize', exact: true })).toBeVisible();
+  await expect(panel.getByRole('button', { name: 'View in FloFi', exact: true })).toBeVisible();
+  await panel.getByRole('button', { name: presentation === 'canvas' ? 'View in FloFi' : 'Authorize', exact: true }).click();
   await expect.poll(async () => (await hostLog(host)).openLinks.length).toBe(1);
   const url = (await hostLog(host)).openLinks[0]!;
-  expect(url).toMatch(new RegExp(`^${APP_ORIGIN.replace(/[.]/g, '\\.')}/approve#flofi_hs_[A-Za-z0-9_-]{43}$`));
+  expect(url).toMatch(new RegExp(`^${APP_ORIGIN.replace(/[.]/g, '\\.')}/approve${presentation === 'canvas' ? '\\?view=canvas' : ''}#flofi_hs_[A-Za-z0-9_-]{43}$`));
   await consent.close();
   return { client, host, panel, url, composed };
 }
-async function proposalIntoWorkflow(signing: Page, url: string, wallet: 'evm' | 'solana', account?: string) {
+async function proposalIntoWorkflow(signing: Page, url: string, wallet: 'evm' | 'solana', account?: string, connected?: string) {
   const response = await signing.goto(url);
   expect(response?.headers()['content-security-policy']).toContain("connect-src 'self'");
   expect(response?.headers()['content-security-policy']).toContain("frame-ancestors 'none'");
@@ -104,31 +114,39 @@ async function proposalIntoWorkflow(signing: Page, url: string, wallet: 'evm' | 
   await expect(region).toContainText('Nothing is authorized yet.');
   await expect(region).toContainText('Test funds');
   await expect(region).toContainText('not financial advice');
-  // BUILD-FLOFI-UX-UI-002: the normal Canvas already shows the proposal's action cards; no separate panel, no Load step, and Simulate stays
-  // closed until a proven wallet has loaded the proposal.
+  // BUILD-FLOFI-UX-UI-002: no separate panel and no Load step. BUILD-SOLANA-TRANSFER-UX-001: the signing surface (default) lists the exact
+  // requested action; "View in FloFi" (`?view=canvas`) shows the proposal's action cards on the normal Canvas. Either way nothing can be
+  // simulated or authorized until a proven wallet has loaded the proposal.
   await expect(signing.locator('.approval-page, .approval-handoff')).toHaveCount(0);
-  await expect(signing.getByRole('region', { name: 'Workflow canvas', exact: true })).toBeVisible();
-  await expect(signing.locator('.build-flow-surface .composer-card').first()).toBeVisible();
-  await expect(signing.locator('.canvas-primary-action button')).toBeDisabled();
+  if (new URL(url).searchParams.get('view') === 'canvas') {
+    await expect(signing.getByRole('region', { name: 'Workflow canvas', exact: true })).toBeVisible();
+    await expect(signing.locator('.build-flow-surface .composer-card').first()).toBeVisible();
+    await expect(signing.locator('.canvas-primary-action button')).toBeDisabled();
+  } else {
+    await expect(signingSurface(signing)).toBeVisible();
+    await expect(signing.getByRole('navigation', { name: 'Workflow stages' })).toHaveCount(0);
+    await expect(signing.getByRole('region', { name: 'Workflow canvas', exact: true })).toHaveCount(0);
+    await expect(signingSurface(signing).locator('button[data-lifecycle-action]')).toHaveCount(0);
+  }
+  await expect(signing.getByRole('checkbox', { name: /I understand/ })).toHaveCount(0);
   await expect(region.getByRole('button', { name: 'Load proposal' })).toHaveCount(0);
   // The secret left the address bar; the account consented in this browser, so status sharing is on by default.
   expect(signing.url()).not.toContain('flofi_hs_');
   await expect(region.getByRole('checkbox')).toBeChecked();
   // The journey wallet records its requests; the Solana and lending fixtures keep their own logs.
   const signIns = await walletRequests(signing).then(requests => requests.filter(method => method === 'personal_sign').length).catch(() => null);
-  if (wallet === 'evm') { await region.getByRole('button', { name: 'Connect wallet and prove ownership' }).click(); await chooseWallet(signing, 'Browser wallet'); }
+  if (wallet === 'evm') await proveConnectedEvmWallet(signing, region, connected ?? account!);
   else { await region.getByRole('button', { name: 'Connect Solana wallet and prove ownership' }).click(); await chooseWallet(signing, MOCKED_SOLANA_WALLET, 'Solana'); }
   // The proof itself loads the proposal: one sign-in message, then the exact proposal, with no further approval step.
   await expect(region.getByRole('status')).toContainText('Ready for your review.');
   if (signIns !== null) expect((await walletRequests(signing)).filter(method => method === 'personal_sign')).toHaveLength(signIns + 1);
-  await expect(signing.locator('.canvas-primary-action button')).toBeEnabled();
   if (account) await expect(region.getByRole('checkbox')).toBeChecked();
 }
 
 test.describe('BUILD-MCP-002 in-chat execution (mocked MCP Apps host)', () => {
   test.beforeAll(assertMcpHarness);
 
-  test('EVM: chat → panel → wallet proof → router simulation; current main blocks MOCKED execution and the panel reports prepared status', async ({ browser }) => {
+  test('EVM: chat → panel Authorize → signing surface → wallet proof → FloFi-prepared router simulation; current main blocks MOCKED execution and the panel reports prepared status', async ({ browser }) => {
     const owner = createTestWallet();
     await routerControl('MOCK_reset', [{ network: 'testnet', owner: owner.address, wallets: [] }]);
     const { context, unexpected } = await guardedContext(browser);
@@ -138,9 +156,19 @@ test.describe('BUILD-MCP-002 in-chat execution (mocked MCP Apps host)', () => {
     const signing = await context.newPage();
     const errors: string[] = []; signing.on('pageerror', e => errors.push(e.message));
     await installJourneyWallet(signing, [owner]);
-    await proposalIntoWorkflow(signing, url, 'evm');
+    await proposalIntoWorkflow(signing, url, 'evm', undefined, owner.address);
+    // Chat-first, no Canvas: FloFi prepares the fresh simulation for the proven wallet; the signing surface shows the exact action, the
+    // signer and the test-funds network, and its one owner action stays disabled because MOCKED evidence cannot authorize.
+    const surface = signingSurface(signing);
+    await expect(surface.getByRole('list', { name: 'Requested actions' })).toContainText('Base Sepolia');
+    await expect(surface).toContainText(new RegExp(owner.address, 'i'));
+    await expect(surface).toContainText('Public testnet · Test funds');
+    await expect(surface.getByRole('button', { name: AUTHORIZE_IN_WALLET, exact: true })).toBeDisabled({ timeout: 30_000 });
+    await assertSigningBlocked(signing, journeySends);
+    // The prepared simulation reuses the sign-in the proof just completed: one wallet message in total, no second prompt.
+    expect((await walletRequests(signing)).filter(method => method === 'personal_sign')).toHaveLength(1);
     // Use the authoritative product's simulation and Review; a MOCKED route cannot authorize execution.
-    await simulateStage(signing);
+    await openProposalSimulationDetails(signing);
     await expect(bridge(signing)).toContainText('Strategy Manifest');
     await expect(bridge(signing)).toContainText(`Owner ${owner.address}`);
     expect(await walletRequests(signing)).toContain('personal_sign');
@@ -148,7 +176,7 @@ test.describe('BUILD-MCP-002 in-chat execution (mocked MCP Apps host)', () => {
     expect(await walletRequests(signing)).not.toContain('eth_sendTransaction');
 
     // Status still reaches the chat, without claiming reconciliation or an evidence bundle.
-    await expect(panel.getByText(/crosschain-router-testnet · PREPARED/)).toBeVisible({ timeout: 45_000 });
+    await expect(panel.getByText(/crosschain-router-testnet · PREPARED/).first()).toBeVisible({ timeout: 45_000 });
     const log = await hostLog(host);
     expect(log.toolCalls).toEqual(expect.arrayContaining(['open_approval_session', 'get_execution_progress']));
     expect(log.toolCalls).not.toContain('request_user_approval');
@@ -161,21 +189,23 @@ test.describe('BUILD-MCP-002 in-chat execution (mocked MCP Apps host)', () => {
     await context.close();
   });
 
-  test('Solana: Sign-In With Solana → Orca simulation; current main blocks MOCKED execution and the panel reports simulated status', async ({ browser }) => {
+  test('Solana: panel View in FloFi → Canvas → Sign-In With Solana → FloFi-prepared Orca simulation; current main blocks MOCKED execution and the panel reports simulated status', async ({ browser }) => {
     const wallet = createMockedSolanaWallet();
     await devnetControl({ action: 'reset', owner: wallet.owner, options: {}, devUsdc: '0' });
     const { context, unexpected } = await guardedContext(browser);
-    const { panel, url } = await chatToSigningWindow(context, { action: 'swap', network: 'solana-devnet', inputAsset: 'SOL', outputAsset: 'devUSDC', amount: '0.1' });
+    const { panel, url } = await chatToSigningWindow(context, { action: 'swap', network: 'solana-devnet', inputAsset: 'SOL', outputAsset: 'devUSDC', amount: '0.1' }, 'canvas');
     const signing = await context.newPage();
     await installDevnetWallet(signing, wallet, { signMessage: true });
     await proposalIntoWorkflow(signing, url, 'solana', wallet.owner);
-    await simulateStage(signing);
-    await chooseSolanaWallet(devnetPanel(signing));
-    await devnetPanel(signing).getByRole('button', { name: 'Simulate swap' }).click();
+    // Optional Canvas: the proposal's action card is on the Canvas, and the wallet proven for the proposal is the one its simulation uses
+    // (no second connection); FloFi prepared that fresh simulation itself.
+    await expect(signing.getByRole('region', { name: 'Simulation workflow graph', exact: true }).locator('.composer-card').first()).toContainText('Solana Devnet');
+    await openProposalSimulationDetails(signing);
+    await expect(devnetPanel(signing).getByRole('button', { name: 'Connect Solana wallet' })).toHaveCount(0);
     await expect(devnetPanel(signing).getByRole('definition').filter({ hasText: '→ expected' })).toContainText('0.1 Devnet SOL → expected');
     await assertHandoffReviewBlocked(signing, () => signRequests(signing), url);
     expect(await devnetControl({ action: 'sent' })).toBe(0);
-    await expect(panel.getByText(/solana-devnet-swap · SIMULATED/)).toBeVisible({ timeout: 45_000 });
+    await expect(panel.getByText(/solana-devnet-swap · SIMULATED/).first()).toBeVisible({ timeout: 45_000 });
     expect(unexpected).toEqual([]);
     await context.close();
   });
@@ -196,10 +226,10 @@ test.describe('BUILD-MCP-002 in-chat execution (mocked MCP Apps host)', () => {
     await installLendingWallet(signing, { signer: fixtureOwner });
     await proposalIntoWorkflow(signing, url, 'evm', LENDING_OWNER);
     const lending = signing.getByRole('region', { name: 'Lending composition' });
-    await simulateStage(signing);
+    await openProposalSimulationDetails(signing);
     await expect(lending).toContainText('Expected output:');
     await assertHandoffReviewBlocked(signing, () => lendingSends(signing), url);
-    await expect(panel.getByText(/lending-composition · SIMULATED/)).toBeVisible({ timeout: 45_000 });
+    await expect(panel.getByText(/lending-composition · SIMULATED/).first()).toBeVisible({ timeout: 45_000 });
     expect(unexpected).toEqual([]);
     await context.close();
   });
@@ -220,13 +250,12 @@ test.describe('BUILD-MCP-002 in-chat execution (mocked MCP Apps host)', () => {
     await proposalIntoWorkflow(signing, url, 'evm', owner.address);
     // A second proven wallet holding the same link cannot take it: claimed by another wallet, and once applied the approval-session
     // link no longer resolves at all (it reveals nothing about the proposal).
-    await approval(stranger).getByRole('button', { name: 'Connect wallet and prove ownership' }).click();
-    await chooseWallet(stranger, 'Browser wallet');
+    await proveConnectedEvmWallet(stranger, approval(stranger), other.address);
     await expect(approval(stranger)).toContainText(/Another wallet already opened this proposal|HANDOFF_NOT_FOUND/);
     await expect(approval(stranger).getByRole('status')).toHaveCount(0);
-    await expect(stranger.locator('.canvas-primary-action button')).toBeDisabled();
+    await expect(stranger.locator('button[data-lifecycle-action]:enabled')).toHaveCount(0);
     // The owner's simulation creates a durable run owned by their wallet; the account cannot read it until the wallet is linked.
-    await simulateStage(signing);
+    await openProposalSimulationDetails(signing);
     await expect(bridge(signing)).toContainText(`Owner ${owner.address}`);
     await expect.poll(() => latestRun('crosschain-router-testnet', owner.address).catch(() => null)).not.toBeNull();
     const runId = await latestRun('crosschain-router-testnet', owner.address);

@@ -59,10 +59,13 @@ export function orderWalletChoices(choices: readonly WalletChoice[], preference:
     ECOSYSTEM_LABEL[a.ecosystem].localeCompare(ECOSYSTEM_LABEL[b.ecosystem]) || a.id.localeCompare(b.id));
 }
 
-/** Only the last explicit choice per ecosystem, and whether the owner disconnected the EVM wallet. Never an address. */
-export type WalletPreference = { readonly evm: string | null; readonly solana: string | null; readonly evmDisconnected: boolean };
+/**
+ * Only the last explicit choice per ecosystem, and whether the owner disconnected it in FloFi. Never an address.
+ * BUILD-SOLANA-TRANSFER-UX-001: `solanaDisconnected` mirrors `evmDisconnected` for the silent Solana reconnect.
+ */
+export type WalletPreference = { readonly evm: string | null; readonly solana: string | null; readonly evmDisconnected: boolean; readonly solanaDisconnected: boolean };
 const PREFERENCE_KEY = 'flofi.wallet.preference.v1';
-const EMPTY: WalletPreference = Object.freeze({ evm: null, solana: null, evmDisconnected: false });
+const EMPTY: WalletPreference = Object.freeze({ evm: null, solana: null, evmDisconnected: false, solanaDisconnected: false });
 const KEY = /^[A-Za-z0-9][A-Za-z0-9 ._:-]{0,63}$/;
 function storage(): Storage | null {
   try { return typeof window === 'undefined' ? null : window.localStorage ?? null; } catch { return null; }
@@ -72,7 +75,7 @@ export function walletPreference(): WalletPreference {
     const value = JSON.parse(storage()?.getItem(PREFERENCE_KEY) ?? 'null') as Partial<Record<keyof WalletPreference, unknown>> | null;
     if (!value || typeof value !== 'object') return EMPTY;
     const key = (input: unknown) => typeof input === 'string' && KEY.test(input) ? input : null;
-    return { evm: key(value.evm), solana: key(value.solana), evmDisconnected: value.evmDisconnected === true };
+    return { evm: key(value.evm), solana: key(value.solana), evmDisconnected: value.evmDisconnected === true, solanaDisconnected: value.solanaDisconnected === true };
   } catch { return EMPTY; }
 }
 export function updateWalletPreference(change: Partial<WalletPreference>): void {

@@ -7,7 +7,8 @@
  *                          + flow mapping + execution plan; general multi-step sequences: MULTI_STEP_SEQUENCE_NOT_IMPLEMENTED)
  *   enabledByDeployment    the flow is enabled here (`mode`), and its own owner-execution switch is on (`info.executionEnabled`)
  *   enabledByPolicy        the MCP handoff policy allows these funds: test funds (FLOFI_MCP_HANDOFF_TEST_FUNDS, default enabled)
- *                          and each mainnet network explicitly (FLOFI_MCP_HANDOFF_MAINNET_NETWORKS, default none)
+ *                          and each mainnet network explicitly (FLOFI_MCP_HANDOFF_MAINNET_NETWORKS, default none); an agent
+ *                          capability whose rollout awaits owner approval (`domain/agent-rollout.ts`) is refused on every surface
  *   demonstratedEvidence   what the registry records as demonstrated — reported, never a gate
  *
  * A handoff is allowed only when the first three hold; the reason is the first failing gate. Mainnet is disabled by POLICY only:
@@ -19,6 +20,7 @@ import { ETHEREUM_ROUTER_NETWORKS } from '@defi-workflow-engine/action-registry'
 import type { FlowName } from '../../backend/flows.ts';
 import { NETWORKS, reviewComposition, type Composition, type WorkflowComposition } from '../engine/strategy-engine';
 import { NETWORK_IDS, type NetworkId, type StrategyAction, type StrategySpec } from '../engine/strategy-spec';
+import { agentRolloutAllows, type PendingAgentCapability } from '../domain/agent-rollout';
 import type { McpRuntime } from './runtime.ts';
 import { strategyFlow } from './simulation.ts';
 
@@ -27,6 +29,7 @@ type Env = Readonly<Record<string, string | undefined>>;
 export const ENGINE_VERSION = 'flofi-engine-2';
 /** Flows that expose `info.executionEnabled` (a separate owner-execution switch). Kept equal to `backend/flows.ts` by a test. */
 export const FLOWS_WITH_EXECUTION_SWITCH: readonly FlowName[] = Object.freeze(['solana-devnet-swap', 'jupiter-swap', 'orca-liquidity', 'uniswap-liquidity',
+  'robinhood-transfer',
   'crosschain-router', 'crosschain-router-testnet', 'pix-payment',
   // BUILD-RH-002: the Robinhood Chain bridge routes (owner execution needs the Robinhood real-funds approval).
   'crosschain-router-base-to-robinhood', 'crosschain-router-robinhood-to-base', 'crosschain-router-arbitrum-to-robinhood', 'crosschain-router-robinhood-to-arbitrum',
@@ -36,8 +39,10 @@ export const FLOWS_WITH_EXECUTION_SWITCH: readonly FlowName[] = Object.freeze(['
   ...ETHEREUM_ROUTER_NETWORKS.map(route => `crosschain-router-${route}` as const),
   // The Solana Devnet composition exposes the same switch; no MCP strategy plans it (MCP integration is deferred).
   'solana-devnet-composition',
-  // BUILD-SOLANA-MAINNET-001: Orca liquidity on Solana mainnet-beta (real-funds owner execution switch); no MCP strategy plans it (MCP integration deferred).
-  'orca-liquidity-mainnet']);
+  // Orca liquidity on Solana mainnet-beta uses its existing real-funds execution switch.
+  'orca-liquidity-mainnet',
+  // BUILD-SOLANA-TRANSFER-UX-001: Solana transfers (mainnet real-funds opt-in; Devnet execution switch).
+  'solana-transfer', 'solana-devnet-transfer']);
 
 /**
  * Review findings that are not defects but the owner's own pre-execution steps in FloFi: every executable flow quotes, simulates
@@ -54,7 +59,9 @@ export function handoffFindings(composition: Composition) {
   return { preExecution: [...new Set(pre.map(f => f.code))], blockers: blocks.filter(f => !pre.includes(f)) };
 }
 
-export type HandoffPolicy = { readonly ok: true; readonly testFunds: boolean; readonly mainnetNetworks: readonly NetworkId[] } | { readonly ok: false; readonly code: 'MCP_HANDOFF_POLICY_INVALID' };
+export type HandoffPolicy = { readonly ok: true; readonly testFunds: boolean; readonly mainnetNetworks: readonly NetworkId[];
+  /** Tests only: the approved agent rollouts to evaluate with. Deployments never set it; `AGENT_ROLLOUT_APPROVED` applies. */
+  readonly agentRollout?: readonly PendingAgentCapability[] } | { readonly ok: false; readonly code: 'MCP_HANDOFF_POLICY_INVALID' };
 /** The MCP handoff policy. Any malformed value disables every handoff (fail closed). */
 export function readHandoffPolicy(env: Env): HandoffPolicy {
   const testFunds = env.FLOFI_MCP_HANDOFF_TEST_FUNDS ?? 'enabled';
@@ -127,6 +134,9 @@ export type Gates = {
 export function policyGate(plan: ExecutionPlan, policy: HandoffPolicy): Gates['enabledByPolicy'] {
   const facts = { fundsClass: plan.fundsClass, networks: plan.networks };
   if (!policy.ok) return { enabled: false, ...facts, reason: policy.code };
+  // Audit A9: implemented agent capabilities stay unavailable to every handoff until the owner approves their rollout.
+  if (plan.steps.some(step => !agentRolloutAllows(step.action, step.network, policy.agentRollout)))
+    return { enabled: false, ...facts, reason: 'AGENT_ROLLOUT_NOT_APPROVED' };
   for (const network of plan.networks) {
     if (NETWORKS[network].class === 'MAINNET') { if (!policy.mainnetNetworks.includes(network)) return { enabled: false, ...facts, reason: 'MAINNET_HANDOFF_DISABLED_BY_POLICY' }; }
     else if (!policy.testFunds) return { enabled: false, ...facts, reason: 'TEST_FUNDS_HANDOFF_DISABLED_BY_POLICY' };
@@ -148,9 +158,13 @@ export async function evaluateGates(composition: Composition, runtime: McpRuntim
   else {
     const mode = await runtime.mode(plan.flow) ?? 'off', on = mode === 'live' || mode === 'harness';
     const switchable = FLOWS_WITH_EXECUTION_SWITCH.includes(plan.flow);
-    const executionSwitch = on && switchable ? (await runtime.info?.(plan.flow))?.executionEnabled ?? null : null;
+    const info = on && switchable ? await runtime.info?.(plan.flow) : null;
+    const executionSwitch = info?.executionEnabled ?? null;
+    // The shared transfer flow is live if either testnet is enabled. Ask the runtime for the requested network too.
+    const networkReason = on && plan.flow === 'robinhood-transfer' ? !info?.networks ? 'EXECUTION_NETWORK_UNKNOWN'
+      : !plan.networks.every(n => info.networks!.includes(n)) ? 'NETWORK_NOT_ENABLED_IN_DEPLOYMENT' : null : null;
     const reason = !on ? 'FLOW_NOT_ENABLED_IN_DEPLOYMENT' : switchable && executionSwitch === null ? 'EXECUTION_SWITCH_UNKNOWN'
-      : switchable && !executionSwitch ? 'OWNER_EXECUTION_NOT_ENABLED_IN_DEPLOYMENT' : null;
+      : switchable && !executionSwitch ? 'OWNER_EXECUTION_NOT_ENABLED_IN_DEPLOYMENT' : networkReason;
     enabledByDeployment = { enabled: reason === null, flow: plan.flow, mode, executionSwitch, mockedHarness: mode === 'harness', reason };
   }
   const enabledByPolicy = policyGate(plan, policy);

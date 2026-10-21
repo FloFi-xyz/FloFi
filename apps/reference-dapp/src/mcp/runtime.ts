@@ -27,7 +27,7 @@ export type McpRuntime = {
    * BUILD-MCP-002: the flow's own owner-execution switch (`info.executionEnabled`, e.g. a mainnet flow whose Simulate/Review are on
    * but whose owner execution needs a separate opt-in). Only called for flows that expose `info`; `null` when unknown.
    */
-  readonly info?: (flow: FlowName) => Promise<{ readonly executionEnabled: boolean } | null>;
+  readonly info?: (flow: FlowName) => Promise<{ readonly executionEnabled: boolean; readonly networks?: readonly string[] } | null>;
   readonly preview: (flow: FlowName, args: readonly unknown[]) => Promise<Result<unknown>>;
   readonly run: (runId: string, owner: string) => Promise<Result<CloudRun | null>>;
   readonly journal: (runId: string, owner: string, after: number | null, limit: number) => Promise<Result<CloudJournalPage | null>>;
@@ -54,8 +54,9 @@ async function evidenceOf(flow: FlowName, record: Result<unknown> | null): Promi
 }
 
 const infoOf = (result: { ok: boolean; value?: unknown } | null) => {
-  const value = result?.ok ? result.value as { executionEnabled?: unknown } | null : null;
-  return value && typeof value.executionEnabled === 'boolean' ? { executionEnabled: value.executionEnabled } : null;
+  const value = result?.ok ? result.value as { executionEnabled?: unknown; networks?: unknown } | null : null;
+  return value && typeof value.executionEnabled === 'boolean' ? { executionEnabled: value.executionEnabled,
+    ...(Array.isArray(value.networks) && value.networks.every(n => typeof n === 'string') ? { networks: value.networks as string[] } : {}) } : null;
 };
 
 /** The deployment's runtime through the existing selection (`flow-runtime.ts`). */

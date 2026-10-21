@@ -5,7 +5,7 @@ import { useLocale } from '../i18n/locale';
 import { useEffect, useState } from 'react';
 import type { ReviewContext } from '@defi-workflow-engine/reference-linter';
 import type { Workflow } from '../domain/initial-workflow';
-import { projectSimulation, simulationStatusPresentation, type SimulationSource, type SimulationLine } from '../domain/simulation-presentation';
+import { projectSimulation, simulationStatusPresentation, type SimulationSource, type SimulationLine, type SimulationStep } from '../domain/simulation-presentation';
 import { NetworkBrandIcon, TokenBrandIcon } from './brand-icon';
 
 function Lines({ lines }: { lines: SimulationLine[] }) {
@@ -52,10 +52,7 @@ export function SimulationSummary({ workflow, context, source, invalidWorkflow =
       {details.steps.length ? <ol className="simulation-results">{details.steps.map(step => <li key={step.id}>
         <div className="simulation-step-title">{multiple && <span className="simulation-step-number">{tr(step.number)}</span>}<strong>{tr(step.action)}</strong></div>
         <div className="simulation-input"><TokenAmount value={step.input}/></div>
-        <span className="simulation-result-label">{tr(step.resultLabel)}</span>
-        <div className="simulation-result"><span aria-hidden="true">→</span><TokenAmount value={step.result ?? '—'}/></div>
-        {step.minimum && <p className="simulation-minimum">{tr("Minimum received · ")}{tr(step.minimum)}</p>}
-        {step.details.length > 0 && <Lines lines={step.details}/>}
+        <SimulationOutcome step={step}/>
       </li>)}</ol> : <p className="simulation-empty-value">—</p>}
     </section>
     <section className="simulation-summary-section" aria-label={tr("Route")}>
@@ -89,5 +86,16 @@ export function SimulationSummary({ workflow, context, source, invalidWorkflow =
         {tr(warning.message)}
       </li>)}</ul>
     </section>}
+  </>;
+}
+
+/** The same simulated outcome and execution minimum in Canvas and the chat signing review. */
+export function SimulationOutcome({ step }: { step: SimulationStep }) {
+  const { t: tr } = useLocale();
+  return <>
+    <span className="simulation-result-label">{tr(step.resultLabel)}</span>
+    <div className="simulation-result"><span aria-hidden="true">→</span><TokenAmount value={step.result ?? '—'}/></div>
+    {step.minimum && <p className="simulation-minimum">{tr('Minimum received · ')}{tr(step.minimum)}</p>}
+    {step.details.length > 0 && <Lines lines={step.details}/>}
   </>;
 }

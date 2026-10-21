@@ -78,7 +78,7 @@ export function projectExecutionStepEvidence(source: ExecutionLifecycleSource, p
       for (const attempt of source.state.record?.attempts ?? []) add(attempt.step, attempt.reconciled);
       break;
     }
-    case 'solana-swap': case 'solana-pool': {
+    case 'solana-swap': case 'solana-pool': case 'solana-transfer': {
       const record = source.state.record;
       add('transaction', Boolean(record?.attempt?.reconciled), journalRecovery(record?.journal));
       break;

@@ -17,16 +17,17 @@ import type { Projection, Projector, WorkRequest } from '@defi-workflow-engine/c
 import { createRobinhoodTransferService, type TransferRecord, type TransferWalletDiagnostic } from '../src/server/robinhood-transfer-service.ts';
 import { createSupplyService, type SupplyRecord, type SupplyWalletDiagnostic } from '../src/server/supply-service.ts';
 import { createDurablePublicTestnetService, type PublicRun } from '../src/server/public-testnet-service.ts';
-import { JUPITER_SOLANA_MAINNET, ORCA_WHIRLPOOLS_DEVNET, ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY, ORCA_WHIRLPOOLS_MAINNET_LIQUIDITY, type AssetCatalog,
-  type OrcaLiquidityProfile } from '@defi-workflow-engine/action-registry';
+import { JUPITER_SOLANA_MAINNET, ORCA_WHIRLPOOLS_DEVNET, ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY, ORCA_WHIRLPOOLS_MAINNET_LIQUIDITY, SOLANA_DEVNET_TRANSFER, SOLANA_MAINNET_TRANSFER,
+  type AssetCatalog, type OrcaLiquidityProfile, type SolanaTransferProfile } from '@defi-workflow-engine/action-registry';
 import { CATALOG_NETWORKS, type CatalogNetworkRuntime } from '../src/server/catalog-networks.ts';
 import type { JupiterHttp } from '@defi-workflow-engine/reference-compiler';
-import { nativeTransferReadRpcs } from '../src/server/robinhood-rpc.ts';
+import { nativeTransferEnabledNetworks, nativeTransferReadRpcs } from '../src/server/robinhood-rpc.ts';
 import { createCatalogLendingReadRpc, createLendingReadRpcs } from '../src/server/supply-rpc.ts';
 import { baseSepoliaSwapRpc, ethereumSepoliaSwapRpc } from '../src/server/public-testnet-rpc.ts';
 import { createSolanaRpc, solanaRpcOverride } from '../src/server/solana-rpc.ts';
 import { createJupiterHttp } from '../src/server/jupiter-http.ts';
 import { createJupiterService, createSolanaDevnetService, type JupiterRecord, type JupiterWalletDiagnostic } from '../src/server/jupiter-service.ts';
+import { createSolanaTransferService, type SolanaTransferRecord, type SolanaTransferWalletDiagnostic } from '../src/server/solana-transfer-service.ts';
 import { createOrcaLiquidityService, type OrcaLiquidityRecord, type OrcaLiquidityWalletDiagnostic } from '../src/server/orca-liquidity-service.ts';
 import { createSolanaCompositionService, type SolanaCompositionDiagnostic, type SolanaCompositionRecord } from '../src/server/solana-composition-service.ts';
 import { createUniswapLiquidityService, uniswapNeedsObservation, type UniswapLiquidityRecord,
@@ -53,7 +54,9 @@ export type FlowName = `crosschain-router-${EthereumRouterNetwork}` | 'robinhood
   /** BUILD-BASE-001: Base mainnet (real funds) as a catalog network, and the Router's Arbitrum One → Base route. */
   | 'ethereum-swap' | 'ethereum-mainnet-transfer' | 'ethereum-liquidity' | 'ethereum-aave' | 'arbitrum-swap' | 'arbitrum-mainnet-transfer' | 'arbitrum-liquidity' | 'base-swap' | 'base-mainnet-transfer' | 'base-liquidity' | 'base-aave' | 'arbitrum-aave' | 'crosschain-router-arbitrum-to-base'
   /** Solana Devnet Swap → Orca liquidity, composed from the two Solana Devnet flows above. */
-  | 'solana-devnet-composition';
+  | 'solana-devnet-composition'
+  /** BUILD-SOLANA-TRANSFER-UX-001: direct SOL / SPL transfers to another wallet on mainnet-beta (real funds) and Devnet. */
+  | 'solana-transfer' | 'solana-devnet-transfer';
 export type Rpc = (method: string, params: readonly unknown[]) => Promise<unknown>;
 /** Network transport for one flow. Built from configuration in production; replaced by MOCKED chains in tests. */
 export type FlowDeps = { readonly rpc: Rpc; readonly mode: 'live' | 'harness'; readonly env: Readonly<Record<string, string | undefined>>; readonly http?: JupiterHttp;
@@ -150,6 +153,7 @@ function transferFlow(name: 'robinhood-transfer' | CatalogNetworkRuntime['flows'
   return {
     name, busyCode: 'TRANSFER_BUSY', runId: RUN, unavailableCode: 'TRANSFER_SERVICE_UNAVAILABLE',
     methods: {
+      ...(!network ? { info: { mutates: false, validate: shape() } } : {}),
       simulate: { mutates: true, validate: shape(workflow, account) },
       review: { mutates: true, validate: shape(id(RUN), commitment, workflow) },
       invalidate: { mutates: true, validate: shape(id(RUN)) },
@@ -169,6 +173,7 @@ function transferFlow(name: 'robinhood-transfer' | CatalogNetworkRuntime['flows'
         provenance: mode === 'harness' ? 'MOCKED' : 'PUBLIC_MAINNET', ...catalog ? { catalogFor: catalog } : {}, executionEnabled: network.ownerExecutionEnabled(mode, env) })
         : createRobinhoodTransferService({ storage, rpc, ...chains ? { rpcs: chains.rpcs } : {}, provenance: mode === 'harness' ? 'MOCKED' : 'PUBLIC_TESTNET' });
       const table: Record<string, (args: Args) => Promise<unknown>> = {
+        ...(!network ? { info: async () => ({ executionEnabled: true, networks: nativeTransferEnabledNetworks(mode, env) }) } : {}),
         simulate: ([w, a]) => s.simulate(w, a as string),
         review: ([i, c, w]) => s.review(i as string, c as string, w as SemanticWorkflow),
         invalidate: ([i]) => s.invalidate(i as string),
@@ -478,6 +483,38 @@ const jupiterSwap: FlowDefinition = {
     return { call: (method, args) => table[method]!(args), load: runId => s.load(runId), observe: runId => s.observe(runId) };
   },
   needsObservation: solanaNeedsObservation, projector: solanaProjector('jupiter-swap', () => 'SWAP'), evidence: record => evidenceOf(record as JupiterRecord),
+};
+/**
+ * BUILD-SOLANA-TRANSFER-UX-001: one Solana transfer flow per cluster, on the same strict method surface as the Solana swaps. Mainnet-beta real-funds
+ * execution is a separate explicit owner opt-in (GRYLOO_SOLANA_TRANSFER_OWNER_EXECUTION); Devnet follows the existing Devnet execution switch.
+ */
+const solanaTransferFlow = (name: 'solana-transfer' | 'solana-devnet-transfer', profile: SolanaTransferProfile): FlowDefinition => {
+  const idPattern = new RegExp(`^${profile.idPrefix}-[a-f0-9]{32}$`);
+  return {
+    name, busyCode: 'SOLANA_TRANSFER_BUSY', runId: idPattern, unavailableCode: 'SOLANA_TRANSFER_SERVICE_UNAVAILABLE',
+    methods: solanaSwapMethods(idPattern),
+    transport: (mode, env) => ({ rpc: createSolanaRpc(mode === 'harness' ? `http://127.0.0.1:8552/${profile.realFunds ? 'transfer-rpc' : 'transfer-devnet-rpc'}`
+      : (profile.realFunds ? solanaRpcOverride(env.GRYLOO_SOLANA_RPC_URL, 'SOLANA_TRANSFER_RPC_CONFIGURATION_INVALID')
+        : solanaRpcOverride(env.GRYLOO_SOLANA_DEVNET_RPC_URL, 'SOLANA_TRANSFER_RPC_CONFIGURATION_INVALID')) ?? profile.rpc, mode === 'harness') }),
+    create(storage, { rpc, mode, env }) {
+      const s = createSolanaTransferService({ storage, rpc, profile, provenance: mode === 'harness' ? 'MOCKED' : profile.provenance,
+        executionEnabled: profile.realFunds ? mode === 'harness' || env.GRYLOO_SOLANA_TRANSFER_OWNER_EXECUTION === 'MAINNET_OWNER_APPROVED'
+          : env.GRYLOO_SOLANA_DEVNET_EXECUTION !== 'DISABLED' });
+      const table: Record<string, (args: Args) => Promise<unknown>> = {
+        info: async () => ({ executionEnabled: s.executionEnabled }),
+        simulate: ([w, o]) => s.simulate(w, o as string),
+        review: ([i, c, w]) => s.review(i as string, c as string, w as SemanticWorkflow),
+        invalidate: ([i]) => s.invalidate(i as string),
+        begin: ([i, o, w]) => s.begin(i as string, o as string, w as SemanticWorkflow),
+        walletFailure: ([i, d]) => s.walletFailure(i as string, d as SolanaTransferWalletDiagnostic),
+        submit: ([i, t]) => s.submit(i as string, t as string),
+        observe: ([i]) => s.observe(i as string),
+        status: ([i]) => s.load(i as string),
+      };
+      return { call: (method, args) => table[method]!(args), load: runId => s.load(runId), observe: runId => s.observe(runId) };
+    },
+    needsObservation: solanaNeedsObservation, projector: solanaProjector(name, () => 'TRANSFER'), evidence: record => evidenceOf(record as SolanaTransferRecord),
+  };
 };
 const ORCA_LP_ID = /^orcalp-[a-f0-9]{32}$/;
 /** Orca Whirlpools liquidity on one Solana cluster: Devnet (`orca-liquidity`) or mainnet-beta (`orca-liquidity-mainnet`, BUILD-SOLANA-MAINNET-001). */
@@ -891,7 +928,8 @@ export const FLOWS: Readonly<Record<FlowName, FlowDefinition>> = Object.freeze({
   'crosschain-router-arbitrum-to-ethereum': routerFlow('crosschain-router-arbitrum-to-ethereum', 'arbitrum-to-ethereum'),
   'crosschain-router-ethereum-to-robinhood': routerFlow('crosschain-router-ethereum-to-robinhood', 'ethereum-to-robinhood'),
   'crosschain-router-robinhood-to-ethereum': routerFlow('crosschain-router-robinhood-to-ethereum', 'robinhood-to-ethereum'),
-  'crosschain-router-arbitrum-to-base': routerFlow('crosschain-router-arbitrum-to-base', 'arbitrum-to-base'), 'solana-devnet-composition': solanaComposition });
+  'crosschain-router-arbitrum-to-base': routerFlow('crosschain-router-arbitrum-to-base', 'arbitrum-to-base'), 'solana-devnet-composition': solanaComposition,
+  'solana-transfer': solanaTransferFlow('solana-transfer', SOLANA_MAINNET_TRANSFER), 'solana-devnet-transfer': solanaTransferFlow('solana-devnet-transfer', SOLANA_DEVNET_TRANSFER) });
 export const isFlowName = (value: string): value is FlowName => Object.hasOwn(FLOWS, value);
 
 /**
@@ -910,6 +948,11 @@ function configuredFlowMode(flow: FlowName, env: Readonly<Record<string, string 
   // Solana Devnet (valueless test tokens): explicit backend enablement; the MOCKED loopback harness wins.
   if (flow === 'solana-devnet-swap' || flow === 'orca-liquidity' || flow === 'solana-devnet-composition')
     return env.GRYLOO_SOLANA_DEVNET_HARNESS === 'MOCKED_LOOPBACK_ONLY' ? 'harness' : env.GRYLOO_SOLANA_DEVNET === 'live' ? 'live' : 'off';
+  // BUILD-SOLANA-TRANSFER-UX-001: Solana transfers. Mainnet-beta: `GRYLOO_SOLANA_TRANSFER=live` enables read-only Simulate/Review; real-funds execution
+  // additionally needs GRYLOO_SOLANA_TRANSFER_OWNER_EXECUTION. Devnet: the existing Devnet enablement. The MOCKED loopback harness wins.
+  if (flow === 'solana-transfer') return env.GRYLOO_SOLANA_TRANSFER_HARNESS === 'MOCKED_LOOPBACK_ONLY' ? 'harness' : env.GRYLOO_SOLANA_TRANSFER === 'live' ? 'live' : 'off';
+  if (flow === 'solana-devnet-transfer')
+    return env.GRYLOO_SOLANA_TRANSFER_HARNESS === 'MOCKED_LOOPBACK_ONLY' ? 'harness' : env.GRYLOO_SOLANA_DEVNET === 'live' ? 'live' : 'off';
   // Jupiter mainnet-beta: `live` enables read-only Simulate/Review; real-funds execution additionally needs GRYLOO_JUPITER_OWNER_EXECUTION.
   if (flow === 'jupiter-swap') return env.GRYLOO_JUPITER_HARNESS === 'MOCKED_LOOPBACK_ONLY' ? 'harness' : env.GRYLOO_JUPITER === 'live' ? 'live' : 'off';
   // BUILD-SOLANA-MAINNET-001 Orca mainnet-beta liquidity: `live` enables read-only Simulate/Review; real-funds execution additionally needs
@@ -969,5 +1012,6 @@ const DISABLED: Readonly<Record<FlowName, string>> = { 'robinhood-transfer': 'TR
   'crosschain-router-ethereum-to-robinhood': 'ETHEREUM_MAINNET_NOT_ENABLED',
   'crosschain-router-robinhood-to-ethereum': 'ETHEREUM_MAINNET_NOT_ENABLED',
   'base-aave': 'BASE_MAINNET_NOT_ENABLED', 'arbitrum-aave': 'ARBITRUM_MAINNET_NOT_ENABLED', 'crosschain-router-arbitrum-to-base': 'ROUTER_NOT_ENABLED',
-  'solana-devnet-composition': 'SOLANA_COMPOSITION_PUBLIC_DEVNET_NOT_ENABLED' };
+  'solana-devnet-composition': 'SOLANA_COMPOSITION_PUBLIC_DEVNET_NOT_ENABLED',
+  'solana-transfer': 'SOLANA_TRANSFER_PUBLIC_MAINNET_NOT_ENABLED', 'solana-devnet-transfer': 'SOLANA_TRANSFER_PUBLIC_DEVNET_NOT_ENABLED' };
 export const disabledCode = (flow: FlowName) => DISABLED[flow];

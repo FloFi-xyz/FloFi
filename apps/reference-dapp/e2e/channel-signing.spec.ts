@@ -2,7 +2,7 @@
 /** FloFi-side host contracts, never live ChatGPT/Claude or wallet apps. Network guard permits loopback app traffic only. */
 import { test, expect } from '@playwright/test';
 import { createTestWallet } from '../../../packages/reference-reconciler/test/test-wallet.ts';
-import { chooseWallet } from './fixtures';
+import { AUTHORIZE_IN_WALLET, proveConnectedEvmWallet, signingSurface } from './fixtures';
 import { guardedContext, installJourneyWallet, journeySends, walletRequests } from './journey-fixtures';
 import { assertMcpHarness, connectViaBrowser, hostLog, mcpClient, openHost, panelHtmlOf } from './mcp-fixtures';
 import { routerControl } from './router-fixtures';
@@ -33,10 +33,11 @@ for (const hostName of ['ChatGPT fixture', 'Claude fixture']) {
     // A normal browser with the original OAuth account opens the universal fallback without asking the model for a capability.
     const page = await context.newPage(); await installJourneyWallet(page, [owner]);
     await page.goto(fallback);
-    // BUILD-FLOFI-UX-UI-002: the proposal's compact notice inside the normal workspace; its cards are already on the Canvas.
+    // BUILD-FLOFI-UX-UI-002: the proposal's compact notice inside the normal workspace. BUILD-SOLANA-TRANSFER-UX-001: the link opens the
+    // minimal signing surface, which already lists the exact requested action.
     const region = page.getByRole('region', { name: /^Proposal from / });
     await expect(region).toContainText('Nothing is authorized yet.');
-    await expect(page.locator('.build-flow-surface .composer-card').first()).toBeVisible();
+    await expect(signingSurface(page).getByRole('list', { name: 'Requested actions' })).toContainText('Base Sepolia');
     await region.getByText('Open with a mobile wallet', { exact: true }).click();
     const metaMask = new URL((await region.getByRole('link', { name: 'Open in MetaMask', exact: true }).getAttribute('href'))!);
     expect(metaMask.hash).toMatch(/^#flofi_hs_/);
@@ -60,7 +61,7 @@ for (const hostName of ['ChatGPT fixture', 'Claude fixture']) {
       } else await route.continue();
     });
     // The proof loads the proposal at once: claim, restore, apply (whose response is lost here).
-    await region.getByRole('button', { name: 'Connect wallet and prove ownership' }).click(); await chooseWallet(page, 'Browser wallet');
+    await proveConnectedEvmWallet(page, region, owner.address);
     await expect(region.getByRole('alert')).toContainText('APPROVAL_UNAVAILABLE');
     await page.unroute('**/approve');
     // After a reload the consumed session is recovered for its proven owner, restored only on the owner's explicit choice.
@@ -68,8 +69,8 @@ for (const hostName of ['ChatGPT fixture', 'Claude fixture']) {
     await expect(region).toContainText('This proposal is already in a FloFi workflow for your wallet.');
     await region.getByRole('button', { name: 'Restore proposal' }).click();
     await expect(region.getByRole('status')).toContainText('Proposal restored for its proven owner.');
-    await page.locator('.canvas-primary-action').getByRole('button', { name: 'Simulate workflow', exact: true }).click();
-    await expect(page.locator('.simulate-workspace')).toBeVisible();
+    // The restored proposal gets FloFi's own fresh read-only simulation; MOCKED evidence keeps the one owner action disabled.
+    await expect(signingSurface(page).getByRole('button', { name: AUTHORIZE_IN_WALLET, exact: true })).toBeDisabled({ timeout: 30_000 });
     expect(await walletRequests(page)).not.toContain('eth_sendTransaction');
     expect(await journeySends()).toBe(0);
     // Browser history may restore the same consumed fragment. Only its existing proven owner can reconstruct it.
@@ -111,7 +112,7 @@ test('a delayed apply response cannot restore the previous proposal after anothe
   });
   try {
     // The proof starts the claim and apply; the apply response is held while another link is presented.
-    await region.getByRole('button', { name: 'Connect wallet and prove ownership' }).click(); await chooseWallet(page, 'Browser wallet');
+    await proveConnectedEvmWallet(page, region, owner.address);
     await applied;
     // Keep the component mounted while the old response is in flight.
     await page.evaluate(() => { window.location.hash = 'flofi_hs_' + 'x'.repeat(43); });
@@ -134,7 +135,7 @@ test('host link refusal leaves a usable private fallback and concurrent clicks m
   const result = await client.toolResult('request_user_approval', { strategy, workflowHash: composed.workflowHash });
   const host = await context.newPage();
   const panel = await openHost(host, client, await panelHtmlOf(client, 'ui://flofi/approval-panel.html'), {}, result, { openLinkRefused: true });
-  await panel.getByRole('button', { name: 'Review with your wallet in FloFi' }).evaluate(button => { (button as HTMLButtonElement).click(); (button as HTMLButtonElement).click(); });
+  await panel.getByRole('button', { name: 'Authorize', exact: true }).evaluate(button => { (button as HTMLButtonElement).click(); (button as HTMLButtonElement).click(); });
   await expect(panel.getByText('OPEN_LINK_REFUSED', { exact: true })).toBeVisible();
   const log = await hostLog(host);
   expect(log.toolCalls.filter(name => name === 'open_approval_session')).toHaveLength(1);
@@ -162,12 +163,13 @@ test('a rejected wallet proof leaves the proposal unclaimed and can be retried w
       return original(input);
     };
   });
-  await region.getByRole('button', { name: 'Connect wallet and prove ownership' }).click(); await chooseWallet(page, 'Browser wallet');
+  await proveConnectedEvmWallet(page, region, owner.address);
   await expect(region.getByRole('alert')).toContainText('WALLET_REQUEST_FAILED');
-  // Nothing was claimed or loaded, and Simulate stays closed.
-  await expect(page.locator('.canvas-primary-action button')).toBeDisabled();
+  // Nothing was claimed or loaded: the signing surface offers no simulation or authorization.
+  await expect(signingSurface(page)).toBeVisible();
+  await expect(page.locator('button[data-lifecycle-action]:enabled')).toHaveCount(0);
   expect(await client.tool('get_approval_status', { approvalId: result.structuredContent!.approvalId })).toMatchObject({ status: 'PENDING', claimed: false, authority: 'NONE' });
-  await region.getByRole('button', { name: 'Connect wallet and prove ownership' }).click(); await chooseWallet(page, 'Browser wallet');
+  await proveConnectedEvmWallet(page, region, owner.address);
   // The retried proof loads the proposal; still nothing is signed or sent.
   await expect(region.getByRole('status')).toContainText('Ready for your review.');
   expect(await client.tool('get_approval_status', { approvalId: result.structuredContent!.approvalId })).toMatchObject({ claimed: true, applied: true, authority: 'NONE' });

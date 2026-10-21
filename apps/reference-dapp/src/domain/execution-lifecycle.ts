@@ -17,6 +17,7 @@ import type { useSolanaLiquidity } from '../state/solana-liquidity-store';
 import type { useSolanaComposition } from '../state/solana-composition-store';
 import type { useUniswapLiquidity } from '../state/uniswap-liquidity-store';
 import type { useRobinhoodTransfer } from '../state/robinhood-transfer-store';
+import type { useSolanaTransfer } from '../state/solana-transfer-store';
 import type { useModeA } from '../state/mode-a-store';
 import type { useModeB } from '../state/mode-b-store';
 import type { useComposition } from '../state/composition-store';
@@ -34,6 +35,7 @@ export type ExecutionLifecycleSource =
   | { kind: 'solana-composition'; state: ReadonlyStore<ReturnType<typeof useSolanaComposition>> }
   | { kind: 'uniswap-pool'; state: ReadonlyStore<ReturnType<typeof useUniswapLiquidity>> }
   | { kind: 'transfer'; state: ReadonlyStore<ReturnType<typeof useRobinhoodTransfer>> }
+  | { kind: 'solana-transfer'; state: ReadonlyStore<ReturnType<typeof useSolanaTransfer>> }
   | { kind: 'fork-swap'; state: ReadonlyStore<ReturnType<typeof useModeA>> }
   | { kind: 'fork-pool'; state: ReadonlyStore<ReturnType<typeof useLiquidity>> }
   | { kind: 'delegated-swap'; state: ReadonlyStore<ReturnType<typeof useModeB>> }
@@ -151,10 +153,11 @@ export function projectExecutionLifecycle(currentWorkflow: Workflow, context: Re
         add(call.step, nodeId, approval ? `Approve ${call.step === 'APPROVE_TOKEN0' ? r.review.token0.symbol : r.review.token1.symbol}` : 'Add liquidity', chain, a?.state ?? null, a?.replacementHash ?? a?.transactionHash ?? null, Boolean(a?.reconciled), approval, simulationAmount(a?.receipt?.gasCostWei, 18, 'ETH'));
       } break;
     }
-    case 'solana-swap': case 'solana-pool': {
+    case 'solana-swap': case 'solana-pool': case 'solana-transfer': {
       const r = source.state.record; if (!r) break;
       select(r.review.workflow, r.id, r.provenance, source.state.recovered);
-      const a = r.attempt; add('transaction', composerActions(workflow)[0]?.nodeId ?? '', source.kind === 'solana-swap' ? 'Swap' : 'Liquidity transaction', r.review.chain, a?.state ?? null, a?.signature ?? null, Boolean(a?.reconciled));
+      const title = source.kind === 'solana-swap' ? 'Swap' : source.kind === 'solana-transfer' ? 'Send' : 'Liquidity transaction';
+      const a = r.attempt; add('transaction', composerActions(workflow)[0]?.nodeId ?? '', title, r.review.chain, a?.state ?? null, a?.signature ?? null, Boolean(a?.reconciled));
       if (a && r.verdict === 'NOT_EXECUTED') { const op = operations.at(-1)!; op.state = 'expired'; op.label = labels.expired; }
       if (a?.state === 'SUBMITTING' && a.signature) { const op = operations.at(-1)!; op.state = 'submitting'; op.label = labels.submitting; }
       // Refused before any broadcast (declined, wallet error, changed or stale bytes): no transaction exists for this attempt.

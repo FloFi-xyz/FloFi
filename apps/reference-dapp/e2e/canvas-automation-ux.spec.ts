@@ -1,10 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, readWorkflowIr, applyPendingProposal } from './fixtures';
-import { installSupplyWallet } from './supply-fixtures';
+import { installSupplyWallet, supplySendCount, SUPPLY_OWNER } from './supply-fixtures';
 import { configureCanvasAction, configureCanvasPool } from './composer-authoring-fixtures';
 
 for (const action of ['swap', 'bridge', 'supply', 'borrow', 'repay', 'withdraw', 'pool', 'lending', 'transfer']) test(`Canvas parity without Advanced action setup: ${action}`, async ({ page }) => {
-  await installSupplyWallet(page); await page.goto('/app');
+  // The wallet accepts an explicit network switch (only the Robinhood Chain Testnet Send asks for one).
+  await installSupplyWallet(page, { switching: 'KNOWN' }); await page.goto('/app');
+  // Supply/Borrow/Repay and Supply → Borrow → Swap bind the connected owner as beneficiary: a click before the wallet's passive
+  // reconnect resolves is refused ("Connect your wallet…") and creates no proposal, so wait for the connected wallet first.
+  await expect(page.locator('.build009-wallet-info')).toHaveAttribute('title', new RegExp(`^${SUPPLY_OWNER}$`, 'i'));
   await expect(page.getByText('Advanced action setup', { exact: true })).toHaveCount(0);
   // UX-005: the canonical `transfer` action is presented as Send.
   await page.getByRole('button', { name: action === 'lending' ? 'Add Supply → Borrow → Swap' : action === 'transfer' ? 'Add send' : `Add ${action}`, exact: true }).click();
@@ -23,10 +27,13 @@ for (const action of ['swap', 'bridge', 'supply', 'borrow', 'repay', 'withdraw',
   else if (action === 'lending') expect(types).toEqual(['supply', 'borrow', 'asset.swap.exact-input']);
   else expect(types).toContain(expected);
   const primary = page.locator('.canvas-primary-action');
+  // BUILD-SOLANA-TRANSFER-UX-001: a connected wallet on another network (this wallet is on Base Sepolia; Send defaults to Robinhood Chain
+  // Testnet) is first asked to switch, through an explicit, non-financial owner action; then the workflow can be simulated.
+  if (action === 'transfer') await primary.getByRole('button', { name: 'Switch to Robinhood Chain Testnet', exact: true }).click();
   await expect(primary.getByRole('button', { name: 'Simulate workflow', exact: true })).toBeVisible();
+  expect(await supplySendCount(page)).toBe(0);
   // Adding an action grants no Review or execution authority.
-  await expect(page.getByRole('button', { name: 'Approve & Continue', exact: true })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Execute workflow', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Authorize in wallet', exact: true })).toHaveCount(0);
 });
 
 test('normal Simulate has concise safety details and no engineering or duplicate lifecycle workspace, desktop and mobile', async ({ page }) => {
@@ -112,7 +119,7 @@ for (const action of ['swap', 'pool']) test(`Solana Devnet ${action} remains aut
 });
 
 test('new Send authoring controls and lifecycle copy use Portuguese', async ({ page }) => {
-  await installSupplyWallet(page);
+  await installSupplyWallet(page, { switching: 'KNOWN' });
   await page.addInitScript(() => localStorage.setItem('flofi.language', 'PT'));
   await page.goto('/app');
   await page.getByRole('button', { name: 'Adicionar envio', exact: true }).click();
@@ -121,6 +128,10 @@ test('new Send authoring controls and lifecycle copy use Portuguese', async ({ p
   await card.getByRole('button', { name: 'Rever alteração do envio', exact: true }).click();
   await card.getByRole('button', { name: 'Aplicar proposta', exact: true }).click();
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '1');
+  // The explicit network switch (the wallet is on Base Sepolia), then the lifecycle CTA, both in Portuguese.
+  await expect(page.locator('.canvas-primary-action button')).toHaveText('Mudar para Robinhood Chain Testnet');
+  await page.locator('.canvas-primary-action button').click();
   await expect(page.locator('.canvas-primary-action button')).toHaveText('Simular fluxo');
+  expect(await supplySendCount(page)).toBe(0);
   await expect(page.getByText('Review Send change', { exact: true })).toHaveCount(0);
 });

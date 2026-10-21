@@ -1,5 +1,7 @@
-# BUILD-CI-GCP-002 — full manual backup certification, pinned to the 105-era CI coverage.
+# BUILD-SOLANA-TRANSFER-UX-001 — one manual source-snapshot certification.
 # One 2-vCPU / 8-GiB Cloud Build worker: stages run SEQUENTIALLY, not concurrently.
+# Critical browsers follow required setup/build; collect independent failures and
+# always require the strict final ledger. No failed stage is allowed to pass.
 # No deploy, registry push, production secrets, automation, or PR-merge authority.
 # The full signed-off CircleCI/GitHub checks remain required until separately reviewed.
 steps:
@@ -27,11 +29,15 @@ steps:
     entrypoint: bash
     args: ['scripts/gcp-ci-full.sh']
     # Substitutions are not step environment variables: pass the triggering branch for governance explicitly.
-    env: ['FLOFI_SOURCE_SHA=$COMMIT_SHA', 'BRANCH_NAME=$BRANCH_NAME']
+    env: ['FLOFI_SOURCE_SNAPSHOT_SHA256=${_SNAPSHOT_SHA256}', 'BRANCH_NAME=${_SOURCE_BRANCH}']
     waitFor: ['disposable-postgres']
-# The stages take about 36 min on CircleCI's 4-vCPU jobs and ran about 3x slower here: expect 85-125 min sequentially.
+# A prior attempt took 51 minutes. Complete coverage may take longer;
+# the 180-minute timeout caps worker compute at USD 1.08 at USD 0.006/minute.
 timeout: '10800s'
 serviceAccount: 'projects/celtic-volt-418819/serviceAccounts/flofi-ci-runner@celtic-volt-418819.iam.gserviceaccount.com'
 options:
   machineType: E2_STANDARD_2
   logging: CLOUD_LOGGING_ONLY
+substitutions:
+  _SNAPSHOT_SHA256: 'REQUIRED_AT_SUBMISSION'
+  _SOURCE_BRANCH: 'claude/build-solana-transfer-ux-001'

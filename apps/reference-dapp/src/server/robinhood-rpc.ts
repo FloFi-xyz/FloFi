@@ -46,13 +46,18 @@ export function createNativeTransferReadRpc(profile: NativeTransferProfile, mode
   return (method, params) => { const result = queue.then(() => read(method, params)); queue = result.catch(() => undefined); return result; };
 }
 export function createRobinhoodReadRpc(mode: 'live' | 'harness'): TransferRpc { return createNativeTransferReadRpc(ROBINHOOD_TESTNET_TRANSFER, mode); }
+/** Network facts for the shared testnet flow; one enabled network never enables the other. */
+export function nativeTransferEnabledNetworks(mode: 'live' | 'harness', env: Readonly<Record<string, string | undefined>>): readonly string[] {
+  return [...mode === 'harness' || env.GRYLOO_ROBINHOOD_TESTNET === 'live' ? ['robinhood-testnet'] : [],
+    ...mode === 'harness' || env.GRYLOO_ETHEREUM_SEPOLIA_TRANSFER === 'live' ? ['ethereum-sepolia'] : []];
+}
 /**
  * Read clients for the transfer networks a deployment enables: Robinhood Testnet with `GRYLOO_ROBINHOOD_TESTNET=live`,
  * Ethereum Sepolia with `GRYLOO_ETHEREUM_SEPOLIA_TRANSFER=live` (optional HTTPS `GRYLOO_ETHEREUM_SEPOLIA_RPC_URL`). The MOCKED
  * loopback harness serves both. A network that is not enabled has no client, so its runs fail closed.
  */
 export function nativeTransferReadRpcs(mode: 'live' | 'harness', env: Readonly<Record<string, string | undefined>>): { rpc?: TransferRpc; rpcs: Readonly<Record<string, TransferRpc>> } {
-  const robinhood = mode === 'harness' || env.GRYLOO_ROBINHOOD_TESTNET === 'live', ethereum = mode === 'harness' || env.GRYLOO_ETHEREUM_SEPOLIA_TRANSFER === 'live';
+  const enabled = nativeTransferEnabledNetworks(mode, env), robinhood = enabled.includes('robinhood-testnet'), ethereum = enabled.includes('ethereum-sepolia');
   return { ...robinhood ? { rpc: createRobinhoodReadRpc(mode) } : {},
     rpcs: Object.freeze(ethereum ? { [ETHEREUM_SEPOLIA_TRANSFER.chain]: createNativeTransferReadRpc(ETHEREUM_SEPOLIA_TRANSFER, mode, env.GRYLOO_ETHEREUM_SEPOLIA_RPC_URL) } : {}) };
 }

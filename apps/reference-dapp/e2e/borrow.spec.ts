@@ -8,7 +8,7 @@ async function author(page:Page,options:Parameters<typeof installSupplyWallet>[1
   await configureCanvasAction(page,'0.01');
   await expect(page.locator('.react-flow__node[data-id="node-002"]')).toContainText('1. Borrow');
   await page.getByRole('button',{name:'Simulate workflow'}).click(); await openSimulationDetails(page);await page.getByRole('button',{name:'Simulate Borrow',exact:true}).click();
-  await expect(page.getByRole('button',{name:'Approve & Continue',exact:true})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Authorize in wallet',exact:true})).toBeVisible();
 }
 async function review(page:Page){await acceptProductReview(page);}
 const execute=(page:Page)=>page.getByRole('region',{name:'Aave Borrow'}).getByRole('button',{name:'Execute',exact:true}).click();
@@ -65,7 +65,6 @@ test('read-only simulation blocks unsafe Borrow before Review',async({page})=>{
   await expect(page.getByRole('region',{name:'Risk and attention',exact:true})).toContainText('This action would leave the lending position below its required safety limit.');
   await expect(details).toContainText('requires a fresh Review');
   await expect(page.locator('.canvas-primary-action').getByRole('button',{name:'Simulate workflow',exact:true})).toBeVisible();
-  await expect(page.getByRole('button',{name:'Approve & Continue',exact:true})).toHaveCount(0);
-  await expect(page.getByRole('button',{name:'Execute workflow',exact:true})).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Authorize in wallet', exact: true })).toHaveCount(0);
   expect(await supplySendCount(page)).toBe(0);
 });

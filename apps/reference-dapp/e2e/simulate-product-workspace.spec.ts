@@ -57,10 +57,10 @@ test('current workflow, read-only cards, honest summary and Back to Build', asyn
   const review = page.locator('.review-authorization-details');
   await review.locator('summary').click();
   await expect(page.getByRole('region', { name: 'Workflow simulation workspace', exact: true }).locator('#simulation-review')).toHaveCount(1);
-  await expect(review.getByRole('button', { name: 'Approve & Continue', exact: true })).toHaveCount(0);
+  await expect(review.getByRole('button', { name: 'Authorize in wallet', exact: true })).toHaveCount(0);
   await expect(review.getByRole('status')).toContainText(/valid simulation|[Ss]imulat(?:e|ion)|review.*again/);
   await expect(review).toContainText('Required wallet confirmations remain separate.');
-  await expect(page.getByRole('button', { name: 'Approve & Continue', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Authorize in wallet', exact: true })).toHaveCount(0);
 
   await expect(page.locator('.simulation-workflow-canvas h2')).toHaveText('Carry Strategy');
   const card = graph(page).locator('.composer-card');
@@ -110,7 +110,7 @@ test('light/dark reuse Build surfaces and preserve token/network brand colors', 
     expect(icons.every(icon => icon.filter === 'none')).toBe(true);
     const review = page.locator('.review-authorization-details');
     await expect(review).toBeVisible();
-    await expect(review.getByRole('button', { name: 'Approve & Continue', exact: true })).toHaveCount(0);
+    await expect(review.getByRole('button', { name: 'Authorize in wallet', exact: true })).toHaveCount(0);
     expect(await review.evaluate(element => getComputedStyle(element).color)).toBe(await summary(page).evaluate(element => getComputedStyle(element).color));
     await expect(page.getByRole('main').locator('.simulation-technical')).toHaveCount(0);
     await expect(page.getByRole('main').getByText('View technical details', { exact: true })).toHaveCount(0);

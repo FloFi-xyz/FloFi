@@ -84,7 +84,7 @@ test('chat selects the second registered position for partial removal and exit; 
   await liquidityPanel(page).getByRole('button', { name: 'Simulate removal' }).click();
   await expect(liquidityPanel(page).getByRole('term').filter({ hasText: /^Expected principal returned$/ })).toBeVisible();
   await expect(liquidityPanel(page).getByRole('definition').filter({ hasText: selected })).toBeVisible();
-  await expect(page.locator('.canvas-primary-action').getByRole('button', { name: 'Approve & Continue', exact: true })).toBeDisabled();
+  await expect(page.locator('.canvas-primary-action').getByRole('button', { name: 'Authorize in wallet', exact: true })).toBeDisabled();
   await stage(page, 'Build');
   await ask(page, 'Close my position');
   await expect(copilotSays(page)).toContainText('Which position do you mean?');

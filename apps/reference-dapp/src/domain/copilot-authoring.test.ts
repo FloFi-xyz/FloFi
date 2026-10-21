@@ -191,10 +191,13 @@ describe('concentrated liquidity', () => {
     sameAsTyped(convert(action(liquidity()), 'Add liquidity with 10 USDC and 0.005 WETH between 2000 and 3000 USDC per WETH on Base Sepolia'),
       'add liquidity 10 USDC and 0.005 WETH from 2000 to 3000 USDC per WETH on Base Sepolia slippage 100 bps');
   });
-  it('authors Orca on Solana Devnet from ticks, defaulting the network from the named protocol', () => {
+  it('authors Orca on Solana Devnet from ticks, defaulting the network from the named protocol while Orca Mainnet awaits its agent rollout', () => {
     const orca = liquidity({ network: null, deposits: [{ asset: 'SOL', maxAmount: '0.01' }, { asset: 'DEVUSDC', maxAmount: '0.3' }], rangeUnit: 'TICK',
       lower: '-29440', upper: '-28160' });
+    // Audit A9: the Copilot does not offer Orca on Solana mainnet-beta until the owner approves it, so Orca alone still means Solana Devnet.
     sameAsTyped(convert(action(orca), 'Provide Orca liquidity with 0.01 SOL and 0.3 devUSDC, ticks -29440 to -28160'),
+      'add liquidity 0.01 SOL and 0.3 devUSDC ticks -29440 to -28160 on Solana Devnet slippage 100 bps');
+    sameAsTyped(convert(action({ ...orca, network: 'SOLANA_DEVNET' }), 'Provide Orca liquidity with 0.01 SOL and 0.3 devUSDC on Solana Devnet, ticks -29440 to -28160'),
       'add liquidity 0.01 SOL and 0.3 devUSDC ticks -29440 to -28160 on Solana Devnet slippage 100 bps');
   });
   it('requires both deposits, a grounded range and a supported pool', () => {

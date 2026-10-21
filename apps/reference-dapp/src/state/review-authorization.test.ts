@@ -24,6 +24,8 @@ vi.mock('./solana-liquidity-store', () => ({ useSolanaLiquidity: () => f.stores.
 vi.mock('./solana-composition-store', () => ({ useSolanaComposition: () => ({ record: null, busy: false, error: null, retired: false, recovered: false, executionEnabled: false, signing: false, owner: null, authorized: false }) }));
 vi.mock('./uniswap-liquidity-store', () => ({ useUniswapLiquidity: () => f.stores.uniswapPool }));
 vi.mock('./robinhood-transfer-store', () => ({ useRobinhoodTransfer: () => f.stores.transfer }));
+// BUILD-SOLANA-TRANSFER-UX-001: the Solana transfer runtime is mounted too; none of these workflows is a Solana transfer, so it stays idle.
+vi.mock('./solana-transfer-store', () => ({ useSolanaTransfer: () => ({ record: null, busy: false, retired: false, recovered: false, error: null }) }));
 vi.mock('./across-store', () => ({ useAcross: () => f.stores.across }));
 vi.mock('./build009-wallet-store', () => ({ useBuild009Wallet: () => f.stores.wallet }));
 vi.mock('./capability-store', () => ({ useExecutionEnvironment: () => f.stores.environment }));

@@ -22,7 +22,8 @@ export function toDashboardRun(value: unknown, account: string): DashboardRun | 
 }
 const titles: Record<string, string> = { 'aave-supply': 'Aave workflow', 'base-sepolia-swap': 'Swap', 'crosschain-router': 'Bridge',
   'crosschain-router-testnet': 'Bridge', 'robinhood-transfer': 'Send', 'jupiter-swap': 'Swap', 'solana-devnet-swap': 'Swap',
-  'orca-liquidity': 'Liquidity workflow', 'orca-liquidity-mainnet': 'Liquidity workflow', 'uniswap-liquidity': 'Liquidity workflow' };
+  'orca-liquidity': 'Liquidity workflow', 'orca-liquidity-mainnet': 'Liquidity workflow', 'uniswap-liquidity': 'Liquidity workflow',
+  'solana-transfer': 'Send', 'solana-devnet-transfer': 'Send' };
 
 export function projectDashboardRun(run: DashboardRun, progress: ExecutionLifecycle | null = null, title = titles[run.flow] ?? 'Workflow execution', current = false): DashboardRunView {
   const result = projectExecutionResult(progress);

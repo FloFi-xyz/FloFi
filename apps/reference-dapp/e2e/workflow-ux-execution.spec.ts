@@ -4,7 +4,7 @@
  * with the synthetic loopback RPC and explicit scripted owner confirmations of the execution-continuity harness. MOCKED; no public broadcast.
  */
 import type { APIRequestContext, Page } from '@playwright/test';
-import { test, expect, acceptProductReview, readWorkflowIr, openFirstActionSettings } from './fixtures';
+import { test, expect, AUTHORIZE_IN_WALLET, readWorkflowIr, openFirstActionSettings } from './fixtures';
 import { installJourneyWallet, walletRequests } from './journey-fixtures';
 import { createTestWallet } from '../../../packages/reference-reconciler/test/test-wallet';
 import { createDatabase } from '@defi-workflow-engine/cloud-runtime';
@@ -15,6 +15,16 @@ const stage = (page: Page, name: 'Build' | 'Simulate' | 'Execute') => page.getBy
 const summary = (page: Page) => page.locator('.execution-summary');
 const cta = (page: Page) => page.locator('.canvas-primary-action');
 const processing = (page: Page) => cta(page).locator('[data-lifecycle-action="processing"]');
+/** BUILD-SOLANA-TRANSFER-UX-001: the one owner action after a simulation (Review acceptance, then the wallet request). */
+const authorize = (page: Page) => cta(page).getByRole('button', { name: AUTHORIZE_IN_WALLET, exact: true });
+/** One explicit click accepts the fresh Review and makes exactly the next wallet request; nothing is requested before it. */
+async function authorizeInWallet(page: Page, owner: Awaited<ReturnType<typeof setup>>, count: number) {
+  await expect(authorize(page)).toBeEnabled({ timeout: 30_000 });
+  await expect(authorize(page)).toHaveAttribute('data-lifecycle-action', 'approve');
+  expect(owner.requested()).toBe(count - 1);
+  await authorize(page).click();
+  await expectWaitingForWallet(page, owner, count);
+}
 async function control(request: APIRequestContext, method: string, params: unknown[] = []) {
   const response = await request.post('https://127.0.0.1:8558/control', { ignoreHTTPSErrors: true, data: { jsonrpc: '2.0', id: 1, method, params } });
   expect(response.ok()).toBe(true);
@@ -82,15 +92,12 @@ async function durableAttempts(id: string) {
   try { return (await db.query<{ step: string; state: string }>('SELECT step, state FROM execution_attempts WHERE run_id = $1 ORDER BY step', [id])).rows; }
   finally { await db.close(); }
 }
-/** A fresh simulation, Review and owner acceptance, then the explicit Execute: the next wallet request is a new, separate one. */
+/** A fresh simulation, then the one explicit Authorize (Review acceptance + wallet request): the next wallet request is a new, separate one. */
 async function simulateReviewExecute(page: Page, owner: Awaited<ReturnType<typeof setup>>, count: number) {
   const simulate = cta(page).getByRole('button', { name: /^Simulate (workflow|again)$/ });
   await expect(simulate).toBeEnabled({ timeout: 30_000 }); await simulate.click();
-  await acceptProductReview(page);
+  await authorizeInWallet(page, owner, count);
   await expect(summary(page)).not.toContainText(/Transaction not submitted|Execution already started/);
-  const execute = page.getByRole('button', { name: 'Execute workflow', exact: true });
-  await expect(execute).toBeEnabled(); await execute.click();
-  await expectWaitingForWallet(page, owner, count);
 }
 async function confirmApprovalAndSwap(page: Page, owner: Awaited<ReturnType<typeof setup>>, count: number) {
   await owner.confirm();
@@ -122,10 +129,7 @@ async function simulateAndExecute(page: Page, owner: Awaited<ReturnType<typeof s
   expect(owner.held()).toBe(held);
   owner.release();
   await expect(processing(page)).toHaveCount(0);
-  await acceptProductReview(page);
-  const execute = page.getByRole('button', { name: 'Execute workflow', exact: true });
-  await expect(execute).toBeEnabled(); await execute.click();
-  await expectWaitingForWallet(page, owner, 1);
+  await authorizeInWallet(page, owner, 1);
 }
 async function expectCleanNewWorkflow(page: Page, owner: Awaited<ReturnType<typeof setup>>, before: { workflowId: string; requested: number; sends: unknown }) {
   await expect(stage(page, 'Build')).toHaveAttribute('aria-current', 'page');
@@ -143,7 +147,7 @@ async function expectCleanNewWorkflow(page: Page, owner: Awaited<ReturnType<type
   expect(owner.requested()).toBe(before.requested); expect(await owner.sends()).toEqual(before.sends);
   // No stale simulation, Review or execution result belongs to the new workflow.
   await stage(page, 'Simulate').click();
-  await expect(page.getByRole('button', { name: /Approve|Execute workflow/ })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /Approve|Execute workflow|Authorize in wallet/ })).toHaveCount(0);
   await stage(page, 'Execute').click();
   await expect(summary(page)).not.toContainText(/Execution completed|Transaction not submitted|Result Summary/);
   await expect(page.getByRole('button', { name: 'Create new workflow', exact: true })).toHaveCount(0);
@@ -274,7 +278,7 @@ async function simulateAndReadLimits(page: Page) {
   await stage(page, 'Simulate').click();
   const simulate = cta(page).getByRole('button', { name: /^Simulate (workflow|again)$/ });
   await expect(simulate).toBeEnabled({ timeout: 30_000 }); await simulate.click();
-  await expect(cta(page).getByRole('button', { name: 'Approve & Continue', exact: true })).toBeEnabled({ timeout: 30_000 });
+  await expect(authorize(page)).toBeEnabled({ timeout: 30_000 });
   const text = await page.locator('main').innerText();
   // The Review & Authorization disclosure lists the Strategy Manifest's execution limits.
   const review = page.locator('details#simulation-review');
@@ -305,7 +309,7 @@ test('BUILD-FIX-UX-001: a new swap starts at 100 bps; slippage and amount apply 
   await field.fill('75'); await inspector.getByRole('button', { name: 'Apply slippage', exact: true }).click();
   await expect(inspector).toContainText('Applied limit: 75 bps (0.75%)');
   expect(await slippageOf(page)).toBe(75);
-  await expect(cta(page).getByRole('button', { name: /Approve & Continue|Execute workflow/ })).toHaveCount(0);
+  await expect(authorize(page)).toHaveCount(0);
   const seventyFive = await simulateAndReadLimits(page);
   expect(seventyFive.slippage).toBe('0.75%');
   // The Review (Strategy Manifest) authorizes exactly the applied limit.
@@ -317,13 +321,10 @@ test('BUILD-FIX-UX-001: a new swap starts at 100 bps; slippage and amount apply 
   const card = page.locator('.build-flow-surface .composer-card').first(), amount = card.getByRole('textbox', { name: 'Source amount (USDC)', exact: true });
   await amount.fill('2'); await amount.press('Enter');
   expect((await swapIr(page)).inputs.find(input => input.name === 'amount-in')!.value.amount).toBe('2000000');
-  await expect(cta(page).getByRole('button', { name: /Approve & Continue|Execute workflow/ })).toHaveCount(0);
+  await expect(authorize(page)).toHaveCount(0);
   const two = await simulateAndReadLimits(page);
   expect(two.slippage).toBe('1.00%'); expect(two.maximum).toBe('1.00%'); expect(two.text).toContain('2 USDC');
-  await acceptProductReview(page);
-  const execute = page.getByRole('button', { name: 'Execute workflow', exact: true });
-  await expect(execute).toBeEnabled(); await execute.click();
-  await expectWaitingForWallet(page, owner, 1);
+  await authorizeInWallet(page, owner, 1);
   await owner.confirm();
   expect(errors).toEqual([]); networkGuard.assertClean();
 });

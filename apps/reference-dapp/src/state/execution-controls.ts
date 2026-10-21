@@ -5,11 +5,12 @@ import { canContinueExecution, projectExecution, startReviewedExecution, type Ex
 import type { ExecutionLifecycle } from '../domain/execution-lifecycle';
 import type { ExecutionRecovery } from '../domain/execution-recovery';
 import { currentExecution, projectExecutionResult } from '../domain/execution-result';
+import { projectReview } from '../domain/review-presentation';
 
 export type ExecutionControlsState = ExecutionWorkspaceState & { progress?: ExecutionLifecycle; recovery?: ExecutionRecovery };
 /** Shared explicit request controls. Mounted across stages so navigation cannot clear a submission lock. */
 export function useExecutionControls(props: ExecutionControlsState) {
-  const { wallet, authorization, execution } = props;
+  const { execution } = props;
   const requestLock = useRef<{ fingerprint: string; error: string | null; sawBusy: boolean } | null>(null);
   const checkLock = useRef<{ sawBusy: boolean } | null>(null);
   const [checking, setChecking] = useState(false), [checkFailed, setCheckFailed] = useState(false);
@@ -20,9 +21,7 @@ export function useExecutionControls(props: ExecutionControlsState) {
   // BUILD-FIX-UX-001: a final run of another (new or edited) workflow is not this workflow's execution state.
   const progress = props.progress, live = currentExecution(progress);
   const [clock, setClock] = useState(() => Date.now());
-  const [acknowledgement, setAcknowledgement] = useState<string | null>(null);
-  const acknowledgementKey = JSON.stringify([authorization.key, wallet.account, wallet.chain, wallet.changed]);
-  const current = { ...props, acknowledged: acknowledgement === acknowledgementKey };
+  const current = props;
   const view = projectExecution(current, Math.max(clock, Date.now())), expiresAt = view.expiresAt;
   useEffect(() => {
     const lock = requestLock.current;
@@ -64,6 +63,46 @@ export function useExecutionControls(props: ExecutionControlsState) {
     };
     try { void Promise.resolve(continuation ? execution.next?.() : startReviewedExecution(current)).catch(failed); } catch { failed(); }
   }
+  /**
+   * BUILD-SOLANA-TRANSFER-UX-001: "Authorize in wallet" — one explicit owner action accepts the current Review and then makes the first wallet
+   * request under that just-accepted authority (Review → wallet, without a second FloFi button). Each half keeps its own gate at its own
+   * boundary: the Review must be approvable at the click (fresh clock), and the reviewed execution must be ready when the accepted authority
+   * lands. A refused Review, replaced authority (a new simulation), expiry or failure ends the chain with no wallet request. The wallet's own
+   * confirmation stays mandatory; FloFi never signs.
+   */
+  const authorizeLock = useRef<{ key: string; settled: boolean; after?: (() => void) | undefined } | null>(null);
+  const [authorizing, setAuthorizing] = useState(false), [, setSettled] = useState(0);
+  function authorize(after?: () => void) {
+    if (authorizeLock.current || requestLock.current || checkLock.current || verifying || recovery?.contextIssue) return;
+    const now = Date.now(), review = projectReview(current.workflow, current.context, current.source, current.authorization, current.wallet, now, current.invalidWorkflow);
+    if (review.status === 'approved') {
+      if (live?.state === 'active' && canContinueExecution(current, now)) { request(true); after?.(); }
+      else if (projectExecution(current, now).canExecute) { request(false); after?.(); }
+      return;
+    }
+    const key = current.authorization.key, approve = current.authorization.approve;
+    if (!review.canApprove || !key || !approve) return;
+    const lock = { key, settled: false, after };
+    authorizeLock.current = lock; setAuthorizing(true); setRequestFailed(false);
+    const settle = (failed: boolean) => {
+      if (authorizeLock.current !== lock) return;
+      if (failed) { authorizeLock.current = null; setAuthorizing(false); setRequestFailed(true); return; }
+      lock.settled = true; setSettled(n => n + 1);
+    };
+    try { void Promise.resolve(approve()).then(() => settle(false), () => settle(true)); } catch { settle(true); }
+  }
+  useEffect(() => {
+    const lock = authorizeLock.current;
+    if (!lock?.settled || props.source.state.busy) return;
+    const stop = (failed = false) => { authorizeLock.current = null; setAuthorizing(false); if (failed) setRequestFailed(true); };
+    // A new simulation replaced the authority the owner clicked for: the click never carries over to it.
+    if (props.authorization.key !== lock.key) { stop(); return; }
+    const now = Date.now();
+    if (live?.state === 'active' && canContinueExecution(current, now)) { stop(); request(true); lock.after?.(); return; }
+    if (projectExecution(current, now).canExecute) { stop(); request(false); lock.after?.(); return; }
+    // The Review was refused, or the accepted authority cannot start (the projected status names why): nothing is requested.
+    stop(!props.authorization.accepted && Boolean(props.source.state.error));
+  });
   useEffect(() => {
     if (expiresAt === null || expiresAt <= Date.now()) return;
     const update = () => setClock(Date.now());
@@ -72,6 +111,6 @@ export function useExecutionControls(props: ExecutionControlsState) {
     return () => { window.clearTimeout(timer); window.removeEventListener('focus', update); document.removeEventListener('visibilitychange', update); };
   }, [expiresAt]);
   return { live, view, current, providers, recovery, verifying, result, reconciledCount, recoveredCount, resultUnit,
-    canContinue, canCheck, checkStatus, request, requesting, requestFailed, checkFailed, acknowledgementKey, setAcknowledgement };
+    canContinue, canCheck, checkStatus, request, requesting, requestFailed, checkFailed, authorize, authorizing };
 }
 export type ExecutionControls = ReturnType<typeof useExecutionControls>;

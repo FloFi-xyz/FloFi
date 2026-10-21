@@ -13,7 +13,7 @@ export type NetworkEnvironment = 'MAINNET' | 'TESTNET';
  * Each has exactly one registry entry below, which carries its name, environment, family and how a message names it.
  */
 export const COPILOT_NETWORK_IDS = Object.freeze(['BASE', 'BASE_SEPOLIA', 'ARBITRUM', 'ARBITRUM_SEPOLIA', 'ETHEREUM', 'ETHEREUM_SEPOLIA', 'SOLANA', 'SOLANA_DEVNET',
-  'ROBINHOOD'] as const);
+  'ROBINHOOD', 'ROBINHOOD_TESTNET'] as const);
 export type CopilotNetworkId = (typeof COPILOT_NETWORK_IDS)[number];
 export type NetworkIdentity = {
   /** Stable key; equal to the MCP strategy network id where one exists. */ readonly key: string;
@@ -59,7 +59,8 @@ export const NETWORKS: readonly NetworkIdentity[] = Object.freeze([
   network({ key: 'robinhood', chain: ROBINHOOD_CHAIN_MAINNET.chain, name: 'Robinhood Chain', aliases: ['Robinhood', 'Robinhood Chain (4663)'], environment: 'MAINNET',
     mark: '/brand/robinhood-avatar.jpg', catalog: true, copilot: 'ROBINHOOD', family: 'robinhood', mention: /\brobinhood(?![\s-]*(?:chain[\s-]*)?testnet)(?:[\s-]*chain)?\b/i, chatName: /Robinhood(?: Chain)?(?![\s-]*Testnet)/ }),
   network({ key: 'robinhood-testnet', chain: ROBINHOOD_CHAIN_TESTNET.chain, name: 'Robinhood Chain Testnet', aliases: ['Robinhood Testnet', 'Robinhood Chain Testnet (46630)'],
-    environment: 'TESTNET', mark: '/brand/robinhood-avatar.jpg', catalog: false, copilot: null, family: 'robinhood', mention: null, chatName: null }),
+    environment: 'TESTNET', mark: '/brand/robinhood-avatar.jpg', catalog: false, copilot: 'ROBINHOOD_TESTNET', family: 'robinhood',
+    mention: /\brobinhood[\s-]*(?:chain[\s-]*)?testnet\b/i, chatName: /Robinhood(?: Chain)? Testnet/ }),
 ]);
 /** Networks FloFi only names (to explain or refuse), never authors on. */
 const NAMED_ONLY: readonly NetworkIdentity[] = Object.freeze([

@@ -12,15 +12,15 @@ beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(reviewNow); });
 afterEach(() => vi.useRealTimers());
 function fixture(): ExecuteWorkspaceProps {
   const data = reviewFixture(); data.authorization.accepted = true;
-  return { ...data, workflowName: 'Approved strategy', execution: { ready: true, started: false, start: vi.fn(), prompt: 'Confirm the next transaction in your wallet.', expiresAt: null, requiresMainnetAcknowledgement: false }, backToBuild: vi.fn(), backToSimulate: vi.fn() };
+  return { ...data, workflowName: 'Approved strategy', execution: { ready: true, started: false, start: vi.fn(), prompt: 'Confirm the next transaction in your wallet.', expiresAt: null }, backToBuild: vi.fn(), backToSimulate: vi.fn() };
 }
 const render = (data = fixture()) => renderToStaticMarkup(createElement(ExecuteWorkspace, data));
 describe('Execute product workspace', () => {
   it('renders a read-only plan, compact shared wallet summary and one explicit primary action', () => {
     const data = fixture(), html = render(data);
     for (const value of ['Approved strategy', 'Execution plan', 'Execution Summary', '0x1111…1111', 'Base Sepolia', 'Testnet', 'Reviewed and approved', 'What happens next']) expect(html).toContain(value);
-    expect(html).not.toMatch(/disabled="">Execute workflow/); expect(data.execution.start).not.toHaveBeenCalled();
-    expect(html.match(/>Execute workflow</g)).toHaveLength(1);
+    expect(html).not.toMatch(/disabled="">Authorize in wallet/); expect(data.execution.start).not.toHaveBeenCalled();
+    expect(html.match(/>Authorize in wallet</g)).toHaveLength(1);
     expect(html).not.toMatch(/Advanced Settings|Undo|Redo|Token selector|Execution limits|Strategy Manifest|schemaVersion|digest|canonical|mock|payload/);
     expect(html).toContain('Back to Build'); expect(html).toContain('Back to Simulate');
     expect(html).not.toContain('execution-authorization-attention');
@@ -36,10 +36,14 @@ describe('Execute product workspace', () => {
     if (state === 'unknown') { data.wallet.chain = null; data.wallet.environment = 'unknown'; }
     if (state === 'started') data.execution.started = true;
     if (state === 'loading') Object.assign(data.source.state, { busy: 'journal_request_id' });
-    const html = render(data); expect(html).not.toMatch(/(?<!disabled="")>Execute workflow<\/button>/); expect(data.execution.start).not.toHaveBeenCalled();
-    const expected = state === 'pending' ? 'Approve &amp; Continue' : state === 'loading' ? 'Simulating workflow…' : ['expired', 'wallet', 'network', 'unknown'].includes(state) ? 'Simulate again' : 'Execute workflow';
+    const html = render(data); expect(data.execution.start).not.toHaveBeenCalled();
+    // BUILD-SOLANA-TRANSFER-UX-001: an approvable, not yet accepted Review offers the single Authorize in wallet action (accept + first wallet
+    // request on click); every other non-ready state keeps it genuinely disabled.
+    if (state === 'pending') expect(html).toContain('data-lifecycle-action="approve" type="button" class="primary">Authorize in wallet</button>');
+    else expect(html).not.toMatch(/(?<!disabled="")>Authorize in wallet<\/button>/);
+    const expected = state === 'pending' ? 'Authorize in wallet' : state === 'loading' ? 'Simulating workflow…' : ['expired', 'wallet', 'network', 'unknown'].includes(state) ? 'Simulate again' : 'Authorize in wallet';
     expect(html).toContain(expected);
-    if (state === 'blocked' || state === 'started') expect(html).toMatch(/disabled="">Execute workflow/);
+    if (state === 'blocked' || state === 'started') expect(html).toMatch(/disabled="">Authorize in wallet/);
     if (['pending', 'expired', 'wallet', 'network'].includes(state)) expect(html).toContain('execution-authorization-attention');
     if (state === 'expired') expect(html).toContain('Simulate again');
     if (state === 'wallet') expect(html).toContain('0x2222…2222');
@@ -50,11 +54,11 @@ describe('Execute product workspace', () => {
   it('keeps existing technical execution panels secondary and collapsed', () => {
     const html = render({ ...fixture(), technicalDetails: createElement('pre', null, 'journal sequence') });
     expect(html).toContain('<summary>View technical details</summary>'); expect(html).not.toMatch(/<details[^>]* open/);
-    expect(html.indexOf('Execute workflow')).toBeLessThan(html.indexOf('journal sequence'));
+    expect(html.indexOf('Authorize in wallet')).toBeLessThan(html.indexOf('journal sequence'));
   });
   it('counts composed actions from the shared workflow without adding transaction steps', () => {
     const data = fixture(); data.workflow = editorReducer(initialEditor(), canvasAddCommand('lending', 0, data.wallet.account!, '1'), data.context).workflow;
-    const html = render(data); expect(html).toContain('<dt>Actions</dt><dd>3</dd>'); expect(html).not.toMatch(/class="primary">Execute workflow/);
+    const html = render(data); expect(html).toContain('<dt>Actions</dt><dd>3</dd>'); expect(html).not.toMatch(/class="primary">Authorize in wallet/);
   });
 });
 
@@ -66,7 +70,7 @@ describe('live execution workspace', () => {
   }
   it.each(['PENDING', 'CONFIRMED', 'REVERTED', 'UNKNOWN'] as const)('shows %s from recorded state without offering another initial Execute', state => {
     const data = live(state), html = render(data);
-    expect(html).toContain('Workflow step progression'); expect(html).not.toContain('>Execute workflow<'); expect(data.execution.start).not.toHaveBeenCalled();
+    expect(html).toContain('Workflow step progression'); expect(html).not.toContain('>Authorize in wallet<'); expect(data.execution.start).not.toHaveBeenCalled();
     if (state === 'PENDING') { expect(html).toContain('Pending confirmation'); expect(html).toContain('Check confirmation'); expect(html).toContain('0xaaaaaa…aaaaaa'); }
     if (state === 'CONFIRMED') {
       expect(html).toContain('Execution completed'); expect(html).toContain('Result Summary');
@@ -102,7 +106,7 @@ describe('live execution workspace', () => {
     const html = render(data);
     expect(html).toContain('Check local order status');
     expect(html).toContain('<summary>View technical details</summary>');
-    expect(html).not.toMatch(/<details[^>]* open|>Execute workflow</);
+    expect(html).not.toMatch(/<details[^>]* open|>Authorize in wallet</);
     expect(data.execution.start).not.toHaveBeenCalled();
     expect(data.execution.check).not.toHaveBeenCalled();
   });
@@ -113,7 +117,7 @@ describe('live execution workspace', () => {
     expect(html).toContain('Checking execution status…');
     expect(html).not.toContain('<dt>Authorization</dt>'); expect(html).not.toContain('Run a valid simulation before approving');
     expect(html).toContain('data-lifecycle-action="status">Reconciling…</span>');
-    expect(html).not.toMatch(/>Execute workflow<|>Continue to|>Retry<|Ready to execute/);
+    expect(html).not.toMatch(/>Authorize in wallet<|>Continue to|>Retry<|Ready to execute/);
     expect(data.recovery.check).not.toHaveBeenCalled();
   });
   it('preserves the execution wallet alongside a changed connected wallet and existing evidence', () => {
@@ -122,7 +126,7 @@ describe('live execution workspace', () => {
     const html = render(data);
     expect(html).toContain('<dt>Connected wallet</dt>'); expect(html).toContain('<dt>Execution wallet</dt>');
     expect(html).toContain('0x1111…1111'); expect(html).toContain('0x2222…2222'); expect(html).toContain('0xaaaaaa…aaaaaa');
-    expect(html).not.toMatch(/>Execute workflow<|>Continue to|>Retry</);
+    expect(html).not.toMatch(/>Authorize in wallet<|>Continue to|>Retry</);
   });
   it('retains a wallet-specific instruction from an actual signing state', () => {
     const data = fixture(), fixtureData = reviewFixture();
@@ -133,16 +137,16 @@ describe('live execution workspace', () => {
     data.progress = projectExecutionLifecycle(data.workflow, data.context, source); data.execution.started = true;
     const html = render(data);
     expect(html).toContain('Waiting for wallet…'); expect(html).toContain('Confirm or decline the reviewed request in your wallet.');
-    expect(html).toContain('Confirm in wallet'); expect(html).not.toMatch(/>Continue to|>Execute workflow<|>Execution in progress<|>Retry</);
+    expect(html).toContain('Confirm in wallet'); expect(html).not.toMatch(/>Continue to|>Authorize in wallet<|>Execution in progress<|>Retry</);
   });
 });
 
 it('places the ordered Execute action pair inside the canvas and keeps the summary informational', () => {
   const data = fixture(), html = render(data), summary = html.slice(html.indexOf('<aside'), html.indexOf('</aside>'));
   const canvas = html.slice(html.indexOf('aria-label="Execution plan"'), html.indexOf('<aside'));
-  expect(canvas).toContain('>Back to Build</button>'); expect(canvas).toContain('>Execute workflow</button>');
-  expect(canvas.indexOf('Back to Build')).toBeLessThan(canvas.indexOf('Execute workflow'));
-  expect(summary).not.toContain('>Execute workflow</button>'); expect(data.execution.start).not.toHaveBeenCalled();
+  expect(canvas).toContain('>Back to Build</button>'); expect(canvas).toContain('>Authorize in wallet</button>');
+  expect(canvas.indexOf('Back to Build')).toBeLessThan(canvas.indexOf('Authorize in wallet'));
+  expect(summary).not.toContain('>Authorize in wallet</button>'); expect(data.execution.start).not.toHaveBeenCalled();
 });
 
 it('shows restored recovery in-place, with an explicit read-only check and no initial execution', () => {
@@ -153,7 +157,7 @@ it('shows restored recovery in-place, with an explicit read-only check and no in
   data.recovery = { action: 'observe', checking: false, recordOnly: false, operationId: 'swap', label: 'Current execution restored', message: 'The recorded execution is preserved.', contextIssue: 'Wallet changed. Connect the wallet used for this execution before continuing.', check: vi.fn() };
   const html = render(data);
   expect(html).toContain('Current execution restored'); expect(html).toContain('Wallet changed'); expect(html).toContain('>Recover execution</button>');
-  expect(html).not.toMatch(/>Execute workflow<|>Retry<|>Try again<|Ready to execute/);
+  expect(html).not.toMatch(/>Authorize in wallet<|>Retry<|>Try again<|Ready to execute/);
   expect(data.recovery.check).not.toHaveBeenCalled(); expect(data.execution.start).not.toHaveBeenCalled();
   data.progress.planUnavailable = true;
   expect(render(data)).toContain('The original workflow details are unavailable in this saved run.');

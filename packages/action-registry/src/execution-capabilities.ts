@@ -47,7 +47,7 @@ const adapterVersions: Readonly<Record<string, string>> = Object.freeze({
   'aave-v3': '1.0.0', 'uniswap.v3': '1.0.0', 'cow.protocol': '1.0.0', 'lifi.rest': '1.0.0', 'across.direct': '1.0.0',
   'gryloo.calculated-split': '1.0.0', 'gryloo.template': '1.0.0', 'jupiter.swap-v2': '1.0.0',
   'orca.whirlpools-devnet': '1.0.0', 'orca.whirlpools-devnet-liquidity': '1.0.0', 'orca.whirlpools-mainnet-liquidity': '1.0.0', 'evm.native-transfer': '1.0.0',
-  'flofi.router': '1.0.0', 'evm.token-transfer': '1.0.0',
+  'flofi.router': '1.0.0', 'evm.token-transfer': '1.0.0', 'solana.system-transfer': '1.0.0', 'solana.spl-transfer': '1.0.0',
 });
 const rows: ExecutionCapabilityProfile[] = [];
 function add(actionType: string, adapterId: string, chainId: string, environment: ExecutionEnvironment,
@@ -79,6 +79,12 @@ add('borrow', 'aave-v3', 'eip155:84532', 'PUBLIC_TESTNET', fork, null, 'DIRECT_T
 add('supply', 'aave-v3', 'eip155:84532', 'PUBLIC_TESTNET', fork, null, 'DIRECT_TRANSACTION', ['INJECTED_WALLET', 'QUOTE_PROVIDER', 'REVIEWED_ARTIFACTS'], ['A']);
 // Jupiter routes only Solana mainnet-beta liquidity. Owner execution is implemented; no execution is demonstrated yet.
 add('asset.swap.exact-input', 'jupiter.swap-v2', 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp', 'MAINNET', fork, null, 'DIRECT_TRANSACTION', ['INJECTED_WALLET', 'QUOTE_PROVIDER', 'REVIEWED_ARTIFACTS'], ['A']);
+// BUILD-SOLANA-TRANSFER-UX-001: direct transfers to another wallet — native SOL (System Program) and SPL / safe Token-2022 tokens
+// (TransferChecked) — on mainnet-beta (real funds) and Devnet (test tokens). Owner execution is implemented; no execution is demonstrated yet.
+for (const adapter of ['solana.system-transfer', 'solana.spl-transfer']) {
+  add('asset.transfer', adapter, 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp', 'MAINNET', fork, null, 'DIRECT_TRANSACTION', ['INJECTED_WALLET', 'QUOTE_PROVIDER', 'REVIEWED_ARTIFACTS'], ['A']);
+  add('asset.transfer', adapter, 'solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1', 'PUBLIC_TESTNET', fork, null, 'DIRECT_TRANSACTION', ['INJECTED_WALLET', 'QUOTE_PROVIDER', 'REVIEWED_ARTIFACTS'], ['A']);
+}
 // Orca Whirlpools on Solana Devnet with valueless test tokens. Owner execution is implemented; none is demonstrated yet.
 add('asset.swap.exact-input', 'orca.whirlpools-devnet', 'solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1', 'PUBLIC_TESTNET', fork, null, 'DIRECT_TRANSACTION', ['INJECTED_WALLET', 'QUOTE_PROVIDER', 'REVIEWED_ARTIFACTS'], ['A']);
 // The canonical concentrated-liquidity action on Solana Devnet via Orca Whirlpools (valueless test tokens). Owner execution is implemented; none is demonstrated yet.

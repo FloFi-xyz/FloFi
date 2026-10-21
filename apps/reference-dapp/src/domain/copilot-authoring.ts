@@ -13,8 +13,10 @@ import { COPILOT_FEE_TIERS, COPILOT_LIMITS, CopilotIntentError, parseCopilotInte
   type CopilotLegacyAsset, type CopilotLendingAction, type CopilotLiquidityAction, type CopilotMissingField, type CopilotNetwork, type CopilotSwapAction,
   type CopilotTransferAction } from './copilot-intent';
 import { copilotCopy, type CopilotCopy, type CopilotLanguage, type NetworkSubject, type Subject } from './copilot-messages';
-import { AAVE_V3_AMOUNT_POLICY, assetDisplayName, type CanonicalAsset } from '@defi-workflow-engine/action-registry';
+import { AAVE_V3_AMOUNT_POLICY, assetDisplayName, solanaTransferAsset, type CanonicalAsset } from '@defi-workflow-engine/action-registry';
+import { solanaTransferProfileFor } from './solana-transfer-authoring';
 import { copilotNetworksFor, lendingOffers, routeLabels, type StrategyAction } from './authoring-capabilities';
+import type { PendingAgentCapability } from './agent-rollout';
 import { resolveAssetReference } from './asset-catalogs';
 import { COPILOT_NETWORK_IDS, copilotNetworksMentioned, catalogNetworkOfChatName, networkIdentity, networkOfCopilot, type CopilotNetworkId } from './network-registry';
 import { routerNetworksOf } from './router-authoring';
@@ -56,7 +58,9 @@ export const COPILOT_CAPABILITIES = copilotCopy('EN').capabilities;
  * How the planners treat unstated networks and which language they reply in. `catalog` (BUILD-BASE-001, CopilotIntentV2): the catalog networks
  * (Base, Robinhood Chain) with their catalog tokens, transfers, Base mainnet Aave and every Router route; V1 keeps its original vocabulary.
  */
-export type PlanningPolicy = { readonly language: CopilotLanguage; readonly networkDefaults: boolean; readonly catalog?: boolean };
+export type PlanningPolicy = { readonly language: CopilotLanguage; readonly networkDefaults: boolean; readonly catalog?: boolean;
+  /** Tests only: approved agent rollouts (audit A9). Product planning uses `AGENT_ROLLOUT_APPROVED`. */
+  readonly agentRollout?: readonly PendingAgentCapability[] };
 export const V1_POLICY: PlanningPolicy = Object.freeze({ language: 'EN', networkDefaults: true });
 /** A field whose value Flofi carried from a resolved referent rather than read from the open request. */
 export type CarriedField = 'network' | 'sourceNetwork' | 'destinationNetwork' | 'inputAsset' | 'outputAsset' | 'asset' | 'amount' | 'supplyAmount' | 'borrowAmount'
@@ -99,7 +103,7 @@ const isCatalogNetwork = (network: Network) => networkOfCopilot(network as Copil
  */
 const V1_REFERENCE_SWAP: Network = 'BASE';
 function actionNetworks(action: StrategyAction, g: Grounding): Network[] {
-  return copilotNetworksFor(action).filter(id => g.policy.catalog === true || !isCatalogNetwork(id) || (action === 'swap' && id === V1_REFERENCE_SWAP));
+  return copilotNetworksFor(action, g.policy.agentRollout).filter(id => g.policy.catalog === true || !isCatalogNetwork(id) || (action === 'swap' && id === V1_REFERENCE_SWAP));
 }
 const chainOf = (network: Network) => networkOfCopilot(network as CopilotNetworkId).chain;
 // Any test-network or test-token wording rules out a mainnet (real funds) interpretation.
@@ -177,6 +181,7 @@ export function groundedBps(text: string, value: string): boolean {
   return numbersIn(text).some(reading => !reading.negative && (reading.value === value || (reading.percent && percentToBps(reading.value) === value)));
 }
 export function groundedAddress(text: string, address: string): boolean {
+  if (!address.startsWith('0x')) return [...text.matchAll(/(?<![A-Za-z0-9])[1-9A-HJ-NP-Za-km-z]{32,44}(?![A-Za-z0-9])/g)].some(match => match[0] === address);
   return [...text.matchAll(/(?<![0-9a-fA-Fx])0x[0-9a-fA-F]{40}(?![0-9a-fA-F])/g)].some(match => match[0].toLowerCase() === address.toLowerCase());
 }
 /** UX-001: a grounded address exactly as the user typed it (its EIP-55 case is validated); the interpreted value when it was carried. */
@@ -466,6 +471,24 @@ function planTransfer(a: CopilotTransferAction, g: Grounding): Plan {
   if (missing.length) ask(a.recipient === null && !self ? [...missing, 'recipient'] : missing, stillNeeds(m, a.recipient === null && !self ? [...missing, 'recipient'] : missing, 'transfer'),
     missing.length === 1 && missing[0] === 'network' ? labels(TRANSFER_COPILOT_NETWORKS) : []);
   const network = resolveNetwork(a.network, TRANSFER_COPILOT_NETWORKS, g, 'transfer', notes), label = COPILOT_NETWORK_LABEL[network];
+  if (network === 'SOLANA' || network === 'SOLANA_DEVNET') {
+    const profile = solanaTransferProfileFor(network === 'SOLANA' ? 'Solana' : 'Solana Devnet');
+    const token = a.asset && solanaTransferAsset(profile, a.asset);
+    if (!token) return refuse(m.tokenUnsupported(m.tokenSubject.transfer));
+    if (!g.carried.has('asset') && !symbolNamed(g.text, a.asset!)) return ask(['asset'], m.tokenNotFound(a.asset!));
+    const amount = amountOf(a.amount, g, 'transfer');
+    const recipient = addressOf(a.recipient, g, 'recipient', m.sendRecipientNotFound), check = checkRecipient(label, recipient);
+    if (!check.ok) return ask(['recipient'], check.code === 'TRANSFER_RECIPIENT_REQUIRED' ? m.sendRecipientQuestion : m.sendRecipientInvalid(label));
+    return { sentence: `send ${amount} ${token.symbol} to ${check.recipient} on ${label}`, expect: 'ADD_RH_TRANSFER', notes };
+  }
+  if (network === 'ETHEREUM_SEPOLIA' || network === 'ROBINHOOD_TESTNET') {
+    const asset = needAsset(a.asset, g, 'transfer', 'asset');
+    if (asset.toUpperCase() !== 'ETH' || a.recipient !== null) return refuse(m.cannotAuthor);
+    if (!self) return ask(['recipient'], m.sendRecipientQuestion);
+    const amount = amountOf(a.amount, g, 'transfer');
+    notes.push(m.connectedRecipientNote);
+    return { sentence: `transfer ${amount} ETH on ${label}`, expect: 'ADD_RH_TRANSFER', notes };
+  }
   const token = catalogToken(a.asset, network, g, 'transfer', 'asset', 'ANY', notes).asset;
   const amount = amountOf(a.amount, g, 'transfer');
   // The Canvas "To" field's own network-aware check: the same canonical recipient whichever surface authored it.
@@ -537,7 +560,7 @@ function planLiquidity(a: CopilotLiquidityAction, g: Grounding): Plan {
   // networks (BUILD-ETHEREUM-001), so it never defaults to one of them.
   // BUILD-BASE-001: Uniswap v3 also runs on the catalog networks (Base, Robinhood Chain: real funds), which are always named.
   // The pool networks come from the capability truth; Orca serves its own network and Uniswap v3 every other one.
-  const pools = actionNetworks('add_liquidity', g), orca = pools.filter(n => n === COPILOT_POOLS.ORCA.network), uniswap = pools.filter(n => n !== COPILOT_POOLS.ORCA.network);
+  const pools = actionNetworks('add_liquidity', g), orca = pools.filter(n => n === 'SOLANA' || n === 'SOLANA_DEVNET'), uniswap = pools.filter(n => !orca.some(value => value === n));
   const supported: Network[] = namedProtocols.length ? namedProtocols[0] === 'UNISWAP_V3' ? uniswap : orca : pools;
   const devnetImplied = a.network === null && namedProtocols[0] !== 'UNISWAP_V3' && !namedNetworks(g).length && impliesDevnet(g, a.deposits.map(d => d.asset));
   const network = devnetImplied ? devnetByAsset(g, notes) : resolveNetwork(a.network, supported, g, 'liquidity', notes);
@@ -545,10 +568,11 @@ function planLiquidity(a: CopilotLiquidityAction, g: Grounding): Plan {
     if (a.protocol === 'ORCA' || namedProtocols[0] === 'ORCA') ask(['protocol'], m.whichPool, m.poolOptions);
     return planCatalogLiquidity(a, g, network, notes);
   }
-  const protocol = network === COPILOT_POOLS.ORCA.network ? 'ORCA' : 'UNISWAP_V3';
+  const protocol = network === 'SOLANA' || network === 'SOLANA_DEVNET' ? 'ORCA' : 'UNISWAP_V3';
   if (a.rangeUnit === 'FULL' || a.feeTier) ask(['range'], m.rangeNotFound(COPILOT_POOLS[protocol].quote, COPILOT_POOLS[protocol].base));
   if (a.protocol !== null && a.protocol !== protocol) ask(['protocol'], m.whichPool, m.poolOptions);
-  const pool = COPILOT_POOLS[protocol];
+  const pool = network === 'SOLANA' ? { ...COPILOT_POOLS.ORCA, quote: 'USDC', second: 'USDC',
+    symbol: (asset: string) => asset.toUpperCase() === 'SOL' ? 'SOL' : asset.toUpperCase() === 'USDC' ? 'USDC' : null } : COPILOT_POOLS[protocol];
   const deposits = new Map<string, string>();
   for (const deposit of a.deposits) {
     const symbol = pool.symbol(deposit.asset);
@@ -562,7 +586,9 @@ function planLiquidity(a: CopilotLiquidityAction, g: Grounding): Plan {
     ...(a.rangeUnit === null || (a.rangeUnit !== 'PERCENT' && a.lower === null) || a.upper === null ? ['range' as const] : [])];
   if (missing.length) ask(missing, m.liquidityNeeds(pool.first, pool.second, pool.quote, pool.base));
   if (a.rangeUnit === 'PERCENT' && protocol !== 'ORCA') ask(['range'], m.percentRangeOrcaOnly);
-  const range = protocol === 'ORCA' ? orcaRange(a, g, notes) : (() => {
+  // The available percentage-price context belongs to Devnet. Never apply that price to a mainnet position.
+  if (network === 'SOLANA' && a.rangeUnit === 'PERCENT') return reject('COPILOT_POOL_PRICE_UNAVAILABLE', m.priceUnavailable);
+  const range = protocol === 'ORCA' ? orcaRange(a, g, notes, pool.quote) : (() => {
     const lower = a.lower!, upper = a.upper!;
     const grounded = g.carried.has('range') ? true : a.rangeUnit === 'PRICE' ? !lower.startsWith('-') && !upper.startsWith('-') && groundedAmount(text, lower) && groundedAmount(text, upper)
       : /^-?\d+$/.test(lower) && /^-?\d+$/.test(upper) && groundedSigned(text, lower) && groundedSigned(text, upper);
@@ -584,8 +610,8 @@ function groundedPercent(text: string, percent: string): boolean {
  * The Orca SOL/devUSDC range as exact-grammar words. A percentage ("a 10% range") is ±that percent around the verified pool price FloFi read itself
  * (`g.solana.price`), through the same bounds as the Canvas range control; without a verified price nothing is proposed.
  */
-function orcaRange(a: CopilotLiquidityAction, g: Grounding, notes: string[]): string {
-  const m = copyOf(g), pool = COPILOT_POOLS.ORCA, text = g.text;
+function orcaRange(a: CopilotLiquidityAction, g: Grounding, notes: string[], quote = COPILOT_POOLS.ORCA.quote): string {
+  const m = copyOf(g), pool = { ...COPILOT_POOLS.ORCA, quote }, text = g.text;
   if (a.rangeUnit === 'PERCENT') {
     const percent = a.upper;
     if (percent === null || a.lower !== null) return ask(['range'], m.rangeNotFound(pool.quote, pool.base));

@@ -22,6 +22,8 @@ export const PREVIEW_METHODS: Readonly<Partial<Record<FlowName, 'simulate' | 'pr
   // BUILD-BASE-001: Base mainnet (real funds) previews, likewise read-only.
   'arbitrum-swap': 'prepare', 'arbitrum-liquidity': 'simulate', 'base-swap': 'prepare', 'base-liquidity': 'simulate', 'base-aave': 'simulate', 'arbitrum-aave': 'simulate', 'crosschain-router-arbitrum-to-base': 'simulate',
   'ethereum-swap': 'prepare', 'ethereum-liquidity': 'simulate', 'ethereum-aave': 'simulate',
+  // BUILD-SOLANA-TRANSFER-UX-001: Solana transfer previews are the same read-only simulations.
+  'solana-transfer': 'simulate', 'solana-devnet-transfer': 'simulate',
   ...Object.fromEntries(ETHEREUM_ROUTER_NETWORKS.map(route => [`crosschain-router-${route}`, 'simulate' as const])),
 });
 

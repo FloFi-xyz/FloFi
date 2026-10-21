@@ -14,7 +14,7 @@ import { Ajv, type ErrorObject } from 'ajv';
 /** Networks by stable MCP identifier. Chain ids come from the registries (see `capability-catalog.ts`). */
 /** BUILD-RH-002: `robinhood` is Robinhood Chain mainnet (4663, real funds); its assets are the official catalog's (USDG, WETH, Stock Tokens).
  *  BUILD-BASE-001: `base` is Base mainnet (8453, real funds), likewise a catalog network (pinned ETH/USDC/WETH plus the validated token list). */
-export const NETWORK_IDS = ['base', 'base-sepolia', 'arbitrum-one', 'ethereum', 'arbitrum-sepolia', 'ethereum-sepolia', 'solana', 'solana-devnet', 'robinhood'] as const;
+export const NETWORK_IDS = ['base', 'base-sepolia', 'arbitrum-one', 'ethereum', 'arbitrum-sepolia', 'ethereum-sepolia', 'solana', 'solana-devnet', 'robinhood', 'robinhood-testnet'] as const;
 export type NetworkId = (typeof NETWORK_IDS)[number];
 export const STRATEGY_ACTIONS = ['bridge', 'swap', 'supply', 'borrow', 'repay', 'withdraw', 'add_liquidity', 'lending_composition', 'transfer'] as const;
 export type StrategyAction = (typeof STRATEGY_ACTIONS)[number];
@@ -24,6 +24,8 @@ const enumOf = <T extends readonly string[]>(values: T, description: string) =>
   Type.Union(values.map(value => Type.Literal(value)) as never, { description }) as unknown as TSchema & { static: T[number] };
 const Decimal = (description: string) => Type.String({ pattern: '^(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$', maxLength: 48, description });
 const EvmAddress = (description: string) => Type.String({ pattern: '^0x[0-9a-fA-F]{40}$', minLength: 42, maxLength: 42, description });
+/** BUILD-SOLANA-TRANSFER-UX-001: a base58 Solana public key (case-sensitive); decoded to exactly 32 bytes at composition. */
+const SolanaAddress = (description: string) => Type.String({ pattern: '^[1-9A-HJ-NP-Za-km-z]{32,44}$', minLength: 32, maxLength: 44, description });
 const Slippage = Type.Integer({ minimum: 0, maximum: 10_000, description: 'Maximum slippage in basis points. Omit to use FloFi\'s documented default for the action; each action enforces its own maximum.' });
 const Version = Type.Literal(1, { description: 'Strategy contract version. Omit or 1.' });
 /**
@@ -67,8 +69,8 @@ const Withdraw = Type.Object({
 const Bound = Type.String({ pattern: '^-?(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$', maxLength: 48 });
 const Liquidity = Type.Object({
   version: Type.Optional(Version), action: Type.Literal('add_liquidity'),
-  network: enumOf(['base-sepolia', 'ethereum-sepolia', 'solana-devnet', 'robinhood', 'base', 'arbitrum-one', 'ethereum'] as const, 'Uniswap v3 USDC/WETH on base-sepolia or ethereum-sepolia; Orca ' +
-    'SOL/devUSDC on solana-devnet; on catalog networks, Uniswap v3 on two catalog ERC-20 assets at feeTier (real funds), only when the factory pool exists.'),
+  network: enumOf(['base-sepolia', 'ethereum-sepolia', 'solana', 'solana-devnet', 'robinhood', 'base', 'arbitrum-one', 'ethereum'] as const, 'Uniswap v3 USDC/WETH on base-sepolia or ethereum-sepolia; Orca ' +
+    'SOL/USDC on solana (real funds), SOL/devUSDC on solana-devnet; on catalog networks, Uniswap v3 on two catalog ERC-20 assets at feeTier (real funds), only when the factory pool exists.'),
   maxAmounts: Type.Record(CatalogSymbol, Decimal('Maximum deposit of this asset.'),
     { minProperties: 2, maxProperties: 2, description: 'Maximum deposit of each pool asset (limits, not amounts to spend); exactly the pool\'s two assets by symbol or whole catalog name: ' +
       'USDC and WETH, SOL and devUSDC, or two official catalog symbols on a supported catalog network.' }),
@@ -93,10 +95,15 @@ const LendingComposition = Type.Object({
 /** BUILD-RH-002: a transfer on Robinhood Chain (real funds): native ETH or an official catalog asset, to the signing wallet or a recipient. BUILD-BASE-001: and Base. */
 const Transfer = Type.Object({
   version: Type.Optional(Version), action: Type.Literal('transfer'),
-  network: enumOf(['robinhood', 'base', 'arbitrum-one', 'ethereum'] as const, 'The registered mainnet for this same-chain transfer (real funds).'),
-  asset: Type.Union([Type.Literal('ETH'), CatalogSymbol], { description: 'Native ETH, or a symbol or whole name of the selected network\'s validated official catalog.' }),
+  network: enumOf(['robinhood', 'base', 'arbitrum-one', 'ethereum', 'solana', 'solana-devnet', 'ethereum-sepolia', 'robinhood-testnet'] as const, 'The network of this same-chain transfer. ' +
+    'robinhood, base, arbitrum-one, ethereum and solana move real funds; solana-devnet moves valueless test tokens. ethereum-sepolia and robinhood-testnet support native test-ETH self-transfers only.'),
+  asset: Type.Union([Type.Literal('ETH'), Type.Literal('SOL'), CatalogSymbol], { description: 'EVM: native ETH, or a symbol or whole name of the selected network\'s ' +
+    'validated official catalog. Solana: SOL, USDC or USDT (solana-devnet: SOL or devUSDC), or an SPL token mint address together with decimals and tokenProgram.' }),
   amount: Decimal('Amount as a decimal string.'),
-  recipient: Type.Optional(EvmAddress('Recipient. Omit to transfer to the wallet that signs in the FloFi app (bound at Review).')),
+  recipient: Type.Optional(Type.Union([EvmAddress('EVM recipient.'), SolanaAddress('Solana recipient wallet address.')], { description: 'Recipient. EVM: omit to transfer ' +
+    'to the wallet that signs in the FloFi app (bound at Review). Solana: required — the destination wallet; FloFi never substitutes the signing wallet.' })),
+  decimals: Type.Optional(Type.Integer({ minimum: 0, maximum: 18, description: 'Solana SPL mint transfers only: the token\'s decimals (verified on chain).' })),
+  tokenProgram: Type.Optional(enumOf(['spl-token', 'token-2022'] as const, 'Solana SPL mint transfers only: the token program (verified on chain).')),
 }, strict);
 const BRANCHES = Object.freeze({ bridge: Bridge, swap: Swap, supply: Lending('supply', 'Account credited with the supplied position.'),
   borrow: Lending('borrow', 'Account whose debt the borrow creates (onBehalfOf).'), repay: Lending('repay', 'Account whose debt is repaid (onBehalfOf).'),

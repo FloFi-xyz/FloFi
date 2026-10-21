@@ -107,7 +107,7 @@ test('saved detail responses cannot leak amounts, evidence or owner identifiers 
   await detail.getByRole('link', { name: 'View Swap run fixture-detail-run', exact: true }).click(); await reads(page, 2);
   await page.evaluate(() => window.flofiWorkspaceAcceptance.respond(1, 'owned'));
   await expect(detail.locator('.execution-plan')).toContainText('0.0243 WETH');
-  await expect(detail.getByRole('button', { name: /^(Retry|Execute workflow|Open current execution)$/ })).toHaveCount(0);
+  await expect(detail.getByRole('button', { name: /^(Retry|Authorize in wallet|Open current execution)$/ })).toHaveCount(0);
   await page.evaluate(value => window.flofiWorkspaceAcceptance.wallet(value), other); await reads(page, 3);
   await expect(detail.getByRole('heading', { name: 'Loading execution…', exact: true })).toBeVisible();
   await expect(detail.locator('.execution-plan')).toHaveCount(0);
@@ -159,7 +159,7 @@ for (const value of ['light', 'dark'] as const) test(`${value} long recorded amo
     await expect(detail.locator('details')).toHaveAttribute('open', '');
     await page.setViewportSize({ width: 320, height: 1000 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-    await expect(detail.getByRole('button', { name: /^(Execute workflow|Retry|Continue execution)$/ })).toHaveCount(0);
+    await expect(detail.getByRole('button', { name: /^(Authorize in wallet|Retry|Continue execution)$/ })).toHaveCount(0);
     if (mode === 'bridge-completed') {
       await page.evaluate(() => Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (value: string) => { Object.assign(window, { finalAcceptanceCopy: value }); } } }));
       await detail.locator('.execution-plan').getByRole('button', { name: /^Copy Provider reference/ }).first().click();

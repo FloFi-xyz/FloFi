@@ -65,6 +65,8 @@ export * from './withdraw.js';
 
 export * from './lending-composition.js';
 export * from './native-transfer.js';
+export * from './solana-transfer.js';
+export * from './solana-transfer-mock.js';
 export * from './uniswap-public-liquidity.js';
 export * from './crosschain-router.js';
 // BUILD-AUTOMATION-002: delegated-authority codecs (namespaced: their helpers are not part of the flat profile API).

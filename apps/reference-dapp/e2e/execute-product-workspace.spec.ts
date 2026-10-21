@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { test, expect, assertNoFinancialCanvasAction } from './fixtures';
+import { test, expect, assertNoFinancialCanvasAction, AUTHORIZE_IN_WALLET } from './fixtures';
 import { build } from 'vite';
 import { fileURLToPath } from 'node:url';
 import { configureCanvasAction } from './composer-authoring-fixtures';
@@ -65,19 +65,39 @@ test.beforeEach(async ({ page }) => {
   await page.evaluate(() => (window as unknown as { FloFiExecuteAcceptance: { mount(element: HTMLElement): void } }).FloFiExecuteAcceptance.mount(document.getElementById('acceptance-root')!));
   await expect.poll(async () => errors.length > 0 || await page.locator('.execution-summary').count() > 0).toBe(true);
   expect(errors).toEqual([]);
-  await expect(page.getByRole('button', { name: 'Execute workflow', exact: true })).toBeEnabled();
+  // The fixture's Review is accepted: the one owner action is the execution request itself.
+  await expect(page.locator('.canvas-primary-action button[data-lifecycle-action="execute"]')).toHaveText(AUTHORIZE_IN_WALLET);
+  await expect(page.getByRole('button', { name: AUTHORIZE_IN_WALLET, exact: true })).toBeEnabled();
   await page.waitForFunction(() => Boolean(window.flofiExecuteAcceptance));
 });
 test.afterEach(({ page }) => { expect(browserErrors.get(page)).toEqual([]); });
+/**
+ * BUILD-SOLANA-TRANSFER-UX-001: an unaccepted but approvable Review keeps the one owner action as Review acceptance ("approve"), never the
+ * accepted execution request. With `click`, the fixture's acceptance does not land (its `approve` leaves the Review unaccepted), so the
+ * Authorize chain must end without a wallet request.
+ */
+async function expectReviewAcceptanceRequired(page: Page, click = false) {
+  const primary = page.locator('.canvas-primary-action');
+  await expect(primary).toHaveCount(1);
+  await expect(primary.locator('button[data-lifecycle-action="execute"], button[data-lifecycle-action="continue"]')).toHaveCount(0);
+  const authorize = primary.locator('button[data-lifecycle-action="approve"]');
+  await expect(authorize).toHaveText(AUTHORIZE_IN_WALLET);
+  await expect(page.locator('.execution-summary button.primary')).toHaveCount(0);
+  if (!click) return;
+  const before = (await page.evaluate(() => window.flofiExecuteAcceptance.counts())).executed;
+  await authorize.click();
+  await expect(primary.locator('button[data-lifecycle-action="approve"]')).toBeEnabled();
+  expect((await page.evaluate(() => window.flofiExecuteAcceptance.counts())).executed).toBe(before);
+}
 
 test('Dark authorization attention follows real approval, invalidation and expiry without changing readiness', async ({ page }) => {
   await page.evaluate(() => document.documentElement.dataset.theme = 'dark');
-  const execute = page.getByRole('button', { name: 'Execute workflow', exact: true });
+  const execute = page.getByRole('button', { name: AUTHORIZE_IN_WALLET, exact: true });
   await expect(execute).toBeEnabled();
   await expect(page.locator('.execution-authorization-attention')).toHaveCount(0);
   for (const change of ['unapproved', 'wallet'] as const) {
     await page.evaluate(value => window.flofiExecuteAcceptance.transition(value), change);
-    await assertNoFinancialCanvasAction(page);
+    if (change === 'unapproved') await expectReviewAcceptanceRequired(page); else await assertNoFinancialCanvasAction(page);
     await expect(page.locator('.execution-authorization-attention')).toHaveCSS('background-color', 'rgb(51, 39, 15)');
     await expect(page.locator('.execution-authorization-attention')).toHaveCSS('color', 'rgb(245, 185, 74)');
     await expect(page.locator('.simulation-validity strong')).toHaveCSS('color', 'rgb(245, 185, 74)');
@@ -98,14 +118,14 @@ test('Dark authorization attention follows real approval, invalidation and expir
 });
 
 test('execution starts only on an explicit native click and cannot be repeated', async ({ page }) => {
-  const execute = page.getByRole('button', { name: 'Execute workflow', exact: true });
+  const execute = page.getByRole('button', { name: AUTHORIZE_IN_WALLET, exact: true });
   expect((await page.evaluate(() => window.flofiExecuteAcceptance.counts())).executed).toBe(0);
   await execute.focus(); await execute.press('Enter');
   await assertNoFinancialCanvasAction(page); await expect(page.getByRole('complementary', { name: 'Execution Summary' })).toContainText('Execution already started');
   expect((await page.evaluate(() => window.flofiExecuteAcceptance.counts())).executed).toBe(1);
 });
 test('expiry updates readiness without navigation and is rechecked at the click boundary', async ({ page }) => {
-  const execute = page.getByRole('button', { name: 'Execute workflow', exact: true });
+  const execute = page.getByRole('button', { name: AUTHORIZE_IN_WALLET, exact: true });
   await page.clock.setSystemTime(reviewNow + 120_001);
   await execute.click(); expect((await page.evaluate(() => window.flofiExecuteAcceptance.counts())).executed).toBe(0);
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
@@ -114,12 +134,12 @@ test('expiry updates readiness without navigation and is rechecked at the click 
   expect((await page.evaluate(() => window.flofiExecuteAcceptance.counts())).simulated).toBe(1);
 });
 test('authorization, wallet, network and workflow transitions stay fail-closed', async ({ page }) => {
-  const execute = page.getByRole('button', { name: 'Execute workflow', exact: true });
+  const execute = page.getByRole('button', { name: AUTHORIZE_IN_WALLET, exact: true });
   for (const change of ['unapproved', 'blocked', 'wallet', 'network', 'unknown', 'workflow'] as const) {
     await page.evaluate(() => window.flofiExecuteAcceptance.transition('valid'));
     await expect(execute).toBeEnabled();
     await page.evaluate(value => window.flofiExecuteAcceptance.transition(value), change);
-    await assertNoFinancialCanvasAction(page);
+    if (change === 'unapproved') await expectReviewAcceptanceRequired(page, true); else await assertNoFinancialCanvasAction(page);
     if (change === 'wallet') await expect(page.locator('.execution-summary')).toContainText('0x2222…2222');
     if (change === 'network') { await expect(page.locator('.execution-summary')).toContainText('Arbitrum'); await expect(page.locator('.execution-summary')).toContainText('Mainnet'); }
     if (change === 'unknown') { await expect(page.locator('.execution-summary')).toContainText('Unknown network'); await expect(page.locator('.execution-summary')).not.toContainText('Mainnet'); }
@@ -141,9 +161,9 @@ for (const theme of ['light', 'dark']) test(`${theme} plan, brand icons and resp
   expect(iconSize).toEqual({ width: 18, height: 18, filter: 'none' });
   const canvas = page.locator('.simulation-workflow-canvas');
   await expect(canvas.getByRole('button', { name: 'Back to Build', exact: true })).toBeVisible();
-  await expect(canvas.getByRole('button', { name: 'Execute workflow', exact: true })).toBeVisible();
-  await expect(page.locator('.execution-summary').getByRole('button', { name: 'Execute workflow', exact: true })).toHaveCount(0);
-  const ctaStyle = await page.getByRole('button', { name: 'Execute workflow', exact: true }).evaluate(button => ({ height: button.getBoundingClientRect().height, radius: getComputedStyle(button).borderRadius }));
+  await expect(canvas.getByRole('button', { name: AUTHORIZE_IN_WALLET, exact: true })).toBeVisible();
+  await expect(page.locator('.execution-summary').getByRole('button', { name: AUTHORIZE_IN_WALLET, exact: true })).toHaveCount(0);
+  const ctaStyle = await page.getByRole('button', { name: AUTHORIZE_IN_WALLET, exact: true }).evaluate(button => ({ height: button.getBoundingClientRect().height, radius: getComputedStyle(button).borderRadius }));
   expect(ctaStyle.height).toBeGreaterThanOrEqual(42); expect(ctaStyle.radius).toBe('7px');
   for (const width of [1440, 1280, 1024, 820, 768, 390, 375, 320]) {
     await page.setViewportSize({ width, height: 900 });
@@ -168,11 +188,11 @@ for (const theme of ['light', 'dark']) test(`${theme} plan, brand icons and resp
     expect(plan!.y).toBe(spacing.gridTop);
     if (width > 900) expect(plan!.x + plan!.width).toBeLessThan(summary!.x);
     else expect(plan!.y + plan!.height).toBeLessThan(summary!.y);
-    await expect(page.getByRole('button', { name: 'Execute workflow', exact: true })).toBeEnabled();
+    await expect(page.getByRole('button', { name: AUTHORIZE_IN_WALLET, exact: true })).toBeEnabled();
     const boxes = await canvas.evaluate(element => {
       const rect = (el: Element) => { const r = el.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom }; };
       const back = [...element.querySelectorAll('button')].find(b => b.textContent === 'Back to Build')!;
-      const execute = [...element.querySelectorAll('button')].find(b => b.textContent === 'Execute workflow')!;
+      const execute = [...element.querySelectorAll('button')].find(b => b.textContent === 'Authorize in wallet')!;
       return { back: rect(back), execute: rect(execute), surface: rect(element.querySelector('.flow-surface')!), controls: rect(element.querySelector('.canvas-navigator')!), footer: rect(element.querySelector('.canvas-foot')!), attribution: rect(element.querySelector('.react-flow__attribution')!) };
     });
     expect(boxes.back.left).toBeLessThan(boxes.execute.left); expect(boxes.back.right).toBeLessThanOrEqual(boxes.execute.left);
@@ -255,7 +275,7 @@ test('the real shell preserves Build and embedded Review while Execute stays rea
 
 // Lifecycle acceptance uses real record shapes and native DOM interactions, without RPC submission.
 test('synchronous repeated clicks cannot duplicate a request before runtime state catches up', async ({ page }) => {
-  await page.evaluate(() => { window.flofiExecuteAcceptance.holdStart(); const button = [...document.querySelectorAll('button')].find(b => b.textContent === 'Execute workflow')!; button.click(); button.click(); });
+  await page.evaluate(() => { window.flofiExecuteAcceptance.holdStart(); const button = [...document.querySelectorAll('button')].find(b => b.textContent === 'Authorize in wallet')!; button.click(); button.click(); });
   expect((await page.evaluate(() => window.flofiExecuteAcceptance.counts())).executed).toBe(1);
   await assertNoFinancialCanvasAction(page);
   await expect(page.locator('.canvas-primary-action')).toContainText('Waiting for wallet…');
@@ -264,7 +284,7 @@ test('approval, submitted action and confirmation remain ordered with explicit c
   await page.evaluate(() => window.flofiExecuteAcceptance.lifecycle('approval-pending'));
   const plan = page.getByRole('region', { name: 'Execution plan', exact: true });
   await expect(plan).toContainText('Approve USDC'); await expect(plan).toContainText('Pending confirmation'); await expect(plan).toContainText('Waiting');
-  await expect(page.getByRole('button', { name: 'Execute workflow', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: AUTHORIZE_IN_WALLET, exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Execution in progress', exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Check status', exact: true })).toHaveClass('primary');
   await page.evaluate(() => window.flofiExecuteAcceptance.lifecycle('approval-confirmed'));
@@ -282,7 +302,7 @@ test('approval, submitted action and confirmation remain ordered with explicit c
 test('failure, uncertainty and restored execution never regain the initial Execute CTA', async ({ page }) => {
   for (const state of ['failed', 'uncertain', 'restored'] as const) {
     await page.evaluate(value => window.flofiExecuteAcceptance.lifecycle(value), state);
-    await expect(page.getByRole('button', { name: 'Execute workflow', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: AUTHORIZE_IN_WALLET, exact: true })).toHaveCount(0);
     if (state === 'failed') await expect(page.locator('.execution-summary')).toContainText('Execution failed');
     if (state === 'uncertain') { await expect(page.locator('.execution-summary')).toContainText('Execution status unresolved'); await expect(page.getByRole('button', { name: /Retry|Check confirmation|Continue to/ })).toHaveCount(0); }
     if (state === 'restored') await expect(page.getByRole('region', { name: 'Execution plan', exact: true })).toContainText('No new request has been sent');
@@ -312,7 +332,7 @@ for (const theme of ['light', 'dark']) test(`${theme} final evidence, actual val
     expect(await plan.locator('img.brand-icon').evaluateAll(images => images.every(image => getComputedStyle(image).filter === 'none'))).toBe(true);
   }
   await page.setViewportSize({ width: 1280, height: 1000 }); await page.screenshot({ path: `.tmp/ux005e-result-${theme}.png`, fullPage: true });
-  await expect(page.getByRole('button', { name: /Retry|Continue to|Execute workflow/ })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /Retry|Continue to|Authorize in wallet/ })).toHaveCount(0);
   expect((await page.evaluate(() => window.flofiExecuteAcceptance.counts())).executed).toBe(0);
 });
 
@@ -350,7 +370,7 @@ test('signed order IDs and long provider references stay distinct from transacti
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await page.getByText('View technical details', { exact: true }).click();
   }
-  await expect(page.getByRole('button', { name: /Retry|Execute workflow/ })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /Retry|Authorize in wallet/ })).toHaveCount(0);
   expect((await page.evaluate(() => window.flofiExecuteAcceptance.counts())).executed).toBe(0);
 });
 test('partial, declined, attention and recovered results retain their actual step truth', async ({ page }) => {
@@ -366,7 +386,7 @@ test('partial, declined, attention and recovered results retain their actual ste
   await page.evaluate(() => window.flofiExecuteAcceptance.evidence('recovered'));
   await expect(page.locator('.execution-summary')).toContainText('2 of 2'); await expect(page.locator('.execution-summary')).toContainText('1 step recovered');
   await expect(page.locator('.execution-evidence-recovered')).toHaveText('Recovered');
-  await expect(page.getByRole('button', { name: /Retry|Execute workflow|Continue to/ })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /Retry|Authorize in wallet|Continue to/ })).toHaveCount(0);
   expect((await page.evaluate(() => window.flofiExecuteAcceptance.counts())).executed).toBe(0);
 });
 for (const theme of ['light', 'dark']) test(`${theme} execution timeline, long hashes and stacked widths`, async ({ page }) => {
@@ -392,7 +412,7 @@ test('wallet, network, workflow and expiry invalidate a next request without dis
     await page.evaluate(change => window.flofiExecuteAcceptance.binding(change), value);
     await expect(page.getByRole('button', { name: 'Continue to swap', exact: true })).toHaveCount(0);
     await expect(page.getByRole('region', { name: 'Execution plan', exact: true })).toContainText('Approve USDC');
-    await expect(page.getByRole('button', { name: 'Execute workflow', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: AUTHORIZE_IN_WALLET, exact: true })).toHaveCount(0);
   }
   await page.evaluate(() => { window.flofiExecuteAcceptance.transition('valid'); window.flofiExecuteAcceptance.lifecycle('approval-confirmed'); });
   await expect(page.getByRole('button', { name: 'Continue to swap', exact: true })).toBeEnabled();
@@ -412,7 +432,7 @@ test('status checks are explicit, locked and can confirm the recorded run withou
   await expect(page.locator('.canvas-primary-action [data-lifecycle-action="status"]')).toHaveText('Reconciling…');
   await expect(page.locator('.execution-summary')).toContainText('Checking execution status');
   await expect(page.locator('.execution-timeline')).toContainText('Checking status');
-  await expect(page.getByRole('button', { name: 'Execute workflow', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: AUTHORIZE_IN_WALLET, exact: true })).toHaveCount(0);
   await page.clock.resume();
   for (const theme of ['light', 'dark']) {
     await page.evaluate(value => document.documentElement.dataset.theme = value, theme);
@@ -430,7 +450,7 @@ test('an unresolved or unsuccessful check preserves uncertainty and never offers
     await page.evaluate(() => window.flofiExecuteAcceptance.finishCheck());
     if (outcome === 'uncertain') await expect(page.locator('.execution-summary')).toContainText('Execution status unresolved');
     else { await expect(page.locator('.execution-summary')).toContainText('Unable to check execution status'); await expect(page.locator('.execution-timeline')).toContainText('Pending confirmation'); }
-    await expect(page.getByRole('button', { name: /Retry|Try again|Execute workflow/ })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /Retry|Try again|Authorize in wallet/ })).toHaveCount(0);
   }
   expect((await page.evaluate(() => window.flofiExecuteAcceptance.counts())).executed).toBe(0);
 });
@@ -441,7 +461,7 @@ test('remount after reload keeps the same pending record and its confirmed appro
   await expect(page.locator('.execution-timeline')).toContainText('Approve USDC');
   await expect(page.locator('.execution-timeline')).toContainText('Pending confirmation');
   await expect(page.locator('.execution-summary')).toContainText('Current execution restored');
-  await expect(page.getByRole('button', { name: 'Execute workflow', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: AUTHORIZE_IN_WALLET, exact: true })).toHaveCount(0);
   expect((await page.evaluate(() => window.flofiExecuteAcceptance.counts())).executed).toBe(0);
 });
 
@@ -450,7 +470,7 @@ test('wallet interaction, submission and confirmation show only recorded lifecyc
   await expect(page.locator('.execution-summary')).toContainText('Waiting for wallet…');
   await expect(page.locator('.execution-summary')).toContainText('Confirm or decline the reviewed request');
   await expect(page.locator('.execution-timeline')).toContainText('Confirm in wallet');
-  await expect(page.getByRole('button', { name: /Continue to|Execute workflow|Check status|Retry/ })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /Continue to|Authorize in wallet|Check status|Retry/ })).toHaveCount(0);
   for (const theme of ['light', 'dark']) {
     await page.evaluate(value => document.documentElement.dataset.theme = value, theme);
     await page.screenshot({ path: `.tmp/ux005e-wallet-${theme}.png`, fullPage: true });

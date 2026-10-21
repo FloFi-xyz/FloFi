@@ -24,7 +24,7 @@ import { createMockedSolanaWallet } from '@defi-workflow-engine/reference-compil
 import { dispatch, occurrencesOf, query, ruleOf, setPrices } from './automation-fixtures';
 import { assertDelegationHarness, chainControl, createDelegationOwner, delegationDispatch, evmWalletRequests, expect, installDelegationEvmWallet, SIGNING_METHODS, test,
   virtualAuthenticator } from './delegation-fixtures';
-import { applyPendingProposal, chooseWallet } from './fixtures';
+import { applyPendingProposal, chooseWallet, proveConnectedEvmWallet } from './fixtures';
 import { installSolanaWallet, MOCKED_SOLANA_WALLET, signRequests } from './jupiter-fixtures';
 
 const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
@@ -55,8 +55,8 @@ async function enrollOnce(page: Page, { solana: withSolana }: { solana: boolean 
 
   // 1–2. A fresh wallet sign-in, then a passkey: the owner's chain-neutral key for authorizing whole workflows.
   await page.goto('/app/passkeys');
-  await page.getByRole('button', { name: 'Connect wallet and prove ownership', exact: true }).click();
-  await chooseWallet(page, 'Browser wallet');
+  // BUILD-SOLANA-TRANSFER-UX-001: the sign-in reuses the EVM wallet already connected in this browser (no selector).
+  await proveConnectedEvmWallet(page, page.locator('body'), owner.address);
   const passkeys = page.getByRole('region', { name: 'Passkeys', exact: true });
   await passkeys.getByRole('textbox', { name: 'Passkey name', exact: true }).fill('Test laptop');
   await passkeys.getByRole('button', { name: 'Add a passkey', exact: true }).click();

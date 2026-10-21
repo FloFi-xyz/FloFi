@@ -1,0 +1,2217 @@
+{
+  "capturedAtUtc": "2026-10-19T01:02:22.570674+00:00",
+  "worktree": "/home/asus/projects/flofi-solana-transfer-ux-001",
+  "branch": "claude/build-solana-transfer-ux-001",
+  "head": "616598fe3cce44dc6d48444753d6b70886873c1d",
+  "baseline": "616598fe3cce44dc6d48444753d6b70886873c1d",
+  "implementationCommits": [],
+  "counts": {
+    "modifiedTracked": 163,
+    "untracked": 36,
+    "staged": 0
+  },
+  "missingInheritedFiles": [],
+  "movedInheritedFiles": [
+    {
+      "from": "apps/reference-dapp/src/__probe/probe.test.ts",
+      "to": "apps/reference-dapp/src/domain/solana-transfer-capabilities.test.ts",
+      "assertionsPreserved": true
+    }
+  ],
+  "sha256Exclusions": [
+    "docs/builds/BUILD-SOLANA-TRANSFER-UX-001-STATE.json"
+  ],
+  "remoteActions": {
+    "pushes": 0,
+    "pullRequestsCreated": 0,
+    "circleCiAttempts": 0,
+    "cloudBuildAttempts": 3,
+    "deployments": 0
+  },
+  "auditDisposition": "HOLD: third task Cloud Build attempt failed the first critical browser journey at its overall deadline. Narrow timeout correction passed locally; complete remote certification and fresh attempt authorization remain outstanding. No PR preparation, push or deployment.",
+  "files": [
+    {
+      "path": "apps/reference-dapp/backend/entrypoint.test.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": false,
+      "sha256": "1d4e5664351ebf2b8d2382a53b4b130929b879d4b2dfa8698b032fb2e1cb1948",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/backend/flows.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "824df28904b09760c06a2be4d372ef3478a26d64345124d94ef9c0d0abc76abf",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": true
+    },
+    {
+      "path": "apps/reference-dapp/backend/preview.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "18f34b990779aa0d76d5526a7dcfe4442da237fe811868bd9e5caaed324aebe9",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/e2e/acceptance-swap-read.spec.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": false,
+      "sha256": "7f7e9cdf2450641c1b4641662cc323c1d8a9a9f97b482beb13a7939f9e36f0e0",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/e2e/acceptance-workflows.spec.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": false,
+      "sha256": "14b69e2a330873a6a1cd964fc5c6f8e5acecfd9cfab48f1c0c39f963f5e2cbd0",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/e2e/automations.spec.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": false,
+      "sha256": "e99008982b4fd0ae3ba5dbe4727c5b6b4e7ce85ed3f160ebd973cd7f2e45ca39",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/e2e/base-observation.spec.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": false,
+      "sha256": "109258e548cbc7fafbd7b2edfb6d797ce3fc3531bcf11cdf54d611f60375c1d6",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/e2e/base-observation.spec.ts-snapshots/observation-expired-chromium-linux.png",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": false,
+      "sha256": "f7eb20bbc4fc1c218fa4f44a6e09276a5e060aed8e456444069ed41858dc81ea",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/e2e/base-observation.spec.ts-snapshots/observation-recorded-chromium-linux.png",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": false,
+      "sha256": "39fd76c36f16b5f2c99c3c0717f1a2b81b82d39246f26bc161fb71368498f304",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/e2e/beta-ui.spec.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "13364f27065323a50d9b6ed1d922506310dd995c831844d38b04434dcbae80e1",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/e2e/borrow.spec.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": false,
+      "sha256": "9beed87611aea22fa9d71e5bfca60a0387d22287ce61cdcbf309da970e8d57d8",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/e2e/brand-ux-001.spec.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": false,
+      "sha256": "c80fa4f9c00be9fdd60c51534355ec9ab52e93022f263933f3eafee1aaa7463c",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/e2e/canvas-automation-ux.spec.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": false,
+      "sha256": "75a9111fc44b6756389264da4156187114167160762fe562e52a1dc99ef7a401",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/e2e/canvas-cta.spec.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": false,
+      "sha256": "f65a1b6ad56c820d3c00230833d43db8ece416b542f84c1b9ae55b79b689548a",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/e2e/channel-signing.spec.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": false,
+      "sha256": "40d0979aa8ea3c9c06afd907a7cc620b00297f8c2851cdf565955935d95cbcd0",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/e2e/contextual-proposals.spec.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": false,
+      "sha256": "db97860e939b2f4451c91a75d48653642fb8073900759bf7ed5fb480a3e80dea",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/e2e/copilot-automations.spec.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": false,
+      "sha256": "d8763feafc067305bd329323cce6e5e8c2e31787c6812c9dadc4216129940c17",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/e2e/copilot-learning-memory.spec.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": false,
+      "sha256": "6fe2bb04bf0ca358e06b2e3713012976009f9e61c223c2b910a21a405ed0e818",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/e2e/copilot-solana.spec.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": false,
+      "sha256": "0a4e99e7522d89afaba8eded316bbfdeaa5717f6bbea052fa12a4d07a599d54d",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/e2e/copilot.spec.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": false,
+      "sha256": "45522e773346e2bdf0bfbce9c36b76d2d8ba29785bb8145d8d11c5d0d9a08047",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/e2e/dashboard-final-acceptance.spec.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": false,
+      "sha256": "14365658c65ef20407bb22fcbf6a4b4083126e4382580d7108abaa661b2a96af",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/e2e/dashboard-foundation.spec.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": false,
+      "sha256": "18a5bcb628ef704f7a160d050142f242ae10426a4d78b9e969ba781bb135817a",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": true
+    },
+    {
+      "path": "apps/reference-dapp/e2e/dashboard-productization.spec.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": false,
+      "sha256": "9dcdebcbc56ae474286a6bb725c696d1259da36c75e2fd898d0d6031fc9f474d",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/e2e/dashboard-run-details.spec.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": false,
+      "sha256": "33c26d07131fbe2b27a337b8397113b52b7eab1dea61e2e76993cdd45529c7d2",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/e2e/dashboard-theme-states.spec.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": false,
+      "sha256": "0189df65cbf9ca5b4e614d01bab46a585e8cd790d62d9848096d98e5cf998657",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/e2e/delegated-execution.spec.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": false,
+      "sha256": "97ae5463a29f58d69b6d1c0d680f748bbd2e337159fcf01b181eaac2848837bf",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/e2e/developer-journey.spec.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": false,
+      "sha256": "dfc364155f66dfeb3e07074ca2cbfcb495ba470dd6f72896a2e29e468db0ddbc",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/e2e/execute-product-workspace.spec.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": false,
+      "sha256": "1c9f2c964aa77cd00b00d8e475582fa9ff4295dd45c1252be6339763eaea3ee9",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/e2e/execution-capabilities.spec.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": false,
+      "sha256": "2194a1a2a656cb36ca6b3e6399b8746f037c676591dcc996e3ab743edcf8ffae",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/e2e/execution-continuity.spec.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": false,
+      "sha256": "2b42ab3de6b80fdf261e4eff3170e3e7330ef1ed9654fa02dfe6d828e0dfb168",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/e2e/fixtures.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": false,
+      "sha256": "f47d845959468b7762af07e592379fd05d147502188ce84bbf0a735bc5fce860",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/e2e/interface-honesty.spec.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": false,
+      "sha256": "e5028cd86d63b20d61169ae94e4a0dfa9204f8688bca75056b4c9ff25f51c5dc",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/e2e/mcp-in-chat.spec.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": false,
+      "sha256": "74e8e279d847eb4edf470106a0917a11e2632070d342ecce1f8900922c096ffe",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/e2e/mcp-route-presentation.spec.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": false,
+      "sha256": "bfe122c341d3f6e33528c6892d2cd9a66fcf9badb3010a3a619b65e21884dfcc",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/e2e/mock-artifact-chain.spec.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": false,
+      "sha256": "381b253dc9d5daf5693f7ce67dff9c24e98addd8032c9753f26305faeb69ada6",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/e2e/mock-artifact-chain.spec.ts-snapshots/simulate-current-chromium-linux.png",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": false,
+      "sha256": "79fac0500c16a9a5655e21a4b34dcdeaa1377451615a6a29be865b555a958a27",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/e2e/mock-artifact-chain.spec.ts-snapshots/simulate-expired-chromium-linux.png",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": false,
+      "sha256": "6f79473cce599d2cf0e9cf5826474d1612c4d8adcab3559d3e35bf34ed2f3c71",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/e2e/mock-artifact-chain.spec.ts-snapshots/simulate-invalidated-chromium-linux.png",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": false,
+      "sha256": "5a5068e0b5d4766ec87662a8207536a2984eeec18ab09c124df8ee31f4bb52e9",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/e2e/release-composition-provenance.spec.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": false,
+      "sha256": "7679feb8f42ea64f11998e0a20e49950f453e80604439be4834fa72b49b3e896",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/e2e/release-provenance.spec.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": false,
+      "sha256": "11f72af20f37b310ba762edeac7a217526034be6d6ade3ff3d7f90aa02cb3642",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/e2e/release-safety-fixtures.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": false,
+      "sha256": "d552c3d56b2ba39d86d8f1b02074938ebb4f46f9fd01da51649505f41ab5755a",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/e2e/repay.spec.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "7f79a01c6619d91ff40bfb13d28f3ba254bda6f584c3f7be7e94616298168f4d",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/e2e/simulate-product-workspace.spec.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": false,
+      "sha256": "c8ccb691e84ca4e123da543c28f211793f0df0602c3c72407d4288d3cc758bc9",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/e2e/simulate-shell.spec.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": false,
+      "sha256": "e8d5a25d47cf08317b1ff6efc96a59589aa48758285cb4f92cc6a9d3dc127609",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/e2e/solana-swap-liquidity-composition.spec.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": false,
+      "sha256": "944b2dd6210128c49d71c128a6cfd0d66343a310130747991c71c8eeb017331d",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/e2e/swap-authoring.spec.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": false,
+      "sha256": "bd089dbcf38da7dd242b3c6b938c2c32ec731a315d4c1b9cb572d881bc3790ea",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/e2e/swap-authoring.spec.ts-snapshots/proposal-chromium-linux.png",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": false,
+      "sha256": "92355ee87431752ebee1c8140cd8b6c0b8ef909f443c1ddd7539f0035bb2998f",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/e2e/swap-authoring.spec.ts-snapshots/review-blocked-chromium-linux.png",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": false,
+      "sha256": "2042a121f166a6e32482ba3d195b3d970bc5dbc56e6d84fc898a968cfeb0fc45",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/e2e/telegram-approve.spec.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": false,
+      "sha256": "7f034941567eace32450f8358cd42500426ee689ae4fa63faae7191881533de4",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": true
+    },
+    {
+      "path": "apps/reference-dapp/e2e/visual-shell.spec.ts-snapshots/build-chromium-linux.png",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": false,
+      "sha256": "4ad295989b891e44eaf14c48c9bf86694525b1ad59e32b716412fae4e593a7fd",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/e2e/visual-shell.spec.ts-snapshots/execute-chromium-linux.png",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": false,
+      "sha256": "3614b287e368ffeb2ff61fdf0c67c8e8590a9ef358339ce42589b555ec71cfcc",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/e2e/visual-shell.spec.ts-snapshots/simulate-chromium-linux.png",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": false,
+      "sha256": "8d6af548483636bfa67ffe9535325dcca8c345aebf8cc592fe0be73bf9a6a840",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/e2e/wallet-fixtures.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "b96f890379a37b18af191e413652e4f07fa49fb88a05ef79e61091b842e2c952",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/e2e/whatsapp-approve.spec.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": false,
+      "sha256": "3983b7a6ea875f1a791fa6a698b078393efb37bcf91af4db2317822b11e929a3",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": true
+    },
+    {
+      "path": "apps/reference-dapp/e2e/workflow-ux-execution.spec.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": false,
+      "sha256": "e6ad62c66b085f32362b8236c78602a5db577b821a523fdb52ad8be1cf2042c6",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/app/globals.css",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "72b7b58f8d08b1799ffcfa74fbb4cbc8d690ec06055620ef0bd89a3bae326d35",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/channels/core/approval.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "26edc18a603532c4cfe73621737f76f15f7dd2e808a02955240829defaadb5de",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/channels/core/copy.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "089699ce505db3ed6a898b8b0898c671ec422976feb8a29d431e82341ea922f2",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": true
+    },
+    {
+      "path": "apps/reference-dapp/src/channels/core/notify.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "ea5960e7f4b622b7226f64ce5526180300b7e48f554f290304671d17e341f825",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/channels/core/status.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "09e87712177c6ed58fd82c021baa8550768b461e3ad930713a374af045d6c46d",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": true
+    },
+    {
+      "path": "apps/reference-dapp/src/channels/core/strategy.test.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "2c819e0f589f1b44c49c386617f6c4c145880bbe9aeb63a6c1626d05005e988d",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/channels/core/strategy.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "bf684e34cecdeb10f14680b0584dd0da3052221cf2fffcf006d40edb95b77832",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/components/app-shell.tsx",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "0d3a776db2f73514ee232f0c83e8198fdedfec055ecd3db874e5d704d52af79f",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/components/approval-handoff.tsx",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "d796f71fd8a482c6c87449fbe03fd73a3c0038603613b8992d44f6abe00b8014",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/components/canvas-lifecycle-action.tsx",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "15141b5665615e3e5255b37afd854b83abcaf96a7192181b8486261ace10ae98",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/components/execute-workspace.test.tsx",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "8ccc92b91c96e0f7c6c27ecde35f8875b6c9d6303a311f1969187437d5be4949",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/components/jupiter-panel.tsx",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "19bb1cca78abfa19864dd368abf8fdc8a583f2e1f22eafa5cbe421f298ebf72b",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/components/product-workspace.tsx",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "c9197b2cf1fff3e3c8c47064d9faa257d1207be7a1f2c4c625e22cd56b908d61",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/components/review-workspace.tsx",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "f4b354668f70de54f61e818db7acead515cfe94f9c07135a42fd0a077d727bbe",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/components/robinhood-transfer-panel.tsx",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "af25ea70c9b944941b0ff89be95789a812f977c06c9868bdc11406afff42ff76",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/components/simulation-summary.tsx",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "8e516a1b05ea3a3d6b9041373b162b847f17d2e4b40c4f7c993088f2f341bef7",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/components/solana-liquidity-panel.tsx",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "0f58a1fc1491586ebce28b8977ddf16f65c019874663deaef6eac89a1f9807fa",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/components/summary-bar.tsx",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "02265fdedf781a7f8ebbd9ed6c106f610edf7b48a4418d1bea72a8b831a0cd7e",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/components/top-bar.tsx",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "973efec30397c9ce1006f69b0747885269e341584be717e0e7b815aa83806c3c",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/components/wallet-proof.tsx",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "9afb1172751d7532b5f9e3915273f3fa476706558ac2cebaedfe6014b571a5dc",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/domain/authoring-capabilities.test.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": false,
+      "sha256": "0cd4907ffbbeb2872c21f292314bad9f58930eb796ef7100ff276ae2c6a6692e",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/domain/canvas-lifecycle.test.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "1cc2c79b41a7e7ba0f15539bf4b68d947e21f77b8274efbe9fdb9ba74ebc79d8",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/domain/canvas-lifecycle.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "e7e95200fb32a13db8f55fa09c29cd627a53c696f76a8994ecb08e11207a9146",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/domain/canvas-transfer.test.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "572fb0564c68d211fd1530caac9b04cc3ca46be854f1037dee2baa656fcc6e34",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/domain/catalog-copilot-parity.test.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "236f0e535cc02cf87b10e8a0c801682233aa5e720d138802f4d47a1724ec5d36",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/domain/commands.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "b6f3cba675cdc5356247688302d18d52e9ad1548b1abdbabb5cae6feb975f2b9",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/domain/composer-presentation.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "dea3598bd1c5514446e793a6dcf513046c676095ee01c2d84da1b8fcc1e5c487",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/domain/copilot-authoring.test.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": false,
+      "sha256": "587d1da3e3a1be49b7be993cdafe766de310726b3370921d414d4be2b3cdd713",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/domain/copilot-authoring.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "fb91a8960ae63f9cdd6989dcc252fc6c4e6e0023545aafe7712bf11fa7153d30",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/domain/copilot-intent-v2.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "ada5f4adad0f98473f9ad3b58b278141ab40bf1606dfef53855212321420ec04",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/domain/copilot-intent.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "788b05e822401e32d4cf57ec2a99f4abf62dc5486477a5a23be4f73f0170f949",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/domain/crypto-action-picker.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "f893c5354548bc2ec8bf11f21f2335bfde846e0c500a0630bb2c55a807c0cdfa",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/domain/execution-evidence.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "3f7c5677649932f33086450b6829c269ab096633802485d5fe59d43772677fa4",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/domain/execution-lifecycle.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "7a00ee2e29548658b333688cb83ffde4c30744ed722c7e07486a738afa9a9b67",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/domain/execution-presentation.test.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "645c21c8ba6c7aaee78b982b4cff08467137b49667150f6384f74f9d30a94ffa",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/domain/execution-presentation.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "ca6012b624002472ea888b7f667f851170f34f866d49d692126c452d8b895ae2",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/domain/execution-recovery.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "b76cac7e41b9c22cfbff42b32637b9686a5f21715217aaeec2a223db69220abf",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/domain/execution-step-evidence.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "6bc906e9495d931ff251ae3c6a2b8225ac7247e68bc60bb3d054029c124b6e8f",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/domain/network-certification.test.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "3b30e9cca08fbd2e90b844bf0b8ddaa8dea695a00930f6f81d2359c21c6e56b1",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/domain/network-registry.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "6ab2ff0b16f62011c776b1b0a6162f600b07ab20ed3404bcfa718483463b29bf",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/domain/proposal.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "a28a1f2e7f903824c4b8340d87e74662b521b56c207a4c836fc00857285cafff",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/domain/recipient-address.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "12a7cc0600dfb23fa98a074d4bf8c9fbe564f13418218f42a9b48bbe9e63cebc",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/domain/robinhood-transfer-authoring.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "8a203971033ba0ccb9629cc931efb70ef20764aef85193156dc49a2849e5ec6d",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/domain/send-recipient.test.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": false,
+      "sha256": "7511d5115a9f7f67d26791b370ed6d979087163c15e1d93ab991bf9c41e22cab",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/domain/simulation-presentation.test.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "513140fdf4b96a75ffa26d276bfdb72e64334b12f5677c1082cbb515becbf62e",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/domain/simulation-presentation.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "3a757370ea4958a8bb92fdf1a877d5e191f2b376ab6cf944e0ea8e5b9567cc33",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/domain/solana-composition-canvas.test.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "82fec225df43ad45b6e2f0c10ebb5406afebd0dfc19afbd6a57472c802324490",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/domain/solana-liquidity-authoring.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "f324bae77a5872914c989f9fd7509312ec47dbbbce9e4565810c1369a82b7bc7",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/domain/solana-wallet-refusal.test.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": false,
+      "sha256": "c3cd24ae2de5248a1f27000f4e41405c515ca81ef488bbd96ce9ac45810c7325",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/domain/workflow-steps.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "ee90885f468247c6fbf13b502f99bee289dd4ebdba15f08733a299d39ec002c9",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/domain/workflow-ux.test.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "7a2c3e167e57e7335d6cdb5f7828fc52d61547aac896cb5b0390c7437eaaf38f",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/engine/capability-catalog.test.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "32094cf3842ecfb3d8f50fcee1ab31c644d75eb69a08c7db7889da88c5ddf38b",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/engine/capability-catalog.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "b0f37d7e89cbaf82f5f84315192e787df5c2172ee62ce47c4249adcd6e8adf12",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/engine/strategy-engine.test.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "e9d359bd8309bc5794915835723fc26f74af910986478a2eb075d9a6ea4307c8",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/engine/strategy-engine.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "a5e50e2791429153ae5215f5a8ed1d64e0248156f0cf2724de1dfbac5443cedf",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/engine/strategy-examples.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "7982bff32b8da1c021f8a9ba571b7b378c3707b1e8035a8b047f24c251e282d7",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/engine/strategy-spec.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "a50a203384728ff34f8507f5dc0d81ab69a5477cc08ae957196e73c3c9633759",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/i18n/preserved-values.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": false,
+      "sha256": "7c2dcbcd9859e504c908898e0a4cc0264cdf04fd036e48ba741dbb7b143db883",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/i18n/pt-product.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "64d5a1f0576bd7932bdfb817e7e9763bc865d8a596e8d8905a003cd756455280",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/i18n/pt.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "7eebdd6da673a037d46157ec49af1f9a891f79fda887d09825c8a029272cffb4",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/lib/dashboard/record-projection.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "c6daa34ad427934902591173b4d30746e7a7ae51a68cfc57d727d215d6f73244",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/lib/dashboard/run-mapping.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "0414877fe444f85cb24a4036dc9889a3f60ae098b6daa67a3a726b2a14923067",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/mcp/app/panel.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "9bb8742e490e725650c18d6c21cdc9878c7f4e7cd8d01e850a13e52a44e4176d",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/mcp/execution.test.ts",
+      "gitState": "modified",
+      "staged": false,
+      "sha256": "61d87cc38e351b632ad1e8d76dfa71341dd95766181c8c560b4a2e34da48c345",
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": true
+    },
+    {
+      "path": "apps/reference-dapp/src/mcp/execution.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "f1e8ae5cd8bdcd657a69e2c79e8e3b2fa07939d0d18003ff6c9a8616affeb175",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": true
+    },
+    {
+      "path": "apps/reference-dapp/src/mcp/gateway.test.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": false,
+      "sha256": "2feb299259b20cb6a8d0b3dd826c073fef1303ca3f9c2641f24d8752a21ffb2f",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/mcp/handoff/journey.pg.test.ts",
+      "gitState": "modified",
+      "staged": false,
+      "sha256": "2bb84d56213df15ee921ecd04524317fc4117ba88681b78401ffe6f113b3135e",
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": true
+    },
+    {
+      "path": "apps/reference-dapp/src/mcp/runtime.test.ts",
+      "gitState": "modified",
+      "staged": false,
+      "sha256": "be03b481508346f5aeb5352344252b6d936be6d580784cb022e53842ad0bdf55",
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": true
+    },
+    {
+      "path": "apps/reference-dapp/src/mcp/runtime.ts",
+      "gitState": "modified",
+      "staged": false,
+      "sha256": "ebcde36d40c5c1fde2cf4b6ead2a04bff827280b3987105e6709817fce316189",
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": true
+    },
+    {
+      "path": "apps/reference-dapp/src/mcp/simulation.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "a04202b28ca3c34ee8b84b4ae85330f19487cd034ac0a4e12f390122f2c325e4",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/mcp/tools.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "bf13a698eeb666dd264e6e549c9314b67bc238514143b51e1ec1d0cb43bac006",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/platform/approvals.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "2cdda3a84fd03ef46ddf3c7d5bc0dd4f4f5ecc589e53ad6b0faf895592cfe978",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": true
+    },
+    {
+      "path": "apps/reference-dapp/src/server/copilot-capabilities.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "d1de60e2c22127c00f2e1f8f05cf9b9d5a47815cc8d627560093e41073fdb0c4",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/server/readiness.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "a5c7094a943a5b4903f73b42b5b9c13953b2a984999317096858590049c946c6",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/server/robinhood-rpc.ts",
+      "gitState": "modified",
+      "staged": false,
+      "sha256": "0b6c132e68d4870078a627663bc4159231e030a5ec02188650931182f4820190",
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": true
+    },
+    {
+      "path": "apps/reference-dapp/src/server/solana-rpc.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "3ffa3aa4985ef7d8386e1b3eb27862d727a110953023148c48281b5c93c90f1e",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/state/build009-wallet-store.tsx",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": false,
+      "sha256": "676f1624d70f8b8d94655b4c7a3bbdca627d8f2acae377ec578d176efd1e3149",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/state/capability-store.tsx",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "4a10d6b56ee69fc225e0218cda06b63846dcc7f56548d182490a440220cd4741",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/state/execution-controls.test.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "019225de7a85ccfeb5556f0e783ec44b10320ff20f728755295c6e9da3bfc0f4",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/state/execution-controls.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "7d4e4a957cc1a976d1bdfc967fe37f7dcddb28ed96e7f0b583912b7e0b01d0ed",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/state/execution-lifecycle.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "b631d2153eb7f0adf48104d98763da3e9beeb1ab4c9eb348e927403d10f35533",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/state/execution-recovery.test.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": false,
+      "sha256": "4edd577e85f8ac27ec4bc5c519e7f2457c8b672034a8e03cc70bb6aa8c3d0e25",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/state/execution-start.test.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "1c7c12fd55ea2db357cfe40c2043e0dfde875abc1ca8217a88c1c76be6a1a599",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/state/execution-start.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "50647407fd073f64839a80818ea89ee6ef836e42a758c71563ad51c183b8aa87",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/state/jupiter-store.tsx",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "5af2e96358912c31a31dc83449be4d09b712ab00a59decfb3d8210f2d87f1e3a",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/state/review-authorization.test.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": false,
+      "sha256": "bbb3c7188ba72b762fe11d04d309b6ef57f66238b5771d1facc903c082c55219",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/state/review-authorization.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "e4d1f1d36adf18c477a66612ca2e90ad014a939a72c5fcd18dd0a0a73ee97ab1",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/state/router-store.tsx",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": false,
+      "sha256": "defc4a0ef16591416ec4056012b1b4f050f633ff02f0a5b2f156df5d43fc05b3",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/state/wallet-connection.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "e6ff241e65349e546fde26776edf0989b6fd21bae7db61c965d486c73c7b96dd",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/state/wallet-review-continuity.test.tsx",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "281af49b7554daaf314f4fe03d71e55459a23002ea36184625311d007e227c37",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/test-utils/execute-acceptance-harness.tsx",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "1f691f5f2ac67deab015d6b94bc82bac87ee2105424324b9d2eb9c4f8f3a5c3f",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/wallet/position-mint-signer.test.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": false,
+      "sha256": "d8283ced381143cdb6fe8836a894b4390218f27dfbf4ffdd9e82d7ab4e376ea8",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/wallet/solana-wallet.test.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "39905e16044e7ac6877ae5e0d08e82e5f45337f1f7c08d1e8b48fdb19cfce336",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/wallet/solana-wallet.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "c06abf66f6a0da7e62962439e67b53367f43ac100ecd84380888d52880e8549a",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/wallet/wallet-discovery.test.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "d61527891c70cb3092d70788a2d18f3c0fc3b3993775f5ba1bf486078e081af0",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/wallet/wallet-registry.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "4fd671b7374976bbbebe6d19230fae2e2637864b5bd13192eaf97b8319c3adbc",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "docs/developer/openapi.json",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": false,
+      "sha256": "e5747ef3235dcb36d46e674d8e0ac291a77c7bd9c430eeb414c5a5b3e0e9e4a8",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "packages/action-registry/src/execution-capabilities.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "109f4a604a323d586722b7370d75f3351714c3798f16b1b8142b9799ed2216a2",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "packages/action-registry/src/index.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "bf3f416c89276ce01bbea86a969c7b51192d1804d4819a59cade71c5824305b2",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "packages/reference-compiler/src/index.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "8baa2054a881acae4306064d90798b418734998741601815d698e3ea9dcf3b9a",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "packages/reference-compiler/src/solana.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "5753ac4cf5307a74cf5cdb6b8d93621d8afdde336a88dc10aa67e471eb628742",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "packages/reference-executor/src/index.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "dba364f03a3d1ac0681862b33da1ecaeb451cc717434708dbb3dc2239d753c62",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "packages/reference-linter/src/index.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "cd8081631899bbb26c1bf0439bb72ac18b2f4500fa1224cbfab0d99e13672908",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "packages/reference-linter/src/validation.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "5ab88c26ed3c9d076d729f5600bbf931d5e94bb29a547bbdfaa60e4bfa4e1454",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "packages/reference-reconciler/src/index.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "ef9ca38e1f2372c2b246c3d99a776a9e36782660c581c8e55d0d34174987bc4a",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "packages/workflow-contracts/src/index.ts",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "375e55b4e28a4bd6858b596ffadc8a25b0423f7c9570110ad8328654facfb9ec",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "scripts/guarded-release-browser.mjs",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "c0e0e5f7975bdadc18850956785d64161f2ce81c0135cf1726f70bdec2eabf8f",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "scripts/test_ci_optimization.py",
+      "gitState": "modified",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "6145da211dec6192c8608ddb90c63b8ab38c821081a9c6c85922f9a4f3face42",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/e2e/approve-authorize-journeys.spec.ts",
+      "gitState": "untracked",
+      "staged": false,
+      "presentAtContinuationStart": false,
+      "sha256": "29a6eafc1e74d8f2b49b1ea708c119ccd71206b5a83ecc985584d14d8e8f95f3",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/e2e/solana-transfer-ux.spec.ts",
+      "gitState": "untracked",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "76cfb26baa498e4706e86b341af13cef2e6b448934ac6e52f2d6222eff12c378",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/playwright.transfer-ux.config.ts",
+      "gitState": "untracked",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "4b77429805c3f0fb2a25f2e55b38099a89b9e972472a01a9547a605be7ec4d4a",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/app/solana-transfer-action.ts",
+      "gitState": "untracked",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "2e373c8b3e03ab74c50be8b83aed0bdf827b2b4dbdc9bde0c29950770e34294a",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/channels/core/status.test.ts",
+      "gitState": "untracked",
+      "staged": false,
+      "sha256": "9248eb1276d1f232cfa741856600a81690f668d17b816ac7e6c996191629fe1d",
+      "presentAtOwnerAuditStart": false,
+      "changedInOwnerAudit": true
+    },
+    {
+      "path": "apps/reference-dapp/src/components/signing-surface.test.tsx",
+      "gitState": "untracked",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "fc8df91d0d3aed3b262cab28f09a4841c9816bc6c4595fdeaa0ea0649663abd7",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/components/signing-surface.tsx",
+      "gitState": "untracked",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "0bd3ba0270ecbf0e6e6239c3bc6ec2de7aa977e88b29b8e6a9a63a60e404a1f4",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/components/solana-transfer-panel.tsx",
+      "gitState": "untracked",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "368cc162892c9b6d31a06a563faeca0fc4954b0695415e1984c4942975a531b0",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/components/wallet-proof.test.ts",
+      "gitState": "untracked",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "fbb1ddcc23e7b7c0a4e0e28b2904bd71aef3cdf7110396830a06390d150c8587",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/domain/solana-transfer-authoring.ts",
+      "gitState": "untracked",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "bf07ce99c83941a315e3bd6e2c8da5eedf0e78ef9c2f388c3e2cba567d8ae21a",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/domain/solana-transfer-capabilities.test.ts",
+      "gitState": "untracked",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "2d1e07177947284686180449b4ba26be7d59b246010da44c0cc7a258e596930e",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/domain/solana-transfer-integration.test.ts",
+      "gitState": "untracked",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "682a3f64c59076f0f609502d965ac373f7c3516e1b26095ca0470fb500df2ce8",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/i18n/pt-execution-ux.ts",
+      "gitState": "untracked",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "9b394620e0fea25360b8578f2f63fff9748d6ac8243675c0ae1cb3829de0ad84",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/mcp/handoff/solana-transfer-journey.pg.test.ts",
+      "gitState": "untracked",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "2f76bd92284e54d7538f88af1618a20f6b1fb56167f0c298880ef5bbbc184cfa",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": true
+    },
+    {
+      "path": "apps/reference-dapp/src/platform/approvals.test.ts",
+      "gitState": "untracked",
+      "staged": false,
+      "sha256": "3c7f4e7a23d69218c03518bb8e413b912c86fb70d46aa9a3b774ba90b2622739",
+      "presentAtOwnerAuditStart": false,
+      "changedInOwnerAudit": true
+    },
+    {
+      "path": "apps/reference-dapp/src/server/solana-transfer-service.test.ts",
+      "gitState": "untracked",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "068dd93e4f4353d00a674bdd5b9ce45fa8fe5c77e10f31134e235c48fdbfc03a",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/server/solana-transfer-service.ts",
+      "gitState": "untracked",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "bdbd3e98532aef1b94e415319fd6d8b07b656100a4cc142a6acb5726ef6accfa",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/state/solana-transfer-store.tsx",
+      "gitState": "untracked",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "77eff26197a29c3fc69849df64a95445c12178a4561f0be906bc16ae7af96223",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/state/wallet-connection.test.ts",
+      "gitState": "untracked",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "920b47eeceb5e7c55c756e0ba02f5891aaf51e6daba681e311894da7d83852e8",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/test-utils/registered-solana-session.ts",
+      "gitState": "untracked",
+      "staged": false,
+      "presentAtContinuationStart": false,
+      "sha256": "3f0ca590d4924b5c6b299ea0a1b5666c792fc693d481509c20067633d379e972",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/test-utils/signing-acceptance-harness.tsx",
+      "gitState": "untracked",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "07167417b0b1b393a63f5cb1bf3a7f71f24c6819071c198b619c882a1754d6b0",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "apps/reference-dapp/src/test-utils/solana-transfer-review-fixture.ts",
+      "gitState": "untracked",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "8b6264fe5b37e8d67ef9da262f97f6379e9f62b5d5159d2d7bc3be6d2ba1c20a",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "docs/builds/BUILD-SOLANA-TRANSFER-UX-001-AUDIT.md",
+      "gitState": "untracked",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "cfce53193abea5a191ce0da8570a08a2e0fa1bea67a2764d34db89b9b84c9392",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": true
+    },
+    {
+      "path": "docs/builds/BUILD-SOLANA-TRANSFER-UX-001-CERTIFICATION.md",
+      "gitState": "untracked",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "f0fb612f8a3e6cd08e019b6a042e7e16c712c4eb168b756a691e6442de9fecda",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": true
+    },
+    {
+      "path": "docs/builds/BUILD-SOLANA-TRANSFER-UX-001-HANDOFF.md",
+      "gitState": "untracked",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "5ab8f8c9ddeac074ec03d686068e660f7f2e9cf934605b34079b7abf838a97b0",
+      "changedInE2eMigration": true,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": true
+    },
+    {
+      "path": "docs/builds/BUILD-SOLANA-TRANSFER-UX-001-LEGACY-TESTS.md",
+      "gitState": "untracked",
+      "staged": false,
+      "sha256": "a6a324d0b042d7041da397c52176bd3e76137f9f8af3965b5e7d67d95bdfab59",
+      "presentAtOwnerAuditStart": false,
+      "changedInOwnerAudit": true
+    },
+    {
+      "path": "docs/builds/BUILD-SOLANA-TRANSFER-UX-001-PREVIEW-ISOLATION.md",
+      "gitState": "untracked",
+      "staged": false,
+      "sha256": "4e3b2a6b83c99527aae7ce1e5c4486e4512912f73c43ae05487c343be2644675",
+      "presentAtOwnerAuditStart": false,
+      "changedInOwnerAudit": true
+    },
+    {
+      "path": "docs/builds/BUILD-SOLANA-TRANSFER-UX-001-STATE.json",
+      "gitState": "untracked",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": null,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": true
+    },
+    {
+      "path": "packages/action-registry/src/solana-transfer.ts",
+      "gitState": "untracked",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "620d0815036c9b1f57eec7f518530ba0200151c2ee26fe2202d363f90fb278b0",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "packages/reference-compiler/src/solana-transfer-mock.ts",
+      "gitState": "untracked",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "5fd9335006f93c1402adb61e489c9c4c59f913305af40675ab560dd8a0c3bdbc",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "packages/reference-compiler/src/solana-transfer.ts",
+      "gitState": "untracked",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "0e169a9e5c7a96c6175de8b985f9222d5fdd071331491dc3c8df11b9cee90c26",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "packages/reference-compiler/test/solana-transfer.test.ts",
+      "gitState": "untracked",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "657538986af63c10bbe5552a832563fcc7aeffbd65cf890336eefb6c711f074c",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "packages/reference-executor/src/solana-transfer.ts",
+      "gitState": "untracked",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "330d634652297c22cf9533a1d6dc6767c9995195249d8bf29283ecea1cdae8a2",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "packages/reference-linter/src/solana-transfer.ts",
+      "gitState": "untracked",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "2b13fe82524b31582a4c0dbff02984812b95611db2c142cb43ad2195ef11960b",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "packages/reference-reconciler/src/solana-transfer.ts",
+      "gitState": "untracked",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "8ee19deea312368433a97d6eb8c7d7fd83c1f6a6ee2b97c13710b6e770c65e45",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    },
+    {
+      "path": "packages/workflow-contracts/src/solana-transfer.ts",
+      "gitState": "untracked",
+      "staged": false,
+      "presentAtContinuationStart": true,
+      "sha256": "c0f7c290495cec6a82dda853369f5802a2fc9e6f75f048b8fbfa0dbb6362ddcc",
+      "changedInE2eMigration": false,
+      "presentAtOwnerAuditStart": true,
+      "changedInOwnerAudit": false
+    }
+  ],
+  "continuationStartInventory": "session scratchpad start-of-turn-hashes.json (126 paths, HEAD 616598f), matched the previous inventory exactly",
+  "ownerAuditCheckpoint": {
+    "date": "2026-10-19",
+    "startingInventory": "/tmp/flofi-transfer-owner-audit-start-20261019.json",
+    "preservedIncomingBrowserResults": {
+      "profilesPassed": 44,
+      "browserTestsPassed": 372,
+      "compositionPassed": 1,
+      "liveBuild009Excluded": true,
+      "fullMatrixRerunInThisContinuation": false,
+      "artifactBackup": "/tmp/flofi-owner-audit-inherited-browser-results-20261019"
+    },
+    "protectedArchitecture": [
+      {
+        "path": ".circleci/config.yml",
+        "sha256": "668e0bc9690fc46050a08cf0828948ed80968a3f5efd696dcd857af16c1c052e",
+        "unchangedSinceStart": true
+      },
+      {
+        "path": "scripts/guarded-release-browser.mjs",
+        "sha256": "c0e0e5f7975bdadc18850956785d64161f2ce81c0135cf1726f70bdec2eabf8f",
+        "unchangedSinceStart": true
+      },
+      {
+        "path": "scripts/test_ci_optimization.py",
+        "sha256": "6145da211dec6192c8608ddb90c63b8ab38c821081a9c6c85922f9a4f3face42",
+        "unchangedSinceStart": true
+      }
+    ],
+    "validation": {
+      "fullUnits": {
+        "passed": 4760,
+        "skipped": 2,
+        "log": "/tmp/flofi-owner-audit-unit-final-20261019.log"
+      },
+      "focusedLifecycleAndGates": {
+        "passed": 59,
+        "log": "/tmp/flofi-owner-audit-focused-final-20261019.log"
+      },
+      "postgresSlice": {
+        "passed": 21,
+        "files": 4,
+        "fullPostgresGate": false,
+        "log": "/tmp/flofi-owner-audit-postgres-final-20261019.log"
+      },
+      "targetedBrowserProfiles": {
+        "approve-authorize-journeys": 2,
+        "channel-approve": 3,
+        "mcp-in-chat": 21,
+        "developer-journey": 1
+      },
+      "dashboardFoundation": {
+        "passed": 5,
+        "scope": "draft graph navigation, disabled unavailable simulation, zero signatures",
+        "log": "/tmp/flofi-owner-audit-dashboard-final-20261019.log"
+      },
+      "buildTasksPassed": 9,
+      "typecheckTasksPassed": 16,
+      "lint": "PASS",
+      "ciArchitectureTestsPassed": 41,
+      "governanceTestsPassed": 19,
+      "governanceScan": "PASS",
+      "schemaExportsVerified": 11,
+      "whitespace": "PASS"
+    },
+    "localDatabase": {
+      "name": "flofi-transfer-owner-audit-20261019",
+      "endpoint": "127.0.0.1:29433",
+      "image": "postgres:18.6-bookworm@sha256:3725f4e2499eef5134592b3b4ab79a543ed7f8e533b05b5b637af926630f6650",
+      "productionCredentialsOrVolumes": false,
+      "stoppedAndAutomaticallyRemoved": true
+    },
+    "vercel": {
+      "inspection": "metadata only; values not decrypted",
+      "configurationChanges": 0,
+      "productionDatabaseConnections": 0,
+      "branchSpecificDatabaseOverridePresent": false,
+      "sharedProductionPreviewDatabaseUrlPresent": true
+    },
+    "ownerApprovalsRequired": [
+      "Exact Vercel branch exclusion or dedicated isolated Preview provisioning and configuration, verified before any push",
+      "A9 external rollout and any deployment/policy execution opt-ins",
+      "Explicit future push/PR/CI instruction after authenticated budget, trigger and context/secret safety evidence"
+    ],
+    "remainingCertificationGaps": [
+      "Full PostgreSQL gate",
+      "Fork suites",
+      "Live LI.FI build009",
+      "Documented legacy protocol-specific positive browser execution/recovery",
+      "Dashboard retention of completed simulation results",
+      "Real MCP hosts and wallet extensions",
+      "Live-chain execution and additional-mint/Token-2022 RPC certification"
+    ]
+  },
+  "updatedAtUtc": "2026-10-19T23:49:33.351078+00:00",
+  "filesInventoryScope": "files/counts retain the pre-GCP owner-audit checkpoint; the complete submitted source inventory is cloudbuild-source-manifest.json. Post-build report/handoff/state files are outside the tested snapshot.",
+  "cloudBuildCertification": {
+    "id": "1b85bb9b-41ca-4b0c-9096-5a45abbc318f",
+    "url": "https://console.cloud.google.com/cloud-build/builds;region=europe-west1/1b85bb9b-41ca-4b0c-9096-5a45abbc318f?project=547158547199",
+    "status": "FAILURE",
+    "project": "celtic-volt-418819",
+    "region": "europe-west1",
+    "startTime": "2026-10-19T01:40:12.675968910Z",
+    "finishTime": "2026-10-19T02:14:13.208341Z",
+    "sourceSha256": "3326ec102e2b37459d2967168189d2809093846f472e94739bf773367ccedf9c",
+    "serviceAccount": "projects/celtic-volt-418819/serviceAccounts/flofi-ci-runner@celtic-volt-418819.iam.gserviceaccount.com",
+    "summary": {
+      "sourceFilesVerified": 2501,
+      "sourceBytesVerified": 115038287,
+      "snapshotSha256": "3326ec102e2b37459d2967168189d2809093846f472e94739bf773367ccedf9c",
+      "governanceTestsPassed": 19,
+      "ciTestsPassed": 45,
+      "unitTestsPassed": 4760,
+      "unitTestsSkipped": 2,
+      "postgresTestsPassed": 443,
+      "postgresTestsFailed": 2,
+      "postgresTestsSkipped": 3,
+      "postgresFilesPassed": 68,
+      "postgresFilesFailed": 1,
+      "postgresFilesSkipped": 1,
+      "failedFile": "apps/reference-dapp/src/channels/whatsapp/journey.pg.test.ts",
+      "failedAssertions": [
+        112,
+        182
+      ],
+      "notReached": [
+        "Anvil bootstrap",
+        "fork suites",
+        "browser bootstrap",
+        "44 guarded browser profiles",
+        "composition",
+        "strict certification ledger fan-in"
+      ],
+      "attemptsSubmitted": 1,
+      "retriesSubmitted": 0,
+      "deploymentCount": 0
+    },
+    "report": "docs/builds/BUILD-SOLANA-TRANSFER-UX-001-CLOUD-BUILD.md",
+    "ownerApprovalRequiredForAnotherAttempt": true
+  },
+  "latestCloudCertification": {
+    "url": "https://console.cloud.google.com/cloud-build/builds;region=europe-west1/609a0156-d8b5-4afc-bac7-82ca65715638?project=celtic-volt-418819",
+    "result": "FAILURE",
+    "completeGreenCertification": false,
+    "sourceSnapshotSha256": "e5ec97df6a3d7595a0eeb6f2d82fa2e84fc04d6520c7ead5d952220160d0b9f0",
+    "postBuildLocalFix": {
+      "file": "apps/reference-dapp/e2e/copilot-learning-memory.spec.ts",
+      "cause": "The single multi-wallet, multi-session PostgreSQL browser journey exhausted its 30-second overall test deadline at different late steps: original consent-off assertion line 140; diagnostic privacy navigation line 136. Neither failure exhausted the individual 10-second assertion deadline.",
+      "change": "Set only this journey total timeout to 60 seconds; retain every assertion, 10-second assertion timeout, zero retries, database-erasure checks and no-signing checks.",
+      "localBaseline": "Unmodified test passed on two local CPU cores with trace: 1/1, 18.6s test / 27.8s run. Consent-off completed in 0.8s; full deletion assertions passed.",
+      "localFixedGuardedProfile": "PASS, 1/1, two local CPU cores, pinned disposable loopback PostgreSQL.",
+      "eslint": "PASS",
+      "productCodeChanged": false,
+      "includedInSubmittedCloudSnapshot": false,
+      "fixedFileSha256": "421c86043bce854fea0ba647fe9848603d794eb09d0381ea4f872ed0b64f567f"
+    },
+    "outstandingBlockers": [
+      "Complete green Cloud Build certification remains outstanding: copilot-learning failed remotely; the other 44 browser profiles, composition and final ledger were not reached.",
+      "The narrowly corrected current worktree needs a new full remote run. The one newly authorized attempt was consumed; another attempt requires fresh owner authorization.",
+      "The GREEN condition for PR preparation was not met. Branch remains uncommitted and unpushed; Preview exclusion/isolation and required GitHub statuses remain outstanding before release."
+    ],
+    "id": "609a0156-d8b5-4afc-bac7-82ca65715638",
+    "finishTime": "2026-10-19T23:46:23.971272Z",
+    "report": "/home/asus/projects/flofi-solana-transfer-ux-001/docs/builds/BUILD-SOLANA-TRANSFER-UX-001-CLOUD-FINAL-ATTEMPT.md"
+  },
+  "cloudOrchestrationPreparation": {
+    "updatedAtUtc": "2026-10-20T00:03:07.993824+00:00",
+    "status": "READY_LOCALLY_NOT_SUBMITTED",
+    "report": "docs/builds/BUILD-SOLANA-TRANSFER-UX-001-CI-ORCHESTRATION.md",
+    "executionOrder": [
+      "required setup and production build",
+      "critical browser profiles (6)",
+      "extended browser profiles (38, two sequential groups)",
+      "composition fork and browser (1 profile)",
+      "typecheck",
+      "lint",
+      "schema drift",
+      "units and contracts",
+      "complete PostgreSQL",
+      "Anvil and offline forks",
+      "strict certification ledger and summary"
+    ],
+    "allProfilesContinueAfterIndependentFailure": true,
+    "requiredStages": 18,
+    "requiredBrowserProfiles": 45,
+    "failClosed": true,
+    "ciSelfTestsPassed": 54,
+    "governanceSelfTestsPassed": 19,
+    "learningRepeats": {
+      "passed": 5,
+      "failed": 0,
+      "processCpuAffinity": [
+        0,
+        1
+      ],
+      "singleWorker": true,
+      "freshProfileInvocations": true,
+      "disposableLoopbackPostgres": true,
+      "invocationSeconds": [
+        25.86,
+        24.44,
+        22.95,
+        25.2,
+        23.12
+      ],
+      "evidence": "/tmp/flofi-ci-learning-repeat-20261020/results.json"
+    },
+    "additionalCloudBuildSubmissions": 0,
+    "newAuthorizationRequiredBeforeSubmission": true,
+    "productCodeChanged": false,
+    "fullLocalCertificationRun": false
+  }
+}

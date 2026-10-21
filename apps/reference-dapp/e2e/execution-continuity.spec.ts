@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /** Real public-swap UI/API/durable runtime, synthetic loopback RPC and explicit scripted owner confirmations. No public broadcast. */
 import type { APIRequestContext, Page } from '@playwright/test';
-import { test, expect, acceptProductReview } from './fixtures';
+import { test, expect, AUTHORIZE_IN_WALLET } from './fixtures';
 import { installJourneyWallet, synchronizeWallet, walletRequests } from './journey-fixtures';
 import { createTestWallet } from '../../../packages/reference-reconciler/test/test-wallet';
 import { createDatabase } from '@defi-workflow-engine/cloud-runtime';
@@ -15,6 +15,8 @@ const stage = (page: Page, name: 'Build' | 'Simulate' | 'Execute') => page.getBy
 const summary = (page: Page) => page.locator('.execution-summary');
 const falseWalletChange = 'Wallet changed. Simulate and review this workflow again with the connected wallet.';
 const pointer = (page: Page) => page.evaluate(() => localStorage.getItem('gryloo:public-testnet-execution-id'));
+/** BUILD-SOLANA-TRANSFER-UX-001: the one owner action after a simulation (Review acceptance, then the wallet request). */
+const authorize = (page: Page) => page.locator('.canvas-primary-action').getByRole('button', { name: AUTHORIZE_IN_WALLET, exact: true });
 async function durable(id: string) {
   const url = process.env.FLOFI_E2E_DATABASE_URL!;
   if (!['127.0.0.1', 'localhost', '[::1]'].includes(new URL(url).hostname)) throw Error('LOOPBACK_DATABASE_REQUIRED');
@@ -73,8 +75,10 @@ async function setup(page: Page, request: APIRequestContext, loseAt = 0) {
   await card.getByRole('textbox', { name: 'Source amount (USDC)', exact: true }).press('Enter');
   await stage(page, 'Simulate');
   await page.getByRole('button', { name: 'Simulate workflow', exact: true }).click();
-  await acceptProductReview(page);
-  await expect(page.getByRole('button', { name: 'Execute workflow', exact: true })).toBeEnabled();
+  // The fresh simulation offers one owner action; nothing is accepted or requested from the wallet until the owner clicks it.
+  await expect(authorize(page)).toBeEnabled();
+  await expect(authorize(page)).toHaveAttribute('data-lifecycle-action', 'approve');
+  expect(requested).toBe(0);
   return {
     requested: () => requested,
     confirm: async () => { await expect.poll(() => confirmations.length).toBe(1); confirmations.shift()!(); },
@@ -85,9 +89,11 @@ async function setup(page: Page, request: APIRequestContext, loseAt = 0) {
 test('production regression: same MetaMask/account/Base Sepolia → approval CONFIRMED → harmless sync → explicit swap → reconciled evidence', async ({ page, request, networkGuard }) => {
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
   const owner = await setup(page, request), id = await pointer(page);
-  await page.getByRole('button', { name: 'Execute workflow', exact: true }).click();
+  // Two clicks in one browser turn: Review acceptance and the first wallet request happen once.
+  await authorize(page).evaluate(button => { (button as HTMLButtonElement).click(); (button as HTMLButtonElement).click(); });
   await expect.poll(owner.requested).toBe(1);
   await expect(summary(page)).toContainText('Preparing request');
+  await page.waitForTimeout(300); expect(owner.requested()).toBe(1);
   expect(await owner.sends()).toBe(0);
   // Wallet extension sync during interaction, followed by owner confirmation of approval.
   await synchronizeWallet(page); await owner.confirm();
@@ -139,7 +145,7 @@ test('production regression: same MetaMask/account/Base Sepolia → approval CON
 
 test('reload after confirmed approval recovers the same run and refreshes its quote without resending approval', async ({ page, request }) => {
   const owner = await setup(page, request), id = await pointer(page);
-  await page.getByRole('button', { name: 'Execute workflow', exact: true }).click(); await owner.confirm();
+  await authorize(page).click(); await owner.confirm();
   await expect(page.locator('.canvas-primary-action').getByRole('button', { name: 'Continue to swap', exact: true })).toBeEnabled();
   await page.reload(); await stage(page, 'Execute');
   await expect(summary(page)).toContainText('Current execution restored');
@@ -147,23 +153,26 @@ test('reload after confirmed approval recovers the same run and refreshes its qu
   await expect(page.locator('.canvas-primary-action').getByRole('button', { name: 'Continue to swap', exact: true })).toHaveCount(0);
   await stage(page, 'Simulate');
   await page.getByRole('region', { name: 'Simulation workflow graph', exact: true }).getByRole('button', { name: 'Simulate again', exact: true }).click();
-  await page.locator('.canvas-primary-action').getByRole('button', { name: 'Approve & Continue', exact: true }).click();
-  await stage(page, 'Execute');
+  // BUILD-SOLANA-TRANSFER-UX-001: the one owner action accepts the refreshed Review and makes the swap's wallet request; the confirmed
+  // approval is never requested again.
+  await expect(authorize(page)).toBeEnabled(); expect(owner.requested()).toBe(1);
+  await authorize(page).click();
+  await expect.poll(owner.requested).toBe(2);
   expect(await pointer(page)).toBe(id); expect(await owner.sends()).toBe(1);
-  const next = page.locator('.canvas-primary-action').getByRole('button', { name: 'Continue to swap', exact: true });
-  await expect(next).toBeEnabled(); await next.click(); await owner.confirm();
+  await expect(page.locator('.canvas-primary-action').getByRole('button', { name: 'Continue to swap', exact: true })).toHaveCount(0);
+  await owner.confirm();
   await expect(summary(page)).toContainText('Execution completed');
   expect(await owner.sends()).toBe(2); expect(owner.requested()).toBe(2);
 });
 
 test('lost second wallet response stays uncertain across sync and reload and never blindly retries', async ({ page, request }) => {
   const owner = await setup(page, request, 2), id = await pointer(page);
-  await page.getByRole('button', { name: 'Execute workflow', exact: true }).click(); await owner.confirm();
+  await authorize(page).click(); await owner.confirm();
   const next = page.locator('.canvas-primary-action').getByRole('button', { name: 'Continue to swap', exact: true });
   await expect(next).toBeEnabled(); await next.click(); await owner.confirm();
   await expect(summary(page)).toContainText('Execution status unresolved');
   await synchronizeWallet(page);
-  await expect(page.locator('.canvas-primary-action').getByRole('button', { name: /Continue to|Execute workflow|Retry|Try again/ })).toHaveCount(0);
+  await expect(page.locator('.canvas-primary-action').getByRole('button', { name: /Continue to|Authorize in wallet|Retry|Try again/ })).toHaveCount(0);
   expect((await durable(id!)).attempts).toMatchObject([{ step: 'APPROVAL', state: 'CONFIRMED' }, { step: 'SWAP', state: 'UNKNOWN' }]);
   expect(await owner.sends()).toBe(2); expect(owner.requested()).toBe(2);
   // BUILD-SOLANA-MAINNET-001 (requirement E): even on a new visit (no tab session), an execution that still needs the owner is brought back to observe.
@@ -171,5 +180,5 @@ test('lost second wallet response stays uncertain across sync and reload and nev
   await page.reload(); await stage(page, 'Execute');
   await expect(summary(page)).toContainText('Execution status unresolved');
   expect(await pointer(page)).toBe(id); expect(await owner.sends()).toBe(2); expect(owner.requested()).toBe(2);
-  await expect(page.locator('.canvas-primary-action').getByRole('button', { name: /Continue to|Execute workflow|Retry|Try again/ })).toHaveCount(0);
+  await expect(page.locator('.canvas-primary-action').getByRole('button', { name: /Continue to|Authorize in wallet|Retry|Try again/ })).toHaveCount(0);
 });

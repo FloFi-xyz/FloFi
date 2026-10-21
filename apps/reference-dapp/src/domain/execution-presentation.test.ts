@@ -5,7 +5,7 @@ import { canContinueExecution, projectExecution, startReviewedExecution, type Ex
 import { reviewFixture, reviewNow, reviewOwner, reviewSpender } from '../test-utils/review-fixture';
 function fixture(): ExecutionWorkspaceState {
   const data = reviewFixture(); data.authorization.accepted = true;
-  return { ...data, execution: { ready: true, started: false, start: vi.fn(), prompt: 'Confirm in your wallet.', expiresAt: null, requiresMainnetAcknowledgement: false } };
+  return { ...data, execution: { ready: true, started: false, start: vi.fn(), prompt: 'Confirm in your wallet.', expiresAt: null } };
 }
 describe('Execute preflight presentation and explicit start boundary', () => {
   it('uses the reviewed plan and requires both authorization and runtime readiness', () => {
@@ -82,10 +82,11 @@ describe('Execute preflight presentation and explicit start boundary', () => {
       expect(view.canExecute).toBe(false); expect(view.message).not.toMatch(/raw_request_id|INSUFFICIENT_USDC/);
     }
   });
-  it('preserves the existing Solana mainnet acknowledgement gate', () => {
-    const data = fixture(); data.execution.requiresMainnetAcknowledgement = true;
-    expect(projectExecution(data, reviewNow)).toMatchObject({ label: 'Confirmation required', canExecute: false });
-    data.acknowledged = true; expect(projectExecution(data, reviewNow).canExecute).toBe(true);
+  it('needs no separate real-funds acknowledgement once the reviewed authority is ready (BUILD-SOLANA-TRANSFER-UX-001)', () => {
+    // The Review shows the network and real funds; the wallet confirmation is the owner's explicit consent. No extra checkbox gates execution.
+    const data = fixture();
+    expect(projectExecution(data, reviewNow)).toMatchObject({ label: 'Ready to execute', canExecute: true });
+    expect(projectExecution(data, reviewNow).label).not.toBe('Confirmation required');
   });
   it('distinguishes a missing review from an unapproved current review', () => {
     const data = fixture(); data.authorization.key = null;
