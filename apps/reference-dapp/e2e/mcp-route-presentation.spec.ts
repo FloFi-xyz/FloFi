@@ -132,14 +132,21 @@ test.describe(`MCP route presentation (OAuth ${enabled ? 'enabled' : 'disabled'}
       const url = await issueApproval(page), secret = new URL(url).hash.slice(1);
       let release!: () => void;
       const ready = new Promise<void>(resolve => { release = resolve; });
+      let lookupStarted!: () => void;
+      const pendingLookup = new Promise<void>(resolve => { lookupStarted = resolve; });
       const response = page.waitForResponse(result => result.request().postData()?.includes(secret) === true);
       await page.route('**/approve', async route => {
-        if (route.request().headers()['next-action'] && route.request().postData()?.includes(secret)) await ready;
+        if (route.request().headers()['next-action'] && route.request().postData()?.includes(secret)) {
+          lookupStarted();
+          await ready;
+        }
         await route.continue();
       });
       try {
         await page.goto(url);
         await expect(page.getByRole('heading', { name: 'Opening your approval' })).toBeVisible();
+        // The loading heading is server-rendered too. Wait for the hydrated gate to actually start its lookup before superseding it.
+        await pendingLookup;
         // Change the fragment in the same document while the valid lookup is pending.
         // This exercises the gate's request generation rather than cancelling it by navigation.
         await page.evaluate(() => { window.location.hash = 'incomplete'; });
