@@ -437,3 +437,81 @@ COMMIT;
 `forward-compatibility.pg.test.ts` runs exactly this block (read from this document): on 0014 it restores the v13 catalog exactly (the referential
 triggers on `learning_subjects` go with the tables), the v13 build then sees its exact schema, and 0014 can be applied again; on a tampered or later
 ledger it refuses and changes nothing.
+
+## 9. Certificate 0015_workflow_runs
+
+Written by BUILD-CHAT-E2E-001 one release ahead of its migration. **Release A** is the certificate alone (the `CERTIFIED_FORWARD_MIGRATIONS` entry, the
+fixture `packages/cloud-runtime/test/fixtures/0015_workflow_runs.sql`, this section and the `forward-compatibility` tests); **Release B** ships the
+migration and workflow runs (off by default: `FLOFI_WORKFLOW_RUNS`).
+
+**Identity.** `packages/cloud-runtime/migrations/0015_workflow_runs.sql`: 14,967 bytes, git blob `818bc3ef`, SHA-256
+`5dfefcf7465d874da5880ae5a082f7f47e28ede51adfdef46dbbe3e3f7ba945f`. Assessed against the v14 build (`base`: `14 learning_automatic 624884d9…`).
+
+**What it creates and changes** (the catalog diff in `forward-compatibility.pg.test.ts` lists every item):
+
+* new tables `workflow_runs`, `workflow_run_steps`, `workflow_run_events` with their checks, indexes, forward-only triggers and functions;
+* **changes to pre-existing relations** (unlike 0012–0014): `delegated_authorizations.rule_id`, `delegated_executions.rule_id` and
+  `delegated_executions.occurrence_id` become nullable; each table gains a nullable `workflow_run_id`, an exclusive-source check, a foreign key to
+  `workflow_runs`, a uniqueness rule and a column-scoped trigger that fires only when `workflow_run_id` itself is written; the foreign keys of
+  `workflow_runs` add PostgreSQL's internal referential triggers on `tenants` and `mcp_handoffs`. No pre-existing function, trigger or index is redefined.
+
+**Why the v14 build is unaffected.** v14 code never names a 0015 object. Every row it writes has a rule (and occurrence) and a null
+`workflow_run_id`, so it satisfies every new check; it never updates `workflow_run_id`, so the new trigger never fires for it. A v14 process could
+only read a row with a null rule if a Release B process created a delegated workflow run, which needs `FLOFI_DELEGATION` and a signer provider —
+off in standard production. **Do not enable delegated workflow runs until every process runs Release B.**
+
+**Locks while it is open** (observed with `pg_locks`): `delegated_authorizations` and `delegated_executions` in `AccessExclusiveLock` (every delegated
+read or write waits), `mcp_handoffs` and `tenants` in `ShareRowExclusiveLock` (approval-handoff writes and a brand-new tenant wait). Cold starts,
+runs, journals, the queue and handoff reads proceed. Its own waits are bounded by `SET LOCAL lock_timeout = '5s'`.
+
+**Duration.** 20–25 ms on loopback PostgreSQL 18.6 with empty delegated tables (two runs). The exclusive-source checks scan the two delegated tables,
+so the window grows with their size; a measurement with large delegated tables was not completed in this build.
+
+### 9.1 Rollout
+
+Release A everywhere first (Railway `flofi-api`/`flofi-worker`, Vercel Production, any Preview on the production database, operator CLIs), then
+Release B (pre-deploy `migrate.applied versions=15`). Workflow runs stay off until the owner sets `FLOFI_WORKFLOW_RUNS=enabled`.
+
+### 9.2 Recovery and rollback
+
+| Situation | Safe action |
+| --- | --- |
+| Before 0015 is applied | Any rollback to Release A or later is safe. |
+| 0015 applied; Release B misbehaves | Unset `FLOFI_WORKFLOW_RUNS`, or roll back to Release A (it serves on 0015). |
+| 0015 applied; a build **older than Release A** | **Unsafe**: it refuses the database (`MIGRATION_HISTORY_MISMATCH`). |
+| 0015 itself must go (last resort) | §9.3, only with Release A serving everywhere and no delegated workflow-run authorization. |
+
+### 9.3 Emergency reversal of 0015 (last resort)
+
+Destroys every workflow run. Refuses — changing nothing — unless 0015 is the newest, certified migration and no delegated authorization or execution
+has a workflow run as its source:
+
+```sql
+BEGIN;
+SET LOCAL lock_timeout = '5s';
+DO $$
+BEGIN
+  IF (SELECT count(*) FROM schema_migrations WHERE version >= 15) <> 1 THEN
+    RAISE EXCEPTION 'REVERSAL_REFUSED: 0015 is not the newest migration';
+  END IF;
+  DELETE FROM schema_migrations WHERE version = 15 AND name = 'workflow_runs'
+    AND sha256 = '5dfefcf7465d874da5880ae5a082f7f47e28ede51adfdef46dbbe3e3f7ba945f';
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'REVERSAL_REFUSED: not the certified 0015';
+  END IF;
+  IF EXISTS (SELECT 1 FROM delegated_authorizations WHERE workflow_run_id IS NOT NULL) OR EXISTS (SELECT 1 FROM delegated_executions WHERE workflow_run_id IS NOT NULL) THEN
+    RAISE EXCEPTION 'REVERSAL_REFUSED: delegated workflow runs exist';
+  END IF;
+END $$;
+DROP TRIGGER delegated_executions_source_immutable ON delegated_executions;
+DROP TRIGGER delegated_authorizations_source_immutable ON delegated_authorizations;
+DROP FUNCTION delegated_workflow_run_source_immutable();
+DROP INDEX delegated_executions_one_per_run;
+ALTER TABLE delegated_executions DROP CONSTRAINT delegated_executions_workflow_run, DROP CONSTRAINT delegated_executions_source, DROP COLUMN workflow_run_id,
+  ALTER COLUMN occurrence_id SET NOT NULL, ALTER COLUMN rule_id SET NOT NULL;
+ALTER TABLE delegated_authorizations DROP CONSTRAINT delegated_authorizations_workflow_run_owner, DROP CONSTRAINT delegated_authorizations_workflow_run,
+  DROP CONSTRAINT delegated_authorizations_source, DROP COLUMN workflow_run_id, ALTER COLUMN rule_id SET NOT NULL;
+DROP TABLE workflow_run_events, workflow_run_steps, workflow_runs;
+DROP FUNCTION workflow_run_transition(), workflow_run_step_transition(), workflow_run_append_only();
+COMMIT;
+```

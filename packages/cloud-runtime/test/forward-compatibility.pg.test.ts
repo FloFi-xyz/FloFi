@@ -627,3 +627,191 @@ describe('BUILD-CHAT-LEARNING-002 what 0014 does to a v13 database (PostgreSQL)'
     expect(await migrate(t.db, V14M)).toEqual([14]);
   });
 });
+
+/**
+ * BUILD-CHAT-E2E-001: the fourth certificate. The v14 build (BUILD-CHAT-LEARNING-002 as merged) with its certificate for 0015 — the exact bytes
+ * BUILD-CHAT-E2E-001 releases (a SHA-256-pinned fixture) — on real ledgers, runners and the real lock window. Unlike 0012–0014, 0015 also relaxes
+ * two pre-existing tables (a workflow run becomes a second possible source of a delegated authorization or execution): every such change is
+ * listed here exactly, existing rows keep their values and satisfy every new rule, and the documented reversal restores the v14 catalog.
+ */
+describe('BUILD-CHAT-E2E-001 what 0015 does to a v14 database (PostgreSQL)', () => {
+  const RUNS = CERTIFIED_FORWARD_MIGRATIONS.find(c => c.migrations.some(m => m.name === 'workflow_runs'))!;
+  const V14_BUILD = SHIPPED_MIGRATIONS.slice(0, 14);
+  const AUTHORIZATION = 'dau_' + 'a'.repeat(26), HANDOFF = 'apr_' + 'a'.repeat(26);
+  let V14M: readonly Migration[], M15: Migration, V15M: readonly Migration[];
+  beforeAll(async () => {
+    const sql = await readFile(new URL('./fixtures/0015_workflow_runs.sql', import.meta.url), 'utf8');
+    M15 = { version: 15, name: 'workflow_runs', sql, sha256: createHash('sha256').update(sql).digest('hex') };
+    V14M = (await loadMigrations()).slice(0, 14);
+    V15M = [...V14M, M15];
+  });
+  /** v14 data next to which 0015 lands: v11's kinds, an approval handoff (MCP/channels) and a v11 delegated authorization lineage of a rule. */
+  async function seed14(db: Database) {
+    await seed(db);
+    await db.query(`INSERT INTO mcp_handoffs (tenant_id, handoff_id, requester_kind, requester_id, client_id, client_name, secret_digest, strategy, workflow_hash,
+        engine_version, network_environment, funds_class, plan, status, expires_at) VALUES ('default', $1, 'CHANNEL_CONVERSATION', 'cnv_compat', 'telegram-compat',
+        'Telegram', $2, '{}', $3, 'flofi-engine-2', 'PUBLIC_TESTNET', 'TEST_FUNDS', '{"kind":"SINGLE_FLOW"}', 'PENDING', now() + interval '1 hour')`,
+    [HANDOFF, Buffer.alloc(32, 7), '0x' + '1'.repeat(64)]);
+    await db.query(`INSERT INTO delegated_authorizations (tenant_id, authorization_id, owner_namespace, owner_account, rule_id, state)
+      VALUES ('default', $1, 'eip155', $2, $3, 'PENDING_SIGNATURE')`, [AUTHORIZATION, OWNER, RULE]);
+    await db.query(`INSERT INTO delegated_authorization_revisions (tenant_id, authorization_id, revision, owner_namespace, owner_account, state, strategy, workflow_hash,
+      manifest, manifest_hash) VALUES ('default', $1, 1, 'eip155', $2, 'PENDING_SIGNATURE', '{}', $3, '{}', $3)`, [AUTHORIZATION, OWNER, '0x' + '2'.repeat(64)]);
+  }
+
+  it('the v14 build serves the certified 0015 schema; the strict check and a build without the certificate refuse; a runner never changes it', async () => {
+    expect(identity(M15)).toEqual(RUNS.migrations[0]);
+    const t = await database(V15M), shape = await catalog(t.db), history = await ledger(t.db);
+    expect(await assertSchemaCompatible(t.db, V14_BUILD)).toEqual({ version: 15, application: 14, forward: [identity(M15)] });
+    expect(await outcome(assertSchemaCurrent(t.db, V14_BUILD))).toEqual(MISMATCH);
+    expect(await outcome(assertSchemaCompatible(t.db, V14_BUILD, CERTIFIED_FORWARD_MIGRATIONS.filter(c => c !== RUNS)))).toEqual(MISMATCH);
+    expect(await migrate(t.db, V14M)).toEqual([]);
+    expect(await catalog(t.db)).toEqual(shape);
+    expect(await ledger(t.db)).toEqual(history);
+    await t.db.query(`UPDATE schema_migrations SET sha256 = repeat('f', 64) WHERE version = 15`);
+    expect(await outcome(assertSchemaCompatible(t.db, V14_BUILD))).toEqual(MISMATCH);
+    expect(await outcome(migrate(t.db, V14M))).toEqual(MISMATCH);
+    const at14 = await database(V14M);
+    expect(await assertSchemaCompatible(at14.db, V14_BUILD)).toEqual({ version: 14, application: 14, forward: [] });
+    expect(await outcome(assertSchemaCompatible(at14.db, V15M))).toEqual(BEHIND);
+  });
+
+  it('changes pre-existing objects only as listed; every existing row keeps its values and satisfies every new rule', async () => {
+    const t = await database(V14M);
+    await seed14(t.db);
+    const before = await catalog(t.db);
+    const tables = [...before.keys()].filter(k => k.startsWith('relation:') && before.get(k)!.startsWith('r ')).map(k => k.slice('relation:'.length))
+      .filter(table => table !== 'schema_migrations');
+    const rows = await data(t.db, tables.filter(table => !/^delegated_(authorizations|executions)$/.test(table))), history = await ledger(t.db);
+    const lineage = (await t.db.query(`SELECT authorization_id, owner_account, rule_id, state, version FROM delegated_authorizations`)).rows;
+    expect(await migrate(t.db, V15M)).toEqual([15]);
+    expect((await ledger(t.db)).slice(0, -1)).toEqual(history);
+    const after = await catalog(t.db);
+    // The three NOT NULL relaxations (PostgreSQL 18 models NOT NULL as named constraints) are the only removals and redefinitions.
+    expect([...before.keys()].filter(key => !after.has(key))).toEqual(['constraint:delegated_authorizations.delegated_authorizations_rule_id_not_null',
+      'constraint:delegated_executions.delegated_executions_rule_id_not_null', 'constraint:delegated_executions.delegated_executions_occurrence_id_not_null']);
+    expect([...before.keys()].filter(key => after.has(key) && after.get(key) !== before.get(key))).toEqual(['column:delegated_authorizations.rule_id',
+      'column:delegated_executions.rule_id', 'column:delegated_executions.occurrence_id']);
+    const own = (key: string) => /^(relation|index):workflow_run/.test(key) || /^(column|constraint|trigger):workflow_run/.test(key) || /^function:workflow_run/.test(key);
+    expect([...after.keys()].filter(key => !before.has(key) && !own(key)).sort()).toEqual([
+      'column:delegated_authorizations.workflow_run_id', 'column:delegated_executions.workflow_run_id',
+      'constraint:delegated_authorizations.delegated_authorizations_source', 'constraint:delegated_authorizations.delegated_authorizations_workflow_run',
+      'constraint:delegated_authorizations.delegated_authorizations_workflow_run_owner', 'constraint:delegated_executions.delegated_executions_source',
+      'constraint:delegated_executions.delegated_executions_workflow_run', 'function:delegated_workflow_run_source_immutable()',
+      'index:delegated_authorizations_workflow_run', 'index:delegated_executions_one_per_run',
+      'trigger:delegated_authorizations.delegated_authorizations_source_immutable',
+      'trigger:delegated_authorizations.internal:delegated_authorizations_workflow_run_owner:RI_FKey_check_ins',
+      'trigger:delegated_authorizations.internal:delegated_authorizations_workflow_run_owner:RI_FKey_check_upd',
+      'trigger:delegated_executions.delegated_executions_source_immutable',
+      'trigger:delegated_executions.internal:delegated_executions_workflow_run:RI_FKey_check_ins',
+      'trigger:delegated_executions.internal:delegated_executions_workflow_run:RI_FKey_check_upd',
+      'trigger:mcp_handoffs.internal:workflow_runs_tenant_id_handoff_id_fkey:RI_FKey_noaction_del',
+      'trigger:mcp_handoffs.internal:workflow_runs_tenant_id_handoff_id_fkey:RI_FKey_noaction_upd',
+      'trigger:tenants.internal:workflow_runs_tenant_id_fkey:RI_FKey_noaction_del', 'trigger:tenants.internal:workflow_runs_tenant_id_fkey:RI_FKey_noaction_upd']);
+    expect(await data(t.db, tables.filter(table => !/^delegated_(authorizations|executions)$/.test(table)))).toEqual(rows);
+    expect((await t.db.query(`SELECT authorization_id, owner_account, rule_id, state, version FROM delegated_authorizations`)).rows).toEqual(lineage);
+    // The v14 build's own writes keep their meaning: its delegated lineage moves through its transitions (the new trigger never fires for it).
+    await t.db.query(`UPDATE delegated_authorizations SET state = 'REVOKED', revoked_at = now(), revoke_code = 'OWNER_REVOKED', version = version + 1
+      WHERE authorization_id = $1`, [AUTHORIZATION]);
+    // A v14 handoff can still be revoked and deleted (no workflow run references it).
+    await t.db.query(`UPDATE mcp_handoffs SET status = 'REVOKED', ended_at = now() WHERE handoff_id = $1`, [HANDOFF]);
+    expect((await t.db.query(`DELETE FROM mcp_handoffs WHERE handoff_id = $1`, [HANDOFF])).rowCount).toBe(1);
+  });
+
+  it('while 0015 is open, only tenant, approval-handoff and delegated writes wait for it (bounded by its transaction); cold starts, runs and the queue never wait', async () => {
+    const t = await database(V14M);
+    await seed14(t.db);
+    const runner = t.open(1), app = t.open(6);
+    let decide!: (commit: boolean) => void, ready!: (pid: number) => void;
+    const opened = new Promise<number>(resolve => { ready = resolve; }), decision = new Promise<boolean>(resolve => { decide = resolve; });
+    const migration = runner.transaction(async tx => {
+      await tx.query('SELECT pg_advisory_xact_lock($1)', [7_340_032_001]);
+      await tx.query('SELECT version, name, sha256 FROM schema_migrations ORDER BY version');
+      await tx.query(M15.sql);
+      await tx.query('INSERT INTO schema_migrations (version, name, sha256) VALUES ($1, $2, $3)', [M15.version, M15.name, M15.sha256]);
+      ready((await tx.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')).rows[0]!.pid);
+      if (!await decision) throw new Error('ROLLED_BACK');
+    });
+    const pid = await opened;
+    try {
+      const { rows: locks } = await app.query<{ relname: string; relkind: string; mode: string }>(`SELECT c.relname, c.relkind::text, l.mode
+        FROM pg_locks l JOIN pg_class c ON c.oid = l.relation WHERE l.pid = $1 AND l.granted AND c.relnamespace = 'public'::regnamespace ORDER BY 1, 3`, [pid]);
+      const committed = locks.filter(l => l.relkind === 'r' && !/^workflow_run/.test(l.relname)).map(({ relname, mode }) => ({ relname, mode }));
+      expect(committed).toEqual([
+        { relname: 'delegated_authorizations', mode: 'AccessExclusiveLock' },     // the relaxation and the new column: blocks every delegated read/write
+        { relname: 'delegated_authorizations', mode: 'AccessShareLock' },
+        { relname: 'delegated_authorizations', mode: 'ShareLock' },
+        { relname: 'delegated_authorizations', mode: 'ShareRowExclusiveLock' },
+        { relname: 'delegated_executions', mode: 'AccessExclusiveLock' },
+        { relname: 'delegated_executions', mode: 'AccessShareLock' },
+        { relname: 'delegated_executions', mode: 'ShareLock' },
+        { relname: 'delegated_executions', mode: 'ShareRowExclusiveLock' },
+        { relname: 'mcp_handoffs', mode: 'AccessShareLock' },
+        { relname: 'mcp_handoffs', mode: 'ShareRowExclusiveLock' },               // the run → handoff foreign key: blocks handoff writes until commit
+        { relname: 'schema_migrations', mode: 'AccessShareLock' },
+        { relname: 'schema_migrations', mode: 'RowExclusiveLock' },
+        { relname: 'tenants', mode: 'AccessShareLock' },
+        { relname: 'tenants', mode: 'ShareRowExclusiveLock' },                    // the run → tenant foreign key: blocks tenant writes until commit
+      ]);
+      // A v14 instance cold-starting and serving inside the window: none of this waits.
+      const fresh = t.open(2), log = createPostgresLogStore({ db: fresh, tenantId: 'default', namespace: 'compat' });
+      const queue = createPostgresWorkQueue({ db: fresh, ownerId: 'window', tenantId: 'default' });
+      expect(await within(assertSchemaCompatible(fresh, V14_BUILD), 2_000)).toEqual({ version: 14, application: 14, forward: [] });
+      expect(await within(ensureTenant(fresh, 'default'), 2_000)).toBeUndefined();
+      expect(await within(log.create('window.jsonl', bytes('{"a":1}\n')), 2_000)).toBe(true);
+      expect(await within(queue.enqueue('default', 'compat-window', 'w', null), 2_000)).toBe(true);
+      expect(await within(sweep(fresh, { tenantId: 'default' }), 2_000)).not.toBe('TIMEOUT');
+      expect(await probe(app, `UPDATE execution_runs SET status = 'AUTHORIZED', updated_at = now() WHERE run_id = 'run-1'`)).toBe('OK');
+      expect(await probe(app, `SELECT count(*) FROM mcp_handoffs`)).toBe('OK');
+      // What waits for it until it commits: a brand-new tenant, approval-handoff writes (MCP/channel claims and creations), and every delegated
+      // read or write (delegation is off in standard production).
+      expect(await probe(app, `UPDATE mcp_handoffs SET status = 'REVOKED', ended_at = now() WHERE handoff_id = $1`, [HANDOFF])).toBe('55P03');
+      expect(await probe(app, `SELECT count(*) FROM delegated_authorizations`)).toBe('55P03');
+      const newTenant = ensureTenant(fresh, 'preview-new');
+      expect(await within(newTenant, 500)).toBe('TIMEOUT');
+      const waiting = probe(app, `UPDATE mcp_handoffs SET status = 'REVOKED', ended_at = now() WHERE handoff_id = $1`, [HANDOFF], 5_000);
+      decide(true);
+      await migration;
+      await newTenant;
+      expect(await waiting).toBe('OK');
+      expect(await assertSchemaCompatible(fresh, V14_BUILD)).toEqual({ version: 15, application: 14, forward: [identity(M15)] });
+      expect(await outcome(unpatched.assertSchemaCurrent(fresh, V14_BUILD))).toEqual(MISMATCH);
+    } finally { decide(false); await migration.catch(() => undefined); }
+  });
+
+  it('the documented emergency reversal restores the exact v14 catalog and refuses, unchanged, anything but the certified 0015 as newest', async () => {
+    const doc = await readFile(new URL('../../../docs/deploy/SCHEMA-COMPATIBILITY.md', import.meta.url), 'utf8');
+    const section = doc.slice(doc.indexOf('### 9.3')), start = section.indexOf('```sql\n') + '```sql\n'.length;
+    const reversal = section.slice(start, section.indexOf('\n```', start));
+    expect(reversal).toMatch(/^BEGIN;[\s\S]*COMMIT;$/);
+    const v14 = await catalog((await database(V14M)).db);
+    for (const tamper of [`UPDATE schema_migrations SET sha256 = repeat('f', 64) WHERE version = 15`,
+      `INSERT INTO schema_migrations (version, name, sha256) VALUES (16, 'later_change', repeat('e', 64))`]) {
+      const t = await database(V15M), session = t.open(1);
+      await t.db.query(tamper);
+      const before = { shape: await catalog(t.db), history: await ledger(t.db) };
+      expect(await outcome(session.query(reversal))).toEqual({ error: 'P0001' });
+      await session.close();
+      expect({ shape: await catalog(t.db), history: await ledger(t.db) }).toEqual(before);
+    }
+    // A delegated authorization whose source is a workflow run cannot be reverted into the v14 shape: refused, unchanged.
+    const withRun = await database(V15M);
+    await seed14(withRun.db);
+    await withRun.db.query(`INSERT INTO workflow_runs (tenant_id, run_id, handoff_id, requester_kind, requester_ref, owner_namespace, owner_account, wallets, strategy,
+      workflow_hash, engine_version, step_count, state, expires_at) VALUES ('default', $1, $2, 'CHANNEL_CONVERSATION', 'cnv_compat', 'eip155', $3, '{}', '{}', $4,
+      'flofi-engine-2', 2, 'PENDING', now() + interval '1 day')`, ['wfr_' + 'a'.repeat(26), HANDOFF, OWNER, '0x' + '1'.repeat(64)]);
+    await withRun.db.query(`INSERT INTO delegated_authorizations (tenant_id, authorization_id, owner_namespace, owner_account, workflow_run_id, state)
+      VALUES ('default', $1, 'eip155', $2, $3, 'PENDING_SIGNATURE')`, ['dau_' + 'b'.repeat(26), OWNER, 'wfr_' + 'a'.repeat(26)]);
+    const refusedShape = await catalog(withRun.db), session = withRun.open(1);
+    expect(await outcome(session.query(reversal))).toEqual({ error: 'P0001' });
+    await session.close();
+    expect(await catalog(withRun.db)).toEqual(refusedShape);
+    // On 0015 with only v14-shaped data: the exact v14 catalog, the v14 build's exact schema, and 0015 can be applied again.
+    const t = await database(V15M);
+    await seed14(t.db);
+    await t.db.query(reversal);
+    expect(await catalog(t.db)).toEqual(v14);
+    expect(await assertSchemaCompatible(t.db, V14_BUILD)).toEqual({ version: 14, application: 14, forward: [] });
+    expect((await t.db.query(`SELECT rule_id FROM delegated_authorizations`)).rows).toEqual([{ rule_id: RULE }]);
+    expect(await migrate(t.db, V15M)).toEqual([15]);
+  });
+});

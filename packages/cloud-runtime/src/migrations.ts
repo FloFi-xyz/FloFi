@@ -76,6 +76,13 @@ export const CERTIFIED_FORWARD_MIGRATIONS: readonly ForwardCompatibilityCertific
     migrations: [{ version: 14, name: 'learning_automatic', sha256: '624884d98407383c7093f6a56885ec13001614ddb9e2dcc2ac203451b519314e' }],
     assessment: 'docs/deploy/SCHEMA-COMPATIBILITY.md#8-certificate-0014_learning_automatic',
   },
+  {
+    base: { version: 14, name: 'learning_automatic', sha256: '624884d98407383c7093f6a56885ec13001614ddb9e2dcc2ac203451b519314e' },
+    // BUILD-CHAT-E2E-001: three new workflow_run* tables; two delegated_* tables gain a nullable workflow-run source (rule/occurrence columns become
+    // nullable, new column, checks, foreign keys, one index, one column-scoped trigger). No pre-existing function, trigger or index is redefined.
+    migrations: [{ version: 15, name: 'workflow_runs', sha256: '5dfefcf7465d874da5880ae5a082f7f47e28ede51adfdef46dbbe3e3f7ba945f' }],
+    assessment: 'docs/deploy/SCHEMA-COMPATIBILITY.md#9-certificate-0015_workflow_runs',
+  },
 ].map(certificate => Object.freeze({ base: Object.freeze(certificate.base),
   migrations: Object.freeze(certificate.migrations.map(migration => Object.freeze(migration))), assessment: certificate.assessment })));
 
