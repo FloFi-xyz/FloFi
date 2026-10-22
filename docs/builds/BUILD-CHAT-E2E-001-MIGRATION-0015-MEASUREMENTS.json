@@ -1,0 +1,351 @@
+{
+  "kind": "flofi-migration-0015-scale-measurement",
+  "build": "BUILD-CHAT-E2E-001",
+  "date": "2026-10-22",
+  "migration": {
+    "version": 15,
+    "name": "workflow_runs",
+    "sha256": "5dfefcf7465d874da5880ae5a082f7f47e28ede51adfdef46dbbe3e3f7ba945f"
+  },
+  "environment": {
+    "postgres": "PostgreSQL 18.6 (Debian 18.6-1.pgdg12+2), image postgres:18.6-bookworm@sha256:3725f4e2499eef5134592b3b4ab79a543ed7f8e533b05b5b637af926630f6650",
+    "host": "WSL2 workstation, Docker loopback",
+    "synchronous_commit": "on",
+    "shared_buffers": "128MB",
+    "data": "synthetic only"
+  },
+  "test": "packages/cloud-runtime/test/migration-0015-scale.pg.test.ts",
+  "command": "FLOFI_0015_SCALE_ROWS=0,10000,100000 FLOFI_0015_SCALE_CONTENDED=1 FLOFI_0015_SCALE_REPORT=<file> vitest run packages/cloud-runtime/test/migration-0015-scale.pg.test.ts",
+  "results": [
+    {
+      "lineages": 0,
+      "seedMs": 193.2,
+      "bytes": "81920",
+      "contended": {
+        "outcome": "55P03",
+        "failedAfterMs": 5026.2,
+        "waitedBehindIt": {
+          "handoffWrite": {
+            "ms": 4523.9,
+            "result": "OK"
+          },
+          "delegatedRead": {
+            "ms": 4523.3,
+            "result": "OK"
+          }
+        },
+        "notWaiting": {
+          "runWrite": {
+            "ms": 7.4,
+            "result": "OK"
+          }
+        }
+      },
+      "migration": {
+        "totalMs": 28.2,
+        "lockAndLedgerReadMs": 7.2,
+        "newTablesMs": 12.4,
+        "delegatedAlterationsMs": 3.6,
+        "ledgerRowMs": 0.5,
+        "commitMs": 4.5,
+        "handoffAndTenantWritesBlockedMs": 21,
+        "delegatedReadsAndWritesBlockedMs": 8.6,
+        "samples": 812,
+        "longestLockWaitMs": 0
+      },
+      "locks": [
+        {
+          "relname": "delegated_authorizations",
+          "mode": "AccessExclusiveLock"
+        },
+        {
+          "relname": "delegated_authorizations",
+          "mode": "AccessShareLock"
+        },
+        {
+          "relname": "delegated_authorizations",
+          "mode": "ShareLock"
+        },
+        {
+          "relname": "delegated_authorizations",
+          "mode": "ShareRowExclusiveLock"
+        },
+        {
+          "relname": "delegated_executions",
+          "mode": "AccessExclusiveLock"
+        },
+        {
+          "relname": "delegated_executions",
+          "mode": "AccessShareLock"
+        },
+        {
+          "relname": "delegated_executions",
+          "mode": "ShareLock"
+        },
+        {
+          "relname": "delegated_executions",
+          "mode": "ShareRowExclusiveLock"
+        },
+        {
+          "relname": "mcp_handoffs",
+          "mode": "AccessShareLock"
+        },
+        {
+          "relname": "mcp_handoffs",
+          "mode": "ShareRowExclusiveLock"
+        },
+        {
+          "relname": "schema_migrations",
+          "mode": "AccessShareLock"
+        },
+        {
+          "relname": "schema_migrations",
+          "mode": "RowExclusiveLock"
+        },
+        {
+          "relname": "tenants",
+          "mode": "AccessShareLock"
+        },
+        {
+          "relname": "tenants",
+          "mode": "ShareRowExclusiveLock"
+        }
+      ],
+      "probes": {
+        "delegated_authorizations read": "55P03",
+        "delegated_executions read": "55P03",
+        "delegated_executions write": "55P03",
+        "delegated_budget_entries read": "OK",
+        "automation_rules write": "OK",
+        "mcp_handoffs read": "OK",
+        "mcp_handoffs write": "55P03",
+        "tenants read": "OK",
+        "tenants write": "55P03",
+        "execution_runs write": "OK",
+        "work queue write": "OK"
+      },
+      "reversalMs": 10.7,
+      "reapplyMs": 20.5
+    },
+    {
+      "lineages": 10000,
+      "seedMs": 4005.8,
+      "bytes": "13369344",
+      "contended": {
+        "outcome": "55P03",
+        "failedAfterMs": 5029.2,
+        "waitedBehindIt": {
+          "handoffWrite": {
+            "ms": 4527.9,
+            "result": "OK"
+          },
+          "delegatedRead": {
+            "ms": 4528.2,
+            "result": "OK"
+          }
+        },
+        "notWaiting": {
+          "runWrite": {
+            "ms": 7.5,
+            "result": "OK"
+          }
+        }
+      },
+      "migration": {
+        "totalMs": 39.7,
+        "lockAndLedgerReadMs": 6.9,
+        "newTablesMs": 11.8,
+        "delegatedAlterationsMs": 16.8,
+        "ledgerRowMs": 0.6,
+        "commitMs": 3.7,
+        "handoffAndTenantWritesBlockedMs": 32.8,
+        "delegatedReadsAndWritesBlockedMs": 21.1,
+        "samples": 777,
+        "longestLockWaitMs": 0
+      },
+      "locks": [
+        {
+          "relname": "delegated_authorizations",
+          "mode": "AccessExclusiveLock"
+        },
+        {
+          "relname": "delegated_authorizations",
+          "mode": "AccessShareLock"
+        },
+        {
+          "relname": "delegated_authorizations",
+          "mode": "ShareLock"
+        },
+        {
+          "relname": "delegated_authorizations",
+          "mode": "ShareRowExclusiveLock"
+        },
+        {
+          "relname": "delegated_executions",
+          "mode": "AccessExclusiveLock"
+        },
+        {
+          "relname": "delegated_executions",
+          "mode": "AccessShareLock"
+        },
+        {
+          "relname": "delegated_executions",
+          "mode": "ShareLock"
+        },
+        {
+          "relname": "delegated_executions",
+          "mode": "ShareRowExclusiveLock"
+        },
+        {
+          "relname": "mcp_handoffs",
+          "mode": "AccessShareLock"
+        },
+        {
+          "relname": "mcp_handoffs",
+          "mode": "ShareRowExclusiveLock"
+        },
+        {
+          "relname": "schema_migrations",
+          "mode": "AccessShareLock"
+        },
+        {
+          "relname": "schema_migrations",
+          "mode": "RowExclusiveLock"
+        },
+        {
+          "relname": "tenants",
+          "mode": "AccessShareLock"
+        },
+        {
+          "relname": "tenants",
+          "mode": "ShareRowExclusiveLock"
+        }
+      ],
+      "probes": {
+        "delegated_authorizations read": "55P03",
+        "delegated_executions read": "55P03",
+        "delegated_executions write": "55P03",
+        "delegated_budget_entries read": "OK",
+        "automation_rules write": "OK",
+        "mcp_handoffs read": "OK",
+        "mcp_handoffs write": "55P03",
+        "tenants read": "OK",
+        "tenants write": "55P03",
+        "execution_runs write": "OK",
+        "work queue write": "OK"
+      },
+      "reversalMs": 17.6,
+      "reapplyMs": 40
+    },
+    {
+      "lineages": 100000,
+      "seedMs": 47180.2,
+      "bytes": "139943936",
+      "contended": {
+        "outcome": "55P03",
+        "failedAfterMs": 5092.9,
+        "waitedBehindIt": {
+          "handoffWrite": {
+            "ms": 4584.9,
+            "result": "OK"
+          },
+          "delegatedRead": {
+            "ms": 4591.4,
+            "result": "OK"
+          }
+        },
+        "notWaiting": {
+          "runWrite": {
+            "ms": 6.6,
+            "result": "OK"
+          }
+        }
+      },
+      "migration": {
+        "totalMs": 164.3,
+        "lockAndLedgerReadMs": 7.2,
+        "newTablesMs": 11.9,
+        "delegatedAlterationsMs": 132.2,
+        "ledgerRowMs": 0.6,
+        "commitMs": 12.5,
+        "handoffAndTenantWritesBlockedMs": 157.2,
+        "delegatedReadsAndWritesBlockedMs": 145.2,
+        "samples": 905,
+        "longestLockWaitMs": 0
+      },
+      "locks": [
+        {
+          "relname": "delegated_authorizations",
+          "mode": "AccessExclusiveLock"
+        },
+        {
+          "relname": "delegated_authorizations",
+          "mode": "AccessShareLock"
+        },
+        {
+          "relname": "delegated_authorizations",
+          "mode": "ShareLock"
+        },
+        {
+          "relname": "delegated_authorizations",
+          "mode": "ShareRowExclusiveLock"
+        },
+        {
+          "relname": "delegated_executions",
+          "mode": "AccessExclusiveLock"
+        },
+        {
+          "relname": "delegated_executions",
+          "mode": "AccessShareLock"
+        },
+        {
+          "relname": "delegated_executions",
+          "mode": "ShareLock"
+        },
+        {
+          "relname": "delegated_executions",
+          "mode": "ShareRowExclusiveLock"
+        },
+        {
+          "relname": "mcp_handoffs",
+          "mode": "AccessShareLock"
+        },
+        {
+          "relname": "mcp_handoffs",
+          "mode": "ShareRowExclusiveLock"
+        },
+        {
+          "relname": "schema_migrations",
+          "mode": "AccessShareLock"
+        },
+        {
+          "relname": "schema_migrations",
+          "mode": "RowExclusiveLock"
+        },
+        {
+          "relname": "tenants",
+          "mode": "AccessShareLock"
+        },
+        {
+          "relname": "tenants",
+          "mode": "ShareRowExclusiveLock"
+        }
+      ],
+      "probes": {
+        "delegated_authorizations read": "55P03",
+        "delegated_executions read": "55P03",
+        "delegated_executions write": "55P03",
+        "delegated_budget_entries read": "OK",
+        "automation_rules write": "OK",
+        "mcp_handoffs read": "OK",
+        "mcp_handoffs write": "55P03",
+        "tenants read": "OK",
+        "tenants write": "55P03",
+        "execution_runs write": "OK",
+        "work queue write": "OK"
+      },
+      "reversalMs": 89.9,
+      "reapplyMs": 188.3
+    }
+  ]
+}

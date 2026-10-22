@@ -179,13 +179,15 @@ All runs used `TMPDIR=~/.cache/flofi-chat-e2e-tmp` and, for PostgreSQL suites,
 `TEST_DATABASE_URL=postgres://flofi@127.0.0.1:29436/postgres?options=-c%20synchronous_commit%3Doff`. That is a disposable loopback container
 with CI's commit setting; without it, local fsync pushes one developer test past its 5 s timeout.
 
-Final code head: `a8ac7bd`. Every gate below ran on that head, or on a tree whose application code is identical to it.
+Final code head: `a8ac7bd`, now `6e2ce2d` after the release reorder, with identical application code. Every gate below ran on that head, or on
+a tree whose application code is identical to it. The [release certification](BUILD-CHAT-E2E-001-RELEASE-CERTIFICATION.md) re-ran the gates on
+the reordered Release A and Release B.
 
 | Gate | Command | Result |
 | --- | --- | --- |
 | CI check | `pnpm check` (typecheck, lint, build, schema drift, unit) | **Pass.** Typecheck 16/16 tasks; lint clean; build 9/9; 11 schema exports verified; unit 406 files, **4,779 passed**, 2 skipped (pre-existing `skipIf` in `server/mode-b-service` and `server/composition-service`), 0 failed |
 | PostgreSQL | `pnpm test:postgres` (75 files, 2 workers) | **Pass.** 74 files, **468 passed**, 3 skipped, 0 failed. The 3 skipped tests are the backend schema-compatibility certificate block, which runs only when this build's head migration is a certificate base, i.e. on Release A; see the next row |
-| Release A tree | `origin/main` + `d69b4bd` only, exported to a scratch directory (no git worktree or branch): `forward-compatibility*.test.ts` and `backend/schema-compatibility.pg.test.ts` | **Pass, 32/32.** Includes the 3 backend tests that skip on Release B by design: the v14 API and worker keep serving through 0015, and cold starts work on the certified schema. `d69b4bd` applies cleanly onto `7a844d2` |
+| Release A tree | `origin/main` + the certificate commit only (`d69b4bd`, now `4bc96e6`), exported to a scratch directory (no git worktree or branch): `forward-compatibility*.test.ts` and `backend/schema-compatibility.pg.test.ts` | **Pass, 32/32.** Includes the 3 backend tests that skip on Release B by design: the v14 API and worker keep serving through 0015, and cold starts work on the certified schema. the certificate commit applies cleanly onto `7a844d2` |
 | Browser (loopback) | `node scripts/guarded-release-browser.mjs profile <name>` with CI's environment: `approve-workflow-run` (new), `approve-authorize-journeys`, `solana-transfer-ux`, `channel-signing`, `channel-approve`, `mcp-in-chat`, `mcp-routes-oauth-disabled`, `developer-journey`, `automations` | **Pass, 54/54 tests in 9 profiles.** These are every profile that drives `/approve`. `default-product` (it only links to the route) and the other product profiles were not run locally |
 | Governance | `python3 scripts/governance_lite.py`; `unittest` of `test_governance_lite.py` and `test_ci_*.py`; `git diff --check` | **Pass.** Governance-lite clean; 19 and 54 unit tests OK; no whitespace errors |
 
@@ -201,9 +203,9 @@ upload.
 
 | Defect | Found by | Fix (commit) |
 | --- | --- | --- |
-| A run's one-shot manifest capped slippage at `max(100, step slippages)`. A 50 bps workflow was shown "Max slippage 1%" before the passkey, and the policy's minimum-output floor accepted up to 1% | Review of the manifest against the plan | The cap is the workflow's own slippage, exactly as the drivers apply it (`7c4a668`) |
-| A confirm-mode run stalled after step 1 wherever the worker did not run workflow runs, because only the worker recorded a reconciled owner step. With a worker, the owner waited about 20 s | Review while planning the browser journey | The owner's status poll runs the worker's observe-only pass. It never readies or loads a step (`b631c23`, with a PostgreSQL test that fails on the old poll) |
-| After *Continue to step 2*, the signing surface kept step 1's simulation under a misleading "Wallet changed" status and asked the owner to simulate again. Nothing was authorizable | The new browser journey | Automatic preparation now ignores only a final run of another workflow, as `executionStart` already did (`700d0fc`) |
+| A run's one-shot manifest capped slippage at `max(100, step slippages)`. A 50 bps workflow was shown "Max slippage 1%" before the passkey, and the policy's minimum-output floor accepted up to 1% | Review of the manifest against the plan | The cap is the workflow's own slippage, exactly as the drivers apply it (`4dae5ad`) |
+| A confirm-mode run stalled after step 1 wherever the worker did not run workflow runs, because only the worker recorded a reconciled owner step. With a worker, the owner waited about 20 s | Review while planning the browser journey | The owner's status poll runs the worker's observe-only pass. It never readies or loads a step (`59c3c40`, with a PostgreSQL test that fails on the old poll) |
+| After *Continue to step 2*, the signing surface kept step 1's simulation under a misleading "Wallet changed" status and asked the owner to simulate again. Nothing was authorizable | The new browser journey | Automatic preparation now ignores only a final run of another workflow, as `executionStart` already did (`1aa7fd7`) |
 
 ### 7.2 Intentional changes to existing tests (for review)
 
@@ -242,14 +244,14 @@ upload.
    - delegated mode, which has no browser-reachable signer on any loopback deployment.
 
    These paths are covered at PostgreSQL level only.
-7. **0015 on large delegated tables.** The duration was measured on empty tables only (20–25 ms). A 20k-row seeding script failed on
-   duplicate rule ids and was not completed; `SCHEMA-COMPATIBILITY.md` §9 says so.
+7. **0015 on large delegated tables.** Resolved by the release certification: 28 / 40 / 164 ms at 0 / 10,000 / 100,000 synthetic delegated
+   lineages, on a workstation, not production hardware (`SCHEMA-COMPATIBILITY.md` §9).
 
 ## 10. Outstanding real-world acceptance checklist
 
 Each step needs explicit owner action. None of it was done in this build.
 
-1. Decide the release split, then merge Release A (`d69b4bd`: the 0015 certificate only) and deploy it. The production build must report the
+1. Decide the release split, then merge Release A (`4bc96e6..8fee11c`: the 0015 certificate, its certification tests and its assessment) and deploy it. The production build must report the
    certificate while still serving v14.
 2. Merge Release B and apply 0015 through the documented process. Do not enable `FLOFI_WORKFLOW_RUNS` yet.
 3. On a Preview with its **own** non-production database (never the production `DATABASE_URL`), set `FLOFI_WORKFLOW_RUNS=enabled` on web and
@@ -278,27 +280,36 @@ Each step needs explicit owner action. None of it was done in this build.
 
 ## 11. Owner decisions
 
-- The release split for 0015: Release A is commit `d69b4bd` alone; Release B is the rest.
+- The release split for 0015: Release A is `4bc96e6..8fee11c`; Release B is everything after it. See the
+  [release certification](BUILD-CHAT-E2E-001-RELEASE-CERTIFICATION.md).
 - Enabling `FLOFI_WORKFLOW_RUNS` (default off).
 - The KMS/HSM provider for delegated signing.
 - The fee basis, the partial-completion rule and the collection mechanism.
 
 ## 12. Commits
 
-On `7a844d2`, in order (`d69b4bd` alone is Release A):
+On `7a844d2`, in order. The history was reordered for the release split on 2026-10-22; the tree is byte-identical to before.
 
-- `ba1bd41` durable sequential workflow runs and one workflow-level delegated authorization
-- `7b43336` tests for bindings, the authorization plan and the 0015 state machines
-- `224fbf5` /approve runs a multi-step workflow without the Canvas
-- `42321ad` multi-step workflows in Telegram and every Channel Core provider
-- `8551a30` MCP journey for multi-step workflows; public run view passes the output guard
-- `d69b4bd` forward-compatibility certificate for 0015 (Release A material)
-- `63d759d` interim report (implemented, tested, blocked, pending)
-- `3ae932c` /approve proves both wallets of an EVM + Solana workflow before claiming it
-- `e8b288b` docs for multi-step execution; Developer API maps the new refusal codes
-- `3d61589` Developer API plans a general sequence SEQUENTIAL; OpenAPI documents bindings
-- `7c4a668` a run's one-shot manifest caps slippage at the workflow's own, not a 100 bps floor
-- `b631c23` the owner's status poll observes the run, so Continue never waits on the worker
-- `700d0fc` the signing surface prepares the next step's fresh simulation after the previous step's run
-- `a8ac7bd` browser journey for a two-step workflow run on /approve, as CI profile approve-workflow-run
-- the commit that adds this final report and its links.
+**Release A** (`7a844d2..8fee11c`):
+
+- `4bc96e6` forward-compatibility certificate for 0015 (Release A material)
+- `8607311` 0015 release certification tests (Release A material)
+- `8fee11c` 0015 assessment with measured durations, failure behaviour and rollout order (Release A material)
+
+**Release B** (`8fee11c..` the branch head):
+
+- `66ee42f` durable sequential workflow runs and one workflow-level delegated authorization
+- `8a7cceb` tests for bindings, the authorization plan and the 0015 state machines
+- `3211f71` /approve runs a multi-step workflow without the Canvas
+- `8609091` multi-step workflows in Telegram and every Channel Core provider
+- `4594a76` MCP journey for multi-step workflows; public run view passes the output guard
+- `a7731fe` interim report (implemented, tested, blocked, pending)
+- `06acaf0` /approve proves both wallets of an EVM + Solana workflow before claiming it
+- `b30cec5` docs for multi-step execution; Developer API maps the new refusal codes
+- `88158bb` Developer API plans a general sequence SEQUENTIAL; OpenAPI documents bindings
+- `4dae5ad` a run's one-shot manifest caps slippage at the workflow's own, not a 100 bps floor
+- `59c3c40` the owner's status poll observes the run, so Continue never waits on the worker
+- `1aa7fd7` the signing surface prepares the next step's fresh simulation after the previous step's run
+- `6e2ce2d` browser journey for a two-step workflow run on /approve, as CI profile approve-workflow-run
+- `f135ef0` final report (capability matrix, single-authorization assessment, acceptance checklist, evidence)
+- the commits that add the release certification and update this report.
