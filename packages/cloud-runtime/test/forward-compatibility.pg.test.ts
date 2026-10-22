@@ -814,4 +814,142 @@ describe('BUILD-CHAT-E2E-001 what 0015 does to a v14 database (PostgreSQL)', () 
     expect((await t.db.query(`SELECT rule_id FROM delegated_authorizations`)).rows).toEqual([{ rule_id: RULE }]);
     expect(await migrate(t.db, V15M)).toEqual([15]);
   });
+
+  // ── Release certification (BUILD-CHAT-E2E-001): delegated executions, concurrent runners, failures and foreign identities ──────────
+  const ASSET = 'eip155:84532/erc20:0x' + '3'.repeat(40), HASH = '0x' + '2'.repeat(64);
+  /** The v14 build's own delegated lineage of a delegated rule, as its stores write it: rule → occurrence → authorization → revision → execution → budget. */
+  async function lineage14(db: Database, suffix: string) {
+    const [rule, authorization, occurrence, execution] = ['aut_', 'dau_', 'occ_', 'dex_'].map(prefix => prefix + suffix.repeat(26));
+    await db.query(`INSERT INTO automation_rules (tenant_id, rule_id, owner_namespace, owner_account, display_name, kind, state, execution_mode, authorization_id,
+        definition, action_strategy, action_workflow_hash, engine_version, timezone, next_evaluation_at)
+      VALUES ('default', $1, 'eip155', $2, 'DCA', 'SCHEDULED_DCA', 'ACTIVE', 'DELEGATED_WITH_LIMITS', $3, '{}', '{}', $4, 'flofi-engine-2', 'UTC', now())`, [rule, OWNER, authorization, HASH]);
+    await db.query(`INSERT INTO delegated_authorizations (tenant_id, authorization_id, owner_namespace, owner_account, rule_id, state)
+      VALUES ('default', $1, 'eip155', $2, $3, 'PENDING_SIGNATURE')`, [authorization, OWNER, rule]);
+    await db.query(`INSERT INTO delegated_authorization_revisions (tenant_id, authorization_id, revision, owner_namespace, owner_account, state, strategy, workflow_hash,
+      manifest, manifest_hash) VALUES ('default', $1, 1, 'eip155', $2, 'PENDING_SIGNATURE', '{}', $3, '{}', $3)`, [authorization, OWNER, HASH]);
+    await db.query(`INSERT INTO automation_occurrences (tenant_id, occurrence_id, rule_id, owner_namespace, owner_account, trigger_key, kind, state, strategy, workflow_hash,
+        due_at, expires_at, decided_at) VALUES ('default', $1, $2, 'eip155', $3, 'slot:compat', 'SCHEDULE', 'DELEGATED', '{}', $4, now(), now() + interval '1 hour', now())`,
+    [occurrence, rule, OWNER, HASH]);
+    await db.query(`INSERT INTO delegated_executions (tenant_id, execution_id, authorization_id, revision, owner_namespace, owner_account, rule_id, occurrence_id, state,
+      workflow_hash, manifest_hash, step_count) VALUES ('default', $1, $2, 1, 'eip155', $3, $4, $5, 'QUEUED', $6, $6, 1)`, [execution, authorization, OWNER, rule, occurrence, HASH]);
+    await db.query(`INSERT INTO delegated_budget_entries (tenant_id, authorization_id, execution_id, step_index, asset, reserved_amount, state, day_start, week_start, month_start)
+      VALUES ('default', $1, $2, 0, $3, 1000, 'RESERVED', date_trunc('day', now()), date_trunc('week', now()), date_trunc('month', now()))`, [authorization, execution, ASSET]);
+    return { rule, authorization, occurrence, execution };
+  }
+  const DELEGATED_TABLES = ['automation_rules', 'automation_occurrences', 'delegated_authorizations', 'delegated_authorization_revisions', 'delegated_executions',
+    'delegated_budget_entries'];
+  /** Every row of `tables`, projected on the columns they had before 0015 (0015 only adds a nullable column to two of them). */
+  async function rows14(db: Queryable, columns: Record<string, readonly string[]>) {
+    const out: Record<string, unknown[]> = {};
+    for (const [table, names] of Object.entries(columns))
+      out[table] = (await db.query(`SELECT ${names.map(n => `"${n}"`).join(', ')} FROM "${table}" ORDER BY 1, 2`)).rows;
+    return out;
+  }
+  async function columns14(db: Queryable) {
+    const { rows } = await db.query<{ table_name: string; column_name: string }>(`SELECT table_name, column_name FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = ANY($1) ORDER BY table_name, ordinal_position`, [DELEGATED_TABLES]);
+    return rows.reduce<Record<string, string[]>>((all, r) => ({ ...all, [r.table_name]: [...all[r.table_name] ?? [], r.column_name] }), {});
+  }
+
+  it('v14 delegated executions, revisions and budget entries keep their rows and transitions under 0015; the v14 build\'s new delegated writes are accepted', async () => {
+    const t = await database(V14M);
+    await seed14(t.db);
+    const first = await lineage14(t.db, 'b');
+    const columns = await columns14(t.db), before = await rows14(t.db, columns);
+    expect(await migrate(t.db, V15M)).toEqual([15]);
+    expect(await rows14(t.db, columns)).toEqual(before);
+    // Every constraint of the schema is validated (0015 adds none as NOT VALID) and every v14 delegated row has no workflow-run source.
+    expect((await t.db.query(`SELECT conrelid::regclass::text AS t, conname FROM pg_constraint WHERE connamespace = 'public'::regnamespace AND NOT convalidated`)).rows).toEqual([]);
+    expect((await t.db.query(`SELECT (SELECT count(*) FROM delegated_authorizations WHERE workflow_run_id IS NOT NULL)::int AS a,
+      (SELECT count(*) FROM delegated_executions WHERE workflow_run_id IS NOT NULL)::int AS e`)).rows).toEqual([{ a: 0, e: 0 }]);
+    // The v14 executor's transitions on its existing execution and budget reservation, as it writes them (no 0015 column is named).
+    for (const state of ['AUTHORITY_VERIFIED', 'RESERVED', 'RUNNING', 'SETTLED'])
+      await t.db.query(`UPDATE delegated_executions SET state = $2, version = version + 1, reserved_at = coalesce(reserved_at, now()),
+        settled_at = CASE WHEN $2 = 'SETTLED' THEN now() END WHERE execution_id = $1`, [first.execution, state]);
+    await t.db.query(`UPDATE delegated_budget_entries SET state = 'SPENT', spent_amount = 990 WHERE execution_id = $1`, [first.execution]);
+    await t.db.query(`UPDATE delegated_authorizations SET state = 'REVOKED', revoked_at = now(), revoke_code = 'OWNER_REVOKED', version = version + 1
+      WHERE authorization_id = $1`, [first.authorization]);
+    // A whole new v14 lineage, written after 0015 exactly as the v14 stores write it.
+    const second = await lineage14(t.db, 'c');
+    expect((await t.db.query(`SELECT state, rule_id, occurrence_id, workflow_run_id FROM delegated_executions WHERE execution_id = ANY($1) ORDER BY execution_id`,
+      [[first.execution, second.execution]])).rows).toEqual([{ state: 'SETTLED', rule_id: first.rule, occurrence_id: first.occurrence, workflow_run_id: null },
+      { state: 'QUEUED', rule_id: second.rule, occurrence_id: second.occurrence, workflow_run_id: null }]);
+    // And its schema check still serves this database.
+    expect(await assertSchemaCompatible(t.db, V14_BUILD)).toEqual({ version: 15, application: 14, forward: [identity(M15)] });
+  });
+
+  it('concurrent runners on a v14 database (two Release B runners, a v14 runner, v14 cold starts) apply 0015 exactly once', async () => {
+    const t = await database(V14M);
+    await seed14(t.db);
+    await lineage14(t.db, 'b');
+    const runners = [t.open(1), t.open(1), t.open(1)], starts = Array.from({ length: 4 }, () => t.open(1));
+    const [[b1, b2, v14], checks] = await Promise.all([Promise.all([migrate(runners[0]!, V15M), migrate(runners[1]!, V15M), migrate(runners[2]!, V14M)]),
+      Promise.all(starts.map(db => assertSchemaCompatible(db, V14_BUILD)))]);
+    expect([b1, b2].map(applied => applied.join(',')).sort()).toEqual(['', '15']);
+    expect(v14).toEqual([]);
+    for (const check of checks) expect([14, 15]).toContain(check.version);
+    expect((await ledger(t.db)).map(row => row.version)).toEqual(Array.from({ length: 15 }, (_, i) => i + 1));
+    expect(await catalog(t.db)).toEqual(await catalog((await database(V15M)).db));
+  });
+
+  it('a lock 0015 cannot get within its 5 s lock_timeout: it fails (55P03) and rolls back completely while v14 keeps serving; a later run applies it', async () => {
+    const t = await database(V14M);
+    await seed14(t.db);
+    await lineage14(t.db, 'b');
+    const columns = await columns14(t.db);
+    const before = { shape: await catalog(t.db), history: await ledger(t.db), rows: await rows14(t.db, columns) };
+    // A long delegated read (e.g. an owner listing) holds its lock past the migration's 5 s lock_timeout.
+    const reader = t.open(1), app = t.open(4);
+    let holding!: () => void, release!: () => void;
+    const held = new Promise<void>(resolve => { holding = resolve; }), done = new Promise<void>(resolve => { release = resolve; });
+    const blocker = reader.transaction(async tx => { await tx.query('SELECT count(*) FROM delegated_executions'); holding(); await done; });
+    await held;
+    try {
+      const started = Date.now(), failed = outcome(migrate(t.open(1), V15M));
+      await new Promise(resolve => setTimeout(resolve, 1_000));
+      // While it waits: v14 cold starts, runs and handoff reads proceed; delegated reads and approval-handoff writes wait behind it (at most 5 s).
+      expect(await within(assertSchemaCompatible(app, V14_BUILD), 2_000)).toEqual({ version: 14, application: 14, forward: [] });
+      expect(await probe(app, `UPDATE execution_runs SET status = 'AUTHORIZED', updated_at = now() WHERE run_id = 'run-1'`)).toBe('OK');
+      expect(await probe(app, `SELECT count(*) FROM mcp_handoffs`)).toBe('OK');
+      expect(await probe(app, `SELECT count(*) FROM delegated_authorizations`)).toBe('55P03');
+      expect(await probe(app, `UPDATE mcp_handoffs SET status = 'REVOKED', ended_at = now() WHERE handoff_id = $1`, [HANDOFF])).toBe('55P03');
+      expect(await failed).toEqual({ error: '55P03' });
+      const waited = Date.now() - started;
+      expect(waited).toBeGreaterThanOrEqual(4_900);
+      expect(waited).toBeLessThan(15_000);
+      // Rolled back completely: the exact v14 catalog, ledger and rows; nothing waits any more.
+      expect({ shape: await catalog(t.db), history: await ledger(t.db), rows: await rows14(t.db, columns) }).toEqual(before);
+      expect(await probe(app, `SELECT count(*) FROM delegated_authorizations`)).toBe('OK');
+      expect(await probe(app, `UPDATE mcp_handoffs SET status = 'REVOKED', ended_at = now() WHERE handoff_id = $1`, [HANDOFF])).toBe('OK');
+    } finally { release(); await blocker; }
+    expect(await migrate(t.db, V15M)).toEqual([15]);
+    expect(await rows14(t.db, columns)).toEqual(before.rows);
+  }, 30_000);
+
+  it('a failure late in 0015 undoes its earlier changes to the delegated tables (one transaction); a later run applies it', async () => {
+    const t = await database(V14M);
+    await seed14(t.db);
+    await lineage14(t.db, 'b');
+    // An object 0015 creates last already exists: its CREATE FUNCTION fails after every ALTER of the delegated tables has run.
+    await t.db.query(`CREATE FUNCTION delegated_workflow_run_source_immutable() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END; $$`);
+    const columns = await columns14(t.db), before = { shape: await catalog(t.db), history: await ledger(t.db), rows: await rows14(t.db, columns) };
+    expect(await outcome(migrate(t.db, V15M))).toEqual({ error: '42723' });
+    expect({ shape: await catalog(t.db), history: await ledger(t.db), rows: await rows14(t.db, columns) }).toEqual(before);
+    expect(before.shape.get('column:delegated_executions.rule_id')).toMatch(/notnull=true/);
+    await t.db.query(`DROP FUNCTION delegated_workflow_run_source_immutable()`);
+    expect(await migrate(t.db, V15M)).toEqual([15]);
+  });
+
+  it('a different 0015 already in the ledger (name, checksum or version): the v14 build and both runners refuse it and change nothing', async () => {
+    for (const tamper of [`UPDATE schema_migrations SET name = 'workflow_runs_v2' WHERE version = 15`,
+      `UPDATE schema_migrations SET sha256 = repeat('e', 64) WHERE version = 15`, `UPDATE schema_migrations SET version = 16 WHERE version = 15`]) {
+      const t = await database(V15M);
+      await t.db.query(tamper);
+      const before = { shape: await catalog(t.db), history: await ledger(t.db) };
+      expect(await outcome(assertSchemaCompatible(t.db, V14_BUILD)), tamper).toEqual(MISMATCH);
+      expect(await outcome(migrate(t.db, V14M)), tamper).toEqual(MISMATCH);
+      expect(await outcome(migrate(t.db, V15M)), tamper).toEqual(MISMATCH);
+      expect({ shape: await catalog(t.db), history: await ledger(t.db) }).toEqual(before);
+    }
+  });
 });
