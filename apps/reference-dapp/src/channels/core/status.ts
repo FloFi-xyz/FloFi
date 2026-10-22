@@ -22,7 +22,7 @@ export const ENDED = new Set(['EXPIRED', 'SUPERSEDED', 'REVOKED', 'STALE']);
 export const OPEN_RUN = new Set(['PENDING', 'RUNNING', 'ATTENTION', 'HALTED']);
 type WorkflowRunProgress = NonNullable<Progress['workflowRun']>;
 const runFacts = (run: WorkflowRunProgress): RunFacts => ({ state: run.state,
-  steps: run.steps.map(step => ({ index: step.index, action: step.action, state: step.state, transaction: step.outcome?.transactions[0]?.hash ?? null })) });
+  steps: run.steps.map(step => ({ index: step.index, action: step.action, state: step.state, transaction: step.outcome?.submissions[0]?.hash ?? null })) });
 /** The non-secret continuation link of a multi-step approval: only the run owner's proven wallet can open it. */
 export const continuationUrl = (origin: string, approvalId: string) => `${origin}/approve#${approvalId}`;
 

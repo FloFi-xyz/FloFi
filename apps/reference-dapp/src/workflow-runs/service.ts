@@ -132,7 +132,8 @@ export type RunStepView = { readonly index: number; readonly action: string; rea
   readonly code: string | null; readonly bound: RunStepRecord['bound'];
   readonly outcome: { readonly executionId: string; readonly kind: string; readonly status: string; readonly evidence: { readonly environment: string; readonly outcome: string;
       readonly bundleHash: string | null } | null;
-    readonly transactions: readonly { readonly chain: string; readonly hash: string; readonly explorerUrl: string | null }[];
+    /** Transaction hashes / signatures the step submitted (public references only; never transaction bytes). */
+    readonly submissions: readonly { readonly chain: string; readonly hash: string; readonly explorerUrl: string | null }[];
     readonly spent: readonly { readonly asset: string; readonly amount: string }[]; readonly received: readonly { readonly asset: string; readonly amount: string }[];
     readonly receiptUrl: string | null } | null };
 export type RunView = { readonly workflowRunId: string; readonly approvalId: string; readonly state: string; readonly mode: string | null; readonly stepCount: number;
@@ -151,7 +152,7 @@ export async function runView(deps: { readonly store: Pick<WorkflowRunStore, 'st
   const views: RunStepView[] = steps.map(s => {
     const local = s.outcome?.evidence?.environment === 'MOCKED';
     const outcome = options.outcomes && s.outcome ? { executionId: s.outcome.executionId, kind: s.outcome.kind, status: s.outcome.status, evidence: s.outcome.evidence,
-      transactions: s.outcome.transactions.map(t => ({ chain: t.chain, hash: t.hash, explorerUrl: executionExplorer(t.chain, t.hash, local) })),
+      submissions: s.outcome.transactions.map(t => ({ chain: t.chain, hash: t.hash, explorerUrl: executionExplorer(t.chain, t.hash, local) })),
       spent: s.outcome.spent, received: s.outcome.received,
       receiptUrl: options.origin && s.outcome.kind === 'OWNER_RUN' && s.state === 'RECONCILED' ? `${options.origin}/app/dashboard/runs/${encodeURIComponent(s.outcome.executionId)}` : null } : null;
     return { index: s.stepIndex, action: composed.ok ? composed.steps[s.stepIndex]?.strategy.action ?? 'unknown' : 'unknown', state: s.state, flow: s.flow,

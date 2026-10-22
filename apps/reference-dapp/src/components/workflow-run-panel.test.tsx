@@ -52,7 +52,7 @@ describe('BUILD-CHAT-E2E-001 workflow run panel', () => {
   it('offers the next step only after the previous one reconciled, and shows its transaction', () => {
     const tx = { chain: 'eip155:84532', hash: '0x' + 'f'.repeat(64), explorerUrl: 'https://sepolia.basescan.org/tx/0x' + 'f'.repeat(64) };
     const outcome = { executionId: 'run-1', kind: 'OWNER_RUN', status: 'RECONCILED', evidence: { environment: 'TESTNET_EXECUTED', outcome: 'RECONCILED', bundleHash: '0x' + '2'.repeat(64) },
-      transactions: [tx], spent: [], received: [], receiptUrl: null };
+      submissions: [tx], spent: [], received: [], receiptUrl: null };
     const html = render(claim({ state: 'RUNNING', mode: 'CONFIRM_EACH_STEP', currentStep: 1, nextAction: 'OWNER_SIGNS_STEP', steps: [step(0, 'RECONCILED', outcome), step(1, 'PENDING')] }));
     expect(html).toContain('Continue to step 2');
     expect(html).toContain(`href="${tx.explorerUrl}"`);

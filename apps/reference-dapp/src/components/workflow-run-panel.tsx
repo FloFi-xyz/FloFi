@@ -84,7 +84,7 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
       {run.steps.map(step => <li key={step.index} data-step-state={step.state} aria-current={step.index === run.currentStep && open ? 'step' : undefined}>
         <span>{tr('Step {0}', String(step.index + 1))} · {tr(ACTION[step.action] ?? step.action)}</span>
         <span className="workflow-run-state">{tr(STEP_STATE[step.state] ?? step.state)}</span>
-        {step.outcome?.transactions.map(tx => tx.explorerUrl
+        {step.outcome?.submissions.map(tx => tx.explorerUrl
           ? <a key={tx.hash} href={tx.explorerUrl} target="_blank" rel="noreferrer"><code>{short(tx.hash)}</code></a>
           : <code key={tx.hash}>{short(tx.hash)}</code>)}
       </li>)}

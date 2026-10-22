@@ -79,7 +79,7 @@ describe('BUILD-CHAT-E2E-001 delegated workflow run (PostgreSQL, MOCKED chains)'
       const progress = await approvalProgress(handoff!, h.flows.runtime, h.handoffs, undefined, h.store);
       expect(progress.workflowRun).toMatchObject({ state: 'COMPLETED', stepsVisible: true, steps: [{ state: 'RECONCILED', outcome: { evidence: { environment: 'MOCKED' } } },
         { state: 'RECONCILED' }] });
-      expect(progress.workflowRun!.steps[0]!.outcome!.transactions[0]!.explorerUrl).toBeNull();
+      expect(progress.workflowRun!.steps[0]!.outcome!.submissions[0]!.explorerUrl).toBeNull();
       // The single completion fact exists once; a repeated drain and advance change nothing.
       await h.drain(run.runId);
       const again = (await h.store.byId(run.runId))!;

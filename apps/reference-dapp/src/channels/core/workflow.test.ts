@@ -80,7 +80,7 @@ describe('BUILD-CHAT-E2E-001 channel workflows', () => {
     const run = { workflowRunId: 'wfr_' + 'a'.repeat(26), approvalId: handoff.handoffId, state: 'RUNNING', mode: 'CONFIRM_EACH_STEP', stepCount: 2, currentStep: 1, code: null,
       workflowHash: '0x' + '1'.repeat(64), expiresAt: '', completedAt: null, createdAt: '', updatedAt: '', stepsVisible: true, nextAction: 'OWNER_SIGNS_STEP', authority: 'NONE', note: null,
       steps: [{ index: 0, action: 'swap', state: 'RECONCILED', flow: null, stepWorkflowHash: null, code: null, bound: null,
-        outcome: { executionId: 'r', kind: 'OWNER_RUN', status: 'RECONCILED', evidence: null, transactions: [{ chain: 'eip155:84532', hash: tx, explorerUrl: null }], spent: [], received: [],
+        outcome: { executionId: 'r', kind: 'OWNER_RUN', status: 'RECONCILED', evidence: null, submissions: [{ chain: 'eip155:84532', hash: tx, explorerUrl: null }], spent: [], received: [],
           receiptUrl: null } },
         { index: 1, action: 'bridge', state: 'PENDING', flow: null, stepWorkflowHash: null, code: null, bound: null, outcome: null }] } as const;
     const progress = { status: 'APPLIED', expiresAt: '2026-10-22T10:00:00.000Z', runs: [], runsVisible: true, workflowRun: run, note: null } as never;
