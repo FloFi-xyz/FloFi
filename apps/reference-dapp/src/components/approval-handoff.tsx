@@ -19,12 +19,11 @@ import { useLocale } from '../i18n/locale';
  * hash, disclosures, mobile wallet handoff) in a collapsed details element. The proven wallet that loaded the proposal is reported so the
  * workspace only authorizes with that same signer (a different connected wallet needs its own proof and a fresh simulation).
  */
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { approvalHandoffPreview, approvalHandoffView, claimApprovalHandoff, markApprovalApplied, openBrowserApprovalHandoff, resumeApprovalHandoff, setApprovalSharing } from '../app/approve-action';
 import { DEVELOPER_LINK_PREFIX } from '../developer/link-format';
 import { AUTOMATION_LINK_PREFIX } from '../automations/link-format';
-import type { ApprovalView } from '../mcp/handoff/service';
 import type { ApprovalPreview } from '../platform/approve';
 import { APPROVAL_SECRET_FORMAT } from '../platform/approval-link-format';
 import { walletDeepLinks } from '../platform/wallet-links';
@@ -33,6 +32,7 @@ import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts'
 import { useWorkflow } from '../state/workflow-store';
 import type { SolanaWalletChain } from '../wallet/solana-wallet';
 import { useWalletProof, WalletProof } from './wallet-proof';
+import { WorkflowRunPanel } from './workflow-run-panel';
 import { McpRouteState } from './mcp-route-state';
 
 // BUILD-DEVELOPER-001: any FloFi approval link (MCP's `flofi_hs_…` and later surfaces' own tags); the server resolves which one.
@@ -87,7 +87,8 @@ export function ApprovalHandoff({ slot = null, surface = 'canvas', onSurfaceChan
   const { t: tr } = useLocale();
   const { state, restoreWorkflow } = useWorkflow();
   const [secret, setSecret] = useState<string | null>(null);
-  const [view, setView] = useState<ApprovalView | null>(null);
+  // BUILD-CHAT-E2E-001: a multi-step approval's view carries its run (`workflowRun`) once claimed.
+  const [view, setView] = useState<ClaimedProposal['view'] | null>(null);
   const [preview, setPreview] = useState<ApprovalPreview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -207,11 +208,18 @@ export function ApprovalHandoff({ slot = null, surface = 'canvas', onSurfaceChan
     const current = generation.current, claimant = proof.proven;
     const result = recovery ?? unwrap(await claimApprovalHandoff(secret!, share === true));
     if (current !== generation.current) return;
-    setView(result.view); setClaimed(true); setClaimedBy(claimant);
+    // BUILD-CHAT-E2E-001: a multi-step workflow's step is signed by the run's wallet of that step's own namespace.
+    setView(result.view); setClaimed(true); setClaimedBy(result.view.workflowRun?.stepWallet ?? claimant);
     // Reuse the existing validated workflow restoration path, which invalidates prior Review authority even if the hash is unchanged.
-    // Simulation, Manifest Review and transaction signatures remain separate actions.
-    restoreWorkflow(result.workflow as SemanticWorkflow);
+    // Simulation, Manifest Review and transaction signatures remain separate actions. A multi-step workflow may have no step to load yet
+    // (the owner chooses how to authorize it, or the previous step has not reconciled).
+    if (result.workflow) restoreWorkflow(result.workflow as SemanticWorkflow);
   });
+  /** BUILD-CHAT-E2E-001: a run update. Only a loaded step (continue, start, resume) enters the editor; a status poll never does. */
+  const onRunProposal = useCallback((proposal: ClaimedProposal) => {
+    setView(proposal.view);
+    if (proposal.workflow) { restoreWorkflow(proposal.workflow as SemanticWorkflow); setClaimedBy(proposal.view.workflowRun?.stepWallet ?? null); }
+  }, [restoreWorkflow]);
   // A proven wallet loads an open proposal (or finishes an interrupted claim) without a further click: the proof was the owner's action and
   // the server still re-verifies the owner, the claim rule and the exact canonical workflow. Each wallet is tried once per link.
   const reloadable = view !== null && (view.status === 'PENDING' || view.status === 'CLAIMED' && view.claimedByYou);
@@ -335,6 +343,8 @@ export function ApprovalHandoff({ slot = null, surface = 'canvas', onSurfaceChan
       </div>
     </div>
     {errorText && <p className="error-banner" role="alert">{tr(errorText)}</p>}
+    {view.workflowRun && <WorkflowRunPanel claim={view.workflowRun} approvalId={view.approvalId} secret={secret && SECRET.test(secret) ? secret : null}
+      onProposal={onRunProposal} onError={setError}/>}
     {!fromAutomation && <label className="approval-share"><input type="checkbox" disabled={busy || Boolean(recovery)} checked={claimed ? view.statusShared : share === true}
       onChange={e => toggleShare(e.target.checked)}/>{tr("Share the status and evidence of runs started from this proposal with ")}{tr(view.clientName)}</label>}
     <details className="approval-details"><summary>{tr('Proposal details')}</summary>

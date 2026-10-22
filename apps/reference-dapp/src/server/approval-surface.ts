@@ -14,6 +14,7 @@ import { developerApprovalContributor } from '../developer/approval-profile.ts';
 import { assembleApprovalSurface, createPgHandoffStore, deploymentEngineRuntime, type ApprovalContributor, type ApprovalHost, type ApprovalSurface, type CookieReader,
   type EngineRuntime } from '../platform/index.ts';
 import { platformStateHost } from './platform-state-host.ts';
+import { workflowRunSurface } from './workflow-run-surface.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
 /** The enabled contributors, in registration order. */
@@ -29,6 +30,8 @@ export async function approvalSurface(env: Env, cookie: CookieReader, options: {
   const contributors = approvalContributors(env);
   if (!contributors.length) throw new Error('APPROVALS_NOT_ENABLED');
   const host = options.host ?? await approvalHost(env);
-  return assembleApprovalSurface(contributors.map(contribute => contribute(host, cookie)), createPgHandoffStore(host.db, host.tenantId),
-    options.runtime ?? deploymentEngineRuntime(env));
+  const contributions = contributors.map(contribute => contribute(host, cookie)), runtime = options.runtime ?? deploymentEngineRuntime(env);
+  // BUILD-CHAT-E2E-001: multi-step workflows' runs, where this deployment enables them (each step re-gated with its requester kind's policy).
+  const profiles = Object.assign({}, ...contributions.map(c => c.profiles)) as Parameters<typeof workflowRunSurface>[3];
+  return assembleApprovalSurface(contributions, createPgHandoffStore(host.db, host.tenantId), runtime, await workflowRunSurface(env, host, runtime, profiles));
 }

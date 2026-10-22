@@ -21,7 +21,7 @@ import type { McpRuntime as EngineRuntime } from '../mcp/runtime.ts';
 import { resolveApprovalSecret, type ApprovalLinkScheme } from './approval-links.ts';
 import { approvalView, CLAIM_SECONDS, openApprovalSession, planNamespace, planNamespaces, verifyHandoff, type ApprovalView, type ClaimedProposal } from './approvals.ts';
 import { authorizationReviewSequential, authorizeSequential, cancelSequential, claimSequential, continueSequential, ownedRun, resumeSequential, startSequential,
-  type WorkflowRunSurface } from './workflow-run-approvals.ts';
+  statusSequential, type WorkflowRunClaim, type WorkflowRunSurface } from './workflow-run-approvals.ts';
 import type { ApprovalRequesterKind, HandoffRecord, HandoffStore, RequesterScope, WalletRef } from './handoff-store.ts';
 import { refuse } from './refusal.ts';
 
@@ -110,7 +110,8 @@ export async function resumeApproval(surface: ApprovalSurface, approvalId: unkno
 }
 
 /** The proposal behind a secret, re-verified now. Seeing it grants nothing. */
-export async function viewApproval(surface: ApprovalSurface, secret: unknown, wallets: readonly WalletRef[], now = new Date()): Promise<ApprovalView> {
+export async function viewApproval(surface: ApprovalSurface, secret: unknown, wallets: readonly WalletRef[], now = new Date()):
+  Promise<ApprovalView & { readonly workflowRun?: WorkflowRunClaim }> {
   const { handoff: h, profile } = await locate(surface, secret, now);
   const sequenceStarted = h.plan.kind === 'SEQUENTIAL' && h.status !== 'PENDING';
   const verified = !sequenceStarted && (h.status === 'PENDING' || h.status === 'CLAIMED' || h.status === 'APPLIED') ? await verifyHandoff(h, surface.runtime, profile.policy) : null;
@@ -118,7 +119,7 @@ export async function viewApproval(surface: ApprovalSurface, secret: unknown, wa
   // BUILD-CHAT-E2E-001: once a sequence's run exists, its owner (and only its owner) sees the run here.
   const run = sequenceStarted && surface.workflowRuns ? await surface.workflowRuns.store.byHandoff(h.handoffId) : null;
   if (!run || !surface.workflowRuns) return view;
-  try { return (await continueSequential(surface.workflowRuns, await ownedRun(surface.workflowRuns, h.handoffId, wallets), wallets, view)).view; }
+  try { return (await statusSequential(surface.workflowRuns, await ownedRun(surface.workflowRuns, h.handoffId, wallets), wallets, view)).view; }
   catch { return view; }
 }
 
@@ -200,6 +201,11 @@ async function runContext(surface: ApprovalSurface, approvalId: unknown, wallets
   if (!h) return refuse('WORKFLOW_RUN_NOT_FOUND');
   const profile = surface.profiles[h.requesterKind] ?? refuse('WORKFLOW_RUN_NOT_FOUND');
   return { runs, run: await ownedRun(runs, approvalId, wallets), base: approvalView(h, null, await viewerOf(profile, wallets)) };
+}
+/** The run's status for its owner, read-only (polled by the signing surface; it never loads or resolves a step). */
+export async function workflowRunStatus(surface: ApprovalSurface, approvalId: unknown, wallets: readonly WalletRef[]): Promise<ClaimedProposal> {
+  const c = await runContext(surface, approvalId, wallets);
+  return statusSequential(c.runs, c.run, wallets, c.base);
 }
 /** The run's status and, when one waits for the owner, the step to sign now (also after a reload, in another browser, by id + wallet proof). */
 export async function workflowRunContinue(surface: ApprovalSurface, approvalId: unknown, wallets: readonly WalletRef[]): Promise<ClaimedProposal> {

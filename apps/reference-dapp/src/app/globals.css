@@ -1808,3 +1808,13 @@ button.wallet-option .wallet-option-status{border-color:var(--accent-line);backg
 .signing-foot button.quiet{min-height:40px;padding:0 14px;border-radius:8px;font-weight:600}
 .top-bar-compact{justify-content:space-between}
 @media(max-width:640px){.signing-card{padding:16px}.signing-actions-row{justify-content:stretch}.signing-actions-row .canvas-lifecycle-control,.signing-actions-row .canvas-lifecycle-control button{width:100%}}
+/* BUILD-CHAT-E2E-001: a multi-step workflow inside the approval notice (its steps, the authorization choice, partial completion). */
+.workflow-run{display:grid;gap:8px;padding:10px 12px;border:1px solid var(--accent-line);border-radius:8px;background:var(--paper)}
+.workflow-run-head{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.workflow-run-steps{margin:0;padding-left:20px;display:grid;gap:4px}
+.workflow-run-steps li{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:baseline}
+.workflow-run-steps li[aria-current=step]{font-weight:600}
+.workflow-run-state{color:var(--muted);font-size:12px}
+.workflow-run-steps code{font-size:11px;overflow-wrap:anywhere}
+.workflow-run-choice,.workflow-run-review{display:grid;gap:8px}
+.workflow-run-note{font-size:12px}

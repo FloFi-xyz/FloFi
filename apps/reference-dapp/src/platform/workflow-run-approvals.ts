@@ -32,15 +32,22 @@ export type RunDelegationOps = {
   readonly revoke: (owner: WalletRef, runId: string) => Promise<void>;
 };
 export type WorkflowRunSurface = WorkflowRunDeps & { readonly delegationOps?: RunDelegationOps | null };
-export type WorkflowRunClaim = { readonly run: RunView; readonly plan: AuthorizationPlan; readonly step: { readonly index: number; readonly count: number } | null };
+/**
+ * The owner's view of their run on `/approve`: the run, the authorization plan for their own grants, the step loaded now (if any) and the wallet
+ * that must sign it (a sequence may span EVM and Solana: each step is signed by the run's wallet of its own namespace).
+ */
+export type WorkflowRunClaim = { readonly run: RunView; readonly plan: AuthorizationPlan; readonly step: { readonly index: number; readonly count: number } | null;
+  readonly stepWallet: string | null };
 /** What the signing surface loads for a sequence: the current step's proposal (null when no step waits for the owner) and the run. */
 export type SequentialProposal = { readonly view: ApprovalView & { readonly workflowRun: WorkflowRunClaim }; readonly command: Command | null;
   readonly workflow: Workflow | null; readonly workflowHash: string; readonly workflowId: string | null };
 
 async function proposalOf(deps: WorkflowRunSurface, run: RunRecord, step: StepProposal | null, base: ApprovalView): Promise<SequentialProposal> {
   const fresh = await deps.store.byId(run.runId) ?? run;
+  const network = step ? step.strategy.action === 'bridge' ? step.strategy.sourceNetwork : step.strategy.network : null;
   const workflowRun: WorkflowRunClaim = { run: await runView(deps, fresh, { outcomes: true }), plan: await ownerAuthorizationPlan(deps, fresh),
-    step: step ? { index: step.stepIndex, count: step.stepCount } : null };
+    step: step ? { index: step.stepIndex, count: step.stepCount } : null,
+    stepWallet: network ? fresh.wallets[network.startsWith('solana') ? 'solana' : 'eip155'] ?? null : null };
   return { view: { ...base, workflowRun }, command: step?.composition.command ?? null, workflow: step?.composition.workflow ?? null,
     workflowHash: step?.workflowHash ?? fresh.workflowHash, workflowId: step?.composition.workflow.workflowId ?? null };
 }
@@ -60,6 +67,11 @@ export async function ownedRun(deps: WorkflowRunSurface, approvalId: string, wal
   const run = await deps.store.byHandoff(approvalId) ?? refuse('WORKFLOW_RUN_NOT_FOUND');
   try { assertRunWallets(run, wallets); } catch (cause) { return refuse(cause instanceof Error && /_PROOF_REQUIRED$/.test(cause.message) ? cause.message : 'WORKFLOW_RUN_NOT_FOUND'); }
   return run;
+}
+/** The run's status for its owner, read-only: nothing is resolved or loaded (a view never changes a step). */
+export async function statusSequential(deps: WorkflowRunSurface, run: RunRecord, wallets: readonly WalletRef[], base: ApprovalView) {
+  assertRunWallets(run, wallets);
+  return proposalOf(deps, run, null, base);
 }
 /** The step the owner signs now (after the previous one reconciled), or the run's status when none waits. */
 export async function continueSequential(deps: WorkflowRunSurface, run: RunRecord, wallets: readonly WalletRef[], base: ApprovalView) {
