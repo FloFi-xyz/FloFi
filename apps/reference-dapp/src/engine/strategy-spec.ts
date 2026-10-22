@@ -115,8 +115,8 @@ export type StrategySpec = Static<typeof StrategySpecSchema>;
  * BUILD-MCP-002: the step-list contract (`version: 2`). A workflow is an ordered list of 1–8 steps, each a single-action strategy.
  * One step is exactly the v1 strategy (same normalization, same workflow hash): a single transaction is a one-step workflow.
  * Each step keeps its own isolated IR (FloFi's authoring rules keep every publicly executable capability alone in its workflow);
- * the workflow hash of several steps covers their ordered step hashes. Which sequences execute today is an execution-plan fact
- * (`MULTI_STEP_SEQUENCE_NOT_IMPLEMENTED` until the sequential runner), never a schema change.
+ * the workflow hash of several steps covers their ordered step hashes. Which sequences execute is an execution-plan fact (BUILD-CHAT-E2E-001:
+ * `SEQUENTIAL`, run step by step by a workflow run), never a schema change.
  */
 export const MAX_WORKFLOW_STEPS = 8;
 /**
