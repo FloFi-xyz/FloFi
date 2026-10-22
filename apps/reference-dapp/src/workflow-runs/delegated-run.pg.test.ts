@@ -50,7 +50,7 @@ describe('BUILD-CHAT-E2E-001 delegated workflow run (PostgreSQL, MOCKED chains)'
 
       // ONE passkey assertion over the Universal Workflow Authorization of this run.
       const review = await authorizationReviewSequential(h.runs, run, [h.evm, h.sol]);
-      expect(review.manifest).toMatchObject({ workflowHash: approval.workflowHash, maxExecutionsPerPeriod: { count: 1, period: 'MONTH' }, maxSlippageBps: 100 });
+      expect(review.manifest).toMatchObject({ workflowHash: approval.workflowHash, maxExecutionsPerPeriod: { count: 1, period: 'MONTH' }, maxSlippageBps: 50 });
       const authorized = await workflowRunAuthorize(h.surface, approval.secret, [h.evm, h.sol], review.revision,
         h.d.passkey.assert(fromB64url(review.challenge), ORIGIN, 'localhost'), h.d.now());
       expect(authorized.view.workflowRun!.run).toMatchObject({ state: 'RUNNING', mode: 'DELEGATED' });

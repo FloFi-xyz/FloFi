@@ -443,7 +443,8 @@ export function createDelegationService(deps: DelegationServiceDeps) {
         const grants = await store.grants(owner), graph = resolveAuthorityGraph(requirement, grants, config.mode, now.getTime());
         if (!graph.ok) refuse(graph.failures[0]!.code);
         if (new Set(graph.bindings.map(b => grants.find(g => g.grantId === b.grantId)!.passkeyId)).size !== 1) refuse('CREDENTIALS_USE_DIFFERENT_PASSKEYS');
-        const spend = executionSpend(requirement), slippage = Math.max(100, ...requirement.steps.map(x => x.slippageBps ?? 0));
+        // The cap is the workflow's own slippage, exactly as each step's driver applies it (a step without one gets none), never a looser floor.
+        const spend = executionSpend(requirement), slippage = Math.max(0, ...requirement.steps.map(x => x.slippageBps ?? 0));
         const authorizationId = deps.newId('dau');
         const manifest = buildManifest({ owner: ownerKey(owner), authorizationId, revision: 1, now, validFrom: now, expiresAt: new Date(now.getTime() + run.validitySeconds * 1000),
           timezone: 'UTC', engineVersion: ENGINE_VERSION, requirement, bindings: graph.bindings,
