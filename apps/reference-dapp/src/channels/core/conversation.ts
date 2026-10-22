@@ -22,6 +22,7 @@
  * platform. Nothing here can approve, sign or execute, and no message is ever treated as authorization.
  */
 import { parseLocalCommand, type Command } from '../../domain/commands';
+import { MAX_WORKFLOW_STEPS } from '../../engine/strategy-spec';
 import { buildCopilotFacts } from '../../domain/copilot-answers';
 import { COPILOT_AUTHORING_COMMANDS } from '../../domain/copilot-authoring';
 import { closeSegment, emptyConversation, failureText, finishTurn, recordProposal, startTurn, type CopilotConversation, type CopilotEnvironment,
@@ -52,6 +53,11 @@ export type ChannelState = {
   readonly copilot: unknown;
   /** The channel's pending proposal: an authoring command of the editor's initial state. */
   readonly pending: Command | null;
+  /**
+   * BUILD-CHAT-E2E-001: the steps the conversation kept before `pending` (ADD STEP), in order. The workflow proposed is `[...steps, pending]`, as ONE
+   * approval; absent or empty: a single-step proposal exactly as before.
+   */
+  readonly steps?: readonly Command[];
   /** The live approval handoff of the pending proposal, and the most recent one (for STATUS). Ids only. */
   readonly approvalId: string | null; readonly lastApprovalId: string | null;
   /** The choices FloFi offered last (answerable by number or by tapping). */
@@ -65,7 +71,9 @@ export const freshState = (language: ChannelLanguage): ChannelState =>
 export const MAX_STATE_BYTES = 32_768;
 
 export type TurnContent = InboundContent | { readonly kind: 'SECRET'; readonly language: ChannelLanguage };
-export type TurnAction = 'REPLY' | 'PROPOSE' | 'CANCEL' | 'LINK' | 'STATUS' | 'OPT_OUT' | 'OPT_IN' | 'IGNORE' | 'SUBSCRIBE' | 'MEMORY';
+export type TurnAction = 'REPLY' | 'PROPOSE' | 'CANCEL' | 'LINK' | 'STATUS' | 'OPT_OUT' | 'OPT_IN' | 'IGNORE' | 'SUBSCRIBE' | 'MEMORY'
+  // BUILD-CHAT-E2E-001: a step kept (the next message authors the next step), the step list shown, the step list edited (re-proposed).
+  | 'ADD_STEP' | 'STEPS' | 'WORKFLOW';
 export type TurnDecision = { readonly action: TurnAction; readonly command: Command | null; readonly aiInterpreted: boolean; readonly replies: readonly ChannelReply[];
   readonly notes: readonly string[]; readonly outcome: string; readonly state: ChannelState;
   /** BUILD-AUTOMATION-001: the one-time code of a SUBSCRIBE turn (`automations ABCD-EFGH-JKLM`), handed to the subscription hook. */
@@ -107,6 +115,16 @@ const MEMORY_COMMANDS: readonly (readonly ['SHOW' | 'OFF' | 'ON', RegExp, Channe
   ['SHOW', /^(?:memory|my memory|\/memory)$/, 'EN'], ['SHOW', /^(?:mem[oó]ria|minha mem[oó]ria)$/, 'PT'],
   ['OFF', /^(?:memory off|pause memory)$/, 'EN'], ['OFF', /^(?:mem[oó]ria off|pausar mem[oó]ria|desativar mem[oó]ria)$/, 'PT'],
   ['ON', /^(?:memory on|resume memory)$/, 'EN'], ['ON', /^(?:mem[oó]ria on|ativar mem[oó]ria|retomar mem[oó]ria)$/, 'PT'],
+];
+/**
+ * BUILD-CHAT-E2E-001: step-list commands, EN and PT, with no model. ADD STEP keeps the pending proposal as a step and starts the next one; a
+ * correction afterwards revises only the new step. REMOVE / MOVE edit the list (the workflow is proposed again as one approval).
+ */
+const STEP_COMMANDS: readonly (readonly ['ADD' | 'LIST' | 'REMOVE' | 'MOVE', RegExp, ChannelLanguage])[] = [
+  ['ADD', /^(?:add step|add another step|add a step|next step|and then|then)$/, 'EN'], ['ADD', /^(?:adicionar etapa|nova etapa|pr[oó]xima etapa|e depois|depois)$/, 'PT'],
+  ['LIST', /^(?:steps|show steps|workflow)$/, 'EN'], ['LIST', /^(?:etapas|ver etapas|fluxo)$/, 'PT'],
+  ['REMOVE', /^(?:remove|delete) step ([1-8])$/, 'EN'], ['REMOVE', /^(?:remover|apagar|tirar) (?:a )?etapa ([1-8])$/, 'PT'],
+  ['MOVE', /^move step ([1-8]) to ([1-8])$/, 'EN'], ['MOVE', /^mover (?:a )?etapa ([1-8]) para (?:a )?([1-8])$/, 'PT'],
 ];
 const PORTUGUESE = /\b(?:coloca|quero|faz|fazer|empresta|emprestar|troca|trocar|muda|mudar|na|no|para|com|de|da|do|em|sim|não|nao)\b/i;
 
@@ -165,7 +183,9 @@ export async function decideTurn(input: TurnInput): Promise<TurnDecision> {
   // BUILD-CHAT-LEARNING-002: where nothing can be stored (session-only adaptation), MEMORY words are ordinary text.
   const storable = !!input.learning && input.learning.memory !== 'SESSION';
   const memoryCommand = storable && !local ? MEMORY_COMMANDS.find(([, pattern]) => pattern.test(normalized)) : undefined;
+  const stepCommand = !local ? STEP_COMMANDS.find(([, pattern]) => pattern.test(normalized)) : undefined;
   if (local?.[2]) state = { ...state, language: local[2] };
+  if (stepCommand) state = { ...state, language: stepCommand[2] };
   if (memoryCommand) state = { ...state, language: memoryCommand[2] };
   const m = channelCopy(state.language), greet = (replies: ChannelReply[]) => state.greeted ? replies : [text(m.firstContact(input.support, input.privacy)), ...replies];
   if (optedOut) return local?.[0] === 'OPT_IN' ? decision('OPT_IN', 'OPTED_IN', [text(m.optedIn), text(m.help(input.support, input.privacy))], { ...freshState(state.language), greeted: true })
@@ -179,11 +199,28 @@ export async function decideTurn(input: TurnInput): Promise<TurnDecision> {
       ? `${m.help(input.support, input.privacy)}\n${channelLearningCopy(state.language).help}` : m.help(input.support, input.privacy))]), greeted);
     if (kind === 'OPT_OUT') return decision('OPT_OUT', 'OPTED_OUT', [text(m.optedOut)], freshState(state.language));
     // NEW/CANCEL also forgets the open question; the service revokes the live approval link.
-    if (kind === 'CANCEL') return decision('CANCEL', 'CANCELLED', greet([]), { ...greeted, pending: null, approvalId: null, copilot: null });
+    if (kind === 'CANCEL') return decision('CANCEL', 'CANCELLED', greet([]), { ...greeted, pending: null, approvalId: null, copilot: null, steps: [] });
     if (kind === 'SUBSCRIBE') return decision('SUBSCRIBE', 'SUBSCRIBE', greet([]), greeted, { subscribeCode: local[1].exec(normalized)![1]!.toUpperCase() });
     return decision(kind, kind === 'STATUS' ? 'STATUS' : 'LINK', greet([]), greeted);
   }
   if (memoryCommand) return decision('MEMORY', `MEMORY_${memoryCommand[0]}`, greet([]), greeted, { memoryCommand: memoryCommand[0] });
+  if (stepCommand) {
+    const [kind, pattern] = stepCommand, match = pattern.exec(normalized)!, all = [...state.steps ?? [], ...state.pending ? [state.pending] : []];
+    if (kind === 'LIST') return decision('STEPS', 'STEPS', greet([]), greeted);
+    if (kind === 'ADD') {
+      if (!state.pending) return decision('REPLY', 'STEP_NOTHING_PENDING', greet([text(m.noPending)]), greeted);
+      if (all.length >= MAX_WORKFLOW_STEPS) return decision('REPLY', 'STEPS_FULL', greet([text(m.stepsFull(MAX_WORKFLOW_STEPS))]), greeted);
+      // The kept step leaves the Copilot's view: the next message authors a NEW step (a correction can no longer reach the kept one).
+      return decision('ADD_STEP', 'STEP_ADDED', greet([]), { ...greeted, steps: all, pending: null, copilot: null });
+    }
+    const from = Number(match[1]) - 1, to = Number(match[2] ?? match[1]) - 1;
+    if (from >= all.length || to >= all.length) return decision('REPLY', 'STEP_UNKNOWN', greet([text(m.stepUnknown(all.length))]), greeted);
+    const next = [...all];
+    if (kind === 'REMOVE') next.splice(from, 1);
+    else next.splice(to, 0, ...next.splice(from, 1));
+    return decision('WORKFLOW', kind === 'REMOVE' ? 'STEP_REMOVED' : 'STEP_MOVED', greet([]), { ...greeted, steps: next.slice(0, -1), pending: next.at(-1) ?? null, copilot: null },
+      { command: next.at(-1) ?? null });
+  }
   const learning = input.learning ?? null;
   const pending = state.pending, env = environment(pending, learning), conversation = decodeCopilot(state.copilot, env);
   const openQuestion = conversation.draft !== null || state.choices.length > 0;

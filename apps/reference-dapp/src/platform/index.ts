@@ -28,3 +28,7 @@ export { assertSafeOutput, previewPlan, projectSimulation, strategyFlow, type Pr
 export { deploymentRuntime as deploymentEngineRuntime, embeddedMcpRuntime as embeddedEngineRuntime, type EvidenceRecord, type McpRuntime as EngineRuntime,
   type Result } from '../mcp/runtime.ts';
 export { credentialDigest, credentialOf, newCredential, newId } from '../mcp/oauth/crypto.ts';
+// BUILD-CHAT-E2E-001: the workflow run service, as every surface sees it (status views, authorization plans); surfaces never import it directly.
+export type { AuthorizationPlan, DelegationFacts } from '../workflow-runs/authorization-plan.ts';
+export type { RunView } from '../workflow-runs/service.ts';
+export type { WorkflowRunStore } from '../workflow-runs/pg-store.ts';

@@ -17,6 +17,8 @@ import { approvalLinkScheme, approvalProgress, requestApproval, type ApprovalLin
   type HandoffPolicy, type HandoffRecord, type HandoffRules, type HandoffStore, type RequesterScope, type WalletRef, type WindowLimit } from '../../platform/index.ts';
 import type { ChannelKeys } from './crypto.ts';
 import type { ChannelStrategy } from './strategy.ts';
+import type { StrategyInput } from '../../engine/strategy-spec';
+import type { AuthorizationPlan, WorkflowRunStore } from '../../platform/index.ts';
 
 export const CHANNEL_APPROVAL_PREFIX = 'flofi_chs_';
 export const CHANNEL_HANDOFF_RULES: HandoffRules = Object.freeze({ handoffSeconds: 900, maxPending: 3, rate: [20, 3_600] as const, supersedeSameWorkflow: false });
@@ -24,7 +26,9 @@ export const channelApprovalScheme = (keys: ChannelKeys): ApprovalLinkScheme => 
 
 /** What the channel needs from the shared platform: the deployment's handoff store, abuse limiter, runtime, the channel policy. */
 export type ChannelPlatform = { readonly origin: string; readonly scheme: ApprovalLinkScheme; readonly handoffs: HandoffStore; readonly allow: WindowLimit;
-  readonly runtime: EngineRuntime; readonly policy: Extract<HandoffPolicy, { ok: true }> };
+  readonly runtime: EngineRuntime; readonly policy: Extract<HandoffPolicy, { ok: true }>;
+  /** BUILD-CHAT-E2E-001: the runs of multi-step approvals (status and notifications), where the deployment runs workflows. */
+  readonly workflowRuns?: Pick<WorkflowRunStore, 'byHandoff' | 'steps'> | null };
 /** The requester of one conversation: its id isolates its handoffs; the intended wallet is immutable, non-secret claim context. */
 export function channelRequester(source: { readonly clientId: string; readonly displayName: string }, conversationId: string, intendedWallet: WalletRef | null): ApprovalRequester {
   return { kind: 'CHANNEL_CONVERSATION', ref: conversationId, clientId: source.clientId, displayName: source.displayName, context: intendedWallet ? { intendedWallet } : {} };
@@ -41,20 +45,24 @@ export const intendedWalletPolicy: ClaimPolicy = (handoff, wallet) => {
     : { ok: false, code: 'CHANNEL_INTENDED_WALLET_MISMATCH' };
 };
 
-export type ChannelApproval = { readonly ok: true; readonly approvalId: string; readonly approvalUrl: string; readonly expiresAt: Date }
+export type ChannelApproval = { readonly ok: true; readonly approvalId: string; readonly approvalUrl: string; readonly expiresAt: Date;
+    /** BUILD-CHAT-E2E-001: a multi-step workflow's authorizations per mode, before anything executes. */
+    readonly authorizationPlan: AuthorizationPlan | null }
   | { readonly ok: false; readonly code: string; readonly blockers: readonly string[] };
 /**
  * A new approval handoff for the pending proposal. The secret-bearing URL is returned once, to be attached to the outgoing message in
  * memory: the channel never logs or stores it.
  */
-export async function createChannelApproval(platform: ChannelPlatform, requester: ApprovalRequester, strategy: ChannelStrategy, now: Date): Promise<ChannelApproval> {
+export async function createChannelApproval(platform: ChannelPlatform, requester: ApprovalRequester, strategy: Pick<ChannelStrategy, 'workflowHash'> & { readonly spec: StrategyInput },
+  now: Date): Promise<ChannelApproval> {
   const result = await requestApproval({ origin: platform.origin, scheme: platform.scheme, handoffs: platform.handoffs, allow: platform.allow, runtime: platform.runtime,
     policy: platform.policy, rules: CHANNEL_HANDOFF_RULES, now }, requester, strategy.spec, strategy.workflowHash);
   if (!result.ok) {
     const blockers = ((result.extra?.blockers ?? []) as { message?: unknown }[]).map(b => String(b.message ?? '')).filter(Boolean).slice(0, 3);
     return { ok: false, code: result.code, blockers };
   }
-  return { ok: true, approvalId: result.value.approvalId, approvalUrl: result.value.approvalUrl, expiresAt: new Date(result.value.expiresAt) };
+  const plan = 'authorizationPlan' in result.value ? result.value.authorizationPlan as AuthorizationPlan : null;
+  return { ok: true, approvalId: result.value.approvalId, approvalUrl: result.value.approvalUrl, expiresAt: new Date(result.value.expiresAt), authorizationPlan: plan };
 }
 /** Withdraws one of this conversation's handoffs that is not yet applied (an applied or ended one is left as it is). */
 export async function revokeChannelApproval(platform: Pick<ChannelPlatform, 'handoffs'>, conversationId: string, approvalId: string | null, now: Date): Promise<boolean> {
@@ -63,8 +71,9 @@ export async function revokeChannelApproval(platform: Pick<ChannelPlatform, 'han
   return h?.status === 'REVOKED';
 }
 /** One of this conversation's handoffs with its shared run progress, or null when it is not this conversation's. */
-export async function channelApprovalProgress(platform: Pick<ChannelPlatform, 'handoffs' | 'runtime'> & Partial<Pick<ChannelPlatform, 'origin'>>, conversationId: string, approvalId: string, now: Date):
+export async function channelApprovalProgress(platform: Pick<ChannelPlatform, 'handoffs' | 'runtime'> & Partial<Pick<ChannelPlatform, 'origin' | 'workflowRuns'>>, conversationId: string,
+  approvalId: string, now: Date):
   Promise<{ readonly handoff: HandoffRecord; readonly progress: Awaited<ReturnType<typeof approvalProgress>> } | null> {
   const handoff = await platform.handoffs.forRequester(approvalId, conversationScope(conversationId), now);
-  return handoff ? { handoff, progress: await approvalProgress(handoff, platform.runtime, platform.handoffs, platform.origin) } : null;
+  return handoff ? { handoff, progress: await approvalProgress(handoff, platform.runtime, platform.handoffs, platform.origin, platform.workflowRuns ?? null) } : null;
 }

@@ -15,7 +15,7 @@ import type { Command } from '../../domain/commands';
 import type { WorkflowStep } from '../../domain/workflow-steps';
 import { CATALOG_NETWORK_IDENTITIES, networkIdentity } from '../../domain/network-registry';
 import { AAVE_V3_LENDING_PROFILES } from '@defi-workflow-engine/action-registry';
-import type { NetworkId, StrategySpec } from '../../engine/strategy-spec';
+import type { NetworkId, StrategyInput, StrategySpec } from '../../engine/strategy-spec';
 import { composeWorkflowOrRefuse, PlatformRefusal, type WalletRef } from '../../platform/index.ts';
 import { workflowVisualModel, type WorkflowVisualModel } from '../../platform/workflow-visual.ts';
 
@@ -135,4 +135,33 @@ export function canonicalStrategy(command: Command): ChannelStrategy | { readonl
   return { ok: true, spec: workflow.strategy as StrategySpec, workflowHash: workflow.workflowHash, command: step.command, summary: step.summary,
     fundsClass: workflow.fundsClass, notes: workflow.notes, intendedWallet: intendedWalletOf(workflow.strategy as StrategySpec),
     steps: step.steps.filter(s => s.kind !== 'TEMPLATE'), visual: workflowVisualModel(workflow) };
+}
+
+/**
+ * BUILD-CHAT-E2E-001: the canonical workflow of a channel's step list (the steps the conversation kept, then the pending command), composed by
+ * the shared platform as one v2 workflow. Every step passes the same parity guard as a single command: the platform must reproduce exactly
+ * that step's command. A list that FloFi would collapse into another shape (e.g. the lending composition) is refused rather than silently
+ * re-authored. One intended wallet at most, and only for the wallet that claims the workflow (its first step's).
+ */
+export type ChannelWorkflow = Omit<ChannelStrategy, 'spec'> & { readonly spec: StrategyInput; readonly commands: readonly Command[]; readonly stepCount: number;
+  readonly stepSummaries: readonly string[] };
+export function canonicalWorkflow(commands: readonly Command[]): ChannelWorkflow | { readonly ok: false; readonly code: string } {
+  if (commands.length === 1) {
+    const one = canonicalStrategy(commands[0]!);
+    return one.ok ? { ...one, commands: [one.command], stepCount: 1, stepSummaries: [one.summary] } : one;
+  }
+  const specs = commands.map(strategyOfCommand);
+  if (specs.some(spec => !spec)) return { ok: false, code: 'CHANNEL_COMMAND_NOT_AUTHORING' };
+  let workflow;
+  try { workflow = composeWorkflowOrRefuse({ version: 2, steps: specs }, undefined); }
+  catch (cause) { return { ok: false, code: cause instanceof PlatformRefusal ? cause.message : 'CHANNEL_STRATEGY_PARITY_FAILED' }; }
+  if (workflow.steps.length !== commands.length || workflow.steps.some((step, i) => !sameCommand(step.command, commands[i]!)))
+    return { ok: false, code: 'CHANNEL_STRATEGY_PARITY_FAILED' };
+  const named = [...new Map(workflow.steps.map(step => intendedWalletOf(step.strategy)).filter((w): w is WalletRef => w !== null).map(w => [w.address, w])).values()];
+  if (named.length > 1) return { ok: false, code: 'CHANNEL_INTENDED_WALLETS_DIFFER' };
+  const first = workflow.steps[0]!.strategy, firstSolana = (first.action === 'bridge' ? first.sourceNetwork : first.network).startsWith('solana');
+  return { ok: true, spec: workflow.strategy, workflowHash: workflow.workflowHash, command: commands.at(-1)!, commands: workflow.steps.map(s => s.command),
+    summary: workflow.steps.map(s => s.summary).join(' → '), stepSummaries: workflow.steps.map(s => s.summary), fundsClass: workflow.fundsClass, notes: workflow.notes,
+    intendedWallet: firstSolana ? null : named[0] ?? null, steps: workflow.steps.flatMap(c => c.steps.filter(s => s.kind !== 'TEMPLATE')),
+    visual: workflowVisualModel(workflow), stepCount: workflow.steps.length };
 }

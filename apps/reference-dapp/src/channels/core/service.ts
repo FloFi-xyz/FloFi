@@ -32,10 +32,11 @@ import { channelRowId, keyedDigest, leaseToken, open, seal, sealContext } from '
 import { addressContext, deliverConversation, newOutboxId, sealReply, type DeliveryContext } from './delivery.ts';
 import type { ChannelLogger } from './log.ts';
 import { parseStateLanguage } from './state-language.ts';
-import { statusReplies } from './status.ts';
+import { continuationUrl, OPEN_RUN, statusReplies } from './status.ts';
 import { RETENTION, type ChannelStore, type ConversationRecord, type NewOutbox, type PendingEvent } from './store.ts';
 import { SUBSCRIBE_LIMIT, type ChannelSubscriptions } from './subscriber.ts';
-import { canonicalStrategy } from './strategy.ts';
+import { canonicalStrategy, canonicalWorkflow } from './strategy.ts';
+import { isStrategyWorkflow } from '../../engine/strategy-spec';
 import type { ChannelAdapter, ChannelAddress, ChannelReply, ChannelVisualRenderer, DeliveryUpdate, InboundMessage } from './types.ts';
 
 export type ChannelContext = { readonly core: ChannelCoreConfig; readonly store: ChannelStore; readonly platform: ChannelPlatform; readonly adapter: ChannelAdapter;
@@ -56,6 +57,14 @@ const MAX_EVENT_ATTEMPTS = 3;
 type Payload = { readonly content: TurnContent; readonly sendTo: ChannelAddress };
 const text = (value: string): ChannelReply => ({ text: shorten(value), choices: [], link: null });
 const PORTUGUESE_SECRET = /chaves?\s+privad|frases?\s+(?:semente|secreta|de\s+recupera)|palavras\s+secretas/i;
+
+/** BUILD-CHAT-E2E-001: one line per step of the conversation's step list (kept steps, then the pending one), in FloFi's own words. */
+function stepLines(state: ChannelState): string[] {
+  return [...state.steps ?? [], ...state.pending ? [state.pending] : []].map(command => {
+    const c = canonicalStrategy(command);
+    return c.ok ? c.steps.map(s => stepSummary(s, state.language)).join(' + ') : command.type;
+  });
+}
 
 export function createChannelService(ctx: ChannelContext) {
   const { core, store, adapter, log } = ctx, keys = core.keys, tenant = core.tenantId;
@@ -229,12 +238,40 @@ export function createChannelService(ctx: ChannelContext) {
       }
       case 'LINK': {
         if (!state.pending) { await commit(decision.outcome, [...decision.replies, text(lm.noPending)], state); return { address: null, language: state.language }; }
+        // BUILD-CHAT-E2E-001: a fresh link for a workflow whose run is under way would start it again from its first step: the owner continues
+        // the existing run instead (its non-secret link opens only for the run owner's proven wallet).
+        const last = state.lastApprovalId ? await channelApprovalProgress(ctx.platform, conversationId, state.lastApprovalId, now) : null;
+        if (last?.progress.workflowRun && OPEN_RUN.has(last.progress.workflowRun.state)) {
+          await commit('LINK_RUN_OPEN', [...decision.replies, text(lm.runOpen(continuationUrl(core.origin, last.handoff.handoffId)))], state);
+          return { address: null, language: state.language };
+        }
         const proposed = await propose(conversationId, state, state.pending, false, [], now);
         await commit(proposed.outcome, [...decision.replies, ...proposed.replies], proposed.state, { handoffId: proposed.handoffId, approvalReply: proposed.approvalReply });
         return { address: null, language: state.language };
       }
       case 'PROPOSE': {
         const proposed = await propose(conversationId, state, decision.command!, decision.aiInterpreted, decision.notes, now);
+        await commit(proposed.outcome, [...decision.replies, ...proposed.replies], proposed.state, { handoffId: proposed.handoffId, approvalReply: proposed.approvalReply });
+        return { address: null, language: state.language };
+      }
+      // BUILD-CHAT-E2E-001: the step list. A kept step withdraws the shorter workflow's link (it must not run alone and then again).
+      case 'ADD_STEP': {
+        await revokeChannelApproval(ctx.platform, conversationId, prior.approvalId, now);
+        const kept = state.steps?.length ?? 0;
+        await commit(decision.outcome, [...decision.replies, text(lm.stepsList(stepLines(state))), text(lm.stepKept(kept))], { ...state, approvalId: null });
+        return { address: null, language: state.language };
+      }
+      case 'STEPS': {
+        await commit(decision.outcome, [...decision.replies, text(lm.stepsList(stepLines(state)))], state);
+        return { address: null, language: state.language };
+      }
+      case 'WORKFLOW': {
+        if (!decision.command) {
+          await revokeChannelApproval(ctx.platform, conversationId, prior.approvalId, now);
+          await commit(decision.outcome, [...decision.replies, text(lm.stepsList([]))], { ...state, approvalId: null });
+          return { address: null, language: state.language };
+        }
+        const proposed = await propose(conversationId, { ...state, approvalId: prior.approvalId }, decision.command, false, [], now);
         await commit(proposed.outcome, [...decision.replies, ...proposed.replies], proposed.state, { handoffId: proposed.handoffId, approvalReply: proposed.approvalReply });
         return { address: null, language: state.language };
       }
@@ -289,21 +326,29 @@ export function createChannelService(ctx: ChannelContext) {
    * the visual's workflow hash is the handoff's own).
    */
   async function propose(conversationId: string, state: ChannelState, command: Command, aiInterpreted: boolean, notes: readonly string[], now: Date) {
-    const m = channelCopy(state.language), strategy = canonicalStrategy(command);
+    // BUILD-CHAT-E2E-001: with kept steps, the proposal is the whole step list as ONE canonical workflow (and one approval).
+    const m = channelCopy(state.language), kept = state.steps ?? [], strategy = canonicalWorkflow([...kept, command]);
     const revoked = await revokeChannelApproval(ctx.platform, conversationId, state.approvalId, now);
     if (!strategy.ok) return { outcome: 'PROPOSAL_NOT_CANONICAL', replies: [text(m.refused(strategy.code))], state: { ...state, pending: null, approvalId: null },
       handoffId: null, approvalReply: null };
     const approval = await createChannelApproval(ctx.platform, channelRequester(adapter, conversationId, strategy.intendedWallet), strategy, now);
     if (!approval.ok) return { outcome: `APPROVAL_REFUSED`, replies: [text([m.refused(approval.code), ...approval.blockers].join('\n'))],
       state: { ...state, pending: strategy.command, approvalId: null }, handoffId: null, approvalReply: null };
-    const preview = core.simulation ? await previewOf(conversationId, strategy, now) : { kind: 'DISABLED' } as const;
-    const networks = strategy.spec.action === 'bridge' ? [strategy.spec.sourceNetwork, strategy.spec.destinationNetwork] : [(strategy.spec as { network: string }).network];
+    // A read-only preview is one step's; a workflow is simulated step by step in FloFi before each step runs.
+    const single = strategy.stepCount === 1 ? strategy as Extract<ReturnType<typeof canonicalStrategy>, { ok: true }> : null;
+    const preview = single && core.simulation ? await previewOf(conversationId, single, now) : { kind: 'DISABLED' } as const;
+    const specs = isStrategyWorkflow(strategy.spec) ? strategy.spec.steps : [strategy.spec];
+    const networks = [...new Set(specs.flatMap(spec => spec.action === 'bridge' ? [spec.sourceNetwork, spec.destinationNetwork] : [(spec as { network: string }).network]))];
+    const plan = approval.authorizationPlan;
     const reply: ChannelReply = { text: readyText(state.language, { lines: strategy.steps.map(s => stepSummary(s, state.language)), networks, fundsClass: strategy.fundsClass,
-      notes: [...revoked ? [m.replaced] : [], ...notes.slice(0, 2)], preview, intendedWallet: strategy.intendedWallet ? shorten(strategy.intendedWallet.address) : null,
-      aiInterpreted, expiresMinutes: Math.round((approval.expiresAt.getTime() - now.getTime()) / 60_000) }),
+      notes: [...revoked ? [m.replaced] : [], ...plan ? m.authorizations({ confirm: plan.confirmEachStep.available ? plan.confirmEachStep.walletConfirmationsAtLeast : null,
+        once: plan.delegatedSingleAuthorization.available }) : [], ...notes.slice(0, 2)], preview,
+      intendedWallet: strategy.intendedWallet ? shorten(strategy.intendedWallet.address) : null, aiInterpreted,
+      expiresMinutes: Math.round((approval.expiresAt.getTime() - now.getTime()) / 60_000) }),
     choices: [], link: { label: m.linkLabel, url: approval.approvalUrl }, visual: { model: strategy.visual, language: state.language } };
     return { outcome: 'APPROVAL_CREATED', replies: [reply], handoffId: approval.approvalId, approvalReply: { reply, handoffId: approval.approvalId },
-      state: { ...state, pending: strategy.command, approvalId: approval.approvalId, lastApprovalId: approval.approvalId } };
+      state: { ...state, pending: strategy.command, ...kept.length ? { steps: strategy.commands.slice(0, -1) } : {}, approvalId: approval.approvalId,
+        lastApprovalId: approval.approvalId } };
   }
 
   /** The shared platform's read-only preview, when its subject is known from the strategy itself; bounded in time and per conversation. */

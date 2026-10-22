@@ -46,7 +46,7 @@ const RUN_PT: Readonly<Record<string, string>> = {
 
 const EN = {
   firstContact: (support: string, privacy: string) => `FloFi (automated assistant). I compose DeFi strategies for you to review and sign in FloFi. I can't sign, execute or move funds, and nothing you write here authorizes anything. Never send a private key or seed phrase. Human support: ${support}. Privacy: ${privacy}. Reply STOP to stop messages.`,
-  help: (support: string, privacy: string) => `What I can do: compose a strategy from your message (for example "Supply 100 USDC on Aave on Base Sepolia"), ask for anything missing, correct it ("make it 50"), and tell you its status (STATUS). LINK sends a fresh approval link, NEW starts over, STOP stops messages.\nExecution happens only in FloFi, with your own wallet, after a fresh simulation and your review of the Strategy Manifest. Messages here never authorize anything.\nHuman support: ${support}. Privacy: ${privacy}.`,
+  help: (support: string, privacy: string) => `What I can do: compose a strategy from your message (for example "Supply 100 USDC on Aave on Base Sepolia"), ask for anything missing, correct it ("make it 50"), and tell you its status (STATUS). LINK sends a fresh approval link, NEW starts over, STOP stops messages.\nWorkflows: after a proposal, ADD STEP keeps it and you describe the next action; STEPS, REMOVE STEP n and MOVE STEP n TO m edit the list; the whole workflow gets ONE approval link.\nExecution happens only in FloFi, with your own wallet, after a fresh simulation and your review of the Strategy Manifest. Messages here never authorize anything.\nHuman support: ${support}. Privacy: ${privacy}.`,
   ready: 'Strategy ready:',
   network: (labels: string, real: boolean) => `Network: ${labels}${real ? ' — REAL FUNDS' : ' (test funds)'}`,
   preview: (p: PreviewNote) => p.kind === 'PASSED' ? `Simulation preview passed (read-only${p.provenance === 'MOCKED' ? ', MOCKED' : ''}). FloFi simulates again before your review.`
@@ -81,7 +81,38 @@ const EN = {
   choose: 'Reply with the number of your choice.',
   busy: 'Too many messages right now — please wait a moment and try again.',
   error: 'Something went wrong on FloFi\'s side. Nothing was proposed or authorized. Please try again.',
+  // BUILD-CHAT-E2E-001: multi-step workflows — the step list, authorization counts and the run's durable status.
+  stepsFull: (max: number) => `A workflow has at most ${max} steps.`,
+  stepUnknown: (count: number) => count ? `There is no such step. This workflow has ${count} step${count === 1 ? '' : 's'}.` : 'There are no steps yet. Tell me what you want to do.',
+  stepKept: (n: number) => `Step ${n} kept. Describe step ${n + 1}: it runs only after step ${n} is reconciled. STEPS shows the workflow; NEW starts over.`,
+  stepsList: (lines: readonly string[]) => lines.length ? `Workflow (${lines.length} step${lines.length === 1 ? '' : 's'}):\n${lines.map((line, i) => `${i + 1}. ${line}`).join('\n')}`
+    : 'There are no steps yet. Tell me what you want to do.',
+  authorizations: (a: AuthorizationFacts) => [...a.confirm !== null ? [`Authorizations: at least ${a.confirm} wallet confirmations in FloFi — one per step, each after a fresh simulation.`] : [],
+    ...a.once ? ['Or ONE passkey authorization for the whole workflow, if your FloFi Credentials cover every step (FloFi checks when you open it).'] : [],
+    'One authorization is not one transaction: each step pays its own network fees.'],
+  workflowRun: (r: RunFacts) => [`Workflow: ${RUN_STATE_EN[r.state] ?? r.state}`, ...r.steps.map(step => `${step.index + 1}. ${ACTION_EN[step.action] ?? step.action} — `
+    + `${STEP_STATE_EN[step.state] ?? step.state}${step.transaction ? ` · tx ${shorten(step.transaction)}` : ''}`)].join('\n'),
+  stepReady: (n: number, url: string) => `Step ${n} is ready for your signature in FloFi: ${url}\nYour wallet proves it is you there; nothing is authorized until you sign.`,
+  runOpen: (url: string) => `This workflow is already running. Continue it in FloFi: ${url}\nA new link would start it again from the first step, so none was created.`,
+  runDone: 'Workflow completed: every step reconciled ✅',
+  runHalted: 'Workflow partially completed: the reconciled steps stay done and their funds rest in your wallet; nothing later was submitted. See FloFi.',
+  runAttention: 'A submitted step has no final outcome yet. FloFi keeps observing it and never resubmits it.',
+  runEnded: (code: string) => `Workflow ended without completing (${code}). See FloFi for details.`,
 };
+export type AuthorizationFacts = { readonly confirm: number | null; readonly once: boolean };
+export type RunFacts = { readonly state: string; readonly steps: readonly { readonly index: number; readonly action: string; readonly state: string; readonly transaction: string | null }[] };
+const RUN_STATE_EN: Readonly<Record<string, string>> = { PENDING: 'waiting for you to choose how to authorize it', RUNNING: 'running', COMPLETED: 'completed ✅',
+  HALTED: 'partially completed', FAILED: 'failed', ATTENTION: 'needs attention', CANCELLED: 'ended', EXPIRED: 'expired' };
+const STEP_STATE_EN: Readonly<Record<string, string>> = { PENDING: 'waiting', READY: 'ready for your signature', AWAITING_OWNER: 'in your wallet', DELEGATED: 'authorized',
+  RECONCILED: 'reconciled ✅', FAILED: 'failed', UNCERTAIN: 'outcome pending', SKIPPED: 'not run', BLOCKED: 'stopped before submission' };
+const ACTION_EN: Readonly<Record<string, string>> = { swap: 'Swap', bridge: 'Bridge', supply: 'Supply', borrow: 'Borrow', repay: 'Repay', withdraw: 'Withdraw',
+  add_liquidity: 'Add liquidity', transfer: 'Transfer', lending_composition: 'Lending composition' };
+const RUN_STATE_PT: Readonly<Record<string, string>> = { PENDING: 'esperando você escolher como autorizar', RUNNING: 'em execução', COMPLETED: 'concluído ✅',
+  HALTED: 'parcialmente concluído', FAILED: 'falhou', ATTENTION: 'requer atenção', CANCELLED: 'encerrado', EXPIRED: 'expirado' };
+const STEP_STATE_PT: Readonly<Record<string, string>> = { PENDING: 'em espera', READY: 'pronta para sua assinatura', AWAITING_OWNER: 'na sua carteira', DELEGATED: 'autorizada',
+  RECONCILED: 'reconciliada ✅', FAILED: 'falhou', UNCERTAIN: 'resultado pendente', SKIPPED: 'não executada', BLOCKED: 'parada antes do envio' };
+const ACTION_PT: Readonly<Record<string, string>> = { swap: 'Troca', bridge: 'Ponte entre redes', supply: 'Depósito', borrow: 'Empréstimo', repay: 'Reembolso', withdraw: 'Saque',
+  add_liquidity: 'Liquidez', transfer: 'Transferência', lending_composition: 'Composição de empréstimo' };
 const REFUSALS_EN: Readonly<Record<string, string>> = {
   MAINNET_HANDOFF_DISABLED_BY_POLICY: 'This strategy uses a mainnet (real funds). Proposals with real funds are disabled for this channel.',
   TEST_FUNDS_HANDOFF_DISABLED_BY_POLICY: 'Test-network proposals are disabled for this channel.',
@@ -97,6 +128,9 @@ const REFUSALS_EN: Readonly<Record<string, string>> = {
   HANDOFF_PENDING_LIMIT: 'Too many open approval links — send NEW to start over.',
   CHANNEL_STRATEGY_PARITY_FAILED: 'FloFi could not turn that into a canonical strategy. Nothing was proposed.',
   STRATEGY_SCHEMA_INVALID: 'FloFi could not turn that into a canonical strategy. Nothing was proposed.',
+  WORKFLOW_RUNS_NOT_ENABLED: 'FloFi cannot run multi-step workflows on this deployment yet. Nothing was proposed.',
+  DEPENDENT_AMOUNT_SOURCE_NOT_IMPLEMENTED: 'A step that spends what another step delivers needs delegated execution, which is not available here. Nothing was proposed.',
+  CHANNEL_INTENDED_WALLETS_DIFFER: 'These steps name different wallets; one workflow is approved by one owner. Nothing was proposed.',
 };
 const APPROVAL_EN: Readonly<Record<string, (expires: string) => string>> = {
   PENDING: e => `Proposal waiting for you to open it in FloFi (expires ${e}).`, CLAIMED: () => 'Proposal loaded for a wallet in FloFi; nothing is signed yet.',
@@ -107,7 +141,7 @@ const APPROVAL_EN: Readonly<Record<string, (expires: string) => string>> = {
 type Copy = typeof EN;
 const PT: Copy = {
   firstContact: (support, privacy) => `FloFi (assistente automático). Eu monto estratégias DeFi para você revisar e assinar no FloFi. Não posso assinar, executar nem mover fundos, e nada do que você escrever aqui autoriza qualquer coisa. Nunca envie chave privada ou frase-semente. Suporte humano: ${support}. Privacidade: ${privacy}. Responda PARAR para não receber mais mensagens.`,
-  help: (support, privacy) => `O que posso fazer: montar uma estratégia a partir da sua mensagem (por exemplo "Coloca 100 USDC na Aave na Base Sepolia"), perguntar o que faltar, corrigir ("muda para 50") e informar o status (ESTADO). LINK envia um novo link de aprovação, NOVO recomeça, PARAR interrompe as mensagens.\nA execução acontece só no FloFi, com a sua própria carteira, depois de uma nova simulação e da sua revisão do Strategy Manifest. Mensagens aqui nunca autorizam nada.\nSuporte humano: ${support}. Privacidade: ${privacy}.`,
+  help: (support, privacy) => `O que posso fazer: montar uma estratégia a partir da sua mensagem (por exemplo "Coloca 100 USDC na Aave na Base Sepolia"), perguntar o que faltar, corrigir ("muda para 50") e informar o status (ESTADO). LINK envia um novo link de aprovação, NOVO recomeça, PARAR interrompe as mensagens.\nFluxos: depois de uma proposta, ADICIONAR ETAPA a mantém e você descreve a próxima ação; ETAPAS, REMOVER ETAPA n e MOVER ETAPA n PARA m editam a lista; o fluxo inteiro recebe UM link de aprovação.\nA execução acontece só no FloFi, com a sua própria carteira, depois de uma nova simulação e da sua revisão do Strategy Manifest. Mensagens aqui nunca autorizam nada.\nSuporte humano: ${support}. Privacidade: ${privacy}.`,
   ready: 'Estratégia pronta:',
   network: (labels, real) => `Rede: ${labels}${real ? ' — FUNDOS REAIS' : ' (fundos de teste)'}`,
   preview: p => p.kind === 'PASSED' ? `Prévia da simulação aprovada (somente leitura${p.provenance === 'MOCKED' ? ', MOCKED' : ''}). O FloFi simula de novo antes da sua revisão.`
@@ -141,6 +175,22 @@ const PT: Copy = {
   choose: 'Responda com o número da sua escolha.',
   busy: 'Muitas mensagens agora — espere um momento e tente de novo.',
   error: 'Algo deu errado do lado do FloFi. Nada foi proposto nem autorizado. Tente de novo.',
+  stepsFull: max => `Um fluxo tem no máximo ${max} etapas.`,
+  stepUnknown: count => count ? `Essa etapa não existe. Este fluxo tem ${count} etapa${count === 1 ? '' : 's'}.` : 'Ainda não há etapas. Diga o que você quer fazer.',
+  stepKept: n => `Etapa ${n} mantida. Descreva a etapa ${n + 1}: ela só roda depois que a etapa ${n} for reconciliada. ETAPAS mostra o fluxo; NOVO recomeça.`,
+  stepsList: lines => lines.length ? `Fluxo (${lines.length} etapa${lines.length === 1 ? '' : 's'}):\n${lines.map((line, i) => `${i + 1}. ${line}`).join('\n')}`
+    : 'Ainda não há etapas. Diga o que você quer fazer.',
+  authorizations: a => [...a.confirm !== null ? [`Autorizações: pelo menos ${a.confirm} confirmações na carteira no FloFi — uma por etapa, cada uma depois de uma nova simulação.`] : [],
+    ...a.once ? ['Ou UMA autorização com passkey para o fluxo inteiro, se as suas Credenciais do FloFi cobrirem todas as etapas (o FloFi verifica quando você abrir).'] : [],
+    'Uma autorização não é uma transação: cada etapa paga as suas próprias taxas de rede.'],
+  workflowRun: r => [`Fluxo: ${RUN_STATE_PT[r.state] ?? r.state}`, ...r.steps.map(step => `${step.index + 1}. ${ACTION_PT[step.action] ?? step.action} — `
+    + `${STEP_STATE_PT[step.state] ?? step.state}${step.transaction ? ` · tx ${shorten(step.transaction)}` : ''}`)].join('\n'),
+  stepReady: (n, url) => `A etapa ${n} está pronta para a sua assinatura no FloFi: ${url}\nA sua carteira prova que é você lá; nada é autorizado até você assinar.`,
+  runOpen: url => `Este fluxo já está em execução. Continue no FloFi: ${url}\nUm novo link o começaria de novo pela primeira etapa, então nenhum foi criado.`,
+  runDone: 'Fluxo concluído: todas as etapas reconciliadas ✅',
+  runHalted: 'Fluxo parcialmente concluído: as etapas reconciliadas ficam feitas e os fundos ficam na sua carteira; nada posterior foi enviado. Veja no FloFi.',
+  runAttention: 'Uma etapa enviada ainda não tem resultado final. O FloFi continua a observá-la e nunca a reenvia.',
+  runEnded: code => `O fluxo terminou sem concluir (${code}). Veja os detalhes no FloFi.`,
 };
 const REFUSALS_PT: Readonly<Record<string, string>> = {
   MAINNET_HANDOFF_DISABLED_BY_POLICY: 'Esta estratégia usa uma mainnet (fundos reais). Propostas com fundos reais estão desativadas neste canal.',
@@ -157,6 +207,9 @@ const REFUSALS_PT: Readonly<Record<string, string>> = {
   HANDOFF_PENDING_LIMIT: 'Muitos links de aprovação abertos — envie NOVO para recomeçar.',
   CHANNEL_STRATEGY_PARITY_FAILED: 'O FloFi não conseguiu transformar isso em uma estratégia canônica. Nada foi proposto.',
   STRATEGY_SCHEMA_INVALID: 'O FloFi não conseguiu transformar isso em uma estratégia canônica. Nada foi proposto.',
+  WORKFLOW_RUNS_NOT_ENABLED: 'O FloFi ainda não roda fluxos de várias etapas neste ambiente. Nada foi proposto.',
+  DEPENDENT_AMOUNT_SOURCE_NOT_IMPLEMENTED: 'Uma etapa que gasta o que outra etapa entrega precisa de execução delegada, que não está disponível aqui. Nada foi proposto.',
+  CHANNEL_INTENDED_WALLETS_DIFFER: 'Estas etapas indicam carteiras diferentes; um fluxo é aprovado por um único dono. Nada foi proposto.',
 };
 const APPROVAL_PT: Readonly<Record<string, (expires: string) => string>> = {
   PENDING: e => `Proposta esperando você abrir no FloFi (expira ${e}).`, CLAIMED: () => 'Proposta carregada para uma carteira no FloFi; nada foi assinado ainda.',
