@@ -19,7 +19,12 @@ const importsOf = (file: string) => {
     .map(m => [m[0], m[1]!] as const);
 };
 const SHARED_UNDER_MCP = new Set(['src/mcp/execution.ts', 'src/mcp/simulation.ts', 'src/mcp/runtime.ts', 'src/mcp/oauth/crypto.ts']);
-const TYPE_ONLY = new Set(['backend/flows.ts', 'src/server/flow-runtime.ts']);
+const TYPE_ONLY = new Set(['backend/flows.ts', 'src/server/flow-runtime.ts', 'src/delegation/views.ts']);
+/**
+ * BUILD-CHAT-E2E-001: the workflow run service (`src/workflow-runs`) is part of the engine service, not a surface: it holds the durable run of
+ * a multi-step approval and uses only the engine, the platform's own modules and the delegation domain (no transport, framework or model).
+ */
+const ENGINE_SERVICES = ['src/workflow-runs/'];
 const PACKAGES = /^(node:|@defi-workflow-engine\/)/;
 
 function allowed(file: string, statement: string, specifier: string): boolean {
@@ -27,7 +32,7 @@ function allowed(file: string, statement: string, specifier: string): boolean {
   if (!specifier.startsWith('.')) return false;
   const target = relative(app, resolve(dirname(file), specifier)).replace(/\\/g, '/'), withTs = target.endsWith('.ts') ? target : `${target}.ts`;
   if (withTs.startsWith('src/platform/') || withTs.startsWith('src/engine/') || withTs.startsWith('src/domain/')) return true;
-  if (SHARED_UNDER_MCP.has(withTs)) return true;
+  if (SHARED_UNDER_MCP.has(withTs) || ENGINE_SERVICES.some(prefix => withTs.startsWith(prefix))) return true;
   return TYPE_ONLY.has(withTs) && /^(import|export) type\b/.test(statement);
 }
 

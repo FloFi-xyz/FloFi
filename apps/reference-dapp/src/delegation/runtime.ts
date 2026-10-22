@@ -11,6 +11,7 @@
 import type { Database } from '@defi-workflow-engine/cloud-runtime';
 import { localDisposableSignerProvider, memorySignerProvider, type DelegatedSignerProvider } from '@defi-workflow-engine/reference-executor';
 import { DELEGATION_EXECUTE_KIND } from '../automations/pg-store.ts';
+import { DELEGATION_EXECUTE_RUN_KIND } from './run-source.ts';
 import { guarded, httpRpc, type ChainTransport, type TransportPurpose } from './chains.ts';
 import type { DelegationConfig } from './config.ts';
 import { createPgDelegationStore, type DelegationStore } from './pg-store.ts';
@@ -20,7 +21,7 @@ export type SignerAdmin = Pick<DelegatedSignerProvider, 'id' | 'create' | 'addre
 export type SignerUser = Pick<DelegatedSignerProvider, 'signEvmDigest' | 'signSolanaMessage'>;
 export type DelegationHost = { readonly db: Database; readonly tenantId: string };
 export type DelegationSeams = { readonly rpc?: (chain: string) => Rpc | null; readonly fetch?: typeof fetch; readonly signer?: DelegatedSignerProvider; readonly now?: () => Date };
-export const DELEGATION_WORK_KINDS = Object.freeze([DELEGATION_EXECUTE_KIND] as const);
+export const DELEGATION_WORK_KINDS = Object.freeze([DELEGATION_EXECUTE_KIND, DELEGATION_EXECUTE_RUN_KIND] as const);
 
 let memory: DelegatedSignerProvider | null = null;
 /** This process's signer provider, or null (`none`). The memory provider is one per process (loopback tests on a single server). */

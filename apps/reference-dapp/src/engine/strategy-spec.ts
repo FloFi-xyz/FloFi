@@ -119,10 +119,21 @@ export type StrategySpec = Static<typeof StrategySpecSchema>;
  * (`MULTI_STEP_SEQUENCE_NOT_IMPLEMENTED` until the sequential runner), never a schema change.
  */
 export const MAX_WORKFLOW_STEPS = 8;
+/**
+ * BUILD-CHAT-E2E-001: a typed dependency between two steps. The step's own amount becomes a cap; the amount used is
+ * min(cap, the actual reconciled amount of the step's input asset that the earlier step delivered to the owner).
+ */
+export const WorkflowBindingSchema = Type.Object({
+  step: Type.Integer({ minimum: 1, maximum: MAX_WORKFLOW_STEPS - 1, description: 'The dependent step (0-based index). Its amount is a cap.' }),
+  amountFrom: Type.Integer({ minimum: 0, maximum: MAX_WORKFLOW_STEPS - 2, description: 'An earlier step (0-based index) whose actual reconciled output of the ' +
+    'dependent step\'s input asset funds it: min(cap, received). Never an estimate.' }),
+}, strict);
 export const StrategyWorkflowSchema = Type.Object({
   version: Type.Literal(2, { description: 'Step-list workflow contract.' }),
   steps: Type.Array(Type.Union(Object.values(BRANCHES)), { minItems: 1, maxItems: MAX_WORKFLOW_STEPS,
-    description: 'Ordered steps, each one single-action strategy (the same objects as version 1). Executed in this order, each with its own review and signature.' }),
+    description: 'Ordered steps, each one single-action strategy (the same objects as version 1). Executed in this order; each step starts only after the previous one reconciled.' }),
+  bindings: Type.Optional(Type.Array(WorkflowBindingSchema, { minItems: 1, maxItems: MAX_WORKFLOW_STEPS - 1,
+    description: 'Optional typed dependencies: a step spends what an earlier step actually delivered (capped by its own amount). The input asset must be exactly the earlier step\'s output token.' })),
 }, strict);
 export type StrategyWorkflow = Static<typeof StrategyWorkflowSchema>;
 /** What a client may send: a v1 single-action strategy or a v2 step list. */
@@ -167,9 +178,16 @@ export function strategyInputIssues(value: unknown): readonly SchemaIssue[] {
   if (inputUnion.check(value)) return [];
   const record = value && typeof value === 'object' && !Array.isArray(value) ? value as { version?: unknown; steps?: unknown } : null;
   if (record?.version !== 2) return strategySpecIssues(value);
-  const extra = Object.keys(record).filter(k => k !== 'version' && k !== 'steps');
+  const extra = Object.keys(record).filter(k => k !== 'version' && k !== 'steps' && k !== 'bindings');
   if (extra.length) return [{ path: '/', rule: 'additionalProperties' }];
   if (!Array.isArray(record.steps)) return [{ path: '/steps', rule: 'type' }];
   if (record.steps.length < 1 || record.steps.length > MAX_WORKFLOW_STEPS) return [{ path: '/steps', rule: record.steps.length < 1 ? 'minItems' : 'maxItems' }];
-  return record.steps.flatMap((step, i) => strategySpecIssues(step).map(issue => ({ path: `/steps/${i}` + (issue.path === '/' ? '' : issue.path), rule: issue.rule })));
+  const steps = record.steps.flatMap((step, i) => strategySpecIssues(step).map(issue => ({ path: `/steps/${i}` + (issue.path === '/' ? '' : issue.path), rule: issue.rule })));
+  const raw = (record as { bindings?: unknown }).bindings;
+  if (raw === undefined) return steps;
+  if (!Array.isArray(raw)) return [...steps, { path: '/bindings', rule: 'type' }];
+  if (raw.length < 1 || raw.length > MAX_WORKFLOW_STEPS - 1) return [...steps, { path: '/bindings', rule: raw.length < 1 ? 'minItems' : 'maxItems' }];
+  return [...steps, ...raw.flatMap((b, i) => bindingIssues(b).map(issue => ({ path: `/bindings/${i}` + (issue.path === '/' ? '' : issue.path), rule: issue.rule })))];
 }
+const binding = compileSchema<Static<typeof WorkflowBindingSchema>>(WorkflowBindingSchema);
+const bindingIssues = (value: unknown): readonly SchemaIssue[] => binding.issues(value);

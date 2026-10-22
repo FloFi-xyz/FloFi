@@ -99,13 +99,16 @@ describe('BUILD-MCP-002 request_user_approval', () => {
       .toMatchObject({ ok: false, code: 'FLOW_NOT_ENABLED_IN_DEPLOYMENT' });
   });
 
-  it('refuses a general multi-step sequence honestly (per-step facts) and accepts the lending shape as its existing executor', async () => {
+  // BUILD-CHAT-E2E-001: a sequence whose steps all have flows is SEQUENTIAL; this deployment's runtime does not run workflows, so it is refused for
+  // that reason only, with every step's own facts (the workflow-run suites cover the enabled deployment).
+  it('refuses a multi-step sequence where workflows do not run (per-step facts) and accepts the lending shape as its existing executor', async () => {
     const { approve, client } = await consumer();
     const SWAP = { action: 'swap', network: 'base-sepolia', inputAsset: 'USDC', outputAsset: 'WETH', amount: '1' };
     const sequence = (await client.callTool('compose_strategy', { strategy: { version: 2, steps: [BRIDGE, SWAP] } })).output as { strategy: unknown; workflowHash: string };
     const refused = (await approve(sequence.strategy, sequence.workflowHash)).output;
-    expect(refused).toMatchObject({ ok: false, code: 'MULTI_STEP_SEQUENCE_NOT_IMPLEMENTED', executionPlan: 'NOT_EXECUTABLE',
-      gates: { supportedByCode: { execute: false, steps: [{ index: 0, execute: true }, { index: 1, execute: true }] } },
+    expect(refused).toMatchObject({ ok: false, code: 'WORKFLOW_RUNS_NOT_ENABLED', executionPlan: 'SEQUENTIAL',
+      gates: { supportedByCode: { execute: true, steps: [{ index: 0, execute: true }, { index: 1, execute: true }] },
+        enabledByDeployment: { enabled: false, reason: 'WORKFLOW_RUNS_NOT_ENABLED' } },
       steps: [{ index: 0, action: 'bridge', flow: 'crosschain-router-testnet' }, { index: 1, action: 'swap', flow: 'base-sepolia-swap' }] });
     const owner = '0x' + '1'.repeat(40), lendingSteps = [{ action: 'supply', network: 'base-sepolia', asset: 'USDC', amount: '10', beneficiary: owner },
       { action: 'borrow', network: 'base-sepolia', asset: 'USDC', amount: '2', beneficiary: owner }, { ...SWAP, amount: '2' }];

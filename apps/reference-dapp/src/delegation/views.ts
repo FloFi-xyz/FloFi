@@ -33,7 +33,9 @@ export type ManifestView = { readonly authorizationId: string; readonly revision
 export type ExecutionStepView = { readonly step: number; readonly state: string; readonly chain: string; readonly network: string; readonly credentialId: string; readonly grantId: string;
   readonly mechanism: string; readonly grantCommitment: string; readonly submissions: readonly string[]; readonly spent: readonly AmountView[]; readonly received: readonly AmountView[];
   readonly code: string | null; readonly provenance: string | null };
-export type ExecutionView = { readonly executionId: string; readonly authorizationId: string; readonly revision: number; readonly ruleId: string; readonly occurrenceId: string;
+export type ExecutionView = { readonly executionId: string; readonly authorizationId: string; readonly revision: number; readonly ruleId: string | null; readonly occurrenceId: string | null;
+  /** BUILD-CHAT-E2E-001: set instead of the rule and occurrence for a conversational workflow run's execution. */
+  readonly workflowRunId: string | null;
   readonly state: string; readonly code: string | null; readonly attention: boolean; readonly currentStep: number; readonly stepCount: number; readonly createdAt: string;
   readonly updatedAt: string; readonly settledAt: string | null; readonly evidenceLevel: string | null; readonly steps: readonly ExecutionStepView[] };
 export type AuthorizationView = { readonly authorizationId: string; readonly ruleId: string; readonly ruleName: string; readonly state: string; readonly latestRevision: number;

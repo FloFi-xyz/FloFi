@@ -19,7 +19,9 @@ import { semanticWorkflowHash } from '../engine/strategy-engine';
 import type { HandoffPolicy } from '../mcp/execution.ts';
 import type { McpRuntime as EngineRuntime } from '../mcp/runtime.ts';
 import { resolveApprovalSecret, type ApprovalLinkScheme } from './approval-links.ts';
-import { approvalView, CLAIM_SECONDS, openApprovalSession, planNamespace, verifyHandoff, type ApprovalView, type ClaimedProposal } from './approvals.ts';
+import { approvalView, CLAIM_SECONDS, openApprovalSession, planNamespace, planNamespaces, verifyHandoff, type ApprovalView, type ClaimedProposal } from './approvals.ts';
+import { authorizationReviewSequential, authorizeSequential, cancelSequential, claimSequential, continueSequential, ownedRun, resumeSequential, startSequential,
+  type WorkflowRunSurface } from './workflow-run-approvals.ts';
 import type { ApprovalRequesterKind, HandoffRecord, HandoffStore, RequesterScope, WalletRef } from './handoff-store.ts';
 import { refuse } from './refusal.ts';
 
@@ -42,13 +44,16 @@ export type CookieReader = (name: string) => string | undefined;
 /** One FloFi surface's part of /approve, built per request; `null` from its factory when the surface is not enabled. */
 export type ApprovalContributor = (host: ApprovalHost, cookie: CookieReader) => ApprovalContribution;
 export type ApprovalSurface = { readonly schemes: readonly ApprovalLinkScheme[]; readonly profiles: Partial<Readonly<Record<ApprovalRequesterKind, ApprovalKindProfile>>>;
-  readonly handoffs: HandoffStore; readonly runtime: EngineRuntime };
+  readonly handoffs: HandoffStore; readonly runtime: EngineRuntime;
+  /** BUILD-CHAT-E2E-001: workflow runs (multi-step workflows), where this deployment enables them; absent: a sequence is refused. */
+  readonly workflowRuns?: WorkflowRunSurface | null };
 
 /**
  * One surface from the deployment's contributions. Every scheme prefix and every requester kind is owned by exactly one contribution,
  * and a contribution may only describe kinds its own scheme serves; anything else is `APPROVAL_SURFACE_INVALID` (fail closed).
  */
-export function assembleApprovalSurface(contributions: readonly ApprovalContribution[], handoffs: HandoffStore, runtime: EngineRuntime): ApprovalSurface {
+export function assembleApprovalSurface(contributions: readonly ApprovalContribution[], handoffs: HandoffStore, runtime: EngineRuntime,
+  workflowRuns: WorkflowRunSurface | null = null): ApprovalSurface {
   const prefixes = new Set<string>(), kinds = new Set<string>(), profiles: Partial<Record<ApprovalRequesterKind, ApprovalKindProfile>> = {};
   for (const { scheme, profiles: own } of contributions) {
     if (prefixes.has(scheme.prefix)) throw new Error('APPROVAL_SURFACE_INVALID');
@@ -59,7 +64,7 @@ export function assembleApprovalSurface(contributions: readonly ApprovalContribu
       profiles[kind] = profile;
     }
   }
-  return Object.freeze({ schemes: Object.freeze(contributions.map(c => c.scheme)), profiles: Object.freeze(profiles), handoffs, runtime });
+  return Object.freeze({ schemes: Object.freeze(contributions.map(c => c.scheme)), profiles: Object.freeze(profiles), handoffs, runtime, workflowRuns });
 }
 
 type Located = { readonly handoff: HandoffRecord; readonly digest: Buffer; readonly kinds: readonly ApprovalRequesterKind[]; readonly profile: ApprovalKindProfile };
@@ -93,6 +98,11 @@ export async function resumeApproval(surface: ApprovalSurface, approvalId: unkno
   for (const wallet of wallets) { h = await surface.handoffs.forClaimant(approvalId, wallet); if (h) break; }
   if (!h) return refuse('HANDOFF_NOT_FOUND');
   const profile = surface.profiles[h.requesterKind] ?? refuse('HANDOFF_NOT_FOUND');
+  // BUILD-CHAT-E2E-001: a sequence resumes at its run's current step (each step was re-verified when it became ready).
+  if (h.plan.kind === 'SEQUENTIAL') {
+    const runs = surface.workflowRuns ?? refuse('WORKFLOW_RUNS_NOT_ENABLED');
+    return continueSequential(runs, await ownedRun(runs, h.handoffId, wallets), wallets, approvalView(h, null, await viewerOf(profile, wallets)));
+  }
   const verified = await verifyHandoff(h, surface.runtime, profile.policy);
   if (!verified.ok) return refuse(verified.code);
   return { view: approvalView(h, verified, await viewerOf(profile, wallets)), command: verified.composition.command,
@@ -102,8 +112,14 @@ export async function resumeApproval(surface: ApprovalSurface, approvalId: unkno
 /** The proposal behind a secret, re-verified now. Seeing it grants nothing. */
 export async function viewApproval(surface: ApprovalSurface, secret: unknown, wallets: readonly WalletRef[], now = new Date()): Promise<ApprovalView> {
   const { handoff: h, profile } = await locate(surface, secret, now);
-  const verified = h.status === 'PENDING' || h.status === 'CLAIMED' || h.status === 'APPLIED' ? await verifyHandoff(h, surface.runtime, profile.policy) : null;
-  return approvalView(h, verified, await viewerOf(profile, wallets));
+  const sequenceStarted = h.plan.kind === 'SEQUENTIAL' && h.status !== 'PENDING';
+  const verified = !sequenceStarted && (h.status === 'PENDING' || h.status === 'CLAIMED' || h.status === 'APPLIED') ? await verifyHandoff(h, surface.runtime, profile.policy) : null;
+  const view = approvalView(h, verified, await viewerOf(profile, wallets));
+  // BUILD-CHAT-E2E-001: once a sequence's run exists, its owner (and only its owner) sees the run here.
+  const run = sequenceStarted && surface.workflowRuns ? await surface.workflowRuns.store.byHandoff(h.handoffId) : null;
+  if (!run || !surface.workflowRuns) return view;
+  try { return (await continueSequential(surface.workflowRuns, await ownedRun(surface.workflowRuns, h.handoffId, wallets), wallets, view)).view; }
+  catch { return view; }
 }
 
 /** BUILD-FLOFI-UX-UI-002: what FloFi needs to show an open proposal on its normal Canvas before the owner proves a wallet. */
@@ -130,8 +146,11 @@ export async function previewApproval(surface: ApprovalSurface, secret: unknown,
  */
 export async function claimApproval(surface: ApprovalSurface, secret: unknown, wallets: readonly WalletRef[], share: boolean, now = new Date()): Promise<ClaimedProposal> {
   const { handoff: current, digest, kinds, profile } = await locate(surface, secret, now);
-  const namespace = planNamespace(current.plan);
+  const namespace = planNamespace(current.plan), sequence = current.plan.kind === 'SEQUENTIAL';
   const wallet = wallets.find(w => w.namespace === namespace) ?? refuse(namespace === 'solana' ? 'SOLANA_WALLET_PROOF_REQUIRED' : 'EVM_WALLET_PROOF_REQUIRED');
+  // BUILD-CHAT-E2E-001: a sequence needs this deployment's workflow runs and a proven wallet of EVERY namespace it uses, before it is claimed.
+  if (sequence && !surface.workflowRuns) refuse('WORKFLOW_RUNS_NOT_ENABLED');
+  if (sequence) for (const ns of planNamespaces(current.plan)) if (!wallets.some(w => w.namespace === ns)) refuse(ns === 'solana' ? 'SOLANA_WALLET_PROOF_REQUIRED' : 'EVM_WALLET_PROOF_REQUIRED');
   const verified = await verifyHandoff(current, surface.runtime, profile.policy);
   // The requester's own rule reads only the handoff's immutable requester data, so deciding it before the row lock is exact.
   const rule = profile.claimPolicy ? await profile.claimPolicy(current, wallet) : { ok: true } as const;
@@ -141,6 +160,7 @@ export async function claimApproval(surface: ApprovalSurface, secret: unknown, w
   if (!claimed.ok) return refuse(claimed.code);
   if (!verified.ok) return refuse(verified.code);
   const view = approvalView(claimed.handoff, verified, await viewerOf(profile, wallets));
+  if (sequence) return claimSequential(surface.workflowRuns!, claimed.handoff, verified.workflow, wallets, view);
   return { view, command: verified.composition.command, workflow: verified.composition.workflow,
     workflowHash: verified.composition.workflowHash, workflowId: verified.composition.workflow.workflowId };
 }
@@ -153,12 +173,72 @@ export async function applyApproval(surface: ApprovalSurface, secret: unknown, w
   const { handoff: current, digest, kinds, profile } = await locate(surface, secret, now);
   let appliedHash: string;
   try { appliedHash = semanticWorkflowHash(workflow as Workflow); } catch { appliedHash = ''; }
+  // BUILD-CHAT-E2E-001: a sequence's editor holds the run's current step, which must hash exactly to the step the run loaded for its owner.
+  if (current.plan.kind === 'SEQUENTIAL') {
+    const runs = surface.workflowRuns ?? refuse('WORKFLOW_RUNS_NOT_ENABLED'), run = await ownedRun(runs, current.handoffId, wallets);
+    const step = (await runs.store.steps(run.runId))[run.currentStep];
+    if (!step || step.state !== 'AWAITING_OWNER' || step.workflowHash !== appliedHash) refuse('HANDOFF_WORKFLOW_MISMATCH');
+    const applied = await surface.handoffs.apply(digest, claimantOf(current, wallets), now, kinds);
+    if (!applied.ok) return refuse(applied.code);
+    return (await continueSequential(runs, run, wallets, approvalView(applied.handoff, null, await viewerOf(profile, wallets)))).view;
+  }
   if (appliedHash !== current.workflowHash) refuse('HANDOFF_WORKFLOW_MISMATCH');
   const verified = await verifyHandoff(current, surface.runtime, profile.policy);
   if (!verified.ok) return refuse(verified.code);
   const applied = await surface.handoffs.apply(digest, claimantOf(current, wallets), now, kinds);
   if (!applied.ok) return refuse(applied.code);
   return approvalView(applied.handoff, await verifyHandoff(applied.handoff, surface.runtime, profile.policy), await viewerOf(profile, wallets));
+}
+
+// ── BUILD-CHAT-E2E-001: a multi-step approval's workflow run, for its proven owner wallets ─────────────────────────────────────────
+/** The run's handoff and the base view, for the run's own proven wallets (another wallet sees nothing). */
+async function runContext(surface: ApprovalSurface, approvalId: unknown, wallets: readonly WalletRef[]) {
+  const runs = surface.workflowRuns ?? refuse('WORKFLOW_RUNS_NOT_ENABLED');
+  if (typeof approvalId !== 'string' || !/^apr_[a-z2-7]{26}$/.test(approvalId)) return refuse('WORKFLOW_RUN_NOT_FOUND');
+  let h: HandoffRecord | null = null;
+  for (const wallet of wallets) { h = await surface.handoffs.forRunOwner(approvalId, wallet); if (h) break; }
+  if (!h) return refuse('WORKFLOW_RUN_NOT_FOUND');
+  const profile = surface.profiles[h.requesterKind] ?? refuse('WORKFLOW_RUN_NOT_FOUND');
+  return { runs, run: await ownedRun(runs, approvalId, wallets), base: approvalView(h, null, await viewerOf(profile, wallets)) };
+}
+/** The run's status and, when one waits for the owner, the step to sign now (also after a reload, in another browser, by id + wallet proof). */
+export async function workflowRunContinue(surface: ApprovalSurface, approvalId: unknown, wallets: readonly WalletRef[]): Promise<ClaimedProposal> {
+  const c = await runContext(surface, approvalId, wallets);
+  return continueSequential(c.runs, c.run, wallets, c.base);
+}
+/** The owner chose to confirm each step in their wallet. */
+export async function workflowRunStart(surface: ApprovalSurface, approvalId: unknown, wallets: readonly WalletRef[]): Promise<ClaimedProposal> {
+  const c = await runContext(surface, approvalId, wallets);
+  return startSequential(c.runs, c.run, wallets, c.base);
+}
+/** The owner ends the run (nothing in flight), or stops a delegated run by revoking its authorization. */
+export async function workflowRunCancel(surface: ApprovalSurface, approvalId: unknown, wallets: readonly WalletRef[]): Promise<ClaimedProposal> {
+  const c = await runContext(surface, approvalId, wallets);
+  return cancelSequential(c.runs, c.run, wallets, c.base);
+}
+/** The owner resumes a halted run whose stopped step submitted nothing. */
+export async function workflowRunResume(surface: ApprovalSurface, approvalId: unknown, wallets: readonly WalletRef[]): Promise<ClaimedProposal> {
+  const c = await runContext(surface, approvalId, wallets);
+  return resumeSequential(c.runs, c.run, wallets, c.base);
+}
+/** The Universal Workflow Authorization Review of the run: what the owner's passkey signs ONCE (delegated mode). */
+export async function workflowRunReview(surface: ApprovalSurface, approvalId: unknown, wallets: readonly WalletRef[]) {
+  const c = await runContext(surface, approvalId, wallets);
+  return authorizationReviewSequential(c.runs, c.run, wallets);
+}
+/**
+ * The owner's ONE passkey signature for the whole workflow (delegated mode). The approval link the browser holds is marked APPLIED with it:
+ * the proposal now lives in FloFi as this run, so the link cannot be claimed or applied again.
+ */
+export async function workflowRunAuthorize(surface: ApprovalSurface, secret: unknown, wallets: readonly WalletRef[], revision: unknown, assertion: unknown,
+  now = new Date()): Promise<ClaimedProposal> {
+  const { handoff: h, digest, kinds } = await locate(surface, secret, now);
+  if (h.plan.kind !== 'SEQUENTIAL') return refuse('WORKFLOW_RUN_NOT_FOUND');
+  if (typeof revision !== 'number' || !Number.isInteger(revision) || revision < 1) return refuse('AUTHORIZATION_REVISION_INVALID');
+  const c = await runContext(surface, h.handoffId, wallets);
+  const authorized = await authorizeSequential(c.runs, c.run, wallets, revision, assertion, c.base);
+  await surface.handoffs.apply(digest, claimantOf(h, wallets), now, kinds);
+  return authorized;
 }
 
 /** The claimant turns status sharing with the requester on or off. */

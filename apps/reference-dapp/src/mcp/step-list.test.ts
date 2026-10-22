@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /**
  * BUILD-MCP-002: the step-list contract (strategy version 2). One step is exactly version 1; the Base Sepolia supply → borrow →
- * swap shape is FloFi's existing lending composition; any other sequence is authored and reviewed per step and refused for
- * execution with MULTI_STEP_SEQUENCE_NOT_IMPLEMENTED — honestly, with every step's own facts — until the sequential runner.
+ * swap shape is FloFi's existing lending composition; any other sequence is authored and reviewed per step.
+ * BUILD-CHAT-E2E-001: a sequence whose every step has an owner-execution flow is SEQUENTIAL (the workflow run executes it step by step); it is
+ * handed off only where the deployment runs workflows (WORKFLOW_RUNS_NOT_ENABLED otherwise), always with every step's own facts.
  */
 import { describe, expect, it } from 'vitest';
 import type { FlowName } from '../../backend/flows.ts';
@@ -20,10 +21,11 @@ const BORROW = { action: 'borrow', network: 'base-sepolia', asset: 'USDC', amoun
 const SWAP = { action: 'swap', network: 'base-sepolia', inputAsset: 'USDC', outputAsset: 'WETH', amount: '2' };
 const BRIDGE = { action: 'bridge', sourceNetwork: 'base-sepolia', destinationNetwork: 'arbitrum-sepolia', asset: 'USDC', amount: '5' };
 const SOLANA = { action: 'swap', network: 'solana', inputAsset: 'USDC', outputAsset: 'SOL', amount: '1' };
-function runtime(): McpRuntime {
+function runtime(sequences = false): McpRuntime {
   const never = async (): Promise<never> => { throw new Error('NEVER'); };
   const on: FlowName[] = ['crosschain-router-testnet', 'base-sepolia-swap', 'aave-supply', 'jupiter-swap', 'lending-composition'];
-  return { kind: 'embedded', mode: async flow => on.includes(flow) ? 'harness' : 'off', info: async () => ({ executionEnabled: true }), preview: never, run: never, journal: never, evidence: never };
+  return { kind: 'embedded', mode: async flow => on.includes(flow) ? 'harness' : 'off', info: async () => ({ executionEnabled: true }), preview: never, run: never, journal: never, evidence: never,
+    ...sequences ? { sequences: async () => ({ enabled: true, delegation: null }) } : {} };
 }
 
 describe('BUILD-MCP-002 step-list contract', () => {
@@ -65,26 +67,30 @@ describe('BUILD-MCP-002 step-list contract', () => {
     expect(strategyInputIssues({ version: 2, steps: [{ action: 'stake' }] })).toEqual([{ path: '/steps/0/action', rule: 'enum' }]);
     expect(composeWorkflow({ version: 2, steps: [SWAP, { ...BRIDGE, amount: '500' }] })).toMatchObject({ ok: false, code: 'ROUTER_AMOUNT_OUT_OF_RANGE' });
   });
-  it('plans and gates a general sequence honestly: per-step facts, MULTI_STEP_SEQUENCE_NOT_IMPLEMENTED, policy over every network', async () => {
+  it('plans and gates a general sequence honestly: per-step facts, SEQUENTIAL, deployment and policy over every network', async () => {
     const w = workflow({ version: 2, steps: [BRIDGE, SWAP] });
-    expect(workflowPlan(w)).toMatchObject({ kind: 'NOT_EXECUTABLE', reason: 'MULTI_STEP_SEQUENCE_NOT_IMPLEMENTED', networks: ['base-sepolia', 'arbitrum-sepolia'],
+    expect(workflowPlan(w)).toMatchObject({ kind: 'SEQUENTIAL', reason: null, networks: ['base-sepolia', 'arbitrum-sepolia'],
       steps: [{ index: 0, action: 'bridge', flow: 'crosschain-router-testnet', workflowHash: w.steps[0]!.workflowHash },
         { index: 1, action: 'swap', flow: 'base-sepolia-swap', workflowHash: w.steps[1]!.workflowHash }] });
+    // Supported by code; refused only because this deployment does not run workflows.
     const gates = await evaluateWorkflowGates(w, runtime(), readHandoffPolicy({}));
-    expect(gates).toMatchObject({ handoff: { allowed: false, reason: 'MULTI_STEP_SEQUENCE_NOT_IMPLEMENTED' }, supportedByCode: { execute: false,
-      steps: [{ index: 0, execute: true, deploymentEnabled: true }, { index: 1, execute: true, deploymentEnabled: true }] }, enabledByPolicy: { enabled: true } });
+    expect(gates).toMatchObject({ handoff: { allowed: false, reason: 'WORKFLOW_RUNS_NOT_ENABLED' }, supportedByCode: { execute: true, plan: 'SEQUENTIAL',
+      steps: [{ index: 0, execute: true, deploymentEnabled: true }, { index: 1, execute: true, deploymentEnabled: true }],
+      modes: { confirmEachStep: null, delegated: 'DELEGATION_NOT_ENABLED' } }, enabledByDeployment: { enabled: false, reason: 'WORKFLOW_RUNS_NOT_ENABLED' },
+      enabledByPolicy: { enabled: true } });
+    expect(await evaluateWorkflowGates(w, runtime(true), readHandoffPolicy({}))).toMatchObject({ handoff: { allowed: true, reason: null } });
     const mixed = await evaluateWorkflowGates(workflow({ version: 2, steps: [BRIDGE, SOLANA] }), runtime(), readHandoffPolicy({}));
     expect(mixed.enabledByPolicy).toMatchObject({ enabled: false, reason: 'MAINNET_HANDOFF_DISABLED_BY_POLICY', fundsClass: 'REAL_FUNDS' });
   });
   it('works end to end over MCP: compose and review per step, simulate one step at a time', async () => {
     const dev = { principal: 'dev-alice', token: credential() }, client = session({ env: gatewayEnv([dev]), token: dev.token });
     const composed = (await client.callTool('compose_strategy', { strategy: { version: 2, steps: [BRIDGE, SWAP] } })).output as Record<string, unknown>;
-    expect(composed).toMatchObject({ ok: true, stepCount: 2, executionPlan: { kind: 'NOT_EXECUTABLE', reason: 'MULTI_STEP_SEQUENCE_NOT_IMPLEMENTED' },
+    expect(composed).toMatchObject({ ok: true, stepCount: 2, executionPlan: { kind: 'SEQUENTIAL', reason: null, mode: 'STEP_BY_STEP' },
       workflowSteps: [{ index: 0, action: 'bridge' }, { index: 1, action: 'swap' }], authority: expect.stringMatching(/^NONE/) });
     const hash = String(composed.workflowHash);
     expect((await client.callTool('validate_strategy', { strategy: composed.strategy, workflowHash: hash })).output).toMatchObject({ ok: true, valid: true, stepCount: 2 });
     expect((await client.callTool('review_strategy', { strategy: composed.strategy, workflowHash: hash })).output).toMatchObject({ ok: true, stepCount: 2,
-      workflowSteps: [{ index: 0 }, { index: 1 }], executionPlan: { reason: 'MULTI_STEP_SEQUENCE_NOT_IMPLEMENTED' } });
+      workflowSteps: [{ index: 0 }, { index: 1 }], executionPlan: { kind: 'SEQUENTIAL', reason: null } });
     expect((await client.callTool('simulate_strategy', { strategy: composed.strategy, workflowHash: hash, simulationSubject: OWNER })).output)
       .toEqual({ ok: false, code: 'SIMULATE_ONE_STEP_AT_A_TIME', stepCount: 2 });
     const single = (await client.callTool('compose_strategy', { strategy: { version: 2, steps: [BRIDGE] } })).output;

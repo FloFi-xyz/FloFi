@@ -7,7 +7,9 @@
 import type { WorkHandler } from '@defi-workflow-engine/cloud-runtime';
 import { createPgAutomationStore, DELEGATION_EXECUTE_KIND } from '../automations/pg-store.ts';
 import { typedId } from '../platform/ids.ts';
-import { executeOccurrence, type ExecutorDeps } from './executor.ts';
+import { createPgWorkflowRunStore } from '../workflow-runs/pg-store.ts';
+import { executeOccurrence, executeWorkflowRun, type ExecutorDeps } from './executor.ts';
+import { DELEGATION_EXECUTE_RUN_KIND, WORKFLOW_RUN_ID } from './run-source.ts';
 import { DELEGATION_WORK_KINDS, signerProvider, signerUser, transportFor, type DelegationRuntime } from './runtime.ts';
 
 /** The executor's dependencies (signing capability included): built only where delegated execution is enabled. */
@@ -15,8 +17,9 @@ export function executorDeps(rt: DelegationRuntime, log: ExecutorDeps['log']): E
   if (!rt.config.executor) return { code: 'DELEGATED_EXECUTION_NOT_ENABLED_HERE' };
   const provider = signerProvider(rt.config, rt.seams);
   if (!provider) return { code: 'DELEGATED_SIGNER_UNAVAILABLE' };
+  const runs = createPgWorkflowRunStore(rt.host.db, rt.host.tenantId);
   return { store: rt.store, automations: createPgAutomationStore(rt.host.db, rt.host.tenantId), config: rt.config, signer: signerUser(provider), now: rt.now,
-    transport: chain => transportFor(rt.config, chain, 'executor', rt.seams), newId: prefix => typedId(prefix), log };
+    transport: chain => transportFor(rt.config, chain, 'executor', rt.seams), newId: prefix => typedId(prefix), log, workflowRuns: { byId: runs.byId } };
 }
 
 const ID = /^occ_[a-z2-7]{26}$/, AUTH = /^dau_[a-z2-7]{26}$/;
@@ -32,6 +35,16 @@ export function delegationHandlers(deps: ExecutorDeps): Record<(typeof DELEGATIO
       deps.log('delegation.executed', { occurrence: occurrenceId, execution: result.executionId, state: result.state, code: result.code });
       await settle(result.retryMs === null ? { outcome: 'DONE' } : { outcome: 'RETRY', delayMs: result.retryMs, reason: 'DELEGATED_EXECUTION_WAITING' });
     },
+    // BUILD-CHAT-E2E-001: the ONE delegated execution of a conversational workflow run.
+    [DELEGATION_EXECUTE_RUN_KIND]: async (item, settle) => {
+      const workflowRunId = item.payload.workflowRunId, authorizationId = item.payload.authorizationId;
+      if (typeof workflowRunId !== 'string' || !WORKFLOW_RUN_ID.test(workflowRunId) || typeof authorizationId !== 'string' || !AUTH.test(authorizationId)) {
+        await settle({ outcome: 'DEAD', reason: 'WORK_PAYLOAD_INVALID' }); return;
+      }
+      const result = await executeWorkflowRun(deps, workflowRunId, authorizationId);
+      deps.log('delegation.executed', { workflowRun: workflowRunId, execution: result.executionId, state: result.state, code: result.code });
+      await settle(result.retryMs === null ? { outcome: 'DONE' } : { outcome: 'RETRY', delayMs: result.retryMs, reason: 'DELEGATED_EXECUTION_WAITING' });
+    },
   } as Record<(typeof DELEGATION_WORK_KINDS)[number], WorkHandler>;
 }
 
@@ -45,7 +58,8 @@ export async function sweepDelegation(rt: DelegationRuntime): Promise<{ readonly
     if (e.state === 'HALTED') continue;
     const { rowCount } = await rt.host.db.query(`INSERT INTO work_items (tenant_id, kind, dedupe_key, run_id, payload, state, available_at)
       VALUES ($1, $2, $3, NULL, $4::jsonb, 'READY', now()) ON CONFLICT (tenant_id, kind, dedupe_key) WHERE state IN ('READY', 'LEASED') DO NOTHING`,
-    [rt.host.tenantId, DELEGATION_EXECUTE_KIND, e.occurrenceId, JSON.stringify({ occurrenceId: e.occurrenceId, authorizationId: e.authorizationId })]);
+    [rt.host.tenantId, e.workflowRunId ? DELEGATION_EXECUTE_RUN_KIND : DELEGATION_EXECUTE_KIND, e.workflowRunId ?? e.occurrenceId,
+      JSON.stringify(e.workflowRunId ? { workflowRunId: e.workflowRunId, authorizationId: e.authorizationId } : { occurrenceId: e.occurrenceId, authorizationId: e.authorizationId })]);
     rearmed += rowCount;
   }
   return { expired, rearmed };

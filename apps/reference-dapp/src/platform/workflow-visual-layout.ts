@@ -36,13 +36,15 @@ const WORDS = {
     many: (n: number) => `${n}-step workflow`, upTo: 'Up to', slippage: 'Max slippage', range: 'Price range', recipient: 'Recipient', beneficiary: 'On behalf of',
     owner: 'Owner', connected: 'To your connected wallet', step: 'Step', on: 'on', via: 'via',
     warnings: { REAL_FUNDS: 'Real funds: this workflow uses a mainnet', DEBT_REMAINS: 'Debt remains after the swap',
-      SEQUENCE_NOT_EXECUTABLE: 'This sequence cannot run as one workflow yet' } satisfies Record<VisualWarning, string>,
+      SEQUENCE_NOT_EXECUTABLE: 'This sequence cannot run as one workflow yet', SEQUENCE_STEP_BY_STEP: 'Runs step by step: each step after the previous one settles',
+    } satisfies Record<VisualWarning, string>,
     footer: 'Review and sign in FloFi · nothing is authorized yet', reference: 'Workflow', alt: 'FloFi workflow' },
   PT: { eyebrow: 'FLOFI · FLUXO', test: 'Fundos de teste', real: 'Fundos reais', steps: (n: number) => `${n} ${n === 1 ? 'etapa' : 'etapas'}`,
     many: (n: number) => `Fluxo de ${n} etapas`, upTo: 'Até', slippage: 'Desvio máximo', range: 'Faixa de preço', recipient: 'Destinatário', beneficiary: 'Em nome de',
     owner: 'Titular', connected: 'Para a sua carteira conectada', step: 'Etapa', on: 'na', via: 'via',
     warnings: { REAL_FUNDS: 'Fundos reais: este fluxo usa uma mainnet', DEBT_REMAINS: 'A dívida continua após a troca',
-      SEQUENCE_NOT_EXECUTABLE: 'Esta sequência ainda não roda como um fluxo único' } satisfies Record<VisualWarning, string>,
+      SEQUENCE_NOT_EXECUTABLE: 'Esta sequência ainda não roda como um fluxo único', SEQUENCE_STEP_BY_STEP: 'Roda etapa por etapa: cada uma após a anterior se concluir',
+    } satisfies Record<VisualWarning, string>,
     footer: 'Revise e assine no FloFi · nada está autorizado ainda', reference: 'Fluxo', alt: 'Fluxo FloFi' },
 } as const;
 

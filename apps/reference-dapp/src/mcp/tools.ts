@@ -28,7 +28,7 @@ import { robinhoodAuthoringCatalog } from '../server/robinhood-mainnet.ts';
 import { ethereumAuthoringCatalog } from '../server/ethereum-mainnet.ts';
 import { arbitrumAuthoringCatalog } from '../server/arbitrum-mainnet.ts';
 import { baseAuthoringCatalog } from '../server/base-mainnet.ts';
-import { approvalForRequester, approvalProgress, capabilityFacts, composeWorkflowOrRefuse, evidenceView, executionStatusView, findOwnedRun, MULTI_STEP_PLAN,
+import { approvalForRequester, approvalProgress, capabilityFacts, composeWorkflowOrRefuse, evidenceView, executionStatusView, findOwnedRun,
   openApprovalSession, PlatformRefusal, refuse, requestApproval, reviewWorkflow, simulatePreview, stepViews, validateStrategy, type ApprovalDeps,
   type ApprovalRequester } from '../platform/index.ts';
 import { principalScopes, type McpOAuthPrincipal, type McpPrincipal } from './config.ts';
@@ -213,9 +213,15 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
   Schemas.capabilities, { ...pure, idempotentHint: false }, async args => {
     const approvals = canRequestApproval(ctx);
     return { ok: true, runtime: ctx.runtime.kind, mcpExecution: 'NOT_AVAILABLE', ownerExecution: 'IN_FLOFI_WITH_THE_OWNER_WALLET_ONLY',
-      stepLists: { contract: 'strategy version 2: {version: 2, steps: [...]}', maxSteps: MAX_WORKFLOW_STEPS, oneStep: 'identical to version 1 (same strategy, same hash)',
-        executableToday: ['every one-action path whose row below can be handed off', 'supply → borrow → swap on base-sepolia (the lending composition)'],
-        otherSequences: 'MULTI_STEP_SEQUENCE_NOT_IMPLEMENTED: composed, reviewed and previewed per step; executed by the sequential runner once available' },
+      stepLists: { contract: 'strategy version 2: {version: 2, steps: [...], bindings?: [{step, amountFrom}]}', maxSteps: MAX_WORKFLOW_STEPS,
+        oneStep: 'identical to version 1 (same strategy, same hash)',
+        executableToday: ['every one-action path whose row below can be handed off', 'supply → borrow → swap on base-sepolia (the lending composition)',
+          'a sequence whose every step has an owner-execution flow, where this deployment runs workflows (request_user_approval says so)'],
+        sequences: 'One approval for the whole workflow; the owner confirms each step in their wallet, in order, each after the previous step reconciled. ' +
+          'Where the owner enrolled delegated Credentials and this deployment can sign delegated steps, ONE passkey authorization can cover the whole ' +
+          'workflow instead (request_user_approval reports the authorizations each mode needs). One authorization is not one transaction and not zero gas.',
+        bindings: 'A step may spend what an earlier step actually delivered: {step, amountFrom}; its own amount is then a cap. Resolved only from reconciled ' +
+          'amounts (delegated runs); owner-signed sequences report DEPENDENT_AMOUNT_SOURCE_NOT_IMPLEMENTED.' },
       capabilities: (await capabilityFacts(ctx.runtime, ctx.policy ?? DEFAULT_POLICY, { network: args.network, action: args.action })).map(({ row: r, flow, mode, previewable,
         previewUnavailableReason, gates }) => {
         return { action: r.action, network: r.network, destinationNetwork: r.destinationNetwork, funds: r.funds, actionTypes: r.actionTypes, adapters: r.adapters,
@@ -244,12 +250,14 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
         nextSteps: ['validate_strategy or review_strategy with this strategy and workflowHash', 'simulate_strategy for a read-only preview (optional)',
           'request_user_approval to hand it to its owner in FloFi (when available); nothing executes from MCP.'] };
     }
-    return { ok: true, strategy: w.strategy, workflowHash: w.workflowHash, fundsClass: w.fundsClass, stepCount: w.steps.length, executionPlan: MULTI_STEP_PLAN,
+    const plan = workflowPlan(w);
+    return { ok: true, strategy: w.strategy, workflowHash: w.workflowHash, fundsClass: w.fundsClass, stepCount: w.steps.length,
+      executionPlan: { kind: plan.kind, reason: plan.reason, mode: 'STEP_BY_STEP', bindings: w.bindings.map(b => ({ step: b.step, amountFrom: b.amountFrom })) },
       workflowSteps: w.steps.map((c, index) => ({ index, action: c.strategy.action, strategy: c.strategy, workflowHash: c.workflowHash, revision: c.workflow.revision,
-        fundsClass: c.fundsClass, workflow: c.workflow, steps: stepViews(c), summary: c.summary, explanation: c.explanation })),
+        fundsClass: c.fundsClass, workflow: c.workflow, steps: stepViews(c), summary: c.summary, explanation: c.explanation, flow: plan.steps[index]?.flow ?? null })),
       notes: w.notes, authority: AUTHORITY, visual,
       nextSteps: ['review_strategy for every step\'s findings', 'simulate_strategy one step at a time (pass that step as a version 1 strategy)',
-        'Executing a general sequence is not available yet (MULTI_STEP_SEQUENCE_NOT_IMPLEMENTED).'] };
+        'request_user_approval to hand the whole workflow to its owner: it reports how many authorizations each mode needs. Each step runs only after the previous one reconciled.'] };
   });
 
   register('validate_strategy', 'Validate strategy', 'Check a strategy against FloFi\'s authoring rules (networks, assets, amounts, limits) and, when given, the workflowHash ' +
@@ -261,9 +269,10 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
     'strategy warnings, as BLOCK / WARNING / INFORMATION. It explains; it never approves or authorizes.', Schemas.bound, { ...pure, idempotentHint: false }, async args => {
     const w = composeWorkflowOrRefuse(args.strategy, args.workflowHash), reviewed = reviewWorkflow(w);
     if (w.steps.length > 1) {
+      const plan = workflowPlan(w);
       return { ok: true, workflowHash: w.workflowHash, reviewKind: 'DETERMINISTIC_STRATEGY_REVIEW', authority: AUTHORITY, stepCount: w.steps.length,
-        summary: reviewed.summary, executionPlan: MULTI_STEP_PLAN, workflowSteps: reviewed.steps,
-        nextSteps: ['Each step is reviewed, simulated and signed on its own in FloFi; a general sequence cannot be executed yet.'] };
+        summary: reviewed.summary, executionPlan: { kind: plan.kind, reason: plan.reason, mode: 'STEP_BY_STEP' }, workflowSteps: reviewed.steps,
+        nextSteps: ['Each step gets a fresh simulation and the owner\'s Review in FloFi before it runs, in order, after the previous step reconciled.'] };
     }
     const c = w.steps[0]!, review = reviewed.steps[0]!, flow = strategyFlow(c.strategy);
     const mode = flow ? await ctx.runtime.mode(flow) : null;
@@ -337,7 +346,9 @@ function registerApprovalTools(ctx: ToolContext, register: Register) {
   register('request_user_approval', 'Request the owner\'s approval', 'Hand a composed strategy (with its workflowHash) to its owner for execution in FloFi. ' +
     'FloFi re-composes and re-checks it, then returns an approval link with authority NONE. Nothing is authorized, signed or sent: the owner must open FloFi, ' +
     'connect their wallet if needed, check FloFi\'s fresh simulation and choose Authorize in wallet. Their own wallet confirmation is mandatory. Canvas is optional. Show the approvalUrl (or FloFi panel). ' +
-    'Mainnet may be disabled by policy; general multi-step sequences are not executable yet.', ApprovalSchemas.request,
+    'Mainnet may be disabled by policy. A multi-step workflow is one approval: tell the user how many authorizations `authorizationPlan` reports (one wallet ' +
+    'confirmation per step, or ONE passkey authorization when delegated Credentials cover every step); each step runs only after the previous one reconciled. ' +
+    'The same approvalUrl reopens the next step for the owner.', ApprovalSchemas.request,
   { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }, async args => {
     const result = await requestApproval(deps(), requester, args.strategy, args.workflowHash);
     if (!result.ok) return failWith(result.code, result.extra ?? {});
@@ -349,13 +360,17 @@ function registerApprovalTools(ctx: ToolContext, register: Register) {
     'openai/toolInvocation/invoked': 'Approval ready' } : {});
 
   register('get_approval_status', 'Approval status', 'The status of an approval request this account created: PENDING, CLAIMED, APPLIED, EXPIRED, SUPERSEDED, ' +
-    'REVOKED or STALE. When the owner shares status, includes run status and the verified receipt URL after reconciliation. Poll this tool when asked; no callback or push is promised. It never reveals the claiming wallet or authorizes anything.', ApprovalSchemas.byId, { ...pure, idempotentHint: false },
-  async args => ({ ok: true, ...await approvalProgress(await owned(args.approvalId), ctx.runtime, state.handoffs, oauth.origin) }));
+    'REVOKED or STALE. When the owner shares status, includes run status and the verified receipt URL after reconciliation. A multi-step approval also returns ' +
+    '`workflowRun`: every step\'s state, the next action (e.g. OWNER_SIGNS_STEP: share the approvalUrl again), and — when the owner shares status — each step\'s ' +
+    'transaction hashes, explorer links, reconciled amounts and evidence; HALTED means partially completed. Poll this tool when asked; no callback or push is promised. ' +
+    'It never reveals the claiming wallet or authorizes anything.', ApprovalSchemas.byId, { ...pure, idempotentHint: false },
+  async args => ({ ok: true, ...await approvalProgress(await owned(args.approvalId), ctx.runtime, state.handoffs, oauth.origin, state.workflowRuns) }));
 
   register('open_approval_session', 'Open FloFi approval', 'App-only: a fresh, short-lived FloFi link for this approval (for the signing window or a wallet ' +
     'in-app browser). The link only shows the proposal; it authorizes nothing.', ApprovalSchemas.byId, { readOnlyHint: false, destructiveHint: false,
     idempotentHint: false, openWorldHint: false }, async args => ({ ok: true, ...await openApprovalSession(deps(), requester, args.approvalId) }), appOnly);
 
   register('get_execution_progress', 'Execution progress', 'App-only: the approval\'s state and, when its owner shares it, the status of the runs started from it.',
-    ApprovalSchemas.byId, { ...pure, idempotentHint: false }, async args => ({ ok: true, ...await approvalProgress(await owned(args.approvalId), ctx.runtime, state.handoffs, oauth.origin) }), appOnly);
+    ApprovalSchemas.byId, { ...pure, idempotentHint: false }, async args => ({ ok: true, ...await approvalProgress(await owned(args.approvalId), ctx.runtime, state.handoffs, oauth.origin,
+      state.workflowRuns) }), appOnly);
 }

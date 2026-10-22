@@ -24,6 +24,10 @@ import type { McpRuntime as EngineRuntime } from '../mcp/runtime.ts';
 import { mintApprovalSecret, type ApprovalLinkScheme } from './approval-links.ts';
 import { REQUESTER_REF, type ApprovalRequesterKind, type HandoffRecord, type HandoffStore, type RequesterScope, type WalletRef } from './handoff-store.ts';
 import { refuse } from './refusal.ts';
+import type { WorkflowRunClaim } from './workflow-run-approvals.ts';
+import type { WorkflowRunStore } from '../workflow-runs/pg-store.ts';
+import { runView, type RunView } from '../workflow-runs/service.ts';
+import { authorizationPlan } from '../workflow-runs/authorization-plan.ts';
 export { walletDeepLinks } from './wallet-links.ts';
 import { walletDeepLinks } from './wallet-links.ts';
 
@@ -64,8 +68,15 @@ export type ApprovalDeps = { readonly origin: string; readonly scheme: ApprovalL
   readonly runtime: EngineRuntime; readonly policy: HandoffPolicy; readonly rules: HandoffRules; readonly now: Date };
 export type Failure = { readonly ok: false; readonly code: string; readonly extra?: Readonly<Record<string, unknown>> };
 export const approvalUrl = (origin: string, secret: string) => `${origin}/approve#${secret}`;
-/** The wallet namespace whose proof a plan needs (every network of one workflow is one namespace today). */
-export const planNamespace = (plan: Pick<ExecutionPlan, 'networks'>): WalletRef['namespace'] => plan.networks.every(n => n.startsWith('solana')) ? 'solana' : 'eip155';
+/**
+ * The wallet namespace whose proof claims a plan: its first step's (a one-step workflow is one namespace). BUILD-CHAT-E2E-001: a sequence
+ * may span EVM and Solana steps; `planNamespaces` lists every namespace whose wallet the owner must prove before its run starts.
+ */
+export const planNamespace = (plan: Pick<ExecutionPlan, 'networks'> & Partial<Pick<ExecutionPlan, 'kind' | 'steps'>>): WalletRef['namespace'] =>
+  plan.kind === 'SEQUENTIAL' && plan.steps?.length ? plan.steps[0]!.network.startsWith('solana') ? 'solana' : 'eip155'
+    : plan.networks.every(n => n.startsWith('solana')) ? 'solana' : 'eip155';
+export const planNamespaces = (plan: Pick<ExecutionPlan, 'networks'>): readonly WalletRef['namespace'][] =>
+  [...new Set(plan.networks.map(n => n.startsWith('solana') ? 'solana' as const : 'eip155' as const))].sort();
 const stepView = (s: PlanStep) => ({ index: s.index, action: s.action, network: s.network, destinationNetwork: s.destinationNetwork, kind: s.kind, protocol: s.protocol,
   fundsClass: s.fundsClass, environment: s.environment, flow: s.flow, stepWorkflowHash: s.workflowHash });
 const gateView = (g: Gates) => ({ supportedByCode: g.supportedByCode, enabledByDeployment: g.enabledByDeployment, enabledByPolicy: g.enabledByPolicy,
@@ -91,26 +102,33 @@ export async function requestApproval(deps: ApprovalDeps, requester: ApprovalReq
   if (!deps.scheme.kinds.includes(requester.kind) || !requesterValid(requester)) return { ok: false, code: 'APPROVAL_REQUESTER_INVALID' } satisfies Failure;
   const workflow = composeWorkflowBound(strategy, workflowHash);
   if (!workflow.ok) return { ok: false, code: workflow.code, extra: { issues: workflow.issues } } satisfies Failure;
-  // A general sequence of steps is refused here (MULTI_STEP_SEQUENCE_NOT_IMPLEMENTED) with every step's facts reported.
+  // A sequence is handed off only when it is SEQUENTIAL and every step's facts allow it (BUILD-CHAT-E2E-001); every step's facts are reported.
   const gates = await evaluateWorkflowGates(workflow, deps.runtime, deps.policy);
   if (!gates.handoff.allowed) return { ok: false, code: gates.handoff.reason!, extra: { gates: gateView(gates), executionPlan: gates.plan.kind, steps: gates.plan.steps.map(stepView) } } satisfies Failure;
-  const composition = workflow.steps[0]!;
-  const { blockers, preExecution } = handoffFindings(composition);
-  if (blockers.length) return { ok: false, code: 'REVIEW_BLOCKED', extra: { blockers: blockers.map(b => ({ code: b.code, message: b.message })) } } satisfies Failure;
+  const composition = workflow.steps[0]!, sequence = workflow.steps.length > 1;
+  // Every step's review is checked; a blocker in any step refuses the whole workflow before anything is stored.
+  const findings = workflow.steps.map(handoffFindings), blockers = findings.flatMap((f, index) => f.blockers.map(b => ({ ...b, step: index })));
+  const preExecution = [...new Set(findings.flatMap(f => f.preExecution))];
+  if (blockers.length) return { ok: false, code: 'REVIEW_BLOCKED', extra: { blockers: blockers.map(b => ({ code: b.code, message: b.message, ...sequence ? { step: b.step } : {} })) } } satisfies Failure;
   if (!await deps.allow(requestBucket(requester), deps.rules.rate[0], deps.rules.rate[1], deps.now)) return { ok: false, code: 'HANDOFF_RATE_LIMITED' } satisfies Failure;
   // Bounded retention, opportunistically (handoffs older than 30 days).
   if (Math.random() < 0.02) await deps.handoffs.purge(deps.now).catch(() => undefined);
   const { secret, digest } = mintApprovalSecret(deps.scheme), handoffId = newId('apr'), expiresAt = new Date(deps.now.getTime() + deps.rules.handoffSeconds * 1000);
+  // A sequence's handoff holds the whole canonical workflow (v2 strategy, sequence hash, SEQUENTIAL plan); its run starts at the claim.
+  const stored = sequence ? { strategy: workflow.strategy, workflowHash: workflow.workflowHash } : { strategy: composition.strategy, workflowHash: composition.workflowHash };
   const created = await deps.handoffs.create({ handoffId, requester: requesterScope(requester), grantId: requester.kind === 'MCP_ACCOUNT' ? requester.grantId : null,
     requesterContext: requester.kind === 'MCP_ACCOUNT' ? {} : requester.context ?? {}, clientId: requester.clientId, clientName: requester.displayName,
-    secretDigest: digest, strategy: composition.strategy, workflowHash: composition.workflowHash, engineVersion: ENGINE_VERSION,
+    secretDigest: digest, strategy: stored.strategy, workflowHash: stored.workflowHash, engineVersion: ENGINE_VERSION,
     networkEnvironment: gates.plan.networkEnvironment, fundsClass: gates.plan.fundsClass, plan: gates.plan, expiresAt },
   deps.now, { maxPending: deps.rules.maxPending, supersedeSameWorkflow: deps.rules.supersedeSameWorkflow });
   if (!created.ok) return { ok: false, code: created.code } satisfies Failure;
-  return { ok: true as const, value: { approvalId: handoffId, approvalUrl: approvalUrl(deps.origin, secret), workflowHash: composition.workflowHash,
+  return { ok: true as const, value: { approvalId: handoffId, approvalUrl: approvalUrl(deps.origin, secret), workflowHash: stored.workflowHash,
     expiresAt: expiresAt.toISOString(), status: 'PENDING', networkEnvironment: gates.plan.networkEnvironment, fundsClass: gates.plan.fundsClass,
     executionPlan: gates.plan.kind, steps: gates.plan.steps.map(stepView), authority: AUTHORITY_NONE, requires: [...APPROVAL_REQUIRES],
-    walletNamespace: planNamespace(gates.plan), gates: gateView(gates), summary: composition.summary,
+    walletNamespace: planNamespace(gates.plan), walletNamespaces: planNamespaces(gates.plan), gates: gateView(gates),
+    summary: sequence ? workflow.steps.map((c, i) => `${i + 1}. ${c.summary}`).join('\n') : composition.summary,
+    // BUILD-CHAT-E2E-001: before anything executes, how many authorizations each mode needs (the owner's own grants decide the rest in FloFi).
+    ...sequence ? { authorizationPlan: authorizationPlan(workflow, gates, (await deps.runtime.sequences?.())?.delegation ?? null) } : {},
     // What FloFi's flow still requires of the owner before anything can be signed (cleared by the fresh simulation and Review).
     preExecution } };
 }
@@ -170,14 +188,24 @@ export function approvalView(h: HandoffRecord, verified: Verified | null, viewer
   return { approvalId: h.handoffId, status: h.status, clientName: h.clientName, requesterKind: h.requesterKind, external: true, createdAt: h.createdAt.toISOString(),
     expiresAt: h.expiresAt.toISOString(),
     networkEnvironment: h.networkEnvironment, fundsClass: h.fundsClass, workflowHash: h.workflowHash, executionPlan: h.plan.kind, steps: h.plan.steps.map(stepView),
-    walletNamespace: planNamespace(h.plan), summary: verified?.ok ? verified.composition.summary : null, explanation: verified?.ok ? verified.composition.explanation : [],
+    walletNamespace: planNamespace(h.plan), walletNamespaces: planNamespaces(h.plan),
+    // BUILD-CHAT-E2E-001: a sequence is summarized step by step (its first step alone would understate it).
+    summary: verified?.ok ? verified.workflow.steps.length > 1 ? verified.workflow.steps.map((c, i) => `${i + 1}. ${c.summary}`).join('\n') : verified.composition.summary : null,
+    explanation: verified?.ok ? verified.workflow.steps.length > 1 ? verified.workflow.steps.flatMap((c, i) => c.explanation.map(line => `${i + 1}. ${line}`))
+      : verified.composition.explanation : [],
     notes: verified?.ok ? verified.composition.notes : [], gates: verified?.ok ? gateView(verified.gates) : null, refusal: verified && !verified.ok ? verified.code : null,
     claimedByYou: claimedByViewer, claimedByAnotherWallet: h.claimed !== null && !claimedByViewer, sameAccount: sameRequester,
     statusShared: h.shareStatus, authorized: false, authority: AUTHORITY_NONE, requires: [...APPROVAL_REQUIRES] };
 }
 export type ApprovalView = ReturnType<typeof approvalView>;
 /** `workflowId` is the identity of the draft the proposal was composed on; the claimant's pristine draft adopts it so the hash can match. */
-export type ClaimedProposal = { readonly view: ApprovalView; readonly command: Command; readonly workflow: Workflow; readonly workflowHash: string; readonly workflowId: string };
+/**
+ * The proposal a claim (or recovery) loads into FloFi's flow. BUILD-CHAT-E2E-001: for a multi-step workflow it is the step the owner signs now,
+ * and `view.workflowRun` carries the run; `command`/`workflow`/`workflowId` are null when no step waits for the owner (the previous step has not
+ * reconciled yet, the owner still chooses the authorization mode, or the run ended).
+ */
+export type ClaimedProposal = { readonly view: ApprovalView & { readonly workflowRun?: WorkflowRunClaim }; readonly command: Command | null; readonly workflow: Workflow | null;
+  readonly workflowHash: string; readonly workflowId: string | null };
 
 /** The workflow a flow record reviewed, wherever the flow keeps it (review, workflow, or the first of several reviews). */
 function reviewedWorkflows(record: unknown): unknown[] {
@@ -218,11 +246,21 @@ export async function sharedRuns(h: HandoffRecord, runtime: EngineRuntime, hando
   if (fresh.length) await handoffs.bindRuns(h.handoffId, fresh);
   return out;
 }
-/** The approval's status for its requester, with the shared runs when the owner shares them. */
-export async function approvalProgress(h: HandoffRecord, runtime: EngineRuntime, handoffs: HandoffStore, origin?: string) {
+/**
+ * The approval's status for its requester, with the shared runs when the owner shares them. BUILD-CHAT-E2E-001: a multi-step approval also
+ * carries its workflow run (`runs`): every step's state always, and its transactions, amounts and evidence only when the owner shares status.
+ */
+export type ApprovalProgress = ReturnType<typeof approvalStatus> & { readonly runs: readonly (RunProgress & { readonly receiptUrl?: string | null })[];
+  readonly runsVisible: boolean; readonly workflowRun: RunView | null; readonly note: string | null };
+export async function approvalProgress(h: HandoffRecord, runtime: EngineRuntime, handoffs: HandoffStore, origin?: string,
+  workflowRuns?: Pick<WorkflowRunStore, 'byHandoff' | 'steps'> | null): Promise<ApprovalProgress> {
+  const run = h.plan.kind === 'SEQUENTIAL' && workflowRuns ? await workflowRuns.byHandoff(h.handoffId) : null;
+  const workflowRun = run && workflowRuns ? await runView({ store: workflowRuns }, run, { outcomes: h.shareStatus, origin: origin ?? null }) : null;
+  if (h.plan.kind === 'SEQUENTIAL') return { ...approvalStatus(h), runs: [], runsVisible: h.shareStatus, workflowRun,
+    note: run ? null : h.status === 'PENDING' ? 'Waiting for the owner to open the approval and prove their wallets.' : null };
   const shared = await sharedRuns(h, runtime, handoffs);
   // A receipt link grants no read access: the existing Dashboard still requires the execution owner's authenticated wallet.
   const runs = shared?.map(run => origin ? { ...run, receiptUrl: run.reconciled ? `${origin}/app/dashboard/runs/${encodeURIComponent(run.executionId)}` : null } : run);
-  return { ...approvalStatus(h), runs: runs ?? [], runsVisible: shared !== null,
+  return { ...approvalStatus(h), runs: runs ?? [], runsVisible: shared !== null, workflowRun: null,
     note: h.status === 'APPLIED' && !h.shareStatus ? 'The owner has not shared the status of runs started from this proposal.' : null };
 }

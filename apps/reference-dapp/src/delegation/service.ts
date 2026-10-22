@@ -20,6 +20,7 @@ import { routeStrategy } from '../automations/assets.ts';
 import { AMOUNT_SCALE, formatScaled, parseScaled } from '../automations/decimal.ts';
 import { assertLimits } from '../automations/limits.ts';
 import { DELEGATION_EXECUTE_KIND } from '../automations/pg-store.ts';
+import { DELEGATION_EXECUTE_RUN_KIND } from './run-source.ts';
 import { assertSchedule, nextSlotAfter, validTimeZone, type Schedule } from '../automations/schedule.ts';
 import type { AutomationStore, Owner, RuleRecord } from '../automations/store.ts';
 import { conditionThreshold, type PriceCondition } from '../automations/trigger.ts';
@@ -117,7 +118,7 @@ export function createDelegationService(deps: DelegationServiceDeps) {
       const a = manifest?.assets.find(y => y.asset === x.asset);
       return { asset: x.asset, symbol: a?.symbol ?? x.asset.split(':').at(-1)!, chain: x.asset.split('/')[0]!, amount: a ? display(x.amount, a.decimals) : x.amount };
     });
-    return { executionId: e.executionId, authorizationId: e.authorizationId, revision: e.revision, ruleId: e.ruleId, occurrenceId: e.occurrenceId, state: e.state, code: e.code,
+    return { executionId: e.executionId, authorizationId: e.authorizationId, revision: e.revision, ruleId: e.ruleId, occurrenceId: e.occurrenceId, workflowRunId: e.workflowRunId, state: e.state, code: e.code,
       attention: e.attention, currentStep: e.currentStep, stepCount: e.stepCount, createdAt: e.createdAt.toISOString(), updatedAt: e.updatedAt.toISOString(),
       settledAt: e.settledAt?.toISOString() ?? null, evidenceLevel: (e.evidence?.evidenceLevel as string | undefined) ?? null,
       steps: steps.map(s => ({ step: s.stepIndex, state: s.state, chain: s.chain, network: networkLabel(s.chain), credentialId: s.credentialId, grantId: s.grantId, mechanism: s.mechanism,
@@ -211,8 +212,10 @@ export function createDelegationService(deps: DelegationServiceDeps) {
 
   return {
     async overview(owner: Owner): Promise<DelegationOverviewView> {
-      const [passkeys, credentials, grants, authorizations, executions] = await Promise.all([store.listPasskeys(owner), store.credentials(owner), store.grants(owner),
+      const [passkeys, credentials, grants, all, executions] = await Promise.all([store.listPasskeys(owner), store.credentials(owner), store.grants(owner),
         store.authorizations(owner), store.executions(owner, { limit: 30 })]);
+      // BUILD-CHAT-E2E-001: a workflow run's one-shot authorization belongs to its run (src/workflow-runs), not to the automations overview.
+      const authorizations = all.filter((a): a is typeof a & { ruleId: string } => a.ruleId !== null);
       const authViews: AuthorizationView[] = [];
       for (const a of authorizations) {
         const rev = await store.revision(a.authorizationId, a.activeRevision ?? a.latestRevision), rule = await deps.automations.getRule(owner, a.ruleId);
@@ -387,7 +390,8 @@ export function createDelegationService(deps: DelegationServiceDeps) {
       const clean = { credentialId: r!.credentialId as string, clientDataJSON: r!.clientDataJSON as string, authenticatorData: r!.authenticatorData as string, signature: r!.signature as string };
       const verified = verifyAssertion(clean, { challenge: digestBytes(rev.envelopeDigest!), origin: config.passkeyOrigin, rpId: passkey!.rpId, credentialId: passkey!.credentialId,
         publicKeySpki: passkey!.publicKeySpki, signCount: passkey!.signCount });
-      const rule = await deps.automations.getRule(owner, a.ruleId) ?? refuse('AUTOMATION_NOT_FOUND');
+      // A workflow run's authorization is signed through its run (`src/workflow-runs/service.ts`), never as an automation.
+      const rule = (a.ruleId === null ? null : await deps.automations.getRule(owner, a.ruleId)) ?? refuse('AUTOMATION_NOT_FOUND');
       const now = deps.now(), schedule = rule.definition.schedule;
       await store.activate(owner, { authorizationId, revision, digest: rev.envelopeDigest!, passkeyId: passkey!.passkeyId, signCount: verified.signCount, assertion: clean,
         ruleResume: { nextEvaluationAt: schedule ? new Date(nextSlotAfter(schedule, now.getTime()).at) : now, scheduleCursor: schedule ? now : null } }, now);
@@ -404,7 +408,7 @@ export function createDelegationService(deps: DelegationServiceDeps) {
       const a = await store.authorization(owner, authorizationId) ?? refuse('AUTHORIZATION_NOT_FOUND');
       if (a.state === 'REVOKED' || a.state === 'EXPIRED') refuse(`AUTHORIZATION_${a.state}`);
       const previous = await store.revision(authorizationId, a.latestRevision) ?? refuse('AUTHORIZATION_NOT_FOUND');
-      const rule = await deps.automations.getRule(owner, a.ruleId) ?? refuse('AUTOMATION_NOT_FOUND');
+      const rule = (a.ruleId === null ? null : await deps.automations.getRule(owner, a.ruleId)) ?? refuse('AUTOMATION_NOT_FOUND');
       if (!rule.binding) refuse('AUTOMATION_ACTION_UNSUPPORTED');
       const composed = composeWorkflowBound(rule.binding!.strategy, rule.binding!.workflowHash);
       const req = composed.ok ? requirementOf(composed) : null;
@@ -418,6 +422,69 @@ export function createDelegationService(deps: DelegationServiceDeps) {
           maxExecutionsPerPeriod: pm.limits.maxExecutionsPerPeriod, cooldownSeconds: pm.limits.cooldownSeconds, maxSlippageBps: pm.limits.maxSlippageBps } });
       await store.newRevision(owner, { authorizationId, strategy: rule.binding!.strategy, manifest, manifestHash: manifestHash(manifest), widening: wideningOf(pm, manifest) }, now);
       return this.authorizationReview(owner, authorizationId);
+    },
+
+    // ── BUILD-CHAT-E2E-001: a conversational workflow run's ONE authorization ───────────────────────────────────────────────
+    /**
+     * The Universal Workflow Authorization Review of a workflow run: on first call, the run's one-shot authorization lineage is created from
+     * the owner's own ACTIVE grants (every step resolved, one passkey) with a manifest whose limits are exactly this workflow once — per-asset
+     * caps equal to its own spend, one execution, the workflow's own slippage, a short validity. Then, like any review, a fresh envelope whose
+     * digest is the single-use challenge. Nothing runs until the owner's passkey signs it.
+     */
+    async workflowRunAuthorizationReview(owner: Owner, run: { readonly runId: string; readonly strategy: StrategyInput; readonly workflowHash: string;
+      readonly validitySeconds: number }): Promise<ReviewView> {
+      let a = await store.authorizationForRun(run.runId);
+      if (!a) {
+        const composed = composeWorkflowBound(run.strategy, run.workflowHash);
+        if (!composed.ok) refuse('WORKFLOW_RUN_STALE');
+        const req = requirementOf(composed as Extract<typeof composed, { ok: true }>);
+        if (!req.ok) refuse(req.code);
+        const requirement = (req as Extract<typeof req, { ok: true }>).value, now = deps.now();
+        const grants = await store.grants(owner), graph = resolveAuthorityGraph(requirement, grants, config.mode, now.getTime());
+        if (!graph.ok) refuse(graph.failures[0]!.code);
+        if (new Set(graph.bindings.map(b => grants.find(g => g.grantId === b.grantId)!.passkeyId)).size !== 1) refuse('CREDENTIALS_USE_DIFFERENT_PASSKEYS');
+        const spend = executionSpend(requirement), slippage = Math.max(100, ...requirement.steps.map(x => x.slippageBps ?? 0));
+        const authorizationId = deps.newId('dau');
+        const manifest = buildManifest({ owner: ownerKey(owner), authorizationId, revision: 1, now, validFrom: now, expiresAt: new Date(now.getTime() + run.validitySeconds * 1000),
+          timezone: 'UTC', engineVersion: ENGINE_VERSION, requirement, bindings: graph.bindings,
+          limits: { assets: [...spend.entries()].map(([asset, amount]) => ({ asset, maxPerExecution: amount.toString(), budgets: [{ period: 'DAY' as const, amount: amount.toString() }] })),
+            maxExecutionsPerPeriod: { count: 1, period: 'MONTH' }, cooldownSeconds: 0, maxSlippageBps: slippage } });
+        await deps.db.transaction(tx => store.createAuthorization(tx, owner, { authorizationId, workflowRunId: run.runId, strategy: requirement.strategy, manifest,
+          manifestHash: manifestHash(manifest) }, now));
+        deps.log('delegation.workflow_run_authorization_created', { authorization: authorizationId, steps: requirement.steps.length });
+        a = (await store.authorizationForRun(run.runId))!;
+      }
+      if (a.owner.namespace !== owner.namespace || a.owner.address !== owner.address) refuse('AUTHORIZATION_NOT_FOUND');
+      return this.authorizationReview(owner, a.authorizationId);
+    },
+    /**
+     * The owner's ONE signature for a workflow run: the passkey assertion over the envelope digest; in the same transaction the run becomes
+     * DELEGATED/RUNNING and its delegated execution is enqueued (`activateRun`, the run store's own check that the run is still PENDING).
+     */
+    async workflowRunAuthorizationSign(owner: Owner, runId: string, revision: number, assertion: unknown,
+      activateRun: (tx: Parameters<NonNullable<Parameters<DelegationStore['activate']>[1]['onActivated']>>[0], authorizationId: string) => Promise<void>): Promise<{ readonly authorizationId: string }> {
+      const a = await store.authorizationForRun(runId) ?? refuse('AUTHORIZATION_NOT_FOUND');
+      if (a.owner.namespace !== owner.namespace || a.owner.address !== owner.address) refuse('AUTHORIZATION_NOT_FOUND');
+      const rev = await store.revision(a.authorizationId, revision) ?? refuse('AUTHORIZATION_NOT_FOUND');
+      if (!rev.envelope || !rev.envelopeDigest || a.latestRevision !== revision) refuse('AUTHORIZATION_NOT_PENDING');
+      const passkey = await store.passkey(owner, rev.envelope!.passkeyId);
+      if (!passkey || passkey.revokedAt) refuse('PASSKEY_REVOKED');
+      const r = assertion as { credentialId?: unknown; clientDataJSON?: unknown; authenticatorData?: unknown; signature?: unknown } | null;
+      if (!r || typeof r.credentialId !== 'string' || typeof r.clientDataJSON !== 'string' || typeof r.authenticatorData !== 'string' || typeof r.signature !== 'string')
+        refuse('AUTHORIZATION_ASSERTION_INVALID');
+      const clean = { credentialId: r!.credentialId as string, clientDataJSON: r!.clientDataJSON as string, authenticatorData: r!.authenticatorData as string, signature: r!.signature as string };
+      const verified = verifyAssertion(clean, { challenge: digestBytes(rev.envelopeDigest!), origin: config.passkeyOrigin, rpId: passkey!.rpId, credentialId: passkey!.credentialId,
+        publicKeySpki: passkey!.publicKeySpki, signCount: passkey!.signCount });
+      await store.activate(owner, { authorizationId: a.authorizationId, revision, digest: rev.envelopeDigest!, passkeyId: passkey!.passkeyId, signCount: verified.signCount,
+        assertion: clean, onActivated: tx => activateRun(tx, a.authorizationId) }, deps.now());
+      deps.log('delegation.workflow_run_authorization_signed', { authorization: a.authorizationId, revision });
+      return { authorizationId: a.authorizationId };
+    },
+    /** Revokes a workflow run's authorization: queued steps never execute; in-flight submissions are reconciled, never undone. */
+    async workflowRunAuthorizationRevoke(owner: Owner, runId: string): Promise<void> {
+      const a = await store.authorizationForRun(runId) ?? refuse('AUTHORIZATION_NOT_FOUND');
+      await store.revoke(owner, a.authorizationId, 'OWNER_REVOKED', deps.now());
+      deps.log('delegation.workflow_run_authorization_revoked', { authorization: a.authorizationId });
     },
 
     // ── Executions ────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -434,7 +501,8 @@ export function createDelegationService(deps: DelegationServiceDeps) {
       const resumed = await store.transition(executionId, { version: e.version, from: ['HALTED'] }, 'RUNNING', { attention: false, code: null }, deps.now()) ?? refuse('EXECUTION_CHANGED');
       await deps.db.query(`INSERT INTO work_items (tenant_id, kind, dedupe_key, run_id, payload, state, available_at) VALUES ($1, $2, $3, NULL, $4::jsonb, 'READY', now())
         ON CONFLICT (tenant_id, kind, dedupe_key) WHERE state IN ('READY', 'LEASED') DO NOTHING`,
-      [config.tenantId, DELEGATION_EXECUTE_KIND, e.occurrenceId, JSON.stringify({ occurrenceId: e.occurrenceId, authorizationId: e.authorizationId })]);
+      [config.tenantId, e.workflowRunId ? DELEGATION_EXECUTE_RUN_KIND : DELEGATION_EXECUTE_KIND, e.workflowRunId ?? e.occurrenceId,
+        JSON.stringify(e.workflowRunId ? { workflowRunId: e.workflowRunId, authorizationId: e.authorizationId } : { occurrenceId: e.occurrenceId, authorizationId: e.authorizationId })]);
       return executionView(resumed);
     },
     /** Used by the automation service: a delegated rule may resume only while its authorization is ACTIVE. */
