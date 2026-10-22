@@ -18,7 +18,7 @@ import type { WorkflowComposition } from '../engine/strategy-engine';
 import type { ReviewView } from '../delegation/views.ts';
 import type { AuthorizationPlan } from '../workflow-runs/authorization-plan.ts';
 import type { RunRecord } from '../workflow-runs/pg-store.ts';
-import { assertRunWallets, cancelRun, currentStep, ensureForClaim, ownerAuthorizationPlan, resumeRun, runView, startConfirm, type RunView, type StepProposal,
+import { assertRunWallets, cancelRun, currentStep, ensureForClaim, observeRun, ownerAuthorizationPlan, resumeRun, runView, startConfirm, type RunView, type StepProposal,
   type WorkflowRunDeps } from '../workflow-runs/service.ts';
 import { DELEGATED_AUTHORIZATION_SECONDS } from '../workflow-runs/state-machine.ts';
 import type { ApprovalView } from './approvals.ts';
@@ -68,10 +68,9 @@ export async function ownedRun(deps: WorkflowRunSurface, approvalId: string, wal
   try { assertRunWallets(run, wallets); } catch (cause) { return refuse(cause instanceof Error && /_PROOF_REQUIRED$/.test(cause.message) ? cause.message : 'WORKFLOW_RUN_NOT_FOUND'); }
   return run;
 }
-/** The run's status for its owner, read-only: nothing is resolved or loaded (a view never changes a step). */
+/** The run's status for its owner: observed as the worker observes it, and nothing is resolved or loaded (a poll never readies or loads a step). */
 export async function statusSequential(deps: WorkflowRunSurface, run: RunRecord, wallets: readonly WalletRef[], base: ApprovalView) {
-  assertRunWallets(run, wallets);
-  return proposalOf(deps, run, null, base);
+  return proposalOf(deps, await observeRun(deps, run, wallets), null, base);
 }
 /** The step the owner signs now (after the previous one reconciled), or the run's status when none waits. */
 export async function continueSequential(deps: WorkflowRunSurface, run: RunRecord, wallets: readonly WalletRef[], base: ApprovalView) {

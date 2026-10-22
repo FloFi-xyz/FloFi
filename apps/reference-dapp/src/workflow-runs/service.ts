@@ -102,6 +102,16 @@ export async function currentStep(deps: WorkflowRunDeps, run: RunRecord, wallets
   return { stepIndex: step.stepIndex, stepCount: fresh.stepCount, strategy: step.strategy!, workflowHash: step.workflowHash!, composition: composed.steps[0]! };
 }
 
+/**
+ * The run as its owner's status poll sees it: observed exactly as the worker observes it (no policy, so a poll never makes a step READY and never
+ * loads one; nothing is signed or submitted). A reconciled step therefore shows at once, and the owner never waits on the worker to continue.
+ */
+export async function observeRun(deps: WorkflowRunDeps, run: RunRecord, wallets: readonly WalletRef[]): Promise<RunRecord> {
+  assertRunWallets(run, wallets);
+  await advanceRun({ ...deps, policyFor: () => null }, run.runId);
+  return (await deps.store.byId(run.runId)) ?? run;
+}
+
 /** The owner ends a run that cannot continue (HALTED), or one that never submitted anything; remaining steps are SKIPPED. */
 export async function cancelRun(deps: WorkflowRunDeps, run: RunRecord, wallets: readonly WalletRef[], code = 'OWNER_CANCELLED'): Promise<RunRecord> {
   assertRunWallets(run, wallets);

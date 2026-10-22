@@ -7,7 +7,7 @@
 import { describe, expect, it } from 'vitest';
 import { createTestDatabase } from '../../../../packages/cloud-runtime/test/pg-harness.ts';
 import { semanticWorkflowHash } from '../engine/strategy-engine';
-import { approvalProgress, applyApproval, claimApproval, workflowRunCancel, workflowRunContinue, workflowRunResume } from '../platform/index.ts';
+import { approvalProgress, applyApproval, claimApproval, workflowRunCancel, workflowRunContinue, workflowRunResume, workflowRunStatus } from '../platform/index.ts';
 import { advanceRun } from './runner.ts';
 import { workflowRunHarness, type RunHarness } from './workflow-run.test-harness.ts';
 
@@ -64,6 +64,32 @@ describe('BUILD-CHAT-E2E-001 confirm-each-step workflow run (PostgreSQL)', () =>
         steps: [{ state: 'RECONCILED', outcome: { kind: 'OWNER_RUN', evidence: { environment: 'MOCKED', outcome: 'RECONCILED' } } },
           { state: 'RECONCILED', outcome: { kind: 'OWNER_RUN', receiptUrl: expect.stringMatching(/^https:\/\/flofi\.test\/app\/dashboard\/runs\//) } }] });
       expect((await h.store.events(run.runId)).filter(e => e.kind === 'RUN_COMPLETED')).toHaveLength(1);
+    } finally { await t.drop(); }
+  });
+
+  it('the owner\'s status poll observes the run like the worker, so continuing never waits on it, yet it never readies or loads a step', async () => {
+    const t = await createTestDatabase();
+    try {
+      const h = await workflowRunHarness(t.db);
+      const { approval, claimed } = await started(h);
+      // While the first step is still in the owner's wallet, a poll changes nothing and offers no next step.
+      expect((await workflowRunStatus(h.surface, approval.approvalId, [h.evm, h.sol])).view.workflowRun!.run)
+        .toMatchObject({ currentStep: 0, nextAction: 'WAITING_FOR_RECONCILIATION', steps: [{ state: 'AWAITING_OWNER' }, { state: 'PENDING' }] });
+      // No worker runs here: the poll alone records the reconciled step, and the next step waits for the owner (not READY, not loaded).
+      h.flows.ownerExecutes('base-sepolia-swap', h.evm.address, claimed.workflow, 'RECONCILED');
+      const polled = await workflowRunStatus(h.surface, approval.approvalId, [h.evm, h.sol]);
+      expect(polled.command).toBeNull();
+      expect(polled.view.workflowRun).toMatchObject({ step: null, run: { state: 'RUNNING', currentStep: 1, nextAction: 'OWNER_SIGNS_STEP',
+        steps: [{ state: 'RECONCILED' }, { state: 'PENDING' }] } });
+      const run = await runOf(h, approval.approvalId);
+      expect((await h.store.steps(run.runId)).map(s => s.state)).toEqual(['RECONCILED', 'PENDING']);
+      // Repeated polls are idempotent: one reconciliation fact.
+      await workflowRunStatus(h.surface, approval.approvalId, [h.evm, h.sol]);
+      expect((await h.store.events(run.runId)).filter(e => e.stepIndex === 0 && e.detail?.state === 'RECONCILED')).toHaveLength(1);
+      // Only the owner's continue readies and loads the second step.
+      expect((await continued(h, approval.approvalId)).view.workflowRun).toMatchObject({ step: { index: 1, count: 2 } });
+      // Another wallet cannot poll (or observe) the run.
+      expect(await refusal(workflowRunStatus(h.surface, approval.approvalId, [{ ...h.evm, address: '0x' + '9'.repeat(40) }, h.sol]))).toBe('WORKFLOW_RUN_NOT_FOUND');
     } finally { await t.drop(); }
   });
 

@@ -38,6 +38,13 @@ The Canvas is optional.
 The worker never signs or submits. It never makes a step ready, because that needs the requester surface's policy. Its sweep also does two
 jobs: it expires runs that never started, and it re-arms open runs whose work item is missing.
 
+The owner's status polls on `/approve` run the same observe-only pass. A reconciled step therefore shows at once, and the owner's *Continue*
+never waits on the worker. The worker is still required for three things:
+
+- observing runs while no owner tab is open, which keeps conversation status and notifications current;
+- delegated runs;
+- the sweep.
+
 **Delegated executor (`delegation.execute-run`).** This runs only on a deployment with a signer provider. It is BUILD-AUTOMATION-002's
 executor, with a workflow run as its source.
 

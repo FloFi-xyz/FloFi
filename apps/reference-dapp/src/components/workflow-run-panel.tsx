@@ -9,8 +9,8 @@
  *   continue               after a step reconciled, load the next step into the signing surface (its own fresh simulation, Review and signature)
  *   end / try again        a halted run (partial completion) can be ended, or a step that submitted nothing tried again
  *
- * Status is polled read-only. Nothing here builds, signs or sends a transaction; the passkey assertion and every wallet confirmation stay the
- * owner's own, and FloFi re-verifies each of them on the server.
+ * Status is polled; a poll observes the run as FloFi's worker does and never loads a step. Nothing here builds, signs or sends a transaction;
+ * the passkey assertion and every wallet confirmation stay the owner's own, and FloFi re-verifies each of them on the server.
  */
 import { useEffect, useRef, useState } from 'react';
 import { authorizeWorkflowRunHandoff, cancelWorkflowRunHandoff, continueWorkflowRunHandoff, resumeWorkflowRunHandoff, reviewWorkflowRunAuthorization,
@@ -42,7 +42,7 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
   const acting = useRef(false);
   const { run, plan } = claim;
   const open = ['PENDING', 'RUNNING', 'ATTENTION', 'HALTED'].includes(run.state);
-  // Read-only status: the server never loads or resolves a step for a poll.
+  // A status poll: the server observes the run (a reconciled step shows at once) but never loads or resolves a step for it.
   useEffect(() => {
     if (!open) return;
     let stopped = false;
