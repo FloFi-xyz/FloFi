@@ -5,7 +5,8 @@ Branch `codex/build-chat-e2e-001`, worktree `/home/asus/projects/flofi-chat-e2e-
 integration was needed. No other worktree or branch was modified.
 
 This plan records the Phase A audit, the architecture decisions and the scope. The [report](BUILD-CHAT-E2E-001-REPORT.md)
-records what was built, what was tested, and what is still blocked.
+records what was built, what was tested, and what is still blocked. Where the build differs from this plan (the shape of step
+bindings, owner-signed bound amounts, the MCP status tool, budget entries), the report's §8 lists each deviation and why.
 
 ## 1. Phase A audit
 
