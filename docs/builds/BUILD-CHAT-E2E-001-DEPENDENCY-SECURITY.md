@@ -103,3 +103,27 @@ branch and the existing exclusions for both releases. GitHub Actions must remain
 disabled. Production promotion, database migration, Railway changes, production
 environment changes, workflow enablement and merging remain unauthorized. The
 Admin health compatibility correction remains separate from all three changes.
+
+## CircleCI recovery: exact SBOM inventory
+
+The first dependency certification, [pipeline 63](https://app.circleci.com/pipelines/circleci/6LUtV1HL3Hv4vgyjN97nYr/QRg7X1Ss31GssJoAAa6jmZ/63),
+checked out `aaeb215b2502238a41729da17ebf2bd1f54dbbfa`. Governance, fresh
+integrity/license/age verification and the security audit passed; the audit said
+“No known vulnerabilities found.” The next step failed with “Dependency evidence
+count changed”: the SBOM validator still required the old 265-package graph.
+
+The follow-up correction changes the three exact SBOM inventory assertions and
+success message to the reviewed 263 identities in both the CircleCI script and
+its GitHub Actions source copy. The copies remain byte-equivalent, and the
+Actions workflows remain disabled externally. Triggers, runners and every other
+SBOM check remain unchanged: exact identity coverage, no omissions/duplicates,
+root identity/license, dependency references, workspace inventory, actual license
+expressions, all 16 reviewed exception names, and unconditional artifact removal.
+
+Two focused tests execute the real Python SBOM validator with the complete
+reviewed identity set and verify failure for omitted, duplicate, unreviewed and
+dangling components. They also verify artifact removal on success and failure.
+Both tests pass; all six existing CI parity tests pass. These lightweight
+preparation checks run no application, browser, fork or database workload. The
+corrected exact commit still requires its own complete CircleCI certification;
+results from the failed earlier SHA do not substitute for it.

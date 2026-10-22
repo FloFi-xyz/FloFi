@@ -384,6 +384,18 @@
       "version": "3.2.1"
     }
   ],
+  "circleci_recovery": {
+    "audit": "No known vulnerabilities found",
+    "correction": "Update exact SBOM inventory count to 263 in CircleCI script and byte-equivalent Actions source; preserve all other checks",
+    "failed_pipeline": 63,
+    "failure": "SBOM validator required old 265-entry inventory; reviewed graph has 263",
+    "preparation_tests": {
+      "ci_parity_tests": 6,
+      "result": "pass",
+      "sbom_validation_cases": 2
+    },
+    "tested_sha": "aaeb215b2502238a41729da17ebf2bd1f54dbbfa"
+  },
   "existing_age_waiver": [
     "source-map-js@1.2.2"
   ],
