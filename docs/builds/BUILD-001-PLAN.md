@@ -193,7 +193,7 @@ is introduced. Asset exclusions and reserved/prohibited boundaries remain.
 | canonicalize | 5.0.0 | Apache-2.0 | Runtime |
 | typescript | 5.9.3 | Apache-2.0 | Development |
 | turbo | 2.10.12 | MIT | Development |
-| vitest | 5.0.0 | MIT | Development |
+| vitest | 5.0.3 | MIT | Development |
 | vite | 8.3.0 | MIT | Development; required Vitest peer |
 | eslint | 10.10.0 | MIT | Development |
 | @eslint/js | 10.0.1 | MIT | Development |
@@ -454,7 +454,7 @@ I queried the official npm registry’s version metadata and publication history
 | `canonicalize` | `5.0.0` | 2026-09-08 20:16 | `>=22` | Apache-2.0 | `sha512-O/NCg79G0/TWoD3Fo6scOMfP4p7/TsxRXVmRo9mEfD6h/5y5o1wtVbKyBO0E2i7FEcqe5tRijyAH/IWHIHMH4w==` |
 | `typescript` | `5.9.3` | 2025-09-30 21:19 | `>=14.17` | Apache-2.0 | `sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==` |
 | `turbo` | `2.10.12` | 2026-08-25 18:38 | — | MIT | `sha512-AswgMPnpOoaVZHrrSBejETzEbuIA69OVGwfkHwfrY0A23VjWXBANzgq9+OymWOHAIArB7D1+1z498WY8fGg1Jw==` |
-| `vitest` | `5.0.0` | 2026-09-03 12:24 | `^22.12.0 \|\| ^24.0.0 \|\| >=26.0.0` | MIT | `sha512-gpsMNoRhMjMktVxPtstOH4/PJuPyovVaMDr4oDilXaGH1EcqM2OE96SoHT2VIQ6fTGtTjqmHDrEu2X9RQiXf8Q==` |
+| `vitest` | `5.0.3` | 2026-09-30 11:30 | `^22.12.0 \|\| ^24.0.0 \|\| >=26.0.0` | MIT | `sha512-xMw97S3rjdtj5dkVat7jCsqWBpvchs3RlpQctUqwJD0KkERk40vz2fJ77lDwW/Vzh/pk18eItYAzkodhSes3jQ==` |
 | `vite` | `8.3.3` | 2026-10-06 04:10 | `^20.19.0 \|\| >=22.12.0` | MIT | `sha512-cTAldKPImjg6c+gk48U19POPn3GCBzZwpdsN8ZMEEcbpes+6/wvfqUd0C2y3qYY4wsj8PwgFwrZ/1jBPVttMSg==` |
 | `eslint` | `10.10.0` | 2026-09-04 14:34 | `^20.19.0 \|\| ^22.13.0 \|\| >=24` | MIT | `sha512-NPXn6r5zl4uET1DAVPaOwzX3rut4c0wcmw3dWJAfOsTM5+TogXo0DDjz8pwm/hL8cyVNpHqeK4JpN0NjnyFFNw==` |
 | `@eslint/js` | `10.0.1` | 2026-02-06 22:34 | `^20.19.0 \|\| ^22.13.0 \|\| >=24` | MIT | `sha512-zeR9k5pd4gxjZ0abRoIaxdc7I3nDktoXZk2qOv9gCNWx3mVwEn32VRhyLaRsDiJjTs0xq/T8mfPtyuXu7GWBcA==` |
@@ -467,6 +467,15 @@ Security update of 21 October 2026: the `vite` row supersedes the planning-time 
 `launch-editor` advisories GHSA-587h-7wmj-h5pm, GHSA-698v-4r3x-3vcv and GHSA-r825-w8mm-5pxw fail the dependency audit.
 `8.3.3` predates that update's seven-day cutoff and keeps the engine range, license and Vitest peer compatibility; only `rolldown`
 1.2.13 with its platform bindings and `@oxc-project/types` 0.153.0 move transitively. No waiver or override is added.
+
+Security update of 22 October 2026 (BUILD-CHAT-E2E-001): the `vitest` row supersedes
+`5.0.0` (2026-09-03 12:24 UTC). The owner approved `5.0.3` and its required
+`@vitest/mocker@5.0.3` / `@vitest/spy@5.0.3` fixes for GHSA-qxg6-89mg-rqv8
+and GHSA-xp26-3454-mjgp. The exact `why-is-node-running@3.2.1` dependency removes
+`siginfo` and `stackback`; other Vitest transitive versions remain fixed. The
+seven-day age requirement and license checks remain unchanged. Next.js 16.4.1
+and its matching `@next/*` packages are reviewed in
+[the dependency correction](BUILD-CHAT-E2E-001-DEPENDENCY-SECURITY.md).
 
 Registry peer checks resolve the earlier plan’s errors:
 

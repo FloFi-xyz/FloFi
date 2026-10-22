@@ -250,7 +250,7 @@ class FullDependencyGate(unittest.TestCase):
     def test_full_inventory_and_existing_exceptions_pass(self):
         self.verify()
         evidence = json.loads((Path(self.scratch.name) / 'build-002-dependencies.json').read_text())
-        self.assertEqual(len(evidence), 265)
+        self.assertEqual(len(evidence), 263)
 
     def test_integrity_license_age_platform_and_missing_entry_fail_without_evidence(self):
         mutations = ['integrity', 'license', 'age', 'platform', 'missing']
