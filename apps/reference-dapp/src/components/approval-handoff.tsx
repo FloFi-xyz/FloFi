@@ -107,6 +107,9 @@ export function ApprovalHandoff({ slot = null, surface = 'canvas', onSurfaceChan
   const autoClaimed = useRef<string | null>(null);
   const chain: SolanaWalletChain = view?.steps.some(s => s.network === 'solana') ? 'solana:mainnet' : 'solana:devnet';
   const proof = useWalletProof(view?.walletNamespace ?? null, chain), proven = proof.proven;
+  // BUILD-CHAT-E2E-001: a workflow with EVM and Solana steps binds both of the owner's wallets when it is claimed, so both are proven first.
+  const otherNamespace = view?.walletNamespaces?.find(namespace => namespace !== view.walletNamespace) ?? null;
+  const secondProof = useWalletProof(otherNamespace, chain), allProven = proven && (!otherNamespace || secondProof.proven) ? proven : null;
   const internal = view?.requesterKind === 'AUTOMATION_RULE';
   const available = resolved && view !== null && !TERMINAL.includes(view.status) && !view.refusal;
 
@@ -225,20 +228,21 @@ export function ApprovalHandoff({ slot = null, surface = 'canvas', onSurfaceChan
   const reloadable = view !== null && (view.status === 'PENDING' || view.status === 'CLAIMED' && view.claimedByYou);
   const autoLoad = available && !claimed && !view!.claimedByAnotherWallet && (internal || !recovery && reloadable);
   useEffect(() => {
-    if (!autoLoad || !proven || busy) return;
-    const key = `${generation.current}:${proven}`;
+    if (!autoLoad || !allProven || busy) return;
+    const key = `${generation.current}:${proven}:${secondProof.proven ?? ''}`;
     if (autoClaimed.current === key) return;
     autoClaimed.current = key;
     void claim();
-  }, [autoLoad, proven, busy, reload]);
+  }, [autoLoad, allProven, busy, reload]);
   // The product ends a sign-in session whose wallet no longer matches the connected account (router store). When the server finds no
   // proven wallet, the session read here is stale: read it again, so the owner is asked to connect instead of seeing the old account.
-  const { refresh: refreshProof } = proof;
+  const { refresh: refreshProof } = proof, { refresh: refreshSecondProof } = secondProof;
   useEffect(() => {
     if (!error || !/^(EVM|SOLANA)_WALLET_PROOF_REQUIRED$/.test(error)) return;
     setError(null);
     void refreshProof();
-  }, [error, refreshProof]);
+    void refreshSecondProof();
+  }, [error, refreshProof, refreshSecondProof]);
   // Another wallet's claim is relative to the wallets proven when the proposal was read: after a new proof, read it again.
   const recheckFor = view?.claimedByAnotherWallet && proven ? proven : null;
   useEffect(() => {
@@ -334,8 +338,9 @@ export function ApprovalHandoff({ slot = null, surface = 'canvas', onSurfaceChan
       {message}
       <div className="approval-actions">
         {!loaded && !claimed && <WalletProof namespace={view.walletNamespace} proof={proof}/>}
+        {!loaded && !claimed && otherNamespace && <WalletProof namespace={otherNamespace} proof={secondProof}/>}
         {wrongWallet && <button type="button" className="secondary" disabled={proof.busy} onClick={prove}>{tr('Use another wallet')}</button>}
-        {recoverable && proven && <button type="button" className="primary" disabled={busy} onClick={() => void claim()}>{tr('Restore proposal')}</button>}
+        {recoverable && allProven && <button type="button" className="primary" disabled={busy} onClick={() => void claim()}>{tr('Restore proposal')}</button>}
         {error && !wrongWallet && !loaded && proven && !recoverable && <button type="button" className="secondary" disabled={busy} onClick={() => void (claimed
           ? run(async () => { const current = generation.current, result = unwrap(await markApprovalApplied(secret!, state.workflow)); if (current === generation.current) setView(result); })
           : claim())}>{tr('Retry loading proposal')}</button>}
@@ -343,6 +348,7 @@ export function ApprovalHandoff({ slot = null, surface = 'canvas', onSurfaceChan
       </div>
     </div>
     {errorText && <p className="error-banner" role="alert">{tr(errorText)}</p>}
+    {otherNamespace && !claimed && <p className="muted">{tr('This workflow uses an EVM wallet and a Solana wallet: both must be proven before it starts.')}</p>}
     {view.workflowRun && <WorkflowRunPanel claim={view.workflowRun} approvalId={view.approvalId} secret={secret && SECRET.test(secret) ? secret : null}
       onProposal={onRunProposal} onError={setError}/>}
     {!fromAutomation && <label className="approval-share"><input type="checkbox" disabled={busy || Boolean(recovery)} checked={claimed ? view.statusShared : share === true}

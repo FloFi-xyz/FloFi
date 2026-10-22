@@ -30,6 +30,11 @@ export const portugueseWorkflowRuns: Readonly<Record<string, string>> = {
   'A submitted step has no final outcome yet. FloFi keeps observing it and never resubmits it.':
     'Uma etapa enviada ainda não tem resultado final. O FloFi continua a observá-la e nunca a reenvia.',
   'Every step reconciled.': 'Todas as etapas reconciliadas.', 'Your conversation can show the result.': 'A sua conversa pode mostrar o resultado.',
+  'This workflow uses an EVM wallet and a Solana wallet: both must be proven before it starts.':
+    'Este fluxo usa uma carteira EVM e uma carteira Solana: as duas precisam ser comprovadas antes de ele começar.',
+  'Each step starts only after the previous step reconciled on chain.': 'Cada etapa só começa depois de a anterior ser reconciliada na rede.',
+  'A dependent step spends what an earlier step actually delivered (after reconciliation), capped by its own amount.':
+    'Uma etapa dependente gasta o que uma etapa anterior realmente entregou (após a reconciliação), limitado ao seu próprio valor.',
   'One authorization is not one transaction: every step still submits its own transactions and pays its own network fees.':
     'Uma autorização não é uma transação: cada etapa continua a enviar as suas próprias transações e a pagar as suas próprias taxas de rede.',
 };
