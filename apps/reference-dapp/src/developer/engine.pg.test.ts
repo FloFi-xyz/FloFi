@@ -84,7 +84,7 @@ describe('BUILD-DEVELOPER-001 one engine: discovery, composition, validation and
     const calls: string[] = [], runtime = recordingRuntime({ calls }), p = await developerProject(t.db), api = developerApi({ db: t.db, runtime }, p.key);
     const alice = { principal: 'dev-alice', token: credential() }, mcp = session({ env: gatewayEnv([alice]), token: alice.token, runtime });
     for (const [input, plan] of [[BRIDGE, 'SINGLE_FLOW'], [{ version: 2, steps: [BRIDGE] }, 'SINGLE_FLOW'], [{ version: 2, steps: [SUPPLY, BORROW, SWAP] }, 'COMPOSITE_FLOW'],
-      [{ version: 2, steps: [BRIDGE, SWAP] }, 'NOT_EXECUTABLE']] as const) {
+      [{ version: 2, steps: [BRIDGE, SWAP] }, 'SEQUENTIAL']] as const) {
       const created = await api<{ id: string; strategy: unknown; workflowHash: string; executionPlan: { kind: string; reason: string | null }; availability: Record<string, unknown>;
         authority: string; validation: { summary: Record<string, number> } }>('POST', '/strategies', { strategy: input });
       const composed = (await mcp.callTool('compose_strategy', { strategy: input })).output as { strategy: unknown; workflowHash: string };
@@ -94,11 +94,12 @@ describe('BUILD-DEVELOPER-001 one engine: discovery, composition, validation and
       expect(created.body.validation.summary).toMatchObject(validated.reviewSummary);
       const row = (await t.db.query('SELECT strategy, workflow_hash, plan FROM developer_strategies WHERE strategy_id = $1', [created.body.id])).rows[0]!;
       expect([row.strategy, row.workflow_hash, (row.plan as { kind: string }).kind]).toEqual([composed.strategy, composed.workflowHash, plan]);
-      if (plan === 'NOT_EXECUTABLE') {
-        expect(created.body.executionPlan.reason).toBe('MULTI_STEP_SEQUENCE_NOT_IMPLEMENTED');
-        expect(created.body.availability).toMatchObject({ approvable: false, reason: 'MULTI_STEP_SEQUENCE_NOT_IMPLEMENTED' });
+      // BUILD-CHAT-E2E-001: a general sequence is planned SEQUENTIAL; this deployment has workflow runs off, so it is not approvable.
+      if (plan === 'SEQUENTIAL') {
+        expect(created.body.executionPlan.reason).toBeNull();
+        expect(created.body.availability).toMatchObject({ approvable: false, reason: 'WORKFLOW_RUNS_NOT_ENABLED' });
         expect(errorOf(await api('POST', '/approvals', { strategyId: created.body.id, workflowHash: created.body.workflowHash })))
-          .toMatchObject({ code: 'CAPABILITY_NOT_SUPPORTED', reason: 'MULTI_STEP_SEQUENCE_NOT_IMPLEMENTED' });
+          .toMatchObject({ code: 'CAPABILITY_NOT_SUPPORTED', reason: 'WORKFLOW_RUNS_NOT_ENABLED' });
         expect(errorOf(await api('POST', `/strategies/${created.body.id}/simulate`, { simulationSubject: OWNER })))
           .toMatchObject({ code: 'CAPABILITY_NOT_SUPPORTED', reason: 'SIMULATE_ONE_STEP_AT_A_TIME' });
       }

@@ -3108,7 +3108,7 @@
                   "steps": {
                     "minItems": 1,
                     "maxItems": 8,
-                    "description": "Ordered steps, each one single-action strategy (the same objects as version 1). Executed in this order, each with its own review and signature.",
+                    "description": "Ordered steps, each one single-action strategy (the same objects as version 1). Executed in this order; each step starts only after the previous one reconciled.",
                     "type": "array",
                     "items": {
                       "anyOf": [
@@ -3968,6 +3968,34 @@
                           }
                         }
                       ]
+                    }
+                  },
+                  "bindings": {
+                    "minItems": 1,
+                    "maxItems": 7,
+                    "description": "Optional typed dependencies: a step spends what an earlier step actually delivered (capped by its own amount). The input asset must be exactly the earlier step's output token.",
+                    "type": "array",
+                    "items": {
+                      "additionalProperties": false,
+                      "type": "object",
+                      "required": [
+                        "step",
+                        "amountFrom"
+                      ],
+                      "properties": {
+                        "step": {
+                          "minimum": 1,
+                          "maximum": 7,
+                          "description": "The dependent step (0-based index). Its amount is a cap.",
+                          "type": "integer"
+                        },
+                        "amountFrom": {
+                          "minimum": 0,
+                          "maximum": 6,
+                          "description": "An earlier step (0-based index) whose actual reconciled output of the dependent step's input asset funds it: min(cap, received). Never an estimate.",
+                          "type": "integer"
+                        }
+                      }
                     }
                   }
                 }
