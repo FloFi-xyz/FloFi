@@ -9,6 +9,7 @@ import { SOLANA_DEVNET_TRANSFER } from '@defi-workflow-engine/action-registry';
 import { LocaleProvider, type Language } from '../i18n/locale';
 import { STRATEGY_EXAMPLES } from '../engine/strategy-examples';
 import { composeStrategy } from '../engine/strategy-engine';
+import { workflowBoundAuthorization } from '../domain/review-presentation';
 
 function View({ data }: { data: ExecutionControlsState }) {
   const controls = useExecutionControls(data);
@@ -66,6 +67,17 @@ describe('shared chat-first signing surface', () => {
       source: { kind: 'unavailable', state: { busy: false, error: null } }, execution: { ready: false, started: false, start: vi.fn(), prompt: null, expiresAt: null } };
     const html = render(data);
     expect(html).toContain('Requested actions'); expect(html).not.toMatch(/mock-read|mock:local|sample units|type="checkbox"|beta-notice/);
+    expect(data.execution.start).not.toHaveBeenCalled();
+  });
+  // BUILD-FLOFI-UNIVERSAL-E2E-001 incident: a Base Sepolia workflow on /approve showed an unrelated Solana Mainnet authorization manifest.
+  it('never presents another workflow\'s Solana Mainnet manifest for a Base Sepolia workflow', async () => {
+    const base = reviewFixture(), solana = await solanaTransferReviewFixture(), mint = solana.authorization.tokens[0]!.address;
+    const data: ExecutionControlsState = { ...base, authorization: solana.authorization, execution: { ready: false, started: false, start: vi.fn(), prompt: null, expiresAt: null } };
+    const leaked = render(data);
+    expect(leaked).toContain('Mainnet · Real funds'); expect(leaked).toContain(mint);
+    const html = render({ ...data, authorization: workflowBoundAuthorization(data.authorization, data.workflow, data.source) });
+    expect(html).toContain('Base Sepolia'); expect(html).not.toContain('Mainnet · Real funds'); expect(html).not.toContain(mint);
+    expect(html).not.toMatch(/Token mint|Solana|Authorize in wallet/);
     expect(data.execution.start).not.toHaveBeenCalled();
   });
 });

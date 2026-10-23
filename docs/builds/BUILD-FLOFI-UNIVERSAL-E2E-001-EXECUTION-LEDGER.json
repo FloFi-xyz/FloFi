@@ -1,0 +1,97 @@
+{
+  "format": "flofi.execution-ledger.v1",
+  "build": "BUILD-FLOFI-UNIVERSAL-E2E-001",
+  "statement": "Every owner-signed public-network execution this repository records, with the identifiers needed to re-verify it read-only. Compiled from committed evidence bundles and reports, plus one owner journal kept outside Git (P0). No entry was produced by this build: it sent no transaction. Historical entries prove the path at the commit named, not on the current release.",
+  "entries": [
+    {
+      "id": "BUILD-011D-2-base-sepolia-swap",
+      "action": "swap", "network": "base-sepolia", "chain": "eip155:84532", "adapter": "uniswap.v3", "flow": "base-sepolia-swap",
+      "channel": "web-canvas", "owner": "0x8ef12e4e2fd397c227492019f626b5d1c5e41b3b", "recordedClass": "TESTNET_EXECUTED",
+      "codeRef": "BUILD-011D-2 (main 205055605d96f36e024a0bbc770453113e4f7b40 lineage)", "evidence": "docs/builds/BUILD-011D-2-REPORT.md",
+      "transactions": [
+        { "role": "approval", "hash": "0xa3ca25b0b5b6e573d3d61b0ee40eda9e9338a6534ceef3678932cd5ce2f7edd0" },
+        { "role": "swap", "hash": "0xb5dd3f4bb4d2f5a101ff5da371636fde917894eb03ef3c5f1ac0e71605799ff8", "block": 47476344 }
+      ]
+    },
+    {
+      "id": "BUILD-012A-base-sepolia-aave-supply",
+      "action": "supply", "network": "base-sepolia", "chain": "eip155:84532", "adapter": "aave-v3", "flow": "aave-supply",
+      "channel": "web-canvas", "owner": "0x8ef12e4e2fd397c227492019f626b5d1c5e41b3b", "recordedClass": "TESTNET_EXECUTED",
+      "codeRef": "BUILD-012A", "evidence": "docs/builds/BUILD-012A-EVIDENCE.json",
+      "transactions": [
+        { "role": "approval", "hash": "0x628d8532caa0ca157b90d93f12ab82b7695692c776d8d8756f97a1aec17ef0a3", "block": 47546186 },
+        { "role": "supply", "hash": "0x717f81f6c360d7f62c64a13d258a513cf003e76ae3c2c1318dd00d3115cf5f0a" }
+      ]
+    },
+    {
+      "id": "BUILD-012B-base-sepolia-aave-borrow",
+      "action": "borrow", "network": "base-sepolia", "chain": "eip155:84532", "adapter": "aave-v3", "flow": "aave-supply",
+      "channel": "web-canvas", "owner": "0x8ef12e4e2fd397c227492019f626b5d1c5e41b3b", "recordedClass": "TESTNET_EXECUTED",
+      "codeRef": "BUILD-012B", "evidence": "docs/builds/BUILD-012B-EVIDENCE.json",
+      "transactions": [ { "role": "borrow", "hash": "0x37a5648235efc91f32d3f1400ccc5529b27e34c7e46dd7547bde493e8667f7f4", "block": 47555223 } ]
+    },
+    {
+      "id": "BUILD-012C-base-sepolia-aave-repay",
+      "action": "repay", "network": "base-sepolia", "chain": "eip155:84532", "adapter": "aave-v3", "flow": "aave-supply",
+      "channel": "web-canvas", "owner": "0x8ef12e4e2fd397c227492019f626b5d1c5e41b3b", "recordedClass": "TESTNET_EXECUTED",
+      "codeRef": "BUILD-012C (PR #43)", "evidence": "docs/builds/BUILD-012C-EVIDENCE.json",
+      "transactions": [
+        { "role": "approval", "hash": "0x4c3455adbe6d5e391f5eea9ed5090e10ab77cbf5787fcf5f89d621e8e8232e88" },
+        { "role": "repay", "hash": "0x426af294483363d23cd9363c24ac7941cc5661f5f2b5a4b55aa03b3750b5ee8f", "block": 47565177 }
+      ]
+    },
+    {
+      "id": "BUILD-012D-base-sepolia-aave-withdraw",
+      "action": "withdraw", "network": "base-sepolia", "chain": "eip155:84532", "adapter": "aave-v3", "flow": "aave-supply",
+      "channel": "web-canvas", "owner": "0x8ef12e4e2fd397c227492019f626b5d1c5e41b3b", "recordedClass": "TESTNET_EXECUTED",
+      "codeRef": "BUILD-012D (main 70ce37efae08018c642ddcc912913c07cabcb770 lineage)", "evidence": "docs/builds/BUILD-012D-EVIDENCE.json",
+      "transactions": [ { "role": "withdraw", "hash": "0xd62dc935a1897f549a9cd7e131c8847953d97d7b8b8acdbf4d0d602adbeac372" } ]
+    },
+    {
+      "id": "RH-DEMO-001-robinhood-testnet-transfer",
+      "action": "transfer", "network": "robinhood-testnet", "chain": "eip155:46630", "adapter": "evm.native-transfer", "flow": "robinhood-transfer",
+      "channel": "web-canvas", "owner": "0x8ef12e4e2fd397c227492019f626b5d1c5e41b3b", "recordedClass": "TESTNET_EXECUTED",
+      "codeRef": "RH-DEMO-001 (PR #47 lineage, main 7003856)", "evidence": "docs/builds/RH-DEMO-001-EVIDENCE.json",
+      "transactions": [ { "role": "transfer", "hash": "0xdadc1fd5fd23e9bad85171cf2255c1e26df121ce3c8e2c35b121274436f4a498", "block": 127567253 } ]
+    },
+    {
+      "id": "BUILD-UNISWAP-LIQUIDITY-PUBLIC-base-sepolia-position",
+      "action": "add_liquidity", "network": "base-sepolia", "chain": "eip155:84532", "adapter": "uniswap.v3", "flow": "uniswap-liquidity",
+      "channel": "web-canvas", "owner": "0x8ef12e4e2fd397c227492019f626b5d1c5e41b3b", "recordedClass": "TESTNET_EXECUTED",
+      "codeRef": "BUILD-UNISWAP-LIQUIDITY-PUBLIC (run unilp-ff982993a669f8a4f86a8d7b4c6c6369)", "evidence": "docs/builds/BUILD-UNISWAP-LIQUIDITY-PUBLIC-OWNER-E2E-CANONICAL-SUPPLEMENT.json",
+      "transactions": [
+        { "role": "approval", "hash": "0x292f12eea493fbcd20cd284a8bfdf74ec14a28dbfca8958a5e00f8dbf36fc35d", "block": 47647737 },
+        { "role": "mint", "hash": "0x158e125d6bfb4df04a87d743e25d5c5ca4b2eef634cd27319439b1fae6f283d2", "block": 47647747 }
+      ]
+    },
+    {
+      "id": "BUILD-DEMO-001-solana-devnet-swap",
+      "action": "swap", "network": "solana-devnet", "chain": "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1", "adapter": "orca.whirlpools-devnet", "flow": "solana-devnet-swap",
+      "channel": "web-canvas", "owner": "6Mc7hRBcjoYukC7PNqKUbfS5pHeJwf41bogtUfKuMYQR", "recordedClass": "DEVNET_EXECUTED",
+      "codeRef": "BUILD-DEMO-001 (PR #42 lineage, main 148f79c)", "evidence": "docs/builds/BUILD-DEMO-001-EVIDENCE/",
+      "transactions": [ { "role": "swap", "signature": "5Aoo6QX3b7rh3wAX5fxY8ybx7R7k1VgrT95QhuAf5HNF2zNiaCVAoTZtus3HbdwtZthSY9BiMKWiJRVQc67dLCbB", "slot": 506389990 } ]
+    },
+    {
+      "id": "BUILD-015-solana-devnet-orca-position",
+      "action": "add_liquidity", "network": "solana-devnet", "chain": "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1", "adapter": "orca.whirlpools-devnet-liquidity", "flow": "orca-liquidity",
+      "channel": "web-canvas", "owner": "6Mc7hRBcjoYukC7PNqKUbfS5pHeJwf41bogtUfKuMYQR", "recordedClass": "DEVNET_EXECUTED", "alsoCovers": ["remove_liquidity:solana-devnet"],
+      "codeRef": "BUILD-015 (PR #44)", "evidence": "docs/builds/BUILD-015-EVIDENCE/",
+      "transactions": [
+        { "role": "open", "signature": "4NmXs8NoB6KW8jzPesDRZqDcQ26QS4crkF13jN9kNkbPxUf4W8FDitGy3ywaNKBaVTUQM9HcLYLpvJQhvW8LaLJJ", "slot": 506426965 },
+        { "role": "decrease-partial", "signature": "5HQGjFbb1jbwNCEvm2fZM3oKZVQvqQ879Q1vDLumCGJF8RDX5t8KaEmFaXnRhNvvP73uiwzrEKwg88EA3r3oNHPa", "slot": 506427731 },
+        { "role": "exit", "signature": "8MAvfVGXXo6mMcfkuikKnHmTfQ6S37Y5oPh6F7sdVJSNeNSgFZyFsGp1WpoonHHrAPLRWKzaQtq2zgCu1hzfZTV", "slot": 506428344 }
+      ]
+    },
+    {
+      "id": "P0-solana-devnet-swap-to-orca-position",
+      "action": "swap_then_add_liquidity", "network": "solana-devnet", "chain": "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1", "adapter": "orca.whirlpools-devnet + orca.whirlpools-devnet-liquidity", "flow": "solana-composition",
+      "channel": "web-canvas (Phantom)", "owner": "6NTyfs83wzEo7WkkhTuNSxXiyYM9x73icbdtQWVbhaRy", "recordedClass": "DEVNET_EXECUTED",
+      "codeRef": "FIX-SOLANA-WALLET-REFUSAL-P0 (PR #93, merged 9d2f4b9); run solcomp-895069b4c454a3ea9afa633c740c8826",
+      "evidence": "owner journal outside Git (~/.cache/flofi-dev-journal/solana-devnet/solcomp-895069b4c454a3ea9afa633c740c8826.jsonl); identifiers reproduced here",
+      "transactions": [
+        { "role": "swap", "signature": "3ojh2zrxqWLjyvqSwXJ7EhuaRYr56bjisTLMzHQYoNB6cpd2nYuuz2fvzcFR2biaaiPC7bRYMj88DVBLrWTj3t57", "slot": 510782908 },
+        { "role": "position", "signature": "GFfk88a4aswnNLCNB7sqe3NMM3qbr9T9UyD6JHYtZxEPcP9gbQsvHKHB8hxD5jFp775W8M7FQmptemV4aygMohn", "slot": 510789352 }
+      ]
+    }
+  ]
+}

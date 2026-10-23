@@ -7,6 +7,19 @@ BUILD-013 remains OPEN on `codex/build-013-lending-composition` at
 `6cd675e41c0838fa8ac9cf3ec8e90de9442da3b9`; PR #48 remains open and unmerged.
 This separate branding build does not resume its execution work. BUILD-CLOUD-001 (below) does not touch BUILD-013 either.
 
+## BUILD-FLOFI-UNIVERSAL-E2E-001 — Universal transaction execution and production certification
+
+**Status: PR-READY FOR OWNER REVIEW on `codex/build-flofi-universal-e2e-001` (from main `78ea792`, the release `flofi.xyz` serves). No
+transaction signed or sent, nothing deployed, migrated or configured.** The incident in which a Base Sepolia workflow showed an unrelated
+Solana Mainnet authorization manifest is root-caused and fixed in general: owner-wallet stores restore this browser's last run, and five
+of them claimed the routing of any current workflow. A recovered run now serves only the untouched draft or its own workflow. Every
+surface presents and approves only the current workflow's own Review, and wallet namespaces never cross. Arbitrum One and Ethereum
+`add_liquidity`, which no web runtime served, are fixed too. The network × action × protocol × channel matrix is generated from code
+(71 rows: 11 `LIVE_CERTIFIED`, all historical testnet/devnet runs re-verified read-only on public chains; 51 `IMPLEMENTED_UNCERTIFIED`;
+9 `NOT_IMPLEMENTED`). **No mainnet execution and no independent-customer execution has ever been recorded**; the owner-run live plan
+with spending limits is in the [report](builds/BUILD-FLOFI-UNIVERSAL-E2E-001-REPORT.md). See also the
+[customer readiness report](builds/BUILD-FLOFI-UNIVERSAL-E2E-001-READINESS.md).
+
 ## BUILD-CHAT-E2E-001 — Conversational multi-step execution and one workflow-level authorization
 
 **Status: IMPLEMENTED ON BRANCH `codex/build-chat-e2e-001` — MOCKED (unit + PostgreSQL on loopback chain doubles) EVIDENCE ONLY; NOT PUSHED;

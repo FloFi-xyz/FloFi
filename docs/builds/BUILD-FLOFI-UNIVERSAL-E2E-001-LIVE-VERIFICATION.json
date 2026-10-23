@@ -1,0 +1,392 @@
+{
+  "format": "flofi.live-evidence-verification.v1",
+  "ledger": "docs/builds/BUILD-FLOFI-UNIVERSAL-E2E-001-EXECUTION-LEDGER.json",
+  "readOnly": true,
+  "signed": false,
+  "broadcast": false,
+  "checkedAt": "2026-10-23T22:21:47.691Z",
+  "results": [
+    {
+      "id": "BUILD-011D-2-base-sepolia-swap",
+      "action": "swap",
+      "network": "base-sepolia",
+      "chain": "eip155:84532",
+      "endpoint": "https://sepolia.base.org",
+      "status": "VERIFIED",
+      "transactions": [
+        {
+          "role": "approval",
+          "id": "0xa3ca25b0b5b6e573d3d61b0ee40eda9e9338a6534ceef3678932cd5ce2f7edd0",
+          "status": "VERIFIED",
+          "checks": {
+            "chainId": true,
+            "receiptStatus": true,
+            "canonicalBlock": true,
+            "recordedBlock": true,
+            "ownerInvolved": true
+          },
+          "block": 47474130,
+          "blockHash": "0x9e51c7db89b6aaf1d883bdc8c6ab4cabfbf75287f93d78e5926e945f877f5925",
+          "confirmations": 1887021,
+          "sender": "0xb01caea8c6c47bbf4f4b4c5080ca642043359c2e",
+          "to": "0xdb9b1e94b5b69df7e401ddbede43491141047db3",
+          "gasUsed": "180617"
+        },
+        {
+          "role": "swap",
+          "id": "0xb5dd3f4bb4d2f5a101ff5da371636fde917894eb03ef3c5f1ac0e71605799ff8",
+          "status": "VERIFIED",
+          "checks": {
+            "chainId": true,
+            "receiptStatus": true,
+            "canonicalBlock": true,
+            "recordedBlock": true,
+            "ownerInvolved": true
+          },
+          "block": 47476344,
+          "blockHash": "0x2f13799358dc25d706511dfdf67e30a3b186f4009f32a2af932275871af12dde",
+          "confirmations": 1884808,
+          "sender": "0xb01caea8c6c47bbf4f4b4c5080ca642043359c2e",
+          "to": "0xdb9b1e94b5b69df7e401ddbede43491141047db3",
+          "gasUsed": "472461"
+        }
+      ]
+    },
+    {
+      "id": "BUILD-012A-base-sepolia-aave-supply",
+      "action": "supply",
+      "network": "base-sepolia",
+      "chain": "eip155:84532",
+      "endpoint": "https://sepolia.base.org",
+      "status": "VERIFIED",
+      "transactions": [
+        {
+          "role": "approval",
+          "id": "0x628d8532caa0ca157b90d93f12ab82b7695692c776d8d8756f97a1aec17ef0a3",
+          "status": "VERIFIED",
+          "checks": {
+            "chainId": true,
+            "receiptStatus": true,
+            "canonicalBlock": true,
+            "recordedBlock": true,
+            "ownerInvolved": true
+          },
+          "block": 47546186,
+          "blockHash": "0x76e22277fbee834d2facf30698580441056b4acf26e1a5651bc05239eae2b494",
+          "confirmations": 1814968,
+          "sender": "0xb01caea8c6c47bbf4f4b4c5080ca642043359c2e",
+          "to": "0xdb9b1e94b5b69df7e401ddbede43491141047db3",
+          "gasUsed": "171416"
+        },
+        {
+          "role": "supply",
+          "id": "0x717f81f6c360d7f62c64a13d258a513cf003e76ae3c2c1318dd00d3115cf5f0a",
+          "status": "VERIFIED",
+          "checks": {
+            "chainId": true,
+            "receiptStatus": true,
+            "canonicalBlock": true,
+            "recordedBlock": true,
+            "ownerInvolved": true
+          },
+          "block": 47548275,
+          "blockHash": "0x706b4664498c8ba87441ff44cb66593bb415c32624f4aceb820eb3a495213d3e",
+          "confirmations": 1812881,
+          "sender": "0xb42f812a44c22cc6b861478900401ee759ebead6",
+          "to": "0xdb9b1e94b5b69df7e401ddbede43491141047db3",
+          "gasUsed": "301422"
+        }
+      ]
+    },
+    {
+      "id": "BUILD-012B-base-sepolia-aave-borrow",
+      "action": "borrow",
+      "network": "base-sepolia",
+      "chain": "eip155:84532",
+      "endpoint": "https://sepolia.base.org",
+      "status": "VERIFIED",
+      "transactions": [
+        {
+          "role": "borrow",
+          "id": "0x37a5648235efc91f32d3f1400ccc5529b27e34c7e46dd7547bde493e8667f7f4",
+          "status": "VERIFIED",
+          "checks": {
+            "chainId": true,
+            "receiptStatus": true,
+            "canonicalBlock": true,
+            "recordedBlock": true,
+            "ownerInvolved": true
+          },
+          "block": 47555223,
+          "blockHash": "0x96722d345f87a9c006d8924c30683576ddec5d0bedfaeb03f2082b635a8aa064",
+          "confirmations": 1805935,
+          "sender": "0x8ef12e4e2fd397c227492019f626b5d1c5e41b3b",
+          "to": "0x8bab6d1b75f19e9ed9fce8b9bd338844ff79ae27",
+          "gasUsed": "240114"
+        }
+      ]
+    },
+    {
+      "id": "BUILD-012C-base-sepolia-aave-repay",
+      "action": "repay",
+      "network": "base-sepolia",
+      "chain": "eip155:84532",
+      "endpoint": "https://sepolia.base.org",
+      "status": "VERIFIED",
+      "transactions": [
+        {
+          "role": "approval",
+          "id": "0x4c3455adbe6d5e391f5eea9ed5090e10ab77cbf5787fcf5f89d621e8e8232e88",
+          "status": "VERIFIED",
+          "checks": {
+            "chainId": true,
+            "receiptStatus": true,
+            "canonicalBlock": true,
+            "recordedBlock": true,
+            "ownerInvolved": true
+          },
+          "block": 47562191,
+          "blockHash": "0x156b7a81ae71399bb85a94a9402a423b877845f8485c76ffbe3c07f4e61df489",
+          "confirmations": 1798969,
+          "sender": "0xb01caea8c6c47bbf4f4b4c5080ca642043359c2e",
+          "to": "0xdb9b1e94b5b69df7e401ddbede43491141047db3",
+          "gasUsed": "161380"
+        },
+        {
+          "role": "repay",
+          "id": "0x426af294483363d23cd9363c24ac7941cc5661f5f2b5a4b55aa03b3750b5ee8f",
+          "status": "VERIFIED",
+          "checks": {
+            "chainId": true,
+            "receiptStatus": true,
+            "canonicalBlock": true,
+            "recordedBlock": true,
+            "ownerInvolved": true
+          },
+          "block": 47565177,
+          "blockHash": "0xef7a4dac9d179febaf5c6ad38c52968a2d46910893716c890c4c3972362e5bff",
+          "confirmations": 1795985,
+          "sender": "0xb42f812a44c22cc6b861478900401ee759ebead6",
+          "to": "0xdb9b1e94b5b69df7e401ddbede43491141047db3",
+          "gasUsed": "268639"
+        }
+      ]
+    },
+    {
+      "id": "BUILD-012D-base-sepolia-aave-withdraw",
+      "action": "withdraw",
+      "network": "base-sepolia",
+      "chain": "eip155:84532",
+      "endpoint": "https://sepolia.base.org",
+      "status": "VERIFIED",
+      "transactions": [
+        {
+          "role": "withdraw",
+          "id": "0xd62dc935a1897f549a9cd7e131c8847953d97d7b8b8acdbf4d0d602adbeac372",
+          "status": "VERIFIED",
+          "checks": {
+            "chainId": true,
+            "receiptStatus": true,
+            "canonicalBlock": true,
+            "recordedBlock": true,
+            "ownerInvolved": true
+          },
+          "block": 47570537,
+          "blockHash": "0x58de57c4383a372bfe3ab6476ba09f0f3c1fa130937c3882c84c81aed9474258",
+          "confirmations": 1790626,
+          "sender": "0xc066ac5d385419b1a8c43a0e146fa439837a8b8c",
+          "to": "0xdb9b1e94b5b69df7e401ddbede43491141047db3",
+          "gasUsed": "308189"
+        }
+      ]
+    },
+    {
+      "id": "RH-DEMO-001-robinhood-testnet-transfer",
+      "action": "transfer",
+      "network": "robinhood-testnet",
+      "chain": "eip155:46630",
+      "endpoint": "https://rpc.testnet.chain.robinhood.com",
+      "status": "VERIFIED",
+      "transactions": [
+        {
+          "role": "transfer",
+          "id": "0xdadc1fd5fd23e9bad85171cf2255c1e26df121ce3c8e2c35b121274436f4a498",
+          "status": "VERIFIED",
+          "checks": {
+            "chainId": true,
+            "receiptStatus": true,
+            "canonicalBlock": true,
+            "recordedBlock": true,
+            "ownerInvolved": true
+          },
+          "block": 127567253,
+          "blockHash": "0xa6c095fbf68bab1db83d232303f0cfde35b7975925f4e2b0703a6b44f207beaf",
+          "confirmations": 13988809,
+          "sender": "0x8ef12e4e2fd397c227492019f626b5d1c5e41b3b",
+          "to": "0x8ef12e4e2fd397c227492019f626b5d1c5e41b3b",
+          "gasUsed": "25359"
+        }
+      ]
+    },
+    {
+      "id": "BUILD-UNISWAP-LIQUIDITY-PUBLIC-base-sepolia-position",
+      "action": "add_liquidity",
+      "network": "base-sepolia",
+      "chain": "eip155:84532",
+      "endpoint": "https://sepolia.base.org",
+      "status": "VERIFIED",
+      "transactions": [
+        {
+          "role": "approval",
+          "id": "0x292f12eea493fbcd20cd284a8bfdf74ec14a28dbfca8958a5e00f8dbf36fc35d",
+          "status": "VERIFIED",
+          "checks": {
+            "chainId": true,
+            "receiptStatus": true,
+            "canonicalBlock": true,
+            "recordedBlock": true,
+            "ownerInvolved": true
+          },
+          "block": 47647737,
+          "blockHash": "0xcc1a8873a496c4558abe9f1508ca623b850672db3c554a753ba5eb72bf8c3215",
+          "confirmations": 1713431,
+          "sender": "0xb42f812a44c22cc6b861478900401ee759ebead6",
+          "to": "0xdb9b1e94b5b69df7e401ddbede43491141047db3",
+          "gasUsed": "160803"
+        },
+        {
+          "role": "mint",
+          "id": "0x158e125d6bfb4df04a87d743e25d5c5ca4b2eef634cd27319439b1fae6f283d2",
+          "status": "VERIFIED",
+          "checks": {
+            "chainId": true,
+            "receiptStatus": true,
+            "canonicalBlock": true,
+            "recordedBlock": true,
+            "ownerInvolved": true
+          },
+          "block": 47647747,
+          "blockHash": "0x1d2e2ef9b596fae2d3a92dd842b5fcb6f1207aa8d0cae2ca9f331920d7ea5a5c",
+          "confirmations": 1713423,
+          "sender": "0xc066ac5d385419b1a8c43a0e146fa439837a8b8c",
+          "to": "0xdb9b1e94b5b69df7e401ddbede43491141047db3",
+          "gasUsed": "645107"
+        }
+      ]
+    },
+    {
+      "id": "BUILD-DEMO-001-solana-devnet-swap",
+      "action": "swap",
+      "network": "solana-devnet",
+      "chain": "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1",
+      "endpoint": "https://api.devnet.solana.com",
+      "status": "VERIFIED",
+      "transactions": [
+        {
+          "role": "swap",
+          "id": "5Aoo6QX3b7rh3wAX5fxY8ybx7R7k1VgrT95QhuAf5HNF2zNiaCVAoTZtus3HbdwtZthSY9BiMKWiJRVQc67dLCbB",
+          "status": "VERIFIED",
+          "checks": {
+            "finalizedWithoutError": true,
+            "signature": true,
+            "recordedSlot": true,
+            "ownerSigned": true
+          },
+          "slot": 506389990,
+          "blockTime": 1790885251,
+          "fee": 5000
+        }
+      ]
+    },
+    {
+      "id": "BUILD-015-solana-devnet-orca-position",
+      "action": "add_liquidity",
+      "network": "solana-devnet",
+      "chain": "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1",
+      "endpoint": "https://api.devnet.solana.com",
+      "status": "VERIFIED",
+      "transactions": [
+        {
+          "role": "open",
+          "id": "4NmXs8NoB6KW8jzPesDRZqDcQ26QS4crkF13jN9kNkbPxUf4W8FDitGy3ywaNKBaVTUQM9HcLYLpvJQhvW8LaLJJ",
+          "status": "VERIFIED",
+          "checks": {
+            "finalizedWithoutError": true,
+            "signature": true,
+            "recordedSlot": true,
+            "ownerSigned": true
+          },
+          "slot": 506426965,
+          "blockTime": 1790893924,
+          "fee": 10000
+        },
+        {
+          "role": "decrease-partial",
+          "id": "5HQGjFbb1jbwNCEvm2fZM3oKZVQvqQ879Q1vDLumCGJF8RDX5t8KaEmFaXnRhNvvP73uiwzrEKwg88EA3r3oNHPa",
+          "status": "VERIFIED",
+          "checks": {
+            "finalizedWithoutError": true,
+            "signature": true,
+            "recordedSlot": true,
+            "ownerSigned": true
+          },
+          "slot": 506427731,
+          "blockTime": 1790894104,
+          "fee": 5000
+        },
+        {
+          "role": "exit",
+          "id": "8MAvfVGXXo6mMcfkuikKnHmTfQ6S37Y5oPh6F7sdVJSNeNSgFZyFsGp1WpoonHHrAPLRWKzaQtq2zgCu1hzfZTV",
+          "status": "VERIFIED",
+          "checks": {
+            "finalizedWithoutError": true,
+            "signature": true,
+            "recordedSlot": true,
+            "ownerSigned": true
+          },
+          "slot": 506428344,
+          "blockTime": 1790894248,
+          "fee": 5000
+        }
+      ]
+    },
+    {
+      "id": "P0-solana-devnet-swap-to-orca-position",
+      "action": "swap_then_add_liquidity",
+      "network": "solana-devnet",
+      "chain": "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1",
+      "endpoint": "https://api.devnet.solana.com",
+      "status": "VERIFIED",
+      "transactions": [
+        {
+          "role": "swap",
+          "id": "3ojh2zrxqWLjyvqSwXJ7EhuaRYr56bjisTLMzHQYoNB6cpd2nYuuz2fvzcFR2biaaiPC7bRYMj88DVBLrWTj3t57",
+          "status": "VERIFIED",
+          "checks": {
+            "finalizedWithoutError": true,
+            "signature": true,
+            "recordedSlot": true,
+            "ownerSigned": true
+          },
+          "slot": 510782908,
+          "blockTime": 1791932165,
+          "fee": 13468
+        },
+        {
+          "role": "position",
+          "id": "GFfk88a4aswnNLCNB7sqe3NMM3qbr9T9UyD6JHYtZxEPcP9gbQsvHKHB8hxD5jFp775W8M7FQmptemV4aygMohn",
+          "status": "VERIFIED",
+          "checks": {
+            "finalizedWithoutError": true,
+            "signature": true,
+            "recordedSlot": true,
+            "ownerSigned": true
+          },
+          "slot": 510789352,
+          "blockTime": 1791933709,
+          "fee": 24460
+        }
+      ]
+    }
+  ]
+}
