@@ -437,3 +437,135 @@ COMMIT;
 `forward-compatibility.pg.test.ts` runs exactly this block (read from this document): on 0014 it restores the v13 catalog exactly (the referential
 triggers on `learning_subjects` go with the tables), the v13 build then sees its exact schema, and 0014 can be applied again; on a tampered or later
 ledger it refuses and changes nothing.
+
+## 9. Certificate 0015_workflow_runs
+
+Written by BUILD-CHAT-E2E-001 one release ahead of its migration. **Release A** is the certificate alone (the `CERTIFIED_FORWARD_MIGRATIONS` entry, the
+fixture `packages/cloud-runtime/test/fixtures/0015_workflow_runs.sql`, this section and the `forward-compatibility` tests); **Release B** ships the
+migration and workflow runs (off by default: `FLOFI_WORKFLOW_RUNS`).
+
+**Identity.** `packages/cloud-runtime/migrations/0015_workflow_runs.sql`: 14,967 bytes, git blob `818bc3ef`, SHA-256
+`5dfefcf7465d874da5880ae5a082f7f47e28ede51adfdef46dbbe3e3f7ba945f`. Assessed against the v14 build (`base`: `14 learning_automatic 624884d9…`).
+
+**What it creates and changes** (the catalog diff in `forward-compatibility.pg.test.ts` lists every item):
+
+* new tables `workflow_runs`, `workflow_run_steps`, `workflow_run_events` with their checks, indexes, forward-only triggers and functions;
+* **changes to pre-existing relations** (unlike 0012–0014): `delegated_authorizations.rule_id`, `delegated_executions.rule_id` and
+  `delegated_executions.occurrence_id` become nullable; each table gains a nullable `workflow_run_id`, an exclusive-source check, a foreign key to
+  `workflow_runs`, a uniqueness rule and a column-scoped trigger that fires only when `workflow_run_id` itself is written; the foreign keys of
+  `workflow_runs` add PostgreSQL's internal referential triggers on `tenants` and `mcp_handoffs`. No pre-existing function, trigger or index is redefined.
+
+**Why the v14 build is unaffected.** v14 code never names a 0015 object. Every row it writes has a rule (and occurrence) and a null
+`workflow_run_id`, so it satisfies every new check; it never updates `workflow_run_id`, so the new trigger never fires for it. A v14 process could
+only read a row with a null rule if a Release B process created a delegated workflow run, which needs `FLOFI_DELEGATION` and a signer provider —
+off in standard production. **Do not enable delegated workflow runs until every process runs Release B.**
+
+**Locks while it is open** (observed with `pg_locks`): `delegated_authorizations` and `delegated_executions` in `AccessExclusiveLock` (every delegated
+read or write waits), `mcp_handoffs` and `tenants` in `ShareRowExclusiveLock` (approval-handoff writes and a brand-new tenant wait). Cold starts,
+runs, journals, the queue and handoff reads proceed. Its own waits are bounded by `SET LOCAL lock_timeout = '5s'`.
+
+**Duration** (`migration-0015-scale.pg.test.ts`, 2026-10-22). Measured on loopback PostgreSQL 18.6 (the CI-pinned image) on a WSL2 workstation,
+with default durability. Each database held N synthetic v14 delegated lineages: delegated rule → occurrence → authorization → revision →
+execution → budget entry. "Blocked" is how long each lock is held, from acquisition to commit:
+
+| Lineages | Delegated tables | Total | Delegated `ALTER`s | Handoff/tenant writes blocked | Delegated reads/writes blocked | §9.3 reversal | Re-application |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 0 | 80 KB | 28 ms | 4 ms | 21 ms | 9 ms | 11 ms | 21 ms |
+| 10,000 | 13 MB | 40 ms | 17 ms | 33 ms | 21 ms | 18 ms | 40 ms |
+| 100,000 | 140 MB | 164 ms | 132 ms | 157 ms | 145 ms | 90 ms | 188 ms |
+
+The cost is the validation scans of the new checks and foreign keys and the build of the two new unique indexes, all linear in the delegated
+tables. With no competing session, the migrator never waited on a lock: 0 ms longest observed wait, sampled about 800 times per run.
+
+Production hardware differs, so read these as orders of magnitude. Before Release B, read the production row counts
+(`SELECT count(*) FROM delegated_authorizations` and the same for `delegated_executions`). Delegation is off by default, and hosted deployments
+have no signer provider.
+
+**When it cannot get a lock.** Each lock wait is bounded by `SET LOCAL lock_timeout = '5s'`. Behind a session that holds a delegated table
+longer than that, 0015 fails with `55P03` after about 5.0 s, at every size measured. It rolls back completely: the v14 catalog, ledger and rows
+are unchanged.
+
+While it waits, it keeps the locks it already took. Approval-handoff writes, a new tenant, and delegated reads and writes queue behind it for
+up to that wait (about 4.5 s in the measurement). Runs, journals, the queue and handoff reads do not wait.
+
+A failure anywhere in the script also rolls back every earlier `ALTER`, because it is one transaction. Concurrent runners serialize on the
+runner's advisory lock and apply it exactly once. All of this is in `forward-compatibility.pg.test.ts`.
+
+### 9.1 Rollout
+
+Preconditions:
+
+- **The production schema is exactly v14 (`14 learning_automatic`).** Read it from the API's `api.starting` or `migrate.applied` log.
+- **No running build is older than Release A.** On 2026-10-22, flofi.xyz served `616598f`. Its `cloud-runtime` is identical to `7a844d2`,
+  certified up to 0014 only, so it refuses a v15 database.
+
+Order:
+
+1. **Release A everywhere.** Railway `flofi-api` (its pre-deploy `migrate` changes nothing at v14), Railway `flofi-worker`, the Vercel
+   Production deployment promoted to flofi.xyz, and operator CLIs.
+2. **Apply 0015 while Release A serves.** Deploy Release B to Railway `flofi-api` first. Its pre-deploy logs `migrate.applied versions=15`, then
+   check `/readyz`. The worker and Vercel keep running Release A, which serves v15 under this certificate.
+3. **Release B on `flofi-worker`.** If Railway deploys both services from one `main` push, a Release B worker that starts before the
+   migration exits with `SCHEMA_NOT_MIGRATED` and is restarted (`restartPolicyType: ALWAYS`) until 0015 lands. If 0015 fails, roll the worker
+   back to Release A.
+4. **Promote Release B on Vercel Production.** The project has `autoAssignCustomDomains: false`, so building from `main` does not change
+   flofi.xyz.
+5. **Keep workflow runs off.** `FLOFI_WORKFLOW_RUNS` stays unset until the owner enables it.
+
+**Previews share the production database.** On 2026-10-22 Vercel's `DATABASE_URL` targeted Preview and Production together, and Previews have
+no `API_BASE_URL`, so they run the embedded backend on production data. A Release B Preview created before 0015 fails closed:
+`SCHEMA_NOT_MIGRATED`, writing nothing; only the Copilot-settings fallback reads. After 0015:
+
+- Previews of builds older than Release A refuse the database (`MIGRATION_HISTORY_MISMATCH`);
+- Release B Previews read and write production data, as every Preview already does. With `FLOFI_WORKFLOW_RUNS` unset they refuse sequences.
+
+Isolating the Preview database is a separate security task.
+
+The Vercel build migrates only with `FLOFI_MIGRATE_ON_BUILD=preview`, which is set only for two old branches, and this branch's build refuses
+a non-dedicated database (`PREVIEW_DATABASE_NOT_DEDICATED`). An older runner never changes a newer database: it is a no-op under its
+certificate and fails closed without one.
+
+### 9.2 Recovery and rollback
+
+| Situation | Safe action |
+| --- | --- |
+| Before 0015 is applied | Any rollback to Release A or later is safe. |
+| 0015 fails to apply (lock timeout, error) | Nothing changed (one transaction). The API keeps its previous deployment, because the pre-deploy failed. Keep, or roll back, the worker and Vercel on Release A, since Release B refuses v14. Redeploy the API once the blocking session ends. |
+| 0015 applied; Release B misbehaves | Unset `FLOFI_WORKFLOW_RUNS`, or roll back to Release A (it serves on 0015). |
+| 0015 applied; a build **older than Release A** | **Unsafe**: it refuses the database (`MIGRATION_HISTORY_MISMATCH`). |
+| 0015 itself must go (last resort) | §9.3, only with Release A serving everywhere and no delegated workflow-run authorization. |
+
+### 9.3 Emergency reversal of 0015 (last resort)
+
+Destroys every workflow run. Refuses — changing nothing — unless 0015 is the newest, certified migration and no delegated authorization or execution
+has a workflow run as its source:
+
+```sql
+BEGIN;
+SET LOCAL lock_timeout = '5s';
+DO $$
+BEGIN
+  IF (SELECT count(*) FROM schema_migrations WHERE version >= 15) <> 1 THEN
+    RAISE EXCEPTION 'REVERSAL_REFUSED: 0015 is not the newest migration';
+  END IF;
+  DELETE FROM schema_migrations WHERE version = 15 AND name = 'workflow_runs'
+    AND sha256 = '5dfefcf7465d874da5880ae5a082f7f47e28ede51adfdef46dbbe3e3f7ba945f';
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'REVERSAL_REFUSED: not the certified 0015';
+  END IF;
+  IF EXISTS (SELECT 1 FROM delegated_authorizations WHERE workflow_run_id IS NOT NULL) OR EXISTS (SELECT 1 FROM delegated_executions WHERE workflow_run_id IS NOT NULL) THEN
+    RAISE EXCEPTION 'REVERSAL_REFUSED: delegated workflow runs exist';
+  END IF;
+END $$;
+DROP TRIGGER delegated_executions_source_immutable ON delegated_executions;
+DROP TRIGGER delegated_authorizations_source_immutable ON delegated_authorizations;
+DROP FUNCTION delegated_workflow_run_source_immutable();
+DROP INDEX delegated_executions_one_per_run;
+ALTER TABLE delegated_executions DROP CONSTRAINT delegated_executions_workflow_run, DROP CONSTRAINT delegated_executions_source, DROP COLUMN workflow_run_id,
+  ALTER COLUMN occurrence_id SET NOT NULL, ALTER COLUMN rule_id SET NOT NULL;
+ALTER TABLE delegated_authorizations DROP CONSTRAINT delegated_authorizations_workflow_run_owner, DROP CONSTRAINT delegated_authorizations_workflow_run,
+  DROP CONSTRAINT delegated_authorizations_source, DROP COLUMN workflow_run_id, ALTER COLUMN rule_id SET NOT NULL;
+DROP TABLE workflow_run_events, workflow_run_steps, workflow_runs;
+DROP FUNCTION workflow_run_transition(), workflow_run_step_transition(), workflow_run_append_only();
+COMMIT;
+```
