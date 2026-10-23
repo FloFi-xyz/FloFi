@@ -384,6 +384,7 @@ does not start another run. Green CI alone is not certification: it is MOCKED/lo
 | --- | --- | --- | --- | --- |
 | B1 | Critical (product) | No real-funds row is certified (40 implemented rows) | No owner-signed mainnet execution has ever been made | Owner-run batches T3–T5 under explicit limits (§8) |
 | B2 | Critical (product) | Not demonstrated with independent customers | Every execution was signed by the owner's own wallets | Permissionless journey P (§8) on `flofi.xyz` |
+| B0 | High (CI) | CircleCI `Dependency audit` fails on every branch, `main` included | GHSA-mrhx-c7xc-m3w5 (high) against `zod < 4.6.6`, a dependency of the MCP SDK; found by this PR's first pipeline (job 250) | PR #117 (`zod` 4.6.6 by exact override, graph pin updated; [security note](BUILD-FLOFI-UNIVERSAL-E2E-001-DEPENDENCY-SECURITY.md)). This branch is stacked on it: merge #117 first |
 | B3 | High | The fixes in this PR are not in production | `flofi.xyz` serves `78ea792` | Owner review, merge, promotion (§11) |
 | B4 | High | Never-executed testnet paths: Ethereum Sepolia (7 rows), the Base Sepolia → Arbitrum Sepolia bridge, the lending composition, the Solana Devnet transfer | No public run was made | Batches T1 and T2 |
 | B5 | High | One-authorization (delegated) workflows are unavailable in production | No KMS/HSM signer provider (`DELEGATED_SIGNER_UNAVAILABLE`); templates exist only for Uniswap swaps on two testnets | A reviewed custody design. Out of scope here (no custody change allowed) |
@@ -425,6 +426,7 @@ the docs and a read-only script.
 
 ## 12. Deviations and limits of this build
 
+- The dependency fix is a separate PR (#117) because it is a different, security-gated change. This build is stacked on it.
 - Real transactions were not submitted (release rules; owner authorization is required). The live certification is a plan (§8), not
   evidence.
 - Remote CI covers the PostgreSQL and database-backed browser suites that could not run locally. Fork suites run in CircleCI as usual.
