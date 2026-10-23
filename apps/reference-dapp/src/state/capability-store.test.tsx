@@ -66,4 +66,12 @@ describe('shared reactive wallet environment source', () => {
     fixture.jupiter.session = { chain: 'solana:devnet', account: { chains: ['solana:devnet'] } };
     expect(readSource().walletEnvironment).toBe('testnet');
   });
+  // BUILD-FLOFI-UNIVERSAL-E2E-001: wallet namespaces never cross. An EVM workflow is not reviewed against the only connected Solana session.
+  it.each(['eip155:84532', 'eip155:8453', 'eip155:42161', 'eip155:1', 'eip155:4663', 'eip155:11155111'])('keeps an EVM workflow on %s on the EVM wallet when only Solana is connected', chain => {
+    fixture.nodes = [{ chainId: 'mock:local', actionType: 'mock-read' }, { chainId: chain, actionType: 'asset.swap.exact-input' }];
+    fixture.jupiter.session = { chain: 'solana:mainnet', account: { chains: ['solana:mainnet'] } };
+    expect(readSource()).toMatchObject({ walletKind: 'evm', walletChain: null, walletEnvironment: 'unknown' });
+    fixture.nodes = [{ chainId: 'mock:local', actionType: 'mock-read' }];
+    expect(readSource()).toMatchObject({ walletKind: 'solana', walletEnvironment: 'mainnet' });
+  });
 });

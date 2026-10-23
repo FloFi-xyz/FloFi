@@ -28,8 +28,10 @@ export function useExecutionEnvironment() {
   const solanaWorkflow = workflow.nodes.some(node => node.chainId.startsWith('solana:')) ||
     Boolean(jupiter.recovered && jupiter.record && workflow.nodes.every(node => node.actionType.startsWith('mock-')));
   // BUILD-SOLANA-TRANSFER-UX-001: a Solana workflow is always reviewed against the Solana session (or none): a connected EVM wallet never
-  // stands in for its signer.
-  const walletKind = solanaWorkflow || jupiter.session && !wallet.account ? 'solana' : 'evm';
+  // stands in for its signer. BUILD-FLOFI-UNIVERSAL-E2E-001: the same holds the other way: an EVM workflow is reviewed against the EVM
+  // wallet (or none), never against a Solana session that happens to be the only connected wallet.
+  const evmWorkflow = !solanaWorkflow && workflow.nodes.some(node => node.chainId.startsWith('eip155:'));
+  const walletKind = solanaWorkflow || !evmWorkflow && jupiter.session && !wallet.account ? 'solana' : 'evm';
   const walletChain = walletKind === 'solana'
     ? jupiter.session?.account.chains.includes(jupiter.session.chain) ? jupiter.session.chain : null
     : wallet.account ? wallet.chainId : null;

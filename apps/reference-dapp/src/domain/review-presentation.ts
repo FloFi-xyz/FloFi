@@ -29,6 +29,22 @@ export function reviewedManifest(value: unknown): StrategyManifest | null {
   if (!value) return null;
   try { validateArtifact('strategy-manifest', value); return value as StrategyManifest; } catch { return null; }
 }
+export const unboundAuthorization = (): ReviewAuthorization => ({ key: null, manifest: null, policy: null, owner: null, chain: null, ready: false, accepted: false,
+  approve: null, approvals: [], tokens: [], limits: [], technical: null });
+const FORK_RUNTIMES: readonly SimulationSource['kind'][] = ['fork-swap', 'fork-pool', 'composition', 'delegated-swap'];
+/**
+ * BUILD-FLOFI-UNIVERSAL-E2E-001: the Review a surface may present for `workflow`. A Review that is not this workflow's own is never shown or
+ * approvable: its runtime's run is retired (another workflow, an edit, another wallet, a restored proposal), or its network is none of the
+ * workflow's networks (a Solana Mainnet manifest for a Base Sepolia workflow). Its key, manifest, policy, tokens, limits and approvals are
+ * dropped, so the surface asks for this workflow's own fresh simulation. Local fork runtimes review on the fork's chain (31337) by design.
+ */
+export function workflowBoundAuthorization(authorization: ReviewAuthorization, workflow: Workflow, source: SimulationSource): ReviewAuthorization {
+  if ('retired' in source.state && source.state.retired) return unboundAuthorization();
+  const chain = authorization.chain ?? reviewedManifest(authorization.manifest)?.owner.chainId ?? null;
+  const bound = (authorization.boundWorkflow ?? workflow) as Workflow;
+  const networks = new Set([...workflow.nodes, ...bound.nodes].filter(node => !node.actionType.startsWith('mock-')).map(node => node.chainId));
+  return chain && networks.size && !networks.has(chain) && !FORK_RUNTIMES.includes(source.kind) ? unboundAuthorization() : authorization;
+}
 function reviewedPolicy(value: unknown): AuthorizationPolicy | null {
   if (!value) return null;
   try { validateArtifact('authorization-policy', value); return value as AuthorizationPolicy; } catch { return null; }

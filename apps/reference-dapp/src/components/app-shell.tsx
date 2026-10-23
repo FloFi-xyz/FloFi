@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
-import { ownerWalletSwapServes } from '../domain/public-testnet-swap';
+import { selectOwnerRuntime } from '../domain/runtime-selection';
 import { BASE_MAINNET } from '@defi-workflow-engine/action-registry';
 import { useLocale } from '../i18n/locale';
 
@@ -8,7 +8,6 @@ import { WithdrawPanel } from './withdraw-panel';
 import { RobinhoodTransferPanel } from './robinhood-transfer-panel';
 import { SolanaTransferPanel } from './solana-transfer-panel';
 import { useSolanaTransfer } from '../state/solana-transfer-store';
-import { isSolanaTransferNode } from '@defi-workflow-engine/workflow-contracts';
 import { useRobinhoodTransfer } from '../state/robinhood-transfer-store';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ToolboxMode } from '../domain/canvas-layout';
@@ -47,6 +46,7 @@ import { useExecutionStart } from '../state/execution-start';
 import { restoredLocalExecutionKind } from '../domain/execution-recovery';
 import { currentExecution } from '../domain/execution-result';
 import { ReviewAuthorizationDetails } from './review-workspace';
+import { workflowBoundAuthorization } from '../domain/review-presentation';
 import { useReviewAuthorization } from '../state/review-authorization';
 import { useWalletConnection, walletNetworkTarget } from '../state/wallet-connection';
 import { SummaryBar } from './summary-bar';
@@ -61,7 +61,7 @@ import { useWorkflowCapability } from '../state/capability-store';
 import { usePublicTestnet } from '../state/public-testnet-store';
 import { PublicTestnetPanel } from './public-testnet-panel';
 
-import {isLendingComposition, type SemanticWorkflow} from '@defi-workflow-engine/workflow-contracts';
+import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import {useLending} from '../state/lending-store';
 import {LendingPanel} from './lending-panel';
 import { useSupply } from '../state/supply-store';
@@ -73,13 +73,11 @@ import { JupiterPanel } from './jupiter-panel';
 import { SolanaLiquidityPanel } from './solana-liquidity-panel';
 import { SolanaCompositionPanel } from './solana-composition-panel';
 import { useSolanaComposition } from '../state/solana-composition-store';
-import { isBoundComposition } from '@defi-workflow-engine/action-registry';
 import { useSolanaLiquidity } from '../state/solana-liquidity-store';
 import { UniswapLiquidityPanel } from './uniswap-liquidity-panel';
 import { useUniswapLiquidity } from '../state/uniswap-liquidity-store';
 import { RouterPanel } from './router-panel';
 import { useRouter } from '../state/router-store';
-import { routerDetails } from '../domain/router-authoring';
 import { DashboardWorkspace } from './dashboard/dashboard-workspace';
 import { dashboardRoute as resolveDashboardRoute } from '../lib/dashboard/routes';
 import { secondaryWorkspaceRoute } from '../domain/secondary-workspaces';
@@ -171,46 +169,33 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
 
   const [workspaceToolboxMode, setWorkspaceToolboxMode] = useState<ToolboxMode>('top');
   const supply = useSupply();
-  const transfer = useRobinhoodTransfer(), solanaTransfer = useSolanaTransfer();
-  // BUILD-SOLANA-TRANSFER-UX-001: a Solana transfer (or its recovered run) has its own runtime; the EVM transfer runtime never receives it.
-  const solanaTransferPath = state.workflow.nodes.some(isSolanaTransferNode) ||
-    Boolean(recoveryShell && solanaTransfer.recovered && solanaTransfer.record && state.workflow.revision === 0 && state.workflow.nodes.every(n => n.actionType.startsWith('mock-')));
-  // RH-DEMO-001: the transfer node, or a persisted run recovered after reload while the workflow is still the untouched template.
-  const transferPath = !solanaTransferPath && (state.workflow.nodes.some(n => n.actionType === 'asset.transfer') || Boolean(recoveryShell && transfer.record && state.workflow.nodes.every(n => n.actionType.startsWith('mock-')) && state.workflow.revision === 0));
-  const lending=useLending(),lendingPath=isLendingComposition(state.workflow)||Boolean(recoveryShell&&lending.recovered&&lending.record&&!lending.retired);
-  const withdrawPath=state.workflow.nodes.some(n=>n.actionType==='withdraw')||Boolean(recoveryShell&&supply.recovered&&supply.record?.review.withdraw);
-  const repayPath=state.workflow.nodes.some(n=>n.actionType==='repay')||Boolean(recoveryShell&&supply.recovered&&supply.record?.review.repay);
-  const borrowPath=state.workflow.nodes.some(n=>n.actionType==='borrow')||Boolean(recoveryShell&&supply.recovered&&supply.record?.review.borrow);
-  const supplyPath = state.workflow.nodes.some(n => n.actionType === 'supply') || Boolean(recoveryShell && supply.recovered && supply.record);
-  const jupiter = useJupiter();
-  const solanaLiquidity = useSolanaLiquidity();
-  const uniswapLiquidity = useUniswapLiquidity();
-  // BUILD-UNISWAP-LIQUIDITY-PUBLIC: the canonical position on Base Sepolia, or a recovered run while the workflow is the untouched template.
-  // BUILD-ETHEREUM-001 adds Ethereum Sepolia; BUILD-RH-002 adds Robinhood Chain (catalog pairs, real funds) on the same panel.
-  const uniswapLiquidityPath = !supplyPath && (state.workflow.nodes.some(n => n.actionType === 'asset.liquidity.concentrated' && ['eip155:84532', 'eip155:11155111', 'eip155:4663', 'eip155:8453'].includes(n.chainId)) ||
-    Boolean(recoveryShell && uniswapLiquidity.recovered && uniswapLiquidity.record && state.workflow.revision === 0 && state.workflow.nodes.every(n => n.actionType.startsWith('mock-'))));
-  const routerState = useRouter();
-  // BUILD-ROUTER-001: the canonical cross-chain bridge node, or a recovered run while the workflow is the untouched template.
-  const routerPath = state.workflow.nodes.some(n => routerDetails(n)) ||
-    Boolean(recoveryShell && routerState.recovered && routerState.record && state.workflow.revision === 0 && state.workflow.nodes.every(n => n.actionType.startsWith('mock-')));
-  // Solana Devnet Swap → Orca liquidity (a registered bound composition), or its recovered run; checked before the isolated Solana paths.
-  const solanaComposition = useSolanaComposition();
-  const solanaCompositionPath = !supplyPath && (isBoundComposition(state.workflow) || Boolean(recoveryShell && solanaComposition.recovered && solanaComposition.record));
-  const solanaLiquidityPath = !supplyPath && !solanaCompositionPath && !uniswapLiquidityPath && (state.workflow.nodes.some(n => n.actionType === 'asset.liquidity.concentrated' && n.chainId.startsWith('solana:')) || Boolean(recoveryShell && solanaLiquidity.recovered && solanaLiquidity.record));
-  const solanaPath = !supplyPath && !solanaCompositionPath && !solanaLiquidityPath && (state.workflow.nodes.some(n => n.actionType === 'asset.swap.exact-input' && n.chainId.startsWith('solana:')) || Boolean(recoveryShell && jupiter.recovered && jupiter.record));
+  const transfer = useRobinhoodTransfer(), solanaTransfer = useSolanaTransfer(), lending = useLending(), jupiter = useJupiter();
+  const solanaLiquidity = useSolanaLiquidity(), uniswapLiquidity = useUniswapLiquidity(), routerState = useRouter(), solanaComposition = useSolanaComposition();
   const publicTestnet = usePublicTestnet();
-  // The shared owner-wallet Uniswap swap: the testnet pairs and (BUILD-RH-002, BUILD-BASE-001) catalog-network swaps. Base USDC ⇄ WETH joins it
-  // only where Base mainnet swaps are enabled and no local fork runtime is available; otherwise it keeps its BUILD-002 paths.
-  const baseReferenceServed = publicTestnet.catalogAvailable(BASE_MAINNET.chain) && !info?.available;
-  // The existing engineering compositions own their full graph; adding an
-  // Arbitrum swap profile must not route their destination swap as an isolated run.
-  const legacyComposition = state.workflow.nodes.some(node => node.nodeId === 'build009-bridge' || node.actionType === 'asset.liquidity.prepare');
-  const testnetWorkflow = !legacyComposition && state.workflow.nodes.some(node => ownerWalletSwapServes(node, baseReferenceServed));
-  const publicRecovery = Boolean(recoveryShell && publicTestnet.recoveryOnly && publicTestnet.run);
-  const continuedApproval = Boolean(publicTestnet.run && !publicTestnet.retired &&
-    publicTestnet.run.attempts.at(-1)?.step === 'approval' &&
-    publicTestnet.run.attempts.at(-1)?.state === 'CONFIRMED');
-  const publicPath = testnetWorkflow || publicRecovery || continuedApproval;
+  // BUILD-FLOFI-UNIVERSAL-E2E-001: the runtime that serves this workflow comes from its own actions and networks. A run a store recovered
+  // from this browser serves only the visit's untouched draft or exactly its own workflow, never another one (e.g. a Base Sepolia swap
+  // opened on /approve after a Solana Mainnet Jupiter run). The order is unchanged: a Solana transfer never reaches the EVM transfer
+  // runtime; Aave paths before the isolated position and Solana paths; the Solana composition before the isolated Solana paths.
+  const supplyReview = supply.record?.review;
+  const runtime = selectOwnerRuntime(state.workflow, { recoveryShell,
+    solanaTransfer: { recovered: solanaTransfer.recovered, workflow: solanaTransfer.record?.review.workflow ?? null },
+    // RH-DEMO-001: the transfer store has no recovery flag; its persisted run still attaches only to the untouched template.
+    transfer: { recovered: Boolean(transfer.record), workflow: transfer.record?.review.workflow ?? null },
+    lending: { recovered: lending.recovered, workflow: lending.record?.reviews[0]?.workflow ?? null },
+    supply: { recovered: supply.recovered, workflow: supplyReview?.workflow ?? null,
+      operation: !supplyReview ? null : supplyReview.withdraw ? 'withdraw' : supplyReview.repay ? 'repay' : supplyReview.borrow ? 'borrow' : 'supply' },
+    uniswapLiquidity: { recovered: uniswapLiquidity.recovered, workflow: uniswapLiquidity.record?.workflow ?? null },
+    router: { recovered: routerState.recovered, workflow: routerState.record?.workflow ?? null },
+    solanaComposition: { recovered: solanaComposition.recovered, workflow: solanaComposition.record?.record.review.workflow ?? null },
+    solanaLiquidity: { recovered: solanaLiquidity.recovered, workflow: solanaLiquidity.record?.review.workflow ?? null },
+    jupiter: { recovered: jupiter.recovered, workflow: jupiter.record?.review.workflow ?? null },
+    publicSwap: { recoveryOnly: publicTestnet.recoveryOnly, workflow: publicTestnet.run?.workflow ?? null,
+      continuedApproval: Boolean(publicTestnet.run && !publicTestnet.retired && publicTestnet.run.attempts.at(-1)?.step === 'approval' && publicTestnet.run.attempts.at(-1)?.state === 'CONFIRMED') },
+    // The shared owner-wallet Uniswap swap: the testnet pairs and (BUILD-RH-002, BUILD-BASE-001) catalog-network swaps. Base USDC ⇄ WETH joins
+    // it only where Base mainnet swaps are enabled and no local fork runtime is available; otherwise it keeps its BUILD-002 paths.
+    baseReferenceServed: publicTestnet.catalogAvailable(BASE_MAINNET.chain) && !info?.available });
+  const { routerPath, solanaTransferPath, transferPath, lendingPath, withdrawPath, repayPath, borrowPath, supplyPath, uniswapLiquidityPath,
+    solanaCompositionPath, solanaLiquidityPath, solanaPath, publicPath } = runtime;
   const [selectedId, select] = useState<string | null>(null);
   const [inspectorExpanded, setInspectorExpanded] = useState(false);
   const selectAction = useCallback((id: string | null) => {
@@ -238,16 +223,16 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     capability.executionSupported && forkExecution);
   // Select the same runtime as the existing Simulate surface; presentation never changes its gates.
   const restoredLocalKind = restoredLocalExecutionKind(state.workflow, recoveryShell ? { composition: composition.recoveryOnly, liquidity: liquidity.recoveryOnly, cow: cow.recoveryOnly } : { composition: false, liquidity: false, cow: false });
-  let simulationSource: SimulationSource = routerPath ? { kind: 'router', state: routerState }
-    : solanaTransferPath ? { kind: 'solana-transfer', state: solanaTransfer }
-    : transferPath ? { kind: 'transfer', state: transfer }
-    : lendingPath ? { kind: 'lending', state: lending }
-    : supplyPath || borrowPath || repayPath || withdrawPath ? { kind: 'supply', state: supply }
-    : uniswapLiquidityPath ? { kind: 'uniswap-pool', state: uniswapLiquidity }
-    : solanaCompositionPath ? { kind: 'solana-composition', state: solanaComposition }
-    : solanaLiquidityPath ? { kind: 'solana-pool', state: solanaLiquidity }
-    : solanaPath ? { kind: 'solana-swap', state: jupiter }
-    : publicPath ? { kind: 'public', state: publicTestnet }
+  let simulationSource: SimulationSource = runtime.kind === 'router' ? { kind: 'router', state: routerState }
+    : runtime.kind === 'solana-transfer' ? { kind: 'solana-transfer', state: solanaTransfer }
+    : runtime.kind === 'transfer' ? { kind: 'transfer', state: transfer }
+    : runtime.kind === 'lending' ? { kind: 'lending', state: lending }
+    : runtime.kind === 'supply' ? { kind: 'supply', state: supply }
+    : runtime.kind === 'uniswap-pool' ? { kind: 'uniswap-pool', state: uniswapLiquidity }
+    : runtime.kind === 'solana-composition' ? { kind: 'solana-composition', state: solanaComposition }
+    : runtime.kind === 'solana-pool' ? { kind: 'solana-pool', state: solanaLiquidity }
+    : runtime.kind === 'solana-swap' ? { kind: 'solana-swap', state: jupiter }
+    : runtime.kind === 'public' ? { kind: 'public', state: publicTestnet }
     : crossChainWorkflow ? { kind: 'unavailable', state: { error: null, busy: false } }
     : acrossWorkflow || across.run ? { kind: 'across', state: across }
     : bridgeSwapWorkflow ? { kind: 'unavailable', state: bridgeSwap }
@@ -264,6 +249,9 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   if (restoredBinding.epoch !== restorationEpoch) setRestoredBinding({ epoch: restorationEpoch, key: reviewBinding.authorization.key });
   if (restorationEpoch > 0 && (restoredBinding.epoch !== restorationEpoch || restoredBinding.key === reviewBinding.authorization.key))
     simulationSource = { ...simulationSource, state: { ...simulationSource.state, retired: true } } as SimulationSource;
+  // BUILD-FLOFI-UNIVERSAL-E2E-001: every surface (Canvas Review, Execute, the /approve signing surface) presents and approves only this
+  // workflow's own Review; a retired or other-network Review is dropped, never shown beside this workflow.
+  const authorization = workflowBoundAuthorization(reviewBinding.authorization, state.workflow, simulationSource);
   const executionProgress = useExecutionLifecycle(simulationSource.kind, reviewBinding.wallet);
   const recordedStart = useExecutionStart(simulationSource.kind, reviewBinding.wallet);
   // BUILD-FIX-UX-001: a final run of another (new or edited) workflow has not started this workflow's execution; its record is unchanged.
@@ -287,7 +275,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     : simulationSource.kind === 'delegated-swap' ? modeB.prepare
     : simulationSource.kind === 'composition' ? composition.prepare
     : openSimulationControls;
-  const embeddedReview = <ReviewAuthorizationDetails workflowName={workflowName} workflow={state.workflow} context={context} source={simulationSource} authorization={reviewBinding.authorization} wallet={reviewBinding.wallet} invalidWorkflow={Boolean(reviewError)} backToBuild={() => setTab('Build')}/>;
+  const embeddedReview = <ReviewAuthorizationDetails workflowName={workflowName} workflow={state.workflow} context={context} source={simulationSource} authorization={authorization} wallet={reviewBinding.wallet} invalidWorkflow={Boolean(reviewError)} backToBuild={() => setTab('Build')}/>;
   const simulationDisabled = authoringIncomplete || approvalGate || simulationSource.kind === 'unavailable' ||
     ('available' in simulationSource.state && simulationSource.state.available === false) ||
     ('info' in simulationSource.state && simulationSource.state.info?.available === false);
@@ -297,14 +285,14 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   const walletConnection = useWalletConnection();
   const walletIssue = approvalWallet && signer && !sameAccount(approvalWallet, signer)
     ? tr('This proposal was loaded for {0}. Switch your wallet to that account to authorize it.', shortAccount(approvalWallet)) : null;
-  const requiredSigningChain = !('retired' in simulationSource.state && simulationSource.state.retired) && reviewBinding.authorization.chain
+  const requiredSigningChain = !('retired' in simulationSource.state && simulationSource.state.retired) && authorization.chain
     || state.workflow.nodes.find(node => !node.actionType.startsWith('mock-'))?.chainId;
   const networkTarget = walletNetworkTarget(requiredSigningChain);
   const networkAction = signer && requiredSigningChain && networkTarget && reviewBinding.wallet.chain !== requiredSigningChain ? {
     label: tr('Switch to {0}', networkTarget.label), disabled: Boolean(simulationSource.state.busy || approvalGate || walletIssue),
     request: () => void walletConnection.switchNetwork(requiredSigningChain),
   } : undefined;
-  const lifecycleState = { workflow: state.workflow, context, source: simulationSource, authorization: reviewBinding.authorization,
+  const lifecycleState = { workflow: state.workflow, context, source: simulationSource, authorization: authorization,
     wallet: reviewBinding.wallet, execution: executionStart, progress: executionProgress, recovery: executionProgress.recovery,
     invalidWorkflow: Boolean(reviewError || authoringIncomplete || approvalGate || walletIssue || autoPrepare && !approvalWallet) };
   const lifecycleControls = useExecutionControls(lifecycleState);
@@ -318,7 +306,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   useEffect(() => {
     if (!prepareKey || preparedFor.current === prepareKey || simulationSource.state.busy) return;
     preparedFor.current = prepareKey;
-    if (reviewBinding.authorization.key && !reviewBinding.wallet.changed && !('retired' in simulationSource.state && simulationSource.state.retired)) return;
+    if (authorization.key && !reviewBinding.wallet.changed && !('retired' in simulationSource.state && simulationSource.state.retired)) return;
     if (surface !== 'signing') setTab('Simulate');
     void simulateAgain();
   // A proposal that arrived while its runtime was busy gets its one preparation when that request settles.
@@ -354,7 +342,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   if (authoringIncomplete && tab !== 'Build') return <div className="app-shell" inert={!interactive}><TopBar tab={tab} setTab={setTab} pathname={pathname ?? null} engineering={engineering}/><main className="main"><section className="panel stage-empty"><p>{tr("Configure the action amount in Build first.")}</p><button type="button" onClick={() => setTab('Build')}>{tr("Return to Build")}</button></section></main></div>;
   const stageContent = tab === 'Build' ? <><div className="build-grid"><WorkflowCanvas estimateOwner={solanaSession?.account.address} environment={walletEnvironment} selectedId={selectedId} select={selectAction} openSettings={openActionSettings} workflowName={workflowName} renameWorkflow={setWorkflowName} onAutomate={automationsReady ? () => { setAutomateCanvas(true); navigate?.('/app/automations'); } : undefined} onSave={() => void saveCurrentWorkflow()} onToolboxModeChange={setWorkspaceToolboxMode} primaryAction={simulateAction}/><CopilotPanel key={workflowEpoch} interactive={interactive} owner={owner} proof={proof}/></div>{verification}{saveNotice?.owner === ownerKey && <p role="status">{tr(saveNotice.message)}</p>}{library.busy && <p role="status">{tr('Saving workflow…')}</p>}{library.error && library.error !== 'WALLET_SESSION_REQUIRED' && <p role="alert">{tr(library.error === 'WORKFLOW_VERSION_CONFLICT' ? 'This workflow was updated in another session. Reopen it before saving.' : 'Workflow saving is unavailable. Try again.')}</p>}<ArtifactInspector selectedId={selectedId} select={selectAction} expanded={inspectorExpanded} onExpandedChange={setInspectorExpanded}/>
           {engineering && <EngineeringAuthoring selectedId={selectedId}><ReviewPanel/></EngineeringAuthoring>}</>
-        : tab === 'Simulate' && engineering ? routerPath ? <RouterPanel view="simulate"/> : solanaTransferPath ? <SolanaTransferPanel view="simulate"/> : transferPath ? <RobinhoodTransferPanel view="simulate"/> : lendingPath ? <LendingPanel view="simulate"/> : withdrawPath ? <WithdrawPanel view="simulate"/> : repayPath ? <RepayPanel view="simulate"/> : borrowPath ? <BorrowPanel view="simulate"/> : supplyPath ? <SupplyPanel view="simulate"/> : uniswapLiquidityPath ? <UniswapLiquidityPanel view="simulate"/> : solanaCompositionPath ? <SolanaCompositionPanel view="simulate"/> : solanaLiquidityPath ? <SolanaLiquidityPanel view="simulate"/> : solanaPath ? <JupiterPanel view="simulate"/> : publicPath ? <PublicTestnetPanel view="simulate"/> : crossChainWorkflow ? <CrossChainLiquidityPanel view="simulate"/> : acrossWorkflow || across.run ? <AcrossPanel view="simulate"/> : bridgeSwapWorkflow ? <BridgeSwapPanel view="simulate"/> : bridgeWorkflow ? <BridgePanel view="simulate"/> : <SimulatePanel engineeringOnly workflowName={workflowName}><ReviewWorkspace workflowName={workflowName} workflow={state.workflow} context={context} source={simulationSource} authorization={reviewBinding.authorization} wallet={reviewBinding.wallet} invalidWorkflow={Boolean(reviewError)} backToBuild={() => setTab('Build')} simulateAgain={simulateAgain} actionSurface="canvas" showTechnicalDetails={false}/><ObservationPanel/><ForkSimulationPanel/><ModeBPanel view="simulate"/><CompositionPanel view="simulate"/><CowPanel view="simulate"/><LiquidityPanel view="simulate"/></SimulatePanel>
+        : tab === 'Simulate' && engineering ? routerPath ? <RouterPanel view="simulate"/> : solanaTransferPath ? <SolanaTransferPanel view="simulate"/> : transferPath ? <RobinhoodTransferPanel view="simulate"/> : lendingPath ? <LendingPanel view="simulate"/> : withdrawPath ? <WithdrawPanel view="simulate"/> : repayPath ? <RepayPanel view="simulate"/> : borrowPath ? <BorrowPanel view="simulate"/> : supplyPath ? <SupplyPanel view="simulate"/> : uniswapLiquidityPath ? <UniswapLiquidityPanel view="simulate"/> : solanaCompositionPath ? <SolanaCompositionPanel view="simulate"/> : solanaLiquidityPath ? <SolanaLiquidityPanel view="simulate"/> : solanaPath ? <JupiterPanel view="simulate"/> : publicPath ? <PublicTestnetPanel view="simulate"/> : crossChainWorkflow ? <CrossChainLiquidityPanel view="simulate"/> : acrossWorkflow || across.run ? <AcrossPanel view="simulate"/> : bridgeSwapWorkflow ? <BridgeSwapPanel view="simulate"/> : bridgeWorkflow ? <BridgePanel view="simulate"/> : <SimulatePanel engineeringOnly workflowName={workflowName}><ReviewWorkspace workflowName={workflowName} workflow={state.workflow} context={context} source={simulationSource} authorization={authorization} wallet={reviewBinding.wallet} invalidWorkflow={Boolean(reviewError)} backToBuild={() => setTab('Build')} simulateAgain={simulateAgain} actionSurface="canvas" showTechnicalDetails={false}/><ObservationPanel/><ForkSimulationPanel/><ModeBPanel view="simulate"/><CompositionPanel view="simulate"/><CowPanel view="simulate"/><LiquidityPanel view="simulate"/></SimulatePanel>
         : executionSurface ? routerPath ? <RouterPanel view="execute"/> : solanaTransferPath ? <SolanaTransferPanel view="execute"/> : transferPath ? <RobinhoodTransferPanel view="execute"/> : lendingPath ? <LendingPanel view="execute"/> : withdrawPath ? <WithdrawPanel view="execute"/> : repayPath ? <RepayPanel view="execute"/> : borrowPath ? <BorrowPanel view="execute"/> : supplyPath ? <SupplyPanel view="execute"/> : uniswapLiquidityPath ? <UniswapLiquidityPanel view="execute"/> : solanaCompositionPath ? <SolanaCompositionPanel view="execute"/> : solanaLiquidityPath ? <SolanaLiquidityPanel view="execute"/> : solanaPath ? <JupiterPanel view="execute"/> : publicPath ? <PublicTestnetPanel view="execute"/> : persistedBuild009Recovery ? <BridgeSwapPanel view="execute"/> : across.recovered ? <AcrossPanel view="execute"/> :
           bridge.recoveryOnly ? <BridgePanel view="execute"/> : modeA.recoveryOnly || modeB.recoveryOnly ||
           composition.recoveryOnly || liquidity.recoveryOnly || cow.recoveryOnly ?
@@ -367,9 +355,9 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     {approvalSlot && <div className="approval-notice-slot" ref={approvalSlot}/>}
     <AutomationInbox owner={owner} proven={Boolean(owner && proof.proven === owner.address)} open={() => navigate?.('/app/automations')}/>
     <main id="workspace" className={`main workflow-workspace${tab === 'Build' ? ' build-workspace' : ''}`} data-workspace-toolbox={workspaceToolboxMode} tabIndex={-1} aria-label={tr(tab === 'Build' ? 'Workflow workspace' : tab === 'Simulate' ? 'Simulation workspace' : 'Execution workspace')}>
-      {tab === 'Execute' ? <ExecuteWorkspace controls={lifecycleControls} primaryAction={simulateAction} workflowName={workflowName} workflow={state.workflow} context={context} source={simulationSource} authorization={reviewBinding.authorization} wallet={reviewBinding.wallet} execution={executionStart} progress={executionProgress} recovery={executionProgress.recovery} invalidWorkflow={Boolean(reviewError || authoringIncomplete)} backToBuild={() => setTab('Build')} backToSimulate={() => setTab('Simulate')} startNewWorkflow={startNewWorkflow} technicalDetails={executionStart.started || executionProgress.started || recoveryPath || localCowIntent ? stageContent : undefined}/> : tab === 'Simulate' ?
+      {tab === 'Execute' ? <ExecuteWorkspace controls={lifecycleControls} primaryAction={simulateAction} workflowName={workflowName} workflow={state.workflow} context={context} source={simulationSource} authorization={authorization} wallet={reviewBinding.wallet} execution={executionStart} progress={executionProgress} recovery={executionProgress.recovery} invalidWorkflow={Boolean(reviewError || authoringIncomplete)} backToBuild={() => setTab('Build')} backToSimulate={() => setTab('Simulate')} startNewWorkflow={startNewWorkflow} technicalDetails={executionStart.started || executionProgress.started || recoveryPath || localCowIntent ? stageContent : undefined}/> : tab === 'Simulate' ?
         <SimulateWorkspace workflowName={workflowName} returnToBuild={() => setTab('Build')} simulationSource={simulationSource} review={embeddedReview} simulateAction={simulateAction}>
-          {engineering && <details className="shell-details technical-workspace simulation-technical"><summary>{tr('View technical details')}</summary><ReviewTechnicalDetails authorization={reviewBinding.authorization}/>{stageContent}</details>}
+          {engineering && <details className="shell-details technical-workspace simulation-technical"><summary>{tr('View technical details')}</summary><ReviewTechnicalDetails authorization={authorization}/>{stageContent}</details>}
         </SimulateWorkspace> : stageContent}
       <MobileBuildNavigation stage={tab === 'Build' ? 'Build' : tab === 'Simulate' ? 'Simulate' : 'Execute'}/>
       {state.error && <div className="error-banner" role="alert"><strong>{tr("Edit not applied")}</strong><span>{tr(tab !== 'Build' ? 'Review the workflow configuration in Build before simulating again.' : state.error)}</span></div>}

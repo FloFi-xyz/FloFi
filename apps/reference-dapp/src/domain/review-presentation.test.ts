@@ -5,7 +5,9 @@ import { hashArtifactBytes, type SemanticWorkflow } from '@defi-workflow-engine/
 import { validateArtifact } from '@defi-workflow-engine/workflow-contracts/schemas';
 import { editorReducer, initialEditor } from './editor';
 import { canvasAddCommand } from './canvas-authoring';
-import { projectReview, reviewedManifest, reviewApprovalCall, reviewApprovalValue } from './review-presentation';
+import { projectReview, reviewedManifest, reviewApprovalCall, reviewApprovalValue, workflowBoundAuthorization } from './review-presentation';
+import { solanaTransferReviewFixture } from '../test-utils/solana-transfer-review-fixture';
+import { initialWorkflow } from './initial-workflow';
 import { reviewFixture, reviewNow, reviewOwner, reviewSpender } from '../test-utils/review-fixture';
 const project = (f = reviewFixture(), now = reviewNow) => projectReview(f.workflow, f.context, f.source, f.authorization, f.wallet, now);
 describe('Review authorization presentation', () => {
@@ -127,5 +129,41 @@ describe('honest ERC-20 approval presentation', () => {
     const f = reviewFixture();
     const value = reviewApprovalValue({ token: reviewSpender, chain: 'eip155:9999', spender: reviewOwner, amount: '999000000', kind: 'exact' }, [], f.context);
     expect(value.value).toBe('Exactly 999000000 token units');
+  });
+});
+describe('BUILD-FLOFI-UNIVERSAL-E2E-001 workflow-bound Review', () => {
+  const unbound = { key: null, manifest: null, owner: null, chain: null, ready: false, accepted: false, approve: null, approvals: [], tokens: [], limits: [] };
+  it('drops a Solana Mainnet Review presented for a Base Sepolia workflow (the incident), with nothing approvable', async () => {
+    const base = reviewFixture(), solana = await solanaTransferReviewFixture();
+    expect(solana.authorization.chain).toBe('solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp');
+    // Unguarded, the Base Sepolia workflow's Review lists the Solana Mainnet manifest's own limits and networks.
+    expect(JSON.stringify(projectReview(base.workflow, base.context, base.source, solana.authorization, base.wallet, reviewNow).limits)).toMatch(/Solana/);
+    const bound = workflowBoundAuthorization(solana.authorization, base.workflow, base.source);
+    expect(bound).toMatchObject(unbound);
+    const view = projectReview(base.workflow, base.context, base.source, bound, base.wallet, reviewNow);
+    expect(view).toMatchObject({ canApprove: false, bindingValid: false, manifest: null });
+    expect(JSON.stringify(view)).not.toMatch(/solana|Mainnet|EPjFWdd5|Jupiter/i);
+    // The Base Sepolia Review stays exactly the same object for its own workflow, and the Solana one for its own.
+    expect(workflowBoundAuthorization(base.authorization, base.workflow, base.source)).toBe(base.authorization);
+    expect(workflowBoundAuthorization(solana.authorization, solana.workflow, solana.source)).toBe(solana.authorization);
+  });
+  it('drops a Review on every other network boundary, including mainnet ↔ testnet of one family', async () => {
+    const base = reviewFixture(), devnet = await solanaTransferReviewFixture((await import('@defi-workflow-engine/action-registry')).SOLANA_DEVNET_TRANSFER);
+    expect(workflowBoundAuthorization(devnet.authorization, (await solanaTransferReviewFixture()).workflow, devnet.source)).toMatchObject(unbound);
+    for (const chain of ['eip155:8453', 'eip155:1', 'eip155:42161', 'eip155:11155111', 'eip155:4663', 'eip155:46630', 'solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1'])
+      expect([chain, workflowBoundAuthorization({ ...base.authorization, chain }, base.workflow, base.source).key]).toEqual([chain, null]);
+  });
+  it('drops a retired Review (an edit, another workflow, another wallet or a restored proposal) but keeps recovery on the untouched draft', () => {
+    const f = reviewFixture();
+    expect(workflowBoundAuthorization(f.authorization, f.workflow, { ...f.source, state: { ...f.source.state, retired: true } } as typeof f.source)).toMatchObject(unbound);
+    expect(workflowBoundAuthorization(f.authorization, initialWorkflow(), f.source)).toBe(f.authorization);
+  });
+  it('keeps a bound position Review (the Solana composition step) and the local fork runtimes reviewed on chain 31337', () => {
+    const f = reviewFixture();
+    const other = { ...f.workflow, nodes: f.workflow.nodes.map(n => ({ ...n, chainId: 'solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1' })) };
+    expect(workflowBoundAuthorization({ ...f.authorization, boundWorkflow: f.workflow }, other, f.source).key).toBe(f.authorization.key);
+    const fork = { kind: 'fork-swap', state: { busy: false, error: null, retired: false } } as unknown as typeof f.source;
+    expect(workflowBoundAuthorization({ ...f.authorization, chain: 'eip155:31337' }, f.workflow, fork).key).toBe(f.authorization.key);
+    expect(workflowBoundAuthorization({ ...f.authorization, chain: 'eip155:31337' }, f.workflow, f.source).key).toBeNull();
   });
 });
