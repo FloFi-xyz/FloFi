@@ -55,7 +55,7 @@ export function recoveredRunAttaches(workflow: Workflow, run: HeldRun): boolean 
 export const ownerPositionNetwork = (chain: string) => uniswapLiquidityProfile(chain) !== null || uniswapCatalogDeployment(chain) !== null;
 export function selectOwnerRuntime(workflow: Workflow, signals: OwnerRuntimeSignals): OwnerRuntime {
   const nodes = workflow.nodes, recovers = (run: HeldRun) => signals.recoveryShell && recoveredRunAttaches(workflow, run);
-  // A run's record carries no recovery flag for the transfer store; it attaches only to the untouched draft, as before.
+  // BUILD-SOLANA-TRANSFER-UX-001: a Solana transfer has its own runtime; the EVM transfer runtime never receives it.
   const solanaTransferPath = nodes.some(isSolanaTransferNode) || recovers(signals.solanaTransfer);
   const transferPath = !solanaTransferPath && (nodes.some(n => n.actionType === 'asset.transfer') || recovers(signals.transfer));
   const lendingPath = isLendingComposition(workflow) || recovers(signals.lending);

@@ -1,0 +1,1631 @@
+{
+  "format": "flofi.production-capability-snapshot.v1",
+  "build": "BUILD-FLOFI-UNIVERSAL-E2E-001",
+  "statement": "Read-only snapshot of production: the FloFi Production MCP get_capabilities tool and https://flofi.xyz/api/flofi/readiness. No authentication, no write, no transaction.",
+  "readiness": {
+    "checkedAt": "2026-10-23T22:27:50.818Z",
+    "deployment": {
+      "environment": "production",
+      "hosted": true,
+      "commit": "78ea7928e6a178e16a7e20bc130646bd59aa16e2",
+      "branch": "main",
+      "region": "iad1"
+    },
+    "runtime": {
+      "kind": "remote",
+      "status": "READY",
+      "tenant": null,
+      "schemaVersion": null
+    },
+    "copilot": {
+      "mode": "live"
+    },
+    "flows": {
+      "base-sepolia-swap": "live",
+      "uniswap-liquidity": "live",
+      "aave-supply": "live",
+      "solana-devnet-swap": "live",
+      "orca-liquidity-mainnet": "live",
+      "crosschain-router-testnet": "live",
+      "orca-liquidity": "live",
+      "robinhood-transfer": "live",
+      "solana-devnet-transfer": "live",
+      "crosschain-router": "live",
+      "solana-transfer": "live",
+      "jupiter-swap": "live",
+      "lending-composition": "live"
+    },
+    "localOnly": {
+      "across-mocked-demo": "ACROSS_MOCKED_DEMO_LOCAL_ONLY",
+      "cow-mocked-loopback": "COW_OFF",
+      "lifi-bridge-mocked": "BRIDGE_OFF",
+      "local-fork-modes": "LOCAL_FORK_ONLY"
+    }
+  },
+  "mcp": {
+    "runtime": "remote",
+    "mcpExecution": "NOT_AVAILABLE",
+    "ownerExecution": "IN_FLOFI_WITH_THE_OWNER_WALLET_ONLY",
+    "stepLists": {
+      "contract": "strategy version 2: {version: 2, steps: [...], bindings?: [{step, amountFrom}]}",
+      "maxSteps": 8,
+      "oneStep": "identical to version 1 (same strategy, same hash)",
+      "executableToday": [
+        "every one-action path whose row below can be handed off",
+        "supply \u2192 borrow \u2192 swap on base-sepolia (the lending composition)",
+        "a sequence whose every step has an owner-execution flow, where this deployment runs workflows (request_user_approval says so)"
+      ],
+      "sequences": "One approval for the whole workflow; the owner confirms each step in their wallet, in order, each after the previous step reconciled. Where the owner enrolled delegated Credentials and this deployment can sign delegated steps, ONE passkey authorization can cover the whole workflow instead (request_user_approval reports the authorizations each mode needs). One authorization is not one transaction and not zero gas.",
+      "bindings": "A step may spend what an earlier step actually delivered: {step, amountFrom}; its own amount is then a cap. Resolved only from reconciled amounts (delegated runs); owner-signed sequences report DEPENDENT_AMOUNT_SOURCE_NOT_IMPLEMENTED."
+    }
+  },
+  "capabilities": [
+    {
+      "action": "bridge",
+      "network": "base-sepolia",
+      "destinationNetwork": "arbitrum-sepolia",
+      "funds": "TEST_FUNDS",
+      "adapters": [
+        "flofi.router"
+      ],
+      "supportedByCode": {
+        "execute": true,
+        "executionPlan": "SINGLE_FLOW",
+        "reason": null
+      },
+      "enabledByDeployment": {
+        "enabled": true,
+        "flow": "crosschain-router-testnet",
+        "mode": "live",
+        "executionSwitch": true,
+        "reason": null
+      },
+      "enabledByPolicy": {
+        "enabled": true,
+        "reason": null
+      },
+      "demonstratedEvidence": "NONE_DEMONSTRATED",
+      "mcpApprovalHandoff": true
+    },
+    {
+      "action": "bridge",
+      "network": "base",
+      "destinationNetwork": "arbitrum-one",
+      "funds": "REAL_FUNDS",
+      "adapters": [
+        "flofi.router"
+      ],
+      "supportedByCode": {
+        "execute": true,
+        "executionPlan": "SINGLE_FLOW",
+        "reason": null
+      },
+      "enabledByDeployment": {
+        "enabled": true,
+        "flow": "crosschain-router",
+        "mode": "live",
+        "executionSwitch": true,
+        "reason": null
+      },
+      "enabledByPolicy": {
+        "enabled": true,
+        "reason": null
+      },
+      "demonstratedEvidence": "NONE_DEMONSTRATED",
+      "mcpApprovalHandoff": true
+    },
+    {
+      "action": "swap",
+      "network": "base",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "adapters": [
+        "uniswap.v3"
+      ],
+      "supportedByCode": {
+        "execute": true,
+        "executionPlan": "SINGLE_FLOW",
+        "reason": null
+      },
+      "enabledByDeployment": {
+        "enabled": true,
+        "flow": "base-swap",
+        "mode": "live",
+        "executionSwitch": null,
+        "reason": null
+      },
+      "enabledByPolicy": {
+        "enabled": true,
+        "reason": null
+      },
+      "demonstratedEvidence": "NONE_DEMONSTRATED",
+      "mcpApprovalHandoff": true
+    },
+    {
+      "action": "swap",
+      "network": "base-sepolia",
+      "destinationNetwork": null,
+      "funds": "TEST_FUNDS",
+      "adapters": [
+        "uniswap.v3"
+      ],
+      "supportedByCode": {
+        "execute": true,
+        "executionPlan": "SINGLE_FLOW",
+        "reason": null
+      },
+      "enabledByDeployment": {
+        "enabled": true,
+        "flow": "base-sepolia-swap",
+        "mode": "live",
+        "executionSwitch": null,
+        "reason": null
+      },
+      "enabledByPolicy": {
+        "enabled": true,
+        "reason": null
+      },
+      "demonstratedEvidence": "TESTNET_EXECUTED",
+      "mcpApprovalHandoff": true
+    },
+    {
+      "action": "swap",
+      "network": "ethereum-sepolia",
+      "destinationNetwork": null,
+      "funds": "TEST_FUNDS",
+      "adapters": [
+        "uniswap.v3"
+      ],
+      "supportedByCode": {
+        "execute": true,
+        "executionPlan": "SINGLE_FLOW",
+        "reason": null
+      },
+      "enabledByDeployment": {
+        "enabled": true,
+        "flow": "base-sepolia-swap",
+        "mode": "live",
+        "executionSwitch": null,
+        "reason": null
+      },
+      "enabledByPolicy": {
+        "enabled": true,
+        "reason": null
+      },
+      "demonstratedEvidence": "NONE_DEMONSTRATED",
+      "mcpApprovalHandoff": true
+    },
+    {
+      "action": "swap",
+      "network": "solana",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "adapters": [
+        "jupiter.swap-v2"
+      ],
+      "supportedByCode": {
+        "execute": true,
+        "executionPlan": "SINGLE_FLOW",
+        "reason": null
+      },
+      "enabledByDeployment": {
+        "enabled": true,
+        "flow": "jupiter-swap",
+        "mode": "live",
+        "executionSwitch": true,
+        "reason": null
+      },
+      "enabledByPolicy": {
+        "enabled": true,
+        "reason": null
+      },
+      "demonstratedEvidence": "NONE_DEMONSTRATED",
+      "mcpApprovalHandoff": true
+    },
+    {
+      "action": "swap",
+      "network": "solana-devnet",
+      "destinationNetwork": null,
+      "funds": "TEST_FUNDS",
+      "adapters": [
+        "orca.whirlpools-devnet"
+      ],
+      "supportedByCode": {
+        "execute": true,
+        "executionPlan": "SINGLE_FLOW",
+        "reason": null
+      },
+      "enabledByDeployment": {
+        "enabled": true,
+        "flow": "solana-devnet-swap",
+        "mode": "live",
+        "executionSwitch": true,
+        "reason": null
+      },
+      "enabledByPolicy": {
+        "enabled": true,
+        "reason": null
+      },
+      "demonstratedEvidence": "NONE_DEMONSTRATED",
+      "mcpApprovalHandoff": true
+    },
+    {
+      "action": "transfer",
+      "network": "solana",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "adapters": [
+        "solana.spl-transfer"
+      ],
+      "supportedByCode": {
+        "execute": true,
+        "executionPlan": "SINGLE_FLOW",
+        "reason": null
+      },
+      "enabledByDeployment": {
+        "enabled": true,
+        "flow": "solana-transfer",
+        "mode": "live",
+        "executionSwitch": true,
+        "reason": null
+      },
+      "enabledByPolicy": {
+        "enabled": true,
+        "reason": null
+      },
+      "demonstratedEvidence": "NONE_DEMONSTRATED",
+      "mcpApprovalHandoff": true
+    },
+    {
+      "action": "transfer",
+      "network": "solana-devnet",
+      "destinationNetwork": null,
+      "funds": "TEST_FUNDS",
+      "adapters": [
+        "solana.system-transfer"
+      ],
+      "supportedByCode": {
+        "execute": true,
+        "executionPlan": "SINGLE_FLOW",
+        "reason": null
+      },
+      "enabledByDeployment": {
+        "enabled": true,
+        "flow": "solana-devnet-transfer",
+        "mode": "live",
+        "executionSwitch": true,
+        "reason": null
+      },
+      "enabledByPolicy": {
+        "enabled": true,
+        "reason": null
+      },
+      "demonstratedEvidence": "NONE_DEMONSTRATED",
+      "mcpApprovalHandoff": true
+    },
+    {
+      "action": "transfer",
+      "network": "ethereum-sepolia",
+      "destinationNetwork": null,
+      "funds": "TEST_FUNDS",
+      "adapters": [
+        "evm.native-transfer"
+      ],
+      "supportedByCode": {
+        "execute": true,
+        "executionPlan": "SINGLE_FLOW",
+        "reason": null
+      },
+      "enabledByDeployment": {
+        "enabled": true,
+        "flow": "robinhood-transfer",
+        "mode": "live",
+        "executionSwitch": true,
+        "reason": null
+      },
+      "enabledByPolicy": {
+        "enabled": false,
+        "reason": "AGENT_ROLLOUT_NOT_APPROVED"
+      },
+      "demonstratedEvidence": "NONE_DEMONSTRATED",
+      "mcpApprovalHandoff": false
+    },
+    {
+      "action": "transfer",
+      "network": "robinhood-testnet",
+      "destinationNetwork": null,
+      "funds": "TEST_FUNDS",
+      "adapters": [
+        "evm.native-transfer"
+      ],
+      "supportedByCode": {
+        "execute": true,
+        "executionPlan": "SINGLE_FLOW",
+        "reason": null
+      },
+      "enabledByDeployment": {
+        "enabled": true,
+        "flow": "robinhood-transfer",
+        "mode": "live",
+        "executionSwitch": true,
+        "reason": null
+      },
+      "enabledByPolicy": {
+        "enabled": false,
+        "reason": "AGENT_ROLLOUT_NOT_APPROVED"
+      },
+      "demonstratedEvidence": "TESTNET_EXECUTED",
+      "mcpApprovalHandoff": false
+    },
+    {
+      "action": "supply",
+      "network": "base-sepolia",
+      "destinationNetwork": null,
+      "funds": "TEST_FUNDS",
+      "adapters": [
+        "aave-v3"
+      ],
+      "supportedByCode": {
+        "execute": true,
+        "executionPlan": "SINGLE_FLOW",
+        "reason": null
+      },
+      "enabledByDeployment": {
+        "enabled": true,
+        "flow": "aave-supply",
+        "mode": "live",
+        "executionSwitch": null,
+        "reason": null
+      },
+      "enabledByPolicy": {
+        "enabled": true,
+        "reason": null
+      },
+      "demonstratedEvidence": "NONE_DEMONSTRATED",
+      "mcpApprovalHandoff": true
+    },
+    {
+      "action": "supply",
+      "network": "ethereum-sepolia",
+      "destinationNetwork": null,
+      "funds": "TEST_FUNDS",
+      "adapters": [
+        "aave-v3"
+      ],
+      "supportedByCode": {
+        "execute": true,
+        "executionPlan": "SINGLE_FLOW",
+        "reason": null
+      },
+      "enabledByDeployment": {
+        "enabled": true,
+        "flow": "aave-supply",
+        "mode": "live",
+        "executionSwitch": null,
+        "reason": null
+      },
+      "enabledByPolicy": {
+        "enabled": true,
+        "reason": null
+      },
+      "demonstratedEvidence": "NONE_DEMONSTRATED",
+      "mcpApprovalHandoff": true
+    },
+    {
+      "action": "borrow",
+      "network": "base-sepolia",
+      "destinationNetwork": null,
+      "funds": "TEST_FUNDS",
+      "adapters": [
+        "aave-v3"
+      ],
+      "supportedByCode": {
+        "execute": true,
+        "executionPlan": "SINGLE_FLOW",
+        "reason": null
+      },
+      "enabledByDeployment": {
+        "enabled": true,
+        "flow": "aave-supply",
+        "mode": "live",
+        "executionSwitch": null,
+        "reason": null
+      },
+      "enabledByPolicy": {
+        "enabled": true,
+        "reason": null
+      },
+      "demonstratedEvidence": "NONE_DEMONSTRATED",
+      "mcpApprovalHandoff": true
+    },
+    {
+      "action": "borrow",
+      "network": "ethereum-sepolia",
+      "destinationNetwork": null,
+      "funds": "TEST_FUNDS",
+      "adapters": [
+        "aave-v3"
+      ],
+      "supportedByCode": {
+        "execute": true,
+        "executionPlan": "SINGLE_FLOW",
+        "reason": null
+      },
+      "enabledByDeployment": {
+        "enabled": true,
+        "flow": "aave-supply",
+        "mode": "live",
+        "executionSwitch": null,
+        "reason": null
+      },
+      "enabledByPolicy": {
+        "enabled": true,
+        "reason": null
+      },
+      "demonstratedEvidence": "NONE_DEMONSTRATED",
+      "mcpApprovalHandoff": true
+    },
+    {
+      "action": "repay",
+      "network": "base-sepolia",
+      "destinationNetwork": null,
+      "funds": "TEST_FUNDS",
+      "adapters": [
+        "aave-v3"
+      ],
+      "supportedByCode": {
+        "execute": true,
+        "executionPlan": "SINGLE_FLOW",
+        "reason": null
+      },
+      "enabledByDeployment": {
+        "enabled": true,
+        "flow": "aave-supply",
+        "mode": "live",
+        "executionSwitch": null,
+        "reason": null
+      },
+      "enabledByPolicy": {
+        "enabled": true,
+        "reason": null
+      },
+      "demonstratedEvidence": "NONE_DEMONSTRATED",
+      "mcpApprovalHandoff": true
+    },
+    {
+      "action": "repay",
+      "network": "ethereum-sepolia",
+      "destinationNetwork": null,
+      "funds": "TEST_FUNDS",
+      "adapters": [
+        "aave-v3"
+      ],
+      "supportedByCode": {
+        "execute": true,
+        "executionPlan": "SINGLE_FLOW",
+        "reason": null
+      },
+      "enabledByDeployment": {
+        "enabled": true,
+        "flow": "aave-supply",
+        "mode": "live",
+        "executionSwitch": null,
+        "reason": null
+      },
+      "enabledByPolicy": {
+        "enabled": true,
+        "reason": null
+      },
+      "demonstratedEvidence": "NONE_DEMONSTRATED",
+      "mcpApprovalHandoff": true
+    },
+    {
+      "action": "withdraw",
+      "network": "base-sepolia",
+      "destinationNetwork": null,
+      "funds": "TEST_FUNDS",
+      "adapters": [
+        "aave-v3"
+      ],
+      "supportedByCode": {
+        "execute": true,
+        "executionPlan": "SINGLE_FLOW",
+        "reason": null
+      },
+      "enabledByDeployment": {
+        "enabled": true,
+        "flow": "aave-supply",
+        "mode": "live",
+        "executionSwitch": null,
+        "reason": null
+      },
+      "enabledByPolicy": {
+        "enabled": true,
+        "reason": null
+      },
+      "demonstratedEvidence": "NONE_DEMONSTRATED",
+      "mcpApprovalHandoff": true
+    },
+    {
+      "action": "withdraw",
+      "network": "ethereum-sepolia",
+      "destinationNetwork": null,
+      "funds": "TEST_FUNDS",
+      "adapters": [
+        "aave-v3"
+      ],
+      "supportedByCode": {
+        "execute": true,
+        "executionPlan": "SINGLE_FLOW",
+        "reason": null
+      },
+      "enabledByDeployment": {
+        "enabled": true,
+        "flow": "aave-supply",
+        "mode": "live",
+        "executionSwitch": null,
+        "reason": null
+      },
+      "enabledByPolicy": {
+        "enabled": true,
+        "reason": null
+      },
+      "demonstratedEvidence": "NONE_DEMONSTRATED",
+      "mcpApprovalHandoff": true
+    },
+    {
+      "action": "add_liquidity",
+      "network": "base-sepolia",
+      "destinationNetwork": null,
+      "funds": "TEST_FUNDS",
+      "adapters": [
+        "uniswap.v3"
+      ],
+      "supportedByCode": {
+        "execute": true,
+        "executionPlan": "SINGLE_FLOW",
+        "reason": null
+      },
+      "enabledByDeployment": {
+        "enabled": true,
+        "flow": "uniswap-liquidity",
+        "mode": "live",
+        "executionSwitch": true,
+        "reason": null
+      },
+      "enabledByPolicy": {
+        "enabled": true,
+        "reason": null
+      },
+      "demonstratedEvidence": "NONE_DEMONSTRATED",
+      "mcpApprovalHandoff": true
+    },
+    {
+      "action": "add_liquidity",
+      "network": "ethereum-sepolia",
+      "destinationNetwork": null,
+      "funds": "TEST_FUNDS",
+      "adapters": [
+        "uniswap.v3"
+      ],
+      "supportedByCode": {
+        "execute": true,
+        "executionPlan": "SINGLE_FLOW",
+        "reason": null
+      },
+      "enabledByDeployment": {
+        "enabled": true,
+        "flow": "uniswap-liquidity",
+        "mode": "live",
+        "executionSwitch": true,
+        "reason": null
+      },
+      "enabledByPolicy": {
+        "enabled": true,
+        "reason": null
+      },
+      "demonstratedEvidence": "NONE_DEMONSTRATED",
+      "mcpApprovalHandoff": true
+    },
+    {
+      "action": "add_liquidity",
+      "network": "solana-devnet",
+      "destinationNetwork": null,
+      "funds": "TEST_FUNDS",
+      "adapters": [
+        "orca.whirlpools-devnet-liquidity"
+      ],
+      "supportedByCode": {
+        "execute": true,
+        "executionPlan": "SINGLE_FLOW",
+        "reason": null
+      },
+      "enabledByDeployment": {
+        "enabled": true,
+        "flow": "orca-liquidity",
+        "mode": "live",
+        "executionSwitch": true,
+        "reason": null
+      },
+      "enabledByPolicy": {
+        "enabled": true,
+        "reason": null
+      },
+      "demonstratedEvidence": "NONE_DEMONSTRATED",
+      "mcpApprovalHandoff": true
+    },
+    {
+      "action": "add_liquidity",
+      "network": "solana",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "adapters": [
+        "orca.whirlpools-mainnet-liquidity"
+      ],
+      "supportedByCode": {
+        "execute": true,
+        "executionPlan": "SINGLE_FLOW",
+        "reason": null
+      },
+      "enabledByDeployment": {
+        "enabled": true,
+        "flow": "orca-liquidity-mainnet",
+        "mode": "live",
+        "executionSwitch": true,
+        "reason": null
+      },
+      "enabledByPolicy": {
+        "enabled": false,
+        "reason": "AGENT_ROLLOUT_NOT_APPROVED"
+      },
+      "demonstratedEvidence": "NONE_DEMONSTRATED",
+      "mcpApprovalHandoff": false
+    },
+    {
+      "action": "lending_composition",
+      "network": "base-sepolia",
+      "destinationNetwork": null,
+      "funds": "TEST_FUNDS",
+      "adapters": [
+        "aave-v3",
+        "uniswap.v3"
+      ],
+      "supportedByCode": {
+        "execute": true,
+        "executionPlan": "COMPOSITE_FLOW",
+        "reason": null
+      },
+      "enabledByDeployment": {
+        "enabled": true,
+        "flow": "lending-composition",
+        "mode": "live",
+        "executionSwitch": null,
+        "reason": null
+      },
+      "enabledByPolicy": {
+        "enabled": true,
+        "reason": null
+      },
+      "demonstratedEvidence": "MOCKED",
+      "mcpApprovalHandoff": true
+    },
+    {
+      "action": "bridge",
+      "network": "base",
+      "destinationNetwork": "robinhood",
+      "funds": "REAL_FUNDS",
+      "adapters": [
+        "flofi.router"
+      ],
+      "supportedByCode": {
+        "execute": true,
+        "executionPlan": "SINGLE_FLOW",
+        "reason": null
+      },
+      "enabledByDeployment": {
+        "enabled": true,
+        "flow": "crosschain-router-base-to-robinhood",
+        "mode": "live",
+        "executionSwitch": true,
+        "reason": null
+      },
+      "enabledByPolicy": {
+        "enabled": true,
+        "reason": null
+      },
+      "demonstratedEvidence": "NONE_DEMONSTRATED",
+      "mcpApprovalHandoff": true
+    },
+    {
+      "action": "bridge",
+      "network": "robinhood",
+      "destinationNetwork": "base",
+      "funds": "REAL_FUNDS",
+      "adapters": [
+        "flofi.router"
+      ],
+      "supportedByCode": {
+        "execute": true,
+        "executionPlan": "SINGLE_FLOW",
+        "reason": null
+      },
+      "enabledByDeployment": {
+        "enabled": true,
+        "flow": "crosschain-router-robinhood-to-base",
+        "mode": "live",
+        "executionSwitch": true,
+        "reason": null
+      },
+      "enabledByPolicy": {
+        "enabled": true,
+        "reason": null
+      },
+      "demonstratedEvidence": "NONE_DEMONSTRATED",
+      "mcpApprovalHandoff": true
+    },
+    {
+      "action": "bridge",
+      "network": "arbitrum-one",
+      "destinationNetwork": "robinhood",
+      "funds": "REAL_FUNDS",
+      "adapters": [
+        "flofi.router"
+      ],
+      "supportedByCode": {
+        "execute": true,
+        "executionPlan": "SINGLE_FLOW",
+        "reason": null
+      },
+      "enabledByDeployment": {
+        "enabled": true,
+        "flow": "crosschain-router-arbitrum-to-robinhood",
+        "mode": "live",
+        "executionSwitch": true,
+        "reason": null
+      },
+      "enabledByPolicy": {
+        "enabled": true,
+        "reason": null
+      },
+      "demonstratedEvidence": "NONE_DEMONSTRATED",
+      "mcpApprovalHandoff": true
+    },
+    {
+      "action": "bridge",
+      "network": "robinhood",
+      "destinationNetwork": "arbitrum-one",
+      "funds": "REAL_FUNDS",
+      "adapters": [
+        "flofi.router"
+      ],
+      "supportedByCode": {
+        "execute": true,
+        "executionPlan": "SINGLE_FLOW",
+        "reason": null
+      },
+      "enabledByDeployment": {
+        "enabled": true,
+        "flow": "crosschain-router-robinhood-to-arbitrum",
+        "mode": "live",
+        "executionSwitch": true,
+        "reason": null
+      },
+      "enabledByPolicy": {
+        "enabled": true,
+        "reason": null
+      },
+      "demonstratedEvidence": "NONE_DEMONSTRATED",
+      "mcpApprovalHandoff": true
+    },
+    {
+      "action": "swap",
+      "network": "robinhood",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "adapters": [
+        "uniswap.v3"
+      ],
+      "supportedByCode": {
+        "execute": true,
+        "executionPlan": "SINGLE_FLOW",
+        "reason": null
+      },
+      "enabledByDeployment": {
+        "enabled": true,
+        "flow": "robinhood-swap",
+        "mode": "live",
+        "executionSwitch": null,
+        "reason": null
+      },
+      "enabledByPolicy": {
+        "enabled": true,
+        "reason": null
+      },
+      "demonstratedEvidence": "NONE_DEMONSTRATED",
+      "mcpApprovalHandoff": true
+    },
+    {
+      "action": "add_liquidity",
+      "network": "robinhood",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "adapters": [
+        "uniswap.v3"
+      ],
+      "supportedByCode": {
+        "execute": true,
+        "executionPlan": "SINGLE_FLOW",
+        "reason": null
+      },
+      "enabledByDeployment": {
+        "enabled": true,
+        "flow": "robinhood-liquidity",
+        "mode": "live",
+        "executionSwitch": true,
+        "reason": null
+      },
+      "enabledByPolicy": {
+        "enabled": true,
+        "reason": null
+      },
+      "demonstratedEvidence": "NONE_DEMONSTRATED",
+      "mcpApprovalHandoff": true
+    },
+    {
+      "action": "transfer",
+      "network": "robinhood",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "adapters": [
+        "evm.token-transfer"
+      ],
+      "supportedByCode": {
+        "execute": true,
+        "executionPlan": "SINGLE_FLOW",
+        "reason": null
+      },
+      "enabledByDeployment": {
+        "enabled": true,
+        "flow": "robinhood-mainnet-transfer",
+        "mode": "live",
+        "executionSwitch": null,
+        "reason": null
+      },
+      "enabledByPolicy": {
+        "enabled": true,
+        "reason": null
+      },
+      "demonstratedEvidence": "NONE_DEMONSTRATED",
+      "mcpApprovalHandoff": true
+    },
+    {
+      "action": "bridge",
+      "network": "arbitrum-one",
+      "destinationNetwork": "base",
+      "funds": "REAL_FUNDS",
+      "adapters": [
+        "flofi.router"
+      ],
+      "supportedByCode": {
+        "execute": true,
+        "executionPlan": "SINGLE_FLOW",
+        "reason": null
+      },
+      "enabledByDeployment": {
+        "enabled": true,
+        "flow": "crosschain-router-arbitrum-to-base",
+        "mode": "live",
+        "executionSwitch": true,
+        "reason": null
+      },
+      "enabledByPolicy": {
+        "enabled": true,
+        "reason": null
+      },
+      "demonstratedEvidence": "NONE_DEMONSTRATED",
+      "mcpApprovalHandoff": true
+    },
+    {
+      "action": "add_liquidity",
+      "network": "base",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "adapters": [
+        "uniswap.v3"
+      ],
+      "supportedByCode": {
+        "execute": true,
+        "executionPlan": "SINGLE_FLOW",
+        "reason": null
+      },
+      "enabledByDeployment": {
+        "enabled": true,
+        "flow": "base-liquidity",
+        "mode": "live",
+        "executionSwitch": true,
+        "reason": null
+      },
+      "enabledByPolicy": {
+        "enabled": true,
+        "reason": null
+      },
+      "demonstratedEvidence": "NONE_DEMONSTRATED",
+      "mcpApprovalHandoff": true
+    },
+    {
+      "action": "transfer",
+      "network": "base",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "adapters": [
+        "evm.token-transfer"
+      ],
+      "supportedByCode": {
+        "execute": true,
+        "executionPlan": "SINGLE_FLOW",
+        "reason": null
+      },
+      "enabledByDeployment": {
+        "enabled": true,
+        "flow": "base-mainnet-transfer",
+        "mode": "live",
+        "executionSwitch": null,
+        "reason": null
+      },
+      "enabledByPolicy": {
+        "enabled": true,
+        "reason": null
+      },
+      "demonstratedEvidence": "NONE_DEMONSTRATED",
+      "mcpApprovalHandoff": true
+    },
+    {
+      "action": "supply",
+      "network": "base",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "adapters": [
+        "aave-v3"
+      ],
+      "supportedByCode": {
+        "execute": true,
+        "executionPlan": "SINGLE_FLOW",
+        "reason": null
+      },
+      "enabledByDeployment": {
+        "enabled": true,
+        "flow": "base-aave",
+        "mode": "live",
+        "executionSwitch": null,
+        "reason": null
+      },
+      "enabledByPolicy": {
+        "enabled": true,
+        "reason": null
+      },
+      "demonstratedEvidence": "NONE_DEMONSTRATED",
+      "mcpApprovalHandoff": true
+    },
+    {
+      "action": "borrow",
+      "network": "base",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "adapters": [
+        "aave-v3"
+      ],
+      "supportedByCode": {
+        "execute": true,
+        "executionPlan": "SINGLE_FLOW",
+        "reason": null
+      },
+      "enabledByDeployment": {
+        "enabled": true,
+        "flow": "base-aave",
+        "mode": "live",
+        "executionSwitch": null,
+        "reason": null
+      },
+      "enabledByPolicy": {
+        "enabled": true,
+        "reason": null
+      },
+      "demonstratedEvidence": "NONE_DEMONSTRATED",
+      "mcpApprovalHandoff": true
+    },
+    {
+      "action": "repay",
+      "network": "base",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "adapters": [
+        "aave-v3"
+      ],
+      "supportedByCode": {
+        "execute": true,
+        "executionPlan": "SINGLE_FLOW",
+        "reason": null
+      },
+      "enabledByDeployment": {
+        "enabled": true,
+        "flow": "base-aave",
+        "mode": "live",
+        "executionSwitch": null,
+        "reason": null
+      },
+      "enabledByPolicy": {
+        "enabled": true,
+        "reason": null
+      },
+      "demonstratedEvidence": "NONE_DEMONSTRATED",
+      "mcpApprovalHandoff": true
+    },
+    {
+      "action": "withdraw",
+      "network": "base",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "adapters": [
+        "aave-v3"
+      ],
+      "supportedByCode": {
+        "execute": true,
+        "executionPlan": "SINGLE_FLOW",
+        "reason": null
+      },
+      "enabledByDeployment": {
+        "enabled": true,
+        "flow": "base-aave",
+        "mode": "live",
+        "executionSwitch": null,
+        "reason": null
+      },
+      "enabledByPolicy": {
+        "enabled": true,
+        "reason": null
+      },
+      "demonstratedEvidence": "NONE_DEMONSTRATED",
+      "mcpApprovalHandoff": true
+    },
+    {
+      "action": "supply",
+      "network": "arbitrum-one",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "adapters": [
+        "aave-v3"
+      ],
+      "supportedByCode": {
+        "execute": true,
+        "executionPlan": "SINGLE_FLOW",
+        "reason": null
+      },
+      "enabledByDeployment": {
+        "enabled": true,
+        "flow": "arbitrum-aave",
+        "mode": "live",
+        "executionSwitch": null,
+        "reason": null
+      },
+      "enabledByPolicy": {
+        "enabled": true,
+        "reason": null
+      },
+      "demonstratedEvidence": "NONE_DEMONSTRATED",
+      "mcpApprovalHandoff": true
+    },
+    {
+      "action": "borrow",
+      "network": "arbitrum-one",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "adapters": [
+        "aave-v3"
+      ],
+      "supportedByCode": {
+        "execute": true,
+        "executionPlan": "SINGLE_FLOW",
+        "reason": null
+      },
+      "enabledByDeployment": {
+        "enabled": true,
+        "flow": "arbitrum-aave",
+        "mode": "live",
+        "executionSwitch": null,
+        "reason": null
+      },
+      "enabledByPolicy": {
+        "enabled": true,
+        "reason": null
+      },
+      "demonstratedEvidence": "NONE_DEMONSTRATED",
+      "mcpApprovalHandoff": true
+    },
+    {
+      "action": "repay",
+      "network": "arbitrum-one",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "adapters": [
+        "aave-v3"
+      ],
+      "supportedByCode": {
+        "execute": true,
+        "executionPlan": "SINGLE_FLOW",
+        "reason": null
+      },
+      "enabledByDeployment": {
+        "enabled": true,
+        "flow": "arbitrum-aave",
+        "mode": "live",
+        "executionSwitch": null,
+        "reason": null
+      },
+      "enabledByPolicy": {
+        "enabled": true,
+        "reason": null
+      },
+      "demonstratedEvidence": "NONE_DEMONSTRATED",
+      "mcpApprovalHandoff": true
+    },
+    {
+      "action": "withdraw",
+      "network": "arbitrum-one",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "adapters": [
+        "aave-v3"
+      ],
+      "supportedByCode": {
+        "execute": true,
+        "executionPlan": "SINGLE_FLOW",
+        "reason": null
+      },
+      "enabledByDeployment": {
+        "enabled": true,
+        "flow": "arbitrum-aave",
+        "mode": "live",
+        "executionSwitch": null,
+        "reason": null
+      },
+      "enabledByPolicy": {
+        "enabled": true,
+        "reason": null
+      },
+      "demonstratedEvidence": "NONE_DEMONSTRATED",
+      "mcpApprovalHandoff": true
+    },
+    {
+      "action": "swap",
+      "network": "arbitrum-one",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "adapters": [
+        "uniswap.v3"
+      ],
+      "supportedByCode": {
+        "execute": true,
+        "executionPlan": "SINGLE_FLOW",
+        "reason": null
+      },
+      "enabledByDeployment": {
+        "enabled": true,
+        "flow": "arbitrum-swap",
+        "mode": "live",
+        "executionSwitch": null,
+        "reason": null
+      },
+      "enabledByPolicy": {
+        "enabled": true,
+        "reason": null
+      },
+      "demonstratedEvidence": "NONE_DEMONSTRATED",
+      "mcpApprovalHandoff": true
+    },
+    {
+      "action": "transfer",
+      "network": "arbitrum-one",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "adapters": [
+        "evm.token-transfer"
+      ],
+      "supportedByCode": {
+        "execute": true,
+        "executionPlan": "SINGLE_FLOW",
+        "reason": null
+      },
+      "enabledByDeployment": {
+        "enabled": true,
+        "flow": "arbitrum-mainnet-transfer",
+        "mode": "live",
+        "executionSwitch": null,
+        "reason": null
+      },
+      "enabledByPolicy": {
+        "enabled": true,
+        "reason": null
+      },
+      "demonstratedEvidence": "NONE_DEMONSTRATED",
+      "mcpApprovalHandoff": true
+    },
+    {
+      "action": "add_liquidity",
+      "network": "arbitrum-one",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "adapters": [
+        "uniswap.v3"
+      ],
+      "supportedByCode": {
+        "execute": true,
+        "executionPlan": "SINGLE_FLOW",
+        "reason": null
+      },
+      "enabledByDeployment": {
+        "enabled": true,
+        "flow": "arbitrum-liquidity",
+        "mode": "live",
+        "executionSwitch": true,
+        "reason": null
+      },
+      "enabledByPolicy": {
+        "enabled": true,
+        "reason": null
+      },
+      "demonstratedEvidence": "NONE_DEMONSTRATED",
+      "mcpApprovalHandoff": true
+    },
+    {
+      "action": "supply",
+      "network": "ethereum",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "adapters": [
+        "aave-v3"
+      ],
+      "supportedByCode": {
+        "execute": true,
+        "executionPlan": "SINGLE_FLOW",
+        "reason": null
+      },
+      "enabledByDeployment": {
+        "enabled": true,
+        "flow": "ethereum-aave",
+        "mode": "live",
+        "executionSwitch": null,
+        "reason": null
+      },
+      "enabledByPolicy": {
+        "enabled": true,
+        "reason": null
+      },
+      "demonstratedEvidence": "NONE_DEMONSTRATED",
+      "mcpApprovalHandoff": true
+    },
+    {
+      "action": "borrow",
+      "network": "ethereum",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "adapters": [
+        "aave-v3"
+      ],
+      "supportedByCode": {
+        "execute": true,
+        "executionPlan": "SINGLE_FLOW",
+        "reason": null
+      },
+      "enabledByDeployment": {
+        "enabled": true,
+        "flow": "ethereum-aave",
+        "mode": "live",
+        "executionSwitch": null,
+        "reason": null
+      },
+      "enabledByPolicy": {
+        "enabled": true,
+        "reason": null
+      },
+      "demonstratedEvidence": "NONE_DEMONSTRATED",
+      "mcpApprovalHandoff": true
+    },
+    {
+      "action": "repay",
+      "network": "ethereum",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "adapters": [
+        "aave-v3"
+      ],
+      "supportedByCode": {
+        "execute": true,
+        "executionPlan": "SINGLE_FLOW",
+        "reason": null
+      },
+      "enabledByDeployment": {
+        "enabled": true,
+        "flow": "ethereum-aave",
+        "mode": "live",
+        "executionSwitch": null,
+        "reason": null
+      },
+      "enabledByPolicy": {
+        "enabled": true,
+        "reason": null
+      },
+      "demonstratedEvidence": "NONE_DEMONSTRATED",
+      "mcpApprovalHandoff": true
+    },
+    {
+      "action": "withdraw",
+      "network": "ethereum",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "adapters": [
+        "aave-v3"
+      ],
+      "supportedByCode": {
+        "execute": true,
+        "executionPlan": "SINGLE_FLOW",
+        "reason": null
+      },
+      "enabledByDeployment": {
+        "enabled": true,
+        "flow": "ethereum-aave",
+        "mode": "live",
+        "executionSwitch": null,
+        "reason": null
+      },
+      "enabledByPolicy": {
+        "enabled": true,
+        "reason": null
+      },
+      "demonstratedEvidence": "NONE_DEMONSTRATED",
+      "mcpApprovalHandoff": true
+    },
+    {
+      "action": "swap",
+      "network": "ethereum",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "adapters": [
+        "uniswap.v3"
+      ],
+      "supportedByCode": {
+        "execute": true,
+        "executionPlan": "SINGLE_FLOW",
+        "reason": null
+      },
+      "enabledByDeployment": {
+        "enabled": true,
+        "flow": "ethereum-swap",
+        "mode": "live",
+        "executionSwitch": null,
+        "reason": null
+      },
+      "enabledByPolicy": {
+        "enabled": true,
+        "reason": null
+      },
+      "demonstratedEvidence": "NONE_DEMONSTRATED",
+      "mcpApprovalHandoff": true
+    },
+    {
+      "action": "transfer",
+      "network": "ethereum",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "adapters": [
+        "evm.token-transfer"
+      ],
+      "supportedByCode": {
+        "execute": true,
+        "executionPlan": "SINGLE_FLOW",
+        "reason": null
+      },
+      "enabledByDeployment": {
+        "enabled": true,
+        "flow": "ethereum-mainnet-transfer",
+        "mode": "live",
+        "executionSwitch": null,
+        "reason": null
+      },
+      "enabledByPolicy": {
+        "enabled": true,
+        "reason": null
+      },
+      "demonstratedEvidence": "NONE_DEMONSTRATED",
+      "mcpApprovalHandoff": true
+    },
+    {
+      "action": "add_liquidity",
+      "network": "ethereum",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "adapters": [
+        "uniswap.v3"
+      ],
+      "supportedByCode": {
+        "execute": true,
+        "executionPlan": "SINGLE_FLOW",
+        "reason": null
+      },
+      "enabledByDeployment": {
+        "enabled": true,
+        "flow": "ethereum-liquidity",
+        "mode": "live",
+        "executionSwitch": true,
+        "reason": null
+      },
+      "enabledByPolicy": {
+        "enabled": true,
+        "reason": null
+      },
+      "demonstratedEvidence": "NONE_DEMONSTRATED",
+      "mcpApprovalHandoff": true
+    },
+    {
+      "action": "bridge",
+      "network": "ethereum",
+      "destinationNetwork": "base",
+      "funds": "REAL_FUNDS",
+      "adapters": [
+        "flofi.router"
+      ],
+      "supportedByCode": {
+        "execute": true,
+        "executionPlan": "SINGLE_FLOW",
+        "reason": null
+      },
+      "enabledByDeployment": {
+        "enabled": true,
+        "flow": "crosschain-router-ethereum-to-base",
+        "mode": "live",
+        "executionSwitch": true,
+        "reason": null
+      },
+      "enabledByPolicy": {
+        "enabled": true,
+        "reason": null
+      },
+      "demonstratedEvidence": "NONE_DEMONSTRATED",
+      "mcpApprovalHandoff": true
+    },
+    {
+      "action": "bridge",
+      "network": "base",
+      "destinationNetwork": "ethereum",
+      "funds": "REAL_FUNDS",
+      "adapters": [
+        "flofi.router"
+      ],
+      "supportedByCode": {
+        "execute": true,
+        "executionPlan": "SINGLE_FLOW",
+        "reason": null
+      },
+      "enabledByDeployment": {
+        "enabled": true,
+        "flow": "crosschain-router-base-to-ethereum",
+        "mode": "live",
+        "executionSwitch": true,
+        "reason": null
+      },
+      "enabledByPolicy": {
+        "enabled": true,
+        "reason": null
+      },
+      "demonstratedEvidence": "NONE_DEMONSTRATED",
+      "mcpApprovalHandoff": true
+    },
+    {
+      "action": "bridge",
+      "network": "ethereum",
+      "destinationNetwork": "arbitrum-one",
+      "funds": "REAL_FUNDS",
+      "adapters": [
+        "flofi.router"
+      ],
+      "supportedByCode": {
+        "execute": true,
+        "executionPlan": "SINGLE_FLOW",
+        "reason": null
+      },
+      "enabledByDeployment": {
+        "enabled": true,
+        "flow": "crosschain-router-ethereum-to-arbitrum",
+        "mode": "live",
+        "executionSwitch": true,
+        "reason": null
+      },
+      "enabledByPolicy": {
+        "enabled": true,
+        "reason": null
+      },
+      "demonstratedEvidence": "NONE_DEMONSTRATED",
+      "mcpApprovalHandoff": true
+    },
+    {
+      "action": "bridge",
+      "network": "arbitrum-one",
+      "destinationNetwork": "ethereum",
+      "funds": "REAL_FUNDS",
+      "adapters": [
+        "flofi.router"
+      ],
+      "supportedByCode": {
+        "execute": true,
+        "executionPlan": "SINGLE_FLOW",
+        "reason": null
+      },
+      "enabledByDeployment": {
+        "enabled": true,
+        "flow": "crosschain-router-arbitrum-to-ethereum",
+        "mode": "live",
+        "executionSwitch": true,
+        "reason": null
+      },
+      "enabledByPolicy": {
+        "enabled": true,
+        "reason": null
+      },
+      "demonstratedEvidence": "NONE_DEMONSTRATED",
+      "mcpApprovalHandoff": true
+    },
+    {
+      "action": "bridge",
+      "network": "ethereum",
+      "destinationNetwork": "robinhood",
+      "funds": "REAL_FUNDS",
+      "adapters": [
+        "flofi.router"
+      ],
+      "supportedByCode": {
+        "execute": true,
+        "executionPlan": "SINGLE_FLOW",
+        "reason": null
+      },
+      "enabledByDeployment": {
+        "enabled": true,
+        "flow": "crosschain-router-ethereum-to-robinhood",
+        "mode": "live",
+        "executionSwitch": true,
+        "reason": null
+      },
+      "enabledByPolicy": {
+        "enabled": true,
+        "reason": null
+      },
+      "demonstratedEvidence": "NONE_DEMONSTRATED",
+      "mcpApprovalHandoff": true
+    },
+    {
+      "action": "bridge",
+      "network": "robinhood",
+      "destinationNetwork": "ethereum",
+      "funds": "REAL_FUNDS",
+      "adapters": [
+        "flofi.router"
+      ],
+      "supportedByCode": {
+        "execute": true,
+        "executionPlan": "SINGLE_FLOW",
+        "reason": null
+      },
+      "enabledByDeployment": {
+        "enabled": true,
+        "flow": "crosschain-router-robinhood-to-ethereum",
+        "mode": "live",
+        "executionSwitch": true,
+        "reason": null
+      },
+      "enabledByPolicy": {
+        "enabled": true,
+        "reason": null
+      },
+      "demonstratedEvidence": "NONE_DEMONSTRATED",
+      "mcpApprovalHandoff": true
+    }
+  ]
+}
