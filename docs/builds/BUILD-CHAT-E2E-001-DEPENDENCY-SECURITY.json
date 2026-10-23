@@ -1,0 +1,437 @@
+{
+  "audit": {
+    "advisories": {},
+    "metadata": {
+      "dependencies": 71,
+      "devDependencies": 154,
+      "optionalDependencies": 71,
+      "totalDependencies": 263,
+      "vulnerabilities": {
+        "critical": 0,
+        "high": 0,
+        "info": 0,
+        "low": 0,
+        "moderate": 0
+      }
+    }
+  },
+  "baseline_sha": "7a844d24252d5f3c53a2e9b3dda0b226bd02ecdb",
+  "changed_packages": [
+    {
+      "cpu": null,
+      "engines": {},
+      "integrity": "sha512-5sUUrrSvs/2/2LnLoesybMGx12EtPB46fdZ6RhAw0XDGSPxU2LFyQBB7yuEiOFFJPKmBY6+q2jTr1/AMbnp0/g==",
+      "libc": null,
+      "license": "MIT",
+      "name": "@next/env",
+      "optional": false,
+      "os": null,
+      "peerDependencies": {},
+      "peerDependenciesMeta": {},
+      "previous_version": "16.3.8",
+      "published": "2026-10-14T17:29:56.519Z",
+      "release_age_eligible_at": "2026-10-21T17:29:56.519000+00:00",
+      "version": "16.4.1"
+    },
+    {
+      "cpu": [
+        "arm64"
+      ],
+      "engines": {
+        "node": ">= 10"
+      },
+      "integrity": "sha512-U+hQ5Gj3fpzf4fveTIF3dpUFYhaSW8vHhdAnbiIomzXzg7boreYFgBqprepXFtW4sw+aTttiNmg0gew/iFNhbg==",
+      "libc": null,
+      "license": "MIT",
+      "name": "@next/swc-darwin-arm64",
+      "optional": true,
+      "os": [
+        "darwin"
+      ],
+      "peerDependencies": {},
+      "peerDependenciesMeta": {},
+      "previous_version": "16.3.8",
+      "published": "2026-10-14T17:28:49.343Z",
+      "release_age_eligible_at": "2026-10-21T17:28:49.343000+00:00",
+      "version": "16.4.1"
+    },
+    {
+      "cpu": [
+        "x64"
+      ],
+      "engines": {
+        "node": ">= 10"
+      },
+      "integrity": "sha512-/hqC3V1XLUjhMASf/WridKdO9FXoEgN3HBWmtKbj00MPgnltutfraWJ3bYTpCRIgEIpbjJyOVLpYgAhh/BkdcQ==",
+      "libc": null,
+      "license": "MIT",
+      "name": "@next/swc-darwin-x64",
+      "optional": true,
+      "os": [
+        "darwin"
+      ],
+      "peerDependencies": {},
+      "peerDependenciesMeta": {},
+      "previous_version": "16.3.8",
+      "published": "2026-10-14T17:28:11.640Z",
+      "release_age_eligible_at": "2026-10-21T17:28:11.640000+00:00",
+      "version": "16.4.1"
+    },
+    {
+      "cpu": [
+        "arm64"
+      ],
+      "engines": {
+        "node": ">= 10"
+      },
+      "integrity": "sha512-GHzncHbcaS9g95kcvTNtKQW3aCLoR+xc3Jm7qrkpk1R+D2BjMHIPyvQGRPKCdMX95BsH/421jBUK06q9tEwzjw==",
+      "libc": [
+        "glibc"
+      ],
+      "license": "MIT",
+      "name": "@next/swc-linux-arm64-gnu",
+      "optional": true,
+      "os": [
+        "linux"
+      ],
+      "peerDependencies": {},
+      "peerDependenciesMeta": {},
+      "previous_version": "16.3.8",
+      "published": "2026-10-14T17:35:55.845Z",
+      "release_age_eligible_at": "2026-10-21T17:35:55.845000+00:00",
+      "version": "16.4.1"
+    },
+    {
+      "cpu": [
+        "arm64"
+      ],
+      "engines": {
+        "node": ">= 10"
+      },
+      "integrity": "sha512-1SuJyDxW/PR9dHJat/ZRgcYLhuSZ+1psP4DlKb2tKIuXbjygqpLrJWRSq+onZQBv8LcmU67EIrmb6c3XTaJLjw==",
+      "libc": [
+        "musl"
+      ],
+      "license": "MIT",
+      "name": "@next/swc-linux-arm64-musl",
+      "optional": true,
+      "os": [
+        "linux"
+      ],
+      "peerDependencies": {},
+      "peerDependenciesMeta": {},
+      "previous_version": "16.3.8",
+      "published": "2026-10-14T17:30:50.610Z",
+      "release_age_eligible_at": "2026-10-21T17:30:50.610000+00:00",
+      "version": "16.4.1"
+    },
+    {
+      "cpu": [
+        "x64"
+      ],
+      "engines": {
+        "node": ">= 10"
+      },
+      "integrity": "sha512-Istng1hMGp9TGO4lUqeKLd70MPN/OOkucVTP2Nmj+gLkwBgmPqUw8CJYBCC7nbl/B/23bBCcjCI5Hsh6hazC1A==",
+      "libc": [
+        "glibc"
+      ],
+      "license": "MIT",
+      "name": "@next/swc-linux-x64-gnu",
+      "optional": true,
+      "os": [
+        "linux"
+      ],
+      "peerDependencies": {},
+      "peerDependenciesMeta": {},
+      "previous_version": "16.3.8",
+      "published": "2026-10-14T17:29:05.782Z",
+      "release_age_eligible_at": "2026-10-21T17:29:05.782000+00:00",
+      "version": "16.4.1"
+    },
+    {
+      "cpu": [
+        "x64"
+      ],
+      "engines": {
+        "node": ">= 10"
+      },
+      "integrity": "sha512-aSC9wMNiZRRFVpPkPWBzRwLQxIGm/CiQcXyFF1XNcgodb+uMxdk7aSSGGpDXCbnvZdf4itjHxpOd5h7i7zaiYw==",
+      "libc": [
+        "musl"
+      ],
+      "license": "MIT",
+      "name": "@next/swc-linux-x64-musl",
+      "optional": true,
+      "os": [
+        "linux"
+      ],
+      "peerDependencies": {},
+      "peerDependenciesMeta": {},
+      "previous_version": "16.3.8",
+      "published": "2026-10-14T17:29:20.557Z",
+      "release_age_eligible_at": "2026-10-21T17:29:20.557000+00:00",
+      "version": "16.4.1"
+    },
+    {
+      "cpu": [
+        "arm64"
+      ],
+      "engines": {
+        "node": ">= 10"
+      },
+      "integrity": "sha512-t/myvwFDlypMUjRvbBf8qLPyuaB0iXYYdBtwMt6DM6f+60wtGr4bSYholdPqNeV5VUXZhrpMwfza829kmhS3iA==",
+      "libc": null,
+      "license": "MIT",
+      "name": "@next/swc-win32-arm64-msvc",
+      "optional": true,
+      "os": [
+        "win32"
+      ],
+      "peerDependencies": {},
+      "peerDependenciesMeta": {},
+      "previous_version": "16.3.8",
+      "published": "2026-10-14T17:33:35.290Z",
+      "release_age_eligible_at": "2026-10-21T17:33:35.290000+00:00",
+      "version": "16.4.1"
+    },
+    {
+      "cpu": [
+        "x64"
+      ],
+      "engines": {
+        "node": ">= 10"
+      },
+      "integrity": "sha512-6ICqPo9awCkrtYNPhwkx1uU7rlFWrZRrIboDHS2LU+jv088UBYQtmJ25h6pCp27/+FZjF6BQ4Te4ErugyMeuBg==",
+      "libc": null,
+      "license": "MIT",
+      "name": "@next/swc-win32-x64-msvc",
+      "optional": true,
+      "os": [
+        "win32"
+      ],
+      "peerDependencies": {},
+      "peerDependenciesMeta": {},
+      "previous_version": "16.3.8",
+      "published": "2026-10-14T17:29:09.511Z",
+      "release_age_eligible_at": "2026-10-21T17:29:09.511000+00:00",
+      "version": "16.4.1"
+    },
+    {
+      "cpu": null,
+      "engines": {},
+      "integrity": "sha512-T8sWAIbkSyAjkwTcaEc3Iu0o9A27X1/kdXrizhZkGuSKScRQtRzclfAMpOTcGdXCsqxeWlpGy3XjqaW8CpLORg==",
+      "libc": null,
+      "license": "MIT",
+      "name": "@vitest/mocker",
+      "optional": false,
+      "os": null,
+      "peerDependencies": {
+        "msw": "^2.4.9",
+        "vite": "^6.0.0 || ^7.0.0 || ^8.0.0"
+      },
+      "peerDependenciesMeta": {
+        "msw": {
+          "optional": true
+        },
+        "vite": {
+          "optional": true
+        }
+      },
+      "previous_version": "5.0.0",
+      "published": "2026-09-30T11:29:00.625Z",
+      "release_age_eligible_at": "2026-10-07T11:29:00.625000+00:00",
+      "version": "5.0.3"
+    },
+    {
+      "cpu": null,
+      "engines": {},
+      "integrity": "sha512-XhFysQTB8AZ+P4gMi+Lpo99vg2AZi0qKpaB9yXQl37+CaMEAPO3iH/wGVnSyL5MPERiLezpqTVtrR6UZH5GCXg==",
+      "libc": null,
+      "license": "MIT",
+      "name": "@vitest/spy",
+      "optional": false,
+      "os": null,
+      "peerDependencies": {},
+      "peerDependenciesMeta": {},
+      "previous_version": "5.0.0",
+      "published": "2026-09-30T11:30:17.823Z",
+      "release_age_eligible_at": "2026-10-07T11:30:17.823000+00:00",
+      "version": "5.0.3"
+    },
+    {
+      "cpu": null,
+      "engines": {
+        "node": ">=20.9.0"
+      },
+      "integrity": "sha512-uc657V62E34fOI6W5NtG9IzwsPcms0Z60grz2MJGtglgD+pTFnNt4Yw2PzaU622tfX4vhrDgLZzicE2YlhI20Q==",
+      "libc": null,
+      "license": "MIT",
+      "name": "next",
+      "optional": false,
+      "os": null,
+      "peerDependencies": {
+        "@opentelemetry/api": "^1.1.0",
+        "@playwright/test": "^1.51.1",
+        "babel-plugin-react-compiler": "*",
+        "react": "^18.2.0 || 19.0.0-rc-de68d2f4-20241204 || ^19.0.0",
+        "react-dom": "^18.2.0 || 19.0.0-rc-de68d2f4-20241204 || ^19.0.0",
+        "sass": "^1.3.0"
+      },
+      "peerDependenciesMeta": {
+        "@opentelemetry/api": {
+          "optional": true
+        },
+        "@playwright/test": {
+          "optional": true
+        },
+        "babel-plugin-react-compiler": {
+          "optional": true
+        },
+        "sass": {
+          "optional": true
+        }
+      },
+      "previous_version": "16.3.8",
+      "published": "2026-10-14T17:43:55.246Z",
+      "release_age_eligible_at": "2026-10-21T17:43:55.246000+00:00",
+      "version": "16.4.1"
+    },
+    {
+      "cpu": null,
+      "engines": {
+        "node": "^22.12.0 || ^24.0.0 || >=26.0.0"
+      },
+      "integrity": "sha512-xMw97S3rjdtj5dkVat7jCsqWBpvchs3RlpQctUqwJD0KkERk40vz2fJ77lDwW/Vzh/pk18eItYAzkodhSes3jQ==",
+      "libc": null,
+      "license": "MIT",
+      "name": "vitest",
+      "optional": false,
+      "os": null,
+      "peerDependencies": {
+        "@edge-runtime/vm": "*",
+        "@opentelemetry/api": "^1.9.0",
+        "@types/node": "^22.0.0 || >=24.0.0",
+        "@vitest/browser-playwright": "5.0.3",
+        "@vitest/browser-preview": "5.0.3",
+        "@vitest/browser-webdriverio": "^5.0.0-beta.5 || >=5.0.0",
+        "@vitest/coverage-istanbul": "5.0.3",
+        "@vitest/coverage-v8": "5.0.3",
+        "@vitest/ui": "5.0.3",
+        "happy-dom": "*",
+        "jsdom": "*",
+        "vite": "^6.4.0 || ^7.0.0 || ^8.0.0"
+      },
+      "peerDependenciesMeta": {
+        "@edge-runtime/vm": {
+          "optional": true
+        },
+        "@opentelemetry/api": {
+          "optional": true
+        },
+        "@types/node": {
+          "optional": true
+        },
+        "@vitest/browser-playwright": {
+          "optional": true
+        },
+        "@vitest/browser-preview": {
+          "optional": true
+        },
+        "@vitest/browser-webdriverio": {
+          "optional": true
+        },
+        "@vitest/coverage-istanbul": {
+          "optional": true
+        },
+        "@vitest/coverage-v8": {
+          "optional": true
+        },
+        "@vitest/ui": {
+          "optional": true
+        },
+        "happy-dom": {
+          "optional": true
+        },
+        "jsdom": {
+          "optional": true
+        },
+        "vite": {
+          "optional": false
+        }
+      },
+      "previous_version": "5.0.0",
+      "published": "2026-09-30T11:30:42.429Z",
+      "release_age_eligible_at": "2026-10-07T11:30:42.429000+00:00",
+      "version": "5.0.3"
+    },
+    {
+      "cpu": null,
+      "engines": {
+        "node": ">=20.11"
+      },
+      "integrity": "sha512-Tb2FUhB4vUsGQlfSquQLYkApkuPAFQXGFzxWKHHumVz2dK+X1RUm/HnID4+TfIGYJ1kTcwOaCk/buYCEJr6YjQ==",
+      "libc": null,
+      "license": "MIT",
+      "name": "why-is-node-running",
+      "optional": false,
+      "os": null,
+      "peerDependencies": {},
+      "peerDependenciesMeta": {},
+      "previous_version": "2.3.0",
+      "published": "2024-10-29T17:08:48.344Z",
+      "release_age_eligible_at": "2024-11-05T17:08:48.344000+00:00",
+      "version": "3.2.1"
+    }
+  ],
+  "circleci_recovery": {
+    "audit": "No known vulnerabilities found",
+    "correction": "Update exact SBOM inventory count to 263 in CircleCI script and byte-equivalent Actions source; preserve all other checks",
+    "failed_pipeline": 63,
+    "failure": "SBOM validator required old 265-entry inventory; reviewed graph has 263",
+    "preparation_tests": {
+      "ci_parity_tests": 6,
+      "result": "pass",
+      "sbom_validation_cases": 2
+    },
+    "tested_sha": "aaeb215b2502238a41729da17ebf2bd1f54dbbfa"
+  },
+  "existing_age_waiver": [
+    "source-map-js@1.2.2"
+  ],
+  "full_registry_review_sha256": "721350fd1ea91b179dc5f93e4376d7c506c7adce4cbdeafad2da4d07ca77986f",
+  "graph_sha256": "7ee7f5d8ecc21d5c3e3544a41292c8525fbd1fa90a92284729e95969807e3d6d",
+  "license_inventory": {
+    "0BSD": 1,
+    "Apache-2.0": 36,
+    "Apache-2.0 AND LGPL-3.0-or-later": 3,
+    "Apache-2.0 AND LGPL-3.0-or-later AND MIT": 1,
+    "BSD-2-Clause": 6,
+    "BSD-3-Clause": 4,
+    "BlueOak-1.0.0": 1,
+    "CC-BY-4.0": 1,
+    "ISC": 16,
+    "LGPL-3.0-or-later": 10,
+    "MIT": 172,
+    "MPL-2.0": 12
+  },
+  "minimum_release_age_minutes": 10080,
+  "preparation_validation": {
+    "certification_provider": "CircleCI",
+    "circleci_result": "NOT_RUN",
+    "dependency_policy_regression_tests": {
+      "duration_seconds": 0.1,
+      "passed": 2
+    }
+  },
+  "registry": "https://registry.npmjs.org/",
+  "registry_package_count_after": 263,
+  "registry_package_count_before": 265,
+  "removed_packages": [
+    "siginfo@2.0.0",
+    "stackback@0.0.2"
+  ],
+  "reviewed_at": "2026-10-22T22:01:01.199405+00:00",
+  "reviewed_license_exceptions": 16,
+  "unchanged_package_entries": 249
+}

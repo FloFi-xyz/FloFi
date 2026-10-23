@@ -273,7 +273,7 @@ BUILD002_REVIEWED_LICENSE_EXCEPTIONS = {'@img/sharp-libvips-darwin-arm64@1.3.4':
 
 BUILD002_DIRECT_VERSIONS = {
     "@xyflow/react": "12.11.6",
-    "next": "16.3.8",  # security patch for the next@<16.3.8 advisories (same dependency set; only @next/* versions move)
+    "next": "16.4.1",  # BUILD-CHAT-E2E-001: fixes the three October Next.js advisories; sharp remains pinned.
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "@playwright/test": "1.63.0",
@@ -332,7 +332,8 @@ BUILDMCP001_DIRECT_VERSIONS = {
 # BUILD-CLOUD-001 adds 15 registry packages (pg, @types/pg and their MIT/ISC dependencies) to the 247;
 # Current main retains 262 after the Colosseum security updates; BUILD-MCP-001 adds
 # 3 (@modelcontextprotocol/server, @modelcontextprotocol/core, zod) to that graph.
-REGISTRY_PACKAGE_COUNT = 265
+# BUILD-CHAT-E2E-001: Vitest 5.0.3 requires why-is-node-running 3.2.1, removing siginfo and stackback.
+REGISTRY_PACKAGE_COUNT = 263
 
 # The pre-existing BUILD-001 MPL tooling exception is exact-name scoped too.
 BUILD001_LIGHTNINGCSS_NAMES = {
@@ -380,7 +381,7 @@ def verify_dependencies():
     if lock.count("\npackages:\n") != 1 or lock.count("\nsnapshots:\n") != 1:
         raise RuntimeError("Unrecognized lockfile sections")
     resolved_sections = "packages:\n" + lock.split("\npackages:\n", 1)[1]
-    if hashlib.sha256(resolved_sections.encode()).hexdigest() != "63b1d131ebad9589386f70938033c006f335a4f2859f8b098b10159399a7d688":
+    if hashlib.sha256(resolved_sections.encode()).hexdigest() != "7ee7f5d8ecc21d5c3e3544a41292c8525fbd1fa90a92284729e95969807e3d6d":
         errors.append("Baseline registry packages/snapshots or peer resolutions changed")
     packages_text = lock.split("\npackages:\n", 1)[1].split("\nsnapshots:\n", 1)[0]
     snapshots_text = lock.split("\nsnapshots:\n", 1)[1]
@@ -569,7 +570,7 @@ def verify_dependencies():
                     result[pair[0].strip("'")] = pair[1].strip("'")
         return result
 
-    next_keys = [key for key in snapshot_blocks if key.startswith("next@16.3.8(")]
+    next_keys = [key for key in snapshot_blocks if key.startswith("next@16.4.1(")]
     if len(next_keys) != 1:
         errors.append(f"Expected one pinned Next snapshot, found {len(next_keys)}")
     next_block = snapshot_blocks.get(next_keys[0], "") if len(next_keys) == 1 else ""

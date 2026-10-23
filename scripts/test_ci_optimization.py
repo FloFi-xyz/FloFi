@@ -11,6 +11,7 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import tarfile
 import unittest
@@ -250,7 +251,7 @@ class FullDependencyGate(unittest.TestCase):
     def test_full_inventory_and_existing_exceptions_pass(self):
         self.verify()
         evidence = json.loads((Path(self.scratch.name) / 'build-002-dependencies.json').read_text())
-        self.assertEqual(len(evidence), 265)
+        self.assertEqual(len(evidence), 263)
 
     def test_integrity_license_age_platform_and_missing_entry_fail_without_evidence(self):
         mutations = ['integrity', 'license', 'age', 'platform', 'missing']
@@ -268,6 +269,58 @@ class FullDependencyGate(unittest.TestCase):
                     self.verify()
                 self.assertFalse((Path(self.scratch.name) / 'build-002-dependencies.json').exists())
                 self.registry = saved
+
+
+class SbomValidation(unittest.TestCase):
+    """Run the actual SBOM validator against complete and corrupted inventories."""
+    def setUp(self):
+        self.scratch = tempfile.TemporaryDirectory()
+        self.addCleanup(self.scratch.cleanup)
+        self.directory = Path(self.scratch.name)
+        script = (ROOT / '.circleci/scripts/ci-sbom.sh').read_text()
+        self.validator = script.split("python3 - <<'PYCODE'\n", 1)[1].rsplit('\nPYCODE', 1)[0]
+        lock = (ROOT / 'pnpm-lock.yaml').read_text().split('\npackages:\n')[1].split('\nsnapshots:\n')[0]
+        identities = [identity.strip("'").rsplit('@', 1) for identity in re.findall(r'(?m)^  (\S[^\n]*):$', lock)]
+        self.evidence = [
+            {'name': name, 'version': version, 'license': bootstrap.BUILD002_REVIEWED_LICENSE_EXCEPTIONS.get(
+                name + '@' + version, {}).get('license', 'MIT')}
+            for name, version in identities
+        ]
+        components = [{'name': row['name'], 'version': row['version'],
+                       'bom-ref': row['name'] + '@' + row['version']} for row in self.evidence]
+        self.document = {
+            'bomFormat': 'CycloneDX', 'specVersion': '1.6', 'components': components,
+            'metadata': {'component': {'name': 'defi-workflow-engine', 'version': '0.1.0',
+                                      'bom-ref': 'root', 'licenses': [{'license': {'id': 'Apache-2.0'}}]}},
+            'dependencies': [{'ref': component['bom-ref'], 'dependsOn': []} for component in components]
+                            + [{'ref': 'root', 'dependsOn': []}],
+        }
+
+    def validate(self):
+        sbom = self.directory / 'build-003a.cdx.json'
+        sbom.write_text(json.dumps(self.document))
+        (self.directory / 'build-002-dependencies.json').write_text(json.dumps(self.evidence))
+        result = subprocess.run([sys.executable, '-c', self.validator], cwd=ROOT, capture_output=True, text=True,
+                                env={**os.environ, 'RUNNER_TEMP': str(self.directory),
+                                     'GITHUB_STEP_SUMMARY': str(self.directory / 'summary.md')}, timeout=10)
+        self.assertFalse(sbom.exists(), 'The SBOM must be removed after success or failure')
+        return result
+
+    def test_complete_reviewed_inventory_passes(self):
+        result = self.validate()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('263 exact registry components', result.stdout)
+
+    def test_missing_duplicate_unreviewed_and_dangling_components_fail(self):
+        saved = json.dumps(self.document)
+        for corruption in ['missing', 'duplicate', 'unreviewed', 'dangling']:
+            with self.subTest(corruption=corruption):
+                self.document = json.loads(saved)
+                if corruption == 'missing': self.document['components'].pop()
+                elif corruption == 'duplicate': self.document['components'].append(self.document['components'][0])
+                elif corruption == 'unreviewed': self.document['components'][0]['version'] = '0.0.0-unreviewed'
+                else: self.document['dependencies'][0]['dependsOn'] = ['unreviewed-ref']
+                self.assertNotEqual(self.validate().returncode, 0)
 
 
 class WorkflowInvariants(unittest.TestCase):
