@@ -42,7 +42,8 @@ describe('BUILD-RH-002 Robinhood Chain strategies', () => {
     const again = ok(composeWorkflow({ version: 2, steps: w.steps.map(s => s.strategy) }));
     expect(again.workflowHash).toBe(w.workflowHash);
     expect(ok(composeWorkflow({ version: 2, steps: [BUY_TSLA] })).workflowHash).toBe(ok(composeStrategy(BUY_TSLA)).workflowHash);
-    expect(workflowPlan(w)).toMatchObject({ kind: 'NOT_EXECUTABLE', reason: 'MULTI_STEP_SEQUENCE_NOT_IMPLEMENTED', networks: ['base', 'robinhood'] });
+    // BUILD-CHAT-E2E-001: each step has its own owner-execution flow, so the workflow run executes the sequence step by step.
+    expect(workflowPlan(w)).toMatchObject({ kind: 'SEQUENTIAL', reason: null, networks: ['base', 'robinhood'] });
     // Each step's review is a mainnet (real-funds) review; nothing is approved by it.
     for (const step of w.steps) expect(reviewComposition(step)).toMatchObject({ environment: 'MAINNET' });
     expect(reviewComposition(w.steps[1]!).findings.map(f => f.code)).toEqual(expect.arrayContaining(['REAL_FUNDS', 'OWNER_APPROVAL_REQUIRED']));
@@ -50,7 +51,7 @@ describe('BUILD-RH-002 Robinhood Chain strategies', () => {
   it('the shared visual names every network and asset: USDC → USDG into Robinhood Chain, USDG → TSLA, AAPL transfer, real funds', () => {
     registerNetworkCatalog(officialCatalog());
     const visual = workflowVisualModel(ok(composeWorkflow({ version: 2, steps: [BRIDGE_IN, BUY_TSLA, SEND_AAPL] })));
-    expect(visual).toMatchObject({ fundsClass: 'REAL_FUNDS', networks: ['Base', 'Robinhood Chain'], warnings: ['REAL_FUNDS', 'SEQUENCE_NOT_EXECUTABLE'] });
+    expect(visual).toMatchObject({ fundsClass: 'REAL_FUNDS', networks: ['Base', 'Robinhood Chain'], warnings: ['REAL_FUNDS', 'SEQUENCE_STEP_BY_STEP'] });
     expect(visual.steps.map(s => [s.action, s.network, s.toNetwork, s.amounts.map(a => `${a.amount} ${a.asset}`).join(), s.toAsset])).toEqual([
       ['BRIDGE', 'Base', 'Robinhood Chain', '100 USDC', 'USDG'], ['SWAP', 'Robinhood Chain', null, '50 USDG', 'TSLA'], ['TRANSFER', 'Robinhood Chain', null, '3 AAPL', null]]);
     expect(visual.connections).toEqual([{ from: 's1', to: 's2' }, { from: 's2', to: 's3' }]);

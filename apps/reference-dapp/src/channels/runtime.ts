@@ -11,6 +11,8 @@ import { channelApprovalScheme, type ChannelPlatform } from './core/approval.ts'
 import type { ChannelCoreConfig } from './core/config.ts';
 import { createPgChannelStore } from './core/pg-store.ts';
 import type { ChannelStore } from './core/store.ts';
+import { createPgWorkflowRunStore } from '../workflow-runs/pg-store.ts';
+import { workflowRunsEnabled } from '../workflow-runs/service.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
 export type ChannelHost = { readonly db: Database; readonly tenantId: string };
@@ -30,5 +32,7 @@ export async function channelHost(env: Env, core: ChannelCoreConfig, host?: Chan
 export function channelRuntime(env: Env, core: ChannelCoreConfig, host: ChannelHost, runtime?: EngineRuntime): ChannelRuntime {
   const store = createPgChannelStore(host.db, host.tenantId);
   return { store, platform: { origin: core.origin, scheme: channelApprovalScheme(core.keys), handoffs: createPgHandoffStore(host.db, host.tenantId), allow: store.allow,
-    runtime: runtime ?? deploymentEngineRuntime(env), policy: core.policy } };
+    runtime: runtime ?? deploymentEngineRuntime(env), policy: core.policy,
+    // BUILD-CHAT-E2E-001: a multi-step approval's run (status and notifications), where this deployment runs workflows.
+    workflowRuns: workflowRunsEnabled(env) ? createPgWorkflowRunStore(host.db, host.tenantId) : null } };
 }

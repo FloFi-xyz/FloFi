@@ -132,8 +132,8 @@ describe('BUILD-AUTOMATION-002 delegated execution: limits, revocation, recovery
       expect(prepared.state).toBe('UNCERTAIN');
       const { executeOccurrence } = await import('./executor.ts');
       // The retried delivery: same persisted bytes, re-broadcast; reconciliation settles.
-      await executeOccurrence(h.deps, e.occurrenceId, e.authorizationId);
-      await executeOccurrence(h.deps, e.occurrenceId, e.authorizationId);
+      await executeOccurrence(h.deps, e.occurrenceId!, e.authorizationId);
+      await executeOccurrence(h.deps, e.occurrenceId!, e.authorizationId);
       e = await last(h);
       expect(e.state).toBe('SETTLED');
       const after = (await h.store.steps(e.executionId))[0]!;
@@ -152,7 +152,7 @@ describe('BUILD-AUTOMATION-002 delegated execution: limits, revocation, recovery
       await h.drain();
       const { executeOccurrence } = await import('./executor.ts');
       let e = await last(h);
-      for (let i = 0; i < 4 && e.state !== 'SETTLED'; i++) { await executeOccurrence(h.deps, e.occurrenceId, e.authorizationId); e = await last(h); }
+      for (let i = 0; i < 4 && e.state !== 'SETTLED'; i++) { await executeOccurrence(h.deps, e.occurrenceId!, e.authorizationId); e = await last(h); }
       expect(e.state).toBe('SETTLED');
       expect(h.evm.control.sends()).toBe(2);
       expect((await h.store.budget(created.authorizationId)).map(b => [b.state, b.spent])).toEqual([['SPENT', 50_000_000n]]);

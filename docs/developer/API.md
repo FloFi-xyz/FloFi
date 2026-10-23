@@ -88,7 +88,8 @@ enabledByDeployment, enabledByPolicy, demonstratedEvidence, mockedHarness}`, `su
 
 - The strategy is immutable: there is no update endpoint and the database refuses changes. A changed intent is a new strategy.
 - `executionPlan.kind`: `SINGLE_FLOW` (one action, one FloFi flow), `COMPOSITE_FLOW` (the Base Sepolia lending composition),
-  `NOT_EXECUTABLE` with its reason (general multi-step lists: `MULTI_STEP_SEQUENCE_NOT_IMPLEMENTED`).
+  `SEQUENTIAL` (several steps, each with its own flow, executed in order by a workflow run where the deployment enables workflow runs),
+  `NOT_EXECUTABLE` with its reason (e.g. a step without an owner flow, or `DEPENDENT_AMOUNT_SOURCE_NOT_IMPLEMENTED` for a bound amount).
 - `validation.preExecution` lists what FloFi's own flow does with the owner before anything can be signed (for example a fresh
   route quote); these are not blockers.
 - Unreferenced strategies are deleted after 90 days.
@@ -201,7 +202,7 @@ secrets.
 | 409 | `STRATEGY_STALE` | `STRATEGY_STALE` |
 | 409 | `IDEMPOTENCY_CONFLICT`, `IDEMPOTENCY_IN_PROGRESS` | — |
 | 410 | `APPROVAL_EXPIRED` | `APPROVAL_EXPIRED`, `APPROVAL_REVOKED`, `APPROVAL_STALE`, `APPROVAL_SUPERSEDED` |
-| 422 | `CAPABILITY_NOT_SUPPORTED` | `MULTI_STEP_SEQUENCE_NOT_IMPLEMENTED`, `OWNER_EXECUTION_NOT_IMPLEMENTED`, `FLOW_NOT_ENABLED_IN_DEPLOYMENT`, `SIMULATE_ONE_STEP_AT_A_TIME`, `SIMULATION_LOCAL_FORK_ONLY` |
+| 422 | `CAPABILITY_NOT_SUPPORTED` | `WORKFLOW_RUNS_NOT_ENABLED`, `DEPENDENT_AMOUNT_SOURCE_NOT_IMPLEMENTED`, `OWNER_EXECUTION_NOT_IMPLEMENTED`, `FLOW_NOT_ENABLED_IN_DEPLOYMENT`, `SIMULATE_ONE_STEP_AT_A_TIME`, `SIMULATION_LOCAL_FORK_ONLY` |
 | 422 | `REVIEW_BLOCKED` | `REVIEW_BLOCKED` (blockers in `issues`) |
 | 422 | `SIMULATION_FAILED` | the flow's classified code |
 | 429 | `RATE_LIMITED` | `REQUESTS_PER_MINUTE`, `SIMULATIONS_PER_HOUR`, `APPROVALS_PER_HOUR`, `PENDING_APPROVALS` |

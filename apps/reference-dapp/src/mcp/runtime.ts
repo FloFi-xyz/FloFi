@@ -12,6 +12,7 @@
  * a tool argument; the runtime answers `null` for any run that wallet does not own.
  */
 import type { FlowName } from '../../backend/flows.ts';
+import type { DelegationFacts } from '../workflow-runs/authorization-plan.ts';
 import type { CloudRunSummary } from '../server/cloud-api-client.ts';
 import { cloudFlow, cloudFlowMode, cloudPreview, cloudRun, cloudRunJournal, cloudRuns, flowRuntimeKind, type CloudJournalPage, type CloudRun, type EmbeddedRuntime,
   type FlowRuntimeKind, type FlowRuntimeMode } from '../server/flow-runtime.ts';
@@ -40,7 +41,14 @@ export type McpRuntime = {
    * It contains executable material and is never returned to an MCP client.
    */
   readonly record?: (flow: FlowName, runId: string, owner: string) => Promise<Result<unknown>>;
+  /**
+   * BUILD-CHAT-E2E-001: whether this deployment runs multi-step workflows (`FLOFI_WORKFLOW_RUNS=enabled`) and its delegated-execution facts
+   * (null: delegation not enabled; otherwise its capability mode and why it cannot sign here, e.g. DELEGATED_SIGNER_UNAVAILABLE). Absent:
+   * sequences are not enabled.
+   */
+  readonly sequences?: () => Promise<SequenceFacts>;
 };
+export type SequenceFacts = { readonly enabled: boolean; readonly delegation: DelegationFacts };
 
 const REQUIRED: Result<never> = { ok: false, code: 'MCP_CLOUD_RUNTIME_REQUIRED' };
 async function evidenceOf(flow: FlowName, record: Result<unknown> | null): Promise<Result<EvidenceRecord | null>> {
@@ -71,6 +79,7 @@ export function deploymentRuntime(env: Env = process.env): McpRuntime {
     evidence: async (flow, runId, owner) => evidenceOf(flow, await cloudFlow(flow, 'status', [runId], { env, principal: owner })),
     runs: async (flow, owner) => await cloudRuns(flow, owner, env) ?? REQUIRED,
     record: async (flow, runId, owner) => await cloudFlow<unknown>(flow, 'status', [runId], { env, principal: owner }) ?? REQUIRED,
+    sequences: async () => (await import('../workflow-runs/facts.ts')).sequenceFacts(env),
   };
 }
 

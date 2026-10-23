@@ -139,14 +139,24 @@ async function main(): Promise<void> {
     if ('disabled' in parts) logger.error('delegation.worker_disabled', { error_code: parts.disabled, reason: parts.reason ?? undefined });
     else { delegation = parts; logger.info('delegation.worker_enabled', { kinds: Object.keys(parts.handlers).join(',') }); }
   }
-  const handlers = { ...automations?.handlers, ...delegation?.handlers, ...backend.handlers };
+  // BUILD-CHAT-E2E-001: multi-step workflow runs, opt-in (FLOFI_WORKFLOW_RUNS=enabled): observes owner-signed steps through this worker's own
+  // flow services (read-only) and mirrors delegated executions; it never signs or submits. Off: nothing below changes.
+  let workflowRuns: { readonly handlers: Readonly<Record<string, WorkHandler>>; readonly sweep: () => Promise<unknown> } | null = null;
+  if (process.env.FLOFI_WORKFLOW_RUNS === 'enabled') {
+    const parts = await import('./workflow-run-worker.ts').then(m => m.loadWorkflowRunWorker(process.env, db, config.tenantId, logger, backend))
+      .catch(() => ({ disabled: 'WORKFLOW_RUN_WORKER_LOAD_FAILED', reason: null }));
+    if ('disabled' in parts) logger.error('workflow_run.worker_disabled', { error_code: parts.disabled, reason: parts.reason ?? undefined });
+    else { workflowRuns = parts; logger.info('workflow_run.worker_enabled', { kinds: Object.keys(parts.handlers).join(',') }); }
+  }
+  const handlers = { ...automations?.handlers, ...delegation?.handlers, ...workflowRuns?.handlers, ...backend.handlers };
   // BUILD-CLOUD-PARITY-001: a worker serves only its deployment's tenant, so a shared database never mixes deployments' runs.
   // BUILD-AUTOMATION-001: and it claims only the work kinds it has handlers for: another service's items are left to that service
   // instead of being dead-lettered here.
   const tenantQueue = createPostgresWorkQueue({ db, ownerId: config.workerId, tenantId: config.tenantId });
   const queue = { ...tenantQueue, claim: (limit: number) => tenantQueue.claim(limit, Object.keys(handlers)) };
   const worker = createWorker({ queue, handlers, logger, workerId: config.workerId, concurrency: config.workerConcurrency,
-    sweep: async () => { try { await sweep(db, { tenantId: config.tenantId }); } finally { await automations?.sweep(); await delegation?.sweep().catch(() => undefined); } } });
+    sweep: async () => { try { await sweep(db, { tenantId: config.tenantId }); } finally { await automations?.sweep(); await delegation?.sweep().catch(() => undefined);
+      await workflowRuns?.sweep().catch(() => undefined); } } });
   const shutdown = () => { logger.info('worker.stopping'); worker.stop().finally(() => db.close().finally(() => process.exit(0))); setTimeout(() => process.exit(1), 120_000).unref(); };
   process.once('SIGTERM', shutdown); process.once('SIGINT', shutdown);
   await worker.start();

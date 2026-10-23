@@ -17,9 +17,14 @@
  * Failures: BLOCKED (nothing submitted; reservation released), HALTED (a later step could not proceed after an irreversible one; funds rest
  * in the owner's own account; attention), UNCERTAIN (outcome unknown; reservation kept), FAILED (reconciled failure). Recovery only re-reads
  * state, re-broadcasts the persisted bytes and reconciles; it never signs a second, different transaction for a step.
+ *
+ * BUILD-CHAT-E2E-001: the source of an execution is an automation occurrence (`executeOccurrence`) or a conversational workflow run
+ * (`executeWorkflowRun`, at most one execution per run). Everything after the source check is the same pipeline. A step bound to an earlier
+ * step's output (`bindings`) spends min(cap, the producer's reconciled received amount of that asset): its requirement and grant need are
+ * narrowed to that amount before the fresh simulation, so the policy check binds the exact narrowed amount and never more than the cap.
  */
 import { erc7710, fromBase64, parseTransaction, verifyEd25519 } from '@defi-workflow-engine/reference-compiler';
-import type { AutomationStore, OccurrenceRecord, RuleRecord } from '../automations/store.ts';
+import type { AutomationStore } from '../automations/store.ts';
 import { verifyAssertion } from '../passkeys/webauthn.ts';
 import { ADAPTERS, delegationOf, passkeyAnchor } from './adapters.ts';
 import { resolveAuthorityGraph, type StepBinding } from './authority.ts';
@@ -31,7 +36,14 @@ import { authorizationDigest, credentialCommitments, executionSpend, manifestHas
 import type { DelegationStore, ExecutionRecord, GrantRecord, RevisionRecord, StepRecord } from './pg-store.ts';
 import { periodStarts, reservationViolation, stepPolicyViolation, type StepPlan } from './policy.ts';
 import type { ExecutionState } from './state-machine.ts';
-import { assetKey, workflowRequirement, type WorkflowRequirement } from './steps.ts';
+import { assetKey, narrowedStep, workflowRequirement, type StepRequirement, type WorkflowRequirement } from './steps.ts';
+import { boundAmount } from '../engine/workflow-bindings';
+import type { StrategyInput } from '../engine/strategy-spec';
+import type { Owner } from './pg-store.ts';
+
+/** BUILD-CHAT-E2E-001: what the executor reads of a workflow run (its own store, `src/workflow-runs`). */
+export type DelegatedRunSource = { readonly runId: string; readonly owner: Owner; readonly strategy: StrategyInput; readonly workflowHash: string;
+  readonly mode: string | null; readonly authorizationId: string | null; readonly state: string };
 
 export type ExecutorDeps = {
   readonly store: DelegationStore; readonly automations: Pick<AutomationStore, 'occurrenceById' | 'ruleById'>; readonly config: DelegationConfig;
@@ -40,7 +52,11 @@ export type ExecutorDeps = {
   readonly signer: SignerUser; readonly now: () => Date; readonly newId: (prefix: 'dex') => string;
   readonly log: (event: string, fields: Readonly<Record<string, string | number | boolean | null>>) => void;
   readonly drivers?: readonly StepDriver[];
+  /** BUILD-CHAT-E2E-001: workflow runs, for executions whose source is a run. */
+  readonly workflowRuns?: { readonly byId: (runId: string) => Promise<DelegatedRunSource | null> };
 };
+/** The source's own facts every pass re-checks against the signed revision (the workflow it binds, its strategy and owner). */
+type SourceFacts = { readonly owner: Owner; readonly strategy: unknown; readonly workflowHash: string | null };
 export type ExecutionOutcome = { readonly executionId: string | null; readonly state: ExecutionState | 'SKIPPED'; readonly code: string | null; readonly retryMs: number | null };
 type Chain = { readonly requirement: WorkflowRequirement; readonly manifest: DelegatedAuthorizationManifest; readonly bindings: readonly StepBinding[];
   readonly grants: ReadonlyMap<string, GrantRecord> };
@@ -56,22 +72,22 @@ const planOf = (stored: Readonly<Record<string, unknown>> | null): StepPlan | nu
 };
 
 /** The whole authority chain of one execution (see the module comment). Read-only except grant re-verification bookkeeping. */
-async function verifyAuthorityChain(deps: ExecutorDeps, rule: RuleRecord, occurrence: OccurrenceRecord, revision: RevisionRecord): Promise<{ ok: true; chain: Chain } | { ok: false; code: string }> {
+async function verifyAuthorityChain(deps: ExecutorDeps, source: SourceFacts, revision: RevisionRecord): Promise<{ ok: true; chain: Chain } | { ok: false; code: string }> {
   const now = deps.now(), m = revision.manifest;
   if (revision.state !== 'ACTIVE' || !revision.envelope || !revision.assertion || !revision.passkeyId) return { ok: false, code: 'AUTHORIZATION_NOT_ACTIVE' };
-  if (!rule.binding || rule.binding.workflowHash !== revision.workflowHash || occurrence.workflowHash !== revision.workflowHash) return { ok: false, code: 'AUTHORIZATION_WORKFLOW_MISMATCH' };
-  const req = workflowRequirement(occurrence.strategy, revision.workflowHash);
+  if (source.workflowHash === null || source.workflowHash !== revision.workflowHash) return { ok: false, code: 'AUTHORIZATION_WORKFLOW_MISMATCH' };
+  const req = workflowRequirement(source.strategy, revision.workflowHash);
   if (!req.ok) return { ok: false, code: req.code === 'STRATEGY_WORKFLOW_HASH_MISMATCH' ? 'AUTHORIZATION_WORKFLOW_MISMATCH' : req.code };
   if (manifestHash(m) !== revision.manifestHash || m.revision !== revision.revision || m.authorizationId !== revision.authorizationId) return { ok: false, code: 'MANIFEST_INTEGRITY' };
   const problem = manifestProblem(m, req.value);
   if (problem) return { ok: false, code: problem };
-  if (m.owner !== `${rule.owner.namespace}:${rule.owner.address}`) return { ok: false, code: 'AUTHORIZATION_OWNER_MISMATCH' };
+  if (m.owner !== `${source.owner.namespace}:${source.owner.address}`) return { ok: false, code: 'AUTHORIZATION_OWNER_MISMATCH' };
   // The owner's ONE signature: the passkey assertion over the exact envelope, which commits to this manifest, environment and grants.
   const envelope = revision.envelope, digest = authorizationDigest(envelope);
   if (digest !== revision.envelopeDigest || envelope.manifestHash !== revision.manifestHash || envelope.workflowHash !== revision.workflowHash
     || envelope.environment.tenant !== deps.config.tenantId || envelope.environment.origin !== deps.config.passkeyOrigin || envelope.passkeyId !== revision.passkeyId
     || envelope.owner !== m.owner || !sameArtifact(envelope.credentials, credentialCommitments(m))) return { ok: false, code: 'AUTHORIZATION_ENVELOPE_MISMATCH' };
-  const passkey = await deps.store.passkey(rule.owner, revision.passkeyId);
+  const passkey = await deps.store.passkey(source.owner, revision.passkeyId);
   if (!passkey || passkey.revokedAt) return { ok: false, code: 'PASSKEY_REVOKED' };
   try {
     verifyAssertion(revision.assertion as never, { challenge: digestBytes(digest), origin: deps.config.passkeyOrigin, rpId: passkey.rpId, credentialId: passkey.credentialId,
@@ -81,7 +97,7 @@ async function verifyAuthorityChain(deps: ExecutorDeps, rule: RuleRecord, occurr
   const grants = new Map<string, GrantRecord>();
   for (const c of m.credentials) {
     const g = await deps.store.grantById(c.grantId);
-    if (!g || g.owner.namespace !== rule.owner.namespace || g.owner.address !== rule.owner.address) return { ok: false, code: 'CREDENTIAL_NOT_FOUND' };
+    if (!g || g.owner.namespace !== source.owner.namespace || g.owner.address !== source.owner.address) return { ok: false, code: 'CREDENTIAL_NOT_FOUND' };
     if (g.commitment !== c.grantCommitment || g.walletAddress !== c.walletAddress) return { ok: false, code: 'GRANT_COMMITMENT_MISMATCH' };
     if (g.passkeyId !== passkey.passkeyId) return { ok: false, code: 'GRANT_PASSKEY_MISMATCH' };
     const anchor = passkeyAnchor({ owner: m.owner, grantId: g.grantId, chain: g.chain, walletAddress: g.walletAddress, passkeyId: passkey.passkeyId, publicKeySpki: passkey.publicKeySpki });
@@ -125,8 +141,34 @@ export async function executeOccurrence(deps: ExecutorDeps, occurrenceId: string
   const revisionNumber = authorization.activeRevision ?? authorization.latestRevision;
   const revision = await deps.store.revision(authorizationId, revisionNumber);
   if (!revision) return { executionId: null, state: 'SKIPPED', code: 'AUTHORIZATION_NOT_FOUND', retryMs: null };
-  let e = await deps.store.ensureExecution({ executionId: deps.newId('dex'), authorizationId, revision: revisionNumber, owner: rule.owner, ruleId: rule.ruleId, occurrenceId,
+  const e = await deps.store.ensureExecution({ executionId: deps.newId('dex'), authorizationId, revision: revisionNumber, owner: rule.owner, ruleId: rule.ruleId, occurrenceId,
     workflowHash: revision.workflowHash, manifestHash: revision.manifestHash, stepCount: revision.manifest.workflow.stepCount }, deps.now());
+  // An occurrence binds its rule's workflow only while the rule still binds the occurrence's own workflow hash.
+  return drive(deps, e, revision, { owner: rule.owner, strategy: occurrence.strategy,
+    workflowHash: rule.binding && rule.binding.workflowHash === occurrence.workflowHash ? occurrence.workflowHash : null });
+}
+
+/**
+ * BUILD-CHAT-E2E-001: drives the ONE delegated execution of a conversational workflow run as far as it can go now. The run must be DELEGATED
+ * under exactly this authorization; its strategy and workflow hash are the run's own (fixed at the claim) and must still be what the owner's
+ * passkey signed. Throws only for infrastructure failures (the work item retries).
+ */
+export async function executeWorkflowRun(deps: ExecutorDeps, runId: string, authorizationId: string): Promise<ExecutionOutcome> {
+  if (!deps.workflowRuns) return { executionId: null, state: 'SKIPPED', code: 'WORKFLOW_RUNS_UNAVAILABLE', retryMs: null };
+  const run = await deps.workflowRuns.byId(runId);
+  if (!run || run.mode !== 'DELEGATED' || run.authorizationId !== authorizationId) return { executionId: null, state: 'SKIPPED', code: 'WORKFLOW_RUN_NOT_DELEGATED', retryMs: null };
+  const authorization = await deps.store.authorizationById(authorizationId);
+  if (!authorization || authorization.workflowRunId !== runId) return { executionId: null, state: 'SKIPPED', code: 'AUTHORIZATION_NOT_FOUND', retryMs: null };
+  const revisionNumber = authorization.activeRevision ?? authorization.latestRevision;
+  const revision = await deps.store.revision(authorizationId, revisionNumber);
+  if (!revision) return { executionId: null, state: 'SKIPPED', code: 'AUTHORIZATION_NOT_FOUND', retryMs: null };
+  const e = await deps.store.ensureRunExecution({ executionId: deps.newId('dex'), authorizationId, revision: revisionNumber, owner: run.owner, workflowRunId: runId,
+    workflowHash: revision.workflowHash, manifestHash: revision.manifestHash, stepCount: revision.manifest.workflow.stepCount }, deps.now());
+  return drive(deps, e, revision, { owner: run.owner, strategy: run.strategy, workflowHash: run.workflowHash });
+}
+
+async function drive(deps: ExecutorDeps, start: ExecutionRecord, revision: RevisionRecord, source: SourceFacts): Promise<ExecutionOutcome> {
+  let e = start;
   const log = (event: string, extra: Readonly<Record<string, string | number | boolean | null>> = {}) => deps.log(event, { execution: e.executionId, state: e.state, ...extra });
   const move = async (to: ExecutionState, patch: Parameters<DelegationStore['transition']>[3] = {}): Promise<boolean> => {
     const next = await deps.store.transition(e.executionId, { version: e.version, from: [e.state] }, to, patch, deps.now());
@@ -138,7 +180,7 @@ export async function executeOccurrence(deps: ExecutorDeps, occurrenceId: string
   if (['SETTLED', 'BLOCKED', 'FAILED', 'HALTED'].includes(e.state)) return outcome();
 
   // Every pass re-establishes the authority chain (nothing is cached across passes or processes).
-  const verified = await verifyAuthorityChain(deps, rule, occurrence, revision);
+  const verified = await verifyAuthorityChain(deps, source, revision);
   if (e.state === 'QUEUED') {
     if (!verified.ok || revision.revision !== e.revision) { await move('BLOCKED', { code: verified.ok ? 'AUTHORIZATION_REVISION_CHANGED' : verified.code }); return outcome(); }
     if (!await move('AUTHORITY_VERIFIED')) return outcome(PENDING_RETRY_MS);
@@ -195,11 +237,15 @@ async function run(deps: ExecutorDeps, start: ExecutionRecord, verified: Awaited
       if (['PENDING', 'SIMULATED', 'POLICY_VERIFIED'].includes(step.state)) return stopBefore(k, 'DELEGATION_CHAIN_UNAVAILABLE');
       return outcome(PENDING_RETRY_MS);
     }
-    const binding = verified.ok ? verified.chain.bindings.find(b => b.stepIndex === k) : null;
+    const pinned = verified.ok ? verified.chain.bindings.find(b => b.stepIndex === k) : null;
+    // BUILD-CHAT-E2E-001: a step bound to an earlier step's output spends min(cap, that step's reconciled received amount).
+    const bound = verified.ok && pinned ? boundStep(verified.chain.requirement, k, pinned, [...steps.values()]) : null;
+    const binding = bound?.ok ? bound.binding : null;
     // Before anything new is submitted the whole chain must still verify (revocation, expiry, edits, external disable).
     if (['PENDING', 'SIMULATED', 'POLICY_VERIFIED'].includes(step.state)) {
-      if (!verified.ok || !binding) return stopBefore(k, verified.ok ? 'STEP_BINDING_MISSING' : verified.code);
-      const ctx: StepContext = { step: verified.chain.requirement.steps[k]!, binding, grant, transport, now: deps.now };
+      if (!verified.ok || !pinned) return stopBefore(k, verified.ok ? 'STEP_BINDING_MISSING' : verified.code);
+      if (!bound?.ok || !binding) return stopBefore(k, bound && !bound.ok ? bound.code : 'STEP_BINDING_MISSING');
+      const ctx: StepContext = { step: bound.step, binding, grant, transport, now: deps.now };
       const driver = driverFor(ctx, deps.config.mode);
       if (!driver || (deps.drivers && !deps.drivers.includes(driver))) return stopBefore(k, 'DELEGATED_STEP_DRIVER_UNAVAILABLE');
       let simulated: Awaited<ReturnType<StepDriver['simulate']>>;
@@ -207,7 +253,7 @@ async function run(deps: ExecutorDeps, start: ExecutionRecord, verified: Awaited
       const stored = bigintJson({ plan: simulated.plan, prepared: simulated.prepared, driver: driver.id });
       const sim = await deps.store.stepTransition(e.executionId, k, ['PENDING', 'SIMULATED', 'POLICY_VERIFIED'], 'SIMULATED', { plan: stored });
       if (!sim) return outcome(PENDING_RETRY_MS);
-      const violation = stepPolicyViolation(verified.chain.manifest, ctx.step, binding, simulated.plan, deps.now().getTime())
+      const violation = stepPolicyViolation(verified.chain.manifest, ctx.step, ctx.binding, simulated.plan, deps.now().getTime())
         ?? await driver.authorize(ctx, simulated.prepared).catch(cause => codeOf(cause, 'GRANT_SCOPE_EXCEEDED'));
       if (violation) return stopBefore(k, violation);
       if (!await deps.store.stepTransition(e.executionId, k, ['SIMULATED'], 'POLICY_VERIFIED', {})) return outcome(PENDING_RETRY_MS);
@@ -219,7 +265,7 @@ async function run(deps: ExecutorDeps, start: ExecutionRecord, verified: Awaited
       step = prepared.step;
       log('delegation.submission_prepared', { step: k });
     }
-    const ctx: StepContext | null = binding && verified.ok ? { step: verified.chain.requirement.steps[k]!, binding, grant, transport, now: deps.now } : null;
+    const ctx: StepContext | null = bound?.ok && binding ? { step: bound.step, binding, grant, transport, now: deps.now } : null;
     // After a submission is prepared, recovery needs only the persisted plan and submission (authority changes can no longer undo it).
     const recoveryCtx = ctx ?? recoveryContext(step, grant, transport, deps);
     const driver = recoveryCtx ? driverFor(recoveryCtx, deps.config.mode) : null;
@@ -300,6 +346,25 @@ async function run(deps: ExecutorDeps, start: ExecutionRecord, verified: Awaited
         spent: s.reconciliation?.spent ?? [], received: s.reconciliation?.received ?? [], provenance: (s.reconciliation?.evidence as { provenance?: string } | undefined)?.provenance ?? null })) };
   }
 }
+/**
+ * BUILD-CHAT-E2E-001: step `k`'s requirement and grant need, narrowed when the workflow binds its amount to an earlier step: min(cap, the
+ * producer's reconciled received amount of exactly the bound asset). Unbound steps are returned unchanged. Nothing received stops the step.
+ */
+function boundStep(requirement: WorkflowRequirement, k: number, pinned: StepBinding, steps: readonly StepRecord[]):
+  { readonly ok: true; readonly step: StepRequirement; readonly binding: StepBinding } | { readonly ok: false; readonly code: string } {
+  const b = requirement.bindings.find(x => x.step === k);
+  if (!b) return { ok: true, step: requirement.steps[k]!, binding: pinned };
+  const producer = steps.find(s => s.stepIndex === b.amountFrom);
+  if (!producer || producer.state !== 'RECONCILED') return { ok: false, code: 'WORKFLOW_BINDING_PRODUCER_NOT_RECONCILED' };
+  const key = assetKey({ chain: b.asset.chainId, address: b.asset.address });
+  const received = ((producer.reconciliation?.received ?? []) as { asset: string; amount: string }[]).filter(r => r.asset === key)
+    .reduce((sum, r) => sum + BigInt(r.amount), 0n);
+  const used = boundAmount(b.cap, received);
+  if (used <= 0n) return { ok: false, code: 'WORKFLOW_BINDING_NOTHING_RECEIVED' };
+  const need = pinned.need.kind === 'EVM_UNISWAP_V3_EXACT_INPUT_SINGLE' ? { ...pinned.need, amountIn: used } : { ...pinned.need, amount: used };
+  return { ok: true, step: narrowedStep(requirement, k, used), binding: { ...pinned, need } };
+}
+
 /** The context to finish a step whose submission was already prepared, from persisted facts only. */
 function recoveryContext(step: StepRecord, grant: GrantRecord, transport: ChainTransport, deps: ExecutorDeps): StepContext | null {
   const stored = step.plan, plan = planOf(stored);

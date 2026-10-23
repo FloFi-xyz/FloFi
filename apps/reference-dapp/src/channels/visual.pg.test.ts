@@ -58,7 +58,7 @@ async function openInFloFi(env: Record<string, string | undefined>, url: string,
   }
   const claimed = await claimApproval(surface, secretOf(url), [evm(OWNER)], false);
   expect(claimed.view).toMatchObject({ status: 'CLAIMED', authority: 'NONE' });
-  expect([claimed.workflowHash, semanticWorkflowHash(claimed.workflow)]).toEqual([handoff.workflow_hash, handoff.workflow_hash]);
+  expect([claimed.workflowHash, semanticWorkflowHash(claimed.workflow!)]).toEqual([handoff.workflow_hash, handoff.workflow_hash]);
   expect((await applyApproval(surface, secretOf(url), [evm(OWNER)], claimed.workflow)).status).toBe('APPLIED');
   expect(calls).not.toContain('EXECUTION_PATH');
   return handoff;

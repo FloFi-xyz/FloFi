@@ -245,7 +245,7 @@ describe('BUILD-CHANNELS-001 scheduled dispatch (PostgreSQL, both providers, MOC
     // Nothing to say while it waits for its owner.
     expect(await d.sweep()).toMatchObject({ notified: 0 });
     const claimed = await claimApproval(await surface(), secret, [evm(OWNER)], true);
-    await applyApproval(await surface(), secret, [evm(OWNER)], editorReducer(initialEditor(), claimed.command, dappReviewContext()).workflow);
+    await applyApproval(await surface(), secret, [evm(OWNER)], editorReducer(initialEditor(), claimed.command!, dappReviewContext()).workflow);
     const before = d.api.delivered().length;
     expect(await d.sweep()).toMatchObject({ notified: 1 });
     expect(d.api.texts().slice(before)).toEqual([expect.stringMatching(/^Your proposal is loaded in FloFi/)]);

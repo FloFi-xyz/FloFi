@@ -78,7 +78,9 @@ id and a new hash. Amounts are decimal strings. A schema error is `400 INVALID_S
 values). A strategy that touches a mainnet is refused at creation with `403 MAINNET_DISABLED` (sandbox keys are test-funds only).
 
 The Base Sepolia lending composition (`supply` → `borrow` → `swap`) is recognized as one executable `COMPOSITE_FLOW`. Other
-multi-step lists are composed, validated and reviewed, but they cannot be approved yet (`MULTI_STEP_SEQUENCE_NOT_IMPLEMENTED`).
+multi-step lists whose every step has an owner-execution flow are `SEQUENTIAL`: where the deployment runs workflows
+(`FLOFI_WORKFLOW_RUNS=enabled`) they are approved once and their owner executes the steps in order in FloFi, each after the previous one
+reconciled; elsewhere they are refused with `WORKFLOW_RUNS_NOT_ENABLED`.
 
 ## 4. Re-validate before handing off
 

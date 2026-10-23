@@ -67,6 +67,11 @@ export interface HandoffStore {
   readonly forRequester: (handoffId: string, requester: RequesterScope, now: Date) => Promise<HandoffRecord | null>;
   /** Read-only recovery of an applied proposal, limited to its proven claimant and this tenant. Never a claim/session capability. */
   readonly forClaimant: (handoffId: string, wallet: WalletRef) => Promise<HandoffRecord | null>;
+  /**
+   * BUILD-CHAT-E2E-001: a multi-step (SEQUENTIAL) approval's record for its claimant, in any status: its workflow run outlives the claim
+   * window. Read-only; every run operation still checks the run's own bound wallets.
+   */
+  readonly forRunOwner: (handoffId: string, wallet: WalletRef) => Promise<HandoffRecord | null>;
   /** The handoff a browser holds a secret for: the approval secret, or a live approval-session secret. */
   readonly bySecret: (digest: Buffer, now: Date, kinds?: Kinds) => Promise<HandoffRecord | null>;
   /**
@@ -166,6 +171,11 @@ export function createPgHandoffStore(db: Database, tenantId: string): HandoffSto
     forClaimant: async (handoffId, wallet) => {
       const row = (await db.query(`SELECT * FROM mcp_handoffs WHERE tenant_id = $1 AND handoff_id = $2
         AND claimed_namespace = $3 AND claimed_address = $4 AND status = 'APPLIED'`, [tenantId, handoffId, wallet.namespace, wallet.address])).rows[0];
+      return row ? recordOf(row) : null;
+    },
+    forRunOwner: async (handoffId, wallet) => {
+      const row = (await db.query(`SELECT * FROM mcp_handoffs WHERE tenant_id = $1 AND handoff_id = $2 AND claimed_namespace = $3 AND claimed_address = $4
+        AND plan->>'kind' = 'SEQUENTIAL'`, [tenantId, handoffId, wallet.namespace, wallet.address])).rows[0];
       return row ? recordOf(row) : null;
     },
     bySecret: (digest, now, kinds) => db.transaction(tx => locked(tx, digest, now, kinds)),

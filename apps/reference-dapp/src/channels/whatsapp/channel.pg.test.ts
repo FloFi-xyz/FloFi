@@ -112,7 +112,7 @@ describe('BUILD-CHANNELS-001 WhatsApp channel (PostgreSQL, fixture provider, MOC
     const claimed = await claimApproval(surface, secret, [evm(OWNER)], false);
     expect(claimed.command).toMatchObject({ type: 'ADD_SUPPLY', input: { amount: '3', beneficiary: OWNER } });
     expect(claimed.view).toMatchObject({ status: 'CLAIMED', claimedByYou: true });
-    const applied = await applyApproval(surface, secret, [evm(OWNER)], workflowOf(claimed.command));
+    const applied = await applyApproval(surface, secret, [evm(OWNER)], workflowOf(claimed.command!));
     expect(applied.status).toBe('APPLIED');
     // STATUS reports the approval but no run: the owner did not share run status with the conversation.
     await d.say('status');

@@ -309,9 +309,10 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     invalidWorkflow: Boolean(reviewError || authoringIncomplete || approvalGate || walletIssue || autoPrepare && !approvalWallet) };
   const lifecycleControls = useExecutionControls(lifecycleState);
   // A proposal opened from a chat, MCP client or channel prepares its own fresh, read-only simulation as soon as it is loaded for that signer:
-  // once per workflow revision and signer, never during or after a recorded run, never retried automatically, and nothing is accepted or signed.
+  // once per workflow revision and signer, never during or after a recorded run of this workflow, never retried automatically, and nothing is
+  // accepted or signed. BUILD-CHAT-E2E-001: the final run of another workflow (the previous step of a multi-step run) does not count.
   const actionable = state.workflow.nodes.some(node => !node.actionType.startsWith('mock-'));
-  const prepareKey = autoPrepare && approvalWallet && !approvalGate && !walletIssue && signer && actionable && !authoringIncomplete && !simulationDisabled && !executionProgress.started
+  const prepareKey = autoPrepare && approvalWallet && !approvalGate && !walletIssue && signer && actionable && !authoringIncomplete && !simulationDisabled && !currentExecution(executionProgress)
     ? `${state.workflow.workflowId}:${state.workflow.revision}:${restorationEpoch}:${signer}:${reviewBinding.wallet.chain}:${connectedWallet.revision}:${jupiter.revision}` : null;
   const preparedFor = useRef<string | null>(null);
   useEffect(() => {

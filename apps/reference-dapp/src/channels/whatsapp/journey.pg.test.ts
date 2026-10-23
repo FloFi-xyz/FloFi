@@ -73,7 +73,7 @@ type Deployment = ReturnType<typeof deployment>;
 async function approveInFloFi(d: Deployment, secret: string, owner: string) {
   const claimed = await d.surface(s => claimApproval(s, secret, [evm(owner)], true));
   expect(claimed.view).toMatchObject({ status: 'CLAIMED', claimedByYou: true, statusShared: true, requesterKind: 'CHANNEL_CONVERSATION', clientName: 'WhatsApp', authority: 'NONE' });
-  const workflow = workflowOf(claimed.command);
+  const workflow = workflowOf(claimed.command!);
   expect((await d.surface(s => applyApproval(s, secret, [evm(owner)], workflow))).status).toBe('APPLIED');
   return workflow;
 }

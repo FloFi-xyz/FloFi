@@ -18,9 +18,6 @@ export function composeSingleStep(strategy: unknown, workflowHash: string | unde
   const workflow = composeWorkflowOrRefuse(strategy, workflowHash);
   return workflow.steps.length === 1 ? workflow.steps[0]! : refuse(multiStepCode, { stepCount: workflow.steps.length });
 }
-/** How a general multi-step sequence executes today: it does not, until the sequential runner exists. */
-export const MULTI_STEP_PLAN = { kind: 'NOT_EXECUTABLE', reason: 'MULTI_STEP_SEQUENCE_NOT_IMPLEMENTED',
-  note: 'Each step can be composed, reviewed and previewed on its own; executing a general sequence needs the sequential runner (not yet available).' } as const;
 export const reviewCounts = (findings: readonly { level: string }[]) => ({ block: findings.filter(f => f.level === 'BLOCK').length,
   warning: findings.filter(f => f.level === 'WARNING').length, information: findings.filter(f => f.level === 'INFORMATION').length });
 /** The public view of a composition's workflow steps. */

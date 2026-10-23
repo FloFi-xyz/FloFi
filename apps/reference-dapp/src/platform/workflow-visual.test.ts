@@ -115,7 +115,8 @@ describe('BUILD-WORKFLOW-VISUAL-PRESENTATION-001 visual model: a deterministic p
     expect(model.steps.map(s => [s.index, s.action, s.chain, s.network])).toEqual([[1, 'BRIDGE', 'EVM', 'Base Sepolia'], [2, 'SWAP', 'SOLANA', 'Solana Devnet']]);
     expect([model.chains, model.networks]).toEqual([['EVM', 'SOLANA'], ['Base Sepolia', 'Arbitrum Sepolia', 'Solana Devnet']]);
     expect(model.connections).toEqual([{ from: 's1', to: 's2' }]);
-    expect(model.warnings).toEqual(['SEQUENCE_NOT_EXECUTABLE']);
+    // BUILD-CHAT-E2E-001: every step has an owner-execution flow, so the sequence runs step by step (no longer "not executable").
+    expect(model.warnings).toEqual(['SEQUENCE_STEP_BY_STEP']);
     expect(model.workflowHash).toBe(workflowSequenceHash(composition.steps.map(c => c.workflowHash)));
     expect(workflowVisualText(model, 'EN').title).toBe('Bridge → Swap');
     // A long list stays readable: compact cards, every step present.

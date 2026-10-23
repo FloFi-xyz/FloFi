@@ -4,7 +4,7 @@
  * it to its owner. Four independent facts, always reported:
  *
  *   supportedByCode        an existing FloFi flow executes this workflow with the owner's wallet (execution capability registry
- *                          + flow mapping + execution plan; general multi-step sequences: MULTI_STEP_SEQUENCE_NOT_IMPLEMENTED)
+ *                          + flow mapping + execution plan; BUILD-CHAT-E2E-001: a sequence whose every step has a flow is SEQUENTIAL)
  *   enabledByDeployment    the flow is enabled here (`mode`), and its own owner-execution switch is on (`info.executionEnabled`)
  *   enabledByPolicy        the MCP handoff policy allows these funds: test funds (FLOFI_MCP_HANDOFF_TEST_FUNDS, default enabled)
  *                          and each mainnet network explicitly (FLOFI_MCP_HANDOFF_MAINNET_NETWORKS, default none); an agent
@@ -21,6 +21,7 @@ import type { FlowName } from '../../backend/flows.ts';
 import { NETWORKS, reviewComposition, type Composition, type WorkflowComposition } from '../engine/strategy-engine';
 import { NETWORK_IDS, type NetworkId, type StrategyAction, type StrategySpec } from '../engine/strategy-spec';
 import { agentRolloutAllows, type PendingAgentCapability } from '../domain/agent-rollout';
+import { delegableByCode } from '../workflow-runs/authorization-plan.ts';
 import type { McpRuntime } from './runtime.ts';
 import { strategyFlow } from './simulation.ts';
 
@@ -79,10 +80,9 @@ export type PlanStep = { readonly index: number; readonly action: StrategyAction
   readonly flow: FlowName | null; readonly workflowHash: string };
 /**
  * How the owner executes a workflow. `SINGLE_FLOW`: one action, one existing flow. `COMPOSITE_FLOW`: an existing executor that
- * runs a fixed multi-step shape (the Base Sepolia lending composition). `NOT_EXECUTABLE`: with its reason — for a general
- * sequence of steps, `MULTI_STEP_SEQUENCE_NOT_IMPLEMENTED`. `SEQUENTIAL` is reserved for the follow-up sequential runner (step →
- * simulate → sign → execute → reconcile → next) over the same step list: plans, handoffs, panel and evidence views already carry
- * per-step flows and hashes, so adding it changes no schema.
+ * runs a fixed multi-step shape (the Base Sepolia lending composition). `SEQUENTIAL` (BUILD-CHAT-E2E-001): the workflow run executes
+ * the steps in order (step → fresh simulation → Review → signature → execute → reconcile → next), each through its own flow.
+ * `NOT_EXECUTABLE`: with its reason.
  */
 export type ExecutionPlan = { readonly kind: 'SINGLE_FLOW' | 'COMPOSITE_FLOW' | 'SEQUENTIAL' | 'NOT_EXECUTABLE'; readonly flow: FlowName | null; readonly reason: string | null;
   readonly steps: readonly PlanStep[]; readonly networks: readonly NetworkId[]; readonly networkEnvironment: ExecutionEnvironment;
@@ -110,19 +110,29 @@ export function executionPlan(composition: Composition): ExecutionPlan {
   return flow ? { kind: 'SINGLE_FLOW', flow, reason: null, steps, ...base } : { kind: 'NOT_EXECUTABLE', flow: null, reason: 'OWNER_EXECUTION_NOT_IMPLEMENTED', steps, ...base };
 }
 
-/** BUILD-MCP-002: the plan of a step-list workflow. One step is that step's plan; several steps are not executable yet. */
+/**
+ * The plan of a step-list workflow. One step is that step's plan. BUILD-CHAT-E2E-001: several steps are `SEQUENTIAL` when every step has
+ * an owner-execution flow. The workflow run (`src/workflow-runs`) then executes them in order, each through its own flow, with its own
+ * fresh simulation, Review and wallet signature, and each only after the previous step reconciled. A step without a flow makes the
+ * sequence NOT_EXECUTABLE with that step's own reason. A bound amount (`bindings`) needs the producer step's reconciled received amount,
+ * which owner-signed flows do not report in a canonical form yet (DEPENDENT_AMOUNT_SOURCE_NOT_IMPLEMENTED). A delegated run reads it from
+ * the executor's reconciliation (see the authorization plan).
+ */
 export function workflowPlan(workflow: WorkflowComposition): ExecutionPlan {
   if (workflow.steps.length === 1) return executionPlan(workflow.steps[0]!);
   const plans = workflow.steps.map(executionPlan), networks = [...new Set(plans.flatMap(p => p.networks))];
   const steps = plans.map((p, index) => ({ ...p.steps[0]!, index, action: workflow.steps[index]!.strategy.action, nodeIds: p.steps.flatMap(s => s.nodeIds), flow: p.flow }));
-  return { kind: 'NOT_EXECUTABLE', flow: null, reason: 'MULTI_STEP_SEQUENCE_NOT_IMPLEMENTED', steps, networks, networkEnvironment: environmentOf(networks),
-    fundsClass: workflow.fundsClass };
+  const missing = plans.find(p => !p.flow);
+  const reason = missing ? missing.reason ?? 'OWNER_EXECUTION_NOT_IMPLEMENTED' : workflow.bindings.length ? 'DEPENDENT_AMOUNT_SOURCE_NOT_IMPLEMENTED' : null;
+  return { kind: reason ? 'NOT_EXECUTABLE' : 'SEQUENTIAL', flow: null, reason, steps, networks, networkEnvironment: environmentOf(networks), fundsClass: workflow.fundsClass };
 }
 
 type StepFacts = { readonly index: number; readonly flow: FlowName | null; readonly execute: boolean; readonly deploymentEnabled: boolean; readonly reason: string | null };
+/** BUILD-CHAT-E2E-001: why each authorization mode of a sequence can or cannot run here (null: it can). */
+export type SequenceModes = { readonly confirmEachStep: string | null; readonly delegated: string | null };
 export type Gates = {
   readonly supportedByCode: { readonly execute: boolean; readonly plan: ExecutionPlan['kind']; readonly flow: FlowName | null; readonly reason: string | null;
-    readonly steps?: readonly StepFacts[] };
+    readonly steps?: readonly StepFacts[]; readonly modes?: SequenceModes };
   readonly enabledByDeployment: { readonly enabled: boolean; readonly flow: FlowName | null; readonly mode: string; readonly executionSwitch: boolean | null;
     readonly mockedHarness: boolean; readonly reason: string | null };
   readonly enabledByPolicy: { readonly enabled: boolean; readonly fundsClass: 'TEST_FUNDS' | 'REAL_FUNDS'; readonly networks: readonly NetworkId[]; readonly reason: string | null };
@@ -174,18 +184,29 @@ export async function evaluateGates(composition: Composition, runtime: McpRuntim
 }
 
 /**
- * The four facts for a step-list workflow. One step: exactly `evaluateGates` of that step. Several steps: each step's own facts are
- * reported (what the sequential runner will need), the workflow is refused with MULTI_STEP_SEQUENCE_NOT_IMPLEMENTED, policy covers
- * every network of every step, and no sequence evidence exists.
+ * The four facts for a step-list workflow. One step: exactly `evaluateGates` of that step. Several steps (BUILD-CHAT-E2E-001): each step's
+ * own facts are reported; the sequence is supported by code when its plan is SEQUENTIAL and every step executes; it is enabled when every
+ * step's flow is enabled here; policy covers every network of every step. No sequence evidence is claimed: each step's evidence is its own
+ * flow's, and the run records which steps reconciled.
  */
 export async function evaluateWorkflowGates(workflow: WorkflowComposition, runtime: McpRuntime, policy: HandoffPolicy): Promise<Gates & { readonly plan: ExecutionPlan }> {
   if (workflow.steps.length === 1) return evaluateGates(workflow.steps[0]!, runtime, policy);
-  const plan = workflowPlan(workflow), each = await Promise.all(workflow.steps.map(step => evaluateGates(step, runtime, policy)));
+  const owned = workflowPlan(workflow), each = await Promise.all(workflow.steps.map(step => evaluateGates(step, runtime, policy)));
   const steps = each.map((g, index) => ({ index, flow: g.plan.flow, execute: g.supportedByCode.execute, deploymentEnabled: g.enabledByDeployment.enabled,
     reason: g.supportedByCode.reason ?? g.enabledByDeployment.reason }));
-  const deploymentReason = each.find(g => !g.enabledByDeployment.enabled)?.enabledByDeployment.reason ?? null;
+  const facts = await runtime.sequences?.() ?? { enabled: false, delegation: null };
+  // Confirm each step: every step's own flow executes and is enabled here. Delegated: every step is delegable on this deployment.
+  const confirmCode = owned.reason ?? each.find(g => !g.supportedByCode.execute)?.supportedByCode.reason ?? null;
+  const confirmDeployment = each.find(g => !g.enabledByDeployment.enabled)?.enabledByDeployment.reason ?? null;
+  const delegated = delegableByCode(workflow, facts.delegation);
+  const modes: SequenceModes = { confirmEachStep: confirmCode ?? confirmDeployment, delegated: delegated.code };
+  // A sequence only a delegated run can execute (e.g. a bound amount) is still SEQUENTIAL: the workflow run executes it in that mode.
+  const plan: ExecutionPlan = owned.kind === 'NOT_EXECUTABLE' && confirmCode !== null && delegated.ok ? { ...owned, kind: 'SEQUENTIAL', reason: null } : owned;
+  const codeReason = confirmCode === null || delegated.ok ? null : confirmCode;
+  const deploymentReason = !facts.enabled ? 'WORKFLOW_RUNS_NOT_ENABLED' : modes.confirmEachStep !== null && !delegated.ok ? confirmDeployment : null;
   const enabledByPolicy = policyGate(plan, policy);
-  return { plan, supportedByCode: { execute: false, plan: plan.kind, flow: null, reason: 'MULTI_STEP_SEQUENCE_NOT_IMPLEMENTED', steps },
+  const reason = codeReason ?? deploymentReason ?? enabledByPolicy.reason;
+  return { plan, supportedByCode: { execute: codeReason === null, plan: plan.kind, flow: null, reason: codeReason, steps, modes },
     enabledByDeployment: { enabled: deploymentReason === null, flow: null, mode: 'PER_STEP', executionSwitch: null, mockedHarness: each.some(g => g.enabledByDeployment.mockedHarness),
-      reason: deploymentReason }, enabledByPolicy, demonstratedEvidence: 'NONE_DEMONSTRATED', handoff: { allowed: false, reason: 'MULTI_STEP_SEQUENCE_NOT_IMPLEMENTED' } };
+      reason: deploymentReason }, enabledByPolicy, demonstratedEvidence: 'NONE_DEMONSTRATED', handoff: { allowed: reason === null, reason } };
 }

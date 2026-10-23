@@ -16,6 +16,7 @@ import { transferDetails } from '../domain/robinhood-transfer-authoring';
 import { ROUTER_NETWORK_OPTIONS } from '../domain/router-authoring';
 import { workflowSteps, type WorkflowStep } from '../domain/workflow-steps';
 import { semanticWorkflowHash, type WorkflowComposition } from '../engine/strategy-engine';
+import { workflowPlan } from '../mcp/execution.ts';
 
 export const WORKFLOW_VISUAL_VERSION = 1;
 export type VisualAction = 'SWAP' | 'BRIDGE' | 'SUPPLY' | 'BORROW' | 'REPAY' | 'WITHDRAW' | 'ADD_LIQUIDITY' | 'TRANSFER' | 'OTHER';
@@ -39,7 +40,8 @@ export type VisualStep = {
   /** Test tokens, real funds, or unknown (null). */
   readonly testFunds: boolean | null;
 };
-export type VisualWarning = 'REAL_FUNDS' | 'DEBT_REMAINS' | 'SEQUENCE_NOT_EXECUTABLE';
+/** BUILD-CHAT-E2E-001: an executable sequence runs step by step (`SEQUENCE_STEP_BY_STEP`); only a sequence no FloFi flow executes is NOT_EXECUTABLE. */
+export type VisualWarning = 'REAL_FUNDS' | 'DEBT_REMAINS' | 'SEQUENCE_NOT_EXECUTABLE' | 'SEQUENCE_STEP_BY_STEP';
 export type WorkflowVisualModel = {
   readonly version: typeof WORKFLOW_VISUAL_VERSION;
   /** The canonical workflow hash this picture shows (single step: its semanticWorkflowHash; a step list: its sequence hash). */
@@ -154,7 +156,7 @@ export function workflowVisualModel(workflow: WorkflowComposition): WorkflowVisu
   const parts = workflow.steps.map(c => partOf(c.workflow, c.context));
   const extra: VisualWarning[] = [];
   if (workflow.steps.some(c => c.strategy.action === 'lending_composition')) extra.push('DEBT_REMAINS');
-  if (workflow.steps.length > 1) extra.push('SEQUENCE_NOT_EXECUTABLE');
+  if (workflow.steps.length > 1) extra.push(workflowPlan(workflow).kind === 'SEQUENTIAL' ? 'SEQUENCE_STEP_BY_STEP' : 'SEQUENCE_NOT_EXECUTABLE');
   return assemble(parts, workflow.workflowHash, workflow.fundsClass, extra);
 }
 /** The visual model of one canonical IR (e.g. a FloFi-authored workflow), bound to its `semanticWorkflowHash`. */

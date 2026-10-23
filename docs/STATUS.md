@@ -7,6 +7,18 @@ BUILD-013 remains OPEN on `codex/build-013-lending-composition` at
 `6cd675e41c0838fa8ac9cf3ec8e90de9442da3b9`; PR #48 remains open and unmerged.
 This separate branding build does not resume its execution work. BUILD-CLOUD-001 (below) does not touch BUILD-013 either.
 
+## BUILD-CHAT-E2E-001 — Conversational multi-step execution and one workflow-level authorization
+
+**Status: IMPLEMENTED ON BRANCH `codex/build-chat-e2e-001` — MOCKED (unit + PostgreSQL on loopback chain doubles) EVIDENCE ONLY; NOT PUSHED;
+NO PR; NO PUBLIC TRANSACTION; OFF BY DEFAULT (`FLOFI_WORKFLOW_RUNS`).** A multi-step workflow composed in ChatGPT/Claude (MCP) or Telegram is
+handed to its owner as ONE approval and executed by a durable workflow run (migration 0015): each step only after the previous one reconciled,
+idempotent, restart-safe, never retrying an uncertain submission, with explicit partial completion. The owner either confirms each step in the
+existing Canvas-free signing surface, or — where their own delegated Credentials cover every step and the deployment can sign delegated steps —
+authorizes the whole workflow ONCE with a passkey (BUILD-AUTOMATION-002's executor with a workflow run as its source). Before anything executes,
+FloFi states how many authorizations each mode needs. Production delegated signing remains **blocked** (no KMS/HSM). No FloFi fee exists yet
+(owner decision). Migration 0015 needs the DB-COMPAT two-release process (certificate in SCHEMA-COMPATIBILITY.md §9). See the
+[plan](builds/BUILD-CHAT-E2E-001-PLAN.md), [report](builds/BUILD-CHAT-E2E-001-REPORT.md) and [operator guide](deploy/WORKFLOW-RUNS.md).
+
 ## BUILD-SOLANA-MAINNET-001 — Solana Mainnet, Mainnet/Testnet consistency and Canvas UX corrections
 
 **Status: READY_FOR_OWNER_REVIEW. Evidence: `PUBLIC_READ_ONLY` on Solana mainnet-beta and MOCKED loopback. No transaction was signed or sent;

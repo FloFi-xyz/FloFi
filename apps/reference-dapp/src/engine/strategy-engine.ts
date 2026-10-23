@@ -37,6 +37,7 @@ import { createUniswapLiquidityNode, uniswapLiquidityProfileFor, type UniswapLiq
 import { workflowSteps, type WorkflowStep } from '../domain/workflow-steps';
 import { isStrategyInput, isStrategySpec, isStrategyWorkflow, strategyInputIssues, strategySpecIssues, NETWORK_IDS, type NetworkId, type SchemaIssue, type StrategyInput,
   type StrategySpec } from './strategy-spec';
+import { canonicalBindings, validateBindings, type WorkflowBinding, type WorkflowBindingInput } from './workflow-bindings';
 
 /** The DApp's initial ReviewContext (`app/page.tsx`): Base mainnet assets from the reference registry. */
 export function dappReviewContext(): ReviewContext {
@@ -281,10 +282,17 @@ export function composeBound(input: unknown, expectedHash: string | undefined): 
 export type WorkflowComposition = {
   readonly ok: true; readonly strategy: StrategyInput; readonly workflowHash: string; readonly steps: readonly Composition[];
   readonly fundsClass: 'TEST_FUNDS' | 'REAL_FUNDS'; readonly notes: readonly string[];
+  /** BUILD-CHAT-E2E-001: typed amount dependencies between steps (empty: every step has its own fixed amount). */
+  readonly bindings: readonly WorkflowBinding[];
 };
-/** The hash of an ordered list of step hashes (several steps only). */
-export function workflowSequenceHash(stepHashes: readonly string[]): string {
-  return '0x' + createHash('sha256').update(JSON.stringify({ contract: 'flofi-strategy-workflow', version: 2, steps: stepHashes })).digest('hex');
+/**
+ * The hash of an ordered list of step hashes (several steps only). BUILD-CHAT-E2E-001: bindings, when present, are part of it;
+ * without bindings the hash is byte-for-byte the BUILD-MCP-002 one.
+ */
+export function workflowSequenceHash(stepHashes: readonly string[], bindings: readonly WorkflowBindingInput[] = []): string {
+  const body = bindings.length ? { contract: 'flofi-strategy-workflow', version: 2, steps: stepHashes, bindings: canonicalBindings(bindings) }
+    : { contract: 'flofi-strategy-workflow', version: 2, steps: stepHashes };
+  return '0x' + createHash('sha256').update(JSON.stringify(body)).digest('hex');
 }
 const sameAccount = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 /** Supply → borrow → swap of exactly the borrowed USDC to WETH, all on Base Sepolia for one account: the existing lending composition. */
@@ -299,7 +307,10 @@ function collapseLending(steps: readonly StrategySpec[]): readonly StrategySpec[
 }
 export function composeWorkflow(input: unknown): WorkflowComposition | ComposeFailure {
   if (!isStrategyInput(input)) return { ok: false, code: 'STRATEGY_SCHEMA_INVALID', issues: strategyInputIssues(input) };
-  const specs = isStrategyWorkflow(input) ? collapseLending(input.steps.map(step => ({ ...step, version: 1 }) as StrategySpec)) : [input];
+  const rawBindings = isStrategyWorkflow(input) ? input.bindings ?? [] : [];
+  // A bound workflow is a general sequence: its step indexes are what its bindings name, so it is never collapsed.
+  const specs = isStrategyWorkflow(input) ? rawBindings.length ? input.steps.map(step => ({ ...step, version: 1 }) as StrategySpec)
+    : collapseLending(input.steps.map(step => ({ ...step, version: 1 }) as StrategySpec)) : [input];
   const steps: Composition[] = [];
   for (const [index, spec] of specs.entries()) {
     const composed = composeStrategy(spec);
@@ -307,9 +318,14 @@ export function composeWorkflow(input: unknown): WorkflowComposition | ComposeFa
     steps.push(composed);
   }
   const fundsClass = steps.some(c => c.fundsClass === 'REAL_FUNDS') ? 'REAL_FUNDS' : 'TEST_FUNDS';
-  if (steps.length === 1) return { ok: true, strategy: steps[0]!.strategy, workflowHash: steps[0]!.workflowHash, steps, fundsClass, notes: steps[0]!.notes };
-  return { ok: true, strategy: { version: 2, steps: steps.map(c => c.strategy) }, workflowHash: workflowSequenceHash(steps.map(c => c.workflowHash)), steps, fundsClass,
-    notes: steps.flatMap((c, i) => c.notes.map(note => `Step ${i + 1}: ${note}`)) };
+  if (steps.length === 1) return { ok: true, strategy: steps[0]!.strategy, workflowHash: steps[0]!.workflowHash, steps, fundsClass, notes: steps[0]!.notes, bindings: [] };
+  const checked = validateBindings(steps, rawBindings);
+  if (!checked.ok) return { ok: false, code: checked.code, issues: checked.issues };
+  const bindings = checked.bindings;
+  return { ok: true, strategy: { version: 2, steps: steps.map(c => c.strategy), ...bindings.length ? { bindings: canonicalBindings(bindings) } : {} },
+    workflowHash: workflowSequenceHash(steps.map(c => c.workflowHash), bindings), steps, fundsClass, bindings,
+    notes: [...steps.flatMap((c, i) => c.notes.map(note => `Step ${i + 1}: ${note}`)),
+      ...bindings.map(b => `Step ${b.step + 1} spends what step ${b.amountFrom + 1} actually delivers (after reconciliation), up to its own amount.`)] };
 }
 export function composeWorkflowBound(input: unknown, expectedHash: string | undefined): WorkflowComposition | ComposeFailure {
   const composed = composeWorkflow(input);

@@ -17,8 +17,10 @@
 import { cookies } from 'next/headers';
 import { after } from 'next/server';
 import { developerApprovalChanged } from '../developer/dispatch';
-import { applyApproval, claimApproval, openBrowserApproval, previewApproval, resumeApproval, shareApproval, viewApproval, type ApprovalPreview, type ApprovalView,
-  type ClaimedProposal } from '../platform/index';
+import { applyApproval, claimApproval, openBrowserApproval, previewApproval, resumeApproval, shareApproval, viewApproval, workflowRunAuthorize, workflowRunCancel,
+  workflowRunContinue, workflowRunResume, workflowRunReview, workflowRunStart, workflowRunStatus, type ApprovalPreview, type ApprovalView,
+  type ApprovalSurface, type ClaimedProposal } from '../platform/index';
+import type { ReviewView } from '../delegation/views';
 import { approvalSurface } from '../server/approval-surface';
 import { remoteApproval, remoteAutomationApproval, remoteAutomationRecovery } from '../server/automation-operation';
 import { currentWalletPrincipals } from '../server/session-principal';
@@ -51,7 +53,7 @@ export async function resumeApprovalHandoff(approvalId: string): Promise<Result<
 }
 
 /** The proposal behind a secret, re-verified now. Seeing it grants nothing. */
-export async function approvalHandoffView(secret: string): Promise<Result<ApprovalView>> {
+export async function approvalHandoffView(secret: string): Promise<Result<ClaimedProposal['view']>> {
   try {
     if (remoteAutomationApproval(secret)) return { ok: true, value: await remoteApproval<ApprovalView>('view', [secret]) };
     return { ok: true, value: await viewApproval(await surface(), secret, await currentWalletPrincipals()) };
@@ -98,4 +100,25 @@ export async function setApprovalSharing(secret: string, share: boolean): Promis
     if (remoteAutomationApproval(secret)) return { ok: true, value: await remoteApproval<{ statusShared: boolean }>('share', [secret, share === true]) };
     const value = await shareApproval(await surface(), secret, await currentWalletPrincipals(), share === true); notify(secret); return { ok: true, value };
   } catch (cause) { return failure(cause); }
+}
+
+// ── BUILD-CHAT-E2E-001: a multi-step approval's workflow run, for the wallets this browser proved (never a client-supplied address) ──────
+const runAction = async <T>(work: (approvals: ApprovalSurface, wallets: Awaited<ReturnType<typeof currentWalletPrincipals>>) => Promise<T>): Promise<Result<T>> => {
+  try { return { ok: true, value: await work(await surface(), await currentWalletPrincipals()) }; } catch (cause) { return failure(cause); }
+};
+/** The run's status for its owner, read-only (it never loads or resolves a step). */
+export async function workflowRunStatusHandoff(approvalId: string): Promise<Result<ClaimedProposal>> { return runAction((s, w) => workflowRunStatus(s, approvalId, w)); }
+/** The step the owner signs now, once the previous one reconciled (the ordinary single-step proposal the signing surface loads). */
+export async function continueWorkflowRunHandoff(approvalId: string): Promise<Result<ClaimedProposal>> { return runAction((s, w) => workflowRunContinue(s, approvalId, w)); }
+/** The owner chose to confirm each step in their wallet. */
+export async function startWorkflowRunHandoff(approvalId: string): Promise<Result<ClaimedProposal>> { return runAction((s, w) => workflowRunStart(s, approvalId, w)); }
+/** The owner ends the run (nothing in flight) or, for a delegated run, revokes its authorization. */
+export async function cancelWorkflowRunHandoff(approvalId: string): Promise<Result<ClaimedProposal>> { return runAction((s, w) => workflowRunCancel(s, approvalId, w)); }
+/** The owner resumes a halted run whose stopped step submitted nothing. */
+export async function resumeWorkflowRunHandoff(approvalId: string): Promise<Result<ClaimedProposal>> { return runAction((s, w) => workflowRunResume(s, approvalId, w)); }
+/** The Universal Workflow Authorization Review of the run: the envelope the owner's passkey signs ONCE (delegated mode). */
+export async function reviewWorkflowRunAuthorization(approvalId: string): Promise<Result<ReviewView>> { return runAction((s, w) => workflowRunReview(s, approvalId, w)); }
+/** The owner's ONE passkey signature for the whole workflow; the approval link is marked applied with it. */
+export async function authorizeWorkflowRunHandoff(secret: string, revision: number, assertion: unknown): Promise<Result<ClaimedProposal>> {
+  return runAction((s, w) => workflowRunAuthorize(s, secret, w, revision, assertion));
 }

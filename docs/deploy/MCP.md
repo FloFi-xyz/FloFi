@@ -96,8 +96,14 @@ Every tool input is a closed JSON Schema. Errors are `{ ok: false, code }`; sche
 A `strategy` is a version 1 single action — `bridge`, `swap`, `supply`, `borrow`, `repay`, `withdraw`, `add_liquidity`,
 `lending_composition` (fields as in the `get_capabilities` examples) — or a version 2 workflow `{ "version": 2, "steps": [ … ] }`
 of 1–8 such actions. One step is exactly version 1 (same hash). Supply → borrow → swap of the borrowed USDC on Base Sepolia is
-the existing lending composition. Any other sequence is composed and reviewed per step and refused for execution with
-`MULTI_STEP_SEQUENCE_NOT_IMPLEMENTED` until the sequential runner exists.
+the existing lending composition. BUILD-CHAT-E2E-001: any other sequence whose every step has an owner-execution flow is `SEQUENTIAL`
+and, where the deployment sets `FLOFI_WORKFLOW_RUNS=enabled`, is handed off as ONE approval whose workflow run executes the steps in order
+(each after the previous one reconciled). `request_user_approval` returns `authorizationPlan` (at least one wallet confirmation per step, or
+one passkey authorization where the owner's delegated Credentials cover every step and the deployment can sign delegated steps);
+`get_approval_status` returns `workflowRun` (step states always; submissions, reconciled amounts and evidence only while the owner shares
+status). Elsewhere a sequence is refused with `WORKFLOW_RUNS_NOT_ENABLED`. An optional `bindings: [{step, amountFrom}]` makes a step spend
+what an earlier step actually delivered (capped by its own amount); owner-signed sequences refuse it with
+`DEPENDENT_AMOUNT_SOURCE_NOT_IMPLEMENTED`. See [WORKFLOW-RUNS.md](WORKFLOW-RUNS.md).
 
 ## 4. The approval journey
 

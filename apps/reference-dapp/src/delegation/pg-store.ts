@@ -38,7 +38,9 @@ export type GrantRecord = GrantView & { readonly owner: Owner; readonly sessionK
   readonly revocation: Readonly<Record<string, unknown>> | null; readonly revocationRequestedAt: Date | null; readonly revokedAt: Date | null;
   readonly evmNextNonce: bigint | null; readonly version: number; readonly createdAt: Date; readonly updatedAt: Date };
 export type AuthorizationState = 'PENDING_SIGNATURE' | 'ACTIVE' | 'REVOKED' | 'EXPIRED';
-export type AuthorizationRecord = { readonly authorizationId: string; readonly owner: Owner; readonly ruleId: string; readonly state: AuthorizationState;
+/** BUILD-CHAT-E2E-001: an authorization's source is an automation rule or a workflow run (exactly one of the two). */
+export type AuthorizationRecord = { readonly authorizationId: string; readonly owner: Owner; readonly ruleId: string | null; readonly workflowRunId: string | null;
+  readonly state: AuthorizationState;
   readonly activeRevision: number | null; readonly latestRevision: number; readonly revokedAt: Date | null; readonly revokeCode: string | null; readonly version: number;
   readonly createdAt: Date; readonly updatedAt: Date };
 export type RevisionState = 'PENDING_SIGNATURE' | 'ACTIVE' | 'SUPERSEDED' | 'REVOKED' | 'EXPIRED';
@@ -46,8 +48,9 @@ export type RevisionRecord = { readonly authorizationId: string; readonly revisi
   readonly strategy: StrategyInput; readonly workflowHash: string; readonly manifest: DelegatedAuthorizationManifest; readonly manifestHash: string;
   readonly widening: readonly string[]; readonly envelope: UniversalWorkflowAuthorization | null; readonly envelopeDigest: string | null; readonly passkeyId: string | null;
   readonly assertion: Readonly<Record<string, unknown>> | null; readonly signedAt: Date | null; readonly createdAt: Date };
-export type ExecutionRecord = { readonly executionId: string; readonly authorizationId: string; readonly revision: number; readonly owner: Owner; readonly ruleId: string;
-  readonly occurrenceId: string; readonly state: ExecutionState; readonly code: string | null; readonly workflowHash: string; readonly manifestHash: string;
+/** BUILD-CHAT-E2E-001: an execution's source is an automation occurrence (rule + occurrence) or a workflow run (exactly one of the two). */
+export type ExecutionRecord = { readonly executionId: string; readonly authorizationId: string; readonly revision: number; readonly owner: Owner; readonly ruleId: string | null;
+  readonly occurrenceId: string | null; readonly workflowRunId: string | null; readonly state: ExecutionState; readonly code: string | null; readonly workflowHash: string; readonly manifestHash: string;
   readonly stepCount: number; readonly currentStep: number; readonly attention: boolean; readonly evidence: Readonly<Record<string, unknown>> | null;
   readonly version: number; readonly reservedAt: Date | null; readonly settledAt: Date | null; readonly createdAt: Date; readonly updatedAt: Date };
 export type StepRecord = { readonly executionId: string; readonly stepIndex: number; readonly state: StepState; readonly credentialId: string; readonly grantId: string;
@@ -71,7 +74,8 @@ const grantOf = (r: Row): GrantRecord => ({ grantId: String(r.grant_id), credent
   verification: (r.verification ?? null) as Record<string, unknown> | null, expiresAt: date(r.expires_at), revocation: (r.revocation ?? null) as Record<string, unknown> | null,
   revocationRequestedAt: maybeDate(r.revocation_requested_at), revokedAt: maybeDate(r.revoked_at), evmNextNonce: r.evm_next_nonce === null ? null : BigInt(String(r.evm_next_nonce)),
   version: Number(r.version), createdAt: date(r.created_at), updatedAt: date(r.updated_at) });
-const authorizationOf = (r: Row): AuthorizationRecord => ({ authorizationId: String(r.authorization_id), owner: ownerOf(r), ruleId: String(r.rule_id),
+const authorizationOf = (r: Row): AuthorizationRecord => ({ authorizationId: String(r.authorization_id), owner: ownerOf(r), ruleId: str(r.rule_id),
+  workflowRunId: str(r.workflow_run_id),
   state: r.state as AuthorizationState, activeRevision: r.active_revision === null ? null : Number(r.active_revision), latestRevision: Number(r.latest_revision),
   revokedAt: maybeDate(r.revoked_at), revokeCode: str(r.revoke_code), version: Number(r.version), createdAt: date(r.created_at), updatedAt: date(r.updated_at) });
 const revisionOf = (r: Row): RevisionRecord => ({ authorizationId: String(r.authorization_id), revision: Number(r.revision), owner: ownerOf(r), state: r.state as RevisionState,
@@ -79,7 +83,7 @@ const revisionOf = (r: Row): RevisionRecord => ({ authorizationId: String(r.auth
   widening: (r.widening ?? []) as string[], envelope: (r.envelope ?? null) as UniversalWorkflowAuthorization | null, envelopeDigest: str(r.envelope_digest),
   passkeyId: str(r.passkey_id), assertion: (r.assertion ?? null) as Record<string, unknown> | null, signedAt: maybeDate(r.signed_at), createdAt: date(r.created_at) });
 const executionOf = (r: Row): ExecutionRecord => ({ executionId: String(r.execution_id), authorizationId: String(r.authorization_id), revision: Number(r.revision),
-  owner: ownerOf(r), ruleId: String(r.rule_id), occurrenceId: String(r.occurrence_id), state: r.state as ExecutionState, code: str(r.code),
+  owner: ownerOf(r), ruleId: str(r.rule_id), occurrenceId: str(r.occurrence_id), workflowRunId: str(r.workflow_run_id), state: r.state as ExecutionState, code: str(r.code),
   workflowHash: String(r.workflow_hash), manifestHash: String(r.manifest_hash), stepCount: Number(r.step_count), currentStep: Number(r.current_step),
   attention: r.attention === true, evidence: (r.evidence ?? null) as Record<string, unknown> | null, version: Number(r.version), reservedAt: maybeDate(r.reserved_at),
   settledAt: maybeDate(r.settled_at), createdAt: date(r.created_at), updatedAt: date(r.updated_at) });
@@ -265,11 +269,16 @@ export function createPgDelegationStore(db: Database, tenantId: string) {
     },
 
     // ── Authorizations ──────────────────────────────────────────────────────────────────────────────────────────────────────
-    /** Inside the rule-creation transaction: the lineage and its first revision (PENDING_SIGNATURE). */
-    async createAuthorization(tx: Queryable, owner: Owner, a: { readonly authorizationId: string; readonly ruleId: string; readonly strategy: StrategyInput;
-      readonly manifest: DelegatedAuthorizationManifest; readonly manifestHash: string }, now: Date) {
-      await tx.query(`INSERT INTO delegated_authorizations (tenant_id, authorization_id, owner_namespace, owner_account, rule_id, state, latest_revision, created_at, updated_at)
-        VALUES ($1, $2, $3, $4, $5, 'PENDING_SIGNATURE', 1, $6, $6)`, [tenantId, a.authorizationId, owner.namespace, owner.address, a.ruleId, now]);
+    /**
+     * Inside the rule-creation transaction (or, BUILD-CHAT-E2E-001, a workflow run's): the lineage and its first revision (PENDING_SIGNATURE).
+     * Its source is exactly one of `ruleId` and `workflowRunId`.
+     */
+    async createAuthorization(tx: Queryable, owner: Owner, a: { readonly authorizationId: string; readonly ruleId?: string; readonly workflowRunId?: string;
+      readonly strategy: StrategyInput; readonly manifest: DelegatedAuthorizationManifest; readonly manifestHash: string }, now: Date) {
+      if ((a.ruleId === undefined) === (a.workflowRunId === undefined)) refuse('AUTHORIZATION_SOURCE_INVALID');
+      await tx.query(`INSERT INTO delegated_authorizations (tenant_id, authorization_id, owner_namespace, owner_account, rule_id, workflow_run_id, state, latest_revision,
+          created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, 'PENDING_SIGNATURE', 1, $7, $7)`,
+      [tenantId, a.authorizationId, owner.namespace, owner.address, a.ruleId ?? null, a.workflowRunId ?? null, now]);
       await tx.query(`INSERT INTO delegated_authorization_revisions (tenant_id, authorization_id, revision, owner_namespace, owner_account, state, strategy, workflow_hash, manifest,
           manifest_hash, created_at, updated_at) VALUES ($1, $2, 1, $3, $4, 'PENDING_SIGNATURE', $5::jsonb, $6, $7::jsonb, $8, $9, $9)`,
       [tenantId, a.authorizationId, owner.namespace, owner.address, json(a.strategy), a.manifest.workflow.workflowHash, json(a.manifest), a.manifestHash, now]);
@@ -278,6 +287,11 @@ export function createPgDelegationStore(db: Database, tenantId: string) {
     async authorization(owner: Owner, authorizationId: string): Promise<AuthorizationRecord | null> {
       const row = (await db.query(`SELECT * FROM delegated_authorizations WHERE tenant_id = $1 AND owner_namespace = $2 AND owner_account = $3 AND authorization_id = $4`,
         [tenantId, owner.namespace, owner.address, authorizationId])).rows[0];
+      return row ? authorizationOf(row) : null;
+    },
+    /** BUILD-CHAT-E2E-001: the delegated authorization lineage of a workflow run (at most one per run). */
+    async authorizationForRun(workflowRunId: string): Promise<AuthorizationRecord | null> {
+      const row = (await db.query('SELECT * FROM delegated_authorizations WHERE tenant_id = $1 AND workflow_run_id = $2', [tenantId, workflowRunId])).rows[0];
       return row ? authorizationOf(row) : null;
     },
     async authorizationById(authorizationId: string): Promise<AuthorizationRecord | null> {
@@ -309,7 +323,9 @@ export function createPgDelegationStore(db: Database, tenantId: string) {
      * counter advances, the revision becomes ACTIVE (a previous one SUPERSEDED), the lineage ACTIVE, and the rule resumes.
      */
     activate: (owner: Owner, input: { readonly authorizationId: string; readonly revision: number; readonly digest: string; readonly passkeyId: string;
-      readonly signCount: number; readonly assertion: Readonly<Record<string, unknown>>; readonly ruleResume: { readonly nextEvaluationAt: Date; readonly scheduleCursor: Date | null } },
+      readonly signCount: number; readonly assertion: Readonly<Record<string, unknown>>; readonly ruleResume?: { readonly nextEvaluationAt: Date; readonly scheduleCursor: Date | null };
+      /** BUILD-CHAT-E2E-001: the source's own activation, in this same transaction (a workflow run starts its delegated execution). */
+      readonly onActivated?: (tx: Queryable, authorization: AuthorizationRecord) => Promise<void> },
     now: Date) => db.transaction(async tx => {
       const a = await lockAuthorization(tx, input.authorizationId);
       if (!a || a.owner.namespace !== owner.namespace || a.owner.address !== owner.address) refuse('AUTHORIZATION_NOT_FOUND');
@@ -332,10 +348,14 @@ export function createPgDelegationStore(db: Database, tenantId: string) {
       const updated = authorizationOf((await tx.query(`UPDATE delegated_authorizations SET state = 'ACTIVE', active_revision = $3, version = version + 1
         WHERE tenant_id = $1 AND authorization_id = $2 RETURNING *`, [tenantId, input.authorizationId, input.revision])).rows[0]!);
       // The rule resumes (re-armed from the next observation, schedule from now); an archived or expired rule stays as it is.
-      await tx.query(`UPDATE automation_rules SET state = 'ACTIVE', version = version + 1, next_evaluation_at = $3, schedule_cursor = $4,
-          trigger_state = jsonb_set(trigger_state, '{armed}', 'null'::jsonb)
-        WHERE tenant_id = $1 AND rule_id = $2 AND state = 'PAUSED'`, [tenantId, a!.ruleId, input.ruleResume.nextEvaluationAt, input.ruleResume.scheduleCursor]);
-      await tx.query(`INSERT INTO automation_evaluations (tenant_id, rule_id, at, outcome) VALUES ($1, $2, $3, 'DELEGATED_AUTHORIZATION_ACTIVATED')`, [tenantId, a!.ruleId, now]);
+      if (a!.ruleId !== null) {
+        if (!input.ruleResume) refuse('AUTHORIZATION_SOURCE_INVALID');
+        await tx.query(`UPDATE automation_rules SET state = 'ACTIVE', version = version + 1, next_evaluation_at = $3, schedule_cursor = $4,
+            trigger_state = jsonb_set(trigger_state, '{armed}', 'null'::jsonb)
+          WHERE tenant_id = $1 AND rule_id = $2 AND state = 'PAUSED'`, [tenantId, a!.ruleId, input.ruleResume!.nextEvaluationAt, input.ruleResume!.scheduleCursor]);
+        await tx.query(`INSERT INTO automation_evaluations (tenant_id, rule_id, at, outcome) VALUES ($1, $2, $3, 'DELEGATED_AUTHORIZATION_ACTIVATED')`, [tenantId, a!.ruleId, now]);
+      }
+      await input.onActivated?.(tx, updated);
       await event(tx, { owner, kind: 'AUTHORIZATION_SIGNED', authorizationId: input.authorizationId, passkeyId: input.passkeyId,
         detail: { revision: input.revision, digest: input.digest } });
       return updated;
@@ -356,7 +376,7 @@ export function createPgDelegationStore(db: Database, tenantId: string) {
         input.manifestHash, json(input.widening), now]);
       await tx.query(`UPDATE delegated_authorizations SET state = 'PENDING_SIGNATURE', active_revision = NULL, latest_revision = $3, version = version + 1
         WHERE tenant_id = $1 AND authorization_id = $2`, [tenantId, input.authorizationId, revision]);
-      await tx.query(`UPDATE automation_rules SET state = 'PAUSED', version = version + 1 WHERE tenant_id = $1 AND rule_id = $2 AND state = 'ACTIVE'`, [tenantId, a!.ruleId]);
+      if (a!.ruleId !== null) await tx.query(`UPDATE automation_rules SET state = 'PAUSED', version = version + 1 WHERE tenant_id = $1 AND rule_id = $2 AND state = 'ACTIVE'`, [tenantId, a!.ruleId]);
       await event(tx, { owner, kind: 'AUTHORIZATION_REVISION_CREATED', authorizationId: input.authorizationId, detail: { revision, widening: [...input.widening] } });
       return revision;
     }),
@@ -372,8 +392,10 @@ export function createPgDelegationStore(db: Database, tenantId: string) {
         [tenantId, authorizationId]);
       const updated = authorizationOf((await tx.query(`UPDATE delegated_authorizations SET state = 'REVOKED', active_revision = NULL, revoked_at = $3, revoke_code = $4,
           version = version + 1 WHERE tenant_id = $1 AND authorization_id = $2 RETURNING *`, [tenantId, authorizationId, now, code])).rows[0]!);
-      await tx.query(`UPDATE automation_rules SET state = 'PAUSED', version = version + 1 WHERE tenant_id = $1 AND rule_id = $2 AND state = 'ACTIVE'`, [tenantId, a!.ruleId]);
-      await tx.query(`INSERT INTO automation_evaluations (tenant_id, rule_id, at, outcome) VALUES ($1, $2, $3, 'DELEGATED_AUTHORIZATION_REVOKED')`, [tenantId, a!.ruleId, now]);
+      if (a!.ruleId !== null) {
+        await tx.query(`UPDATE automation_rules SET state = 'PAUSED', version = version + 1 WHERE tenant_id = $1 AND rule_id = $2 AND state = 'ACTIVE'`, [tenantId, a!.ruleId]);
+        await tx.query(`INSERT INTO automation_evaluations (tenant_id, rule_id, at, outcome) VALUES ($1, $2, $3, 'DELEGATED_AUTHORIZATION_REVOKED')`, [tenantId, a!.ruleId, now]);
+      }
       await event(tx, { owner, kind: 'AUTHORIZATION_REVOKED', authorizationId, code });
       return updated;
     }),
@@ -390,7 +412,7 @@ export function createPgDelegationStore(db: Database, tenantId: string) {
           [tenantId, a.authorizationId]);
         await tx.query(`UPDATE delegated_authorizations SET state = 'EXPIRED', active_revision = NULL, version = version + 1 WHERE tenant_id = $1 AND authorization_id = $2`,
           [tenantId, a.authorizationId]);
-        await tx.query(`UPDATE automation_rules SET state = 'PAUSED', version = version + 1 WHERE tenant_id = $1 AND rule_id = $2 AND state = 'ACTIVE'`, [tenantId, a.ruleId]);
+        if (a.ruleId !== null) await tx.query(`UPDATE automation_rules SET state = 'PAUSED', version = version + 1 WHERE tenant_id = $1 AND rule_id = $2 AND state = 'ACTIVE'`, [tenantId, a.ruleId]);
         await event(tx, { owner: a.owner, kind: 'AUTHORIZATION_EXPIRED', authorizationId: a.authorizationId });
         n++;
       });
@@ -407,6 +429,21 @@ export function createPgDelegationStore(db: Database, tenantId: string) {
       [tenantId, e.executionId, e.authorizationId, e.revision, e.owner.namespace, e.owner.address, e.ruleId, e.occurrenceId, e.workflowHash, e.manifestHash, e.stepCount, now]);
       return executionOf((await db.query(`SELECT * FROM delegated_executions WHERE tenant_id = $1 AND authorization_id = $2 AND occurrence_id = $3`,
         [tenantId, e.authorizationId, e.occurrenceId])).rows[0]!);
+    },
+    /** BUILD-CHAT-E2E-001: the ONE delegated execution of a workflow run (created QUEUED once; a duplicate delivery finds the same row). */
+    async ensureRunExecution(e: { readonly executionId: string; readonly authorizationId: string; readonly revision: number; readonly owner: Owner;
+      readonly workflowRunId: string; readonly workflowHash: string; readonly manifestHash: string; readonly stepCount: number }, now: Date): Promise<ExecutionRecord> {
+      await db.query(`INSERT INTO delegated_executions (tenant_id, execution_id, authorization_id, revision, owner_namespace, owner_account, workflow_run_id, state,
+          workflow_hash, manifest_hash, step_count, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, 'QUEUED', $8, $9, $10, $11, $11)
+        ON CONFLICT (tenant_id, workflow_run_id) WHERE workflow_run_id IS NOT NULL DO NOTHING`,
+      [tenantId, e.executionId, e.authorizationId, e.revision, e.owner.namespace, e.owner.address, e.workflowRunId, e.workflowHash, e.manifestHash, e.stepCount, now]);
+      const row = (await db.query(`SELECT * FROM delegated_executions WHERE tenant_id = $1 AND workflow_run_id = $2`, [tenantId, e.workflowRunId])).rows[0]!;
+      // A run executes under exactly the authorization it activated; any other lineage on its row is refused, never adopted.
+      return row.authorization_id === e.authorizationId ? executionOf(row) : refuse('WORKFLOW_RUN_AUTHORIZATION_MISMATCH');
+    },
+    async executionForRun(workflowRunId: string): Promise<ExecutionRecord | null> {
+      const row = (await db.query(`SELECT * FROM delegated_executions WHERE tenant_id = $1 AND workflow_run_id = $2`, [tenantId, workflowRunId])).rows[0];
+      return row ? executionOf(row) : null;
     },
     executionById: (executionId: string) => executionRow(db, executionId, false),
     async executions(owner: Owner, filter: { readonly authorizationId?: string; readonly limit: number }): Promise<readonly ExecutionRecord[]> {

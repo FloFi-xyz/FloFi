@@ -28,7 +28,9 @@ export type StepRequirement = {
   readonly stepHash: string;
 };
 export type WorkflowRequirement = { readonly workflowHash: string; readonly strategy: StrategyInput; readonly steps: readonly StepRequirement[];
-  readonly chains: readonly string[]; readonly actionTypes: readonly string[]; readonly fundsClass: 'TEST_FUNDS' | 'REAL_FUNDS' };
+  readonly chains: readonly string[]; readonly actionTypes: readonly string[]; readonly fundsClass: 'TEST_FUNDS' | 'REAL_FUNDS';
+  /** BUILD-CHAT-E2E-001: typed amount dependencies; a bound step's input amount is its cap until the producer step reconciled. */
+  readonly bindings: WorkflowComposition['bindings'] };
 
 type Node = Composition['workflow']['nodes'][number];
 type Quantity = { readonly asset: { readonly chainId: string; readonly address?: string; readonly decimals: number }; readonly amount: string };
@@ -70,6 +72,16 @@ function symbolOfAddress(strategy: StrategySpec, asset: Quantity['asset']): stri
   return asset.decimals === 6 ? keys.find(k => k.includes('USDC')) ?? keys[0]! : keys.find(k => !k.includes('USDC')) ?? keys[0]!;
 }
 
+/**
+ * BUILD-CHAT-E2E-001: step `index` of `requirement` with its input narrowed to `used` (a bound step, once its producer reconciled). Only a
+ * smaller-or-equal amount of the very same asset is accepted: the cap the owner authorized is never exceeded.
+ */
+export function narrowedStep(requirement: WorkflowRequirement, index: number, used: bigint): StepRequirement {
+  const step = requirement.steps[index], input = step?.inputs[0];
+  if (!step || step.inputs.length !== 1 || !input || used <= 0n || used > input.amount) throw new Error('WORKFLOW_BINDING_AMOUNT_INVALID');
+  return { ...step, inputs: [{ ...input, amount: used }] };
+}
+
 /** The delegated-authority requirements of a canonical workflow, bound to the hash the caller expects. */
 export function workflowRequirement(strategy: unknown, expectedHash?: string): { readonly ok: true; readonly value: WorkflowRequirement } | { readonly ok: false; readonly code: string } {
   const composed = composeWorkflowBound(strategy, expectedHash);
@@ -81,7 +93,7 @@ export function requirementOf(composed: WorkflowComposition): { readonly ok: tru
     const steps = composed.steps.map((c, i) => stepOf(c, i));
     const chains = [...new Set(steps.flatMap(s => [s.chain, ...s.destinationChain ? [s.destinationChain] : []]))];
     return { ok: true, value: { workflowHash: composed.workflowHash, strategy: composed.strategy, steps, chains,
-      actionTypes: [...new Set(steps.flatMap(s => s.actionTypes))], fundsClass: composed.fundsClass } };
+      actionTypes: [...new Set(steps.flatMap(s => s.actionTypes))], fundsClass: composed.fundsClass, bindings: composed.bindings } };
   } catch (cause) {
     return { ok: false, code: cause instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(cause.message) ? cause.message : 'DELEGATION_STEP_INVALID' };
   }

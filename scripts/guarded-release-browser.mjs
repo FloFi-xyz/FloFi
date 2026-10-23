@@ -99,6 +99,11 @@ const definitions = [
   // synthetic loopback swap RPC and scripted owner confirmations on disposable PostgreSQL (no public network or broadcast).
   ['approve-authorize-journeys', ['approve-authorize-journeys.spec.ts'], { GRYLOO_MCP_E2E: 'EMBEDDED_LOOPBACK_ONLY', GRYLOO_CLOUD_RUNTIME_E2E: 'EMBEDDED_LOOPBACK_ONLY',
     FLOFI_SWAP_READ_E2E: 'MOCKED_LOOPBACK_ONLY', FLOFI_SWAP_EXECUTION_E2E: 'MOCKED_LOOPBACK_ONLY', TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres' }],
+  // BUILD-CHAT-E2E-001: a two-step workflow from an MCP request, one approval, each step signed on /approve after the previous one reconciled,
+  // on the same MCP harness and synthetic loopback swap RPC with workflow runs enabled (confirm each step; no delegated signer exists here).
+  ['approve-workflow-run', ['approve-workflow-run.spec.ts'], { GRYLOO_MCP_E2E: 'EMBEDDED_LOOPBACK_ONLY', GRYLOO_CLOUD_RUNTIME_E2E: 'EMBEDDED_LOOPBACK_ONLY',
+    FLOFI_SWAP_READ_E2E: 'MOCKED_LOOPBACK_ONLY', FLOFI_SWAP_EXECUTION_E2E: 'MOCKED_LOOPBACK_ONLY', FLOFI_WORKFLOW_RUNS: 'enabled',
+    TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres' }],
 ];
 const composition = [['composition-provenance', ['release-composition-provenance.spec.ts'], {}]];
 
@@ -114,7 +119,8 @@ const shards = [
     'robinhood-mainnet-authoring', 'base-mainnet-authoring', 'arbitrum-authoring-certification', 'ethereum-authoring-certification', 'workflow-ux-authoring', 'canvas-workflow-ux'],
   ['cloud-provenance', 'journey-provenance', 'synthetic-fork-provenance', 'execution-continuity', 'workflow-acceptance', 'swap-read-acceptance',
     'automations', 'chat-automations', 'delegated-execution', 'canvas-automation-ux', 'admin-console', 'cow-loopback', 'card-provider-loopback',
-    'mcp-routes-oauth-disabled', 'developer-journey', 'mcp-in-chat', 'channel-signing', 'channel-approve', 'approve-authorize-journeys'],
+    'mcp-routes-oauth-disabled', 'developer-journey', 'mcp-in-chat', 'channel-signing', 'channel-approve', 'approve-authorize-journeys',
+    'approve-workflow-run'],
 ];
 // Fail closed on any plan drift: every product profile runs in exactly one place, and every name in the plan exists.
 const names = definitions.map(([name]) => name), planned = [...critical, ...shards.flat()];
@@ -167,7 +173,7 @@ for (const [index, name] of selection.entries()) {
   for (const key of ['FLOFI_COPILOT', 'FLOFI_RELEASE_PROVENANCE_PROFILE', 'GRYLOO_SUPPLY_E2E', 'GRYLOO_LENDING_E2E',
     'GRYLOO_JUPITER_E2E', 'GRYLOO_SOLANA_DEVNET_E2E', 'GRYLOO_ROBINHOOD_E2E', 'GRYLOO_ROBINHOOD_MAINNET_E2E', 'GRYLOO_BASE_MAINNET_E2E', 'GRYLOO_UNISWAP_LIQUIDITY_E2E',
     'GRYLOO_ROUTER_E2E', 'GRYLOO_ROUTER_TESTNET_E2E', 'GRYLOO_CLOUD_RUNTIME_E2E', 'FLOFI_SWAP_READ_E2E', 'FLOFI_SWAP_EXECUTION_E2E', 'GRYLOO_COW', 'GRYLOO_CARD_E2E', 'GRYLOO_AUTOMATION_E2E', 'GRYLOO_DELEGATION_E2E',
-    'FLOFI_ADMIN_E2E', 'FLOFI_LEARNING_E2E', 'GRYLOO_MCP_E2E', 'GRYLOO_CHANNEL_E2E', 'FLOFI_E2E_DATABASE_URL']) delete env[key];
+    'FLOFI_ADMIN_E2E', 'FLOFI_LEARNING_E2E', 'GRYLOO_MCP_E2E', 'GRYLOO_CHANNEL_E2E', 'FLOFI_E2E_DATABASE_URL', 'FLOFI_WORKFLOW_RUNS']) delete env[key];
   Object.assign(env, settings);
   // Each profile keeps its own artifacts (a later profile never wipes them) and its own JUnit file for the CI test report.
   const output = join(results, name), junit = join(results, 'junit', `${name}.xml`);
