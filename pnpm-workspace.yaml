@@ -14,6 +14,9 @@ overrides:
   'postcss@8.5.23>source-map-js': 1.2.2
   'postcss@8.5.28>source-map-js': 1.2.2
   'next@16.4.1>sharp': 0.35.5
+  # GHSA-mrhx-c7xc-m3w5 (high): zod < 4.6.6 can exhaust memory validating oversized constrained collections.
+  '@modelcontextprotocol/server@2.3.0>zod': 4.6.6
+  '@modelcontextprotocol/core@2.3.0>zod': 4.6.6
 patchedDependencies:
   '@streamparser/json@0.0.26': patches/@streamparser__json@0.0.26.patch
   '@xyflow/system@0.0.82': patches/@xyflow__system@0.0.82.patch

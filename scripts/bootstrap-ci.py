@@ -322,7 +322,7 @@ BUILDCLOUD001_CLOUD_RUNTIME = ("packages/cloud-runtime/package.json", "@defi-wor
                                {"@defi-workflow-engine/reference-executor": "workspace:0.1.0", "pg": "8.23.0"},
                                {"@types/pg": "8.23.1"})
 # BUILD-MCP-001 exact direct pin for the official MCP TypeScript SDK v2 server. Its only registry
-# dependencies are @modelcontextprotocol/core@2.3.0 and zod@4.6.5 (no license exception). From 2.3.0 the
+# dependencies are @modelcontextprotocol/core@2.3.0 and zod@4.6.6 (no license exception). From 2.3.0 the
 # SDK's manifests declare Apache-2.0 (MIT through 2.2.0); zod remains MIT. The reference app also links the
 # already approved BUILD-001 pins @sinclair/typebox and ajv for tool schemas.
 BUILDMCP001_DIRECT_VERSIONS = {
@@ -333,6 +333,7 @@ BUILDMCP001_DIRECT_VERSIONS = {
 # Current main retains 262 after the Colosseum security updates; BUILD-MCP-001 adds
 # 3 (@modelcontextprotocol/server, @modelcontextprotocol/core, zod) to that graph.
 # BUILD-CHAT-E2E-001: Vitest 5.0.3 requires why-is-node-running 3.2.1, removing siginfo and stackback.
+# GHSA-mrhx-c7xc-m3w5: the MCP SDK's zod moves 4.6.5 → 4.6.6 by exact override (MIT, no dependencies); the count is unchanged.
 REGISTRY_PACKAGE_COUNT = 263
 
 # The pre-existing BUILD-001 MPL tooling exception is exact-name scoped too.
@@ -381,7 +382,7 @@ def verify_dependencies():
     if lock.count("\npackages:\n") != 1 or lock.count("\nsnapshots:\n") != 1:
         raise RuntimeError("Unrecognized lockfile sections")
     resolved_sections = "packages:\n" + lock.split("\npackages:\n", 1)[1]
-    if hashlib.sha256(resolved_sections.encode()).hexdigest() != "7ee7f5d8ecc21d5c3e3544a41292c8525fbd1fa90a92284729e95969807e3d6d":
+    if hashlib.sha256(resolved_sections.encode()).hexdigest() != "09b25974a6387957335365ee01f5fbe770be8a50eff72b570b5f9c7f450c016c":
         errors.append("Baseline registry packages/snapshots or peer resolutions changed")
     packages_text = lock.split("\npackages:\n", 1)[1].split("\nsnapshots:\n", 1)[0]
     snapshots_text = lock.split("\nsnapshots:\n", 1)[1]
