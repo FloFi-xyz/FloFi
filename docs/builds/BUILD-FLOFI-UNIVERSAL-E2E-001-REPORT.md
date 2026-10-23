@@ -426,6 +426,11 @@ the docs and a read-only script.
 
 ## 12. Deviations and limits of this build
 
+- **An intentional test change, for review.** CircleCI's `certification-browser-1` failed once in `unsafe-lending-simulations`
+  (`repay.spec.ts`, intermittent; CI's trace rerun passed). The failure screenshot shows "Connect your wallet to set the beneficiary":
+  the test clicked Add Repay before the injected wallet's passive reconnect. This is the race BUILD-SOLANA-TRANSFER-UX-001 fixed in
+  `canvas-automation-ux`, with the same correction: wait until the header shows the owner's wallet before adding the action. It is applied
+  to the profile's two tests (Repay and Borrow). No assertion changed, and the profile passed 3 of 3 runs locally.
 - The dependency fix is a separate PR (#117) because it is a different, security-gated change. This build is stacked on it.
 - Real transactions were not submitted (release rules; owner authorization is required). The live certification is a plan (§8), not
   evidence.
