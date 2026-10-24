@@ -19,7 +19,7 @@ it('exposes executable SOL/SPL capabilities and requires explicit Solana recipie
     expect(handoffFindings(c)).toEqual({ preExecution: [], blockers: [] });
     expect(executionPlan(c)).toMatchObject({ kind: 'SINGLE_FLOW', flow: strategy.network === 'solana-devnet' ? 'solana-devnet-transfer' : 'solana-transfer' });
   }
-  expect(codeCapabilities().filter(r => r.network.startsWith('solana') && r.action === 'transfer')).toHaveLength(2);
-  expect(supportedNetworks().filter(n => n.id.startsWith('solana'))).toHaveLength(2);
-  expect(supportedAssets('solana').filter(a => a.actions.includes('transfer')).map(a => a.symbol)).toEqual(expect.arrayContaining(['SOL', 'USDC', 'USDT']));
+  expect(codeCapabilities('ENGINEERING').filter(r => r.network.startsWith('solana') && r.action === 'transfer')).toHaveLength(2);
+  expect(supportedNetworks('ENGINEERING').filter(n => n.id.startsWith('solana'))).toHaveLength(2);
+  expect(supportedAssets('ENGINEERING', 'solana').filter(a => a.actions.includes('transfer')).map(a => a.symbol)).toEqual(expect.arrayContaining(['SOL', 'USDC', 'USDT']));
 });

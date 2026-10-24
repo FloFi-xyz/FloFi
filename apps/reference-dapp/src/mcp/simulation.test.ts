@@ -129,7 +129,10 @@ describe('BUILD-MCP-001 simulate_strategy: the flows\' own simulation as a read-
     expect((await simulate(local, bridge, ROUTER_OWNER)).output).toEqual({ ok: false, code: 'MCP_CLOUD_RUNTIME_REQUIRED' });
     // A hosted Preview (BUILD-MCP-002: a production deployment refuses static credentials altogether).
     const hosted = session({ env: { ...env, VERCEL: '1', VERCEL_ENV: 'preview', VERCEL_GIT_COMMIT_REF: 'claude/build-mcp-002' }, token: alice.token });
-    expect((await simulate(hosted, bridge, ROUTER_OWNER)).output).toEqual({ ok: false, code: 'CLOUD_RUNTIME_NOT_CONFIGURED' });
+    // BUILD-FLOFI-MAINNET-PRODUCT-001: a hosted deployment is the Mainnet-only product (its contract offers no test network); a mainnet route
+    // still reaches the unconfigured runtime and fails closed there.
+    expect((await simulate(hosted, bridge, ROUTER_OWNER)).text).toMatch(/\/strategy mainnetOnly/);
+    expect((await simulate(hosted, { ...bridge, sourceNetwork: 'base', destinationNetwork: 'arbitrum-one' }, ROUTER_OWNER)).output).toEqual({ ok: false, code: 'CLOUD_RUNTIME_NOT_CONFIGURED' });
   });
 
   it('caps concurrent previews per instance (best effort) and releases the slot afterwards', async () => {

@@ -4,7 +4,7 @@
     "title": "FloFi Developer API",
     "version": "1.0.0",
     "summary": "Developers build the experience. FloFi handles the DeFi workflow lifecycle.",
-    "description": "Server-side API for third-party applications: discover capabilities, store immutable FloFi strategies, validate and simulate them, and hand them to the end user for approval in FloFi. The API key has zero financial authority: it never signs, submits or approves anything. Only the end user's own wallet, in FloFi, after a fresh simulation and the Strategy Manifest Review, can sign. Execution status and evidence are visible only for runs the end user chose to share (off by default). Sandbox credentials only in this release: test funds, every mainnet off.",
+    "description": "Server-side API for third-party applications: discover capabilities, store immutable FloFi strategies, validate and simulate them, and hand them to the end user for approval in FloFi. The API key has zero financial authority: it never signs, submits or approves anything. Only the end user's own wallet, in FloFi, after a fresh simulation and the Strategy Manifest Review, can sign. Execution status and evidence are visible only for runs the end user chose to share (off by default). FloFi runs on mainnets only (real funds). Sandbox credentials only in this release, and a sandbox key has every mainnet off: it can discover capabilities, but strategies and approvals need production credentials, which this release does not issue.",
     "license": {
       "name": "Apache-2.0",
       "identifier": "Apache-2.0"
@@ -60,15 +60,10 @@
               "type": "string",
               "enum": [
                 "base",
-                "base-sepolia",
                 "arbitrum-one",
                 "ethereum",
-                "arbitrum-sepolia",
-                "ethereum-sepolia",
                 "solana",
-                "solana-devnet",
-                "robinhood",
-                "robinhood-testnet"
+                "robinhood"
               ]
             }
           },
@@ -86,7 +81,6 @@
                 "repay",
                 "withdraw",
                 "add_liquidity",
-                "lending_composition",
                 "transfer"
               ]
             }
@@ -2228,14 +2222,14 @@
     "schemas": {
       "CreateStrategyRequest": {
         "additionalProperties": false,
-        "description": "A FloFi StrategySpec: a version 1 strategy or a version 2 step list.",
+        "description": "A FloFi StrategySpec on mainnets: a version 1 strategy or a version 2 step list.",
         "type": "object",
         "required": [
           "strategy"
         ],
         "properties": {
           "strategy": {
-            "description": "A FloFi strategy (version 1, one action) or workflow (version 2, ordered steps): structured intent only.",
+            "description": "A FloFi strategy (version 1, one action) or workflow (version 2, ordered steps) on mainnets (real funds): structured intent only.",
             "anyOf": [
               {
                 "additionalProperties": false,
@@ -2258,12 +2252,8 @@
                     "type": "string"
                   },
                   "sourceNetwork": {
-                    "description": "Source network. base-sepolia pairs with arbitrum-sepolia (test USDC); base and arbitrum-one pair both ways (real funds); base or arbitrum-one USDC bridges into robinhood as USDG, and robinhood USDG bridges out to base or arbitrum-one as USDC (real funds).",
+                    "description": "Source network (real funds). The Cross-chain Router moves USDC between base, arbitrum-one and ethereum, and into or out of robinhood as USDG (WETH also bridges to and from robinhood); get_capabilities lists the routes this deployment enables.",
                     "anyOf": [
-                      {
-                        "const": "base-sepolia",
-                        "type": "string"
-                      },
                       {
                         "const": "base",
                         "type": "string"
@@ -2283,12 +2273,8 @@
                     ]
                   },
                   "destinationNetwork": {
-                    "description": "Destination network; only the pairs above are supported.",
+                    "description": "Destination network; a different network of the same route list.",
                     "anyOf": [
-                      {
-                        "const": "arbitrum-sepolia",
-                        "type": "string"
-                      },
                       {
                         "const": "arbitrum-one",
                         "type": "string"
@@ -2372,26 +2358,14 @@
                     "type": "string"
                   },
                   "network": {
-                    "description": "Swap network. Assets, protocols and runtime support are validated against the shared registries; mainnet uses real funds.",
+                    "description": "Swap network (real funds). Assets, protocols and runtime support are validated against the shared registries.",
                     "anyOf": [
                       {
                         "const": "base",
                         "type": "string"
                       },
                       {
-                        "const": "base-sepolia",
-                        "type": "string"
-                      },
-                      {
-                        "const": "ethereum-sepolia",
-                        "type": "string"
-                      },
-                      {
                         "const": "solana",
-                        "type": "string"
-                      },
-                      {
-                        "const": "solana-devnet",
                         "type": "string"
                       },
                       {
@@ -2432,10 +2406,6 @@
                           {
                             "const": "USDT",
                             "type": "string"
-                          },
-                          {
-                            "const": "devUSDC",
-                            "type": "string"
                           }
                         ]
                       },
@@ -2470,10 +2440,6 @@
                           },
                           {
                             "const": "USDT",
-                            "type": "string"
-                          },
-                          {
-                            "const": "devUSDC",
                             "type": "string"
                           }
                         ]
@@ -2521,16 +2487,8 @@
                     "type": "string"
                   },
                   "network": {
-                    "description": "Aave V3 network: base-sepolia lends test USDC, ethereum-sepolia lends test WBTC, base and arbitrum-one lend native USDC (real funds).",
+                    "description": "Aave V3 network (real funds): native USDC on base, arbitrum-one and ethereum.",
                     "anyOf": [
-                      {
-                        "const": "base-sepolia",
-                        "type": "string"
-                      },
-                      {
-                        "const": "ethereum-sepolia",
-                        "type": "string"
-                      },
                       {
                         "const": "base",
                         "type": "string"
@@ -2587,16 +2545,8 @@
                     "type": "string"
                   },
                   "network": {
-                    "description": "Aave V3 network: base-sepolia lends test USDC, ethereum-sepolia lends test WBTC, base and arbitrum-one lend native USDC (real funds).",
+                    "description": "Aave V3 network (real funds): native USDC on base, arbitrum-one and ethereum.",
                     "anyOf": [
-                      {
-                        "const": "base-sepolia",
-                        "type": "string"
-                      },
-                      {
-                        "const": "ethereum-sepolia",
-                        "type": "string"
-                      },
                       {
                         "const": "base",
                         "type": "string"
@@ -2653,16 +2603,8 @@
                     "type": "string"
                   },
                   "network": {
-                    "description": "Aave V3 network: base-sepolia lends test USDC, ethereum-sepolia lends test WBTC, base and arbitrum-one lend native USDC (real funds).",
+                    "description": "Aave V3 network (real funds): native USDC on base, arbitrum-one and ethereum.",
                     "anyOf": [
-                      {
-                        "const": "base-sepolia",
-                        "type": "string"
-                      },
-                      {
-                        "const": "ethereum-sepolia",
-                        "type": "string"
-                      },
                       {
                         "const": "base",
                         "type": "string"
@@ -2718,16 +2660,8 @@
                     "type": "string"
                   },
                   "network": {
-                    "description": "Aave V3 network (base and arbitrum-one: real funds).",
+                    "description": "Aave V3 network (real funds).",
                     "anyOf": [
-                      {
-                        "const": "base-sepolia",
-                        "type": "string"
-                      },
-                      {
-                        "const": "ethereum-sepolia",
-                        "type": "string"
-                      },
                       {
                         "const": "base",
                         "type": "string"
@@ -2776,22 +2710,10 @@
                     "type": "string"
                   },
                   "network": {
-                    "description": "Uniswap v3 USDC/WETH on base-sepolia or ethereum-sepolia; Orca SOL/USDC on solana (real funds), SOL/devUSDC on solana-devnet; on catalog networks, Uniswap v3 on two catalog ERC-20 assets at feeTier (real funds), only when the factory pool exists.",
+                    "description": "Real funds. Orca SOL/USDC on solana; on the catalog networks (base, arbitrum-one, ethereum, robinhood), Uniswap v3 on two catalog ERC-20 assets at feeTier, only when the factory pool exists.",
                     "anyOf": [
                       {
-                        "const": "base-sepolia",
-                        "type": "string"
-                      },
-                      {
-                        "const": "ethereum-sepolia",
-                        "type": "string"
-                      },
-                      {
                         "const": "solana",
-                        "type": "string"
-                      },
-                      {
-                        "const": "solana-devnet",
                         "type": "string"
                       },
                       {
@@ -2815,7 +2737,7 @@
                   "maxAmounts": {
                     "minProperties": 2,
                     "maxProperties": 2,
-                    "description": "Maximum deposit of each pool asset (limits, not amounts to spend); exactly the pool's two assets by symbol or whole catalog name: USDC and WETH, SOL and devUSDC, or two official catalog symbols on a supported catalog network.",
+                    "description": "Maximum deposit of each pool asset (limits, not amounts to spend); exactly the pool's two assets by symbol or whole catalog name: SOL and USDC on solana, or two official catalog symbols on a catalog network.",
                     "type": "object",
                     "patternProperties": {
                       "^(?!0[xX][0-9a-fA-F])[^\\x00-\\x1f\\x7f]{1,160}$": {
@@ -2838,7 +2760,7 @@
                         ],
                         "properties": {
                           "unit": {
-                            "description": "price: quote per base asset (USDC per WETH, devUSDC per SOL); tick: aligned tick indexes.",
+                            "description": "price: USDC per SOL (solana only); tick: aligned tick indexes.",
                             "anyOf": [
                               {
                                 "const": "price",
@@ -2914,70 +2836,6 @@
                   "action",
                   "network",
                   "asset",
-                  "supplyAmount",
-                  "borrowAmount",
-                  "outputAsset",
-                  "owner"
-                ],
-                "properties": {
-                  "version": {
-                    "description": "Strategy contract version. Omit or 1.",
-                    "const": 1,
-                    "type": "number"
-                  },
-                  "action": {
-                    "const": "lending_composition",
-                    "type": "string"
-                  },
-                  "network": {
-                    "description": "The composition runs on Base Sepolia only.",
-                    "const": "base-sepolia",
-                    "type": "string"
-                  },
-                  "asset": {
-                    "description": "Supplied and borrowed asset (Aave V3 test USDC).",
-                    "const": "USDC",
-                    "type": "string"
-                  },
-                  "supplyAmount": {
-                    "pattern": "^(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
-                    "maxLength": 48,
-                    "description": "USDC supplied to Aave.",
-                    "type": "string"
-                  },
-                  "borrowAmount": {
-                    "pattern": "^(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
-                    "maxLength": 48,
-                    "description": "USDC borrowed from Aave; exactly this amount is swapped.",
-                    "type": "string"
-                  },
-                  "outputAsset": {
-                    "description": "The borrowed USDC is swapped to WETH on Uniswap v3.",
-                    "const": "WETH",
-                    "type": "string"
-                  },
-                  "slippageBps": {
-                    "minimum": 0,
-                    "maximum": 10000,
-                    "description": "Maximum slippage in basis points. Omit to use FloFi's documented default for the action; each action enforces its own maximum.",
-                    "type": "integer"
-                  },
-                  "owner": {
-                    "pattern": "^0x[0-9a-fA-F]{40}$",
-                    "minLength": 42,
-                    "maxLength": 42,
-                    "description": "The wallet that supplies, borrows and receives WETH. Debt remains after the swap.",
-                    "type": "string"
-                  }
-                }
-              },
-              {
-                "additionalProperties": false,
-                "type": "object",
-                "required": [
-                  "action",
-                  "network",
-                  "asset",
                   "amount"
                 ],
                 "properties": {
@@ -2991,7 +2849,7 @@
                     "type": "string"
                   },
                   "network": {
-                    "description": "The network of this same-chain transfer. robinhood, base, arbitrum-one, ethereum and solana move real funds; solana-devnet moves valueless test tokens. ethereum-sepolia and robinhood-testnet support native test-ETH self-transfers only.",
+                    "description": "The network of this same-chain transfer (real funds).",
                     "anyOf": [
                       {
                         "const": "robinhood",
@@ -3012,23 +2870,11 @@
                       {
                         "const": "solana",
                         "type": "string"
-                      },
-                      {
-                        "const": "solana-devnet",
-                        "type": "string"
-                      },
-                      {
-                        "const": "ethereum-sepolia",
-                        "type": "string"
-                      },
-                      {
-                        "const": "robinhood-testnet",
-                        "type": "string"
                       }
                     ]
                   },
                   "asset": {
-                    "description": "EVM: native ETH, or a symbol or whole name of the selected network's validated official catalog. Solana: SOL, USDC or USDT (solana-devnet: SOL or devUSDC), or an SPL token mint address together with decimals and tokenProgram.",
+                    "description": "EVM: native ETH, or a symbol or whole name of the selected network's validated official catalog. Solana: SOL, USDC or USDT, or an SPL token mint address together with decimals and tokenProgram.",
                     "anyOf": [
                       {
                         "const": "ETH",
@@ -3133,12 +2979,8 @@
                               "type": "string"
                             },
                             "sourceNetwork": {
-                              "description": "Source network. base-sepolia pairs with arbitrum-sepolia (test USDC); base and arbitrum-one pair both ways (real funds); base or arbitrum-one USDC bridges into robinhood as USDG, and robinhood USDG bridges out to base or arbitrum-one as USDC (real funds).",
+                              "description": "Source network (real funds). The Cross-chain Router moves USDC between base, arbitrum-one and ethereum, and into or out of robinhood as USDG (WETH also bridges to and from robinhood); get_capabilities lists the routes this deployment enables.",
                               "anyOf": [
-                                {
-                                  "const": "base-sepolia",
-                                  "type": "string"
-                                },
                                 {
                                   "const": "base",
                                   "type": "string"
@@ -3158,12 +3000,8 @@
                               ]
                             },
                             "destinationNetwork": {
-                              "description": "Destination network; only the pairs above are supported.",
+                              "description": "Destination network; a different network of the same route list.",
                               "anyOf": [
-                                {
-                                  "const": "arbitrum-sepolia",
-                                  "type": "string"
-                                },
                                 {
                                   "const": "arbitrum-one",
                                   "type": "string"
@@ -3247,26 +3085,14 @@
                               "type": "string"
                             },
                             "network": {
-                              "description": "Swap network. Assets, protocols and runtime support are validated against the shared registries; mainnet uses real funds.",
+                              "description": "Swap network (real funds). Assets, protocols and runtime support are validated against the shared registries.",
                               "anyOf": [
                                 {
                                   "const": "base",
                                   "type": "string"
                                 },
                                 {
-                                  "const": "base-sepolia",
-                                  "type": "string"
-                                },
-                                {
-                                  "const": "ethereum-sepolia",
-                                  "type": "string"
-                                },
-                                {
                                   "const": "solana",
-                                  "type": "string"
-                                },
-                                {
-                                  "const": "solana-devnet",
                                   "type": "string"
                                 },
                                 {
@@ -3307,10 +3133,6 @@
                                     {
                                       "const": "USDT",
                                       "type": "string"
-                                    },
-                                    {
-                                      "const": "devUSDC",
-                                      "type": "string"
                                     }
                                   ]
                                 },
@@ -3345,10 +3167,6 @@
                                     },
                                     {
                                       "const": "USDT",
-                                      "type": "string"
-                                    },
-                                    {
-                                      "const": "devUSDC",
                                       "type": "string"
                                     }
                                   ]
@@ -3396,16 +3214,8 @@
                               "type": "string"
                             },
                             "network": {
-                              "description": "Aave V3 network: base-sepolia lends test USDC, ethereum-sepolia lends test WBTC, base and arbitrum-one lend native USDC (real funds).",
+                              "description": "Aave V3 network (real funds): native USDC on base, arbitrum-one and ethereum.",
                               "anyOf": [
-                                {
-                                  "const": "base-sepolia",
-                                  "type": "string"
-                                },
-                                {
-                                  "const": "ethereum-sepolia",
-                                  "type": "string"
-                                },
                                 {
                                   "const": "base",
                                   "type": "string"
@@ -3462,16 +3272,8 @@
                               "type": "string"
                             },
                             "network": {
-                              "description": "Aave V3 network: base-sepolia lends test USDC, ethereum-sepolia lends test WBTC, base and arbitrum-one lend native USDC (real funds).",
+                              "description": "Aave V3 network (real funds): native USDC on base, arbitrum-one and ethereum.",
                               "anyOf": [
-                                {
-                                  "const": "base-sepolia",
-                                  "type": "string"
-                                },
-                                {
-                                  "const": "ethereum-sepolia",
-                                  "type": "string"
-                                },
                                 {
                                   "const": "base",
                                   "type": "string"
@@ -3528,16 +3330,8 @@
                               "type": "string"
                             },
                             "network": {
-                              "description": "Aave V3 network: base-sepolia lends test USDC, ethereum-sepolia lends test WBTC, base and arbitrum-one lend native USDC (real funds).",
+                              "description": "Aave V3 network (real funds): native USDC on base, arbitrum-one and ethereum.",
                               "anyOf": [
-                                {
-                                  "const": "base-sepolia",
-                                  "type": "string"
-                                },
-                                {
-                                  "const": "ethereum-sepolia",
-                                  "type": "string"
-                                },
                                 {
                                   "const": "base",
                                   "type": "string"
@@ -3593,16 +3387,8 @@
                               "type": "string"
                             },
                             "network": {
-                              "description": "Aave V3 network (base and arbitrum-one: real funds).",
+                              "description": "Aave V3 network (real funds).",
                               "anyOf": [
-                                {
-                                  "const": "base-sepolia",
-                                  "type": "string"
-                                },
-                                {
-                                  "const": "ethereum-sepolia",
-                                  "type": "string"
-                                },
                                 {
                                   "const": "base",
                                   "type": "string"
@@ -3651,22 +3437,10 @@
                               "type": "string"
                             },
                             "network": {
-                              "description": "Uniswap v3 USDC/WETH on base-sepolia or ethereum-sepolia; Orca SOL/USDC on solana (real funds), SOL/devUSDC on solana-devnet; on catalog networks, Uniswap v3 on two catalog ERC-20 assets at feeTier (real funds), only when the factory pool exists.",
+                              "description": "Real funds. Orca SOL/USDC on solana; on the catalog networks (base, arbitrum-one, ethereum, robinhood), Uniswap v3 on two catalog ERC-20 assets at feeTier, only when the factory pool exists.",
                               "anyOf": [
                                 {
-                                  "const": "base-sepolia",
-                                  "type": "string"
-                                },
-                                {
-                                  "const": "ethereum-sepolia",
-                                  "type": "string"
-                                },
-                                {
                                   "const": "solana",
-                                  "type": "string"
-                                },
-                                {
-                                  "const": "solana-devnet",
                                   "type": "string"
                                 },
                                 {
@@ -3690,7 +3464,7 @@
                             "maxAmounts": {
                               "minProperties": 2,
                               "maxProperties": 2,
-                              "description": "Maximum deposit of each pool asset (limits, not amounts to spend); exactly the pool's two assets by symbol or whole catalog name: USDC and WETH, SOL and devUSDC, or two official catalog symbols on a supported catalog network.",
+                              "description": "Maximum deposit of each pool asset (limits, not amounts to spend); exactly the pool's two assets by symbol or whole catalog name: SOL and USDC on solana, or two official catalog symbols on a catalog network.",
                               "type": "object",
                               "patternProperties": {
                                 "^(?!0[xX][0-9a-fA-F])[^\\x00-\\x1f\\x7f]{1,160}$": {
@@ -3713,7 +3487,7 @@
                                   ],
                                   "properties": {
                                     "unit": {
-                                      "description": "price: quote per base asset (USDC per WETH, devUSDC per SOL); tick: aligned tick indexes.",
+                                      "description": "price: USDC per SOL (solana only); tick: aligned tick indexes.",
                                       "anyOf": [
                                         {
                                           "const": "price",
@@ -3789,70 +3563,6 @@
                             "action",
                             "network",
                             "asset",
-                            "supplyAmount",
-                            "borrowAmount",
-                            "outputAsset",
-                            "owner"
-                          ],
-                          "properties": {
-                            "version": {
-                              "description": "Strategy contract version. Omit or 1.",
-                              "const": 1,
-                              "type": "number"
-                            },
-                            "action": {
-                              "const": "lending_composition",
-                              "type": "string"
-                            },
-                            "network": {
-                              "description": "The composition runs on Base Sepolia only.",
-                              "const": "base-sepolia",
-                              "type": "string"
-                            },
-                            "asset": {
-                              "description": "Supplied and borrowed asset (Aave V3 test USDC).",
-                              "const": "USDC",
-                              "type": "string"
-                            },
-                            "supplyAmount": {
-                              "pattern": "^(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
-                              "maxLength": 48,
-                              "description": "USDC supplied to Aave.",
-                              "type": "string"
-                            },
-                            "borrowAmount": {
-                              "pattern": "^(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
-                              "maxLength": 48,
-                              "description": "USDC borrowed from Aave; exactly this amount is swapped.",
-                              "type": "string"
-                            },
-                            "outputAsset": {
-                              "description": "The borrowed USDC is swapped to WETH on Uniswap v3.",
-                              "const": "WETH",
-                              "type": "string"
-                            },
-                            "slippageBps": {
-                              "minimum": 0,
-                              "maximum": 10000,
-                              "description": "Maximum slippage in basis points. Omit to use FloFi's documented default for the action; each action enforces its own maximum.",
-                              "type": "integer"
-                            },
-                            "owner": {
-                              "pattern": "^0x[0-9a-fA-F]{40}$",
-                              "minLength": 42,
-                              "maxLength": 42,
-                              "description": "The wallet that supplies, borrows and receives WETH. Debt remains after the swap.",
-                              "type": "string"
-                            }
-                          }
-                        },
-                        {
-                          "additionalProperties": false,
-                          "type": "object",
-                          "required": [
-                            "action",
-                            "network",
-                            "asset",
                             "amount"
                           ],
                           "properties": {
@@ -3866,7 +3576,7 @@
                               "type": "string"
                             },
                             "network": {
-                              "description": "The network of this same-chain transfer. robinhood, base, arbitrum-one, ethereum and solana move real funds; solana-devnet moves valueless test tokens. ethereum-sepolia and robinhood-testnet support native test-ETH self-transfers only.",
+                              "description": "The network of this same-chain transfer (real funds).",
                               "anyOf": [
                                 {
                                   "const": "robinhood",
@@ -3887,23 +3597,11 @@
                                 {
                                   "const": "solana",
                                   "type": "string"
-                                },
-                                {
-                                  "const": "solana-devnet",
-                                  "type": "string"
-                                },
-                                {
-                                  "const": "ethereum-sepolia",
-                                  "type": "string"
-                                },
-                                {
-                                  "const": "robinhood-testnet",
-                                  "type": "string"
                                 }
                               ]
                             },
                             "asset": {
-                              "description": "EVM: native ETH, or a symbol or whole name of the selected network's validated official catalog. Solana: SOL, USDC or USDT (solana-devnet: SOL or devUSDC), or an SPL token mint address together with decimals and tokenProgram.",
+                              "description": "EVM: native ETH, or a symbol or whole name of the selected network's validated official catalog. Solana: SOL, USDC or USDT, or an SPL token mint address together with decimals and tokenProgram.",
                               "anyOf": [
                                 {
                                   "const": "ETH",

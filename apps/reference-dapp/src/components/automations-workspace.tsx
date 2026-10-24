@@ -223,7 +223,7 @@ type Draft = { kind: Kind; name: string; source: 'ROUTE' | 'SAVED_WORKFLOW' | 'N
   slippageBps: string; frequency: 'DAILY' | 'WEEKLY'; weekday: string; time: string; timezone: string; condition: 'PRICE_BELOW' | 'PRICE_ABOVE' | 'PERCENT_DROP' | 'PERCENT_RISE';
   threshold: string; reference: string; percent: string; every: string; maxPerExecution: string; periodAmount: string; periodAmountPeriod: string; periodCount: string;
   periodCountPeriod: string; cooldown: string; maxSlippage: string; expires: string; watch: Asset[] };
-const initialDraft = (): Draft => ({ kind: 'SCHEDULED_DCA', name: '', source: 'ROUTE', workflowId: '', side: 'BUY', asset: 'ETH', network: 'base-sepolia', amount: '', slippageBps: '50',
+const initialDraft = (): Draft => ({ kind: 'SCHEDULED_DCA', name: '', source: 'ROUTE', workflowId: '', side: 'BUY', asset: 'ETH', network: '', amount: '', slippageBps: '50',
   frequency: 'WEEKLY', weekday: '1', time: '09:00', timezone: browserZone(), condition: 'PRICE_BELOW', threshold: '', reference: '', percent: '', every: '15', maxPerExecution: '',
   periodAmount: '', periodAmountPeriod: 'WEEK', periodCount: '', periodCountPeriod: 'DAY', cooldown: '0', maxSlippage: '', expires: '', watch: ['BTC', 'ETH', 'SOL'] });
 function inputOf(d: Draft): unknown {
@@ -252,7 +252,7 @@ function CreateForm({ capabilities, owner, busy, run, initial }: { capabilities:
   useEffect(() => { let live = true; void listWorkflows(owner).then(r => { if (live && r.ok) setSaved(r.value.items.filter(i => i.saved)); }).catch(() => undefined); return () => { live = false; }; }, [owner]);
   const routes = useMemo(() => capabilities.routes.filter(r => r.asset === d.asset), [capabilities, d.asset]);
   const route: RouteCapability | undefined = routes.find(r => r.network === d.network);
-  // A network the chosen asset has no route on is replaced by its first executable one (or its first one).
+  // No network yet, or one the chosen asset has no route on, becomes its first executable one (or its first one).
   useEffect(() => {
     if (!routes.some(r => r.network === d.network) && routes[0]) setD(prev => ({ ...prev, network: (routes.find(r => r.executable) ?? routes[0]!).network }));
   }, [d.network, routes]);

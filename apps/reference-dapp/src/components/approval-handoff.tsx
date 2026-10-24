@@ -31,7 +31,9 @@ import type { ClaimedProposal } from '../platform/approvals';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { useWorkflow } from '../state/workflow-store';
 import type { SolanaWalletChain } from '../wallet/solana-wallet';
-import { useWalletProof, WalletProof } from './wallet-proof';
+import { useWalletProof, WalletProof, walletProofMessage } from './wallet-proof';
+import { activeNetworkScope, mainnetCounterpart, TEST_NETWORK_NOT_AVAILABLE } from '../domain/network-scope';
+import { networkIdentity } from '../domain/network-registry';
 import { WorkflowRunPanel } from './workflow-run-panel';
 import { McpRouteState } from './mcp-route-state';
 
@@ -105,7 +107,8 @@ export function ApprovalHandoff({ slot = null, surface = 'canvas', onSurfaceChan
   const generation = useRef(0);
   const previewed = useRef<number | null>(null);
   const autoClaimed = useRef<string | null>(null);
-  const chain: SolanaWalletChain = view?.steps.some(s => s.network === 'solana') ? 'solana:mainnet' : 'solana:devnet';
+  // BUILD-FLOFI-MAINNET-PRODUCT-001: the public product proves and signs Solana on mainnet-beta only.
+  const chain: SolanaWalletChain = activeNetworkScope() !== 'ENGINEERING' || view?.steps.some(s => s.network === 'solana') ? 'solana:mainnet' : 'solana:devnet';
   const proof = useWalletProof(view?.walletNamespace ?? null, chain), proven = proof.proven;
   // BUILD-CHAT-E2E-001: a workflow with EVM and Solana steps binds both of the owner's wallets when it is claimed, so both are proven first.
   const otherNamespace = view?.walletNamespaces?.find(namespace => namespace !== view.walletNamespace) ?? null;
@@ -296,14 +299,25 @@ export function ApprovalHandoff({ slot = null, surface = 'canvas', onSurfaceChan
       : error === 'APPROVAL_ACCOUNT_REQUIRED' ? 'Open this link in the browser used to connect FloFi to ChatGPT or Claude. For another browser or a mobile wallet, use the FloFi panel’s wallet action.'
       : 'Open the FloFi approval link from ChatGPT, Claude, WhatsApp or Telegram. If the link has expired, ask for a new one.'}/>
       {error && <div className="approval-page"><p role="alert">{tr(error)}</p><button type="button" onClick={() => setReload(n => n + 1)}>Try again</button></div>}</>;
+  // BUILD-FLOFI-MAINNET-PRODUCT-001: a proposal prepared for a test network before FloFi became Mainnet-only is never loaded or signed, and never
+  // moved to a mainnet on the owner's behalf: the owner asks for a new mainnet proposal, or builds it in FloFi.
+  if (view.refusal === TEST_NETWORK_NOT_AVAILABLE) {
+    const keys = [...new Set(view.steps.flatMap(s => [s.network, s.destinationNetwork]).filter((n): n is NonNullable<typeof n> => Boolean(n)))];
+    const tests = keys.map(key => networkIdentity(key)).filter((n): n is NonNullable<typeof n> => n?.environment === 'TESTNET');
+    const mainnets = [...new Set(tests.map(n => mainnetCounterpart(n.key)?.name).filter((n): n is string => Boolean(n)))];
+    return <McpRouteState label="Approval" title={tr('This proposal uses a test network')} description={tr('It was prepared for {0}. FloFi now runs on mainnets only, with real funds, so nothing was loaded or authorized. Ask {1} for a new proposal on {2}, or build it yourself in FloFi.',
+      tests.map(n => n.name).join(', ') || tr('a test network'), view.clientName, mainnets.join(' / ') || tr('a mainnet'))}/>;
+  }
   if (!available) return <McpRouteState label="Approval" title={tr("This approval is no longer available")}
     description={fromAutomation ? 'Open the proposal again from FloFi → Automations if it is still waiting for you.'
       : fromApp ? 'Ask the app that sent this link to prepare a new FloFi approval link.' : 'Ask your connected assistant to prepare a new FloFi approval link.'}/>;
   if (!slot) return null;
-  const real = view.fundsClass === 'REAL_FUNDS', shown = error ?? proof.error;
+  const real = view.fundsClass === 'REAL_FUNDS', shown = error;
+  // Wallet F: a proof failure is explained in words; a claim refusal keeps its own texts.
+  const proofText = proof.error ? walletProofMessage(proof.error, view.walletNamespace) : secondProof.error ? walletProofMessage(secondProof.error, otherNamespace) : null;
   const errorText = shown === 'APPROVALS_NOT_ENABLED' || shown === 'MCP_OAUTH_NOT_ENABLED'
     ? fromApp ? 'Approvals are unavailable right now. Return to the app that sent this link and try again later.' : 'Approvals are unavailable right now. Return to your assistant and try again later.'
-    : shown ? CLAIM_TEXT[shown] ?? shown : null;
+    : shown ? CLAIM_TEXT[shown] ?? shown : proofText;
   const prove = () => void (view.walletNamespace === 'solana' ? proof.proveSolana(true) : proof.proveEvm(true));
   const facts = <dl className="approval-facts">
     <div><dt>{tr("Network")}</dt><dd>{tr(view.networkEnvironment === 'MAINNET' ? 'Mainnet' : 'Public testnet')} · {tr([...new Set(view.steps.flatMap(s => [s.network, s.destinationNetwork].filter(Boolean)))].join(' → '))}</dd></div>

@@ -22,7 +22,8 @@ const cards = (page: Page) => page.locator('.build-flow-surface .composer-card')
 async function openSwapDestination(page: Page) {
   await installSupplyWallet(page, { chain: '0x2105' });
   await page.goto('/app');
-  await expect(page.getByRole('combobox', { name: 'Environment', exact: true })).toHaveText('Mainnet');
+  // BUILD-FLOFI-MAINNET-PRODUCT-001: no environment selector; the connected wallet's own network is shown.
+  await expect(page.locator('.build009-wallet-info')).toContainText('· Base (8453)');
   await page.getByRole('button', { name: 'Add swap', exact: true }).click();
   const card = cards(page).filter({ hasText: 'Swap' }).first();
   const destination = card.getByRole('button', { name: 'Select destination token', exact: true });

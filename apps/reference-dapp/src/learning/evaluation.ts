@@ -14,6 +14,7 @@
  * Passing requires zero document errors, zero corpus failures, zero regressions, zero safety violations and zero failed probes. Repetition by
  * users is not an input: only an operator's approval and this evaluation publish a version. Model weights are never trained here.
  */
+import { withNetworkScope } from '../domain/network-scope.ts';
 import { describeProposal } from '../domain/proposal.ts';
 import { editorReducer, initialEditor } from '../domain/editor.ts';
 import type { Command } from '../domain/commands.ts';
@@ -178,6 +179,11 @@ const tally = (results: readonly CaseResult[], cases: readonly LearningEvalCase[
  */
 export function evaluateKnowledge(candidate: unknown, active: KnowledgeDocument | null, options: { readonly cases?: readonly LearningEvalCase[]; readonly version?: number } = {}):
   EvaluationResult {
+  // BUILD-FLOFI-MAINNET-PRODUCT-001: the corpus is a regression check of the deterministic Copilot engine (its curated cases include test networks),
+  // so it always runs in the engineering scope, wherever it is evaluated; it authors, discovers and executes nothing.
+  return withNetworkScope('ENGINEERING', () => evaluate(candidate, active, options));
+}
+function evaluate(candidate: unknown, active: KnowledgeDocument | null, options: { readonly cases?: readonly LearningEvalCase[]; readonly version?: number }): EvaluationResult {
   const cases = options.cases ?? LEARNING_EVAL_CASES, version = options.version ?? null;
   let document: KnowledgeDocument | null = null, documentError: { code: string | null; index: number | null } = { code: null, index: null };
   try { document = validateKnowledgeDocument(candidate); }

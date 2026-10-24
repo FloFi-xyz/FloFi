@@ -46,7 +46,8 @@ const definitions = [
   ['copilot-solana', ['copilot-solana.spec.ts'], { FLOFI_COPILOT: 'replay', GRYLOO_SOLANA_DEVNET_E2E: 'MOCKED_LOOPBACK_ONLY' }],
   // BUILD-SOLANA-MAINNET-001: the Solana Mainnet/Testnet header switch, family-preserving re-networking and Orca mainnet liquidity authoring on the
   // MOCKED loopback (the Devnet harness also serves a MOCKED copy of the mainnet-beta pool); MOCKED cannot authorize, nothing is signed or sent.
-  ['solana-mainnet-network', ['solana-mainnet-network.spec.ts'], { GRYLOO_SOLANA_DEVNET_E2E: 'MOCKED_LOOPBACK_ONLY' }],
+  // BUILD-FLOFI-MAINNET-PRODUCT-001: the public Mainnet-only product exactly as deployed (no engineering opt-in); every other profile certifies the engines.
+  ['solana-mainnet-network', ['solana-mainnet-network.spec.ts'], { GRYLOO_SOLANA_DEVNET_E2E: 'MOCKED_LOOPBACK_ONLY', FLOFI_E2E_NETWORK_SCOPE: 'PUBLIC_MAINNET' }],
   // BUILD-SOLANA-MAINNET-001 PR B: empty Canvas on Launch App, unrestricted card deletion, and the Swap arrow's From/To inversion (MOCKED estimates).
   ['canvas-corrections', ['canvas-corrections.spec.ts'], {}],
   // P0: a wallet that changes the reviewed Solana Devnet swap is refused before broadcast, Execute says why, and Simulate again runs the swap
@@ -173,7 +174,7 @@ for (const [index, name] of selection.entries()) {
   for (const key of ['FLOFI_COPILOT', 'FLOFI_RELEASE_PROVENANCE_PROFILE', 'GRYLOO_SUPPLY_E2E', 'GRYLOO_LENDING_E2E',
     'GRYLOO_JUPITER_E2E', 'GRYLOO_SOLANA_DEVNET_E2E', 'GRYLOO_ROBINHOOD_E2E', 'GRYLOO_ROBINHOOD_MAINNET_E2E', 'GRYLOO_BASE_MAINNET_E2E', 'GRYLOO_UNISWAP_LIQUIDITY_E2E',
     'GRYLOO_ROUTER_E2E', 'GRYLOO_ROUTER_TESTNET_E2E', 'GRYLOO_CLOUD_RUNTIME_E2E', 'FLOFI_SWAP_READ_E2E', 'FLOFI_SWAP_EXECUTION_E2E', 'GRYLOO_COW', 'GRYLOO_CARD_E2E', 'GRYLOO_AUTOMATION_E2E', 'GRYLOO_DELEGATION_E2E',
-    'FLOFI_ADMIN_E2E', 'FLOFI_LEARNING_E2E', 'GRYLOO_MCP_E2E', 'GRYLOO_CHANNEL_E2E', 'FLOFI_E2E_DATABASE_URL', 'FLOFI_WORKFLOW_RUNS']) delete env[key];
+    'FLOFI_ADMIN_E2E', 'FLOFI_LEARNING_E2E', 'GRYLOO_MCP_E2E', 'GRYLOO_CHANNEL_E2E', 'FLOFI_E2E_DATABASE_URL', 'FLOFI_WORKFLOW_RUNS', 'FLOFI_E2E_NETWORK_SCOPE', 'FLOFI_NETWORK_SCOPE']) delete env[key];
   Object.assign(env, settings);
   // Each profile keeps its own artifacts (a later profile never wipes them) and its own JUnit file for the CI test report.
   const output = join(results, name), junit = join(results, 'junit', `${name}.xml`);

@@ -11,7 +11,7 @@ import { useWorkflow } from '../state/workflow-store';
 import { TokenAmountInput } from './token-amount-input';
 import { useRouter } from '../state/router-store';
 import { useBuild009Wallet } from '../state/build009-wallet-store';
-import { useExecutionEnvironment } from '../state/capability-store';
+import { authoringEnvironment, useExecutionEnvironment } from '../state/capability-store';
 
 /**
  * Network labels: mainnet keeps the BUILD-ROUTER-001 wording; the testnet journey names Base Sepolia / Arbitrum Sepolia; BUILD-RH-002 adds
@@ -59,7 +59,7 @@ export function RouterForm({ nodeId, onDone, network: initialNetwork }: { nodeId
       destination: nodeId ? value.destination : patch.destination ?? value.destination, amount: nodeId ? value.amount : patch.amount ?? value.amount }));
   };
   // The wallet's environment bounds the choice; within it the chosen chains select the route (mainnet also offers the Robinhood Chain routes).
-  const environment = walletEnvironment === 'unknown' ? null : walletEnvironment;
+  const authoring = authoringEnvironment(walletEnvironment), environment = authoring === 'unknown' ? null : authoring;
   const chosen = { ...input, ...(nodeId ? bridgeNetworkInputs[nodeId] : {}) }, routed = routerNetworkOfInput(chosen);
   const network: RouterNetwork | null = !environment ? null : routed && ROUTER_NETWORK_OPTIONS[routed].environment === environment ? routed : environment;
   const option = network ? ROUTER_NETWORK_OPTIONS[network] : null, choices = environment && option ? routerChainChoices(environment, option.source) : null;

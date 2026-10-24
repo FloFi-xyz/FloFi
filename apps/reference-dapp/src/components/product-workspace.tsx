@@ -26,11 +26,15 @@ import { SolanaCompositionProvider } from '../state/solana-composition-store';
 import { UniswapLiquidityProvider } from '../state/uniswap-liquidity-store';
 import { EngineeringProbe } from '../test-utils/engineering-probe';
 import { RouterProvider } from '../state/router-store';
+import { setActiveNetworkScope, type NetworkScope } from '../domain/network-scope';
 
 const initialContext = { registryId: referenceRegistry.registryId, capabilityId: referenceRegistry.capabilities[0]!.id,
   actionId: referenceRegistry.actions[0]!.id, assets: baseAssetRegistry };
 /** The existing provider hierarchy is shared by all product routes, keeping current runs mounted. */
-export function ProductWorkspace({ initialWorkflowId, engineeringEnabled = false }: { initialWorkflowId: string; engineeringEnabled?: boolean }) {
+export function ProductWorkspace({ initialWorkflowId, engineeringEnabled = false, networkScope = 'PUBLIC_MAINNET' }: { initialWorkflowId: string; engineeringEnabled?: boolean;
+  /** BUILD-FLOFI-MAINNET-PRODUCT-001: the server's network scope, set before any store or card renders (never a user choice). */
+  networkScope?: NetworkScope }) {
+  setActiveNetworkScope(networkScope);
   const pathname = usePathname(), router = useRouter();
   const [approvalAvailable, setApprovalAvailable] = useState(false);
   const [approvalGate, setApprovalGate] = useState(false);

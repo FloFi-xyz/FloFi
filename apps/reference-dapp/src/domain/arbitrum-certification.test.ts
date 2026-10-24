@@ -57,7 +57,7 @@ describe('Arbitrum capability certification matrix — Canvas / exact Chat / nat
     const row = executionCapabilityRegistry.find(p => p.chainId === node.chainId && p.actionType === node.actionType &&
       p.adapterId === (c.id === 'Native Transfer' ? 'evm.native-transfer' : c.id === 'ERC20 Transfer' ? 'evm.token-transfer' : c.strategy.action === 'bridge' ? 'flofi.router' : ['Swap', 'Liquidity'].includes(c.id) ? 'uniswap.v3' : 'aave-v3') && p.environment === 'MAINNET');
     expect(row).toMatchObject({ capabilities: { AUTHOR: true, EXECUTE: true }, evidenceMaturity: null });
-    const discovery = codeCapabilities().find(row => row.action === c.strategy.action && row.network ===
+    const discovery = codeCapabilities('ENGINEERING').find(row => row.action === c.strategy.action && row.network ===
       (c.strategy.action === 'bridge' ? c.strategy.sourceNetwork : 'arbitrum-one') &&
       (c.strategy.action !== 'bridge' || row.destinationNetwork === c.strategy.destinationNetwork));
     expect(discovery).toMatchObject({ ownerWalletExecutionImplemented: true, demonstratedEvidence: null });

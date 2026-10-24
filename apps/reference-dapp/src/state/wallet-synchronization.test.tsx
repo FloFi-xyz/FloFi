@@ -77,6 +77,31 @@ describe('shared wallet synchronization lifecycle', () => {
     read(); await settle(); host.unmount();
     for (const event of ['connect', 'accountsChanged', 'chainChanged', 'disconnect']) expect(source.count(event)).toBe(0);
   });
+  // BUILD-FLOFI-MAINNET-PRODUCT-001 (wallet A): @metamask/providers emits `accountsChanged` for the account it just granted BEFORE eth_requestAccounts
+  // resolves (first connection, unlocking). That announcement is this connection: the caller gets the session, not a failure.
+  it.each([['first connection', null], ['unlocking a locked wallet', null], ['the same account again', first]])('accepts the account MetaMask announces during Connect (%s)', async (_case, initial) => {
+    source.state.account = initial; read(); await settle();
+    source.request.mockImplementation(async ({ method }: { method: string }) => {
+      if (method === 'eth_chainId') return source.state.chain;
+      if (method === 'eth_accounts') return source.state.account ? [source.state.account] : [];
+      // Synchronously, inside the response callback: exactly the provider's ordering.
+      const changed = source.state.account !== first;
+      source.state.account = first; if (changed) source.emit('accountsChanged', [first]);
+      return [first];
+    });
+    const revision = wallet.revision;
+    expect(await wallet.connect()).toEqual({ account: first, chainId: '0x14a34' }); read();
+    expect(wallet).toMatchObject({ account: first, chainId: '0x14a34', error: null });
+    if (initial === null) expect(wallet.revision).toBeGreaterThan(revision);
+  });
+  it.each([[{ code: 4001, message: 'User rejected the request.' }, 'You declined the connection in Browser wallet. Choose Connect Wallet to try again.'],
+    [{ code: -32002, message: 'Request of type wallet_requestPermissions already pending' }, 'Browser wallet already has a request waiting. Open Browser wallet to approve or reject it, then try again.'],
+    [new Error('boom'), 'Could not connect Browser wallet. Unlock it, make sure it is enabled for this site, and try again.']])('explains a failed Connect in words (%o)', async (failure, text) => {
+    read(); await settle(); source.state.account = null;
+    source.request.mockImplementation(async ({ method }: { method: string }) => { if (method === 'eth_requestAccounts') throw failure; return method === 'eth_chainId' ? source.state.chain : []; });
+    expect(await wallet.connect()).toBeNull(); read();
+    expect(wallet.error).toBe(text);
+  });
   it('does not let an old Connect response overwrite a newer provider account event', async () => {
     read(); await settle(); const pending = deferred<string[]>(); source.request.mockImplementationOnce(() => pending.promise);
     const connecting = wallet.connect(); await requested(); source.state.account = second; source.emit('accountsChanged', [second]); await settle();
@@ -109,7 +134,8 @@ describe('shared wallet synchronization lifecycle', () => {
   });
   it('keeps the provider chain after a rejected switch', async () => {
     read(); await settle(); source.request.mockImplementationOnce(async () => { throw Error('user rejected'); });
-    await wallet.switchTo('0x2105'); read(); expect(wallet.chainId).toBe('0x14a34'); expect(wallet.error).toContain('Could not switch');
+    // Wallet F: the owner's own decline is named as such (never a generic failure or a code).
+    await wallet.switchTo('0x2105'); read(); expect(wallet.chainId).toBe('0x14a34'); expect(wallet.error).toBe('You declined the network switch in Browser wallet. Nothing changed.');
   });
   it('uses the actual provider chain after switch completion and protects a later chain event', async () => {
     read(); await settle(); const switched = deferred<unknown>();

@@ -17,7 +17,8 @@ const cwd = fileURLToPath(new URL('..', import.meta.url));
 const run = (code: string, env: Record<string, string> = {}) => promisify(execFile)(process.execPath, ['--input-type=module', '-e', code],
   { cwd, timeout: 60_000, env: { PATH: process.env.PATH ?? '', NODE_ENV: 'test', ...env } })
   .then(({ stdout }) => ({ code: 0, stdout }), (error: { code: number; stdout: string; stderr: string }) => ({ code: error.code, stdout: error.stdout + error.stderr }));
-const STRATEGY = { action: 'swap', network: 'base-sepolia', inputAsset: 'USDC', outputAsset: 'WETH', amount: '50' };
+// BUILD-FLOFI-MAINNET-PRODUCT-001: the worker runs as deployed (no engineering opt-in), so the parity fixture is a mainnet swap.
+const STRATEGY = { action: 'swap', network: 'base', inputAsset: 'USDC', outputAsset: 'WETH', amount: '50' };
 
 describe('BUILD-AUTOMATION-001 worker-side source resolution', () => {
   const inSource = (path: string) => pathToFileURL(join(SOURCE_ROOT, path)).href;

@@ -68,17 +68,14 @@ describe('product shell rendering', () => {
     expect(wallet.switchTo).not.toHaveBeenCalled();
   });
 
+  // BUILD-FLOFI-MAINNET-PRODUCT-001: FloFi is Mainnet-only, so the header has no Mainnet/Testnet selector, whatever network the wallet is on.
   it.each([
-    { chain: '0x2105', connected: true, environment: 'mainnet', value: 'MAINNET', label: 'Mainnet' },
-    { chain: '0x14a34', connected: true, environment: 'testnet', value: 'PUBLIC_TESTNET', label: 'Testnet' },
-    { chain: '0x2105', connected: false, environment: 'unknown', value: '', label: 'Network' },
-  ])('uses shared wallet environment $environment without changing the wallet', ({ chain, connected, environment, label }) => {
+    { chain: '0x2105', connected: true }, { chain: '0x14a34', connected: true }, { chain: '0x2105', connected: false },
+  ])('has no environment selector for a wallet on $chain (connected=$connected), and never changes the wallet', ({ chain, connected }) => {
     wallet.account = connected ? '0x1111111111111111111111111111111111111111' : null;
     wallet.chainId = chain;
     const html = renderToStaticMarkup(createElement(TopBar, { tab: 'Dashboard', setTab: vi.fn() }));
-    expect(html).toContain(`data-environment="${environment}"`);
-    expect(html).toMatch(new RegExp(`role="combobox" aria-label="Environment"[^>]*><(?:span[^>]*></span><)?span>${label}</span>`));
-    expect(html).toContain('aria-expanded="false"');
+    expect(html).not.toMatch(/data-environment=|aria-label="Environment"|role="combobox"|Testnet|role="listbox"/);
     expect(wallet.switchTo).not.toHaveBeenCalled();
     expect(wallet.connect).not.toHaveBeenCalled();
   });
@@ -95,8 +92,7 @@ describe('product shell rendering', () => {
     expect(vi.mocked(HeaderSettings).mock.calls.at(-1)?.[0]).toMatchObject({ onDisconnect: wallet.reset, disconnectDisabled: !connected });
     expect(vi.mocked(NavigationDrawer).mock.calls.at(-1)?.[0]).toMatchObject({ onDisconnect: wallet.reset, disconnectDisabled: !connected });
     expect(html).toMatch(/class="header-settings" aria-label="Settings" title="Settings" aria-expanded="false"><svg[\s\S]*?<\/svg><\/button>/);
-    expect(html).not.toMatch(/role="dialog"|role="menu"/);
-    expect(html).toContain('aria-haspopup="listbox"');
+    expect(html).not.toMatch(/role="dialog"|role="menu"|aria-haspopup="listbox"/);
     expect(wallet.connect).not.toHaveBeenCalled();
     expect(wallet.reset).not.toHaveBeenCalled();
     expect(wallet.switchTo).not.toHaveBeenCalled();

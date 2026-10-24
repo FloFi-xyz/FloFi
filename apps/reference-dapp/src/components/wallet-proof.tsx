@@ -22,32 +22,64 @@ import { useOptionalBuild009Wallet } from '../state/build009-wallet-store';
 import { useOptionalJupiter } from '../state/jupiter-store';
 import { useWalletSelector } from './wallet-selector';
 import { useLocale } from '../i18n/locale';
+import { activeNetworkScope } from '../domain/network-scope';
+import { solanaWalletErrorMessage } from '../wallet/wallet-errors';
 
 export type Namespace = 'eip155' | 'solana';
 /** BUILD-CHAT-LEARNING-002: dispatched on `window` when the proven wallet or a Privacy & memory choice changed. */
 export const LEARNING_CHANGED = 'flofi:learning-changed';
+/**
+ * BUILD-FLOFI-MAINNET-PRODUCT-001 (wallet D): dispatched on `window` after a sign-in (detail: its namespace). Every other proof of that namespace
+ * re-reads the server's session — a read, never a second signature — so a wallet proven on /approve is proven for Save and Your workflows too.
+ */
+export const WALLET_PROOF_CHANGED = 'flofi:wallet-proof-changed';
+/** The cluster a Solana proof reuses a session on: mainnet-beta in the public product (engineering certification keeps Devnet). */
+export const defaultProofChain = (): SolanaWalletChain => activeNetworkScope() === 'ENGINEERING' ? 'solana:devnet' : 'solana:mainnet';
+/** Owner-facing text for a proof failure code (wallet F): never a raw code. */
+export function walletProofMessage(code: string, namespace: Namespace | null): string {
+  if (/_WALLET_REJECTED$|^WALLET_REQUEST_REJECTED$/.test(code)) return 'You declined the request in your wallet. Nothing was signed. Choose the button again when you are ready.';
+  if (code === 'EVM_WALLET_NOT_FOUND') return 'No wallet answered. Unlock your wallet (for example MetaMask), make sure it is enabled for this site, and try again.';
+  if (code === 'WALLET_SIGNATURE_INVALID' || code === 'WALLET_RESPONSE_INVALID') return 'Your wallet returned an invalid signature. Nothing was signed in. Try again.';
+  if (code === 'WALLET_SIGN_IN_FAILED' || /CHALLENGE/.test(code)) return 'FloFi could not verify the sign-in. Try again.';
+  if (namespace === 'solana' || code.startsWith('SOLANA_') || code.startsWith('WALLET_SOLANA_')) return solanaWalletErrorMessage(code, null);
+  return 'The wallet request did not complete. Check your wallet and try again.';
+}
 const utf8Hex = (text: string) => '0x' + Array.from(new TextEncoder().encode(text), b => b.toString(16).padStart(2, '0')).join('');
 function unwrap<T>(result: { ok: true; value: T } | { ok: false; code: string }): T { if (!result.ok) throw new Error(result.code); return result.value; }
-const codeOf = (cause: unknown) => cause instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(cause.message) ? cause.message : 'WALLET_REQUEST_FAILED';
+const codeOf = (cause: unknown) => cause instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(cause.message) ? cause.message
+  : (cause as { code?: unknown } | null)?.code === 4001 || cause instanceof Error && /reject|declin|denied|cancel/i.test(cause.message + cause.name) ? 'WALLET_REQUEST_REJECTED'
+  : 'WALLET_REQUEST_FAILED';
 
-export function useWalletProof(namespace: Namespace | null, chain: SolanaWalletChain = 'solana:devnet') {
+export function useWalletProof(namespace: Namespace | null, chain: SolanaWalletChain = defaultProofChain()) {
   const [proven, setProven] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const requestLock = useRef(false), namespaceRef = useRef(namespace); namespaceRef.current = namespace;
+  const origin = useRef<object>({});
   const selector = useWalletSelector(), solana = useOptionalJupiter(), evm = useOptionalBuild009Wallet();
   const refresh = useCallback(async () => {
     const account = namespace === 'solana' ? (await solanaSessionStatus())?.account : namespace === 'eip155' ? (await walletSessionStatus())?.account : null;
     if (namespaceRef.current === namespace) setProven(account ?? null);
   }, [namespace]);
   useEffect(() => { setProven(null); void refresh().catch(() => setProven(null)); }, [refresh]);
+  useEffect(() => {
+    const changed = (event: Event) => {
+      const detail = (event as CustomEvent<{ namespace?: string; origin?: object }>).detail;
+      if (detail?.namespace === namespace && detail.origin !== origin.current) void refresh().catch(() => undefined);
+    };
+    window.addEventListener(WALLET_PROOF_CHANGED, changed);
+    return () => window.removeEventListener(WALLET_PROOF_CHANGED, changed);
+  }, [namespace, refresh]);
   async function run(action: () => Promise<string | null>) {
     if (requestLock.current) return; requestLock.current = true; setBusy(true); setError(null);
     const requestedNamespace = namespace;
     try {
       const account = await action();
       // BUILD-CHAT-LEARNING-002: a newly proven wallet changes whose Copilot memory applies; the Copilot reloads its learning context.
-      if (account && namespaceRef.current === requestedNamespace) { setProven(account); window.dispatchEvent(new Event(LEARNING_CHANGED)); }
+      if (account && namespaceRef.current === requestedNamespace) {
+        setProven(account); window.dispatchEvent(new Event(LEARNING_CHANGED));
+        window.dispatchEvent(new CustomEvent(WALLET_PROOF_CHANGED, { detail: { namespace: requestedNamespace, origin: origin.current } }));
+      }
     } catch (cause) { if (namespaceRef.current === requestedNamespace) setError(codeOf(cause)); } finally { requestLock.current = false; setBusy(false); }
   }
   /** `another`: the owner asked to prove a different wallet, so the selector opens even when one is connected. */
@@ -74,6 +106,11 @@ export function useWalletProof(namespace: Namespace | null, chain: SolanaWalletC
   });
   const proveSolana = (another = false) => run(async () => {
     let session: SolanaSession | null = !another && solana?.session?.chain === chain ? solana.session : null;
+    // Wallet E: the operational wallet on the other cluster is asked for this one (same wallet, same account, no wallet chooser) before anything else.
+    if (!session && !another && solana?.session) {
+      const moved = await solana.switchClusterTo(chain);
+      if (moved.ok) session = moved.session;
+    }
     if (!session) {
       const choice = await selector.choose({ ecosystems: ['solana'], solanaChain: chain, title: 'Choose a Solana wallet to prove ownership' });
       if (!choice) return null;

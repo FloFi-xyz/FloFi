@@ -4,7 +4,9 @@ import { createContext, useContext, useEffect, useRef, useState, type ReactNode 
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { ORCA_WHIRLPOOLS_DEVNET } from '@defi-workflow-engine/action-registry';
 import { useWorkflow } from './workflow-store';
-import { connectSolanaWallet, disconnectSolanaWallet, signWithSolanaWallet, subscribeSolanaDiscovery, subscribeSolanaSession, type SolanaSession, type SolanaWalletChain } from '../wallet/solana-wallet';
+import { connectSolanaWallet, disconnectSolanaWallet, signWithSolanaWallet, subscribeSolanaDiscovery, subscribeSolanaSession, subscribeSolanaWalletAccounts, type SolanaSession,
+  type SolanaWalletChain } from '../wallet/solana-wallet';
+import { activeNetworkScope } from '../domain/network-scope';
 import { updateWalletPreference, walletPreference } from '../wallet/wallet-registry';
 import { useWalletSelector } from '../components/wallet-selector';
 import { jupiterBegin, jupiterInfo, jupiterInvalidate, jupiterObserve, jupiterReview, jupiterSimulate, jupiterStatus, jupiterSubmit, jupiterWalletFailure } from '../app/jupiter-action';
@@ -41,6 +43,8 @@ type Store = { record: JupiterRecord | null; owner: string | null; network: Sola
   connect(chain?: SolanaWalletChain): Promise<void>;
   /** Connects one Wallet Standard wallet by its selector key. Returns the session, or null when the wallet refused. */
   connectWith(name: string, chain: SolanaWalletChain): Promise<SolanaSession | null>;
+  /** The same connection with the failure's closed code (for an actionable message). */
+  connectWithResult(name: string, chain: SolanaWalletChain): Promise<{ readonly ok: true; readonly session: SolanaSession } | { readonly ok: false; readonly code: string }>;
   /** Ends FloFi's use of the Solana session (and asks the wallet to forget it when supported). */
   disconnect(): Promise<void>;
   /**
@@ -48,6 +52,8 @@ type Store = { record: JupiterRecord | null; owner: string | null; network: Sola
    * nothing is signed). Returns null on success, else the failure code; the current session is kept when the wallet cannot connect there.
    */
   switchCluster(chain: SolanaWalletChain): Promise<string | null>;
+  /** The same switch, returning the moved session (same wallet, same account) or the failure code. */
+  switchClusterTo(chain: SolanaWalletChain): Promise<{ readonly ok: true; readonly session: SolanaSession } | { readonly ok: false; readonly code: string }>;
   simulate(): Promise<void>; review(): Promise<void>; execute(): Promise<void>; observe(): Promise<void> };
 const Context = createContext<Store | null>(null);
 const unresolved = (record: JupiterRecord | null) => Boolean(record?.attempt && record.verdict === 'PENDING' && ['SUBMITTING', 'SUBMISSION_RESULT_UNKNOWN', 'PENDING'].includes(record.attempt.state));
@@ -93,25 +99,31 @@ export function JupiterProvider({ children }: { children: ReactNode }) {
   // cluster this workflow signs on, without a prompt (Wallet Standard `connect({ silent: true })`). Only that remembered wallet, never after
   // an explicit disconnect in FloFi, never during a request; a wallet that would need to ask simply stays disconnected until the owner
   // connects it in the current flow. Only a session FloFi restored this way follows the workflow's cluster afterwards (same sender); a
-  // session the owner connected or switched explicitly (the header's Mainnet/Testnet control, "Switch to …") is never moved silently.
-  const neededChain = runtime.walletChain;
+  // session the owner connected or switched explicitly ("Switch to …") is never moved silently.
+  // BUILD-FLOFI-MAINNET-PRODUCT-001 (wallet C): the public product restores Solana on mainnet-beta only, and never moves a wallet to Devnet, whatever
+  // workflow is open (a Devnet workflow from before FloFi became Mainnet-only stays blocked). Engineering certification keeps the workflow's cluster.
+  const neededChain: SolanaWalletChain = activeNetworkScope() === 'ENGINEERING' ? runtime.walletChain : 'solana:mainnet';
   const restored = useRef<SolanaSession | null>(null);
   useEffect(() => {
     if (!session) return;
+    // BUILD-FLOFI-MAINNET-PRODUCT-001 (wallet B): the wallet dropping the account (locked, switched to an account not connected to FloFi, disconnected
+    // in the wallet, extension restarted) ends this session and its Review, but it is not the owner's Disconnect in FloFi: silent reconnection
+    // stays possible, and the wallet itself decides whether it still authorizes FloFi.
     return subscribeSolanaSession(session, next => {
       latestSession.current = next;
       setRevision(value => value + 1); setSession(next);
-      if (!next) updateWalletPreference({ solanaDisconnected: true });
     });
   }, [session]);
   useEffect(() => {
     if (session && (session !== restored.current || session.chain === neededChain)) return;
     const preference = walletPreference(), name = session?.wallet.name ?? preference.solana;
     if (!name || preference.solanaDisconnected) return;
-    let live = true, inFlight = false;
+    let live = true, inFlight = false, again = false;
     const attempt = () => {
-      if (inFlight || busyRef.current) return;
-      inFlight = true;
+      // A wallet report that arrives during an attempt is not lost: the attempt runs once more when this one settles.
+      if (inFlight) { again = true; return; }
+      if (busyRef.current || walletPreference().solanaDisconnected) return;
+      inFlight = true; again = false;
       connectSolanaWallet(name, neededChain, runtime.prefix, { silent: true, account: session?.account.address })
         .then(next => {
           if (!live || busyRef.current || walletPreference().solanaDisconnected) return;
@@ -119,12 +131,14 @@ export function JupiterProvider({ children }: { children: ReactNode }) {
           if (latestSession.current && latestSession.current !== restored.current) return;
           restored.current = next; latestSession.current = next; setSession(next);
         })
-        .catch(() => undefined).finally(() => { inFlight = false; });
+        .catch(() => undefined).finally(() => { inFlight = false; if (again && live && !latestSession.current) attempt(); });
     };
     attempt();
-    // Wallet Standard wallets register asynchronously after load.
+    // Wallet Standard wallets register asynchronously after load; without a session, the remembered wallet reporting its accounts again (unlocked,
+    // switched back) is retried silently too (wallet B). An explicit Disconnect in FloFi is never undone: `attempt` checks it every time.
     const unsubscribe = subscribeSolanaDiscovery(attempt);
-    return () => { live = false; unsubscribe(); };
+    const unsubscribeAccounts = session ? () => undefined : subscribeSolanaWalletAccounts(name, attempt);
+    return () => { live = false; unsubscribe(); unsubscribeAccounts(); };
   }, [neededChain, session, runtime.prefix]);
   useEffect(() => {
     if (!signing) return;
@@ -148,35 +162,51 @@ export function JupiterProvider({ children }: { children: ReactNode }) {
    * The owner picks a wallet in the canonical selector, even if it is the only one; nothing connects implicitly.
    * `chain` lets another Solana flow on the same session (BUILD-015 Devnet liquidity) ask for its own cluster explicitly.
    */
-  async function connect(chain: SolanaWalletChain = runtime.walletChain) {
+  async function connect(chain: SolanaWalletChain = neededChain) {
     if (busyRef.current) return;
     setError(null);
     // A chosen wallet that cannot sign on `chain` fails closed with ${prefix}_SOLANA_WALLET_REQUIRED.
     const choice = await selector.choose({ ecosystems: ['solana'], solanaChain: chain });
     if (choice) await connectWith(choice.key, chain);
   }
-  async function connectWith(name: string, chain: SolanaWalletChain): Promise<SolanaSession | null> {
-    let connected: SolanaSession | null = null;
+  async function connectWithResult(name: string, chain: SolanaWalletChain): Promise<{ readonly ok: true; readonly session: SolanaSession } | { readonly ok: false; readonly code: string }> {
+    if (busyRef.current) return { ok: false, code: `${runtime.prefix}_BUSY` };
+    let result: { ok: true; session: SolanaSession } | { ok: false; code: string } = { ok: false, code: `${runtime.prefix}_SOLANA_WALLET_REQUIRED` };
     await operation(async () => {
-      const next = await connectSolanaWallet(name, chain, runtime.prefix);
-      updateWalletPreference({ solana: name, solanaDisconnected: false });
-      latestSession.current = next; setSession(next); connected = next;
+      try {
+        const next = await connectSolanaWallet(name, chain, runtime.prefix);
+        updateWalletPreference({ solana: name, solanaDisconnected: false });
+        latestSession.current = next; setSession(next); result = { ok: true, session: next };
+      } catch (cause) {
+        result = { ok: false, code: cause instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(cause.message) ? cause.message
+          : cause instanceof Error && /reject|declin|denied|cancel/i.test(cause.message + cause.name) || (cause as { code?: unknown } | null)?.code === 4001 ? `${runtime.prefix}_WALLET_REJECTED`
+          : `${runtime.prefix}_SOLANA_WALLET_REQUIRED` };
+        throw cause;
+      }
     });
-    return connected;
+    return result;
   }
-  async function switchCluster(chain: SolanaWalletChain): Promise<string | null> {
-    const current = session;
-    if (!current) return `${runtime.prefix}_SOLANA_WALLET_SELECTION_REQUIRED`;
-    if (current.chain === chain) return null;
-    if (busyRef.current) return `${runtime.prefix}_BUSY`;
+  async function connectWith(name: string, chain: SolanaWalletChain): Promise<SolanaSession | null> {
+    const result = await connectWithResult(name, chain);
+    return result.ok ? result.session : null;
+  }
+  async function switchClusterTo(chain: SolanaWalletChain): Promise<{ readonly ok: true; readonly session: SolanaSession } | { readonly ok: false; readonly code: string }> {
+    const current = latestSession.current;
+    if (!current) return { ok: false, code: `${runtime.prefix}_SOLANA_WALLET_SELECTION_REQUIRED` };
+    if (current.chain === chain) return { ok: true, session: current };
+    if (busyRef.current) return { ok: false, code: `${runtime.prefix}_BUSY` };
     busyRef.current = true; setBusy(true);
     try {
       const next = await connectSolanaWallet(current.wallet.name, chain, runtime.prefix, { account: current.account.address });
       if (latestSession.current !== current || next.wallet !== current.wallet || walletPreference().solanaDisconnected) throw new Error(`${runtime.prefix}_WALLET_CHANGED`);
-      latestSession.current = next; setRevision(value => value + 1); setSession(next); return null;
+      latestSession.current = next; setRevision(value => value + 1); setSession(next); return { ok: true, session: next };
     }
-    catch (cause) { return cause instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(cause.message) ? cause.message : `${runtime.prefix}_SOLANA_WALLET_REQUIRED`; }
+    catch (cause) { return { ok: false, code: cause instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(cause.message) ? cause.message : `${runtime.prefix}_SOLANA_WALLET_REQUIRED` }; }
     finally { busyRef.current = false; setBusy(false); }
+  }
+  async function switchCluster(chain: SolanaWalletChain): Promise<string | null> {
+    const result = await switchClusterTo(chain);
+    return result.ok ? null : result.code;
   }
   async function disconnect() {
     const current = session;
@@ -239,7 +269,8 @@ export function JupiterProvider({ children }: { children: ReactNode }) {
   }); }
   async function observe() { await operation(async () => { if (!record) throw new Error(`${runtime.prefix}_RUN_MISSING`); await poll(record.id); }); }
   return <Context.Provider value={{ record, owner: session && session.chain === runtime.walletChain ? session.account.address : null, network, session, codePrefix: runtime.prefix,
-    busy, error, retired, recovered, revision, executionEnabled: enabled[network], walletChain: runtime.walletChain, connect, connectWith, disconnect, switchCluster, simulate, review, execute, observe }}>
+    busy, error, retired, recovered, revision, executionEnabled: enabled[network], walletChain: runtime.walletChain, connect, connectWith, connectWithResult, disconnect, switchCluster, switchClusterTo,
+    simulate, review, execute, observe }}>
     {signing && <p role="status">Confirm or reject the pending request in your Solana wallet.</p>}
     <div inert={signing} data-jupiter-wallet-pending={signing ? 'true' : undefined}>{children}</div></Context.Provider>;
 }

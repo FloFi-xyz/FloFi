@@ -46,7 +46,7 @@ const RUN_PT: Readonly<Record<string, string>> = {
 
 const EN = {
   firstContact: (support: string, privacy: string) => `FloFi (automated assistant). I compose DeFi strategies for you to review and sign in FloFi. I can't sign, execute or move funds, and nothing you write here authorizes anything. Never send a private key or seed phrase. Human support: ${support}. Privacy: ${privacy}. Reply STOP to stop messages.`,
-  help: (support: string, privacy: string) => `What I can do: compose a strategy from your message (for example "Supply 100 USDC on Aave on Base Sepolia"), ask for anything missing, correct it ("make it 50"), and tell you its status (STATUS). LINK sends a fresh approval link, NEW starts over, STOP stops messages.\nWorkflows: after a proposal, ADD STEP keeps it and you describe the next action; STEPS, REMOVE STEP n and MOVE STEP n TO m edit the list; the whole workflow gets ONE approval link.\nExecution happens only in FloFi, with your own wallet, after a fresh simulation and your review of the Strategy Manifest. Messages here never authorize anything.\nHuman support: ${support}. Privacy: ${privacy}.`,
+  help: (support: string, privacy: string) => `What I can do: compose a strategy from your message (for example "Supply 100 USDC on Aave on Base"), ask for anything missing, correct it ("make it 50"), and tell you its status (STATUS). LINK sends a fresh approval link, NEW starts over, STOP stops messages.\nWorkflows: after a proposal, ADD STEP keeps it and you describe the next action; STEPS, REMOVE STEP n and MOVE STEP n TO m edit the list; the whole workflow gets ONE approval link.\nExecution happens only in FloFi, with your own wallet, after a fresh simulation and your review of the Strategy Manifest. Messages here never authorize anything.\nHuman support: ${support}. Privacy: ${privacy}.`,
   ready: 'Strategy ready:',
   network: (labels: string, real: boolean) => `Network: ${labels}${real ? ' — REAL FUNDS' : ' (test funds)'}`,
   preview: (p: PreviewNote) => p.kind === 'PASSED' ? `Simulation preview passed (read-only${p.provenance === 'MOCKED' ? ', MOCKED' : ''}). FloFi simulates again before your review.`
@@ -77,7 +77,7 @@ const EN = {
   subscribed: (owner: string, days: number) => `This chat now receives FloFi automation notifications for ${owner} (for ${days} days; send STOP to end them, or unlink in FloFi). A notification never authorizes anything: it only points you to FloFi, where your own wallet decides.`,
   subscribeFailed: 'That code is not valid (it may have expired or been used). Create a new one in FloFi → Automations → Notifications.',
   subscribeUnavailable: 'Automation notifications are not available in this chat.',
-  grammarOnly: 'I could not read that as a strategy. Try for example: "supply 100 USDC to Aave on Base Sepolia beneficiary 0x…" or "swap 1 USDC to WETH on Base Sepolia slippage 50 bps". Send HELP for more.',
+  grammarOnly: 'I could not read that as a strategy. Try for example: "supply 100 USDC to Aave on Base beneficiary 0x…" or "swap 1 USDC to WETH on Base slippage 50 bps". Send HELP for more.',
   choose: 'Reply with the number of your choice.',
   busy: 'Too many messages right now — please wait a moment and try again.',
   error: 'Something went wrong on FloFi\'s side. Nothing was proposed or authorized. Please try again.',
@@ -128,6 +128,7 @@ const REFUSALS_EN: Readonly<Record<string, string>> = {
   HANDOFF_PENDING_LIMIT: 'Too many open approval links — send NEW to start over.',
   CHANNEL_STRATEGY_PARITY_FAILED: 'FloFi could not turn that into a canonical strategy. Nothing was proposed.',
   STRATEGY_SCHEMA_INVALID: 'FloFi could not turn that into a canonical strategy. Nothing was proposed.',
+  TEST_NETWORK_NOT_AVAILABLE: 'FloFi runs on mainnets only, with real funds: test networks such as Base Sepolia or Solana Devnet are not available. Nothing was proposed. Name the mainnet you want (for example Base, Arbitrum One, Ethereum, Solana or Robinhood Chain) and the amount.',
   WORKFLOW_RUNS_NOT_ENABLED: 'FloFi cannot run multi-step workflows on this deployment yet. Nothing was proposed.',
   DEPENDENT_AMOUNT_SOURCE_NOT_IMPLEMENTED: 'A step that spends what another step delivers needs delegated execution, which is not available here. Nothing was proposed.',
   CHANNEL_INTENDED_WALLETS_DIFFER: 'These steps name different wallets; one workflow is approved by one owner. Nothing was proposed.',
@@ -141,7 +142,7 @@ const APPROVAL_EN: Readonly<Record<string, (expires: string) => string>> = {
 type Copy = typeof EN;
 const PT: Copy = {
   firstContact: (support, privacy) => `FloFi (assistente automático). Eu monto estratégias DeFi para você revisar e assinar no FloFi. Não posso assinar, executar nem mover fundos, e nada do que você escrever aqui autoriza qualquer coisa. Nunca envie chave privada ou frase-semente. Suporte humano: ${support}. Privacidade: ${privacy}. Responda PARAR para não receber mais mensagens.`,
-  help: (support, privacy) => `O que posso fazer: montar uma estratégia a partir da sua mensagem (por exemplo "Coloca 100 USDC na Aave na Base Sepolia"), perguntar o que faltar, corrigir ("muda para 50") e informar o status (ESTADO). LINK envia um novo link de aprovação, NOVO recomeça, PARAR interrompe as mensagens.\nFluxos: depois de uma proposta, ADICIONAR ETAPA a mantém e você descreve a próxima ação; ETAPAS, REMOVER ETAPA n e MOVER ETAPA n PARA m editam a lista; o fluxo inteiro recebe UM link de aprovação.\nA execução acontece só no FloFi, com a sua própria carteira, depois de uma nova simulação e da sua revisão do Strategy Manifest. Mensagens aqui nunca autorizam nada.\nSuporte humano: ${support}. Privacidade: ${privacy}.`,
+  help: (support, privacy) => `O que posso fazer: montar uma estratégia a partir da sua mensagem (por exemplo "Coloca 100 USDC na Aave na Base"), perguntar o que faltar, corrigir ("muda para 50") e informar o status (ESTADO). LINK envia um novo link de aprovação, NOVO recomeça, PARAR interrompe as mensagens.\nFluxos: depois de uma proposta, ADICIONAR ETAPA a mantém e você descreve a próxima ação; ETAPAS, REMOVER ETAPA n e MOVER ETAPA n PARA m editam a lista; o fluxo inteiro recebe UM link de aprovação.\nA execução acontece só no FloFi, com a sua própria carteira, depois de uma nova simulação e da sua revisão do Strategy Manifest. Mensagens aqui nunca autorizam nada.\nSuporte humano: ${support}. Privacidade: ${privacy}.`,
   ready: 'Estratégia pronta:',
   network: (labels, real) => `Rede: ${labels}${real ? ' — FUNDOS REAIS' : ' (fundos de teste)'}`,
   preview: p => p.kind === 'PASSED' ? `Prévia da simulação aprovada (somente leitura${p.provenance === 'MOCKED' ? ', MOCKED' : ''}). O FloFi simula de novo antes da sua revisão.`
@@ -171,7 +172,7 @@ const PT: Copy = {
   subscribed: (owner, days) => `Esta conversa agora recebe as notificações de automações do FloFi para ${owner} (por ${days} dias; envie PARAR para encerrar, ou desvincule no FloFi). Uma notificação nunca autoriza nada: ela só leva você ao FloFi, onde a sua própria carteira decide.`,
   subscribeFailed: 'Esse código não é válido (pode ter expirado ou já ter sido usado). Crie um novo no FloFi → Automações → Notificações.',
   subscribeUnavailable: 'As notificações de automações não estão disponíveis nesta conversa.',
-  grammarOnly: 'Não consegui ler isso como uma estratégia. Tente por exemplo: "supply 100 USDC to Aave on Base Sepolia beneficiary 0x…" ou "swap 1 USDC to WETH on Base Sepolia slippage 50 bps". Envie AJUDA para mais.',
+  grammarOnly: 'Não consegui ler isso como uma estratégia. Tente por exemplo: "supply 100 USDC to Aave on Base beneficiary 0x…" ou "swap 1 USDC to WETH on Base slippage 50 bps". Envie AJUDA para mais.',
   choose: 'Responda com o número da sua escolha.',
   busy: 'Muitas mensagens agora — espere um momento e tente de novo.',
   error: 'Algo deu errado do lado do FloFi. Nada foi proposto nem autorizado. Tente de novo.',
@@ -207,6 +208,7 @@ const REFUSALS_PT: Readonly<Record<string, string>> = {
   HANDOFF_PENDING_LIMIT: 'Muitos links de aprovação abertos — envie NOVO para recomeçar.',
   CHANNEL_STRATEGY_PARITY_FAILED: 'O FloFi não conseguiu transformar isso em uma estratégia canônica. Nada foi proposto.',
   STRATEGY_SCHEMA_INVALID: 'O FloFi não conseguiu transformar isso em uma estratégia canônica. Nada foi proposto.',
+  TEST_NETWORK_NOT_AVAILABLE: 'O FloFi funciona só em mainnets, com fundos reais: redes de teste como Base Sepolia ou Solana Devnet não estão disponíveis. Nada foi proposto. Diga a mainnet que você quer (por exemplo Base, Arbitrum One, Ethereum, Solana ou Robinhood Chain) e o valor.',
   WORKFLOW_RUNS_NOT_ENABLED: 'O FloFi ainda não roda fluxos de várias etapas neste ambiente. Nada foi proposto.',
   DEPENDENT_AMOUNT_SOURCE_NOT_IMPLEMENTED: 'Uma etapa que gasta o que outra etapa entrega precisa de execução delegada, que não está disponível aqui. Nada foi proposto.',
   CHANNEL_INTENDED_WALLETS_DIFFER: 'Estas etapas indicam carteiras diferentes; um fluxo é aprovado por um único dono. Nada foi proposto.',

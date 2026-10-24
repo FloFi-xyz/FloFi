@@ -12,6 +12,7 @@ import type { JupiterHttp } from '@defi-workflow-engine/reference-compiler';
 import { disabledCode, flowMode, FLOWS, isFlowName, type FlowDeps, type FlowName, type FlowService, type Rpc } from './flows.ts';
 import { PREVIEW_METHODS, previewStorage } from './preview.ts';
 import { assertRunOwnership, normalizePrincipal, WALLET_PRINCIPAL_HEADER } from '../src/server/run-ownership.ts';
+import { testNetworkFlowRefusal, testNetworkPreviewRefusal } from '../src/server/test-network-flows.ts';
 
 import { createSavedWorkflowStore, EXECUTED_WORKFLOW_RUN, validWorkflowId } from '../src/server/saved-workflow-store.ts';
 import { validateSavedWorkflow, workflowOwner, WORKFLOW_OWNER_HEADER, type WorkflowOwner } from '../src/domain/saved-workflow.ts';
@@ -39,6 +40,8 @@ const CODE = /^[A-Z][A-Z0-9_]{2,80}$/;
 
 export function createBackend(options: BackendOptions) {
   const { db, env, logger } = options;
+  // BUILD-FLOFI-MAINNET-PRODUCT-001: the deployment's network scope (the entry point passes `process.env` itself; a hosted one is always Mainnet-only).
+  const scopeEnv = { ...process.env, ...env };
   const transports = new Map<FlowName, Omit<FlowDeps, 'mode' | 'env'>>(), services = new Map<string, FlowService>();
   /** One shared, paced transport per flow and process; tests substitute MOCKED chains. */
   const depsFor = (flow: FlowName, readOnly: boolean): FlowDeps => {
@@ -84,6 +87,10 @@ export function createBackend(options: BackendOptions) {
     const spec = Object.hasOwn(definition.methods, method) ? definition.methods[method] : undefined;
     if (!spec || !spec.validate(args)) throw new HttpError(400, 'ARGUMENTS_INVALID');
     if (mode === 'off') return { ok: false, code: disabledCode(flow) };
+    // BUILD-FLOFI-MAINNET-PRODUCT-001: a live test network keeps its history readable but starts nothing new in the public product. The MOCKED
+    // loopback harness (never on a hosted deployment) is the isolated test fixture of the same engines.
+    const refusal = mode === 'live' ? testNetworkFlowRefusal(flow, method, scopeEnv) : null;
+    if (refusal) return { ok: false, code: refusal };
     const runId = typeof args[0] === 'string' && definition.runId.test(args[0]) ? args[0] : undefined;
     const ownership = definition.ownership;
     if (ownership) {
@@ -115,7 +122,10 @@ export function createBackend(options: BackendOptions) {
     const definition = FLOWS[flow], method = PREVIEW_METHODS[flow];
     if (!method) return { ok: false, code: 'PREVIEW_NOT_AVAILABLE' };
     if (!definition.methods[method]!.validate(args)) throw new HttpError(400, 'ARGUMENTS_INVALID');
-    if (flowMode(flow, env) === 'off') return { ok: false, code: disabledCode(flow) };
+    const mode = flowMode(flow, env);
+    if (mode === 'off') return { ok: false, code: disabledCode(flow) };
+    const refusal = mode === 'live' ? testNetworkPreviewRefusal(flow, scopeEnv) : null;
+    if (refusal) return { ok: false, code: refusal };
     return withSpan(logger, 'flow.preview', { flow, action: method }, async () => {
       try { return { ok: true, value: await definition.create(previewStorage(), depsFor(flow, true), {}).call(method, args) } as const; }
       catch (error) {

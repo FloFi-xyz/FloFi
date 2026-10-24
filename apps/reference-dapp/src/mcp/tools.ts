@@ -22,7 +22,10 @@
 import { Type, type Static, type TSchema } from '@sinclair/typebox';
 import { McpServer, type CallToolResult, type StandardSchemaWithJSON, type ToolAnnotations } from '@modelcontextprotocol/server';
 import { supportedAssets, supportedNetworks } from '../engine/capability-catalog';
-import { compileSchema, MAX_WORKFLOW_STEPS, NETWORK_IDS, STRATEGY_ACTIONS, strategyInputIssues, StrategyInputSchema } from '../engine/strategy-spec';
+import { compileSchema, MAX_WORKFLOW_STEPS, NETWORK_IDS, PUBLIC_NETWORK_IDS, PUBLIC_STRATEGY_ACTIONS, PublicStrategyInputSchema, STRATEGY_ACTIONS, strategyInputIssues,
+  StrategyInputSchema } from '../engine/strategy-spec';
+import type { NetworkScope } from '../domain/network-scope';
+import { networkScope } from '../server/network-scope.ts';
 import { prepareNetworkCatalogs } from '../platform/catalogs.ts';
 import { robinhoodAuthoringCatalog } from '../server/robinhood-mainnet.ts';
 import { ethereumAuthoringCatalog } from '../server/ethereum-mainnet.ts';
@@ -53,6 +56,9 @@ export const MCP_INSTRUCTIONS = 'FloFi composes, validates, previews and explain
   'FloFi computes. Nothing here moves funds or authorizes anything: no tool signs, submits or approves. Execution needs the owner to open the FloFi app, ' +
   're-simulate, review the Strategy Manifest and sign with their own wallet. Carry the `strategy` and `workflowHash` from compose_strategy into later calls. ' +
   'Never ask the user for a private key or seed phrase.';
+/** BUILD-FLOFI-MAINNET-PRODUCT-001: what the public product adds to the instructions. */
+export const MCP_MAINNET_INSTRUCTIONS = ' FloFi runs on mainnets only: every strategy uses real funds. Test networks (Sepolia, Devnet, testnets) are not available; ' +
+  'never move a request to a mainnet on your own — ask the user which mainnet and amount they want.';
 
 /**
  * TypeBox + Ajv (the repo's strict schema stack) behind the Standard Schema interface the SDK consumes. Issues name paths and
@@ -64,7 +70,9 @@ function standard<T>(schema: TSchema): StandardSchemaWithJSON<T, T> {
     const all = compiled.issues(value), strategy = value && typeof value === 'object' ? (value as { strategy?: unknown }).strategy : undefined;
     const inStrategy = (i: { path: string }) => i.path === '/strategy' || i.path.startsWith('/strategy/');
     if (strategy === undefined || !all.some(inStrategy)) return all;
-    return [...all.filter(i => !inStrategy(i)), ...strategyInputIssues(strategy).map(i => ({ path: '/strategy' + (i.path === '/' ? '' : i.path), rule: i.rule }))];
+    const detailed = strategyInputIssues(strategy).map(i => ({ path: '/strategy' + (i.path === '/' ? '' : i.path), rule: i.rule }));
+    // BUILD-FLOFI-MAINNET-PRODUCT-001: valid under the full contract but not the public one: it names a test network (or the Base Sepolia composition).
+    return [...all.filter(i => !inStrategy(i)), ...detailed.length ? detailed : [{ path: '/strategy', rule: 'mainnetOnly' }]];
   };
   return { '~standard': { version: 1, vendor: 'flofi',
     validate: value => compiled.check(value) ? { value: value as T } : { issues: issuesOf(value).map(i => ({ message: `${i.path} ${i.rule}`, path: i.path.split('/').filter(Boolean) })) },
@@ -74,21 +82,31 @@ const strict = { additionalProperties: false } as const;
 const pure = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } as const;
 const Hash = Type.String({ pattern: '^0x[0-9a-f]{64}$', description: 'The workflowHash returned by compose_strategy.' });
 const ExecutionId = Type.String({ pattern: '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$', description: 'A FloFi execution (run) id. It is a lookup key, not an access grant.' });
-const NetworkFilter = Type.Union(NETWORK_IDS.map(n => Type.Literal(n)), { description: 'Network identifier.' });
-const Schemas = {
+/**
+ * BUILD-FLOFI-MAINNET-PRODUCT-001: the tool schemas of a network scope. The public product offers and accepts mainnets only (the public
+ * strategy contract); engineering certification keeps the full contract. The same strategy composes to the same IR and hash under both.
+ */
+function schemasFor(scope: NetworkScope) {
+  const networks = scope === 'ENGINEERING' ? NETWORK_IDS : PUBLIC_NETWORK_IDS, actions = scope === 'ENGINEERING' ? STRATEGY_ACTIONS : PUBLIC_STRATEGY_ACTIONS;
+  const StrategyInput = scope === 'ENGINEERING' ? StrategyInputSchema : PublicStrategyInputSchema;
+  const NetworkFilter = Type.Union(networks.map(n => Type.Literal(n)), { description: 'Network identifier.' });
+  return {
   none: Type.Object({}, strict),
   assets: Type.Object({ network: Type.Optional(NetworkFilter) }, strict),
-  capabilities: Type.Object({ network: Type.Optional(NetworkFilter), action: Type.Optional(Type.Union(STRATEGY_ACTIONS.map(a => Type.Literal(a)))) }, strict),
-  compose: Type.Object({ strategy: StrategyInputSchema }, strict),
-  bound: Type.Object({ strategy: StrategyInputSchema, workflowHash: Type.Optional(Hash) }, strict),
-  simulate: Type.Object({ strategy: StrategyInputSchema, workflowHash: Hash,
+  capabilities: Type.Object({ network: Type.Optional(NetworkFilter), action: Type.Optional(Type.Union(actions.map(a => Type.Literal(a)))) }, strict),
+  compose: Type.Object({ strategy: StrategyInput }, strict),
+  bound: Type.Object({ strategy: StrategyInput, workflowHash: Type.Optional(Hash) }, strict),
+  request: Type.Object({ strategy: StrategyInput, workflowHash: Hash }, strict),
+  simulate: Type.Object({ strategy: StrategyInput, workflowHash: Hash,
     simulationSubject: Type.String({ pattern: '^(0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})$',
       description: 'The account whose PUBLIC balances and allowances the read-only simulation uses (EVM address or Solana public key). It is not authenticated, ' +
         'not an owner and grants nothing; nothing is stored for it.' }) }, strict),
   status: Type.Object({ executionId: ExecutionId, journalAfter: Type.Optional(Type.Integer({ minimum: -1, maximum: 2_147_483_647 })),
     journalLimit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })) }, strict),
   evidence: Type.Object({ executionId: ExecutionId }, strict),
-};
+  };
+}
+const SCHEMAS = { PUBLIC_MAINNET: schemasFor('PUBLIC_MAINNET'), ENGINEERING: schemasFor('ENGINEERING') } as const;
 
 /**
  * BUILD-MCP-002: the OAuth scope each tool needs. The gateway enforces it at the HTTP level (403 `insufficient_scope`); each
@@ -114,7 +132,9 @@ export type ToolContext = { readonly principal: McpPrincipal; readonly runtime: 
   /** BUILD-MCP-002: the MCP handoff policy (default: test funds only, every mainnet off). */
   readonly policy?: HandoffPolicy;
   /** BUILD-MCP-002: the in-chat MCP App panel attached to request_user_approval, when enabled. */
-  readonly ui?: { readonly resourceUri: string; readonly inFrameProbeHosts: readonly string[] } | null };
+  readonly ui?: { readonly resourceUri: string; readonly inFrameProbeHosts: readonly string[] } | null;
+  /** BUILD-FLOFI-MAINNET-PRODUCT-001: the deployment's network scope (default: this server's, `server/network-scope.ts`). */
+  readonly scope?: NetworkScope };
 type Output = Record<string, unknown>;
 const CODE = /^[A-Z][A-Z0-9_]{2,80}$/;
 // BUILD-DEVELOPER-001: the engine operations live in the shared platform (`src/platform`); this file is the MCP surface over them.
@@ -157,7 +177,9 @@ const canRequestApproval = (ctx: ToolContext) => ctx.principal.kind === 'mcp-oau
 export const SIMULATIONS_PER_ACCOUNT_HOUR = 30;
 
 export function createFlofiMcpServer(ctx: ToolContext): McpServer {
-  const server = new McpServer({ name: 'flofi', title: 'FloFi', version: MCP_SERVER_VERSION }, { instructions: MCP_INSTRUCTIONS });
+  const scope = ctx.scope ?? networkScope(), Schemas = SCHEMAS[scope];
+  const server = new McpServer({ name: 'flofi', title: 'FloFi', version: MCP_SERVER_VERSION },
+    { instructions: scope === 'ENGINEERING' ? MCP_INSTRUCTIONS : MCP_INSTRUCTIONS + MCP_MAINNET_INSTRUCTIONS });
   const now = ctx.now ?? (() => performance.now());
   const register = <S extends TSchema>(name: ToolName, title: string, description: string, schema: S, annotations: ToolAnnotations,
     run: (args: Static<S>) => Promise<Output> | Output, toolMeta: Record<string, unknown> = {}) => {
@@ -199,13 +221,13 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
     });
   };
 
-  register('get_supported_networks', 'Supported networks', 'Networks FloFi can author strategies for, with CAIP-2 ids, mainnet/testnet/devnet class and the actions available. ' +
-    'Derived from FloFi\'s registries.', Schemas.none, pure, () => ({ ok: true, networks: supportedNetworks() }));
+  register('get_supported_networks', 'Supported networks', 'Networks FloFi can author strategies for, with CAIP-2 ids, network class and the actions available. ' +
+    'Derived from FloFi\'s registries.', Schemas.none, pure, () => ({ ok: true, networks: supportedNetworks(scope) }));
 
   register('get_supported_assets', 'Supported assets', 'Assets a strategy may name, per network, with the exact token address or mint, decimals and the actions that use ' +
     'each, from the currently loaded validated catalog or the pinned registry assets. Native currencies have a null token address. ' +
-    'One symbol can be two different tokens on one network (e.g. Base Sepolia Aave USDC vs Circle test USDC).', Schemas.assets, pure,
-  args => ({ ok: true, assets: supportedAssets(args.network) }));
+    'One symbol can be two different tokens on one network (each entry names its exact address).', Schemas.assets, pure,
+  args => ({ ok: true, assets: supportedAssets(scope, args.network) }));
 
   register('get_capabilities', 'Capabilities', 'For each action × network: what FloFi code supports (from the execution capability registry on the composed IR), the evidence ' +
     'it has actually demonstrated, whether this deployment enables it, whether policy allows handing it to its owner for approval, and what this MCP server can do ' +
@@ -215,14 +237,15 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
     return { ok: true, runtime: ctx.runtime.kind, mcpExecution: 'NOT_AVAILABLE', ownerExecution: 'IN_FLOFI_WITH_THE_OWNER_WALLET_ONLY',
       stepLists: { contract: 'strategy version 2: {version: 2, steps: [...], bindings?: [{step, amountFrom}]}', maxSteps: MAX_WORKFLOW_STEPS,
         oneStep: 'identical to version 1 (same strategy, same hash)',
-        executableToday: ['every one-action path whose row below can be handed off', 'supply → borrow → swap on base-sepolia (the lending composition)',
+        executableToday: ['every one-action path whose row below can be handed off',
+          ...scope === 'ENGINEERING' ? ['supply → borrow → swap on base-sepolia (the lending composition)'] : [],
           'a sequence whose every step has an owner-execution flow, where this deployment runs workflows (request_user_approval says so)'],
         sequences: 'One approval for the whole workflow; the owner confirms each step in their wallet, in order, each after the previous step reconciled. ' +
           'Where the owner enrolled delegated Credentials and this deployment can sign delegated steps, ONE passkey authorization can cover the whole ' +
           'workflow instead (request_user_approval reports the authorizations each mode needs). One authorization is not one transaction and not zero gas.',
         bindings: 'A step may spend what an earlier step actually delivered: {step, amountFrom}; its own amount is then a cap. Resolved only from reconciled ' +
           'amounts (delegated runs); owner-signed sequences report DEPENDENT_AMOUNT_SOURCE_NOT_IMPLEMENTED.' },
-      capabilities: (await capabilityFacts(ctx.runtime, ctx.policy ?? DEFAULT_POLICY, { network: args.network, action: args.action })).map(({ row: r, flow, mode, previewable,
+      capabilities: (await capabilityFacts(ctx.runtime, ctx.policy ?? DEFAULT_POLICY, { network: args.network, action: args.action }, scope)).map(({ row: r, flow, mode, previewable,
         previewUnavailableReason, gates }) => {
         return { action: r.action, network: r.network, destinationNetwork: r.destinationNetwork, funds: r.funds, actionTypes: r.actionTypes, adapters: r.adapters,
           supportedByCode: { publicEnvironment: r.publicEnvironment, dimensions: r.supportedByCode, ownerWalletExecutionImplemented: r.ownerWalletExecutionImplemented,
@@ -241,7 +264,7 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
     'authoring rules as the FloFi app. Unsupported or ambiguous input is refused with a code, never guessed. Keep `strategy` (normalized) and `workflowHash` for ' +
     'validate/simulate/review. The model must not invent addresses: use only values the user gave. A multi-step workflow is `{version: 2, steps: [...]}` ' +
     '(one step is the same as version 1); each step keeps its own IR and hash.', Schemas.compose, pure, args => {
-    const w = composeWorkflowOrRefuse(args.strategy, undefined), visual = workflowVisualModel(w);
+    const w = composeWorkflowOrRefuse(args.strategy, undefined, scope), visual = workflowVisualModel(w);
     if (w.steps.length === 1) {
       const c = w.steps[0]!, plan = workflowPlan(w);
       return { ok: true, strategy: c.strategy, workflowHash: c.workflowHash, revision: c.workflow.revision, fundsClass: c.fundsClass, workflow: c.workflow,
@@ -262,12 +285,12 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
 
   register('validate_strategy', 'Validate strategy', 'Check a strategy against FloFi\'s authoring rules (networks, assets, amounts, limits) and, when given, the workflowHash ' +
     'from compose_strategy (a mismatch means the strategy changed or FloFi\'s rules changed: compose again).', Schemas.bound, pure, args => {
-    return { ok: true, ...validateStrategy(args.strategy, args.workflowHash) };
+    return { ok: true, ...validateStrategy(args.strategy, args.workflowHash, scope) };
   });
 
   register('review_strategy', 'Review strategy', 'FloFi\'s deterministic Strategy Review: linter findings, capability blockers for the network\'s public environment and ' +
     'strategy warnings, as BLOCK / WARNING / INFORMATION. It explains; it never approves or authorizes.', Schemas.bound, { ...pure, idempotentHint: false }, async args => {
-    const w = composeWorkflowOrRefuse(args.strategy, args.workflowHash), reviewed = reviewWorkflow(w);
+    const w = composeWorkflowOrRefuse(args.strategy, args.workflowHash, scope), reviewed = reviewWorkflow(w);
     if (w.steps.length > 1) {
       const plan = workflowPlan(w);
       return { ok: true, workflowHash: w.workflowHash, reviewKind: 'DETERMINISTIC_STRATEGY_REVIEW', authority: AUTHORITY, stepCount: w.steps.length,
@@ -290,8 +313,8 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
   Schemas.simulate, { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true }, async args => {
     // BUILD-MCP-002: an OAuth account also has an hourly simulation budget (they reach public chains and providers).
     const account = ctx.principal.kind === 'mcp-oauth' ? ctx.principal.accountId : null, state = ctx.state;
-    const { composition: c, plan, view, simulationSubject } = await simulatePreview(ctx.runtime, args, account && state
-      ? { budget: () => state.oauth.allow(`simulate:account:${account}`, SIMULATIONS_PER_ACCOUNT_HOUR, 3_600, new Date()) } : {});
+    const { composition: c, plan, view, simulationSubject } = await simulatePreview(ctx.runtime, args, { scope, ...account && state
+      ? { budget: () => state.oauth.allow(`simulate:account:${account}`, SIMULATIONS_PER_ACCOUNT_HOUR, 3_600, new Date()) } : {} });
     return { ok: true, workflowHash: c.workflowHash, flow: plan.flow, kind: view.kind, provenance: view.provenance, observedAt: view.observedAt, expiresAt: view.expiresAt,
       simulationSubject, subjectRole: 'SIMULATION_SUBJECT_ONLY_NOT_AN_OWNER_OR_AUTHORIZATION',
       preview: true, persisted: false, authorizable: false, evidenceLevel: view.provenance === 'MOCKED' ? 'MOCKED_SIMULATION_PREVIEW' : 'SIMULATION_PREVIEW_NOT_EXECUTION',
@@ -328,7 +351,6 @@ type Register = <S extends TSchema>(name: ToolName, title: string, description: 
   run: (args: Static<S>) => Promise<Output> | Output, toolMeta?: Record<string, unknown>) => void;
 const ApprovalId = Type.String({ pattern: '^apr_[a-z2-7]{26}$', description: 'The approvalId returned by request_user_approval.' });
 const ApprovalSchemas = {
-  request: Type.Object({ strategy: StrategyInputSchema, workflowHash: Hash }, strict),
   byId: Type.Object({ approvalId: ApprovalId }, strict),
 };
 /** BUILD-MCP-002: the bridge to the owner's own wallet in FloFi. Every result carries authority NONE. */
@@ -348,12 +370,12 @@ function registerApprovalTools(ctx: ToolContext, register: Register) {
     'connect their wallet if needed, check FloFi\'s fresh simulation and choose Authorize in wallet. Their own wallet confirmation is mandatory. Canvas is optional. Show the approvalUrl (or FloFi panel). ' +
     'Mainnet may be disabled by policy. A multi-step workflow is one approval: tell the user how many authorizations `authorizationPlan` reports (one wallet ' +
     'confirmation per step, or ONE passkey authorization when delegated Credentials cover every step); each step runs only after the previous one reconciled. ' +
-    'The same approvalUrl reopens the next step for the owner.', ApprovalSchemas.request,
+    'The same approvalUrl reopens the next step for the owner.', SCHEMAS[ctx.scope ?? networkScope()].request,
   { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }, async args => {
     const result = await requestApproval(deps(), requester, args.strategy, args.workflowHash);
     if (!result.ok) return failWith(result.code, result.extra ?? {});
     // The picture of exactly the workflow the handoff holds: the same canonical composition, bound to the same hash.
-    const visual = workflowVisualModel(composeWorkflowOrRefuse(args.strategy, result.value.workflowHash));
+    const visual = workflowVisualModel(composeWorkflowOrRefuse(args.strategy, result.value.workflowHash, ctx.scope ?? networkScope()));
     return { ok: true, ...result.value, visual, message: 'Open the FloFi signing link, connect your wallet if needed, check the fresh simulation and choose Authorize in wallet. ' +
       'Confirm the exact transaction in your wallet. Canvas is optional. Nothing is executed until chain confirmation and reconciliation. Retrieve get_approval_status for shared status and the verified receipt URL.' };
   }, ui ? { ui: { resourceUri: ui.resourceUri }, 'openai/outputTemplate': ui.resourceUri, 'openai/toolInvocation/invoking': 'Preparing approval…',

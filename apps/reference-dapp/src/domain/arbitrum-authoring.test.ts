@@ -71,7 +71,7 @@ describe('Arbitrum canonical authoring parity, no new UX or Copilot list', () =>
       expect(cryptoProfiles(action).some(p => p.chain === 'eip155:42161')).toBe(true);
     }
     expect(catalogCapabilityNetworks().some(n => n.chain === 'eip155:42161')).toBe(true);
-    const rows = codeCapabilities().filter(row => row.network === 'arbitrum-one' && ['swap', 'transfer'].includes(row.action));
+    const rows = codeCapabilities('ENGINEERING').filter(row => row.network === 'arbitrum-one' && ['swap', 'transfer'].includes(row.action));
     expect(rows).toHaveLength(2); expect(rows.every(row => row.ownerWalletExecutionImplemented && row.demonstratedEvidence === null)).toBe(true);
     expect(previewPlan(cases[0].strategy)).toEqual({ flow: 'arbitrum-swap', subject: 'NONE' });
     expect(strategyFlow(cases[3].strategy)).toBe('arbitrum-mainnet-transfer');

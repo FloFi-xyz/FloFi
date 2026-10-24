@@ -5,7 +5,7 @@ import { existsSync, mkdtempSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { createHash, randomBytes } from 'node:crypto';
-import { E2E_APP_ORIGIN, E2E_APP_PORT } from './e2e/app-origin';
+import { E2E_APP_ORIGIN, E2E_APP_PORT, e2eNetworkScopeEnv } from './e2e/app-origin';
 import { MCP_E2E_INVITE } from './e2e/mcp-constants';
 import { SERVER_ONLY_WOOVI_APP_ID } from './e2e/card-provider-fixtures';
 import { E2E_PORTS } from './e2e/fork/ports';
@@ -39,6 +39,9 @@ const runtime = process.env.GRYLOO_MODE_A_RUNTIME ?? join(tmpdir(), 'gryloo-buil
 if (!runtime.startsWith('/')) throw new Error('GRYLOO_MODE_A_RUNTIME must be absolute');
 // Test workers inherit the runner environment, so fixtures and servers share one runtime directory.
 process.env.GRYLOO_MODE_A_RUNTIME = runtime;
+// BUILD-FLOFI-MAINNET-PRODUCT-001: a spec that runs a server handler in the test process (the WhatsApp fixture turns) runs it in the
+// network scope of the app server it drives.
+Object.assign(process.env, e2eNetworkScopeEnv());
 process.env.GRYLOO_MODE_A_E2E = modeA;
 
 const supplyHarness = process.env.GRYLOO_SUPPLY_E2E === 'MOCKED_LOOPBACK_ONLY';
@@ -267,7 +270,7 @@ export default defineConfig({
     reuseExistingServer: false,
     timeout: 60_000,
     // `next start` listens on PORT; FLOFI_E2E_APP_PORT isolates CI from another server on 3000 (release default 3108).
-    env: { FLOFI_ENGINEERING_UI: 'LOOPBACK_ONLY', PORT: String(E2E_APP_PORT), NEXT_TELEMETRY_DISABLED: '1', PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1', GRYLOO_BASE_OBSERVATION: 'replay',
+    env: { FLOFI_ENGINEERING_UI: 'LOOPBACK_ONLY', ...e2eNetworkScopeEnv(), PORT: String(E2E_APP_PORT), NEXT_TELEMETRY_DISABLED: '1', PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1', GRYLOO_BASE_OBSERVATION: 'replay',
       ...(supplyHarness ? { GRYLOO_SUPPLY_HARNESS: 'MOCKED_LOOPBACK_ONLY', GRYLOO_SUPPLY_JOURNAL: supplyJournal } : {}),
       ...(lendingHarness ? { GRYLOO_LENDING_HARNESS: 'MOCKED_LOOPBACK_ONLY', GRYLOO_SUPPLY_JOURNAL: lendingJournal } : {}),
       ...(jupiterHarness ? { GRYLOO_JUPITER_HARNESS: 'MOCKED_LOOPBACK_ONLY', GRYLOO_JUPITER_JOURNAL: jupiterJournal } : {}),

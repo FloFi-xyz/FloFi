@@ -14,6 +14,7 @@
  * (403 `insufficient_scope`, which lets the client step up), and an unauthenticated request gets the 401 challenge that points
  * clients to the protected resource metadata.
  */
+import { networkScope } from '../server/network-scope.ts';
 import { createMcpHandler } from '@modelcontextprotocol/server';
 import { authenticate, principalScopes, readMcpConfig, type McpOAuthPrincipal, type McpPrincipal } from './config.ts';
 import { PANEL_URI } from './app/panel.ts';
@@ -115,7 +116,9 @@ export async function handleMcpRequest(request: Request, options: GatewayOptions
   }
   const runtime = options.runtime ?? deploymentRuntime(env), active = principal;
   const policy = readHandoffPolicy(env), ui = panelConfig(env);
-  const handler = createMcpHandler(() => createFlofiMcpServer({ principal: active, runtime, policy, ui, ...state ? { state } : {}, ...oauth ? { oauth } : {},
+  // BUILD-FLOFI-MAINNET-PRODUCT-001: the deployment's network scope (the route passes `process.env`; a hosted deployment is always Mainnet-only).
+  const scope = networkScope({ ...process.env, ...env });
+  const handler = createMcpHandler(() => createFlofiMcpServer({ principal: active, runtime, policy, ui, scope, ...state ? { state } : {}, ...oauth ? { oauth } : {},
     onTool: event => logger?.info('mcp.tool', { principal: active.id, tenant: active.tenantId, tool: event.tool, outcome: event.outcome, duration_ms: event.durationMs }) }),
   // `auto` answers with one JSON body: no tool emits a notification before its result.
   { legacy: 'stateless', maxRequestBodySize: MCP_MAX_BODY_BYTES, onerror: () => logger?.warn('mcp.protocol_error', { principal: active.id }) });

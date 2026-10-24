@@ -31,7 +31,9 @@ const children = new Set<ChildProcess>();
 const logs: Record<'api' | 'worker', string[]> = { api: [], worker: [] };
 
 const freePort = () => new Promise<number>(resolve => { const s = createServer().listen(0, '127.0.0.1', () => { const { port } = s.address() as { port: number }; s.close(() => resolve(port)); }); });
+// BUILD-FLOFI-MAINNET-PRODUCT-001: the entry points certify the engine on a test-network fixture, so these local processes opt into engineering.
 const common = () => ({ PATH: process.env.PATH ?? '', TMPDIR: tmpdir(), NODE_ENV: 'test' as const, DATABASE_URL: t.url, TENANT_ID: 'default', FLOFI_AUTOMATIONS: 'enabled',
+  FLOFI_NETWORK_SCOPE: 'ENGINEERING_TESTNETS',
   FLOFI_PUBLIC_ORIGIN: 'http://127.0.0.1:3999', FLOFI_AUTOMATION_PRICE_SOURCE: 'fixture', FLOFI_AUTOMATION_PRICE_FIXTURE: PRICES });
 function start(role: 'api' | 'worker', env: Record<string, string>): ChildProcess {
   const child = spawn(process.execPath, ['backend/main.ts', role], { cwd, env: { ...common(), ...env }, stdio: ['ignore', 'pipe', 'pipe'] });

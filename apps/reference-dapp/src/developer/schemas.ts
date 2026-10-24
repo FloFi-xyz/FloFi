@@ -6,7 +6,7 @@
  * transaction, a signature or a wallet secret.
  */
 import { Type, type Static, type TLiteral, type TSchema, type TUnion } from '@sinclair/typebox';
-import { NETWORK_IDS, STRATEGY_ACTIONS, StrategyInputSchema } from '../engine/strategy-spec';
+import { NETWORK_IDS, PublicStrategyInputSchema, STRATEGY_ACTIONS, StrategyInputSchema } from '../engine/strategy-spec';
 import { DEVELOPER_EVENT_TYPES } from './store.ts';
 
 const strict = { additionalProperties: false } as const;
@@ -32,6 +32,11 @@ const Codes = Type.Array(Type.String({ pattern: '^[A-Z][A-Z0-9_]{2,80}$' }));
 // ── Requests ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 export const CapabilitiesQuery = Type.Object({ network: Type.Optional(literals(NETWORK_IDS)), action: Type.Optional(literals(STRATEGY_ACTIONS)) }, strict);
 export const CreateStrategyRequest = Type.Object({ strategy: StrategyInputSchema }, { ...strict, description: 'A FloFi StrategySpec: a version 1 strategy or a version 2 step list.' });
+/**
+ * BUILD-FLOFI-MAINNET-PRODUCT-001: the request as the public product documents it (mainnet networks only). The server validates the full
+ * contract and the shared platform refuses a test network with TEST_NETWORK_NOT_AVAILABLE, so engineering certification keeps its sandbox.
+ */
+export const PublicCreateStrategyRequest = Type.Object({ strategy: PublicStrategyInputSchema }, { ...strict, description: 'A FloFi StrategySpec on mainnets: a version 1 strategy or a version 2 step list.' });
 export const ValidateStrategyRequest = Type.Object({}, strict);
 export const SimulateStrategyRequest = Type.Object({ simulationSubject: Type.String({ pattern: '^(0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})$',
   description: 'The account whose PUBLIC balances and allowances the read-only simulation reads (EVM address or Solana public key). It is not authenticated, ' +

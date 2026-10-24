@@ -164,7 +164,8 @@ test('a rejected wallet proof leaves the proposal unclaimed and can be retried w
     };
   });
   await proveConnectedEvmWallet(page, region, owner.address);
-  await expect(region.getByRole('alert')).toContainText('WALLET_REQUEST_FAILED');
+  // BUILD-FLOFI-MAINNET-PRODUCT-001 (F): the wallet's decline (4001) is named in plain words, never as a code.
+  await expect(region.getByRole('alert')).toContainText('You declined the request in your wallet. Nothing was signed.');
   // Nothing was claimed or loaded: the signing surface offers no simulation or authorization.
   await expect(signingSurface(page)).toBeVisible();
   await expect(page.locator('button[data-lifecycle-action]:enabled')).toHaveCount(0);

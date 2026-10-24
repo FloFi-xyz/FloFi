@@ -6,6 +6,7 @@ import { editorReducer, type EditorState } from '../domain/editor';
 import { editorHistoryReducer, initialEditorHistory } from '../domain/editor-history';
 import { readCanvasLayout, saveCanvasLayout, type CanvasLayout } from '../domain/canvas-layout';
 import { describeProposal } from '../domain/proposal';
+import { activeNetworkScope, introducedTestNetworks, testNetworkMessage } from '../domain/network-scope';
 import { chainReducer, checkChainAccess, initialChainState, type ChainState } from '../domain/artifact-chain';
 import { generateMockedChain, generationEligibility, type Eligibility } from '../domain/mock-artifacts';
 import type { Command } from '../domain/commands';
@@ -56,6 +57,8 @@ type Store = { restorationEpoch: number; state: EditorState; dispatch: Dispatch<
   chain: ChainState; eligibility: Eligibility; generateArtifacts(): void; refreshArtifacts(): void; accessCheck(): void };
 export type StagedPosition = { readonly positionMint: string; readonly operation: 'DECREASE_PARTIAL' | 'EXIT'; readonly partBps: number | null; readonly serial: number };
 const Context = createContext<Store | null>(null);
+const testNetworksIntroduced = (before: Parameters<typeof introducedTestNetworks>[0], after: Parameters<typeof introducedTestNetworks>[1]) =>
+  introducedTestNetworks(before, after, activeNetworkScope());
 
 export function WorkflowProvider({ children, initialContext, initialWorkflowId = 'workflow-local' }: { children: ReactNode; initialContext: unknown; initialWorkflowId?: string }) {
   const [history, dispatchHistory] = useReducer(editorHistoryReducer, undefined, () => {
@@ -63,6 +66,7 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
     return { ...history, editor: { ...history.editor, workflow: { ...history.editor.workflow, workflowId: initialWorkflowId } } };
   });
   const state = history.editor;
+  const editorRef = useRef(state); editorRef.current = state;
   const [restorationEpoch, setRestorationEpoch] = useState(0);
   const [newWorkflow, setNewWorkflow] = useState(false);
   const authoringIncomplete = canvasAuthoringIncomplete(history.actionSetup, history.amountInputs);
@@ -79,6 +83,8 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
   const restoreLendingCanvas=useCallback((workflow:SemanticWorkflow)=>dispatchHistory({type:'RESTORE_LENDING_CANVAS',workflow}),[]);
   const restoreSolanaCompositionCanvas = useCallback((workflow: SemanticWorkflow) => dispatchHistory({ type: 'RESTORE_SOLANA_COMPOSITION_CANVAS', workflow }), []);
   const addCanvasCommand = useCallback((command: Command, position: { x: number; y: number }) => {
+    const preview = editorReducer(editorRef.current, command, context);
+    if (!preview.error && testNetworksIntroduced(editorRef.current.workflow, preview.workflow).length) return;
     dispatchHistory({ type: 'COMMAND', command, position, context });
   }, [context]);
   const [layoutLoaded, setLayoutLoaded] = useState(false);
@@ -139,6 +145,13 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
 
   function propose(command: Command, authoring?: { authoringId: string; authoringAmount: string }) {
     const preview = editorReducer(state, command, context);
+    // BUILD-FLOFI-MAINNET-PRODUCT-001: in the public product no proposal (chat, Copilot, Canvas) may put a step on a test network. The owner is
+    // told why; nothing is moved to a mainnet on their behalf.
+    const introduced = preview.error ? [] : testNetworksIntroduced(state.workflow, preview.workflow);
+    if (introduced.length) {
+      setPending({ valid: false, command, diff: [testNetworkMessage(introduced)], review: null, ...authoring ?? {} });
+      return;
+    }
     const diff = describeProposal(state, preview, command, context);
     let review: ReviewResult | null = null;
     if (!preview.error) {
@@ -153,6 +166,8 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
   }
   function applyProposal() {
     if (!pending || !pending.valid) return;
+    const preview = editorReducer(state, pending.command, context);
+    if (!preview.error && testNetworksIntroduced(state.workflow, preview.workflow).length) return;
     dispatchHistory({ type: 'COMMAND', command: pending.command, context,
       ...(pending.authoringId ? { authoringId: pending.authoringId, authoringAmount: pending.authoringAmount! } : {}) });
     const command = pending.command;

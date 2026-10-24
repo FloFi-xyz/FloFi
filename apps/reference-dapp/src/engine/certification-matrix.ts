@@ -95,7 +95,7 @@ const OTHER_ROWS: readonly (Omit<CertificationRow, 'liveEvidence' | 'status' | '
 ];
 
 export function certificationMatrix(ledger: Ledger, verification: LiveVerification): readonly CertificationRow[] {
-  const capabilities = codeCapabilities();
+  const capabilities = codeCapabilities('ENGINEERING');
   const rows = STRATEGY_EXAMPLES.map(({ id, strategy }, index): CertificationRow => {
     const capability = capabilities[index]!, composed = composeStrategy(strategy);
     if (!composed.ok) throw new Error(`CERTIFICATION_EXAMPLE_INVALID ${id}`);

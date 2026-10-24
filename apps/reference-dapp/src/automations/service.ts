@@ -22,6 +22,7 @@ import { composeWorkflowBound, NETWORKS } from '../engine/strategy-engine';
 import type { StrategySpec } from '../engine/strategy-spec';
 import { evaluateWorkflowGates, requestApproval, sharedRuns, type EngineRuntime, type HandoffRecord, type HandoffStore, type WindowLimit } from '../platform/index.ts';
 import { createSavedWorkflowStore } from '../server/saved-workflow-store.ts';
+import { networkScope } from '../server/network-scope.ts';
 import { automationApprovalScheme, automationRequester, AUTOMATION_HANDOFF_RULES, ruleScope, sameOwner } from './approval.ts';
 import { EXECUTION_ROUTES, observedAssetOf, routeStrategy, sideOf, type Side } from './assets.ts';
 import { bindStrategy, singleStrategy, sourceDrift, strategyOfSavedWorkflow, verifyBinding, type Binding } from './binding.ts';
@@ -120,7 +121,8 @@ export function createAutomationService(deps: ServiceDeps) {
     const routes: RouteCapability[] = [], unavailable: { asset: ObservedAsset; code: string }[] = [];
     for (const asset of OBSERVED_ASSETS) {
       if (!EXECUTION_ROUTES[asset].length) { unavailable.push({ asset, code: `${asset}_EXECUTION_ROUTE_UNAVAILABLE` }); continue; }
-      for (const route of EXECUTION_ROUTES[asset]) {
+      // BUILD-FLOFI-MAINNET-PRODUCT-001: the public product offers mainnet routes only.
+      for (const route of EXECUTION_ROUTES[asset].filter(r => networkScope() === 'ENGINEERING' || NETWORKS[r.network].class === 'MAINNET')) {
         const probe = routeStrategy({ asset, side: 'BUY', network: route.network, amount: '1', slippageBps: 50 });
         // Only the owner's own wallet can claim a proposal, so a route of another wallet namespace is never offered.
         const gates = !probe.ok ? { allowed: false, reason: probe.code } : namespaceOf(probe.strategy) !== owner.namespace

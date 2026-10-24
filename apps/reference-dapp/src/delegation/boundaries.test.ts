@@ -91,7 +91,8 @@ describe('BUILD-AUTOMATION-002 delegated-authority boundary', () => {
 });
 
 describe('BUILD-AUTOMATION-002 configuration fails closed', () => {
-  const base = { FLOFI_DELEGATION: 'enabled', FLOFI_PUBLIC_ORIGIN: 'http://127.0.0.1:3108' };
+  // Delegated execution exists on test networks only: its configuration is certified in the engineering scope (BUILD-FLOFI-MAINNET-PRODUCT-001).
+  const base = { FLOFI_DELEGATION: 'enabled', FLOFI_PUBLIC_ORIGIN: 'http://127.0.0.1:3108', FLOFI_NETWORK_SCOPE: 'ENGINEERING_TESTNETS' };
   it('is off by default and refuses anything malformed', () => {
     expect(readDelegationConfig({})).toEqual({ enabled: false, code: 'DELEGATION_NOT_ENABLED' });
     expect(readDelegationConfig({ ...base, FLOFI_DELEGATION: 'yes' })).toMatchObject({ enabled: false, code: 'DELEGATION_CONFIGURATION_INVALID' });
@@ -100,12 +101,12 @@ describe('BUILD-AUTOMATION-002 configuration fails closed', () => {
     expect(readDelegationConfig({ ...base, FLOFI_DELEGATED_SIGNER: 'local-disposable', FLOFI_DELEGATED_SIGNER_DIR: '/home/x' })).toMatchObject({ reason: 'FLOFI_DELEGATED_SIGNER_DIR' });
     expect(readDelegationConfig({ ...base, FLOFI_DELEGATION_RPC_84532: 'http://rpc.example' })).toMatchObject({ reason: 'FLOFI_DELEGATION_RPC_84532' });
   });
-  it('a hosted deployment can configure neither the MOCKED harness nor a non-production signer: production delegated signing is unavailable', () => {
+  it('a hosted deployment has no delegated execution: the Mainnet-only product (no harness, no signer, whatever its configuration says)', () => {
     const hosted = { ...base, VERCEL: '1', FLOFI_PUBLIC_ORIGIN: 'https://app.flofi.test' };
-    expect(readDelegationConfig({ ...hosted, FLOFI_DELEGATION_HARNESS: 'MOCKED_LOOPBACK_ONLY', FLOFI_DELEGATION_HARNESS_URL: 'http://127.0.0.1:8560' }))
-      .toMatchObject({ enabled: false, reason: 'FLOFI_DELEGATION_HARNESS_HOSTED' });
-    expect(readDelegationConfig({ ...hosted, FLOFI_DELEGATED_SIGNER: 'memory' })).toMatchObject({ enabled: false, reason: 'FLOFI_DELEGATED_SIGNER_HOSTED' });
-    const production = readDelegationConfig(hosted);
+    for (const extra of [{}, { FLOFI_DELEGATION_HARNESS: 'MOCKED_LOOPBACK_ONLY', FLOFI_DELEGATION_HARNESS_URL: 'http://127.0.0.1:8560' }, { FLOFI_DELEGATED_SIGNER: 'memory' }])
+      expect(readDelegationConfig({ ...hosted, ...extra })).toEqual({ enabled: false, code: 'DELEGATION_NOT_ENABLED', reason: 'MAINNET_ONLY_PRODUCT' });
+    // Engineering certification of the production mode still finds no signer: production delegated signing is unavailable.
+    const production = readDelegationConfig(base);
     expect(production).toMatchObject({ enabled: true, mode: 'PRODUCTION', signer: { kind: 'none' }, executor: false });
     expect(production.enabled && executionAvailability(production)).toBe('DELEGATED_SIGNER_UNAVAILABLE');
   });

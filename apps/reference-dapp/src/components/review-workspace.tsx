@@ -9,6 +9,7 @@ import { projectReview, type ReviewAuthorization, type ReviewWallet } from '../d
 import type { SimulationSource } from '../domain/simulation-presentation';
 import { shellChainLabel } from '../domain/product-shell';
 import { walletEnvironmentLabel } from '../wallet/environment';
+import { realFundsTemplate } from '../domain/network-scope';
 import { NetworkBrandIcon, TokenBrandIcon } from './brand-icon';
 
 export type ReviewWorkspaceProps = {
@@ -101,6 +102,7 @@ export function ReviewWorkspace(props: ReviewWorkspaceProps) {
         </dl></section>
         {review.warnings.length > 0 && <p className="review-caption" role="note">{tr("Check the ")}{tr(review.warnings.length)} {tr(review.warnings.length === 1 ? 'notice' : 'notices')}{tr(" in Simulation Summary above before approving.")}</p>}
         <section className="review-section" aria-label={tr("Authorization preview")}><h2>{tr("You are authorizing")}</h2><ul className="review-authorization-preview">{review.preview.map((line, index) => <li key={index}><ReviewTokenAmount value={line}/></li>)}</ul>
+          {realFundsTemplate(review.manifest?.owner.chainId) && <p className="review-caption review-real-funds">{tr(...realFundsTemplate(review.manifest?.owner.chainId)!)}</p>}
           {expiresAt !== null && <p className="review-caption">{tr("Valid until ")}<time dateTime={new Date(expiresAt).toISOString()}>{tr(new Date(expiresAt).toLocaleString())}</time></p>}
           <p className="review-caption"><button type="button" className="simulation-back" onClick={backToBuild}>{tr("Edit in Build")}</button>{tr(" to change any action or limit.")}</p>
           <p className="review-caption">{tr("Changing the workflow, wallet, network or authorization limits requires a fresh Review. An expired simulation must be run again.")}</p>

@@ -44,7 +44,7 @@ describe('Arbitrum canonical lending authoring parity',()=>{
     for(const action of ['supply','borrow','repay','withdraw'] as const){
       expect(lendingOffers(action).find(offer=>offer.network.chain==='eip155:42161')?.asset).toBe('USDC');
       expect(capabilityNetworks(action).some(n=>n.key==='arbitrum-one')).toBe(true);
-      expect(codeCapabilities().find(c=>c.network==='arbitrum-one'&&c.action===action)).toMatchObject({ownerWalletExecutionImplemented:true,demonstratedEvidence:null});
+      expect(codeCapabilities('ENGINEERING').find(c=>c.network==='arbitrum-one'&&c.action===action)).toMatchObject({ownerWalletExecutionImplemented:true,demonstratedEvidence:null});
     }
     expect(()=>lendingProfileFor('Arbitrum One','WBTC')).toThrow('UNSUPPORTED');
     expect(()=>lendingProfileFor('Arbitrum Sepolia','USDC')).toThrow('UNSUPPORTED');

@@ -94,6 +94,14 @@ describe('BUILD-PLATFORM-STATE-001 direct durable state with remote flows', () =
     const consumer = oauthClient({ env: oauthEnv(env) });
     const tokens = await signIn(consumer, { scope: 'flofi.strategy flofi.approval flofi.runs' });
     const mcp = session({ env: { ...oauthEnv(env), FLOFI_MCP: 'enabled' }, token: tokens.access_token });
+    // BUILD-FLOFI-MAINNET-PRODUCT-001: a hosted deployment (the remote case, VERCEL=1) is the Mainnet-only product: its MCP refuses a test network,
+    // so the handoff journey below certifies the same state wiring on the local engineering host (the embedded case).
+    if (kind === 'remote') {
+      expect((await mcp.callTool('compose_strategy', { strategy: BRIDGE })).text).toMatch(/\/strategy mainnetOnly/);
+      await consumer.revoke({ token: tokens.access_token, client_id: tokens.clientId });
+      expect((await mcp.post({ jsonrpc: '2.0', id: 1, method: 'tools/list' })).status).toBe(401);
+      return;
+    }
     const composed = (await mcp.callTool('compose_strategy', { strategy: BRIDGE })).output;
     const handoffResult = await mcp.callTool('request_user_approval', { strategy: BRIDGE, workflowHash: composed.workflowHash });
     expect(handoffResult.text).not.toContain('flofi_hs_');
@@ -120,18 +128,21 @@ describe('BUILD-PLATFORM-STATE-001 direct durable state with remote flows', () =
     const created = await api(env, p.key, 'POST', '/strategies', { strategy: BRIDGE });
     const strategy = await created.json() as { id: string };
     expect(created.status).toBe(201);
+    // BUILD-FLOFI-MAINNET-PRODUCT-001: this hosted deployment is the Mainnet-only product: a test-network preview is refused before any runtime,
+    // and a mainnet preview is routed to the API. Reading a test-network run and its evidence (history) still goes to the API.
     const simulated = await api(env, p.key, 'POST', `/strategies/${strategy.id}/simulate`, { simulationSubject: OWNER });
     expect(simulated.status).toBe(422);
-    expect(await simulated.json()).toMatchObject({ error: { code: 'SIMULATION_FAILED', reason: 'ROUTER_NO_EXECUTABLE_ROUTE' } });
+    expect(await simulated.json()).toMatchObject({ error: { code: 'SIMULATION_FAILED', reason: 'TEST_NETWORK_NOT_AVAILABLE' } });
     const runtime = deploymentEngineRuntime(env), runId = 'xroute-' + 'a'.repeat(32);
     expect(runtime.kind).toBe('remote');
-    expect(await runtime.preview('crosschain-router-testnet', [{ workflowId: 'w', nodes: [] }, OWNER])).toEqual({ ok: false, code: 'ROUTER_NO_EXECUTABLE_ROUTE' });
+    expect(await runtime.preview('crosschain-router-testnet', [{ workflowId: 'w', nodes: [] }, OWNER])).toEqual({ ok: false, code: 'TEST_NETWORK_NOT_AVAILABLE' });
+    expect(await runtime.preview('crosschain-router', [{ workflowId: 'w', nodes: [] }, OWNER])).toEqual({ ok: false, code: 'ROUTER_NO_EXECUTABLE_ROUTE' });
     expect(await runtime.run(runId, OWNER)).toEqual({ ok: true, value: null });
     expect(await runtime.evidence('crosschain-router-testnet', runId, OWNER)).toEqual({ ok: true, value: null });
     const previews = transport.mock.calls.filter(([url]) => String(url).includes('/v1/previews/'));
-    expect(previews).toHaveLength(2);
+    expect(previews).toHaveLength(1);
     for (const [url, init] of previews) {
-      expect(String(url)).toBe('https://api.example/v1/previews/crosschain-router-testnet');
+      expect(String(url)).toBe('https://api.example/v1/previews/crosschain-router');
       expect(init?.method).toBe('POST');
       expect(new Headers(init?.headers).has('x-flofi-wallet-principal')).toBe(false);
       expect(new Headers(init?.headers).has('idempotency-key')).toBe(false);

@@ -15,6 +15,8 @@ import type { McpRuntime as EngineRuntime } from '../mcp/runtime.ts';
 import type { Composition } from '../engine/strategy-engine';
 import { refuse } from './refusal.ts';
 import { composeSingleStep } from './strategy.ts';
+import type { NetworkScope } from '../domain/network-scope';
+import { networkScope } from '../server/network-scope.ts';
 
 export const MAX_CONCURRENT_SIMULATIONS = 2;
 let activeSimulations = 0;
@@ -22,7 +24,9 @@ let activeSimulations = 0;
 export const activeSimulationCount = () => activeSimulations;
 
 export type PreviewRequest = { readonly strategy: unknown; readonly workflowHash: string; readonly simulationSubject: string };
-export type PreviewOptions = { readonly budget?: () => Promise<boolean> };
+export type PreviewOptions = { readonly budget?: () => Promise<boolean>;
+  /** BUILD-FLOFI-MAINNET-PRODUCT-001: the caller's network scope (default: this server's). */
+  readonly scope?: NetworkScope };
 export type SimulationPreview = { readonly composition: Composition; readonly plan: PreviewPlan; readonly view: SimulationView;
   /** The public account whose balances the preview read, or null when the flow reads none. Never an owner or an authorization. */
   readonly simulationSubject: string | null };
@@ -33,7 +37,7 @@ export type SimulationPreview = { readonly composition: Composition; readonly pl
  * or the flow's own classified code.
  */
 export async function simulatePreview(runtime: EngineRuntime, request: PreviewRequest, options: PreviewOptions = {}): Promise<SimulationPreview> {
-  const c = composeSingleStep(request.strategy, request.workflowHash, 'SIMULATE_ONE_STEP_AT_A_TIME'), plan = previewPlan(c.strategy);
+  const c = composeSingleStep(request.strategy, request.workflowHash, 'SIMULATE_ONE_STEP_AT_A_TIME', options.scope ?? networkScope()), plan = previewPlan(c.strategy);
   if ('code' in plan) return refuse(plan.code);
   const evm = /^0x[0-9a-fA-F]{40}$/.test(request.simulationSubject);
   if (plan.subject === 'EVM' && !evm || plan.subject === 'SOLANA' && evm) return refuse('SIMULATION_SUBJECT_INVALID');

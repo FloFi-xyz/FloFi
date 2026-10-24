@@ -24,6 +24,7 @@ const REFUSAL_TEXT: Readonly<Record<string, string>> = {
   AUTOMATION_WORKFLOW_NOT_REPRESENTABLE: 'Some steps cannot run as an automation yet.', AUTOMATION_WORKFLOW_EMPTY: 'Add an action to the Canvas first.',
   AUTOMATION_WORKFLOW_TOO_LONG: 'An automation can have at most four steps.', AUTOMATION_WORKFLOW_ORDER_UNSUPPORTED: 'A step depends on a later step; reorder the Canvas first.',
   AUTOMATION_WORKFLOW_INVALID: 'The Canvas workflow could not be read.', WALLET_SESSION_REQUIRED: 'Verify wallet ownership to automate this workflow.',
+  TEST_NETWORK_NOT_AVAILABLE: 'This workflow uses a test network. FloFi runs on mainnets only: rebuild it on its mainnet in the Canvas first.',
 };
 const labelOf = (r: RouteAction) => {
   const route = EXECUTION_ROUTES[r.asset].find(x => x.network === r.network);

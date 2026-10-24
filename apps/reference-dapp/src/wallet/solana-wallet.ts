@@ -123,6 +123,25 @@ export function subscribeSolanaSession(session: SolanaSession, changed: (session
   });
   return () => { unsubscribeEvents?.(); unsubscribeDiscovery(); };
 }
+/**
+ * BUILD-FLOFI-MAINNET-PRODUCT-001 (wallet B): calls `listener` when a registered wallet named `name` reports accounts again (the owner unlocked
+ * it, switched back to an account connected to FloFi, or the extension restarted). Used only while FloFi has no session for that wallet, so the
+ * caller can try a SILENT reconnect; nothing here connects, prompts or adopts an account by itself.
+ */
+export function subscribeSolanaWalletAccounts(name: string, listener: () => void): () => void {
+  type Events = { on(event: 'change', listener: (event: { accounts?: readonly SolanaWalletAccount[] }) => void): () => void };
+  const subscriptions = new Map<StandardWallet, () => void>();
+  const sync = () => {
+    for (const wallet of registeredWallets()) {
+      if (wallet.name !== name || subscriptions.has(wallet)) continue;
+      const events = wallet.features['standard:events'] as Events | undefined;
+      subscriptions.set(wallet, events?.on('change', event => { if (event.accounts?.length) listener(); }) ?? (() => undefined));
+    }
+  };
+  sync();
+  const stopDiscovery = subscribeSolanaDiscovery(sync);
+  return () => { stopDiscovery(); for (const stop of subscriptions.values()) stop(); subscriptions.clear(); };
+}
 type DisconnectFeature = { disconnect(): Promise<void> };
 /** Ends FloFi's use of the session. Wallets that implement `standard:disconnect` also forget the connection; it never prompts. */
 export async function disconnectSolanaWallet(session: SolanaSession): Promise<void> {

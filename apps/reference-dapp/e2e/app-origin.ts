@@ -25,3 +25,15 @@ export const E2E_APP_ORIGIN = e2eAppOrigin(E2E_APP_PORT);
 // Preserve release isolation and the earlier harness API; CI's canonical variable takes precedence.
 export const APP_PORT = String(E2E_APP_PORT);
 export const APP_ORIGIN = E2E_APP_ORIGIN;
+
+/**
+ * BUILD-FLOFI-MAINNET-PRODUCT-001: the app the browser suites serve. The existing suites certify every engine, test networks included, so they run the
+ * isolated engineering scope (a local, loopback-only server: FLOFI_NETWORK_SCOPE is ignored on any hosted deployment). A suite that certifies the
+ * public product itself sets FLOFI_E2E_NETWORK_SCOPE=PUBLIC_MAINNET and the app runs exactly as deployed: Mainnet only, no opt-in.
+ */
+export function e2eNetworkScopeEnv(value = process.env.FLOFI_E2E_NETWORK_SCOPE): Record<string, string> {
+  if (value === undefined || value === 'ENGINEERING') return { FLOFI_NETWORK_SCOPE: 'ENGINEERING_TESTNETS' };
+  // An explicit empty value: nothing the parent shell exported can opt this server into engineering.
+  if (value === 'PUBLIC_MAINNET') return { FLOFI_NETWORK_SCOPE: '' };
+  throw new Error('FLOFI_E2E_NETWORK_SCOPE_INVALID');
+}

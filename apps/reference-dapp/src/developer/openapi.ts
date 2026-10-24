@@ -6,8 +6,8 @@
  * like the SDK.
  */
 import type { TSchema } from '@sinclair/typebox';
-import { NETWORK_IDS, STRATEGY_ACTIONS } from '../engine/strategy-spec';
-import { ApprovalView, CapabilityList, CreateApprovalRequest, CreateStrategyRequest, CreateWebhookEndpointRequest, DeletedView, ErrorView, EvidenceView, ExecutionView,
+import { PUBLIC_NETWORK_IDS, PUBLIC_STRATEGY_ACTIONS } from '../engine/strategy-spec';
+import { ApprovalView, CapabilityList, CreateApprovalRequest, PublicCreateStrategyRequest, CreateWebhookEndpointRequest, DeletedView, ErrorView, EvidenceView, ExecutionView,
   SimulateStrategyRequest, SimulationView, StrategyValidationView, StrategyView, ValidateStrategyRequest, WebhookEndpointView, WebhookEventView } from './schemas.ts';
 
 const plain = (schema: TSchema): Record<string, unknown> => JSON.parse(JSON.stringify(schema)) as Record<string, unknown>;
@@ -40,15 +40,16 @@ export function developerOpenApi(): Record<string, unknown> {
       description: 'Server-side API for third-party applications: discover capabilities, store immutable FloFi strategies, validate and simulate them, and hand ' +
         'them to the end user for approval in FloFi. The API key has zero financial authority: it never signs, submits or approves anything. Only the end ' +
         'user\'s own wallet, in FloFi, after a fresh simulation and the Strategy Manifest Review, can sign. Execution status and evidence are visible only for ' +
-        'runs the end user chose to share (off by default). Sandbox credentials only in this release: test funds, every mainnet off.',
+        'runs the end user chose to share (off by default). FloFi runs on mainnets only (real funds). Sandbox credentials only in this release, and a sandbox ' +
+        'key has every mainnet off: it can discover capabilities, but strategies and approvals need production credentials, which this release does not issue.',
       license: { name: 'Apache-2.0', identifier: 'Apache-2.0' } },
     servers: [{ url: 'https://{deployment}/api/developer/v1', variables: { deployment: { default: 'flofi.example', description: 'Your FloFi deployment\'s host.' } } }],
     security: [{ apiKey: [] }],
     tags: [{ name: 'Discovery' }, { name: 'Strategies' }, { name: 'Approvals' }, { name: 'Executions' }, { name: 'Webhooks' }],
     paths: {
       '/capabilities': { get: { operationId: 'listCapabilities', tags: ['Discovery'], summary: 'What FloFi can do per action and network on this deployment (any valid key).',
-        parameters: [{ name: 'network', in: 'query', required: false, schema: { type: 'string', enum: [...NETWORK_IDS] } },
-          { name: 'action', in: 'query', required: false, schema: { type: 'string', enum: [...STRATEGY_ACTIONS] } }],
+        parameters: [{ name: 'network', in: 'query', required: false, schema: { type: 'string', enum: [...PUBLIC_NETWORK_IDS] } },
+          { name: 'action', in: 'query', required: false, schema: { type: 'string', enum: [...PUBLIC_STRATEGY_ACTIONS] } }],
         responses: { ...ok('200', 'CapabilityList', 'Capability rows with the four facts and the operations available.'), ...errors(400, ...COMMON) } } },
       '/strategies': { post: { operationId: 'createStrategy', tags: ['Strategies'], summary: 'Store an immutable strategy (scope `strategies`).',
         parameters: [IDEMPOTENCY], requestBody: body('CreateStrategyRequest', 'A FloFi StrategySpec.'),
@@ -89,7 +90,7 @@ export function developerOpenApi(): Record<string, unknown> {
     components: {
       securitySchemes: { apiKey: { type: 'http', scheme: 'bearer', description: 'A FloFi Developer API key (`flofi_sk_test_…`). Server-side only: browser requests are refused.' },
         dispatchToken: { type: 'http', scheme: 'bearer', description: 'The scheduler token whose SHA-256 is FLOFI_DEVELOPER_DISPATCH_TOKEN_SHA256.' } },
-      schemas: { CreateStrategyRequest: plain(CreateStrategyRequest), ValidateStrategyRequest: plain(ValidateStrategyRequest), SimulateStrategyRequest: plain(SimulateStrategyRequest),
+      schemas: { CreateStrategyRequest: plain(PublicCreateStrategyRequest), ValidateStrategyRequest: plain(ValidateStrategyRequest), SimulateStrategyRequest: plain(SimulateStrategyRequest),
         CreateApprovalRequest: plain(CreateApprovalRequest), CreateWebhookEndpointRequest: plain(CreateWebhookEndpointRequest), CapabilityList: plain(CapabilityList),
         Strategy: plain(StrategyView), StrategyValidation: plain(StrategyValidationView), Simulation: plain(SimulationView), Approval: plain(ApprovalView),
         Execution: plain(ExecutionView), Evidence: plain(EvidenceView), WebhookEndpoint: plain(WebhookEndpointView), DeletedWebhookEndpoint: plain(DeletedView),
