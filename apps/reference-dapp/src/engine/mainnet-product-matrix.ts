@@ -30,7 +30,8 @@ export function mainnetProductMatrix(ledger: Ledger, verification: LiveVerificat
     if (named.includes('TESTNET')) retired.push({ id: row.id, action: row.action, network: row.network, destinationNetwork: row.destinationNetwork,
       availability: 'TEST_NETWORK_NOT_AVAILABLE', history: 'READ_ONLY', previousStatus: row.status });
     else if (named.length && named.every(environment => environment === 'MAINNET')) rows.push(row);
-    else perStepRows.push(row);
+    // A sequence's steps are mainnet steps in the public product, so it moves real funds whatever its engineering certification used.
+    else perStepRows.push({ ...row, funds: 'REAL_FUNDS' });
   }
   return { rows, perStepRows, retired };
 }

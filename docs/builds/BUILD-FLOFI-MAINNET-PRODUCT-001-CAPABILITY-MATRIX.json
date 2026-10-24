@@ -1225,7 +1225,7 @@
       "action": "sequence",
       "network": "any (per step)",
       "destinationNetwork": null,
-      "funds": "TEST_FUNDS",
+      "funds": "REAL_FUNDS",
       "protocols": [
         "per step"
       ],
@@ -1252,7 +1252,7 @@
       "action": "sequence_bound_amounts",
       "network": "any (per step)",
       "destinationNetwork": null,
-      "funds": "TEST_FUNDS",
+      "funds": "REAL_FUNDS",
       "protocols": [
         "per step"
       ],

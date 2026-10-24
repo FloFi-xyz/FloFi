@@ -24,6 +24,7 @@ describe('BUILD-FLOFI-MAINNET-PRODUCT-001 public capability matrix', () => {
         expect(name, row.id).not.toMatch(/sepolia|devnet|testnet/i);
       }
     }
+    for (const row of matrix.perStepRows) expect([row.id, row.funds]).toEqual([row.id, 'REAL_FUNDS']);
   });
   it('retires every test-network row as read-only history, and certifies no mainnet row from test-network evidence', () => {
     expect(matrix.retired.length).toBeGreaterThan(20);

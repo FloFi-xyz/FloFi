@@ -56,7 +56,8 @@ test('keyboard choice connects exactly the chosen EVM wallet and the header name
   await expect(page.getByText(`EVM Default: ${short(WALLET_ACCOUNTS.rabby)} · Base Sepolia`, { exact: true })).toBeVisible();
   await expect(page.locator('.header-wallet-provider')).toHaveAttribute('title', 'Rabby Wallet');
   expect(await promptingCalls(page)).toEqual([{ wallet: 'Rabby Wallet', method: 'eth_requestAccounts' }]);
-  await expect(page.getByRole('combobox', { name: 'Environment', exact: true })).toHaveText('Testnet');
+  // BUILD-FLOFI-MAINNET-PRODUCT-001: the wallet badge above names the network; the header has no network selector.
+  await expect(page.getByRole('combobox', { name: 'Environment', exact: true })).toHaveCount(0);
 });
 
 test('Phantom on Solana and Phantom on Ethereum are separate choices with separate identities', async ({ page }) => {

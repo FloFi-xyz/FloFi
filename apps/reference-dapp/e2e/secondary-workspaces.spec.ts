@@ -127,7 +127,8 @@ for (const theme of ['light', 'dark'] as const) {
       for (const width of [320, 375, 768, 1024, 1440]) {
         await page.setViewportSize({ width, height: 900 });
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-        await expect(page.getByRole('combobox', { name: 'Environment', exact: true })).toBeVisible();
+        // BUILD-FLOFI-MAINNET-PRODUCT-001: Mainnet-only, so the header has no network selector.
+        await expect(page.getByRole('combobox', { name: 'Environment', exact: true })).toHaveCount(0);
         await expect(page.getByRole('button', { name: 'Settings', exact: true })).toBeVisible();
         await expect(page.locator('.navigation-trigger')).toBeInViewport();
         await expect(page.locator('.secondary-workspace-heading')).toHaveCSS('font-family', /Outfit/);

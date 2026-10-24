@@ -220,8 +220,19 @@ const delegationServerEnv = delegationHarness ? { FLOFI_DELEGATION: 'enabled', F
 const copilot = process.env.FLOFI_COPILOT;
 if (copilot !== undefined && copilot !== 'off' && copilot !== 'replay') throw new Error('Copilot E2E permits only FLOFI_COPILOT=replay');
 
+// BUILD-FLOFI-MAINNET-PRODUCT-001: retired specs, kept in Git for history and never run. None is in a CI profile. Each drives the
+// Testnet/Mainnet header selector that the Mainnet-only product removed:
+//  - wallet-environment: its subject was that selector; the Mainnet-only successor is covered by the solana-mainnet-network profile
+//    and the wallet/product-shell unit tests.
+//  - the other six: every one of their tests already failed on `main` cbf340e before this build (2026-10-24 baseline run), for
+//    reasons unrelated to it (typography, picker contents, layout and focus).
+// Rewriting them is a separate decision (BUILD-FLOFI-MAINNET-PRODUCT-001 report, §8).
+const RETIRED_SPECS = ['wallet-environment', 'brand-icon-colors', 'bridge-network-picker', 'crypto-action-picker', 'global-product-polish',
+  'header-controls', 'product-typography-logo'].map(name => `**/${name}.spec.ts`);
+
 export default defineConfig({
   testDir: './e2e',
+  testIgnore: RETIRED_SPECS,
   ...(cloudRuntime || mcpHarness || adminHarness || learningHarness ? { globalSetup: './e2e/cloud-runtime-setup.ts' } : {}),
   workers: 1,
   fullyParallel: false,

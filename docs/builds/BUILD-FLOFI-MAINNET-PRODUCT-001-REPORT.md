@@ -191,6 +191,9 @@ execution. Owner-run certification, without CI and with explicit spending limits
 - This PR's `certification-checks` job therefore stops at the audit until it is rebased on that fix. The suites were run locally (see
   the PR).
 
+The final GO/NO-GO, the exact production sequence, the owner-run acceptance checklist and the rollback commands are in
+[BUILD-FLOFI-MAINNET-PRODUCT-001-RELEASE.md](BUILD-FLOFI-MAINNET-PRODUCT-001-RELEASE.md).
+
 ## 8. Owner decisions surfaced by this build
 
 1. **Developer API.** This release issues sandbox credentials only, and a sandbox key has every mainnet off. In a Mainnet-only product it
@@ -200,8 +203,25 @@ execution. Owner-run certification, without CI and with explicit spending limits
    mainnet delegation is disabled in code, and production custody does not exist.
 3. **No longer offered:** the Base Sepolia lending composition, the Solana Devnet swap → Orca composition, and chat position management
    (Devnet Orca only). No mainnet equivalent exists. None was invented.
-4. **Arbitrum One and Ethereum `add_liquidity`** become reachable on `flofi.xyz` with the promotion of `cbf340e` or later (see the earlier
-   promotion assessment). They are real funds and have never been executed.
-5. **Not in CI:** browser specs outside the CI profiles that still drive the removed header selector. Examples are
-   `wallet-environment.spec.ts`, `workflow-save-environment.spec.ts`, `header-controls.spec.ts` and `crypto-action-picker.spec.ts`. They
-   were already outside CI and are kept for history, not deleted. They need rewriting before they are used again.
+4. **Arbitrum One and Ethereum `add_liquidity`** have been reachable on `flofi.xyz` since `cbf340e` was promoted on 2026-10-24 at 00:08
+   UTC (see the earlier promotion assessment). They are real funds and have never been executed.
+5. **Browser specs outside CI that drove the removed header selector (16 files, 98 tests): updated or explicitly retired.**
+   - **Baseline.** On 2026-10-24 the same 98 tests ran on `main` `cbf340e` and on this branch, with the CI browser environment.
+     - On `main`: 44 passed and 54 failed.
+     - On this branch before the fix: 27 passed and 71 failed.
+     - All 17 tests that passed on `main` but failed here failed at a line that used the removed selector. There was no other
+       difference.
+   - **Updated (9 specs):** `composer-product-cleanup`, `dark-product-palette`, `navigation-drawer`, `secondary-workspaces`,
+     `stage-workspace-layout`, `stocks-pool-authoring`, `token-picker`, `wallet-selector` and `workflow-save-environment`.
+     - They now assert the Mainnet-only contract: no selector, and the wallet badge names the wallet's network.
+     - The two `workflow-save-environment` tests about the selector's own menu became "header has no environment menu" and "workflow
+       utilities fit responsive headers without a network selector".
+     - **Result: 42 passed and 22 failed of 64.** Every test that passes on `main` passes here. Each of the 22 fails at the same
+       pre-existing assertion as on `main`: typography, layout and an "Advanced action setup" panel that no longer exists. They are
+       not caused by this build and stay outside CI.
+   - **Retired (7 specs, 34 tests):** kept in Git and excluded by `testIgnore` in `playwright.config.ts`, which states why.
+     - `wallet-environment`: its subject was the removed selector. The successor behaviour is covered by the `solana-mainnet-network`
+       CI profile and the wallet and product-shell unit tests.
+     - `brand-icon-colors`, `bridge-network-picker`, `crypto-action-picker`, `global-product-polish`, `header-controls` and
+       `product-typography-logo`: every one of their tests already failed on `main` before this build.
+   - **Not done:** rewriting these specs is a separate decision.

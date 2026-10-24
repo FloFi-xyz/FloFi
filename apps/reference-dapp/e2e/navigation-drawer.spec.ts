@@ -103,7 +103,8 @@ for (const theme of ['light', 'dark'] as const) {
         await expect(drawer.getByRole('button', { name: 'Logout', exact: true })).toBeInViewport();
         await expect(drawer.locator('[aria-current=page]')).toHaveCount(stage === 'Build' || stage === 'Dashboard' ? 1 : 0);
         await expect(trigger).toBeInViewport();
-        await expect(page.getByRole('combobox', { name: 'Environment', exact: true })).toBeVisible();
+        // BUILD-FLOFI-MAINNET-PRODUCT-001: Mainnet-only, so the header has no network selector.
+        await expect(page.getByRole('combobox', { name: 'Environment', exact: true })).toHaveCount(0);
         await expect(page.getByRole('button', { name: 'Settings', exact: true })).toBeVisible();
         await expect(page.getByRole('group', { name: 'Wallet connection' })).toBeVisible();
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);

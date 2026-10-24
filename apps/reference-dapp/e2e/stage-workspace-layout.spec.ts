@@ -57,8 +57,8 @@ for (const theme of ['Light', 'Dark'] as const) for (const layout of ['standard'
     const graph = canvas.locator('.flow-surface');
     const wallet = page.getByRole('group', { name: 'Wallet connection', exact: true });
     const walletText = await wallet.innerText();
+    // BUILD-FLOFI-MAINNET-PRODUCT-001: Mainnet-only, so the header has no network selector; the wallet group (with its network) stays unchanged.
     const environment = page.getByRole('combobox', { name: 'Environment', exact: true });
-    const environmentValue = await environment.innerText();
     const measurements = [];
     for (const width of [1440, 1024, 375, 320]) {
       await page.setViewportSize({ width, height: 900 });
@@ -107,7 +107,7 @@ for (const theme of ['Light', 'Dark'] as const) for (const layout of ['standard'
         await expect(graph.getByRole('button', { name: 'Simulate workflow', exact: true })).toBeVisible();
         await assertNoFinancialCanvasAction(page);
         expect(await wallet.innerText()).toBe(walletText);
-        await expect(environment).toHaveText(environmentValue);
+        await expect(environment).toHaveCount(0);
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
         const transform = () => graph.locator('.react-flow__viewport').getAttribute('style');
         const before = await transform();
