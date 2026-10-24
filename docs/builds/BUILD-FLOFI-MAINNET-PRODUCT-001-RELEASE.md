@@ -29,7 +29,7 @@ Nothing was merged, promoted, deployed, configured or signed, and no transaction
 
 **Not blockers, but the owner must know them before release (pre-existing in production, not caused by #118):**
 - **K1. Evidence archive failing in production.**
-  - Since at least 2026-10-23 11:44 UTC, every `evidence.archive` job on `flofi-worker` has failed with `EVIDENCE_STORE_READ_FAILED`: 336 attempts, 0 successes, for 3 runs (`jupiter-afb4e4…`, `pub-4ba810e1…`, `pub-01a2ec0f…`).
+  - In the available `flofi-worker` logs (from 2026-10-23 11:44 UTC), every `evidence.archive` attempt has failed with `EVIDENCE_STORE_READ_FAILED`: 336 attempts from 2026-10-23 21:49 UTC onward, 0 successes, for 3 runs (`jupiter-afb4e4…`, `pub-4ba810e1…`, `pub-01a2ec0f…`), still retrying.
   - The S3-compatible store answers the first `GET` of a not-yet-archived object with an error other than 404. Typical causes are wrong or expired credentials, a wrong bucket, region or path style, or credentials without list permission (S3 then returns 403 for a missing object).
   - Evidence is still built from each run record, but no content-addressed archive copy is written.
   - Owner action: check `OBJECT_STORE_*` on `flofi-worker` (and the API). No code change in this release.
