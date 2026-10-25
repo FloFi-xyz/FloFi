@@ -12,6 +12,7 @@
  * network, provider or broadcast; it proves FloFi's side of the contract, not any vendor's MCP host or wallet extension.
  */
 import type { APIRequestContext, Browser, Locator } from '@playwright/test';
+import { writeFile } from 'node:fs/promises';
 import { test, expect } from '@playwright/test';
 import { createTestWallet } from '../../../packages/reference-reconciler/test/test-wallet.ts';
 import { E2E_APP_ORIGIN as APP_ORIGIN } from './app-origin';
@@ -230,13 +231,15 @@ test('embedded chat: existing execution runtime completes after wallet confirmat
   expect(runs).toHaveLength(1); expect(runs[0]!.reconciled).toBe(true);
   expect(runs[0]!.receiptUrl).toBe(`${APP_ORIGIN}/app/dashboard/runs/${runs[0]!.executionId}`);
   await expect.poll(async () => JSON.stringify((await hostLog(host)).modelContext)).toContain(runs[0]!.receiptUrl);
-  await testInfo.attach('MOCKED-public-MCP-tool-responses', { contentType: 'application/json', body: Buffer.from(JSON.stringify({
+  const transcript = testInfo.outputPath('MOCKED-public-MCP-tool-responses.json');
+  await writeFile(transcript, JSON.stringify({
     evidenceEnvironment: 'MOCKED_LOOPBACK_ONLY', toolResults: [
       { tool: 'compose_strategy', structuredContent: composed },
       { tool: 'request_user_approval', structuredContent: result.structuredContent },
       { tool: 'get_approval_status', structuredContent: status },
     ],
-  }, null, 2)) }); // Model-visible responses only: never tool-result _meta or browser credentials.
+  }, null, 2), { mode: 0o600 }); // Model-visible responses only: never tool-result _meta or browser credentials.
+  await testInfo.attach('MOCKED-public-MCP-tool-responses', { contentType: 'application/json', path: transcript });
   expect((await hostLog(host)).openLinks).toEqual([]); expect(context.pages()).toHaveLength(1);
   expect(requested).toBe(2); expect(await control(request, 'MOCK_sends')).toBe(2); expect(unexpected).toEqual([]);
   await context.close();
