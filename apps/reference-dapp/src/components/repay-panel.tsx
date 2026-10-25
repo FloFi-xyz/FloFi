@@ -9,6 +9,7 @@ import { useWorkflow } from '../state/workflow-store';
 import { useBuild009Wallet } from '../state/build009-wallet-store';
 import { useSupply } from '../state/supply-store';
 import type { RepayObservation } from '@defi-workflow-engine/reference-reconciler';
+import { PendingExecutionNote } from './execution-concurrency-notes';
 const human=(value:string,decimals:number)=>(Number(value)/10**decimals).toLocaleString('en-US',{maximumFractionDigits:decimals});
 const hf=(value:string)=>BigInt(value)===(1n<<256n)-1n?'No debt (∞)':human(value,18);
 export function RepayAuthoringForm({nodeId,onDone,direct=false,reviewFormId}:{nodeId?:string;onDone?:()=>void;direct?:boolean;reviewFormId?:string}){
@@ -57,7 +58,7 @@ export function RepayPanel({view}:{view:'simulate'|'execute'}){
       <p>{tr("Maximum network budget: ")}{tr(human(review.manifest.gasBudgets[0]?.maximumAmount??'0',18))}{tr(" ETH, including fee margin.")}</p>
       <p>{tr("Owner / onBehalfOf: ")}{review.account}</p><p>{tr("Pool / approval spender: ")}{tr(review.pool)}</p><p>{tr("Asset: ")}{tr(review.asset)}</p><p>{tr("State block: ")}{tr(review.state.block)}{tr(" · Review expires: ")}{tr(review.expiresAt)}</p>
       <p>{tr("Debt estimates use the current index. Interest accrues until execution; final repayment is independently reconciled.")}</p></>}
-    {view==='simulate'?<button type="button" disabled={run.busy||Boolean(pending)} onClick={()=>void run.simulate()}>{tr("Simulate Repay")}</button>:<>
+    {view==='simulate'?<><button type="button" disabled={run.busy} onClick={()=>void run.simulate()}>{tr("Simulate Repay")}</button><PendingExecutionNote pending={Boolean(pending)}/></>:<>
       {review&&wallet.account&&wallet.chainId!==shown.chainHex&&<button type="button" disabled={run.busy||wallet.busy} onClick={()=>void run.switchNetwork()}>{tr("Switch wallet to ")}{tr(shown.network)}</button>}
       {record&&!record.authorization&&!record.attempts.length&&!run.retired&&<button type="button" disabled={run.busy} onClick={()=>void run.review()}>{tr("Accept Repay review")}</button>}
       {record?.authorization&&!run.retired&&!pending&&!record.notSubmitted&&record.verdict==='PENDING'&&<button type="button" className="primary" disabled={run.busy} onClick={()=>void run.execute()}>{tr(review?.approvalRequired&&!approval?'Approve exactly '+review.amount+' raw '+shown.asset:'Execute')}</button>}

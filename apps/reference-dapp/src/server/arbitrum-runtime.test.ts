@@ -197,6 +197,37 @@ describe('Arbitrum swaps on the shared owner runtime', () => {
     await expect(s.begin(b.quote.executionId, owner)).rejects.toThrow('SWAP_NONCE_ALREADY_RESERVED');
     expect(s.load(b.quote.executionId).attempts).toHaveLength(0);
   });
+  it('HOTFIX-WORKFLOW-CONCURRENCY-001: a pending swap never blocks another; the next Review binds the next nonce and both reconcile', async () => {
+    chain.state.allowances.set(`${UNI.usdc}:${owner}:${UNI.router}`, 10n ** 12n);
+    const s = swapService(), a = await s.prepare(swap(), owner);
+    s.review(a.quote.executionId, a.quote.manifestHash);
+    const beginA = await s.begin(a.quote.executionId, owner);
+    expect(beginA.tx.nonce).toBe('0x0');
+    s.report(a.quote.executionId, beginA.attempt.attemptId, { kind: 'HASH', txHash: chain.queue(beginA.tx) });
+    // A is pending in the mempool: B, the same swap again on purpose, is simulated, reviewed and executed meanwhile.
+    const b = await s.prepare(swap(), owner);
+    expect(b.quote.ownerReview).toMatchObject({ nonce: '1', transaction: { nonce: '0x1' } });
+    s.review(b.quote.executionId, b.quote.manifestHash);
+    const beginB = await s.begin(b.quote.executionId, owner);
+    s.report(b.quote.executionId, beginB.attempt.attemptId, { kind: 'HASH', txHash: chain.queue(beginB.tx) });
+    expect(chain.mineQueued()).toHaveLength(2);
+    const [doneA, doneB] = [await s.observe(a.quote.executionId), await s.observe(b.quote.executionId)];
+    for (const done of [doneA, doneB]) {
+      expect(done).toMatchObject({ outcome: { inputSpent: '10000000', outputReceived: '4000000000000000', evidence: { outcome: 'RECONCILED' } } });
+      expect(done.divergence).toBeUndefined();
+      expect(done.outcome!.evidence.reconciliation.limitations).toContain('OWNER_TRANSACTIONS_IN_WINDOW_RECEIPT_RECONCILED');
+    }
+    expect([doneA.attempts.at(-1)?.receipt?.nonce, doneB.attempts.at(-1)?.receipt?.nonce]).toEqual(['0', '1']);
+  });
+  it('HOTFIX-WORKFLOW-CONCURRENCY-001: a Review whose nonce another transaction took first must be reviewed again', async () => {
+    chain.state.allowances.set(`${UNI.usdc}:${owner}:${UNI.router}`, 10n ** 12n);
+    const s = swapService(), a = await s.prepare(swap(), owner);
+    s.review(a.quote.executionId, a.quote.manifestHash);
+    chain.queue({ from: owner, to: recipient, data: '0x', value: '0x1' }); // an unrelated wallet transaction, pending with nonce 0
+    await expect(s.begin(a.quote.executionId, owner)).rejects.toThrow('OWNER_STATE_CHANGED_REVIEW_REQUIRED');
+    const again = await s.prepare(swap(), owner);
+    expect(again.quote.ownerReview?.nonce).toBe('1');
+  });
   it.each(['approval', 'swap'] as const)('allows an explicit identical %s request after a proven rejection, retaining the nonce reservation', async step => {
     if (step === 'swap') chain.state.allowances.set(`${UNI.usdc}:${owner}:${UNI.router}`, 10_000_000n);
     const path = dir(), s = swapService({ path }), run = await s.prepare(swap(), owner), id = run.quote.executionId;

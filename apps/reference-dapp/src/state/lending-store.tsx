@@ -39,7 +39,8 @@ export function LendingProvider({children}:{children:ReactNode}){
   useEffect(()=>{if(record&&retired&&record.authorization)lendingInvalidate(record.id).then(r=>{if(r.ok)setRecord(r.value);}).catch(()=>setError('LENDING_INVALIDATION_FAILED'));},[record,retired]);
   async function operation(action:()=>Promise<void>){if(busyRef.current)return;busyRef.current=true;setBusy(true);setError(null);try{await action();}catch(cause){setError(cause instanceof Error?cause.message:'LENDING_OPERATION_FAILED');}finally{busyRef.current=false;setBusy(false);}}
   async function simulate(){return operation(async()=>{
-    if(record?.attempts.some(a=>!a.reconciled&&!a.notSubmitted))throw Error('LENDING_EXISTING_ATTEMPT_OBSERVE_ONLY');
+    // HOTFIX-WORKFLOW-CONCURRENCY-001: a pending transaction never blocks a new, separate simulation; the earlier run keeps being observed
+    // server-side and stays listed in Dashboard.
     const snapshot=latest.current,authored=pristine?record!.reviews[0]!.workflow:snapshot;
     if(!isLendingComposition(authored))throw Error('LENDING_WORKFLOW_REQUIRED');
     // Preserve durable nonce/economic reservations after a proved cancellation or completed checkpoint.

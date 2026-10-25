@@ -14,7 +14,7 @@ import { randomBytes } from 'node:crypto';
 import { catalogAsset, transferEnvironment, type AssetCatalog } from '@defi-workflow-engine/action-registry';
 import { isAbsolute } from 'node:path';
 import { createBaseSepoliaReviewContext, validateAuthoringWorkflow } from '@defi-workflow-engine/reference-linter';
-import { assertNativeTransferReview, readTransferState, simulateNativeTransfer, nativeTransferProfile, ROBINHOOD_TESTNET_TRANSFER, transferToken,
+import { assertNativeTransferReview, readTransferState, simulateNativeTransfer, nativeTransferProfile, ROBINHOOD_TESTNET_TRANSFER, transferNextNonce, transferToken,
   type NativeTransferReview, type NativeTransferTransaction, type TransferRpc } from '@defi-workflow-engine/reference-compiler';
 import { createTransferRun, discoverTransferByNonce, prepareTransferAttempt, transferTransition, validateTransferRun, createFileExecutionStorage,
   logMissing, utf8, TRANSFER_RUN_ID, type ExecutionStorage, type TransferRun } from '@defi-workflow-engine/reference-executor';
@@ -173,7 +173,7 @@ export function createRobinhoodTransferService(input: { rpc?: TransferRpc; rpcs?
           throw new Error('TRANSFER_TOKEN_METADATA_MISMATCH');
       }
       await reserveNonce(record);
-      const prepared = await save({ ...record, ...prepareTransferAttempt(record, state.block, state.nonce, at()), error: null });
+      const prepared = await save({ ...record, ...prepareTransferAttempt(record, state.block, transferNextNonce(state), at()), error: null });
       return { record: prepared, transaction: prepared.attempt!.transaction };
     }); },
     /** The handoff boundary: SUBMITTING is durable before the browser calls the wallet. */
@@ -182,7 +182,8 @@ export function createRobinhoodTransferService(input: { rpc?: TransferRpc; rpcs?
       if (record.attempt?.state !== 'PREPARED' || record.authorization !== record.review.commitment || now() >= Date.parse(record.review.expiresAt))
         throw new Error('TRANSFER_WALLET_HANDOFF_NOT_AUTHORIZED');
       const state = await stateOf(record.review, record.review.account);
-      if (state.nonce !== record.attempt.nonce || state.pendingNonce !== record.attempt.nonce) throw new Error('TRANSFER_NONCE_CHANGED');
+      // The reserved nonce must still be the one the wallet assigns next (the owner's other pending transactions come before it).
+      if (transferNextNonce(state) !== record.attempt.nonce) throw new Error('TRANSFER_NONCE_CHANGED');
       if (record.review.state.recipientCodeHash !== undefined) assertNativeTransferReview(record.review, record.review.workflow, record.review.account, state, now());
       await assertFreshGas(record.review, state.block);
       return save({ ...record, ...transferTransition(record, 'SUBMITTING', at()) });

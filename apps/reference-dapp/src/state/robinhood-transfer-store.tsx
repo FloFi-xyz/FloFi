@@ -57,7 +57,8 @@ export function RobinhoodTransferProvider({ children }: { children: ReactNode })
   }
   const unwrap = <T,>(result: { ok: true; value: T } | { ok: false; code: string }): T => { if (!result.ok) throw new Error(result.code); return result.value; };
   async function simulate() { await operation(async () => {
-    if (record?.attempt && !record.attempt.reconciled && !record.notSubmitted && !retired) throw new Error('TRANSFER_EXISTING_ATTEMPT_OBSERVE_ONLY');
+    // HOTFIX-WORKFLOW-CONCURRENCY-001: a pending transaction never blocks a new, separate simulation; the earlier run keeps being observed
+    // server-side and stays listed in Dashboard.
     let session = await wallet.session(); if (!session) session = await wallet.connect();
     if (!session) throw new Error('TRANSFER_WALLET_REQUIRED');
     const snapshot = latest.current, value = unwrap(await transferSimulate(snapshot, session.account));

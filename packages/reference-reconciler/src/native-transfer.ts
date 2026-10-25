@@ -21,6 +21,8 @@ export type TransferObservation = { verdict: 'RECONCILED' | 'DIVERGENT' | 'INCON
   transaction: Record<string, unknown> | null; receipt: Record<string, unknown> | null;
   facts: { blockNumber: number; blockHash: string; gasUsed: string; effectiveGasPrice: string; fee: string; balanceBefore: string; balanceAfter: string;
     nonceBefore: string; nonceAfter: string; transactionType: string;
+    /** HOTFIX-WORKFLOW-CONCURRENCY-001: TRANSACTION when other transactions of the owner shared the block (absent: block-level proof). */
+    reconciliationScope?: 'TRANSACTION';
     /** Token transfers only. */ tokenBalanceBefore?: string; tokenBalanceAfter?: string; recipientTokenBalanceBefore?: string; recipientTokenBalanceAfter?: string } | null };
 const TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
 /** ERC-8056 `TransferWithScaledUI(address,address,uint256,uint256)`, emitted by Robinhood Stock Tokens next to `Transfer`. */
@@ -96,14 +98,18 @@ export async function reconcileNativeTransfer(review: NativeTransferReview, atte
       rpc('eth_getBalance', [owner, before]).then(strict), rpc('eth_getBalance', [owner, after]).then(strict),
       rpc('eth_getTransactionCount', [owner, before]).then(strict), rpc('eth_getTransactionCount', [owner, after]).then(strict),
       rpc('eth_getCode', [owner, after])]);
-    // Exactly one owner transaction in the inclusion block, and it consumed the reviewed nonce.
-    if (nonceBefore !== BigInt(review.nonce) || nonceAfter !== nonceBefore + 1n) throw new Error('TRANSFER_NONCE_MISMATCH');
+    // Exactly one owner transaction in the inclusion block, and it consumed the reviewed nonce: the balance changes are this transfer's alone.
+    // HOTFIX-WORKFLOW-CONCURRENCY-001: independent transactions of the same owner may share the block. The block then holds this transaction's
+    // reviewed nonce among others, and its balance changes are not this transfer's alone: it is proven from its own transaction (exact call,
+    // nonce, fee bounds) and receipt (status, fee, and for a token exactly its transfer log) instead.
+    const reviewed = BigInt(review.nonce), shared = nonceBefore <= reviewed && nonceAfter > reviewed && nonceAfter - nonceBefore > 1n;
+    if (!shared && (nonceBefore !== reviewed || nonceAfter !== nonceBefore + 1n)) throw new Error('TRANSFER_NONCE_MISMATCH');
     if (code !== '0x') throw new Error('TRANSFER_OWNER_NOT_EOA');
     // ETH leaves the owner by exactly the fee, plus the value when it goes to someone else (a self-transfer's value leg nets to zero).
     const valueOut = !token && review.recipient !== owner ? BigInt(review.value) : 0n;
-    if (balanceBefore - balanceAfter !== fee + valueOut || balanceBefore < (token ? 0n : BigInt(review.value)) + fee) throw new Error('TRANSFER_BALANCE_MISMATCH');
+    if (!shared && (balanceBefore - balanceAfter !== fee + valueOut || balanceBefore < (token ? 0n : BigInt(review.value)) + fee)) throw new Error('TRANSFER_BALANCE_MISMATCH');
     let tokenFacts = {};
-    if (token) {
+    if (token && !shared) {
       const balanceOf = (account: string, block: string) => rpc('eth_call', [{ to: token.token, data: '0x70a08231' + account.slice(2).padStart(64, '0') }, block]).then(strictWord);
       const [ownerBefore, ownerAfter, recipientBefore, recipientAfter] = await Promise.all([balanceOf(owner, before), balanceOf(owner, after),
         balanceOf(review.recipient, before), balanceOf(review.recipient, after)]);
@@ -116,7 +122,8 @@ export async function reconcileNativeTransfer(review: NativeTransferReview, atte
     if (rpcHash(final.hash) !== rpcHash(receipt.blockHash)) throw new Error('TRANSFER_REORG');
     return { ...base, verdict: 'RECONCILED', reason: token ? 'TOKEN_TRANSFER_VERIFIED' : 'NATIVE_TRANSFER_VERIFIED', facts: { blockNumber, blockHash: rpcHash(receipt.blockHash),
       gasUsed: gasUsed.toString(), effectiveGasPrice: effectiveGasPrice.toString(), fee: fee.toString(), balanceBefore: balanceBefore.toString(),
-      balanceAfter: balanceAfter.toString(), nonceBefore: nonceBefore.toString(), nonceAfter: nonceAfter.toString(), transactionType: type, ...tokenFacts } };
+      balanceAfter: balanceAfter.toString(), nonceBefore: nonceBefore.toString(), nonceAfter: nonceAfter.toString(), transactionType: type, ...tokenFacts,
+      ...shared ? { reconciliationScope: 'TRANSACTION' as const } : {} } };
   } catch (cause) {
     const message = cause instanceof Error ? cause.message : 'TRANSFER_OBSERVATION_FAILED';
     // Provider failures stay ambiguous; any mismatch never reconciles.
@@ -148,7 +155,9 @@ export function buildNativeTransferEvidence(input: { id: string; review: NativeT
       ...review.asset && o.facts.tokenBalanceAfter !== undefined ? [{ asset: { chainId: profile.chain, address: review.asset.token, decimals: review.asset.decimals }, amount: o.facts.tokenBalanceAfter }] : []],
       allowances: [], debt: [], positions: [],
       fees: [{ asset: nativeAsset, amount: o.facts.fee }], residualAssets: [], ownership: [{ chainId: profile.chain, address: review.account }],
-      limitations: transferL1FeeOracle(profile) ? [
+      limitations: [...o.facts.reconciliationScope === 'TRANSACTION' ? ['Other transactions of this wallet were included in the same block, so the block-level balance changes are not this transfer\'s alone: ' +
+        'it is verified from its own transaction (exact call, nonce and fee bounds) and receipt (status, fee' + (review.asset ? ' and its exact token transfer log' : '') + ').'] : [],
+        ...transferL1FeeOracle(profile) ? [
         `Inclusion is verified at ${profile.network} (L2) sequencer level after confirmations; L1 finality is not claimed.`,
         review.asset ? 'Token transfer: exact transfer(recipient, amount) call, its transfer log(s) and both token balances; ETH moved by exactly the fee.'
           : review.recipient !== review.account ? 'Native transfer to an explicit recipient: the owner balance moved by exactly the value plus the fee.'
@@ -164,7 +173,7 @@ export function buildNativeTransferEvidence(input: { id: string; review: NativeT
         'This is a chain execution proof, not a DeFi capability.'] :
         [`Inclusion is verified at ${profile.network} block level after ${profile.minimumConfirmations} confirmations; finalized-checkpoint status is not claimed.`,
           'Self-transfer: the value leg nets to zero; the fee is gasUsed × effectiveGasPrice.',
-          'This is a chain execution proof, not a DeFi capability.'] },
+          'This is a chain execution proof, not a DeFi capability.']] },
     evidence: [{ evidenceId: 'native-transfer-public-observations', kind: 'EXTERNAL_REFERENCE', contentHash: supplyHash(publicExecution) }] };
   return { bundle, bundleHash: supplyArtifactHash('evidence-bundle', bundle), publicExecution,
     artifacts: { workflow: review.workflow, artifactSet: review.artifactSet, simulation: review.simulation, policy: review.policy,

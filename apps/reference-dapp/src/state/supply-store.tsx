@@ -70,7 +70,8 @@ export function SupplyProvider({children}:{children:ReactNode}){
     const result=await supplyRecoverReview(!record.attempts.length&&record.recoveryOf?record.recoveryOf:record.id);if(!result.ok)throw new Error(result.code);accept(result.value);setRecovered(true);
   });}
   async function simulate(){await operation(async()=>{
-    if(record?.attempts.some(a=>!a.reconciled))throw new Error('SUPPLY_EXISTING_ATTEMPT_OBSERVE_ONLY');
+    // HOTFIX-WORKFLOW-CONCURRENCY-001: a pending transaction never blocks a new, separate simulation; the earlier run keeps being observed
+    // server-side and stays listed in Dashboard.
     const authored=pristineRecovery?record!.review.workflow:workflow;
     const node=authored.nodes.find(n=>['supply','borrow','repay','withdraw'].includes(n.actionType)),beneficiary=node?.inputs.find(p=>p.name==='beneficiary');
     if(node?.actionType!=='withdraw'&&beneficiary?.kind!=='ACCOUNT')throw new Error('SUPPLY_BENEFICIARY_REQUIRED');

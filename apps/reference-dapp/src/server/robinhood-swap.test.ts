@@ -214,6 +214,44 @@ describe('Robinhood Chain catalog swap: owner execution, recovery and reconcilia
     await expect(s.begin(id, owner)).rejects.toThrow('ATTEMPT_ALREADY_ACTIVE');
     expect(s.load(id).attempts.map(a => a.state)).toEqual(['UNKNOWN']);
   });
+  it('HOTFIX-WORKFLOW-CONCURRENCY-001: swaps the same pair again while the first swap is pending; both reconcile from their own receipts', async () => {
+    chain.state.allowances.set(`${usdg.address}:${owner}:${UNI.router}`, 10n ** 12n);
+    const s = service(), first = (await s.prepare(catalogSwapWorkflow(usdg, tsla, '100000000'))).quote.executionId;
+    s.review(first, s.load(first).quote.manifestHash);
+    // Robinhood Chain's wallet assigns the nonce (no owner-bound Review): A is broadcast and still pending when B is reviewed and executed.
+    const a = await s.begin(first, owner);
+    s.report(first, a.attempt.attemptId, { kind: 'HASH', txHash: chain.queue(a.tx) });
+    const second = (await s.prepare(catalogSwapWorkflow(usdg, tsla, '50000000'))).quote.executionId;
+    s.review(second, s.load(second).quote.manifestHash);
+    const b = await s.begin(second, owner);
+    s.report(second, b.attempt.attemptId, { kind: 'HASH', txHash: chain.queue(b.tx) });
+    // Both land in ONE block: each run's balance window holds both swaps, so each is proven from its own receipt.
+    expect(chain.mineQueued()).toHaveLength(2);
+    const [doneA, doneB] = [await s.observe(first), await s.observe(second)];
+    expect(doneA.outcome).toMatchObject({ inputSpent: '100000000', outputReceived: '260000000000000000' });
+    expect(doneB.outcome).toMatchObject({ inputSpent: '50000000', outputReceived: '130000000000000000' });
+    for (const done of [doneA, doneB]) {
+      expect(done.divergence).toBeUndefined();
+      expect(done.outcome!.evidence.reconciliation.limitations).toEqual(['OWNER_WALLET_MAINNET', 'MOCKED_LOOPBACK_CHAIN', 'OWNER_TRANSACTIONS_IN_WINDOW_RECEIPT_RECONCILED']);
+    }
+    expect(doneA.attempts.at(-1)!.txHash).not.toBe(doneB.attempts.at(-1)!.txHash);
+    expect(chain.balance(tsla.address!, owner)).toBe(390_000_000_000_000_000n);
+  });
+  it('HOTFIX-WORKFLOW-CONCURRENCY-001: with other owner transactions in the window, a receipt that does not prove the reviewed swap diverges', async () => {
+    chain.state.allowances.set(`${usdg.address}:${owner}:${UNI.router}`, 10n ** 12n);
+    const s = service(), id = (await s.prepare(catalogSwapWorkflow(usdg, tsla, '100000000'))).quote.executionId;
+    s.review(id, s.load(id).quote.manifestHash);
+    const begun = await s.begin(id, owner);
+    // Another owner transaction (a plain token transfer) lands first, then the swap; the swap receipt's logs are then tampered.
+    chain.apply({ from: owner, to: usdg.address!, data: '0xa9059cbb' + '0'.repeat(24) + '2'.repeat(40) + (1n).toString(16).padStart(64, '0'), value: '0x0' });
+    const hash = chain.apply(begun.tx);
+    const receipt = chain.state.receipts.get(hash)! as { logs: Record<string, unknown>[] };
+    receipt.logs = receipt.logs.filter(log => (log.topics as string[])[0] !== '0xc42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67');
+    s.report(id, begun.attempt.attemptId, { kind: 'HASH', txHash: hash });
+    // Never reconciled: on this network an unprovable receipt fails the observation (owner-bound networks persist it as divergence).
+    await expect(s.observe(id)).rejects.toThrow('TRANSACTION_MISMATCH');
+    expect(s.load(id).outcome).toBeNull();
+  });
   it('persists runs only in the rhs- namespace and no code path sends a transaction', async () => {
     const s = service(), run = await s.prepare(catalogSwapWorkflow(usdg, tsla, '100000000'));
     expect(s.list()).toEqual([run.quote.executionId]);

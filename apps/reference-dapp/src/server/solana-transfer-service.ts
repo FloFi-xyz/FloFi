@@ -20,7 +20,7 @@ import { createSolanaTransferRun, prepareSolanaTransferAttempt, recordSolanaTran
 import { buildSolanaTransferEvidence, classifySolanaTransferEvidence, reconcileSolanaTransferAttempt, type SolanaTransferEvidenceClass,
   type SolanaTransferObservation } from '@defi-workflow-engine/reference-reconciler';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
-import { solanaTransactionClaim } from './solana-transaction-claim';
+import { solanaTransactionClaim } from './solana-transaction-claim.ts';
 
 const X = 'SOLANA_TRANSFER';
 /** `change`: what the wallet altered in a refused transaction (public keys, counts and hashes only; never its bytes or signatures). */

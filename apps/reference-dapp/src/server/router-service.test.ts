@@ -12,7 +12,7 @@ import { routeCommitment, type SemanticWorkflow } from '@defi-workflow-engine/wo
 import { editorReducer, initialEditor } from '../domain/editor';
 import type { RouterBridgeInput } from '../domain/router-authoring';
 import { createRouterHarness, ROUTER_MOCK_CODE_PINS, ROUTER_OWNER, ROUTER_RECIPIENT, type RouterHarness, type RouterHarnessOptions } from '../../e2e/router-harness';
-import { createRouterService, routerNeedsObservation, validateRouterLog, type RouterRecord, type RouterService } from './router-service';
+import { createRouterService, routerDepositIdentity, routerNeedsObservation, validateRouterLog, type RouterRecord, type RouterService } from './router-service';
 
 const SRC = profile.source;
 function workflow(patch: Partial<RouterBridgeInput> = {}): SemanticWorkflow {
@@ -289,7 +289,7 @@ describe('BUILD-ROUTER-001 recovery after restart and ambiguous submissions', ()
     expect(recovered.attempts.at(-1)!.transactionHash).toMatch(/^0x[0-9a-f]{64}$/);
     expect(first.h.counters.sends).toBe(2);
   });
-  it('ambiguous submission: never resent in this run; a queued request blocks new preparations', async () => {
+  it('ambiguous submission: never resent in this run; an independent deposit is prepared on the next nonce meanwhile (HOTFIX-WORKFLOW-CONCURRENCY-001)', async () => {
     const { service, h } = await setup(), w = workflow(), run = await reviewed(service, w);
     await execute(service, h, run.id, w); await service.observe(run.id);
     const begun = await service.begin(run.id, ROUTER_OWNER, w);
@@ -301,21 +301,28 @@ describe('BUILD-ROUTER-001 recovery after restart and ambiguous submissions', ()
     await expect(service.begin(run.id, ROUTER_OWNER, w)).rejects.toThrow('ROUTER_ATTEMPT_ACTIVE_OBSERVE_EXISTING');
     await expect(service.refresh(run.id)).rejects.toThrow('ROUTER_REFRESH_NOT_ALLOWED');
     expect((await service.observe(run.id)).error).toBe('ROUTER_TRANSACTION_NOT_OBSERVED');
+    // A fresh quote is an independent deposit (another FundsDeposited identity): the queued one is pending, so it takes the next nonce.
+    h.advance(5);
     const other = await reviewed(service, w);
-    await expect(service.begin(other.id, ROUTER_OWNER, w)).rejects.toThrow('ROUTER_PENDING_TRANSACTION');
+    expect(routerDepositIdentity(other.review, 42161)).not.toBe(routerDepositIdentity(run.review, 42161));
+    const next = await service.begin(other.id, ROUTER_OWNER, w);
+    expect(BigInt(next.attempt.nonce)).toBe(BigInt(begun.attempt.nonce) + 1n);
     h.wallet.mine();
     expect((await service.observe(run.id)).phase).toBe('SOURCE_CONFIRMED');
     expect(h.counters.sends).toBe(2);
   });
-  it('ambiguous submission without a visible pending transaction (e.g. a relayed request): no second deposit by any run of the owner until resolved', async () => {
+  it('ambiguous submission without a visible pending transaction (e.g. a relayed request): it holds only its own nonce until resolved', async () => {
     const { service, h } = await setup(), w = workflow(), run = await reviewed(service, w);
     await execute(service, h, run.id, w); await service.observe(run.id);
     await service.begin(run.id, ROUTER_OWNER, w);
     await service.handoff(run.id);
     await service.report(run.id, { kind: 'UNKNOWN', code: 'ROUTER_SUBMISSION_UNKNOWN' });
+    h.advance(5);
     const other = await reviewed(service, w);
     expect(other.review.approvals[0]!.required).toBe(false);
-    await expect(service.begin(other.id, ROUTER_OWNER, w)).rejects.toThrow('ROUTER_OWNER_DEPOSIT_IN_FLIGHT');
+    // EVM ordering, not a wallet-wide block: the unknown request may still be broadcast with this nonce, which the next transaction would
+    // otherwise also be handed. Only that nonce waits; nothing of the owner's is locked beyond it.
+    await expect(service.begin(other.id, ROUTER_OWNER, w)).rejects.toThrow('ROUTER_OWNER_NONCE_IN_USE');
     // Once the SpokePool quote window has passed with the owner's nonce unconsumed, the request can no longer move funds.
     h.advance(run.review.deadlines.depositMustLandBy - Math.floor(h.nowMs() / 1000) + 10);
     // BUILD-ARB-001: absence must also be established past the source safe head, not only the sequencer timestamp.
@@ -346,13 +353,15 @@ describe('BUILD-ROUTER-001 recovery after restart and ambiguous submissions', ()
     expect(found.attempts.at(-1)).toMatchObject({ state: 'CONFIRMED', receipt: { submissionKind: 'DELEGATED_SINGLE' } });
     expect(h.counters.sends).toBe(2);
   });
-  it('a guard entry whose attempt was never persisted (never handed to a wallet) does not block the owner forever', async () => {
+  it('a deposit-identity guard entry whose attempt was never persisted (never handed to a wallet) does not block forever', async () => {
     const { service, h, dir } = await setup(), w = workflow(), first = await reviewed(service, w);
     await execute(service, h, first.id, w); await service.observe(first.id);
-    await writeFile(join(dir, `${ROUTER_OWNER}-deposit.xroute-guard`), JSON.stringify({ runId: first.id, attemptId: first.id + '.deposit.9' }) + '\n');
-    const other = await reviewed(service, w);
+    const other = await reviewed(service, w), identity = routerDepositIdentity(other.review, 42161);
+    await writeFile(join(dir, `deposit-${identity}.xroute-guard`), JSON.stringify({ runId: first.id, attemptId: first.id + '.deposit.9' }) + '\n');
     expect((await service.begin(other.id, ROUTER_OWNER, w)).attempt.step).toBe('DEPOSIT');
-    await expect(service.begin(first.id, ROUTER_OWNER, w)).rejects.toThrow('ROUTER_OWNER_DEPOSIT_IN_FLIGHT');
+    // `first` quoted another deposit identity, but `other`'s deposit (with the wallet, not yet broadcast) holds the next nonce: EVM ordering.
+    expect(routerDepositIdentity(first.review, 42161)).not.toBe(identity);
+    await expect(service.begin(first.id, ROUTER_OWNER, w)).rejects.toThrow('ROUTER_OWNER_NONCE_IN_USE');
   });
   it('a proven wallet refusal returns to Review; a repeated or divergent hash report is handled without resending', async () => {
     const { service, h } = await setup(), w = workflow(), run = await reviewed(service, w);

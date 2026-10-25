@@ -16,4 +16,8 @@ export const portugueseConcurrency: Readonly<Record<string, string>> = {
     'Esta transação exata já é tratada por outra execução do FloFi, que continua a acompanhá-la. Simule novamente para obter uma transação nova e separada.',
   'This execution already has a transaction, and FloFi keeps tracking it; it is never sent twice. Simulate again to start a separate execution.':
     'Esta execução já tem uma transação, e o FloFi continua a acompanhá-la; ela nunca é enviada duas vezes. Simule novamente para iniciar uma execução separada.',
+  'An earlier request from this wallet is still waiting in your wallet, or its result is still being checked, and it holds the next transaction slot (nonce). Confirm or reject it in your wallet; FloFi keeps tracking it. Then simulate again.':
+    'Um pedido anterior desta carteira ainda espera na sua carteira, ou o seu resultado ainda está a ser verificado, e ocupa a próxima posição de transação (nonce). Confirme-o ou rejeite-o na carteira; o FloFi continua a acompanhá-lo. Depois simule novamente.',
+  'This exact deposit (the same quote) is already handled by another FloFi execution, which keeps tracking it. Get a new route for a separate deposit.':
+    'Este depósito exato (a mesma cotação) já é tratado por outra execução do FloFi, que continua a acompanhá-lo. Obtenha uma nova rota para um depósito separado.',
 };

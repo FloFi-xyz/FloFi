@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { solanaTransferProfile } from '@defi-workflow-engine/action-registry';
-import { assertRecordedSolanaWalletGuard, base58Encode, decompileMessageV0, fromBase64, parseMessageV0, parseTransaction, solanaSwapArtifactHash, solanaSwapHash, verifySolanaCluster,
+import { base58Encode, decompileMessageV0, fromBase64, parseMessageV0, parseTransaction, solanaSwapArtifactHash, solanaSwapHash, verifySolanaCluster,
   verifySignedSolanaTransfer, type SolanaRpc, type SolanaTransferReview, type SolanaWalletGuard } from '@defi-workflow-engine/reference-compiler';
 import { walletGuardLimitation } from './jupiter.js';
 import { hashJournalBytes, type EvidenceBundle, type ExecutionJournal } from '@defi-workflow-engine/workflow-contracts';

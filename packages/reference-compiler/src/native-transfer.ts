@@ -80,6 +80,15 @@ export async function readTransferState(rpc: TransferRpc, profile: NativeTransfe
     ...tokenFacts, ...recipientFacts };
 }
 function rpcHexOrEmpty(value: unknown): string { return value === '0x' ? '0x' : rpcHex(value); }
+/**
+ * HOTFIX-WORKFLOW-CONCURRENCY-001: the nonce the owner's wallet assigns next, after every transaction of the account already pending.
+ * A pending transaction no longer blocks a transfer; the Review is bound to this exact next nonce instead, and each FloFi run reserves its
+ * nonce, so two runs are never handed the same one.
+ */
+export function transferNextNonce(state: Pick<TransferState, 'nonce' | 'pendingNonce'>): string {
+  if (BigInt(state.pendingNonce) < BigInt(state.nonce)) throw new Error('TRANSFER_RPC_INVALID');
+  return state.pendingNonce;
+}
 
 function transferFields(workflow: SemanticWorkflow): { node: SemanticWorkflow['nodes'][number]; read: TransferFields; profile: NativeTransferProfile } {
   const nodes = workflow.nodes.filter(n => n.actionType === TRANSFER_ACTION);
@@ -129,8 +138,8 @@ export async function simulateNativeTransfer(workflow: SemanticWorkflow, account
   const account = state.account, tag = supplyHex(state.block);
   const recipient = read.fields.recipient === 'CONNECTED_OWNER' ? account : supplyAddress(read.fields.recipient);
   const insufficient = transferEnvironment(profile) === 'MAINNET' ? 'TRANSFER_INSUFFICIENT_ETH' : 'TRANSFER_INSUFFICIENT_TEST_ETH';
-  // A queued transaction would make the wallet's nonce assignment ambiguous.
-  if (state.pendingNonce !== state.nonce) throw new Error('TRANSFER_PENDING_TRANSACTION');
+  // HOTFIX-WORKFLOW-CONCURRENCY-001: the owner's pending transactions never block a transfer; the Review binds the nonce the wallet assigns next.
+  const nonce = transferNextNonce(state);
   let asset: TransferTokenReview | undefined;
   if (token) {
     if (rpcHexOrEmpty(await rpc('eth_getCode', [token.address, tag])) === '0x') throw new Error('TRANSFER_TOKEN_CODE_MISSING');
@@ -198,20 +207,20 @@ export async function simulateNativeTransfer(workflow: SemanticWorkflow, account
       functions: token ? [{ chainId: profile.chain, contract: token.address, functionId: 'transfer-address-uint256' }] : [] },
     budgetReservation: { rule: 'RESERVE_BEFORE_SUBMISSION', concurrentConsumption: 'CUMULATIVE_ACROSS_BRANCHES', implementation: 'NOT_IMPLEMENTED' },
     spendLimits, maximumSlippageBps: 0, gasBudgets, feeBudgets: [], oracleRules: [], accountRiskRules: [], checkpointRules: [], providers,
-    nonce: state.nonce, deadline: expiresAt, revocationEpoch: workflow.revision, recovery, enforcement: 'NOT_ENFORCED' };
+    nonce, deadline: expiresAt, revocationEpoch: workflow.revision, recovery, enforcement: 'NOT_ENFORCED' };
   const policyHash = supplyArtifactHash('authorization-policy', policy);
   const manifest: StrategyManifest = { schemaVersion: '1.0.0', manifestId: 'native-transfer-manifest', semanticWorkflowRevision: workflow.revision,
     semanticWorkflowHash: semanticHash, artifactSetHash: artifactHash, simulationHash, policyHash, authorizationMode: 'MODE_A', owner, executor: null,
-    expiresAt, nonce: state.nonce, revocationEpoch: workflow.revision, spendLimits, maximumSlippageBps: 0, gasBudgets, feeBudgets: [], providers, recovery,
+    expiresAt, nonce, revocationEpoch: workflow.revision, spendLimits, maximumSlippageBps: 0, gasBudgets, feeBudgets: [], providers, recovery,
     enforcement: 'NOT_ENFORCED' };
   const manifestHash = supplyArtifactHash('strategy-manifest', manifest);
   const plan: ExecutionPlan = { schemaVersion: '1.0.0', executionPlanId: 'native-transfer-plan', semanticWorkflowHash: semanticHash, manifestHash,
     segments: [{ segmentId: 'native-transfer-segment', chainId: profile.chain, dependencies: [], steps: [{ stepId: 'native-transfer', nodeId: node.nodeId,
       chainId: profile.chain, adapter, dependencies: [], requiredAuthorizationClass: 'MODE_A', executionKind: 'DIRECT_TRANSACTION',
-      payloadHash: hashSupplyValue({ ...transaction, nonce: state.nonce }, 'payload') }] }], checkpointIds: [], enforcement: 'NOT_ENFORCED' };
+      payloadHash: hashSupplyValue({ ...transaction, nonce }, 'payload') }] }], checkpointIds: [], enforcement: 'NOT_ENFORCED' };
   supplyArtifactHash('execution-plan', plan);
   const review = { format: 'gryloo.native-transfer-review.v1' as const, workflow, chain: profile.chain, chainId: profile.chainId, account, recipient,
-    value: read.fields.amount, nonce: state.nonce, transaction, gasEstimate: gas.toString(), gasLimit: gasLimit.toString(), gasPrice: gasPrice.toString(),
+    value: read.fields.amount, nonce, transaction, gasEstimate: gas.toString(), gasLimit: gasLimit.toString(), gasPrice: gasPrice.toString(),
     maxFeePerGas: maxFeePerGas.toString(), expectedFee: expectedFee.toString(), feeBudget: feeBudget.toString(), balanceBefore: state.balance,
     expectedBalanceAfter: (balance - value - expectedFee).toString(), minimumBalanceAfter: (balance - value - feeBudget).toString(), simulationResult: String(result),
     state, expiresAt, artifactSet, simulation, policy, manifest, plan, ...asset ? { asset } : {}, ...transferL1FeeOracle(profile) ? { l1FeeUpperBound: l1Fee.toString() } : {} };
@@ -231,7 +240,7 @@ export function assertNativeTransferReview(review: NativeTransferReview, workflo
       review.chainId !== profile.chainId || (read.kind === 'TOKEN') !== Boolean(review.asset)) throw new Error('TRANSFER_AUTHORIZATION_INVALID');
   if (now >= Date.parse(review.expiresAt) || now < Date.parse(review.state.observedAt)) throw new Error('TRANSFER_REVIEW_EXPIRED');
   const value = read.kind === 'TOKEN' ? 0n : BigInt(review.value);
-  if (state.account !== review.account || state.nonce !== review.nonce || state.pendingNonce !== review.nonce || state.block < review.state.block ||
+  if (state.account !== review.account || transferNextNonce(state) !== review.nonce || state.block < review.state.block ||
       BigInt(state.gasPrice) > BigInt(review.maxFeePerGas) || BigInt(state.balance) < value + BigInt(review.feeBudget)) throw new Error('TRANSFER_AUTHORIZATION_STALE');
   if (review.state.recipientCodeHash !== state.recipientCodeHash) throw new Error('TRANSFER_RECIPIENT_CODE_CHANGED_REVIEW_REQUIRED');
   if (review.asset) {

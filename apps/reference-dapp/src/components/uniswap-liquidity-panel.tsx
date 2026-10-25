@@ -15,6 +15,7 @@ import { useBuild009Wallet } from '../state/build009-wallet-store';
 import type { UniswapLiquidityStep, UniswapTokenView } from '../server/uniswap-liquidity-service';
 import { catalogLiquidityCopy, liquidityRunNetwork, robinhoodLiquidityDetails } from '../domain/robinhood-liquidity-authoring';
 import { StockFacts } from './stock-facts';
+import { PendingExecutionNote } from './execution-concurrency-notes';
 
 /** Canvas form for the canonical concentrated-liquidity node: Uniswap v3 USDC / WETH on Base Sepolia (0.05%) or Ethereum Sepolia (0.3%). */
 /** Copy is written for Base Sepolia; another network's name is substituted. Display text only. */
@@ -115,7 +116,7 @@ const messages: Record<string, string> = {
   UNISWAP_SIMULATION_UNAVAILABLE: 'The network provider cannot simulate this transaction sequence. Nothing was signed.',
   UNISWAP_SIMULATION_DIVERGENT: 'The public simulation disagreed with the independent estimate. Nothing was signed.',
   UNISWAP_UNEXPECTED_CONTRACT: 'A Uniswap contract does not match the verified deployment. Nothing was simulated or sent.',
-  UNISWAP_PENDING_TRANSACTION: 'Your wallet has a queued transaction on Base Sepolia. Let it confirm first.',
+  UNISWAP_OWNER_NONCE_IN_USE: 'An earlier request from this wallet is still waiting in your wallet, or its result is still being checked, and it holds the next transaction slot (nonce). Confirm or reject it in your wallet; FloFi keeps tracking it. Then simulate again.',
   UNISWAP_WALLET_NONCE_MISMATCH: 'Your wallet would use a different transaction number. Let pending transactions confirm first.',
   UNISWAP_ATTEMPT_ACTIVE_OBSERVE_EXISTING: 'A transaction is still being observed. Check it before continuing.',
   UNISWAP_SUBMISSION_UNKNOWN_OBSERVE_EXISTING: 'The wallet result is unknown. Flofi is observing the network and will not send another request.',
@@ -192,7 +193,8 @@ export function UniswapLiquidityPanel({ view }: { view: 'simulate' | 'execute' }
     {lp.recovered && record && <p role="status">{tr("Recovered run ")}{record.id}{tr(". Its state comes from the server; nothing is resent automatically.")}</p>}
     {!wallet.account ? <button type="button" disabled={wallet.busy} onClick={() => void wallet.connect()}>{tr("Connect wallet")}</button>
       : <p>{tr("Wallet connected: ")}<span>{wallet.account}</span>{wallet.chainId !== profile.chainHex && <> · <button type="button" disabled={lp.busy} onClick={() => void lp.switchNetwork()}>{tr("Switch to ")}{network}</button></>}</p>}
-    {view === 'simulate' && <button type="button" disabled={lp.busy || pending || !lp.available || !(fields || rhFields)} onClick={() => void lp.simulate()}>{tr("Simulate position")}</button>}
+    {view === 'simulate' && <button type="button" disabled={lp.busy || !lp.available || !(fields || rhFields)} onClick={() => void lp.simulate()}>{tr("Simulate position")}</button>}
+    {view === 'simulate' && <PendingExecutionNote pending={pending}/>}
     {r && !lp.retired && <dl className="swap-summary" aria-label={tr(view === 'simulate' ? 'Liquidity simulation' : 'Liquidity review')}>
       <dt>{tr("Network")}</dt><dd>{network}{tr(" (chain ")}{tr(r.chainId)}{tr(") · block ")}{tr(r.block.number)}</dd>
       <dt>{tr("Pool")}</dt><dd>{tr(`Uniswap v3 ${t0.symbol}/${t1.symbol} `)}<code>{tr(r.contracts.pool)}</code>{tr(" · fee ")}{tr(r.pool.fee / 10_000)}{tr("% · tick spacing ")}{tr(r.pool.tickSpacing)}</dd>

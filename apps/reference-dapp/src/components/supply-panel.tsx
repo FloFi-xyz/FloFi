@@ -8,6 +8,7 @@ import { useWorkflow } from '../state/workflow-store';
 import { useBuild009Wallet } from '../state/build009-wallet-store';
 import { useSupply } from '../state/supply-store';
 import { TokenAmountInput } from './token-amount-input';
+import { PendingExecutionNote } from './execution-concurrency-notes';
 export function SupplyAuthoringForm({nodeId,onDone,direct=false,reviewFormId}:{nodeId?:string;onDone?:()=>void;direct?:boolean;reviewFormId?:string}){
   const { t: tr } = useLocale();
   const {state,propose,dispatch,amountInputs={},editCanvasAmount}=useWorkflow(),wallet=useBuild009Wallet();
@@ -53,7 +54,7 @@ export function SupplyPanel({view}:{view:'simulate'|'execute'}){
     {supply.retired&&<p role="alert">{tr("The workflow changed. Prior authorization is invalid. Observe any existing transaction before starting a new execution.")}</p>}
     {view==='simulate'?<>
       <p>{tr(lendingCopy('Your injected wallet must hold Aave test USDC and Base Sepolia ETH for gas.',shown))}</p>
-      <button type="button" disabled={supply.busy||Boolean(pending)} onClick={()=>void supply.simulate()}>{tr("Simulate Supply")}</button>
+      <button type="button" disabled={supply.busy} onClick={()=>void supply.simulate()}>{tr("Simulate Supply")}</button><PendingExecutionNote pending={Boolean(pending)}/>
       {review&&!supply.retired&&<><p>{tr("Approval required: ")}{tr(review.approvalRequired?'Yes — approve exactly this Supply amount.':'No — existing allowance is sufficient.')}</p>
         <p>{tr("Estimated maximum network cost: ")}{tr(formatUnits(review.manifest.gasBudgets[0]?.maximumAmount??'0',18))}{tr(" ETH.")}</p></>}
     </>:<>

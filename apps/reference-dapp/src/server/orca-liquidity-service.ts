@@ -11,7 +11,7 @@ import { createOrcaLiquidityRun, orcaLiquidityAttemptResolved, orcaLiquidityTran
 import { buildOrcaLiquidityEvidence, classifyOrcaLiquidityEvidence, reconcileOrcaLiquidityAttempt, type OrcaLiquidityEvidenceClass,
   type OrcaLiquidityObservation } from '@defi-workflow-engine/reference-reconciler';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
-import { solanaTransactionClaim } from './solana-transaction-claim';
+import { solanaTransactionClaim } from './solana-transaction-claim.ts';
 
 /**
  * BUILD-015 Orca Whirlpools liquidity on Solana Devnet; BUILD-SOLANA-MAINNET-001: one service instance per cluster (`profile`), each on its own

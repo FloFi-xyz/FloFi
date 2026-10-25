@@ -10,7 +10,7 @@ import { createSolanaSwapRun, prepareSolanaSwapAttempt, recordSolanaSwapSignatur
   createFileExecutionStorage, logMissing, utf8, type ExecutionStorage, type SolanaSwapProvenance, type SolanaSwapRun } from '@defi-workflow-engine/reference-executor';
 import { reconcileSolanaSwapAttempt, buildSolanaSwapEvidence, classifySolanaSwapEvidence, type JupiterObservation, type SolanaSwapEvidenceClass } from '@defi-workflow-engine/reference-reconciler';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
-import { solanaTransactionClaim } from './solana-transaction-claim';
+import { solanaTransactionClaim } from './solana-transaction-claim.ts';
 
 /** `change`: what the wallet altered in a refused transaction (public keys, counts and hashes only; never its bytes or signatures). */
 export type JupiterWalletDiagnostic = { stage: 'CONNECT' | 'SIGN' | 'PREFLIGHT'; code: string; error: unknown; change?: SolanaWalletChange };

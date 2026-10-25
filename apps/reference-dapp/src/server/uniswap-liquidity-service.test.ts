@@ -115,6 +115,18 @@ describe('Base Sepolia Uniswap v3 liquidity: execution, recovery and reconciliat
     await expect(service.refresh(run.id)).rejects.toThrow();
     expect(chain.counters.sends).toBe(3);
   });
+  it('HOTFIX-WORKFLOW-CONCURRENCY-001: two independent position workflows of one wallet run side by side with ordered, never shared nonces', async () => {
+    const { service, chain } = await setup(), w = workflow();
+    const a = await reviewed(service, w), b = await reviewed(service, w);
+    // A's approval is broadcast and still pending; B is not blocked by it and takes the next nonce.
+    const firstA = await execute(service, chain, a.id, w, { hold: true });
+    const firstB = await execute(service, chain, b.id, w, { hold: true });
+    expect([firstA.begun.attempt.nonce, firstB.begun.attempt.nonce]).toEqual(['7', '8']);
+    expect(firstA.hash).not.toBe(firstB.hash);
+    chain.wallet.release(); // both land in one block
+    for (const id of [a.id, b.id]) expect((await service.observe(id)).attempts).toMatchObject([{ step: 'APPROVE_TOKEN0', state: 'CONFIRMED', reconciled: true }]);
+    expect(chain.counters.sends).toBe(2);
+  });
   it('browser closes after approval submission; a restarted service discovers it by nonce, then refresh and a new Review gate the mint', async () => {
     const first = await setup(), w = workflow();
     const run = await reviewed(first.service, w);
