@@ -66,8 +66,8 @@ export function TopBar({ tab, setTab, pathname, engineering = false, compact = f
     : build009.account ? build009.provider : null;
   const fork = info?.available ? info : null;
   return <header className={`top-bar${compact ? ' top-bar-compact' : ''}`}>
-    <div className="brand"><NavigationDrawer pathname={pathname ?? null} section={tab} onBuild={() => setTab('Build')}
-      onDisconnect={disconnect} disconnectDisabled={disconnectDisabled}/><FloFiLogo/></div>
+    <div className="brand">{!compact && <NavigationDrawer pathname={pathname ?? null} section={tab} onBuild={() => setTab('Build')}
+      onDisconnect={disconnect} disconnectDisabled={disconnectDisabled}/>}<FloFiLogo/></div>
     {!compact && <nav aria-label={tr("Workflow stages")} className="tabs"><button type="button" onClick={() => setTab('Dashboard')} aria-current={!secondaryWorkspace && tab === 'Dashboard' ? 'page' : undefined} className={!secondaryWorkspace && tab === 'Dashboard' ? 'selected' : ''}>{tr("Dashboard")}</button>{WORKFLOW_STAGES.map((value, index) =>
       <button key={value} type="button" onClick={() => setTab(value)} disabled={Boolean(authoringIncomplete && value !== 'Build')} title={tr(authoringIncomplete && value !== 'Build' ? 'Configure the action amount in Build first' : undefined)} aria-current={!secondaryWorkspace && tab === value ? 'page' : undefined} className={!secondaryWorkspace && tab === value ? 'selected' : ''}><span className="stage-number" aria-hidden="true">{tr(index + 1)}</span>{tr(value)}</button>)}</nav>}
     <div className="top-meta">

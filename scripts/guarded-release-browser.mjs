@@ -88,8 +88,10 @@ const definitions = [
   // same embedded loopback harness (no public network, no real transaction). The full lifecycle is proven by journey.pg.test.ts.
   ['developer-journey', ['developer-journey.spec.ts'], { GRYLOO_MCP_E2E: 'EMBEDDED_LOOPBACK_ONLY', TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres' }],
   // BUILD-MCP-002: consumer OAuth and in-chat approval on disposable loopback infrastructure.
-  ['mcp-in-chat', ['mcp-in-chat.spec.ts', 'mcp-route-presentation.spec.ts'], { GRYLOO_MCP_E2E: 'EMBEDDED_LOOPBACK_ONLY', TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres' }],
+  ['mcp-in-chat', ['mcp-in-chat.spec.ts', 'mcp-route-presentation.spec.ts', '--grep-invert', 'embedded wallet proof'], { GRYLOO_MCP_E2E: 'EMBEDDED_LOOPBACK_ONLY', FLOFI_MCP_OAUTH_ACCESS: 'open', TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres' }],
   // Each invocation gets a fresh disposable database; keep the production OAuth registration rate limit intact.
+  // Fresh database preserves the production OAuth registration limit while certifying the new in-chat wallet journeys.
+  ['mcp-embedded-signing', ['mcp-in-chat.spec.ts', '--grep', 'embedded wallet proof'], { GRYLOO_MCP_E2E: 'EMBEDDED_LOOPBACK_ONLY', FLOFI_MCP_OAUTH_ACCESS: 'open', TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres' }],
   ['channel-signing', ['channel-signing.spec.ts'], { GRYLOO_MCP_E2E: 'EMBEDDED_LOOPBACK_ONLY', TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres' }],
   // BUILD-CHANNELS-001: the channels' /approve paths on the same embedded loopback harness — WhatsApp with the FIXTURE provider (nothing
   // is sent to Meta) and Telegram against the loopback Bot API double (nothing reaches Telegram): the real webhook routes, the
@@ -123,7 +125,7 @@ const shards = [
     'robinhood-mainnet-authoring', 'base-mainnet-authoring', 'arbitrum-authoring-certification', 'ethereum-authoring-certification', 'workflow-ux-authoring', 'canvas-workflow-ux'],
   ['cloud-provenance', 'journey-provenance', 'synthetic-fork-provenance', 'execution-continuity', 'workflow-acceptance', 'swap-read-acceptance',
     'automations', 'chat-automations', 'delegated-execution', 'canvas-automation-ux', 'admin-console', 'cow-loopback', 'card-provider-loopback',
-    'mcp-routes-oauth-disabled', 'developer-journey', 'mcp-in-chat', 'channel-signing', 'channel-approve', 'approve-authorize-journeys',
+    'mcp-routes-oauth-disabled', 'developer-journey', 'mcp-in-chat', 'mcp-embedded-signing', 'channel-signing', 'channel-approve', 'approve-authorize-journeys',
     'approve-workflow-run', 'universal-bridge'],
 ];
 // Fail closed on any plan drift: every product profile runs in exactly one place, and every name in the plan exists.

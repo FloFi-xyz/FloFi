@@ -37,6 +37,7 @@ export const WALLET_PROOF_CHANGED = 'flofi:wallet-proof-changed';
 export const defaultProofChain = (): SolanaWalletChain => activeNetworkScope() === 'ENGINEERING' ? 'solana:devnet' : 'solana:mainnet';
 /** Owner-facing text for a proof failure code (wallet F): never a raw code. */
 export function walletProofMessage(code: string, namespace: Namespace | null): string {
+  if (code === 'EMBEDDED_WALLET_SESSION_UNAVAILABLE') return 'This browser or host could not keep the isolated wallet session inside the chat. Nothing was authorized. Opening FloFi is an optional external fallback.';
   if (/_WALLET_REJECTED$|^WALLET_REQUEST_REJECTED$/.test(code)) return 'You declined the request in your wallet. Nothing was signed. Choose the button again when you are ready.';
   if (code === 'EVM_WALLET_NOT_FOUND') return 'No wallet answered. Unlock your wallet (for example MetaMask), make sure it is enabled for this site, and try again.';
   if (code === 'WALLET_SIGNATURE_INVALID' || code === 'WALLET_RESPONSE_INVALID') return 'Your wallet returned an invalid signature. Nothing was signed in. Try again.';
@@ -56,6 +57,8 @@ export function useWalletProof(namespace: Namespace | null, chain: SolanaWalletC
   const [error, setError] = useState<string | null>(null);
   const requestLock = useRef(false), namespaceRef = useRef(namespace); namespaceRef.current = namespace;
   const origin = useRef<object>({});
+  const embedded = typeof window !== 'undefined' && window.location?.pathname === '/mcp/approve';
+  const proofContext: [boolean?] = embedded ? [true] : [];
   const selector = useWalletSelector(), solana = useOptionalJupiter(), evm = useOptionalBuild009Wallet();
   const refresh = useCallback(async () => {
     const account = namespace === 'solana' ? (await solanaSessionStatus())?.account : namespace === 'eip155' ? (await walletSessionStatus())?.account : null;
@@ -99,10 +102,12 @@ export function useWalletProof(namespace: Namespace | null, chain: SolanaWalletC
     if (!account || !provider) throw new Error('EVM_WALLET_NOT_FOUND');
     const chainId = await provider.request({ method: 'eth_chainId' });
     if (typeof chainId !== 'string') throw new Error('EVM_WALLET_NOT_FOUND');
-    const { message } = unwrap(await walletSignInChallenge(account, Number.parseInt(chainId, 16)));
+    const { message } = unwrap(await walletSignInChallenge(account, Number.parseInt(chainId, 16), ...proofContext));
     const signature = await provider.request({ method: 'personal_sign', params: [utf8Hex(message), account] });
     if (typeof signature !== 'string') throw new Error('WALLET_SIGNATURE_INVALID');
-    return unwrap(await walletSignIn(account, Number.parseInt(chainId, 16), signature)).account;
+    const verified = unwrap(await walletSignIn(account, Number.parseInt(chainId, 16), signature, ...proofContext));
+    if (embedded && (await walletSessionStatus())?.account !== verified.account) throw new Error('EMBEDDED_WALLET_SESSION_UNAVAILABLE');
+    return verified.account;
   });
   const proveSolana = (another = false) => run(async () => {
     let session: SolanaSession | null = !another && solana?.session?.chain === chain ? solana.session : null;
@@ -118,9 +123,11 @@ export function useWalletProof(namespace: Namespace | null, chain: SolanaWalletC
       else { session = await connectSolanaWallet(choice.key, chain, 'WALLET'); updateWalletPreference({ solana: choice.key }); }
       if (!session) throw new Error('SOLANA_WALLET_REQUIRED');
     }
-    const { message } = unwrap(await solanaSignInChallenge(session.account.address));
+    const { message } = unwrap(await solanaSignInChallenge(session.account.address, ...proofContext));
     const signature = await signSolanaMessage(session, message, 'WALLET');
-    return unwrap(await solanaSignIn(session.account.address, signature)).account;
+    const verified = unwrap(await solanaSignIn(session.account.address, signature, ...proofContext));
+    if (embedded && (await solanaSessionStatus())?.account !== verified.account) throw new Error('EMBEDDED_WALLET_SESSION_UNAVAILABLE');
+    return verified.account;
   });
   /** The connected operational account of this namespace, if any (connection only: never treated as proof). */
   const connected = namespace === 'solana' ? solana?.session?.chain === chain ? solana.session.account.address : null : namespace === 'eip155' ? evm?.account ?? null : null;

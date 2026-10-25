@@ -28,7 +28,7 @@ import { installLendingWallet, LENDING_OWNER, lendingRpc, lendingSends } from '.
 import { devnetControl, devnetPanel, installDevnetWallet } from './solana-devnet-fixtures';
 import { panelHtml } from '../src/mcp/app/panel';
 
-const PANEL_URI = 'ui://flofi/approval-panel.html';
+const PANEL_URI = 'ui://flofi/approval-panel-chat-first-v1.html';
 /** The newest durable run of one flow owned by one wallet, read from the disposable loopback database. */
 async function latestRun(flow: string, owner: string): Promise<string> {
   const db = createDatabase({ connectionString: process.env.FLOFI_E2E_DATABASE_URL!, maxConnections: 1 });
@@ -93,17 +93,18 @@ async function chatToSigningWindow(context: BrowserContext, strategy: Record<str
   await expect(panel.getByText('Nothing is authorized yet.', { exact: false })).toBeVisible();
   // The proposal as FloFi's workflow visual, labelled with its text alternative; the full workflow hash stays listed.
   await expect(panel.getByRole('img', { name: /^FloFi workflow: / })).toBeVisible();
-  await expect(panel.getByText(String(composed.workflowHash))).toBeVisible();
+  await panel.getByText('Proposal details', { exact: true }).click();
+  await expect(panel.getByText(`Workflow hash: ${String(composed.workflowHash)}`)).toBeVisible();
   await expect(panel.getByRole('button', { name: 'Check this chat environment (diagnostics)' })).toBeVisible();
   // BUILD-SOLANA-TRANSFER-UX-001: "Authorize" opens the minimal signing surface; "View in FloFi" opens the same session on the Canvas.
-  await expect(panel.getByRole('button', { name: 'Authorize', exact: true })).toBeVisible();
-  await expect(panel.getByRole('button', { name: 'View in FloFi', exact: true })).toBeVisible();
-  await panel.getByRole('button', { name: presentation === 'canvas' ? 'View in FloFi' : 'Authorize', exact: true }).click();
+  await expect(panel.getByRole('button', { name: 'Authorize in chat', exact: true })).toBeVisible();
+  await expect(panel.getByRole('button', { name: 'Open FloFi', exact: true })).toBeVisible();
+  await panel.getByRole('button', { name: 'Open FloFi', exact: true }).click();
   await expect.poll(async () => (await hostLog(host)).openLinks.length).toBe(1);
   const url = (await hostLog(host)).openLinks[0]!;
-  expect(url).toMatch(new RegExp(`^${APP_ORIGIN.replace(/[.]/g, '\\.')}/approve${presentation === 'canvas' ? '\\?view=canvas' : ''}#flofi_hs_[A-Za-z0-9_-]{43}$`));
+  expect(url).toMatch(new RegExp(`^${APP_ORIGIN.replace(/[.]/g, '\\.')}/approve#flofi_hs_[A-Za-z0-9_-]{43}$`));
   await consent.close();
-  return { client, host, panel, url, composed };
+  return { client, host, panel, url: presentation === 'canvas' ? url.replace('/approve#', '/approve?view=canvas#') : url, composed };
 }
 async function proposalIntoWorkflow(signing: Page, url: string, wallet: 'evm' | 'solana', account?: string, connected?: string) {
   const response = await signing.goto(url);
@@ -114,7 +115,9 @@ async function proposalIntoWorkflow(signing: Page, url: string, wallet: 'evm' | 
   await expect(region).toContainText(`From ${CLIENT_NAME}`);
   await expect(region).toContainText('Nothing is authorized yet.');
   await expect(region).toContainText('Test funds');
+  await region.getByText('Proposal details', { exact: true }).click();
   await expect(region).toContainText('not financial advice');
+  await region.getByText('Proposal details', { exact: true }).click();
   // BUILD-FLOFI-UX-UI-002: no separate panel and no Load step. BUILD-SOLANA-TRANSFER-UX-001: the signing surface (default) lists the exact
   // requested action; "View in FloFi" (`?view=canvas`) shows the proposal's action cards on the normal Canvas. Either way nothing can be
   // simulated or authorized until a proven wallet has loaded the proposal.
@@ -146,6 +149,75 @@ async function proposalIntoWorkflow(signing: Page, url: string, wallet: 'evm' | 
 
 test.describe('BUILD-MCP-002 in-chat execution (mocked MCP Apps host)', () => {
   test.beforeAll(assertMcpHarness);
+
+  for (const namespace of ['evm', 'solana'] as const) test(`embedded wallet proof (${namespace}): fresh review stays in chat; no open-link or Canvas`, async ({ browser }) => {
+    const { context, unexpected } = await guardedContext(browser);
+    const host = await context.newPage(), consent = await context.newPage();
+    const owner = createTestWallet(), solana = createMockedSolanaWallet();
+    if (namespace === 'evm') {
+      await routerControl('MOCK_reset', [{ network: 'testnet', owner: owner.address, wallets: [] }]);
+      await installJourneyWallet(host, [owner]);
+    } else {
+      await devnetControl({ action: 'reset', owner: solana.owner, options: {}, devUsdc: '0' });
+      await installDevnetWallet(host, solana, { signMessage: true });
+    }
+    const client = mcpClient(context.request, (await connectViaBrowser(consent, context.request)).accessToken);
+    const capabilities = await client.tool('get_capabilities', {});
+    expect(capabilities).toMatchObject({ ok: true });
+    expect(capabilities.conversationExecution).toMatchObject({ surface: 'MCP_APP_EMBEDDED_SIGNING', canvasRequired: false, hostAndWalletVerified: false });
+    const strategy = namespace === 'evm'
+      ? { action: 'bridge', sourceNetwork: 'base-sepolia', destinationNetwork: 'arbitrum-sepolia', asset: 'USDC', amount: '1' }
+      : { action: 'swap', network: 'solana-devnet', inputAsset: 'SOL', outputAsset: 'devUSDC', amount: '0.1' };
+    const composed = await client.tool('compose_strategy', { strategy });
+    const args = { strategy: composed.strategy, workflowHash: composed.workflowHash };
+    await client.tool('review_strategy', args);
+    const result = await client.toolResult('request_user_approval', args);
+    expect(JSON.stringify(result.structuredContent)).not.toContain('flofi_hs_');
+    const panel = await openHost(host, client, await panelHtmlOf(client, PANEL_URI), args, result, { embedded: true });
+    await panel.getByRole('button', { name: 'Authorize in chat', exact: true }).click();
+    const signing = panel.frameLocator('iframe.signing-frame');
+    const region = signing.getByRole('region', { name: `Proposal from ${CLIENT_NAME}` });
+    await expect(signing.getByRole('main', { name: 'Authorize with your wallet' })).toBeVisible();
+    await expect(signing.getByRole('navigation', { name: 'Workflow stages' })).toHaveCount(0);
+    await expect(signing.getByRole('region', { name: 'Workflow canvas', exact: true })).toHaveCount(0);
+    await region.getByRole('button', { name: namespace === 'evm' ? 'Connect wallet and prove ownership' : 'Connect Solana wallet and prove ownership' }).click();
+    if (namespace === 'solana') await signing.getByRole('button', { name: `${MOCKED_SOLANA_WALLET} on Solana`, exact: true }).click();
+    await expect(region.getByRole('status')).toContainText('Ready for your review.');
+    await expect(signing.getByRole('button', { name: AUTHORIZE_IN_WALLET, exact: true })).toBeDisabled({ timeout: 30_000 });
+    // The iframe persists through the panel's authoritative status refresh, preserving the wallet/runtime instance.
+    const frame = host.frames().find(frame => new URL(frame.url()).pathname === '/mcp/approve')!;
+    await frame.evaluate(() => { (window as unknown as { frameIdentity: string }).frameIdentity = 'same-signing-runtime'; });
+    await panel.getByRole('button', { name: 'Refresh status' }).click();
+    await expect.poll(() => frame.evaluate(() => (window as unknown as { frameIdentity: string }).frameIdentity)).toBe('same-signing-runtime');
+    const cookies = (await context.cookies()).map(({ name, httpOnly, secure, sameSite, path }) => ({ name, httpOnly, secure, sameSite, path }));
+    const proof = cookies.find(cookie => cookie.name === `embedded_flofi_${namespace === 'evm' ? 'wallet' : 'solana'}_session`);
+    expect(proof).toMatchObject({ httpOnly: true, secure: true, sameSite: 'None', path: '/mcp/approve' });
+    expect(cookies.some(cookie => cookie.name === `flofi_${namespace === 'evm' ? 'wallet' : 'solana'}_session`)).toBe(false);
+    expect((await hostLog(host)).openLinks).toEqual([]);
+    expect(unexpected).toEqual([]);
+    expect(namespace === 'evm' ? await journeySends() : await devnetControl({ action: 'sent' })).toBe(0);
+    await context.close();
+  });
+
+  test('embedded wallet proof: missing signer is explicit and never forces an external CTA or fabricates approval', async ({ browser }) => {
+    const { context, unexpected } = await guardedContext(browser), host = await context.newPage(), consent = await context.newPage();
+    const client = mcpClient(context.request, (await connectViaBrowser(consent, context.request)).accessToken);
+    const composed = await client.tool('compose_strategy', { strategy: { action: 'bridge', sourceNetwork: 'base-sepolia', destinationNetwork: 'arbitrum-sepolia', asset: 'USDC', amount: '1' } });
+    const args = { strategy: composed.strategy, workflowHash: composed.workflowHash };
+    const result = await client.toolResult('request_user_approval', args);
+    const panel = await openHost(host, client, await panelHtmlOf(client, PANEL_URI), args, result, { embedded: true });
+    await consent.close();
+    await panel.getByRole('button', { name: 'Authorize in chat', exact: true }).click();
+    const signing = panel.frameLocator('iframe.signing-frame');
+    await signing.getByRole('button', { name: 'Connect wallet and prove ownership' }).click();
+    await expect(signing.getByRole('status').filter({ hasText: 'No compatible wallet is available inside this chat.' })).toBeVisible();
+    await expect(signing.locator('[data-wallet-option]')).toHaveCount(0);
+    await signing.getByRole('button', { name: 'Close wallet selector', exact: true }).click();
+    const status = await client.tool('get_approval_status', { approvalId: result.structuredContent!.approvalId });
+    expect(status).toMatchObject({ ok: true, status: 'PENDING', runs: [] });
+    expect((await hostLog(host)).openLinks).toEqual([]); expect(context.pages()).toHaveLength(1); expect(unexpected).toEqual([]);
+    await context.close();
+  });
 
   test('EVM: chat → panel Authorize → signing surface → wallet proof → FloFi-prepared router simulation; current main blocks MOCKED execution and the panel reports prepared status', async ({ browser }) => {
     const owner = createTestWallet();
@@ -315,17 +387,17 @@ test.describe('BUILD-MCP-LINK-INTEGRITY-P0 panel navigation', () => {
       const page = await context.newPage();
       const panel = await openHost(page, fakeClient(), html(), {}, result);
       await expect.poll(async () => (await hostLog(page)).initialized).toBe(true);
-      await expect(panel.getByRole('button', { name: 'Authorize', exact: true })).toHaveCount(0);
+      await expect(panel.getByRole('button', { name: 'Authorize in chat', exact: true })).toHaveCount(0);
       await expect(panel.locator('code')).toHaveCount(0);
       expect((await hostLog(page)).openLinks).toEqual([]);
       await page.close();
     }
     const page = await context.newPage();
     const panel = await openHost(page, fakeClient(), html(), {}, { structuredContent: approved });
-    await expect(panel.getByRole('button', { name: 'Authorize', exact: true })).toBeVisible();
+    await expect(panel.getByRole('button', { name: 'Authorize in chat', exact: true })).toBeVisible();
     await page.evaluate(() => (document.getElementById('app') as HTMLIFrameElement).contentWindow!.postMessage({ jsonrpc: '2.0',
       method: 'ui/notifications/tool-result', params: { isError: true, structuredContent: { ok: false, code: 'TOOL_FAILED' } } }, '*'));
-    await expect(panel.getByRole('button', { name: 'Authorize', exact: true })).toHaveCount(0);
+    await expect(panel.getByRole('button', { name: 'Authorize in chat', exact: true })).toHaveCount(0);
     await expect(panel.locator('code')).toHaveCount(0);
   });
 
@@ -337,7 +409,7 @@ test.describe('BUILD-MCP-LINK-INTEGRITY-P0 panel navigation', () => {
       { ok: true, approvalId, approvalUrl: privateUrl }]) {
       const page = await context.newPage();
       const panel = await openHost(page, fakeClient(result), html(), {}, { structuredContent: approved });
-      await panel.getByRole('button', { name: 'Authorize', exact: true }).click();
+      await panel.getByRole('button', { name: 'Open FloFi', exact: true }).click();
       if (result.ok && result.approvalId === approvalId && result.approvalUrl === privateUrl) {
         await expect.poll(async () => (await hostLog(page)).openLinks).toEqual([privateUrl]);
       } else {
@@ -346,6 +418,34 @@ test.describe('BUILD-MCP-LINK-INTEGRITY-P0 panel navigation', () => {
       }
       await page.close();
     }
+  });
+
+  test('embedded approval uses only the fixed trusted signing path; hostile sessions create no frame', async ({ context }) => {
+    for (const approvalUrl of ['https://flo.finance/approve', `${origin}/approve?redirect=https://flo.finance#${secret}`, privateUrl]) {
+      const page = await context.newPage();
+      // No live request: the only valid target is intercepted with a blank local response.
+      await page.route(`${origin}/**`, route => route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>Controlled frame target</title>' }));
+      const panel = await openHost(page, fakeClient({ ok: true, approvalId, approvalUrl }), html(), {}, { structuredContent: approved });
+      await panel.getByRole('button', { name: 'Authorize in chat', exact: true }).click();
+      if (approvalUrl === privateUrl) await expect(panel.locator('iframe.signing-frame')).toHaveAttribute('src', `${origin}/mcp/approve#${secret}`);
+      else {
+        await expect(panel.getByText('APPROVAL_LINK_INVALID', { exact: true })).toBeVisible();
+        await expect(panel.locator('iframe')).toHaveCount(0);
+      }
+      expect((await hostLog(page)).openLinks).toEqual([]);
+      await page.close();
+    }
+  });
+
+  test('an unexpected signing-frame redirect cannot navigate to an alternate brand', async ({ page }) => {
+    let alternateRequests = 0, blocked = false;
+    page.on('console', message => { if (message.type() === 'error' && message.text().includes('frame-src')) blocked = true; });
+    await page.route(`${origin}/mcp/approve`, route => route.fulfill({ status: 302, headers: { location: 'https://flo.finance/approve' } }));
+    await page.route('https://flo.finance/**', async route => { alternateRequests++; await route.abort('blockedbyclient'); });
+    const panel = await openHost(page, fakeClient({ ok: true, approvalId, approvalUrl: privateUrl }), html(), {}, { structuredContent: approved });
+    await panel.getByRole('button', { name: 'Authorize in chat', exact: true }).click();
+    await expect.poll(() => blocked).toBe(true);
+    expect(alternateRequests).toBe(0); expect((await hostLog(page)).openLinks).toEqual([]);
   });
 
   test('receipt navigation and model context reject userinfo and alternate domains', async ({ page }) => {

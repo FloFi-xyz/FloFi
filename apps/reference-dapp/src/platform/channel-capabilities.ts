@@ -27,7 +27,7 @@ const MCP: Omit<SurfaceCapability, 'id' | 'name' | 'activation'> = {
   compose: 'Yes. Your assistant interprets the request; compose_strategy, validate_strategy and review_strategy build and check the canonical workflow.',
   simulation: 'Yes. simulate_strategy runs the flow’s read-only preview for a public address you name: nothing is stored and it grants no authority.',
   progress: 'Yes. The FloFi panel follows the approval and its runs and reports status and evidence to the conversation; without MCP Apps, ask for get_approval_status.',
-  signing: 'Your wallet, in FloFi. The panel opens FloFi with the workflow on its Canvas; the chat frame never holds a wallet (in-frame signing is disabled).',
+  signing: 'Your own wallet through the existing signing surface, embedded in MCP Apps when the host allows the FloFi frame and the wallet exposes a compatible provider there. Open FloFi is an optional external fallback; Canvas is optional. Live host/wallet acceptance must be verified.',
   coverage: 'Asked live with get_supported_networks and get_capabilities; mainnet handoffs only for networks the operator lists.',
 };
 const CHANNEL = (name: string): Omit<SurfaceCapability, 'id' | 'name' | 'activation'> => ({
@@ -43,5 +43,5 @@ export const SURFACE_CAPABILITIES: readonly SurfaceCapability[] = Object.freeze(
   { id: 'telegram', name: 'Telegram', ...CHANNEL('Telegram'), activation: 'FloFi’s bot, with the deployment’s verified webhook.' },
   { id: 'whatsapp', name: 'WhatsApp', ...CHANNEL('WhatsApp'), activation: 'Not live: blocked until the owner records provider policy clearance (WHATSAPP_POLICY_CLEARANCE).' },
 ]);
-/** Execution without opening FloFi would need a signer in the chat or a standing delegation for chat requests: neither exists. */
-export const IN_CHAT_EXECUTION = 'NOT_AVAILABLE' as const;
+/** The MCP App can embed the existing runtime; this does not assert that a particular host/wallet supports signing. */
+export const IN_CHAT_EXECUTION = 'HOST_AND_WALLET_DEPENDENT' as const;

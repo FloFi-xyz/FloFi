@@ -166,6 +166,7 @@ if (mcpHarness) {
 }
 const mcpServerEnv = mcpHarness ? { FLOFI_RUNTIME: 'embedded', DATABASE_URL: process.env.FLOFI_E2E_DATABASE_URL!, FLOFI_MCP: 'enabled', FLOFI_MCP_OAUTH: 'enabled',
   FLOFI_PUBLIC_ORIGIN: E2E_APP_ORIGIN, FLOFI_MCP_OAUTH_SECRET: randomBytes(32).toString('hex'), FLOFI_MCP_OAUTH_DCR: 'enabled',
+  FLOFI_MCP_OAUTH_ACCESS: process.env.FLOFI_MCP_OAUTH_ACCESS ?? 'invite',
   FLOFI_MCP_OAUTH_INVITES: createHash('sha256').update(MCP_E2E_INVITE).digest('hex'), FLOFI_MCP_INFRAME_WALLET_HOSTS: 'flofi-e2e-host',
   FLOFI_DEVELOPER: 'enabled', FLOFI_DEVELOPER_SECRET: process.env.FLOFI_E2E_DEVELOPER_SECRET!, FLOFI_DEVELOPER_WEBHOOK_LOOPBACK: 'ALLOW_LOCAL_ONLY',
   FLOFI_DEVELOPER_DISPATCH_TOKEN_SHA256: createHash('sha256').update(process.env.FLOFI_E2E_DEVELOPER_DISPATCH_TOKEN!).digest('hex'),

@@ -23,7 +23,7 @@ for (const hostName of ['ChatGPT fixture', 'Claude fixture']) {
     const fallback = String(result.structuredContent!.approvalUrl);
     expect(fallback).toMatch(/\/approve#apr_[a-z2-7]{26}$/);
     const host = await context.newPage();
-    const panel = await openHost(host, client, await panelHtmlOf(client, 'ui://flofi/approval-panel.html'), {}, result, { hostName });
+    const panel = await openHost(host, client, await panelHtmlOf(client, 'ui://flofi/approval-panel-chat-first-v1.html'), {}, result, { hostName });
     await expect(panel.getByRole('button', { name: 'Open in MetaMask' })).toBeVisible();
     await expect(panel.getByRole('button', { name: 'Open Phantom browser' })).toHaveCount(0);
     const elsewhere = await guardedContext(browser), stranger = await elsewhere.context.newPage();
@@ -134,8 +134,8 @@ test('host link refusal leaves a usable private fallback and concurrent clicks m
   const composed = await client.tool('compose_strategy', { strategy });
   const result = await client.toolResult('request_user_approval', { strategy, workflowHash: composed.workflowHash });
   const host = await context.newPage();
-  const panel = await openHost(host, client, await panelHtmlOf(client, 'ui://flofi/approval-panel.html'), {}, result, { openLinkRefused: true });
-  await panel.getByRole('button', { name: 'Authorize', exact: true }).evaluate(button => { (button as HTMLButtonElement).click(); (button as HTMLButtonElement).click(); });
+  const panel = await openHost(host, client, await panelHtmlOf(client, 'ui://flofi/approval-panel-chat-first-v1.html'), {}, result, { openLinkRefused: true });
+  await panel.getByRole('button', { name: 'Open FloFi', exact: true }).evaluate(button => { (button as HTMLButtonElement).click(); (button as HTMLButtonElement).click(); });
   await expect(panel.getByText('OPEN_LINK_REFUSED', { exact: true })).toBeVisible();
   const log = await hostLog(host);
   expect(log.toolCalls.filter(name => name === 'open_approval_session')).toHaveLength(1);
@@ -188,7 +188,7 @@ test('progress reporting projects public facts even when a host returns unexpect
     flow: 'crosschain-router-testnet', status: 'RECONCILED', reconciled: true, terminal: true, evidenceEnvironment: 'MOCKED',
     evidenceBundleHash: '0x' + 'a'.repeat(64), approvalUrl: 'flofi_hs_' + 'x'.repeat(43), signature: 'hidden', transaction: 'hidden' }] } }) };
   const host = await context.newPage();
-  const panel = await openHost(host, fake, await panelHtmlOf(client, 'ui://flofi/approval-panel.html'), {}, result);
+  const panel = await openHost(host, fake, await panelHtmlOf(client, 'ui://flofi/approval-panel-chat-first-v1.html'), {}, result);
   await panel.getByRole('button', { name: 'Refresh status' }).click();
   await expect.poll(async () => (await hostLog(host)).modelContext.length).toBe(1);
   expect(JSON.stringify((await hostLog(host)).modelContext)).not.toMatch(/flofi_hs_|hidden|approvalUrl|signature|transaction/);

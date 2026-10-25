@@ -5,13 +5,18 @@
  */
 import { cookies, headers } from 'next/headers';
 import { readSolanaSession, readWalletSession, SOLANA_SESSION_COOKIE, WALLET_SESSION_COOKIE, type SolanaWalletSession, type WalletSession } from './wallet-session.ts';
+import { embeddedWalletCookie } from './embedded-approval';
 
 export async function currentWalletSession(): Promise<WalletSession | null> {
-  return readWalletSession(process.env, (await cookies()).get(WALLET_SESSION_COOKIE)?.value, new Date(), (await requestOrigin()).domain);
+  const jar = await cookies(), domain = (await requestOrigin()).domain, now = new Date();
+  return readWalletSession(process.env, jar.get(embeddedWalletCookie(WALLET_SESSION_COOKIE))?.value, now, domain)
+    ?? readWalletSession(process.env, jar.get(WALLET_SESSION_COOKIE)?.value, now, domain);
 }
 /** BUILD-MCP-002: the verified Sign-In With Solana session of this request, or null. */
 export async function currentSolanaSession(): Promise<SolanaWalletSession | null> {
-  return readSolanaSession(process.env, (await cookies()).get(SOLANA_SESSION_COOKIE)?.value, new Date(), (await requestOrigin()).domain);
+  const jar = await cookies(), domain = (await requestOrigin()).domain, now = new Date();
+  return readSolanaSession(process.env, jar.get(embeddedWalletCookie(SOLANA_SESSION_COOKIE))?.value, now, domain)
+    ?? readSolanaSession(process.env, jar.get(SOLANA_SESSION_COOKIE)?.value, now, domain);
 }
 /** BUILD-MCP-002: a wallet proven in this browser, namespace-neutral. */
 export type WalletPrincipal = { readonly namespace: 'eip155' | 'solana'; readonly address: string };

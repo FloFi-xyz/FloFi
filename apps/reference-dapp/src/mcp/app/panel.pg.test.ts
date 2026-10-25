@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /**
- * BUILD-MCP-002: the in-chat MCP App panel as a host sees it — a `ui://` resource with the MCP Apps MIME type and no network,
- * frame or external-resource permission, attached to request_user_approval; its app-only tools hidden from the model. The panel
+ * BUILD-MCP-002: the in-chat MCP App panel as a host sees it — a `ui://` resource with the MCP Apps MIME type, one trusted signing frame and no wrapper network
+ * or external-resource permission, attached to request_user_approval; its app-only tools hidden from the model. The panel
  * program itself is one self-contained script (parsed here; exercised in a real browser by the mocked-host Playwright suite).
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -10,7 +10,7 @@ import { session } from '../gateway.test-harness.ts';
 import { oauthClient, oauthEnv, ORIGIN, signIn } from '../oauth/oauth-test-harness.ts';
 import { createPgOAuthStore } from '../oauth/pg-store.ts';
 import { stateOf } from '../oauth/state.ts';
-import { PANEL_MIME, PANEL_URI, panelHtml } from './panel.ts';
+import { LEGACY_PANEL_URI, PANEL_MIME, PANEL_URI, panelHtml } from './panel.ts';
 
 let t: TestDatabase;
 beforeAll(async () => { t = await createTestDatabase(); });
@@ -36,13 +36,15 @@ describe('BUILD-MCP-002 MCP App panel resource', () => {
     expect(panelHtml({ origin: 'https://x.test/</script><script>alert(1)</script>', inFrameProbeHosts: [] })).not.toContain('</script><script>alert(1)');
   });
 
-  it('is listed and readable with the MCP Apps MIME type and empty CSP domains; request_user_approval points to it', async () => {
+  it('is listed and readable with the MCP Apps MIME type and only the trusted signing frame origin; request_user_approval points to it', async () => {
     const c = await client();
     const listed = ((await c.request('resources/list')).result as { resources: { uri: string; mimeType: string }[] }).resources;
-    expect(listed).toEqual([expect.objectContaining({ uri: PANEL_URI, mimeType: PANEL_MIME })]);
+    expect(listed).toEqual([expect.objectContaining({ uri: PANEL_URI, mimeType: PANEL_MIME }), expect.objectContaining({ uri: LEGACY_PANEL_URI, mimeType: PANEL_MIME })]);
+    const legacy = ((await c.request('resources/read', { uri: LEGACY_PANEL_URI })).result as { contents: { uri: string; text: string }[] }).contents[0]!;
+    expect(legacy.uri).toBe(LEGACY_PANEL_URI); expect(legacy.text).toContain('Authorize in chat');
     const read = ((await c.request('resources/read', { uri: PANEL_URI })).result as { contents: { uri: string; mimeType: string; text: string; _meta: Record<string, unknown> }[] }).contents[0]!;
-    expect(read).toMatchObject({ uri: PANEL_URI, mimeType: 'text/html;profile=mcp-app', _meta: { ui: { csp: { connectDomains: [], resourceDomains: [], frameDomains: [], baseUriDomains: [] },
-      prefersBorder: true }, 'openai/widgetCSP': { connect_domains: [], resource_domains: [], redirect_domains: [ORIGIN, 'https://phantom.com', 'https://metamask.app.link'] } } });
+    expect(read).toMatchObject({ uri: PANEL_URI, mimeType: 'text/html;profile=mcp-app', _meta: { ui: { csp: { connectDomains: [], resourceDomains: [], frameDomains: [ORIGIN], baseUriDomains: [] },
+      prefersBorder: true }, 'openai/widgetCSP': { connect_domains: [], resource_domains: [], frame_domains: [ORIGIN], redirect_domains: [ORIGIN, 'https://phantom.com', 'https://metamask.app.link'] } } });
     expect(read.text).toContain(JSON.stringify(ORIGIN));
     const tools = ((await c.request('tools/list')).result as { tools: { name: string; _meta?: Record<string, unknown> }[] }).tools;
     expect(tools.find(x => x.name === 'request_user_approval')?._meta).toMatchObject({ ui: { resourceUri: PANEL_URI }, 'openai/outputTemplate': PANEL_URI,
@@ -64,7 +66,7 @@ describe('BUILD-MCP-002 MCP App panel resource', () => {
   it('offers the in-frame environment probe only on listed hosts, and only as diagnostics', () => {
     const html = panelHtml({ origin: ORIGIN, inFrameProbeHosts: ['claude-desktop'] });
     expect(html).toContain('"inFrameProbeHosts":["claude-desktop"]');
-    expect(html).toContain('Diagnostics only: in-frame execution is not enabled');
+    expect(html).toContain('Diagnostics only: the signing surface checks its own wallet providers.');
     expect(html).not.toMatch(/eth_requestAccounts|eth_sendTransaction|signTransaction|signMessage|personal_sign/);
   });
 });

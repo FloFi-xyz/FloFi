@@ -25,11 +25,11 @@ describe('BUILD-FLOFI-UX-UI-002 conversational capability matrix', () => {
       const row = surface(id), named = JSON.stringify(row).match(/\b[a-z]+(?:_[a-z]+)+\b/g) ?? [];
       expect(named.filter(name => !name.startsWith('flofi_'))).not.toHaveLength(0);
       for (const name of named) expect(tools, `${id}: ${name}`).toContain(name);
-      expect(row.signing).toMatch(/^Your wallet, in FloFi\./);
+      expect(row.signing).toContain('embedded in MCP Apps');
     }
     expect(tools.filter(name => /sign|submit|execute|authori[sz]e|approve(?!al)/.test(name))).toEqual([]);
-    // The panel's in-frame wallet is a diagnostic probe only, never an execution path.
-    expect(source('../mcp/app/panel.ts')).toContain('in-frame execution is not enabled');
+    // The wrapper embeds the existing runtime; it never becomes a model-callable financial endpoint.
+    expect(source('../mcp/app/panel.ts')).toContain('/mcp/approve');
   });
 
   it('channels: composition and preview follow the deployment switches; progress needs the owner’s sharing; no message authorizes', () => {
@@ -54,7 +54,7 @@ describe('BUILD-FLOFI-UX-UI-002 conversational capability matrix', () => {
   it('WhatsApp stays not live until the owner records provider clearance; nothing executes inside a chat', () => {
     expect(WHATSAPP_POLICY_CLEARANCE).toBeNull();
     expect(surface('whatsapp').activation).toMatch(/^Not live/);
-    expect(IN_CHAT_EXECUTION).toBe('NOT_AVAILABLE');
+    expect(IN_CHAT_EXECUTION).toBe('HOST_AND_WALLET_DEPENDENT');
   });
 
   it('is published in the MCP integration guide, row for row', () => {

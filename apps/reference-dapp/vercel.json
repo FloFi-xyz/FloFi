@@ -6,7 +6,8 @@
   "git": {
     "deploymentEnabled": {
       "claude/build-solana-transfer-ux-001": false,
-      "security/mcp-link-integrity-p0": false
+      "security/mcp-link-integrity-p0": false,
+      "fix/chat-first-approval-ux-20261025": false
     }
   }
 }
