@@ -19,6 +19,7 @@ import { createSolanaSwapNode, parseSolanaSwapChat, solanaSwapDetails, solanaSwa
 import { createSolanaLiquidityNode, parseSolanaCompositionChat, parseSolanaLiquidityChat, solanaLiquidityDetails, type SolanaLiquidityInput } from './solana-liquidity-authoring';
 import { createUniswapLiquidityNode, parseUniswapLiquidityChat, uniswapLiquidityDetails, type UniswapLiquidityInput } from './uniswap-liquidity-authoring';
 import { createRouterNode, parseRouterChat, routerDetails, ROUTER_ROUTING_LABEL, type RouterBridgeInput } from './router-authoring';
+import { createUniversalBridgeFromInput, type UniversalBridgeInput } from './universal-bridge-authoring';
 import { createCryptoActionNode, type CryptoActionInput } from './crypto-action-picker';
 import { BASE_CHAIN, authoringAssetSymbol } from './asset-catalogs';
 import { catalogSwapDetails } from './catalog-swap-authoring';
@@ -62,6 +63,9 @@ export type Command = Base & (
   | { readonly type: 'SET_UNISWAP_LIQUIDITY'; readonly nodeId: string; readonly input: UniswapLiquidityInput }
   | { readonly type: 'ADD_ROUTER_BRIDGE'; readonly input: RouterBridgeInput }
   | { readonly type: 'SET_ROUTER_BRIDGE'; readonly nodeId: string; readonly input: RouterBridgeInput }
+  /** BUILD-CROSSCHAIN-UNIVERSAL-001: the universal bridge across the five mainnets (any provider-supported asset on either side). */
+  | { readonly type: 'ADD_UNIVERSAL_BRIDGE'; readonly input: UniversalBridgeInput }
+  | { readonly type: 'SET_UNIVERSAL_BRIDGE'; readonly nodeId: string; readonly input: UniversalBridgeInput }
   | { readonly type: 'SET_SUPPLY'; readonly nodeId: string; readonly input: SupplyInput }
   | { readonly type: 'ADD'; readonly kind: ActionKind }
   | { readonly type: 'SET_AMOUNT'; readonly nodeId: string; readonly amount: string }
@@ -297,7 +301,7 @@ export function commandIsValid(input: unknown): input is Command {
       || !['CHAT', 'CANVAS'].includes(command.source as string)) return false;
   const fields: Record<string, string[]> = {
     ADD_CRYPTO_ACTION: ['input'], SET_CRYPTO_ACTION: ['nodeId', 'input'],
-    AUTHOR_LENDING:['input'], ADD_RH_TRANSFER: ['input'], SET_RH_TRANSFER: ['nodeId','input'], ADD_WITHDRAW: ['input'], SET_WITHDRAW: ['nodeId','input'], ADD_REPAY: ['input'], SET_REPAY: ['nodeId','input'], ADD_BORROW: ['input'], SET_BORROW: ['nodeId','input'], ADD_SUPPLY: ['input'], SET_SUPPLY: ['nodeId','input'], ADD_SOLANA_SWAP: ['input'], SET_SOLANA_SWAP: ['nodeId','input'], ADD_SOLANA_LIQUIDITY: ['input'], SET_SOLANA_LIQUIDITY: ['nodeId','input'], ADD_SOLANA_COMPOSITION: ['swap', 'from', 'liquidity'], MANAGE_SOLANA_POSITION: ['input', 'positionMint', 'operation', 'partBps'], ADD_UNISWAP_LIQUIDITY: ['input'], SET_UNISWAP_LIQUIDITY: ['nodeId','input'], ADD_ROUTER_BRIDGE: ['input'], SET_ROUTER_BRIDGE: ['nodeId','input'], ADD: ['kind'], AUTHOR_CROSS_CHAIN_LIQUIDITY: ['input'], AUTHOR_BRIDGE_SWAP: ['input'], AUTHOR_ACROSS: ['input'], ADD_BRIDGE: ['input'], SET_BRIDGE: ['nodeId', 'input'], SET_AMOUNT: ['nodeId', 'amount'], LOCK: ['nodeId', 'locked'], AUTHOR_COMPOSITION: ['safe', 'input'], ADD_LIQUIDITY: ['input'], SET_LIQUIDITY: ['nodeId', 'input'],
+    AUTHOR_LENDING:['input'], ADD_RH_TRANSFER: ['input'], SET_RH_TRANSFER: ['nodeId','input'], ADD_WITHDRAW: ['input'], SET_WITHDRAW: ['nodeId','input'], ADD_REPAY: ['input'], SET_REPAY: ['nodeId','input'], ADD_BORROW: ['input'], SET_BORROW: ['nodeId','input'], ADD_SUPPLY: ['input'], SET_SUPPLY: ['nodeId','input'], ADD_SOLANA_SWAP: ['input'], SET_SOLANA_SWAP: ['nodeId','input'], ADD_SOLANA_LIQUIDITY: ['input'], SET_SOLANA_LIQUIDITY: ['nodeId','input'], ADD_SOLANA_COMPOSITION: ['swap', 'from', 'liquidity'], MANAGE_SOLANA_POSITION: ['input', 'positionMint', 'operation', 'partBps'], ADD_UNISWAP_LIQUIDITY: ['input'], SET_UNISWAP_LIQUIDITY: ['nodeId','input'], ADD_ROUTER_BRIDGE: ['input'], SET_ROUTER_BRIDGE: ['nodeId','input'], ADD_UNIVERSAL_BRIDGE: ['input'], SET_UNIVERSAL_BRIDGE: ['nodeId','input'], ADD: ['kind'], AUTHOR_CROSS_CHAIN_LIQUIDITY: ['input'], AUTHOR_BRIDGE_SWAP: ['input'], AUTHOR_ACROSS: ['input'], ADD_BRIDGE: ['input'], SET_BRIDGE: ['nodeId', 'input'], SET_AMOUNT: ['nodeId', 'amount'], LOCK: ['nodeId', 'locked'], AUTHOR_COMPOSITION: ['safe', 'input'], ADD_LIQUIDITY: ['input'], SET_LIQUIDITY: ['nodeId', 'input'],
     CONNECT: ['from', 'to'], DISCONNECT: ['from', 'to'], REMOVE: ['nodeId'], REMOVE_MANY: ['nodeIds'], ADD_SWAP: ['direction', 'amount', 'slippage'], ADD_TESTNET_SWAP: ['direction', 'amount', 'slippage'], ADD_ETHEREUM_SEPOLIA_SWAP: ['direction', 'amount', 'slippage'], ADD_COW_SWAP: ['direction', 'amount', 'slippage'],
     SET_SWAP_AMOUNT: ['nodeId', 'amount'], SET_SLIPPAGE: ['nodeId', 'slippage'],
   };
@@ -375,6 +379,15 @@ export function commandIsValid(input: unknown): input is Command {
           Reflect.ownKeys(fields).sort().join() !== ['source','destination','token','amount','recipient','slippage','routing'].sort().join() ||
           !Object.values(fields).every(v => typeof v === 'string' && v.length <= 80)) return false;
       try { createRouterNode('node-preview', fields as RouterBridgeInput); return true; } catch { return false; }
+    }
+    case 'ADD_UNIVERSAL_BRIDGE':
+    case 'SET_UNIVERSAL_BRIDGE': {
+      if (command.type === 'SET_UNIVERSAL_BRIDGE' && !id(command.nodeId)) return false;
+      const fields = command.input;
+      if (!fields || typeof fields !== 'object' || Array.isArray(fields) || Object.getPrototypeOf(fields) !== Object.prototype ||
+          Reflect.ownKeys(fields).sort().join() !== ['source','destination','inputAsset','outputAsset','amount','recipient','slippage','routing'].sort().join() ||
+          !Object.values(fields).every(v => typeof v === 'string' && v.length <= 80)) return false;
+      try { createUniversalBridgeFromInput('node-preview', fields as UniversalBridgeInput); return true; } catch { return false; }
     }
     case 'ADD': return actionKinds.includes(command.kind as ActionKind);
     case 'SET_AMOUNT': return id(command.nodeId) && typeof command.amount === 'string' && /^(0|[1-9][0-9]{0,77})$/.test(command.amount);

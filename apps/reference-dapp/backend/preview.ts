@@ -24,6 +24,8 @@ export const PREVIEW_METHODS: Readonly<Partial<Record<FlowName, 'simulate' | 'pr
   'ethereum-swap': 'prepare', 'ethereum-liquidity': 'simulate', 'ethereum-aave': 'simulate',
   // BUILD-SOLANA-TRANSFER-UX-001: Solana transfer previews are the same read-only simulations.
   'solana-transfer': 'simulate', 'solana-devnet-transfer': 'simulate',
+  // BUILD-CROSSCHAIN-UNIVERSAL-001: the universal router's preview is its unchanged read-only simulation (nothing persisted, signed or sent).
+  'crosschain-universal': 'simulate',
   ...Object.fromEntries(ETHEREUM_ROUTER_NETWORKS.map(route => [`crosschain-router-${route}`, 'simulate' as const])),
 });
 

@@ -53,6 +53,12 @@ export const universalNetworkOfChain = (chain: string): UniversalNetwork | null 
 export const UNIVERSAL_DIRECTED_PAIRS: readonly { readonly source: UniversalNetworkKey; readonly destination: UniversalNetworkKey }[] = Object.freeze(
   UNIVERSAL_NETWORK_KEYS.flatMap(source => UNIVERSAL_NETWORK_KEYS.filter(destination => destination !== source).map(destination => Object.freeze({ source, destination }))));
 
+/**
+ * Fixed public quote subjects (no private key exists for either): the addresses FloFi asks providers to quote for before a wallet is
+ * connected, and the read-only preview recipient of a Solana ⇄ EVM bridge. Never an owner, a recipient of real funds or an authorization.
+ */
+export const UNIVERSAL_QUOTE_SUBJECTS = Object.freeze({ EVM: '0x000000000000000000000000000000000000dead', SOLANA: 'GsWtMd3S5133XPhnfeR1CvPLcLxBSknhVhmaW7fHevBq' } as const);
+
 // --- addresses -------------------------------------------------------------------------------------------------------
 const B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
 /** Strict base58 decode (no checksum); null when the text is not canonical base58. */

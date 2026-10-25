@@ -2,6 +2,8 @@
 import type { CapabilityBlockerCode } from '@defi-workflow-engine/action-registry';
 import type { ReviewContext } from '@defi-workflow-engine/reference-linter';
 import type { Workflow } from './initial-workflow';
+import { UNIVERSAL_BRIDGE_ROUTING_LABEL } from './universal-bridge-authoring';
+import { UNIVERSAL_NETWORKS } from '@defi-workflow-engine/workflow-contracts';
 import { ROUTER_NETWORK_OPTIONS, ROUTER_ROUTING_LABEL } from './router-authoring';
 import { workflowSteps, type WorkflowStep } from './workflow-steps';
 import { uniswapLiquidityProfileFor } from './uniswap-liquidity-authoring';
@@ -64,6 +66,7 @@ export function stepSummary(step: WorkflowStep, language: CopilotLanguage): stri
     case 'EVM_SWAP': return `Swap ${d.amount} ${d.from} → ${d.to} · ${d.network}`;
     case 'SOLANA_SWAP': return `Swap ${d.input.amount} ${d.input.from} → ${d.input.to} · ${d.input.network} (${step.protocol})`;
     case 'ROUTER': return `Bridge ${d.input.amount} ${d.input.token} · ${step.network}`;
+    case 'UNIVERSAL_BRIDGE': return `Bridge ${d.input.amount} ${d.input.inputAsset} → ${d.input.outputAsset} · ${step.network}`;
     case 'CATALOG_SWAP': return `Swap ${d.amount} ${d.from} → ${d.to} · ${d.network}`;
     case 'CATALOG_LIQUIDITY': return `${pt ? 'Liquidez' : 'Liquidity'} ≤ ${d.input.amountA} ${d.input.tokenA} + ${d.input.amountB} ${d.input.tokenB} · Uniswap v3 · ${d.input.network}`;
     case 'AAVE': return `${d.operation === 'SUPPLY' ? 'Supply' : d.operation === 'BORROW' ? 'Borrow' : 'Repay'} ${d.input.amount} ${d.input.asset} · Aave V3 · ${d.input.network}`;
@@ -92,6 +95,14 @@ export function stepSentence(step: WorkflowStep, language: CopilotLanguage): str
       const arrives = option.pair.destination.symbol !== d.input.token ? option.pair.destination.symbol : null;
       return pt ? `Faz bridge de ${d.input.amount} ${d.input.token} da ${option.sourceLabel} para a ${option.destinationLabel}${arrives ? `, chegando como ${arrives},` : ''} pelo Flofi Cross-chain Router (${routing}), com slippage máximo de ${d.input.slippage} bps, para ${recipientOf(d.input.recipient, pt)}.`
         : `Bridges ${d.input.amount} ${d.input.token} from ${option.sourceLabel} to ${option.destinationLabel}${arrives ? `, arriving as ${arrives},` : ''} through the Flofi Cross-chain Router (${routing}), with at most ${d.input.slippage} bps slippage, to ${recipientOf(d.input.recipient, pt)}.`;
+    }
+    case 'UNIVERSAL_BRIDGE': {
+      // BUILD-CROSSCHAIN-UNIVERSAL-001: the destination asset is always named; the route and its provider are chosen at quote time and shown at Review.
+      const route = UNIVERSAL_BRIDGE_ROUTING_LABEL[d.input.routing], from = UNIVERSAL_NETWORKS[d.input.source].name, to = UNIVERSAL_NETWORKS[d.input.destination].name;
+      const recipient = d.input.recipient || (UNIVERSAL_NETWORKS[d.input.source].ecosystem === UNIVERSAL_NETWORKS[d.input.destination].ecosystem
+        ? (pt ? 'a carteira que assinar no app FloFi' : 'the wallet that signs in the FloFi app') : (pt ? `a carteira ${to} que você conectar no app FloFi` : `the ${to} wallet you connect in the FloFi app`));
+      return pt ? `Faz bridge de ${d.input.amount} ${d.input.inputAsset} da ${from} para a ${to}, recebendo ${d.input.outputAsset}, pelo Universal Cross-chain Router (${route}), com slippage máximo de ${d.input.slippage} bps, para ${recipient}.`
+        : `Bridges ${d.input.amount} ${d.input.inputAsset} from ${from} to ${to}, receiving ${d.input.outputAsset}, through the Universal Cross-chain Router (${route}), with at most ${d.input.slippage} bps slippage, to ${recipient}.`;
     }
     case 'AAVE': { const { amount, asset, network, beneficiary } = d.input;
       return d.operation === 'SUPPLY' ? (pt ? `Faz supply de ${amount} ${asset} na Aave V3 na ${network} para ${beneficiary}.`
@@ -138,6 +149,11 @@ function approvalLine(step: WorkflowStep, pt: boolean): string {
     case 'AAVE_WITHDRAW': return pt ? 'Withdraw: a Review lista cada transação deste passo antes de sua carteira assinar.' : 'Withdraw: Review lists every transaction of this step before your wallet signs.';
     case 'ROUTER': return pt ? `Bridge: um approval exato de ${d.input.token} (nunca ilimitado) para o spender da rota, depois o depósito na ${ROUTER_NETWORK_OPTIONS[d.network].sourceLabel}.`
       : `Bridge: an exact ${d.input.token} approval (never unlimited) to the route's spender, then the deposit on ${ROUTER_NETWORK_OPTIONS[d.network].sourceLabel}.`;
+    case 'UNIVERSAL_BRIDGE': return UNIVERSAL_NETWORKS[d.input.source].ecosystem === 'SOLANA'
+      ? (pt ? `Bridge: uma única transação na Solana (o depósito no Relay), assinada pela sua carteira; a FloFi verifica os bytes assinados e transmite uma vez.`
+        : `Bridge: a single Solana transaction (the Relay deposit), signed by your wallet; FloFi verifies the signed bytes and broadcasts them once.`)
+      : (pt ? `Bridge: um approval exato de ${d.input.inputAsset} (nunca ilimitado) só se a allowance for menor, depois o depósito na ${UNIVERSAL_NETWORKS[d.input.source].name}.`
+        : `Bridge: an exact ${d.input.inputAsset} approval (never unlimited) only if your allowance is short, then the deposit on ${UNIVERSAL_NETWORKS[d.input.source].name}.`);
     case 'CATALOG_SWAP': return pt ? `Swap: só pede approval se a allowance atual de ${d.from} for menor que o valor do swap; depois a transação de swap.`
       : `Swap: an approval only if your current ${d.from} allowance is below the swap amount, then the swap transaction.`;
     case 'EVM_SWAP': return d.network !== 'Base'

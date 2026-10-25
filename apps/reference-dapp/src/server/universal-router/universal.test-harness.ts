@@ -12,8 +12,7 @@
  * Nothing here reaches a network. The owner's EVM wallet is played by `wallet.send`; the Solana owner signs with an in-memory test key.
  */
 import { createHash, generateKeyPairSync, randomBytes, sign as signBytes } from 'node:crypto';
-import type { UniversalEvmDeployment, UniversalRouterDeployment, UniversalSolanaDeployment } from '@defi-workflow-engine/action-registry';
-import { UNIVERSAL_ROUTER_DEPLOYMENT } from '@defi-workflow-engine/action-registry';
+import type { UniversalEvmDeployment, UniversalSolanaDeployment } from '@defi-workflow-engine/action-registry';
 import { associatedTokenAddress, base58Decode, base58Encode, compileMessageV0, decompileMessageV0, encodeErc20ApproveExact, encodeRelayDepositErc20,
   encodeRelayDepositNative, encodeRelayDepositLog, parseMessageV0, parseTransaction, relayOrderId, relaySolanaDepositInstruction, serializeMessageV0, serializeSignedTransaction,
   toBase64, fromBase64, RELAY_EVM_DEPOSITORY, RELAY_SOLANA_DEPOSITORY_PROGRAM, RELAY_SOLANA_VAULT, RELAY_SOLANA_DISCRIMINATORS, SOLANA_ASSOCIATED_TOKEN_PROGRAM_ID,
@@ -21,6 +20,9 @@ import { associatedTokenAddress, base58Decode, base58Encode, compileMessageV0, d
 import { UNIVERSAL_NETWORKS, type UniversalNetwork, type UniversalNetworkKey } from '@defi-workflow-engine/workflow-contracts';
 import type { UniversalHttp } from './http.ts';
 import type { Rpc } from '../public-testnet-service.ts';
+import { MOCK_DEPOSITORY_CODE, MOCK_TOKEN_CODE } from './mock-deployment.ts';
+
+export { mockedUniversalDeployment } from './mock-deployment.ts';
 
 const sha = (text: string) => createHash('sha256').update(text).digest('hex');
 const word = (value: bigint) => BigInt.asUintN(256, value).toString(16).padStart(64, '0');
@@ -28,14 +30,6 @@ const addrWord = (a: string) => a.toLowerCase().slice(2).padStart(64, '0');
 const tagN = (n: number) => '0x' + n.toString(16);
 const TRANSFER = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
 const APPROVAL = '0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925';
-export const MOCK_DEPOSITORY_CODE = '0x60aa60aa', MOCK_TOKEN_CODE = '0x60bb60bb';
-const codeSha = (code: string) => createHash('sha256').update(Buffer.from(code.slice(2), 'hex')).digest('hex');
-/** The deployment the MOCKED service runs against: the real one with the synthetic Depository code pin and mock Relay program facts. */
-export function mockedUniversalDeployment(): UniversalRouterDeployment {
-  const evm = Object.fromEntries(Object.entries(UNIVERSAL_ROUTER_DEPLOYMENT.evm).map(([chain, d]) => [chain, { ...d, relayDepositoryCodeSha256: codeSha(MOCK_DEPOSITORY_CODE) }]));
-  return { ...UNIVERSAL_ROUTER_DEPLOYMENT, evm, solana: { ...UNIVERSAL_ROUTER_DEPLOYMENT.solana } };
-}
-
 // --- EVM -------------------------------------------------------------------------------------------------------------
 type Receipt = Record<string, unknown>;
 export type EvmMock = ReturnType<typeof createEvmMockChain>;

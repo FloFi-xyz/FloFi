@@ -214,13 +214,22 @@ describe('Canonical network and chain-bound catalog resolution', () => {
 });
 
 describe('Honest unsupported scope and stable historical hashes', () => {
-  it.each(['ETH', 'WETH', 'ARB', 'USDC.e'])('bridge %s is refused by canonical route truth, not the model', async asset => {
+  // BUILD-CROSSCHAIN-UNIVERSAL-001 (intentional change): ETH and WETH are provider-supported bridge assets on the universal router, so they are
+  // no longer refused; assets that do not exist on the source network still are.
+  it.each(['ARB', 'USDC.e'])('bridge %s is refused by canonical route truth, not the model', async asset => {
     const strategy = { action: 'bridge', sourceNetwork: 'base', destinationNetwork: 'arbitrum-one', asset, amount: '100' };
     expect(composeStrategy(strategy).ok).toBe(false);
     const { reply } = natural('Bridge 100 ' + asset + ' from Base to Arbitrum', act.bridge({ sourceNetwork: 'BASE', destinationNetwork: 'ARBITRUM', asset, amount: '100' }));
     expect(['UNSUPPORTED', 'FAILED']).toContain(reply.kind); expect(reply.command).toBeUndefined();
     expect(reply.text).not.toMatch(/ASSET_|ROUTER_|COPILOT_/);
     expect((await mcp().callTool('compose_strategy', { strategy })).isError).toBe(true);
+  });
+  it.each(['ETH', 'WETH'])('bridge %s from Base to Arbitrum composes as a universal bridge (no artificial asset restriction)', async asset => {
+    const strategy = { action: 'bridge', sourceNetwork: 'base', destinationNetwork: 'arbitrum-one', asset, amount: '0.01' };
+    const composed = composeStrategy(strategy);
+    expect(composed).toMatchObject({ ok: true, strategy: { asset, outputAsset: asset, routing: 'best' } });
+    expect(composed.ok && composed.workflow.nodes[0]!.adapterConstraints.adapters[0]!.id).toBe('flofi.router.universal');
+    expect((await mcp().callTool('compose_strategy', { strategy })).isError).toBe(false);
   });
   it.each(['WETH', 'ARB', 'USDC.e', 'WBTC'])('Aave reserve %s is refused, although its asset exists in the catalog', async asset => {
     const strategy = { action: 'supply', network: 'arbitrum-one', asset, amount: '1', beneficiary: CERTIFICATION_OWNER };

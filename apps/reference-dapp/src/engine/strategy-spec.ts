@@ -49,14 +49,18 @@ const strict = { additionalProperties: false } as const;
 
 const Bridge = Type.Object({
   version: Type.Optional(Version), action: Type.Literal('bridge'),
-  sourceNetwork: enumOf(['base-sepolia', 'base', 'arbitrum-one', 'robinhood', 'ethereum'] as const, 'Source network. base-sepolia pairs with arbitrum-sepolia (test USDC); base and ' +
-    'arbitrum-one pair both ways (real funds); base or arbitrum-one USDC bridges into robinhood as USDG, and robinhood USDG bridges out to base or arbitrum-one as USDC (real funds).'),
-  destinationNetwork: enumOf(['arbitrum-sepolia', 'arbitrum-one', 'robinhood', 'base', 'ethereum'] as const, 'Destination network; only the pairs above are supported.'),
+  sourceNetwork: enumOf(['base-sepolia', 'base', 'arbitrum-one', 'robinhood', 'ethereum', 'solana'] as const, 'Source network. Every mainnet (solana, base, arbitrum-one, ethereum, ' +
+    'robinhood) bridges to every other mainnet (real funds); base-sepolia pairs only with arbitrum-sepolia (test USDC). Routes are discovered live and shown with their provider at Review.'),
+  destinationNetwork: enumOf(['arbitrum-sepolia', 'arbitrum-one', 'robinhood', 'base', 'ethereum', 'solana'] as const, 'Destination network (a different network from the source).'),
   asset: CatalogSymbol,
   amount: Decimal('Source token amount as a decimal string, e.g. "5".'),
-  routing: Type.Optional(enumOf(['auto', 'lifi', 'across'] as const, 'Provider policy. auto = LI.FI first, direct Across if LI.FI has no reconcilable route (a preference order, not a best-price search). Default auto.')),
+  /** BUILD-CROSSCHAIN-UNIVERSAL-001 */
+  outputAsset: Type.Optional(CatalogSymbol),
+  routing: Type.Optional(enumOf(['auto', 'best', 'relay', 'lifi', 'across'] as const, 'Provider policy. auto = the certified Router (LI.FI first, then direct Across) for its USDC/USDG EVM pairs, ' +
+    'otherwise best; best = every provider is asked and the executable route with the highest guaranteed minimum is chosen; relay, lifi, across = only that provider. Default auto.')),
   slippageBps: Type.Optional(Slippage),
-  recipient: Type.Optional(EvmAddress('Destination recipient. Omit to deliver to the wallet that signs in the FloFi app (bound at Review).')),
+  recipient: Type.Optional(Type.Union([EvmAddress('EVM destination recipient.'), SolanaAddress('Solana destination recipient wallet.')], { description: 'Destination recipient in the ' +
+    'destination network\'s address format. Omit to deliver to the signing wallet (same ecosystem) or to the wallet of the destination ecosystem connected in the FloFi app (Solana ⇄ EVM), bound at Review.' })),
 }, strict);
 const Swap = Type.Object({
   version: Type.Optional(Version), action: Type.Literal('swap'),

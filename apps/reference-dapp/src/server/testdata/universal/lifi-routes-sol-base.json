@@ -1,0 +1,3775 @@
+{
+ "recordedAt": "2026-10-25",
+ "source": "POST https://li.quest/v1/advanced/routes (read-only; random addresses)",
+ "status": 200,
+ "response": {
+  "routes": [
+   {
+    "id": "7a6d8a40-a641-4f59-a564-510e1ce15db4",
+    "fromChainId": 1151111081099710,
+    "fromAmountUSD": "20.0161",
+    "fromAmount": "20000000",
+    "fromToken": {
+     "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+     "chainId": 1151111081099710,
+     "symbol": "USDC",
+     "decimals": 6,
+     "name": "USD Coin",
+     "coinKey": "USDC",
+     "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png",
+     "priceUSD": "1.0008042401",
+     "tags": [
+      "stablecoin"
+     ],
+     "verificationStatus": "verified",
+     "verificationStatusBreakdown": [
+      {
+       "provider": "hypernative",
+       "result": "verified",
+       "providerResult": "accept"
+      }
+     ]
+    },
+    "fromAddress": "qwjYpMzHkNQ6rNuMWaLshaxouXKLAmEDvRcgHLiQMwJ",
+    "toChainId": 8453,
+    "toAmountUSD": "19.8947",
+    "toAmount": "19941774",
+    "toAmountMin": "19842065",
+    "toToken": {
+     "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+     "chainId": 8453,
+     "symbol": "USDC",
+     "decimals": 6,
+     "name": "USD Coin",
+     "coinKey": "USDC",
+     "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png",
+     "priceUSD": "0.9976412145",
+     "tags": [
+      "stablecoin"
+     ],
+     "verificationStatus": "verified",
+     "verificationStatusBreakdown": [
+      {
+       "provider": "hypernative",
+       "result": "verified",
+       "providerResult": "accept"
+      }
+     ]
+    },
+    "toAddress": "0x4e23a33a8205a5db03e631e5484bf514f64b3a76",
+    "gasCostUSD": "0.0136",
+    "containsSwitchChain": false,
+    "steps": [
+     {
+      "type": "lifi",
+      "id": "7a6d8a40-a641-4f59-a564-510e1ce15db4:0",
+      "tool": "near",
+      "toolDetails": {
+       "key": "near",
+       "name": "NearIntents",
+       "logoURI": "https://raw.githubusercontent.com/lifinance/types/main/src/assets/icons/bridges/near.svg"
+      },
+      "action": {
+       "fromToken": {
+        "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        "chainId": 1151111081099710,
+        "symbol": "USDC",
+        "decimals": 6,
+        "name": "USD Coin",
+        "coinKey": "USDC",
+        "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png",
+        "priceUSD": "1.0008042401",
+        "tags": [
+         "stablecoin"
+        ],
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+         {
+          "provider": "hypernative",
+          "result": "verified",
+          "providerResult": "accept"
+         }
+        ]
+       },
+       "fromAmount": "20000000",
+       "toToken": {
+        "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "chainId": 8453,
+        "symbol": "USDC",
+        "decimals": 6,
+        "name": "USD Coin",
+        "coinKey": "USDC",
+        "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png",
+        "priceUSD": "0.9976412145",
+        "tags": [
+         "stablecoin"
+        ],
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+         {
+          "provider": "hypernative",
+          "result": "verified",
+          "providerResult": "accept"
+         }
+        ]
+       },
+       "fromChainId": 1151111081099710,
+       "toChainId": 8453,
+       "slippage": 0.005,
+       "fromAddress": "qwjYpMzHkNQ6rNuMWaLshaxouXKLAmEDvRcgHLiQMwJ",
+       "toAddress": "0x4e23a33a8205a5db03e631e5484bf514f64b3a76"
+      },
+      "estimate": {
+       "tool": "near",
+       "approvalAddress": "0x1231DEB6f5749EF6cE6943a275A1D3E7486F4EaE",
+       "toAmountMin": "19842065",
+       "toAmount": "19941774",
+       "fromAmount": "20000000",
+       "feeCosts": [
+        {
+         "name": "LIFI Fixed Fee",
+         "description": "Fixed LIFI fee, independent of any other fee",
+         "token": {
+          "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "chainId": 1151111081099710,
+          "symbol": "USDC",
+          "decimals": 6,
+          "name": "USD Coin",
+          "coinKey": "USDC",
+          "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png",
+          "priceUSD": "1.0008042401",
+          "tags": [
+           "stablecoin"
+          ],
+          "verificationStatus": "verified",
+          "verificationStatusBreakdown": [
+           {
+            "provider": "hypernative",
+            "result": "verified",
+            "providerResult": "accept"
+           }
+          ]
+         },
+         "amount": "50000",
+         "amountUSD": "0.0500",
+         "percentage": "0.0025",
+         "included": true,
+         "feeSplit": {
+          "lifiFee": "50000",
+          "integratorFee": "0",
+          "recipients": [
+           {
+            "name": "lifi",
+            "type": "FIXED",
+            "fee": "50000"
+           }
+          ]
+         }
+        },
+        {
+         "name": "NearIntents Protocol Fee",
+         "description": "Fee taken by NearIntents for the protocol",
+         "token": {
+          "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "chainId": 1151111081099710,
+          "symbol": "USDC",
+          "decimals": 6,
+          "name": "USD Coin",
+          "coinKey": "USDC",
+          "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png",
+          "priceUSD": "1.0008042401",
+          "tags": [
+           "stablecoin"
+          ],
+          "verificationStatus": "verified",
+          "verificationStatusBreakdown": [
+           {
+            "provider": "hypernative",
+            "result": "verified",
+            "providerResult": "accept"
+           }
+          ]
+         },
+         "amount": "1995",
+         "amountUSD": "0.0020",
+         "percentage": "0.0001",
+         "included": true
+        },
+        {
+         "name": "1ClickSwap API Fee",
+         "description": "Fee taken by 1ClickSwap for the API call",
+         "token": {
+          "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "chainId": 1151111081099710,
+          "symbol": "USDC",
+          "decimals": 6,
+          "name": "USD Coin",
+          "coinKey": "USDC",
+          "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png",
+          "priceUSD": "1.0008042401",
+          "tags": [
+           "stablecoin"
+          ],
+          "verificationStatus": "verified",
+          "verificationStatusBreakdown": [
+           {
+            "provider": "hypernative",
+            "result": "verified",
+            "providerResult": "accept"
+           }
+          ]
+         },
+         "amount": "1995",
+         "amountUSD": "0.0020",
+         "percentage": "0.0001",
+         "included": true
+        },
+        {
+         "name": "NearIntents App Fee",
+         "description": "Affiliate fee",
+         "token": {
+          "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "chainId": 1151111081099710,
+          "symbol": "USDC",
+          "decimals": 6,
+          "name": "USD Coin",
+          "coinKey": "USDC",
+          "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png",
+          "priceUSD": "1.0008042401",
+          "tags": [
+           "stablecoin"
+          ],
+          "verificationStatus": "verified",
+          "verificationStatusBreakdown": [
+           {
+            "provider": "hypernative",
+            "result": "verified",
+            "providerResult": "accept"
+           }
+          ]
+         },
+         "amount": "3990",
+         "amountUSD": "0.0040",
+         "percentage": "0.0002",
+         "included": true
+        }
+       ],
+       "gasCosts": [
+        {
+         "type": "SEND",
+         "price": "1",
+         "estimate": "135000",
+         "limit": "135000",
+         "amount": "135000",
+         "amountUSD": "0.0136",
+         "token": {
+          "address": "11111111111111111111111111111111",
+          "chainId": 1151111081099710,
+          "symbol": "SOL",
+          "decimals": 9,
+          "name": "SOL",
+          "coinKey": "SOL",
+          "logoURI": "https://s2.coinmarketcap.com/static/img/coins/64x64/5426.png",
+          "priceUSD": "100.97014058635108",
+          "tags": [
+           "major_asset"
+          ],
+          "verificationStatus": "unverified",
+          "verificationStatusBreakdown": []
+         }
+        }
+       ],
+       "executionDuration": 22,
+       "fromAmountUSD": "20.0161",
+       "toAmountUSD": "19.8947",
+       "skipPermit": false
+      },
+      "includedSteps": [
+       {
+        "id": "0f5135f2-9199-49b1-8623-fbb0a25a1b11",
+        "type": "protocol",
+        "action": {
+         "fromChainId": 1151111081099710,
+         "fromAmount": "20000000",
+         "fromToken": {
+          "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "chainId": 1151111081099710,
+          "symbol": "USDC",
+          "decimals": 6,
+          "name": "USD Coin",
+          "coinKey": "USDC",
+          "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png",
+          "priceUSD": "1.0008042401",
+          "tags": [
+           "stablecoin"
+          ],
+          "verificationStatus": "verified",
+          "verificationStatusBreakdown": [
+           {
+            "provider": "hypernative",
+            "result": "verified",
+            "providerResult": "accept"
+           }
+          ]
+         },
+         "toChainId": 1151111081099710,
+         "toToken": {
+          "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "chainId": 1151111081099710,
+          "symbol": "USDC",
+          "decimals": 6,
+          "name": "USD Coin",
+          "coinKey": "USDC",
+          "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png",
+          "priceUSD": "1.0008042401",
+          "tags": [
+           "stablecoin"
+          ],
+          "verificationStatus": "verified",
+          "verificationStatusBreakdown": [
+           {
+            "provider": "hypernative",
+            "result": "verified",
+            "providerResult": "accept"
+           }
+          ]
+         },
+         "slippage": 0.005,
+         "fromAddress": "qwjYpMzHkNQ6rNuMWaLshaxouXKLAmEDvRcgHLiQMwJ",
+         "toAddress": "qwjYpMzHkNQ6rNuMWaLshaxouXKLAmEDvRcgHLiQMwJ",
+         "integratorId": "flofi"
+        },
+        "estimate": {
+         "fromAmount": "20000000",
+         "toAmount": "19950000",
+         "toAmountMin": "19950000",
+         "tool": "feeCollection",
+         "approvalAddress": "0x0000000000000000000000000000000000000000",
+         "gasCosts": [
+          {
+           "type": "SEND",
+           "price": "1",
+           "estimate": "130000",
+           "limit": "169000",
+           "amount": "130000",
+           "amountUSD": "0.0131",
+           "token": {
+            "address": "11111111111111111111111111111111",
+            "chainId": 1151111081099710,
+            "symbol": "SOL",
+            "decimals": 9,
+            "name": "SOL",
+            "coinKey": "SOL",
+            "logoURI": "https://s2.coinmarketcap.com/static/img/coins/64x64/5426.png",
+            "priceUSD": "100.97014058635108",
+            "tags": [
+             "major_asset"
+            ],
+            "verificationStatus": "unverified",
+            "verificationStatusBreakdown": []
+           }
+          }
+         ],
+         "feeCosts": [
+          {
+           "name": "LIFI Fixed Fee",
+           "description": "Fixed LIFI fee, independent of any other fee",
+           "token": {
+            "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+            "chainId": 1151111081099710,
+            "symbol": "USDC",
+            "decimals": 6,
+            "name": "USD Coin",
+            "coinKey": "USDC",
+            "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png",
+            "priceUSD": "1.0008042401",
+            "tags": [
+             "stablecoin"
+            ],
+            "verificationStatus": "verified",
+            "verificationStatusBreakdown": [
+             {
+              "provider": "hypernative",
+              "result": "verified",
+              "providerResult": "accept"
+             }
+            ]
+           },
+           "amount": "50000",
+           "amountUSD": "0.0500",
+           "percentage": "0.0025",
+           "included": true,
+           "feeSplit": {
+            "lifiFee": "50000",
+            "integratorFee": "0",
+            "recipients": [
+             {
+              "name": "lifi",
+              "type": "FIXED",
+              "fee": "50000"
+             }
+            ]
+           }
+          }
+         ],
+         "executionDuration": 0
+        },
+        "tool": "feeCollection",
+        "toolDetails": {
+         "key": "feeCollection",
+         "name": "Integrator Fee",
+         "logoURI": "https://raw.githubusercontent.com/lifinance/types/main/src/assets/icons/protocols/feeCollection.svg"
+        }
+       },
+       {
+        "id": "48edc9a0-7511-4cae-996b-0a321a658a31",
+        "type": "cross",
+        "action": {
+         "fromChainId": 1151111081099710,
+         "fromAmount": "19950000",
+         "fromToken": {
+          "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "chainId": 1151111081099710,
+          "symbol": "USDC",
+          "decimals": 6,
+          "name": "USD Coin",
+          "coinKey": "USDC",
+          "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png",
+          "priceUSD": "1.0008042401",
+          "tags": [
+           "stablecoin"
+          ],
+          "verificationStatus": "verified",
+          "verificationStatusBreakdown": [
+           {
+            "provider": "hypernative",
+            "result": "verified",
+            "providerResult": "accept"
+           }
+          ]
+         },
+         "toChainId": 8453,
+         "toToken": {
+          "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "chainId": 8453,
+          "symbol": "USDC",
+          "decimals": 6,
+          "name": "USD Coin",
+          "coinKey": "USDC",
+          "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png",
+          "priceUSD": "0.9976412145",
+          "tags": [
+           "stablecoin"
+          ],
+          "verificationStatus": "verified",
+          "verificationStatusBreakdown": [
+           {
+            "provider": "hypernative",
+            "result": "verified",
+            "providerResult": "accept"
+           }
+          ]
+         },
+         "slippage": 0.005,
+         "fromAddress": "qwjYpMzHkNQ6rNuMWaLshaxouXKLAmEDvRcgHLiQMwJ",
+         "toAddress": "0x4e23a33a8205a5db03e631e5484bf514f64b3a76",
+         "integratorId": "flofi",
+         "destinationGasConsumption": "0"
+        },
+        "estimate": {
+         "tool": "near",
+         "fromAmount": "19950000",
+         "toAmount": "19941774",
+         "toAmountMin": "19842065",
+         "gasCosts": [
+          {
+           "type": "SEND",
+           "price": "1",
+           "estimate": "5000",
+           "limit": "6500",
+           "amount": "5000",
+           "amountUSD": "0.0005",
+           "token": {
+            "address": "11111111111111111111111111111111",
+            "chainId": 1151111081099710,
+            "symbol": "SOL",
+            "decimals": 9,
+            "name": "SOL",
+            "coinKey": "SOL",
+            "logoURI": "https://s2.coinmarketcap.com/static/img/coins/64x64/5426.png",
+            "priceUSD": "100.97014058635108",
+            "tags": [
+             "major_asset"
+            ],
+            "verificationStatus": "unverified",
+            "verificationStatusBreakdown": []
+           }
+          }
+         ],
+         "executionDuration": 22,
+         "approvalAddress": "0x1231DEB6f5749EF6cE6943a275A1D3E7486F4EaE",
+         "feeCosts": [
+          {
+           "name": "NearIntents Protocol Fee",
+           "description": "Fee taken by NearIntents for the protocol",
+           "token": {
+            "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+            "chainId": 1151111081099710,
+            "symbol": "USDC",
+            "decimals": 6,
+            "name": "USD Coin",
+            "coinKey": "USDC",
+            "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png",
+            "priceUSD": "1.0008042401",
+            "tags": [
+             "stablecoin"
+            ],
+            "verificationStatus": "verified",
+            "verificationStatusBreakdown": [
+             {
+              "provider": "hypernative",
+              "result": "verified",
+              "providerResult": "accept"
+             }
+            ]
+           },
+           "amount": "1995",
+           "amountUSD": "0.0020",
+           "percentage": "0.0001",
+           "included": true
+          },
+          {
+           "name": "1ClickSwap API Fee",
+           "description": "Fee taken by 1ClickSwap for the API call",
+           "token": {
+            "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+            "chainId": 1151111081099710,
+            "symbol": "USDC",
+            "decimals": 6,
+            "name": "USD Coin",
+            "coinKey": "USDC",
+            "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png",
+            "priceUSD": "1.0008042401",
+            "tags": [
+             "stablecoin"
+            ],
+            "verificationStatus": "verified",
+            "verificationStatusBreakdown": [
+             {
+              "provider": "hypernative",
+              "result": "verified",
+              "providerResult": "accept"
+             }
+            ]
+           },
+           "amount": "1995",
+           "amountUSD": "0.0020",
+           "percentage": "0.0001",
+           "included": true
+          },
+          {
+           "name": "NearIntents App Fee",
+           "description": "Affiliate fee",
+           "token": {
+            "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+            "chainId": 1151111081099710,
+            "symbol": "USDC",
+            "decimals": 6,
+            "name": "USD Coin",
+            "coinKey": "USDC",
+            "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png",
+            "priceUSD": "1.0008042401",
+            "tags": [
+             "stablecoin"
+            ],
+            "verificationStatus": "verified",
+            "verificationStatusBreakdown": [
+             {
+              "provider": "hypernative",
+              "result": "verified",
+              "providerResult": "accept"
+             }
+            ]
+           },
+           "amount": "3990",
+           "amountUSD": "0.0040",
+           "percentage": "0.0002",
+           "included": true
+          }
+         ]
+        },
+        "tool": "near",
+        "toolDetails": {
+         "key": "near",
+         "name": "NearIntents",
+         "logoURI": "https://raw.githubusercontent.com/lifinance/types/main/src/assets/icons/bridges/near.svg"
+        }
+       }
+      ],
+      "integrator": "flofi",
+      "executionType": "transaction",
+      "recommendedSlippage": null
+     }
+    ],
+    "tags": [
+     "RECOMMENDED",
+     "CHEAPEST"
+    ]
+   },
+   {
+    "id": "9e730f8c-822c-44b7-bf99-c57a5aa583a6",
+    "fromChainId": 1151111081099710,
+    "fromAmountUSD": "20.0161",
+    "fromAmount": "20000000",
+    "fromToken": {
+     "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+     "chainId": 1151111081099710,
+     "symbol": "USDC",
+     "decimals": 6,
+     "name": "USD Coin",
+     "coinKey": "USDC",
+     "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png",
+     "priceUSD": "1.0008042401",
+     "tags": [
+      "stablecoin"
+     ],
+     "verificationStatus": "verified",
+     "verificationStatusBreakdown": [
+      {
+       "provider": "hypernative",
+       "result": "verified",
+       "providerResult": "accept"
+      }
+     ]
+    },
+    "fromAddress": "qwjYpMzHkNQ6rNuMWaLshaxouXKLAmEDvRcgHLiQMwJ",
+    "toChainId": 8453,
+    "toAmountUSD": "19.8773",
+    "toAmount": "19924253",
+    "toAmountMin": "19824632",
+    "toToken": {
+     "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+     "chainId": 8453,
+     "symbol": "USDC",
+     "decimals": 6,
+     "name": "USD Coin",
+     "coinKey": "USDC",
+     "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png",
+     "priceUSD": "0.9976412145",
+     "tags": [
+      "stablecoin"
+     ],
+     "verificationStatus": "verified",
+     "verificationStatusBreakdown": [
+      {
+       "provider": "hypernative",
+       "result": "verified",
+       "providerResult": "accept"
+      }
+     ]
+    },
+    "toAddress": "0x4e23a33a8205a5db03e631e5484bf514f64b3a76",
+    "gasCostUSD": "0.0136",
+    "containsSwitchChain": false,
+    "steps": [
+     {
+      "type": "lifi",
+      "id": "9e730f8c-822c-44b7-bf99-c57a5aa583a6:0",
+      "tool": "relaydepository",
+      "toolDetails": {
+       "key": "relaydepository",
+       "name": "Relay",
+       "logoURI": "https://raw.githubusercontent.com/lifinance/types/main/src/assets/icons/bridges/relay.svg"
+      },
+      "action": {
+       "fromToken": {
+        "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        "chainId": 1151111081099710,
+        "symbol": "USDC",
+        "decimals": 6,
+        "name": "USD Coin",
+        "coinKey": "USDC",
+        "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png",
+        "priceUSD": "1.0008042401",
+        "tags": [
+         "stablecoin"
+        ],
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+         {
+          "provider": "hypernative",
+          "result": "verified",
+          "providerResult": "accept"
+         }
+        ]
+       },
+       "fromAmount": "20000000",
+       "toToken": {
+        "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "chainId": 8453,
+        "symbol": "USDC",
+        "decimals": 6,
+        "name": "USD Coin",
+        "coinKey": "USDC",
+        "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png",
+        "priceUSD": "0.9976412145",
+        "tags": [
+         "stablecoin"
+        ],
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+         {
+          "provider": "hypernative",
+          "result": "verified",
+          "providerResult": "accept"
+         }
+        ]
+       },
+       "fromChainId": 1151111081099710,
+       "toChainId": 8453,
+       "slippage": 0.005,
+       "fromAddress": "qwjYpMzHkNQ6rNuMWaLshaxouXKLAmEDvRcgHLiQMwJ",
+       "toAddress": "0x4e23a33a8205a5db03e631e5484bf514f64b3a76"
+      },
+      "estimate": {
+       "tool": "relaydepository",
+       "approvalAddress": "0x1231DEB6f5749EF6cE6943a275A1D3E7486F4EaE",
+       "toAmountMin": "19824632",
+       "toAmount": "19924253",
+       "fromAmount": "20000000",
+       "feeCosts": [
+        {
+         "name": "LIFI Fixed Fee",
+         "description": "Fixed LIFI fee, independent of any other fee",
+         "token": {
+          "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "chainId": 1151111081099710,
+          "symbol": "USDC",
+          "decimals": 6,
+          "name": "USD Coin",
+          "coinKey": "USDC",
+          "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png",
+          "priceUSD": "1.0008042401",
+          "tags": [
+           "stablecoin"
+          ],
+          "verificationStatus": "verified",
+          "verificationStatusBreakdown": [
+           {
+            "provider": "hypernative",
+            "result": "verified",
+            "providerResult": "accept"
+           }
+          ]
+         },
+         "amount": "50000",
+         "amountUSD": "0.0500",
+         "percentage": "0.0025",
+         "included": true,
+         "feeSplit": {
+          "lifiFee": "50000",
+          "integratorFee": "0",
+          "recipients": [
+           {
+            "name": "lifi",
+            "type": "FIXED",
+            "fee": "50000"
+           }
+          ]
+         }
+        },
+        {
+         "name": "Relayer Gas fee",
+         "description": "Relay bridge gas fee",
+         "token": {
+          "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "chainId": 1151111081099710,
+          "symbol": "USDC",
+          "decimals": 6,
+          "name": "USD Coin",
+          "coinKey": "USDC",
+          "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png",
+          "priceUSD": "1.0008042401",
+          "tags": [
+           "stablecoin"
+          ],
+          "verificationStatus": "verified",
+          "verificationStatusBreakdown": [
+           {
+            "provider": "hypernative",
+            "result": "verified",
+            "providerResult": "accept"
+           }
+          ]
+         },
+         "amount": "1257",
+         "amountUSD": "0.0013",
+         "percentage": "0.0001",
+         "included": true
+        },
+        {
+         "name": "Relayer Service fee",
+         "description": "Relay bridge service fee",
+         "token": {
+          "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "chainId": 1151111081099710,
+          "symbol": "USDC",
+          "decimals": 6,
+          "name": "USD Coin",
+          "coinKey": "USDC",
+          "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png",
+          "priceUSD": "1.0008042401",
+          "tags": [
+           "stablecoin"
+          ],
+          "verificationStatus": "verified",
+          "verificationStatusBreakdown": [
+           {
+            "provider": "hypernative",
+            "result": "verified",
+            "providerResult": "accept"
+           }
+          ]
+         },
+         "amount": "24490",
+         "amountUSD": "0.0245",
+         "percentage": "0.0012",
+         "included": true
+        }
+       ],
+       "gasCosts": [
+        {
+         "type": "SEND",
+         "price": "1",
+         "estimate": "135000",
+         "limit": "135000",
+         "amount": "135000",
+         "amountUSD": "0.0136",
+         "token": {
+          "address": "11111111111111111111111111111111",
+          "chainId": 1151111081099710,
+          "symbol": "SOL",
+          "decimals": 9,
+          "name": "SOL",
+          "coinKey": "SOL",
+          "logoURI": "https://s2.coinmarketcap.com/static/img/coins/64x64/5426.png",
+          "priceUSD": "100.97014058635108",
+          "tags": [
+           "major_asset"
+          ],
+          "verificationStatus": "unverified",
+          "verificationStatusBreakdown": []
+         }
+        }
+       ],
+       "executionDuration": 2,
+       "fromAmountUSD": "20.0161",
+       "toAmountUSD": "19.8773",
+       "skipPermit": false
+      },
+      "includedSteps": [
+       {
+        "id": "4c7a975e-29f7-4010-a35f-acdca5af550e",
+        "type": "protocol",
+        "action": {
+         "fromChainId": 1151111081099710,
+         "fromAmount": "20000000",
+         "fromToken": {
+          "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "chainId": 1151111081099710,
+          "symbol": "USDC",
+          "decimals": 6,
+          "name": "USD Coin",
+          "coinKey": "USDC",
+          "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png",
+          "priceUSD": "1.0008042401",
+          "tags": [
+           "stablecoin"
+          ],
+          "verificationStatus": "verified",
+          "verificationStatusBreakdown": [
+           {
+            "provider": "hypernative",
+            "result": "verified",
+            "providerResult": "accept"
+           }
+          ]
+         },
+         "toChainId": 1151111081099710,
+         "toToken": {
+          "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "chainId": 1151111081099710,
+          "symbol": "USDC",
+          "decimals": 6,
+          "name": "USD Coin",
+          "coinKey": "USDC",
+          "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png",
+          "priceUSD": "1.0008042401",
+          "tags": [
+           "stablecoin"
+          ],
+          "verificationStatus": "verified",
+          "verificationStatusBreakdown": [
+           {
+            "provider": "hypernative",
+            "result": "verified",
+            "providerResult": "accept"
+           }
+          ]
+         },
+         "slippage": 0.005,
+         "fromAddress": "qwjYpMzHkNQ6rNuMWaLshaxouXKLAmEDvRcgHLiQMwJ",
+         "toAddress": "qwjYpMzHkNQ6rNuMWaLshaxouXKLAmEDvRcgHLiQMwJ",
+         "integratorId": "flofi"
+        },
+        "estimate": {
+         "fromAmount": "20000000",
+         "toAmount": "19950000",
+         "toAmountMin": "19950000",
+         "tool": "feeCollection",
+         "approvalAddress": "0x0000000000000000000000000000000000000000",
+         "gasCosts": [
+          {
+           "type": "SEND",
+           "price": "1",
+           "estimate": "130000",
+           "limit": "169000",
+           "amount": "130000",
+           "amountUSD": "0.0131",
+           "token": {
+            "address": "11111111111111111111111111111111",
+            "chainId": 1151111081099710,
+            "symbol": "SOL",
+            "decimals": 9,
+            "name": "SOL",
+            "coinKey": "SOL",
+            "logoURI": "https://s2.coinmarketcap.com/static/img/coins/64x64/5426.png",
+            "priceUSD": "100.97014058635108",
+            "tags": [
+             "major_asset"
+            ],
+            "verificationStatus": "unverified",
+            "verificationStatusBreakdown": []
+           }
+          }
+         ],
+         "feeCosts": [
+          {
+           "name": "LIFI Fixed Fee",
+           "description": "Fixed LIFI fee, independent of any other fee",
+           "token": {
+            "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+            "chainId": 1151111081099710,
+            "symbol": "USDC",
+            "decimals": 6,
+            "name": "USD Coin",
+            "coinKey": "USDC",
+            "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png",
+            "priceUSD": "1.0008042401",
+            "tags": [
+             "stablecoin"
+            ],
+            "verificationStatus": "verified",
+            "verificationStatusBreakdown": [
+             {
+              "provider": "hypernative",
+              "result": "verified",
+              "providerResult": "accept"
+             }
+            ]
+           },
+           "amount": "50000",
+           "amountUSD": "0.0500",
+           "percentage": "0.0025",
+           "included": true,
+           "feeSplit": {
+            "lifiFee": "50000",
+            "integratorFee": "0",
+            "recipients": [
+             {
+              "name": "lifi",
+              "type": "FIXED",
+              "fee": "50000"
+             }
+            ]
+           }
+          }
+         ],
+         "executionDuration": 0
+        },
+        "tool": "feeCollection",
+        "toolDetails": {
+         "key": "feeCollection",
+         "name": "Integrator Fee",
+         "logoURI": "https://raw.githubusercontent.com/lifinance/types/main/src/assets/icons/protocols/feeCollection.svg"
+        }
+       },
+       {
+        "id": "906bc3d6-af8e-4b3c-ae80-a9453e1ccf23",
+        "type": "cross",
+        "action": {
+         "fromChainId": 1151111081099710,
+         "fromAmount": "19950000",
+         "fromToken": {
+          "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "chainId": 1151111081099710,
+          "symbol": "USDC",
+          "decimals": 6,
+          "name": "USD Coin",
+          "coinKey": "USDC",
+          "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png",
+          "priceUSD": "1.0008042401",
+          "tags": [
+           "stablecoin"
+          ],
+          "verificationStatus": "verified",
+          "verificationStatusBreakdown": [
+           {
+            "provider": "hypernative",
+            "result": "verified",
+            "providerResult": "accept"
+           }
+          ]
+         },
+         "toChainId": 8453,
+         "toToken": {
+          "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "chainId": 8453,
+          "symbol": "USDC",
+          "decimals": 6,
+          "name": "USD Coin",
+          "coinKey": "USDC",
+          "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png",
+          "priceUSD": "0.9976412145",
+          "tags": [
+           "stablecoin"
+          ],
+          "verificationStatus": "verified",
+          "verificationStatusBreakdown": [
+           {
+            "provider": "hypernative",
+            "result": "verified",
+            "providerResult": "accept"
+           }
+          ]
+         },
+         "slippage": 0.005,
+         "fromAddress": "qwjYpMzHkNQ6rNuMWaLshaxouXKLAmEDvRcgHLiQMwJ",
+         "toAddress": "0x4e23a33a8205a5db03e631e5484bf514f64b3a76",
+         "integratorId": "flofi",
+         "destinationGasConsumption": "0"
+        },
+        "estimate": {
+         "tool": "relaydepository",
+         "fromAmount": "19950000",
+         "toAmount": "19924253",
+         "toAmountMin": "19824632",
+         "gasCosts": [
+          {
+           "type": "SEND",
+           "price": "1",
+           "estimate": "5000",
+           "limit": "6500",
+           "amount": "5000",
+           "amountUSD": "0.0005",
+           "token": {
+            "address": "11111111111111111111111111111111",
+            "chainId": 1151111081099710,
+            "symbol": "SOL",
+            "decimals": 9,
+            "name": "SOL",
+            "coinKey": "SOL",
+            "logoURI": "https://s2.coinmarketcap.com/static/img/coins/64x64/5426.png",
+            "priceUSD": "100.97014058635108",
+            "tags": [
+             "major_asset"
+            ],
+            "verificationStatus": "unverified",
+            "verificationStatusBreakdown": []
+           }
+          }
+         ],
+         "executionDuration": 2,
+         "approvalAddress": "G9sGMKGAdDDqTwPDuqYnxBPSoQk6A2KPbcJGoHpq2HPV",
+         "feeCosts": [
+          {
+           "name": "Relayer Gas fee",
+           "description": "Relay bridge gas fee",
+           "token": {
+            "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+            "chainId": 1151111081099710,
+            "symbol": "USDC",
+            "decimals": 6,
+            "name": "USD Coin",
+            "coinKey": "USDC",
+            "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png",
+            "priceUSD": "1.0008042401",
+            "tags": [
+             "stablecoin"
+            ],
+            "verificationStatus": "verified",
+            "verificationStatusBreakdown": [
+             {
+              "provider": "hypernative",
+              "result": "verified",
+              "providerResult": "accept"
+             }
+            ]
+           },
+           "amount": "1257",
+           "amountUSD": "0.0013",
+           "percentage": "0.0001",
+           "included": true
+          },
+          {
+           "name": "Relayer Service fee",
+           "description": "Relay bridge service fee",
+           "token": {
+            "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+            "chainId": 1151111081099710,
+            "symbol": "USDC",
+            "decimals": 6,
+            "name": "USD Coin",
+            "coinKey": "USDC",
+            "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png",
+            "priceUSD": "1.0008042401",
+            "tags": [
+             "stablecoin"
+            ],
+            "verificationStatus": "verified",
+            "verificationStatusBreakdown": [
+             {
+              "provider": "hypernative",
+              "result": "verified",
+              "providerResult": "accept"
+             }
+            ]
+           },
+           "amount": "24490",
+           "amountUSD": "0.0245",
+           "percentage": "0.0012",
+           "included": true
+          }
+         ]
+        },
+        "tool": "relaydepository",
+        "toolDetails": {
+         "key": "relaydepository",
+         "name": "Relay",
+         "logoURI": "https://raw.githubusercontent.com/lifinance/types/main/src/assets/icons/bridges/relay.svg"
+        }
+       }
+      ],
+      "integrator": "flofi",
+      "executionType": "transaction",
+      "recommendedSlippage": null
+     }
+    ],
+    "tags": [
+     "FASTEST"
+    ]
+   },
+   {
+    "id": "ae4dde7a-d91c-4b00-8100-0c231ed5b1f2",
+    "fromChainId": 1151111081099710,
+    "fromAmountUSD": "20.0161",
+    "fromAmount": "20000000",
+    "fromToken": {
+     "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+     "chainId": 1151111081099710,
+     "symbol": "USDC",
+     "decimals": 6,
+     "name": "USD Coin",
+     "coinKey": "USDC",
+     "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png",
+     "priceUSD": "1.0008042401",
+     "tags": [
+      "stablecoin"
+     ],
+     "verificationStatus": "verified",
+     "verificationStatusBreakdown": [
+      {
+       "provider": "hypernative",
+       "result": "verified",
+       "providerResult": "accept"
+      }
+     ]
+    },
+    "fromAddress": "qwjYpMzHkNQ6rNuMWaLshaxouXKLAmEDvRcgHLiQMwJ",
+    "toChainId": 8453,
+    "toAmountUSD": "19.8276",
+    "toAmount": "19874430",
+    "toAmountMin": "19775058",
+    "toToken": {
+     "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+     "chainId": 8453,
+     "symbol": "USDC",
+     "decimals": 6,
+     "name": "USD Coin",
+     "coinKey": "USDC",
+     "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png",
+     "priceUSD": "0.9976412145",
+     "tags": [
+      "stablecoin"
+     ],
+     "verificationStatus": "verified",
+     "verificationStatusBreakdown": [
+      {
+       "provider": "hypernative",
+       "result": "verified",
+       "providerResult": "accept"
+      }
+     ]
+    },
+    "toAddress": "0x4e23a33a8205a5db03e631e5484bf514f64b3a76",
+    "gasCostUSD": "0.0136",
+    "containsSwitchChain": false,
+    "steps": [
+     {
+      "type": "lifi",
+      "id": "ae4dde7a-d91c-4b00-8100-0c231ed5b1f2:0",
+      "tool": "layerswap",
+      "toolDetails": {
+       "key": "layerswap",
+       "name": "Layerswap",
+       "logoURI": "https://raw.githubusercontent.com/lifinance/types/main/src/assets/icons/bridges/layerswap.svg"
+      },
+      "action": {
+       "fromToken": {
+        "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        "chainId": 1151111081099710,
+        "symbol": "USDC",
+        "decimals": 6,
+        "name": "USD Coin",
+        "coinKey": "USDC",
+        "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png",
+        "priceUSD": "1.0008042401",
+        "tags": [
+         "stablecoin"
+        ],
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+         {
+          "provider": "hypernative",
+          "result": "verified",
+          "providerResult": "accept"
+         }
+        ]
+       },
+       "fromAmount": "20000000",
+       "toToken": {
+        "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "chainId": 8453,
+        "symbol": "USDC",
+        "decimals": 6,
+        "name": "USD Coin",
+        "coinKey": "USDC",
+        "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png",
+        "priceUSD": "0.9976412145",
+        "tags": [
+         "stablecoin"
+        ],
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+         {
+          "provider": "hypernative",
+          "result": "verified",
+          "providerResult": "accept"
+         }
+        ]
+       },
+       "fromChainId": 1151111081099710,
+       "toChainId": 8453,
+       "slippage": 0.005,
+       "fromAddress": "qwjYpMzHkNQ6rNuMWaLshaxouXKLAmEDvRcgHLiQMwJ",
+       "toAddress": "0x4e23a33a8205a5db03e631e5484bf514f64b3a76"
+      },
+      "estimate": {
+       "tool": "layerswap",
+       "approvalAddress": "0x1231DEB6f5749EF6cE6943a275A1D3E7486F4EaE",
+       "toAmountMin": "19775058",
+       "toAmount": "19874430",
+       "fromAmount": "20000000",
+       "feeCosts": [
+        {
+         "name": "LIFI Fixed Fee",
+         "description": "Fixed LIFI fee, independent of any other fee",
+         "token": {
+          "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "chainId": 1151111081099710,
+          "symbol": "USDC",
+          "decimals": 6,
+          "name": "USD Coin",
+          "coinKey": "USDC",
+          "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png",
+          "priceUSD": "1.0008042401",
+          "tags": [
+           "stablecoin"
+          ],
+          "verificationStatus": "verified",
+          "verificationStatusBreakdown": [
+           {
+            "provider": "hypernative",
+            "result": "verified",
+            "providerResult": "accept"
+           }
+          ]
+         },
+         "amount": "50000",
+         "amountUSD": "0.0500",
+         "percentage": "0.0025",
+         "included": true,
+         "feeSplit": {
+          "lifiFee": "50000",
+          "integratorFee": "0",
+          "recipients": [
+           {
+            "name": "lifi",
+            "type": "FIXED",
+            "fee": "50000"
+           }
+          ]
+         }
+        },
+        {
+         "name": "LayerSwap fee",
+         "description": "LayerSwap bridge fee",
+         "percentage": "0.0038",
+         "token": {
+          "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "chainId": 1151111081099710,
+          "symbol": "USDC",
+          "decimals": 6,
+          "name": "USD Coin",
+          "coinKey": "USDC",
+          "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png",
+          "priceUSD": "1.0008042401",
+          "tags": [
+           "stablecoin"
+          ],
+          "verificationStatus": "verified",
+          "verificationStatusBreakdown": [
+           {
+            "provider": "hypernative",
+            "result": "verified",
+            "providerResult": "accept"
+           }
+          ]
+         },
+         "amount": "75569",
+         "amountUSD": "0.075537",
+         "included": true
+        }
+       ],
+       "gasCosts": [
+        {
+         "type": "SEND",
+         "price": "1",
+         "estimate": "135000",
+         "limit": "135000",
+         "amount": "135000",
+         "amountUSD": "0.0136",
+         "token": {
+          "address": "11111111111111111111111111111111",
+          "chainId": 1151111081099710,
+          "symbol": "SOL",
+          "decimals": 9,
+          "name": "SOL",
+          "coinKey": "SOL",
+          "logoURI": "https://s2.coinmarketcap.com/static/img/coins/64x64/5426.png",
+          "priceUSD": "100.97014058635108",
+          "tags": [
+           "major_asset"
+          ],
+          "verificationStatus": "unverified",
+          "verificationStatusBreakdown": []
+         }
+        }
+       ],
+       "executionDuration": 5,
+       "fromAmountUSD": "20.0161",
+       "toAmountUSD": "19.8276",
+       "skipPermit": false
+      },
+      "includedSteps": [
+       {
+        "id": "9bbe7aac-2a84-493d-937c-6413beee7477",
+        "type": "protocol",
+        "action": {
+         "fromChainId": 1151111081099710,
+         "fromAmount": "20000000",
+         "fromToken": {
+          "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "chainId": 1151111081099710,
+          "symbol": "USDC",
+          "decimals": 6,
+          "name": "USD Coin",
+          "coinKey": "USDC",
+          "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png",
+          "priceUSD": "1.0008042401",
+          "tags": [
+           "stablecoin"
+          ],
+          "verificationStatus": "verified",
+          "verificationStatusBreakdown": [
+           {
+            "provider": "hypernative",
+            "result": "verified",
+            "providerResult": "accept"
+           }
+          ]
+         },
+         "toChainId": 1151111081099710,
+         "toToken": {
+          "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "chainId": 1151111081099710,
+          "symbol": "USDC",
+          "decimals": 6,
+          "name": "USD Coin",
+          "coinKey": "USDC",
+          "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png",
+          "priceUSD": "1.0008042401",
+          "tags": [
+           "stablecoin"
+          ],
+          "verificationStatus": "verified",
+          "verificationStatusBreakdown": [
+           {
+            "provider": "hypernative",
+            "result": "verified",
+            "providerResult": "accept"
+           }
+          ]
+         },
+         "slippage": 0.005,
+         "fromAddress": "qwjYpMzHkNQ6rNuMWaLshaxouXKLAmEDvRcgHLiQMwJ",
+         "toAddress": "qwjYpMzHkNQ6rNuMWaLshaxouXKLAmEDvRcgHLiQMwJ",
+         "integratorId": "flofi"
+        },
+        "estimate": {
+         "fromAmount": "20000000",
+         "toAmount": "19950000",
+         "toAmountMin": "19950000",
+         "tool": "feeCollection",
+         "approvalAddress": "0x0000000000000000000000000000000000000000",
+         "gasCosts": [
+          {
+           "type": "SEND",
+           "price": "1",
+           "estimate": "130000",
+           "limit": "169000",
+           "amount": "130000",
+           "amountUSD": "0.0131",
+           "token": {
+            "address": "11111111111111111111111111111111",
+            "chainId": 1151111081099710,
+            "symbol": "SOL",
+            "decimals": 9,
+            "name": "SOL",
+            "coinKey": "SOL",
+            "logoURI": "https://s2.coinmarketcap.com/static/img/coins/64x64/5426.png",
+            "priceUSD": "100.97014058635108",
+            "tags": [
+             "major_asset"
+            ],
+            "verificationStatus": "unverified",
+            "verificationStatusBreakdown": []
+           }
+          }
+         ],
+         "feeCosts": [
+          {
+           "name": "LIFI Fixed Fee",
+           "description": "Fixed LIFI fee, independent of any other fee",
+           "token": {
+            "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+            "chainId": 1151111081099710,
+            "symbol": "USDC",
+            "decimals": 6,
+            "name": "USD Coin",
+            "coinKey": "USDC",
+            "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png",
+            "priceUSD": "1.0008042401",
+            "tags": [
+             "stablecoin"
+            ],
+            "verificationStatus": "verified",
+            "verificationStatusBreakdown": [
+             {
+              "provider": "hypernative",
+              "result": "verified",
+              "providerResult": "accept"
+             }
+            ]
+           },
+           "amount": "50000",
+           "amountUSD": "0.0500",
+           "percentage": "0.0025",
+           "included": true,
+           "feeSplit": {
+            "lifiFee": "50000",
+            "integratorFee": "0",
+            "recipients": [
+             {
+              "name": "lifi",
+              "type": "FIXED",
+              "fee": "50000"
+             }
+            ]
+           }
+          }
+         ],
+         "executionDuration": 0
+        },
+        "tool": "feeCollection",
+        "toolDetails": {
+         "key": "feeCollection",
+         "name": "Integrator Fee",
+         "logoURI": "https://raw.githubusercontent.com/lifinance/types/main/src/assets/icons/protocols/feeCollection.svg"
+        }
+       },
+       {
+        "id": "f1cd4476-54a9-4bcc-8d99-5f4ba3b0e5c9",
+        "type": "cross",
+        "action": {
+         "fromChainId": 1151111081099710,
+         "fromAmount": "19950000",
+         "fromToken": {
+          "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "chainId": 1151111081099710,
+          "symbol": "USDC",
+          "decimals": 6,
+          "name": "USD Coin",
+          "coinKey": "USDC",
+          "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png",
+          "priceUSD": "1.0008042401",
+          "tags": [
+           "stablecoin"
+          ],
+          "verificationStatus": "verified",
+          "verificationStatusBreakdown": [
+           {
+            "provider": "hypernative",
+            "result": "verified",
+            "providerResult": "accept"
+           }
+          ]
+         },
+         "toChainId": 8453,
+         "toToken": {
+          "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "chainId": 8453,
+          "symbol": "USDC",
+          "decimals": 6,
+          "name": "USD Coin",
+          "coinKey": "USDC",
+          "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png",
+          "priceUSD": "0.9976412145",
+          "tags": [
+           "stablecoin"
+          ],
+          "verificationStatus": "verified",
+          "verificationStatusBreakdown": [
+           {
+            "provider": "hypernative",
+            "result": "verified",
+            "providerResult": "accept"
+           }
+          ]
+         },
+         "slippage": 0.005,
+         "fromAddress": "qwjYpMzHkNQ6rNuMWaLshaxouXKLAmEDvRcgHLiQMwJ",
+         "toAddress": "0x4e23a33a8205a5db03e631e5484bf514f64b3a76",
+         "integratorId": "flofi",
+         "destinationGasConsumption": "0"
+        },
+        "estimate": {
+         "tool": "layerswap",
+         "fromAmount": "19950000",
+         "toAmount": "19874430",
+         "toAmountMin": "19775058",
+         "gasCosts": [
+          {
+           "type": "SEND",
+           "price": "1",
+           "estimate": "5000",
+           "limit": "6500",
+           "amount": "5000",
+           "amountUSD": "0.0005",
+           "token": {
+            "address": "11111111111111111111111111111111",
+            "chainId": 1151111081099710,
+            "symbol": "SOL",
+            "decimals": 9,
+            "name": "SOL",
+            "coinKey": "SOL",
+            "logoURI": "https://s2.coinmarketcap.com/static/img/coins/64x64/5426.png",
+            "priceUSD": "100.97014058635108",
+            "tags": [
+             "major_asset"
+            ],
+            "verificationStatus": "unverified",
+            "verificationStatusBreakdown": []
+           }
+          }
+         ],
+         "executionDuration": 5,
+         "approvalAddress": "G9sGMKGAdDDqTwPDuqYnxBPSoQk6A2KPbcJGoHpq2HPV",
+         "feeCosts": [
+          {
+           "name": "LayerSwap fee",
+           "description": "LayerSwap bridge fee",
+           "percentage": "0.0038",
+           "token": {
+            "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+            "chainId": 1151111081099710,
+            "symbol": "USDC",
+            "decimals": 6,
+            "name": "USD Coin",
+            "coinKey": "USDC",
+            "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png",
+            "priceUSD": "1.0008042401",
+            "tags": [
+             "stablecoin"
+            ],
+            "verificationStatus": "verified",
+            "verificationStatusBreakdown": [
+             {
+              "provider": "hypernative",
+              "result": "verified",
+              "providerResult": "accept"
+             }
+            ]
+           },
+           "amount": "75569",
+           "amountUSD": "0.075537",
+           "included": true
+          }
+         ]
+        },
+        "tool": "layerswap",
+        "toolDetails": {
+         "key": "layerswap",
+         "name": "Layerswap",
+         "logoURI": "https://raw.githubusercontent.com/lifinance/types/main/src/assets/icons/bridges/layerswap.svg"
+        }
+       }
+      ],
+      "integrator": "flofi",
+      "executionType": "transaction",
+      "recommendedSlippage": null
+     }
+    ],
+    "tags": []
+   },
+   {
+    "id": "e26da794-70b5-47ad-93af-87afd37f9063",
+    "fromChainId": 1151111081099710,
+    "fromAmountUSD": "20.0161",
+    "fromAmount": "20000000",
+    "fromToken": {
+     "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+     "chainId": 1151111081099710,
+     "symbol": "USDC",
+     "decimals": 6,
+     "name": "USD Coin",
+     "coinKey": "USDC",
+     "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png",
+     "priceUSD": "1.0008042401",
+     "tags": [
+      "stablecoin"
+     ],
+     "verificationStatus": "verified",
+     "verificationStatusBreakdown": [
+      {
+       "provider": "hypernative",
+       "result": "verified",
+       "providerResult": "accept"
+      }
+     ]
+    },
+    "fromAddress": "qwjYpMzHkNQ6rNuMWaLshaxouXKLAmEDvRcgHLiQMwJ",
+    "toChainId": 8453,
+    "toAmountUSD": "19.8259",
+    "toAmount": "19872733",
+    "toAmountMin": "19872733",
+    "toToken": {
+     "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+     "chainId": 8453,
+     "symbol": "USDC",
+     "decimals": 6,
+     "name": "USD Coin",
+     "coinKey": "USDC",
+     "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png",
+     "priceUSD": "0.9976412145",
+     "tags": [
+      "stablecoin"
+     ],
+     "verificationStatus": "verified",
+     "verificationStatusBreakdown": [
+      {
+       "provider": "hypernative",
+       "result": "verified",
+       "providerResult": "accept"
+      }
+     ]
+    },
+    "toAddress": "0x4e23a33a8205a5db03e631e5484bf514f64b3a76",
+    "gasCostUSD": "0.0136",
+    "containsSwitchChain": false,
+    "steps": [
+     {
+      "type": "lifi",
+      "id": "e26da794-70b5-47ad-93af-87afd37f9063:0",
+      "tool": "lifiIntents",
+      "toolDetails": {
+       "key": "lifiIntents",
+       "name": "LI.FI Intents",
+       "logoURI": "https://raw.githubusercontent.com/lifinance/types/main/src/assets/icons/bridges/lifi.svg"
+      },
+      "action": {
+       "fromToken": {
+        "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        "chainId": 1151111081099710,
+        "symbol": "USDC",
+        "decimals": 6,
+        "name": "USD Coin",
+        "coinKey": "USDC",
+        "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png",
+        "priceUSD": "1.0008042401",
+        "tags": [
+         "stablecoin"
+        ],
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+         {
+          "provider": "hypernative",
+          "result": "verified",
+          "providerResult": "accept"
+         }
+        ]
+       },
+       "fromAmount": "20000000",
+       "toToken": {
+        "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "chainId": 8453,
+        "symbol": "USDC",
+        "decimals": 6,
+        "name": "USD Coin",
+        "coinKey": "USDC",
+        "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png",
+        "priceUSD": "0.9976412145",
+        "tags": [
+         "stablecoin"
+        ],
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+         {
+          "provider": "hypernative",
+          "result": "verified",
+          "providerResult": "accept"
+         }
+        ]
+       },
+       "fromChainId": 1151111081099710,
+       "toChainId": 8453,
+       "slippage": 0.005,
+       "fromAddress": "qwjYpMzHkNQ6rNuMWaLshaxouXKLAmEDvRcgHLiQMwJ",
+       "toAddress": "0x4e23a33a8205a5db03e631e5484bf514f64b3a76"
+      },
+      "estimate": {
+       "tool": "lifiIntents",
+       "approvalAddress": "0x1231DEB6f5749EF6cE6943a275A1D3E7486F4EaE",
+       "toAmountMin": "19872733",
+       "toAmount": "19872733",
+       "fromAmount": "20000000",
+       "feeCosts": [
+        {
+         "name": "LIFI Fixed Fee",
+         "description": "Fixed LIFI fee, independent of any other fee",
+         "token": {
+          "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "chainId": 1151111081099710,
+          "symbol": "USDC",
+          "decimals": 6,
+          "name": "USD Coin",
+          "coinKey": "USDC",
+          "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png",
+          "priceUSD": "1.0008042401",
+          "tags": [
+           "stablecoin"
+          ],
+          "verificationStatus": "verified",
+          "verificationStatusBreakdown": [
+           {
+            "provider": "hypernative",
+            "result": "verified",
+            "providerResult": "accept"
+           }
+          ]
+         },
+         "amount": "50000",
+         "amountUSD": "0.0500",
+         "percentage": "0.0025",
+         "included": true,
+         "feeSplit": {
+          "lifiFee": "50000",
+          "integratorFee": "0",
+          "recipients": [
+           {
+            "name": "lifi",
+            "type": "FIXED",
+            "fee": "50000"
+           }
+          ]
+         }
+        }
+       ],
+       "gasCosts": [
+        {
+         "type": "SEND",
+         "price": "1",
+         "estimate": "135000",
+         "limit": "135000",
+         "amount": "135000",
+         "amountUSD": "0.0136",
+         "token": {
+          "address": "11111111111111111111111111111111",
+          "chainId": 1151111081099710,
+          "symbol": "SOL",
+          "decimals": 9,
+          "name": "SOL",
+          "coinKey": "SOL",
+          "logoURI": "https://s2.coinmarketcap.com/static/img/coins/64x64/5426.png",
+          "priceUSD": "100.97014058635108",
+          "tags": [
+           "major_asset"
+          ],
+          "verificationStatus": "unverified",
+          "verificationStatusBreakdown": []
+         }
+        }
+       ],
+       "executionDuration": 10,
+       "fromAmountUSD": "20.0161",
+       "toAmountUSD": "19.8259",
+       "skipPermit": false
+      },
+      "includedSteps": [
+       {
+        "id": "fee0696c-4e08-4f85-a61b-0f6f8dbb383b",
+        "type": "protocol",
+        "action": {
+         "fromChainId": 1151111081099710,
+         "fromAmount": "20000000",
+         "fromToken": {
+          "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "chainId": 1151111081099710,
+          "symbol": "USDC",
+          "decimals": 6,
+          "name": "USD Coin",
+          "coinKey": "USDC",
+          "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png",
+          "priceUSD": "1.0008042401",
+          "tags": [
+           "stablecoin"
+          ],
+          "verificationStatus": "verified",
+          "verificationStatusBreakdown": [
+           {
+            "provider": "hypernative",
+            "result": "verified",
+            "providerResult": "accept"
+           }
+          ]
+         },
+         "toChainId": 1151111081099710,
+         "toToken": {
+          "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "chainId": 1151111081099710,
+          "symbol": "USDC",
+          "decimals": 6,
+          "name": "USD Coin",
+          "coinKey": "USDC",
+          "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png",
+          "priceUSD": "1.0008042401",
+          "tags": [
+           "stablecoin"
+          ],
+          "verificationStatus": "verified",
+          "verificationStatusBreakdown": [
+           {
+            "provider": "hypernative",
+            "result": "verified",
+            "providerResult": "accept"
+           }
+          ]
+         },
+         "slippage": 0.005,
+         "fromAddress": "qwjYpMzHkNQ6rNuMWaLshaxouXKLAmEDvRcgHLiQMwJ",
+         "toAddress": "qwjYpMzHkNQ6rNuMWaLshaxouXKLAmEDvRcgHLiQMwJ",
+         "integratorId": "flofi"
+        },
+        "estimate": {
+         "fromAmount": "20000000",
+         "toAmount": "19950000",
+         "toAmountMin": "19950000",
+         "tool": "feeCollection",
+         "approvalAddress": "0x0000000000000000000000000000000000000000",
+         "gasCosts": [
+          {
+           "type": "SEND",
+           "price": "1",
+           "estimate": "130000",
+           "limit": "169000",
+           "amount": "130000",
+           "amountUSD": "0.0131",
+           "token": {
+            "address": "11111111111111111111111111111111",
+            "chainId": 1151111081099710,
+            "symbol": "SOL",
+            "decimals": 9,
+            "name": "SOL",
+            "coinKey": "SOL",
+            "logoURI": "https://s2.coinmarketcap.com/static/img/coins/64x64/5426.png",
+            "priceUSD": "100.97014058635108",
+            "tags": [
+             "major_asset"
+            ],
+            "verificationStatus": "unverified",
+            "verificationStatusBreakdown": []
+           }
+          }
+         ],
+         "feeCosts": [
+          {
+           "name": "LIFI Fixed Fee",
+           "description": "Fixed LIFI fee, independent of any other fee",
+           "token": {
+            "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+            "chainId": 1151111081099710,
+            "symbol": "USDC",
+            "decimals": 6,
+            "name": "USD Coin",
+            "coinKey": "USDC",
+            "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png",
+            "priceUSD": "1.0008042401",
+            "tags": [
+             "stablecoin"
+            ],
+            "verificationStatus": "verified",
+            "verificationStatusBreakdown": [
+             {
+              "provider": "hypernative",
+              "result": "verified",
+              "providerResult": "accept"
+             }
+            ]
+           },
+           "amount": "50000",
+           "amountUSD": "0.0500",
+           "percentage": "0.0025",
+           "included": true,
+           "feeSplit": {
+            "lifiFee": "50000",
+            "integratorFee": "0",
+            "recipients": [
+             {
+              "name": "lifi",
+              "type": "FIXED",
+              "fee": "50000"
+             }
+            ]
+           }
+          }
+         ],
+         "executionDuration": 0
+        },
+        "tool": "feeCollection",
+        "toolDetails": {
+         "key": "feeCollection",
+         "name": "Integrator Fee",
+         "logoURI": "https://raw.githubusercontent.com/lifinance/types/main/src/assets/icons/protocols/feeCollection.svg"
+        }
+       },
+       {
+        "id": "ebe385b3-02d3-4ebd-9d18-53c774f75438",
+        "type": "cross",
+        "action": {
+         "fromChainId": 1151111081099710,
+         "fromAmount": "19950000",
+         "fromToken": {
+          "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "chainId": 1151111081099710,
+          "symbol": "USDC",
+          "decimals": 6,
+          "name": "USD Coin",
+          "coinKey": "USDC",
+          "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png",
+          "priceUSD": "1.0008042401",
+          "tags": [
+           "stablecoin"
+          ],
+          "verificationStatus": "verified",
+          "verificationStatusBreakdown": [
+           {
+            "provider": "hypernative",
+            "result": "verified",
+            "providerResult": "accept"
+           }
+          ]
+         },
+         "toChainId": 8453,
+         "toToken": {
+          "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "chainId": 8453,
+          "symbol": "USDC",
+          "decimals": 6,
+          "name": "USD Coin",
+          "coinKey": "USDC",
+          "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png",
+          "priceUSD": "0.9976412145",
+          "tags": [
+           "stablecoin"
+          ],
+          "verificationStatus": "verified",
+          "verificationStatusBreakdown": [
+           {
+            "provider": "hypernative",
+            "result": "verified",
+            "providerResult": "accept"
+           }
+          ]
+         },
+         "slippage": 0.005,
+         "fromAddress": "qwjYpMzHkNQ6rNuMWaLshaxouXKLAmEDvRcgHLiQMwJ",
+         "toAddress": "0x4e23a33a8205a5db03e631e5484bf514f64b3a76",
+         "integratorId": "flofi",
+         "destinationGasConsumption": "0"
+        },
+        "estimate": {
+         "tool": "lifiIntents",
+         "fromAmount": "19950000",
+         "toAmount": "19872733",
+         "toAmountMin": "19872733",
+         "approvalAddress": "G9sGMKGAdDDqTwPDuqYnxBPSoQk6A2KPbcJGoHpq2HPV",
+         "executionDuration": 10,
+         "feeCosts": [],
+         "gasCosts": [
+          {
+           "type": "SEND",
+           "price": "1",
+           "estimate": "5000",
+           "limit": "6500",
+           "amount": "5000",
+           "amountUSD": "0.0005",
+           "token": {
+            "address": "11111111111111111111111111111111",
+            "chainId": 1151111081099710,
+            "symbol": "SOL",
+            "decimals": 9,
+            "name": "SOL",
+            "coinKey": "SOL",
+            "logoURI": "https://s2.coinmarketcap.com/static/img/coins/64x64/5426.png",
+            "priceUSD": "100.97014058635108",
+            "tags": [
+             "major_asset"
+            ],
+            "verificationStatus": "unverified",
+            "verificationStatusBreakdown": []
+           }
+          }
+         ]
+        },
+        "tool": "lifiIntents",
+        "toolDetails": {
+         "key": "lifiIntents",
+         "name": "LI.FI Intents",
+         "logoURI": "https://raw.githubusercontent.com/lifinance/types/main/src/assets/icons/bridges/lifi.svg"
+        }
+       }
+      ],
+      "integrator": "flofi",
+      "executionType": "transaction",
+      "recommendedSlippage": null
+     }
+    ],
+    "tags": []
+   }
+  ],
+  "unavailableRoutes": {
+   "filteredOut": [
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:USDT-1151111081099710:USDT-allbridge-8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:Anon-1151111081099710:Anon-glacis-8453:Anon-8453:Anon~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:AVAIL-1151111081099710:AVAIL-glacis-8453:AVAIL-8453:AVAIL~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:CGPT-1151111081099710:CGPT-glacis-8453:CGPT-8453:CGPT~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:CHZ-1151111081099710:CHZ-glacis-8453:CHZ-8453:CHZ~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:DEGEN-1151111081099710:DEGEN-glacis-8453:DEGEN-8453:DEGEN~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:elizaOS-1151111081099710:elizaOS-glacis-8453:elizaOS-8453:elizaOS~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:EUROB-1151111081099710:EUROB-glacis-8453:EUROB-8453:EUROB~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:FLUID-1151111081099710:FLUID-glacis-8453:FLUID-8453:FLUID~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:GILTS-1151111081099710:GILTS-glacis-8453:GILTS-8453:GILTS~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:ISLAND-1151111081099710:ISLAND-glacis-8453:ISLAND (niftyisland.com)-8453:ISLAND (niftyisland.com)~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:L3-1151111081099710:L3-glacis-8453:L3-8453:L3~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:LINK-1151111081099710:LINK-glacis-8453:LINK-8453:LINK~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:MEW-1151111081099710:MEW-glacis-8453:MEW-8453:MEW~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:$michi-1151111081099710:$michi-glacis-8453:michi-8453:michi~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:ORDER-1151111081099710:ORDER-glacis-8453:ORDER-8453:ORDER~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:PAAL-1151111081099710:PAAL-glacis-8453:$PAAL-8453:$PAAL~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:PEPPER-1151111081099710:PEPPER-glacis-8453:PEPPER-8453:PEPPER~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:pippin-1151111081099710:pippin-glacis-8453:pippin-8453:pippin~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:PUFF-1151111081099710:PUFF-glacis-8453:Puff-8453:Puff~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:RED-1151111081099710:RED-glacis-8453:RED-8453:RED~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:TRUMP-1151111081099710:TRUMP-glacis-8453:TRUMP-8453:TRUMP~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:UFD-1151111081099710:UFD-glacis-8453:UFD-8453:UFD~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:USTRY-1151111081099710:USTRY-glacis-8453:USTRY-8453:USTRY~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:VIRTUAL-1151111081099710:VIRTUAL-glacis-8453:VIRTUAL-8453:VIRTUAL~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:W-1151111081099710:W-glacis-8453:W-8453:W~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:W0G-1151111081099710:W0G-glacis-8453:W0G-8453:W0G~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:YNE-1151111081099710:YNE-glacis-8453:YNE-8453:YNE~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:zBTC-1151111081099710:zBTC-glacis-8453:zBTC-8453:zBTC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:ZEREBRO-1151111081099710:ZEREBRO-glacis-8453:ZEREBRO-8453:ZEREBRO~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:ZYPTO-1151111081099710:ZYPTO-glacis-8453:ZYPTO-8453:ZYPTO~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:SOL-1151111081099710:SOL-gasZipBridge-8453:ETH-8453:ETH~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:SOL-1151111081099710:SOL-near-8453:SSC1_PIT-8453:SSC1_PIT~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:SOL-1151111081099710:SOL-near-8453:KAITO-8453:KAITO~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:SOL-1151111081099710:SOL-near-8453:TITN-8453:TITN~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:SOL-1151111081099710:SOL-near-8453:VVV-8453:VVV~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:SOL-1151111081099710:SOL-near-8453:ETH-8453:ETH~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:SOL-1151111081099710:SOL-near-8453:WETH-8453:WETH~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:SOL-1151111081099710:SOL-near-8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:SOL-1151111081099710:SOL-near-8453:cbBTC-8453:cbBTC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:SOL-1151111081099710:SOL-near-8453:SWEAT-8453:SWEAT~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:SOL-1151111081099710:SOL-near-8453:sUSDC-8453:sUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:SOL-1151111081099710:SOL-near-8453:near-gtUSDCp-8453:near-gtUSDCp~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:SOL-1151111081099710:SOL-near-8453:near-sparkUSDC-8453:near-sparkUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:SOL-1151111081099710:SOL-near-8453:near-mwUSDC-8453:near-mwUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:SOL-1151111081099710:SOL-near-8453:laUSDC-8453:laUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:SOL-1151111081099710:SOL-near-8453:BRETT-8453:BRETT~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:SOL-1151111081099710:SOL-near-8453:FMS Token-8453:FMS Token~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:SOL-1151111081099710:SOL-near-8453:COCA-8453:COCA~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:SOL-1151111081099710:SOL-near-8453:CFI-8453:CFI~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:$WIF-1151111081099710:$WIF-near-8453:SSC1_PIT-8453:SSC1_PIT~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:$WIF-1151111081099710:$WIF-near-8453:KAITO-8453:KAITO~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:$WIF-1151111081099710:$WIF-near-8453:TITN-8453:TITN~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:$WIF-1151111081099710:$WIF-near-8453:VVV-8453:VVV~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:$WIF-1151111081099710:$WIF-near-8453:ETH-8453:ETH~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:$WIF-1151111081099710:$WIF-near-8453:WETH-8453:WETH~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:$WIF-1151111081099710:$WIF-near-8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:$WIF-1151111081099710:$WIF-near-8453:cbBTC-8453:cbBTC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:$WIF-1151111081099710:$WIF-near-8453:SWEAT-8453:SWEAT~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:$WIF-1151111081099710:$WIF-near-8453:sUSDC-8453:sUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:$WIF-1151111081099710:$WIF-near-8453:near-gtUSDCp-8453:near-gtUSDCp~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:$WIF-1151111081099710:$WIF-near-8453:near-sparkUSDC-8453:near-sparkUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:$WIF-1151111081099710:$WIF-near-8453:near-mwUSDC-8453:near-mwUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:$WIF-1151111081099710:$WIF-near-8453:laUSDC-8453:laUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:$WIF-1151111081099710:$WIF-near-8453:BRETT-8453:BRETT~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:$WIF-1151111081099710:$WIF-near-8453:FMS Token-8453:FMS Token~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:$WIF-1151111081099710:$WIF-near-8453:COCA-8453:COCA~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:$WIF-1151111081099710:$WIF-near-8453:CFI-8453:CFI~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:BOME-1151111081099710:BOME-near-8453:SSC1_PIT-8453:SSC1_PIT~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:BOME-1151111081099710:BOME-near-8453:KAITO-8453:KAITO~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:BOME-1151111081099710:BOME-near-8453:TITN-8453:TITN~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:BOME-1151111081099710:BOME-near-8453:VVV-8453:VVV~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:BOME-1151111081099710:BOME-near-8453:ETH-8453:ETH~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:BOME-1151111081099710:BOME-near-8453:WETH-8453:WETH~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:BOME-1151111081099710:BOME-near-8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:BOME-1151111081099710:BOME-near-8453:cbBTC-8453:cbBTC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:BOME-1151111081099710:BOME-near-8453:SWEAT-8453:SWEAT~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:BOME-1151111081099710:BOME-near-8453:sUSDC-8453:sUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:BOME-1151111081099710:BOME-near-8453:near-gtUSDCp-8453:near-gtUSDCp~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:BOME-1151111081099710:BOME-near-8453:near-sparkUSDC-8453:near-sparkUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:BOME-1151111081099710:BOME-near-8453:near-mwUSDC-8453:near-mwUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:BOME-1151111081099710:BOME-near-8453:laUSDC-8453:laUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:BOME-1151111081099710:BOME-near-8453:BRETT-8453:BRETT~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:BOME-1151111081099710:BOME-near-8453:FMS Token-8453:FMS Token~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:BOME-1151111081099710:BOME-near-8453:COCA-8453:COCA~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:BOME-1151111081099710:BOME-near-8453:CFI-8453:CFI~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:TRUMP-1151111081099710:TRUMP-near-8453:SSC1_PIT-8453:SSC1_PIT~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:TRUMP-1151111081099710:TRUMP-near-8453:KAITO-8453:KAITO~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:TRUMP-1151111081099710:TRUMP-near-8453:TITN-8453:TITN~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:TRUMP-1151111081099710:TRUMP-near-8453:VVV-8453:VVV~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:TRUMP-1151111081099710:TRUMP-near-8453:ETH-8453:ETH~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:TRUMP-1151111081099710:TRUMP-near-8453:WETH-8453:WETH~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:TRUMP-1151111081099710:TRUMP-near-8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:TRUMP-1151111081099710:TRUMP-near-8453:cbBTC-8453:cbBTC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:TRUMP-1151111081099710:TRUMP-near-8453:SWEAT-8453:SWEAT~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:TRUMP-1151111081099710:TRUMP-near-8453:sUSDC-8453:sUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:TRUMP-1151111081099710:TRUMP-near-8453:near-gtUSDCp-8453:near-gtUSDCp~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:TRUMP-1151111081099710:TRUMP-near-8453:near-sparkUSDC-8453:near-sparkUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:TRUMP-1151111081099710:TRUMP-near-8453:near-mwUSDC-8453:near-mwUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:TRUMP-1151111081099710:TRUMP-near-8453:laUSDC-8453:laUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:TRUMP-1151111081099710:TRUMP-near-8453:BRETT-8453:BRETT~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:TRUMP-1151111081099710:TRUMP-near-8453:FMS Token-8453:FMS Token~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:TRUMP-1151111081099710:TRUMP-near-8453:COCA-8453:COCA~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:TRUMP-1151111081099710:TRUMP-near-8453:CFI-8453:CFI~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:PENGU-1151111081099710:PENGU-near-8453:SSC1_PIT-8453:SSC1_PIT~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:PENGU-1151111081099710:PENGU-near-8453:KAITO-8453:KAITO~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:PENGU-1151111081099710:PENGU-near-8453:TITN-8453:TITN~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:PENGU-1151111081099710:PENGU-near-8453:VVV-8453:VVV~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:PENGU-1151111081099710:PENGU-near-8453:ETH-8453:ETH~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:PENGU-1151111081099710:PENGU-near-8453:WETH-8453:WETH~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:PENGU-1151111081099710:PENGU-near-8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:PENGU-1151111081099710:PENGU-near-8453:cbBTC-8453:cbBTC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:PENGU-1151111081099710:PENGU-near-8453:SWEAT-8453:SWEAT~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:PENGU-1151111081099710:PENGU-near-8453:sUSDC-8453:sUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:PENGU-1151111081099710:PENGU-near-8453:near-gtUSDCp-8453:near-gtUSDCp~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:PENGU-1151111081099710:PENGU-near-8453:near-sparkUSDC-8453:near-sparkUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:PENGU-1151111081099710:PENGU-near-8453:near-mwUSDC-8453:near-mwUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:PENGU-1151111081099710:PENGU-near-8453:laUSDC-8453:laUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:PENGU-1151111081099710:PENGU-near-8453:BRETT-8453:BRETT~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:PENGU-1151111081099710:PENGU-near-8453:FMS Token-8453:FMS Token~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:PENGU-1151111081099710:PENGU-near-8453:COCA-8453:COCA~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:PENGU-1151111081099710:PENGU-near-8453:CFI-8453:CFI~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:USD1-1151111081099710:USD1-near-8453:SSC1_PIT-8453:SSC1_PIT~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:USD1-1151111081099710:USD1-near-8453:KAITO-8453:KAITO~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:USD1-1151111081099710:USD1-near-8453:TITN-8453:TITN~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:USD1-1151111081099710:USD1-near-8453:VVV-8453:VVV~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:USD1-1151111081099710:USD1-near-8453:ETH-8453:ETH~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:USD1-1151111081099710:USD1-near-8453:WETH-8453:WETH~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:USD1-1151111081099710:USD1-near-8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:USD1-1151111081099710:USD1-near-8453:cbBTC-8453:cbBTC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:USD1-1151111081099710:USD1-near-8453:SWEAT-8453:SWEAT~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:USD1-1151111081099710:USD1-near-8453:sUSDC-8453:sUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:USD1-1151111081099710:USD1-near-8453:near-gtUSDCp-8453:near-gtUSDCp~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:USD1-1151111081099710:USD1-near-8453:near-sparkUSDC-8453:near-sparkUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:USD1-1151111081099710:USD1-near-8453:near-mwUSDC-8453:near-mwUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:USD1-1151111081099710:USD1-near-8453:laUSDC-8453:laUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:USD1-1151111081099710:USD1-near-8453:BRETT-8453:BRETT~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:USD1-1151111081099710:USD1-near-8453:FMS Token-8453:FMS Token~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:USD1-1151111081099710:USD1-near-8453:COCA-8453:COCA~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:USD1-1151111081099710:USD1-near-8453:CFI-8453:CFI~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:USDT-1151111081099710:USDT-near-8453:SSC1_PIT-8453:SSC1_PIT~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:USDT-1151111081099710:USDT-near-8453:KAITO-8453:KAITO~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:USDT-1151111081099710:USDT-near-8453:TITN-8453:TITN~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:USDT-1151111081099710:USDT-near-8453:VVV-8453:VVV~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:USDT-1151111081099710:USDT-near-8453:ETH-8453:ETH~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:USDT-1151111081099710:USDT-near-8453:WETH-8453:WETH~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:USDT-1151111081099710:USDT-near-8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:USDT-1151111081099710:USDT-near-8453:cbBTC-8453:cbBTC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:USDT-1151111081099710:USDT-near-8453:SWEAT-8453:SWEAT~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:USDT-1151111081099710:USDT-near-8453:sUSDC-8453:sUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:USDT-1151111081099710:USDT-near-8453:near-gtUSDCp-8453:near-gtUSDCp~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:USDT-1151111081099710:USDT-near-8453:near-sparkUSDC-8453:near-sparkUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:USDT-1151111081099710:USDT-near-8453:near-mwUSDC-8453:near-mwUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:USDT-1151111081099710:USDT-near-8453:laUSDC-8453:laUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:USDT-1151111081099710:USDT-near-8453:BRETT-8453:BRETT~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:USDT-1151111081099710:USDT-near-8453:FMS Token-8453:FMS Token~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:USDT-1151111081099710:USDT-near-8453:COCA-8453:COCA~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:USDT-1151111081099710:USDT-near-8453:CFI-8453:CFI~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:xBTC-1151111081099710:xBTC-near-8453:SSC1_PIT-8453:SSC1_PIT~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:xBTC-1151111081099710:xBTC-near-8453:KAITO-8453:KAITO~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:xBTC-1151111081099710:xBTC-near-8453:TITN-8453:TITN~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:xBTC-1151111081099710:xBTC-near-8453:VVV-8453:VVV~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:xBTC-1151111081099710:xBTC-near-8453:ETH-8453:ETH~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:xBTC-1151111081099710:xBTC-near-8453:WETH-8453:WETH~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:xBTC-1151111081099710:xBTC-near-8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:xBTC-1151111081099710:xBTC-near-8453:cbBTC-8453:cbBTC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:xBTC-1151111081099710:xBTC-near-8453:SWEAT-8453:SWEAT~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:xBTC-1151111081099710:xBTC-near-8453:sUSDC-8453:sUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:xBTC-1151111081099710:xBTC-near-8453:near-gtUSDCp-8453:near-gtUSDCp~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:xBTC-1151111081099710:xBTC-near-8453:near-sparkUSDC-8453:near-sparkUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:xBTC-1151111081099710:xBTC-near-8453:near-mwUSDC-8453:near-mwUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:xBTC-1151111081099710:xBTC-near-8453:laUSDC-8453:laUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:xBTC-1151111081099710:xBTC-near-8453:BRETT-8453:BRETT~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:xBTC-1151111081099710:xBTC-near-8453:FMS Token-8453:FMS Token~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:xBTC-1151111081099710:xBTC-near-8453:COCA-8453:COCA~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:xBTC-1151111081099710:xBTC-near-8453:CFI-8453:CFI~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:TURBO-1151111081099710:TURBO-near-8453:SSC1_PIT-8453:SSC1_PIT~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:TURBO-1151111081099710:TURBO-near-8453:KAITO-8453:KAITO~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:TURBO-1151111081099710:TURBO-near-8453:TITN-8453:TITN~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:TURBO-1151111081099710:TURBO-near-8453:VVV-8453:VVV~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:TURBO-1151111081099710:TURBO-near-8453:ETH-8453:ETH~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:TURBO-1151111081099710:TURBO-near-8453:WETH-8453:WETH~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:TURBO-1151111081099710:TURBO-near-8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:TURBO-1151111081099710:TURBO-near-8453:cbBTC-8453:cbBTC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:TURBO-1151111081099710:TURBO-near-8453:SWEAT-8453:SWEAT~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:TURBO-1151111081099710:TURBO-near-8453:sUSDC-8453:sUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:TURBO-1151111081099710:TURBO-near-8453:near-gtUSDCp-8453:near-gtUSDCp~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:TURBO-1151111081099710:TURBO-near-8453:near-sparkUSDC-8453:near-sparkUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:TURBO-1151111081099710:TURBO-near-8453:near-mwUSDC-8453:near-mwUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:TURBO-1151111081099710:TURBO-near-8453:laUSDC-8453:laUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:TURBO-1151111081099710:TURBO-near-8453:BRETT-8453:BRETT~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:TURBO-1151111081099710:TURBO-near-8453:FMS Token-8453:FMS Token~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:TURBO-1151111081099710:TURBO-near-8453:COCA-8453:COCA~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:TURBO-1151111081099710:TURBO-near-8453:CFI-8453:CFI~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:SPX-1151111081099710:SPX-near-8453:SSC1_PIT-8453:SSC1_PIT~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:SPX-1151111081099710:SPX-near-8453:KAITO-8453:KAITO~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:SPX-1151111081099710:SPX-near-8453:TITN-8453:TITN~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:SPX-1151111081099710:SPX-near-8453:VVV-8453:VVV~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:SPX-1151111081099710:SPX-near-8453:ETH-8453:ETH~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:SPX-1151111081099710:SPX-near-8453:WETH-8453:WETH~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:SPX-1151111081099710:SPX-near-8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:SPX-1151111081099710:SPX-near-8453:cbBTC-8453:cbBTC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:SPX-1151111081099710:SPX-near-8453:SWEAT-8453:SWEAT~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:SPX-1151111081099710:SPX-near-8453:sUSDC-8453:sUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:SPX-1151111081099710:SPX-near-8453:near-gtUSDCp-8453:near-gtUSDCp~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:SPX-1151111081099710:SPX-near-8453:near-sparkUSDC-8453:near-sparkUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:SPX-1151111081099710:SPX-near-8453:near-mwUSDC-8453:near-mwUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:SPX-1151111081099710:SPX-near-8453:laUSDC-8453:laUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:SPX-1151111081099710:SPX-near-8453:BRETT-8453:BRETT~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:SPX-1151111081099710:SPX-near-8453:FMS Token-8453:FMS Token~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:SPX-1151111081099710:SPX-near-8453:COCA-8453:COCA~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:SPX-1151111081099710:SPX-near-8453:CFI-8453:CFI~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:sUSDC-1151111081099710:sUSDC-near-8453:SSC1_PIT-8453:SSC1_PIT~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:sUSDC-1151111081099710:sUSDC-near-8453:KAITO-8453:KAITO~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:sUSDC-1151111081099710:sUSDC-near-8453:TITN-8453:TITN~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:sUSDC-1151111081099710:sUSDC-near-8453:VVV-8453:VVV~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:sUSDC-1151111081099710:sUSDC-near-8453:ETH-8453:ETH~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:sUSDC-1151111081099710:sUSDC-near-8453:WETH-8453:WETH~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:sUSDC-1151111081099710:sUSDC-near-8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:sUSDC-1151111081099710:sUSDC-near-8453:cbBTC-8453:cbBTC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:sUSDC-1151111081099710:sUSDC-near-8453:SWEAT-8453:SWEAT~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:sUSDC-1151111081099710:sUSDC-near-8453:sUSDC-8453:sUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:sUSDC-1151111081099710:sUSDC-near-8453:near-gtUSDCp-8453:near-gtUSDCp~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:sUSDC-1151111081099710:sUSDC-near-8453:near-sparkUSDC-8453:near-sparkUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:sUSDC-1151111081099710:sUSDC-near-8453:near-mwUSDC-8453:near-mwUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:sUSDC-1151111081099710:sUSDC-near-8453:laUSDC-8453:laUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:sUSDC-1151111081099710:sUSDC-near-8453:BRETT-8453:BRETT~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:sUSDC-1151111081099710:sUSDC-near-8453:FMS Token-8453:FMS Token~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:sUSDC-1151111081099710:sUSDC-near-8453:COCA-8453:COCA~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:sUSDC-1151111081099710:sUSDC-near-8453:CFI-8453:CFI~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:MELANIA-1151111081099710:MELANIA-near-8453:SSC1_PIT-8453:SSC1_PIT~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:MELANIA-1151111081099710:MELANIA-near-8453:KAITO-8453:KAITO~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:MELANIA-1151111081099710:MELANIA-near-8453:TITN-8453:TITN~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:MELANIA-1151111081099710:MELANIA-near-8453:VVV-8453:VVV~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:MELANIA-1151111081099710:MELANIA-near-8453:ETH-8453:ETH~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:MELANIA-1151111081099710:MELANIA-near-8453:WETH-8453:WETH~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:MELANIA-1151111081099710:MELANIA-near-8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:MELANIA-1151111081099710:MELANIA-near-8453:cbBTC-8453:cbBTC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:MELANIA-1151111081099710:MELANIA-near-8453:SWEAT-8453:SWEAT~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:MELANIA-1151111081099710:MELANIA-near-8453:sUSDC-8453:sUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:MELANIA-1151111081099710:MELANIA-near-8453:near-gtUSDCp-8453:near-gtUSDCp~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:MELANIA-1151111081099710:MELANIA-near-8453:near-sparkUSDC-8453:near-sparkUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:MELANIA-1151111081099710:MELANIA-near-8453:near-mwUSDC-8453:near-mwUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:MELANIA-1151111081099710:MELANIA-near-8453:laUSDC-8453:laUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:MELANIA-1151111081099710:MELANIA-near-8453:BRETT-8453:BRETT~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:MELANIA-1151111081099710:MELANIA-near-8453:FMS Token-8453:FMS Token~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:MELANIA-1151111081099710:MELANIA-near-8453:COCA-8453:COCA~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:MELANIA-1151111081099710:MELANIA-near-8453:CFI-8453:CFI~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:LOUD-1151111081099710:LOUD-near-8453:SSC1_PIT-8453:SSC1_PIT~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:LOUD-1151111081099710:LOUD-near-8453:KAITO-8453:KAITO~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:LOUD-1151111081099710:LOUD-near-8453:TITN-8453:TITN~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:LOUD-1151111081099710:LOUD-near-8453:VVV-8453:VVV~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:LOUD-1151111081099710:LOUD-near-8453:ETH-8453:ETH~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:LOUD-1151111081099710:LOUD-near-8453:WETH-8453:WETH~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:LOUD-1151111081099710:LOUD-near-8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:LOUD-1151111081099710:LOUD-near-8453:cbBTC-8453:cbBTC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:LOUD-1151111081099710:LOUD-near-8453:SWEAT-8453:SWEAT~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:LOUD-1151111081099710:LOUD-near-8453:sUSDC-8453:sUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:LOUD-1151111081099710:LOUD-near-8453:near-gtUSDCp-8453:near-gtUSDCp~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:LOUD-1151111081099710:LOUD-near-8453:near-sparkUSDC-8453:near-sparkUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:LOUD-1151111081099710:LOUD-near-8453:near-mwUSDC-8453:near-mwUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:LOUD-1151111081099710:LOUD-near-8453:laUSDC-8453:laUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:LOUD-1151111081099710:LOUD-near-8453:BRETT-8453:BRETT~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:LOUD-1151111081099710:LOUD-near-8453:FMS Token-8453:FMS Token~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:LOUD-1151111081099710:LOUD-near-8453:COCA-8453:COCA~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:LOUD-1151111081099710:LOUD-near-8453:CFI-8453:CFI~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:NEARKAT-1151111081099710:NEARKAT-near-8453:SSC1_PIT-8453:SSC1_PIT~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:NEARKAT-1151111081099710:NEARKAT-near-8453:KAITO-8453:KAITO~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:NEARKAT-1151111081099710:NEARKAT-near-8453:TITN-8453:TITN~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:NEARKAT-1151111081099710:NEARKAT-near-8453:VVV-8453:VVV~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:NEARKAT-1151111081099710:NEARKAT-near-8453:ETH-8453:ETH~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:NEARKAT-1151111081099710:NEARKAT-near-8453:WETH-8453:WETH~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:NEARKAT-1151111081099710:NEARKAT-near-8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:NEARKAT-1151111081099710:NEARKAT-near-8453:cbBTC-8453:cbBTC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:NEARKAT-1151111081099710:NEARKAT-near-8453:SWEAT-8453:SWEAT~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:NEARKAT-1151111081099710:NEARKAT-near-8453:sUSDC-8453:sUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:NEARKAT-1151111081099710:NEARKAT-near-8453:near-gtUSDCp-8453:near-gtUSDCp~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:NEARKAT-1151111081099710:NEARKAT-near-8453:near-sparkUSDC-8453:near-sparkUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:NEARKAT-1151111081099710:NEARKAT-near-8453:near-mwUSDC-8453:near-mwUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:NEARKAT-1151111081099710:NEARKAT-near-8453:laUSDC-8453:laUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:NEARKAT-1151111081099710:NEARKAT-near-8453:BRETT-8453:BRETT~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:NEARKAT-1151111081099710:NEARKAT-near-8453:FMS Token-8453:FMS Token~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:NEARKAT-1151111081099710:NEARKAT-near-8453:COCA-8453:COCA~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:NEARKAT-1151111081099710:NEARKAT-near-8453:CFI-8453:CFI~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:ZEC-1151111081099710:ZEC-near-8453:SSC1_PIT-8453:SSC1_PIT~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:ZEC-1151111081099710:ZEC-near-8453:KAITO-8453:KAITO~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:ZEC-1151111081099710:ZEC-near-8453:TITN-8453:TITN~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:ZEC-1151111081099710:ZEC-near-8453:VVV-8453:VVV~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:ZEC-1151111081099710:ZEC-near-8453:ETH-8453:ETH~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:ZEC-1151111081099710:ZEC-near-8453:WETH-8453:WETH~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:ZEC-1151111081099710:ZEC-near-8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:ZEC-1151111081099710:ZEC-near-8453:cbBTC-8453:cbBTC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:ZEC-1151111081099710:ZEC-near-8453:SWEAT-8453:SWEAT~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:ZEC-1151111081099710:ZEC-near-8453:sUSDC-8453:sUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:ZEC-1151111081099710:ZEC-near-8453:near-gtUSDCp-8453:near-gtUSDCp~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:ZEC-1151111081099710:ZEC-near-8453:near-sparkUSDC-8453:near-sparkUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:ZEC-1151111081099710:ZEC-near-8453:near-mwUSDC-8453:near-mwUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:ZEC-1151111081099710:ZEC-near-8453:laUSDC-8453:laUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:ZEC-1151111081099710:ZEC-near-8453:BRETT-8453:BRETT~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:ZEC-1151111081099710:ZEC-near-8453:FMS Token-8453:FMS Token~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:ZEC-1151111081099710:ZEC-near-8453:COCA-8453:COCA~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:ZEC-1151111081099710:ZEC-near-8453:CFI-8453:CFI~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:wNEAR-1151111081099710:wNEAR-near-8453:SSC1_PIT-8453:SSC1_PIT~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:wNEAR-1151111081099710:wNEAR-near-8453:KAITO-8453:KAITO~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:wNEAR-1151111081099710:wNEAR-near-8453:TITN-8453:TITN~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:wNEAR-1151111081099710:wNEAR-near-8453:VVV-8453:VVV~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:wNEAR-1151111081099710:wNEAR-near-8453:ETH-8453:ETH~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:wNEAR-1151111081099710:wNEAR-near-8453:WETH-8453:WETH~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:wNEAR-1151111081099710:wNEAR-near-8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:wNEAR-1151111081099710:wNEAR-near-8453:cbBTC-8453:cbBTC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:wNEAR-1151111081099710:wNEAR-near-8453:SWEAT-8453:SWEAT~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:wNEAR-1151111081099710:wNEAR-near-8453:sUSDC-8453:sUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:wNEAR-1151111081099710:wNEAR-near-8453:near-gtUSDCp-8453:near-gtUSDCp~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:wNEAR-1151111081099710:wNEAR-near-8453:near-sparkUSDC-8453:near-sparkUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:wNEAR-1151111081099710:wNEAR-near-8453:near-mwUSDC-8453:near-mwUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:wNEAR-1151111081099710:wNEAR-near-8453:laUSDC-8453:laUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:wNEAR-1151111081099710:wNEAR-near-8453:BRETT-8453:BRETT~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:wNEAR-1151111081099710:wNEAR-near-8453:FMS Token-8453:FMS Token~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:wNEAR-1151111081099710:wNEAR-near-8453:COCA-8453:COCA~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:wNEAR-1151111081099710:wNEAR-near-8453:CFI-8453:CFI~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:STRK-1151111081099710:STRK-near-8453:SSC1_PIT-8453:SSC1_PIT~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:STRK-1151111081099710:STRK-near-8453:KAITO-8453:KAITO~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:STRK-1151111081099710:STRK-near-8453:TITN-8453:TITN~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:STRK-1151111081099710:STRK-near-8453:VVV-8453:VVV~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:STRK-1151111081099710:STRK-near-8453:ETH-8453:ETH~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:STRK-1151111081099710:STRK-near-8453:WETH-8453:WETH~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:STRK-1151111081099710:STRK-near-8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:STRK-1151111081099710:STRK-near-8453:cbBTC-8453:cbBTC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:STRK-1151111081099710:STRK-near-8453:SWEAT-8453:SWEAT~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:STRK-1151111081099710:STRK-near-8453:sUSDC-8453:sUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:STRK-1151111081099710:STRK-near-8453:near-gtUSDCp-8453:near-gtUSDCp~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:STRK-1151111081099710:STRK-near-8453:near-sparkUSDC-8453:near-sparkUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:STRK-1151111081099710:STRK-near-8453:near-mwUSDC-8453:near-mwUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:STRK-1151111081099710:STRK-near-8453:laUSDC-8453:laUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:STRK-1151111081099710:STRK-near-8453:BRETT-8453:BRETT~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:STRK-1151111081099710:STRK-near-8453:FMS Token-8453:FMS Token~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:STRK-1151111081099710:STRK-near-8453:COCA-8453:COCA~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:STRK-1151111081099710:STRK-near-8453:CFI-8453:CFI~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:RHEA-1151111081099710:RHEA-near-8453:SSC1_PIT-8453:SSC1_PIT~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:RHEA-1151111081099710:RHEA-near-8453:KAITO-8453:KAITO~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:RHEA-1151111081099710:RHEA-near-8453:TITN-8453:TITN~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:RHEA-1151111081099710:RHEA-near-8453:VVV-8453:VVV~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:RHEA-1151111081099710:RHEA-near-8453:ETH-8453:ETH~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:RHEA-1151111081099710:RHEA-near-8453:WETH-8453:WETH~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:RHEA-1151111081099710:RHEA-near-8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:RHEA-1151111081099710:RHEA-near-8453:cbBTC-8453:cbBTC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:RHEA-1151111081099710:RHEA-near-8453:SWEAT-8453:SWEAT~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:RHEA-1151111081099710:RHEA-near-8453:sUSDC-8453:sUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:RHEA-1151111081099710:RHEA-near-8453:near-gtUSDCp-8453:near-gtUSDCp~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:RHEA-1151111081099710:RHEA-near-8453:near-sparkUSDC-8453:near-sparkUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:RHEA-1151111081099710:RHEA-near-8453:near-mwUSDC-8453:near-mwUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:RHEA-1151111081099710:RHEA-near-8453:laUSDC-8453:laUSDC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:RHEA-1151111081099710:RHEA-near-8453:BRETT-8453:BRETT~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:RHEA-1151111081099710:RHEA-near-8453:FMS Token-8453:FMS Token~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:RHEA-1151111081099710:RHEA-near-8453:COCA-8453:COCA~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:RHEA-1151111081099710:RHEA-near-8453:CFI-8453:CFI~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:ETH-1151111081099710:ETH-lifiIntents-8453:ETH-8453:ETH~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:ETH-1151111081099710:ETH-lifiIntents-8453:WETH-8453:WETH~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:USDT-1151111081099710:USDT-lifiIntents-8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:USDT-1151111081099710:USDT-lifiIntents-8453:USDT-8453:USDT~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:cbBTC-1151111081099710:cbBTC-garden-8453:cbBTC-8453:cbBTC~8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:USDT-1151111081099710:USDT-layerswap-8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:ETH-1151111081099710:ETH-layerswap-8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:SOL-1151111081099710:SOL-layerswap-8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:USDe-1151111081099710:USDe-layerswap-8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:PYUSD-1151111081099710:PYUSD-layerswap-8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:USDG-1151111081099710:USDG-layerswap-8453:USDC",
+     "reason": "Implicit source swaps are currently not supported for non-EVM chains"
+    },
+    {
+     "overallPath": "1151111081099710:USDC-mayan-8453:USDC",
+     "reason": "SOL balance insufficient to cover temporary token account creation"
+    },
+    {
+     "overallPath": "1151111081099710:USDC-mayan-8453:USDC",
+     "reason": "SOL balance insufficient to cover temporary token account creation"
+    },
+    {
+     "overallPath": "1151111081099710:USDC-mayan-8453:USDC",
+     "reason": "SOL balance insufficient to cover temporary token account creation"
+    },
+    {
+     "overallPath": "1151111081099710:USDC-mayan-8453:USDC",
+     "reason": "SOL balance insufficient to cover temporary token account creation"
+    },
+    {
+     "overallPath": "1151111081099710:USDC-mayanMCTP-8453:USDC",
+     "reason": "SOL balance insufficient to cover temporary token account creation"
+    },
+    {
+     "overallPath": "1151111081099710:USDC-mayanMCTP-8453:USDC",
+     "reason": "SOL balance insufficient to cover temporary token account creation"
+    },
+    {
+     "overallPath": "1151111081099710:USDC-mayanMCTP-8453:USDC",
+     "reason": "SOL balance insufficient to cover temporary token account creation"
+    },
+    {
+     "overallPath": "1151111081099710:USDC-mayanMCTP-8453:USDC",
+     "reason": "SOL balance insufficient to cover temporary token account creation"
+    },
+    {
+     "overallPath": "1151111081099710:USDC-mayanFastMCTP-8453:USDC",
+     "reason": "SOL balance insufficient to cover temporary token account creation"
+    },
+    {
+     "overallPath": "1151111081099710:USDC-mayanFastMCTP-8453:USDC",
+     "reason": "SOL balance insufficient to cover temporary token account creation"
+    },
+    {
+     "overallPath": "1151111081099710:USDC-mayanFastMCTP-8453:USDC",
+     "reason": "SOL balance insufficient to cover temporary token account creation"
+    },
+    {
+     "overallPath": "1151111081099710:USDC-mayanFastMCTP-8453:USDC",
+     "reason": "SOL balance insufficient to cover temporary token account creation"
+    },
+    {
+     "overallPath": "1151111081099710:USDC-eco-8453:USDbC-8453:USDbC~8453:USDC",
+     "reason": "Bridge eco requires a signature on the destination chain, but the request did not allow it (allowSwitchChain: false)"
+    },
+    {
+     "overallPath": "1151111081099710:USDC-eco-8453:oUSDT-8453:oUSDT~8453:USDC",
+     "reason": "Bridge eco requires a signature on the destination chain, but the request did not allow it (allowSwitchChain: false)"
+    },
+    {
+     "overallPath": "1151111081099710:USDC-near-8453:SSC1_PIT-8453:SSC1_PIT~8453:USDC",
+     "reason": "Bridge near requires a signature on the destination chain, but the request did not allow it (allowSwitchChain: false)"
+    },
+    {
+     "overallPath": "1151111081099710:USDC-near-8453:KAITO-8453:KAITO~8453:USDC",
+     "reason": "Bridge near requires a signature on the destination chain, but the request did not allow it (allowSwitchChain: false)"
+    },
+    {
+     "overallPath": "1151111081099710:USDC-near-8453:TITN-8453:TITN~8453:USDC",
+     "reason": "Bridge near requires a signature on the destination chain, but the request did not allow it (allowSwitchChain: false)"
+    },
+    {
+     "overallPath": "1151111081099710:USDC-near-8453:VVV-8453:VVV~8453:USDC",
+     "reason": "Bridge near requires a signature on the destination chain, but the request did not allow it (allowSwitchChain: false)"
+    },
+    {
+     "overallPath": "1151111081099710:USDC-near-8453:ETH-8453:ETH~8453:USDC",
+     "reason": "Bridge near requires a signature on the destination chain, but the request did not allow it (allowSwitchChain: false)"
+    },
+    {
+     "overallPath": "1151111081099710:USDC-near-8453:WETH-8453:WETH~8453:USDC",
+     "reason": "Bridge near requires a signature on the destination chain, but the request did not allow it (allowSwitchChain: false)"
+    },
+    {
+     "overallPath": "1151111081099710:USDC-near-8453:cbBTC-8453:cbBTC~8453:USDC",
+     "reason": "Bridge near requires a signature on the destination chain, but the request did not allow it (allowSwitchChain: false)"
+    },
+    {
+     "overallPath": "1151111081099710:USDC-near-8453:SWEAT-8453:SWEAT~8453:USDC",
+     "reason": "Bridge near requires a signature on the destination chain, but the request did not allow it (allowSwitchChain: false)"
+    },
+    {
+     "overallPath": "1151111081099710:USDC-near-8453:sUSDC-8453:sUSDC~8453:USDC",
+     "reason": "Bridge near requires a signature on the destination chain, but the request did not allow it (allowSwitchChain: false)"
+    },
+    {
+     "overallPath": "1151111081099710:USDC-near-8453:near-gtUSDCp-8453:near-gtUSDCp~8453:USDC",
+     "reason": "Bridge near requires a signature on the destination chain, but the request did not allow it (allowSwitchChain: false)"
+    },
+    {
+     "overallPath": "1151111081099710:USDC-near-8453:near-sparkUSDC-8453:near-sparkUSDC~8453:USDC",
+     "reason": "Bridge near requires a signature on the destination chain, but the request did not allow it (allowSwitchChain: false)"
+    },
+    {
+     "overallPath": "1151111081099710:USDC-near-8453:near-mwUSDC-8453:near-mwUSDC~8453:USDC",
+     "reason": "Bridge near requires a signature on the destination chain, but the request did not allow it (allowSwitchChain: false)"
+    },
+    {
+     "overallPath": "1151111081099710:USDC-near-8453:laUSDC-8453:laUSDC~8453:USDC",
+     "reason": "Bridge near requires a signature on the destination chain, but the request did not allow it (allowSwitchChain: false)"
+    },
+    {
+     "overallPath": "1151111081099710:USDC-near-8453:BRETT-8453:BRETT~8453:USDC",
+     "reason": "Bridge near requires a signature on the destination chain, but the request did not allow it (allowSwitchChain: false)"
+    },
+    {
+     "overallPath": "1151111081099710:USDC-near-8453:FMS Token-8453:FMS Token~8453:USDC",
+     "reason": "Bridge near requires a signature on the destination chain, but the request did not allow it (allowSwitchChain: false)"
+    },
+    {
+     "overallPath": "1151111081099710:USDC-near-8453:COCA-8453:COCA~8453:USDC",
+     "reason": "Bridge near requires a signature on the destination chain, but the request did not allow it (allowSwitchChain: false)"
+    },
+    {
+     "overallPath": "1151111081099710:USDC-near-8453:CFI-8453:CFI~8453:USDC",
+     "reason": "Bridge near requires a signature on the destination chain, but the request did not allow it (allowSwitchChain: false)"
+    },
+    {
+     "overallPath": "1151111081099710:USDC-lifiIntents-8453:USDT-8453:USDT~8453:USDC",
+     "reason": "Bridge lifiIntents requires a signature on the destination chain, but the request did not allow it (allowSwitchChain: false)"
+    },
+    {
+     "overallPath": "1151111081099710:USDC-allbridge-8453:USDC",
+     "reason": "Tool allbridge is currently disabled for this action."
+    },
+    {
+     "overallPath": "1151111081099710:USDC-eco-8453:USDC",
+     "reason": "Tool eco is currently disabled for this action."
+    }
+   ],
+   "failed": [
+    {
+     "overallPath": "1151111081099710:USDC~1151111081099710:USDC-1151111081099710:USDC-glacis-8453:USDC",
+     "subpaths": {
+      "1151111081099710:USDC-glacis-8453:USDC": [
+       {
+        "errorType": "NO_QUOTE",
+        "code": "UNKNOWN_ERROR",
+        "tool": "glacis",
+        "message": "An unknown error occurred.",
+        "durationMs": 1103,
+        "action": {
+         "fromChainId": 1151111081099710,
+         "fromAmount": "19950000",
+         "fromToken": {
+          "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "chainId": 1151111081099710,
+          "symbol": "USDC",
+          "decimals": 6,
+          "name": "USD Coin",
+          "coinKey": "USDC",
+          "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png",
+          "priceUSD": "1.0008042401",
+          "tags": [
+           "stablecoin"
+          ],
+          "verificationStatus": "verified",
+          "verificationStatusBreakdown": [
+           {
+            "provider": "hypernative",
+            "result": "verified",
+            "providerResult": "accept"
+           }
+          ]
+         },
+         "toChainId": 8453,
+         "toToken": {
+          "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "chainId": 8453,
+          "symbol": "USDC",
+          "decimals": 6,
+          "name": "USD Coin",
+          "coinKey": "USDC",
+          "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png",
+          "priceUSD": "0.9976412145",
+          "tags": [
+           "stablecoin"
+          ],
+          "verificationStatus": "verified",
+          "verificationStatusBreakdown": [
+           {
+            "provider": "hypernative",
+            "result": "verified",
+            "providerResult": "accept"
+           }
+          ]
+         },
+         "slippage": 0.005,
+         "fromAddress": "qwjYpMzHkNQ6rNuMWaLshaxouXKLAmEDvRcgHLiQMwJ",
+         "toAddress": "0x4e23a33a8205a5db03e631e5484bf514f64b3a76"
+        }
+       }
+      ]
+     }
+    }
+   ]
+  }
+ }
+}

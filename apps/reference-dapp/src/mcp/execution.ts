@@ -38,6 +38,8 @@ export const FLOWS_WITH_EXECUTION_SWITCH: readonly FlowName[] = Object.freeze(['
   // BUILD-BASE-001: Base mainnet liquidity (Base real-funds approval) and the Router's Arbitrum One → Base route (Router approval).
   'base-liquidity', 'arbitrum-liquidity', 'ethereum-liquidity', 'crosschain-router-arbitrum-to-base',
   ...ETHEREUM_ROUTER_NETWORKS.map(route => `crosschain-router-${route}` as const),
+  // BUILD-CROSSCHAIN-UNIVERSAL-001: the universal router (its own real-funds owner-execution approval).
+  'crosschain-universal',
   // The Solana Devnet composition exposes the same switch; no MCP strategy plans it (MCP integration is deferred).
   'solana-devnet-composition',
   // Orca liquidity on Solana mainnet-beta uses its existing real-funds execution switch.
