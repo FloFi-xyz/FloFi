@@ -1777,6 +1777,7 @@ button.wallet-option .wallet-option-status{border-color:var(--accent-line);backg
 .signing-head .eyebrow{margin-bottom:6px}
 .signing-networks{display:flex;flex-wrap:wrap;gap:8px;margin:0;color:var(--muted);font-size:12px}
 .signing-networks :is(.brand-icon,.brand-icon-fallback){width:16px;height:16px;min-width:16px;min-height:16px;flex:none;object-fit:contain}
+.signing-outcome :is(.brand-icon,.brand-icon-fallback){width:18px;height:18px;min-width:18px;min-height:18px;flex:none;object-fit:contain}
 .signing-actions{list-style:none;margin:0;padding:0;display:grid;gap:8px}
 .signing-actions li{display:grid;gap:2px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--soft);min-width:0;overflow-wrap:anywhere}
 .signing-actions li small{color:var(--muted)}

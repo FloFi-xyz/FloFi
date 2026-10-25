@@ -206,6 +206,13 @@ test('embedded chat: existing execution runtime completes after wallet confirmat
   await expect(signing.getByRole('region', { name: 'Workflow canvas', exact: true })).toHaveCount(0);
   await expect(region.locator('.approval-details')).not.toHaveAttribute('open');
   await expect(region.locator('.approval-explanation')).not.toBeVisible();
+  const outcomeIcons = signing.locator('.signing-outcome .brand-icon');
+  expect(await outcomeIcons.count()).toBeGreaterThan(0);
+  for (const icon of await outcomeIcons.all()) {
+    const bounds = await icon.boundingBox(); expect(bounds).not.toBeNull();
+    expect(bounds!.width).toBeLessThanOrEqual(24); expect(bounds!.height).toBeLessThanOrEqual(24);
+  }
+  await expect(signing.locator('.simulation-token-amount').first()).toContainText('WETH');
   await signing.locator('main').screenshot({ path: testInfo.outputPath('MOCKED-in-chat-signing.png') });
   expect(requested).toBe(0); expect(await control(request, 'MOCK_sends')).toBe(0);
   await authorize.click();

@@ -30,6 +30,8 @@ New tool results reference a versioned MCP UI resource to avoid reuse of cached 
 
 **Open FloFi** opens the minimal external signing surface. **Open Canvas** is an explicit choice on that page. The embedded presentation remains signing even if a query requests Canvas. The notice is neutral and compact. Proposal provenance/hash and machine explanations remain available under collapsed details; amounts, sender/recipient, networks, fees, slippage/minimum output, permissions and material warnings remain in the main financial review.
 
+Browser screenshot review also reproduced a pre-existing signing-layout defect: the shared quoted-outcome token icon inherited the global 100% size outside SimulationSummary, filling the card and wrapping the amount vertically. The signing surface now bounds that icon like the existing simulation view. A browser geometry assertion protects the readable financial outcome; no value, minimum, fee or risk text is removed.
+
 The existing `/approve`, Connections and Admin framing restrictions remain. Only the new signing route permits the documented ChatGPT origin/sandbox and the exact Claude sandbox derived from the server-configured MCP endpoint. Unknown ancestors fail closed; no wildcard origin or URL derived from a request header is added. Deliberate preview origins remain separate. The wrapper resource permits only its own server origin as a subframe and retains empty network/static-resource permissions.
 
 Embedded wallet proof uses separate HttpOnly, Secure, SameSite=None, Partitioned cookies scoped to `/mcp/approve`. First-party sessions remain Strict. The existing SIWE/SIWS signature, challenge, domain, MAC, expiry, claimed wallet, canonical workflow and financial authorization checks still apply. The client confirms that the browser retained the isolated session before treating the wallet as proven. Browsers that refuse it receive an explicit limitation, with no fabricated approval. OAuth cookies/tokens are not transferred to the frame. Session expiration uses the matching cookie path and partition attributes.
@@ -58,14 +60,18 @@ Controlled browser financial sends use only the existing synthetic loopback harn
 | `pnpm test:postgres` on disposable loopback PostgreSQL | 77 files / **480 passed**, 3 existing conditional skips |
 | Focused wallet proof, isolation and financial-disclosure tests | **81 passed** |
 | Governance and its self-tests | Passed; **19 tests** |
-| CI plan, profile coverage and ledger self-tests | **45 passed** |
+| Complete CI plan, profile coverage, ledger and orchestration self-tests | **56 passed**; the new profile increases the complete plan from 47 to 48 |
 | Dependency audit and pinned registry/integrity/release-age verification | No known vulnerabilities; 263 locked registry entries verified; no dependency changes |
 | `mcp-embedded-signing` guarded browser profile | **3 passed**: EVM bridge and Solana swap wallet proof/fresh review entirely in the frame; missing signer explicitly refused; no open-link or Canvas |
 | `approve-authorize-journeys` guarded browser profile | **3 passed**: external signing, optional Canvas, and the existing financial runtime completing inside chat after exactly two controlled wallet confirmations, with reconciled receipt returned through MCP |
+| Existing MCP / anti-phishing / OAuth / route browser profile | **26 passed**, including hostile URLs, missing tools, unknown sessions, embedded redirects, preview/privacy and account routes |
+| Channel-signing / workflow-run / Solana UX / universal bridge browser profiles | **6 / 1 / 7 / 4 passed**, including interrupted handoffs, multi-step continuation and verified Phantom-style Lighthouse signing compatibility in the existing external engine |
 
 The browser profile writes a `MOCKED-in-chat-signing.png` screenshot, and remote runs attach model-visible MCP responses with public approval/run IDs, excluding `_meta`, capabilities and OAuth credentials. Additional regression profiles and exact-head CircleCI results are recorded in the PR checks/description. They must pass before release; this table does not predict pending checks.
 
 Iteration failures were investigated and corrected: the proof unit fixture lacked `window.location`; the old UI tests expected the former Canvas/navigation labels; an old resource-URI assertion was updated while retaining legacy resource reads; the embedded Solana wallet dialog was outside the viewport, fixed by placing/bounding the signing frame first. Adding account journeys to the old database also hit its genuine 10/hour OAuth registration limit. A separate profile/database now covers those new journeys; no rate limit, test assertion about financial authority, or existing scenario was removed.
+
+The initial CircleCI governance job on `040ba08` also rejected four orchestration-test expectations still counting 47 profiles. Its actual ledger correctly counted all 48. Those explicit expectations were updated to 48; the complete 56-test CI suite then passed locally. This was an incomplete test-plan update, not an infrastructure failure or evidence of a financial regression. Exact-head remote certification remains mandatory.
 
 Changed code is confined to MCP instructions/resource/panel, the existing approval/signing presentation and wallet-proof transport, the new isolated `/mcp/approve` route/CSP/cookies, tests and this report. No backend flow, protocol implementation, workflow contracts, executor, reconciler, fee calculation or dependency was changed. The reference branch's four commits were not integrated.
 
