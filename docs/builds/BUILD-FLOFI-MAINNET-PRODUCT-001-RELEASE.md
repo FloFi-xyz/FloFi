@@ -38,11 +38,13 @@ Nothing was merged, promoted, deployed, configured or signed, and no transaction
     1. Missing object GET → **HTTP 404** `NoSuchKey`.
     2. Disposable PUT → **200**; GET → **200** with matching SHA-256.
     3. All three pending `evidence.archive` items are **DONE** with rows in `evidence_objects` (`store_id=s3`): `jupiter-afb4e4…`, `pub-4ba810e1…`, `pub-01a2ec0f…`. No new `EVIDENCE_STORE_READ_FAILED` after the worker came up on the fixed credentials (prior failures were backoff retries before the due time).
-- **K2. In-flight workflow `wfr_w4xowbivml3ruqpa2ly4ndlndx` (read-only DB + logs).**
-  - **Network:** Base Sepolia only (`base-sepolia`). **Mode:** `CONFIRM_EACH_STEP`. **State:** `RUNNING`, `current_step` 1 of 2. **Expires:** 2026-10-30T21:48:54Z (not expired). Requester: MCP.
-  - **Steps:** (0) swap 1 USDC→WETH on Base Sepolia — `RECONCILED` / `TESTNET_EXECUTED` (`pub-4ba810e1…`); (1) swap 0.0001 WETH→USDC on Base Sepolia — `PENDING` (not claimed, no outcome, 0 transactions).
-  - **Why it stays RUNNING:** the worker advances with `policyFor = null`, so step 1 is **not** resolved to `READY` on the worker; it waits for the owner in FloFi (`/approve`). Idle `workflow_run.advanced` / `RUNNING` every ~65 s is expected.
-  - **Owner preference:** cancel the remaining pending step rather than sign another testnet transaction. Cancellation is **not** applied until the owner confirms the procedure in the release thread. Step 0's reconciled txs and evidence stay.
+- **K2. In-flight workflow `wfr_w4xowbivml3ruqpa2ly4ndlndx` (rechecked live 2026-10-25; left unchanged).**
+  - **Live state:** `RUNNING` / `CONFIRM_EACH_STEP` / `current_step` 1 of 2 / expires 2026-10-30T21:48:54Z / not expired. Base Sepolia only.
+  - **Steps:** (0) `RECONCILED` — 2 txs on `eip155:84532`, evidence archived (`pub-4ba810e1…`); (1) `PENDING` — not claimed, no outcome, **0** transactions. No in-flight submit.
+  - **Cancel capability vs UI:** `cancelRun()` / `cancelWorkflowRunHandoff` already allow `RUNNING` when no step is `AWAITING_OWNER` / `UNCERTAIN` / `DELEGATED`, with the owner's proven wallets. The public panel (`workflow-run-panel.tsx`) shows **End workflow** only for `HALTED`, so this run has **no accessible product UI path** today. No MCP/admin cancel; no SQL or agent cancel (wallet ownership must hold).
+  - **Left unchanged** pending an owner decision on the proposed one-line UI exposure (below) or natural expiry.
+  - **During Mainnet-only rollout (#118):** "Continue to step 2" is refused (`TEST_NETWORK_NOT_AVAILABLE`); nothing further is signed or submitted. Idle worker advances continue. At expiry the runner **HALTs** (`WORKFLOW_RUN_EXPIRED`) after step 0; **End workflow** then appears on today's UI. Step 0's txs and evidence stay either way.
+  - **Proposed smallest UI fix (not applied):** show End workflow whenever cancel is legal — `PENDING`/`RUNNING`/`HALTED` and no in-flight step states — reusing `cancelWorkflowRunHandoff` (already wallet-gated). Web-only (Vercel); no API/worker/migration. Ship with #118 or a tiny follow-up; needs owner approval before coding.
   - Automations bound to test networks stop proposing and show "attention" after release — check those in the admin console before merging.
 - **K3. The deployment state differs from the earlier assessment.** `flofi.xyz` was promoted to `cbf340e` on 2026-10-24 00:08:53 UTC (`dpl_BkHHTr3CdCeK8mfoarwE1RWDvrWw`). Arbitrum One and Ethereum `add_liquidity` (real funds, never executed) are therefore already reachable in production today.
 
