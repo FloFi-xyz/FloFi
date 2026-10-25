@@ -334,6 +334,8 @@ BUILDMCP001_DIRECT_VERSIONS = {
 # 3 (@modelcontextprotocol/server, @modelcontextprotocol/core, zod) to that graph.
 # BUILD-CHAT-E2E-001: Vitest 5.0.3 requires why-is-node-running 3.2.1, removing siginfo and stackback.
 # GHSA-mrhx-c7xc-m3w5: the MCP SDK's zod moves 4.6.5 → 4.6.6 by exact override (MIT, no dependencies); the count is unchanged.
+# GHSA-w74x-v6f9-j3xg, GHSA-wjr9-j795-jxcr, GHSA-xhq7-xmqj-769h, GHSA-333x-w4r6-6crp: ajv's fast-uri moves 3.1.8 → 3.1.9 by exact
+# override (BSD-3-Clause, no dependencies); the count is unchanged.
 REGISTRY_PACKAGE_COUNT = 263
 
 # The pre-existing BUILD-001 MPL tooling exception is exact-name scoped too.
@@ -382,7 +384,7 @@ def verify_dependencies():
     if lock.count("\npackages:\n") != 1 or lock.count("\nsnapshots:\n") != 1:
         raise RuntimeError("Unrecognized lockfile sections")
     resolved_sections = "packages:\n" + lock.split("\npackages:\n", 1)[1]
-    if hashlib.sha256(resolved_sections.encode()).hexdigest() != "09b25974a6387957335365ee01f5fbe770be8a50eff72b570b5f9c7f450c016c":
+    if hashlib.sha256(resolved_sections.encode()).hexdigest() != "829b227b583d1010a75aeb0b969609807ad1b4e03aaa4816183b95681e911d8a":
         errors.append("Baseline registry packages/snapshots or peer resolutions changed")
     packages_text = lock.split("\npackages:\n", 1)[1].split("\nsnapshots:\n", 1)[0]
     snapshots_text = lock.split("\nsnapshots:\n", 1)[1]

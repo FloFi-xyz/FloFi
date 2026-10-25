@@ -9,7 +9,7 @@ import sys
 import tempfile
 import unittest
 
-from governance_lite import (AGE_WAIVER, CONTRACTS, GOVERNANCE, control_errors, secret_errors, validate,
+from governance_lite import (AGE_WAIVER, APPROVED_AGE_WAIVERS, CONTRACTS, GOVERNANCE, control_errors, secret_errors, validate,
                              dependency_age_waivers, dependency_release_age_allowed)
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -210,11 +210,14 @@ class GovernanceLite(unittest.TestCase):
     def test_exact_temporary_security_age_waiver(self):
         waivers, errors = dependency_age_waivers(self.files)
         self.assertEqual(errors, [])
-        self.assertEqual(waivers, {("source-map-js", "1.2.2")})
+        self.assertEqual(waivers, {(w["package"], w["version"]) for w in APPROVED_AGE_WAIVERS})
+        self.assertIn(("source-map-js", "1.2.2"), waivers)
+        self.assertIn(("fast-uri", "3.1.9"), waivers)
         cutoff = datetime.datetime(2026, 9, 30, tzinfo=datetime.timezone.utc)
         young = cutoff + datetime.timedelta(days=1)
-        for name, version, expected in (("source-map-js", "1.2.2", True),
+        for name, version, expected in (("source-map-js", "1.2.2", True), ("fast-uri", "3.1.9", True),
                 ("source-map-js", "1.2.1", False), ("source-map-js", "1.2.3", False),
+                ("fast-uri", "3.1.8", False), ("fast-uri", "3.1.10", False),
                 ("another-package", "1.2.2", False), ("sharp", "0.35.5", False)):
             with self.subTest(name=name, version=version):
                 self.assertEqual(dependency_release_age_allowed(name, version, young, cutoff, waivers), expected)
@@ -225,18 +228,29 @@ class GovernanceLite(unittest.TestCase):
                 cutoff + datetime.timedelta(microseconds=1), cutoff, waivers))
 
     def test_broad_or_undocumented_age_waivers_fail(self):
+        base_exclude = "minimumReleaseAgeExclude:\n  - source-map-js@1.2.2\n  - fast-uri@3.1.9\n"
         for spec in ("source-map-js", "source-map-js@*", "source-map-js@>=1.2.2",
-                     "source-map-js@1.2.1", "source-map-js@1.2.3", "sharp@0.35.5",
-                     "source-map-js@1.2.2\n  - sharp@0.35.5"):
+                     "source-map-js@1.2.1", "source-map-js@1.2.3", "sharp@0.35.5", "fast-uri@3.1.8",
+                     "source-map-js@1.2.2\n  - sharp@0.35.5",
+                     "fast-uri@3.1.9\n  - source-map-js@1.2.2"):  # wrong order
             files = dict(self.files)
-            files["pnpm-workspace.yaml"] = files["pnpm-workspace.yaml"].replace("  - source-map-js@1.2.2", "  - " + spec)
+            files["pnpm-workspace.yaml"] = files["pnpm-workspace.yaml"].replace(base_exclude, "minimumReleaseAgeExclude:\n  - " + spec + "\n")
             self.assertTrue(dependency_age_waivers(files)[1], spec)
-        for field, value in (("temporary", False), ("approved_by", "Other"), ("version", "1.2.3")):
-            files = dict(self.files)
-            metadata = json.loads(files[AGE_WAIVER])
-            metadata[field] = value
-            files[AGE_WAIVER] = json.dumps(metadata)
-            self.assertTrue(dependency_age_waivers(files)[1])
+        files = dict(self.files)
+        metadata = json.loads(files[AGE_WAIVER])
+        metadata["waivers"][0]["temporary"] = False
+        files[AGE_WAIVER] = json.dumps(metadata)
+        self.assertTrue(dependency_age_waivers(files)[1])
+        files = dict(self.files)
+        metadata = json.loads(files[AGE_WAIVER])
+        metadata["waivers"][1]["approved_by"] = "Other"
+        files[AGE_WAIVER] = json.dumps(metadata)
+        self.assertTrue(dependency_age_waivers(files)[1])
+        files = dict(self.files)
+        metadata = json.loads(files[AGE_WAIVER])
+        metadata["waivers"][1]["version"] = "3.1.8"
+        files[AGE_WAIVER] = json.dumps(metadata)
+        self.assertTrue(dependency_age_waivers(files)[1])
         files = dict(self.files)
         del files[AGE_WAIVER]
         self.assertTrue(dependency_age_waivers(files)[1])

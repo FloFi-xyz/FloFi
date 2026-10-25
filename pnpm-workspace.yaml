@@ -2,10 +2,11 @@ packages:
   - packages/*
   - apps/reference-dapp
 minimumReleaseAge: 10080
-# Owner-approved Colosseum security waiver; remove after delivery.
+# Exact temporary owner-approved release-age exceptions only (no ranges/globs).
 # Metadata: docs/security/COLOSSEUM-DEPENDENCY-AGE-WAIVER.json
 minimumReleaseAgeExclude:
   - source-map-js@1.2.2
+  - fast-uri@3.1.9
 pmOnFail: error
 strictPeerDependencies: true
 autoInstallPeers: false
@@ -17,6 +18,8 @@ overrides:
   # GHSA-mrhx-c7xc-m3w5 (high): zod < 4.6.6 can exhaust memory validating oversized constrained collections.
   '@modelcontextprotocol/server@2.3.0>zod': 4.6.6
   '@modelcontextprotocol/core@2.3.0>zod': 4.6.6
+  # GHSA-w74x-v6f9-j3xg, GHSA-wjr9-j795-jxcr (moderate), GHSA-xhq7-xmqj-769h, GHSA-333x-w4r6-6crp (low): fast-uri < 3.1.9.
+  'ajv@8.20.0>fast-uri': 3.1.9
 patchedDependencies:
   '@streamparser/json@0.0.26': patches/@streamparser__json@0.0.26.patch
   '@xyflow/system@0.0.82': patches/@xyflow__system@0.0.82.patch

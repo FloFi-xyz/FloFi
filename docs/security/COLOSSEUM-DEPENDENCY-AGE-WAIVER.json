@@ -1,9 +1,30 @@
 {
-  "package": "source-map-js",
-  "version": "1.2.2",
-  "advisory": "GHSA-68fv-2mgg-jv7q",
-  "reason": "HIGH security advisory remediation required for Colosseum release",
-  "approved_by": "Owner",
-  "temporary": true,
-  "removal_condition": "Remove after Colosseum delivery completion once normal dependency-age eligibility is no longer needed"
+  "waivers": [
+    {
+      "package": "source-map-js",
+      "version": "1.2.2",
+      "advisories": ["GHSA-68fv-2mgg-jv7q"],
+      "reason": "HIGH security advisory remediation required for Colosseum release",
+      "approved_by": "Owner",
+      "temporary": true,
+      "removal_condition": "Remove after Colosseum delivery completion once normal dependency-age eligibility is no longer needed"
+    },
+    {
+      "package": "fast-uri",
+      "version": "3.1.9",
+      "advisories": [
+        "GHSA-w74x-v6f9-j3xg",
+        "GHSA-wjr9-j795-jxcr",
+        "GHSA-xhq7-xmqj-769h",
+        "GHSA-333x-w4r6-6crp"
+      ],
+      "reason": "Official npm security patch for four fast-uri advisories that fail the Dependency audit on main and block BUILD-FLOFI-MAINNET-PRODUCT-001 certification; owner-authorized emergency release-age exception until normal 7-day eligibility at 2026-10-26T23:05:26Z",
+      "approved_by": "Owner",
+      "temporary": true,
+      "approved_at": "2026-10-25T00:20:00Z",
+      "published_at": "2026-10-19T23:05:26Z",
+      "integrity": "sha512-hS/0Wt3Ya043oKXs0sIxrMpKQITXhMLIrVAKKXi4gozGC9v7YRWVnXIZzjNPTO02M9BdxLCWqK1yRXgNziVyJQ==",
+      "removal_condition": "Remove fast-uri@3.1.9 from minimumReleaseAgeExclude and from this waiver list after 2026-10-26T23:05:26Z when the package reaches normal minimumReleaseAge eligibility"
+    }
+  ]
 }

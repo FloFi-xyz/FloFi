@@ -27,6 +27,28 @@ AUTO_MERGE = re.compile(
 GOVERNANCE = ".github/workflows/governance.yml"
 CONTRACTS = ".github/workflows/contracts.yml"
 AGE_WAIVER = "docs/security/COLOSSEUM-DEPENDENCY-AGE-WAIVER.json"
+# Exact owner-approved temporary release-age exceptions only. Adding a package requires an exact
+# identity here, matching metadata, and an owner-approved temporary entry — never ranges or globs.
+APPROVED_AGE_WAIVERS = (
+    {
+        "package": "source-map-js", "version": "1.2.2", "advisories": ["GHSA-68fv-2mgg-jv7q"],
+        "reason": "HIGH security advisory remediation required for Colosseum release",
+        "approved_by": "Owner", "temporary": True,
+        "removal_condition": "Remove after Colosseum delivery completion once normal dependency-age eligibility is no longer needed",
+    },
+    {
+        "package": "fast-uri", "version": "3.1.9",
+        "advisories": [
+            "GHSA-w74x-v6f9-j3xg", "GHSA-wjr9-j795-jxcr", "GHSA-xhq7-xmqj-769h", "GHSA-333x-w4r6-6crp",
+        ],
+        "reason": "Official npm security patch for four fast-uri advisories that fail the Dependency audit on main and block BUILD-FLOFI-MAINNET-PRODUCT-001 certification; owner-authorized emergency release-age exception until normal 7-day eligibility at 2026-10-26T23:05:26Z",
+        "approved_by": "Owner", "temporary": True, "approved_at": "2026-10-25T00:20:00Z",
+        "published_at": "2026-10-19T23:05:26Z",
+        "integrity": "sha512-hS/0Wt3Ya043oKXs0sIxrMpKQITXhMLIrVAKKXi4gozGC9v7YRWVnXIZzjNPTO02M9BdxLCWqK1yRXgNziVyJQ==",
+        "removal_condition": "Remove fast-uri@3.1.9 from minimumReleaseAgeExclude and from this waiver list after 2026-10-26T23:05:26Z when the package reaches normal minimumReleaseAge eligibility",
+    },
+)
+_EXACT_IDENTITY = re.compile(r"^[a-z0-9][a-z0-9._/-]*@[0-9]+\.[0-9]+\.[0-9]+$")
 
 
 def dependency_age_waivers(files):
@@ -35,21 +57,22 @@ def dependency_age_waivers(files):
     blocks = re.findall(r"(?m)^minimumReleaseAgeExclude:[^\n]*\n(?:[ \t]+[^\n]*\n)*", workspace)
     if not blocks:
         return set(), []
-    if blocks != ["minimumReleaseAgeExclude:\n  - source-map-js@1.2.2\n"]:
-        return set(), ["Dependency age waiver must contain only exact source-map-js@1.2.2"]
+    if len(blocks) != 1:
+        return set(), ["Dependency age waiver must appear once as an exact identity list"]
+    listed = re.findall(r"(?m)^[ \t]+- (.+)$", blocks[0])
+    expected_idents = [f"{w['package']}@{w['version']}" for w in APPROVED_AGE_WAIVERS]
+    if listed != expected_idents or any(not _EXACT_IDENTITY.fullmatch(item) for item in listed):
+        return set(), ["Dependency age waiver must list only the exact owner-approved identities in order"]
     try:
-        waiver = json.loads(files.get(AGE_WAIVER, ""))
+        document = json.loads(files.get(AGE_WAIVER, ""))
     except (ValueError, TypeError):
         return set(), ["Missing or invalid owner-approved dependency age waiver metadata"]
-    expected = {
-        "package": "source-map-js", "version": "1.2.2", "advisory": "GHSA-68fv-2mgg-jv7q",
-        "reason": "HIGH security advisory remediation required for Colosseum release",
-        "approved_by": "Owner", "temporary": True,
-        "removal_condition": "Remove after Colosseum delivery completion once normal dependency-age eligibility is no longer needed",
-    }
-    if waiver != expected or waiver.get("temporary") is not True:
+    waivers = document.get("waivers") if isinstance(document, dict) else None
+    if not isinstance(waivers, list) or waivers != list(APPROVED_AGE_WAIVERS):
         return set(), ["Dependency age waiver metadata differs from exact temporary owner approval"]
-    return {("source-map-js", "1.2.2")}, []
+    if any(entry.get("temporary") is not True or entry.get("approved_by") != "Owner" for entry in waivers):
+        return set(), ["Dependency age waiver metadata differs from exact temporary owner approval"]
+    return {(entry["package"], entry["version"]) for entry in APPROVED_AGE_WAIVERS}, []
 
 
 def dependency_release_age_allowed(name, version, published, cutoff, waivers):
