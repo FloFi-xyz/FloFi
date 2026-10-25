@@ -12,7 +12,7 @@ Nothing was merged, promoted, deployed, configured or signed, and no transaction
 
 | Decision | Verdict | Why |
 |---|---|---|
-| Merge PR #118 today | **NO-GO** | One required CI check is red (B1). It cannot turn green before 2026-10-26 23:05:26 UTC without a waiver, and a waiver is excluded. |
+| Merge PR #118 | **Conditional** | B1 is addressed by owner-authorized PR #119 (`fast-uri@3.1.9` + temporary exact release-age waiver). Merge #119 first when its CI is green, then this PR once rebased CI is green. |
 | The code of PR #118 | **Ready for review** | CI ran every browser profile and all pass: CircleCI 45/45 profiles, 376 tests, none failed, skipped or flaky. Locally, unit, PostgreSQL, browser and every other gate pass. No known regression remains. |
 | Production release | **Conditional GO** | GO once B1–B3 are cleared, following §4 step by step with the owner's approval at each production step. |
 | Telling the public that real funds work | **Only after §5** | FloFi has never executed a mainnet operation (0 of 45 mainnet rows live-certified). The owner-run acceptance in §5 is the first real-funds evidence. |
@@ -21,7 +21,7 @@ Nothing was merged, promoted, deployed, configured or signed, and no transaction
 
 | # | Blocker | Owner of the action | Cleared when |
 |---|---|---|---|
-| **B1** | CircleCI `certification-checks` fails at **Dependency audit**: `fast-uri@3.1.8` (through `ajv@8.20.0`) has GHSA-w74x-v6f9-j3xg, GHSA-wjr9-j795-jxcr, GHSA-xhq7-xmqj-769h and GHSA-333x-w4r6-6crp. It fails identically on `main`; this PR changes no dependency. The fix (`fast-uri` 3.1.9, branch `codex/security-fast-uri-3.1.9`, `87446fa`) is ready but younger than the 7-day release-age policy. | Claude prepares it; the owner merges | The policy clears at **2026-10-26 23:05:26 UTC**. Then the lockfile is regenerated, the gates are run, the PR is opened and CI is green; the owner merges it. |
+| **B1** | CircleCI Dependency audit on `main` fails on `fast-uri@3.1.8` (four GHSAs). **PR #119** pins official `fast-uri@3.1.9` and adds a temporary exact owner release-age waiver (Colosseum precedent). Audit/integrity/licence gates stay on; advisories are fixed, not suppressed. Remove the waive after **2026-10-26T23:05:26Z**. | Owner merges #119 | #119 CI is green (done locally/CI); owner merges it to `main`. |
 | **B2** | Because the job stops at the audit, CI has **not yet run the unit and PostgreSQL suites** on this PR. They pass locally (§3). | Claude (rebase); CI | #118 is rebased on the merged fix, and CI's `certification-checks` passes through the audit, unit and PostgreSQL steps. |
 | **B3** | Owner approval of each production step: merge, the web promotion, the worker deploy, and the owner-chosen §5 acceptance amounts (test budget only — not a product rule). | Owner | §4 |
 
