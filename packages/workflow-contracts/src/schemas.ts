@@ -19,6 +19,7 @@ import {
 import { EvidenceBundleSchema } from './evidence-bundle.js';
 import { BRIDGE_ACTION, BRIDGE_SOURCE, BRIDGE_DESTINATION } from './bridge.js';
 import { ROUTER_ADAPTER, ROUTING_PROVIDERS, ROUTER_PAIRS } from './router-pairs.js';
+import { UNIVERSAL_ROUTER_ADAPTER, UNIVERSAL_ROUTING_PROVIDERS, universalNetworkOfChain } from './universal-router-networks.js';
 import { EnforcementMatrixSchema, type EnforcementMatrix } from './enforcement-matrix.js';
 
 export {
@@ -140,7 +141,12 @@ function checkWorkflow(value: SemanticWorkflow): void {
         && node.adapterConstraints.protocols.every(p => (ROUTING_PROVIDERS as readonly string[]).includes(p))
         && 'address' in output.asset && ROUTER_PAIRS.some(pair => pair.source.chainId === node.chainId
           && pair.destination.chainId === output.asset.chainId && 'address' in output.asset && pair.destination.address === output.asset.address);
-      if (output.asset.chainId !== node.chainId && !routerOutput
+      // BUILD-CROSSCHAIN-UNIVERSAL-001: a universal router node delivers on another of the five FloFi mainnets.
+      const universalOutput = node.actionType === BRIDGE_ACTION && node.adapterConstraints.adapters.length === 1
+        && node.adapterConstraints.adapters[0]?.id === UNIVERSAL_ROUTER_ADAPTER.id && node.adapterConstraints.protocols.length >= 1
+        && node.adapterConstraints.protocols.every(p => (UNIVERSAL_ROUTING_PROVIDERS as readonly string[]).includes(p))
+        && universalNetworkOfChain(node.chainId) !== null && universalNetworkOfChain(output.asset.chainId) !== null;
+      if (output.asset.chainId !== node.chainId && !routerOutput && !universalOutput
         && !(node.actionType === BRIDGE_ACTION && node.chainId === BRIDGE_SOURCE
           && (output.asset.chainId === BRIDGE_DESTINATION
             || (output.asset.chainId === 'eip155:42161'

@@ -71,6 +71,7 @@ export * from './solana-transfer.js';
 export * from './solana-transfer-mock.js';
 export * from './uniswap-public-liquidity.js';
 export * from './crosschain-router.js';
+export * from './universal-relay.js';
 // BUILD-AUTOMATION-002: delegated-authority codecs (namespaced: their helpers are not part of the flat profile API).
 export * as erc7710 from './erc7710.js';
 export * as splDelegation from './spl-delegation.js';
