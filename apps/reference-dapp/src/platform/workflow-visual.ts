@@ -14,6 +14,7 @@ import type { ReviewContext } from '@defi-workflow-engine/reference-linter';
 import type { Workflow } from '../domain/initial-workflow';
 import { transferDetails } from '../domain/robinhood-transfer-authoring';
 import { ROUTER_NETWORK_OPTIONS } from '../domain/router-authoring';
+import { UNIVERSAL_NETWORKS } from '@defi-workflow-engine/workflow-contracts';
 import { workflowSteps, type WorkflowStep } from '../domain/workflow-steps';
 import { semanticWorkflowHash, type WorkflowComposition } from '../engine/strategy-engine';
 import { workflowPlan } from '../mcp/execution.ts';
@@ -80,6 +81,10 @@ function project(s: WorkflowStep, node: Workflow['nodes'][number] | undefined): 
         amounts: [{ amount: d.input.amount, asset: d.input.token }], ...option.pair.destination.symbol !== d.input.token ? { toAsset: option.pair.destination.symbol } : {}, slippageBps: bps(d.input.slippage),
         account: d.input.recipient ? { role: 'RECIPIENT', address: short(d.input.recipient) } : { role: 'CONNECTED_WALLET' }, testFunds });
     }
+    case 'UNIVERSAL_BRIDGE': return step({ action: 'BRIDGE', provider: d.input.routing === 'BEST' ? 'Best route' : d.input.routing === 'RELAY' ? 'Relay' : d.input.routing === 'LIFI'
+      ? 'LI.FI' : d.input.routing === 'MAYAN' ? 'Mayan' : 'Across', network: UNIVERSAL_NETWORKS[d.input.source].name, toNetwork: UNIVERSAL_NETWORKS[d.input.destination].name,
+      amounts: [{ amount: d.input.amount, asset: d.input.inputAsset }], ...d.input.outputAsset !== d.input.inputAsset ? { toAsset: d.input.outputAsset } : {},
+      slippageBps: bps(d.input.slippage), account: d.input.recipient ? { role: 'RECIPIENT', address: short(d.input.recipient) } : { role: 'CONNECTED_WALLET' }, testFunds });
     case 'AAVE': return step({ action: d.operation, provider: 'Aave V3', network: d.input.network, amounts: [{ amount: d.input.amount, asset: d.input.asset }],
       account: { role: 'BENEFICIARY', address: short(d.input.beneficiary) }, testFunds });
     case 'AAVE_WITHDRAW': return step({ action: 'WITHDRAW', provider: 'Aave V3', network: d.input.network, amounts: [{ amount: d.input.amount, asset: d.input.asset }],

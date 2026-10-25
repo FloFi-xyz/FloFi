@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from 'vitest';
-import { assertRunOwnership, normalizePrincipal, PAYMENT_OWNERSHIP, ROUTER_OWNERSHIP } from './run-ownership.ts';
+import { assertRunOwnership, normalizePrincipal, PAYMENT_OWNERSHIP, ROUTER_OWNERSHIP, UNIVERSAL_OWNERSHIP } from './run-ownership.ts';
 import { FLOWS } from '../../backend/flows.ts';
 
 /** BUILD-JOURNEY-001: one ownership rule for the API and local server actions. */
-const A = '0x' + 'a1'.repeat(20), B = '0x' + 'b2'.repeat(20), RUN = 'xroute-' + 'c'.repeat(32);
+const A = '0x' + 'a1'.repeat(20), B = '0x' + 'b2'.repeat(20), RUN = 'xroute-' + 'c'.repeat(32), S = 'GsWtMd3S5133XPhnfeR1CvPLcLxBSknhVhmaW7fHevBq',
+  OTHER = 'HjcWJor6kDs1WtUp9CqaxiC3pq3pZyToQU7rPU5kbbqi';
 const ownerOf = async (id: string) => { if (id !== RUN) throw new Error('ROUTER_RUN_NOT_FOUND'); return A; };
 const check = (method: string, args: unknown[], principal: string | null) => assertRunOwnership(ROUTER_OWNERSHIP, method, args, principal, ownerOf);
 
@@ -34,18 +35,31 @@ describe('BUILD-JOURNEY-001 run ownership', () => {
     'crosschain-router-ethereum-to-arbitrum', 'crosschain-router-arbitrum-to-ethereum', 'crosschain-router-ethereum-to-robinhood', 'crosschain-router-robinhood-to-ethereum'] as const;
   it('covers every method of the Router flows and the payment flow and leaves other flows unchanged', () => {
     for (const [flow, policy] of [['crosschain-router', ROUTER_OWNERSHIP], ['crosschain-router-testnet', ROUTER_OWNERSHIP], ...ROBINHOOD_ROUTES.map(route => [route, ROUTER_OWNERSHIP] as const),
-      ['pix-payment', PAYMENT_OWNERSHIP]] as const) {
+      ['pix-payment', PAYMENT_OWNERSHIP], ['crosschain-universal', UNIVERSAL_OWNERSHIP]] as const) {
       const definition = FLOWS[flow];
       expect(definition.ownership?.policy).toBe(policy);
       for (const method of Object.keys(definition.methods))
         expect(policy.open.includes(method) || Object.hasOwn(policy.ownerArgument, method) || policy.runArgument.includes(method)).toBe(true);
     }
-    expect(Object.values(FLOWS).filter(f => f.ownership).map(f => f.name).sort()).toEqual(['crosschain-router', ...ROBINHOOD_ROUTES, 'crosschain-router-testnet', 'pix-payment'].sort());
+    expect(Object.values(FLOWS).filter(f => f.ownership).map(f => f.name).sort()).toEqual(['crosschain-router', ...ROBINHOOD_ROUTES, 'crosschain-router-testnet', 'pix-payment',
+      'crosschain-universal'].sort());
   });
-  it('accepts only lower-case EVM principals', () => {
+  it('accepts only lower-case EVM principals and (BUILD-CROSSCHAIN-UNIVERSAL-001) base58 Solana keys', () => {
     expect(normalizePrincipal(A)).toBe(A);
     expect(normalizePrincipal(A.toUpperCase().replace('0X', '0x'))).toBeNull();
     expect(normalizePrincipal(undefined)).toBeNull();
     expect(normalizePrincipal([A])).toBeNull();
+    expect(normalizePrincipal(S)).toBe(S);
+    expect(normalizePrincipal('not a key!')).toBeNull();
+  });
+  it('a Solana run belongs to its exact (case-sensitive) Solana key; an EVM-owned run never matches a Solana principal', async () => {
+    const run = 'xuni-' + 'e'.repeat(32), solanaOwner = async () => S;
+    await assertRunOwnership(UNIVERSAL_OWNERSHIP, 'simulate', [{}, S], S, solanaOwner);
+    await assertRunOwnership(UNIVERSAL_OWNERSHIP, 'submit', [run, 'AA=='], S, solanaOwner);
+    await assertRunOwnership(UNIVERSAL_OWNERSHIP, 'discover', [{}], null, solanaOwner);
+    await expect(assertRunOwnership(UNIVERSAL_OWNERSHIP, 'submit', [run, 'AA=='], OTHER, solanaOwner)).rejects.toThrow('RUN_OWNER_MISMATCH');
+    await expect(assertRunOwnership(UNIVERSAL_OWNERSHIP, 'submit', [run, 'AA=='], S.toLowerCase(), solanaOwner)).rejects.toThrow('WALLET_SESSION_REQUIRED');
+    await expect(assertRunOwnership(UNIVERSAL_OWNERSHIP, 'simulate', [{}, S.toLowerCase()], S, solanaOwner)).rejects.toThrow('RUN_OWNER_MISMATCH');
+    await expect(check('status', [RUN], S)).rejects.toThrow('RUN_OWNER_MISMATCH');
   });
 });

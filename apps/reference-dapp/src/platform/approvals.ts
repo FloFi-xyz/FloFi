@@ -74,9 +74,11 @@ export const approvalUrl = (origin: string, secret: string) => `${origin}/approv
 /**
  * The wallet namespace whose proof claims a plan: its first step's (a one-step workflow is one namespace). BUILD-CHAT-E2E-001: a sequence
  * may span EVM and Solana steps; `planNamespaces` lists every namespace whose wallet the owner must prove before its run starts.
+ * BUILD-CROSSCHAIN-UNIVERSAL-001: a step's network is its source, so a bridge from Solana is claimed by the Solana wallet that signs it
+ * (its EVM destination wallet is connected in the app and bound at Review).
  */
 export const planNamespace = (plan: Pick<ExecutionPlan, 'networks'> & Partial<Pick<ExecutionPlan, 'kind' | 'steps'>>): WalletRef['namespace'] =>
-  plan.kind === 'SEQUENTIAL' && plan.steps?.length ? plan.steps[0]!.network.startsWith('solana') ? 'solana' : 'eip155'
+  plan.steps?.length ? plan.steps[0]!.network.startsWith('solana') ? 'solana' : 'eip155'
     : plan.networks.every(n => n.startsWith('solana')) ? 'solana' : 'eip155';
 export const planNamespaces = (plan: Pick<ExecutionPlan, 'networks'>): readonly WalletRef['namespace'][] =>
   [...new Set(plan.networks.map(n => n.startsWith('solana') ? 'solana' as const : 'eip155' as const))].sort();

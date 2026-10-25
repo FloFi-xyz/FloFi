@@ -250,3 +250,4 @@ export * from './uniswap-v3-arbitrum.js';
 export * from './uniswap-v3-ethereum.js';
 
 export { ETHEREUM_ROUTER_DEPLOYMENTS, ETHEREUM_ROUTER_NETWORKS, type EthereumRouterNetwork } from './crosschain-router.js';
+export { UNIVERSAL_ROUTER_DEPLOYMENT, universalEvmDeployment, type UniversalEvmDeployment, type UniversalRouterDeployment, type UniversalSolanaDeployment } from './universal-router.js';

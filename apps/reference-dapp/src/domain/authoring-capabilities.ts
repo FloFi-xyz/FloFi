@@ -14,6 +14,7 @@
  * here grants authority or decides deployment enablement: the owner's Review and wallet signature remain the only way anything executes.
  */
 import { AAVE_V3_AMOUNT_POLICY } from '@defi-workflow-engine/action-registry';
+import { UNIVERSAL_NETWORKS } from '@defi-workflow-engine/workflow-contracts';
 import type { StrategyAction, StrategySpec } from '../engine/strategy-spec';
 export type { StrategyAction };
 import { STRATEGY_EXAMPLES } from '../engine/strategy-examples';
@@ -96,16 +97,18 @@ export function compositionOnlyText(language: Language): string {
 const realFunds = () => unique(scopedCapabilities().flatMap(capability => [capability.network, ...capability.destination ? [capability.destination] : []]))
   .filter(network => network.environment === 'MAINNET');
 
+/** BUILD-CROSSCHAIN-UNIVERSAL-001: the universal Cross-chain Router's networks (the five mainnets, any pair). */
+export const universalNames = (language: Language): string => join(Object.values(UNIVERSAL_NETWORKS).map(network => network.name), language);
 /** The Copilot's in-app answer to "what can you do", generated from the capability truth. Display copy only. */
 export function capabilityText(language: Language): string {
   const catalog = catalogCapabilityNetworks();
   const composed = (language: Language) => compositionText(language) ? `; ${language === 'PT' ? 'e' : 'and'} ${compositionText(language)}` : '';
   if (language === 'PT') return `O Flofi Copilot pode criar: swaps na ${names(copilotCapabilityNetworks('swap'), 'PT')}; transferências na ${names(copilotCapabilityNetworks('transfer'), 'PT')}; ` +
-    `bridges pelo Cross-chain Router ${join(routes(), 'PT')}; Supply, Borrow, Repay e Withdraw na Aave V3 de ${lendingText('PT')}; liquidez na ` +
+    `bridges pelo Cross-chain Router ${join(routes(), 'PT')}; bridges universais de qualquer ativo conhecido entre ${universalNames('PT')} (a rota é escolhida em tempo real e mostrada na Review); Supply, Borrow, Repay e Withdraw na Aave V3 de ${lendingText('PT')}; liquidez na ` +
     `${names(copilotCapabilityNetworks('add_liquidity'), 'PT')}${composed('PT')}. ${lendingAmountScopeText('PT')} Na ${names(catalog, 'PT')}, swaps, transferências e liquidez aceitam qualquer token ` +
     `do catálogo oficial da rede, pelo símbolo ou pelo nome. Usam fundos reais: ${names(realFunds(), 'PT')}.`;
   return `Flofi Copilot can author: swaps on ${names(copilotCapabilityNetworks('swap'), 'EN')}; transfers on ${names(copilotCapabilityNetworks('transfer'), 'EN')}; ` +
-    `Cross-chain Router bridges ${join(routes(), 'EN')}; Aave V3 Supply, Borrow, Repay and Withdraw of ${lendingText('EN')}; liquidity on ` +
+    `Cross-chain Router bridges ${join(routes(), 'EN')}; universal bridges of any known asset between ${universalNames('EN')} (the route is chosen live and shown at Review); Aave V3 Supply, Borrow, Repay and Withdraw of ${lendingText('EN')}; liquidity on ` +
     `${names(copilotCapabilityNetworks('add_liquidity'), 'EN')}${composed('EN')}. ${lendingAmountScopeText('EN')} On ${names(catalog, 'EN')}, swaps, transfers and liquidity take any token ` +
     `of the network's official catalog, by symbol or name. Real funds: ${names(realFunds(), 'EN')}.`;
 }

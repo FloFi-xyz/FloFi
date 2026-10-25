@@ -12,6 +12,7 @@
  * only strategy input: it becomes the handoff's intended wallet, which FloFi checks against a PROVEN wallet at claim time.
  */
 import type { Command } from '../../domain/commands';
+import type { UniversalBridgeInput, UniversalBridgeRouting } from '../../domain/universal-bridge-authoring';
 import type { WorkflowStep } from '../../domain/workflow-steps';
 import { CATALOG_NETWORK_IDENTITIES, networkIdentity } from '../../domain/network-registry';
 import { AAVE_V3_LENDING_PROFILES } from '@defi-workflow-engine/action-registry';
@@ -27,6 +28,7 @@ const ROUTING = { AUTO: 'auto', LIFI: 'lifi', ACROSS: 'across' } as const;
 /** The router's chain names as strategy networks (BUILD-RH-002 adds Robinhood Chain in and out of Base and Arbitrum One). */
 const ROUTER_NETWORK: Readonly<Record<string, NetworkId>> = { 'Ethereum': 'ethereum', 'Base': 'base', 'Base Sepolia': 'base-sepolia', 'Arbitrum': 'arbitrum-one', 'Arbitrum Sepolia': 'arbitrum-sepolia',
   'Robinhood Chain': 'robinhood' };
+const UNIVERSAL_ROUTING: Readonly<Partial<Record<UniversalBridgeRouting, string>>> = { BEST: 'best', RELAY: 'relay', LIFI: 'lifi', ACROSS: 'across' };
 const bps = (value: string) => /^(0|[1-9][0-9]{0,4})$/.test(value) ? Number(value) : NaN;
 
 /** The StrategySpec (v1) an authoring command expresses, or null for anything that is not one of the Copilot's authoring commands. */
@@ -47,6 +49,13 @@ export function strategyOfCommand(command: Command): StrategySpec | null {
       const i = c.input as { source: string; destination: string; token: string; amount: string; recipient: string; slippage: string; routing: keyof typeof ROUTING };
       return { version: 1, action: 'bridge', sourceNetwork: ROUTER_NETWORK[i.source], destinationNetwork: ROUTER_NETWORK[i.destination], asset: i.token, amount: i.amount,
         routing: ROUTING[i.routing], slippageBps: bps(i.slippage), ...i.recipient ? { recipient: i.recipient } : {} } as StrategySpec;
+    }
+    // BUILD-CROSSCHAIN-UNIVERSAL-001: the universal bridge (the five mainnets). Mayan routing has no strategy form (quotes only), so it is not authoring.
+    case 'ADD_UNIVERSAL_BRIDGE': {
+      const i = c.input as UniversalBridgeInput, routing = UNIVERSAL_ROUTING[i.routing];
+      if (!routing) return null;
+      return { version: 1, action: 'bridge', sourceNetwork: i.source, destinationNetwork: i.destination, asset: i.inputAsset, outputAsset: i.outputAsset, amount: i.amount,
+        routing, slippageBps: bps(i.slippage), ...i.recipient ? { recipient: i.recipient } : {} } as StrategySpec;
     }
     // BUILD-RH-002: Robinhood Chain swaps and positions over the official catalog, and Robinhood Chain transfers (BUILD-BASE-001: and Base's).
     case 'ADD_CRYPTO_ACTION': {
@@ -109,9 +118,13 @@ function canonical(value: unknown): unknown {
 }
 export const sameCommand = (a: Command, b: Command) => JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
 
-/** The one address a strategy names (beneficiary, owner or recipient): the wallet that alone may claim its handoff. */
+/**
+ * The one address a strategy names (beneficiary, owner or recipient): the wallet that alone may claim its handoff. A bridge from Solana, or
+ * to a recipient of another ecosystem, names no claiming wallet: the recipient there cannot sign on the source network.
+ */
 export function intendedWalletOf(spec: StrategySpec): WalletRef | null {
   const s = spec as StrategySpec & { beneficiary?: string; owner?: string; recipient?: string };
+  if (s.action === 'bridge' && (s.sourceNetwork.startsWith('solana') || s.recipient !== undefined && !/^0x/i.test(s.recipient))) return null;
   const address = s.action === 'lending_composition' ? s.owner : s.action === 'bridge' ? s.recipient : s.action === 'supply' || s.action === 'borrow' || s.action === 'repay'
     ? s.beneficiary : undefined;
   return address ? { namespace: 'eip155', address: address.toLowerCase() } : null;

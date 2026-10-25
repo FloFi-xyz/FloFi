@@ -10,6 +10,7 @@ import { useLiquidity } from './liquidity-store';
 import { useSupply } from './supply-store';
 import { useLending } from './lending-store';
 import { useRouter } from './router-store';
+import { useUniversalRouter } from './universal-router-store';
 import { usePublicTestnet } from './public-testnet-store';
 import { useJupiter } from './jupiter-store';
 import { useSolanaLiquidity } from './solana-liquidity-store';
@@ -30,7 +31,7 @@ import { solanaProviderIdentity } from '../wallet/solana-wallet';
 /** Review callbacks only: no install, request, begin, submit or execute method crosses this boundary. */
 export function useReviewAuthorization(kind: SimulationSource['kind']): { authorization: ReviewAuthorization; wallet: ReviewWallet } {
   const modeA = useModeA(), modeB = useModeB(), composition = useComposition(), liquidity = useLiquidity();
-  const supply = useSupply(), lending = useLending(), router = useRouter(), publicSwap = usePublicTestnet();
+  const supply = useSupply(), lending = useLending(), router = useRouter(), universal = useUniversalRouter(), publicSwap = usePublicTestnet();
   const jupiter = useJupiter(), solanaPool = useSolanaLiquidity(), uniswapPool = useUniswapLiquidity(), transfer = useRobinhoodTransfer(), across = useAcross();
   const sharedWallet = useBuild009Wallet(), environment = useExecutionEnvironment(), solanaComposition = useSolanaComposition(), solanaTransfer = useSolanaTransfer();
   const { restorationEpoch } = useWorkflow();
@@ -60,6 +61,17 @@ export function useReviewAuthorization(kind: SimulationSource['kind']): { author
       attach(`${r.id}:${q.commitment}`, q.artifacts.manifest, q.artifacts.policy, r.authorization === q.commitment, router.review, !router.busy && !router.retired && ['PREPARED', 'AUTHORIZED'].includes(r.phase) && !r.requote, q);
       for (const token of [q.route.inputToken, q.route.outputToken]) authorization.tokens.push({ address: token.address, chain: token.chainId, symbol: token.symbol, decimals: token.decimals });
       calls(q.calls, q.intent.sourceChain); break;
+    }
+    case 'universal': {
+      const r = universal.record, q = r?.review; if (!r || !q) break;
+      attach(`${r.id}:${q.commitment}`, q.artifacts.manifest, q.artifacts.policy, r.authorization === q.commitment, universal.review,
+        !universal.busy && !universal.retired && ['PREPARED', 'AUTHORIZED'].includes(r.phase) && !r.requote, q);
+      for (const token of [q.route.inputToken, q.route.outputToken]) if (token.address) authorization.tokens.push({ address: token.address, chain: token.chainId, symbol: token.symbol, decimals: token.decimals });
+      authorization.limits.push({ label: 'Max spend', value: simulationAmount(q.route.inputAmount, q.route.inputToken.decimals, q.route.inputToken.symbol)! },
+        { label: 'Minimum received', value: simulationAmount(q.route.minimumOutput, q.route.outputToken.decimals, q.route.outputToken.symbol)! },
+        { label: 'Recipient', value: q.recipient }, { label: 'Provider', value: `${q.route.provider} · order ${q.route.order.orderId.slice(0, 10)}…` });
+      if (q.source.ecosystem === 'EVM') calls(q.source.calls, q.route.sourceChain, 'Relay Depository');
+      break;
     }
     case 'solana-swap': {
       const r = jupiter.record, q = r?.review; if (!r || !q) break;

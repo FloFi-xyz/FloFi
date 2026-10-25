@@ -10,6 +10,7 @@ import { useLiquidity } from './liquidity-store';
 import { useSupply } from './supply-store';
 import { useLending } from './lending-store';
 import { useRouter } from './router-store';
+import { useUniversalRouter } from './universal-router-store';
 import { usePublicTestnet } from './public-testnet-store';
 import { useJupiter } from './jupiter-store';
 import { useSolanaLiquidity } from './solana-liquidity-store';
@@ -21,7 +22,7 @@ import { useSolanaTransfer } from './solana-transfer-store';
 /** Explicit requests only. Existing stores retain all submission and journal semantics. */
 export function useExecutionStart(kind: SimulationSource['kind'], wallet: ReviewWallet): ExecutionStart {
   const modeA = useModeA(), modeB = useModeB(), composition = useComposition(), liquidity = useLiquidity();
-  const supply = useSupply(), lending = useLending(), router = useRouter(), publicSwap = usePublicTestnet();
+  const supply = useSupply(), lending = useLending(), router = useRouter(), universal = useUniversalRouter(), publicSwap = usePublicTestnet();
   const jupiter = useJupiter(), solanaPool = useSolanaLiquidity(), uniswapPool = useUniswapLiquidity(), transfer = useRobinhoodTransfer(), solanaComposition = useSolanaComposition();
   const solanaTransfer = useSolanaTransfer();
   const result: ExecutionStart = { ready: false, started: false, start: null, prompt: null, expiresAt: null };
@@ -49,6 +50,14 @@ export function useExecutionStart(kind: SimulationSource['kind'], wallet: Review
       const next = r?.review.calls.find(c => !confirmed.has(c.purpose === 'APPROVAL' ? 'APPROVAL' : 'DEPOSIT'));
       attach(Boolean(r?.phase === 'AUTHORIZED' && r.authorization === r.review.commitment && !router.retired && !router.busy && !pending && router.executionEnabled && router.sessionReady && next), Boolean(r?.attempts.length), router.execute);
       if (!router.executionEnabled) result.reason = 'Execution is unavailable for this route.'; break;
+    }
+    case 'universal': {
+      // BUILD-CROSSCHAIN-UNIVERSAL-001: one Execute click = one exact wallet request (the exact approval, or the deposit).
+      const r = universal.record, last = r?.attempts.at(-1);
+      const pending = Boolean(last && r?.verdict === 'PENDING' && ['SUBMITTING', 'SUBMISSION_RESULT_UNKNOWN', 'PENDING'].includes(last.state));
+      attach(Boolean(r?.phase === 'AUTHORIZED' && r.authorization === r.review.commitment && !universal.retired && !universal.busy && !pending && universal.executionEnabled),
+        Boolean(r?.attempts.length), universal.execute);
+      if (!universal.executionEnabled) result.reason = 'Execution is unavailable for this route.'; break;
     }
     case 'public': {
       const r = publicSwap.run;
@@ -135,6 +144,11 @@ export function useExecutionStart(kind: SimulationSource['kind'], wallet: Review
         safeNext = Boolean(r && r.attempts.every(a => a.step === 'APPROVAL' && a.state === 'CONFIRMED'));
         result.nextLabel = 'Continue to bridge'; break;
       }
+      case 'universal': {
+        const r = universal.record;
+        safeNext = Boolean(r && r.attempts.length > 0 && r.attempts.every(a => a.step === 'APPROVAL' && a.state === 'CONFIRMED'));
+        result.nextLabel = 'Continue to bridge'; break;
+      }
       case 'public': {
         const attempts = publicSwap.run?.attempts ?? [];
         safeNext = attempts.length > 0 && attempts.every(a => a.step === 'approval' && a.state === 'CONFIRMED');
@@ -170,7 +184,7 @@ export function useExecutionStart(kind: SimulationSource['kind'], wallet: Review
     }
     result.next = result.ready && safeNext ? result.start : null;
   }
-  result.check = kind === 'supply' ? supply.observe : kind === 'lending' ? lending.observe : kind === 'router' ? router.observe : kind === 'public' ? publicSwap.observe
+  result.check = kind === 'supply' ? supply.observe : kind === 'lending' ? lending.observe : kind === 'router' ? router.observe : kind === 'universal' ? universal.observe : kind === 'public' ? publicSwap.observe
     : kind === 'solana-swap' ? jupiter.observe : kind === 'solana-transfer' ? solanaTransfer.observe : kind === 'solana-pool' ? solanaPool.observe : kind === 'solana-composition' ? solanaComposition.observe : kind === 'uniswap-pool' ? uniswapPool.observe : kind === 'transfer' ? transfer.observe
     : kind === 'fork-swap' ? () => { const a = modeA.execution?.attempts.at(-1); if (a && (a.stepId === 'step-approve' || a.stepId === 'step-swap')) modeA.observe(a.stepId); }
     : kind === 'delegated-swap' ? modeB.refresh : kind === 'composition' ? composition.refresh : null;

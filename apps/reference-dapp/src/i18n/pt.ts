@@ -24,12 +24,14 @@ import { portugueseExecutionUx } from './pt-execution-ux';
 import { portugueseWorkflowRuns } from './pt-workflow-runs';
 import { portugueseMainnetProduct } from './pt-mainnet-product';
 import { portugueseConcurrency } from './pt-concurrency';
+import { portugueseUniversalBridge } from './pt-universal-bridge';
 /** English source messages are stable presentation keys. Technical identifiers never enter this catalog. */
 export const portuguese: Readonly<Record<string, string>> = {
   // BUILD-AUTOMATION-001/002: first, so an existing product translation of a shared word keeps precedence.
   ...portugueseDelegation,
   ...portugueseMainnetProduct,
   ...portugueseConcurrency,
+  ...portugueseUniversalBridge,
   ...portugueseAutomations,
   ...portugueseRobinhood,
   ...portugueseBase,

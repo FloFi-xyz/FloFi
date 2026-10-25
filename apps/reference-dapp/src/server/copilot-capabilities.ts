@@ -7,7 +7,7 @@
  */
 import { COPILOT_FEE_TIERS } from '../domain/copilot-intent';
 import { COPILOT_POOLS } from '../domain/copilot-authoring';
-import { AUTHORING_CAPABILITIES, bridgeOffers, catalogCapabilityNetworks, copilotCapabilityNetworks, lendingAmountScopeText, lendingOffers } from '../domain/authoring-capabilities';
+import { AUTHORING_CAPABILITIES, bridgeOffers, universalNames, catalogCapabilityNetworks, copilotCapabilityNetworks, lendingAmountScopeText, lendingOffers } from '../domain/authoring-capabilities';
 import { declaredNetworkSymbols } from '../domain/asset-catalogs';
 import { COPILOT_NETWORK_IDS, networkIdentity, networkOfCopilot, type NetworkIdentity } from '../domain/network-registry';
 import { ROUTER_NETWORK_OPTIONS } from '../domain/router-authoring';
@@ -68,6 +68,9 @@ export function copilotSupportsSection(scope: NetworkScope = networkScope()): st
       (scope === 'ENGINEERING' ? 'Solana: SOL, USDC or USDT; Solana Devnet: SOL or devUSDC.' : 'Solana: SOL, USDC or USDT.') +
       ' Solana transfers require an explicit recipient wallet public key in base58, kept case-sensitive. Never substitute the connected wallet.',
     `- BRIDGE (Cross-chain Router): ${join(bridgeOffers().filter(route => inScope(scope)(route.source) && inScope(scope)(route.destination)).map(routeText), 'or')}; optional LI.FI or Across preference and recipient.`,
+    `- BRIDGE (universal Cross-chain Router): any asset Flofi knows, between any two of ${universalNames('EN')} (mainnets, real funds), including Solana in or out; ` +
+      'put the asset sent in asset and both networks; a destination asset ("receive SOL") or a Relay or Mayan preference is read by Flofi from the user\'s own words. ' +
+      'Recipient: an explicit 0x address for an EVM destination; for a Solana destination leave recipient null (Flofi reads a Solana wallet written in the message).',
     `- SUPPLY, BORROW, REPAY, WITHDRAW on Aave V3: ${[...lending].map(([asset, networks]) => `${asset} on ${names(networks)}`).join('; ')}; nothing else. ${lendingAmountScopeText('EN')}`,
     `- LIQUIDITY: ${[...pools, catalogPools].join('; ')}.`,
     '- AUTOMATION: SCHEDULED_DCA, PRICE_TRIGGER (USD below/above), DAILY_WATCH using the existing owner-confirmed Automation domain.',

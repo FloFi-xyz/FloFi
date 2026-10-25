@@ -154,6 +154,26 @@ export function projectExecutionEvidence(source: ExecutionLifecycleSource, progr
       // Route/provider quoted fees are deliberately not reported as actual costs.
       break;
     }
+    case 'universal': {
+      const record = source.state.record; if (!record) break;
+      evidence.wallet = record.owner; bundle(record.evidence?.bundle, record.evidence?.bundleHash);
+      const review = record.review, route = review.route;
+      for (const attempt of record.attempts) {
+        identifier(attempt.step, attempt.step === 'APPROVAL' ? 'Approval transaction' : 'Source transaction', attempt.transactionHash, 'transaction', route.sourceChain, attempt.state);
+        if (attempt.ecosystem === 'EVM') {
+          identifier(attempt.step, 'Replacement transaction', attempt.replacementHash, 'transaction', route.sourceChain, attempt.state);
+          fee(attempt.step, route.sourceChain, attempt.receipt?.transactionHash, attempt.receipt?.gasCostWei);
+        }
+        failure(attempt.step, attempt.state, attempt.transactionHash, attempt.note ?? undefined);
+      }
+      identifier('DEPOSIT', 'Provider reference · Order ID', route.order.orderId);
+      identifier('destination', 'Destination transaction', record.destination?.transactionHash, 'transaction', route.destinationChain);
+      identifier('destination', 'Refund transaction', record.refund?.transactionHash, 'transaction', record.refund?.chainId ?? route.sourceChain);
+      if (record.source?.final) amount('DEPOSIT', 'Executed input', record.source.ownerDebit, route.inputToken.decimals, route.inputToken.symbol, route.inputAmount);
+      if (record.verdict === 'RECONCILED' && record.destination?.final) amount('destination', 'Actual received', record.destination.amount, route.outputToken.decimals, route.outputToken.symbol, route.expectedOutput);
+      detail('Source network', shellChainLabel(route.sourceChain)); detail('Destination network', shellChainLabel(route.destinationChain));
+      break;
+    }
     case 'uniswap-pool': {
       const record = source.state.record; if (!record) break;
       const chain = `eip155:${record.review.chainId}`;

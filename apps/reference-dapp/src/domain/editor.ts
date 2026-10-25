@@ -22,6 +22,7 @@ import { createSolanaSwapNode, solanaSwapDetails } from './jupiter-authoring';
 import { createSolanaLiquidityNode, solanaLiquidityDetails } from './solana-liquidity-authoring';
 import { createUniswapLiquidityNode, uniswapLiquidityDetails } from './uniswap-liquidity-authoring';
 import { createRouterNode, routerDetails } from './router-authoring';
+import { createUniversalBridgeFromInput, universalBridgeDetails } from './universal-bridge-authoring';
 import { createCryptoActionNode, canSelectCryptoAssets, cryptoSelectionOf, cryptoReviewContext } from './crypto-action-picker';
 
 export interface EditorState { readonly workflow: Workflow; readonly error: string | null }
@@ -187,6 +188,21 @@ export function editorReducer(state: EditorState, command: Command, context?: Re
       validateWorkflowDraft(workflow, context);
       return { workflow: freeze(workflow), error: null };
     } catch (cause) { return reject(cause instanceof Error ? cause.message : 'ROUTER_INPUT_INVALID'); }
+  }
+  if (command.type === 'ADD_UNIVERSAL_BRIDGE' || command.type === 'SET_UNIVERSAL_BRIDGE') {
+    if (!context) return reject('REVIEW_CONTEXT_REQUIRED');
+    try {
+      if (command.type === 'SET_UNIVERSAL_BRIDGE' && !current.nodes.some(node => node.nodeId === command.nodeId && universalBridgeDetails(node))) return reject('UNKNOWN_UNIVERSAL_BRIDGE_NODE');
+      const id = command.type === 'SET_UNIVERSAL_BRIDGE' ? command.nodeId : `node-${String(current.revision + 2).padStart(3, '0')}`;
+      const replacement = createUniversalBridgeFromInput(id, command.input);
+      if (command.type === 'SET_UNIVERSAL_BRIDGE' && JSON.stringify({ ...replacement, dependencies: [] }) === JSON.stringify({ ...current.nodes.find(n => n.nodeId === id), dependencies: [] }))
+        return { workflow: current, error: null };
+      // The universal bridge is an isolated publicly executable capability: it replaces authoring templates, and on SET keeps the node's links.
+      const workflow = { ...current, revision: current.revision + 1, nodes: command.type === 'SET_UNIVERSAL_BRIDGE'
+        ? current.nodes.map(n => n.nodeId === id ? { ...replacement, dependencies: [...n.dependencies] } : n) : [...current.nodes.filter(n => !n.actionType.startsWith('mock-')), replacement] };
+      validateWorkflowDraft(workflow, context);
+      return { workflow: freeze(workflow), error: null };
+    } catch (cause) { return reject(cause instanceof Error ? cause.message : 'UNIVERSAL_BRIDGE_INPUT_INVALID'); }
   }
   if (command.type === 'ADD_BRIDGE' || command.type === 'SET_BRIDGE') {
     if (!context) return reject('REVIEW_CONTEXT_REQUIRED');

@@ -28,7 +28,9 @@ import { workflowRunHandlers } from './worker.ts';
 const silent: Logger = { info: () => undefined, warn: () => undefined, error: () => undefined, child: () => silent } as unknown as Logger;
 type FakeRun = { runId: string; flow: FlowName; owner: string; workflow: unknown; createdAt: string; updatedAt: string; status: string; errorCode: string | null;
   needsObservation: boolean; hasEvidence: boolean; attempts: { transactionHash: string; state: string }[];
-  evidence: { bundleHash: string; environment: string; outcome: string; content: unknown } | null };
+  evidence: { bundleHash: string; environment: string; outcome: string; content: unknown } | null;
+  /** Durable facts observeOwnerStep reads for confirm-mode bindings (optional; defaults empty). */
+  recordExtras: Record<string, unknown> | undefined };
 
 /**
  * TEST DOUBLE (isolated tests only): the deployment's flow runtime for owner-signed steps. `ownerRuns` are what FloFi's flows would have recorded
@@ -46,17 +48,25 @@ export function ownerFlowRuntime(enabled: readonly FlowName[], sequences: { read
     evidence: async (_flow, runId, owner) => ({ ok: true, value: find(runId, owner)?.evidence ?? null }),
     runs: async (flow, owner) => ({ ok: true, value: ownerRuns.filter(r => r.flow === flow && r.owner === owner).map(r => ({ runId: r.runId, flow: r.flow, status: r.status,
       ownerAccount: r.owner, hasEvidence: r.hasEvidence, updatedAt: r.updatedAt })) }),
-    record: async (_flow, runId, owner) => ({ ok: true, value: find(runId, owner) ? { review: { workflow: find(runId, owner)!.workflow } } : null }),
+    record: async (_flow, runId, owner) => {
+      const found = find(runId, owner);
+      return { ok: true, value: found ? { review: { workflow: found.workflow }, ...found.recordExtras } : null };
+    },
     sequences: async () => sequences,
   };
-  /** The owner's flow run of a loaded step, as its flow records it: reconciled, submitted-but-unknown, reverted, or refused before submission. */
-  function ownerExecutes(flow: FlowName, owner: string, workflow: unknown, outcome: 'RECONCILED' | 'PENDING' | 'REVERTED' | 'REFUSED_BEFORE_SUBMISSION') {
+  /**
+   * The owner's flow run of a loaded step, as its flow records it: reconciled, submitted-but-unknown, reverted, or refused before submission.
+   * `amounts` (optional) are the durable spent/received facts confirm-mode bindings resolve from (asset keys as `${chain}/erc20:${address}`).
+   */
+  function ownerExecutes(flow: FlowName, owner: string, workflow: unknown, outcome: 'RECONCILED' | 'PENDING' | 'REVERTED' | 'REFUSED_BEFORE_SUBMISSION',
+    amounts?: { readonly received?: readonly { readonly asset: string; readonly amount: string }[]; readonly spent?: readonly { readonly asset: string; readonly amount: string }[] }) {
     const at = clock().toISOString(), hash = '0x' + randomBytes(32).toString('hex'), submitted = outcome !== 'REFUSED_BEFORE_SUBMISSION';
     const run: FakeRun = { runId: `run-${randomBytes(6).toString('hex')}`, flow, owner, workflow, createdAt: at, updatedAt: at,
       status: outcome === 'RECONCILED' ? 'RECONCILED' : outcome === 'PENDING' ? 'SUBMITTED' : 'FAILED', errorCode: outcome === 'RECONCILED' || outcome === 'PENDING' ? null
         : outcome === 'REVERTED' ? 'SUBMISSION_REVERTED' : 'SIMULATION_FAILED', needsObservation: outcome === 'PENDING', hasEvidence: outcome === 'RECONCILED',
       attempts: submitted ? [{ transactionHash: hash, state: outcome }] : [],
-      evidence: outcome === 'RECONCILED' ? { bundleHash: '0x' + randomBytes(32).toString('hex'), environment: 'MOCKED', outcome: 'RECONCILED', content: {} } : null };
+      evidence: outcome === 'RECONCILED' ? { bundleHash: '0x' + randomBytes(32).toString('hex'), environment: 'MOCKED', outcome: 'RECONCILED', content: {} } : null,
+      recordExtras: amounts ? { receivedAmounts: amounts.received ?? [], spentAmounts: amounts.spent ?? [] } : undefined };
     ownerRuns.push(run);
     return run;
   }
@@ -70,13 +80,17 @@ export function ownerFlowRuntime(enabled: readonly FlowName[], sequences: { read
 
 export type RunHarness = Awaited<ReturnType<typeof workflowRunHarness>>;
 /** Everything a conversational workflow run touches, on one disposable database. `flows`: the enabled owner-execution flows. */
-export async function workflowRunHarness(db: Database, options: { readonly flows?: readonly FlowName[]; readonly sequences?: boolean; readonly delegation?: boolean } = {}) {
+export async function workflowRunHarness(db: Database, options: {
+  readonly flows?: readonly FlowName[]; readonly sequences?: boolean; readonly delegation?: boolean;
+  /** Handoff policy env (e.g. mainnet networks for Swap→Bridge→Swap). Defaults to test-funds only. */
+  readonly policyEnv?: Readonly<Record<string, string | undefined>>;
+} = {}) {
   const d = await delegationHarness(db);
   const facts: DelegationFacts = options.delegation === false ? null : { mode: 'MOCKED_HARNESS', unavailable: null };
   const flows = ownerFlowRuntime(options.flows ?? ['base-sepolia-swap', 'solana-devnet-swap'], { enabled: options.sequences ?? true, delegation: facts }, d.now);
   const handoffs = createPgHandoffStore(db, d.tenantId), store = createPgWorkflowRunStore(db, d.tenantId);
   const scheme = approvalLinkScheme('flofi_chs_', randomBytes(32), ['CHANNEL_CONVERSATION']);
-  const policy = readHandoffPolicy({});
+  const policy = readHandoffPolicy(options.policyEnv ?? {});
   const lines: string[] = [];
   const log = (event: string, fields: Readonly<Record<string, unknown>>) => { lines.push(JSON.stringify({ event, ...fields })); };
   const runs: WorkflowRunSurface = { store, runtime: flows.runtime, delegation: d.store, now: d.now, log, policyFor: () => policy, delegationFacts: facts,

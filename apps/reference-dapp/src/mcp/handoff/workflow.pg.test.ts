@@ -67,14 +67,17 @@ describe('BUILD-CHAT-E2E-001 multi-step workflows over MCP (PostgreSQL)', () => 
     expect(JSON.stringify(status)).not.toContain(OWNER.address);
   });
 
-  it('a bound workflow is refused for owner-signed execution where delegation is unavailable, with the exact reason', async () => {
+  it('a bound workflow is SEQUENTIAL for confirm-each-step (received amounts); delegated stays unavailable without a signer', async () => {
     const { client } = await consumer();
     const bound = { version: 2, steps: [SWAP, { ...SWAP, inputAsset: 'WETH', outputAsset: 'USDC', amount: '0.001' }], bindings: [{ step: 1, amountFrom: 0 }] };
     const composed = (await client.callTool('compose_strategy', { strategy: bound })).output as Record<string, unknown>;
-    expect(composed).toMatchObject({ ok: true, executionPlan: { kind: 'NOT_EXECUTABLE', reason: 'DEPENDENT_AMOUNT_SOURCE_NOT_IMPLEMENTED', bindings: [{ step: 1, amountFrom: 0 }] } });
+    expect(composed).toMatchObject({ ok: true, executionPlan: { kind: 'SEQUENTIAL', reason: null, bindings: [{ step: 1, amountFrom: 0 }] } });
     expect((await client.callTool('request_user_approval', { strategy: composed.strategy, workflowHash: composed.workflowHash })).output)
-      .toMatchObject({ ok: false, code: 'DEPENDENT_AMOUNT_SOURCE_NOT_IMPLEMENTED', gates: { supportedByCode: { modes: { confirmEachStep: 'DEPENDENT_AMOUNT_SOURCE_NOT_IMPLEMENTED',
-        delegated: 'DELEGATION_NOT_ENABLED' } } } });
+      .toMatchObject({ ok: true, executionPlan: 'SEQUENTIAL',
+        authorizationPlan: { confirmEachStep: { available: true }, delegatedSingleAuthorization: { available: false, reason: 'DELEGATION_NOT_ENABLED' },
+          bindings: [{ step: 1, amountFrom: 0, confirmEachStep: 'RECONCILED_RECEIVED_AMOUNT', delegated: 'RECONCILED_RECEIVED_AMOUNT' }],
+          recommended: 'CONFIRM_EACH_STEP' },
+        gates: { supportedByCode: { modes: { confirmEachStep: null, delegated: 'DELEGATION_NOT_ENABLED' } } } });
     expect((await client.callTool('get_capabilities', {})).output).toMatchObject({ stepLists: { sequences: expect.stringContaining('ONE passkey authorization') } });
   });
 });

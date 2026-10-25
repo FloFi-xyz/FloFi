@@ -35,6 +35,8 @@ export type BackendOptions = {
   readonly routers?: Partial<Record<FlowName, FlowDeps['router']>>;
   /** Test seam (BUILD-RH-002): the official asset catalog served from a committed fixture with `rpc[flow]`. */
   readonly catalog?: FlowDeps['catalog'];
+  /** Test seam (BUILD-CROSSCHAIN-UNIVERSAL-001): the MOCKED in-process chains (five networks) and provider transport of `crosschain-universal`. */
+  readonly universal?: FlowDeps['universal'];
 };
 const CODE = /^[A-Z][A-Z0-9_]{2,80}$/;
 
@@ -50,12 +52,16 @@ export function createBackend(options: BackendOptions) {
     if (!transport) {
       const override = options.rpc?.[flow];
       const router = options.routers?.[flow] ?? options.router;
-      transport = override ? { rpc: override, ...options.http ? { http: options.http } : {}, ...router ? { router } : {},
-        ...options.catalog ? { catalog: options.catalog } : {} } : FLOWS[flow].transport(mode, env);
+      transport = flow === 'crosschain-universal' && options.universal ? { rpc: options.universal.evmRpcs['eip155:8453']!, universal: options.universal }
+        : override ? { rpc: override, ...options.http ? { http: options.http } : {}, ...router ? { router } : {},
+          ...options.catalog ? { catalog: options.catalog } : {} } : FLOWS[flow].transport(mode, env);
       transports.set(flow, transport);
     }
     const router = transport.router && readOnly ? { router: { ...transport.router, destinationRpc: observeOnly(transport.router.destinationRpc) } } : {};
-    return { ...transport, ...router, mode, env, rpc: readOnly ? observeOnly(transport.rpc) : transport.rpc };
+    // BUILD-CROSSCHAIN-UNIVERSAL-001: every chain client of the universal router (five networks, Solana included) is observe-only in a worker.
+    const universal = transport.universal && readOnly ? { universal: { ...transport.universal, solanaRpc: observeOnly(transport.universal.solanaRpc),
+      evmRpcs: Object.fromEntries(Object.entries(transport.universal.evmRpcs).map(([chain, rpc]) => [chain, observeOnly(rpc)])) } } : {};
+    return { ...transport, ...router, ...universal, mode, env, rpc: readOnly ? observeOnly(transport.rpc) : transport.rpc };
   };
   function storage(flow: FlowName, tenantId: string): ExecutionStorage {
     const definition = FLOWS[flow], namespace = definition.namespace ?? flow;

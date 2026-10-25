@@ -788,7 +788,7 @@ class GuardedRunner(unittest.TestCase):
 
     def test_a_plan_that_drops_or_repeats_a_profile_refuses_to_run(self):
         source = (self.root / RUNNER).read_text()
-        for broken in [source.replace("'canvas-workflow-ux'],", "],", 1), source.replace("'approve-workflow-run'],", "'approve-workflow-run', 'copilot'],", 1)]:
+        for broken in [source.replace("'canvas-workflow-ux'],", "],", 1), source.replace("'universal-bridge'],", "'universal-bridge', 'copilot'],", 1)]:
             with self.subTest():
                 self.assertNotEqual(broken, source)
                 (self.root / RUNNER).write_text(broken)

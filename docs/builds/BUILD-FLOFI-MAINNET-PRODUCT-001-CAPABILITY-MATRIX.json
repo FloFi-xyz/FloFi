@@ -1256,23 +1256,23 @@
       "protocols": [
         "per step"
       ],
-      "flow": null,
-      "webRuntime": null,
-      "ownerWalletExecutionImplemented": false,
+      "flow": "workflow-run",
+      "webRuntime": "per step",
+      "ownerWalletExecutionImplemented": true,
       "channels": {
         "canvas": false,
-        "approve": false,
+        "approve": true,
         "copilot": false,
-        "mcp": false,
-        "telegram": false,
+        "mcp": true,
+        "telegram": true,
         "whatsapp": "POLICY_BLOCKED",
-        "developerApi": false
+        "developerApi": true
       },
       "agentRollout": null,
       "registryEvidence": null,
       "liveEvidence": [],
-      "status": "NOT_IMPLEMENTED",
-      "reason": "DEPENDENT_AMOUNT_SOURCE_NOT_IMPLEMENTED: owner-signed flows expose no canonical received amount."
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Confirm-each-step and delegated modes resolve min(cap, reconciled received) from the producer step (BUILD-CROSSCHAIN-UNIVERSAL-001)."
     }
   ],
   "retired": [

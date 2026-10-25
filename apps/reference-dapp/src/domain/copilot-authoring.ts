@@ -21,6 +21,8 @@ import { resolveAssetReference } from './asset-catalogs';
 import { COPILOT_NETWORK_IDS, copilotNetworksMentioned, catalogNetworkOfChatName, networkIdentity, networkOfCopilot, type CopilotNetworkId } from './network-registry';
 import { routerNetworksOf } from './router-authoring';
 import { checkRecipient } from './recipient-address';
+import { defaultUniversalOutput, resolveUniversalAsset, universalAssetReference, universalChatSentence, type UniversalBridgeRouting } from './universal-bridge-authoring';
+import { isSolanaPublicKey, UNIVERSAL_NETWORKS, type UniversalNetworkKey } from '@defi-workflow-engine/workflow-contracts';
 import { lexiconAssets, lexiconNamedNetworkIds, lexiconNetworks, targetEnvironment, type LexiconEntry } from './copilot-lexicon';
 
 /**
@@ -49,6 +51,8 @@ export const COPILOT_AUTHORING_COMMANDS = Object.freeze(['ADD_SWAP', 'ADD_TESTNE
   'ADD_REPAY', 'ADD_WITHDRAW', 'ADD_UNISWAP_LIQUIDITY', 'ADD_SOLANA_LIQUIDITY', 'AUTHOR_LENDING',
   // BUILD-BASE-001: catalog-network swaps and positions (the Canvas action command) and catalog-network transfers, as the exact grammar authors them.
   'ADD_CRYPTO_ACTION', 'ADD_RH_TRANSFER',
+  // BUILD-CROSSCHAIN-UNIVERSAL-001: the universal bridge between the five mainnets.
+  'ADD_UNIVERSAL_BRIDGE',
   // PR B: a Solana Devnet swap's output funding an Orca position, added and linked exactly as the Canvas does.
   'ADD_SOLANA_COMPOSITION'] as const);
 export type CopilotAuthoringCommand = (typeof COPILOT_AUTHORING_COMMANDS)[number];
@@ -387,7 +391,8 @@ function planRoute(a: CopilotBridgeAction, g: Grounding): Plan {
   // Known symbols retain the route-specific refusal; whole names resolve within the route's source catalog.
   const asset = g.policy.catalog && !/^[A-Za-z][A-Za-z0-9.]{0,15}$/.test(reference)
     ? catalogToken(reference, route.src, g, 'bridge', 'asset', 'ANY', notes).asset.symbol : reference;
-  if (asset.toUpperCase() !== route.token) refuse(m.routerTokenOnly(route.token, route.option.sourceLabel));
+  // BUILD-CROSSCHAIN-UNIVERSAL-001: another asset on a mainnet route is a universal bridge (no artificial token restriction).
+  if (asset.toUpperCase() !== route.token) return planUniversalBridge(a, g);
   const amount = amountOf(a.amount, g, 'bridge');
   const slippage = slippageOf(a.slippageBps, ROUTER_DEFAULT_SLIPPAGE, g, notes, route.option.profile.maximumSlippageBps);
   const routingNamed = g.carried.has('routing');
@@ -402,7 +407,68 @@ function planRoute(a: CopilotBridgeAction, g: Grounding): Plan {
     expect: 'ADD_ROUTER_BRIDGE', notes };
 }
 
+/**
+ * BUILD-CROSSCHAIN-UNIVERSAL-001: a bridge between any two of the five mainnets that the certified Router does not serve exactly — Solana
+ * in or out, another asset, a chosen destination asset ("receive SOL") or a named provider (Relay, Mayan) — is a universal bridge (V2 only:
+ * CopilotIntent V1 is frozen). As everywhere, both networks must be named (or carried), real funds are never inferred, values come only from
+ * the user's own words, and a destination asset FloFi proposes is stated. The route itself is chosen at Simulate and shown at Review.
+ */
+const UNIVERSAL_OF: Readonly<Partial<Record<Network, UniversalNetworkKey>>> = { SOLANA: 'solana', BASE: 'base', ARBITRUM: 'arbitrum-one', ETHEREUM: 'ethereum', ROBINHOOD: 'robinhood' };
+const RECEIVE_ASSET = /(?<![\p{L}\p{N}])(?:receiv(?:e|ing)|get(?:ting)?|recebendo|receber|receba|recebo)\s+(?:(?:it\s+)?(?:as|in|em|como)\s+)?([A-Za-z$][A-Za-z0-9.]{0,15})(?![\p{L}\p{N}])/iu;
+const RECEIVE_STOP = new Set(['on', 'at', 'to', 'in', 'em', 'na', 'no', 'para', 'it', 'the', 'my', 'minha', 'meu', 'a', 'o', 'funds', 'fundos', 'money', 'dinheiro', 'there', 'la', 'lá']);
+const receivedAsset = (text: string) => { const word = RECEIVE_ASSET.exec(text)?.[1]; return word && !RECEIVE_STOP.has(word.toLowerCase()) ? word : null; };
+const universalWanted = (a: CopilotBridgeAction, g: Grounding) => g.policy.catalog === true && (a.sourceNetwork === 'SOLANA' || a.destinationNetwork === 'SOLANA' ||
+  namedNetworks(g).includes('SOLANA') || receivedAsset(g.text) !== null || /\b(?:relay|mayan)\b/i.test(g.text));
+function planUniversalBridge(a: CopilotBridgeAction, g: Grounding): Plan {
+  const m = copyOf(g), notes: string[] = [], text = g.text;
+  const named = [...namedNetworks(g), ...(['sourceNetwork', 'destinationNetwork'] as const).flatMap(field => {
+    const value = a[field]; return value !== null && value !== 'OTHER' && g.carried.has(field) ? [value] : []; })];
+  const side = (value: CopilotNetwork | null): Network | null | 'OTHER' => value === null ? null : value === 'OTHER' ? 'OTHER' : named.includes(value) ? value : null;
+  const source = side(a.sourceNetwork), destination = side(a.destinationNetwork);
+  const labelsAll = Object.values(UNIVERSAL_NETWORKS).map(n => n.name);
+  if (source === 'OTHER' || destination === 'OTHER' || (source !== null && !UNIVERSAL_OF[source]) || (destination !== null && !UNIVERSAL_OF[destination]))
+    return refuse(m.universalNetworks(labelsAll));
+  const missing: CopilotMissingField[] = [...(a.amount === null ? ['amount' as const] : []), ...(a.asset === null ? ['asset' as const] : []),
+    ...(source === null ? ['sourceNetwork' as const] : []), ...(destination === null ? ['destinationNetwork' as const] : [])];
+  const known = source ?? destination;
+  if (missing.length) ask(missing, stillNeeds(m, missing, 'bridge'), source === null || destination === null
+    ? labelsAll.filter(label => known === null || label !== UNIVERSAL_NETWORKS[UNIVERSAL_OF[known]!].name) : []);
+  if (source === destination) return ask(['destinationNetwork'], m.universalSameNetwork, labelsAll.filter(label => label !== UNIVERSAL_NETWORKS[UNIVERSAL_OF[source!]!].name));
+  const src = UNIVERSAL_OF[source!]!, dst = UNIVERSAL_OF[destination!]!, srcName = UNIVERSAL_NETWORKS[src].name, dstName = UNIVERSAL_NETWORKS[dst].name;
+  const route = `${srcName} → ${dstName}`;
+  if (testWording(g)) ask(['sourceNetwork', 'destinationNetwork'], m.routeRealFunds(route));
+  const written = isCatalogNetwork(source as Network) ? catalogToken(a.asset, source as Network, g, 'bridge', 'asset', 'ANY', notes).asset.symbol : needAsset(a.asset, g, 'bridge', 'asset');
+  const reference = (key: UniversalNetworkKey, value: string, network: string) => {
+    try { return universalAssetReference(key, value); } catch { return refuse(m.universalAssetUnknown(value, network)); }
+  };
+  const asset = reference(src, written, srcName), wantedOutput = receivedAsset(text);
+  let outputAsset: string;
+  if (wantedOutput !== null) outputAsset = reference(dst, wantedOutput, dstName);
+  else {
+    try { outputAsset = defaultUniversalOutput(src, resolveUniversalAsset(src, asset).symbol, dst); } catch { return ask([], m.universalOutputQuestion(dstName)); }
+    notes.push(m.universalDefaultOutputNote(outputAsset, dstName));
+  }
+  const amount = amountOf(a.amount, g, 'bridge');
+  const slippage = slippageOf(a.slippageBps, '50', g, notes, UNIVERSAL_MAXIMUM_SLIPPAGE_BPS);
+  const routingNamed = g.carried.has('routing');
+  const routing: UniversalBridgeRouting = /\brelay\b/i.test(text) ? 'RELAY' : /\bmayan\b/i.test(text) ? 'MAYAN'
+    : a.routing === 'LIFI' && (routingNamed || /li\.?\s?fi/i.test(text)) ? 'LIFI' : a.routing === 'ACROSS' && (routingNamed || /\bacross\b/i.test(text)) ? 'ACROSS' : 'BEST';
+  if (routing === 'BEST') notes.push(m.universalBestRoutingNote);
+  const destinationEcosystem = UNIVERSAL_NETWORKS[dst].ecosystem === 'SOLANA' ? 'Solana' : 'EVM';
+  const solanaRecipient = () => {
+    if (a.recipient !== null && /^0x/i.test(a.recipient)) return refuse(m.universalRecipientFormat(dstName, destinationEcosystem));
+    const keys = [...new Set([...text.matchAll(/(?<![A-Za-z0-9])[1-9A-HJ-NP-Za-km-z]{32,44}(?![A-Za-z0-9])/g)].map(match => match[0]).filter(isSolanaPublicKey))];
+    return keys.length > 1 ? ask(['recipient'], m.universalRecipientWhich, keys) : keys[0] ?? '';
+  };
+  const recipient = destinationEcosystem === 'EVM' ? addressOf(a.recipient, g, 'recipient')?.toLowerCase() ?? '' : solanaRecipient();
+  if (!recipient) notes.push(UNIVERSAL_NETWORKS[src].ecosystem === UNIVERSAL_NETWORKS[dst].ecosystem ? m.connectedRecipientNote : m.universalDestinationWalletNote(destinationEcosystem));
+  notes.push(m.universalFundsNote(route));
+  return { sentence: universalChatSentence({ source: src, destination: dst, inputAsset: asset, outputAsset, amount, recipient, slippage, routing }), expect: 'ADD_UNIVERSAL_BRIDGE', notes };
+}
+const UNIVERSAL_MAXIMUM_SLIPPAGE_BPS = 300;
+
 function planBridge(a: CopilotBridgeAction, g: Grounding): Plan {
+  if (universalWanted(a, g)) return planUniversalBridge(a, g);
   if (extendedRoute(a, g)) return planRoute(a, g);
   const m = copyOf(g), notes: string[] = [], text = g.text;
   const carriedSide = (value: CopilotNetwork | null, field: CarriedField): Network[] => value !== null && value !== 'OTHER' && g.carried.has(field) ? [value] : [];
@@ -434,7 +500,7 @@ function planBridge(a: CopilotBridgeAction, g: Grounding): Plan {
   if (network === 'mainnet' && (!named.includes('BASE') || !named.includes('ARBITRUM') || testWording(g))) ask(['sourceNetwork', 'destinationNetwork'], m.routerRealFunds, pairs);
   if (network === 'testnet' && !named.includes(src) && !named.includes(dst)) ask(['sourceNetwork', 'destinationNetwork'], m.whichRoute, pairs);
   const asset = g.policy.catalog && network === 'mainnet' ? catalogToken(a.asset, src, g, 'bridge', 'asset', 'ANY', notes).asset.symbol : needAsset(a.asset, g, 'bridge', 'asset');
-  if (asset !== ROUTER_NETWORK_OPTIONS[network].pair.source.symbol) refuse(m.routerUsdcOnly);
+  if (asset !== ROUTER_NETWORK_OPTIONS[network].pair.source.symbol) return g.policy.catalog && network === 'mainnet' ? planUniversalBridge(a, g) : refuse(m.routerUsdcOnly);
   const amount = amountOf(a.amount, g, 'bridge');
   const profile = ROUTER_NETWORK_OPTIONS[network].profile;
   const slippage = slippageOf(a.slippageBps, ROUTER_DEFAULT_SLIPPAGE, g, notes, profile.maximumSlippageBps);

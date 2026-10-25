@@ -63,7 +63,9 @@ describe('Robinhood decision gate in the capability registry', () => {
       ['asset.liquidity.concentrated', 'uniswap.v3', 'eip155:4663', 'MAINNET', null],
       ['asset.transfer', 'evm.native-transfer', 'eip155:4663', 'MAINNET', null],
       ['asset.transfer', 'evm.token-transfer', 'eip155:4663', 'MAINNET', null],
-      ['asset.bridge', 'flofi.router', 'eip155:4663', 'MAINNET', null]]);
+      ['asset.bridge', 'flofi.router', 'eip155:4663', 'MAINNET', null],
+      // BUILD-CROSSCHAIN-UNIVERSAL-001
+      ['asset.bridge', 'flofi.router.universal', 'eip155:4663', 'MAINNET', null]]);
     for (const row of rows) {
       expect(row.authorizationModes).toEqual(['A']);
       expect(row.requirements).toEqual(['INJECTED_WALLET', 'QUOTE_PROVIDER', 'REVIEWED_ARTIFACTS']);

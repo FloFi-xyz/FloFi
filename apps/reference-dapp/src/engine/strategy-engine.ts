@@ -23,6 +23,8 @@ import { createSolanaSwapNode } from '../domain/jupiter-authoring';
 import { createAuthoredLending } from '../domain/lending-authoring';
 import { describeProposal } from '../domain/proposal';
 import { createRouterNode, routerNetworkOfInput, ROUTER_NETWORK_OPTIONS, type RouterBridgeInput, type RouterDestination, type RouterSource } from '../domain/router-authoring';
+import { createUniversalBridgeFromInput, defaultUniversalOutput, resolveUniversalAsset, universalAssetReference, type UniversalBridgeInput, type UniversalBridgeRouting } from '../domain/universal-bridge-authoring';
+import { isSolanaPublicKey, UNIVERSAL_NETWORKS, type UniversalNetworkKey } from '@defi-workflow-engine/workflow-contracts';
 import { networkIdentity } from '../domain/network-registry';
 import { authoringAssetSymbol } from '../domain/asset-catalogs';
 import { createCryptoActionNode, type CryptoActionInput } from '../domain/crypto-action-picker';
@@ -75,6 +77,28 @@ const ROUTER_CHAIN = Object.freeze(Object.fromEntries(Object.values(ROUTER_NETWO
 const routerChains = (spec: Extract<StrategySpec, { action: 'bridge' }>) =>
   ({ source: ROUTER_CHAIN[spec.sourceNetwork] as RouterSource, destination: ROUTER_CHAIN[spec.destinationNetwork] as RouterDestination });
 const ROUTING = { auto: 'AUTO', lifi: 'LIFI', across: 'ACROSS' } as const;
+type BridgeSpec = Extract<StrategySpec, { action: 'bridge' }>;
+const isUniversalKey = (network: string): network is UniversalNetworkKey => Object.hasOwn(UNIVERSAL_NETWORKS, network);
+/**
+ * BUILD-CROSSCHAIN-UNIVERSAL-001: a bridge stays on the certified BUILD-ROUTER-001 Router when it is exactly one of its pairs (its source
+ * token, its destination token, an EVM recipient) under its own policy (auto, lifi or across): the same command and workflow hash as before.
+ * Every other mainnet bridge — Solana in or out, another asset, `best` or `relay` routing — is a universal bridge.
+ */
+export function isUniversalBridgeSpec(spec: BridgeSpec): boolean {
+  if (!isUniversalKey(spec.sourceNetwork) || !isUniversalKey(spec.destinationNetwork) || spec.sourceNetwork === spec.destinationNetwork) return false;
+  if (spec.routing === 'best' || spec.routing === 'relay') return true;
+  const chains = routerChains(spec), network = chains.source && chains.destination ? routerNetworkOfInput(chains) : null;
+  if (!network) return true;
+  const pair = ROUTER_NETWORK_OPTIONS[network].pair;
+  return bridgeSymbol(spec.sourceNetwork, spec.asset) !== pair.source.symbol ||
+    spec.outputAsset !== undefined && bridgeSymbol(spec.destinationNetwork, spec.outputAsset) !== pair.destination.symbol || spec.recipient !== undefined && !/^0x/i.test(spec.recipient);
+}
+/** A bridge asset's canonical symbol (a catalog name resolves to its symbol); an unresolvable reference is kept as written for the decision. */
+function bridgeSymbol(network: NetworkId, reference: string): string {
+  const identity = networkIdentity(network);
+  try { return (identity?.catalog ? authoringAssetSymbol(identity.chain, reference) : reference).toUpperCase(); } catch { return reference.toUpperCase(); }
+}
+const UNIVERSAL_ROUTING: Readonly<Record<NonNullable<BridgeSpec['routing']>, UniversalBridgeRouting>> = { auto: 'BEST', best: 'BEST', relay: 'RELAY', lifi: 'LIFI', across: 'ACROSS' };
 /** Defaults FloFi applies when a spec omits slippage: the same values the Copilot planners and profiles use. */
 export function defaultSlippageBps(spec: StrategySpec): number | null {
   switch (spec.action) {
@@ -99,6 +123,24 @@ export function normalizeStrategy(spec: StrategySpec): { readonly strategy: Stra
   if (!('slippageBps' in spec && spec.slippageBps !== undefined) && slippage !== null) notes.push(`Default slippage ${slippage} bps applied.`);
   switch (spec.action) {
     case 'bridge': {
+      if (isUniversalBridgeSpec(spec)) {
+        const source = spec.sourceNetwork as UniversalNetworkKey, destination = spec.destinationNetwork as UniversalNetworkKey;
+        // Catalog networks resolve names and symbols exactly as every other action does (same refusals for unknown or unloaded assets).
+        const asset = universalAssetReference(source, spec.asset), input = resolveUniversalAsset(source, asset);
+        const outputAsset = spec.outputAsset !== undefined ? universalAssetReference(destination, spec.outputAsset) : defaultUniversalOutput(source, input.symbol, destination);
+        const output = resolveUniversalAsset(destination, outputAsset);
+        const cross = UNIVERSAL_NETWORKS[source].ecosystem !== UNIVERSAL_NETWORKS[destination].ecosystem;
+        if (spec.outputAsset === undefined) notes.push(`No destination asset given: ${output.symbol} on ${UNIVERSAL_NETWORKS[destination].name} is proposed and shown at Review.`);
+        if (spec.routing === undefined || spec.routing === 'auto') notes.push('Default routing best applied: every provider is asked; the executable route with the highest guaranteed minimum is chosen and shown at Review.');
+        if (spec.recipient === undefined) notes.push(cross ? `No recipient given: the ${UNIVERSAL_NETWORKS[destination].ecosystem === 'SOLANA' ? 'Solana' : 'EVM'} wallet you connect in the FloFi app receives the funds (bound at Review).`
+          : 'No recipient given: the wallet that signs in the FloFi app receives the funds (bound at Review).');
+        const evmDestination = UNIVERSAL_NETWORKS[destination].ecosystem === 'EVM';
+        if (spec.recipient !== undefined && (evmDestination ? !/^0x[0-9a-fA-F]{40}$/.test(spec.recipient) : !isSolanaPublicKey(spec.recipient))) throw new Error('UNIVERSAL_RECIPIENT_INVALID');
+        const recipient = spec.recipient === undefined ? undefined : evmDestination ? lower(spec.recipient) : spec.recipient;
+        return { notes, strategy: { version: 1, action: 'bridge', sourceNetwork: spec.sourceNetwork, destinationNetwork: spec.destinationNetwork, asset,
+          outputAsset, amount: spec.amount, routing: spec.routing === undefined || spec.routing === 'auto' ? 'best' : spec.routing, slippageBps: slippage!,
+          ...recipient === undefined ? {} : { recipient } } };
+      }
       if (spec.routing === undefined) notes.push('Default routing auto applied: LI.FI first, direct Across only if LI.FI has no reconcilable route.');
       if (spec.recipient === undefined) notes.push('No recipient given: the wallet that signs in the FloFi app receives the funds (bound at Review).');
       return { notes, strategy: { version: 1, action: 'bridge', sourceNetwork: spec.sourceNetwork, destinationNetwork: spec.destinationNetwork, asset: symbol(spec.sourceNetwork, spec.asset), amount: spec.amount,
@@ -158,8 +200,16 @@ function build(spec: StrategySpec, context: ReviewContext): Built {
   const slippage = 'slippageBps' in spec ? String(spec.slippageBps) : '';
   switch (spec.action) {
     case 'bridge': {
+      if (isUniversalBridgeSpec(spec)) {
+        const source = spec.sourceNetwork as UniversalNetworkKey, destination = spec.destinationNetwork as UniversalNetworkKey;
+        const input: UniversalBridgeInput = { source, destination, inputAsset: spec.asset,
+          outputAsset: spec.outputAsset ?? defaultUniversalOutput(source, resolveUniversalAsset(source, spec.asset).symbol, destination), amount: spec.amount,
+          recipient: spec.recipient ?? '', slippage, routing: UNIVERSAL_ROUTING[spec.routing ?? 'best'] };
+        return { command: { ...base, type: 'ADD_UNIVERSAL_BRIDGE', input }, check: () => createUniversalBridgeFromInput('node-preview', input) };
+      }
+      if (spec.routing === 'best' || spec.routing === 'relay' || spec.outputAsset !== undefined) refuse('ROUTER_PAIR_UNSUPPORTED');
       const input: RouterBridgeInput = { ...routerChains(spec), token: spec.asset, amount: spec.amount, recipient: spec.recipient ?? '', slippage,
-        routing: ROUTING[spec.routing ?? 'auto'] };
+        routing: ROUTING[(spec.routing ?? 'auto') as keyof typeof ROUTING] };
       return { command: { ...base, type: 'ADD_ROUTER_BRIDGE', input }, check: () => createRouterNode('node-preview', input) };
     }
     case 'swap': {

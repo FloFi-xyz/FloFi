@@ -36,7 +36,12 @@ import { baseSepoliaLiquidityRpc, createBaseSepoliaReadRpc, UNISWAP_LIQUIDITY_RP
 import { UNI_MOCK_CODE_PINS, UNI_MOCK_RPC_URL } from '../src/server/uniswap-liquidity-mock.ts';
 import { createRouterService, ROUTER_RUN_ID, routerNeedsObservation, type RouterRecord, type RouterWalletDiagnostic } from '../src/server/router-service.ts';
 import { routerNetworkMode, routerNetworkRuntime, type RouterNetwork } from '../src/server/router-runtime.ts';
-import { PAYMENT_OWNERSHIP, ROUTER_OWNERSHIP, type OwnershipPolicy } from '../src/server/run-ownership.ts';
+import { PAYMENT_OWNERSHIP, ROUTER_OWNERSHIP, UNIVERSAL_OWNERSHIP, type OwnershipPolicy } from '../src/server/run-ownership.ts';
+import { createUniversalRouterService, universalNeedsObservation, UNIVERSAL_RUN_ID, type UniversalRecord, type UniversalWalletDiagnostic } from '../src/server/universal-router/service.ts';
+import { createUniversalDiscovery } from '../src/server/universal-router/discovery.ts';
+import { createRelayProvider } from '../src/server/universal-router/relay-provider.ts';
+import { universalRouterMode, universalRouterRuntime, universalRouterTransport, type UniversalRouterTransport } from '../src/server/universal-router/runtime.ts';
+import { parseDiscoveryRequest } from '../src/server/universal-router/requests.ts';
 import type { RouteProvider } from '../src/server/router-providers.ts';
 import type { RoutingProvider } from '@defi-workflow-engine/workflow-contracts';
 import { isHostedDeployment } from '../src/server/deployment.ts';
@@ -56,7 +61,9 @@ export type FlowName = `crosschain-router-${EthereumRouterNetwork}` | 'robinhood
   /** Solana Devnet Swap → Orca liquidity, composed from the two Solana Devnet flows above. */
   | 'solana-devnet-composition'
   /** BUILD-SOLANA-TRANSFER-UX-001: direct SOL / SPL transfers to another wallet on mainnet-beta (real funds) and Devnet. */
-  | 'solana-transfer' | 'solana-devnet-transfer';
+  | 'solana-transfer' | 'solana-devnet-transfer'
+  /** BUILD-CROSSCHAIN-UNIVERSAL-001: the universal Cross-chain Router across the five mainnets (Relay Depository, verified). */
+  | 'crosschain-universal';
 export type Rpc = (method: string, params: readonly unknown[]) => Promise<unknown>;
 /** Network transport for one flow. Built from configuration in production; replaced by MOCKED chains in tests. */
 export type FlowDeps = { readonly rpc: Rpc; readonly mode: 'live' | 'harness'; readonly env: Readonly<Record<string, string | undefined>>; readonly http?: JupiterHttp;
@@ -65,7 +72,9 @@ export type FlowDeps = { readonly rpc: Rpc; readonly mode: 'live' | 'harness'; r
   /** BUILD-ETHEREUM-001: further chain-bound read clients of a multi-network flow, keyed by CAIP-2 chain (`rpc` is its original network). */
   readonly chains?: { readonly rpcs: Readonly<Record<string, Rpc>> };
   /** BUILD-RH-002: the official asset catalog of a catalog network (fails closed when the registry is unavailable or malformed). */
-  readonly catalog?: (chain: string) => Promise<AssetCatalog> };
+  readonly catalog?: (chain: string) => Promise<AssetCatalog>;
+  /** BUILD-CROSSCHAIN-UNIVERSAL-001: the universal router's chains (EVM read clients and Solana) and its provider transport. */
+  readonly universal?: UniversalRouterTransport };
 export type FlowMode = 'live' | 'harness' | 'off';
 type Args = readonly unknown[];
 export type FlowService = { readonly call: (method: string, args: Args) => Promise<unknown>; readonly load: (runId: string) => Promise<unknown>;
@@ -782,6 +791,78 @@ function routerFlow(name: Extract<FlowName, `crosschain-router${string}`>, netwo
 const crosschainRouter = routerFlow('crosschain-router', 'mainnet'), crosschainRouterTestnet = routerFlow('crosschain-router-testnet', 'testnet');
 
 /**
+ * BUILD-CROSSCHAIN-UNIVERSAL-001: the universal Cross-chain Router as one cloud flow and durable namespace for all five mainnets (any
+ * source to any other destination). The UNCHANGED service: workers only observe and reconcile (EVM clients cannot send; the Solana
+ * client's `sendTransaction` is reached only from `submit`, with owner-signed bytes verified against the Review). Runs belong to the
+ * wallet that simulated them — an EVM or a Solana session principal. `discover` is read-only and persists nothing.
+ */
+const universalAccount = (value: unknown) => typeof value === 'string' && (ACCOUNT.test(value) || SOLANA_ADDRESS.test(value));
+const universalDiagnostic = (value: unknown) => isObject(value) && typeof value.invoked === 'boolean' && Array.isArray(value.calls) && typeof value.code === 'string' &&
+  JSON.stringify(value).length <= 65_536;
+const universalRequest = (value: unknown) => isObject(value) && JSON.stringify(value).length <= 4_096;
+const crosschainUniversal: FlowDefinition = {
+  name: 'crosschain-universal', busyCode: 'UNIVERSAL_BUSY', runId: UNIVERSAL_RUN_ID, unavailableCode: 'UNIVERSAL_SERVICE_UNAVAILABLE',
+  methods: {
+    info: { mutates: false, validate: shape() },
+    discover: { mutates: false, validate: shape(universalRequest) },
+    simulate: { mutates: true, validate: optionalShape(2, workflow, universalAccount, universalAccount) },
+    refresh: { mutates: true, validate: optionalShape(1, id(UNIVERSAL_RUN_ID), universalAccount) },
+    review: { mutates: true, validate: shape(id(UNIVERSAL_RUN_ID), commitment, workflow) },
+    invalidate: { mutates: true, validate: optionalShape(1, id(UNIVERSAL_RUN_ID), invalidation) },
+    begin: { mutates: true, validate: shape(id(UNIVERSAL_RUN_ID), universalAccount, workflow) },
+    handoff: { mutates: true, validate: shape(id(UNIVERSAL_RUN_ID)) },
+    report: { mutates: true, validate: shape(id(UNIVERSAL_RUN_ID), result) },
+    submit: { mutates: true, validate: shape(id(UNIVERSAL_RUN_ID), signedTransaction) },
+    walletFailure: { mutates: true, validate: shape(id(UNIVERSAL_RUN_ID), universalDiagnostic) },
+    observe: { mutates: true, validate: shape(id(UNIVERSAL_RUN_ID)) },
+    status: { mutates: false, validate: shape(id(UNIVERSAL_RUN_ID)) },
+  },
+  transport: (mode, env) => { const t = universalRouterTransport(mode, env); return { rpc: t.evmRpcs['eip155:8453']!, universal: t }; },
+  create(storage, { mode, env, universal }) {
+    if (!universal) throw new Error('UNIVERSAL_CONFIGURATION_INVALID');
+    // The runtime's gates (provenance, owner-execution opt-in, MOCKED pins) apply; the transports may be test substitutes.
+    const runtime = universalRouterRuntime(mode, env, universal);
+    const s = createUniversalRouterService({ storage, evmRpcs: runtime.evmRpcs, solanaRpc: runtime.solanaRpc,
+      providers: { relay: createRelayProvider({ http: runtime.http, ...runtime.apis.relay ? { api: runtime.apis.relay } : {}, ...runtime.keys.relay ? { apiKey: runtime.keys.relay } : {} }) },
+      provenance: runtime.provenance, executionEnabled: runtime.executionEnabled, ...runtime.mockedDeployment ? { mockedDeployment: runtime.mockedDeployment } : {} });
+    const discovery = createUniversalDiscovery({ http: runtime.http, apis: runtime.apis, keys: runtime.keys });
+    const table: Record<string, (args: Args) => Promise<unknown>> = {
+      info: async () => ({ executionEnabled: s.executionEnabled }),
+      discover: async ([r]) => { const request = parseDiscoveryRequest(r); return discovery.discover(request, request.providers); },
+      simulate: ([w, a, d]) => s.simulate(w, a as string, d as string | undefined),
+      refresh: ([i, d]) => s.refresh(i as string, d as string | undefined),
+      review: ([i, c, w]) => s.review(i as string, c as string, w as SemanticWorkflow),
+      invalidate: ([i, r]) => s.invalidate(i as string, r as 'SEMANTIC_EDIT' | 'WALLET_CHANGED' | undefined),
+      begin: ([i, a, w]) => s.begin(i as string, a as string, w as SemanticWorkflow),
+      handoff: ([i]) => s.handoff(i as string),
+      report: ([i, r]) => s.report(i as string, r as Parameters<typeof s.report>[1]),
+      submit: ([i, t]) => s.submit(i as string, t as string),
+      walletFailure: ([i, d]) => s.walletFailure(i as string, d as UniversalWalletDiagnostic),
+      observe: ([i]) => s.observe(i as string),
+      status: ([i]) => s.load(i as string),
+    };
+    return { call: (method, args) => table[method]!(args), load: runId => s.load(runId), observe: runId => s.observe(runId) };
+  },
+  needsObservation: universalNeedsObservation,
+  projector(logName, bytes): Projection | null {
+    if (!logName.endsWith('.jsonl')) return null;
+    const record = lastRecord<UniversalRecord>(bytes), observe = universalNeedsObservation(record), evidence = evidenceOf(record);
+    const open = record.attempts.find(a => ['PREPARED', 'SUBMITTING', 'SUBMISSION_RESULT_UNKNOWN', 'PENDING'].includes(a.state));
+    return { run: { runId: record.id, workflowId: record.workflow.workflowId, flow: 'crosschain-universal',
+      status: record.verdict !== 'PENDING' ? record.verdict : open ? open.state : record.phase,
+      provenance: record.provenance, ownerAccount: record.owner, recoveryOf: null, errorCode: errorCode(record.error), needsObservation: observe,
+      hasEvidence: evidence !== null,
+      attempts: record.attempts.map(a => ({ attemptId: a.attemptId, step: a.step, state: a.state, nonce: a.ecosystem === 'EVM' ? a.nonce : null, transactionHash: a.transactionHash,
+        preparedAtBlock: a.ecosystem === 'EVM' ? a.preparedAtBlock : a.preparedAtHeight, reconciled: a.reconciled })),
+      journal: [] },
+      // SUBMITTING usually means the owner's wallet prompt is open; a bridge in flight is polled more gently.
+      work: work('crosschain-universal', record.id, observe, open?.state === 'SUBMITTING' ? 60_000 : open ? 5_000 : 15_000, evidence !== null) };
+  },
+  evidence: record => evidenceOf(record as UniversalRecord),
+  ownership: { policy: UNIVERSAL_OWNERSHIP, ownerOf: record => (record as UniversalRecord).owner },
+};
+
+/**
  * BUILD-013 Supply → Borrow → Swap composition on Base Sepolia (BUILD-CLOUD-PARITY-001 cloud flow). The UNCHANGED service on the Aave
  * family's shared namespace. Its run log repeats every Review in each snapshot, so the cloud store's 16 MiB bound is passed as the
  * service's run capacity: begin() refuses a step before any wallet request when its submission and reconciliation might not fit
@@ -929,7 +1010,8 @@ export const FLOWS: Readonly<Record<FlowName, FlowDefinition>> = Object.freeze({
   'crosschain-router-ethereum-to-robinhood': routerFlow('crosschain-router-ethereum-to-robinhood', 'ethereum-to-robinhood'),
   'crosschain-router-robinhood-to-ethereum': routerFlow('crosschain-router-robinhood-to-ethereum', 'robinhood-to-ethereum'),
   'crosschain-router-arbitrum-to-base': routerFlow('crosschain-router-arbitrum-to-base', 'arbitrum-to-base'), 'solana-devnet-composition': solanaComposition,
-  'solana-transfer': solanaTransferFlow('solana-transfer', SOLANA_MAINNET_TRANSFER), 'solana-devnet-transfer': solanaTransferFlow('solana-devnet-transfer', SOLANA_DEVNET_TRANSFER) });
+  'solana-transfer': solanaTransferFlow('solana-transfer', SOLANA_MAINNET_TRANSFER), 'solana-devnet-transfer': solanaTransferFlow('solana-devnet-transfer', SOLANA_DEVNET_TRANSFER),
+  'crosschain-universal': crosschainUniversal });
 export const isFlowName = (value: string): value is FlowName => Object.hasOwn(FLOWS, value);
 
 /**
@@ -987,6 +1069,8 @@ function configuredFlowMode(flow: FlowName, env: Readonly<Record<string, string 
   if (flow === 'crosschain-router-ethereum-to-robinhood') return routerNetworkMode('ethereum-to-robinhood', env);
   if (flow === 'crosschain-router-robinhood-to-ethereum') return routerNetworkMode('robinhood-to-ethereum', env);
   if (flow === 'crosschain-router-arbitrum-to-base') return routerNetworkMode('arbitrum-to-base', env);
+  // BUILD-CROSSCHAIN-UNIVERSAL-001: `GRYLOO_UNIVERSAL_ROUTER=live` (read-only), owner execution additionally needs its real-funds opt-in; the harness wins.
+  if (flow === 'crosschain-universal') return universalRouterMode(env);
   if (flow === 'robinhood-transfer') {
     if (env.GRYLOO_ROBINHOOD_HARNESS === 'MOCKED_LOOPBACK_ONLY') return 'harness';
     return env.GRYLOO_ROBINHOOD_TESTNET === 'live' || env.GRYLOO_ETHEREUM_SEPOLIA_TRANSFER === 'live' ? 'live' : 'off';
@@ -1013,5 +1097,6 @@ const DISABLED: Readonly<Record<FlowName, string>> = { 'robinhood-transfer': 'TR
   'crosschain-router-robinhood-to-ethereum': 'ETHEREUM_MAINNET_NOT_ENABLED',
   'base-aave': 'BASE_MAINNET_NOT_ENABLED', 'arbitrum-aave': 'ARBITRUM_MAINNET_NOT_ENABLED', 'crosschain-router-arbitrum-to-base': 'ROUTER_NOT_ENABLED',
   'solana-devnet-composition': 'SOLANA_COMPOSITION_PUBLIC_DEVNET_NOT_ENABLED',
-  'solana-transfer': 'SOLANA_TRANSFER_PUBLIC_MAINNET_NOT_ENABLED', 'solana-devnet-transfer': 'SOLANA_TRANSFER_PUBLIC_DEVNET_NOT_ENABLED' };
+  'solana-transfer': 'SOLANA_TRANSFER_PUBLIC_MAINNET_NOT_ENABLED', 'solana-devnet-transfer': 'SOLANA_TRANSFER_PUBLIC_DEVNET_NOT_ENABLED',
+  'crosschain-universal': 'UNIVERSAL_ROUTER_NOT_ENABLED' };
 export const disabledCode = (flow: FlowName) => DISABLED[flow];

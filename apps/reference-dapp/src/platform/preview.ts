@@ -17,6 +17,7 @@ import { refuse } from './refusal.ts';
 import { composeSingleStep } from './strategy.ts';
 import type { NetworkScope } from '../domain/network-scope';
 import { networkScope } from '../server/network-scope.ts';
+import { UNIVERSAL_QUOTE_SUBJECTS as QUOTE_SUBJECTS } from '@defi-workflow-engine/workflow-contracts';
 
 export const MAX_CONCURRENT_SIMULATIONS = 2;
 let activeSimulations = 0;
@@ -47,7 +48,9 @@ export async function simulatePreview(runtime: EngineRuntime, request: PreviewRe
   let preview;
   try {
     const subject = evm ? request.simulationSubject.toLowerCase() : request.simulationSubject;
-    preview = await runtime.preview(plan.flow, plan.subject === 'NONE' ? [c.workflow] : [c.workflow, subject]);
+    // BUILD-CROSSCHAIN-UNIVERSAL-001: a cross-ecosystem bridge needs a destination wallet; the preview uses the public quote subject (no key exists).
+    const destination = plan.destinationSubject ? [QUOTE_SUBJECTS[plan.destinationSubject]] : [];
+    preview = await runtime.preview(plan.flow, plan.subject === 'NONE' ? [c.workflow] : [c.workflow, subject, ...destination]);
   } finally { activeSimulations--; }
   if (!preview.ok) return refuse(preview.code);
   return { composition: c, plan, view: projectSimulation(plan.flow, preview.value), simulationSubject: plan.subject === 'NONE' ? null : request.simulationSubject };

@@ -16,12 +16,22 @@ import type { FlowName } from '../../backend/flows.ts';
 import { catalogNetworkOfChain } from '../server/catalog-networks.ts';
 import { networkIdentity } from '../domain/network-registry.ts';
 import type { StrategySpec } from '../engine/strategy-spec';
+import { isUniversalBridgeSpec } from '../engine/strategy-engine';
+import { UNIVERSAL_NETWORKS, type UniversalNetworkKey } from '@defi-workflow-engine/workflow-contracts';
 
-export type PreviewPlan = { readonly flow: FlowName; readonly subject: 'EVM' | 'SOLANA' | 'NONE' };
+export type PreviewPlan = { readonly flow: FlowName; readonly subject: 'EVM' | 'SOLANA' | 'NONE';
+  /** BUILD-CROSSCHAIN-UNIVERSAL-001: a Solana ⇄ EVM bridge previews with the destination ecosystem's public quote subject as recipient (read-only). */
+  readonly destinationSubject?: 'EVM' | 'SOLANA' };
 /** The flow that previews a strategy, or the reason MCP cannot preview it. */
 export function previewPlan(spec: StrategySpec): PreviewPlan | { readonly code: string } {
   switch (spec.action) {
     case 'bridge': {
+      // BUILD-CROSSCHAIN-UNIVERSAL-001: every non-certified mainnet bridge previews on the universal router's own simulation.
+      if (isUniversalBridgeSpec(spec)) {
+        const source = UNIVERSAL_NETWORKS[spec.sourceNetwork as UniversalNetworkKey], destination = UNIVERSAL_NETWORKS[spec.destinationNetwork as UniversalNetworkKey];
+        return { flow: 'crosschain-universal', subject: source.ecosystem === 'SOLANA' ? 'SOLANA' : 'EVM',
+          ...source.ecosystem !== destination.ecosystem && spec.recipient === undefined ? { destinationSubject: destination.ecosystem === 'SOLANA' ? 'SOLANA' : 'EVM' } : {} };
+      }
       const ethereumRoute = ETHEREUM_ROUTER_NETWORKS.find(route => {
         const [source, destination] = route.split('-to-');
         const key = (network: string) => network === 'arbitrum-one' ? 'arbitrum' : network;
@@ -114,6 +124,24 @@ export function projectSimulation(flow: FlowName, value: unknown): SimulationVie
           approvals: list(r.approvals, ['token', 'spender', 'amount', 'currentAllowance', 'required']),
           fees: pick(r.fees, ['maxFeePerGas', 'maxPriorityFeePerGas', 'gasLimitTotal', 'executionFeeUpperBoundWei', 'l1FeeUpperBoundWei', 'totalUpperBoundWei']),
           deadlines: pick(r.deadlines, ['reviewExpiresAt', 'quoteExpiresAt', 'depositMustLandBy', 'fillDeadline']) },
+        canonicalArtifacts: canonicalArtifacts(r.artifacts) };
+    }
+    case 'crosschain-universal': {
+      const r = obj(record.review), route = obj(r.route), source = obj(r.source), simulation = obj(source.simulation), quote = obj(route.quote);
+      return { kind: 'CROSS_CHAIN_ROUTE', provenance: String(record.provenance), observedAt: String(r.observedAt), expiresAt: String(r.expiresAt),
+        facts: { recipient: String(r.recipient), recipientKind: String(r.recipientKind),
+          quote: { provider: String(route.provider), protocol: String(route.protocol), expectedOutput: String(route.expectedOutput), minimumOutput: String(route.minimumOutput),
+            estimatedDurationSeconds: Number(quote.estimatedDurationSeconds), quotedAt: String(quote.quotedAt), expiresAt: String(quote.expiresAt),
+            inputAmount: String(route.inputAmount), inputToken: pick(route.inputToken, ['chainId', 'kind', 'address', 'decimals', 'symbol']),
+            outputToken: pick(route.outputToken, ['chainId', 'kind', 'address', 'decimals', 'symbol']) },
+          providerFees: list(route.fees, ['kind', 'label', 'chainId', 'symbol', 'decimals', 'amount', 'included']),
+          providersConsidered: list(obj(r.selection).considered, ['provider', 'outcome', 'code', 'expectedOutput', 'minimumOutput']),
+          transactionSimulation: { ...pick(simulation, ['provenance', 'method', 'block', 'slot', 'ownerDebit', 'unitsConsumed']), ecosystem: String(source.ecosystem),
+            calls: list(simulation.calls, ['purpose', 'gasUsed']), notSimulated: Array.isArray(simulation.notSimulated) ? simulation.notSimulated.map(String) : [] },
+          approvals: list(source.approvals, ['token', 'spender', 'amount', 'currentAllowance', 'required']),
+          feePolicy: pick(r.feePolicy, ['flofiFee', 'flofiFeeRateBps', 'flofiFeeBasis', 'flofiFeeCollection', 'networkFeeUpperBound', 'networkFeeSymbol', 'networkFeeDecimals']),
+          authorizations: pick(r.authorizations, ['sourceSignatures', 'destinationAuthorization']),
+          deadlines: pick(r.deadlines, ['reviewExpiresAt', 'quoteExpiresAt', 'orderDeadline']) },
         canonicalArtifacts: canonicalArtifacts(r.artifacts) };
     }
     case 'aave-supply': case 'base-aave': case 'arbitrum-aave': case 'ethereum-aave': {

@@ -24,6 +24,15 @@ export const ROUTER_OWNERSHIP: OwnershipPolicy = Object.freeze({
   ownerArgument: Object.freeze({ simulate: 1, begin: 1 }),
   runArgument: Object.freeze(['refresh', 'review', 'invalidate', 'begin', 'handoff', 'report', 'walletFailure', 'observe', 'status']),
 });
+/**
+ * BUILD-CROSSCHAIN-UNIVERSAL-001: the universal Cross-chain Router. A run belongs to its source wallet — an EVM account (Sign-In With
+ * Ethereum session) or a Solana key (Sign-In With Solana session). Discovery persists nothing and binds no owner.
+ */
+export const UNIVERSAL_OWNERSHIP: OwnershipPolicy = Object.freeze({
+  open: Object.freeze(['mode', 'info', 'discover']),
+  ownerArgument: Object.freeze({ simulate: 1, begin: 1 }),
+  runArgument: Object.freeze(['refresh', 'review', 'invalidate', 'begin', 'handoff', 'report', 'submit', 'walletFailure', 'observe', 'status']),
+});
 /** Stablecoin → Pix payments: a run, its Review and its source transfer belong to the wallet that simulated it. */
 export const PAYMENT_OWNERSHIP: OwnershipPolicy = Object.freeze({
   open: Object.freeze(['mode', 'info']),
@@ -32,12 +41,17 @@ export const PAYMENT_OWNERSHIP: OwnershipPolicy = Object.freeze({
 });
 /** Server-to-server only: the BFF sets it from a verified session; the browser can never reach the API to set it. */
 export const WALLET_PRINCIPAL_HEADER = 'x-flofi-wallet-principal';
-const ACCOUNT = /^0x[0-9a-f]{40}$/;
+const ACCOUNT = /^0x[0-9a-f]{40}$/, SOLANA_KEY = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
-/** A lower-case EVM account, or null for anything else (absent, malformed, mixed case). */
+/**
+ * A lower-case EVM account, or (BUILD-CROSSCHAIN-UNIVERSAL-001) a base58 Solana key proven by a Sign-In With Solana session; null for anything
+ * else (absent, malformed, mixed-case EVM). A Solana principal never equals an EVM owner, so flows owned by EVM accounts are unaffected.
+ */
 export function normalizePrincipal(value: unknown): string | null {
-  return typeof value === 'string' && ACCOUNT.test(value) ? value : null;
+  return typeof value === 'string' && (ACCOUNT.test(value) || SOLANA_KEY.test(value)) ? value : null;
 }
+/** EVM accounts compare case-insensitively; Solana keys are case-sensitive base58 and compare exactly. */
+const samePrincipal = (claimed: string, principal: string) => ACCOUNT.test(principal) ? claimed.toLowerCase() === principal : claimed === principal;
 
 /**
  * Resolves when `principal` may call `method(args)`; otherwise throws a classified code:
@@ -53,11 +67,11 @@ export async function assertRunOwnership(policy: OwnershipPolicy, method: string
   if (!claims && !existing) throw new Error('RUN_OWNERSHIP_UNDECLARED');
   if (claims) {
     const claimed = args[policy.ownerArgument[method]!];
-    if (typeof claimed !== 'string' || claimed.toLowerCase() !== principal) throw new Error('RUN_OWNER_MISMATCH');
+    if (typeof claimed !== 'string' || !samePrincipal(claimed, principal!)) throw new Error('RUN_OWNER_MISMATCH');
   }
   if (existing) {
     if (typeof args[0] !== 'string') throw new Error('RUN_ID_INVALID');
     const owner = await ownerOf(args[0]);
-    if (typeof owner !== 'string' || owner.toLowerCase() !== principal) throw new Error('RUN_OWNER_MISMATCH');
+    if (typeof owner !== 'string' || !samePrincipal(owner, principal!)) throw new Error('RUN_OWNER_MISMATCH');
   }
 }

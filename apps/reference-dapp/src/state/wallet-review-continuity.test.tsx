@@ -35,6 +35,7 @@ vi.mock('./public-testnet-store', () => ({ usePublicTestnet: () => ({}) }));
 vi.mock('./jupiter-store', () => ({ useJupiter: () => ({}) }));
 vi.mock('./solana-liquidity-store', () => ({ useSolanaLiquidity: () => f.solanaPool }));
 vi.mock('./solana-composition-store', () => ({ useSolanaComposition: () => ({ record: null, busy: false, error: null, retired: false, recovered: false, executionEnabled: false, signing: false, owner: null, authorized: false }) }));
+vi.mock('./universal-router-store', () => ({ useUniversalRouter: () => ({ record: null, busy: false, error: null, retired: false, executionEnabled: false, signing: false, review: () => undefined, execute: () => undefined, observe: () => undefined }) })); // BUILD-CROSSCHAIN-UNIVERSAL-001: idle
 vi.mock('./uniswap-liquidity-store', () => ({ useUniswapLiquidity: () => ({}) }));
 vi.mock('./robinhood-transfer-store', () => ({ useRobinhoodTransfer: () => ({}) }));
 vi.mock('./solana-transfer-store', () => ({ useSolanaTransfer: () => ({}) }));

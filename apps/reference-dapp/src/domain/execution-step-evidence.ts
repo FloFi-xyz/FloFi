@@ -74,6 +74,13 @@ export function projectExecutionStepEvidence(source: ExecutionLifecycleSource, p
       add('destination', record?.verdict === 'RECONCILED');
       break;
     }
+    case 'universal': {
+      const record = source.state.record;
+      for (const attempt of record?.attempts ?? []) add(attempt.step, attempt.reconciled);
+      add('destination', record?.verdict === 'RECONCILED', false, record?.verdict === 'RECONCILED' && record.destination ? comparison('Delivered', record.review.route.expectedOutput,
+        record.destination.amount, record.review.route.outputToken.decimals, record.review.route.outputToken.symbol) : []);
+      break;
+    }
     case 'uniswap-pool': {
       for (const attempt of source.state.record?.attempts ?? []) add(attempt.step, attempt.reconciled);
       break;
