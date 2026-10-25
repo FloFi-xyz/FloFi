@@ -14,6 +14,7 @@ import { isLendingComposition, isSolanaTransferNode, type SemanticWorkflow } fro
 import type { Workflow } from './initial-workflow';
 import { ownerWalletSwapServes } from './public-testnet-swap';
 import { routerDetails } from './router-authoring';
+import { universalBridgeDetails } from './universal-bridge-authoring';
 
 /** A run a store holds: `recovered` when it came from the browser's recovery pointer; `workflow` is the run's reviewed workflow (null: no run). */
 export type HeldRun = { readonly recovered: boolean; readonly workflow: unknown };
@@ -21,6 +22,7 @@ export type OwnerRuntimeSignals = {
   /** False once the owner created a new workflow in this visit: a persisted run is recovered only into the visit's initial draft. */
   readonly recoveryShell: boolean;
   readonly solanaTransfer: HeldRun; readonly transfer: HeldRun; readonly lending: HeldRun; readonly uniswapLiquidity: HeldRun; readonly router: HeldRun;
+  /** BUILD-CROSSCHAIN-UNIVERSAL-001: the universal Cross-chain Router run. */ readonly universal?: HeldRun;
   readonly solanaComposition: HeldRun; readonly solanaLiquidity: HeldRun; readonly jupiter: HeldRun;
   /** The Aave run, with the operation its Review is for. */
   readonly supply: HeldRun & { readonly operation: 'supply' | 'borrow' | 'repay' | 'withdraw' | null };
@@ -29,10 +31,10 @@ export type OwnerRuntimeSignals = {
   /** Base USDC ⇄ WETH joins the owner-wallet swap only where Base mainnet swaps are served and no local fork runtime is available. */
   readonly baseReferenceServed: boolean;
 };
-export type OwnerRuntimeKind = 'router' | 'solana-transfer' | 'transfer' | 'lending' | 'supply' | 'uniswap-pool' | 'solana-composition' | 'solana-pool' | 'solana-swap' | 'public';
+export type OwnerRuntimeKind = 'universal' | 'router' | 'solana-transfer' | 'transfer' | 'lending' | 'supply' | 'uniswap-pool' | 'solana-composition' | 'solana-pool' | 'solana-swap' | 'public';
 export type OwnerRuntime = {
   readonly kind: OwnerRuntimeKind | null;
-  readonly routerPath: boolean; readonly solanaTransferPath: boolean; readonly transferPath: boolean; readonly lendingPath: boolean;
+  readonly universalPath: boolean; readonly routerPath: boolean; readonly solanaTransferPath: boolean; readonly transferPath: boolean; readonly lendingPath: boolean;
   readonly withdrawPath: boolean; readonly repayPath: boolean; readonly borrowPath: boolean; readonly supplyPath: boolean;
   readonly uniswapLiquidityPath: boolean; readonly solanaCompositionPath: boolean; readonly solanaLiquidityPath: boolean; readonly solanaPath: boolean;
   readonly publicPath: boolean;
@@ -65,7 +67,8 @@ export function selectOwnerRuntime(workflow: Workflow, signals: OwnerRuntimeSign
   const borrowPath = nodes.some(n => n.actionType === 'borrow') || operation === 'borrow';
   const supplyPath = nodes.some(n => n.actionType === 'supply') || supplyRecovered;
   const uniswapLiquidityPath = !supplyPath && (nodes.some(n => n.actionType === 'asset.liquidity.concentrated' && ownerPositionNetwork(n.chainId)) || recovers(signals.uniswapLiquidity));
-  const routerPath = nodes.some(n => routerDetails(n as SemanticWorkflow['nodes'][number])) || recovers(signals.router);
+  const universalPath = nodes.some(n => universalBridgeDetails(n as SemanticWorkflow['nodes'][number])) || (signals.universal ? recovers(signals.universal) : false);
+  const routerPath = !universalPath && (nodes.some(n => routerDetails(n as SemanticWorkflow['nodes'][number])) || recovers(signals.router));
   // Solana Devnet Swap → Orca liquidity (a registered bound composition) is checked before the isolated Solana paths.
   const solanaCompositionPath = !supplyPath && (isBoundComposition(workflow) || recovers(signals.solanaComposition));
   const solanaLiquidityPath = !supplyPath && !solanaCompositionPath && !uniswapLiquidityPath &&
@@ -77,9 +80,9 @@ export function selectOwnerRuntime(workflow: Workflow, signals: OwnerRuntimeSign
   const testnetWorkflow = !legacyComposition && nodes.some(n => ownerWalletSwapServes(n, signals.baseReferenceServed));
   const publicRecovery = recovers({ recovered: signals.publicSwap.recoveryOnly, workflow: signals.publicSwap.workflow });
   const publicPath = testnetWorkflow || publicRecovery || signals.publicSwap.continuedApproval;
-  const kind: OwnerRuntimeKind | null = routerPath ? 'router' : solanaTransferPath ? 'solana-transfer' : transferPath ? 'transfer' : lendingPath ? 'lending'
+  const kind: OwnerRuntimeKind | null = universalPath ? 'universal' : routerPath ? 'router' : solanaTransferPath ? 'solana-transfer' : transferPath ? 'transfer' : lendingPath ? 'lending'
     : supplyPath || borrowPath || repayPath || withdrawPath ? 'supply' : uniswapLiquidityPath ? 'uniswap-pool' : solanaCompositionPath ? 'solana-composition'
     : solanaLiquidityPath ? 'solana-pool' : solanaPath ? 'solana-swap' : publicPath ? 'public' : null;
-  return { kind, routerPath, solanaTransferPath, transferPath, lendingPath, withdrawPath, repayPath, borrowPath, supplyPath, uniswapLiquidityPath,
+  return { kind, universalPath, routerPath, solanaTransferPath, transferPath, lendingPath, withdrawPath, repayPath, borrowPath, supplyPath, uniswapLiquidityPath,
     solanaCompositionPath, solanaLiquidityPath, solanaPath, publicPath };
 }

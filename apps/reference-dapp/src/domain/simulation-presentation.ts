@@ -5,6 +5,7 @@ import type { ReviewContext } from '@defi-workflow-engine/reference-linter';
 import type { useSupply } from '../state/supply-store';
 import type { useLending } from '../state/lending-store';
 import type { useRouter } from '../state/router-store';
+import type { useUniversalRouter } from '../state/universal-router-store';
 import type { usePublicTestnet } from '../state/public-testnet-store';
 import type { useJupiter } from '../state/jupiter-store';
 import type { useSolanaLiquidity } from '../state/solana-liquidity-store';
@@ -27,6 +28,7 @@ export type SimulationSource =
   | { kind: 'supply'; state: Snapshot<ReturnType<typeof useSupply>> }
   | { kind: 'lending'; state: Snapshot<ReturnType<typeof useLending>> }
   | { kind: 'router'; state: Snapshot<ReturnType<typeof useRouter>> }
+  | { kind: 'universal'; state: Snapshot<ReturnType<typeof useUniversalRouter>> }
   | { kind: 'public'; state: Snapshot<ReturnType<typeof usePublicTestnet>> }
   | { kind: 'solana-swap'; state: Snapshot<ReturnType<typeof useJupiter>> }
   | { kind: 'solana-pool'; state: Snapshot<ReturnType<typeof useSolanaLiquidity>> }
@@ -249,6 +251,22 @@ export function projectSimulation(workflow: Workflow, context: ReviewContext, so
       }
       fee('Route fee total', q.quote.feeTotal, route.inputToken.decimals, route.inputToken.symbol, 'Included in the quoted output; network fees are separate.'); approvals(q.approvals.some(a => a.required));
       warn('attention', 'Destination delivery is quoted. The simulation checks the source transactions; delivery and refunds are not simulated.');
+      break;
+    }
+    case 'universal': {
+      // BUILD-CROSSCHAIN-UNIVERSAL-001: the reviewed route; the provider order guarantees the minimum, delivery and refunds are not simulated.
+      const r = source.state.record; if (!r) break; const q = r.review, route = q.route;
+      if (!guard(same(r.workflow) && boundHash(q.workflowHash, q.revision), r.provenance, Math.min(iso(q.expiresAt), iso(route.quote.expiresAt)), r.error ?? (r.requote ? 'REQUOTE' : null))) break;
+      const s = step(q.nodeId), provider = { relay: 'Relay', lifi: 'LI.FI', mayan: 'Mayan', across: 'Across' }[route.provider] ?? route.provider;
+      result(s, simulationAmount(route.inputAmount, route.inputToken.decimals, route.inputToken.symbol), simulationAmount(route.expectedOutput, route.outputToken.decimals, route.outputToken.symbol),
+        provider, simulationAmount(route.minimumOutput, route.outputToken.decimals, route.outputToken.symbol), route.slippageBps);
+      if (s) s.resultLabel = 'Quoted destination output';
+      fee('Maximum network fee', q.feePolicy.networkFeeUpperBound, q.feePolicy.networkFeeDecimals, q.feePolicy.networkFeeSymbol, 'Paid on the source network, separate from the route.');
+      for (const f of route.fees) if (f.included && BigInt(f.amount) > 0n) fee(f.label, f.amount, f.decimals, f.symbol, 'Included in the quoted output.');
+      fee('FloFi fee', '0', route.inputToken.decimals, route.inputToken.symbol, 'FloFi charges no fee on this bridge.');
+      approvals(q.source.ecosystem === 'EVM' && q.source.approvals.some(a => a.required));
+      if (q.authorizations.sourceSignatures > 1) warn('info', 'This bridge needs two wallet signatures on the source network: an exact approval, then the deposit.');
+      warn('attention', 'Destination delivery is guaranteed by the provider order and proven on chain after it lands. The simulation checks the source transaction; delivery and refunds are not simulated.');
       break;
     }
     case 'public': {

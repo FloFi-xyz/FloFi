@@ -34,6 +34,7 @@ import { CANVAS_GESTURES, CanvasNavigator } from './canvas-navigator';
 import { WorkflowEditReview, workflowEditProposalVisible } from './workflow-edit-review';
 import { ComposerCard, supplyReviewFormId, poolReviewFormId, poolProposalTarget, type CardRecipient, type ComposerCardData } from './composer-card';
 import { canEditCanvasAmount, canvasAmountCommand, setupSummary, bridgePairLabel, bridgeSetupNetworks, type CanvasBridgeNetworks } from '../domain/canvas-action-setup';
+import { universalCanvasPair } from '../domain/universal-bridge-authoring';
 import { ActionIcon } from './action-icon';
 import { ensureNetworkCatalog, useNetworkCatalog } from '../state/asset-catalog-store';
 import { CATALOG_NETWORK_IDENTITIES } from '../domain/network-registry';
@@ -438,7 +439,8 @@ function BuildCanvas({ environment, selectedId, select, openSettings, workflowNa
       // Change only editable drafts; the canonical route still requires Review / Apply.
       if (Object.keys(patch).length) editBridgeNetworks(id, patch);
     };
-    if (actionSetup?.action === 'bridge') alignNetworks(actionSetup.id, bridgeSetupNetworks(actionSetup));
+    // A new card's universal pair (Solana in or out) is a mainnet route of its own: kept as chosen.
+    if (actionSetup?.action === 'bridge' && !(environment === 'mainnet' && universalCanvasPair(bridgeSetupNetworks(actionSetup)))) alignNetworks(actionSetup.id, bridgeSetupNetworks(actionSetup));
     if (transition) for (const node of workflow.nodes) {
       const details = routerDetails(node);
       if (details && canEditCanvasAmount(node, context, workflow)) alignNetworks(node.nodeId, bridgeNetworkInputs[node.nodeId] ?? details);
@@ -485,24 +487,30 @@ function BuildCanvas({ environment, selectedId, select, openSettings, workflowNa
     };
     // BUILD-RH-002: an environment may offer several routes (mainnet: Base → Arbitrum One, Base/Arbitrum ⇄ Robinhood Chain); the destination
     // list follows the chosen source, and choosing a source keeps the destination only when it still forms a supported pair.
-    const bridgeSelection = (id: string, networks: CanvasBridgeNetworks) => {
+    // BUILD-CROSSCHAIN-UNIVERSAL-001: a new Bridge card on mainnet also offers Solana in and out (a universal bridge, any asset in the inspector);
+    // an authored certified Router card keeps its own pairs. Solana Devnet still has no Bridge pair.
+    const bridgeSelection = (id: string, networks: CanvasBridgeNetworks, universalAllowed = false) => {
       const network = environment === 'mainnet' || environment === 'testnet' ? environment : null;
-      const choices = network ? routerChainChoices(network, networks.source) : null;
+      const universal = universalAllowed && network === 'mainnet', solana = JUPITER_SOLANA_MAINNET.network as CanvasBridgeNetworks['source'];
+      const fromSolana = universal && (networks.source as string) === solana;
+      const choices = network ? routerChainChoices(network, fromSolana ? undefined : networks.source) : null;
+      const sources = universal ? [...choices?.sources ?? [], solana] : choices?.sources ?? [];
+      const destinations = (fromSolana ? [...new Set(routerChainChoices('mainnet').destinations)] : universal ? [...choices?.destinations ?? [], solana] : choices?.destinations ?? []) as CanvasBridgeNetworks['destination'][];
       const routed = routerNetworkOfInput(networks);
       return {
-        source: choices?.sources ?? [], destination: choices?.destinations ?? [],
-        valid: network !== null && routed !== null && ROUTER_NETWORK_OPTIONS[routed].environment === network,
-        // Solana has swap/liquidity support, but no canonical Bridge pair yet.
-        unavailable: [network === 'testnet' ? ORCA_WHIRLPOOLS_DEVNET.network : JUPITER_SOLANA_MAINNET.network],
+        source: sources, destination: destinations,
+        valid: network !== null && (routed !== null && ROUTER_NETWORK_OPTIONS[routed].environment === network || universal && universalCanvasPair(networks) !== null),
+        unavailable: universal ? [] : [network === 'testnet' ? ORCA_WHIRLPOOLS_DEVNET.network : JUPITER_SOLANA_MAINNET.network],
         onSelect: (side: 'source' | 'destination', selected: string) => {
           if (!network) return;
           if (side === 'source') {
-            const source = routerChainChoices(network).sources.find(candidate => candidate === selected);
+            const source = sources.find(candidate => candidate === selected);
             if (!source) return;
-            const destinations = routerChainChoices(network, source).destinations;
-            editBridgeNetworks(id, { source, ...destinations.includes(networks.destination) ? {} : { destination: destinations[0]! } });
+            const next = source === solana ? [...new Set(routerChainChoices('mainnet').destinations)] as CanvasBridgeNetworks['destination'][]
+              : [...routerChainChoices(network, source).destinations, ...universal ? [solana as CanvasBridgeNetworks['destination']] : []];
+            editBridgeNetworks(id, { source, ...next.includes(networks.destination) && networks.destination !== (source as string) ? {} : { destination: next[0]! } });
           } else {
-            const destination = choices!.destinations.find(candidate => candidate === selected);
+            const destination = destinations.find(candidate => candidate === selected);
             if (destination) editBridgeNetworks(id, { destination });
           }
         },
@@ -586,7 +594,7 @@ function BuildCanvas({ environment, selectedId, select, openSettings, workflowNa
         summary: setupSummary(actionSetup, context),
         ...(actionSetup.action === 'swap' && actionSetup.stocks && actionSetup.cryptoSelection ? { stocks: stocksData(actionSetup.id, actionSetup.cryptoSelection) } : {}),
         ...(actionSetup.action !== 'bridge' ? { actionSelection: actionSelection(actionSetup.id, actionSetup.cryptoSelection ?? selectCryptoNetwork(actionSetup.action as CryptoAction, actionSetup.action === 'swap' ? context.assets.USDC.asset.chainId === 'eip155:84532' ? 'Base Sepolia' : 'Base' : 'Base Sepolia')) } : {}),
-        ...(actionSetup.action === 'bridge' ? { networkSelection: bridgeSelection(actionSetup.id, bridgeSetupNetworks(actionSetup)) } : {}),
+        ...(actionSetup.action === 'bridge' ? { networkSelection: bridgeSelection(actionSetup.id, bridgeSetupNetworks(actionSetup), true) } : {}),
         ...(actionSetup.action === 'swap' ? { tokenSelection: {
           source: directions.map(direction => inputSymbol(direction)), destination: directions.map(direction => outputSymbol(direction)),
           onSelect: (side: 'source' | 'destination', symbol: string) => {
@@ -606,9 +614,9 @@ function BuildCanvas({ environment, selectedId, select, openSettings, workflowNa
           onApply: applyProposal,
         } } : {}),
         ...(actionSetup.action !== 'pool' ? { amountEditor: { ...(actionSetup.action !== 'swap' && actionSetup.action !== 'bridge' ? { formId: supplyReviewFormId(actionSetup.id) } : {}), value: actionSetup.amount, changed: true, onChange: (value: string) => editCanvasAmount(actionSetup.id, value),
-          canApply: Boolean((actionSetup.action === 'bridge' || Boolean(actionSetup.cryptoSelection && actionSelection(actionSetup.id, actionSetup.cryptoSelection).valid)) && (actionSetup.action !== 'bridge' || bridgeSelection(actionSetup.id, bridgeSetupNetworks(actionSetup)).valid) && pending?.valid && pending.authoringId === actionSetup.id && pending.authoringAmount === actionReviewValue(actionSetup, actionSetup.id, undefined) && pending.command.baseRevision === workflow.revision),
+          canApply: Boolean((actionSetup.action === 'bridge' || Boolean(actionSetup.cryptoSelection && actionSelection(actionSetup.id, actionSetup.cryptoSelection).valid)) && (actionSetup.action !== 'bridge' || bridgeSelection(actionSetup.id, bridgeSetupNetworks(actionSetup), true).valid) && pending?.valid && pending.authoringId === actionSetup.id && pending.authoringAmount === actionReviewValue(actionSetup, actionSetup.id, undefined) && pending.command.baseRevision === workflow.revision),
           onReview: () => reviewCanvasAmount(actionSetup.id), onApply: applyProposal, onCommit: () => commitCanvasAmount(actionSetup.id),
-          blocked: actionSetup.action === 'bridge' ? bridgeSelection(actionSetup.id, bridgeSetupNetworks(actionSetup)).valid ? null : 'Choose matching networks.'
+          blocked: actionSetup.action === 'bridge' ? bridgeSelection(actionSetup.id, bridgeSetupNetworks(actionSetup), true).valid ? null : 'Choose matching networks.'
             : actionSetup.cryptoSelection && actionSelection(actionSetup.id, actionSetup.cryptoSelection).valid ? null : 'Choose a network available for the connected wallet.' } } : {}),
       } });
     return projected;

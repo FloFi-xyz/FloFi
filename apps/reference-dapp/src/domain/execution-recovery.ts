@@ -22,6 +22,9 @@ export function projectExecutionRecovery(source: ExecutionLifecycleSource, progr
     case 'supply': { const r = source.state.record; owner = r?.review.account ?? null; chain = r?.review.chain ?? null; if (r?.attempts.length && unresolved) action = 'observe'; break; }
     case 'lending': { const r = source.state.record, q = r?.reviews.at(-1); owner = q?.fields.owner ?? null; chain = q?.manifest.owner.chainId ?? null; if (r?.attempts.length && unresolved) action = 'observe'; break; }
     case 'router': { const r = source.state.record; owner = r?.owner ?? null; chain = r?.review.intent.sourceChain ?? null; if (r?.verdict === 'PENDING' && unresolved && (r.attempts.some(a => ['PREPARED', 'SUBMITTING', 'SUBMISSION_RESULT_UNKNOWN', 'PENDING'].includes(a.state)) || ['SOURCE_CONFIRMED', 'IN_FLIGHT', 'DESTINATION_OBSERVED', 'RECOVERY_REQUIRED'].includes(r.phase))) action = 'observe'; break; }
+    case 'universal': { const r = source.state.record; owner = r?.owner ?? null; chain = r?.review.route.sourceChain ?? null;
+      if (r?.verdict === 'PENDING' && unresolved && (r.attempts.some(a => ['PREPARED', 'SUBMITTING', 'SUBMISSION_RESULT_UNKNOWN', 'PENDING'].includes(a.state)) ||
+        ['SOURCE_CONFIRMED', 'IN_FLIGHT', 'DESTINATION_OBSERVED', 'RECOVERY_REQUIRED'].includes(r.phase))) action = 'observe'; break; }
     case 'public': {
       const r = source.state.run; owner = r?.quote.ownerReview?.account ?? r?.attempts[0]?.account ?? null;
       chain = r ? `eip155:${r.quote.chainId}` : null; const a = r?.attempts.at(-1);

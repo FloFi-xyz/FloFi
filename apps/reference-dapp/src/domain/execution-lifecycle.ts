@@ -23,12 +23,14 @@ import type { useModeB } from '../state/mode-b-store';
 import type { useComposition } from '../state/composition-store';
 import type { useLiquidity } from '../state/liquidity-store';
 import type { useCow } from '../state/cow-store';
+import type { useUniversalRouter } from '../state/universal-router-store';
 
 type ReadonlyStore<T> = Omit<T, { [K in keyof T]: T[K] extends (...args: never[]) => unknown ? K : never }[keyof T]>;
 export type ExecutionLifecycleSource =
   | { kind: 'supply'; state: ReadonlyStore<ReturnType<typeof useSupply>> }
   | { kind: 'lending'; state: ReadonlyStore<ReturnType<typeof useLending>> }
   | { kind: 'router'; state: ReadonlyStore<ReturnType<typeof useRouter>> }
+  | { kind: 'universal'; state: ReadonlyStore<ReturnType<typeof useUniversalRouter>> }
   | { kind: 'public'; state: ReadonlyStore<ReturnType<typeof usePublicTestnet>> }
   | { kind: 'solana-swap'; state: ReadonlyStore<ReturnType<typeof useJupiter>> }
   | { kind: 'solana-pool'; state: ReadonlyStore<ReturnType<typeof useSolanaLiquidity>> }
@@ -144,6 +146,22 @@ export function projectExecutionLifecycle(currentWorkflow: Workflow, context: Re
       const destinationState = r.verdict === 'RECONCILED' ? 'CONFIRMED' : ['RECOVERY_REQUIRED', 'RECONCILIATION_REQUIRED'].includes(r.phase) || r.verdict === 'DIVERGENT' ? 'INCONCLUSIVE' : r.verdict === 'FAILED' ? 'FAILED' : r.verdict === 'REFUNDED' ? 'CANCELLED' : settling ? 'PENDING' : null;
       add('destination', nodeId, 'Destination settlement', r.review.intent.destinationChain, destinationState, r.destination?.transactionHash ?? null, r.verdict === 'RECONCILED'); break;
     }
+    case 'universal': {
+      const r = source.state.record; if (!r) break;
+      select(r.workflow, r.id, r.provenance, source.state.recovered);
+      const nodeId = r.review.nodeId, src = r.review.source, chain = r.review.route.sourceChain;
+      const calls = src.ecosystem === 'EVM' ? src.calls.map(c => c.purpose === 'APPROVAL' ? 'APPROVAL' as const : 'DEPOSIT' as const) : ['DEPOSIT' as const];
+      for (const step of calls) {
+        const a = r.attempts.filter(x => x.step === step).at(-1), gas = a?.ecosystem === 'EVM' ? simulationAmount(a.receipt?.gasCostWei, 18, 'ETH')
+          : a?.ecosystem === 'SOLANA' ? simulationAmount(a.feeLamports, 9, 'SOL') : null;
+        add(step, nodeId, step === 'APPROVAL' ? `Approve ${r.review.route.inputToken.symbol}` : 'Bridge deposit', chain, a?.state ?? null,
+          a?.ecosystem === 'EVM' ? a.replacementHash ?? a.transactionHash : a?.transactionHash ?? null, Boolean(a?.reconciled), step === 'APPROVAL', gas);
+      }
+      const settling = ['SOURCE_CONFIRMED', 'IN_FLIGHT', 'DESTINATION_OBSERVED'].includes(r.phase);
+      const destinationState = r.verdict === 'RECONCILED' ? 'CONFIRMED' : ['RECOVERY_REQUIRED', 'RECONCILIATION_REQUIRED'].includes(r.phase) || r.verdict === 'DIVERGENT' ? 'INCONCLUSIVE'
+        : r.verdict === 'FAILED' ? 'FAILED' : r.verdict === 'REFUNDED' ? 'CANCELLED' : settling ? 'PENDING' : null;
+      add('destination', nodeId, 'Destination delivery', r.review.route.destinationChain, destinationState, r.destination?.transactionHash ?? null, r.verdict === 'RECONCILED'); break;
+    }
     case 'uniswap-pool': {
       const r = source.state.record; if (!r) break;
       select(r.workflow, r.id, r.provenance, source.state.recovered);
@@ -241,7 +259,8 @@ export function projectExecutionLifecycle(currentWorkflow: Workflow, context: Re
     const status = completed ? 'confirmed' : live?.state ?? 'waiting';
     const intent = own.some(op => op.intent);
     return { id: node.nodeId, number: index + 1, action: card.action.includes('.') ? 'Action' : card.action, input: card.amount === 'Amount not available' ? '—' : card.amount, pair: card.bridgePair ?? card.detail ?? null, network: card.chain,
-      provider: source.kind === 'router' ? simulationProvider(source.state.record?.review.route.routingProvider ?? '') ?? card.provider ?? null : source.kind === 'cow' ? 'CoW Protocol' : card.provider === 'Provider not specified' ? null : card.provider ?? null,
+      provider: source.kind === 'universal' ? simulationProvider(source.state.record?.review.route.provider ?? '') ?? card.provider ?? null
+        : source.kind === 'router' ? simulationProvider(source.state.record?.review.route.routingProvider ?? '') ?? card.provider ?? null : source.kind === 'cow' ? 'CoW Protocol' : card.provider === 'Provider not specified' ? null : card.provider ?? null,
       tokens: [...new Set(`${card.amount} ${card.detail ?? ''} ${card.bridgePair ?? ''}`.match(/\b(?:devUSDC|USDC|WETH|ETH|WSOL|SOL|USDT)\b/g) ?? [])],
       state: status, label: intent && completed ? 'Settled' : labels[status], operations: own };
   });

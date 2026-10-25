@@ -17,6 +17,7 @@ import { createAuthoredTransfer, transferDetails } from './robinhood-transfer-au
 import { singleAmountProposalTarget } from './composer-presentation';
 import { createCryptoActionNode, cryptoInputOf, cryptoProfile, canSelectCryptoAssets, defaultPoolRange, type CryptoSelection, type CryptoSelections, type CryptoActionInput } from './crypto-action-picker';
 import { checkRecipient } from './recipient-address';
+import { createUniversalBridgeFromInput, universalBridgeDetails, universalCanvasInput, universalCanvasPair, universalInputOf } from './universal-bridge-authoring';
 
 /** Required-field authoring only, never an executable node or alternate workflow. */
 /** `cryptoRecipient` (UX-001): the Send card's typed "To" text, committed only as the transfer's canonical `recipient` on Apply. */
@@ -24,7 +25,12 @@ export type CanvasActionSetup = { readonly id: string; readonly amount: string; 
   ({ readonly action: 'pool'; readonly input: UniswapLiquidityInput } |
   /** `stocks`: the Stocks card (BUILD-RH-002): a Robinhood Chain catalog swap that buys a Stock Token with USDG. */
   { readonly action: 'swap'; readonly direction?: Direction; readonly stocks?: true } | { readonly action: 'bridge'; readonly networks?: CanvasBridgeNetworks } | { readonly action: 'withdraw' | 'transfer' } | { readonly action: 'supply' | 'borrow' | 'repay'; readonly beneficiary: string });
+/**
+ * BUILD-CROSSCHAIN-UNIVERSAL-001: a new Bridge card may also carry the label `Solana` (only the card's pickers offer it): such a pair is a universal
+ * bridge, recognized before any certified Router command is built. Certified Router cards keep their own pairs.
+ */
 export type CanvasBridgeNetworks = Pick<RouterBridgeInput, 'source' | 'destination'>;
+const routerNetworks = (networks: CanvasBridgeNetworks) => networks;
 export type CanvasBridgeNetworkInputs = Readonly<Record<string, CanvasBridgeNetworks>>;
 /** UX-001: an authored Send card's edited "To" text (like an amount draft); Apply commits it to that node's canonical `recipient`. */
 export type CanvasRecipientInputs = Readonly<Record<string, string>>;
@@ -34,7 +40,8 @@ export const CANVAS_BRIDGE_NETWORK_OPTIONS = {
 } as const;
 /** "USDC → USDC", or (BUILD-RH-002) "USDC → USDG" into Robinhood Chain; an unsupported chain pair keeps the neutral USDC wording. */
 export function bridgePairLabel(networks: CanvasBridgeNetworks): string {
-  const tokens = routerTokensOf(networks);
+  const tokens = routerTokensOf(routerNetworks(networks)), universal = universalCanvasPair(networks);
+  if (!tokens && universal) { const input = universalCanvasInput(universal, '1'); return `${input.inputAsset} → ${input.outputAsset}`; }
   return tokens ? `${tokens.token} → ${tokens.destinationToken}` : 'USDC → USDC';
 }
 export function bridgeSetupNetworks(setup: Extract<CanvasActionSetup, { action: 'bridge' }>): CanvasBridgeNetworks {
@@ -69,7 +76,7 @@ export type CanvasAmountInputs = Readonly<Record<string, string>>;
 export function amountCommandTarget(command: Command, workflow?: Workflow, preferredId?: string) {
   if (command.type === 'SET_CRYPTO_ACTION') return { id: command.nodeId, amount: command.input.amount };
   if (command.type === 'SET_SWAP_AMOUNT') return { id: command.nodeId, amount: command.amount };
-  if (command.type === 'SET_ROUTER_BRIDGE' || command.type === 'SET_BRIDGE') return { id: command.nodeId, amount: command.input.amount };
+  if (command.type === 'SET_ROUTER_BRIDGE' || command.type === 'SET_BRIDGE' || command.type === 'SET_UNIVERSAL_BRIDGE') return { id: command.nodeId, amount: command.input.amount };
   if (command.type === 'SET_SUPPLY' || command.type === 'SET_BORROW' || command.type === 'SET_REPAY' || command.type === 'SET_WITHDRAW' || command.type === 'SET_RH_TRANSFER') return { id: command.nodeId, amount: command.input.amount };
   if (command.type === 'AUTHOR_LENDING' && workflow) {
     const id = singleAmountProposalTarget(workflow, command, preferredId);
@@ -87,7 +94,7 @@ export function canEditCanvasAmount(node: Workflow['nodes'][number], context: Re
   if (workflow && canSelectCryptoAssets(node, workflow)) return true;
   if (workflow && lendingDetails(workflow) && ['lending-supply', 'lending-borrow'].includes(node.nodeId)) return true;
   return Boolean(supplyDetails(node as Parameters<typeof supplyDetails>[0]) || borrowDetails(node as Parameters<typeof borrowDetails>[0]) || repayDetails(node as Parameters<typeof repayDetails>[0]) || withdrawDetails(node as Parameters<typeof withdrawDetails>[0]) || swapDetails(node, context) || routerDetails(node) ||
-    (bridgeDetails(node) && !node.inputs.some(input => input.kind === 'OUTPUT_REFERENCE')));
+    (bridgeDetails(node) && !node.inputs.some(input => input.kind === 'OUTPUT_REFERENCE')) || universalBridgeDetails(node));
 }
 
 export function canvasAmountCommand(state: EditorState, setup: CanvasActionSetup | null, inputs: CanvasAmountInputs, id: string, context: ReviewContext, bridgeNetworks: CanvasBridgeNetworkInputs = {}, cryptoSelections: CryptoSelections = {}, recipients: CanvasRecipientInputs = {}) {
@@ -109,7 +116,10 @@ export function canvasAmountCommand(state: EditorState, setup: CanvasActionSetup
       ? { type: 'ADD_UNISWAP_LIQUIDITY', input: setup.input, source: 'CANVAS', baseRevision: state.workflow.revision }
       : canvasAddCommand(setup.action, state.workflow.revision, 'beneficiary' in setup ? setup.beneficiary : null, setup.amount);
     if (command.type === 'ADD_SWAP' && setup.action === 'swap' && setup.direction) command = { ...command, direction: setup.direction };
-    if (command.type === 'ADD_ROUTER_BRIDGE' && setup.action === 'bridge') command = { ...command, input: routerInputForNetworks(command.input, bridgeSetupNetworks(setup)) };
+    // BUILD-CROSSCHAIN-UNIVERSAL-001: a pair only the universal router serves (Solana in or out) authors a universal bridge; assets are edited in the inspector.
+    const universal = setup.action === 'bridge' ? universalCanvasPair(bridgeSetupNetworks(setup)) : null;
+    if (universal) command = { type: 'ADD_UNIVERSAL_BRIDGE', input: universalCanvasInput(universal, setup.amount), source: 'CANVAS', baseRevision: state.workflow.revision };
+    else if (command.type === 'ADD_ROUTER_BRIDGE' && setup.action === 'bridge') command = { ...command, input: routerInputForNetworks(command.input, routerNetworks(bridgeSetupNetworks(setup))) };
     }
   }
   else {
@@ -131,7 +141,8 @@ export function canvasAmountCommand(state: EditorState, setup: CanvasActionSetup
       : repay ? { ...base, type: 'SET_REPAY', input: { ...repay, amount } }
       : withdraw ? { ...base, type: 'SET_WITHDRAW', input: { ...withdraw, amount } }
       : supply ? { ...base, type: 'SET_SUPPLY', input: { ...supply, amount } }
-      : router ? { ...base, type: 'SET_ROUTER_BRIDGE', input: routerInputForNetworks({ ...routerInputOf(router), amount }, bridgeNetworks[id] ?? router) }
+      : router ? { ...base, type: 'SET_ROUTER_BRIDGE', input: routerInputForNetworks({ ...routerInputOf(router), amount }, routerNetworks(bridgeNetworks[id] ?? router)) }
+      : universalBridgeDetails(node) ? { ...base, type: 'SET_UNIVERSAL_BRIDGE', input: { ...universalInputOf(universalBridgeDetails(node)!), amount } }
       : bridge ? { ...base, type: 'SET_BRIDGE', input: { amount, slippageBps: String(bridge.slippageBps) } }
         : { ...base, type: 'SET_SWAP_AMOUNT', amount };
   }
@@ -139,6 +150,7 @@ export function canvasAmountCommand(state: EditorState, setup: CanvasActionSetup
   // Surface the existing constructor's field error before the command guard reduces it to INVALID_COMMAND.
   if (command.type === 'ADD_ROUTER_BRIDGE' || command.type === 'SET_ROUTER_BRIDGE') createRouterNode('node-preview', command.input);
   if (command.type === 'SET_BRIDGE') createBridgeNode('node-preview', command.input);
+  if (command.type === 'ADD_UNIVERSAL_BRIDGE' || command.type === 'SET_UNIVERSAL_BRIDGE') createUniversalBridgeFromInput('node-preview', command.input);
   if (command.type === 'SET_SUPPLY' || command.type === 'ADD_SUPPLY') createAuthoredSupply('node-preview', command.input);
   if (command.type === 'SET_BORROW' || command.type === 'ADD_BORROW') createAuthoredBorrow('node-preview', command.input);
   if (command.type === 'SET_REPAY' || command.type === 'ADD_REPAY') createAuthoredRepay('node-preview', command.input);

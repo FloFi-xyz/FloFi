@@ -10,6 +10,7 @@ import { supplyDetails, borrowDetails, repayDetails, withdrawDetails } from './s
 import { lendingDetails, lendingCanvasEdges } from './lending-authoring';
 import { bridgeDetails } from './bridge-authoring';
 import { routerDetails } from './router-authoring';
+import { universalBridgeDetails } from './universal-bridge-authoring';
 import { solanaSwapDetails, solanaSwapLabels } from './jupiter-authoring';
 import { solanaLiquidityDetails } from './solana-liquidity-authoring';
 import { uniswapLiquidityDetails } from './uniswap-liquidity-authoring';
@@ -54,7 +55,7 @@ const actionLabels: Record<string, string> = {
 const providerLabels: Record<string, string> = {
   'aave-v3': 'Aave V3', uniswap: 'Uniswap', 'uniswap-v3': 'Uniswap V3',
   'lifi.rest': 'LI.FI', lifi: 'LI.FI', 'across.direct': 'Across',
-  'flofi.router': 'Cross-chain Router', 'cow-protocol': 'CoW Protocol',
+  'flofi.router': 'Cross-chain Router', 'flofi.router.universal': 'Universal Router', 'cow-protocol': 'CoW Protocol',
   'solana.system-transfer': 'System Program', 'solana.spl-transfer': 'SPL Token',
   'evm.native-transfer': 'Wallet send', 'evm.token-transfer': 'Token transfer',
 };
@@ -64,7 +65,7 @@ export function composerSummary(workflow: Workflow, node: Workflow['nodes'][numb
   const action = catalogSwap?.stockPurchase ? 'Stocks' : actionLabels[node.actionType] ?? 'Action';
   const lending = lendingDetails(workflow);
   const swap = swapDetails(node, context), solana = solanaSwapDetails(node);
-  const router = routerDetails(node), bridge = bridgeDetails(node);
+  const router = routerDetails(node), bridge = bridgeDetails(node), universal = universalBridgeDetails(node);
   const uni = uniswapLiquidityDetails(node), orca = solanaLiquidityDetails(node), rhPool = robinhoodLiquidityDetails(node);
   const position = liquidityDetails(node, context);
   const supply = lending ? null : supplyDetails(node as Parameters<typeof supplyDetails>[0]);
@@ -79,11 +80,11 @@ export function composerSummary(workflow: Workflow, node: Workflow['nodes'][numb
     [...new Set((providers.length ? providers : protocols).map(id => providerLabels[id] ?? id))].join(' / ');
   const destination = node.inputs.find(input => input.name === 'asset-out');
   const destinationChain = destination?.kind === 'ASSET' ? destination.value.chainId : null;
-  const chain = router ? `${router.source} → ${router.destination}` : destinationChain && destinationChain !== node.chainId
+  const chain = universal ? `${universal.sourceLabel} → ${universal.destinationLabel}` : router ? `${router.source} → ${router.destination}` : destinationChain && destinationChain !== node.chainId
     ? `${shellChainLabel(node.chainId)} → ${shellChainLabel(destinationChain)}` : shellChainLabel(node.chainId);
   const linked = node.inputs.some(input => input.kind === 'OUTPUT_REFERENCE');
   const amount = lending ? `${node.actionType === 'supply' ? lending.supply : lending.borrow} USDC` : money ? `${money.amount} ${money.asset}` :
-    transfer ? `${transfer.amount} ${transfer.asset}` : router ? `${router.amount} ${router.token}` : bridge ? `${bridge.amount} USDC` :
+    transfer ? `${transfer.amount} ${transfer.asset}` : universal ? `${universal.amount} ${universal.inputSymbol}` : router ? `${router.amount} ${router.token}` : bridge ? `${bridge.amount} USDC` :
     solana ? `${solana.amount} ${solana.from}` : swap ? `${swap.amount} ${swap.from}` : catalogSwap ? `${catalogSwap.amount} ${catalogSwap.from}` :
     uni ? `${uni.maxUsdc} USDC + ${uni.maxWeth} WETH` : rhPool ? `${rhPool.amountA} ${rhPool.tokenA} + ${rhPool.amountB} ${rhPool.tokenB}` : orca ? orcaAmount(orca) :
     position ? `${formatHumanAmount(position.amountWeth, 'WETH', context)} WETH + ${formatHumanAmount(position.amountUsdc, 'USDC', context)} USDC` :
@@ -92,7 +93,7 @@ export function composerSummary(workflow: Workflow, node: Workflow['nodes'][numb
     lending && node.actionType === 'asset.swap.exact-input' ? 'Borrowed USDC → WETH' :
     uni ? 'USDC / WETH' : rhPool ? `${rhPool.tokenA} / ${rhPool.tokenB}` : orca ? `SOL / ${orca.tokenB}` : position ? 'WETH / USDC' : undefined;
   // The router pair names both assets (BUILD-RH-002: USDC → USDG into Robinhood Chain); legacy bridge readers describe USDC on both ends.
-  const bridgePair = router ? `${router.token} → ${router.destinationToken}` : bridge ? 'USDC → USDC' : undefined;
+  const bridgePair = universal ? `${universal.inputSymbol} → ${universal.outputSymbol}` : router ? `${router.token} → ${router.destinationToken}` : bridge ? 'USDC → USDC' : undefined;
   const liquidityValues = uni ? [{ amount: uni.maxUsdc, token: 'USDC' }, { amount: uni.maxWeth, token: 'WETH' }]
     : rhPool ? [{ amount: rhPool.amountA, token: rhPool.tokenA }, { amount: rhPool.amountB, token: rhPool.tokenB }]
     : orca ? [{ amount: orca.maxSol, token: 'SOL' }, { amount: orca.maxDevUsdc, token: orca.tokenB }]

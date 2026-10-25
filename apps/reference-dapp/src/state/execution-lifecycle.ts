@@ -14,6 +14,7 @@ import { useLiquidity } from './liquidity-store';
 import { useSupply } from './supply-store';
 import { useLending } from './lending-store';
 import { useRouter } from './router-store';
+import { useUniversalRouter } from './universal-router-store';
 import { usePublicTestnet } from './public-testnet-store';
 import { useJupiter } from './jupiter-store';
 import { useSolanaLiquidity } from './solana-liquidity-store';
@@ -26,11 +27,11 @@ import { useCow } from './cow-store';
 export function useExecutionLifecycle(kind: SimulationSource['kind'], wallet: ReviewWallet) {
   const { state, context } = useWorkflow();
   const modeA = useModeA(), modeB = useModeB(), composition = useComposition(), liquidity = useLiquidity();
-  const supply = useSupply(), lending = useLending(), router = useRouter(), publicSwap = usePublicTestnet();
+  const supply = useSupply(), lending = useLending(), router = useRouter(), universal = useUniversalRouter(), publicSwap = usePublicTestnet();
   const solanaComposition = useSolanaComposition();
   const jupiter = useJupiter(), solanaPool = useSolanaLiquidity(), uniswapPool = useUniswapLiquidity(), transfer = useRobinhoodTransfer(), cow = useCow(), solanaTransfer = useSolanaTransfer();
   const source: ExecutionLifecycleSource = kind === 'supply' ? { kind, state: supply }
-    : kind === 'lending' ? { kind, state: lending } : kind === 'router' ? { kind, state: router }
+    : kind === 'lending' ? { kind, state: lending } : kind === 'router' ? { kind, state: router } : kind === 'universal' ? { kind, state: universal }
     : kind === 'public' ? { kind, state: publicSwap } : kind === 'solana-swap' ? { kind, state: jupiter }
     : kind === 'solana-pool' ? { kind, state: solanaPool } : kind === 'solana-composition' ? { kind, state: solanaComposition } : kind === 'uniswap-pool' ? { kind, state: uniswapPool }
     : kind === 'transfer' ? { kind, state: transfer } : kind === 'solana-transfer' ? { kind, state: solanaTransfer } : kind === 'fork-swap' ? { kind, state: modeA }
@@ -43,7 +44,7 @@ export function useExecutionLifecycle(kind: SimulationSource['kind'], wallet: Re
   // Each callback is an existing observation-only path. No start, request, worker or retry callback is used.
   const check = view.action === null ? null
     : source.kind === 'supply' ? supply.observe : source.kind === 'lending' ? lending.observe
-    : source.kind === 'router' ? router.observe : source.kind === 'public' ? publicSwap.observe
+    : source.kind === 'router' ? router.observe : source.kind === 'universal' ? universal.observe : source.kind === 'public' ? publicSwap.observe
     : source.kind === 'solana-swap' ? jupiter.observe : source.kind === 'solana-pool' ? solanaPool.observe : source.kind === 'solana-composition' ? solanaComposition.observe
     : source.kind === 'uniswap-pool' ? uniswapPool.observe : source.kind === 'transfer' ? transfer.observe : source.kind === 'solana-transfer' ? solanaTransfer.observe
     : source.kind === 'fork-swap' ? view.action === 'reconcile' ? modeA.reconcile : () => modeA.observe(view.operationId as 'step-approve' | 'step-swap')

@@ -79,6 +79,8 @@ import { UniswapLiquidityPanel } from './uniswap-liquidity-panel';
 import { useUniswapLiquidity } from '../state/uniswap-liquidity-store';
 import { RouterPanel } from './router-panel';
 import { useRouter } from '../state/router-store';
+import { UniversalBridgePanel } from './universal-bridge-panel';
+import { useUniversalRouter } from '../state/universal-router-store';
 import { DashboardWorkspace } from './dashboard/dashboard-workspace';
 import { dashboardRoute as resolveDashboardRoute } from '../lib/dashboard/routes';
 import { secondaryWorkspaceRoute } from '../domain/secondary-workspaces';
@@ -172,6 +174,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   const supply = useSupply();
   const transfer = useRobinhoodTransfer(), solanaTransfer = useSolanaTransfer(), lending = useLending(), jupiter = useJupiter();
   const solanaLiquidity = useSolanaLiquidity(), uniswapLiquidity = useUniswapLiquidity(), routerState = useRouter(), solanaComposition = useSolanaComposition();
+  const universal = useUniversalRouter();
   const publicTestnet = usePublicTestnet();
   // BUILD-FLOFI-UNIVERSAL-E2E-001: the runtime that serves this workflow comes from its own actions and networks. A run a store recovered
   // from this browser serves only the visit's untouched draft or exactly its own workflow, never another one (e.g. a Base Sepolia swap
@@ -187,6 +190,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
       operation: !supplyReview ? null : supplyReview.withdraw ? 'withdraw' : supplyReview.repay ? 'repay' : supplyReview.borrow ? 'borrow' : 'supply' },
     uniswapLiquidity: { recovered: uniswapLiquidity.recovered, workflow: uniswapLiquidity.record?.workflow ?? null },
     router: { recovered: routerState.recovered, workflow: routerState.record?.workflow ?? null },
+    universal: { recovered: universal.recovered, workflow: universal.record?.workflow ?? null },
     solanaComposition: { recovered: solanaComposition.recovered, workflow: solanaComposition.record?.record.review.workflow ?? null },
     solanaLiquidity: { recovered: solanaLiquidity.recovered, workflow: solanaLiquidity.record?.review.workflow ?? null },
     jupiter: { recovered: jupiter.recovered, workflow: jupiter.record?.review.workflow ?? null },
@@ -195,7 +199,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     // The shared owner-wallet Uniswap swap: the testnet pairs and (BUILD-RH-002, BUILD-BASE-001) catalog-network swaps. Base USDC ⇄ WETH joins
     // it only where Base mainnet swaps are enabled and no local fork runtime is available; otherwise it keeps its BUILD-002 paths.
     baseReferenceServed: publicTestnet.catalogAvailable(BASE_MAINNET.chain) && !info?.available });
-  const { routerPath, solanaTransferPath, transferPath, lendingPath, withdrawPath, repayPath, borrowPath, supplyPath, uniswapLiquidityPath,
+  const { universalPath, routerPath, solanaTransferPath, transferPath, lendingPath, withdrawPath, repayPath, borrowPath, supplyPath, uniswapLiquidityPath,
     solanaCompositionPath, solanaLiquidityPath, solanaPath, publicPath } = runtime;
   const [selectedId, select] = useState<string | null>(null);
   const [inspectorExpanded, setInspectorExpanded] = useState(false);
@@ -211,7 +215,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   const acrossWorkflow = state.workflow.nodes.length === 1 && state.workflow.nodes[0]?.adapterConstraints.adapters[0]?.id === 'across.direct';
   const bridgeSwapWorkflow = (state.workflow.nodes.length === 2 && state.workflow.nodes[0]?.nodeId === 'build009-bridge') || Boolean(bridgeSwap.run);
   const crossChainWorkflow = state.workflow.nodes.some(n => n.actionType === 'asset.liquidity.prepare');
-  const bridgeWorkflow = !routerPath && state.workflow.nodes.length === 1 && state.workflow.nodes[0]?.actionType === 'asset.bridge';
+  const bridgeWorkflow = !routerPath && !universalPath && state.workflow.nodes.length === 1 && state.workflow.nodes[0]?.actionType === 'asset.bridge';
   const forkExecution = tab === 'Execute' && Boolean(crossChainWorkflow || (info?.available && prepared) || modeB.info?.available || cow.execution || (liquidity.info?.available && liquidity.prepared) || composition.info?.available || bridge.execution || bridgeSwap.run || across.run);
   const persistedBuild009Recovery = bridgeSwap.recovered &&
     bridgeSwap.run?.format === 'gryloo.build009.mocked.v1' &&
@@ -220,11 +224,11 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     cow.recoveryOnly || bridge.recoveryOnly || persistedBuild009Recovery || across.recovered);
   // The existing CoW loopback runtime is explicitly disabled on deployed environments.
   const localCowIntent = Boolean(cow.info?.enabled && cow.execution);
-  const executionSurface = routerPath || solanaTransferPath || transferPath || lendingPath || withdrawPath || repayPath || borrowPath || supplyPath || uniswapLiquidityPath || solanaCompositionPath || solanaLiquidityPath || solanaPath || publicPath || recoveryPath || localCowIntent || (environment !== 'PUBLIC_TESTNET' && environment !== 'MAINNET' &&
+  const executionSurface = universalPath || routerPath || solanaTransferPath || transferPath || lendingPath || withdrawPath || repayPath || borrowPath || supplyPath || uniswapLiquidityPath || solanaCompositionPath || solanaLiquidityPath || solanaPath || publicPath || recoveryPath || localCowIntent || (environment !== 'PUBLIC_TESTNET' && environment !== 'MAINNET' &&
     capability.executionSupported && forkExecution);
   // Select the same runtime as the existing Simulate surface; presentation never changes its gates.
   const restoredLocalKind = restoredLocalExecutionKind(state.workflow, recoveryShell ? { composition: composition.recoveryOnly, liquidity: liquidity.recoveryOnly, cow: cow.recoveryOnly } : { composition: false, liquidity: false, cow: false });
-  let simulationSource: SimulationSource = runtime.kind === 'router' ? { kind: 'router', state: routerState }
+  let simulationSource: SimulationSource = runtime.kind === 'universal' ? { kind: 'universal', state: universal } : runtime.kind === 'router' ? { kind: 'router', state: routerState }
     : runtime.kind === 'solana-transfer' ? { kind: 'solana-transfer', state: solanaTransfer }
     : runtime.kind === 'transfer' ? { kind: 'transfer', state: transfer }
     : runtime.kind === 'lending' ? { kind: 'lending', state: lending }
@@ -262,7 +266,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     if (details) { details.open = true; details.scrollIntoView({ block: 'start' }); details.querySelector<HTMLElement>('summary')?.focus(); }
   }
   const solanaReview = solanaLiquidity.record?.review;
-  const simulateAgain = simulationSource.kind === 'router' ? routerState.simulate
+  const simulateAgain = simulationSource.kind === 'universal' ? universal.simulate : simulationSource.kind === 'router' ? routerState.simulate
     : simulationSource.kind === 'solana-transfer' ? solanaTransfer.simulate
     : simulationSource.kind === 'transfer' ? transfer.simulate
     : simulationSource.kind === 'lending' ? lending.simulate
@@ -346,8 +350,8 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   if (authoringIncomplete && tab !== 'Build') return <div className="app-shell" inert={!interactive}><TopBar tab={tab} setTab={setTab} pathname={pathname ?? null} engineering={engineering}/><main className="main"><section className="panel stage-empty"><p>{tr("Configure the action amount in Build first.")}</p><button type="button" onClick={() => setTab('Build')}>{tr("Return to Build")}</button></section></main></div>;
   const stageContent = tab === 'Build' ? <><div className="build-grid"><WorkflowCanvas estimateOwner={solanaSession?.account.address} environment={authoringEnvironment(walletEnvironment)} selectedId={selectedId} select={selectAction} openSettings={openActionSettings} workflowName={workflowName} renameWorkflow={setWorkflowName} onAutomate={automationsReady ? () => { setAutomateCanvas(true); navigate?.('/app/automations'); } : undefined} onSave={() => void saveCurrentWorkflow()} onToolboxModeChange={setWorkspaceToolboxMode} primaryAction={simulateAction}/><CopilotPanel key={workflowEpoch} interactive={interactive} owner={owner} proof={proof}/></div>{verification}{saveNotice?.owner === ownerKey && <p role="status">{tr(saveNotice.message)}</p>}{library.busy && <p role="status">{tr('Saving workflow…')}</p>}{library.error && library.error !== 'WALLET_SESSION_REQUIRED' && <p role="alert">{tr(library.error === 'WORKFLOW_VERSION_CONFLICT' ? 'This workflow was updated in another session. Reopen it before saving.' : 'Workflow saving is unavailable. Try again.')}</p>}<ArtifactInspector selectedId={selectedId} select={selectAction} expanded={inspectorExpanded} onExpandedChange={setInspectorExpanded}/>
           {engineering && <EngineeringAuthoring selectedId={selectedId}><ReviewPanel/></EngineeringAuthoring>}</>
-        : tab === 'Simulate' && engineering ? routerPath ? <RouterPanel view="simulate"/> : solanaTransferPath ? <SolanaTransferPanel view="simulate"/> : transferPath ? <RobinhoodTransferPanel view="simulate"/> : lendingPath ? <LendingPanel view="simulate"/> : withdrawPath ? <WithdrawPanel view="simulate"/> : repayPath ? <RepayPanel view="simulate"/> : borrowPath ? <BorrowPanel view="simulate"/> : supplyPath ? <SupplyPanel view="simulate"/> : uniswapLiquidityPath ? <UniswapLiquidityPanel view="simulate"/> : solanaCompositionPath ? <SolanaCompositionPanel view="simulate"/> : solanaLiquidityPath ? <SolanaLiquidityPanel view="simulate"/> : solanaPath ? <JupiterPanel view="simulate"/> : publicPath ? <PublicTestnetPanel view="simulate"/> : crossChainWorkflow ? <CrossChainLiquidityPanel view="simulate"/> : acrossWorkflow || across.run ? <AcrossPanel view="simulate"/> : bridgeSwapWorkflow ? <BridgeSwapPanel view="simulate"/> : bridgeWorkflow ? <BridgePanel view="simulate"/> : <SimulatePanel engineeringOnly workflowName={workflowName}><ReviewWorkspace workflowName={workflowName} workflow={state.workflow} context={context} source={simulationSource} authorization={authorization} wallet={reviewBinding.wallet} invalidWorkflow={Boolean(reviewError)} backToBuild={() => setTab('Build')} simulateAgain={simulateAgain} actionSurface="canvas" showTechnicalDetails={false}/><ObservationPanel/><ForkSimulationPanel/><ModeBPanel view="simulate"/><CompositionPanel view="simulate"/><CowPanel view="simulate"/><LiquidityPanel view="simulate"/></SimulatePanel>
-        : executionSurface ? routerPath ? <RouterPanel view="execute"/> : solanaTransferPath ? <SolanaTransferPanel view="execute"/> : transferPath ? <RobinhoodTransferPanel view="execute"/> : lendingPath ? <LendingPanel view="execute"/> : withdrawPath ? <WithdrawPanel view="execute"/> : repayPath ? <RepayPanel view="execute"/> : borrowPath ? <BorrowPanel view="execute"/> : supplyPath ? <SupplyPanel view="execute"/> : uniswapLiquidityPath ? <UniswapLiquidityPanel view="execute"/> : solanaCompositionPath ? <SolanaCompositionPanel view="execute"/> : solanaLiquidityPath ? <SolanaLiquidityPanel view="execute"/> : solanaPath ? <JupiterPanel view="execute"/> : publicPath ? <PublicTestnetPanel view="execute"/> : persistedBuild009Recovery ? <BridgeSwapPanel view="execute"/> : across.recovered ? <AcrossPanel view="execute"/> :
+        : tab === 'Simulate' && engineering ? universalPath ? <UniversalBridgePanel view="simulate"/> : routerPath ? <RouterPanel view="simulate"/> : solanaTransferPath ? <SolanaTransferPanel view="simulate"/> : transferPath ? <RobinhoodTransferPanel view="simulate"/> : lendingPath ? <LendingPanel view="simulate"/> : withdrawPath ? <WithdrawPanel view="simulate"/> : repayPath ? <RepayPanel view="simulate"/> : borrowPath ? <BorrowPanel view="simulate"/> : supplyPath ? <SupplyPanel view="simulate"/> : uniswapLiquidityPath ? <UniswapLiquidityPanel view="simulate"/> : solanaCompositionPath ? <SolanaCompositionPanel view="simulate"/> : solanaLiquidityPath ? <SolanaLiquidityPanel view="simulate"/> : solanaPath ? <JupiterPanel view="simulate"/> : publicPath ? <PublicTestnetPanel view="simulate"/> : crossChainWorkflow ? <CrossChainLiquidityPanel view="simulate"/> : acrossWorkflow || across.run ? <AcrossPanel view="simulate"/> : bridgeSwapWorkflow ? <BridgeSwapPanel view="simulate"/> : bridgeWorkflow ? <BridgePanel view="simulate"/> : <SimulatePanel engineeringOnly workflowName={workflowName}><ReviewWorkspace workflowName={workflowName} workflow={state.workflow} context={context} source={simulationSource} authorization={authorization} wallet={reviewBinding.wallet} invalidWorkflow={Boolean(reviewError)} backToBuild={() => setTab('Build')} simulateAgain={simulateAgain} actionSurface="canvas" showTechnicalDetails={false}/><ObservationPanel/><ForkSimulationPanel/><ModeBPanel view="simulate"/><CompositionPanel view="simulate"/><CowPanel view="simulate"/><LiquidityPanel view="simulate"/></SimulatePanel>
+        : executionSurface ? universalPath ? <UniversalBridgePanel view="execute"/> : routerPath ? <RouterPanel view="execute"/> : solanaTransferPath ? <SolanaTransferPanel view="execute"/> : transferPath ? <RobinhoodTransferPanel view="execute"/> : lendingPath ? <LendingPanel view="execute"/> : withdrawPath ? <WithdrawPanel view="execute"/> : repayPath ? <RepayPanel view="execute"/> : borrowPath ? <BorrowPanel view="execute"/> : supplyPath ? <SupplyPanel view="execute"/> : uniswapLiquidityPath ? <UniswapLiquidityPanel view="execute"/> : solanaCompositionPath ? <SolanaCompositionPanel view="execute"/> : solanaLiquidityPath ? <SolanaLiquidityPanel view="execute"/> : solanaPath ? <JupiterPanel view="execute"/> : publicPath ? <PublicTestnetPanel view="execute"/> : persistedBuild009Recovery ? <BridgeSwapPanel view="execute"/> : across.recovered ? <AcrossPanel view="execute"/> :
           bridge.recoveryOnly ? <BridgePanel view="execute"/> : modeA.recoveryOnly || modeB.recoveryOnly ||
           composition.recoveryOnly || liquidity.recoveryOnly || cow.recoveryOnly ?
             <><ExecutionPanel/><ModeBPanel view="execute"/><CompositionPanel view="execute"/><CowPanel view="execute"/><LiquidityPanel view="execute"/></> :

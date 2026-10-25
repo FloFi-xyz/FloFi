@@ -112,3 +112,20 @@ export const universalInputOf = (d: UniversalBridgeDetails): UniversalBridgeInpu
   outputAsset: d.outputSymbol, amount: d.amount, recipient: d.recipient, slippage: d.slippage, routing: d.routing });
 /** The universal bridge node of a workflow, if it is one. */
 export const universalBridgeOfWorkflow = (workflow: SemanticWorkflow) => workflow.nodes.length === 1 ? universalBridgeDetails(workflow.nodes[0]!) : null;
+
+/** The Canvas Bridge card's network labels (the certified Router's labels, plus Solana). */
+export const UNIVERSAL_CANVAS_LABEL: Readonly<Record<UniversalNetworkKey, string>> = Object.freeze({ solana: 'Solana', base: 'Base', 'arbitrum-one': 'Arbitrum', ethereum: 'Ethereum',
+  robinhood: 'Robinhood Chain' });
+export const universalKeyOfCanvasLabel = (label: string): UniversalNetworkKey | null =>
+  (Object.keys(UNIVERSAL_CANVAS_LABEL) as UniversalNetworkKey[]).find(key => UNIVERSAL_CANVAS_LABEL[key] === label) ?? null;
+/** A Canvas pair the certified Router does not serve but the universal router does (today: Solana in or out of any EVM mainnet), or null. */
+export function universalCanvasPair(networks: { readonly source: string; readonly destination: string }): { source: UniversalNetworkKey; destination: UniversalNetworkKey } | null {
+  const source = universalKeyOfCanvasLabel(networks.source), destination = universalKeyOfCanvasLabel(networks.destination);
+  return source && destination && source !== destination && (source === 'solana' || destination === 'solana') ? { source, destination } : null;
+}
+/** The universal bridge a new Canvas Bridge card authors for such a pair: the source network's dollar stablecoin and the stated default destination asset. */
+export function universalCanvasInput(pair: { source: UniversalNetworkKey; destination: UniversalNetworkKey }, amount: string): UniversalBridgeInput {
+  const inputAsset = pair.source === 'robinhood' ? 'USDG' : 'USDC';
+  return { source: pair.source, destination: pair.destination, inputAsset, outputAsset: defaultUniversalOutput(pair.source, inputAsset, pair.destination), amount, recipient: '',
+    slippage: UNIVERSAL_BRIDGE_DEFAULT_SLIPPAGE, routing: 'BEST' };
+}
