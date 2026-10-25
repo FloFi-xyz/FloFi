@@ -12,7 +12,8 @@
  * funds: on-chain collection (Relay appFees, separate transfer, invoice) requires an explicit
  * owner settlement decision (see the build report).
  */
-import type { UniversalRoute, UniversalToken, UniversalVerdict } from './types.ts';
+import type { UniversalRoute, UniversalToken } from '@defi-workflow-engine/workflow-contracts';
+import type { UniversalVerdict } from './types.ts';
 
 /** 10 basis points = 0.1%. */
 export const FLOFI_WORKFLOW_FEE_BPS = 10;

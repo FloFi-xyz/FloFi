@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from 'vitest';
 import { feeObligationFor, flofiFeeAmount, flofiFeePolicy, FLOFI_WORKFLOW_FEE_BPS } from './fee-obligation.ts';
-import type { UniversalRoute } from './types.ts';
+import type { UniversalRoute } from '@defi-workflow-engine/workflow-contracts';
 
 const route = {
   sourceChain: 'eip155:8453', destinationChain: 'solana:mainnet',

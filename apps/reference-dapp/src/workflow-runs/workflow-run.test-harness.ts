@@ -30,7 +30,7 @@ type FakeRun = { runId: string; flow: FlowName; owner: string; workflow: unknown
   needsObservation: boolean; hasEvidence: boolean; attempts: { transactionHash: string; state: string }[];
   evidence: { bundleHash: string; environment: string; outcome: string; content: unknown } | null;
   /** Durable facts observeOwnerStep reads for confirm-mode bindings (optional; defaults empty). */
-  recordExtras?: Record<string, unknown> };
+  recordExtras: Record<string, unknown> | undefined };
 
 /**
  * TEST DOUBLE (isolated tests only): the deployment's flow runtime for owner-signed steps. `ownerRuns` are what FloFi's flows would have recorded
