@@ -23,21 +23,27 @@ Nothing was merged, promoted, deployed, configured or signed, and no transaction
 |---|---|---|---|
 | **B1** | CircleCI `certification-checks` fails at **Dependency audit**: `fast-uri@3.1.8` (through `ajv@8.20.0`) has GHSA-w74x-v6f9-j3xg, GHSA-wjr9-j795-jxcr, GHSA-xhq7-xmqj-769h and GHSA-333x-w4r6-6crp. It fails identically on `main`; this PR changes no dependency. The fix (`fast-uri` 3.1.9, branch `codex/security-fast-uri-3.1.9`, `87446fa`) is ready but younger than the 7-day release-age policy. | Claude prepares it; the owner merges | The policy clears at **2026-10-26 23:05:26 UTC**. Then the lockfile is regenerated, the gates are run, the PR is opened and CI is green; the owner merges it. |
 | **B2** | Because the job stops at the audit, CI has **not yet run the unit and PostgreSQL suites** on this PR. They pass locally (§3). | Claude (rebase); CI | #118 is rebased on the merged fix, and CI's `certification-checks` passes through the audit, unit and PostgreSQL steps. |
-| **B3** | Owner approval of each production step: merge, the web promotion, the worker deploy and the real-funds spending limits. | Owner | §4 |
+| **B3** | Owner approval of each production step: merge, the web promotion, the worker deploy, and the owner-chosen §5 acceptance amounts (test budget only — not a product rule). | Owner | §4 |
 
 `git merge-tree` confirms that the fix and #118 change no common file, so the rebase is conflict-free.
 
 **Not blockers, but the owner must know them before release (pre-existing in production, not caused by #118):**
-- **K1. Evidence archive failing in production.**
-  - In the available `flofi-worker` logs (from 2026-10-23 11:44 UTC), every `evidence.archive` attempt has failed with `EVIDENCE_STORE_READ_FAILED`: 336 attempts from 2026-10-23 21:49 UTC onward, 0 successes, for 3 runs (`jupiter-afb4e4…`, `pub-4ba810e1…`, `pub-01a2ec0f…`), still retrying.
-  - The S3-compatible store answers the first `GET` of a not-yet-archived object with an error other than 404. Typical causes are wrong or expired credentials, a wrong bucket, region or path style, or credentials without list permission (S3 then returns 403 for a missing object).
-  - Evidence is still built from each run record, but no content-addressed archive copy is written.
-  - Owner action: check `OBJECT_STORE_*` on `flofi-worker` (and the API). No code change in this release.
-- **K2. In-flight test-network work stops at release (by design, §4 of the report).**
-  - Workflow run `wfr_w4xowbivml3ruqpa2ly4ndlndx` is `RUNNING`, and the worker re-advances it every ~65 s.
-  - If it has a test-network step, it will not sign a further step after the release.
-  - Automations bound to test networks stop proposing and show "attention".
-  - Check both in the admin console before merging.
+- **K1. Evidence archive failing in production (root cause confirmed 2026-10-24 ~23:45 UTC, read-only).**
+  - `flofi-worker` still has 3 open `evidence.archive` items (`jupiter-afb4e4…`, `pub-4ba810e1…`, `pub-01a2ec0f…`), all `READY` with `EVIDENCE_STORE_READ_FAILED` (deliveries 56–160+); 0 `evidence.archived` successes in the available logs.
+  - Store: Neon Object Storage (`*.storage.*.aws.neon.tech`), bucket `flofi-evidence`, region `us-east-2`, path-style (default). Endpoint/bucket/region are fine.
+  - **Root cause:** on both `flofi-worker` and `flofi-api`, `OBJECT_STORE_ACCESS_KEY_ID` and `OBJECT_STORE_SECRET_ACCESS_KEY` are stored with literal surrounding `"` characters. Signed GETs then return **HTTP 403** / S3 `InvalidAccessKeyId`. The same keys with quotes stripped return **HTTP 404** / `NoSuchKey` for a missing object (the archive pre-check), and a probe PUT+GET with stripped keys returned **200** with a matching SHA-256. No production variable was changed.
+  - **Correction (owner-approved and applied 2026-10-25):** re-set those two variables on **both** services to the same Neon key values **without** surrounding quotes. No credential rotation, no unrelated variables, no secrets printed or committed, no PR #118 product change.
+  - **Railway side effect (confirmed before/after):** default `variable set` redeploys the service from its connected `main` branch. `flofi-api` stayed on `cbf340e`. `flofi-worker` moved from deployment `2f7aef24` (`78ea792`) to `9ddf9044` (`cbf340e`) — env reload plus catching the worker up to current `main` (still before #118). Not a Vercel promotion and not a merge of #118.
+  - **Verified after the correction:**
+    1. Missing object GET → **HTTP 404** `NoSuchKey`.
+    2. Disposable PUT → **200**; GET → **200** with matching SHA-256.
+    3. All three pending `evidence.archive` items are **DONE** with rows in `evidence_objects` (`store_id=s3`): `jupiter-afb4e4…`, `pub-4ba810e1…`, `pub-01a2ec0f…`. No new `EVIDENCE_STORE_READ_FAILED` after the worker came up on the fixed credentials (prior failures were backoff retries before the due time).
+- **K2. In-flight workflow `wfr_w4xowbivml3ruqpa2ly4ndlndx` (read-only DB + logs).**
+  - **Network:** Base Sepolia only (`base-sepolia`). **Mode:** `CONFIRM_EACH_STEP`. **State:** `RUNNING`, `current_step` 1 of 2. **Expires:** 2026-10-30T21:48:54Z (not expired). Requester: MCP.
+  - **Steps:** (0) swap 1 USDC→WETH on Base Sepolia — `RECONCILED` / `TESTNET_EXECUTED` (`pub-4ba810e1…`); (1) swap 0.0001 WETH→USDC on Base Sepolia — `PENDING` (not claimed, no outcome, 0 transactions).
+  - **Why it stays RUNNING:** the worker advances with `policyFor = null`, so step 1 is **not** resolved to `READY` on the worker; it waits for the owner in FloFi (`/approve`). Idle `workflow_run.advanced` / `RUNNING` every ~65 s is expected.
+  - **Owner preference:** cancel the remaining pending step rather than sign another testnet transaction. Cancellation is **not** applied until the owner confirms the procedure in the release thread. Step 0's reconciled txs and evidence stay.
+  - Automations bound to test networks stop proposing and show "attention" after release — check those in the admin console before merging.
 - **K3. The deployment state differs from the earlier assessment.** `flofi.xyz` was promoted to `cbf340e` on 2026-10-24 00:08:53 UTC (`dpl_BkHHTr3CdCeK8mfoarwE1RWDvrWw`). Arbitrum One and Ethereum `add_liquidity` (real funds, never executed) are therefore already reachable in production today.
 
 ## 3. Evidence for the verdict
@@ -65,7 +71,7 @@ changes only documentation, the out-of-CI specs (§7), their `testIgnore`, and t
 |---|---|---|
 | Web `flofi.xyz` | `cbf340e` | `dpl_BkHHTr3CdCeK8mfoarwE1RWDvrWw` (Vercel; domain auto-assignment **off**) |
 | API `flofi-api` | `cbf340e` | `c07a6934` (Railway; **auto-deploys every push to `main` without waiting for CI**) |
-| Worker `flofi-worker` | `78ea792` | `2f7aef24` (Railway; **manual deploys only**) |
+| Worker `flofi-worker` | `cbf340e` | `9ddf9044` (Railway; **manual deploys only**; caught up to `main` when K1 variables were corrected) |
 | Telegram webhook | enabled and configured (an unauthenticated `GET` returns 405) | — |
 | WhatsApp webhook | off (404) | — |
 | Multi-step workflow runs | enabled (the worker processes `workflow-run.advance`) | — |
@@ -99,13 +105,14 @@ checks.
 
 **Phase 0: before the merge (now → 2026-10-26)**
 1. **Owner:** review PR #118 (the diff, the [build report](BUILD-FLOFI-MAINNET-PRODUCT-001-REPORT.md) and this document).
-2. **Owner:** set the spending limits for §5 (a proposal is in §5).
-3. **Owner:** resolve K1 (the evidence object store), or accept it as a known issue for the release.
-4. **Owner:** decide what to do with K2: finish or abandon test-network runs and automations, and tell any affected user.
+2. **Owner:** choose the §5 acceptance-test amounts manually (examples in §5). These never become product-wide amount caps.
+3. **Owner:** fix K1 (re-set the two `OBJECT_STORE_*` credential variables on worker and API without surrounding quotes) or accept missing object-store archives for the release. Verification steps are under K1 above.
+4. **Owner:** decide K2 for `wfr_w4xowbivml3ruqpa2ly4ndlndx`: sign Base Sepolia step 1 before merge, cancel (safe: nothing in flight), or leave until expiry / post-release HALT; also check test-network automations.
 
 **Phase 1: dependency fix (after 2026-10-26 23:05:26 UTC)**
 5. **Claude:**
-   - on `codex/security-fast-uri-3.1.9`, regenerate the lockfile with plain `pnpm install --lockfile-only`; it must be byte-identical to `87446fa`;
+   - local branch `codex/security-fast-uri-3.1.9` at `87446fa` is ready (not yet on origin; no PR). After the policy clears:
+   - regenerate the lockfile with plain `pnpm install --lockfile-only`; it must be byte-identical to `87446fa`;
    - run a frozen install and the full gates;
    - push and open the PR.
 6. **Owner:** merge it once CI is green. Effects:
@@ -138,13 +145,14 @@ checks.
 
 ## 5. Production acceptance checklist (owner-run, real wallets, real funds)
 
-**Spending limits (proposal; the owner confirms or changes them before step D):**
-- At most **5 USDC** (or about US$5 of ETH/SOL) per transaction.
-- At most **US$75** for the whole batch, network fees included.
-- **Ethereum L1** rows are excluded from the first batch unless the owner sets a separate gas budget.
-- Use one dedicated EVM account and one dedicated Solana account, funded only with this budget.
+**Owner acceptance-test budget (manual; not a product restriction):**
+The public product has **no** artificial transaction amount caps. End users choose their own amounts on every surface (Canvas, Chat, MCP, Telegram, APIs). Only blockchain/protocol constraints, balances, gas, liquidity, user slippage and wallet authorization apply. The figures below are only what the owner plans to spend while certifying §5; they must never be implemented as fixed USD caps, demo limits or silent amount truncation.
 
-No CI, agent or automation signs. Every signature is the owner's own action in the reviewed wallet flow.
+- Suggested first-batch test spend: about **US$5 equivalent** per operation, about **US$75** total including fees (owner may choose differently each time).
+- **Ethereum L1** excluded from the first certification batch unless the owner separately approves gas for it.
+- Use dedicated wallets. Every transaction needs the owner's explicit approval in the reviewed wallet flow.
+
+No CI, agent or automation signs.
 
 **A. Wallet connection and reconnection**
 
@@ -224,7 +232,7 @@ No CI, agent or automation signs. Every signature is the owner's own action in t
 |---|---|---|
 | Web | `vercel promote dpl_BkHHTr3CdCeK8mfoarwE1RWDvrWw` (today's `cbf340e` production deployment). This is an alias swap. | about 1 minute |
 | API | Railway → `flofi-api` → deployment `c07a6934` (`cbf340e`) → Rollback. Alternative: revert the merge commit on `main`, which auto-deploys the API (and Vercel builds a production deployment that must be promoted). | a few minutes |
-| Worker | Railway → `flofi-worker` → deployment `2f7aef24` (`78ea792`) → Rollback. Or keep the new worker: it only adds refusals. | a few minutes |
+| Worker | Railway → `flofi-worker` → previous success before the K1 redeploy was `2f7aef24` (`78ea792`); current is `9ddf9044` (`cbf340e`). Rollback only if needed. After #118, prefer keeping the merge-commit worker (refusals only). | a few minutes |
 
 - **No data to unwind:** #118 has no migration and changes no stored shape.
 - Mainnet runs created after the release remain valid, readable and reconcilable on `cbf340e`.
