@@ -33,6 +33,8 @@ import { runView, type RunView } from '../workflow-runs/service.ts';
 import { authorizationPlan } from '../workflow-runs/authorization-plan.ts';
 export { walletDeepLinks } from './wallet-links.ts';
 import { walletDeepLinks } from './wallet-links.ts';
+import { APPROVAL_SECRET_FORMAT } from './approval-link-format.ts';
+import { trustedFlofiUrl } from './navigation.ts';
 
 export const HANDOFF_SECONDS = 900;
 export const CLAIM_SECONDS = 600;
@@ -70,7 +72,11 @@ export type HandoffRules = { readonly handoffSeconds: number; readonly maxPendin
 export type ApprovalDeps = { readonly origin: string; readonly scheme: ApprovalLinkScheme; readonly handoffs: HandoffStore; readonly allow: WindowLimit;
   readonly runtime: EngineRuntime; readonly policy: HandoffPolicy; readonly rules: HandoffRules; readonly now: Date };
 export type Failure = { readonly ok: false; readonly code: string; readonly extra?: Readonly<Record<string, unknown>> };
-export const approvalUrl = (origin: string, secret: string) => `${origin}/approve#${secret}`;
+export function approvalUrl(origin: string, secret: string): string {
+  const url = trustedFlofiUrl(`${origin}/approve#${secret}`, origin);
+  if (!url || !APPROVAL_SECRET_FORMAT.test(secret)) throw new Error('APPROVAL_LINK_INVALID');
+  return url.href;
+}
 /**
  * The wallet namespace whose proof claims a plan: its first step's (a one-step workflow is one namespace). BUILD-CHAT-E2E-001: a sequence
  * may span EVM and Solana steps; `planNamespaces` lists every namespace whose wallet the owner must prove before its run starts.

@@ -32,7 +32,7 @@ describe('BUILD-DEVELOPER-001 developer configuration', () => {
     expect(reason({ ...BASE, FLOFI_DEVELOPER_DISPATCH_TOKEN_SHA256: 'not-hex' })).toBe('FLOFI_DEVELOPER_DISPATCH_TOKEN_SHA256');
     expect(reason({ ...BASE, FLOFI_DEVELOPER_WEBHOOK_LOOPBACK: 'yes' })).toBe('FLOFI_DEVELOPER_WEBHOOK_LOOPBACK');
     // The loopback webhook seam is local-only: a hosted deployment with it set is misconfigured, not silently permissive.
-    expect(reason({ ...BASE, FLOFI_DEVELOPER_WEBHOOK_LOOPBACK: 'ALLOW_LOCAL_ONLY', VERCEL: '1', VERCEL_ENV: 'production' })).toBe('FLOFI_DEVELOPER_WEBHOOK_LOOPBACK_HOSTED');
+    expect(reason({ ...BASE, FLOFI_PUBLIC_ORIGIN: 'https://flofi.xyz', FLOFI_DEVELOPER_WEBHOOK_LOOPBACK: 'ALLOW_LOCAL_ONLY', VERCEL: '1', VERCEL_ENV: 'production' })).toBe('FLOFI_DEVELOPER_WEBHOOK_LOOPBACK_HOSTED');
     expect(reason({ ...BASE, VERCEL: '1', VERCEL_ENV: 'preview' })).toBe('TENANT');
   });
 

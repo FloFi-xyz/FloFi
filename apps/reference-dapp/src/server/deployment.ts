@@ -8,6 +8,7 @@
  * and never invents a per-process session key. Local development and the deterministic test suites are not hosted.
  */
 import { createHash } from 'node:crypto';
+import { FLOFI_PRODUCTION_ORIGIN } from '../platform/navigation.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
 export type DeploymentEnvironment = 'production' | 'preview' | 'development' | 'local';
@@ -50,6 +51,8 @@ export function publicOrigin(env: Env): string | null {
   let url: URL;
   try { url = new URL(raw); } catch { return null; }
   if (url.origin !== raw || url.username || url.password) return null;
+  // Production has one brand origin. Deliberate previews keep their exact server-configured issuer and OAuth audience.
+  if (deploymentEnvironment(env) === 'production' && raw !== FLOFI_PRODUCTION_ORIGIN) return null;
   if (url.protocol === 'https:') return url.origin;
   return url.protocol === 'http:' && LOOPBACK.has(url.hostname) && !isHostedDeployment(env) ? url.origin : null;
 }

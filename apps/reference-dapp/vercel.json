@@ -5,7 +5,8 @@
   "buildCommand": "sh ../../deploy/vercel/build.sh",
   "git": {
     "deploymentEnabled": {
-      "claude/build-solana-transfer-ux-001": false
+      "claude/build-solana-transfer-ux-001": false,
+      "security/mcp-link-integrity-p0": false
     }
   }
 }

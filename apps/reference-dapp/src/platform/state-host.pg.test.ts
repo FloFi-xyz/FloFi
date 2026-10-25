@@ -26,7 +26,7 @@ const pools = new Set<Database>();
 beforeAll(async () => { t = await createTestDatabase(); });
 afterEach(() => { vi.restoreAllMocks(); });
 afterAll(async () => { await Promise.allSettled([...pools].map(db => db.close())); await t?.drop(); });
-const remoteEnv = (tenant: string): Env => ({ ...REMOTE, VERCEL: '1', VERCEL_ENV: 'production', TENANT_ID: tenant, DATABASE_URL: t.url });
+const remoteEnv = (tenant: string): Env => ({ ...REMOTE, VERCEL: '1', VERCEL_ENV: 'production', FLOFI_PUBLIC_ORIGIN: 'https://flofi.xyz', TENANT_ID: tenant, DATABASE_URL: t.url });
 async function hostFor(env: Env) { const host = await platformStateHost(env); pools.add(host.db); return host; }
 async function api(env: Env, key: string, method: string, path: string, body?: unknown) {
   return handleDeveloperRequest(new Request(ORIGIN + '/api/developer/v1' + path, { method,
