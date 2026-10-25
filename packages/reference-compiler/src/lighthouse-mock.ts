@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { SOLANA_MAINNET_TRANSFER } from '@defi-workflow-engine/action-registry';
-import { associatedTokenAddress, compileMessageV0, decompileMessageV0, fromBase64, parseMessageV0, parseTransaction, serializeMessageV0, serializeSignedTransaction,
-  serializeTransaction, toBase64, u64Bytes, type LookupTables, type SolanaInstruction } from './solana.js';
+import { associatedTokenAddress, fromBase64, parseMessageV0, parseTransaction, serializeMessageV0, serializeSignedTransaction, serializeTransaction, toBase64, u64Bytes,
+  type LookupTables, type SolanaInstruction } from './solana.js';
 import { LIGHTHOUSE_PROGRAM } from './solana-wallet-change.js';
 import { decodeLighthouseAssertion } from './solana-wallet-guard.js';
 
@@ -25,9 +25,20 @@ export function mockedPhantomGuardInstructions(owner: string, guard: MockedPhant
 }
 export function applyMockedPhantomLighthouseGuards(unsignedBase64: string, guard: MockedPhantomGuard, tables: LookupTables = {}): string {
   const { signatures, message } = parseTransaction(fromBase64(unsignedBase64, 2048));
-  const parsed = parseMessageV0(message), owner = parsed.staticKeys[0]!;
-  // The reviewed account flags are message-level; a read-only reference to an account the transaction already writes keeps it writable.
-  const changed = serializeMessageV0(compileMessageV0(owner, [...decompileMessageV0(parsed, tables), ...mockedPhantomGuardInstructions(owner, guard)], parsed.blockhash, tables));
+  const parsed = parseMessageV0(message), owner = parsed.staticKeys[0]!, n = parsed.staticKeys.length;
+  // Like a wallet editing the compiled message: the Lighthouse program joins the read-only unsigned static keys (last), so every account
+  // loaded through a lookup table moves up one index; the assertions reference accounts the transaction already loads.
+  const loaded = (['writable', 'readonly'] as const).flatMap(pick => parsed.lookups.flatMap(l => l[pick].map(i => tables[l.table]?.[i] ?? null)));
+  const shift = (i: number) => i >= n ? i + 1 : i;
+  const indexOf = (address: string) => {
+    const at = parsed.staticKeys.indexOf(address), viaLookup = loaded.indexOf(address);
+    if (at >= 0) return at;
+    if (viaLookup >= 0) return shift(n + viaLookup);
+    throw new Error('MOCK_GUARD_TARGET_NOT_IN_TRANSACTION');
+  };
+  const appended = mockedPhantomGuardInstructions(owner, guard).map(ix => ({ programIdIndex: n, accounts: [indexOf(ix.accounts[0]!.pubkey)], data: ix.data }));
+  const changed = serializeMessageV0({ ...parsed, header: [parsed.header[0], parsed.header[1], parsed.header[2] + 1], staticKeys: [...parsed.staticKeys, LIGHTHOUSE_PROGRAM],
+    instructions: [...parsed.instructions.map(ix => ({ ...ix, accounts: ix.accounts.map(shift) })), ...appended] });
   return toBase64(signatures.length === 1 ? serializeTransaction(null, changed) : serializeSignedTransaction(signatures.map(() => null), changed));
 }
 

@@ -428,7 +428,8 @@ MAIN_PROFILES = {
     # BUILD-FLOFI-MAINNET-PRODUCT-001 (intentional change): this profile now certifies the public Mainnet-only product as deployed.
     "solana-mainnet-network": (["solana-mainnet-network.spec.ts"], {"GRYLOO_SOLANA_DEVNET_E2E":"MOCKED_LOOPBACK_ONLY","FLOFI_E2E_NETWORK_SCOPE":"PUBLIC_MAINNET"}),
     "canvas-corrections": (["canvas-corrections.spec.ts"], {}),
-    "solana-wallet-refusal": (["solana-swap-liquidity-composition.spec.ts","--grep","a wallet that changes the reviewed swap|a Phantom-like wallet signs the exact reviewed swap|a reconciled swap continues to its Orca position"], {"GRYLOO_SOLANA_DEVNET_E2E":"MOCKED_LOOPBACK_ONLY"}),
+    # HOTFIX-PHANTOM-LIGHTHOUSE-001 (intentional change): the profile also certifies verified Phantom Lighthouse protections end to end.
+    "solana-wallet-refusal": (["solana-swap-liquidity-composition.spec.ts","--grep","a wallet that changes the reviewed swap|a Phantom-like wallet signs the exact reviewed swap|a Phantom wallet with Lighthouse protections|a reconciled swap continues to its Orca position"], {"GRYLOO_SOLANA_DEVNET_E2E":"MOCKED_LOOPBACK_ONLY"}),
     "lending-provenance": (["release-financial-provenance.spec.ts"], {"FLOFI_RELEASE_PROVENANCE_PROFILE":"lending","GRYLOO_LENDING_E2E":"MOCKED_LOOPBACK_ONLY"}),
     "jupiter-provenance": (["release-financial-provenance.spec.ts"], {"FLOFI_RELEASE_PROVENANCE_PROFILE":"jupiter","GRYLOO_JUPITER_E2E":"MOCKED_LOOPBACK_ONLY"}),
     "devnet-provenance": (["release-financial-provenance.spec.ts"], {"FLOFI_RELEASE_PROVENANCE_PROFILE":"solana-devnet","GRYLOO_SOLANA_DEVNET_E2E":"MOCKED_LOOPBACK_ONLY"}),
