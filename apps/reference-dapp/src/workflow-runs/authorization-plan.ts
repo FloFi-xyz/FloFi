@@ -36,7 +36,7 @@ export type AuthorizationPlan = {
     readonly ownerKnown: boolean };
   readonly recommended: 'DELEGATED_SINGLE_AUTHORIZATION' | 'CONFIRM_EACH_STEP' | null;
   readonly steps: readonly StepAuthorization[];
-  readonly bindings: readonly { readonly step: number; readonly amountFrom: number; readonly confirmEachStep: 'DEPENDENT_AMOUNT_SOURCE_NOT_IMPLEMENTED';
+  readonly bindings: readonly { readonly step: number; readonly amountFrom: number; readonly confirmEachStep: 'RECONCILED_RECEIVED_AMOUNT';
     readonly delegated: 'RECONCILED_RECEIVED_AMOUNT' }[];
   readonly notes: readonly string[];
 };
@@ -87,7 +87,7 @@ export function authorizationPlan(workflow: WorkflowComposition, gates: Pick<Gat
   const passkeys = graph?.ok && owner ? new Set(graph.bindings.map(b => owner.grants.find(g => g.grantId === b.grantId)?.passkeyId)).size : null;
   const delegatedReason = runsOff ?? (!delegation ? 'DELEGATION_NOT_ENABLED' : delegation.unavailable) ?? (notCapable ? notCapable.delegation.code ?? 'DELEGATED_AUTHORITY_UNAVAILABLE'
     : gates.enabledByPolicy.reason ?? (graph && !graph.ok ? 'CREDENTIAL_ENROLLMENT_REQUIRED' : passkeys !== null && passkeys > 1 ? 'CREDENTIALS_USE_DIFFERENT_PASSKEYS' : null));
-  const bindingCodes = workflow.bindings.map(b => ({ step: b.step, amountFrom: b.amountFrom, confirmEachStep: 'DEPENDENT_AMOUNT_SOURCE_NOT_IMPLEMENTED' as const,
+  const bindingCodes = workflow.bindings.map(b => ({ step: b.step, amountFrom: b.amountFrom, confirmEachStep: 'RECONCILED_RECEIVED_AMOUNT' as const,
     delegated: 'RECONCILED_RECEIVED_AMOUNT' as const }));
   const confirmAvailable = confirmReason === null, delegatedAvailable = delegatedReason === null;
   const notes = ['One authorization is not one transaction: every step still submits its own transactions and pays its own network fees.',

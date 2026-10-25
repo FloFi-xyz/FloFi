@@ -100,15 +100,18 @@ describe('A–E: Solana ⇄ every EVM mainnet, verified source to verified deliv
       outputAsset: token('base'), amount: '25000000', recipient: EVM_RECIPIENT });
     const run = await reviewed(c, w, c.wallet.publicKey);
     expect(run.review).toMatchObject({ owner: c.wallet.publicKey, recipient: EVM_RECIPIENT, recipientKind: 'EXPLICIT', authorizations: { sourceSignatures: 1, destinationAuthorization: 'NONE' },
-      feePolicy: { flofiFee: 'NONE', networkFeeSymbol: 'SOL' }, selection: { selected: 'relay' }, source: { ecosystem: 'SOLANA', simulation: { ownerDebit: '25000000' } } });
+      feePolicy: { flofiFee: 'WORKFLOW_0_1_PCT', flofiFeeRateBps: 10, flofiFeeBasis: 'COMPLETED_WORKFLOW_INPUT', flofiFeeCollection: 'OBLIGATION_RECORDED',
+        networkFeeSymbol: 'SOL' }, selection: { selected: 'relay' }, source: { ecosystem: 'SOLANA', simulation: { ownerDebit: '25000000' } } });
     expect(run.phase).toBe('AUTHORIZED');
     const confirmed = await executeSolana(c, run.id, w);
     // Solana deposits are observed at finalized commitment, so the same observation moves the run on to IN_FLIGHT.
     expect(confirmed).toMatchObject({ phase: 'IN_FLIGHT', source: { ownerDebit: '25000000', final: true }, authorization: null });
     expect(c.solana.state.tokens.get(c.solana.ata(RELAY_SOLANA_VAULT, USDC.solana))?.amount).toBe(25_000_000n);
     const done = await settle(c, confirmed);
-    expect(done).toMatchObject({ phase: 'RECONCILED', verdict: 'RECONCILED', received: done.review.route.expectedOutput, destination: { recipient: EVM_RECIPIENT, orderBound: true, final: true } });
-    expect(done.evidence).toMatchObject({ evidenceClass: 'MOCKED', route: { provider: 'relay', orderId: done.review.route.order.orderId }, reconciliation: 'RECONCILED' });
+    expect(done).toMatchObject({ phase: 'RECONCILED', verdict: 'RECONCILED', received: done.review.route.expectedOutput, destination: { recipient: EVM_RECIPIENT, orderBound: true, final: true },
+      feeObligation: { status: 'OBLIGATED', rateBps: 10, feeAmount: '25000', collection: 'NOT_SETTLED', notional: { amount: '25000000', symbol: 'USDC' } } });
+    expect(done.evidence).toMatchObject({ evidenceClass: 'MOCKED', route: { provider: 'relay', orderId: done.review.route.order.orderId }, reconciliation: 'RECONCILED',
+      feeObligation: { status: 'OBLIGATED', feeAmount: '25000' } });
     expect(universalNeedsObservation(done)).toBe(false);
     await roundTripLog(c, run.id);
   });

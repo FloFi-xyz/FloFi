@@ -19,8 +19,8 @@ export const portugueseUniversalBridge: Readonly<Record<string, string>> = {
   'Universal bridge amount': 'Montante da bridge universal', 'Universal bridge recipient': 'Destinatário da bridge universal',
   'Your connected destination wallet': 'A sua carteira de destino ligada', 'Universal bridge routing': 'Encaminhamento da bridge universal',
   'Universal bridge slippage (bps)': 'Desvio da bridge universal (bps)',
-  'The guaranteed minimum you receive is fixed in the reviewed provider order. Provider fees are listed at Review; FloFi charges no fee on this bridge.':
-    'O mínimo garantido que recebe fica fixado na ordem do fornecedor que reviu. As taxas do fornecedor são listadas na Revisão; o FloFi não cobra taxa nesta bridge.',
+  'The guaranteed minimum you receive is fixed in the reviewed provider order. Provider fees are listed at Review. FloFi records a 0.1% fee obligation on each completed workflow; collection is not settled on-chain yet.':
+    'O mínimo garantido que recebe fica fixado na ordem do fornecedor que reviu. As taxas do fornecedor são listadas na Revisão. O FloFi regista uma obrigação de taxa de 0,1% em cada workflow concluído; a cobrança ainda não é liquidada on-chain.',
   'Automatic: the executable route with the highest guaranteed minimum': 'Automático: a rota executável com o maior mínimo garantido',
   'Relay only': 'Só Relay', 'LI.FI only (quotes; execution not available yet)': 'Só LI.FI (cotações; execução ainda indisponível)',
   'Mayan only (quotes; execution not available yet)': 'Só Mayan (cotações; execução ainda indisponível)', 'Across only (certified Router pairs)': 'Só Across (pares certificados do Router)',
@@ -47,15 +47,18 @@ export const portugueseUniversalBridge: Readonly<Record<string, string>> = {
   // Panel, Review and execution
   'Universal cross-chain bridge': 'Bridge cross-chain universal', 'Simulate universal bridge': 'Simular bridge universal', 'Review universal bridge': 'Rever bridge universal',
   'from': 'de', ', receiving': ', recebendo',
-  'Real funds. FloFi never signs: your source wallet signs every transaction after your Review. FloFi charges no fee on this bridge; provider fees are shown below.':
-    'Fundos reais. O FloFi nunca assina: a sua carteira de origem assina cada transação depois da sua Revisão. O FloFi não cobra taxa nesta bridge; as taxas do fornecedor são mostradas abaixo.',
+  'Real funds. FloFi never signs: your source wallet signs every transaction after your Review. FloFi records a 0.1% fee obligation when the workflow completes; provider fees are shown below.':
+    'Fundos reais. O FloFi nunca assina: a sua carteira de origem assina cada transação depois da sua Revisão. O FloFi regista uma obrigação de taxa de 0,1% quando o workflow conclui; as taxas do fornecedor são mostradas abaixo.',
   'Source wallet:': 'Carteira de origem:', 'destination wallet:': 'carteira de destino:', 'Connect wallets': 'Ligar carteiras',
   'Sign in with source wallet': 'Iniciar sessão com a carteira de origem', 'Switch wallet to the source network': 'Mudar a carteira para a rede de origem',
   'order': 'ordem', 'Selection': 'Seleção', 'selected': 'selecionada', 'available': 'disponível', 'not executable': 'não executável', 'refused': 'recusada',
   'You send': 'Envia', 'Expected to receive': 'Recebimento esperado', 'Guaranteed minimum': 'Mínimo garantido',
   '— fixed in the provider order; a smaller delivery is a mismatch': '— fixado na ordem do fornecedor; uma entrega menor é uma divergência',
   'Provider fees': 'Taxas do fornecedor', '(included in the quote)': '(incluída na cotação)', '(paid separately)': '(paga à parte)', 'none listed': 'nenhuma listada',
-  'FloFi fee': 'Taxa do FloFi', 'None on this bridge.': 'Nenhuma nesta bridge.', 'after the deposit confirms (provider estimate)': 'após a confirmação do depósito (estimativa do fornecedor)',
+  'FloFi fee': 'Taxa do FloFi',
+  '0.1% of the completed workflow input — obligation recorded at reconciliation; not collected on-chain yet.':
+    '0,1% do input do workflow concluído — obrigação registada na reconciliação; ainda não cobrada on-chain.',
+  'after the deposit confirms (provider estimate)': 'após a confirmação do depósito (estimativa do fornecedor)',
   'Signatures': 'Assinaturas', 'wallet signature on the source network': 'assinatura da carteira na rede de origem',
   'wallet signatures on the source network (an exact approval, then the deposit)': 'assinaturas da carteira na rede de origem (uma aprovação exata e depois o depósito)',
   '; nothing to sign on the destination network.': '; nada a assinar na rede de destino.',

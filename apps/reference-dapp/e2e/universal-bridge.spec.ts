@@ -104,7 +104,7 @@ test('Solana USDC → Base: routes found, Review, one Solana signature, FloFi br
   await panel(page).getByRole('button', { name: 'Get route and simulate' }).click();
   const review = panel(page).getByRole('definition');
   // Provider label · protocol (relay-depository), not the internal order kind (RELAY_V2).
-  for (const text of ['Relay · relay-depository', '25 USDC on Solana', 'Guaranteed minimum', 'None on this bridge.', '1 wallet signature on the source network; nothing to sign on the destination network.',
+  for (const text of ['Relay · relay-depository', '25 USDC on Solana', 'Guaranteed minimum', '0.1% of the completed workflow input', '1 wallet signature on the source network; nothing to sign on the destination network.',
     'simulateTransaction', 'Not simulated: the destination delivery and refunds.']) await expect(panel(page)).toContainText(text);
   await expect(review.filter({ hasText: wallets.evm.address.toLowerCase() })).toContainText('on Base (your connected wallet)');
   expect(await counters()).toEqual({ solanaSends: 0, evmSends: 0 });

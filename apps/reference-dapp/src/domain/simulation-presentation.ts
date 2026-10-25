@@ -22,6 +22,10 @@ import type { Workflow } from './initial-workflow';
 import { composerActions, composerSummary } from './composer-presentation';
 import { quoteDecimals } from './public-testnet-swap';
 import { resolveNetworkAsset } from './asset-catalogs';
+import { flofiFeeAmount } from '../server/universal-router/fee-obligation.ts';
+
+/** 0.1% of the route input, for Review disclosure (obligation; not collected here). */
+const flofiFeeUnits = (inputAmount: string): string => flofiFeeAmount(inputAmount);
 
 type Snapshot<T> = Pick<T, Extract<keyof T, 'record' | 'run' | 'prepared' | 'status' | 'info' | 'retired' | 'recoveryOnly' | 'busy' | 'error' | 'available' | 'verifyError' | 'verified' | 'quoteExpired'>>;
 export type SimulationSource =
@@ -263,7 +267,8 @@ export function projectSimulation(workflow: Workflow, context: ReviewContext, so
       if (s) s.resultLabel = 'Quoted destination output';
       fee('Maximum network fee', q.feePolicy.networkFeeUpperBound, q.feePolicy.networkFeeDecimals, q.feePolicy.networkFeeSymbol, 'Paid on the source network, separate from the route.');
       for (const f of route.fees) if (f.included && BigInt(f.amount) > 0n) fee(f.label, f.amount, f.decimals, f.symbol, 'Included in the quoted output.');
-      fee('FloFi fee', '0', route.inputToken.decimals, route.inputToken.symbol, 'FloFi charges no fee on this bridge.');
+      fee('FloFi fee (0.1% obligation)', flofiFeeUnits(route.inputAmount), route.inputToken.decimals, route.inputToken.symbol,
+        '0.1% of the completed workflow input. Recorded as an obligation when the run reconciles; not collected on-chain yet. Waived if the workflow fails or refunds.');
       approvals(q.source.ecosystem === 'EVM' && q.source.approvals.some(a => a.required));
       if (q.authorizations.sourceSignatures > 1) warn('info', 'This bridge needs two wallet signatures on the source network: an exact approval, then the deposit.');
       warn('attention', 'Destination delivery is guaranteed by the provider order and proven on chain after it lands. The simulation checks the source transaction; delivery and refunds are not simulated.');

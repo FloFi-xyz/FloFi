@@ -19,6 +19,7 @@ import type { Workflow } from '../domain/initial-workflow';
 import { semanticWorkflowHash } from '../engine/strategy-engine';
 import type { McpRuntime as EngineRuntime } from '../mcp/runtime.ts';
 import type { StepOutcome } from './pg-store.ts';
+import { amountsFromOwnerRecord } from './received-amounts.ts';
 
 export type StepVerdict = { readonly verdict: 'RECONCILED'; readonly outcome: StepOutcome; readonly duplicates: readonly string[] }
   | { readonly verdict: 'UNCERTAIN'; readonly executionId: string; readonly code: string }
@@ -44,7 +45,7 @@ export async function observeOwnerStep(runtime: EngineRuntime, input: { readonly
   if (!listed.ok) return { verdict: 'UNAVAILABLE', code: listed.code };
   const candidates = listed.value.filter(r => r.flow === flow && Date.parse(r.updatedAt) >= since).slice(0, MAX_CANDIDATES);
   type Seen = { runId: string; createdAt: number; status: string; errorCode: string | null; needsObservation: boolean; submitted: readonly string[];
-    evidence: { environment: string; outcome: string; bundleHash: string } | null };
+    evidence: { environment: string; outcome: string; bundleHash: string } | null; spent: StepOutcome['spent']; received: StepOutcome['received'] };
   const seen: Seen[] = [];
   for (const candidate of candidates) {
     const run = await runtime.run(candidate.runId, input.wallet);
@@ -59,12 +60,14 @@ export async function observeOwnerStep(runtime: EngineRuntime, input: { readonly
       if (!e.ok) return { verdict: 'UNAVAILABLE', code: e.code };
       if (e.value) evidence = { environment: e.value.environment, outcome: e.value.outcome, bundleHash: e.value.bundleHash };
     }
+    const amounts = amountsFromOwnerRecord(record.value);
     seen.push({ runId: run.value.runId, createdAt: Date.parse(run.value.createdAt), status: run.value.status, errorCode: run.value.errorCode,
-      needsObservation: run.value.needsObservation, submitted: hashes(Array.isArray(run.value.attempts) ? run.value.attempts : []), evidence });
+      needsObservation: run.value.needsObservation, submitted: hashes(Array.isArray(run.value.attempts) ? run.value.attempts : []), evidence,
+      spent: amounts.spent, received: amounts.received });
   }
   seen.sort((a, b) => a.createdAt - b.createdAt || (a.runId < b.runId ? -1 : 1));
   const outcomeOf = (s: Seen): StepOutcome => ({ kind: 'OWNER_RUN', executionId: s.runId, flow: input.flow, status: s.status,
-    transactions: s.submitted.map(hash => ({ chain: input.chain, hash })), evidence: s.evidence, spent: [], received: [], observedAt: input.now.toISOString() });
+    transactions: s.submitted.map(hash => ({ chain: input.chain, hash })), evidence: s.evidence, spent: s.spent, received: s.received, observedAt: input.now.toISOString() });
   // The same rule as `sharedRuns`: only reconciled evidence of an error-free, fully observed run is a reconciled step.
   const reconciled = seen.filter(s => !s.needsObservation && s.errorCode === null && s.evidence?.outcome === 'RECONCILED' && Boolean(s.evidence.bundleHash)
     && ['RECONCILED', 'COMPLETED'].includes(s.status));

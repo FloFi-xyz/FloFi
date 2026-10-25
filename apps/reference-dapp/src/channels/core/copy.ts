@@ -130,7 +130,7 @@ const REFUSALS_EN: Readonly<Record<string, string>> = {
   STRATEGY_SCHEMA_INVALID: 'FloFi could not turn that into a canonical strategy. Nothing was proposed.',
   TEST_NETWORK_NOT_AVAILABLE: 'FloFi runs on mainnets only, with real funds: test networks such as Base Sepolia or Solana Devnet are not available. Nothing was proposed. Name the mainnet you want (for example Base, Arbitrum One, Ethereum, Solana or Robinhood Chain) and the amount.',
   WORKFLOW_RUNS_NOT_ENABLED: 'FloFi cannot run multi-step workflows on this deployment yet. Nothing was proposed.',
-  DEPENDENT_AMOUNT_SOURCE_NOT_IMPLEMENTED: 'A step that spends what another step delivers needs delegated execution, which is not available here. Nothing was proposed.',
+  DEPENDENT_AMOUNT_SOURCE_NOT_IMPLEMENTED: 'A step that spends what another step delivers could not resolve the earlier step\'s received amount here. Nothing was proposed.',
   CHANNEL_INTENDED_WALLETS_DIFFER: 'These steps name different wallets; one workflow is approved by one owner. Nothing was proposed.',
 };
 const APPROVAL_EN: Readonly<Record<string, (expires: string) => string>> = {
@@ -210,7 +210,7 @@ const REFUSALS_PT: Readonly<Record<string, string>> = {
   STRATEGY_SCHEMA_INVALID: 'O FloFi não conseguiu transformar isso em uma estratégia canônica. Nada foi proposto.',
   TEST_NETWORK_NOT_AVAILABLE: 'O FloFi funciona só em mainnets, com fundos reais: redes de teste como Base Sepolia ou Solana Devnet não estão disponíveis. Nada foi proposto. Diga a mainnet que você quer (por exemplo Base, Arbitrum One, Ethereum, Solana ou Robinhood Chain) e o valor.',
   WORKFLOW_RUNS_NOT_ENABLED: 'O FloFi ainda não roda fluxos de várias etapas neste ambiente. Nada foi proposto.',
-  DEPENDENT_AMOUNT_SOURCE_NOT_IMPLEMENTED: 'Uma etapa que gasta o que outra etapa entrega precisa de execução delegada, que não está disponível aqui. Nada foi proposto.',
+  DEPENDENT_AMOUNT_SOURCE_NOT_IMPLEMENTED: 'Uma etapa que gasta o que outra etapa entrega não conseguiu resolver o montante recebido da etapa anterior. Nada foi proposto.',
   CHANNEL_INTENDED_WALLETS_DIFFER: 'Estas etapas indicam carteiras diferentes; um fluxo é aprovado por um único dono. Nada foi proposto.',
 };
 const APPROVAL_PT: Readonly<Record<string, (expires: string) => string>> = {

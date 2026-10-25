@@ -176,14 +176,15 @@ export default async function AdminOverviewPage({ searchParams }: { searchParams
         <header><h2 id="admin-fees">Platform fee observability</h2><p>Intended model: 0.1% per completed workflow</p></header>
         <div className="admin-table-wrap"><table className="admin-table"><tbody>
           <tr><th scope="row">Completed workflows eligible under the intended model</th><td className="num">{fmt(a.fees.eligibleCompleted)} <span className="admin-badge">{env}</span></td></tr>
-          <tr><th scope="row">Fees charged</th><td><span className="admin-badge" data-tone="warn">Not implemented</span></td></tr>
-          <tr><th scope="row">Fees reconciled / collected</th><td><span className="admin-badge" data-tone="warn">Not implemented</span></td></tr>
-          <tr><th scope="row">Revenue by network and period</th><td><span className="admin-badge">Unavailable</span></td></tr>
+          <tr><th scope="row">Fee model</th><td>0.1% per completed workflow (obligation recorded; collection not settled)</td></tr>
+          <tr><th scope="row">Fees charged on-chain</th><td><span className="admin-badge" data-tone="warn">Not settled — owner decision required</span></td></tr>
+          <tr><th scope="row">Fees reconciled / collected</th><td><span className="admin-badge" data-tone="warn">Obligation only</span></td></tr>
+          <tr><th scope="row">Revenue by network and period</th><td><span className="admin-badge">Unavailable until collection settles</span></td></tr>
         </tbody></table></div>
         {a.fees.byNetwork.length ? <p className="admin-diff" style={{ marginTop: 8 }}>Eligible by first-action network: {a.fees.byNetwork.map((n, i) =>
           <span key={n.network.chain}>{i ? ' · ' : ''}{n.network.name} {fmt(n.completed)}</span>)}</p> : null}
-        <p className="admin-diff">No FloFi fee is charged or recorded on the current main branch (Jupiter execution refuses any platform fee; LI.FI fee lines in a Review
-          are LI.FI&rsquo;s own). Eligibility is a count, not revenue: no amount is estimated. Notional value would need priced, reconciled amounts that analytics do not read.</p>
+        <p className="admin-diff">Completed workflows are eligible for the approved 0.1% obligation (universal bridge runs record it on reconciliation and waive FAILED/REFUNDED).
+          On-chain collection is not settled: Relay is still called without appFees; Jupiter refuses a platform fee. Owner settlement options are listed in the universal-bridge build report.</p>
       </section>
     </div>
 

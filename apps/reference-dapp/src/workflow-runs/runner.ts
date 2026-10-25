@@ -19,12 +19,13 @@
 import type { NetworkId, StrategySpec } from '../engine/strategy-spec';
 import { composeWorkflowBound, type WorkflowComposition } from '../engine/strategy-engine';
 import { NETWORK_CHAINS } from '../engine/capability-catalog';
-import { boundStrategy } from '../engine/workflow-bindings';
+import { boundAmount, boundStrategy } from '../engine/workflow-bindings';
+import { assetKey } from '../delegation/steps.ts';
 import type { DelegationStore, ExecutionRecord, StepRecord as DelegatedStepRecord } from '../delegation/pg-store.ts';
 import { evaluateGates, handoffFindings, type HandoffPolicy } from '../mcp/execution.ts';
 import type { McpRuntime as EngineRuntime } from '../mcp/runtime.ts';
 import { observeOwnerStep } from './observe.ts';
-import type { RunRecord, RunStepRecord, StepOutcome, WorkflowRunStore } from './pg-store.ts';
+import type { BoundResolution, RunRecord, RunStepRecord, StepOutcome, WorkflowRunStore } from './pg-store.ts';
 import { ADVANCE_RETRY_MS, TERMINAL_RUN, type RunState } from './state-machine.ts';
 
 export type RunnerDeps = {
@@ -91,21 +92,34 @@ async function confirmPass(deps: RunnerDeps, run: RunRecord): Promise<Pass> {
       if (!composed.ok) return stopBefore(deps, run, steps, k, 'WORKFLOW_RUN_STALE');
       if (k > 0 && steps[k - 1]!.state !== 'RECONCILED') return stopBefore(deps, run, steps, k, 'WORKFLOW_RUN_ORDER_INVALID');
       if (run.expiresAt <= now) return stopBefore(deps, run, steps, k, 'WORKFLOW_RUN_EXPIRED');
-      // Confirm mode never resolves a bound amount (owner-signed flows do not report a canonical received amount yet).
-      if (composed.bindings.some(b => b.step === k)) return stopBefore(deps, run, steps, k, 'DEPENDENT_AMOUNT_SOURCE_NOT_IMPLEMENTED');
+      // BUILD-CROSSCHAIN-UNIVERSAL-001: confirm mode resolves bound amounts from the producer step's reconciled received facts
+      // (the same min(cap, received) rule delegated runs already apply).
+      const binding = composed.bindings.find(b => b.step === k) ?? null;
+      let strategy = composed.steps[k]!.strategy;
+      let bound: BoundResolution | null = null;
+      if (binding) {
+        const producer = steps[binding.amountFrom]!;
+        if (producer.state !== 'RECONCILED' || !producer.outcome) return stopBefore(deps, run, steps, k, 'WORKFLOW_BINDING_PRODUCER_NOT_RECONCILED');
+        const key = assetKey({ chain: binding.asset.chainId, address: binding.asset.address });
+        const received = producer.outcome.received.filter(r => r.asset === key).reduce((sum, r) => sum + BigInt(r.amount), 0n);
+        const used = boundAmount(binding.cap, received);
+        if (used <= 0n) return stopBefore(deps, run, steps, k, 'WORKFLOW_BINDING_NOTHING_RECEIVED');
+        strategy = boundStrategy(composed.steps[k]!.strategy, used, binding.asset.decimals);
+        bound = { amountFrom: binding.amountFrom, asset: binding.asset, cap: binding.cap, received: received.toString(), used: used.toString() };
+      }
       const policy = deps.policyFor(run);
       if (!policy) return settled(run);
-      const single = composed.steps[k]!;
-      // The step alone, re-composed now, must reproduce its own hash inside the run's workflow and pass its own gates and review today.
-      const alone = composeWorkflowBound(single.strategy, single.workflowHash);
+      // The step alone, re-composed now (with the resolved amount when bound), must pass its own gates and review today.
+      const alone = composeWorkflowBound(strategy, undefined);
       if (!alone.ok || alone.steps.length !== 1) return stopBefore(deps, run, steps, k, 'WORKFLOW_STEP_STALE');
       const gates = await evaluateGates(alone.steps[0]!, deps.runtime, policy);
       if (!gates.handoff.allowed) return stopBefore(deps, run, steps, k, gates.handoff.reason ?? 'WORKFLOW_STEP_NOT_EXECUTABLE');
       if (handoffFindings(alone.steps[0]!).blockers.length) return stopBefore(deps, run, steps, k, 'REVIEW_BLOCKED');
-      const namespace = namespaceOf(networkOf(single.strategy));
+      const namespace = namespaceOf(networkOf(strategy));
       if (!run.wallets[namespace]) return stopBefore(deps, run, steps, k, namespace === 'solana' ? 'SOLANA_WALLET_PROOF_REQUIRED' : 'EVM_WALLET_PROOF_REQUIRED');
-      const ready = await deps.store.stepTransition(run.runId, k, ['PENDING'], 'READY', { flow: gates.plan.flow!, strategy: single.strategy, workflowHash: single.workflowHash });
-      deps.log('workflow_run.step_ready', { run: run.runId, step: k });
+      const ready = await deps.store.stepTransition(run.runId, k, ['PENDING'], 'READY', {
+        flow: gates.plan.flow!, strategy, workflowHash: alone.workflowHash, ...(bound ? { bound } : {}) });
+      deps.log('workflow_run.step_ready', { run: run.runId, step: k, ...(bound ? { boundUsed: bound.used } : {}) });
       return { ...settled(run), progressed: ready !== null };
     }
     case 'READY':

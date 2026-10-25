@@ -67,10 +67,12 @@ describe('BUILD-CHAT-E2E-001 authorization plan', () => {
       .toEqual({ ok: false, code: 'MAINNET_DELEGATION_DISABLED' });
   });
 
-  it('a bound workflow needs a delegated run: confirm mode reports DEPENDENT_AMOUNT_SOURCE_NOT_IMPLEMENTED', async () => {
+  it('a bound workflow resolves received amounts in confirm mode and in delegated mode', async () => {
     const bound = { version: 2, steps: [BASE_SEPOLIA_SWAP, { ...BASE_SEPOLIA_SWAP, inputAsset: 'WETH', outputAsset: 'USDC', amount: '1' }], bindings: [{ step: 1, amountFrom: 0 }] };
-    expect(await planOf(bound, true, MOCKED)).toMatchObject({ confirmEachStep: { available: false, reason: 'DEPENDENT_AMOUNT_SOURCE_NOT_IMPLEMENTED' },
-      delegatedSingleAuthorization: { available: true }, bindings: [{ step: 1, amountFrom: 0, confirmEachStep: 'DEPENDENT_AMOUNT_SOURCE_NOT_IMPLEMENTED' }] });
-    expect(await planOf(bound, true, null)).toMatchObject({ confirmEachStep: { available: false }, delegatedSingleAuthorization: { available: false }, recommended: null });
+    expect(await planOf(bound, true, MOCKED)).toMatchObject({ confirmEachStep: { available: true, reason: null },
+      delegatedSingleAuthorization: { available: true }, bindings: [{ step: 1, amountFrom: 0, confirmEachStep: 'RECONCILED_RECEIVED_AMOUNT',
+        delegated: 'RECONCILED_RECEIVED_AMOUNT' }] });
+    expect(await planOf(bound, true, null)).toMatchObject({ confirmEachStep: { available: true }, delegatedSingleAuthorization: { available: false },
+      recommended: 'CONFIRM_EACH_STEP' });
   });
 });

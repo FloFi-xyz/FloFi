@@ -99,7 +99,7 @@ const EN = {
   universalDestinationWalletNote: (ecosystem: string) => `Recipient: the ${ecosystem} wallet you connect in the Flofi app, bound at Review.`,
   universalRecipientFormat: (network: string, ecosystem: string) => `A recipient on ${network} must be a ${ecosystem} address. Paste the full wallet address.`,
   universalRecipientWhich: 'Your message has more than one wallet address. Which one should receive the funds?',
-  universalFundsNote: (route: string) => `${route} uses real funds. Flofi charges no fee on this bridge; provider fees are shown at Review.`,
+  universalFundsNote: (route: string) => `${route} uses real funds. Flofi records a 0.1% fee obligation per completed workflow (collection not settled on-chain yet); provider fees are shown at Review.`,
   withdrawToWallet: 'An Aave withdrawal always pays your connected wallet; Flofi cannot send it to another address.',
   beneficiaryNote: (wallet: string) => `Beneficiary: your connected wallet ${wallet}.`,
   whichPool: 'Which pool do you mean?',

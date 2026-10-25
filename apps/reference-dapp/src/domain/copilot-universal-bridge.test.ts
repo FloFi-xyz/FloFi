@@ -42,7 +42,7 @@ describe('BUILD-CROSSCHAIN-UNIVERSAL-001 Copilot and channel parity', () => {
     const s = new CopilotSession();
     const reply = s.say('Can you move 25 USDC from Solana over to Base?', intent.action(act.bridge({ sourceNetwork: 'SOLANA', destinationNetwork: 'BASE', asset: 'USDC', amount: '25' })))!;
     expect(reply).toMatchObject({ kind: 'PROPOSAL', sentence: 'bridge 25 USDC from Solana to Base receive USDC via best slippage 50 bps', command: { type: 'ADD_UNIVERSAL_BRIDGE' } });
-    expect(reply.notes.join(' ')).toMatch(/You receive USDC on Base.*the EVM wallet you connect in the Flofi app.*Solana → Base uses real funds\. Flofi charges no fee/s);
+    expect(reply.notes.join(' ')).toMatch(/You receive USDC on Base.*the EVM wallet you connect in the Flofi app.*Solana → Base uses real funds\. Flofi records a 0\.1% fee obligation/s);
     const channel = expectParity(s, reply.command!, reply.sentence!, { action: 'bridge', sourceNetwork: 'solana', destinationNetwork: 'base', asset: 'USDC', amount: '25' });
     expect(channel).toMatchObject({ fundsClass: 'REAL_FUNDS', intendedWallet: null });
     // The Canvas Bridge card (Solana → Base, 25) applies the same command, hence the same node.

@@ -63,8 +63,13 @@ export type UniversalReview = {
   readonly source: EvmReviewSource | SolanaReviewSource;
   readonly destination: { readonly chainId: string; readonly position: { readonly kind: 'BLOCK' | 'SLOT'; readonly height: number }; readonly recipientBalance: string };
   readonly deadlines: { readonly reviewExpiresAt: string; readonly quoteExpiresAt: string; readonly orderDeadline: number };
-  /** FloFi charges no fee on this route (no FloFi fee mechanism exists; see the build report). Provider fees are the route's itemized lines. */
-  readonly feePolicy: { readonly flofiFee: 'NONE'; readonly networkFeeUpperBound: string; readonly networkFeeSymbol: 'ETH' | 'SOL'; readonly networkFeeDecimals: number };
+  /**
+   * FloFi's approved 0.1% fee per completed workflow (disclosure at Review). Collection is recorded as an obligation only —
+   * on-chain settlement requires an owner decision (see fee-obligation.ts and the build report). Provider fees are the route's itemized lines.
+   */
+  readonly feePolicy: { readonly flofiFee: 'WORKFLOW_0_1_PCT'; readonly flofiFeeRateBps: 10; readonly flofiFeeBasis: 'COMPLETED_WORKFLOW_INPUT';
+    readonly flofiFeeCollection: 'OBLIGATION_RECORDED'; readonly networkFeeUpperBound: string; readonly networkFeeSymbol: 'ETH' | 'SOL';
+    readonly networkFeeDecimals: number };
   /** Owner signatures this route needs on the source chain, and whether anything is needed on the destination chain. */
   readonly authorizations: { readonly sourceSignatures: number; readonly destinationAuthorization: 'NONE' };
   readonly artifacts: UniversalArtifacts;
@@ -76,9 +81,15 @@ export type DestinationDelivery = { readonly chainId: string; readonly transacti
   readonly blockHash: string | null; readonly timestamp: number | null; readonly recipient: string; readonly token: string; readonly amount: string;
   readonly orderBound: boolean; readonly discoveredBy: 'PROVIDER_HINT'; readonly contentHash: string; readonly final: boolean };
 export type RefundRecord = { readonly chainId: string; readonly transactionHash: string; readonly recipient: string; readonly token: string; readonly amount: string };
+export type UniversalFeeObligation = {
+  readonly rateBps: 10; readonly basis: 'COMPLETED_WORKFLOW_INPUT';
+  readonly notional: { readonly chainId: string; readonly token: string; readonly symbol: string; readonly decimals: number; readonly amount: string };
+  readonly feeAmount: string; readonly status: 'OBLIGATED' | 'WAIVED'; readonly collection: 'NOT_SETTLED'; readonly reason: string | null;
+};
 export type UniversalEvidence = { readonly bundle: EvidenceBundle; readonly bundleHash: string; readonly evidenceClass: 'MAINNET_EXECUTED' | 'MOCKED';
   readonly route: { readonly provider: UniversalRoutingProvider; readonly protocol: string; readonly routeCommitment: string; readonly orderId: string; readonly manifestHash: string };
   readonly source: SourceSettlement; readonly destination: DestinationDelivery; readonly recipient: string; readonly minimumOutput: string; readonly received: string;
+  readonly feeObligation: UniversalFeeObligation;
   readonly transactions: readonly { readonly chain: string; readonly step: string; readonly transactionHash: string; readonly explorer: string }[];
   readonly reconciliation: 'RECONCILED'; readonly observedAt: string };
 export type UniversalVerdict = 'PENDING' | 'RECONCILED' | 'DIVERGENT' | 'FAILED' | 'REFUNDED';
@@ -87,7 +98,8 @@ export type UniversalRecord = { readonly format: 'flofi.universal-bridge-run.v1'
   readonly attempts: readonly UniversalAttempt[]; readonly source: SourceSettlement | null; readonly destination: DestinationDelivery | null; readonly refund: RefundRecord | null;
   readonly lastHint: ProviderStatusHint | null; readonly routeChanges: readonly RouteChange[]; readonly requote: boolean; readonly evidence: UniversalEvidence | null;
   readonly verdict: UniversalVerdict; readonly error: string | null;
-  /** The delivered amount proven on the destination chain (what a later bound step may spend). */ readonly received: string | null };
+  /** The delivered amount proven on the destination chain (what a later bound step may spend). */ readonly received: string | null;
+  /** Durable FloFi 0.1% obligation (or waiver) once the run reaches a terminal verdict; null while PENDING. */ readonly feeObligation: UniversalFeeObligation | null };
 export type UniversalWalletDiagnostic = { invoked: boolean; calls: { method: string; submission?: boolean; result?: string | null; error?: unknown }[]; code: string; rejectionCode?: number };
 export type UniversalBegin = { readonly record: UniversalRecord; readonly attempt: UniversalAttempt } &
   ({ readonly ecosystem: 'EVM'; readonly transaction: EvmTx } | { readonly ecosystem: 'SOLANA'; readonly unsignedTransaction: string; readonly walletChain: 'solana:mainnet' });

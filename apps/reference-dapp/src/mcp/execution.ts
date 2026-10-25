@@ -52,7 +52,8 @@ export const FLOWS_WITH_EXECUTION_SWITCH: readonly FlowName[] = Object.freeze(['
  * and reviews before anything can be signed (the linter BLOCKs execution until then; the capability registry needs the runtime
  * facts the flow measures at Simulate). A handoff exists precisely so the owner can do that; any OTHER blocker refuses it.
  */
-export const OWNER_PRE_EXECUTION_FINDINGS: ReadonlySet<string> = new Set(['LINTER:ROUTER_ROUTE_REQUIRED', 'LINTER:SOLANA_SWAP_QUOTE_REQUIRED',
+export const OWNER_PRE_EXECUTION_FINDINGS: ReadonlySet<string> = new Set(['LINTER:ROUTER_ROUTE_REQUIRED', 'LINTER:BRIDGE_QUOTE_REQUIRED',
+  'LINTER:SOLANA_SWAP_QUOTE_REQUIRED',
   'LINTER:SUPPLY_SIMULATION_REQUIRED', 'LINTER:UNISWAP_LIQUIDITY_SIMULATION_REQUIRED', 'LINTER:SOLANA_LIQUIDITY_SIMULATION_REQUIRED',
   'LINTER:UNQUOTED_EXECUTION_UNAVAILABLE', 'CAPABILITY:RUNTIME_UNAVAILABLE']);
 /** The review's BLOCK findings split into the owner's pre-execution steps and genuine blockers. */
@@ -116,16 +117,15 @@ export function executionPlan(composition: Composition): ExecutionPlan {
  * The plan of a step-list workflow. One step is that step's plan. BUILD-CHAT-E2E-001: several steps are `SEQUENTIAL` when every step has
  * an owner-execution flow. The workflow run (`src/workflow-runs`) then executes them in order, each through its own flow, with its own
  * fresh simulation, Review and wallet signature, and each only after the previous step reconciled. A step without a flow makes the
- * sequence NOT_EXECUTABLE with that step's own reason. A bound amount (`bindings`) needs the producer step's reconciled received amount,
- * which owner-signed flows do not report in a canonical form yet (DEPENDENT_AMOUNT_SOURCE_NOT_IMPLEMENTED). A delegated run reads it from
- * the executor's reconciliation (see the authorization plan).
+ * sequence NOT_EXECUTABLE with that step's own reason. BUILD-CROSSCHAIN-UNIVERSAL-001: bound amounts (`bindings`) resolve from the
+ * producer step's reconciled received amount in both confirm-each-step and delegated modes (min(cap, received)).
  */
 export function workflowPlan(workflow: WorkflowComposition): ExecutionPlan {
   if (workflow.steps.length === 1) return executionPlan(workflow.steps[0]!);
   const plans = workflow.steps.map(executionPlan), networks = [...new Set(plans.flatMap(p => p.networks))];
   const steps = plans.map((p, index) => ({ ...p.steps[0]!, index, action: workflow.steps[index]!.strategy.action, nodeIds: p.steps.flatMap(s => s.nodeIds), flow: p.flow }));
   const missing = plans.find(p => !p.flow);
-  const reason = missing ? missing.reason ?? 'OWNER_EXECUTION_NOT_IMPLEMENTED' : workflow.bindings.length ? 'DEPENDENT_AMOUNT_SOURCE_NOT_IMPLEMENTED' : null;
+  const reason = missing ? missing.reason ?? 'OWNER_EXECUTION_NOT_IMPLEMENTED' : null;
   return { kind: reason ? 'NOT_EXECUTABLE' : 'SEQUENTIAL', flow: null, reason, steps, networks, networkEnvironment: environmentOf(networks), fundsClass: workflow.fundsClass };
 }
 
@@ -202,7 +202,7 @@ export async function evaluateWorkflowGates(workflow: WorkflowComposition, runti
   const confirmDeployment = each.find(g => !g.enabledByDeployment.enabled)?.enabledByDeployment.reason ?? null;
   const delegated = delegableByCode(workflow, facts.delegation);
   const modes: SequenceModes = { confirmEachStep: confirmCode ?? confirmDeployment, delegated: delegated.code };
-  // A sequence only a delegated run can execute (e.g. a bound amount) is still SEQUENTIAL: the workflow run executes it in that mode.
+  // A sequence only a delegated run can execute (confirm blocked for another reason) is still SEQUENTIAL when delegated can run it.
   const plan: ExecutionPlan = owned.kind === 'NOT_EXECUTABLE' && confirmCode !== null && delegated.ok ? { ...owned, kind: 'SEQUENTIAL', reason: null } : owned;
   const codeReason = confirmCode === null || delegated.ok ? null : confirmCode;
   const deploymentReason = !facts.enabled ? 'WORKFLOW_RUNS_NOT_ENABLED' : modes.confirmEachStep !== null && !delegated.ok ? confirmDeployment : null;

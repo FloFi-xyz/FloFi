@@ -131,7 +131,7 @@ export function UniversalBridgeForm({ nodeId, onDone }: { nodeId?: string; onDon
       {(Object.keys(UNIVERSAL_BRIDGE_ROUTING_LABEL) as UniversalBridgeRouting[]).map(k => <option key={k} value={k}>{tr(UNIVERSAL_BRIDGE_ROUTING_LABEL[k])}</option>)}</select></label>
     <label>{tr('Slippage (bps)')}<input aria-label={tr('Universal bridge slippage (bps)')} inputMode="numeric" autoComplete="off" maxLength={3} value={input.slippage}
       onChange={e => set({ slippage: e.target.value })}/></label>
-    <small>{tr('The guaranteed minimum you receive is fixed in the reviewed provider order. Provider fees are listed at Review; FloFi charges no fee on this bridge.')}</small>
+    <small>{tr('The guaranteed minimum you receive is fixed in the reviewed provider order. Provider fees are listed at Review. FloFi records a 0.1% fee obligation on each completed workflow; collection is not settled on-chain yet.')}</small>
     {error && <p role="alert">{tr(MESSAGES[error] ?? error)}</p>}
     <button type="submit">{tr(nodeId ? 'Review bridge change' : 'Review bridge proposal')}</button>
     {onDone && <button type="button" className="quiet" onClick={onDone}>{tr('Cancel')}</button>}
@@ -189,7 +189,7 @@ export function UniversalBridgePanel({ view }: { view: 'simulate' | 'execute' })
   return <section className="panel" aria-label={tr('Universal cross-chain bridge')}>
     <h2>{tr(view === 'simulate' ? 'Simulate universal bridge' : 'Review universal bridge')}</h2>
     {d && <p>{tr('Bridge')} {d.amount} {d.inputSymbol} {tr('from')} {d.sourceLabel} {tr('to')} {d.destinationLabel}{tr(', receiving')} {d.outputSymbol}.</p>}
-    <p role="note">{tr('Real funds. FloFi never signs: your source wallet signs every transaction after your Review. FloFi charges no fee on this bridge; provider fees are shown below.')}</p>
+    <p role="note">{tr('Real funds. FloFi never signs: your source wallet signs every transaction after your Review. FloFi records a 0.1% fee obligation when the workflow completes; provider fees are shown below.')}</p>
     {!router.available && <p role="status">{tr(MESSAGES.UNIVERSAL_ROUTER_NOT_ENABLED!)}</p>}
     {router.retired && <p role="alert">{tr('The workflow changed. Prior authorization is invalid. Simulate the current bridge again.')}</p>}
     {router.recovered && record && <p role="status">{tr('Recovered run')} {record.id}{tr('. Its state comes from the server; nothing is resent automatically.')}</p>}
@@ -212,7 +212,7 @@ export function UniversalBridgePanel({ view }: { view: 'simulate' | 'execute' })
       <dt>{tr('Expected to receive')}</dt><dd>{outp(route.expectedOutput)} {tr('on')} {net(route.destinationChain)}</dd>
       <dt>{tr('Guaranteed minimum')}</dt><dd>{outp(route.minimumOutput)} {tr('— fixed in the provider order; a smaller delivery is a mismatch')}</dd>
       <dt>{tr('Provider fees')}</dt><dd>{route.fees.length ? route.fees.map((f, i) => <span key={i}>{f.label}: {amountOf(f.amount, f.decimals, f.symbol)}{tr(f.included ? ' (included in the quote)' : ' (paid separately)')}. </span>) : tr('none listed')}</dd>
-      <dt>{tr('FloFi fee')}</dt><dd>{tr('None on this bridge.')}</dd>
+      <dt>{tr('FloFi fee')}</dt><dd>{tr('0.1% of the completed workflow input — obligation recorded at reconciliation; not collected on-chain yet.')}</dd>
       <dt>{tr('Network fees')}</dt><dd>{tr('at most')} {nativeFee} {tr('on')} {net(route.sourceChain)}</dd>
       <dt>{tr('Estimated duration')}</dt><dd>{tr('about')} {route.quote.estimatedDurationSeconds}s {tr('after the deposit confirms (provider estimate)')}</dd>
       <dt>{tr('Signatures')}</dt><dd>{r.authorizations.sourceSignatures} {tr(r.authorizations.sourceSignatures === 1 ? 'wallet signature on the source network' : 'wallet signatures on the source network (an exact approval, then the deposit)')}{tr('; nothing to sign on the destination network.')}</dd>

@@ -76,10 +76,10 @@ its own quote, orderId, Review and wallet signature. Duplicate clicks/retries hi
 
 ## 4. Fee audit (0.1% per complete workflow)
 
-`main` has no FloFi fee mechanism, chargeable basis or ledger. This build does **not** invent one: Relay is called without `appFees` and any
-order fee is refused; Mayan referrer fee is not set; LI.FI's own 0.25% fee is a third-party fee, itemized and labelled as LI.FI's. Every
-provider fee line is shown; the net minimum received is the order's guaranteed minimum. The run records exactly one terminal outcome per
-workflow (`RECONCILED`, `REFUNDED`, `FAILED`, `DIVERGENT`) for a future fee ledger. Owner decisions remain open (see report).
+Approved model: **0.1% of completed workflow input**, one obligation per terminal success; waived on FAILED/REFUNDED/DIVERGENT; provider/network
+fees separate. This build **discloses** the fee, **records** a durable `feeObligation` on RECONCILED (`collection: NOT_SETTLED`), and still
+calls Relay without `appFees` (Mayan referrer unset; LI.FI’s fee itemized as LI.FI’s). On-chain **collection** is an owner settlement decision
+(see report) — not invented here.
 
 ## 5. Scope boundaries stated honestly
 

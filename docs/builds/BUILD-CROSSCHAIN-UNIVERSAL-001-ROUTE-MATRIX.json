@@ -1,0 +1,4670 @@
+{
+  "format": "flofi.universal-route-matrix.v1",
+  "build": "BUILD-CROSSCHAIN-UNIVERSAL-001",
+  "commit": "fc4dae0b293e4711f41c725dac15ce92ea213874",
+  "generatedAt": "2026-10-25T15:31:45.355Z",
+  "method": "Read-only public provider quotes through FloFi discovery (public quote subjects, no keys) and public RPC reads of the Relay contract pins.",
+  "limits": [
+    "A quote is not an execution; no simulation with real funds was run; nothing here is public execution evidence or a certification.",
+    "Provider availability changes by the minute: TEMPORARILY_UNAVAILABLE is a moment, not a verdict."
+  ],
+  "pins": {
+    "evm": {
+      "eip155:8453": {
+        "block": 53076442,
+        "depository": "0x4cd00e387622c35bddb9b4c962c136462338bc31",
+        "codeSha256": "e1aba2f59c0b4f5838d6f283db6e09631ef58f558107b7d42000c7f1252d1eda",
+        "pinned": "e1aba2f59c0b4f5838d6f283db6e09631ef58f558107b7d42000c7f1252d1eda",
+        "matches": true,
+        "stablecoin": {
+          "address": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+          "symbol": "USDC",
+          "decimals": 6,
+          "matches": true
+        }
+      },
+      "eip155:42161": {
+        "block": 518179569,
+        "depository": "0x4cd00e387622c35bddb9b4c962c136462338bc31",
+        "codeSha256": "d78b7a01ce1c25dd2bb1d845c10f28acc520fac31ddf81c79eefce888a4a385f",
+        "pinned": "d78b7a01ce1c25dd2bb1d845c10f28acc520fac31ddf81c79eefce888a4a385f",
+        "matches": true,
+        "stablecoin": {
+          "address": "0xaf88d065e77c8cc2239327c5edb3a432268e5831",
+          "symbol": "USDC",
+          "decimals": 6,
+          "matches": true
+        }
+      },
+      "eip155:1": {
+        "block": 26270600,
+        "depository": "0x4cd00e387622c35bddb9b4c962c136462338bc31",
+        "codeSha256": "9c1545d18e0f4e037338d9c0c50b360f9312868a866ace22d5310de968e6ae97",
+        "pinned": "9c1545d18e0f4e037338d9c0c50b360f9312868a866ace22d5310de968e6ae97",
+        "matches": true,
+        "stablecoin": {
+          "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+          "symbol": "USDC",
+          "decimals": 6,
+          "matches": true
+        }
+      },
+      "eip155:4663": {
+        "block": 97691046,
+        "depository": "0x4cd00e387622c35bddb9b4c962c136462338bc31",
+        "codeSha256": "3e9c39244f26b4a09b55792aaa61e37eb698ff83b3268e6c875c950e17a02b1a",
+        "pinned": "3e9c39244f26b4a09b55792aaa61e37eb698ff83b3268e6c875c950e17a02b1a",
+        "matches": true,
+        "stablecoin": {
+          "address": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+          "symbol": "USDG",
+          "decimals": 6,
+          "matches": true
+        }
+      }
+    },
+    "solana": {
+      "slot": 461308808,
+      "program": "99vQwtBwYtrqqD9YSXbdum3KBdxPAVxYTaQ3cfnJSrN2",
+      "executable": true,
+      "programData": "6y7C7Lfh1WRRbKohE2FQmFBD2asw3yMi17kStwEcAWWF",
+      "deploymentSlot": 386211280,
+      "authority": "6Bz8AWWipCDf7XCSqNuRXrEtKZM5M4Y56uP9ZRjSaMWD",
+      "matches": true
+    }
+  },
+  "totals": {
+    "rows": 40,
+    "executable": 40,
+    "liveQuoteOnly": 0,
+    "supportedNoQuote": 0,
+    "temporarilyUnavailable": 0,
+    "noRoute": 0,
+    "errors": 0
+  },
+  "rpcReads": 14,
+  "pairs": [
+    {
+      "source": "solana",
+      "destination": "base",
+      "assets": {
+        "input": "USDC",
+        "output": "USDC"
+      },
+      "amount": "25000000",
+      "discovery": {
+        "status": "EXECUTABLE",
+        "quoteSubjects": "PUBLIC_QUOTE_SUBJECT",
+        "observedAt": "2026-10-25T15:30:36.784Z",
+        "providers": [
+          {
+            "provider": "relay",
+            "bridge": "relay-depository",
+            "status": "EXECUTABLE",
+            "executableBy": "UNIVERSAL_ROUTER",
+            "expectedOutput": "24973108",
+            "minimumOutput": "24848243",
+            "estimatedDurationSeconds": 2,
+            "fees": [
+              {
+                "label": "Relay destination network fee",
+                "amount": "1263",
+                "symbol": "USDC",
+                "decimals": 6,
+                "included": true
+              },
+              {
+                "label": "Solana network fee (estimate)",
+                "amount": "16075",
+                "symbol": "SOL",
+                "decimals": 9,
+                "included": false
+              },
+              {
+                "label": "Relay service fee",
+                "amount": "25629",
+                "symbol": "USDC",
+                "decimals": 6,
+                "included": true
+              }
+            ],
+            "reason": null
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan-swift",
+            "status": "LIVE_QUOTE",
+            "executableBy": null,
+            "expectedOutput": "24962243",
+            "minimumOutput": "24962243",
+            "estimatedDurationSeconds": 3,
+            "fees": [],
+            "reason": "MAYAN_TRANSACTION_BUILDER_NOT_VERIFIED"
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan-fast_mctp",
+            "status": "LIVE_QUOTE",
+            "executableBy": null,
+            "expectedOutput": "24984753",
+            "minimumOutput": "24849661",
+            "estimatedDurationSeconds": 35,
+            "fees": [],
+            "reason": "MAYAN_TRANSACTION_BUILDER_NOT_VERIFIED"
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan-mctp",
+            "status": "LIVE_QUOTE",
+            "executableBy": null,
+            "expectedOutput": "23993613",
+            "minimumOutput": "23878474",
+            "estimatedDurationSeconds": 60,
+            "fees": [],
+            "reason": "MAYAN_TRANSACTION_BUILDER_NOT_VERIFIED"
+          },
+          {
+            "provider": "lifi",
+            "bridge": "lifi",
+            "status": "TEMPORARILY_UNAVAILABLE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "UNIVERSAL_PROVIDER_RATE_LIMITED"
+          },
+          {
+            "provider": "across",
+            "bridge": "across",
+            "status": "NO_ROUTE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "ACROSS_NETWORK_UNSUPPORTED"
+          }
+        ]
+      },
+      "liveQuote": {
+        "provider": "relay",
+        "status": "EXECUTABLE",
+        "expectedOutput": "24973108",
+        "minimumOutput": "24848243",
+        "reason": null
+      },
+      "simulation": {
+        "status": "NOT_RUN",
+        "reason": "OWNER_FUNDS_REQUIRED: FloFi simulates the exact deposit with the connected owner at Simulate (eth_simulateV1 / simulateTransaction)"
+      },
+      "execution": {
+        "status": "EXECUTABLE_BY_CODE",
+        "by": [
+          "UNIVERSAL_ROUTER"
+        ],
+        "gates": [
+          "GRYLOO_UNIVERSAL_ROUTER=live",
+          "GRYLOO_UNIVERSAL_ROUTER_OWNER_EXECUTION=MAINNET_OWNER_APPROVED",
+          "owner Review + wallet signature"
+        ]
+      },
+      "evidence": "PUBLIC_READ_ONLY_QUOTE",
+      "certification": "NOT_CERTIFIED"
+    },
+    {
+      "source": "solana",
+      "destination": "base",
+      "assets": {
+        "input": "SOL",
+        "output": "ETH"
+      },
+      "amount": "150000000",
+      "discovery": {
+        "status": "EXECUTABLE",
+        "quoteSubjects": "PUBLIC_QUOTE_SUBJECT",
+        "observedAt": "2026-10-25T15:30:38.534Z",
+        "providers": [
+          {
+            "provider": "relay",
+            "bridge": "relay-depository",
+            "status": "EXECUTABLE",
+            "executableBy": "UNIVERSAL_ROUTER",
+            "expectedOutput": "6458999999322167",
+            "minimumOutput": "6426704999325556",
+            "estimatedDurationSeconds": 2,
+            "fees": [
+              {
+                "label": "Solana network fee (estimate)",
+                "amount": "16073",
+                "symbol": "SOL",
+                "decimals": 9,
+                "included": false
+              },
+              {
+                "label": "Relay destination network fee",
+                "amount": "3800",
+                "symbol": "SOL",
+                "decimals": 9,
+                "included": true
+              },
+              {
+                "label": "Relay service fee",
+                "amount": "542006",
+                "symbol": "SOL",
+                "decimals": 9,
+                "included": true
+              }
+            ],
+            "reason": null
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan-fast_mctp",
+            "status": "LIVE_QUOTE",
+            "executableBy": null,
+            "expectedOutput": "6495066821050730",
+            "minimumOutput": "6462591486945480",
+            "estimatedDurationSeconds": 35,
+            "fees": [],
+            "reason": "MAYAN_TRANSACTION_BUILDER_NOT_VERIFIED"
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan-swift",
+            "status": "LIVE_QUOTE",
+            "executableBy": null,
+            "expectedOutput": "6484778677588090",
+            "minimumOutput": "6452354784200150",
+            "estimatedDurationSeconds": 3,
+            "fees": [],
+            "reason": "MAYAN_TRANSACTION_BUILDER_NOT_VERIFIED"
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan-mctp",
+            "status": "LIVE_QUOTE",
+            "executableBy": null,
+            "expectedOutput": "5772782620285120",
+            "minimumOutput": "5743918707183690",
+            "estimatedDurationSeconds": 60,
+            "fees": [],
+            "reason": "MAYAN_TRANSACTION_BUILDER_NOT_VERIFIED"
+          },
+          {
+            "provider": "lifi",
+            "bridge": "lifi",
+            "status": "TEMPORARILY_UNAVAILABLE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "UNIVERSAL_PROVIDER_RATE_LIMITED"
+          },
+          {
+            "provider": "across",
+            "bridge": "across",
+            "status": "NO_ROUTE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "ACROSS_NETWORK_UNSUPPORTED"
+          }
+        ]
+      },
+      "liveQuote": {
+        "provider": "relay",
+        "status": "EXECUTABLE",
+        "expectedOutput": "6458999999322167",
+        "minimumOutput": "6426704999325556",
+        "reason": null
+      },
+      "simulation": {
+        "status": "NOT_RUN",
+        "reason": "OWNER_FUNDS_REQUIRED: FloFi simulates the exact deposit with the connected owner at Simulate (eth_simulateV1 / simulateTransaction)"
+      },
+      "execution": {
+        "status": "EXECUTABLE_BY_CODE",
+        "by": [
+          "UNIVERSAL_ROUTER"
+        ],
+        "gates": [
+          "GRYLOO_UNIVERSAL_ROUTER=live",
+          "GRYLOO_UNIVERSAL_ROUTER_OWNER_EXECUTION=MAINNET_OWNER_APPROVED",
+          "owner Review + wallet signature"
+        ]
+      },
+      "evidence": "PUBLIC_READ_ONLY_QUOTE",
+      "certification": "NOT_CERTIFIED"
+    },
+    {
+      "source": "solana",
+      "destination": "arbitrum-one",
+      "assets": {
+        "input": "USDC",
+        "output": "USDC"
+      },
+      "amount": "25000000",
+      "discovery": {
+        "status": "EXECUTABLE",
+        "quoteSubjects": "PUBLIC_QUOTE_SUBJECT",
+        "observedAt": "2026-10-25T15:30:40.219Z",
+        "providers": [
+          {
+            "provider": "relay",
+            "bridge": "relay-depository",
+            "status": "EXECUTABLE",
+            "executableBy": "UNIVERSAL_ROUTER",
+            "expectedOutput": "24970470",
+            "minimumOutput": "24845618",
+            "estimatedDurationSeconds": 1,
+            "fees": [
+              {
+                "label": "Solana network fee (estimate)",
+                "amount": "16056",
+                "symbol": "SOL",
+                "decimals": 9,
+                "included": false
+              },
+              {
+                "label": "Relay service fee",
+                "amount": "25629",
+                "symbol": "USDC",
+                "decimals": 6,
+                "included": true
+              },
+              {
+                "label": "Relay destination network fee",
+                "amount": "3901",
+                "symbol": "USDC",
+                "decimals": 6,
+                "included": true
+              }
+            ],
+            "reason": null
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan-swift",
+            "status": "LIVE_QUOTE",
+            "executableBy": null,
+            "expectedOutput": "24919286",
+            "minimumOutput": "24919286",
+            "estimatedDurationSeconds": 3,
+            "fees": [],
+            "reason": "MAYAN_TRANSACTION_BUILDER_NOT_VERIFIED"
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan-fast_mctp",
+            "status": "LIVE_QUOTE",
+            "executableBy": null,
+            "expectedOutput": "24933790",
+            "minimumOutput": "24799228",
+            "estimatedDurationSeconds": 35,
+            "fees": [],
+            "reason": "MAYAN_TRANSACTION_BUILDER_NOT_VERIFIED"
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan-mctp",
+            "status": "LIVE_QUOTE",
+            "executableBy": null,
+            "expectedOutput": "23916076",
+            "minimumOutput": "23801680",
+            "estimatedDurationSeconds": 60,
+            "fees": [],
+            "reason": "MAYAN_TRANSACTION_BUILDER_NOT_VERIFIED"
+          },
+          {
+            "provider": "lifi",
+            "bridge": "lifi",
+            "status": "TEMPORARILY_UNAVAILABLE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "UNIVERSAL_PROVIDER_RATE_LIMITED"
+          },
+          {
+            "provider": "across",
+            "bridge": "across",
+            "status": "NO_ROUTE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "ACROSS_NETWORK_UNSUPPORTED"
+          }
+        ]
+      },
+      "liveQuote": {
+        "provider": "relay",
+        "status": "EXECUTABLE",
+        "expectedOutput": "24970470",
+        "minimumOutput": "24845618",
+        "reason": null
+      },
+      "simulation": {
+        "status": "NOT_RUN",
+        "reason": "OWNER_FUNDS_REQUIRED: FloFi simulates the exact deposit with the connected owner at Simulate (eth_simulateV1 / simulateTransaction)"
+      },
+      "execution": {
+        "status": "EXECUTABLE_BY_CODE",
+        "by": [
+          "UNIVERSAL_ROUTER"
+        ],
+        "gates": [
+          "GRYLOO_UNIVERSAL_ROUTER=live",
+          "GRYLOO_UNIVERSAL_ROUTER_OWNER_EXECUTION=MAINNET_OWNER_APPROVED",
+          "owner Review + wallet signature"
+        ]
+      },
+      "evidence": "PUBLIC_READ_ONLY_QUOTE",
+      "certification": "NOT_CERTIFIED"
+    },
+    {
+      "source": "solana",
+      "destination": "arbitrum-one",
+      "assets": {
+        "input": "SOL",
+        "output": "ETH"
+      },
+      "amount": "150000000",
+      "discovery": {
+        "status": "EXECUTABLE",
+        "quoteSubjects": "PUBLIC_QUOTE_SUBJECT",
+        "observedAt": "2026-10-25T15:30:41.974Z",
+        "providers": [
+          {
+            "provider": "relay",
+            "bridge": "relay-depository",
+            "status": "EXECUTABLE",
+            "executableBy": "UNIVERSAL_ROUTER",
+            "expectedOutput": "6460813783279605",
+            "minimumOutput": "6428509714363207",
+            "estimatedDurationSeconds": 1,
+            "fees": [
+              {
+                "label": "Relay destination network fee",
+                "amount": "13027",
+                "symbol": "SOL",
+                "decimals": 9,
+                "included": true
+              },
+              {
+                "label": "Solana network fee (estimate)",
+                "amount": "16073",
+                "symbol": "SOL",
+                "decimals": 9,
+                "included": false
+              },
+              {
+                "label": "Relay service fee",
+                "amount": "512052",
+                "symbol": "SOL",
+                "decimals": 9,
+                "included": true
+              }
+            ],
+            "reason": null
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan-swift",
+            "status": "LIVE_QUOTE",
+            "executableBy": null,
+            "expectedOutput": "6468337452414670",
+            "minimumOutput": "6435995765152590",
+            "estimatedDurationSeconds": 3,
+            "fees": [],
+            "reason": "MAYAN_TRANSACTION_BUILDER_NOT_VERIFIED"
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan-fast_mctp",
+            "status": "LIVE_QUOTE",
+            "executableBy": null,
+            "expectedOutput": "6422778434377950",
+            "minimumOutput": "6390664542206060",
+            "estimatedDurationSeconds": 35,
+            "fees": [],
+            "reason": "MAYAN_TRANSACTION_BUILDER_NOT_VERIFIED"
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan-mctp",
+            "status": "LIVE_QUOTE",
+            "executableBy": null,
+            "expectedOutput": "5671548950271530",
+            "minimumOutput": "5643191205520170",
+            "estimatedDurationSeconds": 60,
+            "fees": [],
+            "reason": "MAYAN_TRANSACTION_BUILDER_NOT_VERIFIED"
+          },
+          {
+            "provider": "lifi",
+            "bridge": "lifi",
+            "status": "TEMPORARILY_UNAVAILABLE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "UNIVERSAL_PROVIDER_RATE_LIMITED"
+          },
+          {
+            "provider": "across",
+            "bridge": "across",
+            "status": "NO_ROUTE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "ACROSS_NETWORK_UNSUPPORTED"
+          }
+        ]
+      },
+      "liveQuote": {
+        "provider": "relay",
+        "status": "EXECUTABLE",
+        "expectedOutput": "6460813783279605",
+        "minimumOutput": "6428509714363207",
+        "reason": null
+      },
+      "simulation": {
+        "status": "NOT_RUN",
+        "reason": "OWNER_FUNDS_REQUIRED: FloFi simulates the exact deposit with the connected owner at Simulate (eth_simulateV1 / simulateTransaction)"
+      },
+      "execution": {
+        "status": "EXECUTABLE_BY_CODE",
+        "by": [
+          "UNIVERSAL_ROUTER"
+        ],
+        "gates": [
+          "GRYLOO_UNIVERSAL_ROUTER=live",
+          "GRYLOO_UNIVERSAL_ROUTER_OWNER_EXECUTION=MAINNET_OWNER_APPROVED",
+          "owner Review + wallet signature"
+        ]
+      },
+      "evidence": "PUBLIC_READ_ONLY_QUOTE",
+      "certification": "NOT_CERTIFIED"
+    },
+    {
+      "source": "solana",
+      "destination": "ethereum",
+      "assets": {
+        "input": "USDC",
+        "output": "USDC"
+      },
+      "amount": "25000000",
+      "discovery": {
+        "status": "EXECUTABLE",
+        "quoteSubjects": "PUBLIC_QUOTE_SUBJECT",
+        "observedAt": "2026-10-25T15:30:43.459Z",
+        "providers": [
+          {
+            "provider": "relay",
+            "bridge": "relay-depository",
+            "status": "EXECUTABLE",
+            "executableBy": "UNIVERSAL_ROUTER",
+            "expectedOutput": "24962105",
+            "minimumOutput": "24837295",
+            "estimatedDurationSeconds": 5,
+            "fees": [
+              {
+                "label": "Relay destination network fee",
+                "amount": "15892",
+                "symbol": "USDC",
+                "decimals": 6,
+                "included": true
+              },
+              {
+                "label": "Solana network fee (estimate)",
+                "amount": "16001",
+                "symbol": "SOL",
+                "decimals": 9,
+                "included": false
+              },
+              {
+                "label": "Relay service fee",
+                "amount": "22003",
+                "symbol": "USDC",
+                "decimals": 6,
+                "included": true
+              }
+            ],
+            "reason": null
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan-swift",
+            "status": "LIVE_QUOTE",
+            "executableBy": null,
+            "expectedOutput": "24517463",
+            "minimumOutput": "24517463",
+            "estimatedDurationSeconds": 3,
+            "fees": [],
+            "reason": "MAYAN_TRANSACTION_BUILDER_NOT_VERIFIED"
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan-fast_mctp",
+            "status": "LIVE_QUOTE",
+            "executableBy": null,
+            "expectedOutput": "23593170",
+            "minimumOutput": "23472168",
+            "estimatedDurationSeconds": 35,
+            "fees": [],
+            "reason": "MAYAN_TRANSACTION_BUILDER_NOT_VERIFIED"
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan-mctp",
+            "status": "LIVE_QUOTE",
+            "executableBy": null,
+            "expectedOutput": "22613353",
+            "minimumOutput": "22511080",
+            "estimatedDurationSeconds": 60,
+            "fees": [],
+            "reason": "MAYAN_TRANSACTION_BUILDER_NOT_VERIFIED"
+          },
+          {
+            "provider": "lifi",
+            "bridge": "lifi",
+            "status": "TEMPORARILY_UNAVAILABLE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "UNIVERSAL_PROVIDER_RATE_LIMITED"
+          },
+          {
+            "provider": "across",
+            "bridge": "across",
+            "status": "NO_ROUTE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "ACROSS_NETWORK_UNSUPPORTED"
+          }
+        ]
+      },
+      "liveQuote": {
+        "provider": "relay",
+        "status": "EXECUTABLE",
+        "expectedOutput": "24962105",
+        "minimumOutput": "24837295",
+        "reason": null
+      },
+      "simulation": {
+        "status": "NOT_RUN",
+        "reason": "OWNER_FUNDS_REQUIRED: FloFi simulates the exact deposit with the connected owner at Simulate (eth_simulateV1 / simulateTransaction)"
+      },
+      "execution": {
+        "status": "EXECUTABLE_BY_CODE",
+        "by": [
+          "UNIVERSAL_ROUTER"
+        ],
+        "gates": [
+          "GRYLOO_UNIVERSAL_ROUTER=live",
+          "GRYLOO_UNIVERSAL_ROUTER_OWNER_EXECUTION=MAINNET_OWNER_APPROVED",
+          "owner Review + wallet signature"
+        ]
+      },
+      "evidence": "PUBLIC_READ_ONLY_QUOTE",
+      "certification": "NOT_CERTIFIED"
+    },
+    {
+      "source": "solana",
+      "destination": "ethereum",
+      "assets": {
+        "input": "SOL",
+        "output": "ETH"
+      },
+      "amount": "150000000",
+      "discovery": {
+        "status": "EXECUTABLE",
+        "quoteSubjects": "PUBLIC_QUOTE_SUBJECT",
+        "observedAt": "2026-10-25T15:30:45.172Z",
+        "providers": [
+          {
+            "provider": "relay",
+            "bridge": "relay-depository",
+            "status": "EXECUTABLE",
+            "executableBy": "UNIVERSAL_ROUTER",
+            "expectedOutput": "6459312103167658",
+            "minimumOutput": "6427015542651820",
+            "estimatedDurationSeconds": 5,
+            "fees": [
+              {
+                "label": "Solana network fee (estimate)",
+                "amount": "16073",
+                "symbol": "SOL",
+                "decimals": 9,
+                "included": false
+              },
+              {
+                "label": "Relay destination network fee",
+                "amount": "47505",
+                "symbol": "SOL",
+                "decimals": 9,
+                "included": true
+              },
+              {
+                "label": "Relay service fee",
+                "amount": "512105",
+                "symbol": "SOL",
+                "decimals": 9,
+                "included": true
+              }
+            ],
+            "reason": null
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan-swift",
+            "status": "LIVE_QUOTE",
+            "executableBy": null,
+            "expectedOutput": "6319466179276400",
+            "minimumOutput": "6287868848380010",
+            "estimatedDurationSeconds": 3,
+            "fees": [],
+            "reason": "MAYAN_TRANSACTION_BUILDER_NOT_VERIFIED"
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan-fast_mctp",
+            "status": "LIVE_QUOTE",
+            "executableBy": null,
+            "expectedOutput": "4547033914769020",
+            "minimumOutput": "4524298745195170",
+            "estimatedDurationSeconds": 35,
+            "fees": [],
+            "reason": "MAYAN_TRANSACTION_BUILDER_NOT_VERIFIED"
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan-mctp",
+            "status": "LIVE_QUOTE",
+            "executableBy": null,
+            "expectedOutput": "3044562003967670",
+            "minimumOutput": "3029339193947830",
+            "estimatedDurationSeconds": 60,
+            "fees": [],
+            "reason": "MAYAN_TRANSACTION_BUILDER_NOT_VERIFIED"
+          },
+          {
+            "provider": "lifi",
+            "bridge": "lifi",
+            "status": "TEMPORARILY_UNAVAILABLE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "UNIVERSAL_PROVIDER_RATE_LIMITED"
+          },
+          {
+            "provider": "across",
+            "bridge": "across",
+            "status": "NO_ROUTE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "ACROSS_NETWORK_UNSUPPORTED"
+          }
+        ]
+      },
+      "liveQuote": {
+        "provider": "relay",
+        "status": "EXECUTABLE",
+        "expectedOutput": "6459312103167658",
+        "minimumOutput": "6427015542651820",
+        "reason": null
+      },
+      "simulation": {
+        "status": "NOT_RUN",
+        "reason": "OWNER_FUNDS_REQUIRED: FloFi simulates the exact deposit with the connected owner at Simulate (eth_simulateV1 / simulateTransaction)"
+      },
+      "execution": {
+        "status": "EXECUTABLE_BY_CODE",
+        "by": [
+          "UNIVERSAL_ROUTER"
+        ],
+        "gates": [
+          "GRYLOO_UNIVERSAL_ROUTER=live",
+          "GRYLOO_UNIVERSAL_ROUTER_OWNER_EXECUTION=MAINNET_OWNER_APPROVED",
+          "owner Review + wallet signature"
+        ]
+      },
+      "evidence": "PUBLIC_READ_ONLY_QUOTE",
+      "certification": "NOT_CERTIFIED"
+    },
+    {
+      "source": "solana",
+      "destination": "robinhood",
+      "assets": {
+        "input": "USDC",
+        "output": "USDG"
+      },
+      "amount": "25000000",
+      "discovery": {
+        "status": "EXECUTABLE",
+        "quoteSubjects": "PUBLIC_QUOTE_SUBJECT",
+        "observedAt": "2026-10-25T15:30:46.892Z",
+        "providers": [
+          {
+            "provider": "relay",
+            "bridge": "relay-depository",
+            "status": "EXECUTABLE",
+            "executableBy": "UNIVERSAL_ROUTER",
+            "expectedOutput": "24962018",
+            "minimumOutput": "24837208",
+            "estimatedDurationSeconds": 1,
+            "fees": [
+              {
+                "label": "Solana network fee (estimate)",
+                "amount": "16075",
+                "symbol": "SOL",
+                "decimals": 9,
+                "included": false
+              },
+              {
+                "label": "Relay service fee",
+                "amount": "28126",
+                "symbol": "USDC",
+                "decimals": 6,
+                "included": true
+              },
+              {
+                "label": "Relay destination network fee",
+                "amount": "5703",
+                "symbol": "USDC",
+                "decimals": 6,
+                "included": true
+              }
+            ],
+            "reason": null
+          },
+          {
+            "provider": "lifi",
+            "bridge": "lifi",
+            "status": "TEMPORARILY_UNAVAILABLE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "UNIVERSAL_PROVIDER_RATE_LIMITED"
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan",
+            "status": "NO_ROUTE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "MAYAN_NETWORK_UNSUPPORTED"
+          },
+          {
+            "provider": "across",
+            "bridge": "across",
+            "status": "NO_ROUTE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "ACROSS_NETWORK_UNSUPPORTED"
+          }
+        ]
+      },
+      "liveQuote": {
+        "provider": "relay",
+        "status": "EXECUTABLE",
+        "expectedOutput": "24962018",
+        "minimumOutput": "24837208",
+        "reason": null
+      },
+      "simulation": {
+        "status": "NOT_RUN",
+        "reason": "OWNER_FUNDS_REQUIRED: FloFi simulates the exact deposit with the connected owner at Simulate (eth_simulateV1 / simulateTransaction)"
+      },
+      "execution": {
+        "status": "EXECUTABLE_BY_CODE",
+        "by": [
+          "UNIVERSAL_ROUTER"
+        ],
+        "gates": [
+          "GRYLOO_UNIVERSAL_ROUTER=live",
+          "GRYLOO_UNIVERSAL_ROUTER_OWNER_EXECUTION=MAINNET_OWNER_APPROVED",
+          "owner Review + wallet signature"
+        ]
+      },
+      "evidence": "PUBLIC_READ_ONLY_QUOTE",
+      "certification": "NOT_CERTIFIED"
+    },
+    {
+      "source": "solana",
+      "destination": "robinhood",
+      "assets": {
+        "input": "SOL",
+        "output": "ETH"
+      },
+      "amount": "150000000",
+      "discovery": {
+        "status": "EXECUTABLE",
+        "quoteSubjects": "PUBLIC_QUOTE_SUBJECT",
+        "observedAt": "2026-10-25T15:30:48.646Z",
+        "providers": [
+          {
+            "provider": "relay",
+            "bridge": "relay-depository",
+            "status": "EXECUTABLE",
+            "executableBy": "UNIVERSAL_ROUTER",
+            "expectedOutput": "6460894983165566",
+            "minimumOutput": "6428590508249738",
+            "estimatedDurationSeconds": 1,
+            "fees": [
+              {
+                "label": "Solana network fee (estimate)",
+                "amount": "16075",
+                "symbol": "SOL",
+                "decimals": 9,
+                "included": false
+              },
+              {
+                "label": "Relay destination network fee",
+                "amount": "16468",
+                "symbol": "SOL",
+                "decimals": 9,
+                "included": true
+              },
+              {
+                "label": "Relay service fee",
+                "amount": "527067",
+                "symbol": "SOL",
+                "decimals": 9,
+                "included": true
+              }
+            ],
+            "reason": null
+          },
+          {
+            "provider": "lifi",
+            "bridge": "lifi",
+            "status": "TEMPORARILY_UNAVAILABLE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "UNIVERSAL_PROVIDER_RATE_LIMITED"
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan",
+            "status": "NO_ROUTE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "MAYAN_NETWORK_UNSUPPORTED"
+          },
+          {
+            "provider": "across",
+            "bridge": "across",
+            "status": "NO_ROUTE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "ACROSS_NETWORK_UNSUPPORTED"
+          }
+        ]
+      },
+      "liveQuote": {
+        "provider": "relay",
+        "status": "EXECUTABLE",
+        "expectedOutput": "6460894983165566",
+        "minimumOutput": "6428590508249738",
+        "reason": null
+      },
+      "simulation": {
+        "status": "NOT_RUN",
+        "reason": "OWNER_FUNDS_REQUIRED: FloFi simulates the exact deposit with the connected owner at Simulate (eth_simulateV1 / simulateTransaction)"
+      },
+      "execution": {
+        "status": "EXECUTABLE_BY_CODE",
+        "by": [
+          "UNIVERSAL_ROUTER"
+        ],
+        "gates": [
+          "GRYLOO_UNIVERSAL_ROUTER=live",
+          "GRYLOO_UNIVERSAL_ROUTER_OWNER_EXECUTION=MAINNET_OWNER_APPROVED",
+          "owner Review + wallet signature"
+        ]
+      },
+      "evidence": "PUBLIC_READ_ONLY_QUOTE",
+      "certification": "NOT_CERTIFIED"
+    },
+    {
+      "source": "base",
+      "destination": "solana",
+      "assets": {
+        "input": "USDC",
+        "output": "USDC"
+      },
+      "amount": "25000000",
+      "discovery": {
+        "status": "EXECUTABLE",
+        "quoteSubjects": "PUBLIC_QUOTE_SUBJECT",
+        "observedAt": "2026-10-25T15:30:50.281Z",
+        "providers": [
+          {
+            "provider": "relay",
+            "bridge": "relay-depository",
+            "status": "EXECUTABLE",
+            "executableBy": "UNIVERSAL_ROUTER",
+            "expectedOutput": "24791080",
+            "minimumOutput": "24667125",
+            "estimatedDurationSeconds": 1,
+            "fees": [
+              {
+                "label": "Relay destination network fee",
+                "amount": "181417",
+                "symbol": "USDC",
+                "decimals": 6,
+                "included": true
+              },
+              {
+                "label": "Relay service fee",
+                "amount": "27503",
+                "symbol": "USDC",
+                "decimals": 6,
+                "included": true
+              },
+              {
+                "label": "Base network fee (estimate)",
+                "amount": "496420143543",
+                "symbol": "ETH",
+                "decimals": 18,
+                "included": false
+              }
+            ],
+            "reason": null
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan-fast_mctp",
+            "status": "LIVE_QUOTE",
+            "executableBy": null,
+            "expectedOutput": "24523079",
+            "minimumOutput": "24391938",
+            "estimatedDurationSeconds": 35,
+            "fees": [],
+            "reason": "MAYAN_TRANSACTION_BUILDER_NOT_VERIFIED"
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan-mctp",
+            "status": "LIVE_QUOTE",
+            "executableBy": null,
+            "expectedOutput": "23324269",
+            "minimumOutput": "23215464",
+            "estimatedDurationSeconds": 1200,
+            "fees": [],
+            "reason": "MAYAN_TRANSACTION_BUILDER_NOT_VERIFIED"
+          },
+          {
+            "provider": "lifi",
+            "bridge": "lifi",
+            "status": "TEMPORARILY_UNAVAILABLE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "UNIVERSAL_PROVIDER_RATE_LIMITED"
+          },
+          {
+            "provider": "across",
+            "bridge": "across",
+            "status": "NO_ROUTE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "ACROSS_NETWORK_UNSUPPORTED"
+          }
+        ]
+      },
+      "liveQuote": {
+        "provider": "relay",
+        "status": "EXECUTABLE",
+        "expectedOutput": "24791080",
+        "minimumOutput": "24667125",
+        "reason": null
+      },
+      "simulation": {
+        "status": "NOT_RUN",
+        "reason": "OWNER_FUNDS_REQUIRED: FloFi simulates the exact deposit with the connected owner at Simulate (eth_simulateV1 / simulateTransaction)"
+      },
+      "execution": {
+        "status": "EXECUTABLE_BY_CODE",
+        "by": [
+          "UNIVERSAL_ROUTER"
+        ],
+        "gates": [
+          "GRYLOO_UNIVERSAL_ROUTER=live",
+          "GRYLOO_UNIVERSAL_ROUTER_OWNER_EXECUTION=MAINNET_OWNER_APPROVED",
+          "owner Review + wallet signature"
+        ]
+      },
+      "evidence": "PUBLIC_READ_ONLY_QUOTE",
+      "certification": "NOT_CERTIFIED"
+    },
+    {
+      "source": "base",
+      "destination": "solana",
+      "assets": {
+        "input": "ETH",
+        "output": "SOL"
+      },
+      "amount": "10000000000000000",
+      "discovery": {
+        "status": "EXECUTABLE",
+        "quoteSubjects": "PUBLIC_QUOTE_SUBJECT",
+        "observedAt": "2026-10-25T15:30:52.325Z",
+        "providers": [
+          {
+            "provider": "relay",
+            "bridge": "relay-depository",
+            "status": "EXECUTABLE",
+            "executableBy": "UNIVERSAL_ROUTER",
+            "expectedOutput": "229585700",
+            "minimumOutput": "228437771",
+            "estimatedDurationSeconds": 1,
+            "fees": [
+              {
+                "label": "Relay destination network fee",
+                "amount": "131820294777",
+                "symbol": "ETH",
+                "decimals": 18,
+                "included": true
+              },
+              {
+                "label": "Relay service fee",
+                "amount": "18498400072054",
+                "symbol": "ETH",
+                "decimals": 18,
+                "included": true
+              },
+              {
+                "label": "Base network fee (estimate)",
+                "amount": "213516084867",
+                "symbol": "ETH",
+                "decimals": 18,
+                "included": false
+              }
+            ],
+            "reason": null
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan-fast_mctp",
+            "status": "LIVE_QUOTE",
+            "executableBy": null,
+            "expectedOutput": "226004034",
+            "minimumOutput": "224874014",
+            "estimatedDurationSeconds": 35,
+            "fees": [],
+            "reason": "MAYAN_TRANSACTION_BUILDER_NOT_VERIFIED"
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan-mctp",
+            "status": "LIVE_QUOTE",
+            "executableBy": null,
+            "expectedOutput": "215313471",
+            "minimumOutput": "214236904",
+            "estimatedDurationSeconds": 1200,
+            "fees": [],
+            "reason": "MAYAN_TRANSACTION_BUILDER_NOT_VERIFIED"
+          },
+          {
+            "provider": "lifi",
+            "bridge": "lifi",
+            "status": "TEMPORARILY_UNAVAILABLE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "UNIVERSAL_PROVIDER_RATE_LIMITED"
+          },
+          {
+            "provider": "across",
+            "bridge": "across",
+            "status": "NO_ROUTE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "ACROSS_NETWORK_UNSUPPORTED"
+          }
+        ]
+      },
+      "liveQuote": {
+        "provider": "relay",
+        "status": "EXECUTABLE",
+        "expectedOutput": "229585700",
+        "minimumOutput": "228437771",
+        "reason": null
+      },
+      "simulation": {
+        "status": "NOT_RUN",
+        "reason": "OWNER_FUNDS_REQUIRED: FloFi simulates the exact deposit with the connected owner at Simulate (eth_simulateV1 / simulateTransaction)"
+      },
+      "execution": {
+        "status": "EXECUTABLE_BY_CODE",
+        "by": [
+          "UNIVERSAL_ROUTER"
+        ],
+        "gates": [
+          "GRYLOO_UNIVERSAL_ROUTER=live",
+          "GRYLOO_UNIVERSAL_ROUTER_OWNER_EXECUTION=MAINNET_OWNER_APPROVED",
+          "owner Review + wallet signature"
+        ]
+      },
+      "evidence": "PUBLIC_READ_ONLY_QUOTE",
+      "certification": "NOT_CERTIFIED"
+    },
+    {
+      "source": "base",
+      "destination": "arbitrum-one",
+      "assets": {
+        "input": "USDC",
+        "output": "USDC"
+      },
+      "amount": "25000000",
+      "discovery": {
+        "status": "EXECUTABLE",
+        "quoteSubjects": "PUBLIC_QUOTE_SUBJECT",
+        "observedAt": "2026-10-25T15:30:54.166Z",
+        "providers": [
+          {
+            "provider": "across",
+            "bridge": "across",
+            "status": "EXECUTABLE",
+            "executableBy": "CERTIFIED_ROUTER",
+            "expectedOutput": "24989156",
+            "minimumOutput": "24989156",
+            "estimatedDurationSeconds": 1,
+            "fees": [],
+            "reason": null
+          },
+          {
+            "provider": "relay",
+            "bridge": "relay-depository",
+            "status": "EXECUTABLE",
+            "executableBy": "UNIVERSAL_ROUTER",
+            "expectedOutput": "24973588",
+            "minimumOutput": "24848721",
+            "estimatedDurationSeconds": 1,
+            "fees": [
+              {
+                "label": "Relay service fee",
+                "amount": "22503",
+                "symbol": "USDC",
+                "decimals": 6,
+                "included": true
+              },
+              {
+                "label": "Relay destination network fee",
+                "amount": "3909",
+                "symbol": "USDC",
+                "decimals": 6,
+                "included": true
+              },
+              {
+                "label": "Base network fee (estimate)",
+                "amount": "496420143543",
+                "symbol": "ETH",
+                "decimals": 18,
+                "included": false
+              }
+            ],
+            "reason": null
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan-fast_mctp",
+            "status": "LIVE_QUOTE",
+            "executableBy": null,
+            "expectedOutput": "24932817",
+            "minimumOutput": "24797442",
+            "estimatedDurationSeconds": 35,
+            "fees": [],
+            "reason": "MAYAN_TRANSACTION_BUILDER_NOT_VERIFIED"
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan-mctp",
+            "status": "LIVE_QUOTE",
+            "executableBy": null,
+            "expectedOutput": "24915850",
+            "minimumOutput": "24791690",
+            "estimatedDurationSeconds": 1200,
+            "fees": [],
+            "reason": "MAYAN_TRANSACTION_BUILDER_NOT_VERIFIED"
+          },
+          {
+            "provider": "lifi",
+            "bridge": "lifi",
+            "status": "TEMPORARILY_UNAVAILABLE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "UNIVERSAL_PROVIDER_RATE_LIMITED"
+          }
+        ]
+      },
+      "liveQuote": {
+        "provider": "relay",
+        "status": "EXECUTABLE",
+        "expectedOutput": "24973588",
+        "minimumOutput": "24848721",
+        "reason": null
+      },
+      "simulation": {
+        "status": "NOT_RUN",
+        "reason": "OWNER_FUNDS_REQUIRED: FloFi simulates the exact deposit with the connected owner at Simulate (eth_simulateV1 / simulateTransaction)"
+      },
+      "execution": {
+        "status": "EXECUTABLE_BY_CODE",
+        "by": [
+          "CERTIFIED_ROUTER",
+          "UNIVERSAL_ROUTER"
+        ],
+        "gates": [
+          "GRYLOO_UNIVERSAL_ROUTER=live",
+          "GRYLOO_UNIVERSAL_ROUTER_OWNER_EXECUTION=MAINNET_OWNER_APPROVED",
+          "owner Review + wallet signature"
+        ]
+      },
+      "evidence": "PUBLIC_READ_ONLY_QUOTE",
+      "certification": "NOT_CERTIFIED"
+    },
+    {
+      "source": "base",
+      "destination": "arbitrum-one",
+      "assets": {
+        "input": "ETH",
+        "output": "ETH"
+      },
+      "amount": "10000000000000000",
+      "discovery": {
+        "status": "EXECUTABLE",
+        "quoteSubjects": "PUBLIC_QUOTE_SUBJECT",
+        "observedAt": "2026-10-25T15:30:55.871Z",
+        "providers": [
+          {
+            "provider": "relay",
+            "bridge": "relay-depository",
+            "status": "EXECUTABLE",
+            "executableBy": "UNIVERSAL_ROUTER",
+            "expectedOutput": "9989926259634468",
+            "minimumOutput": "9939976628336296",
+            "estimatedDurationSeconds": 1,
+            "fees": [
+              {
+                "label": "Base network fee (estimate)",
+                "amount": "213528201906",
+                "symbol": "ETH",
+                "decimals": 18,
+                "included": false
+              },
+              {
+                "label": "Relay destination network fee",
+                "amount": "563942855520",
+                "symbol": "ETH",
+                "decimals": 18,
+                "included": true
+              },
+              {
+                "label": "Relay service fee",
+                "amount": "9509797510012",
+                "symbol": "ETH",
+                "decimals": 18,
+                "included": true
+              }
+            ],
+            "reason": null
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan-fast_mctp",
+            "status": "LIVE_QUOTE",
+            "executableBy": null,
+            "expectedOutput": "9919421089534720",
+            "minimumOutput": "9869823984087050",
+            "estimatedDurationSeconds": 35,
+            "fees": [],
+            "reason": "MAYAN_TRANSACTION_BUILDER_NOT_VERIFIED"
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan-mctp",
+            "status": "LIVE_QUOTE",
+            "executableBy": null,
+            "expectedOutput": "9187262207537980",
+            "minimumOutput": "9141325896500290",
+            "estimatedDurationSeconds": 1200,
+            "fees": [],
+            "reason": "MAYAN_TRANSACTION_BUILDER_NOT_VERIFIED"
+          },
+          {
+            "provider": "across",
+            "bridge": "across",
+            "status": "SUPPORTED_BY_PROVIDER",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "ACROSS_NATIVE_NOT_QUOTED"
+          },
+          {
+            "provider": "lifi",
+            "bridge": "lifi",
+            "status": "TEMPORARILY_UNAVAILABLE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "UNIVERSAL_PROVIDER_RATE_LIMITED"
+          }
+        ]
+      },
+      "liveQuote": {
+        "provider": "relay",
+        "status": "EXECUTABLE",
+        "expectedOutput": "9989926259634468",
+        "minimumOutput": "9939976628336296",
+        "reason": null
+      },
+      "simulation": {
+        "status": "NOT_RUN",
+        "reason": "OWNER_FUNDS_REQUIRED: FloFi simulates the exact deposit with the connected owner at Simulate (eth_simulateV1 / simulateTransaction)"
+      },
+      "execution": {
+        "status": "EXECUTABLE_BY_CODE",
+        "by": [
+          "UNIVERSAL_ROUTER"
+        ],
+        "gates": [
+          "GRYLOO_UNIVERSAL_ROUTER=live",
+          "GRYLOO_UNIVERSAL_ROUTER_OWNER_EXECUTION=MAINNET_OWNER_APPROVED",
+          "owner Review + wallet signature"
+        ]
+      },
+      "evidence": "PUBLIC_READ_ONLY_QUOTE",
+      "certification": "NOT_CERTIFIED"
+    },
+    {
+      "source": "base",
+      "destination": "ethereum",
+      "assets": {
+        "input": "USDC",
+        "output": "USDC"
+      },
+      "amount": "25000000",
+      "discovery": {
+        "status": "EXECUTABLE",
+        "quoteSubjects": "PUBLIC_QUOTE_SUBJECT",
+        "observedAt": "2026-10-25T15:30:57.764Z",
+        "providers": [
+          {
+            "provider": "across",
+            "bridge": "across",
+            "status": "EXECUTABLE",
+            "executableBy": "CERTIFIED_ROUTER",
+            "expectedOutput": "24976820",
+            "minimumOutput": "24976820",
+            "estimatedDurationSeconds": 7,
+            "fees": [],
+            "reason": null
+          },
+          {
+            "provider": "relay",
+            "bridge": "relay-depository",
+            "status": "EXECUTABLE",
+            "executableBy": "UNIVERSAL_ROUTER",
+            "expectedOutput": "24960089",
+            "minimumOutput": "24835289",
+            "estimatedDurationSeconds": 5,
+            "fees": [
+              {
+                "label": "Relay destination network fee",
+                "amount": "17908",
+                "symbol": "USDC",
+                "decimals": 6,
+                "included": true
+              },
+              {
+                "label": "Relay service fee",
+                "amount": "22003",
+                "symbol": "USDC",
+                "decimals": 6,
+                "included": true
+              },
+              {
+                "label": "Base network fee (estimate)",
+                "amount": "496337235418",
+                "symbol": "ETH",
+                "decimals": 18,
+                "included": false
+              }
+            ],
+            "reason": null
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan-mctp",
+            "status": "LIVE_QUOTE",
+            "executableBy": null,
+            "expectedOutput": "24031207",
+            "minimumOutput": "23915707",
+            "estimatedDurationSeconds": 1200,
+            "fees": [],
+            "reason": "MAYAN_TRANSACTION_BUILDER_NOT_VERIFIED"
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan-fast_mctp",
+            "status": "LIVE_QUOTE",
+            "executableBy": null,
+            "expectedOutput": "23592387",
+            "minimumOutput": "23470615",
+            "estimatedDurationSeconds": 35,
+            "fees": [],
+            "reason": "MAYAN_TRANSACTION_BUILDER_NOT_VERIFIED"
+          },
+          {
+            "provider": "lifi",
+            "bridge": "lifi",
+            "status": "TEMPORARILY_UNAVAILABLE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "UNIVERSAL_PROVIDER_RATE_LIMITED"
+          }
+        ]
+      },
+      "liveQuote": {
+        "provider": "relay",
+        "status": "EXECUTABLE",
+        "expectedOutput": "24960089",
+        "minimumOutput": "24835289",
+        "reason": null
+      },
+      "simulation": {
+        "status": "NOT_RUN",
+        "reason": "OWNER_FUNDS_REQUIRED: FloFi simulates the exact deposit with the connected owner at Simulate (eth_simulateV1 / simulateTransaction)"
+      },
+      "execution": {
+        "status": "EXECUTABLE_BY_CODE",
+        "by": [
+          "CERTIFIED_ROUTER",
+          "UNIVERSAL_ROUTER"
+        ],
+        "gates": [
+          "GRYLOO_UNIVERSAL_ROUTER=live",
+          "GRYLOO_UNIVERSAL_ROUTER_OWNER_EXECUTION=MAINNET_OWNER_APPROVED",
+          "owner Review + wallet signature"
+        ]
+      },
+      "evidence": "PUBLIC_READ_ONLY_QUOTE",
+      "certification": "NOT_CERTIFIED"
+    },
+    {
+      "source": "base",
+      "destination": "ethereum",
+      "assets": {
+        "input": "ETH",
+        "output": "ETH"
+      },
+      "amount": "10000000000000000",
+      "discovery": {
+        "status": "EXECUTABLE",
+        "quoteSubjects": "PUBLIC_QUOTE_SUBJECT",
+        "observedAt": "2026-10-25T15:30:59.422Z",
+        "providers": [
+          {
+            "provider": "relay",
+            "bridge": "relay-depository",
+            "status": "EXECUTABLE",
+            "executableBy": "UNIVERSAL_ROUTER",
+            "expectedOutput": "9987119103721188",
+            "minimumOutput": "9937183508202583",
+            "estimatedDurationSeconds": 5,
+            "fees": [
+              {
+                "label": "Relay service fee",
+                "amount": "10559797510012",
+                "symbol": "ETH",
+                "decimals": 18,
+                "included": true
+              },
+              {
+                "label": "Base network fee (estimate)",
+                "amount": "213424201906",
+                "symbol": "ETH",
+                "decimals": 18,
+                "included": false
+              },
+              {
+                "label": "Relay destination network fee",
+                "amount": "2321098768800",
+                "symbol": "ETH",
+                "decimals": 18,
+                "included": true
+              }
+            ],
+            "reason": null
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan-fast_mctp",
+            "status": "LIVE_QUOTE",
+            "executableBy": null,
+            "expectedOutput": "8046790910363120",
+            "minimumOutput": "8006556955811310",
+            "estimatedDurationSeconds": 35,
+            "fees": [],
+            "reason": "MAYAN_TRANSACTION_BUILDER_NOT_VERIFIED"
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan-mctp",
+            "status": "LIVE_QUOTE",
+            "executableBy": null,
+            "expectedOutput": "6562796348041310",
+            "minimumOutput": "6529982366301100",
+            "estimatedDurationSeconds": 1200,
+            "fees": [],
+            "reason": "MAYAN_TRANSACTION_BUILDER_NOT_VERIFIED"
+          },
+          {
+            "provider": "across",
+            "bridge": "across",
+            "status": "SUPPORTED_BY_PROVIDER",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "ACROSS_NATIVE_NOT_QUOTED"
+          },
+          {
+            "provider": "lifi",
+            "bridge": "lifi",
+            "status": "TEMPORARILY_UNAVAILABLE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "UNIVERSAL_PROVIDER_RATE_LIMITED"
+          }
+        ]
+      },
+      "liveQuote": {
+        "provider": "relay",
+        "status": "EXECUTABLE",
+        "expectedOutput": "9987119103721188",
+        "minimumOutput": "9937183508202583",
+        "reason": null
+      },
+      "simulation": {
+        "status": "NOT_RUN",
+        "reason": "OWNER_FUNDS_REQUIRED: FloFi simulates the exact deposit with the connected owner at Simulate (eth_simulateV1 / simulateTransaction)"
+      },
+      "execution": {
+        "status": "EXECUTABLE_BY_CODE",
+        "by": [
+          "UNIVERSAL_ROUTER"
+        ],
+        "gates": [
+          "GRYLOO_UNIVERSAL_ROUTER=live",
+          "GRYLOO_UNIVERSAL_ROUTER_OWNER_EXECUTION=MAINNET_OWNER_APPROVED",
+          "owner Review + wallet signature"
+        ]
+      },
+      "evidence": "PUBLIC_READ_ONLY_QUOTE",
+      "certification": "NOT_CERTIFIED"
+    },
+    {
+      "source": "base",
+      "destination": "robinhood",
+      "assets": {
+        "input": "USDC",
+        "output": "USDG"
+      },
+      "amount": "25000000",
+      "discovery": {
+        "status": "EXECUTABLE",
+        "quoteSubjects": "PUBLIC_QUOTE_SUBJECT",
+        "observedAt": "2026-10-25T15:31:01.119Z",
+        "providers": [
+          {
+            "provider": "across",
+            "bridge": "across",
+            "status": "EXECUTABLE",
+            "executableBy": "CERTIFIED_ROUTER",
+            "expectedOutput": "24975862",
+            "minimumOutput": "24975862",
+            "estimatedDurationSeconds": 1,
+            "fees": [],
+            "reason": null
+          },
+          {
+            "provider": "relay",
+            "bridge": "relay-depository",
+            "status": "EXECUTABLE",
+            "executableBy": "UNIVERSAL_ROUTER",
+            "expectedOutput": "24965182",
+            "minimumOutput": "24840356",
+            "estimatedDurationSeconds": 1,
+            "fees": [
+              {
+                "label": "Relay service fee",
+                "amount": "25001",
+                "symbol": "USDC",
+                "decimals": 6,
+                "included": true
+              },
+              {
+                "label": "Base network fee (estimate)",
+                "amount": "496337235418",
+                "symbol": "ETH",
+                "decimals": 18,
+                "included": false
+              },
+              {
+                "label": "Relay destination network fee",
+                "amount": "5714",
+                "symbol": "USDC",
+                "decimals": 6,
+                "included": true
+              }
+            ],
+            "reason": null
+          },
+          {
+            "provider": "lifi",
+            "bridge": "lifi",
+            "status": "TEMPORARILY_UNAVAILABLE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "UNIVERSAL_PROVIDER_RATE_LIMITED"
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan",
+            "status": "NO_ROUTE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "MAYAN_NETWORK_UNSUPPORTED"
+          }
+        ]
+      },
+      "liveQuote": {
+        "provider": "relay",
+        "status": "EXECUTABLE",
+        "expectedOutput": "24965182",
+        "minimumOutput": "24840356",
+        "reason": null
+      },
+      "simulation": {
+        "status": "NOT_RUN",
+        "reason": "OWNER_FUNDS_REQUIRED: FloFi simulates the exact deposit with the connected owner at Simulate (eth_simulateV1 / simulateTransaction)"
+      },
+      "execution": {
+        "status": "EXECUTABLE_BY_CODE",
+        "by": [
+          "CERTIFIED_ROUTER",
+          "UNIVERSAL_ROUTER"
+        ],
+        "gates": [
+          "GRYLOO_UNIVERSAL_ROUTER=live",
+          "GRYLOO_UNIVERSAL_ROUTER_OWNER_EXECUTION=MAINNET_OWNER_APPROVED",
+          "owner Review + wallet signature"
+        ]
+      },
+      "evidence": "PUBLIC_READ_ONLY_QUOTE",
+      "certification": "NOT_CERTIFIED"
+    },
+    {
+      "source": "base",
+      "destination": "robinhood",
+      "assets": {
+        "input": "ETH",
+        "output": "ETH"
+      },
+      "amount": "10000000000000000",
+      "discovery": {
+        "status": "EXECUTABLE",
+        "quoteSubjects": "PUBLIC_QUOTE_SUBJECT",
+        "observedAt": "2026-10-25T15:31:02.997Z",
+        "providers": [
+          {
+            "provider": "relay",
+            "bridge": "relay-depository",
+            "status": "EXECUTABLE",
+            "executableBy": "UNIVERSAL_ROUTER",
+            "expectedOutput": "9988784602489988",
+            "minimumOutput": "9938840679477539",
+            "estimatedDurationSeconds": 1,
+            "fees": [
+              {
+                "label": "Relay service fee",
+                "amount": "10509797510012",
+                "symbol": "ETH",
+                "decimals": 18,
+                "included": true
+              },
+              {
+                "label": "Base network fee (estimate)",
+                "amount": "213528201906",
+                "symbol": "ETH",
+                "decimals": 18,
+                "included": false
+              },
+              {
+                "label": "Relay destination network fee",
+                "amount": "705600000000",
+                "symbol": "ETH",
+                "decimals": 18,
+                "included": true
+              }
+            ],
+            "reason": null
+          },
+          {
+            "provider": "across",
+            "bridge": "across",
+            "status": "SUPPORTED_BY_PROVIDER",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "ACROSS_NATIVE_NOT_QUOTED"
+          },
+          {
+            "provider": "lifi",
+            "bridge": "lifi",
+            "status": "TEMPORARILY_UNAVAILABLE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "UNIVERSAL_PROVIDER_RATE_LIMITED"
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan",
+            "status": "NO_ROUTE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "MAYAN_NETWORK_UNSUPPORTED"
+          }
+        ]
+      },
+      "liveQuote": {
+        "provider": "relay",
+        "status": "EXECUTABLE",
+        "expectedOutput": "9988784602489988",
+        "minimumOutput": "9938840679477539",
+        "reason": null
+      },
+      "simulation": {
+        "status": "NOT_RUN",
+        "reason": "OWNER_FUNDS_REQUIRED: FloFi simulates the exact deposit with the connected owner at Simulate (eth_simulateV1 / simulateTransaction)"
+      },
+      "execution": {
+        "status": "EXECUTABLE_BY_CODE",
+        "by": [
+          "UNIVERSAL_ROUTER"
+        ],
+        "gates": [
+          "GRYLOO_UNIVERSAL_ROUTER=live",
+          "GRYLOO_UNIVERSAL_ROUTER_OWNER_EXECUTION=MAINNET_OWNER_APPROVED",
+          "owner Review + wallet signature"
+        ]
+      },
+      "evidence": "PUBLIC_READ_ONLY_QUOTE",
+      "certification": "NOT_CERTIFIED"
+    },
+    {
+      "source": "arbitrum-one",
+      "destination": "solana",
+      "assets": {
+        "input": "USDC",
+        "output": "USDC"
+      },
+      "amount": "25000000",
+      "discovery": {
+        "status": "EXECUTABLE",
+        "quoteSubjects": "PUBLIC_QUOTE_SUBJECT",
+        "observedAt": "2026-10-25T15:31:04.610Z",
+        "providers": [
+          {
+            "provider": "relay",
+            "bridge": "relay-depository",
+            "status": "EXECUTABLE",
+            "executableBy": "UNIVERSAL_ROUTER",
+            "expectedOutput": "24791008",
+            "minimumOutput": "24667053",
+            "estimatedDurationSeconds": 1,
+            "fees": [
+              {
+                "label": "Arbitrum One network fee (estimate)",
+                "amount": "1686299738200",
+                "symbol": "ETH",
+                "decimals": 18,
+                "included": false
+              },
+              {
+                "label": "Relay destination network fee",
+                "amount": "181489",
+                "symbol": "USDC",
+                "decimals": 6,
+                "included": true
+              },
+              {
+                "label": "Relay service fee",
+                "amount": "27503",
+                "symbol": "USDC",
+                "decimals": 6,
+                "included": true
+              }
+            ],
+            "reason": null
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan-fast_mctp",
+            "status": "LIVE_QUOTE",
+            "executableBy": null,
+            "expectedOutput": "24522624",
+            "minimumOutput": "24391219",
+            "estimatedDurationSeconds": 35,
+            "fees": [],
+            "reason": "MAYAN_TRANSACTION_BUILDER_NOT_VERIFIED"
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan-mctp",
+            "status": "LIVE_QUOTE",
+            "executableBy": null,
+            "expectedOutput": "23324001",
+            "minimumOutput": "23215199",
+            "estimatedDurationSeconds": 1200,
+            "fees": [],
+            "reason": "MAYAN_TRANSACTION_BUILDER_NOT_VERIFIED"
+          },
+          {
+            "provider": "lifi",
+            "bridge": "lifi",
+            "status": "TEMPORARILY_UNAVAILABLE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "UNIVERSAL_PROVIDER_RATE_LIMITED"
+          },
+          {
+            "provider": "across",
+            "bridge": "across",
+            "status": "NO_ROUTE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "ACROSS_NETWORK_UNSUPPORTED"
+          }
+        ]
+      },
+      "liveQuote": {
+        "provider": "relay",
+        "status": "EXECUTABLE",
+        "expectedOutput": "24791008",
+        "minimumOutput": "24667053",
+        "reason": null
+      },
+      "simulation": {
+        "status": "NOT_RUN",
+        "reason": "OWNER_FUNDS_REQUIRED: FloFi simulates the exact deposit with the connected owner at Simulate (eth_simulateV1 / simulateTransaction)"
+      },
+      "execution": {
+        "status": "EXECUTABLE_BY_CODE",
+        "by": [
+          "UNIVERSAL_ROUTER"
+        ],
+        "gates": [
+          "GRYLOO_UNIVERSAL_ROUTER=live",
+          "GRYLOO_UNIVERSAL_ROUTER_OWNER_EXECUTION=MAINNET_OWNER_APPROVED",
+          "owner Review + wallet signature"
+        ]
+      },
+      "evidence": "PUBLIC_READ_ONLY_QUOTE",
+      "certification": "NOT_CERTIFIED"
+    },
+    {
+      "source": "arbitrum-one",
+      "destination": "solana",
+      "assets": {
+        "input": "ETH",
+        "output": "SOL"
+      },
+      "amount": "10000000000000000",
+      "discovery": {
+        "status": "EXECUTABLE",
+        "quoteSubjects": "PUBLIC_QUOTE_SUBJECT",
+        "observedAt": "2026-10-25T15:31:06.267Z",
+        "providers": [
+          {
+            "provider": "relay",
+            "bridge": "relay-depository",
+            "status": "EXECUTABLE",
+            "executableBy": "UNIVERSAL_ROUTER",
+            "expectedOutput": "229472290",
+            "minimumOutput": "228324928",
+            "estimatedDurationSeconds": 1,
+            "fees": [
+              {
+                "label": "Relay destination network fee",
+                "amount": "132788488513",
+                "symbol": "ETH",
+                "decimals": 18,
+                "included": true
+              },
+              {
+                "label": "Relay service fee",
+                "amount": "22534855450398",
+                "symbol": "ETH",
+                "decimals": 18,
+                "included": true
+              },
+              {
+                "label": "Arbitrum One network fee (estimate)",
+                "amount": "726858000000",
+                "symbol": "ETH",
+                "decimals": 18,
+                "included": false
+              }
+            ],
+            "reason": null
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan-fast_mctp",
+            "status": "LIVE_QUOTE",
+            "executableBy": null,
+            "expectedOutput": "225864622",
+            "minimumOutput": "224735299",
+            "estimatedDurationSeconds": 35,
+            "fees": [],
+            "reason": "MAYAN_TRANSACTION_BUILDER_NOT_VERIFIED"
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan-mctp",
+            "status": "LIVE_QUOTE",
+            "executableBy": null,
+            "expectedOutput": "215177231",
+            "minimumOutput": "214101345",
+            "estimatedDurationSeconds": 1200,
+            "fees": [],
+            "reason": "MAYAN_TRANSACTION_BUILDER_NOT_VERIFIED"
+          },
+          {
+            "provider": "lifi",
+            "bridge": "lifi",
+            "status": "TEMPORARILY_UNAVAILABLE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "UNIVERSAL_PROVIDER_RATE_LIMITED"
+          },
+          {
+            "provider": "across",
+            "bridge": "across",
+            "status": "NO_ROUTE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "ACROSS_NETWORK_UNSUPPORTED"
+          }
+        ]
+      },
+      "liveQuote": {
+        "provider": "relay",
+        "status": "EXECUTABLE",
+        "expectedOutput": "229472290",
+        "minimumOutput": "228324928",
+        "reason": null
+      },
+      "simulation": {
+        "status": "NOT_RUN",
+        "reason": "OWNER_FUNDS_REQUIRED: FloFi simulates the exact deposit with the connected owner at Simulate (eth_simulateV1 / simulateTransaction)"
+      },
+      "execution": {
+        "status": "EXECUTABLE_BY_CODE",
+        "by": [
+          "UNIVERSAL_ROUTER"
+        ],
+        "gates": [
+          "GRYLOO_UNIVERSAL_ROUTER=live",
+          "GRYLOO_UNIVERSAL_ROUTER_OWNER_EXECUTION=MAINNET_OWNER_APPROVED",
+          "owner Review + wallet signature"
+        ]
+      },
+      "evidence": "PUBLIC_READ_ONLY_QUOTE",
+      "certification": "NOT_CERTIFIED"
+    },
+    {
+      "source": "arbitrum-one",
+      "destination": "base",
+      "assets": {
+        "input": "USDC",
+        "output": "USDC"
+      },
+      "amount": "25000000",
+      "discovery": {
+        "status": "EXECUTABLE",
+        "quoteSubjects": "PUBLIC_QUOTE_SUBJECT",
+        "observedAt": "2026-10-25T15:31:08.041Z",
+        "providers": [
+          {
+            "provider": "across",
+            "bridge": "across",
+            "status": "EXECUTABLE",
+            "executableBy": "CERTIFIED_ROUTER",
+            "expectedOutput": "24993488",
+            "minimumOutput": "24993488",
+            "estimatedDurationSeconds": 1,
+            "fees": [],
+            "reason": null
+          },
+          {
+            "provider": "relay",
+            "bridge": "relay-depository",
+            "status": "EXECUTABLE",
+            "executableBy": "UNIVERSAL_ROUTER",
+            "expectedOutput": "24976233",
+            "minimumOutput": "24851352",
+            "estimatedDurationSeconds": 2,
+            "fees": [
+              {
+                "label": "Relay destination network fee",
+                "amount": "1264",
+                "symbol": "USDC",
+                "decimals": 6,
+                "included": true
+              },
+              {
+                "label": "Arbitrum One network fee (estimate)",
+                "amount": "1691357120200",
+                "symbol": "ETH",
+                "decimals": 18,
+                "included": false
+              },
+              {
+                "label": "Relay service fee",
+                "amount": "22503",
+                "symbol": "USDC",
+                "decimals": 6,
+                "included": true
+              }
+            ],
+            "reason": null
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan-mctp",
+            "status": "LIVE_QUOTE",
+            "executableBy": null,
+            "expectedOutput": "24993612",
+            "minimumOutput": "24868676",
+            "estimatedDurationSeconds": 1200,
+            "fees": [],
+            "reason": "MAYAN_TRANSACTION_BUILDER_NOT_VERIFIED"
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan-fast_mctp",
+            "status": "LIVE_QUOTE",
+            "executableBy": null,
+            "expectedOutput": "24984360",
+            "minimumOutput": "24848173",
+            "estimatedDurationSeconds": 35,
+            "fees": [],
+            "reason": "MAYAN_TRANSACTION_BUILDER_NOT_VERIFIED"
+          },
+          {
+            "provider": "lifi",
+            "bridge": "lifi",
+            "status": "TEMPORARILY_UNAVAILABLE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "UNIVERSAL_PROVIDER_RATE_LIMITED"
+          }
+        ]
+      },
+      "liveQuote": {
+        "provider": "relay",
+        "status": "EXECUTABLE",
+        "expectedOutput": "24976233",
+        "minimumOutput": "24851352",
+        "reason": null
+      },
+      "simulation": {
+        "status": "NOT_RUN",
+        "reason": "OWNER_FUNDS_REQUIRED: FloFi simulates the exact deposit with the connected owner at Simulate (eth_simulateV1 / simulateTransaction)"
+      },
+      "execution": {
+        "status": "EXECUTABLE_BY_CODE",
+        "by": [
+          "CERTIFIED_ROUTER",
+          "UNIVERSAL_ROUTER"
+        ],
+        "gates": [
+          "GRYLOO_UNIVERSAL_ROUTER=live",
+          "GRYLOO_UNIVERSAL_ROUTER_OWNER_EXECUTION=MAINNET_OWNER_APPROVED",
+          "owner Review + wallet signature"
+        ]
+      },
+      "evidence": "PUBLIC_READ_ONLY_QUOTE",
+      "certification": "NOT_CERTIFIED"
+    },
+    {
+      "source": "arbitrum-one",
+      "destination": "base",
+      "assets": {
+        "input": "ETH",
+        "output": "ETH"
+      },
+      "amount": "10000000000000000",
+      "discovery": {
+        "status": "EXECUTABLE",
+        "quoteSubjects": "PUBLIC_QUOTE_SUBJECT",
+        "observedAt": "2026-10-25T15:31:09.719Z",
+        "providers": [
+          {
+            "provider": "relay",
+            "bridge": "relay-depository",
+            "status": "EXECUTABLE",
+            "executableBy": "UNIVERSAL_ROUTER",
+            "expectedOutput": "9984275466420590",
+            "minimumOutput": "9934354089088488",
+            "estimatedDurationSeconds": 2,
+            "fees": [
+              {
+                "label": "Relay service fee",
+                "amount": "15559797510012",
+                "symbol": "ETH",
+                "decimals": 18,
+                "included": true
+              },
+              {
+                "label": "Relay destination network fee",
+                "amount": "164736069398",
+                "symbol": "ETH",
+                "decimals": 18,
+                "included": true
+              },
+              {
+                "label": "Arbitrum One network fee (estimate)",
+                "amount": "727948287000",
+                "symbol": "ETH",
+                "decimals": 18,
+                "included": false
+              }
+            ],
+            "reason": null
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan-fast_mctp",
+            "status": "LIVE_QUOTE",
+            "executableBy": null,
+            "expectedOutput": "9988421197832300",
+            "minimumOutput": "9938479091843140",
+            "estimatedDurationSeconds": 35,
+            "fees": [],
+            "reason": "MAYAN_TRANSACTION_BUILDER_NOT_VERIFIED"
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan-mctp",
+            "status": "LIVE_QUOTE",
+            "executableBy": null,
+            "expectedOutput": "9285445003407820",
+            "minimumOutput": "9239017778390780",
+            "estimatedDurationSeconds": 1200,
+            "fees": [],
+            "reason": "MAYAN_TRANSACTION_BUILDER_NOT_VERIFIED"
+          },
+          {
+            "provider": "across",
+            "bridge": "across",
+            "status": "SUPPORTED_BY_PROVIDER",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "ACROSS_NATIVE_NOT_QUOTED"
+          },
+          {
+            "provider": "lifi",
+            "bridge": "lifi",
+            "status": "TEMPORARILY_UNAVAILABLE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "UNIVERSAL_PROVIDER_RATE_LIMITED"
+          }
+        ]
+      },
+      "liveQuote": {
+        "provider": "relay",
+        "status": "EXECUTABLE",
+        "expectedOutput": "9984275466420590",
+        "minimumOutput": "9934354089088488",
+        "reason": null
+      },
+      "simulation": {
+        "status": "NOT_RUN",
+        "reason": "OWNER_FUNDS_REQUIRED: FloFi simulates the exact deposit with the connected owner at Simulate (eth_simulateV1 / simulateTransaction)"
+      },
+      "execution": {
+        "status": "EXECUTABLE_BY_CODE",
+        "by": [
+          "UNIVERSAL_ROUTER"
+        ],
+        "gates": [
+          "GRYLOO_UNIVERSAL_ROUTER=live",
+          "GRYLOO_UNIVERSAL_ROUTER_OWNER_EXECUTION=MAINNET_OWNER_APPROVED",
+          "owner Review + wallet signature"
+        ]
+      },
+      "evidence": "PUBLIC_READ_ONLY_QUOTE",
+      "certification": "NOT_CERTIFIED"
+    },
+    {
+      "source": "arbitrum-one",
+      "destination": "ethereum",
+      "assets": {
+        "input": "USDC",
+        "output": "USDC"
+      },
+      "amount": "25000000",
+      "discovery": {
+        "status": "EXECUTABLE",
+        "quoteSubjects": "PUBLIC_QUOTE_SUBJECT",
+        "observedAt": "2026-10-25T15:31:11.379Z",
+        "providers": [
+          {
+            "provider": "across",
+            "bridge": "across",
+            "status": "EXECUTABLE",
+            "executableBy": "CERTIFIED_ROUTER",
+            "expectedOutput": "24975299",
+            "minimumOutput": "24975299",
+            "estimatedDurationSeconds": 7,
+            "fees": [],
+            "reason": null
+          },
+          {
+            "provider": "relay",
+            "bridge": "relay-depository",
+            "status": "EXECUTABLE",
+            "executableBy": "UNIVERSAL_ROUTER",
+            "expectedOutput": "24960079",
+            "minimumOutput": "24835279",
+            "estimatedDurationSeconds": 5,
+            "fees": [
+              {
+                "label": "Arbitrum One network fee (estimate)",
+                "amount": "1685794000000",
+                "symbol": "ETH",
+                "decimals": 18,
+                "included": false
+              },
+              {
+                "label": "Relay destination network fee",
+                "amount": "17918",
+                "symbol": "USDC",
+                "decimals": 6,
+                "included": true
+              },
+              {
+                "label": "Relay service fee",
+                "amount": "22003",
+                "symbol": "USDC",
+                "decimals": 6,
+                "included": true
+              }
+            ],
+            "reason": null
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan-mctp",
+            "status": "LIVE_QUOTE",
+            "executableBy": null,
+            "expectedOutput": "24012541",
+            "minimumOutput": "23897220",
+            "estimatedDurationSeconds": 1200,
+            "fees": [],
+            "reason": "MAYAN_TRANSACTION_BUILDER_NOT_VERIFIED"
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan-fast_mctp",
+            "status": "LIVE_QUOTE",
+            "executableBy": null,
+            "expectedOutput": "23591900",
+            "minimumOutput": "23469873",
+            "estimatedDurationSeconds": 35,
+            "fees": [],
+            "reason": "MAYAN_TRANSACTION_BUILDER_NOT_VERIFIED"
+          },
+          {
+            "provider": "lifi",
+            "bridge": "lifi",
+            "status": "TEMPORARILY_UNAVAILABLE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "UNIVERSAL_PROVIDER_RATE_LIMITED"
+          }
+        ]
+      },
+      "liveQuote": {
+        "provider": "relay",
+        "status": "EXECUTABLE",
+        "expectedOutput": "24960079",
+        "minimumOutput": "24835279",
+        "reason": null
+      },
+      "simulation": {
+        "status": "NOT_RUN",
+        "reason": "OWNER_FUNDS_REQUIRED: FloFi simulates the exact deposit with the connected owner at Simulate (eth_simulateV1 / simulateTransaction)"
+      },
+      "execution": {
+        "status": "EXECUTABLE_BY_CODE",
+        "by": [
+          "CERTIFIED_ROUTER",
+          "UNIVERSAL_ROUTER"
+        ],
+        "gates": [
+          "GRYLOO_UNIVERSAL_ROUTER=live",
+          "GRYLOO_UNIVERSAL_ROUTER_OWNER_EXECUTION=MAINNET_OWNER_APPROVED",
+          "owner Review + wallet signature"
+        ]
+      },
+      "evidence": "PUBLIC_READ_ONLY_QUOTE",
+      "certification": "NOT_CERTIFIED"
+    },
+    {
+      "source": "arbitrum-one",
+      "destination": "ethereum",
+      "assets": {
+        "input": "ETH",
+        "output": "ETH"
+      },
+      "amount": "10000000000000000",
+      "discovery": {
+        "status": "EXECUTABLE",
+        "quoteSubjects": "PUBLIC_QUOTE_SUBJECT",
+        "observedAt": "2026-10-25T15:31:13.311Z",
+        "providers": [
+          {
+            "provider": "relay",
+            "bridge": "relay-depository",
+            "status": "EXECUTABLE",
+            "executableBy": "UNIVERSAL_ROUTER",
+            "expectedOutput": "9984119103721188",
+            "minimumOutput": "9934198508202583",
+            "estimatedDurationSeconds": 5,
+            "fees": [
+              {
+                "label": "Relay service fee",
+                "amount": "13559797510012",
+                "symbol": "ETH",
+                "decimals": 18,
+                "included": true
+              },
+              {
+                "label": "Relay destination network fee",
+                "amount": "2321098768800",
+                "symbol": "ETH",
+                "decimals": 18,
+                "included": true
+              },
+              {
+                "label": "Arbitrum One network fee (estimate)",
+                "amount": "726858000000",
+                "symbol": "ETH",
+                "decimals": 18,
+                "included": false
+              }
+            ],
+            "reason": null
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan-fast_mctp",
+            "status": "LIVE_QUOTE",
+            "executableBy": null,
+            "expectedOutput": "8040987153838280",
+            "minimumOutput": "8000782218069090",
+            "estimatedDurationSeconds": 35,
+            "fees": [],
+            "reason": "MAYAN_TRANSACTION_BUILDER_NOT_VERIFIED"
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan-mctp",
+            "status": "LIVE_QUOTE",
+            "executableBy": null,
+            "expectedOutput": "6557081394652460",
+            "minimumOutput": "6524295987679190",
+            "estimatedDurationSeconds": 1200,
+            "fees": [],
+            "reason": "MAYAN_TRANSACTION_BUILDER_NOT_VERIFIED"
+          },
+          {
+            "provider": "across",
+            "bridge": "across",
+            "status": "SUPPORTED_BY_PROVIDER",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "ACROSS_NATIVE_NOT_QUOTED"
+          },
+          {
+            "provider": "lifi",
+            "bridge": "lifi",
+            "status": "TEMPORARILY_UNAVAILABLE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "UNIVERSAL_PROVIDER_RATE_LIMITED"
+          }
+        ]
+      },
+      "liveQuote": {
+        "provider": "relay",
+        "status": "EXECUTABLE",
+        "expectedOutput": "9984119103721188",
+        "minimumOutput": "9934198508202583",
+        "reason": null
+      },
+      "simulation": {
+        "status": "NOT_RUN",
+        "reason": "OWNER_FUNDS_REQUIRED: FloFi simulates the exact deposit with the connected owner at Simulate (eth_simulateV1 / simulateTransaction)"
+      },
+      "execution": {
+        "status": "EXECUTABLE_BY_CODE",
+        "by": [
+          "UNIVERSAL_ROUTER"
+        ],
+        "gates": [
+          "GRYLOO_UNIVERSAL_ROUTER=live",
+          "GRYLOO_UNIVERSAL_ROUTER_OWNER_EXECUTION=MAINNET_OWNER_APPROVED",
+          "owner Review + wallet signature"
+        ]
+      },
+      "evidence": "PUBLIC_READ_ONLY_QUOTE",
+      "certification": "NOT_CERTIFIED"
+    },
+    {
+      "source": "arbitrum-one",
+      "destination": "robinhood",
+      "assets": {
+        "input": "USDC",
+        "output": "USDG"
+      },
+      "amount": "25000000",
+      "discovery": {
+        "status": "EXECUTABLE",
+        "quoteSubjects": "PUBLIC_QUOTE_SUBJECT",
+        "observedAt": "2026-10-25T15:31:15.048Z",
+        "providers": [
+          {
+            "provider": "across",
+            "bridge": "across",
+            "status": "EXECUTABLE",
+            "executableBy": "CERTIFIED_ROUTER",
+            "expectedOutput": "24975862",
+            "minimumOutput": "24975862",
+            "estimatedDurationSeconds": 1,
+            "fees": [],
+            "reason": null
+          },
+          {
+            "provider": "relay",
+            "bridge": "relay-depository",
+            "status": "EXECUTABLE",
+            "executableBy": "UNIVERSAL_ROUTER",
+            "expectedOutput": "24965082",
+            "minimumOutput": "24840257",
+            "estimatedDurationSeconds": 1,
+            "fees": [
+              {
+                "label": "Arbitrum One network fee (estimate)",
+                "amount": "1686131158800",
+                "symbol": "ETH",
+                "decimals": 18,
+                "included": false
+              },
+              {
+                "label": "Relay service fee",
+                "amount": "25001",
+                "symbol": "USDC",
+                "decimals": 6,
+                "included": true
+              },
+              {
+                "label": "Relay destination network fee",
+                "amount": "5714",
+                "symbol": "USDC",
+                "decimals": 6,
+                "included": true
+              }
+            ],
+            "reason": null
+          },
+          {
+            "provider": "lifi",
+            "bridge": "lifi",
+            "status": "TEMPORARILY_UNAVAILABLE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "UNIVERSAL_PROVIDER_RATE_LIMITED"
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan",
+            "status": "NO_ROUTE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "MAYAN_NETWORK_UNSUPPORTED"
+          }
+        ]
+      },
+      "liveQuote": {
+        "provider": "relay",
+        "status": "EXECUTABLE",
+        "expectedOutput": "24965082",
+        "minimumOutput": "24840257",
+        "reason": null
+      },
+      "simulation": {
+        "status": "NOT_RUN",
+        "reason": "OWNER_FUNDS_REQUIRED: FloFi simulates the exact deposit with the connected owner at Simulate (eth_simulateV1 / simulateTransaction)"
+      },
+      "execution": {
+        "status": "EXECUTABLE_BY_CODE",
+        "by": [
+          "CERTIFIED_ROUTER",
+          "UNIVERSAL_ROUTER"
+        ],
+        "gates": [
+          "GRYLOO_UNIVERSAL_ROUTER=live",
+          "GRYLOO_UNIVERSAL_ROUTER_OWNER_EXECUTION=MAINNET_OWNER_APPROVED",
+          "owner Review + wallet signature"
+        ]
+      },
+      "evidence": "PUBLIC_READ_ONLY_QUOTE",
+      "certification": "NOT_CERTIFIED"
+    },
+    {
+      "source": "arbitrum-one",
+      "destination": "robinhood",
+      "assets": {
+        "input": "ETH",
+        "output": "ETH"
+      },
+      "amount": "10000000000000000",
+      "discovery": {
+        "status": "EXECUTABLE",
+        "quoteSubjects": "PUBLIC_QUOTE_SUBJECT",
+        "observedAt": "2026-10-25T15:31:16.807Z",
+        "providers": [
+          {
+            "provider": "relay",
+            "bridge": "relay-depository",
+            "status": "EXECUTABLE",
+            "executableBy": "UNIVERSAL_ROUTER",
+            "expectedOutput": "9984734602489988",
+            "minimumOutput": "9934810929477539",
+            "estimatedDurationSeconds": 1,
+            "fees": [
+              {
+                "label": "Relay service fee",
+                "amount": "14559797510012",
+                "symbol": "ETH",
+                "decimals": 18,
+                "included": true
+              },
+              {
+                "label": "Relay destination network fee",
+                "amount": "705600000000",
+                "symbol": "ETH",
+                "decimals": 18,
+                "included": true
+              },
+              {
+                "label": "Arbitrum One network fee (estimate)",
+                "amount": "726930685800",
+                "symbol": "ETH",
+                "decimals": 18,
+                "included": false
+              }
+            ],
+            "reason": null
+          },
+          {
+            "provider": "across",
+            "bridge": "across",
+            "status": "SUPPORTED_BY_PROVIDER",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "ACROSS_NATIVE_NOT_QUOTED"
+          },
+          {
+            "provider": "lifi",
+            "bridge": "lifi",
+            "status": "TEMPORARILY_UNAVAILABLE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "UNIVERSAL_PROVIDER_RATE_LIMITED"
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan",
+            "status": "NO_ROUTE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "MAYAN_NETWORK_UNSUPPORTED"
+          }
+        ]
+      },
+      "liveQuote": {
+        "provider": "relay",
+        "status": "EXECUTABLE",
+        "expectedOutput": "9984734602489988",
+        "minimumOutput": "9934810929477539",
+        "reason": null
+      },
+      "simulation": {
+        "status": "NOT_RUN",
+        "reason": "OWNER_FUNDS_REQUIRED: FloFi simulates the exact deposit with the connected owner at Simulate (eth_simulateV1 / simulateTransaction)"
+      },
+      "execution": {
+        "status": "EXECUTABLE_BY_CODE",
+        "by": [
+          "UNIVERSAL_ROUTER"
+        ],
+        "gates": [
+          "GRYLOO_UNIVERSAL_ROUTER=live",
+          "GRYLOO_UNIVERSAL_ROUTER_OWNER_EXECUTION=MAINNET_OWNER_APPROVED",
+          "owner Review + wallet signature"
+        ]
+      },
+      "evidence": "PUBLIC_READ_ONLY_QUOTE",
+      "certification": "NOT_CERTIFIED"
+    },
+    {
+      "source": "ethereum",
+      "destination": "solana",
+      "assets": {
+        "input": "USDC",
+        "output": "USDC"
+      },
+      "amount": "25000000",
+      "discovery": {
+        "status": "EXECUTABLE",
+        "quoteSubjects": "PUBLIC_QUOTE_SUBJECT",
+        "observedAt": "2026-10-25T15:31:18.540Z",
+        "providers": [
+          {
+            "provider": "relay",
+            "bridge": "relay-depository",
+            "status": "EXECUTABLE",
+            "executableBy": "UNIVERSAL_ROUTER",
+            "expectedOutput": "24790868",
+            "minimumOutput": "24666914",
+            "estimatedDurationSeconds": 1,
+            "fees": [
+              {
+                "label": "Relay destination network fee",
+                "amount": "181629",
+                "symbol": "USDC",
+                "decimals": 6,
+                "included": true
+              },
+              {
+                "label": "Relay service fee",
+                "amount": "27503",
+                "symbol": "USDC",
+                "decimals": 6,
+                "included": true
+              },
+              {
+                "label": "Ethereum network fee (estimate)",
+                "amount": "6747445382640",
+                "symbol": "ETH",
+                "decimals": 18,
+                "included": false
+              }
+            ],
+            "reason": null
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan-fast_mctp",
+            "status": "LIVE_QUOTE",
+            "executableBy": null,
+            "expectedOutput": "24523705",
+            "minimumOutput": "24393368",
+            "estimatedDurationSeconds": 35,
+            "fees": [],
+            "reason": "MAYAN_TRANSACTION_BUILDER_NOT_VERIFIED"
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan-mctp",
+            "status": "LIVE_QUOTE",
+            "executableBy": null,
+            "expectedOutput": "23324003",
+            "minimumOutput": "23215201",
+            "estimatedDurationSeconds": 900,
+            "fees": [],
+            "reason": "MAYAN_TRANSACTION_BUILDER_NOT_VERIFIED"
+          },
+          {
+            "provider": "lifi",
+            "bridge": "lifi",
+            "status": "TEMPORARILY_UNAVAILABLE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "UNIVERSAL_PROVIDER_RATE_LIMITED"
+          },
+          {
+            "provider": "across",
+            "bridge": "across",
+            "status": "NO_ROUTE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "ACROSS_NETWORK_UNSUPPORTED"
+          }
+        ]
+      },
+      "liveQuote": {
+        "provider": "relay",
+        "status": "EXECUTABLE",
+        "expectedOutput": "24790868",
+        "minimumOutput": "24666914",
+        "reason": null
+      },
+      "simulation": {
+        "status": "NOT_RUN",
+        "reason": "OWNER_FUNDS_REQUIRED: FloFi simulates the exact deposit with the connected owner at Simulate (eth_simulateV1 / simulateTransaction)"
+      },
+      "execution": {
+        "status": "EXECUTABLE_BY_CODE",
+        "by": [
+          "UNIVERSAL_ROUTER"
+        ],
+        "gates": [
+          "GRYLOO_UNIVERSAL_ROUTER=live",
+          "GRYLOO_UNIVERSAL_ROUTER_OWNER_EXECUTION=MAINNET_OWNER_APPROVED",
+          "owner Review + wallet signature"
+        ]
+      },
+      "evidence": "PUBLIC_READ_ONLY_QUOTE",
+      "certification": "NOT_CERTIFIED"
+    },
+    {
+      "source": "ethereum",
+      "destination": "solana",
+      "assets": {
+        "input": "ETH",
+        "output": "SOL"
+      },
+      "amount": "10000000000000000",
+      "discovery": {
+        "status": "EXECUTABLE",
+        "quoteSubjects": "PUBLIC_QUOTE_SUBJECT",
+        "observedAt": "2026-10-25T15:31:20.221Z",
+        "providers": [
+          {
+            "provider": "relay",
+            "bridge": "relay-depository",
+            "status": "EXECUTABLE",
+            "executableBy": "UNIVERSAL_ROUTER",
+            "expectedOutput": "229445578",
+            "minimumOutput": "228298350",
+            "estimatedDurationSeconds": 1,
+            "fees": [
+              {
+                "label": "Relay destination network fee",
+                "amount": "153120025428",
+                "symbol": "ETH",
+                "decimals": 18,
+                "included": true
+              },
+              {
+                "label": "Relay service fee",
+                "amount": "22527670138466",
+                "symbol": "ETH",
+                "decimals": 18,
+                "included": true
+              },
+              {
+                "label": "Ethereum network fee (estimate)",
+                "amount": "2890336015115",
+                "symbol": "ETH",
+                "decimals": 18,
+                "included": false
+              }
+            ],
+            "reason": null
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan-fast_mctp",
+            "status": "LIVE_QUOTE",
+            "executableBy": null,
+            "expectedOutput": "225976760",
+            "minimumOutput": "224846876",
+            "estimatedDurationSeconds": 35,
+            "fees": [],
+            "reason": "MAYAN_TRANSACTION_BUILDER_NOT_VERIFIED"
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan-mctp",
+            "status": "LIVE_QUOTE",
+            "executableBy": null,
+            "expectedOutput": "215281862",
+            "minimumOutput": "214205453",
+            "estimatedDurationSeconds": 900,
+            "fees": [],
+            "reason": "MAYAN_TRANSACTION_BUILDER_NOT_VERIFIED"
+          },
+          {
+            "provider": "lifi",
+            "bridge": "lifi",
+            "status": "TEMPORARILY_UNAVAILABLE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "UNIVERSAL_PROVIDER_RATE_LIMITED"
+          },
+          {
+            "provider": "across",
+            "bridge": "across",
+            "status": "NO_ROUTE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "ACROSS_NETWORK_UNSUPPORTED"
+          }
+        ]
+      },
+      "liveQuote": {
+        "provider": "relay",
+        "status": "EXECUTABLE",
+        "expectedOutput": "229445578",
+        "minimumOutput": "228298350",
+        "reason": null
+      },
+      "simulation": {
+        "status": "NOT_RUN",
+        "reason": "OWNER_FUNDS_REQUIRED: FloFi simulates the exact deposit with the connected owner at Simulate (eth_simulateV1 / simulateTransaction)"
+      },
+      "execution": {
+        "status": "EXECUTABLE_BY_CODE",
+        "by": [
+          "UNIVERSAL_ROUTER"
+        ],
+        "gates": [
+          "GRYLOO_UNIVERSAL_ROUTER=live",
+          "GRYLOO_UNIVERSAL_ROUTER_OWNER_EXECUTION=MAINNET_OWNER_APPROVED",
+          "owner Review + wallet signature"
+        ]
+      },
+      "evidence": "PUBLIC_READ_ONLY_QUOTE",
+      "certification": "NOT_CERTIFIED"
+    },
+    {
+      "source": "ethereum",
+      "destination": "base",
+      "assets": {
+        "input": "USDC",
+        "output": "USDC"
+      },
+      "amount": "25000000",
+      "discovery": {
+        "status": "EXECUTABLE",
+        "quoteSubjects": "PUBLIC_QUOTE_SUBJECT",
+        "observedAt": "2026-10-25T15:31:22.105Z",
+        "providers": [
+          {
+            "provider": "across",
+            "bridge": "across",
+            "status": "EXECUTABLE",
+            "executableBy": "CERTIFIED_ROUTER",
+            "expectedOutput": "24993488",
+            "minimumOutput": "24993488",
+            "estimatedDurationSeconds": 2,
+            "fees": [],
+            "reason": null
+          },
+          {
+            "provider": "relay",
+            "bridge": "relay-depository",
+            "status": "EXECUTABLE",
+            "executableBy": "UNIVERSAL_ROUTER",
+            "expectedOutput": "24976234",
+            "minimumOutput": "24851353",
+            "estimatedDurationSeconds": 2,
+            "fees": [
+              {
+                "label": "Relay destination network fee",
+                "amount": "1263",
+                "symbol": "USDC",
+                "decimals": 6,
+                "included": true
+              },
+              {
+                "label": "Relay service fee",
+                "amount": "22503",
+                "symbol": "USDC",
+                "decimals": 6,
+                "included": true
+              },
+              {
+                "label": "Ethereum network fee (estimate)",
+                "amount": "6746031712960",
+                "symbol": "ETH",
+                "decimals": 18,
+                "included": false
+              }
+            ],
+            "reason": null
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan-mctp",
+            "status": "LIVE_QUOTE",
+            "executableBy": null,
+            "expectedOutput": "24993609",
+            "minimumOutput": "24868672",
+            "estimatedDurationSeconds": 900,
+            "fees": [],
+            "reason": "MAYAN_TRANSACTION_BUILDER_NOT_VERIFIED"
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan-fast_mctp",
+            "status": "LIVE_QUOTE",
+            "executableBy": null,
+            "expectedOutput": "24985458",
+            "minimumOutput": "24850359",
+            "estimatedDurationSeconds": 35,
+            "fees": [],
+            "reason": "MAYAN_TRANSACTION_BUILDER_NOT_VERIFIED"
+          },
+          {
+            "provider": "lifi",
+            "bridge": "lifi",
+            "status": "TEMPORARILY_UNAVAILABLE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "UNIVERSAL_PROVIDER_RATE_LIMITED"
+          }
+        ]
+      },
+      "liveQuote": {
+        "provider": "relay",
+        "status": "EXECUTABLE",
+        "expectedOutput": "24976234",
+        "minimumOutput": "24851353",
+        "reason": null
+      },
+      "simulation": {
+        "status": "NOT_RUN",
+        "reason": "OWNER_FUNDS_REQUIRED: FloFi simulates the exact deposit with the connected owner at Simulate (eth_simulateV1 / simulateTransaction)"
+      },
+      "execution": {
+        "status": "EXECUTABLE_BY_CODE",
+        "by": [
+          "CERTIFIED_ROUTER",
+          "UNIVERSAL_ROUTER"
+        ],
+        "gates": [
+          "GRYLOO_UNIVERSAL_ROUTER=live",
+          "GRYLOO_UNIVERSAL_ROUTER_OWNER_EXECUTION=MAINNET_OWNER_APPROVED",
+          "owner Review + wallet signature"
+        ]
+      },
+      "evidence": "PUBLIC_READ_ONLY_QUOTE",
+      "certification": "NOT_CERTIFIED"
+    },
+    {
+      "source": "ethereum",
+      "destination": "base",
+      "assets": {
+        "input": "ETH",
+        "output": "ETH"
+      },
+      "amount": "10000000000000000",
+      "discovery": {
+        "status": "EXECUTABLE",
+        "quoteSubjects": "PUBLIC_QUOTE_SUBJECT",
+        "observedAt": "2026-10-25T15:31:23.747Z",
+        "providers": [
+          {
+            "provider": "relay",
+            "bridge": "relay-depository",
+            "status": "EXECUTABLE",
+            "executableBy": "UNIVERSAL_ROUTER",
+            "expectedOutput": "9984275465910490",
+            "minimumOutput": "9934354088580938",
+            "estimatedDurationSeconds": 2,
+            "fees": [
+              {
+                "label": "Relay service fee",
+                "amount": "15559797510012",
+                "symbol": "ETH",
+                "decimals": 18,
+                "included": true
+              },
+              {
+                "label": "Relay destination network fee",
+                "amount": "164736579498",
+                "symbol": "ETH",
+                "decimals": 18,
+                "included": true
+              },
+              {
+                "label": "Ethereum network fee (estimate)",
+                "amount": "2890336015115",
+                "symbol": "ETH",
+                "decimals": 18,
+                "included": false
+              }
+            ],
+            "reason": null
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan-fast_mctp",
+            "status": "LIVE_QUOTE",
+            "executableBy": null,
+            "expectedOutput": "9989568331570410",
+            "minimumOutput": "9939620489912560",
+            "estimatedDurationSeconds": 35,
+            "fees": [],
+            "reason": "MAYAN_TRANSACTION_BUILDER_NOT_VERIFIED"
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan-mctp",
+            "status": "LIVE_QUOTE",
+            "executableBy": null,
+            "expectedOutput": "9286463671065010",
+            "minimumOutput": "9240031352709680",
+            "estimatedDurationSeconds": 900,
+            "fees": [],
+            "reason": "MAYAN_TRANSACTION_BUILDER_NOT_VERIFIED"
+          },
+          {
+            "provider": "across",
+            "bridge": "across",
+            "status": "SUPPORTED_BY_PROVIDER",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "ACROSS_NATIVE_NOT_QUOTED"
+          },
+          {
+            "provider": "lifi",
+            "bridge": "lifi",
+            "status": "TEMPORARILY_UNAVAILABLE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "UNIVERSAL_PROVIDER_RATE_LIMITED"
+          }
+        ]
+      },
+      "liveQuote": {
+        "provider": "relay",
+        "status": "EXECUTABLE",
+        "expectedOutput": "9984275465910490",
+        "minimumOutput": "9934354088580938",
+        "reason": null
+      },
+      "simulation": {
+        "status": "NOT_RUN",
+        "reason": "OWNER_FUNDS_REQUIRED: FloFi simulates the exact deposit with the connected owner at Simulate (eth_simulateV1 / simulateTransaction)"
+      },
+      "execution": {
+        "status": "EXECUTABLE_BY_CODE",
+        "by": [
+          "UNIVERSAL_ROUTER"
+        ],
+        "gates": [
+          "GRYLOO_UNIVERSAL_ROUTER=live",
+          "GRYLOO_UNIVERSAL_ROUTER_OWNER_EXECUTION=MAINNET_OWNER_APPROVED",
+          "owner Review + wallet signature"
+        ]
+      },
+      "evidence": "PUBLIC_READ_ONLY_QUOTE",
+      "certification": "NOT_CERTIFIED"
+    },
+    {
+      "source": "ethereum",
+      "destination": "arbitrum-one",
+      "assets": {
+        "input": "USDC",
+        "output": "USDC"
+      },
+      "amount": "25000000",
+      "discovery": {
+        "status": "EXECUTABLE",
+        "quoteSubjects": "PUBLIC_QUOTE_SUBJECT",
+        "observedAt": "2026-10-25T15:31:25.307Z",
+        "providers": [
+          {
+            "provider": "across",
+            "bridge": "across",
+            "status": "EXECUTABLE",
+            "executableBy": "CERTIFIED_ROUTER",
+            "expectedOutput": "24989167",
+            "minimumOutput": "24989167",
+            "estimatedDurationSeconds": 2,
+            "fees": [],
+            "reason": null
+          },
+          {
+            "provider": "relay",
+            "bridge": "relay-depository",
+            "status": "EXECUTABLE",
+            "executableBy": "UNIVERSAL_ROUTER",
+            "expectedOutput": "24973595",
+            "minimumOutput": "24848728",
+            "estimatedDurationSeconds": 1,
+            "fees": [
+              {
+                "label": "Relay service fee",
+                "amount": "22503",
+                "symbol": "USDC",
+                "decimals": 6,
+                "included": true
+              },
+              {
+                "label": "Relay destination network fee",
+                "amount": "3902",
+                "symbol": "USDC",
+                "decimals": 6,
+                "included": true
+              },
+              {
+                "label": "Ethereum network fee (estimate)",
+                "amount": "6746031712960",
+                "symbol": "ETH",
+                "decimals": 18,
+                "included": false
+              }
+            ],
+            "reason": null
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan-fast_mctp",
+            "status": "LIVE_QUOTE",
+            "executableBy": null,
+            "expectedOutput": "24933753",
+            "minimumOutput": "24799192",
+            "estimatedDurationSeconds": 35,
+            "fees": [],
+            "reason": "MAYAN_TRANSACTION_BUILDER_NOT_VERIFIED"
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan-mctp",
+            "status": "LIVE_QUOTE",
+            "executableBy": null,
+            "expectedOutput": "24916021",
+            "minimumOutput": "24791859",
+            "estimatedDurationSeconds": 900,
+            "fees": [],
+            "reason": "MAYAN_TRANSACTION_BUILDER_NOT_VERIFIED"
+          },
+          {
+            "provider": "lifi",
+            "bridge": "lifi",
+            "status": "TEMPORARILY_UNAVAILABLE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "UNIVERSAL_PROVIDER_RATE_LIMITED"
+          }
+        ]
+      },
+      "liveQuote": {
+        "provider": "relay",
+        "status": "EXECUTABLE",
+        "expectedOutput": "24973595",
+        "minimumOutput": "24848728",
+        "reason": null
+      },
+      "simulation": {
+        "status": "NOT_RUN",
+        "reason": "OWNER_FUNDS_REQUIRED: FloFi simulates the exact deposit with the connected owner at Simulate (eth_simulateV1 / simulateTransaction)"
+      },
+      "execution": {
+        "status": "EXECUTABLE_BY_CODE",
+        "by": [
+          "CERTIFIED_ROUTER",
+          "UNIVERSAL_ROUTER"
+        ],
+        "gates": [
+          "GRYLOO_UNIVERSAL_ROUTER=live",
+          "GRYLOO_UNIVERSAL_ROUTER_OWNER_EXECUTION=MAINNET_OWNER_APPROVED",
+          "owner Review + wallet signature"
+        ]
+      },
+      "evidence": "PUBLIC_READ_ONLY_QUOTE",
+      "certification": "NOT_CERTIFIED"
+    },
+    {
+      "source": "ethereum",
+      "destination": "arbitrum-one",
+      "assets": {
+        "input": "ETH",
+        "output": "ETH"
+      },
+      "amount": "10000000000000000",
+      "discovery": {
+        "status": "EXECUTABLE",
+        "quoteSubjects": "PUBLIC_QUOTE_SUBJECT",
+        "observedAt": "2026-10-25T15:31:26.960Z",
+        "providers": [
+          {
+            "provider": "relay",
+            "bridge": "relay-depository",
+            "status": "EXECUTABLE",
+            "executableBy": "UNIVERSAL_ROUTER",
+            "expectedOutput": "9985876034305188",
+            "minimumOutput": "9935946654133663",
+            "estimatedDurationSeconds": 1,
+            "fees": [
+              {
+                "label": "Relay service fee",
+                "amount": "13559797510012",
+                "symbol": "ETH",
+                "decimals": 18,
+                "included": true
+              },
+              {
+                "label": "Ethereum network fee (estimate)",
+                "amount": "3179949536334",
+                "symbol": "ETH",
+                "decimals": 18,
+                "included": false
+              },
+              {
+                "label": "Relay destination network fee",
+                "amount": "564168184800",
+                "symbol": "ETH",
+                "decimals": 18,
+                "included": true
+              }
+            ],
+            "reason": null
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan-fast_mctp",
+            "status": "LIVE_QUOTE",
+            "executableBy": null,
+            "expectedOutput": "9920578740003520",
+            "minimumOutput": "9870975846303510",
+            "estimatedDurationSeconds": 35,
+            "fees": [],
+            "reason": "MAYAN_TRANSACTION_BUILDER_NOT_VERIFIED"
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan-mctp",
+            "status": "LIVE_QUOTE",
+            "executableBy": null,
+            "expectedOutput": "9188326760752870",
+            "minimumOutput": "9142385126949110",
+            "estimatedDurationSeconds": 900,
+            "fees": [],
+            "reason": "MAYAN_TRANSACTION_BUILDER_NOT_VERIFIED"
+          },
+          {
+            "provider": "across",
+            "bridge": "across",
+            "status": "SUPPORTED_BY_PROVIDER",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "ACROSS_NATIVE_NOT_QUOTED"
+          },
+          {
+            "provider": "lifi",
+            "bridge": "lifi",
+            "status": "TEMPORARILY_UNAVAILABLE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "UNIVERSAL_PROVIDER_RATE_LIMITED"
+          }
+        ]
+      },
+      "liveQuote": {
+        "provider": "relay",
+        "status": "EXECUTABLE",
+        "expectedOutput": "9985876034305188",
+        "minimumOutput": "9935946654133663",
+        "reason": null
+      },
+      "simulation": {
+        "status": "NOT_RUN",
+        "reason": "OWNER_FUNDS_REQUIRED: FloFi simulates the exact deposit with the connected owner at Simulate (eth_simulateV1 / simulateTransaction)"
+      },
+      "execution": {
+        "status": "EXECUTABLE_BY_CODE",
+        "by": [
+          "UNIVERSAL_ROUTER"
+        ],
+        "gates": [
+          "GRYLOO_UNIVERSAL_ROUTER=live",
+          "GRYLOO_UNIVERSAL_ROUTER_OWNER_EXECUTION=MAINNET_OWNER_APPROVED",
+          "owner Review + wallet signature"
+        ]
+      },
+      "evidence": "PUBLIC_READ_ONLY_QUOTE",
+      "certification": "NOT_CERTIFIED"
+    },
+    {
+      "source": "ethereum",
+      "destination": "robinhood",
+      "assets": {
+        "input": "USDC",
+        "output": "USDG"
+      },
+      "amount": "25000000",
+      "discovery": {
+        "status": "EXECUTABLE",
+        "quoteSubjects": "PUBLIC_QUOTE_SUBJECT",
+        "observedAt": "2026-10-25T15:31:28.697Z",
+        "providers": [
+          {
+            "provider": "across",
+            "bridge": "across",
+            "status": "EXECUTABLE",
+            "executableBy": "CERTIFIED_ROUTER",
+            "expectedOutput": "24973368",
+            "minimumOutput": "24973368",
+            "estimatedDurationSeconds": 2,
+            "fees": [],
+            "reason": null
+          },
+          {
+            "provider": "relay",
+            "bridge": "relay-depository",
+            "status": "EXECUTABLE",
+            "executableBy": "UNIVERSAL_ROUTER",
+            "expectedOutput": "24965115",
+            "minimumOutput": "24840289",
+            "estimatedDurationSeconds": 1,
+            "fees": [
+              {
+                "label": "Relay service fee",
+                "amount": "25001",
+                "symbol": "USDC",
+                "decimals": 6,
+                "included": true
+              },
+              {
+                "label": "Relay destination network fee",
+                "amount": "5731",
+                "symbol": "USDC",
+                "decimals": 6,
+                "included": true
+              },
+              {
+                "label": "Ethereum network fee (estimate)",
+                "amount": "7421988414336",
+                "symbol": "ETH",
+                "decimals": 18,
+                "included": false
+              }
+            ],
+            "reason": null
+          },
+          {
+            "provider": "lifi",
+            "bridge": "lifi",
+            "status": "TEMPORARILY_UNAVAILABLE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "UNIVERSAL_PROVIDER_RATE_LIMITED"
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan",
+            "status": "NO_ROUTE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "MAYAN_NETWORK_UNSUPPORTED"
+          }
+        ]
+      },
+      "liveQuote": {
+        "provider": "relay",
+        "status": "EXECUTABLE",
+        "expectedOutput": "24965115",
+        "minimumOutput": "24840289",
+        "reason": null
+      },
+      "simulation": {
+        "status": "NOT_RUN",
+        "reason": "OWNER_FUNDS_REQUIRED: FloFi simulates the exact deposit with the connected owner at Simulate (eth_simulateV1 / simulateTransaction)"
+      },
+      "execution": {
+        "status": "EXECUTABLE_BY_CODE",
+        "by": [
+          "CERTIFIED_ROUTER",
+          "UNIVERSAL_ROUTER"
+        ],
+        "gates": [
+          "GRYLOO_UNIVERSAL_ROUTER=live",
+          "GRYLOO_UNIVERSAL_ROUTER_OWNER_EXECUTION=MAINNET_OWNER_APPROVED",
+          "owner Review + wallet signature"
+        ]
+      },
+      "evidence": "PUBLIC_READ_ONLY_QUOTE",
+      "certification": "NOT_CERTIFIED"
+    },
+    {
+      "source": "ethereum",
+      "destination": "robinhood",
+      "assets": {
+        "input": "ETH",
+        "output": "ETH"
+      },
+      "amount": "10000000000000000",
+      "discovery": {
+        "status": "EXECUTABLE",
+        "quoteSubjects": "PUBLIC_QUOTE_SUBJECT",
+        "observedAt": "2026-10-25T15:31:30.435Z",
+        "providers": [
+          {
+            "provider": "relay",
+            "bridge": "relay-depository",
+            "status": "EXECUTABLE",
+            "executableBy": "UNIVERSAL_ROUTER",
+            "expectedOutput": "9984729874969988",
+            "minimumOutput": "9934806225595139",
+            "estimatedDurationSeconds": 1,
+            "fees": [
+              {
+                "label": "Relay service fee",
+                "amount": "14559797510012",
+                "symbol": "ETH",
+                "decimals": 18,
+                "included": true
+              },
+              {
+                "label": "Ethereum network fee (estimate)",
+                "amount": "3179949536334",
+                "symbol": "ETH",
+                "decimals": 18,
+                "included": false
+              },
+              {
+                "label": "Relay destination network fee",
+                "amount": "710327520000",
+                "symbol": "ETH",
+                "decimals": 18,
+                "included": true
+              }
+            ],
+            "reason": null
+          },
+          {
+            "provider": "across",
+            "bridge": "across",
+            "status": "SUPPORTED_BY_PROVIDER",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "ACROSS_NATIVE_NOT_QUOTED"
+          },
+          {
+            "provider": "lifi",
+            "bridge": "lifi",
+            "status": "TEMPORARILY_UNAVAILABLE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "UNIVERSAL_PROVIDER_RATE_LIMITED"
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan",
+            "status": "NO_ROUTE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "MAYAN_NETWORK_UNSUPPORTED"
+          }
+        ]
+      },
+      "liveQuote": {
+        "provider": "relay",
+        "status": "EXECUTABLE",
+        "expectedOutput": "9984729874969988",
+        "minimumOutput": "9934806225595139",
+        "reason": null
+      },
+      "simulation": {
+        "status": "NOT_RUN",
+        "reason": "OWNER_FUNDS_REQUIRED: FloFi simulates the exact deposit with the connected owner at Simulate (eth_simulateV1 / simulateTransaction)"
+      },
+      "execution": {
+        "status": "EXECUTABLE_BY_CODE",
+        "by": [
+          "UNIVERSAL_ROUTER"
+        ],
+        "gates": [
+          "GRYLOO_UNIVERSAL_ROUTER=live",
+          "GRYLOO_UNIVERSAL_ROUTER_OWNER_EXECUTION=MAINNET_OWNER_APPROVED",
+          "owner Review + wallet signature"
+        ]
+      },
+      "evidence": "PUBLIC_READ_ONLY_QUOTE",
+      "certification": "NOT_CERTIFIED"
+    },
+    {
+      "source": "robinhood",
+      "destination": "solana",
+      "assets": {
+        "input": "USDG",
+        "output": "USDC"
+      },
+      "amount": "25000000",
+      "discovery": {
+        "status": "EXECUTABLE",
+        "quoteSubjects": "PUBLIC_QUOTE_SUBJECT",
+        "observedAt": "2026-10-25T15:31:32.069Z",
+        "providers": [
+          {
+            "provider": "relay",
+            "bridge": "relay-depository",
+            "status": "EXECUTABLE",
+            "executableBy": "UNIVERSAL_ROUTER",
+            "expectedOutput": "24784472",
+            "minimumOutput": "24660550",
+            "estimatedDurationSeconds": 1,
+            "fees": [
+              {
+                "label": "Relay destination network fee",
+                "amount": "181590",
+                "symbol": "USDG",
+                "decimals": 6,
+                "included": true
+              },
+              {
+                "label": "Robinhood Chain network fee (estimate)",
+                "amount": "2265909861600",
+                "symbol": "ETH",
+                "decimals": 18,
+                "included": false
+              },
+              {
+                "label": "Relay service fee",
+                "amount": "32498",
+                "symbol": "USDG",
+                "decimals": 6,
+                "included": true
+              }
+            ],
+            "reason": null
+          },
+          {
+            "provider": "lifi",
+            "bridge": "lifi",
+            "status": "TEMPORARILY_UNAVAILABLE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "UNIVERSAL_PROVIDER_RATE_LIMITED"
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan",
+            "status": "NO_ROUTE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "MAYAN_NETWORK_UNSUPPORTED"
+          },
+          {
+            "provider": "across",
+            "bridge": "across",
+            "status": "NO_ROUTE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "ACROSS_NETWORK_UNSUPPORTED"
+          }
+        ]
+      },
+      "liveQuote": {
+        "provider": "relay",
+        "status": "EXECUTABLE",
+        "expectedOutput": "24784472",
+        "minimumOutput": "24660550",
+        "reason": null
+      },
+      "simulation": {
+        "status": "NOT_RUN",
+        "reason": "OWNER_FUNDS_REQUIRED: FloFi simulates the exact deposit with the connected owner at Simulate (eth_simulateV1 / simulateTransaction)"
+      },
+      "execution": {
+        "status": "EXECUTABLE_BY_CODE",
+        "by": [
+          "UNIVERSAL_ROUTER"
+        ],
+        "gates": [
+          "GRYLOO_UNIVERSAL_ROUTER=live",
+          "GRYLOO_UNIVERSAL_ROUTER_OWNER_EXECUTION=MAINNET_OWNER_APPROVED",
+          "owner Review + wallet signature"
+        ]
+      },
+      "evidence": "PUBLIC_READ_ONLY_QUOTE",
+      "certification": "NOT_CERTIFIED"
+    },
+    {
+      "source": "robinhood",
+      "destination": "solana",
+      "assets": {
+        "input": "ETH",
+        "output": "SOL"
+      },
+      "amount": "10000000000000000",
+      "discovery": {
+        "status": "EXECUTABLE",
+        "quoteSubjects": "PUBLIC_QUOTE_SUBJECT",
+        "observedAt": "2026-10-25T15:31:33.855Z",
+        "providers": [
+          {
+            "provider": "relay",
+            "bridge": "relay-depository",
+            "status": "EXECUTABLE",
+            "executableBy": "UNIVERSAL_ROUTER",
+            "expectedOutput": "229372848",
+            "minimumOutput": "228225984",
+            "estimatedDurationSeconds": 1,
+            "fees": [
+              {
+                "label": "Relay destination network fee",
+                "amount": "140265466177",
+                "symbol": "ETH",
+                "decimals": 18,
+                "included": true
+              },
+              {
+                "label": "Relay service fee",
+                "amount": "27520882430038",
+                "symbol": "ETH",
+                "decimals": 18,
+                "included": true
+              },
+              {
+                "label": "Robinhood Chain network fee (estimate)",
+                "amount": "915516000000",
+                "symbol": "ETH",
+                "decimals": 18,
+                "included": false
+              }
+            ],
+            "reason": null
+          },
+          {
+            "provider": "lifi",
+            "bridge": "lifi",
+            "status": "TEMPORARILY_UNAVAILABLE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "UNIVERSAL_PROVIDER_RATE_LIMITED"
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan",
+            "status": "NO_ROUTE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "MAYAN_NETWORK_UNSUPPORTED"
+          },
+          {
+            "provider": "across",
+            "bridge": "across",
+            "status": "NO_ROUTE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "ACROSS_NETWORK_UNSUPPORTED"
+          }
+        ]
+      },
+      "liveQuote": {
+        "provider": "relay",
+        "status": "EXECUTABLE",
+        "expectedOutput": "229372848",
+        "minimumOutput": "228225984",
+        "reason": null
+      },
+      "simulation": {
+        "status": "NOT_RUN",
+        "reason": "OWNER_FUNDS_REQUIRED: FloFi simulates the exact deposit with the connected owner at Simulate (eth_simulateV1 / simulateTransaction)"
+      },
+      "execution": {
+        "status": "EXECUTABLE_BY_CODE",
+        "by": [
+          "UNIVERSAL_ROUTER"
+        ],
+        "gates": [
+          "GRYLOO_UNIVERSAL_ROUTER=live",
+          "GRYLOO_UNIVERSAL_ROUTER_OWNER_EXECUTION=MAINNET_OWNER_APPROVED",
+          "owner Review + wallet signature"
+        ]
+      },
+      "evidence": "PUBLIC_READ_ONLY_QUOTE",
+      "certification": "NOT_CERTIFIED"
+    },
+    {
+      "source": "robinhood",
+      "destination": "base",
+      "assets": {
+        "input": "USDG",
+        "output": "USDC"
+      },
+      "amount": "25000000",
+      "discovery": {
+        "status": "EXECUTABLE",
+        "quoteSubjects": "PUBLIC_QUOTE_SUBJECT",
+        "observedAt": "2026-10-25T15:31:35.594Z",
+        "providers": [
+          {
+            "provider": "across",
+            "bridge": "across",
+            "status": "EXECUTABLE",
+            "executableBy": "CERTIFIED_ROUTER",
+            "expectedOutput": "24980992",
+            "minimumOutput": "24980992",
+            "estimatedDurationSeconds": 2,
+            "fees": [],
+            "reason": null
+          },
+          {
+            "provider": "relay",
+            "bridge": "relay-depository",
+            "status": "EXECUTABLE",
+            "executableBy": "UNIVERSAL_ROUTER",
+            "expectedOutput": "24969804",
+            "minimumOutput": "24844955",
+            "estimatedDurationSeconds": 2,
+            "fees": [
+              {
+                "label": "Relay destination network fee",
+                "amount": "1264",
+                "symbol": "USDG",
+                "decimals": 6,
+                "included": true
+              },
+              {
+                "label": "Robinhood Chain network fee (estimate)",
+                "amount": "2271101725200",
+                "symbol": "ETH",
+                "decimals": 18,
+                "included": false
+              },
+              {
+                "label": "Relay service fee",
+                "amount": "27500",
+                "symbol": "USDG",
+                "decimals": 6,
+                "included": true
+              }
+            ],
+            "reason": null
+          },
+          {
+            "provider": "lifi",
+            "bridge": "lifi",
+            "status": "TEMPORARILY_UNAVAILABLE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "UNIVERSAL_PROVIDER_RATE_LIMITED"
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan",
+            "status": "NO_ROUTE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "MAYAN_NETWORK_UNSUPPORTED"
+          }
+        ]
+      },
+      "liveQuote": {
+        "provider": "relay",
+        "status": "EXECUTABLE",
+        "expectedOutput": "24969804",
+        "minimumOutput": "24844955",
+        "reason": null
+      },
+      "simulation": {
+        "status": "NOT_RUN",
+        "reason": "OWNER_FUNDS_REQUIRED: FloFi simulates the exact deposit with the connected owner at Simulate (eth_simulateV1 / simulateTransaction)"
+      },
+      "execution": {
+        "status": "EXECUTABLE_BY_CODE",
+        "by": [
+          "CERTIFIED_ROUTER",
+          "UNIVERSAL_ROUTER"
+        ],
+        "gates": [
+          "GRYLOO_UNIVERSAL_ROUTER=live",
+          "GRYLOO_UNIVERSAL_ROUTER_OWNER_EXECUTION=MAINNET_OWNER_APPROVED",
+          "owner Review + wallet signature"
+        ]
+      },
+      "evidence": "PUBLIC_READ_ONLY_QUOTE",
+      "certification": "NOT_CERTIFIED"
+    },
+    {
+      "source": "robinhood",
+      "destination": "base",
+      "assets": {
+        "input": "ETH",
+        "output": "ETH"
+      },
+      "amount": "10000000000000000",
+      "discovery": {
+        "status": "EXECUTABLE",
+        "quoteSubjects": "PUBLIC_QUOTE_SUBJECT",
+        "observedAt": "2026-10-25T15:31:37.312Z",
+        "providers": [
+          {
+            "provider": "relay",
+            "bridge": "relay-depository",
+            "status": "EXECUTABLE",
+            "executableBy": "UNIVERSAL_ROUTER",
+            "expectedOutput": "9979277256690611",
+            "minimumOutput": "9929380870407158",
+            "estimatedDurationSeconds": 2,
+            "fees": [
+              {
+                "label": "Relay destination network fee",
+                "amount": "164735385204",
+                "symbol": "ETH",
+                "decimals": 18,
+                "included": true
+              },
+              {
+                "label": "Relay service fee",
+                "amount": "20558007924185",
+                "symbol": "ETH",
+                "decimals": 18,
+                "included": true
+              },
+              {
+                "label": "Robinhood Chain network fee (estimate)",
+                "amount": "926314393200",
+                "symbol": "ETH",
+                "decimals": 18,
+                "included": false
+              }
+            ],
+            "reason": null
+          },
+          {
+            "provider": "across",
+            "bridge": "across",
+            "status": "SUPPORTED_BY_PROVIDER",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "ACROSS_NATIVE_NOT_QUOTED"
+          },
+          {
+            "provider": "lifi",
+            "bridge": "lifi",
+            "status": "TEMPORARILY_UNAVAILABLE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "UNIVERSAL_PROVIDER_RATE_LIMITED"
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan",
+            "status": "NO_ROUTE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "MAYAN_NETWORK_UNSUPPORTED"
+          }
+        ]
+      },
+      "liveQuote": {
+        "provider": "relay",
+        "status": "EXECUTABLE",
+        "expectedOutput": "9979277256690611",
+        "minimumOutput": "9929380870407158",
+        "reason": null
+      },
+      "simulation": {
+        "status": "NOT_RUN",
+        "reason": "OWNER_FUNDS_REQUIRED: FloFi simulates the exact deposit with the connected owner at Simulate (eth_simulateV1 / simulateTransaction)"
+      },
+      "execution": {
+        "status": "EXECUTABLE_BY_CODE",
+        "by": [
+          "UNIVERSAL_ROUTER"
+        ],
+        "gates": [
+          "GRYLOO_UNIVERSAL_ROUTER=live",
+          "GRYLOO_UNIVERSAL_ROUTER_OWNER_EXECUTION=MAINNET_OWNER_APPROVED",
+          "owner Review + wallet signature"
+        ]
+      },
+      "evidence": "PUBLIC_READ_ONLY_QUOTE",
+      "certification": "NOT_CERTIFIED"
+    },
+    {
+      "source": "robinhood",
+      "destination": "arbitrum-one",
+      "assets": {
+        "input": "USDG",
+        "output": "USDC"
+      },
+      "amount": "25000000",
+      "discovery": {
+        "status": "EXECUTABLE",
+        "quoteSubjects": "PUBLIC_QUOTE_SUBJECT",
+        "observedAt": "2026-10-25T15:31:39.034Z",
+        "providers": [
+          {
+            "provider": "across",
+            "bridge": "across",
+            "status": "EXECUTABLE",
+            "executableBy": "CERTIFIED_ROUTER",
+            "expectedOutput": "24976650",
+            "minimumOutput": "24976650",
+            "estimatedDurationSeconds": 2,
+            "fees": [],
+            "reason": null
+          },
+          {
+            "provider": "relay",
+            "bridge": "relay-depository",
+            "status": "EXECUTABLE",
+            "executableBy": "UNIVERSAL_ROUTER",
+            "expectedOutput": "24967155",
+            "minimumOutput": "24842320",
+            "estimatedDurationSeconds": 1,
+            "fees": [
+              {
+                "label": "Robinhood Chain network fee (estimate)",
+                "amount": "2259363598800",
+                "symbol": "ETH",
+                "decimals": 18,
+                "included": false
+              },
+              {
+                "label": "Relay service fee",
+                "amount": "27500",
+                "symbol": "USDG",
+                "decimals": 6,
+                "included": true
+              },
+              {
+                "label": "Relay destination network fee",
+                "amount": "3913",
+                "symbol": "USDG",
+                "decimals": 6,
+                "included": true
+              }
+            ],
+            "reason": null
+          },
+          {
+            "provider": "lifi",
+            "bridge": "lifi",
+            "status": "TEMPORARILY_UNAVAILABLE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "UNIVERSAL_PROVIDER_RATE_LIMITED"
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan",
+            "status": "NO_ROUTE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "MAYAN_NETWORK_UNSUPPORTED"
+          }
+        ]
+      },
+      "liveQuote": {
+        "provider": "relay",
+        "status": "EXECUTABLE",
+        "expectedOutput": "24967155",
+        "minimumOutput": "24842320",
+        "reason": null
+      },
+      "simulation": {
+        "status": "NOT_RUN",
+        "reason": "OWNER_FUNDS_REQUIRED: FloFi simulates the exact deposit with the connected owner at Simulate (eth_simulateV1 / simulateTransaction)"
+      },
+      "execution": {
+        "status": "EXECUTABLE_BY_CODE",
+        "by": [
+          "CERTIFIED_ROUTER",
+          "UNIVERSAL_ROUTER"
+        ],
+        "gates": [
+          "GRYLOO_UNIVERSAL_ROUTER=live",
+          "GRYLOO_UNIVERSAL_ROUTER_OWNER_EXECUTION=MAINNET_OWNER_APPROVED",
+          "owner Review + wallet signature"
+        ]
+      },
+      "evidence": "PUBLIC_READ_ONLY_QUOTE",
+      "certification": "NOT_CERTIFIED"
+    },
+    {
+      "source": "robinhood",
+      "destination": "arbitrum-one",
+      "assets": {
+        "input": "ETH",
+        "output": "ETH"
+      },
+      "amount": "10000000000000000",
+      "discovery": {
+        "status": "EXECUTABLE",
+        "quoteSubjects": "PUBLIC_QUOTE_SUBJECT",
+        "observedAt": "2026-10-25T15:31:40.722Z",
+        "providers": [
+          {
+            "provider": "relay",
+            "bridge": "relay-depository",
+            "status": "EXECUTABLE",
+            "executableBy": "UNIVERSAL_ROUTER",
+            "expectedOutput": "9980877767558695",
+            "minimumOutput": "9930973378720902",
+            "estimatedDurationSeconds": 1,
+            "fees": [
+              {
+                "label": "Relay service fee",
+                "amount": "18558007924185",
+                "symbol": "ETH",
+                "decimals": 18,
+                "included": true
+              },
+              {
+                "label": "Relay destination network fee",
+                "amount": "564224517120",
+                "symbol": "ETH",
+                "decimals": 18,
+                "included": true
+              },
+              {
+                "label": "Robinhood Chain network fee (estimate)",
+                "amount": "922016163600",
+                "symbol": "ETH",
+                "decimals": 18,
+                "included": false
+              }
+            ],
+            "reason": null
+          },
+          {
+            "provider": "across",
+            "bridge": "across",
+            "status": "SUPPORTED_BY_PROVIDER",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "ACROSS_NATIVE_NOT_QUOTED"
+          },
+          {
+            "provider": "lifi",
+            "bridge": "lifi",
+            "status": "TEMPORARILY_UNAVAILABLE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "UNIVERSAL_PROVIDER_RATE_LIMITED"
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan",
+            "status": "NO_ROUTE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "MAYAN_NETWORK_UNSUPPORTED"
+          }
+        ]
+      },
+      "liveQuote": {
+        "provider": "relay",
+        "status": "EXECUTABLE",
+        "expectedOutput": "9980877767558695",
+        "minimumOutput": "9930973378720902",
+        "reason": null
+      },
+      "simulation": {
+        "status": "NOT_RUN",
+        "reason": "OWNER_FUNDS_REQUIRED: FloFi simulates the exact deposit with the connected owner at Simulate (eth_simulateV1 / simulateTransaction)"
+      },
+      "execution": {
+        "status": "EXECUTABLE_BY_CODE",
+        "by": [
+          "UNIVERSAL_ROUTER"
+        ],
+        "gates": [
+          "GRYLOO_UNIVERSAL_ROUTER=live",
+          "GRYLOO_UNIVERSAL_ROUTER_OWNER_EXECUTION=MAINNET_OWNER_APPROVED",
+          "owner Review + wallet signature"
+        ]
+      },
+      "evidence": "PUBLIC_READ_ONLY_QUOTE",
+      "certification": "NOT_CERTIFIED"
+    },
+    {
+      "source": "robinhood",
+      "destination": "ethereum",
+      "assets": {
+        "input": "USDG",
+        "output": "USDC"
+      },
+      "amount": "25000000",
+      "discovery": {
+        "status": "EXECUTABLE",
+        "quoteSubjects": "PUBLIC_QUOTE_SUBJECT",
+        "observedAt": "2026-10-25T15:31:42.476Z",
+        "providers": [
+          {
+            "provider": "across",
+            "bridge": "across",
+            "status": "EXECUTABLE",
+            "executableBy": "CERTIFIED_ROUTER",
+            "expectedOutput": "24959597",
+            "minimumOutput": "24959597",
+            "estimatedDurationSeconds": 8,
+            "fees": [],
+            "reason": null
+          },
+          {
+            "provider": "relay",
+            "bridge": "relay-depository",
+            "status": "EXECUTABLE",
+            "executableBy": "UNIVERSAL_ROUTER",
+            "expectedOutput": "24952351",
+            "minimumOutput": "24827590",
+            "estimatedDurationSeconds": 5,
+            "fees": [
+              {
+                "label": "Relay destination network fee",
+                "amount": "18717",
+                "symbol": "USDG",
+                "decimals": 6,
+                "included": true
+              },
+              {
+                "label": "Robinhood Chain network fee (estimate)",
+                "amount": "2261395197600",
+                "symbol": "ETH",
+                "decimals": 18,
+                "included": false
+              },
+              {
+                "label": "Relay service fee",
+                "amount": "27500",
+                "symbol": "USDG",
+                "decimals": 6,
+                "included": true
+              }
+            ],
+            "reason": null
+          },
+          {
+            "provider": "lifi",
+            "bridge": "lifi",
+            "status": "TEMPORARILY_UNAVAILABLE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "UNIVERSAL_PROVIDER_RATE_LIMITED"
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan",
+            "status": "NO_ROUTE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "MAYAN_NETWORK_UNSUPPORTED"
+          }
+        ]
+      },
+      "liveQuote": {
+        "provider": "relay",
+        "status": "EXECUTABLE",
+        "expectedOutput": "24952351",
+        "minimumOutput": "24827590",
+        "reason": null
+      },
+      "simulation": {
+        "status": "NOT_RUN",
+        "reason": "OWNER_FUNDS_REQUIRED: FloFi simulates the exact deposit with the connected owner at Simulate (eth_simulateV1 / simulateTransaction)"
+      },
+      "execution": {
+        "status": "EXECUTABLE_BY_CODE",
+        "by": [
+          "CERTIFIED_ROUTER",
+          "UNIVERSAL_ROUTER"
+        ],
+        "gates": [
+          "GRYLOO_UNIVERSAL_ROUTER=live",
+          "GRYLOO_UNIVERSAL_ROUTER_OWNER_EXECUTION=MAINNET_OWNER_APPROVED",
+          "owner Review + wallet signature"
+        ]
+      },
+      "evidence": "PUBLIC_READ_ONLY_QUOTE",
+      "certification": "NOT_CERTIFIED"
+    },
+    {
+      "source": "robinhood",
+      "destination": "ethereum",
+      "assets": {
+        "input": "ETH",
+        "output": "ETH"
+      },
+      "amount": "10000000000000000",
+      "discovery": {
+        "status": "EXECUTABLE",
+        "quoteSubjects": "PUBLIC_QUOTE_SUBJECT",
+        "observedAt": "2026-10-25T15:31:44.154Z",
+        "providers": [
+          {
+            "provider": "relay",
+            "bridge": "relay-depository",
+            "status": "EXECUTABLE",
+            "executableBy": "UNIVERSAL_ROUTER",
+            "expectedOutput": "9979017581446615",
+            "minimumOutput": "9929122493539382",
+            "estimatedDurationSeconds": 5,
+            "fees": [
+              {
+                "label": "Relay service fee",
+                "amount": "18558007924185",
+                "symbol": "ETH",
+                "decimals": 18,
+                "included": true
+              },
+              {
+                "label": "Relay destination network fee",
+                "amount": "2424410629200",
+                "symbol": "ETH",
+                "decimals": 18,
+                "included": true
+              },
+              {
+                "label": "Robinhood Chain network fee (estimate)",
+                "amount": "917795928000",
+                "symbol": "ETH",
+                "decimals": 18,
+                "included": false
+              }
+            ],
+            "reason": null
+          },
+          {
+            "provider": "across",
+            "bridge": "across",
+            "status": "SUPPORTED_BY_PROVIDER",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "ACROSS_NATIVE_NOT_QUOTED"
+          },
+          {
+            "provider": "lifi",
+            "bridge": "lifi",
+            "status": "TEMPORARILY_UNAVAILABLE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "UNIVERSAL_PROVIDER_RATE_LIMITED"
+          },
+          {
+            "provider": "mayan",
+            "bridge": "mayan",
+            "status": "NO_ROUTE",
+            "executableBy": null,
+            "expectedOutput": null,
+            "minimumOutput": null,
+            "estimatedDurationSeconds": null,
+            "fees": [],
+            "reason": "MAYAN_NETWORK_UNSUPPORTED"
+          }
+        ]
+      },
+      "liveQuote": {
+        "provider": "relay",
+        "status": "EXECUTABLE",
+        "expectedOutput": "9979017581446615",
+        "minimumOutput": "9929122493539382",
+        "reason": null
+      },
+      "simulation": {
+        "status": "NOT_RUN",
+        "reason": "OWNER_FUNDS_REQUIRED: FloFi simulates the exact deposit with the connected owner at Simulate (eth_simulateV1 / simulateTransaction)"
+      },
+      "execution": {
+        "status": "EXECUTABLE_BY_CODE",
+        "by": [
+          "UNIVERSAL_ROUTER"
+        ],
+        "gates": [
+          "GRYLOO_UNIVERSAL_ROUTER=live",
+          "GRYLOO_UNIVERSAL_ROUTER_OWNER_EXECUTION=MAINNET_OWNER_APPROVED",
+          "owner Review + wallet signature"
+        ]
+      },
+      "evidence": "PUBLIC_READ_ONLY_QUOTE",
+      "certification": "NOT_CERTIFIED"
+    }
+  ]
+}

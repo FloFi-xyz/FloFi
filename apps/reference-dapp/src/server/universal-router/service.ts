@@ -35,11 +35,13 @@ import { solanaTransactionClaim } from '../solana-transaction-claim.ts';
 import * as evm from './evm-chain.ts';
 import * as sol from './solana-chain.ts';
 import type { ProviderStatusHint, UniversalProviderAdapter, UniversalQuoteRequest } from './relay-provider.ts';
+import { feeObligationFor, flofiFeePolicy } from './fee-obligation.ts';
 import { UNIVERSAL_ACTIVE, UNIVERSAL_OBSERVABLE, UNIVERSAL_RUN_ID, UNIVERSAL_SETTLING, UNIVERSAL_TERMINAL, type DestinationDelivery, type EvmReviewSource, type EvmTx,
   type ProviderConsideration, type SolanaReviewSource, type SourceSettlement, type TokenFacts, type UniversalAttempt, type UniversalBegin, type UniversalEvidence,
   type UniversalEvmAttempt, type UniversalProvenance, type UniversalRecord, type UniversalReview, type UniversalSolanaAttempt, type UniversalWalletDiagnostic } from './types.ts';
 
 export * from './types.ts';
+export { FLOFI_WORKFLOW_FEE_BPS, flofiFeeAmount, flofiFeePolicy, feeObligationFor } from './fee-obligation.ts';
 const fail = (code: string): never => { throw new Error(code); };
 const isObject = evm.isObject;
 const CODE = /^[A-Z][A-Z0-9_]{2,80}$/;
@@ -92,7 +94,10 @@ export function validateUniversalLog(bytes: Uint8Array): void {
         (run.phase === 'FAILED') !== (run.verdict === 'FAILED') || (run.phase === 'RECONCILIATION_REQUIRED') !== (run.verdict === 'DIVERGENT') ||
         (['AUTHORIZED', 'SOURCE_SUBMITTED'].includes(run.phase) ? run.authorization !== r.commitment : run.authorization !== null) ||
         (run.phase === 'SOURCE_SUBMITTED' && !run.attempts.some(a => a.step === 'DEPOSIT' && UNIVERSAL_OBSERVABLE.includes(a.state))) ||
-        typeof run.requote !== 'boolean' || (run.requote && run.phase !== 'PREPARED') || (run.received !== null && run.destination?.amount !== run.received))
+        typeof run.requote !== 'boolean' || (run.requote && run.phase !== 'PREPARED') || (run.received !== null && run.destination?.amount !== run.received) ||
+        (run.verdict === 'PENDING') !== (run.feeObligation === null) ||
+        (run.verdict === 'RECONCILED' && (run.feeObligation?.status !== 'OBLIGATED' || run.evidence?.feeObligation?.status !== 'OBLIGATED')) ||
+        (run.verdict !== 'PENDING' && run.verdict !== 'RECONCILED' && run.feeObligation?.status !== 'WAIVED'))
       fail('UNIVERSAL_STORE_CORRUPT');
     if (prior) {
       if (run.id !== prior.id || run.owner !== prior.owner || run.provenance !== prior.provenance || !same(run.workflow, prior.workflow) ||
@@ -166,7 +171,8 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
   const deauthorized = (record: UniversalRecord, error: string, changes: readonly RouteChange[] = record.routeChanges, requote = record.requote): UniversalRecord =>
     ({ ...record, authorization: null, phase: record.phase === 'AUTHORIZED' || record.phase === 'SOURCE_SUBMITTED' ? 'PREPARED' : record.phase, error, routeChanges: changes,
       requote: requote && ['AUTHORIZED', 'SOURCE_SUBMITTED', 'PREPARED'].includes(record.phase) });
-  const divergent = (record: UniversalRecord, code: string): UniversalRecord => ({ ...transition(record, 'RECONCILIATION_REQUIRED'), verdict: 'DIVERGENT', authorization: null, error: code });
+  const divergent = (record: UniversalRecord, code: string): UniversalRecord => ({ ...transition(record, 'RECONCILIATION_REQUIRED'), verdict: 'DIVERGENT', authorization: null, error: code,
+    feeObligation: feeObligationFor(record.review.route, 'DIVERGENT') });
 
   // --- intent, tokens, recipient ----------------------------------------------------------------------------------------
   function intentOf(workflow: SemanticWorkflow): UniversalBridgeFields & { nodeId: string; source: UniversalNetwork; destination: UniversalNetwork } {
@@ -331,7 +337,7 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
       tokens: { input: { ...x.inputFacts, symbol: route.inputToken.symbol }, output: { ...x.outputFacts, symbol: route.outputToken.symbol } },
       source: x.source, destination: { chainId: f.destination.chain, position: x.destination.position, recipientBalance: x.destination.recipientBalance },
       deadlines: { reviewExpiresAt: x.expiresAt, quoteExpiresAt: route.quote.expiresAt, orderDeadline: route.order.deadline },
-      feePolicy: { flofiFee: 'NONE', networkFeeUpperBound: x.networkFee, networkFeeSymbol: f.source.native.symbol, networkFeeDecimals: f.source.native.decimals },
+      feePolicy: flofiFeePolicy({ upperBound: x.networkFee, symbol: f.source.native.symbol, decimals: f.source.native.decimals }),
       authorizations: { sourceSignatures: x.signatures, destinationAuthorization: 'NONE' }, artifacts: x.artifacts };
     return { ...review, commitment: universalReviewCommitment(review as UniversalReview) };
   }
@@ -474,7 +480,8 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
     const receipt = { transactionHash: hash, status: facts.status, blockNumber: facts.blockNumber, blockHash: facts.blockHash, from: facts.from, gasCostWei: facts.gasCostWei.toString(),
       submissionKind: facts.direct ? 'DIRECT' as const : 'DELEGATED_SINGLE' as const };
     if (facts.status === 0) {
-      if (attempt.step === 'DEPOSIT') return save(replaceAttempt({ ...transition(record, 'FAILED'), verdict: 'FAILED', authorization: null, error: 'UNIVERSAL_DEPOSIT_REVERTED' },
+      if (attempt.step === 'DEPOSIT') return save(replaceAttempt({ ...transition(record, 'FAILED'), verdict: 'FAILED', authorization: null, error: 'UNIVERSAL_DEPOSIT_REVERTED',
+        feeObligation: feeObligationFor(record.review.route, 'FAILED') },
         { ...attempt, state: 'REVERTED', transactionHash: attempt.transactionHash ?? hash, receipt, note: 'UNIVERSAL_DEPOSIT_REVERTED' }));
       return save(replaceAttempt(deauthorized(record, 'UNIVERSAL_APPROVAL_REVERTED'), { ...attempt, state: 'REVERTED', transactionHash: attempt.transactionHash ?? hash, receipt,
         note: 'UNIVERSAL_APPROVAL_REVERTED' }));
@@ -612,7 +619,8 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
       return save(replaceAttempt(divergent(record, code), { ...pending, state: 'RECONCILIATION_REQUIRED', note: code }));
     }
     if (!landed) return save(replaceAttempt({ ...record, error: 'UNIVERSAL_AWAITING_SOURCE_FINALITY' }, pending));
-    if (landed.status === 'REVERTED') return save(replaceAttempt({ ...transition(record, 'FAILED'), verdict: 'FAILED', authorization: null, error: 'UNIVERSAL_DEPOSIT_REVERTED' },
+    if (landed.status === 'REVERTED') return save(replaceAttempt({ ...transition(record, 'FAILED'), verdict: 'FAILED', authorization: null, error: 'UNIVERSAL_DEPOSIT_REVERTED',
+      feeObligation: feeObligationFor(record.review.route, 'FAILED') },
       { ...pending, state: 'REVERTED', feeLamports: landed.fee.toString(), note: 'UNIVERSAL_DEPOSIT_REVERTED' }));
     const settled: SourceSettlement = { chainId: record.review.route.sourceChain, transactionHash: attempt.transactionHash, position: { kind: 'SLOT', height: landed.slot },
       blockHash: null, timestamp: landed.timestamp, orderId: record.review.route.order.orderId, ownerDebit: landed.ownerDebit.toString(), final: true, confirmedAt: now().toISOString() };
@@ -701,7 +709,8 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
         const refund = await findRefund(record, h);
         // Recovery is recorded before the refund, so the history shows the run left the normal settlement path first.
         if (record.phase !== 'RECOVERY_REQUIRED') record = await save({ ...transition(record, 'RECOVERY_REQUIRED'), error: 'UNIVERSAL_REFUND_NOT_OBSERVED' });
-        if (refund) return save({ ...transition(record, 'REFUNDED'), verdict: 'REFUNDED', refund, error: null });
+        if (refund) return save({ ...transition(record, 'REFUNDED'), verdict: 'REFUNDED', refund, error: null,
+          feeObligation: feeObligationFor(record.review.route, 'REFUNDED') });
         return save({ ...record, error: 'UNIVERSAL_REFUND_NOT_OBSERVED' });
       } else {
         // No delivery yet: past the attention window (or a provider failure report) the run needs attention; it keeps observing and verifies a late fill or a refund.
@@ -723,12 +732,13 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
       }
     }
     if (record.source!.final && record.destination?.final) {
-      const evidence = buildEvidence(record);
-      return save({ ...transition(record, 'RECONCILED'), evidence, verdict: 'RECONCILED', error: null });
+      const feeObligation = feeObligationFor(record.review.route, 'RECONCILED');
+      const evidence = buildEvidence(record, feeObligation);
+      return save({ ...transition(record, 'RECONCILED'), evidence, verdict: 'RECONCILED', error: null, feeObligation });
     }
     return save({ ...record, error: record.destination ? 'UNIVERSAL_AWAITING_FINALITY' : record.error });
   }
-  function buildEvidence(record: UniversalRecord): UniversalEvidence {
+  function buildEvidence(record: UniversalRecord, feeObligation: NonNullable<UniversalRecord['feeObligation']>): UniversalEvidence {
     const source = record.source!, destination = record.destination!, route = record.review.route, a = record.review.artifacts;
     const evidenceClass = universalEvidenceClass(provenance), network = universalNetworkOfChain(route.sourceChain)!;
     const asset = (t: UniversalToken) => t.kind === 'NATIVE' ? { chainId: t.chainId, nativeId: universalNetworkOfChain(t.chainId)!.native.nativeId, decimals: t.decimals }
@@ -749,15 +759,17 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
           { asset: asset(route.inputToken), amount: included.toString() }],
         residualAssets: [], ownership: [{ chainId: route.sourceChain, address: record.owner }, { chainId: route.destinationChain, address: route.recipient }],
         limitations: [provenance === 'PUBLIC_MAINNET' ? 'PUBLIC_MAINNET_OWNER_EXECUTED' : 'MOCKED_CHAINS_ONLY',
-          destination.orderBound ? 'DELIVERY_REFERENCES_ORDER_ON_CHAIN' : 'DELIVERY_REFERENCED_BY_PROVIDER_STATUS', 'SOURCE_AND_DESTINATION_FINAL'] },
+          destination.orderBound ? 'DELIVERY_REFERENCES_ORDER_ON_CHAIN' : 'DELIVERY_REFERENCED_BY_PROVIDER_STATUS', 'SOURCE_AND_DESTINATION_FINAL',
+          'FLOFI_FEE_OBLIGATION_RECORDED_NOT_COLLECTED'] },
       evidence: [{ evidenceId: 'route-commitment', kind: 'EXTERNAL_REFERENCE', contentHash: record.review.routeCommitment },
         { evidenceId: 'provider-order', kind: 'EXTERNAL_REFERENCE', contentHash: digest(route.order) },
         { evidenceId: 'source-deposit', kind: 'EXTERNAL_REFERENCE', contentHash: digest(source) },
         { evidenceId: 'destination-delivery', kind: 'EXTERNAL_REFERENCE', contentHash: digest(destination) },
+        { evidenceId: 'flofi-fee-obligation', kind: 'EXTERNAL_REFERENCE', contentHash: digest(feeObligation) },
         { evidenceId: 'public-explorer', kind: 'EXTERNAL_REFERENCE', contentHash: digest(transactions.map(t => t.explorer).join('\n')) }] }) as EvidenceBundle;
     return { bundle, bundleHash: hashArtifactBytes('evidence-bundle', new TextEncoder().encode(JSON.stringify(bundle))), evidenceClass,
       route: { provider: route.provider, protocol: route.protocol, routeCommitment: record.review.routeCommitment, orderId: route.order.orderId, manifestHash: a.hashes.manifest },
-      source, destination, recipient: route.recipient, minimumOutput: route.minimumOutput, received: destination.amount, transactions, reconciliation: 'RECONCILED',
+      source, destination, recipient: route.recipient, minimumOutput: route.minimumOutput, received: destination.amount, feeObligation, transactions, reconciliation: 'RECONCILED',
       observedAt: now().toISOString() };
   }
 
@@ -768,7 +780,7 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
       const workflow = workflowInput as SemanticWorkflow, review = await buildReview(workflow, ownerInput, destinationWallet);
       return save({ format: 'flofi.universal-bridge-run.v1', id: 'xuni-' + randomBytes(16).toString('hex'), provenance, workflow, owner: review.owner, review,
         authorization: null, phase: 'PREPARED', attempts: [], source: null, destination: null, refund: null, lastHint: null, routeChanges: [], requote: false, evidence: null,
-        verdict: 'PENDING', error: null, received: null });
+        verdict: 'PENDING', error: null, received: null, feeObligation: null });
     },
     /** New quote, simulation and Review for the same run; only before any deposit can exist. */
     async refresh(id: string, destinationWallet?: string): Promise<UniversalRecord> { return locked(id, async () => {

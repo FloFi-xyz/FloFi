@@ -139,7 +139,7 @@ export function projectSimulation(flow: FlowName, value: unknown): SimulationVie
           transactionSimulation: { ...pick(simulation, ['provenance', 'method', 'block', 'slot', 'ownerDebit', 'unitsConsumed']), ecosystem: String(source.ecosystem),
             calls: list(simulation.calls, ['purpose', 'gasUsed']), notSimulated: Array.isArray(simulation.notSimulated) ? simulation.notSimulated.map(String) : [] },
           approvals: list(source.approvals, ['token', 'spender', 'amount', 'currentAllowance', 'required']),
-          feePolicy: pick(r.feePolicy, ['flofiFee', 'networkFeeUpperBound', 'networkFeeSymbol', 'networkFeeDecimals']),
+          feePolicy: pick(r.feePolicy, ['flofiFee', 'flofiFeeRateBps', 'flofiFeeBasis', 'flofiFeeCollection', 'networkFeeUpperBound', 'networkFeeSymbol', 'networkFeeDecimals']),
           authorizations: pick(r.authorizations, ['sourceSignatures', 'destinationAuthorization']),
           deadlines: pick(r.deadlines, ['reviewExpiresAt', 'quoteExpiresAt', 'orderDeadline']) },
         canonicalArtifacts: canonicalArtifacts(r.artifacts) };

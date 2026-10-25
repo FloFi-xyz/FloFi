@@ -97,10 +97,11 @@ describe('BUILD-CHAT-E2E-001 delegated workflow run (PostgreSQL, MOCKED chains)'
       const bound = { version: 2, steps: [BASE_SWAP, { action: 'swap', network: 'base-sepolia', inputAsset: 'WETH', outputAsset: 'USDC', amount: '1', slippageBps: 50 }],
         bindings: [{ step: 1, amountFrom: 0 }] };
       const approval = await h.request(bound);
-      expect(approval).toMatchObject({ executionPlan: 'SEQUENTIAL', gates: { supportedByCode: { modes: { confirmEachStep: 'DEPENDENT_AMOUNT_SOURCE_NOT_IMPLEMENTED', delegated: null } } } });
+      expect(approval).toMatchObject({ executionPlan: 'SEQUENTIAL', gates: { supportedByCode: { modes: { confirmEachStep: null, delegated: null } } } });
       const claimed = await claim(h, approval.secret);
-      expect(claimed.view.workflowRun!.plan).toMatchObject({ confirmEachStep: { available: false, reason: 'DEPENDENT_AMOUNT_SOURCE_NOT_IMPLEMENTED' },
-        delegatedSingleAuthorization: { available: true }, bindings: [{ step: 1, amountFrom: 0, delegated: 'RECONCILED_RECEIVED_AMOUNT' }] });
+      expect(claimed.view.workflowRun!.plan).toMatchObject({ confirmEachStep: { available: true },
+        delegatedSingleAuthorization: { available: true }, bindings: [{ step: 1, amountFrom: 0, confirmEachStep: 'RECONCILED_RECEIVED_AMOUNT',
+          delegated: 'RECONCILED_RECEIVED_AMOUNT' }] });
       const run = await ownedRun(h.runs, approval.approvalId, [h.evm, h.sol]);
       const review = await authorizationReviewSequential(h.runs, run, [h.evm, h.sol]);
       await workflowRunAuthorize(h.surface, approval.secret, [h.evm, h.sol], review.revision, h.d.passkey.assert(fromB64url(review.challenge), ORIGIN, 'localhost'), h.d.now());

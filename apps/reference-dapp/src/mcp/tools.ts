@@ -243,8 +243,8 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
         sequences: 'One approval for the whole workflow; the owner confirms each step in their wallet, in order, each after the previous step reconciled. ' +
           'Where the owner enrolled delegated Credentials and this deployment can sign delegated steps, ONE passkey authorization can cover the whole ' +
           'workflow instead (request_user_approval reports the authorizations each mode needs). One authorization is not one transaction and not zero gas.',
-        bindings: 'A step may spend what an earlier step actually delivered: {step, amountFrom}; its own amount is then a cap. Resolved only from reconciled ' +
-          'amounts (delegated runs); owner-signed sequences report DEPENDENT_AMOUNT_SOURCE_NOT_IMPLEMENTED.' },
+        bindings: 'A step may spend what an earlier step actually delivered: {step, amountFrom}; its own amount is then a cap. Resolved from reconciled ' +
+          'received amounts in both confirm-each-step and delegated modes (min(cap, received)).' },
       capabilities: (await capabilityFacts(ctx.runtime, ctx.policy ?? DEFAULT_POLICY, { network: args.network, action: args.action }, scope)).map(({ row: r, flow, mode, previewable,
         previewUnavailableReason, gates }) => {
         return { action: r.action, network: r.network, destinationNetwork: r.destinationNetwork, funds: r.funds, actionTypes: r.actionTypes, adapters: r.adapters,
