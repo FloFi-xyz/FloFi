@@ -9,7 +9,7 @@ import { validateBridgeWorkflow } from './bridge.js';
 import { validateRouterBridgeWorkflow } from './crosschain-router.js';
 import { validateBridgeSwapWorkflow } from './bridge-swap.js';
 import { validateCrossChainLiquidityWorkflow } from './cross-chain-liquidity.js';
-import { BRIDGE_ACTION, isRouterBridgeNode, isSolanaTransferNode } from '@defi-workflow-engine/workflow-contracts';
+import { BRIDGE_ACTION, isRouterBridgeNode, isSolanaTransferNode, isUniversalBridgeNode, validateUniversalBridgeWorkflow } from '@defi-workflow-engine/workflow-contracts';
 
 import { isLendingComposition } from '@defi-workflow-engine/workflow-contracts';
 import { validateLendingComposition } from './lending-composition.js';
@@ -96,6 +96,8 @@ export function validateAuthoringWorkflow(input: unknown, context: ReviewContext
   if (workflow.nodes.some(node => node.actionType === BRIDGE_ACTION)) {
     // BUILD-ROUTER-001: the Cross-chain Router declaration; BUILD-008/009/010 bridge shapes keep their own validators.
     if (workflow.nodes.some(isRouterBridgeNode)) { validateRouterBridgeWorkflow(workflow); return workflow; }
+    // BUILD-CROSSCHAIN-UNIVERSAL-001: the universal router declaration (five mainnets, any provider-supported asset).
+    if (workflow.nodes.some(isUniversalBridgeNode)) { validateUniversalBridgeWorkflow(workflow); return workflow; }
     if (workflow.nodes.length === 2) validateBridgeSwapWorkflow(workflow);
     else validateBridgeWorkflow(workflow);
     return workflow;

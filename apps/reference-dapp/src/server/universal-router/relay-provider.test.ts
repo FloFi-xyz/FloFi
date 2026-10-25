@@ -96,7 +96,7 @@ describe('N — tampered or mismatched quotes are refused before Review', () => 
   it('an invalid minimum output, an app fee or order fees', () => {
     refuse('sol-base', () => undefined, 'RELAY_ORDER_MINIMUM_BELOW_SLIPPAGE', { slippageBps: 100 });
     refuse('sol-base', raw => { raw.fees.app.amount = '5'; }, 'RELAY_APP_FEE_UNEXPECTED');
-    refuse('sol-base', raw => rehash(raw, o => { (o as { fees: unknown[] }).fees = [{ recipientChainId: 'base', recipient: '0x' + '7'.repeat(40), currencyChainId: 'base',
+    refuse('sol-base', raw => rehash(raw, o => { (o as unknown as { fees: unknown[] }).fees = [{ recipientChainId: 'base', recipient: '0x' + '7'.repeat(40), currencyChainId: 'base',
       currency: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913', amount: '1' }]; }), 'RELAY_ORDER_FEES_UNEXPECTED');
   });
   it('maps Relay refusals to stable codes', () => {

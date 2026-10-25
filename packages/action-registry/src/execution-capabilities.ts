@@ -47,7 +47,7 @@ const adapterVersions: Readonly<Record<string, string>> = Object.freeze({
   'aave-v3': '1.0.0', 'uniswap.v3': '1.0.0', 'cow.protocol': '1.0.0', 'lifi.rest': '1.0.0', 'across.direct': '1.0.0',
   'gryloo.calculated-split': '1.0.0', 'gryloo.template': '1.0.0', 'jupiter.swap-v2': '1.0.0',
   'orca.whirlpools-devnet': '1.0.0', 'orca.whirlpools-devnet-liquidity': '1.0.0', 'orca.whirlpools-mainnet-liquidity': '1.0.0', 'evm.native-transfer': '1.0.0',
-  'flofi.router': '1.0.0', 'evm.token-transfer': '1.0.0', 'solana.system-transfer': '1.0.0', 'solana.spl-transfer': '1.0.0',
+  'flofi.router': '1.0.0', 'flofi.router.universal': '1.0.0', 'evm.token-transfer': '1.0.0', 'solana.system-transfer': '1.0.0', 'solana.spl-transfer': '1.0.0',
 });
 const rows: ExecutionCapabilityProfile[] = [];
 function add(actionType: string, adapterId: string, chainId: string, environment: ExecutionEnvironment,
@@ -144,6 +144,12 @@ for (const action of ['supply', 'borrow', 'repay', 'withdraw'] as const)
 for (const [action, adapter] of [['asset.swap.exact-input', 'uniswap.v3'], ['asset.transfer', 'evm.native-transfer'], ['asset.transfer', 'evm.token-transfer'], ['asset.bridge', 'flofi.router'], ['asset.liquidity.concentrated', 'uniswap.v3'],
   ['supply', 'aave-v3'], ['borrow', 'aave-v3'], ['repay', 'aave-v3'], ['withdraw', 'aave-v3']] as const)
   add(action, adapter, 'eip155:1', 'MAINNET', fork, null, 'DIRECT_TRANSACTION', ['INJECTED_WALLET', 'QUOTE_PROVIDER', 'REVIEWED_ARTIFACTS'], ['A']);
+// BUILD-CROSSCHAIN-UNIVERSAL-001: the universal Cross-chain Router, sourced on any of the five FloFi mainnets (destination any other one),
+// executed through Relay's Depository with FloFi-built source transactions; signed only by the owner's wallet (EVM: sent by the wallet;
+// Solana: wallet-signed bytes verified and broadcast once by FloFi) and gated by an explicit deployment opt-in. None is demonstrated,
+// so no evidence ceiling is claimed.
+for (const chain of ['solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp', 'eip155:8453', 'eip155:42161', 'eip155:1', 'eip155:4663'])
+  add('asset.bridge', 'flofi.router.universal', chain, 'MAINNET', fork, null, 'DIRECT_TRANSACTION', ['INJECTED_WALLET', 'QUOTE_PROVIDER', 'REVIEWED_ARTIFACTS'], ['A']);
 export const executionCapabilityRegistry: readonly ExecutionCapabilityProfile[] = Object.freeze(rows);
 
 export type CapabilityRuntime = {
