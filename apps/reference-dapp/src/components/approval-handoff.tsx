@@ -366,14 +366,12 @@ export function ApprovalHandoff({ slot = null, surface = 'canvas', onSurfaceChan
     {view.workflowRun && <WorkflowRunPanel claim={view.workflowRun} approvalId={view.approvalId} secret={secret && SECRET.test(secret) ? secret : null}
       onProposal={onRunProposal} onError={setError}/>}
     {!fromAutomation && <label className="approval-share"><input type="checkbox" disabled={busy || Boolean(recovery)} checked={claimed ? view.statusShared : share === true}
-      onChange={e => toggleShare(e.target.checked)}/>{tr("Share the status and evidence of runs started from this proposal with ")}{tr(view.clientName)}</label>}
+      onChange={e => toggleShare(e.target.checked)}/>{tr("Share status and evidence with {0}", view.clientName)}</label>}
     <details className="approval-details"><summary>{tr('Proposal details')}</summary>
       {facts}
       <p className="muted approval-ai">{view.requesterKind === 'DEVELOPER_PROJECT'
         ? tr("Created by {0}, a third-party app registered with FloFi, not by FloFi. It is not financial advice; you decide, and only your wallet can sign.", view.clientName)
         : tr("Proposed with an AI assistant from your conversation. It is not financial advice; you decide, and only your wallet can sign.")}</p>
-      {view.summary && <p className="approval-summary">{tr(view.summary)}</p>}
-      {view.explanation.length > 0 && <ul className="approval-explanation">{view.explanation.map((line, i) => <li key={i}>{tr(line)}</li>)}</ul>}
     </details>
     {!claimed && !recovery && links && <details className="approval-mobile"><summary>Open with a mobile wallet</summary>
       <p>Use the browser inside your wallet app. A sign-in message proves ownership; it never approves spending.</p>
