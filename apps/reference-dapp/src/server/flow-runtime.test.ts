@@ -50,7 +50,10 @@ describe('BUILD-CLOUD-PARITY-001 flow runtime selection', () => {
   });
   it('a hosted deployment without a runtime fails closed and never reaches a local journal', async () => {
     const env = { ...VERCEL_PREVIEW, GRYLOO_SUPPLY_JOURNAL: '/tmp/journal', GRYLOO_SUPPLY_TESTNET: 'live' };
-    expect(await cloudFlow('aave-supply', 'simulate', [{}, '0x' + '1'.repeat(40)], { env })).toEqual({ ok: false, code: 'CLOUD_RUNTIME_NOT_CONFIGURED' });
+    expect(await cloudFlow('aave-supply', 'status', ['supply-' + '0'.repeat(32)], { env })).toEqual({ ok: false, code: 'CLOUD_RUNTIME_NOT_CONFIGURED' });
+    // BUILD-FLOFI-MAINNET-PRODUCT-001: a hosted deployment is the Mainnet-only product: a test-network simulation is refused before any runtime.
+    expect(await cloudFlow('aave-supply', 'simulate', [{}, '0x' + '1'.repeat(40)], { env })).toEqual({ ok: false, code: 'TEST_NETWORK_NOT_AVAILABLE' });
+    expect(await cloudFlow('base-aave', 'simulate', [{}, '0x' + '1'.repeat(40)], { env })).toEqual({ ok: false, code: 'CLOUD_RUNTIME_NOT_CONFIGURED' });
     expect(await cloudFlowMode('aave-supply', env)).toBe('off');
     expect(await cloudRuns('crosschain-router-testnet', '0x' + '1'.repeat(40), env)).toEqual({ ok: false, code: 'CLOUD_RUNTIME_NOT_CONFIGURED' });
   });

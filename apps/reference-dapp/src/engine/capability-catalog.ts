@@ -17,7 +17,8 @@ import { ROUTER_PAIRS } from '@defi-workflow-engine/workflow-contracts';
 import { composeStrategy, dappReviewContext, NETWORKS, strategyNetwork } from './strategy-engine';
 import { STRATEGY_EXAMPLES } from './strategy-examples';
 import { networkCatalog } from '../domain/asset-catalogs';
-import { NETWORK_IDS, type NetworkId, type StrategyAction, type StrategySpec } from './strategy-spec';
+import { NETWORK_IDS, PUBLIC_NETWORK_IDS, PUBLIC_STRATEGY_ACTIONS, type NetworkId, type StrategyAction, type StrategySpec } from './strategy-spec';
+import type { NetworkScope } from '../domain/network-scope';
 
 /** CAIP-2 identity of each network, read from the registries that serve it. */
 export const NETWORK_CHAINS: Readonly<Record<NetworkId, string>> = Object.freeze({
@@ -28,14 +29,22 @@ export const NETWORK_CHAINS: Readonly<Record<NetworkId, string>> = Object.freeze
   'robinhood': ROBINHOOD_BASE_ASSETS.chain, 'robinhood-testnet': ROBINHOOD_TESTNET_TRANSFER.chain, 'ethereum': ETHEREUM_BASE_ASSETS.chain,
 });
 const networkOfChain = (chain: string): NetworkId | null => NETWORK_IDS.find(id => NETWORK_CHAINS[id] === chain) ?? null;
+/** A strategy of the public product: every network it names is a mainnet (so the Base Sepolia lending composition is not one). */
+export const strategyInScope = (strategy: StrategySpec): boolean => [strategyNetwork(strategy), strategy.action === 'bridge' ? strategy.destinationNetwork : null]
+  .every(network => network === null || PUBLIC_NETWORK_IDS.includes(network));
 const actionsOn = (network: NetworkId): StrategyAction[] => [...new Set(STRATEGY_EXAMPLES.filter(e => strategyNetwork(e.strategy) === network ||
   e.strategy.action === 'bridge' && e.strategy.destinationNetwork === network).map(e => e.strategy.action))];
 
 export type NetworkInfo = { readonly id: NetworkId; readonly name: string; readonly chainId: string; readonly class: 'MAINNET' | 'TESTNET' | 'DEVNET';
   readonly funds: 'REAL_FUNDS' | 'TEST_FUNDS'; readonly actions: readonly StrategyAction[] };
-export function supportedNetworks(): readonly NetworkInfo[] {
-  return NETWORK_IDS.map(id => ({ id, name: NETWORKS[id].label, chainId: NETWORK_CHAINS[id], class: NETWORKS[id].class,
-    funds: NETWORKS[id].class === 'MAINNET' ? 'REAL_FUNDS' : 'TEST_FUNDS', actions: actionsOn(id) }));
+/**
+ * BUILD-FLOFI-MAINNET-PRODUCT-001: the networks of `scope`. The public product lists mainnets only (each with its public actions); engineering
+ * certification lists every network the registries serve.
+ */
+const networksOf = (scope: NetworkScope): readonly NetworkId[] => scope === 'ENGINEERING' ? NETWORK_IDS : PUBLIC_NETWORK_IDS;
+export function supportedNetworks(scope: NetworkScope): readonly NetworkInfo[] {
+  return networksOf(scope).map(id => ({ id, name: NETWORKS[id].label, chainId: NETWORK_CHAINS[id], class: NETWORKS[id].class,
+    funds: NETWORKS[id].class === 'MAINNET' ? 'REAL_FUNDS' : 'TEST_FUNDS', actions: actionsOn(id).filter(action => scope === 'ENGINEERING' || PUBLIC_STRATEGY_ACTIONS.includes(action)) }));
 }
 
 /** A null address is the chain's native currency, never an ERC-20 identity. */
@@ -79,11 +88,11 @@ function assetEntries(): Entry[] {
   return out;
 }
 /** Every asset a strategy can name, grouped by chain and address (one symbol can be two tokens on one network). */
-export function supportedAssets(network?: NetworkId): readonly AssetInfo[] {
+export function supportedAssets(scope: NetworkScope, network?: NetworkId): readonly AssetInfo[] {
   const merged = new Map<string, { network: NetworkId; chainId: string; symbol: string; address: string | null; decimals: number; actions: Set<StrategyAction>; sources: Set<string> }>();
   for (const e of assetEntries()) {
     const id = networkOfChain(e.chain);
-    if (!id || (network && id !== network)) continue;
+    if (!id || (network && id !== network) || !networksOf(scope).includes(id)) continue;
     const key = `${e.chain}\0${e.address}`, item = merged.get(key) ?? { network: id, chainId: e.chain, symbol: e.symbol, address: e.address, decimals: e.decimals, actions: new Set(), sources: new Set() };
     item.actions.add(e.action); item.sources.add(e.source); merged.set(key, item);
   }
@@ -104,9 +113,9 @@ export type CodeCapability = {
   /** Every registry environment the action's adapter declares on this chain (e.g. a mainnet path that is local-fork only). */
   readonly registryEnvironments: readonly ExecutionEnvironment[];
 };
-/** Code capabilities for each supported action × network, from the registry resolved on the composed IR. */
-export function codeCapabilities(): readonly CodeCapability[] {
-  return STRATEGY_EXAMPLES.map(({ strategy }) => {
+/** Code capabilities for each supported action × network of `scope`, from the registry resolved on the composed IR. */
+export function codeCapabilities(scope: NetworkScope): readonly CodeCapability[] {
+  return STRATEGY_EXAMPLES.filter(({ strategy }) => scope === 'ENGINEERING' || strategyInScope(strategy)).map(({ strategy }) => {
     const composed = composeStrategy(strategy);
     if (!composed.ok) throw new Error('CAPABILITY_EXAMPLE_INVALID');
     const network = strategyNetwork(strategy), environment = NETWORKS[network].environment;

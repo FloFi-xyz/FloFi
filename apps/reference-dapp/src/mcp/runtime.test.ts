@@ -36,20 +36,26 @@ describe('BUILD-MCP-001 runtime selection for the gateway (BUILD-CLOUD-PARITY-00
       : url.endsWith(`/v1/runs/${RUN}`) ? { status: 200, body: { ok: true, value: { runId: RUN, ownerAccount: OWNER } } } : { status: 404, body: { ok: false, code: 'RUN_NOT_FOUND' } });
     const runtime = deploymentRuntime(env);
     expect(runtime.kind).toBe('remote');
-    expect(await runtime.preview('crosschain-router-testnet', [{ workflowId: 'w', nodes: [] }, OWNER])).toEqual({ ok: false, code: 'ROUTER_NO_EXECUTABLE_ROUTE' });
+    // BUILD-FLOFI-MAINNET-PRODUCT-001: a hosted deployment (VERCEL=1) is the Mainnet-only product: its test-network preview never reaches the API.
+    const hostedProduct = 'VERCEL' in env && env.VERCEL === '1';
+    expect(await runtime.preview('crosschain-router-testnet', [{ workflowId: 'w', nodes: [] }, OWNER]))
+      .toEqual({ ok: false, code: hostedProduct ? 'TEST_NETWORK_NOT_AVAILABLE' : 'ROUTER_NO_EXECUTABLE_ROUTE' });
     expect(await runtime.run(RUN, OWNER)).toEqual({ ok: true, value: { runId: RUN, ownerAccount: OWNER } });
     expect(await runtime.run('xroute-' + 'b'.repeat(32), OWNER)).toEqual({ ok: true, value: null });
     expect(await runtime.journal(RUN, OWNER, 3, 10)).toEqual({ ok: true, value: { items: [], next: null } });
     expect(await runtime.evidence('crosschain-router-testnet', RUN, OWNER)).toEqual({ ok: true, value: null });
-    expect(seen.map(s => `${s.method} ${s.url}`)).toEqual([
-      'POST https://api.flofi.test/v1/previews/crosschain-router-testnet', `GET https://api.flofi.test/v1/runs/${RUN}`, `GET https://api.flofi.test/v1/runs/xroute-${'b'.repeat(32)}`,
-      `GET https://api.flofi.test/v1/runs/${RUN}/journal?limit=10&after=3`, 'POST https://api.flofi.test/v1/flows/crosschain-router-testnet/status']);
+    // Reading a run and its evidence is history: it stays available for a test-network run.
+    const reads = [`GET https://api.flofi.test/v1/runs/${RUN}`, `GET https://api.flofi.test/v1/runs/xroute-${'b'.repeat(32)}`,
+      `GET https://api.flofi.test/v1/runs/${RUN}/journal?limit=10&after=3`, 'POST https://api.flofi.test/v1/flows/crosschain-router-testnet/status'];
+    expect(seen.map(s => `${s.method} ${s.url}`)).toEqual(hostedProduct ? reads : ['POST https://api.flofi.test/v1/previews/crosschain-router-testnet', ...reads]);
     expect(seen.every(s => s.headers.authorization === `Bearer ${INTERNAL}`)).toBe(true);
     // A preview names no principal and carries no idempotency key (nothing durable happens); reads are made AS the owner wallet.
-    expect(seen[0]!.headers[WALLET_PRINCIPAL_HEADER]).toBeUndefined();
-    expect(seen[0]!.headers['idempotency-key']).toBeUndefined();
-    expect(JSON.parse(seen[0]!.body!)).toEqual({ args: [{ workflowId: 'w', nodes: [] }, OWNER] });
-    for (const s of seen.slice(1)) expect(s.headers[WALLET_PRINCIPAL_HEADER]).toBe(OWNER);
+    if (!hostedProduct) {
+      expect(seen[0]!.headers[WALLET_PRINCIPAL_HEADER]).toBeUndefined();
+      expect(seen[0]!.headers['idempotency-key']).toBeUndefined();
+      expect(JSON.parse(seen[0]!.body!)).toEqual({ args: [{ workflowId: 'w', nodes: [] }, OWNER] });
+    }
+    for (const s of seen.slice(hostedProduct ? 0 : 1)) expect(s.headers[WALLET_PRINCIPAL_HEADER]).toBe(OWNER);
   });
 
   it('an API deployed before BUILD-MCP-001 has no preview route: fail closed', async () => {
@@ -67,8 +73,10 @@ describe('BUILD-MCP-001 runtime selection for the gateway (BUILD-CLOUD-PARITY-00
     const hosted = deploymentRuntime({ VERCEL: '1', VERCEL_ENV: 'preview', VERCEL_GIT_COMMIT_REF: 'claude/build-mcp-001', GRYLOO_ROUTER_TESTNET_JOURNAL: '/tmp/journal' });
     expect(hosted.kind).toBe('unconfigured');
     expect(await hosted.mode('crosschain-router-testnet')).toBe('off');
-    for (const result of [await hosted.preview('crosschain-router-testnet', []), await hosted.run(RUN, OWNER), await hosted.evidence('crosschain-router-testnet', RUN, OWNER)])
+    for (const result of [await hosted.preview('crosschain-router', []), await hosted.run(RUN, OWNER), await hosted.evidence('crosschain-router-testnet', RUN, OWNER)])
       expect(result).toEqual({ ok: false, code: 'CLOUD_RUNTIME_NOT_CONFIGURED' });
+    // BUILD-FLOFI-MAINNET-PRODUCT-001: a hosted deployment is the Mainnet-only product: a test-network preview is refused before any runtime.
+    expect(await hosted.preview('crosschain-router-testnet', [])).toEqual({ ok: false, code: 'TEST_NETWORK_NOT_AVAILABLE' });
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 

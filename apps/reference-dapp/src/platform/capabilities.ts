@@ -13,6 +13,8 @@ import { evaluateGates, type ExecutionPlan, type Gates, type HandoffPolicy } fro
 import type { McpRuntime as EngineRuntime } from '../mcp/runtime.ts';
 import { previewPlan, strategyFlow } from '../mcp/simulation.ts';
 import { composeSingleStep } from './strategy.ts';
+import type { NetworkScope } from '../domain/network-scope';
+import { networkScope } from '../server/network-scope.ts';
 
 /** One mode/info lookup per flow per call. */
 export function memoizedRuntime(runtime: EngineRuntime): EngineRuntime {
@@ -32,13 +34,13 @@ export type CapabilityFact = {
 export type CapabilityFilter = { readonly network?: NetworkId | undefined; readonly action?: StrategyAction | undefined };
 
 /** The four facts and the preview availability of every capability row matching `filter` (rows in registry order). */
-export async function capabilityFacts(runtime: EngineRuntime, policy: HandoffPolicy, filter: CapabilityFilter = {}): Promise<readonly CapabilityFact[]> {
-  const rows = codeCapabilities().filter(r => (!filter.network || r.network === filter.network || r.destinationNetwork === filter.network) && (!filter.action || r.action === filter.action));
+export async function capabilityFacts(runtime: EngineRuntime, policy: HandoffPolicy, filter: CapabilityFilter = {}, scope: NetworkScope = networkScope()): Promise<readonly CapabilityFact[]> {
+  const rows = codeCapabilities(scope).filter(r => (!filter.network || r.network === filter.network || r.destinationNetwork === filter.network) && (!filter.action || r.action === filter.action));
   const memo = memoizedRuntime(runtime), cloud = runtime.kind === 'remote' || runtime.kind === 'embedded';
   return Promise.all(rows.map(async row => {
     const plan = previewPlan(row.example), flow = strategyFlow(row.example), mode = flow ? await memo.mode(flow) : null;
     const previewable = 'flow' in plan && cloud && (mode === 'live' || mode === 'harness');
-    const composition = composeSingleStep(row.example, undefined, 'CAPABILITY_EXAMPLE_INVALID'), gates = await evaluateGates(composition, memo, policy);
+    const composition = composeSingleStep(row.example, undefined, 'CAPABILITY_EXAMPLE_INVALID', scope), gates = await evaluateGates(composition, memo, policy);
     const previewUnavailableReason = previewable ? null : 'code' in plan ? plan.code
       : !cloud ? (runtime.kind === 'local' ? 'MCP_CLOUD_RUNTIME_REQUIRED' : 'CLOUD_RUNTIME_NOT_CONFIGURED') : 'FLOW_NOT_ENABLED_IN_DEPLOYMENT';
     return { row, flow, mode, previewable, previewUnavailableReason, gates };

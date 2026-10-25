@@ -12,7 +12,8 @@ import { useBuild009Wallet } from './build009-wallet-store';
 import { useCow } from './cow-store';
 import { usePublicTestnet } from './public-testnet-store';
 import { walletChainRef } from '../wallet/evm-networks';
-import { classifyWalletEnvironment, walletExecutionEnvironment } from '../wallet/environment';
+import { classifyWalletEnvironment, walletExecutionEnvironment, type WalletEnvironment } from '../wallet/environment';
+import { activeNetworkScope } from '../domain/network-scope';
 
 import {isLendingComposition, isSolanaTransferNode} from '@defi-workflow-engine/workflow-contracts';
 import {useLending} from './lending-store';
@@ -41,6 +42,14 @@ export function useExecutionEnvironment() {
   // Mock/fork execution modes stay internal; an unknown wallet never gets a public-network indicator.
   const environment: ExecutionEnvironment = walletExecutionEnvironment(walletEnvironment) ?? (forkPrepared ? 'LOCAL_FORK' : 'MOCK');
   return { environment, walletEnvironment, walletKind, walletChain };
+}
+/**
+ * BUILD-FLOFI-MAINNET-PRODUCT-001: the environment FloFi authors in. The public product is Mainnet-only whatever network the wallet is on (a wallet
+ * on a test network is offered an explicit switch to the workflow's mainnet, never the reverse); engineering certification keeps following the
+ * wallet, as before.
+ */
+export function authoringEnvironment(walletEnvironment: WalletEnvironment): WalletEnvironment {
+  return activeNetworkScope() === 'ENGINEERING' ? walletEnvironment : 'mainnet';
 }
 export function useWorkflowCapability() {
   const { state, chain } = useWorkflow();

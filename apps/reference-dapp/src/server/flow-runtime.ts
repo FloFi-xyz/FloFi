@@ -21,6 +21,7 @@ import type { FlowName } from '../../backend/flows.ts';
 import { callCloudFlow, listCloudRuns, previewCloudFlow, readCloudRun, type CloudRunSummary, type FlowResult } from './cloud-api-client.ts';
 import { isHostedDeployment } from './deployment.ts';
 import { serverlessPostgresConfig } from './postgres-config.ts';
+import { testNetworkFlowRefusal, testNetworkPreviewRefusal } from './test-network-flows.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
 export type FlowRuntimeKind = 'remote' | 'embedded' | 'local' | 'unconfigured';
@@ -107,6 +108,9 @@ export async function cloudFlow<T>(flow: FlowName, method: string, args: readonl
   options: { readonly principal?: string | null; readonly env?: Env; readonly transport?: typeof fetch } = {}):
   Promise<FlowResult<T> | null> {
   const env = options.env ?? process.env, kind = flowRuntimeKind(env), principal = options.principal ?? null;
+  // BUILD-FLOFI-MAINNET-PRODUCT-001: every server action passes here first, whichever runtime then serves it (local services included).
+  const refusal = testNetworkFlowRefusal(flow, method, { ...process.env, ...env });
+  if (refusal) return { ok: false, code: refusal };
   if (kind === 'local') return null;
   if (kind === 'unconfigured') return { ok: false, code: 'CLOUD_RUNTIME_NOT_CONFIGURED' };
   if (kind === 'remote') return callCloudFlow<T>(flow, method, args, { env, principal, ...options.transport ? { transport: options.transport } : {} });
@@ -127,6 +131,8 @@ export async function cloudFlowMode(flow: FlowName, env: Env = process.env, tran
 export async function cloudPreview<T>(flow: FlowName, args: readonly unknown[], options: { readonly env?: Env; readonly transport?: typeof fetch } = {}):
   Promise<FlowResult<T> | null> {
   const env = options.env ?? process.env, kind = flowRuntimeKind(env);
+  const refusal = testNetworkPreviewRefusal(flow, { ...process.env, ...env });
+  if (refusal) return { ok: false, code: refusal };
   if (kind === 'local') return null;
   if (kind === 'unconfigured') return { ok: false, code: 'CLOUD_RUNTIME_NOT_CONFIGURED' };
   if (kind === 'remote') return previewCloudFlow<T>(flow, args, { env, ...options.transport ? { transport: options.transport } : {} });

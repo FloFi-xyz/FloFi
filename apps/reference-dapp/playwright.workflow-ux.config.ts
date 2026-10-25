@@ -8,7 +8,7 @@ import { existsSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
-import { E2E_APP_ORIGIN, E2E_APP_PORT } from './e2e/app-origin';
+import { E2E_APP_ORIGIN, E2E_APP_PORT, e2eNetworkScopeEnv } from './e2e/app-origin';
 const cache = process.env.BUILD002_BROWSER_CACHE;
 if (!cache || basename(cache) !== 'chromium_headless_shell-1243') throw Error('VERIFIED_BROWSER_1243_REQUIRED');
 const executablePath = join(cache, 'chrome-headless-shell-linux64', 'chrome-headless-shell');
@@ -27,7 +27,7 @@ export default defineConfig({
   webServer: [
     { command: 'node e2e/robinhood-mainnet-serve.ts', url: 'http://127.0.0.1:8561', reuseExistingServer: false, timeout: 30_000 },
     { command: 'pnpm --filter @defi-workflow-engine/reference-dapp start', url: E2E_APP_ORIGIN, reuseExistingServer: false, timeout: 60_000,
-      env: { PORT: String(E2E_APP_PORT), FLOFI_ENGINEERING_UI: 'LOOPBACK_ONLY', FLOFI_COPILOT: 'replay',
+      env: { PORT: String(E2E_APP_PORT), FLOFI_ENGINEERING_UI: 'LOOPBACK_ONLY', ...e2eNetworkScopeEnv(), FLOFI_COPILOT: 'replay',
         GRYLOO_ROBINHOOD_MAINNET_HARNESS: 'MOCKED_LOOPBACK_ONLY', GRYLOO_ROBINHOOD_JOURNAL: join(tmpdir(), 'gryloo-workflow-ux-' + Date.now() + '-' + process.pid),
         // The existing automation entry point, so its header placement is visible; a per-run disposable secret, never committed.
         FLOFI_AUTOMATIONS: 'enabled', FLOFI_PUBLIC_ORIGIN: E2E_APP_ORIGIN, FLOFI_AUTOMATION_SECRET: randomBytes(32).toString('hex'),

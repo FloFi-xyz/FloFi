@@ -6,6 +6,7 @@ import { chooseEvmWallet, chosenEvmProvider, clearChosenEvmWallet, evmWalletEntr
   subscribeEvmDiscovery, subscribeEvmSelection, type EvmProvider } from '../wallet/evm-discovery';
 import { updateWalletPreference, walletPreference, type WalletChoice } from '../wallet/wallet-registry';
 import { useWalletSelector } from '../components/wallet-selector';
+import { evmWalletErrorMessage } from '../wallet/wallet-errors';
 
 export const BASE_HEX = '0x2105';
 export const ARBITRUM_HEX = '0xa4b1';
@@ -52,6 +53,8 @@ export function Build009WalletProvider({ children }: { children: ReactNode }) {
   const connected = useRef(false);
   const generation = useRef(0);
   const events = useRef(0);
+  /** Chain events only: a network change during Connect makes its response stale (wallet A accepts only an account announcement). */
+  const chainEvents = useRef(0);
   const suppressed = useRef(false);
   // Observe authority synchronously, before React can batch A → B → A into one render.
   // generation/events remain transport race guards; their churn is not Review revocation.
@@ -101,7 +104,7 @@ export function Build009WalletProvider({ children }: { children: ReactNode }) {
       };
       const chainChanged = (...args: unknown[]) => {
         if (!active()) return;
-        ++events.current;
+        ++events.current; ++chainEvents.current;
         updateAuthority({ chainId: normalizedChain(args[0]) });
         if (!connected.current) synchronize();
       };
@@ -144,18 +147,22 @@ export function Build009WalletProvider({ children }: { children: ReactNode }) {
     const provider = chooseEvmWallet(choiceId);
     if (!provider) { setError('That wallet is no longer available. Refresh the page and choose it again.'); return null; }
     suppressed.current = false;
-    setBusy(true); setError(null); const op = ++generation.current, epoch = events.current;
+    setBusy(true); setError(null); const op = ++generation.current, epoch = events.current, chainEpoch = chainEvents.current;
     try {
       const accounts = await provider.request({ method: 'eth_requestAccounts' });
       const chain = await provider.request({ method: 'eth_chainId' });
       if (!Array.isArray(accounts) || !validAccount(accounts[0]) || typeof chain !== 'string' || !/^0x[0-9a-fA-F]+$/.test(chain))
         throw new Error('Wallet returned an invalid account or chain');
-      if (op !== generation.current || epoch !== events.current || injected() !== provider) return null;
+      if (op !== generation.current || injected() !== provider) return null;
       const session = { account: accounts[0].toLowerCase(), chainId: normalizedChain(chain)! };
+      // BUILD-FLOFI-MAINNET-PRODUCT-001 (wallet A): MetaMask's provider announces the account it just granted (`accountsChanged`) before this
+      // request resolves (first connection, unlock). That event is this connection, not a newer one: the result stands when only account events
+      // arrived and they reported this same account. Another account, or any network change, is newer wallet state: this response is dropped.
+      if (epoch !== events.current && (chainEvents.current !== chainEpoch || authority.current.account !== session.account)) return null;
       updateAuthority(session);
       setIdentity(evmWalletIdentity(provider));
       return session;
-    } catch { if (op === generation.current) setError('Could not connect. Check your wallet and try again.'); }
+    } catch (cause) { if (op === generation.current) setError(evmWalletErrorMessage(cause, evmWalletIdentity(provider)?.name ?? null, 'connect')); }
     finally { if (op === generation.current) setBusy(false); }
     return null;
   }, [updateAuthority]);
@@ -174,7 +181,7 @@ export function Build009WalletProvider({ children }: { children: ReactNode }) {
       const actual = await provider.request({ method: 'eth_chainId' });
       if (op !== generation.current || epoch !== events.current || injected() !== provider) return;
       updateAuthority({ chainId: normalizedChain(actual) });
-    } catch { if (op === generation.current) setError('Could not switch networks. Check your wallet and try again.'); }
+    } catch (cause) { if (op === generation.current) setError(evmWalletErrorMessage(cause, evmWalletIdentity(provider)?.name ?? null, 'switch')); }
     finally { if (op === generation.current) setBusy(false); }
   }, [chainId, updateAuthority]);
   // Disconnect ends FloFi's use of the wallet: no silent reuse until the owner picks a wallet again.

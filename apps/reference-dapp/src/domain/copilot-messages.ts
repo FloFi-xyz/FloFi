@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { ROUTER_NETWORK_OPTIONS } from './router-authoring';
-import { capabilityText, compositionOnlyText, lendingOnlyText } from './authoring-capabilities';
+import { capabilityText, catalogNetworkNames, compositionOnlyText, lendingOnlyText, routeLabels } from './authoring-capabilities';
+import { activeNetworkScope } from './network-scope';
 
 /**
  * BUILD-COPILOT-002: every reply the Copilot writes itself, in English and Portuguese. English is byte-identical to
@@ -18,15 +19,16 @@ export type CarriedLabel = 'network' | 'token' | 'amount' | 'destination' | 'rec
 
 // BUILD-BASE-001 (owner addendum): what the Copilot can author is generated from the shared capability truth (`authoring-capabilities.ts`),
 // never written here: the in-app capability answer, the lending and router refusals and the composition rule all read it.
-const EN_CAPABILITIES = capabilityText('EN');
-const EN_COMPOSITION = `Flofi can combine steps only as ${compositionOnlyText('EN')}. Other combinations cannot share one workflow yet: author each action on its own.`;
-const PT_CAPABILITIES = capabilityText('PT');
-const PT_COMPOSITION = `O Flofi só combina passos como ${compositionOnlyText('PT')}. Outras combinações ainda não podem ficar no mesmo fluxo: crie cada ação separadamente.`;
+// BUILD-FLOFI-MAINNET-PRODUCT-001: computed when read (the scope arrives from the server after this module loads in the browser).
+const EN_COMPOSITION = () => compositionOnlyText('EN') ? `Flofi can combine steps only as ${compositionOnlyText('EN')}. Other combinations cannot share one workflow yet: author each action on its own.`
+  : 'Flofi does not combine dependent steps in one workflow on mainnets yet: author each action on its own.';
+const PT_COMPOSITION = () => compositionOnlyText('PT') ? `O Flofi só combina passos como ${compositionOnlyText('PT')}. Outras combinações ainda não podem ficar no mesmo fluxo: crie cada ação separadamente.`
+  : 'O Flofi ainda não combina passos dependentes em um mesmo fluxo nas mainnets: crie cada ação separadamente.';
 
 const capitalize = (value: string) => value.charAt(0).toUpperCase() + value.slice(1);
 const EN = {
-  capabilities: EN_CAPABILITIES,
-  compositionUnsupported: EN_COMPOSITION,
+  get capabilities() { return capabilityText('EN'); },
+  get compositionUnsupported() { return EN_COMPOSITION(); },
   field: { amount: 'the amount', asset: 'the token', network: 'the network', sourceNetwork: 'the source network', destinationNetwork: 'the destination network',
     protocol: 'the protocol', range: 'the price range', slippage: 'the maximum slippage',
     beneficiary: 'a beneficiary (connect your wallet, or include the address in your message)', recipient: 'the recipient' } as Record<MissingLabel, string>,
@@ -96,7 +98,7 @@ const EN = {
   liquidityNeeds: (first: string, second: string, quote: string, base: string) =>
     `To prepare this liquidity position, Flofi still needs the maximum ${first} and ${second} amounts (0 for none) and a range: prices in ${quote} per ${base}, or ticks.`,
   rangeNotFound: (quote: string, base: string) => `Flofi could not find that range in your message. Which range: prices in ${quote} per ${base}, or ticks?`,
-  swapUsesBorrowed: 'The swap must use exactly the borrowed USDC. ' + EN_COMPOSITION,
+  get swapUsesBorrowed() { return 'The swap must use exactly the borrowed USDC. ' + EN_COMPOSITION(); },
   sameOwner: 'Supply and Borrow must use the same owner.',
   ownerNote: (wallet: string) => `Owner: your connected wallet ${wallet}.`,
   compositionWethNote: 'Flofi swaps to the ERC-20 WETH (wrapped ETH), not native ETH.',
@@ -232,8 +234,8 @@ const EN = {
 export type CopilotCopy = typeof EN;
 
 const PT: CopilotCopy = {
-  capabilities: PT_CAPABILITIES,
-  compositionUnsupported: PT_COMPOSITION,
+  get capabilities() { return capabilityText('PT'); },
+  get compositionUnsupported() { return PT_COMPOSITION(); },
   field: { amount: 'o valor', asset: 'o token', network: 'a rede', sourceNetwork: 'a rede de origem', destinationNetwork: 'a rede de destino',
     protocol: 'o protocolo', range: 'a faixa de preço', slippage: 'o slippage máximo',
     beneficiary: 'um beneficiário (conecte sua carteira ou inclua o endereço na mensagem)', recipient: 'o destinatário' },
@@ -301,7 +303,7 @@ const PT: CopilotCopy = {
   liquidityNeeds: (first, second, quote, base) =>
     `Para preparar esta posição de liquidez, o Flofi ainda precisa dos valores máximos de ${first} e ${second} (0 para nenhum) e de uma faixa: preços em ${quote} por ${base}, ou ticks.`,
   rangeNotFound: (quote, base) => `O Flofi não encontrou essa faixa na sua mensagem. Qual faixa: preços em ${quote} por ${base}, ou ticks?`,
-  swapUsesBorrowed: 'O swap precisa usar exatamente o USDC emprestado. ' + PT_COMPOSITION,
+  get swapUsesBorrowed() { return 'O swap precisa usar exatamente o USDC emprestado. ' + PT_COMPOSITION(); },
   sameOwner: 'Supply e Borrow precisam usar o mesmo dono.',
   ownerNote: wallet => `Dono: sua carteira conectada ${wallet}.`,
   compositionWethNote: 'O Flofi faz swap para o ERC-20 WETH (ETH embrulhado), não para ETH nativo.',
@@ -435,4 +437,47 @@ const PT: CopilotCopy = {
 };
 
 export const COPILOT_COPY: Readonly<Record<CopilotLanguage, CopilotCopy>> = Object.freeze({ EN, PT });
-export const copilotCopy = (language: CopilotLanguage | null | undefined): CopilotCopy => language === 'PT' ? PT : EN;
+/**
+ * BUILD-FLOFI-MAINNET-PRODUCT-001: the public product's wording where the engineering copy names a test network. Mainnet-only FloFi never offers a
+ * test network as an option or an example, and says plainly what is not available on mainnets yet (FloFi still decides support itself).
+ */
+const routesText = (language: CopilotLanguage) => routeLabels().join(language === 'PT' ? ', ' : ', ');
+const EN_MAINNET: Partial<CopilotCopy> = {
+  defaultNetworkNote: (subject: string, network: string) => `${subject} is available only on ${network}, so Flofi used it. ${network} uses real funds.`,
+  get evmSwapTokens() { return `Flofi swaps official catalog tokens on ${catalogNetworkNames('EN')}.`; },
+  devnetSwapTokens: 'Solana swaps support SOL, USDC and USDT.',
+  get routerRoutes() { return `The Cross-chain Router bridges ${routesText('EN')}.`; },
+  routerMixed: 'Flofi bridges between mainnets only. Which route do you mean?',
+  poolOptions: ['Uniswap v3 on Base', 'Orca on Solana', 'Uniswap v3 on Ethereum'],
+  insertUnsupported: 'Flofi cannot insert a step into this workflow: Aave actions, Solana actions and liquidity positions each stay in their own workflow. Author the action on its own.',
+  tooManyClarifications: 'Flofi still cannot prepare this request. Describe the whole action in one message, for example “swap 2 USDC to WETH on Base”.',
+  devUsdcNetworkNote: 'devUSDC is a Solana Devnet test token. FloFi runs on mainnets only: use USDC on Solana.',
+  percentRangeOrcaOnly: 'A percentage range is not available on mainnets yet. Give the range in prices or ticks.',
+  swapOutputUnsupported: 'Flofi cannot fund a position with a swap’s output on mainnets yet. Give the maximum deposit of each token.',
+  noSwapForTokens: 'Flofi cannot fund a position with a swap’s output on mainnets yet. Give the maximum deposit of each token.',
+  positionWalletRequired: 'Managing an existing liquidity position from chat is not available on mainnets yet. Nothing changed.',
+  positionNone: 'Managing an existing liquidity position from chat is not available on mainnets yet. Nothing changed.',
+  positionOnlyOrca: 'Managing an existing liquidity position from chat is not available on mainnets yet. Nothing changed.',
+};
+const PT_MAINNET: Partial<CopilotCopy> = {
+  defaultNetworkNote: (subject: string, network: string) => `${subject} só está disponível na ${network}, então o Flofi a usou. A ${network} usa fundos reais.`,
+  get evmSwapTokens() { return `O Flofi faz swap de tokens do catálogo oficial na ${catalogNetworkNames('PT')}.`; },
+  devnetSwapTokens: 'Swaps na Solana aceitam SOL, USDC e USDT.',
+  get routerRoutes() { return `O Cross-chain Router faz bridge ${routesText('PT')}.`; },
+  routerMixed: 'O Flofi faz bridge apenas entre mainnets. Qual rota você quer?',
+  poolOptions: ['Uniswap v3 na Base', 'Orca na Solana', 'Uniswap v3 na Ethereum'],
+  insertUnsupported: 'O Flofi não consegue inserir um passo neste fluxo: ações da Aave, da Solana e posições de liquidez ficam cada uma no seu fluxo. Crie a ação separadamente.',
+  tooManyClarifications: 'O Flofi ainda não consegue preparar este pedido. Descreva a ação completa em uma mensagem, por exemplo “troca 2 USDC por WETH na Base”.',
+  devUsdcNetworkNote: 'devUSDC é um token de teste da Solana Devnet. O Flofi funciona só em mainnets: use USDC na Solana.',
+  percentRangeOrcaOnly: 'Faixa percentual ainda não está disponível nas mainnets. Informe a faixa em preços ou ticks.',
+  swapOutputUnsupported: 'O Flofi ainda não financia uma posição com o resultado de um swap nas mainnets. Informe o depósito máximo de cada token.',
+  noSwapForTokens: 'O Flofi ainda não financia uma posição com o resultado de um swap nas mainnets. Informe o depósito máximo de cada token.',
+  positionWalletRequired: 'Gerenciar uma posição de liquidez existente pelo chat ainda não está disponível nas mainnets. Nada mudou.',
+  positionNone: 'Gerenciar uma posição de liquidez existente pelo chat ainda não está disponível nas mainnets. Nada mudou.',
+  positionOnlyOrca: 'Gerenciar uma posição de liquidez existente pelo chat ainda não está disponível nas mainnets. Nada mudou.',
+};
+const withOverrides = (base: CopilotCopy, overrides: Partial<CopilotCopy>): CopilotCopy =>
+  Object.defineProperties(Object.create(base) as CopilotCopy, Object.getOwnPropertyDescriptors(overrides));
+const EN_PUBLIC = withOverrides(EN, EN_MAINNET), PT_PUBLIC = withOverrides(PT, PT_MAINNET);
+export const copilotCopy = (language: CopilotLanguage | null | undefined): CopilotCopy => activeNetworkScope() === 'ENGINEERING'
+  ? language === 'PT' ? PT : EN : language === 'PT' ? PT_PUBLIC : EN_PUBLIC;

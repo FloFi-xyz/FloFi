@@ -16,9 +16,20 @@ import { Ajv, type ErrorObject } from 'ajv';
  *  BUILD-BASE-001: `base` is Base mainnet (8453, real funds), likewise a catalog network (pinned ETH/USDC/WETH plus the validated token list). */
 export const NETWORK_IDS = ['base', 'base-sepolia', 'arbitrum-one', 'ethereum', 'arbitrum-sepolia', 'ethereum-sepolia', 'solana', 'solana-devnet', 'robinhood', 'robinhood-testnet'] as const;
 export type NetworkId = (typeof NETWORK_IDS)[number];
+/**
+ * BUILD-FLOFI-MAINNET-PRODUCT-001: the test networks. The engine composes them (CI and engineering certification), but the public product's
+ * schema never offers them and every public surface refuses them (`platform/strategy.ts`, `domain/network-scope.ts`).
+ */
+export const TEST_NETWORK_IDS: readonly NetworkId[] = Object.freeze(['base-sepolia', 'arbitrum-sepolia', 'ethereum-sepolia', 'solana-devnet', 'robinhood-testnet']);
+/** The networks a public client may name: every mainnet, in `NETWORK_IDS` order. */
+export const PUBLIC_NETWORK_IDS: readonly NetworkId[] = Object.freeze(NETWORK_IDS.filter(id => !TEST_NETWORK_IDS.includes(id)));
 export const STRATEGY_ACTIONS = ['bridge', 'swap', 'supply', 'borrow', 'repay', 'withdraw', 'add_liquidity', 'lending_composition', 'transfer'] as const;
 export type StrategyAction = (typeof STRATEGY_ACTIONS)[number];
+/** The public actions: the lending composition exists only on Base Sepolia, so the Mainnet-only product has none. */
+export const PUBLIC_STRATEGY_ACTIONS: readonly StrategyAction[] = Object.freeze(STRATEGY_ACTIONS.filter(action => action !== 'lending_composition'));
 export const ASSET_SYMBOLS = ['USDC', 'WETH', 'WBTC', 'SOL', 'USDT', 'devUSDC'] as const;
+/** `devUSDC` is the Solana Devnet test token. */
+const PUBLIC_ASSET_SYMBOLS = ASSET_SYMBOLS.filter(symbol => symbol !== 'devUSDC');
 
 const enumOf = <T extends readonly string[]>(values: T, description: string) =>
   Type.Union(values.map(value => Type.Literal(value)) as never, { description }) as unknown as TSchema & { static: T[number] };
@@ -141,6 +152,82 @@ export const StrategyInputSchema = Type.Union([...Object.values(BRANCHES), Strat
   { description: 'A FloFi strategy (version 1, one action) or workflow (version 2, ordered steps): structured intent only.' });
 export type StrategyInput = StrategySpec | StrategyWorkflow;
 export const isStrategyWorkflow = (value: StrategyInput): value is StrategyWorkflow => (value as { version?: unknown }).version === 2;
+
+/**
+ * BUILD-FLOFI-MAINNET-PRODUCT-001: the same contract as the public product offers it (MCP tools, the Developer API): the identical fields and
+ * rules, with every network a mainnet (real funds). A public strategy is always a valid strategy of the full contract, so it composes to the
+ * same canonical IR and workflow hash; the test networks and the Base Sepolia lending composition are simply not offered.
+ */
+const PUBLIC_EVM_LENDING = ['base', 'arbitrum-one', 'ethereum'] as const;
+const PublicBridge = Type.Object({
+  version: Type.Optional(Version), action: Type.Literal('bridge'),
+  sourceNetwork: enumOf(['base', 'arbitrum-one', 'robinhood', 'ethereum'] as const, 'Source network (real funds). The Cross-chain Router moves USDC between base, ' +
+    'arbitrum-one and ethereum, and into or out of robinhood as USDG (WETH also bridges to and from robinhood); get_capabilities lists the routes this deployment enables.'),
+  destinationNetwork: enumOf(['arbitrum-one', 'robinhood', 'base', 'ethereum'] as const, 'Destination network; a different network of the same route list.'),
+  asset: CatalogSymbol,
+  amount: Decimal('Source token amount as a decimal string, e.g. "5".'),
+  routing: Type.Optional(enumOf(['auto', 'lifi', 'across'] as const, 'Provider policy. auto = LI.FI first, direct Across if LI.FI has no reconcilable route (a preference order, not a best-price search). Default auto.')),
+  slippageBps: Type.Optional(Slippage),
+  recipient: Type.Optional(EvmAddress('Destination recipient. Omit to deliver to the wallet that signs in the FloFi app (bound at Review).')),
+}, strict);
+const PublicSwap = Type.Object({
+  version: Type.Optional(Version), action: Type.Literal('swap'),
+  network: enumOf(['base', 'solana', 'robinhood', 'arbitrum-one', 'ethereum'] as const,
+    'Swap network (real funds). Assets, protocols and runtime support are validated against the shared registries.'),
+  inputAsset: Type.Union([enumOf(PUBLIC_ASSET_SYMBOLS, 'Asset spent.'), CatalogSymbol]), outputAsset: Type.Union([enumOf(PUBLIC_ASSET_SYMBOLS, 'Asset received.'), CatalogSymbol]),
+  amount: Decimal('Exact input amount as a decimal string.'), slippageBps: Type.Optional(Slippage),
+}, strict);
+const PublicLending = (action: 'supply' | 'borrow' | 'repay', who: string) => Type.Object({
+  version: Type.Optional(Version), action: Type.Literal(action),
+  network: enumOf(PUBLIC_EVM_LENDING, 'Aave V3 network (real funds): native USDC on base, arbitrum-one and ethereum.'),
+  asset: CatalogSymbol,
+  amount: Decimal('Amount as a decimal string.'),
+  beneficiary: EvmAddress(who),
+}, strict);
+const PublicWithdraw = Type.Object({
+  version: Type.Optional(Version), action: Type.Literal('withdraw'),
+  network: enumOf(PUBLIC_EVM_LENDING, 'Aave V3 network (real funds).'), asset: CatalogSymbol,
+  amount: Decimal('Amount as a decimal string. The recipient is always the wallet that signs.'),
+}, strict);
+const PublicLiquidity = Type.Object({
+  version: Type.Optional(Version), action: Type.Literal('add_liquidity'),
+  network: enumOf(['solana', 'robinhood', 'base', 'arbitrum-one', 'ethereum'] as const, 'Real funds. Orca SOL/USDC on solana; on the catalog networks (base, arbitrum-one, ' +
+    'ethereum, robinhood), Uniswap v3 on two catalog ERC-20 assets at feeTier, only when the factory pool exists.'),
+  maxAmounts: Type.Record(CatalogSymbol, Decimal('Maximum deposit of this asset.'),
+    { minProperties: 2, maxProperties: 2, description: 'Maximum deposit of each pool asset (limits, not amounts to spend); exactly the pool\'s two assets by symbol or whole catalog name: ' +
+      'SOL and USDC on solana, or two official catalog symbols on a catalog network.' }),
+  range: Type.Union([
+    Type.Object({ unit: enumOf(['price', 'tick'] as const, 'price: USDC per SOL (solana only); tick: aligned tick indexes.'),
+      lower: Bound, upper: Bound }, strict),
+    Type.Object({ unit: Type.Literal('full', { description: 'Catalog networks: the widest usable range of the selected fee tier.' }) }, strict)]),
+  feeTier: Type.Optional(Type.Union([Type.Literal(100), Type.Literal(500), Type.Literal(3000), Type.Literal(10000)],
+    { description: 'Catalog networks: the Uniswap v3 fee tier in hundredths of a basis point (3000 = 0.3%). Default 3000; a missing pool is refused.' })),
+  slippageBps: Type.Optional(Slippage),
+}, strict);
+const PublicTransfer = Type.Object({
+  version: Type.Optional(Version), action: Type.Literal('transfer'),
+  network: enumOf(['robinhood', 'base', 'arbitrum-one', 'ethereum', 'solana'] as const, 'The network of this same-chain transfer (real funds).'),
+  asset: Type.Union([Type.Literal('ETH'), Type.Literal('SOL'), CatalogSymbol], { description: 'EVM: native ETH, or a symbol or whole name of the selected network\'s ' +
+    'validated official catalog. Solana: SOL, USDC or USDT, or an SPL token mint address together with decimals and tokenProgram.' }),
+  amount: Decimal('Amount as a decimal string.'),
+  recipient: Type.Optional(Type.Union([EvmAddress('EVM recipient.'), SolanaAddress('Solana recipient wallet address.')], { description: 'Recipient. EVM: omit to transfer ' +
+    'to the wallet that signs in the FloFi app (bound at Review). Solana: required — the destination wallet; FloFi never substitutes the signing wallet.' })),
+  decimals: Type.Optional(Type.Integer({ minimum: 0, maximum: 18, description: 'Solana SPL mint transfers only: the token\'s decimals (verified on chain).' })),
+  tokenProgram: Type.Optional(enumOf(['spl-token', 'token-2022'] as const, 'Solana SPL mint transfers only: the token program (verified on chain).')),
+}, strict);
+const PUBLIC_BRANCHES = Object.freeze({ bridge: PublicBridge, swap: PublicSwap, supply: PublicLending('supply', 'Account credited with the supplied position.'),
+  borrow: PublicLending('borrow', 'Account whose debt the borrow creates (onBehalfOf).'), repay: PublicLending('repay', 'Account whose debt is repaid (onBehalfOf).'),
+  withdraw: PublicWithdraw, add_liquidity: PublicLiquidity, transfer: PublicTransfer });
+export const PublicStrategyWorkflowSchema = Type.Object({
+  version: Type.Literal(2, { description: 'Step-list workflow contract.' }),
+  steps: Type.Array(Type.Union(Object.values(PUBLIC_BRANCHES)), { minItems: 1, maxItems: MAX_WORKFLOW_STEPS,
+    description: 'Ordered steps, each one single-action strategy (the same objects as version 1). Executed in this order; each step starts only after the previous one reconciled.' }),
+  bindings: Type.Optional(Type.Array(WorkflowBindingSchema, { minItems: 1, maxItems: MAX_WORKFLOW_STEPS - 1,
+    description: 'Optional typed dependencies: a step spends what an earlier step actually delivered (capped by its own amount). The input asset must be exactly the earlier step\'s output token.' })),
+}, strict);
+/** What a public client may send: a mainnet v1 strategy or v2 step list. */
+export const PublicStrategyInputSchema = Type.Union([...Object.values(PUBLIC_BRANCHES), PublicStrategyWorkflowSchema],
+  { description: 'A FloFi strategy (version 1, one action) or workflow (version 2, ordered steps) on mainnets (real funds): structured intent only.' });
 
 const ajv = new Ajv({ strict: true, allErrors: true, coerceTypes: false, removeAdditional: false, useDefaults: false, ownProperties: true });
 /** A schema violation as a path and a rule; never the offending value. */

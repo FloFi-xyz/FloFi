@@ -58,63 +58,29 @@ for (const theme of ['light', 'dark'] as const) {
     expect(await page.evaluate(() => (window as unknown as { supplyWalletRequests: { method: string }[] }).supplyWalletRequests.filter(request => /sign|send|switch/i.test(request.method)))).toEqual([]);
   });
 
-  test(`${theme} environment menu supports keyboard selection, escape, outside click and focus exit`, async ({ page }) => {
-    await page.addInitScript(value => localStorage.setItem('flofi.theme', value), theme);
-    await installSupplyWallet(page); await page.goto('/app');
-    const trigger = page.getByRole('combobox', { name: 'Environment', exact: true });
-    const menu = page.getByRole('listbox', { name: 'Environment options', exact: true });
-    await expect(trigger).toHaveText('Testnet');
-    await trigger.focus(); await trigger.press('ArrowDown');
-    await expect(menu).toBeVisible(); await expect(trigger).toBeFocused();
-    await expect(menu.getByRole('option', { name: 'Testnet', exact: true })).toHaveAttribute('aria-selected', 'true');
-    await trigger.press('End');
-    await expect(menu.getByRole('option', { name: 'Mainnet', exact: true })).toHaveAttribute('data-active', '');
-    await expect(trigger).toHaveText('Testnet');
-    await trigger.press('Enter');
-    await expect(menu).toHaveCount(0); await expect(trigger).toHaveText('Mainnet');
-    await expect(trigger.locator('.header-mainnet-dot')).toHaveCSS('background-color', theme === 'dark' ? 'rgb(74, 222, 128)' : 'rgb(34, 197, 94)');
-    await trigger.press('Space'); await trigger.press('ArrowUp'); await trigger.press('Space');
-    await expect(trigger).toHaveText('Testnet');
-    await trigger.press('m'); await expect(menu).toBeVisible();
-    await expect(menu.getByRole('option', { name: 'Mainnet', exact: true })).toHaveAttribute('data-active', '');
-    await trigger.press('Home');
-    await expect(menu.getByRole('option', { name: 'Testnet', exact: true })).toHaveAttribute('data-active', '');
-    await trigger.press('Escape'); await expect(menu).toHaveCount(0); await expect(trigger).toBeFocused();
-    await trigger.click(); await page.getByRole('heading', { name: 'Your Workflow', exact: true }).click();
-    await expect(menu).toHaveCount(0);
-    await trigger.click(); await trigger.press('Tab'); await expect(menu).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Settings', exact: true })).toBeFocused();
-    await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '0');
-    expect(await page.evaluate(() => (window as unknown as { supplyWalletRequests: { method: string }[] }).supplyWalletRequests.filter(request => /sign|send/i.test(request.method)))).toEqual([]);
-  });
-
-  test(`${theme} rounded environment panel and workflow utilities fit responsive headers`, async ({ page }) => {
+  // BUILD-FLOFI-MAINNET-PRODUCT-001: FloFi is Mainnet-only, so the header's Testnet/Mainnet menu (and its keyboard model) was removed. The
+  // header names the wallet's network in the wallet badge instead, and offers no way to choose a test network.
+  test(`${theme} header has no environment menu and names the wallet network instead`, async ({ page }) => {
     await page.addInitScript(value => localStorage.setItem('flofi.theme', value), theme);
     await installSupplyWallet(page); await page.goto('/app');
     const header = page.getByRole('banner');
-    const trigger = header.getByRole('combobox', { name: 'Environment', exact: true });
-    const menu = header.getByRole('listbox', { name: 'Environment options', exact: true });
+    await expect(page.locator('.build009-wallet-info')).toContainText('Base Sepolia');
+    await expect(header.getByRole('combobox', { name: 'Environment', exact: true })).toHaveCount(0);
+    await expect(header.getByRole('listbox', { name: 'Environment options', exact: true })).toHaveCount(0);
+    await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '0');
+    expect(await page.evaluate(() => (window as unknown as { supplyWalletRequests: { method: string }[] }).supplyWalletRequests.filter(request => /sign|send|switch/i.test(request.method)))).toEqual([]);
+  });
+
+  test(`${theme} workflow utilities fit responsive headers without a network selector`, async ({ page }) => {
+    await page.addInitScript(value => localStorage.setItem('flofi.theme', value), theme);
+    await installSupplyWallet(page); await page.goto('/app');
+    const header = page.getByRole('banner');
     for (const width of [1440, 1024, 768, 375, 320]) {
       await page.setViewportSize({ width, height: 900 }); await header.scrollIntoViewIfNeeded();
-      await expect(trigger).toHaveText('Testnet');
-      const before = await header.boundingBox();
-      await trigger.click(); await expect(menu).toBeVisible();
-      await expect(menu).toHaveCSS('border-radius', '12px'); await expect(menu).toHaveCSS('padding', '6px');
-      await expect(menu).toHaveCSS('background-color', theme === 'dark' ? 'rgb(21, 24, 31)' : 'rgb(255, 255, 255)');
-      const selected = menu.getByRole('option', { name: 'Testnet', exact: true });
-      await expect(selected).toHaveAttribute('aria-selected', 'true'); await expect(selected.locator('svg')).toBeVisible();
-      await expect(selected).toHaveCSS('background-color', theme === 'dark' ? 'rgb(26, 35, 80)' : 'rgb(234, 242, 255)');
-      await expect(selected).toHaveCSS('min-height', '40px');
-      const other = menu.getByRole('option', { name: 'Mainnet', exact: true });
-      await other.hover();
-      await expect(other).toHaveCSS('background-color', theme === 'dark' ? 'rgb(28, 32, 41)' : 'rgb(244, 247, 251)');
-      await expect(other).toHaveAttribute('aria-selected', 'false');
-      const panel = (await menu.boundingBox())!;
-      expect(panel.x).toBeGreaterThanOrEqual(0); expect(panel.x + panel.width).toBeLessThanOrEqual(width);
-      expect(await header.boundingBox()).toEqual(before);
+      await expect(header.getByRole('combobox', { name: 'Environment', exact: true })).toHaveCount(0);
+      await expect(header.getByRole('group', { name: 'Wallet connection' })).toBeVisible();
       expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
       if (width === 1440 || width === 320) await page.screenshot({ path: `.tmp/ux007-save-environment-${theme}-${width}.png` });
-      await trigger.press('Escape');
       await expect(page.getByRole('button', { name: 'Save workflow', exact: true })).toBeInViewport();
     }
     await page.getByRole('button', { name: 'Rename workflow', exact: true }).click();

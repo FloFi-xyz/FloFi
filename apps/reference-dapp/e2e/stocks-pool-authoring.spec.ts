@@ -154,7 +154,8 @@ test('both Pool contribution fields share the position form and require fresh Re
 
 test('Orca Pool contribution fields use the existing Solana position review and keep both amounts synchronized', async ({ page }) => {
   await installSupplyWallet(page); await page.goto('/app');
-  await expect(page.getByRole('combobox', { name: 'Environment', exact: true })).toHaveText('Testnet');
+  // BUILD-FLOFI-MAINNET-PRODUCT-001: no header network selector; the wallet badge names the wallet's network.
+  await expect(page.locator('.build009-wallet-info')).toContainText('Base Sepolia');
   // Enter authored bounds directly; this check needs no quote or provider calls.
   const prompt = page.locator('#mock-prompt');
   await prompt.fill('Add liquidity 0.01 SOL and 0.30 devUSDC ticks -39104 to -36992 on Solana Devnet');

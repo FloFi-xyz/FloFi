@@ -6,25 +6,21 @@ import { signRequests } from './jupiter-fixtures';
 import { devnetControl, installDevnetWallet, resetDevnetHarness } from './solana-devnet-fixtures';
 
 /**
- * BUILD-SOLANA-MAINNET-001 on MOCKED loopback harnesses only (the Devnet harness also serves a MOCKED copy of the mainnet-beta Orca pool):
- * the header Mainnet/Testnet control drives a Solana session's cluster, a step moves only to its own family's counterpart, and Orca liquidity
- * on Solana Mainnet keeps real-funds wording and an explicit acknowledgement before the one owner signature. Nothing reaches a public network:
- * live Build estimates are answered "unavailable" in the browser, so the server never calls a provider.
+ * BUILD-FLOFI-MAINNET-PRODUCT-001 on MOCKED loopback harnesses only, with the app exactly as deployed (no engineering opt-in): FloFi is Mainnet-only.
+ * There is no Mainnet/Testnet selector; a Solana wallet connects on mainnet-beta; the Canvas offers mainnets only, and a test network typed in
+ * chat is refused rather than moved to a mainnet. Orca liquidity on Solana Mainnet keeps real-funds wording, and MOCKED evidence cannot authorize.
+ * (The Devnet harness also serves a MOCKED copy of the mainnet-beta Orca pool.) Nothing reaches a public network: live Build estimates are
+ * answered "unavailable" in the browser, so the server never calls a provider.
  */
 async function closedEstimates(page: Page) {
   await page.route('**/api/build-estimate', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: false, code: 'ESTIMATE_UNAVAILABLE' }) }));
 }
 const mainnetControl = async (body: Record<string, unknown>) => (await (await fetch('http://127.0.0.1:8552/mainnet-control', { method: 'POST',
   headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })).json() as { result: unknown }).result;
-const environment = (page: Page) => page.getByRole('combobox', { name: 'Environment', exact: true });
-async function chooseEnvironment(page: Page, value: 'Mainnet' | 'Testnet') {
-  await environment(page).click(); await page.getByRole('option', { name: value, exact: true }).click();
-  await expect(environment(page)).toHaveText(value);
-}
 async function connectSolana(page: Page) {
   await page.getByRole('button', { name: 'Connect Wallet', exact: true }).click();
   await chooseWallet(page, 'Gryloo MOCKED Solana wallet', 'Solana');
-  await expect(environment(page)).toHaveText('Testnet'); await expect(environment(page)).toBeEnabled();
+  await expect(page.getByRole('group', { name: 'Wallet connection', exact: true })).toContainText('Solana mainnet-beta');
 }
 async function chooseNetwork(page: Page, card: ReturnType<Page['locator']>, network: string) {
   await card.getByRole('button', { name: 'Select source token', exact: true }).click();
@@ -32,39 +28,30 @@ async function chooseNetwork(page: Page, card: ReturnType<Page['locator']>, netw
   await page.getByRole('region', { name: 'Source asset picker', exact: true }).getByRole('button', { name: 'Hide token picker', exact: true }).click();
 }
 const revision = (page: Page) => page.locator('.summary-bar');
+const TEST_NETWORKS = ['Solana Devnet', 'Base Sepolia', 'Ethereum Sepolia', 'Arbitrum Sepolia', 'Robinhood Chain Testnet'];
 
-test('a Solana session switches Testnet ↔ Mainnet from the header, and a Swap step follows its own family (Solana Devnet ↔ Solana) as a draft', async ({ page }) => {
+test('FloFi is Mainnet-only: no environment selector, a Solana wallet connects on mainnet-beta, and the Canvas offers mainnets only', async ({ page }) => {
   await closedEstimates(page);
   const wallet = await resetDevnetHarness(); await installDevnetWallet(page, wallet);
   await page.goto('/app');
+  await expect(page.getByRole('combobox', { name: 'Environment' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Add Supply → Borrow → Swap' })).toHaveCount(0);
   await connectSolana(page);
-  await expect(page.getByRole('group', { name: 'Wallet connection' })).toContainText('Solana Devnet');
   await page.getByRole('button', { name: 'Add swap', exact: true }).click();
   const card = page.locator('.build-flow-surface .composer-card');
-  await chooseNetwork(page, card, 'Solana Devnet');
-  await expect(card.locator('.composer-metadata')).toContainText('Solana Devnet');
+  await card.getByRole('button', { name: 'Select source token', exact: true }).click();
+  const networks = page.getByRole('region', { name: 'Action network picker', exact: true });
+  for (const name of ['Base', 'Solana', 'Robinhood Chain']) await expect(networks.getByRole('button', { name, exact: true })).toBeVisible();
+  for (const name of TEST_NETWORKS) await expect(networks.getByRole('button', { name, exact: true })).toHaveCount(0);
+  await networks.getByRole('button', { name: 'Solana', exact: true }).click();
+  await page.getByRole('region', { name: 'Source asset picker', exact: true }).getByRole('button', { name: 'Hide token picker', exact: true }).click();
+  await expect(card.getByRole('button', { name: 'Select destination token', exact: true })).not.toContainText('devUSDC');
   await card.getByRole('textbox').fill('0.5'); await card.getByRole('textbox').press('Enter');
   await expect(revision(page)).toHaveAttribute('data-workflow-revision', '1');
-  await expect(card.getByRole('button', { name: 'Select destination token', exact: true })).toContainText('devUSDC');
-
-  await chooseEnvironment(page, 'Mainnet');
-  await expect(page.getByRole('group', { name: 'Wallet connection' })).toContainText('Solana mainnet-beta');
-  // The step moves to Solana (mainnet-beta) with mainnet USDC — never to another chain — and stays a draft until Enter.
-  await expect(card.locator('.composer-metadata')).toContainText('Solana');
-  await expect(card.locator('.composer-metadata')).not.toContainText('Devnet');
-  await expect(card.getByRole('button', { name: 'Select destination token', exact: true })).toContainText('USDC');
-  await expect(card.getByRole('button', { name: 'Select destination token', exact: true })).not.toContainText('devUSDC');
-  await expect(revision(page)).toHaveAttribute('data-workflow-revision', '1');
-  await card.getByRole('textbox').press('Enter');
-  await expect(revision(page)).toHaveAttribute('data-workflow-revision', '2');
   await expect(card.locator('.composer-metadata')).toContainText('Jupiter');
-
-  await chooseEnvironment(page, 'Testnet');
-  await expect(card.getByRole('button', { name: 'Select destination token', exact: true })).toContainText('devUSDC');
-  await card.getByRole('textbox').press('Enter');
-  await expect(revision(page)).toHaveAttribute('data-workflow-revision', '3');
-  await expect(card.locator('.composer-metadata')).toContainText('Solana Devnet');
-  // Switching clusters is a connection only: no signature was ever requested.
+  const ir = JSON.parse(await readWorkflowIr(page)) as { nodes: { actionType: string; chainId: string }[] };
+  expect(ir.nodes.filter(node => !node.actionType.startsWith('mock-')).map(node => node.chainId)).toEqual(['solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp']);
+  // Connecting is a connection only: no signature was ever requested.
   expect(await signRequests(page)).toBe(0);
 });
 
@@ -75,7 +62,6 @@ test('Orca liquidity on Solana Mainnet: authored on the Canvas against the verif
   await installDevnetWallet(page, wallet);
   await page.goto('/__engineering');
   await connectSolana(page);
-  await chooseEnvironment(page, 'Mainnet');
   await page.getByRole('button', { name: 'Add pool', exact: true }).click();
   const card = page.locator('.build-flow-surface .composer-card');
   await chooseNetwork(page, card, 'Solana');
@@ -109,4 +95,17 @@ test('Orca liquidity on Solana Mainnet: authored on the Canvas against the verif
   // MOCKED loopback evidence can never authorize a real-funds signature.
   await assertSimulationReviewBlocked(page, () => signRequests(page));
   expect(await mainnetControl({ action: 'sent' })).toBe(0); expect(await devnetControl({ action: 'sent' })).toBe(0);
+});
+
+test('a test network named in chat is refused with an explanation and never moved to a mainnet', async ({ page }) => {
+  await closedEstimates(page);
+  await page.goto('/app');
+  await page.getByLabel('Describe your flow').fill('swap 1 USDC to WETH on Base Sepolia slippage 50 bps');
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await expect(page.getByRole('log', { name: 'Conversation', exact: true }))
+    .toContainText('Base Sepolia is a test network. FloFi runs on mainnets only, with real funds: rebuild this on Base.');
+  await expect(page.getByRole('button', { name: 'Apply proposal', exact: true })).toHaveCount(0);
+  await expect(revision(page)).toHaveAttribute('data-workflow-revision', '0');
+  const ir = JSON.parse(await readWorkflowIr(page)) as { nodes: { actionType: string; chainId: string }[] };
+  expect(ir.nodes.filter(node => !node.actionType.startsWith('mock-'))).toEqual([]);
 });

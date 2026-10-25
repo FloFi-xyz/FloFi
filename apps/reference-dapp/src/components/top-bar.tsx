@@ -1,27 +1,25 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
 import { useLocale } from '../i18n/locale';
-import { useState } from 'react';
 
 import { product } from '../config/product';
 import { useModeB } from '../state/mode-b-store';
 import { useModeA } from '../state/mode-a-store';
 import { StatusBadge } from './status-badge';
-import { useBuild009Wallet, chainName, BASE_HEX, BASE_SEPOLIA_HEX } from '../state/build009-wallet-store';
+import { useBuild009Wallet, chainName } from '../state/build009-wallet-store';
 import { isLendingComposition } from '@defi-workflow-engine/workflow-contracts';
 import { useLending } from '../state/lending-store';
 import { useBridgeSwap } from '../state/bridge-swap-store';
 import { useWorkflow } from '../state/workflow-store';
 import { WORKFLOW_STAGES, workflowShellContext, shellChainLabel, type WorkflowStage } from '../domain/product-shell';
-import { EVM_WALLET_NETWORKS, walletChainRef } from '../wallet/evm-networks';
-import { familyCounterpart } from '../domain/network-registry';
+import { EVM_WALLET_NETWORKS } from '../wallet/evm-networks';
+import { activeNetworkScope, networkAllowed } from '../domain/network-scope';
 import { useRouter } from '../state/router-store';
 import { ROUTER_NETWORK_OPTIONS } from '../domain/router-authoring';
 import { useJupiter } from '../state/jupiter-store';
 import { FloFiLogo } from './flofi-logo';
 import { HeaderSettings } from './header-settings';
 import { useExecutionEnvironment } from '../state/capability-store';
-import { HeaderEnvironment } from './header-environment';
 import { NavigationDrawer } from './navigation-drawer';
 import { secondaryWorkspaceRoute } from '../domain/secondary-workspaces';
 import { useWalletConnection } from '../state/wallet-connection';
@@ -34,7 +32,7 @@ export type ProductSection = Tab | 'Dashboard';
 export function TopBar({ tab, setTab, pathname, engineering = false, compact = false }: { tab: ProductSection; setTab: (value: ProductSection) => void; pathname?: string | null; engineering?: boolean; compact?: boolean }) {
   const { t: tr } = useLocale();
   const secondaryWorkspace = secondaryWorkspaceRoute(pathname);
-  const { walletEnvironment, walletKind } = useExecutionEnvironment();
+  const { walletKind } = useExecutionEnvironment();
   const { info, wallet } = useModeA();
   const modeB = useModeB();
   const build009 = useBuild009Wallet();
@@ -54,29 +52,16 @@ export function TopBar({ tab, setTab, pathname, engineering = false, compact = f
     ?? (routerRecovery ? ROUTER_NETWORK_OPTIONS[router.network].pair.source.chainId : lendingActive ? 'eip155:84532'
       : pristine && jupiter.recovered && jupiter.record ? jupiter.record.review.chain : null);
   // This is only a shortcut to existing user-driven wallet switching, never a capability or execution decision.
-  const switchTarget = EVM_WALLET_NETWORKS.find(network => network.chain === requiredChain && network.switchable);
+  // BUILD-FLOFI-MAINNET-PRODUCT-001: never a test network (a legacy test-network workflow is rebuilt on its mainnet, not switched to).
+  const switchTarget = networkAllowed(requiredChain, activeNetworkScope()) ? EVM_WALLET_NETWORKS.find(network => network.chain === requiredChain && network.switchable) : undefined;
   const solanaActive = walletKind === 'solana';
   const connection = useWalletConnection();
   const solanaDisconnect = () => { void jupiter.disconnect(); };
   const disconnect = solanaActive ? solanaDisconnect : build009.reset;
-  // BUILD-SOLANA-MAINNET-001: Mainnet/Testnet asks the connected wallet for its own network family's counterpart (a Solana session moves between
-  // solana:mainnet and solana:devnet; Base ↔ Base Sepolia, Robinhood Chain ↔ Robinhood Chain Testnet), else Base / Base Sepolia as before.
-  const [switchError, setSwitchError] = useState<string | null>(null);
-  function switchEnvironment(value: 'mainnet' | 'testnet') {
-    setSwitchError(null);
-    if (value === walletEnvironment) return;
-    if (solanaActive) {
-      void jupiter.switchCluster(value === 'mainnet' ? 'solana:mainnet' : 'solana:devnet').then(code => {
-        if (code) setSwitchError(`This Solana wallet could not connect on ${value === 'mainnet' ? 'Solana Mainnet' : 'Solana Devnet'}.`);
-      });
-      return;
-    }
-    const counterpart = familyCounterpart(walletChainRef(build009.chainId), value === 'mainnet' ? 'MAINNET' : 'TESTNET');
-    const target = EVM_WALLET_NETWORKS.find(network => network.chain === counterpart?.chain && network.switchable)?.hex as Parameters<typeof build009.switchTo>[0] | undefined;
-    void build009.switchTo(target ?? (value === 'mainnet' ? BASE_HEX : BASE_SEPOLIA_HEX));
-  }
+  // BUILD-FLOFI-MAINNET-PRODUCT-001: there is no Mainnet/Testnet selector. FloFi runs on mainnets; a wallet on another network is offered the
+  // workflow's own network below ("Switch to …"), and nothing moves a wallet to a test network.
   const disconnectDisabled = solanaActive ? !jupiter.session || jupiter.busy : !build009.account || build009.busy;
-  const walletError = solanaActive ? connection.error ?? switchError : build009.error ?? connection.error;
+  const walletError = solanaActive ? connection.error : build009.error ?? connection.error;
   const provider = solanaActive ? jupiter.session ? { name: jupiter.session.wallet.name, icon: jupiter.session.wallet.icon ?? null } : null
     : build009.account ? build009.provider : null;
   const fork = info?.available ? info : null;
@@ -86,8 +71,6 @@ export function TopBar({ tab, setTab, pathname, engineering = false, compact = f
     {!compact && <nav aria-label={tr("Workflow stages")} className="tabs"><button type="button" onClick={() => setTab('Dashboard')} aria-current={!secondaryWorkspace && tab === 'Dashboard' ? 'page' : undefined} className={!secondaryWorkspace && tab === 'Dashboard' ? 'selected' : ''}>{tr("Dashboard")}</button>{WORKFLOW_STAGES.map((value, index) =>
       <button key={value} type="button" onClick={() => setTab(value)} disabled={Boolean(authoringIncomplete && value !== 'Build')} title={tr(authoringIncomplete && value !== 'Build' ? 'Configure the action amount in Build first' : undefined)} aria-current={!secondaryWorkspace && tab === value ? 'page' : undefined} className={!secondaryWorkspace && tab === value ? 'selected' : ''}><span className="stage-number" aria-hidden="true">{tr(index + 1)}</span>{tr(value)}</button>)}</nav>}
     <div className="top-meta">
-      {!compact && <HeaderEnvironment environment={walletEnvironment} disabled={solanaActive ? !jupiter.session || jupiter.busy : !build009.account || build009.busy}
-        onChange={switchEnvironment}/>}
       <div className="header-wallet" role="group" aria-label={tr("Wallet connection")}>
       {provider && <span className="header-wallet-provider" title={provider.name}><WalletMark icon={provider.icon}/><span className="sr-only">{provider.name}</span></span>}
       {solanaActive && jupiter.session ? <span className="wallet-connection">{tr("Solana Default: ")}<span className="numeric wallet-address">{jupiter.session.account.address.slice(0, 6)}…{jupiter.session.account.address.slice(-4)}</span> · {tr(jupiter.session.chain === 'solana:devnet' ? 'Solana Devnet' : jupiter.session.chain === 'solana:mainnet' ? 'Solana mainnet-beta' : jupiter.session.chain)}</span>

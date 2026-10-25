@@ -25,6 +25,8 @@ import { useWorkflow } from '../state/workflow-store';
 import { editorReducer, resolveCanvasRemoval } from '../domain/editor';
 import { checkConnection, connectionEnd, handleHitScale } from '../domain/canvas-connect';
 import { CANVAS_ACTIONS, canvasAddCommand, type CanvasAction } from '../domain/canvas-authoring';
+import { activeNetworkScope, isTestNetwork, mainnetCounterpart, testNetworkTemplate, workflowTestNetworks } from '../domain/network-scope';
+import { walletChainRef } from '../wallet/evm-networks';
 import { shellChainLabel } from '../domain/product-shell';
 import { WorkflowName } from './workflow-name';
 import { DarkSpotlight } from './dark-spotlight';
@@ -128,6 +130,7 @@ function InsertionViewport({ workflowId, ids }: { workflowId: string; ids: reado
   }, [workflowId, ids, initialized, measured, fitView, store]);
   return null;
 }
+/** BUILD-FLOFI-MAINNET-PRODUCT-001: `lending` (Supply → Borrow → Swap) exists only on Base Sepolia, so the Mainnet-only product does not offer it. */
 const actions = [...CANVAS_ACTIONS, 'stocks'] as const;
 /** BUILD-SOLANA-MAINNET-001: the owner is told about every linked step a deletion also removed; undo restores them. */
 const removalFeedback = (count: number) => count === 1 ? 'Also removed 1 linked step that cannot run without the deleted one. Undo restores it.'
@@ -405,8 +408,10 @@ function BuildCanvas({ environment, selectedId, select, openSettings, workflowNa
     if (actionSetup && actionSetup.action !== 'bridge' && !(actionSetup.action === 'swap' && actionSetup.stocks)) {
       const available = cryptoNetworks(actionSetup.action, environment);
       const selection = actionSetup.cryptoSelection;
+      // A new card starts on the network the connected EVM wallet is already on when it serves the action (FloFi never moves the wallet).
+      const walletChain = walletChainRef(wallet.chainId), preferred = available.find(profile => profile.chain === walletChain) ?? available[0];
       const next = !available.length || available.some(profile => profile.network === selection?.network) ? null
-        : selection ? counterpartSelection(selection, environment) : selectCryptoNetwork(actionSetup.action, available[0]!.network);
+        : selection ? counterpartSelection(selection, environment) : selectCryptoNetwork(actionSetup.action, preferred!.network);
       if (next) editCryptoSelection(actionSetup.id, next, wallet.account ?? undefined);
     }
     if (!transition) return;
@@ -416,7 +421,7 @@ function BuildCanvas({ environment, selectedId, select, openSettings, workflowNa
       const next = counterpartSelection(selection, environment);
       if (next && next !== selection) editCryptoSelection(node.nodeId, next, wallet.account ?? undefined);
     }
-  }, [environment, actionSetup, workflow, cryptoSelections, editCryptoSelection, wallet.account, context]);
+  }, [environment, actionSetup, workflow, cryptoSelections, editCryptoSelection, wallet.account, wallet.chainId, context]);
   useEffect(() => {
     if (environment !== 'mainnet' && environment !== 'testnet') return;
     const transition = routeTransitions.current !== environmentTransitions.current;
@@ -439,6 +444,25 @@ function BuildCanvas({ environment, selectedId, select, openSettings, workflowNa
       if (details && canEditCanvasAmount(node, context, workflow)) alignNetworks(node.nodeId, bridgeNetworkInputs[node.nodeId] ?? details);
     }
   }, [environment, actionSetup, workflow, context, bridgeNetworkInputs, editBridgeNetworks]);
+  // BUILD-FLOFI-MAINNET-PRODUCT-001: a workflow saved or handed off on a test network before FloFi became Mainnet-only opens as it was (never
+  // re-networked silently) and cannot be simulated. "Rebuild on <mainnet>" is the owner's explicit re-authoring: each step becomes a draft on its
+  // network family's mainnet with its own amount, which the owner checks and applies before a fresh simulation and Review on real funds.
+  const legacyNetworks = activeNetworkScope() === 'ENGINEERING' ? [] : workflowTestNetworks(workflow);
+  const legacyMainnets = [...new Set(legacyNetworks.map(network => mainnetCounterpart(network.key)?.name).filter((name): name is string => Boolean(name)))];
+  function rebuildOnMainnet() {
+    for (const node of workflow.nodes) {
+      const router = routerDetails(node);
+      if (router && canEditCanvasAmount(node, context, workflow)) {
+        const option = ROUTER_NETWORK_OPTIONS.mainnet, current = bridgeNetworkInputs[node.nodeId] ?? router;
+        if (current.source !== option.source || current.destination !== option.destination) editBridgeNetworks(node.nodeId, { source: option.source, destination: option.destination });
+        continue;
+      }
+      const selection = cryptoSelections[node.nodeId] ?? cryptoSelectionOf(node);
+      if (!selection || !isTestNetwork(node.chainId) || !canSelectCryptoAssets(node, workflow)) continue;
+      const next = counterpartSelection(selection, 'mainnet');
+      if (next && next !== selection) editCryptoSelection(node.nodeId, next, wallet.account ?? undefined);
+    }
+  }
   const projectedNodes = useMemo<Node[]>(() => {
     const actionSelection = (id: string, selection: CryptoSelection, editable = true) => {
       const profiles = cryptoNetworks(selection.action, environment ?? 'unknown');
@@ -714,7 +738,7 @@ function BuildCanvas({ environment, selectedId, select, openSettings, workflowNa
   const dockButton = <button type="button" className="toolbox-mode-toggle" title={tr(toolboxMode === 'top' ? 'Undock toolbar' : 'Dock toolbar')} aria-label={tr(toolboxMode === 'top' ? 'Undock toolbar' : 'Dock toolbar')} aria-pressed={toolboxMode === 'floating'} onClick={() => changeToolboxMode(toolboxMode === 'top' ? 'floating' : 'top')}><DockIcon floating={toolboxMode === 'floating'}/></button>;
   const toolbox = <div className="canvas-toolbox" role="toolbar" aria-label={tr("Canvas tools")}>
     <div className="canvas-primary-tools" role="group" aria-label={tr("Workflow actions")}>
-    {actions.map(action => <button key={action} type="button"
+    {actions.filter(action => action !== 'lending' || activeNetworkScope() === 'ENGINEERING').map(action => <button key={action} type="button"
       title={tr(action === 'stocks' ? 'Stocks' : action === 'lending' ? 'Add Aave Supply → Aave Borrow → Uniswap Swap' : action === 'swap' || action === 'supply' || action==='borrow' || action==='repay' || action==='withdraw' ? 'Add ' + action : 'Add ' + actionLabel(action))}
       aria-label={tr(action === 'stocks' ? 'Stocks' : action==='lending'?'Add Supply → Borrow → Swap':'Add ' + (action === 'transfer' ? 'send' : action))} disabled={action==='lending'&&isLendingComposition(workflow)} onClick={() => addAction(action)}><ActionIcon action={action}/><span>{tr(actionLabel(action))}</span></button>)}
     <button type="button" disabled aria-label={tr("Privacy")} title={tr("Privacy · not available yet")}>
@@ -736,6 +760,11 @@ function BuildCanvas({ environment, selectedId, select, openSettings, workflowNa
     <div className="canvas-head build-canvas-head"><WorkflowName name={workflowName} rename={renameWorkflow}
       onSave={onSave} onAutomate={onAutomate && workflow.nodes.some(node => !node.actionType.startsWith('mock-')) ? onAutomate : undefined}/><div className={toolboxMode === 'top' ? 'canvas-toolbar-row' : 'canvas-toolbar-utilities'}>{tr(toolboxMode === 'top' && toolbox)}{tr(toolboxMode === 'floating' && dockButton)}<span className="revision">{tr(projectedNodes.length)} {tr(projectedNodes.length === 1 ? 'action' : 'actions')}</span></div></div>
     {feedback && <p className="canvas-feedback" role="status">{tr(feedback)}</p>}
+    {legacyNetworks.length > 0 && <div className="canvas-legacy-network" role="status" data-legacy-network={legacyNetworks.map(network => network.key).join(' ')}>
+      <p><strong>{tr(...testNetworkTemplate(legacyNetworks))}</strong></p>
+      <p>{tr('Nothing on this workflow runs on a test network. Rebuilding turns each step into a draft on its mainnet with the same amount: check every value and apply it. Mainnet uses real funds, and nothing runs before a fresh simulation, your Review and your wallet signature.')}</p>
+      {legacyMainnets.length > 0 && <button type="button" onClick={rebuildOnMainnet}>{tr('Rebuild on {0}', legacyMainnets.join(' / '))}</button>}
+    </div>}
     <div ref={surfaceRef} className="flow-surface build-flow-surface" role="region" aria-label={tr("Workflow graph")} onMouseDown={startMarquee}>
       <ReactFlow key={isLendingComposition(workflow)?'lending':'general'} nodes={nodes} edges={edges} nodeTypes={nodeTypes} onNodesChange={(changes: NodeChange<Node>[]) => onNodesChange(changes.filter(change => change.type !== 'select'))} fitViewOptions={{ padding: COMPOSER_FIT_PADDING }} minZoom={0.35} maxZoom={1.4}
         nodesDraggable nodesConnectable deleteKeyCode={null} selectNodesOnDrag={false} panOnDrag={[1, 2]} {...CANVAS_GESTURES}

@@ -17,6 +17,8 @@ import type { Command } from '../domain/commands';
 import type { WorkflowOwner } from '../domain/saved-workflow';
 import { automationAvailability, automationOperation } from '../server/automation-operation';
 import { automationSteps, type AutomationSteps } from '../automations/automation-steps';
+import { TEST_NETWORK_NOT_AVAILABLE, workflowTestNetworks } from '../domain/network-scope';
+import { networkScope } from '../server/network-scope';
 import { currentWalletPrincipals } from '../server/session-principal';
 
 type Result<T> = { ok: true; value: T } | { ok: false; code: string };
@@ -32,7 +34,10 @@ export async function automationsAvailability(): Promise<{ readonly enabled: boo
 export async function canvasAutomationSteps(workflow: unknown): Promise<Result<AutomationSteps>> {
   try {
     if (!(await currentWalletPrincipals()).length) return { ok: false, code: 'WALLET_SESSION_REQUIRED' };
-    return { ok: true, value: automationSteps(workflow) };
+    const steps = automationSteps(workflow);
+    // BUILD-FLOFI-MAINNET-PRODUCT-001: a legacy test-network Canvas workflow is refused, never prefilled onto a mainnet route.
+    if (networkScope() !== 'ENGINEERING' && workflowTestNetworks({ nodes: steps.steps }).length) return { ok: false, code: TEST_NETWORK_NOT_AVAILABLE };
+    return { ok: true, value: steps };
   } catch { return { ok: false, code: 'AUTOMATION_WORKFLOW_INVALID' }; }
 }
 export async function automationOverview(owner: WorkflowOwner): Promise<Result<OverviewView>> { return automationOperation('overview', [], owner); }

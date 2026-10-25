@@ -17,6 +17,9 @@ import type { StrategySpec } from '../engine/strategy-spec';
 import { ENGINE_VERSION, evaluateWorkflowGates, type HandoffPolicy } from '../mcp/execution.ts';
 import { executionExplorer } from '../domain/execution-lifecycle';
 import { planNamespace, planNamespaces } from '../platform/approvals.ts';
+import { strategyTestNetworks } from '../platform/strategy.ts';
+import { TEST_NETWORK_NOT_AVAILABLE } from '../domain/network-scope';
+import { networkScope } from '../server/network-scope.ts';
 import type { GrantView } from '../delegation/authority.ts';
 import { authorizationPlan, type AuthorizationPlan, type DelegationFacts } from './authorization-plan.ts';
 import type { RunRecord, RunStepRecord, WorkflowRunStore } from './pg-store.ts';
@@ -94,6 +97,8 @@ export async function currentStep(deps: WorkflowRunDeps, run: RunRecord, wallets
   // The exact step the run resolved, re-composed now: a different hash is a stale step, never silently replaced.
   const composed = composeWorkflowBound(step.strategy, step.workflowHash);
   if (!composed.ok || composed.steps.length !== 1) return refuse('WORKFLOW_STEP_STALE');
+  // BUILD-FLOFI-MAINNET-PRODUCT-001: a run started on a test network before FloFi became Mainnet-only signs no further step in the public product.
+  if (networkScope() !== 'ENGINEERING' && strategyTestNetworks(composed).length) return refuse(TEST_NETWORK_NOT_AVAILABLE);
   if (step.state === 'READY') step = await deps.store.stepTransition(run.runId, step.stepIndex, ['READY'], 'AWAITING_OWNER', { claimedAt: deps.now() }, 'STEP_LOADED')
     ?? (await deps.store.steps(run.runId))[fresh.currentStep]!;
   if (step.state !== 'AWAITING_OWNER') return null;

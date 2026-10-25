@@ -1,0 +1,1496 @@
+{
+  "format": "flofi.mainnet-product-matrix.v1",
+  "build": "BUILD-FLOFI-MAINNET-PRODUCT-001",
+  "source": "apps/reference-dapp/src/engine/mainnet-product-matrix.ts",
+  "verifiedAt": "2026-10-23T22:21:47.691Z",
+  "note": "Code support and certification status only. Whether a deployment runs a row is its own enablement and policy (MCP get_capabilities).",
+  "rows": [
+    {
+      "id": "bridge-base-arbitrum-one",
+      "action": "bridge",
+      "network": "base",
+      "destinationNetwork": "arbitrum-one",
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "flofi.router"
+      ],
+      "flow": "crosschain-router",
+      "webRuntime": "router",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": true,
+        "copilot": true,
+        "mcp": true,
+        "telegram": true,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
+    },
+    {
+      "id": "swap-base",
+      "action": "swap",
+      "network": "base",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "uniswap.v3"
+      ],
+      "flow": "base-swap",
+      "webRuntime": "public",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": true,
+        "copilot": true,
+        "mcp": true,
+        "telegram": true,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
+    },
+    {
+      "id": "swap-solana",
+      "action": "swap",
+      "network": "solana",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "jupiter.swap-v2"
+      ],
+      "flow": "jupiter-swap",
+      "webRuntime": "solana-swap",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": true,
+        "copilot": true,
+        "mcp": true,
+        "telegram": true,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
+    },
+    {
+      "id": "transfer-solana",
+      "action": "transfer",
+      "network": "solana",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "solana.spl-transfer"
+      ],
+      "flow": "solana-transfer",
+      "webRuntime": "solana-transfer",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": true,
+        "copilot": true,
+        "mcp": true,
+        "telegram": true,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
+    },
+    {
+      "id": "add-liquidity-solana",
+      "action": "add_liquidity",
+      "network": "solana",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "orca.whirlpools-mainnet-liquidity"
+      ],
+      "flow": "orca-liquidity-mainnet",
+      "webRuntime": "solana-pool",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": true,
+        "copilot": false,
+        "mcp": false,
+        "telegram": false,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": "orca-liquidity-mainnet",
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
+    },
+    {
+      "id": "bridge-base-robinhood",
+      "action": "bridge",
+      "network": "base",
+      "destinationNetwork": "robinhood",
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "flofi.router"
+      ],
+      "flow": "crosschain-router-base-to-robinhood",
+      "webRuntime": "router",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": true,
+        "copilot": true,
+        "mcp": true,
+        "telegram": true,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
+    },
+    {
+      "id": "bridge-robinhood-base",
+      "action": "bridge",
+      "network": "robinhood",
+      "destinationNetwork": "base",
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "flofi.router"
+      ],
+      "flow": "crosschain-router-robinhood-to-base",
+      "webRuntime": "router",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": true,
+        "copilot": true,
+        "mcp": true,
+        "telegram": true,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
+    },
+    {
+      "id": "bridge-arbitrum-robinhood",
+      "action": "bridge",
+      "network": "arbitrum-one",
+      "destinationNetwork": "robinhood",
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "flofi.router"
+      ],
+      "flow": "crosschain-router-arbitrum-to-robinhood",
+      "webRuntime": "router",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": true,
+        "copilot": true,
+        "mcp": true,
+        "telegram": true,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
+    },
+    {
+      "id": "bridge-robinhood-arbitrum",
+      "action": "bridge",
+      "network": "robinhood",
+      "destinationNetwork": "arbitrum-one",
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "flofi.router"
+      ],
+      "flow": "crosschain-router-robinhood-to-arbitrum",
+      "webRuntime": "router",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": true,
+        "copilot": true,
+        "mcp": true,
+        "telegram": true,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
+    },
+    {
+      "id": "swap-robinhood",
+      "action": "swap",
+      "network": "robinhood",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "uniswap.v3"
+      ],
+      "flow": "robinhood-swap",
+      "webRuntime": "public",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": true,
+        "copilot": true,
+        "mcp": true,
+        "telegram": true,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
+    },
+    {
+      "id": "add-liquidity-robinhood",
+      "action": "add_liquidity",
+      "network": "robinhood",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "uniswap.v3"
+      ],
+      "flow": "robinhood-liquidity",
+      "webRuntime": "uniswap-pool",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": true,
+        "copilot": true,
+        "mcp": true,
+        "telegram": true,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
+    },
+    {
+      "id": "transfer-robinhood",
+      "action": "transfer",
+      "network": "robinhood",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "evm.token-transfer"
+      ],
+      "flow": "robinhood-mainnet-transfer",
+      "webRuntime": "transfer",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": true,
+        "copilot": true,
+        "mcp": true,
+        "telegram": true,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
+    },
+    {
+      "id": "bridge-arbitrum-base",
+      "action": "bridge",
+      "network": "arbitrum-one",
+      "destinationNetwork": "base",
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "flofi.router"
+      ],
+      "flow": "crosschain-router-arbitrum-to-base",
+      "webRuntime": "router",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": true,
+        "copilot": true,
+        "mcp": true,
+        "telegram": true,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
+    },
+    {
+      "id": "add-liquidity-base",
+      "action": "add_liquidity",
+      "network": "base",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "uniswap.v3"
+      ],
+      "flow": "base-liquidity",
+      "webRuntime": "uniswap-pool",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": true,
+        "copilot": true,
+        "mcp": true,
+        "telegram": true,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
+    },
+    {
+      "id": "transfer-base",
+      "action": "transfer",
+      "network": "base",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "evm.token-transfer"
+      ],
+      "flow": "base-mainnet-transfer",
+      "webRuntime": "transfer",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": true,
+        "copilot": true,
+        "mcp": true,
+        "telegram": true,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
+    },
+    {
+      "id": "supply-base",
+      "action": "supply",
+      "network": "base",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "aave-v3"
+      ],
+      "flow": "base-aave",
+      "webRuntime": "supply",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": true,
+        "copilot": true,
+        "mcp": true,
+        "telegram": true,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
+    },
+    {
+      "id": "borrow-base",
+      "action": "borrow",
+      "network": "base",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "aave-v3"
+      ],
+      "flow": "base-aave",
+      "webRuntime": "supply",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": true,
+        "copilot": true,
+        "mcp": true,
+        "telegram": true,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
+    },
+    {
+      "id": "repay-base",
+      "action": "repay",
+      "network": "base",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "aave-v3"
+      ],
+      "flow": "base-aave",
+      "webRuntime": "supply",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": true,
+        "copilot": true,
+        "mcp": true,
+        "telegram": true,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
+    },
+    {
+      "id": "withdraw-base",
+      "action": "withdraw",
+      "network": "base",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "aave-v3"
+      ],
+      "flow": "base-aave",
+      "webRuntime": "supply",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": true,
+        "copilot": true,
+        "mcp": true,
+        "telegram": true,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
+    },
+    {
+      "id": "supply-arbitrum",
+      "action": "supply",
+      "network": "arbitrum-one",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "aave-v3"
+      ],
+      "flow": "arbitrum-aave",
+      "webRuntime": "supply",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": true,
+        "copilot": true,
+        "mcp": true,
+        "telegram": true,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
+    },
+    {
+      "id": "borrow-arbitrum",
+      "action": "borrow",
+      "network": "arbitrum-one",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "aave-v3"
+      ],
+      "flow": "arbitrum-aave",
+      "webRuntime": "supply",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": true,
+        "copilot": true,
+        "mcp": true,
+        "telegram": true,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
+    },
+    {
+      "id": "repay-arbitrum",
+      "action": "repay",
+      "network": "arbitrum-one",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "aave-v3"
+      ],
+      "flow": "arbitrum-aave",
+      "webRuntime": "supply",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": true,
+        "copilot": true,
+        "mcp": true,
+        "telegram": true,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
+    },
+    {
+      "id": "withdraw-arbitrum",
+      "action": "withdraw",
+      "network": "arbitrum-one",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "aave-v3"
+      ],
+      "flow": "arbitrum-aave",
+      "webRuntime": "supply",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": true,
+        "copilot": true,
+        "mcp": true,
+        "telegram": true,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
+    },
+    {
+      "id": "swap-arbitrum",
+      "action": "swap",
+      "network": "arbitrum-one",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "uniswap.v3"
+      ],
+      "flow": "arbitrum-swap",
+      "webRuntime": "public",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": true,
+        "copilot": true,
+        "mcp": true,
+        "telegram": true,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
+    },
+    {
+      "id": "transfer-arbitrum",
+      "action": "transfer",
+      "network": "arbitrum-one",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "evm.token-transfer"
+      ],
+      "flow": "arbitrum-mainnet-transfer",
+      "webRuntime": "transfer",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": true,
+        "copilot": true,
+        "mcp": true,
+        "telegram": true,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
+    },
+    {
+      "id": "add-liquidity-arbitrum",
+      "action": "add_liquidity",
+      "network": "arbitrum-one",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "uniswap.v3"
+      ],
+      "flow": "arbitrum-liquidity",
+      "webRuntime": "uniswap-pool",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": true,
+        "copilot": true,
+        "mcp": true,
+        "telegram": true,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
+    },
+    {
+      "id": "supply-ethereum",
+      "action": "supply",
+      "network": "ethereum",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "aave-v3"
+      ],
+      "flow": "ethereum-aave",
+      "webRuntime": "supply",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": true,
+        "copilot": true,
+        "mcp": true,
+        "telegram": true,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
+    },
+    {
+      "id": "borrow-ethereum",
+      "action": "borrow",
+      "network": "ethereum",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "aave-v3"
+      ],
+      "flow": "ethereum-aave",
+      "webRuntime": "supply",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": true,
+        "copilot": true,
+        "mcp": true,
+        "telegram": true,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
+    },
+    {
+      "id": "repay-ethereum",
+      "action": "repay",
+      "network": "ethereum",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "aave-v3"
+      ],
+      "flow": "ethereum-aave",
+      "webRuntime": "supply",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": true,
+        "copilot": true,
+        "mcp": true,
+        "telegram": true,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
+    },
+    {
+      "id": "withdraw-ethereum",
+      "action": "withdraw",
+      "network": "ethereum",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "aave-v3"
+      ],
+      "flow": "ethereum-aave",
+      "webRuntime": "supply",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": true,
+        "copilot": true,
+        "mcp": true,
+        "telegram": true,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
+    },
+    {
+      "id": "swap-ethereum",
+      "action": "swap",
+      "network": "ethereum",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "uniswap.v3"
+      ],
+      "flow": "ethereum-swap",
+      "webRuntime": "public",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": true,
+        "copilot": true,
+        "mcp": true,
+        "telegram": true,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
+    },
+    {
+      "id": "transfer-ethereum",
+      "action": "transfer",
+      "network": "ethereum",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "evm.token-transfer"
+      ],
+      "flow": "ethereum-mainnet-transfer",
+      "webRuntime": "transfer",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": true,
+        "copilot": true,
+        "mcp": true,
+        "telegram": true,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
+    },
+    {
+      "id": "add-liquidity-ethereum",
+      "action": "add_liquidity",
+      "network": "ethereum",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "uniswap.v3"
+      ],
+      "flow": "ethereum-liquidity",
+      "webRuntime": "uniswap-pool",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": true,
+        "copilot": true,
+        "mcp": true,
+        "telegram": true,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
+    },
+    {
+      "id": "bridge-ethereum-base",
+      "action": "bridge",
+      "network": "ethereum",
+      "destinationNetwork": "base",
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "flofi.router"
+      ],
+      "flow": "crosschain-router-ethereum-to-base",
+      "webRuntime": "router",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": true,
+        "copilot": true,
+        "mcp": true,
+        "telegram": true,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
+    },
+    {
+      "id": "bridge-base-ethereum",
+      "action": "bridge",
+      "network": "base",
+      "destinationNetwork": "ethereum",
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "flofi.router"
+      ],
+      "flow": "crosschain-router-base-to-ethereum",
+      "webRuntime": "router",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": true,
+        "copilot": true,
+        "mcp": true,
+        "telegram": true,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
+    },
+    {
+      "id": "bridge-ethereum-arbitrum",
+      "action": "bridge",
+      "network": "ethereum",
+      "destinationNetwork": "arbitrum-one",
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "flofi.router"
+      ],
+      "flow": "crosschain-router-ethereum-to-arbitrum",
+      "webRuntime": "router",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": true,
+        "copilot": true,
+        "mcp": true,
+        "telegram": true,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
+    },
+    {
+      "id": "bridge-arbitrum-ethereum",
+      "action": "bridge",
+      "network": "arbitrum-one",
+      "destinationNetwork": "ethereum",
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "flofi.router"
+      ],
+      "flow": "crosschain-router-arbitrum-to-ethereum",
+      "webRuntime": "router",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": true,
+        "copilot": true,
+        "mcp": true,
+        "telegram": true,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
+    },
+    {
+      "id": "bridge-ethereum-robinhood",
+      "action": "bridge",
+      "network": "ethereum",
+      "destinationNetwork": "robinhood",
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "flofi.router"
+      ],
+      "flow": "crosschain-router-ethereum-to-robinhood",
+      "webRuntime": "router",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": true,
+        "copilot": true,
+        "mcp": true,
+        "telegram": true,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
+    },
+    {
+      "id": "bridge-robinhood-ethereum",
+      "action": "bridge",
+      "network": "robinhood",
+      "destinationNetwork": "ethereum",
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "flofi.router"
+      ],
+      "flow": "crosschain-router-robinhood-to-ethereum",
+      "webRuntime": "router",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": true,
+        "copilot": true,
+        "mcp": true,
+        "telegram": true,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Implemented; no owner-signed mainnet execution has ever been recorded."
+    },
+    {
+      "id": "remove-liquidity-solana",
+      "action": "remove_liquidity",
+      "network": "solana",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "orca.whirlpools-mainnet-liquidity"
+      ],
+      "flow": "orca-liquidity-mainnet",
+      "webRuntime": "solana-pool",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": true,
+        "approve": false,
+        "copilot": false,
+        "mcp": false,
+        "telegram": false,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": "orca-liquidity-mainnet",
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Same Orca engine on mainnet-beta, Canvas only, behind GRYLOO_ORCA_MAINNET and the owner-execution gate."
+    },
+    {
+      "id": "remove-liquidity-base",
+      "action": "remove_liquidity",
+      "network": "base",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "uniswap.v3"
+      ],
+      "flow": null,
+      "webRuntime": null,
+      "ownerWalletExecutionImplemented": false,
+      "channels": {
+        "canvas": false,
+        "approve": false,
+        "copilot": false,
+        "mcp": false,
+        "telegram": false,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "NOT_IMPLEMENTED",
+      "reason": "The public Uniswap v3 engine mints initialized-pool positions only; decrease/collect exist only in the BUILD-006 local-fork engine, which accepts no public route."
+    },
+    {
+      "id": "remove-liquidity-arbitrum-one",
+      "action": "remove_liquidity",
+      "network": "arbitrum-one",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "uniswap.v3"
+      ],
+      "flow": null,
+      "webRuntime": null,
+      "ownerWalletExecutionImplemented": false,
+      "channels": {
+        "canvas": false,
+        "approve": false,
+        "copilot": false,
+        "mcp": false,
+        "telegram": false,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "NOT_IMPLEMENTED",
+      "reason": "The public Uniswap v3 engine mints initialized-pool positions only; decrease/collect exist only in the BUILD-006 local-fork engine, which accepts no public route."
+    },
+    {
+      "id": "remove-liquidity-ethereum",
+      "action": "remove_liquidity",
+      "network": "ethereum",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "uniswap.v3"
+      ],
+      "flow": null,
+      "webRuntime": null,
+      "ownerWalletExecutionImplemented": false,
+      "channels": {
+        "canvas": false,
+        "approve": false,
+        "copilot": false,
+        "mcp": false,
+        "telegram": false,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "NOT_IMPLEMENTED",
+      "reason": "The public Uniswap v3 engine mints initialized-pool positions only; decrease/collect exist only in the BUILD-006 local-fork engine, which accepts no public route."
+    },
+    {
+      "id": "remove-liquidity-robinhood",
+      "action": "remove_liquidity",
+      "network": "robinhood",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "uniswap.v3"
+      ],
+      "flow": null,
+      "webRuntime": null,
+      "ownerWalletExecutionImplemented": false,
+      "channels": {
+        "canvas": false,
+        "approve": false,
+        "copilot": false,
+        "mcp": false,
+        "telegram": false,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "NOT_IMPLEMENTED",
+      "reason": "The public Uniswap v3 engine mints initialized-pool positions only; decrease/collect exist only in the BUILD-006 local-fork engine, which accepts no public route."
+    },
+    {
+      "id": "bridge-evm-solana",
+      "action": "bridge",
+      "network": "any EVM network",
+      "destinationNetwork": "solana",
+      "funds": "REAL_FUNDS",
+      "protocols": [],
+      "flow": null,
+      "webRuntime": null,
+      "ownerWalletExecutionImplemented": false,
+      "channels": {
+        "canvas": false,
+        "approve": false,
+        "copilot": false,
+        "mcp": false,
+        "telegram": false,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "NOT_IMPLEMENTED",
+      "reason": "BRIDGE_ROUTE_UNAVAILABLE: no EVM ↔ Solana route exists."
+    }
+  ],
+  "perStepRows": [
+    {
+      "id": "sequence-confirm-each-step",
+      "action": "sequence",
+      "network": "any (per step)",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "per step"
+      ],
+      "flow": "workflow-run",
+      "webRuntime": "per step",
+      "ownerWalletExecutionImplemented": true,
+      "channels": {
+        "canvas": false,
+        "approve": true,
+        "copilot": false,
+        "mcp": true,
+        "telegram": true,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": true
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "IMPLEMENTED_UNCERTIFIED",
+      "reason": "Durable workflow runs (migration 0015), one approval, one wallet confirmation per step; off unless FLOFI_WORKFLOW_RUNS=enabled."
+    },
+    {
+      "id": "sequence-bound-amounts-confirm-mode",
+      "action": "sequence_bound_amounts",
+      "network": "any (per step)",
+      "destinationNetwork": null,
+      "funds": "REAL_FUNDS",
+      "protocols": [
+        "per step"
+      ],
+      "flow": null,
+      "webRuntime": null,
+      "ownerWalletExecutionImplemented": false,
+      "channels": {
+        "canvas": false,
+        "approve": false,
+        "copilot": false,
+        "mcp": false,
+        "telegram": false,
+        "whatsapp": "POLICY_BLOCKED",
+        "developerApi": false
+      },
+      "agentRollout": null,
+      "registryEvidence": null,
+      "liveEvidence": [],
+      "status": "NOT_IMPLEMENTED",
+      "reason": "DEPENDENT_AMOUNT_SOURCE_NOT_IMPLEMENTED: owner-signed flows expose no canonical received amount."
+    }
+  ],
+  "retired": [
+    {
+      "id": "bridge-base-sepolia-arbitrum-sepolia",
+      "action": "bridge",
+      "network": "base-sepolia",
+      "destinationNetwork": "arbitrum-sepolia",
+      "availability": "TEST_NETWORK_NOT_AVAILABLE",
+      "history": "READ_ONLY",
+      "previousStatus": "IMPLEMENTED_UNCERTIFIED"
+    },
+    {
+      "id": "swap-base-sepolia",
+      "action": "swap",
+      "network": "base-sepolia",
+      "destinationNetwork": null,
+      "availability": "TEST_NETWORK_NOT_AVAILABLE",
+      "history": "READ_ONLY",
+      "previousStatus": "LIVE_CERTIFIED"
+    },
+    {
+      "id": "swap-ethereum-sepolia",
+      "action": "swap",
+      "network": "ethereum-sepolia",
+      "destinationNetwork": null,
+      "availability": "TEST_NETWORK_NOT_AVAILABLE",
+      "history": "READ_ONLY",
+      "previousStatus": "IMPLEMENTED_UNCERTIFIED"
+    },
+    {
+      "id": "swap-solana-devnet",
+      "action": "swap",
+      "network": "solana-devnet",
+      "destinationNetwork": null,
+      "availability": "TEST_NETWORK_NOT_AVAILABLE",
+      "history": "READ_ONLY",
+      "previousStatus": "LIVE_CERTIFIED"
+    },
+    {
+      "id": "transfer-solana-devnet",
+      "action": "transfer",
+      "network": "solana-devnet",
+      "destinationNetwork": null,
+      "availability": "TEST_NETWORK_NOT_AVAILABLE",
+      "history": "READ_ONLY",
+      "previousStatus": "IMPLEMENTED_UNCERTIFIED"
+    },
+    {
+      "id": "transfer-ethereum-sepolia",
+      "action": "transfer",
+      "network": "ethereum-sepolia",
+      "destinationNetwork": null,
+      "availability": "TEST_NETWORK_NOT_AVAILABLE",
+      "history": "READ_ONLY",
+      "previousStatus": "IMPLEMENTED_UNCERTIFIED"
+    },
+    {
+      "id": "transfer-robinhood-testnet",
+      "action": "transfer",
+      "network": "robinhood-testnet",
+      "destinationNetwork": null,
+      "availability": "TEST_NETWORK_NOT_AVAILABLE",
+      "history": "READ_ONLY",
+      "previousStatus": "LIVE_CERTIFIED"
+    },
+    {
+      "id": "supply-base-sepolia",
+      "action": "supply",
+      "network": "base-sepolia",
+      "destinationNetwork": null,
+      "availability": "TEST_NETWORK_NOT_AVAILABLE",
+      "history": "READ_ONLY",
+      "previousStatus": "LIVE_CERTIFIED"
+    },
+    {
+      "id": "supply-ethereum-sepolia",
+      "action": "supply",
+      "network": "ethereum-sepolia",
+      "destinationNetwork": null,
+      "availability": "TEST_NETWORK_NOT_AVAILABLE",
+      "history": "READ_ONLY",
+      "previousStatus": "IMPLEMENTED_UNCERTIFIED"
+    },
+    {
+      "id": "borrow-base-sepolia",
+      "action": "borrow",
+      "network": "base-sepolia",
+      "destinationNetwork": null,
+      "availability": "TEST_NETWORK_NOT_AVAILABLE",
+      "history": "READ_ONLY",
+      "previousStatus": "LIVE_CERTIFIED"
+    },
+    {
+      "id": "borrow-ethereum-sepolia",
+      "action": "borrow",
+      "network": "ethereum-sepolia",
+      "destinationNetwork": null,
+      "availability": "TEST_NETWORK_NOT_AVAILABLE",
+      "history": "READ_ONLY",
+      "previousStatus": "IMPLEMENTED_UNCERTIFIED"
+    },
+    {
+      "id": "repay-base-sepolia",
+      "action": "repay",
+      "network": "base-sepolia",
+      "destinationNetwork": null,
+      "availability": "TEST_NETWORK_NOT_AVAILABLE",
+      "history": "READ_ONLY",
+      "previousStatus": "LIVE_CERTIFIED"
+    },
+    {
+      "id": "repay-ethereum-sepolia",
+      "action": "repay",
+      "network": "ethereum-sepolia",
+      "destinationNetwork": null,
+      "availability": "TEST_NETWORK_NOT_AVAILABLE",
+      "history": "READ_ONLY",
+      "previousStatus": "IMPLEMENTED_UNCERTIFIED"
+    },
+    {
+      "id": "withdraw-base-sepolia",
+      "action": "withdraw",
+      "network": "base-sepolia",
+      "destinationNetwork": null,
+      "availability": "TEST_NETWORK_NOT_AVAILABLE",
+      "history": "READ_ONLY",
+      "previousStatus": "LIVE_CERTIFIED"
+    },
+    {
+      "id": "withdraw-ethereum-sepolia",
+      "action": "withdraw",
+      "network": "ethereum-sepolia",
+      "destinationNetwork": null,
+      "availability": "TEST_NETWORK_NOT_AVAILABLE",
+      "history": "READ_ONLY",
+      "previousStatus": "IMPLEMENTED_UNCERTIFIED"
+    },
+    {
+      "id": "add-liquidity-base-sepolia",
+      "action": "add_liquidity",
+      "network": "base-sepolia",
+      "destinationNetwork": null,
+      "availability": "TEST_NETWORK_NOT_AVAILABLE",
+      "history": "READ_ONLY",
+      "previousStatus": "LIVE_CERTIFIED"
+    },
+    {
+      "id": "add-liquidity-ethereum-sepolia",
+      "action": "add_liquidity",
+      "network": "ethereum-sepolia",
+      "destinationNetwork": null,
+      "availability": "TEST_NETWORK_NOT_AVAILABLE",
+      "history": "READ_ONLY",
+      "previousStatus": "IMPLEMENTED_UNCERTIFIED"
+    },
+    {
+      "id": "add-liquidity-solana-devnet",
+      "action": "add_liquidity",
+      "network": "solana-devnet",
+      "destinationNetwork": null,
+      "availability": "TEST_NETWORK_NOT_AVAILABLE",
+      "history": "READ_ONLY",
+      "previousStatus": "LIVE_CERTIFIED"
+    },
+    {
+      "id": "lending-composition-base-sepolia",
+      "action": "lending_composition",
+      "network": "base-sepolia",
+      "destinationNetwork": null,
+      "availability": "TEST_NETWORK_NOT_AVAILABLE",
+      "history": "READ_ONLY",
+      "previousStatus": "IMPLEMENTED_UNCERTIFIED"
+    },
+    {
+      "id": "remove-liquidity-solana-devnet",
+      "action": "remove_liquidity",
+      "network": "solana-devnet",
+      "destinationNetwork": null,
+      "availability": "TEST_NETWORK_NOT_AVAILABLE",
+      "history": "READ_ONLY",
+      "previousStatus": "LIVE_CERTIFIED"
+    },
+    {
+      "id": "remove-liquidity-base-sepolia",
+      "action": "remove_liquidity",
+      "network": "base-sepolia",
+      "destinationNetwork": null,
+      "availability": "TEST_NETWORK_NOT_AVAILABLE",
+      "history": "READ_ONLY",
+      "previousStatus": "NOT_IMPLEMENTED"
+    },
+    {
+      "id": "remove-liquidity-ethereum-sepolia",
+      "action": "remove_liquidity",
+      "network": "ethereum-sepolia",
+      "destinationNetwork": null,
+      "availability": "TEST_NETWORK_NOT_AVAILABLE",
+      "history": "READ_ONLY",
+      "previousStatus": "NOT_IMPLEMENTED"
+    },
+    {
+      "id": "swap-then-add-liquidity-solana-devnet",
+      "action": "swap_then_add_liquidity",
+      "network": "solana-devnet",
+      "destinationNetwork": null,
+      "availability": "TEST_NETWORK_NOT_AVAILABLE",
+      "history": "READ_ONLY",
+      "previousStatus": "LIVE_CERTIFIED"
+    },
+    {
+      "id": "sequence-delegated-single-authorization",
+      "action": "sequence_delegated",
+      "network": "base-sepolia, ethereum-sepolia (Uniswap swaps only)",
+      "destinationNetwork": null,
+      "availability": "TEST_NETWORK_NOT_AVAILABLE",
+      "history": "READ_ONLY",
+      "previousStatus": "NOT_IMPLEMENTED"
+    }
+  ]
+}

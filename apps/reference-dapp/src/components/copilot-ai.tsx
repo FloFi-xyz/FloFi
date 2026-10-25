@@ -246,7 +246,8 @@ export function useCopilotInterpreter() {
     reset, proposalSentence, learning, refreshLearning };
 }
 
-export const COPILOT_PLACEHOLDER = 'Put 1 USDC into Aave on Base Sepolia';
+/** BUILD-FLOFI-MAINNET-PRODUCT-001: the example names a mainnet (the public product never suggests a test network). */
+export const COPILOT_PLACEHOLDER = 'Put 1 USDC into Aave on Base';
 export function copilotIntro(mode: CopilotMode | 'loading'): string | null {
   if (mode === 'live') return 'Flofi Copilot ready. Describe an action in your own words, change a step, ask about this workflow, or type an exact command. An AI model turns free text into a proposal; it cannot sign or execute, and nothing changes until you apply.';
   if (mode === 'replay') return 'Flofi Copilot ready in replay mode (recorded answers, no AI model). Describe an action, change a step, ask about this workflow, or type an exact command. Nothing changes until you apply a proposal.';

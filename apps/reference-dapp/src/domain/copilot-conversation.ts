@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { activeNetworkScope, introducedTestNetworks, testNetworkMessage } from './network-scope';
 import { groundAutomationDraft } from './copilot-automation';
 import type { AutomationInput } from './copilot-automation';
 import type { ReviewContext } from '@defi-workflow-engine/reference-linter';
@@ -1054,6 +1055,9 @@ function propose(state: CopilotConversation, env: CopilotEnvironment, command: C
     return failed(state, m, copilotRejection('COPILOT_COMMAND_MISMATCH', state.language).message);
   const preview = previewOf(env, command);
   if (preview.error) return failed(state, m, copilotRejection(preview.error.split(':')[0]!.trim(), state.language).message);
+  // BUILD-FLOFI-MAINNET-PRODUCT-001: the public product never proposes a step on a test network (and never moves one to a mainnet itself).
+  const introduced = introducedTestNetworks(env.workflow, preview.workflow, activeNetworkScope());
+  if (introduced.length) return refused(state, m, testNetworkMessage(introduced));
   // A position-management proposal may leave the IR as it is (the workflow already holds that position's step): Apply still prepares the operation.
   const unchanged = command.type !== 'MANAGE_SOLANA_POSITION' && (preview.workflow === env.workflow || (command.type === 'AUTHOR_LENDING' && lendingDetails(env.workflow) !== null &&
     JSON.stringify(lendingDetails(preview.workflow)) === JSON.stringify(lendingDetails(env.workflow))));

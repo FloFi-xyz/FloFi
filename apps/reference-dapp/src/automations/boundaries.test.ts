@@ -64,10 +64,11 @@ describe('BUILD-AUTOMATION-001 authority boundary', () => {
     // of what it reaches can hold or use a key, and no browser state, component or server action is reachable at all.
     for (const file of reached) expect(code(file), file).not.toMatch(KEY_HOLDING);
     expect([...reached].filter(f => /^src\/(?:state|components)\/|-action\.ts$|owner-submission/.test(f))).toEqual([]);
-    // Scheduler code itself reaches into `src/server` only for deployment facts and the runtime host (saved workflows are read by its own query).
+    // Scheduler code itself reaches into `src/server` only for deployment facts and the runtime host (saved workflows are read by its own query);
+    // BUILD-FLOFI-MAINNET-PRODUCT-001: the network scope is a deployment fact too (an environment read, no I/O).
     const servers = own.flatMap(file => importsOf(join(app, file)).filter(s => s.startsWith('.')).map(s => rel(resolve(dirname(join(app, file)), s)).replace(/\.ts$/, '') + '.ts'))
       .filter(f => f.startsWith('src/server/'));
-    expect([...new Set(servers)].sort()).toEqual(['src/server/deployment.ts', 'src/server/flow-runtime.ts']);
+    expect([...new Set(servers)].sort()).toEqual(['src/server/deployment.ts', 'src/server/flow-runtime.ts', 'src/server/network-scope.ts']);
   });
 
   it('gives the Railway worker’s automation entry the same zero authority, and no approval key or engine runtime', () => {

@@ -24,6 +24,9 @@ import { catalogSwapDetails } from '../domain/catalog-swap-authoring';
 import { composeWorkflowBound, dappReviewContext } from '../engine/strategy-engine';
 import { isStrategyWorkflow, type StrategyInput, type StrategySpec } from '../engine/strategy-spec';
 import { ENGINE_VERSION } from '../platform/index.ts';
+import { strategyTestNetworks } from '../platform/strategy.ts';
+import { TEST_NETWORK_NOT_AVAILABLE } from '../domain/network-scope';
+import { networkScope } from '../server/network-scope.ts';
 
 export type WorkflowSource = { readonly workflowId: string; readonly workflowHash: string; readonly version: number };
 /** `strategy` is a v1 single action, or (delegated rules only, BUILD-AUTOMATION-002) a v2 step list. */
@@ -36,6 +39,8 @@ type Refused = { readonly ok: false; readonly code: string };
 export function bindStrategy(input: unknown, source: WorkflowSource | null = null): { readonly ok: true; readonly binding: Binding } | Refused {
   const composed = composeWorkflowBound(input, undefined);
   if (!composed.ok) return { ok: false, code: composed.code };
+  // BUILD-FLOFI-MAINNET-PRODUCT-001: the public product automates mainnet actions only.
+  if (networkScope() !== 'ENGINEERING' && strategyTestNetworks(composed).length) return { ok: false, code: TEST_NETWORK_NOT_AVAILABLE };
   if (composed.steps.length !== 1) return { ok: false, code: 'AUTOMATION_ACTION_UNSUPPORTED' };
   const step = composed.steps[0]!;
   if (step.strategy.action !== 'swap') return { ok: false, code: 'AUTOMATION_ACTION_UNSUPPORTED' };
@@ -44,7 +49,9 @@ export function bindStrategy(input: unknown, source: WorkflowSource | null = nul
 /** The binding still reproduces with the current engine (same hash), or STRATEGY_STALE. Only a delegated rule may bind several steps. */
 export function verifyBinding(binding: Pick<Binding, 'strategy' | 'workflowHash'>, options: { readonly multiStep?: boolean } = {}): { readonly ok: true } | Refused {
   const composed = composeWorkflowBound(binding.strategy, binding.workflowHash);
-  return composed.ok && (composed.steps.length === 1 || options.multiStep === true) ? { ok: true } : { ok: false, code: 'STRATEGY_STALE' };
+  if (!composed.ok || !(composed.steps.length === 1 || options.multiStep === true)) return { ok: false, code: 'STRATEGY_STALE' };
+  // An automation bound to a test network before FloFi became Mainnet-only proposes nothing more; it is never re-networked.
+  return networkScope() !== 'ENGINEERING' && strategyTestNetworks(composed).length ? { ok: false, code: TEST_NETWORK_NOT_AVAILABLE } : { ok: true };
 }
 /** WORKFLOW_CHANGED when the source saved workflow is gone or no longer the exact document the automation was bound to. */
 export function sourceDrift(source: WorkflowSource | null, current: { readonly workflowHash: string; readonly version: number } | null): string | null {

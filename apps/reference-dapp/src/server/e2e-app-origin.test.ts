@@ -24,7 +24,7 @@ describe('FLOFI_E2E_APP_PORT', () => {
   });
   it('drives Playwright baseURL, webServer.url and the Next.js PORT from one origin, with no reused server', () => {
     const config = read(join(app, 'playwright.config.ts'));
-    expect(config).toContain("import { E2E_APP_ORIGIN, E2E_APP_PORT } from './e2e/app-origin';");
+    expect(config).toContain("import { E2E_APP_ORIGIN, E2E_APP_PORT, e2eNetworkScopeEnv } from './e2e/app-origin';");
     expect(config).toContain('baseURL: E2E_APP_ORIGIN,');
     expect(config).toContain('url: E2E_APP_ORIGIN,');
     expect(config).toContain('PORT: String(E2E_APP_PORT),');

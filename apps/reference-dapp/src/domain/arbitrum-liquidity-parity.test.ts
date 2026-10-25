@@ -60,7 +60,7 @@ describe('Arbitrum liquidity authoring parity', () => {
   it('maps the shared MCP preview and execution plan to the registered flow, with no public evidence claim', () => {
     expect(previewPlan(strategy)).toEqual({ flow: 'arbitrum-liquidity', subject: 'EVM' }); expect(strategyFlow(strategy)).toBe('arbitrum-liquidity');
     expect(capabilityNetworks('add_liquidity').some(n => n.key === 'arbitrum-one')).toBe(true);
-    expect(codeCapabilities().find(c => c.network === 'arbitrum-one' && c.action === 'add_liquidity')).toMatchObject({ ownerWalletExecutionImplemented: true, demonstratedEvidence: null });
+    expect(codeCapabilities('ENGINEERING').find(c => c.network === 'arbitrum-one' && c.action === 'add_liquidity')).toMatchObject({ ownerWalletExecutionImplemented: true, demonstratedEvidence: null });
     const result = composeStrategy({ ...strategy, range: { unit: 'tick', lower: '-226560', upper: '-224540' } }); expect(result.ok).toBe(true);
   });
 });

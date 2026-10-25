@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { randomUUID } from 'node:crypto';
 import { connection } from 'next/server';
 import { engineeringUiAllowed } from '../../server/engineering-ui';
+import { networkScope } from '../../server/network-scope';
 import { ProductWorkspace } from '../../components/product-workspace';
 import '@xyflow/react/dist/style.css';
 import '../globals.css';
@@ -11,5 +12,5 @@ import '../globals.css';
 export default async function ProductLayout({ children }: { children: ReactNode }) {
   await connection();
   const initialWorkflowId = `workflow-${randomUUID()}`;
-  return <><ProductWorkspace initialWorkflowId={initialWorkflowId} engineeringEnabled={await engineeringUiAllowed()}/>{children}</>;
+  return <><ProductWorkspace initialWorkflowId={initialWorkflowId} engineeringEnabled={await engineeringUiAllowed()} networkScope={networkScope()}/>{children}</>;
 }

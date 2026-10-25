@@ -16,6 +16,9 @@
  */
 import type { Command } from '../domain/commands';
 import type { Workflow } from '../domain/initial-workflow';
+import { TEST_NETWORK_NOT_AVAILABLE } from '../domain/network-scope';
+import { networkScope } from '../server/network-scope.ts';
+import { strategyTestNetworks } from './strategy.ts';
 import { composeWorkflow, composeWorkflowBound, semanticWorkflowHash, type Composition, type WorkflowComposition } from '../engine/strategy-engine';
 import { ENGINE_VERSION, evaluateWorkflowGates, handoffFindings, type ExecutionPlan, type Gates, type HandoffPolicy, type PlanStep } from '../mcp/execution.ts';
 import { assertSafeOutput } from '../mcp/simulation.ts';
@@ -102,6 +105,10 @@ export async function requestApproval(deps: ApprovalDeps, requester: ApprovalReq
   if (!deps.scheme.kinds.includes(requester.kind) || !requesterValid(requester)) return { ok: false, code: 'APPROVAL_REQUESTER_INVALID' } satisfies Failure;
   const workflow = composeWorkflowBound(strategy, workflowHash);
   if (!workflow.ok) return { ok: false, code: workflow.code, extra: { issues: workflow.issues } } satisfies Failure;
+  // BUILD-FLOFI-MAINNET-PRODUCT-001: the public product hands off mainnet workflows only; a test network is never mapped to its mainnet.
+  const test = networkScope() === 'ENGINEERING' ? [] : strategyTestNetworks(workflow);
+  if (test.length) return { ok: false, code: TEST_NETWORK_NOT_AVAILABLE, extra: { issues: test.map(t => ({ path: t.path, rule: 'mainnetOnly' })),
+    networks: [...new Set(test.map(t => t.network))], mainnets: [...new Set(test.map(t => t.mainnet).filter((m): m is string => m !== null))] } } satisfies Failure;
   // A sequence is handed off only when it is SEQUENTIAL and every step's facts allow it (BUILD-CHAT-E2E-001); every step's facts are reported.
   const gates = await evaluateWorkflowGates(workflow, deps.runtime, deps.policy);
   if (!gates.handoff.allowed) return { ok: false, code: gates.handoff.reason!, extra: { gates: gateView(gates), executionPlan: gates.plan.kind, steps: gates.plan.steps.map(stepView) } } satisfies Failure;
@@ -169,6 +176,9 @@ export type Verified = { readonly ok: true; readonly composition: Composition; r
 export async function verifyHandoff(h: HandoffRecord, runtime: EngineRuntime, policy: HandoffPolicy): Promise<Verified> {
   const workflow = composeWorkflow(h.strategy);
   if (!workflow.ok || workflow.workflowHash !== h.workflowHash) return { ok: false, code: 'HANDOFF_STALE', stale: true };
+  // BUILD-FLOFI-MAINNET-PRODUCT-001: a proposal made for a test network before FloFi became Mainnet-only stays readable but is never loaded,
+  // claimed, simulated or signed in the public product (and never re-networked): the owner asks for a new mainnet proposal.
+  if (networkScope() !== 'ENGINEERING' && strategyTestNetworks(workflow).length) return { ok: false, code: TEST_NETWORK_NOT_AVAILABLE };
   const gates = await evaluateWorkflowGates(workflow, runtime, policy);
   if (!gates.handoff.allowed) return { ok: false, code: gates.handoff.reason! };
   return { ok: true, composition: workflow.steps[0]!, workflow, gates };

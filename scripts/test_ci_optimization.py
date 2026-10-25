@@ -425,7 +425,8 @@ MAIN_PROFILES = {
     "copilot": (["copilot.spec.ts","copilot-conversation.spec.ts"], {"FLOFI_COPILOT":"replay","GRYLOO_SUPPLY_E2E":"MOCKED_LOOPBACK_ONLY"}),
     "copilot-learning": (["copilot-learning-memory.spec.ts"], {"FLOFI_COPILOT":"replay","FLOFI_LEARNING_E2E":"LOOPBACK_ONLY","TEST_DATABASE_URL":"<TEST_DATABASE_URL>"}),
     "copilot-solana": (["copilot-solana.spec.ts"], {"FLOFI_COPILOT":"replay","GRYLOO_SOLANA_DEVNET_E2E":"MOCKED_LOOPBACK_ONLY"}),
-    "solana-mainnet-network": (["solana-mainnet-network.spec.ts"], {"GRYLOO_SOLANA_DEVNET_E2E":"MOCKED_LOOPBACK_ONLY"}),
+    # BUILD-FLOFI-MAINNET-PRODUCT-001 (intentional change): this profile now certifies the public Mainnet-only product as deployed.
+    "solana-mainnet-network": (["solana-mainnet-network.spec.ts"], {"GRYLOO_SOLANA_DEVNET_E2E":"MOCKED_LOOPBACK_ONLY","FLOFI_E2E_NETWORK_SCOPE":"PUBLIC_MAINNET"}),
     "canvas-corrections": (["canvas-corrections.spec.ts"], {}),
     "solana-wallet-refusal": (["solana-swap-liquidity-composition.spec.ts","--grep","a wallet that changes the reviewed swap|a Phantom-like wallet signs the exact reviewed swap|a reconciled swap continues to its Orca position"], {"GRYLOO_SOLANA_DEVNET_E2E":"MOCKED_LOOPBACK_ONLY"}),
     "lending-provenance": (["release-financial-provenance.spec.ts"], {"FLOFI_RELEASE_PROVENANCE_PROFILE":"lending","GRYLOO_LENDING_E2E":"MOCKED_LOOPBACK_ONLY"}),

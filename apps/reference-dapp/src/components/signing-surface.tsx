@@ -19,6 +19,7 @@ import { ExecutionEvidenceDetails } from './execution-evidence-details';
 import { ReviewTokenPermissions } from './review-workspace';
 import { SimulationOutcome } from './simulation-summary';
 import { networkIdentity } from '../domain/network-registry';
+import { realFundsTemplate } from '../domain/network-scope';
 
 const short = (value: string) => value.length > 14 ? `${value.slice(0, 6)}…${value.slice(-4)}` : value;
 const SIGNING_LIMITS = ['Max spend', 'Max per action', 'Max total spend', 'Max slippage', 'Minimum received', 'Max network cost', 'Max provider fees', 'Price range', 'Minimum health factor', 'Max loan-to-value'];
@@ -95,6 +96,7 @@ export function SigningSurface(props: SigningSurfaceProps) {
           {limits.map((line, index) => <div key={`limit-${index}`}><dt>{tr(line.label)}</dt><dd>{tr(line.value)}{line.note && <small>{tr(line.note)}</small>}</dd></div>)}
           {!live && seconds !== null && authorization.key && <div><dt>{tr('Valid for')}</dt><dd>{seconds > 0 ? tr('{0}s', String(seconds)) : tr('Expired')}</dd></div>}
         </dl>
+        {realFundsTemplate(requiredNetwork?.chain) && <p className="signing-real-funds">{tr(...realFundsTemplate(requiredNetwork?.chain)!)}</p>}
         <ReviewTokenPermissions review={review}/>
         <div className={`signing-status simulation-validity simulation-tone-${status.tone}`} role="status" aria-live="polite"><strong><span className="simulation-status-dot" aria-hidden="true"/>{tr(status.label)}</strong><p>{tr(status.message)}</p></div>
         {!live && review.warnings.filter(w => w.message !== status.message).map((warning, index) => <p key={index} className={warning.severity === 'blocking' ? 'simulation-warning-blocking' : 'signing-risk'}>{tr(warning.message)}</p>)}

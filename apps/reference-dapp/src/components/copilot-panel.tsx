@@ -8,6 +8,8 @@ import type { WorkflowOwner } from '../domain/saved-workflow';
 import type { useWalletProof } from './wallet-proof';
 import { useState, type FormEvent } from 'react';
 import { parseLocalCommand, summarize } from '../domain/commands';
+import { editorReducer } from '../domain/editor';
+import { activeNetworkScope, introducedTestNetworks, testNetworkMessage } from '../domain/network-scope';
 import { ensureNetworkCatalog } from '../state/asset-catalog-store';
 import { catalogNetworksNamed } from '../domain/network-registry';
 import { useWorkflow } from '../state/workflow-store';
@@ -64,6 +66,13 @@ export function CopilotPanel({ interactive = true, owner = null, proof }: { inte
         dismissProposal();
         if (issue.kind === 'MISSING') setDestination({ request, network: issue.network });
         setMessages(old => [...old, { role: 'you', text }, { role: 'system', text: issue.kind === 'MISSING' ? SEND_DESTINATION_QUESTION : SEND_DESTINATION_INVALID }]);
+        return;
+      }
+      // BUILD-FLOFI-MAINNET-PRODUCT-001: a test network named in chat is refused in the public product, never moved to a mainnet for the owner.
+      const preview = editorReducer(state, command, context), introduced = preview.error ? [] : introducedTestNetworks(state.workflow, preview.workflow, activeNetworkScope());
+      if (introduced.length) {
+        dismissProposal(); copilot.reset();
+        setMessages(old => [...old, { role: 'you', text }, { role: 'system', text: testNetworkMessage(introduced) }]);
         return;
       }
       propose(command);

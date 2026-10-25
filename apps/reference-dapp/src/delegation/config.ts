@@ -17,6 +17,7 @@
  *   FLOFI_DELEGATED_EXECUTION        enabled: this process runs the delegated executor (needs a signer provider)
  */
 import { isHostedDeployment, publicOrigin, deploymentTenant } from '../server/deployment.ts';
+import { networkScope } from '../server/network-scope.ts';
 import type { CapabilityMode } from './capabilities.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
@@ -33,6 +34,9 @@ export function readDelegationConfig(env: Env): DelegationConfigResult {
   const flag = env.FLOFI_DELEGATION ?? 'disabled';
   if (flag === 'disabled' || flag === '') return { enabled: false, code: 'DELEGATION_NOT_ENABLED' };
   if (flag !== 'enabled') return invalid('FLOFI_DELEGATION');
+  // BUILD-FLOFI-MAINNET-PRODUCT-001: delegated execution exists only on test networks (mainnet delegation is disabled and production custody
+  // does not exist), so the Mainnet-only public product has none; engineering certification keeps it.
+  if (networkScope(env) !== 'ENGINEERING') return { enabled: false, code: 'DELEGATION_NOT_ENABLED', reason: 'MAINNET_ONLY_PRODUCT' };
   const hosted = isHostedDeployment(env);
   const harness = env.FLOFI_DELEGATION_HARNESS;
   if (harness !== undefined && harness !== '' && harness !== 'MOCKED_LOOPBACK_ONLY') return invalid('FLOFI_DELEGATION_HARNESS');

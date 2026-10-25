@@ -338,20 +338,18 @@ test('floating toolbox exposes the existing guarded Delete action alongside ever
   await expect(page.locator('.build-flow-surface .composer-card')).toHaveCount(0);
 });
 
-test('header environment follows wallet changes without rewriting action amounts', async ({ page }) => {
+// BUILD-FLOFI-MAINNET-PRODUCT-001: the header has no network selector (Mainnet-only); the wallet group names the wallet's network.
+test('header wallet network follows wallet changes without rewriting action amounts', async ({ page }) => {
   await installSupplyWallet(page); await page.goto('/app');
   const header = page.getByRole('banner');
-  const environment = header.getByRole('combobox', { name: 'Environment', exact: true });
-  await environment.click();
-  expect(await page.getByRole('listbox', { name: 'Environment options' }).getByRole('option').allTextContents()).toEqual(['Testnet', 'Mainnet']);
-  await environment.press('Escape');
+  await expect(header.getByRole('combobox', { name: 'Environment', exact: true })).toHaveCount(0);
   const wallet = header.getByRole('group', { name: 'Wallet connection', exact: true });
   await expect(wallet).toContainText('0x1111…1111');
   await page.getByRole('button', { name: 'Add swap', exact: true }).click();
   const source = page.locator('.composer-card').getByRole('textbox', { name: 'Source amount (USDC)', exact: true });
   for (const value of ['PUBLIC_TESTNET', 'MAINNET']) {
     await setSupplyWalletChain(page, value === 'MAINNET' ? '0x2105' : '0x14a34');
-    await expect(environment).toHaveText(value === 'MAINNET' ? 'Mainnet' : 'Testnet'); await expect(source).toHaveValue('0');
+    await expect(source).toHaveValue('0');
     await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '0');
     await expect(wallet).toContainText(value === 'MAINNET' ? 'Base (8453)' : 'Base Sepolia');
     await expect(page.getByRole('button', { name: 'Simulate workflow', exact: true })).toBeDisabled();
@@ -368,11 +366,8 @@ test('header environment follows wallet changes without rewriting action amounts
   for (const width of [1440, 900, 390, 320]) {
     await page.setViewportSize({ width, height: 900 });
     await header.scrollIntoViewIfNeeded();
-    await expect(environment).toBeInViewport();
+    await expect(wallet).toBeInViewport();
     await expect(header.getByRole('button', { name: 'Settings', exact: true })).toBeInViewport();
-    const selectorBox = (await environment.boundingBox())!, walletBox = (await wallet.boundingBox())!;
-    expect(selectorBox.x + selectorBox.width).toBeLessThanOrEqual(walletBox.x);
-    expect(Math.abs(selectorBox.y + selectorBox.height / 2 - walletBox.y - walletBox.height / 2)).toBeLessThan(1);
     expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
   }
 });
