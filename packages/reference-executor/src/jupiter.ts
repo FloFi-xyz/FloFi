@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { createJournal, appendJournalState } from './journal.js';
-import { requireSolanaSwapRuntime, solanaSwapArtifactHash, solanaSwapHash, type SolanaSwapReview } from '@defi-workflow-engine/reference-compiler';
+import { assertRecordedSolanaWalletGuard, fromBase64, parseTransaction, requireSolanaSwapRuntime, solanaSwapArtifactHash, solanaSwapHash, type LookupTables, type SignedSolanaTransaction,
+  type SolanaSwapReview, type SolanaWalletGuard } from '@defi-workflow-engine/reference-compiler';
 import { hashJournalBytes, type ExecutionJournal } from '@defi-workflow-engine/workflow-contracts';
 
 /**
@@ -10,8 +11,9 @@ import { hashJournalBytes, type ExecutionJournal } from '@defi-workflow-engine/w
  */
 export type SolanaSwapAttemptState = 'PREPARED' | 'CANCELLED' | 'SUBMITTING' | 'SUBMISSION_RESULT_UNKNOWN' | 'PENDING' | 'CONFIRMED' |
   'REVERTED' | 'EXPIRED' | 'NOT_FOUND' | 'RECONCILIATION_REQUIRED';
+/** `walletGuard`: the verified Lighthouse assertions the owner's wallet appended before signing (absent when it signed the reviewed bytes). */
 export type SolanaSwapAttempt = { state: SolanaSwapAttemptState; preparedAtBlockHeight: number; messageHash: string;
-  signature: string | null; transaction: string | null; reconciled: boolean };
+  signature: string | null; transaction: string | null; reconciled: boolean; walletGuard?: SolanaWalletGuard };
 export type SolanaSwapProvenance = 'PUBLIC_MAINNET' | 'PUBLIC_DEVNET' | 'MOCKED';
 export type SolanaSwapRun = { format: 'gryloo.jupiter-run.v1' | 'gryloo.orca-devnet-run.v1'; id: string; review: SolanaSwapReview; provenance: SolanaSwapProvenance;
   authorization: string | null; attempt: SolanaSwapAttempt | null; journal: ExecutionJournal;
@@ -62,9 +64,18 @@ export function prepareSolanaSwapAttempt(run: SolanaSwapRun, blockHeight: number
   return { ...run, journal, attempt, ownerInitiated: true };
 }
 /** The owner-signed bytes and signature become durable before any broadcast. */
-export function recordSolanaSwapSignature(run: SolanaSwapRun, signed: { signature: string; transaction: string }): SolanaSwapRun {
+export function recordSolanaSwapSignature(run: SolanaSwapRun, signed: SignedSolanaTransaction): SolanaSwapRun {
   if (run.attempt?.state !== 'PREPARED') fail(code(run, 'ATTEMPT_NOT_PREPARED'));
-  return solanaSwapTransition(run, 'SUBMITTING', { signature: signed.signature, transaction: signed.transaction });
+  return solanaSwapTransition(run, 'SUBMITTING', { signature: signed.signature, transaction: signed.transaction, ...signed.walletGuard ? { walletGuard: signed.walletGuard } : {} });
+}
+/**
+ * Journaled signed bytes are the reviewed message, or a wallet guard that still verifies against it and is exactly the recorded one.
+ * Shared by every owner-signed Solana run (swaps, transfers, liquidity).
+ */
+export function assertSignedSolanaAttempt(reviewedMessage: string, attempt: { transaction: string | null; walletGuard?: SolanaWalletGuard }, tables: LookupTables, corrupt: string): void {
+  if (!attempt.transaction) { if (attempt.walletGuard !== undefined) fail(corrupt); return; }
+  try { assertRecordedSolanaWalletGuard(fromBase64(reviewedMessage), parseTransaction(fromBase64(attempt.transaction, 2048)).message, attempt.walletGuard, tables); }
+  catch { fail(corrupt); }
 }
 export type SolanaSwapObservationDecision = 'FOUND' | 'WAIT' | 'EXPIRED';
 /** Absence is conclusive only after finalized block height has passed the reviewed blockhash validity. */
@@ -73,7 +84,7 @@ export function solanaSwapObservationDecision(found: boolean, finalizedBlockHeig
   if (!Number.isSafeInteger(finalizedBlockHeight)) fail('SOLANA_RPC_INVALID');
   return finalizedBlockHeight > lastValidBlockHeight ? 'EXPIRED' : 'WAIT';
 }
-/** An owner may hold one unresolved attempt at a time per runtime, across runs and processes. */
+/** Whether this run's attempt still needs observation (an unresolved attempt never blocks another run's attempt). */
 export function solanaSwapAttemptResolved(run: SolanaSwapRun): boolean {
   return !run.attempt || SOLANA_SWAP_TERMINAL_STATES.includes(run.attempt.state) && run.attempt.state !== 'RECONCILIATION_REQUIRED' || run.verdict !== 'PENDING';
 }
@@ -97,6 +108,7 @@ export function validateSolanaSwapRun(run: SolanaSwapRun): void {
       signed !== Boolean(attempt.signature && attempt.transaction) || attempt.signature !== null && !/^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(attempt.signature) ||
       typeof attempt.reconciled !== 'boolean' || attempt.reconciled !== (attempt.state === 'CONFIRMED') ||
       run.verdict === 'RECONCILED' && !attempt.reconciled) fail(corrupt);
+  assertSignedSolanaAttempt(run.review.message, attempt, run.review.lookupTables, corrupt);
 }
 
 // BUILD-014 names for the same shared lifecycle.

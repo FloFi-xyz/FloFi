@@ -15,10 +15,12 @@ const reason = (text: string, ...args: string[]): SolanaRefusalReason => ({ text
 export function solanaNotSubmittedReason(code: string | null | undefined, change?: SolanaWalletChange | null): SolanaRefusalReason | null {
   if (!code || /_WALLET_REJECTED$/.test(code)) return null;
   if (/_TRANSACTION_CHANGED$/.test(code)) {
-    if (change && walletAppendedInstructions(change)) return reason('Your wallet added {0} instruction(s) from {1} to the transaction you reviewed before signing it. FloFi sends only the exact transaction you reviewed, so it did not send this one and nothing reached Solana. Simulate again for a fresh Review.',
+    // HOTFIX-PHANTOM-LIGHTHOUSE-001: verified Lighthouse assertions are accepted; a refusal here means the additions could not be verified.
+    if (change && walletAppendedInstructions(change)) return reason('Your wallet added {0} instruction(s) from {1} that FloFi could not verify as read-only protection checks of the transaction you reviewed, so it did not send it and nothing reached Solana. Simulate again for a fresh Review.',
       String(change.added.length), change.addedPrograms.map(programName).join(', '));
     return reason('Your wallet returned a different transaction than the one you reviewed. FloFi did not send it, and nothing reached Solana. Simulate again for a fresh Review.');
   }
+  if (/_DUPLICATE_SIGNATURE_NOT_SUBMITTED$/.test(code)) return reason('This signed transaction already belongs to another FloFi execution, so FloFi did not send it again and nothing new reached Solana. Simulate again for a fresh, separate transaction.');
   if (/_(QUOTE|REVIEW)_STALE$/.test(code)) return reason('The reviewed quote expired before your wallet returned the signature. FloFi did not send the transaction, and nothing reached Solana. Simulate again for a fresh quote and Review.');
   if (/_SIGNATURE_INVALID$/.test(code)) return reason('The signature your wallet returned does not match the reviewed transaction and account. FloFi did not send it, and nothing reached Solana. Simulate again for a fresh Review.');
   if (/_WRONG_CLUSTER$/.test(code)) return reason('Your wallet is connected to a different Solana cluster than this workflow. Nothing was sent. Switch the wallet’s network, then simulate again.');

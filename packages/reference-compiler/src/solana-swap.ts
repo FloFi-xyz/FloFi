@@ -4,6 +4,7 @@ import { hashArtifactBytes, hashSupplyValue, type SemanticWorkflow, type Artifac
   type StrategyManifest, type ExecutionPlan } from '@defi-workflow-engine/workflow-contracts';
 import { base58Encode, decodeTokenAccount, decompileMessageV0, fromBase64, parseMessageV0, parseTransaction, serializeTransaction, sha256Hex, solanaAddress, toBase64, u32Bytes, u64Bytes, verifyEd25519,
   type LookupTables, type SolanaInstruction } from './solana.js';
+import { verifySolanaWalletGuard, type SolanaWalletGuard } from './solana-wallet-guard.js';
 
 /**
  * Provider-neutral Solana swap core shared by every runtime of the canonical swap (Jupiter mainnet-beta,
@@ -172,13 +173,21 @@ export function assertSolanaSwapReview(review: SolanaSwapReviewCore, workflow: S
       toBase64(serializeTransaction(null, fromBase64(review.message))) !== review.unsignedTransaction) fail(`${prefix}_TRANSACTION_CHANGED`);
 }
 
-/** The wallet must return exactly the reviewed message with a valid owner signature. Any modification fails closed. */
-export function verifySignedSolanaSwap(review: Pick<SolanaSwapReviewCore, 'message' | 'owner'>, signedBase64: unknown, prefix: string): { signature: string; transaction: string } {
+/** What the owner signed: the exact bytes to broadcast, and the verified wallet guard when the wallet appended one. */
+export type SignedSolanaTransaction = { signature: string; transaction: string; walletGuard?: SolanaWalletGuard };
+/**
+ * The wallet must return the reviewed message, or the reviewed message plus only verified Lighthouse assertions
+ * (`verifySolanaWalletGuard`), with a valid owner signature over exactly the returned message. Anything else fails closed.
+ */
+export function verifySignedSolanaSwap(review: Pick<SolanaSwapReviewCore, 'message' | 'owner'> & { lookupTables?: LookupTables }, signedBase64: unknown,
+  prefix: string): SignedSolanaTransaction {
   const bytes = fromBase64(signedBase64, 2048);
   const { signatures, message } = parseTransaction(bytes);
-  if (signatures.length !== 1 || toBase64(message) !== review.message) fail(`${prefix}_TRANSACTION_CHANGED`);
+  if (signatures.length !== 1) fail(`${prefix}_TRANSACTION_CHANGED`);
+  let walletGuard: SolanaWalletGuard | null;
+  try { walletGuard = verifySolanaWalletGuard(fromBase64(review.message), message, review.lookupTables ?? {}); } catch { return fail(`${prefix}_TRANSACTION_CHANGED`); }
   if (!verifyEd25519(signatures[0]!, message, review.owner)) fail(`${prefix}_SIGNATURE_INVALID`);
-  return { signature: base58Encode(signatures[0]!), transaction: toBase64(bytes) };
+  return { signature: base58Encode(signatures[0]!), transaction: toBase64(bytes), ...walletGuard ? { walletGuard } : {} };
 }
 
 /** Every runtime's review. Shared machinery reads only `SolanaSwapReviewCore` fields; `format` identifies the provider. */

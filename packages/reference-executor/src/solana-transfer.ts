@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { createJournal, appendJournalState } from './journal.js';
-import { solanaSwapArtifactHash, solanaSwapHash, solanaTransferProfile, type SolanaTransferReview } from '@defi-workflow-engine/reference-compiler';
+import { solanaSwapArtifactHash, solanaSwapHash, solanaTransferProfile, type SignedSolanaTransaction, type SolanaTransferReview, type SolanaWalletGuard } from '@defi-workflow-engine/reference-compiler';
+import { assertSignedSolanaAttempt } from './jupiter.js';
 import { hashJournalBytes, type ExecutionJournal } from '@defi-workflow-engine/workflow-contracts';
 
 /**
@@ -11,8 +12,9 @@ import { hashJournalBytes, type ExecutionJournal } from '@defi-workflow-engine/w
  */
 export type SolanaTransferAttemptState = 'PREPARED' | 'CANCELLED' | 'SUBMITTING' | 'SUBMISSION_RESULT_UNKNOWN' | 'PENDING' | 'CONFIRMED' |
   'REVERTED' | 'EXPIRED' | 'NOT_FOUND' | 'RECONCILIATION_REQUIRED';
+/** `walletGuard`: the verified Lighthouse assertions the owner's wallet appended before signing (absent when it signed the reviewed bytes). */
 export type SolanaTransferAttempt = { state: SolanaTransferAttemptState; preparedAtBlockHeight: number; messageHash: string;
-  signature: string | null; transaction: string | null; reconciled: boolean };
+  signature: string | null; transaction: string | null; reconciled: boolean; walletGuard?: SolanaWalletGuard };
 export type SolanaTransferProvenance = 'PUBLIC_MAINNET' | 'PUBLIC_DEVNET' | 'MOCKED';
 export type SolanaTransferRun = { format: 'gryloo.solana-transfer-run.v1'; id: string; review: SolanaTransferReview; provenance: SolanaTransferProvenance;
   authorization: string | null; attempt: SolanaTransferAttempt | null; journal: ExecutionJournal;
@@ -61,9 +63,9 @@ export function prepareSolanaTransferAttempt(run: SolanaTransferRun, blockHeight
   return { ...run, journal, attempt, ownerInitiated: true };
 }
 /** The owner-signed bytes and signature become durable before any broadcast. */
-export function recordSolanaTransferSignature(run: SolanaTransferRun, signed: { signature: string; transaction: string }): SolanaTransferRun {
+export function recordSolanaTransferSignature(run: SolanaTransferRun, signed: SignedSolanaTransaction): SolanaTransferRun {
   if (run.attempt?.state !== 'PREPARED') fail('ATTEMPT_NOT_PREPARED');
-  return solanaTransferTransition(run, 'SUBMITTING', { signature: signed.signature, transaction: signed.transaction });
+  return solanaTransferTransition(run, 'SUBMITTING', { signature: signed.signature, transaction: signed.transaction, ...signed.walletGuard ? { walletGuard: signed.walletGuard } : {} });
 }
 /** Absence is conclusive only after finalized block height has passed the reviewed blockhash validity. */
 export function solanaTransferObservationDecision(found: boolean, finalizedBlockHeight: number, lastValidBlockHeight: number): 'FOUND' | 'WAIT' | 'EXPIRED' {
@@ -71,7 +73,7 @@ export function solanaTransferObservationDecision(found: boolean, finalizedBlock
   if (!Number.isSafeInteger(finalizedBlockHeight)) fail('RPC_INVALID');
   return finalizedBlockHeight > lastValidBlockHeight ? 'EXPIRED' : 'WAIT';
 }
-/** An owner may hold one unresolved transfer attempt at a time per cluster, across runs and processes. */
+/** Whether this run's attempt still needs observation (an unresolved attempt never blocks another run's attempt). */
 export function solanaTransferAttemptResolved(run: SolanaTransferRun): boolean {
   return !run.attempt || ['CANCELLED', 'CONFIRMED', 'REVERTED', 'EXPIRED', 'NOT_FOUND'].includes(run.attempt.state);
 }
@@ -95,4 +97,5 @@ export function validateSolanaTransferRun(run: SolanaTransferRun): void {
       signed !== Boolean(attempt.signature && attempt.transaction) || attempt.signature !== null && !/^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(attempt.signature) ||
       typeof attempt.reconciled !== 'boolean' || attempt.reconciled !== (attempt.state === 'CONFIRMED') ||
       run.verdict === 'RECONCILED' && !attempt.reconciled) fail(corrupt);
+  assertSignedSolanaAttempt(run.review.message, attempt, {}, corrupt);
 }

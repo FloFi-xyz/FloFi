@@ -12,13 +12,15 @@ import { randomBytes } from 'node:crypto';
 import { isAbsolute } from 'node:path';
 import { validateAuthoringWorkflow, createBaseSepoliaReviewContext } from '@defi-workflow-engine/reference-linter';
 import { assertSolanaTransferReview, describeSolanaWalletChange, readSolanaTransferFacts, simulateSolanaTransfer, solanaAddress, solanaTransferIntent,
-  verifySignedSolanaTransfer, verifySolanaCluster, type SolanaRpc, type SolanaTransferProfile, type SolanaTransferReview, type SolanaWalletChange } from '@defi-workflow-engine/reference-compiler';
-import { createSolanaTransferRun, prepareSolanaTransferAttempt, recordSolanaTransferSignature, solanaTransferAttemptResolved, solanaTransferObservationDecision,
+  verifySignedSolanaTransfer, verifySolanaCluster, type SignedSolanaTransaction, type SolanaRpc, type SolanaTransferProfile, type SolanaTransferReview,
+  type SolanaWalletChange } from '@defi-workflow-engine/reference-compiler';
+import { createSolanaTransferRun, prepareSolanaTransferAttempt, recordSolanaTransferSignature, solanaTransferObservationDecision,
   solanaTransferTransition, validateSolanaTransferRun, createFileExecutionStorage, logMissing, utf8, type ExecutionStorage, type SolanaTransferProvenance,
   type SolanaTransferRun } from '@defi-workflow-engine/reference-executor';
 import { buildSolanaTransferEvidence, classifySolanaTransferEvidence, reconcileSolanaTransferAttempt, type SolanaTransferEvidenceClass,
   type SolanaTransferObservation } from '@defi-workflow-engine/reference-reconciler';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
+import { solanaTransactionClaim } from './solana-transaction-claim';
 
 const X = 'SOLANA_TRANSFER';
 /** `change`: what the wallet altered in a refused transaction (public keys, counts and hashes only; never its bytes or signatures). */
@@ -35,7 +37,7 @@ export function createSolanaTransferService(input: { profile: SolanaTransferProf
   if (input.provenance !== 'MOCKED' && input.provenance !== profile.provenance) throw new Error(`${X}_PROVENANCE_INVALID`);
   // Local mode keeps a journal directory; cloud mode supplies shared durable storage instead.
   if (!input.storage && (!input.journalDir || !isAbsolute(input.journalDir) || input.journalDir.includes('/.git/'))) throw new Error(`${X}_STORAGE_INVALID`);
-  const { log, leases } = input.storage ?? createFileExecutionStorage(input.journalDir!, `${X}_BUSY`);
+  const storage = input.storage ?? createFileExecutionStorage(input.journalDir!, `${X}_BUSY`), { log, leases } = storage;
   const idPattern = new RegExp(`^${profile.idPrefix}-[a-f0-9]{32}$`);
   const idCheck = (id: string) => { if (typeof id !== 'string' || !idPattern.test(id)) throw new Error(`${X}_ID_INVALID`); return id; };
   const now = input.now ?? Date.now;
@@ -81,20 +83,16 @@ export function createSolanaTransferService(input: { profile: SolanaTransferProf
     if (!Number.isSafeInteger(height)) throw new Error('SOLANA_RPC_INVALID');
     return height as number;
   };
-  /** One unresolved transfer per owner on this cluster, across runs, tabs and restarts. The lease history is append-only. */
-  async function withOwnerLease<T>(owner: string, id: string, prepare: () => Promise<T>): Promise<T> {
-    return locked('owner-' + owner, async () => {
-      const lease = `${owner}.${profile.idPrefix}-lease`;
-      const prior = utf8(await log.read(lease)), holder = prior.trimEnd().split('\n').filter(Boolean).at(-1);
-      if (holder && holder !== id && !solanaTransferAttemptResolved(await load(holder))) throw new Error(`${X}_OWNER_ATTEMPT_IN_PROGRESS`);
-      // A crash may have persisted the reservation before PREPARED. begin already refuses an existing attempt under the run lock.
-      if (holder !== id) await log.extend(lease, new TextEncoder().encode(prior + id + '\n'), bytes => {
-        if (!new TextDecoder().decode(bytes).trimEnd().split('\n').every(line => idPattern.test(line))) throw new Error(`${X}_STORE_CORRUPT`);
-      });
-      // Reserve and persist PREPARED in the same owner critical section. Another run must not see this holder with no attempt yet.
-      return prepare();
-    });
-  }
+  /**
+   * HOTFIX-WORKFLOW-CONCURRENCY-001: transaction identity, never owner identity. Each reviewed message (blockhash + instructions) is handed
+   * to a wallet for exactly one run and each owner signature belongs to exactly one run; any number of the owner's transfers may be pending.
+   * Two identical transfers are two runs with two different messages. The same message twice would be one Solana transaction that lands
+   * once, so it needs a fresh Simulate.
+   */
+  // A message whose holder was cancelled before any signature existed was never broadcast by FloFi; a new run may take it over.
+  const neverSigned = async (holder: string) => { const prior = await load(holder); return prior.attempt?.state === 'CANCELLED' && !prior.attempt.signature; };
+  const claimTransaction = (kind: 'message' | 'signature', value: string, id: string) => solanaTransactionClaim(storage, `${value.replace(/^0x/, '')}.${profile.idPrefix}-${kind}`, id,
+    kind === 'message' ? `${X}_DUPLICATE_TRANSACTION_SIMULATE_AGAIN` : `${X}_DUPLICATE_SIGNATURE_NOT_SUBMITTED`, kind === 'message' ? neverSigned : undefined);
   /**
    * Fresh chain facts just before the wallet is asked: the owner still holds the amount, the fee, any reviewed account deposit and its own
    * rent-exempt reserve; the token, both token accounts and every extension are still acceptable; a recipient account the Review saw is still
@@ -140,10 +138,9 @@ export function createSolanaTransferService(input: { profile: SolanaTransferProf
       const height = await blockHeight('confirmed');
       assertSolanaTransferReview(record.review, workflow, solanaAddress(owner), height, now());
       await assertStillExecutable(record.review);
-      return withOwnerLease(record.review.owner, id, async () => {
-        const prepared = await save({ ...record, ...prepareSolanaTransferAttempt(record, height), error: null }); // Durable BEFORE the wallet is asked to sign.
-        return { record: prepared, unsignedTransaction: record.review.unsignedTransaction, walletChain: profile.walletChain };
-      });
+      await claimTransaction('message', record.review.messageHash, id);
+      const prepared = await save({ ...record, ...prepareSolanaTransferAttempt(record, height), error: null }); // Durable BEFORE the wallet is asked to sign.
+      return { record: prepared, unsignedTransaction: record.review.unsignedTransaction, walletChain: profile.walletChain };
     }); },
     /** The wallet never returned signed bytes: no transaction can exist. */
     async walletFailure(id: string, diagnostic: SolanaTransferWalletDiagnostic): Promise<SolanaTransferRecord> { return locked(idCheck(id), async () => {
@@ -153,18 +150,20 @@ export function createSolanaTransferService(input: { profile: SolanaTransferProf
       const cancelled = record.attempt ? solanaTransferTransition(record, 'CANCELLED') : record;
       return save({ ...record, ...cancelled, authorization: null, notSubmitted: Boolean(record.attempt), walletDiagnostic: diagnostic, error: diagnostic.code, submissionError: diagnostic.code });
     }); },
-    /** Verify exact reviewed bytes and the owner signature, persist the signature, then broadcast once. */
+    /** Verify the reviewed bytes (or a verified wallet guard) and the owner signature, persist both, then broadcast once. */
     async submit(id: string, signedTransaction: string): Promise<SolanaTransferRecord> { return locked(idCheck(id), async () => {
       const record = await load(id);
       if (record.attempt?.state !== 'PREPARED' || record.authorization !== record.review.commitment) throw new Error(`${X}_WALLET_HANDOFF_NOT_AUTHORIZED`);
-      let signed: { signature: string; transaction: string };
+      let signed: SignedSolanaTransaction;
       try {
+        // The reviewed bytes, or the reviewed bytes plus only verified Lighthouse assertions the wallet appended (HOTFIX-PHANTOM-LIGHTHOUSE-001).
         signed = verifySignedSolanaTransfer(record.review, signedTransaction);
         await assertCluster();
         if (now() >= Date.parse(record.review.expiresAt) || await blockHeight('confirmed') >= record.review.lastValidBlockHeight) throw new Error(`${X}_REVIEW_EXPIRED`);
+        await claimTransaction('signature', signed.signature, id);
       } catch (cause) {
         const failure = code(cause, `${X}_TRANSACTION_CHANGED`);
-        // FloFi never broadcasts modified, mis-signed or stale bytes; the refusal keeps a description of what the wallet changed (never the bytes).
+        // FloFi never broadcasts unverified, mis-signed or stale bytes; the refusal keeps a description of what the wallet changed (never the bytes).
         let change: SolanaWalletChange | undefined;
         if (failure === `${X}_TRANSACTION_CHANGED`) try { change = describeSolanaWalletChange(record.review.message, signedTransaction, {}); } catch { change = undefined; }
         return save({ ...record, ...solanaTransferTransition(record, 'CANCELLED'), authorization: null, notSubmitted: true, error: failure, submissionError: failure,

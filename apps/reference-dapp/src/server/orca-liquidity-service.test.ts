@@ -3,8 +3,8 @@ import { mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { createMockedSolanaDevnetOrca, createMockedSolanaWallet, fromBase64, parseTransaction, serializeSignedTransaction, toBase64,
-  type MockedOrcaOptions } from '@defi-workflow-engine/reference-compiler';
+import { LIGHTHOUSE_PROGRAM, applyMockedPhantomLighthouseGuards, createMockedSolanaDevnetOrca, createMockedSolanaWallet, fromBase64, parseTransaction, serializeSignedTransaction,
+  toBase64, type MockedOrcaOptions } from '@defi-workflow-engine/reference-compiler';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { createSolanaLiquidityNode, type SolanaLiquidityInput } from '../domain/solana-liquidity-authoring';
 import { createPositionMintSigner, type PositionMintSigner } from '../wallet/position-mint-signer';
@@ -109,21 +109,26 @@ describe('Orca liquidity service lifecycle (MOCKED Devnet loopback, no public su
     const next = await createPositionMintSigner();
     await expect(s.service.simulate(workflow(), s.wallet.owner, { operation: 'OPEN', positionMint: next.address })).resolves.toMatchObject({ operation: 'OPEN' });
   });
-  it('two OPEN reviews prepared in parallel never create two positions', async () => {
+  it('two OPEN reviews prepared in parallel create two independent positions, each at its own mint and reconciled by its own run', async () => {
     const s = await setup();
     const a = await createPositionMintSigner(), b = await createPositionMintSigner();
     const first = await reviewed(s, 'OPEN', a.address), second = await reviewed(s, 'OPEN', b.address);
-    expect((await execute(s, first.id, a)).verdict).toBe('RECONCILED');
-    await expect(s.service.begin(second.id, s.wallet.owner, workflow())).rejects.toThrow('ORCA_LIQUIDITY_POSITION_ALREADY_OPEN');
-    expect((await s.service.load(second.id)).attempt).toBeNull();
-    expect(s.env.state.sent).toHaveLength(1);
+    // Both prepared and signed while neither is final: no owner-level lease, distinct messages and signatures.
+    const beginA = await s.service.begin(first.id, s.wallet.owner, workflow()), beginB = await s.service.begin(second.id, s.wallet.owner, workflow());
+    await s.service.submit(first.id, await sign(s, beginA, a)); await s.service.submit(second.id, await sign(s, beginB, b));
+    expect([(await s.service.observe(first.id)).verdict, (await s.service.observe(second.id)).verdict]).toEqual(['RECONCILED', 'RECONCILED']);
+    const positions = await s.service.positions(s.wallet.owner);
+    expect(positions.map(p => [p.positionMint, p.status]).sort()).toEqual([[a.address, 'ACTIVE'], [b.address, 'ACTIVE']].sort());
+    expect(s.env.state.sent).toHaveLength(2);
+    // A position mint is an identity: it is never reused for another OPEN.
+    await expect(s.service.simulate(workflow(), s.wallet.owner, { operation: 'OPEN', positionMint: a.address })).rejects.toThrow('ORCA_POSITION_MINT_IN_USE');
   });
-  it('never creates a second position while one exists, and recovers the real position after a failed later step', async () => {
+  it('opens another position while one exists, and recovers the real position after a failed later step', async () => {
     const s = await setup();
     const { key, record } = await open(s);
     expect(record.verdict).toBe('RECONCILED');
-    const other = await createPositionMintSigner();
-    await expect(s.service.simulate(workflow(), s.wallet.owner, { operation: 'OPEN', positionMint: other.address })).rejects.toThrow('ORCA_LIQUIDITY_POSITION_ALREADY_OPEN');
+    const another = await open(s);
+    expect(another.record.verdict).toBe('RECONCILED');
     // A later decrease fails on chain: the position is untouched and is recovered, not recreated.
     const failing = await reviewed(s, 'DECREASE_PARTIAL', key.address, workflow(), 5000);
     s.options.failLiquidity = true;
@@ -131,13 +136,28 @@ describe('Orca liquidity service lifecycle (MOCKED Devnet loopback, no public su
     expect(failed).toMatchObject({ verdict: 'DIVERGENT', error: 'ORCA_LIQUIDITY_TRANSACTION_FAILED', attempt: { state: 'REVERTED' } });
     s.options.failLiquidity = false;
     const restarted = s.make();
-    const [position] = await restarted.positions(s.wallet.owner);
+    const position = (await restarted.positions(s.wallet.owner)).find(p => p.positionMint === key.address);
     expect(position).toMatchObject({ positionMint: key.address, status: 'ACTIVE', runs: [{ operation: 'OPEN', verdict: 'RECONCILED' }, { operation: 'DECREASE_PARTIAL', verdict: 'DIVERGENT' }] });
+    expect((await restarted.positions(s.wallet.owner)).find(p => p.positionMint === another.key.address)).toMatchObject({ status: 'ACTIVE' });
     const exitReview = await restarted.simulate(workflow(), s.wallet.owner, { operation: 'EXIT', positionMint: key.address });
     const exit = await (async () => { const r = await restarted.review(exitReview.id, exitReview.review.commitment, workflow());
       const begin = await restarted.begin(r.id, s.wallet.owner, workflow()); await restarted.submit(r.id, await sign(s, begin, null)); return restarted.observe(r.id); })();
     expect(exit.verdict).toBe('RECONCILED');
     await expect(restarted.simulate(workflow(), s.wallet.owner, { operation: 'EXIT', positionMint: key.address })).rejects.toThrow('ORCA_POSITION_NOT_FOUND');
+  });
+  it('accepts Phantom Lighthouse protections on an OPEN: the position key co-signs the verified guarded message (HOTFIX-PHANTOM-LIGHTHOUSE-001)', async () => {
+    const s = await setup(), key = await createPositionMintSigner(), record = await reviewed(s, 'OPEN', key.address);
+    const begin = await s.service.begin(record.id, s.wallet.owner, workflow());
+    const guarded = applyMockedPhantomLighthouseGuards(begin.unsignedTransaction, { lamportsAtLeast: 1n });
+    const { signatures, message } = parseTransaction(fromBase64(s.wallet.sign(guarded), 2048));
+    const signed = toBase64(serializeSignedTransaction([signatures[0]!, await key.sign(message)], message));
+    const submitted = await s.service.submit(record.id, signed);
+    expect(submitted).toMatchObject({ error: null, attempt: { state: 'PENDING', walletGuard: { instructions: [{ kind: 'AssertAccountInfoMulti', target: s.wallet.owner }] } } });
+    const observed = await s.service.observe(record.id);
+    expect(observed).toMatchObject({ verdict: 'RECONCILED', attempt: { state: 'CONFIRMED' } });
+    expect(observed.observations.at(-1)?.programs).toContain(LIGHTHOUSE_PROGRAM);
+    expect(observed.evidence!.bundle.reconciliation.limitations[0]).toMatch(/plus 1 Lighthouse assertion instruction\(s\)/);
+    expect(s.env.state.sent).toEqual([signed]);
   });
   it('fails closed on wallet-modified bytes, a wrong or missing position signature and a foreign wallet, and never broadcasts', async () => {
     const s = await setup();

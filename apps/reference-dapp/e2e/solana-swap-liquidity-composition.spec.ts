@@ -124,7 +124,7 @@ test('a wallet that changes the reviewed swap is refused before broadcast; Execu
   await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Execute', exact: true }).click();
   const swapStep = page.locator('.execution-timeline .execution-step').first();
   await expect(swapStep).toHaveClass(/execution-state-not-submitted/);
-  await expect(swapStep).toContainText('FloFi sends only the exact transaction you reviewed, so it did not send this one and nothing reached Solana.');
+  await expect(swapStep).toContainText('that FloFi could not verify as read-only protection checks of the transaction you reviewed, so it did not send it and nothing reached Solana.');
   await expect(page.locator('.execution-timeline .execution-step').nth(1)).toHaveClass(/execution-state-waiting/);
   await expect(page.getByRole('complementary', { name: 'Execution result summary' })).toContainText('Transaction not submitted');
   await expect(page.locator('.execution-timeline')).not.toContainText('Cancelled');

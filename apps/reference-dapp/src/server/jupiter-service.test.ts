@@ -3,7 +3,8 @@ import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { createMockedSolanaJupiter, createMockedSolanaWallet, type MockedJupiterOptions } from '@defi-workflow-engine/reference-compiler';
+import { LIGHTHOUSE_PROGRAM, appendMockedWalletGuards, applyMockedPhantomLighthouseGuards, createMockedSolanaJupiter, createMockedSolanaWallet, fromBase64, parseTransaction,
+  type MockedJupiterOptions } from '@defi-workflow-engine/reference-compiler';
 import { createSolanaSwapNode } from '../domain/jupiter-authoring';
 import { createJupiterService } from './jupiter-service';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
@@ -59,7 +60,7 @@ describe('Jupiter service lifecycle (MOCKED loopback, no public submission)', ()
     const invalidated = await s.service.invalidate(record.id);
     expect(invalidated.authorization).toBeNull();
   });
-  it('records wallet rejection as not submitted and releases the owner lease', async () => {
+  it('records wallet rejection as not submitted; a fresh run proceeds (nothing stays locked)', async () => {
     const s = await setup();
     const record = await reviewed(s);
     await s.service.begin(record.id, s.wallet.owner, workflow());
@@ -78,12 +79,48 @@ describe('Jupiter service lifecycle (MOCKED loopback, no public submission)', ()
     expect(result).toMatchObject({ error: 'JUPITER_TRANSACTION_CHANGED', notSubmitted: true, attempt: { state: 'CANCELLED' } });
     expect(s.env.state.sent).toEqual([]);
   });
-  it('prevents duplicate economic attempts across runs for the same owner', async () => {
+  it('never starts a second attempt of the same run, and never tracks one transaction in two runs', async () => {
     const s = await setup();
-    const first = await reviewed(s), second = await reviewed(s);
-    await s.service.begin(first.id, s.wallet.owner, workflow());
+    const first = await reviewed(s), same = await reviewed(s);
+    expect(same.review.messageHash).toBe(first.review.messageHash); // same quote, same blockhash: one Solana transaction
+    const begin = await s.service.begin(first.id, s.wallet.owner, workflow());
     await expect(s.service.begin(first.id, s.wallet.owner, workflow())).rejects.toThrow('JUPITER_EXISTING_ATTEMPT_OBSERVE_ONLY');
-    await expect(s.service.begin(second.id, s.wallet.owner, workflow())).rejects.toThrow('JUPITER_OWNER_ATTEMPT_IN_PROGRESS');
+    await expect(s.service.begin(same.id, s.wallet.owner, workflow())).rejects.toThrow('JUPITER_DUPLICATE_TRANSACTION_SIMULATE_AGAIN');
+    // A double click or a retry of the SAME attempt after a timeout: broadcast once, then observe only.
+    const signed = s.wallet.sign(begin.unsignedTransaction);
+    expect((await s.service.submit(first.id, signed)).attempt?.state).toBe('PENDING');
+    await expect(s.service.submit(first.id, signed)).rejects.toThrow('JUPITER_WALLET_HANDOFF_NOT_AUTHORIZED');
+    expect(s.env.state.sent).toHaveLength(1);
+  });
+  it('executes independent swaps of the same wallet while earlier ones are pending, each with its own Review, signature and reconciliation', async () => {
+    const s = await setup();
+    const a = await reviewed(s), beginA = await s.service.begin(a.id, s.wallet.owner, workflow());
+    expect((await s.service.submit(a.id, s.wallet.sign(beginA.unsignedTransaction))).attempt?.state).toBe('PENDING');
+    // Swap B (another pair and amount) is reviewed and executed while A is still pending; an unfinished simulation C is simply left alone.
+    s.env.advance(1);
+    const unfinished = await s.service.simulate(workflow('3'), s.wallet.owner);
+    const wfB = workflow('0.1', 'SOL', 'USDC'), b = await reviewed(s, wfB), beginB = await s.service.begin(b.id, s.wallet.owner, wfB);
+    expect((await s.service.submit(b.id, s.wallet.sign(beginB.unsignedTransaction))).attempt?.state).toBe('PENDING');
+    const [observedA, observedB] = [await s.service.observe(a.id), await s.service.observe(b.id)];
+    expect(observedA).toMatchObject({ verdict: 'RECONCILED', attempt: { state: 'CONFIRMED' } });
+    expect(observedB).toMatchObject({ verdict: 'RECONCILED', attempt: { state: 'CONFIRMED' } });
+    expect(observedA.attempt?.signature).not.toBe(observedB.attempt?.signature);
+    expect(await s.service.load(unfinished.id)).toMatchObject({ attempt: null, verdict: 'PENDING' });
+    expect(s.env.state.sent).toHaveLength(2);
+  });
+  it('runs the same swap twice as two separately authorized operations: two distinct transactions, both reconciled', async () => {
+    const s = await setup();
+    const runs = [];
+    for (let i = 0; i < 2; i++) {
+      const record = await reviewed(s), begin = await s.service.begin(record.id, s.wallet.owner, workflow());
+      runs.push(await s.service.submit(record.id, s.wallet.sign(begin.unsignedTransaction)));
+      s.env.advance(1); // the next Simulate is quoted on a newer blockhash, as on mainnet-beta
+    }
+    expect(runs.map(r => r.attempt?.state)).toEqual(['PENDING', 'PENDING']);
+    expect(new Set(runs.map(r => r.attempt?.signature)).size).toBe(2);
+    expect(new Set(runs.map(r => r.review.messageHash)).size).toBe(2);
+    for (const run of runs) expect((await s.service.observe(run.id)).observations.at(-1)).toMatchObject({ verdict: 'RECONCILED', inputSpent: '10000000' });
+    expect(s.env.state.sent).toHaveLength(2);
   });
   it('recovers an uncertain submission by observing the persisted signature, never resubmitting', async () => {
     const s = await setup({ send: 'RPC_ERROR_AFTER_LANDING' });
@@ -102,8 +139,12 @@ describe('Jupiter service lifecycle (MOCKED loopback, no public submission)', ()
     const begin = await s.service.begin(record.id, s.wallet.owner, workflow());
     await s.service.submit(record.id, s.wallet.sign(begin.unsignedTransaction));
     expect((await s.service.observe(record.id))).toMatchObject({ error: 'JUPITER_TRANSACTION_NOT_OBSERVED', verdict: 'PENDING' });
-    const blocked = await reviewed(s);
-    await expect(s.service.begin(blocked.id, s.wallet.owner, workflow())).rejects.toThrow('JUPITER_OWNER_ATTEMPT_IN_PROGRESS');
+    // The uncertain swap keeps being observed by its own signature; it blocks neither its own message nor any other swap.
+    const same = await reviewed(s);
+    await expect(s.service.begin(same.id, s.wallet.owner, workflow())).rejects.toThrow('JUPITER_DUPLICATE_TRANSACTION_SIMULATE_AGAIN');
+    s.env.advance(1);
+    const independent = await reviewed(s);
+    expect((await s.service.begin(independent.id, s.wallet.owner, workflow())).record.attempt?.state).toBe('PREPARED');
     s.env.advance(200);
     expect(await s.service.observe(record.id)).toMatchObject({ verdict: 'NOT_EXECUTED', attempt: { state: 'NOT_FOUND' }, error: 'JUPITER_TRANSACTION_EXPIRED_NOT_EXECUTED' });
     const fresh = await reviewed(s);
@@ -131,6 +172,54 @@ describe('Jupiter service lifecycle (MOCKED loopback, no public submission)', ()
     options.failSwap = true;
     await s.service.submit(record.id, s.wallet.sign(begin.unsignedTransaction));
     expect(await s.service.observe(record.id)).toMatchObject({ verdict: 'DIVERGENT', error: 'JUPITER_SWAP_FAILED', attempt: { state: 'REVERTED' }, evidence: null });
+  });
+  it('accepts Phantom Lighthouse protections: verified, recorded, broadcast once and reconciled with honest evidence (HOTFIX-PHANTOM-LIGHTHOUSE-001)', async () => {
+    const s = await setup(), wf = workflow('0.1', 'SOL', 'USDC');
+    const record = await reviewed(s, wf), begin = await s.service.begin(record.id, s.wallet.owner, wf);
+    // Like Phantom: the output account must end with at least its balance before the swap (100 USDC) plus the minimum output.
+    const guarded = applyMockedPhantomLighthouseGuards(begin.unsignedTransaction, { lamportsAtLeast: 1n, tokenAccount: record.review.inspection.ownerOutputAccount,
+      tokenAmountAtLeast: 100_000_000n + BigInt(record.review.quote.otherAmountThreshold) }, record.review.lookupTables);
+    const submitted = await s.service.submit(record.id, s.wallet.sign(guarded));
+    expect(submitted).toMatchObject({ error: null, attempt: { state: 'PENDING', walletGuard: { format: 'flofi.solana-wallet-guard.v1', reviewedMessageHash: record.review.messageHash,
+      instructions: [{ kind: 'AssertAccountInfoMulti', target: s.wallet.owner }, { kind: 'AssertTokenAccountMulti', target: record.review.inspection.ownerOutputAccount }] } } });
+    // The broadcast bytes are exactly what the owner signed, Lighthouse instructions included.
+    expect(s.env.state.sent).toEqual([submitted.attempt!.transaction]);
+    const observed = await s.service.observe(record.id);
+    expect(observed).toMatchObject({ verdict: 'RECONCILED', evidenceClass: 'MOCKED', attempt: { state: 'CONFIRMED' } });
+    const evidence = observed.evidence!.publicExecution as Record<string, unknown>;
+    expect(evidence).toMatchObject({ messageHash: record.review.messageHash, signedMessageHash: submitted.attempt!.walletGuard!.signedMessageHash, programs: expect.arrayContaining([LIGHTHOUSE_PROGRAM]) });
+    expect(observed.evidence!.bundle.reconciliation.limitations[0]).toMatch(/plus 2 Lighthouse assertion instruction\(s\) the owner's wallet appended/);
+    // Restart: the stored guard is re-verified on every load.
+    expect((await s.make().load(record.id)).attempt?.walletGuard?.signedMessageHash).toBe(submitted.attempt!.walletGuard!.signedMessageHash);
+  });
+  it('a Phantom assertion that fails on chain fails the whole swap atomically (REVERTED, no evidence, nothing locked)', async () => {
+    const s = await setup(), wf = workflow('0.1', 'SOL', 'USDC');
+    const record = await reviewed(s, wf), begin = await s.service.begin(record.id, s.wallet.owner, wf);
+    const guarded = applyMockedPhantomLighthouseGuards(begin.unsignedTransaction, { lamportsAtLeast: 1n, tokenAccount: record.review.inspection.ownerOutputAccount,
+      tokenAmountAtLeast: 100_000_000n + BigInt(record.review.quote.outAmount) * 2n }, record.review.lookupTables);
+    expect((await s.service.submit(record.id, s.wallet.sign(guarded))).attempt?.state).toBe('PENDING');
+    expect(await s.service.observe(record.id)).toMatchObject({ verdict: 'DIVERGENT', error: 'JUPITER_SWAP_FAILED', attempt: { state: 'REVERTED' }, evidence: null });
+    s.env.advance(1);
+    const next = await reviewed(s, wf);
+    expect((await s.service.begin(next.id, s.wallet.owner, wf)).record.attempt?.state).toBe('PREPARED');
+  });
+  it('still refuses wallet additions it cannot verify, and keeps the diagnostic', async () => {
+    const s = await setup(), record = await reviewed(s), begin = await s.service.begin(record.id, s.wallet.owner, workflow());
+    const refused = await s.service.submit(record.id, s.wallet.sign(appendMockedWalletGuards(begin.unsignedTransaction, 2, record.review.lookupTables)));
+    expect(refused).toMatchObject({ error: 'JUPITER_TRANSACTION_CHANGED', notSubmitted: true, attempt: { state: 'CANCELLED', signature: null },
+      walletDiagnostic: { change: { reviewedInstructionsPreserved: true, addedPrograms: [LIGHTHOUSE_PROGRAM] } } });
+    expect(refused.attempt?.walletGuard).toBeUndefined();
+    expect(s.env.state.sent).toEqual([]);
+  });
+  it('rejects a journal whose recorded wallet guard no longer matches the signed bytes', async () => {
+    const s = await setup(), wf = workflow('0.1', 'SOL', 'USDC');
+    const record = await reviewed(s, wf), begin = await s.service.begin(record.id, s.wallet.owner, wf);
+    const guarded = applyMockedPhantomLighthouseGuards(begin.unsignedTransaction, { lamportsAtLeast: 1n }, record.review.lookupTables);
+    const submitted = await s.service.submit(record.id, s.wallet.sign(guarded));
+    expect(parseTransaction(fromBase64(submitted.attempt!.transaction!, 2048)).signatures).toHaveLength(1);
+    const file = join(s.dir, record.id + '.jsonl');
+    await writeFile(file, (await readFile(file, 'utf8')).replaceAll('lamports >= 1', 'lamports >= 0'));
+    await expect(s.service.load(record.id)).rejects.toThrow('JUPITER_STORE_CORRUPT');
   });
   it('rejects a tampered durable journal', async () => {
     const s = await setup();

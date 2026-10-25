@@ -92,7 +92,8 @@ export function SolanaTransferProvider({ children }: { children: ReactNode }) {
     }
   }
   async function simulate() { await operation(async () => {
-    if (unresolved(record)) throw new Error(`${X}_EXISTING_ATTEMPT_OBSERVE_ONLY`);
+    // HOTFIX-WORKFLOW-CONCURRENCY-001: a pending transaction never blocks a new, separate simulation; the earlier run keeps being observed
+    // server-side and stays listed in Dashboard.
     if (!session) throw new Error(`${X}_SOLANA_WALLET_SELECTION_REQUIRED`);
     const snapshot = latest.current;
     const result = await solanaTransferSimulate(cluster, snapshot, session.account.address); if (!result.ok) throw new Error(result.code);

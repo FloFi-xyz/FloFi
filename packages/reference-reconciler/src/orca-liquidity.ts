@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { ORCA_LIQUIDITY_INNER_PROGRAMS, ORCA_LIQUIDITY_TOP_LEVEL_PROGRAMS, ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY as program, assessOrcaLiquidityEffects, base58Encode, decompileMessageV0,
-  fromBase64, parseMessageV0, parseTransaction, requireOrcaLiquidityProfile, solanaSwapArtifactHash, solanaSwapHash, summarizeOrcaLiquidityInstructions, verifyEd25519, verifySolanaCluster,
-  type OrcaLiquidityBalances, type OrcaLiquidityEvent, type OrcaLiquidityReview, type OrcaLiquiditySimulation, type SolanaRpc } from '@defi-workflow-engine/reference-compiler';
+import { LIGHTHOUSE_PROGRAM, ORCA_LIQUIDITY_INNER_PROGRAMS, ORCA_LIQUIDITY_TOP_LEVEL_PROGRAMS, ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY as program, assertRecordedSolanaWalletGuard,
+  assessOrcaLiquidityEffects, base58Encode, decompileMessageV0, fromBase64, parseMessageV0, parseTransaction, requireOrcaLiquidityProfile, solanaSwapArtifactHash, solanaSwapHash,
+  summarizeOrcaLiquidityInstructions, verifyEd25519, verifySolanaCluster, type OrcaLiquidityBalances, type OrcaLiquidityEvent, type OrcaLiquidityReview, type OrcaLiquiditySimulation,
+  type SolanaRpc, type SolanaWalletGuard } from '@defi-workflow-engine/reference-compiler';
+import { walletGuardLimitation } from './jupiter.js';
 import { hashJournalBytes, type EvidenceBundle, type ExecutionJournal } from '@defi-workflow-engine/workflow-contracts';
 
 export type OrcaLiquidityEffects = Omit<OrcaLiquiditySimulation, 'slot' | 'unitsConsumed' | 'logs' | 'pre' | 'post'>;
@@ -11,7 +13,9 @@ export type OrcaLiquidityObservation = { verdict: 'RECONCILED' | 'DIVERGENT' | '
   vaults: { aBefore: string; aAfter: string; bBefore: string; bAfter: string } | null;
   positionAuthority: { tokenAccount: string; owner: string; amount: string } | null;
   effects: OrcaLiquidityEffects | null; events: OrcaLiquidityEvent[]; instructions: string[]; programs: string[]; innerPrograms: string[]; signers: string[];
-  explorer: string | null };
+  explorer: string | null;
+  /** The wallet guard re-verified against the Review for this exact signed transaction (only when the wallet appended one). */
+  walletGuard?: SolanaWalletGuard };
 const fail = (code: string): never => { throw new Error(code); };
 const record = (v: unknown): Record<string, unknown> => v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : fail('SOLANA_RPC_INVALID');
 const lamportList = (v: unknown, n: number): bigint[] => Array.isArray(v) && v.length === n && v.every(x => Number.isSafeInteger(x) && (x as number) >= 0)
@@ -35,11 +39,12 @@ export const orcaLiquidityExplorer = (signature: string, chain: string = program
  * be byte-identical to the reviewed message with valid signatures from exactly the reviewed signers, invoke only allowlisted
  * programs, emit exactly the planned Orca events, and every owner, vault and position balance must be explained.
  */
-export async function reconcileOrcaLiquidityAttempt(review: OrcaLiquidityReview, attempt: { signature: string | null; transaction: string | null },
+export async function reconcileOrcaLiquidityAttempt(review: OrcaLiquidityReview, attempt: { signature: string | null; transaction: string | null; walletGuard?: SolanaWalletGuard },
   rpc: SolanaRpc): Promise<OrcaLiquidityObservation> {
   const base: OrcaLiquidityObservation = { verdict: 'INCONCLUSIVE', reason: 'TRANSACTION_NOT_OBSERVED', found: false, signature: attempt.signature, confirmation: null,
     slot: null, blockTime: null, feeLamports: null, transactionFailed: false, owner: null, vaults: null, positionAuthority: null, effects: null, events: [],
-    instructions: [], programs: [], innerPrograms: [], signers: review.signers, explorer: attempt.signature ? orcaLiquidityExplorer(attempt.signature, review.chain) : null };
+    instructions: [], programs: [], innerPrograms: [], signers: review.signers, explorer: attempt.signature ? orcaLiquidityExplorer(attempt.signature, review.chain) : null,
+    ...attempt.walletGuard ? { walletGuard: attempt.walletGuard } : {} };
   if (!attempt.signature || !attempt.transaction) return base;
   try {
     // The Review's own cluster: a Devnet Review is never reconciled against mainnet-beta, nor the reverse.
@@ -60,8 +65,9 @@ export async function reconcileOrcaLiquidityAttempt(review: OrcaLiquidityReview,
     base.slot = tx.slot as number; base.blockTime = Number.isSafeInteger(tx.blockTime) ? tx.blockTime as number : null;
     // Exact reviewed, fully signed bytes; every reviewed signer's Ed25519 signature re-verified independently.
     const onChain = fromBase64((tx.transaction as unknown[])[0], 2048), parsed = parseTransaction(onChain);
-    if (Buffer.from(onChain).toString('base64') !== Buffer.from(signed).toString('base64') || Buffer.from(parsed.message).toString('base64') !== review.message)
-      fail('ORCA_LIQUIDITY_TRANSACTION_MISMATCH');
+    // The reviewed message, or the recorded wallet guard re-verified against it (HOTFIX-PHANTOM-LIGHTHOUSE-001).
+    if (Buffer.from(onChain).toString('base64') !== Buffer.from(signed).toString('base64')) fail('ORCA_LIQUIDITY_TRANSACTION_MISMATCH');
+    try { assertRecordedSolanaWalletGuard(fromBase64(review.message), parsed.message, attempt.walletGuard, {}); } catch { fail('ORCA_LIQUIDITY_TRANSACTION_MISMATCH'); }
     if (parsed.signatures.length !== review.signers.length || review.signers.some((signer, i) => !verifyEd25519(parsed.signatures[i]!, parsed.message, signer)))
       fail('ORCA_LIQUIDITY_SIGNATURE_MISMATCH');
     if (base.slot < review.simulationResult.slot) fail('ORCA_LIQUIDITY_SLOT_MISMATCH');
@@ -70,13 +76,14 @@ export async function reconcileOrcaLiquidityAttempt(review: OrcaLiquidityReview,
     if (message.lookups.length || (Array.isArray(loaded.writable) && loaded.writable.length) || (Array.isArray(loaded.readonly) && loaded.readonly.length))
       fail('ORCA_LIQUIDITY_LOOKUP_MISMATCH');
     if (keys[0] !== review.owner) fail('ORCA_LIQUIDITY_OWNER_MISMATCH');
-    const instructions = decompileMessageV0(message, {});
+    // The reviewed instructions are an exact prefix; a verified guard only appends Lighthouse assertions after them.
+    const all = decompileMessageV0(message, {}), instructions = all.slice(0, all.length - (attempt.walletGuard?.instructions.length ?? 0));
     base.instructions = summarizeOrcaLiquidityInstructions(instructions).map(i => i.name);
     if (JSON.stringify(base.instructions) !== JSON.stringify(review.instructionSummary.map(i => i.name))) fail('ORCA_LIQUIDITY_INSTRUCTION_MISMATCH');
-    base.programs = [...new Set(instructions.map(i => i.programId))];
+    base.programs = [...new Set(all.map(i => i.programId))];
     base.innerPrograms = Array.isArray(meta.innerInstructions) ? [...new Set((meta.innerInstructions as unknown[]).flatMap(group =>
       Array.isArray(record(group).instructions) ? (record(group).instructions as unknown[]).map(i => keys[record(i).programIdIndex as number] ?? fail('SOLANA_RPC_INVALID')) : []))] : [];
-    if (!base.programs.includes(program.programs.whirlpool) || base.programs.some(p => !ORCA_LIQUIDITY_TOP_LEVEL_PROGRAMS.includes(p)) ||
+    if (!base.programs.includes(program.programs.whirlpool) || base.programs.some(p => !ORCA_LIQUIDITY_TOP_LEVEL_PROGRAMS.includes(p) && !(attempt.walletGuard && p === LIGHTHOUSE_PROGRAM)) ||
         base.innerPrograms.some(p => !ORCA_LIQUIDITY_INNER_PROGRAMS.includes(p))) fail('ORCA_LIQUIDITY_UNEXPECTED_PROGRAM');
     const fee = typeof meta.fee === 'number' && Number.isSafeInteger(meta.fee) ? BigInt(meta.fee) : fail('SOLANA_RPC_INVALID');
     base.feeLamports = fee.toString();
@@ -158,12 +165,13 @@ export function buildOrcaLiquidityEvidence(input: { id: string; review: OrcaLiqu
     collectedFees: { a: effects.collectedFeesA, b: effects.collectedFeesB }, rentPaidLamports: effects.rentPaidLamports, rentRefundedLamports: effects.rentRefundedLamports,
     createdAccounts: effects.createdAccounts, closedAccounts: effects.closedAccounts, events: o.events, signature: o.signature, signers: o.signers, slot: o.slot,
     blockTime: o.blockTime, confirmation: o.confirmation, feeLamports: o.feeLamports, ownerBalances: o.owner, vaults: o.vaults, instructions: o.instructions,
-    programs: o.programs, innerPrograms: o.innerPrograms, messageHash: review.messageHash, lifecycle: input.lifecycle, verdict: o.verdict, reason: o.reason,
+    programs: o.programs, innerPrograms: o.innerPrograms, messageHash: review.messageHash,
+    ...o.walletGuard ? { signedMessageHash: o.walletGuard.signedMessageHash, walletGuard: o.walletGuard } : {}, lifecycle: input.lifecycle, verdict: o.verdict, reason: o.reason,
     provenance: input.provenance, evidenceClass, ownerInitiated: input.ownerInitiated, realFunds: profile.realFunds && input.provenance !== 'MOCKED' };
   const head = hashJournalBytes(new TextEncoder().encode(JSON.stringify(input.journal))).at(-1) ?? fail('ORCA_LIQUIDITY_JOURNAL_EMPTY');
   // The frozen v1 environment enum has no Devnet member: Devnet maps to TESTNET_EXECUTED, mainnet-beta to MAINNET_EXECUTED.
   const environment = input.provenance === 'MOCKED' ? 'MOCKED' as const : profile.bundleEnvironment;
-  const limitations = ['Balances are finalized transaction metadata for the exact fully signed reviewed bytes.',
+  const limitations = [walletGuardLimitation(o.walletGuard) ?? 'Balances are finalized transaction metadata for the exact fully signed reviewed bytes.',
     'Withdrawn principal is taken from Orca LiquidityDecreased events; collected fees are the remaining vault outflow. Principal is never counted as fees.',
     'Native SOL deltas exclude the network fee and refundable account deposits, which are reported separately.',
     profile.realFunds ? 'Solana mainnet-beta with real funds (Gryloo evidence class PUBLIC_EXECUTED).'

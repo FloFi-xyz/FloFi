@@ -43,7 +43,10 @@ describe('Solana Devnet service lifecycle (MOCKED Devnet loopback, no public sub
     expect(observed.evidence?.bundle.environment).toBe('MOCKED');
     expect(observed.observations.at(-1)?.explorer).toMatch(/^https:\/\/explorer\.solana\.com\/tx\/.+\?cluster=devnet$/);
     expect(observed.journal.entries.filter(e => e.level === 'attempt').map(e => e.toState)).toEqual(['PREPARED', 'SUBMITTING', 'PENDING', 'CONFIRMED']);
-    expect((await readdir(s.dir)).some(name => name.endsWith('.orca-lease'))).toBe(true);
+    // The run's transaction identity (reviewed message and owner signature) is claimed durably; no owner-level lease exists.
+    const names = await readdir(s.dir);
+    expect(names).toEqual(expect.arrayContaining([`${record.review.messageHash.slice(2)}.orca-message`, `${submitted.attempt!.signature}.orca-signature`]));
+    expect(names.some(name => name.endsWith('.orca-lease'))).toBe(false);
   });
   it('a public Devnet run without owner execution stays PUBLIC_READ_ONLY; execution can be disabled by the server', async () => {
     const s = await setup({}, { provenance: 'PUBLIC_DEVNET', executionEnabled: false });
@@ -74,7 +77,7 @@ describe('Solana Devnet service lifecycle (MOCKED Devnet loopback, no public sub
     expect((await s.service.load(record.id)).attempt).toBeNull();
     expect((await s.service.invalidate(record.id)).authorization).toBeNull();
   });
-  it('records wallet rejection as a pre-submission failure and releases the owner lease', async () => {
+  it('records wallet rejection as a pre-submission failure; nothing stays locked', async () => {
     const s = await setup();
     const record = await reviewed(s);
     await s.service.begin(record.id, s.wallet.owner, workflow());
@@ -84,12 +87,13 @@ describe('Solana Devnet service lifecycle (MOCKED Devnet loopback, no public sub
     expect(s.env.state.sent).toEqual([]);
     await expect(s.service.begin((await reviewed(s)).id, s.wallet.owner, workflow())).resolves.toBeTruthy();
   });
-  it('never broadcasts a changed transaction (pre-submission failure) and prevents duplicate attempts', async () => {
+  it('never broadcasts a changed transaction (pre-submission failure) and never hands one message to two runs', async () => {
     const s = await setup();
     const first = await reviewed(s), second = await reviewed(s);
     await s.service.begin(first.id, s.wallet.owner, workflow());
     await expect(s.service.begin(first.id, s.wallet.owner, workflow())).rejects.toThrow('DEVNET_SWAP_EXISTING_ATTEMPT_OBSERVE_ONLY');
-    await expect(s.service.begin(second.id, s.wallet.owner, workflow())).rejects.toThrow('DEVNET_SWAP_OWNER_ATTEMPT_IN_PROGRESS');
+    if (second.review.messageHash === first.review.messageHash)
+      await expect(s.service.begin(second.id, s.wallet.owner, workflow())).rejects.toThrow('DEVNET_SWAP_DUPLICATE_TRANSACTION_SIMULATE_AGAIN');
     const changed = second.review.unsignedTransaction === first.review.unsignedTransaction ? null : second.review.unsignedTransaction;
     const other = changed ?? (await reviewed(await setup(), workflow('0.2'))).review.unsignedTransaction;
     expect(await s.service.submit(first.id, s.wallet.sign(other))).toMatchObject({ error: 'DEVNET_SWAP_TRANSACTION_CHANGED', notSubmitted: true, attempt: { state: 'CANCELLED' } });
@@ -111,7 +115,10 @@ describe('Solana Devnet service lifecycle (MOCKED Devnet loopback, no public sub
     const begin = await s.service.begin(record.id, s.wallet.owner, workflow());
     await s.service.submit(record.id, s.wallet.sign(begin.unsignedTransaction));
     expect(await s.service.observe(record.id)).toMatchObject({ error: 'DEVNET_SWAP_TRANSACTION_NOT_OBSERVED', verdict: 'PENDING' });
-    await expect(s.service.begin((await reviewed(s)).id, s.wallet.owner, workflow())).rejects.toThrow('DEVNET_SWAP_OWNER_ATTEMPT_IN_PROGRESS');
+    // While the dropped swap is still being proven absent, an independent swap on a newer blockhash proceeds.
+    s.env.advance(1);
+    const independent = await reviewed(s);
+    expect((await s.service.begin(independent.id, s.wallet.owner, workflow())).record.attempt?.state).toBe('PREPARED');
     s.env.advance(200);
     expect(await s.service.observe(record.id)).toMatchObject({ verdict: 'NOT_EXECUTED', attempt: { state: 'NOT_FOUND' }, error: 'DEVNET_SWAP_TRANSACTION_EXPIRED_NOT_EXECUTED' });
     const unsigned = await reviewed(s);

@@ -84,8 +84,8 @@ describe('P0: a wallet that changes the reviewed Solana Devnet swap (MOCKED loop
     const shown = presented(refused);
     expect(shown.steps).toEqual([['node-002', 'not-submitted', 'Not submitted'], ['node-003', 'waiting', 'Waiting']]);
     const note = shown.progress.evidence.operations.swap!;
-    expect(translate('EN', note.note!, ...note.noteArgs!)).toBe('Your wallet added 2 instruction(s) from Lighthouse to the transaction you reviewed before signing it. FloFi sends only the exact transaction you reviewed, so it did not send this one and nothing reached Solana. Simulate again for a fresh Review.');
-    expect(translate('PT', note.note!, ...note.noteArgs!)).toBe('A sua carteira acrescentou 2 instrução(ões) de Lighthouse à transação que reviu antes de a assinar. O FloFi envia apenas a transação exata que reviu, por isso não enviou esta e nada chegou à Solana. Simule novamente para obter uma nova Revisão.');
+    expect(translate('EN', note.note!, ...note.noteArgs!)).toBe('Your wallet added 2 instruction(s) from Lighthouse that FloFi could not verify as read-only protection checks of the transaction you reviewed, so it did not send it and nothing reached Solana. Simulate again for a fresh Review.');
+    expect(translate('PT', note.note!, ...note.noteArgs!)).toBe('A sua carteira acrescentou 2 instrução(ões) de Lighthouse que o FloFi não conseguiu verificar como verificações de proteção só de leitura da transação que reviu, por isso não a enviou e nada chegou à Solana. Simule novamente para obter uma nova Revisão.');
     expect(shown.progress.evidence.details).toContainEqual({ label: 'Wallet result', value: 'DEVNET_SWAP_TRANSACTION_CHANGED', copy: false });
     expect(shown.result).toMatchObject({ label: 'Transaction not submitted', completed: 0, total: 2 });
     expect(nothingSubmitted(shown.progress)).toBe(true);

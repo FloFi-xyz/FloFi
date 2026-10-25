@@ -226,7 +226,8 @@ export function JupiterProvider({ children }: { children: ReactNode }) {
     }
   }
   async function simulate() { await operation(async () => {
-    if (unresolved(record)) throw new Error(`${runtime.prefix}_EXISTING_ATTEMPT_OBSERVE_ONLY`);
+    // HOTFIX-WORKFLOW-CONCURRENCY-001: a pending transaction never blocks a new, separate simulation; the earlier run keeps being observed
+    // server-side and stays listed in Dashboard.
     const owner = (await ensureSession()).account.address, snapshot = latest.current;
     const result = await runtime.simulate(snapshot, owner); if (!result.ok) throw new Error(result.code);
     if (latest.current !== snapshot) throw new Error(`${runtime.prefix}_SEMANTIC_REVISION_CHANGED`);

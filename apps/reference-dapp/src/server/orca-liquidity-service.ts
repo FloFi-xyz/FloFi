@@ -3,13 +3,15 @@ import { randomBytes } from 'node:crypto';
 import { isAbsolute } from 'node:path';
 import { validateAuthoringWorkflow, createBaseSepoliaReviewContext } from '@defi-workflow-engine/reference-linter';
 import { ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY, assertOrcaLiquidityReview, inspectOrcaPosition, orcaLiquidityIntentProfile, readOrcaLiquidityPrice, simulateOrcaLiquidity,
-  describeSolanaWalletChange, solanaAddress, verifySignedOrcaLiquidityTransaction, type OrcaLiquidityOperation, type OrcaLiquidityProfile, type SolanaRpc, type SolanaWalletChange } from '@defi-workflow-engine/reference-compiler';
+  describeSolanaWalletChange, solanaAddress, verifySignedOrcaLiquidityTransaction, type OrcaLiquidityOperation, type OrcaLiquidityProfile, type SignedSolanaTransaction, type SolanaRpc,
+  type SolanaWalletChange } from '@defi-workflow-engine/reference-compiler';
 import { createOrcaLiquidityRun, orcaLiquidityAttemptResolved, orcaLiquidityTransition, prepareOrcaLiquidityAttempt, recordOrcaLiquiditySignature,
   solanaSwapObservationDecision, validateOrcaLiquidityRun, createFileExecutionStorage, logMissing, utf8, ORCA_LIQUIDITY_ID, type ExecutionStorage, type OrcaLiquidityRun,
   type OrcaLiquidityProvenance } from '@defi-workflow-engine/reference-executor';
 import { buildOrcaLiquidityEvidence, classifyOrcaLiquidityEvidence, reconcileOrcaLiquidityAttempt, type OrcaLiquidityEvidenceClass,
   type OrcaLiquidityObservation } from '@defi-workflow-engine/reference-reconciler';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
+import { solanaTransactionClaim } from './solana-transaction-claim';
 
 /**
  * BUILD-015 Orca Whirlpools liquidity on Solana Devnet; BUILD-SOLANA-MAINNET-001: one service instance per cluster (`profile`), each on its own
@@ -39,7 +41,7 @@ export function createOrcaLiquidityService(input: { rpc: SolanaRpc; journalDir?:
   if (input.provenance !== 'MOCKED' && input.provenance !== profile.provenance) throw new Error(`ORCA_LIQUIDITY_STORAGE_INVALID`);
   // Local mode keeps the original journal directory; cloud mode supplies shared durable storage instead.
   if (!input.storage && (!input.journalDir || !isAbsolute(input.journalDir) || input.journalDir.includes('/.git/'))) throw new Error(`${X}_STORAGE_INVALID`);
-  const { log, leases } = input.storage ?? createFileExecutionStorage(input.journalDir!, `${X}_BUSY`);
+  const storage = input.storage ?? createFileExecutionStorage(input.journalDir!, `${X}_BUSY`), { log, leases } = storage;
   const now = input.now ?? Date.now;
   const idCheck = (id: string) => { if (typeof id !== 'string' || !ORCA_LIQUIDITY_ID.test(id)) throw new Error(`${X}_ID_INVALID`); return id; };
   const path = (id: string) => idCheck(id) + '.jsonl';
@@ -99,17 +101,15 @@ export function createOrcaLiquidityService(input: { rpc: SolanaRpc; journalDir?:
       for (const l of text.trimEnd().split('\n')) { const v = JSON.parse(l) as RegistryLine; if (!ORCA_LIQUIDITY_ID.test(v.id)) throw new Error(`${X}_STORE_CORRUPT`); }
     });
   };
-  /** One unresolved liquidity attempt per owner across runs, tabs and restarts. The lease history is append-only. */
-  async function acquireOwnerLease(owner: string, id: string): Promise<void> {
-    const lease = owner + '.orcalp-lease';
-    const prior = utf8(await log.read(lease));
-    const holder = prior.trimEnd().split('\n').filter(Boolean).at(-1);
-    if (holder && holder !== id && !orcaLiquidityAttemptResolved(await load(holder))) throw new Error(`${X}_OWNER_ATTEMPT_IN_PROGRESS`);
-    if (holder === id) throw new Error(`${X}_EXISTING_ATTEMPT_OBSERVE_ONLY`);
-    await log.extend(lease, new TextEncoder().encode(prior + id + '\n'), bytes => {
-      if (!new TextDecoder().decode(bytes).trimEnd().split('\n').every(line => ORCA_LIQUIDITY_ID.test(line))) throw new Error(`${X}_STORE_CORRUPT`);
-    });
-  }
+  /**
+   * HOTFIX-WORKFLOW-CONCURRENCY-001: transaction identity, never owner identity. Each reviewed message is handed to a wallet for exactly one
+   * run and each owner signature belongs to exactly one run; any number of the owner's position operations may be pending at once. Every
+   * OPEN creates its own position at a fresh mint, so independent positions never share an identity.
+   */
+  // A message whose holder was cancelled before any signature existed was never broadcast by FloFi; a new run may take it over.
+  const neverSigned = async (holder: string) => { const prior = await load(holder); return prior.attempt?.state === 'CANCELLED' && !prior.attempt.signature; };
+  const claimTransaction = (kind: 'message' | 'signature', value: string, id: string) => solanaTransactionClaim(storage, `${value.replace(/^0x/, '')}.orcalp-${kind}`, id,
+    kind === 'message' ? `${X}_DUPLICATE_TRANSACTION_SIMULATE_AGAIN` : `${X}_DUPLICATE_SIGNATURE_NOT_SUBMITTED`, kind === 'message' ? neverSigned : undefined);
   /** Every Gryloo-created position of this owner, with each operation's journal state and the position's current chain state. */
   async function positions(ownerInput: string): Promise<OrcaPositionEntry[]> {
     const owner = solanaAddress(ownerInput), lines = await readRegistry(owner);
@@ -145,8 +145,8 @@ export function createOrcaLiquidityService(input: { rpc: SolanaRpc; journalDir?:
       if (orcaLiquidityIntentProfile(workflow, owner).profile.chain !== profile.chain) throw new Error('SOLANA_CLUSTER_UNSUPPORTED');
       const known = await positions(owner);
       if (request.operation === 'OPEN') {
-        // Recover the real position rather than create another: one Gryloo position per owner on this pool.
-        if (known.some(p => p.status === 'OPEN_PENDING' || p.status === 'ACTIVE' || p.status === 'EMPTY')) throw new Error(`${X}_POSITION_ALREADY_OPEN`);
+        // HOTFIX-WORKFLOW-CONCURRENCY-001: an owner may hold any number of positions on the pool (Orca allows it); each OPEN is a new position
+        // at its own fresh mint, whatever the state of the owner's other positions and their operations.
         if (known.some(p => p.positionMint === positionMint)) throw new Error('ORCA_POSITION_MINT_IN_USE');
       } else {
         const entry = known.find(p => p.positionMint === positionMint);
@@ -176,11 +176,9 @@ export function createOrcaLiquidityService(input: { rpc: SolanaRpc; journalDir?:
       if (record.attempt) throw new Error(`${X}_EXISTING_ATTEMPT_OBSERVE_ONLY`);
       const height = await blockHeight('confirmed');
       assertOrcaLiquidityReview(record.review, workflow, solanaAddress(ownerInput), height, now());
+      // The owner's position registry is appended under a short exclusive section (no lease outlives this call).
       return locked('owner-' + record.review.owner, async () => {
-        // Re-checked under the owner lock: another reviewed OPEN may have created a position since this one was simulated.
-        if (record.operation === 'OPEN' && (await positions(record.review.owner)).some(p => p.positionMint !== record.positionMint &&
-            ['OPEN_PENDING', 'ACTIVE', 'EMPTY'].includes(p.status))) throw new Error(`${X}_POSITION_ALREADY_OPEN`);
-        await acquireOwnerLease(record.review.owner, id);
+        await claimTransaction('message', record.review.messageHash, id);
         // Position identity is durable before any signature exists.
         await appendRegistry(record.review.owner, { positionMint: record.positionMint, id, operation: record.operation });
         const prepared = await save({ ...record, ...prepareOrcaLiquidityAttempt(record, height), error: null }); // Durable BEFORE the wallet is asked to sign.
@@ -195,17 +193,19 @@ export function createOrcaLiquidityService(input: { rpc: SolanaRpc; journalDir?:
       const cancelled = record.attempt ? orcaLiquidityTransition(record, 'CANCELLED') : record;
       return save({ ...record, ...cancelled, authorization: null, notSubmitted: Boolean(record.attempt), walletDiagnostic: diagnostic, error: diagnostic.code, submissionError: diagnostic.code });
     }); },
-    /** Verify exact reviewed bytes and every reviewed signature, persist the signature and bytes, then broadcast once. */
+    /** Verify the reviewed bytes (or a verified wallet guard) and every reviewed signature, persist both, then broadcast once. */
     async submit(id: string, signedTransaction: string): Promise<OrcaLiquidityRecord> { return locked(idCheck(id), async () => {
       const record = await load(id);
       if (record.attempt?.state !== 'PREPARED' || record.authorization !== record.review.commitment) throw new Error(`${X}_WALLET_HANDOFF_NOT_AUTHORIZED`);
-      let signed: { signature: string; transaction: string };
+      let signed: SignedSolanaTransaction;
       try {
+        // The reviewed bytes, or the reviewed bytes plus only verified Lighthouse assertions the wallet appended (HOTFIX-PHANTOM-LIGHTHOUSE-001).
         signed = verifySignedOrcaLiquidityTransaction(record.review, signedTransaction);
         if (now() >= Date.parse(record.review.expiresAt) || await blockHeight('confirmed') >= record.review.lastValidBlockHeight) throw new Error(`${X}_REVIEW_STALE`);
+        await claimTransaction('signature', signed.signature, id);
       } catch (cause) {
         const failure = code(cause, `${X}_TRANSACTION_CHANGED`);
-        // Gryloo never broadcasts modified, mis-signed or stale bytes; the reviewed blockhash bounds any copy's validity.
+        // Gryloo never broadcasts unverified, mis-signed or stale bytes; the reviewed blockhash bounds any copy's validity.
         // The refusal keeps a description of what the wallet changed, so the owner sees the real reason; the bytes are not kept.
         let change: SolanaWalletChange | undefined;
         if (failure === `${X}_TRANSACTION_CHANGED`) try { change = describeSolanaWalletChange(record.review.message, signedTransaction); } catch { change = undefined; }

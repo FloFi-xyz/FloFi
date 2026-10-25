@@ -3,12 +3,14 @@ import { randomBytes } from 'node:crypto';
 import { isAbsolute } from 'node:path';
 import { validateAuthoringWorkflow, createBaseSepoliaReviewContext } from '@defi-workflow-engine/reference-linter';
 import { simulateJupiterSwap, assertJupiterReview, verifySignedJupiterTransaction, simulateOrcaDevnetSwap, assertOrcaDevnetReview, verifySignedOrcaDevnetTransaction,
-  describeSolanaWalletChange, requireSolanaSwapRuntime, solanaAddress, type JupiterHttp, type SolanaWalletChange, type JupiterReview, type OrcaDevnetReview, type SolanaRpc, type SolanaSwapReview } from '@defi-workflow-engine/reference-compiler';
+  describeSolanaWalletChange, requireSolanaSwapRuntime, solanaAddress, type JupiterHttp, type SolanaWalletChange, type JupiterReview, type OrcaDevnetReview, type SignedSolanaTransaction,
+  type SolanaRpc, type SolanaSwapReview } from '@defi-workflow-engine/reference-compiler';
 import { JUPITER_SOLANA_MAINNET, ORCA_WHIRLPOOLS_DEVNET, type SolanaSwapRuntime } from '@defi-workflow-engine/action-registry';
-import { createSolanaSwapRun, prepareSolanaSwapAttempt, recordSolanaSwapSignature, solanaSwapTransition, solanaSwapObservationDecision, solanaSwapAttemptResolved,
-  validateSolanaSwapRun, createFileExecutionStorage, logMissing, utf8, type ExecutionStorage, type SolanaSwapProvenance, type SolanaSwapRun } from '@defi-workflow-engine/reference-executor';
+import { createSolanaSwapRun, prepareSolanaSwapAttempt, recordSolanaSwapSignature, solanaSwapTransition, solanaSwapObservationDecision, validateSolanaSwapRun,
+  createFileExecutionStorage, logMissing, utf8, type ExecutionStorage, type SolanaSwapProvenance, type SolanaSwapRun } from '@defi-workflow-engine/reference-executor';
 import { reconcileSolanaSwapAttempt, buildSolanaSwapEvidence, classifySolanaSwapEvidence, type JupiterObservation, type SolanaSwapEvidenceClass } from '@defi-workflow-engine/reference-reconciler';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
+import { solanaTransactionClaim } from './solana-transaction-claim';
 
 /** `change`: what the wallet altered in a refused transaction (public keys, counts and hashes only; never its bytes or signatures). */
 export type JupiterWalletDiagnostic = { stage: 'CONNECT' | 'SIGN' | 'PREFLIGHT'; code: string; error: unknown; change?: SolanaWalletChange };
@@ -19,11 +21,11 @@ export type SolanaSwapRecord = JupiterRecord;
 export type JupiterBegin = { record: JupiterRecord; unsignedTransaction: string; walletChain: string };
 const code = (cause: unknown, fallback: string) => cause instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(cause.message) ? cause.message : fallback;
 
-/** A runtime's provider-specific steps; journal, lease, signature handoff, recovery and reconciliation are shared. */
+/** A runtime's provider-specific steps; journal, transaction claims, signature handoff, recovery and reconciliation are shared. */
 export type SolanaSwapAdapter = { runtime: SolanaSwapRuntime;
   simulate(workflow: SemanticWorkflow, owner: string, rpc: SolanaRpc, now: number): Promise<SolanaSwapReview>;
   assertReview(review: SolanaSwapReview, workflow: SemanticWorkflow, owner: string, blockHeight: number, now: number): void;
-  verifySigned(review: SolanaSwapReview, signed: unknown): { signature: string; transaction: string } };
+  verifySigned(review: SolanaSwapReview, signed: unknown): SignedSolanaTransaction };
 const reviewOf = <T extends SolanaSwapReview['format']>(review: SolanaSwapReview, format: T, prefix: string) =>
   review.format === format ? review as Extract<SolanaSwapReview, { format: T }> : (() => { throw new Error(prefix + '_AUTHORIZATION_INVALID'); })();
 export const jupiterAdapter = (http: JupiterHttp): SolanaSwapAdapter => ({ runtime: requireSolanaSwapRuntime(JUPITER_SOLANA_MAINNET.chain),
@@ -50,7 +52,7 @@ export function createSolanaSwapService(input: { adapter: SolanaSwapAdapter; rpc
   if (input.provenance !== 'MOCKED' && input.provenance !== runtime.provenance) throw new Error(`${X}_PROVENANCE_INVALID`);
   // Local mode keeps the original journal directory; cloud mode supplies shared durable storage instead.
   if (!input.storage && (!input.journalDir || !isAbsolute(input.journalDir) || input.journalDir.includes('/.git/'))) throw new Error(`${X}_STORAGE_INVALID`);
-  const { log, leases } = input.storage ?? createFileExecutionStorage(input.journalDir!, `${X}_BUSY`);
+  const storage = input.storage ?? createFileExecutionStorage(input.journalDir!, `${X}_BUSY`), { log, leases } = storage;
   const idPattern = new RegExp(`^${runtime.idPrefix}-[a-f0-9]{32}$`);
   const idCheck = (id: string) => { if (typeof id !== 'string' || !idPattern.test(id)) throw new Error(`${X}_ID_INVALID`); return id; };
   const now = input.now ?? Date.now;
@@ -91,20 +93,17 @@ export function createSolanaSwapService(input: { adapter: SolanaSwapAdapter; rpc
     if (!Number.isSafeInteger(height)) throw new Error('SOLANA_RPC_INVALID');
     return height as number;
   };
-  /** One unresolved attempt per owner across runs, tabs and restarts. The lease history is append-only. */
-  async function acquireOwnerLease(owner: string, id: string): Promise<void> {
-    await locked('owner-' + owner, async () => {
-      const lease = owner + `.${runtime.idPrefix}-lease`;
-      const prior = utf8(await log.read(lease));
-      const holders = prior.trimEnd().split('\n').filter(Boolean);
-      const holder = holders.at(-1);
-      if (holder && holder !== id && !solanaSwapAttemptResolved(await load(holder))) throw new Error(`${X}_OWNER_ATTEMPT_IN_PROGRESS`);
-      if (holder === id) throw new Error(`${X}_EXISTING_ATTEMPT_OBSERVE_ONLY`);
-      await log.extend(lease, new TextEncoder().encode(prior + id + '\n'), bytes => {
-        if (!new TextDecoder().decode(bytes).trimEnd().split('\n').every(line => idPattern.test(line))) throw new Error(`${X}_STORE_CORRUPT`);
-      });
-    });
-  }
+  /**
+   * HOTFIX-WORKFLOW-CONCURRENCY-001: transaction identity, never owner identity. Each reviewed message (blockhash + instructions)
+   * is handed to a wallet for exactly one run, and each owner signature belongs to exactly one run, durably and across processes.
+   * Any number of the owner's runs may be pending at once; two identical swaps are two runs with two different messages. The same
+   * message twice would be the same Solana transaction (Ed25519 is deterministic) and could land only once, so it needs a fresh
+   * Simulate instead of being tracked by two runs.
+   */
+  // A message whose holder was cancelled before any signature existed was never broadcast by FloFi; a new run may take it over.
+  const neverSigned = async (holder: string) => { const prior = await load(holder); return prior.attempt?.state === 'CANCELLED' && !prior.attempt.signature; };
+  const claimTransaction = (kind: 'message' | 'signature', value: string, id: string) => solanaTransactionClaim(storage, `${value.replace(/^0x/, '')}.${runtime.idPrefix}-${kind}`, id,
+    kind === 'message' ? `${X}_DUPLICATE_TRANSACTION_SIMULATE_AGAIN` : `${X}_DUPLICATE_SIGNATURE_NOT_SUBMITTED`, kind === 'message' ? neverSigned : undefined);
   return {
     load,
     executionEnabled: input.executionEnabled,
@@ -131,7 +130,7 @@ export function createSolanaSwapService(input: { adapter: SolanaSwapAdapter; rpc
       if (record.attempt) throw new Error(`${X}_EXISTING_ATTEMPT_OBSERVE_ONLY`);
       const height = await blockHeight('confirmed');
       input.adapter.assertReview(record.review, workflow, solanaAddress(owner), height, now());
-      await acquireOwnerLease(record.review.owner, id);
+      await claimTransaction('message', record.review.messageHash, id);
       const prepared = await save({ ...record, ...prepareSolanaSwapAttempt(record, height), error: null }); // Durable BEFORE the wallet is asked to sign.
       return { record: prepared, unsignedTransaction: record.review.unsignedTransaction, walletChain: runtime.walletChain };
     }); },
@@ -143,17 +142,19 @@ export function createSolanaSwapService(input: { adapter: SolanaSwapAdapter; rpc
       const cancelled = record.attempt ? solanaSwapTransition(record, 'CANCELLED') : record;
       return save({ ...record, ...cancelled, authorization: null, notSubmitted: Boolean(record.attempt), walletDiagnostic: diagnostic, error: diagnostic.code, submissionError: diagnostic.code });
     }); },
-    /** Verify exact reviewed bytes and owner signature, persist the signature, then broadcast once. */
+    /** Verify the reviewed bytes (or a verified wallet guard) and the owner signature, persist both, then broadcast once. */
     async submit(id: string, signedTransaction: string): Promise<JupiterRecord> { return locked(idCheck(id), async () => {
       const record = await load(id);
       if (record.attempt?.state !== 'PREPARED' || record.authorization !== record.review.commitment) throw new Error(`${X}_WALLET_HANDOFF_NOT_AUTHORIZED`);
-      let signed: { signature: string; transaction: string };
+      let signed: SignedSolanaTransaction;
       try {
+        // The reviewed bytes, or the reviewed bytes plus only verified Lighthouse assertions the wallet appended (HOTFIX-PHANTOM-LIGHTHOUSE-001).
         signed = input.adapter.verifySigned(record.review, signedTransaction);
         if (now() >= Date.parse(record.review.expiresAt) || await blockHeight('confirmed') >= record.review.lastValidBlockHeight) throw new Error(`${X}_QUOTE_STALE`);
+        await claimTransaction('signature', signed.signature, id);
       } catch (cause) {
         const failure = code(cause, `${X}_TRANSACTION_CHANGED`);
-        // Gryloo never broadcasts modified, mis-signed or stale bytes; the reviewed blockhash bounds any copy's validity.
+        // Gryloo never broadcasts unverified, mis-signed or stale bytes; the reviewed blockhash bounds any copy's validity.
         // The refusal keeps a description of what the wallet changed, so the owner sees the real reason; the bytes are not kept.
         let change: SolanaWalletChange | undefined;
         if (failure === `${X}_TRANSACTION_CHANGED`) try { change = describeSolanaWalletChange(record.review.message, signedTransaction, record.review.lookupTables); } catch { change = undefined; }

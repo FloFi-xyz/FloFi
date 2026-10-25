@@ -11,6 +11,7 @@ import { formatTokenAmount } from '../domain/jupiter-authoring';
 import { useWorkflow } from '../state/workflow-store';
 import { useJupiter } from '../state/jupiter-store';
 import { useSolanaLiquidity, type LiquidityOperation } from '../state/solana-liquidity-store';
+import { PendingExecutionNote, SolanaWalletGuardNote } from './execution-concurrency-notes';
 
 /**
  * Canvas form for the canonical concentrated-liquidity node on Orca Whirlpools: Solana Devnet (SOL / devUSDC test pool) or, BUILD-SOLANA-MAINNET-001,
@@ -87,8 +88,7 @@ const messages: Record<string, string> = {
   WRONG_OWNER: 'Select the wallet account shown in Review.',
   SEMANTIC_REVISION_CHANGED: 'The workflow changed. Simulate and review the current position again.',
   EXECUTION_NOT_ENABLED: 'Execution is not enabled on this server. Simulation and Review remain read-only.',
-  OWNER_ATTEMPT_IN_PROGRESS: 'Another position transaction from this wallet is still being observed. Wait for it to resolve.',
-  POSITION_ALREADY_OPEN: 'You already have a Flofi position on this pool. Manage it below instead of opening another.',
+  DUPLICATE_TRANSACTION_SIMULATE_AGAIN: 'This exact transaction is already handled by another FloFi execution, which keeps tracking it. Simulate again for a fresh, separate transaction.',
   OPEN_UNRESOLVED: 'The position-opening transaction is still being observed. Observe it first.',
   SUBMISSION_UNKNOWN_OBSERVE_EXISTING: 'The network did not confirm receipt. Flofi is observing the signed transaction and will not send another.',
   TRANSACTION_NOT_OBSERVED: 'The transaction is not visible yet. Observe again; Flofi will not send another.',
@@ -134,7 +134,8 @@ export function SolanaLiquidityPanel({ view }: { view: 'simulate' | 'execute' })
     (!stagedPosition || p.positionMint === stagedPosition.positionMint)) ?? null;
   const [operation, setOperation] = useState<LiquidityOperation>('OPEN'), [part, setPart] = useState('5000'), [clock, setClock] = useState(() => Date.now());
   useEffect(() => { const timer = setInterval(() => setClock(Date.now()), 1000); return () => clearInterval(timer); }, []);
-  useEffect(() => { setOperation(active && active.status !== 'OPEN_PENDING' ? 'DECREASE_PARTIAL' : 'OPEN'); }, [active?.positionMint, active?.status]);
+  // HOTFIX-WORKFLOW-CONCURRENCY-001: opening another position is always possible; an applied position-management proposal (below) selects its own operation.
+  useEffect(() => { setOperation('OPEN'); }, [active?.positionMint, active?.status]);
   // A position-management proposal the owner applied (from the Copilot) only preselects its operation for this position; nothing is simulated.
   useEffect(() => {
     if (!stagedPosition || !active || active.positionMint !== stagedPosition.positionMint || active.status === 'OPEN_PENDING') return;
@@ -171,12 +172,12 @@ export function SolanaLiquidityPanel({ view }: { view: 'simulate' | 'execute' })
       <div role="group" aria-label={tr("Liquidity operation")}>
         <label htmlFor="orca-operation">{tr("Operation")}</label>
         <select id="orca-operation" value={operation} onChange={e => setOperation(e.target.value as LiquidityOperation)}>
-          {(['OPEN', 'DECREASE_PARTIAL', 'EXIT'] as const).filter(op => op === 'OPEN' ? !active : Boolean(active && active.status !== 'OPEN_PENDING'))
+          {(['OPEN', 'DECREASE_PARTIAL', 'EXIT'] as const).filter(op => op === 'OPEN' || Boolean(active && active.status !== 'OPEN_PENDING'))
             .map(op => <option key={op} value={op}>{tr(labels[op])}</option>)}
         </select>
         {operation === 'DECREASE_PARTIAL' && <label>{tr("Portion to remove (basis points, 1–9999)")}<input aria-label={tr("Portion to remove (bps)")} inputMode="numeric" maxLength={4} value={part} onChange={e => setPart(e.target.value)}/></label>}
       </div>
-      <button type="button" disabled={liquidity.busy || pending || !liquidity.owner || Boolean(stagedPosition && !active)} onClick={() => void liquidity.simulate(operation, operation === 'OPEN' ? undefined : active?.positionMint,
+      <button type="button" disabled={liquidity.busy || !liquidity.owner || Boolean(stagedPosition && !active)} onClick={() => void liquidity.simulate(operation, operation === 'OPEN' ? undefined : active?.positionMint,
         operation === 'DECREASE_PARTIAL' ? Number(part) : undefined)}>{tr("Simulate ")}{tr(operation === 'OPEN' ? 'position' : 'removal')}</button>
       {review && sim && !liquidity.retired && <dl className="swap-summary" aria-label={tr("Liquidity simulation")}>
         <dt>{tr("Operation")}</dt><dd>{tr(labels[review.operation])}{tr(" (1 transaction; the full lifecycle is open, partial removal, then exit)")}</dd>
@@ -220,7 +221,7 @@ export function SolanaLiquidityPanel({ view }: { view: 'simulate' | 'execute' })
       {record?.authorization && !attempt && !liquidity.executionEnabled && <p role="status">{tr(message('ORCA_LIQUIDITY_EXECUTION_NOT_ENABLED', devnet))}</p>}
       {canExecuteNow && <button type="button" className="primary" disabled={liquidity.busy} onClick={() => void liquidity.execute()}>{tr("Execute ")}{tr(review?.operation === 'OPEN' ? 'position' : 'removal')}</button>}
       {attempt && !record?.evidence && <p>{tr("Transaction: ")}{tr(record?.notSubmitted ? 'not submitted' : attempt.state.toLowerCase().replaceAll('_', ' '))} {observation?.explorer && <a href={observation.explorer} target="_blank" rel="noreferrer">{tr("View transaction")}</a>}</p>}
-      {pending && <button type="button" disabled={liquidity.busy} onClick={() => void liquidity.observe()}>{tr("Observe existing transaction")}</button>}
+      {pending && <button type="button" disabled={liquidity.busy} onClick={() => void liquidity.observe()}>{tr("Observe existing transaction")}</button>}<PendingExecutionNote pending={pending}/><SolanaWalletGuardNote guard={attempt?.walletGuard}/>
       {record?.evidence && observation && effects && <section aria-label={tr("Liquidity result")} className="swap-result">
         <h3>{tr("Success")}</h3>
         <p>{tr(review?.operation === 'OPEN' ? `Position opened and independently reconciled. Deposited ${sol(effects.depositedA)} and ${usdc(effects.depositedB)}; refundable deposits ${sol(effects.rentPaidLamports)}.`

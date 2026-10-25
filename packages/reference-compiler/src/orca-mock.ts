@@ -3,6 +3,8 @@ import { sha256 } from '@noble/hashes/sha2.js';
 import { ORCA_WHIRLPOOLS_DEVNET as profile, solanaDevnetTokenByMint } from '@defi-workflow-engine/action-registry';
 import { associatedTokenAddress, base58Encode, decompileMessageV0, fromBase64, parseMessageV0, parseTransaction, publicKeyBytes, readU64, toBase64,
   u64Bytes, verifyEd25519, type SolanaInstruction } from './solana.js';
+import { LIGHTHOUSE_PROGRAM } from './solana-wallet-change.js';
+import { evaluateMockedLighthouse } from './lighthouse-mock.js';
 import { decodeOrcaSwapV2, orcaOracleAddress, orcaTickArrayAddress, orcaTickArrayStarts } from './orca-whirlpool.js';
 import { ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY as devnetLiquidity, type OrcaLiquidityProfile } from '@defi-workflow-engine/action-registry';
 import { decodeOrcaModifyLiquidity, decodeOrcaOpenPosition, orcaLiquidityAmounts, orcaSqrtPriceAtTick, orcaTickArrayStart, orcaLiquidityTickArray } from './orca-liquidity.js';
@@ -186,6 +188,14 @@ export function createMockedSolanaDevnetOrca(options: MockedOrcaOptions = {}) {
           if (from!.mint === WSOL) s.lamportsOf.set(source, (s.lamportsOf.get(source) ?? 0n) - amount);
           logs.push('Program log: Instruction: SwapV2', `Program ${P.token} invoke [2]`, `Program ${P.token} invoke [2]`);
           if (!options.noTradeEvent) logs.push(tradedLog(args.aToB, amount, actual));
+          return;
+        }
+        if (i.programId === LIGHTHOUSE_PROGRAM) {
+          // A wallet's Lighthouse assertion reads the account as the instructions before it left it; a failed assertion fails the transaction.
+          const token = s.tokens.get(a(0)), lamports = token ? s.lamportsOf.get(a(0)) ?? 0n : s.lamports.get(a(0));
+          try { evaluateMockedLighthouse(i.data, lamports === undefined ? null : { address: a(0), lamports, owner: token ? P.token : P.system, dataLength: token ? 165 : 0,
+            token: token ? { mint: token.mint, owner: token.owner, amount: token.amount, delegate: null, delegatedAmount: 0n } : null }); }
+          catch { fault({ Custom: 6001 }); }
           return;
         }
         fault('UnsupportedProgramId');

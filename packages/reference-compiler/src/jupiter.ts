@@ -5,7 +5,7 @@ import { readExactInputSwap, EXACT_INPUT_SWAP_ACTION, type SemanticWorkflow,
 import { associatedTokenAddress, findProgramAddress, compileMessageV0, decodeLookupTable, fromBase64,
   readU16, readU64, serializeMessageV0, serializeTransaction, sha256Hex, solanaAddress, toBase64,
   u32Bytes, type SolanaInstruction } from './solana.js';
-import { assertMessageRoundTrip, assertSolanaSwapReview, verifySignedSolanaSwap, buildSolanaSwapArtifacts, estimateFee, readSolanaAccounts, readSolanaSwapBalances, requireSolanaSwapRuntime,
+import { assertMessageRoundTrip, assertSolanaSwapReview, verifySignedSolanaSwap, type SignedSolanaTransaction, buildSolanaSwapArtifacts, estimateFee, readSolanaAccounts, readSolanaSwapBalances, requireSolanaSwapRuntime,
   rpcContextValue, setComputeUnitLimit, simulateSolanaMessage, solanaSwapArtifactHash, solanaSwapDeltas, solanaSwapHash, solanaTokenAmount, verifySolanaCluster,
   type SolanaBalances, type SolanaRouteStep, type SolanaRpc, type SolanaSwapQuote, type SolanaSwapSimulation } from './solana-swap.js';
 export { JUPITER_SOLANA_MAINNET, SOLANA_MAINNET_TOKENS } from '@defi-workflow-engine/action-registry';
@@ -249,7 +249,7 @@ export function assertJupiterReview(review: JupiterReview, workflow: SemanticWor
   assertSolanaSwapReview(review, workflow, owner, blockHeight, now, jupiterIntent, 'JUPITER');
 }
 
-/** The wallet must return exactly the reviewed message with a valid owner signature. Any modification fails closed. */
-export function verifySignedJupiterTransaction(review: JupiterReview, signedBase64: unknown): { signature: string; transaction: string } {
+/** The reviewed message (or it plus verified Lighthouse assertions) with a valid owner signature; anything else fails closed. */
+export function verifySignedJupiterTransaction(review: JupiterReview, signedBase64: unknown): SignedSolanaTransaction {
   return verifySignedSolanaSwap(review, signedBase64, 'JUPITER');
 }

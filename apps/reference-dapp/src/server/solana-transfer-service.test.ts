@@ -34,9 +34,11 @@ async function reviewed(s: Env, wf: SemanticWorkflow) {
 }
 
 describe('Solana transfer service lifecycle', () => {
-  it('holds the owner reservation until PREPARED is durable across concurrent runs', async () => {
+  it('never hands the same reviewed message to the wallet for two runs, even while the first is between its claim and PREPARED', async () => {
     const s = await setup(), wf = workflow(s.recipient, '1000000');
+    // Same workflow, same blockhash: byte-identical messages, i.e. one Solana transaction that could land only once.
     const a = await reviewed(s, wf), b = await reviewed(s, wf);
+    expect(b.review.messageHash).toBe(a.review.messageHash);
     const storage = createFileExecutionStorage(s.dir, 'SOLANA_TRANSFER_BUSY');
     let pause!: () => void, resume!: () => void;
     const paused = new Promise<void>(resolve => { pause = resolve; });
@@ -55,9 +57,15 @@ describe('Solana transfer service lifecycle', () => {
     finally { resume(); }
     await first;
     expect(second).toBeInstanceOf(Error);
-    expect((second as Error).message).toMatch(/SOLANA_TRANSFER_(BUSY|OWNER_ATTEMPT_IN_PROGRESS)/);
+    expect((second as Error).message).toMatch(/SOLANA_TRANSFER_(BUSY|DUPLICATE_TRANSACTION_SIMULATE_AGAIN)/);
     expect((await s.service.load(a.id)).attempt?.state).toBe('PREPARED');
     expect((await s.service.load(b.id)).attempt).toBeNull();
+    await expect(s.service.begin(b.id, s.wallet.owner, wf)).rejects.toThrow('SOLANA_TRANSFER_DUPLICATE_TRANSACTION_SIMULATE_AGAIN');
+    // The intentional identical transfer: a fresh Simulate on a new blockhash is a separate transaction, prepared while the first is pending.
+    s.chain.advance(1);
+    const c = await reviewed(s, wf);
+    expect(c.review.messageHash).not.toBe(a.review.messageHash);
+    expect((await s.service.begin(c.id, s.wallet.owner, wf)).record.attempt?.state).toBe('PREPARED');
     expect(s.chain.state.sent).toHaveLength(0);
   });
   it('re-verifies the RPC cluster before the wallet request and before broadcasting reviewed bytes', async () => {
@@ -202,10 +210,12 @@ describe('Solana transfer service lifecycle', () => {
     await s.service.submit(record.id, s.wallet.sign(begin.unsignedTransaction));
     s.chain.advance(200); s.fault.method = 'getSignatureStatuses'; s.fault.malformed = malformed;
     expect(await s.make().observe(record.id)).toMatchObject({ verdict: 'PENDING', attempt: { state: 'SUBMISSION_RESULT_UNKNOWN' } });
+    // The uncertain transfer keeps being observed by its own signature; an independent transfer is not blocked by it.
     const other = await reviewed(s, wf);
-    await expect(s.service.begin(other.id, s.wallet.owner, wf)).rejects.toThrow('SOLANA_TRANSFER_OWNER_ATTEMPT_IN_PROGRESS');
+    expect((await s.service.begin(other.id, s.wallet.owner, wf)).record.attempt?.state).toBe('PREPARED');
     s.fault.method = '';
     expect(await s.make().observe(record.id)).toMatchObject({ verdict: 'RECONCILED', attempt: { state: 'CONFIRMED' } });
+    expect((await s.service.load(other.id)).attempt).toMatchObject({ state: 'PREPARED', signature: null });
     await expect(s.make().submit(record.id, s.wallet.sign(begin.unsignedTransaction))).rejects.toThrow('SOLANA_TRANSFER_WALLET_HANDOFF_NOT_AUTHORIZED');
     expect(s.chain.state.sent).toHaveLength(1);
   });
@@ -218,24 +228,33 @@ describe('Solana transfer service lifecycle', () => {
     delete options.genesisHash;
     expect(await s.service.observe(record.id)).toMatchObject({ verdict: 'NOT_EXECUTED' });
   });
-  it('keeps a divergent transfer reserved for human reconciliation instead of permitting another transfer', async () => {
+  it('keeps a divergent transfer for human reconciliation while an independent transfer proceeds', async () => {
     const s = await setup(), wf = workflow(s.recipient, '1000000'), record = await reviewed(s, wf);
     const begin = await s.service.begin(record.id, s.wallet.owner, wf);
     const sent = await s.service.submit(record.id, s.wallet.sign(begin.unsignedTransaction));
     const landed = s.chain.state.transactions.get(sent.attempt!.signature!)!;
     landed.post[landed.keys.indexOf(s.recipient)]! += 1n;
     expect(await s.service.observe(record.id)).toMatchObject({ verdict: 'DIVERGENT', attempt: { state: 'RECONCILIATION_REQUIRED' } });
-    const other = await reviewed(s, wf);
-    await expect(s.service.begin(other.id, s.wallet.owner, wf)).rejects.toThrow('SOLANA_TRANSFER_OWNER_ATTEMPT_IN_PROGRESS');
+    // The same message can never be taken over: it was signed and landed, and stays bound to the divergent run.
+    const same = await reviewed(s, wf);
+    await expect(s.service.begin(same.id, s.wallet.owner, wf)).rejects.toThrow('SOLANA_TRANSFER_DUPLICATE_TRANSACTION_SIMULATE_AGAIN');
+    s.chain.advance(1);
+    const other = await reviewed(s, wf), next = await s.service.begin(other.id, s.wallet.owner, wf);
+    expect((await s.service.submit(other.id, s.wallet.sign(next.unsignedTransaction))).attempt?.state).toBe('PENDING');
+    expect(await s.service.observe(other.id)).toMatchObject({ verdict: 'RECONCILED' });
+    expect(await s.service.load(record.id)).toMatchObject({ verdict: 'DIVERGENT', attempt: { state: 'RECONCILIATION_REQUIRED' } });
+    expect(s.chain.state.sent).toHaveLength(2);
   });
-  it('recovers a reservation persisted before PREPARED without producing a duplicate attempt', async () => {
+  it('recovers a message claim persisted before PREPARED without producing a duplicate attempt', async () => {
     const s = await setup(), wf = workflow(s.recipient, '1000000'), record = await reviewed(s, wf);
-    await writeFile(join(s.dir, `${s.wallet.owner}.soltx-lease`), record.id + '\n');
+    // A crash between the durable claim and PREPARED; a pre-hotfix owner lease file is simply ignored.
+    await writeFile(join(s.dir, `${record.review.messageHash.slice(2)}.soltx-message`), record.id + '\n');
+    await writeFile(join(s.dir, `${s.wallet.owner}.soltx-lease`), createMockedSolanaWallet().owner + '\n');
     expect((await s.make().begin(record.id, s.wallet.owner, wf)).record.attempt?.state).toBe('PREPARED');
     await expect(s.make().begin(record.id, s.wallet.owner, wf)).rejects.toThrow('SOLANA_TRANSFER_EXISTING_ATTEMPT_OBSERVE_ONLY');
     expect(s.chain.state.sent).toHaveLength(0);
   });
-  it('re-checks balances before the wallet is asked and keeps one unresolved transfer per owner', async () => {
+  it('re-checks balances before the wallet is asked; independent transfers of the same owner are prepared side by side', async () => {
     const s = await setup(), wf = workflow(s.recipient, '1000000', usdc);
     const record = await reviewed(s, wf);
     // The tokens moved elsewhere after Review: nothing is prepared or signed.
@@ -243,8 +262,14 @@ describe('Solana transfer service lifecycle', () => {
     await expect(s.service.begin(record.id, s.wallet.owner, wf)).rejects.toThrow('SOLANA_TRANSFER_INSUFFICIENT_TOKEN_BALANCE');
     s.chain.tokenAccount(s.chain.ata(s.wallet.owner, USDC.mint))!.amount = 40_000_000n;
     const first = await reviewed(s, workflow(s.recipient, '1000')), second = await reviewed(s, workflow(s.recipient, '2000'));
-    await s.service.begin(first.id, s.wallet.owner, workflow(s.recipient, '1000'));
-    await expect(s.service.begin(second.id, s.wallet.owner, workflow(s.recipient, '2000'))).rejects.toThrow('SOLANA_TRANSFER_OWNER_ATTEMPT_IN_PROGRESS');
+    const one = await s.service.begin(first.id, s.wallet.owner, workflow(s.recipient, '1000'));
+    const two = await s.service.begin(second.id, s.wallet.owner, workflow(s.recipient, '2000'));
+    // Both signed and broadcast while neither is final: two distinct signatures, each reconciled by its own run.
+    const a = await s.service.submit(first.id, s.wallet.sign(one.unsignedTransaction)), b = await s.service.submit(second.id, s.wallet.sign(two.unsignedTransaction));
+    expect([a.attempt?.state, b.attempt?.state]).toEqual(['PENDING', 'PENDING']);
+    expect(a.attempt?.signature).not.toBe(b.attempt?.signature);
+    expect((await s.service.observe(second.id)).observations.at(-1)).toMatchObject({ verdict: 'RECONCILED', signature: b.attempt?.signature, amountSent: '2000', amountReceived: '2000' });
+    expect((await s.service.observe(first.id)).observations.at(-1)).toMatchObject({ verdict: 'RECONCILED', signature: a.attempt?.signature, amountSent: '1000', amountReceived: '1000' });
   });
   it('refuses the wrong wallet and keeps real-funds execution behind the deployment opt-in', async () => {
     const s = await setup({}, { executionEnabled: false }), wf = workflow(s.recipient, '1000000');
