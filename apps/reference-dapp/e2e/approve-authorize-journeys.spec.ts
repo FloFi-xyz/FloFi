@@ -65,7 +65,10 @@ async function proposal(browser: Browser, request: APIRequestContext, presentati
   await page.goto(url);
   const region = page.getByRole('region', { name: `Proposal from ${CLIENT_NAME}` });
   await expect(region).toContainText('Nothing is authorized yet.');
-  await expect(region.getByRole('checkbox')).toBeChecked();
+  await expect(region.getByRole('checkbox', { name: `Share status and evidence with ${CLIENT_NAME}` })).toBeChecked();
+  // The handoff UI stays a compact, neutral provenance strip: no expanded revision dump above the Canvas or signing surface.
+  await expect(region.locator('.approval-summary,.approval-explanation')).toHaveCount(0);
+  await expect(region.locator('.approval-details')).not.toHaveAttribute('open', '');
   // No Credentials step and no extra Mainnet checkbox on either presentation.
   await expect(page.getByRole('checkbox', { name: /I understand/ })).toHaveCount(0);
   return { owner, context, unexpected, host, panel, page, region, errors,
