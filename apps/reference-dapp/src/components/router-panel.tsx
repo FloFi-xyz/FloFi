@@ -64,7 +64,8 @@ export function RouterForm({ nodeId, onDone, network: initialNetwork }: { nodeId
   const chosen = { ...input, ...(nodeId ? bridgeNetworkInputs[nodeId] : {}) }, routed = routerNetworkOfInput(chosen);
   const network: RouterNetwork | null = !environment ? null : routed && ROUTER_NETWORK_OPTIONS[routed].environment === environment ? routed : environment;
   const option = network ? ROUTER_NETWORK_OPTIONS[network] : null, choices = environment && option ? routerChainChoices(environment, option.source) : null;
-  const fields = routerInputForNetworks({ ...chosen, amount: nodeId ? amountInputs[nodeId] ?? input.amount : input.amount }, option ?? chosen);
+  // A Canvas draft may briefly carry a Solana label; only a certified Router pair reaches the form fields.
+  const fields = option ? routerInputForNetworks({ ...input, amount: nodeId ? amountInputs[nodeId] ?? input.amount : input.amount }, option) : input;
   const l = LABELS[network ?? existing?.network ?? initialNetwork ?? 'mainnet'];
   const chooseSource = (source: RouterSource) => {
     if (!environment) return;

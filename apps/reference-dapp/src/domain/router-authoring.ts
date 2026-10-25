@@ -60,7 +60,8 @@ export const routerDisabledCode = (network: RouterNetwork): string => network in
 /** The router networks (pairs) of a wallet environment: Base ⇄ Arbitrum and the Robinhood routes on mainnet, the test pair on testnet. */
 export const routerNetworksOf = (environment: 'mainnet' | 'testnet'): readonly RouterNetwork[] =>
   (Object.keys(ROUTER_NETWORK_OPTIONS) as RouterNetwork[]).filter(network => ROUTER_NETWORK_OPTIONS[network].environment === environment);
-export function routerNetworkOfInput(input: Pick<RouterBridgeInput, 'source' | 'destination'>): RouterNetwork | null {
+/** Labels may include Canvas-only endpoints (e.g. Solana); an unmatched pair is null — never a certified Router route. */
+export function routerNetworkOfInput(input: { readonly source: string; readonly destination: string }): RouterNetwork | null {
   return (Object.keys(ROUTER_NETWORK_OPTIONS) as RouterNetwork[]).find(n => ROUTER_NETWORK_OPTIONS[n].source === input.source &&
     ROUTER_NETWORK_OPTIONS[n].destination === input.destination) ?? null;
 }
@@ -68,18 +69,20 @@ export function routerNetworkOfInput(input: Pick<RouterBridgeInput, 'source' | '
  * BUILD-RH-002: the chain choices of an environment's routes for the Canvas pickers — every source, and the destinations that form a
  * supported pair with `source` (Base → Arbitrum One or Robinhood Chain; Arbitrum → Robinhood Chain or Base; Robinhood Chain → Base or Arbitrum).
  */
-export function routerChainChoices(environment: 'mainnet' | 'testnet', source?: RouterSource): { sources: RouterSource[]; destinations: RouterDestination[] } {
+export function routerChainChoices(environment: 'mainnet' | 'testnet', source?: string): { sources: RouterSource[]; destinations: RouterDestination[] } {
   const options = routerNetworksOf(environment).map(n => ROUTER_NETWORK_OPTIONS[n]);
   return { sources: [...new Set(options.map(o => o.source))], destinations: [...new Set(options.filter(o => source === undefined || o.source === source).map(o => o.destination))] };
 }
 /** The assets of a chosen route: the pair's own source and destination tokens (USDC → USDG into Robinhood Chain), or null when unsupported. */
-export function routerTokensOf(networks: Pick<RouterBridgeInput, 'source' | 'destination'>): { token: string; destinationToken: string } | null {
+export function routerTokensOf(networks: { readonly source: string; readonly destination: string }): { token: string; destinationToken: string } | null {
   const network = routerNetworkOfInput(networks);
   return network ? { token: ROUTER_NETWORK_OPTIONS[network].pair.source.symbol, destinationToken: ROUTER_NETWORK_OPTIONS[network].pair.destination.symbol } : null;
 }
-/** Re-targets an input to other chains; the token follows the chosen pair (an unsupported pair keeps it and fails at node creation). */
-export function routerInputForNetworks(input: RouterBridgeInput, networks: Pick<RouterBridgeInput, 'source' | 'destination'>): RouterBridgeInput {
-  return { ...input, source: networks.source, destination: networks.destination, token: routerTokensOf(networks)?.token ?? input.token };
+/** Re-targets an input to other chains; the token follows the chosen pair (an unsupported pair keeps the labels and fails at node creation). */
+export function routerInputForNetworks(input: RouterBridgeInput, networks: { readonly source: string; readonly destination: string }): RouterBridgeInput {
+  // Canvas drafts may carry Solana or a half-chosen pair; createRouterNode refuses anything that is not a certified Router route.
+  return { ...input, source: networks.source as RouterSource, destination: networks.destination as RouterDestination,
+    token: routerTokensOf(networks)?.token ?? input.token };
 }
 const routingOf = (providers: readonly string[]): RouterRouting | null =>
   (Object.keys(ROUTER_ROUTING) as RouterRouting[]).find(k => ROUTER_ROUTING[k].join() === providers.join()) ?? null;

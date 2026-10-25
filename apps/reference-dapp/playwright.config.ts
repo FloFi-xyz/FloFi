@@ -94,6 +94,12 @@ if (process.env.GRYLOO_ROUTER_E2E && !routerHarness) throw new Error('Router E2E
 const routerJournal = process.env.GRYLOO_ROUTER_JOURNAL ?? join(tmpdir(), 'gryloo-router-' + Date.now() + '-' + process.pid);
 if (routerHarness) process.env.GRYLOO_ROUTER_JOURNAL = routerJournal;
 // BUILD-JOURNEY-001: the permissionless testnet journey runs only on the MOCKED loopback Base Sepolia/Arbitrum Sepolia chains and providers.
+// BUILD-CROSSCHAIN-UNIVERSAL-001: the universal Cross-chain Router on its MOCKED loopback chains (five networks) and Relay double.
+const universalHarness = process.env.GRYLOO_UNIVERSAL_E2E === 'MOCKED_LOOPBACK_ONLY';
+if (process.env.GRYLOO_UNIVERSAL_E2E && !universalHarness) throw new Error('Universal router E2E permits only the MOCKED loopback harness');
+const universalJournal = process.env.GRYLOO_UNIVERSAL_ROUTER_JOURNAL ?? join(tmpdir(), 'gryloo-universal-' + Date.now() + '-' + process.pid);
+if (universalHarness) process.env.GRYLOO_UNIVERSAL_ROUTER_JOURNAL = universalJournal;
+
 const routerTestnetHarness = process.env.GRYLOO_ROUTER_TESTNET_E2E === 'MOCKED_LOOPBACK_ONLY';
 if (process.env.GRYLOO_ROUTER_TESTNET_E2E && !routerTestnetHarness) throw new Error('Router testnet E2E permits only the MOCKED loopback harness');
 const routerTestnetJournal = process.env.GRYLOO_ROUTER_TESTNET_JOURNAL ?? join(tmpdir(), 'gryloo-router-testnet-' + Date.now() + '-' + process.pid);
@@ -263,6 +269,7 @@ export default defineConfig({
     ...(robinhoodHarness || cloudRuntime ? [{ command: 'node e2e/robinhood-transfer-harness.mjs --serve', url: 'http://127.0.0.1:8553', reuseExistingServer: false, timeout: 30_000 }] : []),
     ...(uniswapHarness ? [{ command: 'node e2e/uniswap-liquidity-serve.ts', url: 'http://127.0.0.1:8556', reuseExistingServer: false, timeout: 30_000 }] : []),
     ...(routerHarness || routerTestnetHarness || mcpHarness ? [{ command: 'node e2e/router-serve.ts', url: 'http://127.0.0.1:8557', reuseExistingServer: false, timeout: 30_000 }] : []),
+    ...(universalHarness ? [{ command: 'node e2e/universal-serve.ts', url: 'http://127.0.0.1:8566', reuseExistingServer: false, timeout: 30_000 }] : []),
     ...(cardHarness ? [{ command: 'node e2e/card-provider-harness.mjs --serve', url: 'http://127.0.0.1:8555/__harness/health', reuseExistingServer: false, timeout: 30_000 }] : []),
     ...(channelHarness ? [{ command: 'node e2e/telegram-bot-serve.ts', url: 'http://127.0.0.1:8559/__flofi/calls', reuseExistingServer: false, timeout: 30_000 }] : []),
     ...(delegationHarness ? [{ command: 'node e2e/delegation-chain-serve.ts', url: 'http://127.0.0.1:8560', reuseExistingServer: false, timeout: 30_000 }] : []),
@@ -293,6 +300,7 @@ export default defineConfig({
       ...(uniswapHarness ? { GRYLOO_UNISWAP_LIQUIDITY_HARNESS: 'MOCKED_LOOPBACK_ONLY', GRYLOO_UNISWAP_LIQUIDITY_JOURNAL: uniswapJournal } : {}),
       ...(routerHarness ? { GRYLOO_ROUTER_HARNESS: 'MOCKED_LOOPBACK_ONLY', GRYLOO_ROUTER_JOURNAL: routerJournal } : {}),
       ...(routerTestnetHarness ? { GRYLOO_ROUTER_TESTNET_HARNESS: 'MOCKED_LOOPBACK_ONLY', GRYLOO_ROUTER_TESTNET_JOURNAL: routerTestnetJournal } : {}),
+      ...(universalHarness ? { GRYLOO_UNIVERSAL_ROUTER_HARNESS: 'MOCKED_LOOPBACK_ONLY', GRYLOO_UNIVERSAL_ROUTER_JOURNAL: universalJournal } : {}),
       ...(copilot === 'replay' ? { FLOFI_COPILOT: 'replay' } : {}),
       // The payment provider's server-only App ID is present (payments stay off) so the card spec can prove it is never served.
       ...(cardHarness ? { GRYLOO_CARD_HARNESS: 'MOCKED_LOOPBACK_ONLY', WOOVI_APP_ID: SERVER_ONLY_WOOVI_APP_ID, WOOVI_ENVIRONMENT: 'sandbox' } : {}),

@@ -3,7 +3,7 @@ import { editorReducer } from './editor';
 import { describe, expect, it } from 'vitest';
 import { createBaseSepoliaReviewContext, validateAuthoringWorkflow } from '@defi-workflow-engine/reference-linter';
 import { canvasAddCommand } from './canvas-authoring';
-import { canvasAmountCommand, canvasAmountMessage, canvasAuthoringIncomplete, amountCommandTarget, setupReviewValue, canvasAmountReviewValue, bridgeSetupNetworks, CANVAS_BRIDGE_NETWORK_OPTIONS } from './canvas-action-setup';
+import { canvasAmountCommand, canvasAmountMessage, canvasAuthoringIncomplete, amountCommandTarget, setupReviewValue, canvasAmountReviewValue, bridgeSetupNetworks, bridgePairLabel, CANVAS_BRIDGE_NETWORK_OPTIONS } from './canvas-action-setup';
 import { ROUTER_NETWORK_OPTIONS, routerDetails, createRouterNode } from './router-authoring';
 import { editorHistoryReducer, initialEditorHistory, type EditorHistory } from './editor-history';
 
@@ -311,8 +311,8 @@ describe('Bridge card networks use existing router authoring capabilities', () =
     authoringAmount: state.actionSetup?.id === id ? setupReviewValue(state.actionSetup) : canvasAmountReviewValue(state.amountInputs[id], state.bridgeNetworkInputs[id])! });
 
   it('offers the existing endpoint catalog and changes only the chosen side of a new card', () => {
-    expect(CANVAS_BRIDGE_NETWORK_OPTIONS.source).toEqual(Object.values(ROUTER_NETWORK_OPTIONS).map(option => option.source));
-    expect(CANVAS_BRIDGE_NETWORK_OPTIONS.destination).toEqual(Object.values(ROUTER_NETWORK_OPTIONS).map(option => option.destination));
+    expect(CANVAS_BRIDGE_NETWORK_OPTIONS.source).toEqual([...Object.values(ROUTER_NETWORK_OPTIONS).map(option => option.source), 'Solana']);
+    expect(CANVAS_BRIDGE_NETWORK_OPTIONS.destination).toEqual([...Object.values(ROUTER_NETWORK_OPTIONS).map(option => option.destination), 'Solana']);
     const initial = input(start('bridge'), '2.5'), source = choose(initial, { source: 'Base' });
     expect(source.actionSetup).toMatchObject({ amount: '2.5', networks: { source: 'Base', destination: 'Arbitrum Sepolia' } });
     expect(source.editor.workflow).toBe(initial.editor.workflow);
@@ -323,6 +323,22 @@ describe('Bridge card networks use existing router authoring capabilities', () =
     const accepted = accept(destination);
     expect(routerDetails(financial(accepted)[0]!)).toMatchObject({ source: 'Base', destination: 'Arbitrum', amount: '2.5' });
     expect(accepted.editor.error).toBeNull(); expect(incomplete(accepted)).toBe(false);
+  });
+
+  it('BUILD-CROSSCHAIN-UNIVERSAL-001: Solana on a new Bridge card authors a universal bridge (certified Router pairs stay ADD_ROUTER_BRIDGE)', () => {
+    const initial = input(start('bridge'), '12');
+    const solana = editorHistoryReducer(initial, { type: 'EDIT_BRIDGE_NETWORKS', id: initial.actionSetup!.id, patch: { source: 'Solana' }, context });
+    expect(solana.actionSetup).toMatchObject({ amount: '12', networks: { source: 'Solana', destination: 'Arbitrum Sepolia' } });
+    // Half-chosen Solana drafts must not crash the Canvas label (ROUTER_PAIR_UNSUPPORTED must not escape).
+    expect(bridgePairLabel({ source: 'Solana', destination: 'Arbitrum Sepolia' })).toBe('USDC → USDC');
+    // Destination must still form a universal pair (any EVM mainnet label the picker keeps, or Base after the card aligns).
+    const aligned = editorHistoryReducer(solana, { type: 'EDIT_BRIDGE_NETWORKS', id: solana.actionSetup!.id, patch: { destination: 'Base' }, context });
+    expect(aligned.actionSetup).toMatchObject({ networks: { source: 'Solana', destination: 'Base' } });
+    expect(bridgePairLabel({ source: 'Solana', destination: 'Base' })).toBe('USDC → USDC');
+    expect(review(aligned)).toMatchObject({ type: 'ADD_UNIVERSAL_BRIDGE', input: { source: 'solana', destination: 'base', amount: '12', inputAsset: 'USDC', outputAsset: 'USDC' } });
+    const accepted = accept(aligned);
+    expect(accepted.editor.error).toBeNull(); expect(incomplete(accepted)).toBe(false);
+    expect(accepted.editor.workflow.nodes.some(node => node.adapterConstraints.adapters.some(a => a.id === 'flofi.router.universal'))).toBe(true);
   });
 
   it('rejects stale network reviews even when the amount did not change', () => {
@@ -338,7 +354,8 @@ describe('Bridge card networks use existing router authoring capabilities', () =
   it('rejects unsupported endpoints, wrong-side choices and network edits on other actions', () => {
     const initial = start('bridge');
     // BUILD-RH-002: Arbitrum is now a source (→ Robinhood Chain) and Base a destination (Robinhood Chain →); other chains stay unsupported.
-    for (const source of ['Optimism', 'Solana']) expect(choose(initial, { source: source as 'Base' })).toBe(initial);
+    // BUILD-CROSSCHAIN-UNIVERSAL-001: Solana is offered on new Bridge cards (universal); Optimism remains unsupported.
+    for (const source of ['Optimism']) expect(choose(initial, { source: source as 'Base' })).toBe(initial);
     for (const destination of ['Optimism']) expect(choose(initial, { destination: destination as 'Arbitrum' })).toBe(initial);
     const other = start('swap'); expect(choose(other, { source: 'Base' })).toBe(other);
     expect(choose(initial, { source: 'Base' }, 'other-card')).toBe(initial);

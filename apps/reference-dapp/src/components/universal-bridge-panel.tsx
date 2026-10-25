@@ -223,11 +223,12 @@ export function UniversalBridgePanel({ view }: { view: 'simulate' | 'execute' })
       <dt>{tr('Review valid')}</dt><dd>{fresh > 0 ? `${fresh}s` : tr('no longer — get a fresh route')}</dd>
       <dt>{tr('Strategy Manifest')}</dt><dd><code>{r.artifacts.hashes.manifest}</code></dd>
     </dl>}
-    {view === 'execute' && record && <>
-      <ol className="lifecycle" aria-label={tr('Bridge lifecycle')}>{(ROUTER_PHASES.includes(record.phase) && !LIFECYCLE.includes(record.phase)
+    {/* Engineering diagnostic lifecycle (Canvas Authorize stays blocked for MOCKED): Accept / Execute / Observe on both stages. */}
+    {record && !router.retired && <>
+      {view === 'execute' && <ol className="lifecycle" aria-label={tr('Bridge lifecycle')}>{(ROUTER_PHASES.includes(record.phase) && !LIFECYCLE.includes(record.phase)
         ? [...LIFECYCLE.slice(0, LIFECYCLE.indexOf('SOURCE_CONFIRMED')), record.phase] : LIFECYCLE).map(p =>
-        <li key={p} aria-current={record.phase === p ? 'step' : undefined}>{tr(p.toLowerCase().replaceAll('_', ' '))}</li>)}</ol>
-      {record.phase === 'PREPARED' && !record.requote && record.verdict === 'PENDING' && !router.retired && fresh > 0 && !pending && <>
+        <li key={p} aria-current={record.phase === p ? 'step' : undefined}>{tr(p.toLowerCase().replaceAll('_', ' '))}</li>)}</ol>}
+      {record.phase === 'PREPARED' && !record.requote && record.verdict === 'PENDING' && fresh > 0 && !pending && <>
         <p>{tr('Accepting authorizes only the wallet requests listed in this Review. Each request still needs your signature.')}</p>
         <button type="button" disabled={router.busy} onClick={() => void router.review()}>{tr('Accept route review')}</button></>}
       {authorized && !router.executionEnabled && <p role="status">{tr(MESSAGES.UNIVERSAL_EXECUTION_NOT_ENABLED!)}</p>}

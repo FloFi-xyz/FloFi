@@ -29,19 +29,25 @@ export type CanvasActionSetup = { readonly id: string; readonly amount: string; 
  * BUILD-CROSSCHAIN-UNIVERSAL-001: a new Bridge card may also carry the label `Solana` (only the card's pickers offer it): such a pair is a universal
  * bridge, recognized before any certified Router command is built. Certified Router cards keep their own pairs.
  */
-export type CanvasBridgeNetworks = Pick<RouterBridgeInput, 'source' | 'destination'>;
-const routerNetworks = (networks: CanvasBridgeNetworks) => networks;
+export type CanvasBridgeNetworks = { source: RouterBridgeInput['source'] | 'Solana'; destination: RouterBridgeInput['destination'] | 'Solana' };
+const routerNetworks = (networks: CanvasBridgeNetworks): Pick<RouterBridgeInput, 'source' | 'destination'> => {
+  if (networks.source === 'Solana' || networks.destination === 'Solana') throw new Error('ROUTER_PAIR_UNSUPPORTED');
+  return { source: networks.source, destination: networks.destination };
+};
 export type CanvasBridgeNetworkInputs = Readonly<Record<string, CanvasBridgeNetworks>>;
 /** UX-001: an authored Send card's edited "To" text (like an amount draft); Apply commits it to that node's canonical `recipient`. */
 export type CanvasRecipientInputs = Readonly<Record<string, string>>;
+/** Certified Router endpoints plus Solana (universal Bridge cards only; an authored Router card's picker never lists it). */
 export const CANVAS_BRIDGE_NETWORK_OPTIONS = {
-  source: Object.values(ROUTER_NETWORK_OPTIONS).map(option => option.source),
-  destination: Object.values(ROUTER_NETWORK_OPTIONS).map(option => option.destination),
+  source: [...Object.values(ROUTER_NETWORK_OPTIONS).map(option => option.source), 'Solana' as const],
+  destination: [...Object.values(ROUTER_NETWORK_OPTIONS).map(option => option.destination), 'Solana' as const],
 } as const;
-/** "USDC → USDC", or (BUILD-RH-002) "USDC → USDG" into Robinhood Chain; an unsupported chain pair keeps the neutral USDC wording. */
+/** "USDC → USDC", or (BUILD-RH-002) "USDC → USDG" into Robinhood Chain; Solana pairs use the universal stablecoin defaults; anything else stays neutral USDC. */
 export function bridgePairLabel(networks: CanvasBridgeNetworks): string {
-  const tokens = routerTokensOf(routerNetworks(networks)), universal = universalCanvasPair(networks);
-  if (!tokens && universal) { const input = universalCanvasInput(universal, '1'); return `${input.inputAsset} → ${input.outputAsset}`; }
+  // Universal first: `routerNetworks` refuses Solana, and a half-chosen draft must never crash the Canvas.
+  const universal = universalCanvasPair(networks);
+  if (universal) { const input = universalCanvasInput(universal, '1'); return `${input.inputAsset} → ${input.outputAsset}`; }
+  const tokens = routerTokensOf(networks);
   return tokens ? `${tokens.token} → ${tokens.destinationToken}` : 'USDC → USDC';
 }
 export function bridgeSetupNetworks(setup: Extract<CanvasActionSetup, { action: 'bridge' }>): CanvasBridgeNetworks {
@@ -197,10 +203,12 @@ export function setupSummary(setup: CanvasActionSetup, context: ReviewContext) {
     amount: `${setup.input.maxUsdc} USDC + ${setup.input.maxWeth} WETH`,
     liquidityValues: [{ amount: setup.input.maxUsdc, token: 'USDC' }, { amount: setup.input.maxWeth, token: 'WETH' }],
     detail: undefined, bridgePair: undefined, linked: false, risk: undefined };
+  const bridge = setup.action === 'bridge' ? bridgeSetupNetworks(setup) : null;
+  const universal = bridge ? universalCanvasPair(bridge) : null;
   return { action: setup.action === 'swap' ? 'Swap' : setup.action === 'bridge' ? 'Bridge' : setup.action === 'transfer' ? 'Send' : setup.action[0]!.toUpperCase() + setup.action.slice(1),
-    provider: setup.action === 'swap' ? 'Uniswap' : setup.action === 'bridge' ? 'Router' : 'Aave V3',
-    chain: setup.action === 'swap' ? shellChainLabel(context.assets.USDC.asset.chainId) : setup.action === 'bridge' ? `${bridgeSetupNetworks(setup).source} → ${bridgeSetupNetworks(setup).destination}` : 'Base Sepolia',
-    amount: `${setup.amount || '0'} ${setup.action === 'swap' ? inputSymbol(setup.direction ?? 'USDC_TO_WETH') : setup.action === 'bridge' ? routerTokensOf(bridgeSetupNetworks(setup))?.token ?? 'USDC' : 'USDC'}`,
+    provider: setup.action === 'swap' ? 'Uniswap' : setup.action === 'bridge' ? (universal ? 'Universal Router' : 'Router') : 'Aave V3',
+    chain: setup.action === 'swap' ? shellChainLabel(context.assets.USDC.asset.chainId) : bridge ? `${bridge.source} → ${bridge.destination}` : 'Base Sepolia',
+    amount: `${setup.amount || '0'} ${setup.action === 'swap' ? inputSymbol(setup.direction ?? 'USDC_TO_WETH') : bridge ? (universal ? universalCanvasInput(universal, setup.amount || '0').inputAsset : routerTokensOf(bridge)?.token) ?? 'USDC' : 'USDC'}`,
     detail: setup.action === 'swap' ? directionLabel(setup.direction ?? 'USDC_TO_WETH') : undefined,
-    bridgePair: setup.action === 'bridge' ? bridgePairLabel(bridgeSetupNetworks(setup)) : undefined, linked: false, risk: undefined };
+    bridgePair: bridge ? bridgePairLabel(bridge) : undefined, linked: false, risk: undefined };
 }
