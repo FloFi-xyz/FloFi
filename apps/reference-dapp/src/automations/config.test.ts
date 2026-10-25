@@ -8,7 +8,7 @@ import { handleAutomationDispatch, handleAutomationHealth } from './http.ts';
 import type { OccurrenceRecord, RuleRecord } from './store.ts';
 
 const SECRET = randomBytes(32).toString('hex');
-const base = (patch: Record<string, string | undefined> = {}) => ({ FLOFI_AUTOMATIONS: 'enabled', FLOFI_AUTOMATION_SECRET: SECRET, FLOFI_PUBLIC_ORIGIN: 'https://flofi.test', ...patch });
+const base = (patch: Record<string, string | undefined> = {}) => ({ FLOFI_AUTOMATIONS: 'enabled', FLOFI_AUTOMATION_SECRET: SECRET, FLOFI_PUBLIC_ORIGIN: 'https://flofi.xyz', ...patch });
 const reason = (env: Record<string, string | undefined>) => { const c = readAutomationConfig(env); return c.enabled ? 'ENABLED' : 'reason' in c ? c.reason : c.code; };
 const FEED = '0x' + 'ab'.repeat(20);
 

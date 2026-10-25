@@ -26,6 +26,7 @@ import { assertMcpHarness, CLIENT_NAME, connectViaBrowser, hostLog, mcpClient, o
 import { routerControl } from './router-fixtures';
 import { installLendingWallet, LENDING_OWNER, lendingRpc, lendingSends } from './lending-fixtures';
 import { devnetControl, devnetPanel, installDevnetWallet } from './solana-devnet-fixtures';
+import { panelHtml } from '../src/mcp/app/panel';
 
 const PANEL_URI = 'ui://flofi/approval-panel.html';
 /** The newest durable run of one flow owned by one wallet, read from the disposable loopback database. */
@@ -289,5 +290,75 @@ test.describe('BUILD-MCP-002 in-chat execution (mocked MCP Apps host)', () => {
     expect(JSON.stringify(refused)).not.toContain('/approve#');
     expect(unexpected).toEqual([]);
     await context.close();
+  });
+});
+
+test.describe('BUILD-MCP-LINK-INTEGRITY-P0 panel navigation', () => {
+  const origin = 'https://flofi.xyz', approvalId = 'apr_' + 'a'.repeat(26), secret = 'flofi_hs_' + 'x'.repeat(43);
+  const publicUrl = `${origin}/approve#${approvalId}`, privateUrl = `${origin}/approve#${secret}`;
+  const approved = { ok: true, approvalId, approvalUrl: publicUrl, workflowHash: '0x' + '1'.repeat(64), steps: [], status: 'PENDING', authority: 'NONE' };
+  const html = () => panelHtml({ origin, inFrameProbeHosts: [] });
+  // A protocol host double supplies deliberately hostile results. This tests FloFi's UI, not the honesty of a real host/LLM.
+  const fakeClient = (result: Record<string, unknown> = {}) => ({
+    call: async () => result, tool: async () => result, toolResult: async () => ({ structuredContent: result }),
+  });
+
+  test('no tool result, failed tools and invented links produce no CTA; a new failure clears the old CTA', async ({ context }) => {
+    const hostile = ['https://www.flo.finance/?utm_source=chatgpt.com', 'https://flofi.xyz.evil.test/approve', 'https://fl0fi.xyz/approve',
+      'https://flofı.xyz/approve', 'http://flofi.xyz/approve', 'javascript:alert(1)', 'data:text/html,hi', 'https://[bad',
+      `https://user@flofi.xyz/approve#${approvalId}`, `https://flofi.xyz/x/../approve#${approvalId}`,
+      `${origin}/approve?redirect=https://flo.finance#${approvalId}`, `${origin}/approve#apr_${'b'.repeat(26)}`, `${origin}/approve#fabricated`];
+    const invalid = [{}, { structuredContent: { ...approved }, isError: true },
+      ...hostile.map(approvalUrl => ({ structuredContent: { ...approved, approvalUrl } })),
+      { structuredContent: approved, _meta: { 'flofi/approval': { approvalUrl: 'https://flo.finance/approve' } } }];
+    for (const result of invalid) {
+      const page = await context.newPage();
+      const panel = await openHost(page, fakeClient(), html(), {}, result);
+      await expect.poll(async () => (await hostLog(page)).initialized).toBe(true);
+      await expect(panel.getByRole('button', { name: 'Authorize', exact: true })).toHaveCount(0);
+      await expect(panel.locator('code')).toHaveCount(0);
+      expect((await hostLog(page)).openLinks).toEqual([]);
+      await page.close();
+    }
+    const page = await context.newPage();
+    const panel = await openHost(page, fakeClient(), html(), {}, { structuredContent: approved });
+    await expect(panel.getByRole('button', { name: 'Authorize', exact: true })).toBeVisible();
+    await page.evaluate(() => (document.getElementById('app') as HTMLIFrameElement).contentWindow!.postMessage({ jsonrpc: '2.0',
+      method: 'ui/notifications/tool-result', params: { isError: true, structuredContent: { ok: false, code: 'TOOL_FAILED' } } }, '*'));
+    await expect(panel.getByRole('button', { name: 'Authorize', exact: true })).toHaveCount(0);
+    await expect(panel.locator('code')).toHaveCount(0);
+  });
+
+  test('valid canonical approval opens only after a successful matching session; unsafe sessions never reach open-link', async ({ context }) => {
+    for (const result of [{}, { ok: false, code: 'TOOL_FAILED' }, { ok: true, approvalId, approvalUrl: 'https://flo.finance/approve' },
+      { ok: true, approvalId, approvalUrl: `https://user@flofi.xyz/approve#${secret}` },
+      { ok: true, approvalId, approvalUrl: `${origin}/approve?next=https://flo.finance#${secret}` },
+      { ok: true, approvalId: 'apr_' + 'b'.repeat(26), approvalUrl: privateUrl },
+      { ok: true, approvalId, approvalUrl: privateUrl }]) {
+      const page = await context.newPage();
+      const panel = await openHost(page, fakeClient(result), html(), {}, { structuredContent: approved });
+      await panel.getByRole('button', { name: 'Authorize', exact: true }).click();
+      if (result.ok && result.approvalId === approvalId && result.approvalUrl === privateUrl) {
+        await expect.poll(async () => (await hostLog(page)).openLinks).toEqual([privateUrl]);
+      } else {
+        await expect(panel.getByText(/APPROVAL_LINK_INVALID|TOOL_FAILED/, { exact: true })).toBeVisible();
+        expect((await hostLog(page)).openLinks).toEqual([]);
+      }
+      await page.close();
+    }
+  });
+
+  test('receipt navigation and model context reject userinfo and alternate domains', async ({ page }) => {
+    const runs = ['https://user@flofi.xyz/app/dashboard/runs/run-1', 'https://flo.finance/app/dashboard/runs/run-1',
+      `${origin}/app/dashboard/runs/run-1?redirect=https://flo.finance`, `${origin}/app/dashboard/runs/run-1`]
+      .map(receiptUrl => ({ executionId: 'run-1', flow: 'jupiter-swap', status: 'RECONCILED', reconciled: true, receiptUrl }));
+    const panel = await openHost(page, fakeClient({ ok: true, status: 'APPLIED', runs }), html(), {}, { structuredContent: approved });
+    await panel.getByRole('button', { name: 'Refresh status' }).click();
+    await expect(panel.getByRole('button', { name: 'View receipt' })).toHaveCount(1);
+    await panel.getByRole('button', { name: 'View receipt' }).click();
+    await expect.poll(async () => (await hostLog(page)).openLinks).toEqual([`${origin}/app/dashboard/runs/run-1`]);
+    const context = JSON.stringify((await hostLog(page)).modelContext);
+    expect(context).not.toMatch(/flo\.finance|user@|redirect=/);
+    expect(context).toContain(`${origin}/app/dashboard/runs/run-1`);
   });
 });

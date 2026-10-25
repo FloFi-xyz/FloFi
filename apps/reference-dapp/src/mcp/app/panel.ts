@@ -21,6 +21,8 @@
  * markup), scaled to the frame, with its text alternative. The panel computes no layout of its own; the same tree is the PNG that MCP
  * image content, Telegram and WhatsApp show.
  */
+import { trustedFlofiUrl } from '../../platform/navigation.ts';
+
 export const PANEL_URI = 'ui://flofi/approval-panel.html';
 export const PANEL_MIME = 'text/html;profile=mcp-app';
 export type PanelSettings = { readonly origin: string; readonly inFrameProbeHosts: readonly string[] };
@@ -29,7 +31,7 @@ export type PanelSettings = { readonly origin: string; readonly inFrameProbeHost
  * The panel's browser program. It is serialized with `Function.prototype.toString`, so it must stay self-contained: no imports,
  * no closure over module scope, only browser globals. Strings from the server are rendered with `textContent`, never as HTML.
  */
-export function panelMain(settings: PanelSettings): void {
+export function panelMain(settings: PanelSettings, trustedUrl: typeof trustedFlofiUrl): void {
   type Json = Record<string, unknown>;
   type Step = { index: number; action: string; network: string; destinationNetwork: string | null; protocol: string; kind: string };
   type Approval = { approvalId: string; approvalUrl?: string; workflowHash: string; expiresAt: string; status: string; networkEnvironment: string; fundsClass: string;
@@ -50,9 +52,9 @@ export function panelMain(settings: PanelSettings): void {
   const callTool = async (name: string, args: Json): Promise<Json> => {
     const result = await request('tools/call', { name, arguments: args }) as { structuredContent?: Json; isError?: boolean; _meta?: Json };
     const content = result?.structuredContent ?? {};
-    if (result?.isError || content.ok === false) throw new Error(typeof content.code === 'string' ? content.code : 'TOOL_FAILED');
+    if (result?.isError || content.ok !== true) throw new Error(typeof content.code === 'string' ? content.code : 'TOOL_FAILED');
     const links = result?._meta?.['flofi/approval'];
-    return links && typeof links === 'object' ? { ...content, ...links as Json } : content;
+    return links && typeof links === 'object' ? { ...content, approvalUrl: (links as Json).approvalUrl, walletLinks: (links as Json).walletLinks } : content;
   };
   const el = (tag: string, text?: string, className?: string) => {
     const node = document.createElement(tag);
@@ -103,10 +105,16 @@ export function panelMain(settings: PanelSettings): void {
   const isApproval = (value: unknown): value is Approval => !!value && typeof value === 'object' && typeof (value as Json).approvalId === 'string' &&
     /^apr_[a-z2-7]{26}$/.test(String((value as Json).approvalId)) && Array.isArray((value as Json).steps);
   const terminal = (status: unknown) => ['EXPIRED', 'SUPERSEDED', 'REVOKED', 'STALE'].includes(String(status));
+  const approvalLink = (value: unknown, approvalId: string, privateLink: boolean): URL | null => {
+    const url = trustedUrl(value, settings.origin);
+    return url && url.href === `${settings.origin}/approve${url.hash}` && (privateLink
+      ? /^#flofi_hs_[A-Za-z0-9_-]{43}$/.test(url.hash) : url.hash === `#${approvalId}`) ? url : null;
+  };
   const receipt = (run: Json): string | null => {
     if (run.reconciled !== true || typeof run.receiptUrl !== 'string' || typeof run.executionId !== 'string') return null;
-    try { const url = new URL(run.receiptUrl); return url.origin === settings.origin && !url.search && !url.hash &&
-      url.pathname === `/app/dashboard/runs/${encodeURIComponent(run.executionId)}` ? url.href : null; } catch { return null; }
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(run.executionId)) return null;
+    const url = trustedUrl(run.receiptUrl, settings.origin);
+    return url?.href === `${settings.origin}/app/dashboard/runs/${encodeURIComponent(run.executionId)}` ? url.href : null;
   };
 
   /** Opens a FloFi URL through the host (MCP Apps `ui/open-link`; ChatGPT's `openExternal` when the standard call is refused). */
@@ -128,9 +136,8 @@ export function panelMain(settings: PanelSettings): void {
       if (disposed || view.approval?.approvalId !== approvalId) return;
       const links = (session.walletLinks ?? {}) as Record<string, string>;
       const url = target === 'window' ? String(session.approvalUrl) : links[target];
-      const approval = new URL(String(session.approvalUrl));
-      if (approval.origin !== settings.origin || approval.pathname !== '/approve' || approval.search
-        || !/^#flofi_hs_[A-Za-z0-9_-]{43}$/.test(approval.hash)) throw new Error('APPROVAL_LINK_INVALID');
+      const approval = approvalLink(session.approvalUrl, approvalId, true);
+      if (!approval || session.approvalId !== approvalId) throw new Error('APPROVAL_LINK_INVALID');
       const expected = target === 'window' ? approval.href : target === 'metamask'
         ? `https://metamask.app.link/dapp/${approval.origin.replace(/^https?:\/\//, '')}/approve${approval.hash}`
         : `https://phantom.com/ul/browse/${encodeURIComponent(approval.origin + '/approve')}?ref=${encodeURIComponent(settings.origin)}`;
@@ -269,12 +276,20 @@ export function panelMain(settings: PanelSettings): void {
     }
     if (message.method === 'ui/notifications/tool-result') {
       const content = (message.params as { structuredContent?: unknown } | undefined)?.structuredContent;
-      if (isApproval(content)) {
+      // A missing/failed result must clear any prior CTA. The host remains responsible for delivering genuine MCP results.
+      view.approval = null; view.visual = null; view.progress = null;
+      if (timer) clearTimeout(timer);
+      if (message.params?.isError !== true && (content as Json | undefined)?.ok === true && isApproval(content)) {
         const privateLinks = (message.params?._meta as Json | undefined)?.['flofi/approval'] as Json | undefined;
         const visual = (message.params?._meta as Json | undefined)?.['flofi/visual'];
-        view.approval = { ...content, ...(typeof privateLinks?.approvalUrl === 'string' ? { approvalUrl: privateLinks.approvalUrl } : {}) };
-        view.visual = isVisual(visual) ? visual : null;
-        view.error = null; view.progress = null; view.reported = ''; polls = 0; schedule(10_000);
+        const publicUrl = approvalLink(content.approvalUrl, content.approvalId, false);
+        const privateUrl = privateLinks ? approvalLink(privateLinks.approvalUrl, content.approvalId, true) : null;
+        if (!publicUrl || privateLinks && !privateUrl) view.error = 'APPROVAL_LINK_INVALID';
+        else {
+          view.approval = { ...content, approvalUrl: privateUrl?.href ?? publicUrl.href };
+          view.visual = isVisual(visual) ? visual : null;
+          view.error = null; view.reported = ''; polls = 0; schedule(10_000);
+        }
       }
       else view.error = typeof (content as Json | undefined)?.code === 'string' ? String((content as Json).code) : 'NO_APPROVAL';
       render();
@@ -319,7 +334,7 @@ button.primary{background:var(--blue);color:#fff;border:0}button.secondary{backg
 export function panelHtml(settings: PanelSettings): string {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">` +
     `<title>FloFi approval</title><style>${STYLE}</style></head><body><main id="app" aria-live="polite"></main>` +
-    `<script>(${panelMain.toString()})(${JSON.stringify(settings).replace(/</g, '\\u003c')});</script></body></html>`;
+    `<script>(${panelMain.toString()})(${JSON.stringify(settings).replace(/</g, '\\u003c')}, ${trustedFlofiUrl.toString()});</script></body></html>`;
 }
 /** MCP Apps resource metadata: no network, no frames, no external resources; ChatGPT's mirror allows opening FloFi links only. */
 export function panelResourceMeta(origin: string) {

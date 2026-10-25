@@ -79,7 +79,7 @@ describe('BUILD-AUTOMATION-001 worker-side source resolution', () => {
       const { loadAutomationWorker } = await import('./backend/automation-worker.ts');
       const base = { FLOFI_AUTOMATIONS: 'enabled', FLOFI_PUBLIC_ORIGIN: 'http://127.0.0.1:3000', FLOFI_AUTOMATION_PRICE_SOURCE: 'off' };
       const out = [];
-      const railwayFixture = { ...base, RAILWAY_PROJECT_ID: 'p', FLOFI_PUBLIC_ORIGIN: 'https://flofi.example', FLOFI_AUTOMATION_PRICE_SOURCE: 'fixture',
+      const railwayFixture = { ...base, RAILWAY_PROJECT_ID: 'p', FLOFI_PUBLIC_ORIGIN: 'https://flofi.xyz', FLOFI_AUTOMATION_PRICE_SOURCE: 'fixture',
         FLOFI_AUTOMATION_PRICE_FIXTURE: '/tmp/prices.json' };
       for (const env of [{ FLOFI_AUTOMATIONS: 'enabled' }, { ...base, FLOFI_AUTOMATION_PRICE_SOURCE: 'chainlink' }, railwayFixture, base]) {
         const parts = await loadAutomationWorker(env, {}, 'another-tenant', {});

@@ -44,11 +44,12 @@ export function memoryOAuthLogger(): OAuthLogger & { readonly lines: LogLine[] }
 
 /** One browser (a cookie jar) and one OAuth deployment configuration. */
 export function oauthClient(options: { env: Record<string, string>; store?: McpOAuthStore; now?: () => Date; logger?: OAuthLogger; fetched?: string[]; ip?: string }) {
+  const origin = options.env.FLOFI_PUBLIC_ORIGIN ?? ORIGIN;
   const jar = new Map<string, string>(), ip = options.ip ?? `198.51.${randomBytes(1)[0]}.${randomBytes(1)[0]}`;
   const send = async (route: OAuthRoute, path: string, init: { method?: string; headers?: Record<string, string>; body?: string; browser?: boolean } = {}) => {
     const headers: Record<string, string> = { 'x-forwarded-for': ip, ...init.headers };
     if (init.browser !== false && jar.size) headers.cookie = [...jar].map(([k, v]) => `${k}=${v}`).join('; ');
-    const response = await handleOAuthRequest(route, new Request(ORIGIN + path, { method: init.method ?? 'GET', headers, ...init.body === undefined ? {} : { body: init.body } }),
+    const response = await handleOAuthRequest(route, new Request(origin + path, { method: init.method ?? 'GET', headers, ...init.body === undefined ? {} : { body: init.body } }),
       { env: options.env, fetcher: memoryFetcher(options.fetched), ...options.store ? { store: options.store } : {}, ...options.now ? { now: options.now } : {},
         ...options.logger ? { logger: options.logger } : {} });
     if (init.browser !== false) for (const line of response.headers.getSetCookie()) {
@@ -59,9 +60,9 @@ export function oauthClient(options: { env: Record<string, string>; store?: McpO
   };
   const form = (values: Record<string, string>) => new URLSearchParams(values).toString();
   return {
-    jar, send,
+    jar, send, origin,
     authorize: (params: Record<string, string>) => send('authorize', '/oauth/authorize?' + new URLSearchParams(params).toString()),
-    decide: (values: Record<string, string>, headers: Record<string, string> = { origin: ORIGIN, 'sec-fetch-site': 'same-origin' }) =>
+    decide: (values: Record<string, string>, headers: Record<string, string> = { origin, 'sec-fetch-site': 'same-origin' }) =>
       send('authorize', '/oauth/authorize', { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', ...headers }, body: form(values) }),
     token: (values: Record<string, string>) => send('token', '/oauth/token', { method: 'POST', browser: false,
       headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: form(values) }),
@@ -77,16 +78,17 @@ export function consentForm(html: string): { request_id: string; csrf: string } 
 }
 /** The full consumer sign-in: authorize → consent (new account with invite, or the browser's account) → code → tokens. */
 export async function signIn(client: ReturnType<typeof oauthClient>, options: { clientId?: string; redirectUri?: string; scope?: string; invite?: string | null } = {}) {
+  const origin = client.origin;
   const clientId = options.clientId ?? CLAUDE, redirectUri = options.redirectUri ?? CLAUDE_REDIRECT, { verifier, challenge } = pkce(), state = randomBytes(8).toString('hex');
   const page = await client.authorize({ response_type: 'code', client_id: clientId, redirect_uri: redirectUri, state, code_challenge: challenge,
-    code_challenge_method: 'S256', resource: ORIGIN + '/api/mcp', ...options.scope ? { scope: options.scope } : {} });
+    code_challenge_method: 'S256', resource: origin + '/api/mcp', ...options.scope ? { scope: options.scope } : {} });
   if (page.status !== 200) throw new Error(`AUTHORIZE_${page.status}`);
   const decision = await client.decide({ ...consentForm(await page.text()), decision: 'approve', ...options.invite === null ? {} : { invite: options.invite ?? INVITE } });
   if (decision.status !== 303) throw new Error(`CONSENT_${decision.status}`);
   const location = new URL(decision.headers.get('location')!);
-  if (location.searchParams.get('state') !== state || location.searchParams.get('iss') !== ORIGIN) throw new Error('REDIRECT_PARAMETERS');
+  if (location.searchParams.get('state') !== state || location.searchParams.get('iss') !== origin) throw new Error('REDIRECT_PARAMETERS');
   const code = location.searchParams.get('code')!;
-  const response = await client.token({ grant_type: 'authorization_code', code, redirect_uri: redirectUri, client_id: clientId, code_verifier: verifier, resource: ORIGIN + '/api/mcp' });
+  const response = await client.token({ grant_type: 'authorization_code', code, redirect_uri: redirectUri, client_id: clientId, code_verifier: verifier, resource: origin + '/api/mcp' });
   const tokens = await response.json() as { access_token: string; refresh_token: string; scope: string; expires_in: number; token_type: string };
   if (response.status !== 200) throw new Error('TOKEN_' + JSON.stringify(tokens));
   return { ...tokens, code, verifier, clientId, redirectUri };

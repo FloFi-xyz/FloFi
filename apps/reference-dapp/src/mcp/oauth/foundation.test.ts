@@ -152,6 +152,15 @@ describe('BUILD-MCP-002 Client ID Metadata Documents', () => {
     for (const [document, reason] of cases) expect(parseClientMetadata(url, document, NOW), reason).toEqual({ ok: false, reason });
     expect(parseClientMetadata(url, doc({ ...good, client_name: '<script>alert(1)</script>' }), NOW)).toMatchObject({ ok: true, client: { clientName: 'claude.ai' } });
   });
+  it.each([301, 302, 303, 307, 308])('rejects a CIMD HTTP %i instead of following an unexpected redirect', async status => {
+    let calls = 0;
+    const result = await fetchClientMetadata(CHATGPT, HOSTS, NOW, async url => {
+      calls++; expect(url.href).toBe(CHATGPT);
+      return { ...doc({ location: 'https://www.flo.finance/?utm_source=chatgpt.com' }), status };
+    });
+    expect(result).toEqual({ ok: false, reason: 'CIMD_HTTP_STATUS' });
+    expect(calls).toBe(1);
+  });
   it('blocks private, loopback, link-local, CGNAT, metadata, multicast, documentation and translated addresses', () => {
     for (const address of ['10.0.0.1', '127.0.0.1', '169.254.169.254', '172.16.5.4', '192.168.1.1', '100.64.0.1', '0.0.0.0', '224.0.0.1', '198.18.0.1', '192.0.2.1',
       '::1', '::', 'fe80::1', 'fc00::1', 'fd12::1', '::ffff:127.0.0.1', '::ffff:8.8.8.8', '64:ff9b::808:808', '2002:7f00:1::', '2001:db8::1', 'ff02::1', 'localhost', ''])
