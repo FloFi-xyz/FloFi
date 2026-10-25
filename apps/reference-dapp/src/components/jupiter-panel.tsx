@@ -7,6 +7,7 @@ import { createSolanaSwapNode, formatTokenAmount, solanaSwapDetails, solanaSwapL
   type SolanaSwapSymbol } from '../domain/jupiter-authoring';
 import { useWorkflow } from '../state/workflow-store';
 import { useJupiter } from '../state/jupiter-store';
+import { PendingExecutionNote, SolanaWalletGuardNote } from './execution-concurrency-notes';
 
 export function SolanaSwapForm({ nodeId, onDone, direct = false, network: initialNetwork = 'Solana' }: { nodeId?: string; onDone?: () => void; direct?: boolean; network?: SolanaNetwork }) {
   const { t: tr } = useLocale();
@@ -56,7 +57,7 @@ const shared: Record<string, string> = {
   SEMANTIC_REVISION_CHANGED: 'The workflow changed. Simulate and review the current swap again.',
   MAINNET_EXECUTION_NOT_ENABLED: 'Mainnet execution is not enabled on this server. Simulation and Review remain read-only.',
   EXECUTION_NOT_ENABLED: 'Execution is not enabled on this server. Simulation and Review remain read-only.',
-  OWNER_ATTEMPT_IN_PROGRESS: 'Another swap from this wallet is still being observed. Wait for it to resolve.',
+  DUPLICATE_TRANSACTION_SIMULATE_AGAIN: 'This exact transaction is already handled by another FloFi execution, which keeps tracking it. Simulate again for a fresh, separate transaction.',
   SUBMISSION_UNKNOWN_OBSERVE_EXISTING: 'The network did not confirm receipt. Flofi is observing the signed transaction and will not send another.',
   TRANSACTION_NOT_OBSERVED: 'The transaction is not visible yet. Observe again; Flofi will not send another.',
   AWAITING_FINALITY: 'Waiting for Solana finality.',
@@ -107,7 +108,7 @@ export function JupiterPanel({ view }: { view: 'simulate' | 'execute' }) {
     {!jupiter.owner && <button type="button" disabled={jupiter.busy} onClick={() => void jupiter.connect()}>{tr("Connect Solana wallet")}</button>}
     {jupiter.owner && <p>{tr("Wallet connected")}{tr(devnet ? ' · Solana Devnet' : '')}: <span>{tr(jupiter.owner)}</span></p>}
     {view === 'simulate' ? <>
-      <button type="button" disabled={jupiter.busy || pending} onClick={() => void jupiter.simulate()}>{tr("Simulate swap")}</button>
+      <button type="button" disabled={jupiter.busy} onClick={() => void jupiter.simulate()}>{tr("Simulate swap")}</button>
       {review && !jupiter.retired && <dl className="swap-summary" aria-label={tr("Swap simulation")}>
         <dt>{tr("Swap")}</dt><dd>{tr(amount(review.amount, 'input'))}{tr(" → expected ")}{tr(amount(review.quote.outAmount, 'output'))}</dd>
         <dt>{tr("Network")}</dt><dd>{tr(labels.network)}</dd><dt>{tr("Provider")}</dt><dd>{tr(labels.provider)}</dd>
@@ -131,7 +132,7 @@ export function JupiterPanel({ view }: { view: 'simulate' | 'execute' }) {
       {record?.authorization && !attempt && !jupiter.executionEnabled && <p role="status">{tr(message(notEnabled, devnet))}</p>}
       {canExecute && <button type="button" className="primary" disabled={jupiter.busy} onClick={() => void jupiter.execute()}>{tr("Execute swap")}</button>}
       {attempt && !record?.evidence && <p>{tr("Swap: ")}{tr(record?.notSubmitted ? 'not submitted' : attempt.state.toLowerCase().replaceAll('_', ' '))} {observation?.explorer && <a href={observation.explorer} target="_blank" rel="noreferrer">{tr("View transaction")}</a>}</p>}
-      {pending && <button type="button" disabled={jupiter.busy} onClick={() => void jupiter.observe()}>{tr("Observe existing transaction")}</button>}
+      {pending && <button type="button" disabled={jupiter.busy} onClick={() => void jupiter.observe()}>{tr("Observe existing transaction")}</button>}<PendingExecutionNote pending={pending}/><SolanaWalletGuardNote guard={attempt?.walletGuard}/>
       {record?.evidence && observation && <section aria-label={tr("Swap result")} className="swap-result">
         <h3>{tr("Success")}</h3>
         <p>{tr("Swap independently reconciled. Paid ")}{tr(amount(observation.inputSpent, 'input'))}{tr("; received ")}{tr(amount(observation.outputReceived, 'output'))}{tr("; fee ")}{tr(sol(observation.feeLamports))}.</p>

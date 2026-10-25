@@ -112,14 +112,15 @@ describe('BUILD-JOURNEY-001 testnet Router for arbitrary wallets', () => {
     expect(found.attempts.at(-1)).toMatchObject({ step: 'APPROVAL', state: 'CONFIRMED', reconciled: true });
     expect(h.counters.sends).toBe(1);
   });
-  it('one unresolved deposit per wallet across runs, and a deposit that is never filled is reconciled as a verified refund', async () => {
+  it('the same deposit identity is never in flight twice, and a deposit that is never filled is reconciled as a verified refund', async () => {
     const { h, service, owner } = await setup({ autoFillSeconds: null }), w = workflow({ routing: 'ACROSS' });
     const first = await service.simulate(w, owner), second = await service.simulate(w, owner);
     for (const run of [first, second]) await service.review(run.id, run.review.commitment, w);
     await execute(service, h, owner, first.id, w); await service.observe(first.id);
     const begun = await service.begin(first.id, owner, w);
     await service.handoff(first.id);                                         // the deposit request is with the wallet
-    await expect(service.begin(second.id, owner, w)).rejects.toThrow('ROUTER_OWNER_DEPOSIT_IN_FLIGHT');
+    // HOTFIX-WORKFLOW-CONCURRENCY-001: `second` carries the same quote, i.e. the same FundsDeposited identity: it needs a fresh quote.
+    await expect(service.begin(second.id, owner, w)).rejects.toThrow('ROUTER_DEPOSIT_IDENTITY_IN_FLIGHT_SIMULATE_AGAIN');
     await service.report(first.id, { kind: 'HASH', hash: h.wallet.send(begun.transaction) });
     expect((await service.observe(first.id)).phase).toBe('SOURCE_CONFIRMED');
     h.advance(7_300);

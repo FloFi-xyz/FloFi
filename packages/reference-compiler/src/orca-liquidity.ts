@@ -8,8 +8,9 @@ import { associatedTokenAddress, base58Encode, compileMessageV0, decompileMessag
   publicKeyBytes, readU64, serializeMessageV0, serializeSignedTransaction, sha256Hex, solanaAddress, toBase64, u32Bytes, u64Bytes, verifyEd25519,
   type SolanaInstruction } from './solana.js';
 import { readSolanaAccounts, rpcContextValue, setComputeUnitLimit, setComputeUnitPrice, solanaSwapArtifactHash, solanaSwapHash, verifySolanaCluster, decodeRpcAccount,
-  type RawSolanaAccount, type SolanaRpc } from './solana-swap.js';
+  type RawSolanaAccount, type SignedSolanaTransaction, type SolanaRpc } from './solana-swap.js';
 import { decodeWhirlpool, type OrcaPool } from './orca-whirlpool.js';
+import { verifySolanaWalletGuard, type SolanaWalletGuard } from './solana-wallet-guard.js';
 
 /**
  * BUILD-015: the canonical `asset.liquidity.concentrated` action on Solana Devnet through Orca Whirlpools; BUILD-SOLANA-MAINNET-001: the same
@@ -701,16 +702,19 @@ export function assertOrcaLiquidityReview(review: OrcaLiquidityReview, workflow:
   if (parseMessageV0(bytes).blockhash !== review.blockhash) fail('ORCA_LIQUIDITY_TRANSACTION_CHANGED');
 }
 /**
- * The returned transaction must carry exactly the reviewed message and a valid signature from every reviewed signer
- * (owner, and for OPEN the client-side position-mint key). Any difference fails closed.
+ * The returned transaction must carry the reviewed message (or it plus only verified Lighthouse assertions, which keep the
+ * reviewed signer slots) and a valid signature from every reviewed signer (owner, and for OPEN the client-side position-mint
+ * key) over exactly that message. Any other difference fails closed.
  */
-export function verifySignedOrcaLiquidityTransaction(review: Pick<OrcaLiquidityReview, 'message' | 'signers'>, signedBase64: unknown): { signature: string; transaction: string } {
+export function verifySignedOrcaLiquidityTransaction(review: Pick<OrcaLiquidityReview, 'message' | 'signers'>, signedBase64: unknown): SignedSolanaTransaction {
   const bytes = fromBase64(signedBase64, 2048);
   let parsed: { signatures: Uint8Array[]; message: Uint8Array };
   try { parsed = parseTransaction(bytes); } catch { return fail('ORCA_LIQUIDITY_TRANSACTION_CHANGED'); }
-  if (parsed.signatures.length !== review.signers.length || toBase64(parsed.message) !== review.message) fail('ORCA_LIQUIDITY_TRANSACTION_CHANGED');
+  if (parsed.signatures.length !== review.signers.length) fail('ORCA_LIQUIDITY_TRANSACTION_CHANGED');
+  let walletGuard: SolanaWalletGuard | null;
+  try { walletGuard = verifySolanaWalletGuard(fromBase64(review.message), parsed.message, {}); } catch { return fail('ORCA_LIQUIDITY_TRANSACTION_CHANGED'); }
   review.signers.forEach((signer, i) => { if (!verifyEd25519(parsed.signatures[i]!, parsed.message, signer)) fail(i === 0 ? 'ORCA_LIQUIDITY_SIGNATURE_INVALID' : 'ORCA_LIQUIDITY_POSITION_SIGNATURE_INVALID'); });
-  return { signature: base58Encode(parsed.signatures[0]!), transaction: toBase64(bytes) };
+  return { signature: base58Encode(parsed.signatures[0]!), transaction: toBase64(bytes), ...walletGuard ? { walletGuard } : {} };
 }
 /** Pool price for the authoring helper (read-only). */
 export async function readOrcaLiquidityPrice(rpc: SolanaRpc, profile: OrcaLiquidityProfile, bandBps = 1_000) {

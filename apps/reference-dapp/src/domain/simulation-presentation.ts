@@ -108,7 +108,11 @@ export function simulationError(error: string): string {
   if (/MINT_(?:MISMATCH|NOT_FOUND|INVALID)|DECIMALS_MISMATCH|TOKEN_(?:METADATA|IDENTITY|PROGRAM)_MISMATCH|ASSET_IDENTITY|TOKEN_ACCOUNT_(?:MISMATCH|FROZEN)/i.test(error)) return 'The token details do not match what is on the network. Check the token in Build and simulate again.';
   if (/AMOUNT_(?:TOO_SMALL|OUT_OF_RANGE|INVALID|BELOW_RENT)|BELOW_RENT_EXEMPT/i.test(error)) return 'Check the amount. It is outside what this network or token accepts.';
   if (/PARTIAL_DEBT_REQUIRED|NO_DEBT|DEBT_TOO_LOW/i.test(error)) return 'Your current debt is lower than this repayment. Reduce the amount and simulate again.';
-  if (/PENDING_TRANSACTION|OWNER_ATTEMPT_IN_PROGRESS|EXISTING_ATTEMPT/i.test(error)) return 'A previous transaction from this wallet is still being confirmed. Wait for it to finish, then simulate again.';
+  // HOTFIX-WORKFLOW-CONCURRENCY-001: no wallet-wide block remains; these refusals concern one transaction identity only.
+  if (/DUPLICATE_TRANSACTION/i.test(error)) return 'This exact transaction is already handled by another FloFi execution, which keeps tracking it. Simulate again for a fresh, separate transaction.';
+  if (/EXISTING_ATTEMPT|ATTEMPT_ACTIVE/i.test(error)) return 'This execution already has a transaction, and FloFi keeps tracking it; it is never sent twice. Simulate again to start a separate execution.';
+  if (/NONCE_IN_USE|NONCE_ALREADY_RESERVED/i.test(error)) return 'An earlier request from this wallet is still waiting in your wallet, or its result is still being checked, and it holds the next transaction slot (nonce). Confirm or reject it in your wallet; FloFi keeps tracking it. Then simulate again.';
+  if (/DEPOSIT_IDENTITY_IN_FLIGHT/i.test(error)) return 'This exact deposit (the same quote) is already handled by another FloFi execution, which keeps tracking it. Get a new route for a separate deposit.';
   if (/OWNER_NOT_EOA/i.test(error)) return 'This wallet is a smart contract account. Use a standard wallet account to sign this workflow.';
   if (/EXECUTION_NOT_ENABLED|NETWORK_UNAVAILABLE|NETWORK_UNSUPPORTED|PROFILE_UNSUPPORTED|_NOT_ENABLED$/i.test(error)) return 'This action is not available on this FloFi server right now. Nothing was simulated or sent.';
   if (/NO_ROUTE|ROUTE_UNAVAILABLE|ROUTE_REFUSED|UNSUPPORTED/i.test(error)) return 'A route is not available for this workflow. Check its tokens and networks in Build.';

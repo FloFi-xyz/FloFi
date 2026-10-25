@@ -85,7 +85,9 @@ export type UniswapAttempt = { readonly attemptId: string; readonly step: Uniswa
   /** Owner's position NFT count when a MINT was prepared (duplicate-position guard). */ readonly positionsBefore: string | null;
   readonly receipt: UniswapReceipt | null; readonly reconciled: boolean; readonly note: string | null };
 export type UniswapPosition = { readonly tokenId: string; readonly owner: string; readonly liquidity: string; readonly amount0: string; readonly amount1: string;
-  readonly tickLower: number; readonly tickUpper: number; readonly pool: string; readonly blockNumber: number; readonly transactionHash: string };
+  readonly tickLower: number; readonly tickUpper: number; readonly pool: string; readonly blockNumber: number; readonly transactionHash: string;
+  /** HOTFIX-WORKFLOW-CONCURRENCY-001: TRANSACTION when other owner transactions shared the block (absent: block-level balance proof). */
+  readonly reconciliationScope?: 'TRANSACTION' };
 export type UniswapEvidence = { readonly bundle: EvidenceBundle; readonly bundleHash: string; readonly evidenceClass: 'TESTNET_EXECUTED' | 'MAINNET_EXECUTED' | 'MOCKED';
   readonly network: string; readonly chainId: number; readonly owner: string; readonly positionManager: string; readonly pool: string;
   readonly token0: UniswapTokenView; readonly token1: UniswapTokenView; readonly feeTier: number; readonly tickLower: number; readonly tickUpper: number;
@@ -570,10 +572,14 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
     if (position.token0 !== t0.address || position.token1 !== t1.address || position.fee !== profile.feeTier || position.tickLower !== params.tickLower ||
         position.tickUpper !== params.tickUpper || position.liquidity !== liquidity) fail('UNISWAP_POSITION_MISMATCH');
     const balance = async (token: string, block: string) => wordAt(await ethCall(token, SEL.balanceOf + addrWord(record.owner), block), 0);
-    const [b0, a0, b1, a1] = await Promise.all([balance(t0.address, before), balance(t0.address, at), balance(t1.address, before), balance(t1.address, at)]);
-    if (b0 - a0 !== amount0 || b1 - a1 !== amount1) fail('UNISWAP_BALANCE_DELTA_MISMATCH');
+    const [b0, a0, b1, a1, nonceBefore, nonceAfter] = await Promise.all([balance(t0.address, before), balance(t0.address, at), balance(t1.address, before),
+      balance(t1.address, at), rpc('eth_getTransactionCount', [record.owner, before]).then(quantity), rpc('eth_getTransactionCount', [record.owner, at]).then(quantity)]);
+    // HOTFIX-WORKFLOW-CONCURRENCY-001: other transactions of the owner in the same block (independent workflows) also move these balances. The
+    // mint is then proven by its own receipt (the exact owner → pool token transfers and events above) and the position read at this block.
+    const shared = nonceAfter - nonceBefore > 1n;
+    if (!shared && (b0 - a0 !== amount0 || b1 - a1 !== amount1)) fail('UNISWAP_BALANCE_DELTA_MISMATCH');
     return { tokenId: tokenId.toString(), owner: record.owner, liquidity: liquidity.toString(), amount0: amount0.toString(), amount1: amount1.toString(),
-      tickLower: params.tickLower, tickUpper: params.tickUpper, pool: profile.pool, blockNumber, transactionHash: hash };
+      tickLower: params.tickLower, tickUpper: params.tickUpper, pool: profile.pool, blockNumber, transactionHash: hash, ...shared ? { reconciliationScope: 'TRANSACTION' as const } : {} };
   }
   /** Evidence is never stronger than the run's provenance: a MOCKED chain is MOCKED; only a public mainnet run is MAINNET_EXECUTED. */
   const evidenceClass = provenance === 'PUBLIC_TESTNET' ? 'TESTNET_EXECUTED' as const : provenance === 'PUBLIC_MAINNET' ? 'MAINNET_EXECUTED' as const : 'MOCKED' as const;
@@ -595,7 +601,8 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
       fees: [{ asset: { chainId: profile.chain, nativeId: 'ETH', decimals: 18 }, amount: fees.toString() }],
       residualAssets: [{ asset: asset0, amount: balance0.toString() }, { asset: asset1, amount: balance1.toString() }],
       ownership: [{ chainId: profile.chain, address: record.owner }],
-      limitations: [provenance === 'PUBLIC_TESTNET' ? 'PUBLIC_TESTNET_ONLY' : provenance === 'PUBLIC_MAINNET' ? 'OWNER_WALLET_MAINNET' : 'MOCKED_CHAIN_ONLY'] };
+      limitations: [provenance === 'PUBLIC_TESTNET' ? 'PUBLIC_TESTNET_ONLY' : provenance === 'PUBLIC_MAINNET' ? 'OWNER_WALLET_MAINNET' : 'MOCKED_CHAIN_ONLY',
+        ...position.reconciliationScope === 'TRANSACTION' ? ['OWNER_TRANSACTIONS_IN_BLOCK_RECEIPT_RECONCILED'] : []] };
     const transactions = confirmed.map(a => ({ step: a.step, transactionHash: a.receipt!.transactionHash, blockNumber: a.receipt!.blockNumber, blockHash: a.receipt!.blockHash,
       status: a.receipt!.status, gasCostWei: a.receipt!.gasCostWei, submissionKind: a.receipt!.submissionKind, reviewCommitment: a.reviewCommitment,
       explorer: explorerTx(a.receipt!.transactionHash, profile) }));
@@ -788,7 +795,9 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
       try { fresh = await R.simulateCalls(owner, remaining, state.block.number); }
       catch (cause) { if (cause instanceof Error && /^UNISWAP_SIMULATION_(MINT|APPROVAL)_REVERTED$/.test(cause.message)) return changed(); throw cause; }
       try { R.assertMintBounds(review, state, fresh); } catch { return changed(); }
-      if (state.nonce !== state.pendingNonce) fail('UNISWAP_PENDING_TRANSACTION');
+      // HOTFIX-WORKFLOW-CONCURRENCY-001: the owner's pending transactions never block; this attempt takes the nonce the wallet assigns next.
+      const nonce = state.pendingNonce;
+      if (nonce < state.nonce) fail('UNISWAP_RPC_INVALID');
       if (step === 'MINT') {
         if (record.attempts.some(a => a.step === 'MINT' && a.state === 'CONFIRMED')) fail('UNISWAP_POSITION_ALREADY_MINTED');
         // Duplicate-position guard: an earlier mint attempt that never proved a landing must not have grown the owner's positions.
@@ -802,8 +811,8 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
         maxFeePerGas: tag(maxFeePerGas), maxPriorityFeePerGas: tag(priority) };
       try { await R.assertRequestFees(review, tx, tag(state.block.number)); }
       catch (cause) { if (cause instanceof Error && /^UNISWAP_.*_REVIEW_REQUIRED$/.test(cause.message)) return changed(cause.message); throw cause; }
-      await R.reserveNonce(record, attemptId, state.nonce);
-      const attempt: UniswapAttempt = { attemptId, step, state: 'PREPARED', reviewCommitment: review.commitment, nonce: state.nonce.toString(),
+      await R.reserveNonce(record, attemptId, nonce);
+      const attempt: UniswapAttempt = { attemptId, step, state: 'PREPARED', reviewCommitment: review.commitment, nonce: nonce.toString(),
         preparedAtBlock: state.block.number, createdAt: now().toISOString(), tx, transactionHash: null, replacementHash: null,
         positionsBefore: step === 'MINT' ? state.positionCount.toString() : null, receipt: null, reconciled: false, note: null };
       record = await save({ ...record, attempts: [...record.attempts, attempt], error: null });
@@ -832,7 +841,8 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
       }
       const [latest, pending] = await Promise.all([rpc('eth_getTransactionCount', [record.owner, 'latest']).then(quantity),
         rpc('eth_getTransactionCount', [record.owner, 'pending']).then(quantity)]);
-      if (latest !== BigInt(attempt.nonce) || pending !== BigInt(attempt.nonce)) fail('UNISWAP_NONCE_CHANGED');
+      // The reserved nonce must still be the one the wallet assigns next (the owner's other pending transactions come before it).
+      if (pending !== BigInt(attempt.nonce) || latest > pending) fail('UNISWAP_NONCE_CHANGED');
       return save(replaceAttempt(record, { ...attempt, state: 'SUBMITTING' }));
     }); },
     /** Wallet result. A hash is recorded once (a repeated identical report is a no-op); ambiguity is observed, never resent. */

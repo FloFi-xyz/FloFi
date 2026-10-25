@@ -197,8 +197,8 @@ export function RouterProvider({ children }: { children: ReactNode }) {
   }); }
   async function loadRuns() { await operation(async () => { await refreshRuns(); }); }
   async function simulate() { await operation(async () => {
-    if (record && !retired && record.verdict === 'PENDING' && (record.attempts.some(a => ACTIVE.includes(a.state)) || !['PREPARED', 'AUTHORIZED'].includes(record.phase)))
-      throw new Error('ROUTER_ATTEMPT_ACTIVE_OBSERVE_EXISTING');
+    // HOTFIX-WORKFLOW-CONCURRENCY-001: a pending transaction never blocks a new, separate simulation; the earlier run keeps being observed
+    // server-side and stays listed in Dashboard.
     const owner = await establishSession(), snapshot = latest.current;
     const value = unwrap(await routerSimulate(network, snapshot, owner.account));
     if (latest.current !== snapshot) throw new Error('ROUTER_SEMANTIC_REVISION_CHANGED');

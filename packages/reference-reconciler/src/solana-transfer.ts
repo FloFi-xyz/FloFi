@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { solanaTransferProfile } from '@defi-workflow-engine/action-registry';
-import { base58Encode, decompileMessageV0, fromBase64, parseMessageV0, parseTransaction, solanaSwapArtifactHash, solanaSwapHash, verifySolanaCluster, verifySignedSolanaTransfer,
-  type SolanaRpc, type SolanaTransferReview } from '@defi-workflow-engine/reference-compiler';
+import { base58Encode, decompileMessageV0, fromBase64, parseMessageV0, parseTransaction, solanaSwapArtifactHash, solanaSwapHash, verifySolanaCluster,
+  verifySignedSolanaTransfer, type SolanaRpc, type SolanaTransferReview, type SolanaWalletGuard } from '@defi-workflow-engine/reference-compiler';
+import { walletGuardLimitation } from './jupiter.js';
 import { hashJournalBytes, type EvidenceBundle, type ExecutionJournal } from '@defi-workflow-engine/workflow-contracts';
 
 /**
@@ -16,8 +17,10 @@ export type SolanaTransferObservation = { verdict: 'RECONCILED' | 'DIVERGENT' | 
   confirmation: string | null; slot: number | null; blockTime: number | null; feeLamports: string | null;
   owner: { lamportsBefore: string; lamportsAfter: string } | null; recipient: { lamportsBefore: string; lamportsAfter: string } | null;
   token: { sourceBefore: string; sourceAfter: string; destinationBefore: string; destinationAfter: string } | null;
-  amountSent: string | null; amountReceived: string | null; accountCreationLamports: string | null; programs: string[]; explorer: string | null };
-export type SolanaTransferChainAttempt = { signature: string | null; transaction: string | null };
+  amountSent: string | null; amountReceived: string | null; accountCreationLamports: string | null; programs: string[]; explorer: string | null;
+  /** The wallet guard re-verified against the Review for this exact signed transaction (only when the wallet appended one). */
+  walletGuard?: SolanaWalletGuard };
+export type SolanaTransferChainAttempt = { signature: string | null; transaction: string | null; walletGuard?: SolanaWalletGuard };
 const X = 'SOLANA_TRANSFER';
 const fail = (code: string): never => { throw new Error(code); };
 const record = (v: unknown): Record<string, unknown> => v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : fail('SOLANA_RPC_INVALID');
@@ -41,12 +44,13 @@ export async function reconcileSolanaTransferAttempt(review: SolanaTransferRevie
   const profile = solanaTransferProfile(review.chain) ?? fail(`${X}_NETWORK_UNSUPPORTED`);
   const base: SolanaTransferObservation = { verdict: 'INCONCLUSIVE', reason: 'TRANSACTION_NOT_OBSERVED', found: false, absenceVerified: false, signature: attempt.signature, confirmation: null,
     slot: null, blockTime: null, feeLamports: null, owner: null, recipient: null, token: null, amountSent: null, amountReceived: null, accountCreationLamports: null,
-    programs: [], explorer: attempt.signature ? profile.explorerTx(attempt.signature) : null };
+    programs: [], explorer: attempt.signature ? profile.explorerTx(attempt.signature) : null, ...attempt.walletGuard ? { walletGuard: attempt.walletGuard } : {} };
   if (!attempt.signature || !attempt.transaction) return base;
   try {
     await verifySolanaCluster(rpc, profile.genesisHash);
     const signed = fromBase64(attempt.transaction, 2048), parsedSigned = parseTransaction(signed);
-    verifySignedSolanaTransfer(review, attempt.transaction);
+    // The reviewed message, or the recorded wallet guard re-verified against it (HOTFIX-PHANTOM-LIGHTHOUSE-001), with a valid owner signature.
+    if (JSON.stringify(verifySignedSolanaTransfer(review, attempt.transaction).walletGuard) !== JSON.stringify(attempt.walletGuard)) fail(`${X}_TRANSACTION_MISMATCH`);
     if (base58Encode(parsedSigned.signatures[0]!) !== attempt.signature) fail(`${X}_SIGNATURE_MISMATCH`);
     const finalizedSlot = await rpc('getSlot', [{ commitment: 'finalized' }]);
     if (!Number.isSafeInteger(finalizedSlot)) fail('SOLANA_RPC_INVALID');
@@ -68,9 +72,8 @@ export async function reconcileSolanaTransferAttempt(review: SolanaTransferRevie
     if (!Array.isArray(tx.transaction) || tx.transaction[1] !== 'base64' || tx.version !== 0 || !Number.isSafeInteger(tx.slot)) fail('SOLANA_RPC_INVALID');
     base.slot = tx.slot as number; base.blockTime = Number.isSafeInteger(tx.blockTime) ? tx.blockTime as number : null;
     if (s.slot !== tx.slot || JSON.stringify(s.err) !== JSON.stringify(meta.err)) fail(`${X}_STATUS_METADATA_MISMATCH`);
-    // Exact owner-signed reviewed bytes, not merely a similar transaction.
-    if (Buffer.from(fromBase64((tx.transaction as unknown[])[0], 2048)).toString('base64') !== Buffer.from(signed).toString('base64') ||
-        Buffer.from(parsedSigned.message).toString('base64') !== review.message) fail(`${X}_TRANSACTION_MISMATCH`);
+    // Exact owner-signed bytes (verified above against the Review), not merely a similar transaction.
+    if (Buffer.from(fromBase64((tx.transaction as unknown[])[0], 2048)).toString('base64') !== Buffer.from(signed).toString('base64')) fail(`${X}_TRANSACTION_MISMATCH`);
     if (base.slot < review.simulationResult.slot) fail(`${X}_SLOT_MISMATCH`);
     const message = parseMessageV0(parsedSigned.message);
     if (message.lookups.length) fail(`${X}_TRANSACTION_MISMATCH`);
@@ -155,12 +158,13 @@ export function buildSolanaTransferEvidence(input: { id: string; review: SolanaT
     sourceAccount: review.token?.sourceAccount ?? null, destinationAccount: review.token?.destinationAccount ?? null, destinationCreated: o.accountCreationLamports !== null && o.accountCreationLamports !== '0',
     requestedAmount: review.amount, actualSent: o.amountSent, actualReceived: o.amountReceived, signature: o.signature, slot: o.slot, blockTime: o.blockTime,
     confirmation: o.confirmation, feeLamports: o.feeLamports, accountCreationLamports: o.accountCreationLamports, ownerBalances: o.owner, recipientBalances: o.recipient,
-    tokenBalances: o.token, programs: o.programs, messageHash: review.messageHash, verdict: o.verdict, reason: o.reason, provenance: input.provenance, evidenceClass,
+    tokenBalances: o.token, programs: o.programs, messageHash: review.messageHash,
+    ...o.walletGuard ? { signedMessageHash: o.walletGuard.signedMessageHash, walletGuard: o.walletGuard } : {}, verdict: o.verdict, reason: o.reason, provenance: input.provenance, evidenceClass,
     ownerInitiated: input.ownerInitiated, realFunds: profile.realFunds && input.provenance !== 'MOCKED' };
   const head = hashJournalBytes(new TextEncoder().encode(JSON.stringify(input.journal))).at(-1) ?? fail(`${X}_JOURNAL_EMPTY`);
   // The frozen v1 environment enum has no Devnet member: Devnet maps to TESTNET_EXECUTED, never MAINNET_EXECUTED.
   const environment = input.provenance === 'MOCKED' ? 'MOCKED' as const : profile.bundleEnvironment;
-  const limitations = ['Balances are finalized transaction metadata for the exact owner-signed reviewed bytes.',
+  const limitations = [walletGuardLimitation(o.walletGuard) ?? 'Balances are finalized transaction metadata for the exact owner-signed reviewed bytes.',
     ...review.token ? ['Token amounts are the token program\'s own balances; native SOL changes are the network fee and any new recipient token-account deposit.'] : [],
     ...profile.realFunds ? [] : ['Solana Devnet with valueless test tokens (FloFi evidence class DEVNET_EXECUTED). Not mainnet execution and not real funds.']];
   const bundle: EvidenceBundle = { schemaVersion: '1.0.0', evidenceBundleId: input.id, version: 1, supersedes: null,

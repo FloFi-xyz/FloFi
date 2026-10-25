@@ -9,6 +9,7 @@ import { useWorkflow } from '../state/workflow-store';
 import { useBuild009Wallet } from '../state/build009-wallet-store';
 import { useSupply } from '../state/supply-store';
 import type { BorrowObservation } from '@defi-workflow-engine/reference-reconciler';
+import { PendingExecutionNote } from './execution-concurrency-notes';
 function human(value:string,decimals:number):string {return (Number(value)/10**decimals).toLocaleString('en-US',{maximumFractionDigits:decimals});}
 function hf(value:string):string {return BigInt(value)===(1n<<256n)-1n?'No debt (∞)':human(value,18);}
 export function BorrowAuthoringForm({nodeId,onDone,direct=false,reviewFormId}:{nodeId?:string;onDone?:()=>void;direct?:boolean;reviewFormId?:string}){
@@ -62,7 +63,7 @@ export function BorrowPanel({view}:{view:'simulate'|'execute'}){
       <p>{tr("Estimated debt after transaction: $")}{tr(human(review!.borrow!.debtAfterBase,8))}</p>
       <p>{tr("Liquidation threshold: ")}{tr(human(risk.liquidationThresholdBps,2))}{tr("%. Liquidation becomes possible below health factor 1. Flofi requires at least 2.0; prices and interest can change.")}</p>
       <p>{tr("Estimated maximum network cost: ")}{tr(human(review!.manifest.gasBudgets[0]?.maximumAmount??'0',18))}{tr(" ETH.")}</p></>}
-    {view==='simulate'?<button type="button" disabled={run.busy||Boolean(pending)} onClick={()=>void run.simulate()}>{tr("Simulate Borrow")}</button>:<>
+    {view==='simulate'?<><button type="button" disabled={run.busy} onClick={()=>void run.simulate()}>{tr("Simulate Borrow")}</button><PendingExecutionNote pending={Boolean(pending)}/></>:<>
       {review&&wallet.account&&wallet.chainId!==shown.chainHex&&<button type="button" disabled={run.busy||wallet.busy} onClick={()=>void run.switchNetwork()}>{tr("Switch wallet to ")}{tr(shown.network)}</button>}
       {review&&<p>{tr("Borrower / beneficiary: ")}{review.account}</p>}
       {record&&!record.authorization&&!record.attempts.length&&!run.retired&&<button type="button" disabled={run.busy} onClick={()=>void run.review()}>{tr("Accept Borrow review")}</button>}

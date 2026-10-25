@@ -6,6 +6,7 @@ import { associatedTokenAddress, serializeSignedTransaction, base58Encode, compi
   readU64, serializeMessageV0, serializeTransaction, toBase64, u32Bytes, u64Bytes, verifyEd25519, type LookupTables, type SolanaInstruction } from './solana.js';
 import { LIGHTHOUSE_PROGRAM } from './solana-wallet-change.js';
 import { decodeJupiterSwap } from './jupiter.js';
+import { evaluateMockedLighthouse } from './lighthouse-mock.js';
 
 /**
  * MOCKED deterministic Solana mainnet-beta + Jupiter /build loopback for tests and the offline browser harness.
@@ -90,6 +91,14 @@ export function createMockedSolanaJupiter(options: MockedJupiterOptions = {}) {
           source.amount -= BigInt(args.inAmount) + (options.extraInputDebit ?? 0n); target.amount += actual;
           if (target.mint === 'So11111111111111111111111111111111111111112') s.lamportsOf.set(a(2), (s.lamportsOf.get(a(2)) ?? 0n) + actual);
           if (source.mint === 'So11111111111111111111111111111111111111112') s.lamportsOf.set(a(1), (s.lamportsOf.get(a(1)) ?? 0n) - BigInt(args.inAmount));
+          return;
+        }
+        if (i.programId === LIGHTHOUSE_PROGRAM) {
+          // A wallet's Lighthouse assertion reads the account as the swap left it; a failed assertion fails the whole transaction.
+          const token = s.tokens.get(a(0)), lamports = token ? lamportsAt(s, a(0)) : s.lamports.get(a(0));
+          try { evaluateMockedLighthouse(i.data, lamports === undefined ? null : { address: a(0), lamports, owner: token ? P.token : P.system, dataLength: token ? 165 : 0,
+            token: token ? { mint: token.mint, owner: token.owner, amount: token.amount, delegate: null, delegatedAmount: 0n } : null }); }
+          catch { throw Object.assign(new Error('lighthouse'), { custom: { InstructionError: [index, { Custom: 6001 }] } }); }
           return;
         }
         throw Object.assign(new Error('program'), { custom: { InstructionError: [index, 'UnsupportedProgramId'] } });
@@ -185,9 +194,9 @@ export function createMockedSolanaWallet(secretKey: Uint8Array = ed25519.utils.r
   signMessage(message: Uint8Array): Uint8Array { return ed25519.sign(message, secretKey); } };
 }
 /**
- * MOCKED wallet behaviour observed with Phantom: before signing, the wallet appends Lighthouse assertion ("guard") instructions after
- * the dApp's instructions, keeping the fee payer and blockhash, so the signed message differs from the reviewed one. Returns the
- * unsigned transaction the wallet would then sign; nothing here signs or sends.
+ * MOCKED adversarial wallet guard: appends Lighthouse-program instructions whose data is NOT a Lighthouse assertion FloFi can read
+ * (discriminator 0x0d with arbitrary bytes), keeping the fee payer and blockhash. FloFi must refuse it. For the accepted Phantom
+ * protection, byte for byte as captured on mainnet-beta, use `applyMockedPhantomLighthouseGuards`. Nothing here signs or sends.
  */
 export function appendMockedWalletGuards(unsignedBase64: string, count = 2, tables: LookupTables = {}): string {
   const { signatures, message } = parseTransaction(fromBase64(unsignedBase64, 2048));

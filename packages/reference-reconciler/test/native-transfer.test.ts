@@ -95,12 +95,50 @@ describe('RH-DEMO-001 runtime reconciliation', () => {
   });
 });
 
+describe('HOTFIX-WORKFLOW-CONCURRENCY-001: another transaction of the same owner in the inclusion block', () => {
+  // The owner's independent transaction (nonce 6) was included in the same block, just before this one (nonce 7): block-level nonce and
+  // balance changes cover both transactions.
+  const shared = (rpc: Rpc, blockNumber: string, extraDebit: bigint): Rpc => async (method, params = []) => {
+    const value = await rpc(method, params);
+    const before = '0x' + (BigInt(blockNumber) - 1n).toString(16);
+    if (method === 'eth_getTransactionCount' && params[1] === before) return '0x' + (BigInt(value as string) - 1n).toString(16);
+    if (method === 'eth_getBalance' && params[1] === before) return '0x' + (BigInt(value as string) + extraDebit).toString(16);
+    return value;
+  };
+  it('reconciles from its own transaction and receipt, and says so in the evidence', async () => {
+    const { chain, review, attempt, hash } = await executed();
+    const receipt = await chain.rpc('eth_getTransactionReceipt', [hash]) as { blockNumber: string };
+    const o = await verdict(review, attempt, shared(chain.rpc, receipt.blockNumber, 5_000_000_000_000n));
+    expect(o).toMatchObject({ verdict: 'RECONCILED', reason: 'NATIVE_TRANSFER_VERIFIED', facts: { nonceBefore: '6', nonceAfter: '8', reconciliationScope: 'TRANSACTION' } });
+    const r = { ...createTransferRun('rhx-' + 'c'.repeat(32), review, 'MOCKED'), authorization: review.commitment };
+    const evidence = buildNativeTransferEvidence({ id: r.id, review, journal: r.journal, provenance: 'MOCKED', ownerInitiated: true, observation: o });
+    expect(evidence.bundle.reconciliation.limitations[0]).toMatch(/^Other transactions of this wallet were included in the same block/);
+    // Without another transaction in the block the evidence is unchanged.
+    const exclusive = await verdict(review, attempt, chain.rpc);
+    expect(exclusive.facts?.reconciliationScope).toBeUndefined();
+  });
+  it('still requires this exact transaction: its nonce, call and fee bounds', async () => {
+    const { chain, review, attempt, hash } = await executed();
+    const receipt = await chain.rpc('eth_getTransactionReceipt', [hash]) as { blockNumber: string };
+    const rpc = shared(chain.rpc, receipt.blockNumber, 0n);
+    expect(await verdict(review, attempt, tamper(rpc, 'eth_getTransactionByHash', v => ({ ...v, nonce: '0x6' })))).toMatchObject({ verdict: 'DIVERGENT', reason: 'TRANSFER_TRANSACTION_MISMATCH' });
+    expect(await verdict(review, attempt, tamper(rpc, 'eth_getTransactionByHash', v => ({ ...v, value: '0x1' })))).toMatchObject({ verdict: 'DIVERGENT', reason: 'TRANSFER_TRANSACTION_MISMATCH' });
+    expect(await verdict(review, attempt, tamper(rpc, 'eth_getTransactionReceipt', v => ({ ...v, logs: [{ address: '0x' + '5'.repeat(40), topics: [], data: '0x' }] }))))
+      .toMatchObject({ verdict: 'DIVERGENT', reason: 'TRANSFER_LOGS_MISMATCH' });
+    // A block whose nonce range does not contain the reviewed nonce is not this transaction's block.
+    const wrong: Rpc = async (method, params = []) => method === 'eth_getTransactionCount' ? (params[1] === receipt.blockNumber ? '0x7' : '0x5') : rpc(method, params);
+    expect(await verdict(review, attempt, wrong)).toMatchObject({ verdict: 'DIVERGENT', reason: 'TRANSFER_NONCE_MISMATCH' });
+  });
+});
+
 describe('RH-DEMO-001 simulation and Review', () => {
-  it('refuses a wrong chain, a code-bearing owner, a queued nonce, a stale head and insufficient test ETH', async () => {
+  it('refuses a wrong chain, a code-bearing owner, a stale head and insufficient test ETH; a queued transaction only moves the reviewed nonce', async () => {
     const run = (options: Record<string, unknown>) => simulateNativeTransfer(workflow(), owner, (createRobinhoodTransferChain(options) as Chain).rpc);
     await expect(run({ chain: '0x1237' })).rejects.toThrow('TRANSFER_WRONG_CHAIN');
     await expect(run({ code: '0xef0100' + '1'.repeat(40) })).rejects.toThrow('TRANSFER_OWNER_NOT_EOA');
-    await expect(run({ queued: 1 })).rejects.toThrow('TRANSFER_PENDING_TRANSACTION');
+    // HOTFIX-WORKFLOW-CONCURRENCY-001: the wallet's pending transaction (nonce 7) never blocks; the Review binds the next nonce, 8.
+    expect((await run({ queued: 1 })).nonce).toBe('8');
+    expect((await run({})).nonce).toBe('7');
     await expect(run({ staleSeconds: 600 })).rejects.toThrow('TRANSFER_STALE_CHAIN_HEAD');
     await expect(run({ balance: 1000n })).rejects.toThrow('TRANSFER_INSUFFICIENT_TEST_ETH');
     await expect(simulateNativeTransfer(workflow('1000000000000001'), owner, (createRobinhoodTransferChain() as Chain).rpc)).rejects.toThrow('TRANSFER_PROFILE_UNSUPPORTED');
@@ -114,6 +152,9 @@ describe('RH-DEMO-001 simulation and Review', () => {
     expect(() => assertNativeTransferReview(review, w, '0x' + '6'.repeat(40), state)).toThrow('TRANSFER_AUTHORIZATION_INVALID');
     expect(() => assertNativeTransferReview(review, w, owner, state, Date.parse(review.expiresAt))).toThrow('TRANSFER_REVIEW_EXPIRED');
     expect(() => assertNativeTransferReview(review, w, owner, { ...state, nonce: '8', pendingNonce: '8' })).toThrow('TRANSFER_AUTHORIZATION_STALE');
+    // Another transaction became pending after Review: the reviewed nonce is no longer the next one.
+    expect(() => assertNativeTransferReview(review, w, owner, { ...state, pendingNonce: '8' })).toThrow('TRANSFER_AUTHORIZATION_STALE');
+    expect(() => assertNativeTransferReview(review, w, owner, { ...state, nonce: '8', pendingNonce: '7' })).toThrow('TRANSFER_RPC_INVALID');
     expect(() => assertNativeTransferReview(review, w, owner, { ...state, gasPrice: '999999999999' })).toThrow('TRANSFER_AUTHORIZATION_STALE');
   });
 });

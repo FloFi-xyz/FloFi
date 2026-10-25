@@ -3,6 +3,8 @@ import { sha256 } from '@noble/hashes/sha2.js';
 import { SOLANA_MAINNET_TRANSFER, type SolanaTransferProfile } from '@defi-workflow-engine/action-registry';
 import { associatedTokenAddress, base58Encode, decompileMessageV0, fromBase64, parseMessageV0, parseTransaction, publicKeyBytes, readU64, toBase64,
   verifyEd25519, type SolanaInstruction } from './solana.js';
+import { LIGHTHOUSE_PROGRAM } from './solana-wallet-change.js';
+import { evaluateMockedLighthouse } from './lighthouse-mock.js';
 
 /**
  * BUILD-SOLANA-TRANSFER-UX-001: a MOCKED deterministic Solana cluster for transfer tests and the offline browser harness. It interprets the
@@ -110,6 +112,15 @@ export function createMockedSolanaTransferChain(options: MockedTransferOptions =
           if (source.state === 2 || target.state === 2) throw custom(index, { Custom: 17 }); // AccountFrozen
           if (source.amount < amount) throw custom(index, { Custom: 1 }); // InsufficientFunds
           source.amount -= amount; target.amount += amount; units += mint.program === 'token-2022' ? 9_000 : 6_200; return;
+        }
+        if (i.programId === LIGHTHOUSE_PROGRAM) {
+          // A wallet's Lighthouse assertion reads the account as the transfer left it; a failed assertion fails the whole transaction.
+          const token = s.tokens.get(a(0)), lamports = s.lamports.get(a(0));
+          try { evaluateMockedLighthouse(i.data, lamports === undefined ? null : { address: a(0), lamports, owner: token ? programIdOf(token.program) : P.system,
+            dataLength: token ? tokenData(token).length : s.systemData.get(a(0)) ?? 0,
+            token: token ? { mint: token.mint, owner: token.owner, amount: token.amount, delegate: null, delegatedAmount: 0n } : null }); }
+          catch { throw custom(index, { Custom: 6001 }); }
+          units += 2_000; return;
         }
         throw custom(index, 'UnsupportedProgramId');
       });

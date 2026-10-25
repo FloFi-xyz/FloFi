@@ -9,6 +9,7 @@ import { createAuthoredLending,lendingDetails,lendingHuman,type LendingInput } f
 import { useWorkflow } from '../state/workflow-store';
 import { useBuild009Wallet } from '../state/build009-wallet-store';
 import { useLending } from '../state/lending-store';
+import { PendingExecutionNote } from './execution-concurrency-notes';
 const health=(s:string)=>BigInt(s)===(1n<<256n)-1n?'No debt (∞)':Number(lendingHuman(s,18)).toFixed(4);
 export function LendingAuthoringForm(){
   const { t: tr } = useLocale();
@@ -72,7 +73,7 @@ export function LendingPanel({view}:{view:'simulate'|'execute'}){
     </>}
     {historical.length>0&&<details aria-label={tr("Historical cancelled attempts")}><summary>{tr("Historical cancelled attempts (")}{tr(historical.length)}{tr(") · not submitted")}</summary><p>{tr("These preparations were cancelled before wallet handoff, or are approvals proven never submitted on chain. They remain in the durable journal and do not complete or block the current step. A fresh Review and your explicit execution click are required.")}</p><ul>{historical.map(a=><li key={a.id}>{tr(a.step.replaceAll('_',' '))}{tr(" · historical cancelled preparation · ")}{tr(a.id)}</li>)}</ul></details>}
     {run.retired&&<p role="alert">{tr("The workflow changed. Previous authority is invalid. Observe any existing transaction before preparing a new workflow.")}</p>}
-    {view==='simulate'?<button type="button" disabled={run.busy||Boolean(pending)||Boolean(finished&&!run.retired)} onClick={()=>void run.simulate()}>{tr("Simulate lending composition")}</button>:<>
+    {view==='simulate'?<><button type="button" disabled={run.busy} onClick={()=>void run.simulate()}>{tr("Simulate lending composition")}</button><PendingExecutionNote pending={Boolean(pending)}/></>:<>
       {record&&!record.authorization&&!pending&&!finished&&!run.retired&&<button type="button" disabled={run.busy} onClick={()=>void run.review()}>{tr("Accept composed Review")}</button>}
       {record?.authorization&&!pending&&!finished&&!run.retired&&next&&<button type="button" className="primary" disabled={run.busy} onClick={()=>void run.execute()}>{tr("Execute ")}{tr(next.id.replaceAll('_',' ').toLowerCase())}</button>}
       {active.map(a=><p key={a.id}>{tr(a.step)}: {tr(a.reconciled?'reconciled':a.state)}{a.hash&&<> · <a href={`https://sepolia.basescan.org/tx/${a.hash}`} target="_blank" rel="noreferrer">{tr("Transaction")}</a></>}</p>)}

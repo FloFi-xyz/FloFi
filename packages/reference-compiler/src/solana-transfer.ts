@@ -18,7 +18,7 @@ import { isSolanaTransferNode, readSolanaTransferNode, TRANSFER_ACTION, SOLANA_S
 import { associatedTokenAddress, base58Encode, compileMessageV0, fromBase64, readU64, serializeMessageV0, serializeTransaction, sha256Hex, solanaAddress,
   solanaKeyOnCurve, toBase64, u64Bytes, type SolanaInstruction } from './solana.js';
 import { assertMessageRoundTrip, readSolanaAccounts, rpcContextValue, setComputeUnitLimit, setComputeUnitPrice, simulateSolanaMessage, solanaSwapArtifactHash,
-  solanaSwapHash, solanaRecord, decodeRpcAccount, verifySignedSolanaSwap, verifySolanaCluster, type RawSolanaAccount, type SolanaRpc } from './solana-swap.js';
+  solanaSwapHash, solanaRecord, decodeRpcAccount, verifySignedSolanaSwap, verifySolanaCluster, type RawSolanaAccount, type SignedSolanaTransaction, type SolanaRpc } from './solana-swap.js';
 
 export { SOLANA_TRANSFER_PROFILES, SOLANA_MAINNET_TRANSFER, SOLANA_DEVNET_TRANSFER, solanaTransferProfile, solanaTransferAsset } from '@defi-workflow-engine/action-registry';
 export type { SolanaTransferProfile, SolanaTransferAsset } from '@defi-workflow-engine/action-registry';
@@ -353,7 +353,7 @@ export function assertSolanaTransferReview(review: SolanaTransferReview, workflo
   if (sha256Hex(fromBase64(review.message)) !== review.messageHash || step?.executionKind !== 'DIRECT_TRANSACTION' || step.payloadHash !== review.messageHash ||
       toBase64(serializeTransaction(null, fromBase64(review.message))) !== review.unsignedTransaction) fail('TRANSACTION_CHANGED');
 }
-/** The wallet must return exactly the reviewed message with a valid owner signature. Any modification fails closed. */
-export function verifySignedSolanaTransfer(review: Pick<SolanaTransferReview, 'message' | 'owner'>, signedBase64: unknown): { signature: string; transaction: string } {
+/** The reviewed message (or it plus verified Lighthouse assertions) with a valid owner signature; anything else fails closed. */
+export function verifySignedSolanaTransfer(review: Pick<SolanaTransferReview, 'message' | 'owner'>, signedBase64: unknown): SignedSolanaTransaction {
   return verifySignedSolanaSwap(review, signedBase64, X);
 }

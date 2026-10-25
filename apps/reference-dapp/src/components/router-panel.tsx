@@ -12,6 +12,7 @@ import { TokenAmountInput } from './token-amount-input';
 import { useRouter } from '../state/router-store';
 import { useBuild009Wallet } from '../state/build009-wallet-store';
 import { authoringEnvironment, useExecutionEnvironment } from '../state/capability-store';
+import { PendingExecutionNote } from './execution-concurrency-notes';
 
 /**
  * Network labels: mainnet keeps the BUILD-ROUTER-001 wording; the testnet journey names Base Sepolia / Arbitrum Sepolia; BUILD-RH-002 adds
@@ -120,10 +121,10 @@ const messagesFor = (l: Labels): Record<string, string> => ({
   ROBINHOOD_MAINNET_NOT_ENABLED: 'Robinhood Chain routes are not enabled on this server.', ROUTER_INSUFFICIENT_GAS_ETH: `Your wallet needs more ETH on ${l.src} for network fees.`,
   ROUTER_SIMULATION_UNAVAILABLE: 'The network provider cannot simulate these transactions. Nothing was signed.',
   ROUTER_SIMULATION_DEPOSIT_REVERTED: 'The simulation of the bridge deposit failed. Nothing was signed.', ROUTER_UNEXPECTED_CONTRACT: 'A contract does not match its verified deployment.',
-  ROUTER_PENDING_TRANSACTION: `Your wallet has a queued transaction on ${l.src}. Let it confirm first.`,
+  ROUTER_OWNER_NONCE_IN_USE: 'An earlier request from this wallet is still waiting in your wallet, or its result is still being checked, and it holds the next transaction slot (nonce). Confirm or reject it in your wallet; FloFi keeps tracking it. Then simulate again.',
   ROUTER_WALLET_NONCE_MISMATCH: 'Your wallet would use a different transaction number. Let pending transactions confirm first.',
   ROUTER_ATTEMPT_ACTIVE_OBSERVE_EXISTING: 'A transaction is still being observed. Check it before continuing.',
-  ROUTER_OWNER_DEPOSIT_IN_FLIGHT: 'Another bridge deposit from this wallet is still unresolved. Flofi will not prepare a second one.',
+  ROUTER_DEPOSIT_IDENTITY_IN_FLIGHT_SIMULATE_AGAIN: 'This exact deposit (the same quote) is already handled by another FloFi execution, which keeps tracking it. Get a new route for a separate deposit.',
   ROUTER_SUBMISSION_UNKNOWN_OBSERVE_EXISTING: 'The wallet result is unknown. Flofi is observing the network and will not send another request.',
   ROUTER_REJECTED: 'You declined the request in your wallet. Nothing was sent.', ROUTER_TRANSACTION_PENDING: `The transaction is pending on ${l.src}.`,
   ROUTER_TRANSACTION_NOT_OBSERVED: 'No transaction is visible yet. Observe again; nothing will be resent.',
@@ -213,7 +214,8 @@ export function RouterPanel({ view }: { view: 'simulate' | 'execute' }) {
     {router.retired && <p role="alert">{tr("The workflow changed. Prior authorization is invalid. Simulate the current bridge again.")}</p>}
     {router.recovered && record && <p role="status">{tr("Recovered run ")}{record.id}{tr(". Its state comes from the server; nothing is resent automatically.")}</p>}
     <WalletSessionBlock showRuns={true}/>
-    {view === 'simulate' && <button type="button" disabled={router.busy || pending || settling || !router.available || !fields} onClick={() => void router.simulate()}>{tr("Get route and simulate")}</button>}
+    {view === 'simulate' && <button type="button" disabled={router.busy || !router.available || !fields} onClick={() => void router.simulate()}>{tr("Get route and simulate")}</button>}
+    {view === 'simulate' && <PendingExecutionNote pending={pending || settling}/>}
     {record?.error === 'ROUTE_CHANGED' && record.routeChanges.length > 0 && <p role="alert">{tr("Route changed: ")}{tr(record.routeChanges.map(c => changeLabel[c]).join(', '))}.</p>}
     {r && route && !router.retired && <>
       <dl className="swap-summary" aria-label={tr("Route review")}>

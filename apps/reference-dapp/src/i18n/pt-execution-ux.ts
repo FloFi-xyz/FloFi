@@ -30,8 +30,6 @@ export const portugueseExecutionUx: Readonly<Record<string, string>> = {
     'Os dados do token não correspondem aos da rede. Verifique o token em Construir e simule novamente.',
   'Check the amount. It is outside what this network or token accepts.': 'Verifique o montante. Está fora do que esta rede ou este token aceita.',
   'Your current debt is lower than this repayment. Reduce the amount and simulate again.': 'A sua dívida atual é inferior a este reembolso. Reduza o montante e simule novamente.',
-  'A previous transaction from this wallet is still being confirmed. Wait for it to finish, then simulate again.':
-    'Uma transação anterior desta carteira ainda está a ser confirmada. Aguarde que termine e simule novamente.',
   'This wallet is a smart contract account. Use a standard wallet account to sign this workflow.':
     'Esta carteira é uma conta de contrato inteligente. Use uma conta de carteira normal para assinar este fluxo.',
   'This action is not available on this FloFi server right now. Nothing was simulated or sent.':

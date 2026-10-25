@@ -119,7 +119,8 @@ export function SolanaLiquidityProvider({ children }: { children: ReactNode }) {
     return value;
   }
   async function simulate(op: LiquidityOperation, positionMint?: string, partBps?: number) { await operation(async () => {
-    if (unresolved(record)) throw new Error('ORCA_LIQUIDITY_EXISTING_ATTEMPT_OBSERVE_ONLY');
+    // HOTFIX-WORKFLOW-CONCURRENCY-001: a pending transaction never blocks a new, separate simulation; the earlier run keeps being observed
+    // server-side and stays listed in Dashboard.
     if (!owner) throw new Error('ORCA_LIQUIDITY_SOLANA_WALLET_SELECTION_REQUIRED');
     const snapshot = latest.current;
     let mint = positionMint;

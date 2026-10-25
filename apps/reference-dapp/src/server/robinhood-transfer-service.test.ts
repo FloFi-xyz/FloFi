@@ -24,6 +24,33 @@ async function reviewed(options: TransferChainOptions = {}) {
   return { ...s, w, record };
 }
 
+describe('HOTFIX-WORKFLOW-CONCURRENCY-001: independent transfers of one wallet', () => {
+  it('a second transfer is reviewed and handed off while the first is pending; nonces stay ordered and never collide', async () => {
+    const { chain, service, w, record: a } = await reviewed();
+    const beginA = await service.begin(a.id, owner, w);
+    expect(beginA.record.attempt?.nonce).toBe('7');
+    // While A waits in the wallet (nonce 7 not yet pending), another run cannot be handed nonce 7: its reservation refuses, nothing is prepared.
+    const c = await service.simulate(w, owner), cReviewed = await service.review(c.id, c.review.commitment, w);
+    await expect(service.begin(cReviewed.id, owner, w)).rejects.toThrow('TRANSFER_NONCE_ALREADY_RESERVED');
+    expect((await service.load(c.id)).attempt).toBeNull();
+    // A is signed and broadcast: it is pending in the mempool (the account's pending nonce is now 8).
+    await service.handoff(a.id);
+    (chain.state as { queued: number }).queued = 1;
+    const b = await service.simulate(w, owner);
+    expect(b.review.nonce).toBe('8');
+    const bReviewed = await service.review(b.id, b.review.commitment, w), beginB = await service.begin(bReviewed.id, owner, w);
+    expect((await service.handoff(b.id)).attempt?.state).toBe('SUBMITTING');
+    // Both land in nonce order and each run reconciles its own transaction.
+    (chain.state as { queued: number }).queued = 0;
+    const hashA = await walletSend(chain, beginA.transaction), hashB = await walletSend(chain, beginB.transaction);
+    await service.report(a.id, { kind: 'HASH', hash: hashA }); await service.report(b.id, { kind: 'HASH', hash: hashB });
+    const [doneA, doneB] = [await service.observe(a.id), await service.observe(b.id)];
+    expect(doneA).toMatchObject({ verdict: 'RECONCILED', attempt: { nonce: '7', transactionHash: hashA } });
+    expect(doneB).toMatchObject({ verdict: 'RECONCILED', attempt: { nonce: '8', transactionHash: hashB } });
+    expect(chain.transactions).toHaveLength(2);
+  });
+});
+
 describe('RH-DEMO-001 Robinhood Testnet transfer service (MOCKED loopback chain)', () => {
   it('Simulate binds every Review field without any submission', async () => {
     const { chain, service } = await setup(), w = workflow();

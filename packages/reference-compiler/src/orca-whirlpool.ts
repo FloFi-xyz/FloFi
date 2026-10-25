@@ -5,7 +5,7 @@ export type { SolanaDevnetToken, SolanaDevnetTokenSymbol } from '@defi-workflow-
 import { readExactInputSwap, EXACT_INPUT_SWAP_ACTION, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { associatedTokenAddress, base58Encode, compileMessageV0, decompileMessageV0, findProgramAddress, fromBase64, parseMessageV0, publicKeyBytes, readU64, serializeMessageV0, serializeTransaction,
   sha256Hex, solanaAddress, toBase64, u32Bytes, u64Bytes, type SolanaInstruction } from './solana.js';
-import { assertMessageRoundTrip, assertSolanaSwapReview, buildSolanaSwapArtifacts, estimateFee, readSolanaAccounts, readSolanaSwapBalances, requireSolanaSwapRuntime,
+import { assertMessageRoundTrip, assertSolanaSwapReview, buildSolanaSwapArtifacts, type SignedSolanaTransaction, estimateFee, readSolanaAccounts, readSolanaSwapBalances, requireSolanaSwapRuntime,
   rpcContextValue, setComputeUnitLimit, setComputeUnitPrice, simulateSolanaMessage, solanaSwapDeltas, solanaSwapHash, solanaTokenAmount, verifySignedSolanaSwap, verifySolanaCluster,
   type SolanaBalances, type SolanaRpc, type SolanaSwapQuote, type SolanaSwapReviewCore, type SolanaSwapSimulation } from './solana-swap.js';
 
@@ -230,6 +230,6 @@ export function assertOrcaDevnetReview(review: OrcaDevnetReview, workflow: Seman
   if (args.amount !== review.amount || args.otherAmountThreshold !== review.quote.otherAmountThreshold || !args.amountSpecifiedIsInput || args.sqrtPriceLimit !== '0' ||
       swaps[0]!.accounts[3]?.pubkey !== review.owner || swaps[0]!.accounts[4]?.pubkey !== POOL.address) fail('DEVNET_SWAP_TRANSACTION_CHANGED');
 }
-export function verifySignedOrcaDevnetTransaction(review: OrcaDevnetReview, signedBase64: unknown): { signature: string; transaction: string } {
+export function verifySignedOrcaDevnetTransaction(review: OrcaDevnetReview, signedBase64: unknown): SignedSolanaTransaction {
   return verifySignedSolanaSwap(review, signedBase64, 'DEVNET_SWAP');
 }

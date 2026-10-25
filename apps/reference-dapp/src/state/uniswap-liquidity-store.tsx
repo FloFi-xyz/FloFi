@@ -98,8 +98,8 @@ export function UniswapLiquidityProvider({ children }: { children: ReactNode }) 
   /** The reviewed run's chain (else the authored position's) is the only network the wallet may be on. */
   const chainHexOf = uniswapLiquidityChainHex;
   async function simulate() { await operation(async () => {
-    if (record && !retired && record.verdict === 'PENDING' && record.attempts.some(a => ['PREPARED', 'SUBMITTING', 'SUBMISSION_RESULT_UNKNOWN', 'PENDING'].includes(a.state)))
-      throw new Error('UNISWAP_ATTEMPT_ACTIVE_OBSERVE_EXISTING');
+    // HOTFIX-WORKFLOW-CONCURRENCY-001: a pending transaction never blocks a new, separate simulation; the earlier run keeps being observed
+    // server-side and stays listed in Dashboard.
     const session = await ownerSession(), snapshot = latest.current;
     const value = unwrap(await uniswapLiquiditySimulate(snapshot, session.account));
     if (latest.current !== snapshot) throw new Error('UNISWAP_SEMANTIC_REVISION_CHANGED');

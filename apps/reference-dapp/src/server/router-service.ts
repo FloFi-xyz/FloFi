@@ -140,6 +140,12 @@ export function canonical(value: unknown): string {
     .map(key => JSON.stringify(key) + ':' + canonical((value as Record<string, unknown>)[key])).join(',') + '}';
 }
 const digest = (value: unknown) => '0x' + sha256Hex(typeof value === 'string' ? value : canonical(value));
+/** HOTFIX-WORKFLOW-CONCURRENCY-001: a reviewed deposit's on-chain identity, the FundsDeposited fields its discovery matches on (32 hex digits). */
+export function routerDepositIdentity(review: RouterReview, destinationChainId: number): string {
+  const b = review.route.bridge;
+  return digest({ depositor: b.depositor, recipient: review.route.recipient, inputAmount: b.inputAmount, outputAmount: b.outputAmount,
+    quoteTimestamp: b.quoteTimestamp, fillDeadline: b.fillDeadline, destinationChainId }).slice(2, 34);
+}
 export function routerReviewCommitment(review: RouterReview): string { const rest: Record<string, unknown> = { ...review }; delete rest.commitment; return digest(rest); }
 export const routerExplorerTx = (chain: 'source' | 'destination', hash: string, profile: RouterProfile = MAINNET) =>
   (chain === 'source' ? profile.source.explorer : profile.destination.explorer) + 'tx/' + hash;
@@ -488,15 +494,17 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
     });
   }
   /**
-   * Owner + nonce is one economic identity, and at most one unresolved bridge deposit may exist per owner across all runs:
-   * a delegated (relayed) submission does not consume the owner's nonce, so the nonce alone cannot exclude a second deposit
-   * while the first one's outcome is unknown.
+   * Owner + nonce is one economic identity. So is a deposit's own on-chain identity (the FundsDeposited fields discovery matches on): a
+   * delegated (relayed) submission does not consume the owner's nonce, so a deposit whose hash was lost is found by those fields alone, and
+   * two runs with identical fields could not be told apart. HOTFIX-WORKFLOW-CONCURRENCY-001: that identity, never the owner, is what may be
+   * in flight only once; the owner's independent deposits (any other quote) proceed side by side.
    */
   function prepareAttempt(record: RouterRecord, attempt: RouterAttempt): Promise<RouterRecord> {
     const persist = () => save({ ...record, attempts: [...record.attempts, attempt], error: null });
     const nonce = () => claim(`${record.owner}-${attempt.nonce}`, `${record.owner}-${attempt.nonce}.xroute-intent`, 'ROUTER_OWNER_NONCE_IN_USE', record, attempt.attemptId, persist);
+    const identity = routerDepositIdentity(record.review, DST.chainId);
     return attempt.step === 'DEPOSIT'
-      ? claim(`${record.owner}-deposit`, `${record.owner}-deposit.xroute-guard`, 'ROUTER_OWNER_DEPOSIT_IN_FLIGHT', record, attempt.attemptId, nonce) : nonce();
+      ? claim(`deposit-${identity}`, `deposit-${identity}.xroute-guard`, 'ROUTER_DEPOSIT_IDENTITY_IN_FLIGHT_SIMULATE_AGAIN', record, attempt.attemptId, nonce) : nonce();
   }
 
   // --- source observation --------------------------------------------------------------------------------------------
@@ -931,7 +939,8 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
       catch (cause) { if (cause instanceof Error && /^ROUTER_SIMULATION_(APPROVAL|DEPOSIT)_REVERTED$/.test(cause.message)) return invalidate('ROUTER_STATE_CHANGED_REVIEW_REQUIRED'); throw cause; }
       try { depositMatches(route, simulated.at(-1)!.logs, owner); } catch { return invalidate('ROUTER_STATE_CHANGED_REVIEW_REQUIRED'); }
       if (state.usdc < BigInt(route.inputAmount)) fail(SRC.symbol === 'USDC' ? 'ROUTER_INSUFFICIENT_USDC' : 'ROUTER_INSUFFICIENT_TOKEN');
-      if (state.nonce !== state.pendingNonce) fail('ROUTER_PENDING_TRANSACTION');
+      // HOTFIX-WORKFLOW-CONCURRENCY-001: the owner's pending transactions never block; this attempt takes the nonce the wallet assigns next.
+      if (state.pendingNonce < state.nonce) fail('ROUTER_RPC_INVALID');
       if (step === 'DEPOSIT' && state.block.timestamp + 120 > review.deadlines.depositMustLandBy - profile.depositSafetyMarginSeconds) return invalidate('ROUTER_REVIEW_EXPIRED');
       const reviewed = review.calls[index]!;
       const priority = BigInt(review.fees.maxPriorityFeePerGas), maxFeePerGas = BigInt(review.fees.maxFeePerGas);
@@ -941,7 +950,7 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
       const tx: RouterTx = { chainId: SRC.chainHex, from: owner, to: reviewed.to, data: reviewed.data, value: '0x0', gas: tag(BigInt(reviewed.gasLimit)),
         maxFeePerGas: tag(maxFeePerGas), maxPriorityFeePerGas: tag(priority) };
       await assertRequestFees(review, tx, tag(state.block.number), invalidate);
-      const attempt: RouterAttempt = { attemptId, step, state: 'PREPARED', reviewCommitment: review.commitment, nonce: state.nonce.toString(), preparedAtBlock: state.block.number,
+      const attempt: RouterAttempt = { attemptId, step, state: 'PREPARED', reviewCommitment: review.commitment, nonce: state.pendingNonce.toString(), preparedAtBlock: state.block.number,
         createdAt: now().toISOString(), tx, transactionHash: null, replacementHash: null, receipt: null, reconciled: false, note: null };
       record = await prepareAttempt(record, attempt);
       return { record, attempt, transaction: tx };
@@ -953,7 +962,8 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
         fail('ROUTER_WALLET_HANDOFF_NOT_AUTHORIZED');
       const [latest, pending] = await Promise.all([rpc('eth_getTransactionCount', [record.owner, 'latest']).then(quantity),
         rpc('eth_getTransactionCount', [record.owner, 'pending']).then(quantity)]);
-      if (latest !== BigInt(attempt.nonce) || pending !== BigInt(attempt.nonce)) fail('ROUTER_NONCE_CHANGED');
+      // The reserved nonce must still be the one the wallet assigns next (the owner's other pending transactions come before it).
+      if (pending !== BigInt(attempt.nonce) || latest > pending) fail('ROUTER_NONCE_CHANGED');
       await assertRequestFees(record.review, attempt.tx, 'latest', async code => {
         await save(replaceAttempt(deauthorized(record, code, [], true), { ...attempt, state: 'CANCELLED', note: code }));
         return fail(code);

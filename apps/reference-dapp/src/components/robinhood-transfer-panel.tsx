@@ -12,6 +12,7 @@ import { networkIdentity } from '../domain/network-registry';
 import { useWorkflow } from '../state/workflow-store';
 import { useRobinhoodTransfer } from '../state/robinhood-transfer-store';
 import { useBuild009Wallet } from '../state/build009-wallet-store';
+import { PendingExecutionNote } from './execution-concurrency-notes';
 
 /** Copy is written for Robinhood Testnet; another transfer network's name is substituted. Display text only. */
 const short = (network: TransferNetwork) => network === 'Robinhood Chain Testnet' ? 'Robinhood' : network;
@@ -89,7 +90,7 @@ const messages: Record<string, string> = {
   STOCK_REGISTRY_UNAVAILABLE: 'The official Robinhood asset registry is unavailable. Try again later.',
   TRANSFER_WRONG_CHAIN: 'Switch your wallet to Robinhood Chain Testnet.', TRANSFER_WRONG_ACCOUNT: 'Select the owner wallet shown in Review.',
   TRANSFER_INSUFFICIENT_TEST_ETH: 'The owner wallet needs Robinhood Testnet ETH from the faucet.', TRANSFER_OWNER_NOT_EOA: 'The owner account has code (for example a smart-account delegation). Use a plain EOA account.',
-  TRANSFER_PENDING_TRANSACTION: 'The wallet has a pending transaction. Wait for it to settle, then simulate again.',
+  TRANSFER_NONCE_ALREADY_RESERVED: 'An earlier request from this wallet is still waiting in your wallet, or its result is still being checked, and it holds the next transaction slot (nonce). Confirm or reject it in your wallet; FloFi keeps tracking it. Then simulate again.',
   TRANSFER_REVIEW_EXPIRED: 'Review expired. Simulate and review again.', TRANSFER_AUTHORIZATION_STALE: 'Wallet state changed since Review. Simulate and review again.',
   TRANSFER_WALLET_NONCE_MISMATCH: 'The wallet would use a different nonce than the Review. Simulate and review again.',
   TRANSFER_REJECTED: 'The transfer request was declined in the wallet. Nothing was submitted.', AWAITING_CONFIRMATIONS: 'Waiting for network confirmations.',
@@ -144,7 +145,7 @@ export function RobinhoodTransferPanel({ view }: { view: 'simulate' | 'execute' 
     </dl>}
     {review?.asset?.officialId && <p className="muted">{tr("Stock Tokens are issued by Robinhood Assets (Jersey) Limited and are not offered to US persons or in restricted jurisdictions.")}</p>}
     {evidenceLevel && <p role="status">{tr("Evidence state: ")}{tr(evidenceLevel)}</p>}
-    {view === 'simulate' ? <button type="button" disabled={run.busy || observing} onClick={() => void run.simulate()}>{tr("Simulate transfer")}</button> : <>
+    {view === 'simulate' ? <><button type="button" disabled={run.busy} onClick={() => void run.simulate()}>{tr("Simulate transfer")}</button><PendingExecutionNote pending={observing}/></> : <>
       {record && wallet.account && wallet.chainId !== profile.chainHex && !record.evidence && <div><p role="status">{tr("Switch your wallet to ")}{network}{tr(" to continue.")}</p>
         <button type="button" disabled={run.busy} onClick={() => void run.switchNetwork()}>{tr("Switch to ")}{network}</button></div>}
       {record && !record.authorization && !attempt && !run.retired && record.verdict === 'PENDING' && <button type="button" disabled={run.busy} onClick={() => void run.review()}>{tr("Accept transfer review")}</button>}

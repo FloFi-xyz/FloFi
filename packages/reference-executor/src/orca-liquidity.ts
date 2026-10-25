@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { createJournal, appendJournalState } from './journal.js';
-import { orcaLiquidityProfile, solanaSwapArtifactHash, solanaSwapHash, type OrcaLiquidityReview } from '@defi-workflow-engine/reference-compiler';
+import { orcaLiquidityProfile, solanaSwapArtifactHash, solanaSwapHash, type OrcaLiquidityReview, type SignedSolanaTransaction } from '@defi-workflow-engine/reference-compiler';
 import { hashJournalBytes, type ExecutionJournal } from '@defi-workflow-engine/workflow-contracts';
 import type { SolanaSwapAttempt, SolanaSwapAttemptState } from './jupiter.js';
-import { SOLANA_SWAP_TERMINAL_STATES } from './jupiter.js';
+import { SOLANA_SWAP_TERMINAL_STATES, assertSignedSolanaAttempt } from './jupiter.js';
 
 /**
  * BUILD-015: one owner-signed Solana transaction per liquidity operation (OPEN, DECREASE_PARTIAL, EXIT). The attempt is
@@ -69,11 +69,11 @@ export function prepareOrcaLiquidityAttempt(run: OrcaLiquidityRun, blockHeight: 
   return { ...run, journal, attempt, ownerInitiated: true };
 }
 /** The fully signed bytes and the owner signature become durable before any broadcast. */
-export function recordOrcaLiquiditySignature(run: OrcaLiquidityRun, signed: { signature: string; transaction: string }): OrcaLiquidityRun {
+export function recordOrcaLiquiditySignature(run: OrcaLiquidityRun, signed: SignedSolanaTransaction): OrcaLiquidityRun {
   if (run.attempt?.state !== 'PREPARED') fail('ORCA_LIQUIDITY_ATTEMPT_NOT_PREPARED');
-  return orcaLiquidityTransition(run, 'SUBMITTING', { signature: signed.signature, transaction: signed.transaction });
+  return orcaLiquidityTransition(run, 'SUBMITTING', { signature: signed.signature, transaction: signed.transaction, ...signed.walletGuard ? { walletGuard: signed.walletGuard } : {} });
 }
-/** An owner may hold one unresolved liquidity attempt at a time, across runs, tabs and processes. */
+/** Whether this run's attempt still needs observation (an unresolved attempt never blocks another run's attempt). */
 export function orcaLiquidityAttemptResolved(run: OrcaLiquidityRun): boolean {
   return !run.attempt || SOLANA_SWAP_TERMINAL_STATES.includes(run.attempt.state) && run.attempt.state !== 'RECONCILIATION_REQUIRED' || run.verdict !== 'PENDING';
 }
@@ -98,4 +98,5 @@ export function validateOrcaLiquidityRun(run: OrcaLiquidityRun): void {
       signed !== Boolean(attempt.signature && attempt.transaction) || attempt.signature !== null && !/^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(attempt.signature) ||
       typeof attempt.reconciled !== 'boolean' || attempt.reconciled !== (attempt.state === 'CONFIRMED') ||
       run.verdict === 'RECONCILED' && !attempt.reconciled) fail(corrupt);
+  assertSignedSolanaAttempt(run.review.message, attempt, {}, corrupt);
 }

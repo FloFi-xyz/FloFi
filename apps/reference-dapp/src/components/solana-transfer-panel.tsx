@@ -5,6 +5,7 @@ import { useWorkflow } from '../state/workflow-store';
 import { useSolanaTransfer } from '../state/solana-transfer-store';
 import { formatTokenAmount } from '../domain/jupiter-authoring';
 import { shortSolanaAddress, solanaTransferDetails } from '../domain/solana-transfer-authoring';
+import { PendingExecutionNote, SolanaWalletGuardNote } from './execution-concurrency-notes';
 
 /**
  * BUILD-SOLANA-TRANSFER-UX-001: the Solana transfer's own details (technical details on Execute, the engineering Simulate view). The shared
@@ -23,7 +24,7 @@ export function SolanaTransferPanel({ view }: { view: 'simulate' | 'execute' }) 
     {fields && <p>{tr('Send {0} to {1} on {2}.', `${fields.amount} ${fields.symbol}`, shortSolanaAddress(fields.recipient), tr(transfer.network))}</p>}
     {devnet && <p role="note">{tr("Solana Devnet test tokens only. They have no value, and no real funds are used.")}</p>}
     {!transfer.owner && <button type="button" disabled={transfer.busy} onClick={() => void transfer.connect()}>{tr("Connect Solana wallet")}</button>}
-    {view === 'simulate' && <button type="button" disabled={transfer.busy || pending || !transfer.owner} onClick={() => void transfer.simulate()}>{tr("Simulate transfer")}</button>}
+    {view === 'simulate' && <button type="button" disabled={transfer.busy || !transfer.owner} onClick={() => void transfer.simulate()}>{tr("Simulate transfer")}</button>}
     {review && !transfer.retired && <dl className="swap-summary" aria-label={tr("Transfer details")}>
       <dt>{tr("Send")}</dt><dd>{amount}</dd><dt>{tr("To")}</dt><dd><code>{review.recipient}</code></dd>
       <dt>{tr("From")}</dt><dd><code>{review.owner}</code></dd><dt>{tr("Network")}</dt><dd>{tr(review.network)}</dd>
@@ -33,7 +34,7 @@ export function SolanaTransferPanel({ view }: { view: 'simulate' | 'execute' }) 
       {review.token && review.accountCreationLamports === '0' && <><dt>{tr('Maximum token account deposit')}</dt><dd>{sol(review.maximumAccountCreationLamports)}<small>{tr('Only paid if the recipient token account must be recreated before this transfer lands.')}</small></dd></>}
     </dl>}
     {attempt && !record?.evidence && <p>{tr("Transfer: ")}{tr(record?.notSubmitted ? 'not submitted' : attempt.state.toLowerCase().replaceAll('_', ' '))} {observation?.explorer && <a href={observation.explorer} target="_blank" rel="noreferrer">{tr("View transaction")}</a>}</p>}
-    {pending && <button type="button" disabled={transfer.busy} onClick={() => void transfer.observe()}>{tr("Observe existing transaction")}</button>}
+    {pending && <button type="button" disabled={transfer.busy} onClick={() => void transfer.observe()}>{tr("Observe existing transaction")}</button>}<PendingExecutionNote pending={pending}/><SolanaWalletGuardNote guard={attempt?.walletGuard}/>
     {record?.evidence && observation && <section aria-label={tr("Transfer result")} className="swap-result">
       <h3>{tr("Success")}</h3>
       <p>{tr("Transfer independently reconciled. Sent {0}; the recipient received {1}; fee {2}.", amount, review ? `${formatTokenAmount(observation.amountReceived ?? '0', review.asset.decimals)} ${review.asset.symbol}` : '--', sol(observation.feeLamports))}</p>

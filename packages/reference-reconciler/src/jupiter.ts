@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { ORCA_WHIRLPOOLS_DEVNET, decompileMessageV0, fromBase64, parseMessageV0, parseOrcaTradedEvents, parseTransaction, requireSolanaSwapRuntime, solanaSwapArtifactHash,
-  solanaSwapHash, verifySolanaCluster, base58Encode, type OrcaTradedEvent, type SolanaSwapReview, type SolanaRpc } from '@defi-workflow-engine/reference-compiler';
+import { ORCA_WHIRLPOOLS_DEVNET, assertRecordedSolanaWalletGuard, decompileMessageV0, fromBase64, parseMessageV0, parseOrcaTradedEvents, parseTransaction, requireSolanaSwapRuntime,
+  solanaSwapArtifactHash, solanaSwapHash, verifySolanaCluster, base58Encode, type OrcaTradedEvent, type SolanaSwapReview, type SolanaRpc, type SolanaWalletGuard } from '@defi-workflow-engine/reference-compiler';
 import { hashJournalBytes, type EvidenceBundle, type ExecutionJournal } from '@defi-workflow-engine/workflow-contracts';
 
-export type JupiterChainAttempt = { signature: string | null; transaction: string | null };
+/** `walletGuard`: the verified Lighthouse assertions the owner's wallet appended (HOTFIX-PHANTOM-LIGHTHOUSE-001); absent for the reviewed bytes. */
+export type JupiterChainAttempt = { signature: string | null; transaction: string | null; walletGuard?: SolanaWalletGuard };
 export type SolanaSwapChainAttempt = JupiterChainAttempt;
 export type JupiterObservation = { verdict: 'RECONCILED' | 'DIVERGENT' | 'INCONCLUSIVE'; reason: string; found: boolean; signature: string | null;
   confirmation: string | null; slot: number | null; blockTime: number | null; feeLamports: string | null;
@@ -11,7 +12,9 @@ export type JupiterObservation = { verdict: 'RECONCILED' | 'DIVERGENT' | 'INCONC
   inputSpent: string | null; outputReceived: string | null; accountCreationLamports: string | null; minimumOutput: string;
   programs: string[]; innerPrograms: string[]; explorer: string | null;
   /** Devnet runtime only: Orca's own on-chain Traded event for the swap. */
-  trade?: OrcaTradedEvent | null };
+  trade?: OrcaTradedEvent | null;
+  /** The wallet guard re-verified against the Review for this exact signed transaction (only when the wallet appended one). */
+  walletGuard?: SolanaWalletGuard };
 export type SolanaSwapObservation = JupiterObservation;
 const TOKEN_PROGRAM = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
 const fail = (code: string): never => { throw new Error(code); };
@@ -39,7 +42,7 @@ export async function reconcileSolanaSwapAttempt(review: SolanaSwapReview, attem
   const base: JupiterObservation = { verdict: 'INCONCLUSIVE', reason: 'TRANSACTION_NOT_OBSERVED', found: false, signature: attempt.signature, confirmation: null,
     slot: null, blockTime: null, feeLamports: null, owner: null, inputSpent: null, outputReceived: null, accountCreationLamports: null,
     minimumOutput: review.quote.otherAmountThreshold, programs: [], innerPrograms: [], explorer: attempt.signature ? runtime.explorerTx(attempt.signature) : null,
-    ...review.format === 'gryloo.orca-devnet-review.v1' ? { trade: null } : {} };
+    ...review.format === 'gryloo.orca-devnet-review.v1' ? { trade: null } : {}, ...attempt.walletGuard ? { walletGuard: attempt.walletGuard } : {} };
   if (!attempt.signature || !attempt.transaction) return base;
   try {
     await verifySolanaCluster(rpc, runtime.genesisHash);
@@ -56,9 +59,9 @@ export async function reconcileSolanaSwapAttempt(review: SolanaSwapReview, attem
     const tx = record(value), meta = record(tx.meta);
     if (!Array.isArray(tx.transaction) || tx.transaction[1] !== 'base64' || tx.version !== 0 || !Number.isSafeInteger(tx.slot)) fail('SOLANA_RPC_INVALID');
     base.slot = tx.slot as number; base.blockTime = Number.isSafeInteger(tx.blockTime) ? tx.blockTime as number : null;
-    // Exact owner-signed reviewed bytes, not merely a similar transaction.
-    if (Buffer.from(fromBase64((tx.transaction as unknown[])[0], 2048)).toString('base64') !== Buffer.from(signed).toString('base64') ||
-        Buffer.from(parsedSigned.message).toString('base64') !== review.message) fail(`${X}_TRANSACTION_MISMATCH`);
+    // Exact owner-signed bytes, not merely a similar transaction: the reviewed message, or the recorded wallet guard re-verified against it.
+    if (Buffer.from(fromBase64((tx.transaction as unknown[])[0], 2048)).toString('base64') !== Buffer.from(signed).toString('base64')) fail(`${X}_TRANSACTION_MISMATCH`);
+    try { assertRecordedSolanaWalletGuard(fromBase64(review.message), parsedSigned.message, attempt.walletGuard, review.lookupTables); } catch { fail(`${X}_TRANSACTION_MISMATCH`); }
     if (base.slot < review.simulationResult.slot) fail(`${X}_SLOT_MISMATCH`);
     const message = parseMessageV0(parsedSigned.message);
     const loaded = record(meta.loadedAddresses);
@@ -131,6 +134,11 @@ export async function reconcileSolanaSwapAttempt(review: SolanaSwapReview, attem
   }
 }
 
+/** The evidence's honest statement of what was signed when the owner's wallet appended a verified guard; null for the reviewed bytes. */
+export function walletGuardLimitation(guard: SolanaWalletGuard | undefined): string | null {
+  return guard ? `Balances are finalized transaction metadata for the owner-signed transaction: every reviewed instruction byte for byte, plus ${guard.instructions.length} ` +
+    `Lighthouse assertion instruction(s) the owner's wallet appended before signing (verified read-only post-state checks; signed message ${guard.signedMessageHash}).` : null;
+}
 export type SolanaSwapEvidenceClass = 'MOCKED' | 'PUBLIC_READ_ONLY' | 'PUBLIC_EXECUTED' | 'DEVNET_EXECUTED';
 export type JupiterEvidenceClass = SolanaSwapEvidenceClass;
 export type SolanaSwapEvidenceProvenance = 'PUBLIC_MAINNET' | 'PUBLIC_DEVNET' | 'MOCKED';
@@ -161,11 +169,13 @@ export function buildSolanaSwapEvidence(input: { id: string; review: SolanaSwapR
     actualInputDelta: o.inputSpent, actualOutputDelta: o.outputReceived, signature: o.signature, slot: o.slot, blockTime: o.blockTime, confirmation: o.confirmation,
     feeLamports: o.feeLamports, accountCreationLamports: o.accountCreationLamports, balances: o.owner, route: review.quote.routePlan, routeCommitment: review.routeCommitment,
     swapInstruction: review.inspection.swap, programs: o.programs, innerPrograms: o.innerPrograms, messageHash: review.messageHash,
+    ...o.walletGuard ? { signedMessageHash: o.walletGuard.signedMessageHash, walletGuard: o.walletGuard } : {},
     verdict: o.verdict, reason: o.reason, provenance: input.provenance, evidenceClass, ownerInitiated: input.ownerInitiated, realFunds: runtime.realFunds && input.provenance !== 'MOCKED' };
   const head = hashJournalBytes(new TextEncoder().encode(JSON.stringify(input.journal))).at(-1) ?? fail(`${X}_JOURNAL_EMPTY`);
   // The frozen v1 environment enum has no Devnet member: Devnet maps to TESTNET_EXECUTED, never MAINNET_EXECUTED.
   const environment = input.provenance === 'MOCKED' ? 'MOCKED' as const : runtime.bundleEnvironment;
-  const limitations = ['Balances are finalized transaction metadata for the exact owner-signed reviewed bytes.', 'Native SOL deltas exclude the network fee and any new token-account deposit.',
+  const limitations = [walletGuardLimitation(o.walletGuard) ?? 'Balances are finalized transaction metadata for the exact owner-signed reviewed bytes.',
+    'Native SOL deltas exclude the network fee and any new token-account deposit.',
     ...orca ? ['Solana Devnet with valueless test tokens (Gryloo evidence class DEVNET_EXECUTED). Not mainnet execution and not real funds.'] : []];
   const bundle: EvidenceBundle = { schemaVersion: '1.0.0', evidenceBundleId: input.id, version: 1, supersedes: null,
     semanticWorkflowHash: review.manifest.semanticWorkflowHash, artifactSetHash: review.manifest.artifactSetHash, simulationHash: review.manifest.simulationHash,

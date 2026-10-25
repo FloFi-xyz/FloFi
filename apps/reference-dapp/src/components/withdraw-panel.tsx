@@ -9,6 +9,7 @@ import { useBuild009Wallet } from '../state/build009-wallet-store';
 import { useWorkflow } from '../state/workflow-store';
 import { useSupply } from '../state/supply-store';
 import type { WithdrawObservation } from '@defi-workflow-engine/reference-reconciler';
+import { PendingExecutionNote } from './execution-concurrency-notes';
 const human=(value:string,decimals:number)=>(Number(value)/10**decimals).toLocaleString('en-US',{maximumFractionDigits:decimals});
 const hf=(value:string)=>BigInt(value)===(1n<<256n)-1n?'No debt (∞)':human(value,18);
 export function WithdrawAuthoringForm({nodeId,onDone,direct=false,reviewFormId}:{nodeId?:string;onDone?:()=>void;direct?:boolean;reviewFormId?:string}){
@@ -48,7 +49,7 @@ export function WithdrawPanel({view}:{view:'simulate'|'execute'}){
       <p>{tr("Owner / recipient: ")}{review.account}</p><p>{tr("Pool: ")}{tr(review.pool)}</p><p>{tr("Asset: ")}{tr(review.asset)}</p><p>{tr("Chain: ")}{tr(shown.network)} ({tr(Number(BigInt(shown.chainHex)))})</p>
       <p>{tr("Exact Pool call: withdraw(")}{tr(review.asset)}, {tr(review.amount)}, {tr(review.beneficiary)})</p><p>{tr("Exact calldata: ")}<code>{tr(review.transactions[0]?.data)}</code></p>
       <p>{tr("State block: ")}{tr(review.state.block)}{tr(" · Review expires: ")}{tr(review.expiresAt)}</p><p>{tr("Collateral estimates account for index rounding. Debt continues accruing normal interest.")}</p></>}
-    {view==='simulate'?<button type="button" disabled={run.busy||Boolean(pending)} onClick={()=>void run.simulate()}>{tr("Simulate Withdraw")}</button>:<>
+    {view==='simulate'?<><button type="button" disabled={run.busy} onClick={()=>void run.simulate()}>{tr("Simulate Withdraw")}</button><PendingExecutionNote pending={Boolean(pending)}/></>:<>
       {review&&wallet.account&&wallet.chainId!==shown.chainHex&&<button type="button" disabled={run.busy||wallet.busy} onClick={()=>void run.switchNetwork()}>{tr("Switch wallet to ")}{tr(shown.network)}</button>}
       {record&&!record.authorization&&!record.attempts.length&&!run.retired&&<button type="button" disabled={run.busy} onClick={()=>void run.review()}>{tr("Accept Withdraw review")}</button>}
       {record?.authorization&&!run.retired&&!pending&&!record.notSubmitted&&record.verdict==='PENDING'&&<button type="button" className="primary" disabled={run.busy} onClick={()=>void run.execute()}>{tr("Execute")}</button>}

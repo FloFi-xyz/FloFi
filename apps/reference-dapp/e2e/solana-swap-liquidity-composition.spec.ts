@@ -119,12 +119,12 @@ test('a wallet that changes the reviewed swap is refused before broadcast; Execu
   await panel(page).getByRole('button', { name: 'Execute swap', exact: true }).click();
   await phase(page, 'NOT_EXECUTED');
   expect(await signRequests(page)).toBe(1); expect(await devnetControl({ action: 'sent' })).toBe(0);
-  await expect(panel(page).getByRole('status')).toContainText('Your wallet added 2 instruction(s) from Lighthouse to the transaction you reviewed');
+  await expect(panel(page).getByRole('status')).toContainText('Your wallet added 2 instruction(s) from Lighthouse that FloFi could not verify as read-only protection checks');
   // Execute: a concrete outcome and a way forward, never a terminal "Cancelled".
   await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Execute', exact: true }).click();
   const swapStep = page.locator('.execution-timeline .execution-step').first();
   await expect(swapStep).toHaveClass(/execution-state-not-submitted/);
-  await expect(swapStep).toContainText('FloFi sends only the exact transaction you reviewed, so it did not send this one and nothing reached Solana.');
+  await expect(swapStep).toContainText('that FloFi could not verify as read-only protection checks of the transaction you reviewed, so it did not send it and nothing reached Solana.');
   await expect(page.locator('.execution-timeline .execution-step').nth(1)).toHaveClass(/execution-state-waiting/);
   await expect(page.getByRole('complementary', { name: 'Execution result summary' })).toContainText('Transaction not submitted');
   await expect(page.locator('.execution-timeline')).not.toContainText('Cancelled');
@@ -153,6 +153,25 @@ test('a wallet that changes the reviewed swap is refused before broadcast; Execu
 test('a Phantom-like wallet signs the exact reviewed swap and position: both sent once and reconciled', async ({ page }) => {
   const errors: string[] = []; page.on('pageerror', e => errors.push(e.message));
   const wallet = await resetDevnetHarness(); await installDevnetWallet(page, wallet, { phantom: true });
+  await author(page);
+  await swapped(page);
+  expect(await signRequests(page)).toBe(1); expect(await devnetControl({ action: 'sent' })).toBe(1);
+  await panel(page).getByRole('button', { name: 'Prepare position with the received amount', exact: true }).click();
+  await phase(page, 'CONSUMING');
+  await panel(page).getByRole('button', { name: 'Accept position review', exact: true }).click();
+  await panel(page).getByRole('button', { name: 'Execute position', exact: true }).click();
+  await phase(page, 'COMPLETED');
+  expect(await signRequests(page)).toBe(2); expect(await devnetControl({ action: 'sent' })).toBe(2);
+  await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Execute', exact: true }).click();
+  await expect(page.locator('.execution-timeline .execution-step.execution-state-confirmed')).toHaveCount(2);
+  expect(errors).toEqual([]);
+});
+
+// HOTFIX-PHANTOM-LIGHTHOUSE-001: Phantom's transaction protection (Lighthouse assertions appended before signing, as captured on mainnet-beta)
+// is verified and accepted for the swap and for the two-signer position, whose mint key co-signs the guarded message: both sent once, reconciled.
+test('a Phantom wallet with Lighthouse protections signs verified guards on the swap and the position: both sent once and reconciled', async ({ page }) => {
+  const errors: string[] = []; page.on('pageerror', e => errors.push(e.message));
+  const wallet = await resetDevnetHarness(); await installDevnetWallet(page, wallet, { lighthouse: true });
   await author(page);
   await swapped(page);
   expect(await signRequests(page)).toBe(1); expect(await devnetControl({ action: 'sent' })).toBe(1);

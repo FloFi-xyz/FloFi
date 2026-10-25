@@ -4,7 +4,7 @@ import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Locator, Page } from '@playwright/test';
-import { appendMockedWalletGuards, applyMockedPhantomPriorityFee, createMockedSolanaWallet } from '@defi-workflow-engine/reference-compiler';
+import { appendMockedWalletGuards, applyMockedPhantomLighthouseGuards, applyMockedPhantomPriorityFee, createMockedSolanaWallet } from '@defi-workflow-engine/reference-compiler';
 
 /** MOCKED Wallet Standard wallet. Its disposable key lives only in this test process's memory. */
 export async function resetJupiterHarness(options: Record<string, unknown> = {}, funding: { lamports?: string; usdc?: string } = {}) {
@@ -21,13 +21,16 @@ export async function jupiterControl(body: Record<string, unknown>): Promise<unk
 /**
  * `guard`: the wallet appends Lighthouse guard instructions to its first `guard` transactions before signing them (an unknown modification).
  * `phantom`: the modification captured from Phantom on Devnet: SetComputeUnitPrice inserted when the transaction sets no price.
+ * `lighthouse`: Phantom's transaction protection as captured on mainnet-beta (HOTFIX-PHANTOM-LIGHTHOUSE-001): an AssertAccountInfoMulti on the owner
+ * is appended after the reviewed instructions before signing; FloFi verifies and accepts it.
  */
 export async function installSolanaWallet(page: Page, wallet: ReturnType<typeof createMockedSolanaWallet>, behavior: { reject?: boolean; rejectAfter?: number; modify?: string; pause?: boolean; chains?: string[]; decoys?: { name: string; chains: string[] }[];
-  signMessage?: boolean; guard?: number; phantom?: boolean } = {}) {
+  signMessage?: boolean; guard?: number; phantom?: boolean; lighthouse?: boolean } = {}) {
   let guarded = 0;
   await page.exposeFunction('grylooJupiterTestSign', async (unsigned: string) => {
     if (behavior.modify) return wallet.sign(behavior.modify);
     if (guarded < (behavior.guard ?? 0)) { guarded++; return wallet.sign(appendMockedWalletGuards(unsigned)); }
+    if (behavior.lighthouse) return wallet.sign(applyMockedPhantomLighthouseGuards(unsigned, { lamportsAtLeast: 1n }));
     return wallet.sign(behavior.phantom ? applyMockedPhantomPriorityFee(unsigned) : unsigned);
   });
   // BUILD-MCP-002: optional Sign-In With Solana support (Wallet Standard `solana:signMessage`), signed in this test process only.
