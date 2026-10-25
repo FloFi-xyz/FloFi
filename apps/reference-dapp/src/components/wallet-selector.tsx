@@ -27,7 +27,7 @@ export function detectedWalletChoices(ecosystems: readonly WalletEcosystem[], so
   ], walletPreference());
 }
 
-export function WalletSelectorProvider({ children }: { children: ReactNode }) {
+export function WalletSelectorProvider({ children, embedded = false }: { children: ReactNode; embedded?: boolean }) {
   const [pending, setPending] = useState<Pending | null>(null);
   const current = useRef<Pending | null>(null);
   const settle = useCallback((choice: WalletChoice | null) => {
@@ -46,7 +46,7 @@ export function WalletSelectorProvider({ children }: { children: ReactNode }) {
   }), []);
   useEffect(() => () => { current.current?.resolve(null); current.current = null; }, []);
   const value = useMemo(() => ({ choose, open: pending !== null }), [choose, pending]);
-  return <Context.Provider value={value}>{children}{pending && <WalletSelectorDialog request={pending} onSettle={settle}/>}</Context.Provider>;
+  return <Context.Provider value={value}>{children}{pending && <WalletSelectorDialog request={pending} embedded={embedded} onSettle={settle}/>}</Context.Provider>;
 }
 export function useWalletSelector(): Selector {
   const value = useContext(Context);
@@ -64,7 +64,7 @@ export function WalletMark({ icon }: { icon: string | null }) {
   return <span className="wallet-mark" aria-hidden="true">{icon ? <img src={icon} width="28" height="28" alt=""/> : <WalletGlyph/>}</span>;
 }
 
-function WalletSelectorDialog({ request, onSettle }: { request: Pending; onSettle(choice: WalletChoice | null): void }) {
+function WalletSelectorDialog({ request, onSettle, embedded }: { request: Pending; embedded: boolean; onSettle(choice: WalletChoice | null): void }) {
   const { t: tr } = useLocale();
   const dialog = useRef<HTMLDialogElement>(null);
   const list = useRef<HTMLUListElement>(null);
@@ -131,7 +131,9 @@ function WalletSelectorDialog({ request, onSettle }: { request: Pending; onSettl
               <span className="wallet-option-status">{tr(remembered[choice.ecosystem] === choice.key ? 'Last used' : 'Detected')}</span>
             </button>
           </li>)}
-        </ul> : <p className="wallet-selector-empty" role="status">{tr(incompatible ?? 'No wallet detected in this browser. Install or enable a wallet extension, then refresh.')}</p>}
+        </ul> : <p className="wallet-selector-empty" role="status">{tr(incompatible ?? (embedded
+          ? 'No compatible wallet is available inside this chat. This host or wallet does not expose a signer here. Nothing was authorized. Opening FloFi is an optional external fallback.'
+          : 'No wallet detected in this browser. Install or enable a wallet extension, then refresh.'))}</p>}
       </section>
       {others.length > 0 && <section aria-labelledby={otherId}>
         <h3 id={otherId} className="wallet-selector-group">{tr("Other wallets")}</h3>

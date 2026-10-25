@@ -158,7 +158,7 @@ export async function proveConnectedEvmWallet(page: Page, region: Locator, accou
  * opted-in engineering diagnostics. Read-only: it never simulates, accepts or signs anything itself.
  */
 export async function openProposalSimulationDetails(page: Page): Promise<void> {
-  if (await signingSurface(page).count()) await page.getByRole('button', { name: 'View in FloFi', exact: true }).click();
+  if (await signingSurface(page).count()) await page.getByRole('button', { name: 'Open Canvas', exact: true }).click();
   await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Simulate', exact: true }).click();
   await openSimulationDetails(page);
 }

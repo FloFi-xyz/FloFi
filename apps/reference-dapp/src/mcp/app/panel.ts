@@ -1,29 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /**
- * BUILD-MCP-002: the in-chat FloFi approval panel, an MCP App (`io.modelcontextprotocol/ui`, spec 2026-01-26) attached to
- * `request_user_approval`. The host renders it in a sandboxed iframe and sends it the tool result. It shows the external
- * proposal (network, funds class, steps, workflow hash, authority NONE) and offers ways to reach the owner's own wallet:
- *
- *   B. FloFi signing window (desktop default)  app-only `open_approval_session` → `ui/open-link` to a fresh FloFi URL
- *   C. Wallet in-app browsers (mobile)          MetaMask keeps the fragment; Phantom opens the public page for an owner-pasted link
- *   E. /approve link (universal fallback)       always shown as text, also in the tool result for hosts without MCP Apps
- *   A. In-frame wallet                          NOT an execution path: an environment probe only (is a wallet injected here? may
- *                                               this frame open popups?) reported for the owner's host experiments; off unless the
- *                                               host is listed in FLOFI_MCP_INFRAME_WALLET_HOSTS, and even then it only reports
- *   D. WalletConnect / Reown                    deferred; the adapter list has room for it
- *
- * Then it polls the app-only `get_execution_progress` and, when a run is reconciled, puts its status and evidence summary into the
- * model's context (`ui/update-model-context`). The panel has no network access of its own (empty CSP domains): every call goes
- * through the host to FloFi's MCP server with the user's OAuth token. It never sees a key, never signs and never sends.
- *
- * BUILD-WORKFLOW-VISUAL-PRESENTATION-001: the proposal is shown as FloFi's workflow visual — the shared layout the server sends in the
- * tool result's `_meta['flofi/visual']`, painted as DOM (text through textContent, only the layout's own style properties, no URL, no
- * markup), scaled to the frame, with its text alternative. The panel computes no layout of its own; the same tree is the PNG that MCP
- * image content, Telegram and WhatsApp show.
+ * MCP Apps approval wrapper. Authenticated tool metadata stays private to the UI. The wrapper can embed FloFi's existing
+ * signing runtime on a fixed, trusted same-origin path, or explicitly open the minimal external signing page. It never signs.
+ * Embedded signing requires host framing support and a compatible wallet provider; no vendor acceptance is inferred.
+ * Status and verified receipts still come from the app-only progress tool, never from iframe messages.
  */
 import { trustedFlofiUrl } from '../../platform/navigation.ts';
 
-export const PANEL_URI = 'ui://flofi/approval-panel.html';
+export const PANEL_URI = 'ui://flofi/approval-panel-chat-first-v1.html';
+export const LEGACY_PANEL_URI = 'ui://flofi/approval-panel.html';
 export const PANEL_MIME = 'text/html;profile=mcp-app';
 export type PanelSettings = { readonly origin: string; readonly inFrameProbeHosts: readonly string[] };
 
@@ -42,6 +27,9 @@ export function panelMain(settings: PanelSettings, trustedUrl: typeof trustedFlo
     visual: Visual | null } = { approval: null, progress: null, error: null, host: '', opened: null, probe: null, reported: '', visual: null };
   let nextId = 1, timer: ReturnType<typeof setTimeout> | null = null, polls = 0;
   let opening = false, disposed = false;
+  let signingFrame: HTMLIFrameElement | null = null;
+  let frameTimeout: ReturnType<typeof setTimeout> | null = null;
+  const closeFrame = () => { if (frameTimeout) clearTimeout(frameTimeout); frameTimeout = null; signingFrame?.remove(); signingFrame = null; };
   const post = (message: Json) => window.parent.postMessage({ jsonrpc: '2.0', ...message }, '*');
   const request = (method: string, params: Json) => new Promise<unknown>((resolve, reject) => {
     const id = nextId++;
@@ -122,12 +110,12 @@ export function panelMain(settings: PanelSettings, trustedUrl: typeof trustedFlo
     try { const result = await request('ui/open-link', { url }) as { isError?: boolean } | undefined;
       if (result?.isError) throw new Error('OPEN_LINK_REFUSED'); return; }
     catch {
-      const openai = (window as unknown as { openai?: { openExternal?: (input: { href: string }) => unknown } }).openai;
-      if (openai?.openExternal) { await openai.openExternal({ href: url }); return; }
+      const openai = (window as unknown as { openai?: { openExternal?: (input: { href: string; redirectUrl: false }) => unknown } }).openai;
+      if (openai?.openExternal) { await openai.openExternal({ href: url, redirectUrl: false }); return; }
       throw new Error('OPEN_LINK_REFUSED');
     }
   }
-  async function connect(target: 'window' | 'phantom' | 'metamask', canvas = false) {
+  async function connect(target: 'chat' | 'window' | 'phantom' | 'metamask') {
     if (!view.approval || opening) return;
     const approvalId = view.approval.approvalId;
     opening = true; view.error = null; render();
@@ -135,16 +123,32 @@ export function panelMain(settings: PanelSettings, trustedUrl: typeof trustedFlo
       const session = await callTool('open_approval_session', { approvalId });
       if (disposed || view.approval?.approvalId !== approvalId) return;
       const links = (session.walletLinks ?? {}) as Record<string, string>;
-      const url = target === 'window' ? String(session.approvalUrl) : links[target];
+      const url = target === 'window' || target === 'chat' ? String(session.approvalUrl) : links[target];
       const approval = approvalLink(session.approvalUrl, approvalId, true);
       if (!approval || session.approvalId !== approvalId) throw new Error('APPROVAL_LINK_INVALID');
-      const expected = target === 'window' ? approval.href : target === 'metamask'
+      const expected = target === 'window' || target === 'chat' ? approval.href : target === 'metamask'
         ? `https://metamask.app.link/dapp/${approval.origin.replace(/^https?:\/\//, '')}/approve${approval.hash}`
         : `https://phantom.com/ul/browse/${encodeURIComponent(approval.origin + '/approve')}?ref=${encodeURIComponent(settings.origin)}`;
       if (url !== expected) throw new Error('APPROVAL_LINK_INVALID');
       view.approval.approvalUrl = String(session.approvalUrl);
-      if (canvas && target === 'window') approval.searchParams.set('view', 'canvas');
-      await openLink(canvas && target === 'window' ? approval.href : url);
+      if (target === 'chat') {
+        // Derive only this fixed same-origin path from the authenticated app-only result, never a model-supplied embed URL.
+        closeFrame();
+        const frame = document.createElement('iframe');
+        frame.title = 'Authorize with your wallet in this chat';
+        frame.referrerPolicy = 'no-referrer';
+        frame.sandbox.add('allow-scripts', 'allow-same-origin', 'allow-forms');
+        frame.src = `${approval.origin}/mcp/approve${approval.hash}`;
+        frame.className = 'signing-frame';
+        frame.hidden = true;
+        // The host's sandbox still applies. No popup, top navigation or delegated signing permission is requested.
+        document.body.insertBefore(frame, document.getElementById('app')); signingFrame = frame;
+        frameTimeout = setTimeout(() => {
+          if (signingFrame === frame && frame.hidden) {
+            closeFrame(); view.error = 'This host could not load the in-chat signing surface. Nothing was authorized by opening it. Open FloFi is an optional external fallback.'; render();
+          }
+        }, 15_000);
+      } else await openLink(url);
       view.opened = target;
       schedule(2_000);
     } catch (error) { view.error = error instanceof Error ? error.message : 'OPEN_FAILED'; }
@@ -163,7 +167,7 @@ export function panelMain(settings: PanelSettings, trustedUrl: typeof trustedFlo
     try { const opened = window.open('about:blank', '_blank', 'noopener'); popups = opened === null ? 'BLOCKED_OR_NOOPENER' : 'ALLOWED'; } catch { popups = 'BLOCKED'; }
     view.probe = { host: view.host || 'unknown', injectedEvm: typeof w.ethereum === 'object' && w.ethereum !== null, injectedSolanaLegacy: !!(w.solana || w.phantom),
       walletStandard: standardWallets, popups, origin: location.origin, checkedAt: new Date().toISOString(),
-      note: 'Diagnostics only: in-frame execution is not enabled; use the FloFi window.' };
+      note: 'Diagnostics only: the signing surface checks its own wallet providers.' };
     render();
   }
   function schedule(delay: number) {
@@ -213,20 +217,23 @@ export function panelMain(settings: PanelSettings, trustedUrl: typeof trustedFlo
     if (!a) { root.append(el('p', view.error ? `FloFi could not prepare this approval (${view.error}).` : 'Waiting for the FloFi approval…', 'muted')); return; }
     const status = String(view.progress?.status ?? a.status);
     const head = el('div', undefined, 'head');
-    head.append(el('span', 'FLOFI · EXTERNAL PROPOSAL', 'eyebrow'), el('span', status, 'badge'));
-    root.append(head, el('h1', a.summary ?? 'Strategy ready for your approval'));
-    root.append(el('p', 'Nothing is authorized yet. Only your own wallet can sign, after a fresh simulation and the Strategy Manifest Review in FloFi.', 'notice'));
+    head.append(el('span', 'FLOFI · APPROVAL', 'eyebrow'), el('span', status, 'badge'));
+    root.append(head);
+    if (signingFrame?.hidden) root.append(el('p', 'Opening your wallet review in this chat…', 'notice'));
+    if (!signingFrame) root.append(el('h1', a.steps.length === 1 ? `Review ${a.steps[0]!.action}` : 'Review your operation'),
+      el('p', 'Nothing is authorized yet. Only your own wallet can sign, after a fresh simulation and the Strategy Manifest Review in FloFi.', 'notice'));
     if (a.fundsClass === 'REAL_FUNDS') root.append(el('p', 'Real funds: this strategy uses a mainnet.', 'warning'));
-    if (view.visual) figure(view.visual, root);
-    const facts = el('dl');
+    if (view.visual && !signingFrame) figure(view.visual, root);
+    const facts = el('dl'), technical = el('details');
+    technical.append(el('summary', 'Proposal details'));
     const fact = (label: string, value: string) => { facts.append(el('dt', label), el('dd', value)); };
     fact('Network', `${a.networkEnvironment === 'MAINNET' ? 'Mainnet' : 'Public testnet'} · ${[...new Set(a.steps.flatMap(s => [s.network, s.destinationNetwork].filter(Boolean) as string[]))].join(' → ')}`);
     fact('Funds', a.fundsClass === 'REAL_FUNDS' ? 'Real funds' : 'Test funds');
     // The picture shows the steps; the plain list remains for a result without one.
     if (!view.visual) fact('Steps', a.steps.map(s => `${s.index + 1}. ${s.action} (${s.protocol || s.kind})`).join('  '));
-    fact('Workflow hash', a.workflowHash);
-    fact('Authority', a.authority);
-    root.append(facts);
+    if (!signingFrame) root.append(facts);
+    technical.append(el('p', `Workflow hash: ${a.workflowHash}`), el('p', a.authority));
+    if (a.summary) technical.append(el('p', a.summary)); if (!signingFrame) root.append(technical);
     const runs = Array.isArray(view.progress?.runs) ? view.progress!.runs as Json[] : [];
     if (runs.length) {
       const list = el('ul', undefined, 'runs');
@@ -239,23 +246,26 @@ export function panelMain(settings: PanelSettings, trustedUrl: typeof trustedFlo
     }
     if (!terminal(status) && status !== 'APPLIED') {
       const actions = el('div', undefined, 'actions');
-      actions.append(button('Authorize', () => void connect('window'), true), button('View in FloFi', () => void connect('window', true)));
+      if (!signingFrame) actions.append(button('Authorize in chat', () => void connect('chat'), true));
+      actions.append(button('Open FloFi', () => void connect('window')));
       root.append(actions);
       const mobile = el('div', undefined, 'actions');
       mobile.append(el('span', 'On your phone:', 'muted'), a.walletNamespace === 'solana'
         ? button('Open Phantom browser', () => void connect('phantom')) : button('Open in MetaMask', () => void connect('metamask')));
-      root.append(mobile);
-      if (a.walletNamespace === 'solana') root.append(el('p', 'In Phantom, paste the private FloFi approval link below into its browser. Keep this link private.', 'muted'));
-      root.append(el('p', 'Wallet in this chat window: not used. FloFi opens its own page so your wallet extension or app can sign there.', 'muted'));
+      if (!signingFrame) {
+        root.append(mobile);
+        if (a.walletNamespace === 'solana') root.append(el('p', 'In Phantom, paste the private FloFi approval link below into its browser. Keep this link private.', 'muted'));
+        root.append(el('p', 'In-chat authorization needs a wallet that is available in this host. If your wallet is unavailable here, Open FloFi is an optional external fallback; that fallback is not completion inside the chat.', 'muted'));
+      }
     }
-    if (a.approvalUrl && !terminal(status)) {
+    if (!signingFrame && a.approvalUrl && !terminal(status)) {
       const fallback = el('p', 'Or open this link in a browser with your wallet: ', 'muted');
       fallback.append(el('code', a.approvalUrl));
       root.append(fallback);
       if (!a.approvalUrl.includes('flofi_')) root.append(el('p', 'Use the same browser you used to connect FloFi to your assistant.', 'muted'));
     }
-    if (view.opened) root.append(el('p', 'FloFi prepares a fresh simulation for your wallet. Check the details and choose Authorize in wallet, then confirm in your wallet. Canvas is optional. This panel checks the recorded result.', 'muted'));
-    if (settings.inFrameProbeHosts.includes(view.host)) {
+    if (view.opened && !signingFrame) root.append(el('p', 'Check the fresh simulation and choose Authorize in wallet, then confirm in your wallet. This panel checks the recorded result.', 'muted'));
+    if (!signingFrame && settings.inFrameProbeHosts.includes(view.host)) {
       root.append(button('Check this chat environment (diagnostics)', probe));
       if (view.probe) root.append(el('pre', JSON.stringify(view.probe, null, 1)));
     }
@@ -265,6 +275,15 @@ export function panelMain(settings: PanelSettings, trustedUrl: typeof trustedFlo
   }
 
   window.addEventListener('message', event => {
+    if (signingFrame && event.source === signingFrame.contentWindow && event.origin === settings.origin
+      && event.data?.type === 'flofi/approval-frame' && Number.isFinite(event.data.height)) {
+      if (frameTimeout) clearTimeout(frameTimeout); frameTimeout = null;
+      signingFrame.hidden = false;
+      // Keep wallet dialogs within the visible host viewport; the signing document scrolls for longer financial reviews.
+      signingFrame.style.height = `${Math.min(900, Math.max(480, Math.min(window.innerHeight, event.data.height)))}px`;
+      post({ method: 'ui/notifications/size-changed', params: { height: document.documentElement.scrollHeight } });
+      return;
+    }
     if (event.source !== window.parent) return;
     const message = event.data as Json & { id?: number; method?: string; params?: Json; result?: unknown; error?: { message?: string } };
     if (!message || message.jsonrpc !== '2.0') return;
@@ -278,6 +297,7 @@ export function panelMain(settings: PanelSettings, trustedUrl: typeof trustedFlo
       const content = (message.params as { structuredContent?: unknown } | undefined)?.structuredContent;
       // A missing/failed result must clear any prior CTA. The host remains responsible for delivering genuine MCP results.
       view.approval = null; view.visual = null; view.progress = null;
+      closeFrame();
       if (timer) clearTimeout(timer);
       if (message.params?.isError !== true && (content as Json | undefined)?.ok === true && isApproval(content)) {
         const privateLinks = (message.params?._meta as Json | undefined)?.['flofi/approval'] as Json | undefined;
@@ -294,6 +314,7 @@ export function panelMain(settings: PanelSettings, trustedUrl: typeof trustedFlo
       else view.error = typeof (content as Json | undefined)?.code === 'string' ? String((content as Json).code) : 'NO_APPROVAL';
       render();
     } else if (message.method === 'ui/resource-teardown') {
+      closeFrame();
       disposed = true; if (timer) clearTimeout(timer);
       for (const waiter of pending.values()) { clearTimeout(waiter.timeout); waiter.reject(new Error('APP_CLOSED')); }
       pending.clear(); if (typeof message.id === 'number') post({ id: message.id, result: {} });
@@ -328,18 +349,20 @@ dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 12px;margin:0}dt{c
 button.primary{background:var(--blue);color:#fff;border:0}button.secondary{background:var(--soft);color:var(--ink);border:1px solid var(--line)}
 .muted{color:var(--muted);font-size:12px;margin:0}code{font-size:11px;overflow-wrap:anywhere}pre{font-size:11px;background:var(--soft);padding:8px;border-radius:8px;overflow:auto}
 .error{color:var(--red);margin:0;font-weight:700}.runs{margin:0;padding-left:18px}
-.visual{width:100%;max-width:482px;overflow:hidden;border-radius:12px;border:1px solid var(--line)}`;
+.signing-frame{display:block;width:100%;min-height:480px;border:0;background:var(--bg)}.signing-frame[hidden]{display:none}\n.visual{width:100%;max-width:482px;overflow:hidden;border-radius:12px;border:1px solid var(--line)}`;
 
 /** The panel document: one HTML file with inline style and script, no external resource. */
 export function panelHtml(settings: PanelSettings): string {
+  const frameOrigin = trustedFlofiUrl(`${settings.origin}/`, settings.origin)?.origin ?? "'none'";
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">` +
+    `<meta http-equiv="Content-Security-Policy" content="frame-src ${frameOrigin}; connect-src 'none'; base-uri 'none'; form-action 'none'; object-src 'none'">` +
     `<title>FloFi approval</title><style>${STYLE}</style></head><body><main id="app" aria-live="polite"></main>` +
     `<script>(${panelMain.toString()})(${JSON.stringify(settings).replace(/</g, '\\u003c')}, ${trustedFlofiUrl.toString()});</script></body></html>`;
 }
-/** MCP Apps resource metadata: no network, no frames, no external resources; ChatGPT's mirror allows opening FloFi links only. */
+/** MCP Apps metadata: one same-origin signing frame, no wrapper network or external resources. Existing redirect allowlist is retained. */
 export function panelResourceMeta(origin: string) {
-  return { ui: { csp: { connectDomains: [], resourceDomains: [], frameDomains: [], baseUriDomains: [] }, prefersBorder: true },
-    'openai/widgetCSP': { connect_domains: [], resource_domains: [], redirect_domains: [origin, 'https://phantom.com', 'https://metamask.app.link'] },
-    'openai/widgetDescription': 'FloFi approval: shows the proposal and opens FloFi so the user can review and sign with their own wallet. It never signs.',
+  return { ui: { csp: { connectDomains: [], resourceDomains: [], frameDomains: [origin], baseUriDomains: [] }, prefersBorder: true },
+    'openai/widgetCSP': { connect_domains: [], resource_domains: [], frame_domains: [origin], redirect_domains: [origin, 'https://phantom.com', 'https://metamask.app.link'] },
+    'openai/widgetDescription': 'FloFi approval: opens the existing signing surface inside the conversation when the host and wallet support it. External FloFi is optional. Only the wallet signs.',
     'openai/widgetPrefersBorder': true };
 }

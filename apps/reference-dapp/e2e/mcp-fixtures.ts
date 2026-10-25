@@ -29,7 +29,8 @@ export async function connectViaBrowser(page: Page, request: APIRequestContext, 
     code_challenge_method: 'S256', scope, resource: `${APP_ORIGIN}/api/mcp` }).toString());
   await expect(page.getByRole('heading', { name: `Connect ${CLIENT_NAME} to FloFi` })).toBeVisible();
   await expect(page.getByText('This connection never moves funds.')).toBeVisible();
-  await page.getByLabel('Invite code').fill(MCP_E2E_INVITE);
+  if (process.env.FLOFI_MCP_OAUTH_ACCESS === 'open') await expect(page.getByLabel('Invite code')).toHaveCount(0);
+  else if (await page.getByLabel('Invite code').count()) await page.getByLabel('Invite code').fill(MCP_E2E_INVITE);
   await page.getByRole('button', { name: 'Allow' }).click();
   await page.waitForURL(url => url.pathname === '/mcp-e2e-callback');
   const back = new URL(page.url());
@@ -88,9 +89,10 @@ export type HostLog = { openLinks: string[]; modelContext: { content?: { text: s
 
 /** Loads the panel HTML in the test host with the tool call's input and result. */
 export async function openHost(page: Page, client: ReturnType<typeof mcpClient>, panelHtml: string, toolInput: Record<string, unknown>, toolResult: ToolResult,
-  options: { hostName?: string; openLinkRefused?: boolean } = {}): Promise<FrameLocator> {
+  options: { hostName?: string; openLinkRefused?: boolean; embedded?: boolean } = {}): Promise<FrameLocator> {
   await page.exposeFunction('hostCallTool', (name: string, args: Record<string, unknown>) => client.toolResult(name, args));
-  await page.setContent(HOST_HTML);
+  if (options.embedded) await page.goto(`${APP_ORIGIN}/mcp-e2e-callback`);
+  await page.setContent(options.embedded ? HOST_HTML.replace('sandbox="allow-scripts"', 'sandbox="allow-scripts allow-same-origin allow-forms"') : HOST_HTML);
   await page.evaluate(({ html, input, result, options }) => {
     const w = window as unknown as { toolInput: unknown; toolResult: unknown; fixtureHostName?: string; fixtureOpenLinkRefused?: boolean };
     w.toolInput = input; w.toolResult = result;

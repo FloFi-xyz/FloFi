@@ -46,8 +46,8 @@ test('one approval for a two-step workflow: each step signed on /approve after t
     authorizationPlan: { stepCount: 2, confirmEachStep: { available: true, walletConfirmationsAtLeast: 2 }, delegatedSingleAuthorization: { available: false } } });
   const approvalId = String((result.structuredContent as { approvalId: string }).approvalId);
   const host = await context.newPage();
-  const panel = await openHost(host, client, await panelHtmlOf(client, 'ui://flofi/approval-panel.html'), args, result);
-  await panel.getByRole('button', { name: 'Authorize', exact: true }).click();
+  const panel = await openHost(host, client, await panelHtmlOf(client, 'ui://flofi/approval-panel-chat-first-v1.html'), args, result);
+  await panel.getByRole('button', { name: 'Open FloFi', exact: true }).click();
   await expect.poll(async () => (await hostLog(host)).openLinks.length).toBe(1);
   const url = (await hostLog(host)).openLinks[0]!;
   expect(url).toMatch(new RegExp(`^${APP_ORIGIN.replace(/[.]/g, '\\.')}/approve#flofi_hs_[A-Za-z0-9_-]{43}$`));

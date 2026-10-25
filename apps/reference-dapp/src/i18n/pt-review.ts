@@ -63,6 +63,10 @@ export const portugueseReview: Readonly<Record<string, string>> = {
   'Open the FloFi approval link again from the app that sent it. If the link has expired, ask that app for a new one.': 'Abra novamente a ligação de aprovação FloFi a partir da aplicação que a enviou. Se a ligação tiver expirado, peça uma nova a essa aplicação.',
   'Ask your connected assistant to prepare a new FloFi approval link.': 'Peça ao seu assistente ligado que prepare uma nova ligação de aprovação FloFi.',
   'Ask the app that sent this link to prepare a new FloFi approval link.': 'Peça à aplicação que enviou esta ligação que prepare uma nova ligação de aprovação FloFi.',
+  'Share status and evidence with {0}': 'Partilhar estado e comprovativo com {0}',
+  'Open Canvas': 'Abrir Canvas', 'Technical explanation': 'Explicação técnica',
+  'This browser or host could not keep the isolated wallet session inside the chat. Nothing was authorized. Opening FloFi is an optional external fallback.': 'Este navegador ou host não conseguiu manter a sessão isolada da carteira na conversa. Nada foi autorizado. Abrir a FloFi é uma alternativa externa opcional.',
+  'No compatible wallet is available inside this chat. This host or wallet does not expose a signer here. Nothing was authorized. Opening FloFi is an optional external fallback.': 'Não há uma carteira compatível disponível nesta conversa. Este host ou carteira não disponibiliza aqui um assinante. Nada foi autorizado. Abrir a FloFi é uma alternativa externa opcional.',
   // BUILD-FLOFI-UX-UI-002: the compact /approve notice inside the workspace.
   'From {0}': 'De {0}', 'Proposal details': 'Detalhes da proposta', 'Use another wallet': 'Usar outra carteira', 'Restore proposal': 'Restaurar proposta',
   'Close approval': 'Fechar aprovação', 'Loading your exact proposal…': 'A carregar a sua proposta exata…',

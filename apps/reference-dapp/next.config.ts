@@ -13,6 +13,7 @@ const config: NextConfig = {
   outputFileTracingIncludes: {
     '/app{,/**}': ['./e2e/copilot/replay.json', './e2e/copilot/replay-v2.json', './e2e/observations/base-recorded-observations.json'],
     '/approve': ['./e2e/copilot/replay.json', './e2e/copilot/replay-v2.json', './e2e/observations/base-recorded-observations.json'],
+    '/mcp/approve': ['./e2e/copilot/replay.json', './e2e/copilot/replay-v2.json', './e2e/observations/base-recorded-observations.json'],
   },
   // The browser may connect only to its own origin (read-only Base reads run on the local server) and, for Credentials → Add card,
   // to the three Mercado Pago origins its official Secure Fields SDK needs: its API, its static secure-fields host and the

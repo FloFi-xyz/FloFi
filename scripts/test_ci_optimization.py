@@ -455,7 +455,8 @@ MAIN_PROFILES = {
 MAIN_SEPARATE_SUITES = {
     'mcp-routes-oauth-disabled': (['mcp-route-presentation.spec.ts'], {}),
     'developer-journey': (['developer-journey.spec.ts'], {'GRYLOO_MCP_E2E': 'EMBEDDED_LOOPBACK_ONLY', 'TEST_DATABASE_URL': '<TEST_DATABASE_URL>'}),
-    'mcp-in-chat': (['mcp-in-chat.spec.ts', 'mcp-route-presentation.spec.ts'], {'GRYLOO_MCP_E2E': 'EMBEDDED_LOOPBACK_ONLY', 'TEST_DATABASE_URL': '<TEST_DATABASE_URL>'}),
+    'mcp-in-chat': (['mcp-in-chat.spec.ts', 'mcp-route-presentation.spec.ts', '--grep-invert', 'embedded wallet proof'], {'GRYLOO_MCP_E2E': 'EMBEDDED_LOOPBACK_ONLY', 'FLOFI_MCP_OAUTH_ACCESS': 'open', 'TEST_DATABASE_URL': '<TEST_DATABASE_URL>'}),
+    'mcp-embedded-signing': (['mcp-in-chat.spec.ts', '--grep', 'embedded wallet proof'], {'GRYLOO_MCP_E2E': 'EMBEDDED_LOOPBACK_ONLY', 'FLOFI_MCP_OAUTH_ACCESS': 'open', 'TEST_DATABASE_URL': '<TEST_DATABASE_URL>'}),
     'channel-signing': (['channel-signing.spec.ts'], {'GRYLOO_MCP_E2E': 'EMBEDDED_LOOPBACK_ONLY', 'TEST_DATABASE_URL': '<TEST_DATABASE_URL>'}),
     'channel-approve': (['whatsapp-approve.spec.ts', 'telegram-approve.spec.ts'], {'GRYLOO_MCP_E2E': 'EMBEDDED_LOOPBACK_ONLY',
                         'GRYLOO_CHANNEL_E2E': 'FIXTURE_LOOPBACK_ONLY', 'TEST_DATABASE_URL': '<TEST_DATABASE_URL>'}),
@@ -545,7 +546,7 @@ class BrowserPlan(unittest.TestCase):
                     continue
                 if index and args[index - 1] == '--config':
                     self.assertTrue((app / arg).is_file(), arg)
-                elif not index or args[index - 1] != '--grep':
+                elif not index or args[index - 1] not in {'--grep', '--grep-invert'}:
                     with self.subTest(profile=name, filter=arg):
                         self.assertEqual(len([path for path in files if re.search(arg, path)]), 1)
 

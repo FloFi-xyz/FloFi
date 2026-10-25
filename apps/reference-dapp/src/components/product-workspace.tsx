@@ -6,6 +6,7 @@ import { baseAssetRegistry, referenceRegistry } from '@defi-workflow-engine/acti
 import { AppShell } from './app-shell';
 import { ApprovalHandoff } from './approval-handoff';
 import { ChannelProgressPing } from './channel-progress-ping';
+import { EmbeddedApproval } from './embedded-approval';
 import { WorkflowProvider } from '../state/workflow-store';
 import { BridgeProvider } from '../state/bridge-store';
 import { Build009WalletProvider } from '../state/build009-wallet-store';
@@ -44,13 +45,14 @@ export function ProductWorkspace({ initialWorkflowId, engineeringEnabled = false
   // only after the server resolves a usable handoff. Product routes keep AppShell unchanged.
   // BUILD-FLOFI-UX-UI-002: on /approve the proposal's notice renders inside the workspace (no separate panel), and Simulate/Execute stay
   // closed until the proposal is loaded for the proven wallet.
-  const approving = pathname === '/approve';
+  const embedded = pathname === '/mcp/approve';
+  const approving = pathname === '/approve' || embedded;
   const showWorkspace = pathname !== '/connections' && (!approving || approvalAvailable);
-  // BUILD-SOLANA-TRANSFER-UX-001: a proposal opens on the minimal signing surface ("Authorize"); `?view=canvas` or "View in FloFi" shows it on
+  // BUILD-SOLANA-TRANSFER-UX-001: a proposal opens on the minimal signing surface ("Authorize"); `?view=canvas` or "Open Canvas" shows it on
   // the Canvas instead. Both are the same stores and orchestration; only the presentation differs.
   const [surface, setSurface] = useState<'signing' | 'canvas'>('signing');
   const [approvalWallet, setApprovalWallet] = useState<string | null>(null);
-  useEffect(() => { if (approving) setSurface(new URLSearchParams(window.location.search).get('view') === 'canvas' ? 'canvas' : 'signing'); }, [approving]);
-  return <WalletSelectorProvider><WorkflowProvider initialContext={initialContext} initialWorkflowId={initialWorkflowId}><BridgeProvider><Build009WalletProvider><PublicTestnetProvider><SupplyProvider><LendingProvider><RobinhoodTransferProvider><JupiterProvider><SolanaTransferProvider><AcrossProvider><BridgeSwapProvider><ModeAProvider><CowProvider><LiquidityProvider><SolanaLiquidityProvider><SolanaCompositionProvider><UniswapLiquidityProvider><RouterProvider><UniversalRouterProvider>{engineeringEnabled && <EngineeringProbe/>}{approving && <><ApprovalHandoff slot={approvalSlot} surface={surface} onSurfaceChange={setSurface} onAvailabilityChange={setApprovalAvailable} onGateChange={setApprovalGate} onClaimedWallet={setApprovalWallet}/><ChannelProgressPing/></>}{showWorkspace && <AppShell engineering={engineeringEnabled && pathname === '/__engineering'} pathname={pathname} navigate={path => router.push(path)} approvalSlot={approving ? setApprovalSlot : undefined} approvalGate={approving && approvalGate}
-  surface={approving && surface === 'signing' ? 'signing' : 'workspace'} approvalWallet={approving ? approvalWallet : null} autoPrepare={approving} onViewInFloFi={approving ? () => setSurface('canvas') : undefined}/>}</UniversalRouterProvider></RouterProvider></UniswapLiquidityProvider></SolanaCompositionProvider></SolanaLiquidityProvider></LiquidityProvider></CowProvider></ModeAProvider></BridgeSwapProvider></AcrossProvider></SolanaTransferProvider></JupiterProvider></RobinhoodTransferProvider></LendingProvider></SupplyProvider></PublicTestnetProvider></Build009WalletProvider></BridgeProvider></WorkflowProvider></WalletSelectorProvider>;
+  useEffect(() => { if (approving) setSurface(!embedded && new URLSearchParams(window.location.search).get('view') === 'canvas' ? 'canvas' : 'signing'); }, [approving, embedded]);
+  return <WalletSelectorProvider embedded={embedded}><WorkflowProvider initialContext={initialContext} initialWorkflowId={initialWorkflowId}><BridgeProvider><Build009WalletProvider><PublicTestnetProvider><SupplyProvider><LendingProvider><RobinhoodTransferProvider><JupiterProvider><SolanaTransferProvider><AcrossProvider><BridgeSwapProvider><ModeAProvider><CowProvider><LiquidityProvider><SolanaLiquidityProvider><SolanaCompositionProvider><UniswapLiquidityProvider><RouterProvider><UniversalRouterProvider>{engineeringEnabled && <EngineeringProbe/>}{embedded && <EmbeddedApproval/>}{approving && <><ApprovalHandoff slot={approvalSlot} surface={embedded ? 'signing' : surface} onSurfaceChange={embedded ? undefined : setSurface} onAvailabilityChange={setApprovalAvailable} onGateChange={setApprovalGate} onClaimedWallet={setApprovalWallet}/><ChannelProgressPing/></>}{showWorkspace && <AppShell engineering={engineeringEnabled && pathname === '/__engineering'} pathname={pathname} navigate={path => router.push(path)} approvalSlot={approving ? setApprovalSlot : undefined} approvalGate={approving && approvalGate}
+  surface={embedded || approving && surface === 'signing' ? 'signing' : 'workspace'} approvalWallet={approving ? approvalWallet : null} autoPrepare={approving} onViewInFloFi={approving && !embedded ? () => setSurface('canvas') : undefined}/>}</UniversalRouterProvider></RouterProvider></UniswapLiquidityProvider></SolanaCompositionProvider></SolanaLiquidityProvider></LiquidityProvider></CowProvider></ModeAProvider></BridgeSwapProvider></AcrossProvider></SolanaTransferProvider></JupiterProvider></RobinhoodTransferProvider></LendingProvider></SupplyProvider></PublicTestnetProvider></Build009WalletProvider></BridgeProvider></WorkflowProvider></WalletSelectorProvider>;
 }

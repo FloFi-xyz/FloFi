@@ -5,7 +5,7 @@
  * second presentation of the same workflow orchestration the Canvas uses (AppShell's runtime routing, Review binding and execution
  * controls), for every network and action: the exact requested action, the wallet that will sign, the fresh simulation's fees and limits,
  * one "Authorize in wallet" action, then the live status and the receipt. It never builds, signs or sends a transaction itself; the wallet's
- * confirmation stays mandatory and the existing runtimes keep every gate. "View in FloFi" shows the same proposal on the Canvas.
+ * confirmation stays mandatory and the existing runtimes keep every gate. "Open Canvas" explicitly shows the same proposal on the optional Canvas.
  */
 import { useEffect, useState, type ReactNode } from 'react';
 import { useLocale } from '../i18n/locale';
@@ -118,7 +118,7 @@ export function SigningSurface(props: SigningSurfaceProps) {
         {props.walletRequestError && <p className="simulation-warning-blocking" role="status">{tr(props.walletRequestError)}</p>}
         {(c.requestFailed || live && source.state.error) && <p className="simulation-warning-blocking" role="status">{tr('The last request could not complete. Check the recorded status before taking another action.')}</p>}
       </section>
-      {props.onViewInFloFi && <p className="signing-foot"><button type="button" className="quiet" onClick={props.onViewInFloFi}>{tr('View in FloFi')}</button></p>}
+      {props.onViewInFloFi && <p className="signing-foot"><button type="button" className="quiet" onClick={props.onViewInFloFi}>{tr('Open Canvas')}</button></p>}
       {props.footer}
     </div>
   </main>;

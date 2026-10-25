@@ -44,12 +44,12 @@ async function proposal(browser: Browser, request: APIRequestContext, presentati
   // Nothing is authorized by the chat.
   expect(result.structuredContent).toMatchObject({ ok: true, status: 'PENDING', authority: 'NONE' });
   const host = await context.newPage();
-  const panel = await openHost(host, client, await panelHtmlOf(client, 'ui://flofi/approval-panel.html'), args, result);
+  const panel = await openHost(host, client, await panelHtmlOf(client, 'ui://flofi/approval-panel-chat-first-v1.html'), args, result);
   await expect(panel.getByText('Nothing is authorized yet.', { exact: false })).toBeVisible();
-  await panel.getByRole('button', { name: presentation, exact: true }).click();
+  await panel.getByRole('button', { name: 'Open FloFi', exact: true }).click();
   await expect.poll(async () => (await hostLog(host)).openLinks.length).toBe(1);
   const url = (await hostLog(host)).openLinks[0]!;
-  expect(url).toMatch(new RegExp(`^${APP_ORIGIN.replace(/[.]/g, '\\.')}/approve${presentation === 'View in FloFi' ? '\\?view=canvas' : ''}#flofi_hs_[A-Za-z0-9_-]{43}$`));
+  expect(url).toMatch(new RegExp(`^${APP_ORIGIN.replace(/[.]/g, '\\.')}/approve#flofi_hs_[A-Za-z0-9_-]{43}$`));
   await consent.close();
 
   // Every transaction waits for the owner's scripted confirmation in the wallet.
@@ -62,7 +62,7 @@ async function proposal(browser: Browser, request: APIRequestContext, presentati
     await new Promise<void>(resolve => confirmations.push(resolve));
     return control(request, method, params);
   } });
-  await page.goto(url);
+  await page.goto(presentation === 'View in FloFi' ? url.replace('/approve#', '/approve?view=canvas#') : url);
   const region = page.getByRole('region', { name: `Proposal from ${CLIENT_NAME}` });
   await expect(region).toContainText('Nothing is authorized yet.');
   await expect(region.getByRole('checkbox')).toBeChecked();
@@ -128,7 +128,7 @@ async function finish(journey: Journey, receipt: string) {
   await journey.context.close();
 }
 
-test('chat-first: Authorize → signing surface → one Authorize in wallet → wallet confirmation → reconciled receipt in the chat', async ({ browser, request }) => {
+test('external fallback: Open FloFi → minimal signing surface → one Authorize in wallet → wallet confirmation → reconciled receipt in the chat', async ({ browser, request }) => {
   const journey = await proposal(browser, request, 'Authorize');
   const { page, region, owner } = journey, surface = signingSurface(page);
   // The minimal signing surface: no Canvas or stage navigation; the exact requested action is listed before anything is loaded.
@@ -176,4 +176,61 @@ test('optional Canvas: View in FloFi → action card → one Authorize in wallet
   await expect(page.locator('.execution-summary')).toContainText('Execution completed', { timeout: 45_000 });
   await expect(page.locator('.execution-summary')).toContainText('1 of 1');
   await finish(journey, await receiptInChat(journey));
+});
+
+test('embedded chat: existing execution runtime completes after wallet confirmations and returns a genuine reconciled receipt without navigation', async ({ browser, request }, testInfo) => {
+  await control(request, 'MOCK_reset');
+  const owner = createTestWallet(), { context, unexpected } = await guardedContext(browser);
+  const host = await context.newPage(), consent = await context.newPage();
+  const confirmations: (() => void)[] = []; let requested = 0;
+  await installJourneyWallet(host, [owner], { chain: '0x14a34', transactionControl: async (method, params) => {
+    if (method !== 'MOCK_send') throw Error('MOCK_METHOD_DENIED');
+    requested++; await new Promise<void>(resolve => confirmations.push(resolve));
+    return control(request, method, params);
+  } });
+  const client = mcpClient(context.request, (await connectViaBrowser(consent, context.request)).accessToken);
+  const composed = await client.tool('compose_strategy', { strategy: { action: 'swap', network: 'base-sepolia', inputAsset: 'USDC', outputAsset: 'WETH', amount: '1' } });
+  const args = { strategy: composed.strategy, workflowHash: composed.workflowHash };
+  await client.tool('review_strategy', args);
+  const result = await client.toolResult('request_user_approval', args);
+  const panel = await openHost(host, client, await panelHtmlOf(client, 'ui://flofi/approval-panel-chat-first-v1.html'), args, result, { embedded: true });
+  await consent.close();
+  await panel.getByRole('button', { name: 'Authorize in chat', exact: true }).click();
+  const signing = panel.frameLocator('iframe.signing-frame');
+  const region = signing.getByRole('region', { name: `Proposal from ${CLIENT_NAME}` });
+  await region.getByRole('button', { name: 'Connect wallet and prove ownership' }).click();
+  await expect(region.getByRole('status')).toContainText('Ready for your review.');
+  const authorize = signing.getByRole('button', { name: AUTHORIZE_IN_WALLET, exact: true });
+  await expect(authorize).toBeEnabled({ timeout: 30_000 });
+  await expect(signing.getByRole('navigation', { name: 'Workflow stages' })).toHaveCount(0);
+  await expect(signing.getByRole('region', { name: 'Workflow canvas', exact: true })).toHaveCount(0);
+  await expect(region.locator('.approval-details')).not.toHaveAttribute('open');
+  await expect(region.locator('.approval-explanation')).not.toBeVisible();
+  await signing.locator('main').screenshot({ path: testInfo.outputPath('MOCKED-in-chat-signing.png') });
+  expect(requested).toBe(0); expect(await control(request, 'MOCK_sends')).toBe(0);
+  await authorize.click();
+  await expect.poll(() => confirmations.length).toBe(1);
+  expect(await control(request, 'MOCK_sends')).toBe(0); confirmations.shift()!();
+  const next = signing.locator('[data-lifecycle-action="continue"]');
+  await expect(next).toHaveText('Continue to swap', { timeout: 30_000 });
+  expect(requested).toBe(1);
+  await next.click(); await expect.poll(() => confirmations.length).toBe(1); confirmations.shift()!();
+  await expect(signing.locator('.signing-status')).toContainText('Execution completed', { timeout: 45_000 });
+  await panel.getByRole('button', { name: 'Refresh status' }).click();
+  await expect(panel.getByRole('button', { name: 'View receipt', exact: true })).toBeVisible();
+  const status = await client.tool('get_approval_status', { approvalId: result.structuredContent!.approvalId });
+  const runs = status.runs as { reconciled: boolean; executionId: string; receiptUrl: string }[];
+  expect(runs).toHaveLength(1); expect(runs[0]!.reconciled).toBe(true);
+  expect(runs[0]!.receiptUrl).toBe(`${APP_ORIGIN}/app/dashboard/runs/${runs[0]!.executionId}`);
+  await expect.poll(async () => JSON.stringify((await hostLog(host)).modelContext)).toContain(runs[0]!.receiptUrl);
+  await testInfo.attach('MOCKED-public-MCP-tool-responses', { contentType: 'application/json', body: Buffer.from(JSON.stringify({
+    evidenceEnvironment: 'MOCKED_LOOPBACK_ONLY', toolResults: [
+      { tool: 'compose_strategy', structuredContent: composed },
+      { tool: 'request_user_approval', structuredContent: result.structuredContent },
+      { tool: 'get_approval_status', structuredContent: status },
+    ],
+  }, null, 2)) }); // Model-visible responses only: never tool-result _meta or browser credentials.
+  expect((await hostLog(host)).openLinks).toEqual([]); expect(context.pages()).toHaveLength(1);
+  expect(requested).toBe(2); expect(await control(request, 'MOCK_sends')).toBe(2); expect(unexpected).toEqual([]);
+  await context.close();
 });

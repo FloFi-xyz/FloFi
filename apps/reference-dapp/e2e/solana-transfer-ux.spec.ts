@@ -76,7 +76,7 @@ for (const width of [320, 1440]) test(`optional Canvas and normal Back to Build 
   const verify = await open(page, await solanaTransferReviewFixture(), width);
   await expect(page.locator('body')).not.toContainText(/mock-read|mock:local|sample units|beta testing/);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await page.getByRole('button', { name: 'View in FloFi', exact: true }).click();
+  await page.getByRole('button', { name: 'Open Canvas', exact: true }).click();
   const back = page.getByRole('button', { name: 'Back to Build', exact: true }); await expect(back).toBeVisible();
   const rect = await back.boundingBox(); expect(rect!.height).toBeLessThanOrEqual(52); expect(rect!.width).toBeLessThan(180);
   expect(rect!.x).toBeGreaterThanOrEqual(0); expect(rect!.x + rect!.width).toBeLessThanOrEqual(width);
