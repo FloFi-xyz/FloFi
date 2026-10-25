@@ -113,8 +113,14 @@ describe('BUILD-BASE-001 Copilot parity on catalog networks', () => {
     const out = new CopilotSession().say('Please move 5 USDG from Robinhood to Base', intent.action(act.bridge({ sourceNetwork: 'ROBINHOOD', destinationNetwork: 'BASE', asset: 'USDG', amount: '5' })))!;
     expect(out).toMatchObject({ kind: 'PROPOSAL', sentence: 'bridge 5 USDG from Robinhood Chain to Base via auto slippage 50 bps' });
     const wrongToken = new CopilotSession().say('Bridge 5 USDC from Robinhood to Base', intent.action(act.bridge({ sourceNetwork: 'ROBINHOOD', destinationNetwork: 'BASE', asset: 'USDC', amount: '5' })))!;
+    // BUILD-CROSSCHAIN-UNIVERSAL-001: another token on a mainnet route is a universal bridge, so the refusal is now the catalog's own: USDC does not exist on
+    // Robinhood Chain. A token that does (WETH) is proposed as a universal bridge with the same canonical workflow every surface composes.
     expect(wrongToken).toMatchObject({ kind: 'UNSUPPORTED' });
-    expect(wrongToken.text).toContain('bridges USDG only');
+    expect(wrongToken.text).toContain('not in the official Robinhood Chain catalog');
+    const s2 = new CopilotSession();
+    const universal = s2.say('Please move 0.5 WETH from Robinhood over to Base', intent.action(act.bridge({ sourceNetwork: 'ROBINHOOD', destinationNetwork: 'BASE', asset: 'WETH', amount: '0.5' })))!;
+    expect(universal).toMatchObject({ kind: 'PROPOSAL', sentence: 'bridge 0.5 WETH from Robinhood Chain to Base receive WETH via best slippage 50 bps', command: { type: 'ADD_UNIVERSAL_BRIDGE' } });
+    expectParity(s2, universal.command!, universal.sentence!);
   });
   it('edits, refers to and removes catalog steps with the Canvas commands', () => {
     const s = new CopilotSession();

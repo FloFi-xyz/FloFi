@@ -19,7 +19,7 @@ import { createSolanaSwapNode, parseSolanaSwapChat, solanaSwapDetails, solanaSwa
 import { createSolanaLiquidityNode, parseSolanaCompositionChat, parseSolanaLiquidityChat, solanaLiquidityDetails, type SolanaLiquidityInput } from './solana-liquidity-authoring';
 import { createUniswapLiquidityNode, parseUniswapLiquidityChat, uniswapLiquidityDetails, type UniswapLiquidityInput } from './uniswap-liquidity-authoring';
 import { createRouterNode, parseRouterChat, routerDetails, ROUTER_ROUTING_LABEL, type RouterBridgeInput } from './router-authoring';
-import { createUniversalBridgeFromInput, type UniversalBridgeInput } from './universal-bridge-authoring';
+import { createUniversalBridgeFromInput, parseUniversalChat, type UniversalBridgeInput } from './universal-bridge-authoring';
 import { createCryptoActionNode, type CryptoActionInput } from './crypto-action-picker';
 import { BASE_CHAIN, authoringAssetSymbol } from './asset-catalogs';
 import { catalogSwapDetails } from './catalog-swap-authoring';
@@ -180,6 +180,9 @@ export function parseLocalCommand(text: string, workflow: Workflow, context: Rev
   }
   const router = parseRouterChat(input);
   if (router) { createRouterNode('node-preview', router); return { type: 'ADD_ROUTER_BRIDGE', input: router, source: 'CHAT', baseRevision: workflow.revision }; }
+  // BUILD-CROSSCHAIN-UNIVERSAL-001: every other bridge between the five mainnets (Solana in or out, another asset, a chosen destination asset or provider).
+  const universal = parseUniversalChat(input);
+  if (universal) { createUniversalBridgeFromInput('node-preview', universal); return { type: 'ADD_UNIVERSAL_BRIDGE', input: universal, source: 'CHAT', baseRevision: workflow.revision }; }
   const uniswapLiquidity = parseUniswapLiquidityChat(input);
   if (uniswapLiquidity) { createUniswapLiquidityNode('node-preview', uniswapLiquidity); return { type: 'ADD_UNISWAP_LIQUIDITY', input: uniswapLiquidity, source: 'CHAT', baseRevision: workflow.revision }; }
   // A Solana Devnet swap whose output funds an Orca position: "swap … then add liquidity all swapped devUSDC and 0.05 SOL …", or the output of an

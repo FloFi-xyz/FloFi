@@ -25,8 +25,11 @@ describe('BUILD-ROUTER-001 router capability', () => {
   it('is not executable on other environments and leaves the BUILD-008/010 rows unchanged', () => {
     expect(resolveNodeCapability(node, { environment: 'PUBLIC_TESTNET' }).blockers[0]?.code).toBe('PUBLIC_EXECUTION_NOT_ENABLED');
     expect(resolveNodeCapability(node, { environment: 'MOCK' }).capabilities.EXECUTE).toBe(false);
-    expect(executionCapabilityRegistry.filter(row => row.actionType === 'asset.bridge' && row.adapterId !== 'flofi.router')
+    expect(executionCapabilityRegistry.filter(row => row.actionType === 'asset.bridge' && !row.adapterId.startsWith('flofi.router'))
       .map(row => [row.adapterId, row.environment, row.evidenceMaturity])).toEqual([['lifi.rest', 'MOCK', 'MOCKED'], ['across.direct', 'MOCK', 'MOCKED']]);
+    // BUILD-CROSSCHAIN-UNIVERSAL-001: the universal router is a separate adapter, one MAINNET row per network, owner wallet only, no evidence ceiling.
+    expect(executionCapabilityRegistry.filter(row => row.adapterId === 'flofi.router.universal').map(row => [row.chainId, row.environment, row.evidenceMaturity, row.authorizationModes.join()]))
+      .toEqual(['solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp', 'eip155:8453', 'eip155:42161', 'eip155:1', 'eip155:4663'].map(chain => [chain, 'MAINNET', null, 'A']));
   });
   it('profile matches the canonical pair and pins every contract it touches', () => {
     expect(ROUTER_PAIRS[0]!.source.address).toBe(profile.source.token);

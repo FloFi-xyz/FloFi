@@ -12,7 +12,8 @@
 import { SOLANA_MAINNET_TOKENS } from '@defi-workflow-engine/action-registry';
 import { createUniversalBridgeNode, isSolanaPublicKey, isUniversalBridgeNode, readUniversalBridgeNode, UNIVERSAL_NETWORKS, universalNetworkOfChain, type UniversalAssetRef,
   type UniversalBridgeFields, type UniversalNetworkKey, type UniversalRouteSelection, type UniversalRoutingProvider, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
-import { resolveNetworkAsset } from './asset-catalogs';
+import { authoringAssetSymbol, resolveNetworkAsset } from './asset-catalogs';
+import { networkIdentity } from './network-registry';
 import { formatTokenAmount, parseTokenAmount } from './jupiter-authoring';
 
 export type UniversalBridgeRouting = 'BEST' | 'RELAY' | 'LIFI' | 'MAYAN' | 'ACROSS';
@@ -56,6 +57,16 @@ export function resolveUniversalAsset(key: UniversalNetworkKey, reference: strin
   if (!asset) return fail('UNIVERSAL_ASSET_UNKNOWN');
   return asset.address === null ? { asset: { kind: 'NATIVE', decimals: asset.decimals }, symbol: asset.symbol }
     : { asset: { kind: 'TOKEN', address: asset.address, decimals: asset.decimals }, symbol: asset.symbol };
+}
+/**
+ * The canonical text of an asset the owner wrote, shared by the strategy engine, the chat grammar and the channels so each surface authors
+ * the same command: a catalog network's token or company name resolves to its symbol first (the same refusals as every other action), then
+ * the asset's symbol, or the explicit `<address>@<decimals>` of a contract/mint (EVM lower-cased).
+ */
+export function universalAssetReference(key: UniversalNetworkKey, written: string): string {
+  const identity = networkIdentity(UNIVERSAL_NETWORKS[key].chain), explicit = /@[0-9]{1,2}$/.test(written.trim());
+  const resolved = resolveUniversalAsset(key, identity?.catalog && !explicit ? authoringAssetSymbol(identity.chain, written) : written);
+  return explicit && resolved.asset.kind === 'TOKEN' ? `${resolved.asset.address}@${resolved.asset.decimals}` : resolved.symbol;
 }
 /**
  * The destination asset FloFi proposes when the owner names none (always stated in the notes and shown at Review): the same asset when the
@@ -128,4 +139,39 @@ export function universalCanvasInput(pair: { source: UniversalNetworkKey; destin
   const inputAsset = pair.source === 'robinhood' ? 'USDG' : 'USDC';
   return { source: pair.source, destination: pair.destination, inputAsset, outputAsset: defaultUniversalOutput(pair.source, inputAsset, pair.destination), amount, recipient: '',
     slippage: UNIVERSAL_BRIDGE_DEFAULT_SLIPPAGE, routing: 'BEST' };
+}
+
+/**
+ * The exact chat grammar of a universal bridge (the sentence the Copilot plans into, and what an owner may type):
+ * `bridge <amount> <asset> from <network> to <network>[ receive <asset>][ to <recipient>][ via best|relay|LI.FI|Mayan|Across][ slippage <bps> bps]`.
+ * A certified Router sentence is parsed first by its own grammar (same command and hash as before); this one serves every other pair of
+ * the five mainnets. Assets and the recipient are canonicalized exactly as the strategy engine does; a missing destination asset is the
+ * stated default (`defaultUniversalOutput`).
+ */
+const CHAT_NETWORK: readonly { readonly key: UniversalNetworkKey; readonly pattern: string }[] = (Object.keys(UNIVERSAL_NETWORKS) as UniversalNetworkKey[]).map(key => ({ key,
+  pattern: key === 'solana' ? String.raw`Solana(?:[\s-]*mainnet(?:-beta)?)?(?![\s-]*Devnet)` : networkIdentity(UNIVERSAL_NETWORKS[key].chain)!.chatName!.source }));
+const CHAT_NETWORKS = CHAT_NETWORK.map(n => `(?:${n.pattern})`).join('|');
+export const UNIVERSAL_CHAT_PATTERN = new RegExp(String.raw`^(?:bridge|move|manda|traga) ([0-9]+(?:\.[0-9]+)?) ([^\x00-\x1f\x7f]{1,160}?) (?:from|da|de|do) (${CHAT_NETWORKS}) (?:to|para) (?:a |o )?(${CHAT_NETWORKS})` +
+  String.raw`(?: (?:receive|receiving|recebendo|receber) ([^\x00-\x1f\x7f\s]{1,160}))?(?: (?:to|recipient|para) (0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44}))?` +
+  String.raw`(?: via (best|auto|relay|LI\.FI|LIFI|Mayan|Across))?(?: (?:with )?slippage ([0-9]+) bps)?$`, 'i');
+const chatNetwork = (text: string) => CHAT_NETWORK.find(n => new RegExp(`^(?:${n.pattern})$`, 'i').test(text))?.key ?? null;
+const CHAT_ROUTING: Readonly<Record<string, UniversalBridgeRouting>> = { best: 'BEST', auto: 'BEST', relay: 'RELAY', 'li.fi': 'LIFI', lifi: 'LIFI', mayan: 'MAYAN', across: 'ACROSS' };
+/** A universal bridge sentence as its canonical input, or null when the text is not one. Asset and recipient refusals throw their codes. */
+export function parseUniversalChat(text: string): UniversalBridgeInput | null {
+  const m = UNIVERSAL_CHAT_PATTERN.exec(text.trim());
+  if (!m) return null;
+  const source = chatNetwork(m[3]!), destination = chatNetwork(m[4]!);
+  if (!source || !destination || source === destination) return null;
+  const inputAsset = universalAssetReference(source, m[2]!);
+  const outputAsset = m[5] ? universalAssetReference(destination, m[5]) : defaultUniversalOutput(source, resolveUniversalAsset(source, inputAsset).symbol, destination);
+  const evmDestination = UNIVERSAL_NETWORKS[destination].ecosystem === 'EVM', written = m[6] ?? '';
+  if (written && (evmDestination ? !/^0x[0-9a-fA-F]{40}$/.test(written) : !isSolanaPublicKey(written))) fail('UNIVERSAL_RECIPIENT_INVALID');
+  return { source, destination, inputAsset, outputAsset, amount: m[1]!, recipient: evmDestination ? written.toLowerCase() : written,
+    slippage: m[8] ?? UNIVERSAL_BRIDGE_DEFAULT_SLIPPAGE, routing: CHAT_ROUTING[(m[7] ?? 'best').toLowerCase()]! };
+}
+/** The exact sentence of a universal bridge input (the inverse of `parseUniversalChat`). */
+export function universalChatSentence(input: UniversalBridgeInput): string {
+  const via = { BEST: 'best', RELAY: 'relay', LIFI: 'LI.FI', MAYAN: 'Mayan', ACROSS: 'Across' }[input.routing];
+  return `bridge ${input.amount} ${input.inputAsset} from ${UNIVERSAL_NETWORKS[input.source].name} to ${UNIVERSAL_NETWORKS[input.destination].name} receive ${input.outputAsset}` +
+    `${input.recipient ? ' to ' + input.recipient : ''} via ${via} slippage ${input.slippage} bps`;
 }

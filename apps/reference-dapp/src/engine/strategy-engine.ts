@@ -23,8 +23,8 @@ import { createSolanaSwapNode } from '../domain/jupiter-authoring';
 import { createAuthoredLending } from '../domain/lending-authoring';
 import { describeProposal } from '../domain/proposal';
 import { createRouterNode, routerNetworkOfInput, ROUTER_NETWORK_OPTIONS, type RouterBridgeInput, type RouterDestination, type RouterSource } from '../domain/router-authoring';
-import { createUniversalBridgeFromInput, defaultUniversalOutput, resolveUniversalAsset, type UniversalBridgeInput, type UniversalBridgeRouting } from '../domain/universal-bridge-authoring';
-import { UNIVERSAL_NETWORKS, type UniversalNetworkKey } from '@defi-workflow-engine/workflow-contracts';
+import { createUniversalBridgeFromInput, defaultUniversalOutput, resolveUniversalAsset, universalAssetReference, type UniversalBridgeInput, type UniversalBridgeRouting } from '../domain/universal-bridge-authoring';
+import { isSolanaPublicKey, UNIVERSAL_NETWORKS, type UniversalNetworkKey } from '@defi-workflow-engine/workflow-contracts';
 import { networkIdentity } from '../domain/network-registry';
 import { authoringAssetSymbol } from '../domain/asset-catalogs';
 import { createCryptoActionNode, type CryptoActionInput } from '../domain/crypto-action-picker';
@@ -126,18 +126,19 @@ export function normalizeStrategy(spec: StrategySpec): { readonly strategy: Stra
       if (isUniversalBridgeSpec(spec)) {
         const source = spec.sourceNetwork as UniversalNetworkKey, destination = spec.destinationNetwork as UniversalNetworkKey;
         // Catalog networks resolve names and symbols exactly as every other action does (same refusals for unknown or unloaded assets).
-        const input = resolveUniversalAsset(source, symbol(spec.sourceNetwork, spec.asset));
-        const output = resolveUniversalAsset(destination, spec.outputAsset !== undefined ? symbol(spec.destinationNetwork, spec.outputAsset) : defaultUniversalOutput(source, input.symbol, destination));
+        const asset = universalAssetReference(source, spec.asset), input = resolveUniversalAsset(source, asset);
+        const outputAsset = spec.outputAsset !== undefined ? universalAssetReference(destination, spec.outputAsset) : defaultUniversalOutput(source, input.symbol, destination);
+        const output = resolveUniversalAsset(destination, outputAsset);
         const cross = UNIVERSAL_NETWORKS[source].ecosystem !== UNIVERSAL_NETWORKS[destination].ecosystem;
         if (spec.outputAsset === undefined) notes.push(`No destination asset given: ${output.symbol} on ${UNIVERSAL_NETWORKS[destination].name} is proposed and shown at Review.`);
         if (spec.routing === undefined || spec.routing === 'auto') notes.push('Default routing best applied: every provider is asked; the executable route with the highest guaranteed minimum is chosen and shown at Review.');
         if (spec.recipient === undefined) notes.push(cross ? `No recipient given: the ${UNIVERSAL_NETWORKS[destination].ecosystem === 'SOLANA' ? 'Solana' : 'EVM'} wallet you connect in the FloFi app receives the funds (bound at Review).`
           : 'No recipient given: the wallet that signs in the FloFi app receives the funds (bound at Review).');
         const evmDestination = UNIVERSAL_NETWORKS[destination].ecosystem === 'EVM';
-        if (spec.recipient !== undefined && (evmDestination ? !/^0x[0-9a-fA-F]{40}$/.test(spec.recipient) : /^0x/i.test(spec.recipient))) throw new Error('UNIVERSAL_RECIPIENT_INVALID');
+        if (spec.recipient !== undefined && (evmDestination ? !/^0x[0-9a-fA-F]{40}$/.test(spec.recipient) : !isSolanaPublicKey(spec.recipient))) throw new Error('UNIVERSAL_RECIPIENT_INVALID');
         const recipient = spec.recipient === undefined ? undefined : evmDestination ? lower(spec.recipient) : spec.recipient;
-        return { notes, strategy: { version: 1, action: 'bridge', sourceNetwork: spec.sourceNetwork, destinationNetwork: spec.destinationNetwork, asset: input.symbol,
-          outputAsset: output.symbol, amount: spec.amount, routing: spec.routing === undefined || spec.routing === 'auto' ? 'best' : spec.routing, slippageBps: slippage!,
+        return { notes, strategy: { version: 1, action: 'bridge', sourceNetwork: spec.sourceNetwork, destinationNetwork: spec.destinationNetwork, asset,
+          outputAsset, amount: spec.amount, routing: spec.routing === undefined || spec.routing === 'auto' ? 'best' : spec.routing, slippageBps: slippage!,
           ...recipient === undefined ? {} : { recipient } } };
       }
       if (spec.routing === undefined) notes.push('Default routing auto applied: LI.FI first, direct Across only if LI.FI has no reconcilable route.');

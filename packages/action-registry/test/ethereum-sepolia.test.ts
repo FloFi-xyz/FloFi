@@ -87,7 +87,7 @@ describe('Ethereum Sepolia capability registry', () => {
   });
   it('keeps Ethereum Mainnet capabilities separate from Sepolia testnet authorization and demonstrated evidence', () => {
     const mainnet = executionCapabilityRegistry.filter(row => row.chainId === 'eip155:1');
-    expect(mainnet).toHaveLength(9);
+    expect(mainnet).toHaveLength(10); // BUILD-CROSSCHAIN-UNIVERSAL-001: + the universal router's row
     expect(mainnet.every(row => row.environment === 'MAINNET' && row.evidenceMaturity === null)).toBe(true);
     const sepolia = flow(createSupplyNode('s', { chain: ETH, asset: wbtc, amount: '1', beneficiary: owner }));
     expect(resolveWorkflowCapability(sepolia, { environment: 'MAINNET' }).executionSupported).toBe(false);

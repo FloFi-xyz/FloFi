@@ -116,7 +116,9 @@ describe('BUILD-BASE-001 one capability truth for Canvas, Chat, Copilot and MCP'
   it('is pure data like the Copilot modules that read it: the canonical examples and registries only, no state, server, wallet or network', () => {
     const text = readFileSync(join(__dirname, 'authoring-capabilities.ts'), 'utf8');
     // BUILD-FLOFI-MAINNET-PRODUCT-001: `./network-scope` is the deployment's scope (Mainnet-only in public), set once by the server, never a user choice.
-    expect([...text.matchAll(/from '([^']+)'/g)].map(match => match[1]).sort()).toEqual(['../engine/strategy-examples', '../engine/strategy-spec', './agent-rollout', './network-registry', './network-scope', '@defi-workflow-engine/action-registry']);
+    // BUILD-CROSSCHAIN-UNIVERSAL-001: `@defi-workflow-engine/workflow-contracts` gives the universal router's five networks (pure, dependency-free data).
+    expect([...text.matchAll(/from '([^']+)'/g)].map(match => match[1]).sort()).toEqual(['../engine/strategy-examples', '../engine/strategy-spec', './agent-rollout', './network-registry', './network-scope', '@defi-workflow-engine/action-registry',
+      '@defi-workflow-engine/workflow-contracts']);
     expect(text).not.toMatch(/\bfetch\(|window\.|localStorage|sessionStorage|eth_sendTransaction|eth_sign|personal_sign|signTransaction|sendTransaction|process\.env/);
     const examples = readFileSync(join(__dirname, '../engine/strategy-examples.ts'), 'utf8');
     expect([...examples.matchAll(/^import (?!type )/gm)]).toEqual([]);
