@@ -206,6 +206,7 @@ export type RelayOrderExpectation = {
 };
 export type VerifiedRelayOrder = { readonly orderId: string; readonly solver: string; readonly expectedOutput: string; readonly minimumOutput: string;
   readonly deadline: number; readonly refunds: readonly { readonly chainId: string; readonly recipient: string; readonly currency: string }[] };
+const extraDataShape = (value: string, vm: RelayVm) => value === '0x' || vm === 'ethereum-vm' && /^0x0{24}[0-9a-fA-F]{40}$/.test(value);
 const same = (a: string, b: string, vm: RelayVm) => vm === 'ethereum-vm' ? a.toLowerCase() === b.toLowerCase() : a === b;
 /**
  * The order is exactly what the owner intends: hash matches, one input of the exact amount and currency on the source chain, one
@@ -229,6 +230,9 @@ export function verifyRelayOrder(order: RelayOrderData, x: RelayOrderExpectation
   if (out.calls.length !== 0) fail('RELAY_ORDER_DESTINATION_CALLS_UNSUPPORTED');
   if (order.fees.length !== 0) fail('RELAY_ORDER_FEES_UNEXPECTED');
   if (input.refunds.length < 1 || input.refunds.length > 4) fail('RELAY_ORDER_REFUND_INVALID');
+  // `extraData` is Relay's `(address fillContract)` on EVM chains (settlement-sdk `encodeOrderExtraData`): the contract a solver fills or
+  // refunds through. It never changes the recipient (FloFi verifies the credit on chain), but nothing else may ride along in it.
+  if (!extraDataShape(out.extraData, dstVm) || input.refunds.some(r => !extraDataShape(r.extraData, x.vmOf(r.chainId)))) fail('RELAY_ORDER_EXTRA_DATA_UNEXPECTED');
   for (const r of input.refunds) {
     const ok = r.chainId === x.sourceSlug ? same(r.recipient, x.owner, srcVm) && same(r.currency, x.inputCurrency, srcVm)
       : r.chainId === x.destinationSlug ? same(r.recipient, x.recipient, dstVm) && same(r.currency, x.outputCurrency, dstVm) : false;

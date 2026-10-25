@@ -102,16 +102,18 @@ async function discoverLifi(http: UniversalHttp, api: string, r: DiscoveryReques
 }
 
 // --- Mayan -------------------------------------------------------------------------------------------------------------
-async function discoverMayan(http: UniversalHttp, api: string, r: DiscoveryRequest): Promise<DiscoveryCandidate[]> {
+async function discoverMayan(http: UniversalHttp, api: string, r: DiscoveryRequest, sdkVersion: string): Promise<DiscoveryCandidate[]> {
   const S = r.source, D = r.destination;
   if (!S.providers.mayan || !D.providers.mayan) return [candidate('mayan', 'mayan', 'NO_ROUTE', { reason: 'MAYAN_NETWORK_UNSUPPORTED' })];
   // Mayan encodes every native coin (SOL included) as the zero address.
   const token = (t: UniversalToken) => t.kind === 'NATIVE' ? '0x0000000000000000000000000000000000000000' : t.address!;
   const params = new URLSearchParams({ amountIn64: r.amount, fromToken: token(r.inputToken), fromChain: S.providers.mayan, toToken: token(r.outputToken), toChain: D.providers.mayan,
-    slippageBps: String(r.slippageBps), gasDrop: '0', swift: 'true', mctp: 'true', fastMctp: 'true', wormhole: 'true', gasless: 'false', onlyDirect: 'false', fullList: 'true' });
+    slippageBps: String(r.slippageBps), gasDrop: '0', swift: 'true', mctp: 'true', fastMctp: 'true', wormhole: 'true', gasless: 'false', onlyDirect: 'false', fullList: 'true', sdkVersion });
   let raw: unknown;
   try { raw = await http.get(`${api}/quote?${params}`); } catch (cause) { return [failed('mayan', 'mayan', cause)]; }
   const refused = providerHttpError(raw);
+  // An API version refusal is Mayan's availability to this FloFi build, never a statement about the route.
+  if (refused && /SDK_VERSION/i.test(refused.message)) return [candidate('mayan', 'mayan', 'TEMPORARILY_UNAVAILABLE', { reason: 'MAYAN_API_VERSION_REJECTED' })];
   if (refused) return [candidate('mayan', 'mayan', refused.status >= 500 ? 'TEMPORARILY_UNAVAILABLE' : /amount|minimum|too (small|low)/i.test(refused.message) ? 'SUPPORTED_BY_PROVIDER' : 'NO_ROUTE',
     { reason: /amount|minimum|too (small|low)/i.test(refused.message) ? 'MAYAN_AMOUNT_OUT_OF_RANGE' : 'MAYAN_NO_ROUTE' })];
   const quotes = isObject(raw) && Array.isArray(raw.quotes) ? raw.quotes.filter(isObject).slice(0, 6) : [];
@@ -165,7 +167,7 @@ export function createUniversalDiscovery(config: { readonly http: UniversalHttp;
         inputTokenProgram: r.inputTokenProgram ?? (r.source.ecosystem === 'SOLANA' && r.inputToken.kind === 'TOKEN' ? 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA' : null) };
       const relayHeaders = config.keys?.relay ? { 'x-api-key': config.keys.relay } : undefined, lifiHeaders = config.keys?.lifi ? { 'x-lifi-api-key': config.keys.lifi } : undefined;
       const tasks: Promise<DiscoveryCandidate[]>[] = providers.map(p => p === 'relay' ? discoverRelay(config.http, apis.relay, relayRequest, relayHeaders).then(c => [c])
-        : p === 'lifi' ? discoverLifi(config.http, apis.lifi, r, owner, recipient, certified, lifiHeaders) : p === 'mayan' ? discoverMayan(config.http, apis.mayan, r)
+        : p === 'lifi' ? discoverLifi(config.http, apis.lifi, r, owner, recipient, certified, lifiHeaders) : p === 'mayan' ? discoverMayan(config.http, apis.mayan, r, P.mayan.sdkVersion)
           : discoverAcross(config.http, apis.across, r, owner, recipient, certified).then(c => [c]));
       const candidates = (await Promise.all(tasks)).flat().sort((a, b) => RANK[a.status] - RANK[b.status] ||
         (BigInt(b.minimumOutput ?? '0') > BigInt(a.minimumOutput ?? '0') ? 1 : BigInt(b.minimumOutput ?? '0') < BigInt(a.minimumOutput ?? '0') ? -1 : 0));

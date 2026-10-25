@@ -40,6 +40,8 @@ export function createUniversalHttp(fetcher: typeof fetch = fetch, timeoutMs = 2
 export function providerHttpError(value: unknown): { status: number; message: string } | null {
   if (!value || typeof value !== 'object' || !('__httpStatus' in value)) return null;
   const body = (value as { __body?: unknown }).__body as Record<string, unknown> | undefined;
-  const message = body && typeof body === 'object' && typeof body.message === 'string' ? body.message.slice(0, 300) : '';
+  // Relay answers `message`; Mayan answers `code` and `msg` (e.g. SDK_VERSION_TOO_OLD).
+  const text = (key: string) => body && typeof body === 'object' && typeof body[key] === 'string' ? body[key] as string : '';
+  const message = (text('message') || [text('code'), text('msg')].filter(Boolean).join(': ')).slice(0, 300);
   return { status: Number((value as { __httpStatus: unknown }).__httpStatus), message };
 }

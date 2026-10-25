@@ -32,7 +32,8 @@ export type UniversalRouterDeployment = {
   readonly adapterId: 'flofi.router.universal'; readonly protocol: 'relay-depository'; readonly environment: 'MAINNET';
   readonly evm: Readonly<Record<string, UniversalEvmDeployment>>; readonly solana: UniversalSolanaDeployment;
   readonly providers: { readonly relay: { readonly api: string; readonly docs: string }; readonly lifi: { readonly api: string; readonly integrator: string };
-    readonly mayan: { readonly api: string }; readonly across: { readonly api: string } };
+    /** Mayan's quote API refuses requests without the SDK version it serves (`SDK_VERSION_TOO_OLD`); the value its official SDK sends. */
+    readonly mayan: { readonly api: string; readonly sdkVersion: string }; readonly across: { readonly api: string } };
   /** A Review authorizes wallet requests for at most this long (provider quotes move with prices and gas). */ readonly reviewTtlSeconds: number;
   readonly defaultSlippageBps: number; readonly maximumSlippageBps: number;
   /** No delivery after this long past the source confirmation: the run needs attention (it keeps observing; refunds are verified). */
@@ -58,7 +59,7 @@ export const UNIVERSAL_ROUTER_DEPLOYMENT: UniversalRouterDeployment = Object.fre
   providers: Object.freeze({
     relay: Object.freeze({ api: 'https://api.relay.link', docs: 'https://docs.relay.link/references/api/api_core_concepts/input-validation' }),
     lifi: Object.freeze({ api: 'https://li.quest/v1', integrator: 'flofi' }),
-    mayan: Object.freeze({ api: 'https://price-api.mayan.finance/v3' }),
+    mayan: Object.freeze({ api: 'https://price-api.mayan.finance/v3', sdkVersion: '15_3_0' }), // @mayanfinance/swap-sdk 15.3.0, read 2026-10-25
     across: Object.freeze({ api: 'https://app.across.to/api' }),
   }),
   reviewTtlSeconds: 120, defaultSlippageBps: 50, maximumSlippageBps: 300, deliveryAttentionSeconds: 3_600,

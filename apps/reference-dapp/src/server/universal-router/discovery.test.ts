@@ -58,4 +58,13 @@ describe('BUILD-CROSSCHAIN-UNIVERSAL-001 route discovery', () => {
       ['lifi', 'TEMPORARILY_UNAVAILABLE', 'UNIVERSAL_PROVIDER_UNAVAILABLE'], ['mayan', 'NO_ROUTE', 'MAYAN_NETWORK_UNSUPPORTED'], ['across', 'NO_ROUTE', 'ACROSS_NETWORK_UNSUPPORTED']]);
     expect(result.status).toBe('TEMPORARILY_UNAVAILABLE');
   });
+  it('Mayan is asked with the SDK version it serves; a version refusal is availability, never "no route"', async () => {
+    const urls: string[] = [];
+    const recording = (routes: Record<string, unknown>): UniversalHttp => { const inner = http(routes); return { get: async url => { urls.push(url); return inner.get(url); }, post: inner.post }; };
+    const refused = createUniversalDiscovery({ http: recording({ 'price-api.mayan.finance': { __httpStatus: 406, __body: { code: 'SDK_VERSION_TOO_OLD', msg: 'Upgrade sdk' } } }) });
+    const result = await refused.discover({ source: UNIVERSAL_NETWORKS.solana, destination: UNIVERSAL_NETWORKS.base, inputToken: SOL_USDC, outputToken: BASE_USDC, amount: '20000000',
+      slippageBps: 50 }, ['mayan']);
+    expect(result.candidates.map(c => [c.provider, c.status, c.reason])).toEqual([['mayan', 'TEMPORARILY_UNAVAILABLE', 'MAYAN_API_VERSION_REJECTED']]);
+    expect(new URL(urls[0]!).searchParams.get('sdkVersion')).toBe('15_3_0');
+  });
 });

@@ -54,10 +54,14 @@ export const UNIVERSAL_DIRECTED_PAIRS: readonly { readonly source: UniversalNetw
   UNIVERSAL_NETWORK_KEYS.flatMap(source => UNIVERSAL_NETWORK_KEYS.filter(destination => destination !== source).map(destination => Object.freeze({ source, destination }))));
 
 /**
- * Fixed public quote subjects (no private key exists for either): the addresses FloFi asks providers to quote for before a wallet is
- * connected, and the read-only preview recipient of a Solana ⇄ EVM bridge. Never an owner, a recipient of real funds or an authorization.
+ * Fixed public quote subjects: the addresses FloFi asks providers to quote for before a wallet is connected, and the read-only preview
+ * recipient of a Solana ⇄ EVM bridge. Never an owner, a recipient of real funds or an authorization (the Review always re-quotes for the
+ * real owner and recipient). Both are nothing-up-my-sleeve values, so nobody is known to hold a key: EVM = the first 20 bytes of
+ * sha256("flofi.universal-router.public-quote-subject.evm.v1"); Solana = sha256("flofi.universal-router.public-quote-subject.solana.v1:0"),
+ * a valid Ed25519 point. Ordinary addresses on purpose: Relay replaces a burn address such as 0x…dead with its own recipient and refund
+ * address, which FloFi's order verifier then (correctly) refuses, hiding the provider's real availability before a wallet connects.
  */
-export const UNIVERSAL_QUOTE_SUBJECTS = Object.freeze({ EVM: '0x000000000000000000000000000000000000dead', SOLANA: 'GsWtMd3S5133XPhnfeR1CvPLcLxBSknhVhmaW7fHevBq' } as const);
+export const UNIVERSAL_QUOTE_SUBJECTS = Object.freeze({ EVM: '0x7e63d8d571a4793941b903ce2f445dcfb1f1090e', SOLANA: 'htEfnEL8TnmfY5huT9CdJhnRN4ze8T5brBunyuP6xXL' } as const);
 
 // --- addresses -------------------------------------------------------------------------------------------------------
 const B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';

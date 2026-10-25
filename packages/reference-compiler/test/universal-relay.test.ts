@@ -107,6 +107,11 @@ describe('Relay order verification', () => {
     expect(() => verifyRelayOrder(fees.orderData, expectation(f, { orderId: fees.orderId }))).toThrow('RELAY_ORDER_FEES_UNEXPECTED');
     const calls = rehash(f, o => ({ ...o, output: { ...o.output, calls: ['0x1234'] } }));
     expect(() => verifyRelayOrder(calls.orderData, expectation(f, { orderId: calls.orderId }))).toThrow('RELAY_ORDER_DESTINATION_CALLS_UNSUPPORTED');
+    // extraData is only Relay's `(address fillContract)` on EVM chains, and empty on Solana; anything else is refused.
+    const extra = rehash(f, o => ({ ...o, output: { ...o.output, extraData: o.output.extraData + 'ff' } }));
+    expect(() => verifyRelayOrder(extra.orderData, expectation(f, { orderId: extra.orderId }))).toThrow('RELAY_ORDER_EXTRA_DATA_UNEXPECTED');
+    const solanaRefund = rehash(f, o => ({ ...o, inputs: [{ ...o.inputs[0]!, refunds: o.inputs[0]!.refunds.map(r => r.chainId === 'solana' ? { ...r, extraData: '0x' + '0'.repeat(24) + '1'.repeat(40) } : r) }] }));
+    expect(() => verifyRelayOrder(solanaRefund.orderData, expectation(f, { orderId: solanaRefund.orderId }))).toThrow('RELAY_ORDER_EXTRA_DATA_UNEXPECTED');
     expect(() => verifyRelayOrder(f.response.protocol.v2.orderData, expectation(f, { slippageBps: 50 }))).toThrow('RELAY_ORDER_MINIMUM_BELOW_SLIPPAGE');
     const deadline = f.response.protocol.v2.orderData.output.deadline;
     expect(() => verifyRelayOrder(f.response.protocol.v2.orderData, expectation(f, { nowSeconds: deadline - 60 }))).toThrow('RELAY_ORDER_DEADLINE_INVALID');
