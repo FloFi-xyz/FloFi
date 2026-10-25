@@ -64,7 +64,7 @@ export const portugueseReview: Readonly<Record<string, string>> = {
   'Ask your connected assistant to prepare a new FloFi approval link.': 'Peça ao seu assistente ligado que prepare uma nova ligação de aprovação FloFi.',
   'Ask the app that sent this link to prepare a new FloFi approval link.': 'Peça à aplicação que enviou esta ligação que prepare uma nova ligação de aprovação FloFi.',
   // BUILD-FLOFI-UX-UI-002: the compact /approve notice inside the workspace.
-  'From {0}': 'De {0}', 'Proposal details': 'Detalhes da proposta', 'Use another wallet': 'Usar outra carteira', 'Restore proposal': 'Restaurar proposta',
+  'From {0}': 'De {0}', 'Share status and evidence with {0}': 'Partilhar estado e evidências com {0}', 'Proposal details': 'Detalhes da proposta', 'Use another wallet': 'Usar outra carteira', 'Restore proposal': 'Restaurar proposta',
   'Close approval': 'Fechar aprovação', 'Loading your exact proposal…': 'A carregar a sua proposta exata…',
   'Simulate the workflow, review the Strategy Manifest, then sign each transaction in your wallet.': 'Simule o fluxo, reveja o Strategy Manifest e assine cada transação na sua carteira.',
   'The proposal is on your Canvas. Connect your wallet to load it for a fresh simulation, your review and your signature.': 'A proposta já está no seu Canvas. Ligue a sua carteira para a carregar para uma nova simulação, a sua revisão e a sua assinatura.',
