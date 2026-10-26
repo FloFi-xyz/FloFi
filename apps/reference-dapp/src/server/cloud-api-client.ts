@@ -11,7 +11,7 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { WALLET_PRINCIPAL_HEADER } from './run-ownership.ts';
 
-export type FlowResult<T> = { ok: true; value: T } | { ok: false; code: string };
+export type FlowResult<T> = { ok: true; value: T } | { ok: false; code: string; correlationId?: string };
 const CODE = /^[A-Z][A-Z0-9_]{2,80}$/;
 const READ_ONLY = new Set(['status', 'mode']);
 
@@ -47,11 +47,11 @@ export async function callCloudFlow<T>(flow: string, method: string, args: reado
     }
     let body: unknown = null;
     try { body = await response.json(); } catch { /* handled below */ }
-    const result = body as { ok?: unknown; value?: unknown; code?: unknown } | null;
+    const result = body as { ok?: unknown; value?: unknown; code?: unknown; correlationId?: unknown } | null;
     if (response.status === 409 && result?.code === 'IDEMPOTENCY_IN_PROGRESS' && attempt < 3) { await sleep(1_000 * (attempt + 1)); continue; }
     if ([502, 503, 504].includes(response.status) && attempt < 3) { await sleep(500 * 2 ** attempt); continue; }
     if (result?.ok === true && 'value' in result) return { ok: true, value: result.value as T };
-    if (result?.ok === false && typeof result.code === 'string' && CODE.test(result.code)) return { ok: false, code: result.code };
+    if (result?.ok === false && typeof result.code === 'string' && CODE.test(result.code)) return { ok: false, code: result.code, ...typeof result.correlationId === 'string' && /^[a-f0-9-]{36}$/.test(result.correlationId) ? { correlationId: result.correlationId } : {} };
     return { ok: false, code: 'CLOUD_API_UNAVAILABLE' };
   }
   return { ok: false, code: 'CLOUD_API_UNAVAILABLE' };
@@ -80,12 +80,12 @@ export async function previewCloudFlow<T>(flow: string, args: readonly unknown[]
     }
     let body: unknown = null;
     try { body = await response.json(); } catch { /* handled below */ }
-    const result = body as { ok?: unknown; value?: unknown; code?: unknown } | null;
+    const result = body as { ok?: unknown; value?: unknown; code?: unknown; correlationId?: unknown } | null;
     if ([502, 503, 504].includes(response.status) && attempt < 2) { await sleep(500 * 2 ** attempt); continue; }
     // An API deployed before BUILD-MCP-001 has no preview route.
     if (response.status === 404) return { ok: false, code: 'CLOUD_API_PREVIEW_UNAVAILABLE' };
     if (result?.ok === true && 'value' in result) return { ok: true, value: result.value as T };
-    if (result?.ok === false && typeof result.code === 'string' && CODE.test(result.code)) return { ok: false, code: result.code };
+    if (result?.ok === false && typeof result.code === 'string' && CODE.test(result.code)) return { ok: false, code: result.code, ...typeof result.correlationId === 'string' && /^[a-f0-9-]{36}$/.test(result.correlationId) ? { correlationId: result.correlationId } : {} };
     return { ok: false, code: 'CLOUD_API_UNAVAILABLE' };
   }
   return { ok: false, code: 'CLOUD_API_UNAVAILABLE' };

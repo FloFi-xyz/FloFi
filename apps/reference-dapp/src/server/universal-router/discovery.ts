@@ -14,12 +14,12 @@
  * addresses; without a connected wallet, fixed public quote subjects are used (no key exists for either), and the Review always
  * re-quotes for the real owner and recipient.
  */
-import { routerPair, UNIVERSAL_NETWORKS, UNIVERSAL_QUOTE_SUBJECTS, type UniversalNetwork, type UniversalRoutingProvider, type UniversalToken } from '@defi-workflow-engine/workflow-contracts';
+import { UNIVERSAL_NETWORKS, UNIVERSAL_QUOTE_SUBJECTS, type UniversalNetwork, type UniversalRoutingProvider, type UniversalToken } from '@defi-workflow-engine/workflow-contracts';
 import { UNIVERSAL_ROUTER_DEPLOYMENT } from '@defi-workflow-engine/action-registry';
-import { providerHttpError, type UniversalHttp } from './http.ts';
+import { providerHttpError, providerRefusalCode, type UniversalHttp } from './http.ts';
 import { normalizeRelayQuote, relayCurrency, relayQuoteBody, relayRefusal, RELAY_API, type UniversalQuoteRequest } from './relay-provider.ts';
 
-export type DiscoveryStatus = 'EXECUTABLE' | 'LIVE_QUOTE' | 'SUPPORTED_BY_PROVIDER' | 'TEMPORARILY_UNAVAILABLE' | 'NO_ROUTE';
+export type DiscoveryStatus = 'EXECUTABLE' | 'LIVE_QUOTE' | 'SUPPORTED_BY_PROVIDER' | 'TEMPORARILY_UNAVAILABLE' | 'NO_ROUTE' | 'BELOW_MINIMUM' | 'ABOVE_MAXIMUM' | 'INSUFFICIENT_LIQUIDITY';
 export type DiscoveryFee = { readonly label: string; readonly amount: string; readonly symbol: string; readonly decimals: number; readonly included: boolean; readonly chainId: string };
 export type DiscoveryCandidate = {
   readonly provider: UniversalRoutingProvider; readonly bridge: string; readonly status: DiscoveryStatus;
@@ -45,8 +45,13 @@ const candidate = (provider: UniversalRoutingProvider, bridge: string, status: D
   ({ provider, bridge, status, executableBy: null, expectedOutput: null, minimumOutput: null, estimatedDurationSeconds: null, fees: [], reason: null, quoteId: null, ...patch });
 const failed = (provider: UniversalRoutingProvider, bridge: string, cause: unknown): DiscoveryCandidate => {
   const code = codeOf(cause);
-  return candidate(provider, bridge, AVAILABILITY.test(code) ? 'TEMPORARILY_UNAVAILABLE' : 'NO_ROUTE', { reason: code });
+  return candidate(provider, bridge, 'TEMPORARILY_UNAVAILABLE', { reason: code });
 };
+const refusalStatus = (code: string): DiscoveryStatus => AVAILABILITY.test(code) ? 'TEMPORARILY_UNAVAILABLE'
+  : code.endsWith('_AMOUNT_TOO_LOW') ? 'BELOW_MINIMUM' : code.endsWith('_AMOUNT_TOO_HIGH') ? 'ABOVE_MAXIMUM'
+    : code.endsWith('_INSUFFICIENT_LIQUIDITY') ? 'INSUFFICIENT_LIQUIDITY' : 'NO_ROUTE';
+const positiveQuote = (expected: unknown, minimum: unknown) => { const e = units(expected), m = units(minimum); return !!e && !!m && BigInt(m) > 0n && BigInt(e) >= BigInt(m); };
+const sameAddress = (network: UniversalNetwork, a: unknown, b: string) => typeof a === 'string' && (network.ecosystem === 'EVM' ? a.toLowerCase() === b.toLowerCase() : a === b);
 const tokenKey = (n: UniversalNetwork, t: UniversalToken, native: string) => t.kind === 'NATIVE' ? native : t.address!;
 
 // --- Relay -------------------------------------------------------------------------------------------------------------
@@ -55,8 +60,8 @@ async function discoverRelay(http: UniversalHttp, api: string, r: UniversalQuote
   try { raw = await http.post(`${api}/quote/v2`, relayQuoteBody(r), headers); } catch (cause) { return failed('relay', 'relay-depository', cause); }
   const refused = providerHttpError(raw);
   if (refused) {
-    const code = relayRefusal(refused.message);
-    return candidate('relay', 'relay-depository', code === 'RELAY_AMOUNT_TOO_LOW' || code === 'RELAY_AMOUNT_TOO_HIGH' ? 'SUPPORTED_BY_PROVIDER' : 'NO_ROUTE', { reason: code });
+    const code = [401, 403, 408, 425, 429].includes(refused.status) || refused.status >= 500 ? providerRefusalCode('RELAY', refused) : relayRefusal(refused.message);
+    return candidate('relay', 'relay-depository', refusalStatus(code), { reason: code });
   }
   try {
     const route = normalizeRelayQuote(raw, r);
@@ -66,13 +71,13 @@ async function discoverRelay(http: UniversalHttp, api: string, r: UniversalQuote
   } catch (cause) {
     // A real quote FloFi refused to execute (e.g. an origin swap through a router contract): shown with its reason, never executed.
     const details = isObject(raw) && isObject(raw.details) ? raw.details : {}, out = isObject(details.currencyOut) ? details.currencyOut : {};
-    return candidate('relay', 'relay-depository', units(out.amount) ? 'LIVE_QUOTE' : 'NO_ROUTE', { reason: codeOf(cause), expectedOutput: units(out.amount), minimumOutput: units(out.minimumAmount),
+    return candidate('relay', 'relay-depository', positiveQuote(out.amount, out.minimumAmount) && !/MISMATCH|INVALID|EXPIRED/.test(codeOf(cause)) ? 'LIVE_QUOTE' : 'NO_ROUTE', { reason: codeOf(cause), expectedOutput: units(out.amount), minimumOutput: units(out.minimumAmount),
       estimatedDurationSeconds: seconds(details.timeEstimate) });
   }
 }
 
 // --- LI.FI -------------------------------------------------------------------------------------------------------------
-async function discoverLifi(http: UniversalHttp, api: string, r: DiscoveryRequest, owner: string, recipient: string, certified: boolean, headers?: Record<string, string>): Promise<DiscoveryCandidate[]> {
+async function discoverLifi(http: UniversalHttp, api: string, r: DiscoveryRequest, owner: string, recipient: string, headers?: Record<string, string>): Promise<DiscoveryCandidate[]> {
   const S = r.source, D = r.destination, native = (n: UniversalNetwork) => n.ecosystem === 'EVM' ? '0x0000000000000000000000000000000000000000' : '11111111111111111111111111111111';
   let raw: unknown;
   try {
@@ -81,7 +86,8 @@ async function discoverLifi(http: UniversalHttp, api: string, r: DiscoveryReques
       options: { slippage: r.slippageBps / 10_000, order: 'CHEAPEST', integrator: UNIVERSAL_ROUTER_DEPLOYMENT.providers.lifi.integrator, allowSwitchChain: false } }, headers);
   } catch (cause) { return [failed('lifi', 'lifi', cause)]; }
   const refused = providerHttpError(raw);
-  if (refused) return [candidate('lifi', 'lifi', refused.status >= 500 ? 'TEMPORARILY_UNAVAILABLE' : 'NO_ROUTE', { reason: `LIFI_HTTP_${refused.status}` })];
+  if (refused) { const code = providerRefusalCode('LIFI', refused); return [candidate('lifi', 'lifi', refusalStatus(code), { reason: code })]; }
+  if (!isObject(raw) || !Array.isArray(raw.routes)) return [candidate('lifi', 'lifi', 'TEMPORARILY_UNAVAILABLE', { reason: 'LIFI_RESPONSE_INVALID' })];
   const routes = isObject(raw) && Array.isArray(raw.routes) ? raw.routes.filter(isObject).slice(0, 12) : [];
   if (!routes.length) return [candidate('lifi', 'lifi', 'NO_ROUTE', { reason: 'LIFI_NO_ROUTE' })];
   return routes.map(route => {
@@ -93,10 +99,14 @@ async function discoverLifi(http: UniversalHttp, api: string, r: DiscoveryReques
         included: f.included === true, chainId: t.chainId === D.providers.lifi.chainId ? D.chain : S.chain }] : [];
     }) : []);
     const duration = steps.reduce((sum, s) => sum + (isObject(s.estimate) ? seconds(s.estimate.executionDuration) ?? 0 : 0), 0);
-    // The certified Router executes LI.FI → Across on its USDC/USDG pairs; every other LI.FI route is a live quote FloFi cannot verify yet.
-    const viaAcross = certified && bridge === 'across';
-    return candidate('lifi', bridge, viaAcross ? 'EXECUTABLE' : 'LIVE_QUOTE', { executableBy: viaAcross ? 'CERTIFIED_ROUTER' : null, expectedOutput: units(route.toAmount),
-      minimumOutput: units(route.toAmountMin), estimatedDurationSeconds: duration, fees, reason: viaAcross ? null : 'LIFI_BRIDGE_VERIFIER_NOT_IMPLEMENTED',
+    const input = isObject(route.fromToken) ? route.fromToken : {}, output = isObject(route.toToken) ? route.toToken : {};
+    const matches = route.fromChainId === S.providers.lifi.chainId && route.toChainId === D.providers.lifi.chainId && route.fromAmount === r.amount &&
+      sameAddress(S, input.address, tokenKey(S, r.inputToken, native(S))) && sameAddress(D, output.address, tokenKey(D, r.outputToken, native(D))) &&
+      input.decimals === r.inputToken.decimals && output.decimals === r.outputToken.decimals;
+    if (!matches || !positiveQuote(route.toAmount, route.toAmountMin)) return candidate('lifi', bridge, 'NO_ROUTE', { reason: 'LIFI_QUOTE_MISMATCH' });
+    // A tool name is not proof that the certified Router can verify the provider's transaction.
+    return candidate('lifi', bridge, 'LIVE_QUOTE', { expectedOutput: units(route.toAmount),
+      minimumOutput: units(route.toAmountMin), estimatedDurationSeconds: duration, fees, reason: bridge === 'across' ? 'LIFI_REQUIRES_CERTIFIED_ROUTER_VALIDATION' : 'LIFI_BRIDGE_VERIFIER_NOT_IMPLEMENTED',
       quoteId: typeof route.id === 'string' ? route.id.slice(0, 80) : null });
   });
 }
@@ -114,14 +124,15 @@ async function discoverMayan(http: UniversalHttp, api: string, r: DiscoveryReque
   const refused = providerHttpError(raw);
   // An API version refusal is Mayan's availability to this FloFi build, never a statement about the route.
   if (refused && /SDK_VERSION/i.test(refused.message)) return [candidate('mayan', 'mayan', 'TEMPORARILY_UNAVAILABLE', { reason: 'MAYAN_API_VERSION_REJECTED' })];
-  if (refused) return [candidate('mayan', 'mayan', refused.status >= 500 ? 'TEMPORARILY_UNAVAILABLE' : /amount|minimum|too (small|low)/i.test(refused.message) ? 'SUPPORTED_BY_PROVIDER' : 'NO_ROUTE',
-    { reason: /amount|minimum|too (small|low)/i.test(refused.message) ? 'MAYAN_AMOUNT_OUT_OF_RANGE' : 'MAYAN_NO_ROUTE' })];
+  if (refused) { const code = providerRefusalCode('MAYAN', refused); return [candidate('mayan', 'mayan', refusalStatus(code), { reason: code })]; }
+  if (!isObject(raw) || !Array.isArray(raw.quotes)) return [candidate('mayan', 'mayan', 'TEMPORARILY_UNAVAILABLE', { reason: 'MAYAN_RESPONSE_INVALID' })];
   const quotes = isObject(raw) && Array.isArray(raw.quotes) ? raw.quotes.filter(isObject).slice(0, 6) : [];
   if (!quotes.length) return [candidate('mayan', 'mayan', 'NO_ROUTE', { reason: 'MAYAN_NO_ROUTE' })];
   return quotes.map(q => {
-    const toToken = isObject(q.toToken) ? q.toToken : {}, decimals = Number.isSafeInteger(toToken.decimals) ? toToken.decimals as number : r.outputToken.decimals;
-    // A quote for another output token is not this route.
-    const sameOutput = decimals === r.outputToken.decimals;
+    const fromToken = isObject(q.fromToken) ? q.fromToken : {}, toToken = isObject(q.toToken) ? q.toToken : {};
+    const sameOutput = q.fromChain === S.providers.mayan && q.toChain === D.providers.mayan &&
+      sameAddress(S, fromToken.contract, token(r.inputToken)) && sameAddress(D, toToken.contract, token(r.outputToken)) &&
+      fromToken.decimals === r.inputToken.decimals && toToken.decimals === r.outputToken.decimals && positiveQuote(q.expectedAmountOutBaseUnits, q.minAmountOutBaseUnits);
     return candidate('mayan', `mayan-${label(q.type, 'route').toLowerCase()}`, sameOutput ? 'LIVE_QUOTE' : 'NO_ROUTE', {
       expectedOutput: units(q.expectedAmountOutBaseUnits), minimumOutput: units(q.minAmountOutBaseUnits), estimatedDurationSeconds: seconds(q.etaSeconds),
       // Mayan prices its relayer and protocol fees into the quoted output; FloFi lists no separate amount it cannot verify.
@@ -130,7 +141,7 @@ async function discoverMayan(http: UniversalHttp, api: string, r: DiscoveryReque
 }
 
 // --- Across ------------------------------------------------------------------------------------------------------------
-async function discoverAcross(http: UniversalHttp, api: string, r: DiscoveryRequest, owner: string, recipient: string, certified: boolean): Promise<DiscoveryCandidate> {
+async function discoverAcross(http: UniversalHttp, api: string, r: DiscoveryRequest, owner: string, recipient: string): Promise<DiscoveryCandidate> {
   const S = r.source, D = r.destination;
   if (S.providers.across === null || D.providers.across === null) return candidate('across', 'across', 'NO_ROUTE', { reason: 'ACROSS_NETWORK_UNSUPPORTED' });
   // Across names native ETH by the chain's wrapped token with exact-input semantics; FloFi asks only for ERC-20 pairs here.
@@ -141,16 +152,19 @@ async function discoverAcross(http: UniversalHttp, api: string, r: DiscoveryRequ
   let raw: unknown;
   try { raw = await http.get(`${api}/swap/approval?${params}`); } catch (cause) { return failed('across', 'across', cause); }
   const refused = providerHttpError(raw);
-  if (refused) return candidate('across', 'across', refused.status >= 500 ? 'TEMPORARILY_UNAVAILABLE' : /amount|limit|minimum/i.test(refused.message) ? 'SUPPORTED_BY_PROVIDER' : 'NO_ROUTE',
-    { reason: refused.message ? `ACROSS_${/amount|limit|minimum/i.test(refused.message) ? 'AMOUNT_OUT_OF_RANGE' : 'NO_ROUTE'}` : `ACROSS_HTTP_${refused.status}` });
+  if (refused) { const code = providerRefusalCode('ACROSS', refused); return candidate('across', 'across', refusalStatus(code), { reason: code }); }
   if (!isObject(raw)) return candidate('across', 'across', 'TEMPORARILY_UNAVAILABLE', { reason: 'ACROSS_RESPONSE_INVALID' });
-  const swap = raw.crossSwapType === 'bridgeableToBridgeable';
-  return candidate('across', 'across', certified && swap ? 'EXECUTABLE' : 'LIVE_QUOTE', { executableBy: certified && swap ? 'CERTIFIED_ROUTER' : null,
+  const input = isObject(raw.inputToken) ? raw.inputToken : {}, output = isObject(raw.outputToken) ? raw.outputToken : {};
+  if (raw.inputAmount !== r.amount || input.chainId !== S.providers.across || output.chainId !== D.providers.across ||
+    !sameAddress(S, input.address, r.inputToken.address!) || !sameAddress(D, output.address, r.outputToken.address!) ||
+    input.decimals !== r.inputToken.decimals || output.decimals !== r.outputToken.decimals) return candidate('across', 'across', 'NO_ROUTE', { reason: 'ACROSS_QUOTE_MISMATCH' });
+  if (!positiveQuote(raw.expectedOutputAmount, raw.minOutputAmount)) return candidate('across', 'across', 'TEMPORARILY_UNAVAILABLE', { reason: 'ACROSS_RESPONSE_INVALID' });
+  return candidate('across', 'across', 'LIVE_QUOTE', {
     expectedOutput: units(raw.expectedOutputAmount), minimumOutput: units(raw.minOutputAmount), estimatedDurationSeconds: seconds(raw.expectedFillTime),
-    reason: certified && swap ? null : 'ACROSS_EXECUTES_ON_CERTIFIED_ROUTER_PAIRS_ONLY', quoteId: typeof raw.id === 'string' ? raw.id.slice(0, 80) : null });
+    reason: 'ACROSS_REQUIRES_CERTIFIED_ROUTER_VALIDATION', quoteId: typeof raw.id === 'string' ? raw.id.slice(0, 80) : null });
 }
 
-const RANK: Readonly<Record<DiscoveryStatus, number>> = { EXECUTABLE: 0, LIVE_QUOTE: 1, SUPPORTED_BY_PROVIDER: 2, TEMPORARILY_UNAVAILABLE: 3, NO_ROUTE: 4 };
+const RANK: Readonly<Record<DiscoveryStatus, number>> = { EXECUTABLE: 0, LIVE_QUOTE: 1, SUPPORTED_BY_PROVIDER: 2, BELOW_MINIMUM: 3, ABOVE_MAXIMUM: 4, INSUFFICIENT_LIQUIDITY: 5, TEMPORARILY_UNAVAILABLE: 6, NO_ROUTE: 7 };
 export function createUniversalDiscovery(config: { readonly http: UniversalHttp; readonly now?: () => Date; readonly reviewTtlSeconds?: number;
   readonly apis?: { readonly relay?: string; readonly lifi?: string; readonly mayan?: string; readonly across?: string };
   readonly keys?: { readonly relay?: string; readonly lifi?: string } }) {
@@ -160,15 +174,13 @@ export function createUniversalDiscovery(config: { readonly http: UniversalHttp;
     async discover(r: DiscoveryRequest, providers: readonly UniversalRoutingProvider[] = ['relay', 'lifi', 'mayan', 'across']): Promise<DiscoveryResult> {
       const subject = (n: UniversalNetwork) => n.ecosystem === 'EVM' ? QUOTE_SUBJECTS.EVM : QUOTE_SUBJECTS.SOLANA;
       const owner = r.owner ?? subject(r.source), recipient = r.recipient ?? subject(r.destination);
-      const pair = routerPair(r.source.chain, r.inputToken.address ?? '', r.destination.chain, r.outputToken.address ?? '');
-      const certified = !!pair && BigInt(r.amount) >= BigInt(pair.minimumAmount) && BigInt(r.amount) <= BigInt(pair.maximumAmount);
       const relayRequest: UniversalQuoteRequest = { source: r.source, destination: r.destination, inputToken: r.inputToken, outputToken: r.outputToken, amount: r.amount, owner,
         recipient, slippageBps: r.slippageBps, nowMs: now().getTime(), reviewTtlSeconds: config.reviewTtlSeconds ?? UNIVERSAL_ROUTER_DEPLOYMENT.reviewTtlSeconds,
         inputTokenProgram: r.inputTokenProgram ?? (r.source.ecosystem === 'SOLANA' && r.inputToken.kind === 'TOKEN' ? 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA' : null) };
       const relayHeaders = config.keys?.relay ? { 'x-api-key': config.keys.relay } : undefined, lifiHeaders = config.keys?.lifi ? { 'x-lifi-api-key': config.keys.lifi } : undefined;
       const tasks: Promise<DiscoveryCandidate[]>[] = providers.map(p => p === 'relay' ? discoverRelay(config.http, apis.relay, relayRequest, relayHeaders).then(c => [c])
-        : p === 'lifi' ? discoverLifi(config.http, apis.lifi, r, owner, recipient, certified, lifiHeaders) : p === 'mayan' ? discoverMayan(config.http, apis.mayan, r, P.mayan.sdkVersion)
-          : discoverAcross(config.http, apis.across, r, owner, recipient, certified).then(c => [c]));
+        : p === 'lifi' ? discoverLifi(config.http, apis.lifi, r, owner, recipient, lifiHeaders) : p === 'mayan' ? discoverMayan(config.http, apis.mayan, r, P.mayan.sdkVersion)
+          : discoverAcross(config.http, apis.across, r, owner, recipient).then(c => [c]));
       const candidates = (await Promise.all(tasks)).flat().sort((a, b) => RANK[a.status] - RANK[b.status] ||
         (BigInt(b.minimumOutput ?? '0') > BigInt(a.minimumOutput ?? '0') ? 1 : BigInt(b.minimumOutput ?? '0') < BigInt(a.minimumOutput ?? '0') ? -1 : 0));
       // The automatic choice is the universal router's best guaranteed minimum (the certified Router pairs are chosen on their own flow).

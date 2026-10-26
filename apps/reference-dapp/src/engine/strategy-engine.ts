@@ -87,7 +87,7 @@ const isUniversalKey = (network: string): network is UniversalNetworkKey => Obje
  */
 export function isUniversalBridgeSpec(spec: BridgeSpec): boolean {
   if (!isUniversalKey(spec.sourceNetwork) || !isUniversalKey(spec.destinationNetwork) || spec.sourceNetwork === spec.destinationNetwork) return false;
-  if (spec.routing === 'best' || spec.routing === 'relay') return true;
+  if (spec.routing === 'best' || spec.routing === 'relay' || spec.routing === 'mayan') return true;
   const chains = routerChains(spec), network = chains.source && chains.destination ? routerNetworkOfInput(chains) : null;
   if (!network) return true;
   const pair = ROUTER_NETWORK_OPTIONS[network].pair;
@@ -96,10 +96,10 @@ export function isUniversalBridgeSpec(spec: BridgeSpec): boolean {
 }
 /** A bridge asset's canonical symbol (a catalog name resolves to its symbol); an unresolvable reference is kept as written for the decision. */
 function bridgeSymbol(network: NetworkId, reference: string): string {
-  const identity = networkIdentity(network);
-  try { return (identity?.catalog ? authoringAssetSymbol(identity.chain, reference) : reference).toUpperCase(); } catch { return reference.toUpperCase(); }
+  try { return isUniversalKey(network) ? resolveUniversalAsset(network, universalAssetReference(network, reference)).symbol : reference; }
+  catch { return reference; }
 }
-const UNIVERSAL_ROUTING: Readonly<Record<NonNullable<BridgeSpec['routing']>, UniversalBridgeRouting>> = { auto: 'BEST', best: 'BEST', relay: 'RELAY', lifi: 'LIFI', across: 'ACROSS' };
+const UNIVERSAL_ROUTING: Readonly<Record<NonNullable<BridgeSpec['routing']>, UniversalBridgeRouting>> = { auto: 'BEST', best: 'BEST', relay: 'RELAY', lifi: 'LIFI', mayan: 'MAYAN', across: 'ACROSS' };
 /**
  * Defaults FloFi applies when a spec omits slippage: the same values the Copilot planners and profiles use. BUILD-FLOFI-PRODUCT-UX-001: the shared
  * product default (1%, `slippage-policy.ts`), within the route's own limit; an explicit `slippageBps` is always kept as written.
@@ -148,7 +148,7 @@ export function normalizeStrategy(spec: StrategySpec): { readonly strategy: Stra
       }
       if (spec.routing === undefined) notes.push('Default routing auto applied: LI.FI first, direct Across only if LI.FI has no reconcilable route.');
       if (spec.recipient === undefined) notes.push('No recipient given: the wallet that signs in the FloFi app receives the funds (bound at Review).');
-      return { notes, strategy: { version: 1, action: 'bridge', sourceNetwork: spec.sourceNetwork, destinationNetwork: spec.destinationNetwork, asset: symbol(spec.sourceNetwork, spec.asset), amount: spec.amount,
+      return { notes, strategy: { version: 1, action: 'bridge', sourceNetwork: spec.sourceNetwork, destinationNetwork: spec.destinationNetwork, asset: bridgeSymbol(spec.sourceNetwork, spec.asset), amount: spec.amount,
         routing: spec.routing ?? 'auto', slippageBps: slippage!, ...spec.recipient === undefined ? {} : { recipient: lower(spec.recipient) } } };
     }
     case 'swap': return { notes, strategy: { version: 1, action: 'swap', network: spec.network, inputAsset: symbol(spec.network, spec.inputAsset), outputAsset: symbol(spec.network, spec.outputAsset), amount: spec.amount, slippageBps: slippage! } };
@@ -212,7 +212,7 @@ function build(spec: StrategySpec, context: ReviewContext): Built {
           recipient: spec.recipient ?? '', slippage, routing: UNIVERSAL_ROUTING[spec.routing ?? 'best'] };
         return { command: { ...base, type: 'ADD_UNIVERSAL_BRIDGE', input }, check: () => createUniversalBridgeFromInput('node-preview', input) };
       }
-      if (spec.routing === 'best' || spec.routing === 'relay' || spec.outputAsset !== undefined) refuse('ROUTER_PAIR_UNSUPPORTED');
+      if (spec.routing === 'best' || spec.routing === 'relay' || spec.routing === 'mayan' || spec.outputAsset !== undefined) refuse('ROUTER_PAIR_UNSUPPORTED');
       const input: RouterBridgeInput = { ...routerChains(spec), token: spec.asset, amount: spec.amount, recipient: spec.recipient ?? '', slippage,
         routing: ROUTING[(spec.routing ?? 'auto') as keyof typeof ROUTING] };
       return { command: { ...base, type: 'ADD_ROUTER_BRIDGE', input }, check: () => createRouterNode('node-preview', input) };

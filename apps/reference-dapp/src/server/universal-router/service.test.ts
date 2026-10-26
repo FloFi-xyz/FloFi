@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createFileExecutionStorage } from '@defi-workflow-engine/reference-executor';
 import { applyMockedPhantomLighthouseGuards, compileMessageV0, parseMessageV0, decompileMessageV0, serializeMessageV0, RELAY_SOLANA_VAULT } from '@defi-workflow-engine/reference-compiler';
-import { createUniversalBridgeNode, UNIVERSAL_NETWORKS, type SemanticWorkflow, type UniversalAssetRef, type UniversalBridgeFields, type UniversalNetworkKey } from '@defi-workflow-engine/workflow-contracts';
+import { createUniversalBridgeNode, UNIVERSAL_DIRECTED_PAIRS, UNIVERSAL_NETWORKS, type SemanticWorkflow, type UniversalAssetRef, type UniversalBridgeFields, type UniversalNetworkKey } from '@defi-workflow-engine/workflow-contracts';
 import { createRelayProvider } from './relay-provider.ts';
 import { createUniversalRouterService, universalNeedsObservation, validateUniversalLog, type UniversalRecord } from './service.ts';
 import { createEvmMockChain, createRelayMock, createSolanaMock, mockedUniversalDeployment, solanaTestWallet, type EvmMock } from './universal.test-harness.ts';
@@ -28,14 +28,14 @@ function workflow(fields: Partial<UniversalBridgeFields> & Pick<UniversalBridgeF
   const node = createUniversalBridgeNode('node-bridge', { slippageBps: 50, providers: ['relay'], selection: 'BEST_MINIMUM_OUTPUT', ...fields });
   return { schemaVersion: '1.0.0', workflowId, revision: 1, nodes: [node], resourceEdges: [] } as SemanticWorkflow;
 }
-async function setup(options: { executionEnabled?: boolean } = {}) {
+async function setup(options: { executionEnabled?: boolean; extraTokens?: Record<string, Record<string, number>> } = {}) {
   let clock = T0;
   const now = () => clock;
   const D = mockedUniversalDeployment();
   const tokens = (chain: string) => Object.fromEntries(Object.entries(USDC).filter(([k]) => UNIVERSAL_NETWORKS[k as UniversalNetworkKey].chain === chain).map(([, a]) => [a, 6]));
-  const evm: Record<string, EvmMock> = Object.fromEntries(Object.keys(D.evm).map(chain => [chain, createEvmMockChain(D.evm[chain]!, { now, tokens: tokens(chain) })]));
+  const evm: Record<string, EvmMock> = Object.fromEntries(Object.keys(D.evm).map(chain => [chain, createEvmMockChain(D.evm[chain]!, { now, tokens: { ...tokens(chain), ...options.extraTokens?.[chain] } })]));
   const solana = createSolanaMock(D.solana, { mints: { [USDC.solana]: 6 } });
-  const decimals = (chainId: number, currency: string) => currency === '0x0000000000000000000000000000000000000000' ? 18 : currency === '11111111111111111111111111111111' ? 9 : 6;
+  const decimals = (chainId: number, currency: string) => options.extraTokens?.[`eip155:${chainId}`]?.[currency] ?? (currency === '0x0000000000000000000000000000000000000000' ? 18 : currency === '11111111111111111111111111111111' ? 9 : 6);
   // 1 SOL = 150 USDC; 1 ETH = 4,000 USDC; 1 SOL = 0.0375 ETH. Stablecoins 1:1.
   const price = (c: string) => c === '11111111111111111111111111111111' ? 150n : c === '0x0000000000000000000000000000000000000000' ? 4000n : 1n;
   const relayMock = createRelayMock({ now, decimals, rate: (i, o) => 10n ** 18n * price(i) / price(o),
@@ -319,7 +319,7 @@ describe('N: wrong chain, wrong recipient, modified quote, changed bytes, unexpe
       ['invalid minimum', raw => { raw.details.currencyOut.minimumAmount = '1'; }]];
     for (const [name, tamper] of cases) {
       c.relayMock.setTamper(tamper);
-      await expect(c.service.simulate(evmBridge(), EVM_OWNER), name).rejects.toThrow('UNIVERSAL_NO_EXECUTABLE_ROUTE');
+      await expect(c.service.simulate(evmBridge(), EVM_OWNER), name).rejects.toThrow(/^RELAY_.*MISMATCH$/);
     }
   });
   it('a source RPC on the wrong chain is refused', async () => {
@@ -382,13 +382,47 @@ describe('selection and honest unavailability', () => {
       ['relay', 'SELECTED', null], ['mayan', 'NOT_EXECUTABLE', 'MAYAN_TRANSACTION_BUILDER_NOT_VERIFIED']]);
     const only = workflow({ sourceChain: UNIVERSAL_NETWORKS.solana.chain, destinationChain: UNIVERSAL_NETWORKS.base.chain, inputAsset: token('solana'),
       outputAsset: token('base'), amount: '10000000', recipient: EVM_RECIPIENT, providers: ['mayan'] });
-    await expect(c.service.simulate(only, c.wallet.publicKey)).rejects.toThrow('UNIVERSAL_NO_EXECUTABLE_ROUTE');
+    await expect(c.service.simulate(only, c.wallet.publicKey)).rejects.toThrow('MAYAN_TRANSACTION_BUILDER_NOT_VERIFIED');
     c.relayMock.setRefusal('Insufficient liquidity');
-    await expect(c.service.simulate(w, c.wallet.publicKey)).rejects.toThrow('RELAY_NO_ROUTE');
+    await expect(c.service.simulate(w, c.wallet.publicKey)).rejects.toThrow('RELAY_INSUFFICIENT_LIQUIDITY');
   });
   it('a recipient that is not a wallet key is refused on Solana', async () => {
     const c = await setup(), w = workflow({ sourceChain: UNIVERSAL_NETWORKS.base.chain, destinationChain: UNIVERSAL_NETWORKS.solana.chain, inputAsset: token('base'),
       outputAsset: token('solana'), amount: '10000000', recipient: RELAY_SOLANA_VAULT });
     await expect(c.service.simulate(w, EVM_OWNER)).rejects.toThrow('UNIVERSAL_RECIPIENT_OFF_CURVE');
+  });
+});
+
+
+describe('P0: all 20 directions reach verified simulation and Review on MOCKED chains', () => {
+  for (const { source, destination } of UNIVERSAL_DIRECTED_PAIRS) for (const crossToken of [false, true]) {
+    it(`${source} → ${destination}: ${crossToken ? 'stablecoin → native' : 'native → native'}, authorization and reconciled delivery`, async () => {
+      const c = await setup(), owner = source === 'solana' ? c.wallet.publicKey : EVM_OWNER;
+      const w = workflow({ sourceChain: UNIVERSAL_NETWORKS[source].chain, destinationChain: UNIVERSAL_NETWORKS[destination].chain,
+        inputAsset: crossToken ? token(source) : native(source), outputAsset: native(destination),
+        amount: crossToken ? '25000000' : source === 'solana' ? '100000000' : '10000000000000000',
+        recipient: source === 'solana' || destination === 'solana' ? 'CONNECTED_DESTINATION_WALLET' : 'CONNECTED_OWNER', slippageBps: 100 });
+      const run = await reviewed(c, w, owner, destination === 'solana' ? SOLANA_RECIPIENT : EVM_RECIPIENT);
+      expect(run.review.intent).toMatchObject({ inputAsset: crossToken ? token(source) : native(source), outputAsset: native(destination), slippageBps: 100 });
+      expect(run.review.source.simulation.provenance).toBe('TRANSACTION_SIMULATION');
+      expect(run.review.workflowHash).toMatch(/^0x[a-f0-9]{64}$/);
+      expect(run.attempts).toEqual([]);
+      const submitted = source === 'solana' ? await executeSolana(c, run.id, w) : await executeEvm(c, c.chainOf(source), run.id, w);
+      const done = await settle(c, submitted);
+      expect(done.verdict).toBe('RECONCILED');
+      expect(done.evidence?.evidenceClass).toBe('MOCKED');
+      expect(done.feeObligation).toMatchObject({ rateBps: 10, status: 'OBLIGATED', collection: 'NOT_SETTLED' });
+    });
+  }
+  it('mandatory 1 Base USDC → Arbitrum WETH preserves token identities through quote, simulation, Review and mocked settlement', async () => {
+    const weth: UniversalAssetRef = { kind: 'TOKEN', address: '0x82af49447d8a07e3bd95bd0d56f35241523fbab1', decimals: 18 };
+    const c = await setup({ extraTokens: { 'eip155:42161': { [weth.address!]: 18 } } });
+    const w = workflow({ sourceChain: UNIVERSAL_NETWORKS.base.chain, destinationChain: UNIVERSAL_NETWORKS['arbitrum-one'].chain,
+      inputAsset: token('base'), outputAsset: weth, amount: '1000000', recipient: 'CONNECTED_OWNER', slippageBps: 100 });
+    const run = await reviewed(c, w, EVM_OWNER);
+    expect(run.review.tokens).toMatchObject({ input: { address: USDC.base, decimals: 6 }, output: { address: weth.address, decimals: 18 } });
+    expect(run.review.route.outputToken).toMatchObject({ address: weth.address, decimals: 18 });
+    expect(run.review.source.simulation.ownerDebit).toBe('1000000');
+    expect((await settle(c, await executeEvm(c, c.chainOf('base'), run.id, w))).verdict).toBe('RECONCILED');
   });
 });

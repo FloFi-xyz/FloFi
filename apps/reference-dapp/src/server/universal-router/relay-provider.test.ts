@@ -100,7 +100,7 @@ describe('N — tampered or mismatched quotes are refused before Review', () => 
       currency: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913', amount: '1' }]; }), 'RELAY_ORDER_FEES_UNEXPECTED');
   });
   it('maps Relay refusals to stable codes', () => {
-    expect(relayRefusal('Insufficient liquidity for this route')).toBe('RELAY_NO_ROUTE');
+    expect(relayRefusal('Insufficient liquidity for this route')).toBe('RELAY_INSUFFICIENT_LIQUIDITY');
     expect(relayRefusal('Amount is too low')).toBe('RELAY_AMOUNT_TOO_LOW');
     expect(() => normalizeRelayQuote({ __httpStatus: 400, __body: { message: 'No routes found' } }, requestOf('sol-base').request)).toThrow('RELAY_NO_ROUTE');
   });

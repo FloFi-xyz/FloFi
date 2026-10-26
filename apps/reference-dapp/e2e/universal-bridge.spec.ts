@@ -180,3 +180,52 @@ test('chat authors Base → Solana receiving SOL through Relay; the Review needs
   await panel(page).getByRole('button', { name: 'Find routes' }).click();
   await expect(panel(page).getByRole('table', { name: 'Route options' }).getByRole('row').filter({ hasText: 'Relay' })).toContainText('Executable');
 });
+
+for (const sentence of ['quero uma bridge de 1 USDC na Base para WETH na Arbitrum', 'I want to bridge 1 USDC on Base to WETH on Arbitrum']) {
+  test(`P0 Copilot: ${sentence}; exact assets through discovery, simulation and Review`, async ({ page, networkGuard }) => {
+    await installEvmWallet(page, wallets.evm);
+    await authorByChat(page, sentence);
+    await page.getByRole('button', { name: 'Simulate workflow' }).click(); await openSimulationDetails(page);
+    await expect(panel(page)).toContainText('Bridge 1 USDC from Base to Arbitrum One, receiving WETH.');
+    await panel(page).getByRole('button', { name: 'Find routes' }).click();
+    await expect(panel(page).getByRole('table', { name: 'Route options' })).toContainText('Executable');
+    await expect(panel(page)).toContainText('Guaranteed minimum');
+    await expect(panel(page)).toContainText('WETH');
+    await expect(panel(page)).toContainText('eth_simulateV1');
+    await expect(panel(page)).toContainText('0.1% of the completed workflow input');
+    expect(await counters()).toEqual({ solanaSends: 0, evmSends: 0 });
+    await page.screenshot({ path: test.info().outputPath('bridge-review.png'), fullPage: true });
+    networkGuard.assertClean();
+  });
+}
+
+test('P0 simulation infrastructure failure has a safe specific message and a support correlation ID', async ({ page }) => {
+  await installEvmWallet(page, wallets.evm);
+  await authorByChat(page, 'bridge 1 USDC from Base to Arbitrum receive WETH');
+  await control('MOCK_failSimulation', [{ enabled: true }]);
+  await page.getByRole('button', { name: 'Simulate workflow' }).click(); await openSimulationDetails(page);
+  await expect(panel(page)).toContainText('The network provider cannot simulate this transaction right now. Nothing was signed.');
+  await expect(panel(page)).toContainText(/Support reference: [a-f0-9-]{36}/);
+  expect(await counters()).toEqual({ solanaSends: 0, evmSends: 0 });
+});
+
+test('P0 Canvas independently selects Base USDC and Arbitrum WETH and applies the same universal bridge', async ({ page }) => {
+  await installEvmWallet(page, wallets.evm);
+  await page.goto('/app');
+  await page.getByRole('button', { name: 'Add bridge', exact: true }).click();
+  const card = page.locator('.build-flow-surface .composer-card');
+  await card.getByRole('textbox').fill('1');
+  await card.getByRole('button', { name: 'Configure source asset', exact: true }).click();
+  await page.getByRole('region', { name: 'Source network picker', exact: true }).getByRole('button', { name: 'Base', exact: true }).click();
+  await page.getByRole('button', { name: 'Hide bridge picker', exact: true }).click();
+  await card.getByRole('button', { name: 'Configure destination asset', exact: true }).click();
+  await page.getByRole('region', { name: 'Destination network picker', exact: true }).getByRole('button', { name: 'Arbitrum', exact: true }).click();
+  await page.getByRole('region', { name: 'Destination token picker', exact: true }).locator('label').filter({ has: page.getByRole('radio', { name: 'WETH', exact: true }) }).click();
+  await page.getByRole('button', { name: 'Hide bridge picker', exact: true }).click();
+  await expect(card.getByRole('button', { name: 'Configure source asset', exact: true })).toContainText('USDC');
+  await expect(card.getByRole('button', { name: 'Configure destination asset', exact: true })).toContainText('WETH');
+  await card.getByRole('textbox').press('Enter');
+  await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '1');
+  await page.getByRole('button', { name: 'Simulate workflow' }).click(); await openSimulationDetails(page);
+  await expect(panel(page)).toContainText('Bridge 1 USDC from Base to Arbitrum One, receiving WETH.');
+});

@@ -11,19 +11,26 @@
  */
 import type { AssetCatalog } from '@defi-workflow-engine/action-registry';
 import { registerNetworkCatalog } from '../domain/asset-catalogs';
+import { registerSolanaDisplayCatalog, clearSolanaDisplayCatalog, type SolanaAssetCatalog } from '../domain/solana-asset-catalog';
 import { CATALOG_NETWORK_IDENTITIES, catalogNetworksNamed } from '../domain/network-registry';
 
 const isObject = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 export type CatalogNetworkId = 'robinhood' | 'base' | 'arbitrum-one' | 'ethereum';
+type CatalogLoaders = Readonly<Partial<Record<CatalogNetworkId, () => Promise<AssetCatalog>>> & { solana?: () => Promise<SolanaAssetCatalog> }>;
+async function prepareSolana(load: (() => Promise<SolanaAssetCatalog>) | undefined): Promise<void> {
+  if (!load) return;
+  try { registerSolanaDisplayCatalog(await load()); } catch { clearSolanaDisplayCatalog(); }
+}
 /** Whether a v1 strategy or a v2 step list names a network anywhere (network, bridge source or destination). */
-export function strategyNamesNetwork(strategy: unknown, network: CatalogNetworkId): boolean {
+export function strategyNamesNetwork(strategy: unknown, network: CatalogNetworkId | 'solana'): boolean {
   const steps = isObject(strategy) && strategy.version === 2 && Array.isArray(strategy.steps) ? strategy.steps : [strategy];
   return steps.some(step => isObject(step) && [step.network, step.sourceNetwork, step.destinationNetwork].includes(network));
 }
 /** Whether a v1 strategy or a v2 step list names Robinhood Chain anywhere (network, bridge source or destination). */
 export const strategyNamesRobinhood = (strategy: unknown) => strategyNamesNetwork(strategy, 'robinhood');
 /** Registers the catalog of every named catalog network that has a loader. Never throws: a failure only leaves its listed symbols unresolvable. */
-export async function prepareNetworkCatalogs(strategy: unknown, loaders: Readonly<Partial<Record<CatalogNetworkId, () => Promise<AssetCatalog>>>>): Promise<void> {
+export async function prepareNetworkCatalogs(strategy: unknown, loaders: CatalogLoaders): Promise<void> {
+  if (strategyNamesNetwork(strategy, 'solana')) await prepareSolana(loaders.solana);
   for (const identity of CATALOG_NETWORK_IDENTITIES) {
     const network = identity.key as CatalogNetworkId;
     const load = loaders[network];
@@ -35,7 +42,8 @@ export async function prepareNetworkCatalogs(strategy: unknown, loaders: Readonl
  * BUILD-BASE-001: registers the catalog of every catalog network a message names (channels: before the exact grammar and the Copilot plan
  * read it). Never throws: a failure only leaves that network's listed symbols unresolvable (pinned assets always resolve).
  */
-export async function prepareCatalogsForText(text: string, loaders: Readonly<Partial<Record<CatalogNetworkId, () => Promise<AssetCatalog>>>>, intent?: unknown): Promise<void> {
+export async function prepareCatalogsForText(text: string, loaders: CatalogLoaders, intent?: unknown): Promise<void> {
+  if (/\bsolana\b/i.test(text)) await prepareSolana(loaders.solana);
   for (const network of catalogNetworksNamed(text, intent)) {
     const load = loaders[network.key as CatalogNetworkId];
     if (!load) continue;

@@ -19,6 +19,7 @@ import { COPILOT_LIMITS, hasUnsafeCharacters, safeCopilotProse, type CopilotActi
   type CopilotSwapAction } from './copilot-intent';
 import { canonicalSymbol } from './asset-catalogs';
 import { networkIdentity, networkOfCopilot } from './network-registry';
+import { UNIVERSAL_NETWORKS } from '@defi-workflow-engine/workflow-contracts';
 import { ROUTER_NETWORK_OPTIONS } from './router-authoring';
 import { COPILOT_TRANSCRIPT, COPILOT_V2_LIMITS, isCopilotIntentError, parseCopilotIntentV2, type CopilotChanges, type CopilotIntentV2, type CopilotOrdinal, type CopilotQuestionTopic,
   type CopilotReuseField, type CopilotTarget } from './copilot-intent-v2';
@@ -143,7 +144,7 @@ type Result = { readonly reply: CopilotReply; readonly next: CopilotConversation
 
 /** Every Command the Copilot may hand to `propose`: new authoring, typed edits of existing steps, and removal. */
 export const COPILOT_V2_COMMANDS: ReadonlySet<string> = new Set([...COPILOT_AUTHORING_COMMANDS, 'SET_SUPPLY', 'SET_BORROW', 'SET_REPAY', 'SET_WITHDRAW',
-  'SET_SOLANA_SWAP', 'SET_ROUTER_BRIDGE', 'SET_UNISWAP_LIQUIDITY', 'SET_SOLANA_LIQUIDITY', 'SET_SWAP_AMOUNT', 'SET_SLIPPAGE', 'REMOVE',
+  'SET_SOLANA_SWAP', 'SET_ROUTER_BRIDGE', 'SET_UNIVERSAL_BRIDGE', 'SET_UNISWAP_LIQUIDITY', 'SET_SOLANA_LIQUIDITY', 'SET_SWAP_AMOUNT', 'SET_SLIPPAGE', 'REMOVE',
   // BUILD-BASE-001: edits of catalog-network swaps, positions and transfers, with the same commands the Canvas uses.
   'SET_CRYPTO_ACTION', 'SET_RH_TRANSFER',
   // PR B: preparing a verified FloFi position for removal or exit (the owner still simulates, reviews and signs).
@@ -483,7 +484,7 @@ const optionLabel = (m: CopilotCopy, resolved: Resolved, language: CopilotLangua
 type Base = { readonly actions: readonly CopilotAction[]; readonly composition: boolean; readonly role: 'SUPPLY' | 'BORROW' | 'SWAP' | null };
 type ChangeField = keyof CopilotChanges | 'deposit';
 const SWAP_FIELDS: readonly CarriedField[] = ['network', 'inputAsset', 'outputAsset', 'amount', 'slippage'];
-const BRIDGE_FIELDS: readonly CarriedField[] = ['sourceNetwork', 'destinationNetwork', 'asset', 'amount', 'slippage', 'routing', 'recipient'];
+const BRIDGE_FIELDS: readonly CarriedField[] = ['sourceNetwork', 'destinationNetwork', 'asset', 'outputAsset', 'amount', 'slippage', 'routing', 'recipient'];
 const LENDING_FIELDS: readonly CarriedField[] = ['network', 'asset', 'amount', 'beneficiary'];
 const TRANSFER_FIELDS: readonly CarriedField[] = ['network', 'asset', 'amount', 'recipient'];
 const COMPOSITION_FIELDS: readonly CarriedField[] = ['network', 'asset', 'inputAsset', 'outputAsset', 'supplyAmount', 'borrowAmount', 'slippage', 'beneficiary'];
@@ -505,8 +506,12 @@ function stepAction(step: WorkflowStep): Base | null {
     // BUILD-BASE-001: every Router route, from the route registry (Robinhood Chain routes and Arbitrum One → Base included).
     case 'ROUTER': { const option = ROUTER_NETWORK_OPTIONS[d.network];
       return { composition: false, role: null, actions: [{ type: 'BRIDGE', sourceNetwork: lendingNetworkOf(option.sourceLabel), destinationNetwork: lendingNetworkOf(option.destinationLabel),
-      asset: d.input.token, amount: d.input.amount, slippageBps: d.input.slippage,
+      asset: d.input.token, outputAsset: option.pair.destination.symbol, amount: d.input.amount, slippageBps: d.input.slippage,
       routing: d.input.routing === 'AUTO' ? null : d.input.routing, recipient: d.input.recipient ? d.input.recipient.toLowerCase() : null }] }; }
+    case 'UNIVERSAL_BRIDGE': return { composition: false, role: null, actions: [{ type: 'BRIDGE',
+      sourceNetwork: lendingNetworkOf(UNIVERSAL_NETWORKS[d.input.source].chain), destinationNetwork: lendingNetworkOf(UNIVERSAL_NETWORKS[d.input.destination].chain),
+      asset: d.input.inputAsset, outputAsset: d.input.outputAsset, amount: d.input.amount, slippageBps: d.input.slippage,
+      routing: d.input.routing, recipient: d.input.recipient || null }] };
     case 'AAVE': return { composition: false, role: null, actions: [{ type: d.operation, protocol: 'AAVE_V3', network: lendingNetworkOf(d.input.network), asset: d.input.asset,
       amount: d.input.amount, beneficiary: d.input.beneficiary.toLowerCase() }] };
     case 'AAVE_WITHDRAW': return { composition: false, role: null, actions: [{ type: 'WITHDRAW', protocol: 'AAVE_V3', network: lendingNetworkOf(d.input.network), asset: d.input.asset,
@@ -592,7 +597,8 @@ function applyChanges(base: Base, changes: CopilotChanges): Applied {
       case 'destinationNetwork': if (type !== 'BRIDGE') return fail(); set(0, 'destinationNetwork', changes.destinationNetwork); drop('destinationNetwork'); break;
       case 'inputAsset': case 'outputAsset':
         if (type === 'SWAP') { set(0, key, changes[key]); drop(key); }
-        else if (type === 'BRIDGE' || type === 'SUPPLY' || type === 'BORROW' || type === 'REPAY' || type === 'WITHDRAW' || type === 'TRANSFER') { set(0, 'asset', changes[key]); drop('asset'); }
+        else if (type === 'BRIDGE') { const field = key === 'outputAsset' ? 'outputAsset' : 'asset'; set(0, field, changes[key]); drop(field); }
+        else if (type === 'SUPPLY' || type === 'BORROW' || type === 'REPAY' || type === 'WITHDRAW' || type === 'TRANSFER') { set(0, 'asset', changes[key]); drop('asset'); }
         else return fail();
         break;
       case 'recipient':

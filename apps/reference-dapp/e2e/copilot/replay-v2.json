@@ -2212,6 +2212,58 @@
      }
     }
    }
+  },
+  {
+   "user": [
+    "quero uma bridge de 1 USDC na Base para WETH na Arbitrum"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "PT",
+      "kind": "ACTION",
+      "action": {
+       "type": "BRIDGE",
+       "sourceNetwork": "BASE",
+       "destinationNetwork": "ARBITRUM",
+       "asset": "USDC",
+       "outputAsset": "WETH",
+       "amount": "1",
+       "slippageBps": null,
+       "routing": null,
+       "recipient": null
+      },
+      "reuse": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
+    "I want to bridge 1 USDC on Base to WETH on Arbitrum"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "EN",
+      "kind": "ACTION",
+      "action": {
+       "type": "BRIDGE",
+       "sourceNetwork": "BASE",
+       "destinationNetwork": "ARBITRUM",
+       "asset": "USDC",
+       "outputAsset": "WETH",
+       "amount": "1",
+       "slippageBps": null,
+       "routing": null,
+       "recipient": null
+      },
+      "reuse": null
+     }
+    }
+   }
   }
  ]
 }

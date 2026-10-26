@@ -42,7 +42,7 @@ describe('Canvas Bridge catalogs and adapter compatibility', () => {
     const fields = readUniversalBridgeNode(JSON.parse(JSON.stringify(applied.editor.workflow.nodes.find(n => n.actionType === 'asset.bridge')!)));
     expect(fields.inputAsset).toEqual({ kind: 'TOKEN', address: ref.split('@')[0], decimals: 18 });
     const switched = editorHistoryReducer(chosen, { type: 'EDIT_BRIDGE_NETWORKS', id, patch: { destination: 'Solana' }, context });
-    expect(switched.actionSetup).toMatchObject({ networks: { inputAsset: ref, outputAsset: 'USDC' } });
+    expect(switched.actionSetup).toMatchObject({ networks: { inputAsset: ref, outputAsset: '' } });
     expect(editorHistoryReducer(switched, { type: 'UNDO' }).actionSetup).toEqual(chosen.actionSetup);
   });
   it('preserves an authored legacy workflow and its explicit settings until Review/Apply replaces its adapter', () => {

@@ -2252,7 +2252,7 @@
                     "type": "string"
                   },
                   "sourceNetwork": {
-                    "description": "Source network (real funds). The Cross-chain Router moves USDC between base, arbitrum-one and ethereum, and into or out of robinhood as USDG (WETH also bridges to and from robinhood); get_capabilities lists the routes this deployment enables.",
+                    "description": "Source mainnet. All 20 directed pairs are representable; provider eligibility is discovered separately.",
                     "anyOf": [
                       {
                         "const": "base",
@@ -2263,41 +2263,59 @@
                         "type": "string"
                       },
                       {
-                        "const": "robinhood",
+                        "const": "ethereum",
                         "type": "string"
                       },
                       {
-                        "const": "ethereum",
+                        "const": "solana",
+                        "type": "string"
+                      },
+                      {
+                        "const": "robinhood",
                         "type": "string"
                       }
                     ]
                   },
                   "destinationNetwork": {
-                    "description": "Destination network; a different network of the same route list.",
+                    "description": "Destination mainnet, different from the source.",
                     "anyOf": [
-                      {
-                        "const": "arbitrum-one",
-                        "type": "string"
-                      },
-                      {
-                        "const": "robinhood",
-                        "type": "string"
-                      },
                       {
                         "const": "base",
                         "type": "string"
                       },
                       {
+                        "const": "arbitrum-one",
+                        "type": "string"
+                      },
+                      {
                         "const": "ethereum",
+                        "type": "string"
+                      },
+                      {
+                        "const": "solana",
+                        "type": "string"
+                      },
+                      {
+                        "const": "robinhood",
                         "type": "string"
                       }
                     ]
                   },
                   "asset": {
-                    "pattern": "^(?!0[xX][0-9a-fA-F])[^\\x00-\\x1f\\x7f]{1,160}$",
-                    "maxLength": 160,
-                    "description": "A symbol or whole name of the selected network's validated official catalog, matched case-insensitively; unknown, ambiguous and foreign-chain references are refused. Never a contract address.",
-                    "type": "string"
+                    "anyOf": [
+                      {
+                        "pattern": "^(?!0[xX][0-9a-fA-F])[^\\x00-\\x1f\\x7f]{1,160}$",
+                        "maxLength": 160,
+                        "description": "A symbol or whole name of the selected network's validated official catalog, matched case-insensitively; unknown, ambiguous and foreign-chain references are refused. Never a contract address.",
+                        "type": "string"
+                      },
+                      {
+                        "pattern": "^(?:0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})@[0-9]{1,2}$",
+                        "maxLength": 48,
+                        "description": "Explicit bridge token contract or mint with decimals, verified on chain at Simulate; never an execution target.",
+                        "type": "string"
+                      }
+                    ]
                   },
                   "amount": {
                     "pattern": "^(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
@@ -2305,15 +2323,43 @@
                     "description": "Source token amount as a decimal string, e.g. \"5\".",
                     "type": "string"
                   },
+                  "outputAsset": {
+                    "anyOf": [
+                      {
+                        "pattern": "^(?!0[xX][0-9a-fA-F])[^\\x00-\\x1f\\x7f]{1,160}$",
+                        "maxLength": 160,
+                        "description": "A symbol or whole name of the selected network's validated official catalog, matched case-insensitively; unknown, ambiguous and foreign-chain references are refused. Never a contract address.",
+                        "type": "string"
+                      },
+                      {
+                        "pattern": "^(?:0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})@[0-9]{1,2}$",
+                        "maxLength": 48,
+                        "description": "Explicit bridge token contract or mint with decimals, verified on chain at Simulate; never an execution target.",
+                        "type": "string"
+                      }
+                    ]
+                  },
                   "routing": {
-                    "description": "Provider policy. auto = LI.FI first, direct Across if LI.FI has no reconcilable route (a preference order, not a best-price search). Default auto.",
+                    "description": "Provider policy. auto = the certified Router (LI.FI first, then direct Across) for its USDC/USDG EVM pairs, otherwise best; best = every provider is asked and the executable route with the highest guaranteed minimum is chosen; relay, lifi, mayan, across = only that provider (execution eligibility is checked separately). Default auto.",
                     "anyOf": [
                       {
                         "const": "auto",
                         "type": "string"
                       },
                       {
+                        "const": "best",
+                        "type": "string"
+                      },
+                      {
+                        "const": "relay",
+                        "type": "string"
+                      },
+                      {
                         "const": "lifi",
+                        "type": "string"
+                      },
+                      {
+                        "const": "mayan",
                         "type": "string"
                       },
                       {
@@ -2329,11 +2375,23 @@
                     "type": "integer"
                   },
                   "recipient": {
-                    "pattern": "^0x[0-9a-fA-F]{40}$",
-                    "minLength": 42,
-                    "maxLength": 42,
-                    "description": "Destination recipient. Omit to deliver to the wallet that signs in the FloFi app (bound at Review).",
-                    "type": "string"
+                    "description": "Destination recipient in the destination network's address format. Omit to deliver to the signing wallet (same ecosystem) or to the wallet of the destination ecosystem connected in the FloFi app (Solana ⇄ EVM), bound at Review.",
+                    "anyOf": [
+                      {
+                        "pattern": "^0x[0-9a-fA-F]{40}$",
+                        "minLength": 42,
+                        "maxLength": 42,
+                        "description": "EVM destination recipient.",
+                        "type": "string"
+                      },
+                      {
+                        "pattern": "^[1-9A-HJ-NP-Za-km-z]{32,44}$",
+                        "minLength": 32,
+                        "maxLength": 44,
+                        "description": "Solana destination recipient wallet.",
+                        "type": "string"
+                      }
+                    ]
                   }
                 }
               },
@@ -2979,7 +3037,7 @@
                               "type": "string"
                             },
                             "sourceNetwork": {
-                              "description": "Source network (real funds). The Cross-chain Router moves USDC between base, arbitrum-one and ethereum, and into or out of robinhood as USDG (WETH also bridges to and from robinhood); get_capabilities lists the routes this deployment enables.",
+                              "description": "Source mainnet. All 20 directed pairs are representable; provider eligibility is discovered separately.",
                               "anyOf": [
                                 {
                                   "const": "base",
@@ -2990,41 +3048,59 @@
                                   "type": "string"
                                 },
                                 {
-                                  "const": "robinhood",
+                                  "const": "ethereum",
                                   "type": "string"
                                 },
                                 {
-                                  "const": "ethereum",
+                                  "const": "solana",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "robinhood",
                                   "type": "string"
                                 }
                               ]
                             },
                             "destinationNetwork": {
-                              "description": "Destination network; a different network of the same route list.",
+                              "description": "Destination mainnet, different from the source.",
                               "anyOf": [
-                                {
-                                  "const": "arbitrum-one",
-                                  "type": "string"
-                                },
-                                {
-                                  "const": "robinhood",
-                                  "type": "string"
-                                },
                                 {
                                   "const": "base",
                                   "type": "string"
                                 },
                                 {
+                                  "const": "arbitrum-one",
+                                  "type": "string"
+                                },
+                                {
                                   "const": "ethereum",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "solana",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "robinhood",
                                   "type": "string"
                                 }
                               ]
                             },
                             "asset": {
-                              "pattern": "^(?!0[xX][0-9a-fA-F])[^\\x00-\\x1f\\x7f]{1,160}$",
-                              "maxLength": 160,
-                              "description": "A symbol or whole name of the selected network's validated official catalog, matched case-insensitively; unknown, ambiguous and foreign-chain references are refused. Never a contract address.",
-                              "type": "string"
+                              "anyOf": [
+                                {
+                                  "pattern": "^(?!0[xX][0-9a-fA-F])[^\\x00-\\x1f\\x7f]{1,160}$",
+                                  "maxLength": 160,
+                                  "description": "A symbol or whole name of the selected network's validated official catalog, matched case-insensitively; unknown, ambiguous and foreign-chain references are refused. Never a contract address.",
+                                  "type": "string"
+                                },
+                                {
+                                  "pattern": "^(?:0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})@[0-9]{1,2}$",
+                                  "maxLength": 48,
+                                  "description": "Explicit bridge token contract or mint with decimals, verified on chain at Simulate; never an execution target.",
+                                  "type": "string"
+                                }
+                              ]
                             },
                             "amount": {
                               "pattern": "^(0|[1-9][0-9]{0,29})(\\.[0-9]{1,18})?$",
@@ -3032,15 +3108,43 @@
                               "description": "Source token amount as a decimal string, e.g. \"5\".",
                               "type": "string"
                             },
+                            "outputAsset": {
+                              "anyOf": [
+                                {
+                                  "pattern": "^(?!0[xX][0-9a-fA-F])[^\\x00-\\x1f\\x7f]{1,160}$",
+                                  "maxLength": 160,
+                                  "description": "A symbol or whole name of the selected network's validated official catalog, matched case-insensitively; unknown, ambiguous and foreign-chain references are refused. Never a contract address.",
+                                  "type": "string"
+                                },
+                                {
+                                  "pattern": "^(?:0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})@[0-9]{1,2}$",
+                                  "maxLength": 48,
+                                  "description": "Explicit bridge token contract or mint with decimals, verified on chain at Simulate; never an execution target.",
+                                  "type": "string"
+                                }
+                              ]
+                            },
                             "routing": {
-                              "description": "Provider policy. auto = LI.FI first, direct Across if LI.FI has no reconcilable route (a preference order, not a best-price search). Default auto.",
+                              "description": "Provider policy. auto = the certified Router (LI.FI first, then direct Across) for its USDC/USDG EVM pairs, otherwise best; best = every provider is asked and the executable route with the highest guaranteed minimum is chosen; relay, lifi, mayan, across = only that provider (execution eligibility is checked separately). Default auto.",
                               "anyOf": [
                                 {
                                   "const": "auto",
                                   "type": "string"
                                 },
                                 {
+                                  "const": "best",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "relay",
+                                  "type": "string"
+                                },
+                                {
                                   "const": "lifi",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "mayan",
                                   "type": "string"
                                 },
                                 {
@@ -3056,11 +3160,23 @@
                               "type": "integer"
                             },
                             "recipient": {
-                              "pattern": "^0x[0-9a-fA-F]{40}$",
-                              "minLength": 42,
-                              "maxLength": 42,
-                              "description": "Destination recipient. Omit to deliver to the wallet that signs in the FloFi app (bound at Review).",
-                              "type": "string"
+                              "description": "Destination recipient in the destination network's address format. Omit to deliver to the signing wallet (same ecosystem) or to the wallet of the destination ecosystem connected in the FloFi app (Solana ⇄ EVM), bound at Review.",
+                              "anyOf": [
+                                {
+                                  "pattern": "^0x[0-9a-fA-F]{40}$",
+                                  "minLength": 42,
+                                  "maxLength": 42,
+                                  "description": "EVM destination recipient.",
+                                  "type": "string"
+                                },
+                                {
+                                  "pattern": "^[1-9A-HJ-NP-Za-km-z]{32,44}$",
+                                  "minLength": 32,
+                                  "maxLength": 44,
+                                  "description": "Solana destination recipient wallet.",
+                                  "type": "string"
+                                }
+                              ]
                             }
                           }
                         },

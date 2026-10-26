@@ -13,7 +13,7 @@
 import { Buffer } from 'node:buffer';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { UNIVERSAL_DIRECTED_PAIRS, UNIVERSAL_NETWORKS } from '../packages/workflow-contracts/dist/index.js';
 import { UNIVERSAL_ROUTER_DEPLOYMENT } from '../packages/action-registry/dist/index.js';
 import { createUniversalDiscovery } from '../apps/reference-dapp/src/server/universal-router/discovery.ts';
@@ -98,10 +98,9 @@ function summary(result) {
     certification: 'NOT_CERTIFIED',
   };
 }
-async function row(source, destination, kind) {
-  const inputKind = kind, outputKind = kind;
+async function row(source, destination, inputKind, outputKind, amount) {
   const request = { source, destination, inputToken: tokenOf(source, inputKind), outputToken: tokenOf(destination, outputKind),
-    amount: kind === 'NATIVE' ? NATIVE_AMOUNT[UNIVERSAL_NETWORKS[source].native.symbol] : STABLE_AMOUNT, slippageBps: 50 };
+    amount: amount ?? (inputKind === 'NATIVE' ? NATIVE_AMOUNT[UNIVERSAL_NETWORKS[source].native.symbol] : STABLE_AMOUNT), slippageBps: 100 };
   const base = { source, destination, assets: { input: symbolOf(source, inputKind), output: symbolOf(destination, outputKind) }, amount: request.amount };
   try {
     const parsed = parseDiscoveryRequest(request);
@@ -113,15 +112,28 @@ const commit = (() => { try { return execFileSync('git', ['rev-parse', 'HEAD'], 
 const pins = { evm: await evmPins(), solana: await solanaPin() };
 const pairs = [];
 for (const { source, destination } of UNIVERSAL_DIRECTED_PAIRS) {
-  for (const kind of ['STABLE', 'NATIVE']) { pairs.push(await row(source, destination, kind)); await sleep(1_200); }
+  for (const inputKind of ['STABLE', 'NATIVE']) {
+    pairs.push(...await Promise.all(['STABLE', 'NATIVE'].map(outputKind => row(source, destination, inputKind, outputKind))));
+    await sleep(1_200);
+  }
   process.stderr.write(`${source} → ${destination}\n`);
 }
+// Mandatory cross-token regression uses the same discovery path, no execution or funded wallet.
+const regressionRequest = parseDiscoveryRequest({ source: 'base', destination: 'arbitrum-one', inputToken: tokenOf('base', 'STABLE'),
+  outputToken: { kind: 'TOKEN', address: '0x82af49447d8a07e3bd95bd0d56f35241523fbab1', decimals: 18, symbol: 'WETH' }, amount: '1000000', slippageBps: 100 });
+const regression = { request: { source: 'base', destination: 'arbitrum-one', input: 'USDC', output: 'WETH', amount: '1000000', slippageBps: 100 },
+  ...summary(await discovery.discover(regressionRequest, regressionRequest.providers)) };
 const count = status => pairs.filter(p => p.discovery?.status === status).length;
-const report = { format: 'flofi.universal-route-matrix.v1', build: 'BUILD-CROSSCHAIN-UNIVERSAL-001', commit, generatedAt: new Date().toISOString(),
+const sourceFiles = ['discovery.ts', 'http.ts', 'relay-provider.ts', 'requests.ts'];
+const sourceFingerprint = Object.fromEntries(await Promise.all(sourceFiles.map(async name => [name,
+  createHash('sha256').update(await readFile(new URL(`../apps/reference-dapp/src/server/universal-router/${name}`, import.meta.url))).digest('hex')])));
+const workingTreeDirty = (() => { try { execFileSync('git', ['diff', '--quiet']); return false; } catch { return true; } })();
+const report = { sourceFingerprint, workingTreeDirty, format: 'flofi.universal-route-matrix.v1', build: 'BUILD-CROSSCHAIN-UNIVERSAL-001', commit, generatedAt: new Date().toISOString(),
   method: 'Read-only public provider quotes through FloFi discovery (public quote subjects, no keys) and public RPC reads of the Relay contract pins.',
   limits: ['A quote is not an execution; no simulation with real funds was run; nothing here is public execution evidence or a certification.',
     'Provider availability changes by the minute: TEMPORARILY_UNAVAILABLE is a moment, not a verdict.'],
-  pins, totals: { rows: pairs.length, executable: count('EXECUTABLE'), liveQuoteOnly: count('LIVE_QUOTE'), supportedNoQuote: count('SUPPORTED_BY_PROVIDER'),
+  pins, regression, totals: { rows: pairs.length, executable: count('EXECUTABLE'), liveQuoteOnly: count('LIVE_QUOTE'), supportedNoQuote: count('SUPPORTED_BY_PROVIDER'),
+    belowMinimum: count('BELOW_MINIMUM'), aboveMaximum: count('ABOVE_MAXIMUM'), insufficientLiquidity: count('INSUFFICIENT_LIQUIDITY'),
     temporarilyUnavailable: count('TEMPORARILY_UNAVAILABLE'), noRoute: count('NO_ROUTE'), errors: pairs.filter(p => p.error).length }, rpcReads: requests, pairs };
 await writeFile(outputPath, JSON.stringify(report, null, 2) + '\n');
 process.stderr.write(`${JSON.stringify(report.totals)}\n`);

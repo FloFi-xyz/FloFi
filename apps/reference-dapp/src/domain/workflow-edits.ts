@@ -32,7 +32,9 @@ export function editCommandFor(workflow: Workflow, context: ReviewContext, nodeI
     }
     case 'AAVE_WITHDRAW': return authoring.type === 'ADD_WITHDRAW' ? { ok: true, command: { ...base, type: 'SET_WITHDRAW', nodeId, input: authoring.input } } : refuse('STEP_KIND_MISMATCH');
     case 'SOLANA_SWAP': return authoring.type === 'ADD_SOLANA_SWAP' ? { ok: true, command: { ...base, type: 'SET_SOLANA_SWAP', nodeId, input: authoring.input } } : refuse('STEP_KIND_MISMATCH');
-    case 'ROUTER': return authoring.type === 'ADD_ROUTER_BRIDGE' ? { ok: true, command: { ...base, type: 'SET_ROUTER_BRIDGE', nodeId, input: authoring.input } } : refuse('STEP_KIND_MISMATCH');
+    case 'UNIVERSAL_BRIDGE': case 'ROUTER':
+      if (authoring.type === 'ADD_UNIVERSAL_BRIDGE') return { ok: true, command: { ...base, type: 'SET_UNIVERSAL_BRIDGE', nodeId, input: authoring.input } };
+      return authoring.type === 'ADD_ROUTER_BRIDGE' ? { ok: true, command: { ...base, type: 'SET_ROUTER_BRIDGE', nodeId, input: authoring.input } } : refuse('STEP_KIND_MISMATCH');
     case 'UNISWAP_LIQUIDITY': return authoring.type === 'ADD_UNISWAP_LIQUIDITY' ? { ok: true, command: { ...base, type: 'SET_UNISWAP_LIQUIDITY', nodeId, input: authoring.input } }
       : refuse('STEP_KIND_MISMATCH');
     case 'ORCA_LIQUIDITY': return authoring.type === 'ADD_SOLANA_LIQUIDITY' ? { ok: true, command: { ...base, type: 'SET_SOLANA_LIQUIDITY', nodeId, input: authoring.input } }

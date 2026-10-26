@@ -19,7 +19,7 @@ import { canonicalizeUniversalRoute, EVM_ZERO_ADDRESS, SOLANA_SYSTEM_PROGRAM, ty
   type UniversalToken } from '@defi-workflow-engine/workflow-contracts';
 import { encodeErc20ApproveExact, encodeRelayDepositErc20, encodeRelayDepositNative, relaySolanaDepositInstruction, verifyRelayOrder, RELAY_EVM_DEPOSITORY,
   RELAY_SOLANA_DEPOSITORY_PROGRAM, type RelayOrderData } from '@defi-workflow-engine/reference-compiler';
-import { providerHttpError, type UniversalHttp } from './http.ts';
+import { providerHttpError, providerRefusalCode, type UniversalHttp } from './http.ts';
 
 export const RELAY_API = 'https://api.relay.link';
 export type UniversalQuoteRequest = {
@@ -57,14 +57,15 @@ export function relayQuoteBody(r: UniversalQuoteRequest): Record<string, unknown
 }
 /** Relay's "no route" answers, mapped to stable codes (the provider message is kept only as a bounded note). */
 export function relayRefusal(message: string): string {
-  return /insufficient liquidity|no (?:available )?route|not supported|unsupported/i.test(message) ? 'RELAY_NO_ROUTE'
+  return /insufficient liquidity|not enough liquidity/i.test(message) ? 'RELAY_INSUFFICIENT_LIQUIDITY'
+    : /no (?:available )?routes?|not supported|unsupported/i.test(message) ? 'RELAY_NO_ROUTE'
     : /amount.*(?:too (?:low|small)|minimum)|below.*minimum/i.test(message) ? 'RELAY_AMOUNT_TOO_LOW'
       : /amount.*(?:too (?:high|large)|maximum)|exceeds/i.test(message) ? 'RELAY_AMOUNT_TOO_HIGH' : /invalid address/i.test(message) ? 'RELAY_ADDRESS_REFUSED' : 'RELAY_QUOTE_REFUSED';
 }
 
 export function normalizeRelayQuote(raw: unknown, r: UniversalQuoteRequest): UniversalRoute {
   const refused = providerHttpError(raw);
-  if (refused) fail(relayRefusal(refused.message));
+  if (refused) fail([401, 403, 408, 425, 429].includes(refused.status) || refused.status >= 500 ? providerRefusalCode('RELAY', refused) : relayRefusal(refused.message));
   const q = rec(raw, 'RELAY_RESPONSE_INVALID'), protocol = rec(rec(q.protocol, 'RELAY_PROTOCOL_UNSUPPORTED').v2, 'RELAY_PROTOCOL_UNSUPPORTED');
   const requestId = typeof q.requestId === 'string' ? q.requestId.toLowerCase() : fail('RELAY_RESPONSE_INVALID');
   if (!HASH32.test(requestId)) fail('RELAY_RESPONSE_INVALID');

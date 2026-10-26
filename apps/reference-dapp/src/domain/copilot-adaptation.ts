@@ -61,7 +61,7 @@ export function fieldsOfAction(action: CopilotAction | null): ReadingFields {
   const out: Record<string, LexiconTarget> = {};
   const put = (field: ReadingField, value: LexiconTarget | null) => { if (value) out[field] = value; };
   if (OPERATIONS.has(action.type)) put('operation', target(`operation:${action.type}`));
-  if (action.type === 'BRIDGE') { put('sourceNetwork', networkTarget(action.sourceNetwork)); put('destinationNetwork', networkTarget(action.destinationNetwork)); put('asset', assetTarget(action.asset)); }
+  if (action.type === 'BRIDGE') { put('sourceNetwork', networkTarget(action.sourceNetwork)); put('destinationNetwork', networkTarget(action.destinationNetwork)); put('asset', assetTarget(action.asset)); put('outputAsset', assetTarget(action.outputAsset ?? null)); }
   else put('network', networkTarget(action.network));
   if (action.type === 'SWAP') { put('inputAsset', assetTarget(action.inputAsset)); put('outputAsset', assetTarget(action.outputAsset)); }
   else if (action.type !== 'BRIDGE' && action.type !== 'LIQUIDITY') put('asset', assetTarget(action.asset));
@@ -79,7 +79,7 @@ export function actionDiff(before: CopilotAction, after: CopilotAction): { reado
   const a = fieldsOfAction(before), b = fieldsOfAction(after), keys = [...new Set([...Object.keys(a), ...Object.keys(b)])] as ReadingField[];
   const changed = keys.filter(key => a[key] !== b[key]);
   // A field FloFi cannot name in its closed vocabulary (a catalog token) on either side counts as a change it cannot interpret: never a correction.
-  const raw = (action: CopilotAction) => JSON.stringify([action.type === 'BRIDGE' ? [action.sourceNetwork, action.destinationNetwork, action.asset] : action.network,
+  const raw = (action: CopilotAction) => JSON.stringify([action.type === 'BRIDGE' ? [action.sourceNetwork, action.destinationNetwork, action.asset, action.outputAsset] : action.network,
     action.type === 'SWAP' ? [action.inputAsset, action.outputAsset] : action.type === 'LIQUIDITY' ? null : action.asset]);
   const uninterpretable = changed.some(key => !a[key] || !b[key]) || (!changed.length && raw(before) !== raw(after));
   return { changed: changed.filter(key => a[key] && b[key]), financial: otherFields(before) !== otherFields(after) || uninterpretable, replaced: false };

@@ -22,7 +22,7 @@ import { resolveAssetReference } from './asset-catalogs';
 import { COPILOT_NETWORK_IDS, copilotNetworksMentioned, catalogNetworkOfChatName, networkIdentity, networkOfCopilot, type CopilotNetworkId } from './network-registry';
 import { routerNetworksOf } from './router-authoring';
 import { checkRecipient } from './recipient-address';
-import { defaultUniversalOutput, resolveUniversalAsset, universalAssetReference, universalChatSentence, type UniversalBridgeRouting } from './universal-bridge-authoring';
+import { defaultUniversalOutput, resolveUniversalAsset, universalAssetReference, universalChatSentence, UNIVERSAL_CANVAS_LABEL, universalCanvasPair, type UniversalBridgeRouting } from './universal-bridge-authoring';
 import { isSolanaPublicKey, UNIVERSAL_NETWORKS, type UniversalNetworkKey } from '@defi-workflow-engine/workflow-contracts';
 import { lexiconAssets, lexiconNamedNetworkIds, lexiconNetworks, targetEnvironment, type LexiconEntry } from './copilot-lexicon';
 
@@ -417,9 +417,17 @@ function planRoute(a: CopilotBridgeAction, g: Grounding): Plan {
 const UNIVERSAL_OF: Readonly<Partial<Record<Network, UniversalNetworkKey>>> = { SOLANA: 'solana', BASE: 'base', ARBITRUM: 'arbitrum-one', ETHEREUM: 'ethereum', ROBINHOOD: 'robinhood' };
 const RECEIVE_ASSET = /(?<![\p{L}\p{N}])(?:receiv(?:e|ing)|get(?:ting)?|recebendo|receber|receba|recebo)\s+(?:(?:it\s+)?(?:as|in|em|como)\s+)?([A-Za-z$][A-Za-z0-9.]{0,15})(?![\p{L}\p{N}])/iu;
 const RECEIVE_STOP = new Set(['on', 'at', 'to', 'in', 'em', 'na', 'no', 'para', 'it', 'the', 'my', 'minha', 'meu', 'a', 'o', 'funds', 'fundos', 'money', 'dinheiro', 'there', 'la', 'lá']);
-const receivedAsset = (text: string) => { const word = RECEIVE_ASSET.exec(text)?.[1]; return word && !RECEIVE_STOP.has(word.toLowerCase()) ? word : null; };
-const universalWanted = (a: CopilotBridgeAction, g: Grounding) => g.policy.catalog === true && (a.sourceNetwork === 'SOLANA' || a.destinationNetwork === 'SOLANA' ||
-  namedNetworks(g).includes('SOLANA') || receivedAsset(g.text) !== null || /\b(?:relay|mayan)\b/i.test(g.text));
+const DESTINATION_ASSET = /(?<![\p{L}\p{N}])(?:para|to)\s+([A-Za-z$][A-Za-z0-9.@]{0,159})\s+(?:na|no|on|in)\s+/iu;
+const receivedAsset = (text: string) => { const word = RECEIVE_ASSET.exec(text)?.[1] ?? DESTINATION_ASSET.exec(text)?.[1]; return word && !RECEIVE_STOP.has(word.toLowerCase()) ? word : null; };
+const universalWanted = (a: CopilotBridgeAction, g: Grounding) => {
+  if (!g.policy.catalog) return false;
+  if (a.sourceNetwork === 'SOLANA' || a.destinationNetwork === 'SOLANA' || namedNetworks(g).includes('SOLANA') ||
+    ['BEST', 'RELAY', 'MAYAN'].includes(a.routing ?? '') || /\b(?:relay|mayan)\b/i.test(g.text)) return true;
+  const src = a.sourceNetwork && a.sourceNetwork !== 'OTHER' ? UNIVERSAL_OF[a.sourceNetwork] : undefined;
+  const dst = a.destinationNetwork && a.destinationNetwork !== 'OTHER' ? UNIVERSAL_OF[a.destinationNetwork] : undefined;
+  return !!src && !!dst && !!universalCanvasPair({ source: UNIVERSAL_CANVAS_LABEL[src], destination: UNIVERSAL_CANVAS_LABEL[dst],
+    ...a.asset ? { inputAsset: a.asset } : {}, ...a.outputAsset ?? receivedAsset(g.text) ? { outputAsset: (a.outputAsset ?? receivedAsset(g.text))! } : {} });
+};
 function planUniversalBridge(a: CopilotBridgeAction, g: Grounding): Plan {
   const m = copyOf(g), notes: string[] = [], text = g.text;
   const named = [...namedNetworks(g), ...(['sourceNetwork', 'destinationNetwork'] as const).flatMap(field => {
@@ -438,11 +446,16 @@ function planUniversalBridge(a: CopilotBridgeAction, g: Grounding): Plan {
   const src = UNIVERSAL_OF[source!]!, dst = UNIVERSAL_OF[destination!]!, srcName = UNIVERSAL_NETWORKS[src].name, dstName = UNIVERSAL_NETWORKS[dst].name;
   const route = `${srcName} → ${dstName}`;
   if (testWording(g)) ask(['sourceNetwork', 'destinationNetwork'], m.routeRealFunds(route));
-  const written = isCatalogNetwork(source as Network) ? catalogToken(a.asset, source as Network, g, 'bridge', 'asset', 'ANY', notes).asset.symbol : needAsset(a.asset, g, 'bridge', 'asset');
+  const written = isCatalogNetwork(source as Network) && !g.carried.has('asset') && !a.asset?.includes('@') ? catalogToken(a.asset, source as Network, g, 'bridge', 'asset', 'ANY', notes).asset.symbol : needAsset(a.asset, g, 'bridge', 'asset');
   const reference = (key: UniversalNetworkKey, value: string, network: string) => {
     try { return universalAssetReference(key, value); } catch { return refuse(m.universalAssetUnknown(value, network)); }
   };
-  const asset = reference(src, written, srcName), wantedOutput = receivedAsset(text);
+  const asset = reference(src, written, srcName), wantedOutput = a.outputAsset ?? receivedAsset(text);
+  // Destination values have their own grounding and catalog. They can never change the source asset.
+  if (wantedOutput !== null) {
+    if (isCatalogNetwork(destination as Network) && !g.carried.has('outputAsset') && !wantedOutput.includes('@')) catalogToken(wantedOutput, destination as Network, g, 'bridge', 'outputAsset', 'ANY', notes);
+    else needAsset(wantedOutput, g, 'bridge', 'outputAsset');
+  }
   let outputAsset: string;
   if (wantedOutput !== null) outputAsset = reference(dst, wantedOutput, dstName);
   else {
@@ -452,7 +465,9 @@ function planUniversalBridge(a: CopilotBridgeAction, g: Grounding): Plan {
   const amount = amountOf(a.amount, g, 'bridge');
   const slippage = slippageOf(a.slippageBps, DEFAULT_SLIPPAGE, g, notes, UNIVERSAL_MAXIMUM_SLIPPAGE_BPS);
   const routingNamed = g.carried.has('routing');
-  const routing: UniversalBridgeRouting = /\brelay\b/i.test(text) ? 'RELAY' : /\bmayan\b/i.test(text) ? 'MAYAN'
+  if (a.routing && a.routing !== 'AUTO' && a.routing !== 'BEST' && !routingNamed &&
+    !(a.routing === 'LIFI' ? /li\.?\s?fi/i : new RegExp(`\\b${a.routing}\\b`, 'i')).test(text)) ask([], m.whichRouting, m.routingOptions);
+  const routing: UniversalBridgeRouting = a.routing === 'RELAY' || /\brelay\b/i.test(text) ? 'RELAY' : a.routing === 'MAYAN' || /\bmayan\b/i.test(text) ? 'MAYAN'
     : a.routing === 'LIFI' && (routingNamed || /li\.?\s?fi/i.test(text)) ? 'LIFI' : a.routing === 'ACROSS' && (routingNamed || /\bacross\b/i.test(text)) ? 'ACROSS' : 'BEST';
   if (routing === 'BEST') notes.push(m.universalBestRoutingNote);
   const destinationEcosystem = UNIVERSAL_NETWORKS[dst].ecosystem === 'SOLANA' ? 'Solana' : 'EVM';
@@ -469,6 +484,19 @@ function planUniversalBridge(a: CopilotBridgeAction, g: Grounding): Plan {
 const UNIVERSAL_MAXIMUM_SLIPPAGE_BPS = 300;
 
 function planBridge(a: CopilotBridgeAction, g: Grounding): Plan {
+  const statedOutput = g.policy.catalog ? receivedAsset(g.text) : null;
+  if (statedOutput && a.outputAsset && !g.carried.has('outputAsset') && a.destinationNetwork && a.destinationNetwork !== 'OTHER') {
+    const destination = UNIVERSAL_OF[a.destinationNetwork];
+    if (destination) {
+      const same = (() => { try { return JSON.stringify(resolveUniversalAsset(destination, universalAssetReference(destination, statedOutput)).asset) ===
+        JSON.stringify(resolveUniversalAsset(destination, universalAssetReference(destination, a.outputAsset!)).asset); } catch { return false; } })();
+      if (!same) ask(['asset'], copyOf(g).universalOutputQuestion(UNIVERSAL_NETWORKS[destination].name));
+    }
+  }
+  if (g.policy.catalog && a.outputAsset && a.destinationNetwork && a.destinationNetwork !== 'OTHER' && !g.carried.has('outputAsset')) {
+    if (isCatalogNetwork(a.destinationNetwork) && !a.outputAsset.includes('@')) catalogToken(a.outputAsset, a.destinationNetwork, g, 'bridge', 'outputAsset', 'ANY');
+    else needAsset(a.outputAsset, g, 'bridge', 'outputAsset');
+  }
   if (universalWanted(a, g)) return planUniversalBridge(a, g);
   if (extendedRoute(a, g)) return planRoute(a, g);
   const m = copyOf(g), notes: string[] = [], text = g.text;

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use server';
+import { reportUniversalFailure } from '../server/universal-router/failure';
 import { readdir, stat } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 import { UNIVERSAL_NETWORKS, type SemanticWorkflow, type UniversalNetworkKey } from '@defi-workflow-engine/workflow-contracts';
@@ -22,12 +23,11 @@ import { currentSolanaSession, currentWalletSession } from '../server/session-pr
  * (PostgreSQL, workers). Local: the same service on files. A run belongs to the wallet that simulated it: an EVM session
  * (Sign-In With Ethereum) for EVM sources, a Solana session (Sign-In With Solana) for Solana sources — `ecosystem` names which.
  */
-type Result<T> = { ok: true; value: T } | { ok: false; code: string };
+type Result<T> = { ok: true; value: T } | { ok: false; code: string; correlationId?: string };
 export type UniversalEcosystem = 'EVM' | 'SOLANA';
 export type UniversalRunSummary = { runId: string; status: string; hasEvidence: boolean; updatedAt: string };
 const FLOW = 'crosschain-universal' as const;
 let service: UniversalRouterService | null = null;
-const classified = (cause: unknown) => { const code = cause instanceof Error ? cause.message : ''; return /^[A-Z][A-Z0-9_]{2,80}$/.test(code) ? code : 'UNIVERSAL_SERVICE_UNAVAILABLE'; };
 function journalDir(): string {
   const dir = process.env.GRYLOO_UNIVERSAL_ROUTER_JOURNAL;
   if (!dir || !isAbsolute(dir)) throw new Error('UNIVERSAL_STORAGE_NOT_CONFIGURED');
@@ -51,15 +51,15 @@ async function principalFor(ecosystem: UniversalEcosystem): Promise<string | nul
 async function run<T>(ecosystem: UniversalEcosystem, method: string, args: readonly unknown[], action: (s: UniversalRouterService) => Promise<T>): Promise<Result<T>> {
   if (ecosystem !== 'EVM' && ecosystem !== 'SOLANA') return { ok: false, code: 'UNIVERSAL_ECOSYSTEM_INVALID' };
   let principal: string | null;
-  try { principal = await principalFor(ecosystem); } catch (cause) { return { ok: false, code: classified(cause) }; }
+  try { principal = await principalFor(ecosystem); } catch (cause) { return reportUniversalFailure(cause, 'request'); }
   // Cloud deployment (remote API or embedded PostgreSQL runtime): the same backend enforces ownership against the durable run.
-  const cloud = await cloudFlow<T>(FLOW, method, args, { principal });
-  if (cloud) return cloud;
   try {
+    const cloud = await cloudFlow<T>(FLOW, method, args, { principal });
+    if (cloud) return cloud.ok || cloud.correlationId ? cloud : reportUniversalFailure(new Error(cloud.code), method);
     const s = current();
     await assertRunOwnership(UNIVERSAL_OWNERSHIP, method, args, principal, async id => (await s.load(id)).owner);
     return { ok: true, value: await action(s) };
-  } catch (cause) { return { ok: false, code: classified(cause) }; }
+  } catch (cause) { return reportUniversalFailure(cause, 'request'); }
 }
 export async function universalRouterAvailability(): Promise<UniversalRouterMode> {
   return await cloudFlowMode(FLOW) ?? universalRouterMode(process.env);
@@ -67,14 +67,14 @@ export async function universalRouterAvailability(): Promise<UniversalRouterMode
 export async function universalInfo() { return run('EVM', 'info', [], async s => ({ executionEnabled: s.executionEnabled })); }
 /** Read-only route discovery for a pair (every provider, every answer classified). Persists nothing; binds no owner. */
 export async function universalDiscover(request: unknown): Promise<Result<DiscoveryResult>> {
-  const cloud = await cloudFlow<DiscoveryResult>(FLOW, 'discover', [request], { principal: null });
-  if (cloud) return cloud;
   try {
+    const cloud = await cloudFlow<DiscoveryResult>(FLOW, 'discover', [request], { principal: null });
+    if (cloud) return cloud.ok || cloud.correlationId ? cloud : reportUniversalFailure(new Error(cloud.code), 'discover');
     const mode = universalRouterMode(process.env);
     if (mode === 'off') throw new Error('UNIVERSAL_ROUTER_NOT_ENABLED');
     const runtime = universalRouterRuntime(mode, process.env), parsed = parseDiscoveryRequest(request);
     return { ok: true, value: await createUniversalDiscovery({ http: runtime.http, apis: runtime.apis, keys: runtime.keys }).discover(parsed, parsed.providers) };
-  } catch (cause) { return { ok: false, code: classified(cause) }; }
+  } catch (cause) { return reportUniversalFailure(cause, 'request'); }
 }
 /** Read-only token facts for an explicit contract or mint (decimals and, on EVM, the token's own symbol), so a custom asset can be authored. */
 export async function universalTokenFacts(network: UniversalNetworkKey, address: string): Promise<Result<{ decimals: number; symbol: string | null }>> {
@@ -96,7 +96,7 @@ export async function universalTokenFacts(network: UniversalNetworkKey, address:
       }
     } catch { symbol = null; }
     return { ok: true, value: { decimals, symbol } };
-  } catch (cause) { return { ok: false, code: classified(cause) }; }
+  } catch (cause) { return reportUniversalFailure(cause, 'request'); }
 }
 export async function universalSimulate(workflow: SemanticWorkflow, owner: string, destinationWallet?: string) {
   const args = destinationWallet === undefined ? [workflow, owner] : [workflow, owner, destinationWallet];
@@ -127,7 +127,7 @@ export async function universalStatus(ecosystem: UniversalEcosystem, id: string)
 /** The signed-in wallet's universal runs, newest first, so a run can be recovered from any browser. */
 export async function universalRuns(ecosystem: UniversalEcosystem): Promise<Result<UniversalRunSummary[]>> {
   let principal: string | null;
-  try { principal = await principalFor(ecosystem); } catch (cause) { return { ok: false, code: classified(cause) }; }
+  try { principal = await principalFor(ecosystem); } catch (cause) { return reportUniversalFailure(cause, 'request'); }
   if (!principal) return { ok: false, code: 'WALLET_SESSION_REQUIRED' };
   const listed = await cloudRuns(FLOW, principal);
   if (listed) return listed.ok ? { ok: true, value: listed.value.map(r => ({ runId: r.runId, status: r.status, hasEvidence: r.hasEvidence, updatedAt: r.updatedAt })) } : listed;
@@ -144,5 +144,5 @@ export async function universalRuns(ecosystem: UniversalEcosystem): Promise<Resu
       if (runs.length >= 25) break;
     }
     return { ok: true, value: runs };
-  } catch (cause) { return { ok: false, code: classified(cause) }; }
+  } catch (cause) { return reportUniversalFailure(cause, 'request'); }
 }

@@ -14,16 +14,17 @@ import { createEvmMockChain, createRelayMock, createSolanaMock, mockedUniversalD
 import { UNIVERSAL_HARNESS_PORT } from '../src/server/universal-router/mock-deployment.ts';
 
 const USDC = { base: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913', solana: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v' } as const;
+const WETH = { chain: UNIVERSAL_NETWORKS['arbitrum-one'].chain, address: '0x82af49447d8a07e3bd95bd0d56f35241523fbab1', decimals: 18 };
 const NATIVE = { EVM: '0x0000000000000000000000000000000000000000', SOLANA: '11111111111111111111111111111111' } as const;
 function harness(owners: { evm?: string; solana?: string } = {}) {
   const now = () => Date.now(), D = mockedUniversalDeployment();
   const evm: Record<string, EvmMock> = Object.fromEntries(Object.keys(D.evm).map(chain => [chain, createEvmMockChain(D.evm[chain]!, { now,
-    tokens: chain === UNIVERSAL_NETWORKS.base.chain ? { [USDC.base]: 6 } : {} })]));
+    tokens: { ...chain === UNIVERSAL_NETWORKS.base.chain ? { [USDC.base]: 6 } : {}, ...chain === WETH.chain ? { [WETH.address]: WETH.decimals } : {} } })]));
   const solana = createSolanaMock(D.solana, { mints: { [USDC.solana]: 6 } });
   // 1 SOL = 150 USDC; 1 ETH = 4,000 USDC.
-  const price = (c: string) => c === NATIVE.SOLANA ? 150n : c === NATIVE.EVM ? 4000n : 1n;
-  const relay = createRelayMock({ now, decimals: (_, c) => c === NATIVE.EVM ? 18 : c === NATIVE.SOLANA ? 9 : 6, rate: (i, o) => 10n ** 18n * price(i) / price(o),
-    symbol: (_, c) => c === NATIVE.SOLANA ? 'SOL' : c === NATIVE.EVM ? 'ETH' : 'USDC' });
+  const price = (c: string) => c === NATIVE.SOLANA ? 150n : c === NATIVE.EVM || c === WETH.address ? 4000n : 1n;
+  const relay = createRelayMock({ now, decimals: (_, c) => c === NATIVE.EVM || c === WETH.address ? 18 : c === NATIVE.SOLANA ? 9 : 6, rate: (i, o) => 10n ** 18n * price(i) / price(o),
+    symbol: (_, c) => c === NATIVE.SOLANA ? 'SOL' : c === NATIVE.EVM ? 'ETH' : c === WETH.address ? 'WETH' : 'USDC' });
   const base = evm[UNIVERSAL_NETWORKS.base.chain]!;
   if (owners.evm) { base.setNative(owners.evm, 10n ** 18n); base.setToken(USDC.base, owners.evm, 1_000_000_000n); }
   if (owners.solana) { solana.setLamports(owners.solana, 2_000_000_000n); solana.setToken(owners.solana, USDC.solana, 500_000_000n); }
@@ -91,6 +92,7 @@ createServer(async (request, response) => {
         h.counters.evmSends += 1;
         reply({ result: h.evm[chain]!.wallet.send({ from: tx.from, to: tx.to, data: tx.data, value: tx.value ?? '0x0' }).hash }); return;
       }
+      if (method === 'MOCK_failSimulation') { h.evm[UNIVERSAL_NETWORKS.base.chain]!.state.simulateFails = p.enabled === true; reply({ result: true }); return; }
       if (method === 'MOCK_nonce') { const chain = `eip155:${Number(BigInt(String(params[2] ?? '0x2105')))}`;
         reply({ result: await h.evm[chain]!.rpc('eth_getTransactionCount', params.slice(0, 2)) }); return; }
       if (method === 'MOCK_fill') {

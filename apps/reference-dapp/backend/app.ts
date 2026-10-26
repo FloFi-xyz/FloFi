@@ -1,3 +1,4 @@
+import { reportUniversalFailure } from '../src/server/universal-router/failure.ts';
 // SPDX-License-Identifier: AGPL-3.0-only
 /**
  * BUILD-CLOUD-001 backend composition: the stateless API routes and the worker handlers, both built on the
@@ -23,7 +24,7 @@ export function observeOnly(rpc: Rpc): Rpc {
   return (method, params) => SUBMISSION_METHODS.has(method) ? Promise.reject(new Error('WORKER_SUBMISSION_FORBIDDEN')) : rpc(method, params);
 }
 
-export type FlowResult = { ok: true; value: unknown } | { ok: false; code: string };
+export type FlowResult = { ok: true; value: unknown } | { ok: false; code: string; correlationId?: string };
 export type BackendOptions = {
   readonly db: Database; readonly env: Readonly<Record<string, string | undefined>>; readonly logger: Logger; readonly tenantId: string;
   readonly holderId: string; readonly evidenceStore: EvidenceStore | null;
@@ -104,6 +105,7 @@ export function createBackend(options: BackendOptions) {
       catch (error) {
         const code = error instanceof Error && CODE.test(error.message) ? error.message : definition.unavailableCode;
         if (code === 'RUN_OWNER_MISMATCH') logger.warn('flow.ownership_refused', { flow, action: method, run_id: runId });
+        if (flow === 'crosschain-universal') return reportUniversalFailure(error, method, fields => logger.warn('bridge.operation_failed', fields));
         return { ok: false, code };
       }
     }
@@ -114,6 +116,7 @@ export function createBackend(options: BackendOptions) {
           const code = error instanceof Error && CODE.test(error.message) ? error.message : definition.unavailableCode;
           if (code === definition.busyCode && attempt < (options.busyRetries ?? 12)) { await new Promise(resolve => setTimeout(resolve, Math.min(1_000, 100 * 2 ** attempt))); continue; }
           if (!(error instanceof Error && CODE.test(error.message))) logger.warn('flow.unclassified_error', { flow, action: method, run_id: runId });
+          if (flow === 'crosschain-universal') return reportUniversalFailure(error, method, fields => logger.warn('bridge.operation_failed', fields));
           return { ok: false, code } as const;
         }
       }
@@ -136,6 +139,7 @@ export function createBackend(options: BackendOptions) {
       try { return { ok: true, value: await definition.create(previewStorage(), depsFor(flow, true), {}).call(method, args) } as const; }
       catch (error) {
         if (!(error instanceof Error && CODE.test(error.message))) logger.warn('flow.unclassified_error', { flow, action: method });
+        if (flow === 'crosschain-universal') return reportUniversalFailure(error, method, fields => logger.warn('bridge.operation_failed', fields));
         return { ok: false, code: error instanceof Error && CODE.test(error.message) ? error.message : definition.unavailableCode } as const;
       }
     });

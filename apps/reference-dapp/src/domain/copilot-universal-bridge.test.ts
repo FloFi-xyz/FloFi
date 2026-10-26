@@ -98,9 +98,9 @@ describe('BUILD-CROSSCHAIN-UNIVERSAL-001 exact chat grammar', () => {
     expect(parseUniversalChat('bridge 1 USDC from Base to Base')).toBeNull();
     expect(() => parseUniversalChat('bridge 1 USDC from Base to Solana to 0x3333333333333333333333333333333333333333')).toThrow('UNIVERSAL_RECIPIENT_INVALID');
   });
-  it('a channel never authors a Mayan-pinned bridge (quotes only), and a bridge from Solana names no claiming wallet', () => {
+  it('a channel represents a Mayan-pinned bridge even when execution is unavailable', () => {
     const input = parseUniversalChat('bridge 1 USDC from Solana to Base via Mayan')!;
-    expect(canonicalStrategy({ type: 'ADD_UNIVERSAL_BRIDGE', input, source: 'CHAT', baseRevision: 0 } as Command)).toEqual({ ok: false, code: 'CHANNEL_COMMAND_NOT_AUTHORING' });
+    expect(canonicalStrategy({ type: 'ADD_UNIVERSAL_BRIDGE', input, source: 'CHAT', baseRevision: 0 } as Command)).toMatchObject({ ok: true });
   });
 });
 
