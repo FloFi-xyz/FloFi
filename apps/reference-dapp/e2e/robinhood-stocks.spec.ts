@@ -128,11 +128,11 @@ test('the Copilot resolves a company name to its Stock Token: Tesla (EN and PT) 
     await page.goto('/app');
     await ask(page, 'Buy Tesla with 50 USDG on Robinhood Chain');
     const said = conversation(page).locator('.message.ai').last();
-    await expect(said).toContainText('Interpreted as “swap 50 USDG to TSLA on Robinhood Chain slippage 50 bps”');
+    await expect(said).toContainText('Interpreted as “swap 50 USDG to TSLA on Robinhood Chain slippage 100 bps”');
     await expect(said).toContainText('“Tesla” is TSLA (Tesla) in the official Robinhood Chain catalog.');
     const english = await proposedChange(page);
     await ask(page, 'Compre ações da Tesla com 50 USDG na Robinhood');
-    await expect(conversation(page).locator('.message.ai').last()).toContainText('Interpretado como “swap 50 USDG to TSLA on Robinhood Chain slippage 50 bps”');
+    await expect(conversation(page).locator('.message.ai').last()).toContainText('Interpretado como “swap 50 USDG to TSLA on Robinhood Chain slippage 100 bps”');
     await expect(conversation(page).locator('.message.ai').last()).toContainText('“Tesla” é TSLA (Tesla) no catálogo oficial da Robinhood Chain.');
     const portuguese = await proposedChange(page);
     // Chat's exact grammar (no model) proposes the very same change.
@@ -143,7 +143,7 @@ test('the Copilot resolves a company name to its Stock Token: Tesla (EN and PT) 
     expect(exact).toBe(english);
     expect(english).toContain('TSLA');
     await ask(page, 'Buy Salesforce with 20 USDG on Robinhood Chain');
-    await expect(conversation(page).locator('.message.ai').last()).toContainText('Interpreted as “swap 20 USDG to CRM on Robinhood Chain slippage 50 bps”');
+    await expect(conversation(page).locator('.message.ai').last()).toContainText('Interpreted as “swap 20 USDG to CRM on Robinhood Chain slippage 100 bps”');
     // Nothing changed until the owner applies; then the canonical IR holds TSLA's own chain + address.
     await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '0');
     await ask(page, 'Buy Tesla with 50 USDG on Robinhood Chain');

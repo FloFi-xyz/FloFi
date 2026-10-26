@@ -26,7 +26,7 @@ test('one sentence authors the swap and the position it funds; "yes" never appli
   const wallet = await resetDevnetHarness(); await installDevnetWallet(page, wallet);
   await page.goto('/app');
   await ask(page, 'Swap 0.1 SOL to devUSDC on Solana Devnet and add liquidity with these tokens and at most 0.05 SOL in a 10% range');
-  await expect(copilotSays(page)).toContainText('Interpreted as “swap 0.1 SOL to devUSDC on Solana Devnet slippage 50 bps then add liquidity all swapped devUSDC and 0.05 SOL from');
+  await expect(copilotSays(page)).toContainText('Interpreted as “swap 0.1 SOL to devUSDC on Solana Devnet slippage 100 bps then add liquidity all swapped devUSDC and 0.05 SOL from');
   await expect(copilotSays(page)).toContainText('Range ±10% around the current verified pool price');
   await expect(copilotSays(page)).toContainText('The swap and the position are two transactions, each simulated, reviewed and signed in your wallet.');
   await expect(proposal(page)).toHaveCount(1);
