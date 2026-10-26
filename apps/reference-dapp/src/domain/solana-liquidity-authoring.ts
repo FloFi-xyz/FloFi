@@ -3,6 +3,7 @@ import { CONCENTRATED_LIQUIDITY_ACTION, createConcentratedLiquidityNode, readCon
 import { ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY as profile, ORCA_WHIRLPOOLS_MAINNET_LIQUIDITY, orcaLiquidityProfile, type OrcaLiquidityProfile } from '@defi-workflow-engine/action-registry';
 import { orcaAlignPriceRange, orcaPriceFromSqrtPrice, orcaSqrtPriceAtTick } from '@defi-workflow-engine/reference-compiler';
 import { formatTokenAmount, parseTokenAmount, type SolanaSwapInput } from './jupiter-authoring';
+import { DEFAULT_SLIPPAGE } from './slippage-policy';
 
 /**
  * Chat and canvas author the same canonical `asset.liquidity.concentrated` node. The network selects the runtime below
@@ -15,7 +16,7 @@ export type SolanaLiquidityNetwork = 'Solana Devnet' | 'Solana';
 export type SolanaLiquidityInput = { network: SolanaLiquidityNetwork; maxSol: string; maxDevUsdc: string;
   /** Prices in token B per SOL (`PRICE`) or tick indexes (`TICK`). */
   rangeUnit: 'PRICE' | 'TICK'; lower: string; upper: string; slippage: string };
-export const SOLANA_LIQUIDITY_DEFAULT_SLIPPAGE = '100';
+export const SOLANA_LIQUIDITY_DEFAULT_SLIPPAGE = DEFAULT_SLIPPAGE;
 /** The Orca liquidity profile of a Solana liquidity network. */
 export const solanaLiquidityProfileOf = (network: SolanaLiquidityNetwork): OrcaLiquidityProfile => network === 'Solana' ? ORCA_WHIRLPOOLS_MAINNET_LIQUIDITY : profile;
 const amount = (text: string, decimals: number) => text === '0' ? '0' : parseTokenAmount(text, decimals);

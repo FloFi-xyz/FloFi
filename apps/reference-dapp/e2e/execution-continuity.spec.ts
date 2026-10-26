@@ -65,7 +65,7 @@ async function setup(page: Page, request: APIRequestContext, loseAt = 0) {
   }))));
   await page.goto('/app');
   await expect(page.getByRole('group', { name: 'Wallet connection' })).toContainText('MetaMask');
-  await expect(page.getByRole('group', { name: 'Wallet connection' })).toContainText('Base Sepolia');
+  await expect(page.getByRole('group', { name: 'Wallet connection' }).locator('.wallet-connection')).toHaveAttribute('title', /Base Sepolia/);
   await page.getByRole('button', { name: 'Add swap', exact: true }).click();
   const card = page.locator('.build-flow-surface .composer-card').first();
   await card.getByRole('button', { name: 'Select source token', exact: true }).click();

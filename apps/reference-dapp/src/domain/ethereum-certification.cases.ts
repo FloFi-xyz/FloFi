@@ -15,9 +15,9 @@ const bridge = (sourceNetwork: string, destinationNetwork: string) => ({ type: '
 const loan = (type: string, amount: string) => ({ type, protocol: 'AAVE_V3', network: 'ETHEREUM', asset: 'USDC', amount, beneficiary: null });
 export const ETHEREUM_CERTIFICATION_CASES: readonly Case[] = [
   { id: 'Swap', text: 'Swap 10 USDC for WETH on Ethereum', pt: 'troca 10 USDC por WETH na Ethereum',
-    sentence: 'swap 10 USDC to WETH on Ethereum slippage 50 bps', action: swap,
-    strategy: { action: 'swap', network: 'ethereum', inputAsset: 'USDC', outputAsset: 'WETH', amount: '10', slippageBps: 50 },
-    canvas: { selection: { action: 'swap', network: 'Ethereum', from: 'USDC', to: 'WETH' }, amount: '10', slippage: '50' } },
+    sentence: 'swap 10 USDC to WETH on Ethereum slippage 100 bps', action: swap,
+    strategy: { action: 'swap', network: 'ethereum', inputAsset: 'USDC', outputAsset: 'WETH', amount: '10', slippageBps: 100 },
+    canvas: { selection: { action: 'swap', network: 'Ethereum', from: 'USDC', to: 'WETH' }, amount: '10', slippage: '100' } },
   ...(['ETH', 'USDC'] as const).map(asset => {
     const amount = asset === 'ETH' ? '0.01' : '5';
     return { id: asset === 'ETH' ? 'Native Transfer' : 'ERC20 Transfer', text: 'Send ' + amount + ' ' + asset + ' on Ethereum to ' + CERTIFICATION_RECIPIENT,
@@ -31,11 +31,11 @@ export const ETHEREUM_CERTIFICATION_CASES: readonly Case[] = [
     return { id: incoming ? 'Bridge Base → Ethereum' : 'Bridge Ethereum → Base',
       text: (incoming ? 'Bridge' : 'Move') + ' 100 USDC from ' + source + ' to ' + destination,
       pt: (incoming ? 'manda' : 'traga') + ' 100 USDC da ' + source + ' para ' + destination,
-      sentence: 'bridge 100 USDC from ' + source + ' to ' + destination + ' via auto slippage 50 bps',
+      sentence: 'bridge 100 USDC from ' + source + ' to ' + destination + ' via auto slippage 100 bps',
       action: bridge(incoming ? 'BASE' : 'ETHEREUM', incoming ? 'ETHEREUM' : 'BASE'),
       strategy: { action: 'bridge', sourceNetwork: incoming ? 'base' : 'ethereum', destinationNetwork: incoming ? 'ethereum' : 'base',
-        asset: 'USDC', amount: '100', routing: 'auto', slippageBps: 50 } as StrategySpec,
-      canvas: { source, destination, token: 'USDC', amount: '100', recipient: '', routing: 'AUTO', slippage: '50' } as RouterBridgeInput };
+        asset: 'USDC', amount: '100', routing: 'auto', slippageBps: 100 } as StrategySpec,
+      canvas: { source, destination, token: 'USDC', amount: '100', recipient: '', routing: 'AUTO', slippage: '100' } as RouterBridgeInput };
   }),
   { id: 'Liquidity', text: 'Provide liquidity with 10 USDC and 0.005 WETH on Ethereum at 0.05% over the full range',
     pt: 'quero adicionar liquidez de 10 USDC e 0,005 WETH na Ethereum com taxa de 0,05% na faixa completa',

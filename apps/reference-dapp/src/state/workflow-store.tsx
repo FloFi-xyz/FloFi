@@ -42,6 +42,11 @@ type Store = { restorationEpoch: number; state: EditorState; dispatch: Dispatch<
    */
   commitCanvasAmount(id: string): string | null;
   restoreLendingCanvas(workflow:SemanticWorkflow):void; restoreSolanaCompositionCanvas(workflow: SemanticWorkflow): void; restoreWorkflow(workflow: SemanticWorkflow): void; adoptDraftIdentity(workflowId: string): void;
+  /**
+   * BUILD-FLOFI-PRODUCT-UX-001: a run persisted in this browser that may put its workflow back on the untouched Canvas is being read. Until it
+   * settles the Canvas shows a neutral surface, never the empty "Start your workflow" state it would replace a moment later.
+   */
+  canvasRestoring: boolean; trackCanvasRestoration<T>(read: Promise<T>): Promise<T>;
   /** UX-004: start a genuinely clean workflow (fresh draft identity; prior Review/proposal retired). Wallet and session are untouched. */
   createNewWorkflow(): void;
   /** UX-004: true once the owner created a new workflow in this visit; a persisted run is recovered only into the visit's initial draft. */
@@ -69,6 +74,11 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
   const editorRef = useRef(state); editorRef.current = state;
   const [restorationEpoch, setRestorationEpoch] = useState(0);
   const [newWorkflow, setNewWorkflow] = useState(false);
+  const [pendingRestorations, setPendingRestorations] = useState(0);
+  const trackCanvasRestoration = useCallback(<T,>(read: Promise<T>): Promise<T> => {
+    setPendingRestorations(count => count + 1);
+    return read.finally(() => setPendingRestorations(count => count - 1));
+  }, []);
   const authoringIncomplete = canvasAuthoringIncomplete(history.actionSetup, history.amountInputs);
   const incompleteRef = useRef(authoringIncomplete);
   incompleteRef.current = authoringIncomplete;
@@ -114,6 +124,8 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
   workflowRef.current = state.workflow;
   chainRef.current = chain;
   const reviewState = useMemo(() => {
+    // BUILD-FLOFI-PRODUCT-UX-001: the empty draft has no canonical form yet (the IR needs a node), so there is nothing to review and nothing invalid.
+    if (!state.workflow.nodes.length) return { review: null, reviewError: null };
     try { return { review: lintWorkflow(state.workflow, context), reviewError: null }; }
     catch (cause) { return { review: null, reviewError: cause instanceof Error ? cause.message : 'INVALID_WORKFLOW' }; }
   }, [state.workflow, context]);
@@ -269,6 +281,7 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
     generateArtifacts();
   }, [accessCheck, generateArtifacts]);
   return <Context.Provider value={{ restorationEpoch, state, dispatch, context, restoreLendingCanvas, restoreSolanaCompositionCanvas, adoptDraftIdentity: workflowId => dispatchHistory({ type: 'ADOPT_DRAFT_IDENTITY', workflowId }), restoreWorkflow: workflow => { setRestorationEpoch(n => n + 1); setPending(null); dispatchHistory({ type: 'RESTORE_WORKFLOW', workflow }); },
+    canvasRestoring: pendingRestorations > 0, trackCanvasRestoration,
     createNewWorkflow: () => { setRestorationEpoch(n => n + 1); setNewWorkflow(true); setPending(null); setStagedPosition(null); dispatchHistory({ type: 'NEW_WORKFLOW', workflowId: `workflow-${crypto.randomUUID()}` }); }, newWorkflow, canvasLayout: history.layout, canUndo: history.past.length > 0,
     actionSetup: history.actionSetup, amountInputs: history.amountInputs, authoringIncomplete,
     bridgeNetworkInputs: history.bridgeNetworkInputs, editBridgeNetworks, cryptoSelections: history.cryptoSelections, editCryptoSelection, reviewCryptoPool,

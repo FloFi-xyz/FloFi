@@ -20,7 +20,7 @@ const MINT = '7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU', OTHER_MINT = '9WzDX
 const verified = (extra: Partial<CopilotVerified> = {}): CopilotVerified => ({ orcaPrice: { price: '150', tickCurrentIndex: -18_880 }, solanaOwner: 'Owner1111111111111111111111111111111111111',
   orcaPositions: [], remaining: [], ...extra });
 const position = (positionMint = MINT, status = 'ACTIVE') => ({ positionMint, status, tickLower: -19_200, tickUpper: -18_560, liquidity: '1000000000' });
-const swap: SolanaSwapInput = { network: 'Solana Devnet', from: 'SOL', to: 'devUSDC', amount: '0.1', slippage: '50' };
+const swap: SolanaSwapInput = { network: 'Solana Devnet', from: 'SOL', to: 'devUSDC', amount: '0.1', slippage: '100' };
 const tenPercent = { rangeUnit: 'PERCENT', lower: null, upper: '10' };
 /** The Canvas path: add the swap, add the position, connect them (canvas-connect); each step through the same reducer. */
 function canvas(liquidity: SolanaLiquidityInput, from: EditorState = initialEditor()): EditorState {
@@ -40,10 +40,10 @@ describe('token aliases and the devUSDC network', () => {
   it('reads devUSDC in any case and infers Solana Devnet from it, with a note and never a mainnet', () => {
     const session = new CopilotSession();
     const upper = session.say('please swap 0.1 sol into DEVUSDC on solana devnet', intent.action(act.swap({ network: 'SOLANA_DEVNET', inputAsset: 'sol', outputAsset: 'DEVUSDC', amount: '0.1' })))!;
-    expect(upper).toMatchObject({ kind: 'PROPOSAL', sentence: 'swap 0.1 SOL to devUSDC on Solana Devnet slippage 50 bps', command: { type: 'ADD_SOLANA_SWAP' } });
+    expect(upper).toMatchObject({ kind: 'PROPOSAL', sentence: 'swap 0.1 SOL to devUSDC on Solana Devnet slippage 100 bps', command: { type: 'ADD_SOLANA_SWAP' } });
     session.dismiss();
     const implied = session.say('swap 0.2 sol for devusdc', intent.action(act.swap({ inputAsset: 'sol', outputAsset: 'devusdc', amount: '0.2' })))!;
-    expect(implied).toMatchObject({ kind: 'PROPOSAL', sentence: 'swap 0.2 SOL to devUSDC on Solana Devnet slippage 50 bps' });
+    expect(implied).toMatchObject({ kind: 'PROPOSAL', sentence: 'swap 0.2 SOL to devUSDC on Solana Devnet slippage 100 bps' });
     expect(implied.notes).toContain('devUSDC exists only on Solana Devnet (test tokens), so Flofi used Solana Devnet.');
     // Without a test token, an unnamed network is still asked for.
     expect(session.say('swap 0.2 SOL for USDC', intent.action(act.swap({ inputAsset: 'SOL', outputAsset: 'USDC', amount: '0.2' })))).toMatchObject({ kind: 'CLARIFICATION' });
@@ -58,7 +58,7 @@ describe('Swap → Orca liquidity funded by the swap output', () => {
       intent.composition([act.swap({ network: 'SOLANA_DEVNET', inputAsset: 'SOL', outputAsset: 'DEVUSDC', amount: '0.1' }),
         act.liquidity({ deposits: [{ asset: 'SOL', maxAmount: '0.05' }], ...tenPercent, funding: 'SWAP_OUTPUT' })]))!;
     expect(reply).toMatchObject({ kind: 'PROPOSAL', command: { type: 'ADD_SOLANA_COMPOSITION', from: null, swap } });
-    expect(reply.sentence).toBe('swap 0.1 SOL to devUSDC on Solana Devnet slippage 50 bps then add liquidity all swapped devUSDC and 0.05 SOL from 135 to 165 devUSDC per SOL slippage 100 bps');
+    expect(reply.sentence).toBe('swap 0.1 SOL to devUSDC on Solana Devnet slippage 100 bps then add liquidity all swapped devUSDC and 0.05 SOL from 135 to 165 devUSDC per SOL slippage 100 bps');
     expect(reply.notes).toEqual(expect.arrayContaining(['Range ±10% around the current verified pool price (150 devUSDC per SOL): 135–165 devUSDC per SOL, aligned outward to usable ticks.',
       'The position uses 100% of the swap’s actual reconciled devUSDC output, never other devUSDC already in your wallet.']));
     expect(session.workflow.revision).toBe(0);

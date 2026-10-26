@@ -107,6 +107,16 @@ export const portuguese: Readonly<Record<string, string>> = {
   'Environment': 'Ambiente', 'Network': 'Rede', 'Networks': 'Redes', 'Active network': 'Rede ativa',
   'Testnet': 'Rede de testes', 'Mainnet': 'Rede principal', 'Unknown': 'Desconhecida', 'EVM Default': 'EVM Default', 'Solana Default': 'Solana Default',
   'Wallet not connected': 'Carteira desligada', 'Wallet connection': 'Ligação da carteira',
+  'Restoring wallet…': 'A restaurar a carteira…',
+  'FloFi Beta Mainnet — Real funds are enabled. Review every transaction before signing.':
+    'FloFi Beta Mainnet — Operações com fundos reais estão habilitadas. Revise cada transação antes de assinar.',
+  'Shown as': 'Mostrado como',
+  'Any catalog asset by symbol or name, or a contract / mint written as address@decimals (identity verified on chain at Simulate). A valid asset does not guarantee a route.':
+    'Qualquer ativo do catálogo por símbolo ou nome, ou um contrato / mint escrito como endereço@decimais (identidade verificada on-chain na Simulação). Um ativo válido não garante uma rota.',
+  'Search the verified Solana tokens above, or write a mint as address@decimals (verified on chain at Simulate).':
+    'Pesquise os tokens Solana verificados acima, ou escreva um mint como endereço@decimais (verificado on-chain na Simulação).',
+  'Search by symbol, name or contract…': 'Pesquisar por símbolo, nome ou contrato…',
+  '{0} shortcuts': 'Atalhos de {0}',
   'Workflow stages': 'Etapas do fluxo', 'Skip to workspace': 'Ir para a área de trabalho',
   'Workflow workspace': 'Área do fluxo', 'Simulation workspace': 'Área de simulação', 'Execution workspace': 'Área de execução',
   'Navigation': 'Navegação', 'Open navigation': 'Abrir navegação', 'Close navigation': 'Fechar navegação', 'Log out': 'Terminar sessão',

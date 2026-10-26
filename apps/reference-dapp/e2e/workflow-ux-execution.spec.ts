@@ -62,7 +62,8 @@ async function setup(page: Page, request: APIRequestContext, options: { decline?
   });
   await page.goto('/app');
   const wallet = page.getByRole('group', { name: 'Wallet connection' });
-  await expect(wallet).toContainText('MetaMask'); await expect(wallet).toContainText('Base Sepolia');
+  await expect(wallet.locator('.header-wallet-provider')).toHaveAttribute('title', 'MetaMask');
+  await expect(wallet.locator('.wallet-connection')).toHaveAttribute('title', /Base Sepolia/);
   await buildSwap(page);
   await stage(page, 'Simulate').click();
   return {
@@ -143,7 +144,8 @@ async function expectCleanNewWorkflow(page: Page, owner: Awaited<ReturnType<type
   expect(fresh.revision).toBe(0); expect(fresh.workflowId).not.toBe(before.workflowId); expect(fresh.workflowId).toMatch(/^workflow-[0-9a-f-]{36}$/);
   expect(fresh.nodes.every(node => node.actionType.startsWith('mock-'))).toBe(true);
   // The wallet connection and session stay; no wallet request or send happens.
-  await expect(owner.wallet).toContainText('MetaMask'); await expect(owner.wallet).toContainText('Base Sepolia');
+  await expect(owner.wallet.locator('.header-wallet-provider')).toHaveAttribute('title', 'MetaMask');
+  await expect(owner.wallet.locator('.wallet-connection')).toHaveAttribute('title', /Base Sepolia/);
   expect(owner.requested()).toBe(before.requested); expect(await owner.sends()).toEqual(before.sends);
   // No stale simulation, Review or execution result belongs to the new workflow.
   await stage(page, 'Simulate').click();
@@ -236,7 +238,8 @@ test('BUILD-FIX-UX-001: declined request → Create new workflow → same swap �
   expect(second).not.toBe(declined);
   await confirmApprovalAndSwap(page, owner, 2);
   expect(await owner.sends()).toBe(2); expect(owner.requested()).toBe(3);
-  await expect(owner.wallet).toContainText('MetaMask'); await expect(owner.wallet).toContainText('Base Sepolia');
+  await expect(owner.wallet.locator('.header-wallet-provider')).toHaveAttribute('title', 'MetaMask');
+  await expect(owner.wallet.locator('.wallet-connection')).toHaveAttribute('title', /Base Sepolia/);
   // The declined attempt remains recorded exactly as it was; the new run is separate.
   expect(await durableAttempts(declined!)).toEqual([{ step: 'APPROVAL', state: 'REJECTED' }]);
   expect((await durableAttempts(second!)).map(a => a.state)).toEqual(['CONFIRMED', 'CONFIRMED']);
@@ -251,7 +254,8 @@ test('BUILD-FIX-UX-001: a declined request restored after reload offers Simulate
   await expect(summary(page)).toContainText('Transaction not submitted');
   const declined = await pointer(page), authored = JSON.parse(await readWorkflowIr(page)) as { workflowId: string };
   await page.reload();
-  await expect(owner.wallet).toContainText('MetaMask'); await expect(owner.wallet).toContainText('Base Sepolia');
+  await expect(owner.wallet.locator('.header-wallet-provider')).toHaveAttribute('title', 'MetaMask');
+  await expect(owner.wallet.locator('.wallet-connection')).toHaveAttribute('title', /Base Sepolia/);
   // The recorded run is restored into the untouched draft as a result, with no recovery and no request.
   await expect(cta(page).getByRole('button', { name: 'Simulate again', exact: true })).toBeEnabled({ timeout: 30_000 });
   await expect(cta(page)).not.toContainText('Recover execution');

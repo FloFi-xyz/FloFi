@@ -36,7 +36,7 @@ async function answerSolDev(page: Page, amount: string) {
  * wallet still signs the server's sign-in message, and that signature alone proves it.
  */
 async function proveConnectedWallet(page: Page) {
-  await expect(page.getByRole('group', { name: 'Wallet connection' })).toContainText('Base Sepolia');
+  await expect(page.getByRole('group', { name: 'Wallet connection' }).locator('.wallet-connection')).toHaveAttribute('title', /Base Sepolia/);
   const signIns = async () => (await walletRequests(page)).filter(method => method === 'personal_sign').length, before = await signIns();
   await page.getByRole('button', { name: 'Prove an EVM wallet', exact: true }).click();
   await expect(page.getByText(/Memory for wallet/)).toBeVisible();

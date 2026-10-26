@@ -11,7 +11,7 @@ import { WORKFLOW_STAGES } from '../domain/product-shell';
 
 const fixture = vi.hoisted(() => ({ workflow: null as unknown as Workflow, diagnosticsAvailable: false }));
 const wallet = vi.hoisted(() => ({ account: null as string | null, chainId: null as string | null,
-  busy: false, providerError: null, error: null, connect: vi.fn(), switchTo: vi.fn(), reset: vi.fn() }));
+  busy: false, restoring: false, providerError: null, error: null, connect: vi.fn(), switchTo: vi.fn(), reset: vi.fn() }));
 vi.mock('../state/workflow-store', () => ({ useWorkflow: () => ({ state: { workflow: fixture.workflow } }) }));
 vi.mock('./header-settings', async importOriginal => {
   const actual = await importOriginal<typeof import('./header-settings')>();
@@ -34,7 +34,7 @@ vi.mock('../state/composition-store', () => ({ useComposition: () => ({}) }));
 vi.mock('../state/lending-store', () => ({ useLending: () => ({ record: null, recovered: false, retired: false }) }));
 vi.mock('../state/bridge-swap-store', () => ({ useBridgeSwap: () => ({ run: null, recovered: false }) }));
 vi.mock('../state/router-store', () => ({ useRouter: () => ({ record: null, recovered: false, network: 'testnet' }) }));
-vi.mock('../state/jupiter-store', () => ({ useJupiter: () => ({ record: null, recovered: false, owner: null, network: 'Solana' }) }));
+vi.mock('../state/jupiter-store', () => ({ useJupiter: () => ({ record: null, recovered: false, owner: null, network: 'Solana', session: null, busy: false, restoring: false, disconnect: vi.fn() }) }));
 // Header → Connect Wallet goes through the canonical selector hook; rendering never opens it or touches a wallet.
 vi.mock('../state/wallet-connection', () => ({ useWalletConnection: () => ({ connect: wallet.connect, error: null, solanaChain: 'solana:devnet' }) }));
 
@@ -84,9 +84,13 @@ describe('product shell rendering', () => {
     if (connected) { wallet.account = '0x1111111111111111111111111111111111111111'; wallet.chainId = '0x14a34'; }
     const html = renderToStaticMarkup(createElement(TopBar, { tab: 'Build', setTab: vi.fn() }));
     expect(html).toMatch(/class="header-wallet" role="group" aria-label="Wallet connection">[\s\S]*?<\/div><div class="header-settings-control"><button type="button" class="header-settings"/);
-    expect(html.replace(/<[^>]*>/g, '')).toContain(connected ? 'EVM Default: 0x1111…1111 · Base Sepolia' : 'Wallet not connected');
-    if (connected) expect(html).toContain('<span class="numeric wallet-address">0x1111…1111</span>');
-    if (connected) expect(html).not.toContain('header-wallet-provider');
+    expect(html.replace(/<[^>]*>/g, '')).toContain(connected ? '0x1111…1111' : 'Wallet not connected');
+    if (connected) {
+      expect(html).toContain('<span class="numeric wallet-address">0x1111…1111</span>');
+      expect(html).not.toContain('EVM Default:');
+      expect(html.replace(/title="[^"]*"/g, '')).not.toContain('Base Sepolia');
+      expect(html).not.toContain('header-wallet-provider');
+    }
     expect(html).not.toContain('>Disconnect</button>');
     if (!connected) expect(html).toContain('>Connect Wallet</button>');
     expect(vi.mocked(HeaderSettings).mock.calls.at(-1)?.[0]).toMatchObject({ onDisconnect: wallet.reset, disconnectDisabled: !connected });
@@ -126,7 +130,8 @@ describe('product shell rendering', () => {
     const html = renderToStaticMarkup(createElement(TopBar, { tab: 'Build', setTab: vi.fn() }));
     expect(html).toContain('<span class="header-wallet-provider" title="Rabby Wallet">');
     expect(html).toContain('<span class="sr-only">Rabby Wallet</span>');
-    expect(html).toMatch(/class="build009-wallet-info wallet-connection"[^>]*>EVM Default: <span class="numeric wallet-address">0x1111…1111<\/span> · Base Sepolia<\/span>/);
+    expect(html).toMatch(/class="build009-wallet-info wallet-connection"[^>]*title="Rabby Wallet · 0x1111111111111111111111111111111111111111 · Base Sepolia"><span class="numeric wallet-address">0x1111…1111<\/span><\/span>/);
+    expect(html).not.toContain('EVM Default:');
     expect(wallet.connect).not.toHaveBeenCalled();
     Object.assign(wallet, { provider: undefined });
   });
@@ -137,10 +142,21 @@ describe('product shell rendering', () => {
     })] });
     wallet.account = '0x1111111111111111111111111111111111111111'; wallet.chainId = '0x2105';
     const html = renderToStaticMarkup(createElement(TopBar, { tab: 'Simulate', setTab: vi.fn() }));
-    expect(html.replace(/<[^>]*>/g, '')).toContain('EVM Default: 0x1111…1111 · Base (8453)');
+    expect(html.replace(/<[^>]*>/g, '')).toContain('0x1111…1111');
+    expect(html).not.toContain('EVM Default:');
+    expect(html).toContain('title="EVM · 0x1111111111111111111111111111111111111111 · Base (8453)"');
+    // The workflow's own network is named; Mainnet-only product does not offer a switch into a test network.
     expect(html).toContain('Workflow network: Base Sepolia');
-    expect(html).toContain('Switch to Base Sepolia');
+    expect(html).not.toContain('Switch to Base Sepolia');
     expect(wallet.switchTo).not.toHaveBeenCalled();
+  });
+
+  it('an empty canvas never shows a invented workflow network', () => {
+    fixture.workflow = initialWorkflow();
+    wallet.account = '0x1111111111111111111111111111111111111111'; wallet.chainId = '0x2105';
+    const html = renderToStaticMarkup(createElement(TopBar, { tab: 'Build', setTab: vi.fn() }));
+    expect(html).not.toContain('Workflow network:');
+    expect(html).toContain('<span class="numeric wallet-address">0x1111…1111</span>');
   });
 
   it('keeps Dashboard unnumbered and separate from the three lifecycle steps', () => {

@@ -88,7 +88,7 @@ describe('BUILD-AUTOMATION-001 strategy and saved-workflow binding', () => {
   });
   it('binds one canonical swap with its workflow hash and engine version, and refuses other actions', () => {
     const bound = bindStrategy({ action: 'swap', network: 'base-sepolia', inputAsset: 'USDC', outputAsset: 'WETH', amount: '50' });
-    expect(bound.ok && bound.binding).toMatchObject({ strategy: { slippageBps: 50, version: 1 }, workflowHash: expect.stringMatching(/^0x[0-9a-f]{64}$/), engineVersion: 'flofi-engine-2', source: null });
+    expect(bound.ok && bound.binding).toMatchObject({ strategy: { slippageBps: 100, version: 1 }, workflowHash: expect.stringMatching(/^0x[0-9a-f]{64}$/), engineVersion: 'flofi-engine-2', source: null });
     expect(bound.ok && verifyBinding(bound.binding)).toEqual({ ok: true });
     expect(bound.ok && verifyBinding({ ...bound.binding, workflowHash: '0x' + '0'.repeat(64) })).toEqual({ ok: false, code: 'STRATEGY_STALE' });
     expect(bindStrategy({ action: 'withdraw', network: 'base-sepolia', asset: 'USDC', amount: '1' })).toEqual({ ok: false, code: 'AUTOMATION_ACTION_UNSUPPORTED' });

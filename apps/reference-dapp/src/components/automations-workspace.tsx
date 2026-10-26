@@ -18,6 +18,7 @@ import { WalletProof, type useWalletProof } from './wallet-proof';
 import type { ReviewView } from '../delegation/views';
 import { AuthorizationReview, DelegatedAuthorizations, DelegatedCreate, DELEGATION_ERROR_TEXT, useDelegation } from './delegated-automations';
 import { CanvasAutomation, type CanvasAutomationDraft } from './canvas-automation';
+import { DEFAULT_SLIPPAGE, DEFAULT_SLIPPAGE_BPS } from '../domain/slippage-policy';
 
 export type AutomationNavigation = { readonly owner: WorkflowOwner | null; readonly proof: ReturnType<typeof useWalletProof>; readonly onPropose: (command: Command) => void;
   /** BUILD-AUTOMATION-002: "Automate this workflow" — the exact Canvas workflow, when the owner came from the Canvas. */
@@ -128,7 +129,7 @@ function PendingCard({ o, rule, highlighted, capabilities, busy, run, onPropose,
     event.preventDefault();
     if (!trade) return;
     await run(async () => {
-      const prepared = await prepareWatchProposal(owner, o.occurrenceId, { ...trade, slippageBps: 50 });
+      const prepared = await prepareWatchProposal(owner, o.occurrenceId, { ...trade, slippageBps: DEFAULT_SLIPPAGE_BPS });
       if (prepared.ok) onPropose(prepared.value.command);
       return prepared;
     }, 'Your own trade is in Build. Apply it, simulate and review before signing.');
@@ -223,7 +224,7 @@ type Draft = { kind: Kind; name: string; source: 'ROUTE' | 'SAVED_WORKFLOW' | 'N
   slippageBps: string; frequency: 'DAILY' | 'WEEKLY'; weekday: string; time: string; timezone: string; condition: 'PRICE_BELOW' | 'PRICE_ABOVE' | 'PERCENT_DROP' | 'PERCENT_RISE';
   threshold: string; reference: string; percent: string; every: string; maxPerExecution: string; periodAmount: string; periodAmountPeriod: string; periodCount: string;
   periodCountPeriod: string; cooldown: string; maxSlippage: string; expires: string; watch: Asset[] };
-const initialDraft = (): Draft => ({ kind: 'SCHEDULED_DCA', name: '', source: 'ROUTE', workflowId: '', side: 'BUY', asset: 'ETH', network: '', amount: '', slippageBps: '50',
+const initialDraft = (): Draft => ({ kind: 'SCHEDULED_DCA', name: '', source: 'ROUTE', workflowId: '', side: 'BUY', asset: 'ETH', network: '', amount: '', slippageBps: DEFAULT_SLIPPAGE,
   frequency: 'WEEKLY', weekday: '1', time: '09:00', timezone: browserZone(), condition: 'PRICE_BELOW', threshold: '', reference: '', percent: '', every: '15', maxPerExecution: '',
   periodAmount: '', periodAmountPeriod: 'WEEK', periodCount: '', periodCountPeriod: 'DAY', cooldown: '0', maxSlippage: '', expires: '', watch: ['BTC', 'ETH', 'SOL'] });
 function inputOf(d: Draft): unknown {

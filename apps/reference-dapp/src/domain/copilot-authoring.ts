@@ -4,6 +4,7 @@ import { parseLocalCommand, type Command } from './commands';
 import type { Workflow } from './initial-workflow';
 import { ROUTER_DEFAULT_SLIPPAGE, ROUTER_NETWORK_OPTIONS } from './router-authoring';
 import { formatTokenAmount } from './jupiter-authoring';
+import { DEFAULT_SLIPPAGE } from './slippage-policy';
 import { UNISWAP_LIQUIDITY_DEFAULT_SLIPPAGE } from './uniswap-liquidity-authoring';
 import { ROBINHOOD_LIQUIDITY_DEFAULT_SLIPPAGE } from './robinhood-liquidity-authoring';
 import { SOLANA_LIQUIDITY_DEFAULT_SLIPPAGE } from './solana-liquidity-authoring';
@@ -329,7 +330,7 @@ function planSwap(a: CopilotSwapAction, g: Grounding): Plan {
     const input = catalogToken(a.inputAsset, network, g, 'swap', 'inputAsset', 'ERC20', notes), output = catalogToken(a.outputAsset, network, g, 'swap', 'outputAsset', 'ERC20', notes);
     if (input.asset.address === output.asset.address) reject('INVALID_ASSET_PAIR', m.differentTokens);
     const amount = amountOf(a.amount, g, 'swap');
-    const slippage = slippageOf(a.slippageBps, '50', g, notes);
+    const slippage = slippageOf(a.slippageBps, DEFAULT_SLIPPAGE, g, notes);
     if (input.ether || output.ether) notes.push(m.wethNote);
     const from = input.asset.symbol, to = output.asset.symbol, label = COPILOT_NETWORK_LABEL[network];
     if (network === 'BASE' && [from, to].every(symbol => symbol === 'USDC' || symbol === 'WETH'))
@@ -339,7 +340,7 @@ function planSwap(a: CopilotSwapAction, g: Grounding): Plan {
   }
   const input = needAsset(a.inputAsset, g, 'swap', 'inputAsset'), output = needAsset(a.outputAsset, g, 'swap', 'outputAsset');
   const amount = amountOf(a.amount, g, 'swap');
-  const slippage = slippageOf(a.slippageBps, '50', g, notes);
+  const slippage = slippageOf(a.slippageBps, DEFAULT_SLIPPAGE, g, notes);
   if (FAMILY[network] === 'base' || FAMILY[network] === 'ethereum') {
     const evm = (written: string) => { const asset = written.toUpperCase(); return asset === 'USDC' ? 'USDC' : asset === 'WETH' || asset === 'ETH' ? 'WETH' : refuse(m.evmSwapTokens); };
     const from = evm(input), to = evm(output);
@@ -449,7 +450,7 @@ function planUniversalBridge(a: CopilotBridgeAction, g: Grounding): Plan {
     notes.push(m.universalDefaultOutputNote(outputAsset, dstName));
   }
   const amount = amountOf(a.amount, g, 'bridge');
-  const slippage = slippageOf(a.slippageBps, '50', g, notes, UNIVERSAL_MAXIMUM_SLIPPAGE_BPS);
+  const slippage = slippageOf(a.slippageBps, DEFAULT_SLIPPAGE, g, notes, UNIVERSAL_MAXIMUM_SLIPPAGE_BPS);
   const routingNamed = g.carried.has('routing');
   const routing: UniversalBridgeRouting = /\brelay\b/i.test(text) ? 'RELAY' : /\bmayan\b/i.test(text) ? 'MAYAN'
     : a.routing === 'LIFI' && (routingNamed || /li\.?\s?fi/i.test(text)) ? 'LIFI' : a.routing === 'ACROSS' && (routingNamed || /\bacross\b/i.test(text)) ? 'ACROSS' : 'BEST';
@@ -788,7 +789,7 @@ function planComposition(actions: readonly CopilotAction[], g: Grounding, wallet
   if (!['WETH', 'ETH'].includes(needAsset(swap.outputAsset, g, 'composition', 'outputAsset').toUpperCase())) refuse(m.compositionUnsupported);
   const supplied = amountOf(supply.amount, g, 'composition', 'supplyAmount'), borrowed = amountOf(borrow.amount, g, 'composition', 'borrowAmount');
   if (swap.amount !== null && canonicalDecimal(swap.amount) !== canonicalDecimal(borrowed)) refuse(m.swapUsesBorrowed);
-  const slippage = slippageOf(swap.slippageBps, '50', g, notes);
+  const slippage = slippageOf(swap.slippageBps, DEFAULT_SLIPPAGE, g, notes);
   const owners = [...new Set([supply.beneficiary, borrow.beneficiary].filter((v): v is string => v !== null).map(v => addressOf(v, g, 'beneficiary')!))];
   if (owners.length > 1) reject('COPILOT_OWNER_CONFLICT', m.sameOwner);
   if (!owners.length && !wallet) ask(['beneficiary'], stillNeeds(m, ['beneficiary'], 'composition'));

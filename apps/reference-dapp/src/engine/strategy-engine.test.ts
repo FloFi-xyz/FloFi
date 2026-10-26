@@ -24,18 +24,18 @@ describe('BUILD-MCP-001 deterministic engine facade', () => {
     expect(c.workflow.nodes).toHaveLength(1);
     expect(c.workflow.nodes[0]).toMatchObject({ actionType: 'asset.bridge', chainId: 'eip155:84532', requiredAuthorizationClass: 'MODE_A' });
     expect(c.strategy).toEqual({ version: 1, action: 'bridge', sourceNetwork: 'base-sepolia', destinationNetwork: 'arbitrum-sepolia', asset: 'USDC', amount: '5',
-      routing: 'auto', slippageBps: 50 });
+      routing: 'auto', slippageBps: 100 });
     expect(c.workflowHash).toMatch(/^0x[0-9a-f]{64}$/);
     expect(c.fundsClass).toBe('TEST_FUNDS');
-    expect(c.notes).toContain('Default slippage 50 bps applied.');
+    expect(c.notes).toContain('Default slippage 1% (100 bps) applied.');
     expect(c.explanation.join('\n')).toMatch(/Base Sepolia USDC → Arbitrum Sepolia USDC/);
     expect(c.steps.map(s => s.kind)).toEqual(['BRIDGE']);
   });
 
   it('is byte-identical to the DApp chat authoring for every supported action and network', () => {
     const sentences: Record<string, string> = {
-      'bridge-base-sepolia-arbitrum-sepolia': 'bridge 5 USDC from Base Sepolia to Arbitrum Sepolia via auto slippage 50 bps',
-      'bridge-base-arbitrum-one': 'bridge 5 USDC from Base to Arbitrum via auto slippage 50 bps',
+      'bridge-base-sepolia-arbitrum-sepolia': 'bridge 5 USDC from Base Sepolia to Arbitrum Sepolia via auto slippage 100 bps',
+      'bridge-base-arbitrum-one': 'bridge 5 USDC from Base to Arbitrum via auto slippage 100 bps',
       'swap-base': 'swap 2 USDC to WETH on Base slippage 50 bps',
       'swap-base-sepolia': 'swap 1 USDC to WETH on Base Sepolia slippage 50 bps',
       'swap-ethereum-sepolia': 'swap 1 USDC to WETH on Ethereum Sepolia slippage 50 bps',
@@ -57,17 +57,17 @@ describe('BUILD-MCP-001 deterministic engine facade', () => {
       'add-liquidity-ethereum-sepolia': 'add liquidity 10 USDC and 0.005 WETH ticks 189960 to 200040 on Ethereum Sepolia slippage 100 bps',
       'add-liquidity-solana-devnet': 'add liquidity 0.01 SOL and 0.3 devUSDC ticks -29952 to -25600 on Solana Devnet slippage 100 bps',
       'add-liquidity-solana': 'add liquidity 0.01 SOL and 0.3 USDC ticks -29952 to -25600 on Solana slippage 100 bps',
-      'lending-composition-base-sepolia': 'compose supply 10 USDC to Aave then borrow 2 USDC then swap borrowed USDC to WETH on Base Sepolia slippage 50 bps owner 0x0000000000000000000000000000000000000001',
+      'lending-composition-base-sepolia': 'compose supply 10 USDC to Aave then borrow 2 USDC then swap borrowed USDC to WETH on Base Sepolia slippage 100 bps owner 0x0000000000000000000000000000000000000001',
       // BUILD-RH-002: Robinhood Chain (real funds) — the bridge routes in and out, a catalog swap, a position and a transfer.
-      'bridge-base-robinhood': 'bridge 5 USDC from Base to Robinhood via auto slippage 50 bps',
-      'bridge-robinhood-base': 'bridge 5 USDG from Robinhood to Base via auto slippage 50 bps',
-      'bridge-arbitrum-robinhood': 'bridge 5 USDC from Arbitrum to Robinhood via auto slippage 50 bps',
-      'bridge-robinhood-arbitrum': 'bridge 5 USDG from Robinhood to Arbitrum via auto slippage 50 bps',
+      'bridge-base-robinhood': 'bridge 5 USDC from Base to Robinhood via auto slippage 100 bps',
+      'bridge-robinhood-base': 'bridge 5 USDG from Robinhood to Base via auto slippage 100 bps',
+      'bridge-arbitrum-robinhood': 'bridge 5 USDC from Arbitrum to Robinhood via auto slippage 100 bps',
+      'bridge-robinhood-arbitrum': 'bridge 5 USDG from Robinhood to Arbitrum via auto slippage 100 bps',
       'swap-robinhood': 'swap 10 USDG for WETH on Robinhood slippage 50 bps',
       'add-liquidity-robinhood': 'add liquidity 10 USDG and 0.003 WETH on Robinhood fee 0.01% full range slippage 100 bps',
       'transfer-robinhood': 'transfer 1 USDG on Robinhood',
       // BUILD-BASE-001: Base mainnet (real funds) as a catalog network, and the Router's Arbitrum One → Base route.
-      'bridge-arbitrum-base': 'bridge 5 USDC from Arbitrum to Base via auto slippage 50 bps',
+      'bridge-arbitrum-base': 'bridge 5 USDC from Arbitrum to Base via auto slippage 100 bps',
       'add-liquidity-base': 'add liquidity 10 USDC and 0.003 WETH on Base fee 0.05% full range slippage 100 bps',
       'transfer-base': 'transfer 1 USDC on Base',
       'supply-base': `supply 1 USDC to Aave on Base beneficiary 0x0000000000000000000000000000000000000001`,
@@ -85,12 +85,12 @@ describe('BUILD-MCP-001 deterministic engine facade', () => {
       'swap-ethereum': 'swap 10 USDC to WETH on Ethereum slippage 50 bps',
       'transfer-ethereum': 'transfer 5 USDC on Ethereum',
       'add-liquidity-ethereum': 'add liquidity 10 USDC and 0.003 WETH on Ethereum fee 0.05% slippage 100 bps',
-      'bridge-ethereum-base': 'bridge 5 USDC from Ethereum to Base via auto slippage 50 bps',
-      'bridge-base-ethereum': 'bridge 5 USDC from Base to Ethereum via auto slippage 50 bps',
-      'bridge-ethereum-arbitrum': 'bridge 5 USDC from Ethereum to Arbitrum via auto slippage 50 bps',
-      'bridge-arbitrum-ethereum': 'bridge 5 USDC from Arbitrum to Ethereum via auto slippage 50 bps',
-      'bridge-ethereum-robinhood': 'bridge 5 USDC from Ethereum to Robinhood Chain via auto slippage 50 bps',
-      'bridge-robinhood-ethereum': 'bridge 5 USDG from Robinhood Chain to Ethereum via auto slippage 50 bps',
+      'bridge-ethereum-base': 'bridge 5 USDC from Ethereum to Base via auto slippage 100 bps',
+      'bridge-base-ethereum': 'bridge 5 USDC from Base to Ethereum via auto slippage 100 bps',
+      'bridge-ethereum-arbitrum': 'bridge 5 USDC from Ethereum to Arbitrum via auto slippage 100 bps',
+      'bridge-arbitrum-ethereum': 'bridge 5 USDC from Arbitrum to Ethereum via auto slippage 100 bps',
+      'bridge-ethereum-robinhood': 'bridge 5 USDC from Ethereum to Robinhood Chain via auto slippage 100 bps',
+      'bridge-robinhood-ethereum': 'bridge 5 USDG from Robinhood Chain to Ethereum via auto slippage 100 bps',
       'supply-arbitrum': 'supply 1 USDC to Aave on Arbitrum One beneficiary 0x0000000000000000000000000000000000000001',
       'borrow-arbitrum': 'borrow 1 USDC from Aave on Arbitrum One beneficiary 0x0000000000000000000000000000000000000001',
       'repay-arbitrum': 'repay 1 USDC to Aave on Arbitrum One beneficiary 0x0000000000000000000000000000000000000001',

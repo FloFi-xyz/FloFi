@@ -47,30 +47,30 @@ const NOT_PROPOSAL = { kind: ['CLARIFICATION', 'UNSUPPORTED', 'FAILED', 'ANSWER'
 export const LEARNING_EVAL_CASES: readonly LearningEvalCase[] = Object.freeze([
   // ── Intent understanding (labeled) ───────────────────────────────────────────────────────────────────────────────────────────────────
   { id: 'I01', category: 'intent', language: 'EN', turns: [{ user: 'Swap 10 USDC to ETH on Base Sepolia',
-    model: action(swap({ network: 'BASE_SEPOLIA', inputAsset: 'USDC', outputAsset: 'ETH', amount: '10' })), expect: P('swap 10 USDC to WETH on Base Sepolia slippage 50 bps') }] },
+    model: action(swap({ network: 'BASE_SEPOLIA', inputAsset: 'USDC', outputAsset: 'ETH', amount: '10' })), expect: P('swap 10 USDC to WETH on Base Sepolia slippage 100 bps') }] },
   { id: 'I02', category: 'intent', language: 'PT', turns: [{ user: 'Quero trocar 10 USDC por WETH na Base Sepolia',
-    model: action(swap({ network: 'BASE_SEPOLIA', inputAsset: 'USDC', outputAsset: 'WETH', amount: '10' }), 'PT'), expect: P('swap 10 USDC to WETH on Base Sepolia slippage 50 bps') }] },
+    model: action(swap({ network: 'BASE_SEPOLIA', inputAsset: 'USDC', outputAsset: 'WETH', amount: '10' }), 'PT'), expect: P('swap 10 USDC to WETH on Base Sepolia slippage 100 bps') }] },
   { id: 'I03', category: 'intent', language: 'EN', turns: [{ user: 'Move 2 USDC from Base Sepolia to Arbitrum Sepolia',
     model: action(bridge({ sourceNetwork: 'BASE_SEPOLIA', destinationNetwork: 'ARBITRUM_SEPOLIA', asset: 'USDC', amount: '2' })),
-    expect: P('bridge 2 USDC from Base Sepolia to Arbitrum Sepolia via auto slippage 50 bps') }] },
+    expect: P('bridge 2 USDC from Base Sepolia to Arbitrum Sepolia via auto slippage 100 bps') }] },
   { id: 'I04', category: 'intent', language: 'PT', turns: [{ user: 'Faz uma bridge de 2 USDC da Base Sepolia pra Arbitrum Sepolia',
     model: action(bridge({ sourceNetwork: 'BASE_SEPOLIA', destinationNetwork: 'ARBITRUM_SEPOLIA', asset: 'USDC', amount: '2' }), 'PT'),
-    expect: P('bridge 2 USDC from Base Sepolia to Arbitrum Sepolia via auto slippage 50 bps') }] },
+    expect: P('bridge 2 USDC from Base Sepolia to Arbitrum Sepolia via auto slippage 100 bps') }] },
   { id: 'I05', category: 'intent', language: 'EN', turns: [{ user: 'Put 5 USDC into Aave on Base Sepolia',
     model: action(lending('SUPPLY', { network: 'BASE_SEPOLIA', asset: 'USDC', amount: '5' })), expect: P('supply 5 USDC to Aave on Base Sepolia') }] },
   { id: 'I06', category: 'intent', language: 'PT', turns: [{ user: 'Coloca 5 USDC no Aave na Base Sepolia',
     model: action(lending('SUPPLY', { network: 'BASE_SEPOLIA', asset: 'USDC', amount: '5' }), 'PT'), expect: P('supply 5 USDC to Aave on Base Sepolia') }] },
   { id: 'I07', category: 'intent', language: 'EN', turns: [{ user: 'Bridge 10 USDC from Base to Arbitrum One',
     model: action(bridge({ sourceNetwork: 'BASE', destinationNetwork: 'ARBITRUM', asset: 'USDC', amount: '10' })),
-    expect: P('bridge 10 USDC from Base to Arbitrum via auto slippage 50 bps') }] },
+    expect: P('bridge 10 USDC from Base to Arbitrum via auto slippage 100 bps') }] },
   { id: 'I08', category: 'intent', language: 'PT', turns: [{ user: 'Sacar 3 USDC do Aave na Base Sepolia',
     model: action(lending('WITHDRAW', { network: 'BASE_SEPOLIA', asset: 'USDC', amount: '3' }), 'PT'), expect: P('withdraw 3 USDC from Aave on Base Sepolia') }] },
   { id: 'I09', category: 'intent', language: 'EN', turns: [{ user: 'Swap 1 SOL to devUSDC on Solana Devnet',
-    model: action(swap({ network: 'SOLANA_DEVNET', inputAsset: 'SOL', outputAsset: 'DEVUSDC', amount: '1' })), expect: P('swap 1 SOL to devUSDC on Solana Devnet slippage 50 bps') }] },
+    model: action(swap({ network: 'SOLANA_DEVNET', inputAsset: 'SOL', outputAsset: 'DEVUSDC', amount: '1' })), expect: P('swap 1 SOL to devUSDC on Solana Devnet slippage 100 bps') }] },
   { id: 'I10', category: 'intent', language: 'PT', turns: [{ user: 'Pega emprestado 2 USDC no Aave da Base Sepolia',
     model: action(lending('BORROW', { network: 'BASE_SEPOLIA', asset: 'USDC', amount: '2' }), 'PT'), expect: P('borrow 2 USDC from Aave on Base Sepolia') }] },
   { id: 'I11', category: 'intent', language: 'PT', turns: [{ user: 'Troca 1,5 USDC por ETH na Base Sepolia',
-    model: action(swap({ network: 'BASE_SEPOLIA', inputAsset: 'USDC', outputAsset: 'ETH', amount: '1.5' }), 'PT'), expect: P('swap 1.5 USDC to WETH on Base Sepolia slippage 50 bps') }] },
+    model: action(swap({ network: 'BASE_SEPOLIA', inputAsset: 'USDC', outputAsset: 'ETH', amount: '1.5' }), 'PT'), expect: P('swap 1.5 USDC to WETH on Base Sepolia slippage 100 bps') }] },
 
   // ── Ambiguity: a missing or unwritten value is asked for, never guessed ───────────────────────────────────────────────────────────────
   { id: 'A01', category: 'ambiguity', language: 'EN', turns: [{ user: 'Swap some USDC to ETH on Base Sepolia',
@@ -123,26 +123,26 @@ export const LEARNING_EVAL_CASES: readonly LearningEvalCase[] = Object.freeze([
   // ── Corrections and clarification outcomes ──────────────────────────────────────────────────────────────────────────────────────────
   { id: 'C01', category: 'correction', language: 'EN', turns: [
     { user: 'Swap 1 USDC to ETH on Base Sepolia', model: action(swap({ network: 'BASE_SEPOLIA', inputAsset: 'USDC', outputAsset: 'ETH', amount: '1' })),
-      expect: P('swap 1 USDC to WETH on Base Sepolia slippage 50 bps') },
-    { user: 'actually make it 2', model: edit({ amount: '2' }), expect: P('swap 2 USDC to WETH on Base Sepolia slippage 50 bps') }] },
+      expect: P('swap 1 USDC to WETH on Base Sepolia slippage 100 bps') },
+    { user: 'actually make it 2', model: edit({ amount: '2' }), expect: P('swap 2 USDC to WETH on Base Sepolia slippage 100 bps') }] },
   { id: 'C02', category: 'correction', language: 'PT', turns: [
     { user: 'Troca 1 USDC por ETH na Base Sepolia', model: action(swap({ network: 'BASE_SEPOLIA', inputAsset: 'USDC', outputAsset: 'ETH', amount: '1' }), 'PT'),
-      expect: P('swap 1 USDC to WETH on Base Sepolia slippage 50 bps') },
-    { user: 'não, 3', model: edit({ amount: '3' }, 'PT'), expect: P('swap 3 USDC to WETH on Base Sepolia slippage 50 bps') }] },
+      expect: P('swap 1 USDC to WETH on Base Sepolia slippage 100 bps') },
+    { user: 'não, 3', model: edit({ amount: '3' }, 'PT'), expect: P('swap 3 USDC to WETH on Base Sepolia slippage 100 bps') }] },
   { id: 'C03', category: 'correction', language: 'EN', turns: [
     { user: 'Bridge 2 USDC to Arbitrum Sepolia', model: action(bridge({ destinationNetwork: 'ARBITRUM_SEPOLIA', asset: 'USDC', amount: '2' })), expect: Q() },
-    { user: 'Base Sepolia', expect: P('bridge 2 USDC from Base Sepolia to Arbitrum Sepolia via auto slippage 50 bps') }] },
+    { user: 'Base Sepolia', expect: P('bridge 2 USDC from Base Sepolia to Arbitrum Sepolia via auto slippage 100 bps') }] },
 
   // ── A user's own saved meanings, with any global glossary present ───────────────────────────────────────────────────────────────────
   { id: 'P01', category: 'private', language: 'EN', private: [{ term: 'arb', target: 'network:ARBITRUM' }], turns: [{ user: 'Bridge 10 USDC from Base to Arb',
     model: action(bridge({ sourceNetwork: 'BASE', destinationNetwork: 'ARBITRUM', asset: 'USDC', amount: '10' })),
-    expect: P('bridge 10 USDC from Base to Arbitrum via auto slippage 50 bps', { note: 'your saved meaning' }) }] },
+    expect: P('bridge 10 USDC from Base to Arbitrum via auto slippage 100 bps', { note: 'your saved meaning' }) }] },
   { id: 'P02', category: 'private', language: 'EN', private: [{ term: 'arb', target: 'network:ARBITRUM' }], turns: [{ user: 'Bridge 1 USDC from Base Sepolia to arb sepolia',
     model: action(bridge({ sourceNetwork: 'BASE_SEPOLIA', destinationNetwork: 'ARBITRUM_SEPOLIA', asset: 'USDC', amount: '1' })),
-    expect: P('bridge 1 USDC from Base Sepolia to Arbitrum Sepolia via auto slippage 50 bps') }] },
+    expect: P('bridge 1 USDC from Base Sepolia to Arbitrum Sepolia via auto slippage 100 bps') }] },
   { id: 'P03', category: 'private', language: 'PT', private: [{ term: 'dólar digital', target: 'asset:USDC' }], turns: [{ user: 'Troca 5 dólar digital por WETH na Base Sepolia',
     model: action(swap({ network: 'BASE_SEPOLIA', inputAsset: 'USDC', outputAsset: 'WETH', amount: '5' }), 'PT'),
-    expect: P('swap 5 USDC to WETH on Base Sepolia slippage 50 bps', { note: 'salvo por você' }) }] },
+    expect: P('swap 5 USDC to WETH on Base Sepolia slippage 100 bps', { note: 'salvo por você' }) }] },
   { id: 'P04', category: 'private', language: 'PT', turns: [{ user: 'Bridge de 10 USDC da Base pra Arb',
     model: action(bridge({ sourceNetwork: 'BASE', destinationNetwork: 'ARBITRUM', asset: 'USDC', amount: '10' }), 'PT'), expect: Q() }] },
 
@@ -150,7 +150,7 @@ export const LEARNING_EVAL_CASES: readonly LearningEvalCase[] = Object.freeze([
   { id: 'R01', category: 'memory', language: 'EN', memory: 'AVAILABLE', turns: [
     { user: 'Whenever I say Arb, I mean Arbitrum', expect: { kind: 'ANSWER', memory: null } },
     { user: 'Bridge 10 USDC from Base to Arb', model: action(bridge({ sourceNetwork: 'BASE', destinationNetwork: 'ARBITRUM', asset: 'USDC', amount: '10' })),
-      expect: P('bridge 10 USDC from Base to Arbitrum via auto slippage 50 bps', { note: 'as you said in this conversation' }) }] },
+      expect: P('bridge 10 USDC from Base to Arbitrum via auto slippage 100 bps', { note: 'as you said in this conversation' }) }] },
   { id: 'R02', category: 'memory', language: 'PT', memory: 'ANONYMOUS', turns: [
     { user: 'Sempre que eu disser Arb, quero dizer Arbitrum', expect: { kind: 'ANSWER', memory: null } }] },
   { id: 'R03', category: 'memory', language: 'PT', memory: 'AVAILABLE', turns: [
@@ -163,11 +163,11 @@ export const LEARNING_EVAL_CASES: readonly LearningEvalCase[] = Object.freeze([
       expect: { kind: ['CLARIFICATION', 'PROPOSAL'] } },
     { user: 'Solana Devnet', model: edit({ network: 'SOLANA_DEVNET' }), expect: { kind: ['PROPOSAL', 'UNSUPPORTED', 'ANSWER'] } },
     { user: 'Swap 0.2 SOL to devUSDC on sol dev', model: action(swap({ network: 'SOLANA_DEVNET', inputAsset: 'SOL', outputAsset: 'DEVUSDC', amount: '0.2' })),
-      expect: P('swap 0.2 SOL to devUSDC on Solana Devnet slippage 50 bps', { note: '“sol dev”' }) }] },
+      expect: P('swap 0.2 SOL to devUSDC on Solana Devnet slippage 100 bps', { note: '“sol dev”' }) }] },
   // A real-funds answer adapts the word only as FloFi's first option: the next request is asked again, never proposed from the inference.
   { id: 'D02', category: 'adaptation', language: 'PT', turns: [
     { user: 'Bridge de 10 USDC da Base pra arb', model: action(bridge({ sourceNetwork: 'BASE', destinationNetwork: 'ARBITRUM', asset: 'USDC', amount: '10' }), 'PT'), expect: Q() },
-    { user: 'Arbitrum One', expect: P('bridge 10 USDC from Base to Arbitrum via auto slippage 50 bps') },
+    { user: 'Arbitrum One', expect: P('bridge 10 USDC from Base to Arbitrum via auto slippage 100 bps') },
     { user: 'Bridge de 5 USDC da Base pra arb', model: action(bridge({ sourceNetwork: 'BASE', destinationNetwork: 'ARBITRUM', asset: 'USDC', amount: '5' }), 'PT'),
       expect: Q({ firstOption: 'ARBITRUM' }) }] },
   // Correcting a reading FloFi made on its own withdraws it for the conversation: the word is asked about again.
@@ -176,14 +176,14 @@ export const LEARNING_EVAL_CASES: readonly LearningEvalCase[] = Object.freeze([
       expect: { kind: ['CLARIFICATION', 'PROPOSAL'] } },
     { user: 'Ethereum Sepolia', model: edit({ network: 'ETHEREUM_SEPOLIA' }), expect: { kind: ['PROPOSAL', 'UNSUPPORTED', 'ANSWER'] } },
     { user: 'Swap 0.002 WETH to USDC on eth sep', model: action(swap({ network: 'ETHEREUM_SEPOLIA', inputAsset: 'WETH', outputAsset: 'USDC', amount: '0.002' })),
-      expect: P('swap 0.002 WETH to USDC on Ethereum Sepolia slippage 50 bps', { note: '“eth sep”' }) },
-    { user: 'no, I meant Base Sepolia', model: edit({ network: 'BASE_SEPOLIA' }), expect: P('swap 0.002 WETH to USDC on Base Sepolia slippage 50 bps') },
+      expect: P('swap 0.002 WETH to USDC on Ethereum Sepolia slippage 100 bps', { note: '“eth sep”' }) },
+    { user: 'no, I meant Base Sepolia', model: edit({ network: 'BASE_SEPOLIA' }), expect: P('swap 0.002 WETH to USDC on Base Sepolia slippage 100 bps') },
     { user: 'Swap 0.003 WETH to USDC on eth sep', model: action(swap({ network: 'ETHEREUM_SEPOLIA', inputAsset: 'WETH', outputAsset: 'USDC', amount: '0.003' })), expect: Q() }] },
   // A change of objective is not a correction, and nothing financial is ever carried from an adapted word.
   { id: 'D04', category: 'adaptation', language: 'PT', turns: [
     { user: 'Troca 1 USDC por WETH na Base Sepolia', model: action(swap({ network: 'BASE_SEPOLIA', inputAsset: 'USDC', outputAsset: 'WETH', amount: '1' }), 'PT'),
-      expect: P('swap 1 USDC to WETH on Base Sepolia slippage 50 bps') },
+      expect: P('swap 1 USDC to WETH on Base Sepolia slippage 100 bps') },
     { user: 'na verdade, vamos fazer na Ethereum Sepolia', model: edit({ network: 'ETHEREUM_SEPOLIA' }, 'PT'),
-      expect: P('swap 1 USDC to WETH on Ethereum Sepolia slippage 50 bps') },
+      expect: P('swap 1 USDC to WETH on Ethereum Sepolia slippage 100 bps') },
     { user: 'Troca USDC por WETH na Ethereum Sepolia', model: action(swap({ network: 'ETHEREUM_SEPOLIA', inputAsset: 'USDC', outputAsset: 'WETH', amount: '1' }), 'PT'), expect: Q() }] },
 ] as LearningEvalCase[]);

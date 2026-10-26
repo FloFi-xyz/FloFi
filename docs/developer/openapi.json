@@ -2325,7 +2325,7 @@
                   "slippageBps": {
                     "minimum": 0,
                     "maximum": 10000,
-                    "description": "Maximum slippage in basis points. Omit to use FloFi's documented default for the action; each action enforces its own maximum.",
+                    "description": "Maximum slippage in basis points (100 = 1%). Omit to start at FloFi's default of 100 bps (1%); each action enforces its own maximum.",
                     "type": "integer"
                   },
                   "recipient": {
@@ -2461,7 +2461,7 @@
                   "slippageBps": {
                     "minimum": 0,
                     "maximum": 10000,
-                    "description": "Maximum slippage in basis points. Omit to use FloFi's documented default for the action; each action enforces its own maximum.",
+                    "description": "Maximum slippage in basis points (100 = 1%). Omit to start at FloFi's default of 100 bps (1%); each action enforces its own maximum.",
                     "type": "integer"
                   }
                 }
@@ -2824,7 +2824,7 @@
                   "slippageBps": {
                     "minimum": 0,
                     "maximum": 10000,
-                    "description": "Maximum slippage in basis points. Omit to use FloFi's documented default for the action; each action enforces its own maximum.",
+                    "description": "Maximum slippage in basis points (100 = 1%). Omit to start at FloFi's default of 100 bps (1%); each action enforces its own maximum.",
                     "type": "integer"
                   }
                 }
@@ -3052,7 +3052,7 @@
                             "slippageBps": {
                               "minimum": 0,
                               "maximum": 10000,
-                              "description": "Maximum slippage in basis points. Omit to use FloFi's documented default for the action; each action enforces its own maximum.",
+                              "description": "Maximum slippage in basis points (100 = 1%). Omit to start at FloFi's default of 100 bps (1%); each action enforces its own maximum.",
                               "type": "integer"
                             },
                             "recipient": {
@@ -3188,7 +3188,7 @@
                             "slippageBps": {
                               "minimum": 0,
                               "maximum": 10000,
-                              "description": "Maximum slippage in basis points. Omit to use FloFi's documented default for the action; each action enforces its own maximum.",
+                              "description": "Maximum slippage in basis points (100 = 1%). Omit to start at FloFi's default of 100 bps (1%); each action enforces its own maximum.",
                               "type": "integer"
                             }
                           }
@@ -3551,7 +3551,7 @@
                             "slippageBps": {
                               "minimum": 0,
                               "maximum": 10000,
-                              "description": "Maximum slippage in basis points. Omit to use FloFi's documented default for the action; each action enforces its own maximum.",
+                              "description": "Maximum slippage in basis points (100 = 1%). Omit to start at FloFi's default of 100 bps (1%); each action enforces its own maximum.",
                               "type": "integer"
                             }
                           }

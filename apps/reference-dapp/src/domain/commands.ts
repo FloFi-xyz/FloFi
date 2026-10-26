@@ -21,6 +21,7 @@ import { createUniswapLiquidityNode, parseUniswapLiquidityChat, uniswapLiquidity
 import { createRouterNode, parseRouterChat, routerDetails, ROUTER_ROUTING_LABEL, type RouterBridgeInput } from './router-authoring';
 import { createUniversalBridgeFromInput, parseUniversalChat, type UniversalBridgeInput } from './universal-bridge-authoring';
 import { createCryptoActionNode, type CryptoActionInput } from './crypto-action-picker';
+import { DEFAULT_SLIPPAGE } from './slippage-policy';
 import { BASE_CHAIN, authoringAssetSymbol } from './asset-catalogs';
 import { catalogSwapDetails } from './catalog-swap-authoring';
 import { parseCatalogLiquidityChat, robinhoodLiquidityDetails } from './robinhood-liquidity-authoring';
@@ -144,7 +145,7 @@ export function parseLocalCommand(text: string, workflow: Workflow, context: Rev
   const referencePair = (from: string, to: string) => new Set([from, to].map(s => s.toUpperCase())).size === 2 && [from, to].every(s => ['USDC', 'WETH'].includes(s.toUpperCase()));
   if (catalogSwap && swapNetwork && !(swapNetwork.chain === BASE_CHAIN && referencePair(catalogSwap[2]!, catalogSwap[3]!))) {
     const fields: CryptoActionInput = { selection: { action: 'swap', network: swapNetwork.name, from: symbolOn(swapNetwork.chain, catalogSwap[2]!),
-      to: symbolOn(swapNetwork.chain, catalogSwap[3]!) }, amount: catalogSwap[1]!, slippage: catalogSwap[5] ?? '50' };
+      to: symbolOn(swapNetwork.chain, catalogSwap[3]!) }, amount: catalogSwap[1]!, slippage: catalogSwap[5] ?? DEFAULT_SLIPPAGE };
     createCryptoActionNode('node-preview', fields);
     return { type: 'ADD_CRYPTO_ACTION', input: fields, source: 'CHAT', baseRevision: workflow.revision };
   }

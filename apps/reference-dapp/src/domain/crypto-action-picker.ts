@@ -13,6 +13,7 @@ import { createAuthoredSupply, createAuthoredBorrow, createAuthoredRepay, create
 import { BASE_CHAIN, BASE_NETWORK, ROBINHOOD_CHAIN, ROBINHOOD_NETWORK, authoringAssetSymbol, featuredNetworkSymbols, featuredStockSymbols, resolveNetworkAsset } from './asset-catalogs';
 import { CATALOG_SWAP_NETWORKS, catalogSwapDetails, createCatalogSwapAuthoringNode, type CatalogSwapNetwork } from './catalog-swap-authoring';
 import { networkIdentity } from './network-registry';
+import { DEFAULT_SLIPPAGE, DEFAULT_SLIPPAGE_BPS } from './slippage-policy';
 import { CATALOG_LIQUIDITY_NETWORKS, createCatalogLiquidityNode, catalogLiquidityDetails, robinhoodFullRange, ROBINHOOD_LIQUIDITY_DEFAULT_FEE, type CatalogLiquidityNetwork } from './robinhood-liquidity-authoring';
 
 export type CryptoAction = 'swap' | 'pool' | 'supply' | 'borrow' | 'repay' | 'withdraw' | 'transfer';
@@ -242,10 +243,10 @@ export function cryptoInputOf(node: Node): CryptoActionInput | null {
     upper: String(catalogPool.tickUpper), slippage: catalogPool.slippage, fee: catalogPool.fee };
   const solana = solanaSwapDetails(node), uni = uniswapLiquidityDetails(node), orca = solanaLiquidityDetails(node);
   const evmSwap = selection.action === 'swap' && !solana ? swapDetails(node, cryptoReviewContext(selection.network)) : null;
-  if (solana || evmSwap) return { selection, amount: (solana ?? evmSwap)!.amount, slippage: solana?.slippage ?? String(evmSwap!.slippage ?? 50) };
+  if (solana || evmSwap) return { selection, amount: (solana ?? evmSwap)!.amount, slippage: solana?.slippage ?? String(evmSwap!.slippage ?? DEFAULT_SLIPPAGE_BPS) };
   if (uni || orca) return { selection, amount: uni?.maxUsdc ?? orca!.maxSol, secondAmount: uni?.maxWeth ?? orca!.maxDevUsdc, rangeUnit: 'TICK', lower: String((uni ?? orca)!.tickLower), upper: String((uni ?? orca)!.tickUpper), slippage: (uni ?? orca)!.slippage };
   const transfer = transferDetails(node as Parameters<typeof transferDetails>[0]);
-  if (transfer) return { selection, amount: transfer.amount, slippage: '50', ...transfer.recipient !== 'CONNECTED_OWNER' ? { recipient: transfer.recipient } : {} };
+  if (transfer) return { selection, amount: transfer.amount, slippage: DEFAULT_SLIPPAGE, ...transfer.recipient !== 'CONNECTED_OWNER' ? { recipient: transfer.recipient } : {} };
   const lending = supplyDetails(node as SemanticWorkflow['nodes'][number]) ?? borrowDetails(node as SemanticWorkflow['nodes'][number]) ?? repayDetails(node as SemanticWorkflow['nodes'][number]) ?? withdrawDetails(node as SemanticWorkflow['nodes'][number]);
-  return lending ? { selection, amount: lending.amount, slippage: '50', ...('beneficiary' in lending ? { beneficiary: lending.beneficiary } : {}) } : null;
+  return lending ? { selection, amount: lending.amount, slippage: DEFAULT_SLIPPAGE, ...('beneficiary' in lending ? { beneficiary: lending.beneficiary } : {}) } : null;
 }

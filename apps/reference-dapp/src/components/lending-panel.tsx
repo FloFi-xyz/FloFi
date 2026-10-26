@@ -10,11 +10,12 @@ import { useWorkflow } from '../state/workflow-store';
 import { useBuild009Wallet } from '../state/build009-wallet-store';
 import { useLending } from '../state/lending-store';
 import { PendingExecutionNote } from './execution-concurrency-notes';
+import { DEFAULT_SLIPPAGE } from '../domain/slippage-policy';
 const health=(s:string)=>BigInt(s)===(1n<<256n)-1n?'No debt (∞)':Number(lendingHuman(s,18)).toFixed(4);
 export function LendingAuthoringForm(){
   const { t: tr } = useLocale();
   const {state,propose}=useWorkflow(),wallet=useBuild009Wallet(),existing=lendingDetails(state.workflow as SemanticWorkflow);
-  const [input,setInput]=useState<LendingInput>(existing??{supply:'0.1',borrow:'0.01',slippage:'50',owner:''}),[error,setError]=useState('');
+  const [input,setInput]=useState<LendingInput>(existing??{supply:'0.1',borrow:'0.01',slippage:DEFAULT_SLIPPAGE,owner:''}),[error,setError]=useState('');
   const set=(field:keyof LendingInput,value:string)=>setInput(prior=>({...prior,[field]:value}));
   function submit(event:FormEvent){event.preventDefault();try{
     const fields={...input,owner:wallet.account??input.owner};createAuthoredLending(state.workflow.workflowId,state.workflow.revision+1,fields);

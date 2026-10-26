@@ -4,6 +4,7 @@ import { UNISWAP_V3_BASE_SEPOLIA_LIQUIDITY, UNISWAP_LIQUIDITY_PROFILES, uniswapL
 import { validateUniswapLiquidityNode } from '@defi-workflow-engine/reference-linter';
 import { uniswapAlignQuotePriceRange, uniswapBandAroundSqrtPrice, uniswapQuotePriceAtTick } from '@defi-workflow-engine/reference-compiler';
 import { formatTokenAmount, parseTokenAmount } from './jupiter-authoring';
+import { defaultSlippageWithin } from './slippage-policy';
 
 /**
  * Chat and canvas author the same canonical `asset.liquidity.concentrated` node. On Base Sepolia (USDC/WETH 0.05%) and
@@ -17,7 +18,7 @@ export type UniswapLiquidityInput = { network: UniswapLiquidityNetwork; maxUsdc:
   /** Prices in USDC per WETH (`PRICE`) or tick indexes (`TICK`). */
   rangeUnit: 'PRICE' | 'TICK'; lower: string; upper: string; slippage: string };
 export const UNISWAP_LIQUIDITY_NETWORKS: readonly UniswapLiquidityNetwork[] = Object.freeze(UNISWAP_LIQUIDITY_PROFILES.map(profile => profile.network));
-export const UNISWAP_LIQUIDITY_DEFAULT_SLIPPAGE = String(UNISWAP_V3_BASE_SEPOLIA_LIQUIDITY.defaultSlippageBps);
+export const UNISWAP_LIQUIDITY_DEFAULT_SLIPPAGE = String(defaultSlippageWithin(UNISWAP_V3_BASE_SEPOLIA_LIQUIDITY.maximumSlippageBps));
 /** The profile of a named network; any other name is unsupported. */
 export function uniswapLiquidityProfileFor(network: string): UniswapLiquidityProfile {
   const profile = UNISWAP_LIQUIDITY_PROFILES.find(item => item.network === network);

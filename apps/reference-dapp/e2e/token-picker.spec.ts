@@ -111,7 +111,7 @@ for (const theme of ['Light', 'Dark']) test(`${theme} Advanced Settings has clea
 
 test('token panels fit compact and mobile canvases and collapse on outside interaction', async ({ page }) => {
   // BUILD-FLOFI-MAINNET-PRODUCT-001: no header network selector; the wallet badge names the wallet's network.
-  await installSupplyWallet(page); await page.goto('/app'); await expect(page.locator('.build009-wallet-info')).toContainText('Base Sepolia'); await page.getByRole('button', { name: 'Add swap', exact: true }).click();
+  await installSupplyWallet(page); await page.goto('/app'); await expect(page.locator('.build009-wallet-info')).toHaveAttribute('title', /Base Sepolia/); await page.getByRole('button', { name: 'Add swap', exact: true }).click();
   const pill = page.getByRole('button', { name: 'Select source token', exact: true });
   await pill.click();
   const panel = page.getByRole('region', { name: 'Source token picker', exact: true });

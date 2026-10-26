@@ -6,10 +6,11 @@ import { createRouterNode } from './router-authoring';
 import { shellChainLabel, workflowShellContext } from './product-shell';
 
 describe('product shell canonical workflow projection', () => {
-  it('distinguishes the starting mock example from a required wallet network', () => {
+  it('an empty draft invents neither a chain nor a workflow network', () => {
     const workflow = initialWorkflow();
+    expect(workflow.nodes).toEqual([]);
     expect(workflowShellContext(workflow)).toEqual({ workflowId: workflow.workflowId, revision: 0,
-      actionCount: 0, chains: [], mockExample: true, requiredChain: null });
+      actionCount: 0, chains: [], requiredChain: null });
   });
 
   it.each([
@@ -21,20 +22,21 @@ describe('product shell canonical workflow projection', () => {
     })] });
     const before = JSON.stringify(workflow);
     expect(workflowShellContext(workflow)).toMatchObject({ revision: 7, actionCount: 1, chains: labels,
-      requiredChain: chain, mockExample: false });
+      requiredChain: chain });
     expect(JSON.stringify(workflow)).toBe(before);
   });
 
   it('handles an empty workflow without inventing a chain or an action', () => {
     expect(workflowShellContext(freeze({ ...initialWorkflow(), nodes: [] }))).toMatchObject({
-      chains: [], actionCount: 0, mockExample: false, requiredChain: null,
+      chains: [], actionCount: 0, requiredChain: null,
     });
   });
 
   it('deduplicates chains while retaining an unknown canonical chain identity', () => {
-    const node = { ...initialWorkflow().nodes[0]!, actionType: 'future.action', chainId: 'eip155:999999' };
+    const node = { nodeId: 'future', actionType: 'future.action', chainId: 'eip155:999999',
+      dependencies: [] as const, inputs: [] as const, outputs: [] as const, userConstraints: [] as const };
     expect(workflowShellContext(freeze({ ...initialWorkflow(), nodes: [node, { ...node, nodeId: 'second' }] })))
-      .toMatchObject({ actionCount: 2, chains: ['eip155:999999'], requiredChain: 'eip155:999999', mockExample: false });
+      .toMatchObject({ actionCount: 2, chains: ['eip155:999999'], requiredChain: 'eip155:999999' });
   });
 
   it('keeps local forks and Solana clusters visibly distinct', () => {

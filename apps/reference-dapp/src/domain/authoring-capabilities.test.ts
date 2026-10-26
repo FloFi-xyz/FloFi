@@ -25,6 +25,7 @@ import { copilotCopy } from './copilot-messages';
 import { CopilotSession, act, intent } from './copilot-session.test-harness';
 import { COPILOT_NETWORK_IDS, NETWORKS, networkIdentity, networkOfCopilot } from './network-registry';
 import { ROUTER_NETWORK_OPTIONS } from './router-authoring';
+import { activeNetworkScope, networkAllowed, setActiveNetworkScope } from './network-scope';
 import { baseCatalog } from '../server/base-mainnet.test-harness';
 import { officialCatalog } from '../server/robinhood-mainnet.test-harness';
 
@@ -33,6 +34,17 @@ afterAll(() => resetNetworkCatalogs());
 const EXAMPLE_ACCOUNT = '0x0000000000000000000000000000000000000001';
 const names = (networks: readonly { name: string }[]) => networks.map(network => network.name).sort();
 const canvasNetworks = (action: CryptoAction) => [...new Set(cryptoProfiles(action).map(profile => networkIdentity(profile.network)?.name ?? profile.network))].sort();
+/** Engineering certification scope for parity that still covers testnet examples (server `networkScope()` + browser `activeNetworkScope()`). */
+function withEngineeringScope<T>(run: () => T): T {
+  const previous = activeNetworkScope(), previousEnv = process.env.FLOFI_NETWORK_SCOPE;
+  setActiveNetworkScope('ENGINEERING');
+  process.env.FLOFI_NETWORK_SCOPE = 'ENGINEERING_TESTNETS';
+  try { return run(); }
+  finally {
+    setActiveNetworkScope(previous);
+    if (previousEnv === undefined) delete process.env.FLOFI_NETWORK_SCOPE; else process.env.FLOFI_NETWORK_SCOPE = previousEnv;
+  }
+}
 /** How the model reports a token the user wrote (V2: as written; devUSDC is DEVUSDC). */
 const reported = (symbol: string) => symbol === 'devUSDC' ? 'DEVUSDC' : symbol;
 const FEE = { 100: '0.01', 500: '0.05', 3000: '0.3', 10000: '1' } as Record<number, string>;
@@ -41,8 +53,10 @@ const FEE = { 100: '0.01', 500: '0.05', 3000: '0.3', 10000: '1' } as Record<numb
 function naturalTurn(strategy: StrategySpec): { text: string; model: Record<string, unknown> } {
   const s = strategy as StrategySpec & Record<string, unknown>, on = (key: unknown) => networkIdentity(key as string)!;
   switch (strategy.action) {
-    case 'swap': return { text: `Please swap ${s.amount} ${s.inputAsset} for ${s.outputAsset} on ${on(s.network).name}`,
-      model: intent.action(act.swap({ network: on(s.network).copilot, inputAsset: reported(s.inputAsset as string), outputAsset: reported(s.outputAsset as string), amount: s.amount })) };
+    // An example that states its slippage is said with it (BUILD-FLOFI-PRODUCT-UX-001: an unstated slippage is the 100 bps product default).
+    case 'swap': return { text: `Please swap ${s.amount} ${s.inputAsset} for ${s.outputAsset} on ${on(s.network).name}${s.slippageBps === undefined ? '' : ` with slippage ${s.slippageBps} bps`}`,
+      model: intent.action(act.swap({ network: on(s.network).copilot, inputAsset: reported(s.inputAsset as string), outputAsset: reported(s.outputAsset as string), amount: s.amount,
+        ...s.slippageBps === undefined ? {} : { slippageBps: String(s.slippageBps) } })) };
     case 'bridge': return { text: `Please move ${s.amount} ${s.asset} from ${on(s.sourceNetwork).name} over to ${on(s.destinationNetwork).name}`,
       model: intent.action(act.bridge({ sourceNetwork: on(s.sourceNetwork).copilot, destinationNetwork: on(s.destinationNetwork).copilot, asset: s.asset, amount: s.amount })) };
     case 'supply': case 'borrow': case 'repay': return { text: `Please ${strategy.action} ${s.amount} ${s.asset} on Aave on ${on(s.network).name} for ${s.beneficiary}`,
@@ -80,13 +94,13 @@ describe('BUILD-BASE-001 one capability truth for Canvas, Chat, Copilot and MCP'
     }
     expect(names(catalogCapabilityNetworks())).toEqual(['Arbitrum One', 'Base', 'Ethereum', 'Robinhood Chain']);
   });
-  it('agrees with the Aave and Router registries the engine executes', () => {
+  it('agrees with the Aave and Router registries the engine executes', () => withEngineeringScope(() => {
     for (const action of ['supply', 'borrow', 'repay', 'withdraw'] as const)
       expect(lendingOffers(action).map(offer => `${offer.network.chain}|${offer.asset}`)).toEqual(AAVE_V3_LENDING_PROFILES.map(profile => `${profile.chain}|${profile.symbol}`));
     const routes = Object.values(ROUTER_NETWORK_OPTIONS).map(option => `${networkIdentity(option.sourceLabel)!.key}>${networkIdentity(option.destinationLabel)!.key}|${option.pair.source.symbol}`);
     expect(bridgeOffers().map(route => `${route.source.key}>${route.destination.key}|${route.asset}`).sort()).toEqual(routes.sort());
-  });
-  it('agrees with the Canvas pickers', () => {
+  }));
+  it('agrees with the Canvas pickers', () => withEngineeringScope(() => {
     expect(names(capabilityNetworks('swap'))).toEqual(canvasNetworks('swap'));
     // BUILD-SOLANA-MAINNET-001 kept Orca liquidity on Solana mainnet-beta Canvas-only pending owner review. BUILD-SOLANA-TRANSFER-UX-001 implements it
     // for the Copilot and MCP through a canonical strategy example (solana-transfer-integration.test.ts), so the capability truth matches every Canvas
@@ -99,9 +113,9 @@ describe('BUILD-BASE-001 one capability truth for Canvas, Chat, Copilot and MCP'
     expect(names(copilotCapabilityNetworks('add_liquidity'))).toEqual(canvasNetworks('pool').filter(name => name !== 'Solana'));
     expect(names(copilotCapabilityNetworks('transfer'))).toEqual(canvasNetworks('transfer').filter(name => !['Ethereum Sepolia', 'Robinhood Chain Testnet'].includes(name)));
     expect(names(copilotCapabilityNetworks('transfer', PENDING_AGENT_CAPABILITIES))).toEqual(canvasNetworks('transfer'));
-  });
+  }));
   it.each(STRATEGY_EXAMPLES.map(example => [example.id, example.strategy] as const))('%s: said in normal language, the Copilot authors the MCP workflow (same platform hash)',
-    (_, strategy) => {
+    (_, strategy) => withEngineeringScope(() => {
       const { text, model } = naturalTurn(strategy);
       const session = new CopilotSession([], EXAMPLE_ACCOUNT);
       // Parity of the preserved implementation, including the agent rollouts awaiting owner approval (audit A9).
@@ -110,9 +124,9 @@ describe('BUILD-BASE-001 one capability truth for Canvas, Chat, Copilot and MCP'
       const command = reply === null ? session.pending!.command : reply.command;
       expect(reply === null || reply.kind === 'PROPOSAL', `${text}: ${reply?.text}`).toBe(true);
       const copilot = canonicalStrategy(command!);
-      expect(copilot, text).toMatchObject({ ok: true });
+      expect(copilot, `${text}: ${JSON.stringify(copilot)}`).toMatchObject({ ok: true });
       expect(copilot.ok && copilot.workflowHash).toBe(composeWorkflowOrRefuse(strategy, undefined).workflowHash);
-    });
+    }));
   it('is pure data like the Copilot modules that read it: the canonical examples and registries only, no state, server, wallet or network', () => {
     const text = readFileSync(join(__dirname, 'authoring-capabilities.ts'), 'utf8');
     // BUILD-FLOFI-MAINNET-PRODUCT-001: `./network-scope` is the deployment's scope (Mainnet-only in public), set once by the server, never a user choice.
@@ -124,7 +138,9 @@ describe('BUILD-BASE-001 one capability truth for Canvas, Chat, Copilot and MCP'
     expect([...examples.matchAll(/^import (?!type )/gm)]).toEqual([]);
   });
   it('lists every network and route in the Copilot answer (EN/PT) and the model instructions, generated rather than written', () => {
-    const OFFERED = AUTHORING_CAPABILITIES.filter(capability => agentRolloutAllows(capability.action, capability.network.key));
+    // BUILD-FLOFI-MAINNET-PRODUCT-001: advertised capabilities match the deployment scope (mainnets in public), not every registry row.
+    const OFFERED = AUTHORING_CAPABILITIES.filter(capability => agentRolloutAllows(capability.action, capability.network.key)
+      && networkAllowed(capability.network.key, activeNetworkScope()));
     for (const language of ['EN', 'PT'] as const) {
       const text = copilotCopy(language).capabilities;
       expect(text).toBe(capabilityText(language));

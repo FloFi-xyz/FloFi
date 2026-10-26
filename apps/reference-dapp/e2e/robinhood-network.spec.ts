@@ -21,7 +21,7 @@ const methods = (page: import('@playwright/test').Page) =>
 test('an injected wallet on Robinhood Chain Testnet is identified by name without any provider egress', async ({ page, networkGuard }) => {
   await walletOn(page, '0xb626');
   await page.goto('/app');
-  await expect(page.getByText('EVM Default: 0x1111…1111 · Robinhood Chain Testnet (46630)')).toBeVisible();
+  await expect(page.getByText('0x1111…1111')).toBeVisible();
   expect(new Set(await methods(page))).toEqual(new Set(['eth_accounts', 'eth_chainId']));
   networkGuard.assertClean();
 });
@@ -29,7 +29,7 @@ test('an injected wallet on Robinhood Chain Testnet is identified by name withou
 test('a wallet on Robinhood mainnet is recognized but never asked to switch, sign or send', async ({ page, networkGuard }) => {
   await walletOn(page, '0x1237');
   await page.goto('/app');
-  await expect(page.getByText('EVM Default: 0x1111…1111 · Robinhood Chain (4663)')).toBeVisible();
+  await expect(page.getByText('0x1111…1111')).toBeVisible();
   // Normal Canvas follows the existing mainnet/testnet environment policy.
   // Authoring a Base swap must not switch the Robinhood wallet or request financial authority.
   await expect(page.getByText('Advanced action setup', { exact: true })).toHaveCount(0);

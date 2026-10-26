@@ -31,6 +31,7 @@ import { useSolanaLiquidity } from '../state/solana-liquidity-store';
 import { useSupply } from '../state/supply-store';
 import { useUniswapLiquidity } from '../state/uniswap-liquidity-store';
 import { useWorkflow } from '../state/workflow-store';
+import { useProductBootstrap } from '../state/product-bootstrap';
 
 /**
  * BUILD-COPILOT-001: AI interpretation for the Copilot panel, kept apart from the panel itself. Text the exact grammar
@@ -72,7 +73,10 @@ export function useCopilotInterpreter() {
   const flows: Readonly<Record<Exclude<SimulationFlow, 'MOCKED_CHAIN'>, Record_>> = { SUPPLY: useSupply(), LENDING: useLending(), ROUTER: useRouter(),
     SOLANA_SWAP: jupiter, ORCA: orca, UNISWAP: useUniswapLiquidity(), PUBLIC_TESTNET: usePublicTestnet(), TRANSFER: useRobinhoodTransfer() };
   // `loading` renders exactly like `off`; text sent before the status arrives waits for it rather than guessing.
-  const [mode, setMode] = useState<CopilotMode | 'loading'>('loading');
+  // BUILD-FLOFI-PRODUCT-UX-001: the product renders with the mode the server rendered (its configured mode), so the Copilot's text does not change
+  // during hydration; the status read below still confirms it (a live mode whose settings fail becomes `unavailable`).
+  const configured = useProductBootstrap().copilotMode;
+  const [mode, setMode] = useState<CopilotMode | 'loading'>(configured ?? 'loading');
   const status = useRef<Promise<CopilotMode> | null>(null);
   const [busy, setBusy] = useState(false);
   const conversation = useRef<CopilotConversation>(emptyConversation());

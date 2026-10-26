@@ -10,7 +10,7 @@
  * byte-identical to what the DApp authors for the equivalent chat sentence (tested). Nothing here can quote, simulate,
  * authorize, sign or submit; a composed workflow authorizes nothing.
  */
-import { baseAssetRegistry, referenceRegistry, resolveWorkflowCapability, type CapabilityBlocker, type EvidenceMaturity,
+import { baseAssetRegistry, referenceRegistry, resolveWorkflowCapability, UNIVERSAL_ROUTER_DEPLOYMENT, type CapabilityBlocker, type EvidenceMaturity,
   type ExecutionEnvironment } from '@defi-workflow-engine/action-registry';
 import { createReviewContext, lintWorkflow, reviewContextForChain, type ReviewContext } from '@defi-workflow-engine/reference-linter';
 import { createHash } from 'node:crypto';
@@ -35,6 +35,7 @@ import { ROBINHOOD_LIQUIDITY_DEFAULT_FEE, ROBINHOOD_LIQUIDITY_DEFAULT_SLIPPAGE }
 import { createSolanaLiquidityNode, SOLANA_LIQUIDITY_DEFAULT_SLIPPAGE } from '../domain/solana-liquidity-authoring';
 import { createAuthoredBorrow, createAuthoredRepay, createAuthoredSupply, createAuthoredWithdraw, lendingProfileFor } from '../domain/supply-authoring';
 import { createSwapNode, type Direction } from '../domain/swap-authoring';
+import { DEFAULT_SLIPPAGE_BPS, defaultSlippageWithin, formatSlippage } from '../domain/slippage-policy';
 import { createUniswapLiquidityNode, uniswapLiquidityProfileFor, type UniswapLiquidityNetwork } from '../domain/uniswap-liquidity-authoring';
 import { workflowSteps, type WorkflowStep } from '../domain/workflow-steps';
 import { isStrategyInput, isStrategySpec, isStrategyWorkflow, strategyInputIssues, strategySpecIssues, NETWORK_IDS, type NetworkId, type SchemaIssue, type StrategyInput,
@@ -99,11 +100,15 @@ function bridgeSymbol(network: NetworkId, reference: string): string {
   try { return (identity?.catalog ? authoringAssetSymbol(identity.chain, reference) : reference).toUpperCase(); } catch { return reference.toUpperCase(); }
 }
 const UNIVERSAL_ROUTING: Readonly<Record<NonNullable<BridgeSpec['routing']>, UniversalBridgeRouting>> = { auto: 'BEST', best: 'BEST', relay: 'RELAY', lifi: 'LIFI', across: 'ACROSS' };
-/** Defaults FloFi applies when a spec omits slippage: the same values the Copilot planners and profiles use. */
+/**
+ * Defaults FloFi applies when a spec omits slippage: the same values the Copilot planners and profiles use. BUILD-FLOFI-PRODUCT-UX-001: the shared
+ * product default (1%, `slippage-policy.ts`), within the route's own limit; an explicit `slippageBps` is always kept as written.
+ */
 export function defaultSlippageBps(spec: StrategySpec): number | null {
   switch (spec.action) {
-    case 'bridge': return ROUTER_NETWORK_OPTIONS[routerNetworkOfInput(routerChains(spec)) ?? 'mainnet'].profile.defaultSlippageBps;
-    case 'swap': case 'lending_composition': return 50;
+    case 'bridge': return defaultSlippageWithin(isUniversalBridgeSpec(spec) ? UNIVERSAL_ROUTER_DEPLOYMENT.maximumSlippageBps
+      : ROUTER_NETWORK_OPTIONS[routerNetworkOfInput(routerChains(spec)) ?? 'mainnet'].profile.maximumSlippageBps);
+    case 'swap': case 'lending_composition': return DEFAULT_SLIPPAGE_BPS;
     case 'add_liquidity': return spec.network === 'solana-devnet' || spec.network === 'solana' ? Number(SOLANA_LIQUIDITY_DEFAULT_SLIPPAGE)
       : catalogNetworkName(spec.network) ? Number(ROBINHOOD_LIQUIDITY_DEFAULT_SLIPPAGE) : uniswapLiquidityProfileFor(NETWORKS[spec.network].label).defaultSlippageBps;
     default: return null;
@@ -120,7 +125,7 @@ export function normalizeStrategy(spec: StrategySpec): { readonly strategy: Stra
     return identity?.catalog ? authoringAssetSymbol(identity.chain, reference) : reference;
   };
   const slippage = 'slippageBps' in spec && spec.slippageBps !== undefined ? spec.slippageBps : defaultSlippageBps(spec);
-  if (!('slippageBps' in spec && spec.slippageBps !== undefined) && slippage !== null) notes.push(`Default slippage ${slippage} bps applied.`);
+  if (!('slippageBps' in spec && spec.slippageBps !== undefined) && slippage !== null) notes.push(`Default slippage ${formatSlippage(slippage)} applied.`);
   switch (spec.action) {
     case 'bridge': {
       if (isUniversalBridgeSpec(spec)) {

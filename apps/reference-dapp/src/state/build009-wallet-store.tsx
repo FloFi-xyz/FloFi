@@ -7,6 +7,9 @@ import { chooseEvmWallet, chosenEvmProvider, clearChosenEvmWallet, evmWalletEntr
 import { updateWalletPreference, walletPreference, type WalletChoice } from '../wallet/wallet-registry';
 import { useWalletSelector } from '../components/wallet-selector';
 import { evmWalletErrorMessage } from '../wallet/wallet-errors';
+import { useProductBootstrap } from './product-bootstrap';
+import { rememberWalletHint } from '../wallet/wallet-hint';
+import { WALLET_RESTORE_TIMEOUT_MS } from './wallet-restore';
 
 export const BASE_HEX = '0x2105';
 export const ARBITRUM_HEX = '0xa4b1';
@@ -24,6 +27,11 @@ type Wallet = { readonly available: boolean; readonly account: string | null; re
   readonly error: string | null;
   /** Monotonic authority epoch: genuine provider/account/chain transitions and disconnects only. */
   readonly revision: number; readonly busy: boolean;
+  /**
+   * BUILD-FLOFI-PRODUCT-UX-001: a remembered EVM session is still being read back silently (`eth_accounts`): the header shows a neutral slot, never a
+   * false "not connected". Bounded by the wallet's answer or `WALLET_RESTORE_TIMEOUT_MS`.
+   */
+  readonly restoring: boolean;
   session(): Promise<WalletSession | null>;
   /** Opens the canonical wallet selector (EVM wallets) and connects only the wallet the owner picks. */
   connect(): Promise<WalletSession | null>;
@@ -48,6 +56,11 @@ export function Build009WalletProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
   const [busy, setBusy] = useState(false);
+  const { walletHint } = useProductBootstrap();
+  const [restoring, setRestoring] = useState(() => walletHint.includes('evm'));
+  useEffect(() => { if (!restoring) return; const timer = window.setTimeout(() => setRestoring(false), WALLET_RESTORE_TIMEOUT_MS); return () => window.clearTimeout(timer); }, [restoring]);
+  // A session (restored or connected) is remembered as a hint for the next visit's first frame; only an explicit Disconnect forgets it.
+  useEffect(() => { if (account) { rememberWalletHint('evm', true); setRestoring(false); } }, [account]);
   useEffect(() => { if (!error) return; const timer = window.setTimeout(() => setError(null), 6000);
     return () => window.clearTimeout(timer); }, [error]);
   const connected = useRef(false);
@@ -84,13 +97,13 @@ export function Build009WalletProvider({ children }: { children: ReactNode }) {
       // Passive reuse never opens a wallet prompt, and never runs after the owner disconnected in FloFi (HOTFIX-WALLET-SELECTOR).
       // Provider identity and event epoch protect passive reads from overwriting newer wallet state.
       const synchronize = () => {
-        if (!passiveReuseAllowed()) return;
+        if (!passiveReuseAllowed()) { setRestoring(false); return; }
         const op = generation.current, epoch = events.current;
         Promise.all([provider.request({ method: 'eth_accounts' }), provider.request({ method: 'eth_chainId' })]).then(([accounts, chain]) => {
           if (op !== generation.current || epoch !== events.current || injected() !== provider || suppressed.current || !passiveReuseAllowed()) return;
           const next = normalizedAccount(Array.isArray(accounts) ? accounts[0] : null);
           updateAuthority({ account: next, chainId: next ? normalizedChain(chain) : null });
-        }).catch(() => undefined);
+        }).catch(() => undefined).finally(() => setRestoring(false));
       };
       const active = () => injected() === provider && !suppressed.current && passiveReuseAllowed();
       const accountsChanged = (...args: unknown[]) => {
@@ -187,8 +200,9 @@ export function Build009WalletProvider({ children }: { children: ReactNode }) {
   // Disconnect ends FloFi's use of the wallet: no silent reuse until the owner picks a wallet again.
   const reset = useCallback(() => { ++generation.current; ++events.current; updateAuthority({ account: null, chainId: null }, true);
     updateWalletPreference({ evmDisconnected: true }); clearChosenEvmWallet(); suppressed.current = true;
+    rememberWalletHint('evm', false); setRestoring(false);
     setError(null); setBusy(false); }, [updateAuthority]);
-  return <Context.Provider value={{ available, providerError, account, chainId, provider: identity, error, revision, busy, session, connect, connectWith, switchTo, reset }}>{children}</Context.Provider>;
+  return <Context.Provider value={{ available, providerError, account, chainId, provider: identity, error, revision, busy, restoring, session, connect, connectWith, switchTo, reset }}>{children}</Context.Provider>;
 }
 export function useBuild009Wallet(): Wallet { const value = useContext(Context); if (!value) throw new Error('BUILD009_WALLET_MISSING'); return value; }
 /** The operational EVM wallet where the product shell provides one; null elsewhere (e.g. `/connections`, outside the shell). */

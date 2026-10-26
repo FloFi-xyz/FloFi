@@ -13,7 +13,7 @@ describe('BUILD-CROSSCHAIN-UNIVERSAL-001 strategy composition', () => {
   it('"Bridge my USDC from Solana to Base": USDC → USDC, best route, the connected EVM wallet bound at Review', () => {
     const c = ok({ action: 'bridge', sourceNetwork: 'solana', destinationNetwork: 'base', asset: 'USDC', amount: '25' });
     expect(c.strategy).toEqual({ version: 1, action: 'bridge', sourceNetwork: 'solana', destinationNetwork: 'base', asset: 'USDC', outputAsset: 'USDC', amount: '25',
-      routing: 'best', slippageBps: 50 });
+      routing: 'best', slippageBps: 100 });
     expect(c.fundsClass).toBe('REAL_FUNDS');
     expect(fields(c)).toMatchObject({ sourceChain: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp', destinationChain: 'eip155:8453', amount: '25000000',
       recipient: 'CONNECTED_DESTINATION_WALLET', selection: 'BEST_MINIMUM_OUTPUT', providers: ['relay', 'lifi', 'mayan', 'across'],

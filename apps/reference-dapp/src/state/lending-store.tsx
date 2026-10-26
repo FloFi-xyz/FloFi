@@ -17,7 +17,7 @@ const tabKey=key+':tab';
 const tabRun=()=>{try{return window.sessionStorage.getItem(tabKey);}catch{return null;}};
 export const lendingRunInProgress=(r:Pick<LendingRecord,'attempts'|'status'>)=>r.attempts.length>0&&!['COMPLETED','FAILED'].includes(r.status);
 export function LendingProvider({children}:{children:ReactNode}){
-  const {state,restoreLendingCanvas}=useWorkflow(),wallet=useBuild009Wallet(),workflow=state.workflow as SemanticWorkflow;
+  const {state,restoreLendingCanvas,trackCanvasRestoration}=useWorkflow(),wallet=useBuild009Wallet(),workflow=state.workflow as SemanticWorkflow;
   const [record,setRecord]=useState<LendingRecord|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState<string|null>(null),[recovered,setRecovered]=useState(false),[signing,setSigning]=useState(false);
   const latest=useRef(workflow);latest.current=workflow;const walletRef=useRef(wallet);walletRef.current=wallet;const busyRef=useRef(false);
   const pristine=recovered&&workflow.revision===0&&workflow.nodes.every(n=>n.actionType.startsWith('mock-'));
@@ -29,13 +29,13 @@ export function LendingProvider({children}:{children:ReactNode}){
   useEffect(()=>{
     let live=true;
     try {const pointer=JSON.parse(window.localStorage.getItem(key)??'null');
-      if(typeof pointer?.id==='string'&&/^lending-[a-f0-9]{32}$/.test(pointer.id))(async()=>{
+      if(typeof pointer?.id==='string'&&/^lending-[a-f0-9]{32}$/.test(pointer.id))trackCanvasRestoration((async()=>{
         if(typeof pointer.attempt==='string'&&typeof pointer.hash==='string'&&/^0x[0-9a-f]{64}$/.test(pointer.hash))await lendingReport(pointer.id,pointer.attempt,{kind:'HASH',hash:pointer.hash}).catch(()=>undefined);
         return lendingStatus(pointer.id);
-      })().then(result=>{if(live&&result.ok&&(lendingRunInProgress(result.value)||tabRun()===result.value.id)){setRecord(result.value);setRecovered(true);restoreLendingCanvas(result.value.reviews[0]!.workflow);}}).catch(()=>undefined);
+      })()).then(result=>{if(live&&result.ok&&(lendingRunInProgress(result.value)||tabRun()===result.value.id)){setRecord(result.value);setRecovered(true);restoreLendingCanvas(result.value.reviews[0]!.workflow);}}).catch(()=>undefined);
     }catch{setError('LENDING_RECOVERY_POINTER_INVALID');}
     return()=>{live=false;};
-  },[restoreLendingCanvas]);
+  },[restoreLendingCanvas,trackCanvasRestoration]);
   useEffect(()=>{if(record&&retired&&record.authorization)lendingInvalidate(record.id).then(r=>{if(r.ok)setRecord(r.value);}).catch(()=>setError('LENDING_INVALIDATION_FAILED'));},[record,retired]);
   async function operation(action:()=>Promise<void>){if(busyRef.current)return;busyRef.current=true;setBusy(true);setError(null);try{await action();}catch(cause){setError(cause instanceof Error?cause.message:'LENDING_OPERATION_FAILED');}finally{busyRef.current=false;setBusy(false);}}
   async function simulate(){return operation(async()=>{

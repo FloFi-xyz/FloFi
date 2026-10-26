@@ -12,9 +12,10 @@
 import { SOLANA_MAINNET_TOKENS } from '@defi-workflow-engine/action-registry';
 import { createUniversalBridgeNode, isSolanaPublicKey, isUniversalBridgeNode, readUniversalBridgeNode, UNIVERSAL_NETWORKS, universalNetworkOfChain, type UniversalAssetRef,
   type UniversalBridgeFields, type UniversalNetworkKey, type UniversalRouteSelection, type UniversalRoutingProvider, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
-import { authoringAssetSymbol, resolveNetworkAsset } from './asset-catalogs';
+import { authoringAssetSymbol, featuredNetworkSymbols, resolveNetworkAsset } from './asset-catalogs';
 import { networkIdentity } from './network-registry';
 import { formatTokenAmount, parseTokenAmount } from './jupiter-authoring';
+import { DEFAULT_SLIPPAGE } from './slippage-policy';
 
 export type UniversalBridgeRouting = 'BEST' | 'RELAY' | 'LIFI' | 'MAYAN' | 'ACROSS';
 /** Every value is a string so the Canvas form, chat and the editor command validate the same closed shape. */
@@ -27,13 +28,31 @@ export const UNIVERSAL_BRIDGE_ROUTING: Readonly<Record<UniversalBridgeRouting, {
 export const UNIVERSAL_BRIDGE_ROUTING_LABEL: Readonly<Record<UniversalBridgeRouting, string>> = Object.freeze({
   BEST: 'Automatic: the executable route with the highest guaranteed minimum', RELAY: 'Relay only', LIFI: 'LI.FI only (quotes; execution not available yet)',
   MAYAN: 'Mayan only (quotes; execution not available yet)', ACROSS: 'Across only (certified Router pairs)' });
-export const UNIVERSAL_BRIDGE_DEFAULT_SLIPPAGE = '50';
+/** BUILD-FLOFI-PRODUCT-UX-001: the shared product default (1%, `slippage-policy.ts`), within the universal router's 300 bps limit. */
+export const UNIVERSAL_BRIDGE_DEFAULT_SLIPPAGE = DEFAULT_SLIPPAGE;
 export const UNIVERSAL_BRIDGE_NETWORKS: readonly { readonly key: UniversalNetworkKey; readonly label: string }[] = Object.freeze(
   (Object.keys(UNIVERSAL_NETWORKS) as UniversalNetworkKey[]).map(key => Object.freeze({ key, label: UNIVERSAL_NETWORKS[key].name })));
 const fail = (code: string): never => { throw new Error(code); };
 const STABLE_USD = ['USDC', 'USDG'];
 
 export type ResolvedUniversalAsset = { readonly asset: UniversalAssetRef; readonly symbol: string };
+/** BUILD-FLOFI-PRODUCT-UX-001: the starting source asset when a network is chosen (catalog stablecoin, never a hard-coded three-token list). */
+export function defaultUniversalInputAsset(key: UniversalNetworkKey): string {
+  return key === 'robinhood' ? 'USDG' : 'USDC';
+}
+/** Whether `reference` resolves on this network (symbol, native coin, or `address@decimals`). */
+export function universalAssetResolves(key: UniversalNetworkKey, reference: string): boolean {
+  try { resolveUniversalAsset(key, reference); return true; } catch { return false; }
+}
+/**
+ * BUILD-FLOFI-PRODUCT-UX-001: shortcut chips only — never the catalog ceiling. EVM networks use the official catalog's featured symbols
+ * (plus the native coin); Solana uses the verified mainnet token set FloFi already resolves for bridges.
+ */
+export function universalFeaturedAssets(key: UniversalNetworkKey): readonly string[] {
+  const network = UNIVERSAL_NETWORKS[key];
+  if (network.ecosystem === 'SOLANA') return Object.freeze(['SOL', 'USDC', 'USDT']);
+  return Object.freeze([...new Set([network.native.symbol, defaultUniversalInputAsset(key), ...featuredNetworkSymbols(network.chain)])]);
+}
 /** An asset of a network by symbol (catalogs, case-insensitive), its native coin, or `<address>@<decimals>`. Unknown references are refused. */
 export function resolveUniversalAsset(key: UniversalNetworkKey, reference: string): ResolvedUniversalAsset {
   const network = UNIVERSAL_NETWORKS[key];

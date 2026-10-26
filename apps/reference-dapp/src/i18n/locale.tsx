@@ -4,6 +4,18 @@ import { createContext, useContext, useEffect, useMemo, useState, type ReactNode
 import { portuguese } from './pt';
 export type Language = 'EN' | 'PT';
 export const LANGUAGE_KEY = 'flofi.language';
+/**
+ * BUILD-FLOFI-PRODUCT-UX-001: the same preference mirrored into a cookie, so the server renders /app in the owner's language and the page never
+ * paints in English and switches to Portuguese after hydration. Only `EN` or `PT`.
+ */
+export const LANGUAGE_COOKIE = 'flofi_language';
+export const parseLanguage = (value: string | null | undefined): Language | null => value === 'PT' || value === 'EN' ? value : null;
+function rememberLanguageCookie(language: Language) {
+  try {
+    const secure = window.location.protocol === 'https:' ? '; Secure' : '';
+    document.cookie = `${LANGUAGE_COOKIE}=${language}; Path=/; Max-Age=31536000; SameSite=Lax${secure}`;
+  } catch { /* Optional preference storage. */ }
+}
 const templates = Object.entries(portuguese).filter(([key]) => key.includes('{0}')).map(([key, value]) => ({
   pattern: new RegExp('^' + key.split(/(\{\d+\})/).map(part => /^\{\d+\}$/.test(part) ? '(.+?)' : part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('') + '$'), value,
 }));
@@ -25,10 +37,10 @@ const Context = createContext(defaults);
 /** Presentation preference only: no dependency on workflow, wallet, quote, authorization or execution stores. */
 export function LocaleProvider({ children, initialLanguage = 'EN' }: { children: ReactNode; initialLanguage?: Language }) {
   const [language, setLanguageState] = useState<Language>(initialLanguage);
-  useEffect(() => { try { const saved = localStorage.getItem(LANGUAGE_KEY); if (saved === 'PT' || saved === 'EN') setLanguageState(saved); } catch { /* Optional preference storage. */ } }, []);
+  useEffect(() => { try { const saved = parseLanguage(localStorage.getItem(LANGUAGE_KEY)); if (saved) { setLanguageState(saved); rememberLanguageCookie(saved); } } catch { /* Optional preference storage. */ } }, []);
   useEffect(() => { document.documentElement.lang = language === 'PT' ? 'pt' : 'en'; }, [language]);
   const value = useMemo(() => ({ language, setLanguage: (next: Language) => {
-    setLanguageState(next); try { localStorage.setItem(LANGUAGE_KEY, next); } catch { /* Still applies this visit. */ }
+    setLanguageState(next); try { localStorage.setItem(LANGUAGE_KEY, next); } catch { /* Still applies this visit. */ } rememberLanguageCookie(next);
   }, t: <T,>(input: T, ...parameters: readonly (string | number)[]) => translate(language, input, ...parameters) }), [language]);
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }

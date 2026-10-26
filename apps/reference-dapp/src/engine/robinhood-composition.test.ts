@@ -34,8 +34,8 @@ describe('BUILD-RH-002 Robinhood Chain strategies', () => {
     const w = ok(composeWorkflow({ version: 2, steps: [BRIDGE_IN, BUY_TSLA, SEND_AAPL] }));
     expect(w.steps.map(s => s.strategy.action)).toEqual(['bridge', 'swap', 'transfer']);
     expect(w.fundsClass).toBe('REAL_FUNDS');
-    expect(JSON.stringify(w.steps[0]!.workflow)).toBe(JSON.stringify(chat('bridge 100 USDC from Base to Robinhood via auto slippage 50 bps')));
-    expect(JSON.stringify(w.steps[1]!.workflow)).toBe(JSON.stringify(chat('swap 50 USDG for TSLA on Robinhood slippage 50 bps')));
+    expect(JSON.stringify(w.steps[0]!.workflow)).toBe(JSON.stringify(chat('bridge 100 USDC from Base to Robinhood via auto slippage 100 bps')));
+    expect(JSON.stringify(w.steps[1]!.workflow)).toBe(JSON.stringify(chat('swap 50 USDG for TSLA on Robinhood slippage 100 bps')));
     expect(JSON.stringify(w.steps[2]!.workflow)).toBe(JSON.stringify(chat('transfer 3 AAPL on Robinhood')));
     expect(w.steps.map(s => s.workflowHash)).toEqual(w.steps.map(s => semanticWorkflowHash(s.workflow)));
     // Hash continuity: the same intent (and its normalized form) always yields the same hashes; one step is exactly v1.

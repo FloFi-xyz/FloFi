@@ -1,14 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { ROUTER_PHASES, UNIVERSAL_NETWORKS, type RouteChange, type RouterPhase, type UniversalNetworkKey } from '@defi-workflow-engine/workflow-contracts';
 import { useLocale } from '../i18n/locale';
 import { useWorkflow } from '../state/workflow-store';
 import { useUniversalRouter } from '../state/universal-router-store';
-import { createUniversalBridgeFromInput, defaultUniversalOutput, resolveUniversalAsset, universalBridgeDetails, universalInputOf, UNIVERSAL_BRIDGE_DEFAULT_SLIPPAGE,
-  UNIVERSAL_BRIDGE_NETWORKS, UNIVERSAL_BRIDGE_ROUTING_LABEL, type UniversalBridgeInput, type UniversalBridgeRouting } from '../domain/universal-bridge-authoring';
+import { createUniversalBridgeFromInput, defaultUniversalInputAsset, defaultUniversalOutput, resolveUniversalAsset, universalAssetResolves, universalBridgeDetails,
+  universalFeaturedAssets, universalInputOf, UNIVERSAL_BRIDGE_DEFAULT_SLIPPAGE, UNIVERSAL_BRIDGE_NETWORKS, UNIVERSAL_BRIDGE_ROUTING_LABEL,
+  type UniversalBridgeInput, type UniversalBridgeRouting } from '../domain/universal-bridge-authoring';
+import { formatSlippage } from '../domain/slippage-policy';
 import { formatTokenAmount } from '../domain/jupiter-authoring';
 import { TokenAmountInput } from './token-amount-input';
+import { AssetSearch } from './asset-search';
 import { PendingExecutionNote } from './execution-concurrency-notes';
 import type { DiscoveryCandidate } from '../server/universal-router/discovery';
 
@@ -17,9 +20,10 @@ import type { DiscoveryCandidate } from '../server/universal-router/discovery';
  * either side. The form authors the canonical node; "Find routes" asks every provider and shows each answer with its status and reason; the
  * panel simulates the exact source transaction, shows the Review (route, provider order, guaranteed minimum, every fee, signatures needed),
  * and after the owner's acceptance asks the source wallet for exactly the reviewed request. FloFi never signs.
+ *
+ * BUILD-FLOFI-PRODUCT-UX-001: source and destination assets are independent searchable selectors over FloFi's catalogs (parity with Swap), not a
+ * three-token hard-coded list. Selecting a catalog asset never invents a route — discovery still reports executable, quote-only, no liquidity, or provider failure.
  */
-const ASSETS: Readonly<Record<UniversalNetworkKey, readonly string[]>> = { solana: ['SOL', 'USDC', 'USDT'], base: ['ETH', 'USDC', 'WETH'], 'arbitrum-one': ['ETH', 'USDC', 'WETH'],
-  ethereum: ['ETH', 'USDC', 'WETH'], robinhood: ['ETH', 'USDG', 'WETH'] };
 const amountOf = (units: string | null | undefined, decimals: number, symbol: string) => units ? `${formatTokenAmount(units, decimals)} ${symbol}` : '--';
 const short = (account: string) => account.length > 14 ? `${account.slice(0, 6)}…${account.slice(-4)}` : account;
 const LIFECYCLE: readonly RouterPhase[] = ['PREPARED', 'AUTHORIZED', 'SOURCE_SUBMITTED', 'SOURCE_CONFIRMED', 'IN_FLIGHT', 'DESTINATION_OBSERVED', 'RECONCILED'];
@@ -81,6 +85,31 @@ const CHANGE: Readonly<Record<RouteChange, string>> = { CHAIN_CHANGED: 'chain', 
   APPROVAL_CHANGED: 'approval', TRANSACTION_TARGET_CHANGED: 'transaction target', TRANSACTION_FUNCTION_CHANGED: 'transaction function', VALUE_CHANGED: 'value',
   BRIDGE_CONTRACT_CHANGED: 'bridge contract', BRIDGE_MESSAGE_CHANGED: 'destination message', CALLDATA_CHANGED: 'calldata', QUOTE_CHANGED: 'quote', DEADLINE_CHANGED: 'deadline' };
 
+/** Independent source/destination asset field: catalog search on EVM, verified Solana tokens, plus free-form `address@decimals`. */
+function UniversalAssetPicker({ networkKey, value, onChange, label, inputLabel }: {
+  networkKey: UniversalNetworkKey; value: string; onChange(asset: string): void; label: string; inputLabel: string;
+}): ReactNode {
+  const { t: tr } = useLocale();
+  const network = UNIVERSAL_NETWORKS[networkKey];
+  const featured = universalFeaturedAssets(networkKey);
+  const selected = (() => { try { return resolveUniversalAsset(networkKey, value).symbol; } catch { return undefined; } })();
+  return <div className="universal-asset-picker">
+    <label>{label}<input aria-label={inputLabel} autoComplete="off" spellCheck={false} maxLength={80} value={value}
+      onChange={e => onChange(e.target.value)}/></label>
+    <div className="universal-asset-shortcuts" role="group" aria-label={tr('{0} shortcuts', network.name)}>
+      {featured.map(symbol => <button key={symbol} type="button" className="quiet" aria-pressed={selected === symbol}
+        onClick={() => onChange(symbol)}>{symbol}</button>)}
+    </div>
+    {network.ecosystem === 'EVM'
+      ? <AssetSearch chain={network.chain} selected={selected} onSelect={onChange} copy={{
+        heading: tr('Search assets'), searchLabel: tr('Search {0} tokens', network.name), placeholder: tr('Search by symbol, name or contract…'),
+        loading: tr('Loading {0} tokens…', network.name), unavailable: tr('{0} tokens are unavailable right now.', network.name),
+        retry: tr('Try again'), empty: tr('No token matches this search.'), results: tr('{0} token results', network.name),
+        total: count => tr('{0} tokens · type to search', count) }}/>
+      : <small>{tr('Search the verified Solana tokens above, or write a mint as address@decimals (verified on chain at Simulate).')}</small>}
+  </div>;
+}
+
 /** Canvas form for the universal bridge node (create, or edit an existing one). */
 export function UniversalBridgeForm({ nodeId, onDone }: { nodeId?: string; onDone?: () => void }) {
   const { t: tr } = useLocale();
@@ -91,8 +120,12 @@ export function UniversalBridgeForm({ nodeId, onDone }: { nodeId?: string; onDon
   const [error, setError] = useState('');
   const set = (patch: Partial<UniversalBridgeInput>) => setInput(value => {
     const next = { ...value, ...patch };
-    // A new network keeps the chosen assets only where they exist; otherwise FloFi proposes the stated default (shown before Review).
-    if (patch.source && !ASSETS[next.source].includes(next.inputAsset.toUpperCase())) next.inputAsset = ASSETS[next.source][1]!;
+    // A new network keeps the chosen asset only where it still resolves; otherwise FloFi proposes the network default (shown before Review).
+    if (patch.source && !universalAssetResolves(next.source, next.inputAsset)) next.inputAsset = defaultUniversalInputAsset(next.source);
+    if (patch.destination && next.outputAsset && !universalAssetResolves(next.destination, next.outputAsset)
+      && !(patch.source || patch.inputAsset)) {
+      try { next.outputAsset = defaultUniversalOutput(next.source, next.inputAsset, next.destination); } catch { next.outputAsset = ''; }
+    }
     if (patch.source || patch.destination || patch.inputAsset) {
       try { resolveUniversalAsset(next.destination, next.outputAsset); if (!patch.outputAsset && (patch.source || patch.inputAsset)) throw new Error('reselect'); }
       catch { try { next.outputAsset = defaultUniversalOutput(next.source, next.inputAsset, next.destination); } catch { next.outputAsset = ''; } }
@@ -110,20 +143,18 @@ export function UniversalBridgeForm({ nodeId, onDone }: { nodeId?: string; onDon
       onDone?.();
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'UNIVERSAL_BRIDGE_INPUT_INVALID'); }
   }
-  return <form className="inspector-fields" aria-label={tr(nodeId ? 'Edit universal bridge' : 'Create universal bridge')} onSubmit={submit}>
+  return <form className="inspector-fields universal-bridge-form" aria-label={tr(nodeId ? 'Edit universal bridge' : 'Create universal bridge')} onSubmit={submit}>
     <p className="muted">{tr('Universal Cross-chain Router · any FloFi mainnet to any other · real funds. Routes are discovered live; the one you authorize is shown at Review.')}</p>
     <label>{tr('Source network')}<select aria-label={tr('Universal bridge source network')} value={input.source} onChange={e => set({ source: e.target.value as UniversalNetworkKey })}>
       {UNIVERSAL_BRIDGE_NETWORKS.map(n => <option key={n.key} value={n.key}>{n.label}</option>)}</select></label>
-    <label>{tr('Source asset')}<input aria-label={tr('Universal bridge source asset')} list="universal-source-assets" autoComplete="off" spellCheck={false} maxLength={80}
-      value={input.inputAsset} onChange={e => set({ inputAsset: e.target.value })}/></label>
-    <datalist id="universal-source-assets">{ASSETS[input.source].map(a => <option key={a} value={a}/>)}</datalist>
+    <UniversalAssetPicker networkKey={input.source} value={input.inputAsset} onChange={inputAsset => set({ inputAsset })}
+      label={tr('Source asset')} inputLabel={tr('Universal bridge source asset')}/>
     <label>{tr('Destination network')}<select aria-label={tr('Universal bridge destination network')} value={input.destination}
       onChange={e => set({ destination: e.target.value as UniversalNetworkKey })}>
       {UNIVERSAL_BRIDGE_NETWORKS.filter(n => n.key !== input.source).map(n => <option key={n.key} value={n.key}>{n.label}</option>)}</select></label>
-    <label>{tr('Destination asset')}<input aria-label={tr('Universal bridge destination asset')} list="universal-destination-assets" autoComplete="off" spellCheck={false} maxLength={80}
-      value={input.outputAsset} onChange={e => set({ outputAsset: e.target.value })}/></label>
-    <datalist id="universal-destination-assets">{ASSETS[input.destination].map(a => <option key={a} value={a}/>)}</datalist>
-    <small>{tr('Any asset by symbol, or a contract / mint written as address@decimals (verified on chain at Simulate).')}</small>
+    <UniversalAssetPicker networkKey={input.destination} value={input.outputAsset} onChange={outputAsset => set({ outputAsset })}
+      label={tr('Destination asset')} inputLabel={tr('Universal bridge destination asset')}/>
+    <small>{tr('Any catalog asset by symbol or name, or a contract / mint written as address@decimals (identity verified on chain at Simulate). A valid asset does not guarantee a route.')}</small>
     <label>{tr('Amount')}<TokenAmountInput aria-label={tr('Universal bridge amount')} maxLength={40} value={input.amount} onValueChange={amount => set({ amount })}/></label>
     <label>{tr('Recipient')}<input aria-label={tr('Universal bridge recipient')} autoComplete="off" spellCheck={false} maxLength={80} value={input.recipient}
       placeholder={tr(cross ? 'Your connected destination wallet' : 'Your connected wallet')} onChange={e => set({ recipient: e.target.value })}/></label>
@@ -131,7 +162,7 @@ export function UniversalBridgeForm({ nodeId, onDone }: { nodeId?: string; onDon
       {(Object.keys(UNIVERSAL_BRIDGE_ROUTING_LABEL) as UniversalBridgeRouting[]).map(k => <option key={k} value={k}>{tr(UNIVERSAL_BRIDGE_ROUTING_LABEL[k])}</option>)}</select></label>
     <label>{tr('Slippage (bps)')}<input aria-label={tr('Universal bridge slippage (bps)')} inputMode="numeric" autoComplete="off" maxLength={3} value={input.slippage}
       onChange={e => set({ slippage: e.target.value })}/></label>
-    <small>{tr('The guaranteed minimum you receive is fixed in the reviewed provider order. Provider fees are listed at Review. FloFi records a 0.1% fee obligation on each completed workflow; collection is not settled on-chain yet.')}</small>
+    <small>{tr('Shown as')} {formatSlippage(input.slippage)}. {tr('The guaranteed minimum you receive is fixed in the reviewed provider order. Provider fees are listed at Review. FloFi records a 0.1% fee obligation on each completed workflow; collection is not settled on-chain yet.')}</small>
     {error && <p role="alert">{tr(MESSAGES[error] ?? error)}</p>}
     <button type="submit">{tr(nodeId ? 'Review bridge change' : 'Review bridge proposal')}</button>
     {onDone && <button type="button" className="quiet" onClick={onDone}>{tr('Cancel')}</button>}

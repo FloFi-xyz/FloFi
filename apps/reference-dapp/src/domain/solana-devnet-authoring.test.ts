@@ -9,7 +9,7 @@ import { describeProposal } from './proposal';
 import { createSolanaSwapNode, parseSolanaSwapChat, solanaSwapDetails, solanaSwapLabels, type SolanaSwapInput } from './jupiter-authoring';
 
 const context = createReviewContext({ registryId: referenceRegistry.registryId, capabilityId: referenceRegistry.capabilities[0]!.id, actionId: referenceRegistry.actions[0]!.id, assets: baseAssetRegistry });
-const canvasInput: SolanaSwapInput = { network: 'Solana Devnet', from: 'devUSDC', to: 'SOL', amount: '10', slippage: '50' };
+const canvasInput: SolanaSwapInput = { network: 'Solana Devnet', from: 'devUSDC', to: 'SOL', amount: '10', slippage: '100' };
 const DEVNET = 'solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1';
 describe('Solana Devnet swap chat/canvas authoring', () => {
   it('"Swap 10 test USDC to test SOL on Solana Devnet" and the canvas form produce identical canonical IR', () => {
@@ -23,7 +23,7 @@ describe('Solana Devnet swap chat/canvas authoring', () => {
     expect(node.actionType).toBe('asset.swap.exact-input');
     expect(readExactInputSwap(node as Parameters<typeof readExactInputSwap>[0])).toMatchObject({ chain: DEVNET,
       input: { chainId: DEVNET, address: SOLANA_DEVNET_TOKENS.devUSDC.mint, decimals: 6 }, output: { chainId: DEVNET, address: SOLANA_DEVNET_TOKENS.SOL.mint, decimals: 9 },
-      amount: '10000000', slippageBps: 50, protocols: ['orca-whirlpools'] });
+      amount: '10000000', slippageBps: 100, protocols: ['orca-whirlpools'] });
     expect(summarize(fromChat.workflow)).toContain('Swap 10 devUSDC to SOL on Solana Devnet via Orca Whirlpools');
     expect(summarize(fromChat.workflow)).not.toContain('Jupiter');
   });

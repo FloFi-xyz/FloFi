@@ -94,7 +94,7 @@ test('new workflow identity is unique per load and matches the serialized server
 test('normal Build removes the entire QA panel, keeps the header wallet and authors/simulates the permissionless bridge', async ({ page, networkGuard }) => {
   const owner = createTestWallet(); await resetJourneyHarness([owner]); await installJourneyWallet(page, [owner]); await page.goto('/app');
   await expect(page.getByRole('group', { name: 'Wallet connection' })).toBeVisible();
-  await expect(page.getByRole('group', { name: 'Wallet connection' })).toContainText('EVM Default');
+  await expect(page.getByRole('group', { name: 'Wallet connection' })).toContainText(owner.address.slice(0, 6));
   for (const text of ['PERMISSIONLESS TESTNET JOURNEY', 'Bridge test USDC from Base Sepolia to Arbitrum Sepolia with your own wallet',
     'Connect your wallet', 'Create the bridge workflow', 'Refresh runs']) await expect(page.locator('main')).not.toContainText(text);
   await expect(page.getByRole('region', { name: 'Testnet journey' })).toHaveCount(0);
@@ -201,10 +201,14 @@ for (const [initialChain, initialLabel] of [['0x1', 'Ethereum Mainnet'], ['0xaa3
 test(`header tracks external chain changes and reloads the actual provider on ${initialLabel}`, async ({ page, networkGuard }) => {
   const owner = createTestWallet(); await resetJourneyHarness([owner]); await installJourneyWallet(page, [owner], { chain: initialChain }); await page.goto('/app');
   const header = page.getByRole('group', { name: 'Wallet connection' });
-  await expect(header).toContainText('EVM Default'); await expect(header).toContainText(initialLabel);
-  await page.reload(); await expect(header).toContainText(initialLabel);
+  const walletSlot = header.locator('.wallet-connection');
+  await expect(header).toContainText(owner.address.slice(0, 6));
+  await expect(walletSlot).toHaveAttribute('title', new RegExp(initialLabel.replace(/[()]/g, '\\$&')));
+  await page.reload(); await expect(walletSlot).toHaveAttribute('title', new RegExp(initialLabel.replace(/[()]/g, '\\$&')));
   for (const [chain, label] of [['0x2105', 'Base (8453)'], ['0x1', 'Ethereum Mainnet'], ['0xa4b1', 'Arbitrum (42161)'], ['0x14a34', 'Base Sepolia'], ['0xaa36a7', 'Ethereum Sepolia'], ['0xdeadbeef', 'Other chain (0xdeadbeef)']]) {
-    await setWalletChain(page, chain!); await expect(header).toContainText(label!); await expect(header).toContainText('EVM Default');
+    await setWalletChain(page, chain!);
+    await expect(header).toContainText(owner.address.slice(0, 6));
+    await expect(walletSlot).toHaveAttribute('title', new RegExp(label!.replace(/[()]/g, '\\$&')));
   }
   // A new browser load must read eth_chainId; it never infers chain from the selected product environment.
   expect(await walletRequests(page)).not.toContain('eth_sendTransaction'); networkGuard.assertClean();

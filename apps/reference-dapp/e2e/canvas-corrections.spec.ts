@@ -53,8 +53,8 @@ test('Launch App starts with an empty Canvas and nothing adds an action afterwar
   await expect(cards(page)).toHaveCount(0);
   await page.getByRole('button', { name: 'Connect Wallet', exact: true }).click();
   await chooseWallet(page, 'Browser wallet');
-  // BUILD-FLOFI-MAINNET-PRODUCT-001: no environment selector; the connected wallet's own network is shown.
-  await expect(page.locator('.build009-wallet-info')).toContainText('Base Sepolia');
+  // BUILD-FLOFI-PRODUCT-UX-001: header shows the short address; the connected network stays in the wallet title (details menu).
+  await expect(page.locator('.build009-wallet-info')).toHaveAttribute('title', /Base Sepolia/);
   await page.waitForTimeout(1_000);
   await expect(cards(page)).toHaveCount(0); await expect(empty(page)).toBeVisible();
   // A reload starts empty too (execution-continuity.spec.ts covers a new visit with a finished run's pointer still in storage).
@@ -87,8 +87,8 @@ test('Add Swap → configure → delete leaves an empty Canvas with nothing in i
 
 test('Add Bridge → configure → delete keeps an editable Canvas', async ({ page }) => {
   await installSupplyWallet(page); await page.goto('/app');
-  // BUILD-FLOFI-MAINNET-PRODUCT-001: no environment selector; the connected wallet's own network is shown.
-  await expect(page.locator('.build009-wallet-info')).toContainText('Base Sepolia');
+  // BUILD-FLOFI-PRODUCT-UX-001: header shows the short address; the connected network stays in the wallet title (details menu).
+  await expect(page.locator('.build009-wallet-info')).toHaveAttribute('title', /Base Sepolia/);
   await page.getByRole('button', { name: 'Add bridge', exact: true }).click();
   const card = cards(page);
   await card.getByRole('textbox').fill('2.5'); await card.getByRole('textbox').press('Enter');
@@ -130,7 +130,7 @@ test('the Swap arrow inverts SOL/USDC to USDC/SOL on the same network, drops the
   // The owner's Solana wallet connects on the workflow's own cluster (mainnet-beta); it signs nothing here.
   await page.getByRole('button', { name: 'Connect Wallet', exact: true }).click();
   await chooseWallet(page, 'Gryloo MOCKED Solana wallet', 'Solana');
-  await expect(page.getByRole('group', { name: 'Wallet connection', exact: true })).toContainText('Solana mainnet-beta');
+  await expect(page.getByRole('group', { name: 'Wallet connection', exact: true })).toContainText(/[1-9A-HJ-NP-Za-km-z]{4}…[1-9A-HJ-NP-Za-km-z]{4}/);
   const card = cards(page).first();
   const source = card.getByRole('button', { name: 'Select source token', exact: true }), destination = card.getByRole('button', { name: 'Select destination token', exact: true });
   await expect(source).toContainText('SOL'); await expect(destination).toContainText('USDC');

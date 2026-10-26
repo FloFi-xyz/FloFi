@@ -11,7 +11,7 @@ import { createSwapNode } from './swap-authoring';
 import { createBaseSepoliaReviewContext } from '@defi-workflow-engine/reference-linter';
 
 const context = createReviewContext({ registryId: referenceRegistry.registryId, capabilityId: referenceRegistry.capabilities[0]!.id, actionId: referenceRegistry.actions[0]!.id, assets: baseAssetRegistry });
-const canvasInput: SolanaSwapInput = { network: 'Solana', from: 'USDC', to: 'SOL', amount: '10', slippage: '50' };
+const canvasInput: SolanaSwapInput = { network: 'Solana', from: 'USDC', to: 'SOL', amount: '10', slippage: '100' };
 describe('Solana swap chat/canvas authoring', () => {
   it('produces semantically identical canonical swap IR from chat and canvas', () => {
     const chat = parseLocalCommand('Swap 10 USDC to SOL on Solana', initialEditor().workflow, context);

@@ -225,7 +225,7 @@ describe('single-value lending cards reuse guarded amount acceptance', () => {
     const original = editorHistoryReducer(initialEditorHistory(), { type: 'COMMAND', command: canvasAddCommand('lending', 0, owner), context });
     const editing = input(original, '0.02', 'lending-borrow');
     const command = canvasAmountCommand(editing.editor, null, editing.amountInputs, 'lending-borrow', context);
-    expect(command).toMatchObject({ type: 'AUTHOR_LENDING', input: { supply: '0.1', borrow: '0.02', slippage: '50', owner } });
+    expect(command).toMatchObject({ type: 'AUTHOR_LENDING', input: { supply: '0.1', borrow: '0.02', slippage: '100', owner } });
     expect(amountCommandTarget(command, original.editor.workflow)).toEqual({ id: 'lending-borrow', amount: '0.02' });
     const accepted = editorHistoryReducer(editing, { type: 'COMMAND', command, context, authoringId: 'lending-borrow', authoringAmount: '0.02' });
     expect(accepted.editor.error).toBeNull(); expect(incomplete(accepted)).toBe(false);

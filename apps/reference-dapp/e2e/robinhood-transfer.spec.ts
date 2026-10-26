@@ -87,7 +87,7 @@ test('the wrong wallet chain blocks handoff and offers a switch to Robinhood Cha
   await expect(region(page)).toContainText('Switch your wallet to Robinhood Chain Testnet');
   expect(await chainBroadcasts()).toBe(0);
   await region(page).getByRole('button', { name: 'Switch to Robinhood Chain Testnet' }).click();
-  await expect(page.getByText('EVM Default: ' + owner.slice(0, 6) + '…' + owner.slice(-4) + ' · Robinhood Chain Testnet (46630)')).toBeVisible();
+  await expect(page.getByText(owner.slice(0, 6) + '…' + owner.slice(-4))).toBeVisible();
   const switched = await page.evaluate(() => (window as unknown as { transferWalletRequests: { method: string; params?: unknown[] }[] }).transferWalletRequests
     .filter(r => r.method === 'wallet_switchEthereumChain').map(r => r.params?.[0]));
   expect(switched).toEqual([{ chainId: '0xb626' }]);

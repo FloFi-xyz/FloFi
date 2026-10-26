@@ -16,6 +16,10 @@ import { solanaSwapDetails, type SolanaNetwork } from '../domain/jupiter-authori
 import { solanaLiquidityDetails } from '../domain/solana-liquidity-authoring';
 import { solanaTransferDetails } from '../domain/solana-transfer-authoring';
 import type { JupiterRecord } from '../server/jupiter-service';
+import { isPristineDraft } from '../domain/initial-workflow';
+import { useProductBootstrap } from './product-bootstrap';
+import { rememberWalletHint } from '../wallet/wallet-hint';
+import { WALLET_RESTORE_TIMEOUT_MS } from './wallet-restore';
 
 /**
  * One Solana swap store for both runtimes of the canonical swap. The workflow's cluster selects the runtime:
@@ -37,6 +41,12 @@ type Store = { record: JupiterRecord | null; owner: string | null; network: Sola
   executionEnabled: boolean;
   /** Authority changes, including account round trips batched into one React render. */
   revision: number;
+  /**
+   * BUILD-FLOFI-PRODUCT-UX-001: a remembered Solana session (this browser had one, and the owner did not disconnect it in FloFi) is still being
+   * restored silently. The header shows a neutral slot meanwhile — never a false "not connected". Bounded: it settles on the wallet's answer, or
+   * after `WALLET_RESTORE_TIMEOUT_MS` when the wallet never registers.
+   */
+  restoring: boolean;
   /** The cluster the current Solana workflow signs on; a session on another cluster is not this flow's owner. */
   walletChain: SolanaWalletChain;
   /** Opens the canonical wallet selector (Solana wallets) for `chain` and connects only the wallet the owner picks. */
@@ -70,6 +80,11 @@ export function JupiterProvider({ children }: { children: ReactNode }) {
   const [recovered, setRecovered] = useState(false), [signing, setSigning] = useState(false), [session, setSession] = useState<SolanaSession | null>(null);
   const [enabled, setEnabled] = useState<Record<SolanaNetwork, boolean>>({ Solana: false, 'Solana Devnet': false });
   const [revision, setRevision] = useState(0);
+  const { walletHint } = useProductBootstrap();
+  const [restoring, setRestoring] = useState(() => walletHint.includes('solana'));
+  useEffect(() => { if (!restoring) return; const timer = window.setTimeout(() => setRestoring(false), WALLET_RESTORE_TIMEOUT_MS); return () => window.clearTimeout(timer); }, [restoring]);
+  // A session (restored or connected) is remembered as a hint for the next visit's first frame; only an explicit Disconnect forgets it.
+  useEffect(() => { if (session) { rememberWalletHint('solana', true); setRestoring(false); } }, [session]);
   const workflow = state.workflow as unknown as SemanticWorkflow;
   const latest = useRef(workflow); latest.current = workflow;
   const latestSession = useRef(session); latestSession.current = session;
@@ -80,7 +95,7 @@ export function JupiterProvider({ children }: { children: ReactNode }) {
   const network: SolanaNetwork = authored?.network ?? workflow.nodes.map(node => solanaLiquidityDetails(node)?.network ?? solanaTransferDetails(node)?.network).find(Boolean)
     ?? (record ? networkOfRecord(record) : 'Solana');
   const runtime = runtimes[network];
-  const pristineRecovery = recovered && workflow.revision === 0 && workflow.nodes.length === 1 && workflow.nodes[0]?.actionType === 'mock-read';
+  const pristineRecovery = recovered && isPristineDraft(workflow);
   const retired = Boolean(record && JSON.stringify(record.review.workflow) !== JSON.stringify(workflow) && !pristineRecovery);
   function accept(value: JupiterRecord) { setRecord(value); try { window.localStorage.setItem(key, JSON.stringify({ id: value.id })); } catch { /* server journal remains authoritative */ } }
   useEffect(() => {
@@ -117,7 +132,7 @@ export function JupiterProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (session && (session !== restored.current || session.chain === neededChain)) return;
     const preference = walletPreference(), name = session?.wallet.name ?? preference.solana;
-    if (!name || preference.solanaDisconnected) return;
+    if (!name || preference.solanaDisconnected) { setRestoring(false); return; }
     let live = true, inFlight = false, again = false;
     const attempt = () => {
       // A wallet report that arrives during an attempt is not lost: the attempt runs once more when this one settles.
@@ -131,7 +146,9 @@ export function JupiterProvider({ children }: { children: ReactNode }) {
           if (latestSession.current && latestSession.current !== restored.current) return;
           restored.current = next; latestSession.current = next; setSession(next);
         })
-        .catch(() => undefined).finally(() => { inFlight = false; if (again && live && !latestSession.current) attempt(); });
+        // The remembered wallet answered without a session (not authorized silently, another account): nothing to restore. A wallet that has not
+        // registered yet (`…_SOLANA_WALLET_REQUIRED`) may still do so; the bounded timeout covers one that never does.
+        .catch((cause: unknown) => { if (live && !(cause instanceof Error && cause.message.endsWith('_SOLANA_WALLET_REQUIRED'))) setRestoring(false); }).finally(() => { inFlight = false; if (again && live && !latestSession.current) attempt(); });
     };
     attempt();
     // Wallet Standard wallets register asynchronously after load; without a session, the remembered wallet reporting its accounts again (unlocked,
@@ -213,7 +230,7 @@ export function JupiterProvider({ children }: { children: ReactNode }) {
     latestSession.current = null;
     setSession(null); setError(null);
     // No silent reconnect until the owner picks a Solana wallet again (the EVM store's rule).
-    updateWalletPreference({ solanaDisconnected: true });
+    updateWalletPreference({ solanaDisconnected: true }); rememberWalletHint('solana', false); setRestoring(false);
     if (current) await disconnectSolanaWallet(current);
   }
   async function poll(id: string) {
@@ -270,7 +287,7 @@ export function JupiterProvider({ children }: { children: ReactNode }) {
   }); }
   async function observe() { await operation(async () => { if (!record) throw new Error(`${runtime.prefix}_RUN_MISSING`); await poll(record.id); }); }
   return <Context.Provider value={{ record, owner: session && session.chain === runtime.walletChain ? session.account.address : null, network, session, codePrefix: runtime.prefix,
-    busy, error, retired, recovered, revision, executionEnabled: enabled[network], walletChain: runtime.walletChain, connect, connectWith, connectWithResult, disconnect, switchCluster, switchClusterTo,
+    busy, error, retired, recovered, revision, restoring, executionEnabled: enabled[network], walletChain: runtime.walletChain, connect, connectWith, connectWithResult, disconnect, switchCluster, switchClusterTo,
     simulate, review, execute, observe }}>
     {signing && <p role="status">Confirm or reject the pending request in your Solana wallet.</p>}
     <div inert={signing} data-jupiter-wallet-pending={signing ? 'true' : undefined}>{children}</div></Context.Provider>;

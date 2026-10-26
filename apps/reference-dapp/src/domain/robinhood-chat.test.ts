@@ -20,9 +20,9 @@ describe('BUILD-RH-002 Robinhood Chain chat', () => {
   it('"Swap 50 USDG for TSLA on Robinhood" authors the Canvas catalog swap; a non-featured symbol works the same way', () => {
     registerNetworkCatalog(officialCatalog());
     expect(parse('Swap 50 USDG for TSLA on Robinhood')).toMatchObject({ type: 'ADD_CRYPTO_ACTION',
-      input: { selection: { action: 'swap', network: ROBINHOOD_NETWORK, from: 'USDG', to: 'TSLA' }, amount: '50', slippage: '50' } });
+      input: { selection: { action: 'swap', network: ROBINHOOD_NETWORK, from: 'USDG', to: 'TSLA' }, amount: '50', slippage: '100' } });
     const node = apply('Swap 50 USDG for TSLA on Robinhood').nodes.find(n => n.chainId === 'eip155:4663')!;
-    expect(node).toEqual(createCryptoActionNode(node.nodeId, { selection: { action: 'swap', network: ROBINHOOD_NETWORK, from: 'USDG', to: 'TSLA' }, amount: '50', slippage: '50' }));
+    expect(node).toEqual(createCryptoActionNode(node.nodeId, { selection: { action: 'swap', network: ROBINHOOD_NETWORK, from: 'USDG', to: 'TSLA' }, amount: '50', slippage: '100' }));
     expect(parse('swap 10 usdg to pltr on robinhood chain slippage 80 bps')).toMatchObject({ input: { selection: { to: 'PLTR' }, slippage: '80' } });
     expect(summarize(apply('Swap 50 USDG for TSLA on Robinhood'))).toContain('Swap 50 USDG to TSLA on Robinhood Chain via Uniswap v3, 50 bps; real funds');
   });

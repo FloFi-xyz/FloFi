@@ -37,7 +37,7 @@ const Decimal = (description: string) => Type.String({ pattern: '^(0|[1-9][0-9]{
 const EvmAddress = (description: string) => Type.String({ pattern: '^0x[0-9a-fA-F]{40}$', minLength: 42, maxLength: 42, description });
 /** BUILD-SOLANA-TRANSFER-UX-001: a base58 Solana public key (case-sensitive); decoded to exactly 32 bytes at composition. */
 const SolanaAddress = (description: string) => Type.String({ pattern: '^[1-9A-HJ-NP-Za-km-z]{32,44}$', minLength: 32, maxLength: 44, description });
-const Slippage = Type.Integer({ minimum: 0, maximum: 10_000, description: 'Maximum slippage in basis points. Omit to use FloFi\'s documented default for the action; each action enforces its own maximum.' });
+const Slippage = Type.Integer({ minimum: 0, maximum: 10_000, description: 'Maximum slippage in basis points (100 = 1%). Omit to start at FloFi\'s default of 100 bps (1%); each action enforces its own maximum.' });
 const Version = Type.Literal(1, { description: 'Strategy contract version. Omit or 1.' });
 /**
  * An asset symbol or whole name resolves only in the selected network's validated catalog at composition.

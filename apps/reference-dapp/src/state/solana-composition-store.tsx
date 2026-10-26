@@ -46,7 +46,7 @@ const bounded = (cause: unknown) => { try { const v = cause as Record<string, un
 const walletChange = (cause: unknown) => { const change = (cause as { change?: { format?: unknown } } | null)?.change; return change?.format === 'flofi.solana-wallet-change.v1' ? { change: change as SolanaWalletChange } : {}; };
 
 export function SolanaCompositionProvider({ children }: { children: ReactNode }) {
-  const { state, restoreSolanaCompositionCanvas } = useWorkflow();
+  const { state, restoreSolanaCompositionCanvas, trackCanvasRestoration } = useWorkflow();
   const jupiter = useJupiter();
   const session = jupiter.session && jupiter.session.chain === 'solana:devnet' ? jupiter.session : null;
   const owner = session?.account.address ?? null;
@@ -68,7 +68,7 @@ export function SolanaCompositionProvider({ children }: { children: ReactNode })
     try {
       const pointer = JSON.parse(window.localStorage.getItem(key) ?? 'null') as { id?: unknown } | null;
       if (pointer && typeof pointer.id === 'string' && /^solcomp-[a-f0-9]{32}$/.test(pointer.id))
-        solanaCompositionStatus(pointer.id).then(result => {
+        trackCanvasRestoration(solanaCompositionStatus(pointer.id)).then(result => {
           if (!mounted || !result.ok) return;
           setRecord(result.value); setRecovered(true);
           // P0: a run that still needs the owner (a step in flight, or the swap reconciled and its position owed) shows its authorized
@@ -77,7 +77,7 @@ export function SolanaCompositionProvider({ children }: { children: ReactNode })
         }).catch(() => undefined);
     } catch { setError(`${X}_RECOVERY_POINTER_INVALID`); }
     return () => { mounted = false; };
-  }, [restoreSolanaCompositionCanvas]);
+  }, [restoreSolanaCompositionCanvas, trackCanvasRestoration]);
   // An edit before the swap starts retires the composed Review; after it starts, the run is only followed (never re-planned).
   useEffect(() => {
     if (record && retired && ['SIMULATED', 'AUTHORIZED'].includes(record.phase))

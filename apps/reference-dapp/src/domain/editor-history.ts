@@ -16,6 +16,7 @@ import { freeze, type Workflow } from './initial-workflow';
 import { canEditCanvasAmount, canvasAmountCommand, amountCommandTarget, bridgeSetupNetworks, CANVAS_BRIDGE_NETWORK_OPTIONS, type CanvasActionSetup, type CanvasAmountInputs, type CanvasBridgeNetworks, type CanvasBridgeNetworkInputs, type CanvasRecipientInputs } from './canvas-action-setup';
 import { transferDetails } from './robinhood-transfer-authoring';
 import { checkRecipient, recipientPolicy } from './recipient-address';
+import { DEFAULT_SLIPPAGE } from './slippage-policy';
 
 type Snapshot = { readonly workflow: Workflow; readonly layout: CanvasLayout; readonly actionSetup: CanvasActionSetup | null; readonly amountInputs: CanvasAmountInputs; readonly bridgeNetworkInputs: CanvasBridgeNetworkInputs; readonly cryptoSelections: CryptoSelections; readonly recipientInputs: CanvasRecipientInputs };
 export type EditorHistory = { readonly editor: EditorState; readonly layout: CanvasLayout;
@@ -97,7 +98,7 @@ export function editorHistoryReducer(state: EditorHistory, action: HistoryAction
     const id = `action-setup-${state.setupSerial + 1}`;
     let actionSetup: CanvasActionSetup;
     if (action.action === 'pool') actionSetup = { id, action: 'pool', amount: '0', input: {
-      network: 'Base Sepolia', maxUsdc: '0', maxWeth: '0', rangeUnit: 'TICK', lower: '-887270', upper: '887270', slippage: '50',
+      network: 'Base Sepolia', maxUsdc: '0', maxWeth: '0', rangeUnit: 'TICK', lower: '-887270', upper: '887270', slippage: DEFAULT_SLIPPAGE,
     } };
     else if (action.action === 'transfer') actionSetup = { id, action: 'transfer', amount: '0', cryptoSelection: { action: 'transfer', network: 'Robinhood Chain Testnet', from: 'ETH' } };
     else if (action.action === 'supply' || action.action === 'borrow' || action.action === 'repay')
