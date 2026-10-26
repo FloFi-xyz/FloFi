@@ -1,0 +1,520 @@
+{
+  "observedAt": "2026-10-26T13:07:53.448Z",
+  "mode": "READ_ONLY_MAINNET_METADATA",
+  "robinhood": {
+    "chain": "eip155:4663",
+    "count": 198,
+    "provenance": [
+      {
+        "provider": "robinhood.token-contracts",
+        "source": "https://docs.robinhood.com/chain/contracts",
+        "fetchedAt": "2026-10-11T00:00:00.000Z",
+        "contentSha256": null,
+        "officialRecords": 3,
+        "activeRecords": 3
+      },
+      {
+        "provider": "robinhood.rhj-assets",
+        "source": "https://api.robinhood.com/rhj/assets",
+        "fetchedAt": "2026-10-26T13:07:53.866Z",
+        "contentSha256": "f1139a89f522115e8551f3974b33cdf9bd8a0a05088c4820e485609cb1048c97",
+        "officialRecords": 195,
+        "activeRecords": 195
+      }
+    ],
+    "sample": [
+      {
+        "symbol": "ETH",
+        "address": null,
+        "decimals": 18
+      },
+      {
+        "symbol": "WETH",
+        "address": "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+        "decimals": 18
+      },
+      {
+        "symbol": "USDG",
+        "address": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+        "decimals": 6
+      },
+      {
+        "symbol": "CRM",
+        "address": "0xd95b44124e475743a7589e68f3d74008a5536d44",
+        "decimals": 18
+      },
+      {
+        "symbol": "P",
+        "address": "0x1cdad396db64bda184d5182a97dd9b3c62100b7d",
+        "decimals": 18
+      },
+      {
+        "symbol": "CIEN",
+        "address": "0x44f6d488021f8233b9416294d1fe9b1fee28382d",
+        "decimals": 18
+      },
+      {
+        "symbol": "ON",
+        "address": "0xbbd09f72b025360fee5c928053dca6248d35be54",
+        "decimals": 18
+      },
+      {
+        "symbol": "APLD",
+        "address": "0xb8dbf92f9741c9ac1c32115e78581f23509916fd",
+        "decimals": 18
+      }
+    ]
+  },
+  "base": {
+    "chain": "eip155:8453",
+    "count": 195,
+    "provenance": [
+      {
+        "provider": "flofi.pinned",
+        "source": "https://developers.circle.com/stablecoins/usdc-contract-addresses",
+        "fetchedAt": "2026-10-11T00:00:00.000Z",
+        "contentSha256": null,
+        "officialRecords": 3,
+        "activeRecords": 3
+      },
+      {
+        "provider": "uniswap.default-token-list",
+        "source": "https://tokens.uniswap.org",
+        "fetchedAt": "2026-10-26T13:07:53.906Z",
+        "contentSha256": "132cfa159d9ec36717cfd128b85d8a209baea67ed2b0862aa2edfe812878f522",
+        "officialRecords": 195,
+        "activeRecords": 194
+      }
+    ],
+    "sample": [
+      {
+        "symbol": "ETH",
+        "address": null,
+        "decimals": 18
+      },
+      {
+        "symbol": "USDC",
+        "address": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+        "decimals": 6
+      },
+      {
+        "symbol": "WETH",
+        "address": "0x4200000000000000000000000000000000000006",
+        "decimals": 18
+      },
+      {
+        "symbol": "AAVE",
+        "address": "0x63706e401c06ac8513145b7687a14804d17f814b",
+        "decimals": 18
+      },
+      {
+        "symbol": "ABT",
+        "address": "0xe2a8ccb00e328a0ec2204cb0c736309d7c1fa556",
+        "decimals": 18
+      },
+      {
+        "symbol": "ACU",
+        "address": "0xc5fed7c8ccc75d8a72b601a66dffd7a489073f0b",
+        "decimals": 12
+      },
+      {
+        "symbol": "ADX",
+        "address": "0x3c87e7af3cdbae5bb56b4936325ea95ca3e0efd9",
+        "decimals": 18
+      },
+      {
+        "symbol": "AERO",
+        "address": "0x940181a94a35a4569e4529a3cdfb74e38fd98631",
+        "decimals": 18
+      }
+    ]
+  },
+  "ethereum": {
+    "chain": "eip155:1",
+    "count": 477,
+    "provenance": [
+      {
+        "provider": "flofi.pinned",
+        "source": "https://developers.circle.com/stablecoins/usdc-contract-addresses",
+        "fetchedAt": "2026-10-11T00:00:00.000Z",
+        "contentSha256": null,
+        "officialRecords": 3,
+        "activeRecords": 3
+      },
+      {
+        "provider": "uniswap.default-token-list",
+        "source": "https://tokens.uniswap.org",
+        "fetchedAt": "2026-10-26T13:07:53.930Z",
+        "contentSha256": "132cfa159d9ec36717cfd128b85d8a209baea67ed2b0862aa2edfe812878f522",
+        "officialRecords": 483,
+        "activeRecords": 476
+      }
+    ],
+    "sample": [
+      {
+        "symbol": "ETH",
+        "address": null,
+        "decimals": 18
+      },
+      {
+        "symbol": "USDC",
+        "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        "decimals": 6
+      },
+      {
+        "symbol": "WETH",
+        "address": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+        "decimals": 18
+      },
+      {
+        "symbol": "0G",
+        "address": "0x4b948d64de1f71fcd12fb586f4c776421a35b3ee",
+        "decimals": 18
+      },
+      {
+        "symbol": "1INCH",
+        "address": "0x111111111117dc0aa78b770fa6a738034120c302",
+        "decimals": 18
+      },
+      {
+        "symbol": "A8",
+        "address": "0x3e5a19c91266ad8ce2477b91585d1856b84062df",
+        "decimals": 18
+      },
+      {
+        "symbol": "AAVE",
+        "address": "0x7fc66500c84a76ad7e9c93437bfc5ac33e2ddae9",
+        "decimals": 18
+      },
+      {
+        "symbol": "ABT",
+        "address": "0xb98d4c97425d9908e66e53a6fdf673acca0be986",
+        "decimals": 18
+      }
+    ]
+  },
+  "arbitrum-one": {
+    "chain": "eip155:42161",
+    "count": 225,
+    "provenance": [
+      {
+        "provider": "flofi.pinned",
+        "source": "https://developers.circle.com/stablecoins/usdc-contract-addresses",
+        "fetchedAt": "2026-10-11T00:00:00.000Z",
+        "contentSha256": null,
+        "officialRecords": 3,
+        "activeRecords": 3
+      },
+      {
+        "provider": "uniswap.default-token-list",
+        "source": "https://tokens.uniswap.org",
+        "fetchedAt": "2026-10-26T13:07:53.961Z",
+        "contentSha256": "132cfa159d9ec36717cfd128b85d8a209baea67ed2b0862aa2edfe812878f522",
+        "officialRecords": 226,
+        "activeRecords": 224
+      }
+    ],
+    "sample": [
+      {
+        "symbol": "ETH",
+        "address": null,
+        "decimals": 18
+      },
+      {
+        "symbol": "USDC",
+        "address": "0xaf88d065e77c8cc2239327c5edb3a432268e5831",
+        "decimals": 6
+      },
+      {
+        "symbol": "WETH",
+        "address": "0x82af49447d8a07e3bd95bd0d56f35241523fbab1",
+        "decimals": 18
+      },
+      {
+        "symbol": "AAVE",
+        "address": "0xba5ddd1f9d7f570dc94a51479a000e3bce967196",
+        "decimals": 18
+      },
+      {
+        "symbol": "ACX",
+        "address": "0x53691596d1bce8cea565b84d4915e69e03d9c99d",
+        "decimals": 18
+      },
+      {
+        "symbol": "AEVO",
+        "address": "0x377c1fc73d4d0f5600cd943776ced07c2b9783cd",
+        "decimals": 18
+      },
+      {
+        "symbol": "agEUR",
+        "address": "0xfa5ed56a203466cbbc2430a43c66b9d8723528e7",
+        "decimals": 18
+      },
+      {
+        "symbol": "AGLD",
+        "address": "0xb7910e8b16e63efd51d5d1a093d56280012a3b9c",
+        "decimals": 18
+      }
+    ]
+  },
+  "solana": {
+    "count": 4038,
+    "fetchedAt": "2026-10-26T13:07:55.238Z",
+    "source": "https://api.jup.ag/tokens/v2/tag?query=verified",
+    "contentSha256": "2819857a1e6dce0a40243943ba1a8c18c220fd225fb7c4d0cf06823ff91d2c21",
+    "sample": [
+      {
+        "symbol": "SOL",
+        "name": "Solana",
+        "mint": "So11111111111111111111111111111111111111112",
+        "decimals": 9,
+        "native": true,
+        "logoUrl": null
+      },
+      {
+        "mint": "So11111111111111111111111111111111111111112",
+        "symbol": "SOL",
+        "name": "Wrapped SOL",
+        "decimals": 9,
+        "native": false,
+        "logoUrl": null
+      },
+      {
+        "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        "symbol": "USDC",
+        "name": "USD Coin",
+        "decimals": 6,
+        "native": false,
+        "logoUrl": null
+      },
+      {
+        "mint": "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
+        "symbol": "USDT",
+        "name": "USDT",
+        "decimals": 6,
+        "native": false,
+        "logoUrl": null
+      },
+      {
+        "mint": "pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn",
+        "symbol": "PUMP",
+        "name": "Pump",
+        "decimals": 6,
+        "native": false,
+        "logoUrl": null
+      },
+      {
+        "mint": "cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij",
+        "symbol": "cbBTC",
+        "name": "Coinbase Wrapped BTC",
+        "decimals": 8,
+        "native": false,
+        "logoUrl": null
+      },
+      {
+        "mint": "9BEcn9aPEmhSPbPQeFGjidRiEKki46fVQDyPpSQXPA2D",
+        "symbol": "jlUSDC",
+        "name": "Jupiter Lend USDC",
+        "decimals": 6,
+        "native": false,
+        "logoUrl": null
+      },
+      {
+        "mint": "TTWofwAge91oFhZs7kpQdyrVRkmevgM88xijGvQFbKo",
+        "symbol": "TTWO",
+        "name": "Take-Two Interactive Software - Backpack Securities",
+        "decimals": 6,
+        "native": false,
+        "logoUrl": null
+      }
+    ]
+  },
+  "canonical": {
+    "sourceChain": "eip155:42161",
+    "destinationChain": "eip155:4663",
+    "inputAsset": {
+      "kind": "TOKEN",
+      "address": "0x82af49447d8a07e3bd95bd0d56f35241523fbab1",
+      "decimals": 18
+    },
+    "outputAsset": {
+      "kind": "NATIVE",
+      "decimals": 18
+    },
+    "amount": "10000000000000000",
+    "recipient": "CONNECTED_OWNER",
+    "slippageBps": 100,
+    "providers": [
+      "relay",
+      "lifi",
+      "mayan",
+      "across"
+    ],
+    "selection": "BEST_MINIMUM_OUTPUT"
+  },
+  "selectedAssetDiscovery": {
+    "format": "flofi.universal-discovery.v1",
+    "sourceChain": "eip155:42161",
+    "destinationChain": "eip155:4663",
+    "inputToken": {
+      "chainId": "eip155:42161",
+      "kind": "TOKEN",
+      "address": "0x82af49447d8a07e3bd95bd0d56f35241523fbab1",
+      "decimals": 18,
+      "symbol": "WETH"
+    },
+    "outputToken": {
+      "chainId": "eip155:4663",
+      "kind": "NATIVE",
+      "address": null,
+      "decimals": 18,
+      "symbol": "ETH"
+    },
+    "amount": "10000000000000000",
+    "observedAt": "2026-10-26T13:07:56.658Z",
+    "quoteSubjects": "PUBLIC_QUOTE_SUBJECT",
+    "candidates": [
+      {
+        "provider": "lifi",
+        "bridge": "across",
+        "status": "LIVE_QUOTE",
+        "executableBy": null,
+        "expectedOutput": "9967835493853405",
+        "minimumOutput": "9967835493853405",
+        "estimatedDurationSeconds": 1,
+        "fees": [
+          {
+            "label": "LIFI Fixed Fee",
+            "amount": "25000000000000",
+            "symbol": "WETH",
+            "decimals": 18,
+            "included": true,
+            "chainId": "eip155:42161"
+          },
+          {
+            "label": "Relayer fee",
+            "amount": "993354140625",
+            "symbol": "WETH",
+            "decimals": 18,
+            "included": true,
+            "chainId": "eip155:42161"
+          },
+          {
+            "label": "Relayer gas fee",
+            "amount": "4574488130443",
+            "symbol": "WETH",
+            "decimals": 18,
+            "included": true,
+            "chainId": "eip155:42161"
+          },
+          {
+            "label": "LP fee",
+            "amount": "1596663875527",
+            "symbol": "WETH",
+            "decimals": 18,
+            "included": true,
+            "chainId": "eip155:42161"
+          }
+        ],
+        "reason": "LIFI_BRIDGE_VERIFIER_NOT_IMPLEMENTED",
+        "quoteId": "1bc698df-69bb-47dc-bfe9-db9197f2ab73"
+      },
+      {
+        "provider": "lifi",
+        "bridge": "lifiIntents",
+        "status": "LIVE_QUOTE",
+        "executableBy": null,
+        "expectedOutput": "9962600732938537",
+        "minimumOutput": "9962600732938537",
+        "estimatedDurationSeconds": 8,
+        "fees": [
+          {
+            "label": "LIFI Fixed Fee",
+            "amount": "25000000000000",
+            "symbol": "WETH",
+            "decimals": 18,
+            "included": true,
+            "chainId": "eip155:42161"
+          }
+        ],
+        "reason": "LIFI_BRIDGE_VERIFIER_NOT_IMPLEMENTED",
+        "quoteId": "fa2fd1d9-fae9-456c-84cf-1854567c6eaa"
+      },
+      {
+        "provider": "relay",
+        "bridge": "relay-depository",
+        "status": "LIVE_QUOTE",
+        "executableBy": null,
+        "expectedOutput": "9984648726406683",
+        "minimumOutput": "9884802239142617",
+        "estimatedDurationSeconds": 1,
+        "fees": [],
+        "reason": "RELAY_PAYMENT_MISMATCH",
+        "quoteId": null
+      },
+      {
+        "provider": "lifi",
+        "bridge": "relaydepository",
+        "status": "LIVE_QUOTE",
+        "executableBy": null,
+        "expectedOutput": "9959665935309141",
+        "minimumOutput": "9860069275956050",
+        "estimatedDurationSeconds": 1,
+        "fees": [
+          {
+            "label": "LIFI Fixed Fee",
+            "amount": "25000000000000",
+            "symbol": "WETH",
+            "decimals": 18,
+            "included": true,
+            "chainId": "eip155:42161"
+          },
+          {
+            "label": "Relayer Gas fee",
+            "amount": "708634080000",
+            "symbol": "WETH",
+            "decimals": 18,
+            "included": true,
+            "chainId": "eip155:42161"
+          },
+          {
+            "label": "Relayer Service fee",
+            "amount": "14625430610859",
+            "symbol": "WETH",
+            "decimals": 18,
+            "included": true,
+            "chainId": "eip155:42161"
+          }
+        ],
+        "reason": "LIFI_BRIDGE_VERIFIER_NOT_IMPLEMENTED",
+        "quoteId": "21d87e5b-1de1-42d4-9251-f73b46fc9f4c"
+      },
+      {
+        "provider": "across",
+        "bridge": "across",
+        "status": "SUPPORTED_BY_PROVIDER",
+        "executableBy": null,
+        "expectedOutput": null,
+        "minimumOutput": null,
+        "estimatedDurationSeconds": null,
+        "fees": [],
+        "reason": "ACROSS_NATIVE_NOT_QUOTED",
+        "quoteId": null
+      },
+      {
+        "provider": "mayan",
+        "bridge": "mayan",
+        "status": "NO_ROUTE",
+        "executableBy": null,
+        "expectedOutput": null,
+        "minimumOutput": null,
+        "estimatedDurationSeconds": null,
+        "fees": [],
+        "reason": "MAYAN_NETWORK_UNSUPPORTED",
+        "quoteId": null
+      }
+    ],
+    "recommended": null,
+    "status": "LIVE_QUOTE"
+  }
+}

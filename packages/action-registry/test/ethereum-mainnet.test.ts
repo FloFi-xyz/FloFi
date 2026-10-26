@@ -30,9 +30,13 @@ describe('Ethereum mainnet identity and validated catalog', () => {
     expect(trustedAssetLogo(link)).toBe(link.logoUrl);
     expect(trustedAssetLogo({ ...link, chain: 'eip155:11155111' })).toBeNull();
   });
-  it('excludes both reviewed LIT ambiguities while other duplicate identities fail closed', () => {
+  it('excludes reviewed LIT, LCX and U ambiguities while other duplicate identities fail closed', () => {
     const catalog = parse([token(), token('LIT', '0xb59490ab09a0f526cc7305822ac65f2ab12f9723'), token('LIT', '0x232ce3bd40fcd6f80f3d55a522d03f25df784ee2')]);
     expect(catalogAsset(catalog, { symbol: 'LIT' })).toBeNull();
+    for (const symbol of ['LCX', 'U']) {
+      const twins = parse([token(), token(symbol, '0x037a54aab062628c9bbae1fdb1583c195585fe41'), token(symbol, '0x8cd41041505885ef0ad3858181d66f17be8aae7e')]);
+      expect(catalogAsset(twins, { symbol })).toBeNull();
+    }
     expect(catalogAsset(catalog, { symbol: 'LINK' })).not.toBeNull();
     expect(() => parse([token(), token('LINK2')])).toThrow('ETHEREUM_TOKEN_LIST_DUPLICATE_ASSET');
     expect(() => parse([token(), token('link', '0x0000000000000000000000000000000000000002')])).toThrow('ETHEREUM_TOKEN_LIST_DUPLICATE_ASSET');

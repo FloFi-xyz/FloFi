@@ -58,6 +58,22 @@ describe('Build estimate snapshot, freshness and provider binding', () => {
 });
 
 describe('UX-007 fast live quote feedback', () => {
+  it('keeps an in-flight quote when catalog rerenders recreate the same workflow snapshot', async () => {
+    let workflow = authored('100');
+    const pending = deferred<ReturnType<typeof response>>();
+    transport.mockReturnValue(pending.promise);
+    const read = () => host.render(() => useLiveQuote(workflow, 'node-002', 'owner'));
+    read(); await vi.advanceTimersByTimeAsync(LIVE_QUOTE_DEBOUNCE_MS);
+    expect(transport).toHaveBeenCalledOnce();
+    workflow = JSON.parse(JSON.stringify(workflow));
+    expect(read().status).toBe('calculating');
+    expect(transport.mock.calls[0]![1].signal.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(LIVE_QUOTE_DEBOUNCE_MS);
+    expect(transport).toHaveBeenCalledOnce();
+    pending.resolve(response({ ok: true, estimate: estimate(workflow) }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(read().status).toBe('ready');
+  });
   it('shows calculating at once, asks once after the short debounce, then shows this exact amount', async () => {
     const workflow = authored('5'), value = estimate(workflow); let release!: (v: unknown) => void;
     transport.mockReturnValue(new Promise(resolve => { release = resolve; }));

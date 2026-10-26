@@ -171,3 +171,59 @@ test('UX-009/010 repeated Send cards retain links and the manual viewport throug
   expect(await viewport(page).getAttribute('style')).toBe(manual);
   await assertPassiveWallet(page); networkGuard.assertClean();
 });
+
+// FIX-BRIDGE-CATALOG-CANCEL-001: the visual card uses the same catalogs as the inspector; live metadata never proves a route.
+test('Bridge picker searches independent Arbitrum and Robinhood catalogs and authors a canonical non-legacy asset pair', async ({ page, networkGuard }, testInfo) => {
+  await open(page);
+  await page.getByRole('button', { name: 'Add bridge', exact: true }).click();
+  const card = cards(page).last();
+  await card.getByRole('button', { name: 'Configure source asset', exact: true }).click();
+  let picker = page.getByRole('region', { name: 'Source bridge picker', exact: true });
+  await picker.getByRole('button', { name: 'Arbitrum', exact: true }).click();
+  await expect(picker.getByRole('searchbox', { name: 'Search Arbitrum tokens', exact: true })).toBeVisible();
+  await expect(picker.getByRole('button', { name: 'Arbitrum', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  const columns = await picker.locator('.composer-bridge-picker-column').evaluateAll(nodes => nodes.map(n => { const r = n.getBoundingClientRect(); return { x: r.x, y: r.y, right: r.right, width: r.width }; }));
+  expect(columns).toHaveLength(2); expect(columns[1]!.x).toBeGreaterThanOrEqual(columns[0]!.right); expect(columns[0]!.y).toBeCloseTo(columns[1]!.y, 0);
+  expect(columns.every(column => column.width > 100)).toBe(true);
+  expect((await picker.boundingBox())!.height).toBeLessThan(350);
+  await expect(picker.locator('.brand-icon').first()).toBeVisible();
+  await picker.locator('label:has(input[aria-label="WETH"])').click();
+  await page.screenshot({ path: testInfo.outputPath('bridge-arbitrum-source.png') });
+  await card.getByRole('button', { name: 'Configure destination asset', exact: true }).click();
+  picker = page.getByRole('region', { name: 'Destination bridge picker', exact: true });
+  await picker.getByRole('button', { name: 'Robinhood Chain', exact: true }).click();
+  const search = picker.getByRole('searchbox', { name: 'Search Robinhood Chain tokens', exact: true });
+  await expect(search).toBeVisible();
+  await search.fill('Tesla');
+  await expect(picker.getByRole('list', { name: 'Robinhood Chain token results', exact: true })).toContainText('TSLA');
+  await search.fill('');
+  await picker.locator('label:has(input[aria-label="ETH"])').click();
+  await expect(card.getByRole('button', { name: 'Configure source asset', exact: true })).toContainText('WETH');
+  await page.screenshot({ path: testInfo.outputPath('bridge-robinhood-destination.png') });
+  await card.getByRole('button', { name: 'Hide bridge picker', exact: true }).click();
+  const amount = card.getByRole('textbox', { name: /amount/i }).first();
+  await amount.fill('0.01'); await amount.press('Enter');
+  await expect.poll(async () => (await ir(page)).nodes.some(n => n.adapterConstraints.adapters.some(a => a.id === 'flofi.router.universal'))).toBe(true);
+  const workflow = await ir(page), node = workflow.nodes.find(n => n.actionType === 'asset.bridge')!;
+  expect(node.adapterConstraints.adapters).toContainEqual({ id: 'flofi.router.universal', version: '1.0.0' });
+  const { readUniversalBridgeNode } = await import('@defi-workflow-engine/workflow-contracts');
+  expect(readUniversalBridgeNode(node)).toMatchObject({ sourceChain: 'eip155:42161', destinationChain: 'eip155:4663',
+    inputAsset: { kind: 'TOKEN', address: '0x82af49447d8a07e3bd95bd0d56f35241523fbab1', decimals: 18 }, outputAsset: { kind: 'NATIVE', decimals: 18 }, slippageBps: 100 });
+  // Applying an asset creates no liquidity claim and asks no signing method.
+  await expect(card).not.toContainText('Executable');
+  await assertPassiveWallet(page); networkGuard.assertClean();
+});
+
+test('Bridge picker offers searchable metadata on all five mainnets and refuses to infer route availability', async ({ page, networkGuard }) => {
+  await open(page); await page.route('https://img.jup.ag/**', route => route.fulfill({ status: 404, body: '' }));
+  await page.getByRole('button', { name: 'Add bridge', exact: true }).click();
+  const card = cards(page).last();
+  await card.getByRole('button', { name: 'Configure source asset', exact: true }).click();
+  const picker = page.getByRole('region', { name: 'Source bridge picker', exact: true });
+  for (const network of ['Ethereum', 'Base', 'Arbitrum', 'Robinhood Chain', 'Solana']) {
+    await picker.getByRole('button', { name: network, exact: true }).click();
+    await expect(picker.getByRole('searchbox', { name: `Search ${network} tokens`, exact: true })).toBeVisible();
+    await expect(picker.getByRole('button', { name: network, exact: true })).toHaveAttribute('aria-pressed', 'true');
+  }
+  await expect(card).not.toContainText('Executable'); await assertPassiveWallet(page); networkGuard.assertClean();
+});

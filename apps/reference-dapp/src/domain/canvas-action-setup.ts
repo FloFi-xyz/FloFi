@@ -18,7 +18,7 @@ import { singleAmountProposalTarget } from './composer-presentation';
 import { createCryptoActionNode, cryptoInputOf, cryptoProfile, canSelectCryptoAssets, defaultPoolRange, type CryptoSelection, type CryptoSelections, type CryptoActionInput } from './crypto-action-picker';
 import { checkRecipient } from './recipient-address';
 import { DEFAULT_SLIPPAGE } from './slippage-policy';
-import { createUniversalBridgeFromInput, universalBridgeDetails, universalCanvasInput, universalCanvasPair, universalInputOf } from './universal-bridge-authoring';
+import { createUniversalBridgeFromInput, universalBridgeDetails, universalCanvasInput, universalCanvasPair, universalInputOf, resolveUniversalAsset, universalKeyOfCanvasLabel, UNIVERSAL_CANVAS_LABEL } from './universal-bridge-authoring';
 
 /** Required-field authoring only, never an executable node or alternate workflow. */
 /** `cryptoRecipient` (UX-001): the Send card's typed "To" text, committed only as the transfer's canonical `recipient` on Apply. */
@@ -27,10 +27,9 @@ export type CanvasActionSetup = { readonly id: string; readonly amount: string; 
   /** `stocks`: the Stocks card (BUILD-RH-002): a Robinhood Chain catalog swap that buys a Stock Token with USDG. */
   { readonly action: 'swap'; readonly direction?: Direction; readonly stocks?: true } | { readonly action: 'bridge'; readonly networks?: CanvasBridgeNetworks } | { readonly action: 'withdraw' | 'transfer' } | { readonly action: 'supply' | 'borrow' | 'repay'; readonly beneficiary: string });
 /**
- * BUILD-CROSSCHAIN-UNIVERSAL-001: a new Bridge card may also carry the label `Solana` (only the card's pickers offer it): such a pair is a universal
- * bridge, recognized before any certified Router command is built. Certified Router cards keep their own pairs.
+ * Bridge drafts keep each network's asset reference independently. Assets outside certified fixed routes require a reviewed Universal Router proposal.
  */
-export type CanvasBridgeNetworks = { source: RouterBridgeInput['source'] | 'Solana'; destination: RouterBridgeInput['destination'] | 'Solana' };
+export type CanvasBridgeNetworks = { source: RouterBridgeInput['source'] | 'Solana'; destination: RouterBridgeInput['destination'] | 'Solana'; inputAsset?: string; outputAsset?: string };
 const routerNetworks = (networks: CanvasBridgeNetworks): Pick<RouterBridgeInput, 'source' | 'destination'> => {
   if (networks.source === 'Solana' || networks.destination === 'Solana') throw new Error('ROUTER_PAIR_UNSUPPORTED');
   return { source: networks.source, destination: networks.destination };
@@ -46,16 +45,26 @@ export const CANVAS_BRIDGE_NETWORK_OPTIONS = {
 /** "USDC → USDC", or (BUILD-RH-002) "USDC → USDG" into Robinhood Chain; Solana pairs use the universal stablecoin defaults; anything else stays neutral USDC. */
 export function bridgePairLabel(networks: CanvasBridgeNetworks): string {
   // Universal first: `routerNetworks` refuses Solana, and a half-chosen draft must never crash the Canvas.
+  if (networks.inputAsset || networks.outputAsset) return `${bridgeAssetLabel(networks.source, networks.inputAsset ?? routerTokensOf(networks)?.token ?? 'USDC')} → ${bridgeAssetLabel(networks.destination, networks.outputAsset ?? routerTokensOf(networks)?.destinationToken ?? 'USDC')}`;
   const universal = universalCanvasPair(networks);
   if (universal) { const input = universalCanvasInput(universal, '1'); return `${input.inputAsset} → ${input.outputAsset}`; }
   const tokens = routerTokensOf(networks);
   return tokens ? `${tokens.token} → ${tokens.destinationToken}` : 'USDC → USDC';
 }
+/** Display metadata never substitutes for the selected network-bound identity. */
+export function bridgeAssetLabel(network: string, reference: string): string {
+  try { const { symbol } = resolveUniversalAsset(universalKeyOfCanvasLabel(network)!, reference); return symbol === 'TOKEN' ? reference : symbol; }
+  catch { return reference; }
+}
+export function universalCanvasNetworks(details: NonNullable<ReturnType<typeof universalBridgeDetails>>): CanvasBridgeNetworks {
+  const input = universalInputOf(details);
+  return { source: UNIVERSAL_CANVAS_LABEL[input.source], destination: UNIVERSAL_CANVAS_LABEL[input.destination], inputAsset: input.inputAsset, outputAsset: input.outputAsset } as CanvasBridgeNetworks;
+}
 export function bridgeSetupNetworks(setup: Extract<CanvasActionSetup, { action: 'bridge' }>): CanvasBridgeNetworks {
   return setup.networks ?? { source: ROUTER_NETWORK_OPTIONS.testnet.source, destination: ROUTER_NETWORK_OPTIONS.testnet.destination };
 }
 export function canvasAmountReviewValue(amount: string | undefined, networks?: CanvasBridgeNetworks) {
-  return networks && amount !== undefined ? JSON.stringify([amount, networks.source, networks.destination]) : amount;
+  return networks && amount !== undefined ? JSON.stringify([amount, networks.source, networks.destination, networks.inputAsset, networks.outputAsset]) : amount;
 }
 export function setupReviewValue(setup: CanvasActionSetup) { return setup.action === 'pool' ? JSON.stringify(setup.input) : setup.action === 'swap' && setup.direction ? JSON.stringify([setup.amount, setup.direction]) : setup.action === 'bridge' ? canvasAmountReviewValue(setup.amount, setup.networks)! : setup.amount; }
 export function cryptoSetupInput(setup: CanvasActionSetup): CryptoActionInput {
@@ -123,9 +132,9 @@ export function canvasAmountCommand(state: EditorState, setup: CanvasActionSetup
       ? { type: 'ADD_UNISWAP_LIQUIDITY', input: setup.input, source: 'CANVAS', baseRevision: state.workflow.revision }
       : canvasAddCommand(setup.action, state.workflow.revision, 'beneficiary' in setup ? setup.beneficiary : null, setup.amount);
     if (command.type === 'ADD_SWAP' && setup.action === 'swap' && setup.direction) command = { ...command, direction: setup.direction };
-    // BUILD-CROSSCHAIN-UNIVERSAL-001: a pair only the universal router serves (Solana in or out) authors a universal bridge; assets are edited in the inspector.
+    // Preserve certified routes; a different network or asset pair explicitly authors a new Universal Router proposal.
     const universal = setup.action === 'bridge' ? universalCanvasPair(bridgeSetupNetworks(setup)) : null;
-    if (universal) command = { type: 'ADD_UNIVERSAL_BRIDGE', input: universalCanvasInput(universal, setup.amount), source: 'CANVAS', baseRevision: state.workflow.revision };
+    if (universal && setup.action === 'bridge') command = { type: 'ADD_UNIVERSAL_BRIDGE', input: universalCanvasInput(universal, setup.amount, bridgeSetupNetworks(setup)), source: 'CANVAS', baseRevision: state.workflow.revision };
     else if (command.type === 'ADD_ROUTER_BRIDGE' && setup.action === 'bridge') command = { ...command, input: routerInputForNetworks(command.input, routerNetworks(bridgeSetupNetworks(setup))) };
     }
   }
@@ -148,8 +157,9 @@ export function canvasAmountCommand(state: EditorState, setup: CanvasActionSetup
       : repay ? { ...base, type: 'SET_REPAY', input: { ...repay, amount } }
       : withdraw ? { ...base, type: 'SET_WITHDRAW', input: { ...withdraw, amount } }
       : supply ? { ...base, type: 'SET_SUPPLY', input: { ...supply, amount } }
+      : router && universalCanvasPair(bridgeNetworks[id] ?? router) ? { ...base, type: 'SET_UNIVERSAL_BRIDGE', input: { ...universalCanvasInput(universalCanvasPair(bridgeNetworks[id] ?? router)!, amount, bridgeNetworks[id]), recipient: router.recipient, slippage: router.slippage } }
       : router ? { ...base, type: 'SET_ROUTER_BRIDGE', input: routerInputForNetworks({ ...routerInputOf(router), amount }, routerNetworks(bridgeNetworks[id] ?? router)) }
-      : universalBridgeDetails(node) ? { ...base, type: 'SET_UNIVERSAL_BRIDGE', input: { ...universalInputOf(universalBridgeDetails(node)!), amount } }
+      : universalBridgeDetails(node) ? { ...base, type: 'SET_UNIVERSAL_BRIDGE', input: { ...universalInputOf(universalBridgeDetails(node)!), ...(bridgeNetworks[id] ? { source: universalKeyOfCanvasLabel(bridgeNetworks[id]!.source)!, destination: universalKeyOfCanvasLabel(bridgeNetworks[id]!.destination)!, inputAsset: bridgeNetworks[id]!.inputAsset!, outputAsset: bridgeNetworks[id]!.outputAsset! } : {}), amount } }
       : bridge ? { ...base, type: 'SET_BRIDGE', input: { amount, slippageBps: String(bridge.slippageBps) } }
         : { ...base, type: 'SET_SWAP_AMOUNT', amount };
   }
@@ -209,7 +219,7 @@ export function setupSummary(setup: CanvasActionSetup, context: ReviewContext) {
   return { action: setup.action === 'swap' ? 'Swap' : setup.action === 'bridge' ? 'Bridge' : setup.action === 'transfer' ? 'Send' : setup.action[0]!.toUpperCase() + setup.action.slice(1),
     provider: setup.action === 'swap' ? 'Uniswap' : setup.action === 'bridge' ? (universal ? 'Universal Router' : 'Router') : 'Aave V3',
     chain: setup.action === 'swap' ? shellChainLabel(context.assets.USDC.asset.chainId) : bridge ? `${bridge.source} → ${bridge.destination}` : 'Base Sepolia',
-    amount: `${setup.amount || '0'} ${setup.action === 'swap' ? inputSymbol(setup.direction ?? 'USDC_TO_WETH') : bridge ? (universal ? universalCanvasInput(universal, setup.amount || '0').inputAsset : routerTokensOf(bridge)?.token) ?? 'USDC' : 'USDC'}`,
+    amount: `${setup.amount || '0'} ${setup.action === 'swap' ? inputSymbol(setup.direction ?? 'USDC_TO_WETH') : bridge ? (universal ? bridgeAssetLabel(bridge.source, universalCanvasInput(universal, setup.amount || '0', bridge).inputAsset) : routerTokensOf(bridge)?.token) ?? 'USDC' : 'USDC'}`,
     detail: setup.action === 'swap' ? directionLabel(setup.direction ?? 'USDC_TO_WETH') : undefined,
     bridgePair: bridge ? bridgePairLabel(bridge) : undefined, linked: false, risk: undefined };
 }

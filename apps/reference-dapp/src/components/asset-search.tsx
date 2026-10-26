@@ -8,18 +8,18 @@
  */
 import { useEffect, useState, type ReactNode } from 'react';
 import { assetDisplayName, type AssetClass, type CanonicalAsset } from '@defi-workflow-engine/action-registry';
-import { searchNetworkAssets } from '../domain/asset-catalogs';
+import { searchNetworkAssets, networkCatalog } from '../domain/asset-catalogs';
 import { useNetworkCatalog } from '../state/asset-catalog-store';
 import { TokenBrandIcon } from './brand-icon';
 
 /** At most this many search results are rendered at once; typing narrows the full validated catalog. */
 export const ASSET_SEARCH_RESULTS = 12;
 export type AssetSearchCopy = { readonly searchLabel: string; readonly placeholder: string; readonly loading: string; readonly unavailable: string;
-  readonly retry: string; readonly empty: string; readonly results: string; readonly total: (count: number) => string; readonly heading: string };
-export function AssetSearch({ chain, selected, assetClass, accept, onSelect, copy }: {
+  readonly retry: string; readonly empty: string; readonly results: string; readonly total: (count: number) => string; readonly heading: string; readonly excluded?: (count: number) => string };
+export function AssetSearch({ chain, selected, assetClass, accept, onSelect, onSelectAsset, copy }: {
   chain: string; selected: string | undefined; assetClass?: AssetClass | undefined;
   /** Which catalog assets this action may use (e.g. ERC-20s only for swaps and pools). */ accept?: ((asset: CanonicalAsset) => boolean) | undefined;
-  onSelect(symbol: string): void; copy: AssetSearchCopy;
+  onSelect(symbol: string): void; onSelectAsset?: ((asset: CanonicalAsset) => void) | undefined; copy: AssetSearchCopy;
 }): ReactNode {
   const catalog = useNetworkCatalog(chain);
   const [query, setQuery] = useState('');
@@ -27,7 +27,7 @@ export function AssetSearch({ chain, selected, assetClass, accept, onSelect, cop
   const options = { ...assetClass ? { assetClass } : {} };
   const usable = (assets: readonly CanonicalAsset[]) => accept ? assets.filter(accept) : assets;
   const results = catalog.status === 'ready' ? usable(searchNetworkAssets(chain, query, { ...options, limit: 200 })).slice(0, ASSET_SEARCH_RESULTS) : [];
-  const total = catalog.status === 'ready' ? usable(searchNetworkAssets(chain, '', { ...options, limit: 200 })).length : 0;
+  const total = catalog.status === 'ready' ? usable((networkCatalog(chain)?.assets ?? []).filter(asset => !assetClass || asset.assetClass === assetClass)).length : 0;
   return <>
     <label className="composer-stock-search"><span className="composer-bridge-picker-heading">{copy.heading}</span>
       <input type="search" aria-label={copy.searchLabel} placeholder={copy.placeholder} autoComplete="off" spellCheck={false} maxLength={64}
@@ -37,8 +37,8 @@ export function AssetSearch({ chain, selected, assetClass, accept, onSelect, cop
       : !results.length ? <p className="composer-stock-status" role="status">{copy.empty}</p>
       : <>
         <ul className="composer-stock-results" aria-label={copy.results}>
-          {results.map(asset => <li key={asset.id}><button type="button" className="composer-stock-option" aria-pressed={asset.symbol === selected} data-selected={asset.symbol === selected || undefined}
-            onClick={() => onSelect(asset.symbol)}><span className="composer-stock-mark" aria-hidden="true"><TokenBrandIcon symbol={asset.symbol} network={chain} address={asset.address ?? undefined}/></span>
+          {results.map(asset => <li key={asset.id}><button type="button" className="composer-stock-option" aria-pressed={(asset.symbol === selected || `${asset.address}@${asset.decimals}` === selected)} data-selected={(asset.symbol === selected || `${asset.address}@${asset.decimals}` === selected) || undefined}
+            onClick={() => onSelectAsset ? onSelectAsset(asset) : onSelect(asset.symbol)}><span className="composer-stock-mark" aria-hidden="true"><TokenBrandIcon symbol={asset.symbol} network={chain} address={asset.address ?? undefined}/></span>
             <span>{asset.symbol}</span><span className="composer-stock-name">{assetDisplayName(asset)}</span></button></li>)}
         </ul>
         {!query.trim() && total > results.length && <p className="composer-stock-status">{copy.total(total)}</p>}

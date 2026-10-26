@@ -16,6 +16,7 @@ import { useEffect, useRef, useState } from 'react';
 import { authorizeWorkflowRunHandoff, cancelWorkflowRunHandoff, continueWorkflowRunHandoff, resumeWorkflowRunHandoff, reviewWorkflowRunAuthorization,
   startWorkflowRunHandoff, workflowRunStatusHandoff } from '../app/approve-action';
 import type { ReviewView } from '../delegation/views';
+import { canEndWorkflow } from '../workflow-runs/state-machine';
 import { useLocale } from '../i18n/locale';
 import type { ClaimedProposal } from '../platform/approvals';
 import type { WorkflowRunClaim } from '../platform/workflow-run-approvals';
@@ -122,10 +123,16 @@ export function WorkflowRunPanel({ claim, approvalId, secret, onProposal, onErro
       <p role="status">{tr('Partially completed: the reconciled steps stay done and their funds rest in your wallet. Nothing later was submitted.')}</p>
       <div className="approval-actions">
         <button type="button" className="secondary" disabled={busy} onClick={() => void act(() => resumeWorkflowRunHandoff(approvalId))}>{tr('Try this step again')}</button>
-        <button type="button" className="quiet" disabled={busy} onClick={() => void act(() => cancelWorkflowRunHandoff(approvalId))}>{tr('End workflow')}</button>
       </div>
     </div>}
-    {run.state === 'ATTENTION' && <p role="status">{tr('A submitted step has no final outcome yet. FloFi keeps observing it and never resubmits it.')}</p>}
+    {canEndWorkflow(run, run.steps) && <div className="approval-actions">
+      <button type="button" className="quiet" disabled={busy} onClick={() => void act(() => cancelWorkflowRunHandoff(approvalId))}>{tr('End workflow')}</button>
+    </div>}
+    {run.mode === 'DELEGATED' && open && <div className="workflow-run-choice">
+      <p>{tr('Revocation stops future delegated steps. Submitted transactions keep being observed.')}</p>
+      <button type="button" className="quiet" disabled={busy} onClick={() => void act(() => cancelWorkflowRunHandoff(approvalId))}>{tr('Revoke workflow authorization')}</button>
+    </div>}
+    {run.state === 'ATTENTION'  && <p role="status">{tr('A submitted step has no final outcome yet. FloFi keeps observing it and never resubmits it.')}</p>}
     {run.state === 'COMPLETED' && <p role="status"><strong>{tr('Every step reconciled.')}</strong> {tr('Your conversation can show the result.')}</p>}
     <p className="muted workflow-run-note">{tr(plan.notes[0] ?? '')}</p>
   </section>;

@@ -10,8 +10,8 @@ export const ETHEREUM_TOKEN_LIST_LOGOS: AssetLogoRule = Object.freeze({ kind: 'P
     'https://raw.githubusercontent.com/trustwallet/assets/', 'https://s2.coinmarketcap.com/static/img/coins/']), cacheBusterQuery: true });
 export const ETHEREUM_TOKEN_LIST_NETWORK: TokenListNetwork = Object.freeze({ pinned: ETHEREUM_BASE_ASSETS,
   featured: Object.freeze(['USDC', 'WETH']), logos: ETHEREUM_TOKEN_LIST_LOGOS, errorPrefix: 'ETHEREUM_TOKEN_LIST', symbolPattern: CATALOG_ASSET_SYMBOL,
-  // The current source names both Litentry and Lighter LIT. Neither ambiguous identity is eligible for symbol-based authoring.
-  excludedAmbiguousSymbols: Object.freeze(['LIT']),
+  // Reviewed 2026-10-26: the official source has two identities each for LIT, LCX and U. Exclude both twins; never choose by ticker.
+  excludedAmbiguousSymbols: Object.freeze(['LIT', 'LCX', 'U']),
   // Verified decimals() = 8, source declares 18 at block 26208660. Never silently rescale FLUX.
   excludedAddresses: Object.freeze(['0x720cd16b011b987da3518fbf38c3071d4f0d1495']) });
 export const ethereumTokenListProvider = uniswapTokenListProvider(ETHEREUM_TOKEN_LIST_NETWORK);

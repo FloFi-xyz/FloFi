@@ -6,6 +6,8 @@ import {isLendingComposition,workflowDependencyOrder,type SemanticWorkflow} from
 import { isBoundComposition } from '@defi-workflow-engine/action-registry';
 import type { Command } from './commands';
 import { directions, type Direction } from './swap-authoring';
+import { universalBridgeDetails, defaultUniversalInputAsset, universalKeyOfCanvasLabel } from './universal-bridge-authoring';
+import { universalCanvasNetworks } from './canvas-action-setup';
 import { routerDetails } from './router-authoring';
 import type { UniswapLiquidityInput } from './uniswap-liquidity-authoring';
 import { defaultPoolRange, validCryptoSelection, canSelectCryptoAssets, cryptoInputOf, type CryptoSelection, type CryptoSelections } from './crypto-action-picker';
@@ -133,18 +135,21 @@ export function editorHistoryReducer(state: EditorHistory, action: HistoryAction
     }), past: [...state.past, snapshot(state)], future: [] };
   }
   if (action.type === 'EDIT_BRIDGE_NETWORKS') {
-    if (!Object.keys(action.patch).length || Object.keys(action.patch).some(key => key !== 'source' && key !== 'destination') ||
+    if (!Object.keys(action.patch).length || Object.keys(action.patch).some(key => !['source', 'destination', 'inputAsset', 'outputAsset'].includes(key)) ||
       (action.patch.source !== undefined && !CANVAS_BRIDGE_NETWORK_OPTIONS.source.includes(action.patch.source)) ||
       (action.patch.destination !== undefined && !CANVAS_BRIDGE_NETWORK_OPTIONS.destination.includes(action.patch.destination))) return state;
     const setup = state.actionSetup?.id === action.id && state.actionSetup.action === 'bridge' ? state.actionSetup : null;
-    const node = state.editor.workflow.nodes.find(node => node.nodeId === action.id), router = node ? routerDetails(node) : null;
-    if (!setup && (!node || !router || !canEditCanvasAmount(node, action.context, state.editor.workflow))) return state;
-    const current = setup ? bridgeSetupNetworks(setup) : state.bridgeNetworkInputs[action.id] ?? router!;
-    const networks = { source: action.patch.source ?? current.source, destination: action.patch.destination ?? current.destination };
-    if (networks.source === current.source && networks.destination === current.destination) return state;
+    const node = state.editor.workflow.nodes.find(node => node.nodeId === action.id), router = node ? routerDetails(node) : null, universal = node ? universalBridgeDetails(node) : null;
+    if (!setup && (!node || (!router && !universal) || !canEditCanvasAmount(node, action.context, state.editor.workflow))) return state;
+    const current: CanvasBridgeNetworks = setup ? bridgeSetupNetworks(setup) : state.bridgeNetworkInputs[action.id] ?? (universal ? universalCanvasNetworks(universal) : router!);
+    const networks: CanvasBridgeNetworks = { source: current.source, destination: current.destination, ...current.inputAsset ? { inputAsset: current.inputAsset } : {}, ...current.outputAsset ? { outputAsset: current.outputAsset } : {}, ...action.patch };
+    // Changing one network resets only that side's asset to its network default. Never carry an address to another chain.
+    if (current.inputAsset && networks.source !== current.source && universalKeyOfCanvasLabel(networks.source)) networks.inputAsset = defaultUniversalInputAsset(universalKeyOfCanvasLabel(networks.source)!);
+    if (current.outputAsset && networks.destination !== current.destination && universalKeyOfCanvasLabel(networks.destination)) networks.outputAsset = defaultUniversalInputAsset(universalKeyOfCanvasLabel(networks.destination)!);
+    if (networks.source === current.source && networks.destination === current.destination && networks.inputAsset === current.inputAsset && networks.outputAsset === current.outputAsset) return state;
     return { ...state, ...(setup ? { actionSetup: { ...setup, networks } } : {
       bridgeNetworkInputs: { ...state.bridgeNetworkInputs, [action.id]: networks },
-      amountInputs: { ...state.amountInputs, [action.id]: state.amountInputs[action.id] ?? router!.amount },
+      amountInputs: { ...state.amountInputs, [action.id]: state.amountInputs[action.id] ?? (router ?? universal)!.amount },
     }), past: [...state.past, snapshot(state)], future: [] };
   }
   if (action.type === 'EDIT_SWAP_SETUP_DIRECTION') {

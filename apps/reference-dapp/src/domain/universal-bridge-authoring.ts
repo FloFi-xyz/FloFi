@@ -13,6 +13,8 @@ import { SOLANA_MAINNET_TOKENS } from '@defi-workflow-engine/action-registry';
 import { createUniversalBridgeNode, isSolanaPublicKey, isUniversalBridgeNode, readUniversalBridgeNode, UNIVERSAL_NETWORKS, universalNetworkOfChain, type UniversalAssetRef,
   type UniversalBridgeFields, type UniversalNetworkKey, type UniversalRouteSelection, type UniversalRoutingProvider, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { authoringAssetSymbol, featuredNetworkSymbols, resolveNetworkAsset } from './asset-catalogs';
+import { solanaDisplayAsset } from './solana-asset-catalog';
+import { routerTokensOf } from './router-authoring';
 import { networkIdentity } from './network-registry';
 import { formatTokenAmount, parseTokenAmount } from './jupiter-authoring';
 import { DEFAULT_SLIPPAGE } from './slippage-policy';
@@ -62,7 +64,7 @@ export function resolveUniversalAsset(key: UniversalNetworkKey, reference: strin
     const address = explicit[1]!, decimals = Number(explicit[2]);
     if (network.ecosystem === 'EVM' ? !/^0x[0-9a-fA-F]{40}$/.test(address) : !isSolanaPublicKey(address)) return fail('UNIVERSAL_ASSET_ADDRESS_INVALID');
     const known = network.ecosystem === 'EVM' ? resolveNetworkAsset(network.chain, { address: address.toLowerCase() })
-      : Object.values(SOLANA_MAINNET_TOKENS).find(t => t.mint === address) ?? null;
+      : Object.values(SOLANA_MAINNET_TOKENS).find(t => t.mint === address) ?? solanaDisplayAsset(address) ?? null;
     if (known && known.decimals !== decimals) return fail('UNIVERSAL_ASSET_DECIMALS_MISMATCH');
     return { asset: { kind: 'TOKEN', address: network.ecosystem === 'EVM' ? address.toLowerCase() : address, decimals }, symbol: known?.symbol ?? 'TOKEN' };
   }
@@ -120,7 +122,7 @@ export type UniversalBridgeDetails = { readonly source: UniversalNetworkKey; rea
 const symbolOf = (key: UniversalNetworkKey, asset: UniversalAssetRef) => {
   const network = UNIVERSAL_NETWORKS[key];
   if (asset.kind === 'NATIVE') return network.native.symbol;
-  if (network.ecosystem === 'SOLANA') return Object.values(SOLANA_MAINNET_TOKENS).find(t => t.mint === asset.address)?.symbol ?? `${asset.address}@${asset.decimals}`;
+  if (network.ecosystem === 'SOLANA') return Object.values(SOLANA_MAINNET_TOKENS).find(t => t.mint === asset.address)?.symbol ?? solanaDisplayAsset(asset.address)?.symbol ?? `${asset.address}@${asset.decimals}`;
   return resolveNetworkAsset(network.chain, { address: asset.address })?.symbol ?? `${asset.address}@${asset.decimals}`;
 };
 const routingOf = (fields: UniversalBridgeFields): UniversalBridgeRouting =>
@@ -138,8 +140,8 @@ export function universalBridgeDetails(node: SemanticWorkflow['nodes'][number] |
     recipient: fields.recipient === 'CONNECTED_OWNER' || fields.recipient === 'CONNECTED_DESTINATION_WALLET' ? '' : fields.recipient, slippage: String(fields.slippageBps),
     routing: routingOf(fields), fields };
 }
-export const universalInputOf = (d: UniversalBridgeDetails): UniversalBridgeInput => ({ source: d.source, destination: d.destination, inputAsset: d.inputSymbol,
-  outputAsset: d.outputSymbol, amount: d.amount, recipient: d.recipient, slippage: d.slippage, routing: d.routing });
+export const universalInputOf = (d: UniversalBridgeDetails): UniversalBridgeInput => ({ source: d.source, destination: d.destination, inputAsset: d.fields.inputAsset.kind === 'NATIVE' ? d.inputSymbol : `${d.fields.inputAsset.address}@${d.inputDecimals}`,
+  outputAsset: d.fields.outputAsset.kind === 'NATIVE' ? d.outputSymbol : `${d.fields.outputAsset.address}@${d.outputDecimals}`, amount: d.amount, recipient: d.recipient, slippage: d.slippage, routing: d.routing });
 /** The universal bridge node of a workflow, if it is one. */
 export const universalBridgeOfWorkflow = (workflow: SemanticWorkflow) => workflow.nodes.length === 1 ? universalBridgeDetails(workflow.nodes[0]!) : null;
 
@@ -148,15 +150,21 @@ export const UNIVERSAL_CANVAS_LABEL: Readonly<Record<UniversalNetworkKey, string
   robinhood: 'Robinhood Chain' });
 export const universalKeyOfCanvasLabel = (label: string): UniversalNetworkKey | null =>
   (Object.keys(UNIVERSAL_CANVAS_LABEL) as UniversalNetworkKey[]).find(key => UNIVERSAL_CANVAS_LABEL[key] === label) ?? null;
-/** A Canvas pair the certified Router does not serve but the universal router does (today: Solana in or out of any EVM mainnet), or null. */
-export function universalCanvasPair(networks: { readonly source: string; readonly destination: string }): { source: UniversalNetworkKey; destination: UniversalNetworkKey } | null {
+/** A Canvas pair the certified Router does not serve but the universal router does (network or asset pair outside its fixed certified routes), or null. */
+export function universalCanvasPair(networks: { readonly source: string; readonly destination: string; readonly inputAsset?: string; readonly outputAsset?: string }): { source: UniversalNetworkKey; destination: UniversalNetworkKey } | null {
   const source = universalKeyOfCanvasLabel(networks.source), destination = universalKeyOfCanvasLabel(networks.destination);
-  return source && destination && source !== destination && (source === 'solana' || destination === 'solana') ? { source, destination } : null;
+  if (!source || !destination || source === destination) return null;
+  const legacy = routerTokensOf(networks);
+  const same = (key: UniversalNetworkKey, reference: string | undefined, symbol: string) => {
+    if (reference === undefined) return true;
+    try { return JSON.stringify(resolveUniversalAsset(key, reference).asset) === JSON.stringify(resolveUniversalAsset(key, symbol).asset); } catch { return false; }
+  };
+  return legacy && same(source, networks.inputAsset, legacy.token) && same(destination, networks.outputAsset, legacy.destinationToken) ? null : { source, destination };
 }
 /** The universal bridge a new Canvas Bridge card authors for such a pair: the source network's dollar stablecoin and the stated default destination asset. */
-export function universalCanvasInput(pair: { source: UniversalNetworkKey; destination: UniversalNetworkKey }, amount: string): UniversalBridgeInput {
-  const inputAsset = pair.source === 'robinhood' ? 'USDG' : 'USDC';
-  return { source: pair.source, destination: pair.destination, inputAsset, outputAsset: defaultUniversalOutput(pair.source, inputAsset, pair.destination), amount, recipient: '',
+export function universalCanvasInput(pair: { source: UniversalNetworkKey; destination: UniversalNetworkKey }, amount: string, assets: { inputAsset?: string; outputAsset?: string } = {}): UniversalBridgeInput {
+  const inputAsset = assets.inputAsset ?? defaultUniversalInputAsset(pair.source);
+  return { source: pair.source, destination: pair.destination, inputAsset, outputAsset: assets.outputAsset ?? defaultUniversalOutput(pair.source, inputAsset, pair.destination), amount, recipient: '',
     slippage: UNIVERSAL_BRIDGE_DEFAULT_SLIPPAGE, routing: 'BEST' };
 }
 

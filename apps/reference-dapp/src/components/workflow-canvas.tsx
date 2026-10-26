@@ -33,8 +33,8 @@ import { DarkSpotlight } from './dark-spotlight';
 import { CANVAS_GESTURES, CanvasNavigator } from './canvas-navigator';
 import { WorkflowEditReview, workflowEditProposalVisible } from './workflow-edit-review';
 import { ComposerCard, supplyReviewFormId, poolReviewFormId, poolProposalTarget, type CardRecipient, type ComposerCardData } from './composer-card';
-import { canEditCanvasAmount, canvasAmountCommand, setupSummary, bridgePairLabel, bridgeSetupNetworks, type CanvasBridgeNetworks } from '../domain/canvas-action-setup';
-import { universalCanvasPair } from '../domain/universal-bridge-authoring';
+import { canEditCanvasAmount, canvasAmountCommand, setupSummary, bridgePairLabel, bridgeSetupNetworks, type CanvasBridgeNetworks, universalCanvasNetworks } from '../domain/canvas-action-setup';
+import { universalCanvasPair, universalKeyOfCanvasLabel, universalFeaturedAssets, universalBridgeDetails, resolveUniversalAsset, defaultUniversalInputAsset, UNIVERSAL_CANVAS_LABEL } from '../domain/universal-bridge-authoring';
 import { ActionIcon } from './action-icon';
 import { ensureNetworkCatalog, useNetworkCatalog } from '../state/asset-catalog-store';
 import { CATALOG_NETWORK_IDENTITIES } from '../domain/network-registry';
@@ -487,15 +487,15 @@ function BuildCanvas({ environment, selectedId, select, openSettings, workflowNa
     };
     // BUILD-RH-002: an environment may offer several routes (mainnet: Base → Arbitrum One, Base/Arbitrum ⇄ Robinhood Chain); the destination
     // list follows the chosen source, and choosing a source keeps the destination only when it still forms a supported pair.
-    // BUILD-CROSSCHAIN-UNIVERSAL-001: a new Bridge card on mainnet also offers Solana in and out (a universal bridge, any asset in the inspector);
-    // an authored certified Router card keeps its own pairs. Solana Devnet still has no Bridge pair.
+    // All five mainnets can be authored independently. A canonical legacy adapter changes only through an explicit Review/Apply.
     const bridgeSelection = (id: string, networks: CanvasBridgeNetworks, universalAllowed = false) => {
       const network = environment === 'mainnet' || environment === 'testnet' ? environment : null;
-      const universal = universalAllowed && network === 'mainnet', solana = JUPITER_SOLANA_MAINNET.network as CanvasBridgeNetworks['source'];
-      const fromSolana = universal && (networks.source as string) === solana;
-      const choices = network ? routerChainChoices(network, fromSolana ? undefined : networks.source) : null;
-      const sources = universal ? [...choices?.sources ?? [], solana] : choices?.sources ?? [];
-      const destinations = (fromSolana ? [...new Set(routerChainChoices('mainnet').destinations)] : universal ? [...choices?.destinations ?? [], solana] : choices?.destinations ?? []) as CanvasBridgeNetworks['destination'][];
+      const universal = universalAllowed && network === 'mainnet';
+      // Keep the established EVM fallback (Base first) when a source change invalidates its destination. Solana remains independently selectable.
+      const mainnets = [...Object.values(UNIVERSAL_CANVAS_LABEL).filter(label => label !== 'Solana'), 'Solana'];
+      const choices = network ? routerChainChoices(network, networks.source) : null;
+      const sources = universal ? mainnets : choices?.sources ?? [];
+      const destinations = (universal ? mainnets.filter(label => label !== networks.source) : choices?.destinations ?? []) as CanvasBridgeNetworks['destination'][];
       const routed = routerNetworkOfInput(networks);
       return {
         source: sources, destination: destinations,
@@ -506,9 +506,9 @@ function BuildCanvas({ environment, selectedId, select, openSettings, workflowNa
           if (side === 'source') {
             const source = sources.find(candidate => candidate === selected);
             if (!source) return;
-            const next = source === solana ? [...new Set(routerChainChoices('mainnet').destinations)] as CanvasBridgeNetworks['destination'][]
-              : [...routerChainChoices(network, source).destinations, ...universal ? [solana as CanvasBridgeNetworks['destination']] : []];
-            editBridgeNetworks(id, { source, ...next.includes(networks.destination) && networks.destination !== (source as string) ? {} : { destination: next[0]! } });
+            const next = universal ? mainnets.filter(label => label !== source) as CanvasBridgeNetworks['destination'][]
+              : routerChainChoices(network, source).destinations;
+            editBridgeNetworks(id, { source: source as CanvasBridgeNetworks['source'], ...next.includes(networks.destination) && networks.destination !== (source as string) ? {} : { destination: next[0]! } });
           } else {
             const destination = destinations.find(candidate => candidate === selected);
             if (destination) editBridgeNetworks(id, { destination });
@@ -516,6 +516,20 @@ function BuildCanvas({ environment, selectedId, select, openSettings, workflowNa
         },
       };
     };
+    const bridgeTokens = (id: string, networks: CanvasBridgeNetworks) => ({
+      references: { source: networks.inputAsset, destination: networks.outputAsset },
+      source: universalKeyOfCanvasLabel(networks.source) ? universalFeaturedAssets(universalKeyOfCanvasLabel(networks.source)!) : [routerTokensOf(networks)?.token ?? 'USDC'],
+      destination: universalKeyOfCanvasLabel(networks.destination) ? universalFeaturedAssets(universalKeyOfCanvasLabel(networks.destination)!) : [routerTokensOf(networks)?.destinationToken ?? 'USDC'],
+      onSelect: (side: 'source' | 'destination', reference: string) => {
+        const key = universalKeyOfCanvasLabel(side === 'source' ? networks.source : networks.destination);
+        if (!key) return;
+        try { resolveUniversalAsset(key, reference); } catch { return; }
+        // Retain the other side independently, including a different output asset on the same network pair.
+        editBridgeNetworks(id, { inputAsset: networks.inputAsset ?? routerTokensOf(networks)?.token ?? defaultUniversalInputAsset(universalKeyOfCanvasLabel(networks.source)!),
+          outputAsset: networks.outputAsset ?? routerTokensOf(networks)?.destinationToken ?? defaultUniversalInputAsset(universalKeyOfCanvasLabel(networks.destination)!),
+          [side === 'source' ? 'inputAsset' : 'outputAsset']: reference });
+      },
+    });
     // UX-001: a Send card's "To" field drafts the transfer's one canonical recipient; the network's transfer profile decides validity.
     const recipientField = (id: string, network: string | undefined, canonical: string | null): CardRecipient | undefined => {
       const policy = network ? recipientPolicy(network) : null;
@@ -557,9 +571,14 @@ function BuildCanvas({ environment, selectedId, select, openSettings, workflowNa
       ...(routerDetails(node) ? {
         summary: { ...composerSummary(workflow, node, context), chain: `${(bridgeNetworkInputs[node.nodeId] ?? routerDetails(node)!).source} → ${(bridgeNetworkInputs[node.nodeId] ?? routerDetails(node)!).destination}`,
           bridgePair: bridgePairLabel(bridgeNetworkInputs[node.nodeId] ?? routerDetails(node)!),
-          amount: `${composerSummary(workflow, node, context).amount.split(' ')[0]} ${routerTokensOf(bridgeNetworkInputs[node.nodeId] ?? routerDetails(node)!)?.token ?? routerDetails(node)!.token}` },
-        ...(canEditCanvasAmount(node, context, workflow) ? { networkSelection: bridgeSelection(node.nodeId, bridgeNetworkInputs[node.nodeId] ?? routerDetails(node)!) } : {}),
+          amount: `${composerSummary(workflow, node, context).amount.split(' ')[0]} ${bridgePairLabel(bridgeNetworkInputs[node.nodeId] ?? routerDetails(node)!).split(' → ')[0]}` },
+        ...(canEditCanvasAmount(node, context, workflow) ? { networkSelection: bridgeSelection(node.nodeId, bridgeNetworkInputs[node.nodeId] ?? routerDetails(node)!, true), tokenSelection: bridgeTokens(node.nodeId, bridgeNetworkInputs[node.nodeId] ?? routerDetails(node)!) } : {}),
       } : {}),
+      ...(universalBridgeDetails(node) ? (() => {
+        const networks = bridgeNetworkInputs[node.nodeId] ?? universalCanvasNetworks(universalBridgeDetails(node)!);
+        return { summary: { ...composerSummary(workflow, node, context), chain: `${networks.source} → ${networks.destination}`, bridgePair: bridgePairLabel(networks), amount: `${amountInputs[node.nodeId] ?? universalBridgeDetails(node)!.amount} ${bridgePairLabel(networks).split(' → ')[0]}` },
+          networkSelection: bridgeSelection(node.nodeId, networks, true), tokenSelection: bridgeTokens(node.nodeId, networks) };
+      })() : {}),
       ...(composerSummary(workflow, node, context).action === 'Pool / Liquidity' ? { poolProposal: {
         nodeId: node.nodeId, formId: poolReviewFormId(node.nodeId), canReview: selectedId === node.nodeId,
         canApply: Boolean((!cryptoSelectionOf(node) || actionSelection(node.nodeId, cryptoSelections[node.nodeId] ?? cryptoSelectionOf(node)!).valid) && pending?.valid && poolProposalTarget(pending.command) === node.nodeId && pending.command.baseRevision === workflow.revision),
@@ -594,7 +613,7 @@ function BuildCanvas({ environment, selectedId, select, openSettings, workflowNa
         summary: setupSummary(actionSetup, context),
         ...(actionSetup.action === 'swap' && actionSetup.stocks && actionSetup.cryptoSelection ? { stocks: stocksData(actionSetup.id, actionSetup.cryptoSelection) } : {}),
         ...(actionSetup.action !== 'bridge' ? { actionSelection: actionSelection(actionSetup.id, actionSetup.cryptoSelection ?? selectCryptoNetwork(actionSetup.action as CryptoAction, actionSetup.action === 'swap' ? context.assets.USDC.asset.chainId === 'eip155:84532' ? 'Base Sepolia' : 'Base' : 'Base Sepolia')) } : {}),
-        ...(actionSetup.action === 'bridge' ? { networkSelection: bridgeSelection(actionSetup.id, bridgeSetupNetworks(actionSetup), true) } : {}),
+        ...(actionSetup.action === 'bridge' ? { networkSelection: bridgeSelection(actionSetup.id, bridgeSetupNetworks(actionSetup), true), tokenSelection: bridgeTokens(actionSetup.id, bridgeSetupNetworks(actionSetup)) } : {}),
         ...(actionSetup.action === 'swap' ? { tokenSelection: {
           source: directions.map(direction => inputSymbol(direction)), destination: directions.map(direction => outputSymbol(direction)),
           onSelect: (side: 'source' | 'destination', symbol: string) => {

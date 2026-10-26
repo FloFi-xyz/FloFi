@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
+import { routerDetails } from '../domain/router-authoring';
 import { createContext, useCallback, useContext, useEffect, useReducer, useRef, useState, useMemo, type Dispatch, type ReactNode } from 'react';
 import { BaseObservationError, createReviewContext, lintWorkflow, reviewContextForChain, type ReviewContext, type ReviewResult } from '@defi-workflow-engine/reference-linter';
 import { editorReducer, type EditorState } from '../domain/editor';
@@ -253,6 +254,8 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
       const command = canvasAmountCommand(state, history.actionSetup, history.amountInputs, id, context, history.bridgeNetworkInputs, history.cryptoSelections, history.recipientInputs);
       const amount = actionReviewValue(history.actionSetup, id, history.amountInputs[id], history.bridgeNetworkInputs[id], history.cryptoSelections[id], history.recipientInputs[id]);
       if (amount === undefined) return null;
+      // Changing an existing Router adapter needs a visible proposal; ordinary amount edits retain direct Enter-to-apply behavior.
+      if (command.type === 'SET_UNIVERSAL_BRIDGE' && state.workflow.nodes.some(node => node.nodeId === command.nodeId && routerDetails(node))) return reviewCanvasAmount(id);
       // The history guard re-checks that the draft is still exactly this one, so a repeated commit of the same draft is a no-op.
       dispatchHistory({ type: 'COMMAND', command, context, authoringId: id, authoringAmount: amount });
       setPending(current => current?.authoringId === id ? null : current);
