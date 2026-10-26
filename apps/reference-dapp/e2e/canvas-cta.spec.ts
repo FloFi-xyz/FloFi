@@ -7,7 +7,7 @@ test('Build CTA floats inside the wider canvas without colliding with existing c
   await installSupplyWallet(page);
   await page.goto('/app');
   // Supply binds the connected owner as beneficiary: wait for the wallet's passive reconnect before adding it.
-  await expect(page.locator('.build009-wallet-info')).toHaveAttribute('title', new RegExp(`^${SUPPLY_OWNER}$`, 'i'));
+  await expect(page.locator('.build009-wallet-info')).toHaveAttribute('title', new RegExp(SUPPLY_OWNER, 'i'));
   await page.getByRole('button', { name: 'Add supply', exact: true }).click();
   const canvas = page.getByRole('region', { name: 'Workflow canvas', exact: true });
   const graph = page.getByRole('region', { name: 'Workflow graph', exact: true });
@@ -72,7 +72,7 @@ test('Canvas simulation runs the shared Supply lifecycle with one guarded Review
   await installSupplyWallet(page);
   await page.goto('/app');
   // Supply binds the connected owner as beneficiary: wait for the wallet's passive reconnect before adding it.
-  await expect(page.locator('.build009-wallet-info')).toHaveAttribute('title', new RegExp(`^${SUPPLY_OWNER}$`, 'i'));
+  await expect(page.locator('.build009-wallet-info')).toHaveAttribute('title', new RegExp(SUPPLY_OWNER, 'i'));
   await page.getByRole('button', { name: 'Add supply', exact: true }).click();
   await configureCanvasAction(page, '1');
   await page.getByRole('region', { name: 'Workflow graph', exact: true }).getByRole('button', { name: 'Simulate workflow', exact: true }).click();

@@ -148,7 +148,8 @@ export const signingSurface = (page: Page) => page.getByRole('main', { name: 'Au
  * (no Credentials step) and only asks that wallet to sign FloFi's sign-in message.
  */
 export async function proveConnectedEvmWallet(page: Page, region: Locator, account: string): Promise<void> {
-  await expect(page.locator('.build009-wallet-info')).toHaveAttribute('title', new RegExp(`^${account}$`, 'i'));
+  // BUILD-FLOFI-PRODUCT-UX-001: compact chrome keeps the address (and chain) in the title tooltip.
+  await expect(page.locator('.build009-wallet-info')).toHaveAttribute('title', new RegExp(account, 'i'));
   await region.getByRole('button', { name: 'Connect wallet and prove ownership' }).click();
   await expect(page.locator('dialog.wallet-selector[open]')).toHaveCount(0);
 }

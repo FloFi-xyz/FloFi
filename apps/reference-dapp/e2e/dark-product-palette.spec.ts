@@ -101,7 +101,7 @@ test('graphite palette follows the real lifecycle shell, settings and workspace 
 test('all Dark authoring cards and pickers share graphite surfaces with intact asset branding', async ({ page }) => {
   await installSupplyWallet(page, { chain: '0x2105' }); await page.goto('/app'); await dark(page);
   // BUILD-FLOFI-MAINNET-PRODUCT-001: no header network selector; the wallet badge names the wallet's network.
-  await expect(page.locator('.build009-wallet-info')).toContainText('Base (8453)');
+  await expect(page.locator('.build009-wallet-info')).toHaveAttribute('title', /Base \(8453\)/);
   for (const action of ['swap', 'bridge', 'pool', 'supply', 'borrow', 'repay', 'withdraw', 'Stocks']) {
     await page.goto('/app');
     await page.getByRole('button', { name: action === 'Stocks' ? action : `Add ${action}`, exact: true }).click();

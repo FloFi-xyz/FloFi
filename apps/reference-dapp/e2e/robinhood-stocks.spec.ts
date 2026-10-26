@@ -82,7 +82,7 @@ test('on mainnet the existing Bridge card offers the Robinhood Chain routes and 
   await installSupplyWallet(page, { chain: '0x2105' });
   await page.goto('/app');
   // BUILD-FLOFI-MAINNET-PRODUCT-001: no environment selector; the connected wallet's own network is shown.
-  await expect(page.locator('.build009-wallet-info')).toContainText('· Base (8453)');
+  await expect(page.locator('.build009-wallet-info')).toHaveAttribute('title', /Base \(8453\)/);
   await page.getByRole('button', { name: 'Add bridge', exact: true }).click();
   const card = cards(page).filter({ hasText: 'Router' });
   const source = card.getByRole('button', { name: 'Configure source asset', exact: true });

@@ -139,7 +139,7 @@ test('an answer that arrives after a workflow change is discarded', async ({ pag
   await installSupplyWallet(page);
   await page.goto('/app');
   // The Canvas Supply below binds the connected owner as beneficiary: wait for the wallet's passive reconnect first.
-  await expect(page.locator('.build009-wallet-info')).toHaveAttribute('title', new RegExp(`^${SUPPLY_OWNER}$`, 'i'));
+  await expect(page.locator('.build009-wallet-info')).toHaveAttribute('title', new RegExp(SUPPLY_OWNER, 'i'));
   await ask(page, 'Put 2 USDC into Aave on Base Sepolia');
   await expect(conversation(page)).toContainText('Interpreting your message…');
   await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeDisabled();

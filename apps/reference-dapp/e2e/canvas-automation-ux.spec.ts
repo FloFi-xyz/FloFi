@@ -8,7 +8,7 @@ for (const action of ['swap', 'bridge', 'supply', 'borrow', 'repay', 'withdraw',
   await installSupplyWallet(page, { switching: 'KNOWN' }); await page.goto('/app');
   // Supply/Borrow/Repay and Supply → Borrow → Swap bind the connected owner as beneficiary: a click before the wallet's passive
   // reconnect resolves is refused ("Connect your wallet…") and creates no proposal, so wait for the connected wallet first.
-  await expect(page.locator('.build009-wallet-info')).toHaveAttribute('title', new RegExp(`^${SUPPLY_OWNER}$`, 'i'));
+  await expect(page.locator('.build009-wallet-info')).toHaveAttribute('title', new RegExp(SUPPLY_OWNER, 'i'));
   await expect(page.getByText('Advanced action setup', { exact: true })).toHaveCount(0);
   // UX-005: the canonical `transfer` action is presented as Send.
   await page.getByRole('button', { name: action === 'lending' ? 'Add Supply → Borrow → Swap' : action === 'transfer' ? 'Add send' : `Add ${action}`, exact: true }).click();

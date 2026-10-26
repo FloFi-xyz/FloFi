@@ -189,7 +189,7 @@ test('Save → Your workflows → exact Canvas restoration; grouped executions, 
   library = await libraryWorkspace(page, 'PT');
   await expect(library.getByRole('button', { name, exact: true })).toHaveCount(0);
   // The proof reuses the account the wallet now exposes (B), never A's earlier session; no selector opens.
-  await expect(page.locator('.build009-wallet-info')).toHaveAttribute('title', new RegExp(`^${B.address}$`, 'i'));
+  await expect(page.locator('.build009-wallet-info')).toHaveAttribute('title', new RegExp(B.address, 'i'));
   await library.getByRole('button', { name: 'Ligar carteira e verificar titularidade', exact: true }).click();
   await expect(page.locator('dialog.wallet-selector[open]')).toHaveCount(0);
   await expect(library).toContainText('Ainda não há workflows.');
