@@ -85,7 +85,7 @@ test('header and Bridge use the actual EVM wallet chain, update live, and keep u
   await amount.press('Enter');
   await expect(card.getByRole('alert')).toContainText('Choose matching networks.');
   await expect(revision).toHaveAttribute('data-workflow-revision', '0');
-  await expect(page.getByRole('group', { name: 'Wallet connection' })).toContainText('Other chain (0x89)');
+  await expect(page.getByRole('group', { name: 'Wallet connection' }).locator('.wallet-connection')).toHaveAttribute('title', /Other chain \(0x89\)/);
   await card.getByRole('button', { name: 'Configure source asset', exact: true }).click();
   const unknown = page.getByRole('region', { name: 'Source network picker', exact: true });
   await expect(unknown.locator('button:enabled')).toHaveCount(0);
