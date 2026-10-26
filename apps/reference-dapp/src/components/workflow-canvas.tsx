@@ -491,9 +491,11 @@ function BuildCanvas({ environment, selectedId, select, openSettings, workflowNa
     const bridgeSelection = (id: string, networks: CanvasBridgeNetworks, universalAllowed = false) => {
       const network = environment === 'mainnet' || environment === 'testnet' ? environment : null;
       const universal = universalAllowed && network === 'mainnet';
+      // Keep the established EVM fallback (Base first) when a source change invalidates its destination. Solana remains independently selectable.
+      const mainnets = [...Object.values(UNIVERSAL_CANVAS_LABEL).filter(label => label !== 'Solana'), 'Solana'];
       const choices = network ? routerChainChoices(network, networks.source) : null;
-      const sources = universal ? Object.values(UNIVERSAL_CANVAS_LABEL) : choices?.sources ?? [];
-      const destinations = (universal ? Object.values(UNIVERSAL_CANVAS_LABEL).filter(label => label !== networks.source) : choices?.destinations ?? []) as CanvasBridgeNetworks['destination'][];
+      const sources = universal ? mainnets : choices?.sources ?? [];
+      const destinations = (universal ? mainnets.filter(label => label !== networks.source) : choices?.destinations ?? []) as CanvasBridgeNetworks['destination'][];
       const routed = routerNetworkOfInput(networks);
       return {
         source: sources, destination: destinations,
@@ -504,7 +506,7 @@ function BuildCanvas({ environment, selectedId, select, openSettings, workflowNa
           if (side === 'source') {
             const source = sources.find(candidate => candidate === selected);
             if (!source) return;
-            const next = universal ? Object.values(UNIVERSAL_CANVAS_LABEL).filter(label => label !== source) as CanvasBridgeNetworks['destination'][]
+            const next = universal ? mainnets.filter(label => label !== source) as CanvasBridgeNetworks['destination'][]
               : routerChainChoices(network, source).destinations;
             editBridgeNetworks(id, { source: source as CanvasBridgeNetworks['source'], ...next.includes(networks.destination) && networks.destination !== (source as string) ? {} : { destination: next[0]! } });
           } else {

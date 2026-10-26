@@ -206,18 +206,24 @@ test.describe('UX-007 fast live quote feedback', () => {
   for (const network of ['Arbitrum One', 'Base'] as const) test(`${network} Swap: calculating at once, one coalesced request, latest amount wins, no Simulate`, async ({ page, networkGuard }) => {
     // Request 2 (amount 10) is answered after request 3 (amount 1000): its late, different answer must never be shown.
     const seen = await replayQuotes(page, index => [{ delayMs: 200, expected: '0.04' }, { delayMs: 700, expected: '9.99' }, { delayMs: 50, expected: '0.4' }][index] ?? { delayMs: 50, expected: '0.4' });
+    await page.clock.install();
     await open(page);
     await page.getByRole('button', { name: 'Add swap', exact: true }).click();
     const card = cards(page).first(); await chooseNetwork(page, card, network);
     const input = card.getByRole('textbox', { name: 'Source amount (USDC)', exact: true });
     const destination = card.getByRole('group', { name: 'Destination amount (unquoted placeholder)', exact: true });
+    // Slow runners must not turn the typing sequence into real pauses beyond the debounce window.
+    await page.clock.pauseAt(await page.evaluate(() => Date.now()) + 1000);
     const t0 = Date.now();
     await input.pressSequentially('100', { delay: 40 });
     await expect(destination).toContainText('Calculating…'); const calculating = Date.now() - t0;
     await expect(card.locator('.composer-quote-note')).toContainText('Calculating estimate…');
+    expect(seen).toHaveLength(0);
+    await page.clock.runFor(200);
+    await page.clock.resume();
     await expect(destination).toContainText('0.04'); const shown = Date.now() - t0;
     expect(seen.map(amountOf)).toEqual(['100000000']); const requested = seen[0]!.at - t0;
-    test.info().annotations.push({ type: 'mocked timing (ms)', description: `${network}: calculating ${calculating}, request ${requested}, estimate ${shown} (200 ms debounce + 200 ms replay delay)` });
+    test.info().annotations.push({ type: 'mocked timing (ms)', description: `${network}: calculating ${calculating}, request ${requested}, estimate ${shown} (controlled 200 ms debounce; 200 ms replay delay)` });
     await expect(card.locator('.composer-quote-note')).toContainText('Approximate · Uniswap V3 · Simulate before review');
     // A newer amount supersedes a slower older answer; the older one never overwrites it.
     await input.fill('10'); await expect(destination).toContainText('Calculating…');

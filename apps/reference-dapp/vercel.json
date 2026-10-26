@@ -5,6 +5,7 @@
   "buildCommand": "sh ../../deploy/vercel/build.sh",
   "git": {
     "deploymentEnabled": {
+      "codex/fix-bridge-catalog-workflow-cancel-001": false,
       "claude/build-solana-transfer-ux-001": false,
       "security/mcp-link-integrity-p0": false,
       "fix/chat-first-approval-ux-20261025": false

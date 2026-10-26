@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { hashArtifactBytes, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { requestBuildEstimate, type BuildEstimate, type BuildEstimateResult } from '../domain/build-estimate';
 
@@ -27,9 +27,12 @@ function recalled(scope: string): BuildEstimate | null {
 export function clearLiveQuoteCache(): void { answered.clear(); }
 
 export function useLiveQuote(workflow: SemanticWorkflow | undefined, nodeId: string, owner?: string | null): LiveQuote {
-  const key = workflow ? hashArtifactBytes('semantic-workflow', new TextEncoder().encode(JSON.stringify(workflow))) : null;
+  const serialized = workflow ? JSON.stringify(workflow) : null;
+  // Catalog/layout renders may recreate the preview object. Only changed snapshot contents invalidate its request.
+  const snapshot = useMemo(() => serialized ? JSON.parse(serialized) as SemanticWorkflow : undefined, [serialized]);
+  const key = serialized ? hashArtifactBytes('semantic-workflow', new TextEncoder().encode(serialized)) : null;
   const scope = JSON.stringify([key, nodeId, owner ?? null]);
-  const node = workflow?.nodes.find(node => node.nodeId === nodeId);
+  const node = snapshot?.nodes.find(node => node.nodeId === nodeId);
   const chain = node?.chainId;
   const provider = node?.adapterConstraints.protocols.some(protocol => protocol === 'uniswap' || protocol === 'uniswap-v3') ? 'Uniswap V3'
     : node?.adapterConstraints.protocols.includes('jupiter') ? 'Jupiter'
@@ -39,7 +42,7 @@ export function useLiveQuote(workflow: SemanticWorkflow | undefined, nodeId: str
   const generation = useRef(0);
   const quotable = Boolean(workflow && key && chain && provider);
   useEffect(() => {
-    if (!workflow || !key || !chain || !provider) return;
+    if (!snapshot || !key || !chain || !provider) return;
     const ticket = ++generation.current;
     let expire: ReturnType<typeof setTimeout> | undefined;
     const accept = (estimate: BuildEstimate | null, failed: boolean) => {
@@ -52,7 +55,7 @@ export function useLiveQuote(workflow: SemanticWorkflow | undefined, nodeId: str
     if (known) { accept(known, false); return () => { clearTimeout(expire); }; }
     const cancel = requestBuildEstimate(async signal => {
       const response = await fetch('/api/build-estimate', { method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ workflow, nodeId, owner }), signal });
+        body: JSON.stringify({ workflow: snapshot, nodeId, owner }), signal });
       return await response.json() as BuildEstimateResult;
     }, response => {
       const estimate = response.ok && response.estimate.workflowHash === key && response.estimate.nodeId === nodeId && response.estimate.chain === chain && response.estimate.provider === provider && Date.parse(response.estimate.expiresAt) > Date.now() ? response.estimate : null;
@@ -60,7 +63,7 @@ export function useLiveQuote(workflow: SemanticWorkflow | undefined, nodeId: str
       accept(estimate, !estimate);
     });
     return () => { cancel(); clearTimeout(expire); };
-  }, [key, scope, workflow, nodeId, owner, chain, provider]);
+  }, [key, scope, snapshot, nodeId, owner, chain, provider]);
   if (!quotable) return { status: 'idle' };
   if (result?.key !== scope) return { status: 'calculating' };
   return result.estimate ? { status: 'ready', estimate: result.estimate } : result.failed ? { status: 'unavailable' } : { status: 'idle' };
