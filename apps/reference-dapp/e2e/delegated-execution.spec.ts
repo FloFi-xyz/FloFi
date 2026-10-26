@@ -220,7 +220,8 @@ test.describe('BUILD-AUTOMATION-002 delegated execution (MOCKED loopback chains,
     // The Universal Authorization Review shows the owner's limits; the rule exists only paused until the passkey signs.
     const review = proposal.getByRole('region', { name: 'Authorization review', exact: true });
     await expect(review).toContainText('Automatic execution allowed');
-    await expect(review.locator('.delegation-limits > li')).toHaveText(['50 USDC per execution', '200 USDC per week', '4 executions per week', '0.5% slippage', /^expires /]);
+    // BUILD-FLOFI-PRODUCT-UX-001: product default slippage is 100 bps (1%).
+    await expect(review.locator('.delegation-limits > li')).toHaveText(['50 USDC per execution', '200 USDC per week', '4 executions per week', '1% slippage', /^expires /]);
     await expect(review).toContainText('Wallet setup: 1 Credential(s) already enrolled — no new wallet signature is needed.');
     expect(await rulesOf(owner.address)).toMatchObject([{ kind: 'PRICE_TRIGGER', execution_mode: 'DELEGATED_WITH_LIMITS', state: 'PAUSED' }]);
     const walletBefore = await signing(), countBefore = await signCount();
