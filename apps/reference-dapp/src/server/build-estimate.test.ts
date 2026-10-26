@@ -70,16 +70,16 @@ describe('read-only Build estimates', () => {
     expect(await readBuildEstimate({ workflow, nodeId: 'swap' }, {})).toEqual({ ok: false, code: 'ESTIMATE_UNSUPPORTED' });
   });
   it('rejects the wrong provider network without publishing financial values', async () => {
-    expect(await readBuildEstimate({ workflow: authored(), nodeId: 'node-002' }, {}, { rpc: rpc(BASE_SEPOLIA, ETHEREUM_SEPOLIA_SWAP.chainHex), now: () => now })).toEqual({ ok: false, code: 'ESTIMATE_UNAVAILABLE' });
+    expect(await readBuildEstimate({ workflow: authored(), nodeId: 'node-002' }, {}, { rpc: rpc(BASE_SEPOLIA, ETHEREUM_SEPOLIA_SWAP.chainHex), now: () => now })).toMatchObject({ ok: false, code: 'WRONG_PROVIDER_CHAIN', correlationId: expect.any(String) });
   });
   it('returns honest unavailability for RPC failure and unsupported nodes', async () => {
-    expect(await readBuildEstimate({ workflow: authored(), nodeId: 'node-002' }, {}, { rpc: async () => { throw Error('offline'); } })).toEqual({ ok: false, code: 'ESTIMATE_UNAVAILABLE' });
-    expect(await readBuildEstimate({ workflow: authored(), nodeId: 'node-404' }, {})).toEqual({ ok: false, code: 'ESTIMATE_UNAVAILABLE' });
+    expect(await readBuildEstimate({ workflow: authored(), nodeId: 'node-002' }, {}, { rpc: async () => { throw Error('offline'); } })).toMatchObject({ ok: false, code: 'ESTIMATE_UNAVAILABLE', correlationId: expect.any(String) });
+    expect(await readBuildEstimate({ workflow: authored(), nodeId: 'node-404' }, {})).toMatchObject({ ok: false, code: 'ESTIMATE_UNSUPPORTED', correlationId: expect.any(String) });
   });
   it('honors the supplied production restriction before any Base mainnet live read', async () => {
     vi.stubEnv('NODE_ENV', 'development'); vi.stubEnv('GRYLOO_BASE_OBSERVATION', 'live'); vi.stubEnv('GRYLOO_ALCHEMY_API_KEY', 'synthetic-test-key');
     const transport = vi.fn().mockRejectedValue(Error('No network in this test')); vi.stubGlobal('fetch', transport);
-    expect(await readBuildEstimate({ workflow: authored('ADD_SWAP'), nodeId: 'node-002' }, { NODE_ENV: 'production', GRYLOO_BASE_OBSERVATION: 'live' })).toEqual({ ok: false, code: 'ESTIMATE_UNAVAILABLE' });
+    expect(await readBuildEstimate({ workflow: authored('ADD_SWAP'), nodeId: 'node-002' }, { NODE_ENV: 'production', GRYLOO_BASE_OBSERVATION: 'live' })).toMatchObject({ ok: false, code: 'CLOUD_RUNTIME_NOT_CONFIGURED', correlationId: expect.any(String) });
     expect(transport).not.toHaveBeenCalled();
   });
   it('does not present a recorded replay as a live Build estimate', async () => {
@@ -87,7 +87,7 @@ describe('read-only Build estimates', () => {
     vi.spyOn(process, 'cwd').mockReturnValue(fileURLToPath(new URL('../../', import.meta.url)));
     const input = { workflow: authored('ADD_SWAP'), nodeId: 'node-002' }, env = { NODE_ENV: 'production', GRYLOO_BASE_OBSERVATION: 'replay' };
     expect(await readBaseQuoteOnServer(input, { env })).toMatchObject({ ok: true });
-    expect(await readBuildEstimate(input, env)).toEqual({ ok: false, code: 'ESTIMATE_UNAVAILABLE' });
+    expect(await readBuildEstimate(input, env)).toMatchObject({ ok: false, code: 'CLOUD_RUNTIME_NOT_CONFIGURED', correlationId: expect.any(String) });
     expect(transport).not.toHaveBeenCalled();
   });
 });

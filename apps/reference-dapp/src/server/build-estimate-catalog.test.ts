@@ -56,11 +56,11 @@ describe('UX-007 shared catalog-network live quote', () => {
     const { workflow, seams } = setup(c);
     let reads = 0;
     const result = await readBuildEstimate({ workflow, nodeId: 'node-002' }, {}, { ...seams, rpc: async (method, params) => { reads++; return seams.rpc(method, params); } });
-    expect(result).toEqual({ ok: false, code: 'ESTIMATE_UNAVAILABLE' }); expect(reads).toBe(0);
+    expect(result).toMatchObject({ ok: false, code: 'ESTIMATE_NETWORK_NOT_ENABLED', correlationId: expect.any(String) }); expect(reads).toBe(0);
   });
   it.each(CASES)('$name: no usable route is reported as unavailable, never a guessed number', async c => {
     const { workflow, seams } = setup(c, false);
-    expect(await readBuildEstimate({ workflow, nodeId: 'node-002' }, c.env, seams)).toEqual({ ok: false, code: 'ESTIMATE_UNAVAILABLE' });
+    expect(await readBuildEstimate({ workflow, nodeId: 'node-002' }, c.env, seams)).toMatchObject({ ok: false, code: 'POOL_UNUSABLE', correlationId: expect.any(String) });
   });
 
   // BUILD-FIX-UX-001: USD equivalents come only from the deployment's verified price source, for an asset that has a feed.

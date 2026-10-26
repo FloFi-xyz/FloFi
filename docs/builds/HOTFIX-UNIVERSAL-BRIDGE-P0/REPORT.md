@@ -1,6 +1,8 @@
-# HOTFIX P0 — Universal Bridge, todas as rotas
+# HOTFIX P0 — Universal Bridge e cotações de Swap
 
 Base: `origin/main` após PR #125, `c47bb502`. Nenhuma alteração de produção, merge, deploy ou transação financeira pública faz parte desta entrega. O deploy automático da Vercel está desabilitado apenas para a branch deste PR.
+
+A correção adicional de Swap está integrada ao mesmo PR, em commit separado e sem alterar a autoridade financeira ou a política global de timeout MCP. Ver [cobertura de Swap e diagnóstico MCP](SWAP-AND-MCP.md).
 
 ## Correções estruturais
 

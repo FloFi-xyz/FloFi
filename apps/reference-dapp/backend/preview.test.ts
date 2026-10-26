@@ -35,6 +35,9 @@ describe('BUILD-MCP-001 read-only flow previews', () => {
     expect(await call('crosschain-router-testnet', { args: [{ workflowId: 'w', nodes: [] }, '0x' + '1'.repeat(40)] })).toEqual({ ok: false, code: 'ROUTER_TESTNET_NOT_ENABLED' });
     expect(await call('crosschain-router-testnet', { args: [{ workflowId: 'w', nodes: [] }] })).toBe('HTTP_400_ARGUMENTS_INVALID');
     expect(await call('crosschain-router-testnet', { args: [], extra: 1 })).toBe('HTTP_400_ARGUMENTS_INVALID');
+    expect(await call('jupiter-swap', { args: [], purpose: 'EXECUTE' })).toBe('HTTP_400_ARGUMENTS_INVALID');
+    expect(await call('base-swap', { args: [], purpose: 'QUOTE' })).toEqual({ ok: false, code: 'PREVIEW_QUOTE_NOT_AVAILABLE' });
+    expect(await call('jupiter-swap', { args: [{}, 'invalid-owner'], purpose: 'QUOTE' })).toBe('HTTP_400_ARGUMENTS_INVALID');
     expect(await call('crosschain-router-testnet', null)).toBe('HTTP_400_ARGUMENTS_INVALID');
     expect(await call('robinhood-transfer', { args: [] })).toEqual({ ok: false, code: 'PREVIEW_NOT_AVAILABLE' });
     expect(await call('orca-liquidity', { args: [] })).toEqual({ ok: false, code: 'PREVIEW_NOT_AVAILABLE' });

@@ -128,17 +128,27 @@ export async function cloudFlowMode(flow: FlowName, env: Env = process.env, tran
  * unchanged simulation with nothing persisted. Resolves `null` in local mode: the local services keep file journals, so a
  * local caller must not preview through them (use `FLOFI_RUNTIME=embedded` with a database instead).
  */
-export async function cloudPreview<T>(flow: FlowName, args: readonly unknown[], options: { readonly env?: Env; readonly transport?: typeof fetch } = {}):
-  Promise<FlowResult<T> | null> {
+export async function cloudPreview<T>(flow: FlowName, args: readonly unknown[], options: { readonly env?: Env; readonly transport?: typeof fetch;
+  readonly purpose?: 'SIMULATION' | 'QUOTE'; readonly timeoutMs?: number; readonly maxAttempts?: number } = {}): Promise<FlowResult<T> | null> {
   const env = options.env ?? process.env, kind = flowRuntimeKind(env);
   const refusal = testNetworkPreviewRefusal(flow, { ...process.env, ...env });
   if (refusal) return { ok: false, code: refusal };
   if (kind === 'local') return null;
   if (kind === 'unconfigured') return { ok: false, code: 'CLOUD_RUNTIME_NOT_CONFIGURED' };
-  if (kind === 'remote') return previewCloudFlow<T>(flow, args, { env, ...options.transport ? { transport: options.transport } : {} });
-  try { return await (await embeddedRuntime(env)).backend.previewFlow(flow, args) as FlowResult<T>; }
-  catch (error) { return { ok: false, code: classified(error, 'CLOUD_RUNTIME_UNAVAILABLE') }; }
+  const read = async (): Promise<FlowResult<T>> => {
+    if (kind === 'remote') return previewCloudFlow<T>(flow, args, { env, ...options.transport ? { transport: options.transport } : {},
+      ...options.purpose ? { purpose: options.purpose } : {}, ...options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs },
+      ...options.maxAttempts === undefined ? {} : { maxAttempts: options.maxAttempts } });
+    try { return await (await embeddedRuntime(env)).backend.previewFlow(flow, args, options.purpose) as FlowResult<T>; }
+    catch (error) { return { ok: false, code: classified(error, 'CLOUD_RUNTIME_UNAVAILABLE') }; }
+  };
+  if (options.timeoutMs === undefined) return read();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try { return await Promise.race([read(), new Promise<FlowResult<T>>(resolve => {
+    timer = setTimeout(() => resolve({ ok: false, code: 'CLOUD_PREVIEW_TIMEOUT' }), options.timeoutMs);
+  })]); } finally { clearTimeout(timer); }
 }
+
 /**
  * BUILD-MCP-001: one durable run, or one page of its journal, read as `owner`: `null` when the run is absent or belongs to
  * anyone else (never distinguishable). `null` result in local mode, where runs are not durable.

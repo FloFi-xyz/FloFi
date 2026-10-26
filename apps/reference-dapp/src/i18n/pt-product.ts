@@ -182,6 +182,13 @@ export const productPortuguese: Readonly<Record<string, string>> = {
   'This slippage cannot be applied to this step.': 'Este desvio não pode ser aplicado a este passo.',
   'Choose a network available for the connected wallet.': 'Escolha uma rede disponível para a carteira ligada.', 'Choose matching networks.': 'Escolha redes compatíveis.',
   'Show USD value first': 'Mostrar primeiro o valor em USD', 'Test token · no USD value': 'Token de teste · sem valor em USD',
+  'Quote service is not configured. Contact support.': 'O serviço de cotações não está configurado. Contacte o suporte.',
+  'The quote provider or network is unavailable. Try again shortly.': 'O provedor de cotação ou a rede está indisponível. Tente novamente em breve.',
+  'The provider response could not be verified. Try another route or try again later.': 'Não foi possível verificar a resposta do provedor. Tente outra rota ou tente novamente mais tarde.',
+  'The quote request timed out. Try again.': 'O pedido de cotação excedeu o tempo limite. Tente novamente.',
+  'No liquid pool is available for this pair and amount.': 'Não existe um pool com liquidez para este par e montante.',
+  'Quotes are not enabled for this network.': 'As cotações não estão ativadas para esta rede.',
+  'The quote did not match this swap. Try again.': 'A cotação não corresponde a este swap. Tente novamente.',
   'Estimating USD…': 'A estimar USD…', 'USD price unavailable': 'Preço USD indisponível', 'Waiting for the current estimate.': 'A aguardar a estimativa atual.',
   'No verified USD price is available for this asset right now.': 'Não há um preço USD verificado disponível para este ativo neste momento.',
 };

@@ -1,8 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { hashArtifactBytes, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
+import { hashArtifactBytes, UNIVERSAL_QUOTE_SUBJECTS, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { validateArtifact } from '@defi-workflow-engine/workflow-contracts/schemas';
 import { JUPITER_SOLANA_MAINNET, ORCA_WHIRLPOOLS_DEVNET } from '@defi-workflow-engine/action-registry';
 import { jupiterIntent, jupiterBuildQuery, parseJupiterBuild, simulateOrcaDevnetSwap } from '@defi-workflow-engine/reference-compiler';
+import { cloudPreview } from './flow-runtime.ts';
+import { quoteFailure } from './quote-failure.ts';
+import type { FlowResult } from './cloud-api-client.ts';
+import type { FlowName } from '../../backend/flows.ts';
 import { readBaseQuoteOnServer } from './base-rpc.ts';
 import { publicSwapProfile } from '../domain/public-testnet-swap.ts';
 import { simulationAmount } from '../domain/simulation-presentation.ts';
@@ -51,7 +55,7 @@ async function usdOf(prices: PriceSource | null, now: Date, sides: readonly [Quo
 
 /** Adapter/profile selected reads; no execution store, session, Review, signature or submission port. */
 export async function readBuildEstimate(input: unknown, env: Env = process.env,
-  seams: { rpc?: Rpc; http?: ReturnType<typeof createJupiterHttp>; now?: () => Date; catalog?: CatalogSwapRuntime; prices?: PriceSource | null } = {}): Promise<BuildEstimateResult> {
+  seams: { rpc?: Rpc; http?: ReturnType<typeof createJupiterHttp>; now?: () => Date; catalog?: CatalogSwapRuntime; prices?: PriceSource | null; preview?: (flow: FlowName, args: readonly unknown[], options: Parameters<typeof cloudPreview>[2]) => Promise<FlowResult<unknown> | null> } = {}): Promise<BuildEstimateResult> {
   try {
     const prices = () => seams.prices !== undefined ? seams.prices : env === process.env ? processPrices === undefined ? processPrices = deploymentPriceSource(env) : processPrices : deploymentPriceSource(env);
     if (!input || typeof input !== 'object') throw Error('ESTIMATE_INVALID');
@@ -72,15 +76,51 @@ export async function readBuildEstimate(input: unknown, env: Env = process.env,
         slippageBps: q.slippageBps, expiresAt: q.expiresAt } };
     }
     const catalogNetwork = uniswap ? catalogNetworkOfChain(node.chainId) : null;
+    // USD is optional, including failure while constructing the configured price source.
+    const quoteUsd = async (sides: readonly [QuoteSide, QuoteSide]) => { try { return await usdOf(prices(), now(), sides); } catch { return null; } };
+    const solanaMainnet = node.chainId === JUPITER_SOLANA_MAINNET.chain && node.adapterConstraints.protocols.includes('jupiter');
+    if ((catalogNetwork || solanaMainnet) && (seams.preview || !seams.rpc && !seams.http)) {
+      const flow = catalogNetwork ? catalogNetwork.flows.swap : 'jupiter-swap';
+      const subject = typeof owner === 'string' ? owner : UNIVERSAL_QUOTE_SUBJECTS.SOLANA;
+      const preview = await (seams.preview ?? cloudPreview)(flow, catalogNetwork ? [workflow] : [workflow, subject],
+        { env, timeoutMs: 30_000, maxAttempts: 1, ...solanaMainnet ? { purpose: 'QUOTE' as const } : {} });
+      // A configured hosted runtime never falls back to development transports, even after a failed quote.
+      if (preview !== null) {
+        if (!preview.ok) return quoteFailure(new Error(preview.code), preview.correlationId);
+        const record = preview.value as Record<string, unknown> | null;
+        const q = (catalogNetwork ? record?.quote : record) as Record<string, unknown> | null;
+        const amount = node.inputs.find(i => i.name === 'amount-in'), output = node.inputs.find(i => i.name === 'asset-out');
+        const slip = node.userConstraints.find(c => c.kind === 'MAXIMUM_SLIPPAGE_BPS');
+        if (!q || amount?.kind !== 'QUANTITY' || output?.kind !== 'ASSET' || !('address' in amount.value.asset) || !('address' in output.value) ||
+          slip?.kind !== 'MAXIMUM_SLIPPAGE_BPS') throw Error('ESTIMATE_RESPONSE_INVALID');
+        const inRef = amount.value.asset, outRef = output.value;
+        const input = catalogNetwork ? { address: q.inputToken, decimals: q.inputDecimals, symbol: q.inputSymbol } : q.input as { mint?: unknown; decimals?: unknown; symbol?: unknown } | undefined;
+        const out = catalogNetwork ? { address: q.outputToken, decimals: q.outputDecimals, symbol: q.outputSymbol } : q.output as { mint?: unknown; decimals?: unknown; symbol?: unknown } | undefined;
+        const tokenAddress = (t: typeof input) => t && ('address' in t ? t.address : t.mint);
+        if (q.workflowHash !== workflowHash || q.nodeId !== node.nodeId || (catalogNetwork ? `eip155:${q.chainId}` : q.chain) !== node.chainId ||
+          (catalogNetwork ? q.amountIn : q.amount) !== amount.value.amount || q.slippageBps !== slip.maximumBps || !input || !out ||
+          tokenAddress(input) !== inRef.address || tokenAddress(out) !== outRef.address || input.decimals !== inRef.decimals || out.decimals !== outRef.decimals ||
+          typeof input.symbol !== 'string' || typeof out.symbol !== 'string' || typeof q.expiresAt !== 'string' || !Number.isFinite(Date.parse(q.expiresAt)) || Date.parse(q.expiresAt) <= now().getTime()) throw Error('ESTIMATE_RESPONSE_MISMATCH');
+        const expected = q.expectedOut, minimum = q.minimumOut;
+        if (typeof expected !== 'string' || typeof minimum !== 'string' || !/^[1-9][0-9]{0,77}$/.test(expected) || !/^[1-9][0-9]{0,77}$/.test(minimum) ||
+          BigInt(minimum) > BigInt(expected) || BigInt(minimum) < BigInt(expected) * BigInt(10_000 - slip.maximumBps) / 10_000n) throw Error('ESTIMATE_MINIMUM_INVALID');
+        const usd = await quoteUsd([{ symbol: input.symbol, units: amount.value.amount, decimals: inRef.decimals }, { symbol: out.symbol, units: expected, decimals: outRef.decimals }]);
+        return { ok: true, estimate: { workflowHash, nodeId: node.nodeId, chain: node.chainId, provider: catalogNetwork ? 'Uniswap V3' : 'Jupiter',
+          expected: simulationAmount(expected, outRef.decimals)!, minimum: simulationAmount(minimum, outRef.decimals), symbol: out.symbol,
+          slippageBps: slip.maximumBps, expiresAt: q.expiresAt, usd } };
+      }
+    }
+    if (env.NODE_ENV === 'production' && (catalogNetwork && localCatalogNetworkMode(catalogNetwork, env) === 'off' ||
+      solanaMainnet && env.GRYLOO_JUPITER_HARNESS !== 'MOCKED_LOOPBACK_ONLY')) return quoteFailure(new Error('CLOUD_RUNTIME_NOT_CONFIGURED'));
     const catalogEstimate = async (): Promise<BuildEstimateResult> => {
       const mode = catalogNetwork ? localCatalogNetworkMode(catalogNetwork, env) : 'off';
-      if (!catalogNetwork || mode === 'off') return { ok: false, code: 'ESTIMATE_UNAVAILABLE' };
+      if (!catalogNetwork || mode === 'off') return quoteFailure(new Error(env.NODE_ENV === 'production' ? 'CLOUD_RUNTIME_NOT_CONFIGURED' : 'ESTIMATE_NETWORK_NOT_ENABLED'));
       const build = () => createPublicSwapQuoteReader(() => seams.rpc ?? catalogNetwork.rpc(mode, env), now,
         seams.catalog ?? catalogNetwork.swapRuntime(mode, env, catalogNetwork.catalogFor(mode)));
       const reader = env === process.env && !seams.rpc && !seams.catalog ? catalogReader(catalogNetwork.id, mode, build) : build();
       const q = await reader(workflow, 'read-only');
       if (q.outputDecimals === undefined) return { ok: false, code: 'ESTIMATE_UNAVAILABLE' };
-      const usd = q.environment === 'MAINNET' && q.inputDecimals !== undefined ? await usdOf(prices(), now(), [{ symbol: q.inputSymbol, units: q.amountIn, decimals: q.inputDecimals },
+      const usd = q.environment === 'MAINNET' && q.inputDecimals !== undefined ? await quoteUsd( [{ symbol: q.inputSymbol, units: q.amountIn, decimals: q.inputDecimals },
         { symbol: q.outputSymbol, units: q.expectedOut, decimals: q.outputDecimals }]) : null;
       return { ok: true, estimate: { workflowHash, nodeId: node.nodeId, chain: node.chainId, provider: 'Uniswap V3',
         expected: simulationAmount(q.expectedOut, q.outputDecimals)!, minimum: simulationAmount(q.minimumOut, q.outputDecimals), symbol: q.outputSymbol,
@@ -99,7 +139,7 @@ export async function readBuildEstimate(input: unknown, env: Env = process.env,
       const amount = node.inputs.find(v => v.name === 'amount-in');
       const slip = node.userConstraints.find(c => c.kind === 'MAXIMUM_SLIPPAGE_BPS');
       const symbol = amount?.kind === 'QUANTITY' && amount.value.asset.decimals === 6 ? 'WETH' : 'USDC';
-      const usd = amount?.kind === 'QUANTITY' ? await usdOf(prices(), now(), [{ symbol: symbol === 'WETH' ? 'USDC' : 'WETH', units: amount.value.amount, decimals: amount.value.asset.decimals },
+      const usd = amount?.kind === 'QUANTITY' ? await quoteUsd( [{ symbol: symbol === 'WETH' ? 'USDC' : 'WETH', units: amount.value.amount, decimals: amount.value.asset.decimals },
         { symbol, units: best.value.amount, decimals: best.value.asset.decimals }]) : null;
       return { ok: true, estimate: { workflowHash, nodeId: node.nodeId, chain: node.chainId, provider: 'Uniswap V3',
         expected: simulationAmount(best.value.amount, best.value.asset.decimals)!, minimum: null, symbol,
@@ -112,7 +152,7 @@ export async function readBuildEstimate(input: unknown, env: Env = process.env,
       // The taker is an untrusted quote parameter only; this read never binds ownership or grants authority.
       const intent = jupiterIntent(workflow, owner), http = seams.http ?? createJupiterHttp(JUPITER_SOLANA_MAINNET.api + JUPITER_SOLANA_MAINNET.endpoint, env.JUPITER_API_KEY);
       const q = parseJupiterBuild(await http(jupiterBuildQuery(intent)), intent, now().toISOString()).quote;
-      const usd = await usdOf(prices(), now(), [{ symbol: intent.input.symbol, units: intent.amount, decimals: intent.input.decimals },
+      const usd = await quoteUsd( [{ symbol: intent.input.symbol, units: intent.amount, decimals: intent.input.decimals },
         { symbol: intent.output.symbol, units: q.outAmount, decimals: intent.output.decimals }]);
       return { ok: true, estimate: { workflowHash, nodeId: node.nodeId, chain: node.chainId, provider: 'Jupiter',
         expected: simulationAmount(q.outAmount, intent.output.decimals)!, minimum: simulationAmount(q.otherAmountThreshold, intent.output.decimals),
@@ -129,5 +169,5 @@ export async function readBuildEstimate(input: unknown, env: Env = process.env,
         symbol: review.output.symbol, slippageBps: review.slippageBps, expiresAt: review.expiresAt } };
     }
     return { ok: false, code: 'ESTIMATE_UNSUPPORTED' };
-  } catch { return { ok: false, code: 'ESTIMATE_UNAVAILABLE' }; }
+  } catch (cause) { return quoteFailure(cause); }
 }

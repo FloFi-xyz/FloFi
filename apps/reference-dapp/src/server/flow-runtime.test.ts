@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { deploymentEnvironment, deploymentTenant, isHostedDeployment } from './deployment.ts';
-import { cloudFlow, cloudFlowMode, cloudRuns, flowRuntimeKind } from './flow-runtime.ts';
+import { cloudFlow, cloudFlowMode, cloudPreview, cloudRuns, flowRuntimeKind } from './flow-runtime.ts';
 import { flowMode } from '../../backend/flows.ts';
 
 const VERCEL_PREVIEW = { VERCEL: '1', VERCEL_ENV: 'preview', VERCEL_GIT_COMMIT_REF: 'claude/build-cloud-parity-001' };
@@ -35,6 +35,16 @@ describe('BUILD-CLOUD-PARITY-001 deployment identity', () => {
 });
 
 describe('BUILD-CLOUD-PARITY-001 flow runtime selection', () => {
+  it('bounds the whole Build preview even if a transport ignores abort, without changing the general MCP policy', async () => {
+    vi.useFakeTimers();
+    try {
+      const transport = vi.fn<typeof fetch>().mockImplementation(() => new Promise(() => {}));
+      const pending = cloudPreview('base-swap', [{}], { env: { API_BASE_URL: 'https://api.example' }, transport, timeoutMs: 30_000, maxAttempts: 1 });
+      await vi.advanceTimersByTimeAsync(29_999); expect(transport).toHaveBeenCalledOnce();
+      await vi.advanceTimersByTimeAsync(1); expect(await pending).toEqual({ ok: false, code: 'CLOUD_PREVIEW_TIMEOUT' });
+      expect(transport).toHaveBeenCalledOnce();
+    } finally { vi.useRealTimers(); }
+  });
   it('selects remote, embedded, local or unconfigured from the environment', () => {
     expect(flowRuntimeKind({})).toBe('local');
     expect(flowRuntimeKind({ GRYLOO_SUPPLY_JOURNAL: '/tmp/x' })).toBe('local');

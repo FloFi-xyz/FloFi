@@ -1,0 +1,1165 @@
+{
+  "format": "flofi.swap-quote-observation.v1",
+  "generatedAt": "2026-10-26T22:01:56.914Z",
+  "sourceFingerprint": {
+    "build-estimate.ts": "38e1bbb713294da777317ffb505d7b3d301e5af39fb155cb81cac6caccc49437",
+    "flow-runtime.ts": "924c446ed4314915ae10f8f8990b2ebf899ae082e1863419da2b790c55ab5040",
+    "../../backend/preview.ts": "cfae3d3fe686541df8f9c586557064aa7530711bb940a61c9b03788a352adb2f"
+  },
+  "method": "Isolated backend.previewFlow with live public catalog/RPC/provider transports, projected by readBuildEstimate; USD disabled; no production configuration changed.",
+  "limits": [
+    "PUBLIC_READ_ONLY, not fixtures.",
+    "No funded simulation, wallet signature, transaction or financial certification.",
+    "API-key-only providers may be unavailable to this public probe; absence is reported, never replaced by a fixture."
+  ],
+  "rows": [
+    {
+      "network": "robinhood",
+      "inputAsset": "USDG",
+      "outputAsset": "WETH",
+      "amount": "1",
+      "slippageBps": 100,
+      "evidence": "PUBLIC_READ_ONLY",
+      "simulation": "NOT_RUN",
+      "review": "NOT_AUTHORIZED",
+      "execution": "NOT_RUN",
+      "certification": "NOT_CERTIFIED",
+      "workflowHash": "0xf92d004f489a43a873692e866e8ad28b44619bdd832ce2bff3a449b286101277",
+      "assets": [
+        {
+          "name": "amount-in",
+          "kind": "QUANTITY",
+          "value": {
+            "asset": {
+              "chainId": "eip155:4663",
+              "address": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+              "decimals": 6
+            },
+            "amount": "1000000"
+          }
+        },
+        {
+          "name": "asset-out",
+          "kind": "ASSET",
+          "value": {
+            "chainId": "eip155:4663",
+            "address": "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+            "decimals": 18
+          }
+        }
+      ],
+      "result": {
+        "ok": true,
+        "estimate": {
+          "workflowHash": "0xf92d004f489a43a873692e866e8ad28b44619bdd832ce2bff3a449b286101277",
+          "nodeId": "node-002",
+          "chain": "eip155:4663",
+          "provider": "Uniswap V3",
+          "expected": "0.00043360928176538",
+          "minimum": "0.000429273188947726",
+          "symbol": "WETH",
+          "slippageBps": 100,
+          "expiresAt": "2026-10-26T22:01:28.436Z",
+          "usd": null
+        }
+      },
+      "observations": [
+        {
+          "workflowHash": "0xf92d004f489a43a873692e866e8ad28b44619bdd832ce2bff3a449b286101277",
+          "inputToken": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+          "outputToken": "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+          "inputDecimals": 6,
+          "outputDecimals": 18,
+          "amountIn": "1000000",
+          "expectedOut": "433609281765380",
+          "minimumOut": "429273188947726",
+          "pool": "0x52e65b17fb6e5ba00ed806f37afcd2daa50271ca",
+          "fee": 100,
+          "feeTiers": [
+            {
+              "fee": 100,
+              "pool": "0x52e65b17fb6e5ba00ed806f37afcd2daa50271ca",
+              "expectedOut": "433609281765380"
+            },
+            {
+              "fee": 500,
+              "pool": "0x69bfaf19c9f377bb306a89aed9f6b07e2c1a8d9a",
+              "expectedOut": "433267351488293"
+            },
+            {
+              "fee": 3000,
+              "pool": "0xa9188730fe85be88ad499d7d52b099e800fb0334",
+              "expectedOut": "432138287236810"
+            },
+            {
+              "fee": 10000,
+              "pool": "0x5f009e071f07e92b6c624e83f52f17bbda34680d",
+              "expectedOut": "426063975336593"
+            }
+          ],
+          "blockNumber": 98746363,
+          "blockHash": "0x5990ef1378b9eb89330e9336f036d8fc86ec20bdb10f3b689c93b45b13268fa9",
+          "provenance": "PUBLIC_MAINNET",
+          "catalog": {
+            "contentSha256": [
+              null,
+              "f1139a89f522115e8551f3974b33cdf9bd8a0a05088c4820e485609cb1048c97"
+            ],
+            "fetchedAt": "2026-10-26T22:00:16.218Z"
+          }
+        }
+      ],
+      "elapsedMs": 12711
+    },
+    {
+      "network": "robinhood",
+      "inputAsset": "WETH",
+      "outputAsset": "USDG",
+      "amount": "1",
+      "slippageBps": 100,
+      "evidence": "PUBLIC_READ_ONLY",
+      "simulation": "NOT_RUN",
+      "review": "NOT_AUTHORIZED",
+      "execution": "NOT_RUN",
+      "certification": "NOT_CERTIFIED",
+      "workflowHash": "0x2c05ca95d8f574c6b6b7df33dba0597d301e90d3ff25f18ad0361be480a79840",
+      "assets": [
+        {
+          "name": "amount-in",
+          "kind": "QUANTITY",
+          "value": {
+            "asset": {
+              "chainId": "eip155:4663",
+              "address": "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+              "decimals": 18
+            },
+            "amount": "1000000000000000000"
+          }
+        },
+        {
+          "name": "asset-out",
+          "kind": "ASSET",
+          "value": {
+            "chainId": "eip155:4663",
+            "address": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+            "decimals": 6
+          }
+        }
+      ],
+      "result": {
+        "ok": true,
+        "estimate": {
+          "workflowHash": "0x2c05ca95d8f574c6b6b7df33dba0597d301e90d3ff25f18ad0361be480a79840",
+          "nodeId": "node-002",
+          "chain": "eip155:4663",
+          "provider": "Uniswap V3",
+          "expected": "2304.775362",
+          "minimum": "2281.727608",
+          "symbol": "USDG",
+          "slippageBps": 100,
+          "expiresAt": "2026-10-26T22:01:40.071Z",
+          "usd": null
+        }
+      },
+      "observations": [
+        {
+          "workflowHash": "0x2c05ca95d8f574c6b6b7df33dba0597d301e90d3ff25f18ad0361be480a79840",
+          "inputToken": "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+          "outputToken": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+          "inputDecimals": 18,
+          "outputDecimals": 6,
+          "amountIn": "1000000000000000000",
+          "expectedOut": "2304775362",
+          "minimumOut": "2281727608",
+          "pool": "0x52e65b17fb6e5ba00ed806f37afcd2daa50271ca",
+          "fee": 100,
+          "feeTiers": [
+            {
+              "fee": 100,
+              "pool": "0x52e65b17fb6e5ba00ed806f37afcd2daa50271ca",
+              "expectedOut": "2304775362"
+            },
+            {
+              "fee": 500,
+              "pool": "0x69bfaf19c9f377bb306a89aed9f6b07e2c1a8d9a",
+              "expectedOut": "2304502161"
+            },
+            {
+              "fee": 3000,
+              "pool": "0xa9188730fe85be88ad499d7d52b099e800fb0334",
+              "expectedOut": "2299718460"
+            },
+            {
+              "fee": 10000,
+              "pool": "0x5f009e071f07e92b6c624e83f52f17bbda34680d",
+              "expectedOut": "2280595935"
+            }
+          ],
+          "blockNumber": 98746483,
+          "blockHash": "0xced6b8962f396c42ba8b3d57e487e697ae71c6c8d8f7abddbffded19b522b4ae",
+          "provenance": "PUBLIC_MAINNET",
+          "catalog": {
+            "contentSha256": [
+              null,
+              "f1139a89f522115e8551f3974b33cdf9bd8a0a05088c4820e485609cb1048c97"
+            ],
+            "fetchedAt": "2026-10-26T22:00:16.218Z"
+          }
+        }
+      ],
+      "elapsedMs": 11633
+    },
+    {
+      "network": "base",
+      "inputAsset": "USDC",
+      "outputAsset": "WETH",
+      "amount": "1",
+      "slippageBps": 100,
+      "evidence": "PUBLIC_READ_ONLY",
+      "simulation": "NOT_RUN",
+      "review": "NOT_AUTHORIZED",
+      "execution": "NOT_RUN",
+      "certification": "NOT_CERTIFIED",
+      "workflowHash": "0x926a47931dd6761e7141e98f6e0814c194321f8465df6faab6584aac1752421b",
+      "assets": [
+        {
+          "name": "amount-in",
+          "kind": "QUANTITY",
+          "value": {
+            "asset": {
+              "chainId": "eip155:8453",
+              "address": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+              "decimals": 6
+            },
+            "amount": "1000000"
+          }
+        },
+        {
+          "name": "asset-out",
+          "kind": "ASSET",
+          "value": {
+            "chainId": "eip155:8453",
+            "address": "0x4200000000000000000000000000000000000006",
+            "decimals": 18
+          }
+        }
+      ],
+      "result": {
+        "ok": true,
+        "estimate": {
+          "workflowHash": "0x926a47931dd6761e7141e98f6e0814c194321f8465df6faab6584aac1752421b",
+          "nodeId": "node-002",
+          "chain": "eip155:8453",
+          "provider": "Uniswap V3",
+          "expected": "0.000433836466715918",
+          "minimum": "0.000429498102048758",
+          "symbol": "WETH",
+          "slippageBps": 100,
+          "expiresAt": "2026-10-26T22:01:52.776Z",
+          "usd": null
+        }
+      },
+      "observations": [
+        {
+          "workflowHash": "0x926a47931dd6761e7141e98f6e0814c194321f8465df6faab6584aac1752421b",
+          "inputToken": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+          "outputToken": "0x4200000000000000000000000000000000000006",
+          "inputDecimals": 6,
+          "outputDecimals": 18,
+          "amountIn": "1000000",
+          "expectedOut": "433836466715918",
+          "minimumOut": "429498102048758",
+          "pool": "0xb4cb800910b228ed3d0834cf79d697127bbb00e5",
+          "fee": 100,
+          "feeTiers": [
+            {
+              "fee": 100,
+              "pool": "0xb4cb800910b228ed3d0834cf79d697127bbb00e5",
+              "expectedOut": "433836466715918"
+            },
+            {
+              "fee": 500,
+              "pool": "0xd0b53d9277642d899df5c87a3966a349a798f224",
+              "expectedOut": "433543044442327"
+            },
+            {
+              "fee": 3000,
+              "pool": "0x6c561b446416e1a00e8e93e221854d6ea4171372",
+              "expectedOut": "431972851810558"
+            },
+            {
+              "fee": 10000,
+              "pool": "0x0b1c2dcbbfa744ebd3fc17ff1a96a1e1eb4b2d69",
+              "expectedOut": "427156463347967"
+            }
+          ],
+          "blockNumber": 53131346,
+          "blockHash": "0x8123253eff703ef5ec5b2b68bb790b1001743cea67233d5d6a50e6970995de87",
+          "provenance": "PUBLIC_MAINNET",
+          "catalog": {
+            "contentSha256": [
+              null,
+              "132cfa159d9ec36717cfd128b85d8a209baea67ed2b0862aa2edfe812878f522"
+            ],
+            "fetchedAt": "2026-10-26T22:00:40.802Z"
+          }
+        }
+      ],
+      "elapsedMs": 12703
+    },
+    {
+      "network": "base",
+      "inputAsset": "WETH",
+      "outputAsset": "USDC",
+      "amount": "1",
+      "slippageBps": 100,
+      "evidence": "PUBLIC_READ_ONLY",
+      "simulation": "NOT_RUN",
+      "review": "NOT_AUTHORIZED",
+      "execution": "NOT_RUN",
+      "certification": "NOT_CERTIFIED",
+      "workflowHash": "0x9b75f33fdf0e54eef46f207f62568eb51aafc5ff4b345735c60cea5917fd33a4",
+      "assets": [
+        {
+          "name": "amount-in",
+          "kind": "QUANTITY",
+          "value": {
+            "asset": {
+              "chainId": "eip155:8453",
+              "address": "0x4200000000000000000000000000000000000006",
+              "decimals": 18
+            },
+            "amount": "1000000000000000000"
+          }
+        },
+        {
+          "name": "asset-out",
+          "kind": "ASSET",
+          "value": {
+            "chainId": "eip155:8453",
+            "address": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+            "decimals": 6
+          }
+        }
+      ],
+      "result": {
+        "ok": true,
+        "estimate": {
+          "workflowHash": "0x9b75f33fdf0e54eef46f207f62568eb51aafc5ff4b345735c60cea5917fd33a4",
+          "nodeId": "node-002",
+          "chain": "eip155:8453",
+          "provider": "Uniswap V3",
+          "expected": "2303.914737",
+          "minimum": "2280.875589",
+          "symbol": "USDC",
+          "slippageBps": 100,
+          "expiresAt": "2026-10-26T22:02:04.929Z",
+          "usd": null
+        }
+      },
+      "observations": [
+        {
+          "workflowHash": "0x9b75f33fdf0e54eef46f207f62568eb51aafc5ff4b345735c60cea5917fd33a4",
+          "inputToken": "0x4200000000000000000000000000000000000006",
+          "outputToken": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+          "inputDecimals": 18,
+          "outputDecimals": 6,
+          "amountIn": "1000000000000000000",
+          "expectedOut": "2303914737",
+          "minimumOut": "2280875589",
+          "pool": "0xd0b53d9277642d899df5c87a3966a349a798f224",
+          "fee": 500,
+          "feeTiers": [
+            {
+              "fee": 100,
+              "pool": "0xb4cb800910b228ed3d0834cf79d697127bbb00e5",
+              "expectedOut": "2302002334"
+            },
+            {
+              "fee": 500,
+              "pool": "0xd0b53d9277642d899df5c87a3966a349a798f224",
+              "expectedOut": "2303914737"
+            },
+            {
+              "fee": 3000,
+              "pool": "0x6c561b446416e1a00e8e93e221854d6ea4171372",
+              "expectedOut": "2301088419"
+            },
+            {
+              "fee": 10000,
+              "pool": "0x0b1c2dcbbfa744ebd3fc17ff1a96a1e1eb4b2d69",
+              "expectedOut": "2292970058"
+            }
+          ],
+          "blockNumber": 53131352,
+          "blockHash": "0x6358ab7fb88789dda588618ee7d31958202bc00e04809fed7ebab5e695132872",
+          "provenance": "PUBLIC_MAINNET",
+          "catalog": {
+            "contentSha256": [
+              null,
+              "132cfa159d9ec36717cfd128b85d8a209baea67ed2b0862aa2edfe812878f522"
+            ],
+            "fetchedAt": "2026-10-26T22:00:40.802Z"
+          }
+        }
+      ],
+      "elapsedMs": 12153
+    },
+    {
+      "network": "arbitrum-one",
+      "inputAsset": "USDC",
+      "outputAsset": "WETH",
+      "amount": "1",
+      "slippageBps": 100,
+      "evidence": "PUBLIC_READ_ONLY",
+      "simulation": "NOT_RUN",
+      "review": "NOT_AUTHORIZED",
+      "execution": "NOT_RUN",
+      "certification": "NOT_CERTIFIED",
+      "workflowHash": "0x35c6f204453256a8ba6f7ce081d6a354e7ed7cd5c1539d5a3edee64ecbbde1ee",
+      "assets": [
+        {
+          "name": "amount-in",
+          "kind": "QUANTITY",
+          "value": {
+            "asset": {
+              "chainId": "eip155:42161",
+              "address": "0xaf88d065e77c8cc2239327c5edb3a432268e5831",
+              "decimals": 6
+            },
+            "amount": "1000000"
+          }
+        },
+        {
+          "name": "asset-out",
+          "kind": "ASSET",
+          "value": {
+            "chainId": "eip155:42161",
+            "address": "0x82af49447d8a07e3bd95bd0d56f35241523fbab1",
+            "decimals": 18
+          }
+        }
+      ],
+      "result": {
+        "ok": true,
+        "estimate": {
+          "workflowHash": "0x35c6f204453256a8ba6f7ce081d6a354e7ed7cd5c1539d5a3edee64ecbbde1ee",
+          "nodeId": "node-002",
+          "chain": "eip155:42161",
+          "provider": "Uniswap V3",
+          "expected": "0.000433654391627958",
+          "minimum": "0.000429317847711678",
+          "symbol": "WETH",
+          "slippageBps": 100,
+          "expiresAt": "2026-10-26T22:02:17.479Z",
+          "usd": null
+        }
+      },
+      "observations": [
+        {
+          "workflowHash": "0x35c6f204453256a8ba6f7ce081d6a354e7ed7cd5c1539d5a3edee64ecbbde1ee",
+          "inputToken": "0xaf88d065e77c8cc2239327c5edb3a432268e5831",
+          "outputToken": "0x82af49447d8a07e3bd95bd0d56f35241523fbab1",
+          "inputDecimals": 6,
+          "outputDecimals": 18,
+          "amountIn": "1000000",
+          "expectedOut": "433654391627958",
+          "minimumOut": "429317847711678",
+          "pool": "0x6f38e884725a116c9c7fbf208e79fe8828a2595f",
+          "fee": 100,
+          "feeTiers": [
+            {
+              "fee": 100,
+              "pool": "0x6f38e884725a116c9c7fbf208e79fe8828a2595f",
+              "expectedOut": "433654391627958"
+            },
+            {
+              "fee": 500,
+              "pool": "0xc6962004f452be9203591991d15f6b388e09e8d0",
+              "expectedOut": "433561521465385"
+            },
+            {
+              "fee": 3000,
+              "pool": "0xc473e2aee3441bf9240be85eb122abb059a3b57c",
+              "expectedOut": "432003625521074"
+            },
+            {
+              "fee": 10000,
+              "pool": "0x42fc852a750ba93d5bf772ecdc857e87a86403a9",
+              "expectedOut": "427146170139574"
+            }
+          ],
+          "blockNumber": 518563808,
+          "blockHash": "0x758ecdf03b7dd6635644b0f6c63ead596a30dcd59e7bf09d149738dbbaa25c99",
+          "provenance": "PUBLIC_MAINNET",
+          "catalog": {
+            "contentSha256": [
+              null,
+              "132cfa159d9ec36717cfd128b85d8a209baea67ed2b0862aa2edfe812878f522"
+            ],
+            "fetchedAt": "2026-10-26T22:01:05.542Z"
+          }
+        }
+      ],
+      "elapsedMs": 12550
+    },
+    {
+      "network": "arbitrum-one",
+      "inputAsset": "WETH",
+      "outputAsset": "USDC",
+      "amount": "1",
+      "slippageBps": 100,
+      "evidence": "PUBLIC_READ_ONLY",
+      "simulation": "NOT_RUN",
+      "review": "NOT_AUTHORIZED",
+      "execution": "NOT_RUN",
+      "certification": "NOT_CERTIFIED",
+      "workflowHash": "0x1bfcef70eaa90b81285b02c544f4d96691f97713f8f7bd70661f83c6e18cc3bb",
+      "assets": [
+        {
+          "name": "amount-in",
+          "kind": "QUANTITY",
+          "value": {
+            "asset": {
+              "chainId": "eip155:42161",
+              "address": "0x82af49447d8a07e3bd95bd0d56f35241523fbab1",
+              "decimals": 18
+            },
+            "amount": "1000000000000000000"
+          }
+        },
+        {
+          "name": "asset-out",
+          "kind": "ASSET",
+          "value": {
+            "chainId": "eip155:42161",
+            "address": "0xaf88d065e77c8cc2239327c5edb3a432268e5831",
+            "decimals": 6
+          }
+        }
+      ],
+      "result": {
+        "ok": true,
+        "estimate": {
+          "workflowHash": "0x1bfcef70eaa90b81285b02c544f4d96691f97713f8f7bd70661f83c6e18cc3bb",
+          "nodeId": "node-002",
+          "chain": "eip155:42161",
+          "provider": "Uniswap V3",
+          "expected": "2304.171892",
+          "minimum": "2281.130173",
+          "symbol": "USDC",
+          "slippageBps": 100,
+          "expiresAt": "2026-10-26T22:02:29.067Z",
+          "usd": null
+        }
+      },
+      "observations": [
+        {
+          "workflowHash": "0x1bfcef70eaa90b81285b02c544f4d96691f97713f8f7bd70661f83c6e18cc3bb",
+          "inputToken": "0x82af49447d8a07e3bd95bd0d56f35241523fbab1",
+          "outputToken": "0xaf88d065e77c8cc2239327c5edb3a432268e5831",
+          "inputDecimals": 18,
+          "outputDecimals": 6,
+          "amountIn": "1000000000000000000",
+          "expectedOut": "2304171892",
+          "minimumOut": "2281130173",
+          "pool": "0xc6962004f452be9203591991d15f6b388e09e8d0",
+          "fee": 500,
+          "feeTiers": [
+            {
+              "fee": 100,
+              "pool": "0x6f38e884725a116c9c7fbf208e79fe8828a2595f",
+              "expectedOut": "2287960472"
+            },
+            {
+              "fee": 500,
+              "pool": "0xc6962004f452be9203591991d15f6b388e09e8d0",
+              "expectedOut": "2304171892"
+            },
+            {
+              "fee": 3000,
+              "pool": "0xc473e2aee3441bf9240be85eb122abb059a3b57c",
+              "expectedOut": "2300756287"
+            },
+            {
+              "fee": 10000,
+              "pool": "0x42fc852a750ba93d5bf772ecdc857e87a86403a9",
+              "expectedOut": "2286943261"
+            }
+          ],
+          "blockNumber": 518563849,
+          "blockHash": "0xc3e1c871a81856241fdbd347b4753be8acf15282d5c01ef4fdcb2fa30e81eeb4",
+          "provenance": "PUBLIC_MAINNET",
+          "catalog": {
+            "contentSha256": [
+              null,
+              "132cfa159d9ec36717cfd128b85d8a209baea67ed2b0862aa2edfe812878f522"
+            ],
+            "fetchedAt": "2026-10-26T22:01:05.542Z"
+          }
+        }
+      ],
+      "elapsedMs": 11588
+    },
+    {
+      "network": "ethereum",
+      "inputAsset": "USDC",
+      "outputAsset": "WETH",
+      "amount": "1",
+      "slippageBps": 100,
+      "evidence": "PUBLIC_READ_ONLY",
+      "simulation": "NOT_RUN",
+      "review": "NOT_AUTHORIZED",
+      "execution": "NOT_RUN",
+      "certification": "NOT_CERTIFIED",
+      "workflowHash": "0x8fde35a880854f1eea92e05b6ee173f7a7ea9aa51df02a1188922df6b4f83f97",
+      "assets": [
+        {
+          "name": "amount-in",
+          "kind": "QUANTITY",
+          "value": {
+            "asset": {
+              "chainId": "eip155:1",
+              "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+              "decimals": 6
+            },
+            "amount": "1000000"
+          }
+        },
+        {
+          "name": "asset-out",
+          "kind": "ASSET",
+          "value": {
+            "chainId": "eip155:1",
+            "address": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+            "decimals": 18
+          }
+        }
+      ],
+      "result": {
+        "ok": true,
+        "estimate": {
+          "workflowHash": "0x8fde35a880854f1eea92e05b6ee173f7a7ea9aa51df02a1188922df6b4f83f97",
+          "nodeId": "node-002",
+          "chain": "eip155:1",
+          "provider": "Uniswap V3",
+          "expected": "0.000433717781741728",
+          "minimum": "0.00042938060392431",
+          "symbol": "WETH",
+          "slippageBps": 100,
+          "expiresAt": "2026-10-26T22:02:43.731Z",
+          "usd": null
+        }
+      },
+      "observations": [
+        {
+          "workflowHash": "0x8fde35a880854f1eea92e05b6ee173f7a7ea9aa51df02a1188922df6b4f83f97",
+          "inputToken": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+          "outputToken": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+          "inputDecimals": 6,
+          "outputDecimals": 18,
+          "amountIn": "1000000",
+          "expectedOut": "433717781741728",
+          "minimumOut": "429380603924310",
+          "pool": "0xe0554a476a092703abdb3ef35c80e0d76d32939f",
+          "fee": 100,
+          "feeTiers": [
+            {
+              "fee": 100,
+              "pool": "0xe0554a476a092703abdb3ef35c80e0d76d32939f",
+              "expectedOut": "433717781741728"
+            },
+            {
+              "fee": 500,
+              "pool": "0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640",
+              "expectedOut": "433605294380512"
+            },
+            {
+              "fee": 3000,
+              "pool": "0x8ad599c3a0ff1de082011efddc58f1908eb6e6d8",
+              "expectedOut": "432008323926947"
+            },
+            {
+              "fee": 10000,
+              "pool": "0x7bea39867e4169dbe237d55c8242a8f2fcdcc387",
+              "expectedOut": "427292156591634"
+            }
+          ],
+          "blockNumber": 26279720,
+          "blockHash": "0x0dac25a41cd332f29048277522a90ed92e27bc8082d0847a335cd033179092aa",
+          "provenance": "PUBLIC_MAINNET",
+          "catalog": {
+            "contentSha256": [
+              null,
+              "132cfa159d9ec36717cfd128b85d8a209baea67ed2b0862aa2edfe812878f522"
+            ],
+            "fetchedAt": "2026-10-26T22:01:29.763Z"
+          }
+        }
+      ],
+      "elapsedMs": 14663
+    },
+    {
+      "network": "ethereum",
+      "inputAsset": "WETH",
+      "outputAsset": "USDC",
+      "amount": "1",
+      "slippageBps": 100,
+      "evidence": "PUBLIC_READ_ONLY",
+      "simulation": "NOT_RUN",
+      "review": "NOT_AUTHORIZED",
+      "execution": "NOT_RUN",
+      "certification": "NOT_CERTIFIED",
+      "workflowHash": "0x5abeff4d6c2bbc189aac94f7db767f7aba7a8be3df304330dde6ac15edae0732",
+      "assets": [
+        {
+          "name": "amount-in",
+          "kind": "QUANTITY",
+          "value": {
+            "asset": {
+              "chainId": "eip155:1",
+              "address": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+              "decimals": 18
+            },
+            "amount": "1000000000000000000"
+          }
+        },
+        {
+          "name": "asset-out",
+          "kind": "ASSET",
+          "value": {
+            "chainId": "eip155:1",
+            "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+            "decimals": 6
+          }
+        }
+      ],
+      "result": {
+        "ok": true,
+        "estimate": {
+          "workflowHash": "0x5abeff4d6c2bbc189aac94f7db767f7aba7a8be3df304330dde6ac15edae0732",
+          "nodeId": "node-002",
+          "chain": "eip155:1",
+          "provider": "Uniswap V3",
+          "expected": "2306.29041",
+          "minimum": "2283.227505",
+          "symbol": "USDC",
+          "slippageBps": 100,
+          "expiresAt": "2026-10-26T22:02:55.266Z",
+          "usd": null
+        }
+      },
+      "observations": [
+        {
+          "workflowHash": "0x5abeff4d6c2bbc189aac94f7db767f7aba7a8be3df304330dde6ac15edae0732",
+          "inputToken": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+          "outputToken": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+          "inputDecimals": 18,
+          "outputDecimals": 6,
+          "amountIn": "1000000000000000000",
+          "expectedOut": "2306290410",
+          "minimumOut": "2283227505",
+          "pool": "0xe0554a476a092703abdb3ef35c80e0d76d32939f",
+          "fee": 100,
+          "feeTiers": [
+            {
+              "fee": 100,
+              "pool": "0xe0554a476a092703abdb3ef35c80e0d76d32939f",
+              "expectedOut": "2306290410"
+            },
+            {
+              "fee": 500,
+              "pool": "0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640",
+              "expectedOut": "2304218004"
+            },
+            {
+              "fee": 3000,
+              "pool": "0x8ad599c3a0ff1de082011efddc58f1908eb6e6d8",
+              "expectedOut": "2300863764"
+            },
+            {
+              "fee": 10000,
+              "pool": "0x7bea39867e4169dbe237d55c8242a8f2fcdcc387",
+              "expectedOut": "2286261210"
+            }
+          ],
+          "blockNumber": 26279721,
+          "blockHash": "0x367d4ce78e154ddad011a1322473a8f867ded87f08caa4c3b2159f80c1bb75d6",
+          "provenance": "PUBLIC_MAINNET",
+          "catalog": {
+            "contentSha256": [
+              null,
+              "132cfa159d9ec36717cfd128b85d8a209baea67ed2b0862aa2edfe812878f522"
+            ],
+            "fetchedAt": "2026-10-26T22:01:29.763Z"
+          }
+        }
+      ],
+      "elapsedMs": 11534
+    },
+    {
+      "network": "solana",
+      "inputAsset": "SOL",
+      "outputAsset": "USDC",
+      "amount": "1",
+      "slippageBps": 100,
+      "evidence": "PUBLIC_READ_ONLY",
+      "simulation": "NOT_RUN",
+      "review": "NOT_AUTHORIZED",
+      "execution": "NOT_RUN",
+      "certification": "NOT_CERTIFIED",
+      "workflowHash": "0x05ecaa1ce5a35712cae6200b5afee810f7c8c832476128c7c08fe2b6a0ac5413",
+      "assets": [
+        {
+          "name": "amount-in",
+          "kind": "QUANTITY",
+          "value": {
+            "asset": {
+              "chainId": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+              "address": "So11111111111111111111111111111111111111112",
+              "decimals": 9
+            },
+            "amount": "1000000000"
+          }
+        },
+        {
+          "name": "asset-out",
+          "kind": "ASSET",
+          "value": {
+            "chainId": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+            "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+            "decimals": 6
+          }
+        }
+      ],
+      "result": {
+        "ok": true,
+        "estimate": {
+          "workflowHash": "0x05ecaa1ce5a35712cae6200b5afee810f7c8c832476128c7c08fe2b6a0ac5413",
+          "nodeId": "node-002",
+          "chain": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+          "provider": "Jupiter",
+          "expected": "100.332239",
+          "minimum": "99.328917",
+          "symbol": "USDC",
+          "slippageBps": 100,
+          "expiresAt": "2026-10-26T22:02:25.272Z",
+          "usd": null
+        }
+      },
+      "observations": [
+        {
+          "workflowHash": "0x05ecaa1ce5a35712cae6200b5afee810f7c8c832476128c7c08fe2b6a0ac5413",
+          "input": {
+            "mint": "So11111111111111111111111111111111111111112",
+            "decimals": 9,
+            "symbol": "SOL"
+          },
+          "output": {
+            "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+            "decimals": 6,
+            "symbol": "USDC"
+          },
+          "expectedOut": "100332239",
+          "minimumOut": "99328917"
+        }
+      ],
+      "elapsedMs": 682
+    },
+    {
+      "network": "solana",
+      "inputAsset": "USDC",
+      "outputAsset": "SOL",
+      "amount": "1",
+      "slippageBps": 100,
+      "evidence": "PUBLIC_READ_ONLY",
+      "simulation": "NOT_RUN",
+      "review": "NOT_AUTHORIZED",
+      "execution": "NOT_RUN",
+      "certification": "NOT_CERTIFIED",
+      "workflowHash": "0x15b4c823491404b6998c094ad3a3402891f14926cd421d61b9ba2c96d90a9bb4",
+      "assets": [
+        {
+          "name": "amount-in",
+          "kind": "QUANTITY",
+          "value": {
+            "asset": {
+              "chainId": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+              "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+              "decimals": 6
+            },
+            "amount": "1000000"
+          }
+        },
+        {
+          "name": "asset-out",
+          "kind": "ASSET",
+          "value": {
+            "chainId": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+            "address": "So11111111111111111111111111111111111111112",
+            "decimals": 9
+          }
+        }
+      ],
+      "result": {
+        "ok": true,
+        "estimate": {
+          "workflowHash": "0x15b4c823491404b6998c094ad3a3402891f14926cd421d61b9ba2c96d90a9bb4",
+          "nodeId": "node-002",
+          "chain": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+          "provider": "Jupiter",
+          "expected": "0.009967073",
+          "minimum": "0.009867403",
+          "symbol": "SOL",
+          "slippageBps": 100,
+          "expiresAt": "2026-10-26T22:02:25.953Z",
+          "usd": null
+        }
+      },
+      "observations": [
+        {
+          "workflowHash": "0x15b4c823491404b6998c094ad3a3402891f14926cd421d61b9ba2c96d90a9bb4",
+          "input": {
+            "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+            "decimals": 6,
+            "symbol": "USDC"
+          },
+          "output": {
+            "mint": "So11111111111111111111111111111111111111112",
+            "decimals": 9,
+            "symbol": "SOL"
+          },
+          "expectedOut": "9967073",
+          "minimumOut": "9867403"
+        }
+      ],
+      "elapsedMs": 161
+    },
+    {
+      "network": "solana",
+      "inputAsset": "SOL",
+      "outputAsset": "USDT",
+      "amount": "1",
+      "slippageBps": 100,
+      "evidence": "PUBLIC_READ_ONLY",
+      "simulation": "NOT_RUN",
+      "review": "NOT_AUTHORIZED",
+      "execution": "NOT_RUN",
+      "certification": "NOT_CERTIFIED",
+      "workflowHash": "0xc350c614ee65665731bab8bcf34ad8b2667723acd9687a02e7bf5dadbf42f3b1",
+      "assets": [
+        {
+          "name": "amount-in",
+          "kind": "QUANTITY",
+          "value": {
+            "asset": {
+              "chainId": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+              "address": "So11111111111111111111111111111111111111112",
+              "decimals": 9
+            },
+            "amount": "1000000000"
+          }
+        },
+        {
+          "name": "asset-out",
+          "kind": "ASSET",
+          "value": {
+            "chainId": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+            "address": "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
+            "decimals": 6
+          }
+        }
+      ],
+      "result": {
+        "ok": true,
+        "estimate": {
+          "workflowHash": "0xc350c614ee65665731bab8bcf34ad8b2667723acd9687a02e7bf5dadbf42f3b1",
+          "nodeId": "node-002",
+          "chain": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+          "provider": "Jupiter",
+          "expected": "100.515775",
+          "minimum": "99.510618",
+          "symbol": "USDT",
+          "slippageBps": 100,
+          "expiresAt": "2026-10-26T22:02:26.114Z",
+          "usd": null
+        }
+      },
+      "observations": [
+        {
+          "workflowHash": "0xc350c614ee65665731bab8bcf34ad8b2667723acd9687a02e7bf5dadbf42f3b1",
+          "input": {
+            "mint": "So11111111111111111111111111111111111111112",
+            "decimals": 9,
+            "symbol": "SOL"
+          },
+          "output": {
+            "mint": "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
+            "decimals": 6,
+            "symbol": "USDT"
+          },
+          "expectedOut": "100515775",
+          "minimumOut": "99510618"
+        }
+      ],
+      "elapsedMs": 204
+    },
+    {
+      "network": "solana",
+      "inputAsset": "USDT",
+      "outputAsset": "SOL",
+      "amount": "1",
+      "slippageBps": 100,
+      "evidence": "PUBLIC_READ_ONLY",
+      "simulation": "NOT_RUN",
+      "review": "NOT_AUTHORIZED",
+      "execution": "NOT_RUN",
+      "certification": "NOT_CERTIFIED",
+      "workflowHash": "0x961af1bf9392cf2517f7201828c96f66e0c67084887803afab16364c6c5d78df",
+      "assets": [
+        {
+          "name": "amount-in",
+          "kind": "QUANTITY",
+          "value": {
+            "asset": {
+              "chainId": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+              "address": "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
+              "decimals": 6
+            },
+            "amount": "1000000"
+          }
+        },
+        {
+          "name": "asset-out",
+          "kind": "ASSET",
+          "value": {
+            "chainId": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+            "address": "So11111111111111111111111111111111111111112",
+            "decimals": 9
+          }
+        }
+      ],
+      "result": {
+        "ok": true,
+        "estimate": {
+          "workflowHash": "0x961af1bf9392cf2517f7201828c96f66e0c67084887803afab16364c6c5d78df",
+          "nodeId": "node-002",
+          "chain": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+          "provider": "Jupiter",
+          "expected": "0.009953599",
+          "minimum": "0.009854064",
+          "symbol": "SOL",
+          "slippageBps": 100,
+          "expiresAt": "2026-10-26T22:02:26.318Z",
+          "usd": null
+        }
+      },
+      "observations": [
+        {
+          "workflowHash": "0x961af1bf9392cf2517f7201828c96f66e0c67084887803afab16364c6c5d78df",
+          "input": {
+            "mint": "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
+            "decimals": 6,
+            "symbol": "USDT"
+          },
+          "output": {
+            "mint": "So11111111111111111111111111111111111111112",
+            "decimals": 9,
+            "symbol": "SOL"
+          },
+          "expectedOut": "9953599",
+          "minimumOut": "9854064"
+        }
+      ],
+      "elapsedMs": 229
+    },
+    {
+      "network": "solana",
+      "inputAsset": "USDC",
+      "outputAsset": "USDT",
+      "amount": "1",
+      "slippageBps": 100,
+      "evidence": "PUBLIC_READ_ONLY",
+      "simulation": "NOT_RUN",
+      "review": "NOT_AUTHORIZED",
+      "execution": "NOT_RUN",
+      "certification": "NOT_CERTIFIED",
+      "workflowHash": "0x76cacb09d14aebf9ea84c30c38e00dc3d582d49b5d47af4190724012ec1ca584",
+      "assets": [
+        {
+          "name": "amount-in",
+          "kind": "QUANTITY",
+          "value": {
+            "asset": {
+              "chainId": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+              "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+              "decimals": 6
+            },
+            "amount": "1000000"
+          }
+        },
+        {
+          "name": "asset-out",
+          "kind": "ASSET",
+          "value": {
+            "chainId": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+            "address": "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
+            "decimals": 6
+          }
+        }
+      ],
+      "result": {
+        "ok": false,
+        "code": "JUPITER_LOOKUP_TABLE_INVALID",
+        "reason": "Quote unavailable",
+        "correlationId": "5d1744a7-1d16-4eb1-aab5-9cb130a56bc2"
+      },
+      "observations": [],
+      "elapsedMs": 196
+    },
+    {
+      "network": "solana",
+      "inputAsset": "USDT",
+      "outputAsset": "USDC",
+      "amount": "1",
+      "slippageBps": 100,
+      "evidence": "PUBLIC_READ_ONLY",
+      "simulation": "NOT_RUN",
+      "review": "NOT_AUTHORIZED",
+      "execution": "NOT_RUN",
+      "certification": "NOT_CERTIFIED",
+      "workflowHash": "0x79dde929ee6c0608823f1ef4fe7b0a36b87d53fa03a3d9d1240092de2a4e2b2c",
+      "assets": [
+        {
+          "name": "amount-in",
+          "kind": "QUANTITY",
+          "value": {
+            "asset": {
+              "chainId": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+              "address": "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
+              "decimals": 6
+            },
+            "amount": "1000000"
+          }
+        },
+        {
+          "name": "asset-out",
+          "kind": "ASSET",
+          "value": {
+            "chainId": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+            "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+            "decimals": 6
+          }
+        }
+      ],
+      "result": {
+        "ok": false,
+        "code": "JUPITER_RATE_LIMITED",
+        "reason": "The quote provider or network is unavailable. Try again shortly.",
+        "correlationId": "db2fce29-5d7b-4a98-843a-1504831fdc65"
+      },
+      "observations": [],
+      "elapsedMs": 171
+    }
+  ]
+}
