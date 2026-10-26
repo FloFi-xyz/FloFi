@@ -7,6 +7,13 @@ const json = (status: number, body: unknown) => new Response(JSON.stringify(body
 const noSleep = async () => undefined;
 
 describe('BUILD-CLOUD-001 BFF forwarding client', () => {
+  it('fails closed without retry when an older backend rejects the Jupiter QUOTE payload', async () => {
+    const transport = vi.fn<typeof fetch>().mockResolvedValue(json(400, { ok: false, code: 'ARGUMENTS_INVALID' }));
+    expect(await previewCloudFlow('jupiter-swap', ['workflow', 'quote-subject'], { env, transport, purpose: 'QUOTE', maxAttempts: 1 }))
+      .toEqual({ ok: false, code: 'ARGUMENTS_INVALID' });
+    expect(transport).toHaveBeenCalledOnce();
+  });
+
   it('a Build quote uses one bounded read-only preview and carries no wallet principal or idempotency authority', async () => {
     const transport = vi.fn<typeof fetch>().mockResolvedValue(json(503, { ok: false, code: 'JUPITER_HTTP_UNAVAILABLE', correlationId: '12345678-abcd-4321-9876-123456789abc' }));
     const result = await previewCloudFlow('jupiter-swap', ['workflow', 'quote-subject'], { env, transport, timeoutMs: 30_000, maxAttempts: 1, purpose: 'QUOTE' });

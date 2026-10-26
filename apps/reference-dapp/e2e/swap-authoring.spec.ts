@@ -136,8 +136,10 @@ test('proposal and blocked review snapshots show unquoted unavailable state', as
   expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(page.viewportSize()!.width);
   expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(page.viewportSize()!.height);
   await expect(page.getByRole('button', { name: 'Simulate workflow' })).toBeEnabled();
-  // UX-007: capture the completed unavailable quote state, after the debounced read settles.
-  await expect(page.locator('.build-flow-surface .composer-quote-note')).toHaveText('Quote unavailable');
+  // This profile has no cloud runtime: wait for the specific configuration diagnosis after the debounced read.
+  const quoteNote = page.locator('.build-flow-surface .composer-quote-note');
+  await expect(quoteNote).toHaveText('Quote service is not configured. Contact support.');
+  await expect(quoteNote).toHaveAttribute('title', /^CLOUD_RUNTIME_NOT_CONFIGURED · [a-f0-9-]{36}$/);
   await readyForVisualCapture(page);
   // BUILD-FIX-UX-001: Canvas handles now react to hover; capture without the pointer resting on the card so the image is pointer-independent.
   await page.mouse.move(0, 0);

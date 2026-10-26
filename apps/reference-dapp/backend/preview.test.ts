@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from 'vitest';
 import { createLogger, HttpError, type Database } from '@defi-workflow-engine/cloud-runtime';
+import { createMockedSolanaJupiter, createMockedSolanaWallet } from '@defi-workflow-engine/reference-compiler';
+import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
+import { createSolanaSwapNode } from '../src/domain/jupiter-authoring.ts';
 import { createBackend } from './app.ts';
 import { PREVIEW_METHODS, previewStorage } from './preview.ts';
 
@@ -9,6 +12,30 @@ const untouchable = { query: async () => { throw new Error('DB_TOUCHED'); }, clo
 const enc = (text: string) => new TextEncoder().encode(text);
 
 describe('BUILD-MCP-001 read-only flow previews', () => {
+  it('supports the old Jupiter simulation payload during a backend-first rollout and keeps QUOTE read-only', async () => {
+    const harness = createMockedSolanaJupiter(), owner = createMockedSolanaWallet().owner, methods: string[] = [];
+    harness.fund(owner, 3_000_000_000n, { USDC: 100_000_000n });
+    const workflow: SemanticWorkflow = { schemaVersion: '1.0.0', workflowId: 'workflow-preview-compatibility', revision: 1, resourceEdges: [],
+      nodes: [createSolanaSwapNode('node-002', { network: 'Solana', from: 'USDC', to: 'SOL', amount: '1', slippage: '100' })] };
+    const backend = createBackend({ db: untouchable, env: { GRYLOO_JUPITER_HARNESS: 'MOCKED_LOOPBACK_ONLY' }, logger: quiet,
+      tenantId: 'default', holderId: 'test', evidenceStore: null, http: harness.http,
+      rpc: { 'jupiter-swap': async (method, params) => { methods.push(method); return harness.rpc(method, params); } } });
+    const route = backend.routes.find(r => r.name === 'preview')!, path = '/v1/previews/jupiter-swap';
+    const call = async (body: unknown) => (await route.handler({ method: 'POST', path, query: new URLSearchParams(), headers: {}, body, requestId: 'r' }, route.pattern.exec(path)!)).body;
+    const args = [workflow, owner];
+    for (const body of [{ args }, { args, purpose: 'SIMULATION' }]) {
+      expect(await call(body)).toMatchObject({ ok: true, value: { authorization: null, attempt: null, review: { commitment: expect.any(String) } } });
+    }
+    expect(methods).toContain('simulateTransaction');
+    methods.length = 0;
+    const quote = await call({ args, purpose: 'QUOTE' });
+    expect(quote).toMatchObject({ ok: true, value: { format: 'flofi.jupiter-quote-preview.v1', amount: '1000000', slippageBps: 100 } });
+    expect(methods).toEqual([]);
+    expect(harness.state.sent).toEqual([]);
+    const value = (quote as { value: Record<string, unknown> }).value;
+    for (const key of ['id', 'review', 'authorization', 'attempt', 'unsignedTransaction']) expect(value).not.toHaveProperty(key);
+  });
+
   it('the per-call run log keeps the durable store contract and is never shared', async () => {
     const storage = previewStorage(), other = previewStorage();
     expect(await storage.log.read('run.jsonl')).toBeNull();
