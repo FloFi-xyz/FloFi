@@ -148,7 +148,7 @@ export function normalizeStrategy(spec: StrategySpec): { readonly strategy: Stra
       }
       if (spec.routing === undefined) notes.push('Default routing auto applied: LI.FI first, direct Across only if LI.FI has no reconcilable route.');
       if (spec.recipient === undefined) notes.push('No recipient given: the wallet that signs in the FloFi app receives the funds (bound at Review).');
-      return { notes, strategy: { version: 1, action: 'bridge', sourceNetwork: spec.sourceNetwork, destinationNetwork: spec.destinationNetwork, asset: bridgeSymbol(spec.sourceNetwork, spec.asset), amount: spec.amount,
+      return { notes, strategy: { version: 1, action: 'bridge', sourceNetwork: spec.sourceNetwork, destinationNetwork: spec.destinationNetwork, asset: spec.asset.includes('@') ? bridgeSymbol(spec.sourceNetwork, spec.asset) : symbol(spec.sourceNetwork, spec.asset), amount: spec.amount,
         routing: spec.routing ?? 'auto', slippageBps: slippage!, ...spec.recipient === undefined ? {} : { recipient: lower(spec.recipient) } } };
     }
     case 'swap': return { notes, strategy: { version: 1, action: 'swap', network: spec.network, inputAsset: symbol(spec.network, spec.inputAsset), outputAsset: symbol(spec.network, spec.outputAsset), amount: spec.amount, slippageBps: slippage! } };
