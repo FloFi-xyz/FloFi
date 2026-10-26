@@ -39,7 +39,7 @@ describe('BUILD-WORKFLOW-VISUAL-PRESENTATION-001 workflow visual PNG', () => {
       expect(a.bytes.length).toBeLessThan(1_000_000);
     }
     expect(requests).toEqual([]);
-    // Shared 8 GiB certification runners occasionally exceed 120 s drawing every example × EN/PT twice.
+    // Shared 8 GiB certification runners occasionally exceed 120s drawing every example x EN/PT twice.
   }, 240_000);
 
   it('draws English and Portuguese differently from the same model, and a different workflow differently', async () => {
