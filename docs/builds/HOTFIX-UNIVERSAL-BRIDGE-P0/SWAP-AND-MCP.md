@@ -50,4 +50,21 @@ Uma correção global de deadlines, cancelamento, autenticação e resposta MCP 
 
 ## Compatibilidade de implantação para revisão
 
-EVM reutiliza o contrato de preview já existente. O novo `purpose: QUOTE` de Jupiter exige o backend desta revisão antes de seu uso pelo frontend; um backend antigo recusa o argumento, com diagnóstico seguro. A escolha de ordem de implantação fica para a revisão e autorização do dono. Nenhum deploy, merge, mudança de ambiente ou transação real foi feito.
+EVM reutiliza o contrato de preview já existente. Para Jupiter, a compatibilidade é **backend-first** quando `API_BASE_URL` seleciona um backend remoto. `purpose` é opcional no backend novo e sua ausência conserva `SIMULATION`; o frontend novo envia `purpose: QUOTE` somente para a cotação Jupiter de Build.
+
+| Frontend/BFF | Backend | Resultado verificado |
+| --- | --- | --- |
+| Anterior, payload `{ args }` | Anterior (`c47bb502`) | Preview de simulação preservado. |
+| Anterior, payload `{ args }` | Novo | Preview de simulação preservado; equivale a `purpose: SIMULATION`. |
+| Novo, `purpose: QUOTE` | Novo | Projeção de cotação validada. Nenhuma consulta de saldo, simulação de transação, escrita durável, Review, autorização ou bytes não assinados é produzida por `QUOTE`. |
+| Novo, `purpose: QUOTE` | Anterior (`c47bb502`) | HTTP 400 `ARGUMENTS_INVALID`: o handler anterior exige exclusivamente `{ args }`. O Build falha fechado, sem retry dessa recusa, cotação inventada ou fallback local. Esta combinação não oferece a nova cotação Jupiter. |
+
+`backend/preview.test.ts` exerce o endpoint novo com payload anterior, `SIMULATION` explícito e `QUOTE`, sobre infraestrutura MOCKED e um banco que lança erro se for acessado. `cloud-api-client.test.ts` cobre a recusa de um backend antigo. Os quatro arquivos de preview/produção/client/runtime passaram juntos em **41 testes** após a correção de CI.
+
+Uma observação local adicional carregou o handler anterior diretamente do objeto Git `c47bb502:apps/reference-dapp/backend/app.ts`, sem checkout, branch ou worktree adicional, e o conectou ao BFF atual por um transporte em memória. **1 teste passou**: o payload anterior simula no backend anterior; o novo Build recebe `ARGUMENTS_INVALID`, com correlation ID, sem nova chamada ao builder, escrita no banco ou submissão. Os arquivos temporários de teste foram removidos; o log está em `/tmp/flofi-pr126-legacy-compatibility.log`. Nenhum endpoint implantado foi alterado ou usado nessa prova.
+
+Ordem compatível para uma implantação remota **separadamente autorizada**: disponibilizar primeiro o backend novo em todas as instâncias que atendem o frontend, verificar o preview antigo e o novo no ambiente autorizado e só então promover o frontend/BFF novo. Em rollback, reverter primeiro o frontend/BFF; manter o backend novo enquanto houver clientes novos evita a recusa de `QUOTE`.
+
+Quando `DATABASE_URL` seleciona o runtime **embedded**, o backend integra o mesmo bundle do BFF; não existe uma implantação remota independente a ordenar. `API_BASE_URL` tem prioridade se ambos estiverem configurados. Este PR não altera migrações, contratos de deploy, flags financeiras ou a exceção `fast-uri@3.1.9`.
+
+Essa prova certifica a compatibilidade de código e wire com mocks; não comprova que um backend já implantado tenha sido atualizado. Nenhum deploy, merge, mudança de ambiente, mensagem a pessoas ou transação real foi feito.

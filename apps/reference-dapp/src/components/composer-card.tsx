@@ -501,8 +501,9 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
     onTokenChange={symbol => { if (card.actionSelection) card.actionSelection.onToken(tokenPanel, symbol); else card.tokenSelection?.onSelect(tokenPanel, symbol); }}
     onNetworkChange={network => { card.actionSelection?.onNetwork(network); setAmountError(null); if (poolCard) poolRange.reset(); }}/>;
   const bridgeKey = universalKeyOfCanvasLabel(bridgeNetwork);
-  const bridge = bridgePanel && bridgeSymbol && <AssetNetworkPicker bridge key={bridgePanel + bridgeNetwork} id={bridgePanelId} side={bridgePanel} symbol={bridgeSymbol} network={bridgeNetwork}
-    tokens={card.tokenSelection?.[bridgePanel] ?? [bridgeSymbol]} networks={card.networkSelection?.[bridgePanel] ?? [bridgeNetwork]} unavailable={card.networkSelection?.unavailable}
+  // A network change can clear an incompatible asset; keep the picker available for the required new selection.
+  const bridge = bridgePanel && <AssetNetworkPicker bridge key={bridgePanel + bridgeNetwork} id={bridgePanelId} side={bridgePanel} symbol={bridgeSymbol ?? ''} network={bridgeNetwork}
+    tokens={card.tokenSelection?.[bridgePanel] ?? (bridgeSymbol ? [bridgeSymbol] : [])} networks={card.networkSelection?.[bridgePanel] ?? [bridgeNetwork]} unavailable={card.networkSelection?.unavailable}
     selectedReference={card.tokenSelection?.references?.[bridgePanel]}
     search={bridgeKey && card.tokenSelection ? { chain: UNIVERSAL_NETWORKS[bridgeKey].chain, accept: () => true, identity: true, onSelect: reference => card.tokenSelection!.onSelect(bridgePanel, reference) } : undefined}
     onTokenChange={symbol => card.tokenSelection?.onSelect(bridgePanel, symbol)}

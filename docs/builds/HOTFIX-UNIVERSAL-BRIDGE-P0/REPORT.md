@@ -56,7 +56,7 @@ A matriz de serviço executa simulação verificada, Review, autorização expl�
 - a mesma identidade canônica entre os canais para a mesma intenção;
 - simulação/Review e reconciliação aprovadas no serviço MOCKED; navegador PT/EN e Canvas aprovados sem submissões financeiras.
 
-Na consulta pública registrada, Relay retornou `LIVE_QUOTE` com `RELAY_ORDER_REFUND_RECIPIENT_UNEXPECTED`; Across retornou `LIVE_QUOTE` exigindo validação pelo Router certificado; Mayan retornou `LIVE_QUOTE` sem builder de transações verificado; LI.FI respondeu rate limit. A operação continua representável. Essa cotação pública não é evidência de execução.
+**Base USDC → Arbitrum WETH ainda apresentou `LIVE_QUOTE`, não execução certificada.** Na consulta pública registrada em 26/10/2026 às 20:39:35 UTC, Relay retornou `LIVE_QUOTE` com `RELAY_ORDER_REFUND_RECIPIENT_UNEXPECTED`; Across retornou `LIVE_QUOTE` exigindo validação pelo Router certificado; Mayan retornou `LIVE_QUOTE` sem builder de transações verificado; LI.FI respondeu rate limit. O artefato registra `simulation: NOT_RUN`, `execution: NOT_EXECUTABLE_NOW` e `certification: NOT_CERTIFIED`. A operação continua representável, mas a cotação pública não é evidência de execução. A continuação do PR não fez uma nova consulta pública desse par nem enviou transações.
 
 ## Limitações por provedor
 
@@ -81,3 +81,27 @@ Autorização explícita da carteira, ownership, idempotência, nonce/order clai
 Testes principais: `bridge-universal-parity.test.ts`, `copilot-universal-bridge.test.ts`, `mcp/mainnet-only.test.ts`, `universal-router/discovery.test.ts`, `universal-router/service.test.ts`, `universal-router/failure.test.ts`, `backend/crosschain-universal-cloud.pg.test.ts` e `e2e/universal-bridge.spec.ts`.
 
 Reprodução pública somente de leitura: `node scripts/universal-route-matrix.mjs <arquivo.json>`. Disponibilidade e liquidez variam; um resultado temporário não remove tokens ou redes do contrato de intenção.
+
+## Continuação do PR #126
+
+Estado retomado: branch existente `codex/hotfix-universal-bridge-e2e`, HEAD local e remoto `74b7c12b8c4657bd9d8c6a5fde28256e643e1048`, árvore limpa e três commits do PR preservados (`5a0f710`, `617b6e6`, `74b7c12`). Nenhuma branch, worktree ou commit anterior foi recriado ou reescrito.
+
+A [rodada inicial do HEAD retomado](https://app.circleci.com/workflow/0b1f8c9d-e7d7-4124-ba14-e8e0da1c2f23) teve `governance` (#480), `certification-checks` (#482) e `certification-browser-2` (#483) aprovados. `certification-browser-1` (#481) falhou em `swap-authoring.spec.ts`: esperava `Quote unavailable`, enquanto o produto corretamente apresentava `Quote service is not configured. Contact support.` e `CLOUD_RUNTIME_NOT_CONFIGURED`. A repetição diagnóstica confirmou a mesma falha; o agregado `certification` (#484) ficou `not_run`. Nenhum resultado ignorado foi contado como aprovação.
+
+O commit adicional `9f49832b8df78c819e6722c7dddabe605d7cf99f` atualiza somente testes: a expectativa da mensagem e do código/correlation ID, o snapshot afetado e duas regressões de compatibilidade Jupiter. O diff visual foi inspecionado: apenas a mensagem mais longa e a altura/posição dos elementos do card mudaram. Não houve alteração adicional em código de produto, dependências ou configuração de CI.
+
+Validação local dessa continuação:
+
+- Playwright `swap-authoring.spec.ts`: **5 aprovados**, incluindo comparação exata dos snapshots, carteiras passivas e serviços MOCKED em loopback.
+- Preview backend, produção Build, cliente cloud e seleção de runtime: **41 aprovados** em quatro arquivos.
+- Compatibilidade com o handler anterior extraído diretamente de `c47bb502`: **1 aprovado**, em teste temporário com transporte em memória e sem checkout adicional. Ver [matriz backend-first Jupiter](SWAP-AND-MCP.md#compatibilidade-de-implantação-para-revisão).
+- Typecheck completo, lint dos arquivos alterados, governance-lite e `git diff --check`: aprovados.
+- Os sete fingerprints de módulos dos artefatos públicos Bridge/Swap coincidem com o código atual. O lockfile, `pnpm-workspace.yaml`, o verificador de dependências e os metadados da exceção `fast-uri@3.1.9` coincidem byte a byte com o HEAD retomado.
+
+A [rodada CircleCI do SHA `9f49832`](https://app.circleci.com/workflow/11847896-297b-4a5d-8b0f-97e973cf3d33) aprovou governança (#485), checks completos (#486: 5.213 unitários e 485 PostgreSQL aprovados, com ignorados separados) e navegador 2 (#488). No navegador 1 (#487), os 114 testes do perfil `default-product` passaram, incluindo o snapshot corrigido. As duas falhas restantes apareceram no último perfil, `canvas-workflow-ux`: outra expectativa antiga da mensagem de cotação e o seletor Bridge que desaparecia ao limpar o ativo incompatível com a nova rede de destino. A repetição diagnóstica confirmou ambas; o agregado (#489) ficou `not_run`.
+
+A falha do seletor também foi reproduzida localmente antes da correção. Sua condição de renderização exigia um símbolo selecionado, embora a troca de rede corretamente pudesse zerar esse símbolo. A correção conserva o seletor aberto com seleção vazia para permitir a escolha explícita do próximo ativo; não restaura um token incompatível nem escolhe um substituto. O teste existente continua validando a origem WETH, a busca de tokens na nova rede e o IR canônico após escolher ETH no destino, e agora verifica que nenhum token foi selecionado automaticamente.
+
+Após essa correção, `pnpm check` completo passou localmente: tipos, lint, build de produção, 11 exports de schemas e **5.213 testes unitários aprovados, 2 ignorados**. O perfil Playwright `canvas-workflow-ux` passou com **8 aprovados**, incluindo as duas regressões que falharam no CircleCI. Governance-lite e whitespace também passaram. A tentativa de build no sandbox compilou, mas não conseguiu ler a saída do subprocesso TypeScript; a checagem completa normal fora do sandbox passou sem mudar a configuração de build.
+
+O fechamento exige os cinco jobs do HEAD remoto final, incluindo `certification` com seu ledger de todos os perfis planejados; aprovação de uma revisão anterior ou de um subconjunto de jobs não satisfaz esse gate.
