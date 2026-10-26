@@ -194,7 +194,7 @@ export function editorReducer(state: EditorState, command: Command, context?: Re
   if (command.type === 'ADD_UNIVERSAL_BRIDGE' || command.type === 'SET_UNIVERSAL_BRIDGE') {
     if (!context) return reject('REVIEW_CONTEXT_REQUIRED');
     try {
-      if (command.type === 'SET_UNIVERSAL_BRIDGE' && !current.nodes.some(node => node.nodeId === command.nodeId && universalBridgeDetails(node))) return reject('UNKNOWN_UNIVERSAL_BRIDGE_NODE');
+      if (command.type === 'SET_UNIVERSAL_BRIDGE' && !current.nodes.some(node => node.nodeId === command.nodeId && (universalBridgeDetails(node) || routerDetails(node)))) return reject('UNKNOWN_UNIVERSAL_BRIDGE_NODE');
       const id = command.type === 'SET_UNIVERSAL_BRIDGE' ? command.nodeId : `node-${String(current.revision + 2).padStart(3, '0')}`;
       const replacement = createUniversalBridgeFromInput(id, command.input);
       if (command.type === 'SET_UNIVERSAL_BRIDGE' && JSON.stringify({ ...replacement, dependencies: [] }) === JSON.stringify({ ...current.nodes.find(n => n.nodeId === id), dependencies: [] }))

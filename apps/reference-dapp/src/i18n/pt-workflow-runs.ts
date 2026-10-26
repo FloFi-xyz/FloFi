@@ -26,6 +26,8 @@ export const portugueseWorkflowRuns: Readonly<Record<string, string>> = {
   'Continue to step {0}': 'Continuar para a etapa {0}',
   'Partially completed: the reconciled steps stay done and their funds rest in your wallet. Nothing later was submitted.':
     'Parcialmente concluído: as etapas reconciliadas ficam feitas e os seus fundos ficam na sua carteira. Nada posterior foi enviado.',
+  'Revoke workflow authorization': 'Revogar autorização do fluxo',
+  'Revocation stops future delegated steps. Submitted transactions keep being observed.': 'A revogação impede etapas delegadas futuras. As transações enviadas continuam a ser observadas.',
   'Try this step again': 'Tentar esta etapa de novo', 'End workflow': 'Encerrar fluxo',
   'A submitted step has no final outcome yet. FloFi keeps observing it and never resubmits it.':
     'Uma etapa enviada ainda não tem resultado final. O FloFi continua a observá-la e nunca a reenvia.',

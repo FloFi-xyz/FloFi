@@ -51,3 +51,9 @@ export const DELEGATED_AUTHORIZATION_SECONDS = 24 * 3_600;
 /** How often the advance work item re-observes an open run (the flows' own reconciliation is the source of truth). */
 export const ADVANCE_RETRY_MS = 20_000;
 export const WORKFLOW_RUN_ADVANCE_KIND = 'workflow-run.advance';
+
+/** Ending only skips unsubmitted work; reconciled steps and their evidence remain final. */
+export function canEndWorkflow(run: { readonly state: string; readonly mode: string | null }, steps: readonly { readonly state: string }[]): boolean {
+  return run.mode !== 'DELEGATED' && ['PENDING', 'RUNNING', 'HALTED'].includes(run.state) &&
+    !steps.some(step => ['AWAITING_OWNER', 'UNCERTAIN', 'DELEGATED'].includes(step.state));
+}

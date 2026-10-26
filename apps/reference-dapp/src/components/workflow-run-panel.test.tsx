@@ -62,6 +62,15 @@ describe('BUILD-CHAT-E2E-001 workflow run panel', () => {
     expect(waiting).toContain('In your wallet');
   });
 
+  it('offers End workflow for safe pending/running/halted runs and no terminal or in-flight run', () => {
+    for (const state of ['PENDING', 'RUNNING', 'HALTED']) expect(render(claim({ state, steps: [step(0, 'RECONCILED'), step(1, 'PENDING')] }))).toContain('End workflow');
+    for (const state of ['ATTENTION', 'COMPLETED', 'FAILED', 'CANCELLED', 'EXPIRED']) expect(render(claim({ state }))).not.toContain('End workflow');
+    for (const state of ['AWAITING_OWNER', 'UNCERTAIN', 'DELEGATED']) expect(render(claim({ state: 'HALTED', steps: [step(0, state), step(1, 'PENDING')] }))).not.toContain('End workflow');
+    const delegated = render(claim({ state: 'RUNNING', mode: 'DELEGATED' }));
+    expect(delegated).not.toContain('End workflow'); expect(delegated).toContain('Revoke workflow authorization');
+    expect(render(claim({}), 'PT')).toContain('Encerrar fluxo');
+  });
+
   it('reports partial completion and uncertainty honestly', () => {
     const halted = render(claim({ state: 'HALTED', mode: 'CONFIRM_EACH_STEP', currentStep: 1, nextAction: 'OWNER_DECIDES', steps: [step(0, 'RECONCILED'), step(1, 'BLOCKED')] }));
     expect(halted).toContain('Partially completed: the reconciled steps stay done');

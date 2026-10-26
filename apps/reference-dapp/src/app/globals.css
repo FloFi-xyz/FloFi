@@ -873,6 +873,7 @@
 .composer-token-pill>.composer-token-chip,.composer-token-options .composer-token-chip{border:0;background:transparent;padding:0;min-height:26px;margin:0}
 .composer-token-options .composer-token-chip{font-size:12px}
 .composer-bridge-picker{padding:6px 5px 6px 9px}
+.composer-bridge-picker-column:first-child{width:280px;max-height:320px;overflow-y:auto;overscroll-behavior:contain}
 .composer-bridge-picker-columns{display:grid;grid-template-columns:max-content max-content;align-items:start;gap:6px}
 .composer-bridge-picker-column+ .composer-bridge-picker-column{border-left:1px solid var(--accent-line);padding-left:6px}
 .composer-bridge-picker-heading{display:block;margin:0 8px 5px;color:var(--muted);font-size:10px;font-weight:600;line-height:1.4;letter-spacing:.03em}

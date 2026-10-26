@@ -14,7 +14,7 @@
 import type { Database, Queryable, Row } from '@defi-workflow-engine/cloud-runtime';
 import type { StrategyInput, StrategySpec } from '../engine/strategy-spec';
 import type { ApprovalRequesterKind, RequesterScope, WalletRef } from '../platform/handoff-store.ts';
-import { WORKFLOW_RUN_ADVANCE_KIND, type RunMode, type RunState, type StepState } from './state-machine.ts';
+import { WORKFLOW_RUN_ADVANCE_KIND, canEndWorkflow, type RunMode, type RunState, type StepState } from './state-machine.ts';
 
 export type WalletSet = Readonly<Partial<Record<WalletRef['namespace'], string>>>;
 /** How a bound step's amount was resolved (native units of `asset`). */
@@ -130,6 +130,9 @@ export function createPgWorkflowRunStore(db: Database, tenantId: string) {
     /** Compare-and-set on one step: from one of `from`. Null when the step is elsewhere. */
     async stepTransition(runId: string, stepIndex: number, from: readonly StepState[], to: StepState, patch: StepPatch, kind = 'STEP_STATE'): Promise<RunStepRecord | null> {
       return db.transaction(async tx => {
+        // Serialize step loading with cancellation. A stale continue/worker cannot load a cancelled run.
+        const run = await lockRun(tx, runId);
+        if (!run || run.state === 'CANCELLED') return null;
         const row = (await tx.query(`UPDATE workflow_run_steps SET state = $5, version = version + 1, flow = COALESCE($6, flow), strategy = COALESCE($7::jsonb, strategy),
             workflow_hash = COALESCE($8, workflow_hash), bound = COALESCE($9::jsonb, bound), claimed_at = COALESCE($10, claimed_at), outcome = COALESCE($11::jsonb, outcome),
             code = CASE WHEN $12::boolean THEN $13 ELSE code END
@@ -142,6 +145,24 @@ export function createPgWorkflowRunStore(db: Database, tenantId: string) {
         return stepOf(row);
       });
     },
+    /** Cancellation and skipping are atomic under the same run lock used by step loading and delegated activation. */
+    cancel: (runId: string, version: number, code: string) => db.transaction(async tx => {
+      const run = await lockRun(tx, runId) ?? refuse('WORKFLOW_RUN_NOT_FOUND');
+      if (run.version !== version) refuse('WORKFLOW_RUN_CHANGED');
+      if (!['PENDING', 'RUNNING', 'HALTED'].includes(run.state)) refuse(`WORKFLOW_RUN_${run.state}`);
+      if (run.mode === 'DELEGATED') refuse('WORKFLOW_RUN_REVOKE_REQUIRED');
+      const steps = (await tx.query('SELECT * FROM workflow_run_steps WHERE tenant_id = $1 AND run_id = $2 ORDER BY step_index FOR UPDATE', [tenantId, runId])).rows.map(stepOf);
+      if (!canEndWorkflow(run, steps)) refuse('WORKFLOW_RUN_STEP_IN_FLIGHT');
+      const row = (await tx.query(`UPDATE workflow_runs SET state = 'CANCELLED', code = $3, version = version + 1
+        WHERE tenant_id = $1 AND run_id = $2 RETURNING *`, [tenantId, runId, code])).rows[0]!;
+      for (const step of steps) if (['PENDING', 'READY', 'BLOCKED'].includes(step.state)) {
+        await tx.query(`UPDATE workflow_run_steps SET state = 'SKIPPED', code = $4, version = version + 1
+          WHERE tenant_id = $1 AND run_id = $2 AND step_index = $3`, [tenantId, runId, step.stepIndex, code]);
+        await event(tx, runId, step.stepIndex, 'STEP_STATE', code, { state: 'SKIPPED' });
+      }
+      await event(tx, runId, null, 'RUN_CANCELLED', code, { state: 'CANCELLED' });
+      return runOf(row);
+    }),
     /**
      * The owner chose to confirm each step: one transaction under the run's lock. The run must still be PENDING without a mode; any unsigned
      * delegated authorization of this run is revoked in the same transaction (it can never be signed later); the run starts RUNNING.

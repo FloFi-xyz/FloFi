@@ -120,13 +120,7 @@ export async function observeRun(deps: WorkflowRunDeps, run: RunRecord, wallets:
 /** The owner ends a run that cannot continue (HALTED), or one that never submitted anything; remaining steps are SKIPPED. */
 export async function cancelRun(deps: WorkflowRunDeps, run: RunRecord, wallets: readonly WalletRef[], code = 'OWNER_CANCELLED'): Promise<RunRecord> {
   assertRunWallets(run, wallets);
-  const steps = await deps.store.steps(run.runId);
-  // A step that may have reached a chain is never abandoned: the run keeps observing it.
-  if (steps.some(s => ['AWAITING_OWNER', 'UNCERTAIN', 'DELEGATED'].includes(s.state)) && run.state !== 'HALTED') refuse('WORKFLOW_RUN_STEP_IN_FLIGHT');
-  if (!['PENDING', 'RUNNING', 'HALTED'].includes(run.state)) refuse(`WORKFLOW_RUN_${run.state}`);
-  const moved = await deps.store.transition(run.runId, { version: run.version, from: [run.state] }, 'CANCELLED', { code }, 'RUN_CANCELLED') ?? refuse('WORKFLOW_RUN_CHANGED');
-  for (const s of steps) if (['PENDING', 'READY', 'BLOCKED'].includes(s.state)) await deps.store.stepTransition(run.runId, s.stepIndex, ['PENDING', 'READY', 'BLOCKED'], 'SKIPPED', { code });
-  return moved;
+  return deps.store.cancel(run.runId, run.version, code);
 }
 
 /** The owner resumes a HALTED run whose stopped step submitted nothing (e.g. a flow that was disabled is enabled again). */

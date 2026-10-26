@@ -112,8 +112,8 @@ function UniversalAssetPicker({ networkKey, value, onChange, label, inputLabel }
           heading: tr('Search assets'), searchLabel: tr('Search Solana tokens'), placeholder: tr('Search by symbol or mint…'),
           loading: tr('Loading Solana tokens…'), unavailable: tr('Solana tokens are unavailable right now.'),
           retry: tr('Try again'), empty: tr('No verified Solana token matches this search.'), results: tr('Solana token results'),
-          total: count => tr('{0} verified Solana tokens · type to search', count) }}/>
-        <small>{tr('Same verified set as Swap (SOL, USDC, USDT). Another mint: write address@decimals (verified on chain at Simulate). A match does not guarantee a route.')}</small>
+          excluded: count => tr('{0} entries excluded because display metadata is incomplete.', count), total: count => tr('{0} verified Solana tokens · type to search', count) }}/>
+        <small>{tr('Jupiter verified tokens. Mint identity and decimals are checked on chain at Simulate. A match does not guarantee a route.')}</small>
       </>}
   </div>;
 }

@@ -18,6 +18,9 @@ import type { CanonicalAsset } from '@defi-workflow-engine/action-registry';
 import { featuredStockSymbols, ROBINHOOD_CHAIN } from '../domain/asset-catalogs';
 import { networkIdentity } from '../domain/network-registry';
 import type { CryptoSelection } from '../domain/crypto-action-picker';
+import { SolanaVerifiedAssetSearch } from './solana-verified-asset-search';
+import { universalKeyOfCanvasLabel } from '../domain/universal-bridge-authoring';
+import { UNIVERSAL_NETWORKS } from '@defi-workflow-engine/workflow-contracts';
 import { AssetSearch } from './asset-search';
 import { ProposalReviewArtifact } from './proposal-review';
 import { usdLine, type UsdLine } from '../domain/usd-estimate';
@@ -127,15 +130,16 @@ function NetworkPicker({ network, options, unavailable = [], onSelect }: { netwo
   </fieldset>;
 }
 
-function AssetNetworkPicker({ id, side, symbol, network, tokens, networks, unavailable, onTokenChange, onNetworkChange, onCollapse, bridge = false, search }: {
+function AssetNetworkPicker({ id, side, symbol, network, tokens, networks, unavailable, onTokenChange, onNetworkChange, onCollapse, bridge = false, search, selectedReference }: {
   id: string; side: 'source' | 'destination'; symbol: string; network: string; tokens: readonly string[]; networks: readonly string[]; unavailable?: readonly string[] | undefined;
   onTokenChange(symbol: string): void; onNetworkChange(network: string): void; onCollapse(): void;
-  bridge?: boolean;
+  bridge?: boolean; selectedReference?: string | undefined;
   /** BUILD-BASE-001: an official-catalog network's search (the whole validated catalog behind the shortcuts). */
-  search?: { readonly chain: string; readonly accept: (asset: CanonicalAsset) => boolean; onSelect(symbol: string): void } | undefined;
+  search?: { readonly chain: string; readonly accept: (asset: CanonicalAsset) => boolean; readonly identity?: boolean; onSelect(symbol: string): void } | undefined;
 }) {
   const { t: tr } = useLocale();
   const sideLabel = side === 'source' ? 'Source' : 'Destination';
+  const shortcuts = <TokenPicker symbol={symbol} network={network} options={tokens} onChange={token => { if (tokens.includes(token)) onTokenChange(token); }}/>;
   return <section id={id} className="composer-stocks-panel composer-bridge-picker nodrag nopan" aria-label={tr(`${sideLabel} ${bridge ? 'bridge' : 'asset'} picker`)}
     onClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()} onKeyDownCapture={event => {
       if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); onCollapse(); }
@@ -146,11 +150,16 @@ function AssetNetworkPicker({ id, side, symbol, network, tokens, networks, unava
     <div className="composer-bridge-picker-columns">
       <div className="composer-bridge-picker-column" role="region" aria-label={tr(`${sideLabel} token picker`)}>
         <span className="composer-bridge-picker-heading" aria-hidden="true">{tr("Tokens")}</span>
-        <TokenPicker symbol={symbol} network={network} options={tokens} onChange={token => { if (tokens.includes(token)) onTokenChange(token); }}/>
-        {search && <AssetSearch chain={search.chain} selected={symbol} accept={search.accept} onSelect={search.onSelect} copy={{
+        {!bridge && shortcuts}
+        {search && network !== 'Solana' && <AssetSearch chain={search.chain} selected={selectedReference ?? symbol} accept={search.accept} onSelect={search.onSelect} onSelectAsset={search.identity ? asset => search.onSelect(asset.address ? `${asset.address}@${asset.decimals}` : asset.symbol) : undefined} copy={{
           heading: tr("Search assets"), searchLabel: tr("Search {0} tokens", network), placeholder: tr("Search by symbol or name…"),
           loading: tr("Loading {0} tokens…", network), unavailable: tr("{0} tokens are unavailable right now.", network), retry: tr("Try again"),
           empty: tr("No token matches this search."), results: tr("{0} token results", network), total: count => tr("{0} tokens · type to search", count) }}/>}
+        {search && network === 'Solana' && <SolanaVerifiedAssetSearch selected={selectedReference ?? symbol} onSelect={search.onSelect} copy={{
+          heading: tr('Search assets'), searchLabel: tr('Search Solana tokens'), placeholder: tr('Search by symbol or mint…'),
+          loading: tr('Loading {0} tokens…', network), unavailable: tr('{0} tokens are unavailable right now.', network), retry: tr('Try again'),
+          empty: tr('No token matches this search.'), results: tr('{0} token results', network), excluded: count => tr('{0} entries excluded because display metadata is incomplete.', count), total: count => tr('{0} tokens · type to search', count) }}/>}
+        {bridge && shortcuts}
       </div>
       <div className="composer-bridge-picker-column" role="region" aria-label={tr(bridge ? `${sideLabel} network picker` : 'Action network picker')}>
         <span className="composer-bridge-picker-heading" title={tr(bridge ? undefined : 'One network for all assets in this action')} aria-hidden="true">{tr("Networks")}</span>
@@ -312,7 +321,7 @@ export type ComposerCardData = {
   estimateWorkflow?: SemanticWorkflow; estimateNodeId?: string; estimateOwner?: string | null;
   amountEditor?: CanvasAmountEditor;
   contextualProposal?: boolean;
-  tokenSelection?: { source: readonly string[]; destination: readonly string[]; onSelect(side: 'source' | 'destination', symbol: string): void };
+  tokenSelection?: { references?: { source: string | undefined; destination: string | undefined }; source: readonly string[]; destination: readonly string[]; onSelect(side: 'source' | 'destination', symbol: string): void };
   networkSelection?: { source: readonly string[]; destination: readonly string[]; valid: boolean; unavailable?: readonly string[]; onSelect(side: 'source' | 'destination', network: string): void };
   /** BUILD-RH-002: the Stocks card, a Robinhood Chain swap that pays USDG for the selected Stock Token. */
   stocks?: { equity: string; onEquityChange(equity: string): void };
@@ -490,8 +499,11 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
     tokens={tokenOptions} networks={card.actionSelection?.networks ?? []} onCollapse={collapseTokens} search={tokenSearch}
     onTokenChange={symbol => { if (card.actionSelection) card.actionSelection.onToken(tokenPanel, symbol); else card.tokenSelection?.onSelect(tokenPanel, symbol); }}
     onNetworkChange={network => { card.actionSelection?.onNetwork(network); setAmountError(null); if (poolCard) poolRange.reset(); }}/>;
-  const bridge = bridgePanel && bridgeSymbol && <AssetNetworkPicker bridge key={bridgePanel} id={bridgePanelId} side={bridgePanel} symbol={bridgeSymbol} network={bridgeNetwork}
+  const bridgeKey = universalKeyOfCanvasLabel(bridgeNetwork);
+  const bridge = bridgePanel && bridgeSymbol && <AssetNetworkPicker bridge key={bridgePanel + bridgeNetwork} id={bridgePanelId} side={bridgePanel} symbol={bridgeSymbol} network={bridgeNetwork}
     tokens={card.tokenSelection?.[bridgePanel] ?? [bridgeSymbol]} networks={card.networkSelection?.[bridgePanel] ?? [bridgeNetwork]} unavailable={card.networkSelection?.unavailable}
+    selectedReference={card.tokenSelection?.references?.[bridgePanel]}
+    search={bridgeKey && card.tokenSelection ? { chain: UNIVERSAL_NETWORKS[bridgeKey].chain, accept: () => true, identity: true, onSelect: reference => card.tokenSelection!.onSelect(bridgePanel, reference) } : undefined}
     onTokenChange={symbol => card.tokenSelection?.onSelect(bridgePanel, symbol)}
     onNetworkChange={network => { card.networkSelection?.onSelect(bridgePanel, network); setAmountError(null); }} onCollapse={collapseBridge}/>;
   return poolCard ? <div ref={poolNodeRef} className="composer-pool-node">{tr(content)}{tr(tokens)}{poolPanelOpen && <PoolPricePanel strategy={poolRange.preset} onSelect={poolRange.selectPreset} onCollapse={() => setPoolPanelOpen(false)}/>}</div> : card.stocks ? <div ref={poolNodeRef} className="composer-stocks-node">{tr(content)}

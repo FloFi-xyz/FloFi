@@ -4,6 +4,8 @@
  * evidence. Provider, protocol, network and asset names stay as they are.
  */
 export const portugueseUniversalBridge: Readonly<Record<string, string>> = {
+  '{0} entries excluded because display metadata is incomplete.': '{0} entradas excluídas por metadados de apresentação incompletos.',
+  'Jupiter verified tokens. Mint identity and decimals are checked on chain at Simulate. A match does not guarantee a route.': 'Tokens verificados pelo Jupiter. O mint e as casas decimais são verificados na rede em Simular. Uma correspondência não garante uma rota.',
   // Canvas form
   'through the universal Cross-chain Router · real funds · a fresh route, simulation and Review are required after changes.':
     'pelo Router cross-chain universal · fundos reais · após alterações são necessárias uma nova rota, simulação e Revisão.',
