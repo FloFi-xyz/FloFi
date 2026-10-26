@@ -2,7 +2,10 @@
 import { COPILOT_LIMITS, COPILOT_OUTPUT_SCHEMA, CopilotIntentError, hasUnsafeCharacters, parseCopilotOutput, type CopilotIntentV1,
   type CopilotThreadMessage } from '../domain/copilot-intent';
 import { COPILOT_OUTPUT_SCHEMA_V2, COPILOT_TRANSCRIPT, COPILOT_V2_LIMITS, parseCopilotOutputV2, type CopilotIntentV2 } from '../domain/copilot-intent-v2';
+import type { CopilotMode } from '../domain/copilot-mode';
 import { copilotNetworkRule, copilotSupportsSection, copilotTransferScope } from './copilot-capabilities';
+
+export type { CopilotMode };
 
 /**
  * BUILD-COPILOT-001: the server-side AI boundary. One Responses API request per user turn, structured output only,
@@ -13,7 +16,6 @@ import { copilotNetworkRule, copilotSupportsSection, copilotTransferScope } from
 export const OPENAI_RESPONSES_URL = 'https://api.openai.com/v1/responses';
 export const COPILOT_SERVER_LIMITS = Object.freeze({ timeoutMs: 20_000, maxResponseBytes: 262_144, maxOutputTokens: 2_048,
   maxConcurrent: 2, windowMs: 60_000, maxPerWindow: 30 });
-export type CopilotMode = 'off' | 'live' | 'replay' | 'unavailable';
 export type CopilotResult = { readonly ok: true; readonly intent: CopilotIntentV1 } | { readonly ok: false; readonly code: string };
 export type CopilotConfig = { readonly mode: 'off' | 'replay' | 'unavailable' }
   | { readonly mode: 'live'; readonly apiKey: string; readonly model: string; readonly temperature: number | null };

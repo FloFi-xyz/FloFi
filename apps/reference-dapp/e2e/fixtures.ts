@@ -148,7 +148,8 @@ export const signingSurface = (page: Page) => page.getByRole('main', { name: 'Au
  * (no Credentials step) and only asks that wallet to sign FloFi's sign-in message.
  */
 export async function proveConnectedEvmWallet(page: Page, region: Locator, account: string): Promise<void> {
-  await expect(page.locator('.build009-wallet-info')).toHaveAttribute('title', new RegExp(`^${account}$`, 'i'));
+  // BUILD-FLOFI-PRODUCT-UX-001: compact chrome keeps the address (and chain) in the title tooltip.
+  await expect(page.locator('.build009-wallet-info')).toHaveAttribute('title', new RegExp(account, 'i'));
   await region.getByRole('button', { name: 'Connect wallet and prove ownership' }).click();
   await expect(page.locator('dialog.wallet-selector[open]')).toHaveCount(0);
 }
@@ -182,9 +183,10 @@ export async function applyPendingProposal(page: Page): Promise<void> {
 
 /** Inspect canonical IR using the explicitly enabled loopback-only read probe, with no product debug surface. */
 export async function readWorkflowIr(page: Page): Promise<string> {
-  const raw = await page.evaluate(() => (window as unknown as { __flofiEngineeringWorkflow?: string }).__flofiEngineeringWorkflow);
-  if (!raw) throw new Error('The guarded canonical workflow probe is not enabled');
-  return raw;
+  await page.waitForFunction(() => Boolean((window as unknown as { __flofiEngineeringWorkflow?: string }).__flofiEngineeringWorkflow), undefined, { timeout: 10_000 }).catch(() => {
+    throw new Error('The guarded canonical workflow probe is not enabled');
+  });
+  return page.evaluate(() => (window as unknown as { __flofiEngineeringWorkflow: string }).__flofiEngineeringWorkflow);
 }
 
 /** Select an authored action and open its existing Advanced Settings. */

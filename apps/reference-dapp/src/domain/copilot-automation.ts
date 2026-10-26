@@ -6,6 +6,7 @@ import { routeStrategy } from '../automations/assets';
 import type { CapabilityView } from '../automations/views';
 import type { CopilotLanguage } from './copilot-messages';
 import { portugueseAutomations } from '../i18n/pt-automations';
+import { DEFAULT_SLIPPAGE_BPS } from './slippage-policy';
 
 export type { AutomationInput } from '../automations/definition';
 export type AutomationDraft = {
@@ -92,7 +93,7 @@ export function groundAutomationDraft(raw: AutomationDraft, text: string, timezo
       (raw.condition === 'PRICE_BELOW' ? BELOW : ABOVE).test(match[2]!) && (match[3] || match[5]) && groundedAmount(match[4]!, raw.threshold!)))
       return ask('What USD price threshold and direction should trigger the proposal?');
   }
-  const action = watch ? null : { kind: 'ROUTE' as const, asset: raw.asset, side: raw.side!, network: network!, amount: raw.amount!, slippageBps: 50 };
+  const action = watch ? null : { kind: 'ROUTE' as const, asset: raw.asset, side: raw.side!, network: network!, amount: raw.amount!, slippageBps: DEFAULT_SLIPPAGE_BPS };
   if (action) { const route = routeStrategy(action); if (!route.ok) return refuse('The input asset does not match this automation route.'); }
   const limits = { maxAmountPerExecution: raw.amount, maxAmountPerPeriod: null, maxOccurrencesPerPeriod: null, cooldownMinutes: 0, maxSlippageBps: null };
   const label = raw.kind === 'DAILY_WATCH' ? 'Daily watch' : raw.kind === 'SCHEDULED_DCA' ? 'Scheduled DCA' : 'Price trigger';

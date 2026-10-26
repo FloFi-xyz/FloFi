@@ -120,7 +120,9 @@ test('read-only questions are answered from Flofi state: no proposal, no change,
   await ask(page, "Why can't I execute this?");
   await expect(copilotSays(page)).toContainText('Execution is blocked by:');
   await expect(copilotSays(page)).toContainText('There is no simulation result for this workflow yet. Run Simulate first.');
-  await expect(copilotSays(page)).toContainText('This action is available for workflow authoring only.');
+  // PUBLIC_MAINNET product scope: Base Sepolia Uniswap is environment-blocked (not ACTION_TEMPLATE_ONLY).
+  await expect(copilotSays(page)).toContainText('This adapter is not available in this environment.');
+  await expect(copilotSays(page)).toContainText('Output is an unquoted placeholder. Execution is unavailable.');
   await ask(page, 'What is the APY on Aave right now?');
   await expect(copilotSays(page)).toContainText('Flofi has no live prices, APY, balances, gas prices, bridge times or health factors');
   await expect(copilotSays(page)).toContainText('Read only: nothing was proposed, changed, signed or executed.');
@@ -153,11 +155,11 @@ test('a bridge asks where it should go, the button answer needs no model, and "t
   await ask(page, 'Bridge 1 USDC from Base Sepolia.');
   await expect(copilotSays(page)).toContainText('To prepare this bridge, Flofi still needs the destination network.');
   await copilotSays(page).getByRole('button', { name: 'Arbitrum Sepolia' }).click();
-  await expect(copilotSays(page)).toContainText('Interpreted as “bridge 1 USDC from Base Sepolia to Arbitrum Sepolia via auto slippage 50 bps”');
+  await expect(copilotSays(page)).toContainText('Interpreted as “bridge 1 USDC from Base Sepolia to Arbitrum Sepolia via auto slippage 100 bps”');
   await expect(copilotSays(page)).toContainText('Base Sepolia');
   await expect(copilotSays(page)).toContainText('Arbitrum Sepolia');
   await ask(page, 'Do the same thing but with 2 USDC');
-  await expect(copilotSays(page)).toContainText('Interpreted as “bridge 2 USDC from Base Sepolia to Arbitrum Sepolia via auto slippage 50 bps”');
+  await expect(copilotSays(page)).toContainText('Interpreted as “bridge 2 USDC from Base Sepolia to Arbitrum Sepolia via auto slippage 100 bps”');
   await expect(copilotSays(page)).toContainText('Kept from your earlier proposal');
   await dismiss(page);
   await revision(page, 0);

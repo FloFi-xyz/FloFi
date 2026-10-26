@@ -15,9 +15,9 @@ const bridge = (sourceNetwork: string, destinationNetwork: string) => ({ type: '
 const loan = (type: string, amount: string) => ({ type, protocol: 'AAVE_V3', network: 'ARBITRUM', asset: 'USDC', amount, beneficiary: null });
 export const ARBITRUM_CERTIFICATION_CASES: readonly Case[] = [
   { id: 'Swap', text: 'Swap 10 USDC for WETH on Arbitrum', pt: 'troca 10 USDC por WETH na Arbitrum',
-    sentence: 'swap 10 USDC to WETH on Arbitrum One slippage 50 bps', action: swap,
-    strategy: { action: 'swap', network: 'arbitrum-one', inputAsset: 'USDC', outputAsset: 'WETH', amount: '10', slippageBps: 50 },
-    canvas: { selection: { action: 'swap', network: 'Arbitrum One', from: 'USDC', to: 'WETH' }, amount: '10', slippage: '50' } },
+    sentence: 'swap 10 USDC to WETH on Arbitrum One slippage 100 bps', action: swap,
+    strategy: { action: 'swap', network: 'arbitrum-one', inputAsset: 'USDC', outputAsset: 'WETH', amount: '10', slippageBps: 100 },
+    canvas: { selection: { action: 'swap', network: 'Arbitrum One', from: 'USDC', to: 'WETH' }, amount: '10', slippage: '100' } },
   ...(['ETH', 'USDC'] as const).map(asset => {
     const amount = asset === 'ETH' ? '0.01' : '5';
     return { id: asset === 'ETH' ? 'Native Transfer' : 'ERC20 Transfer', text: 'Send ' + amount + ' ' + asset + ' on Arbitrum to ' + CERTIFICATION_RECIPIENT,
@@ -31,11 +31,11 @@ export const ARBITRUM_CERTIFICATION_CASES: readonly Case[] = [
     return { id: incoming ? 'Bridge Base → Arbitrum' : 'Bridge Arbitrum → Base',
       text: (incoming ? 'Bridge' : 'Move') + ' 100 USDC from ' + source + ' to ' + destination,
       pt: (incoming ? 'manda' : 'traga') + ' 100 USDC da ' + source + ' para ' + destination,
-      sentence: 'bridge 100 USDC from ' + source + ' to ' + destination + ' via auto slippage 50 bps',
+      sentence: 'bridge 100 USDC from ' + source + ' to ' + destination + ' via auto slippage 100 bps',
       action: bridge(incoming ? 'BASE' : 'ARBITRUM', incoming ? 'ARBITRUM' : 'BASE'),
       strategy: { action: 'bridge', sourceNetwork: incoming ? 'base' : 'arbitrum-one', destinationNetwork: incoming ? 'arbitrum-one' : 'base',
-        asset: 'USDC', amount: '100', routing: 'auto', slippageBps: 50 } as StrategySpec,
-      canvas: { source, destination, token: 'USDC', amount: '100', recipient: '', routing: 'AUTO', slippage: '50' } as RouterBridgeInput };
+        asset: 'USDC', amount: '100', routing: 'auto', slippageBps: 100 } as StrategySpec,
+      canvas: { source, destination, token: 'USDC', amount: '100', recipient: '', routing: 'AUTO', slippage: '100' } as RouterBridgeInput };
   }),
   { id: 'Liquidity', text: 'Provide liquidity with 10 USDC and 0.005 WETH on Arbitrum at 0.05% over the full range',
     pt: 'quero adicionar liquidez de 10 USDC e 0,005 WETH na Arbitrum com taxa de 0,05% na faixa completa',

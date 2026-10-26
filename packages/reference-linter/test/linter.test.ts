@@ -2,11 +2,11 @@
 import { describe, expect, it } from 'vitest';
 import { baseAssetRegistry, referenceRegistry } from '@defi-workflow-engine/action-registry';
 import { createReviewContext, lintWorkflow } from '../src/index.js';
-import { initialWorkflow } from '../../../apps/reference-dapp/src/domain/initial-workflow';
+import { templateWorkflow } from '../../../apps/reference-dapp/src/domain/initial-workflow';
 import { createSwapNode } from '../../../apps/reference-dapp/src/domain/swap-authoring';
 
 const context = createReviewContext({ registryId: referenceRegistry.registryId, capabilityId: referenceRegistry.capabilities[0]?.id, actionId: referenceRegistry.actions[0]?.id, assets: baseAssetRegistry });
-const make = (bps: number) => ({ ...initialWorkflow(), nodes: [...initialWorkflow().nodes, createSwapNode('node-002', 'USDC_TO_WETH', '2', String(bps), context)] });
+const make = (bps: number) => ({ ...templateWorkflow(), nodes: [...templateWorkflow().nodes, createSwapNode('node-002', 'USDC_TO_WETH', '2', String(bps), context)] });
 
 describe('deterministic swap review', () => {
   it.each([[0, 'ZERO_SLIPPAGE'], [1, null], [100, null], [101, 'ELEVATED_SLIPPAGE'], [300, 'ELEVATED_SLIPPAGE'], [301, 'SLIPPAGE_ABOVE_REVIEW_LIMIT'], [10000, 'SLIPPAGE_ABOVE_REVIEW_LIMIT']] as const)('%i bps', (bps, code) => {

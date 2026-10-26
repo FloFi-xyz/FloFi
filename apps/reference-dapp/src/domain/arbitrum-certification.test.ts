@@ -15,6 +15,9 @@ import { editorReducer, initialEditor } from './editor';
 import { createCryptoActionNode, cryptoNetworks, cryptoProfiles, validCryptoSelection } from './crypto-action-picker';
 import { routerChainChoices, routerTokensOf } from './router-authoring';
 import { composeStrategy, semanticWorkflowHash } from '../engine/strategy-engine';
+import type { StrategySpec } from '../engine/strategy-spec';
+import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
+import { createMockNode } from './mock-actions';
 import { codeCapabilities } from '../engine/capability-catalog';
 import { STRATEGY_EXAMPLES } from '../engine/strategy-examples';
 import { canonicalStrategy } from '../channels/core/strategy';
@@ -105,7 +108,7 @@ describe('Arbitrum capability certification matrix — Canvas / exact Chat / nat
     expect(networkIdentity(chain)?.mark).toBe('/brand/crypto/arbitrum.png');
     for (const language of ['EN', 'PT'] as const) for (const text of [capabilityText(language), copilotSupportsSection()]) {
       expect(text).toContain('Arbitrum One'); expect(text).toContain('Base'); expect(text).toContain('Robinhood Chain');
-      expect(text).toContain('USDC'); expect(text).toContain('Supply');
+      expect(text).toContain('USDC'); expect(text.toLowerCase()).toContain('supply');
     }
   });
 });
@@ -271,8 +274,26 @@ describe('Honest unsupported scope and stable historical hashes', () => {
     const { reply } = natural(text, act.catalogLiquidity({ network: 'ARBITRUM', protocol: 'UNISWAP_V3' }), text.startsWith('quero') ? 'PT' : 'EN');
     expect(reply.kind).toBe('CLARIFICATION'); expect(reply.command).toBeUndefined();
   });
+  // BUILD-FLOFI-PRODUCT-UX-001, two deliberate changes to newly composed workflows, certified against the recorded hashes:
+  //  1. the baseline was recorded when a bridge or a lending composition written without `slippageBps` meant 50 bps — stated explicitly, the same
+  //     meaning composes to the same IR; omitting it now means the 100 bps product default;
+  //  2. a new workflow no longer starts with the hidden template step (`node-001`, `mock-read`), which actions that appended to the initial draft
+  //     carried into their canonical IR. With exactly that step put back in front, every historical workflow is byte-identical to its recorded
+  //     hash — the template's removal is the only change. Stored workflows (saved, handed off, runs) keep their exact IR and hash.
+  const historical = (strategy: StrategySpec): StrategySpec => (strategy.action === 'bridge' || strategy.action === 'lending_composition') && !('slippageBps' in strategy)
+    ? { ...strategy, slippageBps: 50 } as StrategySpec : strategy;
+  const withHistoricalTemplate = (workflow: SemanticWorkflow): SemanticWorkflow => ({ ...workflow, nodes: [createMockNode('node-001', 'read'), ...workflow.nodes] });
   it.each(baseline.entries)('$id retains the Base/Robinhood baseline hash', entry => {
-    const result = composeStrategy(entry.strategy); expect(result).toMatchObject({ ok: true, workflowHash: entry.workflowHash });
+    const result = composeStrategy(historical(entry.strategy as StrategySpec)); expect(result.ok).toBe(true); if (!result.ok) throw Error(result.code);
+    expect(result.workflow.nodes.some(node => node.actionType.startsWith('mock-'))).toBe(false);
+    expect([result.workflowHash, semanticWorkflowHash(withHistoricalTemplate(result.workflow as SemanticWorkflow))]).toContain(entry.workflowHash);
+  });
+  it('a historical bridge or lending composition that omits slippage now starts at the 100 bps product default', () => {
+    for (const entry of baseline.entries.filter(e => historical(e.strategy as StrategySpec) !== e.strategy)) {
+      const result = composeStrategy(entry.strategy as StrategySpec);
+      expect(result).toMatchObject({ ok: true, strategy: { slippageBps: 100 } }); expect(result.ok && result.workflowHash).not.toBe(entry.workflowHash);
+      expect(composeStrategy({ ...entry.strategy, slippageBps: 100 } as StrategySpec)).toMatchObject({ ok: true, workflowHash: result.ok && result.workflowHash });
+    }
   });
   it('every historical canonical example is still present with identical structured meaning', () => {
     for (const entry of baseline.entries.filter(e => !e.id.startsWith('rh-'))) expect(STRATEGY_EXAMPLES.find(e => e.id === entry.id)?.strategy).toEqual(entry.strategy);

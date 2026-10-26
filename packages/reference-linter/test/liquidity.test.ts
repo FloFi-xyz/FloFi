@@ -2,13 +2,13 @@
 import { describe, expect, it } from 'vitest';
 import { baseAssetRegistry, referenceRegistry } from '@defi-workflow-engine/action-registry';
 import { createReviewContext, liquidityDetails, parseTick, validateAuthoringWorkflow } from '../src/index.js';
-import { initialWorkflow } from '../../../apps/reference-dapp/src/domain/initial-workflow';
+import { templateWorkflow } from '../../../apps/reference-dapp/src/domain/initial-workflow';
 import { createLiquidityNode } from '../../../apps/reference-dapp/src/domain/liquidity-authoring';
 const context = createReviewContext({ registryId: referenceRegistry.registryId, capabilityId: referenceRegistry.capabilities[0]?.id,
   actionId: referenceRegistry.actions[0]?.id, assets: baseAssetRegistry });
 const recipient = '0x1111111111111111111111111111111111111111';
 const node = () => createLiquidityNode('node-002', { weth: '0.1', usdc: '200', minimumWeth: '0', minimumUsdc: '0', tickLower: '-100', tickUpper: '100', recipient }, context);
-const workflow = () => ({ ...structuredClone(initialWorkflow()), revision: 1, nodes: [...structuredClone(initialWorkflow().nodes), node()] });
+const workflow = () => ({ ...structuredClone(templateWorkflow()), revision: 1, nodes: [...structuredClone(templateWorkflow().nodes), node()] });
 describe('BUILD-006 liquidity ingress', () => {
   it('uses one strict signed tick profile without changing frozen INTEGER', () => {
     expect(parseTick('tick:-100')).toBe(-100);

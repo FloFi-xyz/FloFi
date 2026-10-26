@@ -6,6 +6,7 @@ import { validateUniswapLiquidityNode } from '@defi-workflow-engine/reference-li
 import { uniswapQuotePriceAtTick } from '@defi-workflow-engine/reference-compiler';
 import { BASE_CHAIN, BASE_NETWORK, authoringAssetSymbol, canonicalSymbol, resolveNetworkAsset, ROBINHOOD_CHAIN, ROBINHOOD_NETWORK } from './asset-catalogs';
 import { CATALOG_CHAT_NETWORKS, catalogNetworkOfChatName, networkIdentity } from './network-registry';
+import { DEFAULT_SLIPPAGE } from './slippage-policy';
 
 /**
  * BUILD-RH-002: concentrated liquidity on a catalog network through Uniswap v3 — any two catalog ERC-20s at a standard fee tier, authored
@@ -22,7 +23,7 @@ export type CatalogLiquidityNetwork = keyof typeof CATALOG_LIQUIDITY_NETWORKS;
 export const ROBINHOOD_LIQUIDITY_FEE_TIERS: readonly number[] = Object.freeze(UNISWAP_V3_ROBINHOOD.feeTiers.map(tier => tier.fee));
 /** 0.3%: the tier of the live Stock Token / USDG pools observed at discovery (and Base's deepest USDC/WETH tier); the owner may name another. */
 export const ROBINHOOD_LIQUIDITY_DEFAULT_FEE = 3000;
-export const ROBINHOOD_LIQUIDITY_DEFAULT_SLIPPAGE = '100';
+export const ROBINHOOD_LIQUIDITY_DEFAULT_SLIPPAGE = DEFAULT_SLIPPAGE;
 export type RobinhoodLiquidityInput = { readonly network: CatalogLiquidityNetwork; readonly tokenA: string; readonly tokenB: string;
   /** Maximum deposits in whole units of each token ('0' = one-sided). */ readonly amountA: string; readonly amountB: string; readonly fee: number;
   /** `FULL`: the widest usable range of the fee tier; `TICK`: explicit ticks on its spacing. */ readonly rangeUnit: 'FULL' | 'TICK';

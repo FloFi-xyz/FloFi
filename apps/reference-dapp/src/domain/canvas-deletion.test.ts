@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { baseAssetRegistry, readBoundComposition } from '@defi-workflow-engine/action-registry';
 import { createBaseSepoliaReviewContext, createReviewContext, validateWorkflowDraft, type ReviewContext } from '@defi-workflow-engine/reference-linter';
 import { parseLocalCommand, type Command } from './commands';
-import { editorReducer, initialEditor, resolveCanvasRemoval, type EditorState } from './editor';
+import { editorReducer, templateEditor, resolveCanvasRemoval, type EditorState } from './editor';
 import { editorHistoryReducer, initialEditorHistory, type EditorHistory } from './editor-history';
 import { canDeleteCanvasNode, planCanvasRemoval } from './canvas-keyboard';
 import { composerActions } from './composer-presentation';
@@ -16,7 +16,7 @@ import { solanaLiquidityDetails } from './solana-liquidity-authoring';
 const base = createReviewContext({ registryId: 'reference.registry', capabilityId: 'swap.direct-transaction', actionId: 'asset.swap.exact-input', assets: baseAssetRegistry });
 const sepolia = createBaseSepoliaReviewContext();
 const OWNER = '0x1111111111111111111111111111111111111111';
-function chat(text: string, context: ReviewContext, from: EditorState = initialEditor()): EditorState {
+function chat(text: string, context: ReviewContext, from: EditorState = templateEditor()): EditorState {
   const next = editorReducer(from, parseLocalCommand(text, from.workflow, context, OWNER), context);
   expect(next.error).toBeNull();
   return next;
@@ -49,7 +49,7 @@ describe('every action card can be deleted', () => {
     expect(canDeleteCanvasNode(bridgeSwap.workflow, 'build009-bridge')).toBe(true);
   });
   it('removes the middle of a connected template chain and keeps the rest consistent', () => {
-    let state = initialEditor();
+    let state = templateEditor();
     for (const kind of ['transform', 'condition'] as const) state = editorReducer(state, { type: 'ADD', kind, source: 'CANVAS', baseRevision: state.workflow.revision }, base);
     state = editorReducer(state, { type: 'CONNECT', from: 'node-001', to: 'node-002', source: 'CANVAS', baseRevision: state.workflow.revision }, base);
     state = editorReducer(state, { type: 'CONNECT', from: 'node-002', to: 'node-003', source: 'CANVAS', baseRevision: state.workflow.revision }, base);
@@ -66,8 +66,8 @@ describe('every action card can be deleted', () => {
 describe('dependants of a deleted step', () => {
   it('Solana Devnet Swap → Orca position: deleting the swap returns the position to its isolated form (it keeps its own maxima)', () => {
     const context = sepolia;
-    let state = editorReducer(initialEditor(), parseLocalCommand('swap 0.1 SOL to devUSDC on Solana Devnet slippage 50 bps then add liquidity 5 swapped devUSDC and 0.05 SOL ticks -1024 to 1024 slippage 100 bps',
-      initialEditor().workflow, context), context);
+    let state = editorReducer(templateEditor(), parseLocalCommand('swap 0.1 SOL to devUSDC on Solana Devnet slippage 50 bps then add liquidity 5 swapped devUSDC and 0.05 SOL ticks -1024 to 1024 slippage 100 bps',
+      templateEditor().workflow, context), context);
     expect(state.error).toBeNull();
     expect(() => readBoundComposition(state.workflow)).not.toThrow();
     const plan = planCanvasRemoval(state.workflow, ['node-002'])!;
@@ -100,7 +100,9 @@ describe('dependants of a deleted step', () => {
       expect(after.error, `${target}: ${after.error}`).toBeNull();
       expect(cards(after)).toEqual([supply, borrow, swap].filter(id => !plan.removed.includes(id!)));
       expect(plan.cascaded).toEqual(plan.removed.filter(id => id !== target));
-      expect(() => validateWorkflowDraft(after.workflow, sepolia)).not.toThrow();
+      // BUILD-FLOFI-PRODUCT-UX-001: cascading away every financial step leaves the empty draft (never linted); otherwise the rest stays valid.
+      if (after.workflow.nodes.length) expect(() => validateWorkflowDraft(after.workflow, sepolia)).not.toThrow();
+      else expect(cards(after)).toEqual([]);
     }
   });
   it('Base → Arbitrum bridge and Uniswap liquidity: deleting any step removes the composition and keeps a valid, editable draft', () => {

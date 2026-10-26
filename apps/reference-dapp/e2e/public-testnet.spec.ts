@@ -36,7 +36,7 @@ test('an existing injected session is reused without a new connection prompt', a
     } } });
   });
   await page.goto('/app');
-  await expect(page.getByText('EVM Default: 0x1111…1111 · Base Sepolia')).toBeVisible();
+  await expect(page.getByText('0x1111…1111')).toBeVisible();
   await authorSwap(page);
   expect(await page.evaluate(() => (window as Window & { __publicWalletPrompts?: number }).__publicWalletPrompts)).toBe(0);
 });

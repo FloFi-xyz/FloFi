@@ -8,6 +8,7 @@ import { createSolanaSwapNode, formatTokenAmount, solanaSwapDetails, solanaSwapL
 import { useWorkflow } from '../state/workflow-store';
 import { useJupiter } from '../state/jupiter-store';
 import { PendingExecutionNote, SolanaWalletGuardNote } from './execution-concurrency-notes';
+import { DEFAULT_SLIPPAGE } from '../domain/slippage-policy';
 
 export function SolanaSwapForm({ nodeId, onDone, direct = false, network: initialNetwork = 'Solana' }: { nodeId?: string; onDone?: () => void; direct?: boolean; network?: SolanaNetwork }) {
   const { t: tr } = useLocale();
@@ -15,8 +16,8 @@ export function SolanaSwapForm({ nodeId, onDone, direct = false, network: initia
   const node = state.workflow.nodes.find(n => n.nodeId === nodeId);
   const existing = node ? solanaSwapDetails(node) : null;
   const devnet = (existing?.network ?? initialNetwork) === 'Solana Devnet';
-  const [input, setInput] = useState<SolanaSwapInput>(existing ?? (devnet ? { network: 'Solana Devnet', from: 'devUSDC', to: 'SOL', amount: '', slippage: '50' }
-    : { network: 'Solana', from: 'USDC', to: 'SOL', amount: '', slippage: '50' }));
+  const [input, setInput] = useState<SolanaSwapInput>(existing ?? (devnet ? { network: 'Solana Devnet', from: 'devUSDC', to: 'SOL', amount: '', slippage: DEFAULT_SLIPPAGE }
+    : { network: 'Solana', from: 'USDC', to: 'SOL', amount: '', slippage: DEFAULT_SLIPPAGE }));
   const [error, setError] = useState('');
   const set = (patch: Partial<SolanaSwapInput>) => setInput(value => ({ ...value, ...patch }));
   const tokens = solanaTokensFor(input.network), label = devnet ? 'Solana Devnet' : 'Solana';

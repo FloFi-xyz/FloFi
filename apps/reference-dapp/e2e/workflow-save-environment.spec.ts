@@ -64,7 +64,7 @@ for (const theme of ['light', 'dark'] as const) {
     await page.addInitScript(value => localStorage.setItem('flofi.theme', value), theme);
     await installSupplyWallet(page); await page.goto('/app');
     const header = page.getByRole('banner');
-    await expect(page.locator('.build009-wallet-info')).toContainText('Base Sepolia');
+    await expect(page.locator('.build009-wallet-info')).toHaveAttribute('title', /Base Sepolia/);
     await expect(header.getByRole('combobox', { name: 'Environment', exact: true })).toHaveCount(0);
     await expect(header.getByRole('listbox', { name: 'Environment options', exact: true })).toHaveCount(0);
     await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '0');

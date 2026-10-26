@@ -12,6 +12,7 @@ import { useLending } from '../state/lending-store';
 import { useBridgeSwap } from '../state/bridge-swap-store';
 import { useWorkflow } from '../state/workflow-store';
 import { WORKFLOW_STAGES, workflowShellContext, shellChainLabel, type WorkflowStage } from '../domain/product-shell';
+import { isPristineDraft } from '../domain/initial-workflow';
 import { EVM_WALLET_NETWORKS } from '../wallet/evm-networks';
 import { activeNetworkScope, networkAllowed } from '../domain/network-scope';
 import { useRouter } from '../state/router-store';
@@ -27,6 +28,9 @@ import { WalletMark } from './wallet-selector';
 
 export type Tab = WorkflowStage;
 export type ProductSection = Tab | 'Dashboard';
+
+const shortAddress = (address: string) => `${address.slice(0, 6)}…${address.slice(-4)}`;
+
 /** `compact` (BUILD-SOLANA-TRANSFER-UX-001, the `/approve` signing surface): brand, wallet and settings only — no stage navigation and no
  * Mainnet/Testnet switch, because the proposal fixes its own network. */
 export function TopBar({ tab, setTab, pathname, engineering = false, compact = false }: { tab: ProductSection; setTab: (value: ProductSection) => void; pathname?: string | null; engineering?: boolean; compact?: boolean }) {
@@ -43,7 +47,9 @@ export function TopBar({ tab, setTab, pathname, engineering = false, compact = f
   const router = useRouter();
   const jupiter = useJupiter();
   const lending = useLending();
-  const pristine = workflow.revision === 0 && context.mockExample;
+  // BUILD-FLOFI-PRODUCT-UX-001: only a genuinely empty / untouched draft may inherit a recovered run's network; a canvas with real actions
+  // always takes `requiredChain` from those actions. An empty canvas never invents a workflow network.
+  const pristine = isPristineDraft(workflow);
   const lendingActive = isLendingComposition(workflow) || Boolean(pristine && lending.recovered && lending.record && !lending.retired);
   const build009Active = workflow.nodes[0]?.nodeId === 'build009-bridge' || Boolean(pristine && bridgeSwap.recovered && bridgeSwap.run);
   const destination = bridgeSwap.run && ['PARTIAL_COMPLETION','SWAP_QUOTED','SWAP_AUTHORIZED','SWAP_UNKNOWN','SWAP_SUBMITTED','SWAP_RECONCILED'].includes(bridgeSwap.run.state);
@@ -64,7 +70,13 @@ export function TopBar({ tab, setTab, pathname, engineering = false, compact = f
   const walletError = solanaActive ? connection.error : build009.error ?? connection.error;
   const provider = solanaActive ? jupiter.session ? { name: jupiter.session.wallet.name, icon: jupiter.session.wallet.icon ?? null } : null
     : build009.account ? build009.provider : null;
+  const restoring = solanaActive ? jupiter.restoring : build009.restoring;
   const fork = info?.available ? info : null;
+  const solanaAddress = jupiter.session?.account.address;
+  const solanaTitle = solanaAddress && jupiter.session
+    ? `${jupiter.session.wallet.name} · ${solanaAddress} · ${jupiter.session.chain === 'solana:devnet' ? 'Solana Devnet' : jupiter.session.chain === 'solana:mainnet' ? 'Solana mainnet-beta' : jupiter.session.chain}`
+    : undefined;
+  const evmTitle = build009.account ? `${provider?.name ?? 'EVM'} · ${build009.account} · ${chainName(build009.chainId)}` : undefined;
   return <header className={`top-bar${compact ? ' top-bar-compact' : ''}`}>
     <div className="brand">{!compact && <NavigationDrawer pathname={pathname ?? null} section={tab} onBuild={() => setTab('Build')}
       onDisconnect={disconnect} disconnectDisabled={disconnectDisabled}/>}<FloFiLogo/></div>
@@ -73,9 +85,10 @@ export function TopBar({ tab, setTab, pathname, engineering = false, compact = f
     <div className="top-meta">
       <div className="header-wallet" role="group" aria-label={tr("Wallet connection")}>
       {provider && <span className="header-wallet-provider" title={provider.name}><WalletMark icon={provider.icon}/><span className="sr-only">{provider.name}</span></span>}
-      {solanaActive && jupiter.session ? <span className="wallet-connection">{tr("Solana Default: ")}<span className="numeric wallet-address">{jupiter.session.account.address.slice(0, 6)}…{jupiter.session.account.address.slice(-4)}</span> · {tr(jupiter.session.chain === 'solana:devnet' ? 'Solana Devnet' : jupiter.session.chain === 'solana:mainnet' ? 'Solana mainnet-beta' : jupiter.session.chain)}</span>
-        : !solanaActive && build009.account ? <span className="build009-wallet-info wallet-connection" title={build009.account}>{tr("EVM Default: ")}<span className="numeric wallet-address">{build009.account.slice(0, 6)}…{build009.account.slice(-4)}</span> · {tr(chainName(build009.chainId))}</span>
-          : <><span className="wallet-connection">{tr(solanaActive ? 'Solana wallet not connected' : 'Wallet not connected')}</span><button type="button" onClick={() => void connection.connect()} disabled={build009.busy || jupiter.busy}>{tr("Connect Wallet")}</button></>}
+      {solanaActive && solanaAddress ? <span className="wallet-connection" title={solanaTitle}><span className="numeric wallet-address">{shortAddress(solanaAddress)}</span></span>
+        : !solanaActive && build009.account ? <span className="build009-wallet-info wallet-connection" title={evmTitle}><span className="numeric wallet-address">{shortAddress(build009.account)}</span></span>
+          : restoring ? <span className="wallet-connection" role="status">{tr("Restoring wallet…")}</span>
+            : <><span className="wallet-connection">{tr(solanaActive ? 'Solana wallet not connected' : 'Wallet not connected')}</span><button type="button" onClick={() => void connection.connect()} disabled={build009.busy || jupiter.busy}>{tr("Connect Wallet")}</button></>}
       </div>
       <HeaderSettings onDisconnect={disconnect} disconnectDisabled={disconnectDisabled}/>
     </div>

@@ -25,7 +25,7 @@ describe('BUILD-ROUTER-001 Guided Chat / Canvas authoring', () => {
   });
   it('defaults: connected wallet, automatic routing and default slippage', () => {
     expect(parseRouterChat('bridge 1.25 USDC from Base to Arbitrum')).toEqual({ source: 'Base', destination: 'Arbitrum', token: 'USDC', amount: '1.25', recipient: '',
-      slippage: '50', routing: 'AUTO' });
+      slippage: '100', routing: 'AUTO' });
     const w = apply({ type: 'ADD_ROUTER_BRIDGE', input: parseRouterChat('bridge 1.25 USDC from Base to Arbitrum via Across')!, source: 'CHAT', baseRevision: 0 });
     expect(readRouterBridgeNode(w.nodes[0]!)).toMatchObject({ recipient: 'CONNECTED_OWNER', providers: ['across'] });
   });

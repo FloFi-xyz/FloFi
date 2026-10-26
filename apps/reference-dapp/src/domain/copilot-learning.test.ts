@@ -37,7 +37,7 @@ describe('BUILD-CHAT-LEARNING-001 acceptance: private meaning, no inheritance, s
     // A later session: the saved meaning comes back through A's verified identity.
     const later = session(learning('AVAILABLE', { private: [saved('arb', 'network:ARBITRUM')] }));
     const reply = later.say('Bridge 10 USDC from Base to Arb', BASE_TO_ARB);
-    expect(reply).toMatchObject({ kind: 'PROPOSAL', sentence: 'bridge 10 USDC from Base to Arbitrum via auto slippage 50 bps' });
+    expect(reply).toMatchObject({ kind: 'PROPOSAL', sentence: 'bridge 10 USDC from Base to Arbitrum via auto slippage 100 bps' });
     expect(reply!.notes).toContain('“arb” read as Arbitrum One — your saved meaning.');
     expect(reply!.learning?.used).toEqual([saved('arb', 'network:ARBITRUM')]);
     // Still a proposal only: nothing applied, review and the wallet still decide.
@@ -57,7 +57,7 @@ describe('BUILD-CHAT-LEARNING-001 acceptance: private meaning, no inheritance, s
       expect(before.say('Swap 0.001 WETH to USDC on eth sepolia', ETH_SEPOLIA_SWAP)!.kind).toBe('CLARIFICATION');
       const after = session(learning('AVAILABLE', { owner, global: [glossary('eth sepolia', 'network:ETHEREUM_SEPOLIA', 3)], globalVersion: 3 }));
       const reply = after.say('Swap 0.001 WETH to USDC on eth sepolia', ETH_SEPOLIA_SWAP);
-      expect(reply).toMatchObject({ kind: 'PROPOSAL', sentence: 'swap 0.001 WETH to USDC on Ethereum Sepolia slippage 50 bps' });
+      expect(reply).toMatchObject({ kind: 'PROPOSAL', sentence: 'swap 0.001 WETH to USDC on Ethereum Sepolia slippage 100 bps' });
       expect(reply!.notes).toContain('“eth sepolia” read as Ethereum Sepolia — FloFi glossary v3.');
     }
   });
@@ -165,7 +165,7 @@ describe('BUILD-CHAT-LEARNING-001 safety of learned vocabulary', () => {
     expect(asked).toMatchObject({ kind: 'CLARIFICATION', options: ['Arbitrum One'] });
     expect(asked!.notes).toEqual(['“arbitrun” may mean Arbitrum One, which uses real funds — choose it below only if that is what you mean.']);
     const picked = s.say('Arbitrum One');
-    expect(picked).toMatchObject({ kind: 'PROPOSAL', sentence: 'bridge 10 USDC from Base to Arbitrum via auto slippage 50 bps' });
+    expect(picked).toMatchObject({ kind: 'PROPOSAL', sentence: 'bridge 10 USDC from Base to Arbitrum via auto slippage 100 bps' });
     expect(picked!.learning?.signals).toEqual(expect.arrayContaining(['CLARIFICATION_ANSWERED', 'SUGGESTION_CONFIRMED']));
     expect(picked!.notes.join('\n')).not.toContain('glossary'); // the user's click named the network, not the glossary
   });
@@ -176,7 +176,7 @@ describe('BUILD-CHAT-LEARNING-001 safety of learned vocabulary', () => {
     expect(global.say('Swap 5 dólar digital to WETH on Base Sepolia', swap)!.kind).toBe('CLARIFICATION');
     const own = session(learning('AVAILABLE', { private: [saved('dólar digital', 'asset:USDC')] }));
     const reply = own.say('Swap 5 dólar digital to WETH on Base Sepolia', swap);
-    expect(reply).toMatchObject({ kind: 'PROPOSAL', sentence: 'swap 5 USDC to WETH on Base Sepolia slippage 50 bps' });
+    expect(reply).toMatchObject({ kind: 'PROPOSAL', sentence: 'swap 5 USDC to WETH on Base Sepolia slippage 100 bps' });
     expect(reply!.notes).toContain('“dólar digital” read as USDC — your saved meaning.');
   });
 
@@ -215,12 +215,12 @@ describe('BUILD-CHAT-LEARNING-002 invisible learning in the conversation', () =>
     const s = session(learning('AVAILABLE', { automatic: 'ON' }));
     expect(s.say('Swap 0.1 SOL to devUSDC on sol dev', SOL_DEV('0.1'))).toMatchObject({ kind: 'CLARIFICATION', options: expect.arrayContaining(['Solana Devnet']) });
     const answered = s.say('Solana Devnet');
-    expect(answered).toMatchObject({ kind: 'PROPOSAL', sentence: 'swap 0.1 SOL to devUSDC on Solana Devnet slippage 50 bps' });
+    expect(answered).toMatchObject({ kind: 'PROPOSAL', sentence: 'swap 0.1 SOL to devUSDC on Solana Devnet slippage 100 bps' });
     expect(answered!.learning?.observations).toEqual([{ kind: 'CLARIFIED', term: 'sol dev', target: 'network:SOLANA_DEVNET', via: 'CHAT' }]);
     expect(events(answered)).toContainEqual({ kind: 'ADAPTATION', outcome: 'CLARIFIED_NETWORK' });
     s.dismiss();
     const next = s.say('Troca 0,2 SOL por devUSDC na sol dev', SOL_DEV('0.2'));
-    expect(next).toMatchObject({ kind: 'PROPOSAL', sentence: 'swap 0.2 SOL to devUSDC on Solana Devnet slippage 50 bps' });
+    expect(next).toMatchObject({ kind: 'PROPOSAL', sentence: 'swap 0.2 SOL to devUSDC on Solana Devnet slippage 100 bps' });
     expect(next!.notes).toContain('“sol dev” read as Solana Devnet — as you chose earlier in this conversation.');
     expect(events(next)).toContainEqual({ kind: 'INFERRED_USED', outcome: 'ADAPTED' });
     // A new conversation starts without it: in-session adaptation is never stored.
@@ -240,10 +240,10 @@ describe('BUILD-CHAT-LEARNING-002 invisible learning in the conversation', () =>
   it('a correction of a reading FloFi made on its own withdraws it; the word is asked about again', () => {
     const s = session(learning('AVAILABLE', { automatic: 'ON', learned: [{ term: 'eth sep', target: 'network:ETHEREUM_SEPOLIA', source: 'LEARNED' }] }));
     const read = s.say('Swap 0.002 WETH to USDC on eth sep', ETH_SEP('0.002'));
-    expect(read).toMatchObject({ kind: 'PROPOSAL', sentence: 'swap 0.002 WETH to USDC on Ethereum Sepolia slippage 50 bps' });
+    expect(read).toMatchObject({ kind: 'PROPOSAL', sentence: 'swap 0.002 WETH to USDC on Ethereum Sepolia slippage 100 bps' });
     expect(read!.notes).toContain('“eth sep” read as Ethereum Sepolia — learned from your earlier choices.');
     const corrected = s.say('no, I meant Base Sepolia', intent.edit({ network: 'BASE_SEPOLIA' }));
-    expect(corrected).toMatchObject({ kind: 'PROPOSAL', sentence: 'swap 0.002 WETH to USDC on Base Sepolia slippage 50 bps' });
+    expect(corrected).toMatchObject({ kind: 'PROPOSAL', sentence: 'swap 0.002 WETH to USDC on Base Sepolia slippage 100 bps' });
     expect(corrected!.learning?.observations).toEqual([{ kind: 'CONTRADICTED', term: 'eth sep', target: 'network:ETHEREUM_SEPOLIA', via: 'CHAT' }]);
     expect(events(corrected)).toEqual(expect.arrayContaining([{ kind: 'ADAPTATION', outcome: 'CORRECTED_NETWORK_CHAT' }, { kind: 'INFERRED_CORRECTED', outcome: 'LEARNED' }]));
     s.dismiss();
@@ -281,7 +281,7 @@ describe('BUILD-CHAT-LEARNING-002 invisible learning in the conversation', () =>
     const node = s.workflow.nodes.find(n => n.actionType !== 'mock-trigger' && !n.actionType.startsWith('mock-'))!;
     // A layout move or any change that leaves the step as it was is nothing.
     expect(s.canvas(workflow => ({ ...workflow }))).toBeNull();
-    const edited = s.canvas({ type: 'SET_SOLANA_SWAP', nodeId: node.nodeId, input: { network: 'Solana', from: 'SOL', to: 'USDC', amount: '0.1', slippage: '50' } as never,
+    const edited = s.canvas({ type: 'SET_SOLANA_SWAP', nodeId: node.nodeId, input: { network: 'Solana', from: 'SOL', to: 'USDC', amount: '0.1', slippage: '100' } as never,
       source: 'CANVAS', baseRevision: s.workflow.revision });
     // Network and token changed together: a new objective, not a correction of how FloFi read one word.
     expect(edited).toMatchObject({ observations: [], events: [{ kind: 'CORRECTION_IGNORED', outcome: 'SEVERAL_FIELDS' }] });
@@ -322,7 +322,7 @@ describe('BUILD-CHAT-LEARNING-002 invisible learning in the conversation', () =>
     expect(reply!.notes).toContain('“grana” read as USDC — as you said in this conversation.');
     const named = session(learning('AVAILABLE', { learned: [{ term: 'eth sep', target: 'network:ETHEREUM_SEPOLIA', source: 'LEARNED' }] }));
     const own = named.say('Swap 0.001 WETH to USDC on Base Sepolia', intent.action(act.swap({ network: 'BASE_SEPOLIA', inputAsset: 'WETH', outputAsset: 'USDC', amount: '0.001' })));
-    expect(own).toMatchObject({ kind: 'PROPOSAL', sentence: 'swap 0.001 WETH to USDC on Base Sepolia slippage 50 bps' });
+    expect(own).toMatchObject({ kind: 'PROPOSAL', sentence: 'swap 0.001 WETH to USDC on Base Sepolia slippage 100 bps' });
     expect(own!.notes.join('\n')).not.toContain('learned');
   });
 

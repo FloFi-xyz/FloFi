@@ -11,7 +11,7 @@
  */
 import { isBoundComposition, uniswapCatalogDeployment, uniswapLiquidityProfile } from '@defi-workflow-engine/action-registry';
 import { isLendingComposition, isSolanaTransferNode, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
-import type { Workflow } from './initial-workflow';
+import { isPristineDraft, type Workflow } from './initial-workflow';
 import { ownerWalletSwapServes } from './public-testnet-swap';
 import { routerDetails } from './router-authoring';
 import { universalBridgeDetails } from './universal-bridge-authoring';
@@ -41,7 +41,7 @@ export type OwnerRuntime = {
 };
 
 /** The visit's initial draft before any edit: only mock template cards, revision 0. */
-export const untouchedDraft = (workflow: Workflow) => workflow.revision === 0 && workflow.nodes.every(node => node.actionType.startsWith('mock-'));
+export const untouchedDraft = (workflow: Workflow) => isPristineDraft(workflow);
 /** A recovered run attaches to the untouched draft, or to exactly its own reviewed workflow; never to another workflow. */
 export function recoveredRunAttaches(workflow: Workflow, run: HeldRun): boolean {
   if (!run.recovered || run.workflow === null || run.workflow === undefined) return false;

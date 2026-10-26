@@ -23,11 +23,11 @@ afterEach(resetNetworkCatalogs);
 
 const cases = [
   { text: 'Swap 10 USDC for WETH on Arbitrum', language: 'EN', action: act.swap({ network: 'ARBITRUM', inputAsset: 'USDC', outputAsset: 'WETH', amount: '10' }),
-    sentence: 'swap 10 USDC to WETH on Arbitrum One slippage 50 bps', strategy: { action: 'swap', network: 'arbitrum-one', inputAsset: 'USDC', outputAsset: 'WETH', amount: '10', slippageBps: 50 } },
+    sentence: 'swap 10 USDC to WETH on Arbitrum One slippage 100 bps', strategy: { action: 'swap', network: 'arbitrum-one', inputAsset: 'USDC', outputAsset: 'WETH', amount: '10', slippageBps: 100 } },
   { text: 'troca 10 USDC por WETH na Arbitrum', language: 'PT', action: act.swap({ network: 'ARBITRUM', inputAsset: 'USDC', outputAsset: 'WETH', amount: '10' }),
-    sentence: 'swap 10 USDC to WETH on Arbitrum One slippage 50 bps', strategy: { action: 'swap', network: 'arbitrum-one', inputAsset: 'USDC', outputAsset: 'WETH', amount: '10', slippageBps: 50 } },
+    sentence: 'swap 10 USDC to WETH on Arbitrum One slippage 100 bps', strategy: { action: 'swap', network: 'arbitrum-one', inputAsset: 'USDC', outputAsset: 'WETH', amount: '10', slippageBps: 100 } },
   { text: 'Please exchange 10 USDC for WETH on Arbitrum', language: 'EN', action: act.swap({ network: 'ARBITRUM', inputAsset: 'USDC', outputAsset: 'WETH', amount: '10' }),
-    sentence: 'swap 10 USDC to WETH on Arbitrum One slippage 50 bps', strategy: { action: 'swap', network: 'arbitrum-one', inputAsset: 'USDC', outputAsset: 'WETH', amount: '10', slippageBps: 50 } },
+    sentence: 'swap 10 USDC to WETH on Arbitrum One slippage 100 bps', strategy: { action: 'swap', network: 'arbitrum-one', inputAsset: 'USDC', outputAsset: 'WETH', amount: '10', slippageBps: 100 } },
   { text: `Send 5 USDC on Arbitrum to ${recipient}`, language: 'EN', action: act.transfer({ network: 'ARBITRUM', asset: 'USDC', amount: '5', recipient }),
     sentence: `transfer 5 USDC on Arbitrum One to ${recipient}`, strategy: { action: 'transfer', network: 'arbitrum-one', asset: 'USDC', amount: '5', recipient } },
   { text: `mande 0.01 ETH na Arbitrum para ${recipient}`, language: 'PT', action: act.transfer({ network: 'ARBITRUM', asset: 'ETH', amount: '0.01', recipient }),
@@ -45,7 +45,7 @@ describe('Arbitrum canonical authoring parity, no new UX or Copilot list', () =>
     const workflow = editorReducer({ workflow: copilot.workflow, error: null }, chat, copilot.context).workflow;
     const node = workflow.nodes.at(-1)!;
     const canvas = c.strategy.action === 'swap'
-      ? createCryptoActionNode(node.nodeId, { selection: { action: 'swap', network: 'Arbitrum One', from: 'USDC', to: 'WETH' }, amount: '10', slippage: '50' })
+      ? createCryptoActionNode(node.nodeId, { selection: { action: 'swap', network: 'Arbitrum One', from: 'USDC', to: 'WETH' }, amount: '10', slippage: '100' })
       : createAuthoredTransfer(node.nodeId, { network: 'Arbitrum One', asset: c.strategy.asset, amount: c.strategy.amount, recipient });
     expect(canvas).toEqual(node); expect(node.chainId).toBe('eip155:42161');
     const canonical = composeStrategy(c.strategy); expect(canonical.ok).toBe(true); if (!canonical.ok) throw Error(canonical.code);

@@ -11,11 +11,12 @@ import type { UniswapLiquidityInput } from './uniswap-liquidity-authoring';
 import { defaultPoolRange, validCryptoSelection, canSelectCryptoAssets, cryptoInputOf, type CryptoSelection, type CryptoSelections } from './crypto-action-picker';
 import { actionReviewValue } from './canvas-action-setup';
 import { canvasPosition, type CanvasLayout } from './canvas-layout';
-import { editorReducer, initialEditor, type EditorState } from './editor';
+import { editorReducer, initialEditor, templateEditor, type EditorState } from './editor';
 import { freeze, type Workflow } from './initial-workflow';
 import { canEditCanvasAmount, canvasAmountCommand, amountCommandTarget, bridgeSetupNetworks, CANVAS_BRIDGE_NETWORK_OPTIONS, type CanvasActionSetup, type CanvasAmountInputs, type CanvasBridgeNetworks, type CanvasBridgeNetworkInputs, type CanvasRecipientInputs } from './canvas-action-setup';
 import { transferDetails } from './robinhood-transfer-authoring';
 import { checkRecipient, recipientPolicy } from './recipient-address';
+import { DEFAULT_SLIPPAGE } from './slippage-policy';
 
 type Snapshot = { readonly workflow: Workflow; readonly layout: CanvasLayout; readonly actionSetup: CanvasActionSetup | null; readonly amountInputs: CanvasAmountInputs; readonly bridgeNetworkInputs: CanvasBridgeNetworkInputs; readonly cryptoSelections: CryptoSelections; readonly recipientInputs: CanvasRecipientInputs };
 export type EditorHistory = { readonly editor: EditorState; readonly layout: CanvasLayout;
@@ -52,6 +53,8 @@ export type HistoryAction =
   | { readonly type: 'REDO' };
 
 export const initialEditorHistory = (): EditorHistory => ({ editor: initialEditor(), layout: {}, actionSetup: null, amountInputs: {}, bridgeNetworkInputs: {}, cryptoSelections: {}, recipientInputs: {}, setupSerial: 0, past: [], future: [] });
+/** Engineering fixture history that starts with the protected mock template at `node-001` (not the product empty canvas). */
+export const templateEditorHistory = (): EditorHistory => ({ editor: templateEditor(), layout: {}, actionSetup: null, amountInputs: {}, bridgeNetworkInputs: {}, cryptoSelections: {}, recipientInputs: {}, setupSerial: 0, past: [], future: [] });
 const snapshot = (state: EditorHistory): Snapshot => ({ workflow: state.editor.workflow, layout: state.layout, actionSetup: state.actionSetup, amountInputs: state.amountInputs, bridgeNetworkInputs: state.bridgeNetworkInputs, cryptoSelections: state.cryptoSelections, recipientInputs: state.recipientInputs });
 
 export function planCanvasDuplicate(workflow: Workflow, layout: CanvasLayout, nodeIds: readonly string[], context: ReviewContext) {
@@ -97,7 +100,7 @@ export function editorHistoryReducer(state: EditorHistory, action: HistoryAction
     const id = `action-setup-${state.setupSerial + 1}`;
     let actionSetup: CanvasActionSetup;
     if (action.action === 'pool') actionSetup = { id, action: 'pool', amount: '0', input: {
-      network: 'Base Sepolia', maxUsdc: '0', maxWeth: '0', rangeUnit: 'TICK', lower: '-887270', upper: '887270', slippage: '50',
+      network: 'Base Sepolia', maxUsdc: '0', maxWeth: '0', rangeUnit: 'TICK', lower: '-887270', upper: '887270', slippage: DEFAULT_SLIPPAGE,
     } };
     else if (action.action === 'transfer') actionSetup = { id, action: 'transfer', amount: '0', cryptoSelection: { action: 'transfer', network: 'Robinhood Chain Testnet', from: 'ETH' } };
     else if (action.action === 'supply' || action.action === 'borrow' || action.action === 'repay')

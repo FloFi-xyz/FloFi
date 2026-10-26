@@ -23,7 +23,7 @@ describe('BUILD-ARB-001 bridge semantics across Canvas/Chat/Copilot/MCP', () => 
   it.each(cases)('$text', async c => {
     const copilot = new CopilotSession(), action = act.bridge({ sourceNetwork: c.from, destinationNetwork: c.to, asset: 'USDC', amount: '100' });
     const reply = copilot.say(c.text, intent.action(action, c.language));
-    const sentence = `bridge 100 USDC from ${c.source} to ${c.destination} via auto slippage 50 bps`;
+    const sentence = `bridge 100 USDC from ${c.source} to ${c.destination} via auto slippage 100 bps`;
     const command = parseLocalCommand(c.text, copilot.workflow, copilot.context, copilot.wallet);
     expect(command).toEqual(parseLocalCommand(sentence, copilot.workflow, copilot.context, copilot.wallet));
     expect(reply?.command ?? copilot.pending?.command).toEqual(command);
@@ -34,14 +34,14 @@ describe('BUILD-ARB-001 bridge semantics across Canvas/Chat/Copilot/MCP', () => 
     expect(finishTurn(turn.turn, { ok: true, intent: intent.action(action, c.language) }, natural.env()).reply.command).toEqual(command);
     const workflow = editorReducer({ workflow: copilot.workflow, error: null }, command, copilot.context).workflow;
     const node = workflow.nodes.at(-1)!;
-    const input: RouterBridgeInput = { source: c.source, destination: c.destination, token: 'USDC', amount: '100', recipient: '', slippage: '50', routing: 'AUTO' };
+    const input: RouterBridgeInput = { source: c.source, destination: c.destination, token: 'USDC', amount: '100', recipient: '', slippage: '100', routing: 'AUTO' };
     const canvasNode = createRouterNode(node.nodeId, input);
     expect(canvasNode).toEqual(node);
     const fields = readRouterBridgeNode(canvasNode);
     expect(fields).toMatchObject({ sourceChain: c.fromId === 'base' ? 'eip155:8453' : 'eip155:42161',
       destinationChain: c.toId === 'base' ? 'eip155:8453' : 'eip155:42161', amount: '100000000', providers: ['lifi', 'across'], recipient: 'CONNECTED_OWNER' });
     expect(fields.inputToken).not.toBe(fields.outputToken);
-    const strategy = { action: 'bridge', sourceNetwork: c.fromId, destinationNetwork: c.toId, asset: 'USDC', amount: '100', routing: 'auto', slippageBps: 50 } as const;
+    const strategy = { action: 'bridge', sourceNetwork: c.fromId, destinationNetwork: c.toId, asset: 'USDC', amount: '100', routing: 'auto', slippageBps: 100 } as const;
     const canonical = composeStrategy(strategy); expect(canonical.ok).toBe(true); if (!canonical.ok) throw Error(canonical.code);
     expect(canonical.workflow).toEqual(workflow); expect(canonical.workflowHash).toBe(semanticWorkflowHash(workflow));
     expect(canonicalStrategy(command)).toMatchObject({ ok: true, workflowHash: canonical.workflowHash });

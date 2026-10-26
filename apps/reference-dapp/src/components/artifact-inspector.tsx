@@ -40,6 +40,7 @@ import { canEditCanvasAmount, setupSummary } from '../domain/canvas-action-setup
 import { supplyReviewFormId, poolReviewFormId } from './composer-card';
 import { usePoolContributionInputs } from './canvas-card-inputs';
 import { StocksSettings } from './stocks-settings';
+import { DEFAULT_SLIPPAGE } from '../domain/slippage-policy';
 
 
 const emptyCrossChain: CrossChainLiquidityInput = { amount: '100', bridgeSlippageBps: '50', swapSlippageBps: '50', tickLower: '-200100', tickUpper: '-199900', recipient: '0x1111111111111111111111111111111111111111', provider: 'lifi.rest', noSwap: false };
@@ -104,7 +105,7 @@ function CanonicalArtifactInspector({ selectedId, select, expanded = false, onEx
   const [amount, setAmount] = useState('');
   const [slippage, setSlippage] = useState('');
   const [slippageError, setSlippageError] = useState('');
-  const [bridgeInput, setBridgeInput] = useState<BridgeInput>({ amount: '', slippageBps: '50' });
+  const [bridgeInput, setBridgeInput] = useState<BridgeInput>({ amount: '', slippageBps: DEFAULT_SLIPPAGE });
   const [liquidityInput, setLiquidityInput] = useState<LiquidityInput>(emptyLiquidity);
   const effectiveLiquidityInput = liquidity && contributions.values ? { ...liquidityInput, weth: contributions.values[0]!.amount, usdc: contributions.values[1]!.amount } : liquidityInput;
   const [error, setError] = useState('');
@@ -112,7 +113,7 @@ function CanonicalArtifactInspector({ selectedId, select, expanded = false, onEx
   useEffect(() => {
     setAmount(swap ? swap.amount : template && node ? amountOf(node) : '');
     setSlippage(swap?.slippage?.toString() ?? cryptoInput?.slippage ?? '');
-    setBridgeInput(bridge ? { amount: bridge.amount, slippageBps: String(bridge.slippageBps) } : { amount: '', slippageBps: '50' });
+    setBridgeInput(bridge ? { amount: bridge.amount, slippageBps: String(bridge.slippageBps) } : { amount: '', slippageBps: DEFAULT_SLIPPAGE });
     setLiquidityInput(liquidity ? {
       weth: formatHumanAmount(liquidity.amountWeth, 'WETH', context), usdc: formatHumanAmount(liquidity.amountUsdc, 'USDC', context),
       minimumWeth: formatHumanAmount(liquidity.minimumWeth, 'WETH', context), minimumUsdc: formatHumanAmount(liquidity.minimumUsdc, 'USDC', context),

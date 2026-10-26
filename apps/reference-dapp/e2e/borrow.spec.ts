@@ -60,7 +60,7 @@ test('semantic amount edits invalidate Borrow Review',async({page})=>{
 test('read-only simulation blocks unsafe Borrow before Review',async({page})=>{
   await installSupplyWallet(page);await page.goto('/app');
   // Borrow binds the connected owner: a click before the wallet's passive reconnect is refused ("Connect your wallet…"), so wait for it.
-  await expect(page.locator('.build009-wallet-info')).toHaveAttribute('title',new RegExp(`^${SUPPLY_OWNER}$`,'i'));await page.getByRole('button',{name:'Add borrow',exact:true}).click();await configureCanvasAction(page,'5');await page.getByRole('button',{name:'Simulate workflow'}).click(); await openSimulationDetails(page);await page.getByRole('button',{name:'Simulate Borrow',exact:true}).click();
+  await expect(page.locator('.build009-wallet-info')).toHaveAttribute('title',new RegExp(SUPPLY_OWNER,'i'));await page.getByRole('button',{name:'Add borrow',exact:true}).click();await configureCanvasAction(page,'5');await page.getByRole('button',{name:'Simulate workflow'}).click(); await openSimulationDetails(page);await page.getByRole('button',{name:'Simulate Borrow',exact:true}).click();
   await expect(page.getByRole('region',{name:'Aave Borrow'})).toContainText('minimum of 2.0');
   const details = page.locator('.review-authorization-details');
   await details.locator('summary').click();

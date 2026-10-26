@@ -2,13 +2,13 @@
 import { describe, expect, it } from 'vitest';
 import { baseAssetRegistry, referenceRegistry } from '@defi-workflow-engine/action-registry';
 import { createReviewContext, validateAuthoringWorkflow } from '../src/index.js';
-import { initialWorkflow } from '../../../apps/reference-dapp/src/domain/initial-workflow';
+import { templateWorkflow } from '../../../apps/reference-dapp/src/domain/initial-workflow';
 import { createSwapNode, parseHumanAmount, parseSlippage } from '../../../apps/reference-dapp/src/domain/swap-authoring';
 import { createMockNode } from '../../../apps/reference-dapp/src/domain/mock-actions';
 
 const source = { registryId: referenceRegistry.registryId, capabilityId: referenceRegistry.capabilities[0]?.id, actionId: referenceRegistry.actions[0]?.id, assets: baseAssetRegistry };
 const context = createReviewContext(source);
-const valid = () => ({ ...initialWorkflow(), nodes: [...initialWorkflow().nodes, createSwapNode('node-002', 'USDC_TO_WETH', '2', '50', context)] });
+const valid = () => ({ ...templateWorkflow(), nodes: [...templateWorkflow().nodes, createSwapNode('node-002', 'USDC_TO_WETH', '2', '50', context)] });
 const asRecord = (value: unknown): Record<string, unknown> => value as Record<string, unknown>;
 const reject = (edit: (workflow: ReturnType<typeof valid>) => void) => {
   const workflow = structuredClone(valid()); edit(workflow);

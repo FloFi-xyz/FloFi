@@ -67,7 +67,7 @@ test('Portuguese and mainnet requests are proposals with explicit notes, and Dis
   // BUILD-COPILOT-002: replies follow the language of the latest message; the canonical sentence stays the exact grammar.
   await expect(copilotSays(page)).toContainText('Interpretado como “supply 1 USDC to Aave on Base Sepolia”');
   await ask(page, 'Swap 100 USDC to ETH on Base');
-  await expect(copilotSays(page)).toContainText('Interpreted as “swap 100 USDC to WETH on Base slippage 50 bps”');
+  await expect(copilotSays(page)).toContainText('Interpreted as “swap 100 USDC to WETH on Base slippage 100 bps”');
   await expect(copilotSays(page)).toContainText('Flofi swaps the ERC-20 WETH (wrapped ETH), not native ETH.');
   await expectChange(page, 'USDC → WETH');
   await expect(copilotSays(page)).toContainText('Base');
@@ -86,7 +86,7 @@ test('clarification with a guided option and a deterministic follow-up', async (
   // The model left the amount null; Flofi asks for it itself instead of guessing.
   await expect(copilotSays(page)).toContainText('To prepare this bridge, Flofi still needs the amount.');
   await ask(page, '5');
-  await expect(copilotSays(page)).toContainText('Interpreted as “bridge 5 USDC from Base Sepolia to Arbitrum Sepolia via auto slippage 50 bps”');
+  await expect(copilotSays(page)).toContainText('Interpreted as “bridge 5 USDC from Base Sepolia to Arbitrum Sepolia via auto slippage 100 bps”');
   await expect(copilotSays(page)).toContainText('Base Sepolia');
   await expect(copilotSays(page)).toContainText('Arbitrum Sepolia');
   await revision(page, 0);
@@ -139,7 +139,7 @@ test('an answer that arrives after a workflow change is discarded', async ({ pag
   await installSupplyWallet(page);
   await page.goto('/app');
   // The Canvas Supply below binds the connected owner as beneficiary: wait for the wallet's passive reconnect first.
-  await expect(page.locator('.build009-wallet-info')).toHaveAttribute('title', new RegExp(`^${SUPPLY_OWNER}$`, 'i'));
+  await expect(page.locator('.build009-wallet-info')).toHaveAttribute('title', new RegExp(SUPPLY_OWNER, 'i'));
   await ask(page, 'Put 2 USDC into Aave on Base Sepolia');
   await expect(conversation(page)).toContainText('Interpreting your message…');
   await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeDisabled();

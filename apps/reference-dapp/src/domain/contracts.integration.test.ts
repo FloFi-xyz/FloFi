@@ -5,7 +5,7 @@ import { assertTransition, invalidationFor, parseArtifactBytes, hashArtifactByte
 import { parseActionRegistryBytes, baseAssetRegistry, referenceRegistry } from '@defi-workflow-engine/action-registry';
 import * as linter from '@defi-workflow-engine/reference-linter';
 import { createReviewContext, lintWorkflow } from '@defi-workflow-engine/reference-linter';
-import { editorReducer, initialEditor } from './editor';
+import { editorReducer, templateEditor } from './editor';
 import { mockActions } from './mock-actions';
 import { parseLocalCommand, parseMockCommand } from './commands';
 import { generateMockedChain } from './mock-artifacts';
@@ -14,7 +14,7 @@ const bytes = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)
 
 describe('BUILD-001 contract integration', () => {
   it('validates and hashes the same immutable workflow before and after a mock edit', () => {
-    const initial = initialEditor();
+    const initial = templateEditor();
     const changed = editorReducer(initial, parseMockCommand('add read', 0));
     for (const state of [initial, changed]) {
       expect(parseArtifactBytes(bytes(state.workflow), 'semantic-workflow')).toEqual(state.workflow);
@@ -28,7 +28,7 @@ describe('BUILD-001 contract integration', () => {
     const context = createReviewContext({ registryId: referenceRegistry.registryId,
       capabilityId: referenceRegistry.capabilities[0]?.id,
       actionId: referenceRegistry.actions[0]?.id, assets: baseAssetRegistry });
-    const start = initialEditor();
+    const start = templateEditor();
     const added = editorReducer(start,
       parseLocalCommand('swap 2 USDC to WETH on Base slippage 50 bps', start.workflow, context), context);
     expect(added.error).toBeNull();
@@ -71,7 +71,7 @@ describe('BUILD-003B mocked chain against the frozen contracts', () => {
     capabilityId: referenceRegistry.capabilities[0]?.id,
     actionId: referenceRegistry.actions[0]?.id, assets: baseAssetRegistry });
   const NOW = Date.parse('2026-09-24T12:00:10.000Z');
-  const authored = editorReducer(initialEditor(), parseLocalCommand('swap 2.25 USDC to WETH on Base slippage 50 bps', initialEditor().workflow, context), context).workflow;
+  const authored = editorReducer(templateEditor(), parseLocalCommand('swap 2.25 USDC to WETH on Base slippage 50 bps', templateEditor().workflow, context), context).workflow;
 
   it('parses every generated artifact through frozen raw ingress and matches every recomputed hash', async () => {
     for (const workflow of [authored, editorReducer({ workflow: authored, error: null }, parseLocalCommand('swap 0.125 WETH to USDC on Base slippage 0 bps', authored, context), context).workflow]) {
@@ -129,7 +129,7 @@ describe('BUILD-003F Mode A fork artifacts against the frozen contracts', () => 
     const { modeASwapFromWorkflow, walletRequestFor } = await import('../server/mode-a-service');
     const context = createReviewContext({ registryId: referenceRegistry.registryId, capabilityId: referenceRegistry.capabilities[0]?.id,
       actionId: referenceRegistry.actions[0]?.id, assets: baseAssetRegistry });
-    const start = initialEditor();
+    const start = templateEditor();
     const authored = editorReducer(start, parseLocalCommand('swap 1 WETH to USDC on Base slippage 100 bps', start.workflow, context), context);
     expect(authored.error).toBeNull();
     const swap = modeASwapFromWorkflow(authored.workflow as never);

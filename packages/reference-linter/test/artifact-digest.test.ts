@@ -5,7 +5,7 @@ import { hashArtifactBytes, hashRawBytes } from '@defi-workflow-engine/workflow-
 import { baseAssetRegistry, referenceRegistry } from '@defi-workflow-engine/action-registry';
 import { DIGEST_FIELDS, digestArtifact, digestRawResponse, digestSelfCheck, type DigestKind } from '../src/artifact-digest.js';
 import { createReviewContext } from '../src/index.js';
-import { editorReducer, initialEditor, type EditorState } from '../../../apps/reference-dapp/src/domain/editor';
+import { editorReducer, templateEditor, type EditorState } from '../../../apps/reference-dapp/src/domain/editor';
 import type { Command } from '../../../apps/reference-dapp/src/domain/commands';
 
 type Vector = { domain: string; value?: unknown; rawHex?: string; digest: string };
@@ -47,7 +47,7 @@ describe('browser-safe digest equivalence (R-4)', () => {
   });
 
   it('equals the frozen hash for authored workflows in both directions, locks and several swaps', async () => {
-    const start = initialEditor();
+    const start = templateEditor();
     const workflows = [
       start,
       apply(start, swap('USDC_TO_WETH', '2.25', '50')),

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { createExactInputSwapNode, readExactInputSwap, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
+import { DEFAULT_SLIPPAGE } from './slippage-policy';
 import { JUPITER_SOLANA_MAINNET, ORCA_WHIRLPOOLS_DEVNET, SOLANA_MAINNET_TOKENS, solanaSwapRuntime, solanaTokenOn, type SolanaDevnetTokenSymbol,
   type SolanaSwapRuntime, type SolanaTokenSymbol } from '@defi-workflow-engine/action-registry';
 
@@ -67,5 +68,5 @@ export function parseSolanaSwapChat(text: string): SolanaSwapInput | null {
     if (devnet) return upper === 'USDC' || upper === 'DEVUSDC' ? 'devUSDC' : upper as SolanaSwapSymbol;
     return test || upper === 'DEVUSDC' ? 'devUSDC' : upper as SolanaSwapSymbol;
   };
-  return { network: devnet ? 'Solana Devnet' : 'Solana', from: token(match[2], match[3]!), to: token(match[4], match[5]!), amount: match[1]!, slippage: match[7] ?? '50' };
+  return { network: devnet ? 'Solana Devnet' : 'Solana', from: token(match[2], match[3]!), to: token(match[4], match[5]!), amount: match[1]!, slippage: match[7] ?? DEFAULT_SLIPPAGE };
 }

@@ -79,7 +79,9 @@ test('a declined position keeps the swap and sends nothing again; after a reload
   await openSimulationDetails(page);
   // BUILD-SOLANA-TRANSFER-UX-001: the Solana wallet the owner already chose is recognized again after the reload without a prompt (a
   // Wallet Standard silent connect: connection only, no transaction permission); no second connection is requested.
-  await expect(page.locator('.wallet-connection')).toContainText(`${wallet.owner.slice(0, 6)}…${wallet.owner.slice(-4)} · Solana Devnet`);
+  // BUILD-FLOFI-PRODUCT-UX-001: compact header shows the address; cluster stays in the title tooltip.
+  await expect(page.locator('.wallet-connection')).toContainText(`${wallet.owner.slice(0, 6)}…${wallet.owner.slice(-4)}`);
+  await expect(page.locator('.wallet-connection')).toHaveAttribute('title', new RegExp(`${wallet.owner} · Solana Devnet`));
   await expect(panel(page).getByRole('button', { name: 'Connect Solana wallet' })).toHaveCount(0);
   expect(await signRequests(page)).toBe(0);
   await phase(page, 'BOUND');
@@ -204,7 +206,9 @@ test('a reconciled swap continues to its Orca position through the Canvas after 
   await openSimulationDetails(page);
   // BUILD-SOLANA-TRANSFER-UX-001: the Solana wallet the owner already chose is recognized again after the reload without a prompt (a
   // Wallet Standard silent connect: connection only, no transaction permission); no second connection is requested.
-  await expect(page.locator('.wallet-connection')).toContainText(`${wallet.owner.slice(0, 6)}…${wallet.owner.slice(-4)} · Solana Devnet`);
+  // BUILD-FLOFI-PRODUCT-UX-001: compact header shows the address; cluster stays in the title tooltip.
+  await expect(page.locator('.wallet-connection')).toContainText(`${wallet.owner.slice(0, 6)}…${wallet.owner.slice(-4)}`);
+  await expect(page.locator('.wallet-connection')).toHaveAttribute('title', new RegExp(`${wallet.owner} · Solana Devnet`));
   await expect(panel(page).getByRole('button', { name: 'Connect Solana wallet' })).toHaveCount(0);
   expect(await signRequests(page)).toBe(0);
   await phase(page, 'BOUND');

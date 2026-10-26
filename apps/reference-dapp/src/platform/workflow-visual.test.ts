@@ -68,7 +68,7 @@ describe('BUILD-WORKFLOW-VISUAL-PRESENTATION-001 visual model: a deterministic p
 
   it('shows a bridge with both networks, the routing the IR names and the recipient (shortened) or the signing wallet', () => {
     expect(only(visualOf(BRIDGE))).toMatchObject({ action: 'BRIDGE', provider: 'LI.FI / Across', network: 'Base Sepolia', toNetwork: 'Arbitrum Sepolia',
-      amounts: [{ amount: '5', asset: 'USDC' }], slippageBps: 50, account: { role: 'CONNECTED_WALLET' } });
+      amounts: [{ amount: '5', asset: 'USDC' }], slippageBps: 100, account: { role: 'CONNECTED_WALLET' } });
     expect(only(visualOf({ ...BRIDGE, routing: 'across', recipient: RECIPIENT }))).toMatchObject({ provider: 'Across', account: { role: 'RECIPIENT', address: '0xabcd…ef01' } });
     expect(only(visualOf({ ...BRIDGE, routing: 'lifi' })).provider).toBe('LI.FI');
     const mainnet = visualOf(example('bridge-base-arbitrum-one'));
@@ -162,7 +162,7 @@ describe('BUILD-WORKFLOW-VISUAL-PRESENTATION-001 visual layout and text (EN/PT)'
     const lending = visualOf(example('lending-composition-base-sepolia')), bridge = visualOf({ ...BRIDGE, recipient: RECIPIENT });
     expect(workflowVisualText(lending, 'EN').title).toBe('Supply → Borrow → Swap');
     expect(workflowVisualText(lending, 'PT').title).toBe('Depositar → Pedir emprestado → Trocar');
-    expect(workflowVisualText(bridge, 'PT').lines[0]).toBe('1. Transferir entre redes (LI.FI / Across) · 5 USDC · Base Sepolia → Arbitrum Sepolia · Desvio máximo 0.5% · ' +
+    expect(workflowVisualText(bridge, 'PT').lines[0]).toBe('1. Transferir entre redes (LI.FI / Across) · 5 USDC · Base Sepolia → Arbitrum Sepolia · Desvio máximo 1% · ' +
       'Destinatário 0xabcd…ef01');
     expect(workflowVisualText(bridge, 'EN').summary).toBe('Bridge · Test funds · 1 step · Base Sepolia · Arbitrum Sepolia');
     expect(workflowVisualText(lending, 'PT').alt).toMatch(/^Fluxo FloFi: .*Fundos de teste · 3 etapas\..*A dívida continua após a troca\..*Revise e assine no FloFi · nada está autorizado ainda\./);

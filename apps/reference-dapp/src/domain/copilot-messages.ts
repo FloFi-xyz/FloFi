@@ -2,6 +2,7 @@
 import { ROUTER_NETWORK_OPTIONS } from './router-authoring';
 import { capabilityText, catalogNetworkNames, compositionOnlyText, lendingOnlyText, routeLabels } from './authoring-capabilities';
 import { activeNetworkScope } from './network-scope';
+import { formatSlippage } from './slippage-policy';
 
 /**
  * BUILD-COPILOT-002: every reply the Copilot writes itself, in English and Portuguese. English is byte-identical to
@@ -44,7 +45,7 @@ const EN = {
   realFundsWhichNetwork: (network: string) => `${network} uses real funds. Which network do you mean?`,
   ethereumWhichNetwork: (subject: string, options: readonly string[]) => `${subject} is available on ${options.join(', ')}. Which network do you mean?`,
   amountNotFound: (value: string) => `Flofi could not find the amount ${value} in your message. How much exactly? Write it in digits.`,
-  defaultSlippageNote: (bps: string) => `Slippage ${bps} bps (Flofi default). Say, for example, "slippage 100 bps" to change it.`,
+  defaultSlippageNote: (bps: string) => `Slippage ${formatSlippage(bps)} (Flofi default). Say, for example, "slippage 50 bps" to change it.`,
   slippageNotFound: (bps: string) => `Flofi could not find the slippage ${bps} bps in your message. What maximum slippage should it use?`,
   slippageAtMost: (bps: number) => `Slippage must be at most ${bps} bps for this action.`,
   addressNotFound: (field: 'beneficiary' | 'recipient') => `Flofi could not find that ${field} address in your message. Type the full address, or leave it out to use your connected wallet.`,
@@ -262,7 +263,7 @@ const PT: CopilotCopy = {
   realFundsWhichNetwork: network => `${network} usa fundos reais. Qual rede você quer dizer?`,
   ethereumWhichNetwork: (subject, options) => `${capitalize(subject)} está disponível em ${options.join(', ')}. Qual rede você quer usar?`,
   amountNotFound: value => `O Flofi não encontrou o valor ${value} na sua mensagem. Quanto exatamente? Escreva em algarismos.`,
-  defaultSlippageNote: bps => `Slippage de ${bps} bps (padrão do Flofi). Diga, por exemplo, "slippage 100 bps" para mudar.`,
+  defaultSlippageNote: bps => `Slippage de ${formatSlippage(bps)} (padrão do Flofi). Diga, por exemplo, "slippage 50 bps" para mudar.`,
   slippageNotFound: bps => `O Flofi não encontrou o slippage de ${bps} bps na sua mensagem. Qual slippage máximo usar?`,
   slippageAtMost: bps => `O slippage deve ser no máximo ${bps} bps nesta ação.`,
   addressNotFound: field => `O Flofi não encontrou esse endereço de ${field === 'beneficiary' ? 'beneficiário' : 'destinatário'} na sua mensagem. Digite o endereço completo ou deixe-o de fora para usar sua carteira conectada.`,

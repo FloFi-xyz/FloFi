@@ -42,7 +42,7 @@ for (const action of ['swap', 'bridge', 'supply', 'borrow', 'repay', 'withdraw',
 
 test('Swap token selection synchronizes both pills and settings, invalidates review, and applies the selected supported direction', async ({ page }) => {
   // BUILD-FLOFI-MAINNET-PRODUCT-001: no header network selector; the wallet badge names the wallet's network.
-  await installSupplyWallet(page, { chain: '0x2105' }); await page.goto('/app'); await expect(page.locator('.build009-wallet-info')).toContainText('Base (8453)'); await page.getByRole('button', { name: 'Add swap', exact: true }).click();
+  await installSupplyWallet(page, { chain: '0x2105' }); await page.goto('/app'); await expect(page.locator('.build009-wallet-info')).toHaveAttribute('title', /Base \(8453\)/); await page.getByRole('button', { name: 'Add swap', exact: true }).click();
   const card = page.locator('.build-flow-surface .composer-card');
   const revision = page.locator('.summary-bar');
   await card.getByRole('textbox').fill('0.25');
@@ -111,7 +111,7 @@ for (const theme of ['Light', 'Dark']) test(`${theme} Advanced Settings has clea
 
 test('token panels fit compact and mobile canvases and collapse on outside interaction', async ({ page }) => {
   // BUILD-FLOFI-MAINNET-PRODUCT-001: no header network selector; the wallet badge names the wallet's network.
-  await installSupplyWallet(page); await page.goto('/app'); await expect(page.locator('.build009-wallet-info')).toContainText('Base Sepolia'); await page.getByRole('button', { name: 'Add swap', exact: true }).click();
+  await installSupplyWallet(page); await page.goto('/app'); await expect(page.locator('.build009-wallet-info')).toHaveAttribute('title', /Base Sepolia/); await page.getByRole('button', { name: 'Add swap', exact: true }).click();
   const pill = page.getByRole('button', { name: 'Select source token', exact: true });
   await pill.click();
   const panel = page.getByRole('region', { name: 'Source token picker', exact: true });

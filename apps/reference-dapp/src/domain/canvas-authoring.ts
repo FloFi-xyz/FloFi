@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { Command } from './commands';
 import { SWAP_DEFAULT_SLIPPAGE_BPS } from './swap-authoring';
+import { DEFAULT_SLIPPAGE } from './slippage-policy';
 
 export const CANVAS_ACTIONS = ['swap', 'bridge', 'pool', 'supply', 'lending', 'borrow', 'repay', 'withdraw', 'transfer'] as const;
 export type CanvasAction = (typeof CANVAS_ACTIONS)[number];
@@ -12,14 +13,14 @@ export function canvasAddCommand(action: CanvasAction, revision: number, owner: 
   if (action === 'transfer') { if (amount === undefined) throw new Error('Enter an amount to configure this action.'); return { ...base, type: 'ADD_RH_TRANSFER', input: { network: 'Robinhood Chain Testnet', asset: 'ETH', amount, recipient: 'CONNECTED_OWNER' } }; }
   if (action === 'swap') return { ...base, type: 'ADD_SWAP', direction: 'USDC_TO_WETH', amount: amount!, slippage: String(SWAP_DEFAULT_SLIPPAGE_BPS) };
   if (action === 'bridge') return { ...base, type: 'ADD_ROUTER_BRIDGE', input: {
-    source: 'Base Sepolia', destination: 'Arbitrum Sepolia', token: 'USDC', amount: amount!, recipient: '', slippage: '50', routing: 'AUTO',
+    source: 'Base Sepolia', destination: 'Arbitrum Sepolia', token: 'USDC', amount: amount!, recipient: '', slippage: DEFAULT_SLIPPAGE, routing: 'AUTO',
   } };
   if (action === 'pool') throw new Error('Configure the liquidity amounts before adding this action.');
   if (action === 'withdraw') return { ...base, type: 'ADD_WITHDRAW', input: {
     network: 'Base Sepolia', asset: 'USDC', amount: amount!, recipient: 'CONNECTED_OWNER',
   } };
   if (!owner) throw new Error('Connect your wallet to set the beneficiary before adding this action.');
-  if (action === 'lending') return { ...base, type: 'AUTHOR_LENDING', input: { supply: '0.1', borrow: '0.01', slippage: '50', owner } };
+  if (action === 'lending') return { ...base, type: 'AUTHOR_LENDING', input: { supply: '0.1', borrow: '0.01', slippage: DEFAULT_SLIPPAGE, owner } };
   const input = { network: 'Base Sepolia' as const, asset: 'USDC' as const,
     amount: amount!, beneficiary: owner };
   return { ...base, type: action === 'supply' ? 'ADD_SUPPLY' : action === 'borrow' ? 'ADD_BORROW' : 'ADD_REPAY', input };

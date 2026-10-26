@@ -4,25 +4,25 @@ import { baseAssetRegistry, referenceRegistry, SOLANA_MAINNET_TOKENS } from '@de
 import { createReviewContext, validateAuthoringWorkflow } from '@defi-workflow-engine/reference-linter';
 import { readExactInputSwap } from '@defi-workflow-engine/workflow-contracts';
 import { commandIsValid, parseLocalCommand, summarize } from './commands';
-import { editorReducer, initialEditor } from './editor';
+import { editorReducer, templateEditor } from './editor';
 import { editorHistoryReducer, initialEditorHistory } from './editor-history';
 import { createSolanaSwapNode, parseTokenAmount, solanaSwapDetails, type SolanaSwapInput } from './jupiter-authoring';
 import { createSwapNode } from './swap-authoring';
 import { createBaseSepoliaReviewContext } from '@defi-workflow-engine/reference-linter';
 
 const context = createReviewContext({ registryId: referenceRegistry.registryId, capabilityId: referenceRegistry.capabilities[0]!.id, actionId: referenceRegistry.actions[0]!.id, assets: baseAssetRegistry });
-const canvasInput: SolanaSwapInput = { network: 'Solana', from: 'USDC', to: 'SOL', amount: '10', slippage: '50' };
+const canvasInput: SolanaSwapInput = { network: 'Solana', from: 'USDC', to: 'SOL', amount: '10', slippage: '100' };
 describe('Solana swap chat/canvas authoring', () => {
   it('produces semantically identical canonical swap IR from chat and canvas', () => {
-    const chat = parseLocalCommand('Swap 10 USDC to SOL on Solana', initialEditor().workflow, context);
+    const chat = parseLocalCommand('Swap 10 USDC to SOL on Solana', templateEditor().workflow, context);
     expect(chat).toEqual({ type: 'ADD_SOLANA_SWAP', input: canvasInput, source: 'CHAT', baseRevision: 0 });
-    const fromChat = editorReducer(initialEditor(), chat, context);
-    const fromCanvas = editorReducer(initialEditor(), { type: 'ADD_SOLANA_SWAP', input: canvasInput, source: 'CANVAS', baseRevision: 0 }, context);
+    const fromChat = editorReducer(templateEditor(), chat, context);
+    const fromCanvas = editorReducer(templateEditor(), { type: 'ADD_SOLANA_SWAP', input: canvasInput, source: 'CANVAS', baseRevision: 0 }, context);
     expect(fromChat.error).toBeNull();
     expect(fromChat.workflow).toEqual(fromCanvas.workflow);
     const node = fromChat.workflow.nodes.find(n => n.actionType === 'asset.swap.exact-input')!;
     expect(readExactInputSwap(node as Parameters<typeof readExactInputSwap>[0])).toMatchObject({ chain: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',
-      input: { address: SOLANA_MAINNET_TOKENS.USDC.mint, decimals: 6 }, output: { address: SOLANA_MAINNET_TOKENS.SOL.mint, decimals: 9 }, amount: '10000000', slippageBps: 50, protocols: ['jupiter'] });
+      input: { address: SOLANA_MAINNET_TOKENS.USDC.mint, decimals: 6 }, output: { address: SOLANA_MAINNET_TOKENS.SOL.mint, decimals: 9 }, amount: '10000000', slippageBps: 100, protocols: ['jupiter'] });
     expect(summarize(fromChat.workflow)).toContain('Swap 10 USDC to SOL on Solana via Jupiter');
   });
   it('uses the same canonical action and port shape as the existing EVM swap', () => {
@@ -37,7 +37,7 @@ describe('Solana swap chat/canvas authoring', () => {
     for (const bad of ['0', '1e3', '-1', '1.0000001', '']) expect(() => parseTokenAmount(bad, 6)).toThrow();
     expect(() => createSolanaSwapNode('n', { ...canvasInput, to: 'USDC' })).toThrow('INVALID_ASSET_PAIR');
     expect(() => createSolanaSwapNode('n', { ...canvasInput, slippage: '301' })).toThrow('SOLANA_SLIPPAGE_OUT_OF_RANGE');
-    expect(() => parseLocalCommand('swap 10 BONK to SOL on Solana', initialEditor().workflow, context)).toThrow();
+    expect(() => parseLocalCommand('swap 10 BONK to SOL on Solana', templateEditor().workflow, context)).toThrow();
   });
   it('edits amount and slippage through chat with revision checks and undo/redo', () => {
     let history = editorHistoryReducer(initialEditorHistory(), { type: 'COMMAND', command: { type: 'ADD_SOLANA_SWAP', input: canvasInput, source: 'CANVAS', baseRevision: 0 }, context });
@@ -57,7 +57,7 @@ describe('Solana swap chat/canvas authoring', () => {
     expect(solanaSwapDetails(history.editor.workflow.nodes.find(n => n.nodeId === 'node-002')!)?.amount).toBe('12.5');
   });
   it('authors distinct Solana swap instances, keeps runtime validation strict and validates commands', () => {
-    const added = editorReducer(initialEditor(), { type: 'ADD_SOLANA_SWAP', input: canvasInput, source: 'CANVAS', baseRevision: 0 }, context);
+    const added = editorReducer(templateEditor(), { type: 'ADD_SOLANA_SWAP', input: canvasInput, source: 'CANVAS', baseRevision: 0 }, context);
     const repeated = editorReducer(added, { type: 'ADD_SOLANA_SWAP', input: canvasInput, source: 'CANVAS', baseRevision: 1 }, context);
     expect(repeated.error).toBeNull();
     expect(new Set(repeated.workflow.nodes.filter(n => !n.actionType.startsWith('mock-')).map(n => n.nodeId)).size).toBe(2);

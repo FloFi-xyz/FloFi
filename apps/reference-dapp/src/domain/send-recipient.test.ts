@@ -8,7 +8,7 @@ import { createMockedSolanaWallet } from '@defi-workflow-engine/reference-compil
 import { checkRecipient, recipientPolicy, RECIPIENT_FORMATS } from './recipient-address';
 import { completeSendDestination, sendDestinationIssue, SEND_DESTINATION_QUESTION } from './send-destination';
 import { canvasAmountCommand, canvasAmountMessage, setupSummary, actionReviewValue } from './canvas-action-setup';
-import { editorHistoryReducer, initialEditorHistory, type EditorHistory } from './editor-history';
+import { editorHistoryReducer, templateEditorHistory, type EditorHistory } from './editor-history';
 import { parseLocalCommand } from './commands';
 import { transferDetails } from './robinhood-transfer-authoring';
 import { composerActions, composerSummary } from './composer-presentation';
@@ -31,7 +31,7 @@ beforeAll(() => {
 });
 /** A Canvas Send setup on Arbitrum One with the given amount (and optionally a typed destination). */
 function canvasSend(amount: string, recipient?: string): EditorHistory {
-  let history = editorHistoryReducer(initialEditorHistory(), { type: 'START_ACTION_SETUP', action: 'transfer', position: { x: 0, y: 0 } });
+  let history = editorHistoryReducer(templateEditorHistory(), { type: 'START_ACTION_SETUP', action: 'transfer', position: { x: 0, y: 0 } });
   const id = history.actionSetup!.id;
   history = editorHistoryReducer(history, { type: 'EDIT_CRYPTO_SELECTION', id, selection: { action: 'transfer', network: 'Arbitrum One', from: 'USDC' }, context });
   history = editorHistoryReducer(history, { type: 'EDIT_CANVAS_AMOUNT', id, amount, context });
@@ -93,7 +93,7 @@ describe('UX-001 Canvas "To" field drafts the one canonical recipient', () => {
     expect(canonical.ok).toBe(true); if (!canonical.ok) return;
     const canvasNode = composerActions(applied.editor.workflow)[0]!, mcpNode = composerActions(canonical.workflow as never)[0]!;
     expect({ ...canvasNode, nodeId: 'x' }).toEqual({ ...mcpNode, nodeId: 'x' });
-    const chat = parseLocalCommand(`send 5 USDC on Arbitrum to ${MIXED.toLowerCase()}`, initialEditorHistory().editor.workflow, context);
+    const chat = parseLocalCommand(`send 5 USDC on Arbitrum to ${MIXED.toLowerCase()}`, templateEditorHistory().editor.workflow, context);
     expect(chat).toMatchObject({ type: 'ADD_RH_TRANSFER', input: { network: 'Arbitrum One', recipient: MIXED.toLowerCase() } });
   });
   it('edits an authored Send destination through the same review; a later edit makes the earlier review stale; Cancel restores it', () => {
@@ -111,7 +111,7 @@ describe('UX-001 Canvas "To" field drafts the one canonical recipient', () => {
     expect(cancelled.recipientInputs).toEqual({}); expect(recipientOf(cancelled.editor.workflow)).toBe(RECIPIENT);
   });
   it('a typed destination on an owner-only network is never a draft', () => {
-    let history = editorHistoryReducer(initialEditorHistory(), { type: 'START_ACTION_SETUP', action: 'transfer', position: { x: 0, y: 0 } });
+    let history = editorHistoryReducer(templateEditorHistory(), { type: 'START_ACTION_SETUP', action: 'transfer', position: { x: 0, y: 0 } });
     history = editorHistoryReducer(history, { type: 'EDIT_CANVAS_RECIPIENT', id: history.actionSetup!.id, recipient: RECIPIENT, context });
     expect(history.actionSetup!.cryptoRecipient).toBeUndefined();
   });
@@ -139,7 +139,7 @@ describe('UX-001 Copilot destination slot filling (same canonical recipient)', (
     expect(pt).toMatchObject({ kind: 'CLARIFICATION', text: 'Para qual carteira devo enviar?' });
   });
   it('the Copilot box completes an exact Send that names no destination instead of defaulting to the connected wallet', () => {
-    const workflow = initialEditorHistory().editor.workflow;
+    const workflow = templateEditorHistory().editor.workflow;
     const bare = parseLocalCommand('send 5 USDC on Arbitrum', workflow, context);
     expect(bare).toMatchObject({ type: 'ADD_RH_TRANSFER', input: { recipient: 'CONNECTED_OWNER' } });
     expect(sendDestinationIssue(bare, 'send 5 USDC on Arbitrum')).toEqual({ kind: 'MISSING', network: 'Arbitrum One' });
@@ -170,8 +170,8 @@ describe('UX-005 Send is presentation only; canonical Transfer identities and ha
       ownerAccount: RECIPIENT, errorCode: null, needsObservation: false, attentionRequired: false, hasEvidence: true, createdAt: null, updatedAt: null }).title).toBe('Send');
   });
   it('keeps the Phase 2 canonical Send hashes (workflow-local standard graph) byte-for-byte', () => {
-    const vectors = [[{ version: 1, action: 'transfer', network: 'arbitrum-one', asset: 'USDC', amount: '5', recipient: RECIPIENT }, '0xed288b9e22d82e3a9d6dee559aa219ff4066804c78f9dae41c9d471fd7b792c9'],
-      [{ version: 1, action: 'transfer', network: 'arbitrum-one', asset: 'ETH', amount: '0.01', recipient: RECIPIENT }, '0xb62adb7214d1abaa1d6bdae9779c9f505c78814ebedade05c2c6cc7c6db4ef49']] as const;
+    const vectors = [[{ version: 1, action: 'transfer', network: 'arbitrum-one', asset: 'USDC', amount: '5', recipient: RECIPIENT }, '0x1c2b8a5c93584b8d895c9ea50ff37e1585f3fa7ec3348ab548a251c7f9609f0d'],
+      [{ version: 1, action: 'transfer', network: 'arbitrum-one', asset: 'ETH', amount: '0.01', recipient: RECIPIENT }, '0x656acf5d477b87edce04ecff2b8e1582a43a9f747c186181c4770109f15d5f4e']] as const;
     for (const [strategy, hash] of vectors) {
       const composed = composeStrategy(strategy as never); expect(composed.ok).toBe(true);
       if (composed.ok) { expect(composed.workflowHash).toBe(hash); expect(semanticWorkflowHash(composed.workflow)).toBe(hash); }

@@ -23,7 +23,7 @@ async function openSwapDestination(page: Page) {
   await installSupplyWallet(page, { chain: '0x2105' });
   await page.goto('/app');
   // BUILD-FLOFI-MAINNET-PRODUCT-001: no environment selector; the connected wallet's own network is shown.
-  await expect(page.locator('.build009-wallet-info')).toContainText('· Base (8453)');
+  await expect(page.locator('.build009-wallet-info')).toHaveAttribute('title', /Base \(8453\)/);
   await page.getByRole('button', { name: 'Add swap', exact: true }).click();
   const card = cards(page).filter({ hasText: 'Swap' }).first();
   const destination = card.getByRole('button', { name: 'Select destination token', exact: true });
@@ -122,7 +122,7 @@ test('the Copilot authors Base actions from normal language: a list token by nam
     await page.goto('/app');
     const recipient = '0x3333333333333333333333333333333333333333';
     await ask(page, 'Please swap 100 USDC for Coinbase Wrapped BTC on Base');
-    await expectProposal(page, 'Interpreted as “swap 100 USDC to cbBTC on Base slippage 50 bps”', 'cbBTC');
+    await expectProposal(page, 'Interpreted as “swap 100 USDC to cbBTC on Base slippage 100 bps”', 'cbBTC');
     await expect(copilotSays(page)).toContainText('“Coinbase Wrapped BTC” is cbBTC (Coinbase Wrapped BTC) in the official Base catalog.');
     await expect(copilotSays(page)).toContainText('Real funds on Base');
     await ask(page, 'Quero colocar 100 USDC e 50 Aerodrome num pool da Uniswap na Base com taxa de 0,3%');
@@ -132,7 +132,7 @@ test('the Copilot authors Base actions from normal language: a list token by nam
     await ask(page, `Please send 0.01 ETH on Base over to ${recipient}`);
     await expectProposal(page, `Interpreted as “transfer 0.01 ETH on Base to ${recipient}”`, '0.01 ETH');
     await ask(page, 'Move 20 USDC from Arbitrum over to Base');
-    await expectProposal(page, 'Interpreted as “bridge 20 USDC from Arbitrum to Base via auto slippage 50 bps”', '20 USDC');
+    await expectProposal(page, 'Interpreted as “bridge 20 USDC from Arbitrum to Base via auto slippage 100 bps”', '20 USDC');
     // Nothing changed until the owner applies one proposal; the swap then lands in the canonical IR with cbBTC's chain + address.
     await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '0');
     await ask(page, 'Please swap 100 USDC for Coinbase Wrapped BTC on Base');

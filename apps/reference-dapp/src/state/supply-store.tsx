@@ -7,6 +7,7 @@ import { useWorkflow } from './workflow-store';
 import { injected, useBuild009Wallet } from './build009-wallet-store';
 import { supplySimulate, supplyReview, supplyBegin, supplyReport, supplyObserve, supplyStatus, supplyInvalidate, supplyRecoverReview, supplyWalletFailure, supplyWalletTrace, supplyHandoff } from '../app/supply-action';
 import type { SupplyRecord, SupplyWalletDiagnostic } from '../server/supply-service';
+import { isPristineDraft } from '../domain/initial-workflow';
 function walletValue(value:unknown,depth=0,seen=new Set<object>()):unknown{
   if(value===undefined)return null;
   if(value===null||typeof value==='boolean'||typeof value==='number')return value;
@@ -41,7 +42,7 @@ export function SupplyProvider({children}:{children:ReactNode}){
   const latestWallet=useRef(wallet);latestWallet.current=wallet;
   const busyRef=useRef(false);
   const equal=record&&JSON.stringify(record.review.workflow)===JSON.stringify(workflow);
-  const pristineRecovery=recovered&&workflow.revision===0&&workflow.nodes.length===1&&workflow.nodes[0]?.actionType==='mock-read';
+  const pristineRecovery=recovered&&isPristineDraft(workflow);
   const retired=Boolean(record&&!equal&&!pristineRecovery);
   function accept(value:SupplyRecord){
     setRecord(value);

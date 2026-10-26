@@ -42,7 +42,6 @@ export function workflowShellContext(workflow: Workflow) {
     revision: workflow.revision,
     actionCount: actions.length,
     chains: [...chains].map(shellChainLabel),
-    mockExample: workflow.nodes.length > 0 && workflow.nodes.every(node => node.actionType.startsWith('mock-')),
     requiredChain: firstAction?.chainId ?? null,
   };
 }

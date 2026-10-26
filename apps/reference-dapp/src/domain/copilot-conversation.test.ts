@@ -32,12 +32,12 @@ describe('bounded multi-turn conversation', () => {
     const session = new CopilotSession();
     const asked = session.say('Bridge 1 USDC from Base Sepolia.', intent.action(act.bridge({ sourceNetwork: 'BASE_SEPOLIA', asset: 'USDC', amount: '1' })))!;
     expect(asked).toMatchObject({ kind: 'CLARIFICATION', text: 'To prepare this bridge, Flofi still needs the destination network.', options: ['Arbitrum Sepolia'] });
-    expect(session.say('Arbitrum Sepolia')).toMatchObject({ kind: 'PROPOSAL', sentence: 'bridge 1 USDC from Base Sepolia to Arbitrum Sepolia via auto slippage 50 bps' });
+    expect(session.say('Arbitrum Sepolia')).toMatchObject({ kind: 'PROPOSAL', sentence: 'bridge 1 USDC from Base Sepolia to Arbitrum Sepolia via auto slippage 100 bps' });
   });
   it('fills a bare amount answer locally and keeps every other value grounded', () => {
     const session = new CopilotSession();
     expect(session.say('Swap USDC to ETH on Base Sepolia', intent.action(act.swap({ network: 'BASE_SEPOLIA', inputAsset: 'USDC', outputAsset: 'ETH' })))).toMatchObject({ kind: 'CLARIFICATION' });
-    expect(session.say('3')).toMatchObject({ kind: 'PROPOSAL', sentence: 'swap 3 USDC to WETH on Base Sepolia slippage 50 bps' });
+    expect(session.say('3')).toMatchObject({ kind: 'PROPOSAL', sentence: 'swap 3 USDC to WETH on Base Sepolia slippage 100 bps' });
   });
   it('edits an applied step through its typed edit command and leaves the workflow alone until Apply', () => {
     const session = new CopilotSession([FIXTURE.testnetSwap]);
@@ -69,7 +69,7 @@ describe('bounded multi-turn conversation', () => {
     const session = new CopilotSession([FIXTURE.supply]);
     expect(session.say('Remove o primeiro passo', intent.remove({ ordinal: 'FIRST' }, 'PT'))).toMatchObject({ kind: 'PROPOSAL', command: { type: 'REMOVE', nodeId: 'node-002' } });
     session.dismiss();
-    expect(new CopilotSession().say('remove the first step', intent.remove({ ordinal: 'FIRST' }))!.text).toContain('starting template');
+    expect(new CopilotSession().say('remove the first step', intent.remove({ ordinal: 'FIRST' }))!.text).toContain('This workflow has 0 steps');
     expect(session.say('remove the fifth step', intent.remove({ ordinal: 'FIFTH' }))!.text).toContain('This workflow has 1 step');
   });
   it('repeats an earlier proposal only with a repeat cue, carrying its values with provenance', () => {

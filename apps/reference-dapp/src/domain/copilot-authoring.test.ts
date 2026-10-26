@@ -96,14 +96,14 @@ describe('Aave V3 Supply, Borrow, Repay and Withdraw', () => {
 
 describe('swaps', () => {
   it('authors a Base swap to WETH and says it is wrapped ETH', () => {
-    const result = sameAsTyped(convert(action(swap()), 'Swap 100 USDC to ETH on Base'), 'swap 100 USDC to WETH on Base slippage 50 bps');
-    expect(result.command).toMatchObject({ type: 'ADD_SWAP', direction: 'USDC_TO_WETH', amount: '100', slippage: '50' });
+    const result = sameAsTyped(convert(action(swap()), 'Swap 100 USDC to ETH on Base'), 'swap 100 USDC to WETH on Base slippage 100 bps');
+    expect(result.command).toMatchObject({ type: 'ADD_SWAP', direction: 'USDC_TO_WETH', amount: '100', slippage: '100' });
     expect(result.notes.join(' ')).toMatch(/WETH \(wrapped ETH\)/);
-    expect(result.notes.join(' ')).toMatch(/Slippage 50 bps \(Flofi default\)/);
+    expect(result.notes.join(' ')).toMatch(/Slippage 1% \(100 bps\) \(Flofi default\)/);
   });
   it('authors a Base Sepolia swap from Portuguese', () => {
     sameAsTyped(convert(action(swap({ network: 'BASE_SEPOLIA' })), 'Troca 100 USDC por ETH na Base Sepolia'),
-      'swap 100 USDC to WETH on Base Sepolia slippage 50 bps', createBaseSepoliaReviewContext());
+      'swap 100 USDC to WETH on Base Sepolia slippage 100 bps', createBaseSepoliaReviewContext());
   });
   it('never infers the network, and never real funds from test-network wording', () => {
     expect(convert(action(swap({ network: null })), 'Swap 100 USDC to ETH')).toMatchObject({ kind: 'CLARIFICATION', missing: ['network'],
@@ -124,9 +124,9 @@ describe('swaps', () => {
   });
   it('authors Solana and Solana Devnet swaps', () => {
     sameAsTyped(convert(action(swap({ network: 'SOLANA', inputAsset: 'SOL', outputAsset: 'USDC', amount: '1' })), 'Swap 1 SOL to USDC on Solana'),
-      'swap 1 SOL to USDC on Solana slippage 50 bps');
+      'swap 1 SOL to USDC on Solana slippage 100 bps');
     sameAsTyped(convert(action(swap({ network: 'SOLANA_DEVNET', inputAsset: 'USDC', outputAsset: 'SOL', amount: '1' })), 'Swap 1 test USDC to SOL on Solana Devnet'),
-      'swap 1 devUSDC to SOL on Solana Devnet slippage 50 bps');
+      'swap 1 devUSDC to SOL on Solana Devnet slippage 100 bps');
   });
   it('rejects hallucinated amounts, assets and invalid precision', () => {
     expect(convert(action(swap({ amount: '1000' })), 'Swap 100 USDC to ETH on Base')).toMatchObject({ kind: 'CLARIFICATION', missing: ['amount'] });
@@ -138,7 +138,7 @@ describe('swaps', () => {
 
 describe('Cross-chain Router bridge', () => {
   it('authors the testnet bridge from English and Portuguese', () => {
-    const typed = 'bridge 5 USDC from Base Sepolia to Arbitrum Sepolia via auto slippage 50 bps';
+    const typed = 'bridge 5 USDC from Base Sepolia to Arbitrum Sepolia via auto slippage 100 bps';
     const english = sameAsTyped(convert(action(bridge()), 'Bridge 5 USDC from Base Sepolia to Arbitrum Sepolia'), typed);
     expect(english.command).toMatchObject({ type: 'ADD_ROUTER_BRIDGE', input: { source: 'Base Sepolia', destination: 'Arbitrum Sepolia', recipient: '', routing: 'AUTO' } });
     sameAsTyped(convert(action(bridge()), 'Quero mandar 5 USDC da Base Sepolia para Arbitrum Sepolia'), typed);
@@ -158,7 +158,7 @@ describe('Cross-chain Router bridge', () => {
   });
   it('completes a test-network pair but never a mainnet one', () => {
     const derived = sameAsTyped(convert(action(bridge({ sourceNetwork: null })), 'Bridge 5 USDC to Arbitrum Sepolia'),
-      'bridge 5 USDC from Base Sepolia to Arbitrum Sepolia via auto slippage 50 bps');
+      'bridge 5 USDC from Base Sepolia to Arbitrum Sepolia via auto slippage 100 bps');
     expect(derived.notes.join(' ')).toContain('only source for Arbitrum Sepolia');
     expect(convert(action(bridge({ sourceNetwork: null, destinationNetwork: 'ARBITRUM' })), 'I want to bridge 100 USDC to Arbitrum')).toMatchObject({
       kind: 'CLARIFICATION', missing: ['sourceNetwork'], options: ['Base'] });
@@ -167,7 +167,7 @@ describe('Cross-chain Router bridge', () => {
   });
   it('authors the mainnet bridge only when both mainnets are named, and says it uses real funds', () => {
     const mainnet = sameAsTyped(convert(action(bridge({ sourceNetwork: 'BASE', destinationNetwork: 'ARBITRUM', amount: '50' })), 'Bridge 50 USDC from Base to Arbitrum One'),
-      'bridge 50 USDC from Base to Arbitrum via auto slippage 50 bps');
+      'bridge 50 USDC from Base to Arbitrum via auto slippage 100 bps');
     expect(mainnet.notes.join(' ')).toContain('Real funds');
     expect(convert(action(bridge({ sourceNetwork: 'BASE', destinationNetwork: 'ARBITRUM' })), 'Bridge 5 USDC from Base Sepolia to Arbitrum Sepolia').kind).toBe('CLARIFICATION');
   });
@@ -221,7 +221,7 @@ describe('compositions', () => {
   it('maps only Supply → Borrow → Swap the borrowed USDC to the existing lending composition', () => {
     const result = sameAsTyped(convert({ version: '1', kind: 'COMPOSITION', actions: [supplyStep, borrowStep, swapStep] },
       'Supply 0.1 USDC to Aave on Base Sepolia, borrow 0.01 USDC and swap the borrowed USDC to WETH'),
-    'compose supply 0.1 USDC to Aave then borrow 0.01 USDC then swap borrowed USDC to WETH on Base Sepolia slippage 50 bps', createBaseSepoliaReviewContext());
+    'compose supply 0.1 USDC to Aave then borrow 0.01 USDC then swap borrowed USDC to WETH on Base Sepolia slippage 100 bps', createBaseSepoliaReviewContext());
     expect(result.command.type).toBe('AUTHOR_LENDING');
     expect(result.notes.join(' ')).toContain('Debt remains');
   });
@@ -282,7 +282,7 @@ describe('Ethereum Sepolia (BUILD-ETHEREUM-001)', () => {
   it('authors the Ethereum Sepolia swap, WBTC lending and Uniswap liquidity exactly as typed', () => {
     expect(COPILOT_AUTHORING_COMMANDS).toContain('ADD_ETHEREUM_SEPOLIA_SWAP');
     const swapped = sameAsTyped(convert(action(swap({ network: 'ETHEREUM_SEPOLIA', outputAsset: 'WETH', amount: '2' })), 'Please swap 2 USDC for WETH on Ethereum Sepolia'),
-      'swap 2 USDC to WETH on Ethereum Sepolia slippage 50 bps');
+      'swap 2 USDC to WETH on Ethereum Sepolia slippage 100 bps');
     expect(swapped.command.type).toBe('ADD_ETHEREUM_SEPOLIA_SWAP');
     for (const [type, text, typed] of [['SUPPLY', 'Put 0.001 WBTC into Aave on Ethereum Sepolia', 'supply 0.001 WBTC to Aave on Ethereum Sepolia'],
       ['BORROW', 'Borrow 0.001 WBTC from Aave on Ethereum Sepolia please', 'borrow 0.001 WBTC from Aave on Ethereum Sepolia'],

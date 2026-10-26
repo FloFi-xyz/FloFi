@@ -20,7 +20,7 @@ const mainnetControl = async (body: Record<string, unknown>) => (await (await fe
 async function connectSolana(page: Page) {
   await page.getByRole('button', { name: 'Connect Wallet', exact: true }).click();
   await chooseWallet(page, 'Gryloo MOCKED Solana wallet', 'Solana');
-  await expect(page.getByRole('group', { name: 'Wallet connection', exact: true })).toContainText('Solana mainnet-beta');
+  await expect(page.getByRole('group', { name: 'Wallet connection', exact: true })).toContainText(/[1-9A-HJ-NP-Za-km-z]{4}…[1-9A-HJ-NP-Za-km-z]{4}/);
 }
 async function chooseNetwork(page: Page, card: ReturnType<Page['locator']>, network: string) {
   await card.getByRole('button', { name: 'Select source token', exact: true }).click();

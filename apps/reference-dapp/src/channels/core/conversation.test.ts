@@ -98,7 +98,7 @@ describe('BUILD-CHANNELS-001 channel conversation', () => {
     expect(asked).toMatchObject({ outcome: 'COPILOT_CLARIFICATION' });
     const proposed = await c.say(`Use ${OWNER}`);
     expect(proposed).toMatchObject({ action: 'PROPOSE', command: { type: 'AUTHOR_LENDING' } });
-    expect(input(proposed.command)).toEqual({ supply: '100', borrow: '20', slippage: '50', owner: OWNER });
+    expect(input(proposed.command)).toEqual({ supply: '100', borrow: '20', slippage: '100', owner: OWNER });
     // "Actually make it 50": three proposed steps could be meant — FloFi asks instead of guessing.
     const which = await c.say('Actually make it 50');
     expect(which).toMatchObject({ action: 'REPLY', outcome: 'COPILOT_CLARIFICATION' });

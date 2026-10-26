@@ -41,7 +41,7 @@ describe('BUILD-CROSSCHAIN-UNIVERSAL-001 Copilot and channel parity', () => {
   it('O: "move 25 USDC from Solana to Base" is the same universal bridge in Copilot, Chat, MCP, Telegram and the Canvas card', () => {
     const s = new CopilotSession();
     const reply = s.say('Can you move 25 USDC from Solana over to Base?', intent.action(act.bridge({ sourceNetwork: 'SOLANA', destinationNetwork: 'BASE', asset: 'USDC', amount: '25' })))!;
-    expect(reply).toMatchObject({ kind: 'PROPOSAL', sentence: 'bridge 25 USDC from Solana to Base receive USDC via best slippage 50 bps', command: { type: 'ADD_UNIVERSAL_BRIDGE' } });
+    expect(reply).toMatchObject({ kind: 'PROPOSAL', sentence: 'bridge 25 USDC from Solana to Base receive USDC via best slippage 100 bps', command: { type: 'ADD_UNIVERSAL_BRIDGE' } });
     expect(reply.notes.join(' ')).toMatch(/You receive USDC on Base.*the EVM wallet you connect in the Flofi app.*Solana → Base uses real funds\. Flofi records a 0\.1% fee obligation/s);
     const channel = expectParity(s, reply.command!, reply.sentence!, { action: 'bridge', sourceNetwork: 'solana', destinationNetwork: 'base', asset: 'USDC', amount: '25' });
     expect(channel).toMatchObject({ fundsClass: 'REAL_FUNDS', intendedWallet: null });
@@ -52,7 +52,7 @@ describe('BUILD-CROSSCHAIN-UNIVERSAL-001 Copilot and channel parity', () => {
   it('PT: "levar 10 USDC da Base para a Solana e receber SOL" names the destination asset; the Solana wallet is bound at Review', () => {
     const s = new CopilotSession();
     const reply = s.say('Quero levar 10 USDC da Base para a Solana e receber SOL', intent.action(act.bridge({ sourceNetwork: 'BASE', destinationNetwork: 'SOLANA', asset: 'USDC', amount: '10' }), 'PT'))!;
-    expect(reply).toMatchObject({ kind: 'PROPOSAL', sentence: 'bridge 10 USDC from Base to Solana receive SOL via best slippage 50 bps' });
+    expect(reply).toMatchObject({ kind: 'PROPOSAL', sentence: 'bridge 10 USDC from Base to Solana receive SOL via best slippage 100 bps' });
     expect(reply.notes.join(' ')).toMatch(/Destinatário: a carteira Solana que você conectar no app Flofi/);
     expectParity(s, reply.command!, reply.sentence!, { action: 'bridge', sourceNetwork: 'base', destinationNetwork: 'solana', asset: 'USDC', outputAsset: 'SOL', amount: '10' });
   });
@@ -60,7 +60,7 @@ describe('BUILD-CROSSCHAIN-UNIVERSAL-001 Copilot and channel parity', () => {
     const s = new CopilotSession();
     const reply = s.say(`Please send 0.2 ETH from Arbitrum over to Solana for ${SOL_WALLET}, receiving SOL`, intent.action(act.bridge({ sourceNetwork: 'ARBITRUM',
       destinationNetwork: 'SOLANA', asset: 'ETH', amount: '0.2' })))!;
-    expect(reply).toMatchObject({ kind: 'PROPOSAL', sentence: `bridge 0.2 ETH from Arbitrum One to Solana receive SOL to ${SOL_WALLET} via best slippage 50 bps` });
+    expect(reply).toMatchObject({ kind: 'PROPOSAL', sentence: `bridge 0.2 ETH from Arbitrum One to Solana receive SOL to ${SOL_WALLET} via best slippage 100 bps` });
     expectParity(s, reply.command!, reply.sentence!, { action: 'bridge', sourceNetwork: 'arbitrum-one', destinationNetwork: 'solana', asset: 'ETH', outputAsset: 'SOL', amount: '0.2', recipient: SOL_WALLET });
     const wrong = new CopilotSession().say('Please send 1 USDC from Base over to Solana for 0x3333333333333333333333333333333333333333', intent.action(act.bridge({
       sourceNetwork: 'BASE', destinationNetwork: 'SOLANA', asset: 'USDC', amount: '1', recipient: '0x3333333333333333333333333333333333333333' })))!;
@@ -69,7 +69,7 @@ describe('BUILD-CROSSCHAIN-UNIVERSAL-001 Copilot and channel parity', () => {
   });
   it('a named provider (Relay) or another asset on a certified pair is a universal bridge; the certified pair itself is unchanged', () => {
     const relay = new CopilotSession().say('Please send 5 USDC from Base over to Arbitrum using Relay', intent.action(act.bridge({ sourceNetwork: 'BASE', destinationNetwork: 'ARBITRUM', asset: 'USDC', amount: '5' })))!;
-    expect(relay).toMatchObject({ kind: 'PROPOSAL', sentence: 'bridge 5 USDC from Base to Arbitrum One receive USDC via relay slippage 50 bps', command: { type: 'ADD_UNIVERSAL_BRIDGE' } });
+    expect(relay).toMatchObject({ kind: 'PROPOSAL', sentence: 'bridge 5 USDC from Base to Arbitrum One receive USDC via relay slippage 100 bps', command: { type: 'ADD_UNIVERSAL_BRIDGE' } });
     const certified = new CopilotSession().say('Please send 5 USDC from Base over to Arbitrum', intent.action(act.bridge({ sourceNetwork: 'BASE', destinationNetwork: 'ARBITRUM', asset: 'USDC', amount: '5' })))!;
     expect(certified).toMatchObject({ kind: 'PROPOSAL', command: { type: 'ADD_ROUTER_BRIDGE' } });
   });
@@ -90,7 +90,7 @@ describe('BUILD-CROSSCHAIN-UNIVERSAL-001 exact chat grammar', () => {
     const input = parseUniversalChat('bridge 1.5 SOL from Solana to Ethereum receive ETH via relay slippage 75 bps')!;
     expect(input).toEqual({ source: 'solana', destination: 'ethereum', inputAsset: 'SOL', outputAsset: 'ETH', amount: '1.5', recipient: '', slippage: '75', routing: 'RELAY' });
     expect(universalChatSentence(input)).toBe('bridge 1.5 SOL from Solana to Ethereum receive ETH via relay slippage 75 bps');
-    expect(parseUniversalChat('bridge 2 usdc from Solana to Robinhood Chain')).toMatchObject({ inputAsset: 'USDC', outputAsset: 'USDG', routing: 'BEST', slippage: '50' });
+    expect(parseUniversalChat('bridge 2 usdc from Solana to Robinhood Chain')).toMatchObject({ inputAsset: 'USDC', outputAsset: 'USDG', routing: 'BEST', slippage: '100' });
     const s = new CopilotSession();
     expect(parseLocalCommand('bridge 10 USDC from Base to Arbitrum via auto slippage 50 bps', s.workflow, s.context, TEST_WALLET).type).toBe('ADD_ROUTER_BRIDGE');
     expect(parseLocalCommand('bridge 10 WETH from Base to Arbitrum', s.workflow, s.context, TEST_WALLET).type).toBe('ADD_UNIVERSAL_BRIDGE');

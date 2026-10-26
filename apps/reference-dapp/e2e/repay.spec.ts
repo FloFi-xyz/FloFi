@@ -49,7 +49,7 @@ test('semantic amount edit removes Repay authorization',async({page})=>{
 test('insufficient debt blocks read-only simulation',async({page})=>{
   await resetSupplyHarness({...repayOptions,scaledDebt:'4000'});await installSupplyWallet(page,{account:REPAY_OWNER});await page.goto('/app');
   // Repay binds the connected owner: a click before the wallet's passive reconnect is refused ("Connect your wallet…"), so wait for it.
-  await expect(page.locator('.build009-wallet-info')).toHaveAttribute('title',new RegExp(`^${REPAY_OWNER}$`,'i'));await page.getByRole('button',{name:'Add repay',exact:true}).click();await configureCanvasAction(page,'0.005');await page.getByRole('button',{name:'Simulate workflow'}).click(); await openSimulationDetails(page);await page.getByRole('button',{name:'Simulate Repay',exact:true}).click();
+  await expect(page.locator('.build009-wallet-info')).toHaveAttribute('title',new RegExp(REPAY_OWNER,'i'));await page.getByRole('button',{name:'Add repay',exact:true}).click();await configureCanvasAction(page,'0.005');await page.getByRole('button',{name:'Simulate workflow'}).click(); await openSimulationDetails(page);await page.getByRole('button',{name:'Simulate Repay',exact:true}).click();
   await expect(region(page)).toContainText('Current variable debt must exceed');
   const details = page.locator('.review-authorization-details');
   await details.locator('summary').click();

@@ -13,7 +13,8 @@ for (const [network, chain] of [['Base Sepolia', '0x14a34'], ['Ethereum Sepolia'
     const workflows: SemanticWorkflow[] = [];
     page.on('request', event => { if (event.url().endsWith('/api/build-estimate')) workflows.push(event.postDataJSON().workflow as SemanticWorkflow); });
     await page.goto('/app');
-    await expect(page.getByRole('group', { name: 'Wallet connection' })).toContainText(network);
+    // BUILD-FLOFI-PRODUCT-UX-001: compact chrome shows the short address; network stays in the title tooltip.
+    await expect(page.getByRole('group', { name: 'Wallet connection' }).locator('.wallet-connection')).toHaveAttribute('title', new RegExp(network));
     await page.getByRole('button', { name: 'Add swap', exact: true }).click();
     const card = page.locator('.build-flow-surface .composer-card').first();
     await card.getByRole('button', { name: 'Select source token', exact: true }).click();

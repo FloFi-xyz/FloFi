@@ -15,6 +15,7 @@ import { usePoolPriceRange, poolPriceBounds } from './pool-price-range';
 import { ROBINHOOD_NETWORK } from '../domain/asset-catalogs';
 import { networkIdentity } from '../domain/network-registry';
 import { robinhoodFullRange, ROBINHOOD_LIQUIDITY_DEFAULT_FEE, ROBINHOOD_LIQUIDITY_FEE_TIERS } from '../domain/robinhood-liquidity-authoring';
+import { DEFAULT_SLIPPAGE } from '../domain/slippage-policy';
 
 /** Picker drafts use the existing pool builders and range validators at Review. */
 export function CryptoPoolForm({ nodeId }: { nodeId: string }) {
@@ -27,7 +28,7 @@ export function CryptoPoolForm({ nodeId }: { nodeId: string }) {
   const selection = setup?.cryptoSelection ?? cryptoSelections[nodeId] ?? existing?.selection;
   const sameNetwork = Boolean(existing && existing.selection.network === selection?.network), initial = defaultPoolRange(selection?.network ?? '');
   const [fields, setFields] = useState({ rangeUnit: existing?.rangeUnit ?? 'TICK', lower: sameNetwork ? existing!.lower ?? '-887270' : initial.lower,
-    upper: sameNetwork ? existing!.upper ?? '887270' : initial.upper, slippage: existing?.slippage ?? '50' });
+    upper: sameNetwork ? existing!.upper ?? '887270' : initial.upper, slippage: existing?.slippage ?? DEFAULT_SLIPPAGE });
   // BUILD-RH-002: a catalog-network pool (Robinhood Chain, BUILD-BASE-001 Base) is the pair's pool at the chosen Uniswap v3 fee tier.
   const [fee, setFee] = useState(existing?.fee ?? ROBINHOOD_LIQUIDITY_DEFAULT_FEE);
   const [error, setError] = useState('');

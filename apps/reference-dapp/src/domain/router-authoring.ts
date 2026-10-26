@@ -5,6 +5,7 @@ import { ETHEREUM_ROUTER_DEPLOYMENTS, type EthereumRouterNetwork, CROSSCHAIN_ROU
 import { authoringAssetSymbol } from './asset-catalogs';
 import { catalogNetworkOfChatName, networkIdentity } from './network-registry';
 import { formatTokenAmount, parseTokenAmount } from './jupiter-authoring';
+import { defaultSlippageWithin } from './slippage-policy';
 
 /**
  * BUILD-ROUTER-001: chat and canvas author the same canonical `asset.bridge` node routed by the Cross-chain Router.
@@ -26,7 +27,8 @@ export type RouterBridgeInput = { source: RouterSource; destination: RouterDesti
 export const ROUTER_ROUTING: Readonly<Record<RouterRouting, readonly RoutingProvider[]>> = Object.freeze({ AUTO: ['lifi', 'across'], LIFI: ['lifi'], ACROSS: ['across'] });
 export const ROUTER_ROUTING_LABEL: Readonly<Record<RouterRouting, string>> = Object.freeze({
   AUTO: 'Automatic: LI.FI first, Across direct if LI.FI has no reconcilable route', LIFI: 'LI.FI only', ACROSS: 'Across direct only' });
-export const ROUTER_DEFAULT_SLIPPAGE = String(CROSSCHAIN_ROUTER_BASE_ARBITRUM.defaultSlippageBps);
+/** BUILD-FLOFI-PRODUCT-UX-001: the shared product default (1%, `slippage-policy.ts`) within the Router profiles' own 300 bps limit. */
+export const ROUTER_DEFAULT_SLIPPAGE = String(defaultSlippageWithin(CROSSCHAIN_ROUTER_BASE_ARBITRUM.maximumSlippageBps));
 const pairOf = (id: string) => ROUTER_PAIRS.find(pair => pair.id === id)!;
 type RouterOption = { source: RouterSource; destination: RouterDestination; sourceLabel: string; destinationLabel: string; pair: (typeof ROUTER_PAIRS)[number];
   profile: RouterProfile; funds: string; environment: 'mainnet' | 'testnet' };

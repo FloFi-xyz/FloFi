@@ -2,7 +2,7 @@ import {createAuthoredLending} from './lending-authoring';
 // SPDX-License-Identifier: AGPL-3.0-only
 import { createBaseSepoliaReviewContext, createEthereumSepoliaReviewContext, reviewContextForChain, validateWorkflowDraft, type ReviewContext } from '@defi-workflow-engine/reference-linter';
 import { commandIsValid, type Command } from './commands';
-import { freeze, initialWorkflow, type Workflow } from './initial-workflow';
+import { freeze, initialWorkflow, templateWorkflow, type Workflow } from './initial-workflow';
 import { createMockNode } from './mock-actions';
 import { createSwapNode, parseHumanAmount, parseSlippage, swapDetails, SWAP_ACTION } from './swap-authoring';
 import { createLiquidityNode, LIQUIDITY_ACTION } from './liquidity-authoring';
@@ -27,6 +27,8 @@ import { createCryptoActionNode, canSelectCryptoAssets, cryptoSelectionOf, crypt
 
 export interface EditorState { readonly workflow: Workflow; readonly error: string | null }
 export const initialEditor = (): EditorState => ({ workflow: initialWorkflow(), error: null });
+/** Engineering fixture editor that starts with the protected mock template at `node-001` (not the product empty canvas). */
+export const templateEditor = (): EditorState => ({ workflow: templateWorkflow(), error: null });
 
 /** One pure reducer for both views. View selection and layout never enter the IR. */
 export function editorReducer(state: EditorState, command: Command, context?: ReviewContext): EditorState {
@@ -227,7 +229,7 @@ export function editorReducer(state: EditorState, command: Command, context?: Re
   let resourceEdges = [...current.resourceEdges];
   if (command.type === 'REMOVE_MANY' || command.type === 'REMOVE') {
     // BUILD-SOLANA-MAINNET-001 (requirement D): any action can be deleted (canvas-keyboard.ts `planCanvasRemoval`). Deleting the last action
-    // leaves the canonical empty draft — the hidden template step every new workflow starts with — and no card; nothing replaces the deleted one.
+    // leaves the empty draft (BUILD-FLOFI-PRODUCT-UX-001: no node at all) and no card; nothing replaces the deleted one.
     const selected = command.type === 'REMOVE' ? [command.nodeId] : command.nodeIds;
     const plan = resolveCanvasRemoval(current, selected, context);
     if (!plan || selected.some(id => !plan.removed.includes(id))) return reject('UNKNOWN_NODE');
@@ -346,6 +348,8 @@ export function editorReducer(state: EditorState, command: Command, context?: Re
     }
   }
   const candidate = { ...current, revision: current.revision + 1, nodes, resourceEdges };
+  // BUILD-FLOFI-PRODUCT-UX-001: deleting the last action leaves the empty draft (no node), which has nothing to validate.
+  if (!candidate.nodes.length) return { workflow: freeze(candidate), error: null };
   if (context) {
     // A public testnet swap is validated against its own chain's trusted assets (Base Sepolia or Ethereum Sepolia).
     const swapChain = candidate.nodes.find(n => n.actionType === SWAP_ACTION && (n.chainId === 'eip155:84532' || n.chainId === 'eip155:11155111'))?.chainId;
@@ -363,7 +367,7 @@ function applyCanvasRemoval(current: Workflow, plan: CanvasRemoval) {
     return { ...own, dependencies: own.dependencies.filter(id => !removed.has(id)),
       inputs: own.inputs.filter(input => !(input.kind === 'OUTPUT_REFERENCE' && removed.has(input.value.nodeId))) };
   });
-  return { nodes: nodes.length ? nodes : [...initialWorkflow().nodes], resourceEdges: current.resourceEdges.filter(edge => !removed.has(edge.fromNodeId) && !removed.has(edge.toNodeId)) };
+  return { nodes, resourceEdges: current.resourceEdges.filter(edge => !removed.has(edge.fromNodeId) && !removed.has(edge.toNodeId)) };
 }
 /** The steps linked to `ids` by dependencies, output references or resource edges, in either direction (a whole composition). */
 function connectedSteps(workflow: Workflow, ids: readonly string[]): Set<string> {
@@ -388,6 +392,7 @@ export function resolveCanvasRemoval(current: Workflow, ids: readonly string[], 
   if (!first || !context) return first;
   const valid = (plan: CanvasRemoval) => {
     const candidate = { ...current, revision: current.revision + 1, ...applyCanvasRemoval(current, plan) };
+    if (!candidate.nodes.length) return true;
     const swapChain = candidate.nodes.find(n => n.actionType === SWAP_ACTION && (n.chainId === 'eip155:84532' || n.chainId === 'eip155:11155111'))?.chainId;
     try { validateWorkflowDraft(candidate, swapChain ? reviewContextForChain(swapChain, context) : context); return true; } catch { return false; }
   };

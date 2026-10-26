@@ -14,9 +14,29 @@ export function freeze<T>(value: T): Immutable<T> {
   return value as Immutable<T>;
 }
 
+/**
+ * BUILD-FLOFI-PRODUCT-UX-001: a new workflow is genuinely empty — no hidden template or sample step. The canonical IR needs at least one node,
+ * so an empty draft is never linted, simulated, saved, handed off or reviewed; it becomes a canonical workflow with the owner's first action.
+ * Engineering fixtures that exercise template steps use `templateWorkflow()` (or ADD a mock node), never the product's initial state.
+ */
 export function initialWorkflow(): Workflow {
+  return freeze<SemanticWorkflow>({
+    schemaVersion: '1.0.0', workflowId: 'workflow-local', revision: 0,
+    nodes: [] as unknown as SemanticWorkflow['nodes'], resourceEdges: [],
+  });
+}
+/** Engineering / unit-test starting graph: one non-executing mock read at `node-001`. Not the product's empty canvas. */
+export function templateWorkflow(): Workflow {
   return freeze<SemanticWorkflow>({
     schemaVersion: '1.0.0', workflowId: 'workflow-local', revision: 0,
     nodes: [createMockNode('node-001', 'read')], resourceEdges: [],
   });
+}
+/** No financial action yet: the new, empty draft (and a draft saved before this build that holds only template steps). */
+export function isEmptyDraft(workflow: { readonly nodes: readonly { readonly actionType: string }[] }): boolean {
+  return workflow.nodes.every(node => node.actionType.startsWith('mock-'));
+}
+/** The visit's untouched draft: empty and never edited. A run persisted in this browser may be recovered into it, never into another workflow. */
+export function isPristineDraft(workflow: { readonly revision: number; readonly nodes: readonly { readonly actionType: string }[] }): boolean {
+  return workflow.revision === 0 && isEmptyDraft(workflow);
 }

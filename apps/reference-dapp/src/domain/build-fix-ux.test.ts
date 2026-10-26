@@ -70,12 +70,13 @@ describe('BUILD-FIX-UX-001 direct Canvas amount entry', () => {
 });
 
 describe('BUILD-FIX-UX-001 swap slippage', () => {
-  it('new Canvas swaps default to 100 bps; pool, bridge and lending defaults are untouched', () => {
+  // BUILD-FLOFI-PRODUCT-UX-001 supersedes the earlier swap-only rule: every new artifact with a slippage starts at the shared 100 bps default.
+  it('new Canvas swaps, bridges and lending compositions all start at the shared 100 bps default', () => {
     expect(SWAP_DEFAULT_SLIPPAGE_BPS).toBe(100); expect(slippagePercent(SWAP_DEFAULT_SLIPPAGE_BPS)).toBe('1.00%');
     expect(cryptoSetupInput({ id: 's', action: 'swap', amount: '1', cryptoSelection: selectCryptoNetwork('swap', 'Arbitrum One') }).slippage).toBe('100');
     expect(canvasAddCommand('swap', 0, null, '1')).toMatchObject({ type: 'ADD_SWAP', slippage: '100' });
-    expect(canvasAddCommand('bridge', 0, null, '1')).toMatchObject({ input: { slippage: '50' } });
-    expect(canvasAddCommand('lending', 0, '0x1111111111111111111111111111111111111111')).toMatchObject({ input: { slippage: '50' } });
+    expect(canvasAddCommand('bridge', 0, null, '1')).toMatchObject({ input: { slippage: '100' } });
+    expect(canvasAddCommand('lending', 0, '0x1111111111111111111111111111111111111111')).toMatchObject({ input: { slippage: '100' } });
   });
   it('accepts an exact integer from 1 to 300 bps and refuses anything else (never clamped)', () => {
     expect(parseSwapSlippageEdit('75')).toBe(75); expect(parseSwapSlippageEdit(' 100 ')).toBe(100); expect(parseSwapSlippageEdit('300')).toBe(300);

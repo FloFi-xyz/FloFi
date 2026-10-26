@@ -1,6 +1,8 @@
 /* SPDX-License-Identifier: AGPL-3.0-only */
 :root{color-scheme:light;--ink:#14233a;--muted:#52627a;--line:#dce4ef;--soft:#f4f7fb;--paper:#fff;--blue:#1d5fca;--blue-soft:#eaf2ff;--grid:#dae4f1;--amber:#915e08;--amber-soft:#fff5de;--red:#a11c29;--on-accent:#fff;--page:#f8fafd;--canvas-start:#fbfdff;--canvas-end:#f4f8ff;--flow-line:#b5c8e6;--card-line:#bdcadb;--accent-line:#c9ddff;--accent-ink:#174d9f;--accent-border:#8db5ff;--accent-hover:#dce9ff;--accent-selected:#edf4ff;--accent-quiet:#f8fbff;--accent-review:#e6efff;--message-line:#d2e2ff;--warning-line:#f2dfb3;--warning-border:#e6cf9c;--warning-paper:#fffcf4;--danger-soft:#fff1f2;--danger-line:#edc4c9;--neutral-soft:#eef1f6;--neutral-line:#c7d0dd;--neutral-ink:#334155;--neutral-paper:#f5f7fa;--range-line:#93a7c4;--range-track:#d9e2ef;--range-handle:#7ba7ed;--edge-active:#2466c2;--edge-line:#6b809b;--edge-label:#536780;}
 :root{--primary:var(--blue);--success:#22c55e}
+/* BUILD-FLOFI-PRODUCT-UX-001: Beta Mainnet notice stays yellow with dark ink in both themes (not redefined for dark). */
+:root{--beta-notice-bg:#fde68a;--beta-notice-line:#f2c94c;--beta-notice-ink:#14233a}
 /* Animate the canvas gradient's colors without changing its approved final appearance. */
 @property --canvas-start{syntax:"<color>";inherits:true;initial-value:#fbfdff}
 @property --canvas-end{syntax:"<color>";inherits:true;initial-value:#f4f8ff}
@@ -938,6 +940,7 @@
 .react-flow__panel.canvas-navigator.bottom.center{left:50%;right:auto;transform:translateX(-50%)}
 .canvas-navigator[data-compact="true"]{width:200px;bottom:calc(var(--canvas-cta-bottom,24px) + var(--canvas-cta-height,44px) + var(--canvas-controls-gap,14px))}
 .canvas-navigator[data-narrow="true"]{width:148px}
+.canvas-navigator[data-measured="false"]{visibility:hidden}
 .canvas-navigator button{flex:none;height:28px;padding:0;border:0;border-radius:999px;background:transparent;color:var(--muted);display:grid;place-items:center}
 .canvas-navigator button:hover{background:var(--soft);color:var(--blue)}
 .canvas-navigator-fit{width:28px}
@@ -1797,6 +1800,13 @@ button.wallet-option .wallet-option-status{border-color:var(--accent-line);backg
 .signing-foot{margin:0;text-align:center}
 .signing-foot button.quiet{min-height:40px;padding:0 14px;border-radius:8px;font-weight:600}
 .top-bar-compact{justify-content:space-between}
+.beta-notice{margin:0;padding:7px 16px;border-bottom:1px solid var(--beta-notice-line);background:var(--beta-notice-bg);color:var(--beta-notice-ink);font-size:13px;line-height:19px;text-align:center;text-wrap:balance}
+@media(max-width:700px){.beta-notice{padding:6px 15px;font-size:12px;line-height:18px}}
+.universal-asset-picker{display:grid;gap:8px;width:100%}
+.universal-asset-shortcuts{display:flex;flex-wrap:wrap;gap:6px}
+.universal-asset-shortcuts button{min-height:32px;padding:0 10px;font-size:12px}
+.universal-asset-shortcuts button[aria-pressed="true"]{border-color:var(--blue)!important;background:var(--blue-soft)!important;color:var(--blue)!important}
+.universal-bridge-form .composer-stock-search,.universal-bridge-form .composer-stock-results,.universal-bridge-form .composer-stock-status{margin-top:0}
 @media(max-width:640px){.signing-card{padding:16px}.signing-actions-row{justify-content:stretch}.signing-actions-row .canvas-lifecycle-control,.signing-actions-row .canvas-lifecycle-control button{width:100%}}
 /* BUILD-CHAT-E2E-001: a multi-step workflow inside the approval notice (its steps, the authorization choice, partial completion). */
 .workflow-run{display:grid;gap:8px;padding:10px 12px;border:1px solid var(--accent-line);border-radius:8px;background:var(--paper)}

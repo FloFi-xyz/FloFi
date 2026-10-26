@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from 'vitest';
 import { canvasShortcut, canDeleteCanvasEdge, canDeleteCanvasNode } from './canvas-keyboard';
-import { editorReducer, initialEditor } from './editor';
+import { editorReducer, templateEditor } from './editor';
 import { parseMockCommand } from './commands';
 import { createAuthoredLending } from './lending-authoring';
 
 describe('canvas keyboard semantic deletion', () => {
   it('deletes a selected node through REMOVE for both keys and clears selection on Escape', () => {
-    const added = editorReducer(initialEditor(), parseMockCommand('add transform', 0));
+    const added = editorReducer(templateEditor(), parseMockCommand('add transform', 0));
     expect(canvasShortcut('Delete', false, 'node-002', added.workflow)).toBe('REMOVE');
     expect(canvasShortcut('Backspace', false, 'node-002', added.workflow)).toBe('REMOVE');
     expect(canvasShortcut('Escape', false, 'node-002', added.workflow)).toBe('CLEAR');
@@ -17,7 +17,7 @@ describe('canvas keyboard semantic deletion', () => {
   // BUILD-SOLANA-MAINNET-001 (intentional change, requirement D): a step with a dependant is deletable; the dependant keeps its own values and loses
   // only the link. The hidden starting template stays non-deletable (it is not an action card).
   it('deletes a step with dependants (they only lose the link) and removes incoming edges with a deleted node', () => {
-    const added = editorReducer(initialEditor(), parseMockCommand('add transform', 0));
+    const added = editorReducer(templateEditor(), parseMockCommand('add transform', 0));
     expect(canDeleteCanvasNode(added.workflow, 'node-001')).toBe(false);
     const connected = editorReducer(added, { type: 'CONNECT', from: 'node-001', to: 'node-002', source: 'CANVAS', baseRevision: 1 });
     expect(canDeleteCanvasNode(connected.workflow, 'node-002')).toBe(true);
@@ -35,7 +35,7 @@ describe('canvas keyboard semantic deletion', () => {
     expect(middle.workflow.resourceEdges).toEqual([]);
   });
   it('disconnects editable edges and protects required typed edges', () => {
-    const added = editorReducer(initialEditor(), parseMockCommand('add transform', 0));
+    const added = editorReducer(templateEditor(), parseMockCommand('add transform', 0));
     const connected = editorReducer(added, { type: 'CONNECT', from: 'node-001', to: 'node-002', source: 'CANVAS', baseRevision: 1 });
     expect(canDeleteCanvasEdge(connected.workflow, 'node-001', 'node-002')).toBe(true);
     const disconnected = editorReducer(connected, { type: 'DISCONNECT', from: 'node-001', to: 'node-002', source: 'CANVAS', baseRevision: 2 });
@@ -49,7 +49,7 @@ describe('canvas keyboard semantic deletion', () => {
     expect(rejected.error).toMatch(/PROTECTED_CONNECTION/);
   });
   it('does not issue destructive node commands from text entry', () => {
-    const added = editorReducer(initialEditor(), parseMockCommand('add transform', 0));
+    const added = editorReducer(templateEditor(), parseMockCommand('add transform', 0));
     expect(canvasShortcut('Delete', true, 'node-002', added.workflow)).toBeNull();
     expect(canvasShortcut('Backspace', true, 'node-002', added.workflow)).toBeNull();
   });

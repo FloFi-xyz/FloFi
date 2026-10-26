@@ -2,6 +2,7 @@
 import type { Workflow } from './initial-workflow';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { createReviewContext, type ReviewContext, type Symbol } from '@defi-workflow-engine/reference-linter';
+import { DEFAULT_SLIPPAGE_BPS } from './slippage-policy';
 
 export type Direction = 'USDC_TO_WETH' | 'WETH_TO_USDC';
 export const directions = ['USDC_TO_WETH', 'WETH_TO_USDC'] as const;
@@ -32,8 +33,9 @@ export function formatHumanAmount(units: string, symbol: Symbol, context: Review
   const fractional = padded.slice(-decimals).replace(/0+$/, '');
   return fractional ? `${whole}.${fractional}` : whole;
 }
-/** BUILD-FIX-UX-001: the slippage limit a newly created swap starts with: 100 bps (1%), the highest limit Review accepts without a warning. */
-export const SWAP_DEFAULT_SLIPPAGE_BPS = 100;
+/** BUILD-FIX-UX-001: the slippage limit a newly created swap starts with: 100 bps (1%), the highest limit Review accepts without a warning.
+ * BUILD-FLOFI-PRODUCT-UX-001: the shared product default (`slippage-policy.ts`). */
+export const SWAP_DEFAULT_SLIPPAGE_BPS = DEFAULT_SLIPPAGE_BPS;
 /** Every swap runtime refuses more than 300 bps and Review blocks above it; a direct edit outside 1–300 bps is refused before it applies. */
 export const SWAP_SLIPPAGE_RANGE = { minimum: 1, maximum: 300 } as const;
 /** A direct Canvas slippage edit: the exact integer bps, refused (never clamped) outside the swap range. */

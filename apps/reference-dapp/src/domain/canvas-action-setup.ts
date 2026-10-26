@@ -17,6 +17,7 @@ import { createAuthoredTransfer, transferDetails } from './robinhood-transfer-au
 import { singleAmountProposalTarget } from './composer-presentation';
 import { createCryptoActionNode, cryptoInputOf, cryptoProfile, canSelectCryptoAssets, defaultPoolRange, type CryptoSelection, type CryptoSelections, type CryptoActionInput } from './crypto-action-picker';
 import { checkRecipient } from './recipient-address';
+import { DEFAULT_SLIPPAGE } from './slippage-policy';
 import { createUniversalBridgeFromInput, universalBridgeDetails, universalCanvasInput, universalCanvasPair, universalInputOf } from './universal-bridge-authoring';
 
 /** Required-field authoring only, never an executable node or alternate workflow. */
@@ -60,7 +61,7 @@ export function setupReviewValue(setup: CanvasActionSetup) { return setup.action
 export function cryptoSetupInput(setup: CanvasActionSetup): CryptoActionInput {
   if (!setup.cryptoSelection) throw new Error('ACTION_SELECTION_REQUIRED');
   return { selection: setup.cryptoSelection, amount: setup.action === 'pool' ? setup.input.maxUsdc : setup.amount,
-    slippage: setup.action === 'pool' ? setup.input.slippage : setup.action === 'swap' ? String(SWAP_DEFAULT_SLIPPAGE_BPS) : '50', ...(setup.cryptoBeneficiary ? { beneficiary: setup.cryptoBeneficiary } : 'beneficiary' in setup ? { beneficiary: setup.beneficiary } : {}),
+    slippage: setup.action === 'pool' ? setup.input.slippage : setup.action === 'swap' ? String(SWAP_DEFAULT_SLIPPAGE_BPS) : DEFAULT_SLIPPAGE, ...(setup.cryptoBeneficiary ? { beneficiary: setup.cryptoBeneficiary } : 'beneficiary' in setup ? { beneficiary: setup.beneficiary } : {}),
     ...(setup.cryptoSelection.action === 'transfer' && setup.cryptoRecipient !== undefined ? { recipient: setup.cryptoRecipient } : {}),
     ...(setup.action === 'pool' ? { secondAmount: setup.input.maxWeth, rangeUnit: setup.input.rangeUnit, lower: setup.input.lower, upper: setup.input.upper } : {}) };
 }

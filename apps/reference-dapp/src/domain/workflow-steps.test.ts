@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from 'vitest';
-import { initialEditor } from './editor';
+import { templateEditor } from './editor';
 import { applyCommand, BASE_CONTEXT, buildWorkflow, contextFor, FIXTURE, TEST_WALLET } from './copilot-test-fixtures';
 import { workflowSteps } from './workflow-steps';
 
@@ -8,7 +8,7 @@ const steps = (sentences: readonly string[]) => { const workflow = buildWorkflow
 
 describe('workflow steps (read-only descriptors of the canonical IR)', () => {
   it('describes the untouched template as one protected template step', () => {
-    const [only, ...rest] = workflowSteps(initialEditor().workflow, BASE_CONTEXT);
+    const [only, ...rest] = workflowSteps(templateEditor().workflow, BASE_CONTEXT);
     expect(rest).toEqual([]);
     expect(only).toMatchObject({ index: 1, nodeId: 'node-001', kind: 'TEMPLATE', detail: { type: 'TEMPLATE', template: 'read' }, removable: false, testFunds: true });
   });
@@ -47,7 +47,7 @@ describe('workflow steps (read-only descriptors of the canonical IR)', () => {
     expect(composition[2]).toMatchObject({ protocol: 'Uniswap v3', detail: { role: 'SWAP', input: { supply: '10', borrow: '4', slippage: '50', owner: TEST_WALLET } } });
   });
   it('describes legacy actions without typing them as editable steps', () => {
-    const workflow = applyCommand(initialEditor().workflow, { type: 'ADD_COW_SWAP', direction: 'USDC_TO_WETH', amount: '2', slippage: '50', source: 'CANVAS', baseRevision: 0 });
+    const workflow = applyCommand(templateEditor().workflow, { type: 'ADD_COW_SWAP', direction: 'USDC_TO_WETH', amount: '2', slippage: '50', source: 'CANVAS', baseRevision: 0 });
     expect(workflowSteps(workflow, BASE_CONTEXT)[0]).toMatchObject({ kind: 'OTHER', network: 'Base', testFunds: false });
   });
 });

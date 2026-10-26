@@ -123,7 +123,7 @@ describe('BUILD-MCP-001 gateway: protocol and tool surface', () => {
   it('composes deterministically over MCP and fails closed on unsupported input', async () => {
     const first = await client().callTool('compose_strategy', { strategy: BRIDGE }), second = await client().callTool('compose_strategy', { strategy: BRIDGE });
     expect(first.isError).toBe(false);
-    expect(first.output).toMatchObject({ ok: true, revision: 1, fundsClass: 'TEST_FUNDS', strategy: { ...BRIDGE, version: 1, slippageBps: 50 } });
+    expect(first.output).toMatchObject({ ok: true, revision: 1, fundsClass: 'TEST_FUNDS', strategy: { ...BRIDGE, version: 1, slippageBps: 100 } });
     expect(first.output.workflowHash).toBe(second.output.workflowHash);
     expect(first.text).toBe(second.text);
     const mixed = await client().callTool('compose_strategy', { strategy: { ...BRIDGE, destinationNetwork: 'arbitrum-one' } });
