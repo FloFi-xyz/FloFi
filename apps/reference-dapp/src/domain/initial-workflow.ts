@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
+import { createMockNode } from './mock-actions';
 
 export type Immutable<T> = T extends readonly (infer V)[] ? readonly Immutable<V>[]
   : T extends object ? { readonly [K in keyof T]: Immutable<T[K]> } : T;
@@ -16,12 +17,19 @@ export function freeze<T>(value: T): Immutable<T> {
 /**
  * BUILD-FLOFI-PRODUCT-UX-001: a new workflow is genuinely empty — no hidden template or sample step. The canonical IR needs at least one node,
  * so an empty draft is never linted, simulated, saved, handed off or reviewed; it becomes a canonical workflow with the owner's first action.
- * Engineering fixtures that exercise template steps add them explicitly (the `ADD` command), never through the product's initial state.
+ * Engineering fixtures that exercise template steps use `templateWorkflow()` (or ADD a mock node), never the product's initial state.
  */
 export function initialWorkflow(): Workflow {
   return freeze<SemanticWorkflow>({
     schemaVersion: '1.0.0', workflowId: 'workflow-local', revision: 0,
     nodes: [] as unknown as SemanticWorkflow['nodes'], resourceEdges: [],
+  });
+}
+/** Engineering / unit-test starting graph: one non-executing mock read at `node-001`. Not the product's empty canvas. */
+export function templateWorkflow(): Workflow {
+  return freeze<SemanticWorkflow>({
+    schemaVersion: '1.0.0', workflowId: 'workflow-local', revision: 0,
+    nodes: [createMockNode('node-001', 'read')], resourceEdges: [],
   });
 }
 /** No financial action yet: the new, empty draft (and a draft saved before this build that holds only template steps). */

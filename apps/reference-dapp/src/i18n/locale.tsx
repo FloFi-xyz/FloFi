@@ -2,14 +2,9 @@
 'use client';
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { portuguese } from './pt';
-export type Language = 'EN' | 'PT';
-export const LANGUAGE_KEY = 'flofi.language';
-/**
- * BUILD-FLOFI-PRODUCT-UX-001: the same preference mirrored into a cookie, so the server renders /app in the owner's language and the page never
- * paints in English and switches to Portuguese after hydration. Only `EN` or `PT`.
- */
-export const LANGUAGE_COOKIE = 'flofi_language';
-export const parseLanguage = (value: string | null | undefined): Language | null => value === 'PT' || value === 'EN' ? value : null;
+import { LANGUAGE_COOKIE, LANGUAGE_KEY, parseLanguage, type Language } from './language';
+export type { Language } from './language';
+export { LANGUAGE_COOKIE, LANGUAGE_KEY, parseLanguage } from './language';
 function rememberLanguageCookie(language: Language) {
   try {
     const secure = window.location.protocol === 'https:' ? '; Secure' : '';

@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { baseAssetRegistry, referenceRegistry } from '@defi-workflow-engine/action-registry';
 import { createReviewContext } from '../src/index.js';
 import { MOCKED_CHAIN_PROFILE, mockedSwapOutputs, reviewMockedArtifactChain } from '../src/mocked-chain.js';
-import { editorReducer, initialEditor, type EditorState } from '../../../apps/reference-dapp/src/domain/editor';
+import { editorReducer, templateEditor, type EditorState } from '../../../apps/reference-dapp/src/domain/editor';
 import { generateMockedChain } from '../../../apps/reference-dapp/src/domain/mock-artifacts';
 import type { Command } from '../../../apps/reference-dapp/src/domain/commands';
 
@@ -12,7 +12,7 @@ const NOW = Date.parse('2026-09-24T12:00:10.000Z');
 const WETH = 10n ** 18n, USDC = 10n ** 9n;
 
 function authored(...commands: ((revision: number) => Command)[]): EditorState {
-  let state = initialEditor();
+  let state = templateEditor();
   for (const make of commands) {
     const next = editorReducer(state, make(state.workflow.revision), context);
     if (next.error) throw new Error(next.error);

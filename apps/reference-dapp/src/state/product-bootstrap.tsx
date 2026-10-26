@@ -6,7 +6,7 @@
  * deployment is configured for (confirmed by the client afterwards). Presentation only: none of it is authority.
  */
 import { createContext, useContext, type ReactNode } from 'react';
-import type { CopilotMode } from '../server/copilot-service';
+import type { CopilotMode } from '../domain/copilot-mode';
 import type { WalletHintEcosystem } from '../wallet/wallet-hint';
 
 export type ProductBootstrap = { readonly walletHint: readonly WalletHintEcosystem[]; readonly copilotMode: CopilotMode | null };

@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { baseAssetRegistry, referenceRegistry } from '@defi-workflow-engine/action-registry';
 import { createReviewContext, lintWorkflow } from '@defi-workflow-engine/reference-linter';
-import { editorReducer, initialEditor } from './editor';
+import { editorReducer, templateEditor } from './editor';
 import { parseLocalCommand } from './commands';
 import { formatHumanAmount } from './swap-authoring';
 const context = createReviewContext({ registryId: referenceRegistry.registryId, capabilityId: referenceRegistry.capabilities[0]?.id, actionId: referenceRegistry.actions[0]?.id, assets: baseAssetRegistry });
@@ -13,7 +13,7 @@ describe('shared swap authoring', () => {
       ['USDC_TO_WETH', 'swap 2.25 USDC to WETH on Base slippage 50 bps', '2.25'],
       ['WETH_TO_USDC', 'swap 0.125 WETH to USDC on Base slippage 50 bps', '0.125'],
     ] as const) {
-      const start = initialEditor();
+      const start = templateEditor();
       const chat = editorReducer(start, parseLocalCommand(text, start.workflow, context), context);
       const canvas = editorReducer(start, { type: 'ADD_SWAP', direction, amount, slippage: '50', source: 'CANVAS', baseRevision: 0 }, context);
       expect(chat.error).toBeNull(); expect(canvas.error).toBeNull();
@@ -26,7 +26,7 @@ describe('shared swap authoring', () => {
     }
   });
   it('rejects stale edits, mock-to-financial connections, locked edits and cap widening', () => {
-    const added = editorReducer(initialEditor(), { type: 'ADD_SWAP', direction: 'USDC_TO_WETH', amount: '2', slippage: '50', source: 'CANVAS', baseRevision: 0 }, context);
+    const added = editorReducer(templateEditor(), { type: 'ADD_SWAP', direction: 'USDC_TO_WETH', amount: '2', slippage: '50', source: 'CANVAS', baseRevision: 0 }, context);
     const stale = editorReducer(added, { type: 'SET_SLIPPAGE', nodeId: 'node-002', slippage: '80', source: 'CHAT', baseRevision: 0 }, context);
     expect(stale.workflow).toBe(added.workflow);
     const edge = editorReducer(added, { type: 'CONNECT', from: 'node-001', to: 'node-002', source: 'CANVAS', baseRevision: 1 }, context);

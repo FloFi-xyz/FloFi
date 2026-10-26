@@ -11,7 +11,7 @@ import type { UniswapLiquidityInput } from './uniswap-liquidity-authoring';
 import { defaultPoolRange, validCryptoSelection, canSelectCryptoAssets, cryptoInputOf, type CryptoSelection, type CryptoSelections } from './crypto-action-picker';
 import { actionReviewValue } from './canvas-action-setup';
 import { canvasPosition, type CanvasLayout } from './canvas-layout';
-import { editorReducer, initialEditor, type EditorState } from './editor';
+import { editorReducer, initialEditor, templateEditor, type EditorState } from './editor';
 import { freeze, type Workflow } from './initial-workflow';
 import { canEditCanvasAmount, canvasAmountCommand, amountCommandTarget, bridgeSetupNetworks, CANVAS_BRIDGE_NETWORK_OPTIONS, type CanvasActionSetup, type CanvasAmountInputs, type CanvasBridgeNetworks, type CanvasBridgeNetworkInputs, type CanvasRecipientInputs } from './canvas-action-setup';
 import { transferDetails } from './robinhood-transfer-authoring';
@@ -53,6 +53,8 @@ export type HistoryAction =
   | { readonly type: 'REDO' };
 
 export const initialEditorHistory = (): EditorHistory => ({ editor: initialEditor(), layout: {}, actionSetup: null, amountInputs: {}, bridgeNetworkInputs: {}, cryptoSelections: {}, recipientInputs: {}, setupSerial: 0, past: [], future: [] });
+/** Engineering fixture history that starts with the protected mock template at `node-001` (not the product empty canvas). */
+export const templateEditorHistory = (): EditorHistory => ({ editor: templateEditor(), layout: {}, actionSetup: null, amountInputs: {}, bridgeNetworkInputs: {}, cryptoSelections: {}, recipientInputs: {}, setupSerial: 0, past: [], future: [] });
 const snapshot = (state: EditorHistory): Snapshot => ({ workflow: state.editor.workflow, layout: state.layout, actionSetup: state.actionSetup, amountInputs: state.amountInputs, bridgeNetworkInputs: state.bridgeNetworkInputs, cryptoSelections: state.cryptoSelections, recipientInputs: state.recipientInputs });
 
 export function planCanvasDuplicate(workflow: Workflow, layout: CanvasLayout, nodeIds: readonly string[], context: ReviewContext) {

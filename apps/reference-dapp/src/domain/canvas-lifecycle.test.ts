@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it, vi } from 'vitest';
 import { hashArtifactBytes } from '@defi-workflow-engine/workflow-contracts';
-import { editorReducer, initialEditor } from './editor';
+import { editorReducer, templateEditor } from './editor';
 import { canvasAddCommand } from './canvas-authoring';
 import { createCryptoActionNode, selectCryptoNetwork } from './crypto-action-picker';
 import { projectReview } from './review-presentation';
@@ -15,7 +15,7 @@ import type { ExecutionControlsState } from '../state/execution-controls';
 const controls = { requesting: false, verifying: false, canContinue: false, canCheck: false };
 function fixture(kind: 'public' | 'router' | 'supply' | 'solana-swap'): ExecutionControlsState {
   const f = reviewFixture();
-  if (kind === 'supply' || kind === 'router') f.workflow = editorReducer(initialEditor(), canvasAddCommand(kind === 'supply' ? 'supply' : 'bridge', 0, f.wallet.account, '100'), f.context).workflow;
+  if (kind === 'supply' || kind === 'router') f.workflow = editorReducer(templateEditor(), canvasAddCommand(kind === 'supply' ? 'supply' : 'bridge', 0, f.wallet.account, '100'), f.context).workflow;
   if (kind === 'solana-swap') {
     f.workflow = { ...f.workflow, nodes: [createCryptoActionNode('solana-swap', { selection: selectCryptoNetwork('swap', 'Solana Devnet'), amount: '1', slippage: '50' })]  };
     const chain = f.workflow.nodes[0]!.chainId;

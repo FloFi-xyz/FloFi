@@ -52,8 +52,9 @@ test('/app Beta Mainnet notice follows the language preference', async ({ page }
   await page.goto('/app');
   await expect(page.locator('.beta-notice')).toHaveText(betaNotice);
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
-  await page.getByRole('button', { name: 'PT', exact: true }).click();
+  // Settings exposes one Language switch (PT/EN are visual labels). The accessible name translates with the locale.
+  await page.getByRole('switch', { name: /^(Language|Idioma)$/ }).click();
   await expect(page.locator('.beta-notice')).toHaveText(betaNoticePt);
-  await page.getByRole('button', { name: 'EN', exact: true }).click();
+  await page.getByRole('switch', { name: /^(Language|Idioma)$/ }).click();
   await expect(page.locator('.beta-notice')).toHaveText(betaNotice);
 });

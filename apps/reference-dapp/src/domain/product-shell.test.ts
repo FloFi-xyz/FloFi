@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from 'vitest';
+import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { JUPITER_SOLANA_MAINNET, ORCA_WHIRLPOOLS_DEVNET } from '@defi-workflow-engine/action-registry';
 import { initialWorkflow, freeze } from './initial-workflow';
+import { createMockNode } from './mock-actions';
 import { createRouterNode } from './router-authoring';
 import { shellChainLabel, workflowShellContext } from './product-shell';
 
@@ -33,8 +35,8 @@ describe('product shell canonical workflow projection', () => {
   });
 
   it('deduplicates chains while retaining an unknown canonical chain identity', () => {
-    const node = { nodeId: 'future', actionType: 'future.action', chainId: 'eip155:999999',
-      dependencies: [] as const, inputs: [] as const, outputs: [] as const, userConstraints: [] as const };
+    // A full IR node (createMockNode) with an unknown chain identity — never a partial fixture that weakens SemanticWorkflow.
+    const node: SemanticWorkflow['nodes'][number] = { ...createMockNode('future', 'read'), actionType: 'future.action', chainId: 'eip155:999999' };
     expect(workflowShellContext(freeze({ ...initialWorkflow(), nodes: [node, { ...node, nodeId: 'second' }] })))
       .toMatchObject({ actionCount: 2, chains: ['eip155:999999'], requiredChain: 'eip155:999999' });
   });

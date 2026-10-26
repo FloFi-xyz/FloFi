@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { initialWorkflow, freeze, type Workflow } from '../domain/initial-workflow';
+import { setActiveNetworkScope } from '../domain/network-scope';
 import { createRouterNode } from '../domain/router-authoring';
 import { TopBar } from './top-bar';
 import { HeaderSettings } from './header-settings';
@@ -45,6 +46,7 @@ beforeEach(() => {
   wallet.busy = false;
   vi.clearAllMocks();
 });
+afterEach(() => setActiveNetworkScope(null));
 
 const stageMarkup = (html: string) => html.match(/<nav aria-label="Workflow stages" class="tabs">([\s\S]*?)<\/nav>/)?.[1] ?? '';
 
@@ -137,6 +139,7 @@ describe('product shell rendering', () => {
   });
 
   it('shows the actual connected network and the canonical Journey network separately', () => {
+    setActiveNetworkScope('PUBLIC_MAINNET');
     fixture.workflow = freeze({ ...initialWorkflow(), revision: 3, nodes: [createRouterNode('bridge', {
       source: 'Base Sepolia', destination: 'Arbitrum Sepolia', token: 'USDC', amount: '1', recipient: '', slippage: '50', routing: 'AUTO',
     })] });

@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import {describe,it,expect} from 'vitest';
-import {createAuthoredLending,lendingNodeInput,lendingCanvasEdges} from './lending-authoring';
-import {parseLocalCommand} from './commands';
-import {editorReducer,initialEditor} from './editor';
-import {describeProposal} from './proposal';
-import {createBaseSepoliaReviewContext,validateAuthoringWorkflow} from '@defi-workflow-engine/reference-linter';
-import {readLendingComposition,readBorrowNode} from '@defi-workflow-engine/workflow-contracts';
-import {resolveWorkflowCapability} from '@defi-workflow-engine/action-registry';
-import {createLendingHarness,OWNER} from '../../e2e/lending-harness.mjs';
-import {simulateLendingComposition,assertLendingReview,assertLendingFresh,readLendingSnapshot,supplyCall,supplyWord,type SupplyRpc} from '@defi-workflow-engine/reference-compiler';
+import { describe, it, expect } from 'vitest';
+import { createAuthoredLending, lendingNodeInput, lendingCanvasEdges } from './lending-authoring';
+import { parseLocalCommand } from './commands';
+import { editorReducer, templateEditor } from './editor';
+import { describeProposal } from './proposal';
+import { createBaseSepoliaReviewContext, validateAuthoringWorkflow } from '@defi-workflow-engine/reference-linter';
+import { readLendingComposition, readBorrowNode } from '@defi-workflow-engine/workflow-contracts';
+import { resolveWorkflowCapability } from '@defi-workflow-engine/action-registry';
+import { createLendingHarness, OWNER } from '../../e2e/lending-harness.mjs';
+import { simulateLendingComposition, assertLendingReview, assertLendingFresh, readLendingSnapshot, supplyCall, supplyWord, type SupplyRpc } from '@defi-workflow-engine/reference-compiler';
 const context=createBaseSepoliaReviewContext(),input={supply:'0.1',borrow:'0.01',slippage:'50',owner:OWNER};
 const workflow=createAuthoredLending('lending',0,input);
 describe('BUILD-013 finite semantics, commitments, simulation and safety',()=>{
@@ -32,7 +32,7 @@ describe('BUILD-013 finite semantics, commitments, simulation and safety',()=>{
     expect(()=>lendingNodeInput(workflow,'lending-swap','301')).toThrow();
   });
   it('Chat and Canvas proposals produce identical IR only after explicit acceptance',()=>{
-    const before=initialEditor(),chat=parseLocalCommand(`compose supply 0.1 USDC to Aave then borrow 0.01 USDC then swap borrowed USDC to WETH on Base Sepolia slippage 50 bps owner ${OWNER}`,before.workflow,context);
+    const before=templateEditor(),chat=parseLocalCommand(`compose supply 0.1 USDC to Aave then borrow 0.01 USDC then swap borrowed USDC to WETH on Base Sepolia slippage 50 bps owner ${OWNER}`,before.workflow,context);
     const canvas={type:'AUTHOR_LENDING' as const,input,source:'CANVAS' as const,baseRevision:0};
     const a=editorReducer(before,chat,context),b=editorReducer(before,canvas,context);expect(a.error).toBeNull();expect(a.workflow).toEqual(b.workflow);expect(before.workflow.nodes).toHaveLength(1);
     expect(describeProposal(before,a,chat,context).join(' ')).toContain('invalidates');expect(readLendingComposition(a.workflow as typeof workflow).borrowAmount).toBe('10000');

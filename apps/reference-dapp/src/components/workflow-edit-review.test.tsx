@@ -33,7 +33,7 @@ describe('contextual workflow proposals', () => {
     expect(presentation.detail).toContain('Borrow 0.01 USDC');
     expect(presentation.detail).not.toContain(owner);
     expect(before.workflow.revision).toBe(0);
-    expect(before.workflow.nodes).toHaveLength(1);
+    expect(before.workflow.nodes).toHaveLength(0);
   });
   it('renders a keyboard reachable artifact closed initially, with no approval controls or bottom panel', () => {
     const html = renderToStaticMarkup(createElement(WorkflowEditReview));

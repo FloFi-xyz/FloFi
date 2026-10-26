@@ -29,7 +29,7 @@ describe('Arbitrum liquidity authoring parity', () => {
     // The existing intent protocol omits deposits when their amounts are missing; it never invents zero deposits.
     const copilot = new CopilotSession(), reply = copilot.say(text, intent.action(act.liquidity({ network: 'ARBITRUM', deposits: [] }), language));
     expect(reply?.kind).toBe('CLARIFICATION'); expect(reply?.command).toBeUndefined();
-    expect(copilot.workflow.nodes).toHaveLength(1); expect(copilot.turns[0]!.request).not.toBeNull();
+    expect(copilot.workflow.nodes).toHaveLength(0); expect(copilot.turns[0]!.request).not.toBeNull();
   });
   it.each([
     ['Please provide liquidity with 10 USDC and 0.005 WETH on Arbitrum at 0.05% over the full range', 'EN'],

@@ -12,6 +12,14 @@ export function workflowOwner(value: unknown): WorkflowOwner | null {
 export function validateSavedWorkflow(value: unknown): SemanticWorkflow {
   const bytes = new TextEncoder().encode(JSON.stringify(value));
   if (bytes.length > 262_144) throw Error('WORKFLOW_INVALID');
+  // BUILD-FLOFI-PRODUCT-UX-001: the empty product draft (no nodes) is never a saved workflow — refuse before the
+  // canonical schema, which requires at least one node.
+  if (value && typeof value === 'object' && Array.isArray((value as { nodes?: unknown }).nodes)
+    && !(value as { nodes: unknown[] }).nodes.some(node => node && typeof node === 'object'
+      && typeof (node as { actionType?: unknown }).actionType === 'string'
+      && !(node as { actionType: string }).actionType.startsWith('mock-'))) {
+    throw Error('WORKFLOW_EMPTY');
+  }
   const workflow = parseArtifactBytes(bytes, 'semantic-workflow');
   if (!workflow.nodes.some(n => !n.actionType.startsWith('mock-'))) throw Error('WORKFLOW_EMPTY');
   const base = createReviewContext({ registryId: referenceRegistry.registryId, capabilityId: referenceRegistry.capabilities[0]!.id,

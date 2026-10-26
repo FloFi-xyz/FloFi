@@ -2,7 +2,7 @@ import {createAuthoredLending} from './lending-authoring';
 // SPDX-License-Identifier: AGPL-3.0-only
 import { createBaseSepoliaReviewContext, createEthereumSepoliaReviewContext, reviewContextForChain, validateWorkflowDraft, type ReviewContext } from '@defi-workflow-engine/reference-linter';
 import { commandIsValid, type Command } from './commands';
-import { freeze, initialWorkflow, type Workflow } from './initial-workflow';
+import { freeze, initialWorkflow, templateWorkflow, type Workflow } from './initial-workflow';
 import { createMockNode } from './mock-actions';
 import { createSwapNode, parseHumanAmount, parseSlippage, swapDetails, SWAP_ACTION } from './swap-authoring';
 import { createLiquidityNode, LIQUIDITY_ACTION } from './liquidity-authoring';
@@ -27,6 +27,8 @@ import { createCryptoActionNode, canSelectCryptoAssets, cryptoSelectionOf, crypt
 
 export interface EditorState { readonly workflow: Workflow; readonly error: string | null }
 export const initialEditor = (): EditorState => ({ workflow: initialWorkflow(), error: null });
+/** Engineering fixture editor that starts with the protected mock template at `node-001` (not the product empty canvas). */
+export const templateEditor = (): EditorState => ({ workflow: templateWorkflow(), error: null });
 
 /** One pure reducer for both views. View selection and layout never enter the IR. */
 export function editorReducer(state: EditorState, command: Command, context?: ReviewContext): EditorState {

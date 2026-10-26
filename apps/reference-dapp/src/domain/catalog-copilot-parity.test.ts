@@ -5,7 +5,7 @@
  * MCP and the channels produce. Every token resolves only in the network's validated catalog and must be the user's own words; real
  * funds are never inferred; an unknown or unloaded catalog fails closed. Nothing here signs, quotes or executes.
  */
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { parseLocalCommand, type Command } from './commands';
 import { registerNetworkCatalog, resetNetworkCatalogs } from './asset-catalogs';
 import { canonicalStrategy } from '../channels/core/strategy';
@@ -14,10 +14,12 @@ import { TEST_WALLET } from './copilot-test-fixtures';
 import { BASE_TOKEN_LIST_TEXT, baseAsset, baseCatalog } from '../server/base-mainnet.test-harness';
 import { officialCatalog } from '../server/robinhood-mainnet.test-harness';
 import { editorReducer } from './editor';
+import { setActiveNetworkScope } from './network-scope';
 
 const RECIPIENT = '0x3333333333333333333333333333333333333333';
 beforeAll(() => { registerNetworkCatalog(baseCatalog()); registerNetworkCatalog(officialCatalog()); });
 afterAll(() => resetNetworkCatalogs());
+afterEach(() => setActiveNetworkScope(null));
 
 /** What a message proposes: the Copilot's reply, or (when the exact grammar already parses it, as Chat does) the exact command. */
 function proposalOf(session: CopilotSession, text: string, model: Record<string, unknown>): { command: Command; sentence: string; notes: readonly string[] } {
@@ -75,6 +77,7 @@ describe('BUILD-BASE-001 Copilot parity on catalog networks', () => {
     } finally { registerNetworkCatalog(baseCatalog()); registerNetworkCatalog(officialCatalog()); }
   });
   it('never infers real funds: an unnamed or test-worded mainnet is asked, not chosen', () => {
+    setActiveNetworkScope('PUBLIC_MAINNET');
     const unnamed = new CopilotSession().say('Send 5 USDC to ' + RECIPIENT, intent.action(act.transfer({ asset: 'USDC', amount: '5', recipient: RECIPIENT })))!;
     // Audit A9: the Ethereum Sepolia and Robinhood Chain Testnet self-transfers are not offered until the owner approves their agent rollout.
     // BUILD-FLOFI-MAINNET-PRODUCT-001: public product offers mainnets only (Solana Devnet is engineering).

@@ -12,6 +12,7 @@ import { formatSlippage } from '../domain/slippage-policy';
 import { formatTokenAmount } from '../domain/jupiter-authoring';
 import { TokenAmountInput } from './token-amount-input';
 import { AssetSearch } from './asset-search';
+import { SolanaVerifiedAssetSearch } from './solana-verified-asset-search';
 import { PendingExecutionNote } from './execution-concurrency-notes';
 import type { DiscoveryCandidate } from '../server/universal-router/discovery';
 
@@ -106,7 +107,14 @@ function UniversalAssetPicker({ networkKey, value, onChange, label, inputLabel }
         loading: tr('Loading {0} tokens…', network.name), unavailable: tr('{0} tokens are unavailable right now.', network.name),
         retry: tr('Try again'), empty: tr('No token matches this search.'), results: tr('{0} token results', network.name),
         total: count => tr('{0} tokens · type to search', count) }}/>
-      : <small>{tr('Search the verified Solana tokens above, or write a mint as address@decimals (verified on chain at Simulate).')}</small>}
+      : <>
+        <SolanaVerifiedAssetSearch selected={selected} onSelect={onChange} copy={{
+          heading: tr('Search assets'), searchLabel: tr('Search Solana tokens'), placeholder: tr('Search by symbol or mint…'),
+          loading: tr('Loading Solana tokens…'), unavailable: tr('Solana tokens are unavailable right now.'),
+          retry: tr('Try again'), empty: tr('No verified Solana token matches this search.'), results: tr('Solana token results'),
+          total: count => tr('{0} verified Solana tokens · type to search', count) }}/>
+        <small>{tr('Same verified set as Swap (SOL, USDC, USDT). Another mint: write address@decimals (verified on chain at Simulate). A match does not guarantee a route.')}</small>
+      </>}
   </div>;
 }
 

@@ -6,12 +6,12 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { createBaseSepoliaReviewContext } from '@defi-workflow-engine/reference-linter';
 import { parseLocalCommand, summarize } from './commands';
-import { editorReducer, initialEditor } from './editor';
+import { editorReducer, templateEditor } from './editor';
 import { registerNetworkCatalog, resetNetworkCatalogs, ROBINHOOD_NETWORK } from './asset-catalogs';
 import { createCryptoActionNode } from './crypto-action-picker';
 import { officialCatalog } from '../server/robinhood-mainnet.test-harness';
 
-const context = createBaseSepoliaReviewContext(), editor = initialEditor();
+const context = createBaseSepoliaReviewContext(), editor = templateEditor();
 const parse = (text: string) => parseLocalCommand(text, editor.workflow, context);
 const apply = (text: string) => { const r = editorReducer(editor, parse(text), context); if (r.error) throw new Error(r.error); return r.workflow; };
 afterEach(() => resetNetworkCatalogs());
@@ -24,7 +24,7 @@ describe('BUILD-RH-002 Robinhood Chain chat', () => {
     const node = apply('Swap 50 USDG for TSLA on Robinhood').nodes.find(n => n.chainId === 'eip155:4663')!;
     expect(node).toEqual(createCryptoActionNode(node.nodeId, { selection: { action: 'swap', network: ROBINHOOD_NETWORK, from: 'USDG', to: 'TSLA' }, amount: '50', slippage: '100' }));
     expect(parse('swap 10 usdg to pltr on robinhood chain slippage 80 bps')).toMatchObject({ input: { selection: { to: 'PLTR' }, slippage: '80' } });
-    expect(summarize(apply('Swap 50 USDG for TSLA on Robinhood'))).toContain('Swap 50 USDG to TSLA on Robinhood Chain via Uniswap v3, 50 bps; real funds');
+    expect(summarize(apply('Swap 50 USDG for TSLA on Robinhood'))).toContain('Swap 50 USDG to TSLA on Robinhood Chain via Uniswap v3, 100 bps; real funds');
   });
   it('"Transfer 3 AAPL on Robinhood" is a token transfer to the connected owner; an explicit recipient is kept', () => {
     registerNetworkCatalog(officialCatalog());

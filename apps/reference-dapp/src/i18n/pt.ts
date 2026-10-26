@@ -113,9 +113,16 @@ export const portuguese: Readonly<Record<string, string>> = {
   'Shown as': 'Mostrado como',
   'Any catalog asset by symbol or name, or a contract / mint written as address@decimals (identity verified on chain at Simulate). A valid asset does not guarantee a route.':
     'Qualquer ativo do catálogo por símbolo ou nome, ou um contrato / mint escrito como endereço@decimais (identidade verificada on-chain na Simulação). Um ativo válido não garante uma rota.',
-  'Search the verified Solana tokens above, or write a mint as address@decimals (verified on chain at Simulate).':
-    'Pesquise os tokens Solana verificados acima, ou escreva um mint como endereço@decimais (verificado on-chain na Simulação).',
   'Search by symbol, name or contract…': 'Pesquisar por símbolo, nome ou contrato…',
+  'Search by symbol or mint…': 'Pesquisar por símbolo ou mint…',
+  'Search Solana tokens': 'Pesquisar tokens Solana',
+  'Loading Solana tokens…': 'A carregar tokens Solana…',
+  'Solana tokens are unavailable right now.': 'Os tokens Solana estão indisponíveis neste momento.',
+  'No verified Solana token matches this search.': 'Nenhum token Solana verificado corresponde a esta pesquisa.',
+  'Solana token results': 'Resultados de tokens Solana',
+  '{0} verified Solana tokens · type to search': '{0} tokens Solana verificados · escreva para pesquisar',
+  'Same verified set as Swap (SOL, USDC, USDT). Another mint: write address@decimals (verified on chain at Simulate). A match does not guarantee a route.':
+    'O mesmo conjunto verificado do Swap (SOL, USDC, USDT). Outro mint: escreva endereço@decimais (verificado on-chain na Simulação). Uma correspondência não garante uma rota.',
   '{0} shortcuts': 'Atalhos de {0}',
   'Workflow stages': 'Etapas do fluxo', 'Skip to workspace': 'Ir para a área de trabalho',
   'Workflow workspace': 'Área do fluxo', 'Simulation workspace': 'Área de simulação', 'Execution workspace': 'Área de execução',

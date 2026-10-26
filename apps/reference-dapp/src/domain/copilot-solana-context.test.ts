@@ -21,6 +21,7 @@ const verified = (extra: Partial<CopilotVerified> = {}): CopilotVerified => ({ o
   orcaPositions: [], remaining: [], ...extra });
 const position = (positionMint = MINT, status = 'ACTIVE') => ({ positionMint, status, tickLower: -19_200, tickUpper: -18_560, liquidity: '1000000000' });
 const swap: SolanaSwapInput = { network: 'Solana Devnet', from: 'SOL', to: 'devUSDC', amount: '0.1', slippage: '100' };
+const swap50: SolanaSwapInput = { ...swap, slippage: '50' };
 const tenPercent = { rangeUnit: 'PERCENT', lower: null, upper: '10' };
 /** The Canvas path: add the swap, add the position, connect them (canvas-connect); each step through the same reducer. */
 function canvas(liquidity: SolanaLiquidityInput, from: EditorState = initialEditor()): EditorState {
@@ -102,7 +103,7 @@ describe('Swap → Orca liquidity funded by the swap output', () => {
     expect(session.pending?.command.type).toBe('ADD_SOLANA_SWAP');
     const reply = session.say('and add liquidity with these tokens plus 0.05 SOL in a 10% range', intent.action(act.liquidity({ deposits: [{ asset: 'SOL', maxAmount: '0.05' }],
       ...tenPercent, funding: 'SWAP_OUTPUT' })))!;
-    expect(reply).toMatchObject({ kind: 'PROPOSAL', command: { type: 'ADD_SOLANA_COMPOSITION', swap, from: null } });
+    expect(reply).toMatchObject({ kind: 'PROPOSAL', command: { type: 'ADD_SOLANA_COMPOSITION', swap: swap50, from: null } });
   });
   it('explains instead of guessing: no swap, no verified price, another pool', () => {
     const session = new CopilotSession();
@@ -238,7 +239,7 @@ describe('exact grammar and commands', () => {
   const workflow = buildWorkflow([FIXTURE.devnetSwap]), context = contextFor(workflow);
   it('parses both composition sentences and checks the swapped token', () => {
     expect(parseLocalCommand('swap 0.1 SOL to devUSDC on Solana Devnet slippage 50 bps then add liquidity 5 swapped devUSDC and 0.05 SOL ticks -1024 to 1024 slippage 100 bps',
-      workflow, context)).toMatchObject({ type: 'ADD_SOLANA_COMPOSITION', swap, from: null, liquidity: { maxSol: '0.05', maxDevUsdc: '5' } });
+      workflow, context)).toMatchObject({ type: 'ADD_SOLANA_COMPOSITION', swap: swap50, from: null, liquidity: { maxSol: '0.05', maxDevUsdc: '5' } });
     expect(parseLocalCommand('add liquidity all devUSDC from node-002 and 0.5 SOL ticks -1024 to 1024 on Solana Devnet slippage 100 bps', workflow, context))
       .toMatchObject({ type: 'ADD_SOLANA_COMPOSITION', swap: null, from: 'node-002', liquidity: { maxDevUsdc: fullOutputCap(1) } });
     expect(() => parseLocalCommand('add liquidity all SOL from node-002 and 5 devUSDC ticks -1024 to 1024 on Solana Devnet slippage 100 bps', workflow, context))
