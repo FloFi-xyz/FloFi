@@ -82,6 +82,12 @@ Browser commands require the repository's pinned headless-shell and Anvil paths,
 
 The first exact-head CircleCI browser-1 job (569) failed before browser tests: the PostgreSQL sidecar exited 137 during static page generation, which started 35 Next workers on a `large` (4 CPU / 8 GB) runner. The logs demonstrate the sidecar SIGKILL and worker count; memory pressure is the supported inference, not a claimed database/application test failure. CI builds now use two page-generation workers through the installed Next configuration API. Runner size, tests, assertions, profiles and certification gates are unchanged. The failed attempt remains a failure; only a fresh exact-head certification can approve the fix.
 
+## PostgreSQL certification blocker
+
+A full local PostgreSQL run exposed an existing scheduler race: the duplicate-dispatch assertion observed two evaluator jobs instead of one. An isolated passing retry was not accepted as certification. A controlled transaction regression then reproduced the cause: `enqueueDue` could select a stale due-rule snapshot, wait for the prior work item to complete, and recreate the old slot after the partial open-item dedupe key disappeared. The regression failed with one obsolete insertion when zero was required.
+
+The enqueue statement now selects due rules with `FOR UPDATE SKIP LOCKED`. This locks only the selected rule versions for that statement and leaves busy rules to the next sweep; an evaluator's committed schedule advancement cannot be overwritten by an old enqueue snapshot. The existing assertions remain, and the new regression also asserts no open obsolete work and an advanced rule. All 22 scheduler tests pass with the fix. There is no schema migration, global account/run lock, execution-engine rewrite, authorization change, or production database operation.
+
 ## Existing limitations
 
 - Catalog inclusion is the existing registry/list projection's decision. Conversation code does not widen provider inclusion rules (for example numeric-leading records excluded by an existing list projection).
