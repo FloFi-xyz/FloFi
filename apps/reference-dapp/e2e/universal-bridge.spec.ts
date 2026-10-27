@@ -31,7 +31,8 @@ test('Copilot keeps a destination question without buttons and resolves one toke
   await ask(page, 'USDG');
   await expect(copilotSays(page)).toContainText('receive USDG');
   await openProposalReview(page);
-  await expect(page.locator('.copilot-notice')).toContainText('bridge 1 USDT from Solana to Robinhood Chain receive USDG');
+  await expect(copilotSays(page)).toContainText('bridge 1 USDT from Solana to Robinhood Chain receive USDG via best slippage 100 bps');
+  await expect(page.getByRole('dialog', { name: 'Proposed change' })).toContainText('Bridge 1 USDT');
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '0');
   expect(await counters()).toEqual(before);
 });
