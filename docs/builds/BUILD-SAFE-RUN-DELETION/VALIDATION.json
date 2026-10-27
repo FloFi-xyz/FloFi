@@ -1,0 +1,48 @@
+{
+  "branch": "codex/build-safe-run-deletion",
+  "baseCommit": "01dbce43bfa4ab7279a95cc0ae24e5f1a94fa8e1",
+  "productionWrites": 0,
+  "publicFinancialTransactions": 0,
+  "hostedAcceptance": "NOT_PERFORMED",
+  "financialTestData": "SYNTHETIC_ONLY",
+  "validation": {
+    "postgres": {
+      "path": "/tmp/flofi-recovery-build2-postgres-final.log",
+      "passed": 505,
+      "skipped": 3,
+      "sha256": "3014e7b490df86a9149d1056ad36b19da30a43ac3ae9a4c5dfe76891054bc206"
+    },
+    "unit": {
+      "path": "/tmp/flofi-recovery-build2-check4.log",
+      "passed": 5221,
+      "skipped": 2,
+      "sha256": "152608ef129a90f12ace89d85c1d3ac9c6906a04cb6ad9e464371a2d0b7c38c2"
+    },
+    "browser": {
+      "path": "/tmp/flofi-recovery-history-browser-sealed.log",
+      "passed": 9,
+      "skipped": 0,
+      "sha256": "84a38d960c32837fcbf901bc26d33004a1adaa36bd8f6683bf2762412c075f70"
+    },
+    "productionBuild": {
+      "path": "/tmp/flofi-recovery-build2-sealed-build.log",
+      "successfulTasks": 9,
+      "sha256": "39704f3c18927788d2ec404df3228188087076987d5a0719bb5a8ad8e296c85f"
+    },
+    "targetedUnit": {
+      "path": "/tmp/flofi-recovery-history-unit-final.log",
+      "passed": 15,
+      "sha256": "849e726f5e1eb91c986c51518b2a904887f981c6c9c64feb4dfd55a9f4bb3a32"
+    },
+    "finalManifest": {
+      "path": "/tmp/flofi-recovery-manifest-final.log",
+      "passed": 2,
+      "sha256": "baffe8c4f13bf4c90cc2c9607b08bb4124117410d01ae196c57998ec106c82c8"
+    },
+    "ciSelfTests": {
+      "path": "/tmp/flofi-recovery-ci-all-tests-final.log",
+      "passed": 56,
+      "sha256": "0376e23d3de340ae7310e0b89f23f22e688975753e971cd02b4b3cf556ab0609"
+    }
+  }
+}

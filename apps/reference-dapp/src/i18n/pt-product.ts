@@ -1,6 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /** Product copy only. Names, protocol IDs, assets and wallet identifiers are interpolation values. */
 export const productPortuguese: Readonly<Record<string, string>> = {
+  'History changes are temporarily unavailable. Your records are preserved.': 'As alterações no histórico estão temporariamente indisponíveis. Os seus registos estão preservados.',
+  'Delete': 'Excluir', 'Archive': 'Arquivar', 'Delete execution': 'Excluir execução', 'Archive execution': 'Arquivar execução',
+  'Delete workflow': 'Excluir workflow', 'Archive workflow': 'Arquivar workflow', 'Delete permanently?': 'Excluir definitivamente?',
+  'Delete permanently': 'Excluir definitivamente', 'Deleting…': 'A excluir…', 'Archive instead': 'Arquivar em vez de excluir',
+  'This cannot be undone. Only records proven to have no financial submission or pending responsibility can be deleted.':
+    'Esta ação é irreversível. Só podem ser excluídos registos comprovadamente sem submissão financeira ou responsabilidade pendente.',
+  'This record may have financial activity, authorization or pending dependencies. Archive it to preserve its history.':
+    'Este registo pode ter atividade financeira, autorização ou dependências pendentes. Arquive-o para preservar o histórico.',
+  'This record is unavailable for the verified wallet. Refresh the history.': 'Este registo não está disponível para a carteira verificada. Atualize o histórico.',
+  'The result could not be confirmed. Refresh the history before trying again.': 'Não foi possível confirmar o resultado. Atualize o histórico antes de tentar novamente.',
   'Base → Arbitrum → Uniswap v3 position': 'Base → Arbitrum → posição Uniswap v3',
   'USD value unavailable': 'Valor USD indisponível',
   'Your workflows': 'Seus workflows',

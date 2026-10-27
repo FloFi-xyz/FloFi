@@ -3,6 +3,8 @@
 import { useLocale } from '../i18n/locale';
 import type { WorkflowList } from '../domain/saved-workflow';
 import { WalletProof, type Namespace, type useWalletProof } from './wallet-proof';
+import { HistoryActions } from './history-actions';
+import type { HistoryDisposition } from '@defi-workflow-engine/cloud-runtime';
 export function WorkflowVerification({ namespace, proof, account }: { namespace: Namespace; proof: ReturnType<typeof useWalletProof>; account: string | null }) {
   const { t } = useLocale();
   return <div className="panel" role="status"><p>{t('Verify wallet ownership to save and reopen workflows.')}</p>
@@ -13,9 +15,9 @@ export function WorkflowVerification({ namespace, proof, account }: { namespace:
 }
 export type WorkflowNavigation = { list: WorkflowList | null; busy: boolean; error: string | null;
   loading?: boolean; connected?: boolean; verification?: import('react').ReactNode;
-  open(id: string): void; refresh(): void };
+  open(id: string): void; refresh(): void; changeHistory?(id: string, action: 'DELETE' | 'ARCHIVE'): Promise<HistoryDisposition> };
 /** Reusable canonical workflow identities in the existing secondary product workspace. */
-export function YourWorkflows({ list = null, busy = false, loading = false, error = null, connected = true, verification, open, refresh }: Partial<WorkflowNavigation>) {
+export function YourWorkflows({ list = null, busy = false, loading = false, error = null, connected = true, verification, open, refresh, changeHistory }: Partial<WorkflowNavigation>) {
   const { t } = useLocale();
   return <section className="saved-workflows" aria-label={t('Your workflows')}>
     <header className="secondary-workspace-heading"><h1>{t('Your workflows')}</h1><p>{t('Open a saved or previously executed workflow to continue building.')}</p></header>
@@ -24,7 +26,7 @@ export function YourWorkflows({ list = null, busy = false, loading = false, erro
         : error ? <div className="workspace-empty" role="alert"><p>{t('Your workflows are temporarily unavailable.')}</p><button type="button" disabled={busy || loading} onClick={refresh}>{t('Retry')}</button></div>
           : loading ? <p role="status">{t('Loading your workflows…')}</p>
             : !list?.items.length ? <div className="workspace-empty"><h2>{t('No workflows yet.')}</h2><p>{t('Build or execute a workflow and it will appear here.')}</p></div>
-              : <ul className="saved-workflow-list">{list.items.map(item => <li key={item.workflowId}><button type="button" className="workspace-action saved-workflow-open" disabled={busy} onClick={() => open?.(item.workflowId)}><span>{item.name ?? t('Workflow')}</span><span aria-hidden="true">→</span></button></li>)}</ul>}
+              : <ul className="saved-workflow-list">{list.items.map(item => <li key={item.workflowId}><button type="button" className="workspace-action saved-workflow-open" disabled={busy} onClick={() => open?.(item.workflowId)}><span>{item.name ?? t('Workflow')}</span><span aria-hidden="true">→</span></button>{changeHistory && <HistoryActions kind="workflow" change={action => changeHistory(item.workflowId, action)} changed={() => refresh?.()}/>}</li>)}</ul>}
     {list?.hasMore && <p className="muted">{t('Showing up to 100 workflows.')}</p>}
   </section>;
 }

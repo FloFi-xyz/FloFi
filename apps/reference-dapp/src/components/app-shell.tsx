@@ -165,7 +165,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     setSaveNotice({ owner: ownerKey, message: 'Workflow restored. Simulate again before reviewing.' });
     setTab('Build');
   }
-  const workflows = { list: library.list, busy: library.busy, error: library.error,
+  const workflows = { list: library.list, busy: library.busy, error: library.error, changeHistory: library.changeHistory,
     open: (id: string) => { void reopenWorkflow(id); }, refresh: () => { void proof.refresh(); library.refresh(); } };
   useEffect(() => { if (secondaryRoute?.id === 'workflows') refreshLibrary(); }, [secondaryRoute?.id, refreshLibrary]);
   const verification = owner && showVerification && proof.proven !== owner.address

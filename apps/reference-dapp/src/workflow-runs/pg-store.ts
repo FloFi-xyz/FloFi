@@ -102,7 +102,9 @@ export function createPgWorkflowRunStore(db: Database, tenantId: string) {
     },
     /** The runs one of these wallets owns (most recent first). */
     async forOwner(owner: WalletRef, limit = 20): Promise<readonly RunRecord[]> {
-      return (await db.query(`SELECT * FROM workflow_runs WHERE tenant_id = $1 AND owner_namespace = $2 AND owner_account = $3 ORDER BY created_at DESC, run_id LIMIT $4`,
+      return (await db.query(`SELECT * FROM workflow_runs WHERE tenant_id = $1 AND owner_namespace = $2 AND owner_account = $3
+        AND NOT EXISTS (SELECT 1 FROM owner_history_visibility h WHERE h.tenant_id=workflow_runs.tenant_id AND h.owner_account=workflow_runs.owner_account AND h.kind='WORKFLOW_RUN' AND h.record_id=workflow_runs.run_id)
+        ORDER BY created_at DESC, run_id LIMIT $4`,
         [tenantId, owner.namespace, owner.address, Math.min(Math.max(1, limit), 100)])).rows.map(runOf);
     },
     async steps(runId: string): Promise<readonly RunStepRecord[]> {

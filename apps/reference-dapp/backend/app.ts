@@ -17,6 +17,7 @@ import { testNetworkFlowRefusal, testNetworkPreviewRefusal } from '../src/server
 
 import { createSavedWorkflowStore, EXECUTED_WORKFLOW_RUN, validWorkflowId } from '../src/server/saved-workflow-store.ts';
 import { validateSavedWorkflow, workflowOwner, WORKFLOW_OWNER_HEADER, type WorkflowOwner } from '../src/domain/saved-workflow.ts';
+import { createOwnerHistory, type HistoryDisposition, type HistoryKind } from '@defi-workflow-engine/cloud-runtime';
 
 /** Methods that could put a transaction on any network. Observer (worker) transports reject them unconditionally. */
 const SUBMISSION_METHODS = new Set(['sendTransaction', 'eth_sendRawTransaction', 'eth_sendTransaction']);
@@ -219,7 +220,24 @@ export function createBackend(options: BackendOptions) {
     } catch (error) { return { ok: false, code: error instanceof Error && CODE.test(error.message) ? error.message : 'WORKFLOW_UNAVAILABLE' }; }
   }
 
+  async function callHistory(method: 'change' | 'disposition', args: readonly unknown[], owner: WorkflowOwner | null): Promise<HistoryDisposition> {
+    if (!owner || !workflowOwner(`${owner.namespace}:${owner.address}`)) return { ok: false, code: 'RUN_NOT_FOUND' };
+    const [kind, id, action] = args;
+    if (!['EXECUTION_RUN','WORKFLOW_RUN','SAVED_WORKFLOW'].includes(kind as string) || typeof id !== 'string' ||
+      method === 'disposition' && args.length !== 2 || method === 'change' && (args.length !== 3 || !['DELETE','ARCHIVE'].includes(action as string)))
+      return { ok: false, code: 'HISTORY_INVALID' };
+    if (method === 'change' && env.FLOFI_OWNER_HISTORY === 'read-only') return { ok: false, code: 'HISTORY_READ_ONLY' };
+    const history = createOwnerHistory(db, options.tenantId);
+    return method === 'disposition' ? history.disposition(owner.address, kind as HistoryKind, id) : history.change(owner.address, kind as HistoryKind, id, action as 'DELETE' | 'ARCHIVE');
+  }
   const routes: Route[] = [
+    { method: 'POST', name: 'owner-history', pattern: /^\/v1\/owner-history\/(change|disposition)$/, handler: wrap(async (request, match) => {
+      const owner = workflowOwner(request.headers[WORKFLOW_OWNER_HEADER]);
+      if (!owner) throw new HttpError(401, 'WALLET_SESSION_REQUIRED');
+      const body = request.body as { args?: unknown } | null;
+      if (!body || !Array.isArray(body.args) || Object.keys(body).length !== 1) throw new HttpError(400, 'HISTORY_INVALID');
+      return { status: 200, body: await callHistory(match[1] as 'change' | 'disposition', body.args, owner) };
+    }) },
     { method: 'POST', name: 'workflows', pattern: /^\/v1\/workflows\/(list|get|save)$/, handler: wrap(async (request, match) => {
       const owner = workflowOwner(request.headers[WORKFLOW_OWNER_HEADER]);
       if (!owner) throw new HttpError(401, 'WALLET_SESSION_REQUIRED');
@@ -271,7 +289,8 @@ export function createBackend(options: BackendOptions) {
       const limit = integerParam(request.query.get('limit')), flow = request.query.get('flow');
       if (flow !== null && !isFlowName(flow)) throw new HttpError(400, 'FLOW_INVALID');
       // A wallet session sees only its own runs.
-      return { status: 200, body: { ok: true, value: await queries(options.tenantId).listRuns(request.query.get('cursor'), limit, { owner: indexPrincipal(request), flow }) } };
+      // Flow-scoped readers also drive composition reconciliation; archiving only hides the main history, never those operational reads.
+      return { status: 200, body: { ok: true, value: await queries(options.tenantId).listRuns(request.query.get('cursor'), limit, { owner: indexPrincipal(request), flow, includeArchived: flow !== null }) } };
     }) },
     { method: 'GET', name: 'run', pattern: /^\/v1\/runs\/([^/]+)$/, handler: wrap(async (request, match) => {
       return { status: 200, body: { ok: true, value: await visibleRun(request, runIdOf(match[1])) } };
@@ -346,6 +365,6 @@ export function createBackend(options: BackendOptions) {
     await settle({ outcome: 'DONE' });
   };
 
-  return { routes, callFlow, callWorkflows, previewFlow, service, storage, handlers: { reconcile, 'evidence.archive': archive } as Record<string, WorkHandler> };
+  return { routes, callFlow, callWorkflows, callHistory, previewFlow, service, storage, handlers: { reconcile, 'evidence.archive': archive } as Record<string, WorkHandler> };
 }
 export type Backend = ReturnType<typeof createBackend>;

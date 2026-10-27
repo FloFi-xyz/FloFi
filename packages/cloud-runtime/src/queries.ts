@@ -8,7 +8,7 @@ import type { Database } from './db.js';
 export type RunSummary = { runId: string; workflowId: string; flow: string; status: string; provenance: string; ownerAccount: string | null; errorCode: string | null;
   needsObservation: boolean; attentionRequired: boolean; hasEvidence: boolean; version: number; createdAt: string; updatedAt: string };
 /** BUILD-JOURNEY-001: optional narrowing of the history to one wallet and/or one flow. */
-export type RunFilter = { readonly owner?: string | null; readonly flow?: string | null };
+export type RunFilter = { readonly owner?: string | null; readonly flow?: string | null; readonly includeArchived?: boolean };
 export type Page<T> = { items: T[]; next: string | null };
 const CURSOR = /^[A-Za-z0-9_-]{1,400}$/;
 const encodeCursor = (value: unknown) => Buffer.from(JSON.stringify(value)).toString('base64url');
@@ -34,9 +34,11 @@ export function createRunQueries(db: Database, tenantId: string) {
       const n = limitOf(limit);
       const after = decodeCursor(cursor, (v): v is [string, string] => Array.isArray(v) && v.length === 2 && typeof v[0] === 'string' && typeof v[1] === 'string');
       const { rows } = await db.query<RunRow>(`SELECT ${RUN_COLUMNS} FROM execution_runs WHERE tenant_id = $1
+        AND ($7::boolean OR NOT EXISTS (SELECT 1 FROM owner_history_visibility h WHERE h.tenant_id=execution_runs.tenant_id
+          AND h.owner_account=execution_runs.owner_account AND h.kind='EXECUTION_RUN' AND h.record_id=execution_runs.run_id))
         AND ($2::timestamptz IS NULL OR (updated_at, run_id) < ($2::timestamptz, $3::text))
         AND ($5::text IS NULL OR owner_account = $5) AND ($6::text IS NULL OR flow = $6)
-        ORDER BY updated_at DESC, run_id DESC LIMIT $4`, [tenantId, after?.[0] ?? null, after?.[1] ?? null, n + 1, filter.owner ?? null, filter.flow ?? null]);
+        ORDER BY updated_at DESC, run_id DESC LIMIT $4`, [tenantId, after?.[0] ?? null, after?.[1] ?? null, n + 1, filter.owner ?? null, filter.flow ?? null, filter.includeArchived ?? false]);
       const items = rows.slice(0, n), last = rows.length > n ? rows[n - 1] : undefined;
       return { items: items.map(summary), next: last ? encodeCursor([last.updated_cursor, last.run_id]) : null };
     },
