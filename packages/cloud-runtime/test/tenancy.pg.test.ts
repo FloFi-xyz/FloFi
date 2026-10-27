@@ -4,7 +4,7 @@
  * sweeps, and the filesystem-free schema check used by serverless functions.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { assertSchemaCurrent, createPostgresWorkQueue, ensureTenant, SHIPPED_MIGRATIONS, sweep } from '../src/index.js';
+import { assertSchemaCurrent, createPostgresWorkQueue, ensureTenant, migrate, SHIPPED_MIGRATIONS, sweep } from '../src/index.js';
 import { createTestDatabase, type TestDatabase } from './pg-harness.js';
 
 let t: TestDatabase;
@@ -19,9 +19,13 @@ describe('BUILD-CLOUD-PARITY-001 deployment tenants', () => {
     for (const bad of ['', 'UPPER', '-leading', 'x'.repeat(64), "a'; DROP TABLE tenants; --"]) await expect(ensureTenant(t.db, bad)).rejects.toThrow('TENANT_ID_INVALID');
   });
   it('the shipped manifest verifies a migrated schema without reading migration files', async () => {
-    expect(await assertSchemaCurrent(t.db, SHIPPED_MIGRATIONS)).toBe(SHIPPED_MIGRATIONS.length);
-    await expect(assertSchemaCurrent(t.db, SHIPPED_MIGRATIONS.slice(0, -1))).rejects.toThrow('MIGRATION_HISTORY_MISMATCH');
-    await expect(assertSchemaCurrent(t.db, [...SHIPPED_MIGRATIONS, { version: 99, name: 'future', sha256: '0'.repeat(64) }])).rejects.toThrow('SCHEMA_NOT_MIGRATED');
+    const exact = await createTestDatabase({ migrated: false });
+    try {
+      await migrate(exact.db); // This test intentionally exercises strict equality, even in a certified-ahead suite.
+      expect(await assertSchemaCurrent(exact.db, SHIPPED_MIGRATIONS)).toBe(SHIPPED_MIGRATIONS.length);
+      await expect(assertSchemaCurrent(exact.db, SHIPPED_MIGRATIONS.slice(0, -1))).rejects.toThrow('MIGRATION_HISTORY_MISMATCH');
+      await expect(assertSchemaCurrent(exact.db, [...SHIPPED_MIGRATIONS, { version: 99, name: 'future', sha256: '0'.repeat(64) }])).rejects.toThrow('SCHEMA_NOT_MIGRATED');
+    } finally { await exact.drop(); }
   });
 });
 

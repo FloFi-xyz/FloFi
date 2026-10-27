@@ -73,3 +73,9 @@ Release A continua em schema 15 e acrescenta o certificado para os bytes exatos 
 15 → 16, cold start de rollback, preservação dos logs, exclusão segura, recusa de ressurgimento por escritor antigo e rollback atômico de uma
 migração que falha. Os dez testes unitários do certificado também passaram. A sequência conjunta, gates e limites de rollback estão no
 [plano único de publicação](../../deploy/RELEASE-127-128.md). Nenhuma migração ou publicação em produção foi executada.
+
+Certificação completa do backend A contra schema **16**: **490 testes PostgreSQL passaram em 80 arquivos**, incluindo processos reais de
+API/worker/migrador/CLI e cold starts do BFF, Developer e MCP OAuth. A primeira rodada encontrou quatro suposições em fixtures: schema
+exato nos testes negativos/manifesto, contagem de migrations aplicada igual à embarcada, e issuer `flofi.test` numa fixture de produção.
+As fixtures agora criam schema exato quando esse é o objeto do teste, comparam a contagem ao ledger real e usam o issuer canônico em
+produção. Nenhum validador da aplicação foi alterado. A rodada completa posterior passou; log `.release-evidence/pg-a-ahead-final.log`.
