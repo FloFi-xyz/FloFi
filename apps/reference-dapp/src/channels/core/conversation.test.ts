@@ -36,6 +36,16 @@ function chat(options: { script?: Script; interpreter?: boolean; state?: Channel
 const input = (command: Command | null) => (command as unknown as { input?: Record<string, string> })?.input;
 
 describe('BUILD-CHANNELS-001 channel conversation', () => {
+  it('persists an outputAsset question without options and resolves a bare reply after JSON rehydration', async () => {
+    const c = chat({ script: [intent.action(act.bridge({ sourceNetwork: 'SOLANA', destinationNetwork: 'ROBINHOOD', asset: 'USDT', amount: '1' }), 'PT')] });
+    expect(await c.say('quero bridge de 1 USDT da Solana para Robinhood Chain')).toMatchObject({ action: 'REPLY', outcome: 'COPILOT_CLARIFICATION' });
+    expect(c.state.copilot).toMatchObject({ draft: { expected: ['outputAsset'], options: [] } });
+    const answer = await c.say('USDG');
+    expect(answer).toMatchObject({ action: 'PROPOSE', command: { type: 'ADD_UNIVERSAL_BRIDGE', input: { inputAsset: 'USDT', outputAsset: 'USDG', amount: '1' } } });
+    expect(c.requests).toHaveLength(1);
+    expect(c.remaining()).toBe(0);
+  });
+
   it('greets once with the automation notice, the human support path, the privacy policy and how to opt out', async () => {
     const c = chat({ interpreter: false }), first = await c.say('help');
     expect(first.replies.map(r => r.text).join('\n')).toMatch(/support@flofi\.test[\s\S]*https:\/\/flofi\.test\/privacy/);

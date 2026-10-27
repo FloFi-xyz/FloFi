@@ -2264,6 +2264,32 @@
      }
     }
    }
+  },
+  {
+   "user": [
+    "quero bridge de 1 USDT da Solana para Robinhood Chain"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "PT",
+      "kind": "ACTION",
+      "action": {
+       "type": "BRIDGE",
+       "sourceNetwork": "SOLANA",
+       "destinationNetwork": "ROBINHOOD",
+       "asset": "USDT",
+       "outputAsset": null,
+       "amount": "1",
+       "slippageBps": null,
+       "routing": null,
+       "recipient": null
+      },
+      "reuse": null
+     }
+    }
+   }
   }
  ]
 }

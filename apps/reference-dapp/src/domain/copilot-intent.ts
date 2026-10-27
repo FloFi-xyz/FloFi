@@ -34,7 +34,7 @@ export const COPILOT_FEE_TIERS = ['0.01', '0.05', '0.3', '1'] as const;
 export const COPILOT_SYMBOL = /^[A-Za-z][A-Za-z0-9.]{0,15}$/;
 /**
  * BUILD-BASE-001 (owner addendum): a V2 token is what the user wrote — a symbol (`COPILOT_SYMBOL`) or a whole token or company name
- * (`Tesla`, `Coinbase Wrapped BTC`, `Coca-Cola`): ASCII words separated by single spaces, at most `maxValueLength` characters. It is only
+ * (`Tesla`, `Coinbase Wrapped BTC`, `Coca-Cola`): ASCII words separated by single spaces, at most 160 characters. It is only
  * text to look up: FloFi resolves it in the named network's catalog (`resolveAssetReference`) and requires it in the user's own words.
  */
 export const COPILOT_ASSET_REFERENCE = /^[A-Za-z0-9][A-Za-z0-9.&'-]*(?: [A-Za-z0-9.&'-]+)*$/;
@@ -164,7 +164,7 @@ function parseAction(value: unknown): CopilotAction {
 
 /** V2 token: null, OTHER, or a symbol or token name as written (grammar only; FloFi resolves it). */
 const symbol = (value: unknown): CopilotAsset | null => value === null ? null : typeof value === 'string' && (value === 'OTHER' ||
-  (value.length <= COPILOT_LIMITS.maxValueLength && (COPILOT_ASSET_REFERENCE.test(value) || /^(?:0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})@[0-9]{1,2}$/.test(value)))) ? value : fail();
+  ((value.length <= 160 && COPILOT_ASSET_REFERENCE.test(value)) || /^(?:0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})@[0-9]{1,2}$/.test(value))) ? value : fail();
 /**
  * BUILD-BASE-001: the CopilotIntentV2 action — the V1 shapes over the V2 vocabulary (catalog networks and symbols), TRANSFER, and a
  * liquidity fee tier and full range. A key a V1-shaped action omits (`feeTier`) stays omitted, so every V1-shaped action is still valid.

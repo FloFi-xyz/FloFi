@@ -58,7 +58,7 @@ describe('Copilot Automation interpretation and grounding', () => {
     [draft({ kind: 'PRICE_TRIGGER', condition: 'PERCENT_DROP', threshold: '3000', percent: '5', amount: '50', time: null }), 'If ETH drops from $3000, buy 50 USDC of ETH on Base Sepolia.', 'By what percentage, and in which direction, should the price move?'],
     [draft({ kind: 'PRICE_TRIGGER', condition: 'PERCENT_RISE', threshold: '3000', percent: '5', amount: '50', time: null }), 'If ETH drops 5% from $3000, buy 50 USDC of ETH on Base Sepolia.', 'By what percentage, and in which direction, should the price move?'],
   ] as const)('asks instead of inferring a reference, a percentage or a direction (%#)', (raw, text, message) => {
-    expect(groundAutomationDraft(raw, text, 'UTC')).toEqual({ kind: 'CLARIFICATION', message });
+    expect(groundAutomationDraft(raw, text, 'UTC')).toEqual({ kind: 'CLARIFICATION', message, missing: message.startsWith('From which') ? ['threshold'] : ['percent', 'condition'] });
   });
   it('parses the percentage strictly', () => {
     expect(parseAutomationDraft(draft({ kind: 'PRICE_TRIGGER', condition: 'PERCENT_DROP', threshold: '3000', percent: '12.25' })).percent).toBe('12.25');

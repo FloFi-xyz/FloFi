@@ -80,8 +80,8 @@ describe('BUILD-CROSSCHAIN-UNIVERSAL-001 Copilot and channel parity', () => {
     const test = new CopilotSession().say('move 5 test USDC from Solana over to Base', intent.action(act.bridge({ sourceNetwork: 'SOLANA', destinationNetwork: 'BASE', asset: 'USDC', amount: '5' })))!;
     expect(test).toMatchObject({ kind: 'CLARIFICATION' });
     const unknown = new CopilotSession().say('move 5 FOO from Solana over to Base', intent.action(act.bridge({ sourceNetwork: 'SOLANA', destinationNetwork: 'BASE', asset: 'FOO', amount: '5' })))!;
-    expect(unknown).toMatchObject({ kind: 'UNSUPPORTED' });
-    expect(unknown.text).toContain('FOO is not an asset Flofi knows on Solana');
+    expect(unknown).toMatchObject({ kind: 'FAILED', code: 'ASSET_CATALOG_UNAVAILABLE' });
+    expect(unknown.text).toContain('official Solana asset catalog is unavailable');
   });
 });
 

@@ -17,7 +17,24 @@ import { installSolanaWallet, MOCKED_SOLANA_WALLET, signRequests } from './jupit
 import { createTestWallet, personalSignText, type TestWallet } from '../../../packages/reference-reconciler/test/test-wallet.ts';
 import type { BuildEstimateResult } from '../src/domain/build-estimate';
 
+const copilotSays = (page: Page) => page.getByRole('log', { name: 'Conversation' }).locator('.message.ai').last();
+async function ask(page: Page, text: string) {
+  await page.locator('#mock-prompt').fill(text);
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
+}
 const panel = (page: Page) => page.getByRole('region', { name: 'Universal cross-chain bridge' });
+test('Copilot keeps a destination question without buttons and resolves one token reply without repeating the request', async ({ page }) => {
+  await page.goto('/app');
+  const before = await counters();
+  await ask(page, 'quero bridge de 1 USDT da Solana para Robinhood Chain');
+  await expect(copilotSays(page)).toContainText('Qual ativo você quer receber');
+  await ask(page, 'USDG');
+  await expect(copilotSays(page)).toContainText('receive USDG');
+  await openProposalReview(page);
+  await expect(page.locator('.copilot-notice')).toContainText('bridge 1 USDT from Solana to Robinhood Chain receive USDG');
+  await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '0');
+  expect(await counters()).toEqual(before);
+});
 async function control(method: string, params: unknown[] = []): Promise<unknown> {
   const response = await fetch('http://127.0.0.1:8566/control', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) });
   const value = await response.json() as { result?: unknown; error?: { message: string } };

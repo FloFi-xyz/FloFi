@@ -44,7 +44,7 @@ export const AUTOMATION_DRAFT_SCHEMA = s.object({
   threshold: s.nullableString('Explicit USD threshold, or for a percentage move the USD reference price the user stated ("from $3000"); normalized decimal; null if absent. Never the current price.'),
   percent: s.nullableString('Percentage of a stated price move ("drops 5%" = "5"); null otherwise.'),
 });
-export type AutomationGrounding = { kind: 'PROPOSAL'; input: AutomationInput } | { kind: 'CLARIFICATION' | 'UNSUPPORTED'; message: string };
+export type AutomationGrounding = { kind: 'PROPOSAL'; input: AutomationInput } | { kind: 'CLARIFICATION'; message: string; missing: readonly import('./copilot-draft').DraftField[] } | { kind: 'UNSUPPORTED'; message: string };
 const NETWORK = { ETHEREUM: 'ethereum', BASE: 'base', BASE_SEPOLIA: 'base-sepolia', ETHEREUM_SEPOLIA: 'ethereum-sepolia', SOLANA: 'solana', SOLANA_DEVNET: 'solana-devnet' } as const;
 const DAILY = /\b(?:daily|every day|each day|todos os dias|todo dia|diariamente)\b/i;
 const BUY = /\b(?:buy|purchase|compr\w*)\b/i, SELL = /\b(?:sell|vend\w*)\b/i;
@@ -53,22 +53,22 @@ const DROP = /\b(?:drops?|dropped|falls?|fell|declines?|cai|cair|caiu|desce|desc
 
 /** Untrusted interpretation → grounded input of the existing Automation domain. No IO or authority. */
 export function groundAutomationDraft(raw: AutomationDraft, text: string, timezone: string, now = Date.now(), language: CopilotLanguage = 'EN'): AutomationGrounding {
-  const ask = (message: string): AutomationGrounding => ({ kind: 'CLARIFICATION', message });
+  const ask = (message: string, ...missing: import('./copilot-draft').DraftField[]): AutomationGrounding => ({ kind: 'CLARIFICATION', message, missing });
   const refuse = (message: string): AutomationGrounding => ({ kind: 'UNSUPPORTED', message });
-  if (!raw.asset || raw.asset === 'OTHER' || !new RegExp(`\\b${raw.asset}\\b`, 'i').test(text)) return ask('Which asset should this automation watch or trade?');
-  if (raw.kind !== 'PRICE_TRIGGER' && !DAILY.test(text)) return ask('Should this automation repeat every day?');
+  if (!raw.asset || raw.asset === 'OTHER' || !new RegExp(`\\b${raw.asset}\\b`, 'i').test(text)) return ask('Which asset should this automation watch or trade?', 'asset');
+  if (raw.kind !== 'PRICE_TRIGGER' && !DAILY.test(text)) return ask('Should this automation repeat every day?', 'schedule');
   const watch = raw.kind === 'DAILY_WATCH';
-  if (watch && (!/\b(?:watch|check|monitor|verifica\w*|acompanha\w*)\b/i.test(text) || BUY.test(text) || SELL.test(text))) return ask('Should FloFi only check the asset, or prepare a trade?');
-  if (!watch && (!raw.side || !(raw.side === 'BUY' ? BUY : SELL).test(text))) return ask('Should FloFi prepare a buy or a sell?');
+  if (watch && (!/\b(?:watch|check|monitor|verifica\w*|acompanha\w*)\b/i.test(text) || BUY.test(text) || SELL.test(text))) return ask('Should FloFi only check the asset, or prepare a trade?', 'kind');
+  if (!watch && (!raw.side || !(raw.side === 'BUY' ? BUY : SELL).test(text))) return ask('Should FloFi prepare a buy or a sell?', 'side');
   if (!watch && raw.asset === 'BTC') return refuse('FloFi has no BTC swap route yet. You can watch BTC and get alerts, but FloFi cannot prepare a BTC purchase.');
   let network: (typeof NETWORK)[keyof typeof NETWORK] | null = null;
   if (!watch) {
-    if (!raw.amount || !groundedAmount(text, raw.amount) || !raw.spendAsset || !new RegExp(`\\b${raw.spendAsset}\\b`, 'i').test(text)) return ask('What amount and input asset should each proposal spend?');
+    if (!raw.amount || !groundedAmount(text, raw.amount) || !raw.spendAsset || !new RegExp(`\\b${raw.spendAsset}\\b`, 'i').test(text)) return ask('What amount and input asset should each proposal spend?', 'amount', 'spendAsset');
     const money = [...text.matchAll(/(\d+(?:[.,]\d+)*)\s*(USDC|devUSDC|ETH|WETH|SOL)\b/gi)];
-    if (!money.some(m => m[2]!.toUpperCase() === raw.spendAsset && groundedAmount(m[1]!, raw.amount!))) return ask('What amount and input asset should each proposal spend?');
+    if (!money.some(m => m[2]!.toUpperCase() === raw.spendAsset && groundedAmount(m[1]!, raw.amount!))) return ask('What amount and input asset should each proposal spend?', 'amount', 'spendAsset');
     if (raw.network && !(raw.network in NETWORK) && (raw.network === 'OTHER' || mentionedNetworks(text).includes(raw.network))) return refuse('This automation route is not supported.');
     if (!raw.network || !(raw.network in NETWORK) || !mentionedNetworks(text).includes(raw.network as Exclude<AutomationDraft['network'], 'OTHER' | null>) ||
-      (['BASE', 'SOLANA', 'ETHEREUM'].includes(raw.network) && TESTNET_WORDS.test(text))) return ask('Which network should this automation use? Name the test network or mainnet explicitly.');
+      (['BASE', 'SOLANA', 'ETHEREUM'].includes(raw.network) && TESTNET_WORDS.test(text))) return ask('Which network should this automation use? Name the test network or mainnet explicitly.', 'network');
     network = NETWORK[raw.network as keyof typeof NETWORK];
     const expected = raw.side === 'BUY' ? network === 'solana-devnet' ? 'DEVUSDC' : 'USDC' : raw.asset === 'ETH' ? ['ETH', 'WETH'] : ['SOL'];
     if (!(Array.isArray(expected) ? expected.includes(raw.spendAsset) : expected === raw.spendAsset)) return refuse('The input asset does not match this automation route.');
@@ -76,22 +76,23 @@ export function groundAutomationDraft(raw: AutomationDraft, text: string, timezo
   const schedule = { frequency: 'DAILY' as const, weekday: null, time: raw.time ?? '', timezone };
   if (raw.kind !== 'PRICE_TRIGGER') {
     const times = [...text.matchAll(/(?:\bat\s*|às?\s*|as\s*)(\d{1,2})(?::([0-5]\d)|h(?:([0-5]\d))?)?/gi)];
-    if (!raw.time || !times.some(m => `${m[1]!.padStart(2, '0')}:${m[2] ?? m[3] ?? '00'}` === raw.time)) return ask('At what time should FloFi check this every day?');
+    const bareTime = /(?:^|\n)(\d{1,2})(?::([0-5]\d)|h)?[.!]?(?:$|\n)/.exec(text);
+    if (!raw.time || !(bareTime && `${bareTime[1]!.padStart(2, '0')}:${bareTime[2] ?? '00'}` === raw.time) && !times.some(m => `${m[1]!.padStart(2, '0')}:${m[2] ?? m[3] ?? '00'}` === raw.time)) return ask('At what time should FloFi check this every day?', 'time');
   }
   const percentMove = raw.kind === 'PRICE_TRIGGER' && (raw.condition === 'PERCENT_DROP' || raw.condition === 'PERCENT_RISE');
   if (percentMove) {
     // Both the percentage and the reference price must be in the user's words; FloFi never infers a reference from the current price.
     const percents = [...text.matchAll(/(\d+(?:[.,]\d+)?)\s*%/g)];
     if (!raw.percent || !percents.some(m => groundedAmount(m[1]!, raw.percent!)) || !(raw.condition === 'PERCENT_DROP' ? DROP : RISE).test(text))
-      return ask('By what percentage, and in which direction, should the price move?');
+      return ask('By what percentage, and in which direction, should the price move?', 'percent', 'condition');
     const references = [...text.matchAll(/\b(?:from|de|a partir de)\s*(\$|USD\s*)?\s*(\d+(?:[.,]\d+)*)(?:\s*(USD|dollars?|d[oó]lares?))?/gi)];
     if (!raw.threshold || !references.some(m => (m[1] || m[3]) && groundedAmount(m[2]!, raw.threshold!)))
-      return ask('From which USD reference price should the percentage be measured?');
+      return ask('From which USD reference price should the percentage be measured?', 'threshold');
   } else if (raw.kind === 'PRICE_TRIGGER') {
     const thresholds = [...text.matchAll(/\b(ETH|SOL|BTC)\b[^,;\n]*?\b(below|under|abaixo(?: de)?|menos de|above|over|acima(?: de)?|mais de)\s*(\$|USD\s*)?\s*(\d+(?:[.,]\d+)*)(?:\s*(USD|dollars?|d[oó]lares?))?/gi)];
     if (!raw.condition || !raw.threshold || !thresholds.some(match => match[1]!.toUpperCase() === raw.asset &&
       (raw.condition === 'PRICE_BELOW' ? BELOW : ABOVE).test(match[2]!) && (match[3] || match[5]) && groundedAmount(match[4]!, raw.threshold!)))
-      return ask('What USD price threshold and direction should trigger the proposal?');
+      return ask('What USD price threshold and direction should trigger the proposal?', 'threshold', 'condition');
   }
   const action = watch ? null : { kind: 'ROUTE' as const, asset: raw.asset, side: raw.side!, network: network!, amount: raw.amount!, slippageBps: DEFAULT_SLIPPAGE_BPS };
   if (action) { const route = routeStrategy(action); if (!route.ok) return refuse('The input asset does not match this automation route.'); }
@@ -104,7 +105,7 @@ export function groundAutomationDraft(raw: AutomationDraft, text: string, timezo
       ? { type: raw.condition as 'PERCENT_DROP' | 'PERCENT_RISE', asset: raw.asset, reference: raw.threshold!, percent: raw.percent!, checkEveryMinutes: 15 }
       : { type: raw.condition as 'PRICE_BELOW' | 'PRICE_ABOVE', asset: raw.asset, threshold: raw.threshold!, checkEveryMinutes: 15 }, action, limits, expiresAt: null };
   const validated = validateAutomationInput(input, now);
-  return validated.ok ? { kind: 'PROPOSAL', input } : ask('Check the automation amount, schedule and threshold.');
+  return validated.ok ? { kind: 'PROPOSAL', input } : ask('Check the automation amount, schedule and threshold.', 'amount', 'schedule', 'threshold');
 }
 /** Same deployment capabilities shown in the Automations workspace; the server rechecks on create. */
 export function automationCapabilityIssue(input: AutomationInput, capabilities: CapabilityView): string | null {

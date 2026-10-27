@@ -500,7 +500,7 @@ export const COPILOT_EVAL_CASES: readonly EvalCase[] = [
     model: intent.action(act.bridge({ sourceNetwork: 'BASE', destinationNetwork: 'OTHER', asset: 'USDC', amount: '1' })),
     expect: U(['The Cross-chain Router supports Base Sepolia → Arbitrum Sepolia, Base → Arbitrum One, Base → Robinhood Chain']) }] },
   { id: 'U07', category: 'unsupported', language: 'EN', turns: [{ user: 'Swap 1 USDC to DAI on Base', model: intent.action(act.swap({ network: 'BASE', inputAsset: 'USDC', outputAsset: 'OTHER', amount: '1' })),
-    expect: U(['That token is not supported']) }] },
+    expect: F(['official Base asset catalog is unavailable']) }] },
   { id: 'U08', category: 'unsupported', language: 'EN', turns: [{ user: 'Supply 5 ETH to Aave on Base Sepolia', model: intent.action(act.lending('SUPPLY', { asset: 'ETH', amount: '5', ...onSepolia })),
     // BUILD-BASE-001: the conversation also lends USDC on Base mainnet (real funds); the refusal is generated from the Aave offers.
     expect: U(['Aave V3 with USDC on Base Sepolia, Base, Arbitrum One and Ethereum, and WBTC on Ethereum Sepolia only']) }] },

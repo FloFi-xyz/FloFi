@@ -17,8 +17,7 @@ import { solanaLiquidityPositions, solanaLiquidityPrice } from '../app/solana-li
 import { reconciledRemaining } from '../domain/copilot-reconciled-context';
 import { useSolanaComposition } from '../state/solana-composition-store';
 import { workflowSteps } from '../domain/workflow-steps';
-import { catalogNetworksNamed } from '../domain/network-registry';
-import { ensureNetworkCatalog } from '../state/asset-catalog-store';
+import { ensureCopilotCatalogs } from '../state/copilot-catalogs';
 import type { CopilotMode } from '../server/copilot-service';
 import { useBuild009Wallet } from '../state/build009-wallet-store';
 import { useWorkflowCapability } from '../state/capability-store';
@@ -215,23 +214,21 @@ export function useCopilotInterpreter() {
     return out;
   }, [refreshLearning, report, deliver]);
   const interpret = useCallback(async (text: string): Promise<CopilotReply> => {
-    const start = startTurn(conversation.current, text, environmentNow());
-    if (start.kind === 'LOCAL') {
-      conversation.current = start.next;
-      if (!start.reply.memory) return show(await settle(start.reply));
-      // A confirmed memory change is one server action: the chat stays busy until it settled (no double submission).
-      setBusy(true);
-      try { return show(await settle(start.reply)); } finally { setBusy(false); }
-    }
     setBusy(true);
     try {
+      // Local clarification answers use the same validated catalogs as model turns. Retry a previous load failure on a new user turn.
+      await ensureCopilotCatalogs([...conversation.current.segment, text].join('\n'), conversation.current.draft?.intent);
+      const start = startTurn(conversation.current, text, environmentNow());
+      if (start.kind === 'LOCAL') {
+        conversation.current = start.next;
+        return show(await settle(start.reply));
+      }
       let result: CopilotResultV2;
       // BUILD-CHAT-LEARNING-001: which proven wallet's memory, and this conversation's own aliases (a glossary hint the server re-validates).
       const options = learningView.current?.enabled ? { identity: identity.current, aliases: start.turn.state.aliases ?? [], adapted: start.turn.state.adapted ?? [] } : undefined;
       try { result = await copilotInterpret(start.request, options) as CopilotResultV2; } catch { result = { ok: false, code: 'COPILOT_UNAVAILABLE' }; }
       // BUILD-BASE-001: catalog-network symbols resolve only in validated catalogs: load those this request or its intent names (where enabled).
-      if (result.ok) await Promise.all([...catalogNetworksNamed(start.turn.state.segment.join('\n'), result.intent).map(n => ensureNetworkCatalog(false, n.chain)),
-        loadVerified(result.intent)]);
+      if (result.ok) await Promise.all([ensureCopilotCatalogs(start.turn.state.segment.join('\n'), result.intent), loadVerified(result.intent)]);
       const finished = finishTurn(start.turn, result, environmentNow());
       conversation.current = finished.next;
       return show(await settle(finished.reply));
