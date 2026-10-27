@@ -27,7 +27,7 @@ export async function ownerHistoryOperation(expectedAccount: string, method: 'ch
     if (value.ok === true && ['DELETED','ARCHIVED','VISIBLE'].includes(value.disposition as string) &&
       (method === 'disposition' || value.disposition === (action === 'DELETE' ? 'DELETED' : 'ARCHIVED')))
       return result as HistoryDisposition;
-    if (value.ok === false && ['RUN_NOT_FOUND','RUN_DELETE_REFUSED','HISTORY_INVALID'].includes(value.code as string)) return result as HistoryDisposition;
+    if (value.ok === false && ['RUN_NOT_FOUND','RUN_DELETE_REFUSED','HISTORY_INVALID','HISTORY_READ_ONLY'].includes(value.code as string)) return result as HistoryDisposition;
     return { ok: false, code: 'HISTORY_INVALID' };
   } catch { return { ok: false, code: 'HISTORY_INVALID' }; }
 }

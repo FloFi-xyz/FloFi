@@ -3,7 +3,7 @@ import type { Database } from './db.js';
 
 export type HistoryKind = 'EXECUTION_RUN' | 'WORKFLOW_RUN' | 'SAVED_WORKFLOW';
 export type HistoryDisposition = { ok: true; disposition: 'DELETED' | 'ARCHIVED' | 'VISIBLE'; counts?: Record<string, number> }
-  | { ok: false; code: 'RUN_NOT_FOUND' | 'RUN_DELETE_REFUSED' | 'HISTORY_INVALID' };
+  | { ok: false; code: 'RUN_NOT_FOUND' | 'RUN_DELETE_REFUSED' | 'HISTORY_INVALID' | 'HISTORY_READ_ONLY' };
 const idValid = (id: string) => /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(id);
 const ownerValid = (owner: string) => /^0x[0-9a-f]{40}$/.test(owner) || /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(owner);
 

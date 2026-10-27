@@ -22,6 +22,7 @@ export function HistoryActions({ kind, change, changed }: { kind: 'execution' | 
       if (result.ok && result.disposition !== 'VISIBLE') { setConfirming(false); changed(result.disposition); }
       else setError(!result.ok && result.code === 'RUN_DELETE_REFUSED'
         ? 'This record may have financial activity, authorization or pending dependencies. Archive it to preserve its history.'
+        : !result.ok && result.code === 'HISTORY_READ_ONLY' ? 'History changes are temporarily unavailable. Your records are preserved.'
         : !result.ok && result.code === 'RUN_NOT_FOUND' ? 'This record is unavailable for the verified wallet. Refresh the history.'
           : 'The result could not be confirmed. Refresh the history before trying again.');
     } catch { if (active.current) setError('The result could not be confirmed. Refresh the history before trying again.'); }

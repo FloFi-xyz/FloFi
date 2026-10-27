@@ -226,6 +226,7 @@ export function createBackend(options: BackendOptions) {
     if (!['EXECUTION_RUN','WORKFLOW_RUN','SAVED_WORKFLOW'].includes(kind as string) || typeof id !== 'string' ||
       method === 'disposition' && args.length !== 2 || method === 'change' && (args.length !== 3 || !['DELETE','ARCHIVE'].includes(action as string)))
       return { ok: false, code: 'HISTORY_INVALID' };
+    if (method === 'change' && env.FLOFI_OWNER_HISTORY === 'read-only') return { ok: false, code: 'HISTORY_READ_ONLY' };
     const history = createOwnerHistory(db, options.tenantId);
     return method === 'disposition' ? history.disposition(owner.address, kind as HistoryKind, id) : history.change(owner.address, kind as HistoryKind, id, action as 'DELETE' | 'ARCHIVE');
   }

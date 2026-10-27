@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /** Product copy only. Names, protocol IDs, assets and wallet identifiers are interpolation values. */
 export const productPortuguese: Readonly<Record<string, string>> = {
+  'History changes are temporarily unavailable. Your records are preserved.': 'As alterações no histórico estão temporariamente indisponíveis. Os seus registos estão preservados.',
   'Delete': 'Excluir', 'Archive': 'Arquivar', 'Delete execution': 'Excluir execução', 'Archive execution': 'Arquivar execução',
   'Delete workflow': 'Excluir workflow', 'Archive workflow': 'Arquivar workflow', 'Delete permanently?': 'Excluir definitivamente?',
   'Delete permanently': 'Excluir definitivamente', 'Deleting…': 'A excluir…', 'Archive instead': 'Arquivar em vez de excluir',

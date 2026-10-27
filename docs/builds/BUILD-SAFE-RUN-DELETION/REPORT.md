@@ -67,3 +67,23 @@ Consulta read-only à Railway confirmou API e worker ainda vinculados a `codex/h
 O primeiro governance do PR #128 recusou a versão inicial. A reprodução do comando do job identificou expectativas fixas de 48 perfis nos self-tests de orquestração, enquanto o novo perfil `owner-history` torna o total 49 (produto + composição). Outro self-test de duplicidade procurava a antiga última linha do plano. As expectativas foram atualizadas para 49 e a mutação adversarial passou a duplicar um perfil pela declaração estável de `critical`. A recusa de perfis ausentes/repetidos e todos os gates permanecem ativos.
 
 `python3 -m unittest discover -s scripts -p 'test_ci_*.py'`: **56 testes passaram**. Esta correção altera apenas os self-tests de CI e os registros; o código da aplicação, a migração e o build aprovado pelas nove jornadas Chromium permanecem iguais. A rodada remota do novo commit deve ser acompanhada separadamente; uma reprodução local não é apresentada como aprovação remota.
+
+## Fechamento técnico: rollback e integração com #127
+
+Todos os cinco contextos CircleCI de `b3abf1185291b0597307278d8b4c135384726965` concluíram com sucesso no workflow
+`d264c846-1502-48cc-879f-84e39eb1283f`. Os commits finais aditivos exigem nova verificação remota.
+
+`FLOFI_OWNER_HISTORY=read-only` suspende somente as mutações DELETE/ARCHIVE e devolve `HISTORY_READ_ONLY`, com mensagem PT/EN.
+Consultas de disposição, máscaras de arquivamento, tombstones, observação financeira, criação e simulação continuam disponíveis.
+O teste real de backend/PostgreSQL comprova a recusa das duas mutações, preservação do registro e leitura normal; o backend ativo depois
+exclui realmente o mesmo registro. Os **dez testes focados de backend PostgreSQL e BFF passaram**, assim como TypeScript completo e lint.
+
+A migração 0016 permanece byte a byte igual, SHA-256 `a3c258cadd9d7865ad9d36d63ec0921fc47455bb3651c201074f3b0486b4be6f`.
+O #127 acrescenta o certificado de schema 16 ao backend de schema 15, com fixture exata e testes reais de compatibilidade, cold start,
+rollback atômico e recusa de ressurgimento. A sequência backend A → 0016 → backend B em read-only → frontend B e os limites de rollback
+estão no [plano único de publicação](https://github.com/alrimarleskovar/FloFi/blob/codex/p0-shared-estimates/docs/deploy/RELEASE-127-128.md).
+Após exclusão ou arquivamento, preservar os leitores B e os tombstones; não remover a migração nem restaurar identidades excluídas.
+
+Após reinício do ambiente, o worktree temporário foi recomposto do commit existente, as seis alterações finais foram reaplicadas e
+verificadas, e a mesma branch foi transferida para `/home/asus/projects/flofi-safe-run-deletion` com `git worktree repair`.
+Nenhum branch/commit foi descartado. Não houve merge, deploy/migração em produção ou transação financeira pública.

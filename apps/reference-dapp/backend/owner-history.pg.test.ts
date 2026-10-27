@@ -36,6 +36,11 @@ it('prepares an actual durable Swap, deletes its unused run through the authenti
   expect(record.attempts).toEqual([]); expect(record.reviewedManifestHash).toBeNull();
   expect(record.quote.ownerReview?.account).toBe(owner.address);
   expect((await t.db.query('SELECT owner_account FROM execution_runs WHERE run_id=$1', [runId])).rows).toEqual([{ owner_account: owner.address }]);
+  const rollback = createBackend({ ...options, env: { FLOFI_OWNER_HISTORY: 'read-only' } });
+  expect(await rollback.callHistory('change', ['EXECUTION_RUN',runId,'DELETE'], owner)).toEqual({ ok: false, code: 'HISTORY_READ_ONLY' });
+  expect(await rollback.callHistory('change', ['EXECUTION_RUN',runId,'ARCHIVE'], owner)).toEqual({ ok: false, code: 'HISTORY_READ_ONLY' });
+  expect(await rollback.callHistory('disposition', ['EXECUTION_RUN',runId], owner)).toEqual({ ok: true, disposition: 'VISIBLE' });
+  expect((await t.db.query('SELECT count(*)::int AS n FROM execution_runs WHERE run_id=$1', [runId])).rows).toEqual([{ n: 1 }]);
   const path = '/v1/owner-history/change', route = backend.routes.find(r => r.name === 'owner-history')!;
   const request = { method: 'POST', path, query: new URLSearchParams(), headers: { [WORKFLOW_OWNER_HEADER]: 'eip155:' + owner.address },
     body: { args: ['EXECUTION_RUN', runId, 'DELETE'] }, requestId: 'owner-delete-test' };
