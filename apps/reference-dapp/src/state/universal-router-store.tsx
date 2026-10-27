@@ -13,6 +13,7 @@ import { solanaSessionStatus, solanaSignIn, solanaSignInChallenge, walletSession
 import { universalBridgeOfWorkflow, type UniversalBridgeDetails } from '../domain/universal-bridge-authoring';
 import type { DiscoveryResult } from '../server/universal-router/discovery';
 import type { UniversalRecord, UniversalWalletDiagnostic } from '../server/universal-router/types';
+import { bridgeEstimateRequest } from '../domain/bridge-estimate';
 
 /**
  * BUILD-CROSSCHAIN-UNIVERSAL-001 browser state for the universal Cross-chain Router. The server-held run is authoritative; this store keeps a
@@ -61,6 +62,9 @@ export function UniversalRouterProvider({ children }: { children: ReactNode }) {
   const owner = ecosystem === 'EVM' ? wallet.account : ecosystem === 'SOLANA' ? solanaAccount : null;
   const destinationWallet = destinationEcosystem && destinationEcosystem !== ecosystem ? destinationEcosystem === 'EVM' ? wallet.account : solanaAccount : null;
   const latest = useRef(workflow); latest.current = workflow;
+  const discoveryScope = JSON.stringify([workflow, owner, destinationWallet]);
+  const latestDiscoveryScope = useRef(discoveryScope); latestDiscoveryScope.current = discoveryScope;
+  useEffect(() => { setDiscovery(null); }, [workflow, owner, destinationWallet]);
   const latestSolana = useRef(solana.session); latestSolana.current = solana.session;
   const busyRef = useRef(false);
   const retired = Boolean(record && JSON.stringify(record.workflow) !== JSON.stringify(workflow) &&
@@ -149,13 +153,10 @@ export function UniversalRouterProvider({ children }: { children: ReactNode }) {
   async function signIn() { await operation(async () => { await establishSession(); await refreshRuns(); }); }
   async function discover() { await operation(async () => {
     if (!details) throw new Error('UNIVERSAL_BRIDGE_REQUIRED');
-    const token = (key: typeof details.source, asset: typeof details.fields.inputAsset, symbol: string) => asset.kind === 'NATIVE' ? { kind: 'NATIVE' as const }
-      : { kind: 'TOKEN' as const, address: asset.address, decimals: asset.decimals, ...symbol.includes('@') ? {} : { symbol } };
-    const recipient = details.recipient || (destinationEcosystem === ecosystem ? owner : destinationWallet);
-    const result = unwrap(await universalDiscover({ source: details.source, destination: details.destination, inputToken: token(details.source, details.fields.inputAsset, details.inputSymbol),
-      outputToken: token(details.destination, details.fields.outputAsset, details.outputSymbol), amount: details.amountUnits, slippageBps: details.fields.slippageBps,
-      ...owner ? { owner } : {}, ...owner && recipient ? { recipient } : {} }));
-    setDiscovery(result);
+    const scope = discoveryScope, snapshot = latest.current, node = snapshot.nodes.find(n => universalBridgeOfWorkflow(snapshot, n.nodeId));
+    if (!node) throw new Error('UNIVERSAL_BRIDGE_REQUIRED');
+    const result = unwrap(await universalDiscover(bridgeEstimateRequest(node, owner, destinationWallet)));
+    if (latest.current === snapshot && latestDiscoveryScope.current === scope) setDiscovery(result);
   }); }
   async function simulate() { await operation(async () => {
     // HOTFIX-WORKFLOW-CONCURRENCY-001: a pending bridge never blocks a new, separate one; earlier runs keep being observed server-side.

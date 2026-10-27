@@ -4,6 +4,12 @@
  * evidence. Provider, protocol, network and asset names stay as they are.
  */
 export const portugueseUniversalBridge: Readonly<Record<string, string>> = {
+  'Provider estimates': 'Estimativas dos provedores',
+  'Live quote only · execution is not validated': 'Somente cotação real · execução não validada',
+  'Builder verified · simulation and Review still required': 'Builder verificado · simulação e Revisão ainda necessárias',
+  'Internal quote error': 'Falha interna na cotação',
+  'An internal quote error occurred. Try again or use the support reference.': 'Ocorreu uma falha interna na cotação. Tente novamente ou use a referência de suporte.',
+  'This quote expired. Request a fresh estimate.': 'Esta cotação expirou. Solicite uma nova estimativa.',
   '{0} entries excluded because display metadata is incomplete.': '{0} entradas excluídas por metadados de apresentação incompletos.',
   'Jupiter verified tokens. Mint identity and decimals are checked on chain at Simulate. A match does not guarantee a route.': 'Tokens verificados pelo Jupiter. O mint e as casas decimais são verificados na rede em Simular. Uma correspondência não garante uma rota.',
   'Support reference': 'Referência de suporte',

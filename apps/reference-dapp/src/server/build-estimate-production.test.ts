@@ -118,7 +118,7 @@ describe('production Swap quote parity through cloudPreview', () => {
     expect(await readBuildEstimate({ workflow: s.w, nodeId: s.w.nodes[0]!.nodeId }, production, seams))
       .toMatchObject({ ok: true, estimate: { symbol: 'WETH', usd: null } });
   });
-  it.each(['workflowHash', 'inputToken', 'outputToken', 'amountIn', 'slippageBps', 'minimumOut', 'expiresAt'])('rejects a mismatched runtime %s before publishing a financial value', async field => {
+  it.each(['workflowHash', 'inputToken', 'outputToken', 'inputSymbol', 'outputSymbol', 'amountIn', 'slippageBps', 'minimumOut', 'expiresAt'])('rejects a mismatched runtime %s before publishing a financial value', async field => {
     const s = evmSetup(networkCases[0]);
     const preview = async (flow: FlowName, args: readonly unknown[]) => {
       const result = await s.preview(flow, args, {});

@@ -5,6 +5,8 @@
   "buildCommand": "sh ../../deploy/vercel/build.sh",
   "git": {
     "deploymentEnabled": {
+      "codex/p0-shared-estimates": false,
+      "codex/build-safe-run-deletion": false,
       "codex/fix-bridge-catalog-workflow-cancel-001": false,
       "claude/build-solana-transfer-ux-001": false,
       "security/mcp-link-integrity-p0": false,

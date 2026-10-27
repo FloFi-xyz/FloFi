@@ -5,10 +5,13 @@ import { JUPITER_SOLANA_MAINNET, ORCA_WHIRLPOOLS_DEVNET } from '@defi-workflow-e
 import { jupiterIntent, jupiterBuildQuery, parseJupiterBuild, simulateOrcaDevnetSwap } from '@defi-workflow-engine/reference-compiler';
 import { cloudPreview } from './flow-runtime.ts';
 import { quoteFailure } from './quote-failure.ts';
+import { readBridgeBuildEstimate } from './bridge-build-estimate.ts';
+import { isHostedDeployment } from './deployment.ts';
+import type { readBridgeDiscovery } from './bridge-discovery.ts';
 import type { FlowResult } from './cloud-api-client.ts';
 import type { FlowName } from '../../backend/flows.ts';
-import { readBaseQuoteOnServer } from './base-rpc.ts';
 import { publicSwapProfile } from '../domain/public-testnet-swap.ts';
+import { cryptoSelectionOf } from '../domain/crypto-action-picker.ts';
 import { simulationAmount } from '../domain/simulation-presentation.ts';
 import type { BuildEstimateResult } from '../domain/build-estimate.ts';
 import { createPublicSwapQuoteReader, type CatalogSwapRuntime, type Rpc } from './public-testnet-service.ts';
@@ -54,18 +57,23 @@ async function usdOf(prices: PriceSource | null, now: Date, sides: readonly [Quo
 }
 
 /** Adapter/profile selected reads; no execution store, session, Review, signature or submission port. */
-export async function readBuildEstimate(input: unknown, env: Env = process.env,
-  seams: { rpc?: Rpc; http?: ReturnType<typeof createJupiterHttp>; now?: () => Date; catalog?: CatalogSwapRuntime; prices?: PriceSource | null; preview?: (flow: FlowName, args: readonly unknown[], options: Parameters<typeof cloudPreview>[2]) => Promise<FlowResult<unknown> | null> } = {}): Promise<BuildEstimateResult> {
+async function readBuildEstimateValue(input: unknown, env: Env = process.env,
+  seams: { rpc?: Rpc; http?: ReturnType<typeof createJupiterHttp>; now?: () => Date; catalog?: CatalogSwapRuntime; prices?: PriceSource | null;
+    discover?: typeof readBridgeDiscovery; correlationId?: string; preview?: (flow: FlowName, args: readonly unknown[], options: Parameters<typeof cloudPreview>[2]) => Promise<FlowResult<unknown> | null> } = {}): Promise<BuildEstimateResult> {
   try {
     const prices = () => seams.prices !== undefined ? seams.prices : env === process.env ? processPrices === undefined ? processPrices = deploymentPriceSource(env) : processPrices : deploymentPriceSource(env);
     if (!input || typeof input !== 'object') throw Error('ESTIMATE_INVALID');
-    const { workflow: raw, nodeId, owner } = input as { workflow?: unknown; nodeId?: unknown; owner?: unknown };
+    const { workflow: raw, nodeId, owner, destinationWallet } = input as { workflow?: unknown; nodeId?: unknown; owner?: unknown; destinationWallet?: unknown };
     const workflow = validateArtifact('semantic-workflow', raw) as SemanticWorkflow;
-    const node = workflow.nodes.find(n => n.nodeId === nodeId && n.actionType === 'asset.swap.exact-input');
+    const node = workflow.nodes.find(n => n.nodeId === nodeId);
     if (!node) throw Error('ESTIMATE_UNSUPPORTED');
     const now = seams.now ?? (() => new Date());
     const workflowHash = hashArtifactBytes('semantic-workflow', new TextEncoder().encode(JSON.stringify(workflow)));
+    if (node.actionType === 'asset.bridge') return await readBridgeBuildEstimate(workflow, node.nodeId, workflowHash,
+      typeof owner === 'string' ? owner : null, typeof destinationWallet === 'string' ? destinationWallet : null, env, now, seams.discover, seams.correlationId);
+    if (node.actionType !== 'asset.swap.exact-input') throw Error('ESTIMATE_UNSUPPORTED');
     const profile = publicSwapProfile(node.chainId);
+    if (isHostedDeployment(env) && (profile || node.chainId === ORCA_WHIRLPOOLS_DEVNET.chain)) throw Error('TEST_NETWORK_NOT_AVAILABLE');
     const uniswap = node.adapterConstraints.protocols.some(protocol => protocol === 'uniswap' || protocol === 'uniswap-v3');
     if (profile && uniswap) {
       const rpc = seams.rpc ?? (profile.chainId === 84532 ? baseSepoliaSwapRpc(env.GRYLOO_BASE_SEPOLIA_RPC_URL) : ethereumSepoliaSwapRpc(env.GRYLOO_ETHEREUM_SEPOLIA_RPC_URL));
@@ -97,10 +105,12 @@ export async function readBuildEstimate(input: unknown, env: Env = process.env,
         const input = catalogNetwork ? { address: q.inputToken, decimals: q.inputDecimals, symbol: q.inputSymbol } : q.input as { mint?: unknown; decimals?: unknown; symbol?: unknown } | undefined;
         const out = catalogNetwork ? { address: q.outputToken, decimals: q.outputDecimals, symbol: q.outputSymbol } : q.output as { mint?: unknown; decimals?: unknown; symbol?: unknown } | undefined;
         const tokenAddress = (t: typeof input) => t && ('address' in t ? t.address : t.mint);
+        const selection = cryptoSelectionOf(node);
         if (q.workflowHash !== workflowHash || q.nodeId !== node.nodeId || (catalogNetwork ? `eip155:${q.chainId}` : q.chain) !== node.chainId ||
           (catalogNetwork ? q.amountIn : q.amount) !== amount.value.amount || q.slippageBps !== slip.maximumBps || !input || !out ||
           tokenAddress(input) !== inRef.address || tokenAddress(out) !== outRef.address || input.decimals !== inRef.decimals || out.decimals !== outRef.decimals ||
-          typeof input.symbol !== 'string' || typeof out.symbol !== 'string' || typeof q.expiresAt !== 'string' || !Number.isFinite(Date.parse(q.expiresAt)) || Date.parse(q.expiresAt) <= now().getTime()) throw Error('ESTIMATE_RESPONSE_MISMATCH');
+          typeof input.symbol !== 'string' || typeof out.symbol !== 'string' || selection && (selection.from !== input.symbol || selection.to !== out.symbol) ||
+          typeof q.expiresAt !== 'string' || !Number.isFinite(Date.parse(q.expiresAt)) || Date.parse(q.expiresAt) <= now().getTime()) throw Error('ESTIMATE_RESPONSE_MISMATCH');
         const expected = q.expectedOut, minimum = q.minimumOut;
         if (typeof expected !== 'string' || typeof minimum !== 'string' || !/^[1-9][0-9]{0,77}$/.test(expected) || !/^[1-9][0-9]{0,77}$/.test(minimum) ||
           BigInt(minimum) > BigInt(expected) || BigInt(minimum) < BigInt(expected) * BigInt(10_000 - slip.maximumBps) / 10_000n) throw Error('ESTIMATE_MINIMUM_INVALID');
@@ -126,25 +136,6 @@ export async function readBuildEstimate(input: unknown, env: Env = process.env,
         expected: simulationAmount(q.expectedOut, q.outputDecimals)!, minimum: simulationAmount(q.minimumOut, q.outputDecimals), symbol: q.outputSymbol,
         slippageBps: q.slippageBps, expiresAt: q.expiresAt, usd } };
     };
-    if (node.chainId === 'eip155:8453' && uniswap) {
-      const read = await readBaseQuoteOnServer({ workflow, nodeId }, { env });
-      // UX-007: a Base pair the reference observation does not serve uses the shared catalog quote below, like every catalog network.
-      if (!read.ok) return catalogNetwork ? await catalogEstimate() : { ok: false, code: 'ESTIMATE_UNAVAILABLE' };
-      const artifact = validateArtifact('quote-state-artifact', JSON.parse(read.artifact));
-      if (!artifact.normalizedValues.some(v => v.name === 'observation-mode' && v.value === 'LIVE_READ_ONLY'))
-        return { ok: false, code: 'ESTIMATE_UNAVAILABLE' };
-      const outputs = artifact.normalizedValues.filter(v => v.kind === 'QUANTITY' && /^tier-\d+\.quoted-output$/.test(v.name));
-      const best = outputs.reduce<(typeof outputs)[number] | null>((a, b) => b.kind === 'QUANTITY' && (!a || a.kind === 'QUANTITY' && BigInt(b.value.amount) > BigInt(a.value.amount)) ? b : a, null);
-      if (!best || best.kind !== 'QUANTITY') return { ok: false, code: 'ESTIMATE_UNAVAILABLE' };
-      const amount = node.inputs.find(v => v.name === 'amount-in');
-      const slip = node.userConstraints.find(c => c.kind === 'MAXIMUM_SLIPPAGE_BPS');
-      const symbol = amount?.kind === 'QUANTITY' && amount.value.asset.decimals === 6 ? 'WETH' : 'USDC';
-      const usd = amount?.kind === 'QUANTITY' ? await quoteUsd( [{ symbol: symbol === 'WETH' ? 'USDC' : 'WETH', units: amount.value.amount, decimals: amount.value.asset.decimals },
-        { symbol, units: best.value.amount, decimals: best.value.asset.decimals }]) : null;
-      return { ok: true, estimate: { workflowHash, nodeId: node.nodeId, chain: node.chainId, provider: 'Uniswap V3',
-        expected: simulationAmount(best.value.amount, best.value.asset.decimals)!, minimum: null, symbol,
-        slippageBps: slip?.kind === 'MAXIMUM_SLIPPAGE_BPS' ? slip.maximumBps : 0, expiresAt: artifact.freshness.expiresAt, usd } };
-    }
     // UX-007: catalog networks (Base, Arbitrum One, Robinhood Chain) quote through the one shared read-only swap quote reader that
     // Simulate uses, under the network's own deployment gate (off: no estimate). No owner binding, approval state or Review is produced.
     if (catalogNetwork) return await catalogEstimate();
@@ -170,4 +161,21 @@ export async function readBuildEstimate(input: unknown, env: Env = process.env,
     }
     return { ok: false, code: 'ESTIMATE_UNSUPPORTED' };
   } catch (cause) { return quoteFailure(cause); }
+}
+
+/** Quote a selected node's declared quantity; retain the full composition as the response binding, never as execution authority. */
+export async function readBuildEstimate(input: unknown, env: Env = process.env, seams: Parameters<typeof readBuildEstimateValue>[2] = {}): Promise<BuildEstimateResult> {
+  try {
+    if (!input || typeof input !== 'object') return await readBuildEstimateValue(input, env, seams);
+    const value = input as { workflow?: unknown; nodeId?: unknown };
+    const workflow = validateArtifact('semantic-workflow', value.workflow) as SemanticWorkflow;
+    const node = workflow.nodes.find(n => n.nodeId === value.nodeId);
+    if (!node || node.actionType !== 'asset.swap.exact-input' || workflow.nodes.length === 1 && !node.dependencies.length && !workflow.resourceEdges.length)
+      return await readBuildEstimateValue(input, env, seams);
+    if (node.inputs.some(i => i.kind === 'OUTPUT_REFERENCE')) return quoteFailure(new Error('ESTIMATE_DEPENDENCY_UNRESOLVED'), seams.correlationId);
+    const projection = { ...workflow, nodes: [{ ...node, dependencies: [] }], resourceEdges: [] };
+    const result = await readBuildEstimateValue({ ...input, workflow: projection }, env, seams);
+    return result.ok ? { ...result, estimate: { ...result.estimate,
+      workflowHash: hashArtifactBytes('semantic-workflow', new TextEncoder().encode(JSON.stringify(workflow))) } } : result;
+  } catch (cause) { return quoteFailure(cause, seams.correlationId); }
 }

@@ -7,6 +7,9 @@ import type { BuildEstimate, BuildEstimateResult } from '../domain/build-estimat
 import { deferred, HookHarness } from '../test-utils/hook-harness';
 import { clearLiveQuoteCache, useBuildEstimate, useLiveQuote } from './build-estimate';
 import { LIVE_QUOTE_DEBOUNCE_MS, BUILD_ESTIMATE_TIMEOUT_MS } from '../domain/build-estimate';
+import { createUniversalBridgeNode, UNIVERSAL_NETWORKS, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
+import { bridgeEstimateRequest } from '../domain/bridge-estimate';
+import { parseDiscoveryRequest } from '../server/universal-router/requests';
 vi.mock('react', async original => ({ ...await original<typeof import('react')>(), ...(await import('../test-utils/hook-harness')).hookMocks }));
 const now = new Date('2026-10-08T12:00:00Z');
 const authored = (amount = '2') => validateSavedWorkflow(editorReducer(initialEditor(), { type: 'ADD_TESTNET_SWAP', direction: 'USDC_TO_WETH', amount, slippage: '50', source: 'CANVAS', baseRevision: 0 }, createBaseSepoliaReviewContext()).workflow);
@@ -138,5 +141,50 @@ describe('UX-007 fast live quote feedback', () => {
   it('is idle (no request) for a snapshot with nothing quotable', async () => {
     expect(host.render(() => useLiveQuote(undefined, 'node-002'))).toEqual({ status: 'idle' });
     await vi.advanceTimersByTimeAsync(LIVE_QUOTE_DEBOUNCE_MS * 5); expect(transport).not.toHaveBeenCalled();
+  });
+});
+
+describe('automatic Bridge estimates (MOCKED)', () => {
+  const workflow = (amount = '10000000000000000', recipient = 'CONNECTED_OWNER', provider = 'relay'): SemanticWorkflow => ({
+    schemaVersion: '1.0.0', workflowId: 'bridge-test', revision: 1, resourceEdges: [], nodes: [createUniversalBridgeNode('bridge', {
+      sourceChain: UNIVERSAL_NETWORKS.base.chain, destinationChain: UNIVERSAL_NETWORKS.ethereum.chain,
+      inputAsset: { kind: 'NATIVE', decimals: 18 }, outputAsset: { kind: 'NATIVE', decimals: 18 }, amount, slippageBps: 100,
+      recipient: recipient as 'CONNECTED_OWNER', providers: [provider as 'relay'], selection: 'PREFERENCE_ORDER' })] });
+  const quote = (w: SemanticWorkflow): BuildEstimate => {
+    const r = parseDiscoveryRequest(bridgeEstimateRequest(w.nodes[0]!)!);
+    return { workflowHash: savedWorkflowHash(w), nodeId: 'bridge', chain: r.source.chain, provider: r.providers[0]!,
+      expected: '0.001', minimum: '0.00099', symbol: 'ETH', slippageBps: 100, expiresAt: new Date(now.getTime() + 1000).toISOString(),
+      bridge: { selected: 0, execution: 'QUOTE_ONLY', discovery: { format: 'flofi.universal-discovery.v1', sourceChain: r.source.chain, destinationChain: r.destination.chain,
+        amount: r.amount, inputToken: r.inputToken, outputToken: r.outputToken, observedAt: now.toISOString(), quoteSubjects: 'PUBLIC_QUOTE_SUBJECT', status: 'LIVE_QUOTE', recommended: null,
+        candidates: [{ provider: r.providers[0]!, bridge: 'MOCKED', status: 'LIVE_QUOTE', executableBy: null, expectedOutput: '1000000000000000', minimumOutput: '990000000000000',
+          estimatedDurationSeconds: null, fees: [], reason: 'BUILDER_NOT_VERIFIED', quoteId: null }] } } };
+  };
+  it.each(['amount', 'recipient', 'provider', 'wallet', 'destinationWallet'] as const)('invalidates on %s and discards an unabortable old answer', async change => {
+    let w = workflow(), owner = 'owner-one', destination = 'destination-one';
+    const old = deferred<ReturnType<typeof response>>();
+    transport.mockReturnValueOnce(old.promise).mockImplementation(async (_url: string, init: { body: string }) => response({ ok: true, estimate: quote(JSON.parse(init.body).workflow) }));
+    const read = () => host.render(() => useLiveQuote(w, 'bridge', owner, destination));
+    expect(read().status).toBe('calculating'); await vi.advanceTimersByTimeAsync(LIVE_QUOTE_DEBOUNCE_MS);
+    const first = w;
+    if (change === 'amount') w = workflow('1');
+    if (change === 'recipient') w = workflow(undefined, '0x' + '12'.repeat(20));
+    if (change === 'provider') w = workflow(undefined, undefined, 'lifi');
+    if (change === 'wallet') owner = 'owner-two';
+    if (change === 'destinationWallet') destination = 'destination-two';
+    expect(read().status).toBe('calculating'); await vi.advanceTimersByTimeAsync(LIVE_QUOTE_DEBOUNCE_MS);
+    old.resolve(response({ ok: true, estimate: quote(first) })); await vi.advanceTimersByTimeAsync(0);
+    expect(read()).toEqual({ status: 'ready', estimate: quote(w) }); expect(transport.mock.calls[0]![1].signal.aborted).toBe(true);
+  });
+  it('refreshes an expired estimate automatically and never displays expired quantities', async () => {
+    const w = workflow(); transport.mockImplementation(async () => response({ ok: true, estimate: quote(w) }));
+    const read = () => host.render(() => useLiveQuote(w, 'bridge'));
+    read(); await vi.advanceTimersByTimeAsync(200); expect(read().status).toBe('ready');
+    await vi.advanceTimersByTimeAsync(800); expect(read().status).toBe('calculating');
+    await vi.advanceTimersByTimeAsync(200); expect(read().status).toBe('unavailable'); expect(transport).toHaveBeenCalledTimes(2);
+  });
+  it('rejects economic tampering even when workflow hash, provider and HTTP status match', async () => {
+    const w = workflow(), estimate = quote(w); transport.mockResolvedValue(response({ ok: true, estimate: { ...estimate, expected: '999999' } }));
+    const read = () => host.render(() => useLiveQuote(w, 'bridge'));
+    read(); await vi.advanceTimersByTimeAsync(200); expect(read()).toMatchObject({ status: 'unavailable', code: 'ESTIMATE_RESPONSE_MISMATCH' });
   });
 });

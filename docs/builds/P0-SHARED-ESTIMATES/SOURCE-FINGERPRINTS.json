@@ -1,0 +1,10 @@
+{
+  "apps/reference-dapp/src/server/build-estimate.ts": "3dc268edacbe227a812e91c83442318756c625a1ceaf1bb9ebaa9601723b0d4d",
+  "apps/reference-dapp/src/server/bridge-build-estimate.ts": "a85ce6993a90657eb61f36a3b317ecd44f68aae93091d8e963c9a4bb1dc54626",
+  "apps/reference-dapp/src/server/bridge-discovery.ts": "327e23668f9af18b719b84ba3fc237d993eb2693e201707d99f7d79a8c3a0a78",
+  "apps/reference-dapp/src/server/universal-router/discovery.ts": "99391081b5842a0ba24c32f288d6676d9d6ef53ff9f0e3558160a07f3c45bea5",
+  "apps/reference-dapp/src/domain/build-estimate.ts": "446d044c1bdb3c628804c0de48742cce9206a02979ed18231cef53c02d1df465",
+  "apps/reference-dapp/src/state/build-estimate.ts": "59c3a12a73033b1b4e45c3a3f99998d69f5d2ccfacb7d6ea2ce93c85e620a450",
+  "apps/reference-dapp/src/components/workflow-canvas.tsx": "177d017defbe81786d5e5e841cc35bedf3a1c39c926dc032aa5651a61b317b1a",
+  "apps/reference-dapp/src/components/composer-card.tsx": "eb97c96d6da4aa453ebc5a241ec12fc40c38f4cfd38535bc43acddfe25b3e589"
+}
