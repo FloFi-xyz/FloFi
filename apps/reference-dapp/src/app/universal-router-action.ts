@@ -7,8 +7,8 @@ import { UNIVERSAL_NETWORKS, type SemanticWorkflow, type UniversalNetworkKey } f
 import { createFileExecutionStorage } from '@defi-workflow-engine/reference-executor';
 import { createUniversalRouterService, UNIVERSAL_RUN_ID, type UniversalRecord, type UniversalRouterService, type UniversalWalletDiagnostic } from '../server/universal-router/service';
 import { createRelayProvider } from '../server/universal-router/relay-provider';
-import { createUniversalDiscovery, type DiscoveryResult } from '../server/universal-router/discovery';
-import { parseDiscoveryRequest } from '../server/universal-router/requests';
+import type { DiscoveryResult } from '../server/universal-router/discovery';
+import { readBridgeDiscovery } from '../server/bridge-discovery';
 import { universalRouterMode, universalRouterRuntime, type UniversalRouterMode } from '../server/universal-router/runtime';
 import { evmTokenDecimals } from '../server/universal-router/evm-chain';
 import { solanaMintFacts } from '../server/universal-router/solana-chain';
@@ -68,12 +68,7 @@ export async function universalInfo() { return run('EVM', 'info', [], async s =>
 /** Read-only route discovery for a pair (every provider, every answer classified). Persists nothing; binds no owner. */
 export async function universalDiscover(request: unknown): Promise<Result<DiscoveryResult>> {
   try {
-    const cloud = await cloudFlow<DiscoveryResult>(FLOW, 'discover', [request], { principal: null });
-    if (cloud) return cloud.ok || cloud.correlationId ? cloud : reportUniversalFailure(new Error(cloud.code), 'discover');
-    const mode = universalRouterMode(process.env);
-    if (mode === 'off') throw new Error('UNIVERSAL_ROUTER_NOT_ENABLED');
-    const runtime = universalRouterRuntime(mode, process.env), parsed = parseDiscoveryRequest(request);
-    return { ok: true, value: await createUniversalDiscovery({ http: runtime.http, apis: runtime.apis, keys: runtime.keys }).discover(parsed, parsed.providers) };
+    return await readBridgeDiscovery(request);
   } catch (cause) { return reportUniversalFailure(cause, 'request'); }
 }
 /** Read-only token facts for an explicit contract or mint (decimals and, on EVM, the token's own symbol), so a custom asset can be authored. */

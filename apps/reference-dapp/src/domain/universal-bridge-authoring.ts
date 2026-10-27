@@ -142,8 +142,15 @@ export function universalBridgeDetails(node: SemanticWorkflow['nodes'][number] |
 }
 export const universalInputOf = (d: UniversalBridgeDetails): UniversalBridgeInput => ({ source: d.source, destination: d.destination, inputAsset: d.fields.inputAsset.kind === 'NATIVE' ? d.inputSymbol : `${d.fields.inputAsset.address}@${d.inputDecimals}`,
   outputAsset: d.fields.outputAsset.kind === 'NATIVE' ? d.outputSymbol : `${d.fields.outputAsset.address}@${d.outputDecimals}`, amount: d.amount, recipient: d.recipient, slippage: d.slippage, routing: d.routing });
-/** The universal bridge node of a workflow, if it is one. */
-export const universalBridgeOfWorkflow = (workflow: SemanticWorkflow) => workflow.nodes.length === 1 ? universalBridgeDetails(workflow.nodes[0]!) : null;
+/** Select by identity in a composition. Without an ID, only an unambiguous bridge is selected. Never changes the workflow. */
+export function universalBridgeOfWorkflow(workflow: SemanticWorkflow, nodeId?: string): UniversalBridgeDetails | null {
+  if (nodeId !== undefined) {
+    const node = workflow.nodes.find(n => n.nodeId === nodeId);
+    return node ? universalBridgeDetails(node) : null;
+  }
+  const bridges = workflow.nodes.map(universalBridgeDetails).filter((d): d is UniversalBridgeDetails => d !== null);
+  return bridges.length === 1 ? bridges[0]! : null;
+}
 
 /** The Canvas Bridge card's network labels (the certified Router's labels, plus Solana). */
 export const UNIVERSAL_CANVAS_LABEL: Readonly<Record<UniversalNetworkKey, string>> = Object.freeze({ solana: 'Solana', base: 'Base', 'arbitrum-one': 'Arbitrum', ethereum: 'Ethereum',

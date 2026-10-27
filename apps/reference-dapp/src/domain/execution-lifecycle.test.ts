@@ -101,6 +101,15 @@ describe('adapter-specific lifecycle boundaries', () => {
     const settled = projectExecutionLifecycle(workflow, f.context, source('router', { record: { ...record, phase: 'RECONCILED', verdict: 'RECONCILED', destination: { transactionHash: hash } }, busy: false }));
     expect(settled.completed).toBe(1); expect(settled.steps[0]?.operations[1]?.hash).toBe(hash);
   });
+  it('keeps the confirmed approval visible after a fresh Bridge Review omits that already completed call', () => {
+    const f = fixture(), workflow = { ...initialEditor().workflow, revision: 1, resourceEdges: [], nodes: [createRouterNode('bridge', { source: 'Base Sepolia', destination: 'Arbitrum Sepolia', token: 'USDC', amount: '5', recipient: '', slippage: '100', routing: 'AUTO' })] };
+    const record = { id: 'bridge', workflow, provenance: 'PUBLIC_TESTNET', phase: 'PREPARED', verdict: 'PENDING', destination: null,
+      review: { nodeId: 'bridge', intent: { sourceChain: 'eip155:84532', destinationChain: 'eip155:421614' }, route: { inputToken: { symbol: 'USDC' }, routingProvider: 'across' }, calls: [{ purpose: 'BRIDGE_DEPOSIT' }] },
+      attempts: [{ step: 'APPROVAL', state: 'CONFIRMED', transactionHash: hash, reconciled: true, receipt: null }] };
+    const view = projectExecutionLifecycle(workflow, f.context, source('router', { record, busy: false, signing: false, recovered: false }));
+    expect(view.steps[0]?.operations).toMatchObject([{ title: 'Approve USDC', state: 'confirmed', hash }, { title: 'Bridge deposit', state: 'waiting' }, { title: 'Destination settlement', state: 'waiting' }]);
+    expect(view).toMatchObject({ completed: 0, state: 'active' });
+  });
   it('attaches the real signing flag only to the current Supply approval', () => {
     const f = fixture(), workflow = editorReducer(initialEditor(), canvasAddCommand('supply', 0, f.wallet.account, '100'), f.context).workflow;
     const view = projectExecutionLifecycle(workflow, f.context, source('supply', { signing: true, busy: true, record: { id: 'supply', provenance: 'PUBLIC_TESTNET', review: { workflow, approvalRequired: true, chain: 'eip155:84532' }, attempts: [{ step: 'APPROVAL', state: 'SUBMITTING', transactionHash: null, reconciled: false }] } }));

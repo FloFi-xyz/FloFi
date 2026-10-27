@@ -320,6 +320,7 @@ export type ComposerCardData = {
   composer: true; step: number; selected: boolean; vertical: boolean;
   summary: ReturnType<typeof composerSummary>;
   estimateWorkflow?: SemanticWorkflow; estimateNodeId?: string; estimateOwner?: string | null;
+  estimateEvmOwner?: string | null; estimateSolanaOwner?: string | null;
   amountEditor?: CanvasAmountEditor;
   contextualProposal?: boolean;
   tokenSelection?: { references?: { source: string | undefined; destination: string | undefined }; source: readonly string[]; destination: readonly string[]; onSelect(side: 'source' | 'destination', symbol: string): void };
@@ -336,8 +337,13 @@ export type ComposerCardData = {
 export function ComposerCard({ data: card }: { data: ComposerCardData }) {
   const { t: tr } = useLocale();
   // UX-007: the shared live quote for swap cards (Swap and the Stocks swap): calculating at once, then this exact amount's estimate or none.
-  const quote = useLiveQuote(card.summary.action === 'Swap' || card.summary.action === 'Stocks' ? card.estimateWorkflow : undefined, card.estimateNodeId ?? '', card.estimateOwner);
+  const quoteNode = card.estimateWorkflow?.nodes.find(n => n.nodeId === card.estimateNodeId);
+  const quoteOwner = quoteNode?.chainId.startsWith('solana:') ? card.estimateSolanaOwner ?? card.estimateOwner : card.estimateEvmOwner ?? card.estimateOwner;
+  const quoteDestination = quoteNode?.chainId.startsWith('solana:') ? card.estimateEvmOwner : card.estimateSolanaOwner;
+  const quote = useLiveQuote(['Swap', 'Stocks', 'Bridge'].includes(card.summary.action) ? card.estimateWorkflow : undefined,
+    card.estimateNodeId ?? '', quoteOwner, card.summary.action === 'Bridge' ? quoteDestination : undefined);
   const estimate = quote.status === 'ready' ? quote.estimate : null;
+  const discovery = estimate?.bridge?.discovery ?? (quote.status === 'unavailable' ? quote.discovery : undefined);
   const usdState = { status: quote.status === 'calculating' ? 'pending' as const : estimate ? 'ready' as const : 'none' as const,
     mocked: estimate?.usd?.evidence === 'MOCKED', ...(estimate?.usd ? { observedAt: estimate.usd.observedAt } : {}) };
   const [amountError, setAmountError] = useState<string | null>(null);
@@ -447,6 +453,15 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
           usd={usdLine(destinationNetwork, estimate?.usd?.output, usdState)}/>
         </ValuePair>
         <span className="composer-quote-note" title={quote.status === 'unavailable' && quote.code ? [quote.code, quote.correlationId].filter(Boolean).join(' · ') : undefined}>{card.networkSelection?.valid === false ? tr('Choose matching networks') : <>{!amountParts && <>{tr(card.summary.amount)} · </>}{tr(estimate ? `Approximate · ${estimate.provider} · Simulate before review` : quote.status === 'calculating' ? 'Calculating estimate…' : quote.status === 'unavailable' ? buildEstimateFailureMessage(quote.code ?? 'ESTIMATE_UNAVAILABLE') : 'Estimate unavailable')}</>}</span>
+        {estimate?.bridge && <span className="composer-quote-note">{tr(estimate.bridge.execution === 'QUOTE_ONLY'
+          ? 'Live quote only · execution is not validated' : 'Builder verified · simulation and Review still required')}</span>}
+        {discovery && <details className="nodrag nopan"><summary>{tr('Provider estimates')}</summary><ul aria-label={tr('Provider estimates')}>
+          {discovery.candidates.map((candidate, index) => <li key={`${candidate.provider}-${index}`} title={candidate.reason ?? undefined}>
+            {candidate.provider} · {tr(({ EXECUTABLE: 'Builder verified · simulation and Review still required', LIVE_QUOTE: 'Live quote only', BELOW_MINIMUM: 'Below provider minimum',
+              ABOVE_MAXIMUM: 'Above provider maximum', INSUFFICIENT_LIQUIDITY: 'Insufficient liquidity', TEMPORARILY_UNAVAILABLE: 'Temporarily unavailable',
+              NO_ROUTE: 'No route', SUPPORTED_BY_PROVIDER: 'Supported, no quote', INTERNAL_ERROR: 'Internal quote error' } as const)[candidate.status])}
+          </li>)}
+        </ul></details>}
         {editor?.changed && (directCommit ? <div className="composer-amount-actions composer-amount-direct">
           <span className="composer-amount-hint">{tr("Press Enter to apply")}</span>
           {editor.onCancel && <button type="button" className="composer-amount-cancel" onClick={() => { setAmountError(null); editor.onCancel!(); }}>{tr("Cancel")}</button>}

@@ -29,7 +29,7 @@ import type { DiscoveryCandidate } from '../server/universal-router/discovery';
 const amountOf = (units: string | null | undefined, decimals: number, symbol: string) => units ? `${formatTokenAmount(units, decimals)} ${symbol}` : '--';
 const short = (account: string) => account.length > 14 ? `${account.slice(0, 6)}…${account.slice(-4)}` : account;
 const LIFECYCLE: readonly RouterPhase[] = ['PREPARED', 'AUTHORIZED', 'SOURCE_SUBMITTED', 'SOURCE_CONFIRMED', 'IN_FLIGHT', 'DESTINATION_OBSERVED', 'RECONCILED'];
-const STATUS_LABEL: Readonly<Record<DiscoveryCandidate['status'], string>> = { EXECUTABLE: 'Executable', LIVE_QUOTE: 'Live quote only', SUPPORTED_BY_PROVIDER: 'Supported, no quote',
+const STATUS_LABEL: Readonly<Record<DiscoveryCandidate['status'], string>> = { INTERNAL_ERROR: 'Internal quote error', EXECUTABLE: 'Builder verified · simulation and Review still required', LIVE_QUOTE: 'Live quote only', SUPPORTED_BY_PROVIDER: 'Supported, no quote',
   TEMPORARILY_UNAVAILABLE: 'Temporarily unavailable', NO_ROUTE: 'No route', BELOW_MINIMUM: 'Below provider minimum', ABOVE_MAXIMUM: 'Above provider maximum', INSUFFICIENT_LIQUIDITY: 'Insufficient liquidity' };
 const PROVIDER_LABEL: Readonly<Record<string, string>> = { relay: 'Relay', lifi: 'LI.FI', mayan: 'Mayan', across: 'Across' };
 /** User-facing reasons for stable codes; anything else shows the code itself. */

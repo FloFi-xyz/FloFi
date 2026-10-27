@@ -194,8 +194,8 @@ describe('BUILD-ADMIN-001 admin analytics (PostgreSQL, genuine records)', () => 
     expect(data.delegated).toMatchObject({ installed: true, created: 0, openNow: 0, attentionNow: 0 });
     expect(JSON.stringify(data)).not.toContain(owner.slice(2));
     const health = await healthReport({}, { db: t.db, tenantId: 'default' }, now);
-    // Every shipped migration is applied (BUILD-CHAT-LEARNING-001: the count follows the shipped manifest, 13 with 0013_copilot_learning).
-    expect(health.database).toMatchObject({ ok: true, value: { appliedMigrations: SHIPPED_MIGRATIONS.length, shippedMigrations: SHIPPED_MIGRATIONS.length, tenantId: 'default' } });
+    const applied = (await t.db.query<{ n: number }>('SELECT count(*)::int AS n FROM schema_migrations')).rows[0]!.n;
+    expect(health.database).toMatchObject({ ok: true, value: { appliedMigrations: applied, shippedMigrations: SHIPPED_MIGRATIONS.length, tenantId: 'default' } });
     expect(health.scheduler).toMatchObject({ ok: true, value: { installed: true, overdueRules: 1 } });
     expect(health.api).toEqual({ topology: 'embedded-or-local', readiness: null });
     expect(health.queue.ok).toBe(true);

@@ -549,7 +549,7 @@ function BuildCanvas({ environment, selectedId, select, openSettings, workflowNa
     // UX-007: a swap card quotes what it shows — the committed action, or its unapplied draft as a preview snapshot that is never applied,
     // reviewed or simulated. An incomplete or invalid draft has nothing to quote.
     const liveQuoteTarget = (id: string): { estimateWorkflow?: Workflow; estimateNodeId: string } => {
-      if (id !== actionSetup?.id && amountInputs[id] === undefined && !cryptoSelections[id]) return { estimateWorkflow: workflow, estimateNodeId: id };
+      if (id !== actionSetup?.id && amountInputs[id] === undefined && !cryptoSelections[id] && !bridgeNetworkInputs[id] && recipientInputs[id] === undefined) return { estimateWorkflow: workflow, estimateNodeId: id };
       try {
         const preview = editorReducer(state, canvasAmountCommand(state, id === actionSetup?.id ? actionSetup : null, amountInputs, id, context, bridgeNetworkInputs, cryptoSelections, recipientInputs), context);
         const nodeId = id === actionSetup?.id ? preview.workflow.nodes.find(node => !workflow.nodes.some(previous => previous.nodeId === node.nodeId))?.nodeId : id;
@@ -564,7 +564,9 @@ function BuildCanvas({ environment, selectedId, select, openSettings, workflowNa
     position: canvasLayout[node.nodeId] ? canvasPosition(canvasLayout, node, index) :
       isLendingComposition(workflow) ? { x: 180, y: 35 + index * 230 } : canvasPosition(canvasLayout, node, index),
     selected: selectedIds.includes(node.nodeId) || selectedId === node.nodeId,
-    data: { composer: true, connectable: true, ...(node.actionType === SWAP_ACTION ? liveQuoteTarget(node.nodeId) : { estimateNodeId: node.nodeId }), estimateOwner: estimateOwner ?? wallet.account, contextualProposal: contextualTarget === node.nodeId, onOpenSettings: () => { selectNodes([node.nodeId], node.nodeId); openSettings?.(node.nodeId); }, step: index + 1, selected: selectedId === node.nodeId,
+    data: { composer: true, connectable: true, ...(['asset.swap.exact-input', 'asset.bridge'].includes(node.actionType) ? liveQuoteTarget(node.nodeId) : { estimateNodeId: node.nodeId }), estimateOwner: node.chainId.startsWith('solana:') ? estimateOwner : wallet.account,
+      estimateEvmOwner: wallet.account, estimateSolanaOwner: estimateOwner,
+      contextualProposal: contextualTarget === node.nodeId, onOpenSettings: () => { selectNodes([node.nodeId], node.nodeId); openSettings?.(node.nodeId); }, step: index + 1, selected: selectedId === node.nodeId,
       vertical: isLendingComposition(workflow), summary: selectedSummary(composerSummary(workflow, node, context), cryptoSelections[node.nodeId]),
       ...(cryptoSelectionOf(node) ? { actionSelection: actionSelection(node.nodeId, cryptoSelections[node.nodeId] ?? cryptoSelectionOf(node)!, canSelectCryptoAssets(node, workflow)) } : {}),
       ...(composerSummary(workflow, node, context).action === 'Stocks' && (cryptoSelections[node.nodeId] ?? cryptoSelectionOf(node)) ? { stocks: stocksData(node.nodeId, cryptoSelections[node.nodeId] ?? cryptoSelectionOf(node)!, canSelectCryptoAssets(node, workflow)) } : {}),
@@ -608,7 +610,8 @@ function BuildCanvas({ environment, selectedId, select, openSettings, workflowNa
     }));
     if (actionSetup) projected.push({ id: actionSetup.id, type: 'workflow', ariaLabel: `Step ${projected.length + 1}: ${setupSummary(actionSetup, context).action}`,
       position: canvasLayout[actionSetup.id] ?? defaultCanvasPosition(projected.length), selected: selectedId === actionSetup.id,
-      data: { composer: true, connectable: false, ...(actionSetup.action === 'swap' ? { ...liveQuoteTarget(actionSetup.id), estimateOwner: estimateOwner ?? wallet.account } : {}),
+      data: { composer: true, connectable: false, ...(['swap', 'bridge'].includes(actionSetup.action) ? { ...liveQuoteTarget(actionSetup.id), estimateOwner: estimateOwner ?? wallet.account,
+        estimateEvmOwner: wallet.account, estimateSolanaOwner: estimateOwner } : {}),
         onOpenSettings: () => { selectNodes([actionSetup.id], actionSetup.id); openSettings?.(actionSetup.id); }, step: projected.length + 1, selected: selectedId === actionSetup.id, vertical: false,
         summary: setupSummary(actionSetup, context),
         ...(actionSetup.action === 'swap' && actionSetup.stocks && actionSetup.cryptoSelection ? { stocks: stocksData(actionSetup.id, actionSetup.cryptoSelection) } : {}),

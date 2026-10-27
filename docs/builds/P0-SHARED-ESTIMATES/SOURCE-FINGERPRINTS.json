@@ -1,0 +1,18 @@
+{
+  "apps/reference-dapp/src/server/build-estimate.ts": "3dc268edacbe227a812e91c83442318756c625a1ceaf1bb9ebaa9601723b0d4d",
+  "apps/reference-dapp/src/server/bridge-build-estimate.ts": "a85ce6993a90657eb61f36a3b317ecd44f68aae93091d8e963c9a4bb1dc54626",
+  "apps/reference-dapp/src/server/bridge-discovery.ts": "327e23668f9af18b719b84ba3fc237d993eb2693e201707d99f7d79a8c3a0a78",
+  "apps/reference-dapp/src/server/universal-router/discovery.ts": "99391081b5842a0ba24c32f288d6676d9d6ef53ff9f0e3558160a07f3c45bea5",
+  "apps/reference-dapp/src/domain/build-estimate.ts": "446d044c1bdb3c628804c0de48742cce9206a02979ed18231cef53c02d1df465",
+  "apps/reference-dapp/src/state/build-estimate.ts": "59c3a12a73033b1b4e45c3a3f99998d69f5d2ccfacb7d6ea2ce93c85e620a450",
+  "apps/reference-dapp/src/components/workflow-canvas.tsx": "177d017defbe81786d5e5e841cc35bedf3a1c39c926dc032aa5651a61b317b1a",
+  "apps/reference-dapp/src/components/composer-card.tsx": "eb97c96d6da4aa453ebc5a241ec12fc40c38f4cfd38535bc43acddfe25b3e589",
+  "apps/reference-dapp/src/components/app-shell.tsx": "af4ddc767e7f66f2d6d9a138a6cbf44aca1a3a6d93212f6ba073751f40718765",
+  "apps/reference-dapp/src/domain/bridge-review-recovery.ts": "1a370ac7e96eef9e80096b9cf9d0360b5faaf0001e50cefdc5dd017a5c868248",
+  "apps/reference-dapp/src/domain/execution-lifecycle.ts": "8965fe4f46258bac78f493d7b8569e7c40949d7e113f0db77889252cbcba01ca",
+  "apps/reference-dapp/e2e/universal-bridge.spec.ts": "979466ecd2c2733b03b043126ee63d8d5285cdd0c3c3dace8ca3f432ee2677e8",
+  "apps/reference-dapp/e2e/universal-serve.ts": "3f64255771ff879f8e80199fb152c0178f7c3d04f21ca494ba45d6e1ce5f7ae7",
+  "packages/cloud-runtime/src/migrations.ts": "5b395834efb2603557f21b4b91ca9bc88a6ef9e3784612f49669e5b3a59167bc",
+  "packages/cloud-runtime/test/fixtures/0016_owner_history_purge.sql": "a3c258cadd9d7865ad9d36d63ec0921fc47455bb3651c201074f3b0486b4be6f",
+  "packages/cloud-runtime/test/owner-history-compatibility.pg.test.ts": "6982fe4a9c10c40d679f624b4ad60a55fc1d6dd564dee5e8edfe71a502ea453d"
+}

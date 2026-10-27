@@ -1,0 +1,31 @@
+{
+  "project": "mute-bird-69509890",
+  "branch": "br-sparkling-silence-b5k6cg13",
+  "classification": "ISOLATED_EMPTY_RELEASE_DATABASE",
+  "applied": [
+    16
+  ],
+  "sha256": "a3c258cadd9d7865ad9d36d63ec0921fc47455bb3651c201074f3b0486b4be6f",
+  "durationMs": 12494,
+  "existingTablesUnchanged": 65,
+  "rollback": {
+    "version": 16,
+    "application": 15,
+    "forward": [
+      {
+        "version": 16,
+        "name": "owner_history_purge",
+        "sha256": "a3c258cadd9d7865ad9d36d63ec0921fc47455bb3651c201074f3b0486b4be6f"
+      }
+    ]
+  },
+  "current": {
+    "version": 16,
+    "application": 16,
+    "forward": []
+  },
+  "oldMigratorNoOp": true,
+  "newMigratorNoOp": true,
+  "runs": 0,
+  "observedAt": "2026-10-27T15:36:31.592Z"
+}

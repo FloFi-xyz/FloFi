@@ -1,0 +1,486 @@
+{
+  "origin": "https://flofi-qbzpcrpu9-alrimarleskovars-projects.vercel.app",
+  "commit": "09eefd56e066a4497448eba0cbddc8d1fffa9fb3",
+  "classification": "PUBLIC_READ_ONLY_HOSTED_REAL_BROWSER",
+  "transactions": 0,
+  "observations": [
+    {
+      "index": 0,
+      "case": {
+        "kind": "bridge",
+        "source": "Base",
+        "destination": "Arbitrum",
+        "input": "USDC",
+        "output": "USDC",
+        "amount": "25"
+      },
+      "started": "2026-10-27T15:40:17.166Z",
+      "observedAt": "2026-10-27T15:40:29.307Z",
+      "httpStatus": 200,
+      "correlationId": "c89dd3a4-226a-45e9-a3fa-0cac131d74e7",
+      "displayed": "24.988975",
+      "body": {
+        "ok": true,
+        "estimate": {
+          "workflowHash": "0xdc96c5e22bb1e13a56376020e8c84cc80ccfdf5d5e0d485641fc1a002f3d3b92",
+          "nodeId": "node-002",
+          "chain": "eip155:8453",
+          "provider": "across",
+          "expected": "24.988975",
+          "minimum": "24.988975",
+          "symbol": "USDC",
+          "slippageBps": 100,
+          "expiresAt": "2026-10-27T15:40:58.852Z",
+          "bridge": {
+            "discovery": {
+              "format": "flofi.universal-discovery.v1",
+              "sourceChain": "eip155:8453",
+              "destinationChain": "eip155:42161",
+              "inputToken": {
+                "chainId": "eip155:8453",
+                "kind": "TOKEN",
+                "address": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+                "decimals": 6,
+                "symbol": "USDC"
+              },
+              "outputToken": {
+                "chainId": "eip155:42161",
+                "kind": "TOKEN",
+                "address": "0xaf88d065e77c8cc2239327c5edb3a432268e5831",
+                "decimals": 6,
+                "symbol": "USDC"
+              },
+              "amount": "25000000",
+              "observedAt": "2026-10-27T15:40:28.852Z",
+              "quoteSubjects": "PUBLIC_QUOTE_SUBJECT",
+              "candidates": [
+                {
+                  "provider": "across",
+                  "bridge": "across",
+                  "status": "LIVE_QUOTE",
+                  "executableBy": null,
+                  "expectedOutput": "24988975",
+                  "minimumOutput": "24988975",
+                  "estimatedDurationSeconds": 2,
+                  "fees": [],
+                  "reason": "ACROSS_REQUIRES_CERTIFIED_ROUTER_VALIDATION",
+                  "quoteId": "gcvtl-1793115627769-b410340e651c"
+                },
+                {
+                  "provider": "lifi",
+                  "bridge": "polymerStandard",
+                  "status": "LIVE_QUOTE",
+                  "executableBy": null,
+                  "expectedOutput": "24937500",
+                  "minimumOutput": "24937500",
+                  "estimatedDurationSeconds": 1080,
+                  "fees": [
+                    {
+                      "label": "LIFI Fixed Fee",
+                      "amount": "62500",
+                      "symbol": "USDC",
+                      "decimals": 6,
+                      "included": true,
+                      "chainId": "eip155:8453"
+                    }
+                  ],
+                  "reason": "LIFI_BRIDGE_VERIFIER_NOT_IMPLEMENTED",
+                  "quoteId": "d7aa18b1-b08c-452c-b094-efa5de453c69"
+                },
+                {
+                  "provider": "lifi",
+                  "bridge": "glacis",
+                  "status": "LIVE_QUOTE",
+                  "executableBy": null,
+                  "expectedOutput": "24935007",
+                  "minimumOutput": "24935007",
+                  "estimatedDurationSeconds": 1143,
+                  "fees": [
+                    {
+                      "label": "LIFI Fixed Fee",
+                      "amount": "62500",
+                      "symbol": "USDC",
+                      "decimals": 6,
+                      "included": true,
+                      "chainId": "eip155:8453"
+                    },
+                    {
+                      "label": "Bridge Fee",
+                      "amount": "132579567397933",
+                      "symbol": "ETH",
+                      "decimals": 18,
+                      "included": false,
+                      "chainId": "eip155:8453"
+                    },
+                    {
+                      "label": "Airlift Fee",
+                      "amount": "2493",
+                      "symbol": "USDC",
+                      "decimals": 6,
+                      "included": true,
+                      "chainId": "eip155:8453"
+                    }
+                  ],
+                  "reason": "LIFI_BRIDGE_VERIFIER_NOT_IMPLEMENTED",
+                  "quoteId": "8f83caf8-b339-4768-a354-07c4df37aafc"
+                },
+                {
+                  "provider": "lifi",
+                  "bridge": "polymer",
+                  "status": "LIVE_QUOTE",
+                  "executableBy": null,
+                  "expectedOutput": "24931764",
+                  "minimumOutput": "24931764",
+                  "estimatedDurationSeconds": 10,
+                  "fees": [
+                    {
+                      "label": "LIFI Fixed Fee",
+                      "amount": "62500",
+                      "symbol": "USDC",
+                      "decimals": 6,
+                      "included": true,
+                      "chainId": "eip155:8453"
+                    },
+                    {
+                      "label": "Polymer fee",
+                      "amount": "2494",
+                      "symbol": "USDC",
+                      "decimals": 6,
+                      "included": true,
+                      "chainId": "eip155:8453"
+                    },
+                    {
+                      "label": "CCTP service fee",
+                      "amount": "3242",
+                      "symbol": "USDC",
+                      "decimals": 6,
+                      "included": true,
+                      "chainId": "eip155:8453"
+                    }
+                  ],
+                  "reason": "LIFI_BRIDGE_VERIFIER_NOT_IMPLEMENTED",
+                  "quoteId": "31572ca4-7ca8-4656-9211-89fc2462075d"
+                },
+                {
+                  "provider": "lifi",
+                  "bridge": "lifiIntents",
+                  "status": "LIVE_QUOTE",
+                  "executableBy": null,
+                  "expectedOutput": "24927573",
+                  "minimumOutput": "24927573",
+                  "estimatedDurationSeconds": 7,
+                  "fees": [
+                    {
+                      "label": "LIFI Fixed Fee",
+                      "amount": "62500",
+                      "symbol": "USDC",
+                      "decimals": 6,
+                      "included": true,
+                      "chainId": "eip155:8453"
+                    }
+                  ],
+                  "reason": "LIFI_BRIDGE_VERIFIER_NOT_IMPLEMENTED",
+                  "quoteId": "2d4b007c-3632-4cd5-92f1-2f1db659bbe7"
+                },
+                {
+                  "provider": "lifi",
+                  "bridge": "across",
+                  "status": "LIVE_QUOTE",
+                  "executableBy": null,
+                  "expectedOutput": "24926483",
+                  "minimumOutput": "24926483",
+                  "estimatedDurationSeconds": 2,
+                  "fees": [
+                    {
+                      "label": "LIFI Fixed Fee",
+                      "amount": "62500",
+                      "symbol": "USDC",
+                      "decimals": 6,
+                      "included": true,
+                      "chainId": "eip155:8453"
+                    },
+                    {
+                      "label": "Relayer fee",
+                      "amount": "2493",
+                      "symbol": "USDC",
+                      "decimals": 6,
+                      "included": true,
+                      "chainId": "eip155:8453"
+                    },
+                    {
+                      "label": "Relayer gas fee",
+                      "amount": "8524",
+                      "symbol": "USDC",
+                      "decimals": 6,
+                      "included": true,
+                      "chainId": "eip155:8453"
+                    }
+                  ],
+                  "reason": "LIFI_REQUIRES_CERTIFIED_ROUTER_VALIDATION",
+                  "quoteId": "c72d5df1-94dd-4786-93cb-b581a8a20e65"
+                },
+                {
+                  "provider": "lifi",
+                  "bridge": "mayan",
+                  "status": "LIVE_QUOTE",
+                  "executableBy": null,
+                  "expectedOutput": "24869802",
+                  "minimumOutput": "24869802",
+                  "estimatedDurationSeconds": 3,
+                  "fees": [
+                    {
+                      "label": "LIFI Fixed Fee",
+                      "amount": "62500",
+                      "symbol": "USDC",
+                      "decimals": 6,
+                      "included": true,
+                      "chainId": "eip155:8453"
+                    }
+                  ],
+                  "reason": "LIFI_BRIDGE_VERIFIER_NOT_IMPLEMENTED",
+                  "quoteId": "1cb9f67d-2de2-4749-83a6-c639c5011691"
+                },
+                {
+                  "provider": "lifi",
+                  "bridge": "celercircle",
+                  "status": "LIVE_QUOTE",
+                  "executableBy": null,
+                  "expectedOutput": "24837500",
+                  "minimumOutput": "24837500",
+                  "estimatedDurationSeconds": 1408,
+                  "fees": [
+                    {
+                      "label": "LIFI Fixed Fee",
+                      "amount": "62500",
+                      "symbol": "USDC",
+                      "decimals": 6,
+                      "included": true,
+                      "chainId": "eip155:8453"
+                    },
+                    {
+                      "label": "Transaction Fee",
+                      "amount": "100000",
+                      "symbol": "USDC",
+                      "decimals": 6,
+                      "included": true,
+                      "chainId": "eip155:8453"
+                    }
+                  ],
+                  "reason": "LIFI_BRIDGE_VERIFIER_NOT_IMPLEMENTED",
+                  "quoteId": "327a12bb-183e-4bbb-8c67-19031d3961f5"
+                },
+                {
+                  "provider": "lifi",
+                  "bridge": "layerswap",
+                  "status": "LIVE_QUOTE",
+                  "executableBy": null,
+                  "expectedOutput": "24932323",
+                  "minimumOutput": "24683000",
+                  "estimatedDurationSeconds": 4,
+                  "fees": [
+                    {
+                      "label": "LIFI Fixed Fee",
+                      "amount": "62500",
+                      "symbol": "USDC",
+                      "decimals": 6,
+                      "included": true,
+                      "chainId": "eip155:8453"
+                    },
+                    {
+                      "label": "LayerSwap fee",
+                      "amount": "5176",
+                      "symbol": "USDC",
+                      "decimals": 6,
+                      "included": true,
+                      "chainId": "eip155:8453"
+                    }
+                  ],
+                  "reason": "LIFI_BRIDGE_VERIFIER_NOT_IMPLEMENTED",
+                  "quoteId": "c0333648-d65a-46d6-82c9-905950682cdf"
+                },
+                {
+                  "provider": "lifi",
+                  "bridge": "near",
+                  "status": "LIVE_QUOTE",
+                  "executableBy": null,
+                  "expectedOutput": "24928398",
+                  "minimumOutput": "24679114",
+                  "estimatedDurationSeconds": 34,
+                  "fees": [
+                    {
+                      "label": "LIFI Fixed Fee",
+                      "amount": "62500",
+                      "symbol": "USDC",
+                      "decimals": 6,
+                      "included": true,
+                      "chainId": "eip155:8453"
+                    },
+                    {
+                      "label": "NearIntents Protocol Fee",
+                      "amount": "2494",
+                      "symbol": "USDC",
+                      "decimals": 6,
+                      "included": true,
+                      "chainId": "eip155:8453"
+                    },
+                    {
+                      "label": "1ClickSwap API Fee",
+                      "amount": "2494",
+                      "symbol": "USDC",
+                      "decimals": 6,
+                      "included": true,
+                      "chainId": "eip155:8453"
+                    },
+                    {
+                      "label": "NearIntents App Fee",
+                      "amount": "4988",
+                      "symbol": "USDC",
+                      "decimals": 6,
+                      "included": true,
+                      "chainId": "eip155:8453"
+                    }
+                  ],
+                  "reason": "LIFI_BRIDGE_VERIFIER_NOT_IMPLEMENTED",
+                  "quoteId": "3d4685f2-4d52-489a-8b63-77957e66f386"
+                },
+                {
+                  "provider": "lifi",
+                  "bridge": "relaydepository",
+                  "status": "LIVE_QUOTE",
+                  "executableBy": null,
+                  "expectedOutput": "24910999",
+                  "minimumOutput": "24661890",
+                  "estimatedDurationSeconds": 1,
+                  "fees": [
+                    {
+                      "label": "LIFI Fixed Fee",
+                      "amount": "62500",
+                      "symbol": "USDC",
+                      "decimals": 6,
+                      "included": true,
+                      "chainId": "eip155:8453"
+                    },
+                    {
+                      "label": "Relayer Gas fee",
+                      "amount": "4003",
+                      "symbol": "USDC",
+                      "decimals": 6,
+                      "included": true,
+                      "chainId": "eip155:8453"
+                    },
+                    {
+                      "label": "Relayer Service fee",
+                      "amount": "22498",
+                      "symbol": "USDC",
+                      "decimals": 6,
+                      "included": true,
+                      "chainId": "eip155:8453"
+                    }
+                  ],
+                  "reason": "LIFI_BRIDGE_VERIFIER_NOT_IMPLEMENTED",
+                  "quoteId": "9fdca6c9-a622-4331-987b-ee2282c3b29e"
+                },
+                {
+                  "provider": "lifi",
+                  "bridge": "mayanFastMCTP",
+                  "status": "LIVE_QUOTE",
+                  "executableBy": null,
+                  "expectedOutput": "24870359",
+                  "minimumOutput": "24611307",
+                  "estimatedDurationSeconds": 35,
+                  "fees": [
+                    {
+                      "label": "LIFI Fixed Fee",
+                      "amount": "62500",
+                      "symbol": "USDC",
+                      "decimals": 6,
+                      "included": true,
+                      "chainId": "eip155:8453"
+                    },
+                    {
+                      "label": "Redeem Relayer Fee",
+                      "amount": "56085",
+                      "symbol": "USDC",
+                      "decimals": 6,
+                      "included": true,
+                      "chainId": "eip155:8453"
+                    }
+                  ],
+                  "reason": "LIFI_BRIDGE_VERIFIER_NOT_IMPLEMENTED",
+                  "quoteId": "db096626-8a0c-4596-a0eb-824c0dcb48a8"
+                },
+                {
+                  "provider": "lifi",
+                  "bridge": "mayanMCTP",
+                  "status": "LIVE_QUOTE",
+                  "executableBy": null,
+                  "expectedOutput": "24853373",
+                  "minimumOutput": "24605677",
+                  "estimatedDurationSeconds": 1200,
+                  "fees": [
+                    {
+                      "label": "LIFI Fixed Fee",
+                      "amount": "62500",
+                      "symbol": "USDC",
+                      "decimals": 6,
+                      "included": true,
+                      "chainId": "eip155:8453"
+                    },
+                    {
+                      "label": "Redeem Relayer Fee",
+                      "amount": "84078",
+                      "symbol": "USDC",
+                      "decimals": 6,
+                      "included": true,
+                      "chainId": "eip155:8453"
+                    }
+                  ],
+                  "reason": "LIFI_BRIDGE_VERIFIER_NOT_IMPLEMENTED",
+                  "quoteId": "7bb719b8-6a7b-4926-bc96-e561b24f6fa4"
+                }
+              ],
+              "recommended": null,
+              "status": "LIVE_QUOTE"
+            },
+            "selected": 0,
+            "execution": "QUOTE_ONLY"
+          },
+          "correlationId": "c89dd3a4-226a-45e9-a3fa-0cac131d74e7"
+        }
+      }
+    },
+    {
+      "index": 22,
+      "case": {
+        "kind": "swap",
+        "source": "Base",
+        "destination": "Base",
+        "input": "WETH",
+        "output": "USDC",
+        "amount": "0.01"
+      },
+      "started": "2026-10-27T15:43:19.054Z",
+      "observedAt": "2026-10-27T15:43:33.836Z",
+      "httpStatus": 200,
+      "correlationId": "255cfdc7-92cd-4a99-8e77-36e2c4666f8f",
+      "displayed": "23.45123",
+      "body": {
+        "ok": true,
+        "estimate": {
+          "workflowHash": "0x5c14af83d6404f7ae45a2d1a2846260b1298ae845781e701009ceea55ce65665",
+          "nodeId": "node-002",
+          "chain": "eip155:8453",
+          "provider": "Uniswap V3",
+          "expected": "23.45123",
+          "minimum": "23.216717",
+          "symbol": "USDC",
+          "slippageBps": 100,
+          "expiresAt": "2026-10-27T15:44:33.683Z",
+          "usd": null,
+          "correlationId": "255cfdc7-92cd-4a99-8e77-36e2c4666f8f"
+        }
+      }
+    }
+  ],
+  "errors": []
+}

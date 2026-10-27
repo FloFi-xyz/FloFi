@@ -29,14 +29,15 @@ async function selectAndDelete(page: Page, card: ReturnType<Page['locator']>) {
 /** MOCKED Build estimates: SOL → USDC answers USDC, USDC → SOL answers SOL, for exactly the snapshot (workflow hash) the card sent. */
 async function mockedSolanaEstimates(page: Page, seen: string[]) {
   await page.route('**/api/build-estimate', async (route: Route) => {
-    const body = JSON.parse(route.request().postData() ?? '{}') as { workflow: { nodes: { nodeId: string; chainId: string; inputs: { name: string; value: { asset: { address: string } } }[] }[] }; nodeId: string };
+    const body = JSON.parse(route.request().postData() ?? '{}') as { workflow: { nodes: { nodeId: string; chainId: string; userConstraints: { kind: string; maximumBps?: number }[]; inputs: { name: string; value: { asset: { address: string } } }[] }[] }; nodeId: string };
     const node = body.workflow.nodes.find(item => item.nodeId === body.nodeId)!;
     const input = node.inputs.find(item => item.name === 'amount-in')!.value.asset.address;
     const toUsdc = input === SOLANA_MAINNET_TOKENS.SOL.mint;
     seen.push(toUsdc ? 'SOL→USDC' : 'USDC→SOL');
     const workflowHash = hashArtifactBytes('semantic-workflow', new TextEncoder().encode(JSON.stringify(body.workflow)));
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, estimate: { workflowHash, nodeId: body.nodeId, chain: node.chainId,
-      provider: 'Jupiter', expected: toUsdc ? '150.25' : '0.006655', minimum: toUsdc ? '149.5' : '0.00662', symbol: toUsdc ? 'USDC' : 'SOL', slippageBps: 50,
+      provider: 'Jupiter', expected: toUsdc ? '150.25' : '0.006655', minimum: toUsdc ? '149.5' : '0.00662', symbol: toUsdc ? 'USDC' : 'SOL',
+      slippageBps: node.userConstraints.find(c => c.kind === 'MAXIMUM_SLIPPAGE_BPS')?.maximumBps,
       expiresAt: new Date(Date.now() + 60_000).toISOString(), usd: null } }) });
   });
 }

@@ -167,6 +167,21 @@ describe('BUILD-ROUTER-001 authorization invalidation (ROUTE_CHANGED and friends
     const other = await reviewed(disabled.service, w);
     await expect(disabled.service.begin(other.id, ROUTER_OWNER, w)).rejects.toThrow('ROUTER_EXECUTION_NOT_ENABLED');
   });
+  it('P0: expiry after a confirmed USDC approval requires a fresh Review and then prepares only the deposit on the same run', async () => {
+    const { service, h } = await setup(), w = workflow(), run = await reviewed(service, w);
+    const { hash } = await execute(service, h, run.id, w);
+    h.advance(profile.reviewTtlSeconds + 1);
+    const observed = await service.observe(run.id);
+    expect(observed.attempts[0]).toMatchObject({ step: 'APPROVAL', state: 'CONFIRMED', transactionHash: hash, reconciled: true });
+    expect(observed).toMatchObject({ verdict: 'PENDING', source: null, destination: null, evidence: null });
+    await expect(service.begin(run.id, ROUTER_OWNER, w)).rejects.toThrow('ROUTER_REVIEW_EXPIRED');
+    const fresh = await service.refresh(run.id);
+    expect(fresh.id).toBe(run.id); expect(fresh.attempts).toEqual(observed.attempts); expect(fresh.authorization).toBeNull();
+    await expect(service.begin(run.id, ROUTER_OWNER, w)).rejects.toThrow('ROUTER_REVIEW_REQUIRED');
+    await service.review(run.id, fresh.review.commitment, w);
+    expect((await service.begin(run.id, ROUTER_OWNER, w)).attempt.step).toBe('DEPOSIT');
+    expect((await service.load(run.id)).attempts.filter(a => a.step === 'APPROVAL')).toHaveLength(1);
+  });
   it('a changed Review commitment, or a tampered stored route, is refused', async () => {
     const { service, dir } = await setup(), w = workflow();
     const run = await service.simulate(w, ROUTER_OWNER);

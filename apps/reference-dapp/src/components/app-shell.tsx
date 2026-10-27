@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
+import { refreshBridgeAfterApproval } from '../domain/bridge-review-recovery';
 import { selectOwnerRuntime } from '../domain/runtime-selection';
 import { BASE_MAINNET } from '@defi-workflow-engine/action-registry';
 import { useLocale } from '../i18n/locale';
@@ -266,7 +267,8 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     if (details) { details.open = true; details.scrollIntoView({ block: 'start' }); details.querySelector<HTMLElement>('summary')?.focus(); }
   }
   const solanaReview = solanaLiquidity.record?.review;
-  const simulateAgain = simulationSource.kind === 'universal' ? universal.simulate : simulationSource.kind === 'router' ? routerState.simulate
+  const simulateAgain = simulationSource.kind === 'universal' ? () => refreshBridgeAfterApproval(universal.record, state.workflow, universal.retired) ? universal.refresh() : universal.simulate()
+    : simulationSource.kind === 'router' ? () => refreshBridgeAfterApproval(routerState.record, state.workflow, routerState.retired) ? routerState.refresh() : routerState.simulate()
     : simulationSource.kind === 'solana-transfer' ? solanaTransfer.simulate
     : simulationSource.kind === 'transfer' ? transfer.simulate
     : simulationSource.kind === 'lending' ? lending.simulate

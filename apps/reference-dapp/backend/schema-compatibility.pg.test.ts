@@ -35,6 +35,7 @@ import { callCloudFlow, listCloudRuns, readCloudRun, type FlowResult } from '../
 import { cloudFlow, embeddedRuntime, type CloudJournalPage } from '../src/server/flow-runtime.ts';
 import { platformStateHost } from '../src/server/platform-state-host.ts';
 import { readiness } from '../src/server/readiness.ts';
+import { FLOFI_PRODUCTION_ORIGIN } from '../src/platform/navigation.ts';
 import type { TransferRecord } from '../src/server/robinhood-transfer-service.ts';
 import { createBackend } from './app.ts';
 
@@ -256,7 +257,8 @@ describe.runIf(CERTIFICATE)(`BUILD-DB-COMPAT-001 this build across its certified
     const t = await database(NEXT);
     const embedded = { FLOFI_RUNTIME: 'embedded', DATABASE_URL: t.url, TENANT_ID: 'compat-embedded', GRYLOO_ROUTER_TESTNET_HARNESS: 'MOCKED_LOOPBACK_ONLY', ...HARNESS };
     // Production shape: flows on the Railway API, platform state (MCP, Developer, Channels, approvals) on the same database.
-    const remote = { API_BASE_URL: 'https://api.example', API_AUTH_TOKEN: TOKEN, VERCEL: '1', VERCEL_ENV: 'production', TENANT_ID: 'compat-remote', DATABASE_URL: t.url };
+    const remote = { API_BASE_URL: 'https://api.example', API_AUTH_TOKEN: TOKEN, VERCEL: '1', VERCEL_ENV: 'production', TENANT_ID: 'compat-remote', DATABASE_URL: t.url,
+      FLOFI_PUBLIC_ORIGIN: FLOFI_PRODUCTION_ORIGIN };
     try {
       await coldWebInstance();
       expect(await cloudFlow('robinhood-transfer', 'mode', [], { env: embedded })).toEqual({ ok: true, value: 'harness' });

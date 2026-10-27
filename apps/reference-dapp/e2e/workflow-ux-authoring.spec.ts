@@ -194,7 +194,8 @@ async function replayQuotes(page: Page, answer: (index: number, seen: Seen) => {
     await new Promise(resolve => setTimeout(resolve, delayMs));
     const node = body.workflow.nodes.find(node => node.nodeId === body.nodeId)!;
     const json = expected === null ? { ok: false, code: 'ESTIMATE_UNAVAILABLE' } : { ok: true, estimate: { nodeId: body.nodeId, chain: node.chainId, provider: 'Uniswap V3',
-      workflowHash: hashArtifactBytes('semantic-workflow', new TextEncoder().encode(JSON.stringify(body.workflow))), expected, minimum: expected, symbol, slippageBps: 50,
+      workflowHash: hashArtifactBytes('semantic-workflow', new TextEncoder().encode(JSON.stringify(body.workflow))), expected, minimum: expected, symbol,
+      slippageBps: node.userConstraints.find(c => c.kind === 'MAXIMUM_SLIPPAGE_BPS')?.maximumBps,
       expiresAt: new Date(Date.now() + 60_000).toISOString() } };
     await route.fulfill({ json }).catch(() => undefined);
   });
@@ -252,7 +253,7 @@ test.describe('UX-007 fast live quote feedback', () => {
   });
 
   test('Robinhood Stock Token swap (Stocks card) uses the same live quote', async ({ page, networkGuard }) => {
-    const seen = await replayQuotes(page, () => ({ delayMs: 20, expected: '0.026', symbol: 'TSLA' }));
+    const seen = await replayQuotes(page, () => ({ delayMs: 20, expected: '0.026', symbol: 'AAPL' }));
     await open(page);
     await page.getByRole('button', { name: 'Stocks', exact: true }).click();
     const card = cards(page).filter({ hasText: 'Robinhood' }).first();

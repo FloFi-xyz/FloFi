@@ -16,16 +16,17 @@
  */
 import { UNIVERSAL_NETWORKS, UNIVERSAL_QUOTE_SUBJECTS, type UniversalNetwork, type UniversalRoutingProvider, type UniversalToken } from '@defi-workflow-engine/workflow-contracts';
 import { UNIVERSAL_ROUTER_DEPLOYMENT } from '@defi-workflow-engine/action-registry';
+import { createLogger } from '@defi-workflow-engine/cloud-runtime';
 import { providerHttpError, providerRefusalCode, type UniversalHttp } from './http.ts';
 import { normalizeRelayQuote, relayCurrency, relayQuoteBody, relayRefusal, RELAY_API, type UniversalQuoteRequest } from './relay-provider.ts';
 
-export type DiscoveryStatus = 'EXECUTABLE' | 'LIVE_QUOTE' | 'SUPPORTED_BY_PROVIDER' | 'TEMPORARILY_UNAVAILABLE' | 'NO_ROUTE' | 'BELOW_MINIMUM' | 'ABOVE_MAXIMUM' | 'INSUFFICIENT_LIQUIDITY';
+export type DiscoveryStatus = 'EXECUTABLE' | 'LIVE_QUOTE' | 'SUPPORTED_BY_PROVIDER' | 'TEMPORARILY_UNAVAILABLE' | 'NO_ROUTE' | 'BELOW_MINIMUM' | 'ABOVE_MAXIMUM' | 'INSUFFICIENT_LIQUIDITY' | 'INTERNAL_ERROR';
 export type DiscoveryFee = { readonly label: string; readonly amount: string; readonly symbol: string; readonly decimals: number; readonly included: boolean; readonly chainId: string };
 export type DiscoveryCandidate = {
   readonly provider: UniversalRoutingProvider; readonly bridge: string; readonly status: DiscoveryStatus;
   readonly executableBy: 'UNIVERSAL_ROUTER' | 'CERTIFIED_ROUTER' | null;
   readonly expectedOutput: string | null; readonly minimumOutput: string | null; readonly estimatedDurationSeconds: number | null;
-  readonly fees: readonly DiscoveryFee[]; readonly reason: string | null; readonly quoteId: string | null };
+  readonly fees: readonly DiscoveryFee[]; readonly reason: string | null; readonly quoteId: string | null; readonly expiresAt?: string };
 export type DiscoveryRequest = { readonly source: UniversalNetwork; readonly destination: UniversalNetwork; readonly inputToken: UniversalToken; readonly outputToken: UniversalToken;
   readonly amount: string; readonly slippageBps: number; readonly owner?: string; readonly recipient?: string; readonly inputTokenProgram?: string | null };
 export type DiscoveryResult = { readonly format: 'flofi.universal-discovery.v1'; readonly sourceChain: string; readonly destinationChain: string;
@@ -45,7 +46,7 @@ const candidate = (provider: UniversalRoutingProvider, bridge: string, status: D
   ({ provider, bridge, status, executableBy: null, expectedOutput: null, minimumOutput: null, estimatedDurationSeconds: null, fees: [], reason: null, quoteId: null, ...patch });
 const failed = (provider: UniversalRoutingProvider, bridge: string, cause: unknown): DiscoveryCandidate => {
   const code = codeOf(cause);
-  return candidate(provider, bridge, 'TEMPORARILY_UNAVAILABLE', { reason: code });
+  return candidate(provider, bridge, code === 'PROVIDER_FAILED' ? 'INTERNAL_ERROR' : 'TEMPORARILY_UNAVAILABLE', { reason: code });
 };
 const refusalStatus = (code: string): DiscoveryStatus => AVAILABILITY.test(code) ? 'TEMPORARILY_UNAVAILABLE'
   : code.endsWith('_AMOUNT_TOO_LOW') ? 'BELOW_MINIMUM' : code.endsWith('_AMOUNT_TOO_HIGH') ? 'ABOVE_MAXIMUM'
@@ -66,12 +67,19 @@ async function discoverRelay(http: UniversalHttp, api: string, r: UniversalQuote
   try {
     const route = normalizeRelayQuote(raw, r);
     return candidate('relay', 'relay-depository', 'EXECUTABLE', { executableBy: 'UNIVERSAL_ROUTER', expectedOutput: route.expectedOutput, minimumOutput: route.minimumOutput,
+      expiresAt: route.quote.expiresAt,
       estimatedDurationSeconds: route.quote.estimatedDurationSeconds, quoteId: route.quote.id,
       fees: route.fees.map(f => ({ label: f.label, amount: f.amount, symbol: f.symbol, decimals: f.decimals, included: f.included, chainId: f.chainId })) });
   } catch (cause) {
     // A real quote FloFi refused to execute (e.g. an origin swap through a router contract): shown with its reason, never executed.
     const details = isObject(raw) && isObject(raw.details) ? raw.details : {}, out = isObject(details.currencyOut) ? details.currencyOut : {};
-    return candidate('relay', 'relay-depository', positiveQuote(out.amount, out.minimumAmount) && !/MISMATCH|INVALID|EXPIRED/.test(codeOf(cause)) ? 'LIVE_QUOTE' : 'NO_ROUTE', { reason: codeOf(cause), expectedOutput: units(out.amount), minimumOutput: units(out.minimumAmount),
+    const inp = isObject(details.currencyIn) ? details.currencyIn : {}, it = isObject(inp.currency) ? inp.currency : {}, ot = isObject(out.currency) ? out.currency : {};
+    const matches = inp.amount === r.amount && it.chainId === r.source.providers.relay.chainId && ot.chainId === r.destination.providers.relay.chainId &&
+      sameAddress(r.source, it.address, relayCurrency(r.source, r.inputToken)) && sameAddress(r.destination, ot.address, relayCurrency(r.destination, r.outputToken)) &&
+      it.decimals === r.inputToken.decimals && ot.decimals === r.outputToken.decimals &&
+      (details.sender === undefined || sameAddress(r.source, details.sender, r.owner)) && (details.recipient === undefined || sameAddress(r.destination, details.recipient, r.recipient));
+    const valid = matches && positiveQuote(out.amount, out.minimumAmount) && !/MISMATCH|INVALID|EXPIRED/.test(codeOf(cause));
+    return candidate('relay', 'relay-depository', valid ? 'LIVE_QUOTE' : 'NO_ROUTE', { reason: codeOf(cause), expectedOutput: valid ? units(out.amount) : null, minimumOutput: valid ? units(out.minimumAmount) : null,
       estimatedDurationSeconds: seconds(details.timeEstimate) });
   }
 }
@@ -134,7 +142,7 @@ async function discoverMayan(http: UniversalHttp, api: string, r: DiscoveryReque
       sameAddress(S, fromToken.contract, token(r.inputToken)) && sameAddress(D, toToken.contract, token(r.outputToken)) &&
       fromToken.decimals === r.inputToken.decimals && toToken.decimals === r.outputToken.decimals && positiveQuote(q.expectedAmountOutBaseUnits, q.minAmountOutBaseUnits);
     return candidate('mayan', `mayan-${label(q.type, 'route').toLowerCase()}`, sameOutput ? 'LIVE_QUOTE' : 'NO_ROUTE', {
-      expectedOutput: units(q.expectedAmountOutBaseUnits), minimumOutput: units(q.minAmountOutBaseUnits), estimatedDurationSeconds: seconds(q.etaSeconds),
+      expectedOutput: sameOutput ? units(q.expectedAmountOutBaseUnits) : null, minimumOutput: sameOutput ? units(q.minAmountOutBaseUnits) : null, estimatedDurationSeconds: seconds(q.etaSeconds),
       // Mayan prices its relayer and protocol fees into the quoted output; FloFi lists no separate amount it cannot verify.
       reason: sameOutput ? 'MAYAN_TRANSACTION_BUILDER_NOT_VERIFIED' : 'MAYAN_OUTPUT_MISMATCH' });
   });
@@ -164,8 +172,9 @@ async function discoverAcross(http: UniversalHttp, api: string, r: DiscoveryRequ
     reason: 'ACROSS_REQUIRES_CERTIFIED_ROUTER_VALIDATION', quoteId: typeof raw.id === 'string' ? raw.id.slice(0, 80) : null });
 }
 
-const RANK: Readonly<Record<DiscoveryStatus, number>> = { EXECUTABLE: 0, LIVE_QUOTE: 1, SUPPORTED_BY_PROVIDER: 2, BELOW_MINIMUM: 3, ABOVE_MAXIMUM: 4, INSUFFICIENT_LIQUIDITY: 5, TEMPORARILY_UNAVAILABLE: 6, NO_ROUTE: 7 };
+const RANK: Readonly<Record<DiscoveryStatus, number>> = { EXECUTABLE: 0, LIVE_QUOTE: 1, SUPPORTED_BY_PROVIDER: 2, BELOW_MINIMUM: 3, ABOVE_MAXIMUM: 4, INSUFFICIENT_LIQUIDITY: 5, TEMPORARILY_UNAVAILABLE: 6, NO_ROUTE: 7, INTERNAL_ERROR: 8 };
 export function createUniversalDiscovery(config: { readonly http: UniversalHttp; readonly now?: () => Date; readonly reviewTtlSeconds?: number;
+  readonly correlationId?: string;
   readonly apis?: { readonly relay?: string; readonly lifi?: string; readonly mayan?: string; readonly across?: string };
   readonly keys?: { readonly relay?: string; readonly lifi?: string } }) {
   const now = config.now ?? (() => new Date()), P = UNIVERSAL_ROUTER_DEPLOYMENT.providers;
@@ -183,6 +192,9 @@ export function createUniversalDiscovery(config: { readonly http: UniversalHttp;
           : discoverAcross(config.http, apis.across, r, owner, recipient).then(c => [c]));
       const candidates = (await Promise.all(tasks)).flat().sort((a, b) => RANK[a.status] - RANK[b.status] ||
         (BigInt(b.minimumOutput ?? '0') > BigInt(a.minimumOutput ?? '0') ? 1 : BigInt(b.minimumOutput ?? '0') < BigInt(a.minimumOutput ?? '0') ? -1 : 0));
+      for (const c of candidates) createLogger({ service: 'flofi-quotes' }).info('quote.provider_result', {
+        correlation_id: config.correlationId, source_chain: r.source.chain, destination_chain: r.destination.chain,
+        provider: c.provider, status: c.status, code: c.reason });
       // The automatic choice is the universal router's best guaranteed minimum (the certified Router pairs are chosen on their own flow).
       const recommended = candidates.findIndex(c => c.executableBy === 'UNIVERSAL_ROUTER');
       const status = candidates.length ? candidates[0]!.status : 'NO_ROUTE';

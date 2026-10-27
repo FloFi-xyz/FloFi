@@ -312,7 +312,7 @@ export type RelayMock = ReturnType<typeof createRelayMock>;
  * Quotes priced by `rate` (output units per input unit, scaled 1e18) minus a relayer fee in input units; orders hashed for real.
  * `tamper` lets a test corrupt a response before the adapter sees it.
  */
-export function createRelayMock(options: { now: () => number; feeUnits?: bigint; rate?: (input: string, output: string) => bigint;
+export function createRelayMock(options: { now: () => number; feeUnits?: bigint; rate?: (input: string, output: string) => bigint; orderLifetimeSeconds?: () => number;
   decimals: (chainId: number, currency: string) => number; symbol?: (chainId: number, currency: string) => string }) {
   const status = new Map<string, Record<string, unknown>>(), quotes: Record<string, unknown>[] = [];
   let tamper: ((raw: Record<string, any>) => void) | null = null, refuse: string | null = null, expectedFactor = 10_000n; // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -324,7 +324,7 @@ export function createRelayMock(options: { now: () => number; feeUnits?: bigint;
     const fee = options.feeUnits ?? amount / 1000n, net = amount - fee;
     const rate = options.rate?.(body.originCurrency, body.destinationCurrency) ?? 10n ** 18n;
     const expected = net * rate * 10n ** BigInt(outDec) / 10n ** BigInt(inDec) / 10n ** 18n * expectedFactor / 10_000n;
-    const minimum = expected * (10_000n - slip) / 10_000n, deadline = Math.floor(options.now() / 1000) + 7 * 86_400;
+    const minimum = expected * (10_000n - slip) / 10_000n, deadline = Math.floor(options.now() / 1000) + (options.orderLifetimeSeconds?.() ?? 7 * 86_400);
     const orderData: RelayOrderData = { version: 'v1', solverChainId: 'base', solver: '0xf70da97812cb96acdf810712aa562db8dfa3dbef', salt: '0x' + randomBytes(32).toString('hex'),
       inputs: [{ payment: { chainId: SLUG(S), currency: body.originCurrency, amount: body.amount, weight: '1' },
         refunds: [{ chainId: SLUG(S), recipient: body.user, currency: body.originCurrency, minimumAmount: '0', deadline, extraData: '0x' }] }],

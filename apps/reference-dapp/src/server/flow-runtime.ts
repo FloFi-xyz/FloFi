@@ -105,7 +105,8 @@ export function embeddedRuntime(env: Env = process.env): Promise<EmbeddedRuntime
  * its in-process development service. `principal` is the verified wallet session (Router ownership), never browser input.
  */
 export async function cloudFlow<T>(flow: FlowName, method: string, args: readonly unknown[],
-  options: { readonly principal?: string | null; readonly env?: Env; readonly transport?: typeof fetch } = {}):
+  options: { readonly principal?: string | null; readonly env?: Env; readonly transport?: typeof fetch;
+    readonly timeoutMs?: number; readonly maxAttempts?: number; readonly correlationId?: string } = {}):
   Promise<FlowResult<T> | null> {
   const env = options.env ?? process.env, kind = flowRuntimeKind(env), principal = options.principal ?? null;
   // BUILD-FLOFI-MAINNET-PRODUCT-001: every server action passes here first, whichever runtime then serves it (local services included).
@@ -113,7 +114,7 @@ export async function cloudFlow<T>(flow: FlowName, method: string, args: readonl
   if (refusal) return { ok: false, code: refusal };
   if (kind === 'local') return null;
   if (kind === 'unconfigured') return { ok: false, code: 'CLOUD_RUNTIME_NOT_CONFIGURED' };
-  if (kind === 'remote') return callCloudFlow<T>(flow, method, args, { env, principal, ...options.transport ? { transport: options.transport } : {} });
+  if (kind === 'remote') return callCloudFlow<T>(flow, method, args, { ...options, env, principal });
   try { return await (await embeddedRuntime(env)).backend.callFlow(flow, method, args, undefined, principal) as FlowResult<T>; }
   catch (error) { return { ok: false, code: classified(error, 'CLOUD_RUNTIME_UNAVAILABLE') }; }
 }

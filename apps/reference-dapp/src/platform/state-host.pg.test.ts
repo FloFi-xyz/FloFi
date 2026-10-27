@@ -172,7 +172,8 @@ describe('BUILD-PLATFORM-STATE-001 direct durable state with remote flows', () =
   });
 
   it('fails closed on a behind schema without creating a tenant, closes failed pools, and retries after migration', async () => {
-    const behind = await createTestDatabase();
+    const behind = await createTestDatabase({ migrated: false });
+    await migrate(behind.db); // Exact shipped schema: this negative fixture must not inherit a certified-ahead test schema.
     // A real schema missing the last shipped migration identity must not serve platform state.
     await behind.db.query('DELETE FROM schema_migrations WHERE version = $1', [SHIPPED_MIGRATIONS.length]);
     const env: Env = { ...remoteEnv('platform-schema-behind'), DATABASE_URL: behind.url };

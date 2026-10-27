@@ -15,6 +15,7 @@ import { createMockedSolanaWallet } from '@defi-workflow-engine/reference-compil
 import { test, expect, chooseWallet, openProposalReview, openSimulationDetails, AUTHORIZE_IN_WALLET } from './fixtures';
 import { installSolanaWallet, MOCKED_SOLANA_WALLET, signRequests } from './jupiter-fixtures';
 import { createTestWallet, personalSignText, type TestWallet } from '../../../packages/reference-reconciler/test/test-wallet.ts';
+import type { BuildEstimateResult } from '../src/domain/build-estimate';
 
 const panel = (page: Page) => page.getByRole('region', { name: 'Universal cross-chain bridge' });
 async function control(method: string, params: unknown[] = []): Promise<unknown> {
@@ -58,7 +59,17 @@ async function authorByChat(page: Page, sentence: string) {
   await page.locator('#mock-prompt').fill(sentence);
   await page.getByRole('button', { name: 'Send', exact: true }).click();
   await openProposalReview(page);
+  const quote = page.waitForResponse(response => response.url().endsWith('/api/build-estimate') && response.request().method() === 'POST');
   await page.getByRole('button', { name: 'Apply proposal' }).click();
+  const response = await quote, result = await response.json() as BuildEstimateResult;
+  expect(result.ok).toBe(true);
+  if (!result.ok) throw Error(result.code);
+  const card = page.locator('.build-flow-surface .composer-card');
+  await expect(card.locator('.composer-destination-box .composer-amount-value')).toHaveText(result.estimate.expected);
+  expect(result.estimate.correlationId).toBe(response.headers()['x-quote-correlation-id']);
+  await expect(card).toContainText('simulation and Review still required');
+  await page.screenshot({ path: test.info().outputPath('bridge-build-estimate.png'), fullPage: true });
+  // MOCKED infrastructure: this proves the browser renders the actual endpoint amount, never public execution.
 }
 async function connectAndSignIn(page: Page) {
   await panel(page).getByRole('button', { name: 'Connect wallets' }).click();
@@ -97,7 +108,7 @@ test('Solana USDC → Base: routes found, Review, one Solana signature, FloFi br
   await expect(panel(page)).toContainText('Bridge 25 USDC from Solana to Base, receiving USDC.');
   await panel(page).getByRole('button', { name: 'Find routes' }).click();
   const routes = panel(page).getByRole('table', { name: 'Route options' });
-  await expect(routes.getByRole('row').filter({ hasText: 'Relay' })).toContainText('Executable · recommended');
+  await expect(routes.getByRole('row').filter({ hasText: 'Relay' })).toContainText('Builder verified · simulation and Review still required · recommended');
   await expect(routes.getByRole('row').filter({ hasText: 'Across' })).toContainText('Across has no route for this network.');
   await connectAndSignIn(page);
   await expect(panel(page)).toContainText(`Source wallet: ${wallets.solana.owner} · destination wallet: ${wallets.evm.address}`);
@@ -165,6 +176,7 @@ test('a new Canvas Bridge card on mainnet offers Solana and applies a universal 
   if (await hide.isVisible()) await hide.click();
   await card.getByRole('textbox').press('Enter');
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '1');
+  await expect(card.locator('.composer-destination-box .composer-amount-value')).toHaveText(/^[0-9]+(?:\.[0-9]+)?$/);
   expect(errors).toEqual([]);
   const simulate = page.getByRole('button', { name: 'Simulate workflow' });
   await expect(simulate).toBeEnabled();
@@ -178,7 +190,7 @@ test('chat authors Base → Solana receiving SOL through Relay; the Review needs
   await page.getByRole('button', { name: 'Simulate workflow' }).click(); await openSimulationDetails(page);
   await expect(panel(page)).toContainText('Bridge 10 USDC from Base to Solana, receiving SOL.');
   await panel(page).getByRole('button', { name: 'Find routes' }).click();
-  await expect(panel(page).getByRole('table', { name: 'Route options' }).getByRole('row').filter({ hasText: 'Relay' })).toContainText('Executable');
+  await expect(panel(page).getByRole('table', { name: 'Route options' }).getByRole('row').filter({ hasText: 'Relay' })).toContainText('Builder verified · simulation and Review still required');
 });
 
 for (const sentence of ['quero uma bridge de 1 USDC na Base para WETH na Arbitrum', 'I want to bridge 1 USDC on Base to WETH on Arbitrum']) {
@@ -188,7 +200,7 @@ for (const sentence of ['quero uma bridge de 1 USDC na Base para WETH na Arbitru
     await page.getByRole('button', { name: 'Simulate workflow' }).click(); await openSimulationDetails(page);
     await expect(panel(page)).toContainText('Bridge 1 USDC from Base to Arbitrum One, receiving WETH.');
     await panel(page).getByRole('button', { name: 'Find routes' }).click();
-    await expect(panel(page).getByRole('table', { name: 'Route options' })).toContainText('Executable');
+    await expect(panel(page).getByRole('table', { name: 'Route options' })).toContainText('Builder verified · simulation and Review still required');
     await expect(panel(page)).toContainText('Guaranteed minimum');
     await expect(panel(page)).toContainText('WETH');
     await expect(panel(page)).toContainText('eth_simulateV1');
@@ -198,6 +210,37 @@ for (const sentence of ['quero uma bridge de 1 USDC na Base para WETH na Arbitru
     networkGuard.assertClean();
   });
 }
+
+test('P0 confirmed USDC approval survives expired Review and Canvas refresh in the same run without reporting Bridge completion', async ({ page, networkGuard }) => {
+  await installEvmWallet(page, wallets.evm);
+  await authorByChat(page, 'bridge 1 USDC from Base to Arbitrum receive WETH');
+  // Test-only Relay order lifetime; production quote/Review expiry checks remain intact.
+  await control('MOCK_quoteValidity', [{ seconds: 10 }]);
+  await page.getByRole('button', { name: 'Simulate workflow' }).click(); await openSimulationDetails(page);
+  await expect(panel(page)).toContainText('Guaranteed minimum');
+  const run = () => page.evaluate(() => JSON.parse(localStorage.getItem('flofi:crosschain-universal:run') ?? 'null') as { id: string } | null);
+  const before = await run(); expect(before?.id).toBeTruthy();
+  await acceptAndExecute(page);
+  await control('MOCK_mine', [{ blocks: 3 }]);
+  await expect(panel(page).getByRole('list', { name: 'Source transactions' })).toContainText('Approval: confirmed', { timeout: 30_000 });
+  await expect(panel(page)).toContainText('no longer — get a fresh route', { timeout: 20_000 });
+  const transactions = panel(page).getByRole('list', { name: 'Source transactions' });
+  const approval = await transactions.getByRole('link', { name: 'view transaction' }).getAttribute('href');
+  expect(await counters()).toEqual({ solanaSends: 0, evmSends: 1 });
+  await control('MOCK_quoteValidity', [{ seconds: 180 }]);
+  await page.getByRole('button', { name: 'Simulate again', exact: true }).click();
+  await expect(panel(page)).toContainText('Existing allowance is sufficient; no approval');
+  expect((await run())?.id).toBe(before?.id);
+  await expect(transactions).toContainText('Approval: confirmed');
+  await expect(transactions.getByRole('link', { name: 'view transaction' })).toHaveAttribute('href', approval!);
+  await expect(panel(page).getByRole('button', { name: 'Accept route review', exact: true })).toBeVisible();
+  await expect(panel(page).getByRole('button', { name: 'Execute with your wallet', exact: true })).toHaveCount(0);
+  await expect(panel(page)).not.toContainText('Deposit confirmed on');
+  await expect(panel(page).getByRole('heading', { name: 'Bridge reconciled', exact: true })).toHaveCount(0);
+  expect(await counters()).toEqual({ solanaSends: 0, evmSends: 1 });
+  await page.screenshot({ path: test.info().outputPath('approval-preserved-fresh-review.png'), fullPage: true });
+  networkGuard.assertClean();
+});
 
 test('P0 simulation infrastructure failure has a safe specific message and a support correlation ID', async ({ page }) => {
   await installEvmWallet(page, wallets.evm);
