@@ -38,6 +38,11 @@
       "path": "/tmp/flofi-recovery-manifest-final.log",
       "passed": 2,
       "sha256": "baffe8c4f13bf4c90cc2c9607b08bb4124117410d01ae196c57998ec106c82c8"
+    },
+    "ciSelfTests": {
+      "path": "/tmp/flofi-recovery-ci-all-tests-final.log",
+      "passed": 56,
+      "sha256": "0376e23d3de340ae7310e0b89f23f22e688975753e971cd02b4b3cf556ab0609"
     }
   }
 }

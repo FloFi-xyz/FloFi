@@ -61,3 +61,9 @@ A migração `0016` não foi aplicada ao Neon. Um processo anterior sem certific
 O PR #127 de estimativas continua independente; este build não incorpora seus commits. A aceitação hospedada do #127 também continua pendente de autorização de preview. Os testes locais não certificam produção nem execução financeira pública.
 
 Consulta read-only à Railway confirmou API e worker ainda vinculados a `codex/hotfix-universal-bridge-e2e` no commit `67064ac4e3c0eedb3709f2d4c085570b9fcda3a4`, sem alterações staged. Publicar esta branch não altera essa configuração.
+
+## Integração com o ledger de CI
+
+O primeiro governance do PR #128 recusou a versão inicial. A reprodução do comando do job identificou expectativas fixas de 48 perfis nos self-tests de orquestração, enquanto o novo perfil `owner-history` torna o total 49 (produto + composição). Outro self-test de duplicidade procurava a antiga última linha do plano. As expectativas foram atualizadas para 49 e a mutação adversarial passou a duplicar um perfil pela declaração estável de `critical`. A recusa de perfis ausentes/repetidos e todos os gates permanecem ativos.
+
+`python3 -m unittest discover -s scripts -p 'test_ci_*.py'`: **56 testes passaram**. Esta correção altera apenas os self-tests de CI e os registros; o código da aplicação, a migração e o build aprovado pelas nove jornadas Chromium permanecem iguais. A rodada remota do novo commit deve ser acompanhada separadamente; uma reprodução local não é apresentada como aprovação remota.

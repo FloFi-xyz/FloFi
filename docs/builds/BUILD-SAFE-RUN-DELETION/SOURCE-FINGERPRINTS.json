@@ -29,5 +29,7 @@
   "packages/cloud-runtime/src/owner-history.ts": "2ccd5258648dcd6da44850e26a52e0e04cbfafb042737f4729d46c179de66ef6",
   "packages/cloud-runtime/src/queries.ts": "073d58e41e78192f14ffe694c9dccd1284c8b62f435f66c3b0a27ee3b061fab7",
   "packages/cloud-runtime/test/owner-history.pg.test.ts": "a8960bd1fae4738dc0ea049963da0b24ef301e8a6a440fd948f51c51afdf1c23",
-  "scripts/guarded-release-browser.mjs": "316507a79a5717a925ea3086d65e6f2ffb1a3ac2d4131f937d8bcabf24305b20"
+  "scripts/guarded-release-browser.mjs": "316507a79a5717a925ea3086d65e6f2ffb1a3ac2d4131f937d8bcabf24305b20",
+  "scripts/test_ci_gcp_orchestration.py": "d37cf3a7511b23631955477a59902f24f60803034c8a28042139c8bfbe881e83",
+  "scripts/test_ci_optimization.py": "d786e763988d1a3ed8790c10f887523639e73dd9f0b3b4432b2ac515f97f19d4"
 }
