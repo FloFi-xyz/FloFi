@@ -60,6 +60,11 @@ export type ForwardCompatibilityCertificate = {
  */
 export const CERTIFIED_FORWARD_MIGRATIONS: readonly ForwardCompatibilityCertificate[] = Object.freeze([
   {
+    base: { version: 15, name: 'workflow_runs', sha256: '5dfefcf7465d874da5880ae5a082f7f47e28ede51adfdef46dbbe3e3f7ba945f' },
+    migrations: [{ version: 16, name: 'owner_history_purge', sha256: 'a3c258cadd9d7865ad9d36d63ec0921fc47455bb3651c201074f3b0486b4be6f' }],
+    assessment: 'docs/deploy/SCHEMA-COMPATIBILITY.md#10-certificate-0016_owner_history_purge',
+  },
+  {
     base: { version: 11, name: 'delegated_execution', sha256: '0c6572af43ffe278df7724241ae30b1d1c15ab59b85941e2266b1b3294220202' },
     // BUILD-ADMIN-001 at 53b1a8b: five new admin_* tables and one new index on automation_evaluations; no existing object changes.
     migrations: [{ version: 12, name: 'admin_control_plane', sha256: '25556fbfd8e45acf0e692fc340eee56fa2f064f4106225960d63e3da9c303af2' }],

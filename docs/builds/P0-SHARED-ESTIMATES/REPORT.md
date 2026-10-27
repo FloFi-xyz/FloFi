@@ -51,4 +51,25 @@ Worktree e commits `f24b0c0` e `06446e5` preservados. O PR independente é [#127
 
 Certificação PostgreSQL adicional no mesmo código: `pnpm test:postgres`, servidor descartável somente em loopback, **78 arquivos passaram, um arquivo pulado; 485 testes passaram e três foram pulados**. Nenhum banco remoto foi usado na suíte. O log de recuperação está em `/tmp/flofi-recovery-build1-postgres.log`.
 
-A aceitação hospedada continua pendente e requer autorização explícita de um preview isolado. Não houve merge, deploy, escrita em produção ou transação financeira. A aprovação de CI e os testes locais não substituem a comparação do navegador com o backend hospedado nem certificam uma rota LIVE_QUOTE como execução financeira.
+A aceitação hospedada ficou pendente na retomada inicial. Nesta etapa o owner autorizou previews isolados; a configuração usa somente um projeto Neon descartável vazio, sem credenciais nem dados de produção. A aprovação de CI e os testes locais não substituem a comparação do navegador com o backend hospedado nem certificam uma rota LIVE_QUOTE como execução financeira.
+
+## Fechamento técnico e P0 de Review após aprovação
+
+Os cinco contextos CircleCI do commit `c1202a8d7b494966acb481d6b5ef9255c1d1b280` concluíram com sucesso no workflow
+`fdfa47fb-0fe6-4ae5-bd38-590cf7607693`. Os commits aditivos desta etapa exigem nova certificação remota.
+
+O caso do Caio foi limitado a aprovação USDC confirmada → Review expirado → depósito ainda não submetido. Os motores já recusavam
+autoridade expirada e permitiam refresh seguro. O Canvas agora escolhe refresh do mesmo run quando há aprovação reconciliada, workflow
+idêntico e nenhuma tentativa de depósito; preserva o hash da aprovação, renova cotação/simulação e exige novo Review. Aprovações pendentes,
+tentativas de depósito e workflows alterados não entram nesse caminho. A projeção mantém a aprovação confirmada mesmo quando o novo
+Review já não contém a chamada de approval. Nenhum TTL ou requisito de autorização foi relaxado.
+
+Chromium real: **nove jornadas passaram**, incluindo expiração real no servidor, refresh pelo botão do Canvas, mesmo ID e hash da aprovação,
+novo Review sem autorização herdada, somente um envio sintético e ausência de depósito/resultado de Bridge. [Captura](approval-preserved-fresh-review.png).
+Os testes dos dois serviços também verificam que, após novo Review, a próxima operação é o depósito, sem repetir a aprovação. Essa evidência
+usa infraestrutura explicitamente MOCKED em loopback; não certifica movimentação financeira pública.
+
+Release A continua em schema 15 e acrescenta o certificado para os bytes exatos de 0016 do #128. Dois testes PostgreSQL reais comprovam
+15 → 16, cold start de rollback, preservação dos logs, exclusão segura, recusa de ressurgimento por escritor antigo e rollback atômico de uma
+migração que falha. Os dez testes unitários do certificado também passaram. A sequência conjunta, gates e limites de rollback estão no
+[plano único de publicação](../../deploy/RELEASE-127-128.md). Nenhuma migração ou publicação em produção foi executada.

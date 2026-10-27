@@ -138,8 +138,9 @@ export function projectExecutionLifecycle(currentWorkflow: Workflow, context: Re
       const r = source.state.record; if (!r) break;
       select(r.workflow, r.id, r.provenance, source.state.recovered);
       const nodeId = r.review.nodeId;
-      for (const call of r.review.calls) {
-        const step = call.purpose === 'APPROVAL' ? 'APPROVAL' : 'DEPOSIT', a = r.attempts.filter(a => a.step === step).at(-1);
+      const calls = [...new Set([...r.attempts.map(a => a.step), ...r.review.calls.map(call => call.purpose === 'APPROVAL' ? 'APPROVAL' as const : 'DEPOSIT' as const)])];
+      for (const step of calls) {
+        const a = r.attempts.filter(a => a.step === step).at(-1);
         add(step, nodeId, step === 'APPROVAL' ? `Approve ${r.review.route.inputToken.symbol}` : 'Bridge deposit', r.review.intent.sourceChain, a?.state ?? null, a?.replacementHash ?? a?.transactionHash ?? null, Boolean(a?.reconciled), step === 'APPROVAL', simulationAmount(a?.receipt?.gasCostWei, 18, 'ETH'));
       }
       const settling = ['SOURCE_CONFIRMED', 'IN_FLIGHT', 'DESTINATION_OBSERVED'].includes(r.phase);
@@ -150,7 +151,7 @@ export function projectExecutionLifecycle(currentWorkflow: Workflow, context: Re
       const r = source.state.record; if (!r) break;
       select(r.workflow, r.id, r.provenance, source.state.recovered);
       const nodeId = r.review.nodeId, src = r.review.source, chain = r.review.route.sourceChain;
-      const calls = src.ecosystem === 'EVM' ? src.calls.map(c => c.purpose === 'APPROVAL' ? 'APPROVAL' as const : 'DEPOSIT' as const) : ['DEPOSIT' as const];
+      const calls = [...new Set([...r.attempts.map(a => a.step), ...(src.ecosystem === 'EVM' ? src.calls.map(c => c.purpose === 'APPROVAL' ? 'APPROVAL' as const : 'DEPOSIT' as const) : ['DEPOSIT' as const])])];
       for (const step of calls) {
         const a = r.attempts.filter(x => x.step === step).at(-1), gas = a?.ecosystem === 'EVM' ? simulationAmount(a.receipt?.gasCostWei, 18, 'ETH')
           : a?.ecosystem === 'SOLANA' ? simulationAmount(a.feeLamports, 9, 'SOL') : null;

@@ -14,6 +14,7 @@ import { createUniversalBridgeNode, UNIVERSAL_DIRECTED_PAIRS, UNIVERSAL_NETWORKS
 import { createRelayProvider } from './relay-provider.ts';
 import { createUniversalRouterService, universalNeedsObservation, validateUniversalLog, type UniversalRecord } from './service.ts';
 import { createEvmMockChain, createRelayMock, createSolanaMock, mockedUniversalDeployment, solanaTestWallet, type EvmMock } from './universal.test-harness.ts';
+import { refreshBridgeAfterApproval } from '../../domain/bridge-review-recovery';
 
 const T0 = Date.parse('2026-10-25T12:00:00.000Z');
 const USDC = { base: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913', 'arbitrum-one': '0xaf88d065e77c8cc2239327c5edb3a432268e5831',
@@ -342,6 +343,35 @@ describe('N: wrong chain, wrong recipient, modified quote, changed bytes, unexpe
     c.tick(121_000);
     await expect(c.service.begin(run.id, EVM_OWNER, w)).rejects.toThrow('UNIVERSAL_REVIEW_EXPIRED');
     expect((await c.service.load(run.id)).authorization).toBeNull();
+  });
+  it('P0: an approval confirmed after Review expiry is retained; a fresh Review resumes the same run at the deposit without another approval', async () => {
+    const c = await setup(), w = evmBridge(), run = await reviewed(c, w, EVM_OWNER), chain = c.chainOf('base');
+    const approval = await c.service.begin(run.id, EVM_OWNER, w);
+    if (approval.ecosystem !== 'EVM') throw Error('expected EVM');
+    expect(approval.attempt.step).toBe('APPROVAL');
+    await c.service.handoff(run.id);
+    const { hash } = chain.wallet.send(approval.transaction);
+    await c.service.report(run.id, { kind: 'HASH', hash });
+    expect(refreshBridgeAfterApproval(await c.service.load(run.id), w, false)).toBe(false);
+    c.tick(121_000); chain.mine(); chain.mine(); chain.mine();
+    const confirmed = await c.service.observe(run.id);
+    expect(confirmed.attempts[0]).toMatchObject({ step: 'APPROVAL', state: 'CONFIRMED', transactionHash: hash, reconciled: true });
+    expect(confirmed).toMatchObject({ verdict: 'PENDING', source: null, destination: null, evidence: null });
+    expect(refreshBridgeAfterApproval(confirmed, w, false)).toBe(true);
+    expect(refreshBridgeAfterApproval(confirmed, w, true)).toBe(false);
+    expect(refreshBridgeAfterApproval(confirmed, { ...w, revision: w.revision + 1 }, false)).toBe(false);
+    await expect(c.service.begin(run.id, EVM_OWNER, w)).rejects.toThrow('UNIVERSAL_REVIEW_EXPIRED');
+    const fresh = await c.service.refresh(run.id);
+    expect(fresh.id).toBe(run.id); expect(fresh.attempts).toEqual(confirmed.attempts);
+    expect(fresh.authorization).toBeNull(); expect(Date.parse(fresh.review.expiresAt)).toBeGreaterThan(c.now());
+    await expect(c.service.begin(run.id, EVM_OWNER, w)).rejects.toThrow('UNIVERSAL_REVIEW_REQUIRED');
+    await c.service.review(run.id, fresh.review.commitment, w);
+    const next = await c.service.begin(run.id, EVM_OWNER, w);
+    expect(next.attempt.step).toBe('DEPOSIT');
+    const durable = await c.service.load(run.id);
+    expect(durable.attempts.filter(a => a.step === 'APPROVAL')).toHaveLength(1);
+    expect(refreshBridgeAfterApproval(durable, w, false)).toBe(false);
+    expect(durable).toMatchObject({ verdict: 'PENDING', source: null, destination: null, evidence: null });
   });
   it('Solana bytes changed by the wallet (an extra instruction) are refused, recorded and never broadcast', async () => {
     const c = await setup(), w = workflow({ sourceChain: UNIVERSAL_NETWORKS.solana.chain, destinationChain: UNIVERSAL_NETWORKS.base.chain, inputAsset: token('solana'),

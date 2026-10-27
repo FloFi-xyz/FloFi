@@ -18,12 +18,13 @@ const WETH = { chain: UNIVERSAL_NETWORKS['arbitrum-one'].chain, address: '0x82af
 const NATIVE = { EVM: '0x0000000000000000000000000000000000000000', SOLANA: '11111111111111111111111111111111' } as const;
 function harness(owners: { evm?: string; solana?: string } = {}) {
   const now = () => Date.now(), D = mockedUniversalDeployment();
+  let orderLifetimeSeconds = 7 * 86_400;
   const evm: Record<string, EvmMock> = Object.fromEntries(Object.keys(D.evm).map(chain => [chain, createEvmMockChain(D.evm[chain]!, { now,
     tokens: { ...chain === UNIVERSAL_NETWORKS.base.chain ? { [USDC.base]: 6 } : {}, ...chain === WETH.chain ? { [WETH.address]: WETH.decimals } : {} } })]));
   const solana = createSolanaMock(D.solana, { mints: { [USDC.solana]: 6 } });
   // 1 SOL = 150 USDC; 1 ETH = 4,000 USDC.
   const price = (c: string) => c === NATIVE.SOLANA ? 150n : c === NATIVE.EVM || c === WETH.address ? 4000n : 1n;
-  const relay = createRelayMock({ now, decimals: (_, c) => c === NATIVE.EVM || c === WETH.address ? 18 : c === NATIVE.SOLANA ? 9 : 6, rate: (i, o) => 10n ** 18n * price(i) / price(o),
+  const relay = createRelayMock({ now, orderLifetimeSeconds: () => orderLifetimeSeconds, decimals: (_, c) => c === NATIVE.EVM || c === WETH.address ? 18 : c === NATIVE.SOLANA ? 9 : 6, rate: (i, o) => 10n ** 18n * price(i) / price(o),
     symbol: (_, c) => c === NATIVE.SOLANA ? 'SOL' : c === NATIVE.EVM ? 'ETH' : c === WETH.address ? 'WETH' : 'USDC' });
   const base = evm[UNIVERSAL_NETWORKS.base.chain]!;
   if (owners.evm) { base.setNative(owners.evm, 10n ** 18n); base.setToken(USDC.base, owners.evm, 1_000_000_000n); }
@@ -35,7 +36,7 @@ function harness(owners: { evm?: string; solana?: string } = {}) {
     if (method === 'sendTransaction') { counters.solanaSends += 1; solana.land(String(result)); }
     return result;
   };
-  return { evm, solana, solanaRpc, relay, counters, base };
+  return { evm, solana, solanaRpc, relay, counters, base, quoteValidity(seconds: number) { orderLifetimeSeconds = 600 + seconds; } };
 }
 let h = harness();
 
@@ -86,6 +87,8 @@ createServer(async (request, response) => {
       if (url.pathname !== '/control') { json(404, {}); return; }
       const p = (params[0] ?? {}) as Record<string, unknown>;
       if (method === 'MOCK_reset') { h = harness(p as { evm?: string; solana?: string }); reply({ result: true }); return; }
+      if (method === 'MOCK_quoteValidity') { const seconds = Number(p.seconds); if (!Number.isInteger(seconds) || seconds < 1 || seconds > 180) throw Error('MOCK_INVALID_VALIDITY');
+        h.quoteValidity(seconds); reply({ result: true }); return; }
       if (method === 'MOCK_evm_send') {
         const tx = p as { from: string; to: string; data: string; value: string; chainId: string };
         const chain = Object.values(UNIVERSAL_NETWORKS).find(n => n.evmChainId === Number(BigInt(tx.chainId)))!.chain;

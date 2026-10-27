@@ -211,6 +211,37 @@ for (const sentence of ['quero uma bridge de 1 USDC na Base para WETH na Arbitru
   });
 }
 
+test('P0 confirmed USDC approval survives expired Review and Canvas refresh in the same run without reporting Bridge completion', async ({ page, networkGuard }) => {
+  await installEvmWallet(page, wallets.evm);
+  await authorByChat(page, 'bridge 1 USDC from Base to Arbitrum receive WETH');
+  // Test-only Relay order lifetime; production quote/Review expiry checks remain intact.
+  await control('MOCK_quoteValidity', [{ seconds: 10 }]);
+  await page.getByRole('button', { name: 'Simulate workflow' }).click(); await openSimulationDetails(page);
+  await expect(panel(page)).toContainText('Guaranteed minimum');
+  const run = () => page.evaluate(() => JSON.parse(localStorage.getItem('flofi:crosschain-universal:run') ?? 'null') as { id: string } | null);
+  const before = await run(); expect(before?.id).toBeTruthy();
+  await acceptAndExecute(page);
+  await control('MOCK_mine', [{ blocks: 3 }]);
+  await expect(panel(page).getByRole('list', { name: 'Source transactions' })).toContainText('Approval: confirmed', { timeout: 30_000 });
+  await expect(panel(page)).toContainText('no longer — get a fresh route', { timeout: 20_000 });
+  const transactions = panel(page).getByRole('list', { name: 'Source transactions' });
+  const approval = await transactions.getByRole('link', { name: 'view transaction' }).getAttribute('href');
+  expect(await counters()).toEqual({ solanaSends: 0, evmSends: 1 });
+  await control('MOCK_quoteValidity', [{ seconds: 180 }]);
+  await page.getByRole('button', { name: 'Simulate again', exact: true }).click();
+  await expect(panel(page)).toContainText('Existing allowance is sufficient; no approval');
+  expect((await run())?.id).toBe(before?.id);
+  await expect(transactions).toContainText('Approval: confirmed');
+  await expect(transactions.getByRole('link', { name: 'view transaction' })).toHaveAttribute('href', approval!);
+  await expect(panel(page).getByRole('button', { name: 'Accept route review', exact: true })).toBeVisible();
+  await expect(panel(page).getByRole('button', { name: 'Execute with your wallet', exact: true })).toHaveCount(0);
+  await expect(panel(page)).not.toContainText('Deposit confirmed on');
+  await expect(panel(page).getByRole('heading', { name: 'Bridge reconciled', exact: true })).toHaveCount(0);
+  expect(await counters()).toEqual({ solanaSends: 0, evmSends: 1 });
+  await page.screenshot({ path: test.info().outputPath('approval-preserved-fresh-review.png'), fullPage: true });
+  networkGuard.assertClean();
+});
+
 test('P0 simulation infrastructure failure has a safe specific message and a support correlation ID', async ({ page }) => {
   await installEvmWallet(page, wallets.evm);
   await authorByChat(page, 'bridge 1 USDC from Base to Arbitrum receive WETH');

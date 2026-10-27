@@ -569,3 +569,28 @@ DROP TABLE workflow_run_events, workflow_run_steps, workflow_runs;
 DROP FUNCTION workflow_run_transition(), workflow_run_step_transition(), workflow_run_append_only();
 COMMIT;
 ```
+
+## 10. Certificate 0016_owner_history_purge
+
+Release A for PR #127 ships migrations through 0015 and explicitly accepts **only** the following additive migration. This certificate does
+not apply to the production binary predating #127, which refuses schema 16. Install Release A on every database consumer before applying 0016.
+
+| Base | Certified forward migration | SHA-256 |
+| --- | --- | --- |
+| 0015 `workflow_runs` | 0016 `owner_history_purge` | `a3c258cadd9d7865ad9d36d63ec0921fc47455bb3651c201074f3b0486b4be6f` |
+
+The exact SQL is tested as a fixture in Release A; Release B (#128) ships those same bytes. Migration 0016 adds owner history masks, an immutable
+purge audit, conservative transactional purge functions and guards against resurrecting deleted identities. Existing run/log bytes and ordinary
+append behavior remain compatible. An old writer attempting to recreate a purged identity is deliberately refused (`EXECUTION_DELETED`).
+No new runtime privilege or authorization is granted by this certificate. Schema 16 does not itself delete, archive or authorize anything.
+
+`owner-history-compatibility.pg.test.ts` uses real disposable PostgreSQL to verify 15 → 16, a second Release A process starting on 16, old log
+append behavior, actual safe deletion and resurrection refusal. It also injects a migration error and verifies the ledger, DDL and append-only
+trigger roll back together. Builds without this certificate and strict schema-15 checks continue to refuse schema 16. The forward-compatibility
+suite additionally exercises application behavior against the certified schema ahead.
+
+Rollout and rollback follow [RELEASE-127-128.md](./RELEASE-127-128.md). Before any history mutation, Release A is a schema-compatible rollback
+target without dropping 0016. After any archive or deletion, keep the schema-16 history reader/tombstone protections from Release B and set
+`FLOFI_OWNER_HISTORY=read-only` to stop new history mutations. Do not roll the frontend or history reader back to an artifact that could expose
+archived runs. Do not remove the immutable audit, restore deleted runs or execute a downmigration. Financial observation and reconciliation
+must continue during rollback. Changes to the SQL require a new compatibility assessment and hash; this certificate cannot be reused.
