@@ -47,7 +47,13 @@ export function createPostgresLeaseStore(options: LeaseOptions): LeaseStore {
         ON CONFLICT (tenant_id, namespace, lease_key) DO UPDATE
           SET owner_id = EXCLUDED.owner_id, fence = execution_leases.fence + 1, acquired_at = now(), expires_at = EXCLUDED.expires_at
           WHERE execution_leases.expires_at <= now()
-        RETURNING fence::text AS fence`, [options.tenantId, options.namespace, key, ownerId, ttl]);
+        RETURNING fence::text AS fence`, [options.tenantId, options.namespace, key, ownerId, ttl]).catch((error: unknown) => {
+        // The purge guard's advisory lock can deadlock with a concurrent journal write. PostgreSQL
+        // aborts this entire acquisition statement: no lease or action exists to resume. Report contention
+        // through the existing BUSY boundary; never retry an execution callback or mask other storage errors.
+        if ((error as { code?: string } | null)?.code === '40P01') throw new Error(options.busyCode, { cause: error });
+        throw error;
+      });
       if (!rows[0]) throw new Error(options.busyCode);
       const lease: HeldLease = { tenantId: options.tenantId, namespace: options.namespace, key, ownerId, fence: rows[0].fence, lost: false };
       const timer = setInterval(() => {

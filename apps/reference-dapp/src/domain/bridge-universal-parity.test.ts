@@ -113,7 +113,7 @@ it('recorded V2 intent without outputAsset cannot erase an explicit PT/EN destin
   for (const text of ['quero uma bridge de 1 USDC na Base para WETH na Arbitrum', 'I want to bridge 1 USDC on Base to WETH on Arbitrum']) {
     const action = act.bridge({ sourceNetwork: 'BASE', destinationNetwork: 'ARBITRUM', asset: 'USDC', amount: '1' });
     expect(new CopilotSession().say(text, intent.action(action))).toMatchObject({ kind: 'PROPOSAL', command: { input: { inputAsset: 'USDC', outputAsset: 'WETH' } } });
-    expect(new CopilotSession().say(text, intent.action({ ...action, outputAsset: 'USDC' }))).toMatchObject({ kind: 'CLARIFICATION' });
+    expect(new CopilotSession().say(text, intent.action({ ...action, outputAsset: 'USDC' }))).toMatchObject({ kind: 'PROPOSAL', command: { input: { inputAsset: 'USDC', outputAsset: 'WETH' } } });
   }
 });
 

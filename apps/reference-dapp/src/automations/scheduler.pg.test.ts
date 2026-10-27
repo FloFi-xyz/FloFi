@@ -144,6 +144,37 @@ describe('BUILD-AUTOMATION-001 scheduler: at most one occurrence per trigger eve
     expect(await count(`work_items WHERE kind = 'automation.evaluate' AND state <> 'DONE'`)).toBe(0);
   });
 
+  it('does not enqueue an obsolete due slot while an evaluation advances the rule and completes its work item', async () => {
+    const h = automationHarness(t.db), rule = await h.service().create(OWNER_A, weeklyDca());
+    h.set('2026-10-12T08:01:00Z');
+    expect(await h.store.enqueueDue(h.now(), 100)).toBe(1);
+    let release!: () => void, entered!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const ready = new Promise<void>(resolve => { entered = resolve; });
+    // Hold the exact transition a worker commits: advance the rule and retire the old open dedupe key.
+    const transition = t.db.transaction(async tx => {
+      await tx.query(`UPDATE automation_rules SET next_evaluation_at = next_evaluation_at + interval '7 days' WHERE rule_id = $1`, [rule.ruleId]);
+      await tx.query(`UPDATE work_items SET state = 'DONE', completed_at = now() WHERE kind = 'automation.evaluate' AND payload->>'ruleId' = $1`, [rule.ruleId]);
+      entered(); await gate;
+    });
+    await Promise.race([ready, transition]);
+    const enqueueDb = t.open(1), observer = t.open(1), pid = (await enqueueDb.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')).rows[0]!.pid;
+    let finished = false;
+    const scheduling = h.rt(enqueueDb).store.enqueueDue(h.now(), 100).finally(() => { finished = true; });
+    try {
+      let waiting = false;
+      const deadline = Date.now() + 5000;
+      while (!finished && !waiting && Date.now() < deadline) {
+        waiting = (await observer.query<{ waiting: boolean }>(`SELECT wait_event_type = 'Lock' AS waiting FROM pg_stat_activity WHERE pid = $1`, [pid])).rows[0]?.waiting === true;
+        if (!finished && !waiting) await new Promise(resolve => setTimeout(resolve, 10));
+      }
+      expect(finished || waiting).toBe(true);
+    } finally { release(); await transition; }
+    expect(await scheduling).toBe(0);
+    expect(await count(`work_items WHERE kind = 'automation.evaluate' AND state IN ('READY', 'LEASED')`)).toBe(0);
+    expect((await h.store.ruleById(rule.ruleId))!.nextEvaluationAt!.getTime()).toBeGreaterThan(h.now().getTime());
+  });
+
   it('a crash before the commit changes nothing; a retry after the commit does nothing', async () => {
     const h = automationHarness(t.db), rule = await h.service().create(OWNER_A, weeklyDca());
     h.set('2026-10-12T08:00:10Z');

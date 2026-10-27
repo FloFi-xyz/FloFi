@@ -43,8 +43,10 @@ export function searchSolanaCatalog(assets: readonly SolanaCatalogAsset[], query
 }
 
 // Validated metadata lookup. Canonical authoring carries mint@decimals; simulation re-reads mint identity on chain.
+let displayCatalogLoaded = false;
+export const solanaDisplayCatalogLoaded = () => displayCatalogLoaded;
 const displayAssets = new Map<string, SolanaCatalogAsset>();
-export function registerSolanaDisplayCatalog(catalog: SolanaAssetCatalog): void { displayAssets.clear(); for (const asset of catalog.assets) if (!asset.native) displayAssets.set(asset.mint, asset); }
+export function registerSolanaDisplayCatalog(catalog: SolanaAssetCatalog): void { displayCatalogLoaded = true; displayAssets.clear(); for (const asset of catalog.assets) if (!asset.native) displayAssets.set(asset.mint, asset); }
 export const solanaDisplayAsset = (mint: string): SolanaCatalogAsset | undefined => displayAssets.get(mint);
 
 /** Exact validated catalog identity; duplicate symbols or names require an explicit mint. */
@@ -54,4 +56,4 @@ export function resolveSolanaCatalogAsset(reference: string): SolanaCatalogAsset
   if (matches.length > 1) throw new Error('UNIVERSAL_ASSET_AMBIGUOUS');
   return matches[0] ?? null;
 }
-export function clearSolanaDisplayCatalog(): void { displayAssets.clear(); }
+export function clearSolanaDisplayCatalog(): void { displayCatalogLoaded = false; displayAssets.clear(); }

@@ -11,7 +11,7 @@ import { formatSlippage } from './slippage-policy';
  */
 export const COPILOT_LANGUAGES = ['EN', 'PT'] as const;
 export type CopilotLanguage = (typeof COPILOT_LANGUAGES)[number];
-export type MissingLabel = 'amount' | 'asset' | 'network' | 'sourceNetwork' | 'destinationNetwork' | 'protocol' | 'range' | 'slippage' | 'beneficiary' | 'recipient';
+export type MissingLabel = 'amount' | 'asset' | 'inputAsset' | 'outputAsset' | 'network' | 'sourceNetwork' | 'destinationNetwork' | 'protocol' | 'range' | 'slippage' | 'beneficiary' | 'recipient';
 /** What a clarification or refusal is about. */
 export type Subject = 'swap' | 'bridge' | 'supply' | 'borrow' | 'repay' | 'withdraw' | 'liquidity' | 'composition' | 'request' | 'transfer';
 /** Which network question is asked; V1 used a capitalized label per action. */
@@ -30,7 +30,7 @@ const capitalize = (value: string) => value.charAt(0).toUpperCase() + value.slic
 const EN = {
   get capabilities() { return capabilityText('EN'); },
   get compositionUnsupported() { return EN_COMPOSITION(); },
-  field: { amount: 'the amount', asset: 'the token', network: 'the network', sourceNetwork: 'the source network', destinationNetwork: 'the destination network',
+  field: { amount: 'the amount', asset: 'the token', inputAsset: 'the input token', outputAsset: 'the destination token', network: 'the network', sourceNetwork: 'the source network', destinationNetwork: 'the destination network',
     protocol: 'the protocol', range: 'the price range', slippage: 'the maximum slippage',
     beneficiary: 'a beneficiary (connect your wallet, or include the address in your message)', recipient: 'the recipient' } as Record<MissingLabel, string>,
   subject: { swap: 'swap', bridge: 'bridge', supply: 'Aave Supply', borrow: 'Aave Borrow', repay: 'Aave Repay', withdraw: 'Aave Withdraw',
@@ -49,6 +49,7 @@ const EN = {
   slippageNotFound: (bps: string) => `Flofi could not find the slippage ${bps} bps in your message. What maximum slippage should it use?`,
   slippageAtMost: (bps: number) => `Slippage must be at most ${bps} bps for this action.`,
   addressNotFound: (field: 'beneficiary' | 'recipient') => `Flofi could not find that ${field} address in your message. Type the full address, or leave it out to use your connected wallet.`,
+  addressIsAsset: 'That address names the token in your request. Which wallet should receive it?',
   tokenUnsupported: (subject: string) => `That token is not supported for ${subject}.`,
   tokenNotFound: (token: string) => `Flofi could not find the token ${token} in your message. Which token do you mean?`,
   evmSwapTokens: 'Flofi swaps USDC and WETH on Base, Base Sepolia and Ethereum Sepolia.',
@@ -93,6 +94,9 @@ const EN = {
   // BUILD-CROSSCHAIN-UNIVERSAL-001: the universal bridge (any pair of the five mainnets).
   universalNetworks: (networks: readonly string[]) => `The universal Cross-chain Router bridges between ${networks.join(', ')} (mainnets, real funds).`,
   universalSameNetwork: 'The source and destination networks must differ. Which destination do you mean?',
+  universalAssetInvalid: (asset: string, network: string, code: string) => /DECIMALS_MISMATCH$/.test(code)
+    ? `The decimals in ${asset} do not match the validated token identity on ${network}.`
+    : `The contract or mint reference ${asset} is invalid on ${network}.`,
   universalAssetUnknown: (asset: string, network: string) => `${asset} is not an asset Flofi knows on ${network}. Name its symbol, or write its contract or mint as address@decimals.`,
   universalOutputQuestion: (network: string) => `Which asset do you want to receive on ${network}?`,
   universalDefaultOutputNote: (asset: string, network: string) => `You receive ${asset} on ${network} (no destination asset named; say, for example, "receive SOL" to choose another).`,
@@ -246,9 +250,10 @@ const EN = {
 export type CopilotCopy = typeof EN;
 
 const PT: CopilotCopy = {
+  addressIsAsset: 'Esse endereço identifica o token no seu pedido. Qual carteira deve recebê-lo?',
   get capabilities() { return capabilityText('PT'); },
   get compositionUnsupported() { return PT_COMPOSITION(); },
-  field: { amount: 'o valor', asset: 'o token', network: 'a rede', sourceNetwork: 'a rede de origem', destinationNetwork: 'a rede de destino',
+  field: { amount: 'o valor', asset: 'o token', inputAsset: 'o token de origem', outputAsset: 'o token de destino', network: 'a rede', sourceNetwork: 'a rede de origem', destinationNetwork: 'a rede de destino',
     protocol: 'o protocolo', range: 'a faixa de preço', slippage: 'o slippage máximo',
     beneficiary: 'um beneficiário (conecte sua carteira ou inclua o endereço na mensagem)', recipient: 'o destinatário' },
   subject: { swap: 'swap', bridge: 'bridge', supply: 'Aave Supply', borrow: 'Aave Borrow', repay: 'Aave Repay', withdraw: 'Aave Withdraw',
@@ -308,6 +313,9 @@ const PT: CopilotCopy = {
   routerTokenOnly: (token, network) => `A partir da ${network}, o Cross-chain Router faz bridge apenas de ${token}.`,
   universalNetworks: networks => `O Cross-chain Router universal faz bridge entre ${networks.join(', ')} (mainnets, fundos reais).`,
   universalSameNetwork: 'As redes de origem e de destino precisam ser diferentes. Qual destino você quer dizer?',
+  universalAssetInvalid: (asset, network, code) => /DECIMALS_MISMATCH$/.test(code)
+    ? `As casas decimais de ${asset} não correspondem à identidade validada do token na ${network}.`
+    : `A referência de contrato ou mint ${asset} é inválida na ${network}.`,
   universalAssetUnknown: (asset, network) => `${asset} não é um ativo que o Flofi conhece na ${network}. Informe o símbolo, ou escreva o contrato ou mint como endereço@decimais.`,
   universalOutputQuestion: network => `Qual ativo você quer receber na ${network}?`,
   universalDefaultOutputNote: (asset, network) => `Você recebe ${asset} na ${network} (nenhum ativo de destino informado; diga, por exemplo, "receber SOL" para escolher outro).`,

@@ -5,6 +5,8 @@ const config: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
   images: { unoptimized: true },
+  // CI containers can expose the host CPU count. Bound page-generation workers to keep the build and PostgreSQL inside the runner's memory budget.
+  ...(process.env.CI ? { experimental: { cpus: 2 } } : {}),
   // Optional isolated preview output: keep the owner's existing .next/dev server running.
   distDir: process.env.FLOFI_DOCS_PREVIEW === 'true' ? '.next-docs' : process.env.FLOFI_MOTION_PREVIEW === 'true' ? '.next-motion' : '.next',
   ...(process.env.FLOFI_DOCS_PREVIEW === 'true' ? { typescript: { tsconfigPath: 'tsconfig.docs-preview.json' } } : {}),

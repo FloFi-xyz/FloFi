@@ -17,6 +17,8 @@ import { ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY } from '@defi-workflow-engine/action-r
 import { orcaLiquidityAmounts, orcaSqrtPriceAtTick } from '@defi-workflow-engine/reference-compiler';
 import { COPILOT_LIMITS, hasUnsafeCharacters, safeCopilotProse, type CopilotAction, type CopilotFeeTier, type CopilotLendingAction, type CopilotNetwork,
   type CopilotSwapAction } from './copilot-intent';
+import { groundExplicitAssets } from './copilot-asset-intent';
+import { answerDraftField, mergeDraftIntent, validatedDraftFields, type DraftField, type ValidatedDraftField } from './copilot-draft';
 import { canonicalSymbol } from './asset-catalogs';
 import { networkIdentity, networkOfCopilot } from './network-registry';
 import { UNIVERSAL_NETWORKS } from '@defi-workflow-engine/workflow-contracts';
@@ -55,7 +57,8 @@ type Resolved =
 type DraftFill = { readonly kind: 'TARGET'; readonly target: Resolved } | { readonly kind: 'ACTION'; readonly patch: Readonly<Record<string, unknown>> }
   | { readonly kind: 'EXTRAS'; readonly extras: Extras };
 /** Flofi's own open question: each button has a deterministic meaning, so answering it needs no model. */
-type Draft = { readonly intent: CopilotIntentV2; readonly options: readonly { readonly label: string; readonly fill: DraftFill }[]; readonly amountFill: boolean;
+type Draft = { readonly expected?: readonly DraftField[]; readonly validated?: readonly ValidatedDraftField[]; readonly grounding?: string;
+  readonly intent: CopilotIntentV2; readonly options: readonly { readonly label: string; readonly fill: DraftFill }[]; readonly amountFill: boolean;
   readonly snapshot: ContextSnapshot;
   /** A bare amount answers Flofi's question for this pool token's maximum (FloFi's own question named it). */ readonly depositFill?: 'SOL' | 'devUSDC';
   /** What resolving the open request already settled (a chosen swap or position). */ readonly extras?: Extras;
@@ -125,7 +128,7 @@ export type CopilotVerified = {
   readonly remaining: readonly { readonly token: 'SOL' | 'devUSDC'; readonly amount: string }[];
 };
 export type CopilotReply = {
-  readonly kind: 'PROPOSAL' | 'AUTOMATION_PROPOSAL' | 'ANSWER' | 'CLARIFICATION' | 'UNSUPPORTED' | 'FAILED' | 'MEMORY'; readonly text: string; readonly notes: readonly string[];
+  readonly code?: string; readonly kind: 'PROPOSAL' | 'AUTOMATION_PROPOSAL' | 'ANSWER' | 'CLARIFICATION' | 'UNSUPPORTED' | 'FAILED' | 'MEMORY'; readonly text: string; readonly notes: readonly string[];
   readonly options: readonly string[]; readonly automation?: AutomationInput; readonly command?: Command; readonly sentence?: string; readonly topic?: CopilotQuestionTopic;
   /** BUILD-CHAT-LEARNING-001: a memory change for the caller to perform (only after the user's own click or explicit statement). */
   readonly memory?: MemoryAction;
@@ -181,7 +184,8 @@ function bounded(entries: readonly TranscriptEntry[]): TranscriptEntry[] {
   return out;
 }
 const withUser = (state: CopilotConversation, text: string): CopilotConversation => ({ ...state, draft: null,
-  segment: [...state.segment, text].slice(-COPILOT_V2_LIMITS.maxSegmentUserTurns), transcript: bounded([...state.transcript, { role: 'user', text }]) });
+  segment: state.draft?.grounding ? [state.draft.grounding.slice(-(COPILOT_V2_LIMITS.maxRequestCharacters - text.length - 1)), text]
+    : [...state.segment, text].slice(-COPILOT_V2_LIMITS.maxSegmentUserTurns), transcript: bounded([...state.transcript, { role: 'user', text }]) });
 export const closeSegment = (state: CopilotConversation): CopilotConversation => {
   const { askedAt: _asked, ...rest } = state;
   void _asked;
@@ -199,7 +203,7 @@ const refused = (state: CopilotConversation, m: CopilotCopy, message: string): R
 function question(state: CopilotConversation, m: CopilotCopy, text: string, options: readonly string[], draft: Draft | null, notes: readonly string[] = []): Result {
   if (state.clarifications >= COPILOT_V2_LIMITS.maxClarifications) return failed(state, m, m.tooManyClarifications);
   return { reply: reply('CLARIFICATION', text, { options, ...notes.length ? { notes } : {} }),
-    next: { ...state, clarifications: state.clarifications + 1, draft: draft && { ...draft, question: text, shown: options },
+    next: { ...state, clarifications: state.clarifications + 1, draft: draft && { ...draft, grounding: segmentText(state), expected: draft.expected ?? ['target'], question: text, shown: options },
       // BUILD-CHAT-LEARNING-002: what the user writes from here on answers FloFi's question (the request's own words end here).
       askedAt: state.askedAt ?? state.segment.length,
       transcript: bounded([...state.transcript, { role: 'assistant', text: COPILOT_TRANSCRIPT.asked + text }]) } };
@@ -678,8 +682,8 @@ function actionFills(intent: CopilotIntentV2, missing: readonly string[], option
         const routing = [en.routingOptions, pt.routingOptions].map(list => list.map(normalize).indexOf(normalize(label))).find(index => index >= 0);
         if (routing !== undefined) return { routing: [null, 'LIFI', 'ACROSS'][routing] };
         if (networks.length === 2 && networks.every(Boolean)) return { sourceNetwork: networks[0], destinationNetwork: networks[1] };
-        if (networks.length === 1 && networks[0]) return /^ARBITRUM/.test(networks[0]) ? missing.includes('destinationNetwork') ? { destinationNetwork: networks[0] } : null
-          : missing.includes('sourceNetwork') ? { sourceNetwork: networks[0] } : null;
+        if (networks.length === 1 && networks[0]) return missing.includes('sourceNetwork') && !missing.includes('destinationNetwork') ? { sourceNetwork: networks[0] }
+          : missing.includes('destinationNetwork') && !missing.includes('sourceNetwork') ? { destinationNetwork: networks[0] } : null;
         return null;
       }
       if (action.type === 'LIQUIDITY') {
@@ -688,8 +692,8 @@ function actionFills(intent: CopilotIntentV2, missing: readonly string[], option
           : { protocol: 'ORCA', network: 'SOLANA_DEVNET' };
       }
       if (networks.length === 1 && networks[0] && missing.includes('network')) return { network: networks[0] };
-      if (/^(?:usdc|wbtc)$/.test(normalize(label)) && missing.includes('asset') && action.type !== 'SWAP' && action.type !== 'LIQUIDITY')
-        return { asset: normalize(label) === 'wbtc' ? 'WBTC' : 'USDC' };
+      const assetField = missing.filter(field => ['asset', 'inputAsset', 'outputAsset'].includes(field));
+      if (assetField.length === 1 && action.type !== 'LIQUIDITY') return { [assetField[0]!]: label };
       return null;
     })();
     if (patch) out.push({ label, fill: { kind: 'ACTION', patch } });
@@ -727,10 +731,19 @@ function yesOrNo(state: CopilotConversation, text: string, env: CopilotEnvironme
   return local(reply('ANSWER', yes ? env.pending ? m.yesPending : m.yesNothingOpen : env.pending ? m.noPending : m.noDropped), closeSegment(state));
 }
 function patchIntent(intent: CopilotIntentV2, patch: Readonly<Record<string, unknown>>): CopilotIntentV2 {
+  if (intent.kind === 'EDIT' || intent.kind === 'REPEAT') return { ...intent, changes: { ...intent.changes, ...patch } };
   if (intent.kind !== 'ACTION') return intent;
   const action = { ...intent.action } as Record<string, unknown>;
   for (const [key, value] of Object.entries(patch)) if (key in action) action[key] = value;
   return { ...intent, action: action as CopilotAction };
+}
+
+/** The clarification budget counts lack of progress. A newly validated value opens the budget for the next missing slot. */
+function answeredDraft(state: CopilotConversation, intent: CopilotIntentV2, text: string): CopilotConversation {
+  const next = withUser(state, text), before = state.draft?.validated ?? [];
+  const after = validatedDraftFields(intent, segmentText(next));
+  const progress = after.some(field => !before.some(old => old.step === field.step && old.field === field.field && JSON.stringify(old.value) === JSON.stringify(field.value)));
+  return progress ? { ...next, clarifications: 0 } : next;
 }
 
 // ── Turns ────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -765,6 +778,9 @@ export function startTurn(current: CopilotConversation, raw: string, env: Copilo
   if (answered && !('pick' in answered)) return answered;
   const draft = state.draft, picked = answered ? answered.pick : text;
   if (draft) {
+    if (contextChange(draft.snapshot, snapshotOf(env))) return { kind: 'LOCAL', ...failed(closeSegment(state), m, m.draftStale) };
+    const filled = answerDraftField(draft.intent, draft.expected ?? [], picked);
+    if (filled && !draft.options.some(o => normalize(o.label) === normalize(picked))) return { kind: 'LOCAL', ...withLearning(tallied(resolveIntent(filled, answeredDraft(state, filled, picked), env, null, draft.extras ?? {}), env), env, ['CLARIFICATION_ANSWERED']) };
     const option = draft.options.find(item => normalize(item.label) === normalize(picked));
     const amount = !option && (draft.amountFill || draft.depositFill) ? bareAmount(text) : null;
     if (option || amount) {
@@ -780,7 +796,7 @@ export function startTurn(current: CopilotConversation, raw: string, env: Copilo
       if (!option && draft.depositFill) return local(resolveIntent(patchDeposit(draft.intent, draft.depositFill, amount!), next, env, null,
         { ...extras, carried: [...extras.carried ?? [], `asset:${draft.depositFill}`] }));
       const intent = option?.fill.kind === 'ACTION' ? patchIntent(draft.intent, option.fill.patch) : patchIntent(draft.intent, { amount });
-      return local(resolveIntent(intent, next, env, null, extras));
+      return local(resolveIntent(intent, answeredDraft(state, intent, picked), env, null, extras));
     }
   }
   const next = withUser(state, text);
@@ -789,18 +805,19 @@ export function startTurn(current: CopilotConversation, raw: string, env: Copilo
 /** Finishes a model turn against the current state. A changed workflow, proposal or wallet discards the answer. */
 export function finishTurn(turn: PendingTurn, result: CopilotResultV2, env: CopilotEnvironment): Result {
   // BUILD-CHAT-LEARNING-001: a reply language the user chose wins over the language of their message (display copy only).
-  const preferred = preferredLanguage(turn.state, env), language = preferred ?? turn.state.language, m = copilotCopy(language), rollback = closeSegment(turn.before);
+  const preferred = preferredLanguage(turn.state, env), language = preferred ?? turn.state.language, m = copilotCopy(language), rollback = turn.before.draft ? turn.before : closeSegment(turn.before);
   const change = contextChange(turn.snapshot, snapshotOf(env));
-  if (change) return { reply: reply('FAILED', change === 'WORKFLOW' ? m.workflowChanged : change === 'PROPOSAL' ? m.proposalChanged : m.walletChanged), next: rollback };
+  if (change) return { reply: reply('FAILED', change === 'WORKFLOW' ? m.workflowChanged : change === 'PROPOSAL' ? m.proposalChanged : m.walletChanged), next: closeSegment(turn.before) };
   if (!result.ok) return tallied({ reply: reply('FAILED', failureText(result.code, language, result.retryAfterSeconds)), next: rollback }, env);
   let intent: CopilotIntentV2;
   try { intent = parseCopilotIntentV2(result.intent); }
   catch (cause) { return tallied({ reply: reply('FAILED', failureText(isCopilotIntentError(cause) && cause.message === 'COPILOT_TOO_MANY_ACTIONS' ? cause.message : 'COPILOT_INTENT_INVALID', language)), next: rollback }, env); }
+  intent = mergeDraftIntent(turn.before.draft?.intent ?? null, intent, turn.state.segment.at(-1) ?? '');
   // BUILD-CHAT-LEARNING-002: the language this conversation is unmistakably written in — the user's words and the interpreter agree (once per
   // conversation; evidence for the identity's starting language only, never a setting, and only where persistent learning is permitted).
   const said = env.learning?.automatic === 'ON' && !turn.state.languageObserved ? messageLanguage(turn.state.segment.at(-1) ?? '') : null, read = intent.language;
   if (preferred && intent.language !== preferred) intent = { ...intent, language: preferred };
-  const resolved = tallied(resolveIntent(intent, { ...turn.state, language: intent.language }, env, null, {}), env);
+  const resolved = tallied(resolveIntent(intent, { ...turn.state, draft: turn.before.draft, language: intent.language }, env, null, turn.before.draft?.extras ?? {}), env);
   if (!said || said !== read) return resolved;
   return withAdaptation({ ...resolved, next: { ...resolved.next, languageObserved: true } }, env, { ...NO_ADAPTATION, observations: [{ kind: 'LANGUAGE', language: said }] });
 }
@@ -813,7 +830,7 @@ function resolveIntent(intent: CopilotIntentV2, state: CopilotConversation, env:
     case 'AUTOMATION': {
       const automation = groundAutomationDraft(intent.draft, segmentText(state), env.timezone ?? 'UTC', Date.now(), language);
       if (automation.kind === 'PROPOSAL') return terminal(state, reply('AUTOMATION_PROPOSAL', 'Review this automation proposal. Nothing is created until you choose Create automation.', { automation: automation.input }), COPILOT_TRANSCRIPT.proposed + automation.input.name);
-      if (automation.kind === 'CLARIFICATION') return question(state, m, automation.message, [], null);
+      if (automation.kind === 'CLARIFICATION') return question(state, m, automation.message, [], { intent, expected: automation.missing, options: [], amountFill: false, snapshot: snapshotOf(env) });
       return refused(state, m, automation.message);
     }
 
@@ -822,7 +839,8 @@ function resolveIntent(intent: CopilotIntentV2, state: CopilotConversation, env:
     case 'POSITION': return resolvePosition(intent, state, env, extras);
     case 'CLARIFICATION_REQUIRED': {
       const text = safeCopilotProse(intent.question) ?? m.stillNeeds(m.subject.request, intent.missing.filter(field => field !== 'target').map(field => m.field[field as keyof typeof m.field]));
-      return question(state, m, text, intent.options.flatMap(option => safeCopilotProse(option) ?? []), null);
+      return question(state, m, text, intent.options.flatMap(option => safeCopilotProse(option) ?? []),
+        { intent: state.draft?.intent ?? intent, expected: intent.missing.map(field => field === 'asset' && state.draft?.expected?.length === 1 ? state.draft.expected[0]! : field), options: [], amountFill: false, snapshot: snapshotOf(env), ...state.draft?.extras ? { extras: state.draft.extras } : {} });
     }
     case 'QUESTION': {
       let step: WorkflowStep | null = null;
@@ -832,7 +850,9 @@ function resolveIntent(intent: CopilotIntentV2, state: CopilotConversation, env:
         step = resolution.resolved.step;
       }
       const answer = answerQuestion(intent.topic, step, env.facts, language);
-      return terminal(state, reply('ANSWER', answer.text, { notes: answer.notes, topic: intent.topic }), m.answered(intent.topic));
+      const value = reply('ANSWER', answer.text, { notes: answer.notes, topic: intent.topic });
+      if (state.draft) return { reply: value, next: { ...state, segment: state.segment.slice(0, -1), transcript: bounded([...state.transcript, { role: 'assistant', text: m.answered(intent.topic) }]) } };
+      return terminal(state, value, m.answered(intent.topic));
     }
     case 'ACTION': case 'COMPOSITION': {
       let actions = intent.kind === 'ACTION' ? [intent.action] : intent.actions;
@@ -1018,10 +1038,12 @@ function author(intent: CopilotIntentV2, actions: readonly CopilotAction[], comp
   const grounding: Grounding = { text: segmentText(state), carried, policy: { language, networkDefaults: false, catalog: true, ...env.agentRollout ? { agentRollout: env.agentRollout } : {} },
     latest: state.segment.at(-1) ?? '',
     solana: { price: env.verified?.orcaPrice?.price ?? null, swap }, ...lexicon.length ? { lexicon } : {} };
+  if (!composition) actions = actions.map(a => groundExplicitAssets(a, grounding.latest ?? grounding.text, lexicon));
+  const draftIntent: CopilotIntentV2 = intent.kind === 'ACTION' ? { ...intent, action: actions[0]! } : intent.kind === 'COMPOSITION' ? { ...intent, actions } : intent;
   const planned = planCopilotActions(actions, composition, grounding, env.wallet);
-  if (planned.kind !== 'PLAN') return stopped(planned, intent, state, env, m, { ...extras, carried: [...carried], ...swap ? { swap } : {} });
+  if (planned.kind !== 'PLAN') return stopped(planned, draftIntent, state, env, m, { ...extras, carried: [...carried], ...swap ? { swap } : {} });
   const outcome = proposalFromPlan(planned.plan, env, language);
-  if (outcome.kind !== 'PROPOSAL') return stopped(outcome, intent, state, env, m, { ...extras, carried: [...carried], ...swap ? { swap } : {} });
+  if (outcome.kind !== 'PROPOSAL') return stopped(outcome, draftIntent, state, env, m, { ...extras, carried: [...carried], ...swap ? { swap } : {} });
   let command = outcome.command;
   if (editNodeId) {
     const edit = editCommandFor(env.workflow, env.context, editNodeId, command);
@@ -1042,16 +1064,22 @@ function author(intent: CopilotIntentV2, actions: readonly CopilotAction[], comp
 }
 function stopped(outcome: Exclude<CopilotOutcome, { kind: 'PROPOSAL' }>, intent: CopilotIntentV2, state: CopilotConversation, env: CopilotEnvironment, m: CopilotCopy,
   extras: Extras = {}): Result {
-  if (outcome.kind === 'UNSUPPORTED') return refused(state, m, outcome.message);
-  if (outcome.kind === 'REJECTED') return failed(state, m, outcome.message);
+  if (outcome.kind === 'UNSUPPORTED' || outcome.kind === 'REJECTED') {
+    if (outcome.missing?.length) {
+      const draft: Draft = { intent, grounding: segmentText(state), expected: outcome.missing, validated: validatedDraftFields(intent, segmentText(state)), options: [], amountFill: false, snapshot: snapshotOf(env), extras };
+      const value = reply(outcome.kind === 'REJECTED' ? 'FAILED' : 'UNSUPPORTED', outcome.message, outcome.code ? { code: outcome.code } : {});
+      return { reply: value, next: { ...state, draft, transcript: bounded([...state.transcript, { role: 'assistant', text: outcome.message }]) } };
+    }
+    return outcome.kind === 'UNSUPPORTED' ? refused(state, m, outcome.message) : failed(state, m, outcome.message);
+  }
   // Flofi's question for the other pool token's maximum (a position funded by a swap's output) is answered by a bare amount.
   const otherToken = outcome.deposit;
   // BUILD-CHAT-LEARNING-001: a glossary suggestion for a mainnet only puts that option first, with a note; the user still picks.
   const suggested = withSuggestion(state, env, outcome.options, intent.language);
-  const draft: Draft = { intent, options: actionFills(intent, outcome.missing, suggested.options), snapshot: snapshotOf(env), extras,
+  const draft: Draft = { intent, expected: outcome.missing, validated: validatedDraftFields(intent, segmentText(state)), options: actionFills(intent, outcome.missing, suggested.options), snapshot: snapshotOf(env), extras,
     amountFill: intent.kind === 'ACTION' && outcome.missing.includes('amount') && intent.action.type !== 'LIQUIDITY',
     ...otherToken && outcome.missing.includes('amount') ? { depositFill: otherToken } : {}, ...suggested.suggestion ? { suggestion: suggested.suggestion } : {} };
-  return question(state, m, outcome.question, suggested.options, draft.options.length || draft.amountFill || draft.depositFill ? draft : null, suggested.notes);
+  return question(state, m, outcome.question, suggested.options, draft, suggested.notes);
 }
 /** Defense in depth, then the editor preview: an unappliable or empty edit is explained instead of shown as a proposal. */
 function propose(state: CopilotConversation, env: CopilotEnvironment, command: Command, sentence: string, text: string, notes: readonly string[], label: string,

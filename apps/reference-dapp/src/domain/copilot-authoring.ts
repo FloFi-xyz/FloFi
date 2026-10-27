@@ -18,6 +18,8 @@ import { AAVE_V3_AMOUNT_POLICY, assetDisplayName, solanaTransferAsset, type Cano
 import { solanaTransferProfileFor } from './solana-transfer-authoring';
 import { copilotNetworksFor, lendingOffers, routeLabels, type StrategyAction } from './authoring-capabilities';
 import type { PendingAgentCapability } from './agent-rollout';
+import { solanaDisplayCatalogLoaded } from './solana-asset-catalog';
+import { explicitInputAsset, explicitOutputAsset, groundExplicitAssets } from './copilot-asset-intent';
 import { resolveAssetReference } from './asset-catalogs';
 import { COPILOT_NETWORK_IDS, copilotNetworksMentioned, catalogNetworkOfChatName, networkIdentity, networkOfCopilot, type CopilotNetworkId } from './network-registry';
 import { routerNetworksOf } from './router-authoring';
@@ -38,12 +40,13 @@ import { lexiconAssets, lexiconNamedNetworkIds, lexiconNetworks, targetEnvironme
  * proposal); those values have deterministic provenance and skip the text check, and nothing else does. It also selects
  * the reply language and whether a network may default (V1) or must be asked for (V2).
  */
+export type CopilotAuthoringMissing = CopilotMissingField | 'inputAsset' | 'outputAsset';
 export type CopilotOutcome =
   | { readonly kind: 'PROPOSAL'; readonly command: Command; readonly sentence: string; readonly notes: readonly string[] }
-  | { readonly kind: 'CLARIFICATION'; readonly missing: readonly CopilotMissingField[]; readonly question: string; readonly options: readonly string[];
+  | { readonly kind: 'CLARIFICATION'; readonly missing: readonly CopilotAuthoringMissing[]; readonly question: string; readonly options: readonly string[];
       /** PR B: the pool token whose maximum the question asks for, so a bare amount can answer it. */ readonly deposit?: 'SOL' | 'devUSDC' }
-  | { readonly kind: 'UNSUPPORTED'; readonly message: string }
-  | { readonly kind: 'REJECTED'; readonly code: string; readonly message: string };
+  | { readonly kind: 'UNSUPPORTED'; readonly message: string; readonly missing?: readonly CopilotAuthoringMissing[]; readonly code?: string }
+  | { readonly kind: 'REJECTED'; readonly code: string; readonly message: string; readonly missing?: readonly CopilotAuthoringMissing[] };
 export type CopilotConversion = { readonly userText: string; readonly workflow: Workflow; readonly context: ReviewContext; readonly wallet: string | null };
 export const COPILOT_AUTOMATION_AUTHORING_INTENT = 'AUTOMATION' as const;
 /** Automation authoring uses a separate typed draft, never a workflow/execution Command. */
@@ -212,14 +215,14 @@ const nameNamed = (text: string, asset: CanonicalAsset) => {
 };
 
 class Stop { constructor(readonly outcome: CopilotOutcome) {} }
-const ask = (missing: CopilotMissingField[], question: string, options: readonly string[] = [], deposit?: 'SOL' | 'devUSDC'): never => {
+const ask = (missing: CopilotAuthoringMissing[], question: string, options: readonly string[] = [], deposit?: 'SOL' | 'devUSDC'): never => {
   throw new Stop({ kind: 'CLARIFICATION', missing, question, options, ...deposit ? { deposit } : {} });
 };
-const refuse = (message: string): never => { throw new Stop({ kind: 'UNSUPPORTED', message }); };
-const reject = (code: string, message: string): never => { throw new Stop({ kind: 'REJECTED', code, message }); };
+const refuse = (message: string, code?: string, missing?: CopilotAuthoringMissing[]): never => { throw new Stop({ kind: 'UNSUPPORTED', message, ...code ? { code } : {}, ...missing ? { missing } : {} }); };
+const reject = (code: string, message: string, missing?: CopilotAuthoringMissing[]): never => { throw new Stop({ kind: 'REJECTED', code, message, ...missing ? { missing } : {} }); };
 const labels = (networks: readonly Network[]) => networks.map(n => COPILOT_NETWORK_LABEL[n]);
 const copyOf = (g: Grounding): CopilotCopy => copilotCopy(g.policy.language);
-const stillNeeds = (m: CopilotCopy, missing: readonly CopilotMissingField[], subject: Subject) => m.stillNeeds(m.subject[subject], missing.map(field => m.field[field]));
+const stillNeeds = (m: CopilotCopy, missing: readonly CopilotAuthoringMissing[], subject: Subject) => m.stillNeeds(m.subject[subject], missing.map(field => m.field[field]));
 
 /** A network can only default when it is the action's single, test-token deployment and the user named no other network of that family. */
 function defaultNetwork(supported: readonly Network[], g: Grounding): Network | null {
@@ -266,14 +269,20 @@ function slippageOf(value: string | null, fallback: string, g: Grounding, notes:
   return value;
 }
 function addressOf(value: string | null, g: Grounding, field: 'beneficiary' | 'recipient', notFound = copyOf(g).addressNotFound(field)): string | null {
+  if (value !== null && !g.carried.has(field)) {
+    const assetAddresses = [explicitInputAsset(g.text), explicitOutputAsset(g.text)].flatMap(asset => asset && /^0x/i.test(asset) ? [asset.split('@')[0]!.toLowerCase()] : []);
+    const mentions = [...g.text.matchAll(/0x[0-9a-fA-F]{40}/g)].filter(match => match[0].toLowerCase() === value.toLowerCase());
+    if (assetAddresses.includes(value.toLowerCase()) && mentions.length === 1) return ask([field], copyOf(g).addressIsAsset);
+  }
   if (value !== null && !g.carried.has(field) && !groundedAddress(g.text, value)) return ask([field], notFound);
   return value;
 }
 function needAsset(value: CopilotAsset | null, g: Grounding, subject: Subject, field: CarriedField): Exclude<CopilotAsset, 'OTHER'> {
   const m = copyOf(g);
-  if (value === null) return ask(['asset'], stillNeeds(m, ['asset'], subject));
+  const missing = g.policy.catalog && (field === 'inputAsset' || field === 'outputAsset') ? field : 'asset';
+  if (value === null) return ask([missing], stillNeeds(m, [missing], subject));
   if (value === 'OTHER') return refuse(m.tokenUnsupported(m.tokenSubject[subject]));
-  if (!g.carried.has(field) && !assetNamed(g.text, value) && !lexiconNamesAsset(g, value)) return ask(['asset'], m.tokenNotFound(value));
+  if (!g.carried.has(field) && !assetNamed(g.text, value) && !lexiconNamesAsset(g, value)) return ask([missing], m.tokenNotFound(value));
   return value;
 }
 /**
@@ -286,21 +295,26 @@ function needAsset(value: CopilotAsset | null, g: Grounding, subject: Subject, f
 function catalogToken(value: CopilotAsset | null, network: Network, g: Grounding, subject: Subject, field: CarriedField, kinds: 'ERC20' | 'ANY',
   notes?: string[]): { readonly asset: CanonicalAsset; readonly ether: boolean } {
   const m = copyOf(g), label = COPILOT_NETWORK_LABEL[network], chain = chainOf(network);
-  if (value === null) return ask(['asset'], stillNeeds(m, ['asset'], subject));
+  const missing = g.policy.catalog && (field === 'inputAsset' || field === 'outputAsset') ? field : 'asset';
+  if (value === null) return ask([missing], stillNeeds(m, [missing], subject));
   if (value === 'OTHER') return refuse(m.tokenUnsupported(m.tokenSubject[subject]));
   const ether = /^eth$/i.test(value) && kinds === 'ERC20';
   const found = resolveAssetReference(chain, ether ? 'WETH' : value);
-  if (found.kind === 'UNAVAILABLE') return reject('ASSET_CATALOG_UNAVAILABLE', m.catalogUnavailable(label));
-  if (found.kind === 'UNKNOWN') return refuse(m.catalogTokenUnknown(value, label));
+  if (found.kind === 'INVALID_REFERENCE' || found.kind === 'DECIMALS_MISMATCH') {
+    const code = found.kind === 'INVALID_REFERENCE' ? 'ASSET_ADDRESS_INVALID' : 'ASSET_DECIMALS_MISMATCH';
+    return refuse(m.universalAssetInvalid(value, label, code), code, [missing]);
+  }
+  if (found.kind === 'UNAVAILABLE') return reject('ASSET_CATALOG_UNAVAILABLE', m.catalogUnavailable(label), [missing]);
+  if (found.kind === 'UNKNOWN') return refuse(m.catalogTokenUnknown(value, label), 'ASSET_UNKNOWN', [missing]);
   if (found.kind === 'AMBIGUOUS') {
     const options = found.assets.map(asset => asset.symbol).slice(0, COPILOT_LIMITS.maxOptions);
-    return ask(['asset'], m.catalogTokenAmbiguous(value, label), options);
+    return ask([missing], m.catalogTokenAmbiguous(value, label), options);
   }
   const asset = found.asset;
-  if (kinds === 'ERC20' && asset.kind !== 'ERC20') return refuse(m.catalogTokenUnknown(value, label));
-  const grounded = g.carried.has(field) || lexiconNamesAsset(g, value) || (found.by === 'SYMBOL' && symbolNamed(g.text, value)) || (/^eth$/i.test(value) && ASSET_MENTIONS.ETH.test(g.text)) ||
+  if (kinds === 'ERC20' && asset.kind !== 'ERC20') return refuse(m.catalogTokenUnknown(value, label), 'ASSET_UNKNOWN', [missing]);
+  const grounded = g.carried.has(field) || lexiconNamesAsset(g, value) || ((found.by === 'SYMBOL' || found.by === 'ADDRESS') && symbolNamed(g.text, value)) || (/^eth$/i.test(value) && ASSET_MENTIONS.ETH.test(g.text)) ||
     nameNamed(g.text, asset);
-  if (!grounded) return ask(['asset'], m.tokenNotFound(value));
+  if (!grounded) return ask([missing], m.tokenNotFound(value));
   if (found.by === 'NAME' && notes) notes.push(m.catalogNameNote(value, asset.symbol, assetDisplayName(asset), label));
   return { asset, ether };
 }
@@ -321,7 +335,7 @@ function planSwap(a: CopilotSwapAction, g: Grounding): Plan {
   // Ethereum and Ethereum Sepolia are grounded independently through the shared network registry.
   const named = namedNetworks(g);
   const devnetImplied = a.network === null && !named.length && impliesDevnet(g, [a.inputAsset, a.outputAsset]);
-  const missing: CopilotMissingField[] = [...(a.amount === null ? ['amount' as const] : []), ...(a.inputAsset === null || a.outputAsset === null ? ['asset' as const] : []),
+  const missing: CopilotAuthoringMissing[] = [...(a.amount === null ? ['amount' as const] : []), ...(a.inputAsset === null ? [g.policy.catalog ? 'inputAsset' as const : 'asset' as const] : []), ...(a.outputAsset === null ? [g.policy.catalog ? 'outputAsset' as const : 'asset' as const] : []),
     ...(a.network === null && !devnetImplied && !supported.some(n => named.includes(n)) && !named.includes('ETHEREUM') ? ['network' as const] : [])];
   if (missing.length) ask(missing, stillNeeds(m, missing, 'swap'), missing.length === 1 && missing[0] === 'network' ? labels(supported) : []);
   const network = devnetImplied ? devnetByAsset(g, notes) : resolveNetwork(a.network, supported, g, 'swap', notes);
@@ -415,10 +429,7 @@ function planRoute(a: CopilotBridgeAction, g: Grounding): Plan {
  * the user's own words, and a destination asset FloFi proposes is stated. The route itself is chosen at Simulate and shown at Review.
  */
 const UNIVERSAL_OF: Readonly<Partial<Record<Network, UniversalNetworkKey>>> = { SOLANA: 'solana', BASE: 'base', ARBITRUM: 'arbitrum-one', ETHEREUM: 'ethereum', ROBINHOOD: 'robinhood' };
-const RECEIVE_ASSET = /(?<![\p{L}\p{N}])(?:receiv(?:e|ing)|get(?:ting)?|recebendo|receber|receba|recebo)\s+(?:(?:it\s+)?(?:as|in|em|como)\s+)?([A-Za-z$][A-Za-z0-9.]{0,15})(?![\p{L}\p{N}])/iu;
-const RECEIVE_STOP = new Set(['on', 'at', 'to', 'in', 'em', 'na', 'no', 'para', 'it', 'the', 'my', 'minha', 'meu', 'a', 'o', 'funds', 'fundos', 'money', 'dinheiro', 'there', 'la', 'lá']);
-const DESTINATION_ASSET = /(?<![\p{L}\p{N}])(?:para|to)\s+([A-Za-z$][A-Za-z0-9.@]{0,159})\s+(?:na|no|on|in)\s+/iu;
-const receivedAsset = (text: string) => { const word = RECEIVE_ASSET.exec(text)?.[1] ?? DESTINATION_ASSET.exec(text)?.[1]; return word && !RECEIVE_STOP.has(word.toLowerCase()) ? word : null; };
+const receivedAsset = explicitOutputAsset;
 const universalWanted = (a: CopilotBridgeAction, g: Grounding) => {
   if (!g.policy.catalog) return false;
   if (a.sourceNetwork === 'SOLANA' || a.destinationNetwork === 'SOLANA' || namedNetworks(g).includes('SOLANA') ||
@@ -448,7 +459,13 @@ function planUniversalBridge(a: CopilotBridgeAction, g: Grounding): Plan {
   if (testWording(g)) ask(['sourceNetwork', 'destinationNetwork'], m.routeRealFunds(route));
   const written = isCatalogNetwork(source as Network) && !g.carried.has('asset') && !a.asset?.includes('@') ? catalogToken(a.asset, source as Network, g, 'bridge', 'asset', 'ANY', notes).asset.symbol : needAsset(a.asset, g, 'bridge', 'asset');
   const reference = (key: UniversalNetworkKey, value: string, network: string) => {
-    try { return universalAssetReference(key, value); } catch { return refuse(m.universalAssetUnknown(value, network)); }
+    try { return universalAssetReference(key, value); } catch (cause) {
+      const code = cause instanceof Error ? cause.message : 'UNIVERSAL_ASSET_UNKNOWN';
+      const field = key === src ? 'asset' : 'outputAsset';
+      if (code === 'UNIVERSAL_ASSET_UNKNOWN' && key === 'solana' && !solanaDisplayCatalogLoaded()) return reject('ASSET_CATALOG_UNAVAILABLE', m.catalogUnavailable(network), [field]);
+      if (code === 'UNIVERSAL_ASSET_AMBIGUOUS') return ask([field], m.catalogTokenAmbiguous(value, network));
+      return refuse(code === 'UNIVERSAL_ASSET_UNKNOWN' || code === 'ASSET_CATALOG_UNAVAILABLE' ? m.universalAssetUnknown(value, network) : m.universalAssetInvalid(value, network, code), code, [field]);
+    }
   };
   const asset = reference(src, written, srcName), wantedOutput = a.outputAsset ?? receivedAsset(text);
   // Destination values have their own grounding and catalog. They can never change the source asset.
@@ -459,7 +476,7 @@ function planUniversalBridge(a: CopilotBridgeAction, g: Grounding): Plan {
   let outputAsset: string;
   if (wantedOutput !== null) outputAsset = reference(dst, wantedOutput, dstName);
   else {
-    try { outputAsset = defaultUniversalOutput(src, resolveUniversalAsset(src, asset).symbol, dst); } catch { return ask([], m.universalOutputQuestion(dstName)); }
+    try { outputAsset = defaultUniversalOutput(src, resolveUniversalAsset(src, asset).symbol, dst); } catch { return ask(['outputAsset'], m.universalOutputQuestion(dstName)); }
     notes.push(m.universalDefaultOutputNote(outputAsset, dstName));
   }
   const amount = amountOf(a.amount, g, 'bridge');
@@ -473,7 +490,10 @@ function planUniversalBridge(a: CopilotBridgeAction, g: Grounding): Plan {
   const destinationEcosystem = UNIVERSAL_NETWORKS[dst].ecosystem === 'SOLANA' ? 'Solana' : 'EVM';
   const solanaRecipient = () => {
     if (a.recipient !== null && /^0x/i.test(a.recipient)) return refuse(m.universalRecipientFormat(dstName, destinationEcosystem));
-    const keys = [...new Set([...text.matchAll(/(?<![A-Za-z0-9])[1-9A-HJ-NP-Za-km-z]{32,44}(?![A-Za-z0-9])/g)].map(match => match[0]).filter(isSolanaPublicKey))];
+    const outputIdentity = resolveUniversalAsset(dst, outputAsset).asset;
+    // Explicit token references and the selected token mint are asset identities, never implicit recipient wallets.
+    const keys = [...new Set([...text.matchAll(/(?<![A-Za-z0-9])[1-9A-HJ-NP-Za-km-z]{32,44}(?![A-Za-z0-9@])/g)].map(match => match[0])
+      .filter(isSolanaPublicKey).filter(key => outputIdentity.kind !== 'TOKEN' || key !== outputIdentity.address))];
     return keys.length > 1 ? ask(['recipient'], m.universalRecipientWhich, keys) : keys[0] ?? '';
   };
   const recipient = destinationEcosystem === 'EVM' ? addressOf(a.recipient, g, 'recipient')?.toLowerCase() ?? '' : solanaRecipient();
@@ -484,15 +504,7 @@ function planUniversalBridge(a: CopilotBridgeAction, g: Grounding): Plan {
 const UNIVERSAL_MAXIMUM_SLIPPAGE_BPS = 300;
 
 function planBridge(a: CopilotBridgeAction, g: Grounding): Plan {
-  const statedOutput = g.policy.catalog ? receivedAsset(g.text) : null;
-  if (statedOutput && a.outputAsset && !g.carried.has('outputAsset') && a.destinationNetwork && a.destinationNetwork !== 'OTHER') {
-    const destination = UNIVERSAL_OF[a.destinationNetwork];
-    if (destination) {
-      const same = (() => { try { return JSON.stringify(resolveUniversalAsset(destination, universalAssetReference(destination, statedOutput)).asset) ===
-        JSON.stringify(resolveUniversalAsset(destination, universalAssetReference(destination, a.outputAsset!)).asset); } catch { return false; } })();
-      if (!same) ask(['asset'], copyOf(g).universalOutputQuestion(UNIVERSAL_NETWORKS[destination].name));
-    }
-  }
+  if (g.policy.catalog) a = groundExplicitAssets(a, g.latest ?? g.text, g.lexicon) as CopilotBridgeAction;
   if (g.policy.catalog && a.outputAsset && a.destinationNetwork && a.destinationNetwork !== 'OTHER' && !g.carried.has('outputAsset')) {
     if (isCatalogNetwork(a.destinationNetwork) && !a.outputAsset.includes('@')) catalogToken(a.outputAsset, a.destinationNetwork, g, 'bridge', 'outputAsset', 'ANY');
     else needAsset(a.outputAsset, g, 'bridge', 'outputAsset');
@@ -846,7 +858,7 @@ export function planCopilotActions(actions: readonly CopilotAction[], compositio
   { readonly kind: 'PLAN'; readonly plan: Plan } | Exclude<CopilotOutcome, { kind: 'PROPOSAL' }> {
   try {
     if (composition) return { kind: 'PLAN', plan: planComposition(actions, g, wallet) };
-    const action = actions[0]!;
+    const action = g.policy.catalog ? groundExplicitAssets(actions[0]!, g.latest ?? g.text, g.lexicon) : actions[0]!;
     if (g.policy.catalog && action.type === 'LIQUIDITY' && action.funding === 'SWAP_OUTPUT') return { kind: 'PLAN', plan: planSolanaComposition(null, action, g) };
     return { kind: 'PLAN', plan: action.type === 'SWAP' ? planSwap(action, g) : action.type === 'BRIDGE' ? planBridge(action, g)
       : action.type === 'LIQUIDITY' ? planLiquidity(action, g) : action.type === 'TRANSFER' ? planTransfer(action, g) : planLending(action, g, wallet) };

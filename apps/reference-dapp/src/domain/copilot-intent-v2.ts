@@ -19,7 +19,7 @@ export const COPILOT_ORDINALS = ['FIRST', 'SECOND', 'THIRD', 'FOURTH', 'FIFTH', 
 export const COPILOT_REUSE_FIELDS = ['network', 'asset', 'amount', 'destination', 'recipient', 'slippage'] as const;
 export const COPILOT_QUESTION_TOPICS = ['WORKFLOW_OVERVIEW', 'STEP_COUNT', 'STEP_DETAIL', 'PROTOCOLS', 'NETWORKS', 'APPROVALS', 'EXECUTION_FLOW',
   'EXECUTION_BLOCKERS', 'MANIFEST', 'SIMULATION', 'FAILURE', 'PROPOSAL', 'REVIEW_FINDINGS', 'CAPABILITIES', 'MARKET_DATA', 'OTHER'] as const;
-export const COPILOT_V2_MISSING_FIELDS = [...COPILOT_MISSING_FIELDS, 'target'] as const;
+export const COPILOT_V2_MISSING_FIELDS = [...COPILOT_MISSING_FIELDS, 'inputAsset', 'outputAsset', 'target'] as const;
 /** Managing an existing FloFi-registered position: remove part of its liquidity, or all of it and close it. */
 export const COPILOT_POSITION_OPERATIONS = ['DECREASE', 'EXIT'] as const;
 export const COPILOT_V2_LIMITS = Object.freeze({ ...COPILOT_LIMITS, maxDeposits: 2, maxReuseFields: COPILOT_REUSE_FIELDS.length,

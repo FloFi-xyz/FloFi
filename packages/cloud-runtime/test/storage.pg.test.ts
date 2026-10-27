@@ -132,6 +132,24 @@ describe('BUILD-CLOUD-001 fenced PostgreSQL leases', () => {
     const { rows } = await db.query<{ fence: string }>(`SELECT fence::text AS fence FROM execution_leases WHERE lease_key = 'run-x'`);
     expect(rows[0]?.fence).toBe('2');
   });
+  it('reports an aborted acquisition deadlock as contention without entering the protected action', async () => {
+    // PostgreSQL 40P01 aborts the acquisition statement before it owns a lease. The history-purge guard
+    // can produce this under concurrent acquisition/journal writes; use a native SQLSTATE fault for deterministic timing.
+    let calls = 0;
+    const contended: Database = { ...db, query: async <R extends Record<string, unknown>>() => {
+      return db.query<R>(`DO $$ BEGIN RAISE EXCEPTION 'test acquisition contention' USING ERRCODE = '40P01'; END $$`);
+    } };
+    await expect(leases('contender', contended).hold('aborted-acquire', async () => { calls++; })).rejects.toThrow('TEST_BUSY');
+    expect(calls).toBe(0);
+    expect((await db.query(`SELECT 1 FROM execution_leases WHERE lease_key = 'aborted-acquire'`)).rows).toHaveLength(0);
+    const unavailable: Database = { ...db, query: async <R extends Record<string, unknown>>() =>
+      db.query<R>(`DO $$ BEGIN RAISE EXCEPTION 'test storage failure' USING ERRCODE = '08006'; END $$`) };
+    await expect(leases('unavailable', unavailable).hold('aborted-acquire', async () => { calls++; })).rejects.toThrow('test storage failure');
+    expect(calls).toBe(0);
+    // A later request still acquires normally; no historical/global lock survives the aborted statement.
+    await leases('next-request').hold('aborted-acquire', async () => { calls++; });
+    expect(calls).toBe(1);
+  });
   it('an expired holder is fenced out: its writes fail after takeover', async () => {
     const log = createPostgresLogStore({ db, tenantId: 'default', namespace: 'ns' });
     await log.extend('fenced.jsonl', bytes('a\n'), lines());

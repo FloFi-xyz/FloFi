@@ -54,8 +54,9 @@ export function resolveNetworkAsset(chain: string, reference: AssetReference): C
   return catalog ? catalogAsset(catalog, reference) : null;
 }
 /** What a written token reference names on one network: one asset (and how), several (ask), none, or the catalog is not loaded. */
-export type AssetResolution = { readonly kind: 'FOUND'; readonly asset: CanonicalAsset; readonly by: 'SYMBOL' | 'NAME' }
-  | { readonly kind: 'AMBIGUOUS'; readonly assets: readonly CanonicalAsset[] } | { readonly kind: 'UNKNOWN' } | { readonly kind: 'UNAVAILABLE' };
+export type AssetResolution = { readonly kind: 'FOUND'; readonly asset: CanonicalAsset; readonly by: 'SYMBOL' | 'NAME' | 'ADDRESS' }
+  | { readonly kind: 'AMBIGUOUS'; readonly assets: readonly CanonicalAsset[] } | { readonly kind: 'UNKNOWN' } | { readonly kind: 'UNAVAILABLE' }
+  | { readonly kind: 'INVALID_REFERENCE' } | { readonly kind: 'DECIMALS_MISMATCH' };
 /** Words people add after a company or token name ("Tesla stock", "Apple shares"); removed only to retry a whole-name match. */
 const NAME_SUFFIX = /\s+(?:stocks?|shares?|tokens?|stock\s+tokens?)$/i;
 /**
@@ -70,6 +71,20 @@ export function resolveAssetReference(chain: string, reference: string): AssetRe
   const catalog = networkCatalog(chain), text = typeof reference === 'string' ? reference.trim() : '';
   if (!catalog) return { kind: 'UNAVAILABLE' };
   if (!text) return { kind: 'UNKNOWN' };
+  if (text.includes('@')) {
+    const explicit = /^(0x[0-9a-fA-F]{40})@([0-9]{1,2})$/.exec(text);
+    if (!explicit) return { kind: 'INVALID_REFERENCE' };
+    const asset = catalogAsset(catalog, { address: explicit[1]!.toLowerCase() });
+    if (asset) return asset.decimals === Number(explicit[2]) ? { kind: 'FOUND', asset, by: 'ADDRESS' } : { kind: 'DECIMALS_MISMATCH' };
+    return officialCatalogLoaded(chain) ? { kind: 'UNKNOWN' } : { kind: 'UNAVAILABLE' };
+  }
+  if (/^0x/i.test(text)) {
+    if (!/^0x[0-9a-fA-F]{40}$/.test(text)) return { kind: 'INVALID_REFERENCE' };
+    const asset = catalogAsset(catalog, { address: text.toLowerCase() });
+    return asset ? { kind: 'FOUND', asset, by: 'ADDRESS' } : officialCatalogLoaded(chain) ? { kind: 'UNKNOWN' } : { kind: 'UNAVAILABLE' };
+  }
+  const symbols = catalog.assets.filter(asset => asset.symbol.toUpperCase() === text.toUpperCase());
+  if (symbols.length > 1) return { kind: 'AMBIGUOUS', assets: symbols };
   const symbol = catalogAsset(catalog, { symbol: text });
   if (symbol) return { kind: 'FOUND', asset: symbol, by: 'SYMBOL' };
   for (const name of new Set([text, text.replace(NAME_SUFFIX, '')])) {
@@ -85,6 +100,9 @@ export function resolveAssetReference(chain: string, reference: string): AssetRe
 export function authoringAssetSymbol(chain: string, reference: string): string {
   const result = resolveAssetReference(chain, reference);
   if (result.kind === 'AMBIGUOUS') throw new Error('ASSET_REFERENCE_AMBIGUOUS');
+  if (result.kind === 'UNKNOWN') throw new Error('ASSET_UNKNOWN');
+  if (result.kind === 'INVALID_REFERENCE') throw new Error('ASSET_ADDRESS_INVALID');
+  if (result.kind === 'DECIMALS_MISMATCH') throw new Error('ASSET_DECIMALS_MISMATCH');
   if (result.kind !== 'FOUND') throw new Error('ASSET_CATALOG_UNAVAILABLE');
   return result.asset.symbol;
 }

@@ -234,12 +234,13 @@ export function createPgAutomationStore(db: Database, tenantId: string): Automat
       return row ? occurrenceOf(row) : null;
     },
     async enqueueDue(now, limit) {
-      // Concurrent schedulers insert the same dedupe key; the open-item unique index keeps one.
+      // Lock the selected rule version before inserting: a stale MVCC snapshot must not recreate a slot after its open dedupe key retires.
+      // Busy due rules are left for the next sweep; the lock covers only this statement and the selected rules.
       const { rowCount } = await db.query(`INSERT INTO work_items (tenant_id, kind, dedupe_key, run_id, payload, state, available_at)
         SELECT r.tenant_id, $4, r.rule_id || ':' || (extract(epoch FROM r.next_evaluation_at) * 1000)::bigint, NULL,
           jsonb_build_object('ruleId', r.rule_id), 'READY', now()
         FROM automation_rules r WHERE r.tenant_id = $1 AND r.state = 'ACTIVE' AND r.next_evaluation_at <= $2
-        ORDER BY r.next_evaluation_at, r.rule_id LIMIT $3
+        ORDER BY r.next_evaluation_at, r.rule_id LIMIT $3 FOR UPDATE SKIP LOCKED
         ON CONFLICT (tenant_id, kind, dedupe_key) WHERE state IN ('READY', 'LEASED') DO NOTHING`, [tenantId, now, limit, EVALUATE_KIND]);
       return rowCount;
     },
