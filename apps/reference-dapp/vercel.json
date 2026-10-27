@@ -9,7 +9,8 @@
       "claude/build-solana-transfer-ux-001": false,
       "security/mcp-link-integrity-p0": false,
       "fix/chat-first-approval-ux-20261025": false,
-      "codex/hotfix-universal-bridge-e2e": false
+      "codex/hotfix-universal-bridge-e2e": false,
+      "codex/build-safe-run-deletion": false
     }
   }
 }

@@ -123,6 +123,8 @@ export function createPostgresLogStore(input: { db: Database; tenantId: string; 
     if (!(next instanceof Uint8Array) || next.length === 0 || next.length > MAX_LOG_BYTES) throw new Error('JOURNAL_CORRUPT');
     try {
       return await db.transaction(async tx => {
+        // The purge procedure takes the same per-log lock before inspecting history; a stale writer cannot recreate deleted bytes.
+        await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [`${tenantId}:${namespace}:${name}`]);
         await assertHeldLeases(tx, tenantId);
         const locked = await tx.query<LogRow>(`SELECT version::text AS version, segment_count, byte_length, content_sha256 FROM execution_logs
           WHERE tenant_id = $1 AND namespace = $2 AND name = $3 FOR UPDATE`, [tenantId, namespace, name]);

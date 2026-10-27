@@ -3,8 +3,12 @@
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import type { SavedWorkflow, WorkflowDocument, WorkflowList, WorkflowOwner } from '../domain/saved-workflow';
 import { workflowOperation } from '../server/workflow-persistence';
+import { ownerHistoryOperation } from '../server/owner-history';
 export async function listWorkflows(owner: WorkflowOwner) { return workflowOperation<WorkflowList>('list', [], owner); }
 export async function openWorkflow(owner: WorkflowOwner, workflowId: string) { return workflowOperation<WorkflowDocument>('get', [workflowId], owner); }
 export async function saveWorkflow(owner: WorkflowOwner, workflow: SemanticWorkflow, name: string, expectedVersion: number) {
   return workflowOperation<SavedWorkflow>('save', [{ workflow, name, expectedVersion }], owner);
+}
+export async function changeSavedWorkflowHistory(owner: WorkflowOwner, workflowId: string, action: 'DELETE' | 'ARCHIVE') {
+  return ownerHistoryOperation(owner.address, 'change', 'SAVED_WORKFLOW', workflowId, action);
 }

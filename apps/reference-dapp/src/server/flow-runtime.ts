@@ -78,7 +78,7 @@ export async function createEmbeddedRuntime(env: Env, seams: EmbeddedSeams = {})
 export function ownerRunReaders(queries: ReturnType<typeof import('@defi-workflow-engine/cloud-runtime').createRunQueries>): Pick<EmbeddedRuntime, 'runs' | 'run' | 'journal'> {
   const owned = async (runId: string, owner: string) => { const run = await queries.getRun(runId); return run && run.ownerAccount === owner ? run : null; };
   return {
-    runs: async (flow, owner) => (await queries.listRuns(null, 25, { owner, flow })).items.map(r => ({ runId: r.runId, flow: r.flow, status: r.status,
+    runs: async (flow, owner) => (await queries.listRuns(null, 25, { owner, flow, includeArchived: true })).items.map(r => ({ runId: r.runId, flow: r.flow, status: r.status,
       ownerAccount: r.ownerAccount, hasEvidence: r.hasEvidence, updatedAt: r.updatedAt })),
     run: owned,
     journal: async (runId, owner, after, limit) => await owned(runId, owner) ? queries.journal(runId, after, limit) : null };

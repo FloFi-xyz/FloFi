@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ExecutionLifecycle } from '../../domain/execution-lifecycle';
 import type { ExecutionRecovery } from '../../domain/execution-recovery';
 import type { ReviewWallet } from '../../domain/review-presentation';
 import type { ReviewContext } from '@defi-workflow-engine/reference-linter';
-import { dashboardRunDetail, dashboardSnapshot } from '../../app/dashboard-action';
+import { changeRunHistory, dashboardRunDetail, dashboardSnapshot, runHistoryDisposition } from '../../app/dashboard-action';
 import { walletSignInChallenge, walletSignIn } from '../../app/wallet-session-action';
 import { injected, useBuild009Wallet } from '../../state/build009-wallet-store';
 import { currentDashboardRun, dashboardRunIndex, projectDashboardRun, sameOwner } from '../../lib/dashboard/run-mapping';
@@ -25,6 +25,20 @@ export function DashboardWorkspace({ workflowName, progress, recovery, wallet, c
   const ownedCurrent = current && sameOwner(current.run.ownerAccount, account) ? current : null;
   const isCurrent = Boolean(runId && ownedCurrent?.run.runId === runId);
   const [version, refresh] = useState(0);
+  const latestAccount = useRef(account); latestAccount.current = account;
+  const currentKey = JSON.stringify([account, ownedCurrent?.run.runId, version]);
+  const [currentVisibility, setCurrentVisibility] = useState<{ key: string; disposition: 'VISIBLE' | 'DELETED' | 'ARCHIVED' } | null>(null);
+  const [removed, setRemoved] = useState<{ owner: string; ids: readonly string[] } | null>(null);
+  useEffect(() => {
+    if (!account || !ownedCurrent) return;
+    let active = true;
+    Promise.resolve().then(() => runHistoryDisposition(account, ownedCurrent.run.runId)).then(result => {
+      if (active) setCurrentVisibility({ key: currentKey, disposition: result.ok ? result.disposition : 'VISIBLE' });
+    }, () => { if (active) setCurrentVisibility({ key: currentKey, disposition: 'VISIBLE' }); });
+    return () => { active = false; };
+  }, [account, ownedCurrent?.run.runId, currentKey]);
+  const currentDisposition = currentVisibility?.key === currentKey ? currentVisibility.disposition : null;
+  const visibleCurrent = currentDisposition === 'VISIBLE' && !(removed?.owner === account && removed.ids.includes(ownedCurrent?.run.runId ?? '')) ? ownedCurrent : null;
   const [loaded, setLoaded] = useState<{ key: string; snapshot?: DashboardSnapshot; response?: DashboardDetailResponse } | null>(null);
   const [verifying, setVerifying] = useState(false);
   const [verificationIssue, setVerificationIssue] = useState<{ account: string; message: string } | null>(null);
@@ -40,12 +54,21 @@ export function DashboardWorkspace({ workflowName, progress, recovery, wallet, c
     return () => { cancelled = true; };
   }, [account, evm, isCurrent, key, runId]);
   const visible = loaded?.key === key ? loaded : null;
-  const loading = Boolean(account && !isCurrent && !visible);
+  const loading = Boolean(account && (!isCurrent && !visible || ownedCurrent && currentDisposition === null));
   const snapshot = visible?.snapshot;
   const detail = visible?.response?.detail;
   // A stale session/result can never flash another account's records while the new read is pending.
   const ownedDetail = detail && sameOwner(detail.run.ownerAccount, account) && detail.run.runId === runId ? detail : null;
   const historical = ownedDetail ? projectDashboardRun(ownedDetail.run, projectDashboardRecord(ownedDetail, context)) : null;
+  function historyChanged(id: string, disposition: 'DELETED' | 'ARCHIVED') {
+    if (!account || latestAccount.current !== account) return;
+    setRemoved(previous => ({ owner: account, ids: [...(previous?.owner === account ? previous.ids : []), id] }));
+    if (id === ownedCurrent?.run.runId) setCurrentVisibility({ key: currentKey, disposition });
+    window.dispatchEvent(new CustomEvent('flofi:history-changed', { detail: { account, id } }));
+    refresh(value => value + 1);
+    if (runId) navigate('/app/dashboard');
+  }
+  const history = account ? { change: (id: string) => (action: 'DELETE' | 'ARCHIVE') => changeRunHistory(account, id, action), changed: historyChanged } : undefined;
 
   async function verify() {
     if (verifying || !account || !evm) return;
@@ -68,11 +91,12 @@ export function DashboardWorkspace({ workflowName, progress, recovery, wallet, c
         : 'Wallet verification was not completed. Your execution records have not changed.' });
     } finally { setVerifying(false); }
   }
-  if (runId) return <RunDetailView view={isCurrent ? ownedCurrent : historical} detail={ownedDetail} loading={loading}
+  if (runId) return <RunDetailView view={isCurrent ? currentDisposition === 'DELETED' || currentDisposition === null ? null : ownedCurrent : historical} detail={ownedDetail} loading={loading}
     connection={!account ? 'DISCONNECTED' : visible?.response?.connection ?? null}
-    back={() => navigate('/app/dashboard')} build={build} execute={execute} refresh={() => refresh(value => value + 1)}/>;
-  const runs = dashboardRunIndex(account, snapshot?.runs ?? [], ownedCurrent);
+    back={() => navigate('/app/dashboard')} build={build} execute={execute} refresh={() => refresh(value => value + 1)}
+    {...history ? { history: { change: history.change(runId), changed: disposition => historyChanged(runId, disposition) } } : {}}/>;
+  const runs = dashboardRunIndex(account, snapshot?.runs ?? [], visibleCurrent).filter(view => removed?.owner !== account || !removed.ids.includes(view.run.runId));
   return <DashboardView account={account} connection={snapshot?.connection ?? null} runs={runs} hasMore={snapshot?.hasMore ?? false}
     loading={loading} build={build} openRun={id => navigate(`/app/dashboard/runs/${encodeURIComponent(id)}`)} verify={() => void verify()} verifying={verifying}
-    verificationIssue={verificationIssue?.account === account ? verificationIssue.message : null} refresh={() => refresh(value => value + 1)}/>;
+    verificationIssue={verificationIssue?.account === account ? verificationIssue.message : null} refresh={() => refresh(value => value + 1)} {...history ? { history } : {}}/>;
 }

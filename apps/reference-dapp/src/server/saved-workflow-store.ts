@@ -55,13 +55,14 @@ export function createSavedWorkflowStore(db: Database, tenantId: string, owner: 
         WITH owned_runs AS (
           SELECT workflow_id,count(*)::text AS run_count,(array_agg(run_id ORDER BY updated_at DESC,run_id DESC))[1] AS last_run_id,
             (array_agg(status ORDER BY updated_at DESC,run_id DESC))[1] AS last_status,max(updated_at) AS updated_at,bool_or(has_evidence) AS has_evidence
-          FROM execution_runs er WHERE tenant_id=$1 AND owner_account=$3 AND ${EXECUTED_WORKFLOW_RUN} GROUP BY workflow_id
+          FROM execution_runs er WHERE tenant_id=$1 AND owner_account=$3 AND ${EXECUTED_WORKFLOW_RUN} AND NOT EXISTS (SELECT 1 FROM owner_history_visibility h WHERE h.tenant_id=er.tenant_id AND h.owner_account=er.owner_account AND h.kind='EXECUTION_RUN' AND h.record_id=er.run_id) GROUP BY workflow_id
         ), owned_saved AS (
           SELECT * FROM saved_workflows WHERE tenant_id=$1 AND owner_namespace=$2 AND owner_account=$3
         )
         SELECT coalesce(s.workflow_id,r.workflow_id) AS workflow_id,s.display_name,s.version::text,
           greatest(s.updated_at,r.updated_at) AS updated_at,coalesce(r.run_count,'0') AS run_count,r.last_run_id,r.last_status,coalesce(r.has_evidence,false) AS has_evidence
         FROM owned_saved s FULL OUTER JOIN owned_runs r ON s.workflow_id=r.workflow_id
+        WHERE NOT EXISTS (SELECT 1 FROM owner_history_visibility h WHERE h.tenant_id=$1 AND h.owner_account=$3 AND h.kind='SAVED_WORKFLOW' AND h.record_id=coalesce(s.workflow_id,r.workflow_id))
         ORDER BY updated_at DESC,workflow_id LIMIT 101`, scope);
       return { hasMore: rows.length > 100, items: rows.slice(0,100).map(row => ({ workflowId: row.workflow_id, name: row.display_name, saved: row.version !== null,
         version: row.version === null ? null : Number(row.version), updatedAt: row.updated_at.toISOString(), runCount: Number(row.run_count), lastRunId: row.last_run_id, lastStatus: row.last_status, hasEvidence: row.has_evidence })) };

@@ -16,9 +16,9 @@ function workspace(account: string | null, runId = 'fixture-detail-run') {
     wallet={{ ...fixture.wallet, account }} context={fixture.context} runId={runId} build={noop} execute={noop} navigate={noop}/>);
 }
 describe('Run Details preserves the existing wallet-owner boundary', () => {
-  it.each([reviewOwner, reviewOwner.toUpperCase()])('shows the current owned execution for its matching wallet (%s)', account => {
+  it.each([reviewOwner, reviewOwner.toUpperCase()])('waits for the server history disposition before showing a locally held execution (%s)', account => {
     const html = workspace(account);
-    expect(html).toContain('Owned current workflow'); expect(html).toContain('CURRENT EXECUTION'); expect(html).toContain('View result in Execute');
+    expect(html).toContain('Loading execution'); expect(html).not.toContain('Owned current workflow'); expect(html).not.toContain('0.0243 WETH');
   });
   it.each([null, '0x' + '2'.repeat(40)])('cannot reveal a current execution to a disconnected or unrelated wallet (%s)', account => {
     const html = workspace(account);

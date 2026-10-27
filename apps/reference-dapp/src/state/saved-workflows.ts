@@ -2,7 +2,8 @@
 'use client';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
-import { listWorkflows, openWorkflow, saveWorkflow } from '../app/workflow-action';
+import { changeSavedWorkflowHistory, listWorkflows, openWorkflow, saveWorkflow } from '../app/workflow-action';
+import type { HistoryDisposition } from '@defi-workflow-engine/cloud-runtime';
 import { savedWorkflowHash, workflowOwner, type WorkflowDocument, type WorkflowList, type WorkflowOwner } from '../domain/saved-workflow';
 
 export function useSavedWorkflows(owner: WorkflowOwner | null) {
@@ -15,6 +16,16 @@ export function useSavedWorkflows(owner: WorkflowOwner | null) {
   const [serial, setSerial] = useState(0);
   const [pendingList, setPendingList] = useState<{ owner: string; serial: number } | null>(null);
   const refresh = useCallback(() => setSerial(n => n + 1), []);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const changed = (event: Event) => {
+      const detail = (event as CustomEvent<{ account?: string; id?: string }>).detail;
+      if (!owner || detail?.account !== owner.address) return;
+      setVersion(current => current?.workflowId === detail.id ? null : current); refresh();
+    };
+    window.addEventListener('flofi:history-changed', changed);
+    return () => window.removeEventListener('flofi:history-changed', changed);
+  }, [ownerKey, refresh]);
   useEffect(() => {
     if (!ownerKey) return;
     const scopedOwner = workflowOwner(ownerKey);
@@ -55,5 +66,18 @@ export function useSavedWorkflows(owner: WorkflowOwner | null) {
     } catch { if (latestOwner.current === ownerKey) setError({ owner: ownerKey, code: 'WORKFLOW_UNAVAILABLE' }); return null; }
     finally { busyRef.current = false; setBusy(false); }
   }
-  return { list: loaded?.owner === ownerKey ? loaded.list : null, error: error?.owner === ownerKey ? error.code : null, loading: Boolean(ownerKey && (pendingList?.owner === ownerKey || loaded?.owner !== ownerKey && error?.owner !== ownerKey)), busy, save, open, refresh };
+  async function changeHistory(id: string, action: 'DELETE' | 'ARCHIVE'): Promise<HistoryDisposition> {
+    if (!owner || !ownerKey || busyRef.current) return { ok: false, code: 'HISTORY_INVALID' };
+    busyRef.current = true; setBusy(true);
+    try {
+      const result = await changeSavedWorkflowHistory(owner, id, action);
+      if (latestOwner.current !== ownerKey) return result;
+      if (result.ok) {
+        setVersion(current => current?.workflowId === id ? null : current);
+        if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('flofi:history-changed', { detail: { account: owner.address, id } })); refresh();
+      }
+      return result;
+    } finally { busyRef.current = false; setBusy(false); }
+  }
+  return { list: loaded?.owner === ownerKey ? loaded.list : null, error: error?.owner === ownerKey ? error.code : null, loading: Boolean(ownerKey && (pendingList?.owner === ownerKey || loaded?.owner !== ownerKey && error?.owner !== ownerKey)), busy, save, open, refresh, changeHistory };
 }

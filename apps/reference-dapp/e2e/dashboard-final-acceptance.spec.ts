@@ -23,7 +23,7 @@ test.beforeAll(async () => {
         if (id.endsWith('/app/wallet-session-action')) return '\0dashboard-acceptance-signing';
       },
       load(id) {
-        if (id === '\0dashboard-acceptance-reads') return 'export const dashboardSnapshot = account => window.flofiWorkspaceAcceptance.read(account, null); export const dashboardRunDetail = (account, runId) => window.flofiWorkspaceAcceptance.read(account, runId);';
+        if (id === '\0dashboard-acceptance-reads') return 'export const dashboardSnapshot = account => window.flofiWorkspaceAcceptance.read(account, null); export const dashboardRunDetail = (account, runId) => window.flofiWorkspaceAcceptance.read(account, runId); export const runHistoryDisposition = async () => ({ ok: true, disposition: "VISIBLE" }); export const changeRunHistory = () => { throw Error("Unexpected fixture history mutation"); };';
         if (id === '\0dashboard-acceptance-wallet') return 'export const useBuild009Wallet = () => ({}); export const injected = () => null;';
         if (id === '\0dashboard-acceptance-signing') return 'export const walletSignInChallenge = () => { throw new Error("Unexpected fixture signing"); }; export const walletSignIn = walletSignInChallenge;';
       },

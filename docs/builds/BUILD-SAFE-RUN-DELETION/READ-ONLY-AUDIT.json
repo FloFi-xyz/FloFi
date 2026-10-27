@@ -1,0 +1,17 @@
+{
+  "observedAt": "2026-10-27T02:07:02.369Z",
+  "access": "READ_ONLY",
+  "productionWrites": 0,
+  "executionRuns": 57,
+  "simulatedRuns": 32,
+  "savedWorkflows": 0,
+  "preliminaryCandidates": 36,
+  "candidatesWithOwnerAccount": 12,
+  "candidatesWithoutOwnerAccount": 24,
+  "candidatesWithLogSegments": 36,
+  "candidatesWithJournal": 5,
+  "candidatesWithFinancialJournalStates": 2,
+  "candidatesWithDirectReadyOrLeasedWork": 0,
+  "purgeEligibleCount": null,
+  "note": "Preliminary counts are not deletion authorization. No purge procedure or migration was installed or executed on production. Every deletion must recheck all historic snapshots, ownership, integrity and dependencies atomically."
+}
