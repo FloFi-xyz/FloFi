@@ -28,7 +28,9 @@ financial transaction. This document is the single rollout sequence for both PRs
 ## Authorized rollout, in order
 
 1. **Backend/worker A first.** Publish the certified Release A to Railway API, worker and every embedded backend/operator consumer of the
-   database. Its existing migration predeploy is a no-op on schema 15. Check health/readiness, schema ledger, real read-only quotes and worker
+   database. Vercel bundles its BFF and UI together: rebuild that artifact as A before 0016 so an old BFF cannot refuse the newer schema.
+   This compatibility prerequisite is part of backend rollout; the final history frontend B still follows migration and backend verification.
+   Its existing migration predeploy is a no-op on schema 15. Check health/readiness, schema ledger, real read-only quotes and worker
    observation. The pre-#127 production binary cannot be the rollback target after 0016. Do not activate the new history frontend yet.
 2. **Compatible migration.** Run the exact Release B migrator once with a reviewed production connection, bounded lock timeout and the
    normal advisory lock. Verify ledger versions/hashes, readiness on A and B, unchanged existing records and active observation. Migration

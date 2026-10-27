@@ -1,0 +1,95 @@
+{
+  "observedAt": "2026-10-27T15:48:03.982177+00:00",
+  "classification": "TECHNICAL_NONPRODUCTION_CERTIFICATION",
+  "productionMutations": false,
+  "financialExecutionCertified": false,
+  "source": {
+    "main": "01dbce43bfa4ab7279a95cc0ae24e5f1a94fa8e1",
+    "pr127": "09eefd56e066a4497448eba0cbddc8d1fffa9fb3",
+    "pr128": "a93f25fd1519c8021b336538619abfc5ad7f185d",
+    "integrationTree": "ff27d840a4b820deb201af328530984de74d48b6",
+    "integrationConflicts": 0
+  },
+  "checks": {
+    "types": "PASS",
+    "lint": "PASS",
+    "build": "PASS",
+    "schemas": 11,
+    "unit": {
+      "passed": 5324,
+      "skipped": 2
+    },
+    "postgresCombined": {
+      "passed": 507,
+      "skipped": 3
+    },
+    "postgresReleaseAOn16": {
+      "passed": 490,
+      "skipped": 0
+    },
+    "browserBridgeCombined": 9,
+    "browserHistoryCombined": 9,
+    "p0FocusedUnit": 135
+  },
+  "hosted": {
+    "cases": 27,
+    "quotesAvailable": 26,
+    "legitimateNoQuote": 1,
+    "stableBridgeDirections": 20,
+    "additionalUsdcWethBridge": 1,
+    "swaps": 5,
+    "exactBrowserBackendMatch": true,
+    "schema16ColdStartCases": 2,
+    "quoteOnlyBridge": 13,
+    "builderVerifiedBridge": 8,
+    "durableFinancialRowsAfterReads": {
+      "execution_runs": 0,
+      "execution_attempts": 0,
+      "journal_entries": 0,
+      "work_items": 0,
+      "purge_audit": 0
+    }
+  },
+  "logs": {
+    "integration-check": {
+      "path": "/home/asus/projects/flofi-bridge-catalog-cancel-001/.release-evidence/integration-check.log",
+      "sha256": "f631f09e9d7150e175175ee58ddc934a627ee9f1430f44b96f6fff74b2bcb09a"
+    },
+    "integration-pg": {
+      "path": "/home/asus/projects/flofi-bridge-catalog-cancel-001/.release-evidence/integration-pg.log",
+      "sha256": "69c0b4fe5db25f91ed7058afae0a2e91b492416de4c6307c46bebcc208c9d8a8"
+    },
+    "integration-bridge-browser": {
+      "path": "/home/asus/projects/flofi-bridge-catalog-cancel-001/.release-evidence/integration-bridge-browser.log",
+      "sha256": "cdf93548237e7e1d9942d2f73b5da081d9aa038222a2416e65c8a3a00d576c37"
+    },
+    "integration-history-browser": {
+      "path": "/home/asus/projects/flofi-bridge-catalog-cancel-001/.release-evidence/integration-history-browser.log",
+      "sha256": "6c71a2a0868963182dde67bfa7f29209bc0437e931047a6fdf4f2ffc08def394"
+    },
+    "pg-a-ahead-final": {
+      "path": "/home/asus/projects/flofi-bridge-catalog-cancel-001/.release-evidence/pg-a-ahead-final.log",
+      "sha256": "c5faa46db45caaa563b9b6e3f765c027c986889d89c5245bec8352adf93e2144"
+    },
+    "bridge-browser": {
+      "path": "/home/asus/projects/flofi-bridge-catalog-cancel-001/.release-evidence/bridge-browser.log",
+      "sha256": "b5bef5d8af9b1f6bfb7870aa9878b5b6bfec8d33f25ec40ebceb34ba6600d22c"
+    },
+    "p0-unit": {
+      "path": "/home/asus/projects/flofi-bridge-catalog-cancel-001/.release-evidence/p0-unit.log",
+      "sha256": "9e15f56e2de07a5013d7be68467cd672438f46211736664ad90ac88944e39957"
+    },
+    "types-a-final": {
+      "path": "/home/asus/projects/flofi-bridge-catalog-cancel-001/.release-evidence/types-a-final.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "lint-a": {
+      "path": "/home/asus/projects/flofi-bridge-catalog-cancel-001/.release-evidence/lint-a.log",
+      "sha256": "8b1154a8bc37f6e140045a1a1cf8bb35a82ffac9387c24c2cdbd837eac8da7c2"
+    },
+    "schemas-a": {
+      "path": "/home/asus/projects/flofi-bridge-catalog-cancel-001/.release-evidence/schemas-a.log",
+      "sha256": "ff3647d12a3766c6a8712faeadc2a5f02b12b6ef96a55daff235e609eaf41563"
+    }
+  }
+}

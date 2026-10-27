@@ -1,6 +1,6 @@
 # P0 — estimativas compartilhadas de Swap e Bridge
 
-Base: `main` após o merge #126, `01dbce43bfa4ab7279a95cc0ae24e5f1a94fa8e1`. PR independente. Nenhum merge, deploy, acesso de escrita a produção ou transação financeira pública foi realizado.
+Base: `main` após o merge #126, `01dbce43bfa4ab7279a95cc0ae24e5f1a94fa8e1`. PR independente. Nenhum merge, deploy em produção, acesso de escrita a produção ou transação financeira pública foi realizado.
 
 ## Diagnóstico e correção
 
@@ -35,7 +35,9 @@ Jupiter mantém o contrato `purpose: QUOTE` já introduzido no #126; `SIMULATION
 
 **Base USDC → Arbitrum WETH apresentou `LIVE_QUOTE` na evidência anterior preservada do #126, não execução certificada. Este PR não converte esse fato em certificação financeira.** A nova matriz usa as combinações stable/nativo que seus registros identificam; ETH nativo não é apresentado como WETH.
 
-**Aceitação hospedada ainda pendente.** Não houve deploy autorizado da alteração, portanto a comparação navegador/backend acima é local e não certifica o build em um ambiente hospedado. Antes da aceitação pelo owner, um preview isolado deste commit precisa comprovar estimativas e recusas no navegador contra o backend efetivamente hospedado. CI verde, testes MOCKED e cotações públicas de leitura não substituem essa etapa. Não se declara GO de aceitação final nem execução financeira pública certificada.
+**Aceitação hospedada de estimativas concluída no fechamento de 27/10.** A etapa inicial acima era local. A etapa posterior autorizada
+validou 27 casos reais no preview isolado e dois casos de cold start após 0016. [Evidência hospedada e integração](./HOSTED-VALIDATION.md).
+Essa certificação de exibição de quotes não certifica execução financeira pública nem autoriza publicação em produção.
 
 Fechamento das consultas públicas no código final: **70/80 estimativas Bridge disponíveis**, seis estados `SUPPORTED_BY_PROVIDER` sem cotação e quatro indisponibilidades temporárias; **13/14 estimativas Swap disponíveis**, uma recusa `JUPITER_RATE_LIMITED`. Uma primeira observação havia obtido 80/80: a disponibilidade variou durante a sessão, e a evidência final preserva as recusas observadas, sem substituir respostas por MOCKED. As 94 observações finalizaram e passaram nas verificações de integridade do payload; isso não significa que as 94 tinham cotação disponível. [Fingerprints dos fontes](SOURCE-FINGERPRINTS.json).
 
