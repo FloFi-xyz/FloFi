@@ -11,6 +11,7 @@ Base revision: `d44d6afc3e6b0f20f9fddb2f32e5a3c0937aa28f`, fetched from `origin/
 5. The model parser placed explicit `address@decimals` references inside the shorter token-name length limit. A complete EVM contract plus decimals exceeded it.
 6. The canonical symbol adapter also collapsed a miss in a loaded catalog into `ASSET_CATALOG_UNAVAILABLE` on MCP/channel composition. New cross-surface assertions reproduce that mismatch and now require `ASSET_UNKNOWN`, preserving separate invalid-reference and decimals errors as well.
 7. An explicit SPL `mint@decimals` also matched the legacy recipient scanner. Independently reproduced failing tests showed both a token mint selected as a Solana recipient and a model recipient incorrectly grounded from an EVM contract written only as the source asset. Token-reference occurrences are now kept separate from recipient/beneficiary evidence.
+8. Network merging treated a network mentioned anywhere in the latest reply as evidence for either side. Two failing regressions showed ACTION and EDIT interpretations moving both sides to Solana when the user changed only the destination. An explicit source/destination correction with one registry-recognized network now changes only that side of the active bridge, preserving the opposite side.
 
 Two failing tests were run before changing production code. A separate `git archive` of the base revision was subsequently exercised with the exact Portuguese USDT request and the isolated catalog fixture from `copilot-context.test.ts`. With a model destination of USDC it produced:
 
@@ -51,7 +52,7 @@ Certified Router pairs retain their existing authoring path. Independent/cross-a
 | 11. Token absent from loaded catalog | AERO and numeric-leading 1INCH refusal on the existing Arbitrum list projection; no substitution |
 | 12. Catalog failure and recovery | Domain recovery and `state/copilot-catalogs.test.ts`, including verified Solana loading |
 | 13. Asset versus provider/route failure | Unknown/unavailable asset assertions plus existing universal discovery, Relay/provider, build-estimate and service suites |
-| 14. Context changes | Wallet, wallet chain, workflow, pending proposal, and in-flight model answer |
+| 14. Context changes | Wallet, wallet chain, workflow, pending proposal, in-flight model answer, and destination-only network correction with a contradictory ACTION/EDIT |
 | 15. Other actions | Swap, Transfer, Lending, Liquidity, supported Composition and Automation draft clarifications |
 | 16. Portuguese and English | New PT/EN matrix plus the existing bilingual eval corpus |
 | 17. Surface parity | Canonical workflow hashes compared with strategy composition; actual persisted Channel Core turn; existing MCP gateway/security suites |

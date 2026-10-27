@@ -173,6 +173,15 @@ describe('persistent fields, corrections and stale context', () => {
     expect(s.say('actually receive LINK', intent.edit({ outputAsset: 'LINK' }))).toMatchObject({ kind: 'PROPOSAL', command: { input: { inputAsset: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913@6', outputAsset: 'LINK', amount: '1' } } });
     expect(s.workflow.revision).toBe(0);
   });
+  it.each(['ACTION', 'EDIT'] as const)('preserves the source when a %s interpretation changes both networks for a destination-only correction', kind => {
+    const s = new CopilotSession();
+    s.say('Please bridge USDC from Base to USDT on Arbitrum', intent.action(act.bridge({ sourceNetwork: 'BASE', destinationNetwork: 'ARBITRUM', asset: 'USDC', outputAsset: 'USDT' })));
+    s.say('muda o destino para Solana', kind === 'ACTION'
+      ? intent.action(act.bridge({ sourceNetwork: 'SOLANA', destinationNetwork: 'SOLANA', asset: 'USDC', outputAsset: 'USDT' }), 'PT')
+      : intent.edit({ network: 'SOLANA', destinationNetwork: 'SOLANA' }, {}, 'PT'));
+    expect(s.state.draft?.intent).toMatchObject({ kind: 'ACTION', action: { sourceNetwork: 'BASE', destinationNetwork: 'SOLANA', asset: 'USDC', outputAsset: 'USDT' } });
+    expect(s.say('1')).toMatchObject({ kind: 'PROPOSAL', command: { input: { source: 'base', destination: 'solana', inputAsset: 'USDC', outputAsset: 'USDT', amount: '1' } } });
+  });
   it.each(['wallet', 'chain', 'workflow', 'proposal'] as const)('rejects a %s change during clarification, including replies without options', changed => {
     const s = new CopilotSession();
     s.say('please bridge 1 cbBTC from Base to Solana', intent.action(act.bridge({ sourceNetwork: 'BASE', destinationNetwork: 'SOLANA', asset: 'cbBTC', amount: '1' })));

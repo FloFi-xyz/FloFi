@@ -42,6 +42,17 @@ function mergeFields(before: object, interpreted: object, text: string): Record<
   }
   return out;
 }
+/** An explicitly named side and one named network change only that side of the active bridge.
+ * The interpreter still handles unrestricted corrections; no network identities are invented here. */
+function bridgeNetworkCorrection(before: CopilotAction, after: CopilotAction, text: string): CopilotAction {
+  if (before.type !== 'BRIDGE' || after.type !== 'BRIDGE') return after;
+  const source = /\b(?:source|origem)\b/i.test(text), destination = /\b(?:destination|destino)\b/i.test(text);
+  if (source === destination) return after;
+  const networks = copilotNetworksMentioned(text);
+  if (networks.length !== 1) return after;
+  return { ...after, sourceNetwork: source ? networks[0]! : before.sourceNetwork,
+    destinationNetwork: destination ? networks[0]! : before.destinationNetwork };
+}
 /** An active request supplies context. Values from completed/unrelated requests never enter here. Every result is re-planned and validated. */
 export function mergeDraftIntent(before: CopilotIntentV2 | null, interpreted: CopilotIntentV2, latest: string): CopilotIntentV2 {
   if (before?.kind === 'ACTION' && interpreted.kind === 'EDIT') {
@@ -51,12 +62,12 @@ export function mergeDraftIntent(before: CopilotIntentV2 | null, interpreted: Co
       const key = field === 'inputAsset' && before.action.type !== 'SWAP' ? 'asset' : field === 'network' && before.action.type === 'BRIDGE' ? 'sourceNetwork' : field;
       if (key in before.action || key === 'outputAsset' && before.action.type === 'BRIDGE') patch[key] = value;
     }
-    return { ...before, language: interpreted.language, action: { ...before.action, ...patch } as CopilotAction };
+    return { ...before, language: interpreted.language, action: bridgeNetworkCorrection(before.action, { ...before.action, ...patch } as CopilotAction, latest) };
   }
   if (interpreted.kind === 'ACTION') {
     const action = before?.kind === 'ACTION' && before.action.type === interpreted.action.type
       ? mergeFields(before.action, interpreted.action, latest) as CopilotAction : interpreted.action;
-    return { ...interpreted, action };
+    return { ...interpreted, action: before?.kind === 'ACTION' ? bridgeNetworkCorrection(before.action, action, latest) : action };
   }
   if (before?.kind === 'COMPOSITION' && interpreted.kind === 'COMPOSITION' && before.actions.length === interpreted.actions.length &&
     before.actions.every((a, i) => a.type === interpreted.actions[i]!.type)) return { ...interpreted, actions: interpreted.actions.map((action, i) =>
