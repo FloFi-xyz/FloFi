@@ -88,6 +88,10 @@ A full local PostgreSQL run exposed an existing scheduler race: the duplicate-di
 
 The enqueue statement now selects due rules with `FOR UPDATE SKIP LOCKED`. This locks only the selected rule versions for that statement and leaves busy rules to the next sweep; an evaluator's committed schedule advancement cannot be overwritten by an old enqueue snapshot. The existing assertions remain, and the new regression also asserts no open obsolete work and an advanced rule. All 22 scheduler tests pass with the fix. There is no schema migration, global account/run lock, execution-engine rewrite, authorization change, or production database operation.
 
+A later full run also failed the existing two-instance transfer concurrency assertion: the losing acquisition returned `TRANSFER_SERVICE_UNAVAILABLE` instead of contention. The disposable PostgreSQL server log at both failing runs records a deadlock between the lease acquisition statement and the existing purge guard's per-log advisory lock during journal writing. An isolated passing retry was not accepted as certification. A deterministic native PostgreSQL `40P01` fault regression failed before the correction.
+
+Only an acquisition statement aborted with PostgreSQL `40P01` now maps to the existing flow BUSY code. PostgreSQL has rolled back that entire statement, so no lease was acquired and no protected callback runs. The existing API contention retry remains responsible for another attempt. The regression asserts zero callbacks and zero lease rows on failure, a later successful acquisition, and preservation of unrelated storage errors. The purge guard, fencing, nonce assertions, journal integrity, and execution callbacks are unchanged. This fixes error classification at the acquisition boundary, without removing the underlying possibility of transient database contention or changing the schema.
+
 ## Existing limitations
 
 - Catalog inclusion is the existing registry/list projection's decision. Conversation code does not widen provider inclusion rules (for example numeric-leading records excluded by an existing list projection).
