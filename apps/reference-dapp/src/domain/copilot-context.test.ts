@@ -201,6 +201,18 @@ describe('persistent fields, corrections and stale context', () => {
 });
 
 describe('shared action clarifications', () => {
+  it.each([',', ';', '!', '?', ''])('does not treat a polite clause before %s as the requested output asset', punctuation => {
+    const s = new CopilotSession();
+    expect(s.say(`Por favor${punctuation} troca 10 USDC por WETH na Arbitrum`, intent.action(act.swap({
+      network: 'ARBITRUM', inputAsset: 'USDC', outputAsset: 'WETH', amount: '10',
+    }), 'PT'))).toMatchObject({ kind: 'PROPOSAL', sentence: 'swap 10 USDC to WETH on Arbitrum One slippage 100 bps' });
+  });
+  it('keeps separate receiving clauses so the last explicit correction takes precedence', () => {
+    const s = new CopilotSession();
+    expect(s.say('Please bridge 1 USDC from Base to Arbitrum receiving WETH, actually receive LINK', intent.action(act.bridge({
+      sourceNetwork: 'BASE', destinationNetwork: 'ARBITRUM', asset: 'USDC', outputAsset: 'WETH', amount: '1',
+    })))).toMatchObject({ kind: 'PROPOSAL', command: { input: { inputAsset: 'USDC', outputAsset: 'LINK' } } });
+  });
   it('retains the supported composition fields while the interpreter fills only the missing borrow amount', () => {
     const s = new CopilotSession();
     s.say('Please supply 5 USDC, then borrow USDC and swap the borrowed USDC for WETH on Base Sepolia', intent.composition([

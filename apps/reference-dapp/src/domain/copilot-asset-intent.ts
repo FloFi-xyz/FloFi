@@ -12,8 +12,8 @@ function reference(clause: string): string | null {
   return /^[\p{L}\p{N}$][\p{L}\p{N} .&'@_+*-]*$/u.test(value) ? value : null;
 }
 export function explicitOutputAsset(text: string): string | null {
-  const clauses = [...text.matchAll(/\b(?:receiv(?:e|ing)|get(?:ting)?|recebendo|receber|receba|recebo)\s+(?:(?:as|in|em|como)\s+)?([^\n]+)/gi),
-    ...text.matchAll(/\b(?:para|to|por|for)\s+([^\n]+?)\s+(?:na|no|on|in)\s+/gi)];
+  const clauses = [...text.matchAll(/\b(?:receiv(?:e|ing)|get(?:ting)?|recebendo|receber|receba|recebo)\s+(?:(?:as|in|em|como)\s+)?([^,;!?\n]+)/gi),
+    ...text.matchAll(/(?=\b(?:para|to|por|for)\s+([^,;!?\n]+?)\s+(?:na|no|on|in)\s+)/gi)];
   clauses.sort((a, b) => a.index! - b.index!);
   for (const clause of clauses.reverse()) { const found = reference(clause[1]!); if (found) return found; }
   return null;
