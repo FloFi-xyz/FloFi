@@ -75,6 +75,8 @@ describe('chain-scoped asset and command matrix', () => {
     const reply = s.say(`quero bridge de 1 USDC na Base para ${output} na Arbitrum`, intent.action(act.bridge({ sourceNetwork: 'BASE', destinationNetwork: 'ARBITRUM', asset: 'USDC', outputAsset: 'USDC', amount: '1' }), 'PT'))!;
     expect(reply).toMatchObject({ kind: 'UNSUPPORTED', code: 'ASSET_UNKNOWN' });
     expect(reply.text).toContain(output); expect(reply.command).toBeUndefined();
+    expect(composeStrategy({ action: 'bridge', sourceNetwork: 'base', destinationNetwork: 'arbitrum-one', asset: 'USDC', outputAsset: output, amount: '1' }))
+      .toMatchObject({ ok: false, code: 'ASSET_UNKNOWN' });
     expect(s.state.draft?.expected).toEqual(['outputAsset']);
     expect(s.say('LINK')).toMatchObject({ kind: 'PROPOSAL', command: { input: { inputAsset: 'USDC', outputAsset: 'LINK' } } });
   });

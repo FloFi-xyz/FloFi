@@ -100,6 +100,9 @@ export function resolveAssetReference(chain: string, reference: string): AssetRe
 export function authoringAssetSymbol(chain: string, reference: string): string {
   const result = resolveAssetReference(chain, reference);
   if (result.kind === 'AMBIGUOUS') throw new Error('ASSET_REFERENCE_AMBIGUOUS');
+  if (result.kind === 'UNKNOWN') throw new Error('ASSET_UNKNOWN');
+  if (result.kind === 'INVALID_REFERENCE') throw new Error('ASSET_ADDRESS_INVALID');
+  if (result.kind === 'DECIMALS_MISMATCH') throw new Error('ASSET_DECIMALS_MISMATCH');
   if (result.kind !== 'FOUND') throw new Error('ASSET_CATALOG_UNAVAILABLE');
   return result.asset.symbol;
 }

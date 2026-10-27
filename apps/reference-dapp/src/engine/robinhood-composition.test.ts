@@ -79,7 +79,7 @@ describe('BUILD-RH-002 Robinhood Chain strategies', () => {
     // BUILD-ARB-001: catalog references resolve before composition; an unresolved foreign symbol still fails closed.
     expect(composeStrategy({ ...BUY_TSLA, network: 'base' })).toMatchObject({ ok: false, code: 'ASSET_CATALOG_UNAVAILABLE' });
     expect(composeStrategy({ ...BRIDGE_IN, asset: 'USDG' })).toMatchObject({ ok: false, code: 'ASSET_CATALOG_UNAVAILABLE' });
-    expect(composeStrategy({ ...BRIDGE_IN, sourceNetwork: 'robinhood' })).toMatchObject({ ok: false, code: 'ASSET_CATALOG_UNAVAILABLE' });
+    expect(composeStrategy({ ...BRIDGE_IN, sourceNetwork: 'robinhood' })).toMatchObject({ ok: false, code: 'ASSET_UNKNOWN' });
     // BUILD-BASE-001 (intentional change): Arbitrum One → Base is now a Router route.
     expect(composeStrategy({ ...BRIDGE_IN, sourceNetwork: 'arbitrum-one', destinationNetwork: 'base' })).toMatchObject({ ok: true });
     expect(composeStrategy({ ...BRIDGE_IN, sourceNetwork: 'arbitrum-one', destinationNetwork: 'arbitrum-one' })).toMatchObject({ ok: false, code: 'ROUTER_PAIR_UNSUPPORTED' });
@@ -90,10 +90,10 @@ describe('BUILD-RH-002 Robinhood Chain strategies', () => {
     expect(composeStrategy({ ...testnet, range: { unit: 'full' } })).toMatchObject({ ok: false, code: 'LIQUIDITY_RANGE_UNIT_UNSUPPORTED' });
     expect(composeStrategy({ ...testnet, range: { unit: 'tick', lower: '189960', upper: '200040' }, feeTier: 3000 })).toMatchObject({ ok: false, code: 'LIQUIDITY_FEE_TIER_UNSUPPORTED' });
     // BUILD-BASE-001: Base is a transfer network too. A symbol outside its pinned assets resolves only in Base's validated list; a Robinhood
-    // Stock Token is in neither, before or after the list is loaded (transfer authoring reports any unresolved symbol as the catalog's).
+    // Stock Token is in neither: unavailable before loading, unknown after a validated catalog loads.
     expect(composeStrategy({ ...SEND_AAPL, network: 'base' })).toMatchObject({ ok: false, code: 'ASSET_CATALOG_UNAVAILABLE' });
     registerNetworkCatalog(baseCatalog());
-    expect(composeStrategy({ ...SEND_AAPL, network: 'base' })).toMatchObject({ ok: false, code: 'ASSET_CATALOG_UNAVAILABLE' });
+    expect(composeStrategy({ ...SEND_AAPL, network: 'base' })).toMatchObject({ ok: false, code: 'ASSET_UNKNOWN' });
     expect(composeStrategy({ ...SEND_AAPL, network: 'base', asset: 'cbBTC' })).toMatchObject({ ok: true });
     expect(composeStrategy({ ...SEND_AAPL, asset: '0x' + '1'.repeat(40) })).toMatchObject({ ok: false, code: 'STRATEGY_SCHEMA_INVALID' });
   });

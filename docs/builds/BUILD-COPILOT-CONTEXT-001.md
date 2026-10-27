@@ -9,7 +9,8 @@ Base revision: `d44d6afc3e6b0f20f9fddb2f32e5a3c0937aa28f`, fetched from `origin/
 3. A subsequent model action replaced the request rather than updating a persistent structured draft. The transcript supplied grounding text but did not protect already settled fields from model omission or substitution.
 4. Browser catalog preparation occurred after a successful model response. Local clarification answers did not perform that preparation, and `ensureNetworkCatalog(false, ...)` retained an earlier unavailable state.
 5. The model parser placed explicit `address@decimals` references inside the shorter token-name length limit. A complete EVM contract plus decimals exceeded it.
-6. An explicit SPL `mint@decimals` also matched the legacy recipient scanner. Independently reproduced failing tests showed both a token mint selected as a Solana recipient and a model recipient incorrectly grounded from an EVM contract written only as the source asset. Token-reference occurrences are now kept separate from recipient/beneficiary evidence.
+6. The canonical symbol adapter also collapsed a miss in a loaded catalog into `ASSET_CATALOG_UNAVAILABLE` on MCP/channel composition. New cross-surface assertions reproduce that mismatch and now require `ASSET_UNKNOWN`, preserving separate invalid-reference and decimals errors as well.
+7. An explicit SPL `mint@decimals` also matched the legacy recipient scanner. Independently reproduced failing tests showed both a token mint selected as a Solana recipient and a model recipient incorrectly grounded from an EVM contract written only as the source asset. Token-reference occurrences are now kept separate from recipient/beneficiary evidence.
 
 Two failing tests were run before changing production code. A separate `git archive` of the base revision was subsequently exercised with the exact Portuguese USDT request and the isolated catalog fixture from `copilot-context.test.ts`. With a model destination of USDC it produced:
 
