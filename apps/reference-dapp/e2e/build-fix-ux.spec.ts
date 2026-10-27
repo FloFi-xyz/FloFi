@@ -130,7 +130,7 @@ function mockedEstimate(usd: { input: string | null; output: string | null }) {
     const swap = body.workflow.nodes.find(item => item.nodeId === body.nodeId)!;
     await route.fulfill({ json: { ok: true, estimate: {
       workflowHash: hashArtifactBytes('semantic-workflow', new TextEncoder().encode(JSON.stringify(body.workflow))), nodeId: body.nodeId, chain: swap.chainId,
-      provider: 'Uniswap V3', expected: '0.000794', minimum: '0.000786', symbol: 'WETH', slippageBps: 100, expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      provider: 'Uniswap V3', expected: '0.000794', minimum: '0.00078606', symbol: 'WETH', slippageBps: 100, expiresAt: new Date(Date.now() + 60_000).toISOString(),
       usd: { ...usd, source: 'FIXTURE', evidence: 'MOCKED', observedAt: new Date().toISOString() } } } });
   };
 }
