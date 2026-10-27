@@ -44,3 +44,11 @@ Evidência visual do build final (infraestrutura MOCKED, idioma da interface EN;
 ## Correção das fixtures após o primeiro CircleCI
 
 O job `certification-browser-1` #501 falhou no perfil crítico `canvas-corrections`: a fixture devolvia 50 bps para o IR de 100 bps. A reprodução confirmou que o novo validador rejeitava corretamente a resposta. A auditoria dos helpers encontrou também um mínimo arredondado abaixo do limite de slippage em `build-fix-ux` e uma fixture TSLA para o token AAPL no IR de Stocks. Apenas as fixtures foram corrigidas; nenhuma validação de produção foi relaxada. Validação local: 11 testes passaram no conjunto padrão afetado (11 casos específicos de perfil pulados), e os 11 testes do perfil oficial `workflow-ux-authoring` passaram, incluindo Stocks. Novo CircleCI solicitado pelo commit aditivo.
+
+## Retomada de 2026-10-27
+
+Worktree e commits `f24b0c0` e `06446e5` preservados. O PR independente é [#127](https://github.com/alrimarleskovar/FloFi/pull/127). O CircleCI do commit `06446e58e56c6de943ecc0de93158c5a17cf409c` concluiu governance, certification-checks, certification-browser-1, certification-browser-2 e certification com sucesso (workflow `72c49720-9d36-46ca-9674-b44030f38f23`).
+
+Certificação PostgreSQL adicional no mesmo código: `pnpm test:postgres`, servidor descartável somente em loopback, **78 arquivos passaram, um arquivo pulado; 485 testes passaram e três foram pulados**. Nenhum banco remoto foi usado na suíte. O log de recuperação está em `/tmp/flofi-recovery-build1-postgres.log`.
+
+A aceitação hospedada continua pendente e requer autorização explícita de um preview isolado. Não houve merge, deploy, escrita em produção ou transação financeira. A aprovação de CI e os testes locais não substituem a comparação do navegador com o backend hospedado nem certificam uma rota LIVE_QUOTE como execução financeira.
