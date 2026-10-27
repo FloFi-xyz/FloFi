@@ -77,6 +77,10 @@ git diff --check
 
 Browser commands require the repository's pinned headless-shell and Anvil paths, telemetry/download controls, and loopback fixtures as specified by `playwright.config.ts`. CircleCI remains the required certification system, using the unchanged governance, certification-checks, browser shards, and certification fan-in ledger. Final head SHA, local results, CircleCI links/statuses, and any failures are recorded in the PR delivery evidence rather than inferred from this document.
 
+## CI resource diagnosis
+
+The first exact-head CircleCI browser-1 job (569) failed before browser tests: the PostgreSQL sidecar exited 137 during static page generation, which started 35 Next workers on a `large` (4 CPU / 8 GB) runner. The logs demonstrate the sidecar SIGKILL and worker count; memory pressure is the supported inference, not a claimed database/application test failure. CI builds now use two page-generation workers through the installed Next configuration API. Runner size, tests, assertions, profiles and certification gates are unchanged. The failed attempt remains a failure; only a fresh exact-head certification can approve the fix.
+
 ## Existing limitations
 
 - Catalog inclusion is the existing registry/list projection's decision. Conversation code does not widen provider inclusion rules (for example numeric-leading records excluded by an existing list projection).
