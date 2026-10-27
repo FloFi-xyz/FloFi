@@ -19,7 +19,7 @@ import { solanaTransferProfileFor } from './solana-transfer-authoring';
 import { copilotNetworksFor, lendingOffers, routeLabels, type StrategyAction } from './authoring-capabilities';
 import type { PendingAgentCapability } from './agent-rollout';
 import { solanaDisplayCatalogLoaded } from './solana-asset-catalog';
-import { explicitOutputAsset, groundExplicitAssets } from './copilot-asset-intent';
+import { explicitInputAsset, explicitOutputAsset, groundExplicitAssets } from './copilot-asset-intent';
 import { resolveAssetReference } from './asset-catalogs';
 import { COPILOT_NETWORK_IDS, copilotNetworksMentioned, catalogNetworkOfChatName, networkIdentity, networkOfCopilot, type CopilotNetworkId } from './network-registry';
 import { routerNetworksOf } from './router-authoring';
@@ -269,6 +269,11 @@ function slippageOf(value: string | null, fallback: string, g: Grounding, notes:
   return value;
 }
 function addressOf(value: string | null, g: Grounding, field: 'beneficiary' | 'recipient', notFound = copyOf(g).addressNotFound(field)): string | null {
+  if (value !== null && !g.carried.has(field)) {
+    const assetAddresses = [explicitInputAsset(g.text), explicitOutputAsset(g.text)].flatMap(asset => asset && /^0x/i.test(asset) ? [asset.split('@')[0]!.toLowerCase()] : []);
+    const mentions = [...g.text.matchAll(/0x[0-9a-fA-F]{40}/g)].filter(match => match[0].toLowerCase() === value.toLowerCase());
+    if (assetAddresses.includes(value.toLowerCase()) && mentions.length === 1) return ask([field], copyOf(g).addressIsAsset);
+  }
   if (value !== null && !g.carried.has(field) && !groundedAddress(g.text, value)) return ask([field], notFound);
   return value;
 }
@@ -485,7 +490,10 @@ function planUniversalBridge(a: CopilotBridgeAction, g: Grounding): Plan {
   const destinationEcosystem = UNIVERSAL_NETWORKS[dst].ecosystem === 'SOLANA' ? 'Solana' : 'EVM';
   const solanaRecipient = () => {
     if (a.recipient !== null && /^0x/i.test(a.recipient)) return refuse(m.universalRecipientFormat(dstName, destinationEcosystem));
-    const keys = [...new Set([...text.matchAll(/(?<![A-Za-z0-9])[1-9A-HJ-NP-Za-km-z]{32,44}(?![A-Za-z0-9])/g)].map(match => match[0]).filter(isSolanaPublicKey))];
+    const outputIdentity = resolveUniversalAsset(dst, outputAsset).asset;
+    // Explicit token references and the selected token mint are asset identities, never implicit recipient wallets.
+    const keys = [...new Set([...text.matchAll(/(?<![A-Za-z0-9])[1-9A-HJ-NP-Za-km-z]{32,44}(?![A-Za-z0-9@])/g)].map(match => match[0])
+      .filter(isSolanaPublicKey).filter(key => outputIdentity.kind !== 'TOKEN' || key !== outputIdentity.address))];
     return keys.length > 1 ? ask(['recipient'], m.universalRecipientWhich, keys) : keys[0] ?? '';
   };
   const recipient = destinationEcosystem === 'EVM' ? addressOf(a.recipient, g, 'recipient')?.toLowerCase() ?? '' : solanaRecipient();

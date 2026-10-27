@@ -49,6 +49,7 @@ const EN = {
   slippageNotFound: (bps: string) => `Flofi could not find the slippage ${bps} bps in your message. What maximum slippage should it use?`,
   slippageAtMost: (bps: number) => `Slippage must be at most ${bps} bps for this action.`,
   addressNotFound: (field: 'beneficiary' | 'recipient') => `Flofi could not find that ${field} address in your message. Type the full address, or leave it out to use your connected wallet.`,
+  addressIsAsset: 'That address names the token in your request. Which wallet should receive it?',
   tokenUnsupported: (subject: string) => `That token is not supported for ${subject}.`,
   tokenNotFound: (token: string) => `Flofi could not find the token ${token} in your message. Which token do you mean?`,
   evmSwapTokens: 'Flofi swaps USDC and WETH on Base, Base Sepolia and Ethereum Sepolia.',
@@ -249,6 +250,7 @@ const EN = {
 export type CopilotCopy = typeof EN;
 
 const PT: CopilotCopy = {
+  addressIsAsset: 'Esse endereço identifica o token no seu pedido. Qual carteira deve recebê-lo?',
   get capabilities() { return capabilityText('PT'); },
   get compositionUnsupported() { return PT_COMPOSITION(); },
   field: { amount: 'o valor', asset: 'o token', inputAsset: 'o token de origem', outputAsset: 'o token de destino', network: 'a rede', sourceNetwork: 'a rede de origem', destinationNetwork: 'a rede de destino',

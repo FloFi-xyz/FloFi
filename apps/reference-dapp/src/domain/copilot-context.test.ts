@@ -108,6 +108,25 @@ describe('chain-scoped asset and command matrix', () => {
   it('parses full explicit EVM references in the strict model contract', () => {
     expect(parseCopilotIntentV2(intent.action(act.bridge({ asset: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913@6' })))).toMatchObject({ kind: 'ACTION', action: { asset: expect.stringContaining('@6') } });
   });
+  it('keeps an explicitly requested Solana mint independent of the destination recipient', () => {
+    const mint = 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB';
+    const s = new CopilotSession();
+    expect(s.say(`Please bridge 1 USDC from Base to Solana receiving ${mint}@6`, intent.action(act.bridge({
+      sourceNetwork: 'BASE', destinationNetwork: 'SOLANA', asset: 'USDC', outputAsset: `${mint}@6`, amount: '1',
+    })))).toMatchObject({ kind: 'PROPOSAL', command: { input: { inputAsset: 'USDC', outputAsset: `${mint}@6`, recipient: '' } } });
+    const recipient = 'GsWtMd3S5133XPhnfeR1CvPLcLxBSknhVhmaW7fHevBq';
+    expect(new CopilotSession().say(`Please bridge 1 USDC from Base to Solana receiving ${mint}@6 for ${recipient}`, intent.action(act.bridge({
+      sourceNetwork: 'BASE', destinationNetwork: 'SOLANA', asset: 'USDC', outputAsset: `${mint}@6`, amount: '1', recipient,
+    })))).toMatchObject({ kind: 'PROPOSAL', command: { input: { outputAsset: `${mint}@6`, recipient } } });
+  });
+  it('does not ground a model recipient from the contract written only as a source asset', () => {
+    const token = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913';
+    const s = new CopilotSession();
+    expect(s.say(`Please bridge 1 ${token}@6 from Base to WETH on Arbitrum`, intent.action(act.bridge({
+      sourceNetwork: 'BASE', destinationNetwork: 'ARBITRUM', asset: `${token}@6`, outputAsset: 'WETH', amount: '1', recipient: token,
+    })))).toMatchObject({ kind: 'CLARIFICATION' });
+    expect(s.state.draft?.expected).toEqual(['recipient']);
+  });
 });
 
 describe('persistent fields, corrections and stale context', () => {

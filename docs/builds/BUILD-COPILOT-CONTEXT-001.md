@@ -9,6 +9,7 @@ Base revision: `d44d6afc3e6b0f20f9fddb2f32e5a3c0937aa28f`, fetched from `origin/
 3. A subsequent model action replaced the request rather than updating a persistent structured draft. The transcript supplied grounding text but did not protect already settled fields from model omission or substitution.
 4. Browser catalog preparation occurred after a successful model response. Local clarification answers did not perform that preparation, and `ensureNetworkCatalog(false, ...)` retained an earlier unavailable state.
 5. The model parser placed explicit `address@decimals` references inside the shorter token-name length limit. A complete EVM contract plus decimals exceeded it.
+6. An explicit SPL `mint@decimals` also matched the legacy recipient scanner. Independently reproduced failing tests showed both a token mint selected as a Solana recipient and a model recipient incorrectly grounded from an EVM contract written only as the source asset. Token-reference occurrences are now kept separate from recipient/beneficiary evidence.
 
 Two failing tests were run before changing production code. A separate `git archive` of the base revision was subsequently exercised with the exact Portuguese USDT request and the isolated catalog fixture from `copilot-context.test.ts`. With a model destination of USDC it produced:
 
@@ -41,7 +42,7 @@ Certified Router pairs retain their existing authoring path. Independent/cross-a
 | 1–2. Base USDC to Arbitrum USDT/WETH | `domain/copilot-context.test.ts`: chain-scoped asset and command matrix |
 | 3. Same-asset bridge | Certified Router regression in that matrix; existing Arbitrum/Router parity suites |
 | 4. Token names | Wrapped Ether, Wrapped BTC; existing catalog and SPL name parity |
-| 5. Contract/mint and decimals | Known EVM address, explicit `@6`, wrong decimals, invented reference; existing SPL parity |
+| 5. Contract/mint and decimals | Known EVM address, explicit `@6`, wrong decimals, invented reference; actual Solana USDT mint with/without a separate recipient; existing SPL parity |
 | 6. Symbol casing | `usdt`, `USDT`, `uSdT`; catalog case regressions |
 | 7. Missing output plus one-token answer | Typed cbBTC-to-Solana draft; persisted Solana-to-Robinhood channel and browser journeys |
 | 8–9. Model omits/substitutes explicit token | Both structured-output cases assert the correct independent canonical identities |
