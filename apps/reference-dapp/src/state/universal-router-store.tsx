@@ -27,11 +27,11 @@ const OBSERVABLE = ['SUBMITTING', 'SUBMISSION_RESULT_UNKNOWN', 'PENDING'];
 type Pointer = { id: string; ecosystem: UniversalEcosystem; owner: string; hash?: string };
 type Store = { available: boolean; executionEnabled: boolean; details: UniversalBridgeDetails | null; ecosystem: UniversalEcosystem | null;
   owner: string | null; destinationWallet: string | null; record: UniversalRecord | null; discovery: DiscoveryResult | null; busy: boolean; signing: boolean;
-  error: string | null; retired: boolean; recovered: boolean; runs: readonly UniversalRunSummary[]; signedIn: boolean;
+  error: string | null; correlationId: string | null; retired: boolean; recovered: boolean; runs: readonly UniversalRunSummary[]; signedIn: boolean;
   connect(): Promise<void>; signIn(): Promise<void>; discover(): Promise<void>; simulate(): Promise<void>; refresh(): Promise<void>; review(): Promise<void>;
   execute(): Promise<void>; observe(): Promise<void>; open(runId: string): Promise<void>; loadRuns(): Promise<void>; switchNetwork(): Promise<void> };
 const Context = createContext<Store | null>(null);
-const unwrap = <T,>(result: { ok: true; value: T } | { ok: false; code: string }): T => { if (!result.ok) throw new Error(result.code); return result.value; };
+const unwrap = <T,>(result: { ok: true; value: T } | { ok: false; code: string; correlationId?: string }): T => { if (!result.ok) throw Object.assign(new Error(result.code), { correlationId: result.correlationId }); return result.value; };
 const utf8Hex = (text: string) => '0x' + Array.from(new TextEncoder().encode(text), b => b.toString(16).padStart(2, '0')).join('');
 const ecosystemOfRecord = (record: UniversalRecord): UniversalEcosystem => record.review.source.ecosystem;
 function errorValue(value: unknown): unknown {
@@ -50,6 +50,7 @@ export function UniversalRouterProvider({ children }: { children: ReactNode }) {
   const { state } = useWorkflow(), wallet = useBuild009Wallet(), solana = useJupiter();
   const [record, setRecord] = useState<UniversalRecord | null>(null), [discovery, setDiscovery] = useState<DiscoveryResult | null>(null);
   const [busy, setBusy] = useState(false), [signing, setSigning] = useState(false), [error, setError] = useState<string | null>(null);
+  const [correlationId, setCorrelationId] = useState<string | null>(null);
   const [available, setAvailable] = useState(false), [executionEnabled, setExecutionEnabled] = useState(false), [recovered, setRecovered] = useState(false);
   const [runs, setRuns] = useState<readonly UniversalRunSummary[]>([]), [sessions, setSessions] = useState<{ EVM: string | null; SOLANA: string | null }>({ EVM: null, SOLANA: null });
   const workflow = state.workflow as unknown as SemanticWorkflow;
@@ -104,8 +105,8 @@ export function UniversalRouterProvider({ children }: { children: ReactNode }) {
       universalInvalidate(ecosystemOfRecord(record), record.id, 'WALLET_CHANGED').then(r => { if (r.ok) setRecord(r.value); }).catch(() => undefined);
   }, [owner, record?.id, record?.phase]);
   async function operation(action: () => Promise<void>) {
-    if (busyRef.current) return; busyRef.current = true; setBusy(true); setError(null);
-    try { await action(); } catch (cause) { setError(cause instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(cause.message) ? cause.message : 'UNIVERSAL_OPERATION_FAILED'); }
+    if (busyRef.current) return; busyRef.current = true; setBusy(true); setError(null); setCorrelationId(null);
+    try { await action(); } catch (cause) { setError(cause instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(cause.message) ? cause.message : 'UNIVERSAL_OPERATION_FAILED'); setCorrelationId(cause instanceof Error && 'correlationId' in cause && typeof cause.correlationId === 'string' && /^[a-f0-9-]{36}$/.test(cause.correlationId) ? cause.correlationId : null); }
     finally { busyRef.current = false; setBusy(false); }
   }
   async function connect() { await operation(async () => {
@@ -283,7 +284,7 @@ export function UniversalRouterProvider({ children }: { children: ReactNode }) {
     await (ecosystemOfRecord(record) === 'EVM' ? executeEvm(record) : executeSolana(record));
     void refreshRuns(ecosystemOfRecord(record));
   }); }
-  return <Context.Provider value={{ available, executionEnabled, details, ecosystem, owner, destinationWallet, record, discovery, busy, signing, error, retired, recovered, runs,
+  return <Context.Provider value={{ available, executionEnabled, details, ecosystem, owner, destinationWallet, record, discovery, busy, signing, error, correlationId, retired, recovered, runs,
     signedIn, connect, signIn, discover, simulate, refresh, review, execute, observe, open, loadRuns, switchNetwork }}>
     {signing && <p role="status">Confirm or reject the pending request in your wallet.</p>}
     <div inert={signing} data-universal-wallet-pending={signing ? 'true' : undefined}>{children}</div></Context.Provider>;

@@ -13,7 +13,7 @@ import { SOLANA_MAINNET_TOKENS } from '@defi-workflow-engine/action-registry';
 import { createUniversalBridgeNode, isSolanaPublicKey, isUniversalBridgeNode, readUniversalBridgeNode, UNIVERSAL_NETWORKS, universalNetworkOfChain, type UniversalAssetRef,
   type UniversalBridgeFields, type UniversalNetworkKey, type UniversalRouteSelection, type UniversalRoutingProvider, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { authoringAssetSymbol, featuredNetworkSymbols, resolveNetworkAsset } from './asset-catalogs';
-import { solanaDisplayAsset } from './solana-asset-catalog';
+import { solanaDisplayAsset, resolveSolanaCatalogAsset } from './solana-asset-catalog';
 import { routerTokensOf } from './router-authoring';
 import { networkIdentity } from './network-registry';
 import { formatTokenAmount, parseTokenAmount } from './jupiter-authoring';
@@ -71,7 +71,7 @@ export function resolveUniversalAsset(key: UniversalNetworkKey, reference: strin
   const symbol = text.toUpperCase();
   if (symbol === network.native.symbol) return { asset: { kind: 'NATIVE', decimals: network.native.decimals }, symbol: network.native.symbol };
   if (network.ecosystem === 'SOLANA') {
-    const token = Object.values(SOLANA_MAINNET_TOKENS).find(t => t.symbol === symbol && !t.native);
+    const token = Object.values(SOLANA_MAINNET_TOKENS).find(t => t.symbol === symbol && !t.native) ?? resolveSolanaCatalogAsset(text);
     return token ? { asset: { kind: 'TOKEN', address: token.mint, decimals: token.decimals }, symbol: token.symbol } : fail('UNIVERSAL_ASSET_UNKNOWN');
   }
   const asset = resolveNetworkAsset(network.chain, { symbol: text });
@@ -87,7 +87,7 @@ export function resolveUniversalAsset(key: UniversalNetworkKey, reference: strin
 export function universalAssetReference(key: UniversalNetworkKey, written: string): string {
   const identity = networkIdentity(UNIVERSAL_NETWORKS[key].chain), explicit = /@[0-9]{1,2}$/.test(written.trim());
   const resolved = resolveUniversalAsset(key, identity?.catalog && !explicit ? authoringAssetSymbol(identity.chain, written) : written);
-  return explicit && resolved.asset.kind === 'TOKEN' ? `${resolved.asset.address}@${resolved.asset.decimals}` : resolved.symbol;
+  return (explicit || key === 'solana' && !Object.values(SOLANA_MAINNET_TOKENS).some(t => t.symbol === resolved.symbol)) && resolved.asset.kind === 'TOKEN' ? `${resolved.asset.address}@${resolved.asset.decimals}` : resolved.symbol;
 }
 /**
  * The destination asset FloFi proposes when the owner names none (always stated in the notes and shown at Review): the same asset when the
@@ -157,7 +157,7 @@ export function universalCanvasPair(networks: { readonly source: string; readonl
   const legacy = routerTokensOf(networks);
   const same = (key: UniversalNetworkKey, reference: string | undefined, symbol: string) => {
     if (reference === undefined) return true;
-    try { return JSON.stringify(resolveUniversalAsset(key, reference).asset) === JSON.stringify(resolveUniversalAsset(key, symbol).asset); } catch { return false; }
+    try { return JSON.stringify(resolveUniversalAsset(key, universalAssetReference(key, reference)).asset) === JSON.stringify(resolveUniversalAsset(key, symbol).asset); } catch { return false; }
   };
   return legacy && same(source, networks.inputAsset, legacy.token) && same(destination, networks.outputAsset, legacy.destinationToken) ? null : { source, destination };
 }

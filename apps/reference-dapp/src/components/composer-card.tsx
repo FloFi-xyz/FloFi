@@ -3,6 +3,7 @@
 import { useLocale } from '../i18n/locale';
 
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
+import { buildEstimateFailureMessage } from '../domain/build-estimate';
 import { useLiveQuote } from '../state/build-estimate';
 import { Handle, Position } from '@xyflow/react';
 import type { composerSummary, composerNodeState } from '../domain/composer-presentation';
@@ -426,7 +427,7 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
             : <span className="numeric composer-amount">{tr(card.summary.amount)}</span>}
           {pairDestination && <><span className="composer-value-arrow" aria-hidden="true">↓</span><ValueBox readOnly token={pairDestination} network={destinationNetwork} hint="Output estimate unavailable" fiatFirst={false} onFiatFirstChange={setFiatFirst}/></>}
         </div>}
-        {pairDestination && <span className="composer-quote-note">{tr("Estimate unavailable")}</span>}
+        {pairDestination && <span className="composer-quote-note" title={quote.status === 'unavailable' && quote.code ? [quote.code, quote.correlationId].filter(Boolean).join(' · ') : undefined}>{tr("Estimate unavailable")}</span>}
       </>        : amountBox ? <AmountContainer className="composer-amount-form nodrag nopan"
         onKeyDown={event => event.stopPropagation()}
         onSubmit={event => { event.preventDefault(); commitAmount(); }}
@@ -445,7 +446,7 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
           hint="Approximate read-only output; simulate before review" fiatFirst={fiatFirst} onFiatFirstChange={setFiatFirst}
           usd={usdLine(destinationNetwork, estimate?.usd?.output, usdState)}/>
         </ValuePair>
-        <span className="composer-quote-note">{card.networkSelection?.valid === false ? tr('Choose matching networks') : <>{!amountParts && <>{tr(card.summary.amount)} · </>}{tr(estimate ? `Approximate · ${estimate.provider} · Simulate before review` : quote.status === 'calculating' ? 'Calculating estimate…' : quote.status === 'unavailable' ? 'Quote unavailable' : 'Estimate unavailable')}</>}</span>
+        <span className="composer-quote-note" title={quote.status === 'unavailable' && quote.code ? [quote.code, quote.correlationId].filter(Boolean).join(' · ') : undefined}>{card.networkSelection?.valid === false ? tr('Choose matching networks') : <>{!amountParts && <>{tr(card.summary.amount)} · </>}{tr(estimate ? `Approximate · ${estimate.provider} · Simulate before review` : quote.status === 'calculating' ? 'Calculating estimate…' : quote.status === 'unavailable' ? buildEstimateFailureMessage(quote.code ?? 'ESTIMATE_UNAVAILABLE') : 'Estimate unavailable')}</>}</span>
         {editor?.changed && (directCommit ? <div className="composer-amount-actions composer-amount-direct">
           <span className="composer-amount-hint">{tr("Press Enter to apply")}</span>
           {editor.onCancel && <button type="button" className="composer-amount-cancel" onClick={() => { setAmountError(null); editor.onCancel!(); }}>{tr("Cancel")}</button>}
@@ -500,8 +501,9 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
     onTokenChange={symbol => { if (card.actionSelection) card.actionSelection.onToken(tokenPanel, symbol); else card.tokenSelection?.onSelect(tokenPanel, symbol); }}
     onNetworkChange={network => { card.actionSelection?.onNetwork(network); setAmountError(null); if (poolCard) poolRange.reset(); }}/>;
   const bridgeKey = universalKeyOfCanvasLabel(bridgeNetwork);
-  const bridge = bridgePanel && bridgeSymbol && <AssetNetworkPicker bridge key={bridgePanel + bridgeNetwork} id={bridgePanelId} side={bridgePanel} symbol={bridgeSymbol} network={bridgeNetwork}
-    tokens={card.tokenSelection?.[bridgePanel] ?? [bridgeSymbol]} networks={card.networkSelection?.[bridgePanel] ?? [bridgeNetwork]} unavailable={card.networkSelection?.unavailable}
+  // A network change can clear an incompatible asset; keep the picker available for the required new selection.
+  const bridge = bridgePanel && <AssetNetworkPicker bridge key={bridgePanel + bridgeNetwork} id={bridgePanelId} side={bridgePanel} symbol={bridgeSymbol ?? ''} network={bridgeNetwork}
+    tokens={card.tokenSelection?.[bridgePanel] ?? (bridgeSymbol ? [bridgeSymbol] : [])} networks={card.networkSelection?.[bridgePanel] ?? [bridgeNetwork]} unavailable={card.networkSelection?.unavailable}
     selectedReference={card.tokenSelection?.references?.[bridgePanel]}
     search={bridgeKey && card.tokenSelection ? { chain: UNIVERSAL_NETWORKS[bridgeKey].chain, accept: () => true, identity: true, onSelect: reference => card.tokenSelection!.onSelect(bridgePanel, reference) } : undefined}
     onTokenChange={symbol => card.tokenSelection?.onSelect(bridgePanel, symbol)}

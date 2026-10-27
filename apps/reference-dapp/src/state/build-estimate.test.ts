@@ -6,7 +6,7 @@ import { savedWorkflowHash, validateSavedWorkflow } from '../domain/saved-workfl
 import type { BuildEstimate, BuildEstimateResult } from '../domain/build-estimate';
 import { deferred, HookHarness } from '../test-utils/hook-harness';
 import { clearLiveQuoteCache, useBuildEstimate, useLiveQuote } from './build-estimate';
-import { LIVE_QUOTE_DEBOUNCE_MS } from '../domain/build-estimate';
+import { LIVE_QUOTE_DEBOUNCE_MS, BUILD_ESTIMATE_TIMEOUT_MS } from '../domain/build-estimate';
 vi.mock('react', async original => ({ ...await original<typeof import('react')>(), ...(await import('../test-utils/hook-harness')).hookMocks }));
 const now = new Date('2026-10-08T12:00:00Z');
 const authored = (amount = '2') => validateSavedWorkflow(editorReducer(initialEditor(), { type: 'ADD_TESTNET_SWAP', direction: 'USDC_TO_WETH', amount, slippage: '50', source: 'CANVAS', baseRevision: 0 }, createBaseSepoliaReviewContext()).workflow);
@@ -51,13 +51,20 @@ describe('Build estimate snapshot, freshness and provider binding', () => {
     const workflow = authored(); transport.mockRejectedValueOnce(Error('offline')).mockReturnValue(new Promise(() => {}));
     const read = () => host.render(() => useBuildEstimate(workflow, 'node-002'));
     read(); await vi.advanceTimersByTimeAsync(350); expect(read()).toBeNull();
-    host.unmount(); host = new HookHarness(); read(); await vi.advanceTimersByTimeAsync(15_350);
+    host.unmount(); host = new HookHarness(); read(); await vi.advanceTimersByTimeAsync(BUILD_ESTIMATE_TIMEOUT_MS + 350);
     expect(read()).toBeNull(); expect(transport.mock.calls.at(-1)![1].signal.aborted).toBe(true);
     host.unmount();
   });
 });
 
 describe('UX-007 fast live quote feedback', () => {
+  it('preserves safe configuration diagnostics and the support reference without publishing an amount', async () => {
+    const workflow = authored(), correlationId = '12345678-abcd-4321-9876-123456789abc';
+    transport.mockResolvedValue(response({ ok: false, code: 'CLOUD_RUNTIME_NOT_CONFIGURED', correlationId }));
+    const read = () => host.render(() => useLiveQuote(workflow, 'node-002'));
+    read(); await vi.advanceTimersByTimeAsync(LIVE_QUOTE_DEBOUNCE_MS);
+    expect(read()).toEqual({ status: 'unavailable', code: 'CLOUD_RUNTIME_NOT_CONFIGURED', correlationId });
+  });
   it('keeps an in-flight quote when catalog rerenders recreate the same workflow snapshot', async () => {
     let workflow = authored('100');
     const pending = deferred<ReturnType<typeof response>>();
@@ -114,7 +121,7 @@ describe('UX-007 fast live quote feedback', () => {
     const read = () => host.render(() => useLiveQuote(workflow, 'node-002'));
     read(); await vi.advanceTimersByTimeAsync(LIVE_QUOTE_DEBOUNCE_MS); expect(read().status).toBe('ready');
     workflow = authored('3'); expect(read()).toEqual({ status: 'calculating' });
-    await vi.advanceTimersByTimeAsync(LIVE_QUOTE_DEBOUNCE_MS); expect(read()).toEqual({ status: 'unavailable' });
+    await vi.advanceTimersByTimeAsync(LIVE_QUOTE_DEBOUNCE_MS); expect(read()).toMatchObject({ status: 'unavailable', code: 'ESTIMATE_UNAVAILABLE' });
     expect(host.render(() => useBuildEstimate(workflow, 'node-002'))).toBeNull();
   });
   it('reuses an answered snapshot only for that exact snapshot and only until its own expiry', async () => {

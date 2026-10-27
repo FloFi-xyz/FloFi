@@ -11,7 +11,7 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { WALLET_PRINCIPAL_HEADER } from './run-ownership.ts';
 
-export type FlowResult<T> = { ok: true; value: T } | { ok: false; code: string };
+export type FlowResult<T> = { ok: true; value: T } | { ok: false; code: string; correlationId?: string };
 const CODE = /^[A-Z][A-Z0-9_]{2,80}$/;
 const READ_ONLY = new Set(['status', 'mode']);
 
@@ -47,11 +47,11 @@ export async function callCloudFlow<T>(flow: string, method: string, args: reado
     }
     let body: unknown = null;
     try { body = await response.json(); } catch { /* handled below */ }
-    const result = body as { ok?: unknown; value?: unknown; code?: unknown } | null;
+    const result = body as { ok?: unknown; value?: unknown; code?: unknown; correlationId?: unknown } | null;
     if (response.status === 409 && result?.code === 'IDEMPOTENCY_IN_PROGRESS' && attempt < 3) { await sleep(1_000 * (attempt + 1)); continue; }
     if ([502, 503, 504].includes(response.status) && attempt < 3) { await sleep(500 * 2 ** attempt); continue; }
     if (result?.ok === true && 'value' in result) return { ok: true, value: result.value as T };
-    if (result?.ok === false && typeof result.code === 'string' && CODE.test(result.code)) return { ok: false, code: result.code };
+    if (result?.ok === false && typeof result.code === 'string' && CODE.test(result.code)) return { ok: false, code: result.code, ...typeof result.correlationId === 'string' && /^[a-f0-9-]{36}$/.test(result.correlationId) ? { correlationId: result.correlationId } : {} };
     return { ok: false, code: 'CLOUD_API_UNAVAILABLE' };
   }
   return { ok: false, code: 'CLOUD_API_UNAVAILABLE' };
@@ -62,30 +62,31 @@ export async function callCloudFlow<T>(flow: string, method: string, args: reado
  * call carries no idempotency key and no principal; a transport failure is simply retried.
  */
 export async function previewCloudFlow<T>(flow: string, args: readonly unknown[], options: {
-  env?: Readonly<Record<string, string | undefined>>; transport?: typeof fetch; sleep?: (ms: number) => Promise<void> } = {}): Promise<FlowResult<T>> {
+  env?: Readonly<Record<string, string | undefined>>; transport?: typeof fetch; sleep?: (ms: number) => Promise<void>; timeoutMs?: number; maxAttempts?: number; purpose?: 'SIMULATION' | 'QUOTE' } = {}): Promise<FlowResult<T>> {
   const env = options.env ?? process.env, transport = options.transport ?? fetch;
   const sleep = options.sleep ?? ((ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)));
   let base: URL | null;
   try { base = cloudApiBaseUrl(env); } catch (error) { return { ok: false, code: (error as Error).message }; }
   if (!base) return { ok: false, code: 'CLOUD_API_NOT_CONFIGURED' };
   const target = new URL(`v1/previews/${encodeURIComponent(flow)}`, base.href.endsWith('/') ? base : new URL(base.href + '/'));
-  for (let attempt = 0; attempt < 3; attempt++) {
+  const attempts = Math.max(1, Math.min(3, options.maxAttempts ?? 3));
+  for (let attempt = 0; attempt < attempts; attempt++) {
     let response: Response;
     try {
-      response = await transport(target, { method: 'POST', cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(240_000),
-        headers: { 'content-type': 'application/json', ...env.API_AUTH_TOKEN ? { authorization: `Bearer ${env.API_AUTH_TOKEN}` } : {} }, body: JSON.stringify({ args }) });
+      response = await transport(target, { method: 'POST', cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(options.timeoutMs ?? 240_000),
+        headers: { 'content-type': 'application/json', ...env.API_AUTH_TOKEN ? { authorization: `Bearer ${env.API_AUTH_TOKEN}` } : {} }, body: JSON.stringify({ args, ...options.purpose ? { purpose: options.purpose } : {} }) });
     } catch {
-      if (attempt < 2) { await sleep(500 * 2 ** attempt); continue; }
+      if (attempt < attempts - 1) { await sleep(500 * 2 ** attempt); continue; }
       return { ok: false, code: 'CLOUD_API_UNAVAILABLE' };
     }
     let body: unknown = null;
     try { body = await response.json(); } catch { /* handled below */ }
-    const result = body as { ok?: unknown; value?: unknown; code?: unknown } | null;
-    if ([502, 503, 504].includes(response.status) && attempt < 2) { await sleep(500 * 2 ** attempt); continue; }
+    const result = body as { ok?: unknown; value?: unknown; code?: unknown; correlationId?: unknown } | null;
+    if ([502, 503, 504].includes(response.status) && attempt < attempts - 1) { await sleep(500 * 2 ** attempt); continue; }
     // An API deployed before BUILD-MCP-001 has no preview route.
     if (response.status === 404) return { ok: false, code: 'CLOUD_API_PREVIEW_UNAVAILABLE' };
     if (result?.ok === true && 'value' in result) return { ok: true, value: result.value as T };
-    if (result?.ok === false && typeof result.code === 'string' && CODE.test(result.code)) return { ok: false, code: result.code };
+    if (result?.ok === false && typeof result.code === 'string' && CODE.test(result.code)) return { ok: false, code: result.code, ...typeof result.correlationId === 'string' && /^[a-f0-9-]{36}$/.test(result.correlationId) ? { correlationId: result.correlationId } : {} };
     return { ok: false, code: 'CLOUD_API_UNAVAILABLE' };
   }
   return { ok: false, code: 'CLOUD_API_UNAVAILABLE' };

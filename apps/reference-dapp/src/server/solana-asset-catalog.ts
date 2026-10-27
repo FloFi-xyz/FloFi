@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { universalRouterMode } from './universal-router/runtime.ts';
 import { JUPITER_VERIFIED_TOKENS, parseJupiterVerifiedCatalog, type SolanaAssetCatalog } from '../domain/solana-asset-catalog.ts';
 
 /** Fixed official source, no redirects, bounded streamed bytes/time, coalesced reads, no stale fallback. Catalog membership proves no route. */
@@ -31,3 +32,9 @@ export function createSolanaCatalogLoader(fetcher: typeof fetch = fetch, now: ()
   };
 }
 export const loadSolanaCatalog = createSolanaCatalogLoader();
+
+/** Harness/offline authoring uses pinned assets; enabled live bridges can load the validated SPL catalog. */
+export async function solanaAuthoringCatalog(env: Readonly<Record<string, string | undefined>> = process.env): Promise<SolanaAssetCatalog> {
+  if (universalRouterMode(env) !== 'live') throw new Error('SOLANA_TOKEN_CATALOG_UNAVAILABLE');
+  return loadSolanaCatalog();
+}

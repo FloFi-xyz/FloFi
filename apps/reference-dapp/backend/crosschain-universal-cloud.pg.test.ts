@@ -89,7 +89,7 @@ describe('BUILD-CROSSCHAIN-UNIVERSAL-001 universal router on durable cloud state
     ok(await api1.call('review', id, run.review.commitment, w));
     // Another wallet (an EVM session) can neither read nor continue the run.
     const stranger = await deployment(c, EVM_OWNER, { evidenceDir: api1.evidenceDir });
-    expect(await stranger.call('status', id)).toEqual({ ok: false, code: 'RUN_OWNER_MISMATCH' });
+    expect(await stranger.call('status', id)).toMatchObject({ ok: false, code: 'RUN_OWNER_MISMATCH', correlationId: expect.stringMatching(/^[a-f0-9-]{36}$/) });
     const begun = ok<{ unsignedTransaction: string }>(await api1.call('begin', id, owner, w));
     const signed = c.wallet.sign(begun.unsignedTransaction);
     const submitted = ok<UniversalRecord>(await api1.call('submit', id, signed));

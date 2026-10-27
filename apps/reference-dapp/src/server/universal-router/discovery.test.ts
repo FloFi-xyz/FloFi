@@ -38,15 +38,16 @@ describe('BUILD-CROSSCHAIN-UNIVERSAL-001 route discovery', () => {
       ['mayan-mctp', 'LIVE_QUOTE', '18993634']]);
     expect(result.candidates.find(c => c.provider === 'across')).toMatchObject({ status: 'NO_ROUTE', reason: 'ACROSS_NETWORK_UNSUPPORTED' });
   });
-  it('the certified Router pairs (Base USDC → Arbitrum USDC) are executable through Across and LI.FI → Across', async () => {
-    const lifi = { routes: [{ id: 'route-1', toAmount: '9990000', toAmountMin: '9990000', steps: [{ tool: 'across', estimate: { executionDuration: 4, feeCosts: [] } }] }] };
-    const across = { crossSwapType: 'bridgeableToBridgeable', expectedOutputAmount: '9995000', minOutputAmount: '9995000', expectedFillTime: 2, id: 'q-1' };
+  it('quotes on certified pairs still require transaction validation before execution', async () => {
+    const lifi = { routes: [{ id: 'route-1', fromChainId: 8453, toChainId: 42161, fromAmount: '10000000', fromToken: BASE_USDC, toToken: ARB_USDC, toAmount: '9990000', toAmountMin: '9990000', steps: [{ tool: 'across', estimate: { executionDuration: 4, feeCosts: [] } }] }] };
+    const across = { inputAmount: '10000000', inputToken: { ...BASE_USDC, chainId: 8453 }, outputToken: { ...ARB_USDC, chainId: 42161 }, crossSwapType: 'bridgeableToBridgeable', expectedOutputAmount: '9995000', minOutputAmount: '9995000', expectedFillTime: 2, id: 'q-1' };
     const discovery = createUniversalDiscovery({ http: http({ 'api.relay.link/quote': { __httpStatus: 400, __body: { message: 'No routes found' } }, 'li.quest': lifi, 'app.across.to': across,
       'price-api.mayan.finance': { quotes: [] } }) });
     const result = await discovery.discover({ source: UNIVERSAL_NETWORKS.base, destination: UNIVERSAL_NETWORKS['arbitrum-one'], inputToken: BASE_USDC, outputToken: ARB_USDC,
       amount: '10000000', slippageBps: 50 });
     expect(result.quoteSubjects).toBe('PUBLIC_QUOTE_SUBJECT');
-    expect(result.candidates.filter(c => c.status === 'EXECUTABLE').map(c => [c.provider, c.executableBy])).toEqual([['across', 'CERTIFIED_ROUTER'], ['lifi', 'CERTIFIED_ROUTER']]);
+    expect(result.candidates.filter(c => c.status === 'EXECUTABLE').map(c => [c.provider, c.executableBy])).toEqual([]);
+    expect(result.candidates.filter(c => c.status === 'LIVE_QUOTE').map(c => c.provider)).toEqual(['across', 'lifi']);
     expect(result.recommended).toBeNull();
     expect(result.candidates.find(c => c.provider === 'relay')).toMatchObject({ status: 'NO_ROUTE', reason: 'RELAY_NO_ROUTE' });
   });
@@ -67,4 +68,33 @@ describe('BUILD-CROSSCHAIN-UNIVERSAL-001 route discovery', () => {
     expect(result.candidates.map(c => [c.provider, c.status, c.reason])).toEqual([['mayan', 'TEMPORARILY_UNAVAILABLE', 'MAYAN_API_VERSION_REJECTED']]);
     expect(new URL(urls[0]!).searchParams.get('sdkVersion')).toBe('15_3_0');
   });
+});
+
+it.each([
+  [503, 'No route', 'TEMPORARILY_UNAVAILABLE', 'RELAY_HTTP_503'],
+  [401, 'Unauthorized', 'TEMPORARILY_UNAVAILABLE', 'RELAY_HTTP_401'],
+  [429, 'No route', 'TEMPORARILY_UNAVAILABLE', 'RELAY_HTTP_429'],
+  [400, 'Insufficient liquidity', 'INSUFFICIENT_LIQUIDITY', 'RELAY_INSUFFICIENT_LIQUIDITY'],
+  [400, 'Amount is too low', 'BELOW_MINIMUM', 'RELAY_AMOUNT_TOO_LOW'],
+  [400, 'Amount is too high', 'ABOVE_MAXIMUM', 'RELAY_AMOUNT_TOO_HIGH'],
+  [400, 'No routes found', 'NO_ROUTE', 'RELAY_NO_ROUTE'],
+])('provider HTTP %s (%s) has a distinct and honest result', async (status, message, expected, reason) => {
+  const d = createUniversalDiscovery({ http: http({ 'api.relay.link': { __httpStatus: status, __body: { message } } }) });
+  const result = await d.discover({ source: UNIVERSAL_NETWORKS.solana, destination: UNIVERSAL_NETWORKS.base, inputToken: SOL_USDC, outputToken: BASE_USDC, amount: '1000000', slippageBps: 100 }, ['relay']);
+  expect(result.candidates[0]).toMatchObject({ status: expected, reason, executableBy: null });
+  expect(result.recommended).toBeNull();
+});
+
+it('Mayan token identity includes chain and address, not just matching decimals', async () => {
+  const raw = structuredClone(fixture('mayan-quote-sol-base').response) as { quotes: { toToken: { contract: string } }[] };
+  raw.quotes.forEach(q => { q.toToken.contract = ARB_USDC.address!; });
+  const d = createUniversalDiscovery({ http: http({ 'price-api.mayan.finance': raw }) });
+  const result = await d.discover({ source: UNIVERSAL_NETWORKS.solana, destination: UNIVERSAL_NETWORKS.base, inputToken: SOL_USDC, outputToken: BASE_USDC, amount: '20000000', slippageBps: 100 }, ['mayan']);
+  expect(result.candidates.every(c => c.status === 'NO_ROUTE' && c.reason === 'MAYAN_OUTPUT_MISMATCH')).toBe(true);
+});
+
+it('malformed provider responses cannot claim a quote or execution', async () => {
+  const d = createUniversalDiscovery({ http: http({ 'li.quest': {}, 'price-api.mayan.finance': {}, 'app.across.to': {} }) });
+  const result = await d.discover({ source: UNIVERSAL_NETWORKS.base, destination: UNIVERSAL_NETWORKS['arbitrum-one'], inputToken: BASE_USDC, outputToken: ARB_USDC, amount: '1000000', slippageBps: 100 }, ['lifi', 'mayan', 'across']);
+  expect(result.candidates.every(c => c.status !== 'EXECUTABLE' && c.status !== 'LIVE_QUOTE' && c.executableBy === null)).toBe(true);
 });

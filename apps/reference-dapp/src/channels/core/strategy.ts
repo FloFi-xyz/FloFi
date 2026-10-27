@@ -28,7 +28,7 @@ const ROUTING = { AUTO: 'auto', LIFI: 'lifi', ACROSS: 'across' } as const;
 /** The router's chain names as strategy networks (BUILD-RH-002 adds Robinhood Chain in and out of Base and Arbitrum One). */
 const ROUTER_NETWORK: Readonly<Record<string, NetworkId>> = { 'Ethereum': 'ethereum', 'Base': 'base', 'Base Sepolia': 'base-sepolia', 'Arbitrum': 'arbitrum-one', 'Arbitrum Sepolia': 'arbitrum-sepolia',
   'Robinhood Chain': 'robinhood' };
-const UNIVERSAL_ROUTING: Readonly<Partial<Record<UniversalBridgeRouting, string>>> = { BEST: 'best', RELAY: 'relay', LIFI: 'lifi', ACROSS: 'across' };
+const UNIVERSAL_ROUTING: Readonly<Partial<Record<UniversalBridgeRouting, string>>> = { BEST: 'best', RELAY: 'relay', LIFI: 'lifi', MAYAN: 'mayan', ACROSS: 'across' };
 const bps = (value: string) => /^(0|[1-9][0-9]{0,4})$/.test(value) ? Number(value) : NaN;
 
 /** The StrategySpec (v1) an authoring command expresses, or null for anything that is not one of the Copilot's authoring commands. */
@@ -50,7 +50,7 @@ export function strategyOfCommand(command: Command): StrategySpec | null {
       return { version: 1, action: 'bridge', sourceNetwork: ROUTER_NETWORK[i.source], destinationNetwork: ROUTER_NETWORK[i.destination], asset: i.token, amount: i.amount,
         routing: ROUTING[i.routing], slippageBps: bps(i.slippage), ...i.recipient ? { recipient: i.recipient } : {} } as StrategySpec;
     }
-    // BUILD-CROSSCHAIN-UNIVERSAL-001: the universal bridge (the five mainnets). Mayan routing has no strategy form (quotes only), so it is not authoring.
+    // BUILD-CROSSCHAIN-UNIVERSAL-001: the universal bridge (the five mainnets). Quote-only policies are still representable; Review checks execution eligibility.
     case 'ADD_UNIVERSAL_BRIDGE': {
       const i = c.input as UniversalBridgeInput, routing = UNIVERSAL_ROUTING[i.routing];
       if (!routing) return null;

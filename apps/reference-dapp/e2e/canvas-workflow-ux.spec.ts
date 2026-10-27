@@ -113,7 +113,9 @@ test('UX-009 fits committed insertions 1–5; proposals and ordinary edits do no
   expect(await viewport(page).getAttribute('style')).toBe(after);
   const amount = cards(page).first().getByRole('textbox', { name: /Source amount/ }); await amount.fill('6');
   await expect(amount).toHaveValue('6');
-  await expect(cards(page).first().locator('.composer-quote-note')).toHaveText('Quote unavailable');
+  const quoteNote = cards(page).first().locator('.composer-quote-note');
+  await expect(quoteNote).toHaveText('Quote service is not configured. Contact support.');
+  await expect(quoteNote).toHaveAttribute('title', /^CLOUD_RUNTIME_NOT_CONFIGURED · [a-f0-9-]{36}$/);
   expect(await viewport(page).getAttribute('style')).toBe(after);
   await cards(page).first().getByRole('button', { name: 'Select source token', exact: true }).click();
   await page.getByRole('region', { name: 'Source token picker', exact: true }).locator('label:has(input[aria-label="WETH"])').click();
@@ -196,6 +198,7 @@ test('Bridge picker searches independent Arbitrum and Robinhood catalogs and aut
   await expect(search).toBeVisible();
   await search.fill('Tesla');
   await expect(picker.getByRole('list', { name: 'Robinhood Chain token results', exact: true })).toContainText('TSLA');
+  await expect(picker.getByRole('radio', { checked: true })).toHaveCount(0);
   await search.fill('');
   await picker.locator('label:has(input[aria-label="ETH"])').click();
   await expect(card.getByRole('button', { name: 'Configure source asset', exact: true })).toContainText('WETH');

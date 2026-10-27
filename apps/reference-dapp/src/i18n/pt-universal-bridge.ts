@@ -6,6 +6,18 @@
 export const portugueseUniversalBridge: Readonly<Record<string, string>> = {
   '{0} entries excluded because display metadata is incomplete.': '{0} entradas excluídas por metadados de apresentação incompletos.',
   'Jupiter verified tokens. Mint identity and decimals are checked on chain at Simulate. A match does not guarantee a route.': 'Tokens verificados pelo Jupiter. O mint e as casas decimais são verificados na rede em Simular. Uma correspondência não garante uma rota.',
+  'Support reference': 'Referência de suporte',
+  'Below provider minimum': 'Abaixo do mínimo do provedor', 'Above provider maximum': 'Acima do máximo do provedor', 'Insufficient liquidity': 'Liquidez insuficiente',
+  'The amount is below the provider minimum. Choose a larger amount or another provider.': 'O montante está abaixo do mínimo do provedor. Escolha um montante maior ou outro provedor.',
+  'The amount is above the provider maximum. Choose a smaller amount or another provider.': 'O montante está acima do máximo do provedor. Escolha um montante menor ou outro provedor.',
+  'The provider has insufficient liquidity for these assets and this amount. Try another provider or try again later.': 'O provedor não tem liquidez suficiente para estes ativos e montante. Escolha outro provedor ou tente mais tarde.',
+  'The provider has no route for the requested networks and assets right now.': 'O provedor não tem uma rota para as redes e ativos pedidos neste momento.',
+  'The provider or network service is unavailable. Try again shortly.': 'O provedor ou serviço da rede está indisponível. Tente novamente dentro de instantes.',
+  'This quote needs transaction validation through the certified Router before execution.': 'Esta cotação exige validação da transação pelo Router certificado antes da execução.',
+  'The source token approval reverted during simulation. Nothing was signed.': 'A aprovação do token de origem reverteu na simulação. Nada foi assinado.',
+  'The network returned an invalid simulation response. Nothing was signed. Try another network service.': 'A rede devolveu uma resposta de simulação inválida. Nada foi assinado. Tente outro serviço de rede.',
+  'The provider quote does not match the requested bridge or its verified transaction. Nothing was signed.': 'A cotação não corresponde à bridge pedida ou à transação verificada. Nada foi assinado.',
+  'A quote may be available, but FloFi cannot yet verify this provider transaction for execution.': 'Pode existir uma cotação, mas a FloFi ainda não consegue verificar esta transação do provedor para execução.',
   // Canvas form
   'through the universal Cross-chain Router · real funds · a fresh route, simulation and Review are required after changes.':
     'pelo Router cross-chain universal · fundos reais · após alterações são necessárias uma nova rota, simulação e Revisão.',

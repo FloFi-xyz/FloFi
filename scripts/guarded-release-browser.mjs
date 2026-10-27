@@ -109,7 +109,7 @@ const definitions = [
     TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres' }],
   // BUILD-CROSSCHAIN-UNIVERSAL-001: the universal Cross-chain Router (Solana ⇄ EVM mainnets, Canvas card, chat, Review, one owner signature, verified
   // delivery and evidence) on its MOCKED loopback chains and Relay double; the wallets are the test's own disposable in-memory keys.
-  ['universal-bridge', ['universal-bridge.spec.ts'], { GRYLOO_UNIVERSAL_E2E: 'MOCKED_LOOPBACK_ONLY' }],
+  ['universal-bridge', ['universal-bridge.spec.ts'], { GRYLOO_UNIVERSAL_E2E: 'MOCKED_LOOPBACK_ONLY', FLOFI_COPILOT: 'replay' }],
 ];
 const composition = [['composition-provenance', ['release-composition-provenance.spec.ts'], {}]];
 

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { reportUniversalFailure } from '../src/server/universal-router/failure.ts';
 /**
  * BUILD-CLOUD-001 backend composition: the stateless API routes and the worker handlers, both built on the
  * same flow services and the same PostgreSQL-backed storage. No request or worker keeps execution state in
@@ -10,7 +11,7 @@ import { archiveEvidence, backoffMs, createIdempotencyStore, createPostgresLease
 import type { ExecutionStorage } from '@defi-workflow-engine/reference-executor';
 import type { JupiterHttp } from '@defi-workflow-engine/reference-compiler';
 import { disabledCode, flowMode, FLOWS, isFlowName, type FlowDeps, type FlowName, type FlowService, type Rpc } from './flows.ts';
-import { PREVIEW_METHODS, previewStorage } from './preview.ts';
+import { jupiterQuotePreview, PREVIEW_METHODS, previewStorage, type PreviewPurpose } from './preview.ts';
 import { assertRunOwnership, normalizePrincipal, WALLET_PRINCIPAL_HEADER } from '../src/server/run-ownership.ts';
 import { testNetworkFlowRefusal, testNetworkPreviewRefusal } from '../src/server/test-network-flows.ts';
 
@@ -23,7 +24,7 @@ export function observeOnly(rpc: Rpc): Rpc {
   return (method, params) => SUBMISSION_METHODS.has(method) ? Promise.reject(new Error('WORKER_SUBMISSION_FORBIDDEN')) : rpc(method, params);
 }
 
-export type FlowResult = { ok: true; value: unknown } | { ok: false; code: string };
+export type FlowResult = { ok: true; value: unknown } | { ok: false; code: string; correlationId?: string };
 export type BackendOptions = {
   readonly db: Database; readonly env: Readonly<Record<string, string | undefined>>; readonly logger: Logger; readonly tenantId: string;
   readonly holderId: string; readonly evidenceStore: EvidenceStore | null;
@@ -104,6 +105,7 @@ export function createBackend(options: BackendOptions) {
       catch (error) {
         const code = error instanceof Error && CODE.test(error.message) ? error.message : definition.unavailableCode;
         if (code === 'RUN_OWNER_MISMATCH') logger.warn('flow.ownership_refused', { flow, action: method, run_id: runId });
+        if (flow === 'crosschain-universal') return reportUniversalFailure(error, method, fields => logger.warn('bridge.operation_failed', fields));
         return { ok: false, code };
       }
     }
@@ -114,6 +116,7 @@ export function createBackend(options: BackendOptions) {
           const code = error instanceof Error && CODE.test(error.message) ? error.message : definition.unavailableCode;
           if (code === definition.busyCode && attempt < (options.busyRetries ?? 12)) { await new Promise(resolve => setTimeout(resolve, Math.min(1_000, 100 * 2 ** attempt))); continue; }
           if (!(error instanceof Error && CODE.test(error.message))) logger.warn('flow.unclassified_error', { flow, action: method, run_id: runId });
+          if (flow === 'crosschain-universal') return reportUniversalFailure(error, method, fields => logger.warn('bridge.operation_failed', fields));
           return { ok: false, code } as const;
         }
       }
@@ -124,7 +127,9 @@ export function createBackend(options: BackendOptions) {
    * BUILD-MCP-001: the flow's unchanged simulation on an observe-only transport and a per-call run log (`preview.ts`). It writes
    * nothing durable and binds nothing to the account argument, so no ownership policy applies: there is no run to own.
    */
-  async function previewFlow(flow: FlowName, args: readonly unknown[]): Promise<FlowResult> {
+  async function previewFlow(flow: FlowName, args: readonly unknown[], purpose: PreviewPurpose = 'SIMULATION'): Promise<FlowResult> {
+    if (purpose !== 'SIMULATION' && purpose !== 'QUOTE') return { ok: false, code: 'ARGUMENTS_INVALID' };
+    if (purpose === 'QUOTE' && flow !== 'jupiter-swap') return { ok: false, code: 'PREVIEW_QUOTE_NOT_AVAILABLE' };
     const definition = FLOWS[flow], method = PREVIEW_METHODS[flow];
     if (!method) return { ok: false, code: 'PREVIEW_NOT_AVAILABLE' };
     if (!definition.methods[method]!.validate(args)) throw new HttpError(400, 'ARGUMENTS_INVALID');
@@ -133,9 +138,11 @@ export function createBackend(options: BackendOptions) {
     const refusal = mode === 'live' ? testNetworkPreviewRefusal(flow, scopeEnv) : null;
     if (refusal) return { ok: false, code: refusal };
     return withSpan(logger, 'flow.preview', { flow, action: method }, async () => {
-      try { return { ok: true, value: await definition.create(previewStorage(), depsFor(flow, true), {}).call(method, args) } as const; }
+      try { return { ok: true, value: purpose === 'QUOTE' ? await jupiterQuotePreview(args, depsFor(flow, true))
+        : await definition.create(previewStorage(), depsFor(flow, true), {}).call(method, args) } as const; }
       catch (error) {
         if (!(error instanceof Error && CODE.test(error.message))) logger.warn('flow.unclassified_error', { flow, action: method });
+        if (flow === 'crosschain-universal') return reportUniversalFailure(error, method, fields => logger.warn('bridge.operation_failed', fields));
         return { ok: false, code: error instanceof Error && CODE.test(error.message) ? error.message : definition.unavailableCode } as const;
       }
     });
@@ -255,9 +262,10 @@ export function createBackend(options: BackendOptions) {
     { method: 'POST', name: 'preview', pattern: /^\/v1\/previews\/([a-z-]{1,40})$/, handler: wrap(async (request, match) => {
       const flow = match[1]!;
       if (!isFlowName(flow)) throw new HttpError(404, 'FLOW_NOT_FOUND');
-      const body = request.body as { args?: unknown } | null;
-      if (!body || typeof body !== 'object' || !Array.isArray(body.args) || Object.keys(body).length !== 1) throw new HttpError(400, 'ARGUMENTS_INVALID');
-      return { status: 200, body: await previewFlow(flow, body.args) };
+      const body = request.body as { args?: unknown; purpose?: unknown } | null;
+      if (!body || typeof body !== 'object' || !Array.isArray(body.args) || Object.keys(body).some(key => !['args', 'purpose'].includes(key)) ||
+        body.purpose !== undefined && body.purpose !== 'SIMULATION' && body.purpose !== 'QUOTE') throw new HttpError(400, 'ARGUMENTS_INVALID');
+      return { status: 200, body: await previewFlow(flow, body.args, body.purpose as PreviewPurpose | undefined) };
     }) },
     { method: 'GET', name: 'runs', pattern: /^\/v1\/runs$/, handler: wrap(async request => {
       const limit = integerParam(request.query.get('limit')), flow = request.query.get('flow');

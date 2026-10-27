@@ -10,6 +10,8 @@ import { useState, type FormEvent } from 'react';
 import { parseLocalCommand, summarize } from '../domain/commands';
 import { editorReducer } from '../domain/editor';
 import { activeNetworkScope, introducedTestNetworks, testNetworkMessage } from '../domain/network-scope';
+import { loadSolanaAuthoringAssetCatalog } from '../app/solana-asset-catalog-action';
+import { registerSolanaDisplayCatalog, clearSolanaDisplayCatalog } from '../domain/solana-asset-catalog';
 import { ensureNetworkCatalog } from '../state/asset-catalog-store';
 import { catalogNetworksNamed } from '../domain/network-registry';
 import { useWorkflow } from '../state/workflow-store';
@@ -41,6 +43,10 @@ export function CopilotPanel({ interactive = true, owner = null, proof }: { inte
   async function send(text: string) {
     // BUILD-RH-002: Robinhood Chain Stock Tokens resolve only in the validated official catalog; load it (where enabled) before parsing.
     // BUILD-RH-002 / BUILD-BASE-001: catalog-network symbols resolve only in validated catalogs; load those the sentence names first.
+    if (/\bsolana\b/i.test(text)) {
+      const catalog = await loadSolanaAuthoringAssetCatalog();
+      if (catalog.ok) registerSolanaDisplayCatalog(catalog.catalog); else clearSolanaDisplayCatalog();
+    }
     await Promise.all(catalogNetworksNamed(text).map(network => ensureNetworkCatalog(false, network.chain)));
     setAutomation(null);
     if (text.toLowerCase() === 'explain') {

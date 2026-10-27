@@ -10,7 +10,29 @@
  */
 import { assertLogName, reentrantLeases, utf8, type ExecutionStorage } from '@defi-workflow-engine/reference-executor';
 import { ETHEREUM_ROUTER_NETWORKS } from '@defi-workflow-engine/action-registry';
-import type { FlowName } from './flows.ts';
+import type { FlowDeps, FlowName } from './flows.ts';
+import { jupiterBuildQuery, jupiterIntent, parseJupiterBuild } from '@defi-workflow-engine/reference-compiler';
+import { hashArtifactBytes } from '@defi-workflow-engine/workflow-contracts';
+import { createBaseSepoliaReviewContext, validateAuthoringWorkflow } from '@defi-workflow-engine/reference-linter';
+
+export type PreviewPurpose = 'SIMULATION' | 'QUOTE';
+export type JupiterQuotePreview = { readonly format: 'flofi.jupiter-quote-preview.v1'; readonly workflowHash: string; readonly nodeId: string;
+  readonly chain: string; readonly input: { readonly mint: string; readonly decimals: number; readonly symbol: string };
+  readonly output: { readonly mint: string; readonly decimals: number; readonly symbol: string }; readonly amount: string;
+  readonly expectedOut: string; readonly minimumOut: string; readonly slippageBps: number; readonly expiresAt: string };
+/** Economic quote validation only: no wallet balances, transaction simulation, run, Review or unsigned bytes. */
+export async function jupiterQuotePreview(args: readonly unknown[], deps: FlowDeps, now = Date.now()): Promise<JupiterQuotePreview> {
+  if (!deps.http) throw new Error('JUPITER_CONFIGURATION_INVALID');
+  const workflow = validateAuthoringWorkflow(args[0], createBaseSepoliaReviewContext());
+  const intent = jupiterIntent(workflow, args[1] as string);
+  const { quote } = parseJupiterBuild(await deps.http(jupiterBuildQuery(intent)), intent, new Date(now).toISOString());
+  return { format: 'flofi.jupiter-quote-preview.v1', workflowHash: hashArtifactBytes('semantic-workflow', new TextEncoder().encode(JSON.stringify(workflow))),
+    nodeId: intent.nodeId, chain: workflow.nodes.find(n => n.nodeId === intent.nodeId)!.chainId,
+    input: { mint: intent.input.mint, decimals: intent.input.decimals, symbol: intent.input.symbol },
+    output: { mint: intent.output.mint, decimals: intent.output.decimals, symbol: intent.output.symbol }, amount: intent.amount,
+    expectedOut: quote.outAmount, minimumOut: quote.otherAmountThreshold, slippageBps: intent.slippageBps, expiresAt: new Date(now + 30_000).toISOString() };
+}
+
 
 /** The one preview method per flow. A flow missing here has no preview (e.g. Orca liquidity needs a browser-generated key). */
 export const PREVIEW_METHODS: Readonly<Partial<Record<FlowName, 'simulate' | 'prepare'>>> = Object.freeze({

@@ -1,12 +1,30 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { describe, expect, it } from 'vitest';
-import { callCloudFlow, cloudApiBaseUrl } from './cloud-api-client';
+import { describe, expect, it, vi } from 'vitest';
+import { callCloudFlow, cloudApiBaseUrl, previewCloudFlow } from './cloud-api-client';
 
 const env = { API_BASE_URL: 'https://api.flofi.example', API_AUTH_TOKEN: 'server-only-token' };
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 const noSleep = async () => undefined;
 
 describe('BUILD-CLOUD-001 BFF forwarding client', () => {
+  it('fails closed without retry when an older backend rejects the Jupiter QUOTE payload', async () => {
+    const transport = vi.fn<typeof fetch>().mockResolvedValue(json(400, { ok: false, code: 'ARGUMENTS_INVALID' }));
+    expect(await previewCloudFlow('jupiter-swap', ['workflow', 'quote-subject'], { env, transport, purpose: 'QUOTE', maxAttempts: 1 }))
+      .toEqual({ ok: false, code: 'ARGUMENTS_INVALID' });
+    expect(transport).toHaveBeenCalledOnce();
+  });
+
+  it('a Build quote uses one bounded read-only preview and carries no wallet principal or idempotency authority', async () => {
+    const transport = vi.fn<typeof fetch>().mockResolvedValue(json(503, { ok: false, code: 'JUPITER_HTTP_UNAVAILABLE', correlationId: '12345678-abcd-4321-9876-123456789abc' }));
+    const result = await previewCloudFlow('jupiter-swap', ['workflow', 'quote-subject'], { env, transport, timeoutMs: 30_000, maxAttempts: 1, purpose: 'QUOTE' });
+    expect(result).toEqual({ ok: false, code: 'JUPITER_HTTP_UNAVAILABLE', correlationId: '12345678-abcd-4321-9876-123456789abc' });
+    expect(transport).toHaveBeenCalledOnce();
+    const [url, init] = transport.mock.calls[0]!;
+    expect(String(url)).toBe('https://api.flofi.example/v1/previews/jupiter-swap');
+    expect(JSON.parse(String(init?.body))).toEqual({ args: ['workflow', 'quote-subject'], purpose: 'QUOTE' });
+    expect(init?.headers).not.toHaveProperty('idempotency-key'); expect(init?.headers).not.toHaveProperty('x-flofi-wallet-principal');
+    expect(init?.signal).toBeInstanceOf(AbortSignal);
+  });
   it('accepts only https (or loopback http) base URLs without credentials', () => {
     expect(cloudApiBaseUrl({})).toBeNull();
     expect(cloudApiBaseUrl({ API_BASE_URL: 'http://127.0.0.1:8080' })?.href).toBe('http://127.0.0.1:8080/');

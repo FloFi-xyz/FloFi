@@ -37,3 +37,17 @@ describe('BUILD-FLOFI-MAINNET-PRODUCT-001: MCP offers and composes mainnet strat
     expect((await client.callTool('compose_strategy', { strategy: testnetSwap })).output).toMatchObject({ ok: true, fundsClass: 'TEST_FUNDS' });
   });
 });
+
+it('MCP composes all 20 directed bridges with independent destination tokens and preserves their canonical hash', async () => {
+  const { UNIVERSAL_DIRECTED_PAIRS, UNIVERSAL_NETWORKS } = await import('@defi-workflow-engine/workflow-contracts');
+  const { composeStrategy } = await import('../engine/strategy-engine');
+  const client = session({ env: publicEnv, token: alice.token });
+  for (const { source, destination } of UNIVERSAL_DIRECTED_PAIRS) {
+    const strategy = { action: 'bridge', sourceNetwork: source, destinationNetwork: destination, asset: source === 'robinhood' ? 'USDG' : 'USDC',
+      outputAsset: UNIVERSAL_NETWORKS[destination].native.symbol, amount: '1' };
+    const canonical = composeStrategy(strategy);
+    expect(canonical).toMatchObject({ ok: true });
+    const result = await client.callTool('compose_strategy', { strategy });
+    expect(result.output).toMatchObject({ workflowHash: canonical.ok ? canonical.workflowHash : '' });
+  }
+});

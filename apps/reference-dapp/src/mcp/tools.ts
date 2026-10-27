@@ -26,6 +26,7 @@ import { compileSchema, MAX_WORKFLOW_STEPS, NETWORK_IDS, PUBLIC_NETWORK_IDS, PUB
   StrategyInputSchema } from '../engine/strategy-spec';
 import type { NetworkScope } from '../domain/network-scope';
 import { networkScope } from '../server/network-scope.ts';
+import { solanaAuthoringCatalog } from '../server/solana-asset-catalog.ts';
 import { prepareNetworkCatalogs } from '../platform/catalogs.ts';
 import { robinhoodAuthoringCatalog } from '../server/robinhood-mainnet.ts';
 import { ethereumAuthoringCatalog } from '../server/ethereum-mainnet.ts';
@@ -208,7 +209,7 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
         // BUILD-RH-002: a strategy naming Robinhood Chain composes against the validated official catalog (where this deployment enables it);
         // BUILD-BASE-001: so does one naming Base (its validated token list).
         if (args && typeof args === 'object' && 'strategy' in args) await prepareNetworkCatalogs((args as { strategy: unknown }).strategy, {
-          ethereum: async () => ethereumAuthoringCatalog(await ctx.runtime.mode('ethereum-swap')),
+          solana: () => solanaAuthoringCatalog(), ethereum: async () => ethereumAuthoringCatalog(await ctx.runtime.mode('ethereum-swap')),
           robinhood: async () => robinhoodAuthoringCatalog(await ctx.runtime.mode('robinhood-swap')), base: async () => baseAuthoringCatalog(await ctx.runtime.mode('base-swap')),
           'arbitrum-one': async () => arbitrumAuthoringCatalog(await ctx.runtime.mode('arbitrum-swap')) });
         const output = await run(args);

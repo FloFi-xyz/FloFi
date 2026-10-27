@@ -2,10 +2,11 @@
 'use client';
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { ROUTER_PHASES, UNIVERSAL_NETWORKS, type RouteChange, type RouterPhase, type UniversalNetworkKey } from '@defi-workflow-engine/workflow-contracts';
+import { bridgeFailureMessage } from '../domain/bridge-failure';
 import { useLocale } from '../i18n/locale';
 import { useWorkflow } from '../state/workflow-store';
 import { useUniversalRouter } from '../state/universal-router-store';
-import { createUniversalBridgeFromInput, defaultUniversalInputAsset, defaultUniversalOutput, resolveUniversalAsset, universalAssetResolves, universalBridgeDetails,
+import { createUniversalBridgeFromInput, resolveUniversalAsset, universalAssetResolves, universalBridgeDetails,
   universalFeaturedAssets, universalInputOf, UNIVERSAL_BRIDGE_DEFAULT_SLIPPAGE, UNIVERSAL_BRIDGE_NETWORKS, UNIVERSAL_BRIDGE_ROUTING_LABEL,
   type UniversalBridgeInput, type UniversalBridgeRouting } from '../domain/universal-bridge-authoring';
 import { formatSlippage } from '../domain/slippage-policy';
@@ -29,7 +30,7 @@ const amountOf = (units: string | null | undefined, decimals: number, symbol: st
 const short = (account: string) => account.length > 14 ? `${account.slice(0, 6)}…${account.slice(-4)}` : account;
 const LIFECYCLE: readonly RouterPhase[] = ['PREPARED', 'AUTHORIZED', 'SOURCE_SUBMITTED', 'SOURCE_CONFIRMED', 'IN_FLIGHT', 'DESTINATION_OBSERVED', 'RECONCILED'];
 const STATUS_LABEL: Readonly<Record<DiscoveryCandidate['status'], string>> = { EXECUTABLE: 'Executable', LIVE_QUOTE: 'Live quote only', SUPPORTED_BY_PROVIDER: 'Supported, no quote',
-  TEMPORARILY_UNAVAILABLE: 'Temporarily unavailable', NO_ROUTE: 'No route' };
+  TEMPORARILY_UNAVAILABLE: 'Temporarily unavailable', NO_ROUTE: 'No route', BELOW_MINIMUM: 'Below provider minimum', ABOVE_MAXIMUM: 'Above provider maximum', INSUFFICIENT_LIQUIDITY: 'Insufficient liquidity' };
 const PROVIDER_LABEL: Readonly<Record<string, string>> = { relay: 'Relay', lifi: 'LI.FI', mayan: 'Mayan', across: 'Across' };
 /** User-facing reasons for stable codes; anything else shows the code itself. */
 const REASONS: Readonly<Record<string, string>> = {
@@ -128,17 +129,11 @@ export function UniversalBridgeForm({ nodeId, onDone }: { nodeId?: string; onDon
   const [error, setError] = useState('');
   const set = (patch: Partial<UniversalBridgeInput>) => setInput(value => {
     const next = { ...value, ...patch };
-    // A new network keeps the chosen asset only where it still resolves; otherwise FloFi proposes the network default (shown before Review).
-    if (patch.source && !universalAssetResolves(next.source, next.inputAsset)) next.inputAsset = defaultUniversalInputAsset(next.source);
-    if (patch.destination && next.outputAsset && !universalAssetResolves(next.destination, next.outputAsset)
-      && !(patch.source || patch.inputAsset)) {
-      try { next.outputAsset = defaultUniversalOutput(next.source, next.inputAsset, next.destination); } catch { next.outputAsset = ''; }
-    }
-    if (patch.source || patch.destination || patch.inputAsset) {
-      try { resolveUniversalAsset(next.destination, next.outputAsset); if (!patch.outputAsset && (patch.source || patch.inputAsset)) throw new Error('reselect'); }
-      catch { try { next.outputAsset = defaultUniversalOutput(next.source, next.inputAsset, next.destination); } catch { next.outputAsset = ''; } }
-    }
+    // A source token change never changes the independently selected destination token.
+    // Clear a token that does not exist on a new network so the owner can select one explicitly.
     if (next.source === next.destination) next.destination = UNIVERSAL_BRIDGE_NETWORKS.find(n => n.key !== next.source)!.key;
+    if (patch.source && !universalAssetResolves(next.source, next.inputAsset)) next.inputAsset = '';
+    if (!universalAssetResolves(next.destination, next.outputAsset)) next.outputAsset = '';
     return next;
   });
   const cross = UNIVERSAL_NETWORKS[input.source].ecosystem !== UNIVERSAL_NETWORKS[input.destination].ecosystem;
@@ -198,7 +193,7 @@ function RouteDiscovery() {
           <td>{amountOf(c.expectedOutput, d.outputDecimals, d.outputSymbol)}</td><td>{amountOf(c.minimumOutput, d.outputDecimals, d.outputSymbol)}</td>
           <td>{c.estimatedDurationSeconds === null ? '--' : `${c.estimatedDurationSeconds}s`}</td>
           <td>{c.fees.map(f => `${f.label}: ${formatTokenAmount(f.amount, f.decimals)} ${f.symbol}${f.included ? '' : ' (separate)'}`).join('; ') || '--'}</td>
-          <td>{c.reason ? tr(REASONS[c.reason] ?? c.reason) : c.executableBy === 'CERTIFIED_ROUTER' ? tr('Executes on the certified Router bridge for this pair.') : ''}</td>
+          <td>{c.reason ? tr(REASONS[c.reason] ?? bridgeFailureMessage(c.reason) ?? c.reason) : c.executableBy === 'CERTIFIED_ROUTER' ? tr('Executes on the certified Router bridge for this pair.') : ''}</td>
           <td>{c.executableBy === 'UNIVERSAL_ROUTER' && c.provider === 'relay' && d.routing !== 'RELAY' &&
             <button type="button" className="quiet" disabled={router.busy} onClick={() => choose('RELAY')}>{tr('Use this route')}</button>}</td></tr>)}</tbody></table>
     </>}
@@ -218,7 +213,7 @@ export function UniversalBridgePanel({ view }: { view: 'simulate' | 'execute' })
   const canExecute = Boolean(authorized && !router.retired && !pending && fresh > 0 && router.executionEnabled);
   const canRefresh = Boolean(record && record.verdict === 'PENDING' && !pending && ['PREPARED', 'AUTHORIZED'].includes(record.phase) &&
     !record.attempts.some(a => a.step === 'DEPOSIT' && !['CANCELLED', 'NOT_FOUND'].includes(a.state)) && (record.requote || fresh === 0));
-  const message = (code: string | null | undefined) => code ? MESSAGES[code] ?? null : null;
+  const message = (code: string | null | undefined) => code ? MESSAGES[code] ?? bridgeFailureMessage(code) : null;
   const info = router.error ?? record?.error;
   const inp = route ? (u: string | null | undefined) => amountOf(u, route.inputToken.decimals, route.inputToken.symbol) : () => '--';
   const outp = route ? (u: string | null | undefined) => amountOf(u, route.outputToken.decimals, route.outputToken.symbol) : () => '--';
@@ -289,6 +284,7 @@ export function UniversalBridgePanel({ view }: { view: 'simulate' | 'execute' })
     </>}
     {view === 'execute' && router.runs.length > 0 && <section aria-label={tr('Your runs')}><h3>{tr('Your universal bridge runs')}</h3><ul>{router.runs.map(run => <li key={run.runId}>
       <button type="button" className="quiet" disabled={router.busy} onClick={() => void router.open(run.runId)}>{run.runId}</button> · {tr(run.status.toLowerCase().replaceAll('_', ' '))}</li>)}</ul></section>}
+    {router.correlationId && <p>{tr('Support reference')}: <code>{router.correlationId}</code></p>}
     {info && <p role="status">{tr(message(info) ?? 'Execution needs attention. Inspect technical details and observe any existing transaction.')}</p>}
     {router.busy && <p role="status">{tr('Working…')}</p>}
     <details><summary>{tr('Show technical details')}</summary><pre>{JSON.stringify({ error: info, run: record?.id, owner: record?.owner, phase: record?.phase, commitment: r?.commitment,

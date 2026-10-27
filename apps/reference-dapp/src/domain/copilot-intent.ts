@@ -12,6 +12,7 @@ export const COPILOT_INTENT_VERSION = '1';
 export const COPILOT_NETWORKS = ['BASE', 'BASE_SEPOLIA', 'ARBITRUM', 'ARBITRUM_SEPOLIA', 'ETHEREUM', 'ETHEREUM_SEPOLIA', 'SOLANA', 'SOLANA_DEVNET', 'OTHER'] as const;
 export const COPILOT_ASSETS = ['USDC', 'WETH', 'ETH', 'SOL', 'USDT', 'DEVUSDC', 'WBTC', 'OTHER'] as const;
 export const COPILOT_ROUTING = ['AUTO', 'LIFI', 'ACROSS'] as const;
+export const COPILOT_V2_ROUTING = [...COPILOT_ROUTING, 'BEST', 'RELAY', 'MAYAN'] as const;
 export const COPILOT_LENDING_TYPES = ['SUPPLY', 'BORROW', 'REPAY', 'WITHDRAW'] as const;
 export const COPILOT_LIQUIDITY_PROTOCOLS = ['UNISWAP_V3', 'ORCA'] as const;
 export const COPILOT_RANGE_UNITS = ['PRICE', 'TICK'] as const;
@@ -48,7 +49,7 @@ export type CopilotNetwork = (typeof COPILOT_V2_NETWORKS)[number];
 /** A V1 token name; V2 also carries any catalog symbol or token name as written (`COPILOT_ASSET_REFERENCE`). */
 export type CopilotLegacyAsset = (typeof COPILOT_ASSETS)[number];
 export type CopilotAsset = CopilotLegacyAsset | (string & {});
-export type CopilotRouting = (typeof COPILOT_ROUTING)[number];
+export type CopilotRouting = (typeof COPILOT_V2_ROUTING)[number];
 export type CopilotLendingType = (typeof COPILOT_LENDING_TYPES)[number];
 export type CopilotMissingField = (typeof COPILOT_MISSING_FIELDS)[number];
 export type CopilotFeeTier = (typeof COPILOT_FEE_TIERS)[number];
@@ -58,6 +59,7 @@ export type CopilotSwapAction = { readonly type: 'SWAP'; readonly network: Copil
 export type CopilotTransferAction = { readonly type: 'TRANSFER'; readonly network: CopilotNetwork | null; readonly asset: CopilotAsset | null;
   readonly amount: string | null; readonly recipient: string | null };
 export type CopilotBridgeAction = { readonly type: 'BRIDGE'; readonly sourceNetwork: CopilotNetwork | null; readonly destinationNetwork: CopilotNetwork | null;
+  /** V2: independently requested destination asset. Absent in recorded V1/older V2 intents. */ readonly outputAsset?: CopilotAsset | null;
   readonly asset: CopilotAsset | null; readonly amount: string | null; readonly slippageBps: string | null; readonly routing: CopilotRouting | null;
   readonly recipient: string | null };
 export type CopilotLendingAction = { readonly type: CopilotLendingType; readonly protocol: 'AAVE_V3'; readonly network: CopilotNetwork | null;
@@ -162,7 +164,7 @@ function parseAction(value: unknown): CopilotAction {
 
 /** V2 token: null, OTHER, or a symbol or token name as written (grammar only; FloFi resolves it). */
 const symbol = (value: unknown): CopilotAsset | null => value === null ? null : typeof value === 'string' && (value === 'OTHER' ||
-  (value.length <= COPILOT_LIMITS.maxValueLength && COPILOT_ASSET_REFERENCE.test(value))) ? value : fail();
+  (value.length <= COPILOT_LIMITS.maxValueLength && (COPILOT_ASSET_REFERENCE.test(value) || /^(?:0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})@[0-9]{1,2}$/.test(value)))) ? value : fail();
 /**
  * BUILD-BASE-001: the CopilotIntentV2 action — the V1 shapes over the V2 vocabulary (catalog networks and symbols), TRANSFER, and a
  * liquidity fee tier and full range. A key a V1-shaped action omits (`feeTier`) stays omitted, so every V1-shaped action is still valid.
@@ -179,9 +181,11 @@ function parseActionV2(value: unknown): CopilotAction {
     return { type, network: network(v.network), asset: symbol(v.asset), amount: amount(v.amount), recipient: transferAddress(v.recipient) };
   }
   if (type === 'BRIDGE') {
-    const v = exact(value, ['type', 'sourceNetwork', 'destinationNetwork', 'asset', 'amount', 'slippageBps', 'routing', 'recipient']);
+    const withOutput = !!value && typeof value === 'object' && Object.hasOwn(value, 'outputAsset');
+    const v = exact(value, ['type', 'sourceNetwork', 'destinationNetwork', 'asset', 'amount', 'slippageBps', 'routing', 'recipient', ...withOutput ? ['outputAsset'] : []]);
     return { type, sourceNetwork: network(v.sourceNetwork), destinationNetwork: network(v.destinationNetwork), asset: symbol(v.asset), amount: amount(v.amount),
-      slippageBps: bps(v.slippageBps), routing: nullableOneOf(COPILOT_ROUTING, v.routing), recipient: address(v.recipient) };
+      ...withOutput ? { outputAsset: symbol(v.outputAsset) } : {},
+      slippageBps: bps(v.slippageBps), routing: nullableOneOf(COPILOT_V2_ROUTING, v.routing), recipient: transferAddress(v.recipient) };
   }
   if ((COPILOT_LENDING_TYPES as readonly unknown[]).includes(type)) {
     const v = exact(value, ['type', 'protocol', 'network', 'asset', 'amount', 'beneficiary']);
@@ -296,9 +300,10 @@ const actionSchemasV2 = [
   object({ type: constant('TRANSFER'), network: nullableChoice(COPILOT_V2_NETWORKS, NETWORK_V2_TEXT), asset: nullableSymbol, amount: nullableString(AMOUNT_TEXT),
     recipient: nullableString('The recipient wallet the user typed: EVM 0x address or case-sensitive Solana base58 public key. Solana requires an explicit recipient; null if missing.') }),
   object({ type: constant('BRIDGE'), sourceNetwork: nullableChoice(COPILOT_V2_NETWORKS, NETWORK_V2_TEXT), destinationNetwork: nullableChoice(COPILOT_V2_NETWORKS, NETWORK_V2_TEXT),
-    asset: nullableSymbol, amount: nullableString(AMOUNT_TEXT), slippageBps: nullableString(SLIPPAGE_TEXT),
-    routing: nullableChoice(COPILOT_ROUTING, 'Provider preference only if the user named LI.FI or Across; null otherwise.'),
-    recipient: nullableString(ADDRESS_TEXT) }),
+    asset: nullableSymbol, outputAsset: nullableString('Destination token exactly as the user named it, including "para WETH na Arbitrum" or "to WETH on Arbitrum". Null only when no destination token was stated. ' + SYMBOL_TEXT),
+    amount: nullableString(AMOUNT_TEXT), slippageBps: nullableString(SLIPPAGE_TEXT),
+    routing: nullableChoice(COPILOT_V2_ROUTING, 'Provider preference only when explicitly named; null otherwise.'),
+    recipient: nullableString('Destination wallet exactly as typed: EVM 0x address or case-sensitive Solana base58 public key; null if not stated.') }),
   object({ type: choice(COPILOT_LENDING_TYPES, 'Aave V3 operation.'), protocol: constant('AAVE_V3'), network: nullableChoice(COPILOT_V2_NETWORKS, NETWORK_V2_TEXT),
     asset: nullableSymbol, amount: nullableString(AMOUNT_TEXT), beneficiary: nullableString(ADDRESS_TEXT + ' Always null for WITHDRAW.') }),
   object({ type: constant('LIQUIDITY'), protocol: nullableChoice(COPILOT_LIQUIDITY_PROTOCOLS, 'Pool protocol only if the user named it; null otherwise.'),

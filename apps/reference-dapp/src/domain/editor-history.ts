@@ -6,7 +6,7 @@ import {isLendingComposition,workflowDependencyOrder,type SemanticWorkflow} from
 import { isBoundComposition } from '@defi-workflow-engine/action-registry';
 import type { Command } from './commands';
 import { directions, type Direction } from './swap-authoring';
-import { universalBridgeDetails, defaultUniversalInputAsset, universalKeyOfCanvasLabel } from './universal-bridge-authoring';
+import { universalBridgeDetails, universalAssetResolves, universalKeyOfCanvasLabel } from './universal-bridge-authoring';
 import { universalCanvasNetworks } from './canvas-action-setup';
 import { routerDetails } from './router-authoring';
 import type { UniswapLiquidityInput } from './uniswap-liquidity-authoring';
@@ -143,9 +143,9 @@ export function editorHistoryReducer(state: EditorHistory, action: HistoryAction
     if (!setup && (!node || (!router && !universal) || !canEditCanvasAmount(node, action.context, state.editor.workflow))) return state;
     const current: CanvasBridgeNetworks = setup ? bridgeSetupNetworks(setup) : state.bridgeNetworkInputs[action.id] ?? (universal ? universalCanvasNetworks(universal) : router!);
     const networks: CanvasBridgeNetworks = { source: current.source, destination: current.destination, ...current.inputAsset ? { inputAsset: current.inputAsset } : {}, ...current.outputAsset ? { outputAsset: current.outputAsset } : {}, ...action.patch };
-    // Changing one network resets only that side's asset to its network default. Never carry an address to another chain.
-    if (current.inputAsset && networks.source !== current.source && universalKeyOfCanvasLabel(networks.source)) networks.inputAsset = defaultUniversalInputAsset(universalKeyOfCanvasLabel(networks.source)!);
-    if (current.outputAsset && networks.destination !== current.destination && universalKeyOfCanvasLabel(networks.destination)) networks.outputAsset = defaultUniversalInputAsset(universalKeyOfCanvasLabel(networks.destination)!);
+    // Keep independent token choices when they resolve; clear invalid choices for explicit reselection.
+    if (current.inputAsset && networks.source !== current.source && universalKeyOfCanvasLabel(networks.source) && !universalAssetResolves(universalKeyOfCanvasLabel(networks.source)!, current.inputAsset)) networks.inputAsset = '';
+    if (current.outputAsset && networks.destination !== current.destination && universalKeyOfCanvasLabel(networks.destination) && !universalAssetResolves(universalKeyOfCanvasLabel(networks.destination)!, current.outputAsset)) networks.outputAsset = '';
     if (networks.source === current.source && networks.destination === current.destination && networks.inputAsset === current.inputAsset && networks.outputAsset === current.outputAsset) return state;
     return { ...state, ...(setup ? { actionSetup: { ...setup, networks } } : {
       bridgeNetworkInputs: { ...state.bridgeNetworkInputs, [action.id]: networks },

@@ -42,7 +42,16 @@ export function searchSolanaCatalog(assets: readonly SolanaCatalogAsset[], query
   return q ? assets.filter(t => [t.symbol, t.name, t.mint].some(value => value.toLowerCase().includes(q))) : assets;
 }
 
-// Presentation lookup only. Canonical authoring still carries mint@decimals and simulation re-reads the mint on chain.
+// Validated metadata lookup. Canonical authoring carries mint@decimals; simulation re-reads mint identity on chain.
 const displayAssets = new Map<string, SolanaCatalogAsset>();
-export function registerSolanaDisplayCatalog(catalog: SolanaAssetCatalog): void { for (const asset of catalog.assets) if (!asset.native) displayAssets.set(asset.mint, asset); }
+export function registerSolanaDisplayCatalog(catalog: SolanaAssetCatalog): void { displayAssets.clear(); for (const asset of catalog.assets) if (!asset.native) displayAssets.set(asset.mint, asset); }
 export const solanaDisplayAsset = (mint: string): SolanaCatalogAsset | undefined => displayAssets.get(mint);
+
+/** Exact validated catalog identity; duplicate symbols or names require an explicit mint. */
+export function resolveSolanaCatalogAsset(reference: string): SolanaCatalogAsset | null {
+  const text = reference.trim().toLowerCase();
+  const matches = [...displayAssets.values()].filter(a => a.mint === reference || a.symbol.toLowerCase() === text || a.name.toLowerCase() === text);
+  if (matches.length > 1) throw new Error('UNIVERSAL_ASSET_AMBIGUOUS');
+  return matches[0] ?? null;
+}
+export function clearSolanaDisplayCatalog(): void { displayAssets.clear(); }

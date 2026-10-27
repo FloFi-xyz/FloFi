@@ -45,3 +45,13 @@ export function providerHttpError(value: unknown): { status: number; message: st
   const message = (text('message') || [text('code'), text('msg')].filter(Boolean).join(': ')).slice(0, 300);
   return { status: Number((value as { __httpStatus: unknown }).__httpStatus), message };
 }
+
+/** Closed technical codes only: never propagate provider bodies, URLs or credentials. */
+export function providerRefusalCode(provider: string, refused: { status: number; message: string }): string {
+  if ([401, 403, 408, 425, 429].includes(refused.status) || refused.status >= 500) return `${provider}_HTTP_${refused.status}`;
+  const message = refused.message;
+  if (/insufficient liquidity|not enough liquidity|liquidity unavailable/i.test(message)) return `${provider}_INSUFFICIENT_LIQUIDITY`;
+  if (/too (?:small|low)|below.*minimum|minimum.*amount|amount.*minimum|AMOUNT_TOO_LOW/i.test(message)) return `${provider}_AMOUNT_TOO_LOW`;
+  if (/too (?:large|high)|above.*maximum|maximum.*amount|amount.*maximum|AMOUNT_TOO_HIGH/i.test(message)) return `${provider}_AMOUNT_TOO_HIGH`;
+  return `${provider}_NO_ROUTE`;
+}

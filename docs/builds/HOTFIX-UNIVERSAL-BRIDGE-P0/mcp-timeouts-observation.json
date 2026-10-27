@@ -1,0 +1,31 @@
+{
+  "source": "Vercel production runtime logs, /api/mcp, read-only six-hour query on 2026-10-26",
+  "records": 59,
+  "from": "2026-10-26T20:39:42.331000+00:00",
+  "to": "2026-10-26T21:30:53.992000+00:00",
+  "responses": [
+    {
+      "method": "GET",
+      "status": 504,
+      "count": 2
+    },
+    {
+      "method": "POST",
+      "status": 200,
+      "count": 15
+    },
+    {
+      "method": "POST",
+      "status": 202,
+      "count": 24
+    },
+    {
+      "method": "POST",
+      "status": 504,
+      "count": 18
+    }
+  ],
+  "timeoutMessage": "Vercel Runtime Timeout Error: Task timed out after 300 seconds",
+  "timeoutCount": 20,
+  "limitation": "No internal tool/stage logs in the retrieved records; cannot attribute each timeout to a particular operation. Raw logs, request identifiers, IPs, credentials and payloads omitted."
+}

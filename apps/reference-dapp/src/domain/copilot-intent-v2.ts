@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { COPILOT_FEE_TIERS, COPILOT_LIMITS, COPILOT_LIQUIDITY_PROTOCOLS, COPILOT_MISSING_FIELDS, COPILOT_ROUTING, COPILOT_V1_PARTS, COPILOT_V2_NETWORKS, COPILOT_V2_RANGE_UNITS,
+import { COPILOT_FEE_TIERS, COPILOT_LIMITS, COPILOT_LIQUIDITY_PROTOCOLS, COPILOT_MISSING_FIELDS, COPILOT_V2_ROUTING, COPILOT_V1_PARTS, COPILOT_V2_NETWORKS, COPILOT_V2_RANGE_UNITS,
   CopilotIntentError, type CopilotAction, type CopilotAsset, type CopilotDeposit, type CopilotFeeTier, type CopilotMissingField, type CopilotNetwork,
   type CopilotRouting } from './copilot-intent';
 import { parseAutomationDraft, AUTOMATION_DRAFT_SCHEMA, type AutomationDraft } from './copilot-automation';
@@ -77,7 +77,7 @@ function parseChanges(value: unknown, requireOne: boolean): CopilotChanges {
   });
   const changes: CopilotChanges = { amount: amount(v.amount), slippageBps: bps(v.slippageBps), network: nullableOneOf(COPILOT_V2_NETWORKS, v.network),
     destinationNetwork: nullableOneOf(COPILOT_V2_NETWORKS, v.destinationNetwork), inputAsset: symbol(v.inputAsset),
-    outputAsset: symbol(v.outputAsset), recipient: transferAddress(v.recipient), routing: nullableOneOf(COPILOT_ROUTING, v.routing), deposits,
+    outputAsset: symbol(v.outputAsset), recipient: transferAddress(v.recipient), routing: nullableOneOf(COPILOT_V2_ROUTING, v.routing), deposits,
     rangeUnit: nullableOneOf(COPILOT_V2_RANGE_UNITS, v.rangeUnit), lower: signedDecimal(v.lower), upper: signedDecimal(v.upper),
     ...withTier ? { feeTier: nullableOneOf(COPILOT_FEE_TIERS, v.feeTier) } : {} };
   // A range is one change: unit and both bounds together (the full range has none), or none of them.
@@ -168,8 +168,8 @@ const CHANGES = object({
   destinationNetwork: nullableChoice(COPILOT_V2_NETWORKS, 'New bridge destination only if the user named it; null otherwise.'),
   inputAsset: nullableString('New input token only if the user named it; null otherwise. ' + symbolText),
   outputAsset: nullableString('New output token only if the user named it; null otherwise. ' + symbolText),
-  recipient: nullableString('A new recipient or beneficiary 0x address only if the user typed it exactly; null otherwise.'),
-  routing: nullableChoice(COPILOT_ROUTING, 'New bridge provider preference only if the user named LI.FI, Across or automatic; null otherwise.'),
+  recipient: nullableString('A new recipient or beneficiary address (EVM 0x or case-sensitive Solana base58) only if the user typed it exactly; null otherwise.'),
+  routing: nullableChoice(COPILOT_V2_ROUTING, 'New bridge provider preference only if the user named a provider or automatic routing; null otherwise.'),
   deposits: { type: 'array', description: 'New liquidity maximum for each token the user named (at most 2); empty if unchanged.',
     items: object({ asset: string(symbolText), maxAmount: string(AMOUNT_TEXT) }) },
   rangeUnit: nullableChoice(COPILOT_V2_RANGE_UNITS, 'PRICE or TICK (with both bounds), FULL (no bounds) or PERCENT (the percent in upper, lower null) for a new liquidity range; null if unchanged.'),

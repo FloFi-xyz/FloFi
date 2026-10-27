@@ -236,7 +236,7 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
     }
     if (!routes.length) {
       const reason = considered.find(c => c.outcome === 'REFUSED' || c.outcome === 'UNAVAILABLE')?.code;
-      return fail(reason && /^RELAY_(NO_ROUTE|AMOUNT_TOO_LOW|AMOUNT_TOO_HIGH)$/.test(reason) ? reason : 'UNIVERSAL_NO_EXECUTABLE_ROUTE');
+      return fail(reason ?? considered.find(c => c.outcome === 'NOT_EXECUTABLE')?.code ?? 'UNIVERSAL_NO_EXECUTABLE_ROUTE');
     }
     // BEST_MINIMUM_OUTPUT: the highest guaranteed minimum; ties keep preference order. PREFERENCE_ORDER: the first executable provider.
     const route = fields.selection === 'BEST_MINIMUM_OUTPUT' ? routes.reduce((best, r) => BigInt(r.minimumOutput) > BigInt(best.minimumOutput) ? r : best) : routes[0]!;
@@ -298,7 +298,7 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
         networkFee, signatures: plan.length });
     }
     const S = D.solana;
-    await verifySolanaCluster(input.solanaRpc, S.genesisHash).catch(() => fail('UNIVERSAL_WRONG_CHAIN'));
+    await verifySolanaCluster(input.solanaRpc, S.genesisHash).catch((cause: unknown) => fail(cause instanceof Error && cause.message === 'SOLANA_WRONG_CLUSTER' ? 'UNIVERSAL_WRONG_CHAIN' : 'UNIVERSAL_RPC_UNAVAILABLE'));
     const program = await sol.assertSolanaRelayProgram(input.solanaRpc, S);
     const { route, considered } = await selectRoute(f, quoteRequest(f, inputFacts, outputFacts, owner, recipient));
     if (route.source.ecosystem !== 'SOLANA' || route.source.instruction.programId !== S.relayProgram) fail('UNIVERSAL_UNEXPECTED_CONTRACT');

@@ -3,7 +3,8 @@
  * BUILD-MCP-001: the typed strategy contract of the deterministic engine facade (`strategy-engine.ts`).
  *
  * A strategy spec is structured intent — action, network names, asset symbols or whole catalog names, decimal amounts and the user's own
- * parameters. It never carries a chain id, contract or token address, adapter, calldata, nonce, signature or key: FloFi
+ * parameters. It never carries an execution target, chain id, adapter, calldata, nonce, signature or key. Bridge token references may carry
+ * address@decimals, verified on chain at Simulate; other assets use their catalog symbols or names. FloFi
  * resolves every network and asset to its registered profile, exactly as chat and canvas authoring do. The schema is
  * closed (no additional properties anywhere) and versioned (`version: 1`); a client carries the spec between calls and
  * FloFi re-derives the canonical Semantic Workflow IR from it each time.
@@ -47,17 +48,20 @@ const CatalogSymbol = Type.String({ pattern: '^(?!0[xX][0-9a-fA-F])[^\\x00-\\x1f
   description: 'A symbol or whole name of the selected network\'s validated official catalog, matched case-insensitively; unknown, ambiguous and foreign-chain references are refused. Never a contract address.' });
 const strict = { additionalProperties: false } as const;
 
+const BridgeAsset = Type.Union([CatalogSymbol, Type.String({
+  pattern: '^(?:0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})@[0-9]{1,2}$', maxLength: 48,
+  description: 'Explicit bridge token contract or mint with decimals, verified on chain at Simulate; never an execution target.' })]);
 const Bridge = Type.Object({
   version: Type.Optional(Version), action: Type.Literal('bridge'),
   sourceNetwork: enumOf(['base-sepolia', 'base', 'arbitrum-one', 'robinhood', 'ethereum', 'solana'] as const, 'Source network. Every mainnet (solana, base, arbitrum-one, ethereum, ' +
     'robinhood) bridges to every other mainnet (real funds); base-sepolia pairs only with arbitrum-sepolia (test USDC). Routes are discovered live and shown with their provider at Review.'),
   destinationNetwork: enumOf(['arbitrum-sepolia', 'arbitrum-one', 'robinhood', 'base', 'ethereum', 'solana'] as const, 'Destination network (a different network from the source).'),
-  asset: CatalogSymbol,
+  asset: BridgeAsset,
   amount: Decimal('Source token amount as a decimal string, e.g. "5".'),
   /** BUILD-CROSSCHAIN-UNIVERSAL-001 */
-  outputAsset: Type.Optional(CatalogSymbol),
-  routing: Type.Optional(enumOf(['auto', 'best', 'relay', 'lifi', 'across'] as const, 'Provider policy. auto = the certified Router (LI.FI first, then direct Across) for its USDC/USDG EVM pairs, ' +
-    'otherwise best; best = every provider is asked and the executable route with the highest guaranteed minimum is chosen; relay, lifi, across = only that provider. Default auto.')),
+  outputAsset: Type.Optional(BridgeAsset),
+  routing: Type.Optional(enumOf(['auto', 'best', 'relay', 'lifi', 'mayan', 'across'] as const, 'Provider policy. auto = the certified Router (LI.FI first, then direct Across) for its USDC/USDG EVM pairs, ' +
+    'otherwise best; best = every provider is asked and the executable route with the highest guaranteed minimum is chosen; relay, lifi, mayan, across = only that provider (execution eligibility is checked separately). Default auto.')),
   slippageBps: Type.Optional(Slippage),
   recipient: Type.Optional(Type.Union([EvmAddress('EVM destination recipient.'), SolanaAddress('Solana destination recipient wallet.')], { description: 'Destination recipient in the ' +
     'destination network\'s address format. Omit to deliver to the signing wallet (same ecosystem) or to the wallet of the destination ecosystem connected in the FloFi app (Solana ⇄ EVM), bound at Review.' })),
@@ -163,16 +167,11 @@ export const isStrategyWorkflow = (value: StrategyInput): value is StrategyWorkf
  * same canonical IR and workflow hash; the test networks and the Base Sepolia lending composition are simply not offered.
  */
 const PUBLIC_EVM_LENDING = ['base', 'arbitrum-one', 'ethereum'] as const;
+// One bridge contract across public MCP, Developer API and the engineering engine.
 const PublicBridge = Type.Object({
-  version: Type.Optional(Version), action: Type.Literal('bridge'),
-  sourceNetwork: enumOf(['base', 'arbitrum-one', 'robinhood', 'ethereum'] as const, 'Source network (real funds). The Cross-chain Router moves USDC between base, ' +
-    'arbitrum-one and ethereum, and into or out of robinhood as USDG (WETH also bridges to and from robinhood); get_capabilities lists the routes this deployment enables.'),
-  destinationNetwork: enumOf(['arbitrum-one', 'robinhood', 'base', 'ethereum'] as const, 'Destination network; a different network of the same route list.'),
-  asset: CatalogSymbol,
-  amount: Decimal('Source token amount as a decimal string, e.g. "5".'),
-  routing: Type.Optional(enumOf(['auto', 'lifi', 'across'] as const, 'Provider policy. auto = LI.FI first, direct Across if LI.FI has no reconcilable route (a preference order, not a best-price search). Default auto.')),
-  slippageBps: Type.Optional(Slippage),
-  recipient: Type.Optional(EvmAddress('Destination recipient. Omit to deliver to the wallet that signs in the FloFi app (bound at Review).')),
+  ...Bridge.properties,
+  sourceNetwork: enumOf(PUBLIC_NETWORK_IDS, 'Source mainnet. All 20 directed pairs are representable; provider eligibility is discovered separately.'),
+  destinationNetwork: enumOf(PUBLIC_NETWORK_IDS, 'Destination mainnet, different from the source.'),
 }, strict);
 const PublicSwap = Type.Object({
   version: Type.Optional(Version), action: Type.Literal('swap'),
