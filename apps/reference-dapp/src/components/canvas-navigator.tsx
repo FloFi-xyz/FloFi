@@ -27,7 +27,7 @@ export function CanvasNavigator({ fitViewOptions, compactBelow = 800 }: { fitVie
     if (!domNode || !wheelZoom) return;
     const wheel = (event: WheelEvent) => {
       // React Flow handles pinch. Forms, node controls and scrollable panels retain native behavior.
-      if (event.ctrlKey || event.metaKey || !(event.target instanceof Element) || event.target.closest('.nowheel, input, textarea, select, button, a, [contenteditable="true"], [role="slider"]')) return;
+      if (event.ctrlKey || event.metaKey || !(event.target instanceof Element) || event.target.closest('.nowheel, input, textarea, select, button, a, [contenteditable]:not([contenteditable="false"]), [role="textbox"], [role="slider"]')) return;
       event.preventDefault(); event.stopPropagation();
       const rect = domNode.getBoundingClientRect();
       void setViewport(navigateCanvas(getViewport(), { x: event.clientX - rect.left, y: event.clientY - rect.top, deltaX: event.deltaX, deltaY: event.deltaY, shiftKey: event.shiftKey, deltaMode: event.deltaMode }, minZoom, maxZoom));

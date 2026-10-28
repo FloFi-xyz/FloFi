@@ -1856,3 +1856,13 @@ button.wallet-option .wallet-option-status{border-color:var(--accent-line);backg
 .react-flow__panel.canvas-navigator{width:320px;height:44px;max-width:calc(100% - 16px)}
 .react-flow__panel.canvas-navigator[data-compact="true"]{width:296px}
 .react-flow__panel.canvas-navigator[data-narrow="true"]{width:calc(100% - 16px)}
+/* Keep the expanded navigator outside the undocked tools, including narrow canvases. */
+.build-flow-surface:has(.floating-toolbox) .react-flow__panel.canvas-navigator{left:calc(50% + 34px);max-width:calc(100% - 92px)}
+.build-flow-surface:has(.floating-toolbox) .canvas-navigator[data-narrow="true"]{display:grid;grid-template-columns:32px 32px 32px 28px minmax(32px,1fr);grid-template-rows:32px 24px;height:70px;border-radius:12px}
+.build-flow-surface:has(.floating-toolbox) .canvas-navigator[data-narrow="true"] .canvas-navigator-slider{grid-column:1/-1;grid-row:2;width:100%}
+.build-flow-surface:has(.floating-toolbox) .canvas-navigator[data-narrow="true"] .canvas-navigator-percentage{grid-column:5;grid-row:1;width:100%}
+
+.bridge-request-details>summary{cursor:pointer;color:var(--blue);font-size:13px;padding:12px 0;min-height:44px}.bridge-request-details>summary:focus-visible{outline:2px solid var(--blue);outline-offset:3px}
+@media(max-width:480px){.workflow-workspace .build-grid>.canvas>.build-canvas-head{flex:0 0 auto;min-height:0}}
+.bridge-stage-network{display:inline-flex;align-items:center;gap:6px}.bridge-stage-network .brand-icon{width:18px;height:18px;flex:none}
+@media(min-width:1001px){.workflow-workspace :is(.simulate-workspace-grid,.execute-workspace-grid):has(>.canvas){grid-template-columns:minmax(340px,.9fr) minmax(0,1.1fr)}}

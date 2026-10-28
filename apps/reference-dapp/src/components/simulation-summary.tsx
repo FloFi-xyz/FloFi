@@ -5,7 +5,7 @@ import { useLocale } from '../i18n/locale';
 import { useEffect, useState } from 'react';
 import type { ReviewContext } from '@defi-workflow-engine/reference-linter';
 import type { Workflow } from '../domain/initial-workflow';
-import { projectSimulation, simulationStatusPresentation, type SimulationSource, type SimulationLine, type SimulationStep } from '../domain/simulation-presentation';
+import { projectSimulation, simulationInputLabel, simulationStatusPresentation, type SimulationSource, type SimulationLine, type SimulationStep } from '../domain/simulation-presentation';
 import { NetworkBrandIcon, TokenBrandIcon } from './brand-icon';
 
 function Lines({ lines }: { lines: SimulationLine[] }) {
@@ -53,7 +53,7 @@ export function SimulationSummary({ workflow, context, source, invalidWorkflow =
       {details.steps.length ? <ol className="simulation-results">{details.steps.map(step => <li key={step.id}>
         <div className="simulation-step-title">{multiple && <span className="simulation-step-number">{tr(step.number)}</span>}<strong>{tr(step.action)}</strong></div>
         <div className="simulation-money-pair">
-          <div className="simulation-money-source"><span className="simulation-result-label">{tr('You send')}</span><div className="simulation-input"><TokenAmount value={step.input}/></div><span className="simulation-money-network">{step.networks[0]}</span></div>
+          <div className="simulation-money-source"><span className="simulation-result-label">{tr(simulationInputLabel(step.action))}</span><div className="simulation-input"><TokenAmount value={step.input}/></div><span className="simulation-money-network">{step.networks[0]}</span></div>
           <div className="simulation-money-destination"><SimulationOutcome step={step}/><span className="simulation-money-network">{step.networks.at(-1)}</span></div>
         </div>
         <p className="simulation-estimate-note">{tr('Estimate only. No funds have moved.')}{step.provider && <> · {step.provider}</>}</p>

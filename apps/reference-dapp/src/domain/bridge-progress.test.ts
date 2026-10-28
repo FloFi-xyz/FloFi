@@ -31,6 +31,10 @@ describe.each(['router', 'universal'] as const)('%s bridge evidence stages', kin
     expect(stages({ verdict: 'RECONCILED', destination, evidence: { bundle: { outcome: 'RECONCILED' } } }).at(-1)?.status).toBe('Confirmed');
     expect(stages({ verdict: 'RECONCILED', destination: { ...destination, safe: false, final: false }, evidence: {} }).at(-1)?.status).not.toBe('Confirmed');
   });
+  it('requires a recorded revert to call a hashed failure financially proven', () => {
+    expect(stages({ source: null, attempts: [{ step: 'DEPOSIT', state: 'FAILED' }] }, [operation('DEPOSIT', 'failed')]).find(s => s.id === 'source')?.status).toBe('Outcome undetermined');
+    expect(stages({ source: null, attempts: [{ step: 'DEPOSIT', state: 'REVERTED' }] }, [operation('DEPOSIT', 'failed')]).find(s => s.id === 'source')?.status).toBe('Failed with evidence');
+  });
   it('retains source/destination hashes while finality is pending', () => {
     const result = stages({ destination: { transactionHash: hash, safe: false, final: false } });
     expect(result.find(s => s.id === 'delivery')).toMatchObject({ hash, status: 'Awaiting observation' });

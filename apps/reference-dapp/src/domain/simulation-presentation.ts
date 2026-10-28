@@ -47,6 +47,10 @@ export type SimulationSource =
   | { kind: 'fork-pool'; state: Snapshot<ReturnType<typeof useLiquidity>> }
   | { kind: 'across'; state: Snapshot<ReturnType<typeof useAcross>> }
   | { kind: 'unavailable'; state: { error: string | null; busy: boolean | string | null } };
+/** Borrowing/withdrawing requests an amount; it must never be described as a wallet debit. */
+export function simulationInputLabel(action: string): string {
+  return ['Borrow', 'Withdraw'].includes(action) ? 'Requested amount' : ['Swap', 'Bridge', 'Send', 'Supply', 'Repay'].includes(action) ? 'You send' : 'Operation input';
+}
 export type SimulationLine = { label: string; value: string; note?: string };
 export type SimulationWarning = { severity: 'info' | 'attention' | 'blocking'; message: string };
 export type SimulationStep = {
@@ -285,7 +289,7 @@ export function projectSimulation(workflow: Workflow, context: ReviewContext, so
       if (q.stocks?.length) warn('attention', 'Stock Tokens are not offered to US persons or in restricted jurisdictions.');
       if (s) s.resultLabel = 'Quoted output';
       if (q.ownerReview) {
-        fee('Maximum network fee', q.ownerReview.feeBudgetWei, 18, 'ETH', 'For the next reviewed transaction. Further approvals and actions can have separate network costs.');
+        fee('Network fee budget', q.ownerReview.feeBudgetWei, 18, 'ETH', 'For the next reviewed transaction. Further approvals and actions can have separate network costs.');
         approvals(q.ownerReview.step === 'approval');
       } else warn('attention', 'This is a pool quote. Network fees and exact transaction simulation are not available yet.');
       break;

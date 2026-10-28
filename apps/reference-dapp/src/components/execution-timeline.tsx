@@ -35,6 +35,10 @@ function StepEvidence({ evidence, action, values, facts }: { evidence: Execution
     </details>}
   </section>;
 }
+function RequestEvidence({ bridge, children }: { bridge: boolean; children: ReactNode }) {
+  const { t } = useLocale();
+  return bridge ? <details className="bridge-request-details"><summary>{t('Request details and evidence')}</summary>{children}</details> : <>{children}</>;
+}
 export function ExecutionTimeline({ progress, result, workflowName, backToBuild, checkingOperation, primaryAction, runContext = 'current' }: { primaryAction?: ReactNode; progress: ExecutionLifecycle; result?: ExecutionResult | null; workflowName: string; backToBuild?: () => void; checkingOperation?: string | null; runContext?: 'current' | 'saved' }) {
   const { t: tr } = useLocale();
   return <section className={`execution-plan panel${result ? ' execution-result-plan' : ''}`} aria-label={tr("Execution plan")}>
@@ -44,8 +48,8 @@ export function ExecutionTimeline({ progress, result, workflowName, backToBuild,
     {progress.restored && <p className="execution-context" role="status">{tr("Resuming display of the recorded execution. No new request has been sent.")}</p>}
     {progress.planUnavailable && <p className="execution-context">{tr("The original workflow details are unavailable in this saved run. Recorded requests and their status are shown below.")}</p>}
     {primaryAction && <div className="canvas-primary-action execution-lifecycle-actions">{primaryAction}</div>}
-    {progress.bridgeStages && <BridgeTimeline stages={progress.bridgeStages} local={progress.local}/>}
-    <ol className="execution-timeline" aria-label={tr("Workflow step progression")}>{progress.steps.map(step => {
+    {progress.bridgeStages && <BridgeTimeline stages={progress.bridgeStages} local={progress.local} evidence={progress.evidence}/>}
+    <RequestEvidence bridge={Boolean(progress.bridgeStages)}><ol className="execution-timeline" aria-label={tr("Workflow step progression")}>{progress.steps.map(step => {
       const recorded = progress.stepEvidence?.[step.id] ?? executionStepEvidence(step, progress.restored);
       const facts = step.operations.flatMap(operation => progress.evidence?.operations[operation.id] ? [progress.evidence.operations[operation.id]!] : []);
       const failure = facts.find(item => item.failure)?.failure;
@@ -69,6 +73,6 @@ export function ExecutionTimeline({ progress, result, workflowName, backToBuild,
           {!showEvidence && fact?.note && <p className="execution-context">{tr(fact.note, ...fact.noteArgs ?? [])}</p>}
         </li>; })}</ul>
       </div>
-    </li>; })}</ol>
+    </li>; })}</ol></RequestEvidence>
   </section>;
 }

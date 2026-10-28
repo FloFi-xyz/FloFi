@@ -26,23 +26,24 @@ export function dateLabel(value: string | null, language: 'EN' | 'PT' = 'EN') {
 function RunCard({ view, openRun, history, readDetails }: { view: DashboardRunView; openRun(runId: string): void; readDetails?: ((runId: string) => Promise<DashboardRunView | null>) | undefined;
   history?: { change(runId: string): HistoryChange; changed(runId: string, disposition: 'DELETED' | 'ARCHIVED'): void } | undefined }) {
   const { t: tr, language } = useLocale();
-  const updated = dateLabel(view.run.updatedAt ?? view.run.createdAt, language);
   const [record, setRecord] = useState<DashboardRunView | null>(null);
   const [readState, setReadState] = useState<'idle' | 'loading' | 'unavailable' | 'ready'>('idle');
   const reading = useRef(false);
+  const cached = useRef<DashboardRunView | null>(null);
   async function expand() {
-    if (!readDetails || view.progress || record || reading.current) return;
+    if (!readDetails || view.progress || cached.current || reading.current) return;
     reading.current = true; setReadState('loading');
-    try { const result = await readDetails(view.run.runId); setRecord(result); setReadState(result?.progress ? 'ready' : 'unavailable'); }
+    try { const result = await readDetails(view.run.runId); cached.current = result?.progress ? result : null; setRecord(result); setReadState(result?.progress ? 'ready' : 'unavailable'); }
     catch { setReadState('unavailable'); }
     finally { reading.current = false; }
   }
   const shown = record ?? view;
+  const updated = dateLabel(shown.run.updatedAt ?? shown.run.createdAt, language);
   return <article className={`dashboard-run-card${shown.current ? ' dashboard-run-current' : ''}`}>
     <div className="dashboard-run-heading"><div className="dashboard-run-title"><span className="dashboard-run-icon"><DashboardIcon kind="activity"/></span><h3 title={shown.title}>{shown.current ? shown.title : tr(shown.title)}</h3></div><DashboardStatusBadge status={shown.status}/></div>
     {shown.progress ? <FinancialOutcome progress={shown.progress} compact/> : <p className="dashboard-amount-context">{tr('Amounts available in run details')}</p>}
     {shown.attention.length > 0 && <p className="dashboard-run-message">{tr(shown.attention[0])}</p>}
-    <details className="dashboard-card-details" onToggle={event => { if (event.currentTarget.open) void expand(); }}><summary>{tr('Record details')}</summary>{record?.progress && <FinancialOutcome progress={record.progress} compact/>}{readState === 'loading' && <p role="status">{tr('Loading execution…')}</p>}{readState === 'unavailable' && <p role="status">{tr('Actual amounts are not confirmed in this record.')}</p>}<p>{tr(shown.message)}</p>
+    <details className="dashboard-card-details" onToggle={event => { if (event.currentTarget.open) void expand(); }}><summary>{tr('Record details')}</summary>{readState === 'loading' && <p role="status">{tr('Loading execution…')}</p>}{readState === 'unavailable' && <p role="status">{tr('Actual amounts are not confirmed in this record.')}</p>}<p>{tr(shown.message)}</p>
       {shown.total !== null && <p>{tr(shown.completed)}{tr(' of ')}{tr(shown.total)} {tr('confirmed')}</p>}
       {shown.recovered && <span>{tr('Recovered')} · </span>}{shown.reconciled && <span>{tr('Reconciled')} · </span>}{shown.run.hasEvidence && <span>{tr('Evidence available')}</span>}
     </details>

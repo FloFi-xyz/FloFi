@@ -185,6 +185,7 @@ for (const value of ['light', 'dark'] as const) test(`${value} long recorded amo
     await expect(detail.getByRole('button', { name: /^(Authorize in wallet|Retry|Continue execution)$/ })).toHaveCount(0);
     if (mode === 'bridge-completed') {
       await page.evaluate(() => Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (value: string) => { Object.assign(window, { finalAcceptanceCopy: value }); } } }));
+      await detail.locator('.bridge-request-details>summary').click();
       const proof = detail.locator('.execution-plan .execution-operation-details').first();
       await proof.locator('summary').click();
       await proof.getByRole('button', { name: /^Copy Provider reference/ }).first().click();

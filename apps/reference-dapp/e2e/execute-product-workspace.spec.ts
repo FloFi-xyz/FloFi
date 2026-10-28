@@ -347,11 +347,12 @@ test('bridge source evidence does not claim destination settlement before reconc
   await page.evaluate(() => window.flofiExecuteAcceptance.evidence('bridge-pending'));
   const plan = page.getByRole('region', { name: 'Execution plan', exact: true });
   await expect(plan).toContainText('Source transaction'); await expect(plan).toContainText('Executed input');
-  await expect(plan.locator('.execution-step-context img.brand-icon')).toHaveCount(2);
-  expect(await plan.locator('.execution-step-context img.brand-icon').evaluateAll(images => images.map(image => ({ width: image.getBoundingClientRect().width, height: image.getBoundingClientRect().height, filter: getComputedStyle(image).filter })))).toEqual([{ width: 18, height: 18, filter: 'none' }, { width: 18, height: 18, filter: 'none' }]);
+  await expect(plan.locator('.bridge-stage-network img.brand-icon')).toHaveCount(3);
+  expect(await plan.locator('.bridge-stage-network img.brand-icon').evaluateAll(images => images.map(image => ({ width: image.getBoundingClientRect().width, height: image.getBoundingClientRect().height, filter: getComputedStyle(image).filter })))).toEqual([{ width: 18, height: 18, filter: 'none' }, { width: 18, height: 18, filter: 'none' }, { width: 18, height: 18, filter: 'none' }]);
   await expect(plan).not.toContainText('Actual received'); await expect(page.locator('.execution-summary')).not.toContainText('Execution completed');
   await page.evaluate(() => window.flofiExecuteAcceptance.evidence('bridge-reconciled'));
   await expect(plan).toContainText('Destination transaction'); await expect(plan).toContainText('Reconciled'); await expect(plan).toContainText('4.89 USDC');
+  await plan.locator('.bridge-request-details>summary').click();
   for (const disclosure of await plan.locator('.execution-operation-details summary').all()) await disclosure.click();
   await expect(plan.locator('.execution-operations').getByRole('link', { name: 'View transaction' })).toHaveCount(2);
   for (const theme of ['light', 'dark']) {
@@ -557,6 +558,7 @@ test('copy fallback and long workflow names stay inside their containers in both
   await page.evaluate(() => { window.flofiExecuteAcceptance.workflowName('A workflow with an unusually long name ' + 'w'.repeat(180)); window.flofiExecuteAcceptance.evidence('bridge-reconciled'); });
   await page.evaluate(() => { Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { async writeText() { throw Error('Clipboard unavailable'); } } }); });
   const plan = page.getByRole('region', { name: 'Execution plan', exact: true });
+  await plan.locator('.bridge-request-details>summary').click();
   await plan.locator('.execution-operation-details').first().locator('summary').click();
   await plan.getByRole('button', { name: /Copy Provider reference/ }).click();
   await expect(plan.getByRole('status').filter({ hasText: 'Copy unavailable.' })).toHaveCount(1);

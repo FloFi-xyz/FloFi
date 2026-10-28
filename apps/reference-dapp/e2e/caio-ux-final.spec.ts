@@ -84,7 +84,8 @@ test('cursor-anchored mouse zoom, Shift touchpad pan, Escape, page scroll and ke
   const verify = await open(page, 'canvas');
   const flow = page.locator('.react-flow'), pane = page.locator('.react-flow__pane');
   const view = () => page.locator('.react-flow__viewport').evaluate(el => { const m = new DOMMatrixReadOnly(getComputedStyle(el).transform); return { x: m.e, y: m.f, zoom: m.a }; });
-  const before = await view(), node = await page.locator('.react-flow__node').getAttribute('style');
+  await expect(page.locator('.react-flow__node')).toBeVisible();
+  const before = await view(), node = await page.locator('.react-flow__node').evaluate(el => (el as HTMLElement).style.transform);
   const box = (await pane.boundingBox())!, point = { x: box.x + 500, y: box.y + 150 };
   await page.mouse.move(point.x, point.y); await page.mouse.wheel(0, 100);
   await expect.poll(() => page.evaluate(() => scrollY)).toBeGreaterThan(0); expect(await view()).toEqual(before);
@@ -99,7 +100,7 @@ test('cursor-anchored mouse zoom, Shift touchpad pan, Escape, page scroll and ke
   await page.keyboard.press('Escape'); await expect(flow.getByRole('button', { name: 'Wheel navigation' })).toHaveAttribute('aria-pressed', 'false');
   await flow.getByRole('button', { name: 'Zoom out', exact: true }).focus(); await page.keyboard.press('Enter');
   await flow.getByRole('button', { name: 'Fit workflow' }).click();
-  expect(await page.locator('.react-flow__node').getAttribute('style')).toBe(node); verify();
+  expect(await page.locator('.react-flow__node').evaluate(el => (el as HTMLElement).style.transform)).toBe(node); verify();
 });
 
 for (const area of ['simulation', 'technical', 'canvas', 'execution', 'history', 'bridge']) test(`${area}: PT-BR mobile labels and accessible disclosures`, async ({ page }) => {
@@ -116,7 +117,8 @@ test('mobile touch pan and pinch preserve workflow nodes and every navigation co
   const page = await context.newPage();
   const verify = await open(page, 'canvas', 320);
   const flow = page.locator('.react-flow'), pane = page.locator('.react-flow__pane');
-  const position = await page.locator('.react-flow__node').getAttribute('style');
+  await expect(page.locator('.react-flow__node')).toBeVisible();
+  const position = await page.locator('.react-flow__node').evaluate(el => (el as HTMLElement).style.transform);
   const viewport = () => page.locator('.react-flow__viewport').getAttribute('style');
   const before = await viewport(), box = (await pane.boundingBox())!;
   const cdp = await context.newCDPSession(page);
@@ -130,6 +132,17 @@ test('mobile touch pan and pinch preserve workflow nodes and every navigation co
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
   await expect.poll(viewport).not.toBe(pan);
   for (const button of await flow.locator('.canvas-navigator button').all()) await expect(button).toBeInViewport();
-  expect(await page.locator('.react-flow__node').getAttribute('style')).toBe(position);
+  expect(await page.locator('.react-flow__node').evaluate(el => (el as HTMLElement).style.transform)).toBe(position);
   verify(); await context.close();
+});
+
+test('wheel navigation leaves node form input and page scrolling intact', async ({ page }) => {
+  const verify = await open(page, 'canvas-form');
+  await page.getByRole('button', { name: 'Wheel navigation' }).click();
+  const input = page.getByRole('textbox', { name: 'Navigation form field' });
+  await input.fill('42');
+  const viewport = page.locator('.react-flow__viewport'), before = await viewport.getAttribute('style');
+  await input.hover(); await page.mouse.wheel(0, 50);
+  await expect(input).toHaveValue('42'); await expect(viewport).toHaveAttribute('style', before!);
+  verify();
 });

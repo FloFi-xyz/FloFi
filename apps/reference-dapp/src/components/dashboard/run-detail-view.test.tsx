@@ -57,7 +57,7 @@ describe('Run Details reuses the UX-005 execution and evidence truth', () => {
       expect(html).toContain('Across'); expect(html).toContain('Arbitrum Sepolia');
       expect(html).toContain(`https://sepolia.arbiscan.io/tx/${detailDestinationHash}`);
     }
-    expect(pending).toContain('In progress'); expect(pending).not.toContain('4.89 USDC'); expect(pending).not.toContain('Execution completed');
+    expect(pending).toContain('In progress'); expect(pending).toContain('4.89 USDC'); expect(pending).toContain('Destination amount observed · awaiting reconciliation'); expect(pending).not.toContain('Actual received'); expect(pending).not.toContain('Execution completed');
     expect(settled).toContain('4.89 USDC'); expect(settled).toContain('4.9 USDC'); expect(settled).toContain('Execution completed');
   });
   it.each(['cow-pending', 'cow-reconciled', 'cow-cancelled'] as const)('preserves %s order identity and the existing scripted limitations', mode => {

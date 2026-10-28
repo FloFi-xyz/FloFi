@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 export const portugueseCaioUx: Readonly<Record<string, string>> = {
   'For the next reviewed transaction. Further approvals and actions can have separate network costs.': 'Para a próxima transação revisada. Outras aprovações e ações podem ter custos de rede separados.',
+  'Network fee budget': 'Orçamento de taxa de rede',
+  'Requested amount': 'Valor solicitado',
+  'Operation input': 'Entrada da operação',
   'You send': 'Você envia',
   'Estimate only. No funds have moved.': 'Apenas uma estimativa. Nenhum valor foi movimentado.',
   'Route details': 'Detalhes da rota',
@@ -17,6 +20,7 @@ export const portugueseCaioUx: Readonly<Record<string, string>> = {
   'Submitted': 'Enviada',
   'Source confirmation': 'Confirmação na origem',
   'Destination delivery': 'Entrega no destino',
+  'Request details and evidence': 'Detalhes dos pedidos e comprovantes',
   'Bridge progress': 'Progresso da transferência entre redes',
   'Token authorization': 'Autorização do token',
   'Cross-network transfer': 'Transferência entre redes',

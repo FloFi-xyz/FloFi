@@ -98,7 +98,7 @@ export function SigningSurface(props: SigningSurfaceProps) {
           {limits.map((line, index) => <div key={`limit-${index}`}><dt>{tr(line.label)}</dt><dd>{tr(line.value)}{line.note && <small>{tr(line.note)}</small>}</dd></div>)}
           {!live && seconds !== null && authorization.key && <div><dt>{tr('Valid for')}</dt><dd>{seconds > 0 ? tr('{0}s', String(seconds)) : tr('Expired')}</dd></div>}
         </dl>
-          <details className="signing-contract-details"><summary>{tr('Token contracts')}</summary>{authorization.tokens.map(token => <div key={`${token.chain}:${token.address}`}><dt>{tr(token.chain.startsWith('solana:') ? 'Token mint' : 'Token contract')}</dt><dd>{token.symbol} · {token.address}</dd></div>)}</details>
+        {authorization.tokens.length > 0 && <details className="signing-contract-details"><summary>{tr('Token contracts')}</summary><dl className="simulation-summary-values">{authorization.tokens.map(token => <div key={`${token.chain}:${token.address}`}><dt>{tr(token.chain.startsWith('solana:') ? 'Token mint' : 'Token contract')}</dt><dd>{token.symbol} · {token.address}</dd></div>)}</dl></details>}
         {realFundsTemplate(requiredNetwork?.chain) && <p className="signing-real-funds">{tr(...realFundsTemplate(requiredNetwork?.chain)!)}</p>}
         <ReviewTokenPermissions review={review}/>
         <div className={`signing-status simulation-validity simulation-tone-${status.tone}`} role="status" aria-live="polite"><strong><span className="simulation-status-dot" aria-hidden="true"/>{tr(status.label)}</strong><p>{tr(status.message)}</p></div>
@@ -108,7 +108,7 @@ export function SigningSurface(props: SigningSurfaceProps) {
             {operation.explorer ? <a href={operation.explorer} target="_blank" rel="noreferrer">{tr('View transaction')}</a> : operation.hash && <code title={operation.hash}>{short(operation.hash)}</code>}</li>)}
         </ul>}
         {live && <FinancialOutcome progress={live}/>}
-        {live?.bridgeStages && <BridgeTimeline stages={live.bridgeStages} local={live.local}/>}
+        {live?.bridgeStages && <BridgeTimeline stages={live.bridgeStages} local={live.local} evidence={live.evidence}/>}
         {live && <details><summary>{tr('Transaction and reconciliation evidence')}</summary><ExecutionEvidenceDetails progress={live}/>
           {live.runKey && <a href={`/app/dashboard/runs/${encodeURIComponent(live.runKey)}`}>{tr('View receipt and evidence')}</a>}
         </details>}

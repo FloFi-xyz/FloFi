@@ -12,7 +12,7 @@ export function FinancialOutcome({ progress, compact = false }: { progress: Exec
     {!compact && <h2>{t('Financial outcome')}</h2>}
     {facts.map(({ step, values }) => <div className="financial-outcome-step" key={step.id}>
       <p className="financial-outcome-route">{t(step.action)} · {step.network}</p>
-      {values.length > 0 && <dl>{values.map((value, index) => <div key={`${value.label}-${index}`}><dt>{t(value.label === 'Executed input' ? 'Confirmed source debit' : value.label)}</dt><dd>{t(value.value)}</dd></div>)}</dl>}
+      {values.length > 0 && <dl>{values.map((value, index) => <div key={`${value.label}-${index}`}><dt>{t(value.label === 'Executed input' && step.operations.some(operation => operation.id === 'DEPOSIT') ? 'Confirmed source debit' : value.label)}</dt><dd>{t(value.value)}</dd></div>)}</dl>}
       {!compact && step.operations.some(op => op.id === 'destination') && !values.some(value => value.label === 'Actual received') && <p className="financial-unknown">{t(values.some(value => value.label === 'Destination amount observed · awaiting reconciliation') ? 'Final destination amount awaits reconciliation' : 'Destination amount not confirmed')}</p>}
     </div>)}
     {!known && <p className="financial-unknown">{t('Actual amounts are not confirmed in this record.')}</p>}

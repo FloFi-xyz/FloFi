@@ -4,7 +4,7 @@ import { hashArtifactBytes } from '@defi-workflow-engine/workflow-contracts';
 import { createBaseSepoliaReviewContext } from '@defi-workflow-engine/reference-linter';
 import { editorReducer, initialEditor } from './editor';
 import { canvasAddCommand } from './canvas-authoring';
-import { projectSimulation, simulationStatusPresentation, simulationAmount, simulationPriceImpact, simulationError, type SimulationSource } from './simulation-presentation';
+import { projectSimulation, simulationInputLabel, simulationStatusPresentation, simulationAmount, simulationPriceImpact, simulationError, type SimulationSource } from './simulation-presentation';
 const context = createBaseSepoliaReviewContext(), now = Date.parse('2026-10-06T12:00:00Z');
 const expiry = new Date(now + 120_000).toISOString();
 const swap = editorReducer(initialEditor(), { type: 'ADD_SWAP', direction: 'USDC_TO_WETH', amount: '100', slippage: '50', source: 'CHAT', baseRevision: 0 }, context).workflow;
@@ -243,6 +243,12 @@ it('discloses a real owner-preflight network budget as the next transaction budg
   const workflow = swap;
   const source = { kind: 'public', state: { busy: false, available: true, retired: false, error: null, run: { workflow, quote: { workflowHash: hash(workflow), revision: workflow.revision, nodeId: workflow.nodes.at(-1)!.nodeId, chainId: 84532, inputSymbol: 'USDC', outputSymbol: 'WETH', amountIn: '100000000', expectedOut: '25000000000000000', minimumOut: '24875000000000000', slippageBps: 50, expiresAt: expiry, ownerReview: { feeBudgetWei: '123456000000000', step: 'approval' } } } } } as unknown as SimulationSource;
   const result = projectSimulation(workflow, context, source, now);
-  expect(result.fees).toContainEqual({ label: 'Maximum network fee', value: '0.000123456 ETH', note: 'For the next reviewed transaction. Further approvals and actions can have separate network costs.' });
+  expect(result.fees).toContainEqual({ label: 'Network fee budget', value: '0.000123456 ETH', note: 'For the next reviewed transaction. Further approvals and actions can have separate network costs.' });
   expect(result.warnings.some(w => w.message === 'Token approval is required before execution.')).toBe(true);
+});
+
+it('keeps Borrow and Withdraw requested amounts distinct from token sends and neutral position inputs', () => {
+  expect(simulationInputLabel('Borrow')).toBe('Requested amount'); expect(simulationInputLabel('Withdraw')).toBe('Requested amount');
+  expect(simulationInputLabel('Swap')).toBe('You send'); expect(simulationInputLabel('Bridge')).toBe('You send');
+  expect(simulationInputLabel('Pool / Liquidity')).toBe('Operation input');
 });
