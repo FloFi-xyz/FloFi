@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FLOWS } from '../../backend/flows.ts';
-import { baseSepoliaSwapRpc } from './public-testnet-rpc.ts';
+import { baseSepoliaSwapRpc, createBaseSepoliaReadRpc } from './public-testnet-rpc.ts';
 
 afterEach(() => { vi.restoreAllMocks(); });
 /** A provider double: answers each POST from `replies` in order (a number is an HTTP status without a body). */
@@ -16,6 +16,12 @@ function provider(replies: (number | Record<string, unknown>)[]) {
 }
 
 describe('BUILD-CLOUD-PARITY-001 Base Sepolia read clients on shared serverless egress', () => {
+  it('classifies pruned historical state and RPC rate limits separately from an execution revert', async () => {
+    provider([{ error: { code: -32000, message: 'missing trie node fixture (path ) state 0x1 is not available, not found' } }]);
+    await expect(createBaseSepoliaReadRpc('https://fixture.invalid', ['eth_call'])('eth_call', [])).rejects.toThrow('PUBLIC_RPC_HISTORY_UNAVAILABLE');
+    provider([{ error: { code: -32011, message: 'request limit reached' } }]);
+    await expect(createBaseSepoliaReadRpc('https://fixture.invalid', ['eth_getLogs'])('eth_getLogs', [])).rejects.toThrow('PUBLIC_RPC_UNAVAILABLE');
+  });
   it('the live Uniswap liquidity client retries a dropped read and returns the answer', async () => {
     const hosts = provider([429, { result: '0x2dc6c0' }]);
     await expect(FLOWS['uniswap-liquidity'].transport('live', {}).rpc('eth_blockNumber', [])).resolves.toBe('0x2dc6c0');

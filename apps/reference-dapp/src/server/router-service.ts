@@ -13,7 +13,7 @@
  * validated when the log is extended, and terminal phases never change.
  */
 import { observeEvmAllowance, retainAllowanceObservation } from './allowance-observation.ts';
-import type { AllowanceObservation } from '../domain/financial-observation';
+import type { AllowanceObservation, FinancialObservation } from '../domain/financial-observation';
 import { discoverEvmNonce, legacyUnprovenApproval, sameEvmIntent } from './evm-submission-discovery.ts';
 import { createHash, randomBytes } from 'node:crypto';
 import { ARBITRUM_ONE, CROSSCHAIN_ROUTER_BASE_ARBITRUM as MAINNET, resolveWorkflowCapability, type RouterProfile } from '@defi-workflow-engine/action-registry';
@@ -96,7 +96,7 @@ export type RouterEvidence = { readonly bundle: EvidenceBundle; readonly bundleH
     readonly explorer: string }[];
   readonly reconciliation: 'RECONCILED'; readonly observedAt: string };
 export type RouterProvenance = 'PUBLIC_MAINNET' | 'PUBLIC_TESTNET' | 'MOCKED';
-export type RouterRecord = { readonly allowanceObservation?: AllowanceObservation; readonly format: 'flofi.router-run.v1'; readonly id: string; readonly provenance: RouterProvenance;
+export type RouterRecord = { readonly observation?: FinancialObservation; readonly allowanceObservation?: AllowanceObservation; readonly format: 'flofi.router-run.v1'; readonly id: string; readonly provenance: RouterProvenance;
   readonly workflow: SemanticWorkflow; readonly owner: string; readonly review: RouterReview; readonly authorization: string | null; readonly phase: RouterPhase;
   readonly attempts: readonly RouterAttempt[]; readonly source: SourceSettlement | null; readonly destination: DestinationFill | null; readonly refund: RefundRecord | null;
   /** Next Arbitrum block to scan for the fill (durable cursor). */ readonly scanFrom: number;
@@ -255,6 +255,8 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
     // Observation repeats often while a bridge is in flight: an unchanged snapshot is not appended again.
     if (prior) {
       const before = JSON.parse(utf8(prior).trimEnd().split('\n').at(-1)!) as RouterRecord;
+      if (before.observation && record.observation && before.observation.outcome === record.observation.outcome && before.observation.reason === record.observation.reason)
+        record = { ...record, observation: before.observation };
       if (record.allowanceObservation) record = { ...record, allowanceObservation: retainAllowanceObservation(before.allowanceObservation, record.allowanceObservation) ?? record.allowanceObservation };
       if (canonical(before) === canonical(record)) return record;
     }
@@ -621,6 +623,21 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
     }
     let hash = attempt.replacementHash ?? attempt.transactionHash;
     let raw = hash ? await rpc('eth_getTransactionReceipt', [hash]) : null;
+    // Recover the exact wallet/nonce first. Optional provider log scans must not prevent a direct transaction from being found.
+    if (raw === null) {
+      const found = await discoverByNonce(attempt);
+      const candidate = found.consumed ? found.tx : found.pendingTx;
+      if (candidate && sameEvmIntent(candidate, attempt.tx, attempt.nonce)) {
+        const recovered = hex(candidate.hash);
+        attempt = { ...attempt, state: 'PENDING', transactionHash: attempt.transactionHash ?? recovered,
+          replacementHash: attempt.transactionHash && attempt.transactionHash !== recovered ? recovered : attempt.replacementHash };
+        record = await save(replaceAttempt({ ...record, error: 'ROUTER_TRANSACTION_PENDING' }, attempt));
+        hash = recovered;
+        // Persistence precedes any further network call (including a receipt lookup that can fail or crash).
+        raw = await rpc('eth_getTransactionReceipt', [hash]);
+        if (raw === null) return record;
+      }
+    }
     if (raw === null && attempt.step === 'DEPOSIT') {
       const scan = await discoverDeposit(record, attempt), logged = scan.hash;
       depositScanComplete = scan.complete;
@@ -664,8 +681,8 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
       const replaced = attempt.transactionHash !== null && attempt.transactionHash !== foundHash;
       const current: RouterAttempt = { ...attempt, state: 'PENDING', transactionHash: attempt.transactionHash ?? foundHash, replacementHash: replaced ? foundHash : attempt.replacementHash };
       hash = foundHash;
-      raw = await rpc('eth_getTransactionReceipt', [hash]);
       const saved = await save(replaceAttempt(record, current));
+      raw = await rpc('eth_getTransactionReceipt', [hash]);
       if (raw === null) return save({ ...saved, error: 'ROUTER_TRANSACTION_PENDING' });
       if (!isObject(raw)) fail('ROUTER_RECEIPT_INVALID');
       return settleSource(saved, current, hash, raw);
@@ -999,6 +1016,7 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
     /** Read-only observation and reconciliation (API and worker). There is no send path here. */
     async observe(id: string): Promise<RouterRecord> { return locked(id, async () => {
       let record = await load(id);
+      const observe = async () => {
       record = await save({ ...record, allowanceObservation: await observeEvmAllowance(rpc, { chain: SRC.chain, owner: record.owner, token: record.review.route.approval.token, spender: record.review.route.approval.spender }, now().toISOString()) });
       if (record.verdict !== 'PENDING') return record;
       let attempt = active(record);
@@ -1011,6 +1029,21 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
         if (record.verdict !== 'PENDING' || active(record)) return record;
       }
       return SETTLING.includes(record.phase) ? observeSettlement(record) : record;
+      };
+      try {
+        record = await observe();
+        const last = record.attempts.at(-1);
+        const outcome = record.verdict === 'RECONCILED' ? 'RECONCILED' : record.refund ? 'REFUND_OBSERVED'
+          : record.destination ? 'DESTINATION_OBSERVED' : last?.state === 'REVERTED' ? 'REVERTED'
+          : record.source ? 'CONFIRMED' : last?.state === 'CONFIRMED' ? 'APPROVAL_CONFIRMED' : last?.state === 'PENDING' ? 'PENDING'
+          : !last || last.state === 'CANCELLED' ? 'NOT_SUBMITTED' : 'UNDETERMINED';
+        return save({ ...record, observation: { checkedAt: now().toISOString(), outcome, reason: record.error ?? last?.note ?? 'ROUTER_OBSERVED' } });
+      } catch (cause) {
+        const code = cause instanceof Error ? cause.message : '';
+        if (!/^(PUBLIC_RPC_|EVM_OBSERVATION_)/.test(code)) throw cause;
+        record = await load(id);
+        return save({ ...record, observation: { checkedAt: now().toISOString(), outcome: 'TEMPORARY_FAILURE', reason: code } });
+      }
     }); },
     load,
   };

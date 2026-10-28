@@ -172,9 +172,13 @@ export function projectExecutionEvidence(source: ExecutionLifecycleSource, progr
       identifier('DEPOSIT', 'Provider reference · Deposit ID', record.source?.depositId);
       identifier('destination', 'Destination transaction', record.destination?.transactionHash, 'transaction', review.intent.destinationChain);
       identifier('destination', 'Refund transaction', record.refund?.transactionHash, 'transaction', review.intent.sourceChain);
-      if (record.source?.safe) amount('DEPOSIT', 'Executed input', record.source.inputAmount, review.route.inputToken.decimals, review.route.inputToken.symbol, review.intent.amount);
+      if (record.source?.safe) amount('DEPOSIT', 'Executed input', record.source.ownerDebit ?? record.source.inputAmount, review.route.inputToken.decimals, review.route.inputToken.symbol, review.intent.amount);
       if (record.verdict === 'RECONCILED' && record.destination?.safe) amount('destination', 'Actual received', record.destination.transferAmount, review.route.outputToken.decimals, review.route.outputToken.symbol, review.quote.expectedOutput);
       allowanceFacts(record.allowanceObservation, review.route.inputToken.decimals, review.route.inputToken.symbol);
+      if (record.observation) {
+        detail('Last execution check', record.observation.checkedAt); detail('Observation reason', record.observation.reason);
+        op(record.source ? 'destination' : record.attempts.at(-1)?.step ?? 'DEPOSIT').note ??= financialObservationMessage(record.observation);
+      }
       if (record.refund) amount('destination', 'Verified refund', record.refund.amount, review.route.inputToken.decimals, review.route.inputToken.symbol);
       detail('Source network', shellChainLabel(review.intent.sourceChain)); detail('Destination network', shellChainLabel(review.intent.destinationChain));
       // Route/provider quoted fees are deliberately not reported as actual costs.

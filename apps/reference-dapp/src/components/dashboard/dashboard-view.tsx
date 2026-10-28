@@ -43,8 +43,9 @@ function RunCard({ view, openRun, history }: { view: DashboardRunView; openRun(r
   </article>;
 }
 
-export function DashboardView({ account, connection, runs, hasMore, loading, build, openRun, verify, verifying, verificationIssue, refresh, history }: {
+export function DashboardView({ account, connection, runs, hasMore, loading, build, openRun, verify, verifying, verificationIssue, refresh, history, loadMore, loadingMore, pageIssue }: {
   account: string | null; connection: DashboardConnection | null; runs: DashboardRunView[]; hasMore: boolean; loading: boolean;
+  loadMore?: () => void; loadingMore?: boolean; pageIssue?: string | null;
   build(): void; openRun(runId: string): void; verify(): void; verifying: boolean; verificationIssue: string | null; refresh(): void;
   history?: { change(runId: string): HistoryChange; changed(runId: string, disposition: 'DELETED' | 'ARCHIVED'): void };
 }) {
@@ -64,7 +65,8 @@ export function DashboardView({ account, connection, runs, hasMore, loading, bui
       {current.length > 0 && <section className="dashboard-current" aria-labelledby="dashboard-current"><div className="dashboard-section-heading"><div><p className="eyebrow">{tr("FROM THIS WORKSPACE")}</p><h2 id="dashboard-current">{tr("Current execution")}</h2></div><span className="dashboard-read-only">{tr("Read-only overview")}</span></div>{current.map(view => <RunCard key={view.run.runId} view={view} openRun={openRun} history={history}/>)}</section>}
       <div className="dashboard-grid">{tr(attention.length > 0 && attentionPanel)}<section className="panel dashboard-activity" aria-labelledby="dashboard-activity"><div className="dashboard-section-heading"><div><h2 id="dashboard-activity">{tr("Recent activity")}</h2><p>{tr("Saved execution records for this wallet.")}</p></div>{connection === 'CONNECTED' && <button type="button" onClick={refresh} disabled={loading}>{tr("Refresh history")}</button>}</div>
         {recent.length ? <ol className="dashboard-run-list">{recent.map(view => <li key={view.run.runId}><RunCard view={view} openRun={openRun} history={history}/></li>)}</ol> : loading ? <div className="dashboard-list-loading" aria-hidden="true"><span/><span/><span/></div> : <div className="dashboard-empty dashboard-history-empty"><span className="dashboard-empty-icon"><DashboardIcon kind="history"/></span><h3>{tr(connection === 'CONNECTED' ? current.length ? 'No other saved runs' : 'No workflows executed yet' : 'Saved records are not available yet')}</h3><p>{tr(connection === 'CONNECTED' ? current.length ? 'Your current execution is shown above. Other saved runs will appear here.' : 'Build your first workflow to see its execution history here.' : current.length ? 'Your current execution is shown above. Saved history will appear when available.' : 'No current execution is available for this wallet.')}</p>{connection === 'CONNECTED' && !current.length && <button type="button" onClick={build}>{tr("Build workflow")}</button>}</div>}
-        {hasMore && <p className="dashboard-history-limit muted">{tr("Showing up to 100 recent saved runs. Older records are not included in this view.")}</p>}
+        {hasMore && loadMore && <button type="button" onClick={loadMore} disabled={loadingMore}>{tr(loadingMore ? 'Loading execution history…' : 'Load more history')}</button>}
+        {pageIssue && <p role="status">{tr(pageIssue)}</p>}
       </section>{tr(!attention.length && attentionPanel)}</div>
     </>}
   </div>;

@@ -12,10 +12,11 @@
  */
 import { UNIVERSAL_ROUTER_DEPLOYMENT, type UniversalRouterDeployment } from '@defi-workflow-engine/action-registry';
 import type { SolanaRpc } from '@defi-workflow-engine/reference-compiler';
-import { chainBoundRpc, createBaseSepoliaReadRpc, pacedReadRpc } from '../public-testnet-rpc.ts';
+import { chainBoundRpc, createBaseSepoliaReadRpc } from '../public-testnet-rpc.ts';
 import type { Rpc } from '../public-testnet-service.ts';
 import { robinhoodRpcUrl } from '../robinhood-mainnet.ts';
 import { routerRpcUrl } from '../router-runtime.ts';
+import { bridgeReadRpc } from '../bridge-read-rpc.ts';
 import { createSolanaRpc, solanaRpcOverride } from '../solana-rpc.ts';
 import { createUniversalHttp, type UniversalHttp } from './http.ts';
 import { mockedUniversalDeployment, UNIVERSAL_HARNESS_PORT } from './mock-deployment.ts';
@@ -40,7 +41,7 @@ export function universalRouterTransport(mode: 'live' | 'harness', env: Env): Un
   const evmRpcs = Object.fromEntries(Object.values(D.evm).map(d => {
     const url = mode === 'harness' ? `${loop}/evm/${d.chainId}` : d.chainId === 4663 ? robinhoodRpcUrl(env.GRYLOO_ROBINHOOD_RPC_URL) : routerRpcUrl(overrideOf(env, d.chainId), d.rpc);
     const client = createBaseSepoliaReadRpc(url, UNIVERSAL_EVM_RPC_METHODS);
-    return [d.chain, chainBoundRpc(mode === 'harness' ? client : pacedReadRpc(client), d.chainId)];
+    return [d.chain, mode === 'harness' ? chainBoundRpc(client, d.chainId) : bridgeReadRpc(d.chainId, url, UNIVERSAL_EVM_RPC_METHODS, env)];
   }));
   const solanaRpc = createSolanaRpc(mode === 'harness' ? `${loop}/solana` : solanaRpcOverride(env.GRYLOO_SOLANA_RPC_URL, 'UNIVERSAL_RPC_CONFIGURATION_INVALID') ?? D.solana.rpc,
     mode === 'harness');

@@ -35,6 +35,17 @@ const routerNetworks = (networks: CanvasBridgeNetworks): Pick<RouterBridgeInput,
   return { source: networks.source, destination: networks.destination };
 };
 export type CanvasBridgeNetworkInputs = Readonly<Record<string, CanvasBridgeNetworks>>;
+/** Reverse both asset identities with their networks. Input amounts remain authored input; estimates are never promoted to inputs. */
+export function invertCanvasBridgeNetworks(networks: CanvasBridgeNetworks): CanvasBridgeNetworks | null {
+  const tokens = routerTokensOf(networks);
+  const pair = universalCanvasPair(networks), defaults = pair ? universalCanvasInput(pair, '1', networks) : null;
+  const inputAsset = networks.outputAsset ?? tokens?.destinationToken ?? defaults?.outputAsset;
+  const outputAsset = networks.inputAsset ?? tokens?.token ?? defaults?.inputAsset;
+  const reversed = { source: networks.destination, destination: networks.source,
+    ...inputAsset ? { inputAsset } : {}, ...outputAsset ? { outputAsset } : {} };
+  return universalCanvasPair(reversed) || Object.values(ROUTER_NETWORK_OPTIONS).some(o => o.source === reversed.source && o.destination === reversed.destination)
+    ? reversed as CanvasBridgeNetworks : null;
+}
 /** UX-001: an authored Send card's edited "To" text (like an amount draft); Apply commits it to that node's canonical `recipient`. */
 export type CanvasRecipientInputs = Readonly<Record<string, string>>;
 /** Certified Router endpoints plus Solana (universal Bridge cards only; an authored Router card's picker never lists it). */

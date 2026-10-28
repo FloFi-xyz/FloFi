@@ -41,8 +41,12 @@ export function DashboardWorkspace({ workflowName, progress, recovery, wallet, c
   const visibleCurrent = currentDisposition === 'VISIBLE' && !(removed?.owner === account && removed.ids.includes(ownedCurrent?.run.runId ?? '')) ? ownedCurrent : null;
   const [loaded, setLoaded] = useState<{ key: string; snapshot?: DashboardSnapshot; response?: DashboardDetailResponse } | null>(null);
   const [verifying, setVerifying] = useState(false);
+  const [pageState, setPageState] = useState<{ key: string; loading: boolean; issue: string | null } | null>(null);
   const [verificationIssue, setVerificationIssue] = useState<{ account: string; message: string } | null>(null);
   const key = JSON.stringify([account, runId, version]);
+  const latestKey = useRef(key); latestKey.current = key;
+  const loadingMore = pageState?.key === key && pageState.loading;
+  const pageIssue = pageState?.key === key ? pageState.issue : null;
   useEffect(() => {
     if (!account || isCurrent) return;
     let cancelled = false;
@@ -56,6 +60,22 @@ export function DashboardWorkspace({ workflowName, progress, recovery, wallet, c
   const visible = loaded?.key === key ? loaded : null;
   const loading = Boolean(account && (!isCurrent && !visible || ownedCurrent && currentDisposition === null));
   const snapshot = visible?.snapshot;
+  async function loadMore() {
+    if (loadingMore || !account || !snapshot?.next) return;
+    const owner = account, requestKey = key, cursor = snapshot.next;
+    setPageState({ key: requestKey, loading: true, issue: null });
+    try {
+      const page = await dashboardSnapshot(owner, cursor);
+      if (latestKey.current !== requestKey || latestAccount.current !== owner) return;
+      if (page.connection !== 'CONNECTED' || !sameOwner(page.account, owner)) { setPageState({ key: requestKey, loading: false, issue: 'Saved history could not be loaded. Try again.' }); return; }
+      setLoaded(prior => {
+        if (prior?.key !== requestKey || prior.snapshot?.next !== cursor) return prior;
+        const ids = new Set(prior.snapshot.runs.map(run => run.runId));
+        return { ...prior, snapshot: { ...page, runs: [...prior.snapshot.runs, ...page.runs.filter(run => !ids.has(run.runId))] } };
+      });
+    } catch { if (latestKey.current === requestKey) setPageState({ key: requestKey, loading: false, issue: 'Saved history could not be loaded. Try again.' }); }
+    finally { if (latestKey.current === requestKey) setPageState(prior => prior?.key === requestKey ? { ...prior, loading: false } : prior); }
+  }
   const detail = visible?.response?.detail;
   // A stale session/result can never flash another account's records while the new read is pending.
   const ownedDetail = detail && sameOwner(detail.run.ownerAccount, account) && detail.run.runId === runId ? detail : null;
@@ -97,6 +117,7 @@ export function DashboardWorkspace({ workflowName, progress, recovery, wallet, c
     {...history ? { history: { change: history.change(runId), changed: disposition => historyChanged(runId, disposition) } } : {}}/>;
   const runs = dashboardRunIndex(account, snapshot?.runs ?? [], visibleCurrent).filter(view => removed?.owner !== account || !removed.ids.includes(view.run.runId));
   return <DashboardView account={account} connection={snapshot?.connection ?? null} runs={runs} hasMore={snapshot?.hasMore ?? false}
+    loadMore={loadMore} loadingMore={loadingMore} pageIssue={pageIssue}
     loading={loading} build={build} openRun={id => navigate(`/app/dashboard/runs/${encodeURIComponent(id)}`)} verify={() => void verify()} verifying={verifying}
     verificationIssue={verificationIssue?.account === account ? verificationIssue.message : null} refresh={() => refresh(value => value + 1)} {...history ? { history } : {}}/>;
 }

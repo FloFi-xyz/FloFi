@@ -16,6 +16,23 @@ function setup() {
   vi.mocked(callCloudFlow).mockResolvedValue({ ok: true, value: { id: 'owned-run' } });
 }
 describe('Dashboard owner-scoped query boundary', () => {
+  it('loads all 75 owned summaries through bounded cursor pages, without fetching financial details', async () => {
+    setup();
+    const transport = vi.fn().mockImplementation((url: URL) => {
+      expect(url.searchParams.get('limit')).toBe('25');
+      const page = Number(url.searchParams.get('cursor') ?? '0');
+      return Promise.resolve(response({ items: Array.from({ length: 25 }, (_, i) => run(account, `owned-${page * 25 + i}`)), next: page < 2 ? String(page + 1) : null }));
+    });
+    vi.stubGlobal('fetch', transport);
+    let cursor: string | null = null;
+    const ids: string[] = [];
+    do { const page = await loadDashboardSnapshot(account, cursor); ids.push(...page.runs.map(run => run.runId)); cursor = page.next ?? null; } while (cursor);
+    expect(new Set(ids).size).toBe(75);
+    expect(transport).toHaveBeenCalledTimes(3);
+    expect(callCloudFlow).not.toHaveBeenCalled();
+    expect((await loadDashboardSnapshot(account, '../../foreign')).connection).toBe('UNAVAILABLE');
+    expect(transport).toHaveBeenCalledTimes(3);
+  });
   it.each([null, other])('requires a matching signed principal (%s) before querying any records', async principal => {
     vi.mocked(currentWalletPrincipal).mockResolvedValue(principal);
     const transport = vi.fn(); vi.stubGlobal('fetch', transport);

@@ -81,7 +81,7 @@ export function projectExecutionRecovery(source: ExecutionLifecycleSource, progr
   const checking = progress.started && typeof busy === 'string' && /^(Reading|Checking|Reconciling|Scanning|Recovering known receipt)/i.test(busy);
   const label = checking ? recordOnly ? 'Updating recorded status…' : 'Checking execution status…' : progress.state === 'uncertain' ? 'Unable to confirm execution' : progress.state === 'attention' ? 'Needs attention' : progress.restored && progress.state === 'complete' ? 'Execution recovered' : progress.restored ? 'Current execution restored' : progress.label;
   let message = checking ? recordOnly ? 'Refreshing the saved execution record. No transaction is resent.' : 'Verifying the recorded request against the available execution state. No transaction is resent.' : progress.state === 'uncertain' ? 'FloFi has not confirmed whether this step completed. No transaction is repeated.' : progress.restored ? `${progress.completed} of ${progress.steps.length} actions completed. The recorded run is preserved; no request is repeated.` : progress.message;
-  if (!checking && source.kind === 'universal' && source.state.record?.observation) message = financialObservationMessage(source.state.record.observation);
+  if (!checking && (source.kind === 'universal' || source.kind === 'router') && source.state.record?.observation) message = financialObservationMessage(source.state.record.observation);
   if (!operationId && action === 'reconcile') operationId = progress.steps.flatMap(step => step.operations).at(-1)?.id ?? null;
   return { action, label, message, contextIssue, operationId, checking, recordOnly };
 }

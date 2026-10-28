@@ -33,7 +33,7 @@ import { DarkSpotlight } from './dark-spotlight';
 import { CANVAS_GESTURES, CanvasNavigator } from './canvas-navigator';
 import { WorkflowEditReview, workflowEditProposalVisible } from './workflow-edit-review';
 import { ComposerCard, supplyReviewFormId, poolReviewFormId, poolProposalTarget, type CardRecipient, type ComposerCardData } from './composer-card';
-import { canEditCanvasAmount, canvasAmountCommand, setupSummary, bridgePairLabel, bridgeSetupNetworks, type CanvasBridgeNetworks, universalCanvasNetworks } from '../domain/canvas-action-setup';
+import { canEditCanvasAmount, canvasAmountCommand, setupSummary, bridgePairLabel, bridgeSetupNetworks, invertCanvasBridgeNetworks, type CanvasBridgeNetworks, universalCanvasNetworks } from '../domain/canvas-action-setup';
 import { universalCanvasPair, universalKeyOfCanvasLabel, universalFeaturedAssets, universalBridgeDetails, resolveUniversalAsset, defaultUniversalInputAsset, UNIVERSAL_CANVAS_LABEL } from '../domain/universal-bridge-authoring';
 import { ActionIcon } from './action-icon';
 import { ensureNetworkCatalog, useNetworkCatalog } from '../state/asset-catalog-store';
@@ -530,6 +530,9 @@ function BuildCanvas({ environment, selectedId, select, openSettings, workflowNa
           [side === 'source' ? 'inputAsset' : 'outputAsset']: reference });
       },
     });
+    const bridgeInvert = (id: string, networks: CanvasBridgeNetworks): Pick<ComposerCardData, 'onInvertBridge'> => invertCanvasBridgeNetworks(networks) ? {
+      onInvertBridge: () => { const reversed = invertCanvasBridgeNetworks(networks); if (reversed) editBridgeNetworks(id, reversed); },
+    } : {};
     // UX-001: a Send card's "To" field drafts the transfer's one canonical recipient; the network's transfer profile decides validity.
     const recipientField = (id: string, network: string | undefined, canonical: string | null): CardRecipient | undefined => {
       const policy = network ? recipientPolicy(network) : null;
@@ -574,12 +577,12 @@ function BuildCanvas({ environment, selectedId, select, openSettings, workflowNa
         summary: { ...composerSummary(workflow, node, context), chain: `${(bridgeNetworkInputs[node.nodeId] ?? routerDetails(node)!).source} → ${(bridgeNetworkInputs[node.nodeId] ?? routerDetails(node)!).destination}`,
           bridgePair: bridgePairLabel(bridgeNetworkInputs[node.nodeId] ?? routerDetails(node)!),
           amount: `${composerSummary(workflow, node, context).amount.split(' ')[0]} ${bridgePairLabel(bridgeNetworkInputs[node.nodeId] ?? routerDetails(node)!).split(' → ')[0]}` },
-        ...(canEditCanvasAmount(node, context, workflow) ? { networkSelection: bridgeSelection(node.nodeId, bridgeNetworkInputs[node.nodeId] ?? routerDetails(node)!, true), tokenSelection: bridgeTokens(node.nodeId, bridgeNetworkInputs[node.nodeId] ?? routerDetails(node)!) } : {}),
+        ...(canEditCanvasAmount(node, context, workflow) ? { networkSelection: bridgeSelection(node.nodeId, bridgeNetworkInputs[node.nodeId] ?? routerDetails(node)!, true), tokenSelection: bridgeTokens(node.nodeId, bridgeNetworkInputs[node.nodeId] ?? routerDetails(node)!), ...bridgeInvert(node.nodeId, bridgeNetworkInputs[node.nodeId] ?? routerDetails(node)!) } : {}),
       } : {}),
       ...(universalBridgeDetails(node) ? (() => {
         const networks = bridgeNetworkInputs[node.nodeId] ?? universalCanvasNetworks(universalBridgeDetails(node)!);
         return { summary: { ...composerSummary(workflow, node, context), chain: `${networks.source} → ${networks.destination}`, bridgePair: bridgePairLabel(networks), amount: `${amountInputs[node.nodeId] ?? universalBridgeDetails(node)!.amount} ${bridgePairLabel(networks).split(' → ')[0]}` },
-          networkSelection: bridgeSelection(node.nodeId, networks, true), tokenSelection: bridgeTokens(node.nodeId, networks) };
+          networkSelection: bridgeSelection(node.nodeId, networks, true), tokenSelection: bridgeTokens(node.nodeId, networks), ...bridgeInvert(node.nodeId, networks) };
       })() : {}),
       ...(composerSummary(workflow, node, context).action === 'Pool / Liquidity' ? { poolProposal: {
         nodeId: node.nodeId, formId: poolReviewFormId(node.nodeId), canReview: selectedId === node.nodeId,
@@ -616,7 +619,7 @@ function BuildCanvas({ environment, selectedId, select, openSettings, workflowNa
         summary: setupSummary(actionSetup, context),
         ...(actionSetup.action === 'swap' && actionSetup.stocks && actionSetup.cryptoSelection ? { stocks: stocksData(actionSetup.id, actionSetup.cryptoSelection) } : {}),
         ...(actionSetup.action !== 'bridge' ? { actionSelection: actionSelection(actionSetup.id, actionSetup.cryptoSelection ?? selectCryptoNetwork(actionSetup.action as CryptoAction, actionSetup.action === 'swap' ? context.assets.USDC.asset.chainId === 'eip155:84532' ? 'Base Sepolia' : 'Base' : 'Base Sepolia')) } : {}),
-        ...(actionSetup.action === 'bridge' ? { networkSelection: bridgeSelection(actionSetup.id, bridgeSetupNetworks(actionSetup), true), tokenSelection: bridgeTokens(actionSetup.id, bridgeSetupNetworks(actionSetup)) } : {}),
+        ...(actionSetup.action === 'bridge' ? { networkSelection: bridgeSelection(actionSetup.id, bridgeSetupNetworks(actionSetup), true), tokenSelection: bridgeTokens(actionSetup.id, bridgeSetupNetworks(actionSetup)), ...bridgeInvert(actionSetup.id, bridgeSetupNetworks(actionSetup)) } : {}),
         ...(actionSetup.action === 'swap' ? { tokenSelection: {
           source: directions.map(direction => inputSymbol(direction)), destination: directions.map(direction => outputSymbol(direction)),
           onSelect: (side: 'source' | 'destination', symbol: string) => {

@@ -99,7 +99,7 @@ export const productPortuguese: Readonly<Record<string, string>> = {
   'Execution blockers': 'Impedimentos à execução', 'Next confirmation': 'Próxima confirmação', 'What happens next': 'O que acontece a seguir',
   'Only the next authorized request starts. Further wallet confirmations remain separate.': 'Só é iniciado o próximo pedido autorizado. As confirmações seguintes na carteira são separadas.',
   'Connect execution wallet': 'Ligar carteira de execução', 'Continue to wallet': 'Continuar para a carteira', 'Updating status…': 'A atualizar o estado…',
-  'Checking status…': 'A verificar o estado…', 'Check confirmation': 'Verificar confirmação', 'Create a workflow in Build': 'Criar um fluxo em Criar',
+  'Checking status…': 'Atualizando…', 'Check confirmation': 'Verificar confirmação', 'Create a workflow in Build': 'Criar um fluxo em Criar',
   'Leaving this view does not cancel submitted requests.': 'Sair desta vista não cancela os pedidos enviados.', '{0} result evidence': 'Evidência do resultado de {0}',
   'Step outcome': 'Resultado da etapa', 'Recovered': 'Recuperado', 'This step’s saved result was restored.': 'O resultado guardado desta etapa foi restaurado.',
   'Planned and actual values': 'Valores previstos e reais', 'Planned': 'Previsto', 'Actual': 'Real',

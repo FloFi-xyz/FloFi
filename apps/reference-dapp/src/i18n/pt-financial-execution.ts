@@ -1,5 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 export const portugueseFinancialExecution: Readonly<Record<string, string>> = {
+  'Last checked at {0}': 'Última atualização às {0}',
+  'Lending workflow': 'Operação de empréstimo',
+  'Swap + Liquidity workflow': 'Troca + operação de liquidez',
+  'Payment': 'Pagamento',
+  'Financial operation': 'Operação financeira',
+  'Load more history': 'Carregar mais histórico',
+  'Saved history could not be loaded. Try again.': 'Não foi possível carregar o histórico salvo. Tente novamente.',
+  'Your Workflow': 'Minha operação',
+  'Request cancelled': 'Solicitação cancelada',
+  'Check amounts, fees and conditions before continuing.': 'Confira valores, taxas e condições antes de continuar.',
   'An earlier approval is confirmed. The remaining request did not complete. Network costs and token allowance may remain.': 'Uma aprovação anterior está confirmada. A solicitação restante não foi concluída. Ainda pode haver custos de rede e uma permissão de uso do token.',
   'The token approval is confirmed. Approval does not transfer your tokens. The source deposit needs its own wallet request.': 'A permissão de uso do token está confirmada. Aprovar não transfere seus tokens. O envio na origem precisa de uma solicitação própria na carteira.',
   'A destination transfer was verified on-chain. Finality and full reconciliation are still pending.': 'Uma transferência no destino foi verificada na rede. A confirmação definitiva e a verificação completa ainda estão pendentes.',

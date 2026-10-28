@@ -10,7 +10,7 @@ export function CanvasLifecycleAction(props: ExecutionControlsState & {
   simulationReason?: string | null;
   onExecute?: () => void; workflowName?: string;
 }) {
-  const { t } = useLocale();
+  const { t, language } = useLocale();
   const c = props.controls, action = projectCanvasAction(c.current, c);
   const disabled = action.disabled || action.kind === 'simulate' && (!props.simulate || props.simulationDisabled) || action.kind === 'execute' && !c.view.canExecute;
   function act() {
@@ -28,7 +28,10 @@ export function CanvasLifecycleAction(props: ExecutionControlsState & {
     {action.processing ? <button data-lifecycle-action="processing" type="button" className="primary canvas-cta-processing" disabled aria-busy="true"><span className="canvas-cta-spinner" aria-hidden="true"/>{t(action.label)}</button>
       : action.kind === 'status' ? <span role="status" data-lifecycle-action="status">{t(action.label)}</span> : <button data-lifecycle-action={action.kind} type="button" className="primary" disabled={disabled}
         title={action.kind === 'simulate' && disabled && props.simulationReason ? t(props.simulationReason) : undefined}
-        aria-description={action.kind === 'simulate' && disabled && props.simulationReason ? t(props.simulationReason) : undefined} onClick={act}>{t(action.label)}</button>}
+        aria-description={action.kind === 'simulate' ? t(disabled && props.simulationReason ? props.simulationReason : 'Check amounts, fees and conditions before continuing.') : undefined} onClick={act}>{t(action.label)}</button>}
     {c.live?.steps.some(step => step.operations.some(operation => operation.state === 'wallet')) && <WalletPendingNotice/>}
+    {action.kind === 'recover' && c.lastCheckedAt && <p className="muted"><time dateTime={c.lastCheckedAt}>{t('Last checked at {0}',new Date(c.lastCheckedAt).toLocaleTimeString(language === 'PT' ? 'pt-BR' : 'en-US'))}</time></p>}
+    {action.kind === 'simulate' && disabled && props.simulationReason && props.workflow.nodes.some(node => !node.actionType.startsWith('mock-')) &&
+      <p role="status">{t(props.simulationReason)}</p>}
   </div>;
 }

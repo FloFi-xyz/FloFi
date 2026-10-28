@@ -331,8 +331,8 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   }
   // BUILD-FLOFI-PRODUCT-UX-001: informational Beta Mainnet notice only; it gates nothing. Omitted from the compact signing surface.
   const betaNotice = <p className="beta-notice" role="note">{tr("FloFi Beta Mainnet — Real funds are enabled. Review every transaction before signing.")}</p>;
-  const simulationReason = simulationDisabled || !actionable ? simulationUnavailableReason({ incomplete: Boolean(authoringIncomplete || reviewError || !actionable),
-    unsupported: testNetworkWorkflow || simulationSource.kind === 'unavailable', walletRequired: !signer || Boolean(approvalGate),
+  const simulationReason = simulationDisabled || !actionable || lifecycleState.invalidWorkflow ? simulationUnavailableReason({ incomplete: Boolean(authoringIncomplete || reviewError || !actionable),
+    unsupported: testNetworkWorkflow || simulationSource.kind === 'unavailable', walletRequired: !signer || Boolean(approvalGate || autoPrepare && !approvalWallet),
     providerUnavailable: 'available' in simulationSource.state && simulationSource.state.available === false || 'info' in simulationSource.state && simulationSource.state.info?.available === false,
     error: simulationSource.state.error, staleQuote: lifecycleControls.view.expiresAt !== null && Date.now() >= lifecycleControls.view.expiresAt }) : null;
   const simulateAction = walletIssue ? <div className="canvas-lifecycle-control"><p role="status">{walletIssue}</p><button type="button" onClick={() => void walletConnection.connect()}>{tr('Use another wallet')}</button></div>
