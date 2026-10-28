@@ -26,8 +26,9 @@ export function failoverReadRpc(providers: readonly Rpc[], chainId: number): Rpc
   const bound = new Set<number>();
   let preferred = 0;
   return async (method, params) => {
+    const start = preferred;
     for (let turn = 0; turn < clients.length; turn++) {
-      const index = (preferred + turn) % clients.length, rpc = clients[index]!;
+      const index = (start + turn) % clients.length, rpc = clients[index]!;
       try {
         // Bind each candidate before any financial read, including a fallback first used mid-observation.
         if (method !== 'eth_chainId' && !bound.has(index)) { await rpc('eth_chainId', []); bound.add(index); }

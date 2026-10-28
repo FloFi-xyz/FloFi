@@ -10,6 +10,22 @@ it('uses an independent configured path when A is unavailable and B succeeds; ev
   expect(b.mock.calls.map(c => c[0])).toEqual(['eth_chainId', 'eth_getTransactionCount']);
   expect([...a.mock.calls, ...b.mock.calls].every(c => !/send|sign/i.test(String(c[0])))).toBe(true);
 });
+it('tries each configured path once even when a concurrent read changes the preferred provider', async () => {
+  let rejectFirst!: (reason: Error) => void;
+  let first = true;
+  const a = vi.fn(async () => {
+    if (first) { first = false; return new Promise<never>((_, reject) => { rejectFirst = reject; }); }
+    throw Error('PUBLIC_RPC_UNAVAILABLE');
+  });
+  const b = vi.fn(async () => '0x2105');
+  const c = vi.fn(async () => { throw Error('PUBLIC_RPC_UNAVAILABLE'); });
+  const rpc = failoverReadRpc([a,b,c],8453);
+  const held = rpc('eth_chainId',[]);
+  expect(await rpc('eth_chainId',[])).toBe('0x2105');
+  rejectFirst(Error('PUBLIC_RPC_UNAVAILABLE'));
+  await expect(held).resolves.toBe('0x2105');
+  expect(b).toHaveBeenCalledTimes(2); expect(c).not.toHaveBeenCalled();
+});
 it('bounds total failure and can recover on a later observation without a permanent circuit lock', async () => {
   let down = true;
   const provider = vi.fn(async () => { if (down) throw Error('PUBLIC_RPC_UNAVAILABLE'); return '0x2105'; });

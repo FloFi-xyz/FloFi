@@ -34,6 +34,8 @@ Financial conclusion: source debit confirmed and destination delivered; FloFi di
 
 The exact incident's **private local snapshot copy** was successfully reobserved with execution disabled: RECONCILED, source debit 1 USDC, actual destination credit 0.988966 USDC, source/destination canonical inclusion and finality, and an evidence bundle. No production database was connected by that rehearsal. Its temporary live test was removed; mandatory CI uses isolated engineering fixtures exclusively. Public facts and restricted evidence digests are in [the evidence manifest](FIX-BRIDGE-RECOVERY-CAIO-001-EVIDENCE.json).
 
+A subsequent concurrency regression found that one read could update the preferred RPC while another was still traversing its candidates, causing an available path to be skipped. Each call now captures its own starting preference and tries each configured path at most once. The test fails before this correction and passes afterwards. Full certification is repeated on the corrected head; older-head certification is not substituted.
+
 Approval gas: **334,506,197,914 wei**. Deposit gas including Base L1 fee: **1,031,832,218,262 wei**. Combined source network cost: **1,366,338,416,176 wei (0.000001366338416176 ETH)**. The source Across deposit carries 997,500 USDC units; LI.FI's fee is 2,500 units and the difference to the delivered amount is 8,534 units of Across costs. These provider/integrator costs are distinct from FloFi's unchanged 10-bps workflow fee policy. No new charge or collection path was introduced. Production still needs the reviewed code release to update its stored projection.
 
 ## All 23 Caio occurrences
