@@ -92,7 +92,7 @@ test('production regression: same MetaMask/account/Base Sepolia → approval CON
   // Two clicks in one browser turn: Review acceptance and the first wallet request happen once.
   await authorize(page).evaluate(button => { (button as HTMLButtonElement).click(); (button as HTMLButtonElement).click(); });
   await expect.poll(owner.requested).toBe(1);
-  await expect(summary(page)).toContainText('Preparing request');
+  await expect(summary(page)).toContainText('Waiting for wallet…');
   await page.waitForTimeout(300); expect(owner.requested()).toBe(1);
   expect(await owner.sends()).toBe(0);
   // Wallet extension sync during interaction, followed by owner confirmation of approval.
@@ -113,7 +113,7 @@ test('production regression: same MetaMask/account/Base Sepolia → approval CON
   // Two clicks in one browser turn exercise the existing request lock.
   await next.evaluate(button => { (button as HTMLButtonElement).click(); (button as HTMLButtonElement).click(); });
   await expect.poll(owner.requested).toBe(2);
-  await expect(summary(page)).toContainText('Preparing request');
+  await expect(summary(page)).toContainText('Waiting for wallet…');
   expect(await owner.sends()).toBe(1);
   await synchronizeWallet(page); await owner.confirm();
   await expect(summary(page)).toContainText('Execution completed');

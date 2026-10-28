@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
+import { WalletPendingNotice } from '../components/wallet-pending-notice';
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { useWorkflow } from './workflow-store';
@@ -42,7 +43,7 @@ export function SolanaTransferProvider({ children }: { children: ReactNode }) {
   const workflow = state.workflow as unknown as SemanticWorkflow;
   const latest = useRef(workflow); latest.current = workflow;
   const latestSession = useRef(solana.session); latestSession.current = solana.session;
-  const busyRef = useRef(false);
+  const busyRef = useRef(false), operationEpoch = useRef(0);
   const authored = workflow.nodes.map(node => solanaTransferDetails(node)).find(Boolean) ?? null;
   const recordCluster = record ? clusterOfId(record.id) : null;
   const network: SolanaNetwork = authored?.network ?? (recordCluster ? networkOfCluster(recordCluster) : 'Solana');
@@ -63,12 +64,6 @@ export function SolanaTransferProvider({ children }: { children: ReactNode }) {
     void recovery.finally(() => { if (mounted) setRecovering(false); });
     return () => { mounted = false; };
   }, []);
-  useEffect(() => {
-    if (!signing) return;
-    const prevent = (event: KeyboardEvent) => { event.preventDefault(); event.stopImmediatePropagation(); };
-    window.addEventListener('keydown', prevent, true);
-    return () => window.removeEventListener('keydown', prevent, true);
-  }, [signing]);
   // A semantic edit after Review invalidates the authorization; an existing transaction stays observable.
   useEffect(() => {
     if (!record || !retired || !record.authorization) return;
@@ -76,9 +71,9 @@ export function SolanaTransferProvider({ children }: { children: ReactNode }) {
     solanaTransferInvalidate(own, record.id).then(result => { if (result.ok) setRecord(current => current?.id === record.id ? result.value : current); }).catch(() => setError(`${X}_AUTHORIZATION_INVALIDATION_FAILED`));
   }, [record, retired]);
   async function operation(action: () => Promise<void>) {
-    if (busyRef.current || recovering) return; busyRef.current = true; setBusy(true); setError(null);
+    if (busyRef.current || recovering) return; const epoch = ++operationEpoch.current; busyRef.current = true; setBusy(true); setError(null);
     try { await action(); } catch (cause) { setError(cause instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(cause.message) ? cause.message : `${X}_OPERATION_FAILED`); }
-    finally { busyRef.current = false; setBusy(false); }
+    finally { if (operationEpoch.current === epoch) { busyRef.current = false; setBusy(false); } }
   }
   // Only the owner's session on this cluster is used; it is the same session every Solana flow shares.
   const session = solana.session?.chain === walletChain ? solana.session : null;
@@ -116,7 +111,7 @@ export function SolanaTransferProvider({ children }: { children: ReactNode }) {
     const begin = await solanaTransferBegin(own, record.id, current.account.address, snapshot); if (!begin.ok) throw new Error(begin.code);
     accept(begin.value.record);
     let signed: string;
-    setSigning(true);
+    setSigning(true); busyRef.current = false; setBusy(false);
     try {
       if (begin.value.walletChain !== current.chain) throw new Error(`${X}_WRONG_CLUSTER`);
       if (JSON.stringify(latest.current) !== JSON.stringify(snapshot)) throw new Error(`${X}_SEMANTIC_REVISION_CHANGED`);
@@ -138,7 +133,7 @@ export function SolanaTransferProvider({ children }: { children: ReactNode }) {
   async function observe() { await operation(async () => { if (!record) throw new Error(`${X}_RUN_MISSING`); await poll(record.id); }); }
   return <Context.Provider value={{ record, owner: session?.account.address ?? null, network, walletChain, busy: busy || recovering, error, retired, recovered,
     executionEnabled: enabled[cluster], signing, connect: () => solana.connect(walletChain), simulate, review, execute, observe }}>
-    {signing && <p role="status">Confirm or reject the pending request in your Solana wallet.</p>}
-    <div inert={signing} data-solana-transfer-wallet-pending={signing ? 'true' : undefined}>{children}</div></Context.Provider>;
+    {signing && <WalletPendingNotice/>}
+    <div data-solana-transfer-wallet-pending={signing ? 'true' : undefined}>{children}</div></Context.Provider>;
 }
 export function useSolanaTransfer() { const value = useContext(Context); if (!value) throw new Error('SOLANA_TRANSFER_PROVIDER_MISSING'); return value; }

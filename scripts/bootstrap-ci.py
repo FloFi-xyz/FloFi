@@ -4,15 +4,21 @@
 import base64
 import gzip
 import hashlib
+import http.client
 import io
 import json
 import os
 from pathlib import Path
 import platform
+import re
 import shlex
 import subprocess
+import ssl
 import tarfile
 import tempfile
+import time
+import urllib.error
+import urllib.parse
 import urllib.request
 from governance_lite import AGE_WAIVER, dependency_age_waivers, dependency_release_age_allowed
 from ci_archive_cache import verified_archive
@@ -27,18 +33,67 @@ PNPM_URL = f"https://registry.npmjs.org/pnpm/-/pnpm-{PNPM_VERSION}.tgz"
 PNPM_SHA512 = "H/hwxMYTPf2I+yr8Rt0T1H8JyXlLQ4xv20fKmMrzvBY4HuC+k6CRuOOCTPAfiJ9G19niCRD7C+GrD7W6qA3WIQ=="
 
 
-def fetch(url, *, compressed=False):
+DOWNLOAD_ATTEMPTS = 3
+DOWNLOAD_TIMEOUT = 90
+DOWNLOAD_BUDGET = 300
+RETRYABLE_HTTP_STATUS = {408, 429, 500, 502, 503, 504}
+
+
+def fetch(url, *, compressed=False, stage="registry metadata"):
+    # Log only a controlled stage and sanitized hostname, never URL credentials,
+    # paths, query strings or exception messages returned by an upstream server.
+    host = re.sub(r"[^a-zA-Z0-9.-]", "_", urllib.parse.urlsplit(url).hostname or "unknown")
+    label = f"Download stage={stage} host={host}"
     request = urllib.request.Request(url, headers={"Accept-Encoding": "gzip"} if compressed else {})
-    with urllib.request.urlopen(request, timeout=90) as response:
-        if response.status != 200:
-            raise RuntimeError(f"Download unavailable: {url}")
-        data = response.read()
-        encoding = response.headers.get("Content-Encoding", "identity")
-        if encoding == "gzip":
-            return gzip.decompress(data)
-        if encoding != "identity":
-            raise RuntimeError("Unsupported registry content encoding")
-        return data
+    deadline = time.monotonic() + DOWNLOAD_BUDGET
+    for attempt in range(1, DOWNLOAD_ATTEMPTS + 1):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise RuntimeError(f"{label}: download time budget exhausted") from None
+        print(f"{label} attempt={attempt}/{DOWNLOAD_ATTEMPTS}", flush=True)
+        try:
+            with urllib.request.urlopen(request, timeout=min(DOWNLOAD_TIMEOUT, remaining)) as response:
+                if response.status != 200:
+                    raise urllib.error.HTTPError(url, response.status, "Download unavailable", {}, None)
+                # read1 performs at most one underlying read, so a slow trickle
+                # cannot indefinitely hide the elapsed budget inside read(). A
+                # blocking operation also retains its finite socket timeout.
+                data = bytearray()
+                while True:
+                    if time.monotonic() >= deadline:
+                        raise TimeoutError("Download time budget exhausted")
+                    chunk = response.read1(1024 * 1024)
+                    if not chunk:
+                        break
+                    data.extend(chunk)
+                length = response.headers.get("Content-Length")
+                if length is not None and len(data) != int(length):
+                    raise http.client.IncompleteRead(b"")
+                encoding = response.headers.get("Content-Encoding", "identity")
+                if encoding == "gzip":
+                    return gzip.decompress(data)
+                if encoding != "identity":
+                    raise RuntimeError("Unsupported registry content encoding")
+                return bytes(data)
+        except urllib.error.HTTPError as exc:
+            exc.close()
+            if exc.code not in RETRYABLE_HTTP_STATUS:
+                raise RuntimeError(f"{label} attempt={attempt}: HTTP {exc.code}; not retryable") from None
+            reason = f"HTTP {exc.code}"
+        except urllib.error.URLError as exc:
+            if isinstance(exc.reason, ssl.SSLError):
+                raise RuntimeError(f"{label} attempt={attempt}: TLS verification/transport failure") from None
+            reason = "connection failure"
+        except (TimeoutError, ConnectionError, http.client.IncompleteRead,
+                http.client.RemoteDisconnected, ssl.SSLEOFError, EOFError) as exc:
+            reason = type(exc).__name__
+        # Do not carry failed response bytes into another attempt or archive.
+        data = None
+        delay = 2 ** attempt
+        if attempt == DOWNLOAD_ATTEMPTS or time.monotonic() + delay >= deadline:
+            raise RuntimeError(f"{label}: failed after {attempt} attempt(s) ({reason}); retries exhausted") from None
+        print(f"{label} attempt={attempt}/{DOWNLOAD_ATTEMPTS} failed={reason}; retry_in={delay}s", flush=True)
+        time.sleep(delay)
 
 
 def registry_metadata(locked):
@@ -100,13 +155,13 @@ def main():
     if Path(".node-version").read_text().strip() != NODE_VERSION:
         raise RuntimeError(".node-version differs from approved version")
     print("packageManager:", package["packageManager"], flush=True)
-    sums = fetch(NODE_SUMS_URL).decode("ascii").splitlines()
+    sums = fetch(NODE_SUMS_URL, stage="Node checksum manifest").decode("ascii").splitlines()
     entries = [line.split() for line in sums if line.split()[-1:] == [NODE_ARCHIVE]]
     if entries != [[NODE_SHA256, NODE_ARCHIVE]]:
         raise RuntimeError("Official Node checksum entry differs from approved digest")
     base = Path(os.environ.get("RUNNER_TEMP", tempfile.gettempdir()))
     def download_node(output):
-        output.write(fetch(NODE_URL))
+        output.write(fetch(NODE_URL, stage="Node archive"))
     with verified_archive(NODE_ARCHIVE, base, download_node, NODE_SHA256) as archive:
         node_bytes = archive.read_bytes()
     node_digest = hashlib.sha256(node_bytes).hexdigest()
@@ -115,7 +170,7 @@ def main():
     if node_digest != NODE_SHA256:
         raise RuntimeError("Node archive checksum mismatch")
     def download_pnpm(output):
-        output.write(fetch(PNPM_URL))
+        output.write(fetch(PNPM_URL, stage="pnpm archive"))
     with verified_archive(f"pnpm-{PNPM_VERSION}.tgz", base, download_pnpm,
                           base64.b64decode(PNPM_SHA512).hex(), algorithm="sha512") as archive:
         pnpm_bytes = archive.read_bytes()

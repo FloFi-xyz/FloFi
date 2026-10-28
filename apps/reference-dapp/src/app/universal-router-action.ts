@@ -110,7 +110,7 @@ export async function universalBegin(ecosystem: UniversalEcosystem, id: string, 
   return run(ecosystem, 'begin', [id, owner, workflow], s => s.begin(id, owner, workflow));
 }
 export async function universalHandoff(id: string) { return run('EVM', 'handoff', [id], s => s.handoff(id)); }
-export async function universalReport(id: string, result: { kind: 'HASH'; hash: string } | { kind: 'UNKNOWN' | 'REJECTED'; code?: string }) {
+export async function universalReport(id: string, result: ({ kind: 'HASH'; hash: string } | { kind: 'UNKNOWN' | 'REJECTED'; code?: string }) & { attemptId?: string }) {
   return run('EVM', 'report', [id, result], s => s.report(id, result));
 }
 export async function universalSubmit(id: string, signedTransaction: string) { return run('SOLANA', 'submit', [id, signedTransaction], s => s.submit(id, signedTransaction)); }

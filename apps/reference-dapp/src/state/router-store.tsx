@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
+import { useLocale } from '../i18n/locale';
+import { watchWalletResponse, walletResultStorage, rememberWalletReport, forgetWalletReport, readWalletReports } from './wallet-request-lifecycle';
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { useWorkflow } from './workflow-store';
@@ -35,7 +37,7 @@ const NETWORKS = Object.keys(KEY) as RouterNetwork[];
 const RESUME: readonly RouterNetwork[] = ['testnet', ...NETWORKS.filter(n => n !== 'testnet')];
 const REFUSALS = [4001, 4100, 4200];
 const ACTIVE = ['PREPARED', 'SUBMITTING', 'SUBMISSION_RESULT_UNKNOWN', 'PENDING'];
-type Pointer = { id: string; owner?: string; hash?: string };
+type Pointer = { id: string; attemptId?: string; owner?: string; hash?: string };
 type Store = { network: RouterNetwork; available: boolean; availability: Readonly<Record<RouterNetwork, boolean>>; executionEnabled: boolean; record: RouterRecord | null;
   busy: boolean; signing: boolean; error: string | null; retired: boolean; recovered: boolean; session: WalletSession | null; sessionReady: boolean;
   runs: readonly RouterRunSummary[]; notice: string | null;
@@ -66,6 +68,7 @@ function readPointer(network: RouterNetwork): Pointer | null {
 }
 
 export function RouterProvider({ children }: { children: ReactNode }) {
+  const { t: tr } = useLocale();
   const { state } = useWorkflow(), wallet = useBuild009Wallet();
   const [record, setRecord] = useState<RouterRecord | null>(null), [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null);
   const [signing, setSigning] = useState(false), [executionEnabled, setExecutionEnabled] = useState(false);
@@ -79,28 +82,40 @@ export function RouterProvider({ children }: { children: ReactNode }) {
   const latest = useRef(workflow); latest.current = workflow;
   const latestWallet = useRef(wallet); latestWallet.current = wallet;
   const latestSession = useRef(session); latestSession.current = session;
-  const busyRef = useRef(false);
+  const busyRef = useRef(false), operationEpoch = useRef(0);
+  const visibleRun = useRef(record?.id); visibleRun.current = record?.id;
   // A recovered run stays visible on the untouched template; any other workflow change retires its Review.
   const retired = Boolean(record && JSON.stringify(record.workflow) !== JSON.stringify(workflow) &&
     !(recovered && workflow.revision === 0 && workflow.nodes.every(n => n.actionType.startsWith('mock-'))));
   function accept(value: RouterRecord) {
     // Only the signed-in wallet's run is shown; a late answer for a previous session never repaints the view.
     if (value.owner !== latestSession.current?.account) return;
-    setRecord(value);
+    visibleRun.current = value.id; setRecord(value);
     const hash = value.attempts.at(-1)?.transactionHash;
-    try { window.localStorage.setItem(KEY[networkOfRecord(value)], JSON.stringify({ id: value.id, owner: value.owner, ...hash ? { hash } : {} })); }
+    try { window.localStorage.setItem(KEY[networkOfRecord(value)], JSON.stringify({ id: value.id, owner: value.owner, ...hash ? { hash, attemptId: value.attempts.at(-1)?.attemptId } : {} })); }
     catch { /* The server run remains authoritative. */ }
   }
   async function refreshRuns(net: RouterNetwork = network) {
     const listed = await routerRuns(net).catch(() => null);
     setRuns(listed?.ok ? listed.value : []);
   }
+  async function deliverWalletResults(account: string) {
+    for (const report of readWalletReports(walletResultStorage(), account)) {
+      if (!report.runId.startsWith('xroute-') || !NETWORKS.includes(report.network as RouterNetwork)) continue;
+      const net = report.network as RouterNetwork;
+      const result = report.kind === 'HASH' ? await routerReport(net, report.runId, { kind: 'HASH', hash: report.hash!, attemptId: report.attemptId }).catch(() => null)
+        : await routerWalletFailure(net, report.runId, { invoked: true, attemptId: report.attemptId, code: report.code ?? 'ROUTER_REJECTED', rejectionCode: report.rejectionCode!,
+          calls: [{ method: 'eth_sendTransaction', submission: true, error: { code: report.rejectionCode } }] }).catch(() => null);
+      if (result?.ok) forgetWalletReport(walletResultStorage(), report.attemptId);
+    }
+  }
   /** Resumes a stored pointer of the signed-in wallet: a hash saved before the browser closed reaches the server first (never a wallet). */
   async function resume(current: WalletSession) {
+    await deliverWalletResults(current.account);
     for (const net of RESUME) {
       const pointer = readPointer(net);
       if (!pointer || pointer.owner !== current.account) continue;
-      if (typeof pointer.hash === 'string' && /^0x[0-9a-f]{64}$/.test(pointer.hash)) await routerReport(net, pointer.id, { kind: 'HASH', hash: pointer.hash }).catch(() => undefined);
+      if (typeof pointer.attemptId === 'string' && typeof pointer.hash === 'string' && /^0x[0-9a-f]{64}$/.test(pointer.hash)) await routerReport(net, pointer.id, { kind: 'HASH', hash: pointer.hash, attemptId: pointer.attemptId }).catch(() => undefined);
       const result = await routerStatus(net, pointer.id).catch(() => null);
       if (result?.ok && latestSession.current?.account === current.account) { setRecord(result.value); setRecovered(true); return; }
     }
@@ -159,8 +174,8 @@ export function RouterProvider({ children }: { children: ReactNode }) {
     void endStaleSession(current, record);
   }, [wallet.account, session?.account]);
   async function operation(action: () => Promise<void>) {
-    if (busyRef.current) return; busyRef.current = true; setBusy(true); setError(null);
-    try { await action(); } catch (cause) { setError(cause instanceof Error ? cause.message : 'ROUTER_OPERATION_FAILED'); } finally { busyRef.current = false; setBusy(false); }
+    if (busyRef.current) return; const epoch = ++operationEpoch.current; busyRef.current = true; setBusy(true); setError(null);
+    try { await action(); } catch (cause) { if (operationEpoch.current !== epoch) return; setError(cause instanceof Error ? cause.message : 'ROUTER_OPERATION_FAILED'); } finally { if (operationEpoch.current === epoch) { busyRef.current = false; setBusy(false); } }
   }
   async function ownerSession() {
     let current = await wallet.session(); if (!current) current = await wallet.connect();
@@ -211,6 +226,7 @@ export function RouterProvider({ children }: { children: ReactNode }) {
   }); }
   async function observe() { await operation(async () => {
     if (!record) throw new Error('ROUTER_RUN_MISSING');
+    await deliverWalletResults(record.owner);
     accept(unwrap(await routerObserve(networkOfRecord(record), record.id))); void refreshRuns(networkOfRecord(record));
   }); }
   async function switchNetwork() { await operation(async () => { await wallet.switchTo(profile.source.chainHex as Parameters<typeof wallet.switchTo>[0]); }); }
@@ -238,46 +254,54 @@ export function RouterProvider({ children }: { children: ReactNode }) {
       if (typeof chain !== 'string' || chain.toLowerCase() !== source) throw new Error('ROUTER_WRONG_CHAIN');
       if (nonce !== null && quantity(await request('eth_getTransactionCount', [record.owner, 'pending'])) !== BigInt(nonce)) throw new Error('ROUTER_WALLET_NONCE_MISMATCH');
     };
-    let prepared = false;
+    const acceptCurrent = (value: RouterRecord) => { if (visibleRun.current === id) accept(value); };
+    let prepared = false, attemptId = '';
     try {
       await validateSession(null);
-      const begun = unwrap(await routerBegin(net, id, current.account, snapshot)); accept(begun.record); prepared = true;
-      const tx = begun.transaction;
+      const begun = unwrap(await routerBegin(net, id, current.account, snapshot)); acceptCurrent(begun.record); prepared = true; attemptId = begun.attempt.attemptId; diagnostic.attemptId = attemptId;
+      const tx = { ...begun.transaction, nonce: '0x' + BigInt(begun.attempt.nonce).toString(16) };
       if (tx.from !== record.owner || tx.chainId !== source || tx.value !== '0x0' ||
           !record.review.calls.some(c => c.to === tx.to && c.data === tx.data)) throw new Error('ROUTER_TRANSACTION_ARTIFACT_CHANGED');
       await validateSession(begun.attempt.nonce);
-      accept(unwrap(await routerHandoff(net, id)));
+      acceptCurrent(unwrap(await routerHandoff(net, id)));
       if (latestWallet.current.account !== current.account || latestWallet.current.chainId !== current.chainId) throw new Error('ROUTER_WRONG_OWNER');
       // The sole submission point, reachable only from the owner's Execute click. The wallet assigns the reviewed nonce.
       setSigning(true); diagnostic.invoked = true;
       let hash: unknown;
-      try { hash = await request('eth_sendTransaction', [tx]); } finally { setSigning(false); }
+      busyRef.current = false; setBusy(false);
+      try { hash = await watchWalletResponse(provider, () => request('eth_sendTransaction', [tx]), () => {
+        setSigning(false);
+        void routerReport(net, id, { kind: 'UNKNOWN', attemptId }).then(r => { if (r.ok) acceptCurrent(r.value); }).catch(() => undefined);
+      }); } finally { setSigning(false); }
       if (typeof hash !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(hash)) throw new Error('ROUTER_SUBMISSION_UNKNOWN');
-      try { window.localStorage.setItem(KEY[net], JSON.stringify({ id, owner: record.owner, hash: hash.toLowerCase() })); } catch { /* Reported to the server next. */ }
-      accept(unwrap(await routerReport(net, id, { kind: 'HASH', hash: hash.toLowerCase() })));
+      rememberWalletReport(walletResultStorage(), { runId: id, attemptId, owner: record.owner, network: net, kind: 'HASH', hash: hash.toLowerCase() });
+      try { if (visibleRun.current === id) window.localStorage.setItem(KEY[net], JSON.stringify({ id, owner: record.owner, attemptId, hash: hash.toLowerCase() })); } catch { /* Reported to the server next. */ }
+      acceptCurrent(unwrap(await routerReport(net, id, { kind: 'HASH', hash: hash.toLowerCase(), attemptId })));
+      forgetWalletReport(walletResultStorage(), attemptId);
     } catch (cause) {
       const send = diagnostic.calls.find(c => c.submission), sendError = send?.error as { code?: unknown } | undefined;
       const refused = Boolean(send) && send!.result === undefined && typeof sendError?.code === 'number' && REFUSALS.includes(sendError.code);
       if (refused) diagnostic.rejectionCode = sendError!.code as number;
-      diagnostic.code = refused ? 'ROUTER_REJECTED' : !diagnostic.invoked ? (cause instanceof Error && /^ROUTER_[A-Z0-9_]+$/.test(cause.message) ? cause.message : 'ROUTER_RPC_ERROR_BEFORE_WALLET_SUBMISSION') : 'ROUTER_SUBMISSION_UNKNOWN';
+      diagnostic.code = refused ? sendError!.code === 4001 ? 'ROUTER_REJECTED' : sendError!.code === 4100 ? 'ROUTER_WALLET_UNAUTHORIZED' : 'ROUTER_WALLET_METHOD_UNSUPPORTED' : !diagnostic.invoked ? (cause instanceof Error && /^ROUTER_[A-Z0-9_]+$/.test(cause.message) ? cause.message : 'ROUTER_RPC_ERROR_BEFORE_WALLET_SUBMISSION') : 'ROUTER_SUBMISSION_UNKNOWN';
+      if (refused) rememberWalletReport(walletResultStorage(), { runId: id, attemptId, owner: record.owner, network: net, kind: 'REJECTED', code: diagnostic.code, rejectionCode: diagnostic.rejectionCode! });
       if (prepared && (!diagnostic.invoked || refused)) {
-        const failure = await routerWalletFailure(net, id, diagnostic); if (failure.ok) accept(failure.value);
+        const failure = await routerWalletFailure(net, id, diagnostic); if (failure.ok) { acceptCurrent(failure.value); forgetWalletReport(walletResultStorage(), attemptId); }
         throw new Error(diagnostic.code, { cause });
       }
       if (diagnostic.invoked) {
         // The request may have reached the network: never resend, only observe.
-        const report = await routerReport(net, id, { kind: 'UNKNOWN', code: diagnostic.code }); if (report.ok) accept(report.value);
+        const report = await routerReport(net, id, { kind: 'UNKNOWN', code: diagnostic.code, attemptId }); if (report.ok) acceptCurrent(report.value);
         throw new Error('ROUTER_SUBMISSION_UNKNOWN_OBSERVE_EXISTING', { cause });
       }
       if (cause instanceof Error && /ROUTE_CHANGED|STATE_CHANGED|REVIEW_EXPIRED/.test(cause.message)) {
-        const latestRun = await routerStatus(net, id); if (latestRun.ok) accept(latestRun.value);
+        const latestRun = await routerStatus(net, id); if (latestRun.ok) acceptCurrent(latestRun.value);
       }
       throw cause;
     }
     for (let i = 0; i < 20; i++) {
       const observed = await routerObserve(net, id);
       if (!observed.ok) break;
-      accept(observed.value);
+      acceptCurrent(observed.value);
       const last = observed.value.attempts.at(-1);
       if (!last || !['SUBMITTING', 'SUBMISSION_RESULT_UNKNOWN', 'PENDING'].includes(last.state) || observed.value.verdict !== 'PENDING') break;
       await new Promise(resolve => setTimeout(resolve, 2_000));
@@ -286,7 +310,7 @@ export function RouterProvider({ children }: { children: ReactNode }) {
   }); }
   return <Context.Provider value={{ network, available, availability, executionEnabled, record, busy, signing, error, retired, recovered, session, sessionReady, runs, notice,
     simulate, refresh, review, execute, observe, switchNetwork, signIn, signOut, open, loadRuns }}>
-    {signing && <p role="status">Confirm or reject the pending request in your wallet.</p>}
-    <div inert={signing} data-router-wallet-pending={signing ? 'true' : undefined}>{children}</div></Context.Provider>;
+    {signing && <p role="status">{tr('Open your wallet to approve or reject. You can navigate and check status while waiting.')}</p>}
+    <div data-router-wallet-pending={signing ? 'true' : undefined}>{children}</div></Context.Provider>;
 }
 export function useRouter() { const value = useContext(Context); if (!value) throw new Error('ROUTER_PROVIDER_MISSING'); return value; }

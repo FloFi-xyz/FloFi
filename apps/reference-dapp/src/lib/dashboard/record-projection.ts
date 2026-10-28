@@ -12,13 +12,18 @@ export function projectDashboardRecord(detail: DashboardRunDetail, context: Revi
   const record = detail.record;
   if (!object(record)) return null;
   const kinds: Record<string, ExecutionLifecycleSource['kind']> = { 'aave-supply': 'supply', 'base-sepolia-swap': 'public',
-    'crosschain-router': 'router', 'crosschain-router-testnet': 'router', 'robinhood-transfer': 'transfer',
+    'crosschain-router': 'router', 'crosschain-universal': 'universal', 'lending-composition': 'lending', 'crosschain-router-testnet': 'router', 'robinhood-transfer': 'transfer',
     'solana-devnet-swap': 'solana-swap', 'jupiter-swap': 'solana-swap', 'orca-liquidity': 'solana-pool', 'orca-liquidity-mainnet': 'solana-pool', 'uniswap-liquidity': 'uniswap-pool',
     'solana-transfer': 'solana-transfer', 'solana-devnet-transfer': 'solana-transfer' };
-  const kind = kinds[detail.run.flow];
+  const kind = kinds[detail.run.flow] ?? (detail.run.flow.startsWith('crosschain-router-') ? 'router'
+    : /^(base|arbitrum|ethereum|robinhood)-swap$/.test(detail.run.flow) ? 'public'
+    : /^(base|arbitrum|ethereum|robinhood)-mainnet-transfer$/.test(detail.run.flow) ? 'transfer'
+    : /^(base|arbitrum|ethereum|robinhood)-liquidity$/.test(detail.run.flow) ? 'uniswap-pool'
+    : /^(base|arbitrum|ethereum)-aave$/.test(detail.run.flow) ? 'supply' : null);
   if (!kind) return null;
   const review = object(record.review) ? record.review : null;
-  const saved = kind === 'router' || kind === 'uniswap-pool' || kind === 'public' ? record.workflow : review?.workflow;
+  const latestReview = kind === 'lending' && Array.isArray(record.reviews) && object(record.reviews.at(-1)) ? record.reviews.at(-1) : review;
+  const saved = kind === 'universal' || kind === 'router' || kind === 'uniswap-pool' || kind === 'public' ? record.workflow : latestReview?.workflow;
   if (!object(saved) || !Array.isArray(saved.nodes) || !Array.isArray(saved.resourceEdges) || typeof saved.workflowId !== 'string') return null;
   // The status endpoint loads validated durable records. Defaults describe the read operation only;
   // no attempts, workflow values, outcomes, receipts or reconciliation are supplied by this adapter.

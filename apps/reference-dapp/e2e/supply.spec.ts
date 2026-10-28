@@ -38,12 +38,14 @@ for(const kind of ['wrong chain','wrong account','approval rejected','Supply rej
   expect(await supplySendCount(page)).toBe(kind==='Supply rejected'?2:kind==='approval rejected'?1:0);
 });
 
-test('pending wallet signature freezes semantic authoring until the owner responds',async({page})=>{
+test('pending wallet signature keeps navigation available and sends the recorded request only once',async({page})=>{
   await installSupplyWallet(page,{pause:'APPROVAL'});await authorSupply(page);await reviewSupply(page);
   const build=await page.getByRole('button',{name:'Build',exact:true}).boundingBox();if(!build)throw new Error('Build navigation missing');
   await page.getByRole('region',{name:'Aave Supply'}).getByRole('button',{name:'Execute',exact:true}).click();
-  await expect(page.locator('[data-supply-wallet-pending="true"]')).toHaveAttribute('inert','');
-  await page.mouse.click(build.x+build.width/2,build.y+build.height/2);await page.keyboard.press('Control+z');
+  await expect(page.locator('[data-supply-wallet-pending="true"]')).not.toHaveAttribute('inert','');
+  await page.mouse.click(build.x+build.width/2,build.y+build.height/2);
+  await expect(page.getByRole('region',{name:'Aave Supply'})).toHaveCount(0);
+  await page.getByRole('navigation',{name:'Workflow stages'}).getByRole('button',{name:'Execute',exact:true}).click();
   await expect(page.locator('.summary-bar[data-workflow-revision="1"]')).toHaveCount(1);
   await page.evaluate(()=>{const w=window as unknown as {releaseSupplyWalletRequest:()=>void};w.releaseSupplyWalletRequest();});
   await expect(page.getByRole('button',{name:'Execute Supply',exact:true})).toBeVisible();expect(await supplySendCount(page)).toBe(1);

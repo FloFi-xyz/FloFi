@@ -20,13 +20,14 @@ export function toDashboardRun(value: unknown, account: string): DashboardRun | 
     needsObservation: value.needsObservation === true, attentionRequired: value.attentionRequired === true, hasEvidence: value.hasEvidence === true,
     createdAt: optionalText(value.createdAt), updatedAt: optionalText(value.updatedAt) };
 }
-const titles: Record<string, string> = { 'aave-supply': 'Aave workflow', 'base-sepolia-swap': 'Swap', 'crosschain-router': 'Bridge',
+const titles: Record<string, string> = { 'aave-supply': 'Aave workflow', 'base-sepolia-swap': 'Swap', 'crosschain-router': 'Bridge', 'crosschain-universal': 'Bridge',
   'crosschain-router-testnet': 'Bridge', 'robinhood-transfer': 'Send', 'jupiter-swap': 'Swap', 'solana-devnet-swap': 'Swap',
   'orca-liquidity': 'Liquidity workflow', 'orca-liquidity-mainnet': 'Liquidity workflow', 'uniswap-liquidity': 'Liquidity workflow',
   'solana-transfer': 'Send', 'solana-devnet-transfer': 'Send' };
 
 export function projectDashboardRun(run: DashboardRun, progress: ExecutionLifecycle | null = null, title = titles[run.flow] ?? 'Workflow execution', current = false): DashboardRunView {
   const result = projectExecutionResult(progress);
+  const unproven = /SUBMISSION_EXPIRED_NOT_EXECUTED$/.test(run.errorCode ?? '');
   let status: DashboardStatus = 'Unresolved', message = 'FloFi has not established the final workflow outcome.';
   if (progress) {
     status = progress.state === 'active' ? 'In progress' : progress.state === 'idle' ? 'Not started'
@@ -37,14 +38,18 @@ export function projectDashboardRun(run: DashboardRun, progress: ExecutionLifecy
   } else if (run.status === 'RECONCILED' && !run.needsObservation) {
     status = run.attentionRequired || run.errorCode ? 'Completed with attention' : 'Completed';
     message = 'The run records a reconciled outcome.';
+  } else if (['CANCELLED', 'REJECTED'].includes(run.status) && !run.needsObservation) {
+    status = 'Transaction not submitted'; message = 'This request was recorded as not submitted. Earlier confirmed actions and costs remain recorded.';
+  } else if (run.status === 'SUBMITTING') {
+    status = 'Unresolved'; message = 'A recorded request still needs verification. No transaction is repeated.';
   } else if (['PARTIAL', 'PARTIALLY_COMPLETED'].includes(run.status)) {
     status = 'Partially completed'; message = 'Earlier completed actions remain recorded.';
   } else if (['FAILED', 'REVERTED'].includes(run.status) && !run.needsObservation) {
     // A summary alone cannot establish whether earlier actions completed.
     status = 'Needs attention'; message = 'A failed action is recorded. Open the run to review any earlier completed actions.';
-  } else if (['SIMULATED', 'AUTHORIZED', 'REVIEWED'].includes(run.status)) {
-    status = 'Not started'; message = 'The run has no recorded execution start.';
-  } else if (['PREPARED', 'RESERVED', 'SUBMITTING', 'PENDING', 'HASH', 'SOURCE_CONFIRMED', 'IN_FLIGHT', 'DESTINATION_OBSERVED', 'SIGNED', 'POSTING', 'POSTED', 'OPEN', 'SETTLING', 'FULFILLED', 'PARTIALLY_FILLED'].includes(run.status)) {
+  } else if (['PREPARED', 'SIMULATED', 'AUTHORIZED', 'REVIEWED'].includes(run.status)) {
+    status = run.needsObservation || unproven ? 'Unresolved' : 'Not started'; message = run.needsObservation || unproven ? 'A recorded request still needs verification. No transaction is repeated.' : 'The run has no recorded execution start.';
+  } else if (['RESERVED', 'SUBMITTING', 'PENDING', 'HASH', 'SOURCE_CONFIRMED', 'IN_FLIGHT', 'DESTINATION_OBSERVED', 'SIGNED', 'POSTING', 'POSTED', 'OPEN', 'SETTLING', 'FULFILLED', 'PARTIALLY_FILLED'].includes(run.status)) {
     status = 'In progress'; message = 'The recorded execution is still awaiting its final outcome.';
   } else if (run.status === 'CONFIRMED') {
     status = 'Needs attention'; message = 'A transaction is confirmed. Full workflow completion has not been established by this summary.';

@@ -303,7 +303,13 @@ test('failure, uncertainty and restored execution never regain the initial Execu
   for (const state of ['failed', 'uncertain', 'restored'] as const) {
     await page.evaluate(value => window.flofiExecuteAcceptance.lifecycle(value), state);
     await expect(page.getByRole('button', { name: AUTHORIZE_IN_WALLET, exact: true })).toHaveCount(0);
-    if (state === 'failed') await expect(page.locator('.execution-summary')).toContainText('Execution failed');
+    if (state === 'failed') {
+      // This fixture already confirmed its approval; the failed swap cannot erase that financial effect.
+      await expect(page.locator('.execution-summary')).toContainText('Execution partially completed');
+      await expect(page.locator('.execution-summary')).toContainText('0 of 1');
+      await expect(page.locator('.execution-plan')).toContainText('Confirmed');
+      await expect(page.locator('.execution-plan')).toContainText('Transaction reverted');
+    }
     if (state === 'uncertain') { await expect(page.locator('.execution-summary')).toContainText('Execution status unresolved'); await expect(page.getByRole('button', { name: /Retry|Check confirmation|Continue to/ })).toHaveCount(0); }
     if (state === 'restored') await expect(page.getByRole('region', { name: 'Execution plan', exact: true })).toContainText('No new request has been sent');
   }
@@ -379,7 +385,12 @@ test('partial, declined, attention and recovered results retain their actual ste
   await expect(page.locator('.execution-step').nth(0)).toContainText('Reconciled'); await expect(page.locator('.execution-step').nth(1)).toContainText('Transaction reverted');
   await expect(page.locator('.execution-summary')).not.toContainText('Execution completed');
   await page.evaluate(() => window.flofiExecuteAcceptance.evidence('declined'));
-  await expect(page.locator('.execution-summary')).toContainText('Transaction not submitted'); await expect(page.locator('.execution-plan')).toContainText('Wallet confirmation was declined');
+  await expect(page.locator('.execution-summary')).toContainText('Execution partially completed');
+  await expect(page.locator('.execution-summary')).toContainText('0 of 1');
+  await expect(page.locator('.execution-summary')).toContainText('An earlier approval is confirmed');
+  await expect(page.locator('.execution-summary')).toContainText('0.0001 ETH');
+  await expect(page.locator('.execution-summary')).not.toContainText('nothing reached the network');
+  await expect(page.locator('.execution-plan')).toContainText('Wallet confirmation was declined');
   await expect(page.locator('.execution-plan')).not.toContainText('Action transaction');
   await page.evaluate(() => window.flofiExecuteAcceptance.evidence('attention'));
   await expect(page.locator('.execution-summary')).toContainText('Execution completed with attention');
@@ -476,9 +487,9 @@ test('wallet interaction, submission and confirmation show only recorded lifecyc
     await page.screenshot({ path: `.tmp/ux005e-wallet-${theme}.png`, fullPage: true });
   }
   await page.evaluate(() => window.flofiExecuteAcceptance.lifecycle('submitting'));
-  await expect(page.locator('.execution-summary')).toContainText('Submitting transaction…');
-  await expect(page.locator('.execution-summary')).toContainText('Confirmation is not yet known');
-  await expect(page.locator('.execution-timeline')).toContainText('Submitting');
+  // A restored handoff without a live wallet request or a hash has an unknown submission result.
+  await expect(page.locator('.execution-summary')).toContainText('Execution status unresolved');
+  await expect(page.locator('.execution-timeline')).toContainText('Execution status uncertain');
   await expect(page.locator('.execution-timeline')).not.toContainText('Action transaction');
   await page.evaluate(() => window.flofiExecuteAcceptance.lifecycle('submitted'));
   await expect(page.locator('.execution-timeline')).toContainText('Transaction submitted');

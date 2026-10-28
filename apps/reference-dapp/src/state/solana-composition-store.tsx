@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
+import { WalletPendingNotice } from '../components/wallet-pending-notice';
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { isBoundComposition } from '@defi-workflow-engine/action-registry';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
@@ -52,7 +53,7 @@ export function SolanaCompositionProvider({ children }: { children: ReactNode })
   const owner = session?.account.address ?? null;
   const [record, setRecord] = useState<SolanaCompositionView | null>(null), [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null);
   const [recovered, setRecovered] = useState(false), [enabled, setEnabled] = useState(false), [signing, setSigning] = useState(false);
-  const mintSigner = useRef<PositionMintSigner | null>(null), busyRef = useRef(false);
+  const mintSigner = useRef<PositionMintSigner | null>(null), busyRef = useRef(false), operationEpoch = useRef(0);
   const workflow = state.workflow as unknown as SemanticWorkflow;
   const latest = useRef(workflow); latest.current = workflow;
   const composed = isBoundComposition(workflow);
@@ -83,15 +84,9 @@ export function SolanaCompositionProvider({ children }: { children: ReactNode })
     if (record && retired && ['SIMULATED', 'AUTHORIZED'].includes(record.phase))
       solanaCompositionInvalidate(record.record.id).then(result => { if (result.ok) setRecord(result.value); }).catch(() => setError(`${X}_AUTHORIZATION_INVALIDATION_FAILED`));
   }, [record, retired]);
-  useEffect(() => {
-    if (!signing) return;
-    const prevent = (event: KeyboardEvent) => { event.preventDefault(); event.stopImmediatePropagation(); };
-    window.addEventListener('keydown', prevent, true);
-    return () => window.removeEventListener('keydown', prevent, true);
-  }, [signing]);
   async function operation(action: () => Promise<void>) {
-    if (busyRef.current) return; busyRef.current = true; setBusy(true); setError(null);
-    try { await action(); } catch (cause) { setError(cause instanceof Error ? cause.message : `${X}_OPERATION_FAILED`); } finally { busyRef.current = false; setBusy(false); }
+    if (busyRef.current) return; const epoch = ++operationEpoch.current; busyRef.current = true; setBusy(true); setError(null);
+    try { await action(); } catch (cause) { setError(cause instanceof Error ? cause.message : `${X}_OPERATION_FAILED`); } finally { if (operationEpoch.current === epoch) { busyRef.current = false; setBusy(false); } }
   }
   async function poll(id: string) {
     for (let i = 0; i < 30; i++) {
@@ -143,7 +138,7 @@ export function SolanaCompositionProvider({ children }: { children: ReactNode })
     }
     const prefix = swap ? 'DEVNET_SWAP' : 'ORCA_LIQUIDITY';
     let signed: string;
-    setSigning(true);
+    setSigning(true); busyRef.current = false; setBusy(false);
     try {
       if (walletChain !== session.chain) throw new Error(`${prefix}_WRONG_CLUSTER`);
       if (JSON.stringify(authorizedWorkflow()) !== JSON.stringify(snapshot)) throw new Error(`${prefix}_SEMANTIC_REVISION_CHANGED`);
@@ -169,7 +164,7 @@ export function SolanaCompositionProvider({ children }: { children: ReactNode })
   }); }
   return <Context.Provider value={{ record, busy, error, retired, recovered, executionEnabled: enabled, signing, owner, authorized: compositionAuthorized(record),
     simulate, review, execute, observe, end }}>
-    {signing && <p role="status">Confirm or reject the pending request in your Solana wallet.</p>}
-    <div inert={signing} data-solana-composition-wallet-pending={signing ? 'true' : undefined}>{children}</div></Context.Provider>;
+    {signing && <WalletPendingNotice/>}
+    <div data-solana-composition-wallet-pending={signing ? 'true' : undefined}>{children}</div></Context.Provider>;
 }
 export function useSolanaComposition() { const value = useContext(Context); if (!value) throw new Error('SOLANA_COMPOSITION_PROVIDER_MISSING'); return value; }

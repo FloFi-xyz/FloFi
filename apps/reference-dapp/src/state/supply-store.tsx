@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
+import { WalletPendingNotice } from '../components/wallet-pending-notice';
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { lendingProfileOfChain, supplyWalletNonce, supplyWalletTransaction, assertSupplyWalletTransaction } from '../domain/supply-authoring';
@@ -31,16 +32,10 @@ const Context=createContext<Store|null>(null);
 export function SupplyProvider({children}:{children:ReactNode}){
   const {state}=useWorkflow(),wallet=useBuild009Wallet();
   const [record,setRecord]=useState<SupplyRecord|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState<string|null>(null),[recovered,setRecovered]=useState(false),[signing,setSigning]=useState(false);
-  useEffect(()=>{
-    if(!signing)return;
-    const preventEdit=(event:KeyboardEvent)=>{event.preventDefault();event.stopImmediatePropagation();};
-    window.addEventListener('keydown',preventEdit,true);
-    return()=>window.removeEventListener('keydown',preventEdit,true);
-  },[signing]);
   const workflow=state.workflow as unknown as SemanticWorkflow;
   const latest=useRef(workflow);latest.current=workflow;
   const latestWallet=useRef(wallet);latestWallet.current=wallet;
-  const busyRef=useRef(false);
+  const busyRef=useRef(false),operationEpoch=useRef(0);
   const equal=record&&JSON.stringify(record.review.workflow)===JSON.stringify(workflow);
   const pristineRecovery=recovered&&isPristineDraft(workflow);
   const retired=Boolean(record&&!equal&&!pristineRecovery);
@@ -64,7 +59,7 @@ export function SupplyProvider({children}:{children:ReactNode}){
     return()=>{mounted=false;};
   },[]);
   useEffect(()=>{if(record&&retired&&record.authorization)supplyInvalidate(record.id).then(result=>{if(result.ok)setRecord(result.value);}).catch(()=>setError('SUPPLY_AUTHORIZATION_INVALIDATION_FAILED'));},[record,retired]);
-  async function operation(action:()=>Promise<void>){if(busyRef.current)return;busyRef.current=true;setBusy(true);setError(null);try{await action();}catch(cause){setError(cause instanceof Error?cause.message:'SUPPLY_OPERATION_FAILED');}finally{busyRef.current=false;setBusy(false);}}
+  async function operation(action:()=>Promise<void>){if(busyRef.current)return;const epoch=++operationEpoch.current;busyRef.current=true;setBusy(true);setError(null);try{await action();}catch(cause){setError(cause instanceof Error?cause.message:'SUPPLY_OPERATION_FAILED');}finally{if(operationEpoch.current===epoch){busyRef.current=false;setBusy(false);}}}
   async function observe(){await operation(async()=>{if(!record)throw new Error('SUPPLY_RUN_MISSING');const result=await supplyObserve(record.id);if(!result.ok)throw new Error(result.code);accept(result.value);});}
   async function recoverReview(){await operation(async()=>{
     if(!record)throw new Error('SUPPLY_RUN_MISSING');
@@ -130,7 +125,7 @@ export function SupplyProvider({children}:{children:ReactNode}){
       if(JSON.stringify(latest.current)!==JSON.stringify(snapshot))throw new Error('SUPPLY_SEMANTIC_REVISION_CHANGED');
       if(injected()!==provider)throw new Error('SUPPLY_WALLET_PROVIDER_CHANGED');
       // This is the sole submission point, reachable only from the owner's Execute click.
-      setSigning(true);
+      setSigning(true);busyRef.current=false;setBusy(false);
       diagnostic.invoked=true;
       let hash:unknown;try{hash=await request('eth_sendTransaction',[transaction]);}finally{setSigning(false);}
       if(typeof hash!=='string'||!/^0x[0-9a-fA-F]{64}$/.test(hash))throw new Error('SUPPLY_SUBMISSION_UNKNOWN');
@@ -156,6 +151,6 @@ export function SupplyProvider({children}:{children:ReactNode}){
     }
     const observed=await supplyObserve(record.id);if(observed.ok)accept(observed.value);
   });}
-  return <Context.Provider value={{record,busy,signing,error,retired,recovered,simulate,review,execute,observe,recoverReview,switchNetwork}}>{signing&&<p role="status">Confirm or reject the pending request in your wallet.</p>}<div inert={signing} data-supply-wallet-pending={signing?'true':undefined}>{children}</div></Context.Provider>;
+  return <Context.Provider value={{record,busy,signing,error,retired,recovered,simulate,review,execute,observe,recoverReview,switchNetwork}}>{signing&&<WalletPendingNotice/>}<div data-supply-wallet-pending={signing?'true':undefined}>{children}</div></Context.Provider>;
 }
 export function useSupply(){const value=useContext(Context);if(!value)throw new Error('SUPPLY_PROVIDER_MISSING');return value;}

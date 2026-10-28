@@ -3,6 +3,7 @@
 from contextlib import redirect_stdout
 import gzip
 import hashlib
+import http.client
 import importlib.util
 import io
 import json
@@ -10,6 +11,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import ssl
 import subprocess
 import sys
 import tempfile
@@ -142,6 +144,120 @@ class RegistryTransport(unittest.TestCase):
             with patch.object(bootstrap.urllib.request, 'urlopen', return_value=self.response(b'bad', encoding)):
                 with self.assertRaises((RuntimeError, OSError)):
                     bootstrap.fetch('https://registry.npmjs.org/example', compressed=True)
+
+    def test_read_timeout_discards_partial_bytes_before_success_and_cache_write(self):
+        failed = self.response(b'')
+        failed.read1 = unittest.mock.Mock(side_effect=[b'partial bytes', TimeoutError('private URL detail')])
+        good = b'complete verified archive'
+        with tempfile.TemporaryDirectory() as scratch, patch.dict(os.environ, {'FLOFI_CI_ARCHIVE_CACHE': scratch + '/cache'}), \
+                patch.object(bootstrap.urllib.request, 'urlopen', side_effect=[failed, self.response(good)]) as open_url, \
+                patch.object(bootstrap.time, 'sleep') as sleep, redirect_stdout(io.StringIO()) as logs:
+            def download(output):
+                # No partial attempt bytes are written into the private file.
+                output.write(bootstrap.fetch(bootstrap.NODE_URL, stage='Node archive'))
+            with verified_archive('node.tar.xz', Path(scratch), download, hashlib.sha256(good).hexdigest()) as archive:
+                self.assertEqual(archive.read_bytes(), good)
+            self.assertTrue(failed.closed)
+            self.assertEqual(open_url.call_count, 2)
+            sleep.assert_called_once_with(2)
+            self.assertEqual((Path(scratch) / 'cache/node.tar.xz').read_bytes(), good)
+            self.assertIn('stage=Node archive host=nodejs.org attempt=2/3', logs.getvalue())
+            self.assertNotIn('private URL detail', logs.getvalue())
+            self.assertFalse(list(Path(scratch).glob('flofi-archive-*')))
+
+    def test_incomplete_length_and_incomplete_read_retry_with_fresh_response(self):
+        short = self.response(b'short')
+        short.headers['Content-Length'] = '99'
+        broken = self.response(b'')
+        broken.read1 = unittest.mock.Mock(side_effect=http.client.IncompleteRead(b'partial'))
+        with patch.object(bootstrap.urllib.request, 'urlopen', side_effect=[short, broken, self.response(b'complete')]) as open_url, \
+                patch.object(bootstrap.time, 'sleep') as sleep:
+            self.assertEqual(bootstrap.fetch(bootstrap.NODE_URL), b'complete')
+            self.assertEqual(open_url.call_count, 3)
+            self.assertEqual(sleep.call_args_list, [unittest.mock.call(2), unittest.mock.call(4)])
+            self.assertTrue(short.closed)
+            self.assertTrue(broken.closed)
+
+    def test_transient_http_and_connection_failures_retry(self):
+        unavailable = bootstrap.urllib.error.HTTPError(bootstrap.NODE_URL, 503, 'private detail', {}, None)
+        offline = bootstrap.urllib.error.URLError(ConnectionResetError('private detail'))
+        with patch.object(bootstrap.urllib.request, 'urlopen', side_effect=[unavailable, offline, self.response(b'ok')]), \
+                patch.object(bootstrap.time, 'sleep') as sleep:
+            self.assertEqual(bootstrap.fetch(bootstrap.NODE_URL), b'ok')
+            self.assertEqual(sleep.call_count, 2)
+
+    def test_exhausted_retries_are_bounded_sanitized_and_leave_no_archive(self):
+        url = 'https://user:secret@nodejs.org/private/path?token=private'
+        for failure in [TimeoutError('private'), http.client.IncompleteRead(b'private'), ssl.SSLEOFError('private'),
+                        bootstrap.urllib.error.URLError('private')]:
+            with self.subTest(failure=type(failure).__name__), tempfile.TemporaryDirectory() as scratch, \
+                    patch.dict(os.environ, {'FLOFI_CI_ARCHIVE_CACHE': scratch + '/cache'}), \
+                    patch.object(bootstrap.urllib.request, 'urlopen', side_effect=failure) as open_url, \
+                    patch.object(bootstrap.time, 'sleep') as sleep, redirect_stdout(io.StringIO()) as logs:
+                with self.assertRaisesRegex(RuntimeError, 'failed after 3 attempt.*retries exhausted') as error:
+                    with verified_archive('node.tar.xz', Path(scratch),
+                                          lambda output: output.write(bootstrap.fetch(url, stage='Node archive')),
+                                          '0' * 64):
+                        self.fail('Failed download reached consumer')
+                self.assertEqual(open_url.call_count, 3)
+                self.assertEqual(sleep.call_args_list, [unittest.mock.call(2), unittest.mock.call(4)])
+                for sensitive in ['secret', 'user:', 'private', 'token=', 'https://']:
+                    self.assertNotIn(sensitive, logs.getvalue() + str(error.exception))
+                self.assertIn('host=nodejs.org', logs.getvalue())
+                self.assertFalse(list(Path(scratch).glob('flofi-archive-*')))
+                self.assertFalse((Path(scratch) / 'cache/node.tar.xz').exists())
+
+    def test_permanent_http_and_tls_errors_are_not_retried(self):
+        for failure in [bootstrap.urllib.error.HTTPError(bootstrap.NODE_URL, 404, 'private', {}, None),
+                        bootstrap.urllib.error.URLError(ssl.SSLCertVerificationError('private'))]:
+            with self.subTest(failure=type(failure).__name__), \
+                    patch.object(bootstrap.urllib.request, 'urlopen', side_effect=failure) as open_url, \
+                    patch.object(bootstrap.time, 'sleep') as sleep:
+                with self.assertRaises(RuntimeError):
+                    bootstrap.fetch(bootstrap.NODE_URL)
+                open_url.assert_called_once()
+                sleep.assert_not_called()
+
+    def test_elapsed_budget_stops_even_a_response_that_keeps_returning_bytes(self):
+        response = self.response(b'')
+        response.read1 = unittest.mock.Mock(return_value=b'trickle')
+        with patch.object(bootstrap.urllib.request, 'urlopen', return_value=response) as open_url, \
+                patch.object(bootstrap.time, 'monotonic', side_effect=[0, 0, 1, 301, 301]), \
+                patch.object(bootstrap.time, 'sleep') as sleep:
+            with self.assertRaisesRegex(RuntimeError, 'retries exhausted'):
+                bootstrap.fetch(bootstrap.NODE_URL)
+            response.read1.assert_called_once()
+            open_url.assert_called_once()
+            sleep.assert_not_called()
+            self.assertTrue(response.closed)
+
+    def test_checksum_mismatch_after_retry_never_retries_integrity_or_caches_bytes(self):
+        pins = [('sha256', bootstrap.NODE_SHA256),
+                ('sha512', bootstrap.base64.b64decode(bootstrap.PNPM_SHA512).hex())]
+        for algorithm, expected in pins:
+            with self.subTest(algorithm=algorithm), tempfile.TemporaryDirectory() as scratch, \
+                    patch.dict(os.environ, {'FLOFI_CI_ARCHIVE_CACHE': scratch + '/cache'}), \
+                    patch.object(bootstrap.urllib.request, 'urlopen', side_effect=[TimeoutError(), self.response(b'corrupt')]) as open_url, \
+                    patch.object(bootstrap.time, 'sleep') as sleep:
+                with self.assertRaisesRegex(RuntimeError, 'Archive digest/size mismatch'):
+                    with verified_archive('test.tgz', Path(scratch),
+                                          lambda output: output.write(bootstrap.fetch(bootstrap.NODE_URL)),
+                                          expected, algorithm=algorithm):
+                        self.fail('Unchecked archive reached consumer')
+                self.assertEqual(open_url.call_count, 2)
+                sleep.assert_called_once_with(2)
+                self.assertFalse((Path(scratch) / 'cache/test.tgz').exists())
+                self.assertFalse(list(Path(scratch).glob('flofi-archive-*')))
+
+    def test_official_node_manifest_mismatch_stops_before_archive_or_execution(self):
+        manifest = ('0' * 64 + '  ' + bootstrap.NODE_ARCHIVE + '\n').encode()
+        with patch.object(bootstrap, 'checked_output'), patch.object(bootstrap, 'fetch', return_value=manifest) as fetch, \
+                patch.object(bootstrap, 'verified_archive') as archive, patch.object(bootstrap, 'extract') as extract:
+            with self.assertRaisesRegex(RuntimeError, 'Official Node checksum entry differs'):
+                bootstrap.main()
+            fetch.assert_called_once_with(bootstrap.NODE_SUMS_URL, stage='Node checksum manifest')
+            archive.assert_not_called()
+            extract.assert_not_called()
 
     def test_multiple_versions_share_one_fresh_response_without_losing_fields(self):
         packages = {'1.0.0': {'license': 'MIT', 'dist': {'integrity': 'sha512-one'}},

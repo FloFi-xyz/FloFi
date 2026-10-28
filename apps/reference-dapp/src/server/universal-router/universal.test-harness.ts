@@ -131,6 +131,7 @@ export function createEvmMockChain(d: UniversalEvmDeployment, options: { now: ()
       case 'eth_blockNumber': return tagN(state.head);
       case 'eth_getBlockByNumber': {
         const t = p[0];
+        if (t === 'pending' && p[1] === true) return { ...block(state.head, true), transactions: [...state.txs.values()].filter(tx => !tx.blockHash) };
         const n = t === 'latest' || t === 'pending' ? state.head : t === 'safe' || t === 'finalized' ? state.head - state.safeLag : Number(BigInt(String(t)));
         return n > state.head || n < 0 ? null : block(n, p[1] === true);
       }

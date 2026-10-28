@@ -105,12 +105,14 @@ test('a dropped transaction survives reload and resolves as expired, never resub
   await expect(panel(page).getByRole('status')).toContainText('expired without landing. No swap happened');
   expect(await jupiterControl({ action: 'sent' })).toBe(1); expect(await signRequests(page)).toBe(0);
 });
-test('pending wallet signature freezes semantic authoring until the owner responds', async ({ page }) => {
+test('pending wallet signature keeps navigation available without a duplicate signature or broadcast', async ({ page }) => {
   const wallet = await resetJupiterHarness(); await installSolanaWallet(page, wallet, { pause: true });
   await authorSolanaSwap(page); await reviewSolanaSwap(page);
   await panel(page).getByRole('button', { name: 'Execute swap' }).click();
-  await expect(page.locator('[data-jupiter-wallet-pending="true"]')).toHaveAttribute('inert', '');
-  await page.keyboard.press('Control+z');
+  await expect(page.locator('[data-jupiter-wallet-pending="true"]')).not.toHaveAttribute('inert', '');
+  await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Build', exact: true }).click();
+  await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Execute', exact: true }).click();
+  expect(await signRequests(page)).toBe(1);
   await page.evaluate(() => (window as unknown as { releaseSolanaSignature: () => void }).releaseSolanaSignature());
   await expect(page.getByRole('link', { name: 'Download Evidence Bundle' })).toBeVisible();
   expect(await jupiterControl({ action: 'sent' })).toBe(1);

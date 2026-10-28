@@ -6,6 +6,7 @@ import { editorReducer, initialEditor } from './editor';
 import { createRouterNode } from './router-authoring';
 import { canvasAddCommand } from './canvas-authoring';
 import { initialWorkflow } from './initial-workflow';
+import { currentExecution } from './execution-result';
 const hash = `0x${'a'.repeat(64)}`;
 const fixture = () => reviewFixture();
 // Minimal observations in the exact existing store shapes; no submission callbacks.
@@ -13,7 +14,7 @@ const source = (kind: ExecutionLifecycleSource['kind'], state: unknown) => ({ ki
 const project = (kind: ExecutionLifecycleSource['kind'], state: unknown) => { const f = fixture(); return projectExecutionLifecycle(f.workflow, f.context, source(kind, state)); };
 function publicRun(attempts: unknown[]) { const f = fixture(); return { ...f.source.state, run: { ...('run' in f.source.state ? f.source.state.run : {}), attempts } }; }
 describe('truthful transaction and order observations', () => {
-  it.each([['PREPARED', 'preparing'], ['SUBMITTING', 'submitting'], ['HASH', 'submitted'], ['PENDING', 'pending'], ['CONFIRMED', 'confirmed'], ['REVERTED', 'failed'], ['REJECTED', 'failed'], ['CANCELLED', 'cancelled'], ['SUBMISSION_RESULT_UNKNOWN', 'uncertain'], ['INCONCLUSIVE', 'uncertain'], ['NOT_FOUND', 'uncertain'], ['RECONCILIATION_REQUIRED', 'uncertain']] as const)('maps %s to %s without interpreting absence as success', (raw, expected) => expect(transactionLifecycle(raw, null)).toBe(expected));
+  it.each([['PREPARED', 'preparing'], ['SUBMITTING', 'uncertain'], ['HASH', 'submitted'], ['PENDING', 'pending'], ['CONFIRMED', 'confirmed'], ['REVERTED', 'failed'], ['REJECTED', 'failed'], ['CANCELLED', 'cancelled'], ['SUBMISSION_RESULT_UNKNOWN', 'uncertain'], ['INCONCLUSIVE', 'uncertain'], ['NOT_FOUND', 'uncertain'], ['RECONCILIATION_REQUIRED', 'uncertain']] as const)('maps %s to %s without interpreting absence as success', (raw, expected) => expect(transactionLifecycle(raw, null)).toBe(expected));
   it('claims wallet confirmation only while a real prepared/submitting request is signing', () => {
     expect(transactionLifecycle('SUBMITTING', null, true)).toBe('wallet'); expect(transactionLifecycle('PREPARED', null, true)).toBe('wallet');
     expect(transactionLifecycle(null, null, true)).toBe('waiting'); expect(transactionLifecycle('PENDING', hash, true)).toBe('pending');
@@ -27,6 +28,14 @@ describe('truthful transaction and order observations', () => {
   });
 });
 describe('current-run ordered lifecycle projection', () => {
+  it.each(['REJECTED', 'CONFIRMED'] as const)('retains a restored terminal %s result in the untouched recovery draft', state => {
+    const f = fixture(), saved = { ...publicRun([{ step: 'swap', state, txHash: state === 'CONFIRMED' ? hash : null }]), recoveryOnly: true };
+    const view = projectExecutionLifecycle(initialWorkflow(), f.context, source('public', saved));
+    expect(currentExecution(view)).not.toBeNull();
+    expect(view).toMatchObject({ restored: true, matchesWorkflow: true });
+    const edited = projectExecutionLifecycle({ ...initialWorkflow(), revision: 1 }, f.context, source('public', saved));
+    expect(currentExecution(edited)).toBeNull();
+  });
   it('keeps approval separate, preserves the real hash and does not start the swap early', () => {
     const view = project('public', publicRun([{ step: 'approval', state: 'PENDING', txHash: hash, receipt: null }]));
     expect(view).toMatchObject({ started: true, completed: 0, state: 'active', label: 'Execution in progress' });

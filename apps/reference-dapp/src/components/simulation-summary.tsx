@@ -20,8 +20,8 @@ function TokenAmount({ value }: { value: string }) {
   const symbol = value.match(/ (USDC|devUSDC|WETH|ETH|SOL|WSOL|USDT)$/)?.[1];
   return <span className="simulation-token-amount">{symbol && <TokenBrandIcon symbol={symbol}/>}<span>{tr(value)}</span></span>;
 }
-export function SimulationSummary({ workflow, context, source, invalidWorkflow = false }: {
-  workflow: Workflow; context: ReviewContext; source?: SimulationSource | undefined; invalidWorkflow?: boolean;
+export function SimulationSummary({ workflow, context, source, invalidWorkflow = false, unavailableReason }: {
+  workflow: Workflow; context: ReviewContext; source?: SimulationSource | undefined; invalidWorkflow?: boolean; unavailableReason?: string | null | undefined;
 }) {
   const { t: tr } = useLocale();
   const [clock, setClock] = useState(() => Date.now());
@@ -37,6 +37,7 @@ export function SimulationSummary({ workflow, context, source, invalidWorkflow =
     return () => { window.clearTimeout(timer); window.removeEventListener('focus', update); document.removeEventListener('visibilitychange', update); };
   }, [expiresAt]);
   const status = simulationStatusPresentation(details, invalidWorkflow, source?.state.busy);
+  const message = unavailableReason && details.steps.length > 0 && details.status !== 'ready' && !source?.state.busy ? unavailableReason : status.message;
   const networks = [...new Set(details.steps.flatMap(step => step.networks))];
   const multiple = details.steps.length > 1;
   const markets = details.steps.filter(step => step.configuredSlippage || step.slippage || step.priceImpact);
@@ -44,7 +45,7 @@ export function SimulationSummary({ workflow, context, source, invalidWorkflow =
     <div className="simulation-summary-heading"><h2>{tr("Simulation Summary")}</h2><p>{tr("What is expected to happen.")}</p></div>
     <div className={`simulation-validity simulation-tone-${status.tone}`} role="status" aria-live="polite">
       <strong><span aria-hidden="true" className="simulation-status-dot"/>{tr(status.label)}</strong>
-      {!details.warnings.some(warning => warning.message === status.message) && <p>{tr(status.message)}</p>}
+      {!details.warnings.some(warning => warning.message === message) && <p>{tr(message)}</p>}
       {expiresAt !== null && expiresAt > Math.max(clock, Date.now()) && !invalidWorkflow && <small>{tr("Valid until ")}<time dateTime={new Date(expiresAt).toISOString()}>{tr(new Date(expiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }))}</time></small>}
     </div>
     <section className="simulation-summary-section" aria-label={tr("Expected result")}>

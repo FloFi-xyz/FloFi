@@ -22,6 +22,7 @@
  * Position Manager when the on-chain allowance is short, then one mint whose NFT recipient is the owner. Each step is
  * its own wallet request; a confirmed approval requires a fresh simulation and Review before the mint.
  */
+import { discoverEvmNonce, legacyUnprovenApproval, sameEvmIntent } from './evm-submission-discovery.ts';
 import { createHash, randomBytes } from 'node:crypto';
 import { ARBITRUM_ONE, catalogAsset, catalogPoolOn, resolveWorkflowCapability, UNISWAP_V3_BASE_SEPOLIA_LIQUIDITY as BASE_PROFILE, UNISWAP_V3_ROBINHOOD as ROBINHOOD,
   uniswapCatalogDeployment, uniswapLiquidityProfile, type AssetCatalog, type CanonicalAsset, type UniswapPoolProfile } from '@defi-workflow-engine/action-registry';
@@ -39,7 +40,7 @@ import { nitroGasLimit, nitroMaxFeePerGas, nitroPostingGas } from './arbitrum-fe
 export type UniswapLiquidityStep = 'APPROVE_TOKEN0' | 'APPROVE_TOKEN1' | 'MINT';
 export type UniswapAttemptState = 'PREPARED' | 'CANCELLED' | 'SUBMITTING' | 'SUBMISSION_RESULT_UNKNOWN' | 'NOT_FOUND' | 'PENDING' | 'CONFIRMED' |
   'REVERTED' | 'RECONCILIATION_REQUIRED';
-export type UniswapTx = { readonly chainId: string; readonly from: string; readonly to: string; readonly data: string; readonly value: '0x0';
+export type UniswapTx = { readonly nonce?: string; readonly chainId: string; readonly from: string; readonly to: string; readonly data: string; readonly value: '0x0';
   readonly gas: string; readonly maxFeePerGas: string; readonly maxPriorityFeePerGas: string };
 export type UniswapReviewCall = { readonly step: UniswapLiquidityStep; readonly to: string; readonly data: string; readonly gasUsed: string; readonly gasLimit: string;
   readonly l1FeeUpperBoundWei?: string | null };
@@ -81,7 +82,7 @@ export type UniswapReceipt = { readonly transactionHash: string; readonly status
 export type UniswapAttempt = { readonly attemptId: string; readonly step: UniswapLiquidityStep; readonly state: UniswapAttemptState;
   readonly reviewCommitment: string; readonly nonce: string; readonly preparedAtBlock: number; readonly createdAt: string; readonly tx: UniswapTx;
   /** The first hash ever reported or discovered; immutable. A same-intent replacement is recorded separately. */
-  readonly transactionHash: string | null; readonly replacementHash: string | null;
+  readonly transactionHash: string | null; readonly replacementHash: string | null; readonly conflictingTransactionHash?: string;
   /** Owner's position NFT count when a MINT was prepared (duplicate-position guard). */ readonly positionsBefore: string | null;
   readonly receipt: UniswapReceipt | null; readonly reconciled: boolean; readonly note: string | null };
 export type UniswapPosition = { readonly tokenId: string; readonly owner: string; readonly liquidity: string; readonly amount0: string; readonly amount1: string;
@@ -114,8 +115,6 @@ const TERMINAL: readonly UniswapAttemptState[] = ['CANCELLED', 'NOT_FOUND', 'CON
 const REFUSALS = [4001, 4100, 4200];
 const staleReviewError = (code: string) => /^UNISWAP_(?:.*_REVIEW_REQUIRED|UNEXPECTED_CONTRACT|DEPLOYMENT_MISMATCH|POOL_MISMATCH|TOKEN_MISMATCH|FEE_TIER_UNSUPPORTED|SIMULATION_(?:MINT|APPROVAL)_REVERTED)$/.test(code) ||
   /^(STOCK_[A-Z_]+|CATALOG_ASSET_IDENTITY_CHANGED)$/.test(code);
-/** An approval whose nonce was never consumed and nothing is queued is abandoned after this long. */
-const APPROVAL_ABANDON_MS = 15 * 60_000;
 /**
  * The run's reviewed pool: the chain's fixed profile, or (a catalog network: Robinhood Chain, Base) the CREATE2 pool of its reviewed pair and
  * fee tier. A persisted review whose pool does not reproduce is corrupt.
@@ -218,7 +217,7 @@ export function validateUniswapLiquidityLog(bytes: Uint8Array): void {
             after.reviewCommitment !== before.reviewCommitment || after.preparedAtBlock !== before.preparedAtBlock ||
             after.positionsBefore !== before.positionsBefore || (before.transactionHash !== null && after.transactionHash !== before.transactionHash) ||
             (before.replacementHash !== null && after.replacementHash !== before.replacementHash) ||
-            (TERMINAL.includes(before.state) && (after.state !== before.state || !same(after.receipt, before.receipt))))
+            (TERMINAL.includes(before.state) && !(legacyUnprovenApproval(before) && after.state === 'SUBMISSION_RESULT_UNKNOWN' && after.note === 'UNISWAP_LEGACY_TIMEOUT_UNPROVEN' && same({ ...after, state: before.state, note: before.note }, before)) && (after.state !== before.state || !same(after.receipt, before.receipt))))
           fail('UNISWAP_LIQUIDITY_STORE_CORRUPT');
       }
     }
@@ -233,7 +232,7 @@ export function reviewCommitment(review: UniswapLiquidityReview): string {
 /** The step and attempt state a projection or worker sees for a run. */
 export function uniswapNeedsObservation(value: unknown): boolean {
   const record = value as UniswapLiquidityRecord, last = record.attempts.at(-1);
-  return record.verdict === 'PENDING' && !!last && UNISWAP_OBSERVABLE.includes(last.state);
+  return record.verdict === 'PENDING' && !!last && (UNISWAP_OBSERVABLE.includes(last.state) || legacyUnprovenApproval(last));
 }
 
 /**
@@ -278,7 +277,7 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
   const locked = <T,>(id: string, action: () => Promise<T>): Promise<T> => leases.hold(runName(id).slice(0, -6), action);
 
   const sameWorkflow = (a: SemanticWorkflow, b: SemanticWorkflow) => canonical(a) === canonical(b);
-  const active = (record: UniswapLiquidityRecord) => record.attempts.find(a => ACTIVE.includes(a.state)) ?? null;
+  const active = (record: UniswapLiquidityRecord) => record.attempts.find(a => (ACTIVE.includes(a.state) || legacyUnprovenApproval(a))) ?? null;
   function replaceAttempt(record: UniswapLiquidityRecord, attempt: UniswapAttempt): UniswapLiquidityRecord {
     return { ...record, attempts: record.attempts.map(a => a.attemptId === attempt.attemptId ? attempt : a) };
   }
@@ -507,26 +506,12 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
       // again: CANCELLED was never broadcast, NOT_FOUND can no longer execute, and CONFIRMED / REVERTED /
       // RECONCILIATION_REQUIRED are already included. A MetaMask delegated redemption is sent by a relayer, so the
       // owner's nonce is unchanged after it and the run's next step legitimately prepares on the same nonce.
-      if (!attempt || ACTIVE.includes(attempt.state)) fail('UNISWAP_OWNER_NONCE_IN_USE');
+      if (!attempt || ACTIVE.includes(attempt.state) || legacyUnprovenApproval(attempt)) fail('UNISWAP_OWNER_NONCE_IN_USE');
       await log.extend(name, new TextEncoder().encode(utf8(existing) + entry), () => undefined);
     });
   }
   /** Binary search on the owner's monotonic nonce finds the including block; the transaction there is compared to the attempt. */
-  async function discoverByNonce(attempt: UniswapAttempt): Promise<{ consumed: false } | { consumed: true; tx: Record<string, unknown> }> {
-    const owner = attempt.tx.from, nonce = BigInt(attempt.nonce);
-    const count = async (block: number | 'latest') => quantity(await rpc('eth_getTransactionCount', [owner, block === 'latest' ? 'latest' : tag(block)]));
-    const latest = Number(quantity(await rpc('eth_blockNumber', [])));
-    if (!Number.isSafeInteger(latest) || latest < attempt.preparedAtBlock) fail('UNISWAP_RPC_INVALID');
-    if (await count(latest) <= nonce) return { consumed: false };
-    if (await count(attempt.preparedAtBlock) > nonce) fail('UNISWAP_NONCE_CONSUMED_BEFORE_PREPARATION');
-    let low = attempt.preparedAtBlock, high = latest;
-    while (high - low > 1) { const middle = low + Math.floor((high - low) / 2); if (await count(middle) > nonce) high = middle; else low = middle; }
-    const block = await rpc('eth_getBlockByNumber', [tag(high), true]);
-    if (!isObject(block) || !Array.isArray(block.transactions)) fail('UNISWAP_RPC_INVALID');
-    const found = block.transactions.find(tx => isObject(tx) && typeof tx.from === 'string' && tx.from.toLowerCase() === owner && quantity(tx.nonce) === nonce);
-    if (!isObject(found)) fail('UNISWAP_DISCOVERY_INCONSISTENT');
-    return { consumed: true, tx: found };
-  }
+  const discoverByNonce = (attempt: UniswapAttempt) => discoverEvmNonce(rpc, attempt);
   const sameIntent = (attempt: UniswapAttempt, tx: Record<string, unknown>) => typeof tx.to === 'string' && tx.to.toLowerCase() === attempt.tx.to &&
     typeof tx.input === 'string' && tx.input.toLowerCase() === attempt.tx.data && quantity(tx.value) === 0n && quantity(tx.chainId) === BigInt(profile.chainId);
 
@@ -807,7 +792,7 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
       const call = review.calls[index]!;
       const priority = BigInt(review.fees.maxPriorityFeePerGas), maxFeePerGas = BigInt(review.fees.maxFeePerGas);
       const attemptId = `${id}.${step.toLowerCase()}.${record.attempts.length + 1}`;
-      const tx: UniswapTx = { chainId: profile.chainHex, from: owner, to: call.to, data: call.data, value: '0x0', gas: tag(BigInt(call.gasLimit)),
+      const tx: UniswapTx = { nonce: tag(nonce), chainId: profile.chainHex, from: owner, to: call.to, data: call.data, value: '0x0', gas: tag(BigInt(call.gasLimit)),
         maxFeePerGas: tag(maxFeePerGas), maxPriorityFeePerGas: tag(priority) };
       try { await R.assertRequestFees(review, tx, tag(state.block.number)); }
       catch (cause) { if (cause instanceof Error && /^UNISWAP_.*_REVIEW_REQUIRED$/.test(cause.message)) return changed(cause.message); throw cause; }
@@ -874,7 +859,11 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
     }); },
     /** Read-only observation and reconciliation (API and worker). There is no send path here. */
     async observe(id: string): Promise<UniswapLiquidityRecord> { return locked(id, async () => {
-      const record = await load(id), attempt = record.attempts.at(-1);
+      let record = await load(id), attempt = record.attempts.at(-1);
+      if (attempt && legacyUnprovenApproval(attempt)) {
+        attempt = { ...attempt, state: 'SUBMISSION_RESULT_UNKNOWN', note: 'UNISWAP_LEGACY_TIMEOUT_UNPROVEN' };
+        record = await save(replaceAttempt({ ...record, authorization: null, error: 'UNISWAP_LEGACY_TIMEOUT_UNPROVEN' }, attempt));
+      }
       if (!attempt || record.verdict !== 'PENDING' || !ACTIVE.includes(attempt.state)) return record;
       if (attempt.state === 'PREPARED') {
         // The browser stopped before the durable handoff: no wallet request can exist for this attempt.
@@ -887,18 +876,21 @@ export function createUniswapLiquidityService(input: { readonly storage: Executi
         const found = await discoverByNonce(attempt);
         if (!found.consumed) {
           const latest = await head();
-          const pending = quantity(await rpc('eth_getTransactionCount', [record.owner, 'pending']));
           const expired = attempt.step === 'MINT' ? latest.timestamp > Number(decodeUniswapMint(attempt.tx.data).deadline)
-            : now().getTime() - Date.parse(attempt.createdAt) > APPROVAL_ABANDON_MS && pending === BigInt(attempt.nonce);
+            : false;
           if (expired) return save(replaceAttempt({ ...record, authorization: null, error: 'UNISWAP_SUBMISSION_EXPIRED_NOT_EXECUTED' },
             { ...attempt, state: 'NOT_FOUND', note: 'UNISWAP_SUBMISSION_EXPIRED_NOT_EXECUTED' }));
+          if (found.pendingTx && sameEvmIntent(found.pendingTx, attempt.tx, attempt.nonce)) {
+            const h = hex(found.pendingTx.hash);
+            return save(replaceAttempt({ ...record, error: 'UNISWAP_TRANSACTION_PENDING' }, { ...attempt, state: 'PENDING', transactionHash: attempt.transactionHash ?? h,
+              replacementHash: attempt.transactionHash && attempt.transactionHash !== h ? h : attempt.replacementHash }));
+          }
           return save({ ...record, error: hash ? 'UNISWAP_TRANSACTION_PENDING' : 'UNISWAP_TRANSACTION_NOT_OBSERVED' });
         }
         const foundHash = hex(found.tx.hash);
         if (!sameIntent(attempt, found.tx)) {
-          // The reviewed nonce was consumed by a different transaction (e.g. a wallet cancellation): this attempt can never execute.
           return save(replaceAttempt({ ...record, authorization: null, error: 'UNISWAP_NONCE_CONSUMED_BY_DIFFERENT_TRANSACTION' },
-            { ...attempt, state: 'NOT_FOUND', transactionHash: attempt.transactionHash ?? foundHash, note: 'UNISWAP_NONCE_CONSUMED_BY_DIFFERENT_TRANSACTION' }));
+            { ...attempt, state: 'SUBMISSION_RESULT_UNKNOWN', conflictingTransactionHash: foundHash, note: 'UNISWAP_NONCE_CONSUMED_BY_DIFFERENT_TRANSACTION' }));
         }
         // Same exact call on the reviewed nonce: the reported transaction, or a wallet speed-up replacement of it.
         const replaced = attempt.transactionHash !== null && attempt.transactionHash !== foundHash;

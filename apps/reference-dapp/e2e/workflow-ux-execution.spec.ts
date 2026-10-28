@@ -107,13 +107,15 @@ async function confirmApprovalAndSwap(page: Page, owner: Awaited<ReturnType<type
   await owner.confirm();
   await expect(summary(page)).toContainText('Execution completed');
 }
-/** UX-003: the wallet request keeps the CTA locked in place; a second click cannot start another request. */
+/** Legacy test-network swaps cannot discover a hashless send. Their financial CTA stays locked while navigation remains available. */
 async function expectWaitingForWallet(page: Page, owner: Awaited<ReturnType<typeof setup>>, count: number) {
   await expect.poll(owner.requested).toBe(count);
+  await expect(summary(page)).toContainText('Waiting for wallet…');
   await expect(processing(page)).toHaveText('Waiting for wallet…'); await expect(processing(page)).toBeDisabled();
   await expect(processing(page)).toHaveAttribute('aria-busy', 'true');
-  await expect(cta(page).locator('[data-lifecycle-action="status"]')).toHaveCount(0);
   await processing(page).click({ force: true }); await processing(page).evaluate(button => (button as HTMLButtonElement).click());
+  await stage(page, 'Build').click(); await stage(page, 'Execute').click();
+  await expect(cta(page).locator('[data-lifecycle-action="approve"], [data-lifecycle-action="execute"], [data-lifecycle-action="continue"]')).toHaveCount(0);
   await page.waitForTimeout(300); expect(owner.requested()).toBe(count);
 }
 async function simulateAndExecute(page: Page, owner: Awaited<ReturnType<typeof setup>>) {

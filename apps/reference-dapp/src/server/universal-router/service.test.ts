@@ -8,6 +8,15 @@ import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { createBaseSepoliaReviewContext } from '@defi-workflow-engine/reference-linter';
+import { projectExecutionLifecycle, type ExecutionLifecycleSource } from '../../domain/execution-lifecycle';
+import { projectExecutionEvidence } from '../../domain/execution-evidence';
+import { projectExecutionStepEvidence } from '../../domain/execution-step-evidence';
+import { projectDashboardRecord } from '../../lib/dashboard/record-projection';
+import { projectDashboardRun } from '../../lib/dashboard/run-mapping';
+import { financialRunStatus } from '../../domain/financial-run-status';
+import type { Workflow } from '../../domain/initial-workflow';
+import type { DashboardRunDetail } from '../../lib/dashboard/types';
 import { createFileExecutionStorage } from '@defi-workflow-engine/reference-executor';
 import { applyMockedPhantomLighthouseGuards, compileMessageV0, parseMessageV0, decompileMessageV0, serializeMessageV0, RELAY_SOLANA_VAULT } from '@defi-workflow-engine/reference-compiler';
 import { createUniversalBridgeNode, UNIVERSAL_DIRECTED_PAIRS, UNIVERSAL_NETWORKS, type SemanticWorkflow, type UniversalAssetRef, type UniversalBridgeFields, type UniversalNetworkKey } from '@defi-workflow-engine/workflow-contracts';
@@ -53,7 +62,7 @@ async function setup(options: { executionEnabled?: boolean; extraTokens?: Record
     for (const t of Object.keys(tokens(chain))) m.setToken(t, EVM_OWNER, 1_000_000_000n);
   }
   const chainOf = (key: UniversalNetworkKey) => evm[UNIVERSAL_NETWORKS[key].chain]!;
-  return { service, evm, solana, relayMock, wallet, chainOf, tick: (ms: number) => { clock += ms; }, now };
+  return { service, evm, solana, relayMock, wallet, chainOf, storage: createFileExecutionStorage(dir, 'UNIVERSAL_BUSY'), tick: (ms: number) => { clock += ms; }, now };
 }
 type Ctx = Awaited<ReturnType<typeof setup>>;
 async function reviewed(c: Ctx, w: SemanticWorkflow, owner: string, destinationWallet?: string) {
@@ -94,6 +103,11 @@ async function settle(c: Ctx, record: UniversalRecord, amount?: bigint): Promise
   return c.service.observe(record.id);
 }
 const roundTripLog = async (c: Ctx, id: string) => { const record = await c.service.load(id); expect(record.id).toBe(id); return record; };
+function financialView(record: UniversalRecord) {
+  const source = { kind: 'universal', state: { record, busy: false, signing: false, recovered: false } } as ExecutionLifecycleSource;
+  const progress = projectExecutionLifecycle(record.workflow as unknown as Workflow, createBaseSepoliaReviewContext(), source);
+  return { progress, evidence: projectExecutionEvidence(source, progress) };
+}
 
 describe('A–E: Solana ⇄ every EVM mainnet, verified source to verified delivery', () => {
   it('A. Solana USDC → Base USDC: one Solana signature, FloFi broadcasts once, Base delivery proven, evidence', async () => {
@@ -249,6 +263,23 @@ describe('I–K: independent and identical bridges, duplicate clicks and retries
 describe('L: pending, delayed, reverted, expired and refunded bridges', () => {
   const sol = () => workflow({ sourceChain: UNIVERSAL_NETWORKS.solana.chain, destinationChain: UNIVERSAL_NETWORKS.base.chain, inputAsset: token('solana'), outputAsset: token('base'),
     amount: '10000000', recipient: EVM_RECIPIENT });
+  it('shows verified source debit, actual Solana cost and non-final destination amount without claiming reconciliation', async () => {
+    const c = await setup(), w = sol(), confirmed = await executeSolana(c, (await reviewed(c, w, c.wallet.publicKey)).id, w);
+    const pending = financialView(confirmed);
+    expect(pending.progress.state).toBe('active');
+    expect(pending.evidence.operations.DEPOSIT?.values).toContainEqual({ label: 'Executed input', value: '10 USDC' });
+    expect(pending.evidence.knownCosts).toContainEqual(expect.objectContaining({ value: '0.00000705 SOL' }));
+    expect(pending.evidence.operations.destination?.values ?? []).toEqual([]);
+    const route = confirmed.review.route, base = c.chainOf('base');
+    const hash = base.deliver({ recipient: route.recipient, token: route.outputToken.address, amount: BigInt(route.expectedOutput), orderId: route.order.orderId });
+    c.relayMock.setStatus(route.quote.id, { status: 'success', inTxHashes: [confirmed.source!.transactionHash], txHashes: [hash] });
+    const observed = await c.service.observe(confirmed.id), view = financialView(observed);
+    expect(observed).toMatchObject({ verdict: 'PENDING', destination: { final: false } });
+    expect(view.progress.steps[0]?.operations.at(-1)?.label).toBe('Destination observed · awaiting finality');
+    expect(view.evidence.operations.destination?.values).toContainEqual(expect.objectContaining({ label: 'Destination amount observed · awaiting reconciliation' }));
+    expect(view.evidence.operations.destination?.comparisons).toEqual([]);
+    expect(view.progress.state).toBe('active');
+  });
   it('pending, then delayed past the attention window, then a late delivery is still verified and reconciled', async () => {
     const c = await setup(), w = sol(), confirmed = await executeSolana(c, (await reviewed(c, w, c.wallet.publicKey)).id, w);
     expect((await c.service.observe(confirmed.id))).toMatchObject({ phase: 'IN_FLIGHT', error: 'UNIVERSAL_DESTINATION_PENDING' });
@@ -285,7 +316,12 @@ describe('L: pending, delayed, reverted, expired and refunded bridges', () => {
     const c = await setup(), w = sol(), confirmed = await executeSolana(c, (await reviewed(c, w, c.wallet.publicKey)).id, w);
     const refund = c.solana.deliver({ recipient: c.wallet.publicKey, mint: USDC.solana, amount: 10_000_000n, orderId: confirmed.review.route.order.orderId });
     c.relayMock.setStatus(confirmed.review.route.quote.id, { status: 'refund', txHashes: [refund], failReason: 'EXECUTION_REVERTED' });
-    expect(await c.service.observe(confirmed.id)).toMatchObject({ phase: 'REFUNDED', verdict: 'REFUNDED', refund: { recipient: c.wallet.publicKey, amount: '10000000' } });
+    const refunded = await c.service.observe(confirmed.id);
+    expect(refunded).toMatchObject({ phase: 'REFUNDED', verdict: 'REFUNDED', refund: { recipient: c.wallet.publicKey, amount: '10000000' } });
+    const view = financialView(refunded);
+    expect(view.evidence.operations.destination?.values).toContainEqual({ label: 'Verified refund', value: '10 USDC' });
+    expect(view.evidence.knownCosts).toContainEqual(expect.objectContaining({ value: '0.00000705 SOL' }));
+    expect(view.progress.state).not.toBe('complete');
   });
   it('a delivery below the reviewed minimum is divergent, never success', async () => {
     const c = await setup(), w = sol(), confirmed = await executeSolana(c, (await reviewed(c, w, c.wallet.publicKey)).id, w);
@@ -454,5 +490,119 @@ describe('P0: all 20 directions reach verified simulation and Review on MOCKED c
     expect(run.review.route.outputToken).toMatchObject({ address: weth.address, decimals: 18 });
     expect(run.review.source.simulation.ownerDebit).toBe('1000000');
     expect((await settle(c, await executeEvm(c, c.chainOf('base'), run.id, w))).verdict).toBe('RECONCILED');
+  });
+});
+
+describe('FIX-FINANCIAL-EXECUTION-TRUTH-001 submission safety', () => {
+  const bridge = () => workflow({ sourceChain: UNIVERSAL_NETWORKS.base.chain, destinationChain: UNIVERSAL_NETWORKS.solana.chain,
+    inputAsset: token('base'), outputAsset: token('solana'), amount: '1000000', recipient: SOLANA_RECIPIENT });
+  it('keeps an unresolved approval fenced after 15 minutes even when a node sees no pending transaction', async () => {
+    const c = await setup(), w = bridge(), run = await reviewed(c, w, EVM_OWNER);
+    await c.service.begin(run.id, EVM_OWNER, w); await c.service.handoff(run.id);
+    await c.service.report(run.id, { kind: 'UNKNOWN' }); c.tick(16 * 60_000);
+    const recovered = await c.service.observe(run.id);
+    expect(recovered.attempts[0]?.state).toBe('SUBMISSION_RESULT_UNKNOWN');
+    expect(universalNeedsObservation(recovered)).toBe(true);
+    await expect(c.service.begin(run.id, EVM_OWNER, w)).rejects.toThrow();
+  });
+  it('binds the wallet request to the durable reserved nonce', async () => {
+    const c = await setup(), w = bridge(), run = await reviewed(c, w, EVM_OWNER);
+    const begun = await c.service.begin(run.id, EVM_OWNER, w);
+    expect(begun.ecosystem === 'EVM' && begun.transaction).toMatchObject({ nonce: '0x' + BigInt(begun.attempt.ecosystem === 'EVM' ? begun.attempt.nonce : '0').toString(16) });
+  });
+  it('discovers the exact pending transaction after a lost wallet response without waiting for mining', async () => {
+    const c = await setup(), base = c.chainOf('base'), w = bridge(), run = await reviewed(c, w, EVM_OWNER);
+    const begun = await c.service.begin(run.id, EVM_OWNER, w); if (begun.ecosystem !== 'EVM') throw Error('EVM');
+    await c.service.handoff(run.id);
+    const sent = base.wallet.send(begun.transaction, { mineNow: false });
+    await c.service.report(run.id, { kind: 'UNKNOWN' });
+    const recovered = await c.service.observe(run.id);
+    expect(recovered.attempts[0]).toMatchObject({ state: 'PENDING', transactionHash: sent.hash });
+    await expect(c.service.begin(run.id, EVM_OWNER, w)).rejects.toThrow();
+    sent.land(); expect((await c.service.observe(run.id)).attempts[0]?.state).toBe('CONFIRMED');
+  });
+  it('quarantines and reopens a legacy approval closed only by the unsafe timeout, preserving its original log', async () => {
+    const c = await setup(), w = bridge(), run = await reviewed(c, w, EVM_OWNER);
+    await c.service.begin(run.id, EVM_OWNER, w); await c.service.handoff(run.id);
+    const unknown = await c.service.report(run.id, { kind: 'UNKNOWN' });
+    const legacy = { ...unknown, phase: 'PREPARED', authorization: null, error: 'UNIVERSAL_SUBMISSION_EXPIRED_NOT_EXECUTED',
+      attempts: unknown.attempts.map(a => ({ ...a, state: 'NOT_FOUND', note: 'UNIVERSAL_SUBMISSION_EXPIRED_NOT_EXECUTED' })) };
+    const name = run.id + '.jsonl', before = await c.storage.log.read(name);
+    await c.storage.log.extend(name, new TextEncoder().encode(new TextDecoder().decode(before!) + JSON.stringify(legacy) + '\n'), validateUniversalLog);
+    await expect(c.service.refresh(run.id)).rejects.toThrow('UNIVERSAL_REFRESH_NOT_ALLOWED');
+    const restored = await c.service.observe(run.id);
+    expect(restored.attempts[0]).toMatchObject({ state: 'SUBMISSION_RESULT_UNKNOWN', note: 'UNIVERSAL_LEGACY_TIMEOUT_UNPROVEN' });
+    expect(restored.observation?.outcome).toBe('UNDETERMINED');
+    expect(universalNeedsObservation(restored)).toBe(true);
+    await expect(c.service.begin(run.id, EVM_OWNER, w)).rejects.toThrow();
+    expect(new TextDecoder().decode((await c.storage.log.read(name))!)).toContain(JSON.stringify(legacy));
+  });
+  it('observes a reverted approval with receipt costs and never treats it as a successful deposit', async () => {
+    const c = await setup(), base = c.chainOf('base'), w = bridge(), run = await reviewed(c, w, EVM_OWNER);
+    const begun = await c.service.begin(run.id, EVM_OWNER, w); if (begun.ecosystem !== 'EVM') throw Error('EVM');
+    await c.service.handoff(run.id);
+    const sent = base.wallet.send(begun.transaction); const receipt = base.state.receipts.get(sent.hash)!;
+    base.state.receipts.set(sent.hash, { ...receipt, status: '0x0', logs: [] });
+    await c.service.report(run.id, { kind: 'HASH', hash: sent.hash, attemptId: begun.attempt.attemptId });
+    const observed = await c.service.observe(run.id);
+    expect(observed.observation?.outcome).toBe('REVERTED');
+    expect(observed.attempts[0]?.ecosystem === 'EVM' && observed.attempts[0].receipt?.gasCostWei).toBeTruthy();
+    expect(observed.source).toBeNull(); expect(observed.evidence).toBeNull();
+  });
+  it('binds late wallet reports to their original attempt instead of the next deposit', async () => {
+    const c = await setup(), base = c.chainOf('base'), w = bridge(), run = await reviewed(c, w, EVM_OWNER);
+    const approval = await c.service.begin(run.id, EVM_OWNER, w); if (approval.ecosystem !== 'EVM') throw Error('EVM');
+    await c.service.handoff(run.id); const hash = base.wallet.send(approval.transaction).hash;
+    await c.service.report(run.id, { kind: 'HASH', hash }); await c.service.observe(run.id);
+    const deposit = await c.service.begin(run.id, EVM_OWNER, w); await c.service.handoff(run.id);
+    await expect(c.service.report(run.id, { kind: 'HASH', hash, attemptId: approval.attempt.attemptId })).rejects.toThrow('UNIVERSAL_ATTEMPT_ID_MISMATCH');
+    expect((await c.service.load(run.id)).attempts.at(-1)?.attemptId).toBe(deposit.attempt.attemptId);
+    expect((await c.service.load(run.id)).attempts.at(-1)?.transactionHash).toBeNull();
+  });
+  it('uses the same financial facts in Execute and saved history from PREPARED through partial execution and reconciliation', async () => {
+    const c = await setup(), base = c.chainOf('base'), w = bridge();
+    const project = (r: UniversalRecord) => {
+      const source = { kind: 'universal', state: { record: r, busy: false, signing: false, recovered: false } } as ExecutionLifecycleSource;
+      const context = createBaseSepoliaReviewContext();
+      const life = projectExecutionLifecycle(w as unknown as Workflow, context, source);
+      const current = { ...life, evidence: projectExecutionEvidence(source, life), stepEvidence: projectExecutionStepEvidence(source, life) };
+      const detail: DashboardRunDetail = { run: { runId: r.id, workflowId: w.workflowId, flow: 'crosschain-universal', status: financialRunStatus(r),
+        provenance: r.provenance, ownerAccount: r.owner, errorCode: r.error, needsObservation: universalNeedsObservation(r), attentionRequired: false,
+        hasEvidence: !!r.evidence, createdAt: null, updatedAt: null }, record: r, attempts: [], evidence: [], evidenceUnavailable: false, recordUnavailable: false };
+      const saved = projectDashboardRecord(detail, context)!;
+      expect(saved).not.toBeNull(); expect(saved.state).toBe(current.state); expect(saved.evidence).toEqual(current.evidence);
+      expect(projectDashboardRun(detail.run, saved).status).toBe(projectDashboardRun(detail.run, current).status);
+      return current;
+    };
+    let r = await c.service.simulate(w, EVM_OWNER); expect(project(r).state).toBe('idle');
+    r = await c.service.review(r.id, r.review.commitment, w);
+    const begun = await c.service.begin(r.id, EVM_OWNER, w); if (begun.ecosystem !== 'EVM') throw Error('EVM');
+    await c.service.handoff(r.id); r = await c.service.report(r.id, { kind: 'UNKNOWN' }); expect(project(r).state).toBe('uncertain');
+    const hash = base.wallet.send(begun.transaction).hash; await c.service.report(r.id, { kind: 'HASH', hash }); r = await c.service.observe(r.id);
+    const approval = project(r);
+    expect(approval.evidence.knownCosts).toHaveLength(1);
+    expect(approval.evidence.operations.APPROVAL?.values).toContainEqual({ label: 'Observed allowance', value: '1 USDC' });
+    expect(approval.evidence.operations.DEPOSIT?.values).toEqual([]);
+    const deposit = await c.service.begin(r.id, EVM_OWNER, w); if (deposit.ecosystem !== 'EVM') throw Error('EVM');
+    await c.service.handoff(r.id);
+    r = await c.service.walletFailure(r.id, { invoked: true, attemptId: deposit.attempt.attemptId, rejectionCode: 4001, code: 'UNIVERSAL_REJECTED',
+      calls: [{ method: 'eth_sendTransaction', submission: true, error: { code: 4001 } }] });
+    const partial = project(r); expect(partial.state).toBe('attention');
+    expect(partial.evidence.knownCosts).toEqual(approval.evidence.knownCosts); expect(partial.evidence.operations.DEPOSIT?.failure).toBe('declined');
+    expect(r.source).toBeNull();
+    // A separate run has its own Review and explicit wallet requests. Recovery of the partial run never submits it.
+    const next = await reviewed(c, { ...w, workflowId: 'another-workflow' }, EVM_OWNER);
+    r = await executeEvm(c, base, next.id, next.workflow);
+    expect(project(r).state).toBe('active'); expect(project(r).evidence.operations.DEPOSIT?.values.length).toBeGreaterThan(0);
+    r = await settle(c, r); const done = project(r);
+    expect(done.state).toBe('complete'); expect(done.evidence.operations.destination?.values.some(v => v.label === 'Actual received')).toBe(true);
+  });
+  it('records a definite wallet rejection separately and preserves it across repeated observation', async () => {
+    const c = await setup(), w = bridge(), run = await reviewed(c, w, EVM_OWNER);
+    await c.service.begin(run.id, EVM_OWNER, w); await c.service.handoff(run.id);
+    const rejected = await c.service.walletFailure(run.id, { invoked: true, code: 'UNIVERSAL_REJECTED', rejectionCode: 4001,
+      calls: [{ method: 'eth_sendTransaction', submission: true, error: { code: 4001 } }] });
+    expect(rejected.attempts[0]).toMatchObject({ state: 'CANCELLED', note: 'UNIVERSAL_REJECTED', transactionHash: null });
+    expect((await c.service.observe(run.id)).attempts).toEqual(rejected.attempts);
   });
 });

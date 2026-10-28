@@ -19,6 +19,21 @@ beforeEach(() => {
 });
 const render = (simulationSource?: SimulationSource) => renderToStaticMarkup(createElement(SimulateWorkspace, { workflowName: 'My strategy', returnToBuild: vi.fn(), simulationSource }));
 describe('Simulate product workspace', () => {
+  it('explains a blocked simulation in its existing status message without adding an action row', () => {
+    fixture.store.state = editorReducer(initialEditor(), { type: 'ADD_SWAP', direction: 'USDC_TO_WETH', amount: '1', slippage: '50', source: 'CHAT', baseRevision: 0 }, fixture.store.context);
+    const reason = 'Connect the wallet required for this workflow before simulating.';
+    const html = renderToStaticMarkup(createElement(SimulateWorkspace, { workflowName: 'My strategy', simulationReason: reason }));
+    const status = html.slice(html.indexOf('role="status"'), html.indexOf('aria-label="Expected result"'));
+    expect(status).toContain(reason);
+    expect(html.match(/simulation-workspace-actions/g)).toHaveLength(2);
+  });
+  it('keeps the empty-workflow guidance when a generic simulation blocker is supplied', () => {
+    const reason = 'Complete the amount, assets, networks and recipient in Build before simulating.';
+    const html = renderToStaticMarkup(createElement(SimulateWorkspace, { workflowName: 'My strategy', simulationReason: reason }));
+    expect(html).toContain('No workflow');
+    expect(html).toContain('Create a workflow in Build first.');
+    expect(html).not.toContain(reason);
+  });
   it('shows unavailable values without generating estimates or Review readiness', () => {
     const html = render();
     expect(html).toContain('My strategy');

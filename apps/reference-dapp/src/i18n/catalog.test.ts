@@ -7,6 +7,8 @@ import { describe, expect, it } from 'vitest';
 import { portuguese } from './pt';
 import { translate } from './locale';
 import { preservedValues } from './preserved-values';
+import { financialObservationMessage, type FinancialObservation } from '../domain/financial-observation';
+import { portugueseFinancialExecution } from './pt-financial-execution';
 
 /** Checks actual translation calls in product components, excluding tests and the deliberate literal inventory. */
 function productMessages() {
@@ -27,6 +29,17 @@ function productMessages() {
   return [...keys].filter(Boolean);
 }
 describe('central product locale catalog', () => {
+  it('translates every dynamic financial observation and blocker through the active EN/PT-BR catalog', () => {
+    const outcomes: FinancialObservation['outcome'][] = ['CONFIRMED', 'APPROVAL_CONFIRMED', 'DESTINATION_OBSERVED', 'REFUND_OBSERVED', 'PENDING', 'REVERTED', 'NOT_SUBMITTED', 'UNDETERMINED', 'TEMPORARY_FAILURE', 'RECONCILED'];
+    const messages = outcomes.map(outcome => financialObservationMessage({ outcome, checkedAt: '2026-10-28T00:00:00Z', reason: 'TEST' }));
+    for (const message of new Set([...messages, ...Object.keys(portugueseFinancialExecution)])) {
+      expect(translate('EN', message)).toBe(message);
+      expect(translate('PT', message), message).toBe(portuguese[message]);
+      expect(translate('PT', message), message).not.toBe(message);
+    }
+    expect(translate('PT', financialObservationMessage({ outcome: 'UNDETERMINED', checkedAt: '', reason: 'NO_MATCH' }))).toContain('Ainda pode haver um envio atrasado');
+    expect(translate('PT', 'You rejected this wallet request. Earlier confirmed transactions and costs remain recorded.')).toContain('Você recusou');
+  });
   it('covers every explicit product translation call or a reviewed literal value', () => {
     expect(productMessages().filter(key => !Object.hasOwn(portuguese, key) && !preservedValues.has(key))).toEqual([]);
   });

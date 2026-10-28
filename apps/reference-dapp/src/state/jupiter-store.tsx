@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
+import { WalletPendingNotice } from '../components/wallet-pending-notice';
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { ORCA_WHIRLPOOLS_DEVNET } from '@defi-workflow-engine/action-registry';
@@ -88,7 +89,7 @@ export function JupiterProvider({ children }: { children: ReactNode }) {
   const workflow = state.workflow as unknown as SemanticWorkflow;
   const latest = useRef(workflow); latest.current = workflow;
   const latestSession = useRef(session); latestSession.current = session;
-  const busyRef = useRef(false);
+  const busyRef = useRef(false), operationEpoch = useRef(0);
   const authored = workflow.nodes.map(node => solanaSwapDetails(node)).find(Boolean) ?? null;
   // A Solana liquidity position uses the same wallet session as the swap on its own cluster (Devnet or, BUILD-SOLANA-MAINNET-001, mainnet-beta).
   // BUILD-SOLANA-TRANSFER-UX-001: a Solana transfer signs with the same session, on its own cluster.
@@ -157,18 +158,12 @@ export function JupiterProvider({ children }: { children: ReactNode }) {
     const unsubscribeAccounts = session ? () => undefined : subscribeSolanaWalletAccounts(name, attempt);
     return () => { live = false; unsubscribe(); unsubscribeAccounts(); };
   }, [neededChain, session, runtime.prefix]);
-  useEffect(() => {
-    if (!signing) return;
-    const prevent = (event: KeyboardEvent) => { event.preventDefault(); event.stopImmediatePropagation(); };
-    window.addEventListener('keydown', prevent, true);
-    return () => window.removeEventListener('keydown', prevent, true);
-  }, [signing]);
   // A semantic edit after Review invalidates the authorization; any existing transaction stays observable.
   useEffect(() => { if (record && retired && record.authorization) runtimes[networkOfRecord(record)].invalidate(record.id).then(result => { if (result.ok) setRecord(current => current?.id === record.id ? result.value : current); })
     .catch(() => setError(`${runtimes[networkOfRecord(record)].prefix}_AUTHORIZATION_INVALIDATION_FAILED`)); }, [record, retired]);
   async function operation(action: () => Promise<void>) {
-    if (busyRef.current) return; busyRef.current = true; setBusy(true); setError(null);
-    try { await action(); } catch (cause) { setError(cause instanceof Error ? cause.message : `${runtime.prefix}_OPERATION_FAILED`); } finally { busyRef.current = false; setBusy(false); }
+    if (busyRef.current) return; const epoch = ++operationEpoch.current; busyRef.current = true; setBusy(true); setError(null);
+    try { await action(); } catch (cause) { setError(cause instanceof Error ? cause.message : `${runtime.prefix}_OPERATION_FAILED`); } finally { if (operationEpoch.current === epoch) { busyRef.current = false; setBusy(false); } }
   }
   // Only an owner-chosen wallet session on the current cluster is used; nothing connects implicitly.
   async function ensureSession(): Promise<SolanaSession> {
@@ -212,14 +207,14 @@ export function JupiterProvider({ children }: { children: ReactNode }) {
     if (!current) return { ok: false, code: `${runtime.prefix}_SOLANA_WALLET_SELECTION_REQUIRED` };
     if (current.chain === chain) return { ok: true, session: current };
     if (busyRef.current) return { ok: false, code: `${runtime.prefix}_BUSY` };
-    busyRef.current = true; setBusy(true);
+    const epoch = ++operationEpoch.current; busyRef.current = true; setBusy(true);
     try {
       const next = await connectSolanaWallet(current.wallet.name, chain, runtime.prefix, { account: current.account.address });
       if (latestSession.current !== current || next.wallet !== current.wallet || walletPreference().solanaDisconnected) throw new Error(`${runtime.prefix}_WALLET_CHANGED`);
       latestSession.current = next; setRevision(value => value + 1); setSession(next); return { ok: true, session: next };
     }
     catch (cause) { return { ok: false, code: cause instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(cause.message) ? cause.message : `${runtime.prefix}_SOLANA_WALLET_REQUIRED` }; }
-    finally { busyRef.current = false; setBusy(false); }
+    finally { if (operationEpoch.current === epoch) { busyRef.current = false; setBusy(false); } }
   }
   async function switchCluster(chain: SolanaWalletChain): Promise<string | null> {
     const result = await switchClusterTo(chain);
@@ -266,7 +261,7 @@ export function JupiterProvider({ children }: { children: ReactNode }) {
     const begin = await api.begin(record.id, current.account.address, snapshot); if (!begin.ok) throw new Error(begin.code);
     accept(begin.value.record);
     let signed: string;
-    setSigning(true);
+    setSigning(true); busyRef.current = false; setBusy(false);
     try {
       if (begin.value.walletChain !== current.chain) throw new Error(`${api.prefix}_WRONG_CLUSTER`);
       if (JSON.stringify(latest.current) !== JSON.stringify(snapshot)) throw new Error(`${api.prefix}_SEMANTIC_REVISION_CHANGED`);
@@ -289,8 +284,8 @@ export function JupiterProvider({ children }: { children: ReactNode }) {
   return <Context.Provider value={{ record, owner: session && session.chain === runtime.walletChain ? session.account.address : null, network, session, codePrefix: runtime.prefix,
     busy, error, retired, recovered, revision, restoring, executionEnabled: enabled[network], walletChain: runtime.walletChain, connect, connectWith, connectWithResult, disconnect, switchCluster, switchClusterTo,
     simulate, review, execute, observe }}>
-    {signing && <p role="status">Confirm or reject the pending request in your Solana wallet.</p>}
-    <div inert={signing} data-jupiter-wallet-pending={signing ? 'true' : undefined}>{children}</div></Context.Provider>;
+    {signing && <WalletPendingNotice/>}
+    <div data-jupiter-wallet-pending={signing ? 'true' : undefined}>{children}</div></Context.Provider>;
 }
 export function useJupiter() { const value = useContext(Context); if (!value) throw new Error('JUPITER_PROVIDER_MISSING'); return value; }
 /** The shared Solana session where the product shell provides one; null elsewhere (e.g. `/connections`, outside the shell). */

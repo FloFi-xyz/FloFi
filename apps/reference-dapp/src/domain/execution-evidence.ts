@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /** Presentation of recorded evidence only. No runtime calls or state changes. */
+import { financialObservationMessage, type AllowanceObservation } from './financial-observation';
 import type { EvidenceBundle } from '@defi-workflow-engine/workflow-contracts';
 import { baseAssetRegistry } from '@defi-workflow-engine/action-registry';
 import { executionExplorer, type ExecutionLifecycle, type ExecutionLifecycleSource } from './execution-lifecycle';
@@ -45,10 +46,33 @@ export function projectExecutionEvidence(source: ExecutionLifecycleSource, progr
     if (hash && validUnits(units)) costs.set(`${chain}/${hash}`, { operation: id, chain, units, decimals, symbol });
   };
   const failure = (id: string, state: string, hash: string | null | undefined, refusalCode?: string) => {
-    if (evidence.operations[id]) delete evidence.operations[id]!.failure;
+    if (evidence.operations[id]) { delete evidence.operations[id]!.failure; delete evidence.operations[id]!.note; }
     if (state === 'REVERTED') op(id).failure = 'reverted';
     else if (!hash && (state === 'REJECTED' || ['CANCELLED', 'NOT_FOUND'].includes(state) && /_(REJECTED|WALLET_REQUEST_REFUSED|WALLET_REJECTED)$/.test(refusalCode ?? ''))) op(id).failure = 'declined';
     else if (state === 'FAILED') op(id).failure = 'failed';
+    if (refusalCode) {
+      detail('Recorded request reason', refusalCode);
+      const note = /_(REJECTED|WALLET_REJECTED)$/.test(refusalCode) ? 'You rejected this wallet request. Earlier confirmed transactions and costs remain recorded.'
+        : /WALLET_UNAUTHORIZED$/.test(refusalCode) ? 'The wallet did not authorize this account or method. This request was not submitted.'
+        : /WALLET_METHOD_UNSUPPORTED$/.test(refusalCode) ? 'The wallet does not support this request. This request was not submitted.'
+        : /WALLET_NOT_SUBMITTED$/.test(refusalCode) ? 'The wallet request was never handed off. This request was not submitted.'
+        : /NONCE_CONSUMED_BY_DIFFERENT_TRANSACTION$/.test(refusalCode) ? 'Another transaction used this request’s nonce. Review its evidence before authorizing a new request.'
+        : /REVIEW_EXPIRED|REVIEW_REQUIRED|SEMANTIC_REVISION_CHANGED|WRONG_OWNER|WRONG_CHAIN/.test(refusalCode) ? 'The reviewed wallet context changed before submission. Review the remaining operation again.'
+        : /UNKNOWN|NOT_OBSERVED|TIMEOUT_UNPROVEN/.test(refusalCode) ? 'The wallet response did not establish whether this transaction was sent. Check its status; no transaction is repeated.' : undefined;
+      if (note) op(id).note = note; else delete op(id).note;
+    }
+
+  };
+  const allowanceFacts = (observation: AllowanceObservation | undefined, decimals: number, symbol: string) => {
+    if (!observation || observation.status !== 'VERIFIED' || observation.amount === null) {
+      op('APPROVAL').values.push({ label: 'Current allowance', value: 'Unknown · no current on-chain observation' });
+      return;
+    }
+    amount('APPROVAL', 'Observed allowance', observation.amount, decimals, symbol);
+    detail('Allowance token', observation.token, true); detail('Allowance spender', observation.spender, true);
+    detail('Allowance network', shellChainLabel(observation.chain)); detail('Allowance observed at', observation.observedAt);
+    detail('Allowance block', String(observation.blockNumber)); detail('Allowance block hash', observation.blockHash, true);
+    if (BigInt(observation.amount) > 0n) evidence.attention.push('An observed token allowance remains. Its value can change after this observation.');
   };
   const bundle = (value: EvidenceBundle | null | undefined, hash?: string | null) => {
     if (!value) return;
@@ -150,6 +174,8 @@ export function projectExecutionEvidence(source: ExecutionLifecycleSource, progr
       identifier('destination', 'Refund transaction', record.refund?.transactionHash, 'transaction', review.intent.sourceChain);
       if (record.source?.safe) amount('DEPOSIT', 'Executed input', record.source.inputAmount, review.route.inputToken.decimals, review.route.inputToken.symbol, review.intent.amount);
       if (record.verdict === 'RECONCILED' && record.destination?.safe) amount('destination', 'Actual received', record.destination.transferAmount, review.route.outputToken.decimals, review.route.outputToken.symbol, review.quote.expectedOutput);
+      allowanceFacts(record.allowanceObservation, review.route.inputToken.decimals, review.route.inputToken.symbol);
+      if (record.refund) amount('destination', 'Verified refund', record.refund.amount, review.route.inputToken.decimals, review.route.inputToken.symbol);
       detail('Source network', shellChainLabel(review.intent.sourceChain)); detail('Destination network', shellChainLabel(review.intent.destinationChain));
       // Route/provider quoted fees are deliberately not reported as actual costs.
       break;
@@ -163,14 +189,24 @@ export function projectExecutionEvidence(source: ExecutionLifecycleSource, progr
         if (attempt.ecosystem === 'EVM') {
           identifier(attempt.step, 'Replacement transaction', attempt.replacementHash, 'transaction', route.sourceChain, attempt.state);
           fee(attempt.step, route.sourceChain, attempt.receipt?.transactionHash, attempt.receipt?.gasCostWei);
-        }
+          detail('Network fee payer', attempt.receipt?.from);
+        } else { fee(attempt.step, route.sourceChain, attempt.transactionHash, attempt.feeLamports, 9, 'SOL'); }
         failure(attempt.step, attempt.state, attempt.transactionHash, attempt.note ?? undefined);
       }
       identifier('DEPOSIT', 'Provider reference · Order ID', route.order.orderId);
       identifier('destination', 'Destination transaction', record.destination?.transactionHash, 'transaction', route.destinationChain);
       identifier('destination', 'Refund transaction', record.refund?.transactionHash, 'transaction', record.refund?.chainId ?? route.sourceChain);
-      if (record.source?.final) amount('DEPOSIT', 'Executed input', record.source.ownerDebit, route.inputToken.decimals, route.inputToken.symbol, route.inputAmount);
+      if (record.source) amount('DEPOSIT', record.source.final ? 'Executed input' : 'Source debit confirmed · awaiting finality', record.source.ownerDebit, route.inputToken.decimals, route.inputToken.symbol, route.inputAmount);
       if (record.verdict === 'RECONCILED' && record.destination?.final) amount('destination', 'Actual received', record.destination.amount, route.outputToken.decimals, route.outputToken.symbol, route.expectedOutput);
+      if (record.destination && record.verdict !== 'RECONCILED') amount('destination', 'Destination amount observed · awaiting reconciliation', record.destination.amount, route.outputToken.decimals, route.outputToken.symbol);
+      if (record.refund) amount('destination', 'Verified refund', record.refund.amount, route.inputToken.decimals, route.inputToken.symbol);
+      if (review.source.ecosystem === 'EVM' && route.inputToken.kind === 'TOKEN') allowanceFacts(record.allowanceObservation, route.inputToken.decimals, route.inputToken.symbol);
+      if (!record.attempts.some(a => a.step === 'DEPOSIT')) op('DEPOSIT').note = 'The source deposit has not been requested. A confirmed approval can still have network costs and an open allowance.';
+      if (record.observation) {
+        detail('Last execution check', record.observation.checkedAt); detail('Observation reason', record.observation.reason);
+        op(record.source ? 'destination' : record.attempts.at(-1)?.step ?? 'DEPOSIT').note ??= financialObservationMessage(record.observation);
+      }
+      evidence.limitations.push('Only receipt-backed network costs are included. Unobserved transaction costs remain unknown.');
       detail('Source network', shellChainLabel(route.sourceChain)); detail('Destination network', shellChainLabel(route.destinationChain));
       break;
     }

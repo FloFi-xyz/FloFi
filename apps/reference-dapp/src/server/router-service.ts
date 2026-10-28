@@ -12,6 +12,9 @@
  * Run = append-only snapshot log `xroute-<32 hex>.jsonl`. Phases follow `ROUTER_PHASE_TRANSITIONS`; every transition is
  * validated when the log is extended, and terminal phases never change.
  */
+import { observeEvmAllowance, retainAllowanceObservation } from './allowance-observation.ts';
+import type { AllowanceObservation } from '../domain/financial-observation';
+import { discoverEvmNonce, legacyUnprovenApproval, sameEvmIntent } from './evm-submission-discovery.ts';
 import { createHash, randomBytes } from 'node:crypto';
 import { ARBITRUM_ONE, CROSSCHAIN_ROUTER_BASE_ARBITRUM as MAINNET, resolveWorkflowCapability, type RouterProfile } from '@defi-workflow-engine/action-registry';
 import { createBaseSepoliaReviewContext, validateAuthoringWorkflow, validateRouterBridgeWorkflow } from '@defi-workflow-engine/reference-linter';
@@ -30,7 +33,7 @@ export const ROUTER_RUN_ID = /^xroute-[a-f0-9]{32}$/;
 export type RouterStep = 'APPROVAL' | 'DEPOSIT';
 export type RouterAttemptState = 'PREPARED' | 'CANCELLED' | 'SUBMITTING' | 'SUBMISSION_RESULT_UNKNOWN' | 'NOT_FOUND' | 'PENDING' | 'CONFIRMED' | 'REVERTED' |
   'RECONCILIATION_REQUIRED';
-export type RouterTx = { readonly chainId: string; readonly from: string; readonly to: string; readonly data: string; readonly value: '0x0'; readonly gas: string;
+export type RouterTx = { readonly nonce?: string; readonly chainId: string; readonly from: string; readonly to: string; readonly data: string; readonly value: '0x0'; readonly gas: string;
   readonly maxFeePerGas: string; readonly maxPriorityFeePerGas: string };
 export type RouterCall = { readonly purpose: 'APPROVAL' | 'BRIDGE_DEPOSIT'; readonly to: string; readonly data: string; readonly gasUsed: string; readonly gasLimit: string;
   /** Per-call OP Stack bound; absent on older durable Reviews. Nitro posting gas is already in gasLimit. */ readonly l1FeeUpperBoundWei?: string | null };
@@ -76,7 +79,7 @@ export type RouterReceipt = { readonly transactionHash: string; readonly status:
   readonly gasCostWei: string; readonly submissionKind: 'DIRECT' | 'DELEGATED_SINGLE'; readonly contentHash: string };
 export type RouterAttempt = { readonly attemptId: string; readonly step: RouterStep; readonly state: RouterAttemptState; readonly reviewCommitment: string;
   readonly nonce: string; readonly preparedAtBlock: number; readonly createdAt: string; readonly tx: RouterTx;
-  readonly transactionHash: string | null; readonly replacementHash: string | null; readonly receipt: RouterReceipt | null; readonly reconciled: boolean;
+  readonly transactionHash: string | null; readonly replacementHash: string | null; readonly conflictingTransactionHash?: string; readonly receipt: RouterReceipt | null; readonly reconciled: boolean;
   readonly note: string | null;
   /** Durable source log cursor; absence in older runs starts at preparedAtBlock. */ readonly depositScanFrom?: number };
 export type SourceSettlement = { readonly transactionHash: string; readonly blockNumber: number; readonly blockHash: string; readonly timestamp: number;
@@ -93,7 +96,7 @@ export type RouterEvidence = { readonly bundle: EvidenceBundle; readonly bundleH
     readonly explorer: string }[];
   readonly reconciliation: 'RECONCILED'; readonly observedAt: string };
 export type RouterProvenance = 'PUBLIC_MAINNET' | 'PUBLIC_TESTNET' | 'MOCKED';
-export type RouterRecord = { readonly format: 'flofi.router-run.v1'; readonly id: string; readonly provenance: RouterProvenance;
+export type RouterRecord = { readonly allowanceObservation?: AllowanceObservation; readonly format: 'flofi.router-run.v1'; readonly id: string; readonly provenance: RouterProvenance;
   readonly workflow: SemanticWorkflow; readonly owner: string; readonly review: RouterReview; readonly authorization: string | null; readonly phase: RouterPhase;
   readonly attempts: readonly RouterAttempt[]; readonly source: SourceSettlement | null; readonly destination: DestinationFill | null; readonly refund: RefundRecord | null;
   /** Next Arbitrum block to scan for the fill (durable cursor). */ readonly scanFrom: number;
@@ -102,7 +105,7 @@ export type RouterRecord = { readonly format: 'flofi.router-run.v1'; readonly id
   readonly requote: boolean; readonly evidence: RouterEvidence | null;
   readonly verdict: 'PENDING' | 'RECONCILED' | 'DIVERGENT' | 'FAILED' | 'REFUNDED'; readonly error: string | null };
 export type RouterBegin = { readonly record: RouterRecord; readonly attempt: RouterAttempt; readonly transaction: RouterTx };
-export type RouterWalletDiagnostic = { invoked: boolean; calls: { method: string; submission?: boolean; result?: string | null; error?: unknown }[]; code: string; rejectionCode?: number };
+export type RouterWalletDiagnostic = { attemptId?: string; invoked: boolean; calls: { method: string; submission?: boolean; result?: string | null; error?: unknown }[]; code: string; rejectionCode?: number };
 export type RouterCodePins = Readonly<Record<keyof RouterProfile['codeSha256'], string>>;
 
 const ADDRESS = /^0x[0-9a-f]{40}$/, HASH = /^0x[0-9a-f]{64}$/;
@@ -111,7 +114,6 @@ export const ROUTER_OBSERVABLE: readonly RouterAttemptState[] = ['SUBMITTING', '
 const TERMINAL: readonly RouterAttemptState[] = ['CANCELLED', 'NOT_FOUND', 'CONFIRMED', 'REVERTED', 'RECONCILIATION_REQUIRED'];
 const SETTLING: readonly RouterPhase[] = ['SOURCE_CONFIRMED', 'IN_FLIGHT', 'DESTINATION_OBSERVED', 'RECOVERY_REQUIRED'];
 const REFUSALS = [4001, 4100, 4200];
-const APPROVAL_ABANDON_MS = 15 * 60_000;
 /** Provider failures that say nothing about the route (retry later) rather than "the reviewed route is no longer offered". */
 const AVAILABILITY = /_(HTTP_\d+|RATE_LIMITED|UNAVAILABLE|RESPONSE_TOO_LARGE|RESPONSE_INVALID|URL_INVALID)$/;
 /** Destination blocks scanned per observation, and the cursor step persisted (smaller, so one call always reaches the head). */
@@ -209,7 +211,7 @@ export function validateRouterLog(bytes: Uint8Array, profile: RouterProfile = MA
             (before.depositScanFrom !== undefined && (after.depositScanFrom ?? 0) < before.depositScanFrom) ||
             (before.transactionHash !== null && after.transactionHash !== before.transactionHash) ||
             (before.replacementHash !== null && after.replacementHash !== before.replacementHash) ||
-            (TERMINAL.includes(before.state) && (after.state !== before.state || !same(after.receipt, before.receipt))))
+            (TERMINAL.includes(before.state) && !(legacyUnprovenApproval(before) && after.state === 'SUBMISSION_RESULT_UNKNOWN' && after.note === 'ROUTER_LEGACY_TIMEOUT_UNPROVEN' && same({ ...after, state: before.state, note: before.note }, before)) && (after.state !== before.state || !same(after.receipt, before.receipt))))
           fail('ROUTER_STORE_CORRUPT');
       }
     }
@@ -218,7 +220,7 @@ export function validateRouterLog(bytes: Uint8Array, profile: RouterProfile = MA
 }
 export function routerNeedsObservation(value: unknown): boolean {
   const record = value as RouterRecord, last = record.attempts.at(-1);
-  return record.verdict === 'PENDING' && (!!last && ROUTER_OBSERVABLE.includes(last.state) || SETTLING.includes(record.phase));
+  return record.verdict === 'PENDING' && (!!last && (ROUTER_OBSERVABLE.includes(last.state) || legacyUnprovenApproval(last)) || SETTLING.includes(record.phase));
 }
 
 type Block = { number: number; hash: string; timestamp: number; baseFee: bigint };
@@ -251,13 +253,17 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
   async function save(record: RouterRecord): Promise<RouterRecord> {
     const name = runName(record.id), prior = await log.read(name);
     // Observation repeats often while a bridge is in flight: an unchanged snapshot is not appended again.
-    if (prior && canonical(JSON.parse(utf8(prior).trimEnd().split('\n').at(-1)!)) === canonical(record)) return record;
+    if (prior) {
+      const before = JSON.parse(utf8(prior).trimEnd().split('\n').at(-1)!) as RouterRecord;
+      if (record.allowanceObservation) record = { ...record, allowanceObservation: retainAllowanceObservation(before.allowanceObservation, record.allowanceObservation) ?? record.allowanceObservation };
+      if (canonical(before) === canonical(record)) return record;
+    }
     await log.extend(name, new TextEncoder().encode(utf8(prior) + JSON.stringify(record) + '\n'), bytes => validateRouterLog(bytes, profile));
     return record;
   }
   const locked = <T,>(id: string, action: () => Promise<T>): Promise<T> => leases.hold(runName(id).slice(0, -6), action);
   const replaceAttempt = (record: RouterRecord, attempt: RouterAttempt): RouterRecord => ({ ...record, attempts: record.attempts.map(a => a.attemptId === attempt.attemptId ? attempt : a) });
-  const active = (record: RouterRecord) => record.attempts.find(a => ACTIVE.includes(a.state)) ?? null;
+  const active = (record: RouterRecord) => record.attempts.find(a => (ACTIVE.includes(a.state) || legacyUnprovenApproval(a))) ?? null;
   const sameWorkflow = (a: SemanticWorkflow, b: SemanticWorkflow) => canonical(a) === canonical(b);
   /** Clears the authorization: the run must go back through Quote → Simulation → Review → new Manifest → new Authorization. */
   const deauthorized = (record: RouterRecord, error: string, changes: readonly RouteChange[] = record.routeChanges, requote = record.requote): RouterRecord =>
@@ -487,7 +493,7 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
         const prior = JSON.parse(utf8(existing).trimEnd().split('\n').at(-1)!) as { runId: string; attemptId: string };
         const holder = prior.runId === record.id ? record : await load(prior.runId);
         const held = holder.attempts.find(a => a.attemptId === prior.attemptId);
-        if (held && ACTIVE.includes(held.state)) fail(code);
+        if (held && (ACTIVE.includes(held.state) || legacyUnprovenApproval(held))) fail(code);
         await log.extend(name, new TextEncoder().encode(utf8(existing) + new TextDecoder().decode(entry)), () => undefined);
       }
       return inner();
@@ -508,21 +514,8 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
   }
 
   // --- source observation --------------------------------------------------------------------------------------------
-  async function discoverByNonce(attempt: RouterAttempt): Promise<{ consumed: false } | { consumed: true; tx: Record<string, unknown> }> {
-    const owner = attempt.tx.from, nonce = BigInt(attempt.nonce);
-    const count = async (block: number) => quantity(await rpc('eth_getTransactionCount', [owner, tag(block)]));
-    const latest = Number(quantity(await rpc('eth_blockNumber', [])));
-    if (!Number.isSafeInteger(latest) || latest < attempt.preparedAtBlock) fail('ROUTER_RPC_INVALID');
-    if (await count(latest) <= nonce) return { consumed: false };
-    if (await count(attempt.preparedAtBlock) > nonce) fail('ROUTER_NONCE_CONSUMED_BEFORE_PREPARATION');
-    let low = attempt.preparedAtBlock, high = latest;
-    while (high - low > 1) { const middle = low + Math.floor((high - low) / 2); if (await count(middle) > nonce) high = middle; else low = middle; }
-    const block = await rpc('eth_getBlockByNumber', [tag(high), true]);
-    if (!isObject(block) || !Array.isArray(block.transactions)) fail('ROUTER_RPC_INVALID');
-    const found = block.transactions.find(tx => isObject(tx) && typeof tx.from === 'string' && tx.from.toLowerCase() === owner && quantity(tx.nonce) === nonce);
-    if (!isObject(found)) fail('ROUTER_DISCOVERY_INCONSISTENT');
-    return { consumed: true, tx: found };
-  }
+  const discoverByNonce = (attempt: RouterAttempt) => discoverEvmNonce(rpc, attempt);
+
   /**
    * The reviewed deposit's own on-chain identity: Across indexes the depositor in `FundsDeposited`, so a deposit is found even
    * when its hash was lost and the owner's nonce never moved (a relayed MetaMask redemption). Only blocks in which the deposit
@@ -647,23 +640,26 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
       const found = await discoverByNonce(attempt);
       if (!found.consumed) {
         await head(rpc, SRC.chainId, 'ROUTER_WRONG_SOURCE_CHAIN');
-        const pending = quantity(await rpc('eth_getTransactionCount', [record.owner, 'pending']));
-        // A deposit can no longer move funds once the SpokePool's quote-time window has passed; an abandoned approval is dropped.
+        // Only a protocol-enforced deposit deadline can exclude a source debit. Approval absence has no time-based proof.
         const safe = attempt.step === 'DEPOSIT' ? await rpc('eth_getBlockByNumber', [profile.finality, false]) : null;
         const expired = attempt.step === 'DEPOSIT' ? depositScanComplete && isObject(safe) && Number(quantity(safe.timestamp)) > record.review.deadlines.depositMustLandBy
-          : now().getTime() - Date.parse(attempt.createdAt) > APPROVAL_ABANDON_MS && pending === BigInt(attempt.nonce);
+          : false;
         if (expired) {
           const next = { ...attempt, state: 'NOT_FOUND' as const, note: 'ROUTER_SUBMISSION_EXPIRED_NOT_EXECUTED' };
           return save(replaceAttempt(attempt.step === 'DEPOSIT' ? { ...transition(record, 'FAILED'), verdict: 'FAILED', authorization: null, error: next.note }
             : deauthorized(record, next.note), next));
         }
+        if (found.pendingTx && sameEvmIntent(found.pendingTx, attempt.tx, attempt.nonce)) {
+          const h = hex(found.pendingTx.hash);
+          return save(replaceAttempt({ ...record, error: 'ROUTER_TRANSACTION_PENDING' }, { ...attempt, state: 'PENDING', transactionHash: attempt.transactionHash ?? h,
+            replacementHash: attempt.transactionHash && attempt.transactionHash !== h ? h : attempt.replacementHash }));
+        }
         return save({ ...record, error: hash ? 'ROUTER_TRANSACTION_PENDING' : 'ROUTER_TRANSACTION_NOT_OBSERVED' });
       }
       const foundHash = hex(found.tx.hash);
       if (!sameIntent(attempt, found.tx)) {
-        const next = { ...attempt, state: 'NOT_FOUND' as const, transactionHash: attempt.transactionHash ?? foundHash, note: 'ROUTER_NONCE_CONSUMED_BY_DIFFERENT_TRANSACTION' };
-        return save(replaceAttempt(attempt.step === 'DEPOSIT' ? { ...transition(record, 'FAILED'), verdict: 'FAILED', authorization: null, error: next.note }
-          : deauthorized(record, next.note), next));
+        return save(replaceAttempt({ ...record, error: 'ROUTER_NONCE_CONSUMED_BY_DIFFERENT_TRANSACTION' },
+          { ...attempt, state: 'SUBMISSION_RESULT_UNKNOWN', conflictingTransactionHash: foundHash, note: 'ROUTER_NONCE_CONSUMED_BY_DIFFERENT_TRANSACTION' }));
       }
       const replaced = attempt.transactionHash !== null && attempt.transactionHash !== foundHash;
       const current: RouterAttempt = { ...attempt, state: 'PENDING', transactionHash: attempt.transactionHash ?? foundHash, replacementHash: replaced ? foundHash : attempt.replacementHash };
@@ -947,7 +943,7 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
       if (simulated.some((c, i) => c.gasUsed > BigInt(remaining[i]!.gasLimit))) return invalidate('ROUTER_GAS_CHANGED_REVIEW_REQUIRED');
       if (state.native < BigInt(reviewed.gasLimit) * maxFeePerGas) fail('ROUTER_INSUFFICIENT_GAS_ETH');
       const attemptId = `${id}.${step.toLowerCase()}.${record.attempts.length + 1}`;
-      const tx: RouterTx = { chainId: SRC.chainHex, from: owner, to: reviewed.to, data: reviewed.data, value: '0x0', gas: tag(BigInt(reviewed.gasLimit)),
+      const tx: RouterTx = { nonce: tag(state.pendingNonce), chainId: SRC.chainHex, from: owner, to: reviewed.to, data: reviewed.data, value: '0x0', gas: tag(BigInt(reviewed.gasLimit)),
         maxFeePerGas: tag(maxFeePerGas), maxPriorityFeePerGas: tag(priority) };
       await assertRequestFees(review, tx, tag(state.block.number), invalidate);
       const attempt: RouterAttempt = { attemptId, step, state: 'PREPARED', reviewCommitment: review.commitment, nonce: state.pendingNonce.toString(), preparedAtBlock: state.block.number,
@@ -972,9 +968,10 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
       return save(attempt.step === 'DEPOSIT' ? transition(next, 'SOURCE_SUBMITTED') : next);
     }); },
     /** Wallet result. A hash is recorded once (a repeated identical report is a no-op); ambiguity is observed, never resent. */
-    async report(id: string, result: { kind: 'HASH'; hash: string } | { kind: 'UNKNOWN' | 'REJECTED'; code?: string }): Promise<RouterRecord> { return locked(id, async () => {
+    async report(id: string, result: ({ kind: 'HASH'; hash: string } | { kind: 'UNKNOWN' | 'REJECTED'; code?: string }) & { attemptId?: string }): Promise<RouterRecord> { return locked(id, async () => {
       const record = await load(id), attempt = record.attempts.at(-1);
       if (!attempt) fail('ROUTER_ATTEMPT_MISSING');
+      if (result.attemptId && result.attemptId !== attempt.attemptId) fail('ROUTER_ATTEMPT_ID_MISMATCH');
       if (result.kind === 'HASH') {
         const hash = result.hash.toLowerCase();
         if (!HASH.test(hash)) fail('ROUTER_HASH_INVALID');
@@ -989,6 +986,7 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
     /** Records a proven pre-broadcast failure or refusal. Anything that may have reached the network stays observation-only. */
     async walletFailure(id: string, diagnostic: RouterWalletDiagnostic): Promise<RouterRecord> { return locked(id, async () => {
       const record = await load(id), attempt = record.attempts.at(-1);
+      if (diagnostic.attemptId && diagnostic.attemptId !== attempt?.attemptId) fail('ROUTER_ATTEMPT_ID_MISMATCH');
       if (JSON.stringify(diagnostic).length > 65_536 || typeof diagnostic.invoked !== 'boolean' || !Array.isArray(diagnostic.calls) || !/^ROUTER_[A-Z0-9_]{2,70}$/.test(diagnostic.code))
         fail('ROUTER_DIAGNOSTIC_INVALID');
       const send = diagnostic.calls.find(c => c.submission === true), error = send?.error as { code?: unknown } | undefined;
@@ -1001,8 +999,13 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
     /** Read-only observation and reconciliation (API and worker). There is no send path here. */
     async observe(id: string): Promise<RouterRecord> { return locked(id, async () => {
       let record = await load(id);
+      record = await save({ ...record, allowanceObservation: await observeEvmAllowance(rpc, { chain: SRC.chain, owner: record.owner, token: record.review.route.approval.token, spender: record.review.route.approval.spender }, now().toISOString()) });
       if (record.verdict !== 'PENDING') return record;
-      const attempt = active(record);
+      let attempt = active(record);
+      if (attempt && legacyUnprovenApproval(attempt)) {
+        attempt = { ...attempt, state: 'SUBMISSION_RESULT_UNKNOWN', note: 'ROUTER_LEGACY_TIMEOUT_UNPROVEN' };
+        record = await save(replaceAttempt({ ...record, error: 'ROUTER_LEGACY_TIMEOUT_UNPROVEN', authorization: null }, attempt));
+      }
       if (attempt) {
         record = await observeAttempt(record, attempt);
         if (record.verdict !== 'PENDING' || active(record)) return record;

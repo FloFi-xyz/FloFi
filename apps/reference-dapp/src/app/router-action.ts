@@ -80,7 +80,7 @@ export async function routerBegin(network: RouterNetwork, id: string, owner: str
   return run(network, 'begin', [id, owner, workflow], s => s.begin(id, owner, workflow));
 }
 export async function routerHandoff(network: RouterNetwork, id: string) { return run(network, 'handoff', [id], s => s.handoff(id)); }
-export async function routerReport(network: RouterNetwork, id: string, result: { kind: 'HASH'; hash: string } | { kind: 'UNKNOWN' | 'REJECTED'; code?: string }) {
+export async function routerReport(network: RouterNetwork, id: string, result: ({ kind: 'HASH'; hash: string } | { kind: 'UNKNOWN' | 'REJECTED'; code?: string }) & { attemptId?: string }) {
   return run(network, 'report', [id, result], s => s.report(id, result));
 }
 export async function routerWalletFailure(network: RouterNetwork, id: string, diagnostic: RouterWalletDiagnostic) {
