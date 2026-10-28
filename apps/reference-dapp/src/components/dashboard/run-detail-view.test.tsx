@@ -13,7 +13,7 @@ describe('Run Details reuses the UX-005 execution and evidence truth', () => {
     const html = render();
     expect(html).toContain('SAVED EXECUTION'); expect(html).toContain('Execution completed'); expect(html).toContain('SAVED RUN RESULT');
     expect(html).toContain('Run summary'); expect(html).toContain('RECORDED EXECUTION PROOF'); expect(html).toContain('Archive integrity verified');
-    expect(html.match(/<details/g)).toHaveLength(1); expect(html).not.toContain('<details open');
+    expect(html.match(/<details class="shell-details technical-workspace"/g)).toHaveLength(1); expect(html).toContain('View transaction evidence'); expect(html).not.toContain('<details open');
     expect(html).toContain('Saved execution record'); expect(html).not.toContain('Current execution record');
     expect(html).not.toContain('current execution record'); expect(html).not.toContain('Back to Build');
   });

@@ -17,13 +17,13 @@ function Lines({ lines }: { lines: SimulationLine[] }) {
 function TokenAmount({ value }: { value: string }) {
   const { t: tr } = useLocale();
   // Reuse supported original-color assets; descriptive outcomes retain plain text.
-  const symbol = value.match(/ (USDC|devUSDC|WETH|ETH|SOL|WSOL|USDT)$/)?.[1];
+  const symbol = value.match(/ (USDC\.e|USDC|devUSDC|WETH|ETH|SOL|WSOL|USDT)$/)?.[1];
   return <span className="simulation-token-amount">{symbol && <TokenBrandIcon symbol={symbol}/>}<span>{tr(value)}</span></span>;
 }
 export function SimulationSummary({ workflow, context, source, invalidWorkflow = false, unavailableReason }: {
   workflow: Workflow; context: ReviewContext; source?: SimulationSource | undefined; invalidWorkflow?: boolean; unavailableReason?: string | null | undefined;
 }) {
-  const { t: tr } = useLocale();
+  const { t: tr, language } = useLocale();
   const [clock, setClock] = useState(() => Date.now());
   // Also evaluate now on ordinary renders, so an old clock cannot revive an expired record.
   const details = projectSimulation(workflow, context, source, Math.max(clock, Date.now()));
@@ -46,27 +46,18 @@ export function SimulationSummary({ workflow, context, source, invalidWorkflow =
     <div className={`simulation-validity simulation-tone-${status.tone}`} role="status" aria-live="polite">
       <strong><span aria-hidden="true" className="simulation-status-dot"/>{tr(status.label)}</strong>
       {!details.warnings.some(warning => warning.message === message) && <p>{tr(message)}</p>}
-      {expiresAt !== null && expiresAt > Math.max(clock, Date.now()) && !invalidWorkflow && <small>{tr("Valid until ")}<time dateTime={new Date(expiresAt).toISOString()}>{tr(new Date(expiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }))}</time></small>}
+      {expiresAt !== null && expiresAt > Math.max(clock, Date.now()) && !invalidWorkflow && <small>{tr("Valid until ")}<time dateTime={new Date(expiresAt).toISOString()}>{tr(new Date(expiresAt).toLocaleTimeString(language === 'PT' ? 'pt-BR' : 'en', { hour: '2-digit', minute: '2-digit', second: '2-digit' }))}</time></small>}
     </div>
     <section className="simulation-summary-section" aria-label={tr("Expected result")}>
       <h3>{tr("Expected result")}</h3>
       {details.steps.length ? <ol className="simulation-results">{details.steps.map(step => <li key={step.id}>
         <div className="simulation-step-title">{multiple && <span className="simulation-step-number">{tr(step.number)}</span>}<strong>{tr(step.action)}</strong></div>
-        <div className="simulation-input"><TokenAmount value={step.input}/></div>
-        <SimulationOutcome step={step}/>
+        <div className="simulation-money-pair">
+          <div className="simulation-money-source"><span className="simulation-result-label">{tr('You send')}</span><div className="simulation-input"><TokenAmount value={step.input}/></div><span className="simulation-money-network">{step.networks[0]}</span></div>
+          <div className="simulation-money-destination"><SimulationOutcome step={step}/><span className="simulation-money-network">{step.networks.at(-1)}</span></div>
+        </div>
+        <p className="simulation-estimate-note">{tr('Estimate only. No funds have moved.')}{step.provider && <> · {step.provider}</>}</p>
       </li>)}</ol> : <p className="simulation-empty-value">—</p>}
-    </section>
-    <section className="simulation-summary-section" aria-label={tr("Route")}>
-      <h3>{tr("Route")}</h3>
-      {!details.steps.length && <p className="simulation-empty-value">—</p>}
-      <ol className="simulation-route">{details.steps.map(step => <li key={step.id}>
-        <span className="simulation-route-context">{tr(multiple ? `${step.number}. ${step.action}` : step.action)}{step.pair && <small>{tr(step.pair)}</small>}</span>
-        <strong>{tr(step.provider ?? '—')}</strong>
-        {step.networks.length > 1 && <small>{tr(step.networks.join(' → '))}</small>}
-      </li>)}</ol>
-      <dl className="simulation-summary-values simulation-network"><div><dt>{tr("Workflow network")}</dt><dd>{networks.length ? networks.map(network => <span className="simulation-summary-network" key={network}>
-        <NetworkBrandIcon network={network.replace(/ \(\d+\)$/, '').replace('Robinhood Chain Testnet', 'Robinhood Chain')}/>{network}
-      </span>) : '—'}</dd></div></dl>
     </section>
     <section className="simulation-summary-section" aria-label={tr("Fees")}><h3>{tr("Fees")}</h3>
       {details.fees.length ? <Lines lines={details.fees}/> : <p className="simulation-empty-value">—</p>}
@@ -87,6 +78,17 @@ export function SimulationSummary({ workflow, context, source, invalidWorkflow =
         {tr(warning.message)}
       </li>)}</ul>
     </section>}
+    <details className="simulation-summary-section simulation-route-details" aria-label={tr("Route")}><summary>{tr("Route details")}</summary>
+      {!details.steps.length && <p className="simulation-empty-value">—</p>}
+      <ol className="simulation-route">{details.steps.map(step => <li key={step.id}>
+        <span className="simulation-route-context">{tr(multiple ? `${step.number}. ${step.action}` : step.action)}{step.pair && <small>{tr(step.pair)}</small>}</span>
+        <strong>{tr(step.provider ?? '—')}</strong>
+        {step.networks.length > 1 && <small>{tr(step.networks.join(' → '))}</small>}
+      </li>)}</ol>
+      <dl className="simulation-summary-values simulation-network"><div><dt>{tr("Workflow network")}</dt><dd>{networks.length ? networks.map(network => <span className="simulation-summary-network" key={network}>
+        <NetworkBrandIcon network={network.replace(/ \(\d+\)$/, '').replace('Robinhood Chain Testnet', 'Robinhood Chain')}/>{network}
+      </span>) : '—'}</dd></div></dl>
+    </details>
   </>;
 }
 

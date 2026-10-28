@@ -21,6 +21,7 @@ import type { useAcross } from '../state/across-store';
 import type { Workflow } from './initial-workflow';
 import { composerActions, composerSummary } from './composer-presentation';
 import { quoteDecimals } from './public-testnet-swap';
+import { bridgeTokenSymbol } from './token-presentation.ts';
 import { resolveNetworkAsset } from './asset-catalogs';
 import { flofiFeeAmount } from '../server/universal-router/fee-obligation.ts';
 
@@ -246,7 +247,7 @@ export function projectSimulation(workflow: Workflow, context: ReviewContext, so
       if (!guard(same(r.workflow) && boundHash(q.workflowHash, q.revision), r.provenance, Math.min(iso(q.expiresAt), iso(q.quote.expiresAt), q.deadlines.depositMustLandBy * 1000), r.error ?? (r.requote ? 'REQUOTE' : null))) break;
       const route = q.route, s = step(q.nodeId);
       const chosen = [simulationProvider(q.selection.selected), simulationProvider(route.underlyingProtocol)].filter((name, i, all) => name && all.indexOf(name) === i).join(' · ');
-      result(s, simulationAmount(route.inputAmount, route.inputToken.decimals, route.inputToken.symbol), simulationAmount(q.quote.expectedOutput, route.outputToken.decimals, route.outputToken.symbol), chosen || '—', simulationAmount(q.quote.minimumOutput, route.outputToken.decimals, route.outputToken.symbol), route.slippageBps);
+      result(s, simulationAmount(route.inputAmount, route.inputToken.decimals, bridgeTokenSymbol(`eip155:${route.inputToken.chainId}`, route.inputToken)), simulationAmount(q.quote.expectedOutput, route.outputToken.decimals, bridgeTokenSymbol(`eip155:${route.outputToken.chainId}`, route.outputToken)), chosen || '—', simulationAmount(q.quote.minimumOutput, route.outputToken.decimals, bridgeTokenSymbol(`eip155:${route.outputToken.chainId}`, route.outputToken)), route.slippageBps);
       if (s) s.resultLabel = 'Quoted destination output';
       networkFees(q.fees);
       const feeLabels = { INTEGRATOR: 'Provider fee', BRIDGE_RELAYER_CAPITAL: 'Bridge relayer fee', BRIDGE_DESTINATION_GAS: 'Destination delivery fee', BRIDGE_LP: 'Bridge liquidity fee', BRIDGE_OTHER: 'Bridge fee' };
@@ -262,8 +263,8 @@ export function projectSimulation(workflow: Workflow, context: ReviewContext, so
       const r = source.state.record; if (!r) break; const q = r.review, route = q.route;
       if (!guard(same(r.workflow) && boundHash(q.workflowHash, q.revision), r.provenance, Math.min(iso(q.expiresAt), iso(route.quote.expiresAt)), r.error ?? (r.requote ? 'REQUOTE' : null))) break;
       const s = step(q.nodeId), provider = { relay: 'Relay', lifi: 'LI.FI', mayan: 'Mayan', across: 'Across' }[route.provider] ?? route.provider;
-      result(s, simulationAmount(route.inputAmount, route.inputToken.decimals, route.inputToken.symbol), simulationAmount(route.expectedOutput, route.outputToken.decimals, route.outputToken.symbol),
-        provider, simulationAmount(route.minimumOutput, route.outputToken.decimals, route.outputToken.symbol), route.slippageBps);
+      result(s, simulationAmount(route.inputAmount, route.inputToken.decimals, bridgeTokenSymbol(route.sourceChain, route.inputToken)), simulationAmount(route.expectedOutput, route.outputToken.decimals, bridgeTokenSymbol(route.destinationChain, route.outputToken)),
+        provider, simulationAmount(route.minimumOutput, route.outputToken.decimals, bridgeTokenSymbol(route.destinationChain, route.outputToken)), route.slippageBps);
       if (s) s.resultLabel = 'Quoted destination output';
       fee('Maximum network fee', q.feePolicy.networkFeeUpperBound, q.feePolicy.networkFeeDecimals, q.feePolicy.networkFeeSymbol, 'Paid on the source network, separate from the route.');
       for (const f of route.fees) if (f.included && BigInt(f.amount) > 0n) fee(f.label, f.amount, f.decimals, f.symbol, 'Included in the quoted output.');
@@ -283,7 +284,10 @@ export function projectSimulation(workflow: Workflow, context: ReviewContext, so
       for (const stock of q.stocks ?? []) warn('attention', `${stock.symbol}: ${simulationAmount(stock.multiplierWad, 18)} underlying shares per token (Robinhood corporate-action multiplier).`);
       if (q.stocks?.length) warn('attention', 'Stock Tokens are not offered to US persons or in restricted jurisdictions.');
       if (s) s.resultLabel = 'Quoted output';
-      if (!q.ownerReview) warn('attention', 'This is a pool quote. Network fees and exact transaction simulation are not available yet.');
+      if (q.ownerReview) {
+        fee('Maximum network fee', q.ownerReview.feeBudgetWei, 18, 'ETH', 'For the next reviewed transaction. Further approvals and actions can have separate network costs.');
+        approvals(q.ownerReview.step === 'approval');
+      } else warn('attention', 'This is a pool quote. Network fees and exact transaction simulation are not available yet.');
       break;
     }
     case 'solana-swap': {

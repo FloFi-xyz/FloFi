@@ -76,7 +76,7 @@ describe('UX-004B result sections', () => {
       },
     } } } as unknown as SimulationSource;
     const html = render(source);
-    for (const section of ['Expected result', 'Route', 'Fees', 'Market impact']) expect(html).toContain(`aria-label="${section}"`);
+    for (const section of ['Expected result', 'Fees', 'Market impact']) expect(html).toContain(`aria-label="${section}"`);
     for (const value of ['100 USDC', '0.1 SOL', '0.0995 SOL', 'Jupiter', '0.000005 SOL', '0.50%', '0.08%', 'Ready', 'Valid until']) expect(html).toContain(value);
     expect(html).toContain('/brand/crypto/usdc.png'); expect(html).toContain('/brand/crypto/solana.svg');
     expect(html).not.toMatch(/N\/A|undefined|null|0.00 USD|mock|synthetic|debug|artifact|canonical|PUBLIC_MAINNET/);
@@ -106,12 +106,13 @@ describe('embedded authorization in Simulate', () => {
     }));
   }
   it('reveals valid Review below Simulation Summary within the same workspace without duplicating simulation cards', () => {
-    const html = embedded(), primary = html.split('<details')[0]!;
+    const html = embedded(), primary = html.replace(/<details\b[^>]*>[\s\S]*?<\/details>/g, '');
     expect(primary.indexOf('aria-label="Simulation Summary"')).toBeLessThan(primary.indexOf('id="simulation-review"'));
     expect(primary).toContain('Ready to approve'); expect(primary).toContain('Approve &amp; Continue');
     expect(primary).not.toMatch(/disabled="">Approve/);
-    for (const section of ['Expected result', 'Route', 'Fees', 'Market impact'])
+    for (const section of ['Expected result', 'Fees', 'Market impact'])
       expect(primary.match(new RegExp(`aria-label="${section}"`, 'g'))).toHaveLength(1);
+    expect(html.match(/aria-label="Route"/g)).toHaveLength(1); expect(html).toContain('<summary>Route details</summary>');
     expect(primary.match(/aria-label="Authorization preview"/g)).toHaveLength(1);
     expect(primary).not.toContain('review-workflow-steps'); expect(primary).not.toContain('Back to Simulate');
     expect(WORKFLOW_STAGES).toEqual(['Build', 'Simulate', 'Execute']);
@@ -156,8 +157,8 @@ describe('UX-004D compact simulation states', () => {
     const simulate = vi.fn();
     const html = renderToStaticMarkup(createElement(SimulateWorkspace, { workflowName: 'My strategy', returnToBuild: vi.fn(), reviewActionHost: vi.fn(), simulateAction: createElement('button', { onClick: simulate }, 'Simulate workflow') }));
     expect(html.indexOf('Simulate workflow')).toBeGreaterThan(html.indexOf('simulation-workspace-actions'));
-    expect(html.indexOf('Simulate workflow')).toBeLessThan(html.indexOf('aria-label="Simulation Summary"'));
-    expect(html.indexOf('Back to Build')).toBeLessThan(html.indexOf('aria-label="Simulation Summary"'));
+    expect(html.indexOf('Simulate workflow')).toBeGreaterThan(html.indexOf('aria-label="Simulation Summary"'));
+    expect(html.indexOf('Back to Build')).toBeGreaterThan(html.indexOf('aria-label="Simulation Summary"'));
     expect(html.indexOf('Back to Build')).toBeLessThan(html.indexOf('Simulate workflow'));
     expect(html.indexOf('simulation-review-action')).toBeGreaterThan(html.indexOf('aria-label="Simulation Summary"'));
     expect(simulate).not.toHaveBeenCalled();

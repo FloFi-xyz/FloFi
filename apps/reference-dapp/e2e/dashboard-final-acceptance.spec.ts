@@ -177,17 +177,42 @@ for (const value of ['light', 'dark'] as const) test(`${value} long recorded amo
     }
     const disclosure = detail.getByText('View technical details', { exact: true });
     await disclosure.focus();
-    if (await detail.locator('details').getAttribute('open') !== null) await page.keyboard.press('Enter');
+    if (await detail.locator('details.shell-details.technical-workspace').getAttribute('open') !== null) await page.keyboard.press('Enter');
     await page.keyboard.press('Enter');
-    await expect(detail.locator('details')).toHaveAttribute('open', '');
+    await expect(detail.locator('details.shell-details.technical-workspace')).toHaveAttribute('open', '');
     await page.setViewportSize({ width: 320, height: 1000 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await expect(detail.getByRole('button', { name: /^(Authorize in wallet|Retry|Continue execution)$/ })).toHaveCount(0);
     if (mode === 'bridge-completed') {
       await page.evaluate(() => Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (value: string) => { Object.assign(window, { finalAcceptanceCopy: value }); } } }));
-      await detail.locator('.execution-plan').getByRole('button', { name: /^Copy Provider reference/ }).first().click();
+      const proof = detail.locator('.execution-plan .execution-operation-details').first();
+      await proof.locator('summary').click();
+      await proof.getByRole('button', { name: /^Copy Provider reference/ }).first().click();
       expect(await page.evaluate(() => (window as unknown as { finalAcceptanceCopy: string }).finalAcceptanceCopy)).toBe('fixture-provider-deposit'.repeat(32));
     }
     await page.screenshot({ style: 'nextjs-portal{display:none}', path: `.tmp/ux006e-long-${mode}-${value}-320.png`, fullPage: true });
   }
+});
+
+test('compact history loads financial detail only on expansion and deduplicates repeated opens', async ({ page }) => {
+  const index = workspace(page);
+  await page.evaluate(() => window.flofiWorkspaceAcceptance.respond(0, 'owned'));
+  const card = index.locator('.dashboard-run-card').first(), disclosure = card.locator('.dashboard-card-details summary');
+  await expect(disclosure).toBeVisible(); await reads(page, 1);
+  await disclosure.click(); await reads(page, 2);
+  await expect(card.getByRole('status')).toContainText('Loading execution');
+  await disclosure.click(); await disclosure.click(); await reads(page, 2);
+  await page.evaluate(() => window.flofiWorkspaceAcceptance.respond(1, 'owned'));
+  await expect(card.getByRole('region', { name: 'Financial outcome' })).toContainText('0.0243 WETH');
+  await disclosure.click(); await disclosure.click(); await reads(page, 2);
+  expect(await page.evaluate(() => window.flofiWorkspaceAcceptance.navigation())).toEqual([]);
+});
+test('an inline financial detail arriving after an owner switch cannot reveal the former account', async ({ page }) => {
+  const index = workspace(page);
+  await page.evaluate(() => window.flofiWorkspaceAcceptance.respond(0, 'owned'));
+  await index.locator('.dashboard-card-details summary').first().click(); await reads(page, 2);
+  await page.evaluate(value => window.flofiWorkspaceAcceptance.wallet(value), other); await reads(page, 3);
+  await page.evaluate(() => window.flofiWorkspaceAcceptance.respond(1, 'owned'));
+  await expect(index.locator('.dashboard-run-card')).toHaveCount(0);
+  expect(await index.innerText()).not.toContain('0.0243 WETH');
 });

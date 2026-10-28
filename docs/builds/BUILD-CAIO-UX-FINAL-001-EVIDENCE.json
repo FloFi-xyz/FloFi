@@ -1,0 +1,38 @@
+{
+  "build": "BUILD-CAIO-UX-FINAL-001",
+  "observedAt": "2026-10-28T20:56:41.180Z",
+  "productionMutated": false,
+  "broadcast": false,
+  "checks": [
+    {
+      "side": "source",
+      "hash": "0xa2938caa574947d70fffe0949ae9e6f891d34c2cb7481c5bfac1bc4aeb096718",
+      "receiptStatus": "0x1",
+      "block": "0x32bd7fd",
+      "finalized": true,
+      "historicalSimulation": {
+        "outcome": "SUCCESS",
+        "resultDigest": "1c9409806518d1a5f52d79299ea0289ea2ff527e05895cd8f7a36d4cca28a13e"
+      }
+    },
+    {
+      "side": "destination",
+      "hash": "0xc35aa3157a594741f9cbaa6b843da658327a029a295f5e84a665a857655e5d22",
+      "receiptStatus": "0x1",
+      "block": "0x1ef0841f",
+      "finalized": true
+    }
+  ],
+  "provider": {
+    "http": 200,
+    "status": "DONE",
+    "substatus": "COMPLETED",
+    "destinationHash": "0xc35aa3157a594741f9cbaa6b843da658327a029a295f5e84a665a857655e5d22"
+  },
+  "originalAmountEvidence": {
+    "sourceDebit": "1 USDC",
+    "destinationCredit": "0.988966 USDC",
+    "reference": "FIX-BRIDGE-RECOVERY-CAIO-001-EVIDENCE.json",
+    "recheckedBalances": false
+  }
+}

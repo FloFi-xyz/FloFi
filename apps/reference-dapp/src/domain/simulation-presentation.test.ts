@@ -238,3 +238,11 @@ describe('UX-004D state language', () => {
     }
   });
 });
+
+it('discloses a real owner-preflight network budget as the next transaction budget, without inventing a workflow total', () => {
+  const workflow = swap;
+  const source = { kind: 'public', state: { busy: false, available: true, retired: false, error: null, run: { workflow, quote: { workflowHash: hash(workflow), revision: workflow.revision, nodeId: workflow.nodes.at(-1)!.nodeId, chainId: 84532, inputSymbol: 'USDC', outputSymbol: 'WETH', amountIn: '100000000', expectedOut: '25000000000000000', minimumOut: '24875000000000000', slippageBps: 50, expiresAt: expiry, ownerReview: { feeBudgetWei: '123456000000000', step: 'approval' } } } } } as unknown as SimulationSource;
+  const result = projectSimulation(workflow, context, source, now);
+  expect(result.fees).toContainEqual({ label: 'Maximum network fee', value: '0.000123456 ETH', note: 'For the next reviewed transaction. Further approvals and actions can have separate network costs.' });
+  expect(result.warnings.some(w => w.message === 'Token approval is required before execution.')).toBe(true);
+});

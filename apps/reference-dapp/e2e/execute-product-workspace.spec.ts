@@ -185,9 +185,9 @@ for (const theme of ['light', 'dark']) test(`${theme} plan, brand icons and resp
     const plan = await page.getByRole('region', { name: 'Execution plan', exact: true }).boundingBox();
     const summary = await page.getByRole('complementary', { name: 'Execution Summary' }).boundingBox();
     expect(plan).not.toBeNull(); expect(summary).not.toBeNull();
-    expect(plan!.y).toBe(spacing.gridTop);
-    if (width > 900) expect(plan!.x + plan!.width).toBeLessThan(summary!.x);
-    else expect(plan!.y + plan!.height).toBeLessThan(summary!.y);
+    expect(summary!.y).toBe(spacing.gridTop);
+    if (width > 1000) expect(summary!.x + summary!.width).toBeLessThan(plan!.x);
+    else expect(summary!.y + summary!.height).toBeLessThan(plan!.y);
     await expect(page.getByRole('button', { name: AUTHORIZE_IN_WALLET, exact: true })).toBeEnabled();
     const boxes = await canvas.evaluate(element => {
       const rect = (el: Element) => { const r = el.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom }; };
@@ -327,6 +327,7 @@ for (const theme of ['light', 'dark']) test(`${theme} final evidence, actual val
   const details = page.locator('.execute-technical'); await expect(details).not.toHaveAttribute('open', '');
   await expect(page.getByText('Current execution record', { exact: true })).not.toBeVisible();
   await page.evaluate(() => { Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { async writeText(value: string) { Object.assign(window, { copiedExecutionIdentifier: value }); } } }); });
+  await plan.locator('.execution-operation-details').last().locator('summary').click();
   await plan.getByRole('button', { name: `Copy transaction ${'0x' + 'b'.repeat(64)}`, exact: true }).click();
   await expect(plan.getByRole('button', { name: `Copy transaction ${'0x' + 'b'.repeat(64)}`, exact: true })).toHaveText('Copied');
   expect(await page.evaluate(() => (window as unknown as { copiedExecutionIdentifier: string }).copiedExecutionIdentifier)).toBe('0x' + 'b'.repeat(64));
@@ -351,7 +352,8 @@ test('bridge source evidence does not claim destination settlement before reconc
   await expect(plan).not.toContainText('Actual received'); await expect(page.locator('.execution-summary')).not.toContainText('Execution completed');
   await page.evaluate(() => window.flofiExecuteAcceptance.evidence('bridge-reconciled'));
   await expect(plan).toContainText('Destination transaction'); await expect(plan).toContainText('Reconciled'); await expect(plan).toContainText('4.89 USDC');
-  await expect(plan.getByRole('link', { name: 'View transaction' })).toHaveCount(2);
+  for (const disclosure of await plan.locator('.execution-operation-details summary').all()) await disclosure.click();
+  await expect(plan.locator('.execution-operations').getByRole('link', { name: 'View transaction' })).toHaveCount(2);
   for (const theme of ['light', 'dark']) {
     await page.evaluate(value => document.documentElement.dataset.theme = value, theme);
     await page.setViewportSize({ width: 820, height: 900 }); await page.getByText('View technical details', { exact: true }).click();
@@ -407,7 +409,7 @@ for (const theme of ['light', 'dark']) test(`${theme} execution timeline, long h
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     const plan = await page.getByRole('region', { name: 'Execution plan', exact: true }).boundingBox();
     const summary = await page.getByRole('complementary', { name: 'Execution Summary' }).boundingBox();
-    if (width > 900) expect(plan!.x + plan!.width).toBeLessThan(summary!.x); else expect(plan!.y + plan!.height).toBeLessThan(summary!.y);
+    if (width > 1000) expect(summary!.x + summary!.width).toBeLessThan(plan!.x); else expect(summary!.y + summary!.height).toBeLessThan(plan!.y);
     const brandStyle = await page.locator('.execution-step-context .brand-icon').evaluate(image => ({ filter: getComputedStyle(image).filter, width: image.getBoundingClientRect().width }));
     expect(brandStyle).toEqual({ filter: 'none', width: 18 });
     await expect(page.getByRole('button', { name: 'Check status', exact: true })).toBeVisible();
@@ -538,7 +540,9 @@ test('technical details, transaction links and copy confirmation work with the k
   const hash = '0x' + 'b'.repeat(64);
   const plan = page.getByRole('region', { name: 'Execution plan', exact: true });
   await page.evaluate(() => { Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { async writeText(value: string) { Object.assign(window, { copiedExecutionIdentifier: value }); } } }); });
-  const copy = plan.getByRole('button', { name: `Copy transaction ${hash}`, exact: true });
+  const actionProof = plan.locator('.execution-operation-details').last();
+  await actionProof.locator('summary').focus(); await page.keyboard.press('Enter');
+  const copy = actionProof.getByRole('button', { name: `Copy transaction ${hash}`, exact: true });
   await copy.focus(); await copy.press('Enter');
   await expect(copy).toHaveText('Copied'); await expect(plan.getByRole('status').filter({ hasText: 'Action transaction copied.' })).toHaveCount(1);
   expect(await page.evaluate(() => (window as unknown as { copiedExecutionIdentifier: string }).copiedExecutionIdentifier)).toBe(hash);
@@ -553,6 +557,7 @@ test('copy fallback and long workflow names stay inside their containers in both
   await page.evaluate(() => { window.flofiExecuteAcceptance.workflowName('A workflow with an unusually long name ' + 'w'.repeat(180)); window.flofiExecuteAcceptance.evidence('bridge-reconciled'); });
   await page.evaluate(() => { Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { async writeText() { throw Error('Clipboard unavailable'); } } }); });
   const plan = page.getByRole('region', { name: 'Execution plan', exact: true });
+  await plan.locator('.execution-operation-details').first().locator('summary').click();
   await plan.getByRole('button', { name: /Copy Provider reference/ }).click();
   await expect(plan.getByRole('status').filter({ hasText: 'Copy unavailable.' })).toHaveCount(1);
   for (const theme of ['light', 'dark']) {

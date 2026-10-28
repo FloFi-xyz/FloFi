@@ -66,7 +66,7 @@ describe('recorded execution evidence projection', () => {
     const result = project(router());
     expect(result.operations.DEPOSIT?.identifiers).toEqual(expect.arrayContaining([expect.objectContaining({ value: actionHash, label: 'Source transaction' }), expect.objectContaining({ value: 'real-provider-deposit', kind: 'reference' })]));
     expect(result.operations.destination?.identifiers[0]).toMatchObject({ value: destinationHash, label: 'Destination transaction', chain: 'eip155:421614' });
-    expect(result.operations.destination?.values).toEqual([]); expect(result.knownCosts).toEqual([]);
+    expect(result.operations.destination?.values).toEqual([{ label: 'Destination amount observed · awaiting reconciliation', value: '4.89 USDC' }]); expect(result.operations.destination?.values.some(v => v.label === 'Actual received')).toBe(false); expect(result.knownCosts).toEqual([]);
     expect(result.operations.DEPOSIT?.values[0]?.value).toBe('5 USDC');
   });
   it('renders actual bridge settlement only after reconciliation and never calls a provider quote an actual fee', () => {

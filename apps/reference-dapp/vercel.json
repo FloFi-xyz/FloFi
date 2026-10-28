@@ -5,6 +5,7 @@
   "buildCommand": "sh ../../deploy/vercel/build.sh",
   "git": {
     "deploymentEnabled": {
+      "codex/build-caio-ux-final-001": false,
       "codex/fix-bridge-recovery-caio-001": false,
       "codex/p0-shared-estimates": false,
       "codex/build-safe-run-deletion": false,
