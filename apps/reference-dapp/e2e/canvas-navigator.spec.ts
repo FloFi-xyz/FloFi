@@ -73,11 +73,10 @@ for (const theme of ['light', 'dark'] as const) {
       expect(await zoom(graph)).toBeLessThan(1); expect(await zoom(graph)).toBeGreaterThan(.35);
       await synchronized(graph);
       const graphBox = (await graph.boundingBox())!;
-      // Explicit navigation with Shift pans both axes without zooming. Plain wheel otherwise scrolls the page.
-      await navigator.getByRole('button', { name: 'Wheel navigation' }).click();
+      // Two-finger trackpad movement (a plain wheel) pans the real viewport 1:1 on both axes and never zooms.
       const panBefore = await viewport(graph);
       await page.mouse.move(graphBox.x + graphBox.width - 80, graphBox.y + 65);
-      await page.keyboard.down('Shift'); await page.mouse.wheel(40, 60); await page.keyboard.up('Shift');
+      await page.mouse.wheel(40, 60);
       await expect.poll(async () => (await viewport(graph)).y).toBeCloseTo(panBefore.y - 60, 0);
       expect((await viewport(graph)).x).toBeCloseTo(panBefore.x - 40, 0);
       expect((await viewport(graph)).zoom).toBe(panBefore.zoom); await synchronized(graph);
@@ -203,7 +202,7 @@ test('node drag moves only the node, pane drag moves neither nodes nor viewport,
   await page.mouse.move(box.x + 70, box.y + 60, { steps: 5 }); await page.mouse.up();
   expect(await viewport(graph)).toEqual(before);
   expect(await position()).toBe(moved);
-  // Wheel outside and over the canvas scrolls the page until navigation is explicitly enabled.
+  // Wheel outside the canvas scrolls the page; wheel over the canvas pans it and leaves the page where it is.
   await page.setViewportSize({ width: 1440, height: 560 });
   await page.evaluate(() => window.scrollTo(0, 0));
   const header = (await page.locator('.top-bar').boundingBox())!;
@@ -213,8 +212,8 @@ test('node drag moves only the node, pane drag moves neither nodes nor viewport,
   const scrolled = await page.evaluate(() => window.scrollY), canvas = (await graph.boundingBox())!, panBefore = await viewport(graph);
   await page.mouse.move(canvas.x + canvas.width / 2, canvas.y + Math.min(canvas.height / 2, 120));
   await page.mouse.wheel(0, 80);
-  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(scrolled);
-  expect(await viewport(graph)).toEqual(panBefore);
+  await expect.poll(async () => (await viewport(graph)).y).toBeCloseTo(panBefore.y - 80, 0);
+  expect(await page.evaluate(() => window.scrollY)).toBe(scrolled);
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '1');
 });
 
@@ -224,10 +223,9 @@ test('narrow canvas keeps trackpad pan, pinch, slider and Fit usable', async ({ 
   await page.getByRole('button', { name: 'Add supply', exact: true }).click();
   await configureCanvasAction(page, '1');
   const graph = page.locator('main .flow-surface').first();
-  await graph.getByRole('button', { name: 'Wheel navigation' }).click();
   const box = (await graph.boundingBox())!, before = await viewport(graph);
   await page.mouse.move(box.x + box.width / 2, box.y + 60);
-  await page.keyboard.down('Shift'); await page.mouse.wheel(-30, 25); await page.keyboard.up('Shift');
+  await page.mouse.wheel(-30, 25);
   await expect.poll(async () => (await viewport(graph)).x).toBeCloseTo(before.x + 30, 0);
   await pinch(graph, 30);
   await expect.poll(() => zoom(graph)).toBeLessThan(before.zoom); await synchronized(graph);

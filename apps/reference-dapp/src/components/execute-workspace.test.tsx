@@ -143,7 +143,7 @@ describe('live execution workspace', () => {
 
 it('places the ordered Execute action pair inside the canvas and keeps the summary informational', () => {
   const data = fixture(), html = render(data), summary = html.slice(html.indexOf('<aside'), html.indexOf('</aside>'));
-  const canvas = html.slice(html.indexOf('aria-label="Execution plan"'));
+  const canvas = html.slice(html.indexOf('aria-label="Execution plan"'), html.indexOf('<aside'));
   expect(canvas).toContain('>Back to Build</button>'); expect(canvas).toContain('>Authorize in wallet</button>');
   expect(canvas.indexOf('Back to Build')).toBeLessThan(canvas.indexOf('Authorize in wallet'));
   expect(summary).not.toContain('>Authorize in wallet</button>'); expect(data.execution.start).not.toHaveBeenCalled();
@@ -184,7 +184,7 @@ describe('UX-003 / UX-004 processing CTA and Create new workflow (presentation o
     const source = { kind: 'supply', state: { signing: true, busy: true, recovered: false, record: { id: 'supply-wallet-request', provenance: 'PUBLIC_TESTNET',
       review: { workflow: f.workflow, chain: f.wallet.chain, account: f.wallet.account }, attempts: [{ step: 'SUPPLY', state: 'SUBMITTING', transactionHash: null, reconciled: false }] } } } as unknown as ExecutionLifecycleSource;
     data.progress = projectExecutionLifecycle(data.workflow, data.context, source); data.execution.started = true;
-    const html = render(data), canvas = html.slice(html.indexOf('aria-label="Execution plan"'));
+    const html = render(data), canvas = html.slice(html.indexOf('aria-label="Execution plan"'), html.indexOf('<aside'));
     expect(canvas).toMatch(/data-lifecycle-action="processing"[^>]*disabled="" aria-busy="true">.*Waiting for wallet…<\/button>/);
     expect(canvas).not.toContain('role="status" data-lifecycle-action="status"');
   });
