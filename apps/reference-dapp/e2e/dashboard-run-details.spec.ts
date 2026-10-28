@@ -40,7 +40,7 @@ test('saved run summary, actual values, archive evidence and secondary technical
   await expect(page.getByRole('list', { name: 'Workflow step progression' })).toContainText('0.0243 WETH');
   await expect(page.getByRole('group', { name: 'Planned and actual values' })).toContainText('0.025 WETH');
   await expect(page.getByRole('region', { name: 'Evidence', exact: true })).toContainText('Archive integrity verified');
-  await expect(page.locator('details')).toHaveCount(1); await expect(page.locator('details')).not.toHaveAttribute('open', '');
+  await expect(page.locator('details.shell-details.technical-workspace')).toHaveCount(1); await expect(page.locator('details.shell-details.technical-workspace')).not.toHaveAttribute('open', '');
   const technical = page.getByText('View technical details', { exact: true });
   await technical.focus(); await technical.press('Enter');
   await expect(page.locator('.execution-evidence-details')).toContainText('Saved execution record');
@@ -68,8 +68,12 @@ test('bridge settlement and CoW order IDs keep correct labels, amounts, networks
   await expect(page.locator('.dashboard-result-summary')).toContainText('In progress');
   await expect(page.locator('.execution-plan')).toContainText('Source transaction');
   await expect(page.locator('.execution-plan')).toContainText('Destination transaction');
-  await expect(page.locator('.execution-plan')).not.toContainText('4.89 USDC');
-  await expect(page.locator('.execution-plan').locator(`a[href="https://sepolia.arbiscan.io/tx/${detailDestinationHash}"]`)).toBeVisible();
+  await expect(page.locator('.execution-plan')).toContainText('4.89 USDC');
+  await expect(page.locator('.execution-plan')).toContainText('Destination amount observed · awaiting reconciliation');
+  await expect(page.locator('.execution-plan')).not.toContainText('Actual received');
+  await page.locator('.bridge-request-details>summary').click();
+  await page.locator('.execution-operation-details').last().locator('summary').click();
+  await expect(page.locator('.execution-plan .execution-operations').locator(`a[href="https://sepolia.arbiscan.io/tx/${detailDestinationHash}"]`)).toBeVisible();
   await page.evaluate(() => window.flofiRunDetailAcceptance.show('bridge-completed'));
   await expect(page.locator('.execution-plan')).toContainText('4.89 USDC');
   await expect(page.locator('.execution-plan')).toContainText('4.9 USDC');
@@ -85,10 +89,12 @@ test('bridge settlement and CoW order IDs keep correct labels, amounts, networks
 
 test('copy keeps full transaction and order identifiers and handles unavailable clipboard', async ({ page }) => {
   await page.evaluate(() => Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (value: string) => { Object.assign(window, { runDetailCopied: value }); } } }));
+  await page.locator('.execution-operation-details').last().locator('summary').click();
   const transaction = page.getByRole('button', { name: `Copy transaction ${detailHash}`, exact: true }).first();
   await transaction.click(); await expect(transaction).toHaveText('Copied');
   expect(await page.evaluate(() => (window as unknown as { runDetailCopied: string }).runDetailCopied)).toBe(detailHash);
   await page.evaluate(() => window.flofiRunDetailAcceptance.show('cow-pending'));
+  await page.locator('.execution-operation-details').first().locator('summary').click();
   const order = page.getByRole('button', { name: `Copy order ${detailOrderId}`, exact: true }).first();
   await order.click(); expect(await page.evaluate(() => (window as unknown as { runDetailCopied: string }).runDetailCopied)).toBe(detailOrderId);
   await page.evaluate(() => Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async () => { throw new Error('Fixture clipboard denied'); } } }));

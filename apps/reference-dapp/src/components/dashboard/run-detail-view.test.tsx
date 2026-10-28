@@ -13,7 +13,7 @@ describe('Run Details reuses the UX-005 execution and evidence truth', () => {
     const html = render();
     expect(html).toContain('SAVED EXECUTION'); expect(html).toContain('Execution completed'); expect(html).toContain('SAVED RUN RESULT');
     expect(html).toContain('Run summary'); expect(html).toContain('RECORDED EXECUTION PROOF'); expect(html).toContain('Archive integrity verified');
-    expect(html.match(/<details/g)).toHaveLength(1); expect(html).not.toContain('<details open');
+    expect(html.match(/<details class="shell-details technical-workspace"/g)).toHaveLength(1); expect(html).toContain('View transaction evidence'); expect(html).not.toContain('<details open');
     expect(html).toContain('Saved execution record'); expect(html).not.toContain('Current execution record');
     expect(html).not.toContain('current execution record'); expect(html).not.toContain('Back to Build');
   });
@@ -57,7 +57,7 @@ describe('Run Details reuses the UX-005 execution and evidence truth', () => {
       expect(html).toContain('Across'); expect(html).toContain('Arbitrum Sepolia');
       expect(html).toContain(`https://sepolia.arbiscan.io/tx/${detailDestinationHash}`);
     }
-    expect(pending).toContain('In progress'); expect(pending).not.toContain('4.89 USDC'); expect(pending).not.toContain('Execution completed');
+    expect(pending).toContain('In progress'); expect(pending).toContain('4.89 USDC'); expect(pending).toContain('Destination amount observed · awaiting reconciliation'); expect(pending).not.toContain('Actual received'); expect(pending).not.toContain('Execution completed');
     expect(settled).toContain('4.89 USDC'); expect(settled).toContain('4.9 USDC'); expect(settled).toContain('Execution completed');
   });
   it.each(['cow-pending', 'cow-reconciled', 'cow-cancelled'] as const)('preserves %s order identity and the existing scripted limitations', mode => {

@@ -7,6 +7,7 @@ import { executionExplorer, type ExecutionLifecycle, type ExecutionLifecycleSour
 import type { EvidenceComparison } from './execution-step-evidence';
 import { simulationAmount } from './simulation-presentation';
 import { quoteDecimals } from './public-testnet-swap';
+import { bridgeTokenSymbol } from './token-presentation.ts';
 import { resolveNetworkAsset } from './asset-catalogs';
 import { shellChainLabel } from './product-shell';
 import { solanaNotSubmittedReason } from './solana-refusal';
@@ -172,8 +173,9 @@ export function projectExecutionEvidence(source: ExecutionLifecycleSource, progr
       identifier('DEPOSIT', 'Provider reference · Deposit ID', record.source?.depositId);
       identifier('destination', 'Destination transaction', record.destination?.transactionHash, 'transaction', review.intent.destinationChain);
       identifier('destination', 'Refund transaction', record.refund?.transactionHash, 'transaction', review.intent.sourceChain);
-      if (record.source?.safe) amount('DEPOSIT', 'Executed input', record.source.ownerDebit ?? record.source.inputAmount, review.route.inputToken.decimals, review.route.inputToken.symbol, review.intent.amount);
-      if (record.verdict === 'RECONCILED' && record.destination?.safe) amount('destination', 'Actual received', record.destination.transferAmount, review.route.outputToken.decimals, review.route.outputToken.symbol, review.quote.expectedOutput);
+      if (record.source?.safe) amount('DEPOSIT', 'Executed input', record.source.ownerDebit ?? record.source.inputAmount, review.route.inputToken.decimals, bridgeTokenSymbol(review.intent.sourceChain, review.route.inputToken), review.intent.amount);
+      if (record.verdict === 'RECONCILED' && record.destination?.safe) amount('destination', 'Actual received', record.destination.transferAmount, review.route.outputToken.decimals, bridgeTokenSymbol(review.intent.destinationChain, review.route.outputToken), review.quote.expectedOutput);
+      if (record.destination?.safe && record.verdict !== 'RECONCILED') amount('destination', 'Destination amount observed · awaiting reconciliation', record.destination.transferAmount, review.route.outputToken.decimals, bridgeTokenSymbol(review.intent.destinationChain, review.route.outputToken));
       allowanceFacts(record.allowanceObservation, review.route.inputToken.decimals, review.route.inputToken.symbol);
       if (record.observation) {
         detail('Last execution check', record.observation.checkedAt); detail('Observation reason', record.observation.reason);
@@ -200,8 +202,8 @@ export function projectExecutionEvidence(source: ExecutionLifecycleSource, progr
       identifier('DEPOSIT', 'Provider reference · Order ID', route.order.orderId);
       identifier('destination', 'Destination transaction', record.destination?.transactionHash, 'transaction', route.destinationChain);
       identifier('destination', 'Refund transaction', record.refund?.transactionHash, 'transaction', record.refund?.chainId ?? route.sourceChain);
-      if (record.source) amount('DEPOSIT', record.source.final ? 'Executed input' : 'Source debit confirmed · awaiting finality', record.source.ownerDebit, route.inputToken.decimals, route.inputToken.symbol, route.inputAmount);
-      if (record.verdict === 'RECONCILED' && record.destination?.final) amount('destination', 'Actual received', record.destination.amount, route.outputToken.decimals, route.outputToken.symbol, route.expectedOutput);
+      if (record.source) amount('DEPOSIT', record.source.final ? 'Executed input' : 'Source debit confirmed · awaiting finality', record.source.ownerDebit, route.inputToken.decimals, bridgeTokenSymbol(route.sourceChain, route.inputToken), route.inputAmount);
+      if (record.verdict === 'RECONCILED' && record.destination?.final) amount('destination', 'Actual received', record.destination.amount, route.outputToken.decimals, bridgeTokenSymbol(route.destinationChain, route.outputToken), route.expectedOutput);
       if (record.destination && record.verdict !== 'RECONCILED') amount('destination', 'Destination amount observed · awaiting reconciliation', record.destination.amount, route.outputToken.decimals, route.outputToken.symbol);
       if (record.refund) amount('destination', 'Verified refund', record.refund.amount, route.inputToken.decimals, route.inputToken.symbol);
       if (review.source.ecosystem === 'EVM' && route.inputToken.kind === 'TOKEN') allowanceFacts(record.allowanceObservation, route.inputToken.decimals, route.inputToken.symbol);

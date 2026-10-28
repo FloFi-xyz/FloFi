@@ -16,10 +16,6 @@ export function SimulateWorkspace({ workflowName, returnToBuild, reviewActionHos
   const { state, context, reviewError } = useWorkflow();
   return <section className="simulate-workspace" aria-label={tr("Workflow simulation workspace")}>
     <div className="simulate-workspace-grid">
-      <SimulateWorkflowCanvas workflowName={workflowName} primaryAction={<div className="simulation-workspace-actions">
-        {returnToBuild && <button type="button" className="simulation-back" onClick={returnToBuild}>{tr("Back to Build")}</button>}
-        {tr(simulateAction)}
-      </div>}/>
       <aside className="simulation-summary panel" aria-label={tr("Simulation Summary")}>
         <div className="simulation-summary-content" role="region" aria-label={tr("Simulation result details")}><SimulationSummary workflow={state.workflow} context={context} source={simulationSource} invalidWorkflow={Boolean(reviewError)} unavailableReason={simulationReason}/></div>
         {tr(review)}
@@ -27,6 +23,10 @@ export function SimulateWorkspace({ workflowName, returnToBuild, reviewActionHos
           {reviewActionHost && <div className="simulation-review-action" ref={reviewActionHost}/>}
         </div>
       </aside>
+      <SimulateWorkflowCanvas workflowName={workflowName} primaryAction={<div className="simulation-workspace-actions">
+        {returnToBuild && <button type="button" className="simulation-back" onClick={returnToBuild}>{tr("Back to Build")}</button>}
+        {tr(simulateAction)}
+      </div>}/>
     </div>
     {children}
   </section>;

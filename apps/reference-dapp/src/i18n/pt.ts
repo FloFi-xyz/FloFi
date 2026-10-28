@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { portugueseCaioUx } from './pt-caio-ux';
 import { portugueseFinancialExecution } from './pt-financial-execution';
 import { portugueseCrossChain } from './pt-cross-chain';
 import { portugueseLocalRuntime } from './pt-local-runtime';
@@ -243,4 +244,5 @@ export const portuguese: Readonly<Record<string, string>> = {
   'No wallet found. Install or enable a browser wallet.': 'Nenhuma carteira encontrada. Instale ou ative uma carteira no navegador.',
   'Could not connect. Check your wallet and try again.': 'Não foi possível ligar. Verifique a carteira e tente novamente.',
   'Connect your wallet first.': 'Ligue primeiro a carteira.', 'Could not switch networks. Check your wallet and try again.': 'Não foi possível mudar de rede. Verifique a carteira e tente novamente.',
+  ...portugueseCaioUx,
 };

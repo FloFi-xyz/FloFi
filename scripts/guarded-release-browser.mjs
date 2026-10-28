@@ -24,6 +24,7 @@ const definitions = [
     'build-fix-ux.spec.ts', 'beta-ui.spec.ts', 'ux-ui-002-landing.spec.ts'], {}],
   ['review-execute-recovery-components', ['simulate-review-acceptance.spec.ts', 'execute-product-workspace.spec.ts', 'execute-workflow.spec.ts'], {}],
   // Direct chat signing and optional Canvas, with no application server, RPC, wallet or database; requests are intercepted by the spec.
+  ['caio-final-ux', ['--config', 'playwright.caio-ux.config.ts'], {}],
   ['solana-transfer-ux', ['--config', 'playwright.transfer-ux.config.ts'], {}],
   ['workflow-acceptance', ['acceptance-workflows.spec.ts'], { GRYLOO_CLOUD_RUNTIME_E2E: 'EMBEDDED_LOOPBACK_ONLY', GRYLOO_ROUTER_TESTNET_E2E: 'MOCKED_LOOPBACK_ONLY', TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres' }],
   ['swap-read-acceptance', ['acceptance-swap-read.spec.ts'], { GRYLOO_CLOUD_RUNTIME_E2E: 'EMBEDDED_LOOPBACK_ONLY', FLOFI_SWAP_READ_E2E: 'MOCKED_LOOPBACK_ONLY', TEST_DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://flofi@127.0.0.1:5432/postgres' }],
@@ -127,7 +128,7 @@ const shards = [
   ['cloud-provenance', 'journey-provenance', 'synthetic-fork-provenance', 'execution-continuity', 'workflow-acceptance', 'swap-read-acceptance',
     'automations', 'chat-automations', 'delegated-execution', 'canvas-automation-ux', 'admin-console', 'cow-loopback', 'card-provider-loopback',
     'mcp-routes-oauth-disabled', 'developer-journey', 'mcp-in-chat', 'mcp-embedded-signing', 'channel-signing', 'channel-approve', 'approve-authorize-journeys',
-    'approve-workflow-run', 'universal-bridge', 'owner-history'],
+    'approve-workflow-run', 'universal-bridge', 'owner-history', 'caio-final-ux'],
 ];
 // Fail closed on any plan drift: every product profile runs in exactly one place, and every name in the plan exists.
 const names = definitions.map(([name]) => name), planned = [...critical, ...shards.flat()];

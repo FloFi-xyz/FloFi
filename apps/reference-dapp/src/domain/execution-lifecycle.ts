@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /** Observations only. This module cannot submit, retry, reconcile or recover an execution. */
+import { projectBridgeProgress, type BridgeStage } from './bridge-progress.ts';
 import { financialAttemptState } from './financial-run-status';
 import type { ReviewContext } from '@defi-workflow-engine/reference-linter';
 import { CROSSCHAIN_ROUTER_PROFILES, ROBINHOOD_TESTNET_TRANSFER, solanaSwapRuntime } from '@defi-workflow-engine/action-registry';
@@ -82,7 +83,7 @@ export function executionExplorer(chain: string, hash: string, local = false): s
 }
 export type LifecycleOperation = { id: string; nodeId: string; title: string; state: LifecycleState; label: string; hash: string | null; chain: string; explorer: string | null; fee: string | null; approval: boolean; intent: boolean };
 export type LifecycleStep = { id: string; number: number; action: string; input: string; pair: string | null; network: string; provider: string | null; tokens: string[]; state: LifecycleState; label: string; operations: LifecycleOperation[] };
-export type ExecutionLifecycle = { started: boolean; restored: boolean; local: boolean; matchesWorkflow?: boolean; planUnavailable?: boolean; stepEvidence?: Record<string, ExecutionStepEvidence>; evidence?: ExecutionEvidence; steps: LifecycleStep[]; active: LifecycleStep | null; completed: number; label: string; message: string; state: 'idle' | 'active' | 'complete' | 'attention' | 'uncertain'; runKey: string | null; fingerprint: string; busy: boolean };
+export type ExecutionLifecycle = { bridgeStages?: BridgeStage[] | undefined; started: boolean; restored: boolean; local: boolean; matchesWorkflow?: boolean; planUnavailable?: boolean; stepEvidence?: Record<string, ExecutionStepEvidence>; evidence?: ExecutionEvidence; steps: LifecycleStep[]; active: LifecycleStep | null; completed: number; label: string; message: string; state: 'idle' | 'active' | 'complete' | 'attention' | 'uncertain'; runKey: string | null; fingerprint: string; busy: boolean };
 
 export function projectExecutionLifecycle(currentWorkflow: Workflow, context: ReviewContext, source: ExecutionLifecycleSource): ExecutionLifecycle {
   let workflow = currentWorkflow, runKey: string | null = null, local = false, restored = false;
@@ -292,5 +293,5 @@ export function projectExecutionLifecycle(currentWorkflow: Workflow, context: Re
   const message = lifecycleState === 'uncertain' ? 'The current request cannot be confirmed or ruled out. No transaction is repeated.' : lifecycleState === 'attention' ? 'The current step could not complete. Any confirmed actions remain recorded. Nothing is retried automatically.' : lifecycleState === 'complete' ? planUnavailable ? 'The saved requests are confirmed. Original workflow details remain unavailable.' : 'All workflow actions are confirmed in the current execution record.' : `${completed} of ${steps.length} actions completed. Each new wallet request requires your explicit confirmation.`;
   // The selected runtime restores into the visit's untouched draft. Terminal results must attach there too, just as pending results do.
   const matchesWorkflow = !planUnavailable && (JSON.stringify(workflow) === JSON.stringify(currentWorkflow) || restored && isPristineDraft(currentWorkflow));
-  return { started, restored, local, matchesWorkflow, planUnavailable, steps, active, completed, label, message, state: lifecycleState, runKey, fingerprint: JSON.stringify(operations.map(op => [op.id, op.state, op.hash])), busy: Boolean(state.busy) };
+  return { bridgeStages: projectBridgeProgress(source, operations), started, restored, local, matchesWorkflow, planUnavailable, steps, active, completed, label, message, state: lifecycleState, runKey, fingerprint: JSON.stringify(operations.map(op => [op.id, op.state, op.hash])), busy: Boolean(state.busy) };
 }

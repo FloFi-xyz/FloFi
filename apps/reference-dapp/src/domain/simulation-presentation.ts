@@ -21,6 +21,7 @@ import type { useAcross } from '../state/across-store';
 import type { Workflow } from './initial-workflow';
 import { composerActions, composerSummary } from './composer-presentation';
 import { quoteDecimals } from './public-testnet-swap';
+import { bridgeTokenSymbol } from './token-presentation.ts';
 import { resolveNetworkAsset } from './asset-catalogs';
 import { flofiFeeAmount } from '../server/universal-router/fee-obligation.ts';
 
@@ -46,6 +47,10 @@ export type SimulationSource =
   | { kind: 'fork-pool'; state: Snapshot<ReturnType<typeof useLiquidity>> }
   | { kind: 'across'; state: Snapshot<ReturnType<typeof useAcross>> }
   | { kind: 'unavailable'; state: { error: string | null; busy: boolean | string | null } };
+/** Borrowing/withdrawing requests an amount; it must never be described as a wallet debit. */
+export function simulationInputLabel(action: string): string {
+  return ['Borrow', 'Withdraw'].includes(action) ? 'Requested amount' : ['Swap', 'Bridge', 'Send', 'Supply', 'Repay'].includes(action) ? 'You send' : 'Operation input';
+}
 export type SimulationLine = { label: string; value: string; note?: string };
 export type SimulationWarning = { severity: 'info' | 'attention' | 'blocking'; message: string };
 export type SimulationStep = {
@@ -67,7 +72,7 @@ export function simulationStatusPresentation(view: SimulationPresentation, inval
   if (/expired/i.test(view.message)) return { label: 'Simulation expired', message: 'Simulate again to refresh the result before authorization.', tone: 'blocked' };
   if (/changed/i.test(view.message)) return { label: 'Review required again', message: view.message, tone: 'blocked' };
   if (/balance.*low|Add funds for the network fee/i.test(view.message)) return { label: 'Insufficient balance', message: view.message, tone: 'blocked' };
-  if (/Simulation is (?:currently unavailable|not available)/i.test(view.message)) return { label: 'Simulation unavailable', message: view.message, tone: 'blocked' };
+  if (/Simulation is (?:currently unavailable|not available|unavailable because)|The simulation service is temporarily unavailable/i.test(view.message)) return { label: 'Simulation unavailable', message: view.message, tone: 'blocked' };
   if (/could not complete this simulation|rejected this transaction in simulation/i.test(view.message)) return { label: 'Simulation failed', message: view.message, tone: 'blocked' };
   if (/Connect the wallet that will sign/i.test(view.message)) return { label: 'Connect your wallet', message: view.message, tone: 'blocked' };
   if (/destination address|token details do not match|token feature FloFi cannot verify|Check the amount/i.test(view.message)) return { label: 'Check the workflow', message: view.message, tone: 'blocked' };
@@ -106,7 +111,11 @@ export function simulationError(error: string): string {
   if (/INSUFFICIENT|BALANCE_TOO_LOW|exceeds.*balance/i.test(error)) return 'Your available balance is too low for this workflow.';
   if (/HEALTH_FACTOR|UNSAFE_HEALTH|UNSAFE_POSITION/i.test(error)) return 'This action would leave the lending position below its required safety limit.';
   if (/EXPIRED|STALE|REQUOTE|quote.*expired/i.test(error)) return 'This result has expired. Refresh the simulation before continuing.';
-  if (/SERVICE_UNAVAILABLE|STORAGE_NOT_CONFIGURED|RPC_(?:ERROR|RATE_LIMITED|UNAVAILABLE)|_OFF$|_RATE_LIMITED$/i.test(error)) return 'Simulation is currently unavailable. Try again before continuing.';
+  if (/RPC_RATE_LIMITED|_RATE_LIMITED$/i.test(error)) return 'Simulation is unavailable because the provider is limiting requests. Wait a moment, then simulate again.';
+  if (/RPC_(?:ERROR|UNAVAILABLE)/i.test(error)) return 'Simulation is unavailable because network data could not be read. Try simulating again.';
+  if (/STORAGE_NOT_CONFIGURED/i.test(error)) return 'Simulation is unavailable because execution record storage is not configured on this server. Contact FloFi support.';
+  if (/SERVICE_UNAVAILABLE/i.test(error)) return 'The simulation service is temporarily unavailable. Try again before continuing.';
+  if (/_OFF$/i.test(error)) return 'Simulation is not available for this route on this server. Contact FloFi support.';
   // BUILD-SOLANA-TRANSFER-UX-001: specific meanings before the broad route and fallback messages (nothing here echoes provider text).
   if (/WALLET_SELECTION_REQUIRED|_WALLET_REQUIRED$|WALLET_NOT_CONNECTED|OWNER_REQUIRED|WALLET_PROOF_REQUIRED/i.test(error)) return 'Connect the wallet that will sign this workflow, then simulate again.';
   if (/RECIPIENT_(?:REQUIRED|INVALID|NOT_EOA|NOT_WALLET|IS_TOKEN_ACCOUNT|IS_PROGRAM|OFF_CURVE|IS_SENDER|UNSUPPORTED)/i.test(error)) return 'Check the destination address. It must be a valid wallet address on this network, not a token or program account.';
@@ -246,7 +255,7 @@ export function projectSimulation(workflow: Workflow, context: ReviewContext, so
       if (!guard(same(r.workflow) && boundHash(q.workflowHash, q.revision), r.provenance, Math.min(iso(q.expiresAt), iso(q.quote.expiresAt), q.deadlines.depositMustLandBy * 1000), r.error ?? (r.requote ? 'REQUOTE' : null))) break;
       const route = q.route, s = step(q.nodeId);
       const chosen = [simulationProvider(q.selection.selected), simulationProvider(route.underlyingProtocol)].filter((name, i, all) => name && all.indexOf(name) === i).join(' · ');
-      result(s, simulationAmount(route.inputAmount, route.inputToken.decimals, route.inputToken.symbol), simulationAmount(q.quote.expectedOutput, route.outputToken.decimals, route.outputToken.symbol), chosen || '—', simulationAmount(q.quote.minimumOutput, route.outputToken.decimals, route.outputToken.symbol), route.slippageBps);
+      result(s, simulationAmount(route.inputAmount, route.inputToken.decimals, bridgeTokenSymbol(`eip155:${route.inputToken.chainId}`, route.inputToken)), simulationAmount(q.quote.expectedOutput, route.outputToken.decimals, bridgeTokenSymbol(`eip155:${route.outputToken.chainId}`, route.outputToken)), chosen || '—', simulationAmount(q.quote.minimumOutput, route.outputToken.decimals, bridgeTokenSymbol(`eip155:${route.outputToken.chainId}`, route.outputToken)), route.slippageBps);
       if (s) s.resultLabel = 'Quoted destination output';
       networkFees(q.fees);
       const feeLabels = { INTEGRATOR: 'Provider fee', BRIDGE_RELAYER_CAPITAL: 'Bridge relayer fee', BRIDGE_DESTINATION_GAS: 'Destination delivery fee', BRIDGE_LP: 'Bridge liquidity fee', BRIDGE_OTHER: 'Bridge fee' };
@@ -262,8 +271,8 @@ export function projectSimulation(workflow: Workflow, context: ReviewContext, so
       const r = source.state.record; if (!r) break; const q = r.review, route = q.route;
       if (!guard(same(r.workflow) && boundHash(q.workflowHash, q.revision), r.provenance, Math.min(iso(q.expiresAt), iso(route.quote.expiresAt)), r.error ?? (r.requote ? 'REQUOTE' : null))) break;
       const s = step(q.nodeId), provider = { relay: 'Relay', lifi: 'LI.FI', mayan: 'Mayan', across: 'Across' }[route.provider] ?? route.provider;
-      result(s, simulationAmount(route.inputAmount, route.inputToken.decimals, route.inputToken.symbol), simulationAmount(route.expectedOutput, route.outputToken.decimals, route.outputToken.symbol),
-        provider, simulationAmount(route.minimumOutput, route.outputToken.decimals, route.outputToken.symbol), route.slippageBps);
+      result(s, simulationAmount(route.inputAmount, route.inputToken.decimals, bridgeTokenSymbol(route.sourceChain, route.inputToken)), simulationAmount(route.expectedOutput, route.outputToken.decimals, bridgeTokenSymbol(route.destinationChain, route.outputToken)),
+        provider, simulationAmount(route.minimumOutput, route.outputToken.decimals, bridgeTokenSymbol(route.destinationChain, route.outputToken)), route.slippageBps);
       if (s) s.resultLabel = 'Quoted destination output';
       fee('Maximum network fee', q.feePolicy.networkFeeUpperBound, q.feePolicy.networkFeeDecimals, q.feePolicy.networkFeeSymbol, 'Paid on the source network, separate from the route.');
       for (const f of route.fees) if (f.included && BigInt(f.amount) > 0n) fee(f.label, f.amount, f.decimals, f.symbol, 'Included in the quoted output.');
@@ -283,7 +292,10 @@ export function projectSimulation(workflow: Workflow, context: ReviewContext, so
       for (const stock of q.stocks ?? []) warn('attention', `${stock.symbol}: ${simulationAmount(stock.multiplierWad, 18)} underlying shares per token (Robinhood corporate-action multiplier).`);
       if (q.stocks?.length) warn('attention', 'Stock Tokens are not offered to US persons or in restricted jurisdictions.');
       if (s) s.resultLabel = 'Quoted output';
-      if (!q.ownerReview) warn('attention', 'This is a pool quote. Network fees and exact transaction simulation are not available yet.');
+      if (q.ownerReview) {
+        fee('Network fee budget', q.ownerReview.feeBudgetWei, 18, 'ETH', 'For the next reviewed transaction. Further approvals and actions can have separate network costs.');
+        approvals(q.ownerReview.step === 'approval');
+      } else warn('attention', 'This is a pool quote. Network fees and exact transaction simulation are not available yet.');
       break;
     }
     case 'solana-swap': {

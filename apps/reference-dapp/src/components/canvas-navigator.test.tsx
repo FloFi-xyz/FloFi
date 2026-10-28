@@ -16,13 +16,13 @@ vi.mock('@xyflow/react', async () => {
 beforeEach(() => { Object.assign(viewport, { transform: [0, 0, 1], minZoom: .35, maxZoom: 1.4, width: 1044 }); });
 
 describe('shared canvas navigator', () => {
-  it('exposes an accessible native slider, fit icon and compact percentage without separate zoom buttons', () => {
+  it('exposes an accessible native slider, fit icon and compact percentage with explicit zoom buttons and opt-in wheel navigation', () => {
     const html = renderToStaticMarkup(createElement(CanvasNavigator));
     expect(html).toContain('role="group" aria-label="Canvas navigator"');
     expect(html).toContain('aria-label="Fit workflow" title="Fit workflow"');
     expect(html).toContain('type="range" aria-label="Canvas zoom" aria-valuetext="100%" min="0.35" max="1.4" step="0.01"');
     expect(html).toContain('>100%</button>');
-    expect(html).not.toMatch(/Zoom in|Zoom out|react-flow__controls/);
+    expect(html).toContain('aria-label="Zoom in"'); expect(html).toContain('aria-label="Zoom out"'); expect(html).toContain('aria-pressed="false"');
   });
 
   it('reads updated zoom and constraints directly from the React Flow store', () => {
@@ -46,8 +46,8 @@ describe('shared canvas navigator', () => {
 });
 
 describe('shared canvas gestures', () => {
-  it('pans on two-finger scroll 1:1 and keeps pinch and Ctrl/⌘ + wheel as zoom, scoped to the canvas pane', () => {
-    expect(CANVAS_GESTURES).toEqual({ panOnScroll: true, panOnScrollSpeed: 1, zoomOnScroll: true, zoomOnPinch: true, preventScrolling: true });
+  it('preserves page scroll by default and keeps native pinch scoped to the canvas pane', () => {
+    expect(CANVAS_GESTURES).toEqual({ panOnScroll: false, zoomOnScroll: false, zoomOnPinch: true, zoomOnDoubleClick: false, preventScrolling: false });
     expect(Object.isFrozen(CANVAS_GESTURES)).toBe(true);
     // The navigator itself opts out of canvas wheel/drag handling, so page scrolling over it is untouched.
     expect(renderToStaticMarkup(createElement(CanvasNavigator))).toContain('class="canvas-navigator nodrag nopan nowheel"');

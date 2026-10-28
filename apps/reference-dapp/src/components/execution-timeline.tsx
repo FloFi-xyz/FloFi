@@ -9,6 +9,7 @@ import { executionStepEvidence, type ExecutionStepEvidence } from '../domain/exe
 import { shellChainLabel } from '../domain/product-shell';
 import { NetworkBrandIcon, TokenBrandIcon } from './brand-icon';
 import type { EvidenceValue, OperationResultEvidence } from '../domain/execution-evidence';
+import { BridgeTimeline } from './bridge-timeline';
 import { ExecutionIdentifier } from './execution-identifier';
 const marker = (state: LifecycleState) => state === 'confirmed' ? '✓' : ['failed', 'uncertain', 'cancelled', 'expired', 'not-submitted'].includes(state) ? '!' : state === 'waiting' ? '○' : '●';
 function Transaction({ operation }: { operation: LifecycleOperation }) {
@@ -27,12 +28,16 @@ function StepEvidence({ evidence, action, values, facts }: { evidence: Execution
     {evidence.restored && !evidence.recovered && <p className="execution-evidence-restored">{tr("This step’s saved result was restored.")}</p>}
     {values.length > 0 && <dl className="execution-actual-values">{values.map((item, index) => <div key={`${item.label}-${index}`}><dt>{tr(item.label)}</dt><dd>{tr(item.value)}</dd></div>)}</dl>}
     {facts.filter(item => item.note).map((item, index) => <p key={index}>{tr(item.note, ...item.noteArgs ?? [])}</p>)}
-    {comparisons.length > 0 && <div className="execution-evidence-comparison" role="group" aria-label={tr("Planned and actual values")}>
+    {comparisons.length > 0 && <details className="execution-evidence-comparison"><summary>{tr("Planned and actual values")}</summary>
       <div className="execution-evidence-comparison-head"><span/><span>{tr("Planned")}</span><span>{tr("Actual")}</span></div>
       {comparisons.map((comparison, index) => <div key={`${comparison.label}-${index}`} className="execution-evidence-comparison-row"><span>{tr(comparison.label)}</span><span>{tr(comparison.planned)}</span><strong>{tr(comparison.actual)}</strong></div>)}
       <p>{tr("Actual values come from recorded execution effects.")}</p>
-    </div>}
+    </details>}
   </section>;
+}
+function RequestEvidence({ bridge, children }: { bridge: boolean; children: ReactNode }) {
+  const { t } = useLocale();
+  return bridge ? <details className="bridge-request-details"><summary>{t('Request details and evidence')}</summary>{children}</details> : <>{children}</>;
 }
 export function ExecutionTimeline({ progress, result, workflowName, backToBuild, checkingOperation, primaryAction, runContext = 'current' }: { primaryAction?: ReactNode; progress: ExecutionLifecycle; result?: ExecutionResult | null; workflowName: string; backToBuild?: () => void; checkingOperation?: string | null; runContext?: 'current' | 'saved' }) {
   const { t: tr } = useLocale();
@@ -43,7 +48,8 @@ export function ExecutionTimeline({ progress, result, workflowName, backToBuild,
     {progress.restored && <p className="execution-context" role="status">{tr("Resuming display of the recorded execution. No new request has been sent.")}</p>}
     {progress.planUnavailable && <p className="execution-context">{tr("The original workflow details are unavailable in this saved run. Recorded requests and their status are shown below.")}</p>}
     {primaryAction && <div className="canvas-primary-action execution-lifecycle-actions">{primaryAction}</div>}
-    <ol className="execution-timeline" aria-label={tr("Workflow step progression")}>{progress.steps.map(step => {
+    {progress.bridgeStages && <BridgeTimeline stages={progress.bridgeStages} local={progress.local} evidence={progress.evidence}/>}
+    <RequestEvidence bridge={Boolean(progress.bridgeStages)}><ol className="execution-timeline" aria-label={tr("Workflow step progression")}>{progress.steps.map(step => {
       const recorded = progress.stepEvidence?.[step.id] ?? executionStepEvidence(step, progress.restored);
       const facts = step.operations.flatMap(operation => progress.evidence?.operations[operation.id] ? [progress.evidence.operations[operation.id]!] : []);
       const failure = facts.find(item => item.failure)?.failure;
@@ -61,12 +67,12 @@ export function ExecutionTimeline({ progress, result, workflowName, backToBuild,
           return <li key={operation.id} className={`execution-operation execution-state-${operation.state}`}>
           <div className="execution-operation-heading"><span>{tr(operation.approval ? 'Wallet setup · ' : '')}{tr(operation.title)}</span><strong>{tr(operation.id === checkingOperation ? 'Checking status…' : operation.label)}</strong></div>
           {operation.chain && operation.hash && <p className="execution-operation-network">{tr(shellChainLabel(operation.chain))}</p>}
-          {fact ? fact.identifiers.map(identifier => <ExecutionIdentifier key={`${identifier.kind}-${identifier.value}`} identifier={identifier}/>) : <Transaction operation={operation}/>}
+          {(fact?.identifiers.length || operation.hash) ? <details className="execution-operation-details"><summary>{tr(operation.intent ? 'View order evidence' : 'View transaction evidence')}</summary>{fact ? fact.identifiers.map(identifier => <ExecutionIdentifier key={`${identifier.kind}-${identifier.value}`} identifier={identifier}/>) : <Transaction operation={operation}/>}</details> : null}
           {fact ? fact.fees.map((fee, index) => <p key={index} className="execution-operation-fee">{tr(fee.label)} · {tr(fee.value)}</p>) : operation.fee && <p className="execution-operation-fee">{tr("Actual network fee · ")}{tr(operation.fee)}</p>}
           {!showEvidence && fact && fact.values.length > 0 && <dl className="execution-actual-values">{fact.values.map((value, index) => <div key={index}><dt>{tr(value.label)}</dt><dd>{tr(value.value)}</dd></div>)}</dl>}
           {!showEvidence && fact?.note && <p className="execution-context">{tr(fact.note, ...fact.noteArgs ?? [])}</p>}
         </li>; })}</ul>
       </div>
-    </li>; })}</ol>
+    </li>; })}</ol></RequestEvidence>
   </section>;
 }
