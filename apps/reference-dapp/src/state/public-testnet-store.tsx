@@ -8,6 +8,7 @@ import type { PublicRun } from '../server/public-testnet-service';
 import { ownerBoundSwapReview, swapProfile } from '../domain/public-testnet-swap';
 import { injected, useBuild009Wallet } from './build009-wallet-store';
 import { useWorkflow } from './workflow-store';
+import { watchWalletResponse } from './wallet-request-lifecycle';
 
 const KEY = 'gryloo:public-testnet-execution-id';
 /**
@@ -24,7 +25,7 @@ type Store = { readonly available: boolean;
   /** BUILD-BASE-001: whether this instance serves a catalog network's mainnet swaps (live or the MOCKED loopback harness). */
   readonly catalogAvailable: (chain: string) => boolean;
   readonly run: PublicRun | null; readonly recoveryOnly: boolean;
-  readonly retired: boolean; readonly busy: string | null; readonly error: string | null;
+  readonly retired: boolean; readonly busy: string | null; readonly signing: boolean; readonly error: string | null;
   simulate(): void; review(): void; execute(): void; observe(): void; switchNetwork(): void };
 const Context = createContext<Store | null>(null);
 function unwrap<T>(result: { ok: true; value: T } | { ok: false; code: string }): T {
@@ -82,6 +83,7 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
   const [source, setSource] = useState<SemanticWorkflow | null>(null);
   const [recoveryOnly, setRecoveryOnly] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
+  const [signingAttempt, setSigningAttempt] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   // BUILD-FIX-UX-001: an earlier attempt's message (e.g. a declined wallet request) belongs to that workflow; a new one starts without it.
   const workflowId = state.workflow.workflowId;
@@ -181,6 +183,8 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
       throw new Error(begun.code);
     }
     const { attempt, tx } = begun.value;
+    const acceptCurrent = (value: PublicRun) => setRun(current => current?.quote.executionId === run.quote.executionId ? value : current);
+    const clearSigning = () => setSigningAttempt(current => current === attempt.attemptId ? null : current);
     setRun(unwrap(await publicStatus(run.quote.executionId)));
     if (tx.chainId !== profile.chainHex || tx.from !== session.account || tx.value !== '0x0' ||
         tx.to !== (attempt.step === 'approval' ? run.quote.inputToken : profile.router) ||
@@ -197,28 +201,34 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
     }
     let hash: unknown;
     busyRef.current = false; setBusy(null);
-    try { hash = await provider.request({ method: 'eth_sendTransaction', params: [tx] }); }
+    setSigningAttempt(attempt.attemptId);
+    try { hash = await watchWalletResponse(provider, () => provider.request({ method: 'eth_sendTransaction', params: [tx] }), () => {
+      clearSigning();
+      void publicReport(run.quote.executionId, attempt.attemptId, { kind: 'UNKNOWN' }).then(result => { if (result.ok) acceptCurrent(result.value); }).catch(() => undefined);
+    }); }
     catch (cause) {
-      setRun(unwrap(await publicReport(run.quote.executionId, attempt.attemptId, { kind: rejected(cause) ? 'REJECTED' : 'UNKNOWN' })));
+      acceptCurrent(unwrap(await publicReport(run.quote.executionId, attempt.attemptId, { kind: rejected(cause) ? 'REJECTED' : 'UNKNOWN' })));
       if (rejected(cause)) throw new Error('WALLET_AUTHORIZATION_REJECTED', { cause });
       throw new Error('SUBMISSION_RESULT_UNKNOWN', { cause });
     }
+    finally { clearSigning(); }
     if (typeof hash !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(hash)) {
-      setRun(unwrap(await publicReport(run.quote.executionId, attempt.attemptId, { kind: 'UNKNOWN' })));
+      acceptCurrent(unwrap(await publicReport(run.quote.executionId, attempt.attemptId, { kind: 'UNKNOWN' })));
       throw new Error('SUBMISSION_RESULT_UNKNOWN');
     }
     const txHash = hash.toLowerCase();
     localStorage.setItem(KEY + ':' + attempt.attemptId, txHash);
-    setRun(unwrap(await publicReport(run.quote.executionId, attempt.attemptId, { kind: 'HASH', txHash })));
+    acceptCurrent(unwrap(await publicReport(run.quote.executionId, attempt.attemptId, { kind: 'HASH', txHash })));
     for (let i = 0; i < 30; i++) {
       const observed = unwrap(await publicObserve(run.quote.executionId));
-      setRun(observed);
+      acceptCurrent(observed);
       const state = observed.attempts.at(-1)?.state;
       if (state !== 'PENDING') break;
       await new Promise<void>(resolve => setTimeout(resolve, 2_000));
     }
   }), [guarded, run, retired, wallet]);
-  return <Context.Provider value={{ available, catalogAvailable, run, recoveryOnly, retired, busy, error,
+  const signing = Boolean(signingAttempt && run?.attempts.some(attempt => attempt.attemptId === signingAttempt));
+  return <Context.Provider value={{ available, catalogAvailable, run, recoveryOnly, retired, busy, signing, error,
     simulate, review, execute, observe, switchNetwork }}>{children}</Context.Provider>;
 }
 export function usePublicTestnet(): Store { const value = useContext(Context); if (!value) throw new Error('PUBLIC_TESTNET_PROVIDER_MISSING'); return value; }

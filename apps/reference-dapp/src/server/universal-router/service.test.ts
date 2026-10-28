@@ -103,6 +103,11 @@ async function settle(c: Ctx, record: UniversalRecord, amount?: bigint): Promise
   return c.service.observe(record.id);
 }
 const roundTripLog = async (c: Ctx, id: string) => { const record = await c.service.load(id); expect(record.id).toBe(id); return record; };
+function financialView(record: UniversalRecord) {
+  const source = { kind: 'universal', state: { record, busy: false, signing: false, recovered: false } } as ExecutionLifecycleSource;
+  const progress = projectExecutionLifecycle(record.workflow as unknown as Workflow, createBaseSepoliaReviewContext(), source);
+  return { progress, evidence: projectExecutionEvidence(source, progress) };
+}
 
 describe('A–E: Solana ⇄ every EVM mainnet, verified source to verified delivery', () => {
   it('A. Solana USDC → Base USDC: one Solana signature, FloFi broadcasts once, Base delivery proven, evidence', async () => {
@@ -258,6 +263,23 @@ describe('I–K: independent and identical bridges, duplicate clicks and retries
 describe('L: pending, delayed, reverted, expired and refunded bridges', () => {
   const sol = () => workflow({ sourceChain: UNIVERSAL_NETWORKS.solana.chain, destinationChain: UNIVERSAL_NETWORKS.base.chain, inputAsset: token('solana'), outputAsset: token('base'),
     amount: '10000000', recipient: EVM_RECIPIENT });
+  it('shows verified source debit, actual Solana cost and non-final destination amount without claiming reconciliation', async () => {
+    const c = await setup(), w = sol(), confirmed = await executeSolana(c, (await reviewed(c, w, c.wallet.publicKey)).id, w);
+    const pending = financialView(confirmed);
+    expect(pending.progress.state).toBe('active');
+    expect(pending.evidence.operations.DEPOSIT?.values).toContainEqual({ label: 'Executed input', value: '10 USDC' });
+    expect(pending.evidence.knownCosts).toContainEqual(expect.objectContaining({ value: '0.00000705 SOL' }));
+    expect(pending.evidence.operations.destination?.values ?? []).toEqual([]);
+    const route = confirmed.review.route, base = c.chainOf('base');
+    const hash = base.deliver({ recipient: route.recipient, token: route.outputToken.address, amount: BigInt(route.expectedOutput), orderId: route.order.orderId });
+    c.relayMock.setStatus(route.quote.id, { status: 'success', inTxHashes: [confirmed.source!.transactionHash], txHashes: [hash] });
+    const observed = await c.service.observe(confirmed.id), view = financialView(observed);
+    expect(observed).toMatchObject({ verdict: 'PENDING', destination: { final: false } });
+    expect(view.progress.steps[0]?.operations.at(-1)?.label).toBe('Destination observed · awaiting finality');
+    expect(view.evidence.operations.destination?.values).toContainEqual(expect.objectContaining({ label: 'Destination amount observed · awaiting reconciliation' }));
+    expect(view.evidence.operations.destination?.comparisons).toEqual([]);
+    expect(view.progress.state).toBe('active');
+  });
   it('pending, then delayed past the attention window, then a late delivery is still verified and reconciled', async () => {
     const c = await setup(), w = sol(), confirmed = await executeSolana(c, (await reviewed(c, w, c.wallet.publicKey)).id, w);
     expect((await c.service.observe(confirmed.id))).toMatchObject({ phase: 'IN_FLIGHT', error: 'UNIVERSAL_DESTINATION_PENDING' });
@@ -294,7 +316,12 @@ describe('L: pending, delayed, reverted, expired and refunded bridges', () => {
     const c = await setup(), w = sol(), confirmed = await executeSolana(c, (await reviewed(c, w, c.wallet.publicKey)).id, w);
     const refund = c.solana.deliver({ recipient: c.wallet.publicKey, mint: USDC.solana, amount: 10_000_000n, orderId: confirmed.review.route.order.orderId });
     c.relayMock.setStatus(confirmed.review.route.quote.id, { status: 'refund', txHashes: [refund], failReason: 'EXECUTION_REVERTED' });
-    expect(await c.service.observe(confirmed.id)).toMatchObject({ phase: 'REFUNDED', verdict: 'REFUNDED', refund: { recipient: c.wallet.publicKey, amount: '10000000' } });
+    const refunded = await c.service.observe(confirmed.id);
+    expect(refunded).toMatchObject({ phase: 'REFUNDED', verdict: 'REFUNDED', refund: { recipient: c.wallet.publicKey, amount: '10000000' } });
+    const view = financialView(refunded);
+    expect(view.evidence.operations.destination?.values).toContainEqual({ label: 'Verified refund', value: '10 USDC' });
+    expect(view.evidence.knownCosts).toContainEqual(expect.objectContaining({ value: '0.00000705 SOL' }));
+    expect(view.progress.state).not.toBe('complete');
   });
   it('a delivery below the reviewed minimum is divergent, never success', async () => {
     const c = await setup(), w = sol(), confirmed = await executeSolana(c, (await reviewed(c, w, c.wallet.publicKey)).id, w);
