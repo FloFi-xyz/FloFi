@@ -26,8 +26,9 @@ export function CanvasLifecycleAction(props: ExecutionControlsState & {
   return <div className="canvas-lifecycle-control">
     {/* UX-003: simulating / waiting for the wallet keep the CTA position as a locked, active button; a duplicate request cannot start. */}
     {action.processing ? <button data-lifecycle-action="processing" type="button" className="primary canvas-cta-processing" disabled aria-busy="true"><span className="canvas-cta-spinner" aria-hidden="true"/>{t(action.label)}</button>
-      : action.kind === 'status' ? <span role="status" data-lifecycle-action="status">{t(action.label)}</span> : <button data-lifecycle-action={action.kind} type="button" className="primary" disabled={disabled} onClick={act}>{t(action.label)}</button>}
-    {action.kind === 'simulate' && props.simulationReason && <p role="status">{t(props.simulationReason)}</p>}
+      : action.kind === 'status' ? <span role="status" data-lifecycle-action="status">{t(action.label)}</span> : <button data-lifecycle-action={action.kind} type="button" className="primary" disabled={disabled}
+        title={action.kind === 'simulate' && disabled && props.simulationReason ? t(props.simulationReason) : undefined}
+        aria-description={action.kind === 'simulate' && disabled && props.simulationReason ? t(props.simulationReason) : undefined} onClick={act}>{t(action.label)}</button>}
     {c.live?.steps.some(step => step.operations.some(operation => operation.state === 'wallet')) && <WalletPendingNotice/>}
   </div>;
 }

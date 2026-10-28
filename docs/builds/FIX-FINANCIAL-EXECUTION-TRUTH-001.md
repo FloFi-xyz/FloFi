@@ -73,6 +73,17 @@ Two additional financial-evidence regressions were run with the current real ser
 
 Full unit/security, PostgreSQL, build, browser, governance and exact-head CircleCI results are recorded in the PR after the final implementation. An interrupted or failed validation attempt is not certification. Unit and PostgreSQL fixtures remain isolated engineering infrastructure, never product execution fallbacks.
 
+### Resumed certification diagnosis
+
+Recovered the existing worktree at `0384129b8cc8b776caf465c7009bc3e71f8fbe62`, including five unfinished simulation-presentation files. Downloaded every available step log and artifact (JUnit, screenshots, error context and diagnostic traces) from workflow `49ef11e7-3c99-4484-a34c-bb891d5b6ab1`. Both browser jobs identify that exact revision and passed their production builds; neither failure was an application build or infrastructure failure.
+
+- Browser 1, job **630**, stopped in `review-execute-recovery-components`: two assertions expected `Execution failed` or `Transaction not submitted` even though their fixtures include a confirmed approval. The local unchanged profile reproduced both failures, with **37 passed / 2 failed**. The assertions now require partial execution, zero completed transfer steps, preserved approval/cost evidence and no new wallet requests. The financial result projector is unchanged.
+- Browser 2, job **628**, stopped in `canvas-automation-ux`: the added simulation-reason paragraph enlarged the floating control, intercepted a Solana token-picker click and moved the CTA **60 pixels** from its required position. The recovered correction uses the disabled button's existing title/accessibility description and the existing Simulation Summary status message. It adds no floating action row or CSS/layout redesign, and changes no simulation or authorization prerequisite.
+
+Later profiles and the certification fan-in did not run in that failed workflow. Focused local passes do not certify those unrun profiles; the existing PR records the final exact-head ledger separately. Automatic Vercel previews were canceled, which is not evidence of an application build failure. The forensic production run and its durable history were not accessed or changed during this resumed work.
+
+Resumed local verification: **5,404 unit/security tests passed**, two existing skips; **511 PostgreSQL tests passed**, three existing skips, on disposable loopback PostgreSQL **18.6**; `review-execute-recovery-components` **39/39**, `canvas-automation-ux` **18/18**, and `universal-bridge` **11/11** passed. Typecheck, lint, schema drift, governance and its **19** tests, and **56** CI orchestration tests passed. Browser tests used the pinned headless-shell revision **1243**, Node **24.21.0**, pnpm **11.22.0** and the hash-verified Anvil **1.8.3**. The PR holds the subsequent full CircleCI result for the final commit; these local results alone do not establish certification.
+
 ## Caio T01–T14 coverage disposition
 
 | Test | Scope |

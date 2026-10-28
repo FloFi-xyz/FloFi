@@ -331,10 +331,10 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   }
   // BUILD-FLOFI-PRODUCT-UX-001: informational Beta Mainnet notice only; it gates nothing. Omitted from the compact signing surface.
   const betaNotice = <p className="beta-notice" role="note">{tr("FloFi Beta Mainnet — Real funds are enabled. Review every transaction before signing.")}</p>;
-  const simulationReason = simulationUnavailableReason({ incomplete: Boolean(authoringIncomplete || reviewError || !actionable),
+  const simulationReason = simulationDisabled || !actionable ? simulationUnavailableReason({ incomplete: Boolean(authoringIncomplete || reviewError || !actionable),
     unsupported: testNetworkWorkflow || simulationSource.kind === 'unavailable', walletRequired: !signer || Boolean(approvalGate),
     providerUnavailable: 'available' in simulationSource.state && simulationSource.state.available === false || 'info' in simulationSource.state && simulationSource.state.info?.available === false,
-    error: simulationSource.state.error, staleQuote: lifecycleControls.view.expiresAt !== null && Date.now() >= lifecycleControls.view.expiresAt });
+    error: simulationSource.state.error, staleQuote: lifecycleControls.view.expiresAt !== null && Date.now() >= lifecycleControls.view.expiresAt }) : null;
   const simulateAction = walletIssue ? <div className="canvas-lifecycle-control"><p role="status">{walletIssue}</p><button type="button" onClick={() => void walletConnection.connect()}>{tr('Use another wallet')}</button></div>
     : networkAction ? <div className="canvas-lifecycle-control"><button type="button" disabled={networkAction.disabled} onClick={networkAction.request}>{networkAction.label}</button>{walletConnection.error && <p role="status">{tr(walletConnection.error)}</p>}</div> : <CanvasLifecycleAction {...lifecycleState} controls={lifecycleControls} workflowName={workflowName}
     simulationDisabled={simulationDisabled || !actionable} simulationReason={simulationReason}
@@ -373,7 +373,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     <AutomationInbox owner={owner} proven={Boolean(owner && proof.proven === owner.address)} open={() => navigate?.('/app/automations')}/>
     <main id="workspace" className={`main workflow-workspace${tab === 'Build' ? ' build-workspace' : ''}`} data-workspace-toolbox={workspaceToolboxMode} tabIndex={-1} aria-label={tr(tab === 'Build' ? 'Workflow workspace' : tab === 'Simulate' ? 'Simulation workspace' : 'Execution workspace')}>
       {tab === 'Execute' ? <ExecuteWorkspace controls={lifecycleControls} primaryAction={simulateAction} workflowName={workflowName} workflow={state.workflow} context={context} source={simulationSource} authorization={authorization} wallet={reviewBinding.wallet} execution={executionStart} progress={executionProgress} recovery={executionProgress.recovery} invalidWorkflow={Boolean(reviewError || authoringIncomplete)} backToBuild={() => setTab('Build')} backToSimulate={() => setTab('Simulate')} startNewWorkflow={startNewWorkflow} technicalDetails={executionStart.started || executionProgress.started || recoveryPath || localCowIntent ? stageContent : undefined}/> : tab === 'Simulate' ?
-        <SimulateWorkspace workflowName={workflowName} returnToBuild={() => setTab('Build')} simulationSource={simulationSource} review={embeddedReview} simulateAction={simulateAction}>
+        <SimulateWorkspace workflowName={workflowName} returnToBuild={() => setTab('Build')} simulationSource={simulationSource} simulationReason={simulationReason} review={embeddedReview} simulateAction={simulateAction}>
           {engineering && <details className="shell-details technical-workspace simulation-technical"><summary>{tr('View technical details')}</summary><ReviewTechnicalDetails authorization={authorization}/>{stageContent}</details>}
         </SimulateWorkspace> : stageContent}
       <MobileBuildNavigation stage={tab === 'Build' ? 'Build' : tab === 'Simulate' ? 'Simulate' : 'Execute'}/>
