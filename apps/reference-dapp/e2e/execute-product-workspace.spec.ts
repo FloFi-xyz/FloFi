@@ -476,9 +476,9 @@ test('wallet interaction, submission and confirmation show only recorded lifecyc
     await page.screenshot({ path: `.tmp/ux005e-wallet-${theme}.png`, fullPage: true });
   }
   await page.evaluate(() => window.flofiExecuteAcceptance.lifecycle('submitting'));
-  await expect(page.locator('.execution-summary')).toContainText('Submitting transaction…');
-  await expect(page.locator('.execution-summary')).toContainText('Confirmation is not yet known');
-  await expect(page.locator('.execution-timeline')).toContainText('Submitting');
+  // A restored handoff without a live wallet request or a hash has an unknown submission result.
+  await expect(page.locator('.execution-summary')).toContainText('Execution status unresolved');
+  await expect(page.locator('.execution-timeline')).toContainText('Execution status uncertain');
   await expect(page.locator('.execution-timeline')).not.toContainText('Action transaction');
   await page.evaluate(() => window.flofiExecuteAcceptance.lifecycle('submitted'));
   await expect(page.locator('.execution-timeline')).toContainText('Transaction submitted');

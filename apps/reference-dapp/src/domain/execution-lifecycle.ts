@@ -3,7 +3,7 @@
 import { financialAttemptState } from './financial-run-status';
 import type { ReviewContext } from '@defi-workflow-engine/reference-linter';
 import { CROSSCHAIN_ROUTER_PROFILES, ROBINHOOD_TESTNET_TRANSFER, solanaSwapRuntime } from '@defi-workflow-engine/action-registry';
-import type { Workflow } from './initial-workflow';
+import { isPristineDraft, type Workflow } from './initial-workflow';
 import { composerActions, composerSummary } from './composer-presentation';
 import { simulationAmount, simulationProvider } from './simulation-presentation';
 import { shellChainLabel } from './product-shell';
@@ -290,5 +290,7 @@ export function projectExecutionLifecycle(currentWorkflow: Workflow, context: Re
   const active = steps.find(step => step.state !== 'confirmed') ?? null;
   const label = lifecycleState === 'uncertain' ? 'Execution status uncertain' : lifecycleState === 'attention' ? 'Execution needs attention' : lifecycleState === 'complete' ? 'Execution confirmed' : lifecycleState === 'active' ? 'Execution in progress' : 'Waiting to start';
   const message = lifecycleState === 'uncertain' ? 'The current request cannot be confirmed or ruled out. No transaction is repeated.' : lifecycleState === 'attention' ? 'The current step could not complete. Any confirmed actions remain recorded. Nothing is retried automatically.' : lifecycleState === 'complete' ? planUnavailable ? 'The saved requests are confirmed. Original workflow details remain unavailable.' : 'All workflow actions are confirmed in the current execution record.' : `${completed} of ${steps.length} actions completed. Each new wallet request requires your explicit confirmation.`;
-  return { started, restored, local, matchesWorkflow: !planUnavailable && JSON.stringify(workflow) === JSON.stringify(currentWorkflow), planUnavailable, steps, active, completed, label, message, state: lifecycleState, runKey, fingerprint: JSON.stringify(operations.map(op => [op.id, op.state, op.hash])), busy: Boolean(state.busy) };
+  // The selected runtime restores into the visit's untouched draft. Terminal results must attach there too, just as pending results do.
+  const matchesWorkflow = !planUnavailable && (JSON.stringify(workflow) === JSON.stringify(currentWorkflow) || restored && isPristineDraft(currentWorkflow));
+  return { started, restored, local, matchesWorkflow, planUnavailable, steps, active, completed, label, message, state: lifecycleState, runKey, fingerprint: JSON.stringify(operations.map(op => [op.id, op.state, op.hash])), busy: Boolean(state.busy) };
 }

@@ -16,6 +16,7 @@ import { test, expect, chooseWallet, openProposalReview, openSimulationDetails, 
 import { installSolanaWallet, MOCKED_SOLANA_WALLET, signRequests } from './jupiter-fixtures';
 import { createTestWallet, personalSignText, type TestWallet } from '../../../packages/reference-reconciler/test/test-wallet.ts';
 import type { BuildEstimateResult } from '../src/domain/build-estimate';
+import { replayProviderLogos } from './asset-logo-replay';
 
 const copilotSays = (page: Page) => page.getByRole('log', { name: 'Conversation' }).locator('.message.ai').last();
 async function ask(page: Page, text: string) {
@@ -117,7 +118,7 @@ async function observeUntil(page: Page, done: () => Promise<boolean>) {
 }
 
 let wallets: Awaited<ReturnType<typeof reset>>;
-test.beforeEach(async () => { wallets = await reset(); });
+test.beforeEach(async ({ page }) => { wallets = await reset(); await replayProviderLogos(page); });
 
 test('Solana USDC → Base: routes found, Review, one Solana signature, FloFi broadcasts once, delivery verified on Base, evidence', async ({ page, networkGuard }) => {
   const errors: string[] = []; page.on('pageerror', e => errors.push(e.message));
@@ -312,7 +313,8 @@ test('financial truth: an unresolved EVM wallet stays navigable and recoverable,
   await expect(page.locator('[data-universal-wallet-pending="true"]')).toHaveCount(0);
   await expect(panel(page).getByRole('list', { name: 'Source transactions' })).toContainText('Approval: cancelled');
   await page.reload(); await stages.getByRole('button', { name: 'Execute', exact: true }).click();
-  await expect(page.locator('.execution-plan')).toContainText('Not submitted');
+  await expect(page.locator('.execution-timeline')).toContainText('Wallet request declined');
+  await expect(page.locator('.execution-summary')).toContainText('Transaction not submitted');
   expect(await counters()).toEqual({ solanaSends: 0, evmSends: 0 });
   expect(await page.evaluate(() => (window as unknown as { evmSends: unknown[] }).evmSends.length)).toBe(0);
   networkGuard.assertClean();
