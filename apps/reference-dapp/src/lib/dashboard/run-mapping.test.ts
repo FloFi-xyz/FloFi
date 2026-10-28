@@ -79,3 +79,8 @@ describe('Dashboard consumes existing execution truth', () => {
     expect(projectDashboardRecord({ ...value, record: { workflow: { nodes: [] } } }, context)).toBeNull();
   });
 });
+
+it('never presents PREPARED, refused or canceled summary records as an on-chain transfer', () => {
+  expect(projectDashboardRun(run('PREPARED')).status).toBe('Not started');
+  for (const status of ['CANCELLED', 'REJECTED']) expect(projectDashboardRun(run(status)).status).toBe('Transaction not submitted');
+});

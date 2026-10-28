@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
+import { WalletPendingNotice } from '../components/wallet-pending-notice';
 import { createContext,useContext,useEffect,useRef,useState,type ReactNode } from 'react';
 import { isLendingComposition,type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { readLendingComposition } from '@defi-workflow-engine/workflow-contracts';
@@ -19,7 +20,7 @@ export const lendingRunInProgress=(r:Pick<LendingRecord,'attempts'|'status'>)=>r
 export function LendingProvider({children}:{children:ReactNode}){
   const {state,restoreLendingCanvas,trackCanvasRestoration}=useWorkflow(),wallet=useBuild009Wallet(),workflow=state.workflow as SemanticWorkflow;
   const [record,setRecord]=useState<LendingRecord|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState<string|null>(null),[recovered,setRecovered]=useState(false),[signing,setSigning]=useState(false);
-  const latest=useRef(workflow);latest.current=workflow;const walletRef=useRef(wallet);walletRef.current=wallet;const busyRef=useRef(false);
+  const latest=useRef(workflow);latest.current=workflow;const walletRef=useRef(wallet);walletRef.current=wallet;const busyRef=useRef(false),operationEpoch=useRef(0);
   const pristine=recovered&&workflow.revision===0&&workflow.nodes.every(n=>n.actionType.startsWith('mock-'));
   const retired=Boolean(record&&JSON.stringify(workflow)!==JSON.stringify(record.reviews[0]!.workflow)&&!pristine);
   const accept=(r:LendingRecord)=>{setRecord(r);let prior:{id?:string;attempt?:string;hash?:string}|null=null;try{prior=JSON.parse(window.localStorage.getItem(key)??'null');}catch{ /* Durable server history remains authoritative. */ }
@@ -37,7 +38,7 @@ export function LendingProvider({children}:{children:ReactNode}){
     return()=>{live=false;};
   },[restoreLendingCanvas,trackCanvasRestoration]);
   useEffect(()=>{if(record&&retired&&record.authorization)lendingInvalidate(record.id).then(r=>{if(r.ok)setRecord(r.value);}).catch(()=>setError('LENDING_INVALIDATION_FAILED'));},[record,retired]);
-  async function operation(action:()=>Promise<void>){if(busyRef.current)return;busyRef.current=true;setBusy(true);setError(null);try{await action();}catch(cause){setError(cause instanceof Error?cause.message:'LENDING_OPERATION_FAILED');}finally{busyRef.current=false;setBusy(false);}}
+  async function operation(action:()=>Promise<void>){if(busyRef.current)return;const epoch=++operationEpoch.current;busyRef.current=true;setBusy(true);setError(null);try{await action();}catch(cause){setError(cause instanceof Error?cause.message:'LENDING_OPERATION_FAILED');}finally{if(operationEpoch.current===epoch){busyRef.current=false;setBusy(false);}}}
   async function simulate(){return operation(async()=>{
     // HOTFIX-WORKFLOW-CONCURRENCY-001: a pending transaction never blocks a new, separate simulation; the earlier run keeps being observed
     // server-side and stays listed in Dashboard.
@@ -77,7 +78,7 @@ export function LendingProvider({children}:{children:ReactNode}){
       const ready=await lendingHandoff(record.id,attempt);if(!ready.ok)throw Error(ready.code);handoff=true;accept(ready.value);
       if(walletRef.current.account!==session.account||walletRef.current.chainId!==session.chainId)throw Error('LENDING_SESSION_CHANGED');
       await validate(begin.value.record.attempts.at(-1)!.nonce);
-      setSigning(true);
+      setSigning(true);busyRef.current=false;setBusy(false);
       // Only this explicit owner click reaches the provider submission method. Recovery never does.
       let hash:unknown;try{hash=await provider.request({method:'eth_sendTransaction',params:[supplyWalletTransaction(begin.value.transaction)]});}finally{setSigning(false);}
       if(typeof hash!=='string'||!/^0x[0-9a-fA-F]{64}$/.test(hash))throw Error('LENDING_SUBMISSION_UNKNOWN');
@@ -89,6 +90,6 @@ export function LendingProvider({children}:{children:ReactNode}){
     }
     const result=await lendingObserve(record.id);if(result.ok)accept(result.value);
   });}
-  return <Context.Provider value={{record,busy,signing,error,retired,recovered,simulate,review,execute,observe,refresh,cancelPrepared}}>{signing&&<p role="status">Confirm the exact transaction in your wallet.</p>}<div inert={signing}>{children}</div></Context.Provider>;
+  return <Context.Provider value={{record,busy,signing,error,retired,recovered,simulate,review,execute,observe,refresh,cancelPrepared}}>{signing&&<WalletPendingNotice/>}<div>{children}</div></Context.Provider>;
 }
 export function useLending(){const value=useContext(Context);if(!value)throw Error('LENDING_PROVIDER_MISSING');return value;}

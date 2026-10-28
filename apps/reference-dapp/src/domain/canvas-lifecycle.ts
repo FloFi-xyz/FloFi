@@ -25,7 +25,7 @@ export function projectCanvasAction(props: ExecutionControlsState, controls: {
   // a fresh simulation; an unresolved run always retains recovery.
   const progress = currentExecution(props.progress);
   const op = progress?.active?.operations.find(o => !['waiting', 'confirmed'].includes(o.state));
-  if (controls.requesting || op?.state === 'wallet') return { kind: 'status', label: 'Waiting for wallet…', disabled: true, processing: true };
+  if (controls.requesting || op?.state === 'wallet' && !controls.canCheck) return { kind: 'status', label: 'Waiting for wallet…', disabled: true, processing: true };
   if (controls.authorizing) return { kind: 'status', label: 'Preparing authorization…', disabled: true, processing: true };
   if (controls.verifying) return { kind: 'status', label: 'Reconciling…', disabled: true };
   if (progress) {

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { portugueseFinancialExecution } from './pt-financial-execution';
 import { portugueseCrossChain } from './pt-cross-chain';
 import { portugueseLocalRuntime } from './pt-local-runtime';
 import { portugueseBridges } from './pt-bridges';
@@ -28,6 +29,7 @@ import { portugueseUniversalBridge } from './pt-universal-bridge';
 /** English source messages are stable presentation keys. Technical identifiers never enter this catalog. */
 export const portuguese: Readonly<Record<string, string>> = {
   // BUILD-AUTOMATION-001/002: first, so an existing product translation of a shared word keeps precedence.
+  ...portugueseFinancialExecution,
   ...portugueseDelegation,
   ...portugueseMainnetProduct,
   ...portugueseConcurrency,

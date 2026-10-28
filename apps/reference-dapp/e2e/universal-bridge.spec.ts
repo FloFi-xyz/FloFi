@@ -53,13 +53,13 @@ async function reset(): Promise<{ solana: ReturnType<typeof createMockedSolanaWa
   return { solana, evm };
 }
 /** The test's EVM wallet (an injected EIP-1193 provider): signs sign-in messages; its only broadcast is the MOCKED loopback chain. */
-async function installEvmWallet(page: Page, wallet: TestWallet) {
+async function installEvmWallet(page: Page, wallet: TestWallet, mode: 'normal' | 'pause-reject' = 'normal') {
   await page.exposeFunction('flofiUniversalControl', control);
   await page.exposeFunction('flofiUniversalSign', (message: unknown) => wallet.signMessage(personalSignText(message)));
-  await page.addInitScript(owner => {
+  await page.addInitScript(({ owner, mode }) => {
     const state = { chain: '0x2105' };
     const w = window as unknown as { ethereum: unknown; flofiUniversalControl: (method: string, params: unknown[]) => Promise<unknown>;
-      flofiUniversalSign: (message: unknown) => Promise<string>; evmSends: unknown[] };
+      flofiUniversalSign: (message: unknown) => Promise<string>; evmSends: unknown[]; rejectEvmRequest?: () => void };
     w.evmSends = [];
     w.ethereum = { on() { /* no events */ }, removeListener() { /* no events */ }, request: async (input: { method: string; params?: unknown[] }) => {
       if (input.method === 'eth_accounts' || input.method === 'eth_requestAccounts') return [owner];
@@ -67,10 +67,12 @@ async function installEvmWallet(page: Page, wallet: TestWallet) {
       if (input.method === 'wallet_switchEthereumChain') { state.chain = (input.params?.[0] as { chainId: string }).chainId; return null; }
       if (input.method === 'personal_sign') return w.flofiUniversalSign(input.params?.[0]);
       if (input.method === 'eth_getTransactionCount') return w.flofiUniversalControl('MOCK_nonce', [...input.params ?? [], state.chain]);
-      if (input.method === 'eth_sendTransaction') { w.evmSends.push(input.params?.[0]); return w.flofiUniversalControl('MOCK_evm_send', [{ ...input.params?.[0] as object, chainId: state.chain }]); }
+      if (input.method === 'eth_sendTransaction') { w.evmSends.push(input.params?.[0]);
+        if (mode === 'pause-reject') await new Promise((_resolve, reject) => { w.rejectEvmRequest = () => reject(Object.assign(new Error('Owner rejected'), { code: 4001 })); });
+        return w.flofiUniversalControl('MOCK_evm_send', [{ ...input.params?.[0] as object, chainId: state.chain }]); }
       throw new Error('MOCK_WALLET_METHOD_DENIED');
     } };
-  }, wallet.address);
+  }, { owner: wallet.address, mode });
 }
 async function authorByChat(page: Page, sentence: string) {
   await page.goto('/app');
@@ -289,4 +291,29 @@ test('P0 Canvas independently selects Base USDC and Arbitrum WETH and applies th
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '1');
   await page.getByRole('button', { name: 'Simulate workflow' }).click(); await openSimulationDetails(page);
   await expect(panel(page)).toContainText('Bridge 1 USDC from Base to Arbitrum One, receiving WETH.');
+});
+
+
+test('financial truth: an unresolved EVM wallet stays navigable and recoverable, then a definite rejection survives reload without a send', async ({ page, networkGuard }) => {
+  await installEvmWallet(page, wallets.evm, 'pause-reject');
+  await authorByChat(page, 'bridge 1 USDC from Base to Arbitrum receive WETH');
+  await page.getByRole('button', { name: 'Simulate workflow' }).click(); await openSimulationDetails(page);
+  await expect(panel(page)).toContainText('Guaranteed minimum');
+  await acceptAndExecute(page);
+  await expect(page.locator('[data-universal-wallet-pending="true"]')).not.toHaveAttribute('inert', '');
+  const stages = page.getByRole('navigation', { name: 'Workflow stages' });
+  await stages.getByRole('button', { name: 'Build', exact: true }).click();
+  await expect(page.locator('.build-flow-surface')).toBeVisible();
+  await stages.getByRole('button', { name: 'Simulate', exact: true }).click(); await openSimulationDetails(page);
+  await expect(panel(page).getByRole('button', { name: 'Observe bridge', exact: true })).toBeEnabled();
+  await panel(page).getByRole('button', { name: 'Observe bridge', exact: true }).click();
+  expect(await counters()).toEqual({ solanaSends: 0, evmSends: 0 });
+  await page.evaluate(() => (window as unknown as { rejectEvmRequest: () => void }).rejectEvmRequest());
+  await expect(page.locator('[data-universal-wallet-pending="true"]')).toHaveCount(0);
+  await expect(panel(page).getByRole('list', { name: 'Source transactions' })).toContainText('Approval: cancelled');
+  await page.reload(); await stages.getByRole('button', { name: 'Execute', exact: true }).click();
+  await expect(page.locator('.execution-plan')).toContainText('Not submitted');
+  expect(await counters()).toEqual({ solanaSends: 0, evmSends: 0 });
+  expect(await page.evaluate(() => (window as unknown as { evmSends: unknown[] }).evmSends.length)).toBe(0);
+  networkGuard.assertClean();
 });

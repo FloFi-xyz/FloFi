@@ -86,6 +86,22 @@ describe('BUILD-CLOUD-001 transactional outbox and durable work queue', () => {
     await sweep(db);
     expect((await queue.claim(10)).some(i => i.runId === 'run-c')).toBe(false);
   });
+  it('re-arms only unproven legacy approval timeouts, retaining tenant scoping and queue deduplication', async () => {
+    const projector: Projector = (name, value) => ({ ...runProjector(() => false)(name, value)!, run: {
+      ...runProjector(() => false)(name, value)!.run, status: 'PREPARED', errorCode: 'UNIVERSAL_SUBMISSION_EXPIRED_NOT_EXECUTED',
+      attempts: [{ attemptId: name + '.approval.1', step: 'APPROVAL', state: 'NOT_FOUND', nonce: '60', transactionHash: null, preparedAtBlock: 100, reconciled: false }],
+    } });
+    const log = createPostgresLogStore({ db, tenantId: 'default', namespace: 'legacy', projector });
+    await log.extend('legacy-approval.jsonl', bytes('old-timeout\n'), anyLines);
+    expect((await db.query(`SELECT needs_observation FROM execution_runs WHERE run_id = 'legacy-approval'`)).rows[0]).toEqual({ needs_observation: false });
+    await sweep(db, { tenantId: 'another-tenant' });
+    expect((await db.query(`SELECT count(*)::int AS n FROM work_items WHERE run_id = 'legacy-approval'`)).rows[0]).toEqual({ n: 0 });
+    await sweep(db, { tenantId: 'default' }); await sweep(db, { tenantId: 'default' });
+    expect((await db.query(`SELECT count(*)::int AS n FROM work_items WHERE run_id = 'legacy-approval' AND state = 'READY'`)).rows[0]).toEqual({ n: 1 });
+    const queue = createPostgresWorkQueue({ db, ownerId: 'legacy-test' });
+    const item = (await queue.claim(100)).find(item => item.runId === 'legacy-approval')!;
+    await queue.complete(item);
+  });
   it('the worker loop settles, retries a failing handler and kills unknown kinds', async () => {
     const queue = createPostgresWorkQueue({ db, ownerId: 'loop' });
     await queue.enqueue('default', 'ok', 'ok-1', null);

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /** Observations only. This module cannot submit, retry, reconcile or recover an execution. */
+import { financialAttemptState } from './financial-run-status';
 import type { ReviewContext } from '@defi-workflow-engine/reference-linter';
 import { CROSSCHAIN_ROUTER_PROFILES, ROBINHOOD_TESTNET_TRANSFER, solanaSwapRuntime } from '@defi-workflow-engine/action-registry';
 import type { Workflow } from './initial-workflow';
@@ -53,12 +54,13 @@ export function transactionLifecycle(state: string | null, hash: string | null, 
   if (['REVERTED', 'FAILED', 'REJECTED'].includes(state ?? '')) return 'failed';
   if (state === 'EXPIRED') return 'expired';
   if (state === 'CANCELLED') return 'cancelled';
+  if (state === 'NOT_SUBMITTED') return 'not-submitted';
   if (['SUBMISSION_RESULT_UNKNOWN', 'UNKNOWN', 'INCONCLUSIVE', 'DIVERGENT', 'NOT_FOUND', 'RECONCILIATION_REQUIRED'].includes(state ?? '') && !verified) return 'uncertain';
   if (verified || state === 'CONFIRMED' || state === 'RECONCILED') return 'confirmed';
   if (state === 'PENDING') return 'pending';
   if (signing && !hash && ['PREPARED', 'SUBMITTING'].includes(state ?? '')) return 'wallet';
   if (state === 'HASH') return 'submitted';
-  if (state === 'SUBMITTING') return hash ? 'submitted' : 'submitting';
+  if (state === 'SUBMITTING') return hash ? 'submitted' : 'uncertain';
   if (state === 'PREPARED' || state === 'RESERVED') return 'preparing';
   return state ? 'uncertain' : 'waiting';
 }
@@ -141,7 +143,7 @@ export function projectExecutionLifecycle(currentWorkflow: Workflow, context: Re
       const calls = [...new Set([...r.attempts.map(a => a.step), ...r.review.calls.map(call => call.purpose === 'APPROVAL' ? 'APPROVAL' as const : 'DEPOSIT' as const)])];
       for (const step of calls) {
         const a = r.attempts.filter(a => a.step === step).at(-1);
-        add(step, nodeId, step === 'APPROVAL' ? `Approve ${r.review.route.inputToken.symbol}` : 'Bridge deposit', r.review.intent.sourceChain, a?.state ?? null, a?.replacementHash ?? a?.transactionHash ?? null, Boolean(a?.reconciled), step === 'APPROVAL', simulationAmount(a?.receipt?.gasCostWei, 18, 'ETH'));
+        add(step, nodeId, step === 'APPROVAL' ? `Approve ${r.review.route.inputToken.symbol}` : 'Bridge deposit', r.review.intent.sourceChain, financialAttemptState(a), a?.replacementHash ?? a?.transactionHash ?? null, Boolean(a?.reconciled), step === 'APPROVAL', simulationAmount(a?.receipt?.gasCostWei, 18, 'ETH'));
       }
       const settling = ['SOURCE_CONFIRMED', 'IN_FLIGHT', 'DESTINATION_OBSERVED'].includes(r.phase);
       const destinationState = r.verdict === 'RECONCILED' ? 'CONFIRMED' : ['RECOVERY_REQUIRED', 'RECONCILIATION_REQUIRED'].includes(r.phase) || r.verdict === 'DIVERGENT' ? 'INCONCLUSIVE' : r.verdict === 'FAILED' ? 'FAILED' : r.verdict === 'REFUNDED' ? 'CANCELLED' : settling ? 'PENDING' : null;
@@ -155,13 +157,15 @@ export function projectExecutionLifecycle(currentWorkflow: Workflow, context: Re
       for (const step of calls) {
         const a = r.attempts.filter(x => x.step === step).at(-1), gas = a?.ecosystem === 'EVM' ? simulationAmount(a.receipt?.gasCostWei, 18, 'ETH')
           : a?.ecosystem === 'SOLANA' ? simulationAmount(a.feeLamports, 9, 'SOL') : null;
-        add(step, nodeId, step === 'APPROVAL' ? `Approve ${r.review.route.inputToken.symbol}` : 'Bridge deposit', chain, a?.state ?? null,
+        add(step, nodeId, step === 'APPROVAL' ? `Approve ${r.review.route.inputToken.symbol}` : 'Bridge deposit', chain, financialAttemptState(a),
           a?.ecosystem === 'EVM' ? a.replacementHash ?? a.transactionHash : a?.transactionHash ?? null, Boolean(a?.reconciled), step === 'APPROVAL', gas);
       }
       const settling = ['SOURCE_CONFIRMED', 'IN_FLIGHT', 'DESTINATION_OBSERVED'].includes(r.phase);
       const destinationState = r.verdict === 'RECONCILED' ? 'CONFIRMED' : ['RECOVERY_REQUIRED', 'RECONCILIATION_REQUIRED'].includes(r.phase) || r.verdict === 'DIVERGENT' ? 'INCONCLUSIVE'
         : r.verdict === 'FAILED' ? 'FAILED' : r.verdict === 'REFUNDED' ? 'CANCELLED' : settling ? 'PENDING' : null;
-      add('destination', nodeId, 'Destination delivery', r.review.route.destinationChain, destinationState, r.destination?.transactionHash ?? null, r.verdict === 'RECONCILED'); break;
+      add('destination', nodeId, 'Destination delivery', r.review.route.destinationChain, destinationState, r.destination?.transactionHash ?? null, r.verdict === 'RECONCILED');
+      if (r.destination && r.verdict !== 'RECONCILED') operations.at(-1)!.label = r.destination.final ? 'Destination observed · awaiting reconciliation' : 'Destination observed · awaiting finality';
+      break;
     }
     case 'uniswap-pool': {
       const r = source.state.record; if (!r) break;
@@ -169,7 +173,7 @@ export function projectExecutionLifecycle(currentWorkflow: Workflow, context: Re
       const nodeId = composerActions(workflow)[0]?.nodeId ?? '', chain = `eip155:${r.review.chainId}`;
       for (const call of r.review.calls) {
         const a = r.attempts.filter(a => a.step === call.step).at(-1), approval = call.step !== 'MINT';
-        add(call.step, nodeId, approval ? `Approve ${call.step === 'APPROVE_TOKEN0' ? r.review.token0.symbol : r.review.token1.symbol}` : 'Add liquidity', chain, a?.state ?? null, a?.replacementHash ?? a?.transactionHash ?? null, Boolean(a?.reconciled), approval, simulationAmount(a?.receipt?.gasCostWei, 18, 'ETH'));
+        add(call.step, nodeId, approval ? `Approve ${call.step === 'APPROVE_TOKEN0' ? r.review.token0.symbol : r.review.token1.symbol}` : 'Add liquidity', chain, financialAttemptState(a), a?.replacementHash ?? a?.transactionHash ?? null, Boolean(a?.reconciled), approval, simulationAmount(a?.receipt?.gasCostWei, 18, 'ETH'));
       } break;
     }
     case 'solana-swap': case 'solana-pool': case 'solana-transfer': {

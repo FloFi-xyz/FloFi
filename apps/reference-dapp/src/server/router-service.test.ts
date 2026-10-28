@@ -269,16 +269,16 @@ describe('BUILD-ROUTER-001 asynchronous execution and destination reconciliation
     const refunded = await service.observe(run.id);
     expect(refunded).toMatchObject({ phase: 'REFUNDED', verdict: 'REFUNDED', evidence: null, refund: { recipient: ROUTER_OWNER, amount: confirmed.source!.inputAmount } });
   });
-  it('a reverted or never-executed deposit is FAILED with no funds moved, and the run cannot be resubmitted', async () => {
+  it('a nonce collision preserves uncertainty about a possibly relayed deposit and cannot be resubmitted', async () => {
     const { service, h } = await setup(), w = workflow(), run = await reviewed(service, w);
     await execute(service, h, run.id, w); await service.observe(run.id);
     const begun = await service.begin(run.id, ROUTER_OWNER, w);
     await service.handoff(run.id);
     h.wallet.cancel();
     const failed = await service.observe(run.id);
-    expect(failed).toMatchObject({ phase: 'FAILED', verdict: 'FAILED', error: 'ROUTER_NONCE_CONSUMED_BY_DIFFERENT_TRANSACTION' });
-    expect(failed.attempts.at(-1)).toMatchObject({ attemptId: begun.attempt.attemptId, state: 'NOT_FOUND' });
-    await expect(service.begin(run.id, ROUTER_OWNER, w)).rejects.toThrow('ROUTER_DEPOSIT_ALREADY_CONFIRMED');
+    expect(failed).toMatchObject({ verdict: 'PENDING', error: 'ROUTER_NONCE_CONSUMED_BY_DIFFERENT_TRANSACTION' });
+    expect(failed.attempts.at(-1)).toMatchObject({ attemptId: begun.attempt.attemptId, state: 'SUBMISSION_RESULT_UNKNOWN' });
+    await expect(service.begin(run.id, ROUTER_OWNER, w)).rejects.toThrow('ROUTER_ATTEMPT_ACTIVE_OBSERVE_EXISTING');
     await expect(service.refresh(run.id)).rejects.toThrow('ROUTER_REFRESH_NOT_ALLOWED');
   });
 });

@@ -193,7 +193,7 @@ describe('Base Sepolia Uniswap v3 liquidity: execution, recovery and reconciliat
     const second = await execute(service, chain, run.id, w, { hold: true });
     chain.wallet.release({ kind: 'CANCEL', hash: second.hash });
     record = await service.observe(run.id);
-    expect(record.attempts[1]).toMatchObject({ step: 'APPROVE_TOKEN1', state: 'NOT_FOUND', note: 'UNISWAP_NONCE_CONSUMED_BY_DIFFERENT_TRANSACTION' });
+    expect(record.attempts[1]).toMatchObject({ step: 'APPROVE_TOKEN1', state: 'SUBMISSION_RESULT_UNKNOWN', note: 'UNISWAP_NONCE_CONSUMED_BY_DIFFERENT_TRANSACTION' });
     expect(record.authorization).toBeNull();
   });
   it('reverted mint, changed pool state and stale Review require a new simulation and Review; no blind retry', async () => {

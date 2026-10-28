@@ -79,6 +79,32 @@ async function drain(c: Chains, d: Awaited<ReturnType<typeof deployment>>, id: s
   return ok<UniversalRecord>(await d.call('status', id));
 }
 
+it('restarts observation of a lost approval response, distinguishes temporary RPC failure, and never broadcasts from recovery', async () => {
+  const c = chains(), w = workflow('base', 'solana', c.wallet.publicKey), api = await deployment(c, EVM_OWNER);
+  const r = ok<UniversalRecord>(await api.call('simulate', w, EVM_OWNER));
+  ok(await api.call('review', r.id, r.review.commitment, w));
+  const begun = ok<{ transaction: Parameters<EvmMock['wallet']['send']>[0] }>(await api.call('begin', r.id, EVM_OWNER, w));
+  ok(await api.call('handoff', r.id)); ok(await api.call('report', r.id, { kind: 'UNKNOWN' }));
+  const originalRpc = c.base.rpc;
+  c.base.rpc = async () => { throw Error('PUBLIC_RPC_UNAVAILABLE'); };
+  const unavailable = await deployment(c, EVM_OWNER);
+  await due(unavailable.db); await unavailable.worker.drainOnce();
+  const preserved = ok<UniversalRecord>(await unavailable.call('status', r.id));
+  expect(preserved.attempts[0]?.state).toBe('SUBMISSION_RESULT_UNKNOWN');
+  expect(preserved.observation).toMatchObject({ outcome: 'TEMPORARY_FAILURE', reason: 'PUBLIC_RPC_UNAVAILABLE' });
+  c.base.rpc = originalRpc;
+  const sent = c.base.wallet.send(begun.transaction, { mineNow: false });
+  const restart = await deployment(c, EVM_OWNER);
+  await due(restart.db); await restart.worker.drainOnce();
+  const pending = ok<UniversalRecord>(await restart.call('status', r.id));
+  expect(pending.attempts[0]).toMatchObject({ state: 'PENDING', transactionHash: sent.hash });
+  await due(restart.db); await restart.worker.drainOnce();
+  expect((await restart.call('begin', r.id, EVM_OWNER, w)).ok).toBe(false);
+  sent.land(); await due(restart.db); await restart.worker.drainOnce();
+  expect(ok<UniversalRecord>(await restart.call('status', r.id)).attempts[0]?.state).toBe('CONFIRMED');
+  for (const d of [unavailable, restart]) expect(d.methods.filter(m => SEND.includes(m))).toEqual([]);
+});
+
 describe('BUILD-CROSSCHAIN-UNIVERSAL-001 universal router on durable cloud state (MOCKED chains)', () => {
   it('Solana → Base: Solana session owns the run, FloFi broadcasts the verified owner-signed bytes once, fresh workers reconcile both chains, evidence', async () => {
     const c = chains(), owner = c.wallet.publicKey, w = workflow('solana', 'base', '0x2222222222222222222222222222222222222222');

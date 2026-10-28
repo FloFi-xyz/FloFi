@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /** Presentation only: a check can observe a recorded request, never replay it. */
+import { financialObservationMessage } from './financial-observation';
 import type { ExecutionLifecycle, ExecutionLifecycleSource } from './execution-lifecycle';
 import type { ReviewWallet } from './review-presentation';
 import { shellChainLabel } from './product-shell';
@@ -17,7 +18,7 @@ export type ExecutionRecovery = {
 export function projectExecutionRecovery(source: ExecutionLifecycleSource, progress: ExecutionLifecycle, wallet: ReviewWallet): Omit<ExecutionRecovery, 'check'> {
   let action: RecoveryCheck | null = null, owner: string | null = null, chain: string | null = null;
   let operationId = progress.active?.operations.find(op => !['waiting', 'confirmed'].includes(op.state))?.id ?? null;
-  const unresolved = progress.steps.some(step => step.operations.some(op => ['preparing', 'submitting', 'submitted', 'pending', 'uncertain', 'posted', 'settling', 'partial'].includes(op.state)));
+  const unresolved = progress.steps.some(step => step.operations.some(op => ['wallet', 'preparing', 'submitting', 'submitted', 'pending', 'uncertain', 'posted', 'settling', 'partial'].includes(op.state)));
   switch (source.kind) {
     case 'supply': { const r = source.state.record; owner = r?.review.account ?? null; chain = r?.review.chain ?? null; if (r?.attempts.length && unresolved) action = 'observe'; break; }
     case 'lending': { const r = source.state.record, q = r?.reviews.at(-1); owner = q?.fields.owner ?? null; chain = q?.manifest.owner.chainId ?? null; if (r?.attempts.length && unresolved) action = 'observe'; break; }
@@ -79,7 +80,8 @@ export function projectExecutionRecovery(source: ExecutionLifecycleSource, progr
   const busy = source.state.busy;
   const checking = progress.started && typeof busy === 'string' && /^(Reading|Checking|Reconciling|Scanning|Recovering known receipt)/i.test(busy);
   const label = checking ? recordOnly ? 'Updating recorded status…' : 'Checking execution status…' : progress.state === 'uncertain' ? 'Unable to confirm execution' : progress.state === 'attention' ? 'Needs attention' : progress.restored && progress.state === 'complete' ? 'Execution recovered' : progress.restored ? 'Current execution restored' : progress.label;
-  const message = checking ? recordOnly ? 'Refreshing the saved execution record. No transaction is resent.' : 'Verifying the recorded request against the available execution state. No transaction is resent.' : progress.state === 'uncertain' ? 'FloFi has not confirmed whether this step completed. No transaction is repeated.' : progress.restored ? `${progress.completed} of ${progress.steps.length} actions completed. The recorded run is preserved; no request is repeated.` : progress.message;
+  let message = checking ? recordOnly ? 'Refreshing the saved execution record. No transaction is resent.' : 'Verifying the recorded request against the available execution state. No transaction is resent.' : progress.state === 'uncertain' ? 'FloFi has not confirmed whether this step completed. No transaction is repeated.' : progress.restored ? `${progress.completed} of ${progress.steps.length} actions completed. The recorded run is preserved; no request is repeated.` : progress.message;
+  if (!checking && source.kind === 'universal' && source.state.record?.observation) message = financialObservationMessage(source.state.record.observation);
   if (!operationId && action === 'reconcile') operationId = progress.steps.flatMap(step => step.operations).at(-1)?.id ?? null;
   return { action, label, message, contextIssue, operationId, checking, recordOnly };
 }

@@ -10,6 +10,7 @@
  *    backend path can sign or submit. PREPARED attempts are never observed by workers, because observing a
  *    PREPARED attempt cancels it and the owner's browser may be between `begin` and `handoff`.
  */
+import { financialRunStatus } from '../src/domain/financial-run-status.ts';
 import { hashJournalBytes, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import type { EthereumRouterNetwork } from '@defi-workflow-engine/action-registry';
 import { boundCompositionNeedsObservation, boundCompositionPhase, type ExecutionStorage } from '@defi-workflow-engine/reference-executor';
@@ -775,7 +776,7 @@ function routerFlow(name: Extract<FlowName, `crosschain-router${string}`>, netwo
       const record = lastRecord<RouterRecord>(bytes), observe = routerNeedsObservation(record), evidence = evidenceOf(record);
       const open = record.attempts.find(a => ['PREPARED', 'SUBMITTING', 'SUBMISSION_RESULT_UNKNOWN', 'PENDING'].includes(a.state));
       return { run: { runId: record.id, workflowId: record.workflow.workflowId, flow: name,
-        status: record.verdict !== 'PENDING' ? record.verdict : open ? open.state : record.phase,
+        status: financialRunStatus(record),
         provenance: record.provenance, ownerAccount: record.owner, recoveryOf: null, errorCode: errorCode(record.error), needsObservation: observe,
         hasEvidence: evidence !== null,
         attempts: record.attempts.map(a => ({ attemptId: a.attemptId, step: a.step, state: a.state, nonce: a.nonce, transactionHash: a.transactionHash,
@@ -849,7 +850,7 @@ const crosschainUniversal: FlowDefinition = {
     const record = lastRecord<UniversalRecord>(bytes), observe = universalNeedsObservation(record), evidence = evidenceOf(record);
     const open = record.attempts.find(a => ['PREPARED', 'SUBMITTING', 'SUBMISSION_RESULT_UNKNOWN', 'PENDING'].includes(a.state));
     return { run: { runId: record.id, workflowId: record.workflow.workflowId, flow: 'crosschain-universal',
-      status: record.verdict !== 'PENDING' ? record.verdict : open ? open.state : record.phase,
+      status: financialRunStatus(record),
       provenance: record.provenance, ownerAccount: record.owner, recoveryOf: null, errorCode: errorCode(record.error), needsObservation: observe,
       hasEvidence: evidence !== null,
       attempts: record.attempts.map(a => ({ attemptId: a.attemptId, step: a.step, state: a.state, nonce: a.ecosystem === 'EVM' ? a.nonce : null, transactionHash: a.transactionHash,

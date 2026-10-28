@@ -337,10 +337,11 @@ export function createBackend(options: BackendOptions) {
         // Re-checked under the run lease: a stale item cannot act on an attempt created after it was queued.
         const record = await svc.load(runId);
         if (!definition.needsObservation(record)) { await settle({ outcome: 'DONE' }); return; }
-        const next = await svc.observe(runId) as { error?: string | null; verdict?: string };
+        const next = await svc.observe(runId) as { error?: string | null; verdict?: string; observation?: { outcome: string; reason: string } };
         const pending = definition.needsObservation(next);
-        log.info('reconcile.observed', { flow, run_id: runId, reconciliation_state: next.verdict ?? null, error_code: next.error ?? null, still_pending: pending });
-        await settle(pending ? { outcome: 'RETRY', delayMs: backoffMs(item.deliveries), reason: next.error ?? 'OBSERVATION_PENDING' } : { outcome: 'DONE' });
+        log.info('reconcile.observed', { flow, run_id: runId, reconciliation_state: next.verdict ?? null, error_code: next.error ?? null,
+          observation_outcome: next.observation?.outcome ?? null, observation_reason: next.observation?.reason ?? null, still_pending: pending });
+        await settle(pending ? { outcome: 'RETRY', delayMs: backoffMs(item.deliveries), reason: next.observation?.reason ?? next.error ?? 'OBSERVATION_PENDING' } : { outcome: 'DONE' });
       });
     } catch (error) {
       const code = failure(error);

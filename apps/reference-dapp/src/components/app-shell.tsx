@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
+import { simulationUnavailableReason } from '../domain/simulation-unavailable';
 import { refreshBridgeAfterApproval } from '../domain/bridge-review-recovery';
 import { selectOwnerRuntime } from '../domain/runtime-selection';
 import { BASE_MAINNET } from '@defi-workflow-engine/action-registry';
@@ -330,9 +331,13 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   }
   // BUILD-FLOFI-PRODUCT-UX-001: informational Beta Mainnet notice only; it gates nothing. Omitted from the compact signing surface.
   const betaNotice = <p className="beta-notice" role="note">{tr("FloFi Beta Mainnet — Real funds are enabled. Review every transaction before signing.")}</p>;
+  const simulationReason = simulationUnavailableReason({ incomplete: Boolean(authoringIncomplete || reviewError || !actionable),
+    unsupported: testNetworkWorkflow || simulationSource.kind === 'unavailable', walletRequired: !signer || Boolean(approvalGate),
+    providerUnavailable: 'available' in simulationSource.state && simulationSource.state.available === false || 'info' in simulationSource.state && simulationSource.state.info?.available === false,
+    error: simulationSource.state.error, staleQuote: lifecycleControls.view.expiresAt !== null && Date.now() >= lifecycleControls.view.expiresAt });
   const simulateAction = walletIssue ? <div className="canvas-lifecycle-control"><p role="status">{walletIssue}</p><button type="button" onClick={() => void walletConnection.connect()}>{tr('Use another wallet')}</button></div>
     : networkAction ? <div className="canvas-lifecycle-control"><button type="button" disabled={networkAction.disabled} onClick={networkAction.request}>{networkAction.label}</button>{walletConnection.error && <p role="status">{tr(walletConnection.error)}</p>}</div> : <CanvasLifecycleAction {...lifecycleState} controls={lifecycleControls} workflowName={workflowName}
-    simulationDisabled={simulationDisabled || !actionable}
+    simulationDisabled={simulationDisabled || !actionable} simulationReason={simulationReason}
     simulate={() => { setTab('Simulate'); return simulateAgain(); }} onExecute={() => setTab('Execute')}/>;
   if (surface === 'signing') return <div className="app-shell signing-shell" inert={!interactive}><a className="skip-link" href="#workspace">{tr("Skip to workspace")}</a>
     <TopBar compact tab={tab} setTab={setTab} pathname={pathname ?? null} engineering={engineering}/>

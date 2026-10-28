@@ -32,7 +32,9 @@ import { validateArtifact } from '@defi-workflow-engine/workflow-contracts/schem
 import { utf8, type ExecutionStorage } from '@defi-workflow-engine/reference-executor';
 import type { Rpc } from '../public-testnet-service.ts';
 import { solanaTransactionClaim } from '../solana-transaction-claim.ts';
+import { observeEvmAllowance, retainAllowanceObservation } from '../allowance-observation.ts';
 import * as evm from './evm-chain.ts';
+import { discoverEvmNonce, legacyUnprovenApproval, sameEvmIntent } from '../evm-submission-discovery.ts';
 import * as sol from './solana-chain.ts';
 import type { ProviderStatusHint, UniversalProviderAdapter, UniversalQuoteRequest } from './relay-provider.ts';
 import { feeObligationFor, flofiFeePolicy } from './fee-obligation.ts';
@@ -46,7 +48,6 @@ const fail = (code: string): never => { throw new Error(code); };
 const isObject = evm.isObject;
 const CODE = /^[A-Z][A-Z0-9_]{2,80}$/;
 const REFUSALS = [4001, 4100, 4200];
-const APPROVAL_ABANDON_MS = 15 * 60_000;
 /** Provider failures that say nothing about the route (retry later) rather than "the reviewed route is no longer offered". */
 const AVAILABILITY = /_(HTTP_\d+|RATE_LIMITED|UNAVAILABLE|RESPONSE_TOO_LARGE|RESPONSE_INVALID|URL_INVALID)$/;
 const SCAN_BLOCKS = 2_000, SCAN_WINDOWS = 5;
@@ -114,7 +115,7 @@ export function validateUniversalLog(bytes: Uint8Array): void {
           : [a.attemptId, a.step, a.messageHash, a.reviewCommitment, a.lastValidBlockHeight];
         if (!same(identity(after), identity(before)) || (before.transactionHash !== null && after.transactionHash !== before.transactionHash) ||
             (before.ecosystem === 'SOLANA' && after.ecosystem === 'SOLANA' && before.transaction !== null && after.transaction !== before.transaction) ||
-            (UNIVERSAL_TERMINAL.includes(before.state) && (after.state !== before.state || !same(after, before))))
+            (UNIVERSAL_TERMINAL.includes(before.state) && !(legacyUnprovenApproval(before) && after.state === 'SUBMISSION_RESULT_UNKNOWN' && after.note === 'UNIVERSAL_LEGACY_TIMEOUT_UNPROVEN' && same({ ...after, state: before.state, note: before.note }, before)) && (after.state !== before.state || !same(after, before))))
           fail('UNIVERSAL_STORE_CORRUPT');
       }
     }
@@ -123,7 +124,7 @@ export function validateUniversalLog(bytes: Uint8Array): void {
 }
 export function universalNeedsObservation(value: unknown): boolean {
   const record = value as UniversalRecord, last = record.attempts.at(-1);
-  return record.verdict === 'PENDING' && (!!last && UNIVERSAL_OBSERVABLE.includes(last.state) || UNIVERSAL_SETTLING.includes(record.phase));
+  return record.verdict === 'PENDING' && (!!last && (UNIVERSAL_OBSERVABLE.includes(last.state) || legacyUnprovenApproval(last)) || UNIVERSAL_SETTLING.includes(record.phase));
 }
 
 export type UniversalRouterServiceInput = {
@@ -158,14 +159,20 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
   }
   async function save(record: UniversalRecord): Promise<UniversalRecord> {
     const name = runName(record.id), prior = await log.read(name);
-    if (prior && canonical(JSON.parse(utf8(prior).trimEnd().split('\n').at(-1)!)) === canonical(record)) return record;
+    if (prior) {
+      const before = JSON.parse(utf8(prior).trimEnd().split('\n').at(-1)!) as UniversalRecord;
+      if (record.allowanceObservation) record = { ...record, allowanceObservation: retainAllowanceObservation(before.allowanceObservation, record.allowanceObservation) ?? record.allowanceObservation };
+      if (before.observation && record.observation && before.observation.outcome === record.observation.outcome && before.observation.reason === record.observation.reason)
+        record = { ...record, observation: before.observation };
+      if (canonical(before) === canonical(record)) return record;
+    }
     await log.extend(name, new TextEncoder().encode(utf8(prior) + JSON.stringify(record) + '\n'), validateUniversalLog);
     return record;
   }
   const locked = <T,>(id: string, action: () => Promise<T>): Promise<T> => leases.hold(runName(id).slice(0, -6), action);
   const replaceAttempt = (record: UniversalRecord, attempt: UniversalAttempt): UniversalRecord =>
     ({ ...record, attempts: record.attempts.map(a => a.attemptId === attempt.attemptId ? attempt : a) });
-  const active = (record: UniversalRecord) => record.attempts.find(a => UNIVERSAL_ACTIVE.includes(a.state)) ?? null;
+  const active = (record: UniversalRecord) => record.attempts.find(a => UNIVERSAL_ACTIVE.includes(a.state) || legacyUnprovenApproval(a)) ?? null;
   const sameWorkflow = (a: SemanticWorkflow, b: SemanticWorkflow) => canonical(a) === canonical(b);
   const transition = (record: UniversalRecord, phase: RouterPhase): UniversalRecord => { assertRouterTransition(record.phase, phase); return { ...record, phase }; };
   const deauthorized = (record: UniversalRecord, error: string, changes: readonly RouteChange[] = record.routeChanges, requote = record.requote): UniversalRecord =>
@@ -352,7 +359,7 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
         const prior = JSON.parse(utf8(existing).trimEnd().split('\n').at(-1)!) as { runId: string; attemptId: string };
         const holder = prior.runId === record.id ? record : await load(prior.runId);
         const held = holder.attempts.find(a => a.attemptId === prior.attemptId);
-        if (held && UNIVERSAL_ACTIVE.includes(held.state) || held && held.step === 'DEPOSIT' && ['CONFIRMED', 'PENDING'].includes(held.state)) fail(code);
+        if (held && (UNIVERSAL_ACTIVE.includes(held.state) || legacyUnprovenApproval(held)) || held && held.step === 'DEPOSIT' && ['CONFIRMED', 'PENDING'].includes(held.state)) fail(code);
         await log.extend(name, new TextEncoder().encode(utf8(existing) + entry), () => undefined);
       }
       return inner();
@@ -401,7 +408,7 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
     if (simulated.some((c, i) => c.gasUsed > BigInt(remaining[i]!.gasLimit))) return invalidate('UNIVERSAL_GAS_CHANGED_REVIEW_REQUIRED');
     const reviewed = src.calls[index]!, maxFee = BigInt(src.fees.maxFeePerGas);
     if (native < BigInt(reviewed.gasLimit) * maxFee + BigInt(reviewed.value)) fail('UNIVERSAL_INSUFFICIENT_GAS');
-    const tx: EvmTx = { chainId: d.chainHex, from: owner, to: reviewed.to, data: reviewed.data, value: evm.tag(BigInt(reviewed.value)), gas: evm.tag(BigInt(reviewed.gasLimit)),
+    const tx: EvmTx = { nonce: evm.tag(pendingNonce), chainId: d.chainHex, from: owner, to: reviewed.to, data: reviewed.data, value: evm.tag(BigInt(reviewed.value)), gas: evm.tag(BigInt(reviewed.gasLimit)),
       maxFeePerGas: evm.tag(maxFee), maxPriorityFeePerGas: evm.tag(BigInt(src.fees.maxPriorityFeePerGas)) };
     await assertRequestFees(review, tx, rpc, d, at, invalidate);
     const attempt: UniversalEvmAttempt = { ecosystem: 'EVM', attemptId: `${record.id}.${step.toLowerCase()}.${record.attempts.length + 1}`, step, state: 'PREPARED',
@@ -428,22 +435,6 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
     }
     const changes = compareUniversalRoutes(route, fresh, 'REQUOTE');
     if (changes.length) await invalidate('ROUTE_CHANGED', changes);
-  }
-  async function discoverByNonce(rpc: Rpc, attempt: UniversalEvmAttempt): Promise<{ consumed: false } | { consumed: true; tx: Record<string, unknown> }> {
-    const owner = attempt.tx.from, nonce = BigInt(attempt.nonce);
-    const count = async (block: number) => evm.quantity(await rpc('eth_getTransactionCount', [owner, evm.tag(block)]));
-    const latest = Number(evm.quantity(await rpc('eth_blockNumber', [])));
-    if (!Number.isSafeInteger(latest) || latest < attempt.preparedAtBlock) fail('UNIVERSAL_RPC_INVALID');
-    if (await count(latest) <= nonce) return { consumed: false };
-    if (await count(attempt.preparedAtBlock) > nonce) fail('UNIVERSAL_NONCE_CONSUMED_BEFORE_PREPARATION');
-    let low = attempt.preparedAtBlock, high = latest;
-    while (high - low > 1) { const middle = low + Math.floor((high - low) / 2); if (await count(middle) > nonce) high = middle; else low = middle; }
-    const block = await rpc('eth_getBlockByNumber', [evm.tag(high), true]);
-    if (!isObject(block) || !Array.isArray((block as Record<string, unknown>).transactions)) fail('UNIVERSAL_RPC_INVALID');
-    const found = ((block as Record<string, unknown>).transactions as unknown[]).find(tx => isObject(tx) && String((tx as Record<string, unknown>).from).toLowerCase() === owner &&
-      evm.quantity((tx as Record<string, unknown>).nonce) === nonce);
-    if (!isObject(found)) fail('UNIVERSAL_DISCOVERY_INCONSISTENT');
-    return { consumed: true, tx: found as Record<string, unknown> };
   }
   /** The order's own on-chain identity: a Depository deposit event carrying the order id, found even when the hash was lost (a relayed submission). */
   async function discoverDeposit(rpc: Rpc, d: UniversalEvmDeployment, record: UniversalRecord, attempt: UniversalEvmAttempt): Promise<{ hash: string | null; nextBlock: number }> {
@@ -531,22 +522,22 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
       }
     }
     if (raw === null) {
-      const found = await discoverByNonce(rpc, attempt);
+      const found = await discoverEvmNonce(rpc, attempt);
       if (!found.consumed) {
-        const pending = evm.quantity(await rpc('eth_getTransactionCount', [record.owner, 'pending']));
-        // An abandoned approval request (the wallet never sent it) is dropped; a deposit stays observation-only while its nonce is open.
-        if (attempt.step === 'APPROVAL' && now().getTime() - Date.parse(attempt.createdAt) > APPROVAL_ABANDON_MS && pending === BigInt(attempt.nonce)) {
-          const next = { ...attempt, state: 'NOT_FOUND' as const, note: 'UNIVERSAL_SUBMISSION_EXPIRED_NOT_EXECUTED' };
-          return save(replaceAttempt(deauthorized(record, next.note), next));
+        if (found.pendingTx && sameEvmIntent(found.pendingTx, attempt.tx, attempt.nonce)) {
+          const pendingHash = evm.hex(found.pendingTx.hash);
+          return save(replaceAttempt({ ...record, error: 'UNIVERSAL_TRANSACTION_PENDING' }, { ...attempt, state: 'PENDING',
+            transactionHash: attempt.transactionHash ?? pendingHash,
+            replacementHash: attempt.transactionHash && attempt.transactionHash !== pendingHash ? pendingHash : attempt.replacementHash }));
         }
-        return save({ ...record, error: hash ? 'UNIVERSAL_TRANSACTION_PENDING' : 'UNIVERSAL_TRANSACTION_NOT_OBSERVED' });
+        // Neither an open nonce nor an empty node-local pool excludes a delayed wallet submission.
+        return save({ ...record, error: hash ? 'UNIVERSAL_TRANSACTION_PENDING' : found.pendingTx ? 'UNIVERSAL_NONCE_COLLISION_PENDING' : 'UNIVERSAL_TRANSACTION_NOT_OBSERVED' });
       }
       const foundHash = evm.hex(found.tx.hash), t = found.tx;
-      const sameIntent = typeof t.to === 'string' && t.to.toLowerCase() === attempt.tx.to && typeof t.input === 'string' && t.input.toLowerCase() === attempt.tx.data &&
-        evm.quantity(t.value) === BigInt(attempt.tx.value) && evm.quantity(t.chainId) === BigInt(d.chainId);
+      const sameIntent = sameEvmIntent(t, attempt.tx, attempt.nonce);
       if (!sameIntent) {
-        const next = { ...attempt, state: 'NOT_FOUND' as const, transactionHash: attempt.transactionHash ?? foundHash, note: 'UNIVERSAL_NONCE_CONSUMED_BY_DIFFERENT_TRANSACTION' };
-        return save(replaceAttempt(attempt.step === 'DEPOSIT' ? { ...deauthorized(record, next.note, record.routeChanges, true) } : deauthorized(record, next.note), next));
+        return save(replaceAttempt({ ...record, error: 'UNIVERSAL_NONCE_CONSUMED_BY_DIFFERENT_TRANSACTION' },
+          { ...attempt, state: 'SUBMISSION_RESULT_UNKNOWN', conflictingTransactionHash: foundHash, note: 'UNIVERSAL_NONCE_CONSUMED_BY_DIFFERENT_TRANSACTION' }));
       }
       const current: UniversalEvmAttempt = { ...attempt, state: 'PENDING', transactionHash: attempt.transactionHash ?? foundHash,
         replacementHash: attempt.transactionHash !== null && attempt.transactionHash !== foundHash ? foundHash : attempt.replacementHash };
@@ -842,10 +833,11 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
       return save(a.step === 'DEPOSIT' ? transition(next, 'SOURCE_SUBMITTED') : next);
     }); },
     /** EVM wallet result. A hash is recorded once (a repeated identical report is a no-op); ambiguity is observed, never resent. */
-    async report(id: string, result: { kind: 'HASH'; hash: string } | { kind: 'UNKNOWN' | 'REJECTED'; code?: string }): Promise<UniversalRecord> { return locked(id, async () => {
+    async report(id: string, result: ({ kind: 'HASH'; hash: string } | { kind: 'UNKNOWN' | 'REJECTED'; code?: string }) & { attemptId?: string }): Promise<UniversalRecord> { return locked(id, async () => {
       const record = await load(id), attempt = record.attempts.at(-1);
       if (!attempt || attempt.ecosystem !== 'EVM') fail('UNIVERSAL_ATTEMPT_MISSING');
       const a = attempt as UniversalEvmAttempt;
+      if (result.attemptId && result.attemptId !== a.attemptId) fail('UNIVERSAL_ATTEMPT_ID_MISMATCH');
       if (result.kind === 'HASH') {
         const hash = result.hash.toLowerCase();
         if (!/^0x[0-9a-f]{64}$/.test(hash)) fail('UNIVERSAL_HASH_INVALID');
@@ -889,6 +881,7 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
     /** Records a proven pre-broadcast failure or refusal. Anything that may have reached the network stays observation-only. */
     async walletFailure(id: string, diagnostic: UniversalWalletDiagnostic): Promise<UniversalRecord> { return locked(id, async () => {
       const record = await load(id), attempt = record.attempts.at(-1);
+      if (diagnostic.attemptId && diagnostic.attemptId !== attempt?.attemptId) fail('UNIVERSAL_ATTEMPT_ID_MISMATCH');
       if (JSON.stringify(diagnostic).length > 65_536 || typeof diagnostic.invoked !== 'boolean' || !Array.isArray(diagnostic.calls) || !/^UNIVERSAL_[A-Z0-9_]{2,70}$/.test(diagnostic.code))
         fail('UNIVERSAL_DIAGNOSTIC_INVALID');
       if (!attempt || attempt.transactionHash) fail('UNIVERSAL_DIAGNOSTIC_NOT_PRE_SUBMISSION');
@@ -900,19 +893,48 @@ export function createUniversalRouterService(input: UniversalRouterServiceInput)
       const send = diagnostic.calls.find(c => c.submission === true), error = send?.error as { code?: unknown } | undefined;
       const refused = diagnostic.invoked && send !== undefined && send.result === undefined && typeof error?.code === 'number' && error.code === diagnostic.rejectionCode &&
         REFUSALS.includes(error.code);
-      if ((diagnostic.invoked || send) && !refused || !['PREPARED', 'SUBMITTING', 'SUBMISSION_RESULT_UNKNOWN'].includes(attempt!.state)) fail('UNIVERSAL_DIAGNOSTIC_NOT_PRE_SUBMISSION');
+      if ((!diagnostic.invoked && attempt!.state !== 'PREPARED') || (diagnostic.invoked || send) && !refused || !['PREPARED', 'SUBMITTING', 'SUBMISSION_RESULT_UNKNOWN'].includes(attempt!.state)) fail('UNIVERSAL_DIAGNOSTIC_NOT_PRE_SUBMISSION');
       return save(replaceAttempt(deauthorized(record, diagnostic.code), { ...attempt!, state: 'CANCELLED', note: diagnostic.code }));
     }); },
-    /** Read-only observation and reconciliation (API and worker). There is no send path here. */
+    /** Observation never sends, even when a wallet response or an earlier worker was lost. */
     async observe(id: string): Promise<UniversalRecord> { return locked(id, async () => {
       let record = await load(id);
-      if (record.verdict !== 'PENDING') return record;
-      const attempt = active(record);
-      if (attempt) {
-        record = attempt.ecosystem === 'EVM' ? await observeEvmAttempt(record, attempt) : await observeSolanaAttempt(record, attempt);
-        if (record.verdict !== 'PENDING' || active(record)) return record;
+      // Current allowance is an independently pinned read, never the allowance quoted at Review.
+      const route = record.review.route;
+      if (record.review.source.ecosystem === 'EVM' && route.inputToken.address) {
+        const { rpc, d } = evmOf(route.sourceChain);
+        record = await save({ ...record, allowanceObservation: await observeEvmAllowance(rpc,
+          { chain: route.sourceChain, owner: record.owner, token: route.inputToken.address, spender: d.relayDepository }, now().toISOString()) });
       }
-      return UNIVERSAL_SETTLING.includes(record.phase) ? observeSettlement(record) : record;
+      const observe = async () => {
+        if (record.verdict !== 'PENDING') return record;
+        let attempt = active(record);
+        if (attempt && legacyUnprovenApproval(attempt)) {
+          attempt = { ...attempt, state: 'SUBMISSION_RESULT_UNKNOWN', note: 'UNIVERSAL_LEGACY_TIMEOUT_UNPROVEN' };
+          record = await save(replaceAttempt({ ...record, error: 'UNIVERSAL_LEGACY_TIMEOUT_UNPROVEN', authorization: null }, attempt));
+        }
+        if (attempt) {
+          record = attempt.ecosystem === 'EVM' ? await observeEvmAttempt(record, attempt) : await observeSolanaAttempt(record, attempt);
+          if (record.verdict !== 'PENDING' || active(record)) return record;
+        }
+        return UNIVERSAL_SETTLING.includes(record.phase) ? observeSettlement(record) : record;
+      };
+      try {
+        record = await observe();
+        const last = record.attempts.at(-1);
+        const outcome = record.verdict === 'RECONCILED' ? 'RECONCILED' : record.refund ? 'REFUND_OBSERVED'
+          : record.destination ? 'DESTINATION_OBSERVED' : last?.state === 'REVERTED' ? 'REVERTED'
+          : last?.state === 'CONFIRMED' ? last.step === 'APPROVAL' ? 'APPROVAL_CONFIRMED' : 'CONFIRMED' : last?.state === 'PENDING' ? 'PENDING'
+          : !last || last.state === 'CANCELLED' ? 'NOT_SUBMITTED' : 'UNDETERMINED';
+        return save({ ...record, observation: { checkedAt: now().toISOString(), outcome,
+          reason: record.error ?? (record.destination ? 'UNIVERSAL_DESTINATION_OBSERVED' : record.source ? 'UNIVERSAL_SOURCE_CONFIRMED' : last?.note ?? 'UNIVERSAL_NOT_STARTED') } });
+      } catch (cause) {
+        const code = cause instanceof Error ? cause.message : '';
+        if (!/^(PUBLIC_RPC_|UNIVERSAL_(RPC_|DISCOVERY_|WRONG_CHAIN)|EVM_OBSERVATION_)/.test(code)) throw cause;
+        // Discovery may have saved a cursor or a hash before a later RPC failed. Reload that latest snapshot.
+        record = await load(id);
+        return save({ ...record, observation: { checkedAt: now().toISOString(), outcome: 'TEMPORARY_FAILURE', reason: code } });
+      }
     }); },
     load,
   };

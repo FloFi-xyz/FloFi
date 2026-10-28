@@ -86,7 +86,11 @@ export async function sweep(db: Database, options: { completedRetentionDays?: nu
     SELECT r.tenant_id, 'reconcile', r.flow || ':' || r.run_id, r.run_id,
       jsonb_build_object('namespace', r.flow, 'runId', r.run_id), 'READY', now()
     FROM execution_runs r
-    WHERE r.needs_observation AND NOT r.attention_required AND ($1::text IS NULL OR r.tenant_id = $1) AND NOT EXISTS (
+    WHERE (r.needs_observation OR (
+      r.status = 'PREPARED' AND r.error_code IN ('UNIVERSAL_SUBMISSION_EXPIRED_NOT_EXECUTED', 'ROUTER_SUBMISSION_EXPIRED_NOT_EXECUTED', 'UNISWAP_SUBMISSION_EXPIRED_NOT_EXECUTED')
+      AND EXISTS (SELECT 1 FROM execution_attempts a WHERE a.tenant_id = r.tenant_id AND a.run_id = r.run_id
+        AND a.state = 'NOT_FOUND' AND a.step LIKE '%APPROV%' AND a.transaction_hash IS NULL)))
+      AND NOT r.attention_required AND ($1::text IS NULL OR r.tenant_id = $1) AND NOT EXISTS (
       SELECT 1 FROM work_items w WHERE w.tenant_id = r.tenant_id AND w.kind = 'reconcile'
         AND w.dedupe_key = r.flow || ':' || r.run_id AND w.state IN ('READY', 'LEASED'))
     LIMIT 500

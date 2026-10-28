@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
+import { useLocale } from '../i18n/locale';
+import { watchWalletResponse, walletResultStorage, rememberWalletReport, forgetWalletReport, readWalletReports } from './wallet-request-lifecycle';
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { UNIVERSAL_NETWORKS, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { useWorkflow } from './workflow-store';
@@ -25,7 +27,7 @@ import { bridgeEstimateRequest } from '../domain/bridge-estimate';
 const KEY = 'flofi:crosschain-universal:run';
 const REFUSALS = [4001, 4100, 4200];
 const OBSERVABLE = ['SUBMITTING', 'SUBMISSION_RESULT_UNKNOWN', 'PENDING'];
-type Pointer = { id: string; ecosystem: UniversalEcosystem; owner: string; hash?: string };
+type Pointer = { id: string; attemptId?: string; ecosystem: UniversalEcosystem; owner: string; hash?: string };
 type Store = { available: boolean; executionEnabled: boolean; details: UniversalBridgeDetails | null; ecosystem: UniversalEcosystem | null;
   owner: string | null; destinationWallet: string | null; record: UniversalRecord | null; discovery: DiscoveryResult | null; busy: boolean; signing: boolean;
   error: string | null; correlationId: string | null; retired: boolean; recovered: boolean; runs: readonly UniversalRunSummary[]; signedIn: boolean;
@@ -48,6 +50,7 @@ function readPointer(): Pointer | null {
 }
 
 export function UniversalRouterProvider({ children }: { children: ReactNode }) {
+  const { t: tr } = useLocale();
   const { state } = useWorkflow(), wallet = useBuild009Wallet(), solana = useJupiter();
   const [record, setRecord] = useState<UniversalRecord | null>(null), [discovery, setDiscovery] = useState<DiscoveryResult | null>(null);
   const [busy, setBusy] = useState(false), [signing, setSigning] = useState(false), [error, setError] = useState<string | null>(null);
@@ -66,20 +69,30 @@ export function UniversalRouterProvider({ children }: { children: ReactNode }) {
   const latestDiscoveryScope = useRef(discoveryScope); latestDiscoveryScope.current = discoveryScope;
   useEffect(() => { setDiscovery(null); }, [workflow, owner, destinationWallet]);
   const latestSolana = useRef(solana.session); latestSolana.current = solana.session;
-  const busyRef = useRef(false);
+  const busyRef = useRef(false), operationEpoch = useRef(0);
+  const visibleRun = useRef(record?.id); visibleRun.current = record?.id;
   const retired = Boolean(record && JSON.stringify(record.workflow) !== JSON.stringify(workflow) &&
     !(recovered && workflow.revision === 0 && workflow.nodes.every(n => n.actionType.startsWith('mock-'))));
   const signedIn = Boolean(ecosystem && owner && sessions[ecosystem] && sessions[ecosystem] === owner);
   function accept(value: UniversalRecord) {
-    setRecord(value);
+    visibleRun.current = value.id; setRecord(value);
     const last = value.attempts.at(-1), hash = last?.ecosystem === 'EVM' ? last.transactionHash : null;
-    try { window.localStorage.setItem(KEY, JSON.stringify({ id: value.id, ecosystem: ecosystemOfRecord(value), owner: value.owner, ...hash ? { hash } : {} })); }
+    try { window.localStorage.setItem(KEY, JSON.stringify({ id: value.id, ecosystem: ecosystemOfRecord(value), owner: value.owner, ...hash ? { hash, attemptId: value.attempts.at(-1)?.attemptId } : {} })); }
     catch { /* The server run remains authoritative. */ }
   }
   async function refreshRuns(eco: UniversalEcosystem | null = ecosystem) {
     if (!eco) return;
     const listed = await universalRuns(eco).catch(() => null);
     setRuns(listed?.ok ? listed.value : []);
+  }
+  async function deliverWalletResults(account: string) {
+    for (const report of readWalletReports(walletResultStorage(), account)) {
+        if (!report.runId.startsWith('xuni-')) continue;
+        const r = report.kind === 'HASH' ? await universalReport(report.runId, { kind: 'HASH', hash: report.hash!, attemptId: report.attemptId }).catch(() => null)
+          : await universalWalletFailure('EVM', report.runId, { invoked: true, attemptId: report.attemptId, code: report.code ?? 'UNIVERSAL_REJECTED', rejectionCode: report.rejectionCode!,
+            calls: [{ method: 'eth_sendTransaction', submission: true, error: { code: report.rejectionCode } }] }).catch(() => null);
+        if (r?.ok) forgetWalletReport(walletResultStorage(), report.attemptId);
+      }
   }
   useEffect(() => {
     let mounted = true;
@@ -89,10 +102,11 @@ export function UniversalRouterProvider({ children }: { children: ReactNode }) {
       if (!mounted) return;
       setSessions({ EVM: evm?.account ?? null, SOLANA: sol?.account ?? null });
       // Resume the stored pointer of a signed-in wallet: a hash saved before the browser closed reaches the server first (never a wallet).
+      if (evm?.account) await deliverWalletResults(evm.account);
       const pointer = readPointer();
       if (!pointer || (pointer.ecosystem === 'EVM' ? evm?.account : sol?.account) !== pointer.owner) return;
-      if (pointer.ecosystem === 'EVM' && typeof pointer.hash === 'string' && /^0x[0-9a-f]{64}$/.test(pointer.hash))
-        await universalReport(pointer.id, { kind: 'HASH', hash: pointer.hash }).catch(() => undefined);
+      if (pointer.ecosystem === 'EVM' && typeof pointer.attemptId === 'string' && typeof pointer.hash === 'string' && /^0x[0-9a-f]{64}$/.test(pointer.hash))
+        await universalReport(pointer.id, { kind: 'HASH', hash: pointer.hash, attemptId: pointer.attemptId }).catch(() => undefined);
       const result = await universalStatus(pointer.ecosystem, pointer.id).catch(() => null);
       if (mounted && result?.ok) { setRecord(result.value); setRecovered(true); }
     }).catch(() => undefined);
@@ -109,9 +123,9 @@ export function UniversalRouterProvider({ children }: { children: ReactNode }) {
       universalInvalidate(ecosystemOfRecord(record), record.id, 'WALLET_CHANGED').then(r => { if (r.ok) setRecord(r.value); }).catch(() => undefined);
   }, [owner, record?.id, record?.phase]);
   async function operation(action: () => Promise<void>) {
-    if (busyRef.current) return; busyRef.current = true; setBusy(true); setError(null); setCorrelationId(null);
-    try { await action(); } catch (cause) { setError(cause instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(cause.message) ? cause.message : 'UNIVERSAL_OPERATION_FAILED'); setCorrelationId(cause instanceof Error && 'correlationId' in cause && typeof cause.correlationId === 'string' && /^[a-f0-9-]{36}$/.test(cause.correlationId) ? cause.correlationId : null); }
-    finally { busyRef.current = false; setBusy(false); }
+    if (busyRef.current) return; const epoch = ++operationEpoch.current; busyRef.current = true; setBusy(true); setError(null); setCorrelationId(null);
+    try { await action(); } catch (cause) { if (operationEpoch.current !== epoch) return; setError(cause instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(cause.message) ? cause.message : 'UNIVERSAL_OPERATION_FAILED'); setCorrelationId(cause instanceof Error && 'correlationId' in cause && typeof cause.correlationId === 'string' && /^[a-f0-9-]{36}$/.test(cause.correlationId) ? cause.correlationId : null); }
+    finally { if (operationEpoch.current === epoch) { busyRef.current = false; setBusy(false); } }
   }
   async function connect() { await operation(async () => {
     if (ecosystem === 'SOLANA') await solana.connect('solana:mainnet');
@@ -177,7 +191,7 @@ export function UniversalRouterProvider({ children }: { children: ReactNode }) {
     for (let i = 0; i < 20; i++) {
       const observed = await universalObserve(eco, id);
       if (!observed.ok) break;
-      accept(observed.value);
+      if (visibleRun.current === id) accept(observed.value);
       const last = observed.value.attempts.at(-1);
       if (observed.value.verdict !== 'PENDING' || !last || !OBSERVABLE.includes(last.state)) break;
       await new Promise(resolve => setTimeout(resolve, 2_000));
@@ -185,6 +199,7 @@ export function UniversalRouterProvider({ children }: { children: ReactNode }) {
   }
   async function observe() { await operation(async () => {
     if (!record) throw new Error('UNIVERSAL_RUN_MISSING');
+    if (ecosystemOfRecord(record) === 'EVM') await deliverWalletResults(record.owner);
     accept(unwrap(await universalObserve(ecosystemOfRecord(record), record.id))); void refreshRuns(ecosystemOfRecord(record));
   }); }
   async function open(runId: string) { await operation(async () => { if (!ecosystem) throw new Error('UNIVERSAL_BRIDGE_REQUIRED'); accept(unwrap(await universalStatus(ecosystem, runId))); setRecovered(true); }); }
@@ -217,39 +232,48 @@ export function UniversalRouterProvider({ children }: { children: ReactNode }) {
       if (!Array.isArray(accounts) || typeof accounts[0] !== 'string' || accounts[0].toLowerCase() !== current.owner) throw new Error('UNIVERSAL_WRONG_OWNER');
       if (typeof chainId !== 'string' || chainId.toLowerCase() !== chain) throw new Error('UNIVERSAL_WRONG_CHAIN');
     };
-    let prepared = false;
+    const acceptCurrent = (value: UniversalRecord) => { if (visibleRun.current === id) accept(value); };
+    let prepared = false, attemptId = '';
     try {
       await validateSession();
-      const begun = unwrap(await universalBegin('EVM', id, connected.account, snapshot)); accept(begun.record); prepared = true;
+      const begun = unwrap(await universalBegin('EVM', id, connected.account, snapshot)); acceptCurrent(begun.record); prepared = true; attemptId = begun.attempt.attemptId; diagnostic.attemptId = attemptId;
       if (begun.ecosystem !== 'EVM') throw new Error('UNIVERSAL_TRANSACTION_ARTIFACT_CHANGED');
-      const tx = begun.transaction;
+      const tx = { ...begun.transaction, nonce: '0x' + BigInt(begun.attempt.ecosystem === 'EVM' ? begun.attempt.nonce : '0').toString(16) };
       // The wallet request must be one of the reviewed calls, byte for byte (target, data, value).
       if (tx.from !== current.owner || tx.chainId !== chain || !src.calls.some(c => c.to === tx.to && c.data === tx.data && BigInt(c.value) === BigInt(tx.value)))
         throw new Error('UNIVERSAL_TRANSACTION_ARTIFACT_CHANGED');
       await validateSession();
-      accept(unwrap(await universalHandoff(id)));
+      acceptCurrent(unwrap(await universalHandoff(id)));
       setSigning(true); diagnostic.invoked = true;
       let hash: unknown;
-      try { hash = await request('eth_sendTransaction', [tx]); } finally { setSigning(false); }
+      // Release only the local operation latch. The durable attempt and nonce fence forbid a duplicate send.
+      busyRef.current = false; setBusy(false);
+      try { hash = await watchWalletResponse(provider, () => request('eth_sendTransaction', [tx]), () => {
+        setSigning(false);
+        void universalReport(id, { kind: 'UNKNOWN', attemptId }).then(r => { if (r.ok) acceptCurrent(r.value); }).catch(() => undefined);
+      }); } finally { setSigning(false); }
       if (typeof hash !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(hash)) throw new Error('UNIVERSAL_SUBMISSION_UNKNOWN');
-      try { window.localStorage.setItem(KEY, JSON.stringify({ id, ecosystem: 'EVM', owner: current.owner, hash: hash.toLowerCase() })); } catch { /* Reported next. */ }
-      accept(unwrap(await universalReport(id, { kind: 'HASH', hash: hash.toLowerCase() })));
+      rememberWalletReport(walletResultStorage(), { runId: id, attemptId, owner: current.owner, kind: 'HASH', hash: hash.toLowerCase() });
+      try { if (visibleRun.current === id) window.localStorage.setItem(KEY, JSON.stringify({ id, ecosystem: 'EVM', owner: current.owner, attemptId, hash: hash.toLowerCase() })); } catch { /* Reported next. */ }
+      acceptCurrent(unwrap(await universalReport(id, { kind: 'HASH', hash: hash.toLowerCase(), attemptId })));
+      forgetWalletReport(walletResultStorage(), attemptId);
     } catch (cause) {
       const send = diagnostic.calls.find(c => c.submission), sendError = send?.error as { code?: unknown } | undefined;
       const refused = Boolean(send) && send!.result === undefined && typeof sendError?.code === 'number' && REFUSALS.includes(sendError.code);
       if (refused) diagnostic.rejectionCode = sendError!.code as number;
-      diagnostic.code = refused ? 'UNIVERSAL_REJECTED' : !diagnostic.invoked ? (cause instanceof Error && /^UNIVERSAL_[A-Z0-9_]+$/.test(cause.message) ? cause.message
+      diagnostic.code = refused ? sendError!.code === 4001 ? 'UNIVERSAL_REJECTED' : sendError!.code === 4100 ? 'UNIVERSAL_WALLET_UNAUTHORIZED' : 'UNIVERSAL_WALLET_METHOD_UNSUPPORTED' : !diagnostic.invoked ? (cause instanceof Error && /^UNIVERSAL_[A-Z0-9_]+$/.test(cause.message) ? cause.message
         : 'UNIVERSAL_RPC_ERROR_BEFORE_WALLET_SUBMISSION') : 'UNIVERSAL_SUBMISSION_UNKNOWN';
+      if (refused) rememberWalletReport(walletResultStorage(), { runId: id, attemptId, owner: current.owner, kind: 'REJECTED', code: diagnostic.code, rejectionCode: diagnostic.rejectionCode! });
       if (prepared && (!diagnostic.invoked || refused)) {
-        const failure = await universalWalletFailure('EVM', id, diagnostic); if (failure.ok) accept(failure.value);
+        const failure = await universalWalletFailure('EVM', id, diagnostic); if (failure.ok) { acceptCurrent(failure.value); forgetWalletReport(walletResultStorage(), attemptId); }
         throw new Error(diagnostic.code, { cause });
       }
       if (diagnostic.invoked) {
         // The request may have reached the network: never resend, only observe.
-        const report = await universalReport(id, { kind: 'UNKNOWN', code: diagnostic.code }); if (report.ok) accept(report.value);
+        const report = await universalReport(id, { kind: 'UNKNOWN', code: diagnostic.code, attemptId }); if (report.ok) acceptCurrent(report.value);
         throw new Error('UNIVERSAL_SUBMISSION_UNKNOWN_OBSERVE_EXISTING', { cause });
       }
-      if (cause instanceof Error && /ROUTE_CHANGED|STATE_CHANGED|REVIEW_EXPIRED/.test(cause.message)) { const r = await universalStatus('EVM', id); if (r.ok) accept(r.value); }
+      if (cause instanceof Error && /ROUTE_CHANGED|STATE_CHANGED|REVIEW_EXPIRED/.test(cause.message)) { const r = await universalStatus('EVM', id); if (r.ok) acceptCurrent(r.value); }
       throw cause;
     }
     await poll('EVM', id);
@@ -287,7 +311,7 @@ export function UniversalRouterProvider({ children }: { children: ReactNode }) {
   }); }
   return <Context.Provider value={{ available, executionEnabled, details, ecosystem, owner, destinationWallet, record, discovery, busy, signing, error, correlationId, retired, recovered, runs,
     signedIn, connect, signIn, discover, simulate, refresh, review, execute, observe, open, loadRuns, switchNetwork }}>
-    {signing && <p role="status">Confirm or reject the pending request in your wallet.</p>}
-    <div inert={signing} data-universal-wallet-pending={signing ? 'true' : undefined}>{children}</div></Context.Provider>;
+    {signing && <p role="status">{tr('Open your wallet to approve or reject. You can navigate and check status while waiting.')}</p>}
+    <div data-universal-wallet-pending={signing ? 'true' : undefined}>{children}</div></Context.Provider>;
 }
 export function useUniversalRouter() { const value = useContext(Context); if (!value) throw new Error('UNIVERSAL_ROUTER_PROVIDER_MISSING'); return value; }

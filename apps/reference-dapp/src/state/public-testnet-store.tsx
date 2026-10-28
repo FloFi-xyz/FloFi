@@ -86,7 +86,7 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
   // BUILD-FIX-UX-001: an earlier attempt's message (e.g. a declined wallet request) belongs to that workflow; a new one starts without it.
   const workflowId = state.workflow.workflowId;
   useEffect(() => { setError(null); }, [workflowId]);
-  const busyRef = useRef(false);
+  const busyRef = useRef(false), operationEpoch = useRef(0);
   const workflowRef = useRef(state.workflow);
   workflowRef.current = state.workflow;
   const initialWorkflow = useRef(state.workflow);
@@ -99,8 +99,8 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
   const available = authoredProfile?.kind === 'CATALOG' ? catalogAvailable(authoredProfile.chainRef) : availability.testnet;
   const guarded = useCallback((label: string, action: () => Promise<void>) => {
     if (busyRef.current) return;
-    busyRef.current = true; setBusy(label); setError(null);
-    action().catch(cause => setError(message(cause))).finally(() => { busyRef.current = false; setBusy(null); });
+    const epoch = ++operationEpoch.current; busyRef.current = true; setBusy(label); setError(null);
+    action().catch(cause => setError(message(cause))).finally(() => { if (operationEpoch.current === epoch) { busyRef.current = false; setBusy(null); } });
   }, []);
   useEffect(() => {
     let cancelled = false;
@@ -196,6 +196,7 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
       throw new Error('WRONG_WALLET_CHAIN');
     }
     let hash: unknown;
+    busyRef.current = false; setBusy(null);
     try { hash = await provider.request({ method: 'eth_sendTransaction', params: [tx] }); }
     catch (cause) {
       setRun(unwrap(await publicReport(run.quote.executionId, attempt.attemptId, { kind: rejected(cause) ? 'REJECTED' : 'UNKNOWN' })));

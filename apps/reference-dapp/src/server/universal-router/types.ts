@@ -3,6 +3,7 @@
 import type { SolanaWalletChange, SolanaWalletGuard, UniversalArtifacts } from '@defi-workflow-engine/reference-compiler';
 import type { EvidenceBundle, RouteChange, RouterPhase, SemanticWorkflow, UniversalAssetRef, UniversalRecipient, UniversalRoute, UniversalRouteSelection,
   UniversalRoutingProvider } from '@defi-workflow-engine/workflow-contracts';
+import type { AllowanceObservation, FinancialObservation } from '../../domain/financial-observation';
 import type { ProviderStatusHint } from './relay-provider.ts';
 
 export const UNIVERSAL_RUN_ID = /^xuni-[a-f0-9]{32}$/;
@@ -15,12 +16,12 @@ export const UNIVERSAL_OBSERVABLE: readonly UniversalAttemptState[] = ['SUBMITTI
 export const UNIVERSAL_TERMINAL: readonly UniversalAttemptState[] = ['CANCELLED', 'NOT_FOUND', 'CONFIRMED', 'REVERTED', 'RECONCILIATION_REQUIRED'];
 export const UNIVERSAL_SETTLING: readonly RouterPhase[] = ['SOURCE_CONFIRMED', 'IN_FLIGHT', 'DESTINATION_OBSERVED', 'RECOVERY_REQUIRED'];
 
-export type EvmTx = { readonly chainId: string; readonly from: string; readonly to: string; readonly data: string; readonly value: string; readonly gas: string;
+export type EvmTx = { readonly nonce?: string; readonly chainId: string; readonly from: string; readonly to: string; readonly data: string; readonly value: string; readonly gas: string;
   readonly maxFeePerGas: string; readonly maxPriorityFeePerGas: string };
 type AttemptBase = { readonly attemptId: string; readonly step: UniversalStep; readonly state: UniversalAttemptState; readonly reviewCommitment: string;
   readonly createdAt: string; readonly transactionHash: string | null; readonly reconciled: boolean; readonly note: string | null };
 export type UniversalEvmAttempt = AttemptBase & { readonly ecosystem: 'EVM'; readonly nonce: string; readonly preparedAtBlock: number; readonly tx: EvmTx;
-  readonly replacementHash: string | null; readonly receipt: { readonly transactionHash: string; readonly status: 0 | 1; readonly blockNumber: number; readonly blockHash: string;
+  readonly replacementHash: string | null; readonly conflictingTransactionHash?: string; readonly receipt: { readonly transactionHash: string; readonly status: 0 | 1; readonly blockNumber: number; readonly blockHash: string;
     readonly from: string; readonly gasCostWei: string; readonly submissionKind: 'DIRECT' | 'DELEGATED_SINGLE' } | null;
   /** Durable cursor of the order-log scan used when the hash was lost. */ readonly depositScanFrom?: number };
 export type UniversalSolanaAttempt = AttemptBase & { readonly ecosystem: 'SOLANA'; readonly step: 'DEPOSIT'; readonly messageHash: string;
@@ -93,13 +94,13 @@ export type UniversalEvidence = { readonly bundle: EvidenceBundle; readonly bund
   readonly transactions: readonly { readonly chain: string; readonly step: string; readonly transactionHash: string; readonly explorer: string }[];
   readonly reconciliation: 'RECONCILED'; readonly observedAt: string };
 export type UniversalVerdict = 'PENDING' | 'RECONCILED' | 'DIVERGENT' | 'FAILED' | 'REFUNDED';
-export type UniversalRecord = { readonly format: 'flofi.universal-bridge-run.v1'; readonly id: string; readonly provenance: UniversalProvenance;
+export type UniversalRecord = { readonly format: 'flofi.universal-bridge-run.v1'; readonly observation?: FinancialObservation; readonly allowanceObservation?: AllowanceObservation; readonly id: string; readonly provenance: UniversalProvenance;
   readonly workflow: SemanticWorkflow; readonly owner: string; readonly review: UniversalReview; readonly authorization: string | null; readonly phase: RouterPhase;
   readonly attempts: readonly UniversalAttempt[]; readonly source: SourceSettlement | null; readonly destination: DestinationDelivery | null; readonly refund: RefundRecord | null;
   readonly lastHint: ProviderStatusHint | null; readonly routeChanges: readonly RouteChange[]; readonly requote: boolean; readonly evidence: UniversalEvidence | null;
   readonly verdict: UniversalVerdict; readonly error: string | null;
   /** The delivered amount proven on the destination chain (what a later bound step may spend). */ readonly received: string | null;
   /** Durable FloFi 0.1% obligation (or waiver) once the run reaches a terminal verdict; null while PENDING. */ readonly feeObligation: UniversalFeeObligation | null };
-export type UniversalWalletDiagnostic = { invoked: boolean; calls: { method: string; submission?: boolean; result?: string | null; error?: unknown }[]; code: string; rejectionCode?: number };
+export type UniversalWalletDiagnostic = { attemptId?: string; invoked: boolean; calls: { method: string; submission?: boolean; result?: string | null; error?: unknown }[]; code: string; rejectionCode?: number };
 export type UniversalBegin = { readonly record: UniversalRecord; readonly attempt: UniversalAttempt } &
   ({ readonly ecosystem: 'EVM'; readonly transaction: EvmTx } | { readonly ecosystem: 'SOLANA'; readonly unsignedTransaction: string; readonly walletChain: 'solana:mainnet' });

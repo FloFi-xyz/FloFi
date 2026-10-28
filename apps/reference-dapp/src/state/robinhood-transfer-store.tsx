@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
+import { WalletPendingNotice } from '../components/wallet-pending-notice';
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { useWorkflow } from './workflow-store';
@@ -31,7 +32,7 @@ export function RobinhoodTransferProvider({ children }: { children: ReactNode })
   const workflow = state.workflow as unknown as SemanticWorkflow;
   const latest = useRef(workflow); latest.current = workflow;
   const latestWallet = useRef(wallet); latestWallet.current = wallet;
-  const busyRef = useRef(false);
+  const busyRef = useRef(false), operationEpoch = useRef(0);
   const retired = Boolean(record && JSON.stringify(record.review.workflow) !== JSON.stringify(workflow) &&
     !(workflow.revision === 0 && workflow.nodes.every(n => n.actionType.startsWith('mock-'))));
   function accept(value: TransferRecord) {
@@ -52,8 +53,8 @@ export function RobinhoodTransferProvider({ children }: { children: ReactNode })
   }, []);
   useEffect(() => { if (record && retired && record.authorization) transferInvalidate(record.id).then(r => { if (r.ok) setRecord(r.value); }).catch(() => setError('TRANSFER_AUTHORIZATION_INVALIDATION_FAILED')); }, [record, retired]);
   async function operation(action: () => Promise<void>) {
-    if (busyRef.current) return; busyRef.current = true; setBusy(true); setError(null);
-    try { await action(); } catch (cause) { setError(cause instanceof Error ? cause.message : 'TRANSFER_OPERATION_FAILED'); } finally { busyRef.current = false; setBusy(false); }
+    if (busyRef.current) return; const epoch = ++operationEpoch.current; busyRef.current = true; setBusy(true); setError(null);
+    try { await action(); } catch (cause) { setError(cause instanceof Error ? cause.message : 'TRANSFER_OPERATION_FAILED'); } finally { if (operationEpoch.current === epoch) { busyRef.current = false; setBusy(false); } }
   }
   const unwrap = <T,>(result: { ok: true; value: T } | { ok: false; code: string }): T => { if (!result.ok) throw new Error(result.code); return result.value; };
   async function simulate() { await operation(async () => {
@@ -112,7 +113,7 @@ export function RobinhoodTransferProvider({ children }: { children: ReactNode })
       if (latestWallet.current.account !== session.account || latestWallet.current.chainId !== session.chainId) throw new Error('TRANSFER_WRONG_ACCOUNT');
       if (JSON.stringify(latest.current) !== JSON.stringify(snapshot) || injected() !== provider) throw new Error('TRANSFER_SEMANTIC_REVISION_CHANGED');
       // The sole submission point, reachable only from the owner's Execute click. The wallet assigns the reviewed nonce.
-      setSigning(true); diagnostic.invoked = true;
+      setSigning(true); diagnostic.invoked = true; busyRef.current = false; setBusy(false);
       const { from, to, value, data, chainId, gas, maxFeePerGas, maxPriorityFeePerGas } = begin.transaction;
       let hash: unknown;
       try { hash = await request('eth_sendTransaction', [{ from, to, value, data, chainId, gas, maxFeePerGas, maxPriorityFeePerGas }]); } finally { setSigning(false); }
@@ -138,7 +139,7 @@ export function RobinhoodTransferProvider({ children }: { children: ReactNode })
     const observed = await transferObserve(record.id); if (observed.ok) accept(observed.value);
   }); }
   return <Context.Provider value={{ record, busy, error, retired, signing, simulate, review, execute, observe, recoverReview, switchNetwork }}>
-    {signing && <p role="status">Confirm or reject the pending request in your wallet.</p>}
-    <div inert={signing} data-transfer-wallet-pending={signing ? 'true' : undefined}>{children}</div></Context.Provider>;
+    {signing && <WalletPendingNotice/>}
+    <div data-transfer-wallet-pending={signing ? 'true' : undefined}>{children}</div></Context.Provider>;
 }
 export function useRobinhoodTransfer() { const value = useContext(Context); if (!value) throw new Error('TRANSFER_PROVIDER_MISSING'); return value; }

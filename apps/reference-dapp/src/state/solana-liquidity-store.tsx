@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
+import { WalletPendingNotice } from '../components/wallet-pending-notice';
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import type { SolanaWalletChange } from '@defi-workflow-engine/reference-compiler';
@@ -59,7 +60,7 @@ export function SolanaLiquidityProvider({ children }: { children: ReactNode }) {
   const [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null), [recovered, setRecovered] = useState(false);
   const [enabled, setEnabled] = useState<Record<SolanaLiquidityNetwork, boolean>>({ 'Solana Devnet': false, Solana: false });
   const [signing, setSigning] = useState(false), [price, setPrice] = useState<PoolPrice | null>(null);
-  const mintSigner = useRef<PositionMintSigner | null>(null), busyRef = useRef(false);
+  const mintSigner = useRef<PositionMintSigner | null>(null), busyRef = useRef(false), operationEpoch = useRef(0);
   const workflow = state.workflow as unknown as SemanticWorkflow;
   const latest = useRef(workflow); latest.current = workflow;
   const authoredNetwork = workflow.nodes.map(node => solanaLiquidityDetails(node)?.network).find(Boolean) ?? null;
@@ -88,15 +89,9 @@ export function SolanaLiquidityProvider({ children }: { children: ReactNode }) {
   // A semantic edit after Review invalidates the authorization; any existing transaction stays observable.
   useEffect(() => { if (record && retired && record.authorization) runtimes[networkOfRecord(record)].invalidate(record.id).then(result => { if (result.ok) setRecord(result.value); })
     .catch(() => setError('ORCA_LIQUIDITY_AUTHORIZATION_INVALIDATION_FAILED')); }, [record, retired]);
-  useEffect(() => {
-    if (!signing) return;
-    const prevent = (event: KeyboardEvent) => { event.preventDefault(); event.stopImmediatePropagation(); };
-    window.addEventListener('keydown', prevent, true);
-    return () => window.removeEventListener('keydown', prevent, true);
-  }, [signing]);
   async function operation(action: () => Promise<void>) {
-    if (busyRef.current) return; busyRef.current = true; setBusy(true); setError(null);
-    try { await action(); } catch (cause) { setError(cause instanceof Error ? cause.message : 'ORCA_LIQUIDITY_OPERATION_FAILED'); } finally { busyRef.current = false; setBusy(false); }
+    if (busyRef.current) return; const epoch = ++operationEpoch.current; busyRef.current = true; setBusy(true); setError(null);
+    try { await action(); } catch (cause) { setError(cause instanceof Error ? cause.message : 'ORCA_LIQUIDITY_OPERATION_FAILED'); } finally { if (operationEpoch.current === epoch) { busyRef.current = false; setBusy(false); } }
   }
   const refresh = useCallback(async (address: string) => {
     const result = await runtimes[network].positions(address); if (!result.ok) throw new Error(result.code);
@@ -153,7 +148,7 @@ export function SolanaLiquidityProvider({ children }: { children: ReactNode }) {
     const begin = await api.begin(record.id, session.account.address, snapshot); if (!begin.ok) throw new Error(begin.code);
     accept(begin.value.record);
     let signed: string;
-    setSigning(true);
+    setSigning(true); busyRef.current = false; setBusy(false);
     try {
       if (begin.value.walletChain !== session.chain) throw new Error('ORCA_LIQUIDITY_WRONG_CLUSTER');
       if (JSON.stringify(latest.current) !== JSON.stringify(snapshot)) throw new Error('ORCA_LIQUIDITY_SEMANTIC_REVISION_CHANGED');
@@ -177,7 +172,7 @@ export function SolanaLiquidityProvider({ children }: { children: ReactNode }) {
   }); }
   return <Context.Provider value={{ record, positions, busy, error, retired, recovered, executionEnabled: enabled[network], signing, owner, price, network,
     walletChain: runtime.walletChain, refreshPositions, fetchPrice, simulate, review, execute, observe }}>
-    {signing && <p role="status">Confirm or reject the pending request in your Solana wallet.</p>}
-    <div inert={signing} data-orca-liquidity-wallet-pending={signing ? 'true' : undefined}>{children}</div></Context.Provider>;
+    {signing && <WalletPendingNotice/>}
+    <div data-orca-liquidity-wallet-pending={signing ? 'true' : undefined}>{children}</div></Context.Provider>;
 }
 export function useSolanaLiquidity() { const value = useContext(Context); if (!value) throw new Error('SOLANA_LIQUIDITY_PROVIDER_MISSING'); return value; }
