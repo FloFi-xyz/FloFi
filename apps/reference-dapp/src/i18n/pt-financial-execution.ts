@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 export const portugueseFinancialExecution: Readonly<Record<string, string>> = {
+  'An earlier approval is confirmed. The remaining request did not complete. Network costs and token allowance may remain.': 'Uma aprovação anterior está confirmada. A solicitação restante não foi concluída. Ainda pode haver custos de rede e uma permissão de uso do token.',
   'The token approval is confirmed. Approval does not transfer your tokens. The source deposit needs its own wallet request.': 'A permissão de uso do token está confirmada. Aprovar não transfere seus tokens. O envio na origem precisa de uma solicitação própria na carteira.',
   'A destination transfer was verified on-chain. Finality and full reconciliation are still pending.': 'Uma transferência no destino foi verificada na rede. A confirmação definitiva e a verificação completa ainda estão pendentes.',
   'A refund was verified on-chain. Review its actual amount and the known transaction costs.': 'Um reembolso foi verificado na rede. Confira o valor real e os custos conhecidos das transações.',

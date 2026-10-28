@@ -47,6 +47,8 @@ The reload browser regression also demonstrated a shared presentation failure: a
 
 The shared owner-wallet Swap store also needed an explicit live wallet-request identity once its operation latch was released. It now distinguishes that interaction from a restored PREPARED attempt, uses the shared account/chain/disconnect watcher, preserves late responses, and prevents an earlier run's completion from replacing a newly selected run. Its source file retains the historical `public-testnet` name; the same store serves catalog mainnet swaps.
 
+The common result summary had another BUG-001/018 failure: a confirmed approval did not count as a financial effect when deciding whether to claim that nothing reached the network. A later not-submitted request could therefore produce a false no-send claim for the whole run. A failing-before regression reproduces this; the summary now describes partial execution and explicitly preserves possible approval costs and allowance. It does not count the approval as a completed transfer step.
+
 Already corrected by current main: #127 supplies shared real Swap/Bridge estimates, provider refusals, quote identity/expiry checks and approval-preserving quote refresh. #128 supplies financial-history retention, transactional deletion of provably disposable runs, archive, tenant/wallet isolation and rollback history read-only mode. #129 supplies conversational draft and source/destination asset continuity. None is reimplemented here. Existing wallet-rejection and on-chain destination verification are reused rather than weakened.
 
 ## Shared implementation and financial invariants

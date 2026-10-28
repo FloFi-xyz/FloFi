@@ -49,6 +49,14 @@ describe('current execution result structure', () => {
     current.steps.unshift({ ...confirmed, id: 'earlier-step' }); current.completed = 1;
     expect(projectExecutionResult(current)).toMatchObject({ label: 'Execution partially completed', completed: 1, total: 2 });
   });
+  it('never claims nothing reached the network when approval confirmed but the next request was not submitted', () => {
+    const current = progress('NOT_SUBMITTED'), confirmed = progress('CONFIRMED').steps[0]!.operations.at(-1)!;
+    current.steps[0]!.operations.unshift({ ...confirmed, id: 'approval', title: 'Approve USDC', approval: true });
+    const result = projectExecutionResult(current);
+    expect(result?.label).toBe('Execution partially completed');
+    expect(result?.message).toContain('approval is confirmed');
+    expect(result?.message).not.toMatch(/nothing reached|no transaction.*sent/i);
+  });
   it('keeps completion with a recorded residual allowance distinct from clean completion', () => {
     const current = progress('CONFIRMED');
     current.evidence = { operations: {}, wallet: null, knownCosts: [], details: [], limitations: [], attention: ['Recorded allowance remains'] };
