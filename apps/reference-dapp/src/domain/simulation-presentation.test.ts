@@ -120,7 +120,21 @@ describe('simulation financial presentation', () => {
     expect(simulationError('SOLANA_TRANSFER_EXECUTION_NOT_ENABLED')).toContain('not available on this FloFi server');
     expect(simulationError('SOMETHING_NEW')).toBe('FloFi could not complete this simulation, and nothing was sent. Check the workflow in Build, then simulate again.');
     for (const code of ['SOLANA_TRANSFER_RECIPIENT_INVALID', 'UNKNOWN_FAILURE', 'X_SIMULATION_FAILED']) expect(simulationError(code)).not.toMatch(/Simulation could not be completed/);
-    expect(simulationError('SUPPLY_STORAGE_NOT_CONFIGURED')).toContain('currently unavailable');
+    expect(simulationError('SUPPLY_STORAGE_NOT_CONFIGURED')).toContain('execution record storage is not configured');
+  });
+  it.each([
+    ['ROUTER_RPC_UNAVAILABLE', 'network data could not be read', 'Try simulating again.'],
+    ['SUPPLY_RPC_ERROR', 'network data could not be read', 'Try simulating again.'],
+    ['ROUTER_RPC_RATE_LIMITED', 'provider is limiting requests', 'Wait a moment, then simulate again.'],
+    ['SUPPLY_STORAGE_NOT_CONFIGURED', 'execution record storage is not configured', 'Contact FloFi support.'],
+    ['ROUTER_SERVICE_UNAVAILABLE', 'service is temporarily unavailable', 'Try again before continuing.'],
+    ['ROUTER_OFF', 'not available for this route', 'Contact FloFi support.'],
+  ])('keeps %s specific, actionable and without invented simulation values', (error, cause, action) => {
+    const result = project(snapshot('unavailable', { error }));
+    expect(result.message).toContain(cause); expect(result.message).toContain(action);
+    expect(result.status).toBe('blocked'); expect(result.fees).toEqual([]);
+    expect(result.steps.every(step => step.result === null && step.minimum === null)).toBe(true);
+    expect(simulationStatusPresentation(result).label).toBe('Simulation unavailable');
   });
 });
 

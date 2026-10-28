@@ -72,7 +72,7 @@ export function simulationStatusPresentation(view: SimulationPresentation, inval
   if (/expired/i.test(view.message)) return { label: 'Simulation expired', message: 'Simulate again to refresh the result before authorization.', tone: 'blocked' };
   if (/changed/i.test(view.message)) return { label: 'Review required again', message: view.message, tone: 'blocked' };
   if (/balance.*low|Add funds for the network fee/i.test(view.message)) return { label: 'Insufficient balance', message: view.message, tone: 'blocked' };
-  if (/Simulation is (?:currently unavailable|not available)/i.test(view.message)) return { label: 'Simulation unavailable', message: view.message, tone: 'blocked' };
+  if (/Simulation is (?:currently unavailable|not available|unavailable because)|The simulation service is temporarily unavailable/i.test(view.message)) return { label: 'Simulation unavailable', message: view.message, tone: 'blocked' };
   if (/could not complete this simulation|rejected this transaction in simulation/i.test(view.message)) return { label: 'Simulation failed', message: view.message, tone: 'blocked' };
   if (/Connect the wallet that will sign/i.test(view.message)) return { label: 'Connect your wallet', message: view.message, tone: 'blocked' };
   if (/destination address|token details do not match|token feature FloFi cannot verify|Check the amount/i.test(view.message)) return { label: 'Check the workflow', message: view.message, tone: 'blocked' };
@@ -111,7 +111,11 @@ export function simulationError(error: string): string {
   if (/INSUFFICIENT|BALANCE_TOO_LOW|exceeds.*balance/i.test(error)) return 'Your available balance is too low for this workflow.';
   if (/HEALTH_FACTOR|UNSAFE_HEALTH|UNSAFE_POSITION/i.test(error)) return 'This action would leave the lending position below its required safety limit.';
   if (/EXPIRED|STALE|REQUOTE|quote.*expired/i.test(error)) return 'This result has expired. Refresh the simulation before continuing.';
-  if (/SERVICE_UNAVAILABLE|STORAGE_NOT_CONFIGURED|RPC_(?:ERROR|RATE_LIMITED|UNAVAILABLE)|_OFF$|_RATE_LIMITED$/i.test(error)) return 'Simulation is currently unavailable. Try again before continuing.';
+  if (/RPC_RATE_LIMITED|_RATE_LIMITED$/i.test(error)) return 'Simulation is unavailable because the provider is limiting requests. Wait a moment, then simulate again.';
+  if (/RPC_(?:ERROR|UNAVAILABLE)/i.test(error)) return 'Simulation is unavailable because network data could not be read. Try simulating again.';
+  if (/STORAGE_NOT_CONFIGURED/i.test(error)) return 'Simulation is unavailable because execution record storage is not configured on this server. Contact FloFi support.';
+  if (/SERVICE_UNAVAILABLE/i.test(error)) return 'The simulation service is temporarily unavailable. Try again before continuing.';
+  if (/_OFF$/i.test(error)) return 'Simulation is not available for this route on this server. Contact FloFi support.';
   // BUILD-SOLANA-TRANSFER-UX-001: specific meanings before the broad route and fallback messages (nothing here echoes provider text).
   if (/WALLET_SELECTION_REQUIRED|_WALLET_REQUIRED$|WALLET_NOT_CONNECTED|OWNER_REQUIRED|WALLET_PROOF_REQUIRED/i.test(error)) return 'Connect the wallet that will sign this workflow, then simulate again.';
   if (/RECIPIENT_(?:REQUIRED|INVALID|NOT_EOA|NOT_WALLET|IS_TOKEN_ACCOUNT|IS_PROGRAM|OFF_CURVE|IS_SENDER|UNSUPPORTED)/i.test(error)) return 'Check the destination address. It must be a valid wallet address on this network, not a token or program account.';

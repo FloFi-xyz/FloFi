@@ -146,3 +146,20 @@ test('wheel navigation leaves node form input and page scrolling intact', async 
   await expect(input).toHaveValue('42'); await expect(viewport).toHaveAttribute('style', before!);
   verify();
 });
+
+test('unavailable simulation explains the real cause and next action in EN/PT without fabricating output', async ({ page }) => {
+  for (const language of ['EN', 'PT'] as const) for (const [area, en, pt, action, ptAction] of [
+    ['rpc', 'network data could not be read', 'não foi possível consultar os dados da rede', 'Try simulating again.', 'Tente simular novamente.'],
+    ['rate', 'provider is limiting requests', 'provedor está limitando as consultas', 'Wait a moment, then simulate again.', 'Aguarde um momento e simule novamente.'],
+    ['storage', 'execution record storage is not configured', 'armazenamento dos registros de execução não está configurado', 'Contact FloFi support.', 'Entre em contato com o suporte da FloFi.'],
+  ]) {
+    const verify = await open(page, `simulation-unavailable-${area}`, 375, language);
+    const warning = page.locator('.simulation-warning-blocking');
+    await expect(warning).toContainText(language === 'PT' ? pt! : en!);
+    await expect(warning).toContainText(language === 'PT' ? ptAction! : action!);
+    await expect(page.locator('.simulation-result')).toHaveText('→—');
+    await expect(page.locator('.simulation-minimum')).toHaveCount(0);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    verify();
+  }
+});

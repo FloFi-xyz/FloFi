@@ -1,5 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 export const portugueseCaioUx: Readonly<Record<string, string>> = {
+  'Simulation is unavailable because the provider is limiting requests. Wait a moment, then simulate again.': 'A simulação está indisponível porque o provedor está limitando as consultas. Aguarde um momento e simule novamente.',
+  'Simulation is unavailable because network data could not be read. Try simulating again.': 'A simulação está indisponível porque não foi possível consultar os dados da rede. Tente simular novamente.',
+  'Simulation is unavailable because execution record storage is not configured on this server. Contact FloFi support.': 'A simulação está indisponível porque o armazenamento dos registros de execução não está configurado neste servidor. Entre em contato com o suporte da FloFi.',
+  'The simulation service is temporarily unavailable. Try again before continuing.': 'O serviço de simulação está temporariamente indisponível. Tente novamente antes de continuar.',
+  'Simulation is not available for this route on this server. Contact FloFi support.': 'A simulação não está habilitada para esta rota neste servidor. Entre em contato com o suporte da FloFi.',
   'For the next reviewed transaction. Further approvals and actions can have separate network costs.': 'Para a próxima transação revisada. Outras aprovações e ações podem ter custos de rede separados.',
   'Network fee budget': 'Orçamento de taxa de rede',
   'Requested amount': 'Valor solicitado',
