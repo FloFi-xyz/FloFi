@@ -84,6 +84,10 @@ Later profiles and the certification fan-in did not run in that failed workflow.
 
 Resumed local verification: **5,404 unit/security tests passed**, two existing skips; **511 PostgreSQL tests passed**, three existing skips, on disposable loopback PostgreSQL **18.6**; `review-execute-recovery-components` **39/39**, `canvas-automation-ux` **18/18**, and `universal-bridge` **11/11** passed. Typecheck, lint, schema drift, governance and its **19** tests, and **56** CI orchestration tests passed. Browser tests used the pinned headless-shell revision **1243**, Node **24.21.0**, pnpm **11.22.0** and the hash-verified Anvil **1.8.3**. The PR holds the subsequent full CircleCI result for the final commit; these local results alone do not establish certification.
 
+On subsequent head `c2b1f228b18655f7d7cbb8f9dd8a9ccb6b61d352`, CircleCI passed governance, the complete certification-checks job and all six critical browser profiles. The extended `default-product` profile then exposed one empty-Simulate screenshot regression (**113 passed / 1 failed**): replacing the existing empty-workflow guidance with a generic configuration blocker added a wrapped line and **18 pixels** to the page. The unchanged visual-shell suite reproduced it locally (**2 passed / 1 failed**). The summary now applies the specific blocker only when an authored step exists; an empty workflow retains its original guidance and screenshot baseline. No screenshot was updated and no layout or financial gate was changed. That head's browser-2 job subsequently passed all **23** extended profiles and composition testing.
+
+After this final empty-state correction, the complete local unit/security suite passed **5,405 tests**, with two existing skips, and the complete `default-product` browser profile passed **114/114**, including the unchanged empty-Simulate screenshot. Production build, typecheck and lint also passed. The final exact-head CircleCI ledger remains a separate required gate, recorded in the PR.
+
 ## Caio T01–T14 coverage disposition
 
 | Test | Scope |

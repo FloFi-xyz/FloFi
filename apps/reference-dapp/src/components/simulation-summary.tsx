@@ -37,7 +37,7 @@ export function SimulationSummary({ workflow, context, source, invalidWorkflow =
     return () => { window.clearTimeout(timer); window.removeEventListener('focus', update); document.removeEventListener('visibilitychange', update); };
   }, [expiresAt]);
   const status = simulationStatusPresentation(details, invalidWorkflow, source?.state.busy);
-  const message = unavailableReason && details.status !== 'ready' && !source?.state.busy ? unavailableReason : status.message;
+  const message = unavailableReason && details.steps.length > 0 && details.status !== 'ready' && !source?.state.busy ? unavailableReason : status.message;
   const networks = [...new Set(details.steps.flatMap(step => step.networks))];
   const multiple = details.steps.length > 1;
   const markets = details.steps.filter(step => step.configuredSlippage || step.slippage || step.priceImpact);
