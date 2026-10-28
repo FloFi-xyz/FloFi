@@ -74,6 +74,8 @@ The unchanged full certification plan remains mandatory: types, ESLint, producti
 
 ## Release and rollback handoff
 
+Certification follow-up: CircleCI workflow `43090e24-d399-48e6-b88f-7099f5906974` on `17e32a7` failed its browser-1 production build before browser tests. Retrieved logs show `next/font/google queries have exactly one entry` in the Outfit loader, the upstream Next.js [extensionless Google-font URL defect](https://github.com/vercel/next.js/issues/99114). The same 12 WOFF2 payloads already used by the passing local build are now bundled with OFL licenses, digest provenance, identical face/weight/range/fallback declarations and the same three Latin preloads. No font design, dependency, gate or screenshot baseline changes. Full exact-head certification is repeated after this correction; the failed workflow is not counted as certification.
+
 No merge or deployment was performed. Vercel Git deployments are disabled for this branch using the repository's existing branch-specific mechanism; CircleCI has no deployment jobs.
 
 After owner review and release authorization, deploy compatible API/worker and frontend code through the existing release process. No schema migration is needed. Keep existing Alchemy credentials server-only; optionally configure independent HTTPS fallback RPC URLs (at most four total paths). Reobserve the original run through the existing owner-authorized read path; the worker can also resume its durable queued item. Verify the original source/destination hashes, final amount, retained approval cost and final evidence before considering the production projection recovered.

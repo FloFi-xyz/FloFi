@@ -1,0 +1,139 @@
+{
+  "source": "Unmodified WOFF2 payloads from the successful 2026-10-28 next/font/google production build at 17e32a70d41a6dc9be721382727706d34f03207f",
+  "license": "OFL-1.1",
+  "families": {
+    "Outfit": "https://github.com/google/fonts/tree/main/ofl/outfit",
+    "IBM Plex Mono": "https://github.com/google/fonts/tree/main/ofl/ibmplexmono"
+  },
+  "files": [
+    {
+      "file": "outfit-9e38b3f1575daba3.woff2",
+      "family": "Outfit",
+      "weights": [
+        "400",
+        "500",
+        "600"
+      ],
+      "sha256": "9e38b3f1575daba3435ef09d33a202585ed5bd204bd0a8c744955c750c2b9091",
+      "bytes": 14760,
+      "unicodeRange": "U+100-2BA,U+2BD-2C5,U+2C7-2CC,U+2CE-2D7,U+2DD-2FF,U+304,U+308,U+329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C4,U+2113,U+2C60-2C7F,U+A720-A7FF"
+    },
+    {
+      "file": "outfit-92684e4acde79ef0.woff2",
+      "family": "Outfit",
+      "weights": [
+        "400",
+        "500",
+        "600"
+      ],
+      "sha256": "92684e4acde79ef07758cd09380b7e01e9824d8b061eddeda046f78c166d7b12",
+      "bytes": 32228,
+      "unicodeRange": "U+??,U+131,U+152-153,U+2BB-2BC,U+2C6,U+2DA,U+2DC,U+304,U+308,U+329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD"
+    },
+    {
+      "file": "ibm-plex-mono-c6f09ee0e0a24b7c.woff2",
+      "family": "IBM Plex Mono",
+      "weights": [
+        "400"
+      ],
+      "sha256": "c6f09ee0e0a24b7c85ecb2a601eb99332f65b1f6b37c31e0bbe73fb307625eca",
+      "bytes": 4348,
+      "unicodeRange": "U+460-52F,U+1C80-1C8A,U+20B4,U+2DE0-2DFF,U+A640-A69F,U+FE2E-FE2F"
+    },
+    {
+      "file": "ibm-plex-mono-7b59d6bf7f8b8408.woff2",
+      "family": "IBM Plex Mono",
+      "weights": [
+        "400"
+      ],
+      "sha256": "7b59d6bf7f8b8408ac28f27d01dca9a890abeae77045d343b1d8ccb089a92e54",
+      "bytes": 5476,
+      "unicodeRange": "U+301,U+400-45F,U+490-491,U+4B0-4B1,U+2116"
+    },
+    {
+      "file": "ibm-plex-mono-0a8b854cc18641bd.woff2",
+      "family": "IBM Plex Mono",
+      "weights": [
+        "400"
+      ],
+      "sha256": "0a8b854cc18641bd1b8222afa7ec82a75e59bc6501f777744ec87db1b6cd7a2c",
+      "bytes": 4000,
+      "unicodeRange": "U+102-103,U+110-111,U+128-129,U+168-169,U+1A0-1A1,U+1AF-1B0,U+300-301,U+303-304,U+308-309,U+323,U+329,U+1EA0-1EF9,U+20AB"
+    },
+    {
+      "file": "ibm-plex-mono-f1050dc5317b4343.woff2",
+      "family": "IBM Plex Mono",
+      "weights": [
+        "400"
+      ],
+      "sha256": "f1050dc5317b43434c0aeda599d4624c774ffc162e87a8cf204b949b6a85816d",
+      "bytes": 8860,
+      "unicodeRange": "U+100-2BA,U+2BD-2C5,U+2C7-2CC,U+2CE-2D7,U+2DD-2FF,U+304,U+308,U+329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C4,U+2113,U+2C60-2C7F,U+A720-A7FF"
+    },
+    {
+      "file": "ibm-plex-mono-c36f509c0a8f9f85.woff2",
+      "family": "IBM Plex Mono",
+      "weights": [
+        "400"
+      ],
+      "sha256": "c36f509c0a8f9f85f29cb44bc8701d8a9e0b14c499e77a884f789ead7093a7ac",
+      "bytes": 10052,
+      "unicodeRange": "U+??,U+131,U+152-153,U+2BB-2BC,U+2C6,U+2DA,U+2DC,U+304,U+308,U+329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD"
+    },
+    {
+      "file": "ibm-plex-mono-311098be73eac339.woff2",
+      "family": "IBM Plex Mono",
+      "weights": [
+        "500"
+      ],
+      "sha256": "311098be73eac339128f0b5a6e33d72645b6f87488541fdf467c402152d297fd",
+      "bytes": 4336,
+      "unicodeRange": "U+460-52F,U+1C80-1C8A,U+20B4,U+2DE0-2DFF,U+A640-A69F,U+FE2E-FE2F"
+    },
+    {
+      "file": "ibm-plex-mono-d524dc8ff6dbf7ed.woff2",
+      "family": "IBM Plex Mono",
+      "weights": [
+        "500"
+      ],
+      "sha256": "d524dc8ff6dbf7ed69772f3b2ff4affaf5a89b5762b270e36c3f21da0d4e39f5",
+      "bytes": 5500,
+      "unicodeRange": "U+301,U+400-45F,U+490-491,U+4B0-4B1,U+2116"
+    },
+    {
+      "file": "ibm-plex-mono-b2529fba93fd07a5.woff2",
+      "family": "IBM Plex Mono",
+      "weights": [
+        "500"
+      ],
+      "sha256": "b2529fba93fd07a50ffb8fc3d103eb04b0c298d4f6564d2833c44fde286de7e4",
+      "bytes": 4036,
+      "unicodeRange": "U+102-103,U+110-111,U+128-129,U+168-169,U+1A0-1A1,U+1AF-1B0,U+300-301,U+303-304,U+308-309,U+323,U+329,U+1EA0-1EF9,U+20AB"
+    },
+    {
+      "file": "ibm-plex-mono-77f03e26f981c582.woff2",
+      "family": "IBM Plex Mono",
+      "weights": [
+        "500"
+      ],
+      "sha256": "77f03e26f981c582bdba3a7abed4baa2d3149211c01366bb3ab3ba7622ec4ae5",
+      "bytes": 8848,
+      "unicodeRange": "U+100-2BA,U+2BD-2C5,U+2C7-2CC,U+2CE-2D7,U+2DD-2FF,U+304,U+308,U+329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C4,U+2113,U+2C60-2C7F,U+A720-A7FF"
+    },
+    {
+      "file": "ibm-plex-mono-a76f53ca6612e7b3.woff2",
+      "family": "IBM Plex Mono",
+      "weights": [
+        "500"
+      ],
+      "sha256": "a76f53ca6612e7b3828eec2311098675b7f9849ae4169a8bcef6302aec02a6c0",
+      "bytes": 10060,
+      "unicodeRange": "U+??,U+131,U+152-153,U+2BB-2BC,U+2C6,U+2DA,U+2DC,U+304,U+308,U+329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD"
+    }
+  ],
+  "preload": [
+    "outfit-92684e4acde79ef0.woff2",
+    "ibm-plex-mono-c36f509c0a8f9f85.woff2",
+    "ibm-plex-mono-a76f53ca6612e7b3.woff2"
+  ]
+}
