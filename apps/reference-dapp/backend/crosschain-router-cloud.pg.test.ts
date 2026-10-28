@@ -32,9 +32,9 @@ let t: TestDatabase;
 beforeAll(async () => { t = await createTestDatabase(); await t.db.query(`INSERT INTO tenants (tenant_id) VALUES ('tenant-b')`); });
 afterAll(async () => { await t?.drop(); });
 /** One fresh API + worker "process" sharing the database; every RPC method it uses (both chains) is recorded. */
-async function deployment(h: RouterHarness, options: { tenantId?: string; evidenceDir?: string } = {}) {
+async function deployment(h: RouterHarness, options: { tenantId?: string; evidenceDir?: string; sourceRpc?: RouterHarness['baseRpc'] } = {}) {
   const methods: string[] = [];
-  const source = (method: string, params: readonly unknown[]) => { methods.push(method); return h.baseRpc(method, params); };
+  const source = (method: string, params: readonly unknown[]) => { methods.push(method); return (options.sourceRpc ?? h.baseRpc)(method, params); };
   const destination = (method: string, params: readonly unknown[]) => { methods.push(method); return h.arbitrumRpc(method, params); };
   const db: Database = t.open(6), workerId = `worker-${Math.random().toString(16).slice(2, 8)}`;
   const evidenceDir = options.evidenceDir ?? await mkdtemp(join(tmpdir(), 'flofi-router-evidence-'));
@@ -57,6 +57,37 @@ async function drain(h: RouterHarness, d: Awaited<ReturnType<typeof deployment>>
 }
 
 describe('BUILD-ROUTER-001 router on durable cloud state (MOCKED Base / Arbitrum)', () => {
+  it('durably saves a recovered deposit hash before a receipt outage; a fresh worker resumes without any resubmission', async () => {
+    const h = createRouterHarness({ nonce: 60n, autoFillSeconds: null }), w = workflow(), d = await deployment(h);
+    const run = ok<RouterRecord>(await d.call('simulate', w, ROUTER_OWNER));
+    ok(await d.call('review', run.id, run.review.commitment, w));
+    const approval = ok<RouterBegin>(await d.call('begin', run.id, ROUTER_OWNER, w));
+    ok(await d.call('handoff', run.id));
+    ok(await d.call('report', run.id, { kind: 'HASH', hash: h.wallet.send(approval.transaction), attemptId: approval.attempt.attemptId }));
+    ok(await d.call('observe', run.id));
+    const deposit = ok<RouterBegin>(await d.call('begin', run.id, ROUTER_OWNER, w));
+    ok(await d.call('handoff', run.id));
+    const hash = h.wallet.send(deposit.transaction);
+    expect(await d.call('report',run.id,{kind:'HASH',hash,attemptId:approval.attempt.attemptId})).toEqual({ok:false,code:'ROUTER_ATTEMPT_ID_MISMATCH'});
+    const outage = await deployment(h, { sourceRpc: async (method, params) => {
+      if (method === 'eth_getLogs' || method === 'eth_getTransactionReceipt') throw Error('PUBLIC_RPC_UNAVAILABLE');
+      return h.baseRpc(method, params);
+    } });
+    await due(outage.db); await outage.worker.drainOnce();
+    const failed = ok<RouterRecord>(await outage.call('status', run.id));
+    expect(failed.observation?.outcome).toBe('TEMPORARY_FAILURE');
+    expect(failed.attempts.at(-1)).toMatchObject({ transactionHash: hash, state: 'PENDING', nonce: '61' });
+    const rows = await t.db.query(`SELECT state,transaction_hash FROM execution_attempts WHERE run_id=$1 AND step='DEPOSIT'`,[run.id]);
+    expect(rows.rows).toEqual([{ state: 'PENDING', transaction_hash: hash }]);
+    const restarted = await deployment(h);
+    await due(restarted.db); await restarted.worker.drainOnce();
+    const pending = ok<RouterRecord>(await restarted.call('status', run.id));
+    expect(pending.source?.transactionHash).toBe(hash); expect(pending.verdict).toBe('PENDING');
+    h.relayer.fill();
+    expect((await drain(h, restarted, run.id, 'RECONCILED')).destination?.transferAmount).toBe(run.review.route.minimumOutput);
+    expect(h.counters.sends).toBe(2);
+    expect([...outage.methods,...restarted.methods].filter(m => SEND.includes(m))).toEqual([]);
+  });
   it('approval and deposit through the API; fresh workers reconcile source and destination after browser loss and restarts; verified evidence', async () => {
     const h = createRouterHarness({ nonce: 40n }), w = workflow();
     const api1 = await deployment(h);

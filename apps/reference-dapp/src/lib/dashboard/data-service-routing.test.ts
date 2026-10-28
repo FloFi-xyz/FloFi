@@ -35,7 +35,7 @@ describe.each(['embedded', 'cloud'] as const)('Dashboard %s routing', mode => {
     expect(await loadDashboardSnapshot(account)).toMatchObject({ connection: 'CONNECTED', account, runs: [{ runId: 'owned-run', workflowId: 'saved-workflow' }] });
     const header = account === evm ? { 'x-flofi-wallet-principal': evm } : { 'x-flofi-workflow-owner': `solana:${solana}` };
     if (mode === 'embedded') { expect(handler.mock.calls[0]![0]).toMatchObject({ method: 'GET', path: '/v1/runs', headers: header }); expect(transport).not.toHaveBeenCalled(); }
-    else { expect(transport.mock.calls[0]![0].href).toBe('https://cloud.example/base/v1/runs?limit=100'); expect(transport.mock.calls[0]![1].headers).toMatchObject(header); expect(embeddedRuntime).not.toHaveBeenCalled(); }
+    else { expect(transport.mock.calls[0]![0].href).toBe('https://cloud.example/base/v1/runs?limit=25'); expect(transport.mock.calls[0]![1].headers).toMatchObject(header); expect(embeddedRuntime).not.toHaveBeenCalled(); }
   });
   it.each([evm, solana])('keeps record/evidence reads owner scoped for %s', async account => {
     setup(mode, account);

@@ -193,7 +193,7 @@ export const portuguese: Readonly<Record<string, string>> = {
   'Not started': 'Não iniciado', 'Not executed': 'Não executado', 'Executing…': 'A executar…', 'Submitting…': 'A enviar…',
   'Recovery required': 'Recuperação necessária', 'Reconciliation required': 'Reconciliação necessária', 'Recovery': 'Recuperação', 'Evidence': 'Evidência',
   'View evidence': 'Ver evidência', 'Download evidence': 'Descarregar evidência', 'View run': 'Ver execução', 'Run details': 'Detalhes da execução',
-  'Check status': 'Verificar estado', 'Check result': 'Verificar resultado', 'Refresh status': 'Atualizar estado', 'Retry': 'Tentar novamente',
+  'Check status': 'Atualizar status', 'Check result': 'Verificar resultado', 'Refresh status': 'Atualizar status', 'Retry': 'Tentar novamente',
   'Resume': 'Retomar', 'Stop': 'Parar', 'Cancel': 'Cancelar', 'Continue': 'Continuar', 'Close': 'Fechar', 'Refresh': 'Atualizar',
   'Recent activity': 'Atividade recente', 'Recent Activity': 'Atividade recente', 'Execution history': 'Histórico de execuções',
   'No execution history yet.': 'Ainda não há histórico de execuções.', 'No activity yet': 'Ainda sem atividade', 'No runs yet': 'Ainda sem execuções',

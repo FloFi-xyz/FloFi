@@ -646,6 +646,14 @@ function compositionEvidence(record: SolanaCompositionRecord) {
 const uniswapEvmResult = (value: unknown) => isObject(value) && (value.kind === 'HASH' ? typeof value.hash === 'string' && HASH.test(value.hash) && Object.keys(value).length === 2
   : (value.kind === 'UNKNOWN' || value.kind === 'REJECTED') && (value.code === undefined || typeof value.code === 'string' && CODE.test(value.code)) &&
     Object.keys(value).every(k => k === 'kind' || k === 'code'));
+/** Preserve the browser's attempt identity across the cloud boundary; services compare it with the durable attempt before accepting a report. */
+const attemptBoundResult = (check: (value: unknown) => boolean, pattern: RegExp) => (value: unknown) => {
+  if (!isObject(value)) return false;
+  const { attemptId, ...report } = value;
+  return (attemptId === undefined || typeof attemptId === 'string' && pattern.test(attemptId)) && check(report);
+};
+const routerWalletResult = attemptBoundResult(uniswapEvmResult, /^xroute-[a-f0-9]{32}\.(approval|deposit)\.[1-9][0-9]?$/);
+const universalWalletResult = attemptBoundResult(result, /^xuni-[a-f0-9]{32}\.(approval|deposit)\.[1-9][0-9]?$/);
 /**
  * BUILD-RH-002 `robinhood-liquidity`: Robinhood Chain (real funds) Uniswap v3 positions on official catalog pairs on the same liquidity
  * service, in their own `rhlp-` namespace, behind the Robinhood Chain gates (owner execution needs the real-funds opt-in).
@@ -743,7 +751,7 @@ function routerFlow(name: Extract<FlowName, `crosschain-router${string}`>, netwo
       invalidate: { mutates: true, validate: optionalShape(1, id(ROUTER_RUN_ID), invalidation) },
       begin: { mutates: true, validate: shape(id(ROUTER_RUN_ID), account, workflow) },
       handoff: { mutates: true, validate: shape(id(ROUTER_RUN_ID)) },
-      report: { mutates: true, validate: shape(id(ROUTER_RUN_ID), uniswapEvmResult) },
+      report: { mutates: true, validate: shape(id(ROUTER_RUN_ID), routerWalletResult) },
       walletFailure: { mutates: true, validate: shape(id(ROUTER_RUN_ID), diagnostic) },
       observe: { mutates: true, validate: shape(id(ROUTER_RUN_ID)) },
       status: { mutates: false, validate: shape(id(ROUTER_RUN_ID)) },
@@ -812,7 +820,7 @@ const crosschainUniversal: FlowDefinition = {
     invalidate: { mutates: true, validate: optionalShape(1, id(UNIVERSAL_RUN_ID), invalidation) },
     begin: { mutates: true, validate: shape(id(UNIVERSAL_RUN_ID), universalAccount, workflow) },
     handoff: { mutates: true, validate: shape(id(UNIVERSAL_RUN_ID)) },
-    report: { mutates: true, validate: shape(id(UNIVERSAL_RUN_ID), result) },
+    report: { mutates: true, validate: shape(id(UNIVERSAL_RUN_ID), universalWalletResult) },
     submit: { mutates: true, validate: shape(id(UNIVERSAL_RUN_ID), signedTransaction) },
     walletFailure: { mutates: true, validate: shape(id(UNIVERSAL_RUN_ID), universalDiagnostic) },
     observe: { mutates: true, validate: shape(id(UNIVERSAL_RUN_ID)) },

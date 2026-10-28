@@ -1,5 +1,7 @@
 # Flofi runtime environment reference (BUILD-CLOUD-PARITY-001)
 
+Bridge recovery read failover (`FIX-BRIDGE-RECOVERY-CAIO-001`): directed and Universal EVM bridges accept optional server-only comma-separated HTTPS `GRYLOO_BASE_FALLBACK_RPC_URLS`, `GRYLOO_ARBITRUM_FALLBACK_RPC_URLS`, `GRYLOO_ETHEREUM_FALLBACK_RPC_URLS` and `GRYLOO_ROBINHOOD_FALLBACK_RPC_URLS`. Their normal primary override remains authoritative. The existing `GRYLOO_ALCHEMY_API_KEY`, when configured, supplies an independent Base/Arbitrum/Ethereum path, including historical reads. At most four distinct paths are accepted, each chain-bound and limited to a 3-second read transport timeout. Credentials never reach the browser or logs. Outages and pruned historical state can use a configured fallback; reverts and wrong-chain answers are refused. No financial execution gate or production variable is changed by this build.
+
 Every variable the reference app, the backend and the build read, per environment. Values are supplied by the hosting platform or
 your own shell; none is committed. **No variable is `NEXT_PUBLIC_*`, and none may be**: everything below is read on the server,
 and the browser only talks to its own origin plus, for Credentials → Add card, Mercado Pago's three Secure Fields origins (CSP

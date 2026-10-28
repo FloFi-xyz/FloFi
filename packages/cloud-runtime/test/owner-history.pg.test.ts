@@ -21,6 +21,33 @@ async function seed(t: TestDatabase, id: string, options: { status?: string; ten
   return { store, first };
 }
 describe('owner purge and archive, real PostgreSQL', () => {
+  it('pages 75 records without losing financial history, crossing owners or exposing archived entries; measures bounded query cost', async () => {
+    const t = await database();
+    for (let i = 0; i < 76; i++) await seed(t, `page-${String(i).padStart(3,'0')}`, { status: 'SUBMITTING', observe: true });
+    await seed(t, 'foreign-tenant', { tenant: 'another' });
+    await t.db.query(`UPDATE execution_runs SET owner_account=$1 WHERE run_id='page-075'`,[stranger]);
+    const queries = createRunQueries(t.db, 'default'), filter = { owner };
+    let cursor: string | null = null;
+    const ids: string[] = [];
+    do { const page = await queries.listRuns(cursor, 25, filter); expect(page.items.length).toBeLessThanOrEqual(25); ids.push(...page.items.map(r=>r.runId)); cursor = page.next; } while(cursor);
+    expect(ids).toHaveLength(75); expect(new Set(ids).size).toBe(75);
+    expect(ids).not.toContain('page-075'); expect(ids).not.toContain('foreign-tenant');
+    const times = { before: [] as number[], after: [] as number[] };
+    let beforeBytes = 0, afterBytes = 0;
+    for(let i=0;i<30;i++) for(const kind of ['before','after'] as const){
+      const start=performance.now(), page=await queries.listRuns(null,kind==='before'?100:25,filter);
+      times[kind].push(performance.now()-start);
+      if(kind==='before')beforeBytes=JSON.stringify(page).length;else afterBytes=JSON.stringify(page).length;
+    }
+    expect(afterBytes).toBeLessThan(beforeBytes/2);
+    const stats=(values:number[])=>{values.sort((a,b)=>a-b);return {p50Ms:values[14],p95Ms:values[28]};};
+    process.stdout.write(JSON.stringify({ history75: { before:stats(times.before),after:stats(times.after),beforeBytes,afterBytes } })+'\n');
+    expect(await createOwnerHistory(t.db,'default').change(owner,'EXECUTION_RUN','page-000','ARCHIVE')).toMatchObject({ok:true});
+    const all=await queries.listRuns(null,100,filter);
+    expect(all.items).toHaveLength(74);
+    expect((await queries.listRuns(null,100,{...filter,includeArchived:true})).items).toHaveLength(75);
+    expect((await queries.getRun('page-000'))?.needsObservation).toBe(true);
+  });
   it('rehearses 56 runs / 39 independently checked disposable candidates / 9 journals; deletes bytes and keeps all 17 unsafe runs', async () => {
     const t = await database(), history = createOwnerHistory(t.db, 'default');
     for (let i = 0; i < 39; i++) await seed(t, `candidate-${i}`, { status: i < 31 ? 'SIMULATED' : 'PREPARED', journal: i < 9 });

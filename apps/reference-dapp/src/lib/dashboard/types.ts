@@ -8,7 +8,7 @@ export type DashboardRun = {
   attentionRequired: boolean; hasEvidence: boolean; createdAt: string | null; updatedAt: string | null;
 };
 export type DashboardConnection = 'SIGN_IN_REQUIRED' | 'NOT_CONFIGURED' | 'UNAVAILABLE' | 'CONNECTED';
-export type DashboardSnapshot = { connection: DashboardConnection; account: string | null; runs: DashboardRun[]; hasMore: boolean };
+export type DashboardSnapshot = { connection: DashboardConnection; account: string | null; runs: DashboardRun[]; hasMore: boolean; next?: string | null };
 export type DashboardAttempt = { attemptId: string; step: string; state: string; transactionHash: string | null; reconciled: boolean };
 export type DashboardEvidence = { bundleHash: string; environment: string; outcome: string; verified: boolean; createdAt: string | null };
 export type DashboardRunDetail = {

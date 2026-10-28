@@ -2,7 +2,7 @@
 import type { Page, Route } from '@playwright/test';
 import { hashArtifactBytes } from '@defi-workflow-engine/workflow-contracts';
 import { SOLANA_MAINNET_TOKENS } from '@defi-workflow-engine/action-registry';
-import { test, expect, applyPendingProposal, chooseWallet, readWorkflowIr } from './fixtures';
+import { test, expect, applyPendingProposal, chooseWallet, readWorkflowIr, installPassiveWallet, assertPassiveWallet } from './fixtures';
 import { createMockedSolanaWallet } from '@defi-workflow-engine/reference-compiler';
 import { installDevnetWallet } from './solana-devnet-fixtures';
 import { installSupplyWallet } from './supply-fixtures';
@@ -17,6 +17,20 @@ test.beforeEach(({ page }) => { pageErrors.length = 0; page.on('pageerror', erro
 test.afterEach(() => { expect(pageErrors).toEqual([]); });
 const revision = (page: Page) => page.locator('.summary-bar');
 const empty = (page: Page) => page.locator('.build-flow-surface .canvas-empty');
+test('the Bridge arrow reverses the networks and preserves the input amount through the canonical authoring path without a wallet request', async ({ page }) => {
+  await installPassiveWallet(page);
+  await page.goto('/app');
+  await page.getByRole('button',{name:'Add bridge',exact:true}).click();
+  const card=cards(page),amount=card.getByRole('textbox',{name:'Source amount (USDC)',exact:true});
+  await amount.fill('2.5'); await amount.press('Enter');
+  const before=JSON.parse(await readWorkflowIr(page));
+  expect(before.nodes[0].chainId).toBe('eip155:8453');
+  await card.getByRole('button',{name:'Switch From and To tokens',exact:true}).click();
+  await expect(amount).toHaveValue('2.5');
+  await amount.press('Enter');
+  await expect.poll(async()=>JSON.parse(await readWorkflowIr(page)).nodes[0].chainId).toBe('eip155:42161');
+  await assertPassiveWallet(page);
+});
 async function chat(page: Page, text: string) {
   await page.getByLabel('Describe your flow').fill(text);
   await page.getByRole('button', { name: 'Send', exact: true }).click();

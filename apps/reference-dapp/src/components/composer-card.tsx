@@ -313,6 +313,7 @@ function ValueBox({ amount, token, network, source, label, hint, editor, inputLa
 }
 
 export type ComposerCardData = {
+  onInvertBridge?: () => void;
   connectable?: boolean;
   actionSelection?: { selection: CryptoSelection; networks: readonly string[]; valid: boolean; tokens: { source: readonly string[]; destination: readonly string[] }; onNetwork(network: string): void; onToken(side: 'source' | 'destination', token: string): void;
     /** BUILD-SOLANA-MAINNET-001: exchanges From and To (Swap cards only; absent where the reversed pair is unavailable or the step is not editable). */
@@ -443,7 +444,7 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
           const next = event.relatedTarget, node = event.currentTarget.closest('.react-flow__node');
           if (directCommit && editor?.changed && !(next instanceof Node && (poolNodeRef.current?.contains(next) || node?.contains(next)))) commitAmount();
         }}>
-        <ValuePair relationship="directional" onInvert={card.summary.action === 'Swap' && !stocksCard ? card.actionSelection?.onInvert : undefined}>
+        <ValuePair relationship="directional" onInvert={bridgeCard ? card.onInvertBridge : card.summary.action === 'Swap' && !stocksCard ? card.actionSelection?.onInvert : undefined}>
         <ValueBox source amount={amountParts?.[1]} token={amountParts?.[2] ?? pairSource ?? '—'} {...stocksCard ? { label: 'Stocks amount', inputLabel: `Stocks amount (${amountParts?.[2] ?? pairSource ?? 'USDG'})` } : {}}
           network={sourceNetwork} editor={editor && directCommit && editor.changed && editor.onCancel ? { ...editor, onEscape: () => { setAmountError(null); editor.onCancel!(); } } : editor} invalid={Boolean(amountError)} {...stocksCard ? {} : { picker: picker('source') }} hint={editor ? 'Enter the source amount' : card.summary.amount} fiatFirst={fiatFirst} onFiatFirstChange={setFiatFirst}
           usd={usdLine(sourceNetwork, estimate?.usd?.input, usdState)}/>

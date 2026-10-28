@@ -53,6 +53,55 @@ async function until(s: RouterService, h: RouterHarness, id: string, phase: Rout
 }
 
 describe('BUILD-ROUTER-001 Quote → Simulation → Review → route-bound Manifest', () => {
+  it('recovers a lost deposit hash by exact nonce despite unavailable log scans, persists it before a receipt outage, and resumes after restart', async () => {
+    const { service, h, dir } = await setup({ autoFillSeconds: null }), w = workflow();
+    const run = await reviewed(service, w);
+    await execute(service, h, run.id, w); await service.observe(run.id);
+    const begun = await service.begin(run.id, ROUTER_OWNER, w);
+    await service.handoff(run.id);
+    const hash = h.wallet.send(begun.transaction);
+    let down = true;
+    const reads: string[] = [];
+    const rpc = async (method: string, params: readonly unknown[]) => {
+      reads.push(method);
+      if (method === 'eth_getLogs' || method === 'eth_getTransactionReceipt' && down) throw Error('PUBLIC_RPC_UNAVAILABLE');
+      return h.baseRpc(method, params);
+    };
+    const restart = () => createRouterService({ storage: createFileExecutionStorage(dir, 'ROUTER_BUSY'), sourceRpc: rpc,
+      destinationRpc: h.arbitrumRpc, providers: h.providers, provenance: 'MOCKED', executionEnabled: true, now: h.clock, mockedCodePins: ROUTER_MOCK_CODE_PINS });
+    const failed = await restart().observe(run.id);
+    expect(failed.observation).toMatchObject({ outcome: 'TEMPORARY_FAILURE', reason: 'PUBLIC_RPC_UNAVAILABLE' });
+    expect((await service.load(run.id)).attempts.at(-1)).toMatchObject({ state: 'PENDING', transactionHash: hash, nonce: begun.attempt.nonce });
+    expect(failed.attempts[0]!.receipt).toEqual((await service.load(run.id)).attempts[0]!.receipt);
+    down = false;
+    const recovered = await restart().observe(run.id);
+    expect(recovered.source?.transactionHash).toBe(hash);
+    expect(recovered.verdict).toBe('PENDING');
+    expect(recovered.destination).toBeNull();
+    expect(reads).not.toContain('eth_getLogs');
+    await expect(restart().begin(run.id, ROUTER_OWNER, w)).rejects.toThrow();
+    h.relayer.fill();
+    const final = await until(restart(), h, run.id, 'RECONCILED');
+    expect(final.evidence?.destination.transferAmount).toBe(final.review.route.minimumOutput);
+    for (let i = 0; i < 3; i++) expect((await restart().observe(run.id)).verdict).toBe('RECONCILED');
+    expect(h.counters.sends).toBe(2);
+    expect(reads.every(m => !/send|sign/i.test(m))).toBe(true);
+  });
+  it('preserves attempt fencing through repeated total outages and recovers when RPC returns', async () => {
+    const { service, h, dir } = await setup(), w = workflow(), run = await reviewed(service, w);
+    const begun = await service.begin(run.id, ROUTER_OWNER, w); await service.handoff(run.id);
+    const hash = h.wallet.send(begun.transaction);
+    const failed = createRouterService({ storage: createFileExecutionStorage(dir, 'ROUTER_BUSY'), sourceRpc: async () => { throw Error('PUBLIC_RPC_UNAVAILABLE'); },
+      destinationRpc: h.arbitrumRpc, providers: h.providers, provenance: 'MOCKED', executionEnabled: true, now: h.clock, mockedCodePins: ROUTER_MOCK_CODE_PINS });
+    for (let i = 0; i < 3; i++) {
+      const record = await failed.observe(run.id);
+      expect(record.observation?.outcome).toBe('TEMPORARY_FAILURE');
+      expect(record.attempts.at(-1)?.state).toBe('SUBMITTING');
+    }
+    await expect(service.begin(run.id, ROUTER_OWNER, w)).rejects.toThrow('ROUTER_ATTEMPT_ACTIVE_OBSERVE_EXISTING');
+    expect((await service.observe(run.id)).attempts.at(-1)).toMatchObject({ state: 'CONFIRMED', transactionHash: hash });
+    expect(h.counters.sends).toBe(1);
+  });
   it('exposes provider, steps, amounts, fees, gas, duration, approvals, recipient and expiry, with quote, simulation and observation kept distinct', async () => {
     const { service } = await setup(), w = workflow();
     const run = await service.simulate(w, ROUTER_OWNER), r = run.review;

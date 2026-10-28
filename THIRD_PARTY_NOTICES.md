@@ -121,3 +121,7 @@ WBTC remains byte-identical. Bitcoin's SVG line endings and trailing whitespace 
 its parsed artwork, colors and proportions are unchanged. Original and served SHA-256 values
 are recorded in that register alongside origin and retrieval date.
 Protocol names and marks identify illustrative ecosystems and convey no endorsement or execution claim.
+
+## Product fonts (OFL-1.1)
+
+Outfit (Copyright 2021 The Outfit Project Authors) and IBM Plex Mono (Copyright 2017 IBM Corp.; Reserved Font Name "Plex") remain licensed under SIL OFL 1.1. Their unchanged WOFF2 payloads, complete licenses, source links and exact SHA-256 manifest are bundled in [`public/fonts`](apps/reference-dapp/public/fonts/README.md). They are excluded from the application's source-license grant. Self-hosting the same font bytes removes a build-time Google Fonts parser failure; it changes no font design or screenshot baseline.

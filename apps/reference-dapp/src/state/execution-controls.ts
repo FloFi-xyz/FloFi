@@ -20,6 +20,7 @@ export function useExecutionControls(props: ExecutionControlsState) {
   useEffect(() => { setRequestFailed(false); setCheckFailed(false); }, [workflowId]);
   // BUILD-FIX-UX-001: a final run of another (new or edited) workflow is not this workflow's execution state.
   const progress = props.progress, live = currentExecution(progress);
+  const [lastCheck, setLastCheck] = useState<{ runKey: string | null; checkedAt: string } | null>(null);
   const [clock, setClock] = useState(() => Date.now());
   const current = props;
   const view = projectExecution(current, Math.max(clock, Date.now())), expiresAt = view.expiresAt;
@@ -46,11 +47,15 @@ export function useExecutionControls(props: ExecutionControlsState) {
   }, [props.source.state.busy]);
   function checkStatus() {
     if (checkLock.current || requestLock.current || !canCheck || !check) return;
-    checkLock.current = { sawBusy: false }; setChecking(true); setCheckFailed(false);
-    const finish = () => { checkLock.current = null; setChecking(false); };
+    const lock = { sawBusy: false };
+    checkLock.current = lock; setChecking(true); setCheckFailed(false);
+    const finish = () => { if (checkLock.current === lock) { checkLock.current = null; setChecking(false); } };
+    // Observation is read-only. A missing HTTP response must not keep the workspace in Checking status forever.
+    const timeout = setTimeout(() => { if (checkLock.current === lock) { setCheckFailed(true); finish(); } }, 30_000);
     try {
-      void Promise.resolve(check()).catch(() => setCheckFailed(true)).finally(finish);
-    } catch { setCheckFailed(true); finish(); }
+      void Promise.resolve(check()).then(() => { if (checkLock.current === lock) setLastCheck({ runKey: live?.runKey ?? null, checkedAt: new Date().toISOString() }); })
+        .catch(() => { if (checkLock.current === lock) setCheckFailed(true); }).finally(() => { clearTimeout(timeout); finish(); });
+    } catch { clearTimeout(timeout); setCheckFailed(true); finish(); }
   }
   function request(continuation: boolean) {
     if (requestLock.current || checkLock.current || verifying || recovery?.contextIssue || !(continuation ? canContinueExecution(current) && live?.state === 'active' : projectExecution(current).canExecute)) return;
@@ -111,6 +116,7 @@ export function useExecutionControls(props: ExecutionControlsState) {
     return () => { window.clearTimeout(timer); window.removeEventListener('focus', update); document.removeEventListener('visibilitychange', update); };
   }, [expiresAt]);
   return { live, view, current, providers, recovery, verifying, result, reconciledCount, recoveredCount, resultUnit,
+    lastCheckedAt: lastCheck?.runKey === live?.runKey ? lastCheck?.checkedAt ?? null : null,
     canContinue, canCheck, checkStatus, request, requesting, requestFailed, checkFailed, authorize, authorizing };
 }
 export type ExecutionControls = ReturnType<typeof useExecutionControls>;

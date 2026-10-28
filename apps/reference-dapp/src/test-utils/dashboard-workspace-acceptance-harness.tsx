@@ -9,14 +9,14 @@ import { runDetailFixture } from './run-detail-fixture';
 import { reviewFixture, reviewOwner } from './review-fixture';
 
 type ReadResult = DashboardSnapshot | DashboardDetailResponse;
-type ResponseMode = 'owned' | 'unrelated' | 'empty' | 'unavailable' | 'not-found' | 'verify';
-const requests: { account: string; runId: string | null; resolve(value: ReadResult): void; done: boolean }[] = [];
+type ResponseMode = 'owned' | 'unrelated' | 'empty' | 'unavailable' | 'not-found' | 'verify' | 'page';
+const requests: { account: string; runId: string | null; cursor: string | null; resolve(value: ReadResult): void; done: boolean }[] = [];
 const saved = runDetailFixture(), pending = runDetailFixture('pending'), review = reviewFixture();
 declare global {
   interface Window {
     flofiWorkspaceAcceptance: {
-      read(account: string, runId: string | null): Promise<ReadResult>;
-      requests(): { account: string; runId: string | null; done: boolean }[];
+      read(account: string, runId: string | null, cursor?: string | null): Promise<ReadResult>;
+      requests(): { account: string; runId: string | null; cursor: string | null; done: boolean }[];
       respond(index: number, mode: ResponseMode): void;
       wallet(account: string | null): void;
       run(runId: string | null): void;
@@ -30,12 +30,17 @@ function Harness() {
   const [navigation, setNavigation] = useState<string[]>([]);
   const go = (path: string) => { setNavigation(value => [...value, path]); setRunId(dashboardRoute(path)?.runId ?? null); };
   window.flofiWorkspaceAcceptance = {
-    read(owner, id) { return new Promise(resolve => { requests.push({ account: owner, runId: id, resolve, done: false }); }); },
-    requests: () => requests.map(({ account, runId, done }) => ({ account, runId, done })),
+    read(owner, id, cursor = null) { return new Promise(resolve => { requests.push({ account: owner, runId: id, cursor, resolve, done: false }); }); },
+    requests: () => requests.map(({ account, runId, cursor, done }) => ({ account, runId, cursor, done })),
     respond(index, mode) {
       const request = requests[index];
       if (!request || request.done) throw new Error('Acceptance read is absent or already resolved');
       request.done = true;
+      if (mode === 'page') {
+        const start=Number(request.cursor??0), next=start+25<75?String(start+25):null;
+        request.resolve({connection:'CONNECTED',account:request.account,runs:Array.from({length:25},(_,i)=>({...saved.detail.run,runId:`page-${start+i}`,ownerAccount:request.account})),hasMore:next!==null,next});
+        return;
+      }
       const connection = mode === 'unavailable' ? 'UNAVAILABLE' : mode === 'verify' ? 'SIGN_IN_REQUIRED' : mode === 'not-found' && request.runId ? 'NOT_FOUND' : 'CONNECTED';
       request.resolve(request.runId ? { connection, account: request.account, detail: mode === 'owned' || mode === 'unrelated' ? saved.detail : null } as DashboardDetailResponse
         : { connection, account: request.account, runs: mode === 'owned' || mode === 'unrelated' ? [saved.detail.run] : [], hasMore: false } as DashboardSnapshot);

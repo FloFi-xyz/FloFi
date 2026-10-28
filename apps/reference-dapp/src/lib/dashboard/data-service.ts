@@ -40,14 +40,16 @@ async function cloudGet(base: URL, path: string, account: string): Promise<unkno
   if (!response.ok || !object(body) || body.ok !== true) throw new Error('CLOUD_API_UNAVAILABLE');
   return body.value;
 }
-export async function loadDashboardSnapshot(expectedAccount: string): Promise<DashboardSnapshot> {
+export async function loadDashboardSnapshot(expectedAccount: string, cursor: string | null = null): Promise<DashboardSnapshot> {
   const scope = await connection(expectedAccount);
   const empty: DashboardSnapshot = { connection: scope.connection, account: scope.account, runs: [], hasMore: false };
   if (!scope.base || !scope.account) return empty;
   try {
-    const value = await cloudGet(scope.base, 'v1/runs?limit=100', scope.account);
+    if (cursor !== null && !/^[A-Za-z0-9_-]{1,400}$/.test(cursor)) throw Error('CURSOR_INVALID');
+    const query = new URLSearchParams({ limit: '25', ...cursor ? { cursor } : {} });
+    const value = await cloudGet(scope.base, `v1/runs?${query}`, scope.account);
     if (!object(value) || !Array.isArray(value.items)) throw new Error('CLOUD_API_UNAVAILABLE');
-    return { ...empty, runs: value.items.flatMap(item => { const run = toDashboardRun(item, scope.account!); return run ? [run] : []; }), hasMore: Boolean(optionalText(value.next)) };
+    return { ...empty, runs: value.items.flatMap(item => { const run = toDashboardRun(item, scope.account!); return run ? [run] : []; }), hasMore: Boolean(optionalText(value.next)), next: optionalText(value.next) };
   } catch { return { ...empty, connection: 'UNAVAILABLE' }; }
 }
 

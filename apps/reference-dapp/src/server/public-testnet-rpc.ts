@@ -7,13 +7,13 @@ import { BASE_SEPOLIA, ETHEREUM_SEPOLIA_SWAP } from '../domain/public-testnet-sw
 import type { Rpc } from './public-testnet-service.ts';
 
 const SEND_METHODS = new Set(['eth_sendTransaction', 'eth_sendRawTransaction', 'sendTransaction', 'eth_sign', 'eth_signTransaction', 'personal_sign']);
-export function createBaseSepoliaReadRpc(url: string, methods: readonly string[]): Rpc {
+export function createBaseSepoliaReadRpc(url: string, methods: readonly string[], timeoutMs = 10_000): Rpc {
   if (methods.some(method => SEND_METHODS.has(method))) throw new Error('PUBLIC_RPC_METHOD_DENIED');
   const allowed = new Set(methods);
   return async (method, params) => {
     if (!allowed.has(method)) throw new Error('PUBLIC_RPC_METHOD_DENIED');
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10_000);
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const response = await fetch(url, { method: 'POST', cache: 'no-store', signal: controller.signal,
         headers: { 'content-type': 'application/json' },
@@ -22,6 +22,12 @@ export function createBaseSepoliaReadRpc(url: string, methods: readonly string[]
       const text = await response.text();
       if (text.length > 1_048_576) throw new Error('PUBLIC_RPC_RESPONSE_TOO_LARGE');
       const result: unknown = JSON.parse(text);
+      if (result && typeof result === 'object' && 'error' in result && result.error && typeof result.error === 'object' &&
+          'message' in result.error && typeof result.error.message === 'string' &&
+          /missing trie node|historical state (?:is )?(?:unavailable|not available)|state .* is not available/i.test(result.error.message))
+        throw new Error('PUBLIC_RPC_HISTORY_UNAVAILABLE');
+      if (result && typeof result === 'object' && 'error' in result && result.error && typeof result.error === 'object' &&
+          'code' in result.error && [-32005, -32011, -32016, -32603].includes(Number(result.error.code))) throw new Error('PUBLIC_RPC_UNAVAILABLE');
       if (!result || typeof result !== 'object' || !('result' in result) || 'error' in result) throw new Error('PUBLIC_RPC_RESPONSE_INVALID');
       return result.result;
     } catch (cause) {

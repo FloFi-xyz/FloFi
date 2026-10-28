@@ -1,0 +1,97 @@
+{
+  "build": "FIX-BRIDGE-RECOVERY-CAIO-001",
+  "productionMutated": false,
+  "verification": "Read-only public RPC evidence and isolated local snapshot reobservation",
+  "wallet": "0x4b212af0a923256961487ae72499ca79f920b3ce",
+  "source": {
+    "transactionHash": "0xa2938caa574947d70fffe0949ae9e6f891d34c2cb7481c5bfac1bc4aeb096718",
+    "blockNumber": 53204989,
+    "blockHash": "0x5d62bf2024cda4d4e59a547329a826725eb1ebc6e0bf3cd7e73172043eca703b",
+    "timestamp": 1793199325,
+    "spokePool": "0x09aea4b2242abc8bb4bb78d537a67a245a7bec64",
+    "depositId": "6385955",
+    "depositor": "0x4b212af0a923256961487ae72499ca79f920b3ce",
+    "recipient": "0x4b212af0a923256961487ae72499ca79f920b3ce",
+    "inputAmount": "997500",
+    "outputAmount": "988966",
+    "quoteTimestamp": 1793199047,
+    "fillDeadline": 1793208298,
+    "ownerDebit": "1000000",
+    "safe": true
+  },
+  "destination": {
+    "transactionHash": "0xc35aa3157a594741f9cbaa6b843da658327a029a295f5e84a665a857655e5d22",
+    "blockNumber": 519078943,
+    "blockHash": "0x1503b27104da900f9ac923960e15c155968651283fa806b49f3f67696f659679",
+    "timestamp": 1793199325,
+    "spokePool": "0xe35e9842fceaca96570b734083f4a58e8f7c5f2a",
+    "relayer": "0x000000000000000000000000fd03abcadaf3f930fa4e37eb2f6ea3a44a41b7f0",
+    "recipient": "0x4b212af0a923256961487ae72499ca79f920b3ce",
+    "outputToken": "0xaf88d065e77c8cc2239327c5edb3a432268e5831",
+    "outputAmount": "988966",
+    "transferAmount": "988966",
+    "fillType": 0,
+    "discoveredBy": "PROVIDER_HINT",
+    "contentHash": "0xf950e9a54236b0b4c17cdc1da708d80dcda40cbc20ec50f2412764a8ea62625b",
+    "safe": true
+  },
+  "verdictInIsolatedCopy": "RECONCILED",
+  "actualGasCosts": [
+    {
+      "step": "APPROVAL",
+      "hash": "0x236d2c4fcb9ac8e5c49c31bdf0a14d0a35ee9474cb9f4f0657b7e49e04b139d4",
+      "gasCostWei": "334506197914"
+    },
+    {
+      "step": "DEPOSIT",
+      "hash": "0xa2938caa574947d70fffe0949ae9e6f891d34c2cb7481c5bfac1bc4aeb096718",
+      "gasCostWei": "1031832218262"
+    }
+  ],
+  "isolatedEvidenceBundleHash": "0x2c13d3f464b3a1f2dee4e11e98946610ba8198c8490c5dce160deaeb2060c4f4",
+  "baseIndependentProviders": [
+    {
+      "provider": "base-public",
+      "observedAt": "2026-10-28T15:19:46.304Z",
+      "head": "0x32bdad7",
+      "exactAttemptMatch": true,
+      "transactionHash": "0xa2938caa574947d70fffe0949ae9e6f891d34c2cb7481c5bfac1bc4aeb096718",
+      "receiptStatus": "0x1"
+    },
+    {
+      "provider": "publicnode",
+      "observedAt": "2026-10-28T15:19:50.192Z",
+      "head": "0x32bdad9",
+      "exactAttemptMatch": true,
+      "transactionHash": "0xa2938caa574947d70fffe0949ae9e6f891d34c2cb7481c5bfac1bc4aeb096718",
+      "receiptStatus": "0x1"
+    },
+    {
+      "provider": "alchemy",
+      "observedAt": "2026-10-28T15:19:52.957Z",
+      "head": "0x32bdada",
+      "exactAttemptMatch": true,
+      "transactionHash": "0xa2938caa574947d70fffe0949ae9e6f891d34c2cb7481c5bfac1bc4aeb096718",
+      "receiptStatus": "0x1"
+    }
+  ],
+  "lifi": {
+    "transactionId": "0x7e181c44598457700ff27878e1d0c5c01732c7d4462af889c0e0d7a3ee344e56",
+    "status": "DONE",
+    "substatus": "COMPLETED",
+    "tool": "across"
+  },
+  "destinationFinalizedAtRead": {
+    "block": "0x1ef0841f",
+    "finalizedHead": "0x1ef08c6f"
+  },
+  "unavailableProvider": {
+    "provider": "arbitrum-publicnode",
+    "error": "HTTP_403"
+  },
+  "privateEvidenceSha256": {
+    "flofi-bridge-incident-db.json": "dd3eb81a2712871755316bc68ddf1d3e96ecee6c8bf860e4385be9e64ffc0938",
+    "flofi-bridge-incident-chain.json": "a14622d3d0d3a08f41b52e6cccf5d5c6f80ea8e41492e6eef7c90f36344325ec",
+    "flofi-bridge-incident-destination.json": "3e694bee911b250d524f7b26d3fbcc7da600b05a29fe09ecaebc5952c77edb46"
+  }
+}

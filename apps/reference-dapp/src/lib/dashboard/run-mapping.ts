@@ -23,9 +23,13 @@ export function toDashboardRun(value: unknown, account: string): DashboardRun | 
 const titles: Record<string, string> = { 'aave-supply': 'Aave workflow', 'base-sepolia-swap': 'Swap', 'crosschain-router': 'Bridge', 'crosschain-universal': 'Bridge',
   'crosschain-router-testnet': 'Bridge', 'robinhood-transfer': 'Send', 'jupiter-swap': 'Swap', 'solana-devnet-swap': 'Swap',
   'orca-liquidity': 'Liquidity workflow', 'orca-liquidity-mainnet': 'Liquidity workflow', 'uniswap-liquidity': 'Liquidity workflow',
-  'solana-transfer': 'Send', 'solana-devnet-transfer': 'Send' };
+  'solana-transfer': 'Send', 'solana-devnet-transfer': 'Send', 'base-swap': 'Swap', 'arbitrum-swap': 'Swap', 'ethereum-swap': 'Swap',
+  'base-mainnet-transfer': 'Send', 'arbitrum-mainnet-transfer': 'Send', 'ethereum-mainnet-transfer': 'Send', 'robinhood-mainnet-transfer': 'Send',
+  'robinhood-swap': 'Swap', 'base-liquidity': 'Liquidity workflow', 'arbitrum-liquidity': 'Liquidity workflow', 'ethereum-liquidity': 'Liquidity workflow', 'robinhood-liquidity': 'Liquidity workflow',
+  'base-aave': 'Aave workflow', 'arbitrum-aave': 'Aave workflow', 'ethereum-aave': 'Aave workflow', 'lending-composition': 'Lending workflow',
+  'solana-devnet-composition': 'Swap + Liquidity workflow', 'pix-payment': 'Payment' };
 
-export function projectDashboardRun(run: DashboardRun, progress: ExecutionLifecycle | null = null, title = titles[run.flow] ?? 'Workflow execution', current = false): DashboardRunView {
+export function projectDashboardRun(run: DashboardRun, progress: ExecutionLifecycle | null = null, title = titles[run.flow] ?? (run.flow.startsWith('crosschain-router-') ? 'Bridge' : 'Financial operation'), current = false): DashboardRunView {
   const result = projectExecutionResult(progress);
   const unproven = /SUBMISSION_EXPIRED_NOT_EXECUTED$/.test(run.errorCode ?? '');
   let status: DashboardStatus = 'Unresolved', message = 'FloFi has not established the final workflow outcome.';

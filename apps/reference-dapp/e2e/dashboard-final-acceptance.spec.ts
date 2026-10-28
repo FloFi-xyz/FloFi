@@ -23,7 +23,7 @@ test.beforeAll(async () => {
         if (id.endsWith('/app/wallet-session-action')) return '\0dashboard-acceptance-signing';
       },
       load(id) {
-        if (id === '\0dashboard-acceptance-reads') return 'export const dashboardSnapshot = account => window.flofiWorkspaceAcceptance.read(account, null); export const dashboardRunDetail = (account, runId) => window.flofiWorkspaceAcceptance.read(account, runId); export const runHistoryDisposition = async () => ({ ok: true, disposition: "VISIBLE" }); export const changeRunHistory = () => { throw Error("Unexpected fixture history mutation"); };';
+        if (id === '\0dashboard-acceptance-reads') return 'export const dashboardSnapshot = (account, cursor) => window.flofiWorkspaceAcceptance.read(account, null, cursor); export const dashboardRunDetail = (account, runId) => window.flofiWorkspaceAcceptance.read(account, runId); export const runHistoryDisposition = async () => ({ ok: true, disposition: "VISIBLE" }); export const changeRunHistory = () => { throw Error("Unexpected fixture history mutation"); };';
         if (id === '\0dashboard-acceptance-wallet') return 'export const useBuild009Wallet = () => ({}); export const injected = () => null;';
         if (id === '\0dashboard-acceptance-signing') return 'export const walletSignInChallenge = () => { throw new Error("Unexpected fixture signing"); }; export const walletSignIn = walletSignInChallenge;';
       },
@@ -61,6 +61,29 @@ test.beforeEach(async ({ page }) => {
   await page.addScriptTag({ url: '/__ux006e-acceptance.js' }); await mount(page); await reads(page, 1);
 });
 test.afterEach(({ page }) => { expect(errors.get(page)).toEqual([]); });
+test('loads all 75 history records in bounded pages, keeps loaded records during a failed page and retries the same cursor',async({page})=>{
+  const index=workspace(page),rows=index.locator('.dashboard-run-list > li'),more=index.getByRole('button',{name:'Load more history',exact:true});
+  await page.evaluate(()=>window.flofiWorkspaceAcceptance.respond(0,'page')); await expect(rows).toHaveCount(25);
+  await more.click(); await reads(page,2);
+  await expect(index.getByRole('button',{name:'Loading execution history…',exact:true})).toBeDisabled();
+  await page.evaluate(()=>window.flofiWorkspaceAcceptance.respond(1,'unavailable')); await expect(rows).toHaveCount(25);
+  await expect(index.getByRole('status')).toContainText('Try again');
+  await more.click(); await reads(page,3); await page.evaluate(()=>window.flofiWorkspaceAcceptance.respond(2,'page')); await expect(rows).toHaveCount(50);
+  await more.click(); await reads(page,4); await page.evaluate(()=>window.flofiWorkspaceAcceptance.respond(3,'page')); await expect(rows).toHaveCount(75);
+  await expect(more).toHaveCount(0);
+  expect(await page.evaluate(()=>window.flofiWorkspaceAcceptance.requests().map(r=>r.cursor))).toEqual([null,'25','25','50']);
+  expect(await page.evaluate(()=>window.flofiWorkspaceAcceptance.navigation())).toEqual([]);
+});
+test('a pending history page from another wallet cannot populate the current wallet',async({page})=>{
+  const index=workspace(page);
+  await page.evaluate(()=>window.flofiWorkspaceAcceptance.respond(0,'page'));
+  await index.getByRole('button',{name:'Load more history',exact:true}).click(); await reads(page,2);
+  await page.evaluate(value=>window.flofiWorkspaceAcceptance.wallet(value),other); await reads(page,3);
+  await page.evaluate(()=>window.flofiWorkspaceAcceptance.respond(1,'page'));
+  await expect(index.locator('.dashboard-run-list > li')).toHaveCount(0);
+  await page.evaluate(()=>window.flofiWorkspaceAcceptance.respond(2,'empty'));
+  await expect(index.getByRole('heading',{name:'No workflows executed yet',exact:true})).toBeVisible();
+});
 
 test('loading and refresh never present a misleading empty account; source and verification states stay distinct', async ({ page }) => {
   const index = workspace(page);

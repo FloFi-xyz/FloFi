@@ -16,6 +16,21 @@ beforeEach(() => {
 });
 afterEach(() => { host.unmount(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 describe('shared Canvas execution controls', () => {
+  it('ends a lost read response after the observation deadline, preserves recovery and never broadcasts', async () => {
+    props.progress = { started: true, restored: true, local: false, steps: [], active: null, completed: 0,
+      label: 'Recovered', message: '', state: 'uncertain', runKey: 'recorded', fingerprint: 'recorded', busy: false };
+    const first = deferred<void>(), second = deferred<void>();
+    props.recovery = { action: 'observe', checking: false, recordOnly: false, operationId: null,
+      label: 'Recovered', message: '', contextIssue: null, check: vi.fn().mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise) };
+    read().checkStatus(); expect(read().verifying).toBe(true);
+    await vi.advanceTimersByTimeAsync(30_001);
+    expect(read().verifying).toBe(false); expect(read().checkFailed).toBe(true);
+    read().checkStatus(); expect(read().verifying).toBe(true);
+    first.resolve(); await Promise.resolve(); await Promise.resolve();
+    expect(read().verifying).toBe(true);
+    second.resolve(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    expect(read().verifying).toBe(false); expect(props.execution.start).not.toHaveBeenCalled();
+  });
   it('retains the submission lock across clicks and stage rerenders until recorded state changes', () => {
     const pending = deferred<void>(); props.execution.start = vi.fn(() => pending.promise);
     read().request(false); read().request(false);
