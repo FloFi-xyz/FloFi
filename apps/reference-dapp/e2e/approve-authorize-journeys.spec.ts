@@ -88,7 +88,7 @@ async function authorizeAndComplete(journey: Journey, actions: Locator) {
   expect((await walletRequests(page)).filter(method => method === 'personal_sign')).toHaveLength(1);
   await authorize.evaluate(button => { (button as HTMLButtonElement).click(); (button as HTMLButtonElement).click(); });
   await expect.poll(journey.requested).toBe(1);
-  await expect(actions.locator('[data-lifecycle-action="recover"]')).toBeEnabled();
+  await expect(actions.locator('[data-lifecycle-action="processing"]')).toHaveText('Waiting for wallet…');
   await expect(actions).toContainText('Open your wallet to approve or reject.');
   await expect(actions.locator('[data-lifecycle-action="approve"], [data-lifecycle-action="execute"], [data-lifecycle-action="continue"]')).toHaveCount(0);
   await page.waitForTimeout(300); expect(journey.requested()).toBe(1); expect(await journey.sends()).toBe(0);
