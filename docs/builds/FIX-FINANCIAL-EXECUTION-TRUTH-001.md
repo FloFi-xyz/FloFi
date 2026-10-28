@@ -2,6 +2,14 @@
 
 Implementation base: `ff3160abf887668250cd5d14d0f783370419d337`, verified against origin/main. Audit reference: `01dbce43bfa4ab7279a95cc0ae24e5f1a94fa8e1`. No merge or deployment is authorized by this report.
 
+## Vercel bootstrap hotfix (2026-10-28)
+
+Owner-authorized Preview verification only; no production deployment. Retrieved Vercel deployment `dpl_9v4TzUp1CSfjBmVDjo85t29xirtc` and its complete build logs: commit `46025d8150646648d71d7e966c179dad54b7c746` failed in `fetch(NODE_URL)` with `TimeoutError: The read operation timed out`, before pnpm installation or application compilation.
+
+The shared bootstrap now retries transient connection/read failures, incomplete responses and selected transient HTTP statuses at most three times, with 2s/4s backoff, a 90s socket timeout and a 300s elapsed download budget checked between reads/attempts. An in-flight blocking operation can run until its socket timeout. Logs identify stage, attempt and sanitized source hostname without URL credentials, paths, queries or upstream exception details. Each response has its own buffer; only a complete response reaches the private archive file. Exhaustion fails closed. Official Node manifest validation, pinned Node SHA-256, pnpm SHA-512, verified cache behavior, frozen lockfile, TLS verification and dependency/security policies are preserved. No financial execution or UX files changed.
+
+Local validation: 64 CI transport/orchestration/source tests and 19 governance tests passed, including deterministic timeout/partial-byte discard, incomplete transfer, retry success/exhaustion, elapsed budget, HTTP/TLS classification, SHA-256/SHA-512 corruption and manifest mismatch cases. A cold live bootstrap downloaded the official Node/pnpm archives, matched both pinned digests and verified Node 24.21.0 / pnpm 11.22.0. Full exact-head CircleCI recertification and a fresh READY Preview are required after this commit; final evidence will be recorded in PR #130 without changing the certified head.
+
 ## Production incident: read-only findings
 
 Run `xuni-379461c2e3f1807a0dc0455342a51d21`; workflow `workflow-cd78e264-e8fe-43f3-9904-406504f3c83d`; wallet `0x4b212af0a923256961487ae72499ca79f920b3ce`. Reviewed intent: 1 Base USDC to Arbitrum One USDT.
