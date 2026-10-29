@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { test, expect, openSimulationDetails, applyPendingProposal, assertNoFinancialCanvasAction } from './fixtures';
+import { test, expect, openSimulationDetails, sendChatCommand, assertNoFinancialCanvasAction } from './fixtures';
 import { installSupplyWallet, resetSupplyHarness, authorSupply, supplySendCount, SUPPLY_OWNER, REPAY_OWNER, repayOptions } from './supply-fixtures';
 import { withdrawOptions } from './withdraw-fixtures';
 
@@ -36,9 +36,7 @@ for (const row of [
     await installSupplyWallet(page, { account: row.owner });
     await page.goto('/app');
     const verb = row.action.toLowerCase();
-    await page.getByLabel('Describe your flow').fill(`${verb} ${row.amount} USDC ${row.action === 'Repay' ? 'to' : 'from'} Aave on Base Sepolia`);
-    await page.getByRole('button', { name: 'Send', exact: true }).click();
-    await applyPendingProposal(page);
+    await sendChatCommand(page, `${verb} ${row.amount} USDC ${row.action === 'Repay' ? 'to' : 'from'} Aave on Base Sepolia`);
     await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '1');
     await page.getByRole('button', { name: 'Simulate workflow', exact: true }).click();
     await openSimulationDetails(page);
@@ -71,9 +69,7 @@ test('Ethereum Sepolia WBTC retains the correct chain, asset and amount while MO
   await resetSupplyHarness({}, '/ethereum-sepolia');
   await installSupplyWallet(page, { chain: '0xaa36a7', route: '/ethereum-sepolia' });
   await page.goto('/app');
-  await page.getByLabel('Describe your flow').fill(`supply 0.001 WBTC to Aave on Ethereum Sepolia beneficiary ${SUPPLY_OWNER}`);
-  await page.getByRole('button', { name: 'Send', exact: true }).click();
-  await applyPendingProposal(page);
+  await sendChatCommand(page, `supply 0.001 WBTC to Aave on Ethereum Sepolia beneficiary ${SUPPLY_OWNER}`);
   const card = page.locator('.build-flow-surface .composer-card').first();
   await expect(card.getByRole('textbox', { name: 'Source amount (WBTC)', exact: true })).toHaveValue('0.001');
   await expect(card).toContainText('Ethereum Sepolia');

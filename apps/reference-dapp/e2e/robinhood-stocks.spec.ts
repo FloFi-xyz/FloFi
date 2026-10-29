@@ -8,7 +8,7 @@
  * public network is contacted.
  */
 import { readFileSync } from 'node:fs';
-import { test, expect, openProposalReview, readWorkflowIr } from './fixtures';
+import { test, expect, readWorkflowIr, CHAT_COMMITTED } from './fixtures';
 import type { Page } from '@playwright/test';
 import { installSupplyWallet } from './supply-fixtures';
 import { expectReviewedImagesOnly, replayProviderLogos } from './asset-logo-replay';
@@ -111,12 +111,18 @@ async function ask(page: Page, text: string) {
   await page.getByRole('button', { name: 'Send', exact: true }).click();
 }
 const conversation = (page: Page) => page.getByRole('log', { name: 'Conversation' });
-async function proposedChange(page: Page): Promise<string> {
-  await openProposalReview(page);
-  const dialog = page.getByRole('dialog', { name: 'Proposed change', exact: true });
-  const text = (await dialog.innerText()).trim();
-  await page.keyboard.press('Escape');
-  return text;
+/**
+ * BUILD-FLOFI-CONVERSATIONAL-001: the chat commits each request at once; the canonical step it committed (without its node id) is compared, then
+ * the chat's Undo restores the empty workflow for the next reading.
+ */
+async function committedStep(page: Page): Promise<string> {
+  const last = conversation(page).locator('.message').last();
+  await expect(last).toContainText(CHAT_COMMITTED);
+  const ir = JSON.parse(await readWorkflowIr(page)) as { nodes: { nodeId: string; actionType: string }[] };
+  const step = ir.nodes.filter(node => !node.actionType.startsWith('mock-')).at(-1)!;
+  await last.getByRole('button', { name: /^(Undo this change|Desfazer esta alteração)$/ }).click();
+  await expect(conversation(page).locator('.message').last()).toContainText(/Undone\.|Desfeito\./);
+  return JSON.stringify({ ...step, nodeId: null });
 }
 
 // BUILD-BASE-001 (owner addendum): the product Copilot on committed replay answers (no model is called). A company name, in English or
@@ -130,26 +136,26 @@ test('the Copilot resolves a company name to its Stock Token: Tesla (EN and PT) 
     const said = conversation(page).locator('.message.ai').last();
     await expect(said).toContainText('Interpreted as “swap 50 USDG to TSLA on Robinhood Chain slippage 100 bps”');
     await expect(said).toContainText('“Tesla” is TSLA (Tesla) in the official Robinhood Chain catalog.');
-    const english = await proposedChange(page);
+    const english = await committedStep(page);
     await ask(page, 'Compre ações da Tesla com 50 USDG na Robinhood');
     await expect(conversation(page).locator('.message.ai').last()).toContainText('Interpretado como “swap 50 USDG to TSLA on Robinhood Chain slippage 100 bps”');
     await expect(conversation(page).locator('.message.ai').last()).toContainText('“Tesla” é TSLA (Tesla) no catálogo oficial da Robinhood Chain.');
-    const portuguese = await proposedChange(page);
-    // Chat's exact grammar (no model) proposes the very same change.
+    const portuguese = await committedStep(page);
+    // Chat's exact grammar (no model) commits the very same step.
     await ask(page, 'Swap 50 USDG for TSLA on Robinhood Chain');
-    await expect(conversation(page).locator('.message.system').last()).toContainText('Proposal:');
-    const exact = await proposedChange(page);
+    await expect(conversation(page).locator('.message.system').last()).toContainText('added to your workflow');
+    const exact = await committedStep(page);
     expect(portuguese).toBe(english);
     expect(exact).toBe(english);
-    expect(english).toContain('TSLA');
+    // The committed step is canonical (chain + token addresses); the interpretation above names the Stock Token.
+    expect(english).toContain('eip155:4663');
     await ask(page, 'Buy Salesforce with 20 USDG on Robinhood Chain');
     await expect(conversation(page).locator('.message.ai').last()).toContainText('Interpreted as “swap 20 USDG to CRM on Robinhood Chain slippage 100 bps”');
-    // Nothing changed until the owner applies; then the canonical IR holds TSLA's own chain + address.
-    await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '0');
+    // Seven revisions so far (three committed readings, each undone, and Salesforce); the canonical IR holds TSLA's own chain + address.
+    await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '7');
     await ask(page, 'Buy Tesla with 50 USDG on Robinhood Chain');
-    await openProposalReview(page);
-    await page.getByRole('button', { name: 'Apply proposal', exact: true }).click();
-    await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '1');
+    await expect(conversation(page).locator('.message.ai').last()).toContainText(CHAT_COMMITTED);
+    await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '8');
     const ir = await readWorkflowIr(page);
     expect(ir).toContain('eip155:4663');
     const capture = JSON.parse(readFileSync(new URL('../../../packages/action-registry/test/fixtures/robinhood-rhj-assets-2026-10-11.json', import.meta.url), 'utf8')) as

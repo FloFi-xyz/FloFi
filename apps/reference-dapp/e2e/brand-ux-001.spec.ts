@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { test, expect, assertNoFinancialCanvasAction, applyPendingProposal } from './fixtures';
+import { test, expect, assertNoFinancialCanvasAction, sendChatCommand } from './fixtures';
 import { assertConnectedFlow } from './connected-flow-assertions';
 
 const widths = [320, 375, 390, 430, 768, 1024, 1440];
@@ -93,7 +93,8 @@ for (const width of [320, 375, 390, 430]) {
     await expect(input).toHaveCSS('font-size', '16px');
     await input.fill('Swap 2 USDC to WETH on Base Sepolia slippage 50 bps');
     await page.getByRole('button', { name: 'Send', exact: true }).click();
-    await applyPendingProposal(page);
+    // BUILD-FLOFI-CONVERSATIONAL-001: the chat commits the request at once (no proposal to apply).
+    await expect(page.getByRole('log', { name: 'Conversation' }).locator('.message').last()).toContainText('Swap added to your workflow: 2 USDC');
     await shortcuts.getByRole('button', { name: 'Canvas', exact: true }).click();
     await expect(page.getByRole('region', { name: 'Workflow canvas', exact: true })).toBeFocused();
     await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '1');
@@ -156,9 +157,7 @@ test('reduced motion exposes all three workflow phases without pinning', async (
 
 test('desktop workflow showcase uses the actual builder', async ({ page }) => {
   await page.goto('/app');
-  await page.getByLabel('Describe your flow').fill('Swap 2 USDC to WETH on Base Sepolia slippage 50 bps');
-  await page.getByRole('button', { name: 'Send', exact: true }).click();
-  await applyPendingProposal(page);
+  await sendChatCommand(page, 'Swap 2 USDC to WETH on Base Sepolia slippage 50 bps');
   await expect(page.locator('.build-flow-surface .composer-card')).toHaveCount(1);
   await page.evaluate(() => document.fonts.ready);
   if (process.env.FLOFI_BRAND_EVIDENCE) await page.screenshot({ path: 'e2e/visual-evidence/build-brand-ux-001/after-build-1440.png', fullPage: true });

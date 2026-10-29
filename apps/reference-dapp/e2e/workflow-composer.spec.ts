@@ -5,7 +5,10 @@ import { configureCanvasAction, configureCanvasPool, openCanvasSettings } from '
 const owner = '0x1111111111111111111111111111111111111111';
 const cards = (page: Page) => page.locator('.build-flow-surface .composer-card');
 const step = (page: Page, id: string) => page.locator(`.build-flow-surface .react-flow__node[data-id="${id}"]`);
-const inspector = (page: Page) => page.getByRole('region', { name: 'Action inspector' });
+// BUILD-FLOFI-CONVERSATIONAL-001: a card's settings open in a dialog anchored to it (the bottom Advanced Settings panel was removed).
+const inspector = (page: Page) => page.getByRole('dialog', { name: 'Action settings', exact: true });
+/** The selected card's own settings control (aria-expanded mirrors its dialog). */
+const gear = (page: Page) => page.locator('.build-flow-surface .composer-card.active').getByRole('button', { name: 'Action settings', exact: true });
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(account => {
@@ -47,7 +50,7 @@ test('supported toolbar actions create real selected nodes and bind their editor
     await page.getByRole('button', { name: `Add ${action}`, exact: true }).click();
     await expect(cards(page)).toHaveCount(1);
     await expect(cards(page)).toHaveClass(/active/);
-    await expect(inspector(page).locator('.inspector-toggle')).toHaveAttribute('aria-expanded', 'false');
+    await expect(gear(page)).toHaveAttribute('aria-expanded', 'false');
     await openCanvasSettings(page);
     await expect(cards(page).locator('.composer-action-title')).toHaveText(`1. ${action === 'pool' ? 'Pool / Liquidity' : action[0]!.toUpperCase() + action.slice(1)}`);
     await expect(cards(page).locator('.composer-action-title svg')).toHaveCount(1);
@@ -77,7 +80,7 @@ test('supported toolbar actions create real selected nodes and bind their editor
       await configureCanvasPool(page);
       await openCanvasSettings(page);
     }
-    await expect(inspector(page).getByRole('button', { name: 'Advanced Settings', exact: true })).toHaveAttribute('aria-expanded', 'true');
+    await expect(gear(page)).toHaveAttribute('aria-expanded', 'true');
     if (form) await expect(inspector(page).getByRole('form', { name: form, exact: true })).toBeVisible();
     else await expect(inspector(page).getByLabel('Input amount (USDC)')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Privacy', exact: true })).toBeDisabled();
@@ -113,7 +116,7 @@ test('connected lending steps select one editor, update linked summaries after a
     await step(page, id).locator('.composer-card').click();
     await expect(page.locator('.build-flow-surface .composer-card.active')).toHaveCount(1);
     await expect(step(page, id).locator('.composer-action-title')).toContainText(`${number}.`);
-    await expect(inspector(page).getByRole('button', { name: 'Advanced Settings', exact: true })).toHaveAttribute('aria-expanded', 'true');
+    await expect(gear(page)).toHaveAttribute('aria-expanded', 'true');
     await expect(inspector(page).getByRole('form', { name: form, exact: true })).toBeVisible();
   }
   await step(page, 'lending-borrow').click();
@@ -144,11 +147,11 @@ test('connected lending steps select one editor, update linked summaries after a
   await expect(page.locator('.build-flow-surface .react-flow__edge')).toHaveCount(2);
   await page.keyboard.press('Escape');
   await expect(page.locator('.build-flow-surface .composer-card.active')).toHaveCount(0);
-  await expect(inspector(page).getByRole('button', { name: 'Advanced Settings', exact: true })).toBeDisabled();
+  await expect(gear(page)).toHaveCount(0); await expect(inspector(page)).toHaveCount(0);
   await step(page, 'lending-swap').focus(); await page.keyboard.press('Enter');
-  await expect(inspector(page).getByRole('button', { name: 'Advanced Settings', exact: true })).toHaveAttribute('aria-expanded', 'false');
+  await expect(gear(page)).toHaveAttribute('aria-expanded', 'false');
   await openCanvasSettings(page);
-  await expect(inspector(page).getByRole('button', { name: 'Advanced Settings', exact: true })).toHaveAttribute('aria-expanded', 'true');
+  await expect(gear(page)).toHaveAttribute('aria-expanded', 'true');
   await expect(step(page, 'lending-swap').locator('.composer-card')).toHaveClass(/active/);
 });
 
@@ -174,7 +177,7 @@ test('accepted settings update the card and existing warnings link to Selected A
   await expect(inspector(page).getByLabel('Selected action checks')).toContainText('Review the prototype slippage limit.');
   await expect(page.locator('.build-flow-surface .react-flow__edge')).toHaveCount(0);
   await page.getByRole('button', { name: 'Remove step', exact: true }).click();
-  await expect(cards(page)).toHaveCount(0); await expect(inspector(page).getByRole('button', { name: 'Advanced Settings', exact: true })).toBeDisabled();
+  await expect(cards(page)).toHaveCount(0); await expect(gear(page)).toHaveCount(0); await expect(inspector(page)).toHaveCount(0);
 });
 
 test('desktop and mobile composer keep compact cards, editor placement and approved canvas controls', async ({ page }) => {
@@ -182,8 +185,8 @@ test('desktop and mobile composer keep compact cards, editor placement and appro
     await page.setViewportSize({ width, height: 900 }); await lending(page);
     await expect(cards(page)).toHaveCount(3);
     const canvas = await page.getByRole('region', { name: 'Workflow canvas', exact: true }).boundingBox();
-    const editor = await inspector(page).boundingBox();
-    expect(editor!.y).toBeGreaterThanOrEqual(canvas!.y + canvas!.height);
+    // No settings panel below the canvas; nothing is open until a card's settings control is used.
+    await expect(inspector(page)).toHaveCount(0); expect(canvas).not.toBeNull();
     await expect(page.getByRole('button', { name: 'Simulate workflow', exact: true })).toBeVisible();
     await expect(page.locator('.build-flow-surface .canvas-navigator')).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
@@ -292,17 +295,17 @@ test('Swap and Bridge source/destination boxes select the existing editor, prese
     });
     expect(footerGap).toBeGreaterThanOrEqual(11); expect(footerGap).toBeLessThanOrEqual(13);
     await openCanvasSettings(page);
-    await inspector(page).locator('.inspector-toggle').click();
-    await expect(inspector(page).locator('.inspector-body')).toBeHidden();
+    await inspector(page).getByRole('button', { name: 'Close action settings', exact: true }).click();
+    await expect(inspector(page)).toHaveCount(0);
     await amount.click();
     await expect(card).toHaveClass(/active/);
-    await expect(inspector(page).locator('.inspector-body')).toBeHidden();
-    await expect(card.locator('.composer-selected')).toHaveText('Advanced Settings');
+    await expect(inspector(page)).toHaveCount(0);
+    await expect(card.locator('.composer-selected')).toHaveText('Settings');
     await expect(card.locator('.composer-selected svg')).toBeVisible();
     await card.locator('.composer-selected').click();
-    await expect(inspector(page).locator('.inspector-body')).toBeVisible();
+    await expect(inspector(page)).toBeVisible();
     const utilities = page.getByRole('group', { name: 'Workflow utilities', exact: true });
-    // The inspector toggle can scroll a narrow page below the canvas header; history lives in that header.
+    // History lives in the canvas header.
     await page.getByRole('toolbar', { name: 'Canvas tools', exact: true }).scrollIntoViewIfNeeded();
     await expect(utilities.getByRole('button', { name: 'Undo', exact: true })).toBeInViewport();
     await utilities.getByRole('button', { name: 'Undo', exact: true }).click();
@@ -315,52 +318,51 @@ test('Swap and Bridge source/destination boxes select the existing editor, prese
     await expect(page.getByRole('button', { name: 'Simulate workflow', exact: true })).toBeDisabled();
     await utilities.getByRole('button', { name: 'Redo', exact: true }).click();
     await expect(amount.locator('.composer-token-value')).toHaveValue('1');
-    await expect(inspector(page).locator('.inspector-body')).toBeHidden();
+    await expect(inspector(page)).toHaveCount(0);
     await openCanvasSettings(page);
-    await expect(inspector(page).locator('.inspector-body')).toBeVisible();
+    await expect(inspector(page)).toBeVisible();
   }
 });
 
-test('Advanced Settings opens only from its controls while card and keyboard selection stay independent', async ({ page }) => {
+test('a card’s settings open only from its own control while card and keyboard selection stay independent', async ({ page }) => {
   await open(page);
-  const panel = inspector(page), toggle = panel.locator('.inspector-toggle'), body = panel.locator('.inspector-body');
-  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
-  await expect(toggle).toBeDisabled();
-  await expect(body).toBeHidden();
-  expect((await panel.boundingBox())!.height).toBeLessThan(60);
+  const panel = inspector(page);
+  await expect(panel).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Action settings', exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'Add Supply → Borrow → Swap', exact: true }).click();
   await applyPendingProposal(page);
-  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
-  await expect(toggle).toBeEnabled();
   await step(page, 'lending-borrow').locator('.composer-card').click();
-  await expect(body).toBeHidden();
+  await expect(gear(page)).toHaveAttribute('aria-expanded', 'false');
+  await expect(panel).toHaveCount(0);
   for (const key of ['Enter', 'Space']) {
     await step(page, 'lending-supply').focus(); await page.keyboard.press(key);
     await expect(step(page, 'lending-supply').locator('.composer-card')).toHaveClass(/active/);
-    await expect(body).toBeHidden();
+    await expect(panel).toHaveCount(0);
   }
   await openCanvasSettings(page);
-  await expect(toggle).toHaveText('Advanced Settings');
-  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  await expect(gear(page)).toHaveText('Settings');
+  await expect(gear(page)).toHaveAttribute('aria-expanded', 'true');
   const supplyAmount = panel.getByLabel('Supply amount USDC', { exact: true });
   await supplyAmount.fill('0.25');
-  await toggle.click(); await expect(body).toBeHidden();
+  await panel.getByRole('button', { name: 'Close action settings', exact: true }).click(); await expect(panel).toHaveCount(0);
   await step(page, 'lending-supply').locator('.composer-card').click();
-  await expect(body).toBeHidden();
+  await expect(panel).toHaveCount(0);
   await openCanvasSettings(page);
   await expect(supplyAmount).toHaveValue('0.25');
+  // Selecting another card closes the first card's settings; that card's own control opens its own.
   await step(page, 'lending-borrow').locator('.composer-card').click();
+  await expect(panel).toHaveCount(0);
+  await openCanvasSettings(page);
   await expect(panel.getByRole('form', { name: 'Edit Aave Borrow', exact: true })).toBeVisible();
-  await toggle.click();
+  await page.keyboard.press('Escape');
   await step(page, 'lending-swap').locator('.composer-card').click();
-  await expect(body).toBeHidden();
-  const gear = step(page, 'lending-swap').getByRole('button', { name: 'Advanced Settings', exact: true });
-  await gear.focus(); await page.keyboard.press('Enter');
+  await expect(panel).toHaveCount(0);
+  const swapGear = step(page, 'lending-swap').getByRole('button', { name: 'Action settings', exact: true });
+  await swapGear.focus(); await page.keyboard.press('Enter');
   await expect(panel.getByRole('form', { name: 'Edit Uniswap Swap', exact: true })).toBeVisible();
   await expect(page.locator('.build-flow-surface .composer-card.active')).toHaveCount(1);
   await step(page, 'lending-swap').focus(); await page.keyboard.press('Escape');
-  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
-  await expect(toggle).toBeDisabled(); await expect(body).toBeHidden();
+  await expect(page.locator('.build-flow-surface .composer-card.active')).toHaveCount(0); await expect(panel).toHaveCount(0);
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '1');
 });
 
@@ -380,13 +382,13 @@ test('Delete uses the current selection, honors locks/protected steps and remain
   await remove.click();
   await expect(cards(page)).toHaveCount(0);
   await expect(remove).toBeDisabled();
-  await expect(inspector(page).getByRole('button', { name: 'Advanced Settings', exact: true })).toBeDisabled();
+  await expect(gear(page)).toHaveCount(0); await expect(inspector(page)).toHaveCount(0);
   await page.getByRole('button', { name: 'Undo', exact: true }).click();
   await expect(cards(page).locator('.composer-amount .composer-token-value')).toHaveValue('1');
   await expect(cards(page)).toHaveClass(/active/);
-  await expect(inspector(page).getByRole('button', { name: 'Advanced Settings', exact: true })).toHaveAttribute('aria-expanded', 'false');
+  await expect(gear(page)).toHaveAttribute('aria-expanded', 'false');
   await openCanvasSettings(page);
-  await expect(inspector(page).getByRole('button', { name: 'Advanced Settings', exact: true })).toHaveAttribute('aria-expanded', 'true');
+  await expect(gear(page)).toHaveAttribute('aria-expanded', 'true');
   await page.getByRole('button', { name: 'Redo', exact: true }).click();
   await expect(cards(page)).toHaveCount(0);
   await lending(page);

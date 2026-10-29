@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { Page } from '@playwright/test';
 import { createDatabase } from '@defi-workflow-engine/cloud-runtime';
-import { test, expect, applyPendingProposal, openSimulationDetails } from './fixtures';
+import { test, expect, sendChatCommand, applyPendingProposal, openSimulationDetails } from './fixtures';
 import { assertSimulationReviewBlocked } from './release-safety-fixtures';
 import { resetLending, installLendingWallet, lendingSends, LENDING_OWNER } from './lending-fixtures';
 import { resetJupiterHarness, installSolanaWallet, authorSolanaSwap, chooseSolanaWallet, signRequests, jupiterControl } from './jupiter-fixtures';
@@ -21,9 +21,7 @@ if (!profiles.some(value => value === profile)) throw new Error('An exact FLOFI_
 
 async function chat(page: Page, text: string) {
   await page.goto('/__engineering');
-  await page.getByLabel('Describe your flow').fill(text);
-  await page.getByRole('button', { name: 'Send', exact: true }).click();
-  await applyPendingProposal(page);
+  await sendChatCommand(page, text);
 }
 async function simulate(page: Page) {
   await page.getByRole('button', { name: 'Simulate workflow', exact: true }).click();
@@ -73,9 +71,7 @@ if (profile === 'solana-liquidity') test('MOCKED Orca liquidity retains exact ti
 if (profile === 'solana-composition') test('MOCKED Solana Devnet Swap → Orca liquidity binds the swap output on the Canvas and keeps the composed plan without authority', async ({ page }) => {
   const wallet = await resetDevnetHarness(); await installDevnetWallet(page, wallet);
   await chat(page, 'swap 0.1 SOL to devUSDC on Solana Devnet slippage 50 bps');
-  await page.getByLabel('Describe your flow').fill('add liquidity 0.05 SOL and 1000 devUSDC ticks -39104 to -36992 on Solana Devnet slippage 100 bps');
-  await page.getByRole('button', { name: 'Send', exact: true }).click();
-  await applyPendingProposal(page);
+  await sendChatCommand(page, 'add liquidity 0.05 SOL and 1000 devUSDC ticks -39104 to -36992 on Solana Devnet slippage 100 bps');
   // The Canvas link is a typed binding: the position's devUSDC maximum reads the swap's actual reconciled output.
   await linkSwapToPosition(page);
   await simulate(page);

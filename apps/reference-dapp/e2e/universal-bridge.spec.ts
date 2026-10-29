@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Page } from '@playwright/test';
 import { createMockedSolanaWallet } from '@defi-workflow-engine/reference-compiler';
-import { test, expect, chooseWallet, openProposalReview, openSimulationDetails, AUTHORIZE_IN_WALLET } from './fixtures';
+import { test, expect, chooseWallet, openSimulationDetails, AUTHORIZE_IN_WALLET, sendChatCommand } from './fixtures';
 import { installSolanaWallet, MOCKED_SOLANA_WALLET, signRequests } from './jupiter-fixtures';
 import { createTestWallet, personalSignText, type TestWallet } from '../../../packages/reference-reconciler/test/test-wallet.ts';
 import type { BuildEstimateResult } from '../src/domain/build-estimate';
@@ -31,10 +31,11 @@ test('Copilot keeps a destination question without buttons and resolves one toke
   await expect(copilotSays(page)).toContainText('Qual ativo você quer receber');
   await ask(page, 'USDG');
   await expect(copilotSays(page)).toContainText('receive USDG');
-  await openProposalReview(page);
   await expect(copilotSays(page)).toContainText('bridge 1 USDT from Solana to Robinhood Chain receive USDG via best slippage 100 bps');
-  await expect(page.getByRole('dialog', { name: 'Proposed change' })).toContainText('Bridge 1 USDT');
-  await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '0');
+  // BUILD-FLOFI-CONVERSATIONAL-001: once every required field is valid the step is committed at once; nothing is quoted, signed or sent by the chat.
+  // The conversation is in Portuguese, so FloFi confirms in Portuguese.
+  await expect(copilotSays(page)).toContainText('Adicionado ao seu workflow: Transferir entre redes · 1 USDT');
+  await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '1');
   expect(await counters()).toEqual(before);
 });
 async function control(method: string, params: unknown[] = []): Promise<unknown> {
@@ -77,11 +78,8 @@ async function installEvmWallet(page: Page, wallet: TestWallet, mode: 'normal' |
 }
 async function authorByChat(page: Page, sentence: string) {
   await page.goto('/app');
-  await page.locator('#mock-prompt').fill(sentence);
-  await page.getByRole('button', { name: 'Send', exact: true }).click();
-  await openProposalReview(page);
   const quote = page.waitForResponse(response => response.url().endsWith('/api/build-estimate') && response.request().method() === 'POST');
-  await page.getByRole('button', { name: 'Apply proposal' }).click();
+  await sendChatCommand(page, sentence);
   const response = await quote, result = await response.json() as BuildEstimateResult;
   expect(result.ok).toBe(true);
   if (!result.ok) throw Error(result.code);

@@ -40,7 +40,7 @@ test('theme defaults to light, covers product surfaces, persists and returns to 
   const size = await picker.evaluate(element => ({ width: parseFloat(getComputedStyle(element).width), height: parseFloat(getComputedStyle(element).height) }));
   expect(size.width).toBeLessThanOrEqual(110); expect(size.height).toBeLessThanOrEqual(164);
   await picker.locator('label').filter({ hasText: 'NVDA' }).click();
-  await card.getByRole('button', { name: 'Advanced Settings', exact: true }).click();
+  await card.getByRole('button', { name: 'Action settings', exact: true }).click();
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   const settings = page.getByRole('group', { name: 'Settings options', exact: true });
   await selectSettingsTheme(page, 'Dark');

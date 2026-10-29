@@ -9,7 +9,9 @@ import {isLendingComposition} from '@defi-workflow-engine/workflow-contracts';
 import { WithdrawAuthoringForm } from './withdraw-panel';
 import { RobinhoodTransferAuthoringForm } from './robinhood-transfer-panel';
 import { recipientPolicy } from '../domain/recipient-address';
-import { useEffect, useId, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { createPortal } from 'react-dom';
+import { proposalReviewPosition } from './proposal-review-position';
 import { liquidityDetails, validateCrossChainLiquidityWorkflow } from '@defi-workflow-engine/reference-linter';
 import { createCrossChainLiquidityWorkflow, type CrossChainLiquidityInput } from '../domain/cross-chain-liquidity';
 import { amountOf } from '../domain/commands';
@@ -39,16 +41,13 @@ import { routerDetails, ROUTER_NETWORK_OPTIONS } from '../domain/router-authorin
 import { canEditCanvasAmount, setupSummary } from '../domain/canvas-action-setup';
 import { supplyReviewFormId, poolReviewFormId } from './composer-card';
 import { usePoolContributionInputs } from './canvas-card-inputs';
-import { StocksSettings } from './stocks-settings';
+import { StocksConfiguration } from './stocks-settings';
 import { DEFAULT_SLIPPAGE } from '../domain/slippage-policy';
 
 
 const emptyCrossChain: CrossChainLiquidityInput = { amount: '100', bridgeSlippageBps: '50', swapSlippageBps: '50', tickLower: '-200100', tickUpper: '-199900', recipient: '0x1111111111111111111111111111111111111111', provider: 'lifi.rest', noSwap: false };
 const emptyLiquidity: LiquidityInput = { weth: '', usdc: '', minimumWeth: '', minimumUsdc: '', tickLower: '', tickUpper: '', recipient: '' };
-type InspectorProps = {
-  selectedId: string | null; select: (id: string | null) => void;
-  expanded?: boolean; onExpandedChange: (expanded: boolean) => void;
-};
+type InspectorProps = { selectedId: string | null; select: (id: string | null) => void };
 const SELF_TRANSFER_NOTE = 'Recipient: your connected owner wallet (a self-transfer), bound at Review. Only the network fee is spent. A chain execution proof, not a DeFi action.';
 // UX-001: on a recipient-capable network the destination is the card's "To" address, committed with the proposal and bound at Review.
 const SEND_RECIPIENT_NOTE = 'Recipient: the address in the card\'s To field, bound at Review. Only the reviewed amount moves; the network fee is paid in ETH.';
@@ -72,7 +71,76 @@ function SlippageField({ value, current, error, onChange, onSubmit }: { value: s
       : current === null ? tr('No slippage limit is set for this step.') : tr('Applied limit: {0} bps ({1}). A fresh simulation and Review use it.', current, slippagePercent(current))}</p>
   </form>;
 }
-export function ArtifactInspector(props: InspectorProps) {
+/**
+ * BUILD-FLOFI-CONVERSATIONAL-001: the selected card's own settings, opened from that card's settings control and anchored to it. It replaces the
+ * former bottom "Advanced Settings" inspector with the same validated forms and commands (no parameter is lost); it is not a second panel: it
+ * shows one card's settings while that card is selected and closes with Escape, its close button or a click elsewhere. While closed it stays
+ * mounted but hidden (as the inspector's collapsed body was), because the card's own Review buttons submit these forms (`supplyReviewFormId`,
+ * `poolReviewFormId`); hidden content is neither visible nor reachable.
+ */
+export function ActionSettingsPopover({ selectedId, select, open, close }: { selectedId: string; select: (id: string | null) => void; open: boolean; close(): void }) {
+  const { t: tr } = useLocale();
+  const popover = useRef<HTMLDivElement>(null), marker = useRef<HTMLSpanElement>(null);
+  const [target, setTarget] = useState<HTMLElement | null>(null);
+  const [position, setPosition] = useState<{ left: number; top: number; maxWidth: number; maxHeight: number } | null>(null);
+  useLayoutEffect(() => { setTarget(document.querySelector<HTMLElement>('.build-flow-surface')); }, []);
+  useLayoutEffect(() => {
+    const surface = target, review = popover.current;
+    if (!open) { setPosition(null); return; }
+    if (!surface || !review) return;
+    const anchor = () => surface.querySelector<HTMLElement>(`.react-flow__node[data-id="${CSS.escape(selectedId)}"]`);
+    function place() {
+      const card = anchor();
+      if (!card) { close(); return; }
+      const canvas = surface!.getBoundingClientRect();
+      const x = Math.max(canvas.left + 8, 8), y = Math.max(canvas.top + 8, 8);
+      const width = Math.max(1, Math.min(canvas.right - 8, window.innerWidth - 8) - x), height = Math.max(1, Math.min(canvas.bottom - 8, window.innerHeight - 8) - y);
+      const obstacles = [...surface!.querySelectorAll<HTMLElement>('.canvas-navigator, .canvas-primary-action, .floating-toolbox')].map(element => element.getBoundingClientRect());
+      const size = { width: Math.min(review!.offsetWidth, width), height: Math.min(review!.scrollHeight, height) }, cardBox = card.getBoundingClientRect();
+      const placed = proposalReviewPosition(cardBox, size, { x, y, width, height }, obstacles);
+      // The settings never cover what lies below them — the Canvas controls (Simulate/Authorize, zoom, toolbox) or their own card and its Review
+      // button (on a narrow Canvas): they end above it and scroll instead.
+      let maxHeight = height - (placed.y - y);
+      for (const obstacle of [...obstacles, cardBox]) {
+        if (placed.x < obstacle.right && placed.x + size.width > obstacle.left && placed.y < obstacle.top && placed.y + size.height > obstacle.top) maxHeight = Math.min(maxHeight, obstacle.top - 8 - placed.y);
+      }
+      setPosition({ left: placed.x - canvas.left, top: placed.y - canvas.top, maxWidth: width, maxHeight: Math.max(160, maxHeight) });
+    }
+    function outside(event: PointerEvent) {
+      if (!(event.target instanceof Node) || review!.contains(event.target)) return;
+      // The card's own settings control toggles the popover itself.
+      if (event.target instanceof Element && event.target.closest('.composer-selected')) return;
+      close();
+    }
+    function escape(event: KeyboardEvent) {
+      if (event.key !== 'Escape' || !(event.target instanceof Node) || !review!.contains(event.target)) return;
+      event.preventDefault(); event.stopPropagation();
+      close(); anchor()?.querySelector<HTMLElement>('.composer-selected')?.focus({ preventScroll: true });
+    }
+    place();
+    const observer = new ResizeObserver(place);
+    observer.observe(surface); observer.observe(review);
+    window.addEventListener('resize', place); window.addEventListener('scroll', place, true);
+    document.addEventListener('pointerdown', outside, true); document.addEventListener('keydown', escape, true);
+    return () => {
+      observer.disconnect(); window.removeEventListener('resize', place); window.removeEventListener('scroll', place, true);
+      document.removeEventListener('pointerdown', outside, true); document.removeEventListener('keydown', escape, true);
+    };
+  }, [target, selectedId, close, open]);
+  const positioned = open && position !== null;
+  useLayoutEffect(() => { if (positioned) popover.current?.focus({ preventScroll: true }); }, [positioned]);
+  const content = <div ref={popover} hidden={!open} className="action-settings-popover inspector panel nodrag nopan nowheel" role="dialog" aria-modal="false" aria-label={tr('Action settings')} tabIndex={-1}
+    style={{ ...position, visibility: position ? 'visible' : 'hidden' }} onPointerDown={event => event.stopPropagation()} onClick={event => event.stopPropagation()} onWheel={event => event.stopPropagation()}>
+    <button type="button" className="action-settings-close quiet" aria-label={tr('Close action settings')} title={tr('Close action settings')} onClick={() => { close(); }}>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>
+    </button>
+    <ActionSettingsContent selectedId={selectedId} select={id => { select(id); if (!id) close(); }}/>
+  </div>;
+  return <><span ref={marker} hidden/>{target && createPortal(content, target)}</>;
+}
+/** The selected action's settings (every field the card's compact controls do not show), with the existing validation and commands. */
+export function ActionSettingsContent(props: InspectorProps) {
+  const { t: tr } = useLocale();
   const { state, context, actionSetup = null, amountInputs = {}, cryptoSelections = {}, editCanvasAmount, editCryptoSelection } = useWorkflow();
   // BUILD-RH-002: the Stocks card (a draft or a canonical Robinhood Chain stock purchase) edits its own selection and amount.
   const setup = actionSetup?.id === props.selectedId && actionSetup.action === 'swap' && actionSetup.stocks ? actionSetup : null;
@@ -81,14 +149,16 @@ export function ArtifactInspector(props: InspectorProps) {
   const selection = setup?.cryptoSelection ?? (node ? cryptoSelections[node.nodeId] ?? input?.selection : null);
   if (!selection || (!setup && !node)) return <CanonicalArtifactInspector {...props}/>;
   const id = (setup?.id ?? node?.nodeId)!;
-  return <StocksSettings selection={selection} amount={setup ? setup.amount : amountInputs[id] ?? input?.amount ?? ''} expanded={props.expanded ?? false}
-    onExpandedChange={props.onExpandedChange} onAmountChange={amount => editCanvasAmount(id, amount)}
-    onEquityChange={symbol => { try { editCryptoSelection(id, selectCryptoToken(selection, 'destination', symbol)); } catch { /* not in the current catalog */ } }}/>;
+  return <section className="inspector-body" aria-label={tr("Stocks settings")}>
+    <h2>{tr("Stocks settings")}</h2>
+    <p className="composer-editor-context">{tr("Stocks · Uniswap · ")}{tr(selection.network)}</p>
+    <StocksConfiguration amount={setup ? setup.amount : amountInputs[id] ?? input?.amount ?? ''} source={selection.from} equity={selection.to ?? ''} onAmountChange={amount => editCanvasAmount(id, amount)}
+      onEquityChange={symbol => { try { editCryptoSelection(id, selectCryptoToken(selection, 'destination', symbol)); } catch { /* not in the current catalog */ } }}/>
+  </section>;
 }
-function CanonicalArtifactInspector({ selectedId, select, expanded = false, onExpandedChange }: InspectorProps) {
+function CanonicalArtifactInspector({ selectedId, select }: InspectorProps) {
   const { t: tr } = useLocale();
   const { state, dispatch, context, propose, review, actionSetup = null, amountInputs = {}, bridgeNetworkInputs = {}, cryptoSelections = {}, dismissProposal, editCanvasAmount, reviewCanvasAmount, commitCanvasAmount, removeActionSetup } = useWorkflow();
-  const contentId = useId();
   const lending=isLendingComposition(state.workflow);
   const node = state.workflow.nodes.find(item => item.nodeId === selectedId && !item.actionType.startsWith('mock-'));
   const setup = actionSetup?.id === selectedId ? actionSetup : null;
@@ -181,13 +251,8 @@ function CanonicalArtifactInspector({ selectedId, select, expanded = false, onEx
   const summary = selectedSummary && networks ? { ...selectedSummary, chain: `${networks.source} → ${networks.destination}` } : selectedSummary;
   const displayAmount = node && amountInputs[node.nodeId] !== undefined ? `${amountInputs[node.nodeId] || '0'} ${selection?.from ?? swap?.from ?? 'USDC'}` : summary?.amount;
   const validation = node ? composerNodeState(review, node.nodeId) : null;
-  const open = Boolean((node || setup) && expanded);
-  return <section className="inspector panel inspector-disclosure" aria-label={tr("Action inspector")}>
-    <button type="button" className="inspector-toggle" aria-expanded={open} aria-controls={contentId} disabled={!node && !setup} onClick={() => onExpandedChange(!open)}>
-      <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true" style={{ transform: open ? 'rotate(90deg)' : undefined }}><path d="m6 3 5 5-5 5"/></svg>
-      <span>{tr("Advanced Settings")}</span>
-    </button>
-    <div id={contentId} className="inspector-body" hidden={!open}>
+  if (!node && !setup) return null;
+  return <section className="inspector-body" aria-label={tr(setup ? `${setupSummary(setup, context).action} settings` : `${label} settings`)}>
     <h2>{tr(setup ? `${setupSummary(setup, context).action} settings` : node ? `${label} settings` : 'Settings')}</h2>
     {summary && <p className="composer-editor-context">{tr(summary.action)} · {tr(summary.provider)} · {tr(summary.chain)} · {tr(displayAmount)}</p>}
     {validation && validation.findings.length > 0 && <div className="composer-findings" aria-label={tr("Selected action checks")}>
@@ -260,6 +325,5 @@ function CanonicalArtifactInspector({ selectedId, select, expanded = false, onEx
       <button type="submit">{tr("Review ")}{tr(cross ? 'composition change' : 'cross-chain composition')}</button>
       <p className="muted">{tr("A destination ETH balance is required for gas. Split amounts are computed from the reconciled bridge output and observed pool state.")}</p>
     </form>}
-    </div>
   </section>;
 }

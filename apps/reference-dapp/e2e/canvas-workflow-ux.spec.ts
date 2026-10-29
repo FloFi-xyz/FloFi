@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /** Phase 7B: normal product, real handles, canonical probe, passive wallet, all financial gates off. */
 import type { Page } from '@playwright/test';
-import { test, expect, installPassiveWallet, assertPassiveWallet, readWorkflowIr, applyPendingProposal } from './fixtures';
+import { test, expect, installPassiveWallet, assertPassiveWallet, readWorkflowIr, sendChatCommand } from './fixtures';
 import { replayProviderLogos } from './asset-logo-replay';
 import { workflowOrder, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 const cards = (page: Page) => page.locator('.build-flow-surface .react-flow__node');
@@ -11,10 +11,8 @@ async function open(page: Page) {
   await replayProviderLogos(page); await installPassiveWallet(page, '0xa4b1'); await page.goto('/app');
   await expect(page.getByRole('log', { name: 'Conversation' })).toContainText('Flofi Copilot ready in replay mode');
 }
-async function say(page: Page, text: string) {
-  await page.locator('#mock-prompt').fill(text); await page.getByRole('button', { name: 'Send', exact: true }).click();
-  await applyPendingProposal(page);
-}
+/** BUILD-FLOFI-CONVERSATIONAL-001: the chat commits the request at once (no proposal to apply). */
+const say = sendChatCommand;
 async function settledViewport(page: Page) {
   let last: string | null = null, stable = 0;
   await expect.poll(async () => {
@@ -102,12 +100,19 @@ for (const width of [1440, 1536, 1920]) test(`UX-008 all desktop toolbar control
 test('UX-009 fits committed insertions 1–5; proposals and ordinary edits do not refit', async ({ page, networkGuard }) => {
   await page.setViewportSize({ width: 1536, height: 1080 }); await open(page);
   for (let count = 1; count <= 5; count++) {
-    const before = await viewport(page).getAttribute('style'), canonical = await ir(page);
-    await page.locator('#mock-prompt').fill('Swap 5 USDC for WETH on Base'); await page.getByRole('button', { name: 'Send', exact: true }).click();
-    await expect(page.getByRole('button', { name: /^Review proposed change:/ })).toBeVisible();
-    expect(await viewport(page).getAttribute('style')).toBe(before); expect(await ir(page)).toEqual(canonical); await applyPendingProposal(page);
+    // BUILD-FLOFI-CONVERSATIONAL-001: each chat request is a committed insertion.
+    await say(page, 'Swap 5 USDC for WETH on Base');
     await visibleCards(page, count);
   }
+  // A proposal (a chat request that would replace the workflow's steps stays one) neither refits the viewport nor changes the IR.
+  await settledViewport(page);
+  const before = await viewport(page).getAttribute('style'), canonical = await ir(page);
+  await page.locator('#mock-prompt').fill('compose supply 1 USDC to Aave then borrow 0.1 USDC then swap borrowed USDC to WETH on Base Sepolia slippage 50 bps owner 0x1111111111111111111111111111111111111111');
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await expect(page.getByRole('button', { name: /^Review proposed change:/ })).toBeVisible();
+  expect(await viewport(page).getAttribute('style')).toBe(before); expect(await ir(page)).toEqual(canonical);
+  await page.getByRole('button', { name: /^Review proposed change:/ }).click();
+  await page.getByRole('button', { name: 'Dismiss proposal', exact: true }).click();
   const after = await viewport(page).getAttribute('style');
   await cards(page).first().locator('.composer-action-title').click();
   expect(await viewport(page).getAttribute('style')).toBe(after);

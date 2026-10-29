@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { test, expect, applyPendingProposal, openProposalReview, readWorkflowIr, openFirstActionSettings, installPassiveWallet, assertPassiveWallet } from './fixtures';
+import { test, expect, sendChatCommand, openProposalReview, readWorkflowIr, openFirstActionSettings, installPassiveWallet, assertPassiveWallet } from './fixtures';
 import type { Page } from '@playwright/test';
 import { hashArtifactBytes, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { readyForVisualCapture } from './mode-a-fixtures';
@@ -12,8 +12,12 @@ const send = async (page: Page, text: string) => {
   await prompt(page).fill(text);
   await page.getByRole('button', { name: 'Send', exact: true }).click();
 };
-const apply = applyPendingProposal;
+/** BUILD-FLOFI-CONVERSATIONAL-001: a valid chat request is committed at once (no proposal to apply). */
+const commit = sendChatCommand;
 const selectSwap = openFirstActionSettings;
+const settings = (page: Page) => page.getByRole('dialog', { name: 'Action settings', exact: true });
+/** A composition that would replace the workflow (dropping its Swap): the chat keeps that change a Canvas proposal. */
+const REPLACING = 'compose supply 0.1 USDC to Aave then borrow 0.01 USDC then swap borrowed USDC to WETH on Base Sepolia slippage 50 bps owner 0x1111111111111111111111111111111111111111';
 const workflow = async (page: Page) => JSON.parse(await readWorkflowIr(page)) as SemanticWorkflow;
 const hash = (value: unknown) => hashArtifactBytes('semantic-workflow', new TextEncoder().encode(JSON.stringify(value)));
 const createCanvas = async (page: Page, direction: 'USDC_TO_WETH' | 'WETH_TO_USDC', amount: string, slippage: string) => {
@@ -31,7 +35,7 @@ const createCanvas = async (page: Page, direction: 'USDC_TO_WETH' | 'WETH_TO_USD
   await input.fill(amount); await input.press('Enter');
   if (slippage !== '100') {
     await selectSwap(page);
-    await page.locator('.inspector').getByLabel('Slippage (bps)', { exact: true }).fill(slippage);
+    await settings(page).getByLabel('Slippage (bps)', { exact: true }).fill(slippage);
     await page.getByRole('button', { name: 'Apply slippage', exact: true }).click();
   }
 };
@@ -42,12 +46,8 @@ for (const [direction, from, to, amount] of [
 ] as const) {
   test(`${from} to ${to}: actual chat and canvas inputs yield equal semantic hashes`, async ({ page }) => {
     await page.goto('/app');
-    await send(page, `swap ${amount} ${from} to ${to} on Base slippage 100 bps`);
-    await openProposalReview(page);
-    await expect(page.getByRole('dialog', { name: 'Proposed change' })).toContainText(`${from}`);
-    await expect(page.getByRole('dialog', { name: 'Proposed change' })).toContainText(`${to}`);
-    await page.keyboard.press('Escape');
-    await apply(page);
+    await commit(page, `swap ${amount} ${from} to ${to} on Base slippage 100 bps`);
+    await expect(page.getByRole('log', { name: 'Conversation' }).locator('.message').last()).toContainText(`${from} → ${to}`);
     const chat = await workflow(page);
     expect(chat.revision).toBe(1);
     await expect(page.getByRole('region', { name: 'Deterministic review findings' })).toHaveCount(0);
@@ -65,30 +65,24 @@ for (const [direction, from, to, amount] of [
 
 test('mixed surface edits, dismissal, locks and stale proposals preserve revisions', async ({ page }) => {
   await page.goto('/app');
-  await send(page, 'swap 2 USDC to WETH on Base slippage 50 bps');
-  await openProposalReview(page);
-  await page.getByRole('button', { name: 'Dismiss proposal' }).click();
-  await expect(page.locator('.summary-bar[data-workflow-revision="0"]')).toBeVisible();
-  await send(page, 'swap 2 USDC to WETH on Base slippage 50 bps');
-  await apply(page);
+  await commit(page, 'swap 2 USDC to WETH on Base slippage 50 bps');
+  await expect(page.locator('.summary-bar[data-workflow-revision="1"]')).toBeVisible();
   await selectSwap(page);
   const card = page.locator('.build-flow-surface .composer-card').first();
   await card.getByRole('textbox', { name: 'Source amount (USDC)' }).fill('3');
   await card.getByRole('textbox', { name: 'Source amount (USDC)' }).press('Enter');
-  await send(page, 'set node-002 slippage 75 bps');
-  await apply(page);
+  await commit(page, 'set node-002 slippage 75 bps');
   const chatCanvasChat = await workflow(page);
   expect(chatCanvasChat.revision).toBe(3);
 
   await page.reload();
   await createCanvas(page, 'USDC_TO_WETH', '2', '100');
-  await send(page, 'set node-002 amount 3');
-  await apply(page);
+  await commit(page, 'set node-002 amount 3');
   await selectSwap(page);
-  // BUILD-FIX-UX-001: a slippage edit applies directly (no proposal and no unrelated "Apply amount"), and Advanced Settings shows it.
-  await page.locator('.inspector').getByLabel('Slippage (bps)', { exact: true }).fill('75');
+  // BUILD-FIX-UX-001: a slippage edit applies directly (no proposal and no unrelated "Apply amount"), and the card's settings show it.
+  await settings(page).getByLabel('Slippage (bps)', { exact: true }).fill('75');
   await page.getByRole('button', { name: 'Apply slippage', exact: true }).click();
-  await expect(page.locator('.inspector')).toContainText('Applied limit: 75 bps (0.75%)');
+  await expect(settings(page)).toContainText('Applied limit: 75 bps (0.75%)');
   await expect(card.getByRole('button', { name: /^(Review|Apply) amount$/ })).toHaveCount(0);
   const canvasChatCanvas = await workflow(page);
   expect(canvasChatCanvas.workflowId).not.toBe(chatCanvasChat.workflowId);
@@ -96,31 +90,34 @@ test('mixed surface edits, dismissal, locks and stale proposals preserve revisio
   expect(reconstructed).toEqual(chatCanvasChat);
   expect(hash(reconstructed)).toBe(hash(chatCanvasChat));
 
-  await send(page, 'set node-002 amount 4');
-  await page.getByRole('button', { name: 'Lock amount' }).click();
+  // BUILD-FLOFI-CONVERSATIONAL-001: a chat change that would drop the Swap stays a proposal; made at revision 3, it is stale after the lock.
+  await send(page, REPLACING);
+  await expect(page.getByRole('button', { name: /^Review proposed change:/ })).toHaveCount(1);
+  await selectSwap(page);
+  await settings(page).getByRole('button', { name: 'Lock amount' }).click();
   await expect(page.locator('.summary-bar[data-workflow-revision="4"]')).toBeVisible();
   await openProposalReview(page);
   await expect(page.getByRole('button', { name: 'Apply proposal' })).toBeDisabled();
   await expect(page.locator('.summary-bar[data-workflow-revision="4"]')).toBeVisible();
   await page.getByRole('button', { name: 'Dismiss proposal' }).click();
+  // A chat edit of the locked amount is refused and changes nothing.
   await send(page, 'set node-002 amount 4');
-  await openProposalReview(page);
-  await expect(page.getByRole('button', { name: 'Apply proposal' })).toBeDisabled();
-  await page.getByRole('button', { name: 'Dismiss proposal' }).click();
-  await page.getByRole('button', { name: 'Unlock amount' }).click();
+  await expect(page.getByRole('log', { name: 'Conversation' }).locator('.message').last()).toContainText('amount is locked');
+  await expect(page.locator('.summary-bar[data-workflow-revision="4"]')).toBeVisible();
+  await selectSwap(page);
+  await settings(page).getByRole('button', { name: 'Unlock amount' }).click();
   await expect(page.locator('.summary-bar[data-workflow-revision="5"]')).toBeVisible();
 });
 
-test('proposal and blocked review snapshots show unquoted unavailable state', async ({ page }) => {
+test('chat-committed and blocked review snapshots show unquoted unavailable state', async ({ page }) => {
   await page.goto('/app');
-  await send(page, 'swap 0.125 WETH to USDC on Base slippage 301 bps');
-  await openProposalReview(page);
-  await expect(page.getByRole('dialog', { name: 'Proposed change' })).toContainText('WETH');
-  await expect(page.getByRole('dialog', { name: 'Proposed change' })).toContainText('USDC');
-  await expect(page.getByRole('button', { name: 'Apply proposal' })).toBeEnabled();
+  // BUILD-FLOFI-CONVERSATIONAL-001: the chat commits the request at once and says what it added; nothing is quoted, approved or signed.
+  await commit(page, 'swap 0.125 WETH to USDC on Base slippage 301 bps');
+  await expect(page.getByRole('log', { name: 'Conversation' }).locator('.message').last()).toContainText('Swap added to your workflow: 0.125 WETH');
+  await expect(page.getByRole('log', { name: 'Conversation' }).locator('.message').last()).toContainText('WETH → USDC');
   await readyForVisualCapture(page);
-  await expect(page).toHaveScreenshot('proposal.png', { fullPage: true, maxDiffPixels: 0 });
-  await page.getByRole('button', { name: 'Apply proposal' }).click();
+  await page.mouse.move(0, 0);
+  await expect(page).toHaveScreenshot('chat-committed.png', { fullPage: true, maxDiffPixels: 0, mask: [page.locator('[data-workflow-ir]')] });
   await selectSwap(page);
   // The displayed IR carries this visit's own draft identity, so it is checked as text and masked in the screenshot below.
   expect((JSON.parse(await readWorkflowIr(page)) as SemanticWorkflow).workflowId).toMatch(/^workflow-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);

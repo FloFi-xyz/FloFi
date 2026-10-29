@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { test, expect, applyPendingProposal, openSimulationDetails, readWorkflowIr, installPassiveWallet, assertPassiveWallet, assertNoFinancialCanvasAction } from './fixtures';
+import { test, expect, sendChatCommand, applyPendingProposal, openSimulationDetails, readWorkflowIr, installPassiveWallet, assertPassiveWallet, assertNoFinancialCanvasAction } from './fixtures';
 const recipient = '0x1111111111111111111111111111111111111111';
 
 test('cross-chain canvas and chat author the same graph while MOCKED simulation cannot authorize Execute', async ({ page }) => {
@@ -28,9 +28,7 @@ test('cross-chain canvas and chat author the same graph while MOCKED simulation 
   await expect(page.getByRole('link', { name: 'Download Evidence Bundle' })).toHaveCount(0);
   await assertPassiveWallet(page);
   await page.reload();
-  await page.getByLabel('Describe your flow').fill(`bridge 100 USDC from Base to Arbitrum via LI.FI and create Uniswap liquidity ticks -200100 to -199900 recipient ${recipient}`);
-  await page.getByRole('button', { name: 'Send', exact: true }).click();
-  await applyPendingProposal(page);
+  await sendChatCommand(page, `bridge 100 USDC from Base to Arbitrum via LI.FI and create Uniswap liquidity ticks -200100 to -199900 recipient ${recipient}`);
   const chatIR = JSON.parse(await readWorkflowIr(page));
   expect(chatIR.nodes).toEqual(canvasIR.nodes);
   expect(chatIR.edges).toEqual(canvasIR.edges);

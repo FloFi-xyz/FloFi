@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { test, expect, openProposalReview } from './fixtures';
+import { test, expect, sendChatCommand } from './fixtures';
 import { hashArtifactBytes, parseArtifactBytes } from '@defi-workflow-engine/workflow-contracts';
 import { digestRawResponse } from '@defi-workflow-engine/reference-linter';
 
@@ -8,10 +8,7 @@ const observation = (page: import('@playwright/test').Page) => page.getByRole('r
 test('replay fails closed for an unrecorded swap and preserves the authority boundary', async ({ page, networkGuard }) => {
   const response = await page.goto('/__engineering');
   expect(response?.headers()['content-security-policy']).toContain("connect-src 'self'");
-  await page.getByLabel('Describe your flow').fill('swap 3 USDC to WETH on Base slippage 50 bps');
-  await page.getByRole('button', { name: 'Send', exact: true }).click();
-  await openProposalReview(page);
-  await page.getByRole('button', { name: 'Apply proposal' }).click();
+  await sendChatCommand(page, 'swap 3 USDC to WETH on Base slippage 50 bps');
   await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Simulate' }).click();
   await page.locator('.simulation-technical > summary').click();
   const mocked = page.locator('.simulation-technical');
@@ -35,10 +32,7 @@ test('replay fails closed for an unrecorded swap and preserves the authority bou
 
 test('observation controls are keyboard reachable and fit mobile, tablet and desktop widths', async ({ page }) => {
   await page.goto('/__engineering');
-  await page.getByLabel('Describe your flow').fill('swap 1 WETH to USDC on Base slippage 50 bps');
-  await page.getByRole('button', { name: 'Send', exact: true }).click();
-  await openProposalReview(page);
-  await page.getByRole('button', { name: 'Apply proposal' }).click();
+  await sendChatCommand(page, 'swap 1 WETH to USDC on Base slippage 50 bps');
   await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Simulate' }).click();
   await page.locator('.simulation-technical > summary').click();
   const read = observation(page).getByRole('button', { name: 'Read Base quote' });
@@ -63,10 +57,7 @@ for (const [from, to, amount, at] of [
     await page.goto('/__engineering');
     // Keep the recorded wall time fixed while ResizeObserver and animation frames fit the graph.
     await page.clock.setFixedTime(new Date(at));
-    await page.getByLabel('Describe your flow').fill(`swap ${amount} ${from} to ${to} on Base slippage 50 bps`);
-    await page.getByRole('button', { name: 'Send', exact: true }).click();
-    await openProposalReview(page);
-    await page.getByRole('button', { name: 'Apply proposal' }).click();
+    await sendChatCommand(page, `swap ${amount} ${from} to ${to} on Base slippage 50 bps`);
     await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Simulate' }).click();
     await page.locator('.simulation-technical > summary').click();
     const region = observation(page);
@@ -120,10 +111,7 @@ test('a semantic edit retires a recorded quote without touching the mocked chain
   await page.goto('/__engineering');
   // Navigation can exceed one second; keep replay time fixed without rewinding timers.
   await page.clock.setFixedTime(at);
-  await page.getByLabel('Describe your flow').fill('swap 1 WETH to USDC on Base slippage 50 bps');
-  await page.getByRole('button', { name: 'Send', exact: true }).click();
-  await openProposalReview(page);
-  await page.getByRole('button', { name: 'Apply proposal' }).click();
+  await sendChatCommand(page, 'swap 1 WETH to USDC on Base slippage 50 bps');
   await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Simulate' }).click();
   await page.locator('.simulation-technical > summary').click();
   const mocked = page.locator('.simulation-technical');
@@ -133,10 +121,7 @@ test('a semantic edit retires a recorded quote without touching the mocked chain
   await region.getByRole('button', { name: 'Read Base quote' }).click();
   await expect(region).toContainText('OBSERVATION: CURRENT');
   await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Build' }).click();
-  await page.getByLabel('Describe your flow').fill('set node-002 amount 2');
-  await page.getByRole('button', { name: 'Send', exact: true }).click();
-  await openProposalReview(page);
-  await page.getByRole('button', { name: 'Apply proposal' }).click();
+  await sendChatCommand(page, 'set node-002 amount 2');
   await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Simulate' }).click();
   await page.locator('.simulation-technical > summary').click();
   await expect(region).toContainText('OBSERVATION: INVALIDATED');

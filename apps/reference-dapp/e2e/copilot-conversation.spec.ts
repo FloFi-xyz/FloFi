@@ -1,25 +1,20 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { Page } from '@playwright/test';
-import { test, expect, applyPendingProposal, openProposalReview } from './fixtures';
+import { test, expect, CHAT_COMMITTED } from './fixtures';
 import { installSupplyWallet, resetSupplyHarness, supplySendCount, SUPPLY_OWNER } from './supply-fixtures';
 
 // BUILD-COPILOT-002: conversational journeys on committed replay answers (e2e/copilot/replay-v2.json). No model is called, the network guard
-// refuses every non-loopback request, and Flofi's own question buttons are answered without any model at all.
+// refuses every non-loopback request, and Flofi's own question buttons are answered without any model at all. BUILD-FLOFI-CONVERSATIONAL-001: a valid
+// request is committed to the workflow at once (no Apply step); FloFi says how it read the words and what the workflow now holds, and Undo reverts it.
 if (process.env.FLOFI_COPILOT !== 'replay') throw new Error('copilot-conversation.spec.ts requires FLOFI_COPILOT=replay');
 
 const conversation = (page: Page) => page.getByRole('log', { name: 'Conversation' });
 const copilotSays = (page: Page) => conversation(page).locator('.message.ai').last();
 const proposal = (page: Page) => page.getByRole('button', { name: /^Review proposed change:/ });
-async function expectChange(page: Page, text: string) {
-  await openProposalReview(page);
-  await expect(page.getByRole('dialog', { name: 'Proposed change' })).toContainText(text);
-  await page.keyboard.press('Escape');
-  await expect(page.getByRole('dialog', { name: 'Proposed change' })).toHaveCount(0);
-  await expect(proposal(page)).toHaveCount(1);
-}
-async function dismiss(page: Page) {
-  await openProposalReview(page);
-  await page.getByRole('button', { name: 'Dismiss proposal', exact: true }).click();
+const commits = (page: Page, count: number) => expect(conversation(page).locator('.message', { hasText: CHAT_COMMITTED })).toHaveCount(count);
+async function undo(page: Page) {
+  await conversation(page).locator('.message').last().getByRole('button', { name: 'Undo this change', exact: true }).click();
+  await expect(conversation(page).locator('.message').last()).toContainText('Undone.');
 }
 const node = (page: Page, id: string) => page.locator(`.react-flow__node[data-id="${id}"]`);
 const revision = (page: Page, value: number) => expect(page.locator(`.summary-bar[data-workflow-revision="${value}"]`)).toHaveCount(1);
@@ -27,17 +22,17 @@ async function ask(page: Page, text: string) {
   await page.locator('#mock-prompt').fill(text);
   await page.getByRole('button', { name: 'Send', exact: true }).click();
 }
-/** An exact command (no model), applied by the user. */
+/** An exact command (no model), committed by the chat. */
 async function author(page: Page, text: string, nextRevision: number) {
   await ask(page, text);
-  await expect(conversation(page).locator('.message.system').last()).toContainText(`Proposal: ${text}.`);
-  await applyPendingProposal(page);
+  await expect(conversation(page).locator('.message.system').last()).toContainText('added to your workflow');
+  await expect(proposal(page)).toHaveCount(0);
   await revision(page, nextRevision);
 }
 
 test.beforeEach(async () => { await resetSupplyHarness(); });
 
-test('Portuguese conversation: network question, revised proposal, read-only answer and removal, each needing Apply', async ({ page }) => {
+test('Portuguese conversation: network question, a correction of the committed step, read-only answer and removal, each committed by the chat', async ({ page }) => {
   await installSupplyWallet(page);
   await page.goto('/app');
   await ask(page, 'Quero colocar 5 USDC na Aave.');
@@ -46,47 +41,43 @@ test('Portuguese conversation: network question, revised proposal, read-only ans
   // Flofi's own button: a deterministic answer, no model call.
   await copilotSays(page).getByRole('button', { name: 'Base Sepolia' }).click();
   await expect(copilotSays(page)).toContainText('Interpretado como “supply 5 USDC to Aave on Base Sepolia”');
-  await expectChange(page, 'Supply 5 USDC');
-  await revision(page, 0);
-  await ask(page, 'Na verdade muda para 2.');
-  // The beneficiary is carried from the visible proposal itself, not re-read from whatever wallet is connected now.
-  await expect(copilotSays(page)).toContainText(`nova versão da proposta pendente: “supply 2 USDC to Aave on Base Sepolia beneficiary ${SUPPLY_OWNER}”`);
-  await expect(copilotSays(page)).toContainText('Mantido da proposta pendente: rede, token, beneficiário.');
-  await expectChange(page, 'Supply 2 USDC');
-  await revision(page, 0);
-  await expect(node(page, 'node-002')).toHaveCount(0);
-  await applyPendingProposal(page);
+  await expect(copilotSays(page)).toContainText('Adicionado ao seu workflow:');
+  await commits(page, 1); await expect(proposal(page)).toHaveCount(0);
   await revision(page, 1);
+  await expect(node(page, 'node-002').getByRole('textbox', { name: 'Source amount (USDC)', exact: true })).toHaveValue('5');
+  await ask(page, 'Na verdade muda para 2.');
+  // A correction of the committed step: the same network, token and beneficiary, only the amount changes.
+  await expect(copilotSays(page)).toContainText('Etapa atualizada:');
+  await commits(page, 2);
+  await revision(page, 2);
   await expect(node(page, 'node-002').getByRole('textbox', { name: 'Source amount (USDC)', exact: true })).toHaveValue('2');
   await expect(node(page, 'node-002')).toContainText('Base Sepolia');
   await ask(page, 'O que esse fluxo faz?');
-  await expect(copilotSays(page)).toContainText('Este fluxo (revisão 1) tem 1 passo.');
+  await expect(copilotSays(page)).toContainText('Este fluxo (revisão 2) tem 1 passo.');
   await expect(copilotSays(page)).toContainText(`Faz supply de 2 USDC na Aave V3 na Base Sepolia para ${SUPPLY_OWNER}`);
   await expect(copilotSays(page)).toContainText('Somente leitura: nada foi proposto, alterado, assinado ou executado.');
   await expect(proposal(page)).toHaveCount(0);
-  await revision(page, 1);
+  await revision(page, 2);
   await ask(page, 'Remove o primeiro passo.');
   await expect(copilotSays(page)).toContainText('Interpretado como remover o passo 1 (Supply 2 USDC · Aave V3 · Base Sepolia)');
-  await revision(page, 1);
-  await applyPendingProposal(page);
-  await revision(page, 2);
+  await expect(copilotSays(page)).toContainText('Removido do seu workflow:');
+  await revision(page, 3);
   await expect(node(page, 'node-002')).toHaveCount(0);
   expect(await supplySendCount(page)).toBe(0);
 });
 
-test('a conversational edit of an applied step is a new proposal; the canvas changes only on Apply', async ({ page }) => {
+test('a conversational edit of a committed step changes that step only, and Undo restores it', async ({ page }) => {
   await page.goto('/app');
   await author(page, 'swap 3 USDC to WETH on Base Sepolia slippage 50 bps', 1);
   await ask(page, 'change it to 2');
   await expect(copilotSays(page)).toContainText('Interpreted as a change to step 1 (Swap 3 USDC → WETH · Base Sepolia)');
-  await expectChange(page, 'Swap 2 USDC');
+  await expect(copilotSays(page)).toContainText('Swap updated: 2 USDC');
   await expect(copilotSays(page)).toContainText('Base Sepolia');
-  await expect(copilotSays(page)).toContainText('Interpreted as a change to step 1');
-  await revision(page, 1);
-  await expect(node(page, 'node-002').getByRole('textbox', { name: 'Source amount (USDC)', exact: true })).toHaveValue('3');
-  await applyPendingProposal(page);
   await revision(page, 2);
   await expect(node(page, 'node-002').getByRole('textbox', { name: 'Source amount (USDC)', exact: true })).toHaveValue('2');
+  await undo(page);
+  await revision(page, 3);
+  await expect(node(page, 'node-002').getByRole('textbox', { name: 'Source amount (USDC)', exact: true })).toHaveValue('3');
 });
 
 test('an ambiguous reference becomes a question with concrete step buttons, never a guess', async ({ page }) => {
@@ -98,12 +89,14 @@ test('an ambiguous reference becomes a question with concrete step buttons, neve
   await expect(proposal(page)).toHaveCount(0);
   await copilotSays(page).getByRole('button', { name: 'Step 2 · Swap 3 USDC → WETH · Base' }).click();
   await expect(copilotSays(page)).toContainText('Interpreted as a change to step 2 (Swap 3 USDC → WETH · Base)');
-  await expectChange(page, 'Swap 2 USDC');
+  await expect(copilotSays(page)).toContainText('Swap updated: 2 USDC');
+  // Only the chosen step changed; the other step is untouched.
   await expect(node(page, 'node-002').getByRole('textbox', { name: 'Source amount (USDC)', exact: true })).toHaveValue('2');
-  await expect(node(page, 'node-003').getByRole('textbox', { name: 'Source amount (USDC)', exact: true })).toHaveValue('3');
-  await dismiss(page);
+  await expect(node(page, 'node-003').getByRole('textbox', { name: 'Source amount (USDC)', exact: true })).toHaveValue('2');
   await expect(proposal(page)).toHaveCount(0);
-  await revision(page, 2);
+  await revision(page, 3);
+  await undo(page);
+  await revision(page, 4);
   await expect(node(page, 'node-003').getByRole('textbox', { name: 'Source amount (USDC)', exact: true })).toHaveValue('3');
 });
 
@@ -161,6 +154,8 @@ test('a bridge asks where it should go, the button answer needs no model, and "t
   await ask(page, 'Do the same thing but with 2 USDC');
   await expect(copilotSays(page)).toContainText('Interpreted as “bridge 2 USDC from Base Sepolia to Arbitrum Sepolia via auto slippage 100 bps”');
   await expect(copilotSays(page)).toContainText('Kept from your earlier proposal');
-  await dismiss(page);
-  await revision(page, 0);
+  await expect(copilotSays(page)).toContainText('Bridge added to your workflow: 2 USDC');
+  await revision(page, 2);
+  await undo(page);
+  await revision(page, 3); await expect(page.locator('.build-flow-surface .composer-card')).toHaveCount(1);
 });

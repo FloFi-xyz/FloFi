@@ -69,7 +69,9 @@ describe('contextual workflow proposals', () => {
     expect(workflowProposalSummary(initialEditor(), swap, context).detail).toContain('2 USDC');
   });
   it('does not retain a second approval interface in Copilot', () => {
-    const html = renderToStaticMarkup(createElement(CopilotPanel));
+    const conversation = { messages: [{ id: 0, role: 'system', text: 'Review each proposed change before applying it.' }], input: '', setInput: vi.fn(), send: vi.fn(), busy: false,
+      copilot: { mode: 'off', enabled: false, busy: false, mayInterpret: false }, automation: null, dismissAutomation: vi.fn(), phase: null, question: null, execution: null, direct: false };
+    const html = renderToStaticMarkup(createElement(CopilotPanel, { conversation: conversation as unknown as Parameters<typeof CopilotPanel>[0]['conversation'] }));
     expect(html).toContain('Copilot');
     expect(html).not.toMatch(/Review proposed edit|Apply proposal|Dismiss proposal|class="proposal"/);
     expect(fixture.store.applyProposal).not.toHaveBeenCalled();

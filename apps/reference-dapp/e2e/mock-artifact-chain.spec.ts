@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { test, expect, applyPendingProposal, openSimulationDetails, readWorkflowIr, openFirstActionSettings, openProposalReview, assertNoFinancialCanvasAction } from './fixtures';
+import { test, expect, sendChatCommand, applyPendingProposal, openSimulationDetails, readWorkflowIr, openFirstActionSettings, openProposalReview, assertNoFinancialCanvasAction } from './fixtures';
 import type { Page } from '@playwright/test';
 import { hashArtifactBytes, parseArtifactBytes } from '@defi-workflow-engine/workflow-contracts';
 
@@ -7,6 +7,8 @@ const T0 = new Date('2026-09-24T12:00:00.000Z');
 const T1 = new Date('2026-09-24T12:00:10.000Z');
 const at = (seconds: number) => new Date(T1.getTime() + seconds * 1000);
 const RATE = 'synthetic rate 1 WETH = 1,000 USDC';
+/** A composition that replaces the workflow (and so would drop its Swap): the chat keeps it a proposal. */
+const REPLACING = 'compose supply 0.1 USDC to Aave then borrow 0.01 USDC then swap borrowed USDC to WETH on Base Sepolia slippage 50 bps owner 0x1111111111111111111111111111111111111111';
 const bytes = (value: unknown) => new TextEncoder().encode(JSON.stringify(value));
 const panel = (page: Page) => page.locator('.simulation-technical');
 const chip = (page: Page, status: string) => panel(page).getByText(`ARTIFACTS: ${status}`, { exact: true });
@@ -21,9 +23,7 @@ async function open(page: Page) {
   await page.clock.pauseAt(T1);
 }
 async function apply(page: Page, text: string) {
-  await page.getByLabel('Describe your flow').fill(text);
-  await page.getByRole('button', { name: 'Send', exact: true }).click();
-  await applyPendingProposal(page);
+  await sendChatCommand(page, text);
 }
 async function generate(page: Page) {
   await tab(page, 'Simulate');
@@ -128,14 +128,20 @@ test('semantic edits invalidate; presentation, dismissal, no-op and stale propos
   await tab(page, 'Simulate');
   await expect(chip(page, 'CURRENT')).toBeVisible();
   await tab(page, 'Build');
-  await page.getByLabel('Describe your flow').fill('set node-002 amount 3');
+  // BUILD-FLOFI-CONVERSATIONAL-001: a chat request that would also drop a step the owner did not name stays a proposal; dismissing it changes nothing.
+  await page.getByLabel('Describe your flow').fill(REPLACING);
   await page.getByRole('button', { name: 'Send', exact: true }).click();
   await openProposalReview(page);
   await page.getByRole('dialog', { name: 'Proposed change' }).getByRole('button', { name: 'Dismiss proposal' }).click();
-  await apply(page, 'set node-002 amount 2.25');
-  await expect(page.locator('.summary-bar[data-workflow-revision="1"]')).toBeVisible();
-  await page.getByLabel('Describe your flow').fill('set node-002 amount 4');
+  // A request for the value the step already has is a no-op: no revision.
+  await page.getByLabel('Describe your flow').fill('set node-002 amount 2.25');
   await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await expect(page.getByRole('log', { name: 'Conversation' }).locator('.message').last()).toContainText('That step already has these values. Nothing changed.');
+  await expect(page.locator('.summary-bar[data-workflow-revision="1"]')).toBeVisible();
+  // A proposal made at revision 1 is stale once the workflow changes (the Canvas lock below): it can no longer be applied.
+  await page.getByLabel('Describe your flow').fill(REPLACING);
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await expect(page.getByRole('button', { name: /^Review proposed change:/ })).toHaveCount(1);
   await openFirstActionSettings(page);
   await page.getByRole('button', { name: 'Lock amount' }).click();
   await expect(page.locator('.summary-bar[data-workflow-revision="2"]')).toBeVisible();

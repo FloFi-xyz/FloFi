@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { test, expect, assertNoFinancialCanvasAction, applyPendingProposal } from './fixtures';
+import { test, expect, assertNoFinancialCanvasAction, sendChatCommand } from './fixtures';
 
 test('Execute shows the shared authored workflow without authorizing or inventing execution', async ({ page }) => {
   await page.goto('/app');
@@ -7,9 +7,7 @@ test('Execute shows the shared authored workflow without authorizing or inventin
   await page.getByRole('button', { name: 'Rename workflow', exact: true }).click();
   await page.getByRole('textbox', { name: 'Workflow name', exact: true }).fill('ESPARTACUS');
   await page.getByRole('textbox', { name: 'Workflow name', exact: true }).press('Enter');
-  await page.getByLabel('Describe your flow').fill('swap 2.25 USDC to WETH on Base slippage 50 bps');
-  await page.getByRole('button', { name: 'Send', exact: true }).click();
-  await applyPendingProposal(page);
+  await sendChatCommand(page, 'swap 2.25 USDC to WETH on Base slippage 50 bps');
   await page.getByRole('button', { name: 'Simulate workflow', exact: true }).click();
   await expect(page.locator('.simulate-canvas').getByRole('heading', { name: 'ESPARTACUS', exact: true })).toBeVisible();
   await nav.getByRole('button', { name: 'Execute', exact: true }).click();

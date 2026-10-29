@@ -69,7 +69,7 @@ test('Orca liquidity on Solana Mainnet: authored on the Canvas against the verif
   await expect(card.getByRole('button', { name: 'Select destination token', exact: true })).toHaveText('USDC');
   await card.getByRole('textbox', { name: 'First liquidity amount (SOL)', exact: true }).fill('0.01');
   await card.getByRole('textbox', { name: 'Second liquidity amount (USDC)', exact: true }).fill('0.3');
-  await card.getByRole('button', { name: 'Advanced Settings', exact: true }).click();
+  await card.getByRole('button', { name: 'Action settings', exact: true }).click();
   const form = page.getByRole('form', { name: 'Edit Solana liquidity position', exact: true });
   await form.getByLabel('Lower bound', { exact: true }).fill('-39104'); await form.getByLabel('Upper bound', { exact: true }).fill('-36992');
   await form.getByLabel('Liquidity slippage (bps)', { exact: true }).fill('100');

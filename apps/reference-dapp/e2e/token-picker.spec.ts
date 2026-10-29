@@ -56,7 +56,7 @@ test('Swap token selection synchronizes both pills and settings, invalidates rev
   await expect(revision).toHaveAttribute('data-workflow-revision', '0');
   await expect(picker.getByRole('radio', { name: 'WETH', exact: true })).toBeChecked();
   await page.getByRole('region', { name: 'Source asset picker', exact: true }).getByRole('button', { name: 'Hide token picker', exact: true }).click();
-  await card.getByRole('button', { name: 'Advanced Settings', exact: true }).click();
+  await card.getByRole('button', { name: 'Action settings', exact: true }).click();
   await expect(page.getByRole('form', { name: 'Configure Swap', exact: true }).getByLabel('Source amount (WETH)', { exact: true })).toHaveValue('0.25');
   await card.getByRole('button', { name: 'Select destination token', exact: true }).click();
   const destination = page.getByRole('region', { name: 'Destination token picker', exact: true });
@@ -73,7 +73,7 @@ test('Swap token selection synchronizes both pills and settings, invalidates rev
   const workflow = JSON.parse(await advanced.locator('[data-workflow-ir]').innerText());
   const node = workflow.nodes.find((node: { actionType: string }) => node.actionType === 'asset.swap.exact-input');
   expect(node.inputs.find((input: { kind: string }) => input.kind === 'QUANTITY').value.amount).toBe('250000000000000000');
-  await card.getByRole('button', { name: 'Advanced Settings', exact: true }).click();
+  await card.getByRole('button', { name: 'Action settings', exact: true }).click();
   // BUILD-FIX-UX-001: slippage is an ordinary edit: typing applies nothing, Enter applies exactly the typed value.
   const settings = page.getByRole('form', { name: 'Swap slippage', exact: true });
   await expect(settings).toContainText('Applied limit: 100 bps (1.00%)');
@@ -96,14 +96,14 @@ for (const theme of ['Light', 'Dark']) test(`${theme} Advanced Settings has clea
   await selectSettingsTheme(page, theme);
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await page.getByRole('button', { name: 'Stocks', exact: true }).click();
-  const card = page.locator('.composer-card'), settings = card.getByRole('button', { name: 'Advanced Settings', exact: true });
+  const card = page.locator('.composer-card'), settings = card.getByRole('button', { name: 'Action settings', exact: true });
   await settings.hover();
   await expect(settings).toHaveCSS('outline-style', 'none'); await expect(settings).toHaveCSS('box-shadow', 'none'); await expect(settings).toHaveCSS('background-image', 'none');
   await page.keyboard.press('Tab'); await settings.focus();
   await expect(settings).toBeFocused(); await expect(settings).toHaveCSS('outline-style', 'none'); await expect(settings).toHaveCSS('box-shadow', 'none');
   await expect(settings).toHaveCSS('border-left-width', '0px'); await expect(settings).toHaveCSS('border-right-width', '0px'); await expect(settings).toHaveCSS('border-bottom-width', '0px');
   await expect(settings).toHaveCSS('text-decoration-line', 'underline'); await expect(settings.locator('svg')).toBeVisible();
-  await settings.press('Enter'); await expect(page.getByRole('region', { name: 'Action inspector', exact: true }).getByRole('textbox', { name: 'Stocks amount', exact: true })).toBeVisible();
+  await settings.press('Enter'); await expect(page.getByRole('dialog', { name: 'Action settings', exact: true }).getByRole('textbox', { name: 'Stocks amount', exact: true })).toBeVisible();
   await card.getByRole('button', { name: 'Select stock', exact: true }).click();
   await page.getByRole('region', { name: 'Stocks configuration', exact: true }).locator('label').filter({ hasText: 'NVDA' }).click();
   await expect(card.getByRole('button', { name: 'Select stock', exact: true })).toContainText('NVDA');

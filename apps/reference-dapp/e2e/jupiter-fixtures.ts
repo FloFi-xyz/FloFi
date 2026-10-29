@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { chooseWallet, openProposalReview, openSimulationDetails, acceptProductReview } from './fixtures';
+import { chooseWallet, sendChatCommand, openProposalReview, openSimulationDetails, acceptProductReview } from './fixtures';
 import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -73,10 +73,9 @@ export async function installSolanaWallet(page: Page, wallet: ReturnType<typeof 
 }
 export async function authorSolanaSwap(page: Page, via: 'canvas' | 'chat' = 'canvas') {
   await page.goto('/__engineering');
-  if (via === 'chat') {
-    await page.locator('#mock-prompt').fill('Swap 10 USDC to SOL on Solana');
-    await page.getByRole('button', { name: 'Send', exact: true }).click();
-  } else {
+  // BUILD-FLOFI-CONVERSATIONAL-001: the chat commits its request at once; the engineering form keeps its proposal.
+  if (via === 'chat') { await sendChatCommand(page, 'Swap 10 USDC to SOL on Solana'); return; }
+  {
     await page.getByText('Advanced action setup').click();
     await page.locator('#swap-network').selectOption('SOLANA');
     const form = page.getByRole('form', { name: 'Create Solana swap' });

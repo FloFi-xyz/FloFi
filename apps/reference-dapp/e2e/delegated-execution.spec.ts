@@ -24,7 +24,7 @@ import { createMockedSolanaWallet } from '@defi-workflow-engine/reference-compil
 import { dispatch, occurrencesOf, query, ruleOf, setPrices } from './automation-fixtures';
 import { assertDelegationHarness, chainControl, createDelegationOwner, delegationDispatch, evmWalletRequests, expect, installDelegationEvmWallet, SIGNING_METHODS, test,
   virtualAuthenticator } from './delegation-fixtures';
-import { applyPendingProposal, chooseWallet, proveConnectedEvmWallet } from './fixtures';
+import { sendChatCommand, chooseWallet, proveConnectedEvmWallet } from './fixtures';
 import { installSolanaWallet, MOCKED_SOLANA_WALLET, signRequests } from './jupiter-fixtures';
 
 const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
@@ -260,9 +260,7 @@ test.describe('BUILD-AUTOMATION-002 delegated execution (MOCKED loopback chains,
     // The owner authors a two-step workflow on the Canvas (FloFi's deterministic grammar, applied through the normal proposal review).
     await page.goto('/app');
     for (const sentence of ['swap 50 USDC to WETH on Base Sepolia slippage 50 bps', 'swap 40 USDC to WETH on Base Sepolia slippage 50 bps']) {
-      await page.getByLabel('Describe your flow', { exact: true }).fill(sentence);
-      await page.getByRole('button', { name: 'Send', exact: true }).click();
-      await applyPendingProposal(page);
+      await sendChatCommand(page, sentence);
     }
     // UX-002: the existing action is the clock icon beside the workflow name's rename/save controls.
     await page.locator('.build-canvas-head .canvas-name').getByRole('button', { name: 'Automate this workflow', exact: true }).click();

@@ -88,8 +88,8 @@ for (const network of ['Robinhood Chain Testnet', 'Ethereum Sepolia']) test(`Can
   const workflow = JSON.parse(await readWorkflowIr(page));
   const transfer = workflow.nodes.find((node: { actionType: string }) => node.actionType === 'asset.transfer');
   expect(transfer).toMatchObject({ actionType: 'asset.transfer', chainId: network === 'Ethereum Sepolia' ? 'eip155:11155111' : 'eip155:46630' });
-  await card.getByRole('button', { name: 'Advanced Settings', exact: true }).click();
-  const inspector = page.getByRole('region', { name: 'Action inspector', exact: true });
+  await card.getByRole('button', { name: 'Action settings', exact: true }).click();
+  const inspector = page.getByRole('dialog', { name: 'Action settings', exact: true });
   await expect(inspector.getByRole('heading', { name: 'Send settings', exact: true })).toBeVisible();
   await expect(inspector).toContainText('Recipient: your connected owner wallet');
   await expect(page.getByText('Advanced action setup', { exact: true })).toHaveCount(0);

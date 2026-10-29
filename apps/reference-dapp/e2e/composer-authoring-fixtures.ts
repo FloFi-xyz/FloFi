@@ -16,7 +16,7 @@ export async function configureCanvasAction(page: Page, amount: string) {
 
 /** Opening settings is an explicit user action, independent of node selection. */
 export async function openCanvasSettings(page: Page) {
-  await page.locator('.build-flow-surface .composer-card.active').getByRole('button', { name: 'Advanced Settings', exact: true }).click();
+  await page.locator('.build-flow-surface .composer-card.active').getByRole('button', { name: 'Action settings', exact: true }).click();
 }
 
 /** Configure a neutral Pool through the existing card Review/Apply controls. */

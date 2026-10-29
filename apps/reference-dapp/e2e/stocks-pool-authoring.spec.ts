@@ -44,7 +44,7 @@ test('floating Stocks action creates a Supply-style editable card without connec
   await expect(card.locator('.composer-token-chip .composer-amount-token')).toHaveText('AAPL');
   await expect(card.locator('.composer-destination-box, .composer-amount-actions, .composer-warning, .composer-card-state, button:disabled')).toHaveCount(0);
   expect(await card.innerText()).not.toMatch(/unsupported|non-executable|coming soon|placeholder|warning|debug|lab\b|transfer|balance|holding/i);
-  await expect(card.getByRole('button', { name: 'Advanced Settings', exact: true })).toBeEnabled();
+  await expect(card.getByRole('button', { name: 'Action settings', exact: true })).toBeEnabled();
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '0');
 });
 
@@ -65,8 +65,8 @@ test('Stocks amount, equities and settings share UI state while canonical workfl
     await picker.locator('.composer-stock-option').filter({ hasText: symbol }).click();
     await expect(card.locator('.composer-amount-token')).toHaveText(symbol);
   }
-  await card.getByRole('button', { name: 'Advanced Settings', exact: true }).click();
-  const inspector = page.getByRole('region', { name: 'Action inspector', exact: true });
+  await card.getByRole('button', { name: 'Action settings', exact: true }).click();
+  const inspector = page.getByRole('dialog', { name: 'Action settings', exact: true });
   await expect(inspector.getByRole('textbox', { name: 'Stocks amount (USDG)', exact: true })).toHaveValue('25');
   await inspector.getByRole('textbox', { name: 'Stocks amount (USDG)', exact: true }).fill('12.5');
   await expect(amount).toHaveValue('12.5');
@@ -124,8 +124,8 @@ test('both Pool contribution fields share the position form and require fresh Re
   await expect(card.getByRole('button', { name: 'Apply', exact: true })).toBeDisabled();
   await first.fill('2.5'); await second.fill('0.0002');
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '0');
-  await card.getByRole('button', { name: 'Advanced Settings', exact: true }).click();
-  const inspector = page.getByRole('region', { name: 'Action inspector', exact: true });
+  await card.getByRole('button', { name: 'Action settings', exact: true }).click();
+  const inspector = page.getByRole('dialog', { name: 'Action settings', exact: true });
   await expect(inspector.getByLabel('Maximum USDC', { exact: true })).toHaveValue('2.5');
   await expect(inspector.getByLabel('Maximum WETH', { exact: true })).toHaveValue('0.0002');
   const review = card.getByRole('button', { name: 'Review', exact: true }), apply = card.getByRole('button', { name: 'Apply', exact: true });
@@ -165,8 +165,8 @@ test('Orca Pool contribution fields use the existing Solana position review and 
   const first = card.getByRole('textbox', { name: 'First liquidity amount (SOL)', exact: true });
   const second = card.getByRole('textbox', { name: 'Second liquidity amount (devUSDC)', exact: true });
   await first.fill('0.02'); await second.fill('0.4');
-  await card.getByRole('button', { name: 'Advanced Settings', exact: true }).click();
-  const inspector = page.getByRole('region', { name: 'Action inspector', exact: true });
+  await card.getByRole('button', { name: 'Action settings', exact: true }).click();
+  const inspector = page.getByRole('dialog', { name: 'Action settings', exact: true });
   await expect(inspector.getByLabel('Maximum SOL', { exact: true })).toHaveValue('0.02');
   await expect(inspector.getByLabel('Maximum devUSDC', { exact: true })).toHaveValue('0.4');
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '1');

@@ -14,7 +14,7 @@ for (const action of ['swap', 'bridge'] as const) test(`${action} applies a vali
   const card = page.locator('.build-flow-surface .composer-card');
   const source = card.getByRole('textbox', { name: 'Source amount (USDC)', exact: true });
   const revision = page.locator('.summary-bar');
-  const settings = page.getByRole('region', { name: 'Action inspector' }).getByRole('button', { name: 'Advanced Settings', exact: true });
+  const settings = page.getByRole('dialog', { name: 'Action settings', exact: true }).getByRole('button', { name: 'Action settings', exact: true });
   const stages = page.getByRole('navigation', { name: 'Workflow stages' });
   const hint = card.locator('.composer-amount-hint');
   await expect(hint).toHaveText('Press Enter to apply');
@@ -57,7 +57,7 @@ for (const action of ['swap', 'bridge'] as const) test(`${action} applies a vali
   await expect(page.getByRole('button', { name: 'Simulate workflow', exact: true })).toBeDisabled();
   await expect(stages.getByRole('button', { name: 'Simulate', exact: true })).toBeEnabled();
   await openCanvasSettings(page);
-  await expect(page.getByRole('region', { name: 'Action inspector' }).getByLabel(action === 'swap' ? 'Input amount (USDC)' : 'Cross-chain amount (USDC)', { exact: true })).toHaveValue('3');
+  await expect(page.getByRole('dialog', { name: 'Action settings', exact: true }).getByLabel(action === 'swap' ? 'Input amount (USDC)' : 'Cross-chain amount (USDC)', { exact: true })).toHaveValue('3');
   await settings.click();
   await stages.getByRole('button', { name: 'Simulate', exact: true }).click();
   await expect(page.locator('.simulate-flow-surface .composer-amount')).toHaveText('3 USDC');
