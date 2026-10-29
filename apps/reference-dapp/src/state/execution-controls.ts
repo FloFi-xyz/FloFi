@@ -77,16 +77,26 @@ export function useExecutionControls(props: ExecutionControlsState) {
    */
   const authorizeLock = useRef<{ key: string; settled: boolean; after?: (() => void) | undefined } | null>(null);
   const [authorizing, setAuthorizing] = useState(false), [, setSettled] = useState(0);
-  function authorize(after?: () => void) {
-    if (authorizeLock.current || requestLock.current || checkLock.current || verifying || recovery?.contextIssue) return;
+  /**
+   * BUILD-FLOFI-BRIDGE-LIVE-FIX-003: why the last explicit authorization ended without any wallet request (the projected Review or execution
+   * message), so no surface reports a start that never began as a generic failure. Cleared by the next authorization.
+   */
+  const [startIssue, setStartIssue] = useState<string | null>(null);
+  /** Whether a Review acceptance or a wallet request was initiated; when nothing was, `issue` (also kept as `startIssue`) says why. */
+  function authorize(after?: () => void): { started: boolean; issue: string | null } {
+    const refuse = (issue: string) => { setStartIssue(issue); return { started: false, issue }; };
+    setStartIssue(null);
+    if (authorizeLock.current || requestLock.current || checkLock.current || verifying || recovery?.contextIssue)
+      return refuse(recovery?.contextIssue ? 'Check this workflow in Simulate before execution.' : 'Another request for this workflow is still in progress.');
     const now = Date.now(), review = projectReview(current.workflow, current.context, current.source, current.authorization, current.wallet, now, current.invalidWorkflow);
     if (review.status === 'approved') {
-      if (live?.state === 'active' && canContinueExecution(current, now)) { request(true); after?.(); }
-      else if (projectExecution(current, now).canExecute) { request(false); after?.(); }
-      return;
+      if (live?.state === 'active' && canContinueExecution(current, now)) { request(true); after?.(); return { started: true, issue: null }; }
+      const projected = projectExecution(current, now);
+      if (projected.canExecute) { request(false); after?.(); return { started: true, issue: null }; }
+      return refuse(projected.message);
     }
     const key = current.authorization.key, approve = current.authorization.approve;
-    if (!review.canApprove || !key || !approve) return;
+    if (!review.canApprove || !key || !approve) return refuse(review.message);
     const lock = { key, settled: false, after };
     authorizeLock.current = lock; setAuthorizing(true); setRequestFailed(false);
     const settle = (failed: boolean) => {
@@ -95,6 +105,7 @@ export function useExecutionControls(props: ExecutionControlsState) {
       lock.settled = true; setSettled(n => n + 1);
     };
     try { void Promise.resolve(approve()).then(() => settle(false), () => settle(true)); } catch { settle(true); }
+    return { started: true, issue: null };
   }
   useEffect(() => {
     const lock = authorizeLock.current;
@@ -104,8 +115,10 @@ export function useExecutionControls(props: ExecutionControlsState) {
     if (props.authorization.key !== lock.key) { stop(); return; }
     const now = Date.now();
     if (live?.state === 'active' && canContinueExecution(current, now)) { stop(); request(true); lock.after?.(); return; }
-    if (projectExecution(current, now).canExecute) { stop(); request(false); lock.after?.(); return; }
+    const projected = projectExecution(current, now);
+    if (projected.canExecute) { stop(); request(false); lock.after?.(); return; }
     // The Review was refused, or the accepted authority cannot start (the projected status names why): nothing is requested.
+    if (!props.source.state.error) setStartIssue(projected.message);
     stop(!props.authorization.accepted && Boolean(props.source.state.error));
   });
   useEffect(() => {
@@ -117,6 +130,6 @@ export function useExecutionControls(props: ExecutionControlsState) {
   }, [expiresAt]);
   return { live, view, current, providers, recovery, verifying, result, reconciledCount, recoveredCount, resultUnit,
     lastCheckedAt: lastCheck?.runKey === live?.runKey ? lastCheck?.checkedAt ?? null : null,
-    canContinue, canCheck, checkStatus, request, requesting, requestFailed, checkFailed, authorize, authorizing };
+    canContinue, canCheck, checkStatus, request, requesting, requestFailed, checkFailed, authorize, authorizing, startIssue };
 }
 export type ExecutionControls = ReturnType<typeof useExecutionControls>;

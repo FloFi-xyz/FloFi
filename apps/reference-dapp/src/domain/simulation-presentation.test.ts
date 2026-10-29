@@ -4,6 +4,7 @@ import { hashArtifactBytes } from '@defi-workflow-engine/workflow-contracts';
 import { createBaseSepoliaReviewContext } from '@defi-workflow-engine/reference-linter';
 import { editorReducer, initialEditor } from './editor';
 import { canvasAddCommand } from './canvas-authoring';
+import { payableCosts } from './conversation-lifecycle';
 import { projectSimulation, simulationStatusPresentation, simulationAmount, simulationPriceImpact, simulationError, type SimulationSource } from './simulation-presentation';
 const context = createBaseSepoliaReviewContext(), now = Date.parse('2026-10-06T12:00:00Z');
 const expiry = new Date(now + 120_000).toISOString();
@@ -32,10 +33,11 @@ describe('simulation financial presentation', () => {
   it('renders a real public quote, distinguishes its minimum and never uses old receipt costs as simulated fees', () => {
     const source = publicSource();
     if (source.kind !== 'public') throw Error('fixture');
-    Object.assign(source.state, { run: { ...source.state.run!, outcome: { gasCostWei: '999999999999999999' } as NonNullable<typeof source.state.run>['outcome'] } });
+    Object.assign(source.state, { run: { ...source.state.run!, quote: { ...source.state.run!.quote, fee: 500 }, outcome: { gasCostWei: '999999999999999999' } as NonNullable<typeof source.state.run>['outcome'] } });
     const result = project(source);
     expect(result.steps[0]).toMatchObject({ input: '100 USDC', result: '0.025 WETH', minimum: '0.024875 WETH', provider: 'Uniswap V3', slippage: '0.50%', priceImpact: null, resultLabel: 'Quoted output' });
-    expect(result.fees).toEqual([]);
+    // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: the pool fee is part of the quoted price (INCLUDED, never a cost on top); a receipt cost is never a simulated fee.
+    expect(result.fees).toEqual([{ label: 'Pool fee', value: '0.05%', note: 'Uniswap v3 fee tier, already reflected in the quoted output.', treatment: 'INCLUDED' }]);
     expect(result.status).toBe('attention');
     expect(result.warnings[0]?.message).toContain('pool quote');
   });
@@ -236,5 +238,52 @@ describe('UX-004D state language', () => {
       expect(simulationStatusPresentation(view)).toMatchObject({ label, tone: 'blocked' });
       expect(view.steps.every(step => step.result === null)).toBe(true);
     }
+  });
+});
+
+describe('BUILD-FLOFI-BRIDGE-LIVE-FIX-003 Bridge fee accounting (the live Arbitrum One → Base Review)', () => {
+  // The production quote: 0.5 USDC via Across; expected = minimum = 0.495897 USDC; destination delivery fee 0.004053 + relayer fee 0.00005 =
+  // route fee total 0.004103 USDC (already deducted from the output); network fee ceiling 0.00000808176 ETH. The Review once showed an
+  // "Estimated total cost" of 0.008206 USDC: the route fee total added to its own components.
+  const bridge = editorReducer(initialEditor(), { type: 'ADD_ROUTER_BRIDGE', input: { source: 'Arbitrum', destination: 'Base', token: 'USDC', amount: '0.5', recipient: '', slippage: '100', routing: 'AUTO' }, source: 'CANVAS', baseRevision: 0 }, context).workflow;
+  const usdc = { chainId: 'eip155:42161', address: '0xaf88d065e77c8cc2239327c5edb3a432268e5831', symbol: 'USDC', decimals: 6 };
+  const live = snapshot('router', { record: {
+    workflow: bridge, provenance: 'PUBLIC_MAINNET', verdict: 'PENDING', error: null, requote: false, review: {
+      workflowHash: hash(bridge), revision: bridge.revision, nodeId: bridge.nodes[0]!.nodeId, expiresAt: expiry, selection: { selected: 'across' },
+      route: { inputToken: usdc, outputToken: { ...usdc, chainId: 'eip155:8453', address: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913' }, inputAmount: '500000', underlyingProtocol: 'across', slippageBps: 100,
+        fees: [{ kind: 'BRIDGE_DESTINATION_GAS', amount: '4053', chainId: usdc.chainId, token: usdc.address }, { kind: 'BRIDGE_RELAYER_CAPITAL', amount: '50', chainId: usdc.chainId, token: usdc.address }] },
+      quote: { expectedOutput: '495897', minimumOutput: '495897', feeTotal: '4103', expiresAt: expiry }, deadlines: { depositMustLandBy: (now + 600_000) / 1000 },
+      approvals: [{ required: true }], fees: { executionFeeUpperBoundWei: '8081760000000', l1FeeUpperBoundWei: null, totalUpperBoundWei: '8081760000000' },
+    },
+  } });
+  it('classifies every fee line: components, the included route total, and the gas ceiling', () => {
+    const result = project(live, now, bridge);
+    expect(result.steps[0]).toMatchObject({ input: '0.5 USDC', result: '0.495897 USDC', minimum: '0.495897 USDC', provider: 'Across', slippage: '1.00%' });
+    expect(result.fees.map(f => [f.label, f.value, f.treatment])).toEqual([['Maximum network fee', '0.00000808176 ETH', 'CEILING'], ['Destination delivery fee', '0.004053 USDC', 'COMPONENT'],
+      ['Bridge relayer fee', '0.00005 USDC', 'COMPONENT'], ['Route fee total', '0.004103 USDC', 'INCLUDED']]);
+  });
+  it('never double counts: the route fee is already in the quoted output, the gas ceiling is not an estimate, and nothing is summed across assets', () => {
+    const costs = payableCosts(project(live, now, bridge).fees);
+    expect(costs).toEqual({ additional: [], ceilings: ['0.00000808176 ETH'], unknown: [], unclassified: 0,
+      flofiFee: { value: 'Not charged', note: expect.stringContaining('not collected on-chain'), recorded: false } });
+    expect(JSON.stringify(costs)).not.toMatch(/0\.008206|0\.004103/);
+  });
+  it('estimates add up exactly per asset while ceilings stay apart; an unclassified line is reported, never summed', () => {
+    expect(payableCosts([{ label: 'Estimated network fee', value: '0.000005 SOL', treatment: 'ADDITIONAL' }, { label: 'Account deposits', value: '0.00203928 SOL', treatment: 'ADDITIONAL' },
+      { label: 'Maximum network fee', value: '0.0001 ETH', treatment: 'CEILING' }, { label: 'Mystery', value: '1 USDC' }]))
+      .toMatchObject({ additional: ['0.00204428 SOL'], ceilings: ['0.0001 ETH'], unknown: [], unclassified: 1 });
+  });
+  it('the universal route records FloFi\'s 0.1% as an obligation (not collected on-chain), never as an additional payment', () => {
+    expect(payableCosts([{ label: 'FloFi fee (0.1% obligation)', value: '0.0005 USDC', note: 'Recorded as an obligation when the run reconciles; not collected on-chain yet.', treatment: 'OBLIGATION' },
+      { label: 'Maximum network fee', value: '0.00001 ETH', treatment: 'CEILING' }])).toMatchObject({ additional: [], ceilings: ['0.00001 ETH'], flofiFee: { value: '0.0005 USDC', recorded: true } });
+  });
+  it('names the execution-boundary refusals that used to fall through to the generic simulation text', () => {
+    for (const code of ['ROUTE_CHANGED', 'ROUTER_STATE_CHANGED_REVIEW_REQUIRED', 'ROUTER_REQUOTE_REQUIRED', 'QUOTE_CHANGED_REVIEW_REQUIRED', 'ROUTER_GAS_CHANGED_REVIEW_REQUIRED'])
+      expect(simulationError(code), code).toBe('The provider quote or the on-chain state changed after your Review, so nothing was sent. Get a fresh quote and review it again.');
+    expect(simulationError('ROUTER_ROUTE_REVALIDATION_UNAVAILABLE')).toContain('could not re-check the route');
+    expect(simulationError('ROUTER_SUBMISSION_UNKNOWN_OBSERVE_EXISTING')).toContain('never sends it again');
+    expect(simulationError('ROUTER_WALLET_HANDOFF_NOT_AUTHORIZED')).toContain('no longer authorized');
+    expect(simulationError('ROUTER_SEMANTIC_REVISION_CHANGED')).toContain('workflow or its reviewed transaction changed');
+    expect(simulationError('ROUTER_REVIEW_EXPIRED')).toBe('This result has expired. Refresh the simulation before continuing.');
   });
 });

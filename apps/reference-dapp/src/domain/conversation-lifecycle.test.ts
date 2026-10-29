@@ -101,7 +101,12 @@ describe('BUILD-FLOFI-CONVERSATIONAL-001 conversational lifecycle', () => {
     expect(review.limits.map(line => line.label)).toEqual(expect.arrayContaining(['Max spend', 'Max slippage']));
     // Nothing is estimated here: no fee line the simulation lacks is invented.
     for (const name of review.unknown) expect(review.fees.some(line => line.label.includes(name))).toBe(false);
-    expect(review.unknown).toEqual(expect.arrayContaining(['FloFi fee']));
+    // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: a pool quote has no network-fee line, so that cost is named unknown; the pool fee is included in the quote;
+    // the FloFi fee says what this route actually does (nothing charged or recorded), and nothing is summed into a total.
+    expect(review.unknown).toEqual(['Network cost']);
+    expect(review.fees.every(line => line.treatment === 'INCLUDED')).toBe(true);
+    expect(review.flofiFee).toEqual({ value: 'Not charged', note: expect.stringContaining('not collected on-chain'), recorded: false });
+    expect(review.totals).toMatchObject({ additional: [], ceilings: [], excludes: [{ text: 'Network cost', parameters: [] }] });
     // The expected output is the record's own quote (100 USDC → 0.025 WETH in the fixture); with no record there is none, never a guess.
     expect(review.steps[0]!.result).toBe('0.025 WETH'); expect(review.steps[0]!.minimum).toBe('0.024875 WETH');
     const blocked = conversationReview({ ...view(), authorization: { ...view().authorization, key: null } }, reviewNow);

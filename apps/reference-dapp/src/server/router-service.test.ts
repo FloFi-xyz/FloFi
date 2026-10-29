@@ -177,6 +177,20 @@ describe('BUILD-ROUTER-001 authorization invalidation (ROUTE_CHANGED and friends
     expect((await service.begin(run.id, ROUTER_OWNER, w)).attempt.step).toBe('APPROVAL');
     expect(h.counters.sends).toBe(0);
   });
+  it('BUILD-FLOFI-BRIDGE-LIVE-FIX-003: a relayer re-pricing of a few base units keeps the Review (reviewed bytes execute; drift recorded); a larger one does not', async () => {
+    // The production failure: the live Across quote moved by 1–3 base units between Review and Execute, and `begin` refused every such run.
+    const { service, h } = await setup(), w = workflow();
+    const run = await reviewed(service, w);
+    h.controls.feeBump = 3n;
+    const begun = await service.begin(run.id, ROUTER_OWNER, w);
+    expect(begun.attempt.tx.data).toBe(run.review.calls.find(c => c.purpose === 'APPROVAL')!.data);
+    expect(begun.attempt.note).toMatch(/^ROUTER_PROVIDER_FEE_DRIFT_TOLERATED:3:3:[0-9]+$/);
+    expect((await service.load(run.id))).toMatchObject({ phase: 'AUTHORIZED', requote: false, error: null });
+    const other = await setup(), again = await reviewed(other.service, w);
+    other.h.controls.feeBump = BigInt(again.review.route.feeTotal) / 100n + 1n;
+    await expect(other.service.begin(again.id, ROUTER_OWNER, w)).rejects.toThrow('ROUTE_CHANGED');
+    expect(h.counters.sends + other.h.counters.sends).toBe(0);
+  });
   it('public provider fallback after Review is never used: LI.FI now routing via another bridge is ROUTE_CHANGED, not a silent switch', async () => {
     const { service, h } = await setup(), w = workflow();
     const run = await reviewed(service, w);

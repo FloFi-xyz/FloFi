@@ -80,7 +80,11 @@ export function executionExplorer(chain: string, hash: string, local = false): s
   }
   return null;
 }
-export type LifecycleOperation = { id: string; nodeId: string; title: string; state: LifecycleState; label: string; hash: string | null; chain: string; explorer: string | null; fee: string | null; approval: boolean; intent: boolean };
+/**
+ * BUILD-FLOFI-BRIDGE-LIVE-FIX-003: `wallet` — whether the operation is a request the owner's wallet signs (an approval, deposit, swap, wrap or
+ * signed intent). A bridge's destination settlement is provider-side execution FloFi only observes and reconciles: never a wallet request.
+ */
+export type LifecycleOperation = { id: string; nodeId: string; title: string; state: LifecycleState; label: string; hash: string | null; chain: string; explorer: string | null; fee: string | null; approval: boolean; intent: boolean; wallet: boolean };
 export type LifecycleStep = { id: string; number: number; action: string; input: string; pair: string | null; network: string; provider: string | null; tokens: string[]; state: LifecycleState; label: string; operations: LifecycleOperation[] };
 export type ExecutionLifecycle = { started: boolean; restored: boolean; local: boolean; matchesWorkflow?: boolean; planUnavailable?: boolean; stepEvidence?: Record<string, ExecutionStepEvidence>; evidence?: ExecutionEvidence; steps: LifecycleStep[]; active: LifecycleStep | null; completed: number; label: string; message: string; state: 'idle' | 'active' | 'complete' | 'attention' | 'uncertain'; runKey: string | null; fingerprint: string; busy: boolean };
 
@@ -97,7 +101,7 @@ export function projectExecutionLifecycle(currentWorkflow: Workflow, context: Re
   const add = (id: string, nodeId: string, title: string, chain: string, raw: string | null, hash: string | null = null, verified = false, approval = false, fee: string | null = null, intent = false) => {
     const status = intent ? intentLifecycle(raw ?? 'REVIEWED') : transactionLifecycle(raw, hash, Boolean(signing), verified);
     const label = intent && raw === 'EXPIRED' ? 'Order expired' : intent && raw === 'CANCEL_REQUESTED' ? 'Cancellation requested' : intent && raw === 'POSTING' ? 'Posting order' : intent && status === 'confirmed' ? 'Settled' : status === 'failed' && raw === 'REJECTED' ? 'Wallet request declined' : labels[status];
-    operations.push({ id, nodeId, title, chain, state: status, label, hash, explorer: hash ? executionExplorer(chain, hash, local) : null, fee, approval, intent });
+    operations.push({ id, nodeId, title, chain, state: status, label, hash, explorer: hash ? executionExplorer(chain, hash, local) : null, fee, approval, intent, wallet: id !== 'destination' });
   };
   switch (source.kind) {
     case 'supply': {

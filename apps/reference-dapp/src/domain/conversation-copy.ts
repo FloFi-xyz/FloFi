@@ -27,6 +27,10 @@ export type ConversationCopy = {
   readonly editApplied: string; readonly editDiscarded: string; readonly editRefused: (reason: string) => string; readonly editQuestion: string;
   readonly switchNetworkFor: (wallet: string | null, network: string) => string; readonly switchFailed: (reason: string) => string; readonly switched: (network: string) => string;
   readonly checkingProviders: string;
+  // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: honest start wording, provider-side settlement, start refusals and quote-change recovery.
+  readonly approvalIfNeeded: string; readonly providerSettles: (steps: string) => string; readonly executionNotStarted: (reason: string) => string;
+  readonly quoteMoved: (reason: string) => string; readonly quoteChanges: (changes: string) => string; readonly quoteUnchanged: string;
+  readonly confirmUpdated: string; readonly anotherRoute: string; readonly refreshing: string;
 };
 const en: ConversationCopy = {
   added: (action, detail) => `${action} added to your workflow: ${detail}.`,
@@ -49,7 +53,7 @@ const en: ConversationCopy = {
   executeQuestion: 'Would you like to execute this workflow now?', executeYes: 'Yes, execute', executeNo: 'Not now',
   walletRequests: requests => `Your wallet will ask you to confirm each request separately: ${requests}.`,
   walletRequestsUnknown: 'Your wallet shows each request before you confirm it; FloFi never signs for you.',
-  executing: 'Opening the reviewed wallet request. Confirm or reject it in your wallet; FloFi never signs for you.',
+  executing: 'Preparing your reviewed wallet request: FloFi re-checks the quote, your wallet and its network first. Then confirm or reject it in your wallet; FloFi never signs for you.',
   continueQuestion: 'The previous wallet request is confirmed. The next reviewed request needs its own confirmation in your wallet. Continue to your wallet?',
   continueYes: 'Continue',
   declined: 'Okay. Nothing was signed or sent. Say “review workflow” when you are ready.',
@@ -67,7 +71,7 @@ const en: ConversationCopy = {
   restored: 'FloFi restored this workflow’s execution from its saved record. The status below comes from that record; nothing is resent.',
   statusChecking: 'Checking the recorded execution. No transaction is resent.',
   statusUnavailable: 'There is no execution to check right now.',
-  executionStartFailed: 'The wallet request could not start, and nothing was sent. The status below shows the recorded state.',
+  executionStartFailed: 'The wallet request could not start, and nothing was sent.',
   checkStatus: 'Check status',
   destructive: steps => `This change would also remove ${steps}. Review it on the Canvas before applying; nothing changed yet.`,
   busy: 'FloFi is still working on the previous step. Wait for it to finish.',
@@ -94,6 +98,15 @@ const en: ConversationCopy = {
   switchFailed: reason => `The network switch did not complete: ${reason} Nothing was simulated or sent.`,
   switched: network => `Your wallet is now on ${network}. Continuing the review.`,
   checkingProviders: 'Checking which providers serve this workflow on this deployment. I will continue the review as soon as they answer.',
+  approvalIfNeeded: 'A token approval is requested only if your current allowance is still too low when you execute.',
+  providerSettles: steps => `Then the provider completes ${steps} on its own: FloFi observes and reconciles it, and your wallet signs nothing for it.`,
+  executionNotStarted: reason => `Nothing was sent and no wallet request was opened. ${reason}`,
+  quoteMoved: reason => `Nothing was sent. ${reason} I am getting a fresh quote now; you review and confirm it again before anything is signed.`,
+  quoteChanges: changes => `The quote changed since your last Review: ${changes}.`,
+  quoteUnchanged: 'The fresh quote has the same amounts as your last Review.',
+  confirmUpdated: 'Do you confirm the updated workflow?',
+  anotherRoute: 'FloFi asks the provider policy configured on this action again (the Bridge card\'s routing). To force a single provider, change the routing on the card; FloFi never switches providers by itself.',
+  refreshing: 'Getting a fresh quote and simulation. Nothing is signed or sent.',
 };
 const pt: ConversationCopy = {
   added: (action, detail) => `Adicionado ao seu workflow: ${action} · ${detail}.`,
@@ -116,7 +129,7 @@ const pt: ConversationCopy = {
   executeQuestion: 'Quer executar este workflow agora?', executeYes: 'Sim, executar', executeNo: 'Agora não',
   walletRequests: requests => `A sua carteira vai pedir a confirmação de cada pedido separadamente: ${requests}.`,
   walletRequestsUnknown: 'A sua carteira mostra cada pedido antes de você confirmar; a FloFi nunca assina por você.',
-  executing: 'Abrindo o pedido revisado na carteira. Confirme ou rejeite na sua carteira; a FloFi nunca assina por você.',
+  executing: 'Preparando o seu pedido revisado na carteira: a FloFi confere de novo a cotação, a carteira e a rede. Depois confirme ou rejeite na sua carteira; a FloFi nunca assina por você.',
   continueQuestion: 'O pedido anterior na carteira está confirmado. O próximo pedido revisado precisa da sua própria confirmação na carteira. Continuar para a carteira?',
   continueYes: 'Continuar',
   declined: 'Certo. Nada foi assinado nem enviado. Diga “revisar workflow” quando quiser.',
@@ -134,7 +147,7 @@ const pt: ConversationCopy = {
   restored: 'A FloFi restaurou a execução deste workflow a partir do registro salvo. O estado abaixo vem desse registro; nada é reenviado.',
   statusChecking: 'Verificando a execução registrada. Nenhuma transação é reenviada.',
   statusUnavailable: 'Não há execução para verificar agora.',
-  executionStartFailed: 'Não foi possível iniciar o pedido na carteira e nada foi enviado. O estado abaixo mostra o registro.',
+  executionStartFailed: 'Não foi possível iniciar o pedido na carteira e nada foi enviado.',
   checkStatus: 'Verificar status',
   destructive: steps => `Esta alteração também removeria ${steps}. Revise-a no Canvas antes de aplicar; nada mudou ainda.`,
   busy: 'A FloFi ainda está a tratar do passo anterior. Aguarde terminar.',
@@ -161,5 +174,14 @@ const pt: ConversationCopy = {
   switchFailed: reason => `A troca de rede não foi concluída: ${reason} Nada foi simulado nem enviado.`,
   switched: network => `A sua carteira agora está em ${network}. Continuando a revisão.`,
   checkingProviders: 'Verificando quais provedores atendem este workflow nesta implantação. Continuo a revisão assim que responderem.',
+  approvalIfNeeded: 'Uma aprovação de token só é pedida se a sua permissão atual ainda for insuficiente no momento da execução.',
+  providerSettles: steps => `Depois, o provedor conclui ${steps} por conta própria: a FloFi observa e reconcilia, e a sua carteira não assina nada para isso.`,
+  executionNotStarted: reason => `Nada foi enviado e nenhum pedido foi aberto na carteira. ${reason}`,
+  quoteMoved: reason => `Nada foi enviado. ${reason} Estou buscando uma nova cotação agora; você revisa e confirma de novo antes de qualquer assinatura.`,
+  quoteChanges: changes => `A cotação mudou desde a sua última revisão: ${changes}.`,
+  quoteUnchanged: 'A nova cotação tem os mesmos valores da sua última revisão.',
+  confirmUpdated: 'Você confirma o workflow atualizado?',
+  anotherRoute: 'A FloFi consulta de novo a política de provedores configurada nesta ação (o roteamento do card de Bridge). Para forçar um único provedor, altere o roteamento no card; a FloFi nunca troca de provedor sozinha.',
+  refreshing: 'Buscando uma nova cotação e simulação. Nada é assinado nem enviado.',
 };
 export const conversationCopy = (language: ConversationLanguage): ConversationCopy => language === 'PT' ? pt : en;

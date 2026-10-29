@@ -88,6 +88,16 @@ describe('Authorize in wallet', () => {
     props.authorization.approve = vi.fn(async () => { props.authorization = { ...props.authorization, accepted: true }; });
     read().authorize(); await flush(); props = { ...props }; read();
     expect(props.execution.start).not.toHaveBeenCalled(); expect(read().authorizing).toBe(false); expect(read().requestFailed).toBe(false);
+    // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: the start that never began says why (the projected execution message), never a silent end.
+    expect(read().startIssue).toBe('Execution cannot begin with the current wallet or execution state. Check this workflow in Simulate.');
+  });
+  it('BUILD-FLOFI-BRIDGE-LIVE-FIX-003: reports at once whether anything was initiated, and why not', () => {
+    props.authorization.approve = vi.fn();
+    const controls = read(); vi.setSystemTime(reviewNow + 120001);
+    expect(controls.authorize()).toEqual({ started: false, issue: expect.stringMatching(/expired|Simulate/i) });
+    vi.setSystemTime(reviewNow);
+    props.authorization.accepted = true; props = { ...props };
+    expect(read().authorize()).toEqual({ started: true, issue: null });
   });
   it('rechecks freshness at the click and approves nothing after expiry', () => {
     props.authorization.approve = vi.fn();
