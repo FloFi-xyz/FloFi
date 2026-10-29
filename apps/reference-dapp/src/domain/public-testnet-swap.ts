@@ -109,3 +109,15 @@ export function ownerWalletSwapServes(node: { readonly actionType: string; reado
   if (!profile) return false;
   return profile.kind !== 'CATALOG' || !profile.referencePair || isCatalogSwapNode(node) || referenceServed;
 }
+
+/**
+ * BUILD-FLOFI-BRIDGE-LIVE-FIX-003: whether the transaction the server prepared is the reviewed wallet request, before the wallet is asked: on the
+ * reviewed chain, from the owner, carrying exactly the reviewed native value (the amount in of a native-ETH swap or a wrap; nothing otherwise),
+ * to the reviewed target (the input token for its approval, WETH9 for a wrap/unwrap, the router for a swap). Calldata is compared by digest.
+ */
+export function swapWalletRequestMatches(quote: { readonly amountIn: string; readonly inputToken: string; readonly native?: 'INPUT' | 'OUTPUT'; readonly conversion?: 'WRAP' | 'UNWRAP' },
+  step: 'approval' | 'swap', tx: { readonly chainId: string; readonly from: string; readonly to: string; readonly value: string }, profile: SwapProfile, owner: string): boolean {
+  const value = step === 'swap' && (quote.native === 'INPUT' || quote.conversion === 'WRAP') ? '0x' + BigInt(quote.amountIn).toString(16) : '0x0';
+  const target = step === 'approval' ? quote.inputToken : quote.conversion ? profile.kind === 'CATALOG' ? profile.weth : null : profile.router;
+  return tx.chainId === profile.chainHex && tx.from === owner && tx.value === value && target !== null && tx.to === target;
+}

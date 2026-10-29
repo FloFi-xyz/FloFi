@@ -49,4 +49,12 @@ export const portugueseBridgeLiveFix: Readonly<Record<string, string>> = {
   'You receive native ETH: in the same transaction the router unwraps WETH9 and pays you at least the minimum. The network fee is paid separately.':
     'Você recebe ETH nativo: na mesma transação o roteador faz o unwrap do WETH9 e paga a você pelo menos o mínimo. A taxa de rede é paga à parte.',
   'WETH9': 'WETH9',
+  // The FloFi Assistant.
+  'FloFi Assistant': 'FloFi Assistant',
+  'Hi FloFier! Describe an action in your own words, change a step, or ask about this workflow. Then simulate, review, and execute with your wallet.':
+    'Olá, FloFier! Descreva uma ação com suas palavras, altere uma etapa ou tire dúvidas sobre seu workflow. Depois simule, revise e execute com sua carteira.',
+  'Hi FloFier! Describe an action in your own words, change a step, or ask about this workflow. Then simulate, review, and execute with your wallet. Replay mode: recorded answers, no AI model.':
+    'Olá, FloFier! Descreva uma ação com suas palavras, altere uma etapa ou tire dúvidas sobre seu workflow. Depois simule, revise e execute com sua carteira. Modo replay: respostas gravadas, sem modelo de IA.',
+  'Hi FloFier! Describe an action as an exact command, for example “swap 0.001 ETH to USDC on Base”. Then simulate, review, and execute with your wallet.':
+    'Olá, FloFier! Descreva uma ação como um comando exato, por exemplo “swap 0.001 ETH to USDC on Base”. Depois simule, revise e execute com sua carteira.',
 };

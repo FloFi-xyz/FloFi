@@ -94,10 +94,11 @@ test('chat swap → card at once → Review in chat → workflow confirmation �
   await chatReview(page);
   // The chat's Review shows the simulation's own values, the same the Simulate stage presents; nothing is invented.
   const review = flofi(page).getByRole('region', { name: 'Workflow review', exact: true });
-  await expect(review).toContainText('1 USDC'); await expect(review).toContainText('Quoted output'); await expect(review).toContainText('Minimum received');
+  await expect(review).toContainText('1 USDC'); await expect(review).toContainText('Quoted output'); await expect(review).toContainText('Minimum receipt');
   await expect(review).toContainText('Max slippage'); await expect(review).toContainText('Estimates from this simulation, not executed results.');
   await expect(review.locator('[data-unknown] dd').first()).toHaveText('Not provided by this simulation');
-  const quoted = (await review.locator('dt', { hasText: 'Quoted output' }).locator('xpath=following-sibling::dd').innerText()).trim();
+  // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: the compact Review names it "Expected receipt" (the quote kind is the small note under the value).
+  const quoted = (await review.locator('dt', { hasText: 'Expected receipt' }).first().locator('xpath=following-sibling::dd').evaluate(dd => dd.firstChild?.textContent ?? '')).trim();
   expect(quoted).toMatch(/^\d+(\.\d+)? WETH$/);
   await stage(page, 'Simulate').click();
   await expect(page.locator('.simulation-summary')).toContainText(quoted.split(' ')[0]!);
@@ -116,7 +117,7 @@ test('chat swap → card at once → Review in chat → workflow confirmation �
   await pick(page, 'Yes, execute');
   // The existing Authorize-in-wallet control: Review acceptance and exactly the first wallet request.
   await expect.poll(owner.requested).toBe(1);
-  await expect(chat(page)).toContainText('Confirm or reject it in your wallet; FloFi never signs for you.');
+  await expect(chat(page)).toContainText('Preparing your reviewed wallet request: FloFi re-checks the quote, your wallet and its network first. Then confirm or reject it in your wallet; FloFi never signs for you.');
   await expect(page.locator('.copilot')).toHaveAttribute('data-conversation-phase', 'AWAITING_WALLET');
   await owner.confirm();
   // The approval is confirmed; the swap is a separate wallet request, asked for separately.

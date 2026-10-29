@@ -5,7 +5,7 @@ import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts'
 import { catalogSwapAvailability, publicAvailability, publicBegin, publicObserve, publicPrepare, publicRefresh, publicReport, publicReview, publicStatus } from '../app/public-testnet-action';
 import { CATALOG_NETWORK_IDENTITIES } from '../domain/network-registry';
 import type { PublicRun } from '../server/public-testnet-service';
-import { ownerBoundSwapReview, swapProfile } from '../domain/public-testnet-swap';
+import { swapWalletRequestMatches, ownerBoundSwapReview, swapProfile } from '../domain/public-testnet-swap';
 import { injected, useBuild009Wallet } from './build009-wallet-store';
 import { useWorkflow } from './workflow-store';
 import { watchWalletResponse } from './wallet-request-lifecycle';
@@ -193,12 +193,8 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
     const acceptCurrent = (value: PublicRun) => setRun(current => current?.quote.executionId === run.quote.executionId ? value : current);
     const clearSigning = () => setSigningAttempt(current => current === attempt.attemptId ? null : current);
     setRun(unwrap(await publicStatus(run.quote.executionId)));
-    // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: the wallet request carries exactly the reviewed native value (the amount in of a native-ETH swap or a wrap,
-    // else nothing) to the reviewed target (WETH9 for a wrap or unwrap, the router for a swap, the token for its approval).
-    const q = run.quote, nativeValue = attempt.step === 'swap' && (q.native === 'INPUT' || q.conversion === 'WRAP') ? '0x' + BigInt(q.amountIn).toString(16) : '0x0';
-    const target = attempt.step === 'approval' ? q.inputToken : q.conversion && 'weth' in profile ? profile.weth : profile.router;
-    if (tx.chainId !== profile.chainHex || tx.from !== session.account || tx.value !== nativeValue || tx.to !== target ||
-        await calldataDigest(tx.data) !== attempt.calldataDigest) {
+    // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: the wallet request carries exactly the reviewed native value to the reviewed target (see swapWalletRequestMatches).
+    if (!swapWalletRequestMatches(run.quote, attempt.step, tx, profile, session.account) || await calldataDigest(tx.data) !== attempt.calldataDigest) {
       unwrap(await publicReport(run.quote.executionId, attempt.attemptId, { kind: 'UNKNOWN' }));
       throw new Error('TRANSACTION_ARTIFACT_CHANGED');
     }

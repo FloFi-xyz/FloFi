@@ -18,7 +18,7 @@ const revision = (page: Page) => page.locator('.summary-bar');
 const actionsCount = (page: Page) => page.locator('.build-canvas-head .revision');
 async function open(page: Page) {
   await replayProviderLogos(page); await installPassiveWallet(page, '0xa4b1'); await page.goto('/app');
-  await expect(conversation(page)).toContainText('Flofi Copilot ready in replay mode');
+  await expect(conversation(page)).toContainText('Hi FloFier!');
 }
 async function say(page: Page, text: string) {
   await page.locator('#mock-prompt').fill(text); await page.getByRole('button', { name: 'Send', exact: true }).click();
@@ -112,7 +112,7 @@ test.describe('UX-001 / UX-005 Send card and destination', () => {
     await expect(cards(page).first().getByRole('textbox', { name: 'To', exact: true })).toHaveValue(MIXED.toLowerCase());
     await expectCanonicalSend(page, MIXED.toLowerCase());
 
-    await page.goto('/app'); await expect(conversation(page)).toContainText('Flofi Copilot ready in replay mode');
+    await page.goto('/app'); await expect(conversation(page)).toContainText('Hi FloFier!');
     const recipient = '0x3333333333333333333333333333333333333333';
     await say(page, 'Please Send 5 USDC on Arbitrum to ' + recipient);
     await expect(answer()).toContainText('Interpreted as'); await expect(answer()).toContainText(CHAT_COMMITTED);

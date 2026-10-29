@@ -81,7 +81,7 @@ test('Settings toggles without layout changes, closes outside/Escape/Tab and lea
     await expect(page.locator('.flow-card.active')).toHaveCount(1);
     await settings.press('Enter');
     await expect(options).toBeVisible();
-    await page.getByRole('heading', { name: 'Copilot', exact: true }).click();
+    await page.getByRole('heading', { name: 'FloFi Assistant', exact: true }).click();
     await expect(options).toHaveCount(0);
     await settings.click();
     await settings.press('Tab');

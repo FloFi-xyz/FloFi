@@ -1,0 +1,217 @@
+{
+  "build": "BUILD-FLOFI-BRIDGE-LIVE-FIX-003",
+  "kind": "native-eth-read-only-verification",
+  "verifiedAt": "2026-10-29T19:02:14.652Z",
+  "subject": "0x00000000000000000000000000000000f10f1003",
+  "note": "eth_call simulations with state overrides on a synthetic codeless account; nothing was signed or sent.",
+  "results": [
+    {
+      "network": "base",
+      "chainId": 8453,
+      "evidence": "PUBLIC_READ_ONLY",
+      "rpc": "mainnet.base.org",
+      "router": "0x2626664c2603336e57b271c5c0b26f421741e481",
+      "weth": "0x4200000000000000000000000000000000000006",
+      "token": {
+        "symbol": "USDC",
+        "address": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913"
+      },
+      "checks": {
+        "routerWeth9": true,
+        "routerFactory": true,
+        "routerMulticallDeadline": true,
+        "routerExactInputSingle": true,
+        "routerUnwrapWeth9": true,
+        "wethDecimals18": true,
+        "wethDispatchesDepositWithdraw": true
+      },
+      "simulations": {
+        "nativeIn": {
+          "ok": true,
+          "amountIn": "1000000000000000",
+          "fee": 100,
+          "quoted": "2327086",
+          "minimum": "2303815",
+          "returned": "2327086"
+        },
+        "nativeOut": {
+          "ok": true,
+          "amountIn": "5000000",
+          "fee": 100,
+          "quoted": "2148175891949485",
+          "minimum": "2126694133029990",
+          "recipientIntermediate": "0x0000000000000000000000000000000000000002"
+        },
+        "wrap": {
+          "ok": true,
+          "amount": "10000000000000000"
+        },
+        "unwrap": {
+          "ok": true,
+          "amount": "10000000000000000"
+        }
+      },
+      "block": {
+        "number": 53255578,
+        "hash": "0x96bc1a763de74a0385b776db1c200cfa837a027ee4feba0fae40c78f8bcf7941",
+        "timestamp": 1793300503
+      }
+    },
+    {
+      "network": "arbitrum-one",
+      "chainId": 42161,
+      "evidence": "PUBLIC_READ_ONLY",
+      "rpc": "arb1.arbitrum.io",
+      "router": "0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45",
+      "weth": "0x82af49447d8a07e3bd95bd0d56f35241523fbab1",
+      "token": {
+        "symbol": "USDC",
+        "address": "0xaf88d065e77c8cc2239327c5edb3a432268e5831"
+      },
+      "checks": {
+        "routerWeth9": true,
+        "routerFactory": true,
+        "routerMulticallDeadline": true,
+        "routerExactInputSingle": true,
+        "routerUnwrapWeth9": true,
+        "wethDecimals18": true,
+        "wethDispatchesDepositWithdraw": false
+      },
+      "simulations": {
+        "nativeIn": {
+          "ok": true,
+          "amountIn": "1000000000000000",
+          "fee": 100,
+          "quoted": "2327080",
+          "minimum": "2303809",
+          "returned": "2327080"
+        },
+        "nativeOut": {
+          "ok": true,
+          "amountIn": "5000000",
+          "fee": 100,
+          "quoted": "2148131083589083",
+          "minimum": "2126649772753192",
+          "recipientIntermediate": "0x0000000000000000000000000000000000000002"
+        },
+        "wrap": {
+          "ok": true,
+          "amount": "10000000000000000"
+        },
+        "unwrap": {
+          "ok": true,
+          "amount": "10000000000000000"
+        }
+      },
+      "block": {
+        "number": 519443933,
+        "hash": "0x83c557072c4f030660e00dce269fc34f3b61b4d3dd6e59026c6c395db048addd",
+        "timestamp": 1793300507
+      }
+    },
+    {
+      "network": "ethereum",
+      "chainId": 1,
+      "evidence": "PUBLIC_READ_ONLY",
+      "rpc": "ethereum-rpc.publicnode.com",
+      "router": "0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45",
+      "weth": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+      "token": {
+        "symbol": "USDC",
+        "address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+      },
+      "checks": {
+        "routerWeth9": true,
+        "routerFactory": true,
+        "routerMulticallDeadline": true,
+        "routerExactInputSingle": true,
+        "routerUnwrapWeth9": true,
+        "wethDecimals18": true,
+        "wethDispatchesDepositWithdraw": true
+      },
+      "simulations": {
+        "nativeIn": {
+          "ok": true,
+          "amountIn": "1000000000000000",
+          "fee": 100,
+          "quoted": "2327265",
+          "minimum": "2303992",
+          "returned": "2327265"
+        },
+        "nativeOut": {
+          "ok": true,
+          "amountIn": "5000000",
+          "fee": 100,
+          "quoted": "2148013743077221",
+          "minimum": "2126533605646448",
+          "recipientIntermediate": "0x0000000000000000000000000000000000000002"
+        },
+        "wrap": {
+          "ok": true,
+          "amount": "10000000000000000"
+        },
+        "unwrap": {
+          "ok": true,
+          "amount": "10000000000000000"
+        }
+      },
+      "block": {
+        "number": 26300360,
+        "hash": "0xce747fe64c56232befab9b5d1ff4281edd212e3f9cc165971714da24b0fb9f99",
+        "timestamp": 1793300519
+      }
+    },
+    {
+      "network": "robinhood",
+      "chainId": 4663,
+      "evidence": "PUBLIC_READ_ONLY",
+      "rpc": "rpc.mainnet.chain.robinhood.com",
+      "router": "0xcaf681a66d020601342297493863e78c959e5cb2",
+      "weth": "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+      "token": {
+        "symbol": "USDG",
+        "address": "0x5fc5360d0400a0fd4f2af552add042d716f1d168"
+      },
+      "checks": {
+        "routerWeth9": true,
+        "routerFactory": true,
+        "routerMulticallDeadline": true,
+        "routerExactInputSingle": true,
+        "routerUnwrapWeth9": true,
+        "wethDecimals18": true,
+        "wethDispatchesDepositWithdraw": false
+      },
+      "simulations": {
+        "nativeIn": {
+          "ok": true,
+          "amountIn": "1000000000000000",
+          "fee": 100,
+          "quoted": "2326626",
+          "minimum": "2303359",
+          "returned": "2326626"
+        },
+        "nativeOut": {
+          "ok": true,
+          "amountIn": "5000000",
+          "fee": 100,
+          "quoted": "2148604714320915",
+          "minimum": "2127118667177705",
+          "recipientIntermediate": "0x0000000000000000000000000000000000000002"
+        },
+        "wrap": {
+          "ok": true,
+          "amount": "10000000000000000"
+        },
+        "unwrap": {
+          "ok": true,
+          "amount": "10000000000000000"
+        }
+      },
+      "block": {
+        "number": 101130482,
+        "hash": "0xdf753cc805b497262a2ed9fea3232d96616c4ac4cdea47118dbd8f5ec167f562",
+        "timestamp": 1793300523
+      }
+    }
+  ]
+}

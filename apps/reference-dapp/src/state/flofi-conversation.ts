@@ -14,6 +14,7 @@ import { useWorkflow } from './workflow-store';
 import { completeSendDestination, sendDestinationIssue, SEND_DESTINATION_INVALID, SEND_DESTINATION_QUESTION } from '../domain/send-destination';
 import { useBuild009Wallet } from './build009-wallet-store';
 import { copilotHelp, useCopilotInterpreter } from '../components/copilot-ai';
+import { FLOFI_WELCOME_COMMANDS } from '../domain/assistant-welcome';
 import { copilotRejection } from '../domain/copilot-authoring';
 import { composerActions } from '../domain/composer-presentation';
 import { projectCanvasAction } from '../domain/canvas-lifecycle';
@@ -79,7 +80,8 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
   const { state, context, propose, dismissProposal, commitChatCommand, undoChatCommit } = workflow;
   const wallet = useBuild009Wallet();
   const copilot = useCopilotInterpreter({ direct });
-  const intro = (): ChatMessage => ({ id: 0, role: 'system', text: direct ? 'Describe an action to add it to your workflow. Funds move only after you review, confirm and sign in your wallet.' : 'Review each proposed change before applying it.' });
+  // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: the FloFi Assistant's short welcome (the panel shows the Copilot mode's own variant when one is configured).
+  const intro = (): ChatMessage => ({ id: 0, role: 'system', text: direct ? FLOFI_WELCOME_COMMANDS : 'Review each proposed change before applying it.' });
   const [messages, setMessages] = useState<ChatMessage[]>(() => [intro()]);
   const [input, setInput] = useState('');
   const [automation, setAutomation] = useState<AutomationInput | null>(null);

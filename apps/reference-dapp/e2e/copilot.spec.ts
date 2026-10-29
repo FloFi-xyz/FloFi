@@ -29,7 +29,7 @@ test.beforeEach(async () => { await resetSupplyHarness(); });
 test('natural language → validated command committed at once → canonical workflow → Simulate and Review, with no wallet send', async ({ page }) => {
   await installSupplyWallet(page);
   await page.goto('/app');
-  await expect(conversation(page)).toContainText('Flofi Copilot ready in replay mode (recorded answers, no AI model)');
+  await expect(conversation(page)).toContainText('Replay mode: recorded answers, no AI model.');
   await expect(page.getByLabel('Describe your flow')).toBeVisible();
   await ask(page, 'Put 1 USDC into Aave on Base Sepolia');
   await expect(copilotSays(page)).toContainText('Supply added to your workflow: 1 USDC · Base Sepolia · Aave V3.');
