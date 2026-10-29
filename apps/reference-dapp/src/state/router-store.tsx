@@ -38,7 +38,8 @@ const RESUME: readonly RouterNetwork[] = ['testnet', ...NETWORKS.filter(n => n !
 const REFUSALS = [4001, 4100, 4200];
 const ACTIVE = ['PREPARED', 'SUBMITTING', 'SUBMISSION_RESULT_UNKNOWN', 'PENDING'];
 type Pointer = { id: string; attemptId?: string; owner?: string; hash?: string };
-type Store = { network: RouterNetwork; available: boolean; availability: Readonly<Record<RouterNetwork, boolean>>; executionEnabled: boolean; record: RouterRecord | null;
+type Store = { network: RouterNetwork; available: boolean; availability: Readonly<Record<RouterNetwork, boolean>>;
+  /** BUILD-FLOFI-CHAT-E2E-FIX-002: false until every network's availability answered. */ availabilityKnown: boolean; executionEnabled: boolean; record: RouterRecord | null;
   busy: boolean; signing: boolean; error: string | null; retired: boolean; recovered: boolean; session: WalletSession | null; sessionReady: boolean;
   runs: readonly RouterRunSummary[]; notice: string | null;
   simulate(): Promise<void>; refresh(): Promise<void>; review(): Promise<void>; execute(): Promise<void>; observe(): Promise<void>; switchNetwork(): Promise<void>;
@@ -73,6 +74,7 @@ export function RouterProvider({ children }: { children: ReactNode }) {
   const [record, setRecord] = useState<RouterRecord | null>(null), [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null);
   const [signing, setSigning] = useState(false), [executionEnabled, setExecutionEnabled] = useState(false);
   const [availability, setAvailability] = useState<Record<RouterNetwork, boolean>>(() => Object.fromEntries(NETWORKS.map(n => [n, false])) as Record<RouterNetwork, boolean>);
+  const [availabilityKnown, setAvailabilityKnown] = useState(false);
   const [recovered, setRecovered] = useState(false), [session, setSession] = useState<WalletSession | null>(null), [sessionReady, setSessionReady] = useState(false);
   const [runs, setRuns] = useState<readonly RouterRunSummary[]>([]), [notice, setNotice] = useState<string | null>(null);
   const workflow = runtimeWorkflow as unknown as SemanticWorkflow;
@@ -141,8 +143,8 @@ export function RouterProvider({ children }: { children: ReactNode }) {
   }
   useEffect(() => {
     let mounted = true;
-    for (const net of NETWORKS)
-      crossChainRouterMode(net).then(mode => { if (mounted) setAvailability(value => ({ ...value, [net]: mode !== 'off' })); }).catch(() => undefined);
+    void Promise.allSettled(NETWORKS.map(net =>
+      crossChainRouterMode(net).then(mode => { if (mounted) setAvailability(value => ({ ...value, [net]: mode !== 'off' })); }))).then(() => { if (mounted) setAvailabilityKnown(true); });
     walletSessionStatus().then(async current => {
       if (!mounted) return;
       setSessionReady(true);
@@ -308,7 +310,7 @@ export function RouterProvider({ children }: { children: ReactNode }) {
     }
     void refreshRuns(net);
   }); }
-  return <Context.Provider value={{ network, available, availability, executionEnabled, record, busy, signing, error, retired, recovered, session, sessionReady, runs, notice,
+  return <Context.Provider value={{ network, available, availability, availabilityKnown, executionEnabled, record, busy, signing, error, retired, recovered, session, sessionReady, runs, notice,
     simulate, refresh, review, execute, observe, switchNetwork, signIn, signOut, open, loadRuns }}>
     {signing && <p role="status">{tr('Open your wallet to approve or reject. You can navigate and check status while waiting.')}</p>}
     <div data-router-wallet-pending={signing ? 'true' : undefined}>{children}</div></Context.Provider>;

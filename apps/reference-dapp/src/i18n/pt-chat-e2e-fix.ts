@@ -16,6 +16,8 @@ export const portugueseChatE2eFix: Readonly<Record<string, string>> = {
     'A etapa {0} ({1} em {2}) ainda não pode ser executada dentro de um workflow com várias ações: a FloFi executa esta ação apenas como um workflow próprio. Nada foi simulado nem enviado.',
   'Step {0} has nothing to spend: step {1} delivered none of its asset.': 'A etapa {0} não tem nada para gastar: a etapa {1} não entregou nenhuma quantidade do ativo.',
   'Step {0} cannot spend the amount step {1} delivered: the step refuses that amount.': 'A etapa {0} não pode gastar o montante que a etapa {1} entregou: a etapa recusa esse montante.',
+  'Step {0} ({1} on {2}) cannot run on this deployment: its provider is not available here. Nothing was simulated or sent.':
+    'A etapa {0} ({1} em {2}) não pode ser executada nesta implantação: o provedor não está disponível aqui. Nada foi simulado nem enviado.',
   'This edit is no longer pending.': 'Esta edição já não está pendente.',
   'Not requested': 'Não solicitado',
   'Simulated or reviewed only: no wallet request was made, so nothing was sent.': 'Apenas simulado ou revisado: nenhum pedido foi feito à carteira, então nada foi enviado.',

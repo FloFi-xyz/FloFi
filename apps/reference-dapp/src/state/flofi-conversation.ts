@@ -18,6 +18,7 @@ import { copilotRejection } from '../domain/copilot-authoring';
 import { composerActions } from '../domain/composer-presentation';
 import { projectCanvasAction } from '../domain/canvas-lifecycle';
 import { currentExecution, isFinalExecutionResult } from '../domain/execution-result';
+import { simulationError } from '../domain/simulation-presentation';
 import { translate } from '../i18n/locale';
 import type { ExecutionControls } from './execution-controls';
 import { conversationCopy } from '../domain/conversation-copy';
@@ -58,6 +59,8 @@ export type ConversationBridge = LifecycleView & {
   readonly pendingEdits?: readonly PendingEdit[] | undefined; readonly resolveEdit?: ((nodeId: string, apply: boolean) => string | null) | undefined;
   /** The wallet's current network label, and the last wallet network-switch error (a rejected or failed request). */
   readonly walletNetwork?: string | null | undefined; readonly networkError?: string | null | undefined;
+  /** True while a runtime this workflow needs has not answered whether it is available here (unknown, not "unavailable"). */
+  readonly runtimeChecking?: boolean | undefined;
 };
 export type PendingEdit = { readonly nodeId: string; readonly step: number; readonly action: string; readonly value: string };
 type Question = { readonly open: PendingQuestion; readonly language: ConversationLanguage };
@@ -90,11 +93,16 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
   const latest = useRef({ bridge, state, context }); latest.current = { bridge, state, context };
   const pendingCommit = useRef<Commit | null>(null), lastCommit = useRef<{ readonly before: Workflow; readonly expected: Workflow } | null>(null);
   const reviewLock = useRef<{ scope: number; key: string | null; sawBusy: boolean; settled: boolean; language: ConversationLanguage } | null>(null);
-  const watch = useRef<{ scope: number; language: ConversationLanguage; phase: string | null; runKey: string | null; continued: string | null } | null>(null);
+  /**
+   * The execution the chat follows. `start` (BUILD-FLOFI-CHAT-E2E-FIX-002) exists only while the chat's own wallet request is starting: the runtime
+   * error it saw then, and whether the authorize/request controls became active, so a start that ends without any execution record is reported.
+   */
+  const watch = useRef<{ scope: number; language: ConversationLanguage; phase: string | null; runKey: string | null; continued: string | null;
+    start?: { error: string | null; active: boolean; idle: number } | undefined } | null>(null);
   const restored = useRef<string | null>(null);
   // BUILD-FLOFI-CHAT-E2E-FIX-002: a Review the chat continues by itself once what blocked it is resolved (the wallet's network switched, an edit
   // applied or discarded), and the sequence step whose completion hands over to the next step's own Review.
-  const resume = useRef<{ scope: number; language: ConversationLanguage; until: 'NETWORK' | 'EDIT'; error: string | null } | null>(null);
+  const resume = useRef<{ scope: number; language: ConversationLanguage; until: 'NETWORK' | 'EDIT' | 'READY'; error: string | null } | null>(null);
   const handover = useRef<{ scope: number; language: ConversationLanguage; from: number; waiting: boolean } | null>(null);
   const setQuestion = (next: Question | null) => { questionRef.current = next; setQuestionState(next); };
   const append = (scope: number, ...list: Omit<ChatMessage, 'id'>[]) => {
@@ -194,6 +202,8 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
       flofi(scope, language, c.editPending(edit.step, translate(language, edit.action), edit.value), { question: c.editQuestion, options: [c.applyEdit, c.discardEdit] });
       return;
     }
+    // A runtime's availability that has not answered yet is unknown: FloFi waits and continues by itself instead of calling it unavailable.
+    if (view.runtimeChecking) { resume.current = { scope, language, until: 'READY', error: null }; flofi(scope, language, c.checkingProviders); return; }
     const sequence = view.sequence;
     if (sequence?.finished) { flofi(scope, language, c.workflowCompleted(sequence.total), view.startNewWorkflow ? { options: [c.startNew] } : {}); return; }
     if (sequence?.awaitingDelivery) { flofi(scope, language, c.awaitingDelivery(sequence.current), view.controls.canCheck ? { options: [c.checkStatus] } : {}); return; }
@@ -246,7 +256,7 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
       flofi(scope, language, c.reviewNotApprovable(translate(language, action.label)), { options: [c.review] }); return;
     }
     flofi(scope, language, c.executing);
-    watch.current = { scope, language, phase: null, runKey: null, continued: null };
+    watch.current = { scope, language, phase: null, runKey: null, continued: null, start: { error: view.source.state.error, active: false, idle: 0 } };
     controls.authorize();
   }
   function answer(scope: number, open: Question, text: string) {
@@ -341,9 +351,20 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
     if (!followed || followed.scope !== session.current) return;
     const c = conversationCopy(followed.language), language = followed.language;
     if (!live) {
-      if (bridge.controls.requestFailed && !bridge.controls.authorizing && !bridge.controls.requesting) { watch.current = null; flofi(followed.scope, language, c.executionStartFailed, { options: [c.review] }); }
+      const start = followed.start, active = bridge.controls.authorizing || bridge.controls.requesting || Boolean(bridge.source.state.busy);
+      if (start && active) { start.active = true; start.idle = 0; return; }
+      // BUILD-FLOFI-CHAT-E2E-FIX-002: a start that ends with no execution record — a refused request (some runtimes keep the failure as their own
+      // error, e.g. a balance too low) or an authorization that could not begin — is reported with the runtime's classified reason, never left
+      // as "opening the wallet request". Nothing was sent: there is no execution record.
+      const error = bridge.source.state.error, newError = Boolean(error) && error !== start?.error;
+      const ended = !active && (bridge.controls.requestFailed || newError || Boolean(start && start.active) || Boolean(start && ++start.idle > 1));
+      if (ended && (start || bridge.controls.requestFailed)) {
+        const reason = error && (newError || bridge.controls.requestFailed) ? translate(language, simulationError(error)) : null;
+        watch.current = null; flofi(followed.scope, language, reason ? `${c.executionStartFailed} ${reason}` : c.executionStartFailed, { options: [c.review] });
+      } else if (start && !active) setTick(n => n + 1);
       return;
     }
+    if (followed.start) followed.start = undefined;
     const view = conversationExecution(bridge)!, phase = view.phase;
     if (phase !== followed.phase) {
       followed.phase = phase; followed.runKey = live.runKey;
@@ -401,7 +422,7 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
       startReview(waiting.scope, waiting.language);
       return;
     }
-    if (bridge.pendingEdits?.length) return;
+    if (waiting.until === 'READY' ? bridge.runtimeChecking : bridge.pendingEdits?.length) return;
     resume.current = null;
     startReview(waiting.scope, waiting.language);
   });
@@ -485,7 +506,11 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
       if (direct) { commit(scope, command, { exact: true, role: 'flofi', language, notes: [] }); return; }
       propose(command);
       append(scope, { role: 'system', text: `Proposal: ${request}. Review against revision ${command.baseRevision} before applying.` });
-    } catch {
+    } catch (cause) {
+      // BUILD-FLOFI-CHAT-E2E-FIX-002: a native-ETH swap is refused with its exact reason, deterministically (ETH is never authored as WETH).
+      if (cause instanceof Error && cause.message === 'SWAP_NATIVE_ASSET_UNSUPPORTED') {
+        dismissProposal(); append(scope, { role: 'system', text: copilotRejection(cause.message, language).message, language }); return;
+      }
       // BUILD-COPILOT-002: the Copilot keeps the pending proposal visible while it interprets ("make it 2", questions about it).
       if (copilot.mayInterpret) {
         const reply = await copilot.respond(text);

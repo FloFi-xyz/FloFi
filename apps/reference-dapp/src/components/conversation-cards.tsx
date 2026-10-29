@@ -22,7 +22,8 @@ export function ConversationReviewCard({ review, language }: { review: Conversat
     {/* BUILD-FLOFI-CHAT-E2E-FIX-002: a sequence lists every canonical action in order; only the current step is simulated now. */}
     {sequence ? <ol className="conversation-review-steps" aria-label={t('Workflow actions')}>{sequence.steps.map(step => <li key={step.number} data-sequence-state={step.state}>
       <strong>{step.number}. {t(step.action)}</strong>
-      <span className="conversation-review-route">{[step.amount && t(step.amount), step.detail && !step.amount?.includes(step.detail) ? t(step.detail) : null, step.network].filter(Boolean).join(' · ')}</span>
+      {/* The current step shows the amount its simulation actually used (a funded step's bound amount), never only the authored cap. */}
+      <span className="conversation-review-route">{[step.state === 'CURRENT' && simulated ? t(simulated.input) : step.amount && t(step.amount), step.detail && !step.amount?.includes(step.detail) ? t(step.detail) : null, step.network].filter(Boolean).join(' · ')}</span>
       <span className="conversation-review-state">{step.state === 'COMPLETED' ? step.delivered ? t('Completed and reconciled · delivered {0}', step.delivered) : t('Completed and reconciled')
         : step.state === 'CURRENT' ? t('Simulated now') : t('Simulated with a fresh quote after step {0} reconciles; you confirm it separately', step.number - 1)}</span>
       {step.funding && <span className="conversation-review-funding">{step.funding.bound ? t('Funded by step {0}: spends {1} (what step {0} delivered, at most {2})', step.funding.from, step.funding.bound, step.funding.cap)

@@ -339,6 +339,9 @@ function planSwap(a: CopilotSwapAction, g: Grounding): Plan {
     ...(a.network === null && !devnetImplied && !supported.some(n => named.includes(n)) && !named.includes('ETHEREUM') ? ['network' as const] : [])];
   if (missing.length) ask(missing, stillNeeds(m, missing, 'swap'), missing.length === 1 && missing[0] === 'network' ? labels(supported) : []);
   const network = devnetImplied ? devnetByAsset(g, notes) : resolveNetwork(a.network, supported, g, 'swap', notes);
+  // BUILD-FLOFI-CHAT-E2E-FIX-002: ETH and WETH are different assets. A swap that names native ETH is refused with the missing capability (no
+  // native swap or wrap/unwrap step exists yet); it is never authored as a WETH swap.
+  if (!/^SOLANA/.test(network) && [a.inputAsset, a.outputAsset].some(asset => typeof asset === 'string' && /^eth$/i.test(asset))) refuse(m.nativeSwapUnavailable, 'SWAP_NATIVE_ASSET_UNSUPPORTED');
   // BUILD-BASE-001: on a catalog network any two catalog ERC-20s; Base's USDC ⇄ WETH keeps its BUILD-002 sentence and command.
   if (g.policy.catalog && isCatalogNetwork(network)) {
     const input = catalogToken(a.inputAsset, network, g, 'swap', 'inputAsset', 'ERC20', notes), output = catalogToken(a.outputAsset, network, g, 'swap', 'outputAsset', 'ERC20', notes);

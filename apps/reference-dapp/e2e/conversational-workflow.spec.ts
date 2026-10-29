@@ -154,10 +154,13 @@ test('a correction retires the Review; a second action keeps the first; an unsup
   await expect(cards(page)).toHaveCount(2);
   const both = JSON.parse(await readWorkflowIr(page)) as { nodes: { nodeId: string }[] };
   expect(both.nodes.find(node => node.nodeId === nodeId)).toEqual(corrected.nodes.find(node => node.nodeId === nodeId));
-  // Two independent swaps are not one route this runtime can simulate: the chat explains why, simulates nothing and invents no route.
+  // BUILD-FLOFI-CHAT-E2E-FIX-002: two independent swaps run as a sequence (no runtime serves them as one route): the review lists both actions,
+  // simulates step 1 now and step 2 after step 1 reconciles. Declining it changes nothing.
   await pick(page, 'Review workflow');
-  await expect(flofi(page)).toContainText(/I can’t start the review yet|The simulation did not produce a review|This review cannot be confirmed yet/, { timeout: 30_000 });
-  await expect(flofi(page)).not.toContainText('Do you confirm this workflow?');
+  await expect(flofi(page)).toContainText('Here is the review of step 1 of 2.', { timeout: 30_000 });
+  await expect(flofi(page).locator('[data-sequence-state]')).toHaveCount(2);
+  await expect(flofi(page)).toContainText('Do you confirm this workflow?');
+  await pick(page, 'No');
   expect(owner.requested()).toBe(0);
   // The chat's Undo removes the second action only.
   await say(page, 'undo');

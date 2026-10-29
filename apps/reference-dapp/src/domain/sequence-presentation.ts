@@ -62,6 +62,12 @@ export function sequenceUnsupportedMessage(workflow: Workflow, context: ReviewCo
   return translate(language, 'Step {0} ({1} on {2}) cannot run as part of a multi-action workflow yet: FloFi executes this action only as its own workflow. Nothing was simulated or sent.',
     step.index + 1, translate(language, summary?.action ?? 'Action'), summary?.network ?? step.chainId);
 }
+/** A step whose runtime exists but whose provider this deployment does not serve (switched off here). */
+export function sequenceUnservedMessage(workflow: Workflow, context: ReviewContext, step: SequenceStep, language: Language = 'EN'): string {
+  const summary = card(workflow, context, step.nodeId);
+  return translate(language, 'Step {0} ({1} on {2}) cannot run on this deployment: its provider is not available here. Nothing was simulated or sent.',
+    step.index + 1, translate(language, summary?.action ?? 'Action'), summary?.network ?? step.chainId);
+}
 /** Why the current funded step cannot use what its producer delivered (nothing delivered, or an amount its card refuses). */
 export function sequenceFundingMessage(sequence: SequenceView, language: Language = 'EN'): string | null {
   const step = sequence.current;

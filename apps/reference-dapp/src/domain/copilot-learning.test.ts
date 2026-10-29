@@ -196,7 +196,7 @@ describe('BUILD-CHAT-LEARNING-001 safety of learned vocabulary', () => {
 
   it('signals a correction of FloFi’s proposal and a repeated failure (content-free)', () => {
     const s = session(learning('AVAILABLE'));
-    s.say('Swap 1 USDC to ETH on Base Sepolia', intent.action(act.swap({ network: 'BASE_SEPOLIA', inputAsset: 'USDC', outputAsset: 'ETH', amount: '1' })));
+    s.say('Swap 1 USDC to WETH on Base Sepolia', intent.action(act.swap({ network: 'BASE_SEPOLIA', inputAsset: 'USDC', outputAsset: 'WETH', amount: '1' })));
     const revised = s.say('actually make it 2', intent.edit({ amount: '2' }));
     expect(revised!.learning?.signals).toEqual(['CORRECTION']);
     s.dismiss();

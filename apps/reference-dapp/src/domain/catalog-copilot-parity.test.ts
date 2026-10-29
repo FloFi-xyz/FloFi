@@ -50,9 +50,12 @@ describe('BUILD-BASE-001 Copilot parity on catalog networks', () => {
   });
   it('keeps Base USDC ⇄ WETH on its BUILD-002 sentence and command', () => {
     const s = new CopilotSession();
-    const reply = s.say('swap 2 USDC into ETH on Base please', intent.action(act.swap({ network: 'BASE', inputAsset: 'USDC', outputAsset: 'ETH', amount: '2' })))!;
+    const reply = s.say('swap 2 USDC into WETH on Base please', intent.action(act.swap({ network: 'BASE', inputAsset: 'USDC', outputAsset: 'WETH', amount: '2' })))!;
     expect(reply).toMatchObject({ kind: 'PROPOSAL', sentence: 'swap 2 USDC to WETH on Base slippage 100 bps', command: { type: 'ADD_SWAP', direction: 'USDC_TO_WETH' } });
-    expect(reply.notes.join(' ')).toContain('not native ETH');
+    // BUILD-FLOFI-CHAT-E2E-FIX-002: native ETH is a different asset; asked for by name it is refused, never swapped as WETH.
+    const native = new CopilotSession().say('swap 2 USDC into ETH on Base please', intent.action(act.swap({ network: 'BASE', inputAsset: 'USDC', outputAsset: 'ETH', amount: '2' })));
+    expect(native).toMatchObject({ kind: 'UNSUPPORTED' });
+    expect(JSON.stringify(native)).toContain('Native ETH swaps are not available in FloFi yet');
   });
   it('grounds a Robinhood Stock Token by its symbol or its full catalog name, never by the model alone', () => {
     const s = new CopilotSession();

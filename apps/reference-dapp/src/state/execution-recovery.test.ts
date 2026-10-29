@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useExecutionLifecycle } from './execution-lifecycle';
 import { reviewFixture, reviewOwner } from '../test-utils/review-fixture';
 const f = vi.hoisted(() => ({ stores: {} as Record<string, Record<string, unknown>>, workflow: {} as unknown, context: {} as unknown }));
-vi.mock('./workflow-store', () => ({ useWorkflow: () => ({ state: { workflow: f.workflow }, context: f.context }) }));
+vi.mock('./workflow-store', () => ({ useWorkflow: () => ({ state: { workflow: f.workflow }, runtimeWorkflow: f.workflow, context: f.context }) }));
 vi.mock('./mode-a-store', () => ({ useModeA: () => f.stores.modeA }));
 vi.mock('./mode-b-store', () => ({ useModeB: () => f.stores.modeB }));
 vi.mock('./composition-store', () => ({ useComposition: () => f.stores.composition }));

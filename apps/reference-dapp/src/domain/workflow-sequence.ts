@@ -15,12 +15,13 @@
  *               min(authored amount, amount the producer actually delivered) — FloFi's existing binding rule (`engine/workflow-bindings.ts`)
  *   independent a step that no earlier step funds spends its authored amount; it is still simulated and signed in order, after the step before it
  *
- * Only a whole sequence of steps each runtime can serve on its own is a sequence: a workflow with resource edges, or whose full form already
- * lints (an existing composition such as Supply → Borrow → Swap), keeps its existing path.
+ * Only a whole sequence of steps each runtime can serve on its own is a sequence. A workflow one of FloFi's composition runtimes serves as a
+ * whole (Supply → Borrow → Swap, the Solana Swap → Orca position, the engineering graphs, anything with resource edges) keeps its existing path.
  */
 import type { ReviewContext } from '@defi-workflow-engine/reference-linter';
 import { formatAssetAmount } from '@defi-workflow-engine/action-registry';
-import { workflowDependencyOrder } from '@defi-workflow-engine/workflow-contracts';
+import { isBoundComposition } from '@defi-workflow-engine/action-registry';
+import { isLendingComposition, workflowDependencyOrder, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import type { Workflow } from './initial-workflow';
 import { editorReducer } from './editor';
 import { canvasAmountCommand } from './canvas-action-setup';
@@ -68,14 +69,18 @@ export function sequenceOrder(workflow: Workflow): readonly Node[] {
 export function stepProjection(workflow: Workflow, node: Node): Workflow {
   return { ...workflow, nodes: [{ ...node, dependencies: [] }], resourceEdges: [] } as Workflow;
 }
+/** A workflow one of FloFi's existing composition runtimes executes as a whole (never split into steps). */
+export function compositionWorkflow(workflow: Workflow): boolean {
+  return workflow.resourceEdges.length > 0 || isLendingComposition(workflow as unknown as SemanticWorkflow) || isBoundComposition(workflow as unknown as SemanticWorkflow) ||
+    workflow.nodes.some(node => node.nodeId === 'build009-bridge' || node.actionType === 'asset.liquidity.prepare');
+}
 /**
- * The workflow's sequence, or null when it is not one (one action, an existing composition, resource edges, or a step its runtime cannot take
- * alone). `lint` is the authoring linter (it throws on an invalid workflow).
+ * The workflow's sequence, or null when it is not one (one action, an existing composition, or a step its runtime cannot take alone). `lint` is
+ * the authoring linter (it throws on an invalid workflow): every step must pass it alone, as its runtime receives it.
  */
 export function workflowSequence(workflow: Workflow, lint: (workflow: Workflow) => unknown): WorkflowSequence | null {
   const ordered = sequenceOrder(workflow);
-  if (ordered.length < 2 || workflow.resourceEdges.length) return null;
-  try { lint(workflow); return null; } catch { /* Not an existing composition: each step must stand alone. */ }
+  if (ordered.length < 2 || compositionWorkflow(workflow)) return null;
   const steps: SequenceStep[] = [];
   for (const [index, node] of ordered.entries()) {
     const projection = stepProjection(workflow, node);

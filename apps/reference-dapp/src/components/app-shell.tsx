@@ -4,7 +4,7 @@ import { simulationUnavailableReason } from '../domain/simulation-unavailable';
 import { refreshBridgeAfterApproval } from '../domain/bridge-review-recovery';
 import { selectOwnerRuntime, type OwnerRuntimeSignals } from '../domain/runtime-selection';
 import { DELIVERY_READABLE, deliveredByRecord, SEQUENCE_RUNTIMES } from '../domain/workflow-sequence';
-import { presentSequence, sequenceFundingMessage, sequenceUnsupportedMessage } from '../domain/sequence-presentation';
+import { presentSequence, sequenceFundingMessage, sequenceUnservedMessage, sequenceUnsupportedMessage } from '../domain/sequence-presentation';
 import { composerActions, composerSummary } from '../domain/composer-presentation';
 import { setupSummary } from '../domain/canvas-action-setup';
 import { shellChainLabel } from '../domain/product-shell';
@@ -217,7 +217,16 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   const freshSignals: OwnerRuntimeSignals = { ...runtimeSignals, recoveryShell: false };
   const sequenceKinds = sequence ? sequence.steps.map(step => selectOwnerRuntime(step.projection, freshSignals).kind) : [];
   const unsupportedStep = sequence ? sequence.steps.find((_, index) => !SEQUENCE_RUNTIMES.includes(sequenceKinds[index] ?? '')) ?? null : null;
+  // A step whose runtime this deployment does not serve (its provider is off here) is named before anything runs, never discovered after step 1.
+  // Until a runtime's availability has answered it is unknown, never "not available": the chat waits for it (`runtimeChecking`).
+  const stepKnown = (kind: string | null) => kind === 'public' ? publicTestnet.availabilityKnown : kind === 'universal' ? universal.availabilityKnown
+    : kind === 'router' ? routerState.availabilityKnown : true;
+  const stepServed = (kind: string | null, chain: string) => !stepKnown(kind) || (kind === 'public' ? publicTestnet.chainAvailable(chain) : kind === 'universal' ? universal.available
+    : kind === 'router' ? routerState.available : true);
+  const unservedStep = sequence && !unsupportedStep ? sequence.steps.find((step, index) => index >= sequence.cursor && !stepServed(sequenceKinds[index] ?? null, step.chainId)) ?? null : null;
+  const runtimeChecking = sequence ? sequence.steps.some((_, index) => index >= sequence.cursor && !stepKnown(sequenceKinds[index] ?? null)) : !stepKnown(runtime.kind);
   const sequenceIssue = !sequence ? null : unsupportedStep ? sequenceUnsupportedMessage(state.workflow, context, unsupportedStep, language === 'PT' ? 'PT' : 'EN')
+    : unservedStep ? sequenceUnservedMessage(state.workflow, context, unservedStep, language === 'PT' ? 'PT' : 'EN')
     : sequenceFundingMessage(sequence, language === 'PT' ? 'PT' : 'EN');
   const { universalPath, routerPath, solanaTransferPath, transferPath, lendingPath, withdrawPath, repayPath, borrowPath, supplyPath, uniswapLiquidityPath,
     solanaCompositionPath, solanaLiquidityPath, solanaPath, publicPath } = runtime;
@@ -396,9 +405,10 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   };
   const conversation = useFlofiConversation({ owner, epoch: workflowEpoch, direct: !approvalSlot && !autoPrepare && surface === 'workspace',
     interfaceLanguage: language === 'PT' ? 'PT' : 'EN',
-    bridge: { workflow: state.workflow, context, source: simulationSource, authorization, wallet: reviewBinding.wallet, progress: executionProgress,
+    // The chat reviews, confirms and follows the workflow its runtime serves (a sequence's current step); it edits the canonical workflow itself.
+    bridge: { workflow: runtimeWorkflow, context, source: simulationSource, authorization, wallet: reviewBinding.wallet, progress: executionProgress,
       invalidWorkflow: lifecycleState.invalidWorkflow, simulate: simulateAgain, controls: lifecycleControls, networkAction, sequence: sequencePresentation,
-      pendingEdits, resolveEdit, walletNetwork: reviewBinding.wallet.chain ? shellChainLabel(reviewBinding.wallet.chain) : null, networkError: walletConnection.error,
+      pendingEdits, resolveEdit, runtimeChecking, walletNetwork: reviewBinding.wallet.chain ? shellChainLabel(reviewBinding.wallet.chain) : null, networkError: walletConnection.error,
       simulationBlocked: walletIssue ?? (simulationDisabled || !actionable || lifecycleState.invalidWorkflow ? simulationReason ?? 'Simulation is not available for this workflow.' : null),
       connectWallet: () => void walletConnection.connect(), startNewWorkflow } });
   // BUILD-FLOFI-CHAT-E2E-FIX-002: the public chat-first workspace presents the Review and progress in the chat; Simulate and Execute show the canvas

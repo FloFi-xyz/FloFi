@@ -47,7 +47,7 @@ function reviewed(): Pick<ConversationBridge, 'source' | 'authorization'> {
   return { source: { kind: 'public', state: { busy: false, error: null, retired: false, recoveryOnly: false, available: true, run: { workflow, quote, attempts: [], outcome: null, reviewedManifestHash: null } } } as unknown as SimulationSource,
     authorization: { ...fixture.authorization, key: `review-${workflow.revision}`, manifest, policy } };
 }
-let bridge: ConversationBridge, controls: { authorize: ReturnType<typeof vi.fn>; request: ReturnType<typeof vi.fn>; checkStatus: ReturnType<typeof vi.fn> };
+let bridge: ConversationBridge, controls: { authorize: ReturnType<typeof vi.fn>; request: ReturnType<typeof vi.fn>; checkStatus: ReturnType<typeof vi.fn>; authorizing?: boolean };
 function lifecycle(patch: Partial<ConversationBridge> = {}) {
   const base = { workflow: editor.workflow, context, source: { kind: 'public', state: { busy: false, error: null, retired: false, recoveryOnly: false, available: true, run: null } } as unknown as SimulationSource,
     authorization: { ...fixture.authorization, key: null, manifest: null, policy: null }, wallet: fixture.wallet, progress: null, invalidWorkflow: false, ...patch };
@@ -73,7 +73,8 @@ beforeEach(() => {
   setActiveNetworkScope('ENGINEERING');
   vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(reviewNow);
   editor = initialEditor(); past = []; f.propose = []; f.respond = null; direct = true; reviewedPatch = {};
-  controls = { authorize: vi.fn(), request: vi.fn(), checkStatus: vi.fn() };
+  // Like the real controls, authorizing starts at the click (a start that never becomes active is reported by the chat).
+  controls = { authorize: vi.fn(() => { controls.authorizing = true; }), request: vi.fn(), checkStatus: vi.fn() };
   harness.slots = []; store(); lifecycle(); simulate.mockClear();
 });
 afterEach(() => { harness.unmount(); vi.useRealTimers(); setActiveNetworkScope(null); });
@@ -267,6 +268,7 @@ describe('BUILD-FLOFI-CHAT-E2E-FIX-002 chat-first review and sequences', () => {
     await say('Yes, execute');
     expect(controls.authorize).toHaveBeenCalledTimes(1);
     // The run of step 1 completes; the workflow is not finished, so FloFi does not call it the workflow's result.
+    controls.authorizing = false;
     reviewedPatch = { ...reviewedPatch, progress: completedRun as unknown as ConversationBridge['progress'] }; lifecycle(reviewedPatch); render(); await flush(); chat = render();
     expect(chat.messages.some(message => /All 2 steps|Execution completed/.test(message.text))).toBe(false);
     // The shell records step 1's reconciled delivery and the runtime now serves step 2: FloFi says what step 1 delivered and simulates step 2.
@@ -297,5 +299,23 @@ describe('BUILD-FLOFI-CHAT-E2E-FIX-002 chat-first review and sequences', () => {
     const chat = render(); chat.send('Review workflow'); await flush();
     expect(last(render()).text).toBe(`I can’t start the review yet: ${issue}`);
     expect(simulate).not.toHaveBeenCalled();
+  });
+});
+
+describe('BUILD-FLOFI-CHAT-E2E-FIX-002 a wallet request that cannot start', () => {
+  it('reports the runtime\'s own reason when the start ends without any execution record (nothing was sent)', async () => {
+    await say('swap 10 USDC to WETH on Base Sepolia slippage 100 bps');
+    await say('Review workflow');
+    reviewedPatch = reviewed(); lifecycle(reviewedPatch); render();
+    await say('Yes, I confirm');
+    let chat = await say('Yes, execute');
+    expect(controls.authorize).toHaveBeenCalledTimes(1);
+    expect(last(chat).text).toMatch(/Confirm or reject it in your wallet/);
+    // The runtime refuses the request (its own error) and the controls settle: no run exists, so nothing was sent.
+    controls.authorizing = false;
+    reviewedPatch = { ...reviewedPatch, source: { ...reviewedPatch.source!, state: { ...reviewedPatch.source!.state, error: 'Insufficient test token balance.' } } as SimulationSource };
+    lifecycle(reviewedPatch); render(); await flush(); chat = render();
+    expect(last(chat).text).toBe('The wallet request could not start, and nothing was sent. The status below shows the recorded state. Your available balance is too low for this workflow.');
+    expect(last(chat).options).toEqual(['Review workflow']);
   });
 });

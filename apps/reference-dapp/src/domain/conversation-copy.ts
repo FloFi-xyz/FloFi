@@ -26,6 +26,7 @@ export type ConversationCopy = {
   readonly editPending: (step: number, action: string, value: string) => string; readonly applyEdit: string; readonly discardEdit: string;
   readonly editApplied: string; readonly editDiscarded: string; readonly editRefused: (reason: string) => string; readonly editQuestion: string;
   readonly switchNetworkFor: (wallet: string | null, network: string) => string; readonly switchFailed: (reason: string) => string; readonly switched: (network: string) => string;
+  readonly checkingProviders: string;
 };
 const en: ConversationCopy = {
   added: (action, detail) => `${action} added to your workflow: ${detail}.`,
@@ -92,6 +93,7 @@ const en: ConversationCopy = {
   switchNetworkFor: (wallet, network) => `Your wallet is on ${wallet ?? 'another network'}, but this step runs on ${network}. Switch your wallet to ${network}; I will continue the review once it is done.`,
   switchFailed: reason => `The network switch did not complete: ${reason} Nothing was simulated or sent.`,
   switched: network => `Your wallet is now on ${network}. Continuing the review.`,
+  checkingProviders: 'Checking which providers serve this workflow on this deployment. I will continue the review as soon as they answer.',
 };
 const pt: ConversationCopy = {
   added: (action, detail) => `Adicionado ao seu workflow: ${action} · ${detail}.`,
@@ -158,5 +160,6 @@ const pt: ConversationCopy = {
   switchNetworkFor: (wallet, network) => `A sua carteira está em ${wallet ?? 'outra rede'}, mas esta etapa é executada em ${network}. Mude a sua carteira para ${network}; eu continuo a revisão assim que terminar.`,
   switchFailed: reason => `A troca de rede não foi concluída: ${reason} Nada foi simulado nem enviado.`,
   switched: network => `A sua carteira agora está em ${network}. Continuando a revisão.`,
+  checkingProviders: 'Verificando quais provedores atendem este workflow nesta implantação. Continuo a revisão assim que responderem.',
 };
 export const conversationCopy = (language: ConversationLanguage): ConversationCopy => language === 'PT' ? pt : en;

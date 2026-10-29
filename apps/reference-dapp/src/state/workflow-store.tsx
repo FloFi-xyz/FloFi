@@ -111,10 +111,11 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
   const incompleteRef = useRef(authoringIncomplete);
   incompleteRef.current = authoringIncomplete;
   // A public testnet swap's own chain selects the trusted context (Base Sepolia or Ethereum Sepolia); anything else keeps the initial one.
-  const context = useMemo(() => {
-    const swapChain = state.workflow.nodes.find(n => n.actionType === 'asset.swap.exact-input' && (n.chainId === 'eip155:84532' || n.chainId === 'eip155:11155111'))?.chainId;
+  const contextOf = useCallback((workflow: Workflow) => {
+    const swapChain = workflow.nodes.find(n => n.actionType === 'asset.swap.exact-input' && (n.chainId === 'eip155:84532' || n.chainId === 'eip155:11155111'))?.chainId;
     return swapChain ? reviewContextForChain(swapChain, createReviewContext(initialContext)) : createReviewContext(initialContext);
-  }, [state.workflow, initialContext]);
+  }, [initialContext]);
+  const context = useMemo(() => contextOf(state.workflow), [state.workflow, contextOf]);
   const dispatch = useCallback((command: Command) => {
     dispatchHistory({ type: 'COMMAND', command, context });
   }, [context]);
@@ -152,19 +153,20 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
   workflowRef.current = state.workflow;
   chainRef.current = chain;
   // BUILD-FLOFI-CHAT-E2E-FIX-002: several independent owner-wallet actions form a sequence; each step must lint alone (its runtime's own rule).
-  const sequence = useMemo(() => state.workflow.nodes.length ? workflowSequence(state.workflow, workflow => lintWorkflow(workflow, context)) : null, [state.workflow, context]);
+  // Each step is linted with its own network's trusted context, exactly as its runtime receives it alone.
+  const sequence = useMemo(() => state.workflow.nodes.length ? workflowSequence(state.workflow, workflow => lintWorkflow(workflow, contextOf(workflow))) : null, [state.workflow, contextOf]);
   const reviewState = useMemo(() => {
     // BUILD-FLOFI-PRODUCT-UX-001: the empty draft has no canonical form yet (the IR needs a node), so there is nothing to review and nothing invalid.
     if (!state.workflow.nodes.length) return { review: null, reviewError: null };
     try { return { review: lintWorkflow(state.workflow, context), reviewError: null }; }
     catch (cause) {
       if (sequence) {
-        const findings = sequence.steps.flatMap(step => lintWorkflow(step.projection, context).findings);
+        const findings = sequence.steps.flatMap(step => lintWorkflow(step.projection, contextOf(step.projection)).findings);
         return { review: Object.freeze({ revision: state.workflow.revision, findings: Object.freeze(findings), executable: false, enforcement: 'NOT_ENFORCED' }) as ReviewResult, reviewError: null };
       }
       return { review: null, reviewError: cause instanceof Error ? cause.message : 'INVALID_WORKFLOW' };
     }
-  }, [state.workflow, context, sequence]);
+  }, [state.workflow, context, contextOf, sequence]);
   // Executed steps of this workflow's sequence (this visit). Only steps that still describe the workflow count; any other change starts over.
   const [sequenceRun, setSequenceRun] = useState<{ readonly workflowId: string; readonly completed: readonly CompletedStep[] }>({ workflowId: '', completed: [] });
   const completed = sequenceRun.workflowId === state.workflow.workflowId ? validCompletions(sequence, state.workflow, sequenceRun.completed) : [];
@@ -172,7 +174,7 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
   const finished = Boolean(sequence && completed.length >= sequence.steps.length);
   const bound = currentStep ? boundAmount(currentStep, completed) : null;
   const producerDelivery = currentStep?.fundedBy !== null && currentStep?.fundedBy !== undefined ? completed[currentStep.fundedBy]?.received ?? null : null;
-  const boundWorkflow = useMemo(() => currentStep ? boundProjection(currentStep, bound, context) : null, [currentStep, bound, context]);
+  const boundWorkflow = useMemo(() => currentStep ? boundProjection(currentStep, bound, contextOf(currentStep.projection)) : null, [currentStep, bound, contextOf]);
   const runtimeWorkflow = sequence && currentStep ? boundWorkflow ?? currentStep.projection : state.workflow;
   const sequenceView: SequenceView | null = sequence && currentStep ? { steps: sequence.steps, cursor, current: currentStep, completed, bound, finished,
     fundingIssue: finished || currentStep.fundedBy === null ? null : producerDelivery === null ? 'DELIVERY_NOT_PROVEN' : producerDelivery === '0' ? 'NOTHING_DELIVERED'

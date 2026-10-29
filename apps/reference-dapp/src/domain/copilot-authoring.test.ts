@@ -18,7 +18,7 @@ const convert = (intent: unknown, userText: string, options: { wallet?: string |
 const action = (value: Record<string, unknown>) => ({ version: '1', kind: 'ACTION', action: value });
 const lending = (type: string, fields: Record<string, unknown> = {}) =>
   ({ type, protocol: 'AAVE_V3', network: 'BASE_SEPOLIA', asset: 'USDC', amount: '200', beneficiary: null, ...fields });
-const swap = (fields: Record<string, unknown> = {}) => ({ type: 'SWAP', network: 'BASE', inputAsset: 'USDC', outputAsset: 'ETH', amount: '100', slippageBps: null, ...fields });
+const swap = (fields: Record<string, unknown> = {}) => ({ type: 'SWAP', network: 'BASE', inputAsset: 'USDC', outputAsset: 'WETH', amount: '100', slippageBps: null, ...fields });
 const bridge = (fields: Record<string, unknown> = {}) => ({ type: 'BRIDGE', sourceNetwork: 'BASE_SEPOLIA', destinationNetwork: 'ARBITRUM_SEPOLIA', asset: 'USDC',
   amount: '5', slippageBps: null, routing: null, recipient: null, ...fields });
 const proposal = (outcome: CopilotOutcome) => {
@@ -95,14 +95,21 @@ describe('Aave V3 Supply, Borrow, Repay and Withdraw', () => {
 });
 
 describe('swaps', () => {
-  it('authors a Base swap to WETH and says it is wrapped ETH', () => {
-    const result = sameAsTyped(convert(action(swap()), 'Swap 100 USDC to ETH on Base'), 'swap 100 USDC to WETH on Base slippage 100 bps');
+  it('BUILD-FLOFI-CHAT-E2E-FIX-002: refuses a native-ETH swap with the missing capability and never authors WETH in its place', () => {
+    for (const [fields, text] of [[{ outputAsset: 'ETH' }, 'Swap 100 USDC to ETH on Base'], [{ inputAsset: 'ETH', outputAsset: 'USDC', amount: '0.01' }, 'Swap 0.01 ETH to USDC on Base'],
+      [{ network: 'BASE_SEPOLIA', outputAsset: 'ETH' }, 'Swap 100 USDC to ETH on Base Sepolia']] as const) {
+      const outcome = convert(action(swap(fields)), text);
+      expect(outcome).toMatchObject({ kind: 'UNSUPPORTED', code: 'SWAP_NATIVE_ASSET_UNSUPPORTED' });
+      expect(outcome.kind === 'UNSUPPORTED' && outcome.message).toMatch(/^Native ETH swaps are not available in FloFi yet.*never swaps it in place of ETH/);
+    }
+  });
+  it('authors an explicit WETH swap on Base, unchanged', () => {
+    const result = sameAsTyped(convert(action(swap()), 'Swap 100 USDC to WETH on Base'), 'swap 100 USDC to WETH on Base slippage 100 bps');
     expect(result.command).toMatchObject({ type: 'ADD_SWAP', direction: 'USDC_TO_WETH', amount: '100', slippage: '100' });
-    expect(result.notes.join(' ')).toMatch(/WETH \(wrapped ETH\)/);
     expect(result.notes.join(' ')).toMatch(/Slippage 1% \(100 bps\) \(Flofi default\)/);
   });
   it('authors a Base Sepolia swap from Portuguese', () => {
-    sameAsTyped(convert(action(swap({ network: 'BASE_SEPOLIA' })), 'Troca 100 USDC por ETH na Base Sepolia'),
+    sameAsTyped(convert(action(swap({ network: 'BASE_SEPOLIA' })), 'Troca 100 USDC por WETH na Base Sepolia'),
       'swap 100 USDC to WETH on Base Sepolia slippage 100 bps', createBaseSepoliaReviewContext());
   });
   it('never infers the network, and never real funds from test-network wording', () => {
@@ -116,8 +123,8 @@ describe('swaps', () => {
     expect(convert(action(swap({ network: 'BASE' })), 'Troca 100 USDC de teste por ETH na Base').kind).toBe('CLARIFICATION');
   });
   it('uses stated slippage only when grounded and refuses unsupported tokens', () => {
-    sameAsTyped(convert(action(swap({ slippageBps: '30' })), 'Swap 100 USDC to ETH on Base, max slippage 0.3%'), 'swap 100 USDC to WETH on Base slippage 30 bps');
-    expect(convert(action(swap({ slippageBps: '100' })), 'Swap 100 USDC to ETH on Base')).toMatchObject({ kind: 'CLARIFICATION', missing: ['slippage'] });
+    sameAsTyped(convert(action(swap({ slippageBps: '30' })), 'Swap 100 USDC to WETH on Base, max slippage 0.3%'), 'swap 100 USDC to WETH on Base slippage 30 bps');
+    expect(convert(action(swap({ slippageBps: '100' })), 'Swap 100 USDC to WETH on Base')).toMatchObject({ kind: 'CLARIFICATION', missing: ['slippage'] });
     expect(convert(action(swap({ outputAsset: 'OTHER' })), 'Swap 100 USDC to PEPE on Base').kind).toBe('UNSUPPORTED');
     expect(convert(action(swap({ outputAsset: 'SOL' })), 'Swap 100 USDC to SOL on Base').kind).toBe('UNSUPPORTED');
     expect(convert(action(swap({ outputAsset: 'USDC' })), 'Swap 100 USDC to USDC on Base')).toMatchObject({ kind: 'REJECTED', code: 'INVALID_ASSET_PAIR' });
@@ -129,10 +136,10 @@ describe('swaps', () => {
       'swap 1 devUSDC to SOL on Solana Devnet slippage 100 bps');
   });
   it('rejects hallucinated amounts, assets and invalid precision', () => {
-    expect(convert(action(swap({ amount: '1000' })), 'Swap 100 USDC to ETH on Base')).toMatchObject({ kind: 'CLARIFICATION', missing: ['amount'] });
-    expect(convert(action(swap()), 'Swap 100 to ETH on Base')).toMatchObject({ kind: 'CLARIFICATION', missing: ['asset'] });
-    expect(convert(action(swap({ amount: '1.1234567' })), 'Swap 1.1234567 USDC to ETH on Base')).toMatchObject({ kind: 'REJECTED', code: 'AMOUNT_PRECISION' });
-    expect(convert(action(swap({ amount: '0' })), 'Swap 0 USDC to ETH on Base').kind).toBe('REJECTED');
+    expect(convert(action(swap({ amount: '1000' })), 'Swap 100 USDC to WETH on Base')).toMatchObject({ kind: 'CLARIFICATION', missing: ['amount'] });
+    expect(convert(action(swap()), 'Swap 100 to WETH on Base')).toMatchObject({ kind: 'CLARIFICATION', missing: ['asset'] });
+    expect(convert(action(swap({ amount: '1.1234567' })), 'Swap 1.1234567 USDC to WETH on Base')).toMatchObject({ kind: 'REJECTED', code: 'AMOUNT_PRECISION' });
+    expect(convert(action(swap({ amount: '0' })), 'Swap 0 USDC to WETH on Base').kind).toBe('REJECTED');
   });
 });
 
@@ -253,7 +260,7 @@ describe('the AI boundary', () => {
   });
   it('produces only new authoring commands at the current revision, without touching the workflow', () => {
     const before = JSON.stringify(start.workflow);
-    const outcomes = [convert(action(lending('SUPPLY')), 'Supply 200 USDC to Aave on Base Sepolia'), convert(action(swap()), 'Swap 100 USDC to ETH on Base'),
+    const outcomes = [convert(action(lending('SUPPLY')), 'Supply 200 USDC to Aave on Base Sepolia'), convert(action(swap()), 'Swap 100 USDC to WETH on Base'),
       convert(action(bridge()), 'Bridge 5 USDC from Base Sepolia to Arbitrum Sepolia')];
     for (const outcome of outcomes) {
       const result = proposal(outcome);

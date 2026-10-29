@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from 'vitest';
 import { baseAssetRegistry, referenceRegistry } from '@defi-workflow-engine/action-registry';
-import { createReviewContext, lintWorkflow } from '@defi-workflow-engine/reference-linter';
+import { createBaseSepoliaReviewContext, createReviewContext, lintWorkflow, type ReviewContext } from '@defi-workflow-engine/reference-linter';
 import { parseLocalCommand } from './commands';
 import { editorReducer, initialEditor, type EditorState } from './editor';
 import type { Workflow } from './initial-workflow';
@@ -11,14 +11,15 @@ const context = createReviewContext({ registryId: referenceRegistry.registryId, 
   assets: baseAssetRegistry });
 const OWNER = '0x1111111111111111111111111111111111111111';
 const BASE_USDC = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913', BASE_WETH = '0x4200000000000000000000000000000000000006';
-function author(...sentences: string[]): Workflow {
+function authorIn(on: ReviewContext, ...sentences: string[]): Workflow {
   let state: EditorState = initialEditor();
   for (const sentence of sentences) {
-    state = editorReducer(state, parseLocalCommand(sentence, state.workflow, context, OWNER), context);
+    state = editorReducer(state, parseLocalCommand(sentence, state.workflow, on, OWNER), on);
     expect(state.error).toBeNull();
   }
   return state.workflow;
 }
+const author = (...sentences: string[]) => authorIn(context, ...sentences);
 const lint = (workflow: Workflow) => lintWorkflow(workflow, context);
 const amountOf = (workflow: Workflow) => (workflow.nodes[0]!.userConstraints.find(c => c.kind === 'MAXIMUM_INPUT') as unknown as { quantity: { amount: string } }).quantity.amount;
 
@@ -50,11 +51,19 @@ describe('BUILD-FLOFI-CHAT-E2E-FIX-002 workflow sequence', () => {
     expect(independent.steps.map(step => step.fundedBy)).toEqual([null, null]);
   });
 
-  it('is not a sequence for one action, or for a workflow that already lints as one composition', () => {
+  it('is not a sequence for one action, or for a workflow a composition runtime executes as a whole', () => {
     expect(workflowSequence(author('swap 10 USDC to WETH on Base slippage 100 bps'), lint)).toBeNull();
     const lending = author(`compose supply 10 USDC to Aave then borrow 2 USDC then swap borrowed USDC to WETH on Base Sepolia slippage 50 bps owner ${OWNER}`);
     expect(() => lint(lending)).not.toThrow();
     expect(workflowSequence(lending, lint)).toBeNull();
+  });
+  it('two independent swaps that lint together are still a sequence: no runtime serves them as one route', () => {
+    const sepolia = createBaseSepoliaReviewContext(), lintSepolia = (workflow: Workflow) => lintWorkflow(workflow, sepolia);
+    const swaps = authorIn(sepolia, 'swap 1 USDC to WETH on Base Sepolia slippage 50 bps', 'swap 2 USDC to WETH on Base Sepolia slippage 50 bps');
+    expect(() => lintSepolia(swaps)).not.toThrow();
+    expect(workflowSequence(swaps, lintSepolia)?.steps.map(step => [step.nodeId, step.fundedBy])).toEqual([['node-002', null], ['node-003', null]]);
+    const funded = authorIn(sepolia, 'swap 1 USDC to WETH on Base Sepolia slippage 50 bps', 'swap 0.0001 WETH to USDC on Base Sepolia slippage 50 bps');
+    expect(workflowSequence(funded, lintSepolia)?.steps.map(step => step.fundedBy)).toEqual([null, 0]);
   });
 
   it('a funded step spends min(authored, delivered), re-authored through its own card command', () => {

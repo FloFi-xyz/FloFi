@@ -24,6 +24,10 @@ export const publicRunInProgress = (run: Pick<PublicRun, 'outcome' | 'attempts'>
 type Store = { readonly available: boolean;
   /** BUILD-BASE-001: whether this instance serves a catalog network's mainnet swaps (live or the MOCKED loopback harness). */
   readonly catalogAvailable: (chain: string) => boolean;
+  /** BUILD-FLOFI-CHAT-E2E-FIX-002: whether this instance serves swaps on `chain` at all (a catalog network, or a test-network pair). */
+  readonly chainAvailable: (chain: string) => boolean;
+  /** BUILD-FLOFI-CHAT-E2E-FIX-002: false until this instance's availability answered (until then "not available" is not yet known). */
+  readonly availabilityKnown: boolean;
   readonly run: PublicRun | null; readonly recoveryOnly: boolean;
   readonly retired: boolean; readonly busy: string | null; readonly signing: boolean; readonly error: string | null;
   simulate(): void; review(): void; execute(): void; observe(): void; switchNetwork(): void };
@@ -78,7 +82,7 @@ async function calldataDigest(data: string): Promise<string> {
 export function PublicTestnetProvider({ children }: { children: ReactNode }) {
   const { state, runtimeWorkflow, restoreWorkflow } = useWorkflow();
   const wallet = useBuild009Wallet();
-  const [availability, setAvailability] = useState<{ testnet: boolean; catalogs: Readonly<Record<string, boolean>> }>({ testnet: false, catalogs: {} });
+  const [availability, setAvailability] = useState<{ testnet: boolean; catalogs: Readonly<Record<string, boolean>>; known: boolean }>({ testnet: false, catalogs: {}, known: false });
   const [run, setRun] = useState<PublicRun | null>(null);
   const [source, setSource] = useState<SemanticWorkflow | null>(null);
   const [recoveryOnly, setRecoveryOnly] = useState(false);
@@ -100,6 +104,8 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
   const authoredProfile = swapProfile(authoredChain ?? run?.quote.chainId);
   const catalogAvailable = useCallback((chain: string) => availability.catalogs[chain] === true, [availability]);
   const available = authoredProfile?.kind === 'CATALOG' ? catalogAvailable(authoredProfile.chainRef) : availability.testnet;
+  const chainAvailable = useCallback((chain: string) => { const profile = swapProfile(chain); return profile ? profile.kind === 'CATALOG' ? catalogAvailable(profile.chainRef) : availability.testnet : false; },
+    [availability, catalogAvailable]);
   const guarded = useCallback((label: string, action: () => Promise<void>) => {
     if (busyRef.current) return;
     const epoch = ++operationEpoch.current; busyRef.current = true; setBusy(label); setError(null);
@@ -108,8 +114,8 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancelled = false;
     Promise.all([publicAvailability(), ...CATALOG_NETWORK_IDENTITIES.map(network => catalogSwapAvailability(network.chain))]).then(([testnet, ...catalogs]) => {
-      if (!cancelled) setAvailability({ testnet, catalogs: Object.fromEntries(CATALOG_NETWORK_IDENTITIES.map((network, index) => [network.chain, catalogs[index] === true])) });
-    });
+      if (!cancelled) setAvailability({ testnet, catalogs: Object.fromEntries(CATALOG_NETWORK_IDENTITIES.map((network, index) => [network.chain, catalogs[index] === true])), known: true });
+    }).catch(() => { if (!cancelled) setAvailability(value => ({ ...value, known: true })); });
     const id = localStorage.getItem(KEY);
     if (id) publicStatus(id).then(async result => {
       if (cancelled || !result.ok) return;
@@ -229,7 +235,7 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
     }
   }), [guarded, run, retired, wallet]);
   const signing = Boolean(signingAttempt && run?.attempts.some(attempt => attempt.attemptId === signingAttempt));
-  return <Context.Provider value={{ available, catalogAvailable, run, recoveryOnly, retired, busy, signing, error,
+  return <Context.Provider value={{ available, catalogAvailable, chainAvailable, availabilityKnown: availability.known, run, recoveryOnly, retired, busy, signing, error,
     simulate, review, execute, observe, switchNetwork }}>{children}</Context.Provider>;
 }
 export function usePublicTestnet(): Store { const value = useContext(Context); if (!value) throw new Error('PUBLIC_TESTNET_PROVIDER_MISSING'); return value; }

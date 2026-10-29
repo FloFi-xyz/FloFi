@@ -11,8 +11,13 @@ const word = (value: bigint) => '0x' + value.toString(16).padStart(64, '0');
 const address = (value: string) => '0x' + value.slice(2).padStart(64, '0');
 const methods: string[] = [];
 const execution = process.env.FLOFI_SWAP_EXECUTION_E2E === 'MOCKED_LOOPBACK_ONLY';
-type Balances = { allowance: bigint; input: bigint; output: bigint; native: bigint };
-const initialBalances = (): Balances => ({ allowance: 0n, input: 10_000_000n, output: 0n, native: 10n ** 18n });
+/** `input` is the owner's USDC, `output` its WETH; each token has its own router allowance. */
+type Balances = { allowance: bigint; allowanceWeth: bigint; input: bigint; output: bigint; native: bigint };
+const initialBalances = (): Balances => ({ allowance: 0n, allowanceWeth: 0n, input: 10_000_000n, output: 0n, native: 10n ** 18n });
+/** BUILD-FLOFI-CHAT-E2E-FIX-002: the synthetic pool prices both directions (1 USDC unit = 5e8 WETH units); quotes can be withdrawn. */
+const RATE = 500_000_000n;
+let quotesUnavailable = false;
+const tokenIn = (data: string) => '0x' + data.slice(34, 74);
 let head = 100, balances = initialBalances();
 const history = new Map<number, Balances>([[head, { ...balances }]]);
 const transactions: Record<string, unknown>[] = [], receipts = new Map<string, Record<string, unknown>>();
@@ -28,16 +33,25 @@ createServer({ key: readFileSync(join(directory, 'key.pem')), cert: readFileSync
       let result: unknown;
       if (method === 'MOCK_reset') {
         head = 100; balances = initialBalances(); history.clear(); history.set(head, { ...balances }); transactions.length = 0; receipts.clear(); methods.length = 0; result = null;
+        quotesUnavailable = false;
       } else if (method === 'MOCK_sends') result = transactions.length;
+      // BUILD-FLOFI-CHAT-E2E-FIX-002: an owner without enough USDC, and a provider that returns no quote (both loopback-only).
+      else if (method === 'MOCK_balance') { balances.input = BigInt(String(params[0])); history.set(head, { ...balances }); result = null; }
+      else if (method === 'MOCK_quotes') { quotesUnavailable = params[0] === 'unavailable'; result = null; }
       else if (method === 'MOCK_send') {
         const tx = params[0] as { chainId: string; from: string; to: string; data: string; value: string };
         const profile = BASE_SEPOLIA;
         if (tx.chainId !== profile.chainHex || !/^0x[0-9a-f]{40}$/.test(tx.from) || tx.value !== '0x0') throw Error('MOCK_TX_DENIED');
         if (tx.to === profile.usdc && tx.data.slice(0, 10) === '0x095ea7b3' && tx.data.slice(10, 74) === address(profile.router).slice(2)) balances.allowance = BigInt('0x' + tx.data.slice(74));
-        else if (tx.to === profile.router && tx.data.slice(0, 10) === '0x04e45aaf') {
+        else if (tx.to === profile.weth && tx.data.slice(0, 10) === '0x095ea7b3' && tx.data.slice(10, 74) === address(profile.router).slice(2)) balances.allowanceWeth = BigInt('0x' + tx.data.slice(74));
+        else if (tx.to === profile.router && tx.data.slice(0, 10) === '0x04e45aaf' && tokenIn(tx.data) === profile.weth) {
+          const amount = BigInt('0x' + tx.data.slice(266, 330));
+          if (balances.allowanceWeth < amount || balances.output < amount) throw Error('MOCK_BALANCE_DENIED');
+          balances.output -= amount; balances.input += amount / RATE; balances.allowanceWeth -= amount;
+        } else if (tx.to === profile.router && tx.data.slice(0, 10) === '0x04e45aaf') {
           const amount = BigInt('0x' + tx.data.slice(266, 330));
           if (balances.allowance < amount || balances.input < amount) throw Error('MOCK_BALANCE_DENIED');
-          balances.input -= amount; balances.output += amount * 500_000_000n; balances.allowance -= amount;
+          balances.input -= amount; balances.output += amount * RATE; balances.allowance -= amount;
         } else throw Error('MOCK_TX_DENIED');
         const hash = word(BigInt(transactions.length + 1));
         const nonce = '0x' + transactions.length.toString(16);
@@ -74,8 +88,13 @@ createServer({ key: readFileSync(join(directory, 'key.pem')), cert: readFileSync
       else if (selector === '0xddca3f43') result = word(BigInt(profile.fee));
       else if (selector === '0x1a686502' || selector === '0x3850c7bd') result = word(1n);
       // Deliberately synthetic engineering fixture. The production reader validates and normalizes this response.
-      else if (selector === '0xc6a5026a') result = word(BigInt('0x' + call.data.slice(138, 202)) * 500_000_000n);
-      else if (execution && selector === '0xdd62ed3e') result = word(at(params[1]).allowance);
+      else if (selector === '0xc6a5026a') {
+        // No route for this size: the quoter reverts (a JSON-RPC error, not an outage the client would retry).
+        if (quotesUnavailable) { response.setHeader('content-type', 'application/json'); response.end(JSON.stringify({ jsonrpc: '2.0', id, error: { code: 3, message: 'execution reverted' } })); return; }
+        const amount = BigInt('0x' + call.data.slice(138, 202));
+        result = word(tokenIn(call.data) === profile.weth ? amount / RATE : amount * RATE);
+      }
+      else if (execution && selector === '0xdd62ed3e') result = word(call.to.toLowerCase() === profile.weth ? at(params[1]).allowanceWeth : at(params[1]).allowance);
       else if (execution && selector === '0x70a08231') result = word(call.to.toLowerCase() === profile.usdc ? at(params[1]).input : at(params[1]).output);
       else throw Error('READ_METHOD_DENIED');
     } else throw Error('READ_METHOD_DENIED');
