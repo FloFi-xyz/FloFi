@@ -8,6 +8,8 @@ import { WalletPendingNotice } from './wallet-pending-notice';
 export function CanvasLifecycleAction(props: ExecutionControlsState & {
   controls: ExecutionControls; simulate?: () => void | Promise<void>; simulationDisabled?: boolean;
   simulationReason?: string | null;
+  /** BUILD-FLOFI-CHAT-E2E-FIX-002: which step of a sequence this control serves (a result never stands for the whole workflow). */
+  sequenceNote?: string | null;
   onExecute?: () => void; workflowName?: string;
 }) {
   const { t, language } = useLocale();
@@ -24,6 +26,7 @@ export function CanvasLifecycleAction(props: ExecutionControlsState & {
     if (next.kind === 'recover') c.checkStatus();
   }
   return <div className="canvas-lifecycle-control">
+    {props.sequenceNote && <p className="canvas-sequence-note" role="note">{props.sequenceNote}</p>}
     {/* UX-003: simulating / waiting for the wallet keep the CTA position as a locked, active button; a duplicate request cannot start. */}
     {action.processing ? <button data-lifecycle-action="processing" type="button" className="primary canvas-cta-processing" disabled aria-busy="true"><span className="canvas-cta-spinner" aria-hidden="true"/>{t(action.label)}</button>
       : action.kind === 'status' ? <span role="status" data-lifecycle-action="status">{t(action.label)}</span> : <button data-lifecycle-action={action.kind} type="button" className="primary" disabled={disabled}

@@ -13,6 +13,12 @@ test.skip(process.env.FLOFI_SWAP_EXECUTION_E2E !== 'MOCKED_LOOPBACK_ONLY', 'Requ
 test.setTimeout(90_000);
 const stage = (page: Page, name: 'Build' | 'Simulate' | 'Execute') => page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name, exact: true });
 const summary = (page: Page) => page.locator('.execution-summary');
+/** BUILD-FLOFI-CHAT-E2E-FIX-002: the chat-first summaries are optional, collapsed details; Create new workflow stays visible beside them. */
+const createNew = (page: Page) => page.locator('.execute-actions.stage-actions').getByRole('button', { name: 'Create new workflow', exact: true });
+async function openDetails(page: Page, selector: '.execution-details' | '.simulation-details') {
+  const details = page.locator(selector);
+  if (!await details.evaluate(element => (element as HTMLDetailsElement).open)) await details.locator(':scope > summary').click();
+}
 const cta = (page: Page) => page.locator('.canvas-primary-action');
 const processing = (page: Page) => cta(page).locator('[data-lifecycle-action="processing"]');
 /** BUILD-SOLANA-TRANSFER-UX-001: the one owner action after a simulation (Review acceptance, then the wallet request). */
@@ -168,8 +174,8 @@ test('UX-003/UX-004: completed run — locked CTAs, Return to Build keeps the wo
   await next.click(); await expectWaitingForWallet(page, owner, 2);
   await owner.confirm();
   await expect(summary(page)).toContainText('Execution completed'); await expect(processing(page)).toHaveCount(0);
-  const create = summary(page).getByRole('button', { name: 'Create new workflow', exact: true });
-  await expect(create).toBeVisible(); await expect(summary(page).getByRole('button', { name: 'Return to Build', exact: true })).toBeVisible();
+  const create = createNew(page);
+  await expect(create).toBeVisible(); await openDetails(page, '.execution-details'); await expect(summary(page).getByRole('button', { name: 'Return to Build', exact: true })).toBeVisible();
   // Return to Build keeps editing the same workflow; the result stays available.
   const authored = await readWorkflowIr(page);
   await summary(page).getByRole('button', { name: 'Return to Build', exact: true }).click();
@@ -183,7 +189,7 @@ test('UX-003/UX-004: completed run — locked CTAs, Return to Build keeps the wo
   expect(owner.requested()).toBe(2);
   await stage(page, 'Execute').click(); await expect(summary(page)).toContainText('Execution completed');
   const before = { workflowId: (JSON.parse(authored) as { workflowId: string }).workflowId, requested: owner.requested(), sends: await owner.sends() };
-  await summary(page).getByRole('button', { name: 'Create new workflow', exact: true }).click();
+  await createNew(page).click();
   await expectCleanNewWorkflow(page, owner, before);
   expect((await walletRequests(page)).filter(method => method === 'eth_sendTransaction')).toHaveLength(2);
   expect(errors).toEqual([]); networkGuard.assertClean();
@@ -197,7 +203,7 @@ test('UX-003/UX-004: a declined wallet request resolves the locked CTA and offer
   await expect(summary(page)).toContainText('Transaction not submitted'); await expect(processing(page)).toHaveCount(0);
   expect(await owner.sends()).toBe(0);
   const before = { workflowId: (JSON.parse(await readWorkflowIr(page)) as { workflowId: string }).workflowId, requested: owner.requested(), sends: await owner.sends() };
-  await summary(page).getByRole('button', { name: 'Create new workflow', exact: true }).click();
+  await createNew(page).click();
   await expectCleanNewWorkflow(page, owner, before);
   expect(errors).toEqual([]); networkGuard.assertClean();
 });
@@ -226,7 +232,7 @@ test('BUILD-FIX-UX-001: declined request → Create new workflow → same swap �
   // A definitively declined request is a concluded attempt, never a recovery: no "Recover execution", and starting over is offered.
   await expect(cta(page)).not.toContainText(/Recover execution|Execution needs attention/);
   await expect(cta(page).getByRole('button', { name: 'Simulate again', exact: true })).toBeEnabled();
-  await summary(page).getByRole('button', { name: 'Create new workflow', exact: true }).click();
+  await createNew(page).click();
   await expectCleanNewWorkflow(page, owner, { workflowId: first.workflowId, requested: 1, sends: 0 });
   await buildSwap(page);
   const fresh = JSON.parse(await readWorkflowIr(page)) as { workflowId: string; revision: number };
@@ -267,7 +273,7 @@ test('BUILD-FIX-UX-001: a declined request restored after reload offers Simulate
   expect((JSON.parse(await readWorkflowIr(page)) as { workflowId: string }).workflowId).toBe(authored.workflowId);
   await stage(page, 'Execute').click();
   await expect(summary(page)).toContainText('Transaction not submitted');
-  await expect(summary(page).getByRole('button', { name: 'Create new workflow', exact: true })).toBeVisible();
+  await expect(createNew(page)).toBeVisible();
   expect(owner.requested()).toBe(1); expect(await owner.sends()).toBe(0);
   // Navigating away and back does not resurrect recovery either.
   await stage(page, 'Build').click(); await stage(page, 'Simulate').click();
@@ -288,6 +294,7 @@ async function simulateAndReadLimits(page: Page) {
   const simulate = cta(page).getByRole('button', { name: /^Simulate (workflow|again)$/ });
   await expect(simulate).toBeEnabled({ timeout: 30_000 }); await simulate.click();
   await expect(authorize(page)).toBeEnabled({ timeout: 30_000 });
+  await openDetails(page, '.simulation-details');
   const text = await page.locator('main').innerText();
   // The Review & Authorization disclosure lists the Strategy Manifest's execution limits.
   const review = page.locator('details#simulation-review');

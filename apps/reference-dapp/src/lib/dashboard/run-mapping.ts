@@ -51,8 +51,9 @@ export function projectDashboardRun(run: DashboardRun, progress: ExecutionLifecy
   } else if (['FAILED', 'REVERTED'].includes(run.status) && !run.needsObservation) {
     // A summary alone cannot establish whether earlier actions completed.
     status = 'Needs attention'; message = 'A failed action is recorded. Open the run to review any earlier completed actions.';
-  } else if (['PREPARED', 'SIMULATED', 'AUTHORIZED', 'REVIEWED'].includes(run.status)) {
-    status = run.needsObservation || unproven ? 'Unresolved' : 'Not started'; message = run.needsObservation || unproven ? 'A recorded request still needs verification. No transaction is repeated.' : 'The run has no recorded execution start.';
+  } else if (['PREPARED', 'SIMULATED', 'AUTHORIZED', 'REVIEWED', 'QUOTED'].includes(run.status)) {
+    status = run.needsObservation || unproven ? 'Unresolved' : 'Not started';
+    message = run.needsObservation || unproven ? 'A recorded request still needs verification. No transaction is repeated.' : 'Simulated or reviewed only: no wallet request was made, so nothing was sent.';
   } else if (['RESERVED', 'SUBMITTING', 'PENDING', 'HASH', 'SOURCE_CONFIRMED', 'IN_FLIGHT', 'DESTINATION_OBSERVED', 'SIGNED', 'POSTING', 'POSTED', 'OPEN', 'SETTLING', 'FULFILLED', 'PARTIALLY_FILLED'].includes(run.status)) {
     status = 'In progress'; message = 'The recorded execution is still awaiting its final outcome.';
   } else if (run.status === 'CONFIRMED') {
@@ -64,8 +65,13 @@ export function projectDashboardRun(run: DashboardRun, progress: ExecutionLifecy
   else if (status === 'Transaction not submitted') attention.push('Wallet confirmation was declined');
   else if (status === 'Needs attention') attention.push(message);
   if (run.needsObservation) attention.push('Awaiting an execution status check');
-  if (run.attentionRequired && !attention.length) attention.push('This execution record needs attention');
-  if (run.errorCode && !attention.length) attention.push('A recorded issue needs review');
+  // BUILD-FLOFI-CHAT-E2E-FIX-002: a run that never made a wallet request has nothing to attend to on chain: its recorded issue (an expired quote,
+  // a refused simulation) explains why it did not start, and is never presented as a pending execution that needs attention.
+  if (status === 'Not started') { if (run.errorCode || run.attentionRequired) message = 'The simulation or Review recorded an issue before any wallet request, so nothing was sent.'; }
+  else {
+    if (run.attentionRequired && !attention.length) attention.push('This execution record needs attention');
+    if (run.errorCode && !attention.length) attention.push('A recorded issue needs review');
+  }
   attention.push(...(progress?.evidence?.attention ?? []));
   return { run, title, status, message, attention: [...new Set(attention)],
     networks: progress ? [...new Set(progress.steps.flatMap(step => step.operations.map(operation => operation.chain)).filter(Boolean))].map(shellChainLabel) : [],

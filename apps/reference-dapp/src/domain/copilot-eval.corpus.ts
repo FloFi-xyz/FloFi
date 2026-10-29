@@ -57,8 +57,11 @@ export const COPILOT_EVAL_CASES: readonly EvalCase[] = [
     expect: P('ADD_REPAY', { sentence: 'repay 1 USDC to Aave on Base Sepolia' }) }] },
   { id: 'D04', category: 'direct', language: 'EN', turns: [{ user: 'Take 3 USDC back out of Aave on Base Sepolia', model: intent.action(act.lending('WITHDRAW', { asset: 'USDC', amount: '3', ...onSepolia })),
     expect: P('ADD_WITHDRAW', { contains: ['Recipient: your connected wallet, bound at Review.'] }) }] },
+  // BUILD-FLOFI-CHAT-E2E-FIX-002: native ETH is never swapped as WETH; the request is refused with the missing capability.
   { id: 'D05', category: 'direct', language: 'EN', turns: [{ user: 'Swap 100 USDC to ETH on Base', model: intent.action(act.swap({ network: 'BASE', inputAsset: 'USDC', outputAsset: 'ETH', amount: '100' })),
-    expect: P('ADD_SWAP', { sentence: 'swap 100 USDC to WETH on Base slippage 100 bps', contains: ['WETH (wrapped ETH)', 'Slippage 1% (100 bps) (Flofi default)'] }) }] },
+    expect: U(['Native ETH swaps are not available in FloFi yet', 'FloFi never swaps it in place of ETH']) }] },
+  { id: 'D05W', category: 'direct', language: 'EN', turns: [{ user: 'Swap 100 USDC to WETH on Base', model: intent.action(act.swap({ network: 'BASE', inputAsset: 'USDC', outputAsset: 'WETH', amount: '100' })),
+    expect: P('ADD_SWAP', { sentence: 'swap 100 USDC to WETH on Base slippage 100 bps', contains: ['Slippage 1% (100 bps) (Flofi default)'] }) }] },
   { id: 'D06', category: 'direct', language: 'EN', turns: [{ user: 'Swap 0.001 WETH to USDC on Base Sepolia',
     model: intent.action(act.swap({ network: 'BASE_SEPOLIA', inputAsset: 'WETH', outputAsset: 'USDC', amount: '0.001' })),
     expect: P('ADD_TESTNET_SWAP', { sentence: 'swap 0.001 WETH to USDC on Base Sepolia slippage 100 bps' }) }] },
@@ -109,7 +112,7 @@ export const COPILOT_EVAL_CASES: readonly EvalCase[] = [
     { user: '10', expect: Q({ local: true, options: ['Base Sepolia', 'Base', 'Arbitrum One', 'Ethereum'] }) },
     { user: 'Base Sepolia', expect: P('ADD_SUPPLY', { local: true, sentence: 'supply 10 USDC to Aave on Base Sepolia' }) }] },
   { id: 'C03', category: 'clarification', language: 'EN', turns: [
-    { user: 'Swap 5 USDC to ETH', model: intent.action(act.swap({ inputAsset: 'USDC', outputAsset: 'ETH', amount: '5' })),
+    { user: 'Swap 5 USDC to WETH', model: intent.action(act.swap({ inputAsset: 'USDC', outputAsset: 'WETH', amount: '5' })),
       expect: Q({ contains: ['still needs the network'], options: ['Base', 'Base Sepolia', 'Arbitrum One', 'Ethereum', 'Ethereum Sepolia', 'Solana', 'Solana Devnet', 'Robinhood Chain'] }) },
     { user: 'Base Sepolia', expect: P('ADD_TESTNET_SWAP', { local: true }) }] },
   { id: 'C04', category: 'clarification', language: 'EN', turns: [
@@ -175,15 +178,15 @@ export const COPILOT_EVAL_CASES: readonly EvalCase[] = [
 
   // ── Multi-turn ─────────────────────────────────────────────────────────────────────────────────────────────────────
   { id: 'M01', category: 'multi-turn', language: 'EN', turns: [
-    { user: 'Swap 3 USDC to ETH on Base Sepolia', model: intent.action(swapTestnet('3')), expect: P('ADD_TESTNET_SWAP') },
+    { user: 'Swap 3 USDC to WETH on Base Sepolia', model: intent.action(swapTestnet('3', { outputAsset: 'WETH' })), expect: P('ADD_TESTNET_SWAP') },
     { user: 'Actually make it 2 USDC', model: intent.edit({ amount: '2' }),
       expect: P('ADD_TESTNET_SWAP', { sentence: 'swap 2 USDC to WETH on Base Sepolia slippage 100 bps', contains: ['new version of the pending proposal', 'Kept from the pending proposal'] }) }] },
   { id: 'M02', category: 'multi-turn', language: 'PT', turns: [
-    { user: 'Troca 3 USDC por ETH na Base Sepolia', model: intent.action(swapTestnet('3'), 'PT'), expect: P('ADD_TESTNET_SWAP') },
+    { user: 'Troca 3 USDC por WETH na Base Sepolia', model: intent.action(swapTestnet('3', { outputAsset: 'WETH' }), 'PT'), expect: P('ADD_TESTNET_SWAP') },
     { user: 'Na verdade, 2', model: intent.edit({ amount: '2' }, {}, 'PT'), expect: P('ADD_TESTNET_SWAP', { sentence: 'swap 2 USDC to WETH on Base Sepolia slippage 100 bps',
       contains: ['nova versão da proposta pendente'] }) }] },
   { id: 'M03', category: 'multi-turn', language: 'EN', turns: [
-    { user: 'Swap 3 USDC to ETH on Base Sepolia', model: intent.action(swapTestnet('3')), expect: P('ADD_TESTNET_SWAP') },
+    { user: 'Swap 3 USDC to WETH on Base Sepolia', model: intent.action(swapTestnet('3', { outputAsset: 'WETH' })), expect: P('ADD_TESTNET_SWAP') },
     { user: 'use 1% slippage instead', model: intent.edit({ slippageBps: '100' }), expect: P('ADD_TESTNET_SWAP', { sentence: 'swap 3 USDC to WETH on Base Sepolia slippage 100 bps' }) }] },
   { id: 'M04', category: 'multi-turn', language: 'EN', turns: [
     { user: 'Please move 2 USDC from Base Sepolia to Arbitrum Sepolia', model: intent.action(bridgeTestnet('2')), expect: P('ADD_ROUTER_BRIDGE') },
@@ -387,7 +390,7 @@ export const COPILOT_EVAL_CASES: readonly EvalCase[] = [
   { id: 'L01', category: 'language', language: 'MIXED', turns: [{ user: 'Faz supply de 2 USDC na Base Sepolia', model: intent.action(sup('2', onSepolia), 'PT'),
     expect: P('ADD_SUPPLY', { contains: ['Interpretado como “supply 2 USDC to Aave on Base Sepolia”'] }) }] },
   { id: 'L02', category: 'language', language: 'PT', turns: [{ user: 'Troca 5 USDC por ETH na Base Sepolia', model: intent.action(swapTestnet('5'), 'PT'),
-    expect: P('ADD_TESTNET_SWAP', { contains: ['ETH embrulhado'] }) }] },
+    expect: U(['Swaps de ETH nativo ainda não estão disponíveis', 'nunca o troca no lugar de ETH']) }] },
   { id: 'L03', category: 'language', language: 'MIXED', turns: [{ user: 'Swap 5 USDC pra ETH', model: intent.action(act.swap({ inputAsset: 'USDC', outputAsset: 'ETH', amount: '5' }), 'PT'),
     expect: Q({ contains: ['o Flofi ainda precisa saber: a rede'], options: ['Base', 'Base Sepolia', 'Arbitrum One', 'Ethereum', 'Ethereum Sepolia', 'Solana', 'Solana Devnet', 'Robinhood Chain'] }) }] },
   { id: 'L04', category: 'language', language: 'MIXED', setup: [FIXTURE.supply], turns: [{ user: 'Muda o amount para 3', model: intent.edit({ amount: '3' }, {}, 'PT'),
@@ -397,7 +400,7 @@ export const COPILOT_EVAL_CASES: readonly EvalCase[] = [
     { user: 'Faz um supply de 2 USDC usando a mesma network', before: s => s.dismiss(), model: intent.action(sup('2'), 'PT', { from: NO_TARGET, fields: ['network'] }),
       expect: P('ADD_SUPPLY', { contains: ['Mantido da sua proposta anterior'] }) }] },
   { id: 'L06', category: 'language', language: 'PT', turns: [{ user: 'Coloca 2 USDC na Aave na Base Sepolia', model: intent.action(sup('2', onSepolia), 'PT'), expect: P('ADD_SUPPLY') }] },
-  { id: 'L07', category: 'language', language: 'PT', turns: [{ user: 'Troca 1,5 USDC por ETH na Base Sepolia', model: intent.action(swapTestnet('1.5'), 'PT'),
+  { id: 'L07', category: 'language', language: 'PT', turns: [{ user: 'Troca 1,5 USDC por WETH na Base Sepolia', model: intent.action(swapTestnet('1.5', { outputAsset: 'WETH' }), 'PT'),
     expect: P('ADD_TESTNET_SWAP', { sentence: 'swap 1.5 USDC to WETH on Base Sepolia slippage 100 bps' }) }] },
   { id: 'L08', category: 'language', language: 'PT', turns: [{ user: 'Coloca 1.000 USDC na Aave na Base Sepolia', model: intent.action(sup('1000', onSepolia), 'PT'),
     expect: P('ADD_SUPPLY', { sentence: 'supply 1000 USDC to Aave on Base Sepolia' }) }] },
@@ -417,7 +420,7 @@ export const COPILOT_EVAL_CASES: readonly EvalCase[] = [
     { user: FIXTURE.testnetSwap, expect: EXACT },
     { user: 'Agora coloca 2 USDC na Aave na mesma rede', before: s => s.dismiss(), model: intent.action(sup('2'), 'PT', { from: NO_TARGET, fields: ['network'] }),
       expect: P('ADD_SUPPLY', { sentence: 'supply 2 USDC to Aave on Base Sepolia', contains: ['Mantido da sua proposta anterior'] }) }] },
-  { id: 'L15', category: 'language', language: 'MIXED', turns: [{ user: 'Swap 5 USDC pra ETH na base sepolia', model: intent.action(swapTestnet('5'), 'PT'),
+  { id: 'L15', category: 'language', language: 'MIXED', turns: [{ user: 'Swap 5 USDC pra WETH na base sepolia', model: intent.action(swapTestnet('5', { outputAsset: 'WETH' }), 'PT'),
     expect: P('ADD_TESTNET_SWAP', { contains: ['Interpretado como'] }) }] },
   { id: 'L16', category: 'language', language: 'PT', setup: [FIXTURE.testnetSwap],
     facts: { capability: { environment: 'PUBLIC_TESTNET', executionSupported: true, executionReady: false, evidenceCeiling: null, blockers: [{ nodeId: 'node-002', code: 'SIMULATION_REQUIRED' }] } },

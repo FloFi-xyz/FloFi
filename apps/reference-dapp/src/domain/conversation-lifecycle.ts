@@ -19,6 +19,7 @@ import { shellChainLabel } from './product-shell';
 import type { Command } from './commands';
 import { conversationCopy } from './conversation-copy';
 import { portuguese } from '../i18n/pt';
+import type { SequencePresentation } from './sequence-presentation';
 
 export type ConversationLanguage = 'EN' | 'PT';
 /** Conceptual chat states. They name what the conversation waits for; the runtimes' own state machines stay the source of truth. */
@@ -28,7 +29,14 @@ export type ConversationPhase = 'AUTHORING' | 'AWAITING_MISSING_FIELDS' | 'READY
 export type LifecycleView = {
   readonly workflow: Workflow; readonly context: ReviewContext; readonly source: SimulationSource; readonly authorization: ReviewAuthorization;
   readonly wallet: ReviewWallet; readonly progress: ExecutionLifecycle | null | undefined; readonly invalidWorkflow: boolean;
+  /**
+   * BUILD-FLOFI-CHAT-E2E-FIX-002: a workflow of several independent owner-wallet actions. `workflow` (and so the Review, binding and execution
+   * record) is then the CURRENT step alone; this lists every canonical action with its state, how a funded step is funded, and why a step
+   * cannot run (`issue`). Null for a one-action workflow or an existing composition.
+   */
+  readonly sequence?: ConversationSequence | null | undefined;
 };
+export type ConversationSequence = SequencePresentation & { readonly issue: string | null; readonly awaitingDelivery: boolean };
 /** Exactly what one conversational confirmation is about. */
 export type ReviewBinding = {
   readonly workflowId: string; readonly revision: number; readonly workflowHash: string; readonly source: SimulationSource['kind'];
@@ -41,7 +49,9 @@ export type PendingQuestion =
   | { readonly kind: 'CONFIRM_WORKFLOW'; readonly binding: ReviewBinding }
   | { readonly kind: 'CONFIRM_EXECUTION'; readonly binding: ReviewBinding }
   /** The next never-attempted wallet request of a run already authorized (e.g. the swap after a confirmed approval). */
-  | { readonly kind: 'CONFIRM_CONTINUE'; readonly binding: ReviewBinding; readonly runKey: string | null; readonly fingerprint: string };
+  | { readonly kind: 'CONFIRM_CONTINUE'; readonly binding: ReviewBinding; readonly runKey: string | null; readonly fingerprint: string }
+  /** BUILD-FLOFI-CHAT-E2E-FIX-002: a Canvas card has a typed amount that was never applied; apply it (YES) or discard it (NO) before the Review. */
+  | { readonly kind: 'RESOLVE_EDIT'; readonly nodeId: string; readonly workflowId: string; readonly revision: number };
 export type Answer = 'YES' | 'NO' | 'UNCLEAR';
 
 const sameAccount = (a: string, b: string) => a === b || /^0x/i.test(a) && a.toLowerCase() === b.toLowerCase();
@@ -90,6 +100,10 @@ const CONFIRM_EXECUTION = pattern(['yes', 'yes please', 'yes execute', 'yes exec
   'sim executa', 'sim execute', 'executar', 'executa', 'executar agora', 'execute agora', 'pode executar', 'sim pode executar', 'executar workflow', 'executar o workflow',
   'executar o fluxo', 'sim executar agora']);
 const CONTINUE = pattern(['yes', 'yes please', 'continue', 'yes continue', 'continue to wallet', 'yes continue to wallet', 'sim', 'continuar', 'sim continuar', 'continua', 'pode continuar']);
+const APPLY_EDIT = pattern(['yes', 'yes please', 'apply', 'apply it', 'apply the edit', 'apply the amount', 'yes apply', 'yes apply it', 'use it', 'sim', 'aplicar', 'aplica',
+  'aplicar a edição', 'aplicar a edicao', 'aplicar o montante', 'sim aplicar', 'sim aplica', 'usar']);
+const DISCARD_EDIT = pattern(['discard', 'discard it', 'discard the edit', 'discard edit', 'no discard', 'drop it', 'descartar', 'descarta', 'descartar a edição',
+  'descartar a edicao', 'descartar edição', 'descartar edicao', 'não descartar', 'nao descartar']);
 const NEXT_REVIEW = pattern(['review', 'review workflow', 'review my workflow', 'review the workflow', 'review this workflow', 'lets review', 'let us review',
   'review it', 'simulate', 'simulate workflow', 'simulate my workflow', 'simulate the workflow', 'run simulation', 'revisar', 'revisar workflow', 'revisar o workflow',
   'revisar meu workflow', 'revisar fluxo', 'revisar o fluxo', 'revisar meu fluxo', 'revise', 'revise o workflow', 'revise meu workflow', 'vamos revisar', 'simular',
@@ -102,11 +116,12 @@ const STATUS_REQUEST = pattern(['status', 'check status', 'execution status', 'w
   'verificar status', 'ver status', 'status da execução', 'status da execucao', 'verificar execução', 'verificar execucao', 'atualizar status']);
 const UNDO_REQUEST = pattern(['undo', 'undo that', 'undo this change', 'undo last change', 'desfazer', 'desfaz', 'desfazer isso', 'desfazer esta alteração', 'desfazer esta alteracao',
   'desfazer última alteração', 'desfazer ultima alteracao']);
-const PT_LIFECYCLE = /\b(?:sim|não|nao|confirmo|confirmar|executar|executa|revisar|revise|simular|adicionar|outra|cancelar|verificar|desfazer|continuar|agora|fluxo)\b/;
+const PT_LIFECYCLE = /\b(?:sim|não|nao|confirmo|confirmar|executar|executa|revisar|revise|simular|adicionar|outra|cancelar|verificar|desfazer|continuar|agora|fluxo|aplicar|aplica|descartar|descarta)\b/;
 
 /** An explicit answer to FloFi's open question. Anything else — extra content, an edit, a hedge — is UNCLEAR and changes nothing. */
 export function classifyAnswer(text: string, question: PendingQuestion['kind']): Answer {
   const value = normalize(text);
+  if (question === 'RESOLVE_EDIT') return DISCARD_EDIT.test(value) ? 'NO' : APPLY_EDIT.test(value) ? 'YES' : NO_WORDS.test(value) ? 'NO' : 'UNCLEAR';
   if (NO_WORDS.test(value)) return 'NO';
   const yes = question === 'CONFIRM_WORKFLOW' ? CONFIRM_WORKFLOW : question === 'CONFIRM_EXECUTION' ? CONFIRM_EXECUTION : question === 'CONFIRM_CONTINUE' ? CONTINUE : null;
   return yes?.test(value) ? 'YES' : 'UNCLEAR';
@@ -120,7 +135,7 @@ export function lifecycleRequest(text: string): 'REVIEW' | 'ADD' | 'EXECUTE' | '
 /** The language of a short lifecycle message (PT words decide), else the interface language. */
 export function answerLanguage(text: string, fallback: ConversationLanguage): ConversationLanguage {
   const value = normalize(text);
-  return PT_LIFECYCLE.test(value) ? 'PT' : /\b(?:yes|no|confirm|execute|review|simulate|add|another|cancel|status|undo|continue|run)\b/.test(value) ? 'EN' : fallback;
+  return PT_LIFECYCLE.test(value) ? 'PT' : /\b(?:yes|no|confirm|execute|review|simulate|add|another|cancel|status|undo|continue|run|apply|discard)\b/.test(value) ? 'EN' : fallback;
 }
 
 // ── Phase ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -163,12 +178,37 @@ export type ConversationReview = {
   readonly unknown: readonly string[];
   /** The simulation's own reason when it cannot be used (a failed or refused simulation), else null. */
   readonly simulationProblem: string | null;
+  /** BUILD-FLOFI-CHAT-E2E-FIX-002: every canonical action of a sequence (the simulated one is `steps`), or null. */
+  readonly sequence: ConversationSequence | null;
+  /**
+   * The estimated total cost: the sum of every itemized fee line per asset (exact decimal sums of the simulation's own values, nothing converted
+   * or estimated), and what it cannot include (a cost line the simulation does not provide, or later steps not simulated yet).
+   */
+  readonly totals: { readonly known: readonly string[]; readonly excludes: readonly { readonly text: string; readonly parameters: readonly (string | number)[] }[] };
 };
+/** Exact per-asset sums of decimal amounts written "<number> <symbol>"; a value that is not one is left out (and reported by the caller). */
+export function sumByAsset(values: readonly string[]): { readonly sums: readonly string[]; readonly unreadable: number } {
+  const totals = new Map<string, { units: bigint; scale: number }>();
+  let unreadable = 0;
+  for (const value of values) {
+    const match = /^(\d+)(?:\.(\d+))? (\S.*)$/.exec(value.trim());
+    if (!match) { unreadable += 1; continue; }
+    const fraction = match[2] ?? '', symbol = match[3]!, units = BigInt(match[1]! + fraction), current = totals.get(symbol) ?? { units: 0n, scale: 0 };
+    const scale = Math.max(current.scale, fraction.length);
+    totals.set(symbol, { units: current.units * 10n ** BigInt(scale - current.scale) + units * 10n ** BigInt(scale - fraction.length), scale });
+  }
+  const sums = [...totals].map(([symbol, { units, scale }]) => {
+    const padded = units.toString().padStart(scale + 1, '0'), whole = scale ? padded.slice(0, -scale) : padded, fraction = scale ? padded.slice(-scale).replace(/0+$/, '') : '';
+    return `${whole}${fraction ? `.${fraction}` : ''} ${symbol}`;
+  });
+  return { sums, unreadable };
+}
 export function conversationReview(view: LifecycleView, now = Date.now()): ConversationReview {
-  const simulation = projectSimulation(view.workflow, view.context, view.source, now), current = review(view, now);
+  const simulation = projectSimulation(view.workflow, view.context, view.source, now), current = review(view, now), sequence = view.sequence ?? null;
   const steps = simulation.steps.map(step => {
     const reviewed = current.steps.find(item => item.id === step.id);
-    return { number: step.number, action: step.action, input: step.input, pair: step.pair, networks: step.networks.join(' → ') || reviewed?.network || '—',
+    // A sequence simulates its current step alone: number it as that step of the whole workflow.
+    return { number: sequence ? sequence.current : step.number, action: step.action, input: step.input, pair: step.pair, networks: step.networks.join(' → ') || reviewed?.network || '—',
       provider: step.provider ?? reviewed?.provider ?? null, result: step.result, resultLabel: step.resultLabel, minimum: step.minimum,
       slippage: step.slippage ?? step.configuredSlippage, priceImpact: step.priceImpact, details: step.details };
   });
@@ -176,12 +216,15 @@ export function conversationReview(view: LifecycleView, now = Date.now()): Conve
   if (!fees.some(line => /network|gas/i.test(line.label))) unknown.push('Network cost');
   if (!fees.some(line => /provider|route fee|bridge/i.test(line.label))) unknown.push('Provider fees');
   if (!fees.some(line => /FloFi fee/i.test(line.label))) unknown.push('FloFi fee');
+  const summed = sumByAsset(fees.map(line => line.value)), later = sequence ? sequence.steps.filter(step => step.state === 'NEXT').map(step => step.number) : [];
+  const excludes = [...unknown.map(text => ({ text, parameters: [] })), ...summed.unreadable ? [{ text: 'Cost lines in another unit', parameters: [] }] : [],
+    ...later.length ? [{ text: later.length === 1 ? 'Step {0} (simulated after the steps before it)' : 'Steps {0} (simulated after the steps before them)', parameters: [later.join(', ')] }] : []];
   const planned = view.progress && !view.progress.started ? view.progress.steps.flatMap(step => step.operations.map(operation => operation.title)) : [];
   return { status: current.status, label: current.label, message: current.status === 'ready' || current.status === 'approved' ? simulation.message : current.message,
     canConfirm: current.status === 'ready' || current.bindingValid, steps, fees, limits: current.limits, warnings: [...current.warnings],
     approvals: current.approvals.map(({ symbol, value, spender, network }) => ({ symbol, value, spender, network })), walletRequests: planned,
     account: view.wallet.account, network: view.wallet.chain ? shellChainLabel(view.wallet.chain) : null, expiresAt: current.expiresAt, unknown,
-    simulationProblem: simulation.status === 'blocked' ? simulation.message : null };
+    simulationProblem: simulation.status === 'blocked' ? simulation.message : null, sequence, totals: { known: summed.sums, excludes } };
 }
 
 // ── Execution progress (the durable record's projection, never chat text) ──────────────────────────────────────────────────────────────
@@ -190,6 +233,8 @@ export type ConversationExecution = {
   readonly current: string | null;
   readonly operations: readonly (Pick<LifecycleOperation, 'id' | 'title' | 'label' | 'state' | 'hash' | 'explorer' | 'chain'> & { readonly network: string })[];
   readonly received: readonly SimulationLine[]; readonly costs: readonly SimulationLine[]; readonly final: boolean;
+  /** BUILD-FLOFI-CHAT-E2E-FIX-002: the sequence step this run executes, and how many steps the workflow has (null: not a sequence). */
+  readonly sequenceStep: { readonly current: number; readonly total: number; readonly action: string; readonly completed: number } | null;
 };
 export function conversationExecution(view: LifecycleView): ConversationExecution | null {
   const live = currentExecution(view.progress);
@@ -198,7 +243,9 @@ export function conversationExecution(view: LifecycleView): ConversationExecutio
   const operations = live.steps.flatMap(step => step.operations).map(({ id, title, label, state, hash, explorer, chain }) => ({ id, title, label, state, hash, explorer, chain, network: shellChainLabel(chain) }));
   const received = Object.values(live.evidence?.operations ?? {}).flatMap(operation => operation.values.filter(value => /received|deposited/i.test(value.label)));
   return { phase, label: result?.label ?? live.label, message: result?.message ?? live.message, completed: live.completed, total: live.steps.length,
-    current: live.active ? `${live.active.number}. ${live.active.action}` : null, operations, received, costs: live.evidence?.knownCosts ?? [], final: Boolean(result) };
+    current: live.active ? `${live.active.number}. ${live.active.action}` : null, operations, received, costs: live.evidence?.knownCosts ?? [], final: Boolean(result),
+    sequenceStep: view.sequence ? { current: view.sequence.current, total: view.sequence.total, action: view.sequence.steps[view.sequence.current - 1]?.action ?? '',
+      completed: view.sequence.steps.filter(step => step.state === 'COMPLETED').length } : null };
 }
 
 // ── Authoring changes the chat committed ────────────────────────────────────────────────────────────────────────────────────────────────

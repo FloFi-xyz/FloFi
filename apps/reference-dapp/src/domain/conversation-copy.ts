@@ -17,6 +17,16 @@ export type ConversationCopy = {
   readonly restored: string; readonly statusChecking: string; readonly statusUnavailable: string; readonly executionStartFailed: string; readonly checkStatus: string;
   readonly destructive: (steps: string) => string; readonly busy: string; readonly connectWallet: string; readonly switchNetwork: (network: string) => string;
   readonly approvalContext: string; readonly finished: string; readonly startNew: string; readonly positionPrepared: string; readonly noChange: string; readonly locked: string;
+  // BUILD-FLOFI-CHAT-E2E-FIX-002: sequences of independent steps, unapplied Canvas edits and the wallet network switch.
+  readonly sequenceReviewReady: (current: number, total: number) => string; readonly confirmStep: (current: number, total: number) => string;
+  readonly executeStepQuestion: (current: number, total: number) => string;
+  readonly stepCompleted: (current: number, total: number, delivered: string | null) => string; readonly stepSimulatingNext: (next: number) => string;
+  readonly workflowCompleted: (total: number) => string; readonly awaitingDelivery: (current: number) => string;
+  readonly stepStopped: (current: number, total: number) => string;
+  readonly editPending: (step: number, action: string, value: string) => string; readonly applyEdit: string; readonly discardEdit: string;
+  readonly editApplied: string; readonly editDiscarded: string; readonly editRefused: (reason: string) => string; readonly editQuestion: string;
+  readonly switchNetworkFor: (wallet: string | null, network: string) => string; readonly switchFailed: (reason: string) => string; readonly switched: (network: string) => string;
+  readonly checkingProviders: string;
 };
 const en: ConversationCopy = {
   added: (action, detail) => `${action} added to your workflow: ${detail}.`,
@@ -68,6 +78,22 @@ const en: ConversationCopy = {
   positionPrepared: 'Prepared for Simulate. Nothing is removed until you review, confirm and sign in your wallet.',
   noChange: 'That step already has these values. Nothing changed.',
   locked: 'That step’s amount is locked. Unlock it in the step’s settings first. Nothing changed.',
+  sequenceReviewReady: (current, total) => `Here is the review of step ${current} of ${total}. Amounts are estimates from this simulation, not executed results. Each later step is simulated with a fresh quote after the steps before it reconcile, and you confirm it before your wallet is asked.`,
+  confirmStep: (current, total) => current === 1 ? 'Do you confirm this workflow?' : `Do you confirm step ${current} of ${total}?`,
+  executeStepQuestion: (current, total) => current === 1 && total === 1 ? 'Would you like to execute this workflow now?' : `Would you like to execute step ${current} of ${total} now?`,
+  stepCompleted: (current, total, delivered) => `Step ${current} of ${total} is completed and reconciled${delivered ? `: it delivered ${delivered}` : ''}.`,
+  stepSimulatingNext: next => `Simulating step ${next} with current provider data. Nothing is signed or sent.`,
+  workflowCompleted: total => `All ${total} steps of this workflow are completed and reconciled. Their records stay in your history.`,
+  awaitingDelivery: current => `Step ${current} is confirmed. FloFi is waiting for its reconciled delivery before the next step can be simulated. Nothing is resent.`,
+  stepStopped: (current, total) => `Step ${current} of ${total} did not complete, so the steps after it were not started. Steps before it stay executed.`,
+  editPending: (step, action, value) => `Step ${step} (${action}) has an amount you typed but did not apply: ${value}.`,
+  applyEdit: 'Apply it', discardEdit: 'Discard it',
+  editApplied: 'Applied. Any earlier simulation or review of this workflow no longer applies.', editDiscarded: 'Discarded. The step keeps its previous amount.',
+  editRefused: reason => `That amount cannot be applied: ${reason}`, editQuestion: 'Should I apply it before reviewing the workflow?',
+  switchNetworkFor: (wallet, network) => `Your wallet is on ${wallet ?? 'another network'}, but this step runs on ${network}. Switch your wallet to ${network}; I will continue the review once it is done.`,
+  switchFailed: reason => `The network switch did not complete: ${reason} Nothing was simulated or sent.`,
+  switched: network => `Your wallet is now on ${network}. Continuing the review.`,
+  checkingProviders: 'Checking which providers serve this workflow on this deployment. I will continue the review as soon as they answer.',
 };
 const pt: ConversationCopy = {
   added: (action, detail) => `Adicionado ao seu workflow: ${action} · ${detail}.`,
@@ -119,5 +145,21 @@ const pt: ConversationCopy = {
   positionPrepared: 'Preparado para a simulação. Nada é removido até você revisar, confirmar e assinar na sua carteira.',
   noChange: 'Essa etapa já tem esses valores. Nada mudou.',
   locked: 'O montante dessa etapa está travado. Destrave-o nas configurações da etapa primeiro. Nada mudou.',
+  sequenceReviewReady: (current, total) => `Esta é a revisão da etapa ${current} de ${total}. Os montantes são estimativas desta simulação, não resultados executados. Cada etapa seguinte é simulada com uma cotação nova depois que as anteriores forem reconciliadas, e você a confirma antes de a carteira ser chamada.`,
+  confirmStep: (current, total) => current === 1 ? 'Você confirma este workflow?' : `Você confirma a etapa ${current} de ${total}?`,
+  executeStepQuestion: (current, total) => current === 1 && total === 1 ? 'Quer executar este workflow agora?' : `Quer executar a etapa ${current} de ${total} agora?`,
+  stepCompleted: (current, total, delivered) => `A etapa ${current} de ${total} foi concluída e reconciliada${delivered ? `: entregou ${delivered}` : ''}.`,
+  stepSimulatingNext: next => `Simulando a etapa ${next} com dados atuais dos provedores. Nada é assinado nem enviado.`,
+  workflowCompleted: total => `As ${total} etapas deste workflow foram concluídas e reconciliadas. Os registros ficam no seu histórico.`,
+  awaitingDelivery: current => `A etapa ${current} está confirmada. A FloFi aguarda a entrega reconciliada antes de simular a etapa seguinte. Nada é reenviado.`,
+  stepStopped: (current, total) => `A etapa ${current} de ${total} não foi concluída, então as etapas seguintes não foram iniciadas. As etapas anteriores continuam executadas.`,
+  editPending: (step, action, value) => `A etapa ${step} (${action}) tem um montante digitado que não foi aplicado: ${value}.`,
+  applyEdit: 'Aplicar', discardEdit: 'Descartar',
+  editApplied: 'Aplicado. Qualquer simulação ou revisão anterior deste workflow deixou de valer.', editDiscarded: 'Descartado. A etapa mantém o montante anterior.',
+  editRefused: reason => `Esse montante não pode ser aplicado: ${reason}`, editQuestion: 'Devo aplicá-lo antes de revisar o workflow?',
+  switchNetworkFor: (wallet, network) => `A sua carteira está em ${wallet ?? 'outra rede'}, mas esta etapa é executada em ${network}. Mude a sua carteira para ${network}; eu continuo a revisão assim que terminar.`,
+  switchFailed: reason => `A troca de rede não foi concluída: ${reason} Nada foi simulado nem enviado.`,
+  switched: network => `A sua carteira agora está em ${network}. Continuando a revisão.`,
+  checkingProviders: 'Verificando quais provedores atendem este workflow nesta implantação. Continuo a revisão assim que responderem.',
 };
 export const conversationCopy = (language: ConversationLanguage): ConversationCopy => language === 'PT' ? pt : en;

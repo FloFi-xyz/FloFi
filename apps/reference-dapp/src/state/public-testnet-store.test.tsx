@@ -12,7 +12,7 @@ import { composeStrategy } from '../engine/strategy-engine';
 
 vi.mock('react', async original => ({ ...await original<typeof import('react')>(), ...(await import('../test-utils/hook-harness')).hookMocks }));
 const f = vi.hoisted(() => ({ workflow: null as Workflow | null, restore: vi.fn(), session: vi.fn() }));
-vi.mock('./workflow-store', () => ({ useWorkflow: () => ({ state: { workflow: f.workflow }, restoreWorkflow: f.restore }) }));
+vi.mock('./workflow-store', () => ({ useWorkflow: () => ({ state: { workflow: f.workflow }, runtimeWorkflow: f.workflow, restoreWorkflow: f.restore }) }));
 vi.mock('./build009-wallet-store', () => ({ useBuild009Wallet: () => ({ session: f.session }), injected: () => null }));
 vi.mock('../app/public-testnet-action', () => ({ publicAvailability: vi.fn(), publicStatus: vi.fn(), publicPrepare: vi.fn(), publicRefresh: vi.fn(),
   publicReview: vi.fn(), publicBegin: vi.fn(), publicObserve: vi.fn(), publicReport: vi.fn(), catalogSwapAvailability: vi.fn(async () => false) }));

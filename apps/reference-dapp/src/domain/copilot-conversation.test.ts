@@ -36,7 +36,7 @@ describe('bounded multi-turn conversation', () => {
   });
   it('fills a bare amount answer locally and keeps every other value grounded', () => {
     const session = new CopilotSession();
-    expect(session.say('Swap USDC to ETH on Base Sepolia', intent.action(act.swap({ network: 'BASE_SEPOLIA', inputAsset: 'USDC', outputAsset: 'ETH' })))).toMatchObject({ kind: 'CLARIFICATION' });
+    expect(session.say('Swap USDC to WETH on Base Sepolia', intent.action(act.swap({ network: 'BASE_SEPOLIA', inputAsset: 'USDC', outputAsset: 'WETH' })))).toMatchObject({ kind: 'CLARIFICATION' });
     expect(session.say('3')).toMatchObject({ kind: 'PROPOSAL', sentence: 'swap 3 USDC to WETH on Base Sepolia slippage 100 bps' });
   });
   it('edits an applied step through its typed edit command and leaves the workflow alone until Apply', () => {

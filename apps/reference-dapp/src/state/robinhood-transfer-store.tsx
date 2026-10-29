@@ -26,10 +26,10 @@ function errorValue(value: unknown): unknown {
   return { code: typeof v.code === 'number' || typeof v.code === 'string' ? v.code : null, message: typeof v.message === 'string' ? v.message.slice(0, 512) : null };
 }
 export function RobinhoodTransferProvider({ children }: { children: ReactNode }) {
-  const { state } = useWorkflow(), wallet = useBuild009Wallet();
+  const { runtimeWorkflow } = useWorkflow(), wallet = useBuild009Wallet();
   const [record, setRecord] = useState<TransferRecord | null>(null), [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null);
   const [signing, setSigning] = useState(false);
-  const workflow = state.workflow as unknown as SemanticWorkflow;
+  const workflow = runtimeWorkflow as unknown as SemanticWorkflow;
   const latest = useRef(workflow); latest.current = workflow;
   const latestWallet = useRef(wallet); latestWallet.current = wallet;
   const busyRef = useRef(false), operationEpoch = useRef(0);

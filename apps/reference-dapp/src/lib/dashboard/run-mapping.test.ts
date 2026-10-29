@@ -84,3 +84,15 @@ it('never presents PREPARED, refused or canceled summary records as an on-chain 
   expect(projectDashboardRun(run('PREPARED')).status).toBe('Not started');
   for (const status of ['CANCELLED', 'REJECTED']) expect(projectDashboardRun(run(status)).status).toBe('Transaction not submitted');
 });
+
+it('BUILD-FLOFI-CHAT-E2E-FIX-002: a run that never made a wallet request says nothing was sent, never "needs attention"', () => {
+  for (const status of ['PREPARED', 'QUOTED', 'AUTHORIZED']) {
+    const view = projectDashboardRun({ ...run(status), errorCode: 'UNIVERSAL_QUOTE_EXPIRED', attentionRequired: true });
+    expect(view.status).toBe('Not started');
+    expect(view.message).toBe('The simulation or Review recorded an issue before any wallet request, so nothing was sent.');
+    expect(view.attention).toEqual([]);
+  }
+  expect(projectDashboardRun(run('PREPARED')).message).toBe('Simulated or reviewed only: no wallet request was made, so nothing was sent.');
+  // A run that did reach the network keeps its attention.
+  expect(projectDashboardRun({ ...run('FAILED'), errorCode: 'X' }).attention.length).toBeGreaterThan(0);
+});

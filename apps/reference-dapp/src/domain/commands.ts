@@ -139,6 +139,10 @@ export function parseLocalCommand(text: string, workflow: Workflow, context: Rev
   // BUILD-BASE-001: the same sentences on every catalog network (Base: pinned USDC/WETH and the validated token list); a symbol takes the
   // catalog's own spelling (cbbtc → cbBTC). Base's USDC ⇄ WETH swap keeps its BUILD-002 sentence and command (handled below).
   const SYMBOL = assetReference;
+  // BUILD-FLOFI-CHAT-E2E-FIX-002: ETH and WETH are different assets. An EVM swap of native ETH is refused (no native swap or wrap/unwrap step
+  // exists yet); it is never authored as a WETH swap.
+  const nativeSwap = /^swap [0-9]+(?:\.[0-9]+)? (\S+) (?:for|to) (\S+) on (.+?)(?: (?:with )?slippage [0-9]+ bps)?$/i.exec(input);
+  if (nativeSwap && [nativeSwap[1], nativeSwap[2]].some(asset => /^eth$/i.test(asset!)) && !/solana/i.test(nativeSwap[3]!)) throw new Error('SWAP_NATIVE_ASSET_UNSUPPORTED');
   const catalogSwap = new RegExp(`^swap ([0-9]+(?:\\.[0-9]+)?) ${SYMBOL} (?:for|to) ${SYMBOL} on (${CATALOG_CHAT_NETWORKS})(?: (?:with )?slippage ([0-9]+) bps)?$`, 'i').exec(input);
   const swapNetwork = catalogSwap ? catalogNetworkOfChatName(catalogSwap[4]!) : null;
   const symbolOn = (chain: string, text: string) => authoringAssetSymbol(chain, text);

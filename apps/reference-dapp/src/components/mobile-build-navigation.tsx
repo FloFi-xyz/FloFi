@@ -7,6 +7,9 @@ export function MobileBuildNavigation({ stage = 'Build' }: { stage?: 'Build' | '
   const { t: tr } = useLocale();
   function focus(selector: string) {
     const target = document.querySelector<HTMLElement>(selector);
+    // BUILD-FLOFI-CHAT-E2E-FIX-002: a summary kept in a collapsed details surface is opened before it is focused.
+    const details = target?.closest('details');
+    if (details && !details.open) details.open = true;
     if (target && !target.hasAttribute('tabindex')) target.tabIndex = -1;
     target?.focus({ preventScroll: true });
     target?.scrollIntoView({ block: 'center', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' });

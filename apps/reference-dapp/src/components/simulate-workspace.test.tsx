@@ -12,7 +12,8 @@ import { WORKFLOW_STAGES } from '../domain/product-shell';
 import { SimulateWorkspace } from './simulate-workspace';
 
 const fixture = vi.hoisted(() => ({ store: null as unknown as ReturnType<typeof import('../state/workflow-store').useWorkflow> }));
-vi.mock('../state/workflow-store', () => ({ useWorkflow: () => fixture.store }));
+// A one-action workflow is its own runtime workflow (BUILD-FLOFI-CHAT-E2E-FIX-002), exactly as the store provides it.
+vi.mock('../state/workflow-store', () => ({ useWorkflow: () => ({ ...fixture.store, runtimeWorkflow: fixture.store.state.workflow }) }));
 vi.mock('./simulate-workflow-canvas', () => ({ SimulateWorkflowCanvas: ({ workflowName, primaryAction }: { workflowName: string; primaryAction?: ReactNode }) => createElement('div', { 'aria-label': 'Simulation workflow graph' }, workflowName, primaryAction) }));
 beforeEach(() => {
   fixture.store = { state: initialEditor(), context: createBaseSepoliaReviewContext() } as unknown as typeof fixture.store;

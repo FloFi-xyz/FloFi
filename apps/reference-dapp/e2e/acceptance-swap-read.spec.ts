@@ -28,6 +28,8 @@ for (const [network, chain] of [['Base Sepolia', '0x14a34'], ['Ethereum Sepolia'
     const workflow = workflows.at(-1)!, revision = await page.locator('.summary-bar').getAttribute('data-workflow-revision');
     const hash = hashArtifactBytes('semantic-workflow', new TextEncoder().encode(JSON.stringify(workflow)));
     await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Simulate', exact: true }).click();
+    // BUILD-FLOFI-CHAT-E2E-FIX-002: the chat-first Simulation Summary is an optional, collapsed details surface under the canvas.
+    await page.locator('.simulation-details > summary').click();
     const summary = page.getByRole('complementary', { name: 'Simulation Summary', exact: true });
     const review = page.locator('.review-authorization-details');
     const primary = page.locator('.canvas-primary-action');

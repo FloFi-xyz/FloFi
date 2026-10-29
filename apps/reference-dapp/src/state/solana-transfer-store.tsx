@@ -35,12 +35,12 @@ function walletCode(cause: unknown): string {
 const bounded = (cause: unknown) => { try { const v = cause as Record<string, unknown>; return { name: String(v?.name ?? ''), code: typeof v?.code === 'number' ? v.code : null, message: String(v?.message ?? cause).slice(0, 500) }; } catch { return { message: 'unreadable' }; } };
 
 export function SolanaTransferProvider({ children }: { children: ReactNode }) {
-  const { state } = useWorkflow(), solana = useJupiter();
+  const { runtimeWorkflow } = useWorkflow(), solana = useJupiter();
   const [record, setRecord] = useState<SolanaTransferRecord | null>(null), [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null);
   const [recovered, setRecovered] = useState(false), [signing, setSigning] = useState(false);
   const [recovering, setRecovering] = useState(true);
   const [enabled, setEnabled] = useState<Record<SolanaTransferCluster, boolean>>({ mainnet: false, devnet: false });
-  const workflow = state.workflow as unknown as SemanticWorkflow;
+  const workflow = runtimeWorkflow as unknown as SemanticWorkflow;
   const latest = useRef(workflow); latest.current = workflow;
   const latestSession = useRef(solana.session); latestSession.current = solana.session;
   const busyRef = useRef(false), operationEpoch = useRef(0);

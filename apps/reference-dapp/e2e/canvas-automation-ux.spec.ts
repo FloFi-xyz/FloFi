@@ -40,6 +40,8 @@ test('normal Simulate has concise safety details and no engineering or duplicate
   await installSupplyWallet(page); await page.goto('/app');
   await page.getByRole('button', { name: 'Add swap', exact: true }).click(); await configureCanvasAction(page, '1');
   await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Simulate', exact: true }).click();
+  // BUILD-FLOFI-CHAT-E2E-FIX-002: the chat-first Simulation Summary (and its embedded Review) is an optional, collapsed details surface.
+  await page.locator('.simulation-details > summary').click();
   const details = page.locator('.review-authorization-details');
   await details.locator('summary').click();
   for (const text of ['Wallet', 'Network', 'Permissions']) await expect(details).toContainText(text);

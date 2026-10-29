@@ -14,7 +14,7 @@ import { JupiterProvider, useJupiter } from './jupiter-store';
 const f = vi.hoisted(() => ({ workflow: null as unknown }));
 vi.mock('react', async original => ({ ...await original<typeof import('react')>(), ...(await import('../test-utils/hook-harness')).hookMocks }));
 vi.mock('../components/wallet-selector', () => ({ useWalletSelector: () => ({ open: false, choose: async () => null }) }));
-vi.mock('./workflow-store', () => ({ useWorkflow: () => ({ state: { workflow: f.workflow } }) }));
+vi.mock('./workflow-store', () => ({ useWorkflow: () => ({ state: { workflow: f.workflow }, runtimeWorkflow: f.workflow }) }));
 const { action } = vi.hoisted(() => ({ action: () => ({ info: vi.fn(async () => ({ ok: true, value: { executionEnabled: false } })), any: vi.fn(async () => ({ ok: false, code: 'UNUSED' })) }) }));
 vi.mock('../app/jupiter-action', () => { const a = action(); return { jupiterInfo: a.info, jupiterSimulate: a.any, jupiterReview: a.any, jupiterInvalidate: a.any,
   jupiterBegin: a.any, jupiterWalletFailure: a.any, jupiterSubmit: a.any, jupiterObserve: a.any, jupiterStatus: a.any }; });

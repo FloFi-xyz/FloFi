@@ -28,7 +28,7 @@ const KEY = 'flofi:crosschain-universal:run';
 const REFUSALS = [4001, 4100, 4200];
 const OBSERVABLE = ['SUBMITTING', 'SUBMISSION_RESULT_UNKNOWN', 'PENDING'];
 type Pointer = { id: string; attemptId?: string; ecosystem: UniversalEcosystem; owner: string; hash?: string };
-type Store = { available: boolean; executionEnabled: boolean; details: UniversalBridgeDetails | null; ecosystem: UniversalEcosystem | null;
+type Store = { available: boolean; /** BUILD-FLOFI-CHAT-E2E-FIX-002: false until availability answered. */ availabilityKnown: boolean; executionEnabled: boolean; details: UniversalBridgeDetails | null; ecosystem: UniversalEcosystem | null;
   owner: string | null; destinationWallet: string | null; record: UniversalRecord | null; discovery: DiscoveryResult | null; busy: boolean; signing: boolean;
   error: string | null; correlationId: string | null; retired: boolean; recovered: boolean; runs: readonly UniversalRunSummary[]; signedIn: boolean;
   connect(): Promise<void>; signIn(): Promise<void>; discover(): Promise<void>; simulate(): Promise<void>; refresh(): Promise<void>; review(): Promise<void>;
@@ -51,13 +51,14 @@ function readPointer(): Pointer | null {
 
 export function UniversalRouterProvider({ children }: { children: ReactNode }) {
   const { t: tr } = useLocale();
-  const { state } = useWorkflow(), wallet = useBuild009Wallet(), solana = useJupiter();
+  const { runtimeWorkflow } = useWorkflow(), wallet = useBuild009Wallet(), solana = useJupiter();
   const [record, setRecord] = useState<UniversalRecord | null>(null), [discovery, setDiscovery] = useState<DiscoveryResult | null>(null);
   const [busy, setBusy] = useState(false), [signing, setSigning] = useState(false), [error, setError] = useState<string | null>(null);
   const [correlationId, setCorrelationId] = useState<string | null>(null);
   const [available, setAvailable] = useState(false), [executionEnabled, setExecutionEnabled] = useState(false), [recovered, setRecovered] = useState(false);
+  const [availabilityKnown, setAvailabilityKnown] = useState(false);
   const [runs, setRuns] = useState<readonly UniversalRunSummary[]>([]), [sessions, setSessions] = useState<{ EVM: string | null; SOLANA: string | null }>({ EVM: null, SOLANA: null });
-  const workflow = state.workflow as unknown as SemanticWorkflow;
+  const workflow = runtimeWorkflow as unknown as SemanticWorkflow;
   const details = universalBridgeOfWorkflow(workflow);
   const ecosystem: UniversalEcosystem | null = details ? UNIVERSAL_NETWORKS[details.source].ecosystem : record ? ecosystemOfRecord(record) : null;
   const destinationEcosystem = details ? UNIVERSAL_NETWORKS[details.destination].ecosystem : null;
@@ -96,7 +97,7 @@ export function UniversalRouterProvider({ children }: { children: ReactNode }) {
   }
   useEffect(() => {
     let mounted = true;
-    universalRouterAvailability().then(mode => { if (mounted) setAvailable(mode !== 'off'); }).catch(() => undefined);
+    universalRouterAvailability().then(mode => { if (mounted) setAvailable(mode !== 'off'); }).catch(() => undefined).finally(() => { if (mounted) setAvailabilityKnown(true); });
     universalInfo().then(info => { if (mounted && info.ok) setExecutionEnabled(info.value.executionEnabled); }).catch(() => undefined);
     Promise.all([walletSessionStatus().catch(() => null), solanaSessionStatus().catch(() => null)]).then(async ([evm, sol]) => {
       if (!mounted) return;
@@ -309,7 +310,7 @@ export function UniversalRouterProvider({ children }: { children: ReactNode }) {
     await (ecosystemOfRecord(record) === 'EVM' ? executeEvm(record) : executeSolana(record));
     void refreshRuns(ecosystemOfRecord(record));
   }); }
-  return <Context.Provider value={{ available, executionEnabled, details, ecosystem, owner, destinationWallet, record, discovery, busy, signing, error, correlationId, retired, recovered, runs,
+  return <Context.Provider value={{ available, availabilityKnown, executionEnabled, details, ecosystem, owner, destinationWallet, record, discovery, busy, signing, error, correlationId, retired, recovered, runs,
     signedIn, connect, signIn, discover, simulate, refresh, review, execute, observe, open, loadRuns, switchNetwork }}>
     {signing && <p role="status">{tr('Open your wallet to approve or reject. You can navigate and check status while waiting.')}</p>}
     <div data-universal-wallet-pending={signing ? 'true' : undefined}>{children}</div></Context.Provider>;

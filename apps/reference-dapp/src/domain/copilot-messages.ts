@@ -55,6 +55,8 @@ const EN = {
   evmSwapTokens: 'Flofi swaps USDC and WETH on Base, Base Sepolia and Ethereum Sepolia.',
   differentTokens: 'The input and output tokens must differ.',
   wethNote: 'Flofi swaps the ERC-20 WETH (wrapped ETH), not native ETH.',
+  /** BUILD-FLOFI-CHAT-E2E-FIX-002: ETH and WETH are different assets; a native-ETH swap is refused, never authored as WETH. */
+  nativeSwapUnavailable: 'Native ETH swaps are not available in FloFi yet: its swaps move ERC-20 tokens only, and FloFi has no wrap or unwrap step. WETH (wrapped ETH) is a different asset, and FloFi never swaps it in place of ETH. To swap wrapped ETH, ask for WETH explicitly; native ETH can be sent or bridged.',
   devnetSwapTokens: 'Solana Devnet swaps support SOL and devUSDC.',
   solanaSwapTokens: 'Solana swaps support SOL, USDC and USDT.',
   routerRoutes: 'The Cross-chain Router bridges USDC from Base to Arbitrum One, or from Base Sepolia to Arbitrum Sepolia.',
@@ -121,6 +123,7 @@ const EN = {
   debtNote: 'Debt remains after the swap. Review the health factor checkpoint before signing anything.',
   cannotAuthor: 'Flofi Copilot cannot author that request.',
   rejection: {
+    SWAP_NATIVE_ASSET_UNSUPPORTED: 'Native ETH swaps are not available in FloFi yet: its swaps move ERC-20 tokens only, and FloFi has no wrap or unwrap step. WETH (wrapped ETH) is a different asset, and FloFi never swaps it in place of ETH. To swap wrapped ETH, ask for WETH explicitly; native ETH can be sent or bridged.',
     INVALID_AMOUNT: 'The amount is not a valid positive number.', SUPPLY_AMOUNT_INVALID: 'The amount is not a valid positive token amount.',
     AMOUNT_PRECISION: 'The amount has more decimal places than the token supports.', AMOUNT_OUT_OF_RANGE: 'The amount is outside the range Flofi allows for this token.',
     INVALID_SLIPPAGE: 'The slippage is not valid.', INVALID_ASSET_PAIR: 'The input and output tokens must differ.',
@@ -277,6 +280,7 @@ const PT: CopilotCopy = {
   evmSwapTokens: 'O Flofi faz swap de USDC e WETH na Base, na Base Sepolia e na Ethereum Sepolia.',
   differentTokens: 'Os tokens de entrada e de saída precisam ser diferentes.',
   wethNote: 'O Flofi faz swap do ERC-20 WETH (ETH embrulhado), não de ETH nativo.',
+  nativeSwapUnavailable: 'Swaps de ETH nativo ainda não estão disponíveis na FloFi: os swaps movem apenas tokens ERC-20 e a FloFi não tem uma etapa de wrap ou unwrap. WETH (ETH embrulhado) é outro ativo, e a FloFi nunca o troca no lugar de ETH. Para fazer swap de ETH embrulhado, peça WETH explicitamente; ETH nativo pode ser enviado ou passar por bridge.',
   devnetSwapTokens: 'Swaps na Solana Devnet aceitam SOL e devUSDC.',
   solanaSwapTokens: 'Swaps na Solana aceitam SOL, USDC e USDT.',
   routerRoutes: 'O Cross-chain Router faz bridge de USDC da Base para a Arbitrum One, ou da Base Sepolia para a Arbitrum Sepolia.',
@@ -340,6 +344,7 @@ const PT: CopilotCopy = {
   debtNote: 'A dívida continua depois do swap. Revise o checkpoint de health factor antes de assinar qualquer coisa.',
   cannotAuthor: 'O Flofi Copilot não pode criar esse pedido.',
   rejection: {
+    SWAP_NATIVE_ASSET_UNSUPPORTED: 'Swaps de ETH nativo ainda não estão disponíveis na FloFi: os swaps movem apenas tokens ERC-20 e a FloFi não tem uma etapa de wrap ou unwrap. WETH (ETH embrulhado) é outro ativo, e a FloFi nunca o troca no lugar de ETH. Para fazer swap de ETH embrulhado, peça WETH explicitamente; ETH nativo pode ser enviado ou passar por bridge.',
     INVALID_AMOUNT: 'O valor não é um número positivo válido.', SUPPLY_AMOUNT_INVALID: 'O valor não é uma quantia positiva válida do token.',
     AMOUNT_PRECISION: 'O valor tem mais casas decimais do que o token suporta.', AMOUNT_OUT_OF_RANGE: 'O valor está fora da faixa que o Flofi permite para este token.',
     INVALID_SLIPPAGE: 'O slippage não é válido.', INVALID_ASSET_PAIR: 'Os tokens de entrada e de saída precisam ser diferentes.',
