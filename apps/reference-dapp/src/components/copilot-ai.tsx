@@ -49,6 +49,10 @@ import { useProductBootstrap } from '../state/product-bootstrap';
  * BUILD-CHAT-LEARNING-002: learning is invisible. The hook tells the engine when the user applied a Copilot proposal and when the workflow changed
  * outside the chat (the canvas), and hands the server the engine's observations about the user's words — only when persistent automatic learning
  * is permitted for the proven wallet (the server checks again) — with a random id of this conversation and the request's ordinal, never text.
+ *
+ * BUILD-FLOFI-CONVERSATIONAL-001: with `direct`, the hook no longer hands a Command to `propose`: the FloFi chat commits the validated command to
+ * the canonical workflow itself (`commitChatCommand`) and tells the hook through `committed`, so referents and learning treat it as an applied
+ * proposal. The hook still never dispatches, signs, simulates or executes.
  */
 type LearningNamespace = 'eip155' | 'solana';
 type FeedbackEvent = { readonly kind: string; readonly outcome?: string; readonly language?: string | null; readonly privateEntries?: number; readonly globalEntries?: number;
@@ -64,7 +68,7 @@ const authorized = (value: unknown) => {
   return Boolean(record && (record.authorization || record.reviewedManifestHash));
 };
 
-export function useCopilotInterpreter() {
+export function useCopilotInterpreter({ direct = false }: { direct?: boolean } = {}) {
   const workflow = useWorkflow();
   const wallet = useBuild009Wallet();
   const { environment, result: capability } = useWorkflowCapability();
@@ -173,21 +177,47 @@ export function useCopilotInterpreter() {
     }
     watched.current = pendingCommand && proposals.current.has(pendingCommand) ? { command: pendingCommand, revision } : null;
   }, [pendingCommand, report, environmentNow, deliver]);
+  // BUILD-FLOFI-CONVERSATIONAL-001: a command the chat committed directly is an applied proposal once the stored workflow is exactly its result.
+  const committing = useRef<{ readonly command: Command; readonly expected: string } | null>(null);
   // BUILD-CHAT-LEARNING-002: a change of the workflow outside the chat may correct a value FloFi read on its own in a step the user applied.
   const ir = workflow.state.workflow;
   useEffect(() => {
+    const marker = committing.current;
+    if (marker && JSON.stringify(ir) === marker.expected) {
+      committing.current = null; appliedWorkflow.current = ir;
+      report([{ kind: 'PROPOSAL_APPLIED' }]);
+      const applied = proposalApplied(conversation.current, environmentNow(), marker.command);
+      conversation.current = applied.next;
+      deliver(applied.learning, proposalSeq.current.get(marker.command) ?? requestSeq.current);
+    }
     if (!learningView.current?.enabled) return;
     const applying = appliedWorkflow.current === ir;
     const observed = observeWorkflow(conversation.current, environmentNow(), applying ? 'APPLIED' : 'CANVAS');
     conversation.current = observed.next;
     if (!applying) deliver(observed.learning, requestSeq.current);
-  }, [ir, environmentNow, deliver]);
+  }, [ir, environmentNow, deliver, report]);
   /** The exact grammar handled a message: Flofi's open question, if any, is over. */
   const reset = useCallback(() => { conversation.current = closeSegment(conversation.current); }, []);
   const show = useCallback((reply: CopilotReply) => {
-    if (reply.command) { proposals.current.set(reply.command, reply.sentence ?? reply.command.type); latest.current.workflow.propose(reply.command); }
+    if (reply.command) { proposals.current.set(reply.command, reply.sentence ?? reply.command.type); if (!direct) latest.current.workflow.propose(reply.command); }
     return reply;
+  }, [direct]);
+  /**
+   * BUILD-FLOFI-CONVERSATIONAL-001: the chat committed `command` (its result is `expected`). An exact-grammar command becomes a referent here
+   * ("make it 2" after it); a Copilot command already is one.
+   */
+  const committed = useCallback((command: Command, expected: unknown, exact: boolean) => {
+    if (exact) conversation.current = recordProposal(conversation.current, environmentNow(), command);
+    committing.current = { command, expected: JSON.stringify(expected) };
+  }, [environmentNow]);
+  /** BUILD-FLOFI-CONVERSATIONAL-001: a new owner or workflow starts a new conversation; nothing of the previous one carries over. */
+  const clear = useCallback(() => {
+    conversation.current = emptyConversation(); committing.current = null; watched.current = null; appliedWorkflow.current = null;
+    conversationKey.current = null; fetched.current = { owner: null, price: null, positions: null };
   }, []);
+  const language = useCallback(() => conversation.current.language, []);
+  /** Whether FloFi's own clarification question is open (the request still misses a required field). */
+  const drafting = useCallback(() => Boolean(conversation.current.draft), []);
   /** BUILD-CHAT-LEARNING-001: performs the memory action the user just confirmed, and reports the turn's content-free feedback. */
   const settle = useCallback(async (reply: CopilotReply): Promise<CopilotReply> => {
     const view = learningView.current;
@@ -244,12 +274,15 @@ export function useCopilotInterpreter() {
   }, [interpret]);
   const proposalSentence = useCallback((command: Command | undefined) => command ? proposals.current.get(command) ?? null : null, []);
   return { mode, enabled: mode === 'live' || mode === 'replay', mayInterpret: mode === 'loading' || mode === 'live' || mode === 'replay', busy, respond,
-    reset, proposalSentence, learning, refreshLearning };
+    reset, proposalSentence, learning, refreshLearning, committed, clear, language, drafting };
 }
 
 /** BUILD-FLOFI-MAINNET-PRODUCT-001: the example names a mainnet (the public product never suggests a test network). */
 export const COPILOT_PLACEHOLDER = 'Put 1 USDC into Aave on Base';
-export function copilotIntro(mode: CopilotMode | 'loading'): string | null {
+export function copilotIntro(mode: CopilotMode | 'loading', direct = false): string | null {
+  if (direct) return mode === 'live' ? 'Flofi Copilot ready. Describe an action in your own words, change a step, ask about this workflow, or type an exact command. FloFi adds each valid step to your workflow; an AI model only interprets your words. It cannot sign or execute: funds move only after you review, confirm and sign in your wallet.'
+    : mode === 'replay' ? 'Flofi Copilot ready in replay mode (recorded answers, no AI model). Describe an action, change a step, ask about this workflow, or type an exact command. FloFi adds each valid step to your workflow; funds move only after you review, confirm and sign in your wallet.'
+    : mode === 'unavailable' ? 'Local command assistant ready. Flofi Copilot is not configured on this server, so only exact commands work. FloFi adds each valid step to your workflow; funds move only after you review, confirm and sign in your wallet.' : null;
   if (mode === 'live') return 'Flofi Copilot ready. Describe an action in your own words, change a step, ask about this workflow, or type an exact command. An AI model turns free text into a proposal; it cannot sign or execute, and nothing changes until you apply.';
   if (mode === 'replay') return 'Flofi Copilot ready in replay mode (recorded answers, no AI model). Describe an action, change a step, ask about this workflow, or type an exact command. Nothing changes until you apply a proposal.';
   if (mode === 'unavailable') return 'Local command assistant ready. Flofi Copilot is not configured on this server, so only exact commands work. Review each proposal before applying it.';

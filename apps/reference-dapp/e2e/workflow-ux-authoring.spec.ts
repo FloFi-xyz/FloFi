@@ -5,7 +5,7 @@
  */
 import type { Locator, Page } from '@playwright/test';
 import { hashArtifactBytes, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
-import { test, expect, applyPendingProposal, assertPassiveWallet, installPassiveWallet, readWorkflowIr } from './fixtures';
+import { test, expect, assertPassiveWallet, installPassiveWallet, readWorkflowIr, sendChatCommand, CHAT_COMMITTED } from './fixtures';
 import { replayProviderLogos } from './asset-logo-replay';
 import { composeStrategy } from '../src/engine/strategy-engine';
 
@@ -91,9 +91,10 @@ test.describe('UX-001 / UX-005 Send card and destination', () => {
     await say(page, BAD);
     await expect(conversation(page).locator('.message').last()).toContainText('That is not a valid address on this network.');
     await say(page, MIXED);
-    await expect(page.getByRole('button', { name: /^Review proposed change: Send/ })).toBeVisible();
-    await expect(revision(page)).toHaveAttribute('data-workflow-revision', '0');
-    await applyPendingProposal(page);
+    // BUILD-FLOFI-CONVERSATIONAL-001: the completed request is committed at once (no proposal to apply).
+    await expect(conversation(page).locator('.message').last()).toContainText('Send added to your workflow: 5 USDC');
+    await expect(page.getByRole('button', { name: /^Review proposed change:/ })).toHaveCount(0);
+    await expect(revision(page)).toHaveAttribute('data-workflow-revision', '1');
     await expect(cards(page).first().getByRole('textbox', { name: 'To', exact: true })).toHaveValue(MIXED.toLowerCase());
     await expectCanonicalSend(page, MIXED.toLowerCase());
     await assertPassiveWallet(page); networkGuard.assertClean();
@@ -107,14 +108,14 @@ test.describe('UX-001 / UX-005 Send card and destination', () => {
     await expect(page.getByRole('button', { name: /^Review proposed change:/ })).toHaveCount(0);
     await say(page, MIXED);
     await expect(answer()).toContainText(`Interpreted as “transfer 5 USDC on Arbitrum One to ${MIXED.toLowerCase()}”`);
-    await applyPendingProposal(page);
+    await expect(answer()).toContainText(CHAT_COMMITTED);
     await expect(cards(page).first().getByRole('textbox', { name: 'To', exact: true })).toHaveValue(MIXED.toLowerCase());
     await expectCanonicalSend(page, MIXED.toLowerCase());
 
     await page.goto('/app'); await expect(conversation(page)).toContainText('Flofi Copilot ready in replay mode');
     const recipient = '0x3333333333333333333333333333333333333333';
     await say(page, 'Please Send 5 USDC on Arbitrum to ' + recipient);
-    await expect(answer()).toContainText('Interpreted as'); await applyPendingProposal(page);
+    await expect(answer()).toContainText('Interpreted as'); await expect(answer()).toContainText(CHAT_COMMITTED);
     await expect(cards(page).first().getByRole('textbox', { name: 'To', exact: true })).toHaveValue(recipient);
     await expectCanonicalSend(page, recipient);
     await assertPassiveWallet(page); networkGuard.assertClean();
@@ -126,7 +127,7 @@ test('UX-002 the existing Automate action is a clock icon beside rename/save, an
   const header = page.locator('.build-canvas-head .canvas-name'), automate = page.getByRole('button', { name: 'Automate this workflow', exact: true });
   await expect(header.getByRole('button', { name: 'Rename workflow', exact: true })).toBeVisible();
   await expect(automate).toHaveCount(0);
-  await say(page, 'send 5 USDC on Arbitrum to 0x3333333333333333333333333333333333333333'); await applyPendingProposal(page);
+  await sendChatCommand(page, 'send 5 USDC on Arbitrum to 0x3333333333333333333333333333333333333333');
   await expect(automate).toHaveCount(1);
   await expect(header.getByRole('button', { name: 'Automate this workflow', exact: true })).toHaveAttribute('title', 'Automate this workflow');
   const order = await header.locator('button').evaluateAll(buttons => buttons.map(button => button.className));
@@ -139,42 +140,31 @@ test('UX-002 the existing Automate action is a clock icon beside rename/save, an
   await assertPassiveWallet(page); networkGuard.assertClean();
 });
 
-test.describe('UX-006 Copilot proposal confirmation in the empty Canvas', () => {
-  test('the same confirmation is centred where the droplet was; nothing changes until Apply; Dismiss restores the empty state', async ({ page, networkGuard }) => {
+/**
+ * UX-006, BUILD-FLOFI-CONVERSATIONAL-001: a chat request is committed at once, so on the empty Canvas the card itself replaces the droplet (no
+ * proposal to confirm). A proposal remains only for a chat change that would drop an unnamed step, and keeps the existing placement.
+ */
+test.describe('UX-006 chat authoring in the empty Canvas', () => {
+  test('a chat request becomes the card at once in place of the empty state; the chat’s Undo restores it', async ({ page, networkGuard }) => {
     await open(page);
     const empty = page.locator('.build-flow-surface .canvas-empty'), artifact = page.getByRole('button', { name: /^Review proposed change:/ });
     await expect(empty).toContainText('Start your workflow'); await expect(actionsCount(page)).toHaveText('0 actions');
-    const before = await readWorkflowIr(page);
     await say(page, 'Swap 5 USDC for WETH on Base');
     await expect(conversation(page).locator('.message.ai').last()).toContainText('Interpreted as');
-    await expect(artifact).toBeVisible(); await expect(artifact).toHaveClass(/proposal-artifact-centered/);
-    await expect(empty).toHaveCount(0);
-    const [box, surface] = await Promise.all([artifact.boundingBox(), page.locator('.build-flow-surface').boundingBox()]);
-    expect(Math.abs(box!.x + box!.width / 2 - (surface!.x + surface!.width / 2))).toBeLessThan(2);
-    expect(Math.abs(box!.y + box!.height / 2 - (surface!.y + surface!.height / 2))).toBeLessThan(2);
-    expect(surface!.x + surface!.width - (box!.x + box!.width)).toBeGreaterThan(100); expect(box!.y - surface!.y).toBeGreaterThan(60);
-    // Uncommitted: the canonical workflow is byte-identical and still has no action.
-    expect(await readWorkflowIr(page)).toBe(before); await expect(actionsCount(page)).toHaveText('0 actions');
-    await expect(revision(page)).toHaveAttribute('data-workflow-revision', '0');
-    await artifact.click();
-    const dialog = page.getByRole('dialog', { name: 'Proposed change', exact: true });
-    await dialog.getByRole('button', { name: 'Dismiss proposal', exact: true }).click();
-    await expect(artifact).toHaveCount(0); await expect(empty).toContainText('Start your workflow');
-    expect(await readWorkflowIr(page)).toBe(before); await expect(actionsCount(page)).toHaveText('0 actions');
-
-    await say(page, 'Swap 5 USDC for WETH on Base');
-    await expect(artifact).toHaveClass(/proposal-artifact-centered/);
-    await applyPendingProposal(page);
+    await expect(conversation(page).locator('.message.ai').last()).toContainText('Swap added to your workflow: 5 USDC');
     await expect(artifact).toHaveCount(0); await expect(empty).toHaveCount(0);
     await expect(actionsCount(page)).toHaveText('1 action'); await expect(cards(page)).toHaveCount(1);
     await expect(revision(page)).toHaveAttribute('data-workflow-revision', '1');
+    await conversation(page).locator('.message').last().getByRole('button', { name: 'Undo this change', exact: true }).click();
+    await expect(empty).toContainText('Start your workflow'); await expect(actionsCount(page)).toHaveText('0 actions');
+    await expect(revision(page)).toHaveAttribute('data-workflow-revision', '2');
     await assertPassiveWallet(page); networkGuard.assertClean();
   });
 
   test('a non-empty workflow keeps the existing proposal placement', async ({ page, networkGuard }) => {
     await open(page);
-    await say(page, 'swap 50 USDC to WETH on Base Sepolia slippage 50 bps'); await applyPendingProposal(page);
-    await say(page, 'swap 40 USDC to WETH on Base Sepolia slippage 50 bps');
+    await sendChatCommand(page, 'swap 50 USDC to WETH on Base Sepolia slippage 50 bps');
+    await say(page, 'compose supply 0.1 USDC to Aave then borrow 0.01 USDC then swap borrowed USDC to WETH on Base Sepolia slippage 50 bps owner 0x1111111111111111111111111111111111111111');
     const artifact = page.getByRole('button', { name: /^Review proposed change:/ });
     await expect(artifact).toBeVisible(); await expect(artifact).not.toHaveClass(/proposal-artifact-centered/);
     const [box, surface] = await Promise.all([artifact.boundingBox(), page.locator('.build-flow-surface').boundingBox()]);

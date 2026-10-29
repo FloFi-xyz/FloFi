@@ -9,7 +9,7 @@ for (const action of ['swap', 'bridge', 'supply', 'borrow', 'repay', 'withdraw']
   await page.getByRole('button', { name: `Add ${action}`, exact: true }).click();
   const card = page.locator('.build-flow-surface .composer-card');
   const source = card.getByRole('textbox', { name: 'Source amount (USDC)', exact: true });
-  const panel = page.getByRole('region', { name: 'Action inspector' });
+  const panel = page.getByRole('dialog', { name: 'Action settings', exact: true });
   const revision = page.locator('.summary-bar');
   const single = ['supply', 'borrow', 'repay', 'withdraw'].includes(action);
   const actionName = action[0]!.toUpperCase() + action.slice(1);
@@ -47,7 +47,8 @@ for (const action of ['swap', 'bridge', 'supply', 'borrow', 'repay', 'withdraw']
   }
   await source.fill(''); await expect(source).toHaveValue(''); await expect(source).toBeFocused();
   await card.locator('.composer-action-title').click(); await expect(source).toHaveValue('0');
-  await expect(panel.locator('.inspector-toggle')).toHaveAttribute('aria-expanded', 'false');
+  // BUILD-FLOFI-CONVERSATIONAL-001: selecting the card does not open its settings dialog.
+  await expect(card.getByRole('button', { name: 'Action settings', exact: true })).toHaveAttribute('aria-expanded', 'false');
 
   await source.fill('1e2'); await expect(source).toHaveValue('1e2');
   await submit(); await refused();
@@ -60,7 +61,7 @@ for (const action of ['swap', 'bridge', 'supply', 'borrow', 'repay', 'withdraw']
   await settingsAmount.fill(''); await expect(source).toHaveValue('');
   await settingsAmount.press('Tab'); await expect(source).toHaveValue('0');
   await expect(settingsAmount).toHaveValue('0');
-  await panel.getByRole('button', { name: 'Advanced Settings', exact: true }).click();
+  await panel.getByRole('button', { name: 'Close action settings', exact: true }).click();
 
   if (action === 'swap' || action === 'bridge') {
     // BUILD-FIX-UX-001: without a verified USD price the line says why, and no USD-first mode is offered for a missing value.

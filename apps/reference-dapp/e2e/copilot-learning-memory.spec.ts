@@ -5,7 +5,7 @@
 // under Privacy & memory (Settings), repeated evidence is learned for that wallet only and used in a later session; another wallet never inherits it;
 // a published global entry reaches both; turning learning off and deleting everything erase it; an exact command is unchanged.
 import { createTestWallet } from '../../../packages/reference-reconciler/test/test-wallet';
-import { test, expect, applyPendingProposal } from './fixtures';
+import { test, expect } from './fixtures';
 import { installJourneyWallet, walletRequests } from './journey-fixtures';
 import { query } from './automation-fixtures';
 import { createDatabase } from '@defi-workflow-engine/cloud-runtime';
@@ -67,6 +67,9 @@ test('invisible learning: adapted in the conversation, learned after consent and
   expect(await query('SELECT * FROM learning_subjects')).toEqual([]);
   expect(await query('SELECT * FROM learning_evidence')).toEqual([]);
 
+  // BUILD-FLOFI-CONVERSATIONAL-001: the chat committed those Solana Devnet swaps (the header now shows the Solana wallet); a fresh visit's empty
+  // draft returns to the EVM wallet this journey proves.
+  await page.goto('/app');
   // Privacy & memory lives in Settings, outside the chat. Proving the wallet signs a sign-in message only; learning is off until the user turns it on.
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await page.getByRole('link', { name: 'Privacy & memory', exact: true }).click();
@@ -82,19 +85,20 @@ test('invisible learning: adapted in the conversation, learned after consent and
   const subjectA = await subjects();
   expect(subjectA).toHaveLength(1);
 
-  // A new conversation: one answer is evidence, not yet a meaning; applying a proposal FloFi read on its own confirms it — then it is learned.
+  // A new conversation: one answer is evidence, not yet a meaning; a step FloFi read on its own, committed by the chat (BUILD-FLOFI-CONVERSATIONAL-001:
+  // the owner's request applies at once, with no separate Apply) and left uncorrected, confirms it — then it is learned.
   await page.goto('/app');
   await answerSolDev(page, '0.1');
   await expect.poll(() => query("SELECT term, target, clarified FROM learning_evidence WHERE term <> ''")).toEqual([{ term: 'sol dev', target: 'network:SOLANA_DEVNET', clarified: 1 }]);
   expect(await meanings()).toEqual([]);
   await send(page, 'Swap 0.2 SOL to devUSDC on sol dev');
   await expect(lastAi(page).locator('.copilot-notes')).toContainText('as you chose earlier in this conversation');
-  await applyPendingProposal(page);
+  await expect(lastAi(page)).toContainText('Swap added to your workflow: 0.2 SOL');
   await expect.poll(meanings).toEqual([{ term: 'sol dev', target: 'network:SOLANA_DEVNET' }]);
   // Pseudonymous: the wallet address is stored nowhere in the learning tables.
   expect(JSON.stringify([await query('SELECT * FROM learning_subjects'), await query('SELECT * FROM learning_evidence')])).not.toContain(a.address.toLowerCase().slice(2, 12));
 
-  // A later session: the learned meaning is used, and labelled as learned. It is only a proposal.
+  // A later session: the learned meaning is used, and labelled as learned.
   await page.reload();
   await send(page, 'Swap 0.3 SOL to devUSDC on sol dev');
   await expect(lastAi(page)).toContainText('swap 0.3 SOL to devUSDC on Solana Devnet');
@@ -133,12 +137,15 @@ test('invisible learning: adapted in the conversation, learned after consent and
   // An ordinary exact command is unchanged (no learning note, no model).
   await page.reload();
   await send(page, 'supply 1 USDC to Aave on Base Sepolia');
-  await expect(page.locator('.message.system').last()).toContainText('Proposal: supply 1 USDC to Aave on Base Sepolia.');
+  await expect(page.locator('.message.system').last()).toContainText('Supply added to your workflow: 1 USDC');
+  await expect(page.locator('.message.system').last()).not.toContainText(/read as|learned|glossary/);
 
   // Privacy & memory shows what is kept and how; turning learning off erases what it learned; delete everything (two steps) erases the rest.
   await page.goto('/app/privacy');
-  await expect(page.locator('.privacy-list')).toContainText('sol dev → Solana Devnet (test network)');
-  await expect(page.locator('.privacy-list')).toContainText('learned from your choices');
+  // BUILD-FLOFI-CONVERSATIONAL-001: committed chat steps are applied steps, so other observations may also be listed ("Observed, not used").
+  const saved = page.getByRole('list', { name: 'Saved meanings', exact: true });
+  await expect(saved).toContainText('sol dev → Solana Devnet (test network)');
+  await expect(saved).toContainText('learned from your choices');
   await page.getByRole('checkbox', { name: /Learn from how I use the Copilot/ }).click();
   await expect(page.getByRole('checkbox', { name: /Learn from how I use the Copilot/ })).not.toBeChecked();
   await expect(page.getByText('FloFi keeps no meanings for this wallet.')).toBeVisible();

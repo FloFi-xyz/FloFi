@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { test, expect, openSimulationDetails, openProposalReview, assertNoFinancialCanvasAction } from './fixtures';
+import { test, expect, openSimulationDetails, assertNoFinancialCanvasAction } from './fixtures';
 
 test('shows honest authorization and unavailable stage states', async ({ page }) => {
   await page.goto('/app');
@@ -31,9 +31,12 @@ test('provides semantic landmarks, labelled controls and keyboard access', async
   await expect(page.getByLabel('Describe your flow')).toBeFocused();
   await page.keyboard.type('swap 2 USDC to WETH on Base slippage 50 bps');
   await page.keyboard.press('Enter');
-  await openProposalReview(page);
-  await page.getByRole('button', { name: 'Apply proposal' }).focus();
+  // BUILD-FLOFI-CONVERSATIONAL-001: the keyboard-sent request is committed at once and FloFi's next question is keyboard reachable.
+  await expect(page.getByRole('log', { name: 'Conversation' }).locator('.message').last()).toContainText('Swap added to your workflow: 2 USDC');
+  await expect(page.locator('.summary-bar[data-workflow-revision="1"]')).toBeVisible();
+  await page.getByRole('button', { name: 'Add another action', exact: true }).focus();
   await page.keyboard.press('Enter');
+  await expect(page.getByRole('log', { name: 'Conversation' }).locator('.message').last()).toContainText('Describe the next action');
   await expect(page.locator('.summary-bar[data-workflow-revision="1"]')).toBeVisible();
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
   expect(overflow).toBe(false);

@@ -6,7 +6,7 @@
  * logo (a broken one falls back to the generated mark), and chat and the natural-language Copilot (committed replay answers) author the same
  * canonical actions. Provider logos are answered by a closed local replay; nothing is quoted, signed or sent and no public network is contacted.
  */
-import { test, expect, openProposalReview, readWorkflowIr } from './fixtures';
+import { test, expect, readWorkflowIr, sendChatCommand, CHAT_COMMITTED } from './fixtures';
 import type { Page } from '@playwright/test';
 import { installSupplyWallet } from './supply-fixtures';
 import { expectReviewedImagesOnly, replayProviderLogos } from './asset-logo-replay';
@@ -83,15 +83,13 @@ test('the Swap card offers Base with its shortcuts and finds a non-featured toke
   networkGuard.assertClean();
 });
 
-test('chat authors the same Base catalog swap; Apply puts cbBTC on the card', async ({ page, networkGuard }) => {
+test('chat authors the same Base catalog swap; the committed card shows cbBTC', async ({ page, networkGuard }) => {
   await tokenList('ok');
   await installSupplyWallet(page, { chain: '0x2105' });
   await page.goto('/app');
-  await page.locator('#mock-prompt').fill('swap 1 USDC for cbBTC on Base');
-  await page.getByRole('button', { name: 'Send', exact: true }).click();
-  await openProposalReview(page);
-  await expect(page.getByRole('dialog', { name: 'Proposed change', exact: true })).toContainText('cbBTC');
-  await page.getByRole('button', { name: 'Apply proposal', exact: true }).click();
+  // BUILD-FLOFI-CONVERSATIONAL-001: the chat commits the request at once and names what it added.
+  await sendChatCommand(page, 'swap 1 USDC for cbBTC on Base');
+  await expect(page.getByRole('log', { name: 'Conversation' }).locator('.message').last()).toContainText('cbBTC');
   const card = cards(page).filter({ hasText: 'Swap' }).first();
   // An authored card names its chain with the id, as every authored network does ("Base (8453)").
   await expect(card.getByRole('button', { name: 'Select destination token', exact: true })).toHaveAttribute('title', /^cbBTC on Base\b(?! Sepolia)/);
@@ -105,11 +103,11 @@ async function ask(page: Page, text: string) {
   await page.getByRole('button', { name: 'Send', exact: true }).click();
 }
 const copilotSays = (page: Page) => page.getByRole('log', { name: 'Conversation' }).locator('.message.ai').last();
+/** BUILD-FLOFI-CONVERSATIONAL-001: each interpretation is committed at once; FloFi says how it read the words and what it added. */
 async function expectProposal(page: Page, interpreted: string, change: string) {
   await expect(copilotSays(page)).toContainText(interpreted);
-  await openProposalReview(page);
-  await expect(page.getByRole('dialog', { name: 'Proposed change', exact: true })).toContainText(change);
-  await page.keyboard.press('Escape');
+  await expect(copilotSays(page)).toContainText(CHAT_COMMITTED);
+  await expect(copilotSays(page)).toContainText(change);
 }
 
 // BUILD-BASE-001 (owner addendum): the product Copilot on committed replay answers (no model is called). FloFi resolves each token the user
@@ -128,17 +126,16 @@ test('the Copilot authors Base actions from normal language: a list token by nam
     await ask(page, 'Quero colocar 100 USDC e 50 Aerodrome num pool da Uniswap na Base com taxa de 0,3%');
     await expectProposal(page, 'Interpretado como “add liquidity 100 USDC and 50 AERO on Base fee 0.3% slippage 100 bps”', 'AERO');
     await ask(page, `Please lend 25 USDC on Aave on Base for ${recipient}`);
-    await expectProposal(page, `Interpreted as “supply 25 USDC to Aave on Base beneficiary ${recipient}”`, 'Supply 25 USDC');
+    await expectProposal(page, `Interpreted as “supply 25 USDC to Aave on Base beneficiary ${recipient}”`, 'Supply added to your workflow: 25 USDC');
     await ask(page, `Please send 0.01 ETH on Base over to ${recipient}`);
     await expectProposal(page, `Interpreted as “transfer 0.01 ETH on Base to ${recipient}”`, '0.01 ETH');
     await ask(page, 'Move 20 USDC from Arbitrum over to Base');
     await expectProposal(page, 'Interpreted as “bridge 20 USDC from Arbitrum to Base via auto slippage 100 bps”', '20 USDC');
-    // Nothing changed until the owner applies one proposal; the swap then lands in the canonical IR with cbBTC's chain + address.
-    await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '0');
+    // Each request became one committed revision; the swap is in the canonical IR with cbBTC's chain + address. A repeated request is a new step.
+    await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '5');
     await ask(page, 'Please swap 100 USDC for Coinbase Wrapped BTC on Base');
-    await openProposalReview(page);
-    await page.getByRole('button', { name: 'Apply proposal', exact: true }).click();
-    await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '1');
+    await expectProposal(page, 'Interpreted as “swap 100 USDC to cbBTC on Base slippage 100 bps”', 'cbBTC');
+    await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '6');
     const ir = await readWorkflowIr(page);
     expect(ir).toContain('0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf');
     expect(ir).toContain('eip155:8453');

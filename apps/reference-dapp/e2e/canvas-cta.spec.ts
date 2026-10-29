@@ -45,8 +45,8 @@ test('Build CTA floats inside the wider canvas without colliding with existing c
         expect(assistantBox.x).toBeGreaterThanOrEqual((await canvas.boundingBox())!.x + (await canvas.boundingBox())!.width);
       }
       if (width === 1920) expect((await page.locator('main').boundingBox())!.width).toBe(1720);
-      const inspectorBox = (await page.getByRole('region', { name: 'Action inspector' }).boundingBox())!;
-      expect(inspectorBox.y).toBeGreaterThanOrEqual((await canvas.boundingBox())!.y + (await canvas.boundingBox())!.height);
+      // BUILD-FLOFI-CONVERSATIONAL-001: no settings panel below the canvas (a card's settings open anchored to it, only on request).
+      await expect(page.getByRole('dialog', { name: 'Action settings', exact: true })).toHaveCount(0);
       expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
     }
   }

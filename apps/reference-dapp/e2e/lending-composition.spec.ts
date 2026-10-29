@@ -24,7 +24,7 @@ test('three separate Canvas editors preserve the typed Borrow input and approval
     ['lending-swap','Uniswap Swap','Swap slippage bps','100'],
   ] as const){
     const node = page.locator(`.react-flow__node[data-id="${id}"]`);
-    await node.getByRole('button',{name:'Advanced Settings',exact:true}).click();
+    await node.getByRole('button',{name:'Action settings',exact:true}).click();
     const form=page.getByRole('form',{name:`Edit ${title}`});await expect(form).toBeVisible();
     await form.getByRole('textbox',{name:label}).fill(value!);
     if(id==='lending-swap') {

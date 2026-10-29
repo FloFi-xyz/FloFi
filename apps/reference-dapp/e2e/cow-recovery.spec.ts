@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { cowPanel, expect, prepareCow, stage, test } from './cow-fixtures';
-import { openProposalReview } from './fixtures';
+import { sendChatCommand } from './fixtures';
 
 test.skip(process.env.GRYLOO_COW !== 'loopback', 'CoW browser acceptance requires the isolated loopback orderbook');
 
@@ -57,10 +57,7 @@ test('semantic edit invalidates a prepared order before wallet signing', async (
   await page.goto('/__engineering');
   await prepareCow(page, 'hold');
   await stage(page, 'Build');
-  await page.getByLabel('Describe your flow').fill('set node-002 slippage 50 bps');
-  await page.getByRole('button', { name: 'Send', exact: true }).click();
-  await openProposalReview(page);
-  await page.getByRole('button', { name: 'Apply proposal' }).click();
+  await sendChatCommand(page, 'set node-002 slippage 50 bps');
   await stage(page, 'Execute');
   const execution = cowPanel(page, 'execution');
   await expect(execution.getByRole('alert')).toContainText('semantic workflow changed');

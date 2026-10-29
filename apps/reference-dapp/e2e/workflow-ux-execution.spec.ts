@@ -175,9 +175,12 @@ test('UX-003/UX-004: completed run — locked CTAs, Return to Build keeps the wo
   await summary(page).getByRole('button', { name: 'Return to Build', exact: true }).click();
   await expect(stage(page, 'Build')).toHaveAttribute('aria-current', 'page');
   expect(await readWorkflowIr(page)).toBe(authored); await expect(page.locator('.build-canvas-head .revision')).toHaveText('1 action');
-  // A pending (uncommitted) Copilot proposal on the old workflow must not survive a new workflow.
-  await page.locator('#mock-prompt').fill('swap 2 USDC to WETH on Base Sepolia slippage 50 bps'); await page.getByRole('button', { name: 'Send', exact: true }).click();
-  await expect(page.getByRole('button', { name: /^Review proposed change:/ })).toBeVisible();
+  // The old workflow's conversation must not survive a new workflow (BUILD-FLOFI-CONVERSATIONAL-001: the chat reports the recorded result and
+  // offers Create new workflow; it never simulates over a completed run).
+  await page.locator('#mock-prompt').fill('Review workflow'); await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await expect(page.getByRole('log', { name: 'Conversation' }).locator('.message').last()).toContainText('Execution completed');
+  await expect(page.getByRole('log', { name: 'Conversation' }).getByRole('button', { name: 'Create new workflow', exact: true })).toBeVisible();
+  expect(owner.requested()).toBe(2);
   await stage(page, 'Execute').click(); await expect(summary(page)).toContainText('Execution completed');
   const before = { workflowId: (JSON.parse(authored) as { workflowId: string }).workflowId, requested: owner.requested(), sends: await owner.sends() };
   await summary(page).getByRole('button', { name: 'Create new workflow', exact: true }).click();
@@ -279,7 +282,7 @@ test('BUILD-FIX-UX-001: a declined request restored after reload offers Simulate
 type SwapIr = { revision: number; nodes: { actionType: string; inputs: { name: string; value: { amount?: string } }[]; userConstraints: { kind: string; maximumBps?: number }[] }[] };
 const swapIr = async (page: Page) => (JSON.parse(await readWorkflowIr(page)) as SwapIr).nodes.find(node => node.actionType === 'asset.swap.exact-input')!;
 const slippageOf = async (page: Page) => (await swapIr(page)).userConstraints.find(c => c.kind === 'MAXIMUM_SLIPPAGE_BPS')!.maximumBps;
-/** The applied limit everywhere the owner reads it: Advanced Settings, the simulation, and the Review that authorizes it. */
+/** The applied limit everywhere the owner reads it: the card's action settings, the simulation, and the Review that authorizes it. */
 async function simulateAndReadLimits(page: Page) {
   await stage(page, 'Simulate').click();
   const simulate = cta(page).getByRole('button', { name: /^Simulate (workflow|again)$/ });
@@ -299,7 +302,7 @@ test('BUILD-FIX-UX-001: a new swap starts at 100 bps; slippage and amount apply 
   await stage(page, 'Build').click();
   expect(await slippageOf(page)).toBe(100);
   await openFirstActionSettings(page);
-  const inspector = page.getByRole('region', { name: 'Action inspector' }), field = inspector.getByLabel('Slippage (bps)', { exact: true });
+  const inspector = page.getByRole('dialog', { name: 'Action settings', exact: true }), field = inspector.getByLabel('Slippage (bps)', { exact: true });
   await expect(field).toHaveValue('100'); await expect(inspector).toContainText('Applied limit: 100 bps (1.00%)');
   // Invalid values are refused with a reason and never silently reverted or applied.
   for (const bad of ['0', '301', 'abc', '1.5']) {

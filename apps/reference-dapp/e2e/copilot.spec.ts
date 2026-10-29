@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { Page } from '@playwright/test';
-import { test, expect, applyPendingProposal, openProposalReview, openSimulationDetails } from './fixtures';
+import { test, expect, openSimulationDetails } from './fixtures';
 import { installSupplyWallet, resetSupplyHarness, supplySendCount, SUPPLY_OWNER } from './supply-fixtures';
 
 // BUILD-COPILOT-001: FLOFI_COPILOT=replay serves committed answers (protocol V2 since BUILD-COPILOT-002: e2e/copilot/replay-v2.json). No model is
@@ -10,16 +10,11 @@ if (process.env.FLOFI_COPILOT !== 'replay') throw new Error('copilot.spec.ts req
 const conversation = (page: Page) => page.getByRole('log', { name: 'Conversation' });
 const copilotSays = (page: Page) => conversation(page).locator('.message.ai').last();
 const proposal = (page: Page) => page.getByRole('button', { name: /^Review proposed change:/ });
-async function expectChange(page: Page, text: string) {
-  await openProposalReview(page);
-  await expect(page.getByRole('dialog', { name: 'Proposed change' })).toContainText(text);
-  await page.keyboard.press('Escape');
-  await expect(page.getByRole('dialog', { name: 'Proposed change' })).toHaveCount(0);
-  await expect(proposal(page)).toHaveCount(1);
-}
-async function dismiss(page: Page) {
-  await openProposalReview(page);
-  await page.getByRole('button', { name: 'Dismiss proposal', exact: true }).click();
+const cards = (page: Page) => page.locator('.build-flow-surface .composer-card');
+/** BUILD-FLOFI-CONVERSATIONAL-001: the chat's Undo reverts its own last change (a fresh revision; nothing earlier revives). */
+async function undo(page: Page, text = 'Undo this change') {
+  await copilotSays(page).getByRole('button', { name: text, exact: true }).click();
+  await expect(conversation(page).locator('.message').last()).toContainText(text === 'Undo this change' ? 'Undone.' : 'Desfeito.');
 }
 const revision = (page: Page, value: number) => expect(page.locator(`.summary-bar[data-workflow-revision="${value}"]`)).toHaveCount(1);
 async function ask(page: Page, text: string) {
@@ -29,25 +24,21 @@ async function ask(page: Page, text: string) {
 
 test.beforeEach(async () => { await resetSupplyHarness(); });
 
-test('natural language → proposal → explicit Apply → canonical workflow → Simulate and Review, with no wallet send', async ({ page }) => {
+// BUILD-FLOFI-CONVERSATIONAL-001: an explicit, valid request is committed to the canonical workflow at once (no proposal/Apply step); FloFi says
+// how it read the words and what the workflow now holds. Authoring is never authorization: Simulate and Review gates are unchanged.
+test('natural language → validated command committed at once → canonical workflow → Simulate and Review, with no wallet send', async ({ page }) => {
   await installSupplyWallet(page);
   await page.goto('/app');
   await expect(conversation(page)).toContainText('Flofi Copilot ready in replay mode (recorded answers, no AI model)');
   await expect(page.getByLabel('Describe your flow')).toBeVisible();
   await ask(page, 'Put 1 USDC into Aave on Base Sepolia');
+  await expect(copilotSays(page)).toContainText('Supply added to your workflow: 1 USDC · Base Sepolia · Aave V3.');
   await expect(copilotSays(page)).toContainText('Interpreted as “supply 1 USDC to Aave on Base Sepolia”');
   await expect(copilotSays(page)).toContainText(`Beneficiary: your connected wallet ${SUPPLY_OWNER}`);
   await expect(copilotSays(page).locator('small')).toHaveText('FLOFI COPILOT · AI');
-  // Copilot answers are ordinary chat messages, not panel-sized blocks.
-  expect((await copilotSays(page).boundingBox())!.height).toBeLessThan(300);
-  await expect(copilotSays(page)).toContainText('Interpreted as “supply 1 USDC to Aave on Base Sepolia”');
-  await expectChange(page, 'Supply 1 USDC');
-  await expect(copilotSays(page)).toContainText('Aave');
-  await expect(copilotSays(page)).toContainText('Base Sepolia');
-  // The proposal alone changes nothing.
-  await revision(page, 0);
-  await expect(page.locator('.react-flow__node[data-id="node-002"]')).toHaveCount(0);
-  await applyPendingProposal(page);
+  await expect(copilotSays(page)).toContainText('Would you like to add another action or review your workflow?');
+  // No proposal to accept: the card is on the Canvas at once, and nothing was approved, signed or sent.
+  await expect(proposal(page)).toHaveCount(0);
   await revision(page, 1);
   await expect(page.locator('.react-flow__node[data-id="node-002"]').getByRole('textbox', { name: 'Source amount (USDC)', exact: true })).toHaveValue('1');
   await expect(page.locator('.react-flow__node[data-id="node-002"]')).toContainText('Base Sepolia');
@@ -60,20 +51,27 @@ test('natural language → proposal → explicit Apply → canonical workflow �
   expect(await supplySendCount(page)).toBe(0);
 });
 
-test('Portuguese and mainnet requests are proposals with explicit notes, and Dismiss discards them', async ({ page }) => {
+test('Portuguese and mainnet requests are committed with explicit notes, and the chat’s Undo reverts them', async ({ page }) => {
   await installSupplyWallet(page);
   await page.goto('/app');
   await ask(page, 'Coloca 1 USDC na Aave na Base Sepolia');
   // BUILD-COPILOT-002: replies follow the language of the latest message; the canonical sentence stays the exact grammar.
+  await expect(copilotSays(page)).toContainText('Adicionado ao seu workflow:');
   await expect(copilotSays(page)).toContainText('Interpretado como “supply 1 USDC to Aave on Base Sepolia”');
+  await expect(copilotSays(page)).toContainText('Quer adicionar outra ação ou revisar o seu workflow?');
+  await revision(page, 1); await expect(cards(page)).toHaveCount(1);
+  await undo(page, 'Desfazer esta alteração');
+  await expect(cards(page)).toHaveCount(0);
   await ask(page, 'Swap 100 USDC to ETH on Base');
+  await expect(copilotSays(page)).toContainText('Swap added to your workflow: 100 USDC');
   await expect(copilotSays(page)).toContainText('Interpreted as “swap 100 USDC to WETH on Base slippage 100 bps”');
   await expect(copilotSays(page)).toContainText('Flofi swaps the ERC-20 WETH (wrapped ETH), not native ETH.');
-  await expectChange(page, 'USDC → WETH');
+  await expect(copilotSays(page)).toContainText('USDC → WETH');
   await expect(copilotSays(page)).toContainText('Base');
-  await dismiss(page);
   await expect(proposal(page)).toHaveCount(0);
-  await revision(page, 0);
+  await undo(page);
+  await expect(cards(page)).toHaveCount(0);
+  await revision(page, 4);
 });
 
 test('clarification with a guided option and a deterministic follow-up', async ({ page }) => {
@@ -87,12 +85,14 @@ test('clarification with a guided option and a deterministic follow-up', async (
   await expect(copilotSays(page)).toContainText('To prepare this bridge, Flofi still needs the amount.');
   await ask(page, '5');
   await expect(copilotSays(page)).toContainText('Interpreted as “bridge 5 USDC from Base Sepolia to Arbitrum Sepolia via auto slippage 100 bps”');
+  await expect(copilotSays(page)).toContainText('Bridge added to your workflow: 5 USDC');
   await expect(copilotSays(page)).toContainText('Base Sepolia');
   await expect(copilotSays(page)).toContainText('Arbitrum Sepolia');
-  await revision(page, 0);
-  await dismiss(page);
+  // Only once every required field was valid did the card appear.
+  await revision(page, 1);
   await expect(proposal(page)).toHaveCount(0);
-  await revision(page, 0);
+  await undo(page);
+  await revision(page, 2); await expect(cards(page)).toHaveCount(0);
 });
 
 test('a prompt-injected or invented model answer never becomes a proposal', async ({ page }) => {
@@ -130,8 +130,8 @@ test('AI failures leave the workflow unchanged and exact commands keep working',
   await revision(page, 0);
   // The exact grammar is consulted first and needs no model.
   await ask(page, 'swap 2 USDC to WETH on Base slippage 50 bps');
-  await expect(conversation(page).locator('.message.system').last()).toContainText('Proposal: swap 2 USDC to WETH on Base slippage 50 bps.');
-  await applyPendingProposal(page);
+  await expect(conversation(page).locator('.message.system').last()).toContainText('Swap added to your workflow: 2 USDC');
+  await expect(proposal(page)).toHaveCount(0);
   await revision(page, 1);
 });
 

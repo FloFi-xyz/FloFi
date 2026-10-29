@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /** Normal /app Copilot beside Canvas, committed model replay, no substituted server actions and no financial authority. */
-import { test, expect, applyPendingProposal, assertPassiveWallet, installPassiveWallet, readWorkflowIr } from './fixtures';
+import { test, expect, assertPassiveWallet, installPassiveWallet, readWorkflowIr, CHAT_COMMITTED } from './fixtures';
 import { replayProviderLogos, expectReviewedImagesOnly } from './asset-logo-replay';
 import { ETHEREUM_CERTIFICATION_CASES as cases } from '../src/domain/ethereum-certification.cases';
 import { composeStrategy, semanticWorkflowHash } from '../src/engine/strategy-engine';
@@ -27,8 +27,8 @@ for (const c of cases) test(c.id + ': normal Copilot proposal → Apply → matc
   const answer = conversation.locator('.message.ai').last();
   await expect(answer).toContainText('Interpreted as “' + c.sentence + '”');
   await expect(answer.locator('small')).toHaveText('FLOFI COPILOT · AI');
-  await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '0');
-  await applyPendingProposal(page);
+  // BUILD-FLOFI-CONVERSATIONAL-001: the interpretation is committed at once (no Apply step) and FloFi says so.
+  await expect(answer).toContainText(CHAT_COMMITTED);
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '1');
   const composed = composeStrategy(c.strategy); expect(composed.ok).toBe(true); if (!composed.ok) throw Error(composed.code);
   const workflow = JSON.parse(await readWorkflowIr(page)) as SemanticWorkflow;
@@ -46,7 +46,7 @@ for (const c of cases.filter(c => ['Swap', 'Native Transfer', 'Supply'].includes
   await page.getByRole('button', { name: 'Send', exact: true }).click();
   const answer = page.getByRole('log', { name: 'Conversation' }).locator('.message.ai').last();
   await expect(answer).toContainText('Interpretado como “' + c.sentence + '”');
-  await applyPendingProposal(page);
+  await expect(answer).toContainText(CHAT_COMMITTED);
   const composed = composeStrategy(c.strategy); expect(composed.ok).toBe(true); if (!composed.ok) throw Error(composed.code);
   expectWorkspaceMeaning(JSON.parse(await readWorkflowIr(page)) as SemanticWorkflow, before, structuredClone(composed.workflow) as SemanticWorkflow);
   await assertPassiveWallet(page); networkGuard.assertClean();

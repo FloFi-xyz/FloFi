@@ -11,7 +11,7 @@ import { RobinhoodTransferPanel } from './robinhood-transfer-panel';
 import { SolanaTransferPanel } from './solana-transfer-panel';
 import { useSolanaTransfer } from '../state/solana-transfer-store';
 import { useRobinhoodTransfer } from '../state/robinhood-transfer-store';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { ToolboxMode } from '../domain/canvas-layout';
 import { CowPanel } from './cow-panel';
 import { useCow } from '../state/cow-store';
@@ -37,8 +37,9 @@ import { ObservationPanel } from './observation-panel';
 import { ForkSimulationPanel } from './fork-simulation-panel';
 import { useExecutionControls } from '../state/execution-controls';
 import { CanvasLifecycleAction } from './canvas-lifecycle-action';
-import { ArtifactInspector } from './artifact-inspector';
+import { ActionSettingsPopover } from './artifact-inspector';
 import { CopilotPanel } from './copilot-panel';
+import { useFlofiConversation } from '../state/flofi-conversation';
 import { MobileBuildNavigation } from './mobile-build-navigation';
 import { ExecutionPanel } from './execution-panel';
 import { ModeBPanel } from './mode-b-panel';
@@ -109,7 +110,7 @@ export function AppShell(props: ProductNavigation = {}) { return <ModeBProvider>
 const sameAccount = (a: string, b: string) => a === b || /^0x/i.test(a) && a.toLowerCase() === b.toLowerCase();
 const shortAccount = (value: string) => `${value.slice(0, 6)}…${value.slice(-4)}`;
 function AppShellContent({ engineering = false, pathname, navigate, approvalSlot, approvalGate = false, surface = 'workspace', approvalWallet = null, autoPrepare = false, onViewInFloFi }: ProductNavigation) {
-  const { t: tr } = useLocale();
+  const { t: tr, language } = useLocale();
   // Server HTML is visible before handlers and initial canvas preferences are ready.
   const [interactive, setInteractive] = useState(false);
   useEffect(() => { setInteractive(true); }, []);
@@ -204,14 +205,17 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   const { universalPath, routerPath, solanaTransferPath, transferPath, lendingPath, withdrawPath, repayPath, borrowPath, supplyPath, uniswapLiquidityPath,
     solanaCompositionPath, solanaLiquidityPath, solanaPath, publicPath } = runtime;
   const [selectedId, select] = useState<string | null>(null);
-  const [inspectorExpanded, setInspectorExpanded] = useState(false);
+  // BUILD-FLOFI-CONVERSATIONAL-001: the bottom Advanced Settings inspector is gone. A card's own settings control opens that card's parameters in a
+  // popover anchored to it (the same validated forms and commands); the chat edits the same canonical steps.
+  const [settingsId, setSettingsId] = useState<string | null>(null);
   const selectAction = useCallback((id: string | null) => {
     select(id);
-    if (!id) setInspectorExpanded(false);
+    setSettingsId(current => current === id ? current : null);
   }, []);
+  const closeActionSettings = useCallback(() => setSettingsId(null), []);
   const openActionSettings = useCallback((id: string) => {
     select(id);
-    setInspectorExpanded(true);
+    setSettingsId(current => current === id ? null : id);
   }, []);
   const { environment, walletEnvironment, result: capability } = useWorkflowCapability();
   const acrossWorkflow = state.workflow.nodes.length === 1 && state.workflow.nodes[0]?.adapterConstraints.adapters[0]?.id === 'across.direct';
@@ -300,7 +304,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     || state.workflow.nodes.find(node => !node.actionType.startsWith('mock-'))?.chainId;
   const networkTarget = walletNetworkTarget(requiredSigningChain);
   const networkAction = signer && requiredSigningChain && networkTarget && reviewBinding.wallet.chain !== requiredSigningChain ? {
-    label: tr('Switch to {0}', networkTarget.label), disabled: Boolean(simulationSource.state.busy || approvalGate || walletIssue),
+    label: tr('Switch to {0}', networkTarget.label), network: networkTarget.label, disabled: Boolean(simulationSource.state.busy || approvalGate || walletIssue),
     request: () => void walletConnection.switchNetwork(requiredSigningChain),
   } : undefined;
   const lifecycleState = { workflow: state.workflow, context, source: simulationSource, authorization: authorization,
@@ -339,6 +343,15 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     : networkAction ? <div className="canvas-lifecycle-control"><button type="button" disabled={networkAction.disabled} onClick={networkAction.request}>{networkAction.label}</button>{walletConnection.error && <p role="status">{tr(walletConnection.error)}</p>}</div> : <CanvasLifecycleAction {...lifecycleState} controls={lifecycleControls} workflowName={workflowName}
     simulationDisabled={simulationDisabled || !actionable} simulationReason={simulationReason}
     simulate={() => { setTab('Simulate'); return simulateAgain(); }} onExecute={() => setTab('Execute')}/>;
+  // BUILD-FLOFI-CONVERSATIONAL-001: the chat lives here, above the stage switch, so Build, Simulate and Execute share one conversation. It reaches
+  // the same lifecycle the Canvas CTA uses (this Simulate, these controls); on /approve it keeps its earlier proposal-only behaviour.
+  const conversation = useFlofiConversation({ owner, epoch: workflowEpoch, direct: !approvalSlot && !autoPrepare && surface === 'workspace',
+    interfaceLanguage: language === 'PT' ? 'PT' : 'EN',
+    bridge: { workflow: state.workflow, context, source: simulationSource, authorization, wallet: reviewBinding.wallet, progress: executionProgress,
+      invalidWorkflow: lifecycleState.invalidWorkflow, simulate: simulateAgain, controls: lifecycleControls, networkAction,
+      simulationBlocked: walletIssue ?? (simulationDisabled || !actionable || lifecycleState.invalidWorkflow ? simulationReason ?? 'Simulation is not available for this workflow.' : null),
+      connectWallet: () => void walletConnection.connect(), startNewWorkflow } });
+  const chat = <CopilotPanel conversation={conversation} interactive={interactive} owner={owner} proof={proof}/>;
   if (surface === 'signing') return <div className="app-shell signing-shell" inert={!interactive}><a className="skip-link" href="#workspace">{tr("Skip to workspace")}</a>
     <TopBar compact tab={tab} setTab={setTab} pathname={pathname ?? null} engineering={engineering}/>
     <SigningSurface {...lifecycleState} controls={lifecycleControls} workflowName={workflowName} simulate={simulateAgain} simulationDisabled={simulationDisabled || !actionable}
@@ -357,7 +370,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
       build={() => setTab('Build')} execute={() => setTab('Execute')} navigate={navigate ?? (() => undefined)}/></main>
   </div>;
   if (authoringIncomplete && tab !== 'Build') return <div className="app-shell" inert={!interactive}><TopBar tab={tab} setTab={setTab} pathname={pathname ?? null} engineering={engineering}/>{betaNotice}<main className="main"><section className="panel stage-empty"><p>{tr("Configure the action amount in Build first.")}</p><button type="button" onClick={() => setTab('Build')}>{tr("Return to Build")}</button></section></main></div>;
-  const stageContent = tab === 'Build' ? <><div className="build-grid"><WorkflowCanvas estimateOwner={solanaSession?.account.address} environment={authoringEnvironment(walletEnvironment)} selectedId={selectedId} select={selectAction} openSettings={openActionSettings} workflowName={workflowName} renameWorkflow={setWorkflowName} onAutomate={automationsReady ? () => { setAutomateCanvas(true); navigate?.('/app/automations'); } : undefined} onSave={() => void saveCurrentWorkflow()} onToolboxModeChange={setWorkspaceToolboxMode} primaryAction={simulateAction}/><CopilotPanel key={workflowEpoch} interactive={interactive} owner={owner} proof={proof}/></div>{verification}{saveNotice?.owner === ownerKey && <p role="status">{tr(saveNotice.message)}</p>}{library.busy && <p role="status">{tr('Saving workflow…')}</p>}{library.error && library.error !== 'WALLET_SESSION_REQUIRED' && <p role="alert">{tr(library.error === 'WORKFLOW_VERSION_CONFLICT' ? 'This workflow was updated in another session. Reopen it before saving.' : 'Workflow saving is unavailable. Try again.')}</p>}<ArtifactInspector selectedId={selectedId} select={selectAction} expanded={inspectorExpanded} onExpandedChange={setInspectorExpanded}/>
+  const stageContent = tab === 'Build' ? <><div className="build-grid"><WorkflowCanvas estimateOwner={solanaSession?.account.address} environment={authoringEnvironment(walletEnvironment)} selectedId={selectedId} select={selectAction} openSettings={openActionSettings} settingsId={settingsId} workflowName={workflowName} renameWorkflow={setWorkflowName} onAutomate={automationsReady ? () => { setAutomateCanvas(true); navigate?.('/app/automations'); } : undefined} onSave={() => void saveCurrentWorkflow()} onToolboxModeChange={setWorkspaceToolboxMode} primaryAction={simulateAction}/>{chat}</div>{verification}{saveNotice?.owner === ownerKey && <p role="status">{tr(saveNotice.message)}</p>}{library.busy && <p role="status">{tr('Saving workflow…')}</p>}{library.error && library.error !== 'WALLET_SESSION_REQUIRED' && <p role="alert">{tr(library.error === 'WORKFLOW_VERSION_CONFLICT' ? 'This workflow was updated in another session. Reopen it before saving.' : 'Workflow saving is unavailable. Try again.')}</p>}{selectedId && <ActionSettingsPopover key={selectedId} selectedId={selectedId} select={selectAction} open={settingsId === selectedId} close={closeActionSettings}/>}
           {engineering && <EngineeringAuthoring selectedId={selectedId}><ReviewPanel/></EngineeringAuthoring>}</>
         : tab === 'Simulate' && engineering ? universalPath ? <UniversalBridgePanel view="simulate"/> : routerPath ? <RouterPanel view="simulate"/> : solanaTransferPath ? <SolanaTransferPanel view="simulate"/> : transferPath ? <RobinhoodTransferPanel view="simulate"/> : lendingPath ? <LendingPanel view="simulate"/> : withdrawPath ? <WithdrawPanel view="simulate"/> : repayPath ? <RepayPanel view="simulate"/> : borrowPath ? <BorrowPanel view="simulate"/> : supplyPath ? <SupplyPanel view="simulate"/> : uniswapLiquidityPath ? <UniswapLiquidityPanel view="simulate"/> : solanaCompositionPath ? <SolanaCompositionPanel view="simulate"/> : solanaLiquidityPath ? <SolanaLiquidityPanel view="simulate"/> : solanaPath ? <JupiterPanel view="simulate"/> : publicPath ? <PublicTestnetPanel view="simulate"/> : crossChainWorkflow ? <CrossChainLiquidityPanel view="simulate"/> : acrossWorkflow || across.run ? <AcrossPanel view="simulate"/> : bridgeSwapWorkflow ? <BridgeSwapPanel view="simulate"/> : bridgeWorkflow ? <BridgePanel view="simulate"/> : <SimulatePanel engineeringOnly workflowName={workflowName}><ReviewWorkspace workflowName={workflowName} workflow={state.workflow} context={context} source={simulationSource} authorization={authorization} wallet={reviewBinding.wallet} invalidWorkflow={Boolean(reviewError)} backToBuild={() => setTab('Build')} simulateAgain={simulateAgain} actionSurface="canvas" showTechnicalDetails={false}/><ObservationPanel/><ForkSimulationPanel/><ModeBPanel view="simulate"/><CompositionPanel view="simulate"/><CowPanel view="simulate"/><LiquidityPanel view="simulate"/></SimulatePanel>
         : executionSurface ? universalPath ? <UniversalBridgePanel view="execute"/> : routerPath ? <RouterPanel view="execute"/> : solanaTransferPath ? <SolanaTransferPanel view="execute"/> : transferPath ? <RobinhoodTransferPanel view="execute"/> : lendingPath ? <LendingPanel view="execute"/> : withdrawPath ? <WithdrawPanel view="execute"/> : repayPath ? <RepayPanel view="execute"/> : borrowPath ? <BorrowPanel view="execute"/> : supplyPath ? <SupplyPanel view="execute"/> : uniswapLiquidityPath ? <UniswapLiquidityPanel view="execute"/> : solanaCompositionPath ? <SolanaCompositionPanel view="execute"/> : solanaLiquidityPath ? <SolanaLiquidityPanel view="execute"/> : solanaPath ? <JupiterPanel view="execute"/> : publicPath ? <PublicTestnetPanel view="execute"/> : persistedBuild009Recovery ? <BridgeSwapPanel view="execute"/> : across.recovered ? <AcrossPanel view="execute"/> :
@@ -368,16 +381,18 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
           bridgeSwap.run ? <BridgeSwapPanel view="execute"/> : bridge.execution ? <BridgePanel view="execute"/> :
           <><ExecutionPanel/><ModeBPanel view="execute"/><CompositionPanel view="execute"/><CowPanel view="execute"/><LiquidityPanel view="execute"/></>
         : null;
+  const wrapStage = (stage: ReactNode) => tab === 'Build' ? stage : <div className="stage-with-chat">{stage}{chat}</div>;
   return <div className="app-shell" inert={!interactive}><a className="skip-link" href="#workspace">{tr("Skip to workspace")}</a><TopBar tab={tab} setTab={setTab} pathname={pathname ?? null} engineering={engineering}/>{betaNotice}
     {approvalSlot && <div className="approval-notice-slot" ref={approvalSlot}/>}
     <AutomationInbox owner={owner} proven={Boolean(owner && proof.proven === owner.address)} open={() => navigate?.('/app/automations')}/>
-    <main id="workspace" className={`main workflow-workspace${tab === 'Build' ? ' build-workspace' : ''}`} data-workspace-toolbox={workspaceToolboxMode} tabIndex={-1} aria-label={tr(tab === 'Build' ? 'Workflow workspace' : tab === 'Simulate' ? 'Simulation workspace' : 'Execution workspace')}>
+    {/* BUILD-FLOFI-CONVERSATIONAL-001: on Simulate and Execute the same conversation continues beside the stage (complementary to main). */}
+    {wrapStage(<main id="workspace" className={`main workflow-workspace${tab === 'Build' ? ' build-workspace' : ''}`} data-workspace-toolbox={workspaceToolboxMode} tabIndex={-1} aria-label={tr(tab === 'Build' ? 'Workflow workspace' : tab === 'Simulate' ? 'Simulation workspace' : 'Execution workspace')}>
       {tab === 'Execute' ? <ExecuteWorkspace controls={lifecycleControls} primaryAction={simulateAction} workflowName={workflowName} workflow={state.workflow} context={context} source={simulationSource} authorization={authorization} wallet={reviewBinding.wallet} execution={executionStart} progress={executionProgress} recovery={executionProgress.recovery} invalidWorkflow={Boolean(reviewError || authoringIncomplete)} backToBuild={() => setTab('Build')} backToSimulate={() => setTab('Simulate')} startNewWorkflow={startNewWorkflow} technicalDetails={executionStart.started || executionProgress.started || recoveryPath || localCowIntent ? stageContent : undefined}/> : tab === 'Simulate' ?
         <SimulateWorkspace workflowName={workflowName} returnToBuild={() => setTab('Build')} simulationSource={simulationSource} simulationReason={simulationReason} review={embeddedReview} simulateAction={simulateAction}>
           {engineering && <details className="shell-details technical-workspace simulation-technical"><summary>{tr('View technical details')}</summary><ReviewTechnicalDetails authorization={authorization}/>{stageContent}</details>}
         </SimulateWorkspace> : stageContent}
       <MobileBuildNavigation stage={tab === 'Build' ? 'Build' : tab === 'Simulate' ? 'Simulate' : 'Execute'}/>
       {state.error && <div className="error-banner" role="alert"><strong>{tr("Edit not applied")}</strong><span>{tr(tab !== 'Build' ? 'Review the workflow configuration in Build before simulating again.' : state.error)}</span></div>}
-    </main>{tab !== 'Execute' && <SummaryBar tab={tab} setTab={setTab} canvasOwnsAction/>}
+    </main>)}{tab !== 'Execute' && <SummaryBar tab={tab} setTab={setTab} canvasOwnsAction/>}
   </div>;
 }

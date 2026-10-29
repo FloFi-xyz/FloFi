@@ -332,6 +332,8 @@ export type ComposerCardData = {
   recipient?: CardRecipient;
   poolProposal?: { nodeId: string; formId: string; canReview: boolean; canApply: boolean; onApply(): void };
   onOpenSettings?: () => void;
+  /** BUILD-FLOFI-CONVERSATIONAL-001: this card's settings popover is open. */
+  settingsOpen?: boolean;
 } & ({ inspection: true } | { inspection?: false; validation: ReturnType<typeof composerNodeState> });
 
 /** Shared UX-002 card; inspection has no authoring or simulation-result status. */
@@ -502,7 +504,8 @@ export function ComposerCard({ data: card }: { data: ComposerCardData }) {
       </div>}
       {!card.inspection && !quietAmount && card.validation.message && <span className="composer-warning" title={tr(card.validation.message)}>{tr("Check settings")}</span>}
       {card.summary.risk && <span className="flow-card-risk">{tr(card.summary.risk)}</span>}
-      {!card.inspection && <button type="button" className="composer-selected nodrag nopan" onClick={event => { event.stopPropagation(); card.onOpenSettings?.(); }} title={tr("Open Advanced Settings")}>{tr("Advanced Settings ")}<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m10 3-.5 3-2 1.2L4.7 6l-2 3.5 2.3 2v1l-2.3 2 2 3.5 2.8-1.2 2 1.2.5 3h4l.5-3 2-1.2 2.8 1.2 2-3.5-2.3-2v-1l2.3-2-2-3.5-2.8 1.2-2-1.2-.5-3Z"/><circle cx="12" cy="12" r="3"/></svg>
+      {!card.inspection && <button type="button" className="composer-selected nodrag nopan" aria-haspopup="dialog" aria-expanded={Boolean(card.settingsOpen)} aria-label={tr("Action settings")}
+        onClick={event => { event.stopPropagation(); card.onOpenSettings?.(); }} title={tr("Open this action's settings")}>{tr("Settings ")}<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m10 3-.5 3-2 1.2L4.7 6l-2 3.5 2.3 2v1l-2.3 2 2 3.5 2.8-1.2 2 1.2.5 3h4l.5-3 2-1.2 2.8 1.2 2-3.5-2.3-2v-1l2.3-2-2-3.5-2.8 1.2-2-1.2-.5-3Z"/><circle cx="12" cy="12" r="3"/></svg>
       </button>}
       <Handle id="output" type="source" position={card.vertical ? Position.Bottom : Position.Right} isConnectable={!card.inspection && Boolean(card.connectable)}/>
     </div>;

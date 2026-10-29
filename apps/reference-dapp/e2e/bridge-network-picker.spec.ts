@@ -121,7 +121,7 @@ test('Bridge wallet network changes keep supported drafts aligned and apply only
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '0');
   await card.getByRole('textbox').press('Enter');
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '1');
-  await card.getByRole('button', { name: 'Advanced Settings', exact: true }).click();
+  await card.getByRole('button', { name: 'Action settings', exact: true }).click();
   const form = page.getByRole('form', { name: 'Edit cross-chain bridge', exact: true });
   await expect(form.getByLabel('Cross-chain network', { exact: true })).toBeDisabled();
   expect(await form.getByLabel('Cross-chain network', { exact: true }).locator('option').allTextContents()).toEqual(['Mainnet (real funds)']);

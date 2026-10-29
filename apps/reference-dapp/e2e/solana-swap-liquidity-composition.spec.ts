@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { Page } from '@playwright/test';
-import { test, expect, applyPendingProposal, openSimulationDetails } from './fixtures';
+import { test, expect, sendChatCommand, openSimulationDetails } from './fixtures';
 import { chooseSolanaWallet, signChains, signRequests } from './jupiter-fixtures';
 import { devnetControl, installDevnetWallet, linkSwapToPosition, resetDevnetHarness } from './solana-devnet-fixtures';
 
@@ -10,9 +10,7 @@ const panel = (page: Page) => page.getByRole('region', { name: 'Solana Devnet sw
 const phase = (page: Page, value: string) => expect(panel(page).locator(`[data-composition-phase="${value}"]`)).toBeVisible({ timeout: 30_000 });
 test.afterEach(async ({ page }, info) => { if (info.status !== info.expectedStatus) console.error('Composition failure:', await panel(page).locator('pre').textContent().catch(() => 'no panel')); });
 async function send(page: Page, text: string) {
-  await page.getByLabel('Describe your flow').fill(text);
-  await page.getByRole('button', { name: 'Send', exact: true }).click();
-  await applyPendingProposal(page);
+  await sendChatCommand(page, text);
 }
 async function author(page: Page) {
   await page.goto('/__engineering');

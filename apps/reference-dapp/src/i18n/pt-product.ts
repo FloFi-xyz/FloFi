@@ -61,7 +61,7 @@ export const productPortuguese: Readonly<Record<string, string>> = {
   'Price strategies': 'Estratégias de preço', 'Hide price strategies': 'Ocultar estratégias de preço',
   'Show token amount first': 'Mostrar primeiro o montante em tokens', 'Show fiat amount first (estimate unavailable)': 'Mostrar primeiro o montante fiduciário (estimativa indisponível)',
   'Check settings': 'Verificar definições', 'Review Supply change': 'Rever alteração do depósito', 'Edit custom range': 'Editar intervalo personalizado',
-  'Open Advanced Settings': 'Abrir definições avançadas', 'Advanced Settings': 'Definições avançadas', 'Advanced action setup': 'Configuração avançada de ações',
+  'Advanced action setup': 'Configuração avançada de ações',
   'Stocks configuration': 'Configuração de ações de empresas', 'Hide Stocks configuration': 'Ocultar configuração de ações de empresas',
   'Review proposed change: {0}': 'Rever alteração proposta: {0}', 'Proposed': 'Proposto', 'Proposed change': 'Alteração proposta', 'Dismiss proposal': 'Descartar proposta',
   'Workflow assistant': 'Assistente do fluxo', 'ASSISTANT': 'ASSISTENTE', 'Conversation': 'Conversa', 'YOU': 'VOCÊ',

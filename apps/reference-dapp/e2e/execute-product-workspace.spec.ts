@@ -155,7 +155,7 @@ for (const theme of ['light', 'dark']) test(`${theme} plan, brand icons and resp
   await expect(graph).toHaveAttribute('data-viewport', 'fitted');
   await expect(graph.locator('.composer-amount')).toHaveText('100 USDC');
   await expect(graph.locator('.composer-card input,.composer-card select')).toHaveCount(0);
-  for (const label of ['Advanced Settings', 'Delete', 'Duplicate', 'Undo', 'Redo']) await expect(graph.getByRole('button', { name: label, exact: true })).toHaveCount(0);
+  for (const label of ['Action settings', 'Advanced Settings', 'Delete', 'Duplicate', 'Undo', 'Redo']) await expect(graph.getByRole('button', { name: label, exact: true })).toHaveCount(0);
   expect(await graph.locator('img.brand-icon').evaluateAll(images => images.every(image => getComputedStyle(image).filter === 'none'))).toBe(true);
   const iconSize = await page.locator('.execution-summary img.brand-icon').evaluate(image => ({ width: image.getBoundingClientRect().width, height: image.getBoundingClientRect().height, filter: getComputedStyle(image).filter }));
   expect(iconSize).toEqual({ width: 18, height: 18, filter: 'none' });

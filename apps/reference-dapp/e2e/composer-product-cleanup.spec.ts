@@ -51,9 +51,9 @@ for (const action of ['swap', 'bridge'] as const) test(`${action} has quiet edit
   await installSupplyWallet(page); await page.goto('/app');
   await page.getByRole('button', { name: `Add ${action}`, exact: true }).click();
   const card = page.locator('.build-flow-surface .composer-card');
-  const panel = page.getByRole('region', { name: 'Action inspector' });
+  const panel = page.getByRole('dialog', { name: 'Action settings', exact: true });
   const source = card.getByRole('textbox', { name: 'Source amount (USDC)', exact: true });
-  const toggle = panel.getByRole('button', { name: 'Advanced Settings', exact: true });
+  const toggle = panel.getByRole('button', { name: 'Action settings', exact: true });
   for (const width of [1440, 390, 320]) {
     await page.setViewportSize({ width, height: 900 });
     await expect(source).toHaveValue('0');
@@ -124,7 +124,7 @@ for (const action of ['swap', 'bridge'] as const) test(`${action} has quiet edit
   await configureCanvasAction(page, '2.5');
   await expect(source).toHaveValue('2.5'); await expect(toggle).toHaveAttribute('aria-expanded', 'false');
   await card.locator('.composer-action-title').click(); await expect(toggle).toHaveAttribute('aria-expanded', 'false');
-  const gear = card.getByRole('button', { name: 'Advanced Settings', exact: true });
+  const gear = card.getByRole('button', { name: 'Action settings', exact: true });
   await gear.focus(); await page.keyboard.press('Enter');
   await expect(toggle).toHaveAttribute('aria-expanded', 'true');
   await expect(panel.getByLabel(action === 'swap' ? 'Input amount (USDC)' : 'Cross-chain amount (USDC)', { exact: true })).toHaveValue('2.5');
@@ -153,7 +153,7 @@ for (const action of ['swap', 'bridge'] as const) test(`${action} shows why ther
     expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
   }
   await openCanvasSettings(page);
-  await expect(page.getByRole('region', { name: 'Action inspector' }).getByLabel(action === 'swap' ? 'Input amount (USDC)' : 'Cross-chain amount (USDC)', { exact: true })).toHaveValue('2.5');
+  await expect(page.getByRole('dialog', { name: 'Action settings', exact: true }).getByLabel(action === 'swap' ? 'Input amount (USDC)' : 'Cross-chain amount (USDC)', { exact: true })).toHaveValue('2.5');
   await expect(card.getByRole('button', { name: 'Review amount', exact: true })).toHaveCount(0);
   await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Simulate', exact: true }).click();
   await expect(page.locator('.simulate-flow-surface .composer-amount')).toHaveText('2.5 USDC');
@@ -166,7 +166,7 @@ for (const action of ['borrow', 'repay', 'withdraw'] as const) test(`${action} u
   const card = page.locator('.build-flow-surface .composer-card');
   const block = card.locator('.composer-amount-box');
   const name = action[0]!.toUpperCase() + action.slice(1);
-  const panel = page.getByRole('region', { name: 'Action inspector' });
+  const panel = page.getByRole('dialog', { name: 'Action settings', exact: true });
   await expect(card.locator('.composer-action-title')).toHaveText(`1. ${name}`);
   await expect(card.locator('.composer-metadata')).toContainText('Aave V3 · Base Sepolia');
   await expect(block).toHaveCount(1);
@@ -184,7 +184,7 @@ for (const action of ['borrow', 'repay', 'withdraw'] as const) test(`${action} u
     await checkTokenPills(card);
     await card.locator('.composer-action-title').click();
     await expect(card).toHaveClass(/active/);
-    await expect(panel.locator('.inspector-toggle')).toHaveAttribute('aria-expanded', 'false');
+    await expect(card.getByRole('button', { name: 'Action settings', exact: true })).toHaveAttribute('aria-expanded', 'false');
     const blockBox = (await block.boundingBox())!, footerBox = (await card.locator('.composer-selected').boundingBox())!, cardBox = (await card.boundingBox())!;
     expect(footerBox.y).toBeGreaterThan(blockBox.y + blockBox.height);
     expect(footerBox.y + footerBox.height).toBeLessThan(cardBox.y + cardBox.height);
@@ -233,7 +233,7 @@ test('Supply edits inline with one shared editor value and validates through its
   await page.getByRole('button', { name: 'Add supply', exact: true }).click();
   const card = page.locator('.build-flow-surface .composer-card');
   const block = card.locator('.composer-amount-box');
-  const panel = page.getByRole('region', { name: 'Action inspector' });
+  const panel = page.getByRole('dialog', { name: 'Action settings', exact: true });
   const inline = card.getByRole('textbox', { name: 'Source amount (USDC)', exact: true });
   const reviewSupply = card.getByRole('button', { name: 'Review Supply change', exact: true });
   const applySupply = card.getByRole('button', { name: 'Apply proposal', exact: true });
@@ -242,7 +242,7 @@ test('Supply edits inline with one shared editor value and validates through its
   await expect(card.locator('.composer-destination-box, .composer-value-arrow, form')).toHaveCount(0);
   await expect(inline).toHaveValue('0');
   await inline.click(); await inline.fill('0');
-  await expect(panel.locator('.inspector-toggle')).toHaveAttribute('aria-expanded', 'false');
+  await expect(card.getByRole('button', { name: 'Action settings', exact: true })).toHaveAttribute('aria-expanded', 'false');
   expect(await inline.evaluate(element => getComputedStyle(element).outlineStyle)).toBe('none');
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '0');
   await expect(card.locator('.composer-action-title')).toHaveText('1. Supply');
@@ -258,7 +258,7 @@ test('Supply edits inline with one shared editor value and validates through its
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '0');
   await amount.fill('2.5');
   await expect(inline).toHaveValue('2.5');
-  await panel.getByRole('button', { name: 'Advanced Settings', exact: true }).click();
+  await panel.getByRole('button', { name: 'Action settings', exact: true }).click();
   await inline.press('Enter');
   await expect(applySupply).toBeEnabled();
   const lowerReview = page.getByRole('region', { name: 'Workflow edit review', exact: true });
@@ -288,7 +288,7 @@ test('Supply edits inline with one shared editor value and validates through its
   await applySupply.focus(); await applySupply.press('Enter');
   await expect(inline).toHaveValue('3');
   await expect(applySupply).toHaveCount(0); await expect(lowerReview).toHaveCount(0);
-  await expect(panel.getByRole('button', { name: 'Advanced Settings', exact: true })).toHaveAttribute('aria-expanded', 'false');
+  await expect(panel.getByRole('button', { name: 'Action settings', exact: true })).toHaveAttribute('aria-expanded', 'false');
   for (const width of [1440, 390, 320]) {
     await page.setViewportSize({ width, height: 900 });
     const value = block.locator('.composer-amount-value'), token = block.locator(':scope > .composer-token-chip');
@@ -473,13 +473,13 @@ test('Pool uses two real liquidity asset blocks with the shared display mode and
   }
   await card.getByRole('button', { name: 'Tick', exact: true }).click();
   await openCanvasSettings(page);
-  const panel = page.getByRole('region', { name: 'Action inspector' });
+  const panel = page.getByRole('dialog', { name: 'Action settings', exact: true });
   await expect(panel.getByLabel('Maximum USDC', { exact: true })).toHaveValue('1');
   await expect(panel.getByLabel('Maximum WETH', { exact: true })).toHaveValue('0.0001');
   await panel.getByLabel('Maximum USDC', { exact: true }).fill('2');
   await expect(panel.getByRole('button', { name: 'Review position change', exact: true })).toHaveCount(0);
   // The card submits the existing position form, even while Advanced Settings is collapsed.
-  await panel.getByRole('button', { name: 'Advanced Settings', exact: true }).click();
+  await panel.getByRole('button', { name: 'Action settings', exact: true }).click();
   await card.getByRole('button', { name: 'Review', exact: true }).click();
   await expect(card.getByRole('button', { name: 'Apply', exact: true })).toBeEnabled();
   await expect(boxes.locator('.composer-amount-value').first()).toHaveValue('2');
@@ -510,7 +510,7 @@ test('linked Borrow edits use the existing composition command and keep Supply a
   const swap = page.locator('.react-flow__node[data-id="lending-swap"] .composer-card');
   const amount = borrow.getByRole('textbox', { name: 'Source amount (USDC)', exact: true });
   await borrow.locator('.composer-action-title').click();
-  await borrow.getByRole('button', { name: 'Advanced Settings', exact: true }).click();
+  await borrow.getByRole('button', { name: 'Action settings', exact: true }).click();
   const review = borrow.getByRole('button', { name: 'Review Borrow change', exact: true });
   const apply = borrow.getByRole('button', { name: 'Apply proposal', exact: true });
   await amount.fill('0'); await review.click(); await expect(apply).toHaveCount(0);
@@ -521,7 +521,7 @@ test('linked Borrow edits use the existing composition command and keep Supply a
   await expect(swap.locator('.composer-amount .composer-amount-value')).toHaveText('0.02');
   await expect(page.locator('.build-flow-surface .react-flow__edge')).toHaveCount(2);
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '2');
-  const settings = page.getByRole('region', { name: 'Action inspector' }).getByLabel('Borrow amount USDC', { exact: true });
+  const settings = page.getByRole('dialog', { name: 'Action settings', exact: true }).getByLabel('Borrow amount USDC', { exact: true });
   await expect(settings).toHaveValue('0.02');
   await settings.fill('0.03'); await expect(amount).toHaveValue('0.03');
   await settings.fill('0.02'); await review.click(); await expect(apply).toBeEnabled(); await apply.click();
@@ -539,7 +539,7 @@ test('Pool Tick/Price selector reveals attached right-side price tiles without c
   const view = card.getByRole('group', { name: 'Liquidity range view', exact: true });
   const poolNode = page.locator('.build-flow-surface .composer-pool-node');
   const presets = poolNode.getByRole('group', { name: 'Price strategies', exact: true });
-  const panel = page.getByRole('region', { name: 'Action inspector' });
+  const panel = page.getByRole('dialog', { name: 'Action settings', exact: true });
   const tick = view.getByRole('button', { name: 'Tick', exact: true }), price = view.getByRole('button', { name: 'Price', exact: true });
   await expect(tick).toHaveAttribute('aria-pressed', 'true');
   await expect(price).toHaveAttribute('aria-pressed', 'false');

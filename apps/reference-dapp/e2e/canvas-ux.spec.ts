@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { test, expect, installPassiveWallet, assertPassiveWallet, applyPendingProposal, openSimulationDetails, readWorkflowIr } from './fixtures';
+import { test, expect, installPassiveWallet, assertPassiveWallet, sendChatCommand, openSimulationDetails, readWorkflowIr } from './fixtures';
 import type { Page } from '@playwright/test';
 
 test.beforeEach(async ({ page }) => { await installPassiveWallet(page); });
@@ -287,9 +287,7 @@ test('drag keeps node mounted and cyclic connections leave semantic edges unchan
 });
 test('text controls guard deletion and approved workflow edges stay protected', async ({ page }) => {
   await page.goto('/app');
-  await page.getByLabel('Describe your flow').fill('compose supply 1 USDC to Aave then borrow 0.1 USDC then swap borrowed USDC to WETH on Base Sepolia slippage 50 bps owner 0x1111111111111111111111111111111111111111');
-  await page.getByRole('button', { name: 'Send', exact: true }).click();
-  await applyPendingProposal(page);
+  await sendChatCommand(page, 'compose supply 1 USDC to Aave then borrow 0.1 USDC then swap borrowed USDC to WETH on Base Sepolia slippage 50 bps owner 0x1111111111111111111111111111111111111111');
   await expect(page.locator('.build-flow-surface .react-flow__edge')).toHaveCount(2);
   const edge = page.locator('.build-flow-surface .react-flow__edge').first();
   await page.getByRole('button', { name: 'Fit workflow', exact: true }).click();

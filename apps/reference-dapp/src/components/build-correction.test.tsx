@@ -6,7 +6,7 @@ import { lintWorkflow, createBaseSepoliaReviewContext } from '@defi-workflow-eng
 import { initialEditor, editorReducer } from '../domain/editor';
 import { canvasAddCommand } from '../domain/canvas-authoring';
 import { WorkflowCanvas } from './workflow-canvas';
-import { ArtifactInspector } from './artifact-inspector';
+import { ActionSettingsContent } from './artifact-inspector';
 import { createUniswapLiquidityNode } from '../domain/uniswap-liquidity-authoring';
 import { ComposerCard } from './composer-card';
 import { createCrossChainLiquidityWorkflow } from '../domain/cross-chain-liquidity';
@@ -132,8 +132,9 @@ describe('corrected Build workspace presentation', () => {
     expect(canvas).not.toMatch(/canvas-empty-mascot|flofi-droplet-wave|Start your workflow/);
     expect(canvas).toContain('Aave V3');
     expect(canvas).toContain('Base Sepolia');
-    expect(canvas).toContain('Advanced Settings');
-    expect(canvas).toMatch(/<button type="button" class="composer-selected nodrag nopan"[^>]*>Advanced Settings\s*<svg/);
+    // BUILD-FLOFI-CONVERSATIONAL-001: the card's own settings control (no bottom Advanced Settings inspector) opens its settings dialog.
+    expect(canvas).not.toContain('Advanced Settings');
+    expect(canvas).toMatch(/<button type="button" class="composer-selected nodrag nopan" aria-haspopup="dialog" aria-expanded="false" aria-label="Action settings"[^>]*>Settings\s*<svg/);
     const name = action[0]!.toUpperCase() + action.slice(1);
     expect(canvas).toMatch(new RegExp(`class="composer-action-title"><span>1\\. ${name}</span><svg[^>]*aria-hidden="true"[^>]*>[\\s\\S]*?</svg></strong>`));
     expect(canvas).not.toMatch(/Step 1|Configured/);
@@ -150,7 +151,7 @@ describe('corrected Build workspace presentation', () => {
     expect(canvas).toMatch(/aria-label="Source amount \(USDC\)"[^>]*value="1"/);
     expect(canvas).toMatch(/type="submit" form="composer-supply-review-[^"]+"[^>]*>Review (Supply|Borrow|Repay|Withdraw) change<\/button>/);
     expect(canvas).not.toContain('Apply proposal');
-    const inspector = renderToStaticMarkup(createElement(ArtifactInspector, { selectedId, select: vi.fn(), expanded: true, onExpandedChange: vi.fn() }));
+    const inspector = renderToStaticMarkup(createElement(ActionSettingsContent, { selectedId, select: vi.fn() }));
     expect(inspector).toContain(`aria-label="Edit ${name}"`);
     expect(inspector).toContain(`aria-label="${name} amount (USDC)"`);
     expect(inspector).toContain(`id="composer-supply-review-${selectedId}"`);
@@ -273,7 +274,7 @@ describe('UX-002 canonical composer projections', () => {
     expect(html).toContain('src="/brand/robinhood-avatar.jpg"');
     expect(html).toContain('aria-label="Robinhood Chain network"');
     expect(html).not.toContain('<select');
-    expect(html).toContain('Advanced Settings');
+    expect(html).toContain('aria-label="Action settings"'); expect(html).not.toContain('Advanced Settings');
     // The destination box keeps the shared Swap-card label ("Destination amount (unquoted placeholder)") until a quote exists.
     expect(html).toContain('aria-label="Destination amount (unquoted placeholder)"');
     expect(html.match(/unsupported|non-executable|coming soon|debug|lab\b|Transfer/i)?.[0] ?? null).toBeNull();
@@ -292,8 +293,8 @@ describe('UX-002 canonical composer projections', () => {
     expect(canvas.match(/composer-card active/g)).toHaveLength(1);
     expect(canvas).toContain('1. Supply'); expect(canvas).toContain('2. Borrow'); expect(canvas).toContain('3. Swap');
     expect(canvas).not.toMatch(/Completed|Runtime:|Confirmed|<form/);
-    const inspector = renderToStaticMarkup(createElement(ArtifactInspector, { selectedId: 'lending-borrow', select: vi.fn(), expanded: true, onExpandedChange: vi.fn() }));
-    expect(inspector).toContain('<span>Advanced Settings</span>');
+    const inspector = renderToStaticMarkup(createElement(ActionSettingsContent, { selectedId: 'lending-borrow', select: vi.fn() }));
+    expect(inspector).not.toContain('Advanced Settings');
     expect(inspector).not.toContain('Selected Action · 2. Borrow');
     expect(inspector).toContain('aria-label="Edit Aave Borrow"');
     fixture.store.state = editorReducer(fixture.store.state, { type: 'AUTHOR_LENDING', source: 'CANVAS', baseRevision: workflow.revision,
@@ -317,7 +318,7 @@ describe('UX-002 canonical composer projections', () => {
     const canvas = renderToStaticMarkup(createElement(WorkflowCanvas, { selectedId: node.nodeId, select: vi.fn() }));
     expect(canvas).not.toContain('data-state="warning"'); expect(canvas).not.toContain('Check settings');
     expect(canvas).not.toMatch(/composer-card-state|composer-warning|composer-value-edit/);
-    const inspector = renderToStaticMarkup(createElement(ArtifactInspector, { selectedId: node.nodeId, select: vi.fn(), expanded: true, onExpandedChange: vi.fn() }));
+    const inspector = renderToStaticMarkup(createElement(ActionSettingsContent, { selectedId: node.nodeId, select: vi.fn() }));
     expect(inspector).toContain('Selected action checks'); expect(inspector).toContain(state.message);
     const missingSlippage = { ...fixture.store.state.workflow, nodes: fixture.store.state.workflow.nodes.map(item => item.nodeId === node.nodeId ? { ...item, userConstraints: item.userConstraints.filter(constraint => constraint.kind !== 'MAXIMUM_SLIPPAGE_BPS') } : item) };
     expect(composerNodeState(lintWorkflow(missingSlippage, fixture.store.context), node.nodeId).tone).toBe('invalid');
@@ -328,8 +329,8 @@ describe('UX-002 canonical composer projections', () => {
     expect(composerConnections(fixture.store.state.workflow)).toEqual([]);
     const canvas = renderToStaticMarkup(createElement(WorkflowCanvas, { selectedId: null, select: vi.fn() }));
     expect(canvas).not.toContain('composer-card active');
-    const inspector = renderToStaticMarkup(createElement(ArtifactInspector, { selectedId: null, select: vi.fn(), onExpandedChange: vi.fn() }));
-    expect(inspector).toContain('Advanced Settings'); expect(inspector).toContain('aria-expanded="false"'); expect(inspector).not.toContain('Edit Supply');
+    // No selected action: there is no settings content at all (no empty bottom panel remains).
+    expect(renderToStaticMarkup(createElement(ActionSettingsContent, { selectedId: null, select: vi.fn() }))).toBe('');
   });
 });
 

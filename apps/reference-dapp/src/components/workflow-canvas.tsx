@@ -260,7 +260,8 @@ function ReadonlyWorkflowCanvas({ mode, workflowName, overlay, primaryAction }: 
   </section>;
 }
 
-type BuildCanvasProps = { environment?: WalletEnvironment; selectedId: string | null; select: (id: string | null) => void; openSettings?: (id: string) => void; workflowName?: string; renameWorkflow?: (name: string) => void; onSave?: () => void; estimateOwner?: string | undefined; onToolboxModeChange?: (mode: ToolboxMode) => void; primaryAction?: ReactNode;
+type BuildCanvasProps = { environment?: WalletEnvironment; selectedId: string | null; select: (id: string | null) => void; openSettings?: (id: string) => void;
+  /** BUILD-FLOFI-CONVERSATIONAL-001: the card whose settings popover is open (its settings control reports it as expanded). */ settingsId?: string | null; workflowName?: string; renameWorkflow?: (name: string) => void; onSave?: () => void; estimateOwner?: string | undefined; onToolboxModeChange?: (mode: ToolboxMode) => void; primaryAction?: ReactNode;
   /** BUILD-AUTOMATION-002: present only where automations are enabled; opens Automations on this exact Canvas workflow. */
   onAutomate?: (() => void) | undefined };
 const EMPTY_OVERLAY: ReadonlyMap<string, SimulationOverlay> = new Map();
@@ -270,7 +271,7 @@ export function WorkflowCanvas(props: BuildCanvasProps | { mode: 'simulate'; wor
   return <BuildCanvas {...props}/>;
 }
 
-function BuildCanvas({ environment, selectedId, select, openSettings, workflowName = 'Your Workflow', renameWorkflow = () => {}, onSave, estimateOwner, onToolboxModeChange, primaryAction, onAutomate }: BuildCanvasProps) {
+function BuildCanvas({ environment, selectedId, select, openSettings, settingsId = null, workflowName = 'Your Workflow', renameWorkflow = () => {}, onSave, estimateOwner, onToolboxModeChange, primaryAction, onAutomate }: BuildCanvasProps) {
   const { t: tr } = useLocale();
   const { state, dispatch, context, canvasLayout, canUndo, canRedo, undo, redo, moveCanvasNodes, addCanvasCommand, duplicateCanvasNodes, propose, review,
     actionSetup = null, amountInputs = {}, bridgeNetworkInputs = {}, cryptoSelections = {}, recipientInputs = {}, editCanvasRecipient, editCryptoSelection, startActionSetup, startStocksSetup, editCanvasAmount, editSwapSetupDirection, editBridgeNetworks, cancelCanvasAmount, reviewCanvasAmount, commitCanvasAmount, removeActionSetup, pending, applyProposal, dismissProposal } = useWorkflow();
@@ -569,7 +570,7 @@ function BuildCanvas({ environment, selectedId, select, openSettings, workflowNa
     selected: selectedIds.includes(node.nodeId) || selectedId === node.nodeId,
     data: { composer: true, connectable: true, ...(['asset.swap.exact-input', 'asset.bridge'].includes(node.actionType) ? liveQuoteTarget(node.nodeId) : { estimateNodeId: node.nodeId }), estimateOwner: node.chainId.startsWith('solana:') ? estimateOwner : wallet.account,
       estimateEvmOwner: wallet.account, estimateSolanaOwner: estimateOwner,
-      contextualProposal: contextualTarget === node.nodeId, onOpenSettings: () => { selectNodes([node.nodeId], node.nodeId); openSettings?.(node.nodeId); }, step: index + 1, selected: selectedId === node.nodeId,
+      contextualProposal: contextualTarget === node.nodeId, onOpenSettings: () => { selectNodes([node.nodeId], node.nodeId); openSettings?.(node.nodeId); }, settingsOpen: settingsId === node.nodeId, step: index + 1, selected: selectedId === node.nodeId,
       vertical: isLendingComposition(workflow), summary: selectedSummary(composerSummary(workflow, node, context), cryptoSelections[node.nodeId]),
       ...(cryptoSelectionOf(node) ? { actionSelection: actionSelection(node.nodeId, cryptoSelections[node.nodeId] ?? cryptoSelectionOf(node)!, canSelectCryptoAssets(node, workflow)) } : {}),
       ...(composerSummary(workflow, node, context).action === 'Stocks' && (cryptoSelections[node.nodeId] ?? cryptoSelectionOf(node)) ? { stocks: stocksData(node.nodeId, cryptoSelections[node.nodeId] ?? cryptoSelectionOf(node)!, canSelectCryptoAssets(node, workflow)) } : {}),
@@ -615,7 +616,7 @@ function BuildCanvas({ environment, selectedId, select, openSettings, workflowNa
       position: canvasLayout[actionSetup.id] ?? defaultCanvasPosition(projected.length), selected: selectedId === actionSetup.id,
       data: { composer: true, connectable: false, ...(['swap', 'bridge'].includes(actionSetup.action) ? { ...liveQuoteTarget(actionSetup.id), estimateOwner: estimateOwner ?? wallet.account,
         estimateEvmOwner: wallet.account, estimateSolanaOwner: estimateOwner } : {}),
-        onOpenSettings: () => { selectNodes([actionSetup.id], actionSetup.id); openSettings?.(actionSetup.id); }, step: projected.length + 1, selected: selectedId === actionSetup.id, vertical: false,
+        onOpenSettings: () => { selectNodes([actionSetup.id], actionSetup.id); openSettings?.(actionSetup.id); }, settingsOpen: settingsId === actionSetup.id, step: projected.length + 1, selected: selectedId === actionSetup.id, vertical: false,
         summary: setupSummary(actionSetup, context),
         ...(actionSetup.action === 'swap' && actionSetup.stocks && actionSetup.cryptoSelection ? { stocks: stocksData(actionSetup.id, actionSetup.cryptoSelection) } : {}),
         ...(actionSetup.action !== 'bridge' ? { actionSelection: actionSelection(actionSetup.id, actionSetup.cryptoSelection ?? selectCryptoNetwork(actionSetup.action as CryptoAction, actionSetup.action === 'swap' ? context.assets.USDC.asset.chainId === 'eip155:84532' ? 'Base Sepolia' : 'Base' : 'Base Sepolia')) } : {}),
@@ -645,7 +646,7 @@ function BuildCanvas({ environment, selectedId, select, openSettings, workflowNa
             : actionSetup.cryptoSelection && actionSelection(actionSetup.id, actionSetup.cryptoSelection).valid ? null : 'Choose a network available for the connected wallet.' } } : {}),
       } });
     return projected;
-  }, [environment, state, workflow, actionSetup, amountInputs, bridgeNetworkInputs, cryptoSelections, recipientInputs, editCanvasRecipient, editCryptoSelection, wallet.account, estimateOwner, selectedId, selectedIds, context, canvasLayout, review, editCanvasAmount, editSwapSetupDirection, editBridgeNetworks, reviewCanvasAmount, commitCanvasAmount, cancelCanvasAmount, openSettings, pending, applyProposal, catalog.version]);
+  }, [environment, state, workflow, actionSetup, amountInputs, bridgeNetworkInputs, cryptoSelections, recipientInputs, editCanvasRecipient, editCryptoSelection, wallet.account, estimateOwner, selectedId, selectedIds, context, canvasLayout, review, editCanvasAmount, editSwapSetupDirection, editBridgeNetworks, reviewCanvasAmount, commitCanvasAmount, cancelCanvasAmount, openSettings, settingsId, pending, applyProposal, catalog.version]);
   // Live pointer positions stay in React Flow state; layout is committed on release.
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>(projectedNodes);
   useLayoutEffect(() => {

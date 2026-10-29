@@ -15,5 +15,7 @@ export function MobileBuildNavigation({ stage = 'Build' }: { stage?: 'Build' | '
   return <nav className="mobile-build-navigation" aria-label={tr(stage === 'Build' ? 'Build workspace navigation' : stage === 'Simulate' ? 'Simulation workspace navigation' : 'Execution workspace navigation')}>
     <button type="button" onClick={() => focus('.workflow-workspace .canvas')}>{tr('Canvas')}</button>
     <button type="button" onClick={() => focus(stage === 'Build' ? '#mock-prompt' : stage === 'Simulate' ? '.simulation-summary' : '.execution-summary')}>{tr(secondary)}</button>
+    {/* BUILD-FLOFI-CONVERSATIONAL-001: the same conversation continues below Simulate and Execute. */}
+    {stage !== 'Build' && <button type="button" onClick={() => focus('#mock-prompt')}>{tr('Copilot')}</button>}
   </nav>;
 }

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /** Integrated acceptance on disposable PostgreSQL and MOCKED loopback chains. No public broadcasts. */
-import { test, expect, openProposalReview, openSimulationDetails, proveConnectedEvmWallet, readWorkflowIr } from './fixtures';
+import { test, expect, sendChatCommand, openSimulationDetails, proveConnectedEvmWallet, readWorkflowIr } from './fixtures';
 import { CROSSCHAIN_ROUTER_BASE_SEPOLIA_ARBITRUM_SEPOLIA as TESTNET } from '@defi-workflow-engine/action-registry';
 import { createRouterHarness } from './router-harness';
 import type { Page } from '@playwright/test';
@@ -13,9 +13,7 @@ import { installJourneyWallet, resetJourneyHarness, journeySends, switchAccount,
 
 const stage = (page: Page, name: string) => page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name, exact: true }).click();
 async function author(page: Page) {
-  await page.locator('#mock-prompt').fill('Bridge 1 USDC from Base Sepolia to Arbitrum Sepolia');
-  await page.getByRole('button', { name: 'Send', exact: true }).click();
-  await openProposalReview(page); await page.getByRole('button', { name: 'Apply proposal' }).click();
+  await sendChatCommand(page, 'Bridge 1 USDC from Base Sepolia to Arbitrum Sepolia');
 
 }
 async function savedCanonical(owner: string) {
@@ -81,9 +79,7 @@ test('new workflow identity is unique per load and matches the serialized server
   // identity is still serialized in the server component's provider props.
   const server = (await response!.text()).match(/initialWorkflowId.{0,12}(workflow-[0-9a-f-]{36})/)?.[1];
   expect(server).toBeDefined();
-  await page.locator('#mock-prompt').fill('Swap 1 USDC to WETH on Base slippage 50 bps');
-  await page.getByRole('button', { name: 'Send', exact: true }).click();
-  await openProposalReview(page); await page.getByRole('button', { name: 'Apply proposal' }).click();
+  await sendChatCommand(page, 'Swap 1 USDC to WETH on Base slippage 50 bps');
   const client = JSON.parse(await readWorkflowIr(page)).workflowId;
   expect(client).toBe(server); expect(client).toMatch(/^workflow-[0-9a-f-]{36}$/);
   const reload = await page.reload();

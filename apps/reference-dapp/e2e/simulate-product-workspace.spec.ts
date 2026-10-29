@@ -88,7 +88,7 @@ test('current workflow, read-only cards, honest summary and Back to Build', asyn
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', revision!);
   await graph(page).getByRole('button', { name: 'Back to Build', exact: true }).click();
   await expect(page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Build', exact: true })).toHaveAttribute('aria-current', 'page');
-  await expect(buildCard.getByRole('button', { name: 'Advanced Settings', exact: true })).toBeVisible();
+  await expect(buildCard.getByRole('button', { name: 'Action settings', exact: true })).toBeVisible();
   expect(await cardStyle(buildCard)).toEqual(style);
   await expect(buildCard.getByRole('textbox', { name: 'Source amount (USDC)', exact: true })).toHaveValue('2.5');
 });

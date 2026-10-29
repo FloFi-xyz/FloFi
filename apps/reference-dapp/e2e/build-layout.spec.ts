@@ -3,21 +3,21 @@ import { test, expect } from './fixtures';
 import { installSupplyWallet } from './supply-fixtures';
 import { openCanvasSettings } from './composer-authoring-fixtures';
 
-test('Build places the existing assistant beside the canvas and selected settings below', async ({ page }) => {
+// BUILD-FLOFI-CONVERSATIONAL-001: no Advanced Settings panel below the canvas; a card's settings open anchored to it, inside the canvas.
+test('Build places the existing assistant beside the canvas and a selected card’s settings inside the canvas, never below it', async ({ page }) => {
   await installSupplyWallet(page);
   await page.goto('/app');
   const canvas = page.getByRole('region', { name: 'Workflow canvas', exact: true });
   const assistant = page.getByRole('complementary', { name: 'Workflow assistant' });
-  const inspector = page.getByRole('region', { name: 'Action inspector' });
+  const inspector = page.getByRole('dialog', { name: 'Action settings', exact: true });
   await expect(assistant).toBeVisible();
   const canvasBox = (await canvas.boundingBox())!;
   const assistantBox = (await assistant.boundingBox())!;
-  const inspectorBox = (await inspector.boundingBox())!;
   expect(assistantBox.x).toBeGreaterThanOrEqual(canvasBox.x + canvasBox.width);
   expect(assistantBox.y).toBe(canvasBox.y);
   expect(assistantBox.width).toBeLessThan(canvasBox.width);
-  expect(inspectorBox.y).toBeGreaterThanOrEqual(canvasBox.y + canvasBox.height);
-  expect(inspectorBox.width).toBeGreaterThan(canvasBox.width);
+  await expect(inspector).toHaveCount(0);
+  await expect(page.locator('.inspector-disclosure, .inspector-toggle')).toHaveCount(0);
   await expect(page.locator('.library .copilot')).toHaveCount(0);
   await expect(page.getByText('Technical authoring tools', { exact: true })).toHaveCount(0);
   await assistant.locator('.chat-form input').fill('explain');
@@ -25,8 +25,11 @@ test('Build places the existing assistant beside the canvas and selected setting
   await expect(assistant.locator('.message.you')).toHaveText('YOUexplain');
   await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '0');
   await page.getByRole('button', { name: 'Add supply', exact: true }).click();
-  await expect(inspector.locator('.inspector-body')).toBeHidden();
+  await expect(inspector).toHaveCount(0);
   await openCanvasSettings(page);
+  const settingsBox = (await inspector.boundingBox())!;
+  expect(settingsBox.y).toBeGreaterThanOrEqual(canvasBox.y); expect(settingsBox.y + settingsBox.height).toBeLessThanOrEqual(canvasBox.y + canvasBox.height);
+  expect(settingsBox.x + settingsBox.width).toBeLessThanOrEqual(canvasBox.x + canvasBox.width);
   const form = inspector.getByRole('form', { name: 'Configure Supply' });
   await expect(form.getByLabel('Source amount (USDC)')).toHaveValue('0');
   await form.getByLabel('Source amount (USDC)').fill('2');
@@ -63,8 +66,8 @@ test('Build keeps existing toolbar actions and zoom behavior at their new positi
     if (width === 1440) {
       expect((await page.getByRole('complementary', { name: 'Workflow assistant' }).boundingBox())!.height).toBe(760);
       const canvasBox = (await page.getByRole('region', { name: 'Workflow canvas', exact: true }).boundingBox())!;
-      for (const section of [page.getByRole('region', { name: 'Action inspector', exact: true }), page.locator('details.library')])
-        expect((await section.boundingBox())!.y).toBeGreaterThanOrEqual(canvasBox.y + canvasBox.height);
+      await expect(page.getByRole('dialog', { name: 'Action settings', exact: true })).toHaveCount(0);
+      for (const section of [page.locator('details.library')]) if (await section.count()) expect((await section.boundingBox())!.y).toBeGreaterThanOrEqual(canvasBox.y + canvasBox.height);
     }
   }
   await page.setViewportSize({ width: 1440, height: 900 });

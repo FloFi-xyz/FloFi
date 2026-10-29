@@ -108,7 +108,7 @@ test('accepted Build edits refresh Simulate while current diagnostic artifacts a
   expect(await page.getByRole('main', { name: 'Simulation workspace', exact: true }).innerText()).not.toMatch(/MOCK|SYNTHETIC|Artifact Set|LOCAL/);
   await graph(page).getByRole('button', { name: 'Back to Build', exact: true }).click();
   await openCanvasSettings(page);
-  const inspectorAmount = page.getByRole('region', { name: 'Action inspector' }).getByLabel('Input amount (USDC)');
+  const inspectorAmount = page.getByRole('dialog', { name: 'Action settings', exact: true }).getByLabel('Input amount (USDC)');
   // BUILD-FIX-UX-001: Enter in Advanced Settings applies the amount directly.
   await inspectorAmount.fill('2.5'); await inspectorAmount.press('Enter');
   await rename(page, 'Updated Strategy');

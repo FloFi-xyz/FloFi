@@ -2,7 +2,7 @@
 import type { Page, Route } from '@playwright/test';
 import { hashArtifactBytes } from '@defi-workflow-engine/workflow-contracts';
 import { SOLANA_MAINNET_TOKENS } from '@defi-workflow-engine/action-registry';
-import { test, expect, applyPendingProposal, chooseWallet, readWorkflowIr, installPassiveWallet, assertPassiveWallet } from './fixtures';
+import { test, expect, sendChatCommand, chooseWallet, readWorkflowIr, installPassiveWallet, assertPassiveWallet } from './fixtures';
 import { createMockedSolanaWallet } from '@defi-workflow-engine/reference-compiler';
 import { installDevnetWallet } from './solana-devnet-fixtures';
 import { installSupplyWallet } from './supply-fixtures';
@@ -31,11 +31,8 @@ test('the Bridge arrow reverses the networks and preserves the input amount thro
   await expect.poll(async()=>JSON.parse(await readWorkflowIr(page)).nodes[0].chainId).toBe('eip155:42161');
   await assertPassiveWallet(page);
 });
-async function chat(page: Page, text: string) {
-  await page.getByLabel('Describe your flow').fill(text);
-  await page.getByRole('button', { name: 'Send', exact: true }).click();
-  await applyPendingProposal(page);
-}
+/** BUILD-FLOFI-CONVERSATIONAL-001: the chat commits the request at once (no proposal to apply). */
+const chat = sendChatCommand;
 async function selectAndDelete(page: Page, card: ReturnType<Page['locator']>) {
   await card.locator('.composer-action-title').click();
   await page.getByRole('button', { name: 'Delete', exact: true }).click();

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { expect, openProposalReview, openSimulationDetails, acceptProductReview } from './fixtures';
+import { expect, sendChatCommand, openProposalReview, openSimulationDetails, acceptProductReview } from './fixtures';
 import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -25,10 +25,9 @@ export const installDevnetWallet = (page: Page, wallet: ReturnType<typeof create
 export const devnetPanel = (page: Page) => page.getByRole('region', { name: 'Solana Devnet swap' });
 export async function authorDevnetSwap(page: Page, via: 'canvas' | 'chat' = 'canvas') {
   await page.goto('/__engineering');
-  if (via === 'chat') {
-    await page.locator('#mock-prompt').fill('Swap 10 test USDC to test SOL on Solana Devnet');
-    await page.getByRole('button', { name: 'Send', exact: true }).click();
-  } else {
+  // BUILD-FLOFI-CONVERSATIONAL-001: the chat commits its request at once; the engineering form keeps its proposal.
+  if (via === 'chat') { await sendChatCommand(page, 'Swap 10 test USDC to test SOL on Solana Devnet'); return; }
+  {
     await page.getByText('Advanced action setup').click();
     await page.locator('#swap-network').selectOption('SOLANA_DEVNET');
     const form = page.getByRole('form', { name: 'Create Solana Devnet swap' });

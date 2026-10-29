@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { test, expect, applyPendingProposal, openSimulationDetails, assertNoFinancialCanvasAction, AUTHORIZE_IN_WALLET } from './fixtures';
+import { test, expect, sendChatCommand, openSimulationDetails, assertNoFinancialCanvasAction, AUTHORIZE_IN_WALLET } from './fixtures';
 import { profile, fork, snapshot } from './composition-fixtures';
 import { assertExecutionBlocked } from './release-safety-fixtures';
 
@@ -24,9 +24,7 @@ test('Pinned local composition requires shared Review without automatically inst
       w.ethereum = { request: ({ method }: { method: string }) => w.releaseCompositionWallet(method) };
     });
     await page.goto('/__engineering');
-    await page.getByLabel('Describe your flow').fill(`compose swap 400 USDC to WETH slippage 100 bps then mint maximum 0.1 WETH and 200 USDC minimum 0.000001 WETH and 0.001 USDC ticks ${center - 100} to ${center + 100} safe ${p.safe}`);
-    await page.getByRole('button', { name: 'Send', exact: true }).click();
-    await applyPendingProposal(page);
+    await sendChatCommand(page, `compose swap 400 USDC to WETH slippage 100 bps then mint maximum 0.1 WETH and 200 USDC minimum 0.000001 WETH and 0.001 USDC ticks ${center - 100} to ${center + 100} safe ${p.safe}`);
     await page.getByRole('button', { name: 'Simulate', exact: true }).click();
     await openSimulationDetails(page);
     const panel = page.getByRole('region', { name: 'Mode B swap to liquidity composition', exact: true });

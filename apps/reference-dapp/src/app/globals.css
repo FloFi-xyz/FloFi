@@ -395,12 +395,11 @@
 .build-grid>.copilot{height:590px;min-width:0;grid-column:auto}
 .build-grid:has(.floating-toolbox)>.canvas:not(.lending-canvas),.build-grid:has(.floating-toolbox)>.copilot{height:760px}
 .build-grid:has(.lending-canvas)>.copilot{height:820px}
-.build-grid+.inspector{min-width:0;width:100%}
-.build-grid+.inspector .inspector-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;align-items:end}
-.build-grid+.inspector .inspector-fields>strong,.build-grid+.inspector .inspector-fields>p,.build-grid+.inspector .inspector-fields>small{grid-column:1/-1}
-.build-grid+.inspector .inspector-fields label{width:100%}.build-grid+.inspector input,.build-grid+.inspector select{width:100%;min-width:0;max-width:100%}
-.build-grid+.inspector p{font-size:12px;line-height:1.6;overflow-wrap:anywhere}
-.build-grid+.inspector select{min-height:40px;border:1px solid var(--line);border-radius:6px;padding:0 10px;background:var(--paper);color:var(--ink);font:inherit}
+.action-settings-popover .inspector-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;align-items:end}
+.action-settings-popover .inspector-fields>strong,.action-settings-popover .inspector-fields>p,.action-settings-popover .inspector-fields>small{grid-column:1/-1}
+.action-settings-popover .inspector-fields label{width:100%}.action-settings-popover input,.action-settings-popover select{width:100%;min-width:0;max-width:100%}
+.action-settings-popover p{font-size:12px;line-height:1.6;overflow-wrap:anywhere}
+.action-settings-popover select{min-height:40px;border:1px solid var(--line);border-radius:6px;padding:0 10px;background:var(--paper);color:var(--ink);font:inherit}
 .build-flow-surface .canvas-primary-action{right:12px;bottom:24px}
 .canvas-primary-action{position:absolute;z-index:5;right:56px;bottom:12px}
 .canvas-primary-action button{min-height:44px;padding:10px 16px;border:1px solid var(--primary);border-radius:9px;background:var(--primary);color:var(--on-accent);font-weight:600;box-shadow:0 5px 18px rgba(24,59,104,.2)}
@@ -647,12 +646,6 @@
 @container(max-width:850px){.canvas-toolbar-row .canvas-utility-tools button span{display:none}.canvas-toolbar-row .canvas-utility-tools button{width:32px;padding:0}.canvas-toolbar-row .canvas-utility-tools .toolbox-mode-toggle{width:32px}.canvas-toolbar-row>.revision{display:none}}
 @container(max-width:650px){.canvas-toolbar-row .canvas-utility-tools button,.canvas-toolbar-row .canvas-utility-tools .toolbox-mode-toggle{width:28px}.canvas-toolbar-row .canvas-primary-tools button{font-size:10px;padding-inline:1px;gap:2px}}
 .floating-toolbox .canvas-primary-tools,.floating-toolbox .canvas-utility-tools{display:flex;flex-direction:column;align-items:center;gap:0}
-.inspector.inspector-disclosure{padding:0;min-height:0;overflow:hidden}
-.inspector-disclosure .inspector-toggle{display:flex;align-items:center;gap:8px;width:100%;min-height:46px;padding:12px 16px;border:0;border-radius:0;background:var(--paper);color:var(--blue);text-align:left;font-size:12px;font-weight:600}
-.inspector-disclosure .inspector-toggle svg{flex:none}
-.inspector-disclosure .inspector-toggle:disabled{opacity:1;cursor:default}
-.inspector-disclosure .inspector-toggle:focus-visible{outline-offset:-3px}
-.inspector-body{padding:18px;border-top:1px solid var(--line)}
 
 /* UX-003B product cleanup: header environment and quiet, editable trade values. */
 .composer-amount-box.numeric{font-family:inherit;font-variant-numeric:tabular-nums}
@@ -818,7 +811,7 @@
 :root[data-theme="dark"] .build-flow-surface .composer-card.active{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent-soft),0 3px 12px rgb(0 0 0 / .2)}
 :root[data-theme="dark"] .build-flow-surface .canvas-primary-action button{animation:none;box-shadow:0 3px 12px rgb(0 0 0 / .18)}
 :root[data-theme="dark"] :is(.canvas-toolbox button:enabled,.composer-action-title,.composer-selected,.header-settings,.composer-pool-collapse) svg{color:var(--accent);stroke-width:1.95}
-:root[data-theme="dark"] :is(.chat-form input,.inspector input,.swap-create input,.swap-create select,.canvas-name input,.build-grid+.inspector select){background:var(--surface-raised)}
+:root[data-theme="dark"] :is(.chat-form input,.inspector input,.swap-create input,.swap-create select,.canvas-name input,.action-settings-popover select){background:var(--surface-raised)}
 :root[data-theme="dark"] :is(.composer-amount-box,.composer-stock-option,.composer-pool-preset,.message.you,.proposal){background:var(--surface-raised)}
 :root[data-theme="dark"] .composer-token-chip{background:var(--surface-raised);color:var(--ink)}
 :root[data-theme="dark"] :is(.composer-pool-presets,.composer-stocks-panel){background:var(--surface)}
@@ -889,7 +882,6 @@
 .composer-network-options button:disabled{pointer-events:none;color:var(--muted);opacity:1}
 .composer-network-options button:disabled>span:nth-child(2){opacity:.6}
 .composer-network-options .composer-stock-option>span:nth-child(2){flex:1}
-.inspector-disclosure .inspector-toggle{font-size:14px}
 .build-workspace .inspector-body h2{font-size:16px}
 .build-workspace .inspector :is(p,li){font-size:14px;line-height:1.55}
 .build-workspace .inspector label{font-size:13px;line-height:1.4}
@@ -1819,3 +1811,32 @@ button.wallet-option .wallet-option-status{border-color:var(--accent-line);backg
 .workflow-run-steps code{font-size:11px;overflow-wrap:anywhere}
 .workflow-run-choice,.workflow-run-review{display:grid;gap:8px}
 .workflow-run-note{font-size:12px}
+/* BUILD-FLOFI-CONVERSATIONAL-001: the chat beside Simulate and Execute (one conversation across stages), a card's own settings anchored to it (no bottom
+   Advanced Settings inspector), and the chat's Review and execution cards. */
+.stage-with-chat{display:grid;grid-template-columns:minmax(0,1fr) 340px;width:100%;max-width:1800px;margin:0 auto;flex:1;align-items:start}
+.stage-with-chat>.main{max-width:none;margin:0;min-width:0}
+.stage-with-chat>.copilot{position:sticky;top:12px;margin:28px 24px 28px 0;height:clamp(460px,calc(100vh - 200px),760px);min-width:0}
+@media(max-width:1280px){.stage-with-chat{grid-template-columns:minmax(0,1fr)}.stage-with-chat>.copilot{position:static;margin:0 16px 24px;height:clamp(390px,65svh,540px)}}
+.action-settings-popover{position:absolute;z-index:40;width:min(400px,calc(100% - 16px));overflow:auto;margin:0;min-height:0;padding:14px 16px 16px;box-shadow:0 18px 42px rgba(24,59,104,.18)}
+.action-settings-popover[hidden]{display:none}
+.action-settings-popover .inspector-body{padding:0}
+.action-settings-popover .inspector-body h2{padding-right:40px}
+.action-settings-close{position:sticky;top:0;float:right;width:34px;min-height:34px!important;padding:0!important;display:grid;place-items:center;margin:-4px -6px 0 8px;z-index:1}
+.conversation-review,.conversation-execution{margin-top:8px;border:1px solid var(--line);border-radius:8px;background:var(--paper);padding:10px 12px;font-size:13px;line-height:1.45}
+.conversation-review-steps{margin:0;padding:0;list-style:none;display:grid;gap:10px}
+.conversation-review-steps>li{display:grid;gap:4px}
+.conversation-review-route{color:var(--muted);overflow-wrap:anywhere}
+.conversation-review dl,.conversation-execution dl{margin:0;display:grid;gap:4px}
+.conversation-review dl>div,.conversation-execution dl>div{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
+.conversation-review dt,.conversation-execution dt{color:var(--muted);font-weight:500;flex:none;max-width:48%}
+.conversation-review dd,.conversation-execution dd{margin:0;text-align:right;overflow-wrap:anywhere;min-width:0}
+.conversation-review dd small{display:block;color:var(--muted);font-size:11px}
+.conversation-review-lines{margin-top:10px!important;padding-top:8px;border-top:1px solid var(--line)}
+.conversation-review [data-unknown] dd{color:var(--muted)}
+.conversation-review-warnings{margin:8px 0 0;padding-left:16px;color:var(--amber)}
+.conversation-review-warnings [data-severity="blocking"]{color:var(--red)}
+.message p.conversation-review-note{margin-top:8px;color:var(--muted);font-size:12px}
+.message p.conversation-question{margin-top:10px}
+.conversation-execution-operations{margin:6px 0;padding-left:16px;overflow-wrap:anywhere}
+.conversation-execution-operations a{color:var(--blue)}
+.conversation-execution-count{color:var(--muted)}

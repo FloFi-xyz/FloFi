@@ -82,8 +82,8 @@ test('clearing an existing amount blocks both later stages without sending zero 
   await openCanvasSettings(page);
   const source = card(page).getByRole('textbox', { name: 'Source amount (USDC)', exact: true });
   await source.fill('0'); await expectBlocked(page);
-  await expect(page.getByRole('region', { name: 'Action inspector' }).locator('.composer-editor-context')).toContainText('0 USDC');
-  await expect(page.getByRole('region', { name: 'Action inspector' }).getByLabel('Input amount (USDC)', { exact: true })).toHaveValue('0');
+  await expect(page.getByRole('dialog', { name: 'Action settings', exact: true }).locator('.composer-editor-context')).toContainText('0 USDC');
+  await expect(page.getByRole('dialog', { name: 'Action settings', exact: true }).getByLabel('Input amount (USDC)', { exact: true })).toHaveValue('0');
   expect(await readWorkflow(page)).toEqual(original);
   await source.press('Enter');
   await expect(card(page).getByRole('alert')).toContainText('greater than 0');

@@ -57,11 +57,22 @@ type Store = { restorationEpoch: number; state: EditorState; dispatch: Dispatch<
   addCanvasCommand(command: Command, position: { x: number; y: number }): void;
   duplicateCanvasNodes(nodeIds: readonly string[]): void;
   pending: Pending | null; propose(command: Command): void; applyProposal(): void; dismissProposal(): void;
+  /**
+   * BUILD-FLOFI-CONVERSATIONAL-001: commits one validated authoring command that the owner asked for in the FloFi chat, with no proposal step:
+   * the same editor reducer, base-revision guard, test-network refusal and undoable history entry as `applyProposal`. Authoring only — the new
+   * revision retires every quote, simulation and Review; execution still needs a fresh simulation, Review and the owner's wallet signature.
+   * `expected` is the workflow the commit produces, so the caller can tell from the stored workflow whether it landed.
+   */
+  commitChatCommand(command: Command): ChatCommit;
+  /** Undoes a chat commit only while it is still the latest history entry (the workflow is exactly `expected`); otherwise nothing changes. */
+  undoChatCommit(commit: { readonly before: Workflow; readonly expected: Workflow }): boolean;
   /** The position operation an applied position-management proposal prepared for the Simulate panel (never simulated, reviewed or signed here). */
   stagedPosition: StagedPosition | null;
   review: ReviewResult | null; reviewError: string | null;
   chain: ChainState; eligibility: Eligibility; generateArtifacts(): void; refreshArtifacts(): void; accessCheck(): void };
 export type StagedPosition = { readonly positionMint: string; readonly operation: 'DECREASE_PARTIAL' | 'EXIT'; readonly partBps: number | null; readonly serial: number };
+type Workflow = EditorState['workflow'];
+export type ChatCommit = { readonly ok: true; readonly before: Workflow; readonly expected: Workflow } | { readonly ok: false; readonly error: string };
 const Context = createContext<Store | null>(null);
 const testNetworksIntroduced = (before: Parameters<typeof introducedTestNetworks>[0], after: Parameters<typeof introducedTestNetworks>[1]) =>
   introducedTestNetworks(before, after, activeNetworkScope());
@@ -73,6 +84,7 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
   });
   const state = history.editor;
   const editorRef = useRef(state); editorRef.current = state;
+  const historyRef = useRef(history); historyRef.current = history;
   const [restorationEpoch, setRestorationEpoch] = useState(0);
   const [newWorkflow, setNewWorkflow] = useState(false);
   const [pendingRestorations, setPendingRestorations] = useState(0);
@@ -189,6 +201,27 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
     else setStagedPosition(null);
     setPending(null);
   }
+  const commitChatCommand = useCallback((command: Command): ChatCommit => {
+    const current = editorRef.current;
+    if (command.source !== 'CHAT') return { ok: false, error: 'CHAT_COMMAND_REQUIRED' };
+    const preview = editorReducer(current, command, context);
+    if (preview.error) return { ok: false, error: preview.error };
+    if (preview.workflow === current.workflow && command.type !== 'MANAGE_SOLANA_POSITION') return { ok: false, error: 'NO_CHANGE' };
+    const introduced = testNetworksIntroduced(current.workflow, preview.workflow);
+    if (introduced.length) return { ok: false, error: testNetworkMessage(introduced) };
+    dispatchHistory({ type: 'COMMAND', command, context });
+    setPending(null);
+    if (command.type === 'MANAGE_SOLANA_POSITION') setStagedPosition(staged => ({ positionMint: command.positionMint, operation: command.operation, partBps: command.partBps,
+      serial: (staged?.serial ?? 0) + 1 }));
+    else setStagedPosition(null);
+    return { ok: true, before: current.workflow, expected: preview.workflow };
+  }, [context]);
+  const undoChatCommit = useCallback((commit: { readonly before: Workflow; readonly expected: Workflow }) => {
+    const latest = historyRef.current, previous = latest.past.at(-1);
+    if (latest.editor.workflow !== commit.expected || previous?.workflow !== commit.before) return false;
+    dispatchHistory({ type: 'UNDO' });
+    return true;
+  }, []);
   function startActionSetup(action: CanvasActionSetup['action'], position: { x: number; y: number }, beneficiary?: string) {
     if (history.actionSetup) return history.actionSetup.id;
     dispatchHistory({ type: 'START_ACTION_SETUP', action, position, ...(beneficiary ? { beneficiary } : {}) });
@@ -291,7 +324,7 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
     startActionSetup, startStocksSetup, editCanvasAmount, editPoolSetup, editSwapSetupDirection, cancelCanvasAmount, reviewCanvasAmount, commitCanvasAmount, removeActionSetup,
     recipientInputs: history.recipientInputs, editCanvasRecipient,
     canRedo: history.future.length > 0, undo, redo, moveCanvasNodes, addCanvasCommand, duplicateCanvasNodes,
-    pending, propose, applyProposal, dismissProposal: () => setPending(null), stagedPosition, ...reviewState,
+    pending, propose, applyProposal, dismissProposal: () => setPending(null), commitChatCommand, undoChatCommit, stagedPosition, ...reviewState,
     chain, eligibility, generateArtifacts, refreshArtifacts, accessCheck }}>
     <BaseObservationProvider>{children}</BaseObservationProvider>
   </Context.Provider>;
