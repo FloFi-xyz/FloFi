@@ -46,8 +46,8 @@ const NOT_PROPOSAL = { kind: ['CLARIFICATION', 'UNSUPPORTED', 'FAILED', 'ANSWER'
 
 export const LEARNING_EVAL_CASES: readonly LearningEvalCase[] = Object.freeze([
   // ── Intent understanding (labeled) ───────────────────────────────────────────────────────────────────────────────────────────────────
-  { id: 'I01', category: 'intent', language: 'EN', turns: [{ user: 'Swap 10 USDC to ETH on Base Sepolia',
-    model: action(swap({ network: 'BASE_SEPOLIA', inputAsset: 'USDC', outputAsset: 'ETH', amount: '10' })), expect: P('swap 10 USDC to WETH on Base Sepolia slippage 100 bps') }] },
+  { id: 'I01', category: 'intent', language: 'EN', turns: [{ user: 'Swap 10 USDC to WETH on Base Sepolia',
+    model: action(swap({ network: 'BASE_SEPOLIA', inputAsset: 'USDC', outputAsset: 'WETH', amount: '10' })), expect: P('swap 10 USDC to WETH on Base Sepolia slippage 100 bps') }] },
   { id: 'I02', category: 'intent', language: 'PT', turns: [{ user: 'Quero trocar 10 USDC por WETH na Base Sepolia',
     model: action(swap({ network: 'BASE_SEPOLIA', inputAsset: 'USDC', outputAsset: 'WETH', amount: '10' }), 'PT'), expect: P('swap 10 USDC to WETH on Base Sepolia slippage 100 bps') }] },
   { id: 'I03', category: 'intent', language: 'EN', turns: [{ user: 'Move 2 USDC from Base Sepolia to Arbitrum Sepolia',
@@ -69,8 +69,8 @@ export const LEARNING_EVAL_CASES: readonly LearningEvalCase[] = Object.freeze([
     model: action(swap({ network: 'SOLANA_DEVNET', inputAsset: 'SOL', outputAsset: 'DEVUSDC', amount: '1' })), expect: P('swap 1 SOL to devUSDC on Solana Devnet slippage 100 bps') }] },
   { id: 'I10', category: 'intent', language: 'PT', turns: [{ user: 'Pega emprestado 2 USDC no Aave da Base Sepolia',
     model: action(lending('BORROW', { network: 'BASE_SEPOLIA', asset: 'USDC', amount: '2' }), 'PT'), expect: P('borrow 2 USDC from Aave on Base Sepolia') }] },
-  { id: 'I11', category: 'intent', language: 'PT', turns: [{ user: 'Troca 1,5 USDC por ETH na Base Sepolia',
-    model: action(swap({ network: 'BASE_SEPOLIA', inputAsset: 'USDC', outputAsset: 'ETH', amount: '1.5' }), 'PT'), expect: P('swap 1.5 USDC to WETH on Base Sepolia slippage 100 bps') }] },
+  { id: 'I11', category: 'intent', language: 'PT', turns: [{ user: 'Troca 1,5 USDC por WETH na Base Sepolia',
+    model: action(swap({ network: 'BASE_SEPOLIA', inputAsset: 'USDC', outputAsset: 'WETH', amount: '1.5' }), 'PT'), expect: P('swap 1.5 USDC to WETH on Base Sepolia slippage 100 bps') }] },
 
   // ── Ambiguity: a missing or unwritten value is asked for, never guessed ───────────────────────────────────────────────────────────────
   { id: 'A01', category: 'ambiguity', language: 'EN', turns: [{ user: 'Swap some USDC to ETH on Base Sepolia',
@@ -122,11 +122,11 @@ export const LEARNING_EVAL_CASES: readonly LearningEvalCase[] = Object.freeze([
 
   // ── Corrections and clarification outcomes ──────────────────────────────────────────────────────────────────────────────────────────
   { id: 'C01', category: 'correction', language: 'EN', turns: [
-    { user: 'Swap 1 USDC to ETH on Base Sepolia', model: action(swap({ network: 'BASE_SEPOLIA', inputAsset: 'USDC', outputAsset: 'ETH', amount: '1' })),
+    { user: 'Swap 1 USDC to WETH on Base Sepolia', model: action(swap({ network: 'BASE_SEPOLIA', inputAsset: 'USDC', outputAsset: 'WETH', amount: '1' })),
       expect: P('swap 1 USDC to WETH on Base Sepolia slippage 100 bps') },
     { user: 'actually make it 2', model: edit({ amount: '2' }), expect: P('swap 2 USDC to WETH on Base Sepolia slippage 100 bps') }] },
   { id: 'C02', category: 'correction', language: 'PT', turns: [
-    { user: 'Troca 1 USDC por ETH na Base Sepolia', model: action(swap({ network: 'BASE_SEPOLIA', inputAsset: 'USDC', outputAsset: 'ETH', amount: '1' }), 'PT'),
+    { user: 'Troca 1 USDC por WETH na Base Sepolia', model: action(swap({ network: 'BASE_SEPOLIA', inputAsset: 'USDC', outputAsset: 'WETH', amount: '1' }), 'PT'),
       expect: P('swap 1 USDC to WETH on Base Sepolia slippage 100 bps') },
     { user: 'não, 3', model: edit({ amount: '3' }, 'PT'), expect: P('swap 3 USDC to WETH on Base Sepolia slippage 100 bps') }] },
   { id: 'C03', category: 'correction', language: 'EN', turns: [

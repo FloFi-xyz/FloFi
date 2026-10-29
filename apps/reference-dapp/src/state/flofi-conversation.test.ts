@@ -164,11 +164,14 @@ describe('BUILD-FLOFI-CONVERSATIONAL-001 conversational workflow', () => {
     f.respond = async () => ({ kind: 'PROPOSAL', text: 'Interpreted as “swap 3 USDC to WETH on Base Sepolia slippage 100 bps”. Review the proposal below: nothing changes until you apply it.',
       notes: ['Flofi swaps the ERC-20 WETH (wrapped ETH), not native ETH.'], options: [], sentence: 'swap 3 USDC to WETH on Base Sepolia slippage 100 bps',
       command: { type: 'ADD_SWAP', direction: 'USDC_TO_WETH', amount: '3', slippage: '100', source: 'CHAT', baseRevision: 0 } });
-    const chat = await say('Swap 3 USDC to ETH on Base Sepolia.');
+    const chat = await say('Swap 3 USDC to WETH on Base Sepolia.');
     expect(editor.workflow.revision).toBe(1); expect(f.propose).toEqual([]);
     expect(last(chat).role).toBe('ai');
     expect(last(chat).text).toMatch(/^Swap added to your workflow: 3 USDC/);
     expect(last(chat).notes).toEqual(['Interpreted as “swap 3 USDC to WETH on Base Sepolia slippage 100 bps”.', 'Flofi swaps the ERC-20 WETH (wrapped ETH), not native ETH.']);
+    // BUILD-FLOFI-CHAT-E2E-FIX-002: native ETH named in a swap is refused deterministically, whatever an interpretation would say; nothing is committed.
+    const native = await say('swap 3 USDC to ETH on Base Sepolia slippage 100 bps');
+    expect(last(native).text).toMatch(/^Native ETH swaps are not available in FloFi yet/); expect(editor.workflow.revision).toBe(1);
   });
   it('in an approval context the chat keeps its proposal behaviour and has no lifecycle controls', async () => {
     direct = false;

@@ -106,3 +106,14 @@ describe('BUILD-FLOFI-CHAT-E2E-FIX-002 workflow sequence', () => {
     expect(deliveredByRecord('universal', native, arbWeth)).toBeNull();
   });
 });
+
+describe('BUILD-FLOFI-CHAT-E2E-FIX-002 ETH and WETH stay distinct in chat authoring', () => {
+  it('refuses a native-ETH swap on every EVM network with the missing capability; an explicit WETH swap is authored unchanged', () => {
+    const sepolia = createBaseSepoliaReviewContext();
+    for (const [sentence, on] of [['swap 0.01 ETH to USDC on Base slippage 100 bps', context], ['swap 10 USDC to ETH on Base', context],
+      ['swap 0.01 ETH to USDC on Base Sepolia slippage 50 bps', sepolia], ['swap 1 USDC for eth on Ethereum Sepolia slippage 50 bps', sepolia]] as const)
+      expect(() => parseLocalCommand(sentence, initialEditor().workflow, on, OWNER), sentence).toThrow('SWAP_NATIVE_ASSET_UNSUPPORTED');
+    const weth = authorIn(sepolia, 'swap 1 USDC to WETH on Base Sepolia slippage 50 bps');
+    expect(weth.nodes[0]!.inputs.find(input => input.name === 'asset-out')?.value).toMatchObject({ address: '0x4200000000000000000000000000000000000006' });
+  });
+});
