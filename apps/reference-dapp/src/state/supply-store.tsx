@@ -30,9 +30,9 @@ type RecoveryPointer={id?:string;step?:'APPROVAL'|'SUPPLY'|'BORROW'|'REPAY'|'WIT
 type Store={record:SupplyRecord|null;busy:boolean;signing:boolean;error:string|null;retired:boolean;recovered:boolean;simulate():Promise<void>;review():Promise<void>;execute():Promise<void>;observe():Promise<void>;recoverReview():Promise<void>;switchNetwork():Promise<void>};
 const Context=createContext<Store|null>(null);
 export function SupplyProvider({children}:{children:ReactNode}){
-  const {state}=useWorkflow(),wallet=useBuild009Wallet();
+  const {runtimeWorkflow}=useWorkflow(),wallet=useBuild009Wallet();
   const [record,setRecord]=useState<SupplyRecord|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState<string|null>(null),[recovered,setRecovered]=useState(false),[signing,setSigning]=useState(false);
-  const workflow=state.workflow as unknown as SemanticWorkflow;
+  const workflow=runtimeWorkflow as unknown as SemanticWorkflow;
   const latest=useRef(workflow);latest.current=workflow;
   const latestWallet=useRef(wallet);latestWallet.current=wallet;
   const busyRef=useRef(false),operationEpoch=useRef(0);

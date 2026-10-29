@@ -19,6 +19,7 @@ import { readBaseQuote } from '../app/observation-action';
 import { browserFailureMessage, initialObservationState, observationReducer, receiveObservation, type ObservationState } from '../domain/base-observation';
 import { actionReviewValue } from '../domain/canvas-action-setup';
 import { createCryptoActionNode, type CryptoActionInput, type CryptoSelection, type CryptoSelections } from '../domain/crypto-action-picker';
+import { boundAmount, boundProjection, stepNodeKey, validCompletions, workflowSequence, type CompletedStep, type SequenceStep, type WorkflowSequence } from '../domain/workflow-sequence';
 
 type Pending = { valid: boolean; command: Command; diff: readonly string[]; review: ReviewResult | null; authoringId?: string; authoringAmount?: string };
 type Store = { restorationEpoch: number; state: EditorState; dispatch: Dispatch<Command>; context: ReviewContext;
@@ -69,7 +70,21 @@ type Store = { restorationEpoch: number; state: EditorState; dispatch: Dispatch<
   /** The position operation an applied position-management proposal prepared for the Simulate panel (never simulated, reviewed or signed here). */
   stagedPosition: StagedPosition | null;
   review: ReviewResult | null; reviewError: string | null;
+  /**
+   * BUILD-FLOFI-CHAT-E2E-FIX-002: a workflow of several independent owner-wallet actions runs as an ordered sequence of one-action steps
+   * (`domain/workflow-sequence.ts`). `runtimeWorkflow` is what every owner-wallet runtime simulates, reviews, authorizes and reconciles: the
+   * current step alone (a funded step bound to what its producer delivered), or the canonical workflow itself when it is not a sequence.
+   * The Canvas and chat always edit the canonical `state.workflow`.
+   */
+  runtimeWorkflow: Workflow; sequence: SequenceView | null;
+  /** Records that the sequence's current step reconciled (from its own durable record); the next step becomes the runtime workflow. */
+  completeSequenceStep(index: number, completion: { readonly received: string | null; readonly runKey: string | null }): void;
   chain: ChainState; eligibility: Eligibility; generateArtifacts(): void; refreshArtifacts(): void; accessCheck(): void };
+/** The sequence as the shell, chat and Review present it. `cursor` is the step its runtime serves now; `finished` once every step reconciled. */
+export type SequenceView = { readonly steps: WorkflowSequence['steps']; readonly cursor: number; readonly current: SequenceStep; readonly completed: readonly CompletedStep[];
+  /** The amount a funded current step spends (native units), or null when it spends its authored amount. */ readonly bound: string | null;
+  /** Why the current funded step cannot use its producer's delivery: nothing provable was delivered, or its card refused the bound amount. */
+  readonly fundingIssue: 'DELIVERY_NOT_PROVEN' | 'NOTHING_DELIVERED' | 'BOUND_REFUSED' | null; readonly finished: boolean };
 export type StagedPosition = { readonly positionMint: string; readonly operation: 'DECREASE_PARTIAL' | 'EXIT'; readonly partBps: number | null; readonly serial: number };
 type Workflow = EditorState['workflow'];
 export type ChatCommit = { readonly ok: true; readonly before: Workflow; readonly expected: Workflow } | { readonly ok: false; readonly error: string };
@@ -136,12 +151,38 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
   const generationRef = useRef(0);
   workflowRef.current = state.workflow;
   chainRef.current = chain;
+  // BUILD-FLOFI-CHAT-E2E-FIX-002: several independent owner-wallet actions form a sequence; each step must lint alone (its runtime's own rule).
+  const sequence = useMemo(() => state.workflow.nodes.length ? workflowSequence(state.workflow, workflow => lintWorkflow(workflow, context)) : null, [state.workflow, context]);
   const reviewState = useMemo(() => {
     // BUILD-FLOFI-PRODUCT-UX-001: the empty draft has no canonical form yet (the IR needs a node), so there is nothing to review and nothing invalid.
     if (!state.workflow.nodes.length) return { review: null, reviewError: null };
     try { return { review: lintWorkflow(state.workflow, context), reviewError: null }; }
-    catch (cause) { return { review: null, reviewError: cause instanceof Error ? cause.message : 'INVALID_WORKFLOW' }; }
-  }, [state.workflow, context]);
+    catch (cause) {
+      if (sequence) {
+        const findings = sequence.steps.flatMap(step => lintWorkflow(step.projection, context).findings);
+        return { review: Object.freeze({ revision: state.workflow.revision, findings: Object.freeze(findings), executable: false, enforcement: 'NOT_ENFORCED' }) as ReviewResult, reviewError: null };
+      }
+      return { review: null, reviewError: cause instanceof Error ? cause.message : 'INVALID_WORKFLOW' };
+    }
+  }, [state.workflow, context, sequence]);
+  // Executed steps of this workflow's sequence (this visit). Only steps that still describe the workflow count; any other change starts over.
+  const [sequenceRun, setSequenceRun] = useState<{ readonly workflowId: string; readonly completed: readonly CompletedStep[] }>({ workflowId: '', completed: [] });
+  const completed = sequenceRun.workflowId === state.workflow.workflowId ? validCompletions(sequence, state.workflow, sequenceRun.completed) : [];
+  const cursor = sequence ? Math.min(completed.length, sequence.steps.length - 1) : 0, currentStep = sequence?.steps[cursor] ?? null;
+  const finished = Boolean(sequence && completed.length >= sequence.steps.length);
+  const bound = currentStep ? boundAmount(currentStep, completed) : null;
+  const producerDelivery = currentStep?.fundedBy !== null && currentStep?.fundedBy !== undefined ? completed[currentStep.fundedBy]?.received ?? null : null;
+  const boundWorkflow = useMemo(() => currentStep ? boundProjection(currentStep, bound, context) : null, [currentStep, bound, context]);
+  const runtimeWorkflow = sequence && currentStep ? boundWorkflow ?? currentStep.projection : state.workflow;
+  const sequenceView: SequenceView | null = sequence && currentStep ? { steps: sequence.steps, cursor, current: currentStep, completed, bound, finished,
+    fundingIssue: finished || currentStep.fundedBy === null ? null : producerDelivery === null ? 'DELIVERY_NOT_PROVEN' : producerDelivery === '0' ? 'NOTHING_DELIVERED'
+      : boundWorkflow === null ? 'BOUND_REFUSED' : null } : null;
+  const sequenceRef = useRef({ sequence, completed, workflow: state.workflow }); sequenceRef.current = { sequence, completed, workflow: state.workflow };
+  const completeSequenceStep = useCallback((index: number, completion: { readonly received: string | null; readonly runKey: string | null }) => {
+    const { sequence, completed, workflow } = sequenceRef.current, step = sequence?.steps[index], node = step && workflow.nodes.find(item => item.nodeId === step.nodeId);
+    if (!step || !node || index !== completed.length) return;
+    setSequenceRun({ workflowId: workflow.workflowId, completed: [...completed, { nodeId: step.nodeId, node: stepNodeKey(node), received: completion.received, runKey: completion.runKey }] });
+  }, []);
   const eligibility: Eligibility = useMemo(() => authoringIncomplete ? { eligible: false, reason: 'Configure the amount in Build before simulating.' }
     : generationEligibility(state.workflow, context), [state.workflow, context, authoringIncomplete]);
 
@@ -324,7 +365,7 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
     startActionSetup, startStocksSetup, editCanvasAmount, editPoolSetup, editSwapSetupDirection, cancelCanvasAmount, reviewCanvasAmount, commitCanvasAmount, removeActionSetup,
     recipientInputs: history.recipientInputs, editCanvasRecipient,
     canRedo: history.future.length > 0, undo, redo, moveCanvasNodes, addCanvasCommand, duplicateCanvasNodes,
-    pending, propose, applyProposal, dismissProposal: () => setPending(null), commitChatCommand, undoChatCommit, stagedPosition, ...reviewState,
+    pending, propose, applyProposal, dismissProposal: () => setPending(null), commitChatCommand, undoChatCommit, stagedPosition, ...reviewState, runtimeWorkflow, sequence: sequenceView, completeSequenceStep,
     chain, eligibility, generateArtifacts, refreshArtifacts, accessCheck }}>
     <BaseObservationProvider>{children}</BaseObservationProvider>
   </Context.Provider>;

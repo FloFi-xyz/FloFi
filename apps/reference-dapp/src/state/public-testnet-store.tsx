@@ -76,7 +76,7 @@ async function calldataDigest(data: string): Promise<string> {
   return '0x' + Array.from(hash, byte => byte.toString(16).padStart(2, '0')).join('');
 }
 export function PublicTestnetProvider({ children }: { children: ReactNode }) {
-  const { state, restoreWorkflow } = useWorkflow();
+  const { state, runtimeWorkflow, restoreWorkflow } = useWorkflow();
   const wallet = useBuild009Wallet();
   const [availability, setAvailability] = useState<{ testnet: boolean; catalogs: Readonly<Record<string, boolean>> }>({ testnet: false, catalogs: {} });
   const [run, setRun] = useState<PublicRun | null>(null);
@@ -89,13 +89,14 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
   const workflowId = state.workflow.workflowId;
   useEffect(() => { setError(null); }, [workflowId]);
   const busyRef = useRef(false), operationEpoch = useRef(0);
-  const workflowRef = useRef(state.workflow);
-  workflowRef.current = state.workflow;
-  const initialWorkflow = useRef(state.workflow);
+  // BUILD-FLOFI-CHAT-E2E-FIX-002: the swap this runtime serves is the runtime workflow (the canonical workflow, or the sequence's current step).
+  const workflowRef = useRef(runtimeWorkflow);
+  workflowRef.current = runtimeWorkflow;
+  const initialWorkflow = useRef(runtimeWorkflow);
   const restoreRef = useRef(restoreWorkflow); restoreRef.current = restoreWorkflow;
-  const retired = Boolean(run && (recoveryOnly || source !== state.workflow));
+  const retired = Boolean(run && (recoveryOnly || source !== runtimeWorkflow));
   // BUILD-RH-002: the authored (else quoted) swap's network decides which deployment gate applies (BUILD-BASE-001: each catalog network its own).
-  const authoredChain = state.workflow.nodes.find(node => node.actionType === 'asset.swap.exact-input')?.chainId ?? null;
+  const authoredChain = runtimeWorkflow.nodes.find(node => node.actionType === 'asset.swap.exact-input')?.chainId ?? null;
   const authoredProfile = swapProfile(authoredChain ?? run?.quote.chainId);
   const catalogAvailable = useCallback((chain: string) => availability.catalogs[chain] === true, [availability]);
   const available = authoredProfile?.kind === 'CATALOG' ? catalogAvailable(authoredProfile.chainRef) : availability.testnet;

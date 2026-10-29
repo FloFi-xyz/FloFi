@@ -5,8 +5,7 @@ import { editorReducer, initialEditor } from './editor';
 import { canvasAddCommand } from './canvas-authoring';
 import { projectExecutionLifecycle, type ExecutionLifecycleSource } from './execution-lifecycle';
 import type { SimulationSource } from './simulation-presentation';
-import { answerLanguage, bindingIssue, classifyAnswer, conversationExecution, conversationPhase, conversationReview, describeChatChange, lifecycleRequest, lostSteps,
-  reviewBinding, workflowHash, type LifecycleView } from './conversation-lifecycle';
+import { answerLanguage, bindingIssue, classifyAnswer, conversationExecution, conversationPhase, conversationReview, describeChatChange, lifecycleRequest, lostSteps, reviewBinding, workflowHash, type LifecycleView, sumByAsset } from './conversation-lifecycle';
 import { conversationCopy } from './conversation-copy';
 import { portuguese } from '../i18n/pt';
 import { reviewFixture, reviewNow, reviewOwner } from '../test-utils/review-fixture';
@@ -136,5 +135,19 @@ describe('BUILD-FLOFI-CONVERSATIONAL-001 conversational lifecycle', () => {
     for (const [key, value] of Object.entries(pt)) if (typeof value === 'string') expect(value, key).not.toBe((en as unknown as Record<string, string>)[key]);
     // Projection labels the chat Review shows are translated by the shared catalog.
     for (const label of ['Max spend', 'Max slippage', 'Minimum received', 'Expected output', 'Network cost', 'Provider fees', 'FloFi fee', 'Token approval', 'Valid until']) expect(portuguese[label], label).toBeTruthy();
+  });
+});
+
+describe('BUILD-FLOFI-CHAT-E2E-FIX-002 chat review additions', () => {
+  it('an unapplied Canvas edit is applied or discarded only on an explicit answer', () => {
+    for (const yes of ['Apply it', 'apply', 'Yes', 'Aplicar', 'sim']) expect(classifyAnswer(yes, 'RESOLVE_EDIT')).toBe('YES');
+    for (const no of ['Discard it', 'discard', 'Descartar', 'No', 'não']) expect(classifyAnswer(no, 'RESOLVE_EDIT')).toBe('NO');
+    for (const unclear of ['maybe', 'apply 30 instead', 'make it 5']) expect(classifyAnswer(unclear, 'RESOLVE_EDIT')).toBe('UNCLEAR');
+    expect(answerLanguage('Descartar', 'EN')).toBe('PT');
+  });
+  it('sums cost lines exactly per asset (no conversion, no rounding) and counts what it cannot read', () => {
+    expect(sumByAsset(['0.0001 ETH', '0.00002 ETH', '0.25 USDC', '1 USDC', 'about 3 dollars'])).toEqual({ sums: ['0.00012 ETH', '1.25 USDC'], unreadable: 1 });
+    expect(sumByAsset(['0.1 ETH', '0.2 ETH'])).toEqual({ sums: ['0.3 ETH'], unreadable: 0 });
+    expect(sumByAsset([])).toEqual({ sums: [], unreadable: 0 });
   });
 });

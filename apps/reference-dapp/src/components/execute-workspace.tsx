@@ -20,6 +20,11 @@ export type ExecuteWorkspaceProps = ExecutionWorkspaceState & {
   workflowName: string; backToBuild(): void; backToSimulate(): void; technicalDetails?: ReactNode; controls?: ExecutionControls; primaryAction?: ReactNode; progress?: ExecutionLifecycle; recovery?: ExecutionRecovery;
   /** UX-004: start a clean workflow; offered only after a final result. "Return to Build" keeps editing this workflow. */
   startNewWorkflow?: () => void;
+  /**
+   * BUILD-FLOFI-CHAT-E2E-FIX-002: the public chat-first workspace, where the chat presents progress and reconciliation: the Execution Summary is an
+   * optional, collapsed details surface under the timeline instead of a third column beside the chat.
+   */
+  detailsOnly?: boolean;
 };
 export function ExecuteWorkspace(props: ExecuteWorkspaceProps) {
   const { t: tr } = useLocale();
@@ -37,9 +42,8 @@ export function ExecuteWorkspace(props: ExecuteWorkspaceProps) {
   const interactionMessage = currentOperation?.state === 'wallet' ? 'Confirm or decline the reviewed request in your wallet.' : currentOperation?.state === 'submitting' ? currentOperation.intent ? 'The signed order is being sent to the provider. Settlement is not yet confirmed.' : 'The reviewed transaction is being submitted. Confirmation is not yet known.' : null;
   const statusLabel = live ? verifying ? verificationLabel : canContinue ? continuationLabel : result?.label ?? interactionLabel ?? recovery?.label ?? live.label : requesting && !execution.started ? 'Preparing execution…' : view.label;
   const statusMessage = live ? verifying ? verificationMessage : canContinue ? continuationMessage : result?.message ?? interactionMessage ?? recovery?.message ?? live.message : view.message;
-  return <section className="execute-workspace" aria-label={tr("Workflow execution workspace")}>
-    <div className="execute-workspace-grid">
-      {live ? <ExecutionTimeline progress={live} result={result} workflowName={workflowName} backToBuild={backToBuild} checkingOperation={verifying && !recovery?.recordOnly ? recovery?.operationId ?? null : null} primaryAction={props.primaryAction ?? <><button type="button" className="simulation-back" onClick={backToBuild}>{tr("Back to Build")}</button><CanvasLifecycleAction {...props} controls={controls}/></>}/> : <SimulateWorkflowCanvas workflowName={workflowName} stage="execute" primaryAction={props.primaryAction ?? <><button type="button" className="simulation-back" onClick={backToBuild}>{tr("Back to Build")}</button><CanvasLifecycleAction {...props} controls={controls}/></>}/>}
+  const detailsOnly = Boolean(props.detailsOnly);
+  const executionSummary = <>
       <aside className={`execution-summary panel${result ? ' execution-result-summary' : ''}`} aria-label={tr(result ? 'Execution result summary' : 'Execution Summary')}>
         <h2>{tr(result ? 'Result Summary' : 'Execution Summary')}</h2>
         <div className={`simulation-validity simulation-tone-${verifying ? 'neutral' : result ? result.tone : live ? live.state === 'complete' ? 'ready' : live.state === 'active' ? 'neutral' : live.state === 'uncertain' ? 'attention' : 'blocked' : view.canExecute ? 'ready' : view.status === 'loading' || view.status === 'empty' ? 'neutral' : 'blocked'}`} role="status" aria-live="polite"><strong><span className="simulation-status-dot" aria-hidden="true"/>{tr(statusLabel)}</strong><p>{tr(statusMessage)}</p></div>
@@ -78,7 +82,13 @@ export function ExecuteWorkspace(props: ExecuteWorkspaceProps) {
         </div>
         {live && live.state !== 'complete' && live.steps.some(step => step.operations.some(operation => operation.hash || operation.intent && ['posted', 'settling', 'partial'].includes(operation.state))) && <p className="execution-context execution-navigation-note">{tr("Leaving this view does not cancel submitted requests.")}</p>}
       </aside>
+  </>;
+  return <section className="execute-workspace" aria-label={tr("Workflow execution workspace")}>
+    <div className={`execute-workspace-grid${detailsOnly ? ' stage-grid-single' : ''}`}>
+      {live ? <ExecutionTimeline progress={live} result={result} workflowName={workflowName} backToBuild={backToBuild} checkingOperation={verifying && !recovery?.recordOnly ? recovery?.operationId ?? null : null} primaryAction={props.primaryAction ?? <><button type="button" className="simulation-back" onClick={backToBuild}>{tr("Back to Build")}</button><CanvasLifecycleAction {...props} controls={controls}/></>}/> : <SimulateWorkflowCanvas workflowName={workflowName} stage="execute" primaryAction={props.primaryAction ?? <><button type="button" className="simulation-back" onClick={backToBuild}>{tr("Back to Build")}</button><CanvasLifecycleAction {...props} controls={controls}/></>}/>}
+      {!detailsOnly && executionSummary}
     </div>
+    {detailsOnly && <details className="shell-details stage-details execution-details"><summary>{tr(result ? 'Result details' : 'Execution details')}</summary>{executionSummary}</details>}
     {(live || props.technicalDetails) && <details className="shell-details technical-workspace execute-technical"><summary>{tr("View technical details")}</summary>{live ? <><ExecutionEvidenceDetails progress={live}/>{tr(props.source.kind === 'unavailable' && props.technicalDetails)}</> : props.technicalDetails}</details>}
   </section>;
 }

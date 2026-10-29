@@ -3,9 +3,9 @@
 import { createContext, useContext, type ReactNode } from 'react';
 import type { ReviewContext } from '@defi-workflow-engine/reference-linter';
 import type { Workflow } from '../domain/initial-workflow';
-const Context = createContext<{ state: { workflow: Workflow }; context: ReviewContext; canvasLayout: Record<string, { x: number; y: number }>; reviewError: null } | null>(null);
+const Context = createContext<{ state: { workflow: Workflow }; runtimeWorkflow: Workflow; sequence: null; context: ReviewContext; canvasLayout: Record<string, { x: number; y: number }>; reviewError: null } | null>(null);
 export function ExecuteAcceptanceWorkflowProvider({ workflow, context, children }: { workflow: Workflow; context: ReviewContext; children: ReactNode }) {
-  return <Context.Provider value={{ state: { workflow }, context, canvasLayout: {}, reviewError: null }}>{children}</Context.Provider>;
+  return <Context.Provider value={{ state: { workflow }, runtimeWorkflow: workflow, sequence: null, context, canvasLayout: {}, reviewError: null }}>{children}</Context.Provider>;
 }
 export function useWorkflow() { const value = useContext(Context); if (!value) throw Error('Acceptance context missing'); return value; }
 // Inspection cards do not call authoring APIs. These aliases exclude Next server actions from Vite.

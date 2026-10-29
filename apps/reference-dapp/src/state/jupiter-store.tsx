@@ -75,7 +75,7 @@ function walletCode(cause: unknown, prefix: string): string {
 const bounded = (cause: unknown) => { try { const v = cause as Record<string, unknown>; return { name: String(v?.name ?? ''), code: typeof v?.code === 'number' ? v.code : null, message: String(v?.message ?? cause).slice(0, 500) }; } catch { return { message: 'unreadable' }; } };
 
 export function JupiterProvider({ children }: { children: ReactNode }) {
-  const { state } = useWorkflow();
+  const { runtimeWorkflow } = useWorkflow();
   const selector = useWalletSelector();
   const [record, setRecord] = useState<JupiterRecord | null>(null), [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null);
   const [recovered, setRecovered] = useState(false), [signing, setSigning] = useState(false), [session, setSession] = useState<SolanaSession | null>(null);
@@ -86,7 +86,7 @@ export function JupiterProvider({ children }: { children: ReactNode }) {
   useEffect(() => { if (!restoring) return; const timer = window.setTimeout(() => setRestoring(false), WALLET_RESTORE_TIMEOUT_MS); return () => window.clearTimeout(timer); }, [restoring]);
   // A session (restored or connected) is remembered as a hint for the next visit's first frame; only an explicit Disconnect forgets it.
   useEffect(() => { if (session) { rememberWalletHint('solana', true); setRestoring(false); } }, [session]);
-  const workflow = state.workflow as unknown as SemanticWorkflow;
+  const workflow = runtimeWorkflow as unknown as SemanticWorkflow;
   const latest = useRef(workflow); latest.current = workflow;
   const latestSession = useRef(session); latestSession.current = session;
   const busyRef = useRef(false), operationEpoch = useRef(0);

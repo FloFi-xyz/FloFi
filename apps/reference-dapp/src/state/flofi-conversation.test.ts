@@ -178,3 +178,124 @@ describe('BUILD-FLOFI-CONVERSATIONAL-001 conversational workflow', () => {
     expect(simulate).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * BUILD-FLOFI-CHAT-E2E-FIX-002: "Review workflow" resolves what blocks a real simulation inside the chat (an unapplied Canvas amount, the wallet on
+ * another network) and continues by itself; a sequence's completed step hands over to the next step's own fresh Review. Test doubles only.
+ */
+const SEQUENCE_STEPS = [
+  { number: 1, action: 'Swap', amount: '10 USDC', detail: 'USDC → WETH', network: 'Base Sepolia', state: 'CURRENT' as const, funding: null, delivered: null },
+  { number: 2, action: 'Bridge', amount: '0.001 WETH', detail: null, network: 'Base Sepolia', state: 'NEXT' as const, funding: { from: 1, cap: '0.001 WETH', bound: null }, delivered: null }];
+const completedRun = { started: true, restored: false, local: false, matchesWorkflow: true, completed: 1, active: null, label: 'Execution confirmed', state: 'complete' as const,
+  message: 'All workflow actions are confirmed in the current execution record.', runKey: 'pub-1', fingerprint: 'done', busy: false,
+  steps: [{ id: 'swap', number: 1, action: 'Swap', operations: [{ id: 'swap', title: 'Swap', label: 'Confirmed', state: 'confirmed', hash: `0x${'a'.repeat(64)}`, explorer: null, chain: 'eip155:84532', approval: false }] }] };
+describe('BUILD-FLOFI-CHAT-E2E-FIX-002 chat-first review and sequences', () => {
+  it('names an unapplied Canvas amount, applies it only on an explicit answer, then runs the real simulation without a tab switch', async () => {
+    await say('swap 10 USDC to WETH on Base Sepolia slippage 100 bps');
+    const nodeId = editor.workflow.nodes[0]!.nodeId;
+    const resolveEdit = vi.fn((nodeId: string, apply: boolean) => { void nodeId; void apply; reviewedPatch = { ...reviewedPatch, pendingEdits: [] }; return null; });
+    reviewedPatch = { pendingEdits: [{ nodeId, step: 1, action: 'Swap', value: '25 USDC' }], resolveEdit }; lifecycle(reviewedPatch);
+    let chat = await say('Review workflow');
+    expect(simulate).not.toHaveBeenCalled();
+    expect(last(chat).text).toBe('Step 1 (Swap) has an amount you typed but did not apply: 25 USDC.');
+    expect(last(chat).question).toBe('Should I apply it before reviewing the workflow?');
+    expect(last(chat).options).toEqual(['Apply it', 'Discard it']);
+    chat = await say('maybe later');
+    expect(last(chat).text).toMatch(/^Please answer yes or no/); expect(resolveEdit).not.toHaveBeenCalled();
+    await say('Apply it');
+    expect(resolveEdit).toHaveBeenCalledWith(nodeId, true);
+    render(); await flush(); chat = render();
+    expect(chat.messages.some(message => message.text.startsWith('Applied.'))).toBe(true);
+    expect(simulate).toHaveBeenCalledTimes(1);
+    expect(last(chat).text).toMatch(/Simulating your workflow/);
+  });
+  it('a discarded edit keeps the step and continues the review; a refused apply changes nothing and says why', async () => {
+    await say('swap 10 USDC to WETH on Base Sepolia slippage 100 bps');
+    const nodeId = editor.workflow.nodes[0]!.nodeId;
+    reviewedPatch = { pendingEdits: [{ nodeId, step: 1, action: 'Swap', value: '0 USDC' }], resolveEdit: () => 'Enter a valid amount greater than 0.' }; lifecycle(reviewedPatch);
+    await say('Review workflow');
+    // The answer is read in the language of FloFi's question (English here), whatever words it uses.
+    let chat = await say('Aplicar');
+    expect(last(chat).text).toBe('That amount cannot be applied: Enter a valid amount greater than 0.');
+    expect(simulate).not.toHaveBeenCalled();
+    const resolveEdit = vi.fn(() => { reviewedPatch = { ...reviewedPatch, pendingEdits: [] }; return null; });
+    reviewedPatch = { ...reviewedPatch, resolveEdit }; lifecycle(reviewedPatch);
+    await say('Review workflow');
+    await say('Discard it');
+    expect(resolveEdit).toHaveBeenCalledWith(nodeId, false);
+    render(); await flush(); chat = render();
+    expect(chat.messages.some(message => message.text === 'Discarded. The step keeps its previous amount.')).toBe(true);
+    expect(simulate).toHaveBeenCalledTimes(1);
+  });
+  it('the wallet on Arbitrum for a Base step: the chat offers the existing network switch and continues the review once the wallet switched', async () => {
+    await say('swap 10 USDC to WETH on Base Sepolia slippage 100 bps');
+    const request = vi.fn(() => { reviewedPatch = { ...reviewedPatch, networkAction: undefined, walletNetwork: 'Base Sepolia' }; });
+    reviewedPatch = { networkAction: { label: 'Switch to Base Sepolia', network: 'Base Sepolia', disabled: false, request }, walletNetwork: 'Arbitrum One' }; lifecycle(reviewedPatch);
+    let chat = await say('Review workflow');
+    expect(simulate).not.toHaveBeenCalled();
+    expect(last(chat).text).toBe('Your wallet is on Arbitrum One, but this step runs on Base Sepolia. Switch your wallet to Base Sepolia; I will continue the review once it is done.');
+    expect(last(chat).options).toEqual(['Switch to Base Sepolia']);
+    await say('Switch to Base Sepolia');
+    expect(request).toHaveBeenCalledTimes(1);
+    render(); await flush(); chat = render();
+    expect(chat.messages.some(message => message.text === 'Your wallet is now on Base Sepolia. Continuing the review.')).toBe(true);
+    expect(simulate).toHaveBeenCalledTimes(1);
+  });
+  it('a rejected network switch is reported and nothing is simulated', async () => {
+    await say('swap 10 USDC to WETH on Base Sepolia slippage 100 bps');
+    const request = vi.fn(() => { reviewedPatch = { ...reviewedPatch, networkError: 'The wallet declined the network switch.' }; });
+    reviewedPatch = { networkAction: { label: 'Switch to Base Sepolia', network: 'Base Sepolia', disabled: false, request }, walletNetwork: 'Arbitrum One', networkError: null }; lifecycle(reviewedPatch);
+    await say('Review workflow');
+    await say('Switch to Base Sepolia');
+    render(); await flush(); const chat = render();
+    expect(last(chat).text).toBe('The network switch did not complete: The wallet declined the network switch. Nothing was simulated or sent.');
+    expect(simulate).not.toHaveBeenCalled();
+  });
+  it('reviews a sequence step by step: step 1 confirmed and executed, then its reconciled completion hands over to step 2\'s own simulation', async () => {
+    await say('swap 10 USDC to WETH on Base Sepolia slippage 100 bps');
+    const sequence = { total: 2, current: 1, finished: false, steps: SEQUENCE_STEPS, issue: null, awaitingDelivery: false };
+    reviewedPatch = { sequence }; lifecycle(reviewedPatch);
+    let chat = await say('Review workflow');
+    expect(last(chat).text).toBe('Simulating step 1 with current provider data. Nothing is signed or sent.');
+    reviewedPatch = { ...reviewed(), sequence }; lifecycle(reviewedPatch); chat = render();
+    expect(last(chat).text).toMatch(/^Here is the review of step 1 of 2\./);
+    expect(last(chat).review?.sequence?.steps.map(step => step.state)).toEqual(['CURRENT', 'NEXT']);
+    expect(last(chat).review?.totals.excludes.some(item => item.text === 'Step {0} (simulated after the steps before it)')).toBe(true);
+    expect(last(chat).question).toBe('Do you confirm this workflow?');
+    chat = await say('Yes, I confirm');
+    expect(last(chat).question).toBe('Would you like to execute step 1 of 2 now?');
+    await say('Yes, execute');
+    expect(controls.authorize).toHaveBeenCalledTimes(1);
+    // The run of step 1 completes; the workflow is not finished, so FloFi does not call it the workflow's result.
+    reviewedPatch = { ...reviewedPatch, progress: completedRun as unknown as ConversationBridge['progress'] }; lifecycle(reviewedPatch); render(); await flush(); chat = render();
+    expect(chat.messages.some(message => /All 2 steps|Execution completed/.test(message.text))).toBe(false);
+    // The shell records step 1's reconciled delivery and the runtime now serves step 2: FloFi says what step 1 delivered and simulates step 2.
+    const next = { ...sequence, current: 2, steps: [{ ...SEQUENCE_STEPS[0]!, state: 'COMPLETED' as const, delivered: '0.0042 WETH' },
+      { ...SEQUENCE_STEPS[1]!, state: 'CURRENT' as const, funding: { from: 1, cap: '0.001 WETH', bound: '0.001 WETH' } }] };
+    reviewedPatch = { sequence: next }; lifecycle(reviewedPatch); render(); await flush(); chat = render();
+    expect(chat.messages.some(message => message.text === 'Step 1 of 2 is completed and reconciled: it delivered 0.0042 WETH.')).toBe(true);
+    expect(last(chat).text).toBe('Simulating step 2 with current provider data. Nothing is signed or sent.');
+    expect(simulate).toHaveBeenCalledTimes(2);
+    reviewedPatch = { ...reviewed(), sequence: next }; lifecycle(reviewedPatch); chat = render();
+    expect(last(chat).question).toBe('Do you confirm step 2 of 2?');
+  });
+  it('a completed step whose delivery is not reconciled yet waits (nothing resent); a finished sequence says every step completed', async () => {
+    await say('swap 10 USDC to WETH on Base Sepolia slippage 100 bps');
+    let chat = (reviewedPatch = { sequence: { total: 2, current: 1, finished: false, steps: SEQUENCE_STEPS, issue: null, awaitingDelivery: true } }, lifecycle(reviewedPatch), await say('Review workflow'));
+    expect(last(chat).text).toBe('Step 1 is confirmed. FloFi is waiting for its reconciled delivery before the next step can be simulated. Nothing is resent.');
+    expect(simulate).not.toHaveBeenCalled();
+    reviewedPatch = { sequence: { total: 2, current: 2, finished: true, steps: SEQUENCE_STEPS, issue: null, awaitingDelivery: false } }; lifecycle(reviewedPatch);
+    chat = await say('Review workflow');
+    expect(last(chat).text).toBe('All 2 steps of this workflow are completed and reconciled. Their records stay in your history.');
+    expect(simulate).not.toHaveBeenCalled();
+  });
+  it('a step that cannot run in a sequence is named before anything is simulated', async () => {
+    await say('swap 10 USDC to WETH on Base Sepolia slippage 100 bps');
+    const issue = 'Step 2 (Supply on Base) cannot run as part of a multi-action workflow yet: FloFi executes this action only as its own workflow. Nothing was simulated or sent.';
+    reviewedPatch = { sequence: { total: 2, current: 1, finished: false, steps: SEQUENCE_STEPS, issue, awaitingDelivery: false }, simulationBlocked: issue } as Partial<ConversationBridge>; lifecycle(reviewedPatch);
+    bridge = { ...bridge, simulationBlocked: issue };
+    const chat = render(); chat.send('Review workflow'); await flush();
+    expect(last(render()).text).toBe(`I can’t start the review yet: ${issue}`);
+    expect(simulate).not.toHaveBeenCalled();
+  });
+});

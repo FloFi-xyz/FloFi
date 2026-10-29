@@ -69,13 +69,13 @@ function readPointer(network: RouterNetwork): Pointer | null {
 
 export function RouterProvider({ children }: { children: ReactNode }) {
   const { t: tr } = useLocale();
-  const { state } = useWorkflow(), wallet = useBuild009Wallet();
+  const { runtimeWorkflow } = useWorkflow(), wallet = useBuild009Wallet();
   const [record, setRecord] = useState<RouterRecord | null>(null), [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null);
   const [signing, setSigning] = useState(false), [executionEnabled, setExecutionEnabled] = useState(false);
   const [availability, setAvailability] = useState<Record<RouterNetwork, boolean>>(() => Object.fromEntries(NETWORKS.map(n => [n, false])) as Record<RouterNetwork, boolean>);
   const [recovered, setRecovered] = useState(false), [session, setSession] = useState<WalletSession | null>(null), [sessionReady, setSessionReady] = useState(false);
   const [runs, setRuns] = useState<readonly RouterRunSummary[]>([]), [notice, setNotice] = useState<string | null>(null);
-  const workflow = state.workflow as unknown as SemanticWorkflow;
+  const workflow = runtimeWorkflow as unknown as SemanticWorkflow;
   // The authored bridge decides the network; a recovered run keeps its own; the journey defaults to the testnet.
   const network: RouterNetwork = routerNetworkOf(workflow) ?? (record ? networkOfRecord(record) : 'testnet');
   const profile = ROUTER_NETWORK_OPTIONS[network].profile;

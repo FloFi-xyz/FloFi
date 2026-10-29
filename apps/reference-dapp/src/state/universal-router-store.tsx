@@ -51,13 +51,13 @@ function readPointer(): Pointer | null {
 
 export function UniversalRouterProvider({ children }: { children: ReactNode }) {
   const { t: tr } = useLocale();
-  const { state } = useWorkflow(), wallet = useBuild009Wallet(), solana = useJupiter();
+  const { runtimeWorkflow } = useWorkflow(), wallet = useBuild009Wallet(), solana = useJupiter();
   const [record, setRecord] = useState<UniversalRecord | null>(null), [discovery, setDiscovery] = useState<DiscoveryResult | null>(null);
   const [busy, setBusy] = useState(false), [signing, setSigning] = useState(false), [error, setError] = useState<string | null>(null);
   const [correlationId, setCorrelationId] = useState<string | null>(null);
   const [available, setAvailable] = useState(false), [executionEnabled, setExecutionEnabled] = useState(false), [recovered, setRecovered] = useState(false);
   const [runs, setRuns] = useState<readonly UniversalRunSummary[]>([]), [sessions, setSessions] = useState<{ EVM: string | null; SOLANA: string | null }>({ EVM: null, SOLANA: null });
-  const workflow = state.workflow as unknown as SemanticWorkflow;
+  const workflow = runtimeWorkflow as unknown as SemanticWorkflow;
   const details = universalBridgeOfWorkflow(workflow);
   const ecosystem: UniversalEcosystem | null = details ? UNIVERSAL_NETWORKS[details.source].ecosystem : record ? ecosystemOfRecord(record) : null;
   const destinationEcosystem = details ? UNIVERSAL_NETWORKS[details.destination].ecosystem : null;
