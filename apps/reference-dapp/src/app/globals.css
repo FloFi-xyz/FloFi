@@ -1818,13 +1818,16 @@ button.wallet-option .wallet-option-status{border-color:var(--accent-line);backg
 .stage-with-chat>.copilot{position:sticky;top:12px;margin:28px 24px 28px 0;height:clamp(460px,calc(100vh - 200px),760px);min-width:0}
 @media(max-width:1280px){.stage-with-chat{grid-template-columns:minmax(0,1fr)}.stage-with-chat>.copilot{position:static;margin:0 16px 24px;height:clamp(390px,65svh,540px)}}
 /* BUILD-FLOFI-CHAT-E2E-FIX-002: chat-first Simulate/Execute — canvas beside the chat, summaries in an optional collapsed details surface (no third column). */
-.simulate-workspace-grid.stage-grid-single,.execute-workspace-grid.stage-grid-single{grid-template-columns:minmax(0,1fr)}
+.simulate-workspace-grid.stage-grid-single,.execute-workspace-grid.stage-grid-single,
+.workflow-workspace :is(.simulate-workspace-grid,.execute-workspace-grid).stage-grid-single:has(>.canvas){grid-template-columns:minmax(0,1fr)}
 .stage-details{margin:14px 0 0;min-width:0}
 .stage-details>summary{cursor:pointer}
 .stage-details>.simulation-summary,.stage-details>.execution-summary{margin:12px 0 0;padding:20px;min-width:0;max-height:none}
 .conversation-review-steps>li[data-sequence-state="NEXT"]{opacity:.85}
 .conversation-review-state,.conversation-review-funding{display:block;font-size:.82rem;color:var(--muted,inherit);overflow-wrap:anywhere}
 .conversation-review-total dd{font-weight:600}
+.message p.conversation-review-excludes{margin:4px 0 0;color:var(--muted);font-size:11px;line-height:1.4;overflow-wrap:anywhere}
+.conversation-review-context{margin-top:8px!important}
 .conversation-review-details{margin:8px 0}
 .conversation-review-details>summary{cursor:pointer;font-size:.85rem}
 .conversation-execution-step{margin:0 0 4px;overflow-wrap:anywhere}

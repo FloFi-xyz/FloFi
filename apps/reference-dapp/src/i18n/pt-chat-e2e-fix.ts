@@ -11,7 +11,7 @@ export const portugueseChatE2eFix: Readonly<Record<string, string>> = {
   'Steps {0} (simulated after the steps before them)': 'Etapas {0} (simuladas depois das etapas anteriores)',
   'This workflow runs as {0} separate wallet transactions, one step at a time. If a later step fails or you stop, the earlier steps stay executed and their assets stay in your wallet.':
     'Este workflow é executado como {0} transações separadas na carteira, uma etapa de cada vez. Se uma etapa posterior falhar ou você parar, as etapas anteriores continuam executadas e os ativos ficam na sua carteira.',
-  'Approvals and limits': 'Aprovações e limites', 'Step {0} of {1}: {2}': 'Etapa {0} de {1}: {2}', '{0} of {1} workflow steps completed': '{0} de {1} etapas do workflow concluídas',
+  'Approvals and limits': 'Aprovações e limites', 'Wallet and quote': 'Carteira e cotação', 'Step {0} of {1}: {2}': 'Etapa {0} de {1}: {2}', '{0} of {1} workflow steps completed': '{0} de {1} etapas do workflow concluídas',
   'Step {0} ({1} on {2}) cannot run as part of a multi-action workflow yet: FloFi executes this action only as its own workflow. Nothing was simulated or sent.':
     'A etapa {0} ({1} em {2}) ainda não pode ser executada dentro de um workflow com várias ações: a FloFi executa esta ação apenas como um workflow próprio. Nada foi simulado nem enviado.',
   'Step {0} has nothing to spend: step {1} delivered none of its asset.': 'A etapa {0} não tem nada para gastar: a etapa {1} não entregou nenhuma quantidade do ativo.',

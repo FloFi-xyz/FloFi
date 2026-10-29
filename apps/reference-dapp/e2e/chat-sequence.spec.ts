@@ -173,3 +173,41 @@ test('too little balance and a missing provider quote are explained exactly; not
   await expect(chat(page)).not.toContainText('completed and reconciled');
   networkGuard.assertClean();
 });
+
+for (const width of [1920, 1440, 1280, 1024, 390, 375]) test(`chat-first layout at ${width}px: no third column beside the chat, summaries optional, nothing overflows`, async ({ page, request, networkGuard }, testInfo) => {
+  await page.setViewportSize({ width, height: width < 500 ? 844 : 1000 });
+  const owner = await setup(page, request);
+  await added(page, 'swap 1 USDC to WETH on Base Sepolia slippage 50 bps', 'Swap added to your workflow: 1 USDC');
+  await added(page, 'swap 0.001 WETH to USDC on Base Sepolia slippage 50 bps', 'Swap added to your workflow: 0.001 WETH');
+  await runtimeReady(page);
+  await say(page, 'Review workflow');
+  await expect(flofi(page)).toContainText('Here is the review of step 1 of 2.', { timeout: 30_000 });
+  const overflow = () => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  // The Review in the chat never overflows its own column.
+  expect(await flofi(page).locator('.conversation-review').evaluate(element => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1);
+  expect(await overflow()).toBeLessThanOrEqual(0);
+  await page.screenshot({ path: testInfo.outputPath(`build-${width}.png`) });
+  for (const [name, grid, summary, details] of [['Simulate', '.simulate-workspace-grid', '.simulation-summary', '.simulation-details'],
+    ['Execute', '.execute-workspace-grid', '.execution-summary', '.execution-details']] as const) {
+    await stage(page, name).click();
+    await expect(page.locator(grid)).toBeVisible();
+    // One column: the canvas (or timeline). The summary is an optional, collapsed details surface — never a third column beside the chat.
+    expect((await page.locator(grid).evaluate(element => getComputedStyle(element).gridTemplateColumns)).trim().split(/\s+/)).toHaveLength(1);
+    await expect(page.locator(summary)).toBeHidden();
+    await expect(page.locator(`${details} > summary`)).toBeVisible();
+    const chatBox = (await page.locator('.stage-with-chat > .copilot').boundingBox())!, stageBox = (await page.locator('.stage-with-chat > .main').boundingBox())!;
+    expect(chatBox.width).toBeGreaterThanOrEqual(Math.min(300, width - 32));
+    // Wide screens keep the chat beside the stage; narrower screens stack it below, at full width.
+    if (width > 1280) expect(chatBox.x).toBeGreaterThanOrEqual(stageBox.x + stageBox.width - 1); else expect(chatBox.y).toBeGreaterThanOrEqual(stageBox.y + stageBox.height - 1);
+    await page.locator('.stage-with-chat #mock-prompt').scrollIntoViewIfNeeded();
+    await expect(page.locator('.stage-with-chat #mock-prompt')).toBeVisible();
+    expect(await overflow()).toBeLessThanOrEqual(0);
+    await page.screenshot({ path: testInfo.outputPath(`${name.toLowerCase()}-${width}.png`), fullPage: true });
+    // The details stay one click away, and opening them never adds a column or overflows.
+    await page.locator(`${details} > summary`).click();
+    await expect(page.locator(summary)).toBeVisible();
+    expect(await overflow()).toBeLessThanOrEqual(0);
+    await page.locator(`${details} > summary`).click();
+  }
+  expect(owner.requested()).toBe(0); networkGuard.assertClean();
+});

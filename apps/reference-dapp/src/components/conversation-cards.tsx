@@ -38,8 +38,10 @@ export function ConversationReviewCard({ review, language }: { review: Conversat
     <dl className="conversation-review-lines" aria-label={t('Costs')}>
       {review.fees.map(line => <div key={`${line.label}:${line.value}`}><dt>{t(line.label)}</dt><dd>{line.value}{line.note ? <small>{t(line.note)}</small> : null}</dd></div>)}
       {review.unknown.map(name => <div key={name} data-unknown="true"><dt>{t(name)}</dt><dd>{t('Not provided by this simulation')}</dd></div>)}
-      <div className="conversation-review-total"><dt>{t('Estimated total cost')}</dt><dd>{review.totals.known.length ? review.totals.known.join(' + ') : t('Not available from this simulation')}
-        {review.totals.excludes.length > 0 && <small>{t('Excludes: {0}', review.totals.excludes.map(item => t(item.text, ...item.parameters)).join('; '))}</small>}</dd></div>
+      <div className="conversation-review-total"><dt>{t('Estimated total cost')}</dt><dd>{review.totals.known.length ? review.totals.known.join(' + ') : t('Not available from this simulation')}</dd></div>
+    </dl>
+    {review.totals.excludes.length > 0 && <p className="conversation-review-excludes">{t('Excludes: {0}', review.totals.excludes.map(item => t(item.text, ...item.parameters)).join('; '))}</p>}
+    <dl className="conversation-review-lines conversation-review-context" aria-label={t('Wallet and quote')}>
       {review.account && <div><dt>{t('Wallet')}</dt><dd title={review.account}>{short(review.account)}</dd></div>}
       {review.network && <div><dt>{t('Network')}</dt><dd>{review.network}</dd></div>}
       {review.expiresAt !== null && <div><dt>{t('Valid until')}</dt><dd><time dateTime={new Date(review.expiresAt).toISOString()}>{new Date(review.expiresAt).toLocaleTimeString(language === 'PT' ? 'pt-BR' : 'en-US')}</time></dd></div>}
