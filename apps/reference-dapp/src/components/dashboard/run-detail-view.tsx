@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { useLocale } from '../../i18n/locale';
-import { FinancialOutcome } from '../financial-outcome';
 import { ExecutionTimeline } from '../execution-timeline';
 import { ExecutionEvidenceDetails } from '../execution-evidence-details';
 import { ExecutionIdentifier } from '../execution-identifier';
@@ -47,12 +46,13 @@ export function RunDetailView({ view, detail, connection, loading, back, execute
       <div className="dashboard-detail-heading"><div><p className="eyebrow">{tr(view.current ? 'CURRENT EXECUTION' : 'SAVED EXECUTION')}{tr(" · READ-ONLY")}</p><h1 title={view.title}>{view.title}</h1>{!view.current && <p className="dashboard-title-context">{tr("Saved workflow · original title not recorded")}</p>}</div>{updated && <div className="dashboard-detail-updated"><span>{tr("Last updated")}</span><time dateTime={view.run.updatedAt!}>{tr(updated)}</time></div>}</div>
       {history && <HistoryActions key={`${view.run.ownerAccount}:${view.run.runId}`} kind="execution" change={history.change} changed={history.changed}/>}
       {detail?.recordUnavailable && <section className="dashboard-notice dashboard-detail-source" role="status"><div><strong>{tr("Detailed execution records could not be loaded.")}</strong><p>{tr("The saved summary remains visible. Workflow details and actual values may be unavailable.")}</p></div>{refresh && <button type="button" onClick={refresh}>{tr("Reload details")}</button>}</section>}
-      <div className={`dashboard-detail-overview${hasContext ? ' dashboard-detail-has-context' : ''}`}><section className="panel dashboard-result-summary" aria-labelledby="run-summary-heading"><div className="dashboard-section-heading"><h2 id="run-summary-heading">{tr("Run summary")}</h2><DashboardStatusBadge status={view.status}/></div><h3 className="dashboard-final-result">{tr(result?.label ?? view.status)}</h3><p>{tr(view.current ? view.message : view.message.replaceAll('current execution record', 'saved execution record'))}</p>{view.progress && <FinancialOutcome progress={view.progress}/>}<dl>
+      <div className={`dashboard-detail-overview${hasContext ? ' dashboard-detail-has-context' : ''}`}><section className="panel dashboard-result-summary" aria-labelledby="run-summary-heading"><div className="dashboard-section-heading"><h2 id="run-summary-heading">{tr("Run summary")}</h2><DashboardStatusBadge status={view.status}/></div><h3 className="dashboard-final-result">{tr(result?.label ?? view.status)}</h3><p>{tr(view.current ? view.message : view.message.replaceAll('current execution record', 'saved execution record'))}</p><dl>
         {view.total !== null && <div><dt>{tr("Steps confirmed")}</dt><dd>{tr(view.completed)}{tr(" of ")}{tr(view.total)}</dd></div>}
         <div><dt>{tr("Execution wallet")}</dt><dd><ExecutionIdentifier identifier={{ label: 'Execution wallet', value: view.run.ownerAccount, kind: 'reference' }}/></dd></div>
         {view.networks.length > 0 && <div><dt>{tr("Networks")}</dt><dd className="dashboard-detail-networks">{view.networks.map(network => <span key={network}><NetworkBrandIcon network={network}/>{network}</span>)}</dd></div>}
         <div><dt>{tr("Recorded evidence")}</dt><dd>{tr(view.run.hasEvidence ? 'Recorded evidence available' : 'No final bundle recorded')}</dd></div>
         {created && <div><dt>{tr("Record created")}</dt><dd><time dateTime={view.run.createdAt!}>{tr(created)}</time></dd></div>}
+        {(view.progress?.evidence?.knownCosts ?? []).map(fee => <div key={fee.label}><dt>{tr(fee.label)}</dt><dd>{tr(fee.value)}</dd></div>)}
       </dl>{view.progress?.local && <p className="dashboard-local-context">{tr("Local execution · no public-chain transactions")}</p>}
       {view.current && <button type="button" className="dashboard-primary" onClick={execute}>{tr(view.status === 'Completed' || view.status === 'Completed with attention' ? 'View result in Execute' : 'Open current execution')}</button>}
       </section>{hasContext && <aside className="dashboard-detail-context" aria-label={tr("Execution follow-up")}>

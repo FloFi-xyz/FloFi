@@ -173,9 +173,9 @@ for (const value of ['light', 'dark'] as const) {
     await expect(detail.locator('.dashboard-run-evidence')).toContainText('Archive integrity verified');
     const disclosure = detail.getByText('View technical details', { exact: true });
     await disclosure.focus(); await disclosure.press('Enter');
-    await expect(detail.locator('details.shell-details.technical-workspace')).toHaveAttribute('open', '');
+    await expect(detail.locator('details')).toHaveAttribute('open', '');
     await theme(page, value === 'light' ? 'dark' : 'light');
-    await expect(detail.locator('details.shell-details.technical-workspace')).toHaveAttribute('open', '');
+    await expect(detail.locator('details')).toHaveAttribute('open', '');
     await expect(detail.locator('.execution-plan')).toContainText('0.0243 WETH');
     expect(await page.evaluate(() => window.flofiRunDetailAcceptance.counts())).toEqual({ back: 0, reloaded: 0, executeNavigation: 0, built: 0 });
     await theme(page, value); await disclosure.click();

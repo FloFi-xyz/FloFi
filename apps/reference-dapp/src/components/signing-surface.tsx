@@ -15,8 +15,6 @@ import { isFinalExecutionResult } from '../domain/execution-result';
 import type { ExecutionControls, ExecutionControlsState } from '../state/execution-controls';
 import { CanvasLifecycleAction } from './canvas-lifecycle-action';
 import { NetworkBrandIcon } from './brand-icon';
-import { FinancialOutcome } from './financial-outcome';
-import { BridgeTimeline } from './bridge-timeline';
 import { ExecutionEvidenceDetails } from './execution-evidence-details';
 import { ReviewTokenPermissions } from './review-workspace';
 import { SimulationOutcome } from './simulation-summary';
@@ -93,12 +91,11 @@ export function SigningSurface(props: SigningSurfaceProps) {
           {requiredNetwork && <div><dt>{tr('Network')}</dt><dd>{tr(requiredNetwork.environment === 'MAINNET' ? 'Mainnet · Real funds' : 'Public testnet · Test funds')}</dd></div>}
           {Array.from(new Set((authorization.policy as { allowlists?: { recipients?: { address: string }[] } } | null)?.allowlists?.recipients?.map(recipient => recipient.address) ?? []))
             .map(address => <div key={address}><dt>{tr('Recipient')}</dt><dd>{address}</dd></div>)}
-
+          {authorization.tokens.map(token => <div key={`${token.chain}:${token.address}`}><dt>{tr(token.chain.startsWith('solana:') ? 'Token mint' : 'Token contract')}</dt><dd>{token.symbol} · {token.address}</dd></div>)}
           {simulation.fees.map((line, index) => <div key={`fee-${index}`}><dt>{tr(line.label)}</dt><dd>{tr(line.value)}{line.note && <small>{tr(line.note)}</small>}</dd></div>)}
           {limits.map((line, index) => <div key={`limit-${index}`}><dt>{tr(line.label)}</dt><dd>{tr(line.value)}{line.note && <small>{tr(line.note)}</small>}</dd></div>)}
           {!live && seconds !== null && authorization.key && <div><dt>{tr('Valid for')}</dt><dd>{seconds > 0 ? tr('{0}s', String(seconds)) : tr('Expired')}</dd></div>}
         </dl>
-        {authorization.tokens.length > 0 && <details className="signing-contract-details"><summary>{tr('Token contracts')}</summary><dl className="simulation-summary-values">{authorization.tokens.map(token => <div key={`${token.chain}:${token.address}`}><dt>{tr(token.chain.startsWith('solana:') ? 'Token mint' : 'Token contract')}</dt><dd>{token.symbol} · {token.address}</dd></div>)}</dl></details>}
         {realFundsTemplate(requiredNetwork?.chain) && <p className="signing-real-funds">{tr(...realFundsTemplate(requiredNetwork?.chain)!)}</p>}
         <ReviewTokenPermissions review={review}/>
         <div className={`signing-status simulation-validity simulation-tone-${status.tone}`} role="status" aria-live="polite"><strong><span className="simulation-status-dot" aria-hidden="true"/>{tr(status.label)}</strong><p>{tr(status.message)}</p></div>
@@ -107,8 +104,7 @@ export function SigningSurface(props: SigningSurfaceProps) {
           {operations.map(({ step, operation }) => <li key={operation.id}><span>{tr(step.action)} · {tr(operation.label)}</span>
             {operation.explorer ? <a href={operation.explorer} target="_blank" rel="noreferrer">{tr('View transaction')}</a> : operation.hash && <code title={operation.hash}>{short(operation.hash)}</code>}</li>)}
         </ul>}
-        {live && <FinancialOutcome progress={live}/>}
-        {live?.bridgeStages && <BridgeTimeline stages={live.bridgeStages} local={live.local} evidence={live.evidence}/>}
+        {live?.evidence?.knownCosts.length ? <dl className="simulation-summary-values">{live.evidence.knownCosts.map(cost => <div key={cost.label}><dt>{tr(cost.label)}</dt><dd>{tr(cost.value)}</dd></div>)}</dl> : null}
         {live && <details><summary>{tr('Transaction and reconciliation evidence')}</summary><ExecutionEvidenceDetails progress={live}/>
           {live.runKey && <a href={`/app/dashboard/runs/${encodeURIComponent(live.runKey)}`}>{tr('View receipt and evidence')}</a>}
         </details>}

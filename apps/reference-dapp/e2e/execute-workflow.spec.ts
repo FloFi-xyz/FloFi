@@ -31,7 +31,6 @@ test('Execute shows the shared authored workflow without authorizing or inventin
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 900 });
     await expect(graph).toHaveAttribute('data-viewport', 'fitted');
-    await graph.scrollIntoViewIfNeeded();
     await expect(graph.locator('.composer-card')).toBeInViewport();
     const graphBox = (await graph.boundingBox())!, controlsBox = (await graph.locator('.canvas-navigator').boundingBox())!;
     expect(controlsBox.x + controlsBox.width / 2).toBeCloseTo(graphBox.x + graphBox.width / 2, 1);

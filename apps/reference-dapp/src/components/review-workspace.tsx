@@ -49,6 +49,8 @@ export function ReviewAuthorizationDetails(props: ReviewWorkspaceProps) {
       {review.expiresAt !== null && <div><dt>{t('Valid until')}</dt><dd><time dateTime={new Date(review.expiresAt).toISOString()}>{new Date(review.expiresAt).toLocaleString()}</time></dd></div>}
     </dl>
     {review.permissions.length > 0 && <div aria-label={t('Permissions')}><strong>{t('Permissions')}</strong><ul>{review.permissions.map(p => <li key={p}>{t(p)}</li>)}</ul></div>}
+    {review.approvals.map((approval, i) => <p key={i}>{t(approval.symbol)} · {t(approval.value)} · {t('Spender')}: {approval.address}
+      {approval.unlimited && <> · {t('This allowance has no spending cap. It remains available to the spender until changed or revoked.')}</>}</p>)}
     <p>{t('Changing the workflow, wallet, network or authorization limits requires a fresh Review. An expired simulation must be run again.')}</p>
     <p>{t('Confirms this Review. No transaction is submitted. Required wallet confirmations remain separate.')}</p>
     {review.manifest?.enforcement === 'NOT_ENFORCED' && <p>{t('FloFi checks these limits before requesting execution. The chain enforces the signed transaction fields; the Manifest itself is not enforced by an on-chain contract.')}</p>}

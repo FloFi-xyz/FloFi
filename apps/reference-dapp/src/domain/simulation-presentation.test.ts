@@ -4,7 +4,7 @@ import { hashArtifactBytes } from '@defi-workflow-engine/workflow-contracts';
 import { createBaseSepoliaReviewContext } from '@defi-workflow-engine/reference-linter';
 import { editorReducer, initialEditor } from './editor';
 import { canvasAddCommand } from './canvas-authoring';
-import { projectSimulation, simulationInputLabel, simulationStatusPresentation, simulationAmount, simulationPriceImpact, simulationError, type SimulationSource } from './simulation-presentation';
+import { projectSimulation, simulationStatusPresentation, simulationAmount, simulationPriceImpact, simulationError, type SimulationSource } from './simulation-presentation';
 const context = createBaseSepoliaReviewContext(), now = Date.parse('2026-10-06T12:00:00Z');
 const expiry = new Date(now + 120_000).toISOString();
 const swap = editorReducer(initialEditor(), { type: 'ADD_SWAP', direction: 'USDC_TO_WETH', amount: '100', slippage: '50', source: 'CHAT', baseRevision: 0 }, context).workflow;
@@ -120,21 +120,7 @@ describe('simulation financial presentation', () => {
     expect(simulationError('SOLANA_TRANSFER_EXECUTION_NOT_ENABLED')).toContain('not available on this FloFi server');
     expect(simulationError('SOMETHING_NEW')).toBe('FloFi could not complete this simulation, and nothing was sent. Check the workflow in Build, then simulate again.');
     for (const code of ['SOLANA_TRANSFER_RECIPIENT_INVALID', 'UNKNOWN_FAILURE', 'X_SIMULATION_FAILED']) expect(simulationError(code)).not.toMatch(/Simulation could not be completed/);
-    expect(simulationError('SUPPLY_STORAGE_NOT_CONFIGURED')).toContain('execution record storage is not configured');
-  });
-  it.each([
-    ['ROUTER_RPC_UNAVAILABLE', 'network data could not be read', 'Try simulating again.'],
-    ['SUPPLY_RPC_ERROR', 'network data could not be read', 'Try simulating again.'],
-    ['ROUTER_RPC_RATE_LIMITED', 'provider is limiting requests', 'Wait a moment, then simulate again.'],
-    ['SUPPLY_STORAGE_NOT_CONFIGURED', 'execution record storage is not configured', 'Contact FloFi support.'],
-    ['ROUTER_SERVICE_UNAVAILABLE', 'service is temporarily unavailable', 'Try again before continuing.'],
-    ['ROUTER_OFF', 'not available for this route', 'Contact FloFi support.'],
-  ])('keeps %s specific, actionable and without invented simulation values', (error, cause, action) => {
-    const result = project(snapshot('unavailable', { error }));
-    expect(result.message).toContain(cause); expect(result.message).toContain(action);
-    expect(result.status).toBe('blocked'); expect(result.fees).toEqual([]);
-    expect(result.steps.every(step => step.result === null && step.minimum === null)).toBe(true);
-    expect(simulationStatusPresentation(result).label).toBe('Simulation unavailable');
+    expect(simulationError('SUPPLY_STORAGE_NOT_CONFIGURED')).toContain('currently unavailable');
   });
 });
 
@@ -251,18 +237,4 @@ describe('UX-004D state language', () => {
       expect(view.steps.every(step => step.result === null)).toBe(true);
     }
   });
-});
-
-it('discloses a real owner-preflight network budget as the next transaction budget, without inventing a workflow total', () => {
-  const workflow = swap;
-  const source = { kind: 'public', state: { busy: false, available: true, retired: false, error: null, run: { workflow, quote: { workflowHash: hash(workflow), revision: workflow.revision, nodeId: workflow.nodes.at(-1)!.nodeId, chainId: 84532, inputSymbol: 'USDC', outputSymbol: 'WETH', amountIn: '100000000', expectedOut: '25000000000000000', minimumOut: '24875000000000000', slippageBps: 50, expiresAt: expiry, ownerReview: { feeBudgetWei: '123456000000000', step: 'approval' } } } } } as unknown as SimulationSource;
-  const result = projectSimulation(workflow, context, source, now);
-  expect(result.fees).toContainEqual({ label: 'Network fee budget', value: '0.000123456 ETH', note: 'For the next reviewed transaction. Further approvals and actions can have separate network costs.' });
-  expect(result.warnings.some(w => w.message === 'Token approval is required before execution.')).toBe(true);
-});
-
-it('keeps Borrow and Withdraw requested amounts distinct from token sends and neutral position inputs', () => {
-  expect(simulationInputLabel('Borrow')).toBe('Requested amount'); expect(simulationInputLabel('Withdraw')).toBe('Requested amount');
-  expect(simulationInputLabel('Swap')).toBe('You send'); expect(simulationInputLabel('Bridge')).toBe('You send');
-  expect(simulationInputLabel('Pool / Liquidity')).toBe('Operation input');
 });

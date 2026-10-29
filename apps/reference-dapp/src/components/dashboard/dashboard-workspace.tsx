@@ -118,12 +118,6 @@ export function DashboardWorkspace({ workflowName, progress, recovery, wallet, c
   const runs = dashboardRunIndex(account, snapshot?.runs ?? [], visibleCurrent).filter(view => removed?.owner !== account || !removed.ids.includes(view.run.runId));
   return <DashboardView account={account} connection={snapshot?.connection ?? null} runs={runs} hasMore={snapshot?.hasMore ?? false}
     loadMore={loadMore} loadingMore={loadingMore} pageIssue={pageIssue}
-    readDetails={async id => {
-      if (!account) return null;
-      const response = await dashboardRunDetail(account, id);
-      if (latestAccount.current !== account || latestKey.current !== key || response.connection !== 'CONNECTED' || !sameOwner(response.account, account) || !response.detail || !sameOwner(response.detail.run.ownerAccount, account) || response.detail.run.runId !== id) return null;
-      return projectDashboardRun(response.detail.run, projectDashboardRecord(response.detail, context));
-    }}
     loading={loading} build={build} openRun={id => navigate(`/app/dashboard/runs/${encodeURIComponent(id)}`)} verify={() => void verify()} verifying={verifying}
     verificationIssue={verificationIssue?.account === account ? verificationIssue.message : null} refresh={() => refresh(value => value + 1)} {...history ? { history } : {}}/>;
 }
