@@ -162,6 +162,8 @@ test('Save → Your workflows → exact Canvas restoration; grouped executions, 
   await expect.poll(() => savedCanonical(A.address)).toEqual(workflow);
   await expect(page.locator('.canvas-name h2')).toHaveText(name);
   await stage(page, 'Simulate');
+  // BUILD-FLOFI-CHAT-E2E-FIX-002: the chat-first summary (with its embedded Review) is an optional, collapsed details surface.
+  await page.locator('.simulation-details > summary').click();
   const review = page.locator('.review-authorization-details');
   await review.locator('summary').click();
   await expect(review).toContainText(/Simulate.*again/);

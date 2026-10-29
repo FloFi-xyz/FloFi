@@ -309,6 +309,10 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     completeSequenceStep(sequence.cursor, { received: stepDelivered, runKey: stepRunKey });
   }, [sequence?.cursor, stepDone, awaitingDelivery, stepDelivered, stepRunKey, completeSequenceStep]);
   const sequencePresentation = sequence ? { ...presentSequence(state.workflow, context, sequence), issue: sequenceIssue, awaitingDelivery } : null;
+  // Every runtime surface names the step it serves, so a step's simulation or Review never reads as the whole workflow's.
+  const sequenceNote = sequencePresentation ? sequencePresentation.finished ? tr('All {0} steps of this workflow are completed and reconciled.', sequencePresentation.total)
+    : tr('Step {0} of {1}: {2}. Each step is simulated, reviewed and signed on its own, in order; this result covers this step only.', sequencePresentation.current, sequencePresentation.total,
+      tr(sequencePresentation.steps[sequencePresentation.current - 1]?.action ?? 'Action')) : null;
   function openSimulationControls() {
     const details = document.querySelector<HTMLDetailsElement>('.simulation-technical');
     if (details) { details.open = true; details.scrollIntoView({ block: 'start' }); details.querySelector<HTMLElement>('summary')?.focus(); }
@@ -383,7 +387,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     error: simulationSource.state.error, staleQuote: lifecycleControls.view.expiresAt !== null && Date.now() >= lifecycleControls.view.expiresAt }) : null);
   const simulateAction = walletIssue ? <div className="canvas-lifecycle-control"><p role="status">{walletIssue}</p><button type="button" onClick={() => void walletConnection.connect()}>{tr('Use another wallet')}</button></div>
     : networkAction ? <div className="canvas-lifecycle-control"><button type="button" disabled={networkAction.disabled} onClick={networkAction.request}>{networkAction.label}</button>{walletConnection.error && <p role="status">{tr(walletConnection.error)}</p>}</div> : <CanvasLifecycleAction {...lifecycleState} controls={lifecycleControls} workflowName={workflowName}
-    simulationDisabled={simulationDisabled || !actionable} simulationReason={simulationReason}
+    simulationDisabled={simulationDisabled || !actionable} simulationReason={simulationReason} sequenceNote={sequenceNote}
     simulate={() => { setTab('Simulate'); return simulateAgain(); }} onExecute={() => setTab('Execute')}/>;
   // BUILD-FLOFI-CONVERSATIONAL-001: the chat lives here, above the stage switch, so Build, Simulate and Execute share one conversation. It reaches
   // the same lifecycle the Canvas CTA uses (this Simulate, these controls); on /approve it keeps its earlier proposal-only behaviour.
@@ -451,7 +455,7 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
     {/* BUILD-FLOFI-CONVERSATIONAL-001: on Simulate and Execute the same conversation continues beside the stage (complementary to main). */}
     {wrapStage(<main id="workspace" className={`main workflow-workspace${tab === 'Build' ? ' build-workspace' : ''}`} data-workspace-toolbox={workspaceToolboxMode} tabIndex={-1} aria-label={tr(tab === 'Build' ? 'Workflow workspace' : tab === 'Simulate' ? 'Simulation workspace' : 'Execution workspace')}>
       {tab === 'Execute' ? <ExecuteWorkspace detailsOnly={chatFirst} controls={lifecycleControls} primaryAction={simulateAction} workflowName={workflowName} workflow={runtimeWorkflow} context={context} source={simulationSource} authorization={authorization} wallet={reviewBinding.wallet} execution={executionStart} progress={executionProgress} recovery={executionProgress.recovery} invalidWorkflow={Boolean(reviewError || authoringIncomplete)} backToBuild={() => setTab('Build')} backToSimulate={() => setTab('Simulate')} startNewWorkflow={startNewWorkflow} technicalDetails={executionStart.started || executionProgress.started || recoveryPath || localCowIntent ? stageContent : undefined}/> : tab === 'Simulate' ?
-        <SimulateWorkspace detailsOnly={chatFirst} workflowName={workflowName} returnToBuild={() => setTab('Build')} simulationSource={simulationSource} simulationReason={simulationReason} review={embeddedReview} simulateAction={simulateAction}>
+        <SimulateWorkspace detailsOnly={chatFirst} sequenceNote={sequenceNote} workflowName={workflowName} returnToBuild={() => setTab('Build')} simulationSource={simulationSource} simulationReason={simulationReason} review={embeddedReview} simulateAction={simulateAction}>
           {engineering && <details className="shell-details technical-workspace simulation-technical"><summary>{tr('View technical details')}</summary><ReviewTechnicalDetails authorization={authorization}/>{stageContent}</details>}
         </SimulateWorkspace> : stageContent}
       <MobileBuildNavigation stage={tab === 'Build' ? 'Build' : tab === 'Simulate' ? 'Simulate' : 'Execute'}/>

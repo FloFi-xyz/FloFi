@@ -60,8 +60,12 @@ ETH and WETH are now always distinct in authoring. A swap that names native ETH 
 ### P0.4 — minimal chat Review (`components/conversation-cards.tsx`, `simulate-workspace.tsx`, `execute-workspace.tsx`, `globals.css`)
 
 * In the public chat-first workspace, Simulate and Execute show the canvas (or timeline) beside the chat. The Simulation Summary and Execution
-  Summary move into an optional, collapsed **"Simulation details" / "Execution details"** surface under it, so there is no third column. The
-  `/approve` signing surfaces and the engineering workspace keep their existing layout.
+  Summary move into an optional, collapsed **"Simulation details" / "Execution details"** surface under it, so there is no third column.
+  "Connect execution wallet" and "Create new workflow", which only that summary offered, stay visible beside the collapsed details. The `/approve`
+  signing surfaces and the engineering workspace keep their existing layout.
+* In a sequence, the Canvas action and the Simulation summary name the step they serve ("Step 1 of 2: Swap. Each step is simulated, reviewed
+  and signed on its own, in order; this result covers this step only."), so a Canvas-only user never reads one step's result as the whole
+  workflow's.
 * The chat Review lists **every action in order** with its state ("Simulated now", "Simulated with a fresh quote after step N reconciles; you
   confirm it separately", "Completed and reconciled · delivered X"), amounts, networks and funding. For the step simulated now it shows the
   estimated output, minimum received, slippage and price impact. Then come the network, provider and FloFi fee lines, and an **Estimated total
@@ -139,7 +143,11 @@ loopback-only controls for balance and quote availability):
 5. Layout at six widths (above).
 
 `conversational-workflow.spec.ts` was updated: two independent swaps are now reviewed as a sequence (the old expectation encoded the production
-bug). `copilot.spec.ts`: "Swap 100 USDC to ETH on Base" is refused, and the explicit WETH request is authored.
+bug). `copilot.spec.ts`: "Swap 100 USDC to ETH on Base" is refused, and the explicit WETH request is authored (a matching entry was added to the
+committed replay answers). Specs that read the Simulation/Execution summaries in the public `/app` workspace now open the details surface first:
+`execute-product-workspace`, `workflow-ux-execution`, `acceptance-workflows`, `acceptance-swap-read`, `canvas-automation-ux` and `visual-shell`.
+The two `visual-shell` goldens (`simulate.png`, `execute.png`) were regenerated. Their changed pixels are confined to the stage area left of the
+chat (x 20–1079, below the header); the header, chat and `build.png` are unchanged, and the new goldens pass without updating.
 
 **Not covered by a browser execution (honest):** a Swap → **Bridge** sequence executed end to end. No loopback harness lets the owner authorize a
 bridge: MOCKED Router and universal provenance keep "Authorize in wallet" disabled by product rule. Swap → Bridge is covered by unit tests of the
@@ -147,9 +155,17 @@ sequence, funding, Router/universal delivery proofs and runtime selection. Its b
 step 2 being a bridge is not exercised in the browser. Quote expiry between the two confirmations is covered by unit tests (existing and new),
 not in the browser. No real-provider read-only evidence was produced in this build.
 
-## 5. Gates
+## 5. Gates (local, final tree)
 
-Results are filled in at delivery; see the PR description.
+* `pnpm typecheck` ✓; `pnpm lint` ✓; `pnpm build` ✓; `pnpm schemas:check` ✓ (11 exports).
+* `pnpm test`: 5465 passed, 2 skipped (pre-existing), 0 failed.
+* PostgreSQL suites touching changed modules (learning, WhatsApp channel journeys): 57 passed on a disposable pinned PostgreSQL 18.6.
+* `python3 scripts/governance_lite.py` ✓, its unittest suite (19) ✓, the CI orchestration tests `test_ci_*.py` (64) ✓, `git diff --check` clean.
+* Guarded browser product phase (`node scripts/guarded-release-browser.mjs profile <name>` with CI's environment, every one of the 48 product
+  profiles). 41 passed on the first pass. The 7 that failed did so only on intended layout changes (summaries now collapsed details, two
+  goldens, one replay answer); after updating those specs they all passed on the final build.
+* Not run locally: the `composition` phase (its spec uses the engineering workspace, whose layout is unchanged) and the fork suites (no fork code
+  changed). CircleCI is authoritative.
 
 ## 6. Remaining limitations
 

@@ -73,6 +73,29 @@
   },
   {
    "user": [
+    "Swap 100 USDC to WETH on Base"
+   ],
+   "answer": {
+    "output": {
+     "intent": {
+      "version": "2",
+      "language": "EN",
+      "kind": "ACTION",
+      "action": {
+       "type": "SWAP",
+       "network": "BASE",
+       "inputAsset": "USDC",
+       "outputAsset": "WETH",
+       "amount": "100",
+       "slippageBps": null
+      },
+      "reuse": null
+     }
+    }
+   }
+  },
+  {
+   "user": [
     "Bridge my USDC"
    ],
    "answer": {

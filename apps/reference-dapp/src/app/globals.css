@@ -1822,12 +1822,15 @@ button.wallet-option .wallet-option-status{border-color:var(--accent-line);backg
 .workflow-workspace :is(.simulate-workspace-grid,.execute-workspace-grid).stage-grid-single:has(>.canvas){grid-template-columns:minmax(0,1fr)}
 .stage-details{margin:14px 0 0;min-width:0}
 .stage-details>summary{cursor:pointer}
+.stage-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:10px;margin:14px 0 0}
 .stage-details>.simulation-summary,.stage-details>.execution-summary{margin:12px 0 0;padding:20px;min-width:0;max-height:none}
 .conversation-review-steps>li[data-sequence-state="NEXT"]{opacity:.85}
 .conversation-review-state,.conversation-review-funding{display:block;font-size:.82rem;color:var(--muted,inherit);overflow-wrap:anywhere}
 .conversation-review-total dd{font-weight:600}
 .message p.conversation-review-excludes{margin:4px 0 0;color:var(--muted);font-size:11px;line-height:1.4;overflow-wrap:anywhere}
 .conversation-review-context{margin-top:8px!important}
+.canvas-sequence-note{margin:0;max-width:min(440px,100%);padding:8px 12px;border:1px solid var(--accent-line);border-radius:8px;background:var(--paper);color:var(--ink);font-size:12px;line-height:1.4;text-align:left;overflow-wrap:anywhere}
+.simulation-sequence-note{margin:0 0 12px;color:var(--ink);font-size:13px;overflow-wrap:anywhere}
 .conversation-review-details{margin:8px 0}
 .conversation-review-details>summary{cursor:pointer;font-size:.85rem}
 .conversation-execution-step{margin:0 0 4px;overflow-wrap:anywhere}

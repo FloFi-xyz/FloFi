@@ -234,11 +234,16 @@ test('the real shell preserves Build and embedded Review while Execute stays rea
   // This idle-shell check has no RPC fixture. Navigation exposes the read-only
   // summary; financial simulation is covered by the dedicated swap acceptance.
   await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Simulate', exact: true }).click();
+  // BUILD-FLOFI-CHAT-E2E-FIX-002: in the chat-first workspace the summaries are an optional, collapsed details surface under the canvas.
+  await expect(page.locator('#simulation-review')).toBeHidden();
+  await page.locator('.simulation-details > summary').click();
   await expect(page.locator('#simulation-review')).toBeVisible();
   await expect(page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Review', exact: true })).toHaveCount(0);
   await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Execute', exact: true }).click();
   await expect(page.locator('.execute-heading')).toHaveCount(0);
   await expect(page.getByRole('heading', { name: 'Your Workflow', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Execution Summary', exact: true })).toBeHidden();
+  await page.locator('.execution-details > summary').click();
   await expect(page.getByRole('heading', { name: 'Execution Summary', exact: true })).toBeVisible();
   const graph = page.getByRole('region', { name: 'Execution workflow graph', exact: true });
   await expect(graph).toHaveAttribute('data-viewport', 'fitted');
@@ -265,7 +270,8 @@ test('the real shell preserves Build and embedded Review while Execute stays rea
   }
   await page.setViewportSize({ width: 1440, height: 900 });
   expect(await page.evaluate(() => (window as unknown as { executeWorkspaceRequests: string[] }).executeWorkspaceRequests.filter(method => /send|sign/i.test(method)))).toEqual([]);
-  await page.getByRole('button', { name: 'Back to Simulate', exact: true }).click(); await expect(page.locator('#simulation-review')).toBeVisible();
+  await page.getByRole('button', { name: 'Back to Simulate', exact: true }).click();
+  await page.locator('.simulation-details > summary').click(); await expect(page.locator('#simulation-review')).toBeVisible();
   await page.setViewportSize({ width: 320, height: 900 }); await expectStageNavigationFits(page);
   await page.getByRole('button', { name: 'Back to Build', exact: true }).click();
   await expectStageNavigationFits(page);

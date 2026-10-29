@@ -64,7 +64,8 @@ test('Portuguese and mainnet requests are committed with explicit notes, and the
   await expect(cards(page)).toHaveCount(0);
   // BUILD-FLOFI-CHAT-E2E-FIX-002: native ETH is a different asset than WETH; a native-ETH swap is refused, never authored as WETH.
   await ask(page, 'Swap 100 USDC to ETH on Base');
-  await expect(copilotSays(page)).toContainText('Native ETH swaps are not available in FloFi yet');
+  // The refusal is deterministic (the chat grammar refuses before any interpretation), so it is FloFi's own message, not the model's.
+  await expect(page.getByRole('log', { name: 'Conversation' }).locator('.message').last()).toContainText('Native ETH swaps are not available in FloFi yet');
   await revision(page, 2); await expect(cards(page)).toHaveCount(0);
   await ask(page, 'Swap 100 USDC to WETH on Base');
   await expect(copilotSays(page)).toContainText('Swap added to your workflow: 100 USDC');

@@ -43,6 +43,14 @@ export function ExecuteWorkspace(props: ExecuteWorkspaceProps) {
   const statusLabel = live ? verifying ? verificationLabel : canContinue ? continuationLabel : result?.label ?? interactionLabel ?? recovery?.label ?? live.label : requesting && !execution.started ? 'Preparing execution…' : view.label;
   const statusMessage = live ? verifying ? verificationMessage : canContinue ? continuationMessage : result?.message ?? interactionMessage ?? recovery?.message ?? live.message : view.message;
   const detailsOnly = Boolean(props.detailsOnly);
+  // The actions only this summary offers (connect the execution wallet, start a new workflow) stay visible when the summary is a collapsed
+  // details surface (BUILD-FLOFI-CHAT-E2E-FIX-002); navigation back to Build/Simulate stays with the summary.
+  const connectWallet = execution.connect && authorization.accepted && !wallet.changed && !execution.started;
+  const startNew = Boolean(result && props.startNewWorkflow && isFinalExecutionResult(live));
+  const stageActions = <>
+    {connectWallet && <button type="button" disabled={Boolean(props.source.state.busy)} onClick={execution.connect}>{tr("Connect execution wallet")}</button>}
+    {startNew && <button type="button" className="primary execute-new-workflow" onClick={props.startNewWorkflow}>{tr("Create new workflow")}</button>}
+  </>;
   const executionSummary = <>
       <aside className={`execution-summary panel${result ? ' execution-result-summary' : ''}`} aria-label={tr(result ? 'Execution result summary' : 'Execution Summary')}>
         <h2>{tr(result ? 'Result Summary' : 'Execution Summary')}</h2>
@@ -76,8 +84,7 @@ export function ExecuteWorkspace(props: ExecuteWorkspaceProps) {
         {!live && view.warnings.length > 0 && <ul className="simulation-warnings" aria-label={tr("Execution blockers")}>{view.warnings.map((warning, index) => <li key={index} className="simulation-warning-blocking"><span className="simulation-warning-label">{tr("Blocking")}</span>{tr(warning.message)}</li>)}</ul>}
         {authorization.accepted && view.prompt && !execution.started && !requesting && <section className="execute-next" aria-label={tr("Next confirmation")}><h3>{tr("What happens next")}</h3><p>{tr(view.prompt)}</p><p>{tr("Only the next authorized request starts. Further wallet confirmations remain separate.")}</p></section>}
         <div className="execute-actions simulation-workspace-actions">
-          {execution.connect && authorization.accepted && !wallet.changed && !execution.started && <button type="button" disabled={Boolean(props.source.state.busy)} onClick={execution.connect}>{tr("Connect execution wallet")}</button>}
-          {result && props.startNewWorkflow && isFinalExecutionResult(live) && <button type="button" className="primary execute-new-workflow" onClick={props.startNewWorkflow}>{tr("Create new workflow")}</button>}
+          {!detailsOnly && stageActions}
           <button type="button" className="simulation-back" onClick={result || view.status === 'empty' ? backToBuild : backToSimulate}>{tr(result ? 'Return to Build' : view.status === 'empty' ? 'Create a workflow in Build' : view.label === 'Simulation expired' ? 'Simulate again' : 'Back to Simulate')}</button>
         </div>
         {live && live.state !== 'complete' && live.steps.some(step => step.operations.some(operation => operation.hash || operation.intent && ['posted', 'settling', 'partial'].includes(operation.state))) && <p className="execution-context execution-navigation-note">{tr("Leaving this view does not cancel submitted requests.")}</p>}
@@ -88,6 +95,7 @@ export function ExecuteWorkspace(props: ExecuteWorkspaceProps) {
       {live ? <ExecutionTimeline progress={live} result={result} workflowName={workflowName} backToBuild={backToBuild} checkingOperation={verifying && !recovery?.recordOnly ? recovery?.operationId ?? null : null} primaryAction={props.primaryAction ?? <><button type="button" className="simulation-back" onClick={backToBuild}>{tr("Back to Build")}</button><CanvasLifecycleAction {...props} controls={controls}/></>}/> : <SimulateWorkflowCanvas workflowName={workflowName} stage="execute" primaryAction={props.primaryAction ?? <><button type="button" className="simulation-back" onClick={backToBuild}>{tr("Back to Build")}</button><CanvasLifecycleAction {...props} controls={controls}/></>}/>}
       {!detailsOnly && executionSummary}
     </div>
+    {detailsOnly && (connectWallet || startNew) && <div className="execute-actions stage-actions">{stageActions}</div>}
     {detailsOnly && <details className="shell-details stage-details execution-details"><summary>{tr(result ? 'Result details' : 'Execution details')}</summary>{executionSummary}</details>}
     {(live || props.technicalDetails) && <details className="shell-details technical-workspace execute-technical"><summary>{tr("View technical details")}</summary>{live ? <><ExecutionEvidenceDetails progress={live}/>{tr(props.source.kind === 'unavailable' && props.technicalDetails)}</> : props.technicalDetails}</details>}
   </section>;

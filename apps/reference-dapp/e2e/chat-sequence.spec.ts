@@ -95,6 +95,8 @@ test('Swap → Swap funded by the first: each step simulated, confirmed, signed 
   await expect(review).toContainText('Excludes:'); await expect(review).toContainText('Step 2 (simulated after the steps before it)');
   await expect(review).toContainText('This workflow runs as 2 separate wallet transactions');
   await expect(stage(page, 'Build')).toHaveAttribute('aria-current', 'page');
+  // The Canvas action names the step it serves: a step's result never reads as the whole workflow's.
+  await expect(page.locator('.canvas-sequence-note')).toContainText('Step 1 of 2: Swap. Each step is simulated, reviewed and signed on its own, in order; this result covers this step only.');
   expect(owner.requested()).toBe(0);
   await executeStep(page, owner, 1, 2);
   // Step 1 reconciled: FloFi says what it delivered and simulates step 2 by itself (read-only), bound to that delivery.
@@ -103,11 +105,13 @@ test('Swap → Swap funded by the first: each step simulated, confirmed, signed 
   const second = flofi(page).getByRole('region', { name: 'Workflow review', exact: true });
   await expect(second.locator('[data-sequence-state="COMPLETED"]')).toContainText('Completed and reconciled · delivered 0.0005 WETH');
   await expect(second.locator('[data-sequence-state="CURRENT"]')).toContainText('0.0005 WETH');
+  await expect(page.locator('.canvas-sequence-note')).toContainText('Step 2 of 2: Swap.');
   await expect(second.locator('[data-sequence-state="CURRENT"]')).toContainText('Funded by step 1: spends 0.0005 WETH (what step 1 delivered, at most 0.001 WETH)');
   // The canonical workflow is unchanged: the bound amount is the step's runtime input, never an edit of the owner's workflow.
   expect(JSON.stringify(JSON.parse(await readWorkflowIr(page)))).toBe(authored);
   await executeStep(page, owner, 2, 2);
   await expect(chat(page)).toContainText('All 2 steps of this workflow are completed and reconciled.', { timeout: 45_000 });
+  await expect(page.locator('.canvas-sequence-note')).toHaveText('All 2 steps of this workflow are completed and reconciled.');
   expect(await owner.sends()).toBe(4);
   expect((await walletRequests(page)).filter(method => method === 'eth_sendTransaction')).toHaveLength(4);
   expect(errors).toEqual([]); networkGuard.assertClean();
