@@ -902,6 +902,8 @@
 .flofi-avatar,.user-avatar{display:inline-flex;align-items:center;justify-content:center;flex:none;width:28px;height:28px;border-radius:50%;border:1px solid var(--line)}
 .flofi-avatar{background:var(--soft)}
 .flofi-avatar img{display:block;width:18px;height:auto}
+.flofi-avatar img.flofi-logo-dark,:root[data-theme="dark"] .flofi-avatar img.flofi-logo-light{display:none}
+:root[data-theme="dark"] .flofi-avatar img.flofi-logo-dark{display:block}
 .flofi-avatar.flofi-avatar-title{width:26px;height:26px;border:0;background:none}
 .flofi-avatar.flofi-avatar-title img{width:24px}
 .user-avatar{background:var(--blue-soft);border-color:var(--message-line);color:var(--blue)}
