@@ -108,12 +108,47 @@ describe('BUILD-FLOFI-CHAT-E2E-FIX-002 workflow sequence', () => {
 });
 
 describe('BUILD-FLOFI-CHAT-E2E-FIX-002 ETH and WETH stay distinct in chat authoring', () => {
-  it('refuses a native-ETH swap on every EVM network with the missing capability; an explicit WETH swap is authored unchanged', () => {
+  it('BUILD-FLOFI-BRIDGE-LIVE-FIX-003: a native-ETH swap on a catalog mainnet is native ETH (nativeId), never WETH; test networks still refuse it', () => {
     const sepolia = createBaseSepoliaReviewContext();
-    for (const [sentence, on] of [['swap 0.01 ETH to USDC on Base slippage 100 bps', context], ['swap 10 USDC to ETH on Base', context],
-      ['swap 0.01 ETH to USDC on Base Sepolia slippage 50 bps', sepolia], ['swap 1 USDC for eth on Ethereum Sepolia slippage 50 bps', sepolia]] as const)
-      expect(() => parseLocalCommand(sentence, initialEditor().workflow, on, OWNER), sentence).toThrow('SWAP_NATIVE_ASSET_UNSUPPORTED');
+    const nativeIn = authorIn(context, 'swap 0.01 ETH to USDC on Base slippage 100 bps').nodes.at(-1)!;
+    expect(nativeIn.inputs.find(input => input.name === 'amount-in')?.value).toMatchObject({ asset: { chainId: 'eip155:8453', nativeId: 'ETH', decimals: 18 } });
+    const nativeOut = authorIn(context, 'swap 10 USDC to ETH on Base').nodes.at(-1)!;
+    expect(nativeOut.inputs.find(input => input.name === 'asset-out')?.value).toEqual({ chainId: 'eip155:8453', nativeId: 'ETH', decimals: 18 });
+    const wrap = authorIn(context, 'wrap 0.01 ETH to WETH on Base').nodes.at(-1)!;
+    expect(wrap.adapterConstraints.protocols).toEqual(['weth9']);
+    expect(authorIn(context, 'unwrap 0.01 WETH on Base').nodes.at(-1)!.inputs.find(input => input.name === 'asset-out')?.value).toMatchObject({ nativeId: 'ETH' });
+    expect(() => parseLocalCommand('wrap 0.01 ETH to WETH', initialEditor().workflow, context, OWNER)).toThrow('WRAP_NETWORK_REQUIRED');
+    expect(() => parseLocalCommand('swap ETH to USDC on Ethereum', initialEditor().workflow, context, OWNER)).toThrow('SWAP_AMOUNT_REQUIRED');
+    expect(() => parseLocalCommand('unwrap 0.01 ETH on Base', initialEditor().workflow, context, OWNER)).toThrow('INVALID_ASSET_PAIR');
+    for (const sentence of ['swap 0.01 ETH to USDC on Base Sepolia slippage 50 bps', 'swap 1 USDC for eth on Ethereum Sepolia slippage 50 bps'])
+      expect(() => parseLocalCommand(sentence, initialEditor().workflow, sepolia, OWNER), sentence).toThrow('SWAP_NATIVE_ASSET_UNSUPPORTED');
     const weth = authorIn(sepolia, 'swap 1 USDC to WETH on Base Sepolia slippage 50 bps');
     expect(weth.nodes[0]!.inputs.find(input => input.name === 'asset-out')?.value).toMatchObject({ address: '0x4200000000000000000000000000000000000006' });
+  });
+});
+
+describe('BUILD-FLOFI-BRIDGE-LIVE-FIX-003 native ETH steps in sequences', () => {
+  const NATIVE = { chainId: 'eip155:8453', address: null, decimals: 18 };
+  it('Swap ETH → USDC then Bridge USDC: the bridge is funded by the swap\'s reconciled USDC', () => {
+    const sequence = workflowSequence(author('swap 0.001 ETH to USDC on Base slippage 100 bps', 'bridge 5 USDC from Base to Arbitrum'), lint)!;
+    expect(sequence.steps.map(step => step.fundedBy)).toEqual([null, 0]);
+    expect(sequence.steps[0]).toMatchObject({ input: { ...NATIVE, amount: '1000000000000000' }, output: { chainId: 'eip155:8453', address: BASE_USDC, decimals: 6 } });
+    expect(() => lint(sequence.steps[0]!.projection)).not.toThrow();
+  });
+  it('Bridge USDC then Swap USDC → ETH on the destination: a native-ETH output step', () => {
+    const sequence = workflowSequence(author('bridge 5 USDC from Arbitrum to Base', 'swap 5 USDC to ETH on Base slippage 100 bps'), lint)!;
+    expect(sequence.steps.map(step => step.fundedBy)).toEqual([null, 0]);
+    expect(sequence.steps[1]!.output).toEqual(NATIVE);
+  });
+  it('Wrap ETH → WETH then Swap WETH → USDC: the swap spends what the wrap delivered (WETH, never native ETH)', () => {
+    const sequence = workflowSequence(author('wrap 0.01 ETH to WETH on Base', 'swap 0.01 WETH to USDC on Base slippage 100 bps'), lint)!;
+    expect(sequence.steps.map(step => step.fundedBy)).toEqual([null, 0]);
+    expect(sequence.steps[0]).toMatchObject({ input: { ...NATIVE, amount: '10000000000000000' }, output: { chainId: 'eip155:8453', address: BASE_WETH, decimals: 18 } });
+  });
+  it('a native-ETH delivery funds only a native-ETH input, and a WETH delivery never does', () => {
+    const record = (outputToken: string) => ({ quote: { chainId: 8453, outputToken }, outcome: { outputReceived: '2140000000000000' } });
+    expect(deliveredByRecord('public', record('0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'), NATIVE)).toBe('2140000000000000');
+    expect(deliveredByRecord('public', record(BASE_WETH), NATIVE)).toBeNull();
+    expect(deliveredByRecord('public', record('0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'), { chainId: 'eip155:8453', address: BASE_WETH, decimals: 18 })).toBeNull();
   });
 });

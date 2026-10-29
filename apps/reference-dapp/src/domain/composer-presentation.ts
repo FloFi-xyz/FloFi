@@ -53,7 +53,7 @@ const actionLabels: Record<string, string> = {
   supply: 'Supply', borrow: 'Borrow', repay: 'Repay', withdraw: 'Withdraw',
 };
 const providerLabels: Record<string, string> = {
-  'aave-v3': 'Aave V3', uniswap: 'Uniswap', 'uniswap-v3': 'Uniswap V3',
+  'aave-v3': 'Aave V3', uniswap: 'Uniswap', 'uniswap-v3': 'Uniswap V3', weth9: 'WETH9',
   'lifi.rest': 'LI.FI', lifi: 'LI.FI', 'across.direct': 'Across',
   'flofi.router': 'Cross-chain Router', 'flofi.router.universal': 'Universal Router', 'cow-protocol': 'CoW Protocol',
   'solana.system-transfer': 'System Program', 'solana.spl-transfer': 'SPL Token',

@@ -295,10 +295,15 @@ export function projectSimulation(workflow: Workflow, context: ReviewContext, so
       // BUILD-RH-002: a catalog quote carries its own provenance (PUBLIC_MAINNET, or MOCKED for the loopback harness) and decimals.
       if (!guard(same(r.workflow) && boundHash(q.workflowHash, q.revision), q.provenance ?? 'PUBLIC_TESTNET', iso(q.expiresAt))) break;
       const s = step(q.nodeId), din = quoteDecimals(q, 'input'), dout = quoteDecimals(q, 'output');
-      result(s, simulationAmount(q.amountIn, din, q.inputSymbol), simulationAmount(q.expectedOut, dout, q.outputSymbol), 'Uniswap V3', simulationAmount(q.minimumOut, dout, q.outputSymbol), q.slippageBps);
+      result(s, simulationAmount(q.amountIn, din, q.inputSymbol), simulationAmount(q.expectedOut, dout, q.outputSymbol), q.conversion ? 'WETH9' : 'Uniswap V3', simulationAmount(q.minimumOut, dout, q.outputSymbol), q.slippageBps);
       for (const stock of q.stocks ?? []) warn('attention', `${stock.symbol}: ${simulationAmount(stock.multiplierWad, 18)} underlying shares per token (Robinhood corporate-action multiplier).`);
       if (q.stocks?.length) warn('attention', 'Stock Tokens are not offered to US persons or in restricted jurisdictions.');
-      if (s) s.resultLabel = 'Quoted output';
+      if (s) s.resultLabel = q.conversion ? 'Exact output' : 'Quoted output';
+      // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: native ETH is named as such — what the wallet request carries, and who pays it out — never as WETH.
+      if (q.conversion) warn('info', q.conversion === 'WRAP' ? 'Wrap through WETH9: exactly 1:1, no pool, no price impact and no slippage. Your wallet sends the ETH with the request; the network fee is paid separately from the same ETH balance.'
+        : 'Unwrap through WETH9: exactly 1:1, no pool, no price impact and no slippage. WETH9 pays you native ETH; the network fee is paid separately.');
+      else if (q.native === 'INPUT') warn('info', 'This swap spends native ETH: your wallet sends it with the request (no token approval). The network fee is paid separately from the same ETH balance.');
+      else if (q.native === 'OUTPUT') warn('info', 'You receive native ETH: in the same transaction the router unwraps WETH9 and pays you at least the minimum. The network fee is paid separately.');
       // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: the pool fee is part of the quoted price (never paid again); the owner-bound gas budget is a ceiling for
       // the next wallet request only.
       if (Number.isSafeInteger(q.fee) && q.fee > 0) view.fees.push({ label: 'Pool fee', value: `${(q.fee / 10_000).toFixed(2)}%`, note: 'Uniswap v3 fee tier, already reflected in the quoted output.', treatment: 'INCLUDED' });

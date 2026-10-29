@@ -259,3 +259,22 @@ describe('Robinhood Chain catalog swap: owner execution, recovery and reconcilia
     expect(chain.state.receipts.size).toBe(0);
   });
 });
+
+describe('BUILD-FLOFI-BRIDGE-LIVE-FIX-003 native ETH on Robinhood Chain (its native currency is ETH; its WETH logs a Transfer mint/burn)', () => {
+  it('swaps native ETH into USDG and back, never touching the owner\'s WETH', async () => {
+    chain.addPool(usdg.address!, UNI.weth, { fee: 100, liquidity: 10n ** 20n, rate: { [usdg.address!]: 430_000_000_000_000_000_000_000n, [UNI.weth]: 2_326_000_000_000_000_000_000n } });
+    chain.fundNative(owner, 10n ** 18n);
+    const ETH = { chain: 'eip155:4663', address: null, decimals: 18, officialId: null };
+    const USDG = { chain: 'eip155:4663', address: usdg.address!, decimals: usdg.decimals, officialId: null };
+    const flow = (node: SemanticWorkflow['nodes'][number]): SemanticWorkflow => ({ schemaVersion: '1.0.0', workflowId: 'workflow-local', revision: 1, nodes: [node], resourceEdges: [] });
+    const s = service(), id = (await s.prepare(flow(createCatalogSwapNode('node-002', { chain: 'eip155:4663', input: ETH, output: USDG, amount: '1000000000000000', slippageBps: 100 })))).quote.executionId;
+    expect(s.load(id).quote).toMatchObject({ native: 'INPUT', inputSymbol: 'ETH', outputToken: usdg.address });
+    s.review(id, s.load(id).quote.manifestHash);
+    const begun = await s.begin(id, owner);
+    expect(begun.tx).toMatchObject({ to: UNI.router, value: '0x' + (10n ** 15n).toString(16) });
+    s.report(id, begun.attempt.attemptId, { kind: 'HASH', txHash: chain.apply(begun.tx) });
+    const done = await s.observe(id);
+    expect(done.outcome).toMatchObject({ inputSpent: '1000000000000000' });
+    expect(chain.balance(UNI.weth, owner)).toBe(0n);
+  });
+});

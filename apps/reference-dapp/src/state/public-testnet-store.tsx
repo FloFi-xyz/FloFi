@@ -193,8 +193,11 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
     const acceptCurrent = (value: PublicRun) => setRun(current => current?.quote.executionId === run.quote.executionId ? value : current);
     const clearSigning = () => setSigningAttempt(current => current === attempt.attemptId ? null : current);
     setRun(unwrap(await publicStatus(run.quote.executionId)));
-    if (tx.chainId !== profile.chainHex || tx.from !== session.account || tx.value !== '0x0' ||
-        tx.to !== (attempt.step === 'approval' ? run.quote.inputToken : profile.router) ||
+    // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: the wallet request carries exactly the reviewed native value (the amount in of a native-ETH swap or a wrap,
+    // else nothing) to the reviewed target (WETH9 for a wrap or unwrap, the router for a swap, the token for its approval).
+    const q = run.quote, nativeValue = attempt.step === 'swap' && (q.native === 'INPUT' || q.conversion === 'WRAP') ? '0x' + BigInt(q.amountIn).toString(16) : '0x0';
+    const target = attempt.step === 'approval' ? q.inputToken : q.conversion && 'weth' in profile ? profile.weth : profile.router;
+    if (tx.chainId !== profile.chainHex || tx.from !== session.account || tx.value !== nativeValue || tx.to !== target ||
         await calldataDigest(tx.data) !== attempt.calldataDigest) {
       unwrap(await publicReport(run.quote.executionId, attempt.attemptId, { kind: 'UNKNOWN' }));
       throw new Error('TRANSACTION_ARTIFACT_CHANGED');

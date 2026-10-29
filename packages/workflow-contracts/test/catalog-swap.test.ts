@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from 'vitest';
 import { canonicalJson } from '../src/canonical.js';
-import { CATALOG_SWAP_CHAINS, CATALOG_SWAP_REFERENCE_PAIRS, catalogSwapMaximumUnits, createCatalogSwapNode, isCatalogSwapNode, isReferencePairSwap,
+import { CATALOG_SWAP_CHAINS, CATALOG_SWAP_REFERENCE_PAIRS, CATALOG_SWAP_WETH9, catalogSwapKind, catalogSwapMaximumUnits, createCatalogSwapNode, isCatalogSwapNode, isReferencePairSwap,
   readCatalogSwapNode, type CatalogAssetRef } from '../src/index.js';
 
 const BASE = 'eip155:8453';
@@ -48,5 +48,43 @@ describe('BUILD-BASE-001 catalog swaps on Base', () => {
     expect(() => createCatalogSwapNode('node-002', { chain: 'eip155:42161', input: usdc, output: cbbtc, amount: '1', slippageBps: 50 })).toThrow('CATALOG_SWAP_ASSET_INVALID');
     expect(() => swap(usdc, { ...cbbtc, chain: 'eip155:4663' })).toThrow('CATALOG_SWAP_ASSET_INVALID');
     expect(canonicalJson(swap(usdc, cbbtc))).toBe(canonicalJson(node));
+  });
+});
+
+describe('BUILD-FLOFI-BRIDGE-LIVE-FIX-003 native ETH and WETH9 conversions', () => {
+  const eth: CatalogAssetRef = { chain: BASE, address: null, decimals: 18, officialId: null };
+  const create = (input: CatalogAssetRef, output: CatalogAssetRef, amount: string, slippageBps: number) => createCatalogSwapNode('node-002', { chain: BASE, input, output, amount, slippageBps });
+  it('native ETH is its own IR asset (nativeId, no address), never WETH, and round-trips exactly', () => {
+    const node = create(eth, usdc, '1000000000000000', 100);
+    expect(node.inputs[0]).toEqual({ name: 'amount-in', kind: 'QUANTITY', value: { asset: { chainId: BASE, nativeId: 'ETH', decimals: 18 }, amount: '1000000000000000' } });
+    expect(node.adapterConstraints.protocols).toEqual(['uniswap']);
+    expect(isCatalogSwapNode(node)).toBe(true); expect(isReferencePairSwap(node)).toBe(false);
+    expect(readCatalogSwapNode(node)).toEqual({ chain: BASE, input: eth, output: usdc, amount: '1000000000000000', slippageBps: 100 });
+    const out = create(usdc, eth, '5000000', 100);
+    expect(out.inputs[1]).toEqual({ name: 'asset-out', kind: 'ASSET', value: { chainId: BASE, nativeId: 'ETH', decimals: 18 } });
+    expect(readCatalogSwapNode(out).output).toEqual(eth);
+    expect(canonicalJson(create(eth, usdc, '1', 100))).not.toBe(canonicalJson(create(weth, cbbtc, '1', 100)));
+  });
+  it('ETH ⇄ WETH9 is a 1:1 WETH9 conversion: protocol weth9, no slippage constraint, minimum = amount', () => {
+    const wrap = create(eth, weth, '10000000000000000', 0), unwrap = create(weth, eth, '10000000000000000', 0);
+    expect(catalogSwapKind(readCatalogSwapNode(wrap))).toBe('WRAP'); expect(catalogSwapKind(readCatalogSwapNode(unwrap))).toBe('UNWRAP');
+    expect(wrap.adapterConstraints.protocols).toEqual(['weth9']);
+    expect(wrap.userConstraints.map(c => c.kind)).toEqual(['MAXIMUM_INPUT']);
+    expect(wrap.expectedOutputs[0]!.minimumAmount).toBe('10000000000000000');
+    expect(() => create(eth, weth, '1', 50)).toThrow('CATALOG_SWAP_SLIPPAGE_INVALID');
+    expect(catalogSwapKind(readCatalogSwapNode(create(eth, usdc, '1', 50)))).toBe('SWAP');
+  });
+  it('refuses a malformed native side, native on both sides, or a forged conversion declaration', () => {
+    expect(() => create({ ...eth, decimals: 6 }, usdc, '1', 50)).toThrow('CATALOG_SWAP_ASSET_INVALID');
+    expect(() => create({ ...eth, officialId: '0x' + '1'.repeat(64) }, usdc, '1', 50)).toThrow('CATALOG_SWAP_ASSET_INVALID');
+    expect(() => create(eth, eth, '1', 50)).toThrow('CATALOG_SWAP_PAIR_INVALID');
+    const forged = { ...create(eth, usdc, '1', 50), adapterConstraints: { adapters: [], protocols: ['weth9'] } };
+    expect(() => readCatalogSwapNode(forged)).toThrow();
+    const otherNative = create(eth, usdc, '1', 50);
+    const sol = { ...otherNative, inputs: otherNative.inputs.map(p => p.name === 'amount-in' ? { ...p, value: { asset: { chainId: BASE, nativeId: 'SOL', decimals: 18 }, amount: '1' } } : p) };
+    expect(() => readCatalogSwapNode(sol as typeof otherNative)).toThrow('CATALOG_SWAP_NODE_INVALID');
+  });
+  it('every catalog network knows its WETH9 (the one its SwapRouter02 reports)', () => {
+    expect(Object.keys(CATALOG_SWAP_WETH9).sort()).toEqual([...CATALOG_SWAP_CHAINS].sort());
   });
 });

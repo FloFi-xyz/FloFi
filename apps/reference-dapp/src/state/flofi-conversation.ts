@@ -542,8 +542,9 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
       propose(command);
       append(scope, { role: 'system', text: `Proposal: ${request}. Review against revision ${command.baseRevision} before applying.` });
     } catch (cause) {
-      // BUILD-FLOFI-CHAT-E2E-FIX-002: a native-ETH swap is refused with its exact reason, deterministically (ETH is never authored as WETH).
-      if (cause instanceof Error && cause.message === 'SWAP_NATIVE_ASSET_UNSUPPORTED') {
+      // BUILD-FLOFI-CHAT-E2E-FIX-002: a native-ETH swap where none exists is refused with its exact reason, deterministically (ETH is never authored
+      // as WETH). BUILD-FLOFI-BRIDGE-LIVE-FIX-003: a wrap without its network, or a swap without its amount, is asked for — never guessed.
+      if (cause instanceof Error && ['SWAP_NATIVE_ASSET_UNSUPPORTED', 'WRAP_NETWORK_REQUIRED', 'SWAP_AMOUNT_REQUIRED'].includes(cause.message)) {
         dismissProposal(); append(scope, { role: 'system', text: copilotRejection(cause.message, language).message, language }); return;
       }
       // BUILD-COPILOT-002: the Copilot keeps the pending proposal visible while it interprets ("make it 2", questions about it).

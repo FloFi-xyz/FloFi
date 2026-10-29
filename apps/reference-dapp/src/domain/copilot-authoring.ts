@@ -339,17 +339,18 @@ function planSwap(a: CopilotSwapAction, g: Grounding): Plan {
     ...(a.network === null && !devnetImplied && !supported.some(n => named.includes(n)) && !named.includes('ETHEREUM') ? ['network' as const] : [])];
   if (missing.length) ask(missing, stillNeeds(m, missing, 'swap'), missing.length === 1 && missing[0] === 'network' ? labels(supported) : []);
   const network = devnetImplied ? devnetByAsset(g, notes) : resolveNetwork(a.network, supported, g, 'swap', notes);
-  // BUILD-FLOFI-CHAT-E2E-FIX-002: ETH and WETH are different assets. A swap that names native ETH is refused with the missing capability (no
-  // native swap or wrap/unwrap step exists yet); it is never authored as a WETH swap.
-  if (!/^SOLANA/.test(network) && [a.inputAsset, a.outputAsset].some(asset => typeof asset === 'string' && /^eth$/i.test(asset))) refuse(m.nativeSwapUnavailable, 'SWAP_NATIVE_ASSET_UNSUPPORTED');
-  // BUILD-BASE-001: on a catalog network any two catalog ERC-20s; Base's USDC ⇄ WETH keeps its BUILD-002 sentence and command.
-  if (g.policy.catalog && isCatalogNetwork(network)) {
-    const input = catalogToken(a.inputAsset, network, g, 'swap', 'inputAsset', 'ERC20', notes), output = catalogToken(a.outputAsset, network, g, 'swap', 'outputAsset', 'ERC20', notes);
-    if (input.asset.address === output.asset.address) reject('INVALID_ASSET_PAIR', m.differentTokens);
+  // BUILD-FLOFI-CHAT-E2E-FIX-002 / BUILD-FLOFI-BRIDGE-LIVE-FIX-003: ETH and WETH are different assets. On a catalog network native ETH is its own
+  // asset (a native swap, or a WETH9 wrap/unwrap against WETH); elsewhere (test networks: USDC ⇄ WETH only) it is refused, never authored as WETH.
+  const catalogNetwork = g.policy.catalog && isCatalogNetwork(network);
+  if (!catalogNetwork && !/^SOLANA/.test(network) && [a.inputAsset, a.outputAsset].some(asset => typeof asset === 'string' && /^eth$/i.test(asset))) refuse(m.nativeSwapUnavailable, 'SWAP_NATIVE_ASSET_UNSUPPORTED');
+  // BUILD-BASE-001: on a catalog network any two catalog assets; Base's USDC ⇄ WETH keeps its BUILD-002 sentence and command.
+  if (catalogNetwork) {
+    const input = catalogToken(a.inputAsset, network, g, 'swap', 'inputAsset', 'ANY', notes), output = catalogToken(a.outputAsset, network, g, 'swap', 'outputAsset', 'ANY', notes);
+    if (input.asset.id === output.asset.id) reject('INVALID_ASSET_PAIR', m.differentTokens);
     const amount = amountOf(a.amount, g, 'swap');
     const slippage = slippageOf(a.slippageBps, DEFAULT_SLIPPAGE, g, notes);
-    if (input.ether || output.ether) notes.push(m.wethNote);
     const from = input.asset.symbol, to = output.asset.symbol, label = COPILOT_NETWORK_LABEL[network];
+    if (from === 'ETH' || to === 'ETH') notes.push([from, to].includes('WETH') ? m.wrapNote : m.nativeEthNote);
     if (network === 'BASE' && [from, to].every(symbol => symbol === 'USDC' || symbol === 'WETH'))
       return { sentence: `swap ${amount} ${from} to ${to} on Base slippage ${slippage} bps`, expect: 'ADD_SWAP', notes };
     notes.push(m.catalogFundsNote(label));

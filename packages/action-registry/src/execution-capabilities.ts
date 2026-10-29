@@ -44,7 +44,7 @@ const preparation = flags(['AUTHOR', 'QUOTE_OR_READ', 'SIMULATE', 'REVIEW', 'EVI
 const templateKinds = new Set(['mock-read', 'mock-transform', 'mock-condition', 'mock-bridge', 'mock-pool', 'mock-supply', 'mock-lending', 'mock-borrow']);
 const definedActions = new Set(['asset.transfer', 'withdraw', 'repay', 'borrow', 'supply', 'asset.swap.exact-input', 'asset.bridge', 'asset.liquidity.uniswap-v3', 'asset.liquidity.concentrated', 'asset.liquidity.prepare', ...templateKinds]);
 const adapterVersions: Readonly<Record<string, string>> = Object.freeze({
-  'aave-v3': '1.0.0', 'uniswap.v3': '1.0.0', 'cow.protocol': '1.0.0', 'lifi.rest': '1.0.0', 'across.direct': '1.0.0',
+  'aave-v3': '1.0.0', 'uniswap.v3': '1.0.0', 'weth9.wrap': '1.0.0', 'cow.protocol': '1.0.0', 'lifi.rest': '1.0.0', 'across.direct': '1.0.0',
   'gryloo.calculated-split': '1.0.0', 'gryloo.template': '1.0.0', 'jupiter.swap-v2': '1.0.0',
   'orca.whirlpools-devnet': '1.0.0', 'orca.whirlpools-devnet-liquidity': '1.0.0', 'orca.whirlpools-mainnet-liquidity': '1.0.0', 'evm.native-transfer': '1.0.0',
   'flofi.router': '1.0.0', 'flofi.router.universal': '1.0.0', 'evm.token-transfer': '1.0.0', 'solana.system-transfer': '1.0.0', 'solana.spl-transfer': '1.0.0',
@@ -144,6 +144,10 @@ for (const action of ['supply', 'borrow', 'repay', 'withdraw'] as const)
 for (const [action, adapter] of [['asset.swap.exact-input', 'uniswap.v3'], ['asset.transfer', 'evm.native-transfer'], ['asset.transfer', 'evm.token-transfer'], ['asset.bridge', 'flofi.router'], ['asset.liquidity.concentrated', 'uniswap.v3'],
   ['supply', 'aave-v3'], ['borrow', 'aave-v3'], ['repay', 'aave-v3'], ['withdraw', 'aave-v3']] as const)
   add(action, adapter, 'eip155:1', 'MAINNET', fork, null, 'DIRECT_TRANSACTION', ['INJECTED_WALLET', 'QUOTE_PROVIDER', 'REVIEWED_ARTIFACTS'], ['A']);
+// BUILD-FLOFI-BRIDGE-LIVE-FIX-003: native ETH ⇄ WETH9 conversions (deposit / withdraw on each network's verified WETH9, exactly 1:1) on the
+// four catalog mainnets, in the same owner-wallet swap runtime; native-ETH pool swaps stay `uniswap.v3`. None is demonstrated on mainnet.
+for (const chain of ['eip155:4663', 'eip155:8453', 'eip155:42161', 'eip155:1'] as const)
+  add('asset.swap.exact-input', 'weth9.wrap', chain, 'MAINNET', fork, null, 'DIRECT_TRANSACTION', ['INJECTED_WALLET', 'QUOTE_PROVIDER', 'REVIEWED_ARTIFACTS'], ['A']);
 // BUILD-CROSSCHAIN-UNIVERSAL-001: the universal Cross-chain Router, sourced on any of the five FloFi mainnets (destination any other one),
 // executed through Relay's Depository with FloFi-built source transactions; signed only by the owner's wallet (EVM: sent by the wallet;
 // Solana: wallet-signed bytes verified and broadcast once by FloFi) and gated by an explicit deployment opt-in. None is demonstrated,
@@ -185,6 +189,7 @@ function selectedAdapter(node: Node): { id: string; version: string } | null {
     if (node.adapterConstraints.protocols.length === 1 && node.adapterConstraints.protocols[0] === 'orca-whirlpools') return { id: 'orca.whirlpools-devnet', version: '1.0.0' };
     if (node.adapterConstraints.protocols.includes('cow-protocol')) return { id: 'cow.protocol', version: '1.0.0' };
     if (node.adapterConstraints.protocols.includes('uniswap')) return { id: 'uniswap.v3', version: '1.0.0' };
+    if (node.adapterConstraints.protocols.length === 1 && node.adapterConstraints.protocols[0] === 'weth9') return { id: 'weth9.wrap', version: '1.0.0' };
   }
   return null;
 }

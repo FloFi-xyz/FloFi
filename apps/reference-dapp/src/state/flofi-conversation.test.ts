@@ -169,9 +169,10 @@ describe('BUILD-FLOFI-CONVERSATIONAL-001 conversational workflow', () => {
     expect(last(chat).role).toBe('ai');
     expect(last(chat).text).toMatch(/^Swap added to your workflow: 3 USDC/);
     expect(last(chat).notes).toEqual(['Interpreted as “swap 3 USDC to WETH on Base Sepolia slippage 100 bps”.', 'Flofi swaps the ERC-20 WETH (wrapped ETH), not native ETH.']);
-    // BUILD-FLOFI-CHAT-E2E-FIX-002: native ETH named in a swap is refused deterministically, whatever an interpretation would say; nothing is committed.
+    // BUILD-FLOFI-CHAT-E2E-FIX-002: native ETH named in a swap where no native path exists (a test network) is refused deterministically,
+    // whatever an interpretation would say; nothing is committed. (BUILD-FLOFI-BRIDGE-LIVE-FIX-003: catalog mainnets have native ETH swaps.)
     const native = await say('swap 3 USDC to ETH on Base Sepolia slippage 100 bps');
-    expect(last(native).text).toMatch(/^Native ETH swaps are not available in FloFi yet/); expect(editor.workflow.revision).toBe(1);
+    expect(last(native).text).toMatch(/^On this network FloFi has no native ETH swap/); expect(editor.workflow.revision).toBe(1);
   });
   it('in an approval context the chat keeps its proposal behaviour and has no lifecycle controls', async () => {
     direct = false;

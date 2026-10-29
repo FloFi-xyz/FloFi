@@ -6,9 +6,10 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ARBITRUM_ONE, ARBITRUM_ONE_TRANSFER, ARBITRUM_TOKEN_LIST, catalogAsset, parseArbitrumTokenList, transferL1FeeOracle,
   UNISWAP_V3_ARBITRUM as UNI, type AssetCatalog } from '@defi-workflow-engine/action-registry';
-import { createCatalogSwapNode, createNativeTransferNode, createTokenTransferNode, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
+import { createCatalogSwapNode, createNativeTransferNode, createTokenTransferNode, type CatalogAssetRef, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
+import { decodeNativeSwap, fromHex } from '@defi-workflow-engine/reference-compiler';
 import { createFileExecutionStorage } from '@defi-workflow-engine/reference-executor';
-import { createPublicTestnetService, createDurablePublicTestnetService, reviewPublicRun, validatePublicRunLog } from './public-testnet-service';
+import { createPublicTestnetService, createDurablePublicTestnetService, NATIVE_ETH, reviewPublicRun, validatePublicRunLog } from './public-testnet-service';
 import { createRobinhoodTransferService } from './robinhood-transfer-service';
 import { createRobinhoodMockChain, mockCatalogRuntime } from './robinhood-mainnet.test-harness';
 import { arbitrumMainnetMode, arbitrumOwnerExecutionEnabled, arbitrumMainnetRpc, arbitrumRpcUrl, createArbitrumCatalogLoader } from './arbitrum-mainnet';
@@ -370,5 +371,51 @@ describe('Arbitrum native and ERC20 transfers', () => {
     increased = true;
     await expect(s.begin(run.id, owner, w)).rejects.toThrow('TRANSFER_GAS_CHANGED_REVIEW_REQUIRED');
     expect((await s.load(run.id)).attempt).toBeNull();
+  });
+});
+
+describe('BUILD-FLOFI-BRIDGE-LIVE-FIX-003 native ETH on Arbitrum One (owner-bound Review; aeWETH mint/burn logs)', () => {
+  const ETH = { chain: chainId, address: null, decimals: 18, officialId: null } as const;
+  const ref = (symbol: string) => ({ chain: chainId, address: asset(symbol).address!, decimals: asset(symbol).decimals, officialId: null });
+  const nativeSwap = (input: CatalogAssetRef, output: CatalogAssetRef, amount: string, slippageBps = 50) =>
+    flow(createCatalogSwapNode('node-002', { chain: chainId, amount, slippageBps, input, output }));
+  it('C — native ETH → USDC: the owner-bound Review is the swap itself (no approval), value = amount, budget covers amount + gas', async () => {
+    const s = swapService(), run = await s.prepare(nativeSwap(ETH, ref('USDC'), '10000000000000000'), owner), id = run.quote.executionId;
+    expect(run.quote).toMatchObject({ native: 'INPUT', inputToken: NATIVE_ETH, ownerReview: { step: 'swap', transaction: { to: UNI.router, value: '0x' + (10n ** 16n).toString(16) } } });
+    expect(decodeNativeSwap(fromHex(run.quote.ownerReview!.transaction.data), UNI.weth)).toMatchObject({ native: 'INPUT', recipient: owner });
+    s.review(id, run.quote.manifestHash);
+    const begun = await s.begin(id, owner); expect(begun.tx).toEqual(run.quote.ownerReview!.transaction);
+    s.report(id, begun.attempt.attemptId, { kind: 'HASH', txHash: chain.apply(begun.tx) });
+    const done = await s.observe(id);
+    expect(done.outcome).toMatchObject({ inputSpent: '10000000000000000' });
+    expect(chain.balance(UNI.weth, owner)).toBe(10n ** 18n); // the owner's own WETH is never touched by a native-ETH swap
+  });
+  it('D — USDC → native ETH: approval, then the router unwraps (aeWETH burn) and pays the owner at least the minimum', async () => {
+    const s = swapService(), first = await s.prepare(nativeSwap(ref('USDC'), ETH, '10000000'), owner), id = first.quote.executionId;
+    expect(first.quote.ownerReview?.step).toBe('approval');
+    s.review(id, first.quote.manifestHash);
+    const approve = await s.begin(id, owner);
+    s.report(id, approve.attempt.attemptId, { kind: 'HASH', txHash: chain.apply(approve.tx) }); await s.observe(id);
+    const next = await s.refresh(id); s.review(id, next.quote.manifestHash);
+    expect(decodeNativeSwap(fromHex(next.quote.ownerReview!.transaction.data), UNI.weth)).toMatchObject({ native: 'OUTPUT', recipient: owner });
+    const begun = await s.begin(id, owner), nativeBefore = chain.state.native.get(owner)!;
+    s.report(id, begun.attempt.attemptId, { kind: 'HASH', txHash: chain.apply(begun.tx) });
+    const done = await s.observe(id), received = BigInt(done.outcome!.outputReceived);
+    expect(received).toBeGreaterThanOrEqual(BigInt(next.quote.minimumOut));
+    expect(chain.state.native.get(owner)! - nativeBefore).toBe(received - BigInt(done.attempts.at(-1)!.receipt!.gasCostWei));
+  });
+  it('wrap and unwrap through aeWETH (Transfer mint/burn) reconcile exactly 1:1', async () => {
+    const s = swapService(), wrap = await s.prepare(nativeSwap(ETH, ref('WETH'), '5000000000000000', 0), owner), id = wrap.quote.executionId;
+    expect(wrap.quote).toMatchObject({ conversion: 'WRAP', ownerReview: { step: 'swap', transaction: { to: UNI.weth, data: '0xd0e30db0' } } });
+    s.review(id, wrap.quote.manifestHash);
+    const begun = await s.begin(id, owner);
+    s.report(id, begun.attempt.attemptId, { kind: 'HASH', txHash: chain.apply(begun.tx) });
+    expect((await s.observe(id)).outcome).toMatchObject({ inputSpent: '5000000000000000', outputReceived: '5000000000000000' });
+    expect(chain.balance(UNI.weth, owner)).toBe(10n ** 18n + 5n * 10n ** 15n);
+    const unwrap = await s.prepare(nativeSwap(ref('WETH'), ETH, '5000000000000000', 0), owner), uid = unwrap.quote.executionId;
+    s.review(uid, unwrap.quote.manifestHash);
+    const out = await s.begin(uid, owner);
+    s.report(uid, out.attempt.attemptId, { kind: 'HASH', txHash: chain.apply(out.tx) });
+    expect((await s.observe(uid)).outcome).toMatchObject({ outputReceived: '5000000000000000' });
   });
 });

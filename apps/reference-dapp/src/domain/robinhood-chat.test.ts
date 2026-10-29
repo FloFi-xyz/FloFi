@@ -48,7 +48,9 @@ describe('BUILD-RH-002 Robinhood Chain chat', () => {
     expect(() => parse('Transfer 3 AAPL on Robinhood')).toThrow('ASSET_CATALOG_UNAVAILABLE');
     registerNetworkCatalog(officialCatalog());
     expect(() => parse('Swap 5 USDG for NOTREAL on Robinhood')).toThrow();
-    expect(() => parse('Swap 5 ETH for TSLA on Robinhood')).toThrow();
+    // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: native ETH is a swap side of its own on Robinhood Chain (its pool is checked at Simulate), never WETH.
+    expect(parse('Swap 5 ETH for TSLA on Robinhood')).toMatchObject({ type: 'ADD_CRYPTO_ACTION', input: { selection: { from: 'ETH', to: 'TSLA' } } });
+    expect(() => parse('Pool 5 ETH and 5 USDG on Robinhood')).toThrow();
     expect(() => parse('Bridge 5 USDG from Base to Robinhood')).toThrow();
   });
 });

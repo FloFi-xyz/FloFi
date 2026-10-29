@@ -38,4 +38,15 @@ export const portugueseBridgeLiveFix: Readonly<Record<string, string>> = {
   "Ceiling for the token approval request; the swap's own network fee is checked after the approval confirms.":
     'Teto para o pedido de aprovação do token; a taxa de rede da troca é verificada depois que a aprovação for confirmada.',
   'Ceiling for this wallet request, separate from the swap output.': 'Teto para este pedido na carteira, separado do valor da troca.',
+  // Native ETH and WETH9 conversions.
+  'Exact output': 'Valor exato recebido', 'Wrap ETH': 'Wrap de ETH', 'Unwrap WETH': 'Unwrap de WETH',
+  'Wrap through WETH9: exactly 1:1, no pool, no price impact and no slippage. Your wallet sends the ETH with the request; the network fee is paid separately from the same ETH balance.':
+    'Wrap pelo WETH9: exatamente 1:1, sem pool, sem impacto de preço e sem slippage. A sua carteira envia o ETH junto com o pedido; a taxa de rede é paga à parte, do mesmo saldo de ETH.',
+  'Unwrap through WETH9: exactly 1:1, no pool, no price impact and no slippage. WETH9 pays you native ETH; the network fee is paid separately.':
+    'Unwrap pelo WETH9: exatamente 1:1, sem pool, sem impacto de preço e sem slippage. O WETH9 paga você em ETH nativo; a taxa de rede é paga à parte.',
+  'This swap spends native ETH: your wallet sends it with the request (no token approval). The network fee is paid separately from the same ETH balance.':
+    'Este swap gasta ETH nativo: a sua carteira o envia junto com o pedido (sem aprovação de token). A taxa de rede é paga à parte, do mesmo saldo de ETH.',
+  'You receive native ETH: in the same transaction the router unwraps WETH9 and pays you at least the minimum. The network fee is paid separately.':
+    'Você recebe ETH nativo: na mesma transação o roteador faz o unwrap do WETH9 e paga a você pelo menos o mínimo. A taxa de rede é paga à parte.',
+  'WETH9': 'WETH9',
 };

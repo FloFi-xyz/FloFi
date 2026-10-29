@@ -58,8 +58,10 @@ export const COPILOT_EVAL_CASES: readonly EvalCase[] = [
   { id: 'D04', category: 'direct', language: 'EN', turns: [{ user: 'Take 3 USDC back out of Aave on Base Sepolia', model: intent.action(act.lending('WITHDRAW', { asset: 'USDC', amount: '3', ...onSepolia })),
     expect: P('ADD_WITHDRAW', { contains: ['Recipient: your connected wallet, bound at Review.'] }) }] },
   // BUILD-FLOFI-CHAT-E2E-FIX-002: native ETH is never swapped as WETH; the request is refused with the missing capability.
-  { id: 'D05', category: 'direct', language: 'EN', turns: [{ user: 'Swap 100 USDC to ETH on Base', model: intent.action(act.swap({ network: 'BASE', inputAsset: 'USDC', outputAsset: 'ETH', amount: '100' })),
-    expect: U(['Native ETH swaps are not available in FloFi yet', 'FloFi never swaps it in place of ETH']) }] },
+  // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: native ETH on a catalog mainnet is its own asset — an exact native-ETH swap (never WETH), a WETH9 wrap/unwrap.
+  { id: 'D05', category: 'direct', language: 'EN', turns: [{ user: 'Swap 100 USDC to ETH on Base', expect: EXACT }] },
+  { id: 'D05N', category: 'direct', language: 'EN', turns: [{ user: 'Swap 0.001 ETH to USDC on Base', expect: EXACT }] },
+  { id: 'D05X', category: 'direct', language: 'EN', turns: [{ user: 'Wrap 0.01 ETH to WETH on Base', expect: EXACT }] },
   { id: 'D05W', category: 'direct', language: 'EN', turns: [{ user: 'Swap 100 USDC to WETH on Base', model: intent.action(act.swap({ network: 'BASE', inputAsset: 'USDC', outputAsset: 'WETH', amount: '100' })),
     expect: P('ADD_SWAP', { sentence: 'swap 100 USDC to WETH on Base slippage 100 bps', contains: ['Slippage 1% (100 bps) (Flofi default)'] }) }] },
   { id: 'D06', category: 'direct', language: 'EN', turns: [{ user: 'Swap 0.001 WETH to USDC on Base Sepolia',
@@ -390,7 +392,7 @@ export const COPILOT_EVAL_CASES: readonly EvalCase[] = [
   { id: 'L01', category: 'language', language: 'MIXED', turns: [{ user: 'Faz supply de 2 USDC na Base Sepolia', model: intent.action(sup('2', onSepolia), 'PT'),
     expect: P('ADD_SUPPLY', { contains: ['Interpretado como “supply 2 USDC to Aave on Base Sepolia”'] }) }] },
   { id: 'L02', category: 'language', language: 'PT', turns: [{ user: 'Troca 5 USDC por ETH na Base Sepolia', model: intent.action(swapTestnet('5'), 'PT'),
-    expect: U(['Swaps de ETH nativo ainda não estão disponíveis', 'nunca o troca no lugar de ETH']) }] },
+    expect: U(['Swaps, wraps e unwraps de ETH nativo funcionam na Base', 'nunca o troca no lugar de ETH']) }] },
   { id: 'L03', category: 'language', language: 'MIXED', turns: [{ user: 'Swap 5 USDC pra ETH', model: intent.action(act.swap({ inputAsset: 'USDC', outputAsset: 'ETH', amount: '5' }), 'PT'),
     expect: Q({ contains: ['o Flofi ainda precisa saber: a rede'], options: ['Base', 'Base Sepolia', 'Arbitrum One', 'Ethereum', 'Ethereum Sepolia', 'Solana', 'Solana Devnet', 'Robinhood Chain'] }) }] },
   { id: 'L04', category: 'language', language: 'MIXED', setup: [FIXTURE.supply], turns: [{ user: 'Muda o amount para 3', model: intent.edit({ amount: '3' }, {}, 'PT'),

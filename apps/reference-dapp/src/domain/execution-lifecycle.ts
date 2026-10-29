@@ -137,7 +137,8 @@ export function projectExecutionLifecycle(currentWorkflow: Workflow, context: Re
       if (approve) add('approval', nodeId, `Approve ${r.quote.inputSymbol}`, chain, r.divergence && last === approve ? 'DIVERGENT' :
         r.quote.ownerReview && approve.state === 'CONFIRMED' && approve.nativeAfter === null ? 'PENDING' : approve.state,
         approve.txHash, false, true, simulationAmount(approve.receipt?.gasCostWei, 18, 'ETH'));
-      add('swap', nodeId, 'Swap', chain, r.divergence ? 'DIVERGENT' : r.quote.ownerReview && swap?.state === 'CONFIRMED' && !r.outcome ? 'PENDING' : swap?.state ?? null,
+      // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: a WETH9 conversion is one wallet request of its own kind, named as such.
+      add('swap', nodeId, r.quote.conversion === 'WRAP' ? 'Wrap ETH' : r.quote.conversion === 'UNWRAP' ? 'Unwrap WETH' : 'Swap', chain, r.divergence ? 'DIVERGENT' : r.quote.ownerReview && swap?.state === 'CONFIRMED' && !r.outcome ? 'PENDING' : swap?.state ?? null,
         swap?.txHash ?? null, false, false, simulationAmount(swap?.receipt?.gasCostWei, 18, 'ETH')); break;
     }
     case 'router': {

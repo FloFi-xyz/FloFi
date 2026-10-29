@@ -64,6 +64,8 @@ describe('Robinhood decision gate in the capability registry', () => {
       ['asset.transfer', 'evm.native-transfer', 'eip155:4663', 'MAINNET', null],
       ['asset.transfer', 'evm.token-transfer', 'eip155:4663', 'MAINNET', null],
       ['asset.bridge', 'flofi.router', 'eip155:4663', 'MAINNET', null],
+      // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: native ETH ⇄ WETH9 conversions (no evidence ceiling)
+      ['asset.swap.exact-input', 'weth9.wrap', 'eip155:4663', 'MAINNET', null],
       // BUILD-CROSSCHAIN-UNIVERSAL-001
       ['asset.bridge', 'flofi.router.universal', 'eip155:4663', 'MAINNET', null]]);
     for (const row of rows) {

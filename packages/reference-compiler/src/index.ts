@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 export { ANVIL_PIN, FORK_CHAIN_ID, FORK_CHAIN_ID_HEX, FORK_CHAIN_REF, FORK_UPSTREAM_POLICY, SOURCE_CHAIN_ID, SOURCE_CHAIN_REF, forkAnvilArgs } from './profile.js';
 export { rlpEncode, rlpDecode, rlpInteger, parseRlpInteger } from './rlp.js';
+export { UNWRAP_WETH9_SELECTOR, ROUTER_ADDRESS_THIS, WETH_DEPOSIT_SELECTOR, WETH_WITHDRAW_SELECTOR, encodeNativeSwap, decodeNativeSwap, encodeWethDeposit, encodeWethWithdraw } from './abi.js';
+export type { NativeSwapArguments } from './abi.js';
 export { SWAP_ROUTER_02, APPROVE_SELECTOR, MULTICALL_SELECTOR, EXACT_INPUT_SINGLE_SELECTOR, encodeApprove, decodeApprove, encodeSwap, decodeSwap } from './abi.js';
 export { encodeUnsignedPayload, decodeUnsignedPayload, payloadIdentity, verifyModeAPair, buildModeAPair, toHex, fromHex } from './payload.js';
 export type { UnsignedPayload, PairContext } from './payload.js';
