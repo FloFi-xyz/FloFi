@@ -164,7 +164,8 @@ compiler, `base-swap`, `arbitrum-runtime`, `ethereum-runtime`, `robinhood-swap`,
 
 ## 12. CircleCI status
 
-_CIRCLECI_STATUS_
+Draft PR #136 at e397b0e (2026-10-29): `ci/circleci: governance`, `certification`, `certification-checks`, `certification-browser-1`,
+`certification-browser-2` — all **pass**; Vercel preview — pass. (This report commit re-runs the same checks.)
 
 ## 13. Real-provider read-only evidence (C)
 
