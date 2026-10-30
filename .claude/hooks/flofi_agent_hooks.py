@@ -30,13 +30,14 @@ READ_ONLY_TOOLS = {"Read", "Grep", "Glob", "Bash"}
 GIT_READ = {"diff", "log", "show", "status", "ls-files", "grep", "rev-parse", "merge-base", "blame",
             "cat-file", "ls-tree", "diff-tree", "rev-list", "shortlog", "describe", "name-rev"}
 GIT_DENY = ("--output", "--ext-diff", "--no-index", "-O", "--open-files-in-pager", "--no-exclude-standard")
-COMMANDS = {"cat", "head", "tail", "wc", "ls", "cut", "tr", "nl", "sort", "diff", "stat", "basename",
-            "dirname", "realpath", "pwd", "jq", "rg", "grep", "find", "sed", "git", "python3"}
+# jq ($ENV/env) and diff (-r over ignored files) are deliberately absent.
+COMMANDS = {"cat", "head", "tail", "wc", "ls", "cut", "tr", "nl", "sort", "stat", "basename",
+            "dirname", "realpath", "pwd", "rg", "grep", "find", "sed", "git", "python3"}
 # Long options are matched by prefix; letters are refused inside short-option bundles.
-DENY_LONG = {"rg": ("--pre", "--follow", "--unrestricted", "--no-ignore", "--search-zip"),
+DENY_LONG = {"rg": ("--pre", "--follow", "--unrestricted", "--no-ignore", "--search-zip", "--hostname-bin"),
              "grep": ("--recursive", "--dereference-recursive", "--directories", "--devices"),
              "tail": ("--follow", "--retry"), "sort": ("--output", "--compress-program", "--temporary-directory")}
-DENY_SHORT = {"rg": "uLz", "grep": "rRdD", "tail": "fF", "sort": "oT"}
+DENY_SHORT = {"rg": "uLz", "grep": "rRdD", "tail": "fF", "sort": "oT", "git": "O"}
 FIND_DENY = {"-exec", "-execdir", "-ok", "-okdir", "-delete", "-fprint", "-fprint0", "-fprintf", "-fls", "-L", "-follow"}
 GUARD_SCRIPTS = {"check", "impact", "report", "domain"}
 SENSITIVE_NAMES = {"id_rsa", "id_ed25519", "id_ecdsa", "credentials", "credentials.json", ".credentials.json",
@@ -146,23 +147,18 @@ def segment_reason(argv, cwd, root=ROOT):
             return "only read-only git subcommands without global options are allowed"
         if any(arg.startswith(GIT_DENY) for arg in args[1:]):
             return "git output files, external diff, no-index and pager options are not allowed"
-        for arg in args[1:]:
-            value = arg.split("=", 1)[1] if arg.startswith("-") and "=" in arg else arg
-            if value.startswith(("/", "~")) or ".." in value.split("/"):
-                reason = path_reason(value, cwd, root)
-                if reason:
-                    return reason
-        return None
-    if name == "python3":
+        # Options such as --contents=FILE or -f FILE read the working tree too.
+        args = args[1:]
+    elif name == "python3":
         script = (Path(cwd) / args[0]).resolve() if args else None
         if (script != root.resolve() / "scripts/agent_guard.py" or len(args) < 2 or args[1] not in GUARD_SCRIPTS
                 or any(not re.fullmatch(r"[A-Za-z0-9_./@^~:=-]+", arg) for arg in args[2:])):
             return "python3 may only run scripts/agent_guard.py check, impact, report or domain"
     if name == "find" and FIND_DENY & set(args):
         return "find actions that execute, delete, write or follow links are not allowed"
-    if name == "sed" and (len(args) < 3 or args[0] != "-n" or not re.fullmatch(r"(?:\d+|\$)(?:,(?:\d+|\$))?p", args[1])
+    if name == "sed" and (len(args) < 2 or args[0] != "-n" or not re.fullmatch(r"(?:\d+|\$)(?:,(?:\d+|\$))?p", args[1])
                           or any(arg.startswith("-") for arg in args[2:])):
-        return "sed is limited to sed -n 'N,Mp' FILE..."
+        return "sed is limited to sed -n 'N,Mp' [FILE...]"
     reason = option_reason(name, args)
     if reason:
         return reason
@@ -209,6 +205,17 @@ def bash_reason(tool_input, cwd, root=ROOT):
     return None
 
 
+def saved_output(event, value):
+    """Claude Code persists long tool output under the session's own tool-results directory."""
+    transcript, session = event.get("transcript_path"), event.get("session_id")
+    if not (isinstance(transcript, str) and isinstance(value, str) and isinstance(session, str)
+            and SAFE_ID.fullmatch(session) and transcript.endswith(f"/{session}.jsonl")):
+        return False
+    folder = Path(transcript.removesuffix(".jsonl"), "tool-results").resolve()
+    target = Path(value).resolve()
+    return target.parent == folder and target.is_file() and target.suffix == ".txt"
+
+
 def guard_reason(event, root=ROOT):
     agent = event.get("agent_type") or ""
     if not isinstance(agent, str) or not agent.startswith("flofi-"):
@@ -222,6 +229,8 @@ def guard_reason(event, root=ROOT):
     if tool == "Bash":
         return bash_reason(tool_input, cwd, root)
     if tool == "Read":
+        if saved_output(event, tool_input.get("file_path")):
+            return None
         return path_reason(tool_input.get("file_path"), cwd, root)
     pattern = tool_input.get("pattern") if tool == "Glob" else None
     if isinstance(pattern, str) and (pattern.startswith(("/", "~")) or ".." in pattern.split("/")):

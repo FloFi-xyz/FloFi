@@ -65,7 +65,8 @@ python3 scripts/agent_guard.py review --base origin/main \
 ```
 
 `review` defaults to `$CLAUDE_CODE_SESSION_ID`; pass `--session <id>` (repeatable)
-for other sessions, `--unit-report`/`--postgres-report` to verify fresh Vitest JSON
+for other sessions, `--stream-json <file>` to take headless sessions and their
+discovered agents from `init` events, `--unit-report`/`--postgres-report` to verify fresh Vitest JSON
 reports, `--json` for machine output and `--strict` to exit 1 when an expected
 specialist is missing, incomplete or blocked without justification, a recorded gate
 failed, more than three ran at once, or a maintained file is unmapped. It prints
@@ -79,8 +80,7 @@ claude -p --output-format stream-json --verbose \
   --allowedTools="Agent,Read,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git status:*),Bash(git grep:*),Bash(rg:*),Bash(grep:*),Bash(find:*),Bash(ls:*),Bash(cat:*),Bash(head:*),Bash(tail:*),Bash(wc:*),Bash(sed -n:*),Bash(python3 scripts/agent_guard.py:*)" \
   "Read-only pre-PR review of this branch against origin/main using the flofi-swap, flofi-mcp and flofi-workflow subagents in parallel. Do not edit files. Summarize each specialist's findings and FLOFI_REVIEW_RESULT line." \
   > "${TMPDIR:-/tmp}/flofi-review.jsonl"
-python3 scripts/agent_guard.py review --base origin/main --session \
-  "$(jq -r 'select(.subtype == "init") | .session_id' "${TMPDIR:-/tmp}/flofi-review.jsonl")"
+python3 scripts/agent_guard.py review --base origin/main --stream-json "${TMPDIR:-/tmp}/flofi-review.jsonl"
 ```
 
 ## Read-only guard
@@ -90,11 +90,19 @@ python3 scripts/agent_guard.py review --base origin/main --session \
 named `flofi-*` it denies tools other than Read/Grep/Glob/Bash and allows Bash only
 for single pipelines of `git` read subcommands (no global options, output files,
 external diff, `--no-index` or pager), `rg`/`grep` without ignore bypass or
-recursion, `find` without actions, `sed -n 'N,Mp'`, common read-only utilities and
-`python3 scripts/agent_guard.py check|impact|report|domain`. It denies chaining,
+recursion, `find` without actions, `sed -n 'N,Mp'` (also as a pipe stage), common
+read-only utilities (not `jq`, which exposes the environment, or `diff`, which
+recurses into ignored files) and `python3 scripts/agent_guard.py
+check|impact|report|domain` by relative path. Read may also open long output that
+Claude Code saved in this session's own `tool-results/` directory. It denies chaining,
 redirection (other than `2>/dev/null`/`2>&1`), expansion, subshells, background
 jobs, environment assignments and any path outside the repository, inside `.git`,
 Git-ignored (except `node_modules`) or named like a secret, including glob matches.
+
+`onFailure: block` was verified on 2.1.314: with the guard script missing, an
+explicitly allowed Bash call was blocked. A broken guard therefore blocks every tool
+call, including the main session's; restore the file from Git, or set
+`"disableAllHooks": true` in the ignored `.claude/settings.local.json` while repairing.
 
 Limits: hooks are skipped with `--bare`, `disableAllHooks` or an untrusted
 interactive folder. The frontmatter allowlist and denylist still remove write,
