@@ -478,6 +478,10 @@
       "path": "scripts/test_ci_agent_guard.py",
       "stage": "governance"
     },
+    "scripts.test_ci_claude_agents": {
+      "path": "scripts/test_ci_claude_agents.py",
+      "stage": "governance"
+    },
     "scripts.test_ci_gcp_orchestration": {
       "path": "scripts/test_ci_gcp_orchestration.py",
       "stage": "governance"
@@ -3447,6 +3451,8 @@
         ".circleci/scripts/ci-composition.sh",
         ".circleci/scripts/ci-fork.sh",
         ".circleci/scripts/ci-sbom.sh",
+        ".claude/hooks/flofi_agent_hooks.py",
+        ".claude/settings.json",
         ".codex/config.toml",
         ".dockerignore",
         ".gcloudignore",
@@ -3498,6 +3504,7 @@
         "scripts/guarded-release-browser.mjs",
         "scripts/summarize-screenshot-diffs.py",
         "scripts/universal-route-matrix.mjs",
+        "scripts/verify_claude_agents.py",
         "scripts/verify_codex_agents.py",
         "tsconfig.base.json",
         "turbo.json",
@@ -3505,13 +3512,15 @@
       ],
       "suites": [
         "scripts.test_ci_agent_guard",
+        "scripts.test_ci_claude_agents",
         "scripts.test_ci_gcp_orchestration",
         "scripts.test_ci_optimization",
         "scripts.test_ci_source_snapshot",
         "scripts.test_governance_lite"
       ],
       "gaps": [
-        "Static/config contracts do not deploy or prove hosted Vercel/Railway/Cloud Build operations; CI branch protection remains owner-managed."
+        "Static/config contracts do not deploy or prove hosted Vercel/Railway/Cloud Build operations; CI branch protection remains owner-managed.",
+        "Codex and Claude specialist delegation is model-driven: hooks record and bound what actually runs but cannot force an invocation; the Codex/Claude harness probes need local CLIs and are not CI stages."
       ]
     },
     {

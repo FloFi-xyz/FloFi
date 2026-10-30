@@ -8,8 +8,12 @@ fresh test report; CircleCI still owns complete release certification.
 
 import argparse
 from collections import Counter
+import difflib
+import hashlib
 import json
+import os
 from pathlib import Path, PurePosixPath
+import re
 import subprocess
 import sys
 import tomllib
@@ -23,6 +27,30 @@ DOMAINS = tuple("flofi-" + name for name in (
     "automations", "frontend-ux", "admin-analytics", "data-privacy",
     "infrastructure-ci", "protocol-integrations", "payments-billing",
 ))
+# Claude Code twins of the Codex roles. They are generated from the Codex
+# definitions, read-only and bounded by the project hook; see CLAUDE-CODE.md.
+CLAUDE_SETTINGS = ".claude/settings.json"
+CLAUDE_HOOK = ".claude/hooks/flofi_agent_hooks.py"
+CLAUDE_RUNS = ".claude/flofi-agent-runs"
+CLAUDE_AGENTS = frozenset(f".claude/agents/{domain}.md" for domain in DOMAINS)
+CLAUDE_FILES = CLAUDE_AGENTS | {CLAUDE_SETTINGS, CLAUDE_HOOK}
+CLAUDE_FRONTMATTER = {"tools": "Read, Grep, Glob, Bash", "model": "inherit",
+                      "disallowedTools": "Agent, Edit, Write, NotebookEdit, WebFetch, WebSearch, mcp__*"}
+_HOOK_ARGS = ["${CLAUDE_PROJECT_DIR}/" + CLAUDE_HOOK]
+_RECORD = [{"hooks": [{"type": "command", "command": "python3", "args": _HOOK_ARGS + ["record"], "timeout": 10}]}]
+_RECORD_BASH = [{"matcher": "Bash", **_RECORD[0]}]
+CLAUDE_SETTINGS_CONTENT = {"hooks": {
+    "SessionStart": _RECORD, "SubagentStart": _RECORD, "SubagentStop": _RECORD, "SessionEnd": _RECORD,
+    "PreToolUse": [{"matcher": "*", "hooks": [{"type": "command", "command": "python3", "args": _HOOK_ARGS + ["guard"],
+                                               "timeout": 10, "onFailure": "block"}]}],
+    "PostToolUse": _RECORD_BASH, "PostToolUseFailure": _RECORD_BASH,
+}}
+SHARED_CORE_DOMAINS = frozenset({
+    "flofi-workflow", "flofi-security", "flofi-swap", "flofi-bridge", "flofi-lending", "flofi-liquidity",
+    "flofi-transfer-payments", "flofi-wallet-execution", "flofi-mcp", "flofi-developers", "flofi-chat",
+    "flofi-frontend-ux", "flofi-data-privacy", "flofi-channels", "flofi-automations",
+})
+MAX_CONCURRENT_REVIEWS = 3
 
 
 def git_paths(root=ROOT):
@@ -46,7 +74,7 @@ def maintained(path):
         # Build reports and this guard's own manifest are validated separately.
         return (not path.startswith(("docs/builds/", "docs/engineering/"))
                 and p.suffix in {".json", ".yaml", ".yml", ".sql", ".toml"})
-    if path.startswith(("tests/", "third_party/", "prompts/", "LICENSES/", ".codex/agents/")):
+    if path.startswith(("tests/", "third_party/", "prompts/", "LICENSES/", ".codex/agents/", ".claude/agents/")):
         return False
     if p.suffix == ".md" or p.name in {"LICENSE", "NOTICE", ".DS_Store"}:
         return False
@@ -64,6 +92,141 @@ def safe_path(path):
 
 def load(root=ROOT):
     return json.loads((root / MANIFEST).read_text())
+
+
+def codex_contract(agent):
+    """Split a Codex role into the shared preamble and its one-line specialty."""
+    lines = agent["developer_instructions"].strip().split("\n")
+    if not lines[-1].startswith("Specialty: ") or any(line.startswith("Specialty:") for line in lines[:-1]):
+        raise ValueError(f"{agent['name']}: Codex instructions must end with one Specialty line")
+    return "\n".join(lines[:-1]).strip(), lines[-1].removeprefix("Specialty: ").strip()
+
+
+def claude_agent_text(agent):
+    """Deterministic Claude Code twin of one Codex role (no ownership copy)."""
+    name = agent["name"]
+    shared, specialty = codex_contract(agent)
+    description = (f"{agent['description']} Use proactively for read-only FloFi engineering review when "
+                   f"`agent_guard.py impact` selects {name}. Returns structured findings; never edits, "
+                   "commits, deploys or signs.")
+    front = [("name", name), ("description", json.dumps(description)),
+             *((key, CLAUDE_FRONTMATTER[key]) for key in ("tools", "disallowedTools", "model"))]
+    return "\n".join(["---", *(f"{key}: {value}" for key, value in front), "---", "",
+        f"# {name} — FloFi engineering review specialist", "",
+        f"Generated from `.codex/agents/{name}.toml` by `python3 scripts/agent_guard.py claude-agents --write`.",
+        "Edit the Codex definition or the generator, not this file; `agent_guard.py check` refuses drift.", "",
+        f"You are the Claude Code twin of the Codex `{name}` specialist: a read-only reviewer of FloFi",
+        "repository changes for the main Claude session. You are development infrastructure, never an",
+        "end-user or runtime transaction agent. In Claude Code, specialists stay read-only; main owns all edits.", "",
+        "## Shared Codex/Claude contract", "", shared, "",
+        "## Specialty", "", specialty, "",
+        "## Domain ownership and regression responsibilities", "",
+        f"- Domain ID `{name}` is shared with `.codex/agents/{name}.toml` and with `primary`/`dependencies` in",
+        "  `docs/engineering/coverage.json`, the only ownership matrix. Do not keep or infer another one.",
+        f"- Load your current contract first: `python3 scripts/agent_guard.py domain {name} --base <ref>` (main",
+        "  names the ref; default `origin/main`). It lists owned and dependent modules, cross-domain",
+        "  dependencies, mapped and required suites, coverage gaps and the changed paths in your scope.",
+        f"- Primary review: changed modules whose `primary` is `{name}`. Dependency review: changed modules that",
+        f"  list `{name}` in `dependencies`, and shared financial core when main assigns it.",
+        "- Regression duties: every mapped suite of an affected module still exists, still exercises the changed",
+        "  boundary and is not skipped, weakened or removed; required unit/PostgreSQL suites stay unconditional;",
+        "  new maintained files are explicitly owned in coverage.json or reported as unmapped.",
+        "- Report findings that belong to another domain to main with that domain ID instead of reviewing it in depth.", "",
+        "## How to review", "",
+        "1. Start from the base, paths and concerns main assigned. Inspect from the repository root without `cd`:",
+        "   `git diff <base>...HEAD`, `git diff`, `git status --short`, `git log`, `git show`, `git grep`, `rg`,",
+        "   non-recursive `grep`, `find`, `ls`, `cat`, `head`, `tail`, `wc`, `sed -n 'N,Mp'` and",
+        "   `python3 scripts/agent_guard.py check|impact|domain|report`. Pipes are allowed; chaining is not.",
+        "2. Trace behavior through current source, `executionCapabilityRegistry` and the tests mapped to the",
+        "   affected modules. Historical reports may be stale.",
+        "3. You cannot run builds or test suites. Give main the exact focused command (for example",
+        "   `pnpm exec vitest run <suite path>`) and mark it not run.", "",
+        "## Boundaries", "",
+        f"- Read-only. The project hook `{CLAUDE_HOOK}` denies other tools, writes, shell expansion or",
+        "  chaining, and paths outside the repository, Git internals, ignored local state or secrets for",
+        "  `flofi-*` agents. Report a denial instead of working around it.",
+        "- Never edit, stage, commit, push, merge, deploy, change production configuration or credentials, or",
+        "  create, sign or broadcast transactions. Never spawn subagents.",
+        "- Never read, quote or summarize credentials, private keys, seed phrases, `.env` files or wallet secrets.", "",
+        "## Findings contract", "",
+        "Return to main, most severe first:",
+        "- Each finding: severity (critical, high, medium or low), concrete defect, impacted `file:line` or",
+        "  symbol, reproduction or test command with its actual result or \"not run\", affected domains and",
+        "  evidence limits.",
+        "- Coverage gaps and checks you could not perform.",
+        "- \"No concrete findings\" when that is the honest result.", "",
+        "End with exactly one final line and nothing after it:", "",
+        "FLOFI_REVIEW_RESULT {\"domain\":\"" + name + "\",\"result\":\"<findings|no-findings|blocked>\","
+        "\"findings\":<count>,\"highest\":\"<critical|high|medium|low|none>\"}", "",
+        "Use `blocked` when the review could not be completed.", ""])
+
+
+def parse_claude_agent(text):
+    """Strict YAML subset: exact keys in order, plain scalars, JSON-quoted description."""
+    match = re.fullmatch(r"---\n((?:[A-Za-z]+: [^\n]+\n)+)---\n(.+)", text, re.S)
+    if not match:
+        raise ValueError("frontmatter must open on line 1 and close with ---")
+    fields = dict(line.split(": ", 1) for line in match[1].splitlines())
+    if list(fields) != ["name", "description", "tools", "disallowedTools", "model"]:
+        raise ValueError("frontmatter fields must be name, description, tools, disallowedTools, model")
+    description = json.loads(fields["description"])
+    if not isinstance(description, str) or not description.strip():
+        raise ValueError("description must be a non-empty quoted string")
+    for key in ("name", "tools", "disallowedTools", "model"):
+        if not re.fullmatch(r"[A-Za-z0-9_*-]+(?:, [A-Za-z0-9_*-]+)*", fields[key]):
+            raise ValueError(f"{key} must be a plain scalar")
+    return {**fields, "description": description}, match[2]
+
+
+def claude_errors(root, paths, codex):
+    """Exact 19 generated read-only twins, bounded settings and no local Claude state."""
+    errors = []
+    for path in paths:
+        parts = PurePosixPath(path).parts
+        if ".claude" in parts[1:]:
+            errors.append(f"{path}: nested Claude project configuration is not allowed")
+        elif parts[0] == ".claude" and path not in CLAUDE_FILES:
+            errors.append(f"{path}: unexpected project Claude file (keep local state ignored)")
+    agents_dir = root / ".claude/agents"
+    present = {str(p.relative_to(root)) for p in agents_dir.rglob("*")} if agents_dir.is_dir() else set()
+    for path in sorted(present - CLAUDE_AGENTS):
+        errors.append(f"{path}: Claude agent definitions must cover exactly the 19 FloFi domains")
+    for path in sorted(CLAUDE_AGENTS):
+        target, name = root / path, PurePosixPath(path).stem
+        if agents_dir.is_symlink() or target.is_symlink() or not target.is_file():
+            errors.append(f"{path}: missing or non-regular Claude agent")
+            continue
+        text = target.read_text()
+        try:
+            fields, _ = parse_claude_agent(text)
+            if fields["name"] != name or any(fields[k] != v for k, v in CLAUDE_FRONTMATTER.items()):
+                errors.append(f"{path}: name, read-only tools or model inheritance changed")
+        except ValueError as exc:
+            errors.append(f"{path}: invalid frontmatter: {exc}")
+        if name in codex:
+            try:
+                if text != claude_agent_text(codex[name]):
+                    errors.append(f"{path}: out of sync with .codex/agents/{name}.toml; "
+                                  "run python3 scripts/agent_guard.py claude-agents")
+            except ValueError as exc:
+                errors.append(str(exc))
+    shared = set()
+    for agent in codex.values():
+        try:
+            shared.add(codex_contract(agent)[0])
+        except ValueError:
+            pass
+    if len(shared) > 1:
+        errors.append("Codex agents must share one identical contract preamble")
+    settings, hook = root / CLAUDE_SETTINGS, root / CLAUDE_HOOK
+    try:
+        if settings.is_symlink() or json.loads(settings.read_text()) != CLAUDE_SETTINGS_CONTENT:
+            errors.append(f"{CLAUDE_SETTINGS}: must contain exactly the FloFi lifecycle and read-only guard hooks")
+    except (OSError, ValueError):
+        errors.append(f"{CLAUDE_SETTINGS}: missing or invalid project Claude settings")
+    if hook.is_symlink() or not hook.is_file():
+        errors.append(f"{CLAUDE_HOOK}: missing or non-regular hook")
+    return errors
 
 
 def validate(data, paths, root=ROOT):
@@ -87,6 +250,9 @@ def validate(data, paths, root=ROOT):
             errors.append(f"{path.name}: {exc}")
     if set(definitions) != set(DOMAINS):
         errors.append("Agent definitions must cover exactly the 19 FloFi domains")
+    errors.extend(claude_errors(root, paths, {
+        name: agent for name, agent in definitions.items() if name in DOMAINS
+        and all(isinstance(agent.get(key), str) for key in ("name", "description", "developer_instructions"))}))
     config = tomllib.loads((root / ".codex/config.toml").read_text())
     if config != {"agents": {"max_concurrent_threads_per_session": 3}}:
         errors.append("Project Codex configuration must retain the bounded agent pool")
@@ -168,34 +334,239 @@ def validate(data, paths, root=ROOT):
 
 def impact(data, changed):
     owners = {path: module for module in data["modules"] for path in module["sources"]}
-    modules, domains, suites, unmapped = {}, set(), set(), []
+    modules, domains, suites, unmapped, reasons = {}, set(), set(), [], {}
+
+    def mark(names, reason):
+        for name in names:
+            domains.add(name)
+            reasons.setdefault(name, set()).add(reason)
+
     for path in changed:
         affected = [owners[path]] if path in owners else [
             module for module in data["modules"]
             if any(data["suites"][suite]["path"] == path for suite in module["suites"])
         ]
-        if path == MANIFEST or path in {"AGENTS.md", "CLAUDE.md", "docs/SCOPE_GUARD.md"}:
+        governance = path == MANIFEST or path in {"AGENTS.md", "CLAUDE.md", "docs/SCOPE_GUARD.md"}
+        if governance:
             affected = data["modules"]
-        if path.startswith(".codex/agents/"):
+        if path.startswith((".codex/agents/", ".claude/agents/")):
             domain = PurePosixPath(path).stem
-            domains.add(domain if domain in DOMAINS else "flofi-infrastructure-ci")
-            domains.add("flofi-infrastructure-ci")
+            mark([domain if domain in DOMAINS else "flofi-infrastructure-ci", "flofi-infrastructure-ci"],
+                 "agent definition")
         for module in affected:
             modules[module["id"]] = module
-            domains.update([module["primary"], *module["dependencies"]])
+            mark([module["primary"]], "governance change" if governance
+                 else "primary owner" if path in owners else "mapped suite changed")
+            mark(module["dependencies"], "governance change" if governance else "dependency")
             suites.update(module["suites"])
             if module.get("sharedFinancialCore"):
-                domains.update({"flofi-workflow", "flofi-security", "flofi-swap", "flofi-bridge",
-                                "flofi-lending", "flofi-liquidity", "flofi-transfer-payments",
-                                "flofi-wallet-execution", "flofi-mcp", "flofi-developers",
-                                "flofi-chat", "flofi-frontend-ux", "flofi-data-privacy",
-                                "flofi-channels", "flofi-automations"})
+                mark(SHARED_CORE_DOMAINS, "shared financial core")
         if not affected and maintained(path):
             unmapped.append(path)
     return {"domains": sorted(domains), "modules": sorted(modules), "suites": sorted(suites),
-            "unmapped": sorted(unmapped), "maxConcurrentSubagents": 3,
+            "unmapped": sorted(unmapped), "maxConcurrentSubagents": MAX_CONCURRENT_REVIEWS,
+            "reasons": {name: sorted(items) for name, items in sorted(reasons.items())},
             "gaps": {name: row["gaps"] for name, row in sorted(modules.items()) if row["gaps"]},
             "note": "Review selection only. Existing full CI coverage is never filtered by this plan."}
+
+
+def domain_contract(data, domain, changed=None):
+    """One domain's live view of coverage.json, shared by its Codex and Claude roles."""
+    if domain not in DOMAINS:
+        raise ValueError(f"Unknown domain {domain}")
+    required = set(data["requiredUnitSuites"]) | set(data["requiredPostgresSuites"])
+    owned = [m for m in data["modules"] if m["primary"] == domain]
+    suite_ids = sorted({suite for module in owned for suite in module["suites"]})
+    result = {
+        "domain": domain, "codexAgent": f".codex/agents/{domain}.toml", "claudeAgent": f".claude/agents/{domain}.md",
+        "ownedModules": [{"id": m["id"], "files": len(m["sources"]), "dependencies": m["dependencies"],
+                          "sharedFinancialCore": bool(m.get("sharedFinancialCore")), "suites": m["suites"],
+                          "gaps": m["gaps"]} for m in owned],
+        "dependencyReviewOf": sorted(m["id"] for m in data["modules"] if domain in m["dependencies"]),
+        "dependsOn": sorted({name for module in owned for name in module["dependencies"]}),
+        "suites": {suite: data["suites"][suite] for suite in suite_ids},
+        "requiredSuites": sorted(set(suite_ids) & required),
+    }
+    if changed is not None:
+        owners = {path: module for module in data["modules"] for path in module["sources"]}
+        suite_paths = {data["suites"][suite]["path"] for suite in suite_ids}
+        result["changedPaths"] = {
+            "owned": sorted(p for p in changed if p in owners and owners[p]["primary"] == domain),
+            "dependency": sorted(p for p in changed if p in owners and domain in owners[p]["dependencies"]),
+            "sharedFinancialCore": sorted(p for p in changed if p in owners and owners[p].get("sharedFinancialCore")),
+            "mappedSuites": sorted(p for p in changed if p in suite_paths),
+        }
+        result["selectedBecause"] = impact(data, changed)["reasons"].get(domain, [])
+    return result
+
+
+def read_runs(session, root=ROOT):
+    """Hook-recorded lifecycle for one Claude session; never contains prompts or output."""
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", session):
+        raise ValueError("Invalid Claude session id")
+    path = root / CLAUDE_RUNS / f"{session}.jsonl"
+    events, malformed = [], 0
+    found = path.is_file() and not path.is_symlink()
+    for line in path.read_text().splitlines() if found else []:
+        try:
+            row = json.loads(line)
+        except ValueError:
+            row = None
+        if isinstance(row, dict) and isinstance(row.get("event"), str):
+            events.append(row)
+        else:
+            malformed += 1
+    return {"session": session, "found": found, "events": events, "malformed": malformed}
+
+
+def review_summary(data, plan, runs, skips=None, reports=(), root=ROOT):
+    """Combine expected specialists with what hooks actually observed. Advisory only."""
+    skips = skips or {}
+    agents, tests, denials, definitions, peak = {}, [], Counter(), {}, 0
+    for run in runs:
+        running = set()
+        for row in run["events"]:
+            key = f"{run['session']}/{row.get('agentId')}"
+            if row["event"] == "session_start" and isinstance(row.get("definitions"), dict):
+                definitions.update(row["definitions"])
+            elif row["event"] == "subagent_start":
+                agents[key] = {"agent": row.get("agent"), "status": "started", "review": None}
+                if str(row.get("agent")).startswith("flofi-"):
+                    running.add(key)
+                    peak = max(peak, len(running))
+            elif row["event"] == "subagent_stop":
+                agents.setdefault(key, {"agent": row.get("agent"), "status": "started", "review": None})
+                agents[key].update(status="completed", review=row.get("review"))
+                running.discard(key)
+            elif row["event"] == "test":
+                tests.append(row)
+            elif row["event"] == "guard_deny":
+                denials[row.get("agent")] += 1
+    current = {}
+    for path in sorted(CLAUDE_AGENTS):
+        target = root / path
+        current[PurePosixPath(path).stem] = (hashlib.sha256(target.read_bytes()).hexdigest()[:16]
+                                              if target.is_file() and not target.is_symlink() else None)
+    rows, problems = [], []
+    for domain in plan["domains"]:
+        seen = [a for a in agents.values() if a["agent"] == domain]
+        done = [a for a in seen if a["status"] == "completed"]
+        reviews = [a["review"] for a in done if isinstance(a["review"], dict)]
+        status = ("completed" if done else "incomplete" if seen
+                  else "skipped" if domain in skips else "not-invoked")
+        rows.append({"domain": domain, "selectedBecause": plan.get("reasons", {}).get(domain, []),
+                     "status": status, "invocations": len(seen), "completed": len(done),
+                     "reviews": reviews, "unstructured": len(done) - len(reviews),
+                     "skipReason": skips.get(domain), "guardDenials": denials.get(domain, 0)})
+        if status == "incomplete":
+            problems.append(f"{domain}: started without a recorded completion (failed, interrupted or still running)")
+        elif status == "not-invoked":
+            problems.append(f"{domain}: expected specialist not invoked and no skip justification")
+        if any(review.get("result") == "blocked" for review in reviews):
+            problems.append(f"{domain}: specialist reported its review as blocked")
+    for test in tests:
+        if test.get("ok") is False:
+            problems.append(f"Recorded gate failed: {', '.join(test.get('gates', []))}")
+    if peak > MAX_CONCURRENT_REVIEWS:
+        problems.append(f"Observed {peak} concurrent flofi-* reviewers; the limit is {MAX_CONCURRENT_REVIEWS}")
+    problems.extend(f"Unmapped maintained source: {path}" for path in plan["unmapped"])
+    verified = []
+    for stage, path in reports:
+        errors = verify_results(data, json.loads(Path(path).read_text()), root, stage)
+        verified.append({"stage": stage, "report": str(path), "errors": errors})
+        problems.extend(errors)
+    changed_definitions = sorted(name for name, digest in definitions.items() if current.get(name) != digest)
+    return {
+        "base": plan.get("base"), "sessions": [{"session": r["session"], "found": r["found"],
+                                                "events": len(r["events"]), "malformed": r["malformed"]} for r in runs],
+        "documentationOnly": not plan["domains"] and not plan["modules"] and not plan["unmapped"],
+        "specialists": rows,
+        "unexpectedAgents": sorted({str(a["agent"]) for a in agents.values()} - set(plan["domains"])),
+        "definitionsAtSessionStart": len(definitions), "definitionsChangedSince": changed_definitions,
+        "peakConcurrentReviewers": peak, "tests": tests, "reports": verified,
+        "gaps": plan["gaps"], "problems": problems,
+        "evidence": ("Hook-observed lifecycle only. Delegation is model-driven and advisory; recorded gates are "
+                     "shell exit statuses, not certification. CircleCI remains the certification authority."),
+    }
+
+
+def review_markdown(summary):
+    lines = ["# FloFi Claude review summary", "", summary["evidence"], "",
+             f"Base: `{summary['base']}`. Sessions: " + (", ".join(
+                 f"`{s['session']}` ({s['events']} events{'' if s['found'] else ', no ledger'})"
+                 for s in summary["sessions"]) or "none") + ".", ""]
+    if summary["documentationOnly"]:
+        lines += ["No maintained source, suite or governance contract changed: documentation-only, "
+                  "specialist review not required.", ""]
+    lines += ["## Changed domains and specialists", "",
+              "| Domain | Selected because | Status | Result |", "| --- | --- | --- | --- |"]
+    for row in summary["specialists"]:
+        result = "; ".join(f"{r.get('result')} ({r.get('findings')} findings, highest {r.get('highest')})"
+                           for r in row["reviews"]) or ("unstructured" if row["unstructured"] else "")
+        if row["status"] == "skipped":
+            result = "Skipped: " + row["skipReason"]
+        if row["guardDenials"]:
+            result += f"; {row['guardDenials']} guard denials"
+        lines.append(f"| {row['domain']} | {', '.join(row['selectedBecause'])} | {row['status']} | {result or '—'} |")
+    lines += ["", f"Agents invoked outside the plan: {', '.join(summary['unexpectedAgents']) or 'none'}.",
+              f"Peak concurrent flofi-* reviewers: {summary['peakConcurrentReviewers']} (limit {MAX_CONCURRENT_REVIEWS}).",
+              f"Claude agent definitions recorded at session start: {summary['definitionsAtSessionStart']}; "
+              f"changed since: {', '.join(summary['definitionsChangedSince']) or 'none'}.", "", "## Tests recorded by hooks", ""]
+    for test in summary["tests"]:
+        state = {True: "passed", False: "failed", None: "result not observed"}[test.get("ok")]
+        notes = (" (pipeline: status of the last command)" if test.get("piped") else "") + (
+            f"; suites: {', '.join(test['suites'])}" if test.get("suites") else "")
+        lines.append(f"- {', '.join(test.get('gates', []))} by {test.get('agent', 'main')}: {state}"
+                     + (f", exit {test['exit']}" if test.get("exit") is not None else "") + notes)
+    if not summary["tests"]:
+        lines.append("- None recorded in these sessions.")
+    for report in summary["reports"]:
+        lines.append(f"- Required {report['stage']} suites in `{report['report']}`: "
+                     + ("PASS" if not report["errors"] else "FAIL: " + "; ".join(report["errors"])))
+    gaps = summary["gaps"]
+    lines += ["", "## Coverage gaps in affected modules", ""]
+    if len(gaps) > 15:
+        lines.append(f"{len(gaps)} affected modules declare gaps: {', '.join(gaps)}. Full text: `--json`.")
+    else:
+        lines += [f"- {module}: {'; '.join(items)}" for module, items in gaps.items()] or ["- None."]
+    lines += ["", "## Problems and unresolved reviews", ""]
+    lines += [f"- {problem}" for problem in summary["problems"]] or ["- None."]
+    return "\n".join(lines) + "\n"
+
+
+def claude_sync(root=ROOT, write=False, overwrite=False):
+    """Generate missing Claude twins; never replace a differing file without --overwrite."""
+    drift, messages = False, []
+    for domain in DOMAINS:
+        path = f".claude/agents/{domain}.md"
+        expected = claude_agent_text(tomllib.loads((root / f".codex/agents/{domain}.toml").read_text()))
+        target = root / path
+        if target.is_symlink():
+            raise ValueError(f"{path}: symlink refused")
+        current = target.read_text() if target.is_file() else None
+        if current == expected:
+            continue
+        if current is not None and not overwrite:
+            drift = True
+            messages.extend(difflib.unified_diff(current.splitlines(), expected.splitlines(),
+                                                 f"{path} (current)", f"{path} (generated)", lineterm=""))
+            messages.append(f"{path}: differs from the generated twin; not overwritten. Move intended text into "
+                            "the Codex definition or generator, or pass --overwrite after reviewing the diff.")
+        elif write or overwrite:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(expected)
+            messages.append(f"Wrote {path}")
+        else:
+            drift = True
+            messages.append(f"{path}: missing")
+    return drift, messages
+
+
+def changed_paths(base, root=ROOT):
+    merge_base = subprocess.check_output(["git", "merge-base", "HEAD", base], cwd=root, text=True).strip()
+    changed = subprocess.check_output(["git", "diff", "--name-only", "-z", merge_base], cwd=root).decode().split("\0")
+    changed += subprocess.check_output(["git", "ls-files", "--others", "--exclude-standard", "-z"], cwd=root).decode().split("\0")
+    return merge_base, sorted(set(filter(None, changed)))
 
 
 def verify_results(data, report, root=ROOT, stage="unit"):
@@ -240,27 +611,54 @@ def coverage_report(data):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["check", "impact", "report", "verify-results"])
-    parser.add_argument("result_file", nargs="?")
+    parser.add_argument("command", choices=["check", "impact", "report", "verify-results", "domain", "review", "claude-agents"])
+    parser.add_argument("result_file", nargs="?", help="verify-results: Vitest JSON report; domain: domain ID")
     parser.add_argument("--base", help="Explicit Git ref to compare using merge-base; no network fetch")
     parser.add_argument("--stage", choices=["unit", "postgres"], default="unit", help="Test report's existing certification stage")
+    parser.add_argument("--session", action="append", help="review: Claude session ID (default $CLAUDE_CODE_SESSION_ID)")
+    parser.add_argument("--skip", action="append", default=[], metavar="DOMAIN=REASON", help="review: justified skipped specialist")
+    parser.add_argument("--unit-report", help="review: fresh Vitest JSON report to verify for required unit suites")
+    parser.add_argument("--postgres-report", help="review: fresh Vitest JSON report for required PostgreSQL suites")
+    parser.add_argument("--json", action="store_true", help="review: print JSON instead of Markdown")
+    parser.add_argument("--strict", action="store_true", help="review: exit 1 on unresolved reviews or failures")
+    parser.add_argument("--write", action="store_true", help="claude-agents: create missing generated agents")
+    parser.add_argument("--overwrite", action="store_true", help="claude-agents: also replace differing agents")
     # Python 3.12.3 (CircleCI) otherwise leaves the optional result positional
     # unconsumed in `verify-results --stage postgres report.json`.
     args = parser.parse_intermixed_args()
+    if args.command == "claude-agents":
+        drift, messages = claude_sync(write=args.write, overwrite=args.overwrite)
+        print("\n".join(messages or ["Claude agents: 19 generated twins match their Codex definitions"]))
+        return int(drift)
     data = load()
     if args.command == "verify-results":
         if not args.result_file:
             parser.error("verify-results requires the fresh Vitest JSON report path")
         errors = verify_results(data, json.loads(Path(args.result_file).read_text()), stage=args.stage)
-    elif args.command == "impact":
-        if not args.base:
-            parser.error("impact requires an explicit --base ref")
-        base = subprocess.check_output(["git", "merge-base", "HEAD", args.base], cwd=ROOT, text=True).strip()
-        changed = subprocess.check_output(["git", "diff", "--name-only", "-z", base], cwd=ROOT).decode().split("\0")
-        changed += subprocess.check_output(["git", "ls-files", "--others", "--exclude-standard", "-z"], cwd=ROOT).decode().split("\0")
-        result = impact(data, sorted(set(filter(None, changed))))
-        print(json.dumps(result, indent=2))
-        return int(bool(result["unmapped"]))
+    elif args.command in {"impact", "domain", "review"}:
+        if args.command != "domain" and not args.base:
+            parser.error(f"{args.command} requires an explicit --base ref")
+        if args.command == "domain" and not args.result_file:
+            parser.error("domain requires a FloFi domain ID")
+        merge_base, changed = changed_paths(args.base) if args.base else (None, None)
+        if args.command == "domain":
+            print(json.dumps(domain_contract(data, args.result_file, changed), indent=2))
+            return 0
+        result = impact(data, changed)
+        if args.command == "impact":
+            print(json.dumps(result, indent=2))
+            return int(bool(result["unmapped"]))
+        sessions = args.session or [os.environ.get("CLAUDE_CODE_SESSION_ID", "")]
+        if not all(sessions):
+            parser.error("review requires --session when CLAUDE_CODE_SESSION_ID is not set")
+        skips = dict(item.split("=", 1) for item in args.skip if "=" in item and item.split("=", 1)[1].strip())
+        if len(skips) != len(args.skip) or set(skips) - set(DOMAINS):
+            parser.error("--skip takes DOMAIN=REASON with a known domain and a non-empty reason")
+        reports = [(stage, path) for stage, path in (("unit", args.unit_report), ("postgres", args.postgres_report)) if path]
+        summary = review_summary(data, {**result, "base": f"{args.base} ({merge_base[:12]})"},
+                                 [read_runs(session) for session in sessions], skips, reports)
+        print(json.dumps(summary, indent=2) if args.json else review_markdown(summary), end="\n" if args.json else "")
+        return int(args.strict and bool(summary["problems"]))
     elif args.command == "report":
         print(coverage_report(data), end="")
         return 0
