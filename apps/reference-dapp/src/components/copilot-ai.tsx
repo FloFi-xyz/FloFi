@@ -4,7 +4,8 @@ import { FLOFI_WELCOME, FLOFI_WELCOME_COMMANDS, FLOFI_WELCOME_REPLAY } from '../
 import { useLocale } from '../i18n/locale';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { copilotInterpret, copilotStatus } from '../app/copilot-action';
+import { copilotInterpret, copilotStatus, copilotTurnReport } from '../app/copilot-action';
+import { turnMetrics } from '../domain/intelligence/turn-metrics';
 import { learningApply, learningFeedback, learningObserve, learningStatus } from '../app/learning-action';
 import { learningCopy } from '../domain/copilot-learning-copy';
 import type { LearningStatusView } from '../learning/web-actions';
@@ -249,9 +250,13 @@ export function useCopilotInterpreter({ direct = false }: { direct?: boolean } =
     try {
       // Local clarification answers use the same validated catalogs as model turns. Retry a previous load failure on a new user turn.
       await ensureCopilotCatalogs([...conversation.current.segment, text].join('\n'), conversation.current.draft?.intent);
-      const start = startTurn(conversation.current, text, environmentNow());
+      const before = conversation.current, start = startTurn(before, text, environmentNow());
+      // BUILD-FLOFI-INTELLIGENCE-001: one content-free turn record (counters and codes only), best effort and never awaited by the chat.
+      const measure = (reply: CopilotReply, next: CopilotConversation, interpreted: string | null) =>
+        void copilotTurnReport(turnMetrics(before, reply, next, interpreted, 'WEB')).catch(() => undefined);
       if (start.kind === 'LOCAL') {
         conversation.current = start.next;
+        measure(start.reply, start.next, 'LOCAL');
         return show(await settle(start.reply));
       }
       let result: CopilotResultV2;
@@ -262,6 +267,7 @@ export function useCopilotInterpreter({ direct = false }: { direct?: boolean } =
       if (result.ok) await Promise.all([ensureCopilotCatalogs(start.turn.state.segment.join('\n'), result.intent), loadVerified(result.intent)]);
       const finished = finishTurn(start.turn, result, environmentNow());
       conversation.current = finished.next;
+      measure(finished.reply, finished.next, result.ok ? String((result.intent as { kind?: unknown } | null)?.kind ?? '') || null : null);
       return show(await settle(finished.reply));
     } finally { setBusy(false); }
   }, [environmentNow, show, settle, loadVerified]);

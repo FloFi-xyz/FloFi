@@ -9,6 +9,9 @@ import { webCopilotSettingsReader } from '../server/copilot-settings-source';
 import { parseInterpretOptions, requestGlossary } from '../learning/web-actions';
 import { webLearningService, pickPrincipal } from '../server/learning-web';
 import { currentWalletPrincipals } from '../server/session-principal';
+import { copilotToolkit } from '../server/copilot-toolkit';
+import { logCopilotTurn } from '../server/copilot-service';
+import { parseTurnMetrics } from '../domain/intelligence/turn-metrics';
 
 /**
  * BUILD-COPILOT-001: Flofi Copilot interpretation. The browser sends only its short clarification thread and receives
@@ -81,7 +84,7 @@ export async function copilotInterpret(input: unknown, options?: unknown): Promi
       const learning = await learningFor(input, options);
       const result = await interpretCopilotV2(input, { transport: createOpenAITransport(apiKey, fetch, { timeoutMs: settings.timeoutMs, maxResponseBytes: COPILOT_SERVER_LIMITS.maxResponseBytes }),
         settings: { model: settings.model, temperature: settings.temperature, maxOutputTokens: settings.maxOutputTokens, reasoningEffort: settings.reasoningEffort },
-        mode: 'live', limiter: limiter(), telemetry: copilotTelemetrySink(process.env, 'live'), glossary: learning?.glossary ?? null });
+        mode: 'live', limiter: limiter(), telemetry: copilotTelemetrySink(process.env, 'live'), glossary: learning?.glossary ?? null, toolkit: copilotToolkit(process.env), surface: 'WEB' });
       await learning?.record(result);
       return result;
     }
@@ -94,7 +97,7 @@ export async function copilotInterpret(input: unknown, options?: unknown): Promi
     const learning = await learningFor(input, options);
     const result = await interpretCopilotV2(input, { transport: createReplayTransport(replay, 'segment'), settings: { model: 'replay', temperature: 0,
       maxOutputTokens: COPILOT_TUNING_DEFAULTS.maxOutputTokens, reasoningEffort: null }, mode: 'replay', limiter: limiter(), telemetry: copilotTelemetrySink(process.env, 'replay'),
-      glossary: learning?.glossary ?? null });
+      glossary: learning?.glossary ?? null, toolkit: copilotToolkit(process.env), surface: 'WEB' });
     await learning?.record(result);
     return result;
   }
@@ -102,4 +105,23 @@ export async function copilotInterpret(input: unknown, options?: unknown): Promi
     const replay = parseCopilotReplay(JSON.parse(await readFile(REPLAY_FILE, 'utf8')));
     return interpretCopilot(input, { transport: createReplayTransport(replay), model: 'replay', temperature: 0, limiter: limiter() });
   } catch { return { ok: false, code: 'COPILOT_REPLAY_INVALID' }; }
+}
+
+/** Held on globalThis: a per-process bound on turn records (they are log lines; a flood is dropped, never queued). */
+function turnLimiter(): CopilotLimiter {
+  const key = Symbol.for('flofi.copilot.turn-limiter');
+  const holder = globalThis as unknown as Record<symbol, CopilotLimiter | undefined>;
+  holder[key] ??= createCopilotLimiter({ windowMs: 60_000, maxConcurrent: 1_000, maxPerWindow: 240 });
+  return holder[key];
+}
+/**
+ * BUILD-FLOFI-INTELLIGENCE-001: the browser's content-free record of one Copilot turn (`intelligence/turn-metrics.ts`), re-validated strictly here and
+ * logged like the interpretation records. Counters and closed codes only; anything else is dropped. Returns nothing the browser could depend on.
+ */
+export async function copilotTurnReport(input: unknown): Promise<void> {
+  const config = copilotConfig(process.env), record = parseTurnMetrics(input);
+  if (config.mode === 'off' || config.mode === 'unavailable' || !record || record.surface !== 'WEB') return;
+  const release = turnLimiter().acquire();
+  if (!release) return;
+  try { logCopilotTurn(process.env, config.mode === 'replay' ? 'replay' : 'live', record); } finally { release(); }
 }

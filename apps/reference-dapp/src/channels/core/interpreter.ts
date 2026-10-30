@@ -17,6 +17,10 @@ import { COPILOT_REPLAY_FORMAT_V2, COPILOT_SERVER_LIMITS, COPILOT_TUNING_DEFAULT
   createOpenAITransport, createReplayTransport, interpretCopilotV2, parseCopilotReplay, type CopilotLimiter, type CopilotModelSettings,
   type CopilotTransport } from '../../server/copilot-service.ts';
 import type { ChannelInterpreter } from './conversation.ts';
+import { copilotToolkitOf, copilotToolsEnabled, type CopilotToolkit } from '../../platform/copilot-tools.ts';
+import { scopeOfEnv } from '../../domain/network-scope';
+import { logCopilotTurn } from '../../server/copilot-service.ts';
+import type { TurnMetrics } from '../../domain/intelligence/turn-metrics';
 
 type Env = Readonly<Record<string, string | undefined>>;
 /** One turn's live settings, or the browser-safe code to answer with. */
@@ -31,12 +35,16 @@ function sharedLimiter(): CopilotLimiter {
 }
 
 /** The interpreter this deployment allows for channels, or null (exact commands only). `transport` is a test seam for replayed answers. */
-export function channelInterpreter(env: Env, options: { readonly enabled: boolean; readonly transport?: CopilotTransport; readonly live?: ChannelLiveCopilot } =
+export function channelInterpreter(env: Env, options: { readonly enabled: boolean; readonly transport?: CopilotTransport; readonly live?: ChannelLiveCopilot;
+  /** BUILD-FLOFI-INTELLIGENCE-001: test seam for the read-only tools (default: this deployment's, `copilotToolkit`). */ readonly toolkit?: CopilotToolkit | null } =
   { enabled: true }): ChannelInterpreter | null {
   if (!options.enabled) return null;
+  // BUILD-FLOFI-INTELLIGENCE-001: the same read-only tool contracts as FloFi's own chat, without route discovery (Channel Core reaches no flow runtime;
+  // the route tools say ROUTE_DISCOVERY_UNAVAILABLE). Catalogs for the request were registered before interpretation. None with FLOFI_COPILOT_TOOLS=off.
+  const toolkit = options.toolkit !== undefined ? options.toolkit : copilotToolsEnabled(env) ? copilotToolkitOf(scopeOfEnv(env), {}) : null;
   if (options.transport) {
     const transport = options.transport;
-    return (request, options) => interpretCopilotV2(request, { transport, mode: 'replay', limiter: sharedLimiter(), glossary: options?.glossary ?? null,
+    return (request, options) => interpretCopilotV2(request, { transport, mode: 'replay', limiter: sharedLimiter(), glossary: options?.glossary ?? null, toolkit, surface: 'CHANNEL',
       settings: { model: 'replay', temperature: 0, maxOutputTokens: COPILOT_TUNING_DEFAULTS.maxOutputTokens, reasoningEffort: null } });
   }
   const config = copilotConfig(env), tuning = copilotTuning(env), live = options.live;
@@ -47,7 +55,7 @@ export function channelInterpreter(env: Env, options: { readonly enabled: boolea
       if (!resolved.ok) return { ok: false, code: resolved.code };
       const { apiKey, settings } = resolved;
       return interpretCopilotV2(request, { transport: createOpenAITransport(apiKey, fetch, { timeoutMs: settings.timeoutMs, maxResponseBytes: COPILOT_SERVER_LIMITS.maxResponseBytes }),
-        mode: 'live', limiter: sharedLimiter(), telemetry: copilotTelemetrySink(env, 'live'), glossary: options?.glossary ?? null,
+        mode: 'live', limiter: sharedLimiter(), telemetry: copilotTelemetrySink(env, 'live'), glossary: options?.glossary ?? null, toolkit, surface: 'CHANNEL',
         settings: { model: settings.model, temperature: settings.temperature, maxOutputTokens: settings.maxOutputTokens, reasoningEffort: settings.reasoningEffort } });
     };
   }
@@ -55,14 +63,19 @@ export function channelInterpreter(env: Env, options: { readonly enabled: boolea
   if (config.mode === 'live' && tuning) {
     const transport = createOpenAITransport(config.apiKey, fetch, { timeoutMs: tuning.timeoutMs, maxResponseBytes: COPILOT_SERVER_LIMITS.maxResponseBytes });
     return (request, options) => interpretCopilotV2(request, { transport, mode: 'live', limiter: sharedLimiter(), telemetry: copilotTelemetrySink(env, 'live'),
-      glossary: options?.glossary ?? null,
+      glossary: options?.glossary ?? null, toolkit, surface: 'CHANNEL',
       settings: { model: config.model, temperature: config.temperature, maxOutputTokens: tuning.maxOutputTokens, reasoningEffort: tuning.reasoningEffort } });
   }
   return async (request, options) => {
     try {
       const replay = parseCopilotReplay(JSON.parse(await readFile(REPLAY_FILE_V2, 'utf8')), COPILOT_REPLAY_FORMAT_V2);
-      return interpretCopilotV2(request, { transport: createReplayTransport(replay, 'segment'), mode: 'replay', limiter: sharedLimiter(), glossary: options?.glossary ?? null,
+      return interpretCopilotV2(request, { transport: createReplayTransport(replay, 'segment'), mode: 'replay', limiter: sharedLimiter(), glossary: options?.glossary ?? null, toolkit, surface: 'CHANNEL',
         settings: { model: 'replay', temperature: 0, maxOutputTokens: COPILOT_TUNING_DEFAULTS.maxOutputTokens, reasoningEffort: null } });
     } catch { return { ok: false, code: 'COPILOT_REPLAY_INVALID' }; }
   };
+}
+
+/** BUILD-FLOFI-INTELLIGENCE-001: a channel turn's content-free record (`domain/intelligence/turn-metrics.ts`), under the Copilot's telemetry switch. */
+export function logChannelTurn(env: Env, record: TurnMetrics): void {
+  logCopilotTurn(env, env.FLOFI_COPILOT === 'live' ? 'live' : 'replay', record);
 }

@@ -2,6 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildCopilotRequestV2, copilotConfig, copilotTuning, createOpenAITransport, interpretCopilotV2, validateCopilotRequestV2, COPILOT_SERVER_LIMITS,
   type CopilotTelemetry } from './copilot-service';
+import { copilotToolkitOf } from '../platform/copilot-tools';
 
 /**
  * BUILD-COPILOT-002: owner-triggered live smoke test of the interpretation path only. It is excluded from `pnpm test`
@@ -59,5 +60,38 @@ describe('live OpenAI interpretation smoke test (owner-triggered, never CI)', ()
     // Hard: schema compatibility and safety. Interpretation quality is reported for the owner to judge.
     expect(report.filter(row => !row.ok)).toEqual([]);
     expect(report.find(row => row.probe === 'Injection')?.kind).not.toMatch(/^(ACTION|EDIT|REPEAT|REMOVE|COMPOSITION|INSERT)$/);
+  }, 600_000);
+
+  /**
+   * BUILD-FLOFI-INTELLIGENCE-001: the same owner-triggered run with FloFi's read-only tools offered (closed context card; route discovery replaced by a
+   * port that answers ROUTE_DISCOVERY_UNAVAILABLE, so no provider is called). It checks that the live model accepts the tool definitions, that tool
+   * rounds stay within the orchestration bounds, and that goal requests come back as GOAL. Interpretation quality is reported for the owner to judge.
+   */
+  it('accepts FloFi\'s strict tool definitions and returns valid intents through the bounded tool loop', async () => {
+    if (process.env.FLOFI_COPILOT_LIVE_SMOKE !== '1') throw new Error('Set FLOFI_COPILOT_LIVE_SMOKE=1 to run the live smoke test; it is never part of pnpm test or CI.');
+    const config = copilotConfig(process.env), tuning = copilotTuning(process.env);
+    if (config.mode !== 'live' || !tuning) throw new Error('Live mode needs FLOFI_COPILOT=live, OPENAI_API_KEY, OPENAI_COPILOT_MODEL and valid optional tuning.');
+    const transport = createOpenAITransport(config.apiKey, fetch, { timeoutMs: tuning.timeoutMs, maxResponseBytes: COPILOT_SERVER_LIMITS.maxResponseBytes });
+    const settings = { model: config.model, temperature: config.temperature, maxOutputTokens: tuning.maxOutputTokens, reasoningEffort: tuning.reasoningEffort };
+    const toolkit = copilotToolkitOf('PUBLIC_MAINNET', { discover: async () => ({ ok: false, code: 'ROUTE_DISCOVERY_UNAVAILABLE' }) });
+    const goals: readonly Probe[] = [
+      { name: 'EN goal cross-chain', messages: [{ role: 'user', text: 'I have 25 USDC on Base and want SOL on Solana' }], kinds: ['GOAL', 'ACTION'] },
+      { name: 'EN goal supply', messages: [{ role: 'user', text: 'I want to supply 10 USDC to Aave on Arbitrum; my USDC is on Base' }], kinds: ['GOAL'] },
+      { name: 'PT goal cheapest', messages: [{ role: 'user', text: 'Quero levar meus USDC da Base para a Arbitrum pelo menor custo' }], kinds: ['GOAL', 'CLARIFICATION_REQUIRED'] },
+      { name: 'EN capability question', messages: [{ role: 'user', text: 'What can I do on Arbitrum?' }], kinds: ['QUESTION'] },
+      { name: 'EN currency', messages: [{ role: 'user', text: 'swap 1 usd to eth on base' }], kinds: ['ACTION', 'CLARIFICATION_REQUIRED'] },
+    ];
+    const report: Record<string, unknown>[] = [];
+    for (const probe of goals) {
+      const seen: { record: CopilotTelemetry | null } = { record: null };
+      const result = await interpretCopilotV2({ version: '2', messages: probe.messages }, { transport, settings, mode: 'live', toolkit, telemetry: record => { seen.record = record; } });
+      const kind = result.ok ? result.intent.kind : null, t = seen.record;
+      report.push({ probe: probe.name, ok: result.ok, code: result.ok ? 'OK' : result.code, kind, expectedKind: probe.kinds.includes(kind ?? ''), toolCalls: t?.toolCalls ?? null,
+        toolCategories: t?.toolCategories ?? null, toolRounds: t?.toolRounds ?? null, answerGrounding: t?.answerGrounding ?? null, durationMs: t?.durationMs ?? null,
+        inputTokens: t?.inputTokens ?? null, outputTokens: t?.outputTokens ?? null, responseModel: t?.responseModel ?? null });
+    }
+    console.info('[copilot-live-tools]', JSON.stringify({ model: config.model, tuning, report }, null, 1));
+    expect(report.filter(row => !row.ok)).toEqual([]);
+    for (const row of report) expect(Number(row.toolCalls ?? 0)).toBeLessThanOrEqual(8);
   }, 600_000);
 });
