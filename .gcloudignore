@@ -1,8 +1,34 @@
-# Direct certification upload; the signed-off manifest verifies the exact resulting inventory.
+# Direct certification upload; the digest-bound manifest verifies the exact resulting inventory.
 .git
 #!include:.gitignore
 .agents/
-.codex/
+# Keep user Codex state out; include only the bounded project config and the
+# explicit engineering agent files accepted by scripts/gcp-source-snapshot.py.
+**/.codex/
+!/.codex/
+/.codex/*
+!/.codex/config.toml
+!/.codex/agents/
+/.codex/agents/*
+!/.codex/agents/flofi-swap.toml
+!/.codex/agents/flofi-bridge.toml
+!/.codex/agents/flofi-lending.toml
+!/.codex/agents/flofi-liquidity.toml
+!/.codex/agents/flofi-transfer-payments.toml
+!/.codex/agents/flofi-workflow.toml
+!/.codex/agents/flofi-chat.toml
+!/.codex/agents/flofi-mcp.toml
+!/.codex/agents/flofi-channels.toml
+!/.codex/agents/flofi-wallet-execution.toml
+!/.codex/agents/flofi-security.toml
+!/.codex/agents/flofi-developers.toml
+!/.codex/agents/flofi-automations.toml
+!/.codex/agents/flofi-frontend-ux.toml
+!/.codex/agents/flofi-admin-analytics.toml
+!/.codex/agents/flofi-data-privacy.toml
+!/.codex/agents/flofi-infrastructure-ci.toml
+!/.codex/agents/flofi-protocol-integrations.toml
+!/.codex/agents/flofi-payments-billing.toml
 .aws/
 .vercel/
 **/.tmp/

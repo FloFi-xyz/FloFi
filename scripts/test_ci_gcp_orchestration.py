@@ -39,6 +39,15 @@ class CloudOrchestration(unittest.TestCase):
         (fork / 'ci-fork.sh').write_text(
             "set -euo pipefail\nsource scripts/ci-observe.sh 'Anvil and offline forks'\npnpm test:fork --testTimeout=30000\n")
         (self.root / 'scripts/summarize-screenshot-diffs.py').write_text('')
+        # Isolate the pipeline's failure handling; the guard itself has its own
+        # repository/inventory tests. This double also exercises a guard refusal.
+        (self.root / 'scripts/agent_guard.py').write_text(
+            "import os, sys\n"
+            "with open(os.environ['FAKE_LOG'], 'a') as log: log.write('agent_guard ' + ' '.join(sys.argv[1:]) + '\\n')\n"
+            "if sys.argv[1] == 'verify-results':\n"
+            "    key = 'FAKE_GUARD_POSTGRES_RESULTS_STATUS' if 'postgres' in sys.argv else 'FAKE_GUARD_RESULTS_STATUS'\n"
+            "else: key = 'FAKE_GUARD_STATUS'\n"
+            "sys.exit(int(os.environ.get(key, '0')))\n")
         dist = self.root / 'packages/reference-linter/dist'
         dist.mkdir(parents=True)
         for name in ['index.js', 'index.d.ts']:
@@ -114,6 +123,41 @@ class CloudOrchestration(unittest.TestCase):
         self.assertNotIn('vitest run packages apps/reference-dapp/src', self.log.read_text())
         self.assertEqual(self.stages()['PostgreSQL']['outcome'], 'success')
 
+    def test_guard_failure_blocks_unit_stage_and_certification(self):
+        result = self.run_cloud(FAKE_GUARD_STATUS='6')
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(self.stages()['Unit and contract tests']['exit_code'], 6)
+        self.assertNotIn('apps/reference-dapp/src/server/workflow-visual-image.test.ts', self.log.read_text())
+        self.assertNotIn('vitest run packages apps/reference-dapp/src', self.log.read_text())
+        self.assertEqual(self.stages()['PostgreSQL']['outcome'], 'success')
+        self.assertIn('Certification ledger: FAIL', result.stdout)
+        self.assertNotIn('Cloud certification: PASS', result.stdout)
+
+    def test_required_regression_result_refusal_keeps_certification_failed(self):
+        result = self.run_cloud(FAKE_GUARD_RESULTS_STATUS='8')
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(self.stages()['Unit and contract tests']['exit_code'], 8)
+        calls = self.log.read_text()
+        self.assertIn('--reporter=default --reporter=json --outputFile=', calls)
+        self.assertIn('agent_guard verify-results ', calls)
+        self.assertNotIn('--filter @defi-workflow-engine/reference-linter', calls)
+        self.assertEqual(self.stages()['PostgreSQL']['outcome'], 'success')
+        self.assertIn('Certification ledger: FAIL', result.stdout)
+        self.assertNotIn('Cloud certification: PASS', result.stdout)
+
+    def test_postgres_result_refusal_blocks_ledger_without_changing_unit_result(self):
+        # The guard's skipped/missing-case detection is tested separately. This
+        # double proves that its refusal survives the PostgreSQL stage and fan-in.
+        result = self.run_cloud(FAKE_GUARD_POSTGRES_RESULTS_STATUS='10')
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(self.stages()['Unit and contract tests']['outcome'], 'success')
+        self.assertEqual(self.stages()['PostgreSQL']['exit_code'], 10)
+        calls = self.log.read_text()
+        self.assertIn('test:postgres --reporter=default --reporter=json --outputFile=', calls)
+        self.assertIn('agent_guard verify-results --stage postgres ', calls)
+        self.assertIn('Certification ledger: FAIL', result.stdout)
+        self.assertNotIn('Cloud certification: PASS', result.stdout)
+
     def test_missing_setup_still_reaches_ledger_and_cannot_pass(self):
         for path in self.metrics.glob('*.json'):
             if json.loads(path.read_text())['name'] == 'Production build':
@@ -145,7 +189,11 @@ class CloudOrchestration(unittest.TestCase):
         self.assertLess(certify.index("run_stage 'Guarded browser suites'"), certify.index("run_stage 'Unit and contract tests'"))
         self.assertIn('--maxWorkers=1', certify)
         self.assertIn('--maxWorkers=2', certify)
-        self.assertIn('pnpm test:postgres', certify)
+        self.assertIn('python3 scripts/agent_guard.py check', certify)
+        self.assertIn('--reporter=default --reporter=json --outputFile="$RUNNER_TEMP/flofi-agent-unit.json"', certify)
+        self.assertIn('python3 scripts/agent_guard.py verify-results "$RUNNER_TEMP/flofi-agent-unit.json"', certify)
+        self.assertIn('pnpm test:postgres --reporter=default --reporter=json --outputFile="$RUNNER_TEMP/flofi-agent-postgres.json"', certify)
+        self.assertIn('python3 scripts/agent_guard.py verify-results --stage postgres "$RUNNER_TEMP/flofi-agent-postgres.json"', certify)
         self.assertIn('python3 scripts/ci-observe.py verify', certify)
         config = (ROOT / 'cloudbuild.yaml').read_text()
         self.assertIn('machineType: E2_STANDARD_2', config)

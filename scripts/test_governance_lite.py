@@ -153,7 +153,9 @@ class GovernanceLite(unittest.TestCase):
             self.assertTrue(any("automated merge" in e for e in control_errors(files)))
 
     def test_ci_dependency_test_browser_and_evidence_gates_remain(self):
-        for command in ("pnpm typecheck", "pnpm lint", "pnpm build", "pnpm schemas:check", "pnpm test",
+        for command in ("pnpm typecheck", "pnpm lint", "pnpm build", "pnpm schemas:check", "python3 scripts/agent_guard.py check",
+                        'pnpm test --reporter=default --reporter=json --outputFile="$RUNNER_TEMP/flofi-agent-unit.json"',
+                        'python3 scripts/agent_guard.py verify-results "$RUNNER_TEMP/flofi-agent-unit.json"',
                         "pnpm install --frozen-lockfile --ignore-scripts", "pnpm audit --audit-level low",
                         "python3 scripts/bootstrap-ci.py --verify-dependencies",
                         "node scripts/guarded-release-browser.mjs critical",
