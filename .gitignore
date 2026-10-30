@@ -165,3 +165,9 @@ alchemy-key*
 
 # BUILD-CLOUD-001 Vercel install toolchain (verified at build time, never committed)
 .flofi-toolchain/
+
+# BUILD-FLOFI-CLAUDE-AGENTS-001 local Claude Code state: agent lifecycle ledger and user overrides (never tracked)
+/.claude/flofi-agent-runs/
+/.claude/settings.local.json
+/.claude/worktrees/
+/.claude/agent-memory-local/
