@@ -30,7 +30,10 @@ export function channelE2eEnv(env: Env = process.env) {
   if (!appSecret || !verifyToken || !channelSecret || !botToken || !webhookSecret || !dispatch) throw new Error('CHANNEL_E2E_SECRETS_MISSING');
   const pool = Array.from({ length: CHANNEL_E2E_USER_POOL }, (_, slot) => channelE2eUsers(slot, env));
   const digest = (value: string) => createHash('sha256').update(value).digest('hex');
-  return { FLOFI_WHATSAPP: 'enabled', FLOFI_WHATSAPP_PROVIDER: 'fixture', WHATSAPP_APP_SECRET: appSecret, WHATSAPP_WEBHOOK_VERIFY_TOKEN: verifyToken,
+  // Same network scope as the loopback Next server (`e2eNetworkScopeEnv`): in-process webhook helpers must share the handoff policy,
+  // or LINK recreates a public-mainnet refusal for the suite's Base Sepolia fixtures after an engineering-scoped first delivery.
+  const networkScope = env.FLOFI_NETWORK_SCOPE === '' ? '' : (env.FLOFI_NETWORK_SCOPE ?? 'ENGINEERING_TESTNETS');
+  return { FLOFI_NETWORK_SCOPE: networkScope, FLOFI_WHATSAPP: 'enabled', FLOFI_WHATSAPP_PROVIDER: 'fixture', WHATSAPP_APP_SECRET: appSecret, WHATSAPP_WEBHOOK_VERIFY_TOKEN: verifyToken,
     WHATSAPP_PHONE_NUMBER_ID: '106540352242922', WHATSAPP_BUSINESS_ACCOUNT_ID: '102290129340398', FLOFI_WHATSAPP_ALLOWED_SENDERS: pool.map(u => digest(u.whatsapp)).join(','),
     FLOFI_TELEGRAM: 'enabled', TELEGRAM_BOT_TOKEN: botToken, TELEGRAM_WEBHOOK_SECRET: webhookSecret, FLOFI_TELEGRAM_API_BASE: TELEGRAM_DOUBLE,
     FLOFI_TELEGRAM_ALLOWED_USERS: pool.map(u => digest(String(u.telegram))).join(','), FLOFI_CHANNEL_DISPATCH_TOKEN_SHA256: digest(dispatch),
