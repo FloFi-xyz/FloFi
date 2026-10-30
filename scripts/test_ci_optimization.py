@@ -671,7 +671,12 @@ class CiParity(unittest.TestCase):
     # Gates both CI systems run unconditionally (GitHub Actions in one job, CircleCI across the certification jobs).
     MANDATORY = ['python3 scripts/bootstrap-ci.py', 'pnpm install --frozen-lockfile --ignore-scripts', 'python3 scripts/bootstrap-ci.py --verify-dependencies',
                  'pnpm audit --audit-level low', 'pnpm typecheck', 'pnpm lint', 'pnpm exec eslint scripts/guarded-release-browser.mjs', 'pnpm build',
-                 'pnpm schemas:check', 'pnpm test', 'python3 scripts/summarize-screenshot-diffs.py --self-test', 'pnpm test:postgres',
+                 'pnpm schemas:check', 'python3 scripts/agent_guard.py check',
+                 'pnpm test --reporter=default --reporter=json --outputFile="$RUNNER_TEMP/flofi-agent-unit.json"',
+                 'python3 scripts/agent_guard.py verify-results "$RUNNER_TEMP/flofi-agent-unit.json"',
+                 'python3 scripts/summarize-screenshot-diffs.py --self-test',
+                 'pnpm test:postgres --reporter=default --reporter=json --outputFile="$RUNNER_TEMP/flofi-agent-postgres.json"',
+                 'python3 scripts/agent_guard.py verify-results --stage postgres "$RUNNER_TEMP/flofi-agent-postgres.json"',
                  'python3 scripts/bootstrap-anvil.py "$RUNNER_TEMP/gryloo-anvil/foundry-v1.8.3"', 'pnpm test:anvil', 'pnpm test:fork --testTimeout=30000',
                  'node apps/reference-dapp/e2e/fork/offline-rehearsal.mjs > "$RUNNER_TEMP/build-003f-f1.json"',
                  'python3 scripts/bootstrap-playwright.py "$BUILD002_BROWSER_CACHE"', 'node scripts/guarded-release-browser.mjs critical',
@@ -744,7 +749,9 @@ class CiParity(unittest.TestCase):
         def position(command):
             return next(index for index, (_, step) in enumerate(self.actions) if command in run_body(step, 10))
         self.assertLess(position('pnpm build'), position('node scripts/guarded-release-browser.mjs critical'))
-        for later in ['pnpm test', 'pnpm test:postgres', 'pnpm test:fork --testTimeout=30000', 'node scripts/guarded-release-browser.mjs extended']:
+        for later in ['pnpm test --reporter=default --reporter=json --outputFile="$RUNNER_TEMP/flofi-agent-unit.json"',
+                      'pnpm test:postgres --reporter=default --reporter=json --outputFile="$RUNNER_TEMP/flofi-agent-postgres.json"',
+                      'pnpm test:fork --testTimeout=30000', 'node scripts/guarded-release-browser.mjs extended']:
             self.assertLess(position('node scripts/guarded-release-browser.mjs critical'), position(later), later)
         browser = [lines for _, _, lines in self.jobs['certification-browser-1'] if any(line.startswith('node scripts/guarded-release-browser.mjs') for line in lines)]
         self.assertEqual([line for lines in browser for line in lines if line.startswith('node scripts/')],

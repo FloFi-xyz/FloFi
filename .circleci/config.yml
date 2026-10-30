@@ -203,7 +203,9 @@ jobs:
           command: |
             set -euo pipefail
             source scripts/ci-observe.sh 'Unit and contract tests'
-            pnpm test
+            python3 scripts/agent_guard.py check
+            pnpm test --reporter=default --reporter=json --outputFile="$RUNNER_TEMP/flofi-agent-unit.json"
+            python3 scripts/agent_guard.py verify-results "$RUNNER_TEMP/flofi-agent-unit.json"
             python3 scripts/summarize-screenshot-diffs.py --self-test
             test -f packages/reference-linter/dist/index.js
             test -f packages/reference-linter/dist/index.d.ts
@@ -214,7 +216,8 @@ jobs:
             set -euo pipefail
             source scripts/ci-observe.sh 'PostgreSQL'
             export TEST_DATABASE_URL="postgres://flofi@127.0.0.1:5432/postgres"
-            pnpm test:postgres
+            pnpm test:postgres --reporter=default --reporter=json --outputFile="$RUNNER_TEMP/flofi-agent-postgres.json"
+            python3 scripts/agent_guard.py verify-results --stage postgres "$RUNNER_TEMP/flofi-agent-postgres.json"
       - run:
           name: "Bootstrap exact approved anvil"
           command: |

@@ -7,10 +7,15 @@ import os
 from pathlib import Path, PurePosixPath
 import re
 import subprocess
+import tomllib
 
+from agent_guard import DOMAINS
 from governance_lite import secret_errors
 
 MANIFEST = 'cloudbuild-source-manifest.json'
+PROJECT_CODEX_CONFIG = '.codex/config.toml'
+PROJECT_CODEX_AGENTS = frozenset(f'.codex/agents/{domain}.toml' for domain in DOMAINS)
+PROJECT_CODEX_FILES = PROJECT_CODEX_AGENTS | {PROJECT_CODEX_CONFIG}
 
 
 def digest_files(files):
@@ -20,16 +25,33 @@ def digest_files(files):
 def inspect_file(root, relative):
     path = PurePosixPath(relative)
     if path.is_absolute() or '..' in path.parts or str(path) != relative or any(
-            part in {'.git', '.aws', '.codex', '.agents', '.vercel', 'node_modules', '.next', 'test-results'} for part in path.parts):
+            part in {'.git', '.aws', '.agents', '.vercel', 'node_modules', '.next', 'test-results'} for part in path.parts):
+        raise ValueError('Unsafe source path: ' + relative)
+    if '.codex' in path.parts and relative not in PROJECT_CODEX_FILES:
         raise ValueError('Unsafe source path: ' + relative)
     if path.name.startswith('.env') and path.name != '.env.example':
         raise ValueError('Environment file refused: ' + relative)
     if path.name in {'credentials.db', 'application_default_credentials.json', 'id_rsa', 'id_ed25519'}:
         raise ValueError('Credential file refused: ' + relative)
     target = root / relative
-    if target.is_symlink() or not target.is_file():
+    if target.is_symlink() or not target.is_file() or any((root / parent).is_symlink() for parent in path.parents):
         raise ValueError('Missing/nonregular source: ' + relative)
     data = target.read_bytes()
+    if relative in PROJECT_CODEX_FILES:
+        # Only repository engineering definitions may enter an upload. User
+        # config, credentials, MCP endpoints and local agent overrides stay out.
+        try:
+            definition = tomllib.loads(data.decode())
+        except (UnicodeDecodeError, tomllib.TOMLDecodeError):
+            raise ValueError('Invalid project Codex definition: ' + relative) from None
+        if relative == PROJECT_CODEX_CONFIG:
+            if definition != {'agents': {'max_concurrent_threads_per_session': 3}}:
+                raise ValueError('Only bounded project agent config is allowed: ' + relative)
+        elif (set(definition) != {'name', 'description', 'developer_instructions'}
+              or definition.get('name') != path.stem
+              or any(not isinstance(definition.get(key), str) or not definition[key].strip()
+                     for key in ('name', 'description', 'developer_instructions'))):
+            raise ValueError('Invalid project agent definition: ' + relative)
     if b'\0' not in data:
         try:
             errors = secret_errors(relative, data.decode())
