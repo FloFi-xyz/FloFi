@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, installPassiveWallet, assertPassiveWallet, sendChatCommand, openSimulationDetails, readWorkflowIr } from './fixtures';
 import type { Page } from '@playwright/test';
-import { openBuilder, reloadBuilder } from './build-entry-navigation';
+import { continueToBuilder, openBuilder, reloadBuilder } from './build-entry-navigation';
 
 test.beforeEach(async ({ page }) => { await installPassiveWallet(page); });
 test.afterEach(async ({ page }) => { await assertPassiveWallet(page); });
@@ -322,15 +322,18 @@ test('the first toolbar action waits for initialization and survives preference 
   try {
     await page.goto('/app', { waitUntil: 'commit' });
     await expect(shell).toHaveAttribute('inert', '');
-    await expect(page.getByLabel('Describe your flow')).toBeDisabled();
-    await expect(shell.locator('.chat-form button[type="submit"]')).toBeDisabled();
-    await expect(undock).toBeVisible();
-    await undock.focus();
-    await expect(undock).not.toBeFocused();
+    // BUILD0-UX-001: a fresh visit is server-rendered on Build 0; until initialization nothing there is actionable either.
+    const request = page.locator('#build-entry-request');
+    await expect(request).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Create strategy', exact: true })).toBeDisabled();
+    await request.focus();
+    await expect(request).not.toBeFocused();
   } finally { release(); }
   await page.waitForLoadState('load');
   await expect(shell).not.toHaveAttribute('inert', '');
+  await continueToBuilder(page);
   await expect(page.getByLabel('Describe your flow')).toBeEnabled();
+  await expect(undock).toBeVisible();
   await page.getByRole('button', { name: 'Undock toolbar' }).click();
   await expect(page.locator('.floating-toolbox')).toBeVisible();
   await reloadBuilder(page);
