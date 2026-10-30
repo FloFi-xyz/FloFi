@@ -51,3 +51,20 @@ it('MCP composes all 20 directed bridges with independent destination tokens and
     expect(result.output).toMatchObject({ workflowHash: canonical.ok ? canonical.workflowHash : '' });
   }
 });
+
+describe('BUILD-FLOFI-BRIDGE-LIVE-FIX-003: MCP composes native ETH as native ETH (never WETH), and WETH9 wraps', () => {
+  const nodeOf = (output: Record<string, unknown>) => (output.workflow as { nodes: { inputs: { name: string; value: Record<string, unknown> }[]; adapterConstraints: { protocols: string[] } }[] }).nodes[0]!;
+  it('a native-ETH swap on Base, its reverse on Arbitrum One, and an ETH → WETH wrap on Ethereum', async () => {
+    const client = session({ env: publicEnv, token: alice.token });
+    const native = await client.callTool('compose_strategy', { strategy: { action: 'swap', network: 'base', inputAsset: 'ETH', outputAsset: 'USDC', amount: '0.001', slippageBps: 100 } });
+    expect(native.isError).toBe(false);
+    expect(nodeOf(native.output).inputs.find(input => input.name === 'amount-in')!.value).toMatchObject({ asset: { chainId: 'eip155:8453', nativeId: 'ETH', decimals: 18 } });
+    expect(JSON.stringify(native.output)).not.toContain('0x4200000000000000000000000000000000000006');
+    const reverse = await client.callTool('compose_strategy', { strategy: { action: 'swap', network: 'arbitrum-one', inputAsset: 'USDC', outputAsset: 'ETH', amount: '5' } });
+    expect(reverse.isError).toBe(false);
+    expect(nodeOf(reverse.output).inputs.find(input => input.name === 'asset-out')!.value).toEqual({ chainId: 'eip155:42161', nativeId: 'ETH', decimals: 18 });
+    const wrap = await client.callTool('compose_strategy', { strategy: { action: 'swap', network: 'ethereum', inputAsset: 'ETH', outputAsset: 'WETH', amount: '0.01' } });
+    expect(wrap.isError).toBe(false);
+    expect(nodeOf(wrap.output).adapterConstraints.protocols).toEqual(['weth9']);
+  });
+});

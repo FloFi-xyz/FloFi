@@ -48,10 +48,13 @@ const erc20Only = (action: CryptoAction) => action === 'swap' || action === 'poo
 /** A token of a profile: a shortcut, or (catalog networks) any ERC-20 the current catalog resolves. */
 function profileHasToken(profile: CryptoPickerProfile, symbol: string | undefined, action: CryptoAction): boolean {
   if (!symbol) return false;
-  if (profile.tokens.includes(symbol)) return !profile.catalog || !erc20Only(action) || resolveNetworkAsset(profile.chain, { symbol })?.kind !== 'NATIVE';
+  // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: a catalog network's native ETH is a swap side of its own (a native swap or a WETH9 wrap/unwrap), never WETH.
+  const nativeSwap = (asset: ReturnType<typeof resolveNetworkAsset>) => action === 'swap' && asset?.kind === 'NATIVE' && asset.symbol === 'ETH';
+  if (profile.tokens.includes(symbol)) { const asset = profile.catalog ? resolveNetworkAsset(profile.chain, { symbol }) : null;
+    return !profile.catalog || !erc20Only(action) || asset?.kind !== 'NATIVE' || nativeSwap(asset); }
   if (!profile.catalog || !ASSET_SYMBOL.test(symbol)) return false;
   const asset = resolveNetworkAsset(profile.chain, { symbol });
-  return Boolean(asset && (!erc20Only(action) || asset.kind === 'ERC20'));
+  return Boolean(asset && (!erc20Only(action) || asset.kind === 'ERC20' || nativeSwap(asset)));
 }
 const pools: readonly CryptoPickerProfile[] = [
   // BUILD-BASE-001: any two Base catalog ERC-20s at a standard tier (the canonical, owner-executable position), replacing the fork-only pair.

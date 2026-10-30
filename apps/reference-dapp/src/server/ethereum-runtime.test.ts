@@ -6,7 +6,8 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ETHEREUM_MAINNET, ETHEREUM_MAINNET_TRANSFER, ETHEREUM_TOKEN_LIST, catalogAsset, parseEthereumTokenList, transferL1FeeOracle,
   UNISWAP_V3_ETHEREUM as UNI, type AssetCatalog } from '@defi-workflow-engine/action-registry';
-import { createCatalogSwapNode, createNativeTransferNode, createTokenTransferNode, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
+import { createCatalogSwapNode, createNativeTransferNode, createTokenTransferNode, type CatalogAssetRef, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
+import { decodeNativeSwap, fromHex } from '@defi-workflow-engine/reference-compiler';
 import { createFileExecutionStorage } from '@defi-workflow-engine/reference-executor';
 import { createPublicTestnetService, createDurablePublicTestnetService, reviewPublicRun, validatePublicRunLog } from './public-testnet-service';
 import { createRobinhoodTransferService } from './robinhood-transfer-service';
@@ -346,5 +347,33 @@ describe('Ethereum native and ERC20 transfers', () => {
     increased = true;
     await expect(s.begin(run.id, owner, w)).rejects.toThrow('TRANSFER_GAS_CHANGED_REVIEW_REQUIRED');
     expect((await s.load(run.id)).attempt).toBeNull();
+  });
+});
+
+describe('BUILD-FLOFI-BRIDGE-LIVE-FIX-003 native ETH on Ethereum (owner-bound Review; WETH9 Deposit/Withdrawal logs)', () => {
+  const ETH = { chain: chainId, address: null, decimals: 18, officialId: null } as const;
+  const ref = (symbol: string) => ({ chain: chainId, address: asset(symbol).address!, decimals: asset(symbol).decimals, officialId: null });
+  const nativeSwap = (input: CatalogAssetRef, output: CatalogAssetRef, amount: string, slippageBps = 50) =>
+    flow(createCatalogSwapNode('node-002', { chain: chainId, amount, slippageBps, input, output }));
+  async function execute(s: ReturnType<typeof swapService>, id: string) {
+    const begun = await s.begin(id, owner);
+    s.report(id, begun.attempt.attemptId, { kind: 'HASH', txHash: chain.apply(begun.tx) });
+    return { begun, run: await s.observe(id) };
+  }
+  it('E — native ETH → USDC with the deadline multicall and exact value, reconciled from the receipt', async () => {
+    const s = swapService(), run = await s.prepare(nativeSwap(ETH, ref('USDC'), '10000000000000000'), owner), id = run.quote.executionId;
+    expect(run.quote).toMatchObject({ native: 'INPUT', ownerReview: { step: 'swap', transaction: { value: '0x' + (10n ** 16n).toString(16) } } });
+    s.review(id, run.quote.manifestHash);
+    const { run: done } = await execute(s, id);
+    expect(done.outcome).toMatchObject({ inputSpent: '10000000000000000', outputReceived: run.quote.expectedOut });
+  });
+  it('F — USDC → native ETH after the exact approval; the router unwraps (WETH9 Withdrawal) for the owner', async () => {
+    const s = swapService(), first = await s.prepare(nativeSwap(ref('USDC'), ETH, '10000000'), owner), id = first.quote.executionId;
+    s.review(id, first.quote.manifestHash);
+    await execute(s, id);
+    const next = await s.refresh(id); s.review(id, next.quote.manifestHash);
+    const { begun, run: done } = await execute(s, id);
+    expect(decodeNativeSwap(fromHex(begun.tx.data), UNI.weth)).toMatchObject({ native: 'OUTPUT', recipient: owner });
+    expect(BigInt(done.outcome!.outputReceived)).toBeGreaterThanOrEqual(BigInt(next.quote.minimumOut));
   });
 });

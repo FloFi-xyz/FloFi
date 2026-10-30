@@ -233,6 +233,29 @@ export function compareRoutes(reviewedInput: CanonicalRoute, candidateInput: Can
   }
   return [...changes].sort();
 }
+/** BUILD-FLOFI-BRIDGE-LIVE-FIX-003: the provider-fee noise a revalidation tolerates — 1% of the reviewed route fee, at least one base unit. */
+export const PROVIDER_FEE_DRIFT_BPS = 100;
+export type ProviderFeeDrift = { readonly feeIncrease: string; readonly minimumDecrease: string; readonly tolerance: string; readonly withinTolerance: boolean };
+/**
+ * BUILD-FLOFI-BRIDGE-LIVE-FIX-003: a relayer-priced quote (Across: output = minimum, re-priced every few seconds) moves by a few base units
+ * between Review and Execute although nothing material changed. The executed bytes are still the reviewed bytes, so the owner's spend and
+ * guaranteed receipt are exactly the reviewed ones; only the fresh quote — evidence that the provider still offers the route — drifted. This
+ * is that drift, and whether it stays within `PROVIDER_FEE_DRIFT_BPS` of the reviewed fee. Callers accept it only when it is the sole change.
+ */
+export function providerFeeDrift(reviewedInput: CanonicalRoute, candidateInput: CanonicalRoute): ProviderFeeDrift {
+  const a = canonicalizeRoute(reviewedInput), b = canonicalizeRoute(candidateInput);
+  const positive = (value: bigint) => value > 0n ? value : 0n;
+  const feeIncrease = positive(BigInt(b.feeTotal) - BigInt(a.feeTotal)), minimumDecrease = positive(BigInt(a.minimumOutput) - BigInt(b.minimumOutput));
+  const share = BigInt(a.feeTotal) * BigInt(PROVIDER_FEE_DRIFT_BPS) / 10_000n, tolerance = share > 1n ? share : 1n;
+  return { feeIncrease: feeIncrease.toString(), minimumDecrease: minimumDecrease.toString(), tolerance: tolerance.toString(),
+    withinTolerance: feeIncrease <= tolerance && minimumDecrease <= tolerance };
+}
+/** The changes of a REQUOTE comparison that remain once a tolerated provider-fee drift is set aside (empty: the reviewed route still stands). */
+export function materialRouteChanges(reviewed: CanonicalRoute, candidate: CanonicalRoute): readonly RouteChange[] {
+  const changes = compareRoutes(reviewed, candidate, 'REQUOTE');
+  const drift = changes.filter(change => change === 'FEES_OUT_OF_BOUNDS' || change === 'MINIMUM_OUTPUT_DECREASED');
+  return drift.length && drift.length === changes.length && providerFeeDrift(reviewed, candidate).withinTolerance ? [] : changes;
+}
 
 // ---------------------------------------------------------------------------------------------------------------
 // Cross-chain lifecycle

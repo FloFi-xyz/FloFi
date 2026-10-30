@@ -5,7 +5,7 @@ import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts'
 import { catalogSwapAvailability, publicAvailability, publicBegin, publicObserve, publicPrepare, publicRefresh, publicReport, publicReview, publicStatus } from '../app/public-testnet-action';
 import { CATALOG_NETWORK_IDENTITIES } from '../domain/network-registry';
 import type { PublicRun } from '../server/public-testnet-service';
-import { ownerBoundSwapReview, swapProfile } from '../domain/public-testnet-swap';
+import { swapWalletRequestMatches, ownerBoundSwapReview, swapProfile } from '../domain/public-testnet-swap';
 import { injected, useBuild009Wallet } from './build009-wallet-store';
 import { useWorkflow } from './workflow-store';
 import { watchWalletResponse } from './wallet-request-lifecycle';
@@ -193,9 +193,8 @@ export function PublicTestnetProvider({ children }: { children: ReactNode }) {
     const acceptCurrent = (value: PublicRun) => setRun(current => current?.quote.executionId === run.quote.executionId ? value : current);
     const clearSigning = () => setSigningAttempt(current => current === attempt.attemptId ? null : current);
     setRun(unwrap(await publicStatus(run.quote.executionId)));
-    if (tx.chainId !== profile.chainHex || tx.from !== session.account || tx.value !== '0x0' ||
-        tx.to !== (attempt.step === 'approval' ? run.quote.inputToken : profile.router) ||
-        await calldataDigest(tx.data) !== attempt.calldataDigest) {
+    // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: the wallet request carries exactly the reviewed native value to the reviewed target (see swapWalletRequestMatches).
+    if (!swapWalletRequestMatches(run.quote, attempt.step, tx, profile, session.account) || await calldataDigest(tx.data) !== attempt.calldataDigest) {
       unwrap(await publicReport(run.quote.executionId, attempt.attemptId, { kind: 'UNKNOWN' }));
       throw new Error('TRANSACTION_ARTIFACT_CHANGED');
     }

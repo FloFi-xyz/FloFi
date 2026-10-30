@@ -40,7 +40,7 @@ test('Build CTA floats inside the wider canvas without colliding with existing c
       }
       if (width > 800) {
         expect(await page.locator('main').evaluate(element => getComputedStyle(element).paddingLeft)).toBe('20px');
-        const assistantBox = (await page.getByRole('complementary', { name: 'Workflow assistant' }).boundingBox())!;
+        const assistantBox = (await page.getByRole('complementary', { name: 'FloFi Assistant' }).boundingBox())!;
         expect(assistantBox.width).toBe(340);
         expect(assistantBox.x).toBeGreaterThanOrEqual((await canvas.boundingBox())!.x + (await canvas.boundingBox())!.width);
       }

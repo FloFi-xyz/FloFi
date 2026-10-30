@@ -139,10 +139,24 @@ export function parseLocalCommand(text: string, workflow: Workflow, context: Rev
   // BUILD-BASE-001: the same sentences on every catalog network (Base: pinned USDC/WETH and the validated token list); a symbol takes the
   // catalog's own spelling (cbbtc → cbBTC). Base's USDC ⇄ WETH swap keeps its BUILD-002 sentence and command (handled below).
   const SYMBOL = assetReference;
-  // BUILD-FLOFI-CHAT-E2E-FIX-002: ETH and WETH are different assets. An EVM swap of native ETH is refused (no native swap or wrap/unwrap step
-  // exists yet); it is never authored as a WETH swap.
+  // BUILD-FLOFI-CHAT-E2E-FIX-002 / BUILD-FLOFI-BRIDGE-LIVE-FIX-003: ETH and WETH are different assets. Native ETH swaps on a catalog network (Base,
+  // Arbitrum One, Ethereum, Robinhood Chain) are their own catalog swaps below; elsewhere a native-ETH swap is refused, never authored as WETH.
   const nativeSwap = /^swap [0-9]+(?:\.[0-9]+)? (\S+) (?:for|to) (\S+) on (.+?)(?: (?:with )?slippage [0-9]+ bps)?$/i.exec(input);
-  if (nativeSwap && [nativeSwap[1], nativeSwap[2]].some(asset => /^eth$/i.test(asset!)) && !/solana/i.test(nativeSwap[3]!)) throw new Error('SWAP_NATIVE_ASSET_UNSUPPORTED');
+  if (nativeSwap && [nativeSwap[1], nativeSwap[2]].some(asset => /^eth$/i.test(asset!)) && !/solana/i.test(nativeSwap[3]!) && !catalogNetworkOfChatName(nativeSwap[3]!))
+    throw new Error('SWAP_NATIVE_ASSET_UNSUPPORTED');
+  // "wrap 0.01 ETH [to WETH] on Base" / "unwrap 0.01 WETH [to ETH] on Ethereum": a 1:1 WETH9 conversion of the network's own WETH9 (no slippage).
+  const wrap = new RegExp(`^(wrap|unwrap) ([0-9]+(?:\\.[0-9]+)?) (ETH|WETH)(?: (?:to|into|for) (ETH|WETH))?(?: on (${CATALOG_CHAT_NETWORKS}))?$`, 'i').exec(input);
+  if (wrap) {
+    const unwrapping = /^unwrap$/i.test(wrap[1]!), from = unwrapping ? 'WETH' : 'ETH', to = unwrapping ? 'ETH' : 'WETH';
+    if (wrap[3]!.toUpperCase() !== from || (wrap[4] && wrap[4].toUpperCase() !== to)) throw new Error('INVALID_ASSET_PAIR');
+    const network = wrap[5] ? catalogNetworkOfChatName(wrap[5]) : null;
+    if (!network) throw new Error('WRAP_NETWORK_REQUIRED');
+    const fields: CryptoActionInput = { selection: { action: 'swap', network: network.name, from, to }, amount: wrap[2]!, slippage: DEFAULT_SLIPPAGE };
+    createCryptoActionNode('node-preview', fields);
+    return { type: 'ADD_CRYPTO_ACTION', input: fields, source: 'CHAT', baseRevision: workflow.revision };
+  }
+  // A swap without an amount is asked for, never guessed ("swap ETH to USDC on Ethereum").
+  if (new RegExp(`^swap (?![0-9])${SYMBOL} (?:for|to) ${SYMBOL} on (${CATALOG_CHAT_NETWORKS})(?: (?:with )?slippage ([0-9]+) bps)?$`, 'i').test(input)) throw new Error('SWAP_AMOUNT_REQUIRED');
   const catalogSwap = new RegExp(`^swap ([0-9]+(?:\\.[0-9]+)?) ${SYMBOL} (?:for|to) ${SYMBOL} on (${CATALOG_CHAT_NETWORKS})(?: (?:with )?slippage ([0-9]+) bps)?$`, 'i').exec(input);
   const swapNetwork = catalogSwap ? catalogNetworkOfChatName(catalogSwap[4]!) : null;
   const symbolOn = (chain: string, text: string) => authoringAssetSymbol(chain, text);

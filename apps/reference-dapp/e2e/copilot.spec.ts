@@ -29,7 +29,7 @@ test.beforeEach(async () => { await resetSupplyHarness(); });
 test('natural language → validated command committed at once → canonical workflow → Simulate and Review, with no wallet send', async ({ page }) => {
   await installSupplyWallet(page);
   await page.goto('/app');
-  await expect(conversation(page)).toContainText('Flofi Copilot ready in replay mode (recorded answers, no AI model)');
+  await expect(conversation(page)).toContainText('Replay mode: recorded answers, no AI model.');
   await expect(page.getByLabel('Describe your flow')).toBeVisible();
   await ask(page, 'Put 1 USDC into Aave on Base Sepolia');
   await expect(copilotSays(page)).toContainText('Supply added to your workflow: 1 USDC · Base Sepolia · Aave V3.');
@@ -62,11 +62,15 @@ test('Portuguese and mainnet requests are committed with explicit notes, and the
   await revision(page, 1); await expect(cards(page)).toHaveCount(1);
   await undo(page, 'Desfazer esta alteração');
   await expect(cards(page)).toHaveCount(0);
-  // BUILD-FLOFI-CHAT-E2E-FIX-002: native ETH is a different asset than WETH; a native-ETH swap is refused, never authored as WETH.
+  // BUILD-FLOFI-CHAT-E2E-FIX-002 / BUILD-FLOFI-BRIDGE-LIVE-FIX-003: native ETH is a different asset than WETH. On Base it is now a native-ETH swap
+  // of its own (the exact chat grammar, FloFi's own message), never authored as WETH; the chat's Undo reverts it.
   await ask(page, 'Swap 100 USDC to ETH on Base');
-  // The refusal is deterministic (the chat grammar refuses before any interpretation), so it is FloFi's own message, not the model's.
-  await expect(page.getByRole('log', { name: 'Conversation' }).locator('.message').last()).toContainText('Native ETH swaps are not available in FloFi yet');
-  await revision(page, 2); await expect(cards(page)).toHaveCount(0);
+  await expect(page.getByRole('log', { name: 'Conversation' }).locator('.message').last()).toContainText('Swap added to your workflow: 100 USDC · USDC → ETH');
+  await revision(page, 3); await expect(cards(page)).toHaveCount(1);
+  // An exact command is FloFi's own message (not the model's): its Undo is on that message.
+  await page.getByRole('log', { name: 'Conversation' }).locator('.message').last().getByRole('button', { name: 'Undo this change', exact: true }).click();
+  await expect(conversation(page).locator('.message').last()).toContainText('Undone.');
+  await revision(page, 4); await expect(cards(page)).toHaveCount(0);
   await ask(page, 'Swap 100 USDC to WETH on Base');
   await expect(copilotSays(page)).toContainText('Swap added to your workflow: 100 USDC');
   await expect(copilotSays(page)).toContainText('Interpreted as “swap 100 USDC to WETH on Base slippage 100 bps”');
@@ -75,7 +79,7 @@ test('Portuguese and mainnet requests are committed with explicit notes, and the
   await expect(proposal(page)).toHaveCount(0);
   await undo(page);
   await expect(cards(page)).toHaveCount(0);
-  await revision(page, 4);
+  await revision(page, 6);
 });
 
 test('clarification with a guided option and a deterministic follow-up', async ({ page }) => {

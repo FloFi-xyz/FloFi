@@ -91,7 +91,7 @@ test('Swap → Swap funded by the first: each step simulated, confirmed, signed 
   await expect(review.locator('[data-sequence-state]')).toHaveCount(2);
   await expect(review.locator('[data-sequence-state="CURRENT"]')).toContainText('1. Swap');
   await expect(review.locator('[data-sequence-state="NEXT"]')).toContainText('Funded by step 1: spends the smaller of 0.001 WETH and what step 1 actually delivers');
-  await expect(review).toContainText('Quoted output'); await expect(review).toContainText('Minimum received'); await expect(review).toContainText('Estimated total cost');
+  await expect(review).toContainText('Quoted output'); await expect(review).toContainText('Minimum receipt'); await expect(review).toContainText('Total additional payable costs');
   await expect(review).toContainText('Excludes:'); await expect(review).toContainText('Step 2 (simulated after the steps before it)');
   await expect(review).toContainText('This workflow runs as 2 separate wallet transactions');
   await expect(stage(page, 'Build')).toHaveAttribute('aria-current', 'page');
@@ -171,7 +171,7 @@ test('too little balance and a missing provider quote are explained exactly; not
   await say(page, 'Review workflow');
   await expect(flofi(page)).toContainText('Here is the review of step 1 of 2.', { timeout: 30_000 });
   await pick(page, 'Yes, I confirm'); await pick(page, 'Yes, execute');
-  await expect(chat(page)).toContainText('The wallet request could not start, and nothing was sent. The status below shows the recorded state. Your available balance is too low for this workflow.', { timeout: 30_000 });
+  await expect(chat(page)).toContainText('The wallet request could not start, and nothing was sent. Your available balance is too low for this workflow.', { timeout: 30_000 });
   await page.waitForTimeout(500);
   expect(owner.requested()).toBe(0); expect(await owner.sends()).toBe(0);
   await expect(chat(page)).not.toContainText('completed and reconciled');

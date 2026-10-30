@@ -18,6 +18,7 @@
  * Only a whole sequence of steps each runtime can serve on its own is a sequence. A workflow one of FloFi's composition runtimes serves as a
  * whole (Supply → Borrow → Swap, the Solana Swap → Orca position, the engineering graphs, anything with resource edges) keeps its existing path.
  */
+import { NATIVE_ETH } from './public-testnet-swap';
 import type { ReviewContext } from '@defi-workflow-engine/reference-linter';
 import { formatAssetAmount } from '@defi-workflow-engine/action-registry';
 import { isBoundComposition } from '@defi-workflow-engine/action-registry';
@@ -149,7 +150,8 @@ export function deliveredByRecord(kind: string, record: unknown, output: Sequenc
     (output.address === null ? address === null || address === undefined : typeof address === 'string' && (output.chainId.startsWith('eip155:') ? address.toLowerCase() : address) === output.address);
   if (kind === 'public' && isObject(record.quote) && isObject(record.outcome)) {
     const quote = record.quote, units = record.outcome.outputReceived;
-    return same(`eip155:${String(quote.chainId)}`, quote.outputToken) && typeof units === 'string' && UNITS.test(units) ? units : null;
+    // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: a native-ETH output (EIP-7528 marker) is the native asset — never WETH9 — and funds only a native-ETH input.
+    return same(`eip155:${String(quote.chainId)}`, quote.outputToken === NATIVE_ETH ? null : quote.outputToken) && typeof units === 'string' && UNITS.test(units) ? units : null;
   }
   if (kind === 'universal' && record.verdict === 'RECONCILED' && isObject(record.review) && isObject(record.review.route)) {
     const token = record.review.route.outputToken, units = record.received;

@@ -47,7 +47,7 @@ function reviewed(): Pick<ConversationBridge, 'source' | 'authorization'> {
   return { source: { kind: 'public', state: { busy: false, error: null, retired: false, recoveryOnly: false, available: true, run: { workflow, quote, attempts: [], outcome: null, reviewedManifestHash: null } } } as unknown as SimulationSource,
     authorization: { ...fixture.authorization, key: `review-${workflow.revision}`, manifest, policy } };
 }
-let bridge: ConversationBridge, controls: { authorize: ReturnType<typeof vi.fn>; request: ReturnType<typeof vi.fn>; checkStatus: ReturnType<typeof vi.fn>; authorizing?: boolean };
+let bridge: ConversationBridge, controls: { authorize: ReturnType<typeof vi.fn>; request: ReturnType<typeof vi.fn>; checkStatus: ReturnType<typeof vi.fn>; authorizing?: boolean; startIssue?: string | null };
 function lifecycle(patch: Partial<ConversationBridge> = {}) {
   const base = { workflow: editor.workflow, context, source: { kind: 'public', state: { busy: false, error: null, retired: false, recoveryOnly: false, available: true, run: null } } as unknown as SimulationSource,
     authorization: { ...fixture.authorization, key: null, manifest: null, policy: null }, wallet: fixture.wallet, progress: null, invalidWorkflow: false, ...patch };
@@ -74,7 +74,7 @@ beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(reviewNow);
   editor = initialEditor(); past = []; f.propose = []; f.respond = null; direct = true; reviewedPatch = {};
   // Like the real controls, authorizing starts at the click (a start that never becomes active is reported by the chat).
-  controls = { authorize: vi.fn(() => { controls.authorizing = true; }), request: vi.fn(), checkStatus: vi.fn() };
+  controls = { authorize: vi.fn(() => { controls.authorizing = true; return { started: true, issue: null }; }), request: vi.fn(), checkStatus: vi.fn() };
   harness.slots = []; store(); lifecycle(); simulate.mockClear();
 });
 afterEach(() => { harness.unmount(); vi.useRealTimers(); setActiveNetworkScope(null); });
@@ -107,7 +107,7 @@ describe('BUILD-FLOFI-CONVERSATIONAL-001 conversational workflow', () => {
     expect(controls.authorize).not.toHaveBeenCalled();
     chat = await say('Yes, execute');
     expect(controls.authorize).toHaveBeenCalledTimes(1);
-    expect(last(chat).text).toMatch(/Confirm or reject it in your wallet; FloFi never signs for you/);
+    expect(last(chat).text).toMatch(/^Preparing your reviewed wallet request: FloFi re-checks the quote, your wallet and its network first. Then confirm or reject it in your wallet; FloFi never signs for you/);
     expect(controls.request).not.toHaveBeenCalled();
   });
   it('an unclear or negative answer changes nothing; a changed workflow, wallet or expired quote retires the confirmation', async () => {
@@ -169,9 +169,10 @@ describe('BUILD-FLOFI-CONVERSATIONAL-001 conversational workflow', () => {
     expect(last(chat).role).toBe('ai');
     expect(last(chat).text).toMatch(/^Swap added to your workflow: 3 USDC/);
     expect(last(chat).notes).toEqual(['Interpreted as “swap 3 USDC to WETH on Base Sepolia slippage 100 bps”.', 'Flofi swaps the ERC-20 WETH (wrapped ETH), not native ETH.']);
-    // BUILD-FLOFI-CHAT-E2E-FIX-002: native ETH named in a swap is refused deterministically, whatever an interpretation would say; nothing is committed.
+    // BUILD-FLOFI-CHAT-E2E-FIX-002: native ETH named in a swap where no native path exists (a test network) is refused deterministically,
+    // whatever an interpretation would say; nothing is committed. (BUILD-FLOFI-BRIDGE-LIVE-FIX-003: catalog mainnets have native ETH swaps.)
     const native = await say('swap 3 USDC to ETH on Base Sepolia slippage 100 bps');
-    expect(last(native).text).toMatch(/^Native ETH swaps are not available in FloFi yet/); expect(editor.workflow.revision).toBe(1);
+    expect(last(native).text).toMatch(/^On this network FloFi has no native ETH swap/); expect(editor.workflow.revision).toBe(1);
   });
   it('in an approval context the chat keeps its proposal behaviour and has no lifecycle controls', async () => {
     direct = false;
@@ -313,12 +314,82 @@ describe('BUILD-FLOFI-CHAT-E2E-FIX-002 a wallet request that cannot start', () =
     await say('Yes, I confirm');
     let chat = await say('Yes, execute');
     expect(controls.authorize).toHaveBeenCalledTimes(1);
-    expect(last(chat).text).toMatch(/Confirm or reject it in your wallet/);
+    expect(last(chat).text).toMatch(/confirm or reject it in your wallet/);
     // The runtime refuses the request (its own error) and the controls settle: no run exists, so nothing was sent.
     controls.authorizing = false;
     reviewedPatch = { ...reviewedPatch, source: { ...reviewedPatch.source!, state: { ...reviewedPatch.source!.state, error: 'Insufficient test token balance.' } } as SimulationSource };
     lifecycle(reviewedPatch); render(); await flush(); chat = render();
-    expect(last(chat).text).toBe('The wallet request could not start, and nothing was sent. The status below shows the recorded state. Your available balance is too low for this workflow.');
+    expect(last(chat).text).toBe('The wallet request could not start, and nothing was sent. Your available balance is too low for this workflow.');
     expect(last(chat).options).toEqual(['Review workflow']);
+  });
+});
+
+/** The reviewed record with the provider's quote moved (as a fresh quote after a refused start returns it). */
+function requoted(expectedOut: string, minimumOut: string): Partial<ConversationBridge> {
+  const base = reviewed(), run = (base.source.state as { run: { quote: Record<string, unknown> } }).run;
+  return { ...base, source: { ...base.source, state: { ...base.source.state, run: { ...run, quote: { ...run.quote, expectedOut, minimumOut } } } } as unknown as SimulationSource,
+    authorization: { ...base.authorization, key: `${base.authorization.key}:requoted` } };
+}
+describe('BUILD-FLOFI-BRIDGE-LIVE-FIX-003 the live Bridge start failure and its recovery in chat', () => {
+  async function confirmedAndExecuting() {
+    await say('swap 10 USDC to WETH on Base Sepolia slippage 100 bps');
+    await say('Review workflow');
+    reviewedPatch = reviewed(); lifecycle(reviewedPatch); render();
+    await say('Yes, I confirm');
+    return say('Yes, execute');
+  }
+  it('a quote the execution boundary found changed is re-quoted at once; the fresh Review names every change and needs its own confirmation (nothing resent)', async () => {
+    // Production: begin re-quoted Across, found the route fee 1–3 base units higher (ROUTE_CHANGED), deauthorized the run and sent nothing;
+    // the chat then said only "could not start" with the generic simulation text, and every later "Review workflow" re-showed the dead Review.
+    await confirmedAndExecuting();
+    let chat: FlofiConversation;
+    expect(controls.authorize).toHaveBeenCalledTimes(1);
+    simulate.mockClear();
+    controls.authorizing = false;
+    reviewedPatch = { ...reviewedPatch, source: { ...reviewedPatch.source!, state: { ...reviewedPatch.source!.state, error: 'ROUTE_CHANGED' } } as SimulationSource };
+    lifecycle(reviewedPatch); render(); await flush(); chat = render();
+    const said = chat.messages.slice(-2).map(message => message.text);
+    expect(said[0]).toBe('Nothing was sent. The provider quote or the on-chain state changed after your Review, so nothing was sent. Get a fresh quote and review it again. '
+      + 'I am getting a fresh quote now; you review and confirm it again before anything is signed.');
+    expect(said[1]).toMatch(/Simulating your workflow/);
+    expect(simulate).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(chat.messages)).not.toMatch(/FloFi could not complete this simulation/);
+    // The fresh quote lands: the chat lists exactly what changed and asks to confirm the updated workflow — never reusing the old confirmation.
+    reviewedPatch = requoted('24990000000000000', '24865050000000000'); lifecycle(reviewedPatch); render(); await flush(); chat = render();
+    expect(last(chat).notes).toEqual(['The quote changed since your last Review: Expected receipt 0.025 WETH → 0.02499 WETH; Minimum receipt 0.024875 WETH → 0.02486505 WETH.']);
+    expect(last(chat).question).toBe('Do you confirm the updated workflow?');
+    expect(controls.authorize).toHaveBeenCalledTimes(1);
+    chat = await say('Yes, I confirm');
+    expect(last(chat).question).toBe('Would you like to execute this workflow now?');
+    await say('Yes, execute');
+    expect(controls.authorize).toHaveBeenCalledTimes(2);
+  });
+  it('a start the controls refuse at once never says it is preparing a wallet request, and says why', async () => {
+    controls.authorize = vi.fn(() => ({ started: false, issue: 'Execution is unavailable for this route.' }));
+    const chat = await confirmedAndExecuting();
+    expect(last(chat).text).toBe('Nothing was sent and no wallet request was opened. Execution is unavailable for this route.');
+    expect(JSON.stringify(chat.messages)).not.toMatch(/Preparing your reviewed wallet request/);
+    expect(last(chat).options).toEqual(['Review workflow']);
+  });
+  it('an accepted Review that cannot start reports the projected reason instead of a bare failure', async () => {
+    await confirmedAndExecuting();
+    controls.authorizing = false; controls.startIssue = 'Execution is unavailable for this route.';
+    lifecycle(reviewedPatch); render(); await flush(); const chat = render();
+    expect(last(chat).text).toBe('The wallet request could not start, and nothing was sent. Execution is unavailable for this route.');
+  });
+  it('"Refresh quote" re-simulates even an approvable Review; "try another route" says FloFi never switches providers by itself', async () => {
+    await say('swap 10 USDC to WETH on Base Sepolia slippage 100 bps');
+    await say('Review workflow');
+    reviewedPatch = reviewed(); lifecycle(reviewedPatch); render(); await flush();
+    simulate.mockClear();
+    let chat = await say('Refresh quote');
+    expect(simulate).toHaveBeenCalledTimes(1);
+    expect(last(chat).text).toBe('Getting a fresh quote and simulation. Nothing is signed or sent.');
+    reviewedPatch = requoted('25000000000000000', '24875000000000000'); lifecycle(reviewedPatch); render(); await flush(); chat = render();
+    expect(last(chat).notes).toEqual(['The fresh quote has the same amounts as your last Review.']);
+    simulate.mockClear();
+    chat = await say('try another route');
+    expect(chat.messages.some(message => /never switches providers by itself/.test(message.text))).toBe(true);
+    expect(simulate).toHaveBeenCalledTimes(1);
   });
 });

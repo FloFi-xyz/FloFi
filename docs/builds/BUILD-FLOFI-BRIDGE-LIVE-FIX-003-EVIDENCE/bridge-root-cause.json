@@ -1,0 +1,39 @@
+{
+  "build": "BUILD-FLOFI-BRIDGE-LIVE-FIX-003",
+  "kind": "bridge-live-failure-root-cause",
+  "evidence": "PUBLIC_READ_ONLY",
+  "productionApiRuntimeLogs": {
+    "source": "Railway flofi-api runtime logs (read-only CLI), deployment c8d39f69 (main 9e71c100); web flofi.xyz on 84ed0d0",
+    "flow": "crosschain-router-arbitrum-to-base",
+    "run": "xroute-26e5abba77fe08b01f14531d65fa9d2a",
+    "timeline": [
+      { "at": "2026-10-29T17:30:18.605Z", "action": "info", "outcome": "ok" },
+      { "at": "2026-10-29T17:30:43.627Z", "action": "simulate", "outcome": "ok", "durationMs": 9151 },
+      { "at": "2026-10-29T17:31:03.875Z", "action": "review", "outcome": "ok", "durationMs": 285 },
+      { "at": "2026-10-29T17:31:11.165Z", "action": "begin", "outcome": "ok (typed refusal)", "durationMs": 6960 },
+      { "at": "2026-10-29T17:31:11.626Z", "action": "status", "outcome": "ok", "durationMs": 24 },
+      { "at": "2026-10-29T17:36:33.773Z", "action": "simulate", "outcome": "ok", "durationMs": 10529, "note": "a new run; no review/begin followed" }
+    ],
+    "absent": ["handoff", "walletFailure", "report"],
+    "reading": "begin re-quoted the provider and refused with a ROUTE_CHANGED-family code (the client called status only after such a refusal and never reached handoff); no wallet request was opened and nothing was sent."
+  },
+  "acrossQuoteDrift": {
+    "source": "https://app.across.to/api/swap/approval (read-only GET, synthetic depositor 0x1111…1111), 0.5 USDC Arbitrum One → Base, slippage 0.01",
+    "samples": [
+      { "at": "2026-10-29T18:14:39.837Z", "expected": "495928", "minimum": "495928", "feeTotal": "4101" },
+      { "at": "2026-10-29T18:14:48.196Z", "expected": "495928", "minimum": "495928", "feeTotal": "4101" },
+      { "at": "2026-10-29T18:14:56.658Z", "expected": "495931", "minimum": "495931", "feeTotal": "4102" },
+      { "at": "2026-10-29T18:15:04.972Z", "expected": "495931", "minimum": "495931", "feeTotal": "4102" },
+      { "at": "2026-10-29T18:15:13.339Z", "expected": "495930", "minimum": "495930", "feeTotal": "4102" },
+      { "at": "2026-10-29T18:15:21.772Z", "expected": "495931", "minimum": "495931", "feeTotal": "4102" }
+    ],
+    "reading": "Across output equals its minimum and re-prices by 1–3 base units every few seconds; the pre-fix REQUOTE comparison refused any fee increase or minimum decrease."
+  },
+  "wethEventDialects": {
+    "source": "eth_getLogs on each network's WETH (read-only), 2026-10-29",
+    "base": { "blocks": 100, "Deposit": 212, "Withdrawal": 333, "TransferMint": 0, "TransferBurn": 0 },
+    "ethereum": { "blocks": 30, "Deposit": 209, "Withdrawal": 198, "TransferMint": 0, "TransferBurn": 0 },
+    "arbitrum-one": { "blocks": 2000, "Deposit": 0, "Withdrawal": 0, "TransferMint": 130, "TransferBurn": 140 },
+    "robinhood": { "blocks": 3000, "Deposit": 0, "Withdrawal": 0, "TransferMint": 1058, "TransferBurn": 1518 }
+  }
+}

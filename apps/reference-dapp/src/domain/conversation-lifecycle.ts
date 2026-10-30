@@ -108,6 +108,12 @@ const NEXT_REVIEW = pattern(['review', 'review workflow', 'review my workflow', 
   'review it', 'simulate', 'simulate workflow', 'simulate my workflow', 'simulate the workflow', 'run simulation', 'revisar', 'revisar workflow', 'revisar o workflow',
   'revisar meu workflow', 'revisar fluxo', 'revisar o fluxo', 'revisar meu fluxo', 'revise', 'revise o workflow', 'revise meu workflow', 'vamos revisar', 'simular',
   'simular workflow', 'simular o workflow', 'simular meu workflow', 'simular fluxo', 'simular meu fluxo']);
+// BUILD-FLOFI-BRIDGE-LIVE-FIX-003: recovery after a refused start or an expired/changed quote is a fresh simulation, asked for in chat.
+const REFRESH_REQUEST = pattern(['simulate again', 'simulate it again', 'retry simulation', 'try again', 'refresh quote', 'refresh the quote', 'get a new quote',
+  'get a fresh quote', 'new quote', 'requote', 'simular novamente', 'simular de novo', 'tentar novamente', 'tentar de novo', 'atualizar cotação', 'atualizar cotacao',
+  'atualizar a cotação', 'atualizar a cotacao', 'nova cotação', 'nova cotacao']);
+const ANOTHER_ROUTE = pattern(['try another route', 'try a different route', 'another route', 'different route', 'find another route', 'use another route',
+  'tentar outra rota', 'outra rota', 'buscar outra rota', 'usar outra rota']);
 const NEXT_ADD = pattern(['add another action', 'add another', 'add action', 'add more', 'another action', 'adicionar outra ação', 'adicionar outra acao',
   'adicionar ação', 'adicionar acao', 'outra ação', 'outra acao', 'adicionar mais']);
 const EXECUTE_REQUEST = pattern(['execute', 'execute workflow', 'execute my workflow', 'execute the workflow', 'execute this workflow', 'run my workflow', 'run the workflow',
@@ -116,7 +122,7 @@ const STATUS_REQUEST = pattern(['status', 'check status', 'execution status', 'w
   'verificar status', 'ver status', 'status da execução', 'status da execucao', 'verificar execução', 'verificar execucao', 'atualizar status']);
 const UNDO_REQUEST = pattern(['undo', 'undo that', 'undo this change', 'undo last change', 'desfazer', 'desfaz', 'desfazer isso', 'desfazer esta alteração', 'desfazer esta alteracao',
   'desfazer última alteração', 'desfazer ultima alteracao']);
-const PT_LIFECYCLE = /\b(?:sim|não|nao|confirmo|confirmar|executar|executa|revisar|revise|simular|adicionar|outra|cancelar|verificar|desfazer|continuar|agora|fluxo|aplicar|aplica|descartar|descarta)\b/;
+const PT_LIFECYCLE = /\b(?:sim|não|nao|confirmo|confirmar|executar|executa|revisar|revise|simular|adicionar|outra|cancelar|verificar|desfazer|continuar|agora|fluxo|aplicar|aplica|descartar|descarta|novamente|cotação|cotacao|rota|tentar)\b/;
 
 /** An explicit answer to FloFi's open question. Anything else — extra content, an edit, a hedge — is UNCLEAR and changes nothing. */
 export function classifyAnswer(text: string, question: PendingQuestion['kind']): Answer {
@@ -127,15 +133,15 @@ export function classifyAnswer(text: string, question: PendingQuestion['kind']):
   return yes?.test(value) ? 'YES' : 'UNCLEAR';
 }
 /** A lifecycle request the chat handles itself, with no model: Review, Add another action, Execute, Status or Undo. */
-export function lifecycleRequest(text: string): 'REVIEW' | 'ADD' | 'EXECUTE' | 'STATUS' | 'UNDO' | null {
+export function lifecycleRequest(text: string): 'REVIEW' | 'REFRESH' | 'ROUTE' | 'ADD' | 'EXECUTE' | 'STATUS' | 'UNDO' | null {
   const value = normalize(text);
-  return NEXT_REVIEW.test(value) ? 'REVIEW' : NEXT_ADD.test(value) ? 'ADD' : EXECUTE_REQUEST.test(value) ? 'EXECUTE' : STATUS_REQUEST.test(value) ? 'STATUS'
+  return NEXT_REVIEW.test(value) ? 'REVIEW' : REFRESH_REQUEST.test(value) ? 'REFRESH' : ANOTHER_ROUTE.test(value) ? 'ROUTE' : NEXT_ADD.test(value) ? 'ADD' : EXECUTE_REQUEST.test(value) ? 'EXECUTE' : STATUS_REQUEST.test(value) ? 'STATUS'
     : UNDO_REQUEST.test(value) ? 'UNDO' : null;
 }
 /** The language of a short lifecycle message (PT words decide), else the interface language. */
 export function answerLanguage(text: string, fallback: ConversationLanguage): ConversationLanguage {
   const value = normalize(text);
-  return PT_LIFECYCLE.test(value) ? 'PT' : /\b(?:yes|no|confirm|execute|review|simulate|add|another|cancel|status|undo|continue|run|apply|discard)\b/.test(value) ? 'EN' : fallback;
+  return PT_LIFECYCLE.test(value) ? 'PT' : /\b(?:yes|no|confirm|execute|review|simulate|add|another|cancel|status|undo|continue|run|apply|discard|refresh|quote|route|retry|again)\b/.test(value) ? 'EN' : fallback;
 }
 
 // ── Phase ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -173,7 +179,10 @@ export type ConversationReview = {
   readonly fees: readonly SimulationLine[]; readonly limits: readonly SimulationLine[]; readonly warnings: readonly SimulationWarning[];
   readonly approvals: readonly { readonly symbol: string; readonly value: string; readonly spender: string; readonly network: string }[];
   /** The wallet requests the reviewed record plans, in order (each is a separate confirmation in the wallet). Empty: not known before execution starts. */
-  readonly walletRequests: readonly string[]; readonly account: string | null; readonly network: string | null; readonly expiresAt: number | null;
+  readonly walletRequests: readonly string[];
+  /** BUILD-FLOFI-BRIDGE-LIVE-FIX-003: what the provider executes after the wallet requests (a bridge's destination settlement): no signature. */
+  readonly providerSteps: readonly string[];
+  readonly account: string | null; readonly network: string | null; readonly expiresAt: number | null;
   /** Fee lines the simulation does not itemize, named so the chat says "not provided" rather than inventing a value. */
   readonly unknown: readonly string[];
   /** The simulation's own reason when it cannot be used (a failed or refused simulation), else null. */
@@ -181,10 +190,15 @@ export type ConversationReview = {
   /** BUILD-FLOFI-CHAT-E2E-FIX-002: every canonical action of a sequence (the simulated one is `steps`), or null. */
   readonly sequence: ConversationSequence | null;
   /**
-   * The estimated total cost: the sum of every itemized fee line per asset (exact decimal sums of the simulation's own values, nothing converted
-   * or estimated), and what it cannot include (a cost line the simulation does not provide, or later steps not simulated yet).
+   * BUILD-FLOFI-BRIDGE-LIVE-FIX-003: the total additional payable cost. `additional`: exact per-asset sums of the estimates paid on top of the
+   * amount sent (ADDITIONAL lines only); `ceilings`: exact per-asset sums of the maximums (never added to an estimate). A fee already included in
+   * the quoted output, a component of such a fee and FloFi's unrecorded or obligation fee are never added; nothing is converted or estimated.
+   * `excludes` names what the total cannot include (a cost the simulation does not provide, lines it cannot classify, later steps).
    */
-  readonly totals: { readonly known: readonly string[]; readonly excludes: readonly { readonly text: string; readonly parameters: readonly (string | number)[] }[] };
+  readonly totals: { readonly additional: readonly string[]; readonly ceilings: readonly string[];
+    readonly excludes: readonly { readonly text: string; readonly parameters: readonly (string | number)[] }[] };
+  /** FloFi's fee as this route actually accounts it: the recorded obligation line, or that nothing is charged or recorded. Never a guess. */
+  readonly flofiFee: { readonly value: string; readonly note: string; readonly recorded: boolean };
 };
 /** Exact per-asset sums of decimal amounts written "<number> <symbol>"; a value that is not one is left out (and reported by the caller). */
 export function sumByAsset(values: readonly string[]): { readonly sums: readonly string[]; readonly unreadable: number } {
@@ -203,6 +217,45 @@ export function sumByAsset(values: readonly string[]): { readonly sums: readonly
   });
   return { sums, unreadable };
 }
+/**
+ * BUILD-FLOFI-BRIDGE-LIVE-FIX-003: the payable costs of a simulation's fee lines. A line counts only by its explicit treatment — never by blindly
+ * summing every displayed fee line (the live Bridge Review once added a route fee total to its own components, showing 0.008206 USDC for a
+ * 0.004103 USDC route fee that was already deducted from the quoted output). `additional`: exact per-asset sums of ADDITIONAL estimates;
+ * `ceilings`: exact per-asset sums of CEILING maximums (never added to an estimate); a network cost with neither is `unknown`; lines without a
+ * treatment (or an unreadable amount) are counted in `unclassified` and excluded. FloFi's fee is the OBLIGATION line, or "Not charged".
+ */
+export function payableCosts(fees: readonly SimulationLine[]) {
+  const unknown: string[] = [];
+  if (!fees.some(line => (line.treatment === 'ADDITIONAL' || line.treatment === 'CEILING') && /network|gas|execution fee/i.test(line.label))) unknown.push('Network cost');
+  const additional = sumByAsset(fees.filter(line => line.treatment === 'ADDITIONAL').map(line => line.value));
+  const ceilings = sumByAsset(fees.filter(line => line.treatment === 'CEILING').map(line => line.value));
+  const unclassified = fees.filter(line => !line.treatment).length + additional.unreadable + ceilings.unreadable;
+  const obligation = fees.find(line => line.treatment === 'OBLIGATION');
+  const flofiFee = obligation ? { value: obligation.value, note: obligation.note ?? '', recorded: true }
+    : { value: 'Not charged', note: 'FloFi\'s 0.1% fee per completed workflow is not collected on-chain, and this route records no fee obligation yet.', recorded: false };
+  return { additional: additional.sums, ceilings: ceilings.sums, unknown, unclassified, flofiFee };
+}
+/**
+ * BUILD-FLOFI-BRIDGE-LIVE-FIX-003: refusals at the execution boundary that mean the reviewed quote or chain state no longer stands (changed or
+ * expired). Nothing was sent; the chat re-quotes and asks for a fresh Review instead of offering the dead one again.
+ */
+export const QUOTE_MOVED = /ROUTE_CHANGED|QUOTE_CHANGED|REQUOTE|STATE_CHANGED|GAS_CHANGED|REVIEW_EXPIRED|QUOTE_EXPIRED|STOCK_MULTIPLIER_CHANGED/;
+/** What a fresh Review changed against the previous one of the same workflow revision: every step figure and cost line, by label (values as shown). */
+export function reviewChanges(previous: ConversationReview, next: ConversationReview): readonly { readonly label: string; readonly before: string; readonly after: string }[] {
+  const changes: { label: string; before: string; after: string }[] = [];
+  const compare = (label: string, before: string | null | undefined, after: string | null | undefined) => {
+    if ((before ?? null) !== (after ?? null)) changes.push({ label, before: before ?? '—', after: after ?? '—' });
+  };
+  for (const step of next.steps) {
+    const old = previous.steps.find(item => item.number === step.number);
+    if (!old) continue;
+    compare('Expected receipt', old.result, step.result);
+    compare('Minimum receipt', old.minimum, step.minimum); compare('Provider', old.provider, step.provider); compare('Max slippage', old.slippage, step.slippage);
+  }
+  const labels = [...new Set([...previous.fees, ...next.fees].map(line => line.label))];
+  for (const label of labels) compare(label, previous.fees.find(line => line.label === label)?.value, next.fees.find(line => line.label === label)?.value);
+  return changes;
+}
 export function conversationReview(view: LifecycleView, now = Date.now()): ConversationReview {
   const simulation = projectSimulation(view.workflow, view.context, view.source, now), current = review(view, now), sequence = view.sequence ?? null;
   const steps = simulation.steps.map(step => {
@@ -212,19 +265,18 @@ export function conversationReview(view: LifecycleView, now = Date.now()): Conve
       provider: step.provider ?? reviewed?.provider ?? null, result: step.result, resultLabel: step.resultLabel, minimum: step.minimum,
       slippage: step.slippage ?? step.configuredSlippage, priceImpact: step.priceImpact, details: step.details };
   });
-  const fees = simulation.fees, unknown: string[] = [];
-  if (!fees.some(line => /network|gas/i.test(line.label))) unknown.push('Network cost');
-  if (!fees.some(line => /provider|route fee|bridge/i.test(line.label))) unknown.push('Provider fees');
-  if (!fees.some(line => /FloFi fee/i.test(line.label))) unknown.push('FloFi fee');
-  const summed = sumByAsset(fees.map(line => line.value)), later = sequence ? sequence.steps.filter(step => step.state === 'NEXT').map(step => step.number) : [];
-  const excludes = [...unknown.map(text => ({ text, parameters: [] })), ...summed.unreadable ? [{ text: 'Cost lines in another unit', parameters: [] }] : [],
+  const fees = simulation.fees, { additional, ceilings, unknown, unclassified, flofiFee } = payableCosts(fees);
+  const later = sequence ? sequence.steps.filter(step => step.state === 'NEXT').map(step => step.number) : [];
+  const excludes = [...unknown.map(text => ({ text, parameters: [] })), ...unclassified ? [{ text: 'Cost lines FloFi cannot classify', parameters: [] }] : [],
     ...later.length ? [{ text: later.length === 1 ? 'Step {0} (simulated after the steps before it)' : 'Steps {0} (simulated after the steps before them)', parameters: [later.join(', ')] }] : []];
-  const planned = view.progress && !view.progress.started ? view.progress.steps.flatMap(step => step.operations.map(operation => operation.title)) : [];
+  // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: only requests the owner's wallet signs; provider settlement is observed and reconciled, never signed.
+  const planned = view.progress && !view.progress.started ? view.progress.steps.flatMap(step => step.operations.filter(operation => operation.wallet).map(operation => operation.title)) : [];
+  const settlement = view.progress && !view.progress.started ? view.progress.steps.flatMap(step => step.operations.filter(operation => !operation.wallet).map(operation => operation.title)) : [];
   return { status: current.status, label: current.label, message: current.status === 'ready' || current.status === 'approved' ? simulation.message : current.message,
     canConfirm: current.status === 'ready' || current.bindingValid, steps, fees, limits: current.limits, warnings: [...current.warnings],
-    approvals: current.approvals.map(({ symbol, value, spender, network }) => ({ symbol, value, spender, network })), walletRequests: planned,
+    approvals: current.approvals.map(({ symbol, value, spender, network }) => ({ symbol, value, spender, network })), walletRequests: planned, providerSteps: settlement,
     account: view.wallet.account, network: view.wallet.chain ? shellChainLabel(view.wallet.chain) : null, expiresAt: current.expiresAt, unknown,
-    simulationProblem: simulation.status === 'blocked' ? simulation.message : null, sequence, totals: { known: summed.sums, excludes } };
+    simulationProblem: simulation.status === 'blocked' ? simulation.message : null, sequence, totals: { additional, ceilings, excludes }, flofiFee };
 }
 
 // ── Execution progress (the durable record's projection, never chat text) ──────────────────────────────────────────────────────────────

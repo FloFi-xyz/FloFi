@@ -38,6 +38,8 @@ export const ROBINHOOD_MAINNET_SWAP = Object.freeze({
   l1DataFee: false, kind: 'CATALOG', environment: 'MAINNET',
   /** Run namespace of this catalog network; the code-pinned tokens by address; only pinned assets and Stock Tokens exist here. */
   runPrefix: 'rhs', pinnedTokens: { [robinhood.weth]: 'weth', [robinhood.usdg]: 'usdg' }, listedTokens: 'REFUSE', referencePair: null,
+  /** BUILD-FLOFI-BRIDGE-LIVE-FIX-003: this WETH (an Arbitrum-style aeWETH) logs a wrap as a Transfer mint and an unwrap as a Transfer burn. */
+  wethEvents: 'MINT_BURN',
 } as const);
 /**
  * BUILD-BASE-001: Base mainnet (real funds) over the Base asset catalog (pinned ETH/USDC/WETH and the validated token list). Any catalog pair
@@ -53,6 +55,8 @@ export const BASE_MAINNET_SWAP = Object.freeze({
   /** OP Stack: receipts carry a separate `l1Fee`, bounded through the GasPriceOracle before the wallet is asked. */
   l1DataFee: true, gasPriceOracle: base.gasPriceOracle, kind: 'CATALOG', environment: 'MAINNET',
   runPrefix: 'bas', pinnedTokens: { [base.weth]: 'weth', [base.usdc]: 'usdc' }, listedTokens: 'CODE_AND_DECIMALS', referencePair: [base.usdc, base.weth],
+  /** BUILD-FLOFI-BRIDGE-LIVE-FIX-003: canonical WETH9 logs `Deposit(dst, wad)` and `Withdrawal(src, wad)`. */
+  wethEvents: 'WETH9',
 } as const);
 /** Arbitrum Nitro: standard estimates and receipts already include parent posting gas. Strict owner-bound Review. */
 export const ARBITRUM_MAINNET_SWAP = Object.freeze({
@@ -61,7 +65,7 @@ export const ARBITRUM_MAINNET_SWAP = Object.freeze({
   weth: arbitrum.weth, usdc: arbitrum.usdc, poolInitCodeHash: arbitrum.poolInitCodeHash, feeTiers: arbitrum.feeTiers,
   codeSha256: arbitrum.codeSha256, reviewTtlSeconds: arbitrum.reviewTtlSeconds, l1DataFee: false, kind: 'CATALOG', environment: 'MAINNET',
   runPrefix: 'ars', pinnedTokens: { [arbitrum.weth]: 'weth', [arbitrum.usdc]: 'usdc' }, listedTokens: 'CODE_AND_DECIMALS', referencePair: null,
-  ownerBoundReview: true,
+  ownerBoundReview: true, wethEvents: 'MINT_BURN',
 } as const);
 export const ETHEREUM_MAINNET_SWAP = Object.freeze({
   chainId: mainnet.chainId, chainHex: mainnet.chainHex, chainRef: mainnet.chain, network: mainnet.network,
@@ -69,8 +73,10 @@ export const ETHEREUM_MAINNET_SWAP = Object.freeze({
   weth: mainnet.weth, usdc: mainnet.usdc, poolInitCodeHash: mainnet.poolInitCodeHash, feeTiers: mainnet.feeTiers,
   codeSha256: mainnet.codeSha256, reviewTtlSeconds: mainnet.reviewTtlSeconds, l1DataFee: false, kind: 'CATALOG', environment: 'MAINNET',
   runPrefix: 'ets', pinnedTokens: { [mainnet.weth]: 'weth', [mainnet.usdc]: 'usdc' }, listedTokens: 'CODE_AND_DECIMALS', referencePair: null,
-  ownerBoundReview: true,
+  ownerBoundReview: true, wethEvents: 'WETH9',
 } as const);
+/** BUILD-FLOFI-BRIDGE-LIVE-FIX-003: EIP-7528's native-asset address: a quote side that is the network's native ETH, never a token contract. */
+export const NATIVE_ETH = '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
 export const ownerBoundSwapReview = (profile: SwapProfile) => 'ownerBoundReview' in profile && profile.ownerBoundReview;
 export type PairSwapProfile = typeof BASE_SEPOLIA | typeof ETHEREUM_SEPOLIA_SWAP;
 export type CatalogSwapProfile = typeof ROBINHOOD_MAINNET_SWAP | typeof BASE_MAINNET_SWAP | typeof ARBITRUM_MAINNET_SWAP | typeof ETHEREUM_MAINNET_SWAP;
@@ -102,4 +108,16 @@ export function ownerWalletSwapServes(node: { readonly actionType: string; reado
   const profile = node.actionType === 'asset.swap.exact-input' ? swapProfile(node.chainId) : null;
   if (!profile) return false;
   return profile.kind !== 'CATALOG' || !profile.referencePair || isCatalogSwapNode(node) || referenceServed;
+}
+
+/**
+ * BUILD-FLOFI-BRIDGE-LIVE-FIX-003: whether the transaction the server prepared is the reviewed wallet request, before the wallet is asked: on the
+ * reviewed chain, from the owner, carrying exactly the reviewed native value (the amount in of a native-ETH swap or a wrap; nothing otherwise),
+ * to the reviewed target (the input token for its approval, WETH9 for a wrap/unwrap, the router for a swap). Calldata is compared by digest.
+ */
+export function swapWalletRequestMatches(quote: { readonly amountIn: string; readonly inputToken: string; readonly native?: 'INPUT' | 'OUTPUT'; readonly conversion?: 'WRAP' | 'UNWRAP' },
+  step: 'approval' | 'swap', tx: { readonly chainId: string; readonly from: string; readonly to: string; readonly value: string }, profile: SwapProfile, owner: string): boolean {
+  const value = step === 'swap' && (quote.native === 'INPUT' || quote.conversion === 'WRAP') ? '0x' + BigInt(quote.amountIn).toString(16) : '0x0';
+  const target = step === 'approval' ? quote.inputToken : quote.conversion ? profile.kind === 'CATALOG' ? profile.weth : null : profile.router;
+  return tx.chainId === profile.chainHex && tx.from === owner && tx.value === value && target !== null && tx.to === target;
 }

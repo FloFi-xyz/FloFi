@@ -95,12 +95,12 @@ describe('Aave V3 Supply, Borrow, Repay and Withdraw', () => {
 });
 
 describe('swaps', () => {
-  it('BUILD-FLOFI-CHAT-E2E-FIX-002: refuses a native-ETH swap with the missing capability and never authors WETH in its place', () => {
+  it('BUILD-FLOFI-CHAT-E2E-FIX-002: without the validated catalogs (no native path) refuses a native-ETH swap and never authors WETH in its place', () => {
     for (const [fields, text] of [[{ outputAsset: 'ETH' }, 'Swap 100 USDC to ETH on Base'], [{ inputAsset: 'ETH', outputAsset: 'USDC', amount: '0.01' }, 'Swap 0.01 ETH to USDC on Base'],
       [{ network: 'BASE_SEPOLIA', outputAsset: 'ETH' }, 'Swap 100 USDC to ETH on Base Sepolia']] as const) {
       const outcome = convert(action(swap(fields)), text);
       expect(outcome).toMatchObject({ kind: 'UNSUPPORTED', code: 'SWAP_NATIVE_ASSET_UNSUPPORTED' });
-      expect(outcome.kind === 'UNSUPPORTED' && outcome.message).toMatch(/^Native ETH swaps are not available in FloFi yet.*never swaps it in place of ETH/);
+      expect(outcome.kind === 'UNSUPPORTED' && outcome.message).toMatch(/^Native ETH swaps, wraps and unwraps run on Base, Arbitrum One, Ethereum and Robinhood Chain.*never swaps it in place of ETH/);
     }
   });
   it('authors an explicit WETH swap on Base, unchanged', () => {

@@ -49,7 +49,8 @@ describe('Robinhood Chain in the shared crypto picker', () => {
     registerNetworkCatalog(catalog);
     expect(validCryptoSelection({ ...selection, to: 'PLTR' })).toBe(true);
     expect(selectCryptoToken(selection, 'destination', 'PLTR')).toEqual({ ...selection, to: 'PLTR' });
-    expect(validCryptoSelection({ ...selection, to: 'ETH' })).toBe(false);
+    // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: Robinhood Chain's native ETH is a swap side of its own (never its WETH).
+    expect(validCryptoSelection({ ...selection, to: 'ETH' })).toBe(selection.action === 'swap');
     expect(validCryptoSelection({ ...selection, to: 'NOPE' })).toBe(false);
   });
   it('fails closed while the official catalog is not loaded: no Stock Token identity is invented', () => {

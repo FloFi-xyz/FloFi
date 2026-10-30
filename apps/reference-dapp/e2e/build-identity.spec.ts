@@ -29,7 +29,7 @@ test('workflow naming confirms inline, cancels without clearing selection and su
   await expect(canvas.getByRole('heading', { name: 'ETH Carry Strategy', exact: true })).toBeVisible();
   await rename.click();
   await input.fill('ETH Income Strategy');
-  await page.getByRole('heading', { name: 'Copilot', exact: true }).click();
+  await page.getByRole('heading', { name: 'FloFi Assistant', exact: true }).click();
   await expect(canvas.getByRole('heading', { name: 'ETH Income Strategy', exact: true })).toBeVisible();
   const nav = page.getByRole('navigation', { name: 'Workflow stages' });
   await nav.getByRole('button', { name: 'Dashboard', exact: true }).click();
@@ -63,11 +63,11 @@ test('Privacy is a disabled affordance in both toolbar positions and never autho
 test('Copilot keeps existing commands and proposal review while removing internal presentation', async ({ page }) => {
   await installSupplyWallet(page);
   await page.goto('/app');
-  const assistant = page.getByRole('complementary', { name: 'Workflow assistant' });
+  const assistant = page.getByRole('complementary', { name: 'FloFi Assistant' });
   const prompt = assistant.getByLabel('Describe your flow', { exact: true });
   const send = assistant.getByRole('button', { name: 'Send', exact: true });
-  await expect(assistant.getByRole('heading', { name: 'Copilot', exact: true })).toBeVisible();
-  await expect(assistant).toContainText('ASSISTANT');
+  await expect(assistant.getByRole('heading', { name: 'FloFi Assistant', exact: true })).toBeVisible();
+  await expect(assistant.locator('.assistant-title img[src="/brand/flofi-symbol-light.svg"]')).toHaveCount(1);
   expect(await assistant.innerText()).not.toMatch(/GRYLOO|mock|demo|local command|no model|ticks/i);
   await prompt.fill('explain');
   await send.click();

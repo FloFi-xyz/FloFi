@@ -9,6 +9,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { catalogAsset, parseRobinhoodStockTokenRegistry, robinhoodNetworkCatalog, uniswapV3PoolAddress, UNISWAP_V3_ETHEREUM, UNISWAP_V3_ARBITRUM, UNISWAP_V3_BASE, UNISWAP_V3_ROBINHOOD,
   type AssetCatalog, type CanonicalAsset } from '@defi-workflow-engine/action-registry';
+import { decodeNativeSwap, fromHex } from '@defi-workflow-engine/reference-compiler';
 import type { CatalogSwapRuntime, Rpc } from './public-testnet-service.ts';
 
 export const OFFICIAL_REGISTRY_TEXT = readFileSync(new URL('../../../../packages/action-registry/test/fixtures/robinhood-rhj-assets-2026-10-11.json', import.meta.url), 'utf8');
@@ -28,6 +29,10 @@ export const addressWord = (value: string) => '0x' + value.toLowerCase().slice(2
 export const TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
 export const SCALED_TRANSFER_TOPIC = '0x37e7f0db430edc9dd31bc66f25f8449353aa0818f503b906747dd8f286cd3802';
 export const SWAP_TOPIC = '0xc42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67';
+/** BUILD-FLOFI-BRIDGE-LIVE-FIX-003: WETH9 `Deposit` / `Withdrawal` (Base, Ethereum); Arbitrum-style WETH logs a Transfer mint/burn instead. */
+export const DEPOSIT_TOPIC = '0xe1fffcc4923d04b559f4d29a8bfc6cda04eb5b0d3c460751c2402c5c5cc9109c';
+export const WITHDRAWAL_TOPIC = '0x7fcf532c15f0a6db0bd6d0e038bea71d30d808c7d98cb3bf7268a95bf5081b65';
+const ZERO = '0x' + '0'.repeat(40);
 
 export type MockPool = { readonly fee: number; readonly liquidity: bigint;
   /** Output units per 1e18 input units, for each direction keyed by input address. */ readonly rate: Readonly<Record<string, bigint>> };
@@ -128,6 +133,8 @@ export function createRobinhoodMockChain(catalog: AssetCatalog, options: { reado
     if (selector === '0xdd62ed3e') return word(state.allowances.get(allowanceKey(to, readAddress(data, 0), readAddress(data, 1))) ?? 0n);
     if (selector === '0xa9059cbb') return word(1n);
     if (selector === '0x04e45aaf') return word(0n);
+    // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: WETH deposit()/withdraw(uint256) return nothing.
+    if (to === UNI.weth && (selector === '0xd0e30db0' || selector === '0x2e1a7d4d')) return '0x';
     throw new Error('execution reverted');
   }
   const rpc: Rpc = async (method, params) => {
@@ -188,7 +195,53 @@ export function createRobinhoodMockChain(catalog: AssetCatalog, options: { reado
       const stock = state.stocks.get(token.toLowerCase());
       if (stock) logs.push({ address: token, topics: [SCALED_TRANSFER_TOPIC, addressWord(a), addressWord(b)], data: word(amount) + word(amount * stock.multiplierWad / 10n ** 18n).slice(2) });
     };
-    if (selector === '0x095ea7b3') state.allowances.set(allowanceKey(to, from, readAddress(data, 0)), readWord(data, 1));
+    // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: WETH's wrap/unwrap in the network's own log dialect, and SwapRouter02's native-ETH multicalls.
+    const wethDialect = base || eth ? 'WETH9' : 'MINT_BURN';
+    const wrapLog = (holder: string, amount: bigint) => logs.push(wethDialect === 'WETH9' ? { address: UNI.weth, topics: [DEPOSIT_TOPIC, addressWord(holder)], data: word(amount) }
+      : { address: UNI.weth, topics: [TRANSFER_TOPIC, addressWord(ZERO), addressWord(holder)], data: word(amount) });
+    const unwrapLog = (holder: string, amount: bigint) => logs.push(wethDialect === 'WETH9' ? { address: UNI.weth, topics: [WITHDRAWAL_TOPIC, addressWord(holder)], data: word(amount) }
+      : { address: UNI.weth, topics: [TRANSFER_TOPIC, addressWord(holder), addressWord(ZERO)], data: word(amount) });
+    const credit = (holder: string, amount: bigint) => state.native.set(holder, (state.native.get(holder) ?? 0n) + amount);
+    const debit = (holder: string, amount: bigint) => { const before = state.native.get(holder) ?? 0n; if (before < amount) throw new Error('execution reverted: native balance'); state.native.set(holder, before - amount); };
+    const value = BigInt(tx.value || '0x0');
+    let native: ReturnType<typeof decodeNativeSwap> | null = null;
+    if (to === UNI.router && tx.data.startsWith('0x5ae401dc')) { try { native = decodeNativeSwap(fromHex(tx.data), UNI.weth); } catch { native = null; } }
+    if (native?.native === 'INPUT' && value === 0n) native = null; // a WETH ERC-20 swap: the router pulls WETH, it wraps nothing
+    if (to === UNI.weth && selector === '0xd0e30db0') {
+      debit(from, value); state.balances.set(key(UNI.weth, from), (state.balances.get(key(UNI.weth, from)) ?? 0n) + value); wrapLog(from, value);
+    } else if (to === UNI.weth && selector === '0x2e1a7d4d') {
+      const amount = readWord(data, 0), before = state.balances.get(key(UNI.weth, from)) ?? 0n;
+      if (before < amount || value !== 0n) throw new Error('execution reverted: withdraw');
+      state.balances.set(key(UNI.weth, from), before - amount); unwrapLog(from, amount); credit(from, amount);
+    } else if (native) {
+      if (native.deadline <= BigInt(Math.floor(options.now() / 1000))) throw new Error('execution reverted: deadline');
+      const tokenIn = native.native === 'INPUT' ? UNI.weth : native.tokenIn, tokenOut = native.native === 'OUTPUT' ? UNI.weth : native.tokenOut;
+      const out = quote(tokenIn, tokenOut, native.amountIn, native.fee), pool = uniswapV3PoolAddress(UNI.factory, UNI.poolInitCodeHash, tokenIn, tokenOut, native.fee);
+      if (out < native.amountOutMinimum) throw new Error('execution reverted: Too little received');
+      const [delta0, delta1] = tokenIn.toLowerCase() < tokenOut.toLowerCase() ? [native.amountIn, -out] : [-out, native.amountIn];
+      const swapLog = (recipient: string) => logs.push({ address: pool, topics: [SWAP_TOPIC, addressWord(UNI.router), addressWord(recipient)],
+        data: word(delta0) + word(delta1).slice(2) + word(79228162514264337593543950336n).slice(2) + word(state.pools.get(pool)!.liquidity).slice(2) + word(0n).slice(2) });
+      if (native.native === 'INPUT') {
+        if (value !== native.amountIn) throw new Error('execution reverted: value');
+        debit(from, value); credit(UNI.router, value);
+        // The router wraps exactly msg.value and pays the pool; the pool pays the recipient.
+        debit(UNI.router, value); state.balances.set(key(UNI.weth, UNI.router), (state.balances.get(key(UNI.weth, UNI.router)) ?? 0n) + value); wrapLog(UNI.router, value);
+        move(UNI.weth, UNI.router, pool, value);
+        state.balances.set(key(tokenOut, pool), (state.balances.get(key(tokenOut, pool)) ?? 0n) + out);
+        move(tokenOut, pool, native.recipient, out); swapLog(native.recipient);
+      } else {
+        if (value !== 0n) throw new Error('execution reverted: value');
+        const allowance = state.allowances.get(allowanceKey(tokenIn, from, UNI.router)) ?? 0n;
+        if (allowance < native.amountIn) throw new Error('execution reverted: STF');
+        state.allowances.set(allowanceKey(tokenIn, from, UNI.router), allowance - native.amountIn);
+        move(tokenIn, from, pool, native.amountIn);
+        state.balances.set(key(UNI.weth, pool), (state.balances.get(key(UNI.weth, pool)) ?? 0n) + out);
+        move(UNI.weth, pool, UNI.router, out); swapLog(UNI.router);
+        // unwrapWETH9(amountMinimum, recipient): the router's whole WETH balance, in native ETH, to the recipient.
+        const held = state.balances.get(key(UNI.weth, UNI.router)) ?? 0n;
+        state.balances.set(key(UNI.weth, UNI.router), 0n); unwrapLog(UNI.router, held); credit(native.recipient, held);
+      }
+    } else if (selector === '0x095ea7b3') state.allowances.set(allowanceKey(to, from, readAddress(data, 0)), readWord(data, 1));
     else if (selector === '0xa9059cbb') move(to, from, readAddress(data, 0), readWord(data, 1));
     else if (selector === '0x04e45aaf' && to === UNI.router) {
       const tokenIn = readAddress(data, 0), tokenOut = readAddress(data, 1), fee = Number(readWord(data, 2)), recipient = readAddress(data, 3);
@@ -206,7 +259,6 @@ export function createRobinhoodMockChain(catalog: AssetCatalog, options: { reado
       logs.push({ address: pool, topics: [SWAP_TOPIC, addressWord(UNI.router), addressWord(recipient)],
         data: word(delta0) + word(delta1).slice(2) + word(79228162514264337593543950336n).slice(2) + word(state.pools.get(pool)!.liquidity).slice(2) + word(0n).slice(2) });
     } else if (data === '0x') {
-      const value = BigInt(tx.value);
       state.native.set(from, (state.native.get(from) ?? 0n) - value);
       state.native.set(to, (state.native.get(to) ?? 0n) + value);
     } else throw new Error('UNSUPPORTED_MOCK_TRANSACTION');

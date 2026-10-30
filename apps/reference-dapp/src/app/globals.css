@@ -896,6 +896,22 @@
 .copilot-head .eyebrow{font-size:11px}
 .copilot .message p{font-size:14px;line-height:1.55}
 .copilot .message small{font-size:11px}
+/* BUILD-FLOFI-BRIDGE-LIVE-FIX-003: the FloFi Assistant — a compact header with the official symbol, and an avatar beside every message
+   (FloFi's symbol for the assistant, a person for the owner). Bubbles shrink to the row; nothing overflows horizontally. */
+.copilot-head .assistant-title{display:flex;align-items:center;gap:8px;margin:0;font-size:16px;font-weight:600;line-height:1.25}
+.flofi-avatar,.user-avatar{display:inline-flex;align-items:center;justify-content:center;flex:none;width:28px;height:28px;border-radius:50%;border:1px solid var(--line)}
+.flofi-avatar{background:var(--soft)}
+.flofi-avatar img{display:block;width:18px;height:auto}
+.flofi-avatar img.flofi-logo-dark,:root[data-theme="dark"] .flofi-avatar img.flofi-logo-light{display:none}
+:root[data-theme="dark"] .flofi-avatar img.flofi-logo-dark{display:block}
+.flofi-avatar.flofi-avatar-title{width:26px;height:26px;border:0;background:none}
+.flofi-avatar.flofi-avatar-title img{width:24px}
+.user-avatar{background:var(--blue-soft);border-color:var(--message-line);color:var(--blue)}
+.chat-row{display:flex;align-items:flex-start;gap:8px;max-width:100%;min-width:0}
+.chat-row>.message{min-width:0;max-width:calc(100% - 36px);overflow-wrap:anywhere}
+.chat-row-flofi>.message{flex:1 1 auto}
+.chat-row-you{justify-content:flex-end;align-self:flex-end;max-width:min(100%,560px)}
+.chat-row>.message.you{align-self:flex-start;flex:0 1 auto}
 .copilot .chat-form label{font-size:13px}
 .copilot .chat-form :is(input,button){font-size:14px}
 .copilot .chat-form small{font-size:12px}

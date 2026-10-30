@@ -8,7 +8,7 @@ test('Build places the existing assistant beside the canvas and a selected cardâ
   await installSupplyWallet(page);
   await page.goto('/app');
   const canvas = page.getByRole('region', { name: 'Workflow canvas', exact: true });
-  const assistant = page.getByRole('complementary', { name: 'Workflow assistant' });
+  const assistant = page.getByRole('complementary', { name: 'FloFi Assistant' });
   const inspector = page.getByRole('dialog', { name: 'Action settings', exact: true });
   await expect(assistant).toBeVisible();
   const canvasBox = (await canvas.boundingBox())!;
@@ -64,7 +64,7 @@ test('Build keeps existing toolbar actions and zoom behavior at their new positi
     const toolboxBox = (await toolbar.boundingBox())!;
     expect(lastButton.y + lastButton.height).toBeLessThanOrEqual(toolboxBox.y + toolboxBox.height);
     if (width === 1440) {
-      expect((await page.getByRole('complementary', { name: 'Workflow assistant' }).boundingBox())!.height).toBe(760);
+      expect((await page.getByRole('complementary', { name: 'FloFi Assistant' }).boundingBox())!.height).toBe(760);
       const canvasBox = (await page.getByRole('region', { name: 'Workflow canvas', exact: true }).boundingBox())!;
       await expect(page.getByRole('dialog', { name: 'Action settings', exact: true })).toHaveCount(0);
       for (const section of [page.locator('details.library')]) if (await section.count()) expect((await section.boundingBox())!.y).toBeGreaterThanOrEqual(canvasBox.y + canvasBox.height);

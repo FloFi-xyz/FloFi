@@ -11,13 +11,21 @@ const short = (value: string) => value.length > 16 ? `${value.slice(0, 6)}…${v
 export function ConversationReviewCard({ review, language }: { review: ConversationReview; language: ConversationLanguage }) {
   const t = (value: string, ...parameters: (string | number)[]) => translate(language, value, ...parameters);
   const sequence = review.sequence, simulated = review.steps[0];
-  const details = (step: ConversationReview['steps'][number]) => <dl>
-    <div><dt>{t(step.resultLabel)}</dt><dd>{step.result ?? t('Not provided by this simulation')}</dd></div>
-    {step.minimum && <div><dt>{t('Minimum received')}</dt><dd>{step.minimum}</dd></div>}
+  // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: one compact financial hierarchy for every action — what is sent, what is expected, the guaranteed minimum,
+  // who routes it and the slippage limit; technical lines stay in the expandable details below.
+  const details = (step: ConversationReview['steps'][number]) => <dl className="conversation-review-figures">
+    {step.input !== '—' && <div><dt>{t('Sending')}</dt><dd>{t(step.input)}</dd></div>}
+    <div><dt>{t('Expected receipt')}</dt><dd>{step.result ?? t('Not provided by this simulation')}{step.result ? <small>{t(step.resultLabel)}</small> : null}</dd></div>
+    {step.minimum && <div><dt>{t('Minimum receipt')}</dt><dd>{step.minimum}</dd></div>}
+    {step.provider && <div><dt>{t('Provider')}</dt><dd>{t(step.provider)}</dd></div>}
     {step.slippage && <div><dt>{t('Max slippage')}</dt><dd>{step.slippage}</dd></div>}
     {step.priceImpact && <div><dt>{t('Price impact')}</dt><dd>{step.priceImpact}</dd></div>}
     {step.details.map(line => <div key={`${line.label}:${line.value}`}><dt>{t(line.label)}</dt><dd>{t(line.value)}</dd></div>)}
   </dl>;
+  const treatment = { INCLUDED: 'Already included in the quoted output', CEILING: 'Maximum, separate from the output', ADDITIONAL: 'Estimated, paid on top' } as const;
+  const costs = review.fees.filter(line => line.treatment !== 'COMPONENT' && line.treatment !== 'OBLIGATION'), parts = review.fees.filter(line => line.treatment === 'COMPONENT');
+  const total = review.totals.additional.length ? review.totals.additional.join(' + ') + (review.totals.ceilings.length ? ` · ${t('network fee up to {0}', review.totals.ceilings.join(' + '))}` : '')
+    : review.totals.ceilings.length ? t('Up to {0}', review.totals.ceilings.join(' + ')) : review.unknown.length ? t('Not available from this simulation') : t('None beyond the amount sent');
   return <section className="conversation-review" aria-label={t('Workflow review')}>
     {/* BUILD-FLOFI-CHAT-E2E-FIX-002: a sequence lists every canonical action in order; only the current step is simulated now. */}
     {sequence ? <ol className="conversation-review-steps" aria-label={t('Workflow actions')}>{sequence.steps.map(step => <li key={step.number} data-sequence-state={step.state}>
@@ -31,20 +39,25 @@ export function ConversationReviewCard({ review, language }: { review: Conversat
       {step.state === 'CURRENT' && simulated && details(simulated)}
     </li>)}</ol>
     : <ol className="conversation-review-steps">{review.steps.map(step => <li key={step.number}>
-      <strong>{step.number}. {t(step.action)}</strong>
-      <span className="conversation-review-route">{[t(step.input), step.pair && t(step.pair), step.networks, step.provider].filter(Boolean).join(' · ')}</span>
+      <strong>{step.number}. {[t(step.action), step.networks].filter(Boolean).join(' · ')}</strong>
+      {step.pair && <span className="conversation-review-route">{t(step.pair)}</span>}
       {details(step)}
     </li>)}</ol>}
     <dl className="conversation-review-lines" aria-label={t('Costs')}>
-      {review.fees.map(line => <div key={`${line.label}:${line.value}`}><dt>{t(line.label)}</dt><dd>{line.value}{line.note ? <small>{t(line.note)}</small> : null}</dd></div>)}
+      {costs.map(line => <div key={`${line.label}:${line.value}`} data-treatment={line.treatment ?? 'UNCLASSIFIED'}><dt>{t(line.label)}</dt>
+        <dd>{line.value}<small>{line.treatment && line.treatment in treatment ? t(treatment[line.treatment as keyof typeof treatment]) : null}{line.note ? `${line.treatment && line.treatment in treatment ? ' · ' : ''}${t(line.note)}` : ''}</small></dd></div>)}
       {review.unknown.map(name => <div key={name} data-unknown="true"><dt>{t(name)}</dt><dd>{t('Not provided by this simulation')}</dd></div>)}
-      <div className="conversation-review-total"><dt>{t('Estimated total cost')}</dt><dd>{review.totals.known.length ? review.totals.known.join(' + ') : t('Not available from this simulation')}</dd></div>
+      <div data-treatment="OBLIGATION" data-flofi-fee={review.flofiFee.recorded ? 'obligation' : 'not-charged'}><dt>{t('FloFi fee')}</dt><dd>{t(review.flofiFee.value)}<small>{t(review.flofiFee.note)}</small></dd></div>
+      {review.expiresAt !== null && <div><dt>{t('Quote expiry')}</dt><dd><time dateTime={new Date(review.expiresAt).toISOString()}>{new Date(review.expiresAt).toLocaleTimeString(language === 'PT' ? 'pt-BR' : 'en-US')}</time></dd></div>}
+      <div className="conversation-review-total"><dt>{t('Total additional payable costs')}</dt><dd>{total}</dd></div>
     </dl>
     {review.totals.excludes.length > 0 && <p className="conversation-review-excludes">{t('Excludes: {0}', review.totals.excludes.map(item => t(item.text, ...item.parameters)).join('; '))}</p>}
+    {parts.length > 0 && <details className="conversation-review-details"><summary>{t('Fee breakdown')}</summary><dl className="conversation-review-lines">
+      {parts.map(line => <div key={`${line.label}:${line.value}`} data-treatment="COMPONENT"><dt>{t(line.label)}</dt><dd>{line.value}{line.note ? <small>{t(line.note)}</small> : null}</dd></div>)}
+    </dl></details>}
     <dl className="conversation-review-lines conversation-review-context" aria-label={t('Wallet and quote')}>
       {review.account && <div><dt>{t('Wallet')}</dt><dd title={review.account}>{short(review.account)}</dd></div>}
       {review.network && <div><dt>{t('Network')}</dt><dd>{review.network}</dd></div>}
-      {review.expiresAt !== null && <div><dt>{t('Valid until')}</dt><dd><time dateTime={new Date(review.expiresAt).toISOString()}>{new Date(review.expiresAt).toLocaleTimeString(language === 'PT' ? 'pt-BR' : 'en-US')}</time></dd></div>}
     </dl>
     {(review.warnings.length > 0 || sequence) && <ul className="conversation-review-warnings" aria-label={t('Risks and warnings')}>
       {sequence && <li data-severity="attention">{t('This workflow runs as {0} separate wallet transactions, one step at a time. If a later step fails or you stop, the earlier steps stay executed and their assets stay in your wallet.', sequence.total)}</li>}

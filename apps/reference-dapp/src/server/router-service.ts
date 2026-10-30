@@ -21,7 +21,7 @@ import { createBaseSepoliaReviewContext, validateAuthoringWorkflow, validateRout
 import { compileRouterArtifacts, decodeErc20Approval, decodeErc20Transfer, decodeFilledRelay, decodeFundsDeposited, decodeRouterApprove, encodeRouterApprove,
   EIP1967_IMPLEMENTATION_SLOT, ROUTER_SELECTORS as SEL, ROUTER_TOPICS as TOPIC, type FilledRelay, type FundsDeposited, type RouterArtifacts,
   type RouterLog } from '@defi-workflow-engine/reference-compiler';
-import { assertRouterTransition, compareRoutes, hashArtifactBytes, routeCommitment, ROUTER_PHASES, type CanonicalRoute, type EvidenceBundle, type RouteChange,
+import { assertRouterTransition, compareRoutes, hashArtifactBytes, materialRouteChanges, providerFeeDrift, routeCommitment, ROUTER_PHASES, type CanonicalRoute, type EvidenceBundle, type RouteChange,
   type RouterPhase, type RoutingProvider, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { validateArtifact } from '@defi-workflow-engine/workflow-contracts/schemas';
 import { utf8, type ExecutionStorage } from '@defi-workflow-engine/reference-executor';
@@ -939,7 +939,9 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
         if (AVAILABILITY.test(code) || !/^[A-Z][A-Z0-9_]{2,80}$/.test(code)) fail('ROUTER_ROUTE_REVALIDATION_UNAVAILABLE');
         return invalidate('ROUTE_CHANGED', ['PROTOCOL_CHANGED']);
       }
-      const changes = compareRoutes(route, fresh, 'REQUOTE');
+      // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: the reviewed bytes are what executes; a relayer re-pricing of a few base units (within 1% of the reviewed
+      // route fee, `providerFeeDrift`) is no material change and is recorded on the attempt. Any other or larger change still needs a new Review.
+      const changes = materialRouteChanges(route, fresh), drift = changes.length ? null : providerFeeDrift(route, fresh);
       if (changes.length) return invalidate('ROUTE_CHANGED', changes);
       const needsApproval = state.allowance < BigInt(route.approval.amount);
       const step: RouterStep = needsApproval ? 'APPROVAL' : 'DEPOSIT';
@@ -964,7 +966,8 @@ export function createRouterService(input: { readonly storage: ExecutionStorage;
         maxFeePerGas: tag(maxFeePerGas), maxPriorityFeePerGas: tag(priority) };
       await assertRequestFees(review, tx, tag(state.block.number), invalidate);
       const attempt: RouterAttempt = { attemptId, step, state: 'PREPARED', reviewCommitment: review.commitment, nonce: state.pendingNonce.toString(), preparedAtBlock: state.block.number,
-        createdAt: now().toISOString(), tx, transactionHash: null, replacementHash: null, receipt: null, reconciled: false, note: null };
+        createdAt: now().toISOString(), tx, transactionHash: null, replacementHash: null, receipt: null, reconciled: false,
+        note: drift && (drift.feeIncrease !== '0' || drift.minimumDecrease !== '0') ? `ROUTER_PROVIDER_FEE_DRIFT_TOLERATED:${drift.feeIncrease}:${drift.minimumDecrease}:${drift.tolerance}` : null };
       record = await prepareAttempt(record, attempt);
       return { record, attempt, transaction: tx };
     }); },

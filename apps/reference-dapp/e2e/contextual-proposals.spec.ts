@@ -23,7 +23,7 @@ test('outside click and Escape close the proposal without applying or dismissing
   await replacingProposal(page);
   for (const close of ['outside', 'Escape']) {
     await openProposalReview(page);
-    if (close === 'outside') await page.getByRole('heading', { name: 'Copilot', exact: true }).click();
+    if (close === 'outside') await page.getByRole('heading', { name: 'FloFi Assistant', exact: true }).click();
     else await page.keyboard.press('Escape');
     await expect(page.getByRole('dialog', { name: 'Proposed change' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: /^Review proposed change:/ })).toHaveCount(1);

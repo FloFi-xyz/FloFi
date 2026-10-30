@@ -9,7 +9,7 @@ const viewport = (page: Page) => page.locator('.build-flow-surface .react-flow__
 const ir = async (page: Page) => JSON.parse(await readWorkflowIr(page)) as SemanticWorkflow;
 async function open(page: Page) {
   await replayProviderLogos(page); await installPassiveWallet(page, '0xa4b1'); await page.goto('/app');
-  await expect(page.getByRole('log', { name: 'Conversation' })).toContainText('Flofi Copilot ready in replay mode');
+  await expect(page.getByRole('log', { name: 'Conversation' })).toContainText('Hi FloFier!');
 }
 /** BUILD-FLOFI-CONVERSATIONAL-001: the chat commits the request at once (no proposal to apply). */
 const say = sendChatCommand;

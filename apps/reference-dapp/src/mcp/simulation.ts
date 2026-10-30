@@ -159,7 +159,9 @@ export function projectSimulation(flow: FlowName, value: unknown): SimulationVie
       // Robinhood Chain quotes also carry the Stock Token multipliers.
       return { kind: 'SWAP_QUOTE', provenance: flow === 'base-sepolia-swap' ? 'PUBLIC_TESTNET' : String(q.provenance), observedAt: String(q.observedAt), expiresAt: String(q.expiresAt),
         facts: { ...pick(q, ['chainId', 'inputToken', 'outputToken', 'inputSymbol', 'outputSymbol', 'amountIn', 'expectedOut', 'minimumOut', 'slippageBps', 'pool', 'fee',
-          'blockNumber', 'estimatedGas', 'inputDecimals', 'outputDecimals']),
+          'blockNumber', 'estimatedGas', 'inputDecimals', 'outputDecimals',
+          // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: which side is the network's native ETH (its token is the EIP-7528 marker, never WETH9), or a WETH9 wrap/unwrap.
+          'native', 'conversion']),
           ...flow === 'robinhood-swap' ? { stocks: list(q.stocks, ['side', 'symbol', 'officialId', 'multiplierWad', 'scheduledMultiplierWad', 'scheduledEffectiveAt']) } : {} },
         canonicalArtifacts: null };
     }

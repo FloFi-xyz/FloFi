@@ -15,6 +15,8 @@ const ISSUER_REGISTERED: ReadonlySet<string> = new Set([ROBINHOOD_BASE_ASSETS.ch
  */
 export function validateCatalogAssetIdentity(ref: CatalogAssetRef): void {
   const pinned = BASE_ASSETS[ref.chain];
+  // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: the network's native ETH (every catalog network's native currency) — no address, 18 decimals, no official id.
+  if (ref.address === null) { if (!pinned || ref.decimals !== 18 || ref.officialId !== null) throw new Error('CATALOG_SWAP_ASSET_IDENTITY_INVALID'); return; }
   const base = pinned?.assets.find(asset => asset.address === ref.address);
   const valid = !pinned ? false : base ? base.decimals === ref.decimals && ref.officialId === null
     : ISSUER_REGISTERED.has(ref.chain) ? ref.officialId !== null && ref.decimals === 18

@@ -13,17 +13,18 @@ import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, re
 import { isAbsolute, join } from 'node:path';
 import { baseAssetRegistry, catalogAsset, referenceRegistry, resolveWorkflowCapability, uniswapV3PoolAddress, type AssetCatalog, type CanonicalAsset } from '@defi-workflow-engine/action-registry';
 import { createBaseSepoliaReviewContext, createReviewContext, reviewContextForChain, validateAuthoringWorkflow } from '@defi-workflow-engine/reference-linter';
-import { encodeSwap, toHex } from '@defi-workflow-engine/reference-compiler';
-import { hashArtifactBytes, isCatalogSwapNode, isReferencePairSwap, readCatalogSwapNode, type CatalogSwapFields, type EvidenceBundle, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
+import { encodeNativeSwap, encodeSwap, encodeWethDeposit, encodeWethWithdraw, toHex } from '@defi-workflow-engine/reference-compiler';
+import { catalogSwapKind, hashArtifactBytes, isCatalogSwapNode, isReferencePairSwap, readCatalogSwapNode, type CatalogAssetRef, type CatalogSwapFields, type EvidenceBundle, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { validateArtifact } from '@defi-workflow-engine/workflow-contracts/schemas';
 import { createFileExecutionStorage, discoverTransferByNonce, utf8, type ExecutionStorage } from '@defi-workflow-engine/reference-executor';
-import { BASE_SEPOLIA, ownerBoundSwapReview, publicSwapProfile, quoteDecimals, swapProfile, type CatalogSwapProfile, type PairSwapProfile, type SwapProfile } from '../domain/public-testnet-swap.ts';
-export { BASE_MAINNET_SWAP, BASE_SEPOLIA, ETHEREUM_SEPOLIA_SWAP, ROBINHOOD_MAINNET_SWAP, quoteDecimals } from '../domain/public-testnet-swap.ts';
+import { BASE_SEPOLIA, NATIVE_ETH, ownerBoundSwapReview, publicSwapProfile, quoteDecimals, swapProfile, type CatalogSwapProfile, type PairSwapProfile, type SwapProfile } from '../domain/public-testnet-swap.ts';
+export { BASE_MAINNET_SWAP, BASE_SEPOLIA, ETHEREUM_SEPOLIA_SWAP, NATIVE_ETH, ROBINHOOD_MAINNET_SWAP, quoteDecimals } from '../domain/public-testnet-swap.ts';
 
 export type Rpc = (method: string, params: readonly unknown[]) => Promise<unknown>;
 type Step = 'approval' | 'swap';
+/** BUILD-FLOFI-BRIDGE-LIVE-FIX-003: `value` is the exact native ETH the reviewed call carries — the amount in of a native-ETH swap or wrap, else 0. */
 type Tx = { readonly chainId: SwapProfile['chainHex']; readonly from: string; readonly to: string;
-  readonly data: string; readonly value: '0x0'; readonly gas: string;
+  readonly data: string; readonly value: string; readonly gas: string;
   readonly nonce?: string; readonly maxFeePerGas?: string; readonly maxPriorityFeePerGas?: string };
 /** Optional strict owner preflight on the shared engine. Quote-only previews cannot be authorized. */
 export type SwapOwnerReview = { readonly account: string; readonly router: string; readonly nonce: string; readonly step: Step;
@@ -47,11 +48,16 @@ export type PublicQuote = { readonly executionId: string; readonly revision: num
   readonly provenance?: 'PUBLIC_MAINNET' | 'MOCKED'; readonly stocks?: readonly StockQuoteState[];
   readonly feeTiers?: readonly { readonly fee: number; readonly pool: string; readonly expectedOut: string | null }[];
   readonly catalog?: { readonly contentSha256: readonly (string | null)[]; readonly fetchedAt: string };
+  /**
+   * BUILD-FLOFI-BRIDGE-LIVE-FIX-003: `native` names the side that is the network's native ETH (its token field is `NATIVE_ETH`, never WETH9);
+   * `conversion` marks a WETH9 wrap/unwrap (exactly 1:1, no pool: `pool` is the WETH9 contract, `fee` 0). Absent on every ERC-20 quote.
+   */
+  readonly native?: 'INPUT' | 'OUTPUT'; readonly conversion?: 'WRAP' | 'UNWRAP';
   readonly ownerReview?: SwapOwnerReview };
 export type PublicAttempt = { readonly attemptId: string; readonly executionId: string; readonly step: Step;
   readonly state: 'PREPARED' | 'HASH' | 'REJECTED' | 'UNKNOWN' | 'PENDING' | 'REVERTED' | 'CONFIRMED';
   readonly createdAt: string; readonly submittedAt: string | null; readonly account: string; readonly chainId: SwapProfile['chainId']; readonly environment: 'PUBLIC_TESTNET' | 'MAINNET';
-  readonly adapter: 'uniswap.v3'; readonly semanticRevision: number; readonly manifestHash: string;
+  readonly adapter: 'uniswap.v3' | 'weth9.wrap'; readonly semanticRevision: number; readonly manifestHash: string;
   readonly tx: Tx; readonly calldataDigest: string; readonly authorizedInput: string; readonly authorizedMinimumOutput: string;
   readonly preBlock: number; readonly nativeBefore: string; readonly inputBefore: string; readonly outputBefore: string;
   readonly allowanceBefore: string; readonly nativeAfter: string | null; readonly txHash: string | null; readonly receipt: PublicReceipt | null };
@@ -70,6 +76,9 @@ export type PublicRun = { readonly quote: PublicQuote; readonly workflow: Semant
 export type PublicBegin = { readonly attempt: PublicAttempt; readonly tx: Tx };
 const ADDRESS = /^0x[0-9a-f]{40}$/;
 const HASH = /^0x[0-9a-f]{64}$/;
+/** WETH9 `Deposit(address indexed dst, uint256 wad)` and `Withdrawal(address indexed src, uint256 wad)` (Base and Ethereum WETH9). */
+const DEPOSIT_TOPIC = '0xe1fffcc4923d04b559f4d29a8bfc6cda04eb5b0d3c460751c2402c5c5cc9109c';
+const WITHDRAWAL_TOPIC = '0x7fcf532c15f0a6db0bd6d0e038bea71d30d808c7d98cb3bf7268a95bf5081b65';
 /**
  * Run-id namespaces: `pub-` for the public-testnet pairs, `rhs-` (BUILD-RH-002) for Robinhood Chain mainnet catalog swaps, `bas-`
  * (BUILD-BASE-001) for Base mainnet swaps, so a run id alone routes to its deployment and a testnet journal can never hold a mainnet
@@ -117,6 +126,52 @@ function receiptSwap(logs: unknown[], quote: PublicQuote, owner: string, router:
   if (inDelta !== amountIn || outDelta !== -received) fail('TRANSACTION_MISMATCH');
   return received;
 }
+/**
+ * BUILD-FLOFI-BRIDGE-LIVE-FIX-003: a native-ETH swap or WETH9 conversion proven from its own receipt — never from an ERC-20 Transfer alone.
+ * A wrap is WETH's mint to the owner of exactly the amount; an unwrap its burn from the owner; a native-in swap is the router's wrap of exactly
+ * the amount, its WETH → pool transfer and the pool's output Transfer to the owner; a native-out swap is the owner's input Transfer to the pool,
+ * the pool's WETH → router transfer and the router's unwrap (the native ETH the router then pays the owner — its recipient is bound in the
+ * reviewed calldata). WETH's own dialect decides how a wrap and an unwrap are logged (WETH9 `Deposit`/`Withdrawal`, or an aeWETH Transfer
+ * mint/burn). Returns what was spent and received, in base units.
+ */
+function receiptNative(logs: unknown[], quote: PublicQuote, owner: string, P: CatalogSwapProfile, amountIn: bigint): { spent: bigint; received: bigint } {
+  const records = logs.filter(isObject), weth = P.weth, zero = '0x' + '0'.repeat(40);
+  const topics = (log: Record<string, unknown>) => Array.isArray(log.topics) ? log.topics as unknown[] : fail('TRANSACTION_MISMATCH');
+  const transfer = (log: Record<string, unknown>, from: string, to: string) => topics(log)[0] === TRANSFER_TOPIC && topicAddress(topics(log)[1]) === from && topicAddress(topics(log)[2]) === to;
+  /** WETH's wrap of `amount` for `holder` (minted to it), or its unwrap of `amount` from `holder` (burned from it). */
+  const wrapped = (log: Record<string, unknown>, holder: string) => P.wethEvents === 'WETH9' ? topics(log)[0] === DEPOSIT_TOPIC && topicAddress(topics(log)[1]) === holder : transfer(log, zero, holder);
+  const unwrapped = (log: Record<string, unknown>, holder: string) => P.wethEvents === 'WETH9' ? topics(log)[0] === WITHDRAWAL_TOPIC && topicAddress(topics(log)[1]) === holder : transfer(log, holder, zero);
+  const wethLogs = records.filter(log => address(log.address) === weth);
+  if (quote.conversion) {
+    const [only] = wethLogs;
+    if (records.length !== 1 || wethLogs.length !== 1 || quantity(only!.data) !== amountIn || !(quote.conversion === 'WRAP' ? wrapped(only!, owner) : unwrapped(only!, owner))) fail('TRANSACTION_MISMATCH');
+    return { spent: amountIn, received: amountIn };
+  }
+  const token = quote.native === 'INPUT' ? quote.outputToken : quote.inputToken, router = P.router;
+  const tokenLogs = records.filter(log => address(log.address) === token), poolLogs = records.filter(log => address(log.address) === quote.pool);
+  const tokenTransfers = tokenLogs.filter(log => topics(log)[0] === TRANSFER_TOPIC);
+  // A Stock Token's ERC-8056 companion log only mirrors a verified Transfer of the same token.
+  const companion = (log: Record<string, unknown>) => topics(log)[0] === SCALED_TRANSFER_TOPIC && tokenTransfers.some(t => topics(t)[1] === topics(log)[1] && topics(t)[2] === topics(log)[2]);
+  if (tokenTransfers.length !== 1 || !tokenLogs.every(log => tokenTransfers.includes(log) || companion(log)) || poolLogs.length !== 1 ||
+      records.some(log => ![weth, token, quote.pool].includes(address(log.address)))) fail('TRANSACTION_MISMATCH');
+  const [pool] = poolLogs as [Record<string, unknown>], [moved] = tokenTransfers as [Record<string, unknown>];
+  const data = hex(pool.data), amount0 = data.length < 130 ? null : signed(BigInt('0x' + data.slice(2, 66))), amount1 = data.length < 130 ? null : signed(BigInt('0x' + data.slice(66, 130)));
+  const [wethDelta, tokenDelta] = weth < token ? [amount0, amount1] : [amount1, amount0];
+  if (topics(pool)[0] !== SWAP_TOPIC || topicAddress(topics(pool)[1]) !== router) fail('TRANSACTION_MISMATCH');
+  if (quote.native === 'INPUT') {
+    // The router wraps exactly the sent value, pays the pool, and the pool pays the owner.
+    const wrap = wethLogs.find(log => wrapped(log, router)), paid = wethLogs.find(log => transfer(log, router, quote.pool));
+    const received = quantity(moved.data);
+    if (wethLogs.length !== 2 || !wrap || !paid || quantity(wrap.data) !== amountIn || quantity(paid.data) !== amountIn || !transfer(moved, quote.pool, owner) ||
+        topicAddress(topics(pool)[2]) !== owner || wethDelta !== amountIn || tokenDelta !== -received) fail('TRANSACTION_MISMATCH');
+    return { spent: amountIn, received };
+  }
+  // Native out: the owner pays the pool, the pool pays the router in WETH, the router unwraps all of it for the owner.
+  const paid = wethLogs.find(log => transfer(log, quote.pool, router)), unwrap = wethLogs.find(log => unwrapped(log, router));
+  if (wethLogs.length !== 2 || !paid || !unwrap || !transfer(moved, owner, quote.pool) || quantity(moved.data) !== amountIn || topicAddress(topics(pool)[2]) !== router ||
+      tokenDelta !== amountIn || wethDelta !== -quantity(paid.data) || quantity(unwrap.data) < quantity(paid.data)) fail('TRANSACTION_MISMATCH');
+  return { spent: amountIn, received: quantity(unwrap.data) };
+}
 function fail(code: string): never { throw new Error(code); }
 function address(value: unknown): string { if (typeof value !== 'string' || !ADDRESS.test(value.toLowerCase())) fail('ADDRESS_INVALID'); return value.toLowerCase(); }
 function hex(value: unknown): string { if (typeof value !== 'string' || !/^0x[0-9a-fA-F]+$/.test(value)) fail('RPC_RESPONSE_INVALID'); return value.toLowerCase(); }
@@ -137,6 +192,28 @@ const deadlineSwapData = (q: PublicQuote, owner: string, deadline: number) => {
   return toHex(encodeSwap({ tokenIn: q.inputToken, tokenOut: q.outputToken, fee: q.fee as 100 | 500 | 3000 | 10000,
     recipient: owner, amountIn: BigInt(q.amountIn), amountOutMinimum: BigInt(q.minimumOut), sqrtPriceLimitX96: 0n, deadline: BigInt(deadline) }));
 };
+/**
+ * BUILD-FLOFI-BRIDGE-LIVE-FIX-003: the reviewed main call of a quote — its target, exact calldata and exact native value. An ERC-20 swap keeps
+ * its existing encoding (`strict`: multicall with deadline; else exactInputSingle); a native-ETH swap is always the deadline multicall of
+ * `encodeNativeSwap` (native in: value = amount in; native out: the router unwraps for the owner); a wrap is WETH9 `deposit()` carrying
+ * exactly the amount; an unwrap WETH9 `withdraw(amount)`. A token approval, when needed, is a separate earlier call (ERC-20 input only).
+ */
+function mainCall(q: PublicQuote, owner: string, deadline: number, P: SwapProfile, strict: boolean): { to: string; data: string; value: string } {
+  const amount = BigInt(q.amountIn), value = (units: bigint) => '0x' + units.toString(16);
+  if (q.conversion) {
+    if (P.kind !== 'CATALOG') fail('PUBLIC_WORKFLOW_UNSUPPORTED');
+    return q.conversion === 'WRAP' ? { to: P.weth, data: toHex(encodeWethDeposit()), value: value(amount) } : { to: P.weth, data: toHex(encodeWethWithdraw(amount)), value: '0x0' };
+  }
+  if (q.native) {
+    if (P.kind !== 'CATALOG' || ![100, 500, 3000, 10000].includes(q.fee)) fail('QUOTE_INVALID');
+    const data = toHex(encodeNativeSwap({ native: q.native, weth: P.weth, tokenIn: q.native === 'INPUT' ? P.weth : q.inputToken, tokenOut: q.native === 'OUTPUT' ? P.weth : q.outputToken,
+      fee: q.fee as 100 | 500 | 3000 | 10000, recipient: owner, amountIn: amount, amountOutMinimum: BigInt(q.minimumOut), sqrtPriceLimitX96: 0n, deadline: BigInt(deadline) }));
+    return { to: P.router, data, value: q.native === 'INPUT' ? value(amount) : '0x0' };
+  }
+  return { to: P.router, data: strict ? deadlineSwapData(q, owner, deadline) : swapData(q, owner), value: '0x0' };
+}
+/** Whether the main call spends an ERC-20 the router must be allowed to pull (never for native ETH in, a wrap or an unwrap). */
+const needsAllowance = (q: PublicQuote) => !q.conversion && q.native !== 'INPUT';
 const poolData = (a: string, b: string, p: PairSwapProfile) => callData('0x1698ee82', addrWord(a), addrWord(b), word(BigInt(p.fee)));
 const quoteData = (a: string, b: string, amount: bigint, fee: number) => callData('0xc6a5026a', addrWord(a), addrWord(b),
   word(amount), word(BigInt(fee)), word(0n));
@@ -231,14 +308,18 @@ function delegatedExecutionDepth(input: string, target: string, data: string): n
  * owner). Read-only; shared by the public swap and the public Uniswap liquidity flow. Effects are checked by the caller.
  */
 export async function verifyOwnerSubmission(rpc: Rpc, attempt: { readonly txHash: string; readonly account: string; readonly target: string;
-  readonly data: string; readonly preBlock: number }, tx: unknown, raw: Record<string, unknown>,
+  readonly data: string; readonly preBlock: number; /** BUILD-FLOFI-BRIDGE-LIVE-FIX-003: the reviewed native value (hex); absent: 0. */ readonly value?: string },
+  tx: unknown, raw: Record<string, unknown>,
   /** EVM chain id of the reviewed call (Base Sepolia unless a flow names its chain, e.g. the Base mainnet router). */ chainId = 84532,
   /** OP Stack receipts must carry `l1Fee`; an Ethereum L1 receipt must not (BUILD-ETHEREUM-001). */ l1DataFee = true) {
   if (!isObject(tx)) fail('TRANSACTION_MISMATCH');
   const txFrom = address(tx.from), txTo = address(tx.to), txInput = hex(tx.input);
-  if (Number(quantity(tx.chainId)) !== chainId || hex(tx.hash) !== attempt.txHash || quantity(tx.value) !== 0n)
+  const value = BigInt(attempt.value ?? '0x0');
+  if (Number(quantity(tx.chainId)) !== chainId || hex(tx.hash) !== attempt.txHash || quantity(tx.value) !== value)
     fail('TRANSACTION_MISMATCH');
   const direct = txFrom === attempt.account && txTo === attempt.target && txInput === attempt.data;
+  // A call that carries native ETH is only ever the owner's own direct transaction (no delegated re-entry may move that value).
+  if (value > 0n && !direct) fail('TRANSACTION_MISMATCH');
   const delegationDepth = delegatedExecutionDepth(txInput, attempt.target, attempt.data);
   const authorizations = tx.authorizationList;
   const txType = direct ? null : hex(tx.type);
@@ -483,7 +564,13 @@ export type CatalogSwapRuntime = { readonly catalogFor: (chain: string) => Promi
   readonly codePins?: Partial<Record<string, string>>; readonly executionEnabled: boolean };
 const sha256Hex = (code: string) => createHash('sha256').update(Buffer.from(code.slice(2), 'hex')).digest('hex');
 /** One side of a catalog swap: the current official catalog must still map the authored identity exactly. */
-function catalogSide(catalog: AssetCatalog, ref: { address: string; decimals: number; officialId: string | null }, side: 'input' | 'output'): CanonicalAsset {
+function catalogSide(catalog: AssetCatalog, ref: CatalogAssetRef, side: 'input' | 'output'): CanonicalAsset {
+  // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: the network's native ETH, by the catalog's own NATIVE entry (never its WETH).
+  if (ref.address === null) {
+    const native = catalogAsset(catalog, { symbol: 'ETH' });
+    if (!native || native.kind !== 'NATIVE' || native.decimals !== 18 || native.chain !== catalog.chain) fail('CATALOG_ASSET_IDENTITY_CHANGED');
+    return native;
+  }
   const asset = catalogAsset(catalog, { address: ref.address });
   if (!asset || asset.chain !== catalog.chain || asset.chainId !== catalog.chainId || asset.kind !== 'ERC20' || asset.decimals !== ref.decimals || (asset.stock?.officialId ?? null) !== ref.officialId)
     fail('CATALOG_ASSET_IDENTITY_CHANGED');
@@ -579,8 +666,10 @@ function catalogSwapRead(workflow: SemanticWorkflow, P: CatalogSwapProfile): { n
  */
 async function catalogQuote(workflow: SemanticWorkflow, executionId: string, P: CatalogSwapProfile, rpc: Rpc, runtime: CatalogSwapRuntime, now: () => Date): Promise<PublicQuote> {
   const { node, fields } = catalogSwapRead(workflow, P);
+  // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: a side may be the network's native ETH; ETH ⇄ WETH9 is a WETH9 conversion (its own adapter, no pool).
+  const kind = catalogSwapKind(fields), native = fields.input.address === null ? 'INPUT' as const : fields.output.address === null ? 'OUTPUT' as const : null;
   const cap = resolveWorkflowCapability(workflow, { environment: P.environment });
-  if (!cap.executionSupported || cap.nodes.find(item => item.nodeId === node.nodeId)?.profile?.adapterId !== 'uniswap.v3') fail('PUBLIC_WORKFLOW_UNSUPPORTED');
+  if (!cap.executionSupported || cap.nodes.find(item => item.nodeId === node.nodeId)?.profile?.adapterId !== (kind === 'SWAP' ? 'uniswap.v3' : 'weth9.wrap')) fail('PUBLIC_WORKFLOW_UNSUPPORTED');
   const catalog = await runtime.catalogFor(P.chainRef);
   if (catalog.chain !== P.chainRef || catalog.chainId !== P.chainId) fail('CATALOG_NETWORK_MISMATCH');
   const input = catalogSide(catalog, fields.input, 'input'), output = catalogSide(catalog, fields.output, 'output');
@@ -608,24 +697,31 @@ async function catalogQuote(workflow: SemanticWorkflow, executionId: string, P: 
     if (addressOf(await call(target, '0xc45a0155', block)) !== P.factory || addressOf(await call(target, '0x4aa4a4fc', block)) !== P.weth) fail('PROTOCOL_DEPLOYMENT_MISMATCH');
   const stocks: StockQuoteState[] = [];
   for (const [side, asset] of [['input', input], ['output', output]] as const) {
+    if (asset.kind === 'NATIVE') continue;
     const stock = await verifyCatalogToken(rpc, policy, asset, side, block, headTime, P.reviewTtlSeconds, now);
     if (stock) stocks.push(stock);
   }
-  // Every standard fee tier's canonical pool is derived locally (CREATE2), checked for code and live liquidity, and quoted.
+  // Native ETH travels through the router's WETH9 (the router's own `WETH9()`, checked above): it must carry its pinned code.
+  if (native && sha256Hex(await code(P.weth)) !== pins.weth) fail('TOKEN_DEPLOYMENT_MISMATCH');
   const amountIn = BigInt(fields.amount), tiers: { fee: number; pool: string; expectedOut: string | null }[] = [];
-  for (const tier of P.feeTiers) {
-    const pool = uniswapV3PoolAddress(P.factory, P.poolInitCodeHash, input.address!, output.address!, tier.fee);
+  const routeToken = (asset: CanonicalAsset) => asset.kind === 'NATIVE' ? P.weth : asset.address!;
+  const inRoute = routeToken(input), outRoute = routeToken(output);
+  // Every standard fee tier's canonical pool is derived locally (CREATE2), checked for code and live liquidity, and quoted. A WETH9 conversion has none.
+  for (const tier of kind === 'SWAP' ? P.feeTiers : []) {
+    const pool = uniswapV3PoolAddress(P.factory, P.poolInitCodeHash, inRoute, outRoute, tier.fee);
     if (await codeAt(pool) === '0x') { tiers.push({ fee: tier.fee, pool, expectedOut: null }); continue; }
-    const [token0, token1] = [input.address!, output.address!].sort();
+    const [token0, token1] = [inRoute, outRoute].sort();
     if (addressOf(await call(pool, '0xc45a0155', block)) !== P.factory || addressOf(await call(pool, '0x0dfe1681', block)) !== token0 ||
         addressOf(await call(pool, '0xd21220a7', block)) !== token1 || BigInt(await call(pool, '0xddca3f43', block)) !== BigInt(tier.fee)) fail('POOL_METADATA_MISMATCH');
     if (BigInt(await call(pool, '0x1a686502', block)) === 0n || word0(await call(pool, '0x3850c7bd', block)) === 0n) { tiers.push({ fee: tier.fee, pool, expectedOut: null }); continue; }
     // A tier whose quote reverts (no usable liquidity for this size) is simply not a candidate.
     let out: bigint | null;
-    try { out = word0(await call(P.quoter, quoteData(input.address!, output.address!, amountIn, tier.fee), block)); } catch { out = null; }
+    try { out = word0(await call(P.quoter, quoteData(inRoute, outRoute, amountIn, tier.fee), block)); } catch { out = null; }
     tiers.push({ fee: tier.fee, pool, expectedOut: out && out > 0n ? out.toString() : null });
   }
-  const best = tiers.filter(tier => tier.expectedOut !== null).sort((a, b) => BigInt(b.expectedOut!) > BigInt(a.expectedOut!) ? 1 : BigInt(b.expectedOut!) < BigInt(a.expectedOut!) ? -1 : a.fee - b.fee)[0];
+  // A WETH9 conversion is exactly 1:1 on the WETH9 contract itself (its "pool"); its minimum is the amount.
+  const best = kind !== 'SWAP' ? { fee: 0, pool: P.weth, expectedOut: amountIn.toString() }
+    : tiers.filter(tier => tier.expectedOut !== null).sort((a, b) => BigInt(b.expectedOut!) > BigInt(a.expectedOut!) ? 1 : BigInt(b.expectedOut!) < BigInt(a.expectedOut!) ? -1 : a.fee - b.fee)[0];
   if (!best) fail('POOL_UNUSABLE');
   const expectedOut = BigInt(best.expectedOut!), minimumOut = expectedOut * BigInt(10_000 - fields.slippageBps) / 10_000n;
   if (minimumOut <= 0n) fail('QUOTE_INVALID');
@@ -634,11 +730,13 @@ async function catalogQuote(workflow: SemanticWorkflow, executionId: string, P: 
   const observedAt = now().toISOString();
   const quoteFields = { executionId, revision: workflow.revision, nodeId: node.nodeId,
     workflowHash: hashArtifactBytes('semantic-workflow', new TextEncoder().encode(JSON.stringify(workflow))), chainId: P.chainId,
-    inputToken: input.address!, outputToken: output.address!, inputSymbol: input.symbol, outputSymbol: output.symbol, amountIn: fields.amount,
+    inputToken: input.kind === 'NATIVE' ? NATIVE_ETH : input.address!, outputToken: output.kind === 'NATIVE' ? NATIVE_ETH : output.address!,
+    inputSymbol: input.symbol, outputSymbol: output.symbol, amountIn: fields.amount,
     expectedOut: expectedOut.toString(), minimumOut: minimumOut.toString(), slippageBps: fields.slippageBps, pool: best.pool, fee: best.fee,
     blockNumber, blockHash, observedAt, expiresAt: new Date(now().getTime() + P.reviewTtlSeconds * 1000).toISOString(), estimatedGas: null,
     inputDecimals: input.decimals, outputDecimals: output.decimals, environment: 'MAINNET' as const, provenance: runtime.provenance, stocks, feeTiers: tiers,
-    catalog: { contentSha256: catalog.provenance.map(item => item.contentSha256), fetchedAt: catalog.provenance.map(item => item.fetchedAt).sort().at(-1)! } };
+    catalog: { contentSha256: catalog.provenance.map(item => item.contentSha256), fetchedAt: catalog.provenance.map(item => item.fetchedAt).sort().at(-1)! },
+    ...native ? { native } : {}, ...kind !== 'SWAP' ? { conversion: kind } : {} };
   return { ...quoteFields, manifestHash: digest(canonical(quoteFields)) };
 }
 /** The economically material state of a catalog quote: a change of any of it needs a new Review. */
@@ -652,10 +750,12 @@ async function bindSwapOwner(q: PublicQuote, rpc: Rpc, ownerValue: string, expir
   const P = profileOf(q.chainId), account = address(ownerValue), at = blockHex(q.blockNumber);
   if (account === '0x' + '0'.repeat(40)) fail('ADDRESS_INVALID');
   if (quantity(await rpc('eth_chainId', [])) !== BigInt(P.chainId)) fail('WRONG_PROVIDER_CHAIN');
+  // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: native ETH in is spent from the account's own balance (no allowance); an ERC-20 in keeps its allowance read.
+  const nativeIn = q.native === 'INPUT' || q.conversion === 'WRAP', allowanceRead = needsAllowance(q);
   const [nonce, pending, allowed, input, native, gasPrice, code] = await Promise.all([
     rpc('eth_getTransactionCount', [account, at]).then(quantity), rpc('eth_getTransactionCount', [account, 'pending']).then(quantity),
-    rpc('eth_call', [{ to: q.inputToken, data: allowanceData(account, P) }, at]).then(quantity),
-    rpc('eth_call', [{ to: q.inputToken, data: balanceData(account) }, at]).then(quantity),
+    allowanceRead ? rpc('eth_call', [{ to: q.inputToken, data: allowanceData(account, P) }, at]).then(quantity) : Promise.resolve(BigInt(q.amountIn)),
+    nativeIn ? rpc('eth_getBalance', [account, at]).then(quantity) : rpc('eth_call', [{ to: q.inputToken, data: balanceData(account) }, at]).then(quantity),
     rpc('eth_getBalance', [account, at]).then(quantity), rpc('eth_gasPrice', []).then(quantity), rpc('eth_getCode', [account, at]),
   ]);
   if (code !== '0x') fail('OWNER_NOT_EOA');
@@ -664,9 +764,10 @@ async function bindSwapOwner(q: PublicQuote, rpc: Rpc, ownerValue: string, expir
   if (pending < nonce) fail('OWNER_NONCE_STATE_INVALID');
   if (input < BigInt(q.amountIn)) fail('INSUFFICIENT_INPUT');
   const step: Step = allowed < BigInt(q.amountIn) ? 'approval' : 'swap', deadline = Math.floor(Date.parse(expiresAt) / 1000);
-  const data = step === 'approval' ? approveData(BigInt(q.amountIn), P) : deadlineSwapData(q, account, deadline);
-  const to = step === 'approval' ? q.inputToken : P.router;
-  const call = { from: account, to, data, value: '0x0' as const };
+  const main = mainCall(q, account, deadline, P, true);
+  const data = step === 'approval' ? approveData(BigInt(q.amountIn), P) : main.data;
+  const to = step === 'approval' ? q.inputToken : main.to;
+  const call = { from: account, to, data, value: step === 'approval' ? '0x0' : main.value };
   const simulation = await rpc('eth_call', [call, at]);
   if (typeof simulation !== 'string' || !/^0x(?:[0-9a-fA-F]{2})*$/.test(simulation) ||
       step === 'approval' && simulation !== '0x' && simulation !== '0x' + word(1n)) fail('SWAP_SIMULATION_INVALID');
@@ -674,7 +775,8 @@ async function bindSwapOwner(q: PublicQuote, rpc: Rpc, ownerValue: string, expir
   if (gas < 21_000n || gas > 30_000_000n || gasPrice <= 0n || gasPrice >= 1n << 128n) fail('SWAP_FEE_INVALID');
   // Nitro: estimate includes posting gas. No separate OP Stack l1Fee, no quoter-only gas estimate.
   const gasLimit = nitroGasLimit(gas), maxFee = nitroMaxFeePerGas(gasPrice), budget = gasLimit * maxFee;
-  if (native < budget) fail('INSUFFICIENT_GAS_FUNDS');
+  // Native ETH in must cover the amount AND the network fee ceiling (the wallet pays both from the same balance).
+  if (native < budget + BigInt(call.value)) fail(native < BigInt(call.value) ? 'INSUFFICIENT_INPUT' : 'INSUFFICIENT_GAS_FUNDS');
   const transaction: Tx = { ...call, chainId: P.chainHex, nonce: '0x' + pending.toString(16), gas: '0x' + gasLimit.toString(16),
     maxFeePerGas: '0x' + maxFee.toString(16), maxPriorityFeePerGas: '0x0' };
   const ownerReview: SwapOwnerReview = { account, router: P.router, nonce: pending.toString(), step, allowance: allowed.toString(), transaction,
@@ -832,27 +934,31 @@ function createPublicTestnetCore(rpcFor: (profile: SwapProfile) => Rpc, now: () 
       } });
       if (!gate.executionReady) fail('EXECUTION_NOT_READY');
       const head = Number(quantity(await rpc('eth_blockNumber', []))), at = blockHex(head);
-      const amountIn = BigInt(run.quote.amountIn);
+      const amountIn = BigInt(run.quote.amountIn), q = run.quote;
+      // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: a native side is read as the account's native balance (never as WETH); native ETH in needs no allowance.
+      const nativeBalance = () => rpc('eth_getBalance', [owner, at]).then(quantity);
       const [inputBefore, outputBefore, allowanceBefore, ethBefore] = await Promise.all([
-        balance(rpc, run.quote.inputToken, owner, at), balance(rpc, run.quote.outputToken, owner, at),
-        allowance(rpc, P, run.quote.inputToken, owner, at), rpc('eth_getBalance', [owner, at]).then(quantity),
+        q.inputToken === NATIVE_ETH ? nativeBalance() : balance(rpc, q.inputToken, owner, at), q.outputToken === NATIVE_ETH ? nativeBalance() : balance(rpc, q.outputToken, owner, at),
+        needsAllowance(q) ? allowance(rpc, P, q.inputToken, owner, at) : Promise.resolve(amountIn), nativeBalance(),
       ]);
       if (inputBefore < amountIn) fail('INSUFFICIENT_INPUT');
       const step: Step = allowanceBefore < amountIn ? 'approval' : 'swap';
       if (step === 'approval' && run.attempts.some(a => a.step === 'approval' && a.state === 'CONFIRMED')) fail('APPROVAL_INEFFECTIVE');
-      const data = strict ? reviewedOwner!.transaction.data : step === 'approval' ? approveData(amountIn, P) : swapData(run.quote, owner);
-      const to = step === 'approval' ? run.quote.inputToken : P.router;
-      const baseTx = { chainId: P.chainHex, from: owner, to, data, value: '0x0' as const };
-      const gas = quantity(await rpc('eth_estimateGas', [{ from: owner, to, data, value: '0x0' }]));
+      const main = mainCall(q, owner, Math.floor(Date.parse(q.expiresAt) / 1000), P, false);
+      const data = strict ? reviewedOwner!.transaction.data : step === 'approval' ? approveData(amountIn, P) : main.data;
+      const to = step === 'approval' ? q.inputToken : main.to, value = step === 'approval' ? '0x0' : main.value;
+      const baseTx = { chainId: P.chainHex, from: owner, to, data, value };
+      const gas = quantity(await rpc('eth_estimateGas', [{ from: owner, to, data, value }]));
       const gasPrice = quantity(await rpc('eth_gasPrice', []));
       // BUILD-BASE-001: on an OP Stack catalog network the owner also pays the L1 data fee, bounded by the GasPriceOracle (fails closed).
       const l1Fee = 'gasPriceOracle' in P ? quantity(await rpc('eth_call', [{ to: P.gasPriceOracle, data: '0xf1c7a58b' + word(BigInt((data.length - 2) / 2 + 120)) }, at])) : 0n;
-      if (gas <= 0n || gasPrice <= 0n || ethBefore < gas * gasPrice * 2n + l1Fee) fail(P.environment === 'MAINNET' ? 'INSUFFICIENT_GAS_FUNDS' : 'INSUFFICIENT_TEST_ETH');
+      // Native ETH in is paid from the same balance as the network fee: the account needs both.
+      if (gas <= 0n || gasPrice <= 0n || ethBefore < gas * gasPrice * 2n + l1Fee + BigInt(value)) fail(P.environment === 'MAINNET' ? 'INSUFFICIENT_GAS_FUNDS' : 'INSUFFICIENT_TEST_ETH');
       const tx: Tx = strict ? reviewedOwner!.transaction : { ...baseTx, gas: '0x' + (gas * 12n / 10n).toString(16) };
       if (strict) {
         const [nonce, pending] = await Promise.all([rpc('eth_getTransactionCount', [owner, 'latest']).then(quantity),
           rpc('eth_getTransactionCount', [owner, 'pending']).then(quantity)]);
-        if (step !== reviewedOwner!.step || ethBefore < BigInt(reviewedOwner!.feeBudgetWei) || gas > BigInt(tx.gas) || gasPrice > BigInt(reviewedOwner!.maxFeePerGas)) {
+        if (step !== reviewedOwner!.step || BigInt(tx.value) !== BigInt(value) || ethBefore < BigInt(reviewedOwner!.feeBudgetWei) + BigInt(tx.value) || gas > BigInt(tx.gas) || gasPrice > BigInt(reviewedOwner!.maxFeePerGas)) {
           await save({ ...run, reviewedManifestHash: null }); fail('OWNER_STATE_CHANGED_REVIEW_REQUIRED');
         }
         // The reviewed nonce must still be the one the account uses next (its other pending transactions come before it).
@@ -863,7 +969,7 @@ function createPublicTestnetCore(rpcFor: (profile: SwapProfile) => Rpc, now: () 
       }
       const attempt: PublicAttempt = { attemptId: id + '.' + step + '.' + String(run.attempts.length + 1), executionId: id,
         step, state: 'PREPARED', createdAt: now().toISOString(), submittedAt: null, account: owner, chainId: P.chainId, environment: P.environment,
-        adapter: 'uniswap.v3', semanticRevision: run.quote.revision, manifestHash: run.quote.manifestHash,
+        adapter: run.quote.conversion ? 'weth9.wrap' : 'uniswap.v3', semanticRevision: run.quote.revision, manifestHash: run.quote.manifestHash,
         tx, calldataDigest: digest(data), authorizedInput: run.quote.amountIn,
         authorizedMinimumOutput: run.quote.minimumOut, preBlock: head, nativeBefore: ethBefore.toString(), inputBefore: inputBefore.toString(),
         outputBefore: outputBefore.toString(), allowanceBefore: allowanceBefore.toString(), nativeAfter: null, txHash: null, receipt: null };
@@ -894,7 +1000,7 @@ function createPublicTestnetCore(rpcFor: (profile: SwapProfile) => Rpc, now: () 
         const tx = await rpc('eth_getTransactionByHash', [attempt.txHash]);
         let verified: Awaited<ReturnType<typeof verifyOwnerSubmission>>;
         try { verified = await verifyOwnerSubmission(rpc, { txHash: attempt.txHash, account: attempt.account, target: attempt.tx.to, data: attempt.tx.data,
-          preBlock: attempt.preBlock }, tx, raw, P.chainId, P.l1DataFee); }
+          preBlock: attempt.preBlock, value: attempt.tx.value }, tx, raw, P.chainId, P.l1DataFee); }
         catch (cause) {
           // Not yet canonically included (e.g. a preconfirmed receipt): exactly like no receipt yet.
           if (cause instanceof Error && cause.message === 'RECEIPT_NOT_CANONICAL')
@@ -910,7 +1016,8 @@ function createPublicTestnetCore(rpcFor: (profile: SwapProfile) => Rpc, now: () 
         const concurrent = direct && P.kind === 'CATALOG' && quantity(await rpc('eth_getTransactionCount', [attempt.account, blockHex(blockNumber)])) -
           quantity(await rpc('eth_getTransactionCount', [attempt.account, blockHex(attempt.preBlock)])) > 1n;
         let receivedByReceipt: bigint | null = null;
-        if (concurrent && status === 1) {
+        const nativeRun = Boolean(run.quote.native || run.quote.conversion);
+        if (concurrent && status === 1 && !(nativeRun && attempt.step === 'swap')) {
           if (!Array.isArray(raw.logs)) fail('RECEIPT_INVALID');
           const records = raw.logs.filter(isObject);
           if (attempt.step === 'approval') {
@@ -952,6 +1059,12 @@ function createPublicTestnetCore(rpcFor: (profile: SwapProfile) => Rpc, now: () 
               fail('TRANSACTION_MISMATCH');
           }
         }
+        // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: a native-ETH swap or WETH9 conversion is always proven from its own receipt (direct only).
+        let nativeProof: { spent: bigint; received: bigint } | null = null;
+        if (nativeRun && attempt.step === 'swap' && status === 1) {
+          if (!direct || P.kind !== 'CATALOG' || !Array.isArray(raw.logs)) fail('TRANSACTION_MISMATCH');
+          nativeProof = receiptNative(raw.logs, run.quote, attempt.account, P, BigInt(attempt.authorizedInput));
+        }
         if (run.quote.ownerReview) {
           const submitted = isObject(tx) ? tx : fail('TRANSACTION_MISMATCH');
           const offeredFee = submitted.maxFeePerGas === undefined ? quantity(submitted.gasPrice) : quantity(submitted.maxFeePerGas);
@@ -965,7 +1078,7 @@ function createPublicTestnetCore(rpcFor: (profile: SwapProfile) => Rpc, now: () 
           gasUsed: gasUsed.toString(), effectiveGasPrice: effectiveGasPrice.toString(),
           executionGasCostWei: executionGasCost.toString(), l1FeeWei: l1Fee.toString(),
           gasCostWei: (executionGasCost + l1Fee).toString(), gasPayer: txFrom,
-          nonce: nonce.toString(), value: '0',
+          nonce: nonce.toString(), value: BigInt(attempt.tx.value).toString(),
           submissionKind: delegated ? 'DELEGATED_SINGLE' : 'DIRECT', executionTarget: attempt.tx.to,
           delegationDepth,
           outerCalldataDigest: digest(txInput), executionCalldataDigest: attempt.calldataDigest };
@@ -974,9 +1087,11 @@ function createPublicTestnetCore(rpcFor: (profile: SwapProfile) => Rpc, now: () 
         if (status === 0) return run;
         const at = blockHex(blockNumber);
         if (attempt.step === 'approval') {
+          // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: a native-ETH output side is the native balance, which only this approval's gas moved (checked below).
+          const nativeOut = run.quote.outputToken === NATIVE_ETH;
           const [observed, inputAfter, outputAfter, nativeAfter] = await Promise.all([
             allowance(rpc, P, run.quote.inputToken, attempt.account, at),
-            balance(rpc, run.quote.inputToken, attempt.account, at), balance(rpc, run.quote.outputToken, attempt.account, at),
+            balance(rpc, run.quote.inputToken, attempt.account, at), nativeOut ? Promise.resolve(BigInt(attempt.outputBefore)) : balance(rpc, run.quote.outputToken, attempt.account, at),
             rpc('eth_getBalance', [attempt.account, at]).then(quantity),
           ]);
           if (observed !== BigInt(attempt.authorizedInput) || !concurrent && (inputAfter !== BigInt(attempt.inputBefore) || outputAfter !== BigInt(attempt.outputBefore)) ||
@@ -986,36 +1101,52 @@ function createPublicTestnetCore(rpcFor: (profile: SwapProfile) => Rpc, now: () 
           return await save({ ...run, attempts: run.attempts.map(a => a.attemptId === attempt.attemptId ?
             { ...a, nativeAfter: nativeAfter.toString() } : a) });
         }
+        const nativeAt = () => rpc('eth_getBalance', [attempt.account, at]).then(quantity);
         const [inputAfter, outputAfter, allowanceAfter, nativeAfter] = await Promise.all([
-          balance(rpc, run.quote.inputToken, attempt.account, at), balance(rpc, run.quote.outputToken, attempt.account, at),
-          allowance(rpc, P, run.quote.inputToken, attempt.account, at), rpc('eth_getBalance', [attempt.account, at]).then(quantity),
+          run.quote.inputToken === NATIVE_ETH ? nativeAt() : balance(rpc, run.quote.inputToken, attempt.account, at),
+          run.quote.outputToken === NATIVE_ETH ? nativeAt() : balance(rpc, run.quote.outputToken, attempt.account, at),
+          needsAllowance(run.quote) ? allowance(rpc, P, run.quote.inputToken, attempt.account, at) : Promise.resolve(0n), nativeAt(),
         ]);
-        const spent = concurrent ? BigInt(attempt.authorizedInput) : BigInt(attempt.inputBefore) - inputAfter;
-        const received = concurrent ? receivedByReceipt! : outputAfter - BigInt(attempt.outputBefore);
         const approvalGasCost = run.attempts.filter(a => a.step === 'approval' && a.state === 'CONFIRMED').reduce((sum, a) => {
           if (a.nativeAfter === null || a.receipt === null) fail('APPROVAL_GAS_UNKNOWN');
           return sum + BigInt(a.receipt.gasCostWei);
         }, 0n);
         const actualGasCost = BigInt(receipt.gasCostWei) + approvalGasCost;
-        if (spent !== BigInt(run.quote.amountIn) || received < BigInt(run.quote.minimumOut) ||
-            (direct && BigInt(attempt.nativeBefore) - nativeAfter < BigInt(receipt.gasCostWei)) ||
-            (delegated && nativeAfter !== BigInt(attempt.nativeBefore))) fail('RECONCILIATION_MISMATCH');
+        let spent: bigint, received: bigint;
+        if (nativeProof) {
+          // The receipt proves the amounts; the balances only bound them. Native ETH and gas share one balance, so a gas deduction is never read
+          // as a missing output: native in spent at most amount + gas; native out received at least the proven amount − gas. Third-party
+          // deposits can only add to a balance; an owner transaction in the window (concurrent) leaves the receipt as the only proof.
+          ({ spent, received } = nativeProof);
+          const gasCost = BigInt(receipt.gasCostWei), nativeDelta = nativeAfter - BigInt(attempt.nativeBefore);
+          const nativeIn = run.quote.inputToken === NATIVE_ETH, nativeOut = run.quote.outputToken === NATIVE_ETH;
+          if (!concurrent && (nativeIn && -nativeDelta > spent + gasCost || nativeOut && nativeDelta + gasCost < received ||
+              !nativeIn && BigInt(attempt.inputBefore) - inputAfter !== spent || !nativeOut && outputAfter - BigInt(attempt.outputBefore) < received)) fail('RECONCILIATION_MISMATCH');
+          if (spent !== BigInt(run.quote.amountIn) || received < BigInt(run.quote.minimumOut)) fail('RECONCILIATION_MISMATCH');
+        } else {
+          spent = concurrent ? BigInt(attempt.authorizedInput) : BigInt(attempt.inputBefore) - inputAfter;
+          received = concurrent ? receivedByReceipt! : outputAfter - BigInt(attempt.outputBefore);
+          if (spent !== BigInt(run.quote.amountIn) || received < BigInt(run.quote.minimumOut) ||
+              (direct && BigInt(attempt.nativeBefore) - nativeAfter < BigInt(receipt.gasCostWei)) ||
+              (delegated && nativeAfter !== BigInt(attempt.nativeBefore))) fail('RECONCILIATION_MISMATCH');
+        }
         const explorer = explorerUrl(attempt.txHash, P);
         run = { ...run, attempts: run.attempts.map(a => a.attemptId === attempt.attemptId ?
           { ...a, nativeAfter: nativeAfter.toString() } : a) };
         const journalHeadHash = digest(canonical(run));
         const receiptHash = digest(canonical(raw));
-        const inputAsset = { chainId: P.chainRef, address: run.quote.inputToken, decimals: quoteDecimals(run.quote, 'input') };
-        const outputAsset = { chainId: P.chainRef, address: run.quote.outputToken, decimals: quoteDecimals(run.quote, 'output') };
         const nativeAsset = { chainId: P.chainRef, nativeId: 'ETH', decimals: 18 };
+        // Native ETH is reconciled as the native asset, never as WETH9 or the EIP-7528 marker.
+        const inputAsset = run.quote.inputToken === NATIVE_ETH ? nativeAsset : { chainId: P.chainRef, address: run.quote.inputToken, decimals: quoteDecimals(run.quote, 'input') };
+        const outputAsset = run.quote.outputToken === NATIVE_ETH ? nativeAsset : { chainId: P.chainRef, address: run.quote.outputToken, decimals: quoteDecimals(run.quote, 'output') };
         const reconciliation = { balances: [{ asset: inputAsset, amount: inputAfter.toString() },
           { asset: outputAsset, amount: outputAfter.toString() }],
-          allowances: [{ asset: inputAsset, amount: allowanceAfter.toString() }], debt: [], positions: [],
+          allowances: needsAllowance(run.quote) ? [{ asset: inputAsset, amount: allowanceAfter.toString() }] : [], debt: [], positions: [],
           fees: [{ asset: nativeAsset, amount: actualGasCost.toString() }],
           residualAssets: [{ asset: inputAsset, amount: inputAfter.toString() }, { asset: outputAsset, amount: outputAfter.toString() }],
           ownership: [{ chainId: P.chainRef, address: attempt.account }],
           limitations: [...P.kind === 'CATALOG' ? ['OWNER_WALLET_MAINNET', ...run.quote.provenance === 'MOCKED' ? ['MOCKED_LOOPBACK_CHAIN'] : []] : ['PUBLIC_TESTNET_ONLY'],
-            ...concurrent ? ['OWNER_TRANSACTIONS_IN_WINDOW_RECEIPT_RECONCILED'] : []] };
+            ...concurrent ? ['OWNER_TRANSACTIONS_IN_WINDOW_RECEIPT_RECONCILED'] : [], ...nativeProof ? ['NATIVE_ETH_RECEIPT_RECONCILED'] : []] };
         const bundle = validateArtifact('evidence-bundle', { schemaVersion: '1.0.0',
           evidenceBundleId: id + '.evidence', version: 1, supersedes: null,
           semanticWorkflowHash: run.quote.workflowHash, artifactSetHash: digest(canonical(run.quote)),

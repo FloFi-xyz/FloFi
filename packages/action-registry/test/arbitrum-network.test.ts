@@ -104,7 +104,7 @@ describe('BUILD-ARB-001 capability discovery is not execution authority', () => 
     // BUILD-CROSSCHAIN-UNIVERSAL-001 adds the universal router's MAINNET row (no evidence ceiling) after the existing ones.
     expect(executionCapabilityRegistry.filter(row => row.chainId === ARBITRUM_ONE.chain && row.environment === 'MAINNET')
       .map(row => `${row.actionType}/${row.adapterId}`)).toEqual(['asset.bridge/flofi.router', 'asset.swap.exact-input/uniswap.v3', 'asset.transfer/evm.native-transfer', 'asset.transfer/evm.token-transfer', 'asset.liquidity.concentrated/uniswap.v3', 'supply/aave-v3', 'borrow/aave-v3', 'repay/aave-v3', 'withdraw/aave-v3',
-        'asset.bridge/flofi.router.universal']);
+        'asset.swap.exact-input/weth9.wrap', 'asset.bridge/flofi.router.universal']); // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: + native ETH ⇄ WETH9
     expect(discoverNetworkCapabilities('eip155:421614')).toEqual([]);
     expect(discoverNetworkCapabilities('arbitrum')).toEqual([]);
   });

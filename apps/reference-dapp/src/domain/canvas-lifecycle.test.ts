@@ -46,6 +46,14 @@ describe('shared Canvas lifecycle across runtime projections', () => {
     return f;
   }
   const hash = (c: string) => `0x${c.repeat(64)}`;
+  it('BUILD-FLOFI-BRIDGE-LIVE-FIX-003: a Review refused at the execution boundary (requote) offers a fresh simulation, never a dead disabled approval', () => {
+    // Production: begin deauthorized the Router run (ROUTE_CHANGED, requote) and the Canvas kept a disabled "Authorize in wallet", so the chat
+    // re-presented that dead Review on every "Review workflow" instead of simulating again.
+    const f = fixture('router'), record = (f.source.state as unknown as { record: Record<string, unknown> }).record;
+    const refused = { ...f, source: { ...f.source, state: { ...f.source.state, error: 'ROUTE_CHANGED', record: { ...record, requote: true, error: 'ROUTE_CHANGED' } } } as unknown as SimulationSource };
+    expect(projectCanvasAction(refused, controls)).toEqual({ kind: 'simulate', label: 'Simulate again', disabled: false });
+    expect(projectCanvasAction({ ...refused, invalidWorkflow: true }, controls)).toMatchObject({ kind: 'simulate', disabled: true });
+  });
   it('a wallet request declined before submission concludes the attempt: Simulate again, also after a reload, never "Recover execution"', () => {
     for (const restored of [false, true]) {
       const f = publicRun([{ step: 'approval', state: 'REJECTED', txHash: null }], { restored });

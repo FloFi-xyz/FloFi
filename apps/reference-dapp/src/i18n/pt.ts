@@ -28,6 +28,7 @@ import { portugueseConcurrency } from './pt-concurrency';
 import { portugueseUniversalBridge } from './pt-universal-bridge';
 import { portugueseConversation } from './pt-conversation';
 import { portugueseChatE2eFix } from './pt-chat-e2e-fix';
+import { portugueseBridgeLiveFix } from './pt-bridge-live-fix';
 /** English source messages are stable presentation keys. Technical identifiers never enter this catalog. */
 export const portuguese: Readonly<Record<string, string>> = {
   // BUILD-AUTOMATION-001/002: first, so an existing product translation of a shared word keeps precedence.
@@ -46,6 +47,7 @@ export const portuguese: Readonly<Record<string, string>> = {
   ...portugueseWorkflowRuns,
   ...portugueseConversation,
   ...portugueseChatE2eFix,
+  ...portugueseBridgeLiveFix,
   'Automation workflow': 'Fluxo da automação',
   'Prepared by your FloFi automation. Simulate and review before executing.': 'Preparado pela sua automação FloFi. Simule e revise antes de executar.',
   'Loading your exact automation workflow…': 'Carregando o fluxo exato da sua automação…',

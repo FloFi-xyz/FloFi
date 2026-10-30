@@ -118,6 +118,17 @@ describe('adapter-specific lifecycle boundaries', () => {
     const view = projectExecutionLifecycle(workflow, f.context, source('router', { record, busy: false, signing: false, recovered: false }));
     expect(view.steps[0]?.operations).toMatchObject([{ title: 'Approve USDC', state: 'confirmed', hash }, { title: 'Bridge deposit', state: 'waiting' }, { title: 'Destination settlement', state: 'waiting' }]);
     expect(view).toMatchObject({ completed: 0, state: 'active' });
+    // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: the destination settlement is the provider's execution, observed and reconciled — never a wallet request.
+    expect(view.steps[0]?.operations.map(operation => [operation.title, operation.wallet])).toEqual([['Approve USDC', true], ['Bridge deposit', true], ['Destination settlement', false]]);
+  });
+  it('BUILD-FLOFI-BRIDGE-LIVE-FIX-003: the wallet requests of a Review are exactly its reviewed calls (no approval when the allowance suffices)', () => {
+    const f = fixture(), workflow = { ...initialEditor().workflow, revision: 1, resourceEdges: [], nodes: [createRouterNode('bridge', { source: 'Base Sepolia', destination: 'Arbitrum Sepolia', token: 'USDC', amount: '5', recipient: '', slippage: '100', routing: 'AUTO' })] };
+    const review = (calls: { purpose: string }[]) => ({ id: 'bridge', workflow, provenance: 'PUBLIC_TESTNET', phase: 'PREPARED', verdict: 'PENDING', destination: null, attempts: [],
+      review: { nodeId: 'bridge', intent: { sourceChain: 'eip155:84532', destinationChain: 'eip155:421614' }, route: { inputToken: { symbol: 'USDC' }, routingProvider: 'across' }, calls } });
+    const requests = (calls: { purpose: string }[]) => projectExecutionLifecycle(workflow, f.context, source('router', { record: review(calls), busy: false, signing: false, recovered: false }))
+      .steps[0]!.operations.filter(operation => operation.wallet).map(operation => operation.title);
+    expect(requests([{ purpose: 'APPROVAL' }, { purpose: 'BRIDGE_DEPOSIT' }])).toEqual(['Approve USDC', 'Bridge deposit']);
+    expect(requests([{ purpose: 'BRIDGE_DEPOSIT' }])).toEqual(['Bridge deposit']);
   });
   it('attaches the real signing flag only to the current Supply approval', () => {
     const f = fixture(), workflow = editorReducer(initialEditor(), canvasAddCommand('supply', 0, f.wallet.account, '100'), f.context).workflow;

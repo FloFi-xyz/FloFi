@@ -46,7 +46,13 @@ export type SimulationSource =
   | { kind: 'fork-pool'; state: Snapshot<ReturnType<typeof useLiquidity>> }
   | { kind: 'across'; state: Snapshot<ReturnType<typeof useAcross>> }
   | { kind: 'unavailable'; state: { error: string | null; busy: boolean | string | null } };
-export type SimulationLine = { label: string; value: string; note?: string };
+/**
+ * BUILD-FLOFI-BRIDGE-LIVE-FIX-003: how a cost line counts. `ADDITIONAL`: an estimate paid on top of the input; `CEILING`: a maximum (never also an
+ * estimate); `INCLUDED`: already deducted from the quoted output (never paid again); `COMPONENT`: one part of an included total (informative);
+ * `OBLIGATION`: FloFi's fee as recorded (not collected on-chain). Totals add only ADDITIONAL lines of one asset; nothing else is ever summed.
+ */
+export type FeeTreatment = 'ADDITIONAL' | 'CEILING' | 'INCLUDED' | 'COMPONENT' | 'OBLIGATION';
+export type SimulationLine = { label: string; value: string; note?: string; treatment?: FeeTreatment };
 export type SimulationWarning = { severity: 'info' | 'attention' | 'blocking'; message: string };
 export type SimulationStep = {
   id: string; number: number; action: string; input: string; networks: string[]; pair: string | null;
@@ -105,7 +111,17 @@ export function simulationError(error: string): string {
   if (/INSUFFICIENT.*(ETH|SOL|NATIVE|GAS)|INSUFFICIENT_GAS/i.test(error)) return 'Add funds for the network fee, then simulate again.';
   if (/INSUFFICIENT|BALANCE_TOO_LOW|exceeds.*balance/i.test(error)) return 'Your available balance is too low for this workflow.';
   if (/HEALTH_FACTOR|UNSAFE_HEALTH|UNSAFE_POSITION/i.test(error)) return 'This action would leave the lending position below its required safety limit.';
-  if (/EXPIRED|STALE|REQUOTE|quote.*expired/i.test(error)) return 'This result has expired. Refresh the simulation before continuing.';
+  // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: a refusal at the execution boundary names what happened instead of the generic fallback below.
+  if (/SUBMISSION_UNKNOWN|OBSERVE_EXISTING|DEPOSIT_MAY_EXIST/i.test(error)) return 'Your wallet may already have sent this request. FloFi never sends it again; it keeps checking the network for its result.';
+  if (/ROUTE_REVALIDATION_UNAVAILABLE/i.test(error)) return 'FloFi could not re-check the route with the provider just before your wallet request, so nothing was sent. Try again in a moment.';
+  if (/ROUTE_CHANGED|QUOTE_CHANGED|REQUOTE|STATE_CHANGED|GAS_CHANGED|REVIEW_CHANGED|STOCK_MULTIPLIER_CHANGED/i.test(error)) return 'The provider quote or the on-chain state changed after your Review, so nothing was sent. Get a fresh quote and review it again.';
+  if (/HANDOFF_NOT_AUTHORIZED/i.test(error)) return 'The reviewed request was no longer authorized when FloFi was about to open your wallet, so nothing was sent. Review it again.';
+  if (/NONCE_MISMATCH|NONCE_CHANGED/i.test(error)) return 'Another transaction from this wallet took the next transaction slot (nonce), so nothing was sent. Review it again.';
+  if (/SEMANTIC_REVISION_CHANGED|SEMANTIC_EDIT|TRANSACTION_ARTIFACT_CHANGED/i.test(error)) return 'The workflow or its reviewed transaction changed before your wallet was asked, so nothing was sent. Review it again.';
+  if (/WALLET_PROVIDER_CHANGED|WALLET_CHANGED/i.test(error)) return 'Your wallet connection changed, so nothing was sent. Reconnect the reviewed wallet and review again.';
+  if (/WALLET_UNAUTHORIZED/i.test(error)) return 'Your wallet did not authorize FloFi for this account. Reconnect the wallet, then try again.';
+  if (/WALLET_METHOD_UNSUPPORTED/i.test(error)) return 'This wallet cannot send this kind of request. Use another wallet, then try again.';
+  if (/EXPIRED|STALE|quote.*expired/i.test(error)) return 'This result has expired. Refresh the simulation before continuing.';
   if (/SERVICE_UNAVAILABLE|STORAGE_NOT_CONFIGURED|RPC_(?:ERROR|RATE_LIMITED|UNAVAILABLE)|_OFF$|_RATE_LIMITED$/i.test(error)) return 'Simulation is currently unavailable. Try again before continuing.';
   // BUILD-SOLANA-TRANSFER-UX-001: specific meanings before the broad route and fallback messages (nothing here echoes provider text).
   if (/WALLET_SELECTION_REQUIRED|_WALLET_REQUIRED$|WALLET_NOT_CONNECTED|OWNER_REQUIRED|WALLET_PROOF_REQUIRED/i.test(error)) return 'Connect the wallet that will sign this workflow, then simulate again.';
@@ -186,14 +202,14 @@ export function projectSimulation(workflow: Workflow, context: ReviewContext, so
     s.input = input ?? s.input; s.result = output; s.provider = provider; s.minimum = minimum ?? null;
     if (slippage !== undefined) s.slippage = bps(slippage);
   };
-  const fee = (label: string, units: string | null, decimalPlaces: number, symbol: string, note?: string) => {
+  const fee = (label: string, units: string | null, decimalPlaces: number, symbol: string, note: string | undefined, treatment: FeeTreatment) => {
     const value = simulationAmount(units, decimalPlaces, symbol);
-    if (value !== null) view.fees.push({ label, value, ...(note ? { note } : {}) });
+    if (value !== null) view.fees.push({ label, value, ...(note ? { note } : {}), treatment });
   };
   const approvals = (required: boolean) => { if (required) warn('info', 'Token approval is required before execution.'); };
   const networkFees = (f: { totalUpperBoundWei: string | null; executionFeeUpperBoundWei: string; l1FeeUpperBoundWei: string | null }) => {
-    if (f.totalUpperBoundWei !== null) fee('Maximum network fee', f.totalUpperBoundWei, 18, 'ETH', 'Includes execution and L1 data fees.');
-    else { fee('Maximum execution fee', f.executionFeeUpperBoundWei, 18, 'ETH'); warn('attention', 'The L1 data fee is not available; the network fee total is incomplete.'); }
+    if (f.totalUpperBoundWei !== null) fee('Maximum network fee', f.totalUpperBoundWei, 18, 'ETH', 'Includes execution and L1 data fees.', 'CEILING');
+    else { fee('Maximum execution fee', f.executionFeeUpperBoundWei, 18, 'ETH', undefined, 'CEILING'); warn('attention', 'The L1 data fee is not available; the network fee total is incomplete.'); }
   };
   const health = (s: SimulationStep | undefined, value: string | undefined) => {
     if (!s || value === undefined) return;
@@ -213,7 +229,7 @@ export function projectSimulation(workflow: Workflow, context: ReviewContext, so
       const s = step(), amount = simulationAmount(q.amount, 6, 'USDC');
       result(s, amount, amount ? `${s?.action ?? 'Supply'} ${amount}` : null, 'Aave V3');
       if (s) s.resultLabel = 'Expected action';
-      for (const budget of q.manifest.gasBudgets) if ('nativeId' in budget.asset && budget.asset.nativeId === 'ETH') fee('Maximum network fee', budget.maximumAmount, budget.asset.decimals, 'ETH');
+      for (const budget of q.manifest.gasBudgets) if ('nativeId' in budget.asset && budget.asset.nativeId === 'ETH') fee('Maximum network fee', budget.maximumAmount, budget.asset.decimals, 'ETH', undefined, 'CEILING');
       health(s, q.borrow?.expectedPostHealthFactor ?? q.repay?.expectedPostHealthFactor ?? q.withdraw?.expectedPostHealthFactor);
       approvals(q.approvalRequired);
       if (q.borrow) warn('attention', 'Borrowing creates variable-rate debt and changes your collateral risk.');
@@ -232,7 +248,7 @@ export function projectSimulation(workflow: Workflow, context: ReviewContext, so
       for (const [s, id] of [[supply, 'SUPPLY'], [borrow, 'BORROW'], [swap, 'SWAP']] as const) {
         if (s && q.completed.includes(id)) s.details.push({ label: 'Step status', value: 'Already completed' });
       }
-      for (const budget of q.manifest.gasBudgets) if ('nativeId' in budget.asset && budget.asset.nativeId === 'ETH') fee('Maximum network fee', budget.maximumAmount, budget.asset.decimals, 'ETH', 'Workflow ceiling, including L1 data fees.');
+      for (const budget of q.manifest.gasBudgets) if ('nativeId' in budget.asset && budget.asset.nativeId === 'ETH') fee('Maximum network fee', budget.maximumAmount, budget.asset.decimals, 'ETH', 'Workflow ceiling, including L1 data fees.', 'CEILING');
       approvals(q.calls.some(c => c.id === 'POOL_APPROVAL' || c.id === 'ROUTER_APPROVAL'));
       warn('attention', 'Borrowing creates variable-rate debt. Completed steps are not automatically reversed if a later step fails.');
       for (const uncertainty of q.simulation.uncertainty) {
@@ -251,9 +267,9 @@ export function projectSimulation(workflow: Workflow, context: ReviewContext, so
       networkFees(q.fees);
       const feeLabels = { INTEGRATOR: 'Provider fee', BRIDGE_RELAYER_CAPITAL: 'Bridge relayer fee', BRIDGE_DESTINATION_GAS: 'Destination delivery fee', BRIDGE_LP: 'Bridge liquidity fee', BRIDGE_OTHER: 'Bridge fee' };
       for (const f of route.fees) if (f.chainId === route.inputToken.chainId && f.token.toLowerCase() === route.inputToken.address.toLowerCase() && BigInt(f.amount) > 0n) {
-        fee(feeLabels[f.kind], f.amount, route.inputToken.decimals, route.inputToken.symbol, 'Included in the route fee total.');
+        fee(feeLabels[f.kind], f.amount, route.inputToken.decimals, route.inputToken.symbol, 'Included in the route fee total.', 'COMPONENT');
       }
-      fee('Route fee total', q.quote.feeTotal, route.inputToken.decimals, route.inputToken.symbol, 'Included in the quoted output; network fees are separate.'); approvals(q.approvals.some(a => a.required));
+      fee('Route fee total', q.quote.feeTotal, route.inputToken.decimals, route.inputToken.symbol, 'Included in the quoted output; network fees are separate.', 'INCLUDED'); approvals(q.approvals.some(a => a.required));
       warn('attention', 'Destination delivery is quoted. The simulation checks the source transactions; delivery and refunds are not simulated.');
       break;
     }
@@ -265,10 +281,10 @@ export function projectSimulation(workflow: Workflow, context: ReviewContext, so
       result(s, simulationAmount(route.inputAmount, route.inputToken.decimals, route.inputToken.symbol), simulationAmount(route.expectedOutput, route.outputToken.decimals, route.outputToken.symbol),
         provider, simulationAmount(route.minimumOutput, route.outputToken.decimals, route.outputToken.symbol), route.slippageBps);
       if (s) s.resultLabel = 'Quoted destination output';
-      fee('Maximum network fee', q.feePolicy.networkFeeUpperBound, q.feePolicy.networkFeeDecimals, q.feePolicy.networkFeeSymbol, 'Paid on the source network, separate from the route.');
-      for (const f of route.fees) if (f.included && BigInt(f.amount) > 0n) fee(f.label, f.amount, f.decimals, f.symbol, 'Included in the quoted output.');
+      fee('Maximum network fee', q.feePolicy.networkFeeUpperBound, q.feePolicy.networkFeeDecimals, q.feePolicy.networkFeeSymbol, 'Paid on the source network, separate from the route.', 'CEILING');
+      for (const f of route.fees) if (f.included && BigInt(f.amount) > 0n) fee(f.label, f.amount, f.decimals, f.symbol, 'Included in the quoted output.', 'INCLUDED');
       fee('FloFi fee (0.1% obligation)', flofiFeeUnits(route.inputAmount), route.inputToken.decimals, route.inputToken.symbol,
-        '0.1% of the completed workflow input. Recorded as an obligation when the run reconciles; not collected on-chain yet. Waived if the workflow fails or refunds.');
+        '0.1% of the completed workflow input. Recorded as an obligation when the run reconciles; not collected on-chain yet. Waived if the workflow fails or refunds.', 'OBLIGATION');
       approvals(q.source.ecosystem === 'EVM' && q.source.approvals.some(a => a.required));
       if (q.authorizations.sourceSignatures > 1) warn('info', 'This bridge needs two wallet signatures on the source network: an exact approval, then the deposit.');
       warn('attention', 'Destination delivery is guaranteed by the provider order and proven on chain after it lands. The simulation checks the source transaction; delivery and refunds are not simulated.');
@@ -279,10 +295,20 @@ export function projectSimulation(workflow: Workflow, context: ReviewContext, so
       // BUILD-RH-002: a catalog quote carries its own provenance (PUBLIC_MAINNET, or MOCKED for the loopback harness) and decimals.
       if (!guard(same(r.workflow) && boundHash(q.workflowHash, q.revision), q.provenance ?? 'PUBLIC_TESTNET', iso(q.expiresAt))) break;
       const s = step(q.nodeId), din = quoteDecimals(q, 'input'), dout = quoteDecimals(q, 'output');
-      result(s, simulationAmount(q.amountIn, din, q.inputSymbol), simulationAmount(q.expectedOut, dout, q.outputSymbol), 'Uniswap V3', simulationAmount(q.minimumOut, dout, q.outputSymbol), q.slippageBps);
+      result(s, simulationAmount(q.amountIn, din, q.inputSymbol), simulationAmount(q.expectedOut, dout, q.outputSymbol), q.conversion ? 'WETH9' : 'Uniswap V3', simulationAmount(q.minimumOut, dout, q.outputSymbol), q.slippageBps);
       for (const stock of q.stocks ?? []) warn('attention', `${stock.symbol}: ${simulationAmount(stock.multiplierWad, 18)} underlying shares per token (Robinhood corporate-action multiplier).`);
       if (q.stocks?.length) warn('attention', 'Stock Tokens are not offered to US persons or in restricted jurisdictions.');
-      if (s) s.resultLabel = 'Quoted output';
+      if (s) s.resultLabel = q.conversion ? 'Exact output' : 'Quoted output';
+      // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: native ETH is named as such — what the wallet request carries, and who pays it out — never as WETH.
+      if (q.conversion) warn('info', q.conversion === 'WRAP' ? 'Wrap through WETH9: exactly 1:1, no pool, no price impact and no slippage. Your wallet sends the ETH with the request; the network fee is paid separately from the same ETH balance.'
+        : 'Unwrap through WETH9: exactly 1:1, no pool, no price impact and no slippage. WETH9 pays you native ETH; the network fee is paid separately.');
+      else if (q.native === 'INPUT') warn('info', 'This swap spends native ETH: your wallet sends it with the request (no token approval). The network fee is paid separately from the same ETH balance.');
+      else if (q.native === 'OUTPUT') warn('info', 'You receive native ETH: in the same transaction the router unwraps WETH9 and pays you at least the minimum. The network fee is paid separately.');
+      // BUILD-FLOFI-BRIDGE-LIVE-FIX-003: the pool fee is part of the quoted price (never paid again); the owner-bound gas budget is a ceiling for
+      // the next wallet request only.
+      if (Number.isSafeInteger(q.fee) && q.fee > 0) view.fees.push({ label: 'Pool fee', value: `${(q.fee / 10_000).toFixed(2)}%`, note: 'Uniswap v3 fee tier, already reflected in the quoted output.', treatment: 'INCLUDED' });
+      if (q.ownerReview) fee('Maximum network fee', q.ownerReview.feeBudgetWei, 18, 'ETH', q.ownerReview.step === 'approval'
+        ? 'Ceiling for the token approval request; the swap\'s own network fee is checked after the approval confirms.' : 'Ceiling for this wallet request, separate from the swap output.', 'CEILING');
       if (!q.ownerReview) warn('attention', 'This is a pool quote. Network fees and exact transaction simulation are not available yet.');
       break;
     }
@@ -296,14 +322,14 @@ export function projectSimulation(workflow: Workflow, context: ReviewContext, so
         const providers = [...new Set(q.quote.routePlan.map(p => simulationProvider(p.label)).filter(Boolean))];
         if (providers.length) s.details.push({ label: 'Route pools', value: providers.join(' → ') });
       }
-      fee('Estimated network fee', q.estimatedFeeLamports, 9, 'SOL');
-      if (BigInt(q.simulationResult.accountCreationLamports) > 0n) fee('Account deposits', q.simulationResult.accountCreationLamports, 9, 'SOL', 'Account rent, separate from network fees.');
+      fee('Estimated network fee', q.estimatedFeeLamports, 9, 'SOL', undefined, 'ADDITIONAL');
+      if (BigInt(q.simulationResult.accountCreationLamports) > 0n) fee('Account deposits', q.simulationResult.accountCreationLamports, 9, 'SOL', 'Account rent, separate from network fees.', 'ADDITIONAL');
       if (q.format === 'gryloo.orca-devnet-review.v1') {
         const trade = q.simulatedTrade;
         for (const [label, amount] of [['Liquidity provider fee', trade.lpFee], ['Protocol fee', trade.protocolFee], ['Input transfer fee', trade.inputTransferFee]] as const) {
-          if (BigInt(amount) > 0n) fee(label, amount, q.input.decimals, tokenIn, 'Already reflected in the simulated output.');
+          if (BigInt(amount) > 0n) fee(label, amount, q.input.decimals, tokenIn, 'Already reflected in the simulated output.', 'INCLUDED');
         }
-        if (BigInt(trade.outputTransferFee) > 0n) fee('Output transfer fee', trade.outputTransferFee, q.output.decimals, tokenOut, 'Already reflected in the simulated output.');
+        if (BigInt(trade.outputTransferFee) > 0n) fee('Output transfer fee', trade.outputTransferFee, q.output.decimals, tokenOut, 'Already reflected in the simulated output.', 'INCLUDED');
       }
       break;
     }
@@ -324,8 +350,8 @@ export function projectSimulation(workflow: Workflow, context: ReviewContext, so
       const amounts = [simulationAmount(opening ? sim.depositedA : sim.withdrawnPrincipalA, q.token0.decimals, solanaSymbol(q.token0.symbol, q.cluster)), simulationAmount(opening ? sim.depositedB : sim.withdrawnPrincipalB, q.token1.decimals, solanaSymbol(q.token1.symbol, q.cluster))];
       result(s, null, amounts.every(Boolean) ? amounts.join(' + ') : null, 'Orca Whirlpools', null, q.intent.slippageBps);
       if (s) s.resultLabel = opening ? 'Expected pool contribution' : 'Expected withdrawal';
-      range(s, q.range, `${solanaSymbol(q.token1.symbol, q.cluster)} per SOL`); fee('Estimated network fee', q.estimatedFeeLamports, 9, 'SOL');
-      if (BigInt(sim.rentPaidLamports) > 0n) fee('Account deposits', sim.rentPaidLamports, 9, 'SOL', 'Account rent, separate from network fees.');
+      range(s, q.range, `${solanaSymbol(q.token1.symbol, q.cluster)} per SOL`); fee('Estimated network fee', q.estimatedFeeLamports, 9, 'SOL', undefined, 'ADDITIONAL');
+      if (BigInt(sim.rentPaidLamports) > 0n) fee('Account deposits', sim.rentPaidLamports, 9, 'SOL', 'Account rent, separate from network fees.', 'ADDITIONAL');
       break;
     }
     case 'solana-composition': {
@@ -352,8 +378,8 @@ export function projectSimulation(workflow: Workflow, context: ReviewContext, so
         if (v.record.binding) poolStep.details.push({ label: 'Bound amount', value: simulationAmount(v.record.binding.bound, dec(lp.boundToken), token(lp.boundToken)) ?? '—' });
       }
       range(poolStep, position?.range ?? { lowerPrice: lp.lowerPrice, upperPrice: lp.upperPrice, state: lp.expected.state }, 'devUSDC per SOL');
-      fee('Estimated swap network fee', v.swap.review.estimatedFeeLamports, 9, 'SOL');
-      if (position) fee('Estimated position network fee', position.estimatedFeeLamports, 9, 'SOL');
+      fee('Estimated swap network fee', v.swap.review.estimatedFeeLamports, 9, 'SOL', undefined, 'ADDITIONAL');
+      if (position) fee('Estimated position network fee', position.estimatedFeeLamports, 9, 'SOL', undefined, 'ADDITIONAL');
       for (const check of lp.preflight) if (!check.ok && !check.blocking) warn('attention', 'With this range, the position would not use any of the swap output.');
       warn('attention', 'The swap and the position are separate transactions. If the position is not opened, the swapped tokens stay in your wallet; the swap is never repeated.');
       if (!position && planned) warn('info', 'Position amounts are a projection. The position is simulated with the actual swap output and reviewed again after the swap.');
@@ -367,7 +393,7 @@ export function projectSimulation(workflow: Workflow, context: ReviewContext, so
       const amount = simulationAmount(q.value, q.asset?.decimals ?? 18, symbol), s = step(), self = q.recipient === q.account;
       result(s, amount, amount ? self ? `Send ${amount} to your wallet` : `Send ${amount} to ${q.recipient}` : null, 'Wallet send');
       if (s) s.resultLabel = 'Expected action';
-      fee('Estimated network fee', q.expectedFee, 18, 'ETH'); fee('Maximum network fee', q.feeBudget, 18, 'ETH', 'Fee ceiling, not an additional charge.');
+      fee('Estimated network fee', q.expectedFee, 18, 'ETH', undefined, 'ADDITIONAL'); fee('Maximum network fee', q.feeBudget, 18, 'ETH', 'Fee ceiling, not an additional charge.', 'CEILING');
       if (q.asset?.multiplierWad) warn('attention', `${symbol}: ${simulationAmount(q.asset.multiplierWad, 18)} underlying shares per token (Robinhood corporate-action multiplier).`);
       if (!self) warn('attention', 'Funds go to an address other than the signing wallet. Confirm it belongs to the intended recipient.');
       warn('info', self && !q.asset ? 'Sending to the same wallet returns the funds; only the network fee is spent.' : 'Only the reviewed amount moves; the network fee is paid in ETH.'); break;
@@ -380,9 +406,9 @@ export function projectSimulation(workflow: Workflow, context: ReviewContext, so
       const amount = simulationAmount(q.amount, q.asset.decimals, symbol), s = step();
       result(s, amount, amount ? `Send ${amount} to ${q.recipient}` : null, 'Wallet send');
       if (s) { s.resultLabel = 'Expected action'; if (q.asset.mint) s.details.push({ label: 'Token mint', value: q.asset.mint }); }
-      fee('Estimated network fee', q.estimatedFeeLamports, 9, 'SOL');
-      if (BigInt(q.accountCreationLamports) > 0n) fee('Recipient token account deposit', q.accountCreationLamports, 9, 'SOL', 'Opens the recipient\'s token account; paid once, separate from the network fee.');
-      else if (q.token) fee('Maximum token account deposit', q.maximumAccountCreationLamports, 9, 'SOL', 'Only paid if the recipient token account must be recreated before this transfer lands.');
+      fee('Estimated network fee', q.estimatedFeeLamports, 9, 'SOL', undefined, 'ADDITIONAL');
+      if (BigInt(q.accountCreationLamports) > 0n) fee('Recipient token account deposit', q.accountCreationLamports, 9, 'SOL', 'Opens the recipient\'s token account; paid once, separate from the network fee.', 'ADDITIONAL');
+      else if (q.token) fee('Maximum token account deposit', q.maximumAccountCreationLamports, 9, 'SOL', 'Only paid if the recipient token account must be recreated before this transfer lands.', 'CEILING');
       if (!q.asset.verified) warn('attention', 'This token is not on FloFi\'s verified list. Its mint, decimals and token program were checked on chain; confirm it is the token you intend to send.');
       if (q.token?.program === 'token-2022') warn('info', 'Token-2022 token: only extensions FloFi can verify were found, and the recipient receives exactly the amount sent.');
       warn('attention', 'Funds go to an address other than the signing wallet. Confirm it belongs to the intended recipient.');
@@ -392,7 +418,7 @@ export function projectSimulation(workflow: Workflow, context: ReviewContext, so
       const q = source.state.prepared; if (!q) break;
       if (!guard(same(q.workflow), q.environment, Math.min(seconds(q.quoteExpiresAt), seconds(q.deadline)), source.state.verifyError, true)) break;
       result(step(q.nodeId), simulationAmount(q.amountIn, q.decimalsIn, q.symbolIn), simulationAmount(q.quotedOut, q.decimalsOut, q.symbolOut), 'Uniswap V3', simulationAmount(q.minimumOut, q.decimalsOut, q.symbolOut), q.slippageBps);
-      for (const budget of q.artifacts.manifest.gasBudgets) if ('nativeId' in budget.asset && budget.asset.nativeId === 'ETH') fee('Maximum network fee', budget.maximumAmount, budget.asset.decimals, 'ETH');
+      for (const budget of q.artifacts.manifest.gasBudgets) if ('nativeId' in budget.asset && budget.asset.nativeId === 'ETH') fee('Maximum network fee', budget.maximumAmount, budget.asset.decimals, 'ETH', undefined, 'CEILING');
       warn('info', 'Results come from the current local-fork simulation.');
       for (const finding of q.findings) warn(finding.severity === 'BLOCK' ? 'blocking' : 'attention', ['ZERO_SLIPPAGE', 'ELEVATED_SLIPPAGE', 'SLIPPAGE_ABOVE_REVIEW_LIMIT'].includes(finding.code) ? 'Review the configured slippage limit before continuing.' : 'Check the simulation before continuing.');
       if (!source.state.verified['step-approve'] || !source.state.verified['step-swap']) warn('blocking', 'The simulation transactions could not be verified. Simulate again before continuing.');
@@ -431,7 +457,7 @@ export function projectSimulation(workflow: Workflow, context: ReviewContext, so
       const s = step();
       result(s, simulationAmount(q.inputAmount, 6, 'USDC'), simulationAmount(q.expectedOutput, 6, 'USDC'), 'Across', simulationAmount(q.minimumOutput, 6, 'USDC'));
       if (s) s.resultLabel = 'Quoted destination output';
-      fee('Maximum bridge fee', q.feeMaximum, 6, 'USDC'); fee('Maximum network fee', q.maximumGasCostWei, 18, 'ETH');
+      fee('Maximum bridge fee', q.feeMaximum, 6, 'USDC', undefined, 'CEILING'); fee('Maximum network fee', q.maximumGasCostWei, 18, 'ETH', undefined, 'CEILING');
       warn('attention', 'A route quote is available. Exact transaction and destination delivery simulation are not available.'); break;
     }
   }

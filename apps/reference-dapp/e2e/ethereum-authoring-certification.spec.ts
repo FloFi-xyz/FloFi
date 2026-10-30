@@ -19,7 +19,7 @@ function expectWorkspaceMeaning(actual: SemanticWorkflow, before: SemanticWorkfl
 for (const c of cases) test(c.id + ': normal Copilot proposal → Apply → matching Canvas IR/hash', async ({ page, networkGuard }) => {
   await replayProviderLogos(page); await installPassiveWallet(page, '0x1'); await page.goto('/app');
   const conversation = page.getByRole('log', { name: 'Conversation' });
-  await expect(conversation).toContainText('Flofi Copilot ready in replay mode');
+  await expect(conversation).toContainText('Hi FloFier!');
   await expect(page.getByLabel('Describe your flow')).toBeVisible();
   const before = JSON.parse(await readWorkflowIr(page)) as SemanticWorkflow;
   await page.locator('#mock-prompt').fill('Please ' + c.text);
@@ -40,7 +40,7 @@ for (const c of cases) test(c.id + ': normal Copilot proposal → Apply → matc
 
 for (const c of cases.filter(c => ['Swap', 'Native Transfer', 'Supply'].includes(c.id))) test(c.id + ': Portuguese natural Copilot reaches the same Canvas', async ({ page, networkGuard }) => {
   await replayProviderLogos(page); await installPassiveWallet(page, '0x1'); await page.goto('/app');
-  await expect(page.getByRole('log', { name: 'Conversation' })).toContainText('Flofi Copilot ready in replay mode');
+  await expect(page.getByRole('log', { name: 'Conversation' })).toContainText('Hi FloFier!');
   const before = JSON.parse(await readWorkflowIr(page)) as SemanticWorkflow;
   await page.locator('#mock-prompt').fill('Por favor, ' + c.pt);
   await page.getByRole('button', { name: 'Send', exact: true }).click();
