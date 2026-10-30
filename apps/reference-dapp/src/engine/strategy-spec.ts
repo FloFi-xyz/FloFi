@@ -221,6 +221,14 @@ const PublicTransfer = Type.Object({
 const PUBLIC_BRANCHES = Object.freeze({ bridge: PublicBridge, swap: PublicSwap, supply: PublicLending('supply', 'Account credited with the supplied position.'),
   borrow: PublicLending('borrow', 'Account whose debt the borrow creates (onBehalfOf).'), repay: PublicLending('repay', 'Account whose debt is repaid (onBehalfOf).'),
   withdraw: PublicWithdraw, add_liquidity: PublicLiquidity, transfer: PublicTransfer });
+/**
+ * BUILD-FLOFI-INTELLIGENCE-001: the fields a strategy of `action` must carry, read from the canonical schema branch (the public contract when the
+ * action is public, else the engineering one) — the Capability API's "required parameters" are never a separate hand-written list.
+ */
+export function strategyRequiredFields(action: StrategyAction): readonly string[] {
+  const branch = (PUBLIC_BRANCHES as Readonly<Record<string, TSchema>>)[action] ?? BRANCHES[action];
+  return Object.freeze(((branch as { required?: readonly string[] }).required ?? []).filter(field => field !== 'action' && field !== 'version'));
+}
 export const PublicStrategyWorkflowSchema = Type.Object({
   version: Type.Literal(2, { description: 'Step-list workflow contract.' }),
   steps: Type.Array(Type.Union(Object.values(PUBLIC_BRANCHES)), { minItems: 1, maxItems: MAX_WORKFLOW_STEPS,

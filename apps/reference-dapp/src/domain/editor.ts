@@ -115,6 +115,16 @@ export function editorReducer(state: EditorState, command: Command, context?: Re
       validateWorkflowDraft(workflow, context); return { workflow: freeze(workflow), error: null };
     } catch (cause) { return reject(cause instanceof Error ? cause.message : 'SOLANA_LIQUIDITY_INPUT_INVALID'); }
   }
+  if (command.type === 'ADD_SEQUENCE') {
+    // BUILD-FLOFI-INTELLIGENCE-001: exactly the single-step paths, one reducer step at a time, each at the revision the previous one produced. Any
+    // refused step refuses the whole sequence: nothing partial is ever applied.
+    let next: EditorState = { workflow: current, error: null };
+    for (const step of command.steps) {
+      next = editorReducer(next, { ...step, source: command.source, baseRevision: next.workflow.revision } as Command, context);
+      if (next.error) return reject(next.error);
+    }
+    return next;
+  }
   if (command.type === 'ADD_SOLANA_COMPOSITION') {
     // Exactly the Canvas path, one reducer step at a time: add the swap (unless it exists), add the position, then link them; the link must bind.
     const step = (from: EditorState, next: Record<string, unknown>) => editorReducer(from, { ...next, source: command.source, baseRevision: from.workflow.revision } as Command, context);
