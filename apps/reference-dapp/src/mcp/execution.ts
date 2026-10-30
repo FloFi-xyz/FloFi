@@ -24,6 +24,7 @@ import { agentRolloutAllows, type PendingAgentCapability } from '../domain/agent
 import { delegableByCode } from '../workflow-runs/authorization-plan.ts';
 import type { McpRuntime } from './runtime.ts';
 import { strategyFlow } from './simulation.ts';
+import { scopeOfEnv } from '../domain/network-scope';
 
 type Env = Readonly<Record<string, string | undefined>>;
 /** Composition semantics of handoffs. A handoff created under another version is re-verified and goes STALE if it no longer reproduces. */
@@ -73,6 +74,10 @@ export function readHandoffPolicy(env: Env): HandoffPolicy {
   const listed = (env.FLOFI_MCP_HANDOFF_MAINNET_NETWORKS ?? '').split(',').map(s => s.trim()).filter(Boolean);
   // Only mainnet networks may be listed; a testnet name here is a configuration mistake, not a permission.
   if (!listed.every(n => (NETWORK_IDS as readonly string[]).includes(n) && NETWORKS[n as NetworkId].class === 'MAINNET')) return { ok: false, code: 'MCP_HANDOFF_POLICY_INVALID' };
+  // Use the same effective deployment scope as gateway.ts. Public users can choose every registered mainnet without an operator
+  // whitelist; the existing canonical validation, runtime enablement, wallet proof, Manifest and signing remain mandatory.
+  if (scopeOfEnv({ ...process.env, ...env }) === 'PUBLIC_MAINNET') return { ok: true, testFunds: false,
+    mainnetNetworks: Object.freeze(NETWORK_IDS.filter(n => NETWORKS[n].class === 'MAINNET')) };
   return { ok: true, testFunds: testFunds === 'enabled', mainnetNetworks: Object.freeze([...new Set(listed as NetworkId[])]) };
 }
 

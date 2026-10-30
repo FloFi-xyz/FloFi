@@ -594,3 +594,24 @@ target without dropping 0016. After any archive or deletion, keep the schema-16 
 `FLOFI_OWNER_HISTORY=read-only` to stop new history mutations. Do not roll the frontend or history reader back to an artifact that could expose
 archived runs. Do not remove the immutable audit, restore deleted runs or execute a downmigration. Financial observation and reconciliation
 must continue during rollback. Changes to the SQL require a new compatibility assessment and hash; this certificate cannot be reused.
+
+## 11. Certificate 0017_copilot_metrics
+
+| Base | Certified forward migration | SHA-256 |
+| --- | --- | --- |
+| 0016 `owner_history_purge` | 0017 `copilot_metrics` | `c20a07de7bb504cbb8d95776796a0e6b412a1130c0539aee3449ceb6f89c45bf` |
+
+Migration 0017 adds one tenant-scoped daily aggregate table. It changes no execution, approval, wallet or existing telemetry table.
+Counters contain no transcript, wallet, request/workflow identifier, asset, financial amount or tool arguments. Server interpretation
+measurements and untrusted browser turn reports have separate provenance; live and replay records are queried separately. The query
+window is at most 90 UTC days; older counters are deleted on accepted writes and Admin reads. This is operational telemetry, not proof
+of transaction success. An unavailable telemetry database cannot grant financial authority or interrupt reconciliation.
+
+`copilot-metrics-migration.pg.test.ts` checks exact migration bytes, atomic rollback and a version-16 reader carrying this certificate
+starting on schema 17. `copilot-metrics-store.pg.test.ts` checks concurrent increments, tenant isolation, retention and provenance.
+
+Release order remains certificate first: every version-16 database consumer must receive this exact forward certificate before 0017
+is applied. The already deployed version-16 artifact does not gain that certificate from a PR. This PR supplies the schema-17 code and
+assessment; promotion requires a reviewed certificate-bearing version-16 release followed by the migration-bearing release. No production
+migration or release was performed during engineering. Rollback must retain the certificate or use a schema-17 compatible artifact;
+do not drop the telemetry table or loosen schema validation to accommodate an older binary.

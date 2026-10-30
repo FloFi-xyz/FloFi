@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { solanaTransferProfile } from '@defi-workflow-engine/action-registry';
-import { base58Encode, decompileMessageV0, fromBase64, parseMessageV0, parseTransaction, solanaSwapArtifactHash, solanaSwapHash, verifySolanaCluster,
+import { solanaRpcU64, base58Encode, decompileMessageV0, fromBase64, parseMessageV0, parseTransaction, solanaSwapArtifactHash, solanaSwapHash, verifySolanaCluster,
   verifySignedSolanaTransfer, type SolanaRpc, type SolanaTransferReview, type SolanaWalletGuard } from '@defi-workflow-engine/reference-compiler';
 import { walletGuardLimitation } from './jupiter.js';
 import { hashJournalBytes, type EvidenceBundle, type ExecutionJournal } from '@defi-workflow-engine/workflow-contracts';
@@ -24,8 +24,8 @@ export type SolanaTransferChainAttempt = { signature: string | null; transaction
 const X = 'SOLANA_TRANSFER';
 const fail = (code: string): never => { throw new Error(code); };
 const record = (v: unknown): Record<string, unknown> => v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : fail('SOLANA_RPC_INVALID');
-const lamportList = (v: unknown, n: number): bigint[] => Array.isArray(v) && v.length === n && v.every(x => Number.isSafeInteger(x) && (x as number) >= 0)
-  ? (v as number[]).map(BigInt) : fail('SOLANA_RPC_INVALID');
+const lamportList = (v: unknown, n: number): bigint[] => Array.isArray(v) && v.length === n
+  ? v.map(value => solanaRpcU64(value)) : fail('SOLANA_RPC_INVALID');
 type TokenBalance = { index: number; mint: string; owner: string; amount: bigint; decimals: number; programId: string | null };
 function tokenBalances(v: unknown): TokenBalance[] {
   if (!Array.isArray(v)) fail('SOLANA_RPC_INVALID');
@@ -84,7 +84,7 @@ export async function reconcileSolanaTransferAttempt(review: SolanaTransferRevie
     base.programs = [...new Set(decompileMessageV0(message, {}).map(i => i.programId))];
     const program = review.token ? review.token.programId : profile.programs.system;
     if (!base.programs.includes(program)) fail(`${X}_PROGRAM_MISMATCH`);
-    const fee = typeof meta.fee === 'number' && Number.isSafeInteger(meta.fee) && meta.fee >= 0 ? BigInt(meta.fee) : fail('SOLANA_RPC_INVALID');
+    const fee = solanaRpcU64(meta.fee);
     base.feeLamports = fee.toString();
     if (meta.err !== null) return { ...base, verdict: 'DIVERGENT', reason: `${X}_TRANSFER_FAILED` };
     if (fee > BigInt(review.estimatedFeeLamports)) fail(`${X}_FEE_MISMATCH`);

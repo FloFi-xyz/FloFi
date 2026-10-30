@@ -6,7 +6,7 @@
  *   FLOFI_MCP_OAUTH=enabled                 explicit opt-in
  *   FLOFI_PUBLIC_ORIGIN=https://host        the issuer and the resource base; never derived from request headers
  *   FLOFI_MCP_OAUTH_SECRET=<≥ 32 chars>     dedicated key material: refused if equal to API_AUTH_TOKEN or FLOFI_SESSION_SECRET
- *   FLOFI_MCP_OAUTH_ACCESS=invite|open      new accounts need an invite code (default) or not
+ *   FLOFI_MCP_OAUTH_ACCESS=invite|open      invite codes (engineering fixtures) or open (default; public mainnet always open)
  *   FLOFI_MCP_OAUTH_INVITES=<sha256>,…      SHA-256 hex digests of invite codes (codes themselves are never configured)
  *   FLOFI_MCP_CIMD_HOSTS=claude.ai,…        hosts whose Client ID Metadata Documents are accepted
  *   FLOFI_MCP_OAUTH_DCR=enabled             narrow dynamic client registration fallback (off by default)
@@ -17,6 +17,7 @@
  */
 import { createHash, hkdfSync, timingSafeEqual } from 'node:crypto';
 import { deploymentEnvironment, deploymentTenant, publicOrigin } from '../../server/deployment.ts';
+import { scopeOfEnv } from '../../domain/network-scope';
 
 /** BUILD-DEVELOPER-001: `publicOrigin` moved to the deployment module (every surface uses it); re-exported for existing importers. */
 export { publicOrigin } from '../../server/deployment.ts';
@@ -59,8 +60,10 @@ export function readOAuthConfig(env: Env): OAuthConfigResult {
   if (secret.length < 32 || secret.length > 512) return invalid('FLOFI_MCP_OAUTH_SECRET');
   // The OAuth key must be dedicated: never the internal API bearer, never the wallet-session key.
   if (sameSecret(secret, env.API_AUTH_TOKEN) || sameSecret(secret, env.FLOFI_SESSION_SECRET)) return invalid('FLOFI_MCP_OAUTH_SECRET_REUSED');
-  const access = env.FLOFI_MCP_OAUTH_ACCESS ?? 'invite';
-  if (access !== 'invite' && access !== 'open') return invalid('FLOFI_MCP_OAUTH_ACCESS');
+  const requestedAccess = env.FLOFI_MCP_OAUTH_ACCESS ?? 'open';
+  if (requestedAccess !== 'invite' && requestedAccess !== 'open') return invalid('FLOFI_MCP_OAUTH_ACCESS');
+  // Every public user can connect a supported MCP client. Legacy invitation controls apply only to local engineering fixtures.
+  const access = scopeOfEnv(env) === 'PUBLIC_MAINNET' ? 'open' : requestedAccess;
   const invites = (env.FLOFI_MCP_OAUTH_INVITES ?? '').split(',').map(s => s.trim()).filter(Boolean);
   if (invites.length > 64 || !invites.every(d => /^[0-9a-f]{64}$/.test(d))) return invalid('FLOFI_MCP_OAUTH_INVITES');
   const cimdHosts = hostList(env.FLOFI_MCP_CIMD_HOSTS, ['claude.ai', 'chatgpt.com']);

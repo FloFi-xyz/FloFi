@@ -234,6 +234,18 @@
       "path": "apps/reference-dapp/src/server/base-swap.test.ts",
       "stage": "unit"
     },
+    "app.server.channel-copilot-toolkit": {
+      "path": "apps/reference-dapp/src/server/channel-copilot-toolkit.test.ts",
+      "stage": "unit"
+    },
+    "app.server.copilot-metrics": {
+      "path": "apps/reference-dapp/src/server/copilot-metrics-store.test.ts",
+      "stage": "unit"
+    },
+    "app.server.copilot-metrics.pg": {
+      "path": "apps/reference-dapp/src/server/copilot-metrics-store.pg.test.ts",
+      "stage": "postgres"
+    },
     "app.server.copilot-orchestration": {
       "path": "apps/reference-dapp/src/server/copilot-orchestration.test.ts",
       "stage": "unit"
@@ -316,6 +328,10 @@
     },
     "app.workflow-runs.confirm-run.pg": {
       "path": "apps/reference-dapp/src/workflow-runs/confirm-run.pg.test.ts",
+      "stage": "postgres"
+    },
+    "cloud-runtime.copilot-metrics-migration.pg": {
+      "path": "packages/cloud-runtime/test/copilot-metrics-migration.pg.test.ts",
       "stage": "postgres"
     },
     "cloud-runtime.dispatch.pg": {
@@ -481,36 +497,38 @@
   },
   "requiredUnitSuites": [
     "action-registry.engineering-regression",
+    "app.admin.session",
+    "app.automations.boundaries",
+    "app.channels.core.delivery",
+    "app.channels.core.workflow",
+    "app.developer.openapi",
+    "app.domain.copilot-context",
+    "app.domain.intelligence",
+    "app.domain.intelligence.conversation-regression",
+    "app.i18n.catalog",
+    "app.mcp.oauth.foundation",
+    "app.platform.copilot-tools",
     "app.platform.engineering-continuity",
+    "app.platform.intelligence-parity",
+    "app.server.base-swap",
+    "app.server.channel-copilot-toolkit",
+    "app.server.copilot-metrics",
+    "app.server.copilot-orchestration",
+    "app.server.lending-composition-service",
+    "app.server.universal-router.fee-obligation",
+    "app.state.flofi-conversation",
+    "app.state.review-authorization",
+    "app.state.wallet-review-continuity",
+    "cloud-runtime.migration-manifest",
+    "developer-sdk.webhooks",
+    "reference-compiler.bridge",
     "reference-compiler.native-eth",
     "reference-compiler.review",
     "reference-compiler.simulation",
+    "reference-compiler.solana-transfer",
     "reference-executor.bound-composition",
     "reference-executor.cross-chain-liquidity-recovery",
-    "app.server.lending-composition-service",
-    "app.state.review-authorization",
-    "app.mcp.oauth.foundation",
-    "app.developer.openapi",
-    "developer-sdk.webhooks",
-    "app.automations.boundaries",
-    "app.admin.session",
-    "cloud-runtime.migration-manifest",
-    "app.server.universal-router.fee-obligation",
-    "reference-compiler.bridge",
-    "reference-compiler.solana-transfer",
-    "reference-reconciler.evidence",
-    "app.channels.core.workflow",
-    "app.channels.core.delivery",
-    "app.i18n.catalog",
-    "app.domain.copilot-context",
-    "app.state.flofi-conversation",
-    "app.state.wallet-review-continuity",
-    "app.server.base-swap",
-    "app.domain.intelligence",
-    "app.domain.intelligence.conversation-regression",
-    "app.platform.copilot-tools",
-    "app.platform.intelligence-parity",
-    "app.server.copilot-orchestration"
+    "reference-reconciler.evidence"
   ],
   "modules": [
     {
@@ -646,7 +664,7 @@
         "reference-reconciler.orca-mainnet-liquidity"
       ],
       "gaps": [
-        "General swap-to-liquidity composition is unsupported; finite engineering compositions do not establish arbitrary mainnet support.",
+        "Liquidity conversion sequences now have canonical token-specific bindings and owner-wallet runtime support; current-state per-step previews do not establish a full post-prefix mainnet simulation.",
         "Mapped fork suites include existing owner-gated cases that may skip; a successful stage is not proof those optional cases ran."
       ]
     },
@@ -809,6 +827,7 @@
       "sources": [
         "apps/reference-dapp/src/admin/analytics/actions.ts",
         "apps/reference-dapp/src/admin/analytics/classify.ts",
+        "apps/reference-dapp/src/admin/analytics/copilot.ts",
         "apps/reference-dapp/src/admin/analytics/indexer.ts",
         "apps/reference-dapp/src/admin/analytics/networks.ts",
         "apps/reference-dapp/src/admin/analytics/view.ts",
@@ -831,7 +850,9 @@
         "app.admin.analytics.workflows",
         "app.admin.http.pg",
         "app.admin.session",
-        "app.admin.settings.pg"
+        "app.admin.settings.pg",
+        "app.server.copilot-metrics",
+        "app.server.copilot-metrics.pg"
       ],
       "gaps": [
         "Synthetic events verify projection contracts, not production metrics completeness or telemetry delivery."
@@ -876,6 +897,7 @@
       "sources": [
         "apps/reference-dapp/src/app/admin/access/page.tsx",
         "apps/reference-dapp/src/app/admin/admin.css",
+        "apps/reference-dapp/src/app/admin/ai-analytics/page.tsx",
         "apps/reference-dapp/src/app/admin/ai-learning/page.tsx",
         "apps/reference-dapp/src/app/admin/ai-settings/page.tsx",
         "apps/reference-dapp/src/app/admin/api/learning/route.ts",
@@ -893,7 +915,9 @@
         "app.admin.analytics.workflows",
         "app.admin.http.pg",
         "app.admin.session",
-        "app.admin.settings.pg"
+        "app.admin.settings.pg",
+        "app.server.copilot-metrics",
+        "app.server.copilot-metrics.pg"
       ],
       "gaps": [
         "Synthetic events verify projection contracts, not production metrics completeness or telemetry delivery."
@@ -1164,7 +1188,7 @@
         "reference-reconciler.orca-mainnet-liquidity"
       ],
       "gaps": [
-        "General swap-to-liquidity composition is unsupported; finite engineering compositions do not establish arbitrary mainnet support.",
+        "Liquidity conversion sequences now have canonical token-specific bindings and owner-wallet runtime support; current-state per-step previews do not establish a full post-prefix mainnet simulation.",
         "Mapped fork suites include existing owner-gated cases that may skip; a successful stage is not proof those optional cases ran."
       ]
     },
@@ -1745,12 +1769,14 @@
         "packages/cloud-runtime/migrations/0014_learning_automatic.sql",
         "packages/cloud-runtime/migrations/0015_workflow_runs.sql",
         "packages/cloud-runtime/migrations/0016_owner_history_purge.sql",
+        "packages/cloud-runtime/migrations/0017_copilot_metrics.sql",
         "packages/cloud-runtime/src/owner-history.ts"
       ],
       "suites": [
         "app.learning.automatic",
         "app.learning.automatic.pg",
         "app.learning.learning.pg",
+        "cloud-runtime.copilot-metrics-migration.pg",
         "cloud-runtime.forward-compatibility.pg",
         "cloud-runtime.migration-manifest",
         "cloud-runtime.tenancy.pg"
@@ -2181,7 +2207,7 @@
         "reference-reconciler.orca-mainnet-liquidity"
       ],
       "gaps": [
-        "General swap-to-liquidity composition is unsupported; finite engineering compositions do not establish arbitrary mainnet support.",
+        "Liquidity conversion sequences now have canonical token-specific bindings and owner-wallet runtime support; current-state per-step previews do not establish a full post-prefix mainnet simulation.",
         "Mapped fork suites include existing owner-gated cases that may skip; a successful stage is not proof those optional cases ran."
       ]
     },
@@ -2690,7 +2716,7 @@
         "app.state.flofi-conversation"
       ],
       "gaps": [
-        "Goal plans compose only certified single-action sequence steps (swap, bridge, supply); liquidity after a conversion is refused, not executed.",
+        "Goal plans compose certified sequence steps including funded liquidity after a conversion when the position and range are stated; Channel Core uses the public-quote discovery adapter.",
         "Scripted/model fixtures cannot certify live-model interpretation or every conversational ambiguity.",
         "Turn analytics are content-free log records; no durable Admin dashboard or cost estimate is derived from them."
       ]
@@ -2750,7 +2776,7 @@
         "reference-reconciler.orca-mainnet-liquidity"
       ],
       "gaps": [
-        "General swap-to-liquidity composition is unsupported; finite engineering compositions do not establish arbitrary mainnet support.",
+        "Liquidity conversion sequences now have canonical token-specific bindings and owner-wallet runtime support; current-state per-step previews do not establish a full post-prefix mainnet simulation.",
         "Mapped fork suites include existing owner-gated cases that may skip; a successful stage is not proof those optional cases ran."
       ]
     },
@@ -3501,7 +3527,7 @@
         "reference-reconciler.orca-mainnet-liquidity"
       ],
       "gaps": [
-        "General swap-to-liquidity composition is unsupported; finite engineering compositions do not establish arbitrary mainnet support.",
+        "Liquidity conversion sequences now have canonical token-specific bindings and owner-wallet runtime support; current-state per-step previews do not establish a full post-prefix mainnet simulation.",
         "Mapped fork suites include existing owner-gated cases that may skip; a successful stage is not proof those optional cases ran."
       ]
     },
@@ -3886,7 +3912,7 @@
         "reference-reconciler.orca-mainnet-liquidity"
       ],
       "gaps": [
-        "General swap-to-liquidity composition is unsupported; finite engineering compositions do not establish arbitrary mainnet support.",
+        "Liquidity conversion sequences now have canonical token-specific bindings and owner-wallet runtime support; current-state per-step previews do not establish a full post-prefix mainnet simulation.",
         "Mapped fork suites include existing owner-gated cases that may skip; a successful stage is not proof those optional cases ran."
       ]
     },
@@ -4161,7 +4187,7 @@
         "reference-reconciler.orca-mainnet-liquidity"
       ],
       "gaps": [
-        "General swap-to-liquidity composition is unsupported; finite engineering compositions do not establish arbitrary mainnet support.",
+        "Liquidity conversion sequences now have canonical token-specific bindings and owner-wallet runtime support; current-state per-step previews do not establish a full post-prefix mainnet simulation.",
         "Mapped fork suites include existing owner-gated cases that may skip; a successful stage is not proof those optional cases ran."
       ]
     },
@@ -4395,7 +4421,7 @@
         "reference-reconciler.orca-mainnet-liquidity"
       ],
       "gaps": [
-        "General swap-to-liquidity composition is unsupported; finite engineering compositions do not establish arbitrary mainnet support.",
+        "Liquidity conversion sequences now have canonical token-specific bindings and owner-wallet runtime support; current-state per-step previews do not establish a full post-prefix mainnet simulation.",
         "Mapped fork suites include existing owner-gated cases that may skip; a successful stage is not proof those optional cases ran."
       ]
     },
@@ -4626,7 +4652,7 @@
         "reference-reconciler.orca-mainnet-liquidity"
       ],
       "gaps": [
-        "General swap-to-liquidity composition is unsupported; finite engineering compositions do not establish arbitrary mainnet support.",
+        "Liquidity conversion sequences now have canonical token-specific bindings and owner-wallet runtime support; current-state per-step previews do not establish a full post-prefix mainnet simulation.",
         "Mapped fork suites include existing owner-gated cases that may skip; a successful stage is not proof those optional cases ran."
       ]
     },
@@ -4766,6 +4792,7 @@
       ],
       "sharedFinancialCore": false,
       "sources": [
+        "apps/reference-dapp/src/server/copilot-metrics-store.ts",
         "apps/reference-dapp/src/server/copilot-settings-source.ts",
         "apps/reference-dapp/src/server/copilot-settings.ts",
         "apps/reference-dapp/src/server/runtime-settings-store.ts"
@@ -4774,7 +4801,9 @@
         "app.admin.analytics.workflows",
         "app.admin.http.pg",
         "app.admin.session",
-        "app.admin.settings.pg"
+        "app.admin.settings.pg",
+        "app.server.copilot-metrics",
+        "app.server.copilot-metrics.pg"
       ],
       "gaps": [
         "Synthetic events verify projection contracts, not production metrics completeness or telemetry delivery."
@@ -4860,6 +4889,26 @@
       ]
     },
     {
+      "id": "server--channels",
+      "primary": "flofi-channels",
+      "dependencies": [
+        "flofi-chat",
+        "flofi-protocol-integrations",
+        "flofi-security"
+      ],
+      "sharedFinancialCore": false,
+      "sources": [
+        "apps/reference-dapp/src/server/channel-copilot-toolkit.ts"
+      ],
+      "suites": [
+        "app.server.channel-copilot-toolkit",
+        "app.channels.core.conversation"
+      ],
+      "gaps": [
+        "Scripted provider responses verify the read-only server boundary; hosted Telegram delivery and live provider availability require external engineering acceptance."
+      ]
+    },
+    {
       "id": "server--chat",
       "primary": "flofi-chat",
       "dependencies": [
@@ -4887,7 +4936,7 @@
       ],
       "gaps": [
         "Scripted/model fixtures cannot certify live-model interpretation or every conversational ambiguity.",
-        "The Responses API tool loop is certified against a scripted transport; live model tool-call behaviour (including reasoning-item continuation with store:false) needs owner live acceptance."
+        "The Responses API tool loop has deterministic regression coverage and mandatory assertions in the live engineering acceptance suite; configured-model acceptance remains unverified until that suite runs with the existing authorized secret binding."
       ]
     },
     {
@@ -4974,7 +5023,7 @@
         "reference-reconciler.orca-mainnet-liquidity"
       ],
       "gaps": [
-        "General swap-to-liquidity composition is unsupported; finite engineering compositions do not establish arbitrary mainnet support.",
+        "Liquidity conversion sequences now have canonical token-specific bindings and owner-wallet runtime support; current-state per-step previews do not establish a full post-prefix mainnet simulation.",
         "Mapped fork suites include existing owner-gated cases that may skip; a successful stage is not proof those optional cases ran."
       ]
     },
@@ -5336,7 +5385,7 @@
         "reference-reconciler.orca-mainnet-liquidity"
       ],
       "gaps": [
-        "General swap-to-liquidity composition is unsupported; finite engineering compositions do not establish arbitrary mainnet support.",
+        "Liquidity conversion sequences now have canonical token-specific bindings and owner-wallet runtime support; current-state per-step previews do not establish a full post-prefix mainnet simulation.",
         "Mapped fork suites include existing owner-gated cases that may skip; a successful stage is not proof those optional cases ran."
       ]
     },
@@ -5651,7 +5700,7 @@
         "reference-reconciler.orca-mainnet-liquidity"
       ],
       "gaps": [
-        "General swap-to-liquidity composition is unsupported; finite engineering compositions do not establish arbitrary mainnet support.",
+        "Liquidity conversion sequences now have canonical token-specific bindings and owner-wallet runtime support; current-state per-step previews do not establish a full post-prefix mainnet simulation.",
         "Mapped fork suites include existing owner-gated cases that may skip; a successful stage is not proof those optional cases ran."
       ]
     },
@@ -5915,8 +5964,10 @@
     "app.mcp.handoff.workflow.pg",
     "app.mcp.link-integrity.pg",
     "app.mcp.oauth.server.pg",
+    "app.server.copilot-metrics.pg",
     "app.workflow-runs.cancel-run.pg",
     "app.workflow-runs.confirm-run.pg",
+    "cloud-runtime.copilot-metrics-migration.pg",
     "cloud-runtime.dispatch.pg",
     "cloud-runtime.forward-compatibility.pg",
     "cloud-runtime.storage.pg",

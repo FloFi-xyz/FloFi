@@ -15,7 +15,7 @@ export function ethereumAddChainParameters() {
 export const ETHEREUM_MAINNET_TRANSFER = Object.freeze({
   network: ETHEREUM_MAINNET.name, chain: ETHEREUM_MAINNET.chain, chainId: ETHEREUM_MAINNET.chainId, chainHex: ETHEREUM_MAINNET.chainHex,
   rpc: ETHEREUM_MAINNET.rpc, explorer: ETHEREUM_MAINNET.explorer, officialSource: ETHEREUM_MAINNET.officialSource,
-  adapterId: 'evm.native-transfer', action: 'asset.transfer', maximumValueWei: '1000000000000000000000000', defaultValueWei: '1000000000000',
+  adapterId: 'evm.native-transfer', action: 'asset.transfer', maximumValueWei: (2n ** 256n - 1n).toString(), defaultValueWei: '1000000000000',
   reviewTtlSeconds: 60, gasLimitMarginPercent: 150, maxFeeMultiplier: 2, minimumConfirmations: 3, reestimateBeforeSubmission: true,
   settlement: 'L1' as const, recipients: 'ANY' as const, contractRecipients: true, tokenAdapterId: 'evm.token-transfer', environment: 'MAINNET' as const,
 });

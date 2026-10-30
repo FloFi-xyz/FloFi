@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { LIGHTHOUSE_PROGRAM, ORCA_LIQUIDITY_INNER_PROGRAMS, ORCA_LIQUIDITY_TOP_LEVEL_PROGRAMS, ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY as program, assertRecordedSolanaWalletGuard,
+import { solanaRpcU64, LIGHTHOUSE_PROGRAM, ORCA_LIQUIDITY_INNER_PROGRAMS, ORCA_LIQUIDITY_TOP_LEVEL_PROGRAMS, ORCA_WHIRLPOOLS_DEVNET_LIQUIDITY as program, assertRecordedSolanaWalletGuard,
   assessOrcaLiquidityEffects, base58Encode, decompileMessageV0, fromBase64, parseMessageV0, parseTransaction, requireOrcaLiquidityProfile, solanaSwapArtifactHash, solanaSwapHash,
   summarizeOrcaLiquidityInstructions, verifyEd25519, verifySolanaCluster, type OrcaLiquidityBalances, type OrcaLiquidityEvent, type OrcaLiquidityReview, type OrcaLiquiditySimulation,
   type SolanaRpc, type SolanaWalletGuard } from '@defi-workflow-engine/reference-compiler';
@@ -18,8 +18,8 @@ export type OrcaLiquidityObservation = { verdict: 'RECONCILED' | 'DIVERGENT' | '
   walletGuard?: SolanaWalletGuard };
 const fail = (code: string): never => { throw new Error(code); };
 const record = (v: unknown): Record<string, unknown> => v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : fail('SOLANA_RPC_INVALID');
-const lamportList = (v: unknown, n: number): bigint[] => Array.isArray(v) && v.length === n && v.every(x => Number.isSafeInteger(x) && (x as number) >= 0)
-  ? (v as number[]).map(BigInt) : fail('SOLANA_RPC_INVALID');
+const lamportList = (v: unknown, n: number): bigint[] => Array.isArray(v) && v.length === n
+  ? v.map(value => solanaRpcU64(value)) : fail('SOLANA_RPC_INVALID');
 type TokenBalance = { index: number; mint: string; owner: string; amount: bigint; programId: string };
 function tokenBalances(v: unknown): TokenBalance[] {
   if (!Array.isArray(v)) fail('SOLANA_RPC_INVALID');
@@ -85,7 +85,7 @@ export async function reconcileOrcaLiquidityAttempt(review: OrcaLiquidityReview,
       Array.isArray(record(group).instructions) ? (record(group).instructions as unknown[]).map(i => keys[record(i).programIdIndex as number] ?? fail('SOLANA_RPC_INVALID')) : []))] : [];
     if (!base.programs.includes(program.programs.whirlpool) || base.programs.some(p => !ORCA_LIQUIDITY_TOP_LEVEL_PROGRAMS.includes(p) && !(attempt.walletGuard && p === LIGHTHOUSE_PROGRAM)) ||
         base.innerPrograms.some(p => !ORCA_LIQUIDITY_INNER_PROGRAMS.includes(p))) fail('ORCA_LIQUIDITY_UNEXPECTED_PROGRAM');
-    const fee = typeof meta.fee === 'number' && Number.isSafeInteger(meta.fee) ? BigInt(meta.fee) : fail('SOLANA_RPC_INVALID');
+    const fee = solanaRpcU64(meta.fee);
     base.feeLamports = fee.toString();
     if (meta.err !== null) return { ...base, transactionFailed: true, verdict: 'DIVERGENT', reason: 'ORCA_LIQUIDITY_TRANSACTION_FAILED' };
     if (fee > BigInt(review.estimatedFeeLamports)) fail('ORCA_LIQUIDITY_FEE_MISMATCH');

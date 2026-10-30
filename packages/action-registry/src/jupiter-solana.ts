@@ -12,9 +12,9 @@ export type SolanaToken = { readonly symbol: SolanaTokenSymbol; readonly mint: s
   readonly native: boolean; readonly maximumAmount: string };
 export const SOLANA_MAINNET_TOKENS: Readonly<Record<SolanaTokenSymbol, SolanaToken>> = Object.freeze({
   // Jupiter identifies native SOL by the wrapped SOL mint and wraps/unwraps around the swap.
-  SOL: Object.freeze({ symbol: 'SOL', mint: 'So11111111111111111111111111111111111111112', decimals: 9, native: true, maximumAmount: '1000000000000' }),
-  USDC: Object.freeze({ symbol: 'USDC', mint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', decimals: 6, native: false, maximumAmount: '1000000000000' }),
-  USDT: Object.freeze({ symbol: 'USDT', mint: 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB', decimals: 6, native: false, maximumAmount: '1000000000000' }),
+  SOL: Object.freeze({ symbol: 'SOL', mint: 'So11111111111111111111111111111111111111112', decimals: 9, native: true, maximumAmount: (2n ** 64n - 1n).toString() }),
+  USDC: Object.freeze({ symbol: 'USDC', mint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', decimals: 6, native: false, maximumAmount: (2n ** 64n - 1n).toString() }),
+  USDT: Object.freeze({ symbol: 'USDT', mint: 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB', decimals: 6, native: false, maximumAmount: (2n ** 64n - 1n).toString() }),
 });
 export const JUPITER_SOLANA_MAINNET = Object.freeze({
   network: 'Solana', cluster: 'mainnet-beta', chain: SOLANA_MAINNET_CHAIN, walletChain: 'solana:mainnet',

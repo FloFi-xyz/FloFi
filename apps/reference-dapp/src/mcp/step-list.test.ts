@@ -82,7 +82,7 @@ describe('BUILD-MCP-002 step-list contract', () => {
     const mixed = await evaluateWorkflowGates(workflow({ version: 2, steps: [BRIDGE, SOLANA] }), runtime(), readHandoffPolicy({}));
     expect(mixed.enabledByPolicy).toMatchObject({ enabled: false, reason: 'MAINNET_HANDOFF_DISABLED_BY_POLICY', fundsClass: 'REAL_FUNDS' });
   });
-  it('works end to end over MCP: compose and review per step, simulate one step at a time', async () => {
+  it('works end to end over MCP: compose/review the workflow and return each step\'s actual simulation outcome', async () => {
     const dev = { principal: 'dev-alice', token: credential() }, client = session({ env: gatewayEnv([dev]), token: dev.token });
     const composed = (await client.callTool('compose_strategy', { strategy: { version: 2, steps: [BRIDGE, SWAP] } })).output as Record<string, unknown>;
     expect(composed).toMatchObject({ ok: true, stepCount: 2, executionPlan: { kind: 'SEQUENTIAL', reason: null, mode: 'STEP_BY_STEP' },
@@ -92,7 +92,8 @@ describe('BUILD-MCP-002 step-list contract', () => {
     expect((await client.callTool('review_strategy', { strategy: composed.strategy, workflowHash: hash })).output).toMatchObject({ ok: true, stepCount: 2,
       workflowSteps: [{ index: 0 }, { index: 1 }], executionPlan: { kind: 'SEQUENTIAL', reason: null } });
     expect((await client.callTool('simulate_strategy', { strategy: composed.strategy, workflowHash: hash, simulationSubject: OWNER })).output)
-      .toEqual({ ok: false, code: 'SIMULATE_ONE_STEP_AT_A_TIME', stepCount: 2 });
+      .toMatchObject({ ok: true, kind: 'WORKFLOW_PREVIEW', stepCount: 2, status: 'INCOMPLETE', authorizable: false,
+        steps: [{ index: 0, state: 'FAILED', code: 'MCP_CLOUD_RUNTIME_REQUIRED' }, { index: 1, state: 'FAILED', code: 'MCP_CLOUD_RUNTIME_REQUIRED' }] });
     const single = (await client.callTool('compose_strategy', { strategy: { version: 2, steps: [BRIDGE] } })).output;
     expect(single).toMatchObject({ ok: true, stepCount: 1, executionPlan: { kind: 'SINGLE_FLOW', reason: null } });
     expect((await client.callTool('get_capabilities', {})).output).toMatchObject({ stepLists: { maxSteps: 8 } });

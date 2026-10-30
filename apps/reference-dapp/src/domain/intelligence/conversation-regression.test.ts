@@ -164,11 +164,10 @@ describe('cases 8–11: grounded answers, failures and the mainnet boundary', ()
     const invented = s.say('and the yield?', { ...intent.question('WORKFLOW_OVERVIEW'), answer: 'It yields 7.5% per year.' })!;
     expect(invented.notes.join(' ')).not.toMatch(/7\.5|AI explanation/);
   });
-  it('10: an unreachable composition is explained with grounded alternatives; nothing is proposed', () => {
+  it('10: a conversion into liquidity retains the goal and asks for its missing pool parameters', () => {
     const reply = mainnet().say('swap some USDC for WETH on Base and put both in a liquidity position', intent.goal({ network: 'BASE', asset: 'USDC' }, { asset: 'WETH', use: 'LIQUIDITY' }))!;
-    expect(reply.kind).toBe('UNSUPPORTED');
-    expect(reply.text).toMatch(/cannot yet run a conversion and a liquidity position as one reviewed workflow on Base: liquidity is not a sequence step/);
-    expect(reply.text).toMatch(/swap first as its own step/);
+    expect(reply.kind).toBe('CLARIFICATION');
+    expect(reply.text).toMatch(/two pool tokens and maximum deposit/);
     expect(reply.command).toBeUndefined();
   });
   it('11: a test-network request is refused without moving it to a mainnet', () => {
@@ -219,6 +218,64 @@ describe('case 12: a long conversation keeps typed state and asks nothing twice'
     // The transcript sent to the model stays bounded; the typed state (workflow, pending proposal, referents) carries the conversation.
     for (const turn of s.turns) if (turn.request) expect(turn.request.messages.filter(message => message.role === 'user').length).toBeLessThanOrEqual(8);
     noRepeats(s);
+  });
+});
+
+describe('complete mainnet conversion and existing-action composition', () => {
+  const liquidity = act.catalogLiquidity({ network: 'BASE', protocol: 'UNISWAP_V3',
+    deposits: [{ asset: 'USDC', maxAmount: '10' }, { asset: 'WETH', maxAmount: '0.005' }], rangeUnit: 'FULL' });
+  it('grounds signed ticks when a mainnet bridge funds an Orca position', () => {
+    const s = mainnet();
+    const position = act.liquidity({ protocol: 'ORCA', network: 'SOLANA', deposits: [{ asset: 'SOL', maxAmount: '0.1' }, { asset: 'USDC', maxAmount: '5' }],
+      rangeUnit: 'TICK', lower: '-64', upper: '64' });
+    const result = s.say('I have 10 USDC on Base; move it to SOL on Solana then provide Orca liquidity up to 0.1 SOL and 5 USDC at ticks -64 to 64',
+      intent.goal({ network: 'BASE', asset: 'USDC', amount: '10' }, { network: 'SOLANA', asset: 'SOL', use: 'LIQUIDITY' }, { liquidity: position }));
+    expect(result, JSON.stringify(result)).toMatchObject({ kind: 'PROPOSAL', command: { type: 'ADD_SEQUENCE' } });
+    s.apply();
+    expect(workflowSequence(s.workflow, candidate => lintWorkflow(candidate, s.context))?.steps[1]?.fundedBy).toBe(0);
+  });
+  it('keeps the sign of a corrected tick range while completing an open goal', () => {
+    const s = mainnet(), target = { network: 'SOLANA', asset: 'SOL', use: 'LIQUIDITY' };
+    const position = act.liquidity({ protocol: 'ORCA', network: 'SOLANA', deposits: [{ asset: 'SOL', maxAmount: '0.1' }, { asset: 'USDC', maxAmount: '5' }],
+      rangeUnit: 'TICK', lower: '-64', upper: '64' });
+    expect(s.say('Use USDC on Base to provide Orca liquidity on Solana with up to 0.1 SOL and 5 USDC at ticks -64 to 64',
+      intent.goal({ network: 'BASE', asset: 'USDC' }, target, { liquidity: position }))?.kind).toBe('CLARIFICATION');
+    const result = s.say('10 USDC; actually ticks -128 to 128', intent.goal({ amount: '10' }, { use: 'LIQUIDITY' },
+      { liquidity: { ...position, deposits: [], lower: '-128', upper: '128' } }));
+    expect(result, JSON.stringify(result)).toMatchObject({ kind: 'PROPOSAL', command: { type: 'ADD_SEQUENCE', steps: [{ type: 'ADD_UNIVERSAL_BRIDGE' },
+      { type: 'ADD_SOLANA_LIQUIDITY', input: { lower: '-128', upper: '128' } }] } });
+  });
+  it('a goal authors swap and liquidity together and binds the delivered WETH only', () => {
+    const s = mainnet();
+    const model = intent.goal({ network: 'BASE', asset: 'USDC', amount: '5' }, { network: 'BASE', asset: 'WETH', use: 'LIQUIDITY' }, { liquidity });
+    const reply = s.say('I have 5 USDC on Base; convert to WETH and provide Uniswap v3 liquidity, up to 10 USDC and 0.005 WETH, full range', model)!;
+    expect(reply.kind, JSON.stringify(reply)).toBe('PROPOSAL');
+    expect(reply).toMatchObject({ kind: 'PROPOSAL', command: { type: 'ADD_SEQUENCE', steps: [{ type: 'ADD_SWAP' }, { type: 'ADD_CRYPTO_ACTION' }] } });
+    expect(s.workflow.nodes.filter(node => !node.actionType.startsWith('mock-'))).toHaveLength(0);
+    s.apply();
+    const sequence = workflowSequence(s.workflow, candidate => lintWorkflow(candidate, s.context));
+    expect(sequence?.steps).toHaveLength(2);
+    expect(sequence?.steps[1]).toMatchObject({ fundedBy: 0, funding: [{ fundedBy: 0, input: { amount: '5000000000000000' } }] });
+    expect(sequence?.steps[1]?.funding).toHaveLength(1);
+  });
+  it('natural clarification preserves a conversion while collecting the position parameters', () => {
+    const s = mainnet(), source = { network: 'BASE', asset: 'USDC', amount: '5' }, target = { network: 'BASE', asset: 'WETH', use: 'LIQUIDITY' };
+    expect(s.say('I have 5 USDC on Base; convert to WETH and add liquidity', intent.goal(source, target))?.kind).toBe('CLARIFICATION');
+    const reply = s.say('Uniswap v3, up to 10 USDC and 0.005 WETH, full range', intent.goal({}, { use: 'LIQUIDITY' }, { liquidity }))!;
+    expect(reply.kind, JSON.stringify(reply)).toBe('PROPOSAL');
+    expect(reply).toMatchObject({ kind: 'PROPOSAL', command: { type: 'ADD_SEQUENCE' } });
+    expect(reply.sentence).toContain('swap 5 USDC to WETH on Base');
+    noRepeats(s);
+  });
+  it('an explicitly requested mainnet swap and supply use the same sequence without a hardcoded composition', () => {
+    const s = mainnet();
+    const reply = s.say('Swap 0.01 ETH to USDC on Base then supply up to 20 USDC on Aave', intent.composition([
+      act.swap({ network: 'BASE', inputAsset: 'ETH', outputAsset: 'USDC', amount: '0.01' }),
+      act.lending('SUPPLY', { network: 'BASE', asset: 'USDC', amount: '20' }),
+    ]))!;
+    expect(reply).toMatchObject({ kind: 'PROPOSAL', command: { type: 'ADD_SEQUENCE' } });
+    s.apply();
+    expect(workflowSequence(s.workflow, candidate => lintWorkflow(candidate, s.context))?.steps[1]?.fundedBy).toBe(0);
   });
 });
 

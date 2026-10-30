@@ -319,7 +319,8 @@ export function editorReducer(state: EditorState, command: Command, context?: Re
         if (locked === command.locked) return { workflow: current, error: null };
         nodes = nodes.map(n => n.nodeId === node.nodeId ? { ...n,
           lockedParameters: command.locked ? [parameter] : [],
-          editableBounds: command.locked ? [] : [{ parameterName: 'amount-in', asset: { ...parameter.value.asset }, minimumAmount: '1', maximumAmount: context.assets[details.from].maximumAmountUnits }],
+          editableBounds: command.locked ? [] : createSwapNode(node.nodeId, details.from === 'USDC' ? 'USDC_TO_WETH' : 'WETH_TO_USDC', details.amount,
+            String(details.slippage ?? 100), context).editableBounds,
         } : n);
       } else if (command.type === 'SET_SWAP_AMOUNT') {
         if (locked) return reject('LOCKED_PARAMETER: unlock on canvas before editing.');
@@ -330,6 +331,8 @@ export function editorReducer(state: EditorState, command: Command, context?: Re
         nodes = nodes.map(n => n.nodeId === node.nodeId ? { ...n,
           inputs: n.inputs.map(p => p.name === 'amount-in' ? { ...parameter, value: { ...parameter.value, amount } } : p),
           userConstraints: n.userConstraints.map(c => c.kind === 'MAXIMUM_INPUT' ? { ...c, quantity: { ...c.quantity, amount } } : c),
+          editableBounds: n.editableBounds.map(bound => bound.parameterName === 'amount-in' && BigInt(bound.maximumAmount) < BigInt(amount)
+            ? { ...bound, maximumAmount: amount } : bound),
         } : n);
       } else if (command.type === 'SET_SLIPPAGE') {
         let bps: number;

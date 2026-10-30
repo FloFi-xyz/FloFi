@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { CopilotAction, CopilotNetwork } from './copilot-intent';
 import type { CopilotIntentV2 } from './copilot-intent-v2';
-import { groundedAddress, groundedAmount, groundedBps } from './copilot-authoring';
+import { groundedAddress, groundedAmount, groundedBps, groundedSigned } from './copilot-authoring';
 import { copilotNetworksMentioned, networkIdentity, networkOfCopilot } from './network-registry';
 import { resolveAssetReference } from './asset-catalogs';
 import { resolveUniversalAsset, universalAssetReference } from './universal-bridge-authoring';
@@ -20,7 +20,8 @@ const words = (text: string, value: string) => text.toLowerCase().includes(value
 function stated(field: string, value: unknown, text: string): boolean {
   if (typeof value !== 'string') return false;
   if (['network', 'sourceNetwork', 'destinationNetwork'].includes(field)) return copilotNetworksMentioned(text).includes(value as Exclude<CopilotNetwork, 'OTHER'>);
-  if (['amount', 'threshold', 'percent', 'lower', 'upper'].includes(field)) return groundedAmount(text, value);
+  if (field === 'lower' || field === 'upper') return groundedSigned(text, value);
+  if (['amount', 'threshold', 'percent'].includes(field)) return groundedAmount(text, value);
   if (field === 'slippageBps') return groundedBps(text, value);
   if (field === 'recipient' || field === 'beneficiary') return groundedAddress(text, value) || words(text, value);
   if (field === 'time') return text.includes(value) || (value.endsWith(':00') && new RegExp(`\\b${Number(value.slice(0, 2))}h?\\b`, 'i').test(text));
@@ -80,7 +81,9 @@ export function mergeDraftIntent(before: CopilotIntentV2 | null, interpreted: Co
     source: mergeFields(before.goal.source, interpreted.goal.source, latest) as typeof interpreted.goal.source,
     target: { ...mergeFields(before.goal.target, interpreted.goal.target, latest) as typeof interpreted.goal.target, use: interpreted.goal.target.use },
     preference: interpreted.goal.preference ?? before.goal.preference, cap: interpreted.goal.cap ?? before.goal.cap,
-    recipient: interpreted.goal.recipient ?? before.goal.recipient ?? null } };
+    recipient: interpreted.goal.recipient ?? before.goal.recipient ?? null,
+    liquidity: interpreted.goal.liquidity && before.goal.liquidity ? mergeFields(before.goal.liquidity, interpreted.goal.liquidity, latest) as typeof interpreted.goal.liquidity
+      : interpreted.goal.liquidity ?? before.goal.liquidity ?? null } };
   return interpreted;
 }
 /** A short reply to one typed slot; arbitrary sentences and corrections still go through the model. */

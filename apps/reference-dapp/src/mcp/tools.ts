@@ -39,6 +39,9 @@ import { approvalForRequester, approvalProgress, capabilityFacts, composeWorkflo
 import { principalScopes, type McpOAuthPrincipal, type McpPrincipal } from './config.ts';
 import { GOAL_PREFERENCES, GOAL_USES, planGoal, type Goal } from '../domain/intelligence/goal-planner';
 import { goalStrategy } from '../domain/intelligence/goal-strategy';
+import { networkIdentity } from '../domain/network-registry';
+import type { CopilotLiquidityAction } from '../domain/copilot-intent';
+import { simulateWorkflowPreview } from '../platform/preview.ts';
 import { LEGACY_PANEL_URI, PANEL_MIME, PANEL_URI, panelHtml, panelResourceMeta } from './app/panel.ts';
 import { MCP_HANDOFF_RULES, mcpApprovalLinkScheme } from './approval-profile.ts';
 import { readHandoffPolicy, workflowPlan, type HandoffPolicy } from './execution.ts';
@@ -129,6 +132,13 @@ function schemasFor(scope: NetworkScope) {
     preference: Type.Optional(Type.Union(GOAL_PREFERENCES.map(item => Type.Literal(item)), { description: 'Only if the user asked for it.' })),
     cap: Type.Optional(Type.String({ pattern: '^(0|[1-9][0-9]{0,30})(\\.[0-9]{1,18})?$', description: 'The most a later funded step of another asset may spend, as the user stated.' })),
     beneficiary: Type.Optional(Type.String({ pattern: '^0x[0-9a-fA-F]{40}$', description: 'Supply only: the account Aave credits, exactly as the user gave it. Never invent one.' })),
+    liquidity: Type.Optional(Type.Object({
+      maxAmounts: Type.Record(Type.String({ minLength: 1, maxLength: 160 }), Type.String({ pattern: '^(0|[1-9][0-9]{0,30})(\\.[0-9]{1,18})?$' }), { minProperties: 2, maxProperties: 2 }),
+      range: Type.Union([Type.Object({ unit: Type.Union([Type.Literal('price'), Type.Literal('tick')]), lower: Type.String({ maxLength: 48 }), upper: Type.String({ maxLength: 48 }) }, strict),
+        Type.Object({ unit: Type.Literal('full') }, strict)]),
+      feeTier: Type.Optional(Type.Union([Type.Literal(100), Type.Literal(500), Type.Literal(3000), Type.Literal(10000)])),
+      slippageBps: Type.Optional(Type.Integer({ minimum: 1, maximum: 10_000 })),
+    }, { ...strict, description: 'For a liquidity goal: the pool assets, maximum deposits and range the user chose. FloFi plans any necessary conversion first.' })),
   }, strict) }, strict),
   };
 }
@@ -318,7 +328,7 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
       workflowSteps: w.steps.map((c, index) => ({ index, action: c.strategy.action, strategy: c.strategy, workflowHash: c.workflowHash, revision: c.workflow.revision,
         fundsClass: c.fundsClass, workflow: c.workflow, steps: stepViews(c), summary: c.summary, explanation: c.explanation, flow: plan.steps[index]?.flow ?? null })),
       notes: w.notes, authority: AUTHORITY, visual,
-      nextSteps: ['review_strategy for every step\'s findings', 'simulate_strategy one step at a time (pass that step as a version 1 strategy)',
+      nextSteps: ['review_strategy for every step\'s findings', 'simulate_strategy with this complete strategy and workflowHash for every step\'s preview',
         'request_user_approval to hand the whole workflow to its owner: it reports how many authorizations each mode needs. Each step runs only after the previous one reconciled.'] };
   });
 
@@ -328,8 +338,16 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
     'Or the one field still missing, or why it is not reachable. Use only values the user gave. It authorizes nothing: compose/review/request approval as usual.',
   Schemas.plan, pure, args => {
     const g = args.goal;
+    const position = g.liquidity;
+    const liquidity: CopilotLiquidityAction | null = position ? { type: 'LIQUIDITY',
+      protocol: g.targetNetwork === 'solana' || g.targetNetwork === 'solana-devnet' ? 'ORCA' : 'UNISWAP_V3', network: networkIdentity(g.targetNetwork ?? '')?.copilot ?? null,
+      deposits: Object.entries(position.maxAmounts).map(([asset, maxAmount]) => ({ asset, maxAmount })),
+      rangeUnit: position.range.unit === 'full' ? 'FULL' : position.range.unit === 'tick' ? 'TICK' : 'PRICE',
+      lower: 'lower' in position.range ? position.range.lower : null, upper: 'upper' in position.range ? position.range.upper : null,
+      slippageBps: position.slippageBps === undefined ? null : String(position.slippageBps),
+      feeTier: position.feeTier === undefined ? null : String(position.feeTier / 10_000) as NonNullable<CopilotLiquidityAction['feeTier']>, funding: 'SWAP_OUTPUT' } : null;
     const goal: Goal = { source: { network: g.sourceNetwork ?? null, asset: g.sourceAsset ?? null, amount: g.amount ?? null },
-      target: { network: g.targetNetwork ?? null, asset: g.targetAsset ?? null, use: g.use }, preference: g.preference ?? null, cap: g.cap ?? null };
+      target: { network: g.targetNetwork ?? null, asset: g.targetAsset ?? null, use: g.use }, preference: g.preference ?? null, cap: g.cap ?? null, liquidity };
     const plan = planGoal(goal, scope);
     if (plan.kind === 'LIQUIDITY') return { ok: true, kind: 'LIQUIDITY', network: plan.network, authority: AUTHORITY,
       nextSteps: ['compose_strategy with an add_liquidity strategy on this network, naming both pool assets, their maximum deposits and the range the user states.'] };
@@ -373,6 +391,16 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
   Schemas.simulate, { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true }, async args => {
     // BUILD-MCP-002: an OAuth account also has an hourly simulation budget (they reach public chains and providers).
     const account = ctx.principal.kind === 'mcp-oauth' ? ctx.principal.accountId : null, state = ctx.state;
+    const workflow = composeWorkflowOrRefuse(args.strategy, args.workflowHash, scope);
+    if (workflow.steps.length > 1) {
+      const preview = await simulateWorkflowPreview(ctx.runtime, args, { scope, ...account && state
+        ? { budget: () => state.oauth.allow(`simulate:account:${account}`, SIMULATIONS_PER_ACCOUNT_HOUR, 3_600, new Date()) } : {} });
+      return { ok: true, kind: 'WORKFLOW_PREVIEW', ...preview, preview: true,
+        subjectRole: 'SIMULATION_SUBJECT_ONLY_NOT_AN_OWNER_OR_AUTHORIZATION', authority: AUTHORITY,
+        notes: ['Each step uses its own provider simulation against the current chain state.',
+          'Dependent balances arrive only after earlier steps reconcile; an awaiting step is explicitly incomplete.',
+          'FloFi re-simulates each actual received amount and presents its Strategy Manifest before the wallet signs.'] };
+    }
     const { composition: c, plan, view, simulationSubject } = await simulatePreview(ctx.runtime, args, { scope, ...account && state
       ? { budget: () => state.oauth.allow(`simulate:account:${account}`, SIMULATIONS_PER_ACCOUNT_HOUR, 3_600, new Date()) } : {} });
     return { ok: true, workflowHash: c.workflowHash, flow: plan.flow, kind: view.kind, provenance: view.provenance, observedAt: view.observedAt, expiresAt: view.expiresAt,

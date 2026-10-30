@@ -23,6 +23,14 @@ function setup(options: Parameters<typeof createMockedSolanaTransferChain>[0] = 
 const instructionsOf = (unsigned: string) => decompileMessageV0(parseMessageV0(parseTransaction(fromBase64(unsigned, 2048)).message), {});
 
 describe('Solana transfer intent', () => {
+  it('uses the uint64 instruction amount limit on mainnet and preserves actual wallet/balance checks', () => {
+    const { owner, recipient } = setup();
+    for (const token of [null, usdc]) {
+      expect(solanaTransferIntent(workflow(recipient, '10000000000001', token), owner.owner).amount).toBe('10000000000001');
+      expect(solanaTransferIntent(workflow(recipient, (2n ** 64n - 1n).toString(), token), owner.owner).amount).toBe((2n ** 64n - 1n).toString());
+      expect(() => solanaTransferIntent(workflow(recipient, (2n ** 64n).toString(), token), owner.owner)).toThrow();
+    }
+  });
   it('requires an explicit recipient that is a wallet key and never the sender', () => {
     const { owner, recipient } = setup();
     expect(solanaTransferIntent(workflow(recipient, '1000'), owner.owner)).toMatchObject({ owner: owner.owner, recipient, amount: '1000' });

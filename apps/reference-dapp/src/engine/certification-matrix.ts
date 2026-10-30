@@ -113,7 +113,7 @@ export function certificationMatrix(ledger: Ledger, verification: LiveVerificati
     return { id, action: strategy.action, network, destinationNetwork: destination, funds: capability.funds, protocols: capability.adapters, flow: strategyFlow(strategy),
       webRuntime, ownerWalletExecutionImplemented: implemented,
       channels: { canvas: webRuntime !== null, approve: webRuntime !== null, copilot: agents, mcp: agents, telegram: agents, whatsapp: 'POLICY_BLOCKED', developerApi: !real && agents },
-      agentRollout: pendingAgentCapability(strategy.action, network), registryEvidence: capability.demonstratedEvidence, liveEvidence, status, reason };
+      agentRollout: agents ? null : pendingAgentCapability(strategy.action, network), registryEvidence: capability.demonstratedEvidence, liveEvidence, status, reason };
   });
   const others = OTHER_ROWS.map(({ implemented, why, ...row }): CertificationRow => {
     const liveEvidence = verifiedEntries(ledger, verification, `${row.action}:${row.network}`, row.protocols.length ? [row.protocols.join(' + ')] : []);

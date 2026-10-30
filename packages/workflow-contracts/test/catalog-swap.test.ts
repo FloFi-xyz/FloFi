@@ -24,12 +24,13 @@ describe('BUILD-BASE-001 catalog swaps on Base', () => {
       adapterConstraints: { adapters: [], protocols: ['uniswap'] }, requiredAuthorizationClass: 'MODE_A', failurePolicy: 'ABORT' });
     expect(node.inputs.map(input => input.name)).toEqual(['amount-in', 'asset-out']);
     expect(readCatalogSwapNode(node)).toEqual({ chain: BASE, input: usdc, output: cbbtc, amount: '100000000', slippageBps: 50 });
-    // Base USDC keeps its reference bound (1,000,000 USDC) in every pair; a listed asset uses the catalog bound (10^9 whole units).
+    // Existing editing windows keep old hashes; larger user-authored amounts remain valid up to the integer encoding limit.
     expect(node.editableBounds[0]!.maximumAmount).toBe('1000000000000');
-    expect(swap(cbbtc, usdc, '100000').editableBounds[0]!.maximumAmount).toBe(catalogSwapMaximumUnits(8));
-    expect(catalogSwapMaximumUnits(18, BASE, weth.address)).toBe('1000000000000000000000');
-    expect(catalogSwapMaximumUnits(6)).toBe('1000000000000000');
-    expect(() => swap(usdc, cbbtc, '1000000000001')).toThrow('CATALOG_SWAP_AMOUNT_INVALID');
+    expect(swap(cbbtc, usdc, '100000').editableBounds[0]!.maximumAmount).toBe('100000000000000000');
+    expect(catalogSwapMaximumUnits(18, BASE, weth.address)).toBe((2n ** 256n - 1n).toString());
+    expect(catalogSwapMaximumUnits(6)).toBe((2n ** 256n - 1n).toString());
+    expect(() => swap(usdc, cbbtc, '1000000000001')).not.toThrow();
+    expect(() => swap(usdc, cbbtc, (2n ** 256n).toString())).toThrow('CATALOG_SWAP_AMOUNT_INVALID');
   });
   it('keeps Base USDC ⇄ WETH the BUILD-002 reference swap: never a catalog swap, in either direction', () => {
     expect(() => swap(usdc, weth)).toThrow('CATALOG_SWAP_REFERENCE_PAIR');

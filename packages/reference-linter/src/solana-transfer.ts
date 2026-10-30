@@ -21,7 +21,7 @@ export function validateSolanaTransferWorkflow(workflow: SemanticWorkflow): Sola
   }
   const known = solanaTransferAsset(profile, fields.token.mint);
   if (known && (known.decimals !== fields.token.decimals || known.program !== fields.token.program)) throw new Error('SOLANA_TRANSFER_MINT_DECIMALS_MISMATCH');
-  // At most one billion whole units, like the other transfer engines.
-  if (BigInt(fields.amount) > 10n ** BigInt(fields.token.decimals + 9)) throw new Error('SOLANA_TRANSFER_AMOUNT_OUT_OF_RANGE');
+  // Mainnet transfer instructions encode uint64; Devnet keeps its test-fund profile limit.
+  if (BigInt(fields.amount) > (profile.realFunds ? 2n ** 64n - 1n : 10n ** BigInt(fields.token.decimals + 9))) throw new Error('SOLANA_TRANSFER_AMOUNT_OUT_OF_RANGE');
   return fields;
 }

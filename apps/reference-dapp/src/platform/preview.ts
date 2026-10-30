@@ -13,8 +13,8 @@ import type { PreviewPlan, SimulationView } from '../mcp/simulation.ts';
 import { previewPlan, projectSimulation } from '../mcp/simulation.ts';
 import type { McpRuntime as EngineRuntime } from '../mcp/runtime.ts';
 import type { Composition } from '../engine/strategy-engine';
-import { refuse } from './refusal.ts';
-import { composeSingleStep } from './strategy.ts';
+import { PlatformRefusal, refuse } from './refusal.ts';
+import { composeSingleStep, composeWorkflowOrRefuse } from './strategy.ts';
 import type { NetworkScope } from '../domain/network-scope';
 import { networkScope } from '../server/network-scope.ts';
 import { UNIVERSAL_QUOTE_SUBJECTS as QUOTE_SUBJECTS } from '@defi-workflow-engine/workflow-contracts';
@@ -54,4 +54,44 @@ export async function simulatePreview(runtime: EngineRuntime, request: PreviewRe
   } finally { activeSimulations--; }
   if (!preview.ok) return refuse(preview.code);
   return { composition: c, plan, view: projectSimulation(plan.flow, preview.value), simulationSubject: plan.subject === 'NONE' ? null : request.simulationSubject };
+}
+
+export type WorkflowStepPreview = { readonly index: number; readonly workflowHash: string; readonly flow: string | null;
+  readonly state: 'SIMULATED' | 'AWAITING_PRODUCER_SETTLEMENT' | 'FAILED'; readonly code: string | null;
+  readonly amountFrom: readonly number[]; readonly simulationSubject: string | null; readonly subjectSource: 'REQUEST' | 'PUBLIC_QUOTE_SUBJECT' | 'NONE';
+  readonly view: SimulationView | null };
+/**
+ * Preview an entire canonical sequence without asking the caller to manually split it. Every supported step uses its real flow
+ * preview, with the same shared admission controls. These calls read today's state: a dependent step may lack the balance that a
+ * preceding transaction will deliver. That is reported as pending settlement, never fabricated as a successful simulation. The
+ * durable workflow runner re-simulates the exact received amount after reconciliation and before the next Manifest/signature.
+ */
+export async function simulateWorkflowPreview(runtime: EngineRuntime, request: PreviewRequest, options: PreviewOptions = {}) {
+  const workflow = composeWorkflowOrRefuse(request.strategy, request.workflowHash, options.scope ?? networkScope());
+  const steps: WorkflowStepPreview[] = [];
+  for (const [index, composition] of workflow.steps.entries()) {
+    const plan = previewPlan(composition.strategy), dependencies = workflow.bindings.filter(b => b.step === index).map(b => b.amountFrom);
+    const evm = /^0x[0-9a-fA-F]{40}$/.test(request.simulationSubject);
+    const subject = 'subject' in plan && plan.subject !== 'NONE'
+      ? (plan.subject === 'EVM') === evm ? request.simulationSubject : QUOTE_SUBJECTS[plan.subject] : request.simulationSubject;
+    const subjectSource = !('subject' in plan) || plan.subject === 'NONE' ? 'NONE' as const
+      : subject === request.simulationSubject ? 'REQUEST' as const : 'PUBLIC_QUOTE_SUBJECT' as const;
+    try {
+      const preview = await simulatePreview(runtime, { strategy: composition.strategy, workflowHash: composition.workflowHash, simulationSubject: subject },
+        { ...options.scope ? { scope: options.scope } : {}, ...index === 0 && options.budget ? { budget: options.budget } : {} });
+      steps.push({ index, workflowHash: composition.workflowHash, flow: preview.plan.flow, state: 'SIMULATED', code: null, amountFrom: dependencies,
+        simulationSubject: preview.simulationSubject, subjectSource, view: preview.view });
+    } catch (cause) {
+      const code = cause instanceof PlatformRefusal || cause instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(cause.message) ? (cause as Error).message : 'SIMULATION_UNAVAILABLE';
+      if (code === 'SIMULATION_BUSY' || code === 'SIMULATION_RATE_LIMITED') return refuse(code);
+      const awaiting = dependencies.length > 0 && /INSUFFICIENT|BALANCE|NO_COLLATERAL|COLLATERAL_REQUIRED/.test(code);
+      steps.push({ index, workflowHash: composition.workflowHash, flow: 'flow' in plan ? plan.flow : null,
+        state: awaiting ? 'AWAITING_PRODUCER_SETTLEMENT' : 'FAILED', code, amountFrom: dependencies,
+        simulationSubject: subjectSource === 'NONE' ? null : subject, subjectSource, view: null });
+    }
+  }
+  return { workflowHash: workflow.workflowHash, fundsClass: workflow.fundsClass, stepCount: workflow.steps.length, steps,
+    status: steps.every(step => step.state === 'SIMULATED') ? 'STEP_PREVIEWS_AVAILABLE' as const : 'INCOMPLETE' as const,
+    executionSimulation: 'FRESH_PER_STEP_AFTER_PREVIOUS_RECONCILIATION' as const,
+    authorizable: false as const, persisted: false as const };
 }

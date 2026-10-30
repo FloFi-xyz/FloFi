@@ -16,12 +16,9 @@ export const CATALOG_SWAP_CHAINS: readonly string[] = Object.freeze(['eip155:466
 const BASE_USDC = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913', BASE_WETH = '0x4200000000000000000000000000000000000006';
 /**
  * BUILD-BASE-001: Base's reference pair. USDC ⇄ WETH on Base keeps its BUILD-002 declaration (the reference registry swap, authored by
- * `createSwapNode`) so every existing Base swap keeps its IR and hash; only other catalog pairs are catalog swaps. Base USDC and WETH keep
- * their reference input bounds (1,000,000 USDC and 1,000 WETH, `baseAssetRegistry.maximumAmountUnits`) in every Base pair.
+ * `createSwapNode`) so every existing Base swap keeps its IR and hash; only other catalog pairs are catalog swaps. Public amounts are constrained by their integer encoding and live provider state.
  */
 export const CATALOG_SWAP_REFERENCE_PAIRS: Readonly<Record<string, readonly [string, string]>> = Object.freeze({ 'eip155:8453': Object.freeze([BASE_USDC, BASE_WETH] as const) });
-const REFERENCE_BOUNDS: Readonly<Record<string, Readonly<Record<string, string>>>> = Object.freeze({
-  'eip155:8453': Object.freeze({ [BASE_USDC]: '1000000000000', [BASE_WETH]: '1000000000000000000000' }) });
 export const CATALOG_SWAP_MAXIMUM_SLIPPAGE_BPS = 300;
 /**
  * BUILD-FLOFI-BRIDGE-LIVE-FIX-003: each catalog network's native currency is ETH, and its WETH9 is the deployment the network's SwapRouter02
@@ -44,9 +41,12 @@ export function catalogSwapKind(fields: Pick<CatalogSwapFields, 'chain' | 'input
 }
 const ADDRESS = /^0x[0-9a-f]{40}$/, UNITS = /^[1-9][0-9]{0,77}$/, OFFICIAL_ID = /^0x[0-9a-f]{64}$/;
 function fail(code: string): never { throw new Error(code); }
-/** At most one billion whole units of the input asset (a network's reference asset keeps its reference bound); amounts are exact native units. */
-export const catalogSwapMaximumUnits = (decimals: number, chain?: string, address?: string) =>
-  (chain !== undefined && address !== undefined ? REFERENCE_BOUNDS[chain]?.[address] : undefined) ?? (10n ** BigInt(decimals + 9)).toString();
+/** uint256 token amount encoding limit; pool availability is determined from a real quote and simulation. */
+export function catalogSwapMaximumUnits(decimals: number, _chain?: string, _address?: string): string {
+  void _chain; void _address;
+  if (!Number.isInteger(decimals) || decimals < 0 || decimals > 36) fail('CATALOG_SWAP_ASSET_INVALID');
+  return (2n ** 256n - 1n).toString();
+}
 type SwapLike = { readonly actionType: string; readonly chainId: string; readonly inputs?: readonly { readonly name: string; readonly kind: string; readonly value: unknown }[] };
 const addressOf = (value: unknown): string | null => value && typeof value === 'object' && 'address' in value && typeof value.address === 'string' ? value.address : null;
 /** A swap of exactly a chain's reference pair (Base USDC ⇄ WETH), in either direction. */
@@ -84,6 +84,9 @@ export function createCatalogSwapNode(nodeId: string, fields: CatalogSwapFields)
   const maximum = catalogSwapMaximumUnits(input.decimals, fields.chain, input.address ?? undefined);
   if (typeof fields.amount !== 'string' || !UNITS.test(fields.amount) || BigInt(fields.amount) > BigInt(maximum))
     fail('CATALOG_SWAP_AMOUNT_INVALID');
+  const legacyEditingMaximum = fields.chain === 'eip155:8453' && input.address === BASE_USDC ? '1000000000000'
+    : fields.chain === 'eip155:8453' && input.address === BASE_WETH ? '1000000000000000000000' : (10n ** BigInt(input.decimals + 9)).toString();
+  const editingMaximum = BigInt(fields.amount) > BigInt(legacyEditingMaximum) ? fields.amount : legacyEditingMaximum;
   const kind = catalogSwapKind({ chain: fields.chain, input, output }), conversion = kind !== 'SWAP';
   // A WETH9 conversion is exactly 1:1: it has no pool, no price and no slippage, and its minimum output is the amount itself.
   if (conversion ? fields.slippageBps !== 0 : !Number.isSafeInteger(fields.slippageBps) || fields.slippageBps < 1 || fields.slippageBps > CATALOG_SWAP_MAXIMUM_SLIPPAGE_BPS)
@@ -98,7 +101,7 @@ export function createCatalogSwapNode(nodeId: string, fields: CatalogSwapFields)
     expectedOutputs: [{ outputId: 'amount-out', asset: outAsset, minimumAmount: conversion ? fields.amount : '0' }], dependencies: [],
     userConstraints: [{ kind: 'MAXIMUM_INPUT', quantity }, ...conversion ? [] : [{ kind: 'MAXIMUM_SLIPPAGE_BPS' as const, maximumBps: fields.slippageBps }]],
     failurePolicy: 'ABORT', requiredAuthorizationClass: 'MODE_A', lockedParameters: [],
-    editableBounds: [{ parameterName: 'amount-in', asset: inAsset, minimumAmount: '1', maximumAmount: maximum }] };
+    editableBounds: [{ parameterName: 'amount-in', asset: inAsset, minimumAmount: '1', maximumAmount: editingMaximum }] };
 }
 /** Closed declaration: the node must be exactly the canonical construction of its own fields. */
 export function readCatalogSwapNode(node: Node): CatalogSwapFields {

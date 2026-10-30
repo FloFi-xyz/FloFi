@@ -81,7 +81,7 @@ function limitationsOf(network: NetworkIdentity, action: StrategyAction): string
   if (network.environment === 'MAINNET') out.push('REAL_FUNDS');
   const policy = (AAVE_V3_AMOUNT_POLICY as Readonly<Record<string, string>>)[action];
   if (policy === 'PARTIAL_ONLY') out.push('PARTIAL_AMOUNTS_ONLY');
-  if (pendingAgentCapability(action, network.key)) out.push('AGENT_ROLLOUT_PENDING_OWNER_APPROVAL');
+  if (pendingAgentCapability(action, network.key) && !agentRolloutAllows(action, network.key)) out.push('AGENT_ROLLOUT_PENDING_OWNER_APPROVAL');
   if (network.catalog && (action === 'swap' || action === 'add_liquidity' || action === 'transfer')) out.push('ASSET_MUST_BE_IN_OFFICIAL_CATALOG');
   if (action === 'add_liquidity') out.push('NOT_A_SEQUENCE_STEP');
   if (action === 'lending_composition') out.push('FIXED_COMPOSITION_ONLY');

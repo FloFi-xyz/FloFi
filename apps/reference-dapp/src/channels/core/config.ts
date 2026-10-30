@@ -11,9 +11,9 @@
  *   FLOFI_CHANNEL_COPILOT                   enabled (default) | disabled — disabled = exact commands only, no model at all
  *   FLOFI_CHANNEL_SIMULATION                enabled (default) | disabled — the read-only preview before the approval link
  *   FLOFI_CHANNEL_LANGUAGE                  EN (default) | PT — reply language until the user's own language is known
- *   FLOFI_CHANNEL_HANDOFF_TEST_FUNDS        enabled (default) | disabled
- *   FLOFI_CHANNEL_HANDOFF_MAINNET_NETWORKS  mainnet network ids a channel proposal may name (default none:
- *                                           MAINNET_HANDOFF_DISABLED_BY_POLICY); every mainnet a workflow touches must be listed
+ *   FLOFI_CHANNEL_HANDOFF_TEST_FUNDS        local engineering only: enabled (default) | disabled
+ *   FLOFI_CHANNEL_HANDOFF_MAINNET_NETWORKS  local engineering only: mainnet ids for fixture policies; public handoffs always
+ *                                           cover all registered mainnets, with test funds disabled
  *   FLOFI_CHANNEL_DISPATCH_TOKEN_SHA256     optional: SHA-256 hex of the scheduler's bearer for `/api/channels/dispatch` (Vercel Cron:
  *                                           the digest of CRON_SECRET); without it the endpoint does not exist (404)
  *   FLOFI_CHANNEL_MODEL_BUDGET_HOURLY       BUILD-TELEGRAM-PUBLIC-001: interpreter (model) calls per hour across every conversation, channel and
@@ -28,6 +28,7 @@ import { NETWORK_IDS, type NetworkId } from '../../engine/strategy-spec';
 import type { HandoffPolicy } from '../../platform/index.ts';
 import { deploymentTenant, isHostedDeployment, publicOrigin } from '../../server/deployment.ts';
 import { channelKeys, type ChannelKeys } from './crypto.ts';
+import { scopeOfEnv } from '../../domain/network-scope';
 
 type Env = Readonly<Record<string, string | undefined>>;
 export type ChannelLanguage = 'EN' | 'PT';
@@ -53,6 +54,8 @@ const switchOf = (value: string | undefined, fallback: 'enabled' | 'disabled') =
 
 /** The exact origin FloFi is served from (the platform's `publicOrigin`): `https://host[:port]`, or loopback `http://` off-hosting only. */
 export const channelPublicOrigin = publicOrigin;
+/** The public product is mainnet-only and open to every user; engineering scope is never available when hosted. */
+export const publicChannelProduct = (env: Env) => scopeOfEnv(env) === 'PUBLIC_MAINNET';
 const httpsUrl = (raw: string | undefined) => {
   try { const url = new URL(raw ?? ''); return url.protocol === 'https:' && !url.username && !url.password && raw!.length <= 256 ? url.toString() : null; }
   catch { return null; }
@@ -64,13 +67,15 @@ export const limitOf = (value: string | undefined, fallback: number) => {
   return /^[1-9][0-9]{0,5}$/.test(v) && Number(v) <= 100_000 ? Number(v) : null;
 };
 
-/** The channel handoff policy: test funds and each mainnet explicitly. Any malformed value invalidates the configuration. */
+/** Public handoffs cover every registered mainnet; local engineering may select test-fund fixtures. Wallet authority is unchanged. */
 export function readChannelHandoffPolicy(env: Env): Extract<HandoffPolicy, { ok: true }> | null {
   const testFunds = switchOf(env.FLOFI_CHANNEL_HANDOFF_TEST_FUNDS, 'enabled');
   if (testFunds === null) return null;
   const listed = (env.FLOFI_CHANNEL_HANDOFF_MAINNET_NETWORKS ?? '').split(',').map(s => s.trim()).filter(Boolean);
   // Only mainnet networks may be listed; a test network here is a configuration mistake, not a permission.
   if (!listed.every(n => (NETWORK_IDS as readonly string[]).includes(n) && NETWORKS[n as NetworkId].class === 'MAINNET')) return null;
+  if (publicChannelProduct(env)) return { ok: true, testFunds: false,
+    mainnetNetworks: Object.freeze(NETWORK_IDS.filter(n => NETWORKS[n].class === 'MAINNET')) };
   return { ok: true, testFunds, mainnetNetworks: Object.freeze([...new Set(listed as NetworkId[])]) };
 }
 

@@ -44,8 +44,10 @@ describe('BUILD-ROUTER-001 canonical router node', () => {
   });
   it('rejects unsupported pairs, amounts, slippage, recipients, provider policies and altered declarations', () => {
     expect(() => createRouterBridgeNode('n', { ...fields, destinationChain: 'eip155:10' })).toThrow('ROUTER_PAIR_UNSUPPORTED');
-    expect(() => createRouterBridgeNode('n', { ...fields, amount: '100000001' })).toThrow('ROUTER_AMOUNT_OUT_OF_RANGE');
-    expect(() => createRouterBridgeNode('n', { ...fields, amount: '99999' })).toThrow('ROUTER_AMOUNT_OUT_OF_RANGE');
+    expect(() => createRouterBridgeNode('n', { ...fields, amount: (2n ** 256n).toString() })).toThrow('ROUTER_AMOUNT_OUT_OF_RANGE');
+    expect(() => createRouterBridgeNode('n', { ...fields, amount: '0' })).toThrow('ROUTER_AMOUNT_OUT_OF_RANGE');
+    expect(readRouterBridgeNode(createRouterBridgeNode('n', { ...fields, amount: '100000001' })).amount).toBe('100000001');
+    expect(readRouterBridgeNode(createRouterBridgeNode('n', { ...fields, amount: '1' })).amount).toBe('1');
     expect(() => createRouterBridgeNode('n', { ...fields, slippageBps: 301 })).toThrow('ROUTER_SLIPPAGE_OUT_OF_RANGE');
     expect(() => createRouterBridgeNode('n', { ...fields, recipient: '0x' + '0'.repeat(40) })).toThrow('ROUTER_RECIPIENT_INVALID');
     expect(() => createRouterBridgeNode('n', { ...fields, recipient: '0x' + 'A'.repeat(40) })).toThrow('ROUTER_RECIPIENT_INVALID');
@@ -57,6 +59,13 @@ describe('BUILD-ROUTER-001 canonical router node', () => {
       .toThrow('ROUTER_RECIPIENT_INVALID');
     const otherChain = { ...node, expectedOutputs: [{ ...node.expectedOutputs[0]!, asset: { chainId: 'eip155:1', address: ARB_USDC, decimals: 6 } }] };
     expect(() => validateArtifact('semantic-workflow', { schemaVersion: '1.0.0', workflowId: 'w', revision: 1, nodes: [otherChain], resourceEdges: [] })).toThrow();
+  });
+  it('recovers older reviewed editing bounds without widening their bytes or admitting a bound outside uint256', () => {
+    const node = createRouterBridgeNode('n', fields);
+    const old = { ...node, editableBounds: [{ ...node.editableBounds[0]!, minimumAmount: '100000', maximumAmount: '100000000' }] };
+    expect(readRouterBridgeNode(old)).toEqual(fields);
+    expect(old.editableBounds[0]!.maximumAmount).toBe('100000000');
+    expect(() => readRouterBridgeNode({ ...node, editableBounds: [{ ...node.editableBounds[0]!, maximumAmount: (2n ** 256n).toString() }] })).toThrow('ROUTER_DECLARATION_INVALID');
   });
 });
 

@@ -9,7 +9,7 @@ import type { Workflow } from './initial-workflow';
 import { lendingDetails } from './lending-authoring';
 import { workflowSteps, type WorkflowStep } from './workflow-steps';
 import { editCommandFor, removeCommandFor } from './workflow-edits';
-import { COPILOT_AUTHORING_COMMANDS, COPILOT_NETWORK_LABEL, COPILOT_POOLS, amountReadings, canonicalDecimal, copilotRejection, groundedAddress, groundedAmount, mentionedNetworks,
+import { COPILOT_AUTHORING_COMMANDS, COPILOT_NETWORK_LABEL, COPILOT_POOLS, amountReadings, canonicalDecimal, copilotRejection, groundedAddress, groundedAmount, groundedSigned, mentionedNetworks,
   planCopilotActions, proposalFromPlan, type CarriedField, type CopilotOutcome, type Grounding, type SwapSource } from './copilot-authoring';
 import { SOLANA_LIQUIDITY_DEFAULT_SLIPPAGE, solanaLiquidityDetails, type SolanaLiquidityInput } from './solana-liquidity-authoring';
 import { formatTokenAmount, parseTokenAmount } from './jupiter-authoring';
@@ -931,6 +931,11 @@ function resolveIntent(intent: CopilotIntentV2, state: CopilotConversation, env:
     }
     case 'ACTION': case 'COMPOSITION': {
       let actions = intent.kind === 'ACTION' ? [intent.action] : intent.actions;
+      // Mainnet combinations share the canonical sequence runtime. Historical engineering compositions keep their atomic runtime.
+      if (intent.kind === 'COMPOSITION' && actions.length > 1 && actions.some(action => {
+        const network = action.type === 'BRIDGE' ? action.sourceNetwork : action.network;
+        return network && network !== 'OTHER' && networkOfCopilot(network).environment === 'MAINNET';
+      })) return authorSequence(intent, null, actions, state, env, []);
       const carried = new Set<CarriedField>(extras.carried ?? []);
       let notes: string[] = [];
       if (intent.kind === 'ACTION' && intent.reuse && REUSE_CUE.test(segmentText(state))) {
@@ -1041,10 +1046,14 @@ function groundedGoal(goal: CopilotGoal, text: string, carried: ReadonlySet<stri
   const recipient = goal.recipient && groundedAddress(text, goal.recipient) ? goal.recipient : null;
   return { source: { network: network(goal.source.network, 'sourceNetwork'), asset: asset(goal.source.asset, 'sourceAsset'), amount: amount(goal.source.amount, 'amount') },
     target: { network: network(goal.target.network, 'targetNetwork'), asset: asset(goal.target.asset, 'targetAsset'), use: goal.target.use }, preference: goal.preference,
-    cap: amount(goal.cap, 'cap'), recipient };
+    cap: amount(goal.cap, 'cap'), recipient,
+    liquidity: goal.liquidity ? { ...goal.liquidity, network: null,
+      deposits: goal.liquidity.deposits.filter(deposit => named(text, deposit.asset) && groundedAmount(text, deposit.maxAmount)),
+      lower: goal.liquidity.rangeUnit === 'TICK' && goal.liquidity.lower !== null ? groundedSigned(text, goal.liquidity.lower) ? goal.liquidity.lower : null : amount(goal.liquidity.lower, 'lower'),
+      upper: goal.liquidity.rangeUnit === 'TICK' && goal.liquidity.upper !== null ? groundedSigned(text, goal.liquidity.upper) ? goal.liquidity.upper : null : amount(goal.liquidity.upper, 'upper') } : null };
 }
 const plannerGoal = (goal: CopilotGoal): Goal => ({ source: { network: keyOfCopilot(goal.source.network), asset: goal.source.asset, amount: goal.source.amount },
-  target: { network: keyOfCopilot(goal.target.network), asset: goal.target.asset, use: goal.target.use }, preference: goal.preference, cap: goal.cap });
+  target: { network: keyOfCopilot(goal.target.network), asset: goal.target.asset, use: goal.target.use }, preference: goal.preference, cap: goal.cap, liquidity: goal.liquidity ?? null });
 /**
  * A plan step as the V1 action the existing planners author (and ground) exactly like a typed request. The user's typed address belongs to the final
  * step only (a supply's beneficiary, a holding bridge's recipient): an earlier step always delivers to the owner, so the next step can spend it.
@@ -1055,10 +1064,11 @@ function stepCopilotAction(step: GoalStep, recipient: string | null): CopilotAct
     case 'bridge': return { type: 'BRIDGE', sourceNetwork: COPILOT_ID_OF_KEY(step.network), destinationNetwork: COPILOT_ID_OF_KEY(step.destinationNetwork!), asset: step.inputAsset,
       outputAsset: step.outputAsset, amount: step.amount, slippageBps: null, routing: step.routing, recipient };
     case 'supply': return { type: 'SUPPLY', protocol: 'AAVE_V3', network: COPILOT_ID_OF_KEY(step.network), asset: step.inputAsset, amount: step.amount, beneficiary: recipient };
+    case 'add_liquidity': return { ...step.liquidity!, type: 'LIQUIDITY', network: COPILOT_ID_OF_KEY(step.network), funding: null };
   }
 }
 const GOAL_DRAFT_FIELD: Readonly<Record<GoalField, DraftField>> = { sourceAsset: 'inputAsset', sourceNetwork: 'sourceNetwork', amount: 'amount', targetNetwork: 'destinationNetwork',
-  targetAsset: 'outputAsset', cap: 'amount' };
+  targetAsset: 'outputAsset', cap: 'amount', deposits: 'deposits', range: 'range' };
 /** Option buttons of a goal question: each one sets that goal field (a network by its registry label, an asset by symbol). */
 function goalFills(field: GoalField, options: readonly string[]): Draft['options'] {
   return options.flatMap(label => {
@@ -1116,7 +1126,7 @@ function resolveGoal(intent: Extract<CopilotIntentV2, { kind: 'GOAL' }>, state: 
  * Several plan steps → one `ADD_SEQUENCE` proposal: each step planned and grounded exactly like a typed request at the revision the steps before it
  * produce, then the whole workflow must be FloFi's reviewed sequence with the funding the plan expects (a later step spends the earlier step's output).
  */
-function authorSequence(intent: Extract<CopilotIntentV2, { kind: 'GOAL' }>, plan: Extract<GoalPlan, { kind: 'PLAN' }>, actions: readonly CopilotAction[], state: CopilotConversation,
+function authorSequence(intent: CopilotIntentV2, plan: Extract<GoalPlan, { kind: 'PLAN' }> | null, actions: readonly CopilotAction[], state: CopilotConversation,
   env: CopilotEnvironment, notes: readonly string[]): Result {
   const language = intent.language, m = copilotCopy(language), c = intelligenceCopy(language);
   const grounding: Grounding = { text: segmentText(state), carried: new Set(), policy: { language, networkDefaults: false, catalog: true, ...env.agentRollout ? { agentRollout: env.agentRollout } : {} },
@@ -1125,11 +1135,11 @@ function authorSequence(intent: Extract<CopilotIntentV2, { kind: 'GOAL' }>, plan
   const steps: Command[] = [], sentences: string[] = [], stepNotes: string[] = [];
   for (const [index, action] of actions.entries()) {
     // A funded step's cap is the user's own amount (or the cap they stated): FloFi's provenance, grounded in the same words.
-    const planned = planCopilotActions([action], false, { ...grounding, carried: new Set(plan.steps[index]!.fundedBy !== null ? ['amount'] : []) }, env.wallet);
+    const planned = planCopilotActions([action], false, { ...grounding, carried: new Set(plan && plan.steps[index]!.fundedBy !== null ? ['amount'] : []) }, env.wallet);
     if (planned.kind !== 'PLAN') return stopped(planned, intent, state, env, m);
     const outcome = proposalFromPlan(planned.plan, { workflow, context: env.context, wallet: env.wallet }, language);
     if (outcome.kind !== 'PROPOSAL') return stopped(outcome, intent, state, env, m);
-    if (!SEQUENCE_STEP_COMMANDS.includes(outcome.command.type)) return refused(state, m, c.goalGaps.LIQUIDITY_AFTER_CONVERSION_NOT_EXECUTABLE(null));
+    if (!SEQUENCE_STEP_COMMANDS.includes(outcome.command.type)) return refused(state, m, m.compositionUnsupported);
     const next = editorReducer({ workflow, error: null }, outcome.command, env.context);
     if (next.error) return failed(state, m, copilotRejection(next.error.split(':')[0]!.trim(), language).message);
     steps.push(outcome.command); sentences.push(outcome.sentence); stepNotes.push(...outcome.notes); workflow = next.workflow;
@@ -1139,8 +1149,9 @@ function authorSequence(intent: Extract<CopilotIntentV2, { kind: 'GOAL' }>, plan
   const sequence = workflowSequence(workflow, candidate => lintWorkflow(candidate, env.context));
   const added = sequence?.steps.slice(-steps.length) ?? [];
   const offset = (sequence?.steps.length ?? 0) - steps.length;
-  if (!sequence || added.length !== steps.length || plan.steps.some((step, index) => step.fundedBy !== null && added[index]!.fundedBy !== step.fundedBy + offset))
+  if (!sequence || added.length !== steps.length || plan?.steps.some((step, index) => step.fundedBy !== null && added[index]!.fundedBy !== step.fundedBy + offset)) {
     return refused(state, m, m.compositionUnsupported);
+  }
   const listed = sentences.map((sentence, index) => c.goalStep(index + 1, sentence));
   return propose(state, env, command, sentences.join(' then '), [c.goalIntro(steps.length), ...listed, c.sequenceInterpreted].join(' '), [...notes, ...stepNotes], m.subject.request);
 }

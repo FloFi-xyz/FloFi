@@ -631,13 +631,13 @@
       "channels": {
         "canvas": true,
         "approve": true,
-        "copilot": false,
-        "mcp": false,
-        "telegram": false,
+        "copilot": true,
+        "mcp": true,
+        "telegram": true,
         "whatsapp": "POLICY_BLOCKED",
         "developerApi": false
       },
-      "agentRollout": "orca-liquidity-mainnet",
+      "agentRollout": null,
       "registryEvidence": null,
       "liveEvidence": [],
       "status": "IMPLEMENTED_UNCERTIFIED",

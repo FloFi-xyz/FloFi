@@ -40,10 +40,53 @@ describe('BUILD-CHAT-E2E-001 workflow bindings', () => {
       .toMatchObject({ ok: false, code: 'WORKFLOW_BINDING_ASSET_MISMATCH', issues: [{ path: '/bindings/0' }] });
   });
 
-  it('refuses consumers without one wallet input, producers delivering nothing to the owner, and malformed orders', () => {
+  it('binds only the matching liquidity deposit, leaving its other limit and immutable range unchanged', () => {
     const liquidity = { action: 'add_liquidity', network: 'base-sepolia', maxAmounts: { USDC: '10', WETH: '0.01' }, range: { unit: 'price', lower: '1000', upper: '5000' } };
-    expect(composeWorkflow({ version: 2, steps: [USDC_TO_WETH, liquidity], bindings: [{ step: 1, amountFrom: 0 }] }))
-      .toMatchObject({ ok: false, code: 'WORKFLOW_BINDING_CONSUMER_UNSUPPORTED', issues: [{ path: '/bindings/0/step' }] });
+    const w = ok({ version: 2, steps: [USDC_TO_WETH, liquidity], bindings: [{ step: 1, amountFrom: 0 }] });
+    expect(w.bindings).toEqual([{ step: 1, amountFrom: 0, inputAsset: 'WETH', asset: { chainId: 'eip155:84532', address: '0x4200000000000000000000000000000000000006', decimals: 18 }, cap: '10000000000000000' }]);
+    const resolved = boundStrategy(w.steps[1]!.strategy, 4_000_000_000_000_000n, 18, w.bindings[0]!.inputAsset);
+    expect(resolved).toEqual({ ...w.steps[1]!.strategy, maxAmounts: { USDC: '10', WETH: '0.004' } });
+    expect(composeStrategy(resolved)).toMatchObject({ ok: true });
+    expect(ok(w.strategy).workflowHash).toBe(w.workflowHash);
+    expect(() => boundStrategy(w.steps[1]!.strategy, 1n, 18, 'ETH')).toThrow('WORKFLOW_BINDING_ASSET_MISMATCH');
+  });
+
+  it('can fund both liquidity deposits with different prior outputs and canonicalizes their order', () => {
+    const steps = [{ ...USDC_TO_WETH, network: 'base' }, { ...WETH_TO_USDC, network: 'base' },
+      { action: 'add_liquidity', network: 'base', maxAmounts: { USDC: '10', WETH: '0.01' }, range: { unit: 'full' } }];
+    const a = ok({ version: 2, steps, bindings: [{ step: 2, amountFrom: 1 }, { step: 2, amountFrom: 0 }] });
+    const b = ok({ version: 2, steps, bindings: [{ step: 2, amountFrom: 0 }, { step: 2, amountFrom: 1 }] });
+    expect(a.bindings.map(x => x.inputAsset)).toEqual(['WETH', 'USDC']);
+    expect(a.workflowHash).toBe(b.workflowHash);
+    expect(composeWorkflow({ version: 2, steps: [steps[0], steps[0], steps[2]], bindings: [{ step: 2, amountFrom: 0 }, { step: 2, amountFrom: 1 }] }))
+      .toMatchObject({ ok: false, code: 'WORKFLOW_BINDING_INVALID' });
+  });
+
+  it('binds native ETH and SOL deliveries to native transfers without substituting WETH', () => {
+    const eth = { action: 'swap', network: 'base', inputAsset: 'USDC', outputAsset: 'ETH', amount: '10' };
+    const transfer = { action: 'transfer', network: 'base', asset: 'ETH', amount: '0.01', recipient: OWNER };
+    const native = ok({ version: 2, steps: [eth, transfer], bindings: [{ step: 1, amountFrom: 0 }] });
+    expect(native.bindings[0]).toMatchObject({ asset: { chainId: 'eip155:8453', address: '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', decimals: 18 } });
+    expect(JSON.stringify(native.steps[1]!.workflow)).not.toContain('0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee');
+    expect(composeWorkflow({ version: 2, steps: [{ ...eth, outputAsset: 'WETH' }, transfer], bindings: [{ step: 1, amountFrom: 0 }] }))
+      .toMatchObject({ ok: false, code: 'WORKFLOW_BINDING_ASSET_MISMATCH' });
+    const sol = ok({ version: 2, steps: [{ action: 'swap', network: 'solana', inputAsset: 'USDC', outputAsset: 'SOL', amount: '10' },
+      { action: 'transfer', network: 'solana', asset: 'SOL', amount: '0.1', recipient: '11111111111111111111111111111111' }], bindings: [{ step: 1, amountFrom: 0 }] });
+    expect(sol.bindings[0]).toMatchObject({ asset: { chainId: expect.stringMatching(/^solana:/), address: 'So11111111111111111111111111111111111111112', decimals: 9 } });
+  });
+
+  it('uses protocol integer limits instead of arbitrary mainnet amount caps', () => {
+    for (const strategy of [
+      { action: 'swap', network: 'base', inputAsset: 'USDC', outputAsset: 'WETH', amount: '1000001' },
+      { action: 'swap', network: 'solana', inputAsset: 'SOL', outputAsset: 'USDC', amount: '1001' },
+      { action: 'add_liquidity', network: 'base', maxAmounts: { USDC: '1000000001', WETH: '1' }, range: { unit: 'full' } },
+      { action: 'add_liquidity', network: 'solana', maxAmounts: { SOL: '1001', USDC: '1000001' }, range: { unit: 'tick', lower: '-64', upper: '64' } },
+      { action: 'transfer', network: 'base', asset: 'ETH', amount: '1000001', recipient: OWNER },
+    ]) expect(composeStrategy(strategy), JSON.stringify(strategy)).toMatchObject({ ok: true });
+    expect(composeStrategy({ action: 'swap', network: 'solana', inputAsset: 'USDC', outputAsset: 'SOL', amount: '18446744073709.551616' })).toMatchObject({ ok: false });
+  });
+
+  it('refuses producers delivering nothing to the owner, mismatched identities, and malformed orders', () => {
     expect(composeWorkflow({ version: 2, steps: [SUPPLY_AAVE_USDC, USDC_TO_WETH], bindings: [{ step: 1, amountFrom: 0 }] }))
       .toMatchObject({ ok: false, code: 'WORKFLOW_BINDING_PRODUCER_UNSUPPORTED', issues: [{ path: '/bindings/0/amountFrom' }] });
     // A bridge to an explicit recipient delivers to someone else: never a producer for the owner's next step.

@@ -14,7 +14,8 @@ export type Namespace = 'eip155' | 'solana';
 /** A token on one chain: its CAIP-2 chain, contract/mint address, decimals and the strategy's symbol (display only). */
 export type AssetRef = { readonly chain: string; readonly address: string; readonly decimals: number; readonly symbol: string };
 export type AssetAmount = AssetRef & { readonly amount: bigint };
-export const assetKey = (a: Pick<AssetRef, 'chain' | 'address'>): string => `${a.chain}/${a.chain.startsWith('solana:') ? 'token' : 'erc20'}:${a.address}`;
+export const assetKey = (a: Pick<AssetRef, 'chain' | 'address'>): string => a.chain.startsWith('eip155:') && a.address.toLowerCase() === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
+  ? `${a.chain}/native:ETH` : `${a.chain}/${a.chain.startsWith('solana:') ? 'token' : 'erc20'}:${a.address}`;
 
 export type StepRequirement = {
   readonly index: number; readonly strategy: StrategySpec; readonly network: NetworkId; readonly chain: string; readonly namespace: Namespace;

@@ -299,10 +299,11 @@ function AppShellContent({ engineering = false, pathname, navigate, approvalSlot
   // submitted here; the next step still needs its own fresh simulation, Review, confirmations and wallet signature.
   const liveStep = currentExecution(executionProgress);
   const stepRecord: unknown = simulationSource.kind === 'public' ? publicTestnet.run : simulationSource.kind === 'universal' ? universal.record
-    : simulationSource.kind === 'router' ? routerState.record : null;
+    : simulationSource.kind === 'router' ? routerState.record : simulationSource.kind === 'solana-swap' ? jupiter.record
+    : simulationSource.kind === 'supply' ? supply.record : null;
   const stepDone = Boolean(sequence && !sequence.finished && !sequenceIssue && liveStep && liveStep.matchesWorkflow !== false && liveStep.state === 'complete' && isFinalExecutionResult(liveStep));
   const stepDelivered = stepDone && sequence ? deliveredByRecord(simulationSource.kind, stepRecord, sequence.current.output) : null;
-  const awaitingDelivery = stepDone && Boolean(sequence?.steps.some(step => step.fundedBy === sequence.cursor)) && DELIVERY_READABLE.includes(simulationSource.kind) && stepDelivered === null;
+  const awaitingDelivery = stepDone && Boolean(sequence?.steps.some(step => step.funding.some(f => f.fundedBy === sequence.cursor))) && DELIVERY_READABLE.includes(simulationSource.kind) && stepDelivered === null;
   const stepRunKey = liveStep?.runKey ?? null;
   useEffect(() => {
     if (!sequence || !stepDone || awaitingDelivery) return;

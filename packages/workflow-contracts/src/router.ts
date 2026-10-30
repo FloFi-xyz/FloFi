@@ -49,6 +49,10 @@ export function createRouterBridgeNode(nodeId: string, fields: RouterBridgeField
   const source = { chainId: pair!.source.chainId, address: pair!.source.address, decimals: pair!.source.decimals };
   const destination = { chainId: pair!.destination.chainId, address: pair!.destination.address, decimals: pair!.destination.decimals };
   const quantity = { asset: source, amount: fields.amount };
+  const mainnet = !pair!.id.includes('sepolia');
+  const legacyMinimum = pair!.source.chainId === 'eip155:4663' || pair!.destination.chainId === 'eip155:4663' ? '1000000' : '100000';
+  const editingMinimum = mainnet ? BigInt(fields.amount) < BigInt(legacyMinimum) ? fields.amount : legacyMinimum : pair!.minimumAmount;
+  const editingMaximum = mainnet ? BigInt(fields.amount) > 100_000_000n ? fields.amount : '100000000' : pair!.maximumAmount;
   const recipient = fields.recipient === 'CONNECTED_OWNER'
     ? { name: 'recipient', kind: 'IDENTIFIER' as const, value: 'CONNECTED_OWNER' }
     : { name: 'recipient', kind: 'ACCOUNT' as const, value: { chainId: destination.chainId, address: fields.recipient } };
@@ -58,7 +62,7 @@ export function createRouterBridgeNode(nodeId: string, fields: RouterBridgeField
     expectedOutputs: [{ outputId: 'amount-out', asset: destination, minimumAmount: '0' }], dependencies: [],
     userConstraints: [{ kind: 'MAXIMUM_INPUT', quantity }, { kind: 'MAXIMUM_SLIPPAGE_BPS', maximumBps: fields.slippageBps }],
     failurePolicy: 'ABORT', requiredAuthorizationClass: 'MODE_A', lockedParameters: [],
-    editableBounds: [{ parameterName: 'amount-in', asset: source, minimumAmount: pair!.minimumAmount, maximumAmount: pair!.maximumAmount }] };
+    editableBounds: [{ parameterName: 'amount-in', asset: source, minimumAmount: editingMinimum, maximumAmount: editingMaximum }] };
 }
 export const isRouterBridgeNode = (node: { readonly actionType: string; readonly adapterConstraints: { readonly adapters: readonly { readonly id: string }[] } }) =>
   node.actionType === BRIDGE_ACTION && node.adapterConstraints.adapters.length === 1 && node.adapterConstraints.adapters[0]!.id === ROUTER_ADAPTER.id;
@@ -78,6 +82,14 @@ export function readRouterBridgeNode(node: Node): RouterBridgeFields {
     providers: node.adapterConstraints.protocols as RoutingProvider[] };
   let rebuilt: Node;
   try { rebuilt = createRouterBridgeNode(node.nodeId, fields); } catch (cause) { throw cause instanceof Error ? cause : new Error('ROUTER_NODE_INVALID'); }
+  // Older reviewed declarations may carry a stricter editable range. Preserve those exact bytes on recovery; accepting a larger
+  // public encoding range must never rewrite an existing workflow or silently expand its authored editing scope.
+  const existing = node.editableBounds[0], current = rebuilt.editableBounds[0];
+  const pair = routerPair(fields.sourceChain, fields.inputToken, fields.destinationChain, fields.outputToken)!;
+  if (node.editableBounds.length === 1 && existing && current && UNITS.test(existing.minimumAmount) && UNITS.test(existing.maximumAmount) &&
+      BigInt(existing.minimumAmount) >= BigInt(pair.minimumAmount) && BigInt(existing.maximumAmount) <= BigInt(pair.maximumAmount) &&
+      BigInt(existing.minimumAmount) <= BigInt(fields.amount) && BigInt(existing.maximumAmount) >= BigInt(fields.amount))
+    rebuilt = { ...rebuilt, editableBounds: [{ ...current, minimumAmount: existing.minimumAmount, maximumAmount: existing.maximumAmount }] };
   if (canonicalJson(node) !== canonicalJson(rebuilt)) fail('ROUTER_DECLARATION_INVALID');
   return fields;
 }

@@ -21,10 +21,12 @@ export type CarriedLabel = 'network' | 'token' | 'amount' | 'destination' | 'rec
 // BUILD-BASE-001 (owner addendum): what the Copilot can author is generated from the shared capability truth (`authoring-capabilities.ts`),
 // never written here: the in-app capability answer, the lending and router refusals and the composition rule all read it.
 // BUILD-FLOFI-MAINNET-PRODUCT-001: computed when read (the scope arrives from the server after this module loads in the browser).
-const EN_COMPOSITION = () => compositionOnlyText('EN') ? `Flofi can combine steps only as ${compositionOnlyText('EN')}. Other combinations cannot share one workflow yet: author each action on its own.`
-  : 'Flofi does not combine dependent steps in one workflow on mainnets yet: author each action on its own.';
-const PT_COMPOSITION = () => compositionOnlyText('PT') ? `O Flofi só combina passos como ${compositionOnlyText('PT')}. Outras combinações ainda não podem ficar no mesmo fluxo: crie cada ação separadamente.`
-  : 'O Flofi ainda não combina passos dependentes em um mesmo fluxo nas mainnets: crie cada ação separadamente.';
+const EN_COMPOSITION = () => activeNetworkScope() === 'PUBLIC_MAINNET' ? 'FloFi could not construct this sequence from the verified action inputs. Check the named networks, token identities and funding dependencies.'
+  : compositionOnlyText('EN') ? `Flofi can combine steps only as ${compositionOnlyText('EN')}. Other combinations cannot share one workflow yet: author each action on its own.`
+    : 'FloFi could not construct this sequence from the verified action inputs.';
+const PT_COMPOSITION = () => activeNetworkScope() === 'PUBLIC_MAINNET' ? 'O FloFi não conseguiu construir esta sequência com os dados verificados das ações. Verifique as redes, as identidades dos tokens e as dependências de fundos.'
+  : compositionOnlyText('PT') ? `O Flofi só combina passos como ${compositionOnlyText('PT')}. Outras combinações ainda não podem ficar no mesmo fluxo: crie cada ação separadamente.`
+    : 'O FloFi não conseguiu construir esta sequência com os dados verificados das ações.';
 
 const capitalize = (value: string) => value.charAt(0).toUpperCase() + value.slice(1);
 const EN = {

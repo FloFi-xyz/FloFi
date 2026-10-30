@@ -359,7 +359,15 @@ function boundStep(requirement: WorkflowRequirement, k: number, pinned: StepBind
   const key = assetKey({ chain: b.asset.chainId, address: b.asset.address });
   const received = ((producer.reconciliation?.received ?? []) as { asset: string; amount: string }[]).filter(r => r.asset === key)
     .reduce((sum, r) => sum + BigInt(r.amount), 0n);
-  const used = boundAmount(b.cap, received);
+  const consumed = requirement.bindings.filter(prior => prior.step < k && prior.amountFrom === b.amountFrom &&
+    assetKey({ chain: prior.asset.chainId, address: prior.asset.address }) === key).reduce((sum, prior) => {
+    const record = steps.find(candidate => candidate.stepIndex === prior.step);
+    const facts = ((record?.reconciliation?.spent ?? []) as { asset: string; amount: string }[]).filter(fact => fact.asset === key);
+    const spent = facts.reduce((total, fact) => total + BigInt(fact.amount), 0n);
+    // Missing exact spend facts reserve the approved cap conservatively.
+    return sum + (facts.length ? spent : BigInt(prior.cap));
+  }, 0n);
+  const used = boundAmount(b.cap, received > consumed ? received - consumed : 0n);
   if (used <= 0n) return { ok: false, code: 'WORKFLOW_BINDING_NOTHING_RECEIVED' };
   const need = pinned.need.kind === 'EVM_UNISWAP_V3_EXACT_INPUT_SINGLE' ? { ...pinned.need, amountIn: used } : { ...pinned.need, amount: used };
   return { ok: true, step: narrowedStep(requirement, k, used), binding: { ...pinned, need } };

@@ -37,5 +37,9 @@ describe('shared swap authoring', () => {
     expect(refused.workflow).toBe(locked.workflow);
     const unlocked = editorReducer(locked, { type: 'LOCK', nodeId: 'node-002', locked: false, source: 'CANVAS', baseRevision: 2 }, context);
     expect(unlocked.workflow.nodes[1]?.editableBounds[0]?.maximumAmount).toBe('1000000000000');
+    const large = editorReducer(unlocked, { type: 'SET_SWAP_AMOUNT', nodeId: 'node-002', amount: '2000000', source: 'CANVAS', baseRevision: 3 }, context);
+    expect(large.error).toBeNull();
+    expect(large.workflow.revision).toBe(4);
+    expect(large.workflow.nodes[1]?.editableBounds[0]?.maximumAmount).toBe('2000000000000');
   });
 });

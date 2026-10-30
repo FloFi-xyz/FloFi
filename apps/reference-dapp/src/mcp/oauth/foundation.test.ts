@@ -10,11 +10,16 @@ import { deriveKey, inviteAccepted, publicOrigin, readOAuthConfig, type OAuthCon
 import { credentialDigest, credentialOf, newCredential, newId, pkceMatches, sealValue, TOKEN_PREFIX, unsealValue } from './crypto.ts';
 
 const SECRET = 'o'.repeat(48);
-const base = { FLOFI_MCP_OAUTH: 'enabled', FLOFI_PUBLIC_ORIGIN: 'https://flofi.example', FLOFI_MCP_OAUTH_SECRET: SECRET };
+const base = { FLOFI_MCP_OAUTH: 'enabled', FLOFI_PUBLIC_ORIGIN: 'https://flofi.example', FLOFI_MCP_OAUTH_SECRET: SECRET,
+  FLOFI_NETWORK_SCOPE: 'ENGINEERING_TESTNETS', FLOFI_MCP_OAUTH_ACCESS: 'invite' };
 const enabled = (env: Record<string, string>) => { const c = readOAuthConfig(env); if (!c.enabled) throw new Error(c.code + ' ' + c.reason); return c as OAuthConfig; };
 const sha = (s: string) => createHash('sha256').update(s).digest('hex');
 
 describe('BUILD-MCP-002 OAuth configuration', () => {
+  it('opens public ChatGPT and Claude connections without legacy invitations', () => {
+    expect(enabled({ ...base, VERCEL: '1', VERCEL_ENV: 'preview', VERCEL_GIT_COMMIT_REF: 'public-access' })).toMatchObject({ access: 'open' });
+    expect(enabled({ ...base, FLOFI_NETWORK_SCOPE: '' })).toMatchObject({ access: 'open' });
+  });
   it('is off unless explicitly enabled', () => {
     expect(readOAuthConfig({})).toEqual({ enabled: false, code: 'MCP_OAUTH_NOT_ENABLED' });
     expect(readOAuthConfig({ ...base, FLOFI_MCP_OAUTH: 'true' })).toEqual({ enabled: false, code: 'MCP_OAUTH_NOT_ENABLED' });

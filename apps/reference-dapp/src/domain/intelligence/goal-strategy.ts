@@ -9,7 +9,7 @@
 import type { StrategyInput, StrategySpec } from '../../engine/strategy-spec';
 import type { GoalStep } from './goal-planner';
 
-export type GoalStrategy = { readonly ok: true; readonly strategy: StrategyInput } | { readonly ok: false; readonly code: 'GOAL_BENEFICIARY_REQUIRED' };
+export type GoalStrategy = { readonly ok: true; readonly strategy: StrategyInput } | { readonly ok: false; readonly code: 'GOAL_BENEFICIARY_REQUIRED' | 'GOAL_POOL_PRICE_REQUIRED' };
 /** One plan step as a v1 strategy. Bridges: BEST is the universal router; otherwise the certified route's default routing. */
 export function goalStepStrategy(step: GoalStep, beneficiary: string | null): StrategySpec | null {
   switch (step.action) {
@@ -17,10 +17,19 @@ export function goalStepStrategy(step: GoalStep, beneficiary: string | null): St
     case 'bridge': return { action: 'bridge', sourceNetwork: step.network, destinationNetwork: step.destinationNetwork!, asset: step.inputAsset, amount: step.amount,
       ...step.routing === 'BEST' ? { routing: 'best', ...step.outputAsset ? { outputAsset: step.outputAsset } : {} } : { routing: 'auto' } } as StrategySpec;
     case 'supply': return beneficiary ? { action: 'supply', network: step.network, asset: step.inputAsset, amount: step.amount, beneficiary: beneficiary.toLowerCase() } as StrategySpec : null;
+    case 'add_liquidity': {
+      const position = step.liquidity!;
+      if (!position.rangeUnit || position.rangeUnit === 'PERCENT') return null;
+      return { action: 'add_liquidity', network: step.network, maxAmounts: Object.fromEntries(position.deposits.map(deposit => [deposit.asset, deposit.maxAmount])),
+        range: position.rangeUnit === 'FULL' ? { unit: 'full' } : { unit: position.rangeUnit.toLowerCase(), lower: position.lower!, upper: position.upper! },
+        ...position.slippageBps !== null ? { slippageBps: Number(position.slippageBps) } : {},
+        ...position.feeTier ? { feeTier: Number(position.feeTier) * 10_000 } : {} } as StrategySpec;
+    }
   }
 }
 /** The whole plan as one strategy input (v1 for one step, v2 with bindings for several). */
 export function goalStrategy(steps: readonly GoalStep[], beneficiary: string | null): GoalStrategy {
+  if (steps.some(step => step.action === 'add_liquidity' && step.liquidity?.rangeUnit === 'PERCENT')) return { ok: false, code: 'GOAL_POOL_PRICE_REQUIRED' };
   const specs = steps.map(step => goalStepStrategy(step, beneficiary));
   if (specs.some(spec => spec === null)) return { ok: false, code: 'GOAL_BENEFICIARY_REQUIRED' };
   if (specs.length === 1) return { ok: true, strategy: { version: 1, ...specs[0]! } as StrategySpec };

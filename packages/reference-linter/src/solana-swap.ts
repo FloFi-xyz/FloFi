@@ -24,7 +24,7 @@ export function validateSolanaSwapWorkflow(workflow: SemanticWorkflow): ExactInp
     throw new Error('SOLANA_MINT_UNSUPPORTED');
   if (fields.protocols.length !== 1 || fields.protocols[0] !== runtime.protocol) throw new Error('SOLANA_SWAP_PROVIDER_UNSUPPORTED');
   if (fields.slippageBps < 1 || fields.slippageBps > runtime.maximumSlippageBps) throw new Error('SOLANA_SLIPPAGE_OUT_OF_RANGE');
-  if (BigInt(fields.amount) > BigInt(input.maximumAmount) || fields.maximumAmount !== input.maximumAmount) throw new Error('AMOUNT_OUT_OF_RANGE');
+  if (BigInt(fields.amount) > BigInt(input.maximumAmount) || (runtime.realFunds ? BigInt(fields.maximumAmount) > BigInt(input.maximumAmount) || BigInt(fields.amount) > BigInt(fields.maximumAmount) : fields.maximumAmount !== input.maximumAmount)) throw new Error('AMOUNT_OUT_OF_RANGE');
   // Closed declaration: the node must be byte-equivalent to the canonical construction.
   const canonical = createExactInputSwapNode(node.nodeId, fields);
   const sorted = (v: unknown): string => JSON.stringify(v, (_, item) => item && typeof item === 'object' && !Array.isArray(item)

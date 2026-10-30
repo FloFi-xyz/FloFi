@@ -11,8 +11,8 @@ describe('BUILD-003A declaration', () => {
     expect(Object.isFrozen(referenceRegistry.actions[0]?.inputs)).toBe(true);
     expect(Object.isFrozen(baseAssetRegistry.USDC.asset)).toBe(true);
     expect(Object.isFrozen(baseAssetRegistry.WETH.asset)).toBe(true);
-    expect(baseAssetRegistry.USDC.maximumAmountUnits).toBe('1000000000000');
-    expect(baseAssetRegistry.WETH.maximumAmountUnits).toBe('1000000000000000000000');
+    expect(baseAssetRegistry.USDC.maximumAmountUnits).toBe((2n ** 256n - 1n).toString());
+    expect(baseAssetRegistry.WETH.maximumAmountUnits).toBe((2n ** 256n - 1n).toString());
   });
   it('declaration compatibility never grants execution', () => {
     const result = checkActionCompatibility(structuredClone(referenceRegistry) as never, {

@@ -43,13 +43,16 @@ describe('BUILD-CHANNELS-001 Telegram configuration', () => {
     expect(code({ ...f.env, FLOFI_TELEGRAM_API_BASE: 'http://127.0.0.1:8081', VERCEL: '1', VERCEL_ENV: 'preview' })).toBe('TELEGRAM_CONFIGURATION_INVALID:FLOFI_TELEGRAM_API_BASE');
   });
 
-  it('keeps allowlist as default and explicitly permits private human senders only in public mode', () => {
+  it('admits private human senders publicly by default, retaining allowlists only in isolated engineering', () => {
     const f = telegramEnv();
-    const defaultConfig = readTelegramConfig({ ...f.env, FLOFI_TELEGRAM_ALLOWED_USERS: undefined }) as TelegramConfig;
-    expect(defaultConfig.accessMode).toBe('allowlist');
-    expect(parseUpdate(textUpdate('hi', { user: TELEGRAM_OTHER_USER }), defaultConfig, NOW)!.messages[0]!.allowed).toBe(false);
+    const defaultConfig = readTelegramConfig({ ...f.env, FLOFI_TELEGRAM_ACCESS_MODE: undefined, FLOFI_TELEGRAM_ALLOWED_USERS: undefined }) as TelegramConfig;
+    expect(defaultConfig.accessMode).toBe('public');
+    expect(parseUpdate(textUpdate('hi', { user: TELEGRAM_OTHER_USER }), defaultConfig, NOW)!.messages[0]!.allowed).toBe(true);
+    const hosted = readTelegramConfig({ ...f.env, VERCEL: '1', FLOFI_TELEGRAM_ALLOWED_USERS: undefined }) as TelegramConfig;
+    expect(hosted.accessMode).toBe('public');
+    expect(parseUpdate(textUpdate('hi', { user: TELEGRAM_OTHER_USER }), hosted, NOW)!.messages[0]!.allowed).toBe(true);
     expect(code({ ...f.env, FLOFI_TELEGRAM_ACCESS_MODE: 'PUBLIC' })).toBe('TELEGRAM_CONFIGURATION_INVALID:FLOFI_TELEGRAM_ACCESS_MODE');
-    const publicConfig = readTelegramConfig({ ...f.env, FLOFI_TELEGRAM_ACCESS_MODE: 'public', FLOFI_TELEGRAM_ALLOWED_USERS: undefined }) as TelegramConfig;
+    const publicConfig = readTelegramConfig({ ...f.env, FLOFI_NETWORK_SCOPE: undefined, FLOFI_TELEGRAM_ACCESS_MODE: 'allowlist', FLOFI_TELEGRAM_ALLOWED_USERS: undefined }) as TelegramConfig;
     expect(publicConfig.accessMode).toBe('public');
     expect(parseUpdate(textUpdate('/start', { user: TELEGRAM_OTHER_USER }), publicConfig, NOW)!.messages[0]!.allowed).toBe(true);
     expect(parseUpdate(textUpdate('/start', { chat: { id: -100123, type: 'supergroup' } }), publicConfig, NOW)!.messages).toEqual([]);

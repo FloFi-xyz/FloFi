@@ -14,7 +14,7 @@ export const ARBITRUM_ONE = Object.freeze({
 export const ARBITRUM_ONE_TRANSFER = Object.freeze({
   network: ARBITRUM_ONE.name, chain: ARBITRUM_ONE.chain, chainId: ARBITRUM_ONE.chainId, chainHex: ARBITRUM_ONE.chainHex,
   rpc: ARBITRUM_ONE.rpc, explorer: ARBITRUM_ONE.explorer, officialSource: ARBITRUM_ONE.officialSource,
-  adapterId: 'evm.native-transfer', action: 'asset.transfer', maximumValueWei: '1000000000000000000000000', defaultValueWei: '1000000000000',
+  adapterId: 'evm.native-transfer', action: 'asset.transfer', maximumValueWei: (2n ** 256n - 1n).toString(), defaultValueWei: '1000000000000',
   reviewTtlSeconds: 60, gasLimitMarginPercent: 150, maxFeeMultiplier: 2, minimumConfirmations: 2, reestimateBeforeSubmission: true,
   settlement: 'L2' as const, recipients: 'ANY' as const, contractRecipients: true, tokenAdapterId: 'evm.token-transfer', environment: 'MAINNET' as const,
 });

@@ -40,11 +40,18 @@ export function requireSolanaSwapRuntime(chain: string): SolanaSwapRuntime {
 }
 
 export type RawSolanaAccount = { lamports: bigint; owner: string; data: Uint8Array } | null;
+/** Exact unsigned RPC amounts: unsafe JavaScript numbers have already lost their wire precision and are never accepted. */
+export function solanaRpcU64(value: unknown, code = 'SOLANA_RPC_INVALID'): bigint {
+  const decimal = typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? String(value)
+    : typeof value === 'string' && /^(0|[1-9][0-9]{0,19})$/.test(value) ? value : fail(code);
+  const result = BigInt(decimal);
+  return result <= 0xffff_ffff_ffff_ffffn ? result : fail(code);
+}
 export function decodeRpcAccount(value: unknown): RawSolanaAccount {
   if (value === null) return null;
   const a = solanaRecord(value, 'SOLANA_RPC_INVALID');
-  if (!Array.isArray(a.data) || a.data[1] !== 'base64' || typeof a.lamports !== 'number' || !Number.isSafeInteger(a.lamports)) fail('SOLANA_RPC_INVALID');
-  return { lamports: BigInt(a.lamports as number), owner: solanaAddress(a.owner), data: fromBase64((a.data as unknown[])[0], 1_000_000) };
+  if (!Array.isArray(a.data) || a.data[1] !== 'base64') fail('SOLANA_RPC_INVALID');
+  return { lamports: solanaRpcU64(a.lamports), owner: solanaAddress(a.owner), data: fromBase64((a.data as unknown[])[0], 1_000_000) };
 }
 export const rpcContextValue = (value: unknown): Record<string, unknown> => solanaRecord(solanaRecord(value, 'SOLANA_RPC_INVALID').value, 'SOLANA_RPC_INVALID');
 export async function readSolanaAccounts(rpc: SolanaRpc, keys: string[]): Promise<{ slot: number; accounts: RawSolanaAccount[] }> {

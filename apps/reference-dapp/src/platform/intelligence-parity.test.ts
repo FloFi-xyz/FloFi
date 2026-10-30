@@ -8,7 +8,7 @@
 import { afterAll, beforeAll, beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { canonicalStrategy, canonicalWorkflow } from '../channels/core/strategy.ts';
 import { decideTurn, freshState, type ChannelInterpreter } from '../channels/core/conversation.ts';
-import { CopilotSession, intent } from '../domain/copilot-session.test-harness.ts';
+import { CopilotSession, act, intent } from '../domain/copilot-session.test-harness.ts';
 import { TEST_WALLET } from '../domain/copilot-test-fixtures.ts';
 import { setActiveNetworkScope } from '../domain/network-scope.ts';
 import { semanticWorkflowHash } from '../engine/strategy-engine.ts';
@@ -37,6 +37,22 @@ async function channelProposal(text: string, model: Record<string, unknown>): Pr
 }
 
 describe('case 14: the same goal yields the same canonical workflow on every surface', () => {
+  it('preserves non-default position slippage across web, Telegram and MCP conversion-to-liquidity plans', async () => {
+    const mcp = mcpClient(), chat = new CopilotSession(); chat.walletChainId = 'eip155:8453';
+    const text = 'I have 5 USDC on Base; convert to WETH and provide Uniswap liquidity, up to 10 USDC and 0.005 WETH full range with slippage 50 bps';
+    const position = act.liquidity({ network: 'BASE', protocol: 'UNISWAP_V3', deposits: [{ asset: 'USDC', maxAmount: '10' }, { asset: 'WETH', maxAmount: '0.005' }], rangeUnit: 'FULL', slippageBps: '50' });
+    const model = intent.goal({ network: 'BASE', asset: 'USDC', amount: '5' }, { network: 'BASE', asset: 'WETH', use: 'LIQUIDITY' }, { liquidity: position });
+    const web = canonicalWorkflow([chat.say(text, model)!.command!]);
+    const telegram = canonicalWorkflow([await channelProposal(text, model)]);
+    expect(web.ok).toBe(true); expect(telegram.ok).toBe(true);
+    if (!web.ok || !telegram.ok) throw new Error('canonical plan required');
+    const planned = await mcp.callTool('plan_strategy', { goal: { sourceNetwork: 'base', sourceAsset: 'USDC', amount: '5', targetNetwork: 'base', targetAsset: 'WETH', use: 'LIQUIDITY',
+      liquidity: { maxAmounts: { USDC: '10', WETH: '0.005' }, range: { unit: 'full' }, slippageBps: 50 } } });
+    expect(planned.output).toMatchObject({ ok: true, kind: 'PLAN', stepCount: 2, workflowHash: web.workflowHash });
+    expect(telegram.workflowHash).toBe(web.workflowHash);
+    expect(web.spec).toMatchObject({ steps: [{ action: 'swap' }, { action: 'add_liquidity', slippageBps: 50 }] });
+    expect(mcp.forbidden).not.toHaveBeenCalled();
+  });
   it('a one-step goal: chat proposal = channel canonical strategy = MCP plan_strategy = compose_strategy', async () => {
     const mcp = mcpClient(), chat = new CopilotSession(); chat.walletChainId = 'eip155:8453';
     const text = 'I have 25 USDC on Base and want SOL on Solana', model = intent.goal({ network: 'BASE', asset: 'USDC', amount: '25' }, { network: 'SOLANA', asset: 'SOL' });

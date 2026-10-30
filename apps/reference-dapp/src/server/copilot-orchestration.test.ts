@@ -139,6 +139,10 @@ describe('bounded tool orchestration', () => {
     logCopilotTurn({ FLOFI_COPILOT_TELEMETRY: 'off' }, 'live', record, line => lines.push(line));
     logCopilotTurn({}, 'replay', record, line => lines.push(line));
     expect(lines).toEqual([JSON.stringify(record)]);
+    const client = { ...record, surface: 'WEB' as const, code: 'CLIENT_ENCODED_PRIVATE_DATA', interpreted: 'CLIENT_ENCODED_PRIVATE_DATA' };
+    logCopilotTurn({}, 'live', client, line => lines.push(line), 'CLIENT');
+    expect(lines[1]).not.toContain('CLIENT_ENCODED_PRIVATE_DATA');
+    expect(JSON.parse(lines[1]!)).toMatchObject({ provenance: 'CLIENT', code: null, interpreted: null });
   });
 });
 

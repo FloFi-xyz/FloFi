@@ -10,6 +10,7 @@ export const ADMIN_NAV = [
   { id: 'workflows', href: '/admin/workflows', label: 'Workflows' },
   { id: 'automations', href: '/admin/automations', label: 'Automations' },
   { id: 'ai-settings', href: '/admin/ai-settings', label: 'AI Settings' },
+  { id: 'ai-analytics', href: '/admin/ai-analytics', label: 'AI Analytics' },
   { id: 'ai-learning', href: '/admin/ai-learning', label: 'AI Learning' },
   { id: 'health', href: '/admin/health', label: 'System Health' },
   { id: 'access', href: '/admin/access', label: 'Access & audit' },

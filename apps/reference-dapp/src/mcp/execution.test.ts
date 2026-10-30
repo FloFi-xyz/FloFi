@@ -27,6 +27,12 @@ function runtime(modes: Partial<Record<FlowName, 'live' | 'harness' | 'off'>>, s
 }
 
 describe('BUILD-MCP-002 handoff policy', () => {
+  it('public deployments offer all registered mainnets without a network whitelist and never permit test funds', () => {
+    const policy = readHandoffPolicy({ VERCEL: '1', FLOFI_NETWORK_SCOPE: 'ENGINEERING_TESTNETS', FLOFI_MCP_HANDOFF_MAINNET_NETWORKS: 'base' });
+    expect(policy).toMatchObject({ ok: true, testFunds: false });
+    expect(policy.ok && policy.mainnetNetworks).toEqual(['base', 'arbitrum-one', 'ethereum', 'solana', 'robinhood']);
+    expect(readHandoffPolicy({ FLOFI_NETWORK_SCOPE: undefined })).toEqual(policy);
+  });
   it('defaults to test funds on and every mainnet off', () => {
     expect(DEFAULT).toEqual({ ok: true, testFunds: true, mainnetNetworks: [] });
     expect(readHandoffPolicy({ FLOFI_MCP_HANDOFF_TEST_FUNDS: 'disabled', FLOFI_MCP_HANDOFF_MAINNET_NETWORKS: 'solana, base,base' }))
@@ -134,8 +140,8 @@ describe('BUILD-MCP-002 handoff gates', () => {
       [runtime({ [flow]: 'live' }, { [flow]: false }), policy, 'OWNER_EXECUTION_NOT_ENABLED_IN_DEPLOYMENT'],
       [runtime({ [flow]: 'live' }, { [flow]: true }), rolledOut(DEFAULT), 'MAINNET_HANDOFF_DISABLED_BY_POLICY'],
       [runtime({ [flow]: 'live' }, { [flow]: true }), policy, null],
-      // Audit A9: runtime, owner-execution switch and a policy listing `solana` (as production has) do not release the agent rollout.
-      [runtime({ [flow]: 'live' }, { [flow]: true }), listed, 'AGENT_ROLLOUT_NOT_APPROVED'],
+      // The owner approved the inherited Orca path for the public conversational product. Runtime and signing gates still apply.
+      [runtime({ [flow]: 'live' }, { [flow]: true }), listed, null],
     ] as const) {
       const gates = await evaluateGates(orca, deployment, handoffPolicy);
       expect(gates.supportedByCode).toMatchObject({ execute: true, flow });

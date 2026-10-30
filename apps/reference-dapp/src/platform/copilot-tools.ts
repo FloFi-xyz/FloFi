@@ -29,6 +29,7 @@ import { networkCapabilityProfiles, networkCapabilityProfile, type NetworkCapabi
 import { lookupAsset } from '../domain/intelligence/asset-resolution';
 import { GOAL_PREFERENCES, GOAL_USES, planGoal, type Goal } from '../domain/intelligence/goal-planner';
 import { goalStrategy } from '../domain/intelligence/goal-strategy';
+import { COPILOT_V1_PARTS, type CopilotLiquidityAction } from '../domain/copilot-intent';
 import type { CopilotContextCard } from '../domain/intelligence/operational-state';
 import { validateStrategy } from './strategy';
 
@@ -87,7 +88,10 @@ export const COPILOT_TOOL_DEFINITIONS: readonly Record<string, unknown>[] = Obje
     'or the one missing field, or why it is not reachable. Only plans; never authors.',
     parameters: object({ sourceNetwork: NULLABLE(NETWORK_TEXT), sourceAsset: NULLABLE('Asset the user holds, as written.'), amount: NULLABLE('Amount the user wrote, or null.'),
       targetNetwork: NULLABLE(NETWORK_TEXT), targetAsset: NULLABLE('Asset the user wants, as written, or null.'), use: { type: 'string', enum: [...GOAL_USES], description: 'What the asset is for.' },
-      preference: { anyOf: [{ type: 'string', enum: [...GOAL_PREFERENCES] }, { type: 'null' }], description: 'Only if the user stated one.' } }) },
+      preference: { anyOf: [{ type: 'string', enum: [...GOAL_PREFERENCES] }, { type: 'null' }], description: 'Only if the user stated one.' },
+      cap: NULLABLE('User-stated maximum for the funded destination action, or null.'),
+      liquidity: { anyOf: [SCHEMA_STRING('The user-stated LIQUIDITY action as JSON (deposits, range and fee tier).', 3_000), { type: 'null' }],
+        description: 'The user-stated LIQUIDITY action as JSON, or null for other goals.' } }) },
   { type: 'function', name: 'explain_failure', strict: true, description: 'FloFi\'s own explanation of a closed failure code returned by FloFi (for example NO_ROUTE, ASSET_UNKNOWN).',
     parameters: object({ code: SCHEMA_STRING('The code exactly as FloFi returned it.', 80) }) },
 ]);
@@ -235,12 +239,24 @@ export async function runCopilotTool(name: string, rawArguments: string, ctx: Co
           authority: 'NONE: validation authorizes nothing.' } : { ok: true, valid: false, code: checked.code, issues: (checked.issues ?? []).slice(0, 8) });
       }
       case 'plan_goal': {
-        const args = exactArgs(rawArguments, ['sourceNetwork', 'sourceAsset', 'amount', 'targetNetwork', 'targetAsset', 'use', 'preference']);
+        let raw: Record<string, unknown>;
+        try { raw = JSON.parse(rawArguments) as Record<string, unknown>; } catch { return bad(); }
+        const extraKeys = ['cap', 'liquidity'].filter(key => raw && typeof raw === 'object' && Object.hasOwn(raw, key));
+        const args = exactArgs(rawArguments, ['sourceNetwork', 'sourceAsset', 'amount', 'targetNetwork', 'targetAsset', 'use', 'preference', ...extraKeys]);
         const network = (value: unknown) => { const text = nstr(value, 60); if (!text) return null; const scoped = scopedNetwork(text, ctx.scope); return scoped.ok ? scoped.key : text; };
         const amount = nstr(args.amount, 40);
         if (amount !== null && !AMOUNT.test(amount)) return done({ ok: false, code: 'AMOUNT_INVALID' });
+        const cap = args.cap === undefined ? null : nstr(args.cap, 40);
+        if (cap !== null && !AMOUNT.test(cap)) return done({ ok: false, code: 'AMOUNT_INVALID' });
+        let liquidity: CopilotLiquidityAction | null = null;
+        if (args.liquidity !== undefined && args.liquidity !== null) {
+          if (typeof args.liquidity !== 'string' || args.liquidity.length > 3_000) return bad();
+          const position = COPILOT_V1_PARTS.parseActionV2(JSON.parse(args.liquidity));
+          if (position.type !== 'LIQUIDITY') return bad();
+          liquidity = position;
+        }
         const goal: Goal = { source: { network: network(args.sourceNetwork), asset: nstr(args.sourceAsset), amount }, target: { network: network(args.targetNetwork),
-          asset: nstr(args.targetAsset), use: choice(GOAL_USES, args.use) }, preference: args.preference === null ? null : choice(GOAL_PREFERENCES, args.preference), cap: null };
+          asset: nstr(args.targetAsset), use: choice(GOAL_USES, args.use) }, preference: args.preference === null ? null : choice(GOAL_PREFERENCES, args.preference), cap, liquidity };
         const plan = planGoal(goal, ctx.scope);
         if (plan.kind !== 'PLAN') return done({ ok: true, ...plan });
         const strategy = goalStrategy(plan.steps, null), composed = strategy.ok ? composeWorkflow(strategy.strategy) : null;

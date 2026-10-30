@@ -19,7 +19,7 @@ import { AAVE_V3_LENDING_PROFILES } from '@defi-workflow-engine/action-registry'
 import type { NetworkId, StrategyInput, StrategySpec } from '../../engine/strategy-spec';
 import { composeWorkflowOrRefuse, PlatformRefusal, type WalletRef } from '../../platform/index.ts';
 import { workflowVisualModel, type WorkflowVisualModel } from '../../platform/workflow-visual.ts';
-import { sameSequenceAsset, stepAssets } from '../../domain/workflow-sequence';
+import { sameAsset, stepInputs, stepOutput } from '../../engine/workflow-bindings';
 
 const LENDING_NETWORK: Readonly<Record<string, NetworkId>> = Object.fromEntries(AAVE_V3_LENDING_PROFILES.map(profile => [profile.network, networkIdentity(profile.chain)!.key as NetworkId]));
 /** BUILD-BASE-001: the catalog networks (Canvas name → strategy network): Robinhood Chain and Base. */
@@ -193,16 +193,16 @@ function sequenceWorkflow(commands: readonly Command[]): ChannelWorkflow | { rea
   let workflow;
   try {
     const unbound = composeWorkflowOrRefuse({ version: 2, steps: specs }, undefined);
-    const nodes = unbound.steps.map(step => step.workflow.nodes.find(node => !node.actionType.startsWith('mock-')));
     const bindings = flat.flatMap((_, consumer) => {
       if (group[consumer] === -1) return [];
-      const input = nodes[consumer] ? stepAssets(nodes[consumer]!).input : null;
-      for (let producer = consumer - 1; producer >= 0 && input; producer -= 1) {
-        if (group[producer] !== group[consumer]) break;
-        const delivered = nodes[producer] ? stepAssets(nodes[producer]!) : null;
-        if (delivered?.output && delivered.ownerReceives && sameSequenceAsset(delivered.output, input)) return [{ step: consumer, amountFrom: producer }];
-      }
-      return [];
+      return stepInputs(unbound.steps[consumer]!).flatMap(input => {
+        for (let producer = consumer - 1; producer >= 0; producer -= 1) {
+          if (group[producer] !== group[consumer]) break;
+          const output = stepOutput(unbound.steps[producer]!);
+          if (output && sameAsset(output, input)) return [{ step: consumer, amountFrom: producer }];
+        }
+        return [];
+      });
     });
     workflow = bindings.length ? composeWorkflowOrRefuse({ version: 2, steps: specs, bindings }, undefined) : unbound;
   } catch (cause) { return { ok: false, code: cause instanceof PlatformRefusal ? cause.message : 'CHANNEL_STRATEGY_PARITY_FAILED' }; }

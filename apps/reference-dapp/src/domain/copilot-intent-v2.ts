@@ -57,6 +57,8 @@ export type CopilotGoal = {
   readonly preference: GoalPreference | null;
   /** The most a later, funded step of another asset may spend, only when the user stated it. */ readonly cap: string | null;
   /** An address the user typed for the goal's final step (a supply's beneficiary, a bridge's recipient); absent in older answers. */ readonly recipient?: string | null;
+  /** User-stated position parameters; retained while FloFi plans its conversion and funding steps. */
+  readonly liquidity?: Extract<CopilotAction, { type: 'LIQUIDITY' }> | null;
 };
 /** "Remove 50% of my liquidity", "exit my position": FloFi selects the position from the connected wallet's verified FloFi positions. */
 export type CopilotPositionRequest = { readonly operation: (typeof COPILOT_POSITION_OPERATIONS)[number]; readonly protocol: (typeof COPILOT_LIQUIDITY_PROTOCOLS)[number] | null;
@@ -108,11 +110,15 @@ function parseChanges(value: unknown, requireOne: boolean): CopilotChanges {
 const answerOf = (value: unknown): string | null => value === undefined || value === null ? null : text(value, COPILOT_V2_LIMITS.maxAnswerLength);
 function parseGoal(value: unknown): CopilotGoal {
   const withRecipient = !!value && typeof value === 'object' && Object.hasOwn(value, 'recipient');
-  const v = exact(value, withRecipient ? ['source', 'target', 'preference', 'cap', 'recipient'] : ['source', 'target', 'preference', 'cap']);
+  const withLiquidity = !!value && typeof value === 'object' && Object.hasOwn(value, 'liquidity');
+  const v = exact(value, ['source', 'target', 'preference', 'cap', ...withRecipient ? ['recipient'] : [], ...withLiquidity ? ['liquidity'] : []]);
   const source = exact(v.source, ['network', 'asset', 'amount']), target = exact(v.target, ['network', 'asset', 'use']);
+  const liquidity = withLiquidity && v.liquidity !== null ? parseAction(v.liquidity) : null;
+  if (liquidity && liquidity.type !== 'LIQUIDITY') return fail();
   return { source: { network: nullableOneOf(COPILOT_V2_NETWORKS, source.network), asset: symbol(source.asset), amount: amount(source.amount) },
     target: { network: nullableOneOf(COPILOT_V2_NETWORKS, target.network), asset: symbol(target.asset), use: oneOf(GOAL_USES, target.use) },
-    preference: nullableOneOf(GOAL_PREFERENCES, v.preference), cap: amount(v.cap), ...withRecipient ? { recipient: transferAddress(v.recipient) } : {} };
+    preference: nullableOneOf(GOAL_PREFERENCES, v.preference), cap: amount(v.cap), ...withRecipient ? { recipient: transferAddress(v.recipient) } : {},
+    ...withLiquidity ? { liquidity: liquidity as Exclude<CopilotGoal['liquidity'], undefined> } : {} };
 }
 const common = (v: Record<string, unknown>): Common => {
   oneOf([COPILOT_INTENT_V2_VERSION], v.version);
@@ -224,6 +230,8 @@ const GOAL = object({
   preference: nullableChoice(GOAL_PREFERENCES, 'Only if the user asked for the cheapest/minimal cost, the fastest, or a certified route; null otherwise.'),
   cap: nullableString('Only when FloFi asked how much a later step may use and the user answered: exactly that number; null otherwise.'),
   recipient: nullableString('An address (EVM 0x or case-sensitive Solana base58) the user typed exactly, for whom the outcome is (beneficiary or recipient); null otherwise.'),
+  liquidity: { anyOf: [actionSchemas.find(schema => (schema as { properties?: { type?: { enum?: string[] } } }).properties?.type?.enum?.includes('LIQUIDITY'))!, { type: 'null' }],
+    description: 'For a LIQUIDITY goal: the position parameters the user stated, retaining deposits, range and fee tier while FloFi plans the preceding swap or bridge. Null for other goals.' },
 });
 export const COPILOT_OUTPUT_SCHEMA_V2 = Object.freeze(object({ intent: { anyOf: [
   object({ ...head('AUTOMATION'), draft: AUTOMATION_DRAFT_SCHEMA }),

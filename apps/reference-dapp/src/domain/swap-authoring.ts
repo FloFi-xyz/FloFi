@@ -61,6 +61,10 @@ export function createSwapNode(nodeId: string, direction: Direction, humanAmount
   const from = inputSymbol(direction), to = outputSymbol(direction);
   const input = trusted.assets[from].asset, output = trusted.assets[to].asset;
   const amount = parseHumanAmount(humanAmount, from, trusted);
+  // Keep historical small-workflow hashes and editing scope. Larger explicitly authored amounts get their own editing bound;
+  // the input validator uses the token's actual integer limit, so these compatibility windows never cap a new request.
+  const legacyEditingMaximum = input.chainId === 'eip155:8453' ? from === 'USDC' ? '1000000000000' : '1000000000000000000000' : trusted.assets[from].maximumAmountUnits;
+  const editingMaximum = BigInt(amount) > BigInt(legacyEditingMaximum) ? amount : legacyEditingMaximum;
   const slippage = parseSlippage(slippageText);
   return {
     nodeId, actionType: SWAP_ACTION, actionSchemaVersion: '1.0.0', chainId: input.chainId,
@@ -78,7 +82,7 @@ export function createSwapNode(nodeId: string, direction: Direction, humanAmount
     ],
     failurePolicy: 'ABORT', requiredAuthorizationClass: 'MODE_A',
     lockedParameters: [],
-    editableBounds: [{ parameterName: 'amount-in', asset: { ...input }, minimumAmount: '1', maximumAmount: trusted.assets[from].maximumAmountUnits }],
+    editableBounds: [{ parameterName: 'amount-in', asset: { ...input }, minimumAmount: '1', maximumAmount: editingMaximum }],
   };
 }
 export function swapDetails(node: Workflow['nodes'][number], context: ReviewContext) {

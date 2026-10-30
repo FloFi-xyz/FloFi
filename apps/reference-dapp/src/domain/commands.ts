@@ -40,10 +40,10 @@ const lendingAsset = (network: SupplyInput['network'], text: string): SupplyInpu
   lendingProfileFor(network, text).symbol;
 /**
  * BUILD-FLOFI-INTELLIGENCE-001: the authoring commands a goal plan may combine into one `ADD_SEQUENCE` (each step is an independent single-action
- * runtime step of a reviewed sequence, `domain/workflow-sequence.ts`). Liquidity and compositions are not sequence steps.
+ * runtime step of a reviewed sequence, `domain/workflow-sequence.ts`).
  */
-export const SEQUENCE_STEP_COMMANDS: readonly string[] = Object.freeze(['ADD_CRYPTO_ACTION', 'ADD_SOLANA_SWAP', 'ADD_ROUTER_BRIDGE', 'ADD_UNIVERSAL_BRIDGE', 'ADD_SUPPLY',
-  'ADD_RH_TRANSFER']);
+export const SEQUENCE_STEP_COMMANDS: readonly string[] = Object.freeze(['ADD_CRYPTO_ACTION', 'ADD_SWAP', 'ADD_TESTNET_SWAP', 'ADD_ETHEREUM_SEPOLIA_SWAP', 'ADD_SOLANA_SWAP', 'ADD_ROUTER_BRIDGE', 'ADD_UNIVERSAL_BRIDGE', 'ADD_SUPPLY',
+  'ADD_RH_TRANSFER', 'ADD_BORROW', 'ADD_REPAY', 'ADD_WITHDRAW', 'ADD_UNISWAP_LIQUIDITY', 'ADD_SOLANA_LIQUIDITY', 'ADD_LIQUIDITY']);
 export const MAX_SEQUENCE_STEPS = 4;
 export type Command = Base & (
   /** BUILD-FLOFI-INTELLIGENCE-001: several authoring steps applied in order as one change (one review of the proposal, one undo). */
@@ -345,9 +345,7 @@ export function commandIsValid(input: unknown): input is Command {
     case 'ADD_SEQUENCE': return Array.isArray(command.steps) && Object.getPrototypeOf(command.steps) === Array.prototype && command.steps.length >= 2 &&
       command.steps.length <= MAX_SEQUENCE_STEPS && Reflect.ownKeys(command.steps).length === command.steps.length + 1 &&
       command.steps.every(step => !!step && typeof step === 'object' && SEQUENCE_STEP_COMMANDS.includes((step as { type?: unknown }).type as string) &&
-        (step as { source?: unknown }).source === command.source && commandIsValid(step) &&
-        // A catalog pool is a liquidity position, never a sequence step.
-        (step.type !== 'ADD_CRYPTO_ACTION' || step.input.selection.action !== 'pool'));
+        (step as { source?: unknown }).source === command.source && commandIsValid(step));
     case 'ADD_CRYPTO_ACTION':
     case 'SET_CRYPTO_ACTION': {
       if (command.type === 'SET_CRYPTO_ACTION' && !id(command.nodeId)) return false;

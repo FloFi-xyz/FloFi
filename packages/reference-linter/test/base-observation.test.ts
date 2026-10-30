@@ -300,7 +300,7 @@ describe('fail-closed consistency (plan §3.2.3 and §3.7)', () => {
       { swap: WETH_USDC, mode: 'MOCKED', providerHost: P.providerHost },
       { swap: WETH_USDC, mode: 'LIVE_READ_ONLY', providerHost: 'other.example' },
       { swap: { ...WETH_USDC, amountIn: '0' }, mode: 'LIVE_READ_ONLY', providerHost: P.providerHost },
-      { swap: { ...WETH_USDC, amountIn: '1000000000000000000001' }, mode: 'LIVE_READ_ONLY', providerHost: P.providerHost },
+      { swap: { ...WETH_USDC, amountIn: (2n ** 256n).toString() }, mode: 'LIVE_READ_ONLY', providerHost: P.providerHost },
       { swap: { from: 'WETH', to: 'WETH', amountIn: '1' }, mode: 'LIVE_READ_ONLY', providerHost: P.providerHost },
       { swap: WETH_USDC, mode: 'LIVE_READ_ONLY', providerHost: P.providerHost, extra: 1 },
     ]) {

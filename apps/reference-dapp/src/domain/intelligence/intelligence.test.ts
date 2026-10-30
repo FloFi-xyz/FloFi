@@ -49,7 +49,7 @@ describe('Capability API: one registry-driven view per network', () => {
     expect(capabilityGap('PUBLIC_MAINNET', 'swap', 'Base Sepolia')).toBe('TEST_NETWORK_NOT_AVAILABLE');
     expect(capabilityGap('PUBLIC_MAINNET', 'swap', 'Optimism')).toBe('NETWORK_UNKNOWN');
     expect(capabilityGap('PUBLIC_MAINNET', 'supply', 'solana')).toBe('ACTION_NOT_ON_NETWORK');
-    expect(capabilityGap('PUBLIC_MAINNET', 'add_liquidity', 'solana')).toBe('AGENT_ROLLOUT_NOT_APPROVED');
+    expect(capabilityGap('PUBLIC_MAINNET', 'add_liquidity', 'solana')).toBeNull();
     expect(capabilityGap('PUBLIC_MAINNET', 'supply', 'Arbitrum One')).toBeNull();
   });
   it('catalog networks report catalog availability; lending binds its registered asset; required parameters come from the strategy schema', () => {
@@ -121,10 +121,19 @@ describe('goal planner: registry-driven steps, reasons and honest refusals', () 
     expect(planGoal(goal({ network: 'base', asset: 'WETH', amount: '1' }, { network: 'base', use: 'SUPPLY', asset: 'WETH' }), scope)).toMatchObject({ kind: 'UNSUPPORTED', code: 'LENDING_ASSET_NOT_SUPPORTED' });
     expect(planGoal(goal({ network: 'base', asset: 'USDC', amount: '1' }, { network: 'solana', use: 'SUPPLY' }), scope)).toMatchObject({ kind: 'UNSUPPORTED', code: 'LENDING_NOT_ON_NETWORK' });
   });
-  it('liquidity: no conversion hands over to liquidity authoring; a conversion first is not a sequence and is said so', () => {
-    expect(planGoal(goal({ network: 'base' }, { use: 'LIQUIDITY' }), scope)).toEqual({ kind: 'LIQUIDITY', network: 'base' });
-    expect(planGoal(goal({ network: 'base', asset: 'USDC' }, { asset: 'WETH', use: 'LIQUIDITY' }), scope))
-      .toMatchObject({ kind: 'UNSUPPORTED', code: 'LIQUIDITY_AFTER_CONVERSION_NOT_EXECUTABLE', alternatives: [{ code: 'SWAP_ONLY' }, { code: 'SEPARATE_LIQUIDITY' }] });
+  it('liquidity retains the goal, asks for position parameters, then composes the conversion and funded position', () => {
+    expect(planGoal(goal({ network: 'base' }, { use: 'LIQUIDITY' }), scope)).toEqual({ kind: 'NEEDS', field: 'deposits', options: [] });
+    const liquidity = act.liquidity({ network: 'BASE', deposits: [{ asset: 'USDC', maxAmount: '10' }, { asset: 'WETH', maxAmount: '0.005' }], rangeUnit: 'FULL', slippageBps: '50' }) as NonNullable<Goal['liquidity']>;
+    const plan = planGoal(goal({ network: 'base', asset: 'USDC', amount: '5' }, { network: 'base', asset: 'WETH', use: 'LIQUIDITY' }, { liquidity }), scope);
+    expect(plan).toMatchObject({ kind: 'PLAN', steps: [{ action: 'swap', outputAsset: 'WETH' }, { action: 'add_liquidity', fundedBy: 0, inputAsset: 'WETH' }] });
+    if (plan.kind !== 'PLAN') throw new Error('plan expected');
+    const strategy = goalStrategy(plan.steps, null);
+    expect(strategy.ok).toBe(true);
+    if (!strategy.ok) throw new Error('strategy expected');
+    expect(strategy.strategy).toMatchObject({ version: 2, bindings: [{ step: 1, amountFrom: 0 }] });
+    expect(composeWorkflow(strategy.strategy)).toMatchObject({ ok: true, bindings: [{ step: 1, amountFrom: 0, inputAsset: 'WETH' }] });
+    const composed = composeWorkflow(strategy.strategy);
+    expect(composed.ok && composed.steps[1]!.strategy).toMatchObject({ slippageBps: 50 });
   });
   it('missing fields are asked one at a time with registry options; test networks, currencies and unknown networks are refused', () => {
     expect(planGoal(goal({}, { network: 'arbitrum-one' }), scope)).toMatchObject({ kind: 'NEEDS', field: 'sourceAsset' });

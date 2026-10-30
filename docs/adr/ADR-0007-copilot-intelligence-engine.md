@@ -82,7 +82,8 @@ limiter. Usage tokens are summed across rounds. No cost is computed: there is no
 
 ## Compatibility and migration
 
-- No database migration, no environment variable change, no dependency change. Model selection and credentials are unchanged.
+- Product-completion continuation adds additive migration `0017_copilot_metrics` (content-free daily counters) and opens public MCP
+  account creation on `PUBLIC_MAINNET` without legacy invitations. Model selection and credentials are unchanged.
 - V2 intents recorded before this build parse unchanged (`answer`/`recipient` are optional keys). Requests without a context card are
   accepted. Without tools and without a card the request body and the telemetry record are byte-identical to before.
 - Behaviour changes, each covered by tests: an ambiguous grouping is clarified (`L08` now asks, then proposes); `0.001`/`0,005` are
@@ -108,8 +109,10 @@ The Capability API, the model's "What Flofi supports" section, the scoped capabi
 ## Known limitations
 
 - Live model tool-calling (including reasoning-item continuation with `store: false`) is verified against a scripted transport only;
-  owner live acceptance with the configured model is required.
-- Liquidity is not a sequence step, so "swap then add liquidity" is refused with alternatives rather than executed.
-- Channel Core has no live route discovery (boundary-preserving); Telegram users get registry facts, not live quotes.
+  owner live acceptance with the configured model is required (`pnpm test:copilot-live`).
 - A goal never chooses among assets or protocols on its own; it plans only what the registries certify for the stated outcome.
-- Turn analytics are log records; no durable Admin dashboard was added (that needs a reviewed migration).
+  Liquidity after a conversion is planned when the user states the pair, deposits and range; percent-of-price ranges still need a
+  live pool mid before authoring (`GOAL_POOL_PRICE_REQUIRED`).
+- Channel Core reaches live route discovery only through the authenticated public-quote adapter (`channel-copilot-toolkit.ts`); it
+  still has no flow runtime, wallet principal or transaction transport.
+- Durable Admin AI analytics persist content-free daily counters (`0017_copilot_metrics`); they never imply execution success.

@@ -22,6 +22,7 @@ import { networkIdentity, type NetworkIdentity } from '../network-registry';
 import { networkAllowed, type NetworkScope } from '../network-scope';
 import { capabilityGap, networkCapabilityProfiles } from './capability-api';
 import { fiatReference } from './asset-resolution';
+import type { CopilotLiquidityAction } from '../copilot-intent';
 
 export { GOAL_PREFERENCES, GOAL_USES, type GoalPreference, type GoalUse } from './goal-vocabulary';
 import type { GoalPreference, GoalUse } from './goal-vocabulary';
@@ -32,21 +33,23 @@ export type Goal = {
   readonly preference: GoalPreference | null;
   /** The most a funded later step may spend when it is a different asset than the user's own amount (stated by the user). */
   readonly cap: string | null;
+  readonly liquidity?: CopilotLiquidityAction | null;
 };
-export type GoalField = 'sourceAsset' | 'sourceNetwork' | 'amount' | 'targetNetwork' | 'targetAsset' | 'cap';
-export type GoalStepAction = 'swap' | 'bridge' | 'supply';
+export type GoalField = 'sourceAsset' | 'sourceNetwork' | 'amount' | 'targetNetwork' | 'targetAsset' | 'cap' | 'deposits' | 'range';
+export type GoalStepAction = 'swap' | 'bridge' | 'supply' | 'add_liquidity';
 export type GoalStep = {
   readonly action: GoalStepAction; readonly network: string; readonly destinationNetwork: string | null;
   readonly inputAsset: string; readonly outputAsset: string | null; readonly amount: string;
   /** The earlier step whose actual delivery this step spends (its `amount` is then a cap), or null. */ readonly fundedBy: number | null;
   /** Bridges: BEST asks the universal router for every provider's guaranteed amount; null lets FloFi use a certified route when one exists. */
   readonly routing: 'BEST' | null;
+  readonly liquidity?: CopilotLiquidityAction;
 };
 export type GoalReason = 'SAME_NETWORK_SWAP' | 'CERTIFIED_ROUTE' | 'UNIVERSAL_ROUTE' | 'CONVERTS_IN_ROUTE' | 'LOWEST_COST_AT_REVIEW' | 'FASTEST_NOT_SELECTABLE'
   | 'FUNDED_BY_PREVIOUS_STEP' | 'CAP_IS_YOUR_AMOUNT' | 'EACH_STEP_REVIEWED' | 'REAL_FUNDS';
 export type GoalAlternative = { readonly code: 'UNIVERSAL_BEST' | 'CERTIFIED_ROUTE' | 'SWAP_ONLY' | 'SEPARATE_LIQUIDITY'; readonly network: string | null };
 export type GoalGap = 'TEST_NETWORK_NOT_AVAILABLE' | 'NETWORK_UNKNOWN' | 'NO_SWAP_ON_NETWORK' | 'NO_ROUTE_BETWEEN_NETWORKS' | 'LENDING_ASSET_NOT_SUPPORTED'
-  | 'LENDING_NOT_ON_NETWORK' | 'LIQUIDITY_AFTER_CONVERSION_NOT_EXECUTABLE' | 'FIAT_NOT_AN_ASSET' | 'SAME_NETWORK_BRIDGE';
+  | 'LENDING_NOT_ON_NETWORK' | 'LIQUIDITY_NOT_ON_NETWORK' | 'LIQUIDITY_ASSET_NOT_IN_PAIR' | 'FIAT_NOT_AN_ASSET' | 'SAME_NETWORK_BRIDGE';
 export type GoalPlan =
   | { readonly kind: 'PLAN'; readonly steps: readonly GoalStep[]; readonly reasons: readonly GoalReason[]; readonly alternatives: readonly GoalAlternative[] }
   | { readonly kind: 'NEEDS'; readonly field: GoalField; readonly options: readonly string[]; readonly step?: number; readonly asset?: string }
@@ -83,11 +86,25 @@ export function planGoal(goal: Goal, scope: NetworkScope): GoalPlan {
   if (goal.target.use === 'LIQUIDITY') {
     const network = to?.network ?? from?.network ?? null;
     if (!network) return { kind: 'NEEDS', field: 'targetNetwork', options: networkCapabilityProfiles(scope).filter(p => p.actions.some(a => a.action === 'add_liquidity')).map(p => p.name) };
-    const converting = (from && to && from.network !== to.network) || (goal.source.asset && goal.target.asset && !same(goal.source.asset, goal.target.asset));
-    if (converting) return { kind: 'UNSUPPORTED', code: 'LIQUIDITY_AFTER_CONVERSION_NOT_EXECUTABLE', network: network.name, options: [],
-      alternatives: [{ code: 'SWAP_ONLY', network: network.key }, { code: 'SEPARATE_LIQUIDITY', network: network.key }] };
-    return capabilityGap(scope, 'add_liquidity', network.key) ? { kind: 'UNSUPPORTED', code: 'LIQUIDITY_AFTER_CONVERSION_NOT_EXECUTABLE', network: network.name, options: [], alternatives: [] }
-      : { kind: 'LIQUIDITY', network: network.key };
+    if (capabilityGap(scope, 'add_liquidity', network.key)) return { kind: 'UNSUPPORTED', code: 'LIQUIDITY_NOT_ON_NETWORK', network: network.name, options: [], alternatives: [] };
+    const position = goal.liquidity;
+    if (!position || position.deposits.length !== 2) return { kind: 'NEEDS', field: 'deposits', options: [] };
+    if (!position.rangeUnit || (position.rangeUnit !== 'FULL' && (!position.upper || (position.rangeUnit !== 'PERCENT' && !position.lower))))
+      return { kind: 'NEEDS', field: 'range', options: [] };
+    const asset = goal.target.asset ?? position.deposits.find(deposit => same(deposit.asset, goal.source.asset))?.asset ?? null;
+    if (!asset) return { kind: 'NEEDS', field: 'targetAsset', options: position.deposits.map(deposit => deposit.asset) };
+    const deposit = position.deposits.find(item => same(item.asset, asset));
+    if (!deposit) return { kind: 'UNSUPPORTED', code: 'LIQUIDITY_ASSET_NOT_IN_PAIR', network: network.name, options: position.deposits.map(item => item.asset), alternatives: [] };
+    // Reuse the same registry-backed route search for the funding asset; the position remains part of this workflow.
+    const conversion = planGoal({ ...goal, target: { network: network.key, asset, use: 'HOLD' } }, scope);
+    if (conversion.kind !== 'PLAN' && conversion.kind !== 'NOTHING_TO_DO') return conversion;
+    const prefix = conversion.kind === 'PLAN' ? conversion.steps : [];
+    const fundedBy = prefix.length ? prefix.length - 1 : null;
+    const step: GoalStep = { action: 'add_liquidity', network: network.key, destinationNetwork: null, inputAsset: asset, outputAsset: null,
+      amount: deposit.maxAmount, fundedBy, routing: null, liquidity: position };
+    return { kind: 'PLAN', steps: [...prefix, step], reasons: [...new Set<GoalReason>([...conversion.kind === 'PLAN' ? conversion.reasons : [],
+      ...fundedBy !== null ? ['FUNDED_BY_PREVIOUS_STEP', 'EACH_STEP_REVIEWED'] as const : [], ...network.environment === 'MAINNET' ? ['REAL_FUNDS'] as const : []])],
+      alternatives: conversion.kind === 'PLAN' ? conversion.alternatives : [] };
   }
   if (!goal.source.asset) return { kind: 'NEEDS', field: 'sourceAsset', options: goal.target.use === 'SUPPLY' ? [...new Set(lendingOn(scope).map(offer => offer.asset))] : [] };
   const lending = lendingOn(scope);

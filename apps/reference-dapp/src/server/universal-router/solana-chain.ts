@@ -6,7 +6,7 @@
  * Read-only: nothing here signs; `sendTransaction` exists only on the service's owner-signed submit path.
  */
 import type { UniversalSolanaDeployment } from '@defi-workflow-engine/action-registry';
-import { assertSafeMintExtensions, base58Decode, base58Encode, compileMessageV0, decodeSplMint, decodeSplTokenAccount, decompileMessageV0, estimateFee, fromBase64,
+import { solanaRpcU64, assertSafeMintExtensions, base58Decode, base58Encode, compileMessageV0, decodeSplMint, decodeSplTokenAccount, decompileMessageV0, estimateFee, fromBase64,
   parseMessageV0, parseTransaction, readSolanaAccounts, serializeMessageV0, serializeTransaction, setComputeUnitLimit, setComputeUnitPrice, simulateSolanaMessage,
   solanaKeyOnCurve, solanaMessageHash, solanaRecord, toBase64, associatedTokenAddress, type RawSolanaAccount, type SolanaInstruction, type SolanaRpc,
   SOLANA_ASSOCIATED_TOKEN_PROGRAM_ID, SOLANA_SYSTEM_PROGRAM_ID, SOLANA_TOKEN_2022_PROGRAM_ID, SOLANA_TOKEN_PROGRAM_ID, RELAY_SOLANA_VAULT } from '@defi-workflow-engine/reference-compiler';
@@ -169,7 +169,7 @@ export async function solanaFinalizedTransaction(rpc: SolanaRpc, signature: stri
     keys = staticKeys;
     instructions = [];
   }
-  const fee = typeof meta.fee === 'number' && Number.isSafeInteger(meta.fee) ? BigInt(meta.fee) : fail('SOLANA_RPC_INVALID');
+  const fee = solanaRpcU64(meta.fee);
   return { slot: tx.slot as number, blockTime: Number.isSafeInteger(tx.blockTime) ? tx.blockTime as number : null, err: meta.err ?? null, keys,
     pre: lamportList(meta.preBalances, keys.length), post: lamportList(meta.postBalances, keys.length), preTokens: tokenBalances(meta.preTokenBalances),
     postTokens: tokenBalances(meta.postTokenBalances), instructions, fee, bytes, contentHash: '0x' + sha256Hex(JSON.stringify(value)) };

@@ -19,8 +19,11 @@ export type UniswapCatalogLiquidity = {
   readonly gasPriceOracle: string | null;
   readonly maximumSlippageBps: number; readonly defaultSlippageBps: number; readonly reviewTtlSeconds: number; readonly mintDeadlineSeconds: number;
 };
-/** Per-side sanity bound of a catalog position: 10^9 whole tokens (real amounts are checked against balances). */
-export const catalogLiquidityMaximumUnits = (decimals: number) => (10n ** BigInt(decimals + 9)).toString();
+/** ERC-20 deposit encoding limit. Wallet balances and live pool liquidity determine actual availability. */
+export function catalogLiquidityMaximumUnits(decimals: number): string {
+  if (!Number.isInteger(decimals) || decimals < 0 || decimals > 36) throw new Error('UNISWAP_TOKEN_UNSUPPORTED');
+  return (2n ** 256n - 1n).toString();
+}
 /**
  * A Uniswap v3 pool on a catalog network as a liquidity runtime: the CREATE2 pool of the pinned factory for (tokenA, tokenB, fee), tokens
  * in pool order. Identity, code and live state are verified at simulation; an unknown fee tier or identical tokens fail closed.

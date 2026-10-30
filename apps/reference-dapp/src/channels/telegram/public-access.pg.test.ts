@@ -70,10 +70,10 @@ describe('BUILD-TELEGRAM-PUBLIC-001 public Telegram access (PostgreSQL, Bot API 
     expect(d.logs.join('\n')).not.toMatch(new RegExp(`${STRANGER}|${STRANGER_WALLET}|flofi_chs_|supply 100`));
   });
 
-  it('keeps the allowlist as the default: without public mode the same stranger is ignored', async () => {
+  it('admits an unlisted stranger without a public-mode override', async () => {
     const d = deployment({ FLOFI_TELEGRAM_ACCESS_MODE: undefined });
     expect(await d.say('/start', STRANGER)).toEqual({ status: 200, code: 'ACCEPTED' });
-    expect(d.api.sent()).toHaveLength(0);
+    expect(d.to(STRANGER)).toEqual([expect.stringMatching(/^FloFi \(automated assistant\)/), expect.stringMatching(/^What I can do/)]);
   });
 
   it('bounds admission per sender first, then globally, before anything is stored, and says nothing about who was limited', async () => {

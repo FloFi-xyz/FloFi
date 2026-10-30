@@ -34,7 +34,7 @@ export const BASE_MAINNET_TRANSFER = Object.freeze({
   chainHex: '0x2105', rpc: BASE_MAINNET.rpc, explorer: BASE_MAINNET.explorer,
   officialSource: BASE_MAINNET.officialSource, adapterId: 'evm.native-transfer', action: 'asset.transfer',
   /** No product ceiling on real funds beyond the owner's balance and the reviewed fee budget (one million ETH is a representation bound). */
-  maximumValueWei: '1000000000000000000000000', defaultValueWei: '1000000000000',
+  maximumValueWei: (2n ** 256n - 1n).toString(), defaultValueWei: '1000000000000',
   reviewTtlSeconds: 60, gasLimitMarginPercent: 150, maxFeeMultiplier: 2, minimumConfirmations: 2,
   /** Inclusion is a sequencer block of an OP Stack rollup; L1 finality is not claimed. */
   settlement: 'L2' as const,

@@ -265,7 +265,7 @@ Rules:
    - POSITION: managing an existing liquidity position: "remove 50% of my liquidity", "withdraw half of my position" → operation DECREASE, percent "50"; "remove all my liquidity", "close/exit my position" → operation EXIT, percent null. Never invent which position: FloFi selects it from the connected wallet.
    - A bare "yes"/"no" after Flofi's own question is answered by FloFi; you only see the ones it cannot settle. Never treat "yes" as approval, a signature or an execution.
    - QUESTION: any read-only question about the workflow, a step, protocols, networks, approvals, the Manifest, the simulation, blockers, failures or the pending proposal. Pick the topic and the target if a step is named; never answer it yourself: FloFi writes the factual answer (the optional answer field stays null unless FloFi's tools gave you facts for a short explanation). Questions about prices, APY, balances, gas, bridge times or health factors are topic MARKET_DATA.
-   - GOAL: an outcome described without naming every step ("I have USDC on Base and want SOL on Solana", "supply my USDC on Aave", "move my funds to Arbitrum as cheaply as possible"). Report only what the user said, null for the rest; FloFi plans the steps from its registries and asks for anything missing. Use ACTION or COMPOSITION when the user named the action itself.
+   - GOAL: an outcome described without naming every step ("I have USDC on Base and want SOL on Solana", "supply my USDC on Aave", "move my funds to Arbitrum as cheaply as possible"). Report only what the user said, null for the rest; FloFi plans the steps from its registries and asks for anything missing. For conversion into liquidity, retain the position's stated deposits/range in goal.liquidity so FloFi plans the conversion and position together. Use ACTION or COMPOSITION when the user named the action itself.
    - CLARIFICATION_REQUIRED: something material is missing and cannot be expressed with null. One short question in the user's language and up to 4 short options.
    - UNSUPPORTED: anything else (transfers outside ${copilotTransferScope()}, staking, leverage loops, limit orders, unsupported automations, portfolio or investment advice, news, other protocols). One short reason in the user's language.
 8. Networks: ${copilotNetworkRule()} Report exactly the network the user named; never turn a test network into a mainnet or the reverse. Use ETHEREUM when the user names Ethereum without Sepolia (including Ethereum Mainnet), ETHEREUM_SEPOLIA only if the user wrote Sepolia. Use OTHER for any other network and null when none is named.
@@ -381,7 +381,7 @@ export function buildCopilotRequestV2(settings: CopilotModelSettings, messages: 
   tools: readonly Record<string, unknown>[] | null = null): Record<string, unknown> {
   return { model: settings.model, instructions: tools ? COPILOT_INSTRUCTIONS_V2 + COPILOT_TOOL_RULES : COPILOT_INSTRUCTIONS_V2,
     input: [...glossary ? [{ role: 'developer', content: glossary }] : [], ...messages.map(message => ({ role: message.role, content: message.text }))],
-    ...tools ? { tools: [...tools], tool_choice: 'auto', parallel_tool_calls: true } : {},
+    ...tools ? { tools: [...tools], tool_choice: 'auto', parallel_tool_calls: true, include: ['reasoning.encrypted_content'] } : {},
     text: { format: { type: 'json_schema', name: 'flofi_copilot_intent_v2', strict: true, schema: COPILOT_OUTPUT_SCHEMA_V2 } },
     max_output_tokens: settings.maxOutputTokens, store: false, ...(settings.temperature === null ? {} : { temperature: settings.temperature }),
     ...(settings.reasoningEffort === null ? {} : { reasoning: { effort: settings.reasoningEffort } }) };
@@ -497,10 +497,10 @@ export async function interpretCopilotV2(input: unknown, deps: { readonly transp
  * BUILD-FLOFI-INTELLIGENCE-001: one content-free turn record (`intelligence/turn-metrics.ts`), under the same switch as the interpretation records
  * (`FLOFI_COPILOT_TELEMETRY=off` silences both; replay records only with `log`).
  */
-export function logCopilotTurn(env: Env, mode: 'live' | 'replay', record: TurnMetrics, log: (line: string) => void = line => console.info(line)): void {
+export function logCopilotTurn(env: Env, mode: 'live' | 'replay', record: TurnMetrics, log: (line: string) => void = line => console.info(line), provenance?: 'CLIENT' | 'SERVER'): void {
   const setting = env.FLOFI_COPILOT_TELEMETRY?.trim();
   if (setting === 'off' || (setting !== 'log' && mode !== 'live')) return;
-  log(JSON.stringify(record));
+  log(JSON.stringify(provenance === 'CLIENT' ? { ...record, code: null, interpreted: null, provenance } : provenance ? { ...record, provenance } : record));
 }
 /** `FLOFI_COPILOT_TELEMETRY=off|log`; by default live requests are logged as one metadata line each and replay requests are not. */
 export function copilotTelemetrySink(env: Env, mode: 'live' | 'replay', log: (line: string) => void = line => console.info(line)): ((record: CopilotTelemetry) => void) | undefined {

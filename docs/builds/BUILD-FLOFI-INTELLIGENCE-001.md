@@ -79,16 +79,42 @@ An earlier full unit run on an intermediate tree failed one case: rewording the 
 field); the guard test was not changed. The remaining browser profiles of the 49-profile matrix were not run locally; CircleCI runs the
 complete matrix and remains authoritative.
 
+## Product-completion continuation (unmerged on this branch)
+
+### Continuation validation
+
+Local evidence on the uncommitted product-completion tree (Node 24.21.0, pnpm 11.22.0, disposable PostgreSQL 18 on loopback `127.0.0.1:29451`):
+
+| Check | Result |
+| --- | --- |
+| Focused intelligence / sequence / channel / metrics suites | 110+ passed (incl. swap→liquidity parity and confirm-run liquidity) |
+| Full unit (`pnpm test`) | 5,804 passed, 2 skipped, 0 failed; `verify-results` PASS (33 required suites) |
+| Full PostgreSQL (`pnpm test:postgres`) | 521 passed, 3 skipped, 0 failed |
+| Live channel discovery probe (Base USDC → Solana SOL) | PASS — authentic Relay `EXECUTABLE` quote via `channel-copilot-toolkit` |
+| Typecheck / lint / schemas:check / production build | PASS |
+| Configured production-model acceptance (`pnpm test:copilot-live`) | Not run here — no `OPENAI_API_KEY` in this environment; owner-gated |
+
+Owner-required gaps closed on top of `e6dbb69` without weakening custody, review or signing:
+
+- **Liquidity sequences.** Goal plans may include `add_liquidity` funded by a prior swap/bridge when the user states deposits and
+  range; sequence runtime binds both pool sides from reconciled deliveries (`uniswap-pool` / `solana-pool`).
+- **Channel quotes.** Authenticated Channel Core entry points use `channel-copilot-toolkit.ts` for public-subject universal
+  discovery (no flow runtime / wallet principal / transaction transport).
+- **Admin AI Analytics.** Additive migration `0017_copilot_metrics` + `/admin/ai-analytics` for content-free daily counters.
+- **Public MCP access.** On `PUBLIC_MAINNET`, OAuth account creation is open; invitation digests remain for engineering fixtures.
+- **Amount editing bounds.** Newly authored mainnet amounts use token encoding limits; live quotes/simulation still decide
+  availability. Older reviewed workflows keep their stored editable bounds.
+
 ## Remaining limitations
 
 - Live model tool-calling, including reasoning-item continuation with `store: false`, is certified against a scripted transport only;
   run `FLOFI_COPILOT_LIVE_SMOKE=1 … pnpm test:copilot-live` with the configured model before relying on it.
-- Telegram/WhatsApp have no live route quotes (boundary-preserving); they answer with registry facts.
-- Liquidity after a conversion, and any composition the sequence runtime does not execute, is refused rather than planned.
-- Turn analytics are log lines, not a durable Admin dashboard; a dashboard needs a reviewed migration.
-- No public execution, wallet ceremony or provider availability is evidenced by this build.
+- Percent-of-price liquidity ranges need a live pool mid before authoring (`GOAL_POOL_PRICE_REQUIRED`).
+- No public execution, wallet ceremony or provider availability is evidenced by this build; CircleCI remains authoritative for the
+  full browser matrix.
 
 ## Deployment readiness
 
-Ready for owner review; not ready to promote without the owner's live-model acceptance run. Operational switches: `FLOFI_COPILOT_TOOLS=off`
-(tools off, previous single request), `FLOFI_COPILOT_TELEMETRY=off`. No migration, environment change or dependency change is required.
+Ready for owner review; not ready to promote without the owner's live-model acceptance run and explicit authorization to apply
+migration `0017_copilot_metrics`. Operational switches: `FLOFI_COPILOT_TOOLS=off` (tools off, previous single request),
+`FLOFI_COPILOT_TELEMETRY=off`. Do not merge, deploy or change hosted settings without separate owner authorization.

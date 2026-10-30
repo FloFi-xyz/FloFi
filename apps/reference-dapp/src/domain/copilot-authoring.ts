@@ -186,7 +186,7 @@ export function groundedAmount(text: string, value: string): boolean {
   const wanted = canonicalDecimal(value);
   return numbersIn(text).some(reading => reading.value === wanted);
 }
-function groundedSigned(text: string, value: string): boolean {
+export function groundedSigned(text: string, value: string): boolean {
   const negative = value.startsWith('-'), wanted = canonicalDecimal(negative ? value.slice(1) : value);
   return numbersIn(text).some(reading => reading.value === wanted && reading.negative === negative);
 }

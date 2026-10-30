@@ -3786,8 +3786,8 @@
                   },
                   "bindings": {
                     "minItems": 1,
-                    "maxItems": 7,
-                    "description": "Optional typed dependencies: a step spends what an earlier step actually delivered (capped by its own amount). The input asset must be exactly the earlier step's output token.",
+                    "maxItems": 14,
+                    "description": "Optional typed dependencies: a step spends what an earlier step actually delivered (capped by its own amount). The input asset must be exactly the earlier step's output token. A liquidity step may bind each of its two distinct deposits.",
                     "type": "array",
                     "items": {
                       "additionalProperties": false,

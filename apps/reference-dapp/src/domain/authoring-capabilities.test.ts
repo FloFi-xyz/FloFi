@@ -109,8 +109,8 @@ describe('BUILD-BASE-001 one capability truth for Canvas, Chat, Copilot and MCP'
     for (const action of ['supply', 'borrow', 'repay', 'withdraw'] as const) expect(names(capabilityNetworks(action))).toEqual(canvasNetworks(action));
     // BUILD-SOLANA-TRANSFER-UX-001: the Ethereum Sepolia and Robinhood Chain Testnet native self-transfers are implemented for chat and handoff too.
     expect(names(capabilityNetworks('transfer'))).toEqual(canvasNetworks('transfer'));
-    // Audit A9: until the owner approves these agent rollouts, the Copilot offers neither (the Canvas keeps its own controls).
-    expect(names(copilotCapabilityNetworks('add_liquidity'))).toEqual(canvasNetworks('pool').filter(name => name !== 'Solana'));
+    // The owner approved the existing public mainnet Orca journey; testnet-native transfers retain their engineering rollout policy.
+    expect(names(copilotCapabilityNetworks('add_liquidity'))).toEqual(canvasNetworks('pool'));
     expect(names(copilotCapabilityNetworks('transfer'))).toEqual(canvasNetworks('transfer').filter(name => !['Ethereum Sepolia', 'Robinhood Chain Testnet'].includes(name)));
     expect(names(copilotCapabilityNetworks('transfer', PENDING_AGENT_CAPABILITIES))).toEqual(canvasNetworks('transfer'));
   }));

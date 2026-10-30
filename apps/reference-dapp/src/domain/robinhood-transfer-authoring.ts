@@ -27,7 +27,7 @@ export const TRANSFER_NETWORKS: Readonly<Record<EvmTransferNetwork, NativeTransf
 const WEI = 10n ** 18n;
 /** Exact decimal ETH to wei; at most 18 decimals and never above the profile's cap. */
 export function parseTransferAmount(value: string, profile: NativeTransferProfile = ROBINHOOD_TESTNET_TRANSFER): string {
-  if (typeof value !== 'string' || value.length > 40 || !/^(0|[1-9][0-9]*)(?:\.[0-9]{1,18})?$/.test(value)) throw new Error('TRANSFER_AMOUNT_INVALID');
+  if (typeof value !== 'string' || value.length > 80 || !/^(0|[1-9][0-9]*)(?:\.[0-9]{1,18})?$/.test(value)) throw new Error('TRANSFER_AMOUNT_INVALID');
   const [whole, fraction = ''] = value.split('.');
   const wei = BigInt(whole!) * WEI + BigInt(fraction.padEnd(18, '0'));
   if (wei <= 0n || wei > BigInt(profile.maximumValueWei)) throw new Error('TRANSFER_AMOUNT_INVALID');

@@ -3,7 +3,8 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { COPILOT_REPLAY_FORMAT_V2, copilotConfig, copilotTelemetrySink, createCopilotLimiter, createOpenAITransport, createReplayTransport, interpretCopilot,
-  interpretCopilotV2, parseCopilotReplay, COPILOT_SERVER_LIMITS, COPILOT_TUNING_DEFAULTS, type CopilotLimiter, type CopilotMode, type CopilotResult, type CopilotResultV2 } from '../server/copilot-service';
+  interpretCopilotV2, parseCopilotReplay, COPILOT_SERVER_LIMITS, COPILOT_TUNING_DEFAULTS, type CopilotLimiter, type CopilotMode, type CopilotResult, type CopilotResultV2,
+  type CopilotTelemetry } from '../server/copilot-service';
 import { logCopilotSettingsFailure, publicCopilotCode, resolveCopilotLive, runtimeSettingsEnabled } from '../server/copilot-runtime';
 import { webCopilotSettingsReader } from '../server/copilot-settings-source';
 import { parseInterpretOptions, requestGlossary } from '../learning/web-actions';
@@ -12,6 +13,8 @@ import { currentWalletPrincipals } from '../server/session-principal';
 import { copilotToolkit } from '../server/copilot-toolkit';
 import { logCopilotTurn } from '../server/copilot-service';
 import { parseTurnMetrics } from '../domain/intelligence/turn-metrics';
+import { copilotMetricsEnabled, persistCopilotInterpretation, persistCopilotTurn, recordCopilotMetrics } from '../server/copilot-metrics-store';
+import { platformStateHost } from '../server/platform-state-host';
 
 /**
  * BUILD-COPILOT-001: Flofi Copilot interpretation. The browser sends only its short clarification thread and receives
@@ -56,6 +59,17 @@ export async function copilotStatus(): Promise<{ mode: CopilotMode }> {
   return { mode: await mode() };
 }
 const isV2 = (input: unknown) => !!input && typeof input === 'object' && (input as { version?: unknown }).version === '2';
+/** Collect during interpretation; finish durable writes before the server action returns. No in-memory delivery queue. */
+async function interpretWithMetrics(input: unknown, deps: Parameters<typeof interpretCopilotV2>[1]): Promise<CopilotResultV2> {
+  if (!copilotMetricsEnabled(process.env, deps.mode)) return interpretCopilotV2(input, deps);
+  const records: CopilotTelemetry[] = [];
+  const result = await interpretCopilotV2(input, { ...deps, telemetry: record => { deps.telemetry?.(record); records.push(record); } });
+  if (records.length) await recordCopilotMetrics(async () => {
+    const host = await platformStateHost(process.env);
+    for (const record of records) await persistCopilotInterpretation(host, record);
+  });
+  return result;
+}
 /** The learning part of a V2 request: its glossary and how to record its outcome; null when learning is off or unavailable (fail-soft). */
 async function learningFor(input: unknown, options: unknown) {
   const service = await webLearningService(process.env);
@@ -82,7 +96,7 @@ export async function copilotInterpret(input: unknown, options?: unknown): Promi
     const { apiKey, settings } = resolved;
     if (isV2(input)) {
       const learning = await learningFor(input, options);
-      const result = await interpretCopilotV2(input, { transport: createOpenAITransport(apiKey, fetch, { timeoutMs: settings.timeoutMs, maxResponseBytes: COPILOT_SERVER_LIMITS.maxResponseBytes }),
+      const result = await interpretWithMetrics(input, { transport: createOpenAITransport(apiKey, fetch, { timeoutMs: settings.timeoutMs, maxResponseBytes: COPILOT_SERVER_LIMITS.maxResponseBytes }),
         settings: { model: settings.model, temperature: settings.temperature, maxOutputTokens: settings.maxOutputTokens, reasoningEffort: settings.reasoningEffort },
         mode: 'live', limiter: limiter(), telemetry: copilotTelemetrySink(process.env, 'live'), glossary: learning?.glossary ?? null, toolkit: copilotToolkit(process.env), surface: 'WEB' });
       await learning?.record(result);
@@ -95,7 +109,7 @@ export async function copilotInterpret(input: unknown, options?: unknown): Promi
     let replay;
     try { replay = parseCopilotReplay(JSON.parse(await readFile(REPLAY_FILE_V2, 'utf8')), COPILOT_REPLAY_FORMAT_V2); } catch { return { ok: false, code: 'COPILOT_REPLAY_INVALID' }; }
     const learning = await learningFor(input, options);
-    const result = await interpretCopilotV2(input, { transport: createReplayTransport(replay, 'segment'), settings: { model: 'replay', temperature: 0,
+    const result = await interpretWithMetrics(input, { transport: createReplayTransport(replay, 'segment'), settings: { model: 'replay', temperature: 0,
       maxOutputTokens: COPILOT_TUNING_DEFAULTS.maxOutputTokens, reasoningEffort: null }, mode: 'replay', limiter: limiter(), telemetry: copilotTelemetrySink(process.env, 'replay'),
       glossary: learning?.glossary ?? null, toolkit: copilotToolkit(process.env), surface: 'WEB' });
     await learning?.record(result);
@@ -107,7 +121,7 @@ export async function copilotInterpret(input: unknown, options?: unknown): Promi
   } catch { return { ok: false, code: 'COPILOT_REPLAY_INVALID' }; }
 }
 
-/** Held on globalThis: a per-process bound on turn records (they are log lines; a flood is dropped, never queued). */
+/** Held on globalThis: a per-process bound on client turn reports; excess reports are dropped, never queued. */
 function turnLimiter(): CopilotLimiter {
   const key = Symbol.for('flofi.copilot.turn-limiter');
   const holder = globalThis as unknown as Record<symbol, CopilotLimiter | undefined>;
@@ -116,12 +130,16 @@ function turnLimiter(): CopilotLimiter {
 }
 /**
  * BUILD-FLOFI-INTELLIGENCE-001: the browser's content-free record of one Copilot turn (`intelligence/turn-metrics.ts`), re-validated strictly here and
- * logged like the interpretation records. Counters and closed codes only; anything else is dropped. Returns nothing the browser could depend on.
+ * persisted separately as CLIENT provenance. Counters only; client codes, identities and text are never persisted. Returns nothing the browser could depend on.
  */
 export async function copilotTurnReport(input: unknown): Promise<void> {
   const config = copilotConfig(process.env), record = parseTurnMetrics(input);
   if (config.mode === 'off' || config.mode === 'unavailable' || !record || record.surface !== 'WEB') return;
   const release = turnLimiter().acquire();
   if (!release) return;
-  try { logCopilotTurn(process.env, config.mode === 'replay' ? 'replay' : 'live', record); } finally { release(); }
+  try {
+    const mode = config.mode === 'replay' ? 'replay' : 'live';
+    logCopilotTurn(process.env, mode, record, undefined, 'CLIENT');
+    if (copilotMetricsEnabled(process.env, mode)) await recordCopilotMetrics(async () => persistCopilotTurn(await platformStateHost(process.env), mode, record, 'CLIENT'));
+  } finally { release(); }
 }

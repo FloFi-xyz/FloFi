@@ -27,6 +27,8 @@ import { channelHost, channelRuntime, type ChannelHost } from './runtime.ts';
 import { channelLearning } from './learning-runtime.ts';
 import { channelVisualRenderer } from './visuals.ts';
 import { authoringCatalogPreparer } from '../server/authoring-catalogs.ts';
+import { channelCopilotToolkit } from '../server/channel-copilot-toolkit.ts';
+import { copilotMetricsEnabled, persistCopilotInterpretation, persistCopilotTurn, recordCopilotMetrics } from '../server/copilot-metrics-store.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
 export type ChannelWebhookOptions = {
@@ -110,7 +112,14 @@ export async function handleChannelWebhook(route: ChannelRoute, request: Request
   }
   const service = createChannelService({ core, store, log, now, platform, previewTimeoutMs: options.previewTimeoutMs ?? 60_000, adapter: provider.adapter,
     interpreter: options.interpreter !== undefined ? options.interpreter
-      : channelInterpreter(env, { enabled: core.copilot, live: channelLiveCopilot(env, route === 'whatsapp' ? 'WHATSAPP' : 'TELEGRAM', host) }), subscriptions: channelSubscriptions(env, host),
+      : channelInterpreter(env, { enabled: core.copilot, live: channelLiveCopilot(env, route === 'whatsapp' ? 'WHATSAPP' : 'TELEGRAM', host),
+        toolkit: channelCopilotToolkit(env), metrics: async record => {
+          if (copilotMetricsEnabled(env, record.mode)) await recordCopilotMetrics(() => persistCopilotInterpretation(host, record, now()));
+        } }), subscriptions: channelSubscriptions(env, host),
+    metrics: async record => {
+      const mode = env.FLOFI_COPILOT === 'live' ? 'live' : 'replay';
+      if (copilotMetricsEnabled(env, mode)) await recordCopilotMetrics(() => persistCopilotTurn(host, mode, record, 'SERVER', now()));
+    },
     visuals: options.visuals !== undefined ? options.visuals : channelVisualRenderer, catalogs: authoringCatalogPreparer(env), learning: channelLearning(env, host, provider.adapter.channel),
     ...options.sleep ? { sleep: options.sleep } : {}, ...options.random ? { random: options.random } : {} });
   let ingested;
