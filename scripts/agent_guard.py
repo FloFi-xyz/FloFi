@@ -402,56 +402,116 @@ def domain_contract(data, domain, changed=None):
     return result
 
 
+def review_fields(value):
+    """Same self-consistency rule as the hook: no-findings is 0/none, findings is at least 1."""
+    if not isinstance(value, dict):
+        return None
+    result, findings, highest = value.get("result"), value.get("findings"), value.get("highest")
+    if (type(findings) is not int or not 0 <= findings <= 999
+            or highest not in {"critical", "high", "medium", "low", "none"}
+            or result not in {"findings", "no-findings", "blocked"}
+            or (result == "no-findings" and (findings, highest) != (0, "none"))
+            or (result == "findings" and (findings == 0 or highest == "none"))):
+        return None
+    return {"result": result, "findings": findings, "highest": highest}
+
+
+def ledger_row(row):
+    """Re-validate a local ledger row on read and keep only the documented fields."""
+    if not isinstance(row, dict):
+        return None
+    event = row.get("event")
+    name = (lambda value: value if isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9_.:-]{1,64}", value) else "other")
+    clean = {"event": event}
+    if event in {"subagent_start", "subagent_stop", "guard_deny"}:
+        agent_id = row.get("agentId")
+        clean.update(agent=name(row.get("agent")), agentId=agent_id if isinstance(agent_id, str)
+                     and re.fullmatch(r"[A-Za-z0-9_-]{1,128}", agent_id) else None)
+    if event == "subagent_stop":
+        clean["review"] = review_fields(row.get("review"))
+    elif event == "guard_deny":
+        clean["tool"] = row.get("tool") if row.get("tool") in {"Read", "Grep", "Glob", "Bash"} else "other"
+    elif event == "session_start":
+        definitions = row.get("definitions") if isinstance(row.get("definitions"), dict) else {}
+        clean["definitions"] = {key: value for key, value in definitions.items() if key in DOMAINS
+                                and isinstance(value, str) and re.fullmatch(r"[0-9a-f]{16}", value)}
+    elif event == "test":
+        gates, suites = row.get("gates"), row.get("suites")
+        if not isinstance(gates, list) or not gates or not all(
+                isinstance(gate, str) and re.fullmatch(r"[a-z0-9-]{1,40}", gate) for gate in gates):
+            return None
+        clean.update(gates=gates, ok=row.get("ok") if row.get("ok") in (True, False, None) else None,
+                     exit=row.get("exit") if type(row.get("exit")) is int else None, piped=row.get("piped") is True,
+                     agent=name(row.get("agent")), suites=[s for s in suites if isinstance(s, str) and safe_path(s)
+                                                            and len(s) <= 220][:20] if isinstance(suites, list) else [])
+    elif event not in {"subagent_start", "session_end"}:
+        return None
+    return clean
+
+
 def read_runs(session, root=ROOT):
     """Hook-recorded lifecycle for one Claude session; never contains prompts or output."""
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", session):
         raise ValueError("Invalid Claude session id")
-    path = root / CLAUDE_RUNS / f"{session}.jsonl"
+    runs = root / CLAUDE_RUNS
+    path = runs / f"{session}.jsonl"
     events, malformed = [], 0
-    found = path.is_file() and not path.is_symlink()
+    found = (not runs.parent.is_symlink() and not runs.is_symlink() and path.is_file() and not path.is_symlink())
     for line in path.read_text().splitlines() if found else []:
         try:
-            row = json.loads(line)
+            row = ledger_row(json.loads(line))
         except ValueError:
             row = None
-        if isinstance(row, dict) and isinstance(row.get("event"), str):
+        if row:
             events.append(row)
         else:
             malformed += 1
     return {"session": session, "found": found, "events": events, "malformed": malformed}
 
 
-def discovered_agents(stream_text):
-    """Agents listed by a `claude -p --output-format stream-json --verbose` init event."""
-    found = {}
+def stream_sessions(stream_text):
+    """Discovered agents and failed subagent tasks in `claude -p --output-format stream-json` output.
+
+    Only agent names, task IDs and the API error type are kept, never message text.
+    """
+    sessions = {}
     for line in stream_text.splitlines():
         try:
             event = json.loads(line)
         except ValueError:
             continue
-        if (isinstance(event, dict) and event.get("type") == "system" and event.get("subtype") == "init"
-                and isinstance(event.get("session_id"), str) and isinstance(event.get("agents"), list)):
-            found[event["session_id"]] = sorted(a for a in event["agents"] if isinstance(a, str))
-    return found
+        if not isinstance(event, dict) or not isinstance(event.get("session_id"), str):
+            continue
+        session = sessions.setdefault(event["session_id"], {"agents": [], "failed": {}})
+        patch = event.get("patch") if isinstance(event.get("patch"), dict) else {}
+        if event.get("subtype") == "init" and isinstance(event.get("agents"), list):
+            session["agents"] = sorted(a for a in event["agents"] if isinstance(a, str))
+        elif (event.get("subtype") == "task_updated" and patch.get("status") in {"failed", "killed"}
+              and isinstance(event.get("task_id"), str)):
+            error = re.search(r"error type ([a-z_]{1,40})", str(patch.get("error", "")))
+            session["failed"][event["task_id"]] = error[1] if error else patch["status"]
+    return {key: value for key, value in sessions.items() if value["agents"] or value["failed"]}
 
 
-def review_summary(data, plan, runs, skips=None, reports=(), root=ROOT, discovered=None):
+def review_summary(data, plan, runs, skips=None, reports=(), root=ROOT, streams=None):
     """Combine expected specialists with what hooks actually observed. Advisory only."""
-    skips, discovered = skips or {}, discovered or {}
-    agents, tests, denials, definitions, peak = {}, [], Counter(), {}, 0
+    skips, streams = skips or {}, streams or {}
+    agents, tests, denials, definitions, peak = {}, [], Counter(), [], 0
     for run in runs:
         running = set()
         for row in run["events"]:
             key = f"{run['session']}/{row.get('agentId')}"
             if row["event"] == "session_start" and isinstance(row.get("definitions"), dict):
-                definitions.update(row["definitions"])
+                definitions.append((run["session"], row["definitions"]))
             elif row["event"] == "subagent_start":
-                agents[key] = {"agent": row.get("agent"), "status": "started", "review": None}
+                failure = streams.get(run["session"], {}).get("failed", {}).get(row.get("agentId"))
+                agents[key] = {"agent": row.get("agent"), "status": "failed" if failure else "started",
+                               "review": None, "error": failure}
                 if str(row.get("agent")).startswith("flofi-"):
                     running.add(key)
                     peak = max(peak, len(running))
             elif row["event"] == "subagent_stop":
-                agents.setdefault(key, {"agent": row.get("agent"), "status": "started", "review": None})
+                agents.setdefault(key, {"agent": row.get("agent"), "status": "started", "review": None, "error": None})
                 agents[key].update(status="completed", review=row.get("review"))
                 running.discard(key)
             elif row["event"] == "test":
@@ -467,16 +527,20 @@ def review_summary(data, plan, runs, skips=None, reports=(), root=ROOT, discover
     for domain in plan["domains"]:
         seen = [a for a in agents.values() if a["agent"] == domain]
         done = [a for a in seen if a["status"] == "completed"]
+        failed = sorted({a["error"] for a in seen if a["status"] == "failed"})
         reviews = [a["review"] for a in done if isinstance(a["review"], dict)]
-        status = ("completed" if done else "incomplete" if seen
+        status = ("completed" if done else "failed" if failed else "incomplete" if seen
                   else "skipped" if domain in skips else "not-invoked")
         rows.append({"domain": domain, "selectedBecause": plan.get("reasons", {}).get(domain, []),
                      "defined": current.get(domain) is not None,
-                     "discovered": any(domain in agents for agents in discovered.values()) if discovered else None,
+                     "discovered": any(domain in s["agents"] for s in streams.values()) if streams else None,
+                     "failures": failed,
                      "status": status, "invocations": len(seen), "completed": len(done),
                      "reviews": reviews, "unstructured": len(done) - len(reviews),
                      "skipReason": skips.get(domain), "guardDenials": denials.get(domain, 0)})
-        if status == "incomplete":
+        if status == "failed":
+            problems.append(f"{domain}: specialist failed ({', '.join(failed)}) without a review result")
+        elif status == "incomplete":
             problems.append(f"{domain}: started without a recorded completion (failed, interrupted or still running)")
         elif status == "not-invoked":
             problems.append(f"{domain}: expected specialist not invoked and no skip justification")
@@ -493,14 +557,16 @@ def review_summary(data, plan, runs, skips=None, reports=(), root=ROOT, discover
         errors = verify_results(data, json.loads(Path(path).read_text()), root, stage)
         verified.append({"stage": stage, "report": str(path), "errors": errors})
         problems.extend(errors)
-    changed_definitions = sorted(name for name, digest in definitions.items() if current.get(name) != digest)
+    changed_definitions = {session: sorted(name for name, digest in recorded.items() if current.get(name) != digest)
+                           for session, recorded in definitions}
     return {
         "base": plan.get("base"), "sessions": [{"session": r["session"], "found": r["found"],
                                                 "events": len(r["events"]), "malformed": r["malformed"]} for r in runs],
         "documentationOnly": not plan["domains"] and not plan["modules"] and not plan["unmapped"],
-        "specialists": rows, "discoveryObserved": sorted(discovered),
+        "specialists": rows, "discoveryObserved": sorted(s for s, v in streams.items() if v["agents"]),
         "unexpectedAgents": sorted({str(a["agent"]) for a in agents.values()} - set(plan["domains"])),
-        "definitionsAtSessionStart": len(definitions), "definitionsChangedSince": changed_definitions,
+        "definitionsAtSessionStart": {session: len(recorded) for session, recorded in definitions},
+        "definitionsChangedSince": {session: names for session, names in changed_definitions.items() if names},
         "peakConcurrentReviewers": peak, "tests": tests, "reports": verified,
         "gaps": plan["gaps"], "problems": problems,
         "evidence": ("Hook-observed lifecycle only. Delegation is model-driven and advisory; recorded gates are "
@@ -524,6 +590,8 @@ def review_markdown(summary):
                            for r in row["reviews"]) or ("unstructured" if row["unstructured"] else "")
         if row["status"] == "skipped":
             result = "Skipped: " + row["skipReason"]
+        elif row["status"] == "failed":
+            result = "Failed: " + ", ".join(row["failures"])
         if row["guardDenials"]:
             result += f"; {row['guardDenials']} guard denials"
         seen = {True: "yes", False: "no", None: "not observed"}
@@ -531,8 +599,11 @@ def review_markdown(summary):
                      f"{seen[row['discovered']]} | {row['status']} | {result or '—'} |")
     lines += ["", f"Agents invoked outside the plan: {', '.join(summary['unexpectedAgents']) or 'none'}.",
               f"Peak concurrent flofi-* reviewers: {summary['peakConcurrentReviewers']} (limit {MAX_CONCURRENT_REVIEWS}).",
-              f"Claude agent definitions recorded at session start: {summary['definitionsAtSessionStart']}; "
-              f"changed since: {', '.join(summary['definitionsChangedSince']) or 'none'}.", "", "## Tests recorded by hooks", ""]
+              "Claude agent definitions recorded at session start: " + (", ".join(
+                  f"{count} in `{session}`" for session, count in summary["definitionsAtSessionStart"].items()) or "none")
+              + "; changed since: " + ("; ".join(f"{len(names)} since `{session}`"
+                                                for session, names in summary["definitionsChangedSince"].items()) or "none")
+              + ".", "", "## Tests recorded by hooks", ""]
     for test in summary["tests"]:
         state = {True: "passed", False: "failed", None: "result not observed"}[test.get("ok")]
         notes = (" (pipeline: status of the last command)" if test.get("piped") else "") + (
@@ -670,10 +741,10 @@ def main():
         if args.command == "impact":
             print(json.dumps(result, indent=2))
             return int(bool(result["unmapped"]))
-        discovered = {}
+        streams = {}
         for path in args.stream_json:
-            discovered.update(discovered_agents(Path(path).read_text()))
-        sessions = args.session or sorted(discovered) or [os.environ.get("CLAUDE_CODE_SESSION_ID", "")]
+            streams.update(stream_sessions(Path(path).read_text()))
+        sessions = args.session or sorted(streams) or [os.environ.get("CLAUDE_CODE_SESSION_ID", "")]
         if not all(sessions):
             parser.error("review requires --session when CLAUDE_CODE_SESSION_ID is not set")
         skips = dict(item.split("=", 1) for item in args.skip if "=" in item and item.split("=", 1)[1].strip())
@@ -681,7 +752,7 @@ def main():
             parser.error("--skip takes DOMAIN=REASON with a known domain and a non-empty reason")
         reports = [(stage, path) for stage, path in (("unit", args.unit_report), ("postgres", args.postgres_report)) if path]
         summary = review_summary(data, {**result, "base": f"{args.base} ({merge_base[:12]})"},
-                                 [read_runs(session) for session in sessions], skips, reports, discovered=discovered)
+                                 [read_runs(session) for session in sessions], skips, reports, streams=streams)
         print(json.dumps(summary, indent=2) if args.json else review_markdown(summary), end="\n" if args.json else "")
         return int(args.strict and bool(summary["problems"]))
     elif args.command == "report":

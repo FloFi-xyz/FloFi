@@ -65,22 +65,25 @@ python3 scripts/agent_guard.py review --base origin/main \
 ```
 
 `review` defaults to `$CLAUDE_CODE_SESSION_ID`; pass `--session <id>` (repeatable)
-for other sessions, `--stream-json <file>` to take headless sessions and their
-discovered agents from `init` events, `--unit-report`/`--postgres-report` to verify fresh Vitest JSON
+for other sessions, `--stream-json <file>` to take headless sessions, their
+discovered agents (`init`) and failed specialists with the API error type, `--unit-report`/`--postgres-report` to verify fresh Vitest JSON
 reports, `--json` for machine output and `--strict` to exit 1 when an expected
 specialist is missing, incomplete or blocked without justification, a recorded gate
 failed, more than three ran at once, or a maintained file is unmapped. It prints
 changed domains and why, expected versus actually invoked specialists, completion
 and structured results, guard denials, recorded gates, coverage gaps and skips.
 
-A repeatable headless variant (uses your Claude account; never in CI):
+A repeatable headless variant (uses your Claude account; never in CI). The stream
+holds the whole conversation, so keep it private and delete it after summarizing:
 
 ```sh
+stream="$(umask 077 && mktemp "${TMPDIR:-/tmp}/flofi-review.XXXXXX")"
 claude -p --output-format stream-json --verbose \
   --allowedTools="Agent,Read,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git status:*),Bash(git grep:*),Bash(rg:*),Bash(grep:*),Bash(find:*),Bash(ls:*),Bash(cat:*),Bash(head:*),Bash(tail:*),Bash(wc:*),Bash(sed -n:*),Bash(python3 scripts/agent_guard.py:*)" \
   "Read-only pre-PR review of this branch against origin/main using the flofi-swap, flofi-mcp and flofi-workflow subagents in parallel. Do not edit files. Summarize each specialist's findings and FLOFI_REVIEW_RESULT line." \
-  > "${TMPDIR:-/tmp}/flofi-review.jsonl"
-python3 scripts/agent_guard.py review --base origin/main --stream-json "${TMPDIR:-/tmp}/flofi-review.jsonl"
+  > "$stream"
+python3 scripts/agent_guard.py review --base origin/main --stream-json "$stream"
+rm -f "$stream"
 ```
 
 ## Read-only guard
@@ -111,20 +114,24 @@ The guard is a review boundary, not a sandbox for hostile code.
 
 ## Lifecycle ledger
 
-`record` appends to `.claude/flofi-agent-runs/<session>.jsonl` (Git-ignored, mode
-0600, directory 0700, refused through symlinks; excluded from Cloud Build uploads):
+`record` appends to `.claude/flofi-agent-runs/<session>.jsonl` (Git-ignored;
+excluded from Cloud Build uploads). Every write re-applies mode 0600/0700 and refuses
+symlinks, hard-linked or foreign-owned files; `review` re-validates every row on read
+and refuses a symlinked ledger directory:
 
 | Event | Stored fields |
 | --- | --- |
 | `session_start` | source; SHA-256 prefix of each `flofi-*.md` present (defined) |
 | `subagent_start` / `subagent_stop` | agent name, agent ID; validated `FLOFI_REVIEW_RESULT` (result, count, highest severity) or null |
 | `guard_deny` | agent name, agent ID, tool name |
-| `test` | gate IDs from a fixed list, pass/fail/unknown, exit code, pipeline flag, test file paths |
+| `test` | gate IDs from a fixed list, pass/fail/unknown, exit code, pipeline flag, repository-relative test file paths |
 | `session_end` | reason |
 
 Prompts, commands, tool output, transcripts, findings text, environment values,
 wallet data and conversations are never stored. A start without a stop means the
-specialist failed, was interrupted or is still running. Delete the directory at any
+specialist failed, was interrupted or is still running; hooks cannot tell which, but
+a headless stream can (for example `rate_limit` when the account's usage limit ends a
+specialist). A result trailer must be self-consistent (`no-findings` is 0/`none`). Delete the directory at any
 time; set `FLOFI_AGENT_TELEMETRY=off` to stop recording. A gate's status is the
 shell exit status (a pipeline reports its last command); only `verify-results` on a
 fresh report checks required suites, and only CircleCI certifies a release.

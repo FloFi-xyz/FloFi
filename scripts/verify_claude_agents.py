@@ -19,6 +19,7 @@ import re
 import subprocess
 import tempfile
 import threading
+import uuid
 
 from agent_guard import CLAUDE_FRONTMATTER, CLAUDE_RUNS, DOMAINS, ROOT, parse_claude_agent
 
@@ -99,6 +100,8 @@ def main():
         def log_message(self, *_args):
             pass
 
+    session_id = str(uuid.uuid4())
+    ledger = ROOT / CLAUDE_RUNS / f"{session_id}.jsonl"
     with http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler) as server:
         worker = threading.Thread(target=server.serve_forever, daemon=True)
         worker.start()
@@ -108,19 +111,18 @@ def main():
                        "ANTHROPIC_BASE_URL": f"http://127.0.0.1:{server.server_port}", "ANTHROPIC_API_KEY": "offline-probe",
                        "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1", "DISABLE_AUTOUPDATER": "1", "DISABLE_TELEMETRY": "1"}
                 version = subprocess.check_output(["claude", "--version"], env=env, text=True, stderr=subprocess.DEVNULL).strip()
-                run = subprocess.run(["claude", "-p", "--output-format", "stream-json", "--verbose",
+                run = subprocess.run(["claude", "-p", "--output-format", "stream-json", "--verbose", "--session-id", session_id,
                                       f"--allowedTools=Bash({ALLOWED})", "Offline FloFi agent probe."],
                                      cwd=ROOT, env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=600)
         finally:
             server.shutdown()
             worker.join()
+            # Scripted probe evidence is not a review session, even after a timeout.
+            rows = [json.loads(line) for line in ledger.read_text().splitlines()] if ledger.is_file() else []
+            ledger.unlink(missing_ok=True)
     events = [json.loads(line) for line in run.stdout.splitlines() if line.startswith("{")]
     init = next((e for e in events if e.get("type") == "system" and e.get("subtype") == "init"), None)
-    ledger = ROOT / CLAUDE_RUNS / f"{init['session_id']}.jsonl" if init else None
-    rows = [json.loads(line) for line in ledger.read_text().splitlines()] if ledger and ledger.is_file() else []
-    if ledger:
-        ledger.unlink(missing_ok=True)  # Scripted probe evidence is not a review session.
-    if run.returncode or not init:
+    if run.returncode or not init or init.get("session_id") != session_id:
         raise RuntimeError(f"Claude Code probe run failed (exit {run.returncode}): {run.stderr.strip()[-500:]}")
     errors = []
     if set(DOMAINS) - set(init.get("agents", [])):

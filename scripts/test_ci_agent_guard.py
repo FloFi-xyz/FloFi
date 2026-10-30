@@ -300,7 +300,7 @@ class EngineeringGuard(unittest.TestCase):
         self.assertEqual(rows["flofi-bridge"]["guardDenials"], 1)
         self.assertEqual(rows["flofi-lending"]["status"], "not-invoked")
         self.assertEqual(summary["unexpectedAgents"], ["Explore"])
-        self.assertEqual(summary["definitionsChangedSince"], ["flofi-lending"])
+        self.assertEqual(summary["definitionsChangedSince"], {run["session"]: ["flofi-lending"]})
         self.assertIn("flofi-lending: expected specialist not invoked and no skip justification", summary["problems"])
         self.assertIn("Recorded gate failed: pnpm-check", summary["problems"])
         skipped = guard.review_summary(self.data, plan, [run], {"flofi-lending": "Lending untouched; reviewed by bridge"}, root=self.root)
@@ -320,16 +320,25 @@ class EngineeringGuard(unittest.TestCase):
         self.assertIn("flofi-swap: specialist reported its review as blocked", problems)
         self.assertIn("Observed 4 concurrent flofi-* reviewers", problems)
 
-    def test_discovery_is_reported_only_when_a_stream_init_event_was_observed(self):
-        stream = "\n".join([json.dumps({"type": "system", "subtype": "hook_started"}), "not json",
-                             json.dumps({"type": "system", "subtype": "init", "session_id": "s-1",
-                                         "agents": ["Explore", "flofi-swap"]})])
-        discovered = guard.discovered_agents(stream)
-        self.assertEqual(discovered, {"s-1": ["Explore", "flofi-swap"]})
+    def test_discovery_and_failures_are_reported_only_when_a_stream_observed_them(self):
+        session = "11111111-2222-3333-4444-555555555555"
+        stream = "\n".join([json.dumps({"type": "system", "subtype": "hook_started", "session_id": session}), "not json",
+                             json.dumps({"type": "system", "subtype": "init", "session_id": session,
+                                         "agents": ["Explore", "flofi-swap"]}),
+                             json.dumps({"type": "system", "subtype": "task_updated", "session_id": session, "task_id": "b1",
+                                         "patch": {"status": "failed", "error": "Agent terminated early due to an API error: "
+                                                   "limit reached (error type rate_limit, HTTP 429, request id req_x)"}})])
+        streams = guard.stream_sessions(stream)
+        self.assertEqual(streams, {session: {"agents": ["Explore", "flofi-swap"], "failed": {"b1": "rate_limit"}}})
+        self.assertNotIn("req_x", json.dumps(streams))
         plan = {**guard.impact(self.data, self.data["modules"][0]["sources"][:1]), "base": "origin/main"}
-        rows = {r["domain"]: r for r in guard.review_summary(self.data, plan, [self.runs()], root=self.root,
-                                                            discovered=discovered)["specialists"]}
+        run = self.runs({"event": "subagent_start", "agent": "flofi-bridge", "agentId": "b1"})
+        summary = guard.review_summary(self.data, plan, [run], root=self.root, streams=streams)
+        rows = {r["domain"]: r for r in summary["specialists"]}
         self.assertEqual((rows["flofi-swap"]["discovered"], rows["flofi-bridge"]["discovered"]), (True, False))
+        self.assertEqual((rows["flofi-bridge"]["status"], rows["flofi-bridge"]["failures"]), ("failed", ["rate_limit"]))
+        self.assertIn("flofi-bridge: specialist failed (rate_limit) without a review result", summary["problems"])
+        self.assertIn("Failed: rate_limit", guard.review_markdown(summary))
         self.assertTrue(rows["flofi-swap"]["defined"])
         unobserved = guard.review_summary(self.data, plan, [self.runs()], root=self.root)
         self.assertIsNone(unobserved["specialists"][0]["discovered"])
@@ -349,6 +358,53 @@ class EngineeringGuard(unittest.TestCase):
         run = guard.read_runs("s1", self.root)
         self.assertEqual((len(run["events"]), run["malformed"], run["found"]), (1, 2, True))
         self.assertFalse(guard.read_runs("absent", self.root)["found"])
+
+    def test_every_event_the_hook_writes_survives_the_reader(self):
+        spec = importlib.util.spec_from_file_location("hooks", guard.ROOT / guard.CLAUDE_HOOK)
+        hooks = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(hooks)
+        session = "22222222-3333-4444-5555-666666666666"
+        base = {"session_id": session, "cwd": str(self.root)}
+        for event in [{"hook_event_name": "SessionStart", "source": "startup"},
+                      {"hook_event_name": "SubagentStart", "agent_type": "flofi-swap", "agent_id": "a1"},
+                      {"hook_event_name": "PostToolUse", "tool_name": "Bash", "agent_type": "flofi-swap",
+                       "tool_input": {"command": "pnpm check"}, "tool_response": {}},
+                      {"hook_event_name": "SubagentStop", "agent_type": "flofi-swap", "agent_id": "a1",
+                       "last_assistant_message": 'FLOFI_REVIEW_RESULT {"domain":"flofi-swap","result":"no-findings","findings":0,"highest":"none"}'},
+                      {"hook_event_name": "SessionEnd", "reason": "other"}]:
+            hooks.record({**base, **event}, self.root)
+        hooks.guard({**base, "agent_type": "flofi-swap", "agent_id": "a1", "tool_name": "Edit", "tool_input": {}}, self.root)
+        run = guard.read_runs(session, self.root)
+        self.assertEqual(run["malformed"], 0)
+        self.assertEqual([row["event"] for row in run["events"]], ["session_start", "subagent_start", "test",
+                                                                   "subagent_stop", "session_end", "guard_deny"])
+        plan = {**guard.impact(self.data, self.data["modules"][0]["sources"][:1]), "base": "origin/main"}
+        swap = guard.review_summary(self.data, plan, [run], root=self.root)
+        self.assertEqual(swap["peakConcurrentReviewers"], 1)
+        self.assertEqual({r["domain"]: r["status"] for r in swap["specialists"]}["flofi-swap"], "completed")
+
+    def test_ledger_reader_keeps_only_documented_and_consistent_fields(self):
+        rows = [{"event": "test", "gates": ["pnpm-check"], "ok": True, "exit": 0, "agent": "main", "extra": "leak",
+                 "suites": ["src/a.test.ts", "/home/user/x.test.ts", "../x.test.ts"]},
+                {"event": "subagent_stop", "agent": "flofi-swap", "agentId": "a1", "prompt": "leak",
+                 "review": {"result": "no-findings", "findings": 7, "highest": "critical"}},
+                {"event": "guard_deny", "agent": "flofi-swap; rm", "agentId": "../x", "tool": "Edit", "command": "leak"},
+                {"event": "invented"}, {"event": "test", "gates": "pnpm-check"}]
+        self.write(f"{guard.CLAUDE_RUNS}/s2.jsonl", "\n".join(map(json.dumps, rows)) + "\n")
+        run = guard.read_runs("s2", self.root)
+        self.assertNotIn("leak", json.dumps(run))
+        self.assertEqual(run["events"][0]["suites"], ["src/a.test.ts"])
+        self.assertIsNone(run["events"][1]["review"])
+        self.assertEqual({k: run["events"][2][k] for k in ("agent", "agentId", "tool")},
+                         {"agent": "other", "agentId": None, "tool": "other"})
+        self.assertEqual(run["malformed"], 2)
+
+    def test_ledger_reader_refuses_a_symlinked_ledger_directory(self):
+        outside = tempfile.TemporaryDirectory()
+        self.addCleanup(outside.cleanup)
+        Path(outside.name, "s3.jsonl").write_text('{"event":"session_end"}\n')
+        (self.root / guard.CLAUDE_RUNS).symlink_to(outside.name, target_is_directory=True)
+        self.assertEqual((guard.read_runs("s3", self.root)["found"], guard.read_runs("s3", self.root)["events"]), (False, []))
 
     def test_repository_claude_twins_match_their_codex_roles(self):
         codex = {d: tomllib.loads((guard.ROOT / f".codex/agents/{d}.toml").read_text()) for d in guard.DOMAINS}

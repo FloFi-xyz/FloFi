@@ -18,6 +18,7 @@ import os
 from pathlib import Path
 import re
 import shlex
+import stat
 import subprocess
 import sys
 import time
@@ -60,7 +61,7 @@ GATES = (
     ("claude-agent-probe", r"python3 scripts/verify_claude_agents\.py.*"),
     ("codex-agent-probe", r"python3 scripts/verify_codex_agents\.py"),
 )
-TEST_PATH = re.compile(r"[A-Za-z0-9_./@-]+\.(?:test|spec)\.tsx?")
+TEST_PATH = re.compile(r"[A-Za-z0-9_./@-]{1,200}\.(?:test|spec)\.tsx?")
 
 
 def sensitive(part):
@@ -239,18 +240,34 @@ def guard_reason(event, root=ROOT):
 
 
 def append(session, record, root=ROOT):
-    if os.environ.get("FLOFI_AGENT_TELEMETRY") == "off" or not SAFE_ID.fullmatch(session or ""):
+    """Owner-only append; refuses symlinks, hard links and foreign-owned ledgers."""
+    if os.environ.get("FLOFI_AGENT_TELEMETRY") == "off" or not isinstance(session, str) or not SAFE_ID.fullmatch(session):
         return
     runs = root / RUNS
-    if runs.parent.is_symlink() or runs.is_symlink():
+    if runs.parent.is_symlink() or not runs.parent.is_dir() or runs.is_symlink():
         return
-    runs.mkdir(mode=0o700, parents=True, exist_ok=True)
-    record = {"v": 1, "t": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), **record}
-    descriptor = os.open(runs / f"{session}.jsonl", os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW, 0o600)
     try:
-        os.write(descriptor, (json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n").encode())
+        os.mkdir(runs, 0o700)
+    except FileExistsError:
+        pass
+    record = {"v": 1, "t": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), **record}
+    directory = os.open(runs, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        if os.fstat(directory).st_uid != os.geteuid():
+            return
+        os.fchmod(directory, 0o700)
+        descriptor = os.open(f"{session}.jsonl", os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW, 0o600,
+                             dir_fd=directory)
+        try:
+            info = os.fstat(descriptor)
+            if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_uid != os.geteuid():
+                return
+            os.fchmod(descriptor, 0o600)
+            os.write(descriptor, (json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n").encode())
+        finally:
+            os.close(descriptor)
     finally:
-        os.close(descriptor)
+        os.close(directory)
 
 
 def agent_fields(event):
@@ -271,16 +288,37 @@ def review_result(agent, message):
             value = json.loads(match[1])
         except ValueError:
             return None
-        findings = value.get("findings") if isinstance(value, dict) else None
-        if (value.get("domain") == agent and value.get("result") in {"findings", "no-findings", "blocked"}
-                and type(findings) is int and 0 <= findings <= 999
-                and value.get("highest") in {"critical", "high", "medium", "low", "none"}):
-            return {"result": value["result"], "findings": findings, "highest": value["highest"]}
-        return None
+        return review_fields(value) if isinstance(value, dict) and value.get("domain") == agent else None
     return None
 
 
-def gate_record(event):
+def review_fields(value):
+    """A self-consistent result: no-findings is 0/none, findings is at least 1 below none."""
+    if not isinstance(value, dict):
+        return None
+    result, findings, highest = value.get("result"), value.get("findings"), value.get("highest")
+    if (type(findings) is not int or not 0 <= findings <= 999
+            or highest not in {"critical", "high", "medium", "low", "none"}
+            or result not in {"findings", "no-findings", "blocked"}
+            or (result == "no-findings" and (findings, highest) != (0, "none"))
+            or (result == "findings" and (findings == 0 or highest == "none"))):
+        return None
+    return {"result": result, "findings": findings, "highest": highest}
+
+
+def suite_path(token, root=ROOT):
+    """Repository-relative test path only; absolute paths would expose the local user."""
+    if not TEST_PATH.fullmatch(token) or ".." in token.split("/"):
+        return None
+    if token.startswith("/"):
+        try:
+            return str(Path(token).relative_to(root.resolve()))
+        except ValueError:
+            return None
+    return token
+
+
+def gate_record(event, root=ROOT):
     tool_input = event.get("tool_input") if isinstance(event.get("tool_input"), dict) else {}
     command = tool_input.get("command")
     if not isinstance(command, str):
@@ -294,7 +332,7 @@ def gate_record(event):
             if re.fullmatch(pattern, head):
                 gates.append(gate)
                 piped = piped or len(stages) > 1
-                suites += [token for token in head.split() if TEST_PATH.fullmatch(token) and ".." not in token]
+                suites += [path for path in (suite_path(token, root) for token in head.split()) if path]
     if not gates:
         return None
     record = {"event": "test", "gates": sorted(set(gates)), "piped": piped, "suites": sorted(set(suites))[:20],
@@ -329,7 +367,7 @@ def record(event, root=ROOT):
         append(session, {"event": "session_end", "reason": reason if reason in {
             "clear", "resume", "logout", "prompt_input_exit", "other"} else "other"}, root)
     elif name in {"PostToolUse", "PostToolUseFailure"} and event.get("tool_name") == "Bash":
-        entry = gate_record(event)
+        entry = gate_record(event, root)
         if entry:
             append(session, entry, root)
 
@@ -344,19 +382,25 @@ def main():
         return 0
     if mode != "guard":
         return 1
-    event = json.load(sys.stdin)  # Malformed input fails closed through onFailure=block.
-    reason = guard_reason(event)
-    if reason:
-        try:
-            append(event.get("session_id"), {"event": "guard_deny", **agent_fields(event),
-                                             "tool": event.get("tool_name") if event.get("tool_name") in READ_ONLY_TOOLS else "other"})
-        except Exception:  # The denial below must still be returned.
-            pass
-        print(json.dumps({"hookSpecificOutput": {
-            "hookEventName": "PreToolUse", "permissionDecision": "deny",
-            "permissionDecisionReason": f"FloFi read-only review guard: {reason}. Report it to the main session; "
-                                        "it runs tests and makes any changes."}}))
+    decision = guard(json.load(sys.stdin))  # Malformed input fails closed through onFailure=block.
+    if decision:
+        print(json.dumps(decision))
     return 0
+
+
+def guard(event, root=ROOT):
+    reason = guard_reason(event, root)
+    if not reason:
+        return None
+    try:
+        append(event.get("session_id"), {"event": "guard_deny", **agent_fields(event),
+                                         "tool": event.get("tool_name") if event.get("tool_name") in READ_ONLY_TOOLS else "other"}, root)
+    except Exception:  # The denial below must still be returned.
+        pass
+    return {"hookSpecificOutput": {
+        "hookEventName": "PreToolUse", "permissionDecision": "deny",
+        "permissionDecisionReason": f"FloFi read-only review guard: {reason}. Report it to the main session; "
+                                    "it runs tests and makes any changes."}}
 
 
 if __name__ == "__main__":
