@@ -201,6 +201,10 @@ class LifecycleLedger(Repository):
                         'FLOFI_REVIEW_RESULT {"domain":"flofi-swap","result":"certified","findings":0,"highest":"none"}',
                         'FLOFI_REVIEW_RESULT {"domain":"flofi-swap","result":"no-findings","findings":true,"highest":"none"}',
                         'FLOFI_REVIEW_RESULT {"domain":"flofi-swap","result":"no-findings","findings":-1,"highest":"none"}',
+                        'FLOFI_REVIEW_RESULT {"domain":"flofi-swap","result":"no-findings","findings":7,"highest":"critical"}',
+                        'FLOFI_REVIEW_RESULT {"domain":"flofi-swap","result":"findings","findings":0,"highest":"high"}',
+                        'FLOFI_REVIEW_RESULT {"domain":"flofi-swap","result":"findings","findings":2,"highest":"none"}',
+                        'FLOFI_REVIEW_RESULT {"result":"no-findings","findings":0,"highest":"none"}',
                         'FLOFI_REVIEW_RESULT {broken']:
             with self.subTest(message=message):
                 self.assertIsNone(hooks.review_result("flofi-swap", message))
@@ -237,6 +241,11 @@ class LifecycleLedger(Repository):
                 self.assertNotIn("hunter2", json.dumps(entry))
         entry = hooks.gate_record({"hook_event_name": "PostToolUse", "tool_input": {"command": cases[4][0]}, "tool_response": {}})
         self.assertEqual(entry["suites"], ["apps/b/src/y.test.tsx", "packages/a/test/x.test.ts"])
+        command = (f"pnpm exec vitest run {self.root}/src/b.test.ts /home/someone/other/x.test.ts "
+                   f"../escape/y.test.ts {'a' * 300}.test.ts")
+        entry = hooks.gate_record({"hook_event_name": "PostToolUse", "tool_input": {"command": command}, "tool_response": {}}, self.root)
+        self.assertEqual(entry["suites"], ["src/b.test.ts"])
+        self.assertNotIn("someone", json.dumps(entry))
         for command in ["ls", "git status", "echo pnpm check", "pnpm install", "rm -rf node_modules"]:
             self.assertIsNone(hooks.gate_record({"hook_event_name": "PostToolUse", "tool_input": {"command": command}}))
 
@@ -264,6 +273,43 @@ class LifecycleLedger(Repository):
         self.addCleanup(os.environ.pop, "FLOFI_AGENT_TELEMETRY", None)
         self.record(hook_event_name="SessionStart", source="startup")
         self.assertFalse((self.root / hooks.RUNS).exists())
+
+    def test_existing_loose_or_linked_ledgers_are_tightened_or_refused(self):
+        runs = self.root / hooks.RUNS
+        runs.mkdir(mode=0o755)
+        os.chmod(runs, 0o755)
+        (runs / f"{SESSION}.jsonl").write_text("")
+        os.chmod(runs / f"{SESSION}.jsonl", 0o644)
+        self.record(hook_event_name="SessionStart", source="startup")
+        self.assertEqual(stat.S_IMODE(runs.stat().st_mode), 0o700)
+        self.assertEqual(stat.S_IMODE((runs / f"{SESSION}.jsonl").stat().st_mode), 0o600)
+        os.link(self.outside / "secret.txt", runs / "hardlinked.jsonl")
+        (runs / "symlinked.jsonl").symlink_to(self.outside / "secret.txt")
+        for session in ["hardlinked", "symlinked"]:
+            with self.subTest(session=session):
+                try:
+                    hooks.record({"session_id": session, "hook_event_name": "SessionStart"}, self.root)
+                except OSError:
+                    pass
+        self.assertEqual((self.outside / "secret.txt").read_text(), "outside\n")
+
+    def test_symlinked_claude_directory_writes_nothing(self):
+        moved = Path(self.outside, "claude")
+        (self.root / ".claude").rename(moved)
+        (self.root / ".claude").symlink_to(moved, target_is_directory=True)
+        self.record(hook_event_name="SessionStart", source="startup")
+        self.assertFalse((moved / "flofi-agent-runs").exists())
+
+    def test_guard_denials_record_only_agent_identity_and_tool(self):
+        decision = hooks.guard({"session_id": SESSION, "agent_type": "flofi-security", "agent_id": "a1",
+                                "tool_name": "Bash", "tool_input": {"command": "cat .env.local # SECRET=abc"},
+                                "cwd": str(self.root)}, self.root)
+        self.assertEqual(decision["hookSpecificOutput"]["permissionDecision"], "deny")
+        row = self.ledger()[0]
+        self.assertEqual(set(row), {"v", "t", "event", "agent", "agentId", "tool"})
+        self.assertEqual((row["event"], row["agent"], row["tool"]), ("guard_deny", "flofi-security", "Bash"))
+        self.assertNotIn("SECRET", (self.root / hooks.RUNS / f"{SESSION}.jsonl").read_text())
+        self.assertIsNone(hooks.guard({"session_id": SESSION, "tool_name": "Edit", "tool_input": {}}, self.root))
 
     def test_record_cli_never_blocks_or_prints(self):
         env = {**os.environ, "FLOFI_AGENT_TELEMETRY": "off"}
