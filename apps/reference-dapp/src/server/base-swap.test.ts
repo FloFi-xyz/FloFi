@@ -224,4 +224,44 @@ describe('BUILD-FLOFI-BRIDGE-LIVE-FIX-003 native ETH on Base: swaps in and out, 
     await expect(s.observe(id)).rejects.toThrow('TRANSACTION_MISMATCH');
     expect(s.load(id).outcome).toBeNull();
   });
+  it('P0 real Base regression: an improved spot quote does not invalidate an already reviewed USDC -> native ETH transaction', async () => {
+    chain.state.allowances.set(`${usdc.address}:${owner}:${UNI.router}`, 10n ** 12n);
+    const s = service();
+    const workflow = { schemaVersion: '1.0.0', workflowId: 'workflow-local', revision: 2,
+      nodes: [createCatalogSwapNode('node-002', { chain: 'eip155:8453',
+        input: ref(usdc), output: ETH, amount: '400000', slippageBps: 100 })], resourceEdges: [] } as SemanticWorkflow;
+    const id = (await s.prepare(workflow)).quote.executionId;
+    const reviewed = s.load(id).quote;
+    s.review(id, reviewed.manifestHash);
+    const pool = chain.state.pools.get(reviewed.pool)!;
+    const rate = pool.rate[usdc.address!]!;
+    chain.state.pools.set(reviewed.pool, { ...pool, rate: { ...pool.rate, [usdc.address!]: rate * 101n / 100n } });
+    const begun = await s.begin(id, owner);
+    expect(begun.attempt.step).toBe('swap');
+    expect(begun.tx.to).toBe(UNI.router);
+    expect(begun.tx.value).toBe('0x0');
+    expect(decodeNativeSwap(fromHex(begun.tx.data), UNI.weth)).toMatchObject({
+      native: 'OUTPUT', recipient: owner, amountOutMinimum: BigInt(reviewed.minimumOut) });
+    expect(s.load(id).quote.manifestHash).toBe(reviewed.manifestHash);
+    expect(s.load(id).attempts).toHaveLength(1);
+  });
+  it('P0 real Base regression: a price movement below approved minimum requires a new Review and never prepares a transaction', async () => {
+    chain.state.allowances.set(`${usdc.address}:${owner}:${UNI.router}`, 10n ** 12n);
+    const s = service();
+    const workflow = { schemaVersion: '1.0.0', workflowId: 'workflow-local', revision: 2,
+      nodes: [createCatalogSwapNode('node-002', { chain: 'eip155:8453',
+        input: ref(usdc), output: ETH, amount: '400000', slippageBps: 100 })], resourceEdges: [] } as SemanticWorkflow;
+    const id = (await s.prepare(workflow)).quote.executionId;
+    const reviewed = s.load(id).quote;
+    s.review(id, reviewed.manifestHash);
+    const pool = chain.state.pools.get(reviewed.pool)!;
+    const rate = pool.rate[usdc.address!]!;
+    chain.state.pools.set(reviewed.pool, { ...pool, rate: { ...pool.rate, [usdc.address!]: rate * 98n / 100n } });
+    await expect(s.begin(id, owner)).rejects.toThrow('QUOTE_CHANGED_REVIEW_REQUIRED');
+    const blocked = s.load(id);
+    expect(blocked.reviewedManifestHash).toBeNull();
+    expect(blocked.attempts).toHaveLength(0);
+    expect(BigInt(blocked.quote.expectedOut)).toBeLessThan(BigInt(reviewed.minimumOut));
+  });
+
 });
