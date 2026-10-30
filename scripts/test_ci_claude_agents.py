@@ -80,7 +80,8 @@ class ReadOnlyGuard(Repository):
                         "git --no-pager log -1", "git merge-base HEAD origin/main", "git blame src/a.ts",
                         "rg -n 'export' src 2>/dev/null", "rg -g '*.ts' export", "grep -n export src/a.ts",
                         "sed -n '1,40p' src/a.ts", "find src -name '*.ts' | wc -l", "cat CLAUDE.md", "ls -la src",
-                        "head -n 5 src/a.ts", "tail -n 5 src/a.ts", "jq '.a' src/a.ts", "sort -n src/a.ts | head",
+                        "head -n 5 src/a.ts", "tail -n 5 src/a.ts", "sort -n src/a.ts | head",
+                        "git diff origin/main...HEAD | sed -n '1,200p'", "git log -1 | tail -1",
                         "python3 scripts/agent_guard.py impact --base origin/main",
                         "python3 scripts/agent_guard.py domain flofi-swap --base origin/main", "pwd"]:
             with self.subTest(command=command):
@@ -92,6 +93,8 @@ class ReadOnlyGuard(Repository):
             "git branch -D main", "git add .", "git tag v1", "git apply x.patch", "git -C /tmp log",
             "git -c core.pager=sh log", "git diff --output=x", "git diff --ext-diff", "git diff --no-index /etc/passwd x",
             "git grep -Ovi x", "git grep --no-exclude-standard --untracked KEY", "git show HEAD -- ../outside",
+            "git blame --contents=.env.local src/a.ts", "git blame --contents .mode-a/journal src/a.ts",
+            "git grep -f .env.local -- src", "git diff HEAD -- local-state/notes", "git log -- src/link.ts",
             "rm -rf src", "mv src x", "cp src/a.ts x", "touch x", "mkdir x", "chmod +x x", "tee x", "dd if=x of=y",
             "cat src/a.ts > x", "cat src/a.ts >> x", "cat < src/a.ts", "echo $HOME", "cat ${HOME}/x", "cat $(echo x)",
             "cat `echo x`", 'cat "$HOME/x"', "ls; rm x", "ls && rm x", "ls || true", "ls & rm x", "(ls)", "{ ls; }",
@@ -107,10 +110,34 @@ class ReadOnlyGuard(Repository):
             "grep --recursive KEY src", "rg --no-ignore KEY", "rg -uu KEY", "rg -u KEY", "rg --pre cat KEY",
             "rg -L KEY", "rg -z KEY", "rg KEY .env.local", "sed -i 's/a/b/' src/a.ts", "sed -n '1w out' src/a.ts",
             "sed -n '1,2p' src/a.ts -i", "sed 'e ls' src/a.ts", "tail -f src/a.ts", "sort -o out src/a.ts",
-            "sort --compress-program=sh src/a.ts", "cd /tmp", "",
+            "sort --compress-program=sh src/a.ts", "cd /tmp", "", "jq -n '$ENV'", "jq -n env",
+            "diff -r src local-state", "rg --hostname-bin=sh KEY", "git grep -nOvi KEY", "git -C . status --short",
         ]:
             with self.subTest(command=command):
                 self.assertIsNotNone(self.guard(command=command))
+
+    def test_reviewers_may_read_only_this_sessions_saved_tool_output(self):
+        projects = Path(self.outside, "projects/slug")
+        saved = projects / SESSION / "tool-results"
+        saved.mkdir(parents=True)
+        (saved / "b1el7won7.txt").write_text("long output\n")
+        (projects / SESSION / "secret.txt").write_text("not tool output\n")
+        other = projects / "11111111-1111-1111-1111-111111111111/tool-results"
+        other.mkdir(parents=True)
+        (other / "x.txt").write_text("another session\n")
+
+        def read(path, transcript=str(projects / f"{SESSION}.jsonl"), session=SESSION):
+            return hooks.guard_reason({"agent_type": "flofi-swap", "tool_name": "Read", "tool_input": {"file_path": path},
+                                       "cwd": str(self.root), "session_id": session, "transcript_path": transcript}, self.root)
+        self.assertIsNone(read(str(saved / "b1el7won7.txt")))
+        for path in [str(projects / SESSION / "secret.txt"), str(other / "x.txt"), str(saved / "missing.txt"),
+                     str(saved / ".." / "secret.txt")]:
+            with self.subTest(path=path):
+                self.assertIsNotNone(read(path))
+        self.assertIsNotNone(read(str(saved / "b1el7won7.txt"), transcript=str(projects / "other.jsonl")))
+        self.assertIsNotNone(read(str(saved / "b1el7won7.txt"), session="../x"))
+        (saved / "link.txt").symlink_to(self.outside / "secret.txt")
+        self.assertIsNotNone(read(str(saved / "link.txt")))
 
     def test_background_and_oversized_commands_are_denied(self):
         self.assertIsNotNone(self.guard(command="git status", run_in_background=True))

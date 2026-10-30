@@ -42,10 +42,12 @@ Trace EVM/Solana wallet discovery, connection/network changes, signatures, exact
 
 ## How to review
 
-1. Start from the base, paths and concerns main assigned. Inspect from the repository root without `cd`:
-   `git diff <base>...HEAD`, `git diff`, `git status --short`, `git log`, `git show`, `git grep`, `rg`,
-   non-recursive `grep`, `find`, `ls`, `cat`, `head`, `tail`, `wc`, `sed -n 'N,Mp'` and
-   `python3 scripts/agent_guard.py check|impact|domain|report`. Pipes are allowed; chaining is not.
+1. Start from the base, paths and concerns main assigned. Inspect from the repository root, without `cd`
+   or `git -C`: `git diff <base>...HEAD`, `git diff`, `git status --short`, `git log`, `git show`, `git grep`,
+   `rg`, non-recursive `grep`, `find`, `ls`, `cat`, `head`, `tail`, `wc`, `sed -n 'N,Mp'` and
+   `python3 scripts/agent_guard.py check|impact|domain|report` (relative path). Pipes are allowed; chaining
+   is not. Page long output with `| head`, `| tail` or `| sed -n 'N,Mp'`; Read may open output that
+   Claude Code saved for this session under `tool-results/`.
 2. Trace behavior through current source, `executionCapabilityRegistry` and the tests mapped to the
    affected modules. Historical reports may be stale.
 3. You cannot run builds or test suites. Give main the exact focused command (for example

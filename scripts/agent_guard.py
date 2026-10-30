@@ -133,10 +133,12 @@ def claude_agent_text(agent):
         "  new maintained files are explicitly owned in coverage.json or reported as unmapped.",
         "- Report findings that belong to another domain to main with that domain ID instead of reviewing it in depth.", "",
         "## How to review", "",
-        "1. Start from the base, paths and concerns main assigned. Inspect from the repository root without `cd`:",
-        "   `git diff <base>...HEAD`, `git diff`, `git status --short`, `git log`, `git show`, `git grep`, `rg`,",
-        "   non-recursive `grep`, `find`, `ls`, `cat`, `head`, `tail`, `wc`, `sed -n 'N,Mp'` and",
-        "   `python3 scripts/agent_guard.py check|impact|domain|report`. Pipes are allowed; chaining is not.",
+        "1. Start from the base, paths and concerns main assigned. Inspect from the repository root, without `cd`",
+        "   or `git -C`: `git diff <base>...HEAD`, `git diff`, `git status --short`, `git log`, `git show`, `git grep`,",
+        "   `rg`, non-recursive `grep`, `find`, `ls`, `cat`, `head`, `tail`, `wc`, `sed -n 'N,Mp'` and",
+        "   `python3 scripts/agent_guard.py check|impact|domain|report` (relative path). Pipes are allowed; chaining",
+        "   is not. Page long output with `| head`, `| tail` or `| sed -n 'N,Mp'`; Read may open output that",
+        "   Claude Code saved for this session under `tool-results/`.",
         "2. Trace behavior through current source, `executionCapabilityRegistry` and the tests mapped to the",
         "   affected modules. Historical reports may be stale.",
         "3. You cannot run builds or test suites. Give main the exact focused command (for example",
@@ -360,7 +362,7 @@ def impact(data, changed):
             mark(module["dependencies"], "governance change" if governance else "dependency")
             suites.update(module["suites"])
             if module.get("sharedFinancialCore"):
-                mark(SHARED_CORE_DOMAINS, "shared financial core")
+                mark(SHARED_CORE_DOMAINS, "governance change" if governance else "shared financial core")
         if not affected and maintained(path):
             unmapped.append(path)
     return {"domains": sorted(domains), "modules": sorted(modules), "suites": sorted(suites),
@@ -419,9 +421,23 @@ def read_runs(session, root=ROOT):
     return {"session": session, "found": found, "events": events, "malformed": malformed}
 
 
-def review_summary(data, plan, runs, skips=None, reports=(), root=ROOT):
+def discovered_agents(stream_text):
+    """Agents listed by a `claude -p --output-format stream-json --verbose` init event."""
+    found = {}
+    for line in stream_text.splitlines():
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if (isinstance(event, dict) and event.get("type") == "system" and event.get("subtype") == "init"
+                and isinstance(event.get("session_id"), str) and isinstance(event.get("agents"), list)):
+            found[event["session_id"]] = sorted(a for a in event["agents"] if isinstance(a, str))
+    return found
+
+
+def review_summary(data, plan, runs, skips=None, reports=(), root=ROOT, discovered=None):
     """Combine expected specialists with what hooks actually observed. Advisory only."""
-    skips = skips or {}
+    skips, discovered = skips or {}, discovered or {}
     agents, tests, denials, definitions, peak = {}, [], Counter(), {}, 0
     for run in runs:
         running = set()
@@ -455,6 +471,8 @@ def review_summary(data, plan, runs, skips=None, reports=(), root=ROOT):
         status = ("completed" if done else "incomplete" if seen
                   else "skipped" if domain in skips else "not-invoked")
         rows.append({"domain": domain, "selectedBecause": plan.get("reasons", {}).get(domain, []),
+                     "defined": current.get(domain) is not None,
+                     "discovered": any(domain in agents for agents in discovered.values()) if discovered else None,
                      "status": status, "invocations": len(seen), "completed": len(done),
                      "reviews": reviews, "unstructured": len(done) - len(reviews),
                      "skipReason": skips.get(domain), "guardDenials": denials.get(domain, 0)})
@@ -480,7 +498,7 @@ def review_summary(data, plan, runs, skips=None, reports=(), root=ROOT):
         "base": plan.get("base"), "sessions": [{"session": r["session"], "found": r["found"],
                                                 "events": len(r["events"]), "malformed": r["malformed"]} for r in runs],
         "documentationOnly": not plan["domains"] and not plan["modules"] and not plan["unmapped"],
-        "specialists": rows,
+        "specialists": rows, "discoveryObserved": sorted(discovered),
         "unexpectedAgents": sorted({str(a["agent"]) for a in agents.values()} - set(plan["domains"])),
         "definitionsAtSessionStart": len(definitions), "definitionsChangedSince": changed_definitions,
         "peakConcurrentReviewers": peak, "tests": tests, "reports": verified,
@@ -499,7 +517,8 @@ def review_markdown(summary):
         lines += ["No maintained source, suite or governance contract changed: documentation-only, "
                   "specialist review not required.", ""]
     lines += ["## Changed domains and specialists", "",
-              "| Domain | Selected because | Status | Result |", "| --- | --- | --- | --- |"]
+              "| Domain | Selected because | Defined | Discovered | Status | Result |",
+              "| --- | --- | --- | --- | --- | --- |"]
     for row in summary["specialists"]:
         result = "; ".join(f"{r.get('result')} ({r.get('findings')} findings, highest {r.get('highest')})"
                            for r in row["reviews"]) or ("unstructured" if row["unstructured"] else "")
@@ -507,7 +526,9 @@ def review_markdown(summary):
             result = "Skipped: " + row["skipReason"]
         if row["guardDenials"]:
             result += f"; {row['guardDenials']} guard denials"
-        lines.append(f"| {row['domain']} | {', '.join(row['selectedBecause'])} | {row['status']} | {result or '—'} |")
+        seen = {True: "yes", False: "no", None: "not observed"}
+        lines.append(f"| {row['domain']} | {', '.join(row['selectedBecause'])} | {seen[row['defined']]} | "
+                     f"{seen[row['discovered']]} | {row['status']} | {result or '—'} |")
     lines += ["", f"Agents invoked outside the plan: {', '.join(summary['unexpectedAgents']) or 'none'}.",
               f"Peak concurrent flofi-* reviewers: {summary['peakConcurrentReviewers']} (limit {MAX_CONCURRENT_REVIEWS}).",
               f"Claude agent definitions recorded at session start: {summary['definitionsAtSessionStart']}; "
@@ -619,6 +640,7 @@ def main():
     parser.add_argument("--skip", action="append", default=[], metavar="DOMAIN=REASON", help="review: justified skipped specialist")
     parser.add_argument("--unit-report", help="review: fresh Vitest JSON report to verify for required unit suites")
     parser.add_argument("--postgres-report", help="review: fresh Vitest JSON report for required PostgreSQL suites")
+    parser.add_argument("--stream-json", action="append", default=[], help="review: claude -p stream-json output (discovery and session ID)")
     parser.add_argument("--json", action="store_true", help="review: print JSON instead of Markdown")
     parser.add_argument("--strict", action="store_true", help="review: exit 1 on unresolved reviews or failures")
     parser.add_argument("--write", action="store_true", help="claude-agents: create missing generated agents")
@@ -648,7 +670,10 @@ def main():
         if args.command == "impact":
             print(json.dumps(result, indent=2))
             return int(bool(result["unmapped"]))
-        sessions = args.session or [os.environ.get("CLAUDE_CODE_SESSION_ID", "")]
+        discovered = {}
+        for path in args.stream_json:
+            discovered.update(discovered_agents(Path(path).read_text()))
+        sessions = args.session or sorted(discovered) or [os.environ.get("CLAUDE_CODE_SESSION_ID", "")]
         if not all(sessions):
             parser.error("review requires --session when CLAUDE_CODE_SESSION_ID is not set")
         skips = dict(item.split("=", 1) for item in args.skip if "=" in item and item.split("=", 1)[1].strip())
@@ -656,7 +681,7 @@ def main():
             parser.error("--skip takes DOMAIN=REASON with a known domain and a non-empty reason")
         reports = [(stage, path) for stage, path in (("unit", args.unit_report), ("postgres", args.postgres_report)) if path]
         summary = review_summary(data, {**result, "base": f"{args.base} ({merge_base[:12]})"},
-                                 [read_runs(session) for session in sessions], skips, reports)
+                                 [read_runs(session) for session in sessions], skips, reports, discovered=discovered)
         print(json.dumps(summary, indent=2) if args.json else review_markdown(summary), end="\n" if args.json else "")
         return int(args.strict and bool(summary["problems"]))
     elif args.command == "report":

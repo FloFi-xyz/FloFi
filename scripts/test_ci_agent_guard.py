@@ -266,7 +266,7 @@ class EngineeringGuard(unittest.TestCase):
         plan = guard.impact(self.data, core["sources"])
         self.assertIn("shared financial core", plan["reasons"]["flofi-security"])
         self.assertIn("primary owner", plan["reasons"]["flofi-workflow"])
-        self.assertIn("governance change", guard.impact(self.data, ["CLAUDE.md"])["reasons"]["flofi-swap"])
+        self.assertEqual(guard.impact(self.data, ["CLAUDE.md"])["reasons"]["flofi-swap"], ["governance change"])
 
     def test_domain_contract_is_a_live_view_of_the_manifest(self):
         changed = self.data["modules"][0]["sources"][:1] + self.data["modules"][1]["sources"]
@@ -319,6 +319,21 @@ class EngineeringGuard(unittest.TestCase):
         self.assertIn("flofi-bridge: started without a recorded completion", problems)
         self.assertIn("flofi-swap: specialist reported its review as blocked", problems)
         self.assertIn("Observed 4 concurrent flofi-* reviewers", problems)
+
+    def test_discovery_is_reported_only_when_a_stream_init_event_was_observed(self):
+        stream = "\n".join([json.dumps({"type": "system", "subtype": "hook_started"}), "not json",
+                             json.dumps({"type": "system", "subtype": "init", "session_id": "s-1",
+                                         "agents": ["Explore", "flofi-swap"]})])
+        discovered = guard.discovered_agents(stream)
+        self.assertEqual(discovered, {"s-1": ["Explore", "flofi-swap"]})
+        plan = {**guard.impact(self.data, self.data["modules"][0]["sources"][:1]), "base": "origin/main"}
+        rows = {r["domain"]: r for r in guard.review_summary(self.data, plan, [self.runs()], root=self.root,
+                                                            discovered=discovered)["specialists"]}
+        self.assertEqual((rows["flofi-swap"]["discovered"], rows["flofi-bridge"]["discovered"]), (True, False))
+        self.assertTrue(rows["flofi-swap"]["defined"])
+        unobserved = guard.review_summary(self.data, plan, [self.runs()], root=self.root)
+        self.assertIsNone(unobserved["specialists"][0]["discovered"])
+        self.assertIn("not observed", guard.review_markdown(unobserved))
 
     def test_documentation_only_change_needs_no_specialist_and_no_evidence_is_invented(self):
         plan = {**guard.impact(self.data, ["docs/notes.md"]), "base": "origin/main"}
