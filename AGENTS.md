@@ -12,6 +12,9 @@ in [the engineering guide](docs/engineering/README.md).
 
 Delegate independent reviews to the affected `.codex/agents/flofi-*.toml`
 specialists. Use the impact report to select reviewers; do not spawn all 19.
+Claude Code uses generated read-only twins in `.claude/agents/` with the same
+domains and coverage.json contracts. After editing a Codex role, review
+`python3 scripts/agent_guard.py claude-agents` and apply it with `--overwrite`.
 For shared financial-core changes always include flofi-workflow integration
 review and affected action domains, with flofi-security for authorization or
 identity boundaries. Review each affected boundary even when work runs in batches.
