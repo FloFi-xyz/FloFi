@@ -134,6 +134,14 @@
       "path": "apps/reference-dapp/src/domain/copilot-conversation.test.ts",
       "stage": "unit"
     },
+    "app.domain.intelligence": {
+      "path": "apps/reference-dapp/src/domain/intelligence/intelligence.test.ts",
+      "stage": "unit"
+    },
+    "app.domain.intelligence.conversation-regression": {
+      "path": "apps/reference-dapp/src/domain/intelligence/conversation-regression.test.ts",
+      "stage": "unit"
+    },
     "app.e2e.canvas-keyboard": {
       "path": "apps/reference-dapp/e2e/canvas-keyboard.spec.ts",
       "stage": "browser"
@@ -206,8 +214,16 @@
       "path": "apps/reference-dapp/src/passkeys/webauthn.test.ts",
       "stage": "unit"
     },
+    "app.platform.copilot-tools": {
+      "path": "apps/reference-dapp/src/platform/copilot-tools.test.ts",
+      "stage": "unit"
+    },
     "app.platform.engineering-continuity": {
       "path": "apps/reference-dapp/src/platform/engineering-continuity.test.ts",
+      "stage": "unit"
+    },
+    "app.platform.intelligence-parity": {
+      "path": "apps/reference-dapp/src/platform/intelligence-parity.test.ts",
       "stage": "unit"
     },
     "app.platform.parity": {
@@ -216,6 +232,10 @@
     },
     "app.server.base-swap": {
       "path": "apps/reference-dapp/src/server/base-swap.test.ts",
+      "stage": "unit"
+    },
+    "app.server.copilot-orchestration": {
+      "path": "apps/reference-dapp/src/server/copilot-orchestration.test.ts",
       "stage": "unit"
     },
     "app.server.embedded-approval": {
@@ -485,7 +505,12 @@
     "app.domain.copilot-context",
     "app.state.flofi-conversation",
     "app.state.wallet-review-continuity",
-    "app.server.base-swap"
+    "app.server.base-swap",
+    "app.domain.intelligence",
+    "app.domain.intelligence.conversation-regression",
+    "app.platform.copilot-tools",
+    "app.platform.intelligence-parity",
+    "app.server.copilot-orchestration"
   ],
   "modules": [
     {
@@ -1685,7 +1710,8 @@
         "app.channels.telegram.learning.pg",
         "app.channels.telegram.workflow.pg",
         "app.channels.whatsapp.journey.pg",
-        "app.channels.whatsapp.learning.pg"
+        "app.channels.whatsapp.learning.pg",
+        "app.platform.intelligence-parity"
       ],
       "gaps": [
         "WhatsApp is fixture-only; Telegram provider delivery needs configured acceptance; no cross-provider live guarantee."
@@ -2611,10 +2637,14 @@
       "id": "domain--chat",
       "primary": "flofi-chat",
       "dependencies": [
+        "flofi-admin-analytics",
+        "flofi-bridge",
         "flofi-channels",
         "flofi-frontend-ux",
+        "flofi-lending",
         "flofi-mcp",
         "flofi-security",
+        "flofi-swap",
         "flofi-workflow"
       ],
       "sharedFinancialCore": false,
@@ -2638,17 +2668,31 @@
         "apps/reference-dapp/src/domain/copilot-mode.ts",
         "apps/reference-dapp/src/domain/copilot-reconciled-context.ts",
         "apps/reference-dapp/src/domain/copilot-test-fixtures.ts",
+        "apps/reference-dapp/src/domain/intelligence/asset-resolution.ts",
+        "apps/reference-dapp/src/domain/intelligence/capability-api.ts",
+        "apps/reference-dapp/src/domain/intelligence/copy.ts",
+        "apps/reference-dapp/src/domain/intelligence/goal-planner.ts",
+        "apps/reference-dapp/src/domain/intelligence/goal-strategy.ts",
+        "apps/reference-dapp/src/domain/intelligence/goal-vocabulary.ts",
+        "apps/reference-dapp/src/domain/intelligence/grounding.ts",
+        "apps/reference-dapp/src/domain/intelligence/operational-state.ts",
+        "apps/reference-dapp/src/domain/intelligence/turn-metrics.ts",
         "apps/reference-dapp/src/domain/proposal.ts"
       ],
       "suites": [
         "app.domain.copilot-context",
         "app.domain.copilot-conversation",
+        "app.domain.intelligence",
+        "app.domain.intelligence.conversation-regression",
         "app.e2e.chat-assistant",
         "app.platform.engineering-continuity",
+        "app.platform.intelligence-parity",
         "app.state.flofi-conversation"
       ],
       "gaps": [
-        "Scripted/model fixtures cannot certify live-model interpretation or every conversational ambiguity."
+        "Goal plans compose only certified single-action sequence steps (swap, bridge, supply); liquidity after a conversion is refused, not executed.",
+        "Scripted/model fixtures cannot certify live-model interpretation or every conversational ambiguity.",
+        "Turn analytics are content-free log records; no durable Admin dashboard or cost estimate is derived from them."
       ]
     },
     {
@@ -3156,7 +3200,8 @@
         "app.mcp.mainnet-only",
         "app.mcp.oauth.foundation",
         "app.mcp.oauth.server.pg",
-        "app.platform.engineering-continuity"
+        "app.platform.engineering-continuity",
+        "app.platform.intelligence-parity"
       ],
       "gaps": [
         "External ChatGPT/Claude OAuth and approval acceptance remains manual; local gateway tests do not certify hosted clients."
@@ -3212,6 +3257,30 @@
       ],
       "gaps": [
         "WhatsApp is fixture-only; Telegram provider delivery needs configured acceptance; no cross-provider live guarantee."
+      ]
+    },
+    {
+      "id": "platform--chat",
+      "primary": "flofi-chat",
+      "dependencies": [
+        "flofi-bridge",
+        "flofi-channels",
+        "flofi-mcp",
+        "flofi-security",
+        "flofi-workflow"
+      ],
+      "sharedFinancialCore": false,
+      "sources": [
+        "apps/reference-dapp/src/platform/copilot-tools.ts"
+      ],
+      "suites": [
+        "app.platform.copilot-tools",
+        "app.platform.intelligence-parity",
+        "app.server.copilot-orchestration"
+      ],
+      "gaps": [
+        "Route discovery is exercised through a deterministic port; live provider availability, rate limits and quote freshness are not certified by unit tests.",
+        "Channel Core offers the same tool contracts without route discovery (its boundary admits no flow runtime)."
       ]
     },
     {
@@ -4805,17 +4874,20 @@
         "apps/reference-dapp/src/server/copilot-capabilities.ts",
         "apps/reference-dapp/src/server/copilot-glossary.ts",
         "apps/reference-dapp/src/server/copilot-runtime.ts",
-        "apps/reference-dapp/src/server/copilot-service.ts"
+        "apps/reference-dapp/src/server/copilot-service.ts",
+        "apps/reference-dapp/src/server/copilot-toolkit.ts"
       ],
       "suites": [
         "app.domain.copilot-context",
         "app.domain.copilot-conversation",
         "app.e2e.chat-assistant",
         "app.platform.engineering-continuity",
+        "app.server.copilot-orchestration",
         "app.state.flofi-conversation"
       ],
       "gaps": [
-        "Scripted/model fixtures cannot certify live-model interpretation or every conversational ambiguity."
+        "Scripted/model fixtures cannot certify live-model interpretation or every conversational ambiguity.",
+        "The Responses API tool loop is certified against a scripted transport; live model tool-call behaviour (including reasoning-item continuation with store:false) needs owner live acceptance."
       ]
     },
     {
