@@ -104,9 +104,16 @@ test('admin console: refusal until granted, overview with network distribution, 
     await nav.getByRole('link', { name: 'AI Settings' }).click();
     await expect(page.getByRole('heading', { name: 'AI Settings', level: 1 })).toBeVisible();
     await expect(page.getByText('Not configured', { exact: true }).first()).toBeVisible();
-    await page.getByLabel('Model').first().fill('gpt-4o-mini');
-    await page.getByLabel('Reason (optional, stored in the version history)').fill('E2E: cheaper interpreter');
-    await page.getByRole('button', { name: 'Save as version 1' }).click();
+    // The editor is a client component rendered on the server first: text typed before it hydrates never reaches its state (Save stays
+    // disabled). Type again until the editor registers the change, then save exactly as before.
+    const save = page.getByRole('button', { name: 'Save as version 1' });
+    await expect(async () => {
+      await page.getByLabel('Model').first().fill('');
+      await page.getByLabel('Model').first().fill('gpt-4o-mini');
+      await page.getByLabel('Reason (optional, stored in the version history)').fill('E2E: cheaper interpreter');
+      await expect(save).toBeEnabled({ timeout: 2_000 });
+    }).toPass({ timeout: 30_000 });
+    await save.click();
     await expect(page.getByRole('button', { name: 'Save as version 2' })).toBeVisible();
     await expect(page.getByRole('region', { name: 'Version history' }).or(page.locator('section').filter({ has: page.getByRole('heading', { name: 'Version history' }) })))
       .toContainText('E2E: cheaper interpreter');

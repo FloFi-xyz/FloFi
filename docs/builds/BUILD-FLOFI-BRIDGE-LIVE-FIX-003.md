@@ -165,7 +165,10 @@ compiler, `base-swap`, `arbitrum-runtime`, `ethereum-runtime`, `robinhood-swap`,
 ## 12. CircleCI status
 
 Draft PR #136 at e397b0e (2026-10-29): `ci/circleci: governance`, `certification`, `certification-checks`, `certification-browser-1`,
-`certification-browser-2` — all **pass**; Vercel preview — pass. (This report commit re-runs the same checks.)
+`certification-browser-2` — all **pass**; Vercel preview — pass. The report commit cbc150c re-ran them: `certification-browser-2` failed once in
+`admin-console` (untouched by this build): the AI Settings editor (a server-rendered client component) can receive the test's typing before it
+hydrates, so React never sees the change and "Save as version 1" stays disabled. The spec now re-types until the editor registers the change,
+then saves exactly as before (no assertion removed); 3/3 local passes.
 
 ## 13. Real-provider read-only evidence (C)
 
