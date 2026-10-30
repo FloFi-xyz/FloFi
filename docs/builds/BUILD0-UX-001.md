@@ -43,18 +43,27 @@ Build 0 → Build 1 (the existing builder: Canvas, chat, editing) → Simulate �
 | Governance-lite and CI plan self-tests | pass |
 | Guarded browser critical tier (6 profiles) | pass (copilot-learning after the reload fix) |
 | Guarded browser extended shard 2 (23 profiles: execution-continuity, MCP, channels, /approve, automations, delegated execution, Admin, owner history…) | pass |
-| Guarded browser extended shard 1 (19 profiles) | 18 pass; `default-product` 112 passed, 9 failed — see §4 |
+| Guarded browser extended shard 1 (19 profiles) | 18 pass; `default-product` 112 passed, 9 failed with the sandbox's browser wrapper — see §4 |
 | New `build-entry.spec.ts` | 7/7 pass |
+| CircleCI `governance`, `certification-checks` (unit + result verification, PostgreSQL 18.6, fork) on `c6dacee` | pass |
+| CircleCI `certification-browser-2` on `c6dacee` | pass |
+| CircleCI `certification-browser-1` on `c6dacee` | critical tier pass; `default-product` failed only the four `/app` baselines below (`build009`, `mock-artifact-chain`, `base-observation` pass) |
 
 ## 4. Limitations for owner review
 
-- **Screenshot baselines (7 tests) cannot be certified in this sandbox.** `visual-shell` (build/simulate/execute), `swap-authoring`
-  (chat-committed), `mock-artifact-chain` (2) and `base-observation` (1) fail here **identically on unmodified `main`**: text rasterization
-  differs from the certified renderer across the whole page. No sandbox-rendered golden was committed. The `/app` baselines
-  (`visual-shell` ×3, `swap-authoring`) will legitimately change in the certified environment (new `0 Build` tab, Execute status panel) and
-  need `--update-snapshots` there; the two `/__engineering` specs are not affected by this change.
-- **`build009.spec.ts` (2 tests)** request a live LI.FI quote from the server (`li.quest`), unreachable here (`ENOTFOUND`); they fail the
-  same way on unmodified `main` and are reported as not run, not as passes.
+- **Screenshot baselines.** Five `/app` baselines change with this build: `visual-shell` build/simulate/execute and `swap-authoring`
+  chat-committed/review-blocked (new `0 Build` tab; the Execute status panel replaces the collapsed *Execution details*). They were
+  regenerated with a renderer shown to match CI's: the same Chrome for Testing 153.0.8010.12 headless shell without the sandbox's launcher
+  wrapper (which adds `--font-render-hinting=none --disable-lcd-text`) and with stock Ubuntu fontconfig (the sandbox image forces unhinted
+  grayscale text). Evidence: with that renderer the untouched `base-observation` and `mock-artifact-chain` baselines pass at
+  `maxDiffPixels: 0`; old → new baseline diffs measured with Playwright's comparator equal CI's reported diffs exactly (2017, 1949,
+  3660 with 900 → 927 px, 1992); `review-blocked`, never compared in CI because that test stops at its first screenshot, differs by the
+  same 1992 header pixels as `chat-committed`. Outside the header only anti-aliasing-level pixels changed (max 54/255 per channel). The new
+  baselines pass twice in a row locally; CI is the certifying run.
+- **`build009.spec.ts` (2 tests)** request a live LI.FI quote from the server (`li.quest`), unreachable in this sandbox (`ENOTFOUND`); they
+  pass in CI.
+- One PostgreSQL forward-compatibility case expects PostgreSQL 18's named NOT NULL constraints and fails on the sandbox's PostgreSQL 16; it
+  passes in CI on 18.6. No `packages/` file changed in this build.
 - Build 0 chips fill illustrative mainnet examples. Exact commands (e.g. *Swap 50 USDC to SOL on Solana*) author directly; natural-language
   ones (liquidity, collateral, multi-step) need the configured Copilot, otherwise FloFi's reason is shown and the text kept. *Supply* needs a
   connected wallet for the beneficiary.
