@@ -244,7 +244,9 @@ def main():
     parser.add_argument("result_file", nargs="?")
     parser.add_argument("--base", help="Explicit Git ref to compare using merge-base; no network fetch")
     parser.add_argument("--stage", choices=["unit", "postgres"], default="unit", help="Test report's existing certification stage")
-    args = parser.parse_args()
+    # Python 3.12.3 (CircleCI) otherwise leaves the optional result positional
+    # unconsumed in `verify-results --stage postgres report.json`.
+    args = parser.parse_intermixed_args()
     data = load()
     if args.command == "verify-results":
         if not args.result_file:

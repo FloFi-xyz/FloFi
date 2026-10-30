@@ -73,7 +73,7 @@ disposable `/tmp` cluster on loopback port 55439; no remote database was accesse
 | Schema drift | PASS: 11 unchanged schema exports |
 | Full unit/contract run | 5,712 passed, 2 existing optional skips, zero failures; all 26 required suites passed every case |
 | Full PostgreSQL run | 513 passed, 3 existing certified-ahead compatibility skips, zero failures; all 26 required suites passed every case |
-| Python CI/inventory/parity/source-snapshot tests | 103 passed, including 30 guard self-tests and skipped/missing-result refusal checks |
+| Python CI/inventory/parity/source-snapshot tests | 108 passed after the CLI compatibility follow-up, including 35 guard self-tests and skipped/missing-result refusal checks |
 | Governance self-tests and scanner | 19 passed; scanner and whitespace checks passed |
 | Anvil compatibility | 4 passed, 10 owner-gated skips |
 | Offline fork suite | 31 passed, 32 owner-gated skips; no public financial execution claim |
@@ -96,6 +96,26 @@ verification is not bound to a revision and cannot prove freshness or certificat
 Local logs/reports and browser artifacts remain outside tracked source under
 `/tmp/flofi-agent-*` and the ignored dapp `test-results` directory. These are local
 engineering observations, not a CircleCI certification ledger for a published SHA.
+
+### CircleCI follow-up: Python 3.12.3 argument parsing
+
+The first CircleCI run on `f7b009a` passed governance and both complete browser
+jobs. In [certification-checks job 753](https://app.circleci.com/workflow/b9b00e92-8046-4da5-8822-f3bd1a8decdc/job/b791db46-0417-4a0a-8cda-5cff92328e2d),
+all 513 PostgreSQL tests passed (three existing compatibility skips), then the
+new verification command exited 2 with `unrecognized arguments` for its report
+path. CircleCI uses Python 3.12.3; the local implementation run used 3.14.4.
+That older parser does not consume the optional report positional after
+`--stage postgres` when using `parse_args()`.
+
+The guard now uses strict `parse_intermixed_args()`. Five real subprocess CLI
+tests cover the exact unit/PG commands, report/option ordering, required-case
+failures, missing reports, unknown options and excess positionals. Required
+suite lists, failure criteria, CI commands and ledger requirements are unchanged.
+The exact CPython 3.12.3 argparse source reproduced the pre-fix failure locally;
+all 35 guard tests pass with that parser and with local Python 3.14.4. The full
+Python CI suite passed 108 tests and governance passed 19 after the fix. Product
+test counts above remain evidence from the implementation run; the new CircleCI
+run on the fix is authoritative for certification.
 
 ## Coverage gaps and acceptance boundaries
 

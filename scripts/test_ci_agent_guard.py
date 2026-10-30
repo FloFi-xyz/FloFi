@@ -4,6 +4,9 @@ import copy
 import importlib.util
 import json
 from pathlib import Path
+import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -250,6 +253,74 @@ class EngineeringGuard(unittest.TestCase):
         for path, expected_suite in direct_suites.items():
             plan = guard.impact(data, [path])
             self.assertIn(expected_suite, [data["suites"][name]["path"] for name in plan["suites"]])
+
+
+class EngineeringGuardCLI(unittest.TestCase):
+    """Exercise the real entry point and exact CI argument order, without a DB."""
+
+    def setUp(self):
+        scratch = tempfile.TemporaryDirectory()
+        self.addCleanup(scratch.cleanup)
+        self.root = Path(scratch.name)
+        (self.root / "scripts").mkdir()
+        self.script = self.root / "scripts/agent_guard.py"
+        shutil.copy(Path(__file__).with_name("agent_guard.py"), self.script)
+        (self.root / "docs/engineering").mkdir(parents=True)
+        self.suites = {stage: {"path": f"packages/example/test/contract{'.pg' if stage == 'postgres' else ''}.test.ts",
+                               "stage": stage} for stage in ("unit", "postgres")}
+        (self.root / "docs/engineering/coverage.json").write_text(json.dumps({
+            "suites": self.suites, "requiredUnitSuites": ["unit"], "requiredPostgresSuites": ["postgres"],
+        }))
+
+    def report(self, stage, status="passed"):
+        path = self.root / f"{stage}.json"
+        path.write_text(json.dumps({"success": True, "testResults": [{
+            "name": str(self.root / self.suites[stage]["path"]), "status": "passed",
+            "assertionResults": [{"status": status, "fullName": "required contract"}],
+        }]}))
+        return str(path)
+
+    def run_cli(self, *args):
+        return subprocess.run([sys.executable, str(self.script), *args], cwd=self.root,
+                              capture_output=True, text=True, timeout=15)
+
+    def test_exact_unit_ci_command_accepts_a_passing_report(self):
+        result = self.run_cli("verify-results", self.report("unit"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Engineering unit results: PASS", result.stdout)
+
+    def test_postgres_stage_and_report_can_be_interspersed_as_in_ci(self):
+        report = self.report("postgres")
+        for args in [("verify-results", "--stage", "postgres", report),
+                     ("verify-results", report, "--stage", "postgres"),
+                     ("--stage", "postgres", "verify-results", report)]:
+            with self.subTest(args=args):
+                result = self.run_cli(*args)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("Engineering postgres results: PASS", result.stdout)
+
+    def test_exact_ci_commands_reject_skipped_required_cases_with_a_verification_failure(self):
+        for stage in ("unit", "postgres"):
+            for status in ("pending", "skipped", "failed"):
+                with self.subTest(stage=stage, status=status):
+                    result = self.run_cli("verify-results", "--stage", stage, self.report(stage, status))
+                    self.assertEqual(result.returncode, 1, result.stderr)
+                    self.assertIn("required cases failed, skipped, pending or absent", result.stderr)
+                    self.assertNotIn("PASS", result.stdout)
+
+    def test_missing_report_still_fails_argument_validation(self):
+        result = self.run_cli("verify-results", "--stage", "postgres")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("verify-results requires", result.stderr)
+
+    def test_unknown_options_and_extra_positionals_are_not_ignored(self):
+        report = self.report("postgres")
+        for extra in ("--ignore-failures", "unexpected-extra-report.json"):
+            with self.subTest(extra=extra):
+                result = self.run_cli("verify-results", "--stage", "postgres", report, extra)
+                self.assertEqual(result.returncode, 2)
+                self.assertIn("unrecognized arguments", result.stderr)
+                self.assertNotIn("PASS", result.stdout)
 
 
 if __name__ == "__main__":
