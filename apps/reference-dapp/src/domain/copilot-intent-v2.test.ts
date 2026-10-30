@@ -40,7 +40,11 @@ describe('CopilotIntentV2 strict parsing', () => {
     rejects({ ...intent.edit({ amount: '2' }), target: { step: 'STAKE', ordinal: null } });
     rejects({ ...intent.edit({ amount: '2' }), target: { step: null, ordinal: 'SIXTH' } });
     rejects(intent.question('SEND_FUNDS'));
-    rejects({ ...intent.question('PROTOCOLS'), answer: 'Aave pays 12%' });
+    // BUILD-FLOFI-INTELLIGENCE-001: an explanation is a bounded string or null (its grounding is checked where the facts are, `domain/intelligence/grounding.ts`).
+    rejects({ ...intent.question('PROTOCOLS'), answer: 42 });
+    rejects({ ...intent.question('PROTOCOLS'), answer: 'x'.repeat(901) });
+    rejects({ ...intent.question('PROTOCOLS'), answer: 'Aave\u202epays' });
+    rejects({ ...intent.question('PROTOCOLS'), answer: null, extra: 'x' });
     rejects({ intent: intent.edit({ amount: '2' }), extra: true }, 'COPILOT_INTENT_INVALID');
     const hidden = intent.edit({ amount: '2' });
     Object.defineProperty(hidden, 'execute', { value: true, enumerable: false });

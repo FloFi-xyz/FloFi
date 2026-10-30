@@ -90,7 +90,8 @@ describe('BUILD-MCP-001 gateway: protocol and tool surface', () => {
   it('serves the 2026-07-28 revision too (server/discover, tools/list, tools/call)', async () => {
     const discover = await client().request('server/discover', {}, { modern: true });
     expect((discover.result as { supportedVersions: string[] }).supportedVersions).toContain('2026-07-28');
-    expect(((await client().request('tools/list', {}, { modern: true })).result as { tools: unknown[] }).tools).toHaveLength(9);
+    // BUILD-FLOFI-INTELLIGENCE-001 adds plan_strategy (the shared goal planner) to the static credential's strategy tools.
+    expect(((await client().request('tools/list', {}, { modern: true })).result as { tools: unknown[] }).tools).toHaveLength(10);
     const call = await client().request('tools/call', { name: 'get_supported_networks', arguments: {} }, { modern: true });
     // BUILD-RH-002 adds Robinhood Chain mainnet (`robinhood`); BUILD-SOLANA-TRANSFER-UX-001 its testnet (`robinhood-testnet`, native self-transfer).
     expect((call.result as { structuredContent: { networks: { id: string }[] } }).structuredContent.networks.map(network => network.id)).toContain('robinhood-testnet');

@@ -108,6 +108,10 @@ export const intent = {
   question: (topic: string, target: Record<string, unknown> | null = null, language: L = 'EN') => ({ ...head('QUESTION', language), topic, target: target ? { ...NO_TARGET, ...target } : null }),
   clarify: (missing: string[], question: string, options: string[] = [], language: L = 'EN') => ({ ...head('CLARIFICATION_REQUIRED', language), missing, question, options }),
   unsupported: (reason: string, language: L = 'EN') => ({ ...head('UNSUPPORTED', language), reason }),
+  /** BUILD-FLOFI-INTELLIGENCE-001: an outcome the user described (FloFi plans the steps). */
+  goal: (source: Record<string, unknown>, target: Record<string, unknown>, extra: Record<string, unknown> = {}, language: L = 'EN', answer: string | null = null) =>
+    ({ ...head('GOAL', language), goal: { source: { network: null, asset: null, amount: null, ...source }, target: { network: null, asset: null, use: 'HOLD', ...target },
+      preference: null, cap: null, recipient: null, ...extra }, answer }),
   /** PR B: managing an existing FloFi position. */
   position: (operation: 'DECREASE' | 'EXIT', percent: string | null = null, language: L = 'EN', fields: Record<string, unknown> = {}) =>
     ({ ...head('POSITION', language), operation, protocol: null, network: null, percent, ...fields }),
