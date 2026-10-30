@@ -139,7 +139,8 @@ test('Build 0 request → card at once → Review in chat → workflow confirmat
   await expect(flofi(page)).toContainText('Execution completed', { timeout: 30_000 });
   // BUILD0-UX-001: no execution report in the chat (no step list, operations or transaction hashes); Execute and the Dashboard keep the record.
   await expect(executionCard(page)).toHaveCount(0);
-  await expect(chat(page)).not.toContainText(/0x[0-9a-f]{4}…[0-9a-f]{4}/);
+  await expect(chat(page).locator('a[href*="/tx/"], code, .conversation-execution-operations')).toHaveCount(0);
+  await expect(chat(page)).not.toContainText(/steps confirmed|Current step|Action transaction|Approval transaction/);
   await page.screenshot({ path: '.tmp/build0-chat-after-execution.png' });
   await stage(page, 'Execute').click();
   await expect(page.locator('.execution-status-panel')).toContainText('Execution completed');
