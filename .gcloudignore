@@ -29,6 +29,36 @@
 !/.codex/agents/flofi-infrastructure-ci.toml
 !/.codex/agents/flofi-protocol-integrations.toml
 !/.codex/agents/flofi-payments-billing.toml
+# Same for Claude Code: generated read-only agents, the exact hook settings and the
+# hook script only. Local overrides, the agent ledger and other state stay out.
+**/.claude/
+!/.claude/
+/.claude/*
+!/.claude/settings.json
+!/.claude/hooks/
+/.claude/hooks/*
+!/.claude/hooks/flofi_agent_hooks.py
+!/.claude/agents/
+/.claude/agents/*
+!/.claude/agents/flofi-swap.md
+!/.claude/agents/flofi-bridge.md
+!/.claude/agents/flofi-lending.md
+!/.claude/agents/flofi-liquidity.md
+!/.claude/agents/flofi-transfer-payments.md
+!/.claude/agents/flofi-workflow.md
+!/.claude/agents/flofi-chat.md
+!/.claude/agents/flofi-mcp.md
+!/.claude/agents/flofi-channels.md
+!/.claude/agents/flofi-wallet-execution.md
+!/.claude/agents/flofi-security.md
+!/.claude/agents/flofi-developers.md
+!/.claude/agents/flofi-automations.md
+!/.claude/agents/flofi-frontend-ux.md
+!/.claude/agents/flofi-admin-analytics.md
+!/.claude/agents/flofi-data-privacy.md
+!/.claude/agents/flofi-infrastructure-ci.md
+!/.claude/agents/flofi-protocol-integrations.md
+!/.claude/agents/flofi-payments-billing.md
 .aws/
 .vercel/
 **/.tmp/

@@ -1,9 +1,13 @@
 """Archive identity must reject tampering, omissions and untracked additions."""
 import importlib.util
+import json
 import subprocess
 import tempfile
+import tomllib
 from pathlib import Path
 import unittest
+
+import agent_guard
 
 spec = importlib.util.spec_from_file_location('source_snapshot', Path(__file__).with_name('gcp-source-snapshot.py'))
 snapshot = importlib.util.module_from_spec(spec)
@@ -104,6 +108,64 @@ class SourceSnapshot(unittest.TestCase):
         (self.root / snapshot.PROJECT_CODEX_CONFIG).symlink_to(self.root / 'outside/config.toml')
         with self.assertRaisesRegex(ValueError, 'Missing/nonregular source'):
             snapshot.inspect_file(self.root, snapshot.PROJECT_CODEX_CONFIG)
+
+    def write_claude_project(self):
+        self.write(snapshot.CLAUDE_SETTINGS, json.dumps(snapshot.CLAUDE_SETTINGS_CONTENT, indent=2) + '\n')
+        self.write('.claude/hooks/flofi_agent_hooks.py', '# hook\n')
+        for domain in snapshot.DOMAINS:
+            codex = tomllib.loads(f'name = "{domain}"\ndescription = "Review"\n'
+                                  f'developer_instructions = """\nShared.\nSpecialty: {domain}.\n"""\n')
+            self.write(f'.claude/agents/{domain}.md', agent_guard.claude_agent_text(codex))
+
+    def test_project_claude_agents_settings_and_hook_survive_snapshot_verification(self):
+        self.write_claude_project()
+        paths = sorted(snapshot.CLAUDE_FILES | {'implementation.ts'})
+        files = [snapshot.inspect_file(self.root, relative) for relative in paths]
+        digest = snapshot.digest_files(files)
+        snapshot.verify_manifest(self.root, {'files': files, 'snapshotSha256': digest, 'changedPaths': paths}, digest)
+
+    def test_claude_local_state_and_unknown_claude_paths_are_refused(self):
+        for relative in ['.claude/settings.local.json', '.claude/flofi-agent-runs/session.jsonl',
+                         '.claude/agents/local.md', '.claude/agents/flofi-mcp-channels.md', '.claude/hooks/local.py',
+                         '.claude/agents/review/flofi-swap.md', '.claude/CLAUDE.md', 'apps/reference-dapp/.claude/settings.json']:
+            with self.subTest(path=relative):
+                self.write(relative, 'local state must not upload\n')
+                with self.assertRaisesRegex(ValueError, 'Unsafe source path'):
+                    snapshot.inspect_file(self.root, relative)
+
+    def test_claude_settings_and_agents_cannot_carry_credentials_or_broader_tools(self):
+        self.write_claude_project()
+        agent = '.claude/agents/flofi-swap.md'
+        original = (self.root / agent).read_text()
+        for relative, body in [
+            (snapshot.CLAUDE_SETTINGS, json.dumps({**snapshot.CLAUDE_SETTINGS_CONTENT, 'env': {'ANTHROPIC_API_KEY': 'x'}})),
+            (snapshot.CLAUDE_SETTINGS, json.dumps({**snapshot.CLAUDE_SETTINGS_CONTENT, 'apiKeyHelper': './key.sh'})),
+            (snapshot.CLAUDE_SETTINGS, '{broken'),
+            (agent, original.replace('tools: Read, Grep, Glob, Bash', 'tools: Read, Bash, Edit')),
+            (agent, original.replace('name: flofi-swap', 'name: flofi-mcp')),
+            (agent, '---\nname: flofi-swap\n'),
+        ]:
+            with self.subTest(path=relative, body=body[:50]):
+                self.write(relative, body)
+                with self.assertRaisesRegex(ValueError, 'Invalid project Claude definition'):
+                    snapshot.inspect_file(self.root, relative)
+                self.write_claude_project()
+
+    def test_upload_ignore_rules_include_only_the_exact_project_claude_files(self):
+        ignore = Path(__file__).resolve().parents[1] / '.gcloudignore'
+        self.write('.gitignore', ignore.read_text())
+        subprocess.run(['git', 'init', '-q'], cwd=self.root, check=True, capture_output=True)
+        refused = {'.claude/settings.local.json', '.claude/flofi-agent-runs/s.jsonl', '.claude/agents/local.md',
+                   '.claude/agents/review/flofi-swap.md', '.claude/hooks/local.py', '.claude/worktrees/x/a.ts',
+                   'apps/example/.claude/settings.json'}
+        paths = sorted(snapshot.CLAUDE_FILES | refused)
+        for relative in paths:
+            self.write(relative, 'path-filter fixture\n')
+        result = subprocess.run(['git', 'check-ignore', '--no-index', '--stdin'], cwd=self.root,
+                                input='\n'.join(paths) + '\n', text=True, capture_output=True, check=True)
+        self.assertEqual(set(result.stdout.splitlines()), refused)
+        permitted = {line.removeprefix('!/') for line in ignore.read_text().splitlines() if line.startswith('!/.claude/agents/flofi-')}
+        self.assertEqual(permitted, agent_guard.CLAUDE_AGENTS)
 
     def test_upload_ignore_rules_include_only_the_exact_project_codex_files(self):
         ignore = Path(__file__).resolve().parents[1] / '.gcloudignore'
