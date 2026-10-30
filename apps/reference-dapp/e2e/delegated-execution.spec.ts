@@ -26,6 +26,7 @@ import { assertDelegationHarness, chainControl, createDelegationOwner, delegatio
   virtualAuthenticator } from './delegation-fixtures';
 import { sendChatCommand, chooseWallet, proveConnectedEvmWallet } from './fixtures';
 import { installSolanaWallet, MOCKED_SOLANA_WALLET, signRequests } from './jupiter-fixtures';
+import { openBuilder } from './build-entry-navigation';
 
 const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 type Sends = { evm: number; solana: number };
@@ -187,7 +188,7 @@ test.describe('BUILD-AUTOMATION-002 delegated execution (MOCKED loopback chains,
     const { owner, signCount, signing } = await enrollOnce(page, { solana: false });
 
     // The committed replay is the AI's typed reading of this message: a PRICE_TRIGGER draft with no mode, limit, expiry or Credential.
-    await page.goto('/app');
+    await openBuilder(page);
     await page.locator('#mock-prompt').fill('If ETH drops 5% from $3000, buy 50 USDC of ETH on Base Sepolia automatically, max 200 USDC/week.');
     await page.locator('.chat-form button[type=submit]').click();
     const proposal = page.getByRole('region', { name: 'Automation proposal', exact: true });
@@ -258,7 +259,7 @@ test.describe('BUILD-AUTOMATION-002 delegated execution (MOCKED loopback chains,
     const { owner, signCount, signing } = await enrollOnce(page, { solana: false });
 
     // The owner authors a two-step workflow on the Canvas (FloFi's deterministic grammar, applied through the normal proposal review).
-    await page.goto('/app');
+    await openBuilder(page);
     for (const sentence of ['swap 50 USDC to WETH on Base Sepolia slippage 50 bps', 'swap 40 USDC to WETH on Base Sepolia slippage 50 bps']) {
       await sendChatCommand(page, sentence);
     }

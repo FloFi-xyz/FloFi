@@ -2,9 +2,10 @@
 import { test,expect,openProposalReview, openSimulationDetails, acceptProductReview } from './fixtures';
 import type { Page } from '@playwright/test';
 import { installLendingWallet,lendingRpc,lendingSends,resetLending,LENDING_OWNER } from './lending-fixtures';
+import { openBuilder, reloadBuilder } from './build-entry-navigation';
 const panel=(page:Page)=>page.getByRole('region',{name:'Lending composition'});
 async function author(page:Page,options:Parameters<typeof installLendingWallet>[1]={},chat=false){
-  await installLendingWallet(page,options);await page.goto('/app');
+  await installLendingWallet(page,options);await openBuilder(page);
   if(chat){await page.locator('#mock-prompt').fill(`compose supply 0.1 USDC to Aave then borrow 0.01 USDC then swap borrowed USDC to WETH on Base Sepolia slippage 50 bps owner ${LENDING_OWNER}`);await page.getByRole('button',{name:'Send',exact:true}).click();}
   else {await expect(page.locator('.build009-wallet-info')).toContainText(LENDING_OWNER.slice(0,6));await page.getByRole('button',{name:'Add Supply → Borrow → Swap',exact:true}).click();}
   await openProposalReview(page);
@@ -59,7 +60,7 @@ test('cancelled preparation is historical, survives reload, and fresh Simulate/R
   await expect(panel(page).getByRole('group',{name:'Historical cancelled attempts'})).toBeVisible();
   const prior=await panel(page).locator('details pre').evaluate(pre=>JSON.parse(pre.textContent!).record.id);
   expect(await lendingSends(page)).toBe(0);
-  await page.reload();await expect(page.locator('.react-flow__node')).toHaveCount(3);
+  await reloadBuilder(page);await expect(page.locator('.react-flow__node')).toHaveCount(3);
   await expect(page.locator('.react-flow__node[data-id="lending-supply"]')).toContainText('Aave Supply');
   await page.getByRole('button',{name:'Simulate workflow'}).click(); await openSimulationDetails(page);
   await expect(page.getByRole('button',{name:'Simulate lending composition',exact:true})).toBeEnabled();await review(page);
@@ -88,7 +89,7 @@ test('wrong wallet chain blocks before owner submission',async({page})=>{await a
 test('price drift invalidates authority and requires fresh Simulate and Review',async({page})=>{await author(page);await review(page);await lendingRpc('MOCK_reset',[{price:'110000000'}]);await execute(page,'pool approval');await expect(panel(page)).toContainText('Review expired or the market changed');expect(await lendingSends(page)).toBe(0);await page.getByRole('button',{name:'Fresh Simulate and Review of remaining steps'}).click();await page.getByRole('button',{name:'Accept composed Review'}).click();await confirmed(page,'pool approval');expect(await lendingSends(page)).toBe(1);});
 test('lost Borrow result reloads into observation-only recovery and never sends another Borrow',async({page})=>{
   await author(page,{uncertainAt:3});await review(page);await execute(page,'pool approval');await execute(page,'supply');await execute(page,'borrow');await expect(panel(page)).toContainText('SUBMISSION_RESULT_UNKNOWN');expect(await lendingSends(page)).toBe(3);
-  await page.reload();await page.getByRole('navigation',{name:'Workflow stages'}).getByRole('button',{name:'Execute',exact:true}).click();await page.getByRole('button',{name:'Observe existing execution'}).click();await expect(panel(page)).toContainText('BORROW: reconciled');expect(await lendingSends(page)).toBe(0);await expect(panel(page)).toContainText('debt: 0.01 USDC');
+  await reloadBuilder(page);await page.getByRole('navigation',{name:'Workflow stages'}).getByRole('button',{name:'Execute',exact:true}).click();await page.getByRole('button',{name:'Observe existing execution'}).click();await expect(panel(page)).toContainText('BORROW: reconciled');expect(await lendingSends(page)).toBe(0);await expect(panel(page)).toContainText('debt: 0.01 USDC');
 });
 test('downstream route loss after Borrow retains debt and requires explicit fresh continuation',async({page})=>{
   await author(page);await review(page);for(const step of ['pool approval','supply','borrow'])await confirmed(page,step);await lendingRpc('MOCK_patch',[{swapAvailable:false}]);await execute(page,'router approval');await expect(panel(page).getByRole('status')).toBeVisible();expect(await lendingSends(page)).toBe(3);await page.getByRole('button',{name:'Observe existing execution'}).click();await expect(panel(page)).toContainText('debt: 0.01 USDC');await expect(panel(page)).toContainText('Borrow has completed');await expect(panel(page)).toContainText('Partial execution evidence');

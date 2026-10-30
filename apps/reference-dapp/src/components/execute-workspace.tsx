@@ -17,12 +17,20 @@ import { ExecutionEvidenceDetails } from './execution-evidence-details';
 import { isFinalExecutionResult } from '../domain/execution-result';
 
 export type ExecuteWorkspaceProps = ExecutionWorkspaceState & {
-  workflowName: string; backToBuild(): void; backToSimulate(): void; technicalDetails?: ReactNode; controls?: ExecutionControls; primaryAction?: ReactNode; progress?: ExecutionLifecycle; recovery?: ExecutionRecovery;
+  workflowName: string; backToBuild(): void; backToSimulate(): void; controls?: ExecutionControls; primaryAction?: ReactNode; progress?: ExecutionLifecycle; recovery?: ExecutionRecovery;
+  /**
+   * The engineering workspace's runtime panels. BUILD0-UX-001: the product Execute workspace has no technical disclosure; a run's transactions,
+   * provider references and evidence stay in the Dashboard (and the timeline keeps each step's transaction links).
+   */
+  technicalDetails?: ReactNode;
   /** UX-004: start a clean workflow; offered only after a final result. "Return to Build" keeps editing this workflow. */
   startNewWorkflow?: () => void;
+  /** BUILD0-UX-001: opens the Dashboard, where the run's full record is kept. */
+  openDashboard?: () => void;
   /**
-   * BUILD-FLOFI-CHAT-E2E-FIX-002: the public chat-first workspace, where the chat presents progress and reconciliation: the Execution Summary is an
-   * optional, collapsed details surface under the timeline instead of a third column beside the chat.
+   * BUILD-FLOFI-CHAT-E2E-FIX-002: the public chat-first workspace, where the chat presents progress and reconciliation, so there is no third column
+   * beside the chat. BUILD0-UX-001: the status, what needs the owner's action and the navigation stay visible under the timeline (no "Result
+   * details" disclosure); wallet, network and cost details are in the Dashboard.
    */
   detailsOnly?: boolean;
 };
@@ -43,18 +51,31 @@ export function ExecuteWorkspace(props: ExecuteWorkspaceProps) {
   const statusLabel = live ? verifying ? verificationLabel : canContinue ? continuationLabel : result?.label ?? interactionLabel ?? recovery?.label ?? live.label : requesting && !execution.started ? 'Preparing execution…' : view.label;
   const statusMessage = live ? verifying ? verificationMessage : canContinue ? continuationMessage : result?.message ?? interactionMessage ?? recovery?.message ?? live.message : view.message;
   const detailsOnly = Boolean(props.detailsOnly);
-  // The actions only this summary offers (connect the execution wallet, start a new workflow) stay visible when the summary is a collapsed
-  // details surface (BUILD-FLOFI-CHAT-E2E-FIX-002); navigation back to Build/Simulate stays with the summary.
+  // The actions only this summary offers: connect the execution wallet, start a new workflow (and navigation back to Build/Simulate).
   const connectWallet = execution.connect && authorization.accepted && !wallet.changed && !execution.started;
   const startNew = Boolean(result && props.startNewWorkflow && isFinalExecutionResult(live));
   const stageActions = <>
     {connectWallet && <button type="button" disabled={Boolean(props.source.state.busy)} onClick={execution.connect}>{tr("Connect execution wallet")}</button>}
     {startNew && <button type="button" className="primary execute-new-workflow" onClick={props.startNewWorkflow}>{tr("Create new workflow")}</button>}
   </>;
+  const status = <div className={`simulation-validity simulation-tone-${verifying ? 'neutral' : result ? result.tone : live ? live.state === 'complete' ? 'ready' : live.state === 'active' ? 'neutral' : live.state === 'uncertain' ? 'attention' : 'blocked' : view.canExecute ? 'ready' : view.status === 'loading' || view.status === 'empty' ? 'neutral' : 'blocked'}`} role="status" aria-live="polite"><strong><span className="simulation-status-dot" aria-hidden="true"/>{tr(statusLabel)}</strong><p>{tr(statusMessage)}</p></div>;
+  // What needs the owner's attention or action: the same lines in the side summary and in the chat-first status panel.
+  const notices = <>
+        {(requestFailed || live && props.source.state.error) && <p className="simulation-warning-blocking execution-request-error" role="status">{tr("The last request could not complete. Check the recorded status before taking another action.")}</p>}
+        {live && recovery?.contextIssue && <p className="execution-context execution-recovery-attention" role="status">{tr(recovery.contextIssue)}</p>}
+        {result && live?.evidence?.attention.map(item => <p className="execution-context execution-recovery-attention" key={item}>{tr(item)}</p>)}
+        {live?.local && live.steps.some(step => step.operations.some(operation => operation.intent)) && <p className="execution-context">{tr("Local signed-order execution · scripted settlement. No public settlement or funds are observed.")}</p>}
+        {checkFailed && <p className="execution-context" role="status">{tr("Unable to check execution status. The recorded result is unchanged; no transaction was resent.")}</p>}
+        {live && live.state === 'active' && live.active?.operations.some(operation => operation.state === 'waiting') && !verifying && !requesting && !recovery?.contextIssue && !view.bindingValid && <p className="execution-context" role="status">{tr(view.authorizationMessage)}</p>}
+        {!live && view.warnings.length > 0 && <ul className="simulation-warnings" aria-label={tr("Execution blockers")}>{view.warnings.map((warning, index) => <li key={index} className="simulation-warning-blocking"><span className="simulation-warning-label">{tr("Blocking")}</span>{tr(warning.message)}</li>)}</ul>}
+        {authorization.accepted && view.prompt && !execution.started && !requesting && <section className="execute-next" aria-label={tr("Next confirmation")}><h3>{tr("What happens next")}</h3><p>{tr(view.prompt)}</p><p>{tr("Only the next authorized request starts. Further wallet confirmations remain separate.")}</p></section>}
+  </>;
+  const back = <button type="button" className="simulation-back" onClick={result || view.status === 'empty' ? backToBuild : backToSimulate}>{tr(result ? 'Return to Build' : view.status === 'empty' ? 'Create a workflow in Build' : view.label === 'Simulation expired' ? 'Simulate again' : 'Back to Simulate')}</button>;
+  const navigationNote = live && live.state !== 'complete' && live.steps.some(step => step.operations.some(operation => operation.hash || operation.intent && ['posted', 'settling', 'partial'].includes(operation.state))) && <p className="execution-context execution-navigation-note">{tr("Leaving this view does not cancel submitted requests.")}</p>;
   const executionSummary = <>
       <aside className={`execution-summary panel${result ? ' execution-result-summary' : ''}`} aria-label={tr(result ? 'Execution result summary' : 'Execution Summary')}>
         <h2>{tr(result ? 'Result Summary' : 'Execution Summary')}</h2>
-        <div className={`simulation-validity simulation-tone-${verifying ? 'neutral' : result ? result.tone : live ? live.state === 'complete' ? 'ready' : live.state === 'active' ? 'neutral' : live.state === 'uncertain' ? 'attention' : 'blocked' : view.canExecute ? 'ready' : view.status === 'loading' || view.status === 'empty' ? 'neutral' : 'blocked'}`} role="status" aria-live="polite"><strong><span className="simulation-status-dot" aria-hidden="true"/>{tr(statusLabel)}</strong><p>{tr(statusMessage)}</p></div>
+        {status}
         <dl className="simulation-summary-values">
           {result ? <>
             <div className="execution-result-count"><dt>{tr(result.countLabel)}</dt><dd>{tr(result.completed)}{tr(" of ")}{tr(result.total)}</dd></div>
@@ -75,28 +96,35 @@ export function ExecuteWorkspace(props: ExecuteWorkspaceProps) {
           {!live && <div><dt>{tr("Authorization")}</dt><dd className={['Review required again', 'Approval required', 'Expired'].includes(view.authorizationLabel) ? 'execution-authorization-attention' : undefined}>{tr(view.authorizationLabel)}</dd></div>}
         </dl>
         {live?.active && <section className="execute-next" aria-label={tr("Current step")}><h3>{tr(result ? 'Needs attention' : 'Current step')}</h3><p>{tr(live.active.number)}. {tr(live.active.action)}</p><p>{tr([live.active.provider, live.active.network].filter(Boolean).join(' · '))}</p><p>{tr(live.active.label)}</p></section>}
-        {(requestFailed || live && props.source.state.error) && <p className="simulation-warning-blocking execution-request-error" role="status">{tr("The last request could not complete. Check the recorded status before taking another action.")}</p>}
-        {live && recovery?.contextIssue && <p className="execution-context execution-recovery-attention" role="status">{tr(recovery.contextIssue)}</p>}
-        {result && live?.evidence?.attention.map(item => <p className="execution-context execution-recovery-attention" key={item}>{tr(item)}</p>)}
-        {live?.local && live.steps.some(step => step.operations.some(operation => operation.intent)) && <p className="execution-context">{tr("Local signed-order execution · scripted settlement. No public settlement or funds are observed.")}</p>}
-        {checkFailed && <p className="execution-context" role="status">{tr("Unable to check execution status. The recorded result is unchanged; no transaction was resent.")}</p>}
-        {live && live.state === 'active' && live.active?.operations.some(operation => operation.state === 'waiting') && !verifying && !requesting && !recovery?.contextIssue && !view.bindingValid && <p className="execution-context" role="status">{tr(view.authorizationMessage)}</p>}
-        {!live && view.warnings.length > 0 && <ul className="simulation-warnings" aria-label={tr("Execution blockers")}>{view.warnings.map((warning, index) => <li key={index} className="simulation-warning-blocking"><span className="simulation-warning-label">{tr("Blocking")}</span>{tr(warning.message)}</li>)}</ul>}
-        {authorization.accepted && view.prompt && !execution.started && !requesting && <section className="execute-next" aria-label={tr("Next confirmation")}><h3>{tr("What happens next")}</h3><p>{tr(view.prompt)}</p><p>{tr("Only the next authorized request starts. Further wallet confirmations remain separate.")}</p></section>}
+        {notices}
         <div className="execute-actions simulation-workspace-actions">
-          {!detailsOnly && stageActions}
-          <button type="button" className="simulation-back" onClick={result || view.status === 'empty' ? backToBuild : backToSimulate}>{tr(result ? 'Return to Build' : view.status === 'empty' ? 'Create a workflow in Build' : view.label === 'Simulation expired' ? 'Simulate again' : 'Back to Simulate')}</button>
+          {stageActions}
+          {back}
         </div>
-        {live && live.state !== 'complete' && live.steps.some(step => step.operations.some(operation => operation.hash || operation.intent && ['posted', 'settling', 'partial'].includes(operation.state))) && <p className="execution-context execution-navigation-note">{tr("Leaving this view does not cancel submitted requests.")}</p>}
+        {navigationNote}
       </aside>
   </>;
+  // BUILD0-UX-001: the chat-first status panel — the run's state and progress, what needs the owner's action, and where to go next. The wallet,
+  // network, provider and cost lines of the side summary and the run's technical evidence are in the Dashboard, never duplicated here.
+  const statusPanel = <section className={`execution-summary execution-status-panel panel${result ? ' execution-result-summary' : ''}`} aria-label={tr(result ? 'Execution result' : 'Execution status')}>
+    {status}
+    {!live && ['Review required again', 'Approval required', 'Expired'].includes(view.authorizationLabel) && <p className="execution-context execution-authorization-attention" role="status">{tr('Authorization')}: {tr(view.authorizationLabel)}</p>}
+    {live && <p className="execution-status-progress">{result ? <>{tr(result.countLabel)} · <span className="numeric">{tr(result.completed)}{tr(" of ")}{tr(result.total)}</span></>
+      : tr('{0} of {1} steps confirmed', live.completed, live.steps.length)}</p>}
+    {notices}
+    <div className="execute-actions simulation-workspace-actions execution-status-actions">
+      {stageActions}
+      {back}
+      {live && props.openDashboard && <button type="button" className="simulation-back execution-dashboard-link" onClick={props.openDashboard}>{tr('View in Dashboard')}</button>}
+    </div>
+    {navigationNote}
+  </section>;
   return <section className="execute-workspace" aria-label={tr("Workflow execution workspace")}>
     <div className={`execute-workspace-grid${detailsOnly ? ' stage-grid-single' : ''}`}>
       {live ? <ExecutionTimeline progress={live} result={result} workflowName={workflowName} backToBuild={backToBuild} checkingOperation={verifying && !recovery?.recordOnly ? recovery?.operationId ?? null : null} primaryAction={props.primaryAction ?? <><button type="button" className="simulation-back" onClick={backToBuild}>{tr("Back to Build")}</button><CanvasLifecycleAction {...props} controls={controls}/></>}/> : <SimulateWorkflowCanvas workflowName={workflowName} stage="execute" primaryAction={props.primaryAction ?? <><button type="button" className="simulation-back" onClick={backToBuild}>{tr("Back to Build")}</button><CanvasLifecycleAction {...props} controls={controls}/></>}/>}
       {!detailsOnly && executionSummary}
     </div>
-    {detailsOnly && (connectWallet || startNew) && <div className="execute-actions stage-actions">{stageActions}</div>}
-    {detailsOnly && <details className="shell-details stage-details execution-details"><summary>{tr(result ? 'Result details' : 'Execution details')}</summary>{executionSummary}</details>}
-    {(live || props.technicalDetails) && <details className="shell-details technical-workspace execute-technical"><summary>{tr("View technical details")}</summary>{live ? <><ExecutionEvidenceDetails progress={live}/>{tr(props.source.kind === 'unavailable' && props.technicalDetails)}</> : props.technicalDetails}</details>}
+    {detailsOnly && statusPanel}
+    {props.technicalDetails && <details className="shell-details technical-workspace execute-technical"><summary>{tr("View technical details")}</summary>{live ? <><ExecutionEvidenceDetails progress={live}/>{tr(props.source.kind === 'unavailable' && props.technicalDetails)}</> : props.technicalDetails}</details>}
   </section>;
 }

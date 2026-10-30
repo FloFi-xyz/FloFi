@@ -2,8 +2,9 @@
 import { test, expect } from './fixtures';
 import { selectSettingsTheme } from './settings-fixtures';
 import { installSupplyWallet, setSupplyWalletChain } from './supply-fixtures';
+import { openBuilder } from './build-entry-navigation';
 for (const action of ['swap', 'pool', 'supply', 'borrow', 'repay', 'withdraw']) test(`${action} reuses Tokens / Networks with one supported action network`, async ({ page }) => {
-  await installSupplyWallet(page); await page.goto('/app');
+  await installSupplyWallet(page); await openBuilder(page);
   await expect(page.getByRole('combobox', { name: 'Environment', exact: true })).toHaveText('Testnet');
   await page.getByRole('button', { name: `Add ${action}`, exact: true }).click();
   const card = page.locator('.build-flow-surface .composer-card');
@@ -77,7 +78,7 @@ for (const action of ['swap', 'pool', 'supply', 'borrow', 'repay', 'withdraw']) 
 });
 
 for (const theme of ['Light', 'Dark']) test(`${theme} Swap shares live environment filtering, independent assets and neutral unknown networks`, async ({ page }) => {
-  await installSupplyWallet(page, { chain: '0x2105' }); await page.goto('/app');
+  await installSupplyWallet(page, { chain: '0x2105' }); await openBuilder(page);
   await expect(page.getByRole('combobox', { name: 'Environment', exact: true })).toHaveText('Mainnet');
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await selectSettingsTheme(page, theme); await page.getByRole('button', { name: 'Settings', exact: true }).click();

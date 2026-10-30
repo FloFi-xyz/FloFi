@@ -2,6 +2,7 @@
 import { test, expect, applyPendingProposal, openSimulationDetails } from './fixtures';
 import type { Page } from '@playwright/test';
 import { configureCanvasAction, configureCanvasPool, openCanvasSettings } from './composer-authoring-fixtures';
+import { openBuilder } from './build-entry-navigation';
 const owner = '0x1111111111111111111111111111111111111111';
 const graph = (page: Page) => page.getByRole('region', { name: 'Simulation workflow graph', exact: true });
 const summary = (page: Page) => page.getByRole('complementary', { name: 'Simulation Summary', exact: true });
@@ -45,7 +46,7 @@ test.afterEach(async ({ page }) => {
   expect(await page.evaluate(() => (window as unknown as { inspectionWalletRequests: string[] }).inspectionWalletRequests.filter(method => /sign|send/i.test(method)))).toEqual([]);
 });
 async function open(page: Page) {
-  await page.goto('/app'); await expect(page.locator('.build009-wallet-info')).toBeVisible({ timeout: 15000 });
+  await openBuilder(page); await expect(page.locator('.build009-wallet-info')).toBeVisible({ timeout: 15000 });
 }
 async function rename(page: Page, name: string) {
   await page.getByRole('button', { name: 'Rename workflow', exact: true }).click();

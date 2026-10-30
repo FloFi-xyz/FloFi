@@ -3,11 +3,12 @@ import { test, expect, assertNoFinancialCanvasAction } from './fixtures';
 import { selectSettingsTheme } from './settings-fixtures';
 import { installSupplyWallet } from './supply-fixtures';
 import { configureCanvasAction } from './composer-authoring-fixtures';
+import { openBuilder } from './build-entry-navigation';
 
 for (const theme of ['Light', 'Dark'] as const) test(`${theme} approved fonts and identity preserve the shell at product widths`, async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
-  await installSupplyWallet(page); await page.goto('/app');
+  await installSupplyWallet(page); await openBuilder(page);
   await expect(page.locator('.wallet-address')).toBeVisible();
   const settings = page.getByRole('button', { name: 'Settings', exact: true });
   await settings.click(); await selectSettingsTheme(page, theme);

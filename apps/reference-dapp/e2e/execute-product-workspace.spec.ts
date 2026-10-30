@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { configureCanvasAction } from './composer-authoring-fixtures';
 import type { Page } from '@playwright/test';
 import { reviewNow } from '../src/test-utils/review-fixture';
+import { openBuilder, reloadBuilder } from './build-entry-navigation';
 
 // Mount Execute with a real read-only canvas to verify native clicks, expiry and wallet updates.
 // These normalized fixtures do not claim to exercise RPC or wallet signatures.
@@ -52,7 +53,7 @@ test.beforeAll(async () => {
 test.beforeEach(async ({ page }) => {
   const errors: string[] = []; browserErrors.set(page, errors);
   page.on('pageerror', error => errors.push(error.message));
-  await page.goto('/app');
+  await openBuilder(page);
   await expect(page.getByRole('button', { name: 'Settings', exact: true })).toBeVisible();
   const styles = await page.locator('head link[rel="stylesheet"]').evaluateAll(links => links.map(link => link.outerHTML).join(''));
   const fontClasses = await page.locator('html').getAttribute('class');
@@ -221,7 +222,7 @@ test('the real shell preserves Build and embedded Review while Execute stays rea
       }, on() {}, removeListener() {},
     } });
   });
-  await page.goto('/app');
+  await openBuilder(page);
   // This provider already exposes an account. Wait for the shared wallet's passive reuse;
   // the transient Connect button disappears during hydration.
   await expect(page.locator('.build009-wallet-info')).toBeVisible();
@@ -242,15 +243,16 @@ test('the real shell preserves Build and embedded Review while Execute stays rea
   await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Execute', exact: true }).click();
   await expect(page.locator('.execute-heading')).toHaveCount(0);
   await expect(page.getByRole('heading', { name: 'Your Workflow', exact: true })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Execution Summary', exact: true })).toBeHidden();
-  await page.locator('.execution-details > summary').click();
-  await expect(page.getByRole('heading', { name: 'Execution Summary', exact: true })).toBeVisible();
+  // BUILD0-UX-001: no "Execution details" / "View technical details" disclosures; the status panel stays visible under the canvas.
+  await expect(page.getByRole('heading', { name: 'Execution Summary', exact: true })).toHaveCount(0);
+  await expect(page.locator('details.execution-details, details.execute-technical')).toHaveCount(0);
+  await expect(page.getByRole('region', { name: 'Execution status', exact: true })).toBeVisible();
   const graph = page.getByRole('region', { name: 'Execution workflow graph', exact: true });
   await expect(graph).toHaveAttribute('data-viewport', 'fitted');
   await expect(graph.locator('.composer-amount')).toHaveText('2.5 USDC');
   await expect(graph.locator('.composer-card input,.composer-card select')).toHaveCount(0);
-  await expect(page.locator('.execution-summary')).toContainText('Base Sepolia');
-  await expect(page.locator('.execution-summary')).toContainText('Testnet');
+  // The wallet, network and environment lines live in the Dashboard; the header still names the workflow's network.
+  await expect(page.locator('.shell-network-row')).toContainText('Base Sepolia');
   await assertNoFinancialCanvasAction(page);
   await expect(page.locator('#simulation-review')).toHaveCount(0);
   for (const theme of ['light', 'dark']) {
@@ -330,14 +332,13 @@ for (const theme of ['light', 'dark']) test(`${theme} final evidence, actual val
   await expect(plan).toContainText('Actual received'); await expect(plan).toContainText('0.0243 WETH');
   await expect(plan).toContainText('0.025 WETH'); await expect(plan).toContainText('Planned'); await expect(plan).toContainText('Actual');
   await expect(plan).toContainText('Approval transaction'); await expect(plan).toContainText('Action transaction');
-  const details = page.locator('.execute-technical'); await expect(details).not.toHaveAttribute('open', '');
-  await expect(page.getByText('Current execution record', { exact: true })).not.toBeVisible();
+  // BUILD0-UX-001: Execute has no technical disclosure; the run's record and evidence are in the Dashboard (dashboard-run-details.spec.ts).
+  await expect(page.locator('.execute-technical')).toHaveCount(0);
+  await expect(page.getByText('Current execution record', { exact: true })).toHaveCount(0);
   await page.evaluate(() => { Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { async writeText(value: string) { Object.assign(window, { copiedExecutionIdentifier: value }); } } }); });
   await plan.getByRole('button', { name: `Copy transaction ${'0x' + 'b'.repeat(64)}`, exact: true }).click();
   await expect(plan.getByRole('button', { name: `Copy transaction ${'0x' + 'b'.repeat(64)}`, exact: true })).toHaveText('Copied');
   expect(await page.evaluate(() => (window as unknown as { copiedExecutionIdentifier: string }).copiedExecutionIdentifier)).toBe('0x' + 'b'.repeat(64));
-  await page.getByText('View technical details', { exact: true }).click();
-  await expect(page.getByText('Current execution record', { exact: true })).toBeVisible(); await expect(details).toContainText('acceptance-evidence');
   for (const width of [1280, 820, 390]) {
     await page.setViewportSize({ width, height: 900 });
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
@@ -360,9 +361,8 @@ test('bridge source evidence does not claim destination settlement before reconc
   await expect(plan.getByRole('link', { name: 'View transaction' })).toHaveCount(2);
   for (const theme of ['light', 'dark']) {
     await page.evaluate(value => document.documentElement.dataset.theme = value, theme);
-    await page.setViewportSize({ width: 820, height: 900 }); await page.getByText('View technical details', { exact: true }).click();
+    await page.setViewportSize({ width: 820, height: 900 });
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-    await page.getByText('View technical details', { exact: true }).click();
   }
 });
 test('signed order IDs and long provider references stay distinct from transaction hashes', async ({ page }) => {
@@ -378,9 +378,8 @@ test('signed order IDs and long provider references stay distinct from transacti
   await expect(plan).toContainText('Scripted received'); await expect(plan).toContainText('0.0243 WETH');
   for (const theme of ['light', 'dark']) {
     await page.evaluate(value => document.documentElement.dataset.theme = value, theme);
-    await page.setViewportSize({ width: 390, height: 900 }); await page.getByText('View technical details', { exact: true }).click();
+    await page.setViewportSize({ width: 390, height: 900 });
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-    await page.getByText('View technical details', { exact: true }).click();
   }
   await expect(page.getByRole('button', { name: /Retry|Authorize in wallet/ })).toHaveCount(0);
   expect((await page.evaluate(() => window.flofiExecuteAcceptance.counts())).executed).toBe(0);
@@ -473,7 +472,7 @@ test('an unresolved or unsuccessful check preserves uncertainty and never offers
 });
 test('remount after reload keeps the same pending record and its confirmed approval', async ({ page }) => {
   await page.evaluate(() => window.flofiExecuteAcceptance.lifecycle('restored'));
-  await page.reload();
+  await reloadBuilder(page);
   await page.evaluate(() => (window as unknown as { FloFiExecuteAcceptance: { mount(element: HTMLElement): void } }).FloFiExecuteAcceptance.mount(document.getElementById('acceptance-root')!));
   await expect(page.locator('.execution-timeline')).toContainText('Approve USDC');
   await expect(page.locator('.execution-timeline')).toContainText('Pending confirmation');
@@ -531,16 +530,10 @@ test('safe status checks and continuation each have one primary Canvas action', 
   expect((await page.evaluate(() => window.flofiExecuteAcceptance.counts())).executed).toBe(0);
 });
 
-test('technical details, transaction links and copy confirmation work with the keyboard', async ({ page }) => {
+test('transaction links and copy confirmation work with the keyboard', async ({ page }) => {
   await page.evaluate(() => window.flofiExecuteAcceptance.evidence('reconciled'));
-  const disclosure = page.locator('.execute-technical summary');
-  for (const theme of ['light', 'dark']) {
-    await page.evaluate(value => document.documentElement.dataset.theme = value, theme);
-    await disclosure.focus(); await disclosure.press('Enter');
-    await expect(page.locator('.execute-technical')).toHaveAttribute('open', '');
-    expect(await disclosure.evaluate(element => ({ style: getComputedStyle(element).outlineStyle, width: getComputedStyle(element).outlineWidth }))).toEqual({ style: 'solid', width: '2px' });
-    await disclosure.press('Space'); await expect(page.locator('.execute-technical')).not.toHaveAttribute('open', '');
-  }
+  // BUILD0-UX-001: no technical disclosure on Execute; the timeline keeps each transaction's copy and explorer controls.
+  await expect(page.locator('.execute-technical')).toHaveCount(0);
   const hash = '0x' + 'b'.repeat(64);
   const plan = page.getByRole('region', { name: 'Execution plan', exact: true });
   await page.evaluate(() => { Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { async writeText(value: string) { Object.assign(window, { copiedExecutionIdentifier: value }); } } }); });
@@ -598,8 +591,6 @@ for (const width of [320, 375, 390, 430]) {
     await page.evaluate(() => window.flofiExecuteAcceptance.evidence('bridge-reconciled'));
     const plan = page.getByRole('region', { name: 'Execution plan', exact: true });
     await expect(plan).toContainText('Reconciled');
-    await page.getByText('View technical details', { exact: true }).click();
-    await expect(page.locator('.execution-evidence-details')).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     const result = await page.locator('.execution-transaction').evaluateAll(items => items.every(item => item.getBoundingClientRect().right <= innerWidth));
     expect(result).toBe(true);

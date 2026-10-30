@@ -3,12 +3,13 @@ import type { Page } from '@playwright/test';
 import { test, expect } from './fixtures';
 import { chooseSolanaWallet, signChains, signRequests } from './jupiter-fixtures';
 import { devnetControl, installDevnetWallet, resetDevnetHarness } from './solana-devnet-fixtures';
+import { openBuilder, reloadBuilder } from './build-entry-navigation';
 
 // BUILD-015 on the MOCKED Devnet loopback only: these runs prove the UX and fail-closed paths, never DEVNET_EXECUTED.
 const panel = (page: Page) => page.getByRole('region', { name: 'Solana Devnet liquidity' });
 test.afterEach(async ({ page }, info) => { if (info.status !== info.expectedStatus) console.error('Liquidity failure:', await panel(page).locator('pre').textContent().catch(() => 'no panel')); });
 async function authorCanvas(page: Page) {
-  await page.goto('/app');
+  await openBuilder(page);
   await page.getByText('Advanced action setup').click();
   await page.locator('#liquidity-network').selectOption('SOLANA_DEVNET');
   const form = page.getByRole('form', { name: 'Create Solana Devnet liquidity position' });
@@ -19,7 +20,7 @@ async function authorCanvas(page: Page) {
   await page.getByRole('button', { name: 'Apply proposal' }).click();
 }
 async function authorChat(page: Page) {
-  await page.goto('/app');
+  await openBuilder(page);
   await page.locator('#mock-prompt').fill('Add liquidity 0.01 SOL and 0.30 devUSDC ticks -39104 to -36992 on Solana Devnet');
   await page.getByRole('button', { name: 'Send', exact: true }).click();
   await page.getByRole('button', { name: 'Apply proposal' }).click();
@@ -110,7 +111,7 @@ test('bytes changed by the wallet are never broadcast and the position key never
 test('after a reload the one-time position key is gone: Execute is refused before any wallet request or broadcast', async ({ page }) => {
   const wallet = await resetDevnetHarness(); await installDevnetWallet(page, wallet);
   await authorChat(page); await simulateAndReview(page);
-  await page.reload();
+  await reloadBuilder(page);
   await page.getByRole('button', { name: 'Simulate workflow' }).click();
   await expect(panel(page)).toBeVisible();
   await chooseSolanaWallet(panel(page));

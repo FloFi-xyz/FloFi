@@ -7,6 +7,7 @@
 import type { Page } from '@playwright/test';
 import { test, expect } from './fixtures';
 import { installSupplyWallet, resetSupplyHarness, reviewSupply, SUPPLY_OWNER, supplySendCount } from './supply-fixtures';
+import { openBuilder } from './build-entry-navigation';
 
 const ROUTE = '/ethereum-sepolia' as const;
 const WBTC = '0x29f2d40b0605204364af54ec677bd022da425d03', POOL = '0x6ae43d3271ff6888e7fc43fd7321a503ff738951';
@@ -15,7 +16,7 @@ const requests = (page: Page) => page.evaluate(() => (window as unknown as { sup
 const region = (page: Page) => page.getByRole('region', { name: 'Aave Supply' });
 
 async function authorWbtcSupply(page: Page) {
-  await page.goto('/app'); await page.getByRole('button', { name: 'Add supply', exact: true }).click();
+  await openBuilder(page); await page.getByRole('button', { name: 'Add supply', exact: true }).click();
   const form = page.getByRole('form', { name: 'Create Supply' });
   await form.getByLabel('Supply network').selectOption('Ethereum Sepolia');
   await form.getByLabel('Supply amount (WBTC)').fill('0.001'); await form.getByLabel('Supply beneficiary').fill(SUPPLY_OWNER);

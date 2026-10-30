@@ -17,6 +17,7 @@ import { installSolanaWallet, MOCKED_SOLANA_WALLET, signRequests } from './jupit
 import { createTestWallet, personalSignText, type TestWallet } from '../../../packages/reference-reconciler/test/test-wallet.ts';
 import type { BuildEstimateResult } from '../src/domain/build-estimate';
 import { replayProviderLogos } from './asset-logo-replay';
+import { openBuilder, reloadBuilder } from './build-entry-navigation';
 
 const copilotSays = (page: Page) => page.getByRole('log', { name: 'Conversation' }).locator('.message.ai').last();
 async function ask(page: Page, text: string) {
@@ -25,7 +26,7 @@ async function ask(page: Page, text: string) {
 }
 const panel = (page: Page) => page.getByRole('region', { name: 'Universal cross-chain bridge' });
 test('Copilot keeps a destination question without buttons and resolves one token reply without repeating the request', async ({ page }) => {
-  await page.goto('/app');
+  await openBuilder(page);
   const before = await counters();
   await ask(page, 'quero bridge de 1 USDT da Solana para Robinhood Chain');
   await expect(copilotSays(page)).toContainText('Qual ativo você quer receber');
@@ -77,7 +78,7 @@ async function installEvmWallet(page: Page, wallet: TestWallet, mode: 'normal' |
   }, { owner: wallet.address, mode });
 }
 async function authorByChat(page: Page, sentence: string) {
-  await page.goto('/app');
+  await openBuilder(page);
   const quote = page.waitForResponse(response => response.url().endsWith('/api/build-estimate') && response.request().method() === 'POST');
   await sendChatCommand(page, sentence);
   const response = await quote, result = await response.json() as BuildEstimateResult;
@@ -180,7 +181,7 @@ test('a Phantom wallet that adds its verified Lighthouse protections still signs
 test('a new Canvas Bridge card on mainnet offers Solana and applies a universal bridge (existing Router pairs keep their own card)', async ({ page }) => {
   const errors: string[] = []; page.on('pageerror', e => errors.push(e.message));
   await installEvmWallet(page, wallets.evm);
-  await page.goto('/app');
+  await openBuilder(page);
   await page.getByRole('button', { name: 'Add bridge', exact: true }).click();
   const card = page.locator('.build-flow-surface .composer-card');
   await card.getByRole('textbox').fill('12');
@@ -273,7 +274,7 @@ test('P0 simulation infrastructure failure has a safe specific message and a sup
 
 test('P0 Canvas independently selects Base USDC and Arbitrum WETH and applies the same universal bridge', async ({ page }) => {
   await installEvmWallet(page, wallets.evm);
-  await page.goto('/app');
+  await openBuilder(page);
   await page.getByRole('button', { name: 'Add bridge', exact: true }).click();
   const card = page.locator('.build-flow-surface .composer-card');
   await card.getByRole('textbox').fill('1');
@@ -310,7 +311,7 @@ test('financial truth: an unresolved EVM wallet stays navigable and recoverable,
   await page.evaluate(() => (window as unknown as { rejectEvmRequest: () => void }).rejectEvmRequest());
   await expect(page.locator('[data-universal-wallet-pending="true"]')).toHaveCount(0);
   await expect(panel(page).getByRole('list', { name: 'Source transactions' })).toContainText('Approval: cancelled');
-  await page.reload(); await stages.getByRole('button', { name: 'Execute', exact: true }).click();
+  await reloadBuilder(page); await stages.getByRole('button', { name: 'Execute', exact: true }).click();
   await expect(page.locator('.execution-timeline')).toContainText('Wallet request declined');
   await expect(page.locator('.execution-summary')).toContainText('Transaction not submitted');
   expect(await counters()).toEqual({ solanaSends: 0, evmSends: 0 });

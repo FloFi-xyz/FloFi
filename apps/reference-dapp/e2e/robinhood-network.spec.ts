@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect } from './fixtures';
 import { configureCanvasAction } from './composer-authoring-fixtures';
+import { openBuilder } from './build-entry-navigation';
 
 /** A passive injected wallet already on `chain`. It records every method and refuses anything but reads. */
 async function walletOn(page: import('@playwright/test').Page, chain: string) {
@@ -20,7 +21,7 @@ const methods = (page: import('@playwright/test').Page) =>
 
 test('an injected wallet on Robinhood Chain Testnet is identified by name without any provider egress', async ({ page, networkGuard }) => {
   await walletOn(page, '0xb626');
-  await page.goto('/app');
+  await openBuilder(page);
   await expect(page.getByText('0x1111…1111')).toBeVisible();
   expect(new Set(await methods(page))).toEqual(new Set(['eth_accounts', 'eth_chainId']));
   networkGuard.assertClean();
@@ -28,7 +29,7 @@ test('an injected wallet on Robinhood Chain Testnet is identified by name withou
 
 test('a wallet on Robinhood mainnet is recognized but never asked to switch, sign or send', async ({ page, networkGuard }) => {
   await walletOn(page, '0x1237');
-  await page.goto('/app');
+  await openBuilder(page);
   await expect(page.getByText('0x1111…1111')).toBeVisible();
   // Normal Canvas follows the existing mainnet/testnet environment policy.
   // Authoring a Base swap must not switch the Robinhood wallet or request financial authority.

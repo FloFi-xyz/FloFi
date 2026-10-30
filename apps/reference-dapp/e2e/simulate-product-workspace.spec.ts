@@ -4,6 +4,7 @@ import { selectSettingsTheme } from './settings-fixtures';
 import type { Locator, Page } from '@playwright/test';
 import { configureCanvasAction } from './composer-authoring-fixtures';
 import { resetSupplyHarness } from './supply-fixtures';
+import { openBuilder } from './build-entry-navigation';
 
 const graph = (page: Page) => page.getByRole('region', { name: 'Simulation workflow graph', exact: true });
 const summary = (page: Page) => page.getByRole('complementary', { name: 'Simulation Summary', exact: true });
@@ -33,7 +34,7 @@ test.beforeEach(async ({ page }, testInfo) => {
       }, on() {}, removeListener() {},
     } });
   }, testInfo.title.includes('mocked diagnostics') ? '0x2105' : '0x14a34');
-  await page.goto('/app');
+  await openBuilder(page);
   await expect(page.locator('.build009-wallet-info')).toBeVisible();
 });
 test.afterEach(async ({ page }) => {

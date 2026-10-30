@@ -2,10 +2,11 @@
 import { test, expect, chooseWallet } from './fixtures';
 import { installSupplyWallet } from './supply-fixtures';
 import { configureCanvasAction } from './composer-authoring-fixtures';
+import { openBuilder } from './build-entry-navigation';
 
 test('boxed wallet preserves connect/disconnect and aligns with the Settings toggle', async ({ page }) => {
   await installSupplyWallet(page, { connected: false });
-  await page.goto('/app');
+  await openBuilder(page);
   const header = page.getByRole('banner');
   const wallet = header.getByRole('group', { name: 'Wallet connection', exact: true });
   const settings = header.getByRole('button', { name: 'Settings', exact: true });
@@ -55,7 +56,7 @@ test('boxed wallet preserves connect/disconnect and aligns with the Settings tog
 
 test('Settings toggles without layout changes, closes outside/Escape/Tab and leaves wallet and node selection untouched', async ({ page }) => {
   await installSupplyWallet(page);
-  await page.goto('/app');
+  await openBuilder(page);
   await page.getByRole('button', { name: 'Add supply', exact: true }).click();
   const settings = page.getByRole('button', { name: 'Settings', exact: true });
   const options = page.getByRole('group', { name: 'Settings options', exact: true });
@@ -99,7 +100,7 @@ test('Settings toggles without layout changes, closes outside/Escape/Tab and lea
 });
 
 test('single-area language and theme switches preserve preferences and fit narrow headers', async ({ page }) => {
-  await installSupplyWallet(page); await page.goto('/app');
+  await installSupplyWallet(page); await openBuilder(page);
   await expect(page.locator('.build009-wallet-info')).toBeVisible();
   const header = page.getByRole('banner');
   const settings = header.getByRole('button', { name: 'Settings', exact: true });
@@ -136,7 +137,7 @@ test('single-area language and theme switches preserve preferences and fit narro
 
 test('advanced setup has a single outer expansion and retains existing forms without primary workflow internals', async ({ page }) => {
   await installSupplyWallet(page);
-  await page.goto('/app');
+  await openBuilder(page);
   await expect(page.getByText('Technical authoring tools', { exact: true })).toHaveCount(0);
   const advanced = page.locator('details.library[aria-label="Advanced action setup"]');
   await expect(advanced).toHaveCount(1);

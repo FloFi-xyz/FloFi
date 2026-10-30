@@ -10,6 +10,7 @@ import { createBackend, type FlowResult } from '../backend/app';
 import type { RouterBegin, RouterRecord } from '../src/server/router-service';
 import { createTestWallet, type TestWallet } from '../../../packages/reference-reconciler/test/test-wallet';
 import { installJourneyWallet, resetJourneyHarness, journeySends, switchAccount, walletRequests, setWalletChain } from './journey-fixtures';
+import { continueToBuilder, openBuilder, reloadBuilder } from './build-entry-navigation';
 
 const stage = (page: Page, name: string) => page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name, exact: true }).click();
 async function author(page: Page) {
@@ -79,6 +80,7 @@ test('new workflow identity is unique per load and matches the serialized server
   // identity is still serialized in the server component's provider props.
   const server = (await response!.text()).match(/initialWorkflowId.{0,12}(workflow-[0-9a-f-]{36})/)?.[1];
   expect(server).toBeDefined();
+  await continueToBuilder(page);
   await sendChatCommand(page, 'Swap 1 USDC to WETH on Base slippage 50 bps');
   const client = JSON.parse(await readWorkflowIr(page)).workflowId;
   expect(client).toBe(server); expect(client).toMatch(/^workflow-[0-9a-f-]{36}$/);
@@ -88,7 +90,7 @@ test('new workflow identity is unique per load and matches the serialized server
 });
 
 test('normal Build removes the entire QA panel, keeps the header wallet and authors/simulates the permissionless bridge', async ({ page, networkGuard }) => {
-  const owner = createTestWallet(); await resetJourneyHarness([owner]); await installJourneyWallet(page, [owner]); await page.goto('/app');
+  const owner = createTestWallet(); await resetJourneyHarness([owner]); await installJourneyWallet(page, [owner]); await openBuilder(page);
   await expect(page.getByRole('group', { name: 'Wallet connection' })).toBeVisible();
   await expect(page.getByRole('group', { name: 'Wallet connection' })).toContainText(owner.address.slice(0, 6));
   for (const text of ['PERMISSIONLESS TESTNET JOURNEY', 'Bridge test USDC from Base Sepolia to Arbitrum Sepolia with your own wallet',
@@ -116,7 +118,7 @@ test('normal Build removes the entire QA panel, keeps the header wallet and auth
 
 test('Save → Your workflows → exact Canvas restoration; grouped executions, ownership, EN/PT and Dashboard evidence stay separate', async ({ page, networkGuard }) => {
   test.setTimeout(90_000);
-  const A = createTestWallet(), B = createTestWallet(); await resetJourneyHarness([A, B]); await installJourneyWallet(page, [A, B]); await page.goto('/app');
+  const A = createTestWallet(), B = createTestWallet(); await resetJourneyHarness([A, B]); await installJourneyWallet(page, [A, B]); await openBuilder(page);
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
   await author(page);
   const name = 'Save workflow'; // User data that happens to be a catalog key must stay unchanged.
@@ -150,7 +152,7 @@ test('Save → Your workflows → exact Canvas restoration; grouped executions, 
   await expect(page.locator('main')).toContainText(run1);
   await expect(page.locator('main')).toContainText('Evidence');
   expect(run1).not.toBe(run2);
-  await page.reload();
+  await reloadBuilder(page);
   library = await libraryWorkspace(page);
   await expect(library.getByRole('button', { name, exact: true })).toHaveCount(1);
   await expect(library.getByRole('button', { name: 'Workflow', exact: true })).toHaveCount(1);
@@ -197,12 +199,12 @@ test('Save → Your workflows → exact Canvas restoration; grouped executions, 
 
 for (const [initialChain, initialLabel] of [['0x1', 'Ethereum Mainnet'], ['0xaa36a7', 'Ethereum Sepolia']] as const) {
 test(`header tracks external chain changes and reloads the actual provider on ${initialLabel}`, async ({ page, networkGuard }) => {
-  const owner = createTestWallet(); await resetJourneyHarness([owner]); await installJourneyWallet(page, [owner], { chain: initialChain }); await page.goto('/app');
+  const owner = createTestWallet(); await resetJourneyHarness([owner]); await installJourneyWallet(page, [owner], { chain: initialChain }); await openBuilder(page);
   const header = page.getByRole('group', { name: 'Wallet connection' });
   const walletSlot = header.locator('.wallet-connection');
   await expect(header).toContainText(owner.address.slice(0, 6));
   await expect(walletSlot).toHaveAttribute('title', new RegExp(initialLabel.replace(/[()]/g, '\\$&')));
-  await page.reload(); await expect(walletSlot).toHaveAttribute('title', new RegExp(initialLabel.replace(/[()]/g, '\\$&')));
+  await reloadBuilder(page); await expect(walletSlot).toHaveAttribute('title', new RegExp(initialLabel.replace(/[()]/g, '\\$&')));
   for (const [chain, label] of [['0x2105', 'Base (8453)'], ['0x1', 'Ethereum Mainnet'], ['0xa4b1', 'Arbitrum (42161)'], ['0x14a34', 'Base Sepolia'], ['0xaa36a7', 'Ethereum Sepolia'], ['0xdeadbeef', 'Other chain (0xdeadbeef)']]) {
     await setWalletChain(page, chain!);
     await expect(header).toContainText(owner.address.slice(0, 6));

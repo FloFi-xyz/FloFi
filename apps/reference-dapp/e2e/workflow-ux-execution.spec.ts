@@ -8,14 +8,15 @@ import { test, expect, AUTHORIZE_IN_WALLET, readWorkflowIr, openFirstActionSetti
 import { installJourneyWallet, walletRequests } from './journey-fixtures';
 import { createTestWallet } from '../../../packages/reference-reconciler/test/test-wallet';
 import { createDatabase } from '@defi-workflow-engine/cloud-runtime';
+import { openBuilder, reloadBuilder } from './build-entry-navigation';
 
 test.skip(process.env.FLOFI_SWAP_EXECUTION_E2E !== 'MOCKED_LOOPBACK_ONLY', 'Requires the opt-in loopback swap execution harness');
 test.setTimeout(90_000);
 const stage = (page: Page, name: 'Build' | 'Simulate' | 'Execute') => page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name, exact: true });
 const summary = (page: Page) => page.locator('.execution-summary');
-/** BUILD-FLOFI-CHAT-E2E-FIX-002: the chat-first summaries are optional, collapsed details; Create new workflow stays visible beside them. */
-const createNew = (page: Page) => page.locator('.execute-actions.stage-actions').getByRole('button', { name: 'Create new workflow', exact: true });
-async function openDetails(page: Page, selector: '.execution-details' | '.simulation-details') {
+/** BUILD0-UX-001: the chat-first Execute status panel (always visible) offers Create new workflow beside Return to Build. */
+const createNew = (page: Page) => page.locator('.execution-status-panel').getByRole('button', { name: 'Create new workflow', exact: true });
+async function openDetails(page: Page, selector: '.simulation-details') {
   const details = page.locator(selector);
   if (!await details.evaluate(element => (element as HTMLDetailsElement).open)) await details.locator(':scope > summary').click();
 }
@@ -66,7 +67,7 @@ async function setup(page: Page, request: APIRequestContext, options: { decline?
     if (gate && route.request().method() === 'POST' && route.request().headers()['next-action']) { held++; await gate; }
     await route.fallback();
   });
-  await page.goto('/app');
+  await openBuilder(page);
   const wallet = page.getByRole('group', { name: 'Wallet connection' });
   await expect(wallet.locator('.header-wallet-provider')).toHaveAttribute('title', 'MetaMask');
   await expect(wallet.locator('.wallet-connection')).toHaveAttribute('title', /Base Sepolia/);
@@ -175,7 +176,7 @@ test('UX-003/UX-004: completed run — locked CTAs, Return to Build keeps the wo
   await owner.confirm();
   await expect(summary(page)).toContainText('Execution completed'); await expect(processing(page)).toHaveCount(0);
   const create = createNew(page);
-  await expect(create).toBeVisible(); await openDetails(page, '.execution-details'); await expect(summary(page).getByRole('button', { name: 'Return to Build', exact: true })).toBeVisible();
+  await expect(create).toBeVisible(); await expect(summary(page).getByRole('button', { name: 'Return to Build', exact: true })).toBeVisible();
   // Return to Build keeps editing the same workflow; the result stays available.
   const authored = await readWorkflowIr(page);
   await summary(page).getByRole('button', { name: 'Return to Build', exact: true }).click();
@@ -264,7 +265,7 @@ test('BUILD-FIX-UX-001: a declined request restored after reload offers Simulate
   await owner.confirm();
   await expect(summary(page)).toContainText('Transaction not submitted');
   const declined = await pointer(page), authored = JSON.parse(await readWorkflowIr(page)) as { workflowId: string };
-  await page.reload();
+  await reloadBuilder(page);
   await expect(owner.wallet.locator('.header-wallet-provider')).toHaveAttribute('title', 'MetaMask');
   await expect(owner.wallet.locator('.wallet-connection')).toHaveAttribute('title', /Base Sepolia/);
   // The recorded run is restored into the untouched draft as a result, with no recovery and no request.

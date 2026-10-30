@@ -3,6 +3,7 @@ import { test, expect } from './fixtures';
 import { installSupplyWallet, setSupplyWalletChain } from './supply-fixtures';
 import { configureCanvasAction, configureCanvasPool, openCanvasSettings } from './composer-authoring-fixtures';
 import type { Locator } from '@playwright/test';
+import { openBuilder } from './build-entry-navigation';
 
 async function checkTokenPills(card: Locator) {
   for (const pill of await card.locator('.composer-amount-box > .composer-token-chip').all()) {
@@ -48,7 +49,7 @@ async function checkTokenPills(card: Locator) {
 }
 
 for (const action of ['swap', 'bridge'] as const) test(`${action} has quiet editable values and opens settings only explicitly`, async ({ page }) => {
-  await installSupplyWallet(page); await page.goto('/app');
+  await installSupplyWallet(page); await openBuilder(page);
   await page.getByRole('button', { name: `Add ${action}`, exact: true }).click();
   const card = page.locator('.build-flow-surface .composer-card');
   const panel = page.getByRole('dialog', { name: 'Action settings', exact: true });
@@ -131,7 +132,7 @@ for (const action of ['swap', 'bridge'] as const) test(`${action} has quiet edit
 });
 
 for (const action of ['swap', 'bridge'] as const) test(`${action} shows why there is no USD value on test tokens, in both boxes, without changing amounts`, async ({ page }) => {
-  await installSupplyWallet(page); await page.goto('/app');
+  await installSupplyWallet(page); await openBuilder(page);
   await page.getByRole('button', { name: `Add ${action}`, exact: true }).click();
   await configureCanvasAction(page, '2.5');
   const card = page.locator('.build-flow-surface .composer-card');
@@ -161,7 +162,7 @@ for (const action of ['swap', 'bridge'] as const) test(`${action} shows why ther
 });
 
 for (const action of ['borrow', 'repay', 'withdraw'] as const) test(`${action} uses Supply's editable zero-based value block and validated Review/Apply`, async ({ page }) => {
-  await installSupplyWallet(page); await page.goto('/app');
+  await installSupplyWallet(page); await openBuilder(page);
   await page.getByRole('button', { name: `Add ${action}`, exact: true }).click();
   const card = page.locator('.build-flow-surface .composer-card');
   const block = card.locator('.composer-amount-box');
@@ -228,7 +229,7 @@ for (const action of ['borrow', 'repay', 'withdraw'] as const) test(`${action} u
 });
 
 test('Supply edits inline with one shared editor value and validates through its existing review/apply path', async ({ page }) => {
-  await installSupplyWallet(page); await page.goto('/app');
+  await installSupplyWallet(page); await openBuilder(page);
   await expect(page.locator('.build009-wallet-info')).toBeVisible();
   await page.getByRole('button', { name: 'Add supply', exact: true }).click();
   const card = page.locator('.build-flow-surface .composer-card');
@@ -309,7 +310,7 @@ test('Supply edits inline with one shared editor value and validates through its
 });
 
 test('floating toolbox exposes the existing guarded Delete action alongside every tool', async ({ page }) => {
-  await page.goto('/app');
+  await openBuilder(page);
   await page.getByRole('button', { name: 'Undock toolbar', exact: true }).click();
   const toolbox = page.locator('.floating-toolbox');
   const remove = toolbox.getByRole('button', { name: 'Delete', exact: true });
@@ -340,7 +341,7 @@ test('floating toolbox exposes the existing guarded Delete action alongside ever
 
 // BUILD-FLOFI-MAINNET-PRODUCT-001: the header has no network selector (Mainnet-only); the wallet group names the wallet's network.
 test('header wallet network follows wallet changes without rewriting action amounts', async ({ page }) => {
-  await installSupplyWallet(page); await page.goto('/app');
+  await installSupplyWallet(page); await openBuilder(page);
   const header = page.getByRole('banner');
   await expect(header.getByRole('combobox', { name: 'Environment', exact: true })).toHaveCount(0);
   const wallet = header.getByRole('group', { name: 'Wallet connection', exact: true });
@@ -387,7 +388,7 @@ async function waitForPoolLayout(card: ReturnType<import('@playwright/test').Pag
 }
 
 test('Pool uses two real liquidity asset blocks with the shared display mode and existing position editor', async ({ page }) => {
-  await installSupplyWallet(page); await page.goto('/app');
+  await installSupplyWallet(page); await openBuilder(page);
   await page.getByRole('button', { name: 'Add pool', exact: true }).click();
   await configureCanvasPool(page);
   const card = page.locator('.build-flow-surface .composer-card');
@@ -502,7 +503,7 @@ test('Pool uses two real liquidity asset blocks with the shared display mode and
 
 
 test('linked Borrow edits use the existing composition command and keep Supply and Swap linkage intact', async ({ page }) => {
-  await installSupplyWallet(page); await page.goto('/app');
+  await installSupplyWallet(page); await openBuilder(page);
   await page.getByRole('button', { name: 'Add Supply → Borrow → Swap', exact: true }).click();
   await page.getByRole('button', { name: 'Apply proposal', exact: true }).click();
   const supply = page.locator('.react-flow__node[data-id="lending-supply"] .composer-card');
@@ -532,7 +533,7 @@ test('linked Borrow edits use the existing composition command and keep Supply a
 
 
 test('Pool Tick/Price selector reveals attached right-side price tiles without changing the authored position', async ({ page }) => {
-  await installSupplyWallet(page); await page.goto('/app');
+  await installSupplyWallet(page); await openBuilder(page);
   await page.getByRole('button', { name: 'Add pool', exact: true }).click();
   await configureCanvasPool(page);
   const card = page.locator('.build-flow-surface .composer-card');
@@ -676,7 +677,7 @@ test('Pool Tick/Price selector reveals attached right-side price tiles without c
 
 
 test('Pool custom price handles mirror live, share the percentage, and keep unavailable prices unapplied', async ({ page }) => {
-  await installSupplyWallet(page); await page.goto('/app');
+  await installSupplyWallet(page); await openBuilder(page);
   await page.getByRole('button', { name: 'Add pool', exact: true }).click();
   await configureCanvasPool(page);
   const card = page.locator('.build-flow-surface .composer-card');

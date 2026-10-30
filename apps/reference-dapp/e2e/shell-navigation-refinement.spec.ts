@@ -3,6 +3,7 @@ import { test, expect, chooseWallet } from './fixtures';
 import { installSupplyWallet } from './supply-fixtures';
 import { configureCanvasAction } from './composer-authoring-fixtures';
 import type { Page } from '@playwright/test';
+import { openBuilder } from './build-entry-navigation';
 
 function captureErrors(page: Page) {
   const errors: string[] = [];
@@ -25,7 +26,7 @@ for (const theme of ['light', 'dark'] as const) {
   test(`${theme} drawer reuses real Dashboard and Build, selects one route, and Logout uses Disconnect semantics`, async ({ page }) => {
     const errors = captureErrors(page);
     await page.addInitScript(value => localStorage.setItem('flofi.theme', value), theme);
-    await installSupplyWallet(page); await page.goto('/app');
+    await installSupplyWallet(page); await openBuilder(page);
     await expect(page.locator('.build009-wallet-info')).toBeVisible();
     await page.getByRole('button', { name: 'Add supply', exact: true }).click();
     await configureCanvasAction(page, '1');
@@ -160,7 +161,7 @@ for (const theme of ['light', 'dark'] as const) {
   test(`${theme} Settings Support is safely inert and preserves switches, keyboard, Disconnect, and responsive placement`, async ({ page }, testInfo) => {
     const errors = captureErrors(page);
     await page.addInitScript(value => localStorage.setItem('flofi.theme', value), theme);
-    await installSupplyWallet(page); await page.goto('/app');
+    await installSupplyWallet(page); await openBuilder(page);
     await expect(page.locator('.build009-wallet-info')).toBeVisible();
     const settings = page.getByRole('button', { name: 'Settings', exact: true });
     const menu = page.getByRole('group', { name: 'Settings options', exact: true });

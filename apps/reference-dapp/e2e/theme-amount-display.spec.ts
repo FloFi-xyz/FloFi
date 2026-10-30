@@ -2,11 +2,12 @@
 import { test, expect } from './fixtures';
 import { selectSettingsTheme } from './settings-fixtures';
 import { installSupplyWallet } from './supply-fixtures';
+import { openBuilder, reloadBuilder } from './build-entry-navigation';
 
 for (const action of ['swap', 'bridge', 'pool', 'Stocks', 'supply', 'borrow', 'repay', 'withdraw']) {
   test(`${action} explains the missing USD value on every line, without a USD-first mode or a changed amount`, async ({ page }) => {
     await installSupplyWallet(page);
-    await page.goto('/app');
+    await openBuilder(page);
     await page.getByRole('button', { name: action === 'Stocks' ? action : `Add ${action}`, exact: true }).click();
     const card = page.locator('.build-flow-surface .composer-card');
     const boxes = card.locator('.composer-amount-box');
@@ -29,7 +30,7 @@ for (const action of ['swap', 'bridge', 'pool', 'Stocks', 'supply', 'borrow', 'r
 
 test('theme defaults to light, covers product surfaces, persists and returns to light', async ({ page }) => {
   await page.emulateMedia({ colorScheme: 'dark' });
-  await page.goto('/app');
+  await openBuilder(page);
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
   await page.getByRole('button', { name: 'Undock toolbar', exact: true }).click();
   await page.getByRole('button', { name: 'Stocks', exact: true }).click();
@@ -79,13 +80,13 @@ test('theme defaults to light, covers product surfaces, persists and returns to 
     expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
     await page.screenshot({ path: `.tmp/flofi-dark-${width}.png`, fullPage: true });
   }
-  await page.reload();
+  await reloadBuilder(page);
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await selectSettingsTheme(page, 'Light');
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
   expect(await page.locator('.top-bar').evaluate(element => getComputedStyle(element).backgroundColor)).toBe('rgb(255, 255, 255)');
-  await page.reload(); await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+  await reloadBuilder(page); await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
 });
 
 test('theme remains functional when preference storage is unavailable', async ({ page }) => {
@@ -100,7 +101,7 @@ test('theme remains functional when preference storage is unavailable', async ({
       set.call(this, key, value);
     };
   });
-  await page.goto('/app');
+  await openBuilder(page);
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await selectSettingsTheme(page, 'Dark');
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
@@ -110,7 +111,7 @@ test('theme remains functional when preference storage is unavailable', async ({
 
 
 test('short-value menus fit labels, grow for longer symbols and retain row targets', async ({ page }) => {
-  await page.goto('/app');
+  await openBuilder(page);
   await page.getByRole('button', { name: 'Stocks', exact: true }).click();
   await page.getByRole('button', { name: 'Select stock', exact: true }).click();
   const picker = page.getByRole('region', { name: 'Stocks configuration', exact: true });
@@ -146,7 +147,7 @@ test('short-value menus fit labels, grow for longer symbols and retain row targe
 
 test('dark hover uses restrained borders and respects reduced motion', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'no-preference' });
-  await page.goto('/app');
+  await openBuilder(page);
   await page.getByRole('button', { name: 'Stocks', exact: true }).click();
   const card = page.locator('.composer-card');
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
@@ -166,7 +167,7 @@ test('dark hover uses restrained borders and respects reduced motion', async ({ 
 
 test('graphite ambient spotlight stays below usable controls and respects forced colors', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'no-preference' });
-  await page.goto('/app');
+  await openBuilder(page);
   const aura = page.locator('.dark-spotlight');
   await expect(aura).toHaveAttribute('aria-hidden', 'true');
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
@@ -190,7 +191,7 @@ test('graphite ambient spotlight stays below usable controls and respects forced
 });
 
 test('dark edges and icons lift on hover and keyboard focus with no light-theme halo', async ({ page }) => {
-  await page.goto('/app');
+  await openBuilder(page);
   const stocks = page.getByRole('button', { name: 'Stocks', exact: true });
   await stocks.click();
   const card = page.locator('.composer-card');

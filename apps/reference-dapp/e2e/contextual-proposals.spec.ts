@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { Page } from '@playwright/test';
 import { test, expect, openProposalReview, applyPendingProposal, sendChatCommand, installPassiveWallet, assertPassiveWallet, assertNoFinancialCanvasAction } from './fixtures';
+import { openBuilder } from './build-entry-navigation';
 
-test.beforeEach(async ({ page }) => { await installPassiveWallet(page, '0x14a34'); await page.goto('/app'); });
+test.beforeEach(async ({ page }) => { await installPassiveWallet(page, '0x14a34'); await openBuilder(page); });
 test.afterEach(async ({ page }) => { await assertPassiveWallet(page); });
 
 const LENDING = 'compose supply 0.1 USDC to Aave then borrow 0.01 USDC then swap borrowed USDC to WETH on Base Sepolia slippage 50 bps owner 0x1111111111111111111111111111111111111111';

@@ -13,6 +13,7 @@ import { evaluateKnowledge } from '../src/learning/evaluation';
 import { KNOWLEDGE_SCHEMA, validateKnowledgeDocument } from '../src/learning/knowledge';
 import { createLearningStore } from '../src/learning/store';
 import type { Page } from '@playwright/test';
+import { openBuilder, reloadBuilder } from './build-entry-navigation';
 
 test.beforeAll(() => {
   if (process.env.FLOFI_LEARNING_E2E !== 'LOOPBACK_ONLY' || process.env.FLOFI_COPILOT !== 'replay') throw new Error('LEARNING_HARNESS_REQUIRED');
@@ -54,7 +55,7 @@ test('invisible learning: adapted in the conversation, learned after consent and
   test.setTimeout(60_000);
   const a = createTestWallet(), b = createTestWallet();
   await installJourneyWallet(page, [a], { chain: '0x14a34' });
-  await page.goto('/app');
+  await openBuilder(page);
   // No Memory panel, no Remember button, no teaching prompt in the chat.
   await expect(page.locator('details.copilot-memory')).toHaveCount(0);
 
@@ -69,7 +70,7 @@ test('invisible learning: adapted in the conversation, learned after consent and
 
   // BUILD-FLOFI-CONVERSATIONAL-001: the chat committed those Solana Devnet swaps (the header now shows the Solana wallet); a fresh visit's empty
   // draft returns to the EVM wallet this journey proves.
-  await page.goto('/app');
+  await openBuilder(page);
   // Privacy & memory lives in Settings, outside the chat. Proving the wallet signs a sign-in message only; learning is off until the user turns it on.
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await page.getByRole('link', { name: 'Privacy & memory', exact: true }).click();
@@ -87,7 +88,7 @@ test('invisible learning: adapted in the conversation, learned after consent and
 
   // A new conversation: one answer is evidence, not yet a meaning; a step FloFi read on its own, committed by the chat (BUILD-FLOFI-CONVERSATIONAL-001:
   // the owner's request applies at once, with no separate Apply) and left uncorrected, confirms it — then it is learned.
-  await page.goto('/app');
+  await openBuilder(page);
   await answerSolDev(page, '0.1');
   await expect.poll(() => query("SELECT term, target, clarified FROM learning_evidence WHERE term <> ''")).toEqual([{ term: 'sol dev', target: 'network:SOLANA_DEVNET', clarified: 1 }]);
   expect(await meanings()).toEqual([]);
@@ -99,7 +100,7 @@ test('invisible learning: adapted in the conversation, learned after consent and
   expect(JSON.stringify([await query('SELECT * FROM learning_subjects'), await query('SELECT * FROM learning_evidence')])).not.toContain(a.address.toLowerCase().slice(2, 12));
 
   // A later session: the learned meaning is used, and labelled as learned.
-  await page.reload();
+  await reloadBuilder(page);
   await send(page, 'Swap 0.3 SOL to devUSDC on sol dev');
   await expect(lastAi(page)).toContainText('swap 0.3 SOL to devUSDC on Solana Devnet');
   await expect(lastAi(page).locator('.copilot-notes')).toContainText('“sol dev” read as Solana Devnet — learned from your earlier choices.');
@@ -109,7 +110,7 @@ test('invisible learning: adapted in the conversation, learned after consent and
   await installJourneyWallet(pageB, [b], { chain: '0x14a34' });
   await provePrivacy(pageB);
   await expect(pageB.locator('.privacy-list')).toHaveCount(0);
-  await pageB.goto('/app');
+  await openBuilder(pageB);
   await send(pageB, 'Swap 0.3 SOL to devUSDC on sol dev');
   await expect(lastAi(pageB).getByRole('group', { name: 'Suggested answers' })).toBeVisible();
   await expect(lastAi(pageB)).not.toContainText('learned');
@@ -127,7 +128,7 @@ test('invisible learning: adapted in the conversation, learned after consent and
     await store.appendKnowledge({ expectedVersion: 0, document, evaluationId: evaluation.evaluationId, restoredFrom: null, createdBy: 'cli', reason: 'e2e' }, new Date());
   } finally { await db.close(); }
   for (const p of [page, pageB]) {
-    await p.reload();
+    await reloadBuilder(p);
     await send(p, 'Swap 0.001 WETH to USDC on eth sepolia');
     await expect(lastAi(p)).toContainText('swap 0.001 WETH to USDC on Ethereum Sepolia');
     await expect(lastAi(p).locator('.copilot-notes')).toContainText('“eth sepolia” read as Ethereum Sepolia — FloFi glossary v1.');
@@ -135,7 +136,7 @@ test('invisible learning: adapted in the conversation, learned after consent and
   await other.close();
 
   // An ordinary exact command is unchanged (no learning note, no model).
-  await page.reload();
+  await reloadBuilder(page);
   await send(page, 'supply 1 USDC to Aave on Base Sepolia');
   await expect(page.locator('.message.system').last()).toContainText('Supply added to your workflow: 1 USDC');
   await expect(page.locator('.message.system').last()).not.toContainText(/read as|learned|glossary/);

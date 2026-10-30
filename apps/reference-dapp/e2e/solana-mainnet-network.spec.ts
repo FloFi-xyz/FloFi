@@ -4,6 +4,7 @@ import { test, expect, chooseWallet, openSimulationDetails, readWorkflowIr } fro
 import { assertSimulationReviewBlocked } from './release-safety-fixtures';
 import { signRequests } from './jupiter-fixtures';
 import { devnetControl, installDevnetWallet, resetDevnetHarness } from './solana-devnet-fixtures';
+import { openBuilder } from './build-entry-navigation';
 
 /**
  * BUILD-FLOFI-MAINNET-PRODUCT-001 on MOCKED loopback harnesses only, with the app exactly as deployed (no engineering opt-in): FloFi is Mainnet-only.
@@ -33,7 +34,7 @@ const TEST_NETWORKS = ['Solana Devnet', 'Base Sepolia', 'Ethereum Sepolia', 'Arb
 test('FloFi is Mainnet-only: no environment selector, a Solana wallet connects on mainnet-beta, and the Canvas offers mainnets only', async ({ page }) => {
   await closedEstimates(page);
   const wallet = await resetDevnetHarness(); await installDevnetWallet(page, wallet);
-  await page.goto('/app');
+  await openBuilder(page);
   await expect(page.getByRole('combobox', { name: 'Environment' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Add Supply → Borrow → Swap' })).toHaveCount(0);
   await connectSolana(page);
@@ -99,7 +100,7 @@ test('Orca liquidity on Solana Mainnet: authored on the Canvas against the verif
 
 test('a test network named in chat is refused with an explanation and never moved to a mainnet', async ({ page }) => {
   await closedEstimates(page);
-  await page.goto('/app');
+  await openBuilder(page);
   await page.getByLabel('Describe your flow').fill('swap 1 USDC to WETH on Base Sepolia slippage 50 bps');
   await page.getByRole('button', { name: 'Send', exact: true }).click();
   await expect(page.getByRole('log', { name: 'Conversation', exact: true }))

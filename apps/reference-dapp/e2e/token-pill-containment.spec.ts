@@ -4,6 +4,7 @@ import { selectSettingsTheme } from './settings-fixtures';
 import { installSupplyWallet } from './supply-fixtures';
 import { configureCanvasAction, configureCanvasPool } from './composer-authoring-fixtures';
 import type { Locator } from '@playwright/test';
+import { openBuilder } from './build-entry-navigation';
 
 async function tokenIconsStayInside(surface: Locator) {
   const icons = surface.locator('.composer-token-avatar > img.brand-icon');
@@ -29,7 +30,7 @@ async function tokenIconsStayInside(surface: Locator) {
 for (const theme of ['Light', 'Dark']) test(`${theme} keeps token icons contained in Pool, Swap, picker and Simulate pills`, async ({ page }) => {
   await installSupplyWallet(page);
   for (const action of ['pool', 'swap'] as const) {
-    await page.goto('/app');
+    await openBuilder(page);
     await page.getByRole('button', { name: 'Settings', exact: true }).click();
     await selectSettingsTheme(page, theme);
     await page.keyboard.press('Escape');

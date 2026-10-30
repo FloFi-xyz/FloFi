@@ -12,6 +12,7 @@ import { test, expect, readWorkflowIr, CHAT_COMMITTED } from './fixtures';
 import type { Page } from '@playwright/test';
 import { installSupplyWallet } from './supply-fixtures';
 import { expectReviewedImagesOnly, replayProviderLogos } from './asset-logo-replay';
+import { openBuilder } from './build-entry-navigation';
 
 test.skip(process.env.GRYLOO_ROBINHOOD_MAINNET_E2E !== 'MOCKED_LOOPBACK_ONLY', 'Robinhood Chain authoring requires the isolated loopback registry harness');
 test.describe.configure({ mode: 'serial' });
@@ -34,7 +35,7 @@ async function openStocks(page: Page) {
 test('the Stocks card shows the registry unavailable, then loading, then the full official catalog behind its featured shortcuts', async ({ page, networkGuard }) => {
   // The first read of this server fails: nothing stale or recorded stands in for the official registry.
   await registry('unavailable');
-  await page.goto('/app');
+  await openBuilder(page);
   const { panel } = await openStocks(page);
   await expect(panel.getByText('Robinhood Stock Tokens are unavailable right now.')).toBeVisible();
   await expect(panel.getByRole('list', { name: 'Stock Token results', exact: true })).toHaveCount(0);
@@ -53,7 +54,7 @@ test('the Stocks card shows the registry unavailable, then loading, then the ful
 
 test('search reaches a non-featured Stock Token (PLTR), selects it on the same card, and an unmatched search is empty', async ({ page, networkGuard }) => {
   await registry('ok');
-  await page.goto('/app');
+  await openBuilder(page);
   const { card, panel } = await openStocks(page);
   const search = panel.getByRole('searchbox', { name: 'Search Stock Tokens', exact: true });
   await search.fill('palantir');
@@ -80,7 +81,7 @@ test('search reaches a non-featured Stock Token (PLTR), selects it on the same c
 
 test('on mainnet the existing Bridge card offers the Robinhood Chain routes and names the delivered asset (USDC → USDG)', async ({ page, networkGuard }) => {
   await installSupplyWallet(page, { chain: '0x2105' });
-  await page.goto('/app');
+  await openBuilder(page);
   // BUILD-FLOFI-MAINNET-PRODUCT-001: no environment selector; the connected wallet's own network is shown.
   await expect(page.locator('.build009-wallet-info')).toHaveAttribute('title', /Base \(8453\)/);
   await page.getByRole('button', { name: 'Add bridge', exact: true }).click();
@@ -131,7 +132,7 @@ test('the Copilot resolves a company name to its Stock Token: Tesla (EN and PT) 
   async ({ page, networkGuard }) => {
     test.skip(process.env.FLOFI_COPILOT !== 'replay', 'the natural-language Copilot runs on committed replay answers only');
     await registry('ok');
-    await page.goto('/app');
+    await openBuilder(page);
     await ask(page, 'Buy Tesla with 50 USDG on Robinhood Chain');
     const said = conversation(page).locator('.message.ai').last();
     await expect(said).toContainText('Interpreted as “swap 50 USDG to TSLA on Robinhood Chain slippage 100 bps”');

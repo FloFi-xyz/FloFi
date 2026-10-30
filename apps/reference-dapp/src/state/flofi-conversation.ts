@@ -571,7 +571,8 @@ export function useFlofiConversation({ owner, epoch, bridge, direct, interfaceLa
     }
   }
   const phase = direct ? conversationPhase(bridge, question?.open ?? null, Boolean(destination) || copilot.drafting() || question?.open.kind === 'RESOLVE_EDIT') : null;
-  return { messages, input, setInput, send: (text: string) => void send(text), busy: copilot.busy || sending, copilot, automation, dismissAutomation: () => setAutomation(null),
-    phase, question: question?.open.kind ?? null, execution: direct ? conversationExecution(bridge) : null, direct };
+  // BUILD0-UX-001: `submit` is the same `send`, awaitable, for Build 0 (the request and FloFi's answer stay in this conversation).
+  return { messages, input, setInput, send: (text: string) => void send(text), submit: send, busy: copilot.busy || sending, copilot, automation, dismissAutomation: () => setAutomation(null),
+    phase, question: question?.open.kind ?? null, direct };
 }
 export type FlofiConversation = ReturnType<typeof useFlofiConversation>;

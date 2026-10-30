@@ -25,15 +25,18 @@ import { NavigationDrawer } from './navigation-drawer';
 import { secondaryWorkspaceRoute } from '../domain/secondary-workspaces';
 import { useWalletConnection } from '../state/wallet-connection';
 import { WalletMark } from './wallet-selector';
+import { BUILD_ENTRY, type BuildEntrySection } from '../domain/build-entry';
 
 export type Tab = WorkflowStage;
-export type ProductSection = Tab | 'Dashboard';
+/** BUILD0-UX-001: Build 0 (the intent entry) precedes the existing Build (Build 1), Simulate and Execute stages. */
+export type ProductSection = Tab | 'Dashboard' | BuildEntrySection;
 
 const shortAddress = (address: string) => `${address.slice(0, 6)}…${address.slice(-4)}`;
 
 /** `compact` (BUILD-SOLANA-TRANSFER-UX-001, the `/approve` signing surface): brand, wallet and settings only — no stage navigation and no
- * Mainnet/Testnet switch, because the proposal fixes its own network. */
-export function TopBar({ tab, setTab, pathname, engineering = false, compact = false }: { tab: ProductSection; setTab: (value: ProductSection) => void; pathname?: string | null; engineering?: boolean; compact?: boolean }) {
+ * Mainnet/Testnet switch, because the proposal fixes its own network. `entry` (BUILD0-UX-001) offers Build 0 before Build 1 in the public
+ * chat-first workspace only. */
+export function TopBar({ tab, setTab, pathname, engineering = false, compact = false, entry = false }: { tab: ProductSection; setTab: (value: ProductSection) => void; pathname?: string | null; engineering?: boolean; compact?: boolean; entry?: boolean }) {
   const { t: tr } = useLocale();
   const secondaryWorkspace = secondaryWorkspaceRoute(pathname);
   const { walletKind } = useExecutionEnvironment();
@@ -78,10 +81,13 @@ export function TopBar({ tab, setTab, pathname, engineering = false, compact = f
     : undefined;
   const evmTitle = build009.account ? `${provider?.name ?? 'EVM'} · ${build009.account} · ${chainName(build009.chainId)}` : undefined;
   return <header className={`top-bar${compact ? ' top-bar-compact' : ''}`}>
-    <div className="brand">{!compact && <NavigationDrawer pathname={pathname ?? null} section={tab} onBuild={() => setTab('Build')}
+    <div className="brand">{!compact && <NavigationDrawer pathname={pathname ?? null} section={tab === BUILD_ENTRY ? 'Build' : tab} onBuild={() => setTab('Build')}
       onDisconnect={disconnect} disconnectDisabled={disconnectDisabled}/>}<FloFiLogo/></div>
-    {!compact && <nav aria-label={tr("Workflow stages")} className="tabs"><button type="button" onClick={() => setTab('Dashboard')} aria-current={!secondaryWorkspace && tab === 'Dashboard' ? 'page' : undefined} className={!secondaryWorkspace && tab === 'Dashboard' ? 'selected' : ''}>{tr("Dashboard")}</button>{WORKFLOW_STAGES.map((value, index) =>
-      <button key={value} type="button" onClick={() => setTab(value)} disabled={Boolean(authoringIncomplete && value !== 'Build')} title={tr(authoringIncomplete && value !== 'Build' ? 'Configure the action amount in Build first' : undefined)} aria-current={!secondaryWorkspace && tab === value ? 'page' : undefined} className={!secondaryWorkspace && tab === value ? 'selected' : ''}><span className="stage-number" aria-hidden="true">{tr(index + 1)}</span>{tr(value)}</button>)}</nav>}
+    {!compact && <nav aria-label={tr("Workflow stages")} className="tabs"><button type="button" onClick={() => setTab('Dashboard')} aria-current={!secondaryWorkspace && tab === 'Dashboard' ? 'page' : undefined} className={!secondaryWorkspace && tab === 'Dashboard' ? 'selected' : ''}>{tr("Dashboard")}</button>
+      {/* Visible "0 Build" / "1 Build"; the entry's accessible name is "Build 0" while Build 1 keeps the existing "Build". */}
+      {entry && <button type="button" onClick={() => setTab(BUILD_ENTRY)} aria-label={tr('Build 0')} title={tr('Describe what you want to do')} data-build-stage="0" aria-current={!secondaryWorkspace && tab === BUILD_ENTRY ? 'page' : undefined} className={!secondaryWorkspace && tab === BUILD_ENTRY ? 'selected' : ''}><span className="stage-number" aria-hidden="true">0</span>{tr('Build')}</button>}
+      {WORKFLOW_STAGES.map((value, index) =>
+      <button key={value} type="button" onClick={() => setTab(value)} disabled={Boolean(authoringIncomplete && value !== 'Build')} title={tr(authoringIncomplete && value !== 'Build' ? 'Configure the action amount in Build first' : entry && value === 'Build' ? 'Edit the workflow on the Canvas and in the chat' : undefined)} data-build-stage={entry && value === 'Build' ? '1' : undefined} aria-current={!secondaryWorkspace && tab === value ? 'page' : undefined} className={!secondaryWorkspace && tab === value ? 'selected' : ''}><span className="stage-number" aria-hidden="true">{tr(index + 1)}</span>{tr(value)}</button>)}</nav>}
     <div className="top-meta">
       <div className="header-wallet" role="group" aria-label={tr("Wallet connection")}>
       {provider && <span className="header-wallet-provider" title={provider.name}><WalletMark icon={provider.icon}/><span className="sr-only">{provider.name}</span></span>}

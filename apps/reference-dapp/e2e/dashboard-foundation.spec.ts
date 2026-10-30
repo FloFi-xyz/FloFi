@@ -2,6 +2,7 @@
 import { test, expect, assertNoFinancialCanvasAction } from './fixtures';
 import { selectSettingsTheme } from './settings-fixtures';
 import type { Page } from '@playwright/test';
+import { openBuilder, reloadBuilder } from './build-entry-navigation';
 
 const pageErrors = new WeakMap<Page, string[]>();
 test.beforeEach(async ({ page }) => {
@@ -34,7 +35,7 @@ test('Build, Simulate and Execute retain their current workflow through Dashboar
         throw new Error(`Unexpected wallet method: ${method}`);
       }, on() {}, removeListener() {} } });
   });
-  await page.goto('/app');
+  await openBuilder(page);
   await expect(page.locator('.build009-wallet-info')).toBeVisible();
   await page.getByRole('button', { name: 'Add swap', exact: true }).click();
   const amount = page.getByRole('textbox', { name: 'Source amount (USDC)', exact: true });
@@ -69,7 +70,7 @@ test('run-detail deep links and refresh stay inside the canonical wallet-scoped 
   await page.goto('/app/dashboard/runs/absent-owned-run');
   await expect(page.getByRole('heading', { name: 'Connect the wallet used for this execution' })).toBeVisible();
   await expect(page.locator('.top-bar')).toHaveCount(1);
-  await page.reload();
+  await reloadBuilder(page);
   await expect(page.getByRole('heading', { name: 'Connect the wallet used for this execution' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Authorize in wallet', exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'Back to Dashboard' }).click();

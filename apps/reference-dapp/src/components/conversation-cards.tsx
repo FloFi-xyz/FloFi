@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
 import { translate } from '../i18n/locale';
-import type { ConversationExecution, ConversationLanguage, ConversationReview } from '../domain/conversation-lifecycle';
+import type { ConversationLanguage, ConversationReview } from '../domain/conversation-lifecycle';
 
 const short = (value: string) => value.length > 16 ? `${value.slice(0, 6)}…${value.slice(-4)}` : value;
 /**
@@ -67,23 +67,5 @@ export function ConversationReviewCard({ review, language }: { review: Conversat
       {review.approvals.map(approval => <div key={`${approval.symbol}:${approval.spender}`}><dt>{t('Token approval')}</dt><dd>{t(approval.value)} · {approval.symbol} · {t(approval.spender)} · {approval.network}</dd></div>)}
     </dl></details>}
     <p className="conversation-review-note">{t('Estimates from this simulation, not executed results. Your wallet shows every request before you sign it.')}</p>
-  </section>;
-}
-/** The current run as its durable record reports it, re-read on every render: never what the chat said earlier. */
-export function ConversationExecutionCard({ execution, language }: { execution: ConversationExecution; language: ConversationLanguage }) {
-  const t = (value: string, ...parameters: (string | number)[]) => translate(language, value, ...parameters);
-  return <section className="conversation-execution" aria-label={t('Execution status')} data-phase={execution.phase}>
-    {execution.sequenceStep && <p className="conversation-execution-step"><strong>{t('Step {0} of {1}: {2}', execution.sequenceStep.current, execution.sequenceStep.total, t(execution.sequenceStep.action))}</strong>
-      {' · '}{t('{0} of {1} workflow steps completed', execution.sequenceStep.completed, execution.sequenceStep.total)}</p>}
-    <p role="status" aria-live="polite"><strong>{t(execution.label)}</strong> {t(execution.message)}</p>
-    <p className="conversation-execution-count">{t('{0} of {1} steps confirmed', execution.completed, execution.total)}{execution.current && !execution.final ? ` · ${t('Current step')}: ${t(execution.current)}` : ''}</p>
-    <ul className="conversation-execution-operations">{execution.operations.map(operation => <li key={operation.id} data-state={operation.state}>
-      <span>{t(operation.title)}</span> · <span>{t(operation.label)}</span> · <span>{operation.network}</span>
-      {operation.hash && <> · {operation.explorer ? <a href={operation.explorer} target="_blank" rel="noreferrer" title={operation.hash}>{short(operation.hash)}</a> : <code title={operation.hash}>{short(operation.hash)}</code>}</>}
-    </li>)}</ul>
-    {(execution.received.length > 0 || execution.costs.length > 0) && <dl className="conversation-review-lines">
-      {execution.received.map(line => <div key={`${line.label}:${line.value}`}><dt>{t(line.label)}</dt><dd>{line.value}</dd></div>)}
-      {execution.costs.map(line => <div key={`${line.label}:${line.value}`}><dt>{t(line.label)}</dt><dd>{line.value}</dd></div>)}
-    </dl>}
   </section>;
 }

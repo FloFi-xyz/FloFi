@@ -3,6 +3,7 @@
 import { test, expect, chooseWallet } from './fixtures';
 import { installMultichainWallets, promptingCalls, WALLET_ACCOUNTS, walletCalls } from './wallet-fixtures';
 import type { Page } from '@playwright/test';
+import { openBuilder, reloadBuilder } from './build-entry-navigation';
 
 const selector = (page: Page) => page.locator('dialog.wallet-selector[open]');
 const short = (address: string) => `${address.slice(0, 6)}…${address.slice(-4)}`;
@@ -16,7 +17,7 @@ for (const theme of ['light', 'dark'] as const) {
     const errors: string[] = [];
     page.on('pageerror', error => errors.push(error.message));
     await page.addInitScript(value => localStorage.setItem('flofi.theme', value), theme);
-    await installMultichainWallets(page); await page.goto('/app');
+    await installMultichainWallets(page); await openBuilder(page);
     await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
     await open(page);
     const dialog = selector(page);
@@ -44,7 +45,7 @@ for (const theme of ['light', 'dark'] as const) {
 }
 
 test('keyboard choice connects exactly the chosen EVM wallet and the header names it', async ({ page }) => {
-  await installMultichainWallets(page); await page.goto('/app');
+  await installMultichainWallets(page); await openBuilder(page);
   await open(page);
   const options = selector(page).locator('[data-wallet-option]');
   await expect(options.first()).toBeFocused();
@@ -61,7 +62,7 @@ test('keyboard choice connects exactly the chosen EVM wallet and the header name
 });
 
 test('Phantom on Solana and Phantom on Ethereum are separate choices with separate identities', async ({ page }) => {
-  await installMultichainWallets(page); await page.goto('/app');
+  await installMultichainWallets(page); await openBuilder(page);
   await open(page);
   await chooseWallet(page, 'Phantom', 'Solana');
   // Only the Solana provider was asked; the header shows the Solana account on Devnet (testnet first).
@@ -81,12 +82,12 @@ test('Phantom on Solana and Phantom on Ethereum are separate choices with separa
 });
 
 test('a remembered wallet is highlighted first but never opened by Connect Wallet', async ({ page }) => {
-  await installMultichainWallets(page); await page.goto('/app');
+  await installMultichainWallets(page); await openBuilder(page);
   await open(page); await chooseWallet(page, 'Rabby Wallet');
   await expect(page.locator('.build009-wallet-info')).toBeVisible();
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await page.getByRole('button', { name: 'Disconnect', exact: true }).click();
-  await page.reload();
+  await reloadBuilder(page);
   // After an explicit disconnect, a reload does not silently reconnect the wallet.
   await expect(page.getByRole('button', { name: 'Connect Wallet', exact: true })).toBeVisible();
   await expect(page.locator('.build009-wallet-info')).toHaveCount(0);
@@ -101,7 +102,7 @@ test('a remembered wallet is highlighted first but never opened by Connect Walle
 
 for (const width of [320, 768]) test(`selector fits and stays usable at ${width}px`, async ({ page }) => {
   await page.setViewportSize({ width, height: 720 });
-  await installMultichainWallets(page); await page.goto('/app');
+  await installMultichainWallets(page); await openBuilder(page);
   await open(page);
   const box = (await selector(page).boundingBox())!;
   expect(box.x).toBeGreaterThanOrEqual(8); expect(box.x + box.width).toBeLessThanOrEqual(width - 8);

@@ -126,6 +126,10 @@
       "path": "apps/reference-dapp/src/developer/webhooks.pg.test.ts",
       "stage": "postgres"
     },
+    "app.domain.build-entry": {
+      "path": "apps/reference-dapp/src/domain/build-entry.test.ts",
+      "stage": "unit"
+    },
     "app.domain.copilot-context": {
       "path": "apps/reference-dapp/src/domain/copilot-context.test.ts",
       "stage": "unit"
@@ -141,6 +145,10 @@
     "app.domain.intelligence.conversation-regression": {
       "path": "apps/reference-dapp/src/domain/intelligence/conversation-regression.test.ts",
       "stage": "unit"
+    },
+    "app.e2e.build-entry": {
+      "path": "apps/reference-dapp/e2e/build-entry.spec.ts",
+      "stage": "browser"
     },
     "app.e2e.canvas-keyboard": {
       "path": "apps/reference-dapp/e2e/canvas-keyboard.spec.ts",
@@ -2059,6 +2067,8 @@
         "apps/reference-dapp/src/components/approval-handoff.tsx",
         "apps/reference-dapp/src/components/artifact-inspector.tsx",
         "apps/reference-dapp/src/components/brand-icon.tsx",
+        "apps/reference-dapp/src/components/build-entry.module.css",
+        "apps/reference-dapp/src/components/build-entry.tsx",
         "apps/reference-dapp/src/components/canvas-card-inputs.tsx",
         "apps/reference-dapp/src/components/canvas-lifecycle-action.tsx",
         "apps/reference-dapp/src/components/canvas-navigator.tsx",
@@ -2137,6 +2147,7 @@
         "apps/reference-dapp/src/components/workflow-run-panel.tsx"
       ],
       "suites": [
+        "app.e2e.build-entry",
         "app.e2e.canvas-keyboard",
         "app.e2e.global-product-polish",
         "app.e2e.wallet-selector",
@@ -2676,6 +2687,7 @@
       "sharedFinancialCore": false,
       "sources": [
         "apps/reference-dapp/src/domain/assistant-welcome.ts",
+        "apps/reference-dapp/src/domain/build-entry.ts",
         "apps/reference-dapp/src/domain/commands.ts",
         "apps/reference-dapp/src/domain/conversation-copy.ts",
         "apps/reference-dapp/src/domain/conversation-lifecycle.ts",
@@ -2706,10 +2718,12 @@
         "apps/reference-dapp/src/domain/proposal.ts"
       ],
       "suites": [
+        "app.domain.build-entry",
         "app.domain.copilot-context",
         "app.domain.copilot-conversation",
         "app.domain.intelligence",
         "app.domain.intelligence.conversation-regression",
+        "app.e2e.build-entry",
         "app.e2e.chat-assistant",
         "app.platform.engineering-continuity",
         "app.platform.intelligence-parity",
@@ -3066,6 +3080,7 @@
         "apps/reference-dapp/src/i18n/pt-base.ts",
         "apps/reference-dapp/src/i18n/pt-bridge-live-fix.ts",
         "apps/reference-dapp/src/i18n/pt-bridges.ts",
+        "apps/reference-dapp/src/i18n/pt-build-entry.ts",
         "apps/reference-dapp/src/i18n/pt-chat-e2e-fix.ts",
         "apps/reference-dapp/src/i18n/pt-concurrency.ts",
         "apps/reference-dapp/src/i18n/pt-conversation.ts",

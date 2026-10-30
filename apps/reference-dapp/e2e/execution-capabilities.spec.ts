@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, installPassiveWallet, assertPassiveWallet } from './fixtures';
 import { configureCanvasAction } from './composer-authoring-fixtures';
+import { openBuilder, reloadBuilder } from './build-entry-navigation';
 
 test('normal Build keeps capability details internal and authoring requests no financial wallet authority', async ({ page }) => {
-  await page.goto('/app');
+  await openBuilder(page);
   await expect(page.getByLabel('Execution environment')).toHaveCount(0);
   await expect(page.getByRole('region', { name: 'Workflow readiness' })).toHaveCount(0);
   await expect(page.getByRole('navigation', { name: 'Workflow stages' })).toBeVisible();
@@ -12,7 +13,7 @@ test('normal Build keeps capability details internal and authoring requests no f
   // Asset selection follows the existing connected-wallet environment policy.
   // Reuse a passive testnet identity; authoring must request no connection, signature or transaction.
   await installPassiveWallet(page, '0x14a34');
-  await page.reload();
+  await reloadBuilder(page);
   await expect(page.locator('.build009-wallet-info')).toBeVisible();
   await page.getByRole('button', { name: 'Add swap', exact: true }).click();
   await page.locator('.build-flow-surface .composer-card').getByRole('button', { name: 'Select source token', exact: true }).click();
@@ -24,7 +25,7 @@ test('normal Build keeps capability details internal and authoring requests no f
 });
 
 test('an unprepared liquidity workflow cannot authorize or execute', async ({ page }) => {
-  await page.goto('/app');
+  await openBuilder(page);
   await page.getByRole('button', { name: 'Add pool', exact: true }).click();
   await expect(page.locator('.build-flow-surface .composer-card')).toHaveCount(1);
   await expect(page.getByRole('region', { name: 'Workflow readiness' })).toHaveCount(0);

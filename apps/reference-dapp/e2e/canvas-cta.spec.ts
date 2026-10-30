@@ -2,10 +2,11 @@
 import { test, expect } from './fixtures';
 import { installSupplyWallet, SUPPLY_OWNER } from './supply-fixtures';
 import { configureCanvasAction } from './composer-authoring-fixtures';
+import { openBuilder } from './build-entry-navigation';
 
 test('Build CTA floats inside the wider canvas without colliding with existing controls', async ({ page }) => {
   await installSupplyWallet(page);
-  await page.goto('/app');
+  await openBuilder(page);
   // Supply binds the connected owner as beneficiary: wait for the wallet's passive reconnect before adding it.
   await expect(page.locator('.build009-wallet-info')).toHaveAttribute('title', new RegExp(SUPPLY_OWNER, 'i'));
   await page.getByRole('button', { name: 'Add supply', exact: true }).click();
@@ -70,7 +71,7 @@ test('Build CTA floats inside the wider canvas without colliding with existing c
 
 test('Canvas simulation runs the shared Supply lifecycle with one guarded Review action', async ({ page }) => {
   await installSupplyWallet(page);
-  await page.goto('/app');
+  await openBuilder(page);
   // Supply binds the connected owner as beneficiary: wait for the wallet's passive reconnect before adding it.
   await expect(page.locator('.build009-wallet-info')).toHaveAttribute('title', new RegExp(SUPPLY_OWNER, 'i'));
   await page.getByRole('button', { name: 'Add supply', exact: true }).click();

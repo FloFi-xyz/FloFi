@@ -3,6 +3,7 @@ import { test, expect, sendChatCommand, openProposalReview, readWorkflowIr, open
 import type { Page } from '@playwright/test';
 import { hashArtifactBytes, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
 import { readyForVisualCapture } from './mode-a-fixtures';
+import { openBuilder, reloadBuilder } from './build-entry-navigation';
 
 test.beforeEach(async ({ page }) => { await installPassiveWallet(page); });
 test.afterEach(async ({ page }) => { await assertPassiveWallet(page); });
@@ -45,14 +46,14 @@ for (const [direction, from, to, amount] of [
   ['WETH_TO_USDC', 'WETH', 'USDC', '0.125'],
 ] as const) {
   test(`${from} to ${to}: actual chat and canvas inputs yield equal semantic hashes`, async ({ page }) => {
-    await page.goto('/app');
+    await openBuilder(page);
     await commit(page, `swap ${amount} ${from} to ${to} on Base slippage 100 bps`);
     await expect(page.getByRole('log', { name: 'Conversation' }).locator('.message').last()).toContainText(`${from} → ${to}`);
     const chat = await workflow(page);
     expect(chat.revision).toBe(1);
     await expect(page.getByRole('region', { name: 'Deterministic review findings' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Authorize in wallet', exact: true })).toHaveCount(0);
-    await page.reload();
+    await reloadBuilder(page);
     await createCanvas(page, direction, amount, '100');
     const canvas = await workflow(page);
     expect(canvas.revision).toBe(1);
@@ -64,7 +65,7 @@ for (const [direction, from, to, amount] of [
 }
 
 test('mixed surface edits, dismissal, locks and stale proposals preserve revisions', async ({ page }) => {
-  await page.goto('/app');
+  await openBuilder(page);
   await commit(page, 'swap 2 USDC to WETH on Base slippage 50 bps');
   await expect(page.locator('.summary-bar[data-workflow-revision="1"]')).toBeVisible();
   await selectSwap(page);
@@ -75,7 +76,7 @@ test('mixed surface edits, dismissal, locks and stale proposals preserve revisio
   const chatCanvasChat = await workflow(page);
   expect(chatCanvasChat.revision).toBe(3);
 
-  await page.reload();
+  await reloadBuilder(page);
   await createCanvas(page, 'USDC_TO_WETH', '2', '100');
   await commit(page, 'set node-002 amount 3');
   await selectSwap(page);
@@ -110,7 +111,7 @@ test('mixed surface edits, dismissal, locks and stale proposals preserve revisio
 });
 
 test('chat-committed and blocked review snapshots show unquoted unavailable state', async ({ page }) => {
-  await page.goto('/app');
+  await openBuilder(page);
   // BUILD-FLOFI-CONVERSATIONAL-001: the chat commits the request at once and says what it added; nothing is quoted, approved or signed.
   await commit(page, 'swap 0.125 WETH to USDC on Base slippage 301 bps');
   await expect(page.getByRole('log', { name: 'Conversation' }).locator('.message').last()).toContainText('Swap added to your workflow: 0.125 WETH');
@@ -144,7 +145,7 @@ test('chat-committed and blocked review snapshots show unquoted unavailable stat
 });
 
 test('Base authoring and review fit mobile, tablet and desktop widths', async ({ page }) => {
-  await page.goto('/app');
+  await openBuilder(page);
   await createCanvas(page, 'USDC_TO_WETH', '2', '50');
   await selectSwap(page);
   await readWorkflowIr(page);
