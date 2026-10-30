@@ -8,6 +8,7 @@ import { hashArtifactBytes, type SemanticWorkflow } from '@defi-workflow-engine/
 import { test, expect, assertPassiveWallet, installPassiveWallet, readWorkflowIr, sendChatCommand, CHAT_COMMITTED } from './fixtures';
 import { replayProviderLogos } from './asset-logo-replay';
 import { composeStrategy } from '../src/engine/strategy-engine';
+import { openBuilder } from './build-entry-navigation';
 
 test.skip(process.env.FLOFI_WORKFLOW_UX_AUTHORING_E2E !== 'MOCKED_LOOPBACK_ONLY', 'Runs under playwright.workflow-ux.config.ts');
 // The EIP-55 reference vector (mixed case) and the same address with one letter's case flipped (checksum fails).
@@ -17,7 +18,7 @@ const conversation = (page: Page) => page.getByRole('log', { name: 'Conversation
 const revision = (page: Page) => page.locator('.summary-bar');
 const actionsCount = (page: Page) => page.locator('.build-canvas-head .revision');
 async function open(page: Page) {
-  await replayProviderLogos(page); await installPassiveWallet(page, '0xa4b1'); await page.goto('/app');
+  await replayProviderLogos(page); await installPassiveWallet(page, '0xa4b1'); await openBuilder(page);
   await expect(conversation(page)).toContainText('Hi FloFier!');
 }
 async function say(page: Page, text: string) {
@@ -74,7 +75,7 @@ test.describe('UX-001 / UX-005 Send card and destination', () => {
   });
 
   test('an owner-only self-transfer network shows To as the connected wallet, read-only', async ({ page, networkGuard }) => {
-    await replayProviderLogos(page); await installPassiveWallet(page, '0x14a34'); await page.goto('/app');
+    await replayProviderLogos(page); await installPassiveWallet(page, '0x14a34'); await openBuilder(page);
     await page.getByRole('button', { name: 'Add send', exact: true }).click();
     const card = cards(page).first(), to = card.getByRole('textbox', { name: 'To', exact: true });
     await chooseNetwork(page, card, 'Robinhood Chain Testnet');
@@ -112,7 +113,7 @@ test.describe('UX-001 / UX-005 Send card and destination', () => {
     await expect(cards(page).first().getByRole('textbox', { name: 'To', exact: true })).toHaveValue(MIXED.toLowerCase());
     await expectCanonicalSend(page, MIXED.toLowerCase());
 
-    await page.goto('/app'); await expect(conversation(page)).toContainText('Hi FloFier!');
+    await openBuilder(page); await expect(conversation(page)).toContainText('Hi FloFier!');
     const recipient = '0x3333333333333333333333333333333333333333';
     await say(page, 'Please Send 5 USDC on Arbitrum to ' + recipient);
     await expect(answer()).toContainText('Interpreted as'); await expect(answer()).toContainText(CHAT_COMMITTED);

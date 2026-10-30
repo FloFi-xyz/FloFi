@@ -4,6 +4,7 @@ import { selectSettingsTheme } from './settings-fixtures';
 import type { Page, Locator } from '@playwright/test';
 import { installSupplyWallet } from './supply-fixtures';
 import { configureCanvasAction } from './composer-authoring-fixtures';
+import { openBuilder } from './build-entry-navigation';
 
 const widths = [1440, 1024, 768, 375, 320];
 async function dark(page: Page) {
@@ -39,7 +40,7 @@ async function readable(values: Locator) {
 
 test('graphite palette follows the real lifecycle shell, settings and workspace at every product width', async ({ page }) => {
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
-  await installSupplyWallet(page); await page.goto('/app'); await dark(page);
+  await installSupplyWallet(page); await openBuilder(page); await dark(page);
   const tokens = await page.locator('html').evaluate(element => {
     const style = getComputedStyle(element);
     return Object.fromEntries(['app-bg', 'surface', 'surface-raised', 'border', 'text-primary', 'text-secondary', 'accent', 'accent-soft', 'primary', 'success', 'warning-surface', 'warning-text']
@@ -99,11 +100,11 @@ test('graphite palette follows the real lifecycle shell, settings and workspace 
 });
 
 test('all Dark authoring cards and pickers share graphite surfaces with intact asset branding', async ({ page }) => {
-  await installSupplyWallet(page, { chain: '0x2105' }); await page.goto('/app'); await dark(page);
+  await installSupplyWallet(page, { chain: '0x2105' }); await openBuilder(page); await dark(page);
   // BUILD-FLOFI-MAINNET-PRODUCT-001: no header network selector; the wallet badge names the wallet's network.
   await expect(page.locator('.build009-wallet-info')).toHaveAttribute('title', /Base \(8453\)/);
   for (const action of ['swap', 'bridge', 'pool', 'supply', 'borrow', 'repay', 'withdraw', 'Stocks']) {
-    await page.goto('/app');
+    await openBuilder(page);
     await page.getByRole('button', { name: action === 'Stocks' ? action : `Add ${action}`, exact: true }).click();
     const card = page.locator('.build-flow-surface .composer-card');
     await expect(card).toHaveCSS('background-color', 'rgb(21, 24, 31)');

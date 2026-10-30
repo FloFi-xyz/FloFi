@@ -6,6 +6,7 @@ import { test, expect, sendChatCommand, chooseWallet, readWorkflowIr, installPas
 import { createMockedSolanaWallet } from '@defi-workflow-engine/reference-compiler';
 import { installDevnetWallet } from './solana-devnet-fixtures';
 import { installSupplyWallet } from './supply-fixtures';
+import { openBuilder, reloadBuilder } from './build-entry-navigation';
 
 /**
  * BUILD-SOLANA-MAINNET-001 PR B (requirements C, D, E) on the product Canvas. Nothing here quotes a public provider, signs or sends: Build
@@ -19,7 +20,7 @@ const revision = (page: Page) => page.locator('.summary-bar');
 const empty = (page: Page) => page.locator('.build-flow-surface .canvas-empty');
 test('the Bridge arrow reverses the networks and preserves the input amount through the canonical authoring path without a wallet request', async ({ page }) => {
   await installPassiveWallet(page);
-  await page.goto('/app');
+  await openBuilder(page);
   await page.getByRole('button',{name:'Add bridge',exact:true}).click();
   const card=cards(page),amount=card.getByRole('textbox',{name:'Source amount (USDC)',exact:true});
   await amount.fill('2.5'); await amount.press('Enter');
@@ -56,7 +57,7 @@ async function mockedSolanaEstimates(page: Page, seen: string[]) {
 test('Launch App starts with an empty Canvas and nothing adds an action afterwards: not time, a wallet connection or a network change', async ({ page }) => {
   test.setTimeout(90_000);
   await installSupplyWallet(page, { connected: false });
-  await page.goto('/app');
+  await openBuilder(page);
   await expect(empty(page)).toContainText('Start your workflow');
   await expect(cards(page)).toHaveCount(0);
   await expect(revision(page)).toHaveAttribute('data-workflow-revision', '0');
@@ -70,7 +71,7 @@ test('Launch App starts with an empty Canvas and nothing adds an action afterwar
   await page.waitForTimeout(1_000);
   await expect(cards(page)).toHaveCount(0); await expect(empty(page)).toBeVisible();
   // A reload starts empty too (execution-continuity.spec.ts covers a new visit with a finished run's pointer still in storage).
-  await page.reload();
+  await reloadBuilder(page);
   await expect(empty(page)).toContainText('Start your workflow'); await expect(cards(page)).toHaveCount(0);
   await page.waitForTimeout(2_000);
   await expect(cards(page)).toHaveCount(0);
@@ -78,7 +79,7 @@ test('Launch App starts with an empty Canvas and nothing adds an action afterwar
 
 test('Add Swap → configure → delete leaves an empty Canvas with nothing in its place; the Canvas stays editable', async ({ page }) => {
   await page.route('**/api/build-estimate', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: false, code: 'ESTIMATE_UNAVAILABLE' }) }));
-  await page.goto('/app');
+  await openBuilder(page);
   await chat(page, 'swap 2 USDC to WETH on Base slippage 50 bps');
   await expect(cards(page)).toHaveCount(1);
   await expect(revision(page)).toHaveAttribute('data-workflow-revision', '1');
@@ -98,7 +99,7 @@ test('Add Swap → configure → delete leaves an empty Canvas with nothing in i
 });
 
 test('Add Bridge → configure → delete keeps an editable Canvas', async ({ page }) => {
-  await installSupplyWallet(page); await page.goto('/app');
+  await installSupplyWallet(page); await openBuilder(page);
   // BUILD-FLOFI-PRODUCT-UX-001: header shows the short address; the connected network stays in the wallet title (details menu).
   await expect(page.locator('.build009-wallet-info')).toHaveAttribute('title', /Base Sepolia/);
   await page.getByRole('button', { name: 'Add bridge', exact: true }).click();
@@ -113,7 +114,7 @@ test('Add Bridge → configure → delete keeps an editable Canvas', async ({ pa
 });
 
 test('deleting the middle of connected actions keeps a consistent graph, names what else it removed, and undo restores it', async ({ page }) => {
-  await page.goto('/app');
+  await openBuilder(page);
   await chat(page, 'compose supply 0.1 USDC to Aave then borrow 0.01 USDC then swap borrowed USDC to WETH on Base Sepolia slippage 50 bps owner 0x1111111111111111111111111111111111111111');
   await expect(cards(page)).toHaveCount(3);
   const before = JSON.parse(await readWorkflowIr(page)) as { nodes: { nodeId: string }[] };
@@ -137,7 +138,7 @@ test('deleting the middle of connected actions keeps a consistent graph, names w
 test('the Swap arrow inverts SOL/USDC to USDC/SOL on the same network, drops the old quote and re-quotes the new direction', async ({ page }) => {
   const seen: string[] = []; await mockedSolanaEstimates(page, seen);
   await installDevnetWallet(page, createMockedSolanaWallet());
-  await page.goto('/app');
+  await openBuilder(page);
   await chat(page, 'Swap 1 SOL to USDC on Solana');
   // The owner's Solana wallet connects on the workflow's own cluster (mainnet-beta); it signs nothing here.
   await page.getByRole('button', { name: 'Connect Wallet', exact: true }).click();

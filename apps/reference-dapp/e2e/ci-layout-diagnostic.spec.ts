@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { configureCanvasAction } from './composer-authoring-fixtures';
 import type { Page } from '@playwright/test';
 import { reviewNow } from '../src/test-utils/review-fixture';
+import { openBuilder, reloadBuilder } from './build-entry-navigation';
 
 // Mount Execute with a real read-only canvas to verify native clicks, expiry and wallet updates.
 // These normalized fixtures do not claim to exercise RPC or wallet signatures.
@@ -64,7 +65,7 @@ test.beforeEach(async ({ page }) => {
   });
   const errors: string[] = []; browserErrors.set(page, errors);
   page.on('pageerror', error => errors.push(error.message));
-  await page.goto('/app');
+  await openBuilder(page);
   await expect(page.getByRole('button', { name: 'Settings', exact: true })).toBeVisible();
   const styles = await page.locator('head link[rel="stylesheet"]').evaluateAll(links => links.map(link => link.outerHTML).join(''));
   const fontClasses = await page.locator('html').getAttribute('class');
@@ -214,7 +215,7 @@ test('the real shell preserves Build and embedded Review while Execute stays rea
       }, on() {}, removeListener() {},
     } });
   });
-  await page.goto('/app');
+  await openBuilder(page);
   // This provider already exposes an account. Wait for the shared wallet's passive reuse;
   // the transient Connect button disappears during hydration.
   await expect(page.locator('.build009-wallet-info')).toBeVisible();
@@ -441,7 +442,7 @@ test('an unresolved or unsuccessful check preserves uncertainty and never offers
 });
 test('remount after reload keeps the same pending record and its confirmed approval', async ({ page }) => {
   await page.evaluate(() => window.flofiExecuteAcceptance.lifecycle('restored'));
-  await page.reload();
+  await reloadBuilder(page);
   await page.evaluate(() => (window as unknown as { FloFiExecuteAcceptance: { mount(element: HTMLElement): void } }).FloFiExecuteAcceptance.mount(document.getElementById('acceptance-root')!));
   await expect(page.locator('.execution-timeline')).toContainText('Approve USDC');
   await expect(page.locator('.execution-timeline')).toContainText('Pending confirmation');

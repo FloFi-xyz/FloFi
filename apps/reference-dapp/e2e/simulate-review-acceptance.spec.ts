@@ -4,6 +4,7 @@ import { build } from 'vite';
 import { fileURLToPath } from 'node:url';
 import type { Page } from '@playwright/test';
 import { reviewNow } from '../src/test-utils/review-fixture';
+import { openBuilder } from './build-entry-navigation';
 
 // Mount real Summary/Review components to test effects, native buttons and prop updates.
 // These normalized fixtures do not claim to exercise RPC or wallet signatures.
@@ -35,7 +36,7 @@ test.beforeAll(async () => {
 test.beforeEach(async ({ page }) => {
   const errors: string[] = []; browserErrors.set(page, errors);
   page.on('pageerror', error => errors.push(error.message));
-  await page.goto('/app');
+  await openBuilder(page);
   await expect(page.getByRole('button', { name: 'Settings', exact: true })).toBeVisible();
   const styles = await page.locator('head link[rel="stylesheet"]').evaluateAll(links => links.map(link => link.outerHTML).join(''));
   await page.clock.install({ time: reviewNow });

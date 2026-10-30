@@ -178,7 +178,7 @@ describe('BUILD-FLOFI-CONVERSATIONAL-001 conversational workflow', () => {
     direct = false;
     const chat = await say('swap 10 USDC to WETH on Base Sepolia slippage 100 bps');
     expect(f.propose).toHaveLength(1); expect(editor.workflow.revision).toBe(0);
-    expect(chat.phase).toBeNull(); expect(chat.execution).toBeNull();
+    expect(chat.phase).toBeNull();
     await say('Review workflow');
     expect(simulate).not.toHaveBeenCalled();
   });

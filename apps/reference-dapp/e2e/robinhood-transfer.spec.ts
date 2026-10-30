@@ -2,11 +2,12 @@
 import { test, expect, openProposalReview, openSimulationDetails, acceptProductReview } from './fixtures';
 import type { Page } from '@playwright/test';
 import { installTransferWallet, resetTransferHarness, chainBroadcasts, sendRequests, TRANSFER_OWNER as owner, type TransferWalletOptions } from './robinhood-transfer-fixtures';
+import { openBuilder, reloadBuilder } from './build-entry-navigation';
 
 const region = (page: Page) => page.getByRole('region', { name: 'Robinhood Testnet transfer' });
 const stage = (page: Page, name: 'Build' | 'Simulate' | 'Execute') => page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name, exact: true }).click();
 async function author(page: Page, options: TransferWalletOptions = {}) {
-  await installTransferWallet(page, options); await page.goto('/app');
+  await installTransferWallet(page, options); await openBuilder(page);
   await page.getByText('Advanced action setup', { exact: true }).click();
   const form = page.getByRole('form', { name: 'Create Robinhood transfer' });
   await form.getByLabel('Transfer amount (test ETH)').fill('0.000001');
@@ -58,7 +59,7 @@ test('a lost wallet response is recovered after refresh by observation, with no 
   await expect(region(page)).toContainText('The wallet result is uncertain. Flofi will not submit again');
   await expect(region(page).getByRole('button', { name: 'Observe existing transaction' })).toBeVisible();
   expect(await chainBroadcasts()).toBe(1);
-  await page.reload(); await stage(page, 'Execute');
+  await reloadBuilder(page); await stage(page, 'Execute');
   await region(page).getByRole('button', { name: 'Observe existing transaction' }).click();
   await expect(page.getByRole('link', { name: 'Download Evidence Bundle' })).toBeVisible();
   await expect(region(page).getByRole('button', { name: 'Execute', exact: true })).toHaveCount(0);
@@ -67,7 +68,7 @@ test('a lost wallet response is recovered after refresh by observation, with no 
 test('an unknown result that never reached the chain stays observation-only across refresh', async ({ page }) => {
   await author(page, { notBroadcast: true }); await review(page); await execute(page);
   await expect(region(page)).toContainText('The wallet result is uncertain. Flofi will not submit again');
-  await page.reload(); await stage(page, 'Execute');
+  await reloadBuilder(page); await stage(page, 'Execute');
   await region(page).getByRole('button', { name: 'Observe existing transaction' }).click();
   await expect(region(page)).toContainText('Flofi will not submit again');
   await expect(region(page).getByRole('button', { name: 'Execute', exact: true })).toHaveCount(0);

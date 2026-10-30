@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect } from './fixtures';
+import { openBuilder } from './build-entry-navigation';
 
 // BUILD-BETA-UI-001: copy and colour only. The header CTA keeps its destination.
 const retiredNotice = "FloFi is currently in beta testing. Do not use real funds until the official launch announcement is published in the app and on FloFi's official social media channels.";
@@ -27,7 +28,7 @@ test('the landing header CTA reads Launch Beta FloFi on yellow and still opens t
 for (const width of [320, 1440]) {
   test(`/app shows the Beta Mainnet notice between the header and the workflow canvas at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
-    await page.goto('/app');
+    await openBuilder(page);
     await expect(page.getByText(retiredNotice)).toHaveCount(0);
     const notice = page.locator('.beta-notice');
     await expect(notice).toHaveCount(1);
@@ -49,7 +50,7 @@ for (const width of [320, 1440]) {
 }
 
 test('/app Beta Mainnet notice follows the language preference', async ({ page }) => {
-  await page.goto('/app');
+  await openBuilder(page);
   await expect(page.locator('.beta-notice')).toHaveText(betaNotice);
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   // Settings exposes one Language switch (PT/EN are visual labels). The accessible name translates with the locale.

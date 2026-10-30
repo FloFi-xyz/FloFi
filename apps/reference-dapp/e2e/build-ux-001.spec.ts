@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect } from './fixtures';
 import type { Page } from '@playwright/test';
+import { openBuilder } from './build-entry-navigation';
 
 const node = (page: Page, id: string) => page.locator(`.build-flow-surface .react-flow__node[data-id="${id}"]`);
 async function addThree(page: Page) {
@@ -23,7 +24,7 @@ async function marquee(page: Page) {
 }
 
 test('marquee, group drag, multi-delete, undo and redo work as one edit per action', async ({ page }) => {
-  await page.goto('/app');
+  await openBuilder(page);
   const undo = page.getByRole('button', { name: 'Undo', exact: true });
   const redo = page.getByRole('button', { name: 'Redo', exact: true });
   await expect(undo).toBeDisabled();
@@ -63,7 +64,7 @@ test('marquee, group drag, multi-delete, undo and redo work as one edit per acti
 });
 
 test('Shift+click toggles membership, empty click and Escape clear, and Ctrl+Y redoes', async ({ page }) => {
-  await page.goto('/app');
+  await openBuilder(page);
   await addThree(page);
   await node(page, 'node-002').locator('.flow-card').click();
   await node(page, 'node-003').locator('.flow-card').click({ modifiers: ['Shift'] });
@@ -83,7 +84,7 @@ test('Shift+click toggles membership, empty click and Escape clear, and Ctrl+Y r
 });
 
 test('Flofi logo replaces the letter mark and history controls work in floating toolbox', async ({ page }) => {
-  await page.goto('/app');
+  await openBuilder(page);
   await expect(page.getByRole('img', { name: 'FloFi logo' })).toBeVisible();
   await expect(page.locator('.brand-mark')).not.toHaveText('G');
   await page.getByLabel('Toolbox position').selectOption('floating');

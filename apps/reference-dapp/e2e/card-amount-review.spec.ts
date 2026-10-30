@@ -7,9 +7,10 @@
 import { test, expect } from './fixtures';
 import { installSupplyWallet } from './supply-fixtures';
 import { configureCanvasAction, openCanvasSettings } from './composer-authoring-fixtures';
+import { openBuilder } from './build-entry-navigation';
 
 for (const action of ['swap', 'bridge'] as const) test(`${action} applies a valid amount on Enter, refuses an invalid one inline and keeps one canonical value`, async ({ page }) => {
-  await installSupplyWallet(page); await page.goto('/app');
+  await installSupplyWallet(page); await openBuilder(page);
   await page.getByRole('button', { name: `Add ${action}`, exact: true }).click();
   const card = page.locator('.build-flow-surface .composer-card');
   const source = card.getByRole('textbox', { name: 'Source amount (USDC)', exact: true });
@@ -65,7 +66,7 @@ for (const action of ['swap', 'bridge'] as const) test(`${action} applies a vali
 });
 
 test('an applied amount is scoped to its own card; leaving a step applies only that step, and an invalid draft changes nothing', async ({ page }) => {
-  await installSupplyWallet(page); await page.goto('/app');
+  await installSupplyWallet(page); await openBuilder(page);
   const cards = page.locator('.build-flow-surface .composer-card');
   await page.getByRole('button', { name: 'Add swap', exact: true }).click();
   await configureCanvasAction(page, '2');

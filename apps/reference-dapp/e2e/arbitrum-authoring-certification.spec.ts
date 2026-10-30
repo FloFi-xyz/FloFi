@@ -5,6 +5,7 @@ import { replayProviderLogos, expectReviewedImagesOnly } from './asset-logo-repl
 import { ARBITRUM_CERTIFICATION_CASES as cases } from '../src/domain/arbitrum-certification.cases';
 import { composeStrategy, semanticWorkflowHash } from '../src/engine/strategy-engine';
 import type { SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
+import { openBuilder } from './build-entry-navigation';
 
 function expectWorkspaceMeaning(actual: SemanticWorkflow, before: SemanticWorkflow, canonical: SemanticWorkflow) {
   // Workspace UUIDs are hash-bound product identities. Standalone MCP uses workflow-local; do not claim equal raw hashes.
@@ -17,7 +18,7 @@ function expectWorkspaceMeaning(actual: SemanticWorkflow, before: SemanticWorkfl
 }
 
 for (const c of cases) test(c.id + ': normal Copilot proposal → Apply → matching Canvas IR/hash', async ({ page, networkGuard }) => {
-  await replayProviderLogos(page); await installPassiveWallet(page, '0xa4b1'); await page.goto('/app');
+  await replayProviderLogos(page); await installPassiveWallet(page, '0xa4b1'); await openBuilder(page);
   const conversation = page.getByRole('log', { name: 'Conversation' });
   await expect(conversation).toContainText('Hi FloFier!');
   await expect(page.getByLabel('Describe your flow')).toBeVisible();
@@ -39,7 +40,7 @@ for (const c of cases) test(c.id + ': normal Copilot proposal → Apply → matc
 });
 
 for (const c of cases.filter(c => ['Swap', 'Native Transfer', 'Supply'].includes(c.id))) test(c.id + ': Portuguese natural Copilot reaches the same Canvas', async ({ page, networkGuard }) => {
-  await replayProviderLogos(page); await installPassiveWallet(page, '0xa4b1'); await page.goto('/app');
+  await replayProviderLogos(page); await installPassiveWallet(page, '0xa4b1'); await openBuilder(page);
   await expect(page.getByRole('log', { name: 'Conversation' })).toContainText('Hi FloFier!');
   const before = JSON.parse(await readWorkflowIr(page)) as SemanticWorkflow;
   await page.locator('#mock-prompt').fill('Por favor, ' + c.pt);
@@ -58,7 +59,7 @@ for (const [text, explanation] of [
   ['Provide liquidity for USDC and WETH on Arbitrum', 'maximum amounts'],
   ['Please provide 10 USDC and 0.005 WETH liquidity on Arbitrum fee 0.02%', 'registered fee tiers'],
 ]) test('honest refusal/clarification without a proposal: ' + text, async ({ page, networkGuard }) => {
-  await replayProviderLogos(page); await installPassiveWallet(page, '0xa4b1'); await page.goto('/app');
+  await replayProviderLogos(page); await installPassiveWallet(page, '0xa4b1'); await openBuilder(page);
   await page.locator('#mock-prompt').fill(text!); await page.getByRole('button', { name: 'Send', exact: true }).click();
   const answer = page.getByRole('log', { name: 'Conversation' }).locator('.message.ai').last();
   await expect(answer).toContainText(explanation!); await expect(answer).not.toContainText(/COPILOT_|ASSET_|SUPPLY_|UNISWAP_/);
@@ -68,7 +69,7 @@ for (const [text, explanation] of [
 });
 
 test('the existing generic network picker offers Arbitrum and chain-bound pinned assets with its existing mark', async ({ page, networkGuard }) => {
-  await replayProviderLogos(page); await installPassiveWallet(page, '0xa4b1'); await page.goto('/app');
+  await replayProviderLogos(page); await installPassiveWallet(page, '0xa4b1'); await openBuilder(page);
   await page.getByRole('button', { name: 'Add swap', exact: true }).click();
   const card = page.locator('.build-flow-surface .composer-card').first();
   await card.getByRole('button', { name: 'Select destination token', exact: true }).click();

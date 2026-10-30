@@ -7,6 +7,7 @@
  */
 import type { Page } from '@playwright/test';
 import { test, expect, readWorkflowIr } from './fixtures';
+import { openBuilder } from './build-entry-navigation';
 
 type IrNode = { inputs: { name: string; value: { asset?: unknown } }[]; adapterConstraints: { protocols: string[] }; userConstraints: { kind: string }[] };
 const workflowIr = async (page: Page) => JSON.parse(await readWorkflowIr(page)) as { nodes: IrNode[] };
@@ -28,7 +29,7 @@ for (const [width, height] of VIEWPORTS) for (const language of width === 1440 |
   test(`FloFi Assistant at ${width}px (${language}): official symbol + title, short welcome, avatars, no overflow`, async ({ page }, testInfo) => {
     if (language === 'PT') await page.addInitScript(() => localStorage.setItem('flofi.language', 'PT'));
     await page.setViewportSize({ width, height });
-    await page.goto('/app');
+    await openBuilder(page);
     const assistant = page.locator('aside.copilot');
     const title = assistant.locator('.copilot-head .assistant-title');
     await expect(title).toHaveText('FloFi Assistant');
@@ -58,7 +59,7 @@ for (const [width, height] of VIEWPORTS) for (const language of width === 1440 |
 }
 
 test('native ETH in chat: a native-ETH swap and a WETH9 wrap on Base, a missing network asked for, test networks refused', async ({ page }) => {
-  await page.goto('/app');
+  await openBuilder(page);
   await say(page, 'Swap 0.001 ETH to USDC on Base');
   await expect(flofi(page)).toContainText('Swap added to your workflow: 0.001 ETH');
   let ir = await workflowIr(page);

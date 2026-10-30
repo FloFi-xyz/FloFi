@@ -2,9 +2,10 @@
 import { test, expect } from './fixtures';
 import { selectSettingsTheme } from './settings-fixtures';
 import { installSupplyWallet, setSupplyWalletChain } from './supply-fixtures';
+import { openBuilder } from './build-entry-navigation';
 
 for (const theme of ['Light', 'Dark']) test(`${theme} Bridge side pickers show separate token and network columns with only supported endpoints`, async ({ page }) => {
-  await installSupplyWallet(page); await page.goto('/app');
+  await installSupplyWallet(page); await openBuilder(page);
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await selectSettingsTheme(page, theme);
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
@@ -96,7 +97,7 @@ for (const theme of ['Light', 'Dark']) test(`${theme} Bridge side pickers show s
 });
 
 test('Bridge wallet network changes keep supported drafts aligned and apply only on Enter', async ({ page }) => {
-  await installSupplyWallet(page); await page.goto('/app');
+  await installSupplyWallet(page); await openBuilder(page);
   await setSupplyWalletChain(page, '0x14a34');
   await page.getByRole('button', { name: 'Add bridge', exact: true }).click();
   const card = page.locator('.build-flow-surface .composer-card');

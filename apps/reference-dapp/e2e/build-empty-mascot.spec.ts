@@ -4,6 +4,7 @@ import { selectSettingsTheme } from './settings-fixtures';
 import type { Locator } from '@playwright/test';
 import { installSupplyWallet } from './supply-fixtures';
 import { configureCanvasAction } from './composer-authoring-fixtures';
+import { openBuilder } from './build-entry-navigation';
 
 type Box = { x: number; y: number; width: number; height: number };
 const overlap = (a: Box, b: Box) => a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
@@ -21,7 +22,7 @@ async function geometry(canvas: Locator) {
 for (const theme of ['Light', 'Dark'] as const) {
   test(`${theme} empty Build shows decorative Aceno above copy without overflow or workspace changes`, async ({ page }, testInfo) => {
     const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
-    await installSupplyWallet(page); await page.goto('/app');
+    await installSupplyWallet(page); await openBuilder(page);
     await expect(page.locator('.build009-wallet-info')).toBeVisible();
     const settings = page.getByRole('button', { name: 'Settings', exact: true });
     await settings.click(); await selectSettingsTheme(page, theme); await settings.press('Escape');
@@ -80,7 +81,7 @@ for (const theme of ['Light', 'Dark'] as const) {
   });
 
   test(`${theme} Aceno leaves canvas input intact and disappears from authored lifecycle previews`, async ({ page }) => {
-    await installSupplyWallet(page); await page.goto('/app'); await expect(page.locator('.build009-wallet-info')).toBeVisible();
+    await installSupplyWallet(page); await openBuilder(page); await expect(page.locator('.build009-wallet-info')).toBeVisible();
     const settings = page.getByRole('button', { name: 'Settings', exact: true });
     await settings.click(); await selectSettingsTheme(page, theme); await settings.press('Escape');
     const graph = page.getByRole('region', { name: 'Workflow graph', exact: true });
@@ -116,7 +117,7 @@ for (const theme of ['Light', 'Dark'] as const) {
   });
 
   test(`${theme} floating empty Build keeps the welcome group clear of toolbar and controls`, async ({ page }) => {
-    await installSupplyWallet(page); await page.goto('/app'); await expect(page.locator('.build009-wallet-info')).toBeVisible();
+    await installSupplyWallet(page); await openBuilder(page); await expect(page.locator('.build009-wallet-info')).toBeVisible();
     const settings = page.getByRole('button', { name: 'Settings', exact: true });
     await settings.click(); await selectSettingsTheme(page, theme); await settings.press('Escape');
     await page.getByRole('button', { name: 'Undock toolbar', exact: true }).click();

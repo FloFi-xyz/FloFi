@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, applyPendingProposal, openSimulationDetails } from './fixtures';
+import { openBuilder } from './build-entry-navigation';
 
 test('Simulate anchors its CTAs inside the canvas beside the zoom controls', async ({ page }) => {
-  await page.goto('/app');
+  await openBuilder(page);
   const stages = page.getByRole('navigation', { name: 'Workflow stages' });
   await page.getByRole('button', { name: 'Rename workflow', exact: true }).click();
   await page.getByRole('textbox', { name: 'Workflow name', exact: true }).fill('ESPARTACUS');

@@ -2,6 +2,7 @@
 import { test, expect, openSimulationDetails, sendChatCommand, assertNoFinancialCanvasAction } from './fixtures';
 import { installSupplyWallet, resetSupplyHarness, authorSupply, supplySendCount, SUPPLY_OWNER, REPAY_OWNER, repayOptions } from './supply-fixtures';
 import { withdrawOptions } from './withdraw-fixtures';
+import { openBuilder, reloadBuilder } from './build-entry-navigation';
 
 test('a valid MOCKED Supply simulation cannot grant production Review or submit a transaction', async ({ page, networkGuard }) => {
   await resetSupplyHarness();
@@ -20,7 +21,7 @@ test('a valid MOCKED Supply simulation cannot grant production Review or submit 
   await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Execute', exact: true }).click();
   await assertNoFinancialCanvasAction(page);
   expect(await supplySendCount(page)).toBe(0);
-  await page.reload();
+  await reloadBuilder(page);
   expect(await supplySendCount(page)).toBe(0);
   await expect(page.getByRole('link', { name: 'Download Evidence Bundle' })).toHaveCount(0);
   networkGuard.assertClean();
@@ -34,7 +35,7 @@ for (const row of [
   test(`a valid MOCKED ${row.action} simulation preserves its economic review but cannot authorize execution`, async ({ page, networkGuard }) => {
     await resetSupplyHarness(row.options);
     await installSupplyWallet(page, { account: row.owner });
-    await page.goto('/app');
+    await openBuilder(page);
     const verb = row.action.toLowerCase();
     await sendChatCommand(page, `${verb} ${row.amount} USDC ${row.action === 'Repay' ? 'to' : 'from'} Aave on Base Sepolia`);
     await expect(page.locator('.summary-bar')).toHaveAttribute('data-workflow-revision', '1');
@@ -55,7 +56,7 @@ for (const row of [
     await expect(page.getByRole('link', { name: 'Download Evidence Bundle' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Observe existing transaction' })).toHaveCount(0);
     expect(await supplySendCount(page)).toBe(0);
-    await page.reload();
+    await reloadBuilder(page);
     await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Execute', exact: true }).click();
     await assertNoFinancialCanvasAction(page);
     await expect(page.getByRole('link', { name: 'Download Evidence Bundle' })).toHaveCount(0);
@@ -68,7 +69,7 @@ for (const row of [
 test('Ethereum Sepolia WBTC retains the correct chain, asset and amount while MOCKED Review refuses authority', async ({ page, networkGuard }) => {
   await resetSupplyHarness({}, '/ethereum-sepolia');
   await installSupplyWallet(page, { chain: '0xaa36a7', route: '/ethereum-sepolia' });
-  await page.goto('/app');
+  await openBuilder(page);
   await sendChatCommand(page, `supply 0.001 WBTC to Aave on Ethereum Sepolia beneficiary ${SUPPLY_OWNER}`);
   const card = page.locator('.build-flow-surface .composer-card').first();
   await expect(card.getByRole('textbox', { name: 'Source amount (WBTC)', exact: true })).toHaveValue('0.001');

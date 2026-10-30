@@ -3,6 +3,7 @@ import { test, expect, readWorkflowIr } from './fixtures';
 import { installSupplyWallet } from './supply-fixtures';
 import { configureCanvasAction, openCanvasSettings } from './composer-authoring-fixtures';
 import type { Page } from '@playwright/test';
+import { openBuilder } from './build-entry-navigation';
 
 const card = (page: Page) => page.locator('.build-flow-surface .composer-card');
 async function readWorkflow(page: Page) {
@@ -22,7 +23,7 @@ async function expectBlocked(page: Page) {
 }
 
 for (const action of ['swap', 'bridge'] as const) test(`${action} starts unconfigured at zero, blocks later stages and accepts only a validated positive amount`, async ({ page }) => {
-  await installSupplyWallet(page); await page.goto('/app');
+  await installSupplyWallet(page); await openBuilder(page);
   await page.getByRole('button', { name: `Add ${action}`, exact: true }).click();
   const source = card(page).getByRole('textbox', { name: 'Source amount (USDC)', exact: true });
   await expect(source).toHaveValue('0');
@@ -75,7 +76,7 @@ for (const action of ['swap', 'bridge'] as const) test(`${action} starts unconfi
 });
 
 test('clearing an existing amount blocks both later stages without sending zero to the IR, and Cancel restores its value', async ({ page }) => {
-  await installSupplyWallet(page); await page.goto('/app');
+  await installSupplyWallet(page); await openBuilder(page);
   await page.getByRole('button', { name: 'Add swap', exact: true }).click();
   await configureCanvasAction(page, '2');
   const original = await readWorkflow(page);
@@ -97,7 +98,7 @@ test('clearing an existing amount blocks both later stages without sending zero 
 });
 
 test('an unapplied amount can be corrected freely, and delete/history restores an incomplete card safely', async ({ page }) => {
-  await installSupplyWallet(page); await page.goto('/app');
+  await installSupplyWallet(page); await openBuilder(page);
   await page.getByRole('button', { name: 'Add bridge', exact: true }).click();
   const source = card(page).getByRole('textbox', { name: 'Source amount (USDC)', exact: true });
   await source.fill('2'); await source.fill('0');
@@ -121,7 +122,7 @@ test('an unapplied amount can be corrected freely, and delete/history restores a
 
 
 test('a new isolated Bridge cannot replace an already-configured workflow through amount acceptance', async ({ page }) => {
-  await installSupplyWallet(page); await page.goto('/app');
+  await installSupplyWallet(page); await openBuilder(page);
   await page.getByRole('button', { name: 'Add swap', exact: true }).click();
   await configureCanvasAction(page, '2');
   const original = await readWorkflow(page);

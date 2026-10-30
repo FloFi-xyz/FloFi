@@ -3,6 +3,7 @@ import { test, expect } from './fixtures';
 import type { Page } from '@playwright/test';
 import { installSupplyWallet, SUPPLY_OWNER } from './supply-fixtures';
 import { configureCanvasAction } from './composer-authoring-fixtures';
+import { openBuilder } from './build-entry-navigation';
 
 const artifact = (page: Page) => page.getByRole('button', { name: /^Review proposed change:/ });
 const popover = (page: Page) => page.getByRole('dialog', { name: 'Proposed change' });
@@ -32,7 +33,7 @@ async function fitReview(page: Page) {
 }
 async function boot(page: Page, theme: string) {
   await page.addInitScript(value => localStorage.setItem('flofi.theme', value), theme);
-  await installSupplyWallet(page); await page.goto('/app');
+  await installSupplyWallet(page); await openBuilder(page);
   await expect(page.locator('.build009-wallet-info')).toBeVisible();
   await expect(page.locator('.fork-badge')).toHaveCount(1);
   await page.evaluate(() => document.fonts.ready);

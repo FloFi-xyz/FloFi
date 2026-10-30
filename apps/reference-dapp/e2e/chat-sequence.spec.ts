@@ -13,6 +13,7 @@ import type { APIRequestContext, Page } from '@playwright/test';
 import { test, expect, readWorkflowIr } from './fixtures';
 import { installJourneyWallet, walletRequests } from './journey-fixtures';
 import { createTestWallet } from '../../../packages/reference-reconciler/test/test-wallet';
+import { openBuilder } from './build-entry-navigation';
 
 test.skip(process.env.FLOFI_SWAP_EXECUTION_E2E !== 'MOCKED_LOOPBACK_ONLY', 'Requires the opt-in loopback swap execution harness');
 test.setTimeout(180_000);
@@ -48,7 +49,7 @@ async function setup(page: Page, request: APIRequestContext, options: { chain?: 
     window.addEventListener('eip6963:requestProvider', () => window.dispatchEvent(new CustomEvent('eip6963:announceProvider', {
       detail: { provider: w.ethereum, info: { rdns: 'io.metamask', name: 'MetaMask', uuid: 'chat-sequence-metamask' } } })));
   });
-  await page.goto('/app');
+  await openBuilder(page);
   await expect(page.locator('.header-wallet-provider')).toHaveAttribute('title', 'MetaMask');
   return { requested: () => requested, sends: () => control(request, 'MOCK_sends'),
     confirm: async () => { await expect.poll(() => confirmations.length).toBe(1); confirmations.shift()!(); } };
@@ -192,13 +193,14 @@ for (const width of [1920, 1440, 1280, 1024, 390, 375]) test(`chat-first layout 
   expect(await overflow()).toBeLessThanOrEqual(0);
   await page.screenshot({ path: testInfo.outputPath(`build-${width}.png`) });
   for (const [name, grid, summary, details] of [['Simulate', '.simulate-workspace-grid', '.simulation-summary', '.simulation-details'],
-    ['Execute', '.execute-workspace-grid', '.execution-summary', '.execution-details']] as const) {
+    ['Execute', '.execute-workspace-grid', '.execution-summary', null]] as const) {
     await stage(page, name).click();
     await expect(page.locator(grid)).toBeVisible();
     // One column: the canvas (or timeline). The summary is an optional, collapsed details surface — never a third column beside the chat.
     expect((await page.locator(grid).evaluate(element => getComputedStyle(element).gridTemplateColumns)).trim().split(/\s+/)).toHaveLength(1);
-    await expect(page.locator(summary)).toBeHidden();
-    await expect(page.locator(`${details} > summary`)).toBeVisible();
+    // BUILD0-UX-001: Execute shows its short status panel instead of collapsed details (and no technical disclosure).
+    if (details) { await expect(page.locator(summary)).toBeHidden(); await expect(page.locator(`${details} > summary`)).toBeVisible(); }
+    else { await expect(page.locator(summary)).toBeVisible(); await expect(page.locator('.execution-details, .execute-technical')).toHaveCount(0); }
     const chatBox = (await page.locator('.stage-with-chat > .copilot').boundingBox())!, stageBox = (await page.locator('.stage-with-chat > .main').boundingBox())!;
     expect(chatBox.width).toBeGreaterThanOrEqual(Math.min(300, width - 32));
     // Wide screens keep the chat beside the stage; narrower screens stack it below, at full width.
@@ -208,10 +210,12 @@ for (const width of [1920, 1440, 1280, 1024, 390, 375]) test(`chat-first layout 
     expect(await overflow()).toBeLessThanOrEqual(0);
     await page.screenshot({ path: testInfo.outputPath(`${name.toLowerCase()}-${width}.png`), fullPage: true });
     // The details stay one click away, and opening them never adds a column or overflows.
-    await page.locator(`${details} > summary`).click();
-    await expect(page.locator(summary)).toBeVisible();
-    expect(await overflow()).toBeLessThanOrEqual(0);
-    await page.locator(`${details} > summary`).click();
+    if (details) {
+      await page.locator(`${details} > summary`).click();
+      await expect(page.locator(summary)).toBeVisible();
+      expect(await overflow()).toBeLessThanOrEqual(0);
+      await page.locator(`${details} > summary`).click();
+    }
   }
   expect(owner.requested()).toBe(0); networkGuard.assertClean();
 });

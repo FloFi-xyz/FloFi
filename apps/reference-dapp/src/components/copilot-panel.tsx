@@ -7,7 +7,7 @@ import type { WorkflowOwner } from '../domain/saved-workflow';
 import type { useWalletProof } from './wallet-proof';
 import type { FormEvent, ReactNode } from 'react';
 import type { FlofiConversation } from '../state/flofi-conversation';
-import { ConversationExecutionCard, ConversationReviewCard } from './conversation-cards';
+import { ConversationReviewCard } from './conversation-cards';
 import { CopilotMessage, COPILOT_PLACEHOLDER, copilotIntro, copilotLabel, useFollowLatest } from './copilot-ai';
 import { FloFiAvatar, UserAvatar } from './flofi-avatar';
 
@@ -20,7 +20,7 @@ export function CopilotPanel({ conversation, interactive = true, owner = null, p
   proof?: ReturnType<typeof useWalletProof> }) {
   const { t: tr, language } = useLocale();
   const { copilot, messages, busy, input, setInput, send } = conversation;
-  const log = useFollowLatest(copilot.enabled || conversation.direct, messages.length + (conversation.execution ? 1 : 0), busy);
+  const log = useFollowLatest(copilot.enabled || conversation.direct, messages.length, busy);
   const last = messages.at(-1);
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -50,8 +50,8 @@ export function CopilotPanel({ conversation, interactive = true, owner = null, p
         </> : <p>{message.role === 'you' ? message.text : tr((index === 0 && copilot.enabled && copilotIntro(copilot.mode, conversation.direct)) || message.text)}</p>}
       </div>);
     })}
-      {conversation.execution && row(false, 'execution', <div className="message system flofi conversation-execution-message">{showLabels && <small className="sr-only">{tr('FLOFI')}</small>}
-        <ConversationExecutionCard execution={conversation.execution} language={language}/></div>)}
+      {/* BUILD0-UX-001: no execution report card in the chat. FloFi's own short messages announce each phase (wallet request, uncertainty, the
+          result and what to do next); the Execute stage and the Dashboard keep the steps, transactions and evidence. */}
       {busy && row(false, 'busy', <div className="message ai" role="status"><small className="sr-only">{tr(copilotLabel('ai', copilot.mode))}</small><p>{tr("Interpreting your message…")}</p></div>)}
       {conversation.automation && <CopilotAutomationProposal input={conversation.automation} owner={owner} {...(proof ? { proof } : {})} dismiss={conversation.dismissAutomation}/>}
     </div>

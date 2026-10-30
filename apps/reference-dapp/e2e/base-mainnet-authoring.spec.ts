@@ -10,6 +10,7 @@ import { test, expect, readWorkflowIr, sendChatCommand, CHAT_COMMITTED } from '.
 import type { Page } from '@playwright/test';
 import { installSupplyWallet } from './supply-fixtures';
 import { expectReviewedImagesOnly, replayProviderLogos } from './asset-logo-replay';
+import { openBuilder } from './build-entry-navigation';
 
 test.skip(process.env.GRYLOO_BASE_MAINNET_E2E !== 'MOCKED_LOOPBACK_ONLY', 'Base authoring requires the isolated loopback token-list harness');
 test.describe.configure({ mode: 'serial' });
@@ -21,7 +22,7 @@ async function tokenList(mode: 'ok' | 'unavailable' | 'slow') {
 const cards = (page: Page) => page.locator('.build-flow-surface .composer-card');
 async function openSwapDestination(page: Page) {
   await installSupplyWallet(page, { chain: '0x2105' });
-  await page.goto('/app');
+  await openBuilder(page);
   // BUILD-FLOFI-MAINNET-PRODUCT-001: no environment selector; the connected wallet's own network is shown.
   await expect(page.locator('.build009-wallet-info')).toHaveAttribute('title', /Base \(8453\)/);
   await page.getByRole('button', { name: 'Add swap', exact: true }).click();
@@ -86,7 +87,7 @@ test('the Swap card offers Base with its shortcuts and finds a non-featured toke
 test('chat authors the same Base catalog swap; the committed card shows cbBTC', async ({ page, networkGuard }) => {
   await tokenList('ok');
   await installSupplyWallet(page, { chain: '0x2105' });
-  await page.goto('/app');
+  await openBuilder(page);
   // BUILD-FLOFI-CONVERSATIONAL-001: the chat commits the request at once and names what it added.
   await sendChatCommand(page, 'swap 1 USDC for cbBTC on Base');
   await expect(page.getByRole('log', { name: 'Conversation' }).locator('.message').last()).toContainText('cbBTC');
@@ -117,7 +118,7 @@ test('the Copilot authors Base actions from normal language: a list token by nam
     test.skip(process.env.FLOFI_COPILOT !== 'replay', 'the natural-language Copilot runs on committed replay answers only');
     await tokenList('ok');
     await installSupplyWallet(page, { chain: '0x2105' });
-    await page.goto('/app');
+    await openBuilder(page);
     const recipient = '0x3333333333333333333333333333333333333333';
     await ask(page, 'Please swap 100 USDC for Coinbase Wrapped BTC on Base');
     await expectProposal(page, 'Interpreted as “swap 100 USDC to cbBTC on Base slippage 100 bps”', 'cbBTC');

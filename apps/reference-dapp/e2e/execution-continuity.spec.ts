@@ -8,6 +8,7 @@ import { createDatabase } from '@defi-workflow-engine/cloud-runtime';
 import { hashArtifactBytes } from '@defi-workflow-engine/workflow-contracts';
 import { validateArtifact } from '@defi-workflow-engine/workflow-contracts/schemas';
 import { validatePublicRunLog, type PublicRun } from '../src/server/public-testnet-service';
+import { openBuilder, reloadBuilder } from './build-entry-navigation';
 
 test.skip(process.env.FLOFI_SWAP_EXECUTION_E2E !== 'MOCKED_LOOPBACK_ONLY', 'Requires the opt-in loopback swap execution harness');
 test.setTimeout(90_000);
@@ -63,7 +64,7 @@ async function setup(page: Page, request: APIRequestContext, loseAt = 0) {
   await page.addInitScript(() => window.addEventListener('eip6963:requestProvider', () => window.dispatchEvent(new CustomEvent('eip6963:announceProvider', {
     detail: { provider: (window as Window & { ethereum?: unknown }).ethereum, info: { rdns: 'io.metamask', name: 'MetaMask', uuid: 'continuity-metamask' } },
   }))));
-  await page.goto('/app');
+  await openBuilder(page);
   await expect(page.getByRole('group', { name: 'Wallet connection' })).toContainText('MetaMask');
   await expect(page.getByRole('group', { name: 'Wallet connection' }).locator('.wallet-connection')).toHaveAttribute('title', /Base Sepolia/);
   await page.getByRole('button', { name: 'Add swap', exact: true }).click();
@@ -124,16 +125,17 @@ test('production regression: same MetaMask/account/Base Sepolia → approval CON
     { step: 'APPROVAL', state: 'CONFIRMED', reconciled: true }, { step: 'SWAP', state: 'CONFIRMED', reconciled: true },
   ], evidence: [{ outcome: 'RECONCILED' }] });
   expect((await walletRequests(page)).filter(method => method === 'eth_sendTransaction')).toHaveLength(2);
-  await page.getByText('View technical details', { exact: true }).click();
-  await expect(page.locator('.execution-evidence-details')).toContainText(id!);
-  await expect(page.locator('.execution-evidence-details').getByRole('button', { name: /Copy.*transaction/ })).toHaveCount(2);
-  await page.reload(); await stage(page, 'Execute');
+  // BUILD0-UX-001: no technical disclosure on Execute: the timeline keeps both transactions (copy and explorer), the Dashboard keeps the record.
+  await expect(page.getByText('View technical details', { exact: true })).toHaveCount(0);
+  await expect(page.locator('.execution-plan').getByRole('button', { name: /Copy.*transaction/ })).toHaveCount(2);
+  await expect(summary(page).getByRole('button', { name: 'View in Dashboard', exact: true })).toBeVisible();
+  await reloadBuilder(page); await stage(page, 'Execute');
   await expect(summary(page)).toContainText('Execution completed');
   await expect(page.locator('.execution-evidence-restored')).toHaveText('This step’s saved result was restored.');
   expect(await pointer(page)).toBe(id); expect(await owner.sends()).toBe(2); expect(owner.requested()).toBe(2);
   // BUILD-SOLANA-MAINNET-001 (requirement E): a new visit (this tab's session gone) starts with an empty Canvas; the finished run is not put back
   // as a card. Its durable record and pointer are untouched (the Dashboard keeps it), and nothing is resent.
-  await page.evaluate(() => sessionStorage.clear()); await page.reload();
+  await page.evaluate(() => sessionStorage.clear()); await reloadBuilder(page);
   await stage(page, 'Build');
   await expect(page.locator('.build-flow-surface .canvas-empty')).toContainText('Start your workflow');
   await page.waitForTimeout(2_000);
@@ -147,7 +149,7 @@ test('reload after confirmed approval recovers the same run and refreshes its qu
   const owner = await setup(page, request), id = await pointer(page);
   await authorize(page).click(); await owner.confirm();
   await expect(page.locator('.canvas-primary-action').getByRole('button', { name: 'Continue to swap', exact: true })).toBeEnabled();
-  await page.reload(); await stage(page, 'Execute');
+  await reloadBuilder(page); await stage(page, 'Execute');
   await expect(summary(page)).toContainText('Current execution restored');
   expect(await pointer(page)).toBe(id); expect(await owner.sends()).toBe(1);
   await expect(page.locator('.canvas-primary-action').getByRole('button', { name: 'Continue to swap', exact: true })).toHaveCount(0);
@@ -177,7 +179,7 @@ test('lost second wallet response stays uncertain across sync and reload and nev
   expect(await owner.sends()).toBe(2); expect(owner.requested()).toBe(2);
   // BUILD-SOLANA-MAINNET-001 (requirement E): even on a new visit (no tab session), an execution that still needs the owner is brought back to observe.
   await page.evaluate(() => sessionStorage.clear());
-  await page.reload(); await stage(page, 'Execute');
+  await reloadBuilder(page); await stage(page, 'Execute');
   await expect(summary(page)).toContainText('Execution status unresolved');
   expect(await pointer(page)).toBe(id); expect(await owner.sends()).toBe(2); expect(owner.requested()).toBe(2);
   await expect(page.locator('.canvas-primary-action').getByRole('button', { name: /Continue to|Authorize in wallet|Retry|Try again/ })).toHaveCount(0);

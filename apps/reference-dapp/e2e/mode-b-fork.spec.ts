@@ -6,6 +6,7 @@ import { fromHex } from '@defi-workflow-engine/reference-compiler';
 import { signModeBLocalTransaction } from '@defi-workflow-engine/reference-executor';
 import { test, expect } from './fixtures';
 import { authorSwap } from './mode-a-fixtures';
+import { openBuilder } from './build-entry-navigation';
 
 const profilePath = process.env.GRYLOO_MODE_B_PROFILE;
 const keyPath = process.env.GRYLOO_MODE_B_EXECUTOR_KEY_FILE;
@@ -120,7 +121,7 @@ test('review, install, restart worker, reconcile, and revoke through a guarded b
       expect((await service.reconcile(executionId)).outcome).toBe('RECONCILED');
     } finally { await vite.close(); }
     const recovered = page;
-    await recovered.goto('/app');
+    await openBuilder(recovered);
     await recovered.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Execute', exact: true }).click();
     const after = recovered.getByRole('region', { name: 'Finite Mode B authority' });
     await expect(after).toContainText('RECONCILED');

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, assertNoFinancialCanvasAction, sendChatCommand } from './fixtures';
 import { assertConnectedFlow } from './connected-flow-assertions';
+import { openBuilder, reloadBuilder } from './build-entry-navigation';
 
 const widths = [320, 375, 390, 430, 768, 1024, 1440];
 async function noOverflow(page: import('@playwright/test').Page) {
@@ -58,7 +59,7 @@ for (const width of widths) {
     }
     await page.getByRole('button', { name: 'PT', exact: true }).click();
     await expect(page.locator('html')).toHaveAttribute('lang', 'pt-BR');
-    await page.reload();
+    await reloadBuilder(page);
     await expect(page.getByRole('heading', { level: 1 })).toContainText('Várias entradas.');
     await expect(page.locator('main')).not.toContainText(/devnet|testnet|sepolia|mock|sandbox|synthetic|fundos de teste/i);
     await expect(page.getByRole('region', { name: 'Redes compatíveis', exact: true })).toContainText('Em breve');
@@ -78,7 +79,7 @@ for (const width of widths) {
 for (const width of [320, 375, 390, 430]) {
   test(`touch controls, proposal and wallet dismissal at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 740 });
-    await page.goto('/app');
+    await openBuilder(page);
     const tools = page.getByRole('toolbar', { name: 'Canvas tools' });
     const pool = tools.getByRole('button', { name: 'Add pool', exact: true });
     await expect(pool).toBeVisible();
@@ -156,7 +157,7 @@ test('reduced motion exposes all three workflow phases without pinning', async (
 });
 
 test('desktop workflow showcase uses the actual builder', async ({ page }) => {
-  await page.goto('/app');
+  await openBuilder(page);
   await sendChatCommand(page, 'Swap 2 USDC to WETH on Base Sepolia slippage 50 bps');
   await expect(page.locator('.build-flow-surface .composer-card')).toHaveCount(1);
   await page.evaluate(() => document.fonts.ready);

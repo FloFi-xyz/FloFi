@@ -2,10 +2,11 @@
 import { test, expect, assertNoFinancialCanvasAction } from './fixtures';
 import { configureCanvasAction } from './composer-authoring-fixtures';
 import { installSupplyWallet } from './supply-fixtures';
+import { openBuilder } from './build-entry-navigation';
 
 test('Simulate and Execute open directly on existing content without a workspace introduction', async ({ page }) => {
   await installSupplyWallet(page);
-  await page.goto('/app');
+  await openBuilder(page);
   const nav = page.getByRole('navigation', { name: 'Workflow stages' });
   const execution = page.getByRole('main', { name: 'Execution workspace', exact: true });
   await nav.getByRole('button', { name: 'Execute', exact: true }).click();

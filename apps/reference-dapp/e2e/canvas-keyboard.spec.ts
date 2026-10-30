@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, sendChatCommand } from './fixtures';
+import { openBuilder } from './build-entry-navigation';
 
 // BUILD-SOLANA-MAINNET-001 (intentional change): a Swap card's center arrow is now the From/To switch, so the card is selected by its title.
 test('canvas Delete, Backspace, Escape and text-entry guards use semantic IR', async ({ page }) => {
-  await page.goto('/app');
+  await openBuilder(page);
   // BUILD-FLOFI-CONVERSATIONAL-001: the chat commits the request at once (no proposal to apply).
   const prompt = page.getByLabel('Describe your flow');
   const addSwap = () => sendChatCommand(page, 'swap 2 USDC to WETH on Base slippage 50 bps');

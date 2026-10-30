@@ -8,6 +8,7 @@ import type { SupplyReview } from '@defi-workflow-engine/reference-compiler';
 import { createRequire } from 'node:module';
 import type { Page } from '@playwright/test';
 import type { SupplyRpc } from '@defi-workflow-engine/reference-compiler';
+import { openBuilder } from './build-entry-navigation';
 export const REPAY_OWNER='0x5975c152fe58cdcb7e25586a3c9b994a16dbb615';
 export const repayOptions={owner:REPAY_OWNER,balance:'10000',scaledDebt:'8001',userConfig:'3'};
 export const SUPPLY_OWNER='0x1111111111111111111111111111111111111111';
@@ -73,7 +74,7 @@ export async function resetSupplyHarness(options:Record<string,unknown>={},route
   await rm(process.env.GRYLOO_SUPPLY_JOURNAL,{recursive:true,force:true});await supplyHarnessRpc('MOCK_reset',[options],route);
 }
 export async function authorSupply(page:Page,amount='10',beneficiary=SUPPLY_OWNER){
-  await page.goto('/app');await page.getByRole('button',{name:'Add supply',exact:true}).click();
+  await openBuilder(page);await page.getByRole('button',{name:'Add supply',exact:true}).click();
   const card=page.locator('.build-flow-surface .composer-card.active');
   await card.getByRole('textbox',{name:'Source amount (USDC)',exact:true}).fill(amount);
   await card.getByRole('button',{name:'Review Supply change',exact:true}).click();

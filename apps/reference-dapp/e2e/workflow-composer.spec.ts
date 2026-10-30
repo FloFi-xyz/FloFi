@@ -2,6 +2,7 @@
 import { test, expect, applyPendingProposal } from './fixtures';
 import type { Page } from '@playwright/test';
 import { configureCanvasAction, configureCanvasPool, openCanvasSettings } from './composer-authoring-fixtures';
+import { openBuilder } from './build-entry-navigation';
 const owner = '0x1111111111111111111111111111111111111111';
 const cards = (page: Page) => page.locator('.build-flow-surface .composer-card');
 const step = (page: Page, id: string) => page.locator(`.build-flow-surface .react-flow__node[data-id="${id}"]`);
@@ -28,7 +29,7 @@ test.afterEach(async ({ page }) => {
   expect(await page.evaluate(() => (window as unknown as { composerWalletRequests: string[] }).composerWalletRequests.filter(method => /sign|send/i.test(method)))).toEqual([]);
 });
 async function open(page: Page) {
-  await page.goto('/app');
+  await openBuilder(page);
   await expect(page.locator('.build009-wallet-info')).toBeVisible({ timeout: 15000 });
 }
 async function lending(page: Page) {

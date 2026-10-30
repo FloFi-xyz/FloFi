@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, assertNoFinancialCanvasAction, sendChatCommand } from './fixtures';
+import { openBuilder } from './build-entry-navigation';
 
 test('Execute shows the shared authored workflow without authorizing or inventing execution', async ({ page }) => {
-  await page.goto('/app');
+  await openBuilder(page);
   const nav = page.getByRole('navigation', { name: 'Workflow stages' });
   await page.getByRole('button', { name: 'Rename workflow', exact: true }).click();
   await page.getByRole('textbox', { name: 'Workflow name', exact: true }).fill('ESPARTACUS');

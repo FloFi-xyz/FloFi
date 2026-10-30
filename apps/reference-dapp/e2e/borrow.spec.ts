@@ -3,8 +3,9 @@ import {test,expect, openSimulationDetails, acceptProductReview } from './fixtur
 import { configureCanvasAction, openCanvasSettings } from './composer-authoring-fixtures';
 import type {Page} from '@playwright/test';
 import {installSupplyWallet,resetSupplyHarness,supplySendCount,supplyHarnessRpc,SUPPLY_OWNER} from './supply-fixtures';
+import { openBuilder, reloadBuilder } from './build-entry-navigation';
 async function author(page:Page,options:Parameters<typeof installSupplyWallet>[1]={}){
-  await installSupplyWallet(page,options);await page.goto('/app');await page.getByRole('button',{name:'Add borrow',exact:true}).click();
+  await installSupplyWallet(page,options);await openBuilder(page);await page.getByRole('button',{name:'Add borrow',exact:true}).click();
   await configureCanvasAction(page,'0.01');
   await expect(page.locator('.react-flow__node[data-id="node-002"]')).toContainText('1. Borrow');
   await page.getByRole('button',{name:'Simulate workflow'}).click(); await openSimulationDetails(page);await page.getByRole('button',{name:'Simulate Borrow',exact:true}).click();
@@ -29,7 +30,7 @@ test('lost response recovers the same Borrow across reload without another send'
   await author(page,{uncertain:'SUPPLY'});await review(page);await execute(page);
   await expect.poll(()=>supplySendCount(page)).toBe(1);await expect(page.getByRole('button',{name:'Observe existing transaction'})).toBeEnabled();
   await expect(page.getByRole('link',{name:'Download Evidence Bundle'})).toHaveCount(0);
-  await page.reload();await page.getByRole('navigation',{name:'Workflow stages'}).getByRole('button',{name:'Execute',exact:true}).click();
+  await reloadBuilder(page);await page.getByRole('navigation',{name:'Workflow stages'}).getByRole('button',{name:'Execute',exact:true}).click();
   await page.getByRole('button',{name:'Observe existing transaction'}).click();await expect(page.getByRole('link',{name:'Download Evidence Bundle'})).toBeVisible();expect(await supplySendCount(page)).toBe(0);
 });
 test('owner refusal needs fresh owner Review and records no successful debt evidence',async({page})=>{
@@ -58,7 +59,7 @@ test('semantic amount edits invalidate Borrow Review',async({page})=>{
   await expect(page.getByRole('region',{name:'Aave Borrow'}).getByRole('button',{name:'Execute',exact:true})).toHaveCount(0);expect(await supplySendCount(page)).toBe(0);
 });
 test('read-only simulation blocks unsafe Borrow before Review',async({page})=>{
-  await installSupplyWallet(page);await page.goto('/app');
+  await installSupplyWallet(page);await openBuilder(page);
   // Borrow binds the connected owner: a click before the wallet's passive reconnect is refused ("Connect your wallet…"), so wait for it.
   await expect(page.locator('.build009-wallet-info')).toHaveAttribute('title',new RegExp(SUPPLY_OWNER,'i'));await page.getByRole('button',{name:'Add borrow',exact:true}).click();await configureCanvasAction(page,'5');await page.getByRole('button',{name:'Simulate workflow'}).click(); await openSimulationDetails(page);await page.getByRole('button',{name:'Simulate Borrow',exact:true}).click();
   await expect(page.getByRole('region',{name:'Aave Borrow'})).toContainText('minimum of 2.0');

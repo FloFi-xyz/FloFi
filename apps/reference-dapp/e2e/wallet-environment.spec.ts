@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, chooseWallet, openProposalReview } from './fixtures';
 import type { Page } from '@playwright/test';
+import { openBuilder } from './build-entry-navigation';
 
 type WalletControls = {
   setChain(chain: string): void; disconnect(): void;
@@ -44,7 +45,7 @@ async function installWallet(page: Page, connected = true, chain = '0x14a34') {
 const setChain = (page: Page, chain: string) => page.evaluate(value => (window as unknown as { walletEnvironmentTest: WalletControls }).walletEnvironmentTest.setChain(value), chain);
 
 test('header and Bridge use the actual EVM wallet chain, update live, and keep unknown chains neutral', async ({ page }) => {
-  await installWallet(page); await page.goto('/app');
+  await installWallet(page); await openBuilder(page);
   const indicator = page.locator('.header-environment-control'), environment = page.getByRole('combobox', { name: 'Environment', exact: true });
   await expect(environment).toHaveText('Testnet');
   await page.getByRole('button', { name: 'Add bridge', exact: true }).click();
@@ -106,7 +107,7 @@ test('header and Bridge use the actual EVM wallet chain, update live, and keep u
 });
 
 test('Network control waits for actual wallet confirmation and never fabricates a successful switch', async ({ page }) => {
-  await installWallet(page); await page.goto('/app');
+  await installWallet(page); await openBuilder(page);
   const environment = page.getByRole('combobox', { name: 'Environment', exact: true }), dot = page.locator('.header-mainnet-dot');
   await expect(environment).toHaveText('Testnet');
   for (const result of ['reject', 'unchanged', 'switch'] as const) {
@@ -128,7 +129,7 @@ test('Network control waits for actual wallet confirmation and never fabricates 
 });
 
 test('a disconnected wallet is neutral until connection reports its actual network', async ({ page }) => {
-  await installWallet(page, false, '0x2105'); await page.goto('/app');
+  await installWallet(page, false, '0x2105'); await openBuilder(page);
   const environment = page.getByRole('combobox', { name: 'Environment', exact: true });
   await expect(environment).toHaveText('Network'); await expect(page.locator('.header-mainnet-dot')).toHaveCount(0);
   await page.getByRole('button', { name: 'Connect Wallet', exact: true }).click();
@@ -146,7 +147,7 @@ for (const cluster of ['solana:devnet', 'solana:mainnet']) test(`${cluster} conn
     } };
     window.addEventListener('wallet-standard:app-ready', event => (event as CustomEvent<{ register(wallet: unknown): void }>).detail.register(wallet));
   });
-  await page.goto('/app');
+  await openBuilder(page);
   await page.locator('#mock-prompt').fill(cluster === 'solana:mainnet' ? 'Swap 1 USDC to SOL on Solana' : 'Swap 0.1 SOL to devUSDC on Solana Devnet');
   await page.getByRole('button', { name: 'Send', exact: true }).click();
   await openProposalReview(page);

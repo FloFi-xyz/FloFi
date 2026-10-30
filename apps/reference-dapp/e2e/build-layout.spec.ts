@@ -2,11 +2,12 @@
 import { test, expect } from './fixtures';
 import { installSupplyWallet } from './supply-fixtures';
 import { openCanvasSettings } from './composer-authoring-fixtures';
+import { openBuilder } from './build-entry-navigation';
 
 // BUILD-FLOFI-CONVERSATIONAL-001: no Advanced Settings panel below the canvas; a card's settings open anchored to it, inside the canvas.
 test('Build places the existing assistant beside the canvas and a selected cardâ€™s settings inside the canvas, never below it', async ({ page }) => {
   await installSupplyWallet(page);
-  await page.goto('/app');
+  await openBuilder(page);
   const canvas = page.getByRole('region', { name: 'Workflow canvas', exact: true });
   const assistant = page.getByRole('complementary', { name: 'FloFi Assistant' });
   const inspector = page.getByRole('dialog', { name: 'Action settings', exact: true });
@@ -42,7 +43,7 @@ test('Build places the existing assistant beside the canvas and a selected cardâ
 
 test('Build keeps existing toolbar actions and zoom behavior at their new positions', async ({ page }) => {
   await installSupplyWallet(page);
-  await page.goto('/app');
+  await openBuilder(page);
   await page.getByRole('button', { name: 'Undock toolbar', exact: true }).click();
   const graph = page.getByRole('region', { name: 'Workflow graph', exact: true });
   const toolbar = graph.locator('.floating-toolbox');

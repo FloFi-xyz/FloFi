@@ -2,12 +2,13 @@
 import {
   authorSwap, executionPanel, expect, forkRpc, preparedRecord, requestStep, reviewAndConnect, simulateOnFork, stepState, test, visual,
 } from './mode-a-fixtures';
+import { openBuilder, reloadBuilder } from './build-entry-navigation';
 
 const stage = (page: import('@playwright/test').Page, name: 'Execute') =>
   page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name, exact: true }).click();
 
 test('an unknown wallet result survives a browser restart and is recovered from the fork without a duplicate', async ({ page, fork, testWallet }) => {
-  await page.goto('/app');
+  await openBuilder(page);
   await authorSwap(page, 'WETH_TO_USDC', '1', '100');
   await simulateOnFork(page);
   await reviewAndConnect(page);
@@ -22,7 +23,7 @@ test('an unknown wallet result survives a browser restart and is recovered from 
 
   // Browser restart: the page reloads the durable journal; no new swap request is offered.
   testWallet.fault = {};
-  await page.reload();
+  await reloadBuilder(page);
   await stage(page, 'Execute');
   await expect(stepState(page, 'Step 2 · exact swap')).toHaveText('SUBMISSION_RESULT_UNKNOWN');
   await expect(page.getByRole('region', { name: 'Mode A Manifest review' })).toContainText('Recovered from the journal after a restart');
@@ -40,7 +41,7 @@ test('an unknown wallet result survives a browser restart and is recovered from 
 });
 
 test('delayed mining keeps each step PENDING until its block exists, then reconciles', async ({ page, fork, testWallet }) => {
-  await page.goto('/app');
+  await openBuilder(page);
   await authorSwap(page, 'WETH_TO_USDC', '1', '100');
   await simulateOnFork(page);
   await reviewAndConnect(page);
@@ -59,7 +60,7 @@ test('delayed mining keeps each step PENDING until its block exists, then reconc
 });
 
 test('a reverted swap leaves a residual allowance that only a separate revocation clears', async ({ page, fork, testWallet }) => {
-  await page.goto('/app');
+  await openBuilder(page);
   await authorSwap(page, 'WETH_TO_USDC', '1', '0');
   await simulateOnFork(page);
   await reviewAndConnect(page);

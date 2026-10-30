@@ -4,6 +4,7 @@ import { selectSettingsTheme } from './settings-fixtures';
 import type { Locator } from '@playwright/test';
 import { installSupplyWallet } from './supply-fixtures';
 import { configureCanvasAction } from './composer-authoring-fixtures';
+import { openBuilder } from './build-entry-navigation';
 
 type Box = { x: number; y: number; width: number; height: number };
 const right = (box: Box) => box.x + box.width;
@@ -34,7 +35,7 @@ for (const theme of ['Light', 'Dark'] as const) for (const layout of ['standard'
   test(`${theme} ${layout} workspace keeps Build geometry, CTA anchors and controls through lifecycle stages`, async ({ page }, testInfo) => {
     const errors: string[] = [];
     page.on('pageerror', error => errors.push(error.message));
-    await installSupplyWallet(page); await page.goto('/app');
+    await installSupplyWallet(page); await openBuilder(page);
     await expect(page.locator('.build009-wallet-info')).toBeVisible();
     const settings = page.getByRole('button', { name: 'Settings', exact: true });
     await settings.click();

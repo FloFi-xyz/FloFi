@@ -4,6 +4,7 @@ import { test, expect } from './fixtures';
 import { installJourneyWallet, walletRequests, setWalletChain } from './journey-fixtures';
 import { createTestWallet } from '../../../packages/reference-reconciler/test/test-wallet';
 import { hashArtifactBytes, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
+import { openBuilder } from './build-entry-navigation';
 
 for (const [network, chain] of [['Base Sepolia', '0x14a34'], ['Ethereum Sepolia', '0xaa36a7']] as const) {
   test(`${network}: Canvas → real read client estimate → Simulate → Review; locale preserves authority and wallet changes invalidate it`, async ({ page, request, networkGuard }) => {
@@ -12,7 +13,7 @@ for (const [network, chain] of [['Base Sepolia', '0x14a34'], ['Ethereum Sepolia'
     const owner = createTestWallet(); await installJourneyWallet(page, [owner], { chain });
     const workflows: SemanticWorkflow[] = [];
     page.on('request', event => { if (event.url().endsWith('/api/build-estimate')) workflows.push(event.postDataJSON().workflow as SemanticWorkflow); });
-    await page.goto('/app');
+    await openBuilder(page);
     // BUILD-FLOFI-PRODUCT-UX-001: compact chrome shows the short address; network stays in the title tooltip.
     await expect(page.getByRole('group', { name: 'Wallet connection' }).locator('.wallet-connection')).toHaveAttribute('title', new RegExp(network));
     await page.getByRole('button', { name: 'Add swap', exact: true }).click();

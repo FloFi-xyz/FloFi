@@ -4,9 +4,10 @@ import { configureCanvasAction, openCanvasSettings } from './composer-authoring-
 import type {Page} from '@playwright/test';
 import {installSupplyWallet,resetSupplyHarness,supplySendCount,supplyHarnessRpc} from './supply-fixtures';
 import {withdrawOptions,WITHDRAW_OWNER as owner} from './withdraw-fixtures';
+import { openBuilder, reloadBuilder } from './build-entry-navigation';
 const region=(page:Page)=>page.getByRole('region',{name:'Aave Withdraw'});
 async function author(page:Page,options:Parameters<typeof installSupplyWallet>[1]={}){
-  await installSupplyWallet(page,{account:owner,...options});await page.goto('/app');await page.getByRole('button',{name:'Add withdraw',exact:true}).click();
+  await installSupplyWallet(page,{account:owner,...options});await openBuilder(page);await page.getByRole('button',{name:'Add withdraw',exact:true}).click();
   await configureCanvasAction(page,'0.1');
   await expect(page.locator('.react-flow__node[data-id="node-002"]')).toContainText('1. Withdraw');
   await page.getByRole('button',{name:'Simulate workflow'}).click(); await openSimulationDetails(page);await page.getByRole('button',{name:'Simulate Withdraw',exact:true}).click();await expect(page.getByRole('button',{name:'Approve & Continue',exact:true})).toBeVisible();
@@ -23,10 +24,10 @@ test('Build → read-only Simulate → owner Review → one exact Withdraw → R
   const requests=await page.evaluate(()=>{const w=window as unknown as {supplyWalletRequests:{method:string;params:unknown[]}[]};return w.supplyWalletRequests.filter(r=>r.method==='eth_sendTransaction').map(r=>r.params[0]);});expect(requests[0]).not.toHaveProperty('nonce');expect(errors).toEqual([]);await page.screenshot({path:'/tmp/BUILD-012D-WITHDRAW-MOCKED-RESULT.png',fullPage:true});
 });
 test('lost response recovers the same Withdraw after refresh with no repeat send',async({page})=>{
-  await author(page,{uncertain:'SUPPLY'});await review(page);await execute(page);await expect(page.getByRole('button',{name:'Observe existing transaction'})).toBeEnabled();await page.reload();await page.getByRole('navigation',{name:'Workflow stages'}).getByRole('button',{name:'Execute',exact:true}).click();await page.getByRole('button',{name:'Observe existing transaction'}).click();await expect(page.getByRole('link',{name:'Download Evidence Bundle'})).toBeVisible();expect(await supplySendCount(page)).toBe(0);
+  await author(page,{uncertain:'SUPPLY'});await review(page);await execute(page);await expect(page.getByRole('button',{name:'Observe existing transaction'})).toBeEnabled();await reloadBuilder(page);await page.getByRole('navigation',{name:'Workflow stages'}).getByRole('button',{name:'Execute',exact:true}).click();await page.getByRole('button',{name:'Observe existing transaction'}).click();await expect(page.getByRole('link',{name:'Download Evidence Bundle'})).toBeVisible();expect(await supplySendCount(page)).toBe(0);
 });
 test('unknown unobserved submission stays observation-only across refresh',async({page})=>{
-  await author(page,{notBroadcast:'SUPPLY'});await review(page);await execute(page);await expect(page.getByRole('button',{name:'Observe existing transaction'})).toBeEnabled();await page.reload();await page.getByRole('navigation',{name:'Workflow stages'}).getByRole('button',{name:'Execute',exact:true}).click();await page.getByRole('button',{name:'Observe existing transaction'}).click();await expect(region(page).getByRole('button',{name:'Execute',exact:true})).toHaveCount(0);await expect(page.getByRole('button',{name:'Prepare fresh review'})).toHaveCount(0);expect(await supplySendCount(page)).toBe(0);
+  await author(page,{notBroadcast:'SUPPLY'});await review(page);await execute(page);await expect(page.getByRole('button',{name:'Observe existing transaction'})).toBeEnabled();await reloadBuilder(page);await page.getByRole('navigation',{name:'Workflow stages'}).getByRole('button',{name:'Execute',exact:true}).click();await page.getByRole('button',{name:'Observe existing transaction'}).click();await expect(region(page).getByRole('button',{name:'Execute',exact:true})).toHaveCount(0);await expect(page.getByRole('button',{name:'Prepare fresh review'})).toHaveCount(0);expect(await supplySendCount(page)).toBe(0);
 });
 test('known wallet refusal requires fresh explicit Review',async({page})=>{await author(page,{reject:'SUPPLY'});await review(page);await execute(page);await expect(region(page)).toContainText('not submitted');await page.getByRole('button',{name:'Prepare fresh review'}).click();await expect(page.getByRole('button',{name:'Accept Withdraw review'})).toBeVisible();expect(await supplySendCount(page)).toBe(1);});
 test('wrong chain blocks wallet handoff',async({page})=>{await author(page,{chain:'0x1'});await review(page);await execute(page);await expect(region(page)).toContainText('Switch your wallet');expect(await supplySendCount(page)).toBe(0);});

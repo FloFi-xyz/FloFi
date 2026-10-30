@@ -1,0 +1,105 @@
+/* BUILD0-UX-001: Build 0 entry. Proportions from the approved reference (TELA_ALVO_CRIA); colours from the official FloFi tokens (light: white
+   and navy; dark: graphite). The primary button follows the product's own --primary, like every other primary action. The dotted field and soft
+   glows are CSS only. */
+.root{
+  --entry-bg:#fbfdff;--entry-ink:#041b3d;--entry-muted:#4b5b73;--entry-paper:#fff;--entry-line:#d9e2ec;--entry-field-line:#bfd7fa;
+  --entry-blue:var(--primary,#2343d9);--entry-blue-hover:color-mix(in srgb,var(--entry-blue) 86%,#000);--entry-link:#2343d9;--entry-blue-soft:#e9edfd;--entry-dot:#a9c7e9;--entry-halo:rgba(219,233,255,.4);
+  --entry-gradient:linear-gradient(95deg,#0860e7 12%,#12bdde 93%);--entry-chip-line:#d4e2f3;--entry-chip-ink:#0e275c;
+  --entry-red:#b42318;--entry-red-soft:#fdecea;--entry-red-line:#f3c5c0;
+  position:relative;isolation:isolate;display:grid;place-items:center;min-height:max(640px,calc(100vh - 140px));overflow:hidden;padding:54px 30px 64px;
+  background:radial-gradient(circle at 18% 70%,rgba(196,233,255,.19),transparent 29%),radial-gradient(circle at 82% 44%,rgba(208,232,255,.18),transparent 31%),var(--entry-bg);
+  color:var(--entry-ink)}
+.root::before{content:"";position:absolute;inset:0;z-index:-2;pointer-events:none;background-image:radial-gradient(var(--entry-dot) .65px,transparent .8px);background-size:30px 30px;opacity:.36;
+  mask-image:linear-gradient(to bottom,transparent,#000 23%,#000 86%,transparent)}
+.root::after{content:"";position:absolute;z-index:-1;inset:10% -13%;pointer-events:none;
+  background:radial-gradient(ellipse 24% 22% at 13% 28%,rgba(83,207,229,.13),transparent 100%),radial-gradient(ellipse 25% 32% at 91% 70%,rgba(87,159,245,.11),transparent 100%)}
+.content{position:relative;z-index:1;width:min(100%,1160px);display:flex;flex-direction:column;align-items:center;text-align:center}
+.mascot{position:relative;width:168px;height:172px;margin:0 auto 8px;display:grid;place-items:center}
+.mascotLight,.mascotDark{position:absolute;inset:0;z-index:1;width:100%;height:auto;filter:drop-shadow(0 17px 21px rgba(28,85,161,.12));animation:mascotFloat 5s ease-in-out infinite;pointer-events:none;user-select:none}
+.mascotDark{display:none}
+.mascotShadow{position:absolute;bottom:1px;left:27%;width:46%;height:10px;border-radius:50%;background:rgba(40,117,224,.1);filter:blur(5px)}
+.title{margin:0;font-size:clamp(42px,5vw,64px);font-weight:600;line-height:1.06;letter-spacing:-.055em;color:var(--entry-ink);text-wrap:balance}
+.title span{background:var(--entry-gradient);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent}
+.description{max-width:735px;margin:19px auto 34px;font-size:clamp(16px,1.6vw,21px);line-height:1.48;color:var(--entry-muted);text-wrap:pretty}
+.composer{width:min(100%,1070px);min-height:88px;display:flex;align-items:center;gap:19px;padding:8px 8px 8px 26px;border:1px solid var(--entry-field-line);border-radius:23px;background:var(--entry-paper);
+  box-shadow:0 14px 38px rgba(28,88,168,.08),0 0 0 5px var(--entry-halo);transition:box-shadow .2s ease,border-color .2s ease}
+.composer:focus-within{border-color:var(--entry-blue);box-shadow:0 14px 38px rgba(28,88,168,.1),0 0 0 4px rgba(35,67,217,.24)}
+.spark{flex:none;width:26px;height:26px;color:#1474ff}
+.composer textarea{flex:1;min-width:0;min-height:58px;max-height:150px;padding:15px 0 8px;border:0;outline:0;resize:vertical;background:transparent;color:var(--entry-ink);font-size:17px;line-height:1.4;text-align:left}
+.composer textarea::placeholder{color:var(--entry-muted);opacity:1}
+.composer textarea:disabled{opacity:.7}
+.create{align-self:stretch;flex:none;display:flex;align-items:center;justify-content:center;gap:11px;min-width:213px;min-height:56px;border:0;border-radius:17px;padding:0 20px;background:var(--entry-blue);color:#fff;
+  font-size:16px;font-weight:600;cursor:pointer;box-shadow:0 5px 12px color-mix(in srgb,var(--entry-blue) 22%,transparent);transition:background .2s ease,transform .2s ease,opacity .2s ease}
+.create:not(:disabled):hover{background:var(--entry-blue-hover);transform:translateY(-1px)}
+.create:disabled{cursor:default;opacity:.55;box-shadow:none}
+.createIcon{width:20px;height:20px;stroke-width:1.8}
+.create:focus-visible,.suggestions button:focus-visible,.manual:focus-visible,.error button:focus-visible,.context button:focus-visible{outline:3px solid var(--entry-link);outline-offset:3px}
+/* The composer itself carries the field's focus ring (border and a 4px ring), so the textarea draws none of its own. */
+.composer textarea:focus-visible{outline:0}
+.status{margin:17px 0 0;color:var(--entry-muted);font-size:14px}
+.error{width:min(100%,800px);margin:18px 0 0;padding:16px 19px;border:1px solid var(--entry-red-line);border-radius:14px;background:var(--entry-red-soft);color:var(--entry-red);text-align:left}
+.error p{margin:0 0 6px;font-weight:500}.error .errorNote{margin-bottom:12px;color:var(--entry-muted);font-weight:400;font-size:13px}
+.error div{display:flex;flex-wrap:wrap;gap:8px}
+.error button,.context button{min-height:37px;padding:0 13px;border:1px solid var(--entry-field-line);border-radius:8px;background:var(--entry-paper);color:var(--entry-link);font-weight:600;cursor:pointer}
+.error button:disabled{opacity:.55;cursor:default}
+.context{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:8px 10px;margin:18px 0 0;color:var(--entry-muted);font-size:14px}
+.context button{min-height:32px}
+.suggestions{display:flex;justify-content:center;flex-wrap:wrap;gap:10px;margin:35px 0 0}
+.suggestions button{display:inline-flex;align-items:center;gap:10px;min-height:47px;padding:0 18px;border:1px solid var(--entry-chip-line);border-radius:999px;background:color-mix(in srgb,var(--entry-paper) 90%,transparent);
+  color:var(--entry-chip-ink);font-size:14px;font-weight:500;cursor:pointer;box-shadow:0 7px 17px rgba(23,75,144,.045);transition:border-color .18s ease,background .18s ease,transform .18s ease}
+.suggestions button:not(:disabled):hover{border-color:#82adf0;background:var(--entry-paper);transform:translateY(-2px)}
+.suggestions button:disabled{opacity:.6;cursor:default}
+.chipIcon{width:19px;height:19px;flex:none;color:#1268f3}
+.manual{margin:20px 0 0;padding:6px 10px;border:0;border-radius:6px;background:transparent;color:#275487;font-size:14px;text-decoration:underline;text-underline-offset:4px;cursor:pointer}
+.manual:hover{color:var(--entry-link)}
+.trust{display:flex;align-items:center;gap:13px;margin:28px auto 0;text-align:left;color:var(--entry-ink)}
+.check{flex:none;display:grid;place-items:center;width:41px;height:41px;border-radius:50%;background:var(--entry-blue-soft);color:var(--entry-link)}
+.check svg{width:22px;height:22px;stroke-width:2}
+.trust strong{font-size:13px;font-weight:600}.trust p{margin:4px 0 0;color:var(--entry-muted);font-size:13px}
+
+:global(:root[data-theme="dark"]) .root{
+  --entry-bg:#0b0d12;--entry-ink:#f4f5f7;--entry-muted:#a4abb8;--entry-paper:#15181f;--entry-line:#2a2f3a;--entry-field-line:#2a2f3a;
+  --entry-blue:var(--primary,#2343d9);--entry-blue-hover:color-mix(in srgb,var(--entry-blue) 84%,#fff);--entry-link:#93a6ff;--entry-blue-soft:#1a2350;--entry-dot:#3a4252;--entry-halo:rgba(35,67,217,.12);
+  --entry-gradient:linear-gradient(95deg,#5b7cff 10%,#22c7e6 92%);--entry-chip-line:#2a2f3a;--entry-chip-ink:#f4f5f7;
+  --entry-red:#ff8a80;--entry-red-soft:#3a1614;--entry-red-line:#5c2a26;
+  background:radial-gradient(circle at 20% 67%,rgba(65,111,209,.09),transparent 34%),radial-gradient(circle at 82% 44%,rgba(35,67,217,.07),transparent 31%),var(--entry-bg)}
+:global(:root[data-theme="dark"]) .root::before{opacity:.5}
+:global(:root[data-theme="dark"]) .root::after{opacity:.55}
+:global(:root[data-theme="dark"]) .mascotLight{display:none}
+:global(:root[data-theme="dark"]) .mascotDark{display:block}
+:global(:root[data-theme="dark"]) .mascotLight,:global(:root[data-theme="dark"]) .mascotDark{filter:drop-shadow(0 17px 21px rgba(0,0,0,.35))}
+:global(:root[data-theme="dark"]) .mascotShadow{background:rgba(147,166,255,.12)}
+:global(:root[data-theme="dark"]) .composer{box-shadow:0 14px 38px rgba(0,0,0,.28),0 0 0 5px var(--entry-halo)}
+:global(:root[data-theme="dark"]) .composer:focus-within{border-color:var(--entry-link);box-shadow:0 14px 38px rgba(0,0,0,.3),0 0 0 4px rgba(147,166,255,.3)}
+:global(:root[data-theme="dark"]) .spark,:global(:root[data-theme="dark"]) .chipIcon{color:var(--entry-link)}
+:global(:root[data-theme="dark"]) .create{box-shadow:0 5px 14px rgba(0,0,0,.3)}
+/* Outranks the shell's generic dark disabled-button surface: the reference keeps a muted blue CTA until a request is typed. */
+:global(:root[data-theme="dark"]) .root .create:disabled{background:var(--entry-blue);color:#fff;opacity:.5}
+:global(:root[data-theme="dark"]) .suggestions button{background:var(--entry-paper);box-shadow:0 7px 17px rgba(0,0,0,.18)}
+:global(:root[data-theme="dark"]) .suggestions button:not(:disabled):hover{border-color:var(--entry-link);background:#1c2029}
+:global(:root[data-theme="dark"]) .manual{color:var(--entry-link)}
+:global(:root[data-theme="dark"]) .manual:hover{color:#b8c5ff}
+:global(:root[data-theme="dark"]) .error button,:global(:root[data-theme="dark"]) .context button{background:#1c2029}
+
+@keyframes mascotFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}
+@media(max-width:800px){
+  .root{padding:42px 20px 60px;min-height:calc(100vh - 140px)}
+  .mascot{width:138px;height:142px}
+  .description{margin-bottom:28px}.composer{gap:12px}.suggestions{margin-top:27px}
+}
+@media(max-width:590px){
+  .root{padding:25px 18px 45px;min-height:calc(100vh - 120px)}.root::after{display:none}
+  .mascot{width:112px;height:115px}
+  .title{font-size:39px}.description{font-size:15px;margin:15px auto 24px}
+  .composer{display:grid;grid-template-columns:23px minmax(0,1fr);align-items:start;padding:13px 13px 11px 17px;gap:5px 11px;border-radius:18px}
+  .spark{width:22px;height:22px;margin-top:10px}
+  .composer textarea{font-size:15px;min-height:72px;padding:8px 0 0}
+  .create{grid-column:1/-1;min-width:0;min-height:48px;border-radius:12px;margin-top:6px}
+  .suggestions{gap:8px}.suggestions button{min-height:39px;padding:0 12px;font-size:12px;gap:8px}.chipIcon{width:16px;height:16px}
+  .trust{align-items:flex-start}.trust strong,.trust p{font-size:12px}
+}
+@media(prefers-reduced-motion:reduce){
+  .mascotLight,.mascotDark{animation:none}
+  .composer,.create,.suggestions button{transition:none}
+  .create:not(:disabled):hover,.suggestions button:not(:disabled):hover{transform:none}
+}

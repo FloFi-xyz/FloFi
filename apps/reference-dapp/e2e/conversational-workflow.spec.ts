@@ -10,15 +10,17 @@ import type { APIRequestContext, Page } from '@playwright/test';
 import { test, expect, readWorkflowIr } from './fixtures';
 import { installJourneyWallet, walletRequests } from './journey-fixtures';
 import { createTestWallet } from '../../../packages/reference-reconciler/test/test-wallet';
+import { openBuilder } from './build-entry-navigation';
 
 test.skip(process.env.FLOFI_SWAP_EXECUTION_E2E !== 'MOCKED_LOOPBACK_ONLY', 'Requires the opt-in loopback swap execution harness');
 test.setTimeout(120_000);
 const stage = (page: Page, name: 'Build' | 'Simulate' | 'Execute') => page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name, exact: true });
 /** The conversation log (by class: its accessible name is translated in Portuguese). */
 const chat = (page: Page) => page.locator('.chat-messages[role="log"]');
-/** FloFi's latest message (the live execution card, always last in the log, is not a message). */
+/** FloFi's latest message. BUILD0-UX-001: the chat has no execution report card; the class stays excluded for older builds' markup. */
 const flofi = (page: Page) => chat(page).locator('.message:not(.you):not(.conversation-execution-message)').last();
 const cards = (page: Page) => page.locator('.build-flow-surface .composer-card');
+/** BUILD0-UX-001: the removed execution report card (steps, operations, networks, hashes); the chat keeps FloFi's short messages only. */
 const executionCard = (page: Page) => chat(page).locator('.conversation-execution');
 async function say(page: Page, text: string) {
   await page.locator('#mock-prompt').fill(text);
@@ -31,7 +33,7 @@ async function control(request: APIRequestContext, method: string, params: unkno
   return (await response.json() as { result: unknown }).result;
 }
 /** Every wallet send waits for the test; `decline` makes that request the wallet's user rejection; `lose` loses the wallet's response. */
-async function setup(page: Page, request: APIRequestContext, options: { decline?: number; lose?: number; language?: 'PT'; viewport?: { width: number; height: number } } = {}) {
+async function setup(page: Page, request: APIRequestContext, options: { decline?: number; lose?: number; language?: 'PT'; viewport?: { width: number; height: number }; entry?: boolean } = {}) {
   await control(request, 'MOCK_reset');
   const confirmations: (() => void)[] = []; let requested = 0;
   const owner = createTestWallet(), other = createTestWallet();
@@ -57,7 +59,8 @@ async function setup(page: Page, request: APIRequestContext, options: { decline?
   });
   if (options.language) await page.addInitScript(language => localStorage.setItem('flofi.language', language), options.language);
   if (options.viewport) await page.setViewportSize(options.viewport);
-  await page.goto('/app');
+  // BUILD0-UX-001: `entry` keeps the visit on Build 0, where the owner's first request is typed.
+  if (options.entry) await page.goto('/app'); else await openBuilder(page);
   await expect(page.locator('.header-wallet-provider')).toHaveAttribute('title', 'MetaMask');
   await expect(page.locator('.wallet-connection')).toHaveAttribute('title', /Base Sepolia/);
   return { owner: owner.address, other: other.address, requested: () => requested, sends: () => control(request, 'MOCK_sends'),
@@ -83,10 +86,17 @@ async function chatReview(page: Page, option = 'Review workflow') {
   await expect(stage(page, 'Build')).toHaveAttribute('aria-current', 'page');
 }
 
-test('chat swap → card at once → Review in chat → workflow confirmation → separate execution confirmation → wallet → reconciliation', async ({ page, request, networkGuard }) => {
+test('Build 0 request → card at once → Review in chat → workflow confirmation → separate execution confirmation → wallet → reconciliation', async ({ page, request, networkGuard }) => {
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
-  const owner = await setup(page, request);
-  await chatSwap(page);
+  const owner = await setup(page, request, { entry: true });
+  // BUILD0-UX-001: the first request is typed in Build 0; the same conversation commits it and continues in the Build 1 chat.
+  await page.locator('#build-entry-request').fill('swap 1 USDC to WETH on Base Sepolia slippage 50 bps');
+  await page.getByRole('button', { name: 'Create strategy', exact: true }).click();
+  await expect(stage(page, 'Build')).toHaveAttribute('aria-current', 'page');
+  await expect(chat(page).locator('.message.you > p')).toHaveText(['swap 1 USDC to WETH on Base Sepolia slippage 50 bps']);
+  await expect(flofi(page)).toContainText('Swap added to your workflow: 1 USDC');
+  await expect(flofi(page)).toContainText('Would you like to add another action or review your workflow?');
+  await expect(page.getByRole('button', { name: /^Review proposed change:/ })).toHaveCount(0);
   await expect(cards(page)).toHaveCount(1);
   const authored = JSON.parse(await readWorkflowIr(page)) as { revision: number; nodes: { actionType: string }[] };
   expect(authored.revision).toBe(1); expect(authored.nodes.filter(node => node.actionType === 'asset.swap.exact-input')).toHaveLength(1);
@@ -126,9 +136,19 @@ test('chat swap → card at once → Review in chat → workflow confirmation �
   await pick(page, 'Continue');
   await expect.poll(owner.requested).toBe(2);
   await owner.confirm();
-  await expect(executionCard(page)).toContainText('Execution completed', { timeout: 30_000 });
-  await expect(executionCard(page).locator('a, code').first()).toHaveText(/^0x[0-9a-f]{4}…[0-9a-f]{4}$/);
-  await expect(flofi(page)).toContainText('Execution completed');
+  await expect(flofi(page)).toContainText('Execution completed', { timeout: 30_000 });
+  // BUILD0-UX-001: no execution report in the chat (no step list, operations or transaction hashes); Execute and the Dashboard keep the record.
+  await expect(executionCard(page)).toHaveCount(0);
+  await expect(chat(page)).not.toContainText(/0x[0-9a-f]{4}…[0-9a-f]{4}/);
+  await page.screenshot({ path: '.tmp/build0-chat-after-execution.png' });
+  await stage(page, 'Execute').click();
+  await expect(page.locator('.execution-status-panel')).toContainText('Execution completed');
+  await page.screenshot({ path: '.tmp/build0-execute-result.png', fullPage: true });
+  await expect(page.locator('.execution-status-panel')).toContainText('1 of 1');
+  await expect(page.locator('.execution-plan')).toContainText('Action transaction');
+  await expect(page.getByText(/^(Result details|View technical details)$/)).toHaveCount(0);
+  await page.getByRole('button', { name: 'View in Dashboard', exact: true }).click();
+  await expect(page).toHaveURL(/\/app\/dashboard$/);
   expect(await owner.sends()).toBe(2);
   expect((await walletRequests(page)).filter(method => method === 'eth_sendTransaction')).toHaveLength(2);
   expect(errors).toEqual([]); networkGuard.assertClean();
@@ -171,8 +191,9 @@ test('a correction retires the Review; a second action keeps the first; an unsup
   await pick(page, 'Yes, I confirm'); await pick(page, 'Yes, execute');
   await expect.poll(owner.requested).toBe(1);
   await owner.confirm();
-  // The wallet declined: nothing was submitted, and the chat never reports an execution.
-  await expect(executionCard(page)).toContainText('Transaction not submitted', { timeout: 30_000 });
+  // The wallet declined: nothing was submitted, and the chat never reports an execution (FloFi says so in one short message).
+  await expect(flofi(page)).toContainText('Transaction not submitted', { timeout: 30_000 });
+  await expect(executionCard(page)).toHaveCount(0);
   await expect(chat(page)).not.toContainText('Execution completed');
   expect(await owner.sends()).toBe(0);
   networkGuard.assertClean();
@@ -201,11 +222,14 @@ test('an unresolved wallet response restored after reload is followed read-only:
   await pick(page, 'Yes, I confirm'); await pick(page, 'Yes, execute');
   await expect.poll(owner.requested).toBe(1);
   await owner.confirm();
-  await expect(executionCard(page)).toContainText(/unresolved|uncertain/i, { timeout: 30_000 });
+  await expect(flofi(page)).toContainText(/unresolved|uncertain/i, { timeout: 30_000 });
   const sends = await owner.sends();
   await page.reload();
+  // BUILD0-UX-001: the recovered run never stays behind Build 0: the visit opens Build 1 with the chat following it.
+  await expect(stage(page, 'Build')).toHaveAttribute('aria-current', 'page', { timeout: 30_000 });
   await expect(chat(page)).toContainText('FloFi restored this workflow’s execution from its saved record.', { timeout: 30_000 });
-  await expect(executionCard(page)).toBeVisible();
+  await expect(flofi(page)).toContainText(/unresolved|uncertain/i);
+  await expect(executionCard(page)).toHaveCount(0);
   // Only observation is offered; asking for the status or a new review never resends anything.
   await say(page, 'check status');
   await say(page, 'Review workflow');

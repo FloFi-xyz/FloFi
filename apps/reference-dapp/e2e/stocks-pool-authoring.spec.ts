@@ -3,6 +3,7 @@ import { test, expect } from './fixtures';
 import { installSupplyWallet, setSupplyWalletChain } from './supply-fixtures';
 import { configureCanvasAction } from './composer-authoring-fixtures';
 import type { Page } from '@playwright/test';
+import { openBuilder } from './build-entry-navigation';
 
 // BUILD-RH-002: the Stocks amount names the asset it spends (USDG on Robinhood Chain): its field is "Stocks amount (USDG)".
 const cards = (page: Page) => page.locator('.build-flow-surface .composer-card');
@@ -16,7 +17,7 @@ async function workflowJson(page: Page) {
 }
 
 test('floating Stocks action creates a Supply-style editable card without connecting a wallet', async ({ page }) => {
-  await page.goto('/app');
+  await openBuilder(page);
   await page.getByRole('button', { name: 'Undock toolbar', exact: true }).click();
   const toolbox = page.locator('.floating-toolbox');
   const stocks = toolbox.getByRole('button', { name: 'Stocks', exact: true });
@@ -49,7 +50,7 @@ test('floating Stocks action creates a Supply-style editable card without connec
 });
 
 test('Stocks amount, equities and settings share UI state while canonical workflow and wallet requests stay untouched', async ({ page }) => {
-  await installSupplyWallet(page); await page.goto('/app');
+  await installSupplyWallet(page); await openBuilder(page);
   await setSupplyWalletChain(page, '0x2105');
   await page.getByRole('button', { name: 'Add swap', exact: true }).click();
   await configureCanvasAction(page, '2');
@@ -95,7 +96,7 @@ test('Stocks amount, equities and settings share UI state while canonical workfl
 // BUILD-RH-002: the Stocks card is now a real authoring draft (a Robinhood Chain catalog swap), not a UI-only placeholder, so it follows the
 // Canvas rule "configure one new action at a time": another action starts once the draft is applied or removed.
 test('Stocks is one unfinished action at a time: Pool waits for it, and removing it leaves the canonical workflow untouched', async ({ page }) => {
-  await page.goto('/app');
+  await openBuilder(page);
   await page.getByRole('button', { name: 'Stocks', exact: true }).click();
   const stock = cards(page).filter({ hasText: 'Robinhood' });
   await stock.getByRole('textbox', { name: 'Stocks amount (USDG)', exact: true }).fill('3');
@@ -113,7 +114,7 @@ test('Stocks is one unfinished action at a time: Pool waits for it, and removing
 });
 
 test('both Pool contribution fields share the position form and require fresh Review before Apply', async ({ page }) => {
-  await installSupplyWallet(page); await page.goto('/app');
+  await installSupplyWallet(page); await openBuilder(page);
   await page.getByRole('button', { name: 'Add pool', exact: true }).click();
   const card = cards(page);
   const first = card.getByRole('textbox', { name: 'First liquidity amount (USDC)', exact: true });
@@ -153,7 +154,7 @@ test('both Pool contribution fields share the position form and require fresh Re
 });
 
 test('Orca Pool contribution fields use the existing Solana position review and keep both amounts synchronized', async ({ page }) => {
-  await installSupplyWallet(page); await page.goto('/app');
+  await installSupplyWallet(page); await openBuilder(page);
   // BUILD-FLOFI-MAINNET-PRODUCT-001: no header network selector; the wallet badge names the wallet's network.
   await expect(page.locator('.build009-wallet-info')).toHaveAttribute('title', /Base Sepolia/);
   // Enter authored bounds directly; this check needs no quote or provider calls.
@@ -177,7 +178,7 @@ test('Orca Pool contribution fields use the existing Solana position review and 
 });
 
 test('Stocks pill opens a compact stock list with shared selection and no extra form fields', async ({ page }) => {
-  await page.goto('/app');
+  await openBuilder(page);
   await expect(page.locator('.library .action-list, .library-note')).toHaveCount(0);
   await expect(page.getByText('One semantic plan', { exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'Stocks', exact: true }).click();

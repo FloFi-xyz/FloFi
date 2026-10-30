@@ -3,10 +3,11 @@ import { test, expect, applyPendingProposal } from './fixtures';
 import { installSupplyWallet } from './supply-fixtures';
 import { configureCanvasAction } from './composer-authoring-fixtures';
 import type { Page, Locator } from '@playwright/test';
+import { openBuilder } from './build-entry-navigation';
 
 async function prepare(page: Page, theme: 'light' | 'dark') {
   await page.addInitScript(value => localStorage.setItem('flofi.theme', value), theme);
-  await installSupplyWallet(page); await page.goto('/app');
+  await installSupplyWallet(page); await openBuilder(page);
   await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
   await expect(page.locator('.build009-wallet-info')).toBeVisible();
   await page.evaluate(() => document.fonts.ready);

@@ -5,6 +5,7 @@ import { seedCopilotPosition } from './copilot-solana-fixtures';
 import { assertSimulationReviewBlocked } from './release-safety-fixtures';
 import { chooseSolanaWallet, signRequests } from './jupiter-fixtures';
 import { devnetControl, installDevnetWallet, resetDevnetHarness } from './solana-devnet-fixtures';
+import { openBuilder } from './build-entry-navigation';
 
 // PR B: context-aware Solana Devnet authoring in the Copilot, on committed replay answers (e2e/copilot/replay-v2.json) and the MOCKED Devnet
 // loopback. The pool price and the wallet's FloFi positions are read by FloFi itself; BUILD-FLOFI-CONVERSATIONAL-001: a valid request is committed to
@@ -26,7 +27,7 @@ async function ask(page: Page, text: string) {
 
 test('one sentence authors the swap and the position it funds as the linked Canvas pair; "yes" signs and sends nothing', async ({ page }) => {
   const wallet = await resetDevnetHarness(); await installDevnetWallet(page, wallet);
-  await page.goto('/app');
+  await openBuilder(page);
   await ask(page, 'Swap 0.1 SOL to devUSDC on Solana Devnet and add liquidity with these tokens and at most 0.05 SOL in a 10% range');
   await expect(copilotSays(page)).toContainText('Interpreted as “swap 0.1 SOL to devUSDC on Solana Devnet slippage 100 bps then add liquidity all swapped devUSDC and 0.05 SOL from');
   await expect(copilotSays(page)).toContainText('Range ±10% around the current verified pool price');
@@ -46,7 +47,7 @@ test('one sentence authors the swap and the position it funds as the linked Canv
 
 test('"these tokens" links a position to the applied swap; Flofi asks for the other maximum and takes a bare amount without the model', async ({ page }) => {
   const wallet = await resetDevnetHarness(); await installDevnetWallet(page, wallet);
-  await page.goto('/app');
+  await openBuilder(page);
   await ask(page, 'swap 0.1 SOL to devUSDC on Solana Devnet slippage 50 bps');
   await commits(page, 1);
   await revision(page, 1);
@@ -67,7 +68,7 @@ test('chat selects the second registered position for partial removal and exit; 
   await seedCopilotPosition(wallet);
   const selected = await seedCopilotPosition(wallet);
   await installDevnetWallet(page, wallet);
-  await page.goto('/app');
+  await openBuilder(page);
   await ask(page, 'Add liquidity 0.01 SOL and 0.30 devUSDC ticks -39104 to -36992 on Solana Devnet');
   await commits(page, 1);
   await page.getByRole('button', { name: 'Simulate workflow' }).click();

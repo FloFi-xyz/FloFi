@@ -2,6 +2,7 @@
 import { test, expect, openSimulationDetails, installPassiveWallet, assertPassiveWallet } from './fixtures';
 import type { Page } from '@playwright/test';
 import { configureCanvasAction } from './composer-authoring-fixtures';
+import { openBuilder } from './build-entry-navigation';
 
 async function authorSwap(page: Page) {
   await expect(page.getByText('Advanced action setup', { exact: true })).toHaveCount(0);
@@ -14,7 +15,7 @@ async function authorSwap(page: Page) {
 
 test('public recording remains off in standard browser CI', async ({ page }) => {
   await installPassiveWallet(page, '0x14a34');
-  await page.goto('/app');
+  await openBuilder(page);
   await authorSwap(page);
   await page.getByRole('button', { name: 'Simulate', exact: true }).first().click();
   await openSimulationDetails(page);
@@ -35,7 +36,7 @@ test('an existing injected session is reused without a new connection prompt', a
       throw new Error('unexpected method ' + method);
     } } });
   });
-  await page.goto('/app');
+  await openBuilder(page);
   await expect(page.getByText('0x1111…1111')).toBeVisible();
   await authorSwap(page);
   expect(await page.evaluate(() => (window as Window & { __publicWalletPrompts?: number }).__publicWalletPrompts)).toBe(0);

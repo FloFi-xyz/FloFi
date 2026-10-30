@@ -3,6 +3,7 @@
 import { test, expect, openProposalReview, openSimulationDetails, acceptProductReview } from './fixtures';
 import type { Page } from '@playwright/test';
 import { installUniswapWallet, resetUniswapHarness, sendRequests, walletSends, UNI_E2E_OWNER as owner, type UniswapWalletOptions } from './uniswap-liquidity-fixtures';
+import { openBuilder, reloadBuilder } from './build-entry-navigation';
 
 const POOL = '0x94bfc0574ff48e92ce43d495376c477b1d0eeec0', NPM = '0x27f971cb582bf9e50f397e4d29a5c7a34f11faa2';
 const USDC = '0x036cbd53842c5426634e7929541ec2318f3dcf7e', WETH = '0x4200000000000000000000000000000000000006';
@@ -10,7 +11,7 @@ const region = (page: Page) => page.getByRole('region', { name: 'Base Sepolia li
 const stage = (page: Page, name: 'Build' | 'Simulate' | 'Execute') => page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name, exact: true }).click();
 const transactions = (page: Page) => region(page).getByRole('list', { name: 'Liquidity transactions' });
 async function author(page: Page, options: UniswapWalletOptions = {}) {
-  await installUniswapWallet(page, options); await page.goto('/app');
+  await installUniswapWallet(page, options); await openBuilder(page);
   await page.getByText('Advanced action setup', { exact: true }).click();
   await page.locator('#liquidity-network').selectOption('BASE_SEPOLIA');
   const form = page.getByRole('form', { name: 'Create Base Sepolia liquidity position' });
@@ -66,7 +67,7 @@ test('a page reload between approval and mint loses nothing and never resends', 
   await author(page); await accept(page);
   await execute(page, 'Approve USDC (exact amount)');
   await expect(transactions(page)).toContainText('Approve USDC (exact amount): confirmed');
-  await page.reload(); await stage(page, 'Execute');
+  await reloadBuilder(page); await stage(page, 'Execute');
   await expect(region(page)).toContainText('Recovered run');
   await expect(transactions(page)).toContainText('Approve USDC (exact amount): confirmed');
   expect(await walletSends()).toBe(1);

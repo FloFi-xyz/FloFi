@@ -8,6 +8,7 @@ import { test, expect } from './fixtures';
 import type { Page } from '@playwright/test';
 import { createDatabase } from '@defi-workflow-engine/cloud-runtime';
 import { installTransferWallet, sendRequests, transferHarnessRpc, TRANSFER_OWNER as owner, type TransferWalletOptions } from './robinhood-transfer-fixtures';
+import { openBuilder, reloadBuilder } from './build-entry-navigation';
 
 const region = (page: Page) => page.getByRole('region', { name: 'Robinhood Testnet transfer' });
 const execute = (page: Page) => region(page).getByRole('button', { name: 'Execute', exact: true }).click();
@@ -20,7 +21,7 @@ async function reset(nonce: number) {
   return async () => Number(BigInt(await transferHarnessRpc('eth_getTransactionCount', [owner, 'latest']) as string)) - nonce;
 }
 async function authorAndReview(page: Page, options: TransferWalletOptions = {}) {
-  await installTransferWallet(page, options); await page.goto('/app');
+  await installTransferWallet(page, options); await openBuilder(page);
   await page.getByText('Advanced action setup', { exact: true }).click();
   const form = page.getByRole('form', { name: 'Create Robinhood transfer' });
   await form.getByLabel('Transfer amount (test ETH)').fill('0.000001');
@@ -64,7 +65,7 @@ test('a lost wallet response is reconciled from PostgreSQL after a reload, with 
   await authorAndReview(page, { uncertain: true }); await execute(page);
   await expect(region(page)).toContainText('The wallet result is uncertain. Flofi will not submit again');
   expect(await broadcasts()).toBe(1);
-  await page.reload();
+  await reloadBuilder(page);
   await stage(page, 'Execute');
   await region(page).getByRole('button', { name: 'Observe existing transaction' }).click();
   await expect(page.getByRole('link', { name: 'Download Evidence Bundle' })).toBeVisible();

@@ -2,11 +2,12 @@
 import { test, expect } from './fixtures';
 import { installSupplyWallet } from './supply-fixtures';
 import { configureCanvasAction } from './composer-authoring-fixtures';
+import { openBuilder } from './build-entry-navigation';
 
 for (const theme of ['light', 'dark'] as const) {
   test(`${theme} workflow save utility is truthful and preserves title, cards and session identity`, async ({ page }) => {
     await page.addInitScript(value => localStorage.setItem('flofi.theme', value), theme);
-    await installSupplyWallet(page); await page.goto('/app');
+    await installSupplyWallet(page); await openBuilder(page);
     const canvas = page.getByRole('region', { name: 'Workflow canvas', exact: true });
     const rename = canvas.getByRole('button', { name: 'Rename workflow', exact: true });
     const save = canvas.getByRole('button', { name: 'Save workflow', exact: true });
@@ -62,7 +63,7 @@ for (const theme of ['light', 'dark'] as const) {
   // header names the wallet's network in the wallet badge instead, and offers no way to choose a test network.
   test(`${theme} header has no environment menu and names the wallet network instead`, async ({ page }) => {
     await page.addInitScript(value => localStorage.setItem('flofi.theme', value), theme);
-    await installSupplyWallet(page); await page.goto('/app');
+    await installSupplyWallet(page); await openBuilder(page);
     const header = page.getByRole('banner');
     await expect(page.locator('.build009-wallet-info')).toHaveAttribute('title', /Base Sepolia/);
     await expect(header.getByRole('combobox', { name: 'Environment', exact: true })).toHaveCount(0);
@@ -73,7 +74,7 @@ for (const theme of ['light', 'dark'] as const) {
 
   test(`${theme} workflow utilities fit responsive headers without a network selector`, async ({ page }) => {
     await page.addInitScript(value => localStorage.setItem('flofi.theme', value), theme);
-    await installSupplyWallet(page); await page.goto('/app');
+    await installSupplyWallet(page); await openBuilder(page);
     const header = page.getByRole('banner');
     for (const width of [1440, 1024, 768, 375, 320]) {
       await page.setViewportSize({ width, height: 900 }); await header.scrollIntoViewIfNeeded();

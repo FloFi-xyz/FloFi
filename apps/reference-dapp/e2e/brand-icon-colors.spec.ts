@@ -3,6 +3,7 @@ import { test, expect } from './fixtures';
 import { selectSettingsTheme } from './settings-fixtures';
 import { installSupplyWallet } from './supply-fixtures';
 import type { Locator } from '@playwright/test';
+import { openBuilder } from './build-entry-navigation';
 
 async function nativeImage(image: Locator, src: string) {
   await expect(image).toHaveAttribute('src', src);
@@ -22,7 +23,7 @@ async function nativeImage(image: Locator, src: string) {
   });
 }
 for (const theme of ['Light', 'Dark']) test(`${theme} preserves native token, badge and network picker brand colors`, async ({ page }) => {
-  await installSupplyWallet(page, { chain: '0x2105' }); await page.goto('/app');
+  await installSupplyWallet(page, { chain: '0x2105' }); await openBuilder(page);
   await expect(page.getByRole('combobox', { name: 'Environment', exact: true })).toHaveText('Mainnet');
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await selectSettingsTheme(page, theme); await page.getByRole('button', { name: 'Settings', exact: true }).click();
@@ -42,7 +43,7 @@ for (const theme of ['Light', 'Dark']) test(`${theme} preserves native token, ba
   expect(solNetwork.some(color => { const [r, g, b] = color.split(',').map(Number); return r! < 70 && g! > 170 && b! > 100; })).toBe(true);
   await page.screenshot({ path: `.tmp/native-brand-${theme.toLowerCase()}-bridge.png`, fullPage: true });
 
-  await page.goto('/app');
+  await openBuilder(page);
   await page.getByRole('button', { name: 'Add swap', exact: true }).click();
   const from = card.getByRole('button', { name: 'Select source token', exact: true }), to = card.getByRole('button', { name: 'Select destination token', exact: true });
   const eth = await nativeImage(to.locator('.composer-token-avatar > img'), '/brand/crypto/ethereum.svg');

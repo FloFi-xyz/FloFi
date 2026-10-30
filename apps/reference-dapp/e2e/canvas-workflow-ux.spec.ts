@@ -4,11 +4,12 @@ import type { Page } from '@playwright/test';
 import { test, expect, installPassiveWallet, assertPassiveWallet, readWorkflowIr, sendChatCommand } from './fixtures';
 import { replayProviderLogos } from './asset-logo-replay';
 import { workflowOrder, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
+import { openBuilder } from './build-entry-navigation';
 const cards = (page: Page) => page.locator('.build-flow-surface .react-flow__node');
 const viewport = (page: Page) => page.locator('.build-flow-surface .react-flow__viewport');
 const ir = async (page: Page) => JSON.parse(await readWorkflowIr(page)) as SemanticWorkflow;
 async function open(page: Page) {
-  await replayProviderLogos(page); await installPassiveWallet(page, '0xa4b1'); await page.goto('/app');
+  await replayProviderLogos(page); await installPassiveWallet(page, '0xa4b1'); await openBuilder(page);
   await expect(page.getByRole('log', { name: 'Conversation' })).toContainText('Hi FloFier!');
 }
 /** BUILD-FLOFI-CONVERSATIONAL-001: the chat commits the request at once (no proposal to apply). */

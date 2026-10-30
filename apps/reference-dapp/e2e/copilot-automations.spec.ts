@@ -5,6 +5,7 @@ import { installJourneyWallet, walletRequests } from './journey-fixtures';
 import { assertAutomationHarness, query } from './automation-fixtures';
 import { groundAutomationDraft, type AutomationDraft } from '../src/domain/copilot-automation';
 import { validateAutomationInput } from '../src/automations/definition';
+import { openBuilder } from './build-entry-navigation';
 
 const draft: AutomationDraft = { kind: 'SCHEDULED_DCA', asset: 'ETH', side: 'BUY', network: 'BASE_SEPOLIA', amount: '10', spendAsset: 'USDC', time: '09:00', condition: null, threshold: null, percent: null };
 const cases = [
@@ -23,7 +24,7 @@ for (const [text, interpretation, language] of cases) test(`explicit chat confir
   await proveConnectedEvmWallet(page, page.locator('body'), owner.address);
   await expect(page.getByRole('heading', { name: 'Create an automation', exact: true })).toBeVisible();
   if (language === 'PT') await page.evaluate(() => localStorage.setItem('flofi.language', 'PT'));
-  await page.goto('/app');
+  await openBuilder(page);
   const beforeAuthoring = (await walletRequests(page)).length;
   const create = language === 'PT' ? 'Criar automação' : 'Create automation';
   async function ask() { await page.locator('#mock-prompt').fill(text); await page.locator('.chat-form button[type=submit]').click(); }
@@ -53,7 +54,7 @@ for (const [text, interpretation, language] of cases) test(`explicit chat confir
   networkGuard.assertClean();
 });
 for (const text of ['Compre ETH todo dia.', 'Buy 10 USDC of ETH every day at 9:00.', 'Buy 10 USDC of BTC every day at 9:00 on Base Sepolia.']) test(`clarification/refusal cannot silently create: ${text}`, async ({ page }) => {
-  await page.goto('/app'); await page.locator('#mock-prompt').fill(text); await page.locator('.chat-form button[type=submit]').click();
+  await openBuilder(page); await page.locator('#mock-prompt').fill(text); await page.locator('.chat-form button[type=submit]').click();
   await expect(page.locator('.message.ai')).toHaveCount(1);
   await expect(page.locator('.copilot-automation-proposal')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Create automation', exact: true })).toHaveCount(0);

@@ -2,10 +2,11 @@
 import { test, expect, readWorkflowIr, applyPendingProposal } from './fixtures';
 import { installSupplyWallet, supplySendCount, SUPPLY_OWNER } from './supply-fixtures';
 import { configureCanvasAction, configureCanvasPool } from './composer-authoring-fixtures';
+import { openBuilder } from './build-entry-navigation';
 
 for (const action of ['swap', 'bridge', 'supply', 'borrow', 'repay', 'withdraw', 'pool', 'lending', 'transfer']) test(`Canvas parity without Advanced action setup: ${action}`, async ({ page }) => {
   // The wallet accepts an explicit network switch (only the Robinhood Chain Testnet Send asks for one).
-  await installSupplyWallet(page, { switching: 'KNOWN' }); await page.goto('/app');
+  await installSupplyWallet(page, { switching: 'KNOWN' }); await openBuilder(page);
   // Supply/Borrow/Repay and Supply → Borrow → Swap bind the connected owner as beneficiary: a click before the wallet's passive
   // reconnect resolves is refused ("Connect your wallet…") and creates no proposal, so wait for the connected wallet first.
   await expect(page.locator('.build009-wallet-info')).toHaveAttribute('title', new RegExp(SUPPLY_OWNER, 'i'));
@@ -37,7 +38,7 @@ for (const action of ['swap', 'bridge', 'supply', 'borrow', 'repay', 'withdraw',
 });
 
 test('normal Simulate has concise safety details and no engineering or duplicate lifecycle workspace, desktop and mobile', async ({ page }) => {
-  await installSupplyWallet(page); await page.goto('/app');
+  await installSupplyWallet(page); await openBuilder(page);
   await page.getByRole('button', { name: 'Add swap', exact: true }).click(); await configureCanvasAction(page, '1');
   await page.getByRole('navigation', { name: 'Workflow stages' }).getByRole('button', { name: 'Simulate', exact: true }).click();
   // BUILD-FLOFI-CHAT-E2E-FIX-002: the chat-first Simulation Summary (and its embedded Review) is an optional, collapsed details surface.
@@ -72,7 +73,7 @@ test('engineering harness is explicitly invoked separately from the normal works
 });
 
 for (const network of ['Robinhood Chain Testnet', 'Ethereum Sepolia']) test(`Canvas native transfer authors and edits the supported self-transfer on ${network}`, async ({ page }) => {
-  await installSupplyWallet(page); await page.goto('/app');
+  await installSupplyWallet(page); await openBuilder(page);
   await page.getByRole('button', { name: 'Add send', exact: true }).click();
   const card = page.locator('.build-flow-surface .composer-card');
   await card.getByRole('button', { name: 'Select source token', exact: true }).click();
@@ -98,7 +99,7 @@ for (const network of ['Robinhood Chain Testnet', 'Ethereum Sepolia']) test(`Can
 });
 
 for (const action of ['swap', 'pool']) test(`Solana Devnet ${action} remains authored in the normal Canvas`, async ({ page }) => {
-  await installSupplyWallet(page); await page.goto('/app');
+  await installSupplyWallet(page); await openBuilder(page);
   await page.getByRole('button', { name: `Add ${action}`, exact: true }).click();
   const card = page.locator('.build-flow-surface .composer-card');
   await card.getByRole('button', { name: 'Select source token', exact: true }).click();
@@ -123,7 +124,7 @@ for (const action of ['swap', 'pool']) test(`Solana Devnet ${action} remains aut
 test('new Send authoring controls and lifecycle copy use Portuguese', async ({ page }) => {
   await installSupplyWallet(page, { switching: 'KNOWN' });
   await page.addInitScript(() => localStorage.setItem('flofi.language', 'PT'));
-  await page.goto('/app');
+  await openBuilder(page);
   await page.getByRole('button', { name: 'Adicionar envio', exact: true }).click();
   const card = page.locator('.build-flow-surface .composer-card');
   await card.getByRole('textbox', { name: 'Valor de origem (ETH)', exact: true }).fill('0.000001');

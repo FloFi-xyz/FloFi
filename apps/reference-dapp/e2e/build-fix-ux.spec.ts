@@ -7,6 +7,7 @@
 import { test, expect, installPassiveWallet, assertPassiveWallet, readWorkflowIr } from './fixtures';
 import type { Page, Route } from '@playwright/test';
 import { hashArtifactBytes } from '@defi-workflow-engine/workflow-contracts';
+import { openBuilder } from './build-entry-navigation';
 
 test.afterEach(async ({ page }) => { await assertPassiveWallet(page); });
 type Ir = { revision: number; nodes: { nodeId: string; actionType: string; dependencies: string[]; chainId: string }[] };
@@ -38,7 +39,7 @@ async function addSwap(page: Page, amount: string) {
 }
 /** Two connectable swaps, the first moved left so both handles are clear of each other. */
 async function twoSwaps(page: Page) {
-  await installPassiveWallet(page); await page.goto('/app');
+  await installPassiveWallet(page); await openBuilder(page);
   await addSwap(page, '1'); await addSwap(page, '2');
   const title = (await node(page, 'node-002').locator('.composer-action-title').boundingBox())!;
   await page.mouse.move(title.x + 10, title.y + 10); await page.mouse.down();
@@ -138,7 +139,7 @@ function mockedEstimate(usd: { input: string | null; output: string | null }) {
 test('a verified USD estimate is shown as an approximation (MOCKED here, labelled so), with USD first only where a value exists', async ({ page, networkGuard }) => {
   await installPassiveWallet(page, '0x2105');
   await page.route('**/api/build-estimate', mockedEstimate({ input: null, output: '2.49' }));
-  await page.goto('/app');
+  await openBuilder(page);
   await page.getByRole('button', { name: 'Add swap', exact: true }).click();
   const card = page.locator('.build-flow-surface .composer-card'), source = card.locator('.composer-amount'), destination = card.locator('.composer-destination-box');
   await expect(card.locator('.composer-chain')).toHaveText('Base');
@@ -165,7 +166,7 @@ test('a verified USD estimate is shown as an approximation (MOCKED here, labelle
 test('valueless test tokens never show a USD number, even when an estimate carries one', async ({ page, networkGuard }) => {
   await installPassiveWallet(page, '0x14a34');
   await page.route('**/api/build-estimate', mockedEstimate({ input: '2.50', output: '2.49' }));
-  await page.goto('/app');
+  await openBuilder(page);
   await page.getByRole('button', { name: 'Add swap', exact: true }).click();
   const card = page.locator('.build-flow-surface .composer-card');
   await expect(card.locator('.composer-chain')).toHaveText('Base Sepolia');
@@ -178,7 +179,7 @@ test('valueless test tokens never show a USD number, even when an estimate carri
 
 for (const width of [1440, 390]) test(`an amount applies on Enter at ${width}px, once, and an invalid one is refused inline`, async ({ page, networkGuard }) => {
   await page.setViewportSize({ width, height: 900 });
-  await installPassiveWallet(page); await page.goto('/app');
+  await installPassiveWallet(page); await openBuilder(page);
   await addSwap(page, '5');
   const card = page.locator('.build-flow-surface .composer-card'), field = card.getByRole('textbox', { name: 'Source amount (USDC)', exact: true });
   const revision = (await ir(page)).revision;
