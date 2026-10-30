@@ -739,9 +739,17 @@ async function catalogQuote(workflow: SemanticWorkflow, executionId: string, P: 
     ...native ? { native } : {}, ...kind !== 'SWAP' ? { conversion: kind } : {} };
   return { ...quoteFields, manifestHash: digest(canonical(quoteFields)) };
 }
-/** The economically material state of a catalog quote: a change of any of it needs a new Review. */
+/**
+ * P0 LIVE SWAP: The user authorized an exact input and a minimum output, NOT an exact spot quote.
+ * A fresh Uniswap pool price can move between Review and Begin without changing the reviewed transaction.
+ * Keep the original reviewed calldata/minimum; re-review only for a changed route/asset/stock policy or
+ * when the fresh expected output falls BELOW that minimum. Never replace the reviewed quote silently.
+ */
 function catalogEconomics(quote: PublicQuote) {
-  return canonical({ expectedOut: quote.expectedOut, minimumOut: quote.minimumOut, pool: quote.pool, fee: quote.fee,
+  return canonical({ chainId: quote.chainId, inputToken: quote.inputToken, outputToken: quote.outputToken,
+    inputDecimals: quote.inputDecimals, outputDecimals: quote.outputDecimals, amountIn: quote.amountIn,
+    slippageBps: quote.slippageBps, native: quote.native ?? null, conversion: quote.conversion ?? null,
+    pool: quote.pool, fee: quote.fee,
     stocks: (quote.stocks ?? []).map(stock => [stock.officialId, stock.multiplierWad, stock.scheduledMultiplierWad, stock.scheduledEffectiveAt]) });
 }
 
@@ -918,7 +926,8 @@ function createPublicTestnetCore(rpcFor: (profile: SwapProfile) => Rpc, now: () 
         // Stock Token multiplier state is economic: a changed multiplier changes what the owner's tokens represent.
         const stockChanged = canonical((fresh.stocks ?? []).map(x => [x.officialId, x.multiplierWad, x.scheduledMultiplierWad, x.scheduledEffectiveAt])) !==
           canonical((run.quote.stocks ?? []).map(x => [x.officialId, x.multiplierWad, x.scheduledMultiplierWad, x.scheduledEffectiveAt]));
-        if (P.kind === 'CATALOG' ? catalogEconomics(fresh) !== catalogEconomics(run.quote) : fresh.expectedOut !== run.quote.expectedOut ||
+        if (P.kind === 'CATALOG' ? catalogEconomics(fresh) !== catalogEconomics(run.quote) ||
+            BigInt(fresh.expectedOut) < BigInt(run.quote.minimumOut) : fresh.expectedOut !== run.quote.expectedOut ||
             fresh.minimumOut !== run.quote.minimumOut || fresh.pool !== run.quote.pool || fresh.fee !== run.quote.fee) {
           run = await save({ ...run, quote: fresh, reviewedManifestHash: null });
           fail(stockChanged ? 'STOCK_MULTIPLIER_CHANGED_REVIEW_REQUIRED' : 'QUOTE_CHANGED_REVIEW_REQUIRED');
