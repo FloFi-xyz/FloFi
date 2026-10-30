@@ -3,13 +3,13 @@ import { activeNetworkScope, introducedTestNetworks, testNetworkMessage } from '
 import { groundAutomationDraft } from './copilot-automation';
 import type { AutomationInput } from './copilot-automation';
 import type { ReviewContext } from '@defi-workflow-engine/reference-linter';
-import { commandIsValid, type Command } from './commands';
+import { commandIsValid, SEQUENCE_STEP_COMMANDS, type Command } from './commands';
 import { editorReducer } from './editor';
 import type { Workflow } from './initial-workflow';
 import { lendingDetails } from './lending-authoring';
 import { workflowSteps, type WorkflowStep } from './workflow-steps';
 import { editCommandFor, removeCommandFor } from './workflow-edits';
-import { COPILOT_AUTHORING_COMMANDS, COPILOT_NETWORK_LABEL, COPILOT_POOLS, amountReadings, canonicalDecimal, copilotRejection, groundedAmount, mentionedNetworks,
+import { COPILOT_AUTHORING_COMMANDS, COPILOT_NETWORK_LABEL, COPILOT_POOLS, amountReadings, canonicalDecimal, copilotRejection, groundedAddress, groundedAmount, mentionedNetworks,
   planCopilotActions, proposalFromPlan, type CarriedField, type CopilotOutcome, type Grounding, type SwapSource } from './copilot-authoring';
 import { SOLANA_LIQUIDITY_DEFAULT_SLIPPAGE, solanaLiquidityDetails, type SolanaLiquidityInput } from './solana-liquidity-authoring';
 import { formatTokenAmount, parseTokenAmount } from './jupiter-authoring';
@@ -23,8 +23,8 @@ import { canonicalSymbol } from './asset-catalogs';
 import { networkIdentity, networkOfCopilot } from './network-registry';
 import { UNIVERSAL_NETWORKS } from '@defi-workflow-engine/workflow-contracts';
 import { ROUTER_NETWORK_OPTIONS } from './router-authoring';
-import { COPILOT_TRANSCRIPT, COPILOT_V2_LIMITS, isCopilotIntentError, parseCopilotIntentV2, type CopilotChanges, type CopilotIntentV2, type CopilotOrdinal, type CopilotQuestionTopic,
-  type CopilotReuseField, type CopilotTarget } from './copilot-intent-v2';
+import { COPILOT_TRANSCRIPT, COPILOT_V2_LIMITS, isCopilotIntentError, parseCopilotIntentV2, type CopilotChanges, type CopilotGoal, type CopilotIntentV2, type CopilotOrdinal,
+  type CopilotQuestionTopic, type CopilotReuseField, type CopilotTarget } from './copilot-intent-v2';
 import { copilotCopy, type CarriedLabel, type CopilotCopy, type CopilotLanguage } from './copilot-messages';
 import { answerQuestion, stepSummary, type CopilotFacts } from './copilot-answers';
 import { copilotNetworksMentioned, type CopilotNetworkId } from './network-registry';
@@ -32,6 +32,13 @@ import type { PendingAgentCapability } from './agent-rollout';
 import { lexiconAssets, lexiconNetworks, lexiconSuggestions, LEXICON_LIMITS, mergeLexicon, parseLexicon, parseMemoryStatement, statedSource, type LexiconEntry,
   type LexiconTarget, type MemoryStatement } from './copilot-lexicon';
 import { learningCopy, MEMORY_NO, MEMORY_YES, refusalFor, suggestionNote, targetLabel, usedNote } from './copilot-learning-copy';
+import { lintWorkflow } from '@defi-workflow-engine/reference-linter';
+import { workflowSequence } from './workflow-sequence';
+import { networkCapabilityProfile } from './intelligence/capability-api';
+import { intelligenceCopy } from './intelligence/copy';
+import { planGoal, type Goal, type GoalField, type GoalPlan, type GoalStep } from './intelligence/goal-planner';
+import { contextCard, contextKey, operationalState, type CopilotContextCard } from './intelligence/operational-state';
+import { groundedProse } from './intelligence/grounding';
 import { actionDiff, ADAPTATION_LIMITS, clarifiedAdaptation, confirmedAdaptation, correctionAdaptation, correctionCue, fieldsOfAction, inferredUse, mergeAdaptations, messageLanguage,
   NO_ADAPTATION, proposalReadings, type Adaptation, type AdaptationEvent, type LearningObservation, type ProposalReading, type ReadingField,
   type ReadingFields } from './copilot-adaptation';
@@ -56,6 +63,10 @@ type Resolved =
   | { readonly source: 'REFERENT'; readonly step: WorkflowStep; readonly referent: CopilotReferent };
 type DraftFill = { readonly kind: 'TARGET'; readonly target: Resolved } | { readonly kind: 'ACTION'; readonly patch: Readonly<Record<string, unknown>> }
   | { readonly kind: 'EXTRAS'; readonly extras: Extras };
+/** BUILD-FLOFI-INTELLIGENCE-001: what each operational question asked in this request, and what the user corrected (content-free counters). */
+export type ConversationLedger = { readonly asked: readonly { readonly field: string; readonly count: number }[]; readonly corrected: readonly string[];
+  /** Questions about a field FloFi had already asked in this request (a settled question asked again is a defect to measure). */ readonly repeats: number;
+  /** User turns since the request opened (time to a valid proposal, in turns). */ readonly turns: number };
 /** Flofi's own open question: each button has a deterministic meaning, so answering it needs no model. */
 type Draft = { readonly expected?: readonly DraftField[]; readonly validated?: readonly ValidatedDraftField[]; readonly grounding?: string;
   readonly intent: CopilotIntentV2; readonly options: readonly { readonly label: string; readonly fill: DraftFill }[]; readonly amountFill: boolean;
@@ -66,7 +77,8 @@ type Draft = { readonly expected?: readonly DraftField[]; readonly validated?: r
   /** BUILD-CHAT-LEARNING-001: a mainnet FloFi's glossary suggested, offered first (picking it or another option is a feedback signal). */
   readonly suggestion?: CopilotNetworkId };
 /** Values Flofi settled itself while resolving one request: values it carried, the swap whose output funds a position, a position and its portion. */
-type Extras = { readonly carried?: readonly CarriedField[]; readonly swap?: SwapSource; readonly position?: string; readonly portion?: string };
+type Extras = { readonly carried?: readonly CarriedField[]; readonly swap?: SwapSource; readonly position?: string; readonly portion?: string;
+  /** BUILD-FLOFI-INTELLIGENCE-001: the action is a goal plan's step (its assets were grounded per goal field, see `Grounding.explicitAssets`). */ readonly planned?: true };
 export type CopilotConversation = {
   readonly transcript: readonly TranscriptEntry[]; readonly segment: readonly string[]; readonly clarifications: number;
   readonly draft: Draft | null; readonly referents: readonly CopilotReferent[]; readonly language: CopilotLanguage;
@@ -83,6 +95,8 @@ export type CopilotConversation = {
    *  conversation's language was already observed. */
   readonly adapted?: readonly LexiconEntry[]; readonly suppressed?: readonly { readonly term: string; readonly target: LexiconTarget }[];
   readonly askedAt?: number; readonly languageObserved?: boolean;
+  /** BUILD-FLOFI-INTELLIGENCE-001: the open request's ledger (reset with the request). */
+  readonly ledger?: ConversationLedger;
 };
 /**
  * BUILD-CHAT-LEARNING-001: what the caller knows about this user's learning. It never decides grounding by itself: the engine validates every
@@ -138,9 +152,16 @@ export type CopilotReply = {
 };
 export type ReplyLearning = { readonly used: readonly LexiconEntry[]; readonly signals: readonly LearningSignal[]; readonly observations?: readonly LearningObservation[];
   readonly events?: readonly AdaptationEvent[] };
-export type CopilotRequestV2 = { readonly version: '2'; readonly messages: readonly TranscriptEntry[] };
-export type CopilotResultV2 = { readonly ok: true; readonly intent: unknown } | { readonly ok: false; readonly code: string; readonly retryAfterSeconds?: number };
-export type PendingTurn = { readonly before: CopilotConversation; readonly state: CopilotConversation; readonly snapshot: ContextSnapshot };
+/**
+ * BUILD-FLOFI-INTELLIGENCE-001: a request may carry FloFi's sanitized context card (`intelligence/operational-state.ts`) and its fingerprint. The server
+ * hands the card to the model only through the read-only `get_workflow_context` / `get_wallet_context` tools, and echoes the fingerprint so an
+ * answer computed for another context is never applied.
+ */
+export type CopilotRequestV2 = { readonly version: '2'; readonly messages: readonly TranscriptEntry[]; readonly context?: CopilotContextCard; readonly contextKey?: string };
+export type CopilotResultV2 = { readonly ok: true; readonly intent: unknown; readonly contextKey?: string;
+  /** BUILD-FLOFI-INTELLIGENCE-001: the numbers FloFi's own tools returned this turn (the server's facts), for grounding the model's explanation again here. */
+  readonly groundingNumbers?: readonly string[] } | { readonly ok: false; readonly code: string; readonly retryAfterSeconds?: number };
+export type PendingTurn = { readonly before: CopilotConversation; readonly state: CopilotConversation; readonly snapshot: ContextSnapshot; readonly contextKey?: string };
 export type TurnStart = { readonly kind: 'LOCAL'; readonly reply: CopilotReply; readonly next: CopilotConversation }
   | { readonly kind: 'REMOTE'; readonly request: CopilotRequestV2; readonly turn: PendingTurn };
 type Result = { readonly reply: CopilotReply; readonly next: CopilotConversation };
@@ -151,7 +172,9 @@ export const COPILOT_V2_COMMANDS: ReadonlySet<string> = new Set([...COPILOT_AUTH
   // BUILD-BASE-001: edits of catalog-network swaps, positions and transfers, with the same commands the Canvas uses.
   'SET_CRYPTO_ACTION', 'SET_RH_TRANSFER',
   // PR B: preparing a verified FloFi position for removal or exit (the owner still simulates, reviews and signs).
-  'MANAGE_SOLANA_POSITION']);
+  'MANAGE_SOLANA_POSITION',
+  // BUILD-FLOFI-INTELLIGENCE-001: a goal plan's ordered single-action steps, applied as one change (each step is one of the authoring commands above).
+  'ADD_SEQUENCE']);
 export const emptyConversation = (): CopilotConversation => ({ transcript: [], segment: [], clarifications: 0, draft: null, referents: [], language: 'EN' });
 export const snapshotOf = (env: CopilotEnvironment): ContextSnapshot =>
   ({ workflow: env.workflow, pending: env.pending, wallet: env.wallet, walletChainId: env.walletChainId, solanaOwner: env.verified?.solanaOwner ?? null });
@@ -184,13 +207,27 @@ function bounded(entries: readonly TranscriptEntry[]): TranscriptEntry[] {
   return out;
 }
 const withUser = (state: CopilotConversation, text: string): CopilotConversation => ({ ...state, draft: null,
+  ledger: { ...state.ledger ?? EMPTY_LEDGER, turns: (state.ledger?.turns ?? 0) + 1 },
   segment: state.draft?.grounding ? [state.draft.grounding.slice(-(COPILOT_V2_LIMITS.maxRequestCharacters - text.length - 1)), text]
     : [...state.segment, text].slice(-COPILOT_V2_LIMITS.maxSegmentUserTurns), transcript: bounded([...state.transcript, { role: 'user', text }]) });
 export const closeSegment = (state: CopilotConversation): CopilotConversation => {
-  const { askedAt: _asked, ...rest } = state;
-  void _asked;
+  const { askedAt: _asked, ledger: _ledger, ...rest } = state;
+  void _asked; void _ledger;
   return { ...rest, segment: [], clarifications: 0, draft: null };
 };
+const EMPTY_LEDGER: ConversationLedger = Object.freeze({ asked: [], corrected: [], repeats: 0, turns: 0 });
+/** The ledger after FloFi asks for `fields` (each counted; one already asked in this request is a repeat). */
+function askedLedger(ledger: ConversationLedger | undefined, fields: readonly string[]): ConversationLedger {
+  const current = ledger ?? EMPTY_LEDGER, asked = [...current.asked];
+  let repeats = current.repeats;
+  for (const field of new Set(fields.filter(field => field !== 'target'))) {
+    const at = asked.findIndex(item => item.field === field);
+    if (at >= 0) { asked[at] = { field, count: asked[at]!.count + 1 }; repeats += 1; } else asked.push({ field, count: 1 });
+  }
+  return { ...current, asked: asked.slice(-16), repeats };
+}
+const correctedLedger = (ledger: ConversationLedger | undefined, fields: readonly string[]): ConversationLedger =>
+  ({ ...ledger ?? EMPTY_LEDGER, corrected: [...new Set([...(ledger ?? EMPTY_LEDGER).corrected, ...fields])].slice(-16) });
 const reply = (kind: CopilotReply['kind'], text: string, extra: Partial<CopilotReply> = {}): CopilotReply => ({ kind, text, notes: [], options: [], ...extra });
 /** A turn that ends the open request: proposal, answer, refusal or failure. */
 const terminal = (state: CopilotConversation, value: CopilotReply, summary: string): Result =>
@@ -203,7 +240,8 @@ const refused = (state: CopilotConversation, m: CopilotCopy, message: string): R
 function question(state: CopilotConversation, m: CopilotCopy, text: string, options: readonly string[], draft: Draft | null, notes: readonly string[] = []): Result {
   if (state.clarifications >= COPILOT_V2_LIMITS.maxClarifications) return failed(state, m, m.tooManyClarifications);
   return { reply: reply('CLARIFICATION', text, { options, ...notes.length ? { notes } : {} }),
-    next: { ...state, clarifications: state.clarifications + 1, draft: draft && { ...draft, grounding: segmentText(state), expected: draft.expected ?? ['target'], question: text, shown: options },
+    next: { ...state, clarifications: state.clarifications + 1, ledger: askedLedger(state.ledger, draft?.expected ?? ['request']),
+      draft: draft && { ...draft, grounding: segmentText(state), expected: draft.expected ?? ['target'], question: text, shown: options },
       // BUILD-CHAT-LEARNING-002: what the user writes from here on answers FloFi's question (the request's own words end here).
       askedAt: state.askedAt ?? state.segment.length,
       transcript: bounded([...state.transcript, { role: 'assistant', text: COPILOT_TRANSCRIPT.asked + text }]) } };
@@ -569,6 +607,22 @@ const carriedLabels = (m: CopilotCopy, carried: ReadonlySet<CarriedField>) =>
     : CARRIED_LABEL[field] ? [CARRIED_LABEL[field]!] : []))].map(label => m.carriedLabel[label]);
 
 type Applied = { readonly ok: true; readonly base: Base; readonly carried: Set<CarriedField>; readonly changed: readonly string[] } | { readonly ok: false; readonly field: ChangeField };
+/** The step's current value of a change field (single actions only), as the user would restate it. */
+function currentValue(action: CopilotAction, key: keyof CopilotChanges): unknown {
+  const a = action as Record<string, unknown>;
+  switch (key) {
+    case 'network': return action.type === 'BRIDGE' ? action.sourceNetwork : a.network;
+    case 'inputAsset': return action.type === 'SWAP' ? action.inputAsset : a.asset;
+    case 'recipient': return a.recipient ?? a.beneficiary;
+    case 'amount': case 'slippageBps': case 'destinationNetwork': case 'outputAsset': case 'routing': case 'feeTier': return a[key];
+    default: return undefined;
+  }
+}
+const unchangedValue = (action: CopilotAction, key: keyof CopilotChanges, value: unknown): boolean => {
+  const current = currentValue(action, key);
+  if (typeof current !== 'string' || typeof value !== 'string') return false;
+  return key === 'amount' || key === 'slippageBps' ? canonicalDecimal(current) === canonicalDecimal(value) : current.toLowerCase() === value.toLowerCase();
+};
 /** Only the changed fields leave the carried set; each of them must then be grounded in the open request by the planners. */
 function applyChanges(base: Base, changes: CopilotChanges): Applied {
   const carried = allFields(base), changed: string[] = [];
@@ -580,6 +634,8 @@ function applyChanges(base: Base, changes: CopilotChanges): Applied {
   for (const key of entries) {
     const action = actions[0]!, type = base.composition ? 'COMPOSITION' : action.type;
     const fail = (): Applied => ({ ok: false, field: key });
+    // BUILD-FLOFI-INTELLIGENCE-001: a "change" to the value the step already has is a restatement, not a change: it stays carried.
+    if (!base.composition && unchangedValue(action, key, changes[key])) continue;
     switch (key) {
       case 'amount':
         if (type === 'LIQUIDITY') return fail();
@@ -730,7 +786,8 @@ function yesOrNo(state: CopilotConversation, text: string, env: CopilotEnvironme
   if (state.clarifications > 0) return null;
   return local(reply('ANSWER', yes ? env.pending ? m.yesPending : m.yesNothingOpen : env.pending ? m.noPending : m.noDropped), closeSegment(state));
 }
-function patchIntent(intent: CopilotIntentV2, patch: Readonly<Record<string, unknown>>): CopilotIntentV2 {
+function patchIntent(intent: CopilotIntentV2, patch: Readonly<Record<string, unknown>>, expected: readonly string[] = []): CopilotIntentV2 {
+  if (intent.kind === 'GOAL') return patchGoal(intent, patch, expected);
   if (intent.kind === 'EDIT' || intent.kind === 'REPEAT') return { ...intent, changes: { ...intent.changes, ...patch } };
   if (intent.kind !== 'ACTION') return intent;
   const action = { ...intent.action } as Record<string, unknown>;
@@ -795,12 +852,15 @@ export function startTurn(current: CopilotConversation, raw: string, env: Copilo
       if (option?.fill.kind === 'EXTRAS') return local(resolveIntent(draft.intent, next, env, null, { ...extras, ...option.fill.extras }));
       if (!option && draft.depositFill) return local(resolveIntent(patchDeposit(draft.intent, draft.depositFill, amount!), next, env, null,
         { ...extras, carried: [...extras.carried ?? [], `asset:${draft.depositFill}`] }));
-      const intent = option?.fill.kind === 'ACTION' ? patchIntent(draft.intent, option.fill.patch) : patchIntent(draft.intent, { amount });
+      const intent = option?.fill.kind === 'ACTION' ? patchIntent(draft.intent, option.fill.patch, draft.expected) : patchIntent(draft.intent, { amount }, draft.expected);
       return local(resolveIntent(intent, answeredDraft(state, intent, picked), env, null, extras));
     }
   }
   const next = withUser(state, text);
-  return { kind: 'REMOTE', request: { version: '2', messages: next.transcript }, turn: { before: state, state: next, snapshot: snapshotOf(env) } };
+  // BUILD-FLOFI-INTELLIGENCE-001: FloFi's sanitized context card travels with the request; the model reads it only through a read-only tool.
+  const card = contextCard(operationalState(next, env)), key = contextKey(card);
+  return { kind: 'REMOTE', request: { version: '2', messages: next.transcript, context: card, contextKey: key },
+    turn: { before: state, state: next, snapshot: snapshotOf(env), contextKey: key } };
 }
 /** Finishes a model turn against the current state. A changed workflow, proposal or wallet discards the answer. */
 export function finishTurn(turn: PendingTurn, result: CopilotResultV2, env: CopilotEnvironment): Result {
@@ -809,10 +869,20 @@ export function finishTurn(turn: PendingTurn, result: CopilotResultV2, env: Copi
   const change = contextChange(turn.snapshot, snapshotOf(env));
   if (change) return { reply: reply('FAILED', change === 'WORKFLOW' ? m.workflowChanged : change === 'PROPOSAL' ? m.proposalChanged : m.walletChanged), next: closeSegment(turn.before) };
   if (!result.ok) return tallied({ reply: reply('FAILED', failureText(result.code, language, result.retryAfterSeconds)), next: rollback }, env);
+  // BUILD-FLOFI-INTELLIGENCE-001: tool facts were read for the context this turn sent; an answer bound to any other context is never applied.
+  if (turn.contextKey && result.contextKey !== undefined && result.contextKey !== turn.contextKey)
+    return { reply: reply('FAILED', m.workflowChanged), next: closeSegment(turn.before) };
   let intent: CopilotIntentV2;
   try { intent = parseCopilotIntentV2(result.intent); }
   catch (cause) { return tallied({ reply: reply('FAILED', failureText(isCopilotIntentError(cause) && cause.message === 'COPILOT_TOO_MANY_ACTIONS' ? cause.message : 'COPILOT_INTENT_INVALID', language)), next: rollback }, env); }
   intent = mergeDraftIntent(turn.before.draft?.intent ?? null, intent, turn.state.segment.at(-1) ?? '');
+  // BUILD-FLOFI-INTELLIGENCE-001 (defense in depth): a model explanation shows only when every number in it is one of FloFi's facts — the user's words,
+  // the workflow facts and context FloFi holds, and the numbers FloFi's tools returned this turn. Otherwise FloFi's own answer stands alone.
+  if ((intent.kind === 'QUESTION' || intent.kind === 'GOAL') && intent.answer) {
+    const facts = [...turn.state.segment, ...turn.state.transcript.filter(entry => entry.role === 'user').map(entry => entry.text), JSON.stringify(env.facts),
+      JSON.stringify(contextCard(operationalState(turn.state, env))), (result.groundingNumbers ?? []).slice(0, 256).join(' ')];
+    if (!groundedProse(intent.answer, facts).ok) intent = { ...intent, answer: null };
+  }
   // BUILD-CHAT-LEARNING-002: the language this conversation is unmistakably written in — the user's words and the interpreter agree (once per
   // conversation; evidence for the identity's starting language only, never a setting, and only where persistent learning is permitted).
   const said = env.learning?.automatic === 'ON' && !turn.state.languageObserved ? messageLanguage(turn.state.segment.at(-1) ?? '') : null, read = intent.language;
@@ -836,6 +906,7 @@ function resolveIntent(intent: CopilotIntentV2, state: CopilotConversation, env:
 
     // PR B: a short, contextual reason; the full capability list is only the answer to a CAPABILITIES question.
     case 'UNSUPPORTED': return refused(state, m, safeCopilotProse(intent.reason) ?? m.cannotAuthor);
+    case 'GOAL': return resolveGoal(intent, state, env, extras);
     case 'POSITION': return resolvePosition(intent, state, env, extras);
     case 'CLARIFICATION_REQUIRED': {
       const text = safeCopilotProse(intent.question) ?? m.stillNeeds(m.subject.request, intent.missing.filter(field => field !== 'target').map(field => m.field[field as keyof typeof m.field]));
@@ -849,8 +920,12 @@ function resolveIntent(intent: CopilotIntentV2, state: CopilotConversation, env:
         if (!resolution.ok) return resolution.result;
         step = resolution.resolved.step;
       }
-      const answer = answerQuestion(intent.topic, step, env.facts, language);
-      const value = reply('ANSWER', answer.text, { notes: answer.notes, topic: intent.topic });
+      // BUILD-FLOFI-INTELLIGENCE-001: a capability question about a named network is answered from that network's Capability API profile; the model's
+      // explanation (grounded by the server in the tool facts it read) is shown apart from FloFi's own answer, labelled as such.
+      const answer = (intent.topic === 'CAPABILITIES' || intent.topic === 'NETWORKS' ? scopedCapabilities(state.segment.at(-1) ?? '', language) : null)
+        ?? answerQuestion(intent.topic, step, env.facts, language);
+      const prose = intent.answer ? safeCopilotProse(intent.answer) : null;
+      const value = reply('ANSWER', answer.text, { notes: [...prose ? [intelligenceCopy(language).explanation(prose)] : [], ...answer.notes], topic: intent.topic });
       if (state.draft) return { reply: value, next: { ...state, segment: state.segment.slice(0, -1), transcript: bounded([...state.transcript, { role: 'assistant', text: m.answered(intent.topic) }]) } };
       return terminal(state, value, m.answered(intent.topic));
     }
@@ -907,6 +982,8 @@ function resolveIntent(intent: CopilotIntentV2, state: CopilotConversation, env:
       const applied = applyChanges(base, intent.changes);
       if (!applied.ok) return refused(state, m, applied.field === 'deposit' ? m.compositionSwapAmount
         : m.changeNotApplicable(m.carriedLabel[CARRIED_LABEL[applied.field] ?? (applied.field === 'deposits' ? 'maxima' : 'range')], label));
+      // BUILD-FLOFI-INTELLIGENCE-001: a restated settled value ("keep the same source") stays carried, so it is never asked again; what changed is a correction.
+      if (intent.kind === 'EDIT') state = { ...state, ledger: correctedLedger(state.ledger, applied.changed) };
       const notes = applied.carried.size ? [m.carried(sourceLabel(m, resolved, language), carriedLabels(m, applied.carried))] : [];
       if (intent.kind === 'REPEAT') return author(intent, applied.base.actions, applied.base.composition, applied.carried, state, env, notes, sentence => m.interpreted(sentence), label);
       const revising = resolved.source === 'PENDING' && (resolved.command.type.startsWith('ADD_') || resolved.command.type === 'AUTHOR_LENDING');
@@ -934,6 +1011,138 @@ function resolveIntent(intent: CopilotIntentV2, state: CopilotConversation, env:
       return refused(state, m, m.insertUnsupported);
     }
   }
+}
+
+// ── BUILD-FLOFI-INTELLIGENCE-001: capability discovery and goal-to-workflow planning ─────────────────────────────────────────────
+/** "What can I do on Arbitrum?": each named network's Capability API profile in this scope (test networks are named as such); null when none named. */
+function scopedCapabilities(latest: string, language: CopilotLanguage): { readonly text: string; readonly notes: readonly string[] } | null {
+  const named = copilotNetworksMentioned(latest);
+  if (!named.length) return null;
+  const c = intelligenceCopy(language), scope = activeNetworkScope();
+  const lines = named.map(id => {
+    const network = networkOfCopilot(id), profile = networkCapabilityProfile(scope, network.key);
+    return profile ? c.capabilitiesOf(profile) : network.environment === 'TESTNET' ? c.capabilitiesTestNetwork(network.name) : c.capabilitiesUnknown(network.name);
+  });
+  return { text: lines.join(' '), notes: [c.capabilityScopeNote, language === 'PT' ? 'Somente leitura: nada foi proposto, alterado, assinado ou executado.'
+    : 'Read only: nothing was proposed, changed, signed or executed.'] };
+}
+const COPILOT_ID_OF_KEY = (key: string): CopilotNetwork => (networkIdentity(key)?.copilot ?? 'OTHER') as CopilotNetwork;
+const keyOfCopilot = (id: CopilotNetwork | null): string | null => id && id !== 'OTHER' ? networkOfCopilot(id).key : id === 'OTHER' ? 'unknown-network' : null;
+const named = (text: string, value: string) => new RegExp(`(?<![\\p{L}\\p{N}.])${value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\p{L}\\p{N}])`, 'iu').test(text);
+/**
+ * A goal keeps only what the user's own words in the open request state (FloFi asks for the rest): a network they named, an asset they wrote, an amount
+ * or cap they typed. The model's reading never adds a value.
+ */
+function groundedGoal(goal: CopilotGoal, text: string, carried: ReadonlySet<string>): CopilotGoal {
+  const networks = copilotNetworksMentioned(text);
+  const network = (value: CopilotNetwork | null, field: string) => value === null ? null : value === 'OTHER' || networks.includes(value as CopilotNetworkId) || carried.has(field) ? value : null;
+  const asset = (value: string | null, field: string) => value !== null && (named(text, value) || carried.has(field)) ? value : null;
+  const amount = (value: string | null, field: string) => value !== null && (groundedAmount(text, value) || carried.has(field)) ? value : null;
+  const recipient = goal.recipient && groundedAddress(text, goal.recipient) ? goal.recipient : null;
+  return { source: { network: network(goal.source.network, 'sourceNetwork'), asset: asset(goal.source.asset, 'sourceAsset'), amount: amount(goal.source.amount, 'amount') },
+    target: { network: network(goal.target.network, 'targetNetwork'), asset: asset(goal.target.asset, 'targetAsset'), use: goal.target.use }, preference: goal.preference,
+    cap: amount(goal.cap, 'cap'), recipient };
+}
+const plannerGoal = (goal: CopilotGoal): Goal => ({ source: { network: keyOfCopilot(goal.source.network), asset: goal.source.asset, amount: goal.source.amount },
+  target: { network: keyOfCopilot(goal.target.network), asset: goal.target.asset, use: goal.target.use }, preference: goal.preference, cap: goal.cap });
+/**
+ * A plan step as the V1 action the existing planners author (and ground) exactly like a typed request. The user's typed address belongs to the final
+ * step only (a supply's beneficiary, a holding bridge's recipient): an earlier step always delivers to the owner, so the next step can spend it.
+ */
+function stepCopilotAction(step: GoalStep, recipient: string | null): CopilotAction {
+  switch (step.action) {
+    case 'swap': return { type: 'SWAP', network: COPILOT_ID_OF_KEY(step.network), inputAsset: step.inputAsset, outputAsset: step.outputAsset, amount: step.amount, slippageBps: null };
+    case 'bridge': return { type: 'BRIDGE', sourceNetwork: COPILOT_ID_OF_KEY(step.network), destinationNetwork: COPILOT_ID_OF_KEY(step.destinationNetwork!), asset: step.inputAsset,
+      outputAsset: step.outputAsset, amount: step.amount, slippageBps: null, routing: step.routing, recipient };
+    case 'supply': return { type: 'SUPPLY', protocol: 'AAVE_V3', network: COPILOT_ID_OF_KEY(step.network), asset: step.inputAsset, amount: step.amount, beneficiary: recipient };
+  }
+}
+const GOAL_DRAFT_FIELD: Readonly<Record<GoalField, DraftField>> = { sourceAsset: 'inputAsset', sourceNetwork: 'sourceNetwork', amount: 'amount', targetNetwork: 'destinationNetwork',
+  targetAsset: 'outputAsset', cap: 'amount' };
+/** Option buttons of a goal question: each one sets that goal field (a network by its registry label, an asset by symbol). */
+function goalFills(field: GoalField, options: readonly string[]): Draft['options'] {
+  return options.flatMap(label => {
+    const network = NETWORK_BY_LABEL.get(normalize(label));
+    if (field === 'sourceNetwork' || field === 'targetNetwork') return network ? [{ label, fill: { kind: 'ACTION' as const, patch: { [field]: network } } }] : [];
+    if (field === 'sourceAsset' || field === 'targetAsset') return /^[A-Za-z][A-Za-z0-9.]{0,15}$/.test(label) ? [{ label, fill: { kind: 'ACTION' as const, patch: { [field]: label } } }] : [];
+    return [];
+  });
+}
+/** A patch of goal fields (option buttons, a bare amount): the only way FloFi's own question fills a goal. */
+function patchGoal(intent: Extract<CopilotIntentV2, { kind: 'GOAL' }>, patch: Readonly<Record<string, unknown>>, expected: readonly string[]): CopilotIntentV2 {
+  const g = intent.goal, value = (key: string) => typeof patch[key] === 'string' ? patch[key] as string : undefined;
+  const amount = value('amount'), cap = expected.includes('cap') ? amount : undefined, sourceAmount = cap === undefined ? amount : undefined;
+  return { ...intent, goal: { ...g, source: { network: (value('sourceNetwork') as CopilotNetwork | undefined) ?? g.source.network, asset: value('sourceAsset') ?? g.source.asset,
+    amount: sourceAmount ?? g.source.amount }, target: { ...g.target, network: (value('targetNetwork') as CopilotNetwork | undefined) ?? g.target.network,
+    asset: value('targetAsset') ?? g.target.asset }, cap: cap ?? g.cap } };
+}
+function goalNotes(plan: Extract<GoalPlan, { kind: 'PLAN' }>, language: CopilotLanguage): string[] {
+  const c = intelligenceCopy(language);
+  return [...plan.reasons.map(reason => c.goalReasons[reason]), ...plan.alternatives.map(alternative => c.goalAlternatives[alternative.code])];
+}
+/** A goal → FloFi's plan → the proposal (one step, or the ordered sequence), or FloFi's one question, or why the registries cannot reach it. */
+function resolveGoal(intent: Extract<CopilotIntentV2, { kind: 'GOAL' }>, state: CopilotConversation, env: CopilotEnvironment, extras: Extras): Result {
+  const language = intent.language, m = copilotCopy(language), c = intelligenceCopy(language), text = segmentText(state);
+  const carried = new Set<string>((extras.carried ?? []).map(String));
+  const goal = groundedGoal(intent.goal, text, carried), grounded: Extract<CopilotIntentV2, { kind: 'GOAL' }> = { ...intent, goal };
+  const plan = planGoal(plannerGoal(goal), activeNetworkScope());
+  const prose = intent.answer ? safeCopilotProse(intent.answer) : null, explained = prose ? [c.explanation(prose)] : [];
+  switch (plan.kind) {
+    case 'NEEDS': {
+      const expected = [plan.field === 'cap' ? 'cap' : GOAL_DRAFT_FIELD[plan.field]] as DraftField[];
+      const question_ = plan.field === 'cap' ? c.goalCap(plan.step ?? 1, plan.asset ?? '') : c.goalNeeds[plan.field];
+      return question(state, m, question_, plan.options.slice(0, COPILOT_LIMITS.maxOptions), { intent: grounded, expected, options: goalFills(plan.field, plan.options),
+        amountFill: plan.field === 'amount' || plan.field === 'cap', snapshot: snapshotOf(env), extras }, explained);
+    }
+    case 'UNSUPPORTED': {
+      const options = plan.options.length ? [c.goalOptionsNote(plan.options)] : [];
+      return refused(state, m, [c.goalGaps[plan.code](plan.network), ...options, ...plan.alternatives.map(item => c.goalAlternatives[item.code])].join(' '));
+    }
+    case 'NOTHING_TO_DO': return terminal(state, reply('ANSWER', c.goalNothing(plan.network, plan.asset), { notes: explained }), m.answered('PROPOSAL'));
+    case 'LIQUIDITY': {
+      const liquidity: CopilotAction = { type: 'LIQUIDITY', protocol: null, network: COPILOT_ID_OF_KEY(plan.network), deposits: [], rangeUnit: null, lower: null, upper: null, slippageBps: null, feeTier: null };
+      return author({ version: '2', language, kind: 'ACTION', action: liquidity, reuse: null }, [liquidity], false, new Set(['network']), state, env, explained, sentence => m.interpreted(sentence), m.subject.request);
+    }
+    case 'PLAN': {
+      const actions = plan.steps.map((step, index) => stepCopilotAction(step, index === plan.steps.length - 1 ? goal.recipient ?? null : null));
+      const notes = [...explained, ...goalNotes(plan, language)];
+      if (actions.length === 1) return author({ version: '2', language, kind: 'ACTION', action: actions[0]!, reuse: null }, actions, false, new Set(), state, env, notes,
+        sentence => `${c.goalIntro(1)} ${m.interpreted(sentence)}`, m.subject.request, null, null, { ...extras, planned: true });
+      return authorSequence(grounded, plan, actions, state, env, notes);
+    }
+  }
+}
+/**
+ * Several plan steps → one `ADD_SEQUENCE` proposal: each step planned and grounded exactly like a typed request at the revision the steps before it
+ * produce, then the whole workflow must be FloFi's reviewed sequence with the funding the plan expects (a later step spends the earlier step's output).
+ */
+function authorSequence(intent: Extract<CopilotIntentV2, { kind: 'GOAL' }>, plan: Extract<GoalPlan, { kind: 'PLAN' }>, actions: readonly CopilotAction[], state: CopilotConversation,
+  env: CopilotEnvironment, notes: readonly string[]): Result {
+  const language = intent.language, m = copilotCopy(language), c = intelligenceCopy(language);
+  const grounding: Grounding = { text: segmentText(state), carried: new Set(), policy: { language, networkDefaults: false, catalog: true, ...env.agentRollout ? { agentRollout: env.agentRollout } : {} },
+    latest: state.segment.at(-1) ?? '', solana: { price: env.verified?.orcaPrice?.price ?? null, swap: null }, explicitAssets: false };
+  let workflow = env.workflow;
+  const steps: Command[] = [], sentences: string[] = [], stepNotes: string[] = [];
+  for (const [index, action] of actions.entries()) {
+    // A funded step's cap is the user's own amount (or the cap they stated): FloFi's provenance, grounded in the same words.
+    const planned = planCopilotActions([action], false, { ...grounding, carried: new Set(plan.steps[index]!.fundedBy !== null ? ['amount'] : []) }, env.wallet);
+    if (planned.kind !== 'PLAN') return stopped(planned, intent, state, env, m);
+    const outcome = proposalFromPlan(planned.plan, { workflow, context: env.context, wallet: env.wallet }, language);
+    if (outcome.kind !== 'PROPOSAL') return stopped(outcome, intent, state, env, m);
+    if (!SEQUENCE_STEP_COMMANDS.includes(outcome.command.type)) return refused(state, m, c.goalGaps.LIQUIDITY_AFTER_CONVERSION_NOT_EXECUTABLE(null));
+    const next = editorReducer({ workflow, error: null }, outcome.command, env.context);
+    if (next.error) return failed(state, m, copilotRejection(next.error.split(':')[0]!.trim(), language).message);
+    steps.push(outcome.command); sentences.push(outcome.sentence); stepNotes.push(...outcome.notes); workflow = next.workflow;
+  }
+  const command = { type: 'ADD_SEQUENCE', steps, source: 'CHAT', baseRevision: env.workflow.revision } as Command;
+  // The existing sequence runtime must take every step on its own, funded exactly as planned; otherwise this is not executable and FloFi says so.
+  const sequence = workflowSequence(workflow, candidate => lintWorkflow(candidate, env.context));
+  const added = sequence?.steps.slice(-steps.length) ?? [];
+  const offset = (sequence?.steps.length ?? 0) - steps.length;
+  if (!sequence || added.length !== steps.length || plan.steps.some((step, index) => step.fundedBy !== null && added[index]!.fundedBy !== step.fundedBy + offset))
+    return refused(state, m, m.compositionUnsupported);
+  const listed = sentences.map((sentence, index) => c.goalStep(index + 1, sentence));
+  return propose(state, env, command, sentences.join(' then '), [c.goalIntro(steps.length), ...listed, c.sequenceInterpreted].join(' '), [...notes, ...stepNotes], m.subject.request);
 }
 
 // ── PR B: the swap behind "these tokens", and FloFi-registered positions ─────────────────────────────────────────────
@@ -1037,8 +1246,8 @@ function author(intent: CopilotIntentV2, actions: readonly CopilotAction[], comp
   const lexicon = lexiconOf(state, env);
   const grounding: Grounding = { text: segmentText(state), carried, policy: { language, networkDefaults: false, catalog: true, ...env.agentRollout ? { agentRollout: env.agentRollout } : {} },
     latest: state.segment.at(-1) ?? '',
-    solana: { price: env.verified?.orcaPrice?.price ?? null, swap }, ...lexicon.length ? { lexicon } : {} };
-  if (!composition) actions = actions.map(a => groundExplicitAssets(a, grounding.latest ?? grounding.text, lexicon));
+    solana: { price: env.verified?.orcaPrice?.price ?? null, swap }, ...lexicon.length ? { lexicon } : {}, ...extras.planned ? { explicitAssets: false } : {} };
+  if (!composition && !extras.planned) actions = actions.map(a => groundExplicitAssets(a, grounding.latest ?? grounding.text, lexicon));
   const draftIntent: CopilotIntentV2 = intent.kind === 'ACTION' ? { ...intent, action: actions[0]! } : intent.kind === 'COMPOSITION' ? { ...intent, actions } : intent;
   const planned = planCopilotActions(actions, composition, grounding, env.wallet);
   if (planned.kind !== 'PLAN') return stopped(planned, draftIntent, state, env, m, { ...extras, carried: [...carried], ...swap ? { swap } : {} });

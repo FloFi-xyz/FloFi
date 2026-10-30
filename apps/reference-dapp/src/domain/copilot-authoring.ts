@@ -27,6 +27,9 @@ import { checkRecipient } from './recipient-address';
 import { defaultUniversalOutput, resolveUniversalAsset, universalAssetReference, universalChatSentence, UNIVERSAL_CANVAS_LABEL, universalCanvasPair, type UniversalBridgeRouting } from './universal-bridge-authoring';
 import { isSolanaPublicKey, UNIVERSAL_NETWORKS, type UniversalNetworkKey } from '@defi-workflow-engine/workflow-contracts';
 import { lexiconAssets, lexiconNamedNetworkIds, lexiconNetworks, targetEnvironment, type LexiconEntry } from './copilot-lexicon';
+import { fiatCandidates, fiatReference } from './intelligence/asset-resolution';
+import { activeNetworkScope, TEST_NETWORK_NOT_AVAILABLE } from './network-scope';
+import { intelligenceCopy } from './intelligence/copy';
 
 /**
  * BUILD-COPILOT-001: the deterministic boundary between an untrusted AI intent and the existing authoring path.
@@ -88,7 +91,12 @@ export type Grounding = { readonly text: string; readonly carried: ReadonlySet<C
    * own meanings (this conversation's, or saved for their verified identity) name networks and tokens; FloFi's reviewed glossary names test
    * networks only. It never grounds an amount, a slippage, a range, a fee or an address.
    */
-  readonly lexicon?: readonly LexiconEntry[] };
+  readonly lexicon?: readonly LexiconEntry[];
+  /**
+   * BUILD-FLOFI-INTELLIGENCE-001: false for the steps of a goal plan. Their assets were grounded per goal field; a role read from the whole message
+   * ("to Aave", "receive SOL") describes the goal, not each step, so it must not overwrite a step's own planned asset.
+   */
+  readonly explicitAssets?: boolean };
 const NOTHING_CARRIED: ReadonlySet<CarriedField> = new Set();
 
 type Network = Exclude<CopilotNetwork, 'OTHER'>;
@@ -150,14 +158,17 @@ export const canonicalDecimal = (value: string): string => {
   const trimmed = fraction.replace(/0+$/, '');
   return whole!.replace(/^0+(?=\d)/, '') + (trimmed ? '.' + trimmed : '');
 };
-/** Every exact reading of one written number: 1.5 / 1,5 as decimals, 1,000 / 1.000 as grouped thousands, 1,000.50 and 1.000,50. */
+/**
+ * Every exact reading of one written number: 1.5 / 1,5 as decimals, 1,000 / 1.000 as grouped thousands, 1,000.50 and 1.000,50.
+ * BUILD-FLOFI-INTELLIGENCE-001: a thousands group never starts a number with 0 — "0.001" and "0,005" are decimals only, never 1 or 5.
+ */
 export function amountReadings(token: string): string[] {
   const out: string[] = [];
   if (/^\d+(?:\.\d+)?$/.test(token)) out.push(token);
   if (/^\d+,\d+$/.test(token)) out.push(token.replace(',', '.'));
-  if (/^\d{1,3}(?:\.\d{3})+$/.test(token) || /^\d{1,3}(?:,\d{3})+$/.test(token)) out.push(token.replace(/[.,]/g, ''));
-  if (/^\d{1,3}(?:,\d{3})+\.\d+$/.test(token)) out.push(token.replace(/,/g, ''));
-  if (/^\d{1,3}(?:\.\d{3})+,\d+$/.test(token)) out.push(token.replace(/\./g, '').replace(',', '.'));
+  if (/^[1-9]\d{0,2}(?:\.\d{3})+$/.test(token) || /^[1-9]\d{0,2}(?:,\d{3})+$/.test(token)) out.push(token.replace(/[.,]/g, ''));
+  if (/^[1-9]\d{0,2}(?:,\d{3})+\.\d+$/.test(token)) out.push(token.replace(/,/g, ''));
+  if (/^[1-9]\d{0,2}(?:\.\d{3})+,\d+$/.test(token)) out.push(token.replace(/\./g, '').replace(',', '.'));
   return [...new Set(out.map(canonicalDecimal))];
 }
 type Reading = { readonly value: string; readonly negative: boolean; readonly percent: boolean };
@@ -255,11 +266,55 @@ function resolveNetwork(value: CopilotNetwork | null, supported: readonly Networ
   notes.push(m.defaultNetworkNote(what, COPILOT_NETWORK_LABEL[network]));
   return network;
 }
+/**
+ * BUILD-FLOFI-INTELLIGENCE-001: the written number behind an amount when it has several exact readings ("1,000" is 1 or 1000; "1.000" too) and the
+ * request writes it in no unambiguous form: FloFi asks instead of choosing. "0,0001" and "1,5" have one reading and never ask.
+ */
+export function ambiguousAmount(text: string, value: string): { readonly written: string; readonly readings: readonly string[] } | null {
+  const wanted = canonicalDecimal(value), clean = text.replace(/0x[0-9a-f]*/gi, ' ');
+  const tokens = [...clean.matchAll(/(?<![A-Za-z0-9_.,])\d(?:[\d.,]*\d)?/g)].map(match => ({ written: match[0], readings: amountReadings(match[0]) }))
+    .filter(token => token.readings.includes(wanted));
+  if (!tokens.length || tokens.some(token => token.readings.length === 1)) return null;
+  return { written: tokens[0]!.written, readings: tokens[0]!.readings };
+}
 function amountOf(value: string | null, g: Grounding, subject: Subject, field: CarriedField = 'amount'): string {
   const m = copyOf(g);
   if (value === null) return ask(['amount'], stillNeeds(m, ['amount'], subject));
   if (!g.carried.has(field) && !groundedAmount(g.text, value)) return ask(['amount'], m.amountNotFound(value));
+  const ambiguous = g.carried.has(field) || g.policy.catalog !== true ? null : ambiguousAmount(g.text, value);
+  if (ambiguous) return ask(['amount'], intelligenceCopy(g.policy.language).amountAmbiguous(ambiguous.written, ambiguous.readings), ambiguous.readings);
   return value;
+}
+/**
+ * BUILD-FLOFI-INTELLIGENCE-001: a test network the user named, in the public product, is said to be one — never offered a mainnet in its place
+ * (the user names the mainnet and amount they want; FloFi never moves test funds to real funds).
+ */
+function testNetworkGuard(action: CopilotAction, g: Grounding): void {
+  if (g.policy.catalog !== true || activeNetworkScope() !== 'PUBLIC_MAINNET') return;
+  const networks = action.type === 'BRIDGE' ? [action.sourceNetwork, action.destinationNetwork] : [action.network];
+  const named = namedNetworks(g);
+  for (const network of networks) if (network && network !== 'OTHER' && networkOfCopilot(network).environment === 'TESTNET' && named.includes(network))
+    refuse(intelligenceCopy(g.policy.language).goalGaps.TEST_NETWORK_NOT_AVAILABLE(COPILOT_NETWORK_LABEL[network]), TEST_NETWORK_NOT_AVAILABLE);
+}
+/**
+ * BUILD-FLOFI-INTELLIGENCE-001: a currency the user wrote where a token belongs ("swap 1 usd to eth on base") is asked about, with the network's own
+ * stablecoins of that currency as the options; FloFi never turns USD into USDC by itself. Only a reference the user actually wrote is checked.
+ */
+function fiatGuard(action: CopilotAction, g: Grounding): void {
+  if (g.policy.catalog !== true) return;
+  const slots: [string, CopilotAsset | null, CopilotNetwork | null, CopilotAuthoringMissing][] = action.type === 'SWAP'
+    ? [['inputAsset', action.inputAsset, action.network, 'inputAsset'], ['outputAsset', action.outputAsset, action.network, 'outputAsset']]
+    : action.type === 'BRIDGE' ? [['asset', action.asset, action.sourceNetwork, 'asset'], ['outputAsset', action.outputAsset ?? null, action.destinationNetwork, 'outputAsset']]
+      : action.type === 'LIQUIDITY' ? action.deposits.map(deposit => ['deposit', deposit.asset, action.network, 'asset'] as [string, CopilotAsset, CopilotNetwork | null, CopilotAuthoringMissing])
+        : [['asset', action.asset, action.network, 'asset']];
+  const plain = (text: string) => text.normalize('NFD').replace(/\p{Diacritic}/gu, '');
+  for (const [, value, network, missing] of slots) {
+    const currency = fiatReference(value);
+    if (!value || !currency || !symbolNamed(plain(g.text), plain(value)) && !/(?:^|\s)(?:us\$|\$|r\$|€)/i.test(g.text)) continue;
+    const identity = network && network !== 'OTHER' ? networkOfCopilot(network) : null;
+    const candidates = identity ? fiatCandidates(identity.key, currency) : [];
+    ask([missing], intelligenceCopy(g.policy.language).fiatAmbiguous(value, currency, identity?.name ?? null, candidates), candidates);
+  }
 }
 function slippageOf(value: string | null, fallback: string, g: Grounding, notes: string[], maximum?: number): string {
   const m = copyOf(g);
@@ -433,7 +488,8 @@ function planRoute(a: CopilotBridgeAction, g: Grounding): Plan {
  * the user's own words, and a destination asset FloFi proposes is stated. The route itself is chosen at Simulate and shown at Review.
  */
 const UNIVERSAL_OF: Readonly<Partial<Record<Network, UniversalNetworkKey>>> = { SOLANA: 'solana', BASE: 'base', ARBITRUM: 'arbitrum-one', ETHEREUM: 'ethereum', ROBINHOOD: 'robinhood' };
-const receivedAsset = explicitOutputAsset;
+/** The destination asset the message names ("receive SOL"); never for a goal plan's step, whose own planned asset (or the default) stands. */
+const receivedAsset = (text: string, g?: Grounding) => g?.explicitAssets === false ? null : explicitOutputAsset(text);
 const universalWanted = (a: CopilotBridgeAction, g: Grounding) => {
   if (!g.policy.catalog) return false;
   if (a.sourceNetwork === 'SOLANA' || a.destinationNetwork === 'SOLANA' || namedNetworks(g).includes('SOLANA') ||
@@ -441,7 +497,7 @@ const universalWanted = (a: CopilotBridgeAction, g: Grounding) => {
   const src = a.sourceNetwork && a.sourceNetwork !== 'OTHER' ? UNIVERSAL_OF[a.sourceNetwork] : undefined;
   const dst = a.destinationNetwork && a.destinationNetwork !== 'OTHER' ? UNIVERSAL_OF[a.destinationNetwork] : undefined;
   return !!src && !!dst && !!universalCanvasPair({ source: UNIVERSAL_CANVAS_LABEL[src], destination: UNIVERSAL_CANVAS_LABEL[dst],
-    ...a.asset ? { inputAsset: a.asset } : {}, ...a.outputAsset ?? receivedAsset(g.text) ? { outputAsset: (a.outputAsset ?? receivedAsset(g.text))! } : {} });
+    ...a.asset ? { inputAsset: a.asset } : {}, ...a.outputAsset ?? receivedAsset(g.text, g) ? { outputAsset: (a.outputAsset ?? receivedAsset(g.text, g))! } : {} });
 };
 function planUniversalBridge(a: CopilotBridgeAction, g: Grounding): Plan {
   const m = copyOf(g), notes: string[] = [], text = g.text;
@@ -471,7 +527,7 @@ function planUniversalBridge(a: CopilotBridgeAction, g: Grounding): Plan {
       return refuse(code === 'UNIVERSAL_ASSET_UNKNOWN' || code === 'ASSET_CATALOG_UNAVAILABLE' ? m.universalAssetUnknown(value, network) : m.universalAssetInvalid(value, network, code), code, [field]);
     }
   };
-  const asset = reference(src, written, srcName), wantedOutput = a.outputAsset ?? receivedAsset(text);
+  const asset = reference(src, written, srcName), wantedOutput = a.outputAsset ?? receivedAsset(text, g);
   // Destination values have their own grounding and catalog. They can never change the source asset.
   if (wantedOutput !== null) {
     if (isCatalogNetwork(destination as Network) && !g.carried.has('outputAsset') && !wantedOutput.includes('@')) catalogToken(wantedOutput, destination as Network, g, 'bridge', 'outputAsset', 'ANY', notes);
@@ -508,7 +564,7 @@ function planUniversalBridge(a: CopilotBridgeAction, g: Grounding): Plan {
 const UNIVERSAL_MAXIMUM_SLIPPAGE_BPS = 300;
 
 function planBridge(a: CopilotBridgeAction, g: Grounding): Plan {
-  if (g.policy.catalog) a = groundExplicitAssets(a, g.latest ?? g.text, g.lexicon) as CopilotBridgeAction;
+  if (g.policy.catalog && g.explicitAssets !== false) a = groundExplicitAssets(a, g.latest ?? g.text, g.lexicon) as CopilotBridgeAction;
   if (g.policy.catalog && a.outputAsset && a.destinationNetwork && a.destinationNetwork !== 'OTHER' && !g.carried.has('outputAsset')) {
     if (isCatalogNetwork(a.destinationNetwork) && !a.outputAsset.includes('@')) catalogToken(a.outputAsset, a.destinationNetwork, g, 'bridge', 'outputAsset', 'ANY');
     else needAsset(a.outputAsset, g, 'bridge', 'outputAsset');
@@ -861,8 +917,10 @@ export function copilotRejection(code: string, language: CopilotLanguage = 'EN')
 export function planCopilotActions(actions: readonly CopilotAction[], composition: boolean, g: Grounding, wallet: string | null):
   { readonly kind: 'PLAN'; readonly plan: Plan } | Exclude<CopilotOutcome, { kind: 'PROPOSAL' }> {
   try {
+    for (const candidate of actions) { testNetworkGuard(candidate, g); fiatGuard(candidate, g); }
     if (composition) return { kind: 'PLAN', plan: planComposition(actions, g, wallet) };
-    const action = g.policy.catalog ? groundExplicitAssets(actions[0]!, g.latest ?? g.text, g.lexicon) : actions[0]!;
+    const action = g.policy.catalog && g.explicitAssets !== false ? groundExplicitAssets(actions[0]!, g.latest ?? g.text, g.lexicon) : actions[0]!;
+    fiatGuard(action, g);
     if (g.policy.catalog && action.type === 'LIQUIDITY' && action.funding === 'SWAP_OUTPUT') return { kind: 'PLAN', plan: planSolanaComposition(null, action, g) };
     return { kind: 'PLAN', plan: action.type === 'SWAP' ? planSwap(action, g) : action.type === 'BRIDGE' ? planBridge(action, g)
       : action.type === 'LIQUIDITY' ? planLiquidity(action, g) : action.type === 'TRANSFER' ? planTransfer(action, g) : planLending(action, g, wallet) };
