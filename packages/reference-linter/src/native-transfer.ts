@@ -25,7 +25,7 @@ export function validateNativeTransferWorkflow(workflow: SemanticWorkflow): Tran
   const { token } = read.fields;
   try { validateCatalogAssetIdentity({ chain: read.fields.chain, address: token.address, decimals: token.decimals, officialId: token.officialId }); }
   catch { throw new Error('TRANSFER_ASSET_IDENTITY_INVALID'); }
-  // At most one billion whole units, like a catalog swap's input.
-  if (BigInt(read.fields.amount) > 10n ** BigInt(token.decimals + 9)) throw new Error('TRANSFER_AMOUNT_OUT_OF_RANGE');
+  // ERC-20 transfer amounts are uint256; balances remain a live simulation check.
+  if (BigInt(read.fields.amount) > (2n ** 256n - 1n)) throw new Error('TRANSFER_AMOUNT_OUT_OF_RANGE');
   return read;
 }

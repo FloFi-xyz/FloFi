@@ -25,6 +25,7 @@ import { parseLocalCommand, type Command } from '../../domain/commands';
 import { MAX_WORKFLOW_STEPS } from '../../engine/strategy-spec';
 import { buildCopilotFacts } from '../../domain/copilot-answers';
 import { COPILOT_AUTHORING_COMMANDS } from '../../domain/copilot-authoring';
+import { turnMetrics, type TurnMetrics } from '../../domain/intelligence/turn-metrics';
 import { closeSegment, emptyConversation, failureText, finishTurn, recordProposal, startTurn, type CopilotConversation, type CopilotEnvironment,
   type CopilotLearning, type CopilotReply, type CopilotRequestV2, type CopilotResultV2, type MemoryAction } from '../../domain/copilot-conversation';
 import { parseLexicon, type LexiconEntry } from '../../domain/copilot-lexicon';
@@ -80,7 +81,8 @@ export type TurnDecision = { readonly action: TurnAction; readonly command: Comm
   readonly subscribeCode?: string;
   /** BUILD-CHAT-LEARNING-001: a memory action the user confirmed (performed by the service on the sender's own identity), a MEMORY command,
    *  and the learned entries / content-free signals of the reply. */
-  readonly memory?: MemoryAction; readonly memoryCommand?: 'SHOW' | 'OFF' | 'ON'; readonly learning?: CopilotReply['learning'] };
+  readonly memory?: MemoryAction; readonly memoryCommand?: 'SHOW' | 'OFF' | 'ON'; readonly learning?: CopilotReply['learning'];
+  /** BUILD-FLOFI-INTELLIGENCE-001: the content-free record of a Copilot engine turn (`intelligence/turn-metrics.ts`). */ readonly metrics?: TurnMetrics };
 export type TurnInput = { readonly content: TurnContent; readonly state: ChannelState; readonly optedOut: boolean; readonly interpret: TurnInterpreter | null;
   readonly support: string; readonly privacy: string;
   /** BUILD-BASE-001: registers the validated catalogs of the catalog networks a text (and an untrusted intent) names; none = pinned assets only. */
@@ -90,7 +92,8 @@ export type TurnInput = { readonly content: TurnContent; readonly state: Channel
 
 const BASE: Workflow = initialEditor().workflow;
 const CONTEXT = dappReviewContext();
-const AUTHORING: ReadonlySet<string> = new Set(COPILOT_AUTHORING_COMMANDS.filter(command => command !== 'ADD_SOLANA_COMPOSITION')); // DApp-only composition; no channel StrategySpec.
+// DApp-only composition; no channel StrategySpec. BUILD-FLOFI-INTELLIGENCE-001: a goal plan's ADD_SEQUENCE becomes the channel's step list (`strategy.ts`).
+const AUTHORING: ReadonlySet<string> = new Set([...COPILOT_AUTHORING_COMMANDS.filter(command => command !== 'ADD_SOLANA_COMPOSITION'), 'ADD_SEQUENCE']);
 const text = (value: string): ChannelReply => ({ text: value, choices: [], link: null });
 
 const words = (value: string) => value.trim().toLowerCase().replace(/[.!?¡¿]+$/g, '').replace(/\s+/g, ' ');
@@ -238,7 +241,7 @@ export async function decideTurn(input: TurnInput): Promise<TurnDecision> {
   if (!input.interpret) return decision('REPLY', 'NOT_UNDERSTOOD', greet([text(m.grammarOnly)]), greeted);
   const languageHint = PORTUGUESE.test(raw) ? 'PT' : state.language;
   const start = startTurn(conversation.language === languageHint ? conversation : { ...conversation, language: languageHint }, raw, env);
-  let reply, next: CopilotConversation;
+  let reply, next: CopilotConversation, interpreted: string | null = 'LOCAL';
   if (start.kind === 'LOCAL') ({ reply, next } = start);
   else {
     let result: CopilotResultV2;
@@ -246,11 +249,13 @@ export async function decideTurn(input: TurnInput): Promise<TurnDecision> {
     catch { result = { ok: false, code: 'COPILOT_UNAVAILABLE' }; }
     if (result.ok) await input.catalogs?.([...conversation.segment, raw].join('\n'), result.intent);
     ({ reply, next } = finishTurn(start.turn, result, env));
+    interpreted = result.ok ? String((result.intent as { kind?: unknown } | null)?.kind ?? '') || null : null;
   }
+  const metrics = turnMetrics(conversation, reply, next, interpreted, 'CHANNEL');
   const lm = channelCopy(next.language), learned = reply.learning ? { learning: reply.learning } : {}, requests = (state.requests ?? 0) + 1;
   if (reply.command && AUTHORING.has(reply.command.type)) {
     const proposed = withCopilot({ ...greeted, language: next.language, requests }, next, environment(reply.command, learning), { pending: reply.command });
-    return decision('PROPOSE', 'PROPOSED_INTERPRETED', [], proposed, { command: reply.command, aiInterpreted: true, notes: reply.notes, ...learned });
+    return decision('PROPOSE', 'PROPOSED_INTERPRETED', [], proposed, { command: reply.command, aiInterpreted: true, notes: reply.notes, ...learned, metrics });
   }
   // BUILD-CHAT-LEARNING-001: FloFi's memory offer is answered like its questions (buttons, or the number of the choice).
   const choices = reply.kind === 'CLARIFICATION' || reply.kind === 'MEMORY' ? choicesOf(reply.options) : [];
@@ -258,7 +263,7 @@ export async function decideTurn(input: TurnInput): Promise<TurnDecision> {
   const after = withCopilot({ ...greeted, language: next.language, choices, requests }, next, env);
   const replies = [{ text: body, choices, link: null }];
   return decision('REPLY', `COPILOT_${reply.kind}`, state.greeted ? replies : [text(lm.firstContact(input.support, input.privacy)), ...replies], after,
-    { ...reply.memory ? { memory: reply.memory } : {}, ...learned });
+    { ...reply.memory ? { memory: reply.memory } : {}, ...learned, metrics });
 }
 
 /** The persisted state, or a fresh one when it is absent or unreadable (never a guess). */

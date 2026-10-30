@@ -109,7 +109,7 @@ export const ROBINHOOD_MAINNET_TRANSFER = Object.freeze({
   chainHex: '0x1237', rpc: ROBINHOOD_CHAIN_MAINNET.rpc, explorer: ROBINHOOD_CHAIN_MAINNET.explorer,
   officialSource: ROBINHOOD_CHAIN_MAINNET.officialSource, adapterId: 'evm.native-transfer', action: 'asset.transfer',
   /** No product ceiling on real funds beyond the owner's balance and the reviewed fee budget (one million ETH is a representation bound). */
-  maximumValueWei: '1000000000000000000000000', defaultValueWei: '1000000000000',
+  maximumValueWei: (2n ** 256n - 1n).toString(), defaultValueWei: '1000000000000',
   reviewTtlSeconds: 60, gasLimitMarginPercent: 150, maxFeeMultiplier: 2, minimumConfirmations: 2,
   settlement: 'L2' as const,
   /** Explicit recipients and catalog ERC-20 transfers are allowed on this profile (testnet profiles stay owner-only, native only). */

@@ -44,9 +44,10 @@ export function createSolanaSwapNode(nodeId: string, input: SolanaSwapInput): Se
   if (!/^[1-9][0-9]{0,3}$/.test(input.slippage) || Number(input.slippage) > runtime.maximumSlippageBps) throw new Error('SOLANA_SLIPPAGE_OUT_OF_RANGE');
   const amount = parseTokenAmount(input.amount, from.decimals);
   if (BigInt(amount) > BigInt(from.maximumAmount)) throw new Error('AMOUNT_OUT_OF_RANGE');
+  const maximumAmount = input.network === 'Solana' && BigInt(amount) <= 1_000_000_000_000n ? '1000000000000' : from.maximumAmount;
   return createExactInputSwapNode(nodeId, { chain: runtime.chain, input: { chainId: runtime.chain, address: from.mint, decimals: from.decimals },
     output: { chainId: runtime.chain, address: to.mint, decimals: to.decimals }, amount, slippageBps: Number(input.slippage),
-    protocols: [runtime.protocol], maximumAmount: from.maximumAmount });
+    protocols: [runtime.protocol], maximumAmount });
 }
 export function solanaSwapDetails(node: SemanticWorkflow['nodes'][number] | { readonly actionType: string; readonly chainId: string }): SolanaSwapInput | null {
   if (node.actionType !== 'asset.swap.exact-input' || !node.chainId.startsWith('solana:')) return null;

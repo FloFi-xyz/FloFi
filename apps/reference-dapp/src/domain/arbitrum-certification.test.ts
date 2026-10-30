@@ -268,7 +268,7 @@ describe('Honest unsupported scope and stable historical hashes', () => {
     if (turn.kind !== 'REMOTE') throw Error('EXPECTED_INTENT_PROVIDER');
     const reply = finishTurn(turn.turn, { ok: true, intent: intent.composition([act.lending('SUPPLY', { network: 'ARBITRUM', asset: 'USDC', amount: '100' }),
       act.lending('BORROW', { network: 'ARBITRUM', asset: 'USDC', amount: '20' }), act.swap({ network: 'ARBITRUM', inputAsset: 'USDC', outputAsset: 'WETH', amount: '20' })]) }, s.env()).reply;
-    expect(reply.kind).toBe('CLARIFICATION'); expect(reply.command).toBeUndefined();
+    expect(reply).toMatchObject({ kind: 'PROPOSAL', command: { type: 'ADD_SEQUENCE', steps: [{ type: 'ADD_SUPPLY' }, { type: 'ADD_BORROW' }, { type: 'ADD_CRYPTO_ACTION' }] } });
   });
   it.each(['Provide liquidity for USDC and WETH on Arbitrum', 'quero adicionar liquidez de USDC e WETH na Arbitrum'])('missing liquidity amounts ask, never guess: %s', text => {
     const { reply } = natural(text, act.catalogLiquidity({ network: 'ARBITRUM', protocol: 'UNISWAP_V3' }), text.startsWith('quero') ? 'PT' : 'EN');

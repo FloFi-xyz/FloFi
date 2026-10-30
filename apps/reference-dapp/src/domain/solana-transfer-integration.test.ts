@@ -57,10 +57,10 @@ describe('Solana transfers across Copilot, channels and MCP', () => {
   it('preserves Solana Mainnet Orca liquidity across Copilot, channel canonicalization and the shared signing route', () => {
     const request = 'Please provide 0.01 SOL and 0.3 USDC to Orca on Solana at ticks -29952 to -25600', action = act.liquidity({ protocol: 'ORCA', network: 'SOLANA',
       deposits: [{ asset: 'SOL', maxAmount: '0.01' }, { asset: 'USDC', maxAmount: '0.3' }], rangeUnit: 'TICK', lower: '-29952', upper: '-25600' });
-    // Audit A9: until the owner approves this agent rollout, the Copilot proposes no real-funds Orca position.
-    const unreleased = new CopilotSession();
-    expect(unreleased.say(request, intent.action(action))?.kind).not.toBe('PROPOSAL');
-    expect(unreleased.pending).toBeNull();
+    // The public mainnet journey uses the owner's approved registry capability with no per-user rollout switch.
+    const publicSession = new CopilotSession();
+    expect(publicSession.say(request, intent.action(action))?.kind).toBe('PROPOSAL');
+    expect(publicSession.pending).not.toBeNull();
     const session = new CopilotSession();
     session.agentRollout = PENDING_AGENT_CAPABILITIES;
     const reply = session.say(request, intent.action(action));

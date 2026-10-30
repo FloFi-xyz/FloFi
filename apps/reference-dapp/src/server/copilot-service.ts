@@ -4,6 +4,11 @@ import { COPILOT_LIMITS, COPILOT_OUTPUT_SCHEMA, CopilotIntentError, hasUnsafeCha
 import { COPILOT_OUTPUT_SCHEMA_V2, COPILOT_TRANSCRIPT, COPILOT_V2_LIMITS, parseCopilotOutputV2, type CopilotIntentV2 } from '../domain/copilot-intent-v2';
 import type { CopilotMode } from '../domain/copilot-mode';
 import { copilotNetworkRule, copilotSupportsSection, copilotTransferScope } from './copilot-capabilities';
+import { CONTEXT_CARD_LIMITS, type CopilotContextCard } from '../domain/intelligence/operational-state';
+import { factNumbers, groundedProse } from '../domain/intelligence/grounding';
+import type { TurnMetrics } from '../domain/intelligence/turn-metrics';
+import type { CopilotToolkit } from '../platform/copilot-tools.ts';
+export type { CopilotToolkit };
 
 export type { CopilotMode };
 
@@ -259,7 +264,8 @@ Rules:
    - Ranges: "a 10% range", "±10%", "10% around the price" → rangeUnit PERCENT, upper "10", lower null. FloFi computes the bounds from the verified pool price; never compute them yourself.
    - POSITION: managing an existing liquidity position: "remove 50% of my liquidity", "withdraw half of my position" → operation DECREASE, percent "50"; "remove all my liquidity", "close/exit my position" → operation EXIT, percent null. Never invent which position: FloFi selects it from the connected wallet.
    - A bare "yes"/"no" after Flofi's own question is answered by FloFi; you only see the ones it cannot settle. Never treat "yes" as approval, a signature or an execution.
-   - QUESTION: any read-only question about the workflow, a step, protocols, networks, approvals, the Manifest, the simulation, blockers, failures or the pending proposal. Pick the topic and the target if a step is named; never answer it yourself. Questions about prices, APY, balances, gas, bridge times or health factors are topic MARKET_DATA.
+   - QUESTION: any read-only question about the workflow, a step, protocols, networks, approvals, the Manifest, the simulation, blockers, failures or the pending proposal. Pick the topic and the target if a step is named; never answer it yourself: FloFi writes the factual answer (the optional answer field stays null unless FloFi's tools gave you facts for a short explanation). Questions about prices, APY, balances, gas, bridge times or health factors are topic MARKET_DATA.
+   - GOAL: an outcome described without naming every step ("I have USDC on Base and want SOL on Solana", "supply my USDC on Aave", "move my funds to Arbitrum as cheaply as possible"). Report only what the user said, null for the rest; FloFi plans the steps from its registries and asks for anything missing. For conversion into liquidity, retain the position's stated deposits/range in goal.liquidity so FloFi plans the conversion and position together. Use ACTION or COMPOSITION when the user named the action itself.
    - CLARIFICATION_REQUIRED: something material is missing and cannot be expressed with null. One short question in the user's language and up to 4 short options.
    - UNSUPPORTED: anything else (transfers outside ${copilotTransferScope()}, staking, leverage loops, limit orders, unsupported automations, portfolio or investment advice, news, other protocols). One short reason in the user's language.
 8. Networks: ${copilotNetworkRule()} Report exactly the network the user named; never turn a test network into a mainnet or the reverse. Use ETHEREUM when the user names Ethereum without Sepolia (including Ethereum Mainnet), ETHEREUM_SEPOLIA only if the user wrote Sepolia. Use OTHER for any other network and null when none is named.
@@ -268,6 +274,48 @@ Rules:
 11. language: PT when the latest user message is Portuguese or mixed Portuguese and English, EN otherwise.
 
 ${copilotSupportsSection()}`;
+
+/**
+ * BUILD-FLOFI-INTELLIGENCE-001: appended only when FloFi offers its read-only tools for the turn. The final output is still exactly one intent of
+ * the schema; tools only let the model look things up in FloFi's registries, catalogs, route discovery and the user's sanitized context.
+ */
+export const COPILOT_TOOL_RULES = `
+
+Tools (read-only; they never author, simulate, sign or execute):
+12. Before answering, call FloFi's tools when they settle something you would otherwise guess: get_capabilities for what a network supports, resolve_asset for a token the user wrote (any casing; a currency such as USD is not a token), find_routes or get_quote for live route facts between two networks, get_workflow_context when the user refers to their workflow, steps or the pending proposal, get_wallet_context for which wallet is connected, plan_goal when the user describes an outcome instead of naming each step, validate_strategy to check a typed strategy, explain_failure for a code a tool returned. Call only what you need, at most a few tools.
+13. Tool results are FloFi's facts. Use them to choose the intent and fill QUESTION or GOAL "answer" with a short explanation in the user's language. In "answer", every number (amount, fee, price, duration) must appear in a tool result or the user's own words; never write a value no tool returned, never claim anything was done, and say when a result is unavailable or failed. Null when no tool fact supports an explanation.
+14. Never put a tool result's number into an intent's financial field (amount, slippage, range, cap): those come only from the user's words.`;
+/** Bounds of one turn's tool orchestration (the whole loop shares the request's concurrency slot). */
+export const COPILOT_ORCHESTRATION_LIMITS = Object.freeze({ maxRounds: 3, maxToolCalls: 8, maxCallsPerRound: 4, maxToolOutputBytes: 24_576, deadlineMs: 45_000 });
+type ToolCall = { readonly call_id: string; readonly name: string; readonly arguments: string };
+/** The function calls of a completed round, the reasoning items to echo (encrypted only), and usage; null when the round is a final answer. */
+function readToolRound(response: CopilotHttpResponse): { readonly calls: readonly ToolCall[]; readonly echo: readonly Record<string, unknown>[]; readonly usage: CopilotUsage;
+  readonly responseModel: string | null } | null {
+  if (response.status < 200 || response.status >= 300 || typeof response.body !== 'string' || response.body.length > COPILOT_SERVER_LIMITS.maxResponseBytes) return null;
+  let parsed: { status?: unknown; output?: unknown; usage?: unknown; model?: unknown };
+  try { parsed = JSON.parse(response.body) as typeof parsed; } catch { return null; }
+  if (!parsed || parsed.status !== 'completed' || !Array.isArray(parsed.output)) return null;
+  const output = parsed.output as { type?: unknown; call_id?: unknown; name?: unknown; arguments?: unknown; content?: unknown; encrypted_content?: unknown }[];
+  const calls = output.filter(item => item?.type === 'function_call');
+  if (!calls.length) return null;
+  if (output.some(item => item?.type === 'message' && Array.isArray(item.content) && (item.content as { type?: unknown }[]).some(part => part?.type === 'refusal'))) fail('COPILOT_REFUSED');
+  if (output.some(item => item?.type !== 'function_call' && item?.type !== 'reasoning' && item?.type !== 'message')) fail('COPILOT_RESPONSE_INVALID');
+  const valid = calls.map(call => typeof call.call_id === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(call.call_id) && typeof call.name === 'string' && /^[a-z_]{1,64}$/.test(call.name) &&
+    typeof call.arguments === 'string' && call.arguments.length <= 4_096 ? { call_id: call.call_id, name: call.name, arguments: call.arguments } : fail('COPILOT_RESPONSE_INVALID'));
+  const echo = output.filter(item => item?.type === 'reasoning' && typeof item.encrypted_content === 'string') as Record<string, unknown>[];
+  const usage = (parsed.usage ?? {}) as { input_tokens?: unknown; output_tokens?: unknown; output_tokens_details?: { reasoning_tokens?: unknown } };
+  return { calls: valid, echo, usage: { inputTokens: count(usage.input_tokens), outputTokens: count(usage.output_tokens), reasoningTokens: count(usage.output_tokens_details?.reasoning_tokens) },
+    responseModel: typeof parsed.model === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$/.test(parsed.model) ? parsed.model : null };
+}
+const addUsage = (a: CopilotUsage, b: CopilotUsage): CopilotUsage => ({ inputTokens: a.inputTokens === null && b.inputTokens === null ? null : (a.inputTokens ?? 0) + (b.inputTokens ?? 0),
+  outputTokens: a.outputTokens === null && b.outputTokens === null ? null : (a.outputTokens ?? 0) + (b.outputTokens ?? 0),
+  reasoningTokens: a.reasoningTokens === null && b.reasoningTokens === null ? null : (a.reasoningTokens ?? 0) + (b.reasoningTokens ?? 0) });
+/** A model explanation is kept only when grounded in this turn's facts (tool outputs, the user's words, FloFi's context card). */
+function groundAnswer(intent: CopilotIntentV2, facts: readonly string[]): { readonly intent: CopilotIntentV2; readonly grounding: string } {
+  if ((intent.kind !== 'QUESTION' && intent.kind !== 'GOAL') || !intent.answer) return { intent, grounding: 'NONE' };
+  const checked = groundedProse(intent.answer, facts);
+  return checked.ok ? { intent, grounding: 'GROUNDED' } : { intent: { ...intent, answer: null }, grounding: checked.reason };
+}
 
 export type CopilotReasoningEffort = 'minimal' | 'low' | 'medium' | 'high';
 /** Owner-chosen live tuning; every value is bounded and nothing falls back to a different model. */
@@ -291,7 +339,9 @@ export function copilotTuning(env: Env): CopilotTuning | null {
 export function validateCopilotRequestV2(input: unknown): CopilotThreadMessage[] {
   const plain = (value: unknown, keys: readonly string[]): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value) &&
     Object.getPrototypeOf(value) === Object.prototype && Reflect.ownKeys(value).sort().join() === [...keys].sort().join();
-  if (!plain(input, ['version', 'messages']) || input.version !== '2') return fail('COPILOT_INPUT_INVALID');
+  const record = input as Record<string, unknown> | null, extra = record && typeof record === 'object' ? ['context', 'contextKey'].filter(key => Object.hasOwn(record, key)) : [];
+  if (!plain(input, ['version', 'messages', ...extra]) || input.version !== '2') return fail('COPILOT_INPUT_INVALID');
+  if (extra.length) requestContext(input);
   const messages = input.messages;
   if (!Array.isArray(messages) || messages.length < 1 || messages.length > COPILOT_V2_LIMITS.maxTranscriptMessages) return fail('COPILOT_INPUT_INVALID');
   const out = messages.map((message: unknown, index) => {
@@ -305,20 +355,39 @@ export function validateCopilotRequestV2(input: unknown): CopilotThreadMessage[]
     out.reduce((total, message) => total + message.text.length, 0) > COPILOT_V2_LIMITS.maxRequestCharacters) return fail('COPILOT_INPUT_INVALID');
   return out;
 }
+/**
+ * BUILD-FLOFI-INTELLIGENCE-001: the optional context card of a V2 request (`intelligence/operational-state.ts`) and its fingerprint. It is untrusted
+ * client data: bounded, plain JSON, version 1, and it may not carry a wallet address, a Solana public key, a node id or a chain id. It is shown to
+ * the model only through the read-only context tools and is never authority for any value.
+ */
+export function requestContext(input: unknown): { readonly card: CopilotContextCard | null; readonly key: string | null } {
+  const record = input as { context?: unknown; contextKey?: unknown };
+  const key = record.contextKey === undefined ? null : typeof record.contextKey === 'string' && /^c[0-9a-f]{16}$/.test(record.contextKey) ? record.contextKey : fail('COPILOT_INPUT_INVALID');
+  if (record.context === undefined) return { card: null, key };
+  let text: string;
+  try { text = JSON.stringify(record.context); } catch { return fail('COPILOT_INPUT_INVALID'); }
+  const card = record.context as CopilotContextCard;
+  if (!card || typeof card !== 'object' || Array.isArray(card) || card.version !== 1 || typeof text !== 'string' || text.length > CONTEXT_CARD_LIMITS.maxBytes || hasUnsafeCharacters(text) ||
+    /0x[0-9a-fA-F]{40}|(?<![A-Za-z0-9])[1-9A-HJ-NP-Za-km-z]{32,44}(?![A-Za-z0-9])|node-\d|eip155:|solana:/.test(text) || !Array.isArray(card.steps) || !card.request || !card.wallet)
+    return fail('COPILOT_INPUT_INVALID');
+  return { card, key };
+}
 export type CopilotModelSettings = { readonly model: string; readonly temperature: number | null; readonly maxOutputTokens: number; readonly reasoningEffort: CopilotReasoningEffort | null };
 /**
  * BUILD-CHAT-LEARNING-001: `glossary` (`copilot-glossary.ts`) is one optional `developer` input item of code-rendered reference data placed before
  * the transcript; everything else — instructions, schema, `store: false`, limits — is unchanged, and without it the request is byte-identical.
  */
-export function buildCopilotRequestV2(settings: CopilotModelSettings, messages: readonly CopilotThreadMessage[], glossary: string | null = null): Record<string, unknown> {
-  return { model: settings.model, instructions: COPILOT_INSTRUCTIONS_V2, input: [...glossary ? [{ role: 'developer', content: glossary }] : [],
-    ...messages.map(message => ({ role: message.role, content: message.text }))],
+export function buildCopilotRequestV2(settings: CopilotModelSettings, messages: readonly CopilotThreadMessage[], glossary: string | null = null,
+  tools: readonly Record<string, unknown>[] | null = null): Record<string, unknown> {
+  return { model: settings.model, instructions: tools ? COPILOT_INSTRUCTIONS_V2 + COPILOT_TOOL_RULES : COPILOT_INSTRUCTIONS_V2,
+    input: [...glossary ? [{ role: 'developer', content: glossary }] : [], ...messages.map(message => ({ role: message.role, content: message.text }))],
+    ...tools ? { tools: [...tools], tool_choice: 'auto', parallel_tool_calls: true, include: ['reasoning.encrypted_content'] } : {},
     text: { format: { type: 'json_schema', name: 'flofi_copilot_intent_v2', strict: true, schema: COPILOT_OUTPUT_SCHEMA_V2 } },
     max_output_tokens: settings.maxOutputTokens, store: false, ...(settings.temperature === null ? {} : { temperature: settings.temperature }),
     ...(settings.reasoningEffort === null ? {} : { reasoning: { effort: settings.reasoningEffort } }) };
 }
 export type CopilotUsage = { readonly inputTokens: number | null; readonly outputTokens: number | null; readonly reasoningTokens: number | null };
-const count = (value: unknown): number | null => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
+function count(value: unknown): number | null { return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null; }
 /** V2 extraction: the V1 checks, plus a failed response, a content-filter stop, token usage and the model the API reports. */
 export function readCopilotResponseV2(response: CopilotHttpResponse): { readonly intent: CopilotIntentV2; readonly usage: CopilotUsage; readonly responseModel: string | null } {
   if (response.status >= 200 && response.status < 300 && typeof response.body === 'string' && response.body.length <= COPILOT_SERVER_LIMITS.maxResponseBytes) {
@@ -349,32 +418,89 @@ export function retryAfterSeconds(value: string | null | undefined, now: number 
 export type CopilotTelemetry = { readonly event: 'flofi.copilot.interpret'; readonly protocol: 'v2'; readonly mode: 'live' | 'replay'; readonly model: string;
   readonly outcome: string; readonly intentKind: string | null; readonly topic: string | null; readonly durationMs: number; readonly messages: number; readonly userTurns: number;
   readonly inputTokens: number | null; readonly outputTokens: number | null; readonly reasoningTokens: number | null; readonly responseModel: string | null;
-  /** BUILD-CHAT-LEARNING-001: how many glossary lines the request carried (present only when it carried some). */ readonly glossaryLines?: number };
-export type CopilotResultV2 = { readonly ok: true; readonly intent: CopilotIntentV2 } | { readonly ok: false; readonly code: string; readonly retryAfterSeconds?: number };
+  /** BUILD-CHAT-LEARNING-001: how many glossary lines the request carried (present only when it carried some). */ readonly glossaryLines?: number;
+  /** BUILD-FLOFI-INTELLIGENCE-001 (present when tools were offered): tool calls by category, failed calls, rounds, and whether a model explanation was
+   *  grounded (GROUNDED, NONE, or why it was dropped). Names and codes only. */
+  readonly toolCalls?: number; readonly toolCategories?: readonly string[]; readonly toolFailures?: number; readonly toolRounds?: number; readonly answerGrounding?: string;
+  /** Whether the request carried FloFi's context card, and the engine's own content-free counters for the open request. */
+  readonly contextCard?: boolean;
+  /** Which surface asked (FloFi's chat or Channel Core), when the caller says. */ readonly surface?: 'WEB' | 'CHANNEL' };
+export type CopilotResultV2 = { readonly ok: true; readonly intent: CopilotIntentV2; readonly contextKey?: string; readonly groundingNumbers?: readonly string[] }
+  | { readonly ok: false; readonly code: string; readonly retryAfterSeconds?: number };
 export async function interpretCopilotV2(input: unknown, deps: { readonly transport: CopilotTransport; readonly settings: CopilotModelSettings; readonly mode: 'live' | 'replay';
   readonly limiter?: CopilotLimiter; readonly telemetry?: ((record: CopilotTelemetry) => void) | undefined; readonly now?: () => number;
-  /** BUILD-CHAT-LEARNING-001: the rendered glossary for this request (`copilot-glossary.ts`), or none. */ readonly glossary?: string | null }): Promise<CopilotResultV2> {
+  /** BUILD-CHAT-LEARNING-001: the rendered glossary for this request (`copilot-glossary.ts`), or none. */ readonly glossary?: string | null;
+  /** BUILD-FLOFI-INTELLIGENCE-001: FloFi's read-only tools for this turn (`copilot-tools.ts`); absent, the turn is one request without tools. */
+  readonly toolkit?: CopilotToolkit | null; readonly orchestration?: Partial<typeof COPILOT_ORCHESTRATION_LIMITS>; readonly surface?: 'WEB' | 'CHANNEL' }): Promise<CopilotResultV2> {
   const now = deps.now ?? (() => performance.now()), started = now(), glossary = deps.glossary ?? null;
   let messages: CopilotThreadMessage[] = [];
   const report = (outcome: string, extra: Partial<CopilotTelemetry> = {}) => deps.telemetry?.({ event: 'flofi.copilot.interpret', protocol: 'v2', mode: deps.mode,
     model: deps.settings.model, outcome, intentKind: null, topic: null, durationMs: Math.max(0, Math.round(now() - started)), messages: messages.length,
     userTurns: messages.filter(message => message.role === 'user').length, inputTokens: null, outputTokens: null, reasoningTokens: null, responseModel: null,
-    ...glossary ? { glossaryLines: glossary.split('\n').length - 1 } : {}, ...extra });
-  try { messages = validateCopilotRequestV2(input); } catch { report('COPILOT_INPUT_INVALID'); return { ok: false, code: 'COPILOT_INPUT_INVALID' }; }
+    ...glossary ? { glossaryLines: glossary.split('\n').length - 1 } : {}, ...deps.surface ? { surface: deps.surface } : {}, ...extra });
+  let context: ReturnType<typeof requestContext> = { card: null, key: null };
+  try { messages = validateCopilotRequestV2(input); context = requestContext(input); } catch { report('COPILOT_INPUT_INVALID'); return { ok: false, code: 'COPILOT_INPUT_INVALID' }; }
   const release = deps.limiter ? deps.limiter.acquire() : () => undefined;
   if (!release) { report('COPILOT_BUSY'); return { ok: false, code: 'COPILOT_BUSY' }; }
-  let response: CopilotHttpResponse | null = null;
+  const toolkit = deps.toolkit ?? null, limits = { ...COPILOT_ORCHESTRATION_LIMITS, ...deps.orchestration };
+  // Tool outputs are facts for the model, which writes the user-facing language itself; FloFi's own explanations are returned in English.
+  const language = 'EN' as const;
+  // Grounding facts: the user's words, FloFi's context card, and every tool output of this turn.
+  const facts: string[] = [...messages.filter(message => message.role === 'user').map(message => message.text), ...context.card ? [JSON.stringify(context.card)] : []];
+  const trace = { calls: 0, failures: 0, rounds: 0, categories: new Set<string>(), bytes: 0 }, toolFactsFrom = facts.length;
+  // Without tools or a context card the record is exactly the one before this build.
+  const extra = (grounding: string | null): Partial<CopilotTelemetry> => ({ ...toolkit ? { toolCalls: trace.calls, toolCategories: [...trace.categories].sort(), toolFailures: trace.failures,
+    toolRounds: trace.rounds } : {}, ...toolkit || context.card ? { contextCard: Boolean(context.card) } : {}, ...grounding ? { answerGrounding: grounding } : {} });
+  let response: CopilotHttpResponse | null = null, usage: CopilotUsage = { inputTokens: null, outputTokens: null, reasoningTokens: null };
   try {
-    response = await deps.transport({ body: JSON.stringify(buildCopilotRequestV2(deps.settings, messages, glossary)) });
-    const { intent, usage, responseModel } = readCopilotResponseV2(response);
-    report('OK', { intentKind: intent.kind, topic: intent.kind === 'QUESTION' ? intent.topic : null, ...usage, responseModel });
-    return { ok: true, intent };
+    const base = buildCopilotRequestV2(deps.settings, messages, glossary, toolkit?.definitions ?? null);
+    let items = [...base.input as Record<string, unknown>[]];
+    for (let round = 0; ; round += 1) {
+      // Out of rounds, calls or time: the model must answer now, without tools.
+      const exhausted = round >= limits.maxRounds || trace.calls >= limits.maxToolCalls || now() - started > limits.deadlineMs;
+      const body = { ...base, input: items, ...toolkit ? { tool_choice: exhausted ? 'none' : 'auto' } : {} };
+      response = await deps.transport({ body: JSON.stringify(body) });
+      const calls = toolkit ? readToolRound(response) : null;
+      if (!calls) break;
+      if (exhausted) fail('COPILOT_RESPONSE_INVALID');
+      trace.rounds += 1; usage = addUsage(usage, calls.usage);
+      const admitted = calls.calls.slice(0, Math.min(limits.maxCallsPerRound, limits.maxToolCalls - trace.calls));
+      const results = await Promise.all(admitted.map(async call => {
+        const result = await toolkit!.run(call.name, call.arguments, { card: context.card, language });
+        trace.calls += 1; if (result.category) trace.categories.add(result.category); if (result.outcome !== 'OK') trace.failures += 1;
+        let output = JSON.stringify(result.output);
+        if (trace.bytes + output.length > limits.maxToolOutputBytes) output = JSON.stringify({ ok: false, code: 'TOOL_BUDGET_EXHAUSTED' });
+        trace.bytes += output.length; facts.push(output);
+        return { type: 'function_call_output', call_id: call.call_id, output };
+      }));
+      // Calls beyond this round's admission are answered as refused, so the model sees every call it made answered.
+      const refused = calls.calls.slice(admitted.length).map(call => ({ type: 'function_call_output', call_id: call.call_id, output: JSON.stringify({ ok: false, code: 'TOOL_CALL_LIMIT' }) }));
+      items = [...items, ...calls.echo, ...calls.calls.map(call => ({ type: 'function_call', call_id: call.call_id, name: call.name, arguments: call.arguments })), ...results, ...refused];
+    }
+    const read = readCopilotResponseV2(response);
+    usage = addUsage(usage, read.usage);
+    const grounded = groundAnswer(read.intent, facts);
+    report('OK', { intentKind: grounded.intent.kind, topic: grounded.intent.kind === 'QUESTION' ? grounded.intent.topic : null, ...usage, responseModel: read.responseModel,
+      ...extra(grounded.grounding === 'NONE' ? null : grounded.grounding) });
+    // The engine grounds the explanation again against its own facts; it receives the numbers FloFi's tools returned (never the tool outputs).
+    const explained = (grounded.intent.kind === 'QUESTION' || grounded.intent.kind === 'GOAL') && Boolean(grounded.intent.answer);
+    const numbers = explained ? [...factNumbers(facts.slice(toolFactsFrom))].slice(0, 256) : [];
+    return { ok: true, intent: grounded.intent, ...context.key ? { contextKey: context.key } : {}, ...numbers.length ? { groundingNumbers: numbers } : {} };
   } catch (cause) {
     const code = cause instanceof CopilotServiceError && /^COPILOT_[A-Z_]{2,60}$/.test(cause.message) ? cause.message : 'COPILOT_UNAVAILABLE';
     const retry = code === 'COPILOT_UPSTREAM_RATE_LIMITED' ? retryAfterSeconds(response?.retryAfter) : null;
-    report(code);
+    report(code, { ...usage, ...extra(null) });
     return retry ? { ok: false, code, retryAfterSeconds: retry } : { ok: false, code };
   } finally { release(); }
+}
+/**
+ * BUILD-FLOFI-INTELLIGENCE-001: one content-free turn record (`intelligence/turn-metrics.ts`), under the same switch as the interpretation records
+ * (`FLOFI_COPILOT_TELEMETRY=off` silences both; replay records only with `log`).
+ */
+export function logCopilotTurn(env: Env, mode: 'live' | 'replay', record: TurnMetrics, log: (line: string) => void = line => console.info(line), provenance?: 'CLIENT' | 'SERVER'): void {
+  const setting = env.FLOFI_COPILOT_TELEMETRY?.trim();
+  if (setting === 'off' || (setting !== 'log' && mode !== 'live')) return;
+  log(JSON.stringify(provenance === 'CLIENT' ? { ...record, code: null, interpreted: null, provenance } : provenance ? { ...record, provenance } : record));
 }
 /** `FLOFI_COPILOT_TELEMETRY=off|log`; by default live requests are logged as one metadata line each and replay requests are not. */
 export function copilotTelemetrySink(env: Env, mode: 'live' | 'replay', log: (line: string) => void = line => console.info(line)): ((record: CopilotTelemetry) => void) | undefined {

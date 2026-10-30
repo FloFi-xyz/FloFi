@@ -5,7 +5,9 @@ import { createBaseSepoliaReviewContext, createReviewContext, lintWorkflow, type
 import { parseLocalCommand } from './commands';
 import { editorReducer, initialEditor, type EditorState } from './editor';
 import type { Workflow } from './initial-workflow';
-import { boundAmount, boundProjection, deliveredByRecord, stepNodeKey, validCompletions, workflowSequence, type CompletedStep } from './workflow-sequence';
+import { boundAmount, boundProjection, deliveredByRecord, fundingAllocations, stepNodeKey, validCompletions, workflowSequence, type CompletedStep } from './workflow-sequence';
+import { readConcentratedLiquidity, type SemanticWorkflow } from '@defi-workflow-engine/workflow-contracts';
+import { amountsFromOwnerRecord } from '../workflow-runs/received-amounts';
 
 const context = createReviewContext({ registryId: referenceRegistry.registryId, capabilityId: referenceRegistry.capabilities[0]!.id, actionId: referenceRegistry.actions[0]!.id,
   assets: baseAssetRegistry });
@@ -24,6 +26,57 @@ const lint = (workflow: Workflow) => lintWorkflow(workflow, context);
 const amountOf = (workflow: Workflow) => (workflow.nodes[0]!.userConstraints.find(c => c.kind === 'MAXIMUM_INPUT') as unknown as { quantity: { amount: string } }).quantity.amount;
 
 describe('BUILD-FLOFI-CHAT-E2E-FIX-002 workflow sequence', () => {
+  it('shares a producer delivery across consumers without spending the same funding twice', () => {
+    const workflow = author('swap 10 USDC to WETH on Base slippage 100 bps', 'swap 0.004 WETH to USDC on Base slippage 100 bps',
+      'swap 0.004 WETH to USDC on Base slippage 100 bps');
+    const sequence = workflowSequence(workflow, lint)!;
+    const completed: CompletedStep[] = [{ nodeId: 'node-002', node: '', received: '6000000000000000', runKey: 'producer' }];
+    expect(boundAmount(sequence.steps[1]!, completed)).toBe('4000000000000000');
+    completed.push({ nodeId: 'node-003', node: '', received: '1', runKey: 'consumer', allocations: fundingAllocations(sequence.steps[1]!, completed) });
+    expect(boundAmount(sequence.steps[2]!, completed)).toBe('2000000000000000');
+  });
+  it('executes swap then liquidity through the existing isolated runtimes and binds only the received token maximum', () => {
+    const workflow = author('swap 10 USDC to WETH on Base slippage 100 bps', 'add liquidity 5 USDC and 0.01 WETH on Base full range slippage 100 bps');
+    const sequence = workflowSequence(workflow, lint)!;
+    expect(sequence.steps.map(step => step.fundedBy)).toEqual([null, 0]);
+    const step = sequence.steps[1]!;
+    expect(step.funding).toMatchObject([{ fundedBy: 0, input: { address: BASE_WETH, amount: '10000000000000000' } }]);
+    const before = readConcentratedLiquidity(step.projection.nodes[0]! as SemanticWorkflow['nodes'][number]);
+    const projected = boundProjection(step, '4000000000000000', context)!;
+    const after = readConcentratedLiquidity(projected.nodes[0]! as SemanticWorkflow['nodes'][number]);
+    expect(after).toEqual({ ...before, amount0Max: '4000000000000000' });
+    expect(() => lint(projected)).not.toThrow();
+    expect(boundProjection(step, '0', context)).toBeNull();
+    expect(boundProjection(step, null, context)).toBeNull();
+  });
+
+  it('resolves both position deposits from their own reconciled producers', () => {
+    const workflow = author('swap 10 USDC to WETH on Base slippage 100 bps', 'swap 0.001 ETH to USDC on Base slippage 100 bps', 'add liquidity 5 USDC and 0.01 WETH on Base full range slippage 100 bps');
+    const step = workflowSequence(workflow, lint)!.steps[2]!;
+    expect(step.funding).toHaveLength(2);
+    const completed: CompletedStep[] = [{ nodeId: 'node-002', node: '', received: '4000000000000000', runKey: 'first' },
+      { nodeId: 'node-003', node: '', received: '3000000', runKey: 'second' }];
+    const projected = boundProjection(step, null, context, completed)!;
+    expect(readConcentratedLiquidity(projected.nodes[0]! as SemanticWorkflow['nodes'][number])).toMatchObject({ amount0Max: '4000000000000000', amount1Max: '3000000' });
+    expect(boundProjection(step, null, context, [{ ...completed[0]!, received: null }, completed[1]!])).toBeNull();
+  });
+
+  it('binds native SOL from a universal bridge into Orca wrapped-mint deposit semantics', () => {
+    const workflow = author('bridge 10 USDC from Base to Solana receive SOL via best slippage 100 bps',
+      'add liquidity 0.1 SOL and 5 USDC ticks -64 to 64 on Solana slippage 100 bps');
+    const sequence = workflowSequence(workflow, lint)!;
+    expect(sequence.steps.map(step => step.fundedBy)).toEqual([null, 0]);
+    expect(sequence.steps[1]!.funding).toMatchObject([{ input: { address: null, decimals: 9 }, fundedBy: 0 }]);
+    const projected = boundProjection(sequence.steps[1]!, '50000000', context)!;
+    expect(readConcentratedLiquidity(projected.nodes[0]! as SemanticWorkflow['nodes'][number])).toMatchObject({ amount0Max: '50000000', amount1Max: '5000000' });
+  });
+
+  it('withdrawn and borrowed assets can fund a later swap', () => {
+    for (const sentence of ['withdraw 5 USDC from Aave on Base', 'borrow 5 USDC from Aave on Base']) {
+      const workflow = author(sentence, 'swap 5 USDC to WETH on Base slippage 100 bps');
+      expect(workflowSequence(workflow, lint)?.steps.map(step => step.fundedBy)).toEqual([null, 0]);
+    }
+  });
   it('reproduces the production failure: Swap + Bridge is refused as one workflow by every runtime', () => {
     expect(() => lint(author('swap 10 USDC to WETH on Base slippage 100 bps', 'bridge 5 USDC from Base to Arbitrum'))).toThrow('ROUTER_ISOLATED_ONLY');
     expect(() => lint(author('swap 10 USDC to WETH on Base slippage 100 bps', 'bridge 0.001 WETH from Base to Arbitrum'))).toThrow('UNIVERSAL_ISOLATED_ONLY');
@@ -104,6 +157,23 @@ describe('BUILD-FLOFI-CHAT-E2E-FIX-002 workflow sequence', () => {
     const native = { verdict: 'RECONCILED', received: '9', review: { route: { outputToken: { chainId: 'eip155:42161', kind: 'NATIVE', address: null } } } };
     expect(deliveredByRecord('universal', native, { chainId: 'eip155:42161', address: null, decimals: 18 })).toBe('9');
     expect(deliveredByRecord('universal', native, arbWeth)).toBeNull();
+  });
+
+  it('extracts live service record delivery contracts for both web and durable workflow runs', () => {
+    const evm = { quote: { chainId: 8453, outputToken: BASE_WETH, inputToken: BASE_USDC }, outcome: { outputReceived: '420', inputSpent: '100' } };
+    expect(amountsFromOwnerRecord(evm)).toEqual({ received: [{ asset: `eip155:8453/erc20:${BASE_WETH}`, amount: '420' }], spent: [{ asset: `eip155:8453/erc20:${BASE_USDC}`, amount: '100' }] });
+    expect(amountsFromOwnerRecord({ ...evm, quote: { ...evm.quote, outputToken: '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee' } })).toMatchObject({
+      received: [{ asset: 'eip155:8453/native:ETH', amount: '420' }] });
+    const sol = { chainId: 'solana:mainnet', address: 'MixedCaseTokenMint', decimals: 6 };
+    const record = { verdict: 'RECONCILED', review: { chain: sol.chainId, input: { mint: 'MixedCaseInputMint' }, output: { mint: sol.address, decimals: 6 } },
+      observations: [{ verdict: 'RECONCILED', outputReceived: '350', inputSpent: '100' }] };
+    expect(deliveredByRecord('solana-swap', record, sol)).toBe('350');
+    expect(deliveredByRecord('solana-swap', record, { ...sol, address: sol.address.toLowerCase() })).toBeNull();
+    expect(amountsFromOwnerRecord(record)).toMatchObject({ received: [{ asset: `${sol.chainId}/token:${sol.address}`, amount: '350' }] });
+    const aave = { verdict: 'RECONCILED', review: { chain: 'eip155:8453', asset: BASE_USDC, withdraw: {} }, observations: [{ verdict: 'RECONCILED', walletDelta: '5000000' }] };
+    expect(deliveredByRecord('supply', aave, { chainId: 'eip155:8453', address: BASE_USDC, decimals: 6 })).toBe('5000000');
+    expect(amountsFromOwnerRecord(aave)).toMatchObject({ received: [{ asset: `eip155:8453/erc20:${BASE_USDC}`, amount: '5000000' }] });
+    expect(deliveredByRecord('supply', { ...aave, verdict: 'PENDING' }, { chainId: 'eip155:8453', address: BASE_USDC, decimals: 6 })).toBeNull();
   });
 });
 

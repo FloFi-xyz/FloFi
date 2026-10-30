@@ -16,7 +16,8 @@ export const updateId = () => ++nextUpdate;
 export function telegramEnv(overrides: Record<string, string | undefined> = {}) {
   const token = `${BOT_ID}:${randomBytes(30).toString('base64url').slice(0, 35)}`, webhookSecret = randomBytes(32).toString('base64url');
   const channelSecret = randomBytes(32).toString('hex');
-  const env: Record<string, string | undefined> = { FLOFI_TELEGRAM: 'enabled', TELEGRAM_BOT_TOKEN: token, TELEGRAM_WEBHOOK_SECRET: webhookSecret,
+  const env: Record<string, string | undefined> = { FLOFI_NETWORK_SCOPE: 'ENGINEERING_TESTNETS', FLOFI_TELEGRAM_ACCESS_MODE: 'allowlist',
+    FLOFI_TELEGRAM: 'enabled', TELEGRAM_BOT_TOKEN: token, TELEGRAM_WEBHOOK_SECRET: webhookSecret,
     FLOFI_TELEGRAM_ALLOWED_USERS: telegramUserDigest(String(TELEGRAM_USER)), FLOFI_CHANNEL_SECRET: channelSecret, FLOFI_PUBLIC_ORIGIN: 'http://127.0.0.1:3100',
     FLOFI_CHANNEL_SUPPORT_CONTACT: 'support@flofi.test', FLOFI_CHANNEL_PRIVACY_URL: 'https://flofi.test/privacy', FLOFI_CHANNEL_COPILOT: 'disabled', ...overrides };
   return { env, token, webhookSecret, channelSecret };

@@ -19,7 +19,8 @@ import { WORKFLOW_RUN_ADVANCE_KIND, canEndWorkflow, type RunMode, type RunState,
 export type WalletSet = Readonly<Partial<Record<WalletRef['namespace'], string>>>;
 /** How a bound step's amount was resolved (native units of `asset`). */
 export type BoundResolution = { readonly amountFrom: number; readonly asset: { readonly chainId: string; readonly address: string; readonly decimals: number };
-  readonly cap: string; readonly received: string; readonly used: string };
+  readonly cap: string; readonly received: string; readonly used: string;
+  /** Position inputs can be funded by two distinct reconciled producer assets. */ readonly additional?: readonly BoundResolution[] };
 /** Public reconciled facts of one step (never calldata, keys or signatures). */
 export type StepOutcome = {
   readonly kind: 'OWNER_RUN' | 'DELEGATED_STEP'; readonly executionId: string; readonly flow: string | null; readonly status: string;

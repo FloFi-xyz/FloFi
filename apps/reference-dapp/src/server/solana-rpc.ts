@@ -21,7 +21,10 @@ export function createSolanaRpc(endpoint: string, loopback: boolean): SolanaRpc 
         headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) });
       const text = await response.text(); if (text.length > 2_097_152) throw new Error('SOLANA_RPC_RESPONSE_TOO_LARGE');
       if (response.status === 429 && method !== 'sendTransaction') { if (attempt < 2) continue; throw new Error('SOLANA_RPC_RATE_LIMITED'); }
-      const value: unknown = JSON.parse(text);
+      // Node 24 supplies each primitive's original JSON lexeme. Preserve large integer balances before JSON.parse's Number result
+      // can lose precision; downstream uint64 decoders accept these exact decimal strings and still reject unsafe Number values.
+      const value: unknown = JSON.parse(text, (_key: string, parsed: unknown, context?: { source?: string }) =>
+        typeof parsed === 'number' && !Number.isSafeInteger(parsed) && context?.source && /^-?[0-9]+$/.test(context.source) ? context.source : parsed);
       if (value && typeof value === 'object' && 'error' in value && value.error) {
         const rpcError = value.error as { code?: unknown; message?: unknown };
         throw new Error(method === 'sendTransaction' ? 'SOLANA_SEND_REJECTED' : 'SOLANA_RPC_ERROR', { cause: { code: rpcError.code, message: String(rpcError.message ?? '').slice(0, 300) } });

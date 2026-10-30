@@ -5,6 +5,7 @@
  *
  *   discovery      get_supported_networks, get_supported_assets, get_capabilities   (registries + deployment enablement)
  *   authoring      compose_strategy, validate_strategy, review_strategy               (pure deterministic facade, no state)
+ *   planning       plan_strategy (BUILD-FLOFI-INTELLIGENCE-001: FloFi's goal planner, the same as its own chat, composed by the engine)
  *   preview        simulate_strategy                                                  (the flow's own simulation, nothing persisted)
  *   observation    get_execution_status, get_evidence                                 (owner-scoped durable reads)
  *
@@ -36,6 +37,11 @@ import { approvalForRequester, approvalProgress, capabilityFacts, composeWorkflo
   openApprovalSession, PlatformRefusal, refuse, requestApproval, reviewWorkflow, simulatePreview, stepViews, validateStrategy, type ApprovalDeps,
   type ApprovalRequester } from '../platform/index.ts';
 import { principalScopes, type McpOAuthPrincipal, type McpPrincipal } from './config.ts';
+import { GOAL_PREFERENCES, GOAL_USES, planGoal, type Goal } from '../domain/intelligence/goal-planner';
+import { goalStrategy } from '../domain/intelligence/goal-strategy';
+import { networkIdentity } from '../domain/network-registry';
+import type { CopilotLiquidityAction } from '../domain/copilot-intent';
+import { simulateWorkflowPreview } from '../platform/preview.ts';
 import { LEGACY_PANEL_URI, PANEL_MIME, PANEL_URI, panelHtml, panelResourceMeta } from './app/panel.ts';
 import { MCP_HANDOFF_RULES, mcpApprovalLinkScheme } from './approval-profile.ts';
 import { readHandoffPolicy, workflowPlan, type HandoffPolicy } from './execution.ts';
@@ -53,7 +59,7 @@ export { walletDeepLinks } from '../platform/index.ts';
 
 export const MCP_SERVER_VERSION = '0.1.0';
 export const MCP_TOOL_NAMES = Object.freeze(['get_supported_networks', 'get_supported_assets', 'get_capabilities', 'compose_strategy', 'validate_strategy',
-  'simulate_strategy', 'review_strategy', 'get_execution_status', 'get_evidence'] as const);
+  'simulate_strategy', 'review_strategy', 'get_execution_status', 'get_evidence', 'plan_strategy'] as const);
 export const MCP_INSTRUCTIONS = `FloFi's official production website is ${FLOFI_PRODUCTION_ORIGIN}; its MCP endpoint is ${FLOFI_PRODUCTION_ORIGIN}/api/mcp. ` +
   'FloFi is not Flo Finance or any alternate brand. Never recommend an alternate domain as the official FloFi website. ' +
   'Use only FloFi navigation URLs supplied by genuine successful MCP tool results, on this server\'s trusted origin. ' +
@@ -115,6 +121,25 @@ function schemasFor(scope: NetworkScope) {
   status: Type.Object({ executionId: ExecutionId, journalAfter: Type.Optional(Type.Integer({ minimum: -1, maximum: 2_147_483_647 })),
     journalLimit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })) }, strict),
   evidence: Type.Object({ executionId: ExecutionId }, strict),
+  // BUILD-FLOFI-INTELLIGENCE-001: an outcome in the user's own terms; FloFi plans the steps from its registries. Assets are symbols or whole names.
+  plan: Type.Object({ goal: Type.Object({
+    sourceNetwork: Type.Optional(NetworkFilter), sourceAsset: Type.Optional(Type.String({ minLength: 1, maxLength: 80, pattern: '^[A-Za-z0-9][A-Za-z0-9 .&\'-]*$',
+      description: 'Asset the user holds or wants to spend, exactly as they named it.' })),
+    amount: Type.Optional(Type.String({ pattern: '^(0|[1-9][0-9]{0,30})(\\.[0-9]{1,18})?$', description: 'Amount the user stated, as a decimal string.' })),
+    targetNetwork: Type.Optional(NetworkFilter), targetAsset: Type.Optional(Type.String({ minLength: 1, maxLength: 80, pattern: '^[A-Za-z0-9][A-Za-z0-9 .&\'-]*$',
+      description: 'Asset the user wants to end up with, only if they named it.' })),
+    use: Type.Union(GOAL_USES.map(use => Type.Literal(use)), { description: 'HOLD the asset there, SUPPLY it on Aave V3, or LIQUIDITY.' }),
+    preference: Type.Optional(Type.Union(GOAL_PREFERENCES.map(item => Type.Literal(item)), { description: 'Only if the user asked for it.' })),
+    cap: Type.Optional(Type.String({ pattern: '^(0|[1-9][0-9]{0,30})(\\.[0-9]{1,18})?$', description: 'The most a later funded step of another asset may spend, as the user stated.' })),
+    beneficiary: Type.Optional(Type.String({ pattern: '^0x[0-9a-fA-F]{40}$', description: 'Supply only: the account Aave credits, exactly as the user gave it. Never invent one.' })),
+    liquidity: Type.Optional(Type.Object({
+      maxAmounts: Type.Record(Type.String({ minLength: 1, maxLength: 160 }), Type.String({ pattern: '^(0|[1-9][0-9]{0,30})(\\.[0-9]{1,18})?$' }), { minProperties: 2, maxProperties: 2 }),
+      range: Type.Union([Type.Object({ unit: Type.Union([Type.Literal('price'), Type.Literal('tick')]), lower: Type.String({ maxLength: 48 }), upper: Type.String({ maxLength: 48 }) }, strict),
+        Type.Object({ unit: Type.Literal('full') }, strict)]),
+      feeTier: Type.Optional(Type.Union([Type.Literal(100), Type.Literal(500), Type.Literal(3000), Type.Literal(10000)])),
+      slippageBps: Type.Optional(Type.Integer({ minimum: 1, maximum: 10_000 })),
+    }, { ...strict, description: 'For a liquidity goal: the pool assets, maximum deposits and range the user chose. FloFi plans any necessary conversion first.' })),
+  }, strict) }, strict),
   };
 }
 const SCHEMAS = { PUBLIC_MAINNET: schemasFor('PUBLIC_MAINNET'), ENGINEERING: schemasFor('ENGINEERING') } as const;
@@ -132,7 +157,7 @@ export const APPROVAL_TOOL_NAMES = Object.freeze(['request_user_approval', 'get_
 export const APP_ONLY_TOOLS: readonly ToolName[] = Object.freeze(['open_approval_session', 'get_execution_progress']);
 export type ToolName = (typeof MCP_TOOL_NAMES)[number] | (typeof APPROVAL_TOOL_NAMES)[number];
 export const TOOL_SCOPES: Readonly<Record<ToolName, McpScope>> = Object.freeze({
-  get_supported_networks: 'flofi.strategy', get_supported_assets: 'flofi.strategy', get_capabilities: 'flofi.strategy', compose_strategy: 'flofi.strategy',
+  get_supported_networks: 'flofi.strategy', get_supported_assets: 'flofi.strategy', get_capabilities: 'flofi.strategy', compose_strategy: 'flofi.strategy', plan_strategy: 'flofi.strategy',
   validate_strategy: 'flofi.strategy', simulate_strategy: 'flofi.strategy', review_strategy: 'flofi.strategy', get_execution_status: 'flofi.runs', get_evidence: 'flofi.runs',
   request_user_approval: 'flofi.approval', get_approval_status: 'flofi.approval', open_approval_session: 'flofi.approval', get_execution_progress: 'flofi.approval' });
 
@@ -208,7 +233,9 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
         if (!principalScopes(ctx.principal).includes(scope)) failWith('MCP_INSUFFICIENT_SCOPE');
         // BUILD-RH-002: a strategy naming Robinhood Chain composes against the validated official catalog (where this deployment enables it);
         // BUILD-BASE-001: so does one naming Base (its validated token list).
-        if (args && typeof args === 'object' && 'strategy' in args) await prepareNetworkCatalogs((args as { strategy: unknown }).strategy, {
+        const named = args && typeof args === 'object' ? 'strategy' in args ? (args as { strategy: unknown }).strategy : 'goal' in args
+          ? { sourceNetwork: (args as { goal: { sourceNetwork?: string } }).goal.sourceNetwork, destinationNetwork: (args as { goal: { targetNetwork?: string } }).goal.targetNetwork } : undefined : undefined;
+        if (named !== undefined) await prepareNetworkCatalogs(named, {
           solana: () => solanaAuthoringCatalog(), ethereum: async () => ethereumAuthoringCatalog(await ctx.runtime.mode('ethereum-swap')),
           robinhood: async () => robinhoodAuthoringCatalog(await ctx.runtime.mode('robinhood-swap')), base: async () => baseAuthoringCatalog(await ctx.runtime.mode('base-swap')),
           'arbitrum-one': async () => arbitrumAuthoringCatalog(await ctx.runtime.mode('arbitrum-swap')) });
@@ -301,8 +328,37 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
       workflowSteps: w.steps.map((c, index) => ({ index, action: c.strategy.action, strategy: c.strategy, workflowHash: c.workflowHash, revision: c.workflow.revision,
         fundsClass: c.fundsClass, workflow: c.workflow, steps: stepViews(c), summary: c.summary, explanation: c.explanation, flow: plan.steps[index]?.flow ?? null })),
       notes: w.notes, authority: AUTHORITY, visual,
-      nextSteps: ['review_strategy for every step\'s findings', 'simulate_strategy one step at a time (pass that step as a version 1 strategy)',
+      nextSteps: ['review_strategy for every step\'s findings', 'simulate_strategy with this complete strategy and workflowHash for every step\'s preview',
         'request_user_approval to hand the whole workflow to its owner: it reports how many authorizations each mode needs. Each step runs only after the previous one reconciled.'] };
+  });
+
+  register('plan_strategy', 'Plan strategy from a goal', 'FloFi\'s goal planner (the same one its own chat uses): from an outcome the user described — the asset and ' +
+    'network they hold, the asset or network they want, and whether to hold, supply or provide liquidity — the ordered steps FloFi\'s registries can reach it ' +
+    'with, why, and alternatives, composed into one strategy and workflowHash (a later step that spends an earlier step\'s output carries a binding). ' +
+    'Or the one field still missing, or why it is not reachable. Use only values the user gave. It authorizes nothing: compose/review/request approval as usual.',
+  Schemas.plan, pure, args => {
+    const g = args.goal;
+    const position = g.liquidity;
+    const liquidity: CopilotLiquidityAction | null = position ? { type: 'LIQUIDITY',
+      protocol: g.targetNetwork === 'solana' || g.targetNetwork === 'solana-devnet' ? 'ORCA' : 'UNISWAP_V3', network: networkIdentity(g.targetNetwork ?? '')?.copilot ?? null,
+      deposits: Object.entries(position.maxAmounts).map(([asset, maxAmount]) => ({ asset, maxAmount })),
+      rangeUnit: position.range.unit === 'full' ? 'FULL' : position.range.unit === 'tick' ? 'TICK' : 'PRICE',
+      lower: 'lower' in position.range ? position.range.lower : null, upper: 'upper' in position.range ? position.range.upper : null,
+      slippageBps: position.slippageBps === undefined ? null : String(position.slippageBps),
+      feeTier: position.feeTier === undefined ? null : String(position.feeTier / 10_000) as NonNullable<CopilotLiquidityAction['feeTier']>, funding: 'SWAP_OUTPUT' } : null;
+    const goal: Goal = { source: { network: g.sourceNetwork ?? null, asset: g.sourceAsset ?? null, amount: g.amount ?? null },
+      target: { network: g.targetNetwork ?? null, asset: g.targetAsset ?? null, use: g.use }, preference: g.preference ?? null, cap: g.cap ?? null, liquidity };
+    const plan = planGoal(goal, scope);
+    if (plan.kind === 'LIQUIDITY') return { ok: true, kind: 'LIQUIDITY', network: plan.network, authority: AUTHORITY,
+      nextSteps: ['compose_strategy with an add_liquidity strategy on this network, naming both pool assets, their maximum deposits and the range the user states.'] };
+    if (plan.kind !== 'PLAN') return { ok: true, ...plan, authority: AUTHORITY };
+    const strategy = goalStrategy(plan.steps, g.beneficiary ?? null);
+    if (!strategy.ok) return { ok: true, kind: 'NEEDS', field: 'beneficiary', options: [], authority: AUTHORITY };
+    const w = composeWorkflowOrRefuse(strategy.strategy, undefined, scope);
+    return { ok: true, kind: 'PLAN', strategy: w.strategy, workflowHash: w.workflowHash, stepCount: w.steps.length, fundsClass: w.fundsClass, reasons: plan.reasons,
+      alternatives: plan.alternatives, bindings: w.bindings.map(b => ({ step: b.step, amountFrom: b.amountFrom })),
+      steps: w.steps.map((c, index) => ({ index, action: c.strategy.action, strategy: c.strategy, workflowHash: c.workflowHash, summary: c.summary })), notes: w.notes, authority: AUTHORITY,
+      nextSteps: ['review_strategy with this strategy and workflowHash', 'request_user_approval to hand it to its owner in FloFi (when available); nothing executes from MCP.'] };
   });
 
   register('validate_strategy', 'Validate strategy', 'Check a strategy against FloFi\'s authoring rules (networks, assets, amounts, limits) and, when given, the workflowHash ' +
@@ -335,6 +391,16 @@ export function createFlofiMcpServer(ctx: ToolContext): McpServer {
   Schemas.simulate, { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true }, async args => {
     // BUILD-MCP-002: an OAuth account also has an hourly simulation budget (they reach public chains and providers).
     const account = ctx.principal.kind === 'mcp-oauth' ? ctx.principal.accountId : null, state = ctx.state;
+    const workflow = composeWorkflowOrRefuse(args.strategy, args.workflowHash, scope);
+    if (workflow.steps.length > 1) {
+      const preview = await simulateWorkflowPreview(ctx.runtime, args, { scope, ...account && state
+        ? { budget: () => state.oauth.allow(`simulate:account:${account}`, SIMULATIONS_PER_ACCOUNT_HOUR, 3_600, new Date()) } : {} });
+      return { ok: true, kind: 'WORKFLOW_PREVIEW', ...preview, preview: true,
+        subjectRole: 'SIMULATION_SUBJECT_ONLY_NOT_AN_OWNER_OR_AUTHORIZATION', authority: AUTHORITY,
+        notes: ['Each step uses its own provider simulation against the current chain state.',
+          'Dependent balances arrive only after earlier steps reconcile; an awaiting step is explicitly incomplete.',
+          'FloFi re-simulates each actual received amount and presents its Strategy Manifest before the wallet signs.'] };
+    }
     const { composition: c, plan, view, simulationSubject } = await simulatePreview(ctx.runtime, args, { scope, ...account && state
       ? { budget: () => state.oauth.allow(`simulate:account:${account}`, SIMULATIONS_PER_ACCOUNT_HOUR, 3_600, new Date()) } : {} });
     return { ok: true, workflowHash: c.workflowHash, flow: plan.flow, kind: view.kind, provenance: view.provenance, observedAt: view.observedAt, expiresAt: view.expiresAt,

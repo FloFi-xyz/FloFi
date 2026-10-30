@@ -7,8 +7,8 @@
  */
 export const PENDING_AGENT_CAPABILITIES = ['orca-liquidity-mainnet', 'testnet-native-transfer'] as const;
 export type PendingAgentCapability = (typeof PENDING_AGENT_CAPABILITIES)[number];
-/** Owner-approved agent rollouts. Empty: nothing in `PENDING_AGENT_CAPABILITIES` is released. */
-export const AGENT_ROLLOUT_APPROVED: readonly PendingAgentCapability[] = Object.freeze([]);
+/** The owner explicitly authorized the existing mainnet Orca journey on every public conversational surface in PR #139. */
+export const AGENT_ROLLOUT_APPROVED: readonly PendingAgentCapability[] = Object.freeze(['orca-liquidity-mainnet']);
 
 /** The pending capability an action needs on a network (stable MCP network id), or null when this gate does not apply. */
 export function pendingAgentCapability(action: string, network: string): PendingAgentCapability | null {

@@ -55,7 +55,8 @@ export function copilotSupportsSection(scope: NetworkScope = networkScope()): st
   const lending = new Map<string, NetworkIdentity[]>();
   for (const offer of lendingOffers().filter(offer => inScope(scope)(offer.network))) lending.set(offer.asset, [...lending.get(offer.asset) ?? [], offer.network]);
   const pools = plain('add_liquidity').map(network => {
-    const pool = network.chain.startsWith('solana:') ? { name: 'Orca', ...COPILOT_POOLS.ORCA } : { name: 'Uniswap v3', ...COPILOT_POOLS.UNISWAP_V3 };
+    const pool = network.chain.startsWith('solana:') ? { name: 'Orca', ...COPILOT_POOLS.ORCA,
+      ...network.environment === 'MAINNET' ? { quote: 'USDC' } : {} } : { name: 'Uniswap v3', ...COPILOT_POOLS.UNISWAP_V3 };
     return `${pool.name} ${join(tokensOf(network, 'add_liquidity'), '/')} on ${network.name} (price range in ${pool.quote} per ${pool.base}, or ticks)`;
   });
   const catalogPools = `Uniswap v3 with any two catalog tokens on ${names(catalogLine('add_liquidity'))} (fee tier ${join(COPILOT_FEE_TIERS.map(String), 'or')} percent; full range or ticks)`;
@@ -74,6 +75,7 @@ export function copilotSupportsSection(scope: NetworkScope = networkScope()): st
     `- SUPPLY, BORROW, REPAY, WITHDRAW on Aave V3: ${[...lending].map(([asset, networks]) => `${asset} on ${names(networks)}`).join('; ')}; nothing else. ${lendingAmountScopeText('EN')}`,
     `- LIQUIDITY: ${[...pools, catalogPools].join('; ')}.`,
     '- AUTOMATION: SCHEDULED_DCA, PRICE_TRIGGER (USD below/above), DAILY_WATCH using the existing owner-confirmed Automation domain.',
-    composition.length ? `- COMPOSITION: only ${join(composition, 'or')}.` : '- COMPOSITION: none.',
+    '- COMPOSITION: ordered sequences of the registered actions, including swaps, bridges, lending, transfers and liquidity. Each step uses its own verified runtime and fresh review; an earlier delivered token can fund a later step.',
+    ...composition.length ? [`- Atomic engineering composition: ${join(composition, 'or')}.`] : [],
   ].join('\n');
 }

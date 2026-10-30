@@ -29,6 +29,53 @@ const progressOf = async (h: RunHarness, approvalId: string) => approvalProgress
 const continued = (h: RunHarness, approvalId: string) => workflowRunContinue(h.surface, approvalId, [h.evm, h.sol]);
 
 describe('BUILD-CHAT-E2E-001 confirm-each-step workflow run (PostgreSQL)', () => {
+  it('conserves one producer delivery across multiple bound consumers after restart', async () => {
+    const t = await createTestDatabase();
+    try {
+      const h = await workflowRunHarness(t.db, { flows: ['base-sepolia-swap'], delegation: false });
+      const consumer = { ...BASE_SWAP, inputAsset: 'WETH', outputAsset: 'USDC', amount: '0.004' };
+      const strategy = { version: 2, steps: [BASE_SWAP, consumer, consumer], bindings: [{ step: 1, amountFrom: 0 }, { step: 2, amountFrom: 0 }] };
+      const { approval, claimed } = await started(h, strategy);
+      const run = await runOf(h, approval.approvalId);
+      h.flows.ownerExecutes('base-sepolia-swap', h.evm.address, claimed.workflow, 'RECONCILED',
+        { received: [{ asset: 'eip155:84532/erc20:0x4200000000000000000000000000000000000006', amount: '6000000000000000' }] });
+      await h.drain(run.runId);
+      const second = await continued(h, approval.approvalId);
+      h.flows.ownerExecutes('base-sepolia-swap', h.evm.address, second.workflow, 'RECONCILED',
+        { spent: [{ asset: 'eip155:84532/erc20:0x4200000000000000000000000000000000000006', amount: '4000000000000000' }] });
+      await h.drain(run.runId);
+      await continued(h, approval.approvalId);
+      expect((await h.store.steps(run.runId))[2]).toMatchObject({ strategy: { amount: '0.002' }, bound: { used: '2000000000000000' } });
+    } finally { await t.drop(); }
+  });
+  it('runs a mainnet swap then a token-funded liquidity position with a fresh canonical Review after reconciliation', async () => {
+    const t = await createTestDatabase();
+    try {
+      const h = await workflowRunHarness(t.db, { flows: ['base-swap', 'base-liquidity'], delegation: false,
+        policyEnv: { FLOFI_MCP_HANDOFF_MAINNET_NETWORKS: 'base' } });
+      const strategy = { version: 2, steps: [{ ...BASE_SWAP, network: 'base' },
+        { action: 'add_liquidity', network: 'base', maxAmounts: { USDC: '5', WETH: '0.01' }, range: { unit: 'full' }, slippageBps: 100 }],
+        bindings: [{ step: 1, amountFrom: 0 }] };
+      const { approval, claimed } = await started(h, strategy);
+      const run = await runOf(h, approval.approvalId);
+      expect((await continued(h, approval.approvalId)).view.workflowRun!.step!.index).toBe(0);
+      // This is durable mocked observation evidence, never a public transaction.
+      h.flows.ownerExecutes('base-swap', h.evm.address, claimed.workflow, 'RECONCILED',
+        { received: [{ asset: 'eip155:8453/erc20:0x4200000000000000000000000000000000000006', amount: '4000000000000000' }] });
+      await h.drain(run.runId);
+      const second = await continued(h, approval.approvalId);
+      const step = (await h.store.steps(run.runId))[1]!;
+      expect(step).toMatchObject({ state: 'AWAITING_OWNER', flow: 'base-liquidity', strategy: { action: 'add_liquidity', maxAmounts: { USDC: '5', WETH: '0.004' } },
+        bound: { cap: '10000000000000000', received: '4000000000000000', used: '4000000000000000' } });
+      expect(semanticWorkflowHash(second.workflow!)).toBe(step.workflowHash);
+      expect(step.workflowHash).not.toBe(approval.composed.steps[1]!.workflowHash);
+      await applyApproval(h.surface, approval.secret, [h.evm, h.sol], second.workflow, h.d.now()).catch(() => undefined);
+      h.flows.ownerExecutes('base-liquidity', h.evm.address, second.workflow, 'RECONCILED');
+      await h.drain(run.runId);
+      expect(await runOf(h, approval.approvalId)).toMatchObject({ state: 'COMPLETED' });
+    } finally { await t.drop(); }
+  });
+
   it('runs an EVM → Solana workflow one owner-signed step at a time, each only after the previous one reconciled', async () => {
     const t = await createTestDatabase();
     try {

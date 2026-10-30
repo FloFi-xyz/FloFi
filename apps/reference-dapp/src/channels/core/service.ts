@@ -20,7 +20,8 @@
 import { looksSecret } from '../../domain/copilot-conversation';
 import { stepSummary } from '../../domain/copilot-answers';
 import type { Command } from '../../domain/commands';
-import { PlatformRefusal, previewPlan, simulatePreview } from '../../platform/index.ts';
+import { PlatformRefusal, previewPlan, simulatePreview, simulateWorkflowPreview } from '../../platform/index.ts';
+import { UNIVERSAL_QUOTE_SUBJECTS } from '@defi-workflow-engine/workflow-contracts';
 import { channelRequester, createChannelApproval, revokeChannelApproval, channelApprovalProgress, type ChannelPlatform } from './approval.ts';
 import type { ChannelCoreConfig, ChannelLanguage } from './config.ts';
 import { decideTurn, parseState, type ChannelInterpreter, type ChannelState, type TurnContent, type TurnDecision, type TurnInterpreter } from './conversation.ts';
@@ -35,9 +36,11 @@ import { parseStateLanguage } from './state-language.ts';
 import { continuationUrl, OPEN_RUN, statusReplies } from './status.ts';
 import { RETENTION, type ChannelStore, type ConversationRecord, type NewOutbox, type PendingEvent } from './store.ts';
 import { SUBSCRIBE_LIMIT, type ChannelSubscriptions } from './subscriber.ts';
-import { canonicalStrategy, canonicalWorkflow } from './strategy.ts';
+import { canonicalStrategy, canonicalWorkflow, type ChannelWorkflow } from './strategy.ts';
+import { logChannelTurn } from './interpreter.ts';
 import { isStrategyWorkflow } from '../../engine/strategy-spec';
 import type { ChannelAdapter, ChannelAddress, ChannelReply, ChannelVisualRenderer, DeliveryUpdate, InboundMessage } from './types.ts';
+import type { TurnMetrics } from '../../domain/intelligence/turn-metrics';
 
 export type ChannelContext = { readonly core: ChannelCoreConfig; readonly store: ChannelStore; readonly platform: ChannelPlatform; readonly adapter: ChannelAdapter;
   readonly interpreter: ChannelInterpreter | null; readonly log: ChannelLogger; readonly now: () => Date; readonly previewTimeoutMs?: number;
@@ -50,7 +53,8 @@ export type ChannelContext = { readonly core: ChannelCoreConfig; readonly store:
   /** BUILD-BASE-001: registers the validated catalogs of the catalog networks a message names (the deployment's own gates); none = pinned assets only. */
   readonly catalogs?: ((text: string, intent?: unknown) => Promise<void>) | null;
   /** BUILD-CHAT-LEARNING-001: learning for this provider's senders (`learning.ts`, implemented by the wiring); none = learning off (turns as before). */
-  readonly learning?: ChannelLearning | null };
+  readonly learning?: ChannelLearning | null;
+  /** Awaited content-free server metrics, attached by the authenticated entry point. */ readonly metrics?: (record: TurnMetrics) => Promise<void> };
 export const LEASE_SECONDS = 300;
 export const LIMITS = Object.freeze({ inbound: [20, 600] as const, model: [30, 3_600] as const, modelDaily: [100, 86_400] as const, preview: [10, 3_600] as const });
 const MAX_EVENT_ATTEMPTS = 3;
@@ -193,6 +197,11 @@ export function createChannelService(ctx: ChannelContext) {
     let decision = await decideTurn({ content: payload.content, state, optedOut: !active, interpret, support: core.supportContact, privacy: core.privacyUrl,
       catalogs: ctx.catalogs ?? null, ...session && session.learning.memory !== 'UNAVAILABLE' ? { learning: session.learning } : {} });
     if (session) decision = await learn(decision, principal!, session, conversationId);
+    // BUILD-FLOFI-INTELLIGENCE-001: the turn's content-free record, under the Copilot's own telemetry switch.
+    if (decision.metrics) {
+      if (ctx.metrics) await ctx.metrics(decision.metrics);
+      else logChannelTurn(process.env, decision.metrics);
+    }
     state = decision.state;
     const lm = channelCopy(state.language);
     switch (decision.action) {
@@ -334,9 +343,7 @@ export function createChannelService(ctx: ChannelContext) {
     const approval = await createChannelApproval(ctx.platform, channelRequester(adapter, conversationId, strategy.intendedWallet), strategy, now);
     if (!approval.ok) return { outcome: `APPROVAL_REFUSED`, replies: [text([m.refused(approval.code), ...approval.blockers].join('\n'))],
       state: { ...state, pending: strategy.command, approvalId: null }, handoffId: null, approvalReply: null };
-    // A read-only preview is one step's; a workflow is simulated step by step in FloFi before each step runs.
-    const single = strategy.stepCount === 1 ? strategy as Extract<ReturnType<typeof canonicalStrategy>, { ok: true }> : null;
-    const preview = single && core.simulation ? await previewOf(conversationId, single, now) : { kind: 'DISABLED' } as const;
+    const preview = core.simulation ? await previewOf(conversationId, strategy, now) : { kind: 'DISABLED' } as const;
     const specs = isStrategyWorkflow(strategy.spec) ? strategy.spec.steps : [strategy.spec];
     const networks = [...new Set(specs.flatMap(spec => spec.action === 'bridge' ? [spec.sourceNetwork, spec.destinationNetwork] : [(spec as { network: string }).network]))];
     const plan = approval.authorizationPlan;
@@ -347,20 +354,33 @@ export function createChannelService(ctx: ChannelContext) {
       expiresMinutes: Math.round((approval.expiresAt.getTime() - now.getTime()) / 60_000) }),
     choices: [], link: { label: m.linkLabel, url: approval.approvalUrl }, visual: { model: strategy.visual, language: state.language } };
     return { outcome: 'APPROVAL_CREATED', replies: [reply], handoffId: approval.approvalId, approvalReply: { reply, handoffId: approval.approvalId },
-      state: { ...state, pending: strategy.command, ...kept.length ? { steps: strategy.commands.slice(0, -1) } : {}, approvalId: approval.approvalId,
+      state: { ...state, pending: command.type === 'ADD_SEQUENCE' ? command : strategy.command,
+        ...kept.length ? { steps: kept } : {}, approvalId: approval.approvalId,
         lastApprovalId: approval.approvalId } };
   }
 
   /** The shared platform's read-only preview, when its subject is known from the strategy itself; bounded in time and per conversation. */
-  async function previewOf(conversationId: string, strategy: Extract<ReturnType<typeof canonicalStrategy>, { ok: true }>, now: Date): Promise<PreviewNote> {
-    const plan = previewPlan(strategy.spec);
+  async function previewOf(conversationId: string, strategy: ChannelWorkflow, now: Date): Promise<PreviewNote> {
+    const first = isStrategyWorkflow(strategy.spec) ? strategy.spec.steps[0]! : strategy.spec;
+    const plan = previewPlan(first);
     if ('code' in plan) return { kind: 'SKIPPED' };
     const subject = plan.subject === 'NONE' ? 'none' : plan.subject === 'EVM' ? strategy.intendedWallet?.address : undefined;
-    if (!subject) return { kind: 'SKIPPED' };
+    if (!subject && strategy.stepCount === 1) return { kind: 'SKIPPED' };
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
+      if (strategy.stepCount > 1) {
+        const preview = await Promise.race([
+          simulateWorkflowPreview(ctx.platform.runtime, { strategy: strategy.spec, workflowHash: strategy.workflowHash,
+            simulationSubject: strategy.intendedWallet?.address ?? (plan.subject === 'SOLANA' ? UNIVERSAL_QUOTE_SUBJECTS.SOLANA : UNIVERSAL_QUOTE_SUBJECTS.EVM) },
+          { budget: () => store.allow(`channel:preview:${conversationId}`, LIMITS.preview[0], LIMITS.preview[1], now) }),
+          new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new PlatformRefusal('SIMULATION_TIMEOUT')), ctx.previewTimeoutMs ?? 60_000); }),
+        ]);
+        return { kind: 'WORKFLOW', total: preview.stepCount, simulated: preview.steps.filter(step => step.state === 'SIMULATED').length,
+          pending: preview.steps.filter(step => step.state === 'AWAITING_PRODUCER_SETTLEMENT').length,
+          codes: preview.steps.filter(step => step.code !== null).map(step => step.code!) };
+      }
       const result = await Promise.race([
-        simulatePreview(ctx.platform.runtime, { strategy: strategy.spec, workflowHash: strategy.workflowHash, simulationSubject: subject },
+        simulatePreview(ctx.platform.runtime, { strategy: strategy.spec, workflowHash: strategy.workflowHash, simulationSubject: subject! },
           { budget: () => store.allow(`channel:preview:${conversationId}`, LIMITS.preview[0], LIMITS.preview[1], now) }),
         new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new PlatformRefusal('SIMULATION_TIMEOUT')), ctx.previewTimeoutMs ?? 60_000); }),
       ]);

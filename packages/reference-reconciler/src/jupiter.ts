@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { ORCA_WHIRLPOOLS_DEVNET, assertRecordedSolanaWalletGuard, decompileMessageV0, fromBase64, parseMessageV0, parseOrcaTradedEvents, parseTransaction, requireSolanaSwapRuntime,
+import { solanaRpcU64, ORCA_WHIRLPOOLS_DEVNET, assertRecordedSolanaWalletGuard, decompileMessageV0, fromBase64, parseMessageV0, parseOrcaTradedEvents, parseTransaction, requireSolanaSwapRuntime,
   solanaSwapArtifactHash, solanaSwapHash, verifySolanaCluster, base58Encode, type OrcaTradedEvent, type SolanaSwapReview, type SolanaRpc, type SolanaWalletGuard } from '@defi-workflow-engine/reference-compiler';
 import { hashJournalBytes, type EvidenceBundle, type ExecutionJournal } from '@defi-workflow-engine/workflow-contracts';
 
@@ -19,8 +19,8 @@ export type SolanaSwapObservation = JupiterObservation;
 const TOKEN_PROGRAM = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
 const fail = (code: string): never => { throw new Error(code); };
 const record = (v: unknown): Record<string, unknown> => v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : fail('SOLANA_RPC_INVALID');
-const lamportList = (v: unknown, n: number): bigint[] => Array.isArray(v) && v.length === n && v.every(x => Number.isSafeInteger(x) && (x as number) >= 0)
-  ? (v as number[]).map(BigInt) : fail('SOLANA_RPC_INVALID');
+const lamportList = (v: unknown, n: number): bigint[] => Array.isArray(v) && v.length === n
+  ? v.map(value => solanaRpcU64(value)) : fail('SOLANA_RPC_INVALID');
 type TokenBalance = { index: number; mint: string; owner: string; amount: bigint; decimals: number };
 function tokenBalances(v: unknown): TokenBalance[] {
   if (!Array.isArray(v)) fail('SOLANA_RPC_INVALID');
@@ -76,7 +76,7 @@ export async function reconcileSolanaSwapAttempt(review: SolanaSwapReview, attem
     base.innerPrograms = Array.isArray(meta.innerInstructions) ? [...new Set((meta.innerInstructions as unknown[]).flatMap(group =>
       Array.isArray(record(group).instructions) ? (record(group).instructions as unknown[]).map(i => keys[record(i).programIdIndex as number] ?? fail('SOLANA_RPC_INVALID')) : []))] : [];
     if (!base.programs.includes(runtime.providerProgram)) fail(`${X}_PROGRAM_MISMATCH`);
-    const fee = typeof meta.fee === 'number' && Number.isSafeInteger(meta.fee) ? BigInt(meta.fee) : fail('SOLANA_RPC_INVALID');
+    const fee = solanaRpcU64(meta.fee);
     base.feeLamports = fee.toString();
     if (meta.err !== null) return { ...base, verdict: 'DIVERGENT', reason: `${X}_SWAP_FAILED` };
     if (fee > BigInt(review.estimatedFeeLamports)) fail(`${X}_FEE_MISMATCH`);

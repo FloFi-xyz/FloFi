@@ -28,7 +28,7 @@ export type SolanaTransferProfile = {
    */
   readonly computeUnitPriceMicroLamports: string; readonly maximumComputeUnits: number;
   readonly reviewTtlSeconds: number;
-  /** Largest native amount one transfer may move, in lamports (a typo guard, not a balance). */
+  /** Largest encoded native transfer amount: uint64 on mainnet; testnet policy stays profile-specific. */
   readonly maximumLamports: string;
   readonly assets: readonly SolanaTransferAsset[];
   explorerTx(signature: string): string;
@@ -41,7 +41,7 @@ export const SOLANA_MAINNET_TRANSFER: SolanaTransferProfile = Object.freeze({
   network: 'Solana', cluster: 'mainnet-beta', chain: JUPITER_SOLANA_MAINNET.chain, genesisHash: JUPITER_SOLANA_MAINNET.genesisHash, walletChain: 'solana:mainnet',
   environment: 'MAINNET', provenance: 'PUBLIC_MAINNET', executedEvidence: 'PUBLIC_EXECUTED', bundleEnvironment: 'MAINNET_EXECUTED', realFunds: true, idPrefix: 'soltx',
   programs: PROGRAMS, rpc: JUPITER_SOLANA_MAINNET.rpc, explorer: JUPITER_SOLANA_MAINNET.explorer, officialSource: 'https://www.solana-program.com/docs/token',
-  baseFeeLamports: '5000', computeUnitPriceMicroLamports: '200000', maximumComputeUnits: 200_000, reviewTtlSeconds: 60, maximumLamports: '10000000000000',
+  baseFeeLamports: '5000', computeUnitPriceMicroLamports: '200000', maximumComputeUnits: 200_000, reviewTtlSeconds: 60, maximumLamports: (2n ** 64n - 1n).toString(),
   assets: Object.freeze([native('SOL'),
     Object.freeze({ symbol: 'USDC', label: 'USDC', mint: SOLANA_MAINNET_TOKENS.USDC.mint, decimals: SOLANA_MAINNET_TOKENS.USDC.decimals, program: 'spl-token' as const }),
     Object.freeze({ symbol: 'USDT', label: 'USDT', mint: SOLANA_MAINNET_TOKENS.USDT.mint, decimals: SOLANA_MAINNET_TOKENS.USDT.decimals, program: 'spl-token' as const })]),

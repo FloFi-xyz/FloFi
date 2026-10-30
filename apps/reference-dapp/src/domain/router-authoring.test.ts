@@ -48,7 +48,8 @@ describe('BUILD-ROUTER-001 Guided Chat / Canvas authoring', () => {
   });
   it('rejects malformed commands and inputs outside the supported pair and bounds', () => {
     expect(commandIsValid({ type: 'ADD_ROUTER_BRIDGE', input: { ...canvasInput, extra: 'x' }, source: 'CANVAS', baseRevision: 0 })).toBe(false);
-    expect(commandIsValid({ type: 'ADD_ROUTER_BRIDGE', input: { ...canvasInput, amount: '1000' }, source: 'CANVAS', baseRevision: 0 })).toBe(false);
+    expect(commandIsValid({ type: 'ADD_ROUTER_BRIDGE', input: { ...canvasInput, amount: '0' }, source: 'CANVAS', baseRevision: 0 })).toBe(false);
+    expect(commandIsValid({ type: 'ADD_ROUTER_BRIDGE', input: { ...canvasInput, amount: '1000' }, source: 'CANVAS', baseRevision: 0 })).toBe(true);
     expect(() => createRouterNode('n', { ...canvasInput, destination: 'Optimism' as 'Arbitrum' })).toThrow('ROUTER_PAIR_UNSUPPORTED');
     expect(() => createRouterNode('n', { ...canvasInput, recipient: '0x123' })).toThrow('ROUTER_RECIPIENT_INVALID');
     expect(() => createRouterNode('n', { ...canvasInput, slippage: '301' })).toThrow('ROUTER_SLIPPAGE_OUT_OF_RANGE');
@@ -71,15 +72,16 @@ describe('BUILD-RH-002 Robinhood Chain bridge routes', () => {
     // Chat and Canvas produce the identical IR.
     expect(createRouterNode('n', routerInputOf(routerDetails(node)!))).toEqual(node);
   });
-  it('refuses a token that is not the pair\'s source asset, unsupported directions and the 100-per-bridge cap', () => {
+  it('refuses unsupported tokens and directions while mainnet amounts follow uint256 and provider liquidity', () => {
     // BUILD-BASE-001: 'Bridge 5 USDC from Arbitrum to Base' is a route now (see the Base route test).
     for (const text of ['Bridge 5 USDC from Robinhood to Base', 'Bridge 5 USDG from Base to Robinhood', 'Bridge 5 USDG from Arbitrum to Base',
       'Bridge 5 USDC from Robinhood to Robinhood', 'Bridge 5 USDG from Base Sepolia to Robinhood']) expect(parseRouterChat(text), text).toBeNull();
     const base: RouterBridgeInput = { source: 'Robinhood Chain', destination: 'Base', token: 'USDG', amount: '5', recipient: '', slippage: '50', routing: 'AUTO' };
     expect(() => createRouterNode('n', { ...base, token: 'USDC' })).toThrow('ROUTER_PAIR_UNSUPPORTED');
     expect(() => createRouterNode('n', { ...base, destination: 'Robinhood Chain' })).toThrow('ROUTER_PAIR_UNSUPPORTED');
-    expect(() => createRouterNode('n', { ...base, amount: '100.000001' })).toThrow();
-    expect(() => createRouterNode('n', { ...base, amount: '0.5' })).toThrow();
+    expect(readRouterBridgeNode(createRouterNode('n', { ...base, amount: '100.000001' })).amount).toBe('100000001');
+    expect(readRouterBridgeNode(createRouterNode('n', { ...base, amount: '0.5' })).amount).toBe('500000');
+    expect(() => createRouterNode('n', { ...base, amount: '0' })).toThrow('AMOUNT_OUT_OF_RANGE');
     expect(readRouterBridgeNode(createRouterNode('n', { ...base, amount: '100' })).amount).toBe('100000000');
   });
   it('Canvas choices: mainnet offers the Robinhood routes beside Base → Arbitrum One; the token follows the chosen pair', () => {

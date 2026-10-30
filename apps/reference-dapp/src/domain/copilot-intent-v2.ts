@@ -4,6 +4,7 @@ import { COPILOT_FEE_TIERS, COPILOT_LIMITS, COPILOT_LIQUIDITY_PROTOCOLS, COPILOT
   type CopilotRouting } from './copilot-intent';
 import { parseAutomationDraft, AUTOMATION_DRAFT_SCHEMA, type AutomationDraft } from './copilot-automation';
 import { COPILOT_LANGUAGES, type CopilotLanguage } from './copilot-messages';
+import { GOAL_PREFERENCES, GOAL_USES, type GoalPreference, type GoalUse } from './intelligence/goal-vocabulary';
 
 /**
  * BUILD-COPILOT-002: the versioned successor of CopilotIntentV1 for a bounded conversation. The model still only reports
@@ -23,7 +24,9 @@ export const COPILOT_V2_MISSING_FIELDS = [...COPILOT_MISSING_FIELDS, 'inputAsset
 /** Managing an existing FloFi-registered position: remove part of its liquidity, or all of it and close it. */
 export const COPILOT_POSITION_OPERATIONS = ['DECREASE', 'EXIT'] as const;
 export const COPILOT_V2_LIMITS = Object.freeze({ ...COPILOT_LIMITS, maxDeposits: 2, maxReuseFields: COPILOT_REUSE_FIELDS.length,
-  maxTranscriptMessages: 16, maxUserTurns: 8, maxSegmentUserTurns: 6, maxClarifications: 3, maxReferents: 4, maxRequestCharacters: 12_000 });
+  maxTranscriptMessages: 16, maxUserTurns: 8, maxSegmentUserTurns: 6, maxClarifications: 3, maxReferents: 4, maxRequestCharacters: 12_000,
+  /** BUILD-FLOFI-INTELLIGENCE-001: a model-written explanation (QUESTION/GOAL `answer`), shown only when grounded (`intelligence/grounding.ts`). */
+  maxAnswerLength: 900 });
 
 /** Prefixes of the transcript entries Flofi writes; a replayed answer is keyed by the user turns after the last non-question entry. */
 export const COPILOT_TRANSCRIPT = Object.freeze({ proposed: 'Flofi proposed: ', asked: 'Flofi asked: ', declined: 'Flofi declined: ' });
@@ -43,6 +46,20 @@ export type CopilotChanges = {
   /** BUILD-BASE-001: a new catalog-pool fee tier; absent when the model's shape omits it. */ readonly feeTier?: CopilotFeeTier | null;
 };
 export type CopilotReuse = { readonly from: CopilotTarget; readonly fields: readonly CopilotReuseField[] };
+/**
+ * BUILD-FLOFI-INTELLIGENCE-001 (goal-to-workflow): an outcome the user described without naming every step ("I have USDC on Base and want SOL on
+ * Solana", "supply my USDC on Aave"). Every value is what the user said (null when unstated); FloFi plans the steps from its registries
+ * (`intelligence/goal-planner.ts`), grounds each value in the user's words and authors each step through the exact grammar.
+ */
+export type CopilotGoal = {
+  readonly source: { readonly network: CopilotNetwork | null; readonly asset: CopilotAsset | null; readonly amount: string | null };
+  readonly target: { readonly network: CopilotNetwork | null; readonly asset: CopilotAsset | null; readonly use: GoalUse };
+  readonly preference: GoalPreference | null;
+  /** The most a later, funded step of another asset may spend, only when the user stated it. */ readonly cap: string | null;
+  /** An address the user typed for the goal's final step (a supply's beneficiary, a bridge's recipient); absent in older answers. */ readonly recipient?: string | null;
+  /** User-stated position parameters; retained while FloFi plans its conversion and funding steps. */
+  readonly liquidity?: Extract<CopilotAction, { type: 'LIQUIDITY' }> | null;
+};
 /** "Remove 50% of my liquidity", "exit my position": FloFi selects the position from the connected wallet's verified FloFi positions. */
 export type CopilotPositionRequest = { readonly operation: (typeof COPILOT_POSITION_OPERATIONS)[number]; readonly protocol: (typeof COPILOT_LIQUIDITY_PROTOCOLS)[number] | null;
   readonly network: CopilotNetwork | null; readonly percent: string | null };
@@ -55,7 +72,9 @@ export type CopilotIntentV2 = Common & (
   | { readonly kind: 'REPEAT'; readonly target: CopilotTarget; readonly changes: CopilotChanges }
   | { readonly kind: 'REMOVE'; readonly target: CopilotTarget }
   | { readonly kind: 'INSERT'; readonly position: 'BEFORE' | 'AFTER'; readonly anchor: CopilotTarget; readonly action: CopilotAction }
-  | { readonly kind: 'QUESTION'; readonly topic: CopilotQuestionTopic; readonly target: CopilotTarget | null }
+  | { readonly kind: 'QUESTION'; readonly topic: CopilotQuestionTopic; readonly target: CopilotTarget | null;
+      /** BUILD-FLOFI-INTELLIGENCE-001: the model's explanation from FloFi's tool facts (absent in older answers); shown only when grounded. */ readonly answer?: string | null }
+  | { readonly kind: 'GOAL'; readonly goal: CopilotGoal; readonly answer?: string | null }
   | ({ readonly kind: 'POSITION' } & CopilotPositionRequest)
   | { readonly kind: 'CLARIFICATION_REQUIRED'; readonly missing: readonly CopilotV2MissingField[]; readonly question: string; readonly options: readonly string[] }
   | { readonly kind: 'UNSUPPORTED'; readonly reason: string });
@@ -86,6 +105,20 @@ function parseChanges(value: unknown, requireOne: boolean): CopilotChanges {
   if (changes.rangeUnit === 'FULL' ? range !== 1 : changes.rangeUnit === 'PERCENT' ? range !== 2 || changes.lower !== null : range !== 0 && range !== 3) return fail();
   if (requireOne && !CHANGE_KEYS.some(key => key === 'deposits' ? deposits.length > 0 : changes[key] !== null) && !changes.feeTier) return fail();
   return changes;
+}
+/** An optional model explanation: absent, null, or bounded safe text (grounding is checked where the facts are known). */
+const answerOf = (value: unknown): string | null => value === undefined || value === null ? null : text(value, COPILOT_V2_LIMITS.maxAnswerLength);
+function parseGoal(value: unknown): CopilotGoal {
+  const withRecipient = !!value && typeof value === 'object' && Object.hasOwn(value, 'recipient');
+  const withLiquidity = !!value && typeof value === 'object' && Object.hasOwn(value, 'liquidity');
+  const v = exact(value, ['source', 'target', 'preference', 'cap', ...withRecipient ? ['recipient'] : [], ...withLiquidity ? ['liquidity'] : []]);
+  const source = exact(v.source, ['network', 'asset', 'amount']), target = exact(v.target, ['network', 'asset', 'use']);
+  const liquidity = withLiquidity && v.liquidity !== null ? parseAction(v.liquidity) : null;
+  if (liquidity && liquidity.type !== 'LIQUIDITY') return fail();
+  return { source: { network: nullableOneOf(COPILOT_V2_NETWORKS, source.network), asset: symbol(source.asset), amount: amount(source.amount) },
+    target: { network: nullableOneOf(COPILOT_V2_NETWORKS, target.network), asset: symbol(target.asset), use: oneOf(GOAL_USES, target.use) },
+    preference: nullableOneOf(GOAL_PREFERENCES, v.preference), cap: amount(v.cap), ...withRecipient ? { recipient: transferAddress(v.recipient) } : {},
+    ...withLiquidity ? { liquidity: liquidity as Exclude<CopilotGoal['liquidity'], undefined> } : {} };
 }
 const common = (v: Record<string, unknown>): Common => {
   oneOf([COPILOT_INTENT_V2_VERSION], v.version);
@@ -126,8 +159,15 @@ export function parseCopilotIntentV2(value: unknown): CopilotIntentV2 {
       return { ...common(v), kind, position: oneOf(['BEFORE', 'AFTER'] as const, v.position), anchor: parseTarget(v.anchor), action: parseAction(v.action) };
     }
     case 'QUESTION': {
-      const v = keys(['topic', 'target']);
-      return { ...common(v), kind, topic: oneOf(COPILOT_QUESTION_TOPICS, v.topic), target: v.target === null ? null : parseTarget(v.target) };
+      const answered = !!value && typeof value === 'object' && Object.hasOwn(value, 'answer');
+      const v = keys(answered ? ['topic', 'target', 'answer'] : ['topic', 'target']);
+      return { ...common(v), kind, topic: oneOf(COPILOT_QUESTION_TOPICS, v.topic), target: v.target === null ? null : parseTarget(v.target),
+        ...answered ? { answer: answerOf(v.answer) } : {} };
+    }
+    case 'GOAL': {
+      const answered = !!value && typeof value === 'object' && Object.hasOwn(value, 'answer');
+      const v = keys(answered ? ['goal', 'answer'] : ['goal']);
+      return { ...common(v), kind, goal: parseGoal(v.goal), ...answered ? { answer: answerOf(v.answer) } : {} };
     }
     case 'POSITION': {
       const v = keys(['operation', 'protocol', 'network', 'percent']);
@@ -179,6 +219,20 @@ const CHANGES = object({
 const head = (kind: string) => ({ version: constant(COPILOT_INTENT_V2_VERSION),
   language: choice(COPILOT_LANGUAGES, 'Language of the latest user message: PT for Portuguese (also mixed Portuguese and English), EN otherwise.'), kind: constant(kind) });
 const ACTION = { anyOf: actionSchemas };
+const ANSWER = nullableString('Optional: a short explanation in the user\'s language written ONLY from facts FloFi\'s tools returned in this turn and the user\'s own words. ' +
+  'No amount, fee, price, rate or status that a tool did not return; never claim anything was done. Null when no tool facts support one.');
+const GOAL_NETWORK = (role: string) => nullableChoice(COPILOT_V2_NETWORKS, `${role} only if the user named it; null otherwise. ` + networkV2Text);
+const GOAL = object({
+  source: object({ network: GOAL_NETWORK('The network the user holds the asset on'), asset: nullableString('The asset the user holds or wants to spend. ' + symbolText),
+    amount: nullableString(AMOUNT_TEXT) }),
+  target: object({ network: GOAL_NETWORK('The network the user wants to end up on'), asset: nullableString('The asset the user wants to end up with, only if named. ' + symbolText),
+    use: choice(GOAL_USES, 'HOLD: just have the asset there. SUPPLY: supply it on Aave. LIQUIDITY: provide liquidity with it.') }),
+  preference: nullableChoice(GOAL_PREFERENCES, 'Only if the user asked for the cheapest/minimal cost, the fastest, or a certified route; null otherwise.'),
+  cap: nullableString('Only when FloFi asked how much a later step may use and the user answered: exactly that number; null otherwise.'),
+  recipient: nullableString('An address (EVM 0x or case-sensitive Solana base58) the user typed exactly, for whom the outcome is (beneficiary or recipient); null otherwise.'),
+  liquidity: { anyOf: [actionSchemas.find(schema => (schema as { properties?: { type?: { enum?: string[] } } }).properties?.type?.enum?.includes('LIQUIDITY'))!, { type: 'null' }],
+    description: 'For a LIQUIDITY goal: the position parameters the user stated, retaining deposits, range and fee tier while FloFi plans the preceding swap or bridge. Null for other goals.' },
+});
 export const COPILOT_OUTPUT_SCHEMA_V2 = Object.freeze(object({ intent: { anyOf: [
   object({ ...head('AUTOMATION'), draft: AUTOMATION_DRAFT_SCHEMA }),
   object({ ...head('ACTION'), action: ACTION, reuse: { anyOf: [object({ from: TARGET, fields: { type: 'array', items: choice(COPILOT_REUSE_FIELDS,
@@ -194,7 +248,8 @@ export const COPILOT_OUTPUT_SCHEMA_V2 = Object.freeze(object({ intent: { anyOf: 
     network: nullableChoice(COPILOT_V2_NETWORKS, 'The network only if the user named it; null otherwise.'),
     percent: nullableString('For DECREASE: the percentage to remove exactly as written ("50" for 50%, "50" for half); null if not stated, and null for EXIT.') }),
   object({ ...head('QUESTION'), topic: choice(COPILOT_QUESTION_TOPICS, 'What the read-only question is about.'),
-    target: { anyOf: [TARGET, { type: 'null' }], description: 'The step the question is about, if any.' } }),
+    target: { anyOf: [TARGET, { type: 'null' }], description: 'The step the question is about, if any.' }, answer: ANSWER }),
+  object({ ...head('GOAL'), goal: GOAL, answer: ANSWER }),
   object({ ...head('CLARIFICATION_REQUIRED'), missing: { type: 'array', items: choice(COPILOT_V2_MISSING_FIELDS, 'Missing field.') },
     question: string('One short question in the user\'s language.'), options: { type: 'array', description: 'Up to 4 short answer options.', items: string('Option.') } }),
   object({ ...head('UNSUPPORTED'), reason: string('One short sentence in the user\'s language.') }),

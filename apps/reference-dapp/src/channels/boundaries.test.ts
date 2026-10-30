@@ -103,8 +103,13 @@ describe('BUILD-CHANNELS-001 channel boundaries', () => {
     // VISUAL-PRESENTATION-001) FloFi's shared workflow renderer, (BUILD-BASE-001) the read-only authoring catalogs and (BUILD-ADMIN-001)
     // the Copilot's runtime model-settings lookup, which the wiring passes to the interpreter (a read of `admin_settings_versions`; no flow).
     const servers = [...channelFiles].flatMap(file => importsOf(join(app, file)).map(([, s]) => s.startsWith('.') ? target(join(app, file), s) : s)).filter(t => t.startsWith('src/server/'));
-    expect([...new Set(servers)].sort()).toEqual(['src/server/authoring-catalogs.ts', 'src/server/copilot-runtime.ts', 'src/server/copilot-service.ts',
+    expect([...new Set(servers)].sort()).toEqual(['src/server/authoring-catalogs.ts', 'src/server/channel-copilot-toolkit.ts', 'src/server/copilot-metrics-store.ts', 'src/server/copilot-runtime.ts', 'src/server/copilot-service.ts',
       'src/server/deployment.ts', 'src/server/platform-state-host.ts', 'src/server/workflow-visual-image.ts']);
+    // Authenticated turn wiring can discover real routes without gaining a flow client, wallet principal or transaction path.
+    const discovery = closure(join(app, 'src/server/channel-copilot-toolkit.ts')).files;
+    expect(discovery.filter(f => /^backend\/|^src\/app\/|flow-runtime|cloud-api|wallet-session|session-principal/.test(f))).toEqual([]);
+    for (const file of discovery.filter(f => /^src\/server\/(?:channel-copilot-toolkit|universal-router)/.test(f)))
+      expect(code(join(app, file)), file).not.toMatch(/eth_sendTransaction|sendRawTransaction|signTransaction|signMessage|privateKey|createWalletClient|callFlow\(/);
     // BUILD-ADMIN-001: that lookup reaches only the settings store, its validation and the copilot boundary — no flow, runtime, handoff or wallet.
     const settings = closure(join(app, 'src/server/copilot-runtime.ts')).files;
     expect(settings.filter(f => /^backend\/|^src\/app\/|^src\/mcp\/|flow-runtime|cloud-api|handoff|approval|wallet-session|session-principal|platform-state-host/.test(f))).toEqual([]);

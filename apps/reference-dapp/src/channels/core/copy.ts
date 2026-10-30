@@ -14,6 +14,7 @@ const NETWORK_LABEL: Readonly<Record<string, string>> = { 'base': 'Base', 'base-
 export const networkLabel = (id: string) => NETWORK_LABEL[id] ?? id;
 
 export type PreviewNote = { readonly kind: 'PASSED'; readonly provenance: string } | { readonly kind: 'FAILED'; readonly code: string }
+  | { readonly kind: 'WORKFLOW'; readonly total: number; readonly simulated: number; readonly pending: number; readonly codes: readonly string[] }
   | { readonly kind: 'SKIPPED' } | { readonly kind: 'DISABLED' };
 export type ReadyFacts = { readonly lines: readonly string[]; readonly networks: readonly string[]; readonly fundsClass: 'TEST_FUNDS' | 'REAL_FUNDS';
   readonly notes: readonly string[]; readonly preview: PreviewNote; readonly intendedWallet: string | null; readonly aiInterpreted: boolean; readonly expiresMinutes: number };
@@ -50,6 +51,7 @@ const EN = {
   ready: 'Strategy ready:',
   network: (labels: string, real: boolean) => `Network: ${labels}${real ? ' — REAL FUNDS' : ' (test funds)'}`,
   preview: (p: PreviewNote) => p.kind === 'PASSED' ? `Simulation preview passed (read-only${p.provenance === 'MOCKED' ? ', MOCKED' : ''}). FloFi simulates again before your review.`
+    : p.kind === 'WORKFLOW' ? `Workflow preview: ${p.simulated}/${p.total} steps simulated against current state.${p.pending ? ` ${p.pending} await earlier steps' received funds.` : ''}${p.codes.length ? ` Details: ${p.codes.join(', ')}.` : ''} FloFi freshly simulates every step after the previous step reconciles, before your Manifest review and wallet signature.`
     : p.kind === 'FAILED' ? `Simulation preview did not pass (${p.code}). FloFi will show the details when you open it.`
       : p.kind === 'SKIPPED' ? 'FloFi runs the simulation when you open it.' : 'FloFi runs the simulation when you open it.',
   authorize: (wallet: string | null, minutes: number) => `Nothing is authorized yet: open FloFi${wallet ? `, connect the wallet ${wallet}` : ', connect your wallet'}, review the Strategy Manifest and sign there. The link works once and expires in ${minutes} minutes.`,
@@ -146,6 +148,7 @@ const PT: Copy = {
   ready: 'Estratégia pronta:',
   network: (labels, real) => `Rede: ${labels}${real ? ' — FUNDOS REAIS' : ' (fundos de teste)'}`,
   preview: p => p.kind === 'PASSED' ? `Prévia da simulação aprovada (somente leitura${p.provenance === 'MOCKED' ? ', MOCKED' : ''}). O FloFi simula de novo antes da sua revisão.`
+    : p.kind === 'WORKFLOW' ? `Prévia do fluxo: ${p.simulated}/${p.total} etapas simuladas no estado atual.${p.pending ? ` ${p.pending} aguardam os fundos recebidos das etapas anteriores.` : ''}${p.codes.length ? ` Detalhes: ${p.codes.join(', ')}.` : ''} O FloFi simula cada etapa depois da reconciliação anterior, antes da revisão do Manifest e da assinatura da carteira.`
     : p.kind === 'FAILED' ? `A prévia da simulação não passou (${p.code}). O FloFi mostra os detalhes quando você abrir.` : 'O FloFi roda a simulação quando você abrir.',
   authorize: (wallet, minutes) => `Nada está autorizado ainda: abra o FloFi${wallet ? `, conecte a carteira ${wallet}` : ', conecte sua carteira'}, revise o Strategy Manifest e assine lá. O link funciona uma vez e expira em ${minutes} minutos.`,
   ai: 'Interpretado da sua mensagem com um assistente de IA. Não é recomendação financeira; a decisão é sua.',

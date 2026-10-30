@@ -8,7 +8,7 @@
  *   TELEGRAM_BOT_TOKEN=<bot id>:<secret>          from @BotFather; the bot id (before the colon) is public, the rest is the credential
  *   TELEGRAM_WEBHOOK_SECRET=<32–256 [A-Za-z0-9_-]>  the `secret_token` given to setWebhook; Telegram echoes it in
  *                                                 X-Telegram-Bot-Api-Secret-Token on every delivery
- *   FLOFI_TELEGRAM_ACCESS_MODE=allowlist|public  explicit opt-in; defaults to allowlist
+ *   FLOFI_TELEGRAM_ACCESS_MODE=allowlist|public  defaults to public; allowlist is isolated local engineering only
  *   FLOFI_TELEGRAM_PUBLIC_GLOBAL_LIMIT=<n>       public mode: updates admitted per 10 minutes across all senders (default 300)
  *   FLOFI_TELEGRAM_PUBLIC_SENDER_LIMIT=<n>       public mode: updates admitted per 10 minutes per sender (default 30; above the
  *                                                conversation's own 20, which answers "busy": this backstop is silent)
@@ -19,7 +19,7 @@
  */
 import { createHash } from 'node:crypto';
 import { isHostedDeployment } from '../../server/deployment.ts';
-import { limitOf, sameSecret } from '../core/config.ts';
+import { limitOf, publicChannelProduct, sameSecret } from '../core/config.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
 export type TelegramConfig = {
@@ -44,9 +44,10 @@ export function readTelegramConfig(env: Env): TelegramConfigResult {
   if (!match) return invalid('TELEGRAM_BOT_TOKEN');
   const webhookSecret = env.TELEGRAM_WEBHOOK_SECRET?.trim() ?? '';
   if (!WEBHOOK_SECRET.test(webhookSecret) || sameSecret(webhookSecret, token)) return invalid('TELEGRAM_WEBHOOK_SECRET');
-  // Explicit opt-in only: an empty allowlist never means public access.
-  const accessMode = env.FLOFI_TELEGRAM_ACCESS_MODE ?? 'allowlist';
-  if (accessMode !== 'allowlist' && accessMode !== 'public') return invalid('FLOFI_TELEGRAM_ACCESS_MODE');
+  const configuredAccess = env.FLOFI_TELEGRAM_ACCESS_MODE ?? 'public';
+  if (configuredAccess !== 'allowlist' && configuredAccess !== 'public') return invalid('FLOFI_TELEGRAM_ACCESS_MODE');
+  // The public product admits every private human sender. Allowlists remain available only for isolated local certification.
+  const accessMode = publicChannelProduct(env) ? 'public' : configuredAccess;
   const globalLimit = limitOf(env.FLOFI_TELEGRAM_PUBLIC_GLOBAL_LIMIT, 300), senderLimit = limitOf(env.FLOFI_TELEGRAM_PUBLIC_SENDER_LIMIT, 30);
   if (globalLimit === null) return invalid('FLOFI_TELEGRAM_PUBLIC_GLOBAL_LIMIT');
   if (senderLimit === null || senderLimit > globalLimit) return invalid('FLOFI_TELEGRAM_PUBLIC_SENDER_LIMIT');

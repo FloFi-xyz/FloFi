@@ -3,17 +3,19 @@
  * BUILD-CROSSCHAIN-UNIVERSAL-001: canonical spent/received amounts from an owner-signed flow's durable record.
  *
  * Confirm-mode workflow bindings resolve min(cap, received) from these facts — the same rule delegated runs already apply.
- * Only amounts proven on the flow's own reconciled record are returned (never quotes or estimates). Native assets without a
- * contract/mint address are omitted: typed bindings require an address identity (see workflow-bindings.ts).
+ * Only amounts proven on the flow's own reconciled record are returned (never quotes or estimates). Native ETH uses its own
+ * native asset key; native SOL follows the existing Jupiter/Orca wrapped-mint identity convention for amount bindings.
  */
 import { assetKey } from '../delegation/steps.ts';
+import { SOLANA_MAINNET_TOKENS } from '@defi-workflow-engine/action-registry';
 
 export type FlowAmount = { readonly asset: string; readonly amount: string };
 
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 const units = (v: unknown): string | null => typeof v === 'string' && /^(0|[1-9][0-9]{0,77})$/.test(v) ? v : null;
 const tokenAddress = (token: Record<string, unknown>): string | null =>
-  typeof token.address === 'string' && token.address.length > 0 ? token.address : null;
+  typeof token.address === 'string' && token.address.length > 0 ? token.address : token.kind === 'NATIVE' && typeof token.chainId === 'string'
+    ? token.chainId.startsWith('eip155:') ? '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee' : token.chainId.startsWith('solana:') ? SOLANA_MAINNET_TOKENS.SOL.mint : null : null;
 
 /**
  * Public spent/received facts of one owner-signed flow run, read from its durable `status` record.
@@ -27,6 +29,30 @@ export function amountsFromOwnerRecord(record: unknown): { readonly spent: reado
   // Explicit binding facts (flow projectors / test harness): preferred when present.
   const explicitReceived = listAmounts(record.receivedAmounts), explicitSpent = listAmounts(record.spentAmounts);
   if (explicitReceived || explicitSpent) return { spent: explicitSpent ?? [], received: explicitReceived ?? [] };
+  // These are the actual owner-wallet service contracts, rather than provider quote estimates.
+  if (record.verdict === 'RECONCILED' && isObject(record.review) && Array.isArray(record.observations)) {
+    const review = record.review, observed = record.observations.at(-1);
+    if (isObject(observed) && observed.verdict === 'RECONCILED') {
+      if (typeof review.chain === 'string' && isObject(review.output) && typeof review.output.mint === 'string' && units(observed.outputReceived)) {
+        const received = [{ asset: assetKey({ chain: review.chain, address: review.output.mint }), amount: units(observed.outputReceived)! }];
+        const spent = isObject(review.input) && typeof review.input.mint === 'string' && units(observed.inputSpent)
+          ? [{ asset: assetKey({ chain: review.chain, address: review.input.mint }), amount: units(observed.inputSpent)! }] : [];
+        return { spent, received };
+      }
+      if ((review.borrow || review.withdraw) && typeof review.chain === 'string' && typeof review.asset === 'string' && units(observed.walletDelta))
+        return { spent: [], received: [{ asset: assetKey({ chain: review.chain, address: review.asset }), amount: units(observed.walletDelta)! }] };
+    }
+  }
+  if (isObject(record.quote) && isObject(record.outcome)) {
+    const quote = record.quote, outcome = record.outcome;
+    const chain = typeof quote.chainId === 'number' && Number.isSafeInteger(quote.chainId) ? `eip155:${quote.chainId}`
+      : typeof quote.chainId === 'string' ? quote.chainId.startsWith('eip155:') ? quote.chainId : /^[0-9]+$/.test(quote.chainId) ? `eip155:${quote.chainId}` : null : null;
+    const token = (value: unknown) => typeof value === 'string' && /^0x[0-9a-fA-F]{40}$/.test(value) ? value.toLowerCase() : null;
+    const output = token(quote.outputToken), input = token(quote.inputToken), received = units(outcome.outputReceived), spent = units(outcome.inputSpent);
+    if (chain && output && received) return {
+      received: [{ asset: assetKey({ chain, address: output }), amount: received }],
+      spent: input && spent ? [{ asset: assetKey({ chain, address: input }), amount: spent }] : [] };
+  }
   // Universal bridge: destination delivery amount + route token identities.
   if (typeof record.received === 'string' && units(record.received) && isObject(record.review) && isObject(record.review.route)) {
     const route = record.review.route, out = isObject(route.outputToken) ? route.outputToken : null, inn = isObject(route.inputToken) ? route.inputToken : null;
@@ -77,8 +103,9 @@ export function amountsFromOwnerRecord(record: unknown): { readonly spent: reado
   if (isObject(record.destination) && units(record.destination.transferAmount ?? record.destination.amount) && isObject(record.review)) {
     const dest = record.destination, route = isObject(record.review.route) ? record.review.route : isObject(record.review.quote) ? record.review.quote : null;
     const amount = units(dest.transferAmount ?? dest.amount)!;
-    const chain = typeof dest.chainId === 'string' ? dest.chainId : typeof dest.chain === 'string' ? dest.chain : null;
-    const token = typeof dest.token === 'string' ? dest.token
+    const intent = isObject(record.review.intent) ? record.review.intent : null;
+    const chain = intent && typeof intent.destinationChain === 'string' ? intent.destinationChain : typeof dest.chainId === 'string' ? dest.chainId : typeof dest.chain === 'string' ? dest.chain : null;
+    const token = typeof dest.outputToken === 'string' ? dest.outputToken : typeof dest.token === 'string' ? dest.token
       : route && isObject(route.outputToken) ? tokenAddress(route.outputToken) : null;
     if (chain && token) return { spent: [], received: [{ asset: assetKey({ chain, address: token }), amount }] };
   }

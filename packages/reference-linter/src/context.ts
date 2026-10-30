@@ -17,8 +17,8 @@ export interface ReviewContext {
 }
 
 const MAINNET_EXPECTED = Object.freeze({
-  USDC: Object.freeze({ chainId: 'eip155:8453', address: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913', decimals: 6, maximumAmountUnits: '1000000000000' }),
-  WETH: Object.freeze({ chainId: 'eip155:8453', address: '0x4200000000000000000000000000000000000006', decimals: 18, maximumAmountUnits: '1000000000000000000000' }),
+  USDC: Object.freeze({ chainId: 'eip155:8453', address: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913', decimals: 6, maximumAmountUnits: (2n ** 256n - 1n).toString() }),
+  WETH: Object.freeze({ chainId: 'eip155:8453', address: '0x4200000000000000000000000000000000000006', decimals: 18, maximumAmountUnits: (2n ** 256n - 1n).toString() }),
 });
 
 const TESTNET_EXPECTED = Object.freeze({

@@ -151,8 +151,8 @@ export const StrategyWorkflowSchema = Type.Object({
   version: Type.Literal(2, { description: 'Step-list workflow contract.' }),
   steps: Type.Array(Type.Union(Object.values(BRANCHES)), { minItems: 1, maxItems: MAX_WORKFLOW_STEPS,
     description: 'Ordered steps, each one single-action strategy (the same objects as version 1). Executed in this order; each step starts only after the previous one reconciled.' }),
-  bindings: Type.Optional(Type.Array(WorkflowBindingSchema, { minItems: 1, maxItems: MAX_WORKFLOW_STEPS - 1,
-    description: 'Optional typed dependencies: a step spends what an earlier step actually delivered (capped by its own amount). The input asset must be exactly the earlier step\'s output token.' })),
+  bindings: Type.Optional(Type.Array(WorkflowBindingSchema, { minItems: 1, maxItems: 2 * (MAX_WORKFLOW_STEPS - 1),
+    description: 'Optional typed dependencies: a step spends what an earlier step actually delivered (capped by its own amount). The input asset must be exactly the earlier step\'s output token. A liquidity step may bind each of its two distinct deposits.' })),
 }, strict);
 export type StrategyWorkflow = Static<typeof StrategyWorkflowSchema>;
 /** What a client may send: a v1 single-action strategy or a v2 step list. */
@@ -221,12 +221,20 @@ const PublicTransfer = Type.Object({
 const PUBLIC_BRANCHES = Object.freeze({ bridge: PublicBridge, swap: PublicSwap, supply: PublicLending('supply', 'Account credited with the supplied position.'),
   borrow: PublicLending('borrow', 'Account whose debt the borrow creates (onBehalfOf).'), repay: PublicLending('repay', 'Account whose debt is repaid (onBehalfOf).'),
   withdraw: PublicWithdraw, add_liquidity: PublicLiquidity, transfer: PublicTransfer });
+/**
+ * BUILD-FLOFI-INTELLIGENCE-001: the fields a strategy of `action` must carry, read from the canonical schema branch (the public contract when the
+ * action is public, else the engineering one) — the Capability API's "required parameters" are never a separate hand-written list.
+ */
+export function strategyRequiredFields(action: StrategyAction): readonly string[] {
+  const branch = (PUBLIC_BRANCHES as Readonly<Record<string, TSchema>>)[action] ?? BRANCHES[action];
+  return Object.freeze(((branch as { required?: readonly string[] }).required ?? []).filter(field => field !== 'action' && field !== 'version'));
+}
 export const PublicStrategyWorkflowSchema = Type.Object({
   version: Type.Literal(2, { description: 'Step-list workflow contract.' }),
   steps: Type.Array(Type.Union(Object.values(PUBLIC_BRANCHES)), { minItems: 1, maxItems: MAX_WORKFLOW_STEPS,
     description: 'Ordered steps, each one single-action strategy (the same objects as version 1). Executed in this order; each step starts only after the previous one reconciled.' }),
-  bindings: Type.Optional(Type.Array(WorkflowBindingSchema, { minItems: 1, maxItems: MAX_WORKFLOW_STEPS - 1,
-    description: 'Optional typed dependencies: a step spends what an earlier step actually delivered (capped by its own amount). The input asset must be exactly the earlier step\'s output token.' })),
+  bindings: Type.Optional(Type.Array(WorkflowBindingSchema, { minItems: 1, maxItems: 2 * (MAX_WORKFLOW_STEPS - 1),
+    description: 'Optional typed dependencies: a step spends what an earlier step actually delivered (capped by its own amount). The input asset must be exactly the earlier step\'s output token. A liquidity step may bind each of its two distinct deposits.' })),
 }, strict);
 /** What a public client may send: a mainnet v1 strategy or v2 step list. */
 export const PublicStrategyInputSchema = Type.Union([...Object.values(PUBLIC_BRANCHES), PublicStrategyWorkflowSchema],
@@ -276,7 +284,7 @@ export function strategyInputIssues(value: unknown): readonly SchemaIssue[] {
   const raw = (record as { bindings?: unknown }).bindings;
   if (raw === undefined) return steps;
   if (!Array.isArray(raw)) return [...steps, { path: '/bindings', rule: 'type' }];
-  if (raw.length < 1 || raw.length > MAX_WORKFLOW_STEPS - 1) return [...steps, { path: '/bindings', rule: raw.length < 1 ? 'minItems' : 'maxItems' }];
+  if (raw.length < 1 || raw.length > 2 * (MAX_WORKFLOW_STEPS - 1)) return [...steps, { path: '/bindings', rule: raw.length < 1 ? 'minItems' : 'maxItems' }];
   return [...steps, ...raw.flatMap((b, i) => bindingIssues(b).map(issue => ({ path: `/bindings/${i}` + (issue.path === '/' ? '' : issue.path), rule: issue.rule })))];
 }
 const binding = compileSchema<Static<typeof WorkflowBindingSchema>>(WorkflowBindingSchema);

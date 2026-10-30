@@ -10,6 +10,9 @@ import type { HandoffRecord } from '../../platform/index.ts';
 import { decideTurn, freshState, parseState, type ChannelState, type TurnDecision } from './conversation.ts';
 import { plannedNotifications, statusReplies } from './status.ts';
 import { canonicalWorkflow } from './strategy.ts';
+import type { Command } from '../../domain/commands';
+import { credential, gatewayEnv, session } from '../../mcp/gateway.test-harness';
+import type { McpRuntime } from '../../mcp/runtime';
 
 const SWAP = 'swap 1 USDC to WETH on Base Sepolia slippage 50 bps', BRIDGE = 'bridge 5 USDC from Base Sepolia to Arbitrum Sepolia via auto slippage 50 bps';
 function chat(language: 'EN' | 'PT' = 'EN') {
@@ -23,6 +26,25 @@ function chat(language: 'EN' | 'PT' = 'EN') {
 }
 
 describe('BUILD-CHAT-E2E-001 channel workflows', () => {
+  it('a swap → liquidity goal shares one bound canonical workflow across the channel and MCP planner', async () => {
+    const direct = composeWorkflow({ version: 2, steps: [
+      { action: 'swap', network: 'base', inputAsset: 'USDC', outputAsset: 'WETH', amount: '10' },
+      { action: 'add_liquidity', network: 'base', maxAmounts: { USDC: '5', WETH: '0.01' }, range: { unit: 'full' } },
+    ], bindings: [{ step: 1, amountFrom: 0 }] });
+    if (!direct.ok) throw new Error(direct.code);
+    const command = { type: 'ADD_SEQUENCE', source: 'CHAT', baseRevision: 0,
+      steps: direct.steps.map(step => step.command) } as unknown as Command;
+    const channel = canonicalWorkflow([command]);
+    expect(channel).toMatchObject({ ok: true, stepCount: 2, workflowHash: direct.workflowHash,
+      spec: { version: 2, bindings: [{ step: 1, amountFrom: 0 }] } });
+    const token = credential(), forbidden = async (): Promise<never> => { throw new Error('PLANNING_MUST_NOT_EXECUTE'); };
+    const runtime: McpRuntime = { kind: 'embedded', mode: async () => 'off', preview: forbidden, run: forbidden, journal: forbidden, evidence: forbidden };
+    const client = session({ env: gatewayEnv([{ principal: 'liquidity-planning', token }], { FLOFI_NETWORK_SCOPE: '' }), token, runtime });
+    const planned = await client.callTool('plan_strategy', { goal: { sourceNetwork: 'base', sourceAsset: 'USDC', amount: '10',
+      targetNetwork: 'base', targetAsset: 'WETH', use: 'LIQUIDITY', liquidity: { maxAmounts: { USDC: '5', WETH: '0.01' }, range: { unit: 'full' } } } });
+    expect(planned.output).toMatchObject({ ok: true, kind: 'PLAN', stepCount: 2, workflowHash: direct.workflowHash,
+      bindings: [{ step: 1, amountFrom: 0 }] });
+  });
   it('ADD STEP keeps the pending proposal; the next message authors a new step; the list is proposed as one workflow', async () => {
     const c = chat();
     const first = await c.say(SWAP);

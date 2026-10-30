@@ -26,6 +26,7 @@ export const DOCUMENTS: Record<string, unknown> = {
 };
 export function oauthEnv(extra: Record<string, string> = {}): Record<string, string> {
   return { FLOFI_MCP_OAUTH: 'enabled', FLOFI_PUBLIC_ORIGIN: ORIGIN, FLOFI_MCP_OAUTH_SECRET: OAUTH_SECRET,
+    FLOFI_NETWORK_SCOPE: 'ENGINEERING_TESTNETS', FLOFI_MCP_OAUTH_ACCESS: 'invite',
     FLOFI_MCP_OAUTH_INVITES: createHash('sha256').update(INVITE).digest('hex'), ...extra };
 }
 export function memoryFetcher(fetched: string[] = []) {

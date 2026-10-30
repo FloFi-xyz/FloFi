@@ -48,7 +48,7 @@ export function solanaTransferIntent(workflow: SemanticWorkflow, ownerInput: str
     if (fields.token.mint === WRAPPED_SOL) fail('WRAPPED_SOL_UNSUPPORTED');
     const known = solanaTransferAsset(profile, fields.token.mint);
     if (known && (known.decimals !== fields.token.decimals || known.program !== fields.token.program)) fail('MINT_DECIMALS_MISMATCH');
-    if (BigInt(fields.amount) > 10n ** BigInt(fields.token.decimals + 9)) fail('AMOUNT_OUT_OF_RANGE');
+    if (BigInt(fields.amount) > (profile.realFunds ? 2n ** 64n - 1n : 10n ** BigInt(fields.token.decimals + 9))) fail('AMOUNT_OUT_OF_RANGE');
   } else if (BigInt(fields.amount) > BigInt(profile.maximumLamports)) fail('AMOUNT_OUT_OF_RANGE');
   return { nodeId: nodes[0]!.nodeId, profile, owner, recipient, amount: fields.amount, fields };
 }

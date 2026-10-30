@@ -64,8 +64,8 @@ describe('mocked arithmetic (R-2)', () => {
   it('never reaches the arithmetic with cap-plus-one, ineligible slippage or malformed input', () => {
     const valid = { amountIn: '1', from: 'USDC', to: 'WETH', slippageBps: 0 };
     for (const [input, code] of [
-      [{ ...valid, amountIn: '1000000000001' }, 'AMOUNT_OUT_OF_RANGE'],
-      [{ ...valid, from: 'WETH', to: 'USDC', amountIn: '1000000000000000000001' }, 'AMOUNT_OUT_OF_RANGE'],
+      [{ ...valid, amountIn: (2n ** 256n).toString() }, 'AMOUNT_OUT_OF_RANGE'],
+      [{ ...valid, from: 'WETH', to: 'USDC', amountIn: (2n ** 256n).toString() }, 'AMOUNT_OUT_OF_RANGE'],
       [{ ...valid, amountIn: '0' }, 'INVALID_AMOUNT'], [{ ...valid, amountIn: '01' }, 'INVALID_AMOUNT'],
       [{ ...valid, amountIn: '1.5' }, 'INVALID_AMOUNT'], [{ ...valid, amountIn: 1 }, 'INVALID_AMOUNT'],
       [{ ...valid, slippageBps: 301 }, 'SLIPPAGE_NOT_ELIGIBLE'], [{ ...valid, slippageBps: -1 }, 'SLIPPAGE_NOT_ELIGIBLE'],

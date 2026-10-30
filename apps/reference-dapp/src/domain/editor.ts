@@ -115,6 +115,16 @@ export function editorReducer(state: EditorState, command: Command, context?: Re
       validateWorkflowDraft(workflow, context); return { workflow: freeze(workflow), error: null };
     } catch (cause) { return reject(cause instanceof Error ? cause.message : 'SOLANA_LIQUIDITY_INPUT_INVALID'); }
   }
+  if (command.type === 'ADD_SEQUENCE') {
+    // BUILD-FLOFI-INTELLIGENCE-001: exactly the single-step paths, one reducer step at a time, each at the revision the previous one produced. Any
+    // refused step refuses the whole sequence: nothing partial is ever applied.
+    let next: EditorState = { workflow: current, error: null };
+    for (const step of command.steps) {
+      next = editorReducer(next, { ...step, source: command.source, baseRevision: next.workflow.revision } as Command, context);
+      if (next.error) return reject(next.error);
+    }
+    return next;
+  }
   if (command.type === 'ADD_SOLANA_COMPOSITION') {
     // Exactly the Canvas path, one reducer step at a time: add the swap (unless it exists), add the position, then link them; the link must bind.
     const step = (from: EditorState, next: Record<string, unknown>) => editorReducer(from, { ...next, source: command.source, baseRevision: from.workflow.revision } as Command, context);
@@ -309,7 +319,8 @@ export function editorReducer(state: EditorState, command: Command, context?: Re
         if (locked === command.locked) return { workflow: current, error: null };
         nodes = nodes.map(n => n.nodeId === node.nodeId ? { ...n,
           lockedParameters: command.locked ? [parameter] : [],
-          editableBounds: command.locked ? [] : [{ parameterName: 'amount-in', asset: { ...parameter.value.asset }, minimumAmount: '1', maximumAmount: context.assets[details.from].maximumAmountUnits }],
+          editableBounds: command.locked ? [] : createSwapNode(node.nodeId, details.from === 'USDC' ? 'USDC_TO_WETH' : 'WETH_TO_USDC', details.amount,
+            String(details.slippage ?? 100), context).editableBounds,
         } : n);
       } else if (command.type === 'SET_SWAP_AMOUNT') {
         if (locked) return reject('LOCKED_PARAMETER: unlock on canvas before editing.');
@@ -320,6 +331,8 @@ export function editorReducer(state: EditorState, command: Command, context?: Re
         nodes = nodes.map(n => n.nodeId === node.nodeId ? { ...n,
           inputs: n.inputs.map(p => p.name === 'amount-in' ? { ...parameter, value: { ...parameter.value, amount } } : p),
           userConstraints: n.userConstraints.map(c => c.kind === 'MAXIMUM_INPUT' ? { ...c, quantity: { ...c.quantity, amount } } : c),
+          editableBounds: n.editableBounds.map(bound => bound.parameterName === 'amount-in' && BigInt(bound.maximumAmount) < BigInt(amount)
+            ? { ...bound, maximumAmount: amount } : bound),
         } : n);
       } else if (command.type === 'SET_SLIPPAGE') {
         let bps: number;

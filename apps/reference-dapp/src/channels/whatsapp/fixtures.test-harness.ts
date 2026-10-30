@@ -12,7 +12,7 @@ export const sha256Hex = (value: string) => createHash('sha256').update(value, '
 /** A complete local configuration with generated secrets (fixture provider; loopback origin). */
 export function whatsAppEnv(overrides: Record<string, string | undefined> = {}) {
   const appSecret = randomBytes(16).toString('hex'), verifyToken = randomBytes(24).toString('base64url'), channelSecret = randomBytes(32).toString('hex');
-  const env: Record<string, string | undefined> = { FLOFI_WHATSAPP: 'enabled', FLOFI_WHATSAPP_PROVIDER: 'fixture', WHATSAPP_APP_SECRET: appSecret,
+  const env: Record<string, string | undefined> = { FLOFI_NETWORK_SCOPE: 'ENGINEERING_TESTNETS', FLOFI_WHATSAPP: 'enabled', FLOFI_WHATSAPP_PROVIDER: 'fixture', WHATSAPP_APP_SECRET: appSecret,
     WHATSAPP_WEBHOOK_VERIFY_TOKEN: verifyToken, WHATSAPP_PHONE_NUMBER_ID: PHONE_NUMBER_ID, WHATSAPP_BUSINESS_ACCOUNT_ID: BUSINESS_ACCOUNT_ID,
     FLOFI_WHATSAPP_ALLOWED_SENDERS: sha256Hex(USER_BSUID), FLOFI_CHANNEL_SECRET: channelSecret, FLOFI_PUBLIC_ORIGIN: 'http://127.0.0.1:3100',
     FLOFI_CHANNEL_SUPPORT_CONTACT: 'support@flofi.test', FLOFI_CHANNEL_PRIVACY_URL: 'https://flofi.test/privacy', ...overrides };

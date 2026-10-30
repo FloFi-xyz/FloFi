@@ -94,19 +94,32 @@ async function confirmPass(deps: RunnerDeps, run: RunRecord): Promise<Pass> {
       if (run.expiresAt <= now) return stopBefore(deps, run, steps, k, 'WORKFLOW_RUN_EXPIRED');
       // BUILD-CROSSCHAIN-UNIVERSAL-001: confirm mode resolves bound amounts from the producer step's reconciled received facts
       // (the same min(cap, received) rule delegated runs already apply).
-      const binding = composed.bindings.find(b => b.step === k) ?? null;
+      const bindings = composed.bindings.filter(b => b.step === k);
       let strategy = composed.steps[k]!.strategy;
       let bound: BoundResolution | null = null;
-      if (binding) {
+      const resolutions: BoundResolution[] = [];
+      for (const binding of bindings) {
         const producer = steps[binding.amountFrom]!;
         if (producer.state !== 'RECONCILED' || !producer.outcome) return stopBefore(deps, run, steps, k, 'WORKFLOW_BINDING_PRODUCER_NOT_RECONCILED');
         const key = assetKey({ chain: binding.asset.chainId, address: binding.asset.address });
         const received = producer.outcome.received.filter(r => r.asset === key).reduce((sum, r) => sum + BigInt(r.amount), 0n);
-        const used = boundAmount(binding.cap, received);
+        // One reconciled delivery is a finite funding budget across all its consumers. Reserve an earlier consumer's approved maximum
+        // unless its reconciled record proves it spent less; missing spend evidence must never unlock the owner's unrelated balance.
+        const consumed = steps.filter(previous => previous.stepIndex < k && previous.bound).reduce((sum, previous) => {
+          const prior = [previous.bound!, ...previous.bound!.additional ?? []].filter(resolution => resolution.amountFrom === binding.amountFrom &&
+            assetKey({ chain: resolution.asset.chainId, address: resolution.asset.address }) === key);
+          if (!prior.length) return sum;
+          const reserved = prior.reduce((total, resolution) => total + BigInt(resolution.used), 0n);
+          const facts = previous.outcome?.spent.filter(fact => fact.asset === key) ?? [];
+          const spent = facts.reduce((total, fact) => total + BigInt(fact.amount), 0n);
+          return sum + (facts.length && spent < reserved ? spent : reserved);
+        }, 0n);
+        const used = boundAmount(binding.cap, received > consumed ? received - consumed : 0n);
         if (used <= 0n) return stopBefore(deps, run, steps, k, 'WORKFLOW_BINDING_NOTHING_RECEIVED');
-        strategy = boundStrategy(composed.steps[k]!.strategy, used, binding.asset.decimals);
-        bound = { amountFrom: binding.amountFrom, asset: binding.asset, cap: binding.cap, received: received.toString(), used: used.toString() };
+        strategy = boundStrategy(strategy, used, binding.asset.decimals, binding.inputAsset);
+        resolutions.push({ amountFrom: binding.amountFrom, asset: binding.asset, cap: binding.cap, received: received.toString(), used: used.toString() });
       }
+      if (resolutions[0]) bound = { ...resolutions[0], ...resolutions.length > 1 ? { additional: resolutions.slice(1) } : {} };
       const policy = deps.policyFor(run);
       if (!policy) return settled(run);
       // The step alone, re-composed now (with the resolved amount when bound), must pass its own gates and review today.
@@ -175,7 +188,7 @@ function resolvedStrategy(composed: WorkflowComposition, k: number, s: Delegated
   const base = composed.steps[k]!.strategy, binding = composed.bindings.find(b => b.step === k);
   if (!binding) return base;
   const spent = ((s.plan?.plan as { spend?: { amount: string }[] } | undefined)?.spend ?? [])[0]?.amount;
-  return spent ? boundStrategy(base, BigInt(spent), binding.asset.decimals) : base;
+  return spent ? boundStrategy(base, BigInt(spent), binding.asset.decimals, binding.inputAsset) : base;
 }
 
 async function delegatedPass(deps: RunnerDeps, run: RunRecord): Promise<Pass> {

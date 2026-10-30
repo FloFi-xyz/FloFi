@@ -17,6 +17,9 @@ import { ownerFlowRuntime } from '../../workflow-runs/workflow-run.test-harness.
 import { handleChannelDispatch } from '../dispatch-http.ts';
 import { botApi, telegramEnv, telegramRequest, textUpdate } from './fixtures.test-harness.ts';
 import { handleTelegramWebhook } from './handler.ts';
+import type { ChannelInterpreter } from '../core/conversation.ts';
+import { intent } from '../../domain/copilot-session.test-harness.ts';
+import type { FlowName } from '../../../backend/flows.ts';
 
 const OWNER = '0x1111111111111111111111111111111111111111';
 const SWAP = 'swap 1 USDC to WETH on Base Sepolia slippage 50 bps', BRIDGE = 'bridge 5 USDC from Base Sepolia to Arbitrum Sepolia via auto slippage 50 bps';
@@ -25,15 +28,16 @@ beforeAll(async () => { t = await createTestDatabase(); });
 afterAll(async () => { await t?.drop(); });
 const evm = (address: string): WalletRef => ({ namespace: 'eip155', address });
 
-async function deployment() {
+async function deployment(options: { interpreter?: ChannelInterpreter; flows?: readonly FlowName[]; env?: Record<string, string | undefined> } = {}) {
   const tenantId = `wf-${randomBytes(6).toString('hex')}`;
   await t.db.query('INSERT INTO tenants (tenant_id) VALUES ($1)', [tenantId]);
   const token = randomBytes(24).toString('base64url'), tg = telegramEnv();
-  const env = { ...tg.env, TENANT_ID: tenantId, FLOFI_WORKFLOW_RUNS: 'enabled', FLOFI_CHANNEL_DISPATCH_TOKEN_SHA256: createHash('sha256').update(token).digest('hex') };
+  const env = { ...tg.env, ...options.env, TENANT_ID: tenantId, FLOFI_WORKFLOW_RUNS: 'enabled',
+    ...options.interpreter ? { FLOFI_CHANNEL_COPILOT: 'enabled' } : {}, FLOFI_CHANNEL_DISPATCH_TOKEN_SHA256: createHash('sha256').update(token).digest('hex') };
   const api = botApi(), host = { db: t.db, tenantId };
   const now = () => new Date();
-  const flows = ownerFlowRuntime(['base-sepolia-swap', 'crosschain-router-testnet'], { enabled: true, delegation: null }, now);
-  const common = { env, host, runtime: flows.runtime, interpreter: null, now, sleep: async () => undefined, random: () => 0.5 };
+  const flows = ownerFlowRuntime(options.flows ?? ['base-sepolia-swap', 'crosschain-router-testnet'], { enabled: true, delegation: null }, now);
+  const common = { env, host, runtime: flows.runtime, interpreter: options.interpreter ?? null, now, sleep: async () => undefined, random: () => 0.5 };
   const say = async (text: string) => { const r = await handleTelegramWebhook(telegramRequest(textUpdate(text), tg.webhookSecret), { ...common, fetch: api.fetch }); expect(r.status).toBe(200); };
   const sweep = async () => { const r = await handleChannelDispatch(new Request('http://127.0.0.1:3100/api/channels/dispatch', { headers: { authorization: `Bearer ${token}` } }),
     { ...common, seams: { telegramFetch: api.fetch } }); expect(r.status).toBe(200); };
@@ -45,6 +49,21 @@ async function deployment() {
 }
 
 describe('BUILD-CHAT-E2E-001 Telegram multi-step workflow (PostgreSQL, Bot API double, MOCKED flows)', () => {
+  it('retains a naturally planned mainnet goal as the complete canonical sequence when LINK renews the approval', async () => {
+    const interpreter: ChannelInterpreter = async () => ({ ok: true, intent: intent.goal({ network: 'BASE', asset: 'USDC', amount: '10' },
+      { network: 'ARBITRUM', use: 'SUPPLY' }, { recipient: OWNER }) });
+    const d = await deployment({ interpreter, flows: ['crosschain-router', 'arbitrum-aave'],
+      env: { FLOFI_NETWORK_SCOPE: undefined, FLOFI_TELEGRAM_ACCESS_MODE: undefined, FLOFI_CHANNEL_SIMULATION: 'disabled' } });
+    await d.say(`I have 10 USDC on Base and want to supply it on Aave on Arbitrum beneficiary ${OWNER}`);
+    expect(d.api.texts().at(-1)).toMatch(/Strategy ready:[\s\S]*1\.[\s\S]*2\./);
+    const first = d.api.lastLink();
+    await d.say('link');
+    expect(d.api.lastLink()).not.toBe(first);
+    const rows = (await t.db.query('SELECT strategy, workflow_hash FROM mcp_handoffs WHERE tenant_id = $1 ORDER BY created_at', [d.tenantId])).rows;
+    expect(rows).toHaveLength(2);
+    expect(rows[0]!.workflow_hash).toBe(rows[1]!.workflow_hash);
+    for (const row of rows) expect(row.strategy).toMatchObject({ version: 2, steps: [{ action: 'bridge' }, { action: 'supply' }], bindings: [{ step: 1, amountFrom: 0 }] });
+  });
   it('authors steps in chat, hands ONE approval to the owner, follows each step to completion and never restarts a running workflow', async () => {
     const d = await deployment();
     await d.say(SWAP);

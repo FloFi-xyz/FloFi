@@ -3,7 +3,7 @@ import { transferDetails, isSolanaTransferNetwork } from './robinhood-transfer-a
 import { solanaSwapDetails, solanaSwapLabels, solanaTokenMint } from './jupiter-authoring';
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { ReviewContext } from '@defi-workflow-engine/reference-linter';
-import type { EditorState } from './editor';
+import { editorReducer, type EditorState } from './editor';
 import type { Command } from './commands';
 import { swapDetails } from './swap-authoring';
 import { bridgeDetails } from './bridge-authoring';
@@ -22,6 +22,19 @@ export function describeProposal(before: EditorState, after: EditorState, comman
     return Object.freeze([`Revision ${before.workflow.revision} → ${after.workflow.revision}`, `Remove: ${selected.join(', ')}`,
       ...linked.length ? [`Also removed (cannot run without it): ${linked.join(', ')}`] : [],
       'Removing a step changes only the draft. A transaction already submitted is not cancelled; prior reviews are retired.']);
+  }
+  if (command.type === 'ADD_SEQUENCE') {
+    // BUILD-FLOFI-INTELLIGENCE-001: each step described exactly as its own proposal, in order, then how the sequence runs.
+    const lines = [`Revision ${before.workflow.revision} → ${after.workflow.revision}`];
+    let state = before;
+    for (const [index, step] of command.steps.entries()) {
+      const sub = { ...step, source: command.source, baseRevision: state.workflow.revision } as Command, next = editorReducer(state, sub, context);
+      lines.push(...describeProposal(state, next, sub, context).filter(line => !line.startsWith('Revision ')).map(line => `Step ${index + 1}: ${line}`));
+      state = next;
+    }
+    lines.push('The steps run in order as a reviewed sequence: each one gets its own fresh simulation, Review and wallet signature after the previous step settled. ' +
+      'A step that spends an earlier step\'s output uses what that step actually delivered, up to its own amount.');
+    return Object.freeze(lines);
   }
   if (command.type === 'ADD_SOLANA_COMPOSITION') {
     // The swap (new, or the existing step) and the position it funds, added and linked as the Canvas does.

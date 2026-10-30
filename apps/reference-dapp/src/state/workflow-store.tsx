@@ -19,7 +19,7 @@ import { readBaseQuote } from '../app/observation-action';
 import { browserFailureMessage, initialObservationState, observationReducer, receiveObservation, type ObservationState } from '../domain/base-observation';
 import { actionReviewValue } from '../domain/canvas-action-setup';
 import { createCryptoActionNode, type CryptoActionInput, type CryptoSelection, type CryptoSelections } from '../domain/crypto-action-picker';
-import { boundAmount, boundProjection, stepNodeKey, validCompletions, workflowSequence, type CompletedStep, type SequenceStep, type WorkflowSequence } from '../domain/workflow-sequence';
+import { boundAmount, boundProjection, fundingAllocations, stepNodeKey, validCompletions, workflowSequence, type CompletedStep, type SequenceStep, type WorkflowSequence } from '../domain/workflow-sequence';
 
 type Pending = { valid: boolean; command: Command; diff: readonly string[]; review: ReviewResult | null; authoringId?: string; authoringAmount?: string };
 type Store = { restorationEpoch: number; state: EditorState; dispatch: Dispatch<Command>; context: ReviewContext;
@@ -169,21 +169,24 @@ export function WorkflowProvider({ children, initialContext, initialWorkflowId =
   }, [state.workflow, context, contextOf, sequence]);
   // Executed steps of this workflow's sequence (this visit). Only steps that still describe the workflow count; any other change starts over.
   const [sequenceRun, setSequenceRun] = useState<{ readonly workflowId: string; readonly completed: readonly CompletedStep[] }>({ workflowId: '', completed: [] });
-  const completed = sequenceRun.workflowId === state.workflow.workflowId ? validCompletions(sequence, state.workflow, sequenceRun.completed) : [];
+  const completed = useMemo(() => sequenceRun.workflowId === state.workflow.workflowId ? validCompletions(sequence, state.workflow, sequenceRun.completed) : [],
+    [sequenceRun, state.workflow, sequence]);
   const cursor = sequence ? Math.min(completed.length, sequence.steps.length - 1) : 0, currentStep = sequence?.steps[cursor] ?? null;
   const finished = Boolean(sequence && completed.length >= sequence.steps.length);
   const bound = currentStep ? boundAmount(currentStep, completed) : null;
   const producerDelivery = currentStep?.fundedBy !== null && currentStep?.fundedBy !== undefined ? completed[currentStep.fundedBy]?.received ?? null : null;
-  const boundWorkflow = useMemo(() => currentStep ? boundProjection(currentStep, bound, contextOf(currentStep.projection)) : null, [currentStep, bound, contextOf]);
+  const boundWorkflow = useMemo(() => currentStep ? boundProjection(currentStep, bound, contextOf(currentStep.projection), completed) : null, [currentStep, bound, contextOf, completed]);
   const runtimeWorkflow = sequence && currentStep ? boundWorkflow ?? currentStep.projection : state.workflow;
   const sequenceView: SequenceView | null = sequence && currentStep ? { steps: sequence.steps, cursor, current: currentStep, completed, bound, finished,
-    fundingIssue: finished || currentStep.fundedBy === null ? null : producerDelivery === null ? 'DELIVERY_NOT_PROVEN' : producerDelivery === '0' ? 'NOTHING_DELIVERED'
+    fundingIssue: finished || currentStep.fundedBy === null ? null : currentStep.funding.some(f => completed[f.fundedBy]?.received == null) || producerDelivery === null ? 'DELIVERY_NOT_PROVEN'
+      : currentStep.funding.some(f => completed[f.fundedBy]?.received === '0') || producerDelivery === '0' ? 'NOTHING_DELIVERED'
       : boundWorkflow === null ? 'BOUND_REFUSED' : null } : null;
   const sequenceRef = useRef({ sequence, completed, workflow: state.workflow }); sequenceRef.current = { sequence, completed, workflow: state.workflow };
   const completeSequenceStep = useCallback((index: number, completion: { readonly received: string | null; readonly runKey: string | null }) => {
     const { sequence, completed, workflow } = sequenceRef.current, step = sequence?.steps[index], node = step && workflow.nodes.find(item => item.nodeId === step.nodeId);
     if (!step || !node || index !== completed.length) return;
-    setSequenceRun({ workflowId: workflow.workflowId, completed: [...completed, { nodeId: step.nodeId, node: stepNodeKey(node), received: completion.received, runKey: completion.runKey }] });
+    setSequenceRun({ workflowId: workflow.workflowId, completed: [...completed, { nodeId: step.nodeId, node: stepNodeKey(node), received: completion.received, runKey: completion.runKey,
+      allocations: fundingAllocations(step, completed) }] });
   }, []);
   const eligibility: Eligibility = useMemo(() => authoringIncomplete ? { eligible: false, reason: 'Configure the amount in Build before simulating.' }
     : generationEligibility(state.workflow, context), [state.workflow, context, authoringIncomplete]);

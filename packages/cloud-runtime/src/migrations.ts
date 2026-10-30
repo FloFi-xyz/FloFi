@@ -44,6 +44,7 @@ export const SHIPPED_MIGRATIONS: readonly MigrationIdentity[] = Object.freeze([
   { version: 14, name: 'learning_automatic', sha256: '624884d98407383c7093f6a56885ec13001614ddb9e2dcc2ac203451b519314e' },
   { version: 15, name: 'workflow_runs', sha256: '5dfefcf7465d874da5880ae5a082f7f47e28ede51adfdef46dbbe3e3f7ba945f' },
   { version: 16, name: 'owner_history_purge', sha256: 'a3c258cadd9d7865ad9d36d63ec0921fc47455bb3651c201074f3b0486b4be6f' },
+  { version: 17, name: 'copilot_metrics', sha256: 'c20a07de7bb504cbb8d95776796a0e6b412a1130c0539aee3449ceb6f89c45bf' },
 ].map(migration => Object.freeze(migration)));
 
 /**
@@ -60,6 +61,11 @@ export type ForwardCompatibilityCertificate = {
  * byte-identical to what was certified).
  */
 export const CERTIFIED_FORWARD_MIGRATIONS: readonly ForwardCompatibilityCertificate[] = Object.freeze([
+  {
+    base: { version: 16, name: 'owner_history_purge', sha256: 'a3c258cadd9d7865ad9d36d63ec0921fc47455bb3651c201074f3b0486b4be6f' },
+    migrations: [{ version: 17, name: 'copilot_metrics', sha256: 'c20a07de7bb504cbb8d95776796a0e6b412a1130c0539aee3449ceb6f89c45bf' }],
+    assessment: 'docs/deploy/SCHEMA-COMPATIBILITY.md#11-certificate-0017_copilot_metrics',
+  },
   {
     base: { version: 15, name: 'workflow_runs', sha256: '5dfefcf7465d874da5880ae5a082f7f47e28ede51adfdef46dbbe3e3f7ba945f' },
     migrations: [{ version: 16, name: 'owner_history_purge', sha256: 'a3c258cadd9d7865ad9d36d63ec0921fc47455bb3651c201074f3b0486b4be6f' }],

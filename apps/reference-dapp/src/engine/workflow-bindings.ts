@@ -17,29 +17,53 @@
  */
 import type { Composition } from './strategy-engine';
 import type { SchemaIssue, StrategyAction, StrategySpec } from './strategy-spec';
+import { orcaLiquidityProfile, uniswapLiquidityProfile, SOLANA_MAINNET_TOKENS } from '@defi-workflow-engine/action-registry';
+import { resolveNetworkAsset } from '../domain/asset-catalogs';
 
 export type WorkflowBindingInput = { readonly step: number; readonly amountFrom: number };
 export type AssetIdentity = { readonly chainId: string; readonly address: string; readonly decimals: number };
 /** A validated binding with the bound asset's identity and the consumer's cap (native units of that asset). */
-export type WorkflowBinding = WorkflowBindingInput & { readonly asset: AssetIdentity; readonly cap: string };
+export type WorkflowBinding = WorkflowBindingInput & { readonly asset: AssetIdentity; readonly cap: string;
+  /** A liquidity consumer has two inputs; this is the exact canonical maxAmounts key selected by token identity. */
+  readonly inputAsset?: string };
 type Node = Composition['workflow']['nodes'][number];
-type Quantity = { readonly asset: { readonly chainId: string; readonly address?: string; readonly decimals: number }; readonly amount: string };
+type Quantity = { readonly asset: { readonly chainId: string; readonly address?: string; readonly nativeId?: string; readonly decimals: number }; readonly amount: string };
 
-const CONSUMERS: ReadonlySet<StrategyAction> = new Set(['swap', 'bridge', 'supply', 'repay', 'transfer']);
+const CONSUMERS: ReadonlySet<StrategyAction> = new Set(['swap', 'bridge', 'supply', 'repay', 'transfer', 'add_liquidity']);
 const PRODUCERS: ReadonlySet<StrategyAction> = new Set(['swap', 'bridge', 'withdraw', 'borrow']);
-const identity = (asset: Quantity['asset'] | undefined): AssetIdentity | null => asset && typeof asset.address === 'string' && Number.isInteger(asset.decimals)
-  ? { chainId: asset.chainId, address: asset.chainId.startsWith('eip155:') ? asset.address.toLowerCase() : asset.address, decimals: asset.decimals } : null;
+/** Native identifiers are internal binding keys only. They never become a token contract or transfer recipient. */
+const identity = (asset: Quantity['asset'] | undefined): AssetIdentity | null => {
+  if (!asset || !Number.isInteger(asset.decimals)) return null;
+  const address = typeof asset.address === 'string' ? asset.address : asset.nativeId === 'ETH' && asset.chainId.startsWith('eip155:') && asset.decimals === 18
+    ? '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee' : asset.nativeId === 'SOL' && asset.chainId.startsWith('solana:') && asset.decimals === 9 ? SOLANA_MAINNET_TOKENS.SOL.mint : null;
+  return address ? { chainId: asset.chainId, address: asset.chainId.startsWith('eip155:') ? address.toLowerCase() : address, decimals: asset.decimals } : null;
+};
 export const sameAsset = (a: AssetIdentity, b: AssetIdentity): boolean => a.chainId === b.chainId && a.address === b.address && a.decimals === b.decimals;
 const financial = (c: Composition): readonly Node[] => c.workflow.nodes.filter(n => !n.actionType.startsWith('mock-'));
 
+/** Every wallet input of an isolated step; position deposits remain distinct exact token identities. */
+export function stepInputs(c: Composition): readonly (AssetIdentity & { readonly amount: string; readonly inputAsset?: string })[] {
+  if (!CONSUMERS.has(c.strategy.action)) return [];
+  const nodes = financial(c);
+  if (nodes.length !== 1) return [];
+  const limits = nodes[0]!.userConstraints.filter(u => u.kind === 'MAXIMUM_INPUT') as unknown as { quantity: Quantity }[];
+  return limits.flatMap(({ quantity }) => {
+    const asset = identity(quantity.asset);
+    if (!asset || !/^[1-9][0-9]{0,77}$/.test(quantity.amount)) return [];
+    if (c.strategy.action !== 'add_liquidity') return [{ ...asset, amount: quantity.amount }];
+    const orca = orcaLiquidityProfile(asset.chainId), uniswap = uniswapLiquidityProfile(asset.chainId);
+    const symbol = resolveNetworkAsset(asset.chainId, { address: asset.address })?.symbol
+      ?? (orca && [orca.token0, orca.token1].find(t => t.mint === asset.address && t.decimals === asset.decimals)?.symbol)
+      ?? (uniswap && [uniswap.token0, uniswap.token1].find(t => t.address.toLowerCase() === asset.address && t.decimals === asset.decimals)?.symbol);
+    const inputAsset = symbol && Object.keys(c.strategy.maxAmounts).find(key => key === symbol);
+    return inputAsset ? [{ ...asset, amount: quantity.amount, inputAsset }] : [];
+  });
+}
+
 /** What one composed step spends from the owner's wallet: its single MAXIMUM_INPUT, for a consumer action. */
 export function stepInput(c: Composition): (AssetIdentity & { readonly amount: string }) | null {
-  if (!CONSUMERS.has(c.strategy.action)) return null;
-  const nodes = financial(c);
-  const limits = nodes.flatMap(n => n.userConstraints).filter(u => u.kind === 'MAXIMUM_INPUT') as unknown as { quantity: Quantity }[];
-  if (nodes.length !== 1 || limits.length !== 1) return null;
-  const asset = identity(limits[0]!.quantity.asset);
-  return asset && /^[1-9][0-9]{0,77}$/.test(limits[0]!.quantity.amount) ? { ...asset, amount: limits[0]!.quantity.amount } : null;
+  const inputs = stepInputs(c);
+  return inputs.length === 1 ? inputs[0]! : null;
 }
 /** What one composed step delivers to the owner's own wallet, for a producer action. */
 export function stepOutput(c: Composition): AssetIdentity | null {
@@ -61,25 +85,29 @@ export type BindingCheck = { readonly ok: true; readonly bindings: readonly Work
 /** Validates raw bindings against the composed steps (order, one binding per consumer, action shapes, exact token identity). */
 export function validateBindings(steps: readonly Composition[], raw: readonly WorkflowBindingInput[] | undefined): BindingCheck {
   if (!raw?.length) return { ok: true, bindings: [] };
-  const out: WorkflowBinding[] = [], seen = new Set<number>();
+  const out: WorkflowBinding[] = [], seen = new Set<string>();
   for (const [i, b] of raw.entries()) {
     const fail = (code: string, field = ''): BindingCheck => ({ ok: false, code, issues: [{ path: `/bindings/${i}${field}`, rule: code }] });
-    if (!Number.isInteger(b.step) || !Number.isInteger(b.amountFrom) || b.step >= steps.length || b.amountFrom < 0 || b.amountFrom >= b.step || seen.has(b.step))
+    if (!Number.isInteger(b.step) || !Number.isInteger(b.amountFrom) || b.step < 1 || b.step >= steps.length || b.amountFrom < 0 || b.amountFrom >= b.step)
       return fail('WORKFLOW_BINDING_INVALID');
-    seen.add(b.step);
     const consumer = steps[b.step]!, producer = steps[b.amountFrom]!;
-    const input = stepInput(consumer);
-    if (!input) return fail('WORKFLOW_BINDING_CONSUMER_UNSUPPORTED', '/step');
+    const inputs = stepInputs(consumer);
+    if (!inputs.length) return fail('WORKFLOW_BINDING_CONSUMER_UNSUPPORTED', '/step');
     const output = stepOutput(producer);
     if (!output) return fail('WORKFLOW_BINDING_PRODUCER_UNSUPPORTED', '/amountFrom');
-    if (!sameAsset(input, output)) return fail('WORKFLOW_BINDING_ASSET_MISMATCH');
-    out.push({ step: b.step, amountFrom: b.amountFrom, asset: { chainId: input.chainId, address: input.address, decimals: input.decimals }, cap: input.amount });
+    const input = inputs.find(candidate => sameAsset(candidate, output));
+    if (!input) return fail('WORKFLOW_BINDING_ASSET_MISMATCH');
+    const key = `${b.step}:${input.chainId}:${input.address}`;
+    if (seen.has(key)) return fail('WORKFLOW_BINDING_INVALID');
+    seen.add(key);
+    out.push({ step: b.step, amountFrom: b.amountFrom, asset: { chainId: input.chainId, address: input.address, decimals: input.decimals }, cap: input.amount,
+      ...input.inputAsset ? { inputAsset: input.inputAsset } : {} });
   }
-  return { ok: true, bindings: out.sort((a, b) => a.step - b.step) };
+  return { ok: true, bindings: out.sort((a, b) => a.step - b.step || a.amountFrom - b.amountFrom) };
 }
 /** The canonical form a strategy and the sequence hash carry: `{step, amountFrom}` by consumer step. */
 export const canonicalBindings = (bindings: readonly WorkflowBindingInput[]): WorkflowBindingInput[] =>
-  [...bindings].map(b => ({ step: b.step, amountFrom: b.amountFrom })).sort((a, b) => a.step - b.step);
+  [...bindings].map(b => ({ step: b.step, amountFrom: b.amountFrom })).sort((a, b) => a.step - b.step || a.amountFrom - b.amountFrom);
 
 /** min(cap, received): the amount a bound step actually uses (native units). Zero means there is nothing to spend. */
 export function boundAmount(cap: string | bigint, received: string | bigint): bigint {
@@ -94,7 +122,11 @@ export function decimalOf(native: bigint, decimals: number): string {
   return fraction ? `${whole}.${fraction}` : whole;
 }
 /** The consumer step's strategy with its amount set to the resolved bound amount. Every other field is unchanged. */
-export function boundStrategy(spec: StrategySpec, native: bigint, decimals: number): StrategySpec {
+export function boundStrategy(spec: StrategySpec, native: bigint, decimals: number, inputAsset?: string): StrategySpec {
   if (!CONSUMERS.has(spec.action) || native <= 0n) throw new Error('WORKFLOW_BINDING_AMOUNT_INVALID');
+  if (spec.action === 'add_liquidity') {
+    if (!inputAsset || !Object.hasOwn(spec.maxAmounts, inputAsset)) throw new Error('WORKFLOW_BINDING_ASSET_MISMATCH');
+    return { ...spec, maxAmounts: { ...spec.maxAmounts, [inputAsset]: decimalOf(native, decimals) } };
+  }
   return { ...spec, amount: decimalOf(native, decimals) } as StrategySpec;
 }

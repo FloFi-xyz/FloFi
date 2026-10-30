@@ -38,7 +38,16 @@ const lendingNetwork = (text: string): SupplyInput['network'] => {
 const assetReference = '([^\\x00-\\x1f\\x7f]{1,160}?)';
 const lendingAsset = (network: SupplyInput['network'], text: string): SupplyInput['asset'] =>
   lendingProfileFor(network, text).symbol;
+/**
+ * BUILD-FLOFI-INTELLIGENCE-001: the authoring commands a goal plan may combine into one `ADD_SEQUENCE` (each step is an independent single-action
+ * runtime step of a reviewed sequence, `domain/workflow-sequence.ts`).
+ */
+export const SEQUENCE_STEP_COMMANDS: readonly string[] = Object.freeze(['ADD_CRYPTO_ACTION', 'ADD_SWAP', 'ADD_TESTNET_SWAP', 'ADD_ETHEREUM_SEPOLIA_SWAP', 'ADD_SOLANA_SWAP', 'ADD_ROUTER_BRIDGE', 'ADD_UNIVERSAL_BRIDGE', 'ADD_SUPPLY',
+  'ADD_RH_TRANSFER', 'ADD_BORROW', 'ADD_REPAY', 'ADD_WITHDRAW', 'ADD_UNISWAP_LIQUIDITY', 'ADD_SOLANA_LIQUIDITY', 'ADD_LIQUIDITY']);
+export const MAX_SEQUENCE_STEPS = 4;
 export type Command = Base & (
+  /** BUILD-FLOFI-INTELLIGENCE-001: several authoring steps applied in order as one change (one review of the proposal, one undo). */
+  | { readonly type: 'ADD_SEQUENCE'; readonly steps: readonly Command[] }
   | { readonly type: 'ADD_CRYPTO_ACTION'; readonly input: CryptoActionInput }
   | { readonly type: 'SET_CRYPTO_ACTION'; readonly nodeId: string; readonly input: CryptoActionInput }
   | {readonly type:'AUTHOR_LENDING';readonly input:LendingInput}
@@ -322,7 +331,7 @@ export function commandIsValid(input: unknown): input is Command {
   if (!Number.isSafeInteger(command.baseRevision) || (command.baseRevision as number) < 0
       || !['CHAT', 'CANVAS'].includes(command.source as string)) return false;
   const fields: Record<string, string[]> = {
-    ADD_CRYPTO_ACTION: ['input'], SET_CRYPTO_ACTION: ['nodeId', 'input'],
+    ADD_SEQUENCE: ['steps'], ADD_CRYPTO_ACTION: ['input'], SET_CRYPTO_ACTION: ['nodeId', 'input'],
     AUTHOR_LENDING:['input'], ADD_RH_TRANSFER: ['input'], SET_RH_TRANSFER: ['nodeId','input'], ADD_WITHDRAW: ['input'], SET_WITHDRAW: ['nodeId','input'], ADD_REPAY: ['input'], SET_REPAY: ['nodeId','input'], ADD_BORROW: ['input'], SET_BORROW: ['nodeId','input'], ADD_SUPPLY: ['input'], SET_SUPPLY: ['nodeId','input'], ADD_SOLANA_SWAP: ['input'], SET_SOLANA_SWAP: ['nodeId','input'], ADD_SOLANA_LIQUIDITY: ['input'], SET_SOLANA_LIQUIDITY: ['nodeId','input'], ADD_SOLANA_COMPOSITION: ['swap', 'from', 'liquidity'], MANAGE_SOLANA_POSITION: ['input', 'positionMint', 'operation', 'partBps'], ADD_UNISWAP_LIQUIDITY: ['input'], SET_UNISWAP_LIQUIDITY: ['nodeId','input'], ADD_ROUTER_BRIDGE: ['input'], SET_ROUTER_BRIDGE: ['nodeId','input'], ADD_UNIVERSAL_BRIDGE: ['input'], SET_UNIVERSAL_BRIDGE: ['nodeId','input'], ADD: ['kind'], AUTHOR_CROSS_CHAIN_LIQUIDITY: ['input'], AUTHOR_BRIDGE_SWAP: ['input'], AUTHOR_ACROSS: ['input'], ADD_BRIDGE: ['input'], SET_BRIDGE: ['nodeId', 'input'], SET_AMOUNT: ['nodeId', 'amount'], LOCK: ['nodeId', 'locked'], AUTHOR_COMPOSITION: ['safe', 'input'], ADD_LIQUIDITY: ['input'], SET_LIQUIDITY: ['nodeId', 'input'],
     CONNECT: ['from', 'to'], DISCONNECT: ['from', 'to'], REMOVE: ['nodeId'], REMOVE_MANY: ['nodeIds'], ADD_SWAP: ['direction', 'amount', 'slippage'], ADD_TESTNET_SWAP: ['direction', 'amount', 'slippage'], ADD_ETHEREUM_SEPOLIA_SWAP: ['direction', 'amount', 'slippage'], ADD_COW_SWAP: ['direction', 'amount', 'slippage'],
     SET_SWAP_AMOUNT: ['nodeId', 'amount'], SET_SLIPPAGE: ['nodeId', 'slippage'],
@@ -332,6 +341,11 @@ export function commandIsValid(input: unknown): input is Command {
   const id = (value: unknown) => typeof value === 'string' && /^node-\d{3,16}$/.test(value);
   const nodeRef = (value: unknown) => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value);
   switch (command.type) {
+    // Two to four authoring steps of the same source, each itself a valid command of a sequence-step type; never nested.
+    case 'ADD_SEQUENCE': return Array.isArray(command.steps) && Object.getPrototypeOf(command.steps) === Array.prototype && command.steps.length >= 2 &&
+      command.steps.length <= MAX_SEQUENCE_STEPS && Reflect.ownKeys(command.steps).length === command.steps.length + 1 &&
+      command.steps.every(step => !!step && typeof step === 'object' && SEQUENCE_STEP_COMMANDS.includes((step as { type?: unknown }).type as string) &&
+        (step as { source?: unknown }).source === command.source && commandIsValid(step));
     case 'ADD_CRYPTO_ACTION':
     case 'SET_CRYPTO_ACTION': {
       if (command.type === 'SET_CRYPTO_ACTION' && !id(command.nodeId)) return false;

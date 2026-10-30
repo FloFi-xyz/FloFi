@@ -21,17 +21,19 @@ describe('closed runtime validation', () => {
     forged.assets.USDC.maximumAmountUnits = '999999999999999999999';
     expect(() => createReviewContext(forged)).toThrow('INVALID_REVIEW_CONTEXT');
     expect(Object.isFrozen(context.assets.USDC.asset)).toBe(true);
-    expect(context.assets.USDC.maximumAmountUnits).toBe('1000000000000');
+    expect(context.assets.USDC.maximumAmountUnits).toBe((2n ** 256n - 1n).toString());
   });
   it('converts precisely within caps without floats', () => {
     expect(parseHumanAmount('0.000001', 'USDC', context)).toBe('1');
     expect(parseHumanAmount('0.000000000000000001', 'WETH', context)).toBe('1');
     expect(parseHumanAmount('1000000', 'USDC', context)).toBe('1000000000000');
     expect(parseHumanAmount('1000', 'WETH', context)).toBe('1000000000000000000000');
-    for (const value of ['', '0', '01', '-1', '1e3', '1.0000001', '1000000.000001', '1.', ' 1', '1,000', '1'.repeat(81)]) {
+    for (const value of ['', '0', '01', '-1', '1e3', '1.0000001', '1.', ' 1', '1,000', '1'.repeat(81)]) {
       expect(() => parseHumanAmount(value, 'USDC', context)).toThrow();
     }
-    expect(() => parseHumanAmount('1000.000000000000000001', 'WETH', context)).toThrow();
+    expect(parseHumanAmount('1000.000000000000000001', 'WETH', context)).toBe('1000000000000000000001');
+    expect(parseHumanAmount('1000000.000001', 'USDC', context)).toBe('1000000000001');
+    expect(() => parseHumanAmount((2n ** 256n).toString(), 'USDC', context)).toThrow();
     for (const value of ['', '-1', '1.5', '10001', '01', 'NaN']) expect(() => parseSlippage(value)).toThrow();
   });
   it('permits the approved CoW option while preserving legacy Uniswap-only swaps', () => {
@@ -51,7 +53,7 @@ describe('closed runtime validation', () => {
     reject(w => { w.nodes[1]!.editableBounds[0]!.minimumAmount = '2000001'; });
     reject(w => { w.nodes[1]!.editableBounds[0]!.maximumAmount = '1999999'; });
     reject(w => { w.nodes[1]!.editableBounds[0]!.minimumAmount = '0'; });
-    reject(w => { w.nodes[1]!.editableBounds[0]!.maximumAmount = '1000000000001'; });
+    reject(w => { w.nodes[1]!.editableBounds[0]!.maximumAmount = (2n ** 256n).toString(); });
   });
   it('rejects alternate contexts, hidden object fields, unusual arrays and graph cycles', () => {
     const forged = structuredClone(context);
@@ -80,7 +82,7 @@ describe('closed runtime validation', () => {
     reject(w => { asRecord(w.nodes[1]!.inputs[0]!.value).amount = '0001'; });
     reject(w => { asRecord(asRecord(w.nodes[1]!.inputs[0]!.value).asset).decimals = 18; });
     reject(w => { asRecord(w.nodes[1]!.inputs[1]!.value).address = '0xdead'; });
-    reject(w => { w.nodes[1]!.editableBounds[0]!.maximumAmount = '999999999999999'; });
+    reject(w => { w.nodes[1]!.editableBounds[0]!.maximumAmount = (2n ** 256n).toString(); });
     reject(w => { w.nodes[1]!.editableBounds[0]!.minimumAmount = '2000001'; });
     reject(w => { w.nodes[1]!.expectedOutputs[0]!.minimumAmount = '1'; });
     reject(w => { w.nodes[1]!.dependencies.push('node-001'); });

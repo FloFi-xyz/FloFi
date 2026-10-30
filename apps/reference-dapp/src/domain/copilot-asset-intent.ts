@@ -9,6 +9,8 @@ const END = /\s+(?:on|in|from|to|into|for|na|no|da|do|para|pra|por|via|using|usa
 function reference(clause: string): string | null {
   const value = clause.split(END)[0]!.trim().replace(/^(?:some|a little|um pouco de|alguns?)\s+/i, '').replace(/[.!?]+$/, '');
   if (!value || value.length > 160 || networkIdentity(value) || /^(?:the|a|o|as|os|it|there|funds|fundos|money|dinheiro|mesm[oa]|same|of|into|usando|on|na|no|to|para)\b/i.test(value)) return null;
+  // BUILD-FLOFI-INTELLIGENCE-001: a unit after a number ("slippage 50 bps", "1% de deslizamento") is never a token.
+  if (/^(?:bps|bp|basis\s+points?|pontos?(?:\s+base)?|%|percent|por\s*cento|slippage|deslizamento)\b/i.test(value)) return null;
   return /^[\p{L}\p{N}$][\p{L}\p{N} .&'@_+*-]*$/u.test(value) ? value : null;
 }
 export function explicitOutputAsset(text: string): string | null {

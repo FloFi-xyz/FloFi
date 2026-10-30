@@ -9,6 +9,7 @@ import { createHash } from 'node:crypto';
 import { createDatabase, type Database } from '@defi-workflow-engine/cloud-runtime';
 import { createTestWallet } from '../../../packages/reference-reconciler/test/test-wallet.ts';
 import { runAdminCommand } from '../src/admin/cli-commands.ts';
+import { persistCopilotInterpretation, persistCopilotTurn } from '../src/server/copilot-metrics-store.ts';
 import { expect, test } from './fixtures';
 import { installJourneyWallet } from './journey-fixtures';
 
@@ -40,6 +41,14 @@ test('admin console: refusal until granted, overview with network distribution, 
       attempt: { state: 'CONFIRMED', hash: '0x' + 'b'.repeat(64), reconciled: false } });
     await seedRun(db, { id: 'e2e-sol', flow: 'solana-devnet-swap', status: 'DIVERGENT', provenance: 'PUBLIC_DEVNET',
       node: { nodeId: 'x', actionType: 'asset.swap.exact-input', chainId: SOLANA_DEVNET }, attempt: { state: 'REVERTED', hash: 'c'.repeat(88), reconciled: false } });
+    // Synthetic metric seeds exercise the real persistence → Admin rendering boundary; no live model request is made.
+    const metricsHost = { db, tenantId: 'default' }, metric = { event: 'flofi.copilot.interpret', protocol: 'v2', mode: 'live', model: 'browser-fixture-model', outcome: 'OK',
+      intentKind: 'GOAL', topic: null, durationMs: 100, messages: 1, userTurns: 1, inputTokens: 20, outputTokens: 10, reasoningTokens: null,
+      responseModel: null, surface: 'WEB', toolCalls: 2, toolFailures: 0, toolRounds: 1 } as const;
+    await persistCopilotInterpretation(metricsHost, metric);
+    await persistCopilotInterpretation(metricsHost, { ...metric, mode: 'replay', toolCalls: 7 });
+    await persistCopilotTurn(metricsHost, 'live', { event: 'flofi.copilot.turn', version: 1, surface: 'WEB', outcome: 'PROPOSAL', code: null,
+      interpreted: 'GOAL', mismatch: false, clarifications: 0, repeatedQuestions: 0, corrections: 0, turnsInRequest: 1, proposalSteps: 2 }, 'CLIENT');
 
     const stranger = createTestWallet(), operator = createTestWallet();
     await installJourneyWallet(page, [stranger, operator], { chain: '0x14a34' });
@@ -72,7 +81,7 @@ test('admin console: refusal until granted, overview with network distribution, 
     await page.waitForURL(url => url.pathname === '/admin');
     await expect(page.getByRole('heading', { name: 'Overview', level: 1 })).toBeVisible();
     const nav = page.getByRole('navigation', { name: 'Admin' });
-    for (const label of ['Overview', 'Workflows', 'Automations', 'AI Settings', 'AI Learning', 'System Health', 'Access & audit']) await expect(nav.getByRole('link', { name: label })).toBeVisible();
+    for (const label of ['Overview', 'Workflows', 'Automations', 'AI Settings', 'AI Analytics', 'AI Learning', 'System Health', 'Access & audit']) await expect(nav.getByRole('link', { name: label })).toBeVisible();
     await expect(nav.locator('.admin-brand').getByRole('img', { name: 'FloFi', exact: true })).toHaveAttribute('src', '/brand/flofi-wordmark-light.png');
     if (process.env.FLOFI_ADMIN_EVIDENCE) for (const colorScheme of ['light', 'dark'] as const) {
       await page.emulateMedia({ colorScheme }); await page.waitForTimeout(150);
@@ -99,6 +108,17 @@ test('admin console: refusal until granted, overview with network distribution, 
     await networks.getByRole('button', { name: 'Apply' }).click();
     await expect(page.locator('.admin-donut-layout table').getByRole('row', { name: /Base Sepolia/ })).toContainText('100.0%');
     await expect(page.locator('.admin-kpi').filter({ hasText: 'Executed workflows' }).locator('strong')).toHaveText('3');
+
+    await nav.getByRole('link', { name: 'AI Analytics' }).click();
+    await expect(page.getByRole('heading', { name: 'AI Analytics', level: 1 })).toBeVisible();
+    await expect(page.locator('.admin-kpi').filter({ hasText: 'Model requests' }).locator('strong')).toHaveText('1');
+    await expect(page.locator('.admin-kpi').filter({ hasText: 'Tool calls' }).locator('strong')).toHaveText('2');
+    await expect(page.locator('.admin-kpi').filter({ hasText: 'Browser proposal reports' }).locator('strong')).toHaveText('1');
+    await expect(page.getByText(/may be missing or forged/)).toBeVisible();
+    await page.getByLabel('Data source').selectOption('replay');
+    await page.getByRole('button', { name: 'Apply', exact: true }).click();
+    await expect(page.locator('.admin-kpi').filter({ hasText: 'Tool calls' }).locator('strong')).toHaveText('7');
+    await expect(page.locator('.admin-kpi').filter({ hasText: 'Browser proposal reports' }).locator('strong')).toHaveText('0');
 
     // AI settings: an operator versions the Copilot settings; no key is ever shown.
     await nav.getByRole('link', { name: 'AI Settings' }).click();
@@ -147,6 +167,8 @@ test('admin console: refusal until granted, overview with network distribution, 
     await page.getByRole('button', { name: 'Sign out' }).click();
     await page.waitForURL(url => url.pathname === '/admin/login');
     await page.goto('/admin/ai-settings');
+    expect(new URL(page.url()).pathname).toBe('/admin/login');
+    await page.goto('/admin/ai-analytics');
     expect(new URL(page.url()).pathname).toBe('/admin/login');
     const kinds = (await db.query<{ kind: string; outcome: string }>(`SELECT kind, outcome FROM admin_audit_events ORDER BY event_id`)).rows.map(r => `${r.kind}:${r.outcome}`);
     expect(kinds).toEqual(['ADMIN_SIGN_IN:REFUSED', 'ADMIN_PRINCIPAL_GRANTED:OK', 'ADMIN_SIGN_IN:OK', 'ADMIN_COPILOT_SETTINGS_SAVED:OK', 'ADMIN_SIGN_OUT:OK']);
