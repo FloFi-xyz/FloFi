@@ -3,6 +3,8 @@
 This is repository engineering infrastructure. The 19 custom Codex agents review
 changes; they do not participate in end-user transactions. Deterministic tests
 remain the product evidence, and CircleCI remains the certification authority.
+Claude Code uses 19 generated read-only twins of the same roles and contracts;
+see [the Claude Code guide](CLAUDE-CODE.md).
 
 The inventory was audited against main `9e95b5c55d3e51ccfa5929819d3f15039db09f59`.
 Current source and capability registries take precedence over old build reports.
@@ -112,7 +114,9 @@ The existing PostgreSQL CI run also emits JSON and runs
 | New cross-surface regression | Existing unit run | Scripted EN/PT clarification, actual Canvas reducer, channel canonicalization, direct engine and MCP share current hashes and native ETH/WETH identity; stale hashes and public testnets refuse |
 | Required suite result verifier | Existing Unit/contract and PostgreSQL stages | Each designated suite appears exactly once, contains cases, and every case passed; skipped/todo/missing/failed cases fail the stage |
 | Existing PostgreSQL/fork/browser/security gates and ledger | Unchanged complete CI | Existing durability, isolation, browser, fork, dependency/audit/SBOM and certification requirements |
-| Selective specialist review | Active Codex session | Advisory domain/integration review with concrete defects and test evidence; no deterministic pass |
+| Claude twin parity, settings and hook self-tests | Existing Governance/Contracts CI | 19 generated read-only Claude agents match their Codex roles, exact hook settings, no local Claude state, guard and ledger behavior |
+| Selective specialist review | Active Codex or Claude session | Advisory domain/integration review with concrete defects and test evidence; no deterministic pass |
+| Claude lifecycle ledger | Claude Code hooks, locally | Which specialists actually started and completed, their structured result, guard denials and recorded gates; not certification |
 | Owner/provider/real-wallet acceptance | Explicit manual acceptance | Real extension/device behavior, external OAuth clients/provider delivery and actual supported public execution |
 
 Standalone result verification trusts its input report; it does not bind an

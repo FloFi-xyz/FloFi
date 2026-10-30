@@ -29,4 +29,26 @@ useful design context. Historical exact-path lists do not authorize future work.
 - Report meaningful blockers and validation results honestly. Skipped tests are
   not passes; local/mock evidence does not prove public execution or certification.
 
+## Engineering review specialists
+
+`.claude/agents/flofi-*.md` are 19 read-only reviewers generated from the Codex
+roles in `.codex/agents/`; ownership, dependencies, suites and gaps come only from
+`docs/engineering/coverage.json` ([guide](docs/engineering/CLAUDE-CODE.md)). For
+relevant development work, the main session:
+
+1. Inspects `git status`, the diff and its base, then runs
+   `python3 scripts/agent_guard.py check` and `... impact --base origin/main`.
+2. Delegates independent reviews to the selected specialists with the base, paths
+   and concerns: flofi-workflow for shared financial core, flofi-security for
+   authorization, wallet or identity, and flofi-mcp, flofi-channels and
+   flofi-developers when shared contracts reach those entry points.
+3. Runs at most three specialists at once and batches the rest; specialists never
+   spawn agents. Minor changes do not need all 19; documentation-only work may
+   skip review with a stated reason.
+4. Verifies findings, fixes regressions, runs the focused and normal gates, then
+   reports `python3 scripts/agent_guard.py review --base origin/main` honestly.
+
+Delegation is model-driven and not guaranteed by this file. Hooks record what
+actually ran; CircleCI remains the certification authority.
+
 Toolchain: Node 24.21.0, pnpm 11.22.0, Foundry Anvil 1.8.3, as currently pinned.
