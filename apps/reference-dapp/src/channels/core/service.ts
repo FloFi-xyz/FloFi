@@ -36,6 +36,7 @@ import { continuationUrl, OPEN_RUN, statusReplies } from './status.ts';
 import { RETENTION, type ChannelStore, type ConversationRecord, type NewOutbox, type PendingEvent } from './store.ts';
 import { SUBSCRIBE_LIMIT, type ChannelSubscriptions } from './subscriber.ts';
 import { canonicalStrategy, canonicalWorkflow } from './strategy.ts';
+import { logChannelTurn } from './interpreter.ts';
 import { isStrategyWorkflow } from '../../engine/strategy-spec';
 import type { ChannelAdapter, ChannelAddress, ChannelReply, ChannelVisualRenderer, DeliveryUpdate, InboundMessage } from './types.ts';
 
@@ -193,6 +194,8 @@ export function createChannelService(ctx: ChannelContext) {
     let decision = await decideTurn({ content: payload.content, state, optedOut: !active, interpret, support: core.supportContact, privacy: core.privacyUrl,
       catalogs: ctx.catalogs ?? null, ...session && session.learning.memory !== 'UNAVAILABLE' ? { learning: session.learning } : {} });
     if (session) decision = await learn(decision, principal!, session, conversationId);
+    // BUILD-FLOFI-INTELLIGENCE-001: the turn's content-free record, under the Copilot's own telemetry switch.
+    if (decision.metrics) logChannelTurn(process.env, decision.metrics);
     state = decision.state;
     const lm = channelCopy(state.language);
     switch (decision.action) {

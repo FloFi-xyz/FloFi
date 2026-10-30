@@ -83,7 +83,7 @@ clients in BUILD-MCP-002 (see the report's consumer acceptance section).
 
 | Scope | Tools |
 | --- | --- |
-| `flofi.strategy` | `get_supported_networks`, `get_supported_assets`, `get_capabilities`, `compose_strategy`, `validate_strategy`, `review_strategy`, `simulate_strategy` |
+| `flofi.strategy` | `get_supported_networks`, `get_supported_assets`, `get_capabilities`, `plan_strategy`, `compose_strategy`, `validate_strategy`, `review_strategy`, `simulate_strategy` |
 | `flofi.approval` | `request_user_approval`, `get_approval_status`; app-only (MCP Apps visibility `["app"]`, hidden from the model): `open_approval_session`, `get_execution_progress` |
 | `flofi.runs` | `get_execution_status`, `get_evidence` — only runs of wallets the account **linked on FloFi** (`/connections`) |
 
@@ -92,6 +92,7 @@ Every tool input is a closed JSON Schema. Errors are `{ ok: false, code }`; sche
 | Tool | Input | Notes |
 | --- | --- | --- |
 | `get_capabilities` | `{ network?, action? }` | per action × network: `supportedByCode`, `enabledByDeployment`, `enabledByPolicy`, `demonstratedEvidence`; whether the caller can request an approval; the step-list contract |
+| `plan_strategy` | `{ goal: { sourceNetwork?, sourceAsset?, amount?, targetNetwork?, targetAsset?, use, preference?, cap?, beneficiary? } }` | BUILD-FLOFI-INTELLIGENCE-001: FloFi's goal planner (the same as its own chat) → `kind: PLAN` with one composed `strategy` (v2 with bindings when a step spends an earlier step's output), `workflowHash`, `reasons`, `alternatives`; or `NEEDS` (the one missing field), `UNSUPPORTED` (closed code), `NOTHING_TO_DO`, `LIQUIDITY`; authorizes nothing |
 | `compose_strategy` | `{ strategy }` | canonical IR, `workflowHash`, steps, explanation, `executionPlan` |
 | `validate_strategy` / `review_strategy` | `{ strategy, workflowHash? }` | authoring rules + hash binding; BLOCK / WARNING / INFORMATION findings; authorize nothing |
 | `simulate_strategy` | `{ strategy, workflowHash, simulationSubject }` | the flow's own simulation, read-only; one step at a time; never calldata |

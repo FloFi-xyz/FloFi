@@ -19,6 +19,7 @@ import { AAVE_V3_LENDING_PROFILES } from '@defi-workflow-engine/action-registry'
 import type { NetworkId, StrategyInput, StrategySpec } from '../../engine/strategy-spec';
 import { composeWorkflowOrRefuse, PlatformRefusal, type WalletRef } from '../../platform/index.ts';
 import { workflowVisualModel, type WorkflowVisualModel } from '../../platform/workflow-visual.ts';
+import { sameSequenceAsset, stepAssets } from '../../domain/workflow-sequence';
 
 const LENDING_NETWORK: Readonly<Record<string, NetworkId>> = Object.fromEntries(AAVE_V3_LENDING_PROFILES.map(profile => [profile.network, networkIdentity(profile.chain)!.key as NetworkId]));
 /** BUILD-BASE-001: the catalog networks (Canvas name → strategy network): Robinhood Chain and Base. */
@@ -159,6 +160,7 @@ export function canonicalStrategy(command: Command): ChannelStrategy | { readonl
 export type ChannelWorkflow = Omit<ChannelStrategy, 'spec'> & { readonly spec: StrategyInput; readonly commands: readonly Command[]; readonly stepCount: number;
   readonly stepSummaries: readonly string[] };
 export function canonicalWorkflow(commands: readonly Command[]): ChannelWorkflow | { readonly ok: false; readonly code: string } {
+  if (commands.some(command => command.type === 'ADD_SEQUENCE')) return sequenceWorkflow(commands);
   if (commands.length === 1) {
     const one = canonicalStrategy(commands[0]!);
     return one.ok ? { ...one, commands: [one.command], stepCount: 1, stepSummaries: [one.summary] } : one;
@@ -172,9 +174,48 @@ export function canonicalWorkflow(commands: readonly Command[]): ChannelWorkflow
     return { ok: false, code: 'CHANNEL_STRATEGY_PARITY_FAILED' };
   const named = [...new Map(workflow.steps.map(step => intendedWalletOf(step.strategy)).filter((w): w is WalletRef => w !== null).map(w => [w.address, w])).values()];
   if (named.length > 1) return { ok: false, code: 'CHANNEL_INTENDED_WALLETS_DIFFER' };
+  return channelWorkflowOf(workflow, commands, named[0] ?? null);
+}
+/**
+ * BUILD-FLOFI-INTELLIGENCE-001: a goal plan's `ADD_SEQUENCE` is the channel's step list — its steps in order, after any kept steps — composed as one
+ * v2 workflow. A step of the sequence that spends exactly the asset an earlier step of the same sequence delivers to the owner carries the typed
+ * binding (`{ step, amountFrom }`), so MCP, the Developer API and the handoff run it as FloFi's chat does: it spends what that step actually
+ * delivered, up to its own amount. The same parity guard applies to every step.
+ */
+function sequenceWorkflow(commands: readonly Command[]): ChannelWorkflow | { readonly ok: false; readonly code: string } {
+  const flat: Command[] = [], group: number[] = [];
+  for (const [index, command] of commands.entries()) {
+    if (command.type !== 'ADD_SEQUENCE') { flat.push(command); group.push(-1); continue; }
+    for (const step of command.steps) { flat.push({ ...step, source: command.source, baseRevision: 0 } as Command); group.push(index); }
+  }
+  const specs = flat.map(strategyOfCommand);
+  if (specs.some(spec => !spec)) return { ok: false, code: 'CHANNEL_COMMAND_NOT_AUTHORING' };
+  let workflow;
+  try {
+    const unbound = composeWorkflowOrRefuse({ version: 2, steps: specs }, undefined);
+    const nodes = unbound.steps.map(step => step.workflow.nodes.find(node => !node.actionType.startsWith('mock-')));
+    const bindings = flat.flatMap((_, consumer) => {
+      if (group[consumer] === -1) return [];
+      const input = nodes[consumer] ? stepAssets(nodes[consumer]!).input : null;
+      for (let producer = consumer - 1; producer >= 0 && input; producer -= 1) {
+        if (group[producer] !== group[consumer]) break;
+        const delivered = nodes[producer] ? stepAssets(nodes[producer]!) : null;
+        if (delivered?.output && delivered.ownerReceives && sameSequenceAsset(delivered.output, input)) return [{ step: consumer, amountFrom: producer }];
+      }
+      return [];
+    });
+    workflow = bindings.length ? composeWorkflowOrRefuse({ version: 2, steps: specs, bindings }, undefined) : unbound;
+  } catch (cause) { return { ok: false, code: cause instanceof PlatformRefusal ? cause.message : 'CHANNEL_STRATEGY_PARITY_FAILED' }; }
+  if (workflow.steps.length !== flat.length || workflow.steps.some((step, i) => !sameCommand({ ...step.command, baseRevision: 0 } as Command, flat[i]!)))
+    return { ok: false, code: 'CHANNEL_STRATEGY_PARITY_FAILED' };
+  const named = [...new Map(workflow.steps.map(step => intendedWalletOf(step.strategy)).filter((w): w is WalletRef => w !== null).map(w => [w.address, w])).values()];
+  if (named.length > 1) return { ok: false, code: 'CHANNEL_INTENDED_WALLETS_DIFFER' };
+  return channelWorkflowOf(workflow, flat, named[0] ?? null);
+}
+function channelWorkflowOf(workflow: ReturnType<typeof composeWorkflowOrRefuse>, commands: readonly Command[], named: WalletRef | null): ChannelWorkflow {
   const first = workflow.steps[0]!.strategy, firstSolana = (first.action === 'bridge' ? first.sourceNetwork : first.network).startsWith('solana');
   return { ok: true, spec: workflow.strategy, workflowHash: workflow.workflowHash, command: commands.at(-1)!, commands: workflow.steps.map(s => s.command),
     summary: workflow.steps.map(s => s.summary).join(' → '), stepSummaries: workflow.steps.map(s => s.summary), fundsClass: workflow.fundsClass, notes: workflow.notes,
-    intendedWallet: firstSolana ? null : named[0] ?? null, steps: workflow.steps.flatMap(c => c.steps.filter(s => s.kind !== 'TEMPLATE')),
+    intendedWallet: firstSolana ? null : named, steps: workflow.steps.flatMap(c => c.steps.filter(s => s.kind !== 'TEMPLATE')),
     visual: workflowVisualModel(workflow), stepCount: workflow.steps.length };
 }
