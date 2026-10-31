@@ -11,13 +11,19 @@
  * before Privy was asked is that refusal's code (4100); anything after Privy was asked is unknown and is reconciled, never retried blindly.
  */
 import { floFiMessageGate, floFiSigningGate } from '../app/flofi-wallet-action';
-import { currentFloFiPrivy, privyErrorCode } from '../accounts/privy-client';
+import { currentFloFiPrivy, privyErrorCode, type PrivyReview } from '../accounts/privy-client';
+import type { SigningSummary } from './flofi-signing';
 import type { FloFiWalletRequest } from './flofi-wallet-channel';
 import type { WalletResult } from '../wallet-app/protocol';
 
 const fromBase64 = (text: string) => Uint8Array.from(atob(text), char => char.charCodeAt(0));
 const toBase64 = (bytes: Uint8Array) => { let text = ''; for (const byte of bytes) text += String.fromCharCode(byte); return btoa(text); };
 const toHex = (bytes: Uint8Array) => Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
+/** What Privy's confirmation screen states: FloFi's server summary of the reviewed attempt (built from its own Review, never from the page). */
+export function privyReview(summary: SigningSummary): PrivyReview {
+  const lines = [`${summary.network}${summary.realFunds ? ' (real funds)' : ''}`, ...summary.lines.map(line => `${line.label}: ${line.value}`), `FloFi run ${summary.runId}`];
+  return { title: 'FloFi reviewed strategy', action: summary.action.slice(0, 80), description: lines.join(' · ').slice(0, 600) };
+}
 /** After Privy was asked: a cancel there signed nothing; anything else may have signed. */
 const afterPrivy = (cause: unknown, unknown: string) => new Error(privyErrorCode(cause) === 'PRIVY_USER_CANCELLED' ? 'FLOFI_WALLET_REJECTED' : unknown);
 
@@ -33,10 +39,10 @@ export async function requestThroughPrivy(request: FloFiWalletRequest): Promise<
         const tx = request.tx;
         try {
           return { signedTransaction: await privy.signEvmTransaction(request.address, { to: tx.to, value: tx.value, data: tx.data, chainId: Number(BigInt(tx.chainId)),
-            nonce: tx.nonce, gas: tx.gas, maxFeePerGas: tx.maxFeePerGas, maxPriorityFeePerGas: tx.maxPriorityFeePerGas }) };
+            nonce: tx.nonce, gas: tx.gas, maxFeePerGas: tx.maxFeePerGas, maxPriorityFeePerGas: tx.maxPriorityFeePerGas }, privyReview(gate.value)) };
         } catch (cause) { throw afterPrivy(cause, 'FLOFI_WALLET_SUBMISSION_UNKNOWN'); }
       }
-      try { return { signedTransaction: toBase64(await privy.signSolanaTransaction(request.address, fromBase64(request.transaction))) }; }
+      try { return { signedTransaction: toBase64(await privy.signSolanaTransaction(request.address, fromBase64(request.transaction), privyReview(gate.value))) }; }
       catch (cause) { throw afterPrivy(cause, 'FLOFI_WALLET_SIGNATURE_UNKNOWN'); }
     }
     case 'evm_sign_message': case 'solana_sign_message': {

@@ -75,14 +75,14 @@ export function privyBrowserConfig(env: Env): PrivyBrowserConfig | null {
 
 const clients = new Map<string, PrivyApi>();
 /** The official SDK client for this configuration (one per app: it caches the app's JWKS). */
-export function officialPrivyApi(config: PrivyServerConfig): PrivyApi {
+export function officialPrivyApi(config: PrivyServerConfig, transport?: typeof fetch): PrivyApi {
   const cacheKey = `${config.appId}|${config.apiUrl}|${config.verificationKey ?? ''}|${config.appSecret}`;
-  const cached = clients.get(cacheKey);
+  const cached = transport ? undefined : clients.get(cacheKey);
   if (cached) return cached;
   const client = new PrivyClient({ appId: config.appId, appSecret: config.appSecret, apiUrl: config.apiUrl, timeout: 15_000, maxRetries: 1,
-    ...config.verificationKey ? { jwtVerificationKey: config.verificationKey } : {} });
+    ...config.verificationKey ? { jwtVerificationKey: config.verificationKey } : {}, ...transport ? { fetch: transport } : {} });
   const api: PrivyApi = { verifyAccessToken: token => client.utils().auth().verifyAccessToken(token), getUser: userId => client.users()._get(userId) };
-  clients.set(cacheKey, api);
+  if (!transport) clients.set(cacheKey, api);
   return api;
 }
 

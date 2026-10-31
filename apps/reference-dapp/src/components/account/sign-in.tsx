@@ -57,7 +57,7 @@ export function SignInScreen({ state, initialError, returnTo }: { state: Account
     if (!privy?.ready || cleared.current) return;
     cleared.current = true;
     if (privy.authenticated && !started.current) void privy.logout();
-  }, [privy?.ready]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [privy?.ready]);
 
   async function begin(method: Method, run: () => Promise<void> | void) {
     setError(null); setNotice(''); started.current = true; setBusy(method);

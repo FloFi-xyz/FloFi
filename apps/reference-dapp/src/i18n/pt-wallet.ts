@@ -195,4 +195,10 @@ export const portugueseWallet: Readonly<Record<string, string>> = {
   'FloFi Wallet unlocks with the sign-in you first used for it. Choose that method.': 'A FloFi Wallet desbloqueia com o login que você usou primeiro para ela. Escolha esse método.',
   'FloFi Wallet could not verify that sign-in. Nothing was unlocked.': 'A FloFi Wallet não conseguiu verificar esse login. Nada foi desbloqueado.',
   'Something went wrong in FloFi Wallet. Try again.': 'Algo deu errado na FloFi Wallet. Tente de novo.',
+  // BUILD-FLOFI-PRIVY-UX-001: FloFi Wallet is legacy and export-only.
+  'FloFi Wallet now only exports wallets created here before. New wallets are created, imported and used in FloFi itself.':
+    'A FloFi Wallet agora só exporta carteiras criadas aqui antes. Carteiras novas são criadas, importadas e usadas no próprio FloFi.',
+  'This FloFi account has no wallets from the earlier FloFi Wallet.': 'Esta conta FloFi não tem carteiras da FloFi Wallet anterior.',
+  'Return to FloFi to continue. This window only exports wallets created here before.': 'Volte ao FloFi para continuar. Esta janela só exporta carteiras criadas aqui antes.',
+  'Unlock now to export a wallet created here before. Unlocking never signs anything by itself.': 'Desbloqueie agora para exportar uma carteira criada aqui antes. Desbloquear nunca assina nada por si só.',
 };

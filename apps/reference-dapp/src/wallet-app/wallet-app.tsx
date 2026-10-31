@@ -218,10 +218,10 @@ export function WalletApp({ config }: { config: WalletAppConfig }) {
       <section className={styles.card} aria-labelledby="wallets-title">
         <h1 id="wallets-title" className={styles.heading}>{t('Your FloFi Wallets')}</h1>
         <WalletList wallets={context.wallets}/>
-        {hasOpener ? <p className={styles.hint}>{t('Return to FloFi to continue. This window asks you whenever FloFi needs a signature.')}</p> : null}
+        {hasOpener ? <p className={styles.hint}>{t('Return to FloFi to continue. This window only exports wallets created here before.')}</p> : null}
       </section>
       {!unlocked && <UnlockPanel config={config} context={context} onUnlocked={onUnlocked} title="Unlock now"
-        reason="Unlock now so FloFi Wallet is ready when FloFi asks for a signature. Unlocking never signs anything by itself."/>}
+        reason="Unlock now to export a wallet created here before. Unlocking never signs anything by itself."/>}
     </>;
   } else if (phase === 'ended') {
     body = <section className={styles.card} aria-labelledby="ended-title">

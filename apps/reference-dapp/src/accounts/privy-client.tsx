@@ -29,6 +29,8 @@ export type PrivyLoginEvent = { readonly wasAlreadyAuthenticated: boolean };
 /** An unsigned EIP-1559 transaction FloFi asks Privy to sign (every field already checked against the reviewed attempt). */
 export type PrivyEvmTransaction = { readonly to: string; readonly value: string; readonly data: string; readonly chainId: number; readonly nonce: string;
   readonly gas: string; readonly maxFeePerGas: string; readonly maxPriorityFeePerGas: string };
+/** What Privy's confirmation screen states about a transaction: FloFi's server-built summary of the reviewed attempt. */
+export type PrivyReview = { readonly title: string; readonly action: string; readonly description: string };
 export type FloFiPrivy = {
   readonly ready: boolean;
   readonly authenticated: boolean;
@@ -49,9 +51,9 @@ export type FloFiPrivy = {
   readonly importWallet: (ecosystem: WalletEcosystem, privateKey: string) => Promise<{ readonly address: string }>;
   /** Opens Privy's own export screen (the key is shown in Privy's frame, never to FloFi). */
   readonly exportWallet: (ecosystem: WalletEcosystem, address: string) => Promise<void>;
-  readonly signEvmTransaction: (address: string, tx: PrivyEvmTransaction) => Promise<string>;
+  readonly signEvmTransaction: (address: string, tx: PrivyEvmTransaction, review?: PrivyReview) => Promise<string>;
   readonly signEvmMessage: (address: string, message: string) => Promise<string>;
-  readonly signSolanaTransaction: (address: string, transaction: Uint8Array) => Promise<Uint8Array>;
+  readonly signSolanaTransaction: (address: string, transaction: Uint8Array, review?: PrivyReview) => Promise<Uint8Array>;
   readonly signSolanaMessage: (address: string, message: Uint8Array) => Promise<Uint8Array>;
   readonly logout: () => Promise<void>;
 };
@@ -114,6 +116,9 @@ export function privyErrorCode(cause: unknown, fallback = 'PRIVY_REQUEST_FAILED'
   return PRIVY_CODES.find(([pattern]) => pattern.test(text))?.[1] ?? fallback;
 }
 const fail = (code: string): never => { throw new Error(code); };
+/** Privy's confirmation screen, always shown, with FloFi's server summary of the reviewed attempt when there is one. */
+const uiOptions = (review?: PrivyReview) => ({ showWalletUIs: true, buttonText: 'Sign',
+  ...review ? { description: review.description, transactionInfo: { title: review.title, action: review.action } } : {} });
 
 /** Embedded wallets of a Privy user (client view). */
 export function embeddedWallets(user: User | null): PrivyEmbedded[] {
@@ -174,16 +179,16 @@ function PrivyBridge({ children }: { children: ReactNode }) {
       }, 'PRIVY_WALLET_IMPORT_FAILED'),
       exportWallet: (ecosystem, address) => wrap(async () => { own(ecosystem, address); await (ecosystem === 'evm' ? exportEvm({ address }) : exportSolana({ address })); },
         'PRIVY_WALLET_EXPORT_FAILED'),
-      signEvmTransaction: (address, tx) => wrap(async () => {
+      signEvmTransaction: (address, tx, review) => wrap(async () => {
         own('evm', address);
         const { signature } = await signEvm({ from: address, to: tx.to, value: tx.value, data: tx.data, chainId: tx.chainId, nonce: tx.nonce, gasLimit: tx.gas,
-          maxFeePerGas: tx.maxFeePerGas, maxPriorityFeePerGas: tx.maxPriorityFeePerGas, type: 2 }, { address });
+          maxFeePerGas: tx.maxFeePerGas, maxPriorityFeePerGas: tx.maxPriorityFeePerGas, type: 2 }, { address, uiOptions: uiOptions(review) });
         return signature;
       }, 'FLOFI_WALLET_SIGNATURE_UNKNOWN'),
       signEvmMessage: (address, message) => wrap(async () => { own('evm', address); return (await signEvmText({ message }, { address })).signature; }, 'FLOFI_WALLET_SIGNATURE_UNKNOWN'),
-      signSolanaTransaction: (address, transaction) => wrap(async () => {
+      signSolanaTransaction: (address, transaction, review) => wrap(async () => {
         own('solana', address);
-        return (await signSolana({ transaction, wallet: solanaWallet(address), chain: 'solana:mainnet' })).signedTransaction;
+        return (await signSolana({ transaction, wallet: solanaWallet(address), chain: 'solana:mainnet', options: { uiOptions: uiOptions(review) } })).signedTransaction;
       }, 'FLOFI_WALLET_SIGNATURE_UNKNOWN'),
       signSolanaMessage: (address, message) => wrap(async () => { own('solana', address); return (await signSolanaText({ message, wallet: solanaWallet(address) })).signature; },
         'FLOFI_WALLET_SIGNATURE_UNKNOWN'),
@@ -202,6 +207,8 @@ function PrivyBridge({ children }: { children: ReactNode }) {
 export type PrivyDriver = Omit<FloFiPrivy, 'ready' | 'authenticated' | 'userId' | 'embedded'> & {
   readonly snapshot: () => { readonly ready: boolean; readonly authenticated: boolean; readonly userId: string | null; readonly embedded: readonly PrivyEmbedded[] };
   readonly subscribe: (listener: () => void) => () => void;
+  /** Test only: receives FloFi's own signing request function (src/wallet/flofi-privy-signer.ts). */
+  readonly attachFloFi?: (flofi: { readonly request: (request: never) => Promise<unknown> }) => void;
 };
 const LOOPBACK_HOSTS: ReadonlySet<string> = new Set(['127.0.0.1', 'localhost']);
 function loopbackDriver(): PrivyDriver | null {
@@ -213,9 +220,23 @@ const NO_DRIVER = Object.freeze({ ready: false, authenticated: false, userId: nu
 function EmulatedPrivy({ children }: { children: ReactNode }) {
   const [driver, setDriver] = useState<PrivyDriver | null>(null);
   useEffect(() => { setDriver(loopbackDriver()); }, []);
+  // The suite drives FloFi's own signing path (gate → Privy → result) the way a wallet store does, through FloFi's real function.
+  useEffect(() => { if (driver?.attachFloFi) void import('../wallet/flofi-privy-signer').then(module => driver.attachFloFi!({ request: module.requestThroughPrivy })); }, [driver]);
   const subscribe = useCallback((listener: () => void) => driver?.subscribe(listener) ?? (() => undefined), [driver]);
   const snapshot = useSyncExternalStore(subscribe, () => driver?.snapshot() ?? NO_DRIVER, () => NO_DRIVER);
-  const value = useMemo<FloFiPrivy | null>(() => driver ? { ...driver, ...snapshot } : null, [driver, snapshot]);
+  const value = useMemo<FloFiPrivy | null>(() => {
+    if (!driver) return null;
+    // The stand-in's errors go through the same mapping as Privy's (PrivyBridge): FloFi only ever sees its own codes.
+    const wrap = <A extends unknown[], R>(run: (...args: A) => Promise<R>, fallback: string) => async (...args: A): Promise<R> => {
+      try { return await run(...args); } catch (cause) { throw new Error(privyErrorCode(cause, fallback), { cause }); }
+    };
+    return { ...snapshot, getAccessToken: driver.getAccessToken, onLogin: driver.onLogin, onLoginError: driver.onLoginError, loginWithWallet: driver.loginWithWallet,
+      logout: driver.logout, loginWithOAuth: wrap(driver.loginWithOAuth, 'PRIVY_SIGN_IN_FAILED'), sendEmailCode: wrap(driver.sendEmailCode, 'PRIVY_EMAIL_CODE_FAILED'),
+      loginWithEmailCode: wrap(driver.loginWithEmailCode, 'PRIVY_EMAIL_CODE_INVALID'), createWallet: wrap(driver.createWallet, 'PRIVY_WALLET_CREATE_FAILED'),
+      importWallet: wrap(driver.importWallet, 'PRIVY_WALLET_IMPORT_FAILED'), exportWallet: wrap(driver.exportWallet, 'PRIVY_WALLET_EXPORT_FAILED'),
+      signEvmTransaction: wrap(driver.signEvmTransaction, 'FLOFI_WALLET_SIGNATURE_UNKNOWN'), signEvmMessage: wrap(driver.signEvmMessage, 'FLOFI_WALLET_SIGNATURE_UNKNOWN'),
+      signSolanaTransaction: wrap(driver.signSolanaTransaction, 'FLOFI_WALLET_SIGNATURE_UNKNOWN'), signSolanaMessage: wrap(driver.signSolanaMessage, 'FLOFI_WALLET_SIGNATURE_UNKNOWN') };
+  }, [driver, snapshot]);
   return <Context.Provider value={value}><Registrar/>{children}</Context.Provider>;
 }
 
@@ -236,5 +257,5 @@ export { Context as FloFiPrivyContext };
 export function useWhenPrivyReady(run: (privy: FloFiPrivy) => void | (() => void)) {
   const privy = useFloFiPrivy();
   const ready = privy?.ready ?? false;
-  useEffect(() => { if (privy && ready) return run(privy) ?? undefined; }, [ready]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (privy && ready) return run(privy) ?? undefined; }, [ready]);
 }

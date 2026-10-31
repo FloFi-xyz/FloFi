@@ -102,6 +102,11 @@
 .ecosystemTab{background:var(--eco-fill);color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:10px 0}
 .ecosystemTab span{writing-mode:vertical-rl;transform:rotate(180deg);font-weight:600;font-size:14px;letter-spacing:.02em}
 .ecosystemTab img{width:20px;height:20px;filter:brightness(0) invert(1)}
+/* BUILD-FLOFI-PRIVY-UX-001: the card's second column holds its wallet addresses above the Create / Import tiles. */
+.ecosystemBody{display:grid;min-width:0}
+.cardWallets{margin:8px 8px 0}
+.cardWallets li{min-width:0}
+.cardWallets code{overflow-wrap:anywhere;word-break:break-all}
 .tiles{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;padding:8px}
 .tile{display:grid;align-content:center;justify-items:center;gap:6px;text-align:center;min-height:104px;border-radius:12px;border:1px solid transparent;
   background:var(--acc-raised);color:var(--acc-ink);padding:12px}

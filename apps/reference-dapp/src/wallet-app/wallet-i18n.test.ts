@@ -27,13 +27,14 @@ function translationCalls(): string[] {
 const PASSED = ['Sign', 'Signing…', 'Show recovery phrase', 'Show private key', 'Opening…', 'Unlock FloFi Wallet', 'Unlock again to export', 'Unlock now',
   'Unlocking proves it’s you to the wallet provider. Your keys stay with Turnkey; FloFi never holds them.',
   'Export needs an unlock in the last 5 minutes. Unlock again with your email code, Google or Apple.',
-  'Unlock now so FloFi Wallet is ready when FloFi asks for a signature. Unlocking never signs anything by itself.',
+  'Unlock now to export a wallet created here before. Unlocking never signs anything by itself.',
   'Email me a code', 'Continue with Google', 'Continue with Apple'];
 
 describe('FloFi Wallet Portuguese catalog', () => {
   it('translates every literal the wallet pages pass to t()', () => {
     const calls = translationCalls();
-    expect(calls.length).toBeGreaterThan(120);
+    // BUILD-FLOFI-PRIVY-UX-001: FloFi Wallet is export-only now (its signing, create and import screens were removed), so it has fewer texts.
+    expect(calls.length).toBeGreaterThan(50);
     expect(calls.filter(key => !Object.hasOwn(portugueseWallet, key))).toEqual([]);
   });
   it('translates the texts passed to shared controls and every code message, including the fallbacks', () => {

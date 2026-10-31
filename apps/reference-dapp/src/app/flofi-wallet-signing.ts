@@ -6,8 +6,8 @@
  * - Runs are read through each flow's existing `status` action, i.e. the same cloud flow (hosted) or local service (development) the
  *   product uses, so FloFi Wallet sees exactly the durable attempt the owner's store prepared, never a copy.
  * - EVM reads and broadcasts go through the `managed-wallet-evm` cloud flow on hosted deployments and the in-process module locally.
- * - `signingGate` is what FloFi Wallet's relay and sign-context route use: it resolves the binding for the managed wallets saved to the
- *   account and, for the relay, claims the attempt so FloFi Wallet signs each reviewed attempt at most once.
+ * - `signingGate` is what `floFiSigningGate` (src/app/flofi-wallet-action.ts) uses before Privy is asked to sign: it resolves the binding for
+ *   the Privy wallets saved to the account and claims the attempt, so each reviewed attempt is signed at most once (BUILD-FLOFI-PRIVY-UX-001).
  */
 import { createHash } from 'node:crypto';
 import { canonicalAddress, isPrivyWallet, type AccountWallet } from '../accounts/account-model';
@@ -84,9 +84,10 @@ export async function releaseAttempt(store: Pick<AccountStore, 'releaseProof'>, 
 }
 
 /**
- * FloFi Wallet's gate for one wallet session (wallet origin only). `claim: false` (sign-context) only resolves and summarizes; `claim: true`
- * (the relay, right before forwarding a signing activity) also consumes the attempt's single signature, so a second signature for the same
- * reviewed attempt is refused (`FLOFI_WALLET_ALREADY_SIGNED`) whoever asks for it.
+ * The reviewed-attempt gate for one account's Privy wallets. `claim: false` only resolves and summarizes; `claim: true` (`floFiSigningGate`,
+ * right before Privy is asked) also consumes the attempt's single signature, so a second signature for the same reviewed attempt is refused
+ * (`FLOFI_WALLET_ALREADY_SIGNED`) whoever asks for it. A cancel in Privy never gives the claim back: only the browser says it happened, so the
+ * person simulates again (a fresh attempt) instead.
  */
 export function signingGate(store: Pick<AccountStore, 'consumeProof'>, wallets: readonly AccountWallet[], options: { readonly claim: boolean },
   deps: ManagedSigningDeps = signingDeps(wallets)) {

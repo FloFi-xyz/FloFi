@@ -107,7 +107,8 @@ export function AddWallets({ state }: { state: AccountState }) {
     return <section key={ecosystem} className={`${styles.ecosystem} ${ecosystem === 'evm' ? styles.ecosystemEvm : styles.ecosystemSolana}`} aria-label={NAME[ecosystem]}
       data-ecosystem={ecosystem}>
       <div className={styles.ecosystemTab}><img src={`/brand/crypto/${ecosystem === 'evm' ? 'ethereum' : 'solana'}.svg`} alt=""/><span>{NAME[ecosystem]}</span></div>
-      {own.length > 0 && <ul className={styles.pending} aria-label={t('{0} wallets', NAME[ecosystem])}>{own.map(wallet => <li key={wallet.id} data-wallet-address={wallet.address}>
+      <div className={styles.ecosystemBody}>
+      {own.length > 0 && <ul className={`${styles.pending} ${styles.cardWallets}`} aria-label={t('{0} wallets', NAME[ecosystem])}>{own.map(wallet => <li key={wallet.id} data-wallet-address={wallet.address}>
         <span>{wallet.label} · <code title={wallet.address}>{wallet.address}</code></span>
         <span className={`${styles.badge} ${styles.badgeGreen}`}>{t(isLegacyWallet(wallet) ? 'Legacy FloFi Wallet' : wallet.origin === 'generated' ? 'Created'
           : wallet.origin === 'imported' ? 'Imported' : 'Connected')}</span></li>)}</ul>}
@@ -122,6 +123,7 @@ export function AddWallets({ state }: { state: AccountState }) {
             <strong><AccountIcon name="import" size={16}/>{t('Import key')}</strong><small>{t('Bring an existing {0} wallet with its private key', NAME[ecosystem])}</small></a>
           : <button type="button" className={styles.tile} disabled><strong><AccountIcon name="import" size={16}/>{t('Import key')}</strong>
             <small>{t('Bring an existing {0} wallet with its private key', NAME[ecosystem])}</small></button>}
+      </div>
       </div>
     </section>;
   };

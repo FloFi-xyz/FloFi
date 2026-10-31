@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /**
- * BUILD-FLOFI-AUTH-WALLETS-001 browser suite: sign-in, wallet onboarding, My wallets and export on normal routes, against the MOCKED
- * loopback identity provider and wallet provider (e2e/account-harness.ts) and a disposable LOOPBACK PostgreSQL database. Every key and
- * secret below is generated for this run in memory and never written; no public provider is contacted and no real identity is used.
+ * BUILD-FLOFI-AUTH-WALLETS-001 / BUILD-FLOFI-PRIVY-UX-001 browser suite: Privy sign-in (Google, email code, Web3 wallet), one-click wallet
+ * creation, private-key import, Disconnect, My wallets and Privy-backed signing on normal routes, against the MOCKED loopback Privy stand-in
+ * (e2e/privy-emulator.ts, 8581; its browser half e2e/privy-emulator-client.js is injected by the spec) and a disposable LOOPBACK PostgreSQL
+ * database. The legacy FloFi Wallet origin (Turnkey, export only) keeps its MOCKED loopback identity and wallet providers (e2e/account-harness.ts).
+ * Every key and secret below is generated for this run in memory and never written; no public provider is contacted and no real identity is used.
  * FloFi Wallet's signing journeys add two MOCKED loopback mainnet harnesses: Solana mainnet with Jupiter (e2e/jupiter-harness.mjs, 8551) and
  * Base mainnet (e2e/base-mainnet-serve.ts, 8562). Mainnet-shaped transactions only, MOCKED evidence only: nothing reaches a public network.
  */
@@ -25,6 +27,10 @@ if (!process.env.FLOFI_E2E_DATABASE_URL) {
   process.env.FLOFI_E2E_DATABASE_URL = server.href;
 }
 export const ACCOUNT_HARNESS_PORT = 8571, ACCOUNT_HARNESS_ORIGIN = `http://127.0.0.1:${ACCOUNT_HARNESS_PORT}`;
+// The MOCKED Privy stand-in: a fresh app id and server secret per run (the secret never reaches the browser).
+export const PRIVY_EMULATOR_ORIGIN = 'http://127.0.0.1:8581';
+const privyAppId = `cme2e${randomBytes(10).toString('hex')}`, privyAppSecret = randomBytes(24).toString('hex');
+process.env.FLOFI_PRIVY_EMULATOR_ORIGIN = PRIVY_EMULATOR_ORIGIN;
 // Workers inherit the runner environment: the spec reads the harness origin and the database from here.
 process.env.FLOFI_ACCOUNT_HARNESS_ORIGIN = ACCOUNT_HARNESS_ORIGIN;
 process.env.FLOFI_AUTH_WALLETS_E2E = 'MOCKED_LOOPBACK_ONLY';
@@ -64,6 +70,8 @@ export default defineConfig({
         FLOFI_ACCOUNT_HARNESS_OTP_SIGNER_PRIVATE_KEY: otpSigner.getPrivateKey('hex').padStart(64, '0'), FLOFI_ACCOUNT_HARNESS_WALLET_ORIGIN: WALLET_ORIGIN,
         FLOFI_ACCOUNT_HARNESS_WALLET_GOOGLE_CLIENT: walletGoogleClient, FLOFI_ACCOUNT_HARNESS_WALLET_GOOGLE_SECRET: walletGoogleSecret,
         FLOFI_ACCOUNT_HARNESS_WALLET_APPLE_CLIENT: walletAppleClient } },
+    { command: 'node e2e/privy-emulator.ts', url: `${PRIVY_EMULATOR_ORIGIN}/health`, reuseExistingServer: false, timeout: 30_000,
+      env: { FLOFI_PRIVY_E2E_APP_ID: privyAppId, FLOFI_PRIVY_E2E_APP_SECRET: privyAppSecret } },
     { command: 'node e2e/jupiter-harness.mjs --serve', url: 'http://127.0.0.1:8551', reuseExistingServer: false, timeout: 30_000 },
     { command: 'node e2e/base-mainnet-serve.ts', url: 'http://127.0.0.1:8562', reuseExistingServer: false, timeout: 30_000 },
     { command: 'pnpm --filter @defi-workflow-engine/reference-dapp start', url: E2E_APP_ORIGIN, reuseExistingServer: false, timeout: 90_000,
@@ -73,7 +81,8 @@ export default defineConfig({
         FLOFI_ENGINEERING_UI: 'LOOPBACK_ONLY', GRYLOO_JUPITER_HARNESS: 'MOCKED_LOOPBACK_ONLY', GRYLOO_JUPITER_JOURNAL: jupiterJournal,
         GRYLOO_BASE_MAINNET_HARNESS: 'MOCKED_LOOPBACK_ONLY', GRYLOO_BASE_JOURNAL: baseJournal,
         FLOFI_PUBLIC_ORIGIN: E2E_APP_ORIGIN, DATABASE_URL: process.env.FLOFI_E2E_DATABASE_URL!, FLOFI_SESSION_SECRET: randomBytes(32).toString('hex'),
-        FLOFI_GOOGLE_CLIENT_ID: googleClient, FLOFI_GOOGLE_CLIENT_SECRET: googleSecret, FLOFI_APPLE_CLIENT_ID: appleClient,
+        // Privy (MOCKED loopback stand-in): the app's server verifies tokens against the stand-in's JWKS and reads users from it.
+        NEXT_PUBLIC_PRIVY_APP_ID: privyAppId, PRIVY_APP_SECRET: privyAppSecret, PRIVY_API_URL: PRIVY_EMULATOR_ORIGIN, FLOFI_PRIVY_E2E: 'MOCKED_LOOPBACK_ONLY',
         FLOFI_AUTH_E2E_IDP: 'MOCKED_LOOPBACK_ONLY', FLOFI_AUTH_E2E_IDP_ORIGIN: ACCOUNT_HARNESS_ORIGIN,
         FLOFI_TURNKEY_E2E: 'MOCKED_LOOPBACK_ONLY', FLOFI_TURNKEY_ORGANIZATION_ID: parentOrg, FLOFI_TURNKEY_API_PUBLIC_KEY: parent.getPublicKey('hex', 'compressed'),
         FLOFI_TURNKEY_API_PRIVATE_KEY: parent.getPrivateKey('hex').padStart(64, '0'), FLOFI_TURNKEY_API_BASE_URL: ACCOUNT_HARNESS_ORIGIN,

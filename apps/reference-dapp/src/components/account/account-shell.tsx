@@ -65,7 +65,7 @@ function Showcase({ initial }: { initial: Slide }) {
     </div> : slide === 'wallets' ? <div className={styles.preview} aria-hidden="true">
       <div className={styles.previewCard}><small>EVM</small><p>{t('FloFi wallet · Generated')}</p><p><code>0x7a3…e91c</code></p></div>
       <div className={styles.previewCard}><small>SOLANA</small><p>{t('Phantom · Connected')}</p><p><code>9xQe…4Lm2</code></p></div>
-      <div className={styles.previewCard}><small>{t('PROTECTED BY TURNKEY')}</small><p>{t('Keys are created and kept by Turnkey, not by FloFi.')}</p></div>
+      <div className={styles.previewCard}><small>{t('PROTECTED BY PRIVY')}</small><p>{t('Keys are created and kept by Privy, not by FloFi.')}</p></div>
     </div> : <div className={styles.preview} aria-hidden="true">
       <div className={styles.previewCard}><small>{t('YOUR WORKFLOW')}</small><p>{t('Swap 500 USDC → ETH on Base')}</p>
         <div className={styles.steps}><span>{t('Build')}</span><span>{t('Simulate')}</span><span>{t('Execute')}</span></div></div>
