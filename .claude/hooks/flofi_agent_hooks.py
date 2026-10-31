@@ -12,9 +12,10 @@ Standard library only, no network. Set FLOFI_AGENT_TELEMETRY=off to disable reco
 """
 
 import hashlib
+import hmac
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import stat
 import subprocess
@@ -75,8 +76,9 @@ _DIFF = ("--stat --shortstat --numstat --name-only --name-status --summary --pat
          "--no-renames --cached --staged --merge-base --ignore-all-space --ignore-space-change --word-diff --raw "
          "--minimal --patience --histogram --find-renames --check --no-ext-diff --no-textconv --full-index --color ")
 _DIFF_VALUED = "--diff-filter --unified --color --word-diff --stat "
+# No --all: it includes refs/stash, whose untracked parts may hold ignored files.
 _LOG = ("--oneline --graph --decorate --no-decorate --first-parent --no-merges --merges --follow --reverse "
-        "--abbrev-commit --all --topo-order --date-order ")
+        "--abbrev-commit --topo-order --date-order ")
 _LOG_VALUED = "--max-count --skip --since --until --after --before --author --committer --grep --format --pretty --date --abbrev "
 GIT = {
     "diff": options("pswbRM", "U", _DIFF, _DIFF_VALUED, numbers="-U --unified"),
@@ -100,10 +102,10 @@ GIT = {
     "merge-base": options("a", "", "--is-ancestor --all --fork-point --octopus"),
     "blame": options("wsecltfnMC", "L", "--porcelain --line-porcelain --show-name --show-number"),
     "ls-tree": options("rdtlz", "", "--long --name-only --name-status --full-name --full-tree", "--abbrev"),
-    "rev-list": options("", "n", "--count --all --first-parent --merges --no-merges --reverse --left-right",
+    "rev-list": options("", "n", "--count --first-parent --merges --no-merges --reverse --left-right",
                         "--max-count --since --until", numbers="-n --max-count"),
     "shortlog": options("sne", "", "--summary --numbered --email"),
-    "describe": options("", "", "--tags --always --long --contains --all", "--abbrev --match"),
+    "describe": options("", "", "--tags --always --long --contains", "--abbrev --match"),
     "name-rev": options("", "", "--name-only --tags --always"),
 }
 FIND_UNARY = {"-print", "-print0", "-prune", "-o", "-or", "-a", "-and", "-not", "!", "(", ")", "-empty", "-true",
@@ -138,6 +140,8 @@ def path_reason(value, cwd, root=ROOT):
         return "invalid path"
     if value.startswith("~"):
         return "home-directory paths are outside the repository"
+    if ".." in PurePosixPath(value).parts:  # git treats a written ../ as outside the tree (implicit --no-index)
+        return "paths must not contain .. components"
     try:
         resolved = (Path(cwd) / value).resolve()
         relative = resolved.relative_to(root.resolve())
@@ -257,7 +261,7 @@ def parse_options(name, args, spec):
         nonlocal patterns
         if option in spec["numbers"] and not COUNT.fullmatch(value):
             return f"{name} {option} takes a number"
-        if option in {"--format", "--pretty"} and "%G" in value:
+        if option in {"--format", "--pretty"} and re.search(r"%[-+ ]?G", value):
             return "signature placeholders run gpg or ssh-keygen"
         if option in PATTERN_OPTIONS:
             patterns = True  # a pattern is never opened as a file
@@ -362,6 +366,10 @@ def segment_reason(argv, cwd, root=ROOT):
     # Every operand is checked, even a would-be pattern: ugrep's context options take an optional
     # argument, so the operand after `-C 5` may be a file. Patterns given with -e are exempt.
     for position, value in enumerate(positionals + values):
+        if name.startswith("git") and "stash" in value.lower():
+            return "stash entries are not readable (they can hold untracked or ignored files)"
+        if name.startswith("git") and value.startswith("/") and position < len(positionals):
+            return "git operands must be repository-relative"
         if name.startswith("git") and ":" in value and not value.startswith("-"):
             reason = path_reason(value.split(":", 1)[1] or ".", root, root)  # REV:path reads that path
             if reason:
@@ -439,7 +447,7 @@ def append(session, record, root=ROOT):
         os.mkdir(runs, 0o700)
     except FileExistsError:
         pass
-    record = {"v": 1, "t": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), **record}
+    record = {"v": 2, "t": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), **record}
     directory = os.open(runs, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
         if os.fstat(directory).st_uid != os.geteuid():
@@ -550,24 +558,53 @@ def command_parts(command):
 
 
 NEUTRAL_ARGUMENTS = ("--reporter=", "--outputFile=", "--testTimeout=", "--maxWorkers=")
-BASE_WORDS = {"guarded-browser": 2, "governance-unittests": 3, "agent-guard-verify-results": 3}
 
 
-def gate_scope(gate, words):
-    """Which run of a gate this was, so one run's pass never clears another run's failure.
+def scope_key(root=ROOT):
+    """Per-checkout HMAC key for run identities (owner-only file beside the ledger)."""
+    runs = root / RUNS
+    if runs.parent.is_symlink() or not runs.parent.is_dir() or runs.is_symlink():
+        return None
+    try:
+        os.mkdir(runs, 0o700)
+    except FileExistsError:
+        pass
+    except OSError:
+        return None
+    path = runs / ".scope-key"
+    try:
+        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(os.urandom(32))
+    except FileExistsError:
+        pass
+    except OSError:
+        return None
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        with os.fdopen(descriptor, "rb") as stream:
+            info = os.fstat(stream.fileno())
+            key = stream.read(64)
+    except OSError:
+        return None
+    if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_uid != os.geteuid() or len(key) != 32:
+        return None
+    return key
 
-    "full" when no filtering arguments were given; a readable browser profile name; or a
-    digest of the arguments, which never stores paths or names from the command.
+
+def gate_scope(gate, words, place, root=ROOT):
+    """The exact identity of a gate run: gate, working directory and every filtering argument.
+
+    A keyed digest, so it never stores paths or names and cannot be confirmed by guessing.
+    Only a later pass with the same identity clears a failure.
     """
-    start = words.index("run") + 1 if gate == "vitest-focused" else BASE_WORDS.get(gate, 2)
-    extra = [w for w in words[start:] if not w.startswith(NEUTRAL_ARGUMENTS)]
+    material = [w for w in words if not w.startswith(NEUTRAL_ARGUMENTS)]
     if gate == "agent-guard-verify-results":
-        extra = [w for w in extra if not w.endswith(".json")]  # the fresh report path, not a filter
-    if not extra:
-        return "full"
-    if gate == "guarded-browser" and len(extra) == 1 and re.fullmatch(r"[a-z0-9-]{1,40}", extra[0]):
-        return extra[0]
-    return "args-" + hashlib.sha256("\0".join(extra).encode()).hexdigest()[:12]
+        material = [w for w in material if not w.endswith(".json")]  # the fresh report path, not a filter
+    key = scope_key(root)
+    if key is None:
+        return "unknown"
+    return "run-" + hmac.new(key, "\0".join([gate, place, *material]).encode(), "sha256").hexdigest()[:12]
 
 
 def gate_record(event, root=ROOT):
@@ -577,14 +614,25 @@ def gate_record(event, root=ROOT):
         return None
     parts = command_parts(command)
     separators = [separator for _segment, separator in parts if separator]
+    cwd = event.get("cwd") if isinstance(event.get("cwd"), str) else ""
+    try:
+        place = str(Path(cwd).resolve().relative_to(root.resolve()))
+    except (OSError, ValueError):
+        place = "outside"
     gates, suites, scopes = [], [], {}
     for segment, _separator in parts:
-        head = re.sub(r"^\s*(?:cd \S+\s*$|(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*(?:timeout \d+[smh]? )?)", "", segment)
+        moved = re.fullmatch(r"\s*cd\s+(\S+)\s*", segment)
+        if moved:
+            place = f"{place}|cd {moved[1]}"  # the gate runs wherever the line moved to
+            continue
+        head = re.sub(r"^\s*(?:(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*(?:timeout \d+[smh]? )?)", "", segment)
         head = re.sub(r"(?<!\S)2>(?:/dev/null|&1)(?!\S)", " ", head).strip()
+        if re.fullmatch(r"node scripts/guarded-release-browser\.mjs (?:list|--help)", head):
+            continue  # prints the plan; runs nothing
         for gate, pattern in GATES:
             if re.fullmatch(pattern, head):
                 gates.append(gate)
-                scopes[gate] = gate_scope(gate, head.split())
+                scopes[gate] = gate_scope(gate, head.split(), place, root)
                 suites += [path for path in (suite_path(token, root) for token in head.split()) if path]
     if not gates:
         return None
@@ -613,14 +661,14 @@ def worktree_state(root=ROOT):
     A failed or slow Git call yields unknown (None), never "clean", and never drops the row.
     """
     def git(*args):
-        result = subprocess.run(["git", "--no-optional-locks", *args], cwd=root, stdin=subprocess.DEVNULL,
-                                capture_output=True, text=True, timeout=5,
-                                env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"})
+        try:
+            result = subprocess.run(["git", "--no-optional-locks", *args], cwd=root, stdin=subprocess.DEVNULL,
+                                    capture_output=True, text=True, timeout=5,
+                                    env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"})
+        except (OSError, subprocess.SubprocessError):
+            return None
         return result.stdout if result.returncode == 0 else None
-    try:
-        head, status = git("rev-parse", "HEAD"), git("status", "--porcelain")
-    except (OSError, subprocess.SubprocessError):
-        head = status = None
+    head, status = git("rev-parse", "HEAD"), git("status", "--porcelain")
     head = head.strip() if head else ""
     return {"head": head if re.fullmatch(r"[0-9a-f]{40}", head) else None,
             "dirty": None if status is None else bool(status.strip())}

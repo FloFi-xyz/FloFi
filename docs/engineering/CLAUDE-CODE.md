@@ -76,8 +76,8 @@ denials, recorded gates, coverage gaps, skips, problems and warnings.
 incomplete, blocked or completed without a valid result line (unless skipped with a
 reason), a recorded gate whose latest run failed, more than three reviewers at once,
 invalid ledger rows, an unmapped maintained file, a failing required-suite report or
-uncommitted changes in the worktree when `review` runs (or a worktree state it
-cannot determine).
+uncommitted changes in the worktree when `review` runs, or a HEAD or worktree state
+it cannot determine.
 A specialist also counts as a problem when none of its valid reviews started and
 finished on the current HEAD with a known-clean worktree, unless accepted with
 `--accept-stale DOMAIN=REASON`. Agent definitions changed since a session, earlier
@@ -117,8 +117,10 @@ Denylists were not enough: GNU tools and git accept abbreviated long options
 and its `find` is bfs. So `rg -g`/`--hidden` (they override `.gitignore` or reach
 `.git`), `grep -r`/`-f`, `git grep -O`/`--no-index`/`--untracked` exclusions,
 `--output`, `--ext-diff`, `--textconv`, `--show-signature` and signature format
-placeholders (`%G…`), `git cat-file`, untracked listings (`ls-files -o`,
-`status --ignored`) and every unknown or abbreviated option are refused. File-reading commands take files, not
+placeholders (`%G…`, including `%+G`), `git cat-file`, untracked listings
+(`ls-files -o`, `status --ignored`), stash references and `--all` (both reach
+`refs/stash`, which can hold untracked or ignored files) and every unknown or
+abbreviated option are refused. File-reading commands take files, not
 directories. Context and count options take numbers, never a path. The guard splits
 commands with its own Bash-compatible tokenizer (a differential test compares it
 with Bash): only an unquoted `|` separates stages, so a quoted or escaped `|` stays an
@@ -127,11 +129,16 @@ redirection (other than `2>/dev/null`/`2>&1`), expansion, subshells, background 
 and environment assignments are refused; quote patterns instead. Redirect words must
 be entirely unquoted (`2>'&1'` would write a file). Every operand is path-checked,
 including a would-be pattern (ugrep's context options take an optional argument);
-pass patterns with `-e` to exempt them. A `REV:path` operand checks its path. Paths (operands and option values) must be
+pass patterns with `-e` to exempt them. A `REV:path` operand checks its path. No
+operand may contain a `..` component as written (`git diff ../repo ../repo/x` would
+silently switch to no-index mode and ignore `.gitignore`), and git operands must be
+repository-relative. Paths (operands and option values) must be
 inside the repository, outside `.git` (any case), not Git-ignored (except
 `node_modules` outside its dot directories and outside ignored directories) and not
 named like a secret. Names (not
-contents) of ignored files can still appear through `find` and `ls`. The working directory must be such a
+contents) of ignored files can still appear through `find` and `ls`; recursive `rg`
+can read untracked, non-ignored files with secret-looking names, so keep such files
+ignored. Allowed `git status`/`git diff` may refresh the index. The working directory must be such a
 location too. Read may also open long output that Claude Code saved in this
 session's own `tool-results/` directory. The Grep tool's `glob` filter is refused.
 
@@ -161,10 +168,11 @@ and refuses a symlinked ledger directory:
 | `session_start` | source; Git HEAD; SHA-256 prefix of each `flofi-*.md` present (defined) |
 | `subagent_start` / `subagent_stop` | agent name, agent ID, Git HEAD and whether the worktree had uncommitted changes (the reviewed state); validated `FLOFI_REVIEW_RESULT` (result, count, highest severity) or null |
 | `guard_deny` | agent name, agent ID, tool name |
-| `test` | gate IDs from a fixed list, scope per gate (`full`, a browser profile name or `args-` plus a 12-hex digest of the filtering arguments; rows written before scopes are `legacy`), pass/fail/unknown, exit code, pipeline flag, agent, repository-relative test file paths |
+| `test` | gate IDs from a fixed list, run identity per gate (`run-` plus a 12-hex HMAC of the gate, working directory, `cd` target and filtering arguments, keyed by an owner-only `.scope-key` beside the ledger; `legacy` for rows written before identities, `unknown` without a key), pass/fail/unknown, exit code, pipeline flag, agent, repository-relative test file paths |
 | `session_end` | reason |
 
-Every row also carries `v` (format version) and `t` (UTC time, seconds). Prompts,
+Every row also carries `v` (format version: 2 since run identities and per-review
+commits; older rows are read as legacy) and `t` (UTC time, seconds). Prompts,
 commands, tool output, transcripts, findings text, environment values, file names
 from `git status`, wallet data and conversations are never stored. Files stay until
 you delete them (one per session; writing stops once a file reaches 1 MiB, so it can
@@ -176,9 +184,9 @@ time; set `FLOFI_AGENT_TELEMETRY=off` to stop recording. A gate's status is the
 shell exit status, recorded only when the line is a single command or an all-`&&`
 chain that succeeded; pipelines, `;`, `||` and `&` record "not observed", and a failure
 of a multi-command line is not attributed to any gate; splitting respects quotes.
-`--strict` counts each gate run (gate and scope) by its latest known result:
-sessions in the order they started, rows in the order written. Only a later pass of
-the same run or a full run of the gate clears a failure. Only `verify-results` on a fresh report checks required
+`--strict` counts each gate run by its exact identity, in time order: only a later
+pass of the same identity clears a failure. A different, narrower, legacy or unknown
+run never does; `guarded-release-browser.mjs list` is not recorded as a gate. Only `verify-results` on a fresh report checks required
 suites, and only CircleCI certifies a release.
 
 ## Maintenance and verification

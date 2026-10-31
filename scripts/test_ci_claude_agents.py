@@ -140,6 +140,10 @@ class ReadOnlyGuard(Repository):
             "grep -C 5 .env.local", "grep src src/a.ts", "rg x .env.local", "git show stash^3:.env.local",
             "git show HEAD:local-state/notes", "git log --format='%G?' -1", "git log --pretty=format:%GG -1",
             "git ls-files -o", "git ls-files --others --directory",
+            # batch 7: a written ../ makes git diff compare outside the tree (implicit --no-index); stash; %+G.
+            "git diff ../repo ../repo/src", "cat ../repo/CLAUDE.md", "ls ../repo", "git diff " + "/x/repo/src",
+            "git show stash^3", "git show 'stash^{/:}^3:.env.local'", "git log --all -p", "git rev-list --all",
+            "git describe --all", "git log --format='%+G?' -1", "git log --format='%-GG' -1", "git log --pretty='% GS' -1",
             # ugrep (Claude Code's grep) recurses into directory operands, reading ignored files:
             "grep -n LOCAL src", "grep -n LOCAL .", "cat src", "head src", "sed -n '1,2p' src",
         ]:
@@ -337,22 +341,34 @@ class LifecycleLedger(Repository):
         vitest = "pnpm exec vitest run packages/a/test/x.test.ts apps/b/src/y.test.tsx"
         entry = hooks.gate_record({"hook_event_name": "PostToolUse", "tool_input": {"command": vitest}, "tool_response": {}})
         self.assertEqual(entry["suites"], ["apps/b/src/y.test.tsx", "packages/a/test/x.test.ts"])
-        def scope(command):
-            entry = hooks.gate_record({"hook_event_name": "PostToolUse", "tool_input": {"command": command}, "tool_response": {}})
+        def scope(command, cwd=None):
+            entry = hooks.gate_record({"hook_event_name": "PostToolUse", "tool_input": {"command": command},
+                                       "tool_response": {}, "cwd": cwd or str(self.root)}, self.root)
             return list(entry["scopes"].values())[0]
-        self.assertEqual([scope(c) for c in ["pnpm test", "pnpm test --reporter=json --outputFile=/tmp/u.json",
-                                             "pnpm test:fork --testTimeout=30000", "node scripts/guarded-release-browser.mjs critical",
-                                             "python3 scripts/agent_guard.py verify-results /tmp/u.json"]],
-                         ["full", "full", "full", "critical", "full"])
-        distinct = [scope(c) for c in ["pnpm test -t name", "pnpm test -t other", "pnpm test:fork -t x",
-                                       "node scripts/guarded-release-browser.mjs profile wallet-isolation",
-                                       "node scripts/guarded-release-browser.mjs profile canvas",
-                                       "node scripts/guarded-release-browser.mjs extended --shard 1/4",
-                                       "pnpm exec vitest run packages/domain", "pnpm --filter app exec vitest run apps/web",
-                                       "python3 -m unittest discover -s scripts -p 'test_governance_lite.py'",
-                                       "python3 scripts/agent_guard.py verify-results --stage postgres /tmp/p.json"]]
+        self.assertEqual(scope("pnpm test"), scope("pnpm test --reporter=json --outputFile=/tmp/u.json"))
+        self.assertEqual(scope("pnpm test:fork"), scope("pnpm test:fork --testTimeout=30000"))
+        self.assertEqual(scope("python3 scripts/agent_guard.py verify-results /tmp/a.json"),
+                         scope("python3 scripts/agent_guard.py verify-results /tmp/b.json"))
+        distinct = [scope("pnpm typecheck"), scope("cd src && pnpm typecheck"), scope("pnpm typecheck", str(self.root / "src")),
+                    scope("pnpm test -t name"), scope("pnpm test -t other"), scope("pnpm test:fork -t x"),
+                    scope("node scripts/guarded-release-browser.mjs critical"),
+                    scope("node scripts/guarded-release-browser.mjs profile wallet-isolation"),
+                    scope("node scripts/guarded-release-browser.mjs profile canvas"),
+                    scope("node scripts/guarded-release-browser.mjs extended --shard 1/4"),
+                    scope("pnpm --filter a exec vitest run x.test.ts"), scope("pnpm --filter b exec vitest run x.test.ts"),
+                    scope("python3 -m unittest discover -s scripts -p 'test_governance_lite.py'"),
+                    scope("python3 scripts/agent_guard.py verify-results /tmp/u.json"),
+                    scope("python3 scripts/agent_guard.py verify-results --stage postgres /tmp/p.json")]
         self.assertEqual(len(set(distinct)), len(distinct), distinct)
-        self.assertTrue(all(re.fullmatch(r"args-[0-9a-f]{12}", s) for s in distinct))
+        self.assertTrue(all(re.fullmatch(r"run-[0-9a-f]{12}", s) for s in distinct))
+        key = self.root / hooks.RUNS / ".scope-key"
+        self.assertEqual((stat.S_IMODE(key.stat().st_mode) & 0o077, key.stat().st_size), (0, 32))
+        other = Path(self.outside, "other-repo")
+        (other / ".claude").mkdir(parents=True)
+        self.assertNotEqual(hooks.gate_scope("pnpm-test", ["pnpm", "test"], ".", other),
+                            hooks.gate_scope("pnpm-test", ["pnpm", "test"], ".", self.root))  # keyed per checkout
+        self.assertIsNone(hooks.gate_record({"hook_event_name": "PostToolUse", "tool_input": {
+            "command": "node scripts/guarded-release-browser.mjs list"}, "tool_response": {}}, self.root))
         self.assertNotIn("asus", json.dumps(hooks.gate_record({"hook_event_name": "PostToolUse", "tool_input": {
             "command": "pnpm exec vitest run /home/asus/x.test.ts"}, "tool_response": {}})))
         self.assertEqual(hooks.gate_record({"hook_event_name": "PostToolUse", "tool_input": {

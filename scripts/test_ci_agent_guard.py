@@ -304,7 +304,7 @@ class EngineeringGuard(unittest.TestCase):
         self.assertEqual(summary["unexpectedAgents"], ["Explore"])
         self.assertEqual(summary["definitionsChangedSince"], {run["session"]: ["flofi-lending"]})
         self.assertIn("flofi-lending: expected specialist not invoked and no skip justification", summary["problems"])
-        self.assertIn("Recorded gate failed: pnpm-check", summary["problems"])
+        self.assertIn("Recorded gate failed: pnpm-check (full)", summary["problems"])
         skipped = guard.review_summary(self.data, plan, [run], {"flofi-lending": "Lending untouched; reviewed by bridge"}, root=self.root)
         self.assertEqual({r["domain"]: r["status"] for r in skipped["specialists"]}["flofi-lending"], "skipped")
         self.assertIn("Skipped: Lending untouched", guard.review_markdown(skipped))
@@ -426,6 +426,13 @@ class EngineeringGuard(unittest.TestCase):
         swap = next(r for r in summary["specialists"] if r["domain"] == "flofi-swap")
         self.assertEqual(swap["reviewedCommits"], ["bbbbbbbbbbbb+unknown-worktree"])
         self.assertTrue(any(p.startswith("flofi-swap: reviewed bbbbbbbbbbbb") for p in summary["problems"]))
+        # A current (v2) stop row with an unknown HEAD is never labelled with the start commit.
+        unknown = self.runs({"v": 2, "event": "subagent_start", "agent": "flofi-swap", "agentId": "s5", "head": head, "dirty": False},
+                            {"v": 2, "event": "subagent_stop", "agent": "flofi-swap", "agentId": "s5", "head": None,
+                             "dirty": None, "review": done})
+        swap = next(r for r in guard.review_summary(self.data, plan, [unknown], root=self.root)["specialists"]
+                    if r["domain"] == "flofi-swap")
+        self.assertEqual(swap["reviewedCommits"], [f"{head[:12]}..unrecorded+unknown-worktree"])
         # Uncommitted changes at review time do not count as a review of HEAD.
         dirty = self.runs({"event": "subagent_start", "agent": "flofi-swap", "agentId": "s3", "head": head, "dirty": False},
                           {"event": "subagent_stop", "agent": "flofi-swap", "agentId": "s3", "head": head,
@@ -439,10 +446,10 @@ class EngineeringGuard(unittest.TestCase):
                            "exit": None, "piped": False, "suites": [], "agent": "main"}
         fixed = guard.review_summary(self.data, plan, [self.runs(gate(False), gate(True))], root=self.root)
         self.assertEqual(fixed["problems"], [])
-        self.assertIn("Earlier gate failures later passed: pnpm-check", fixed["warnings"])
+        self.assertIn("Earlier gate failures later passed: pnpm-check (full)", fixed["warnings"])
         for events in [(gate(False), gate(None)), (gate(True), gate(False))]:
             summary = guard.review_summary(self.data, plan, [self.runs(*events)], root=self.root)
-            self.assertEqual(summary["problems"], ["Recorded gate failed: pnpm-check"])
+            self.assertEqual(summary["problems"], ["Recorded gate failed: pnpm-check (full)"])
 
     def test_gate_failures_are_cleared_only_by_the_same_or_a_full_run(self):
         plan = {**guard.impact(self.data, ["docs/notes.md"]), "base": "origin/main"}
@@ -450,19 +457,24 @@ class EngineeringGuard(unittest.TestCase):
         def gate(ok, scope="full", suites=(), stamp="2026-10-31T10:00:00Z"):
             return {"event": "test", "gates": ["pnpm-test"], "scopes": {"pnpm-test": scope}, "ok": ok, "exit": None,
                     "piped": False, "suites": list(suites), "agent": "main", "t": stamp}
-        cases = [((gate(False), gate(True, "args-aaaaaaaaaaaa")), ["Recorded gate failed: pnpm-test"]),
-                 ((gate(False, "args-aaaaaaaaaaaa"), gate(True, "args-aaaaaaaaaaaa")), []),
-                 ((gate(False, "args-aaaaaaaaaaaa"), gate(True, "args-bbbbbbbbbbbb")),
-                  ["Recorded gate failed: pnpm-test (args-aaaaaaaaaaaa)"]),
-                 ((gate(False, "args-aaaaaaaaaaaa"), gate(True)), []),
-                 ((gate(False, "legacy"), gate(True, "args-aaaaaaaaaaaa")), ["Recorded gate failed: pnpm-test (legacy)"])]
+        a, b = "run-aaaaaaaaaaaa", "run-bbbbbbbbbbbb"
+        cases = [((gate(False, a), gate(True, a)), []),
+                 ((gate(False, a), gate(True, b)), [f"Recorded gate failed: pnpm-test ({a})"]),
+                 ((gate(False, a), gate(None, a)), [f"Recorded gate failed: pnpm-test ({a})"]),
+                 ((gate(False, "legacy"), gate(True, "legacy")), ["Recorded gate failed: pnpm-test (legacy)"]),
+                 ((gate(False, "unknown"), gate(True, "unknown")), ["Recorded gate failed: pnpm-test (unknown)"])]
         for events, problems in cases:
             with self.subTest(events=[(e["ok"], e["scopes"]["pnpm-test"], e["suites"]) for e in events]):
                 self.assertEqual(guard.review_summary(self.data, plan, [self.runs(*events)], root=self.root)["problems"], problems)
         # Across sessions, time order decides, not argument order (batch 5 flofi-infrastructure-ci finding 5).
-        later_pass = self.runs(gate(True, stamp="2026-10-31T12:00:00Z"), session="a")
-        earlier_fail = self.runs(gate(False, stamp="2026-10-31T11:00:00Z"), session="b")
+        later_pass = self.runs(gate(True, a, stamp="2026-10-31T12:00:00Z"), session="a")
+        earlier_fail = self.runs(gate(False, a, stamp="2026-10-31T11:00:00Z"), session="b")
         self.assertEqual(guard.review_summary(self.data, plan, [later_pass, earlier_fail], root=self.root)["problems"], [])
+        # Overlapping sessions: an earlier-starting session's later failure is not cleared by an earlier pass.
+        overlap_a = self.runs(gate(True, a, stamp="2026-10-31T10:00:00Z"), gate(False, a, stamp="2026-10-31T13:00:00Z"), session="c")
+        overlap_b = self.runs(gate(True, a, stamp="2026-10-31T12:00:00Z"), session="d")
+        self.assertEqual(guard.review_summary(self.data, plan, [overlap_a, overlap_b], root=self.root)["problems"],
+                         [f"Recorded gate failed: pnpm-test ({a})"])
 
     def test_ledger_reader_applies_the_writers_file_rules(self):
         runs = self.root / guard.CLAUDE_RUNS
@@ -478,8 +490,13 @@ class EngineeringGuard(unittest.TestCase):
                                          + b'{"event":"subagent_start","agent":"flofi-swap","dirty":"yes"}\n')
         run = guard.read_runs("odd", self.root)
         self.assertEqual((len(run["events"]), run["malformed"]), (1, 4))
-        (runs / "shapes.jsonl").write_text('{"event":[]}\n{"event":{}}\n{"event":"test","gates":["x"],"scopes":{"1":2}}\n')
-        self.assertEqual(guard.read_runs("shapes", self.root)["malformed"], 3)
+        (runs / "shapes.jsonl").write_text('{"event":[]}\n{"event":{}}\n{"v":2,"event":"test","gates":["x"],"scopes":{"1":2}}\n'
+                                           '{"v":2,"event":"test","gates":["x"],"scopes":{"x":"full"},"ok":0}\n')
+        self.assertEqual(guard.read_runs("shapes", self.root)["malformed"], 4)
+        (runs / "v1.jsonl").write_text('{"v":1,"event":"test","gates":["x"],"scopes":{"x":"full"},"ok":true,'
+                                       '"suites":["a.test.ts","b\\n.test.ts"]}\n')
+        row = guard.read_runs("v1", self.root)["events"][0]
+        self.assertEqual((row["scopes"], row["suites"]), ({"x": "legacy"}, ["a.test.ts"]))
 
     def test_report_paths_and_uncommitted_worktrees(self):
         self.commit_fixture()
