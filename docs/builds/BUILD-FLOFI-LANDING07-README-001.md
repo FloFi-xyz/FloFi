@@ -14,11 +14,40 @@ signed or sent. Evidence level: LOCAL (loopback production builds and MOCKED loo
 - Repository: `FloFi-xyz/FloFi`. The session's remote, `alrimarleskovar/FloFi`, redirects there.
 - Dependency: PR #143 `BUILD-FLOFI-AUTH-WALLETS-001`.
   - State: **open, not merged**.
-  - Head: branch `claude/wonderful-shannon-nacbbz` at `a5fa5c838b4bd4f2b6a00b826383f0ec31c194cb`.
-  - Base: `main` at `39459013b125c7ef5bf6c92b9fb9326005ed55fe` (checked 2026-10-31).
-- This build: branch `claude/build-flofi-landing07-readme-001`, created from `a5fa5c8` and stacked on PR #143.
+  - Head: branch `claude/wonderful-shannon-nacbbz`. This build started from `a5fa5c838b4bd4f2b6a00b826383f0ec31c194cb` and is
+    synchronized with `a0414d45ad61414e6949bc0f40dd0f3995b1b85a` (§1.1).
+  - `main`: `6b7bd62` (RELEASE A, schema 0018 certificate), already contained in PR #143's head.
+- This build: branch `claude/build-flofi-landing07-readme-001`, stacked on PR #143.
   - PR #143's branch was not modified.
   - If both are accepted, merge PR #143 first.
+
+### 1.1 Synchronization with PR #143 (2026-10-31)
+
+PR #143 gained 21 commits: FloFi Wallet on its own origin, managed signing bound to reviewed attempts, mainnet-only FloFi Wallet, the
+account/wallet proxy policy, the minimatch audit fix, the auth-wallets CI profile and RELEASE A from `main`. They were brought in with
+a merge commit (`8c52274`), with no rebase and no force-push.
+
+Conflicts resolved:
+- `e2e/brand-ux-001.spec.ts`: keeps the Landing 07 entry flow and adds PR #143's `/login` checks (`lang` en, no overflow).
+- `docs/engineering/coverage.json` and `COVERAGE.md`: PR #143's version plus this build's Landing 07 files and suites; the report is
+  regenerated with `scripts/agent_guard.py report`.
+- `e2e/auth-wallets.spec.ts`: auto-merged; the Landing 07 entry and returning-visitor steps apply to PR #143's new version.
+
+Nothing in the Landing 07 files, assets, route, font, README or the 8 `/login` links changed in the merge. All 11 package payload files
+still match `SHA256SUMS.txt`, except `landing07-page.tsx`, whose only difference is the 8 destinations.
+
+CircleCI findings on this PR and their causes:
+- **`certification-checks` failed on `ecfa90e`** at `pnpm audit --audit-level low`. The cause was GHSA-g3hv-75wg-m249 (minimatch
+  < 11.0.1 via ESLint), already present on PR #143's old head. The audit fails the same way on `ecfa90e` here. PR #143's
+  `106cf08`/`fe4b26f` patch it, and after the merge `pnpm audit` reports no known vulnerabilities.
+- **`governance` failed on the merge commit `8c52274`** at `git diff --check HEAD^1 HEAD`. On a merge commit that range carries PR
+  #143's new code, which has two whitespace-only defects:
+  - `i18n/pt-wallet.ts:82`: a line holding one space, from `13c5c59`;
+  - `wallet/flofi-wallet-channel.ts`: a blank line at EOF, from `25e6489`.
+
+  PR #143's own gate passes because its last commit does not touch those lines. Both lines are fixed in a separate commit with no
+  change to any string, translation or behaviour. The same two lines would trip the gate when PR #143 is merged into `main`;
+  applying the identical fix there is recommended.
 
 ## 2. Package received
 
@@ -137,19 +166,29 @@ repository, unrouted. Removing them is a separate decision.
 
 ## 6. Validation (Node 24.21.0, pnpm 11.22.0, Chromium headless shell 1243, loopback PostgreSQL 16)
 
+After the synchronization (§1.1), the `certification-checks` steps ran locally in CI order:
+
 | Check | Result |
 | --- | --- |
-| `pnpm check` (typecheck, lint, build, 11 schema exports, unit tests) | pass — 466 files, 5,856 tests, 2 pre-existing skips |
-| `governance_lite.py` + self-tests, `test_ci_*.py`, `agent_guard.py check` | pass (agent guard: 19 domains, 163 modules) |
+| `bootstrap-ci.py --verify-dependencies`, `pnpm audit --audit-level low`, CycloneDX SBOM | pass (no known vulnerabilities; 295 registry components) |
+| typecheck, lint (+ `guarded-release-browser.mjs`), schema drift | pass |
+| `agent_guard.py check`, unit tests, `verify-results` | pass. 6,086 tests passed and 2 skipped; both skips are pre-existing. |
+| Screenshot-diff self-test, reference-linter exports | pass |
+| `pnpm test:postgres` + `verify-results --stage postgres` | 553 passed, 3 skipped, 1 failed. The failure is `forward-compatibility.pg.test.ts`, which encodes PostgreSQL 18 catalog behaviour; this container runs PostgreSQL 16 while CircleCI runs 18.6. The failure is documented in PR #143, and `cloud-runtime` is not touched here. |
+| Governance gate (governance-lite + self-tests, `test_ci_*.py`, `git diff --check`, `git diff --check HEAD^1 HEAD`) | pass |
 | `landing07.spec.ts` | 15/15 |
 | `brand-ux-001`, `beta-ui` (CI `default-product` members) | 15/15, 4/4 |
 | `native-docs` | 8/9. The failure is **pre-existing and unrelated**: `public/docs/api-reference.json` still lists testnets while `docs/developer/openapi.json` is mainnet-only. Neither file is touched by this branch, and the docs suite is not in CI. |
-| `playwright.auth-wallets.config.ts` (MOCKED loopback Google/Apple/Turnkey, loopback DB) | 8/8, starting from Landing 07; includes onboarding, persistence and the returning-session entry |
-| Pixel comparison, package route vs integrated route | 0 differing pixels in 16 captures |
+| `playwright.auth-wallets.config.ts` (MOCKED loopback Google/Apple/Turnkey, FloFi Wallet origin, loopback DB) | 13/13, including PR #143's FloFi Wallet journeys. Entry is from Landing 07's header link; a returning signed-in visitor goes from the landing straight to `/app`. |
+| Pixel comparison, package route vs integrated route, after the synchronization | 0 differing pixels in 16 captures |
+
+Before the synchronization (on `ecfa90e`): `pnpm check` passed (466 files, 5,856 tests), and so did `auth-wallets` (8/8). CircleCI
+`certification-browser-1` and `certification-browser-2` passed on `ecfa90e`; together they cover the guarded browser plan, including
+`landing07.spec.ts` in `default-product`.
 
 - The browser specs ran under a local app-only Playwright config: the same app server and settings, without the Mode A fork server,
   because Foundry Anvil is not installed here. CI runs the full harness.
-- CircleCI certification and the full guarded browser suites were **not run here**.
+- The fork suites and the full guarded browser plan run only in CircleCI; the PR description records the final run.
 - MOCKED providers do not prove live Google, Apple or Turnkey behaviour; that remains PR #143's external gate.
 
 Screenshots and the side-by-side with Caio's `PREVIEWS/` are in `BUILD-FLOFI-LANDING07-README-001-EVIDENCE/`.
