@@ -615,3 +615,29 @@ is applied. The already deployed version-16 artifact does not gain that certific
 assessment; promotion requires a reviewed certificate-bearing version-16 release followed by the migration-bearing release. No production
 migration or release was performed during engineering. Rollback must retain the certificate or use a schema-17 compatible artifact;
 do not drop the telemetry table or loosen schema validation to accommodate an older binary.
+
+## 12. Certificate 0018_flofi_accounts
+
+| Base | Certified forward migration | SHA-256 |
+| --- | --- | --- |
+| 0017 `copilot_metrics` | 0018 `flofi_accounts` | `0919a57a5af80a1376ada213bb00ac5db79c434ab7a9ff0ebea50e6a9664ae75` |
+
+Migration 0018 (BUILD-FLOFI-AUTH-WALLETS-001) adds six tenant-scoped tables: `flofi_accounts`, `flofi_account_identities`,
+`flofi_account_sessions`, `flofi_account_wallets`, `flofi_account_email_challenges` (attempt counting and throttling; never the code)
+and `flofi_account_used_proofs` (SHA-256 digests of accepted ID tokens, for single use). It changes no execution, approval, owner-history, wallet-session, delegation,
+automation, saved-workflow or telemetry relation, and defines no function or trigger. The tables hold account identifiers, sign-in
+identity subjects (OIDC `sub`, a verified email address or a proven wallet address), revocable session records and public wallet
+metadata. CHECK constraints admit no secret: wallet rows hold an address, a provider name, the provider's non-secret resource id and
+an export capability; no column can hold a key, seed phrase, OTP, OAuth/OIDC token or password. A version-17 build never reads these
+tables, so it runs unchanged on schema 18.
+
+`flofi-accounts-migration.pg.test.ts` checks exact migration bytes, unchanged pre-existing columns, atomic rollback, the
+secret-free constraints and a version-17 reader carrying this certificate starting on schema 18. `account-store.pg.test.ts` checks
+tenant and account isolation, identity uniqueness (no implicit merge), session revocation and wallet ownership.
+
+Release order remains certificate first: every version-17 database consumer must receive this exact forward certificate before 0018
+is applied. This PR supplies the schema-18 code and assessment; promotion requires a reviewed certificate-bearing version-17 release
+followed by the migration-bearing release. No production migration or release was performed during engineering. Rollback must
+retain the certificate or use a schema-18 compatible artifact; do not drop the account tables or loosen schema validation to
+accommodate an older binary. The exact Release A contents, deployment order and rollback table are in
+[RELEASE-AUTH-WALLETS-0018.md](./RELEASE-AUTH-WALLETS-0018.md).
