@@ -394,7 +394,7 @@ BUILDMCP001_DIRECT_VERSIONS = {
 # BUILD-FLOFI-AUTH-WALLETS-001 adds 8 (Apache-2.0/MIT): @turnkey/iframe-stamper (no dependencies) and @turnkey/indexed-db-stamper
 # with @turnkey/encoding, @turnkey/sdk-types, bs58, bs58check, base-x and @noble/hashes. Owner review: these are the provider's
 # isolated import/export iframe bridge and its non-extractable WebCrypto session-key stamper; FloFi holds no wallet key.
-REGISTRY_PACKAGE_COUNT = 271
+REGISTRY_PACKAGE_COUNT = 272
 # BUILD-FLOFI-AUTH-WALLETS-001: the embedded-wallet provider's browser stampers (docs/builds/BUILD-FLOFI-AUTH-WALLETS-001.md).
 BUILDAUTHWALLETS001_DIRECT_VERSIONS = {
     "@turnkey/iframe-stamper": "2.11.1",
@@ -447,7 +447,7 @@ def verify_dependencies():
     if lock.count("\npackages:\n") != 1 or lock.count("\nsnapshots:\n") != 1:
         raise RuntimeError("Unrecognized lockfile sections")
     resolved_sections = "packages:\n" + lock.split("\npackages:\n", 1)[1]
-    if hashlib.sha256(resolved_sections.encode()).hexdigest() != "f245305f39847f86493048d092091cd6c30990c463b988f9bde3b7730a36c333":
+    if hashlib.sha256(resolved_sections.encode()).hexdigest() != "ed035b7fc333fa44d962f774913551edee8df28d16903613b059319ca608dc13":
         errors.append("Baseline registry packages/snapshots or peer resolutions changed")
     packages_text = lock.split("\npackages:\n", 1)[1].split("\nsnapshots:\n", 1)[0]
     snapshots_text = lock.split("\nsnapshots:\n", 1)[1]
@@ -721,8 +721,10 @@ def verify_dependencies():
         license_id = package.get("license")
         legacy_mpl = (license_id == "MPL-2.0" and version == "1.33.0" and
                       name in BUILD001_LIGHTNINGCSS_NAMES)
+        # BlueOak-1.0.0 (permissive, OSI-approved), exact identities only. minimatch@10.2.6 was reviewed earlier; GHSA-g3hv-75wg-m249
+        # moves ESLint's three consumers to minimatch@11.0.3, which adds its author's @isaacs/nonrecursive-glob-match (same license).
         legacy_blueoak = (license_id == "BlueOak-1.0.0" and
-                          identity == "minimatch@10.2.6")
+                          identity in {"minimatch@11.0.3", "@isaacs/nonrecursive-glob-match@1.0.3"})
         rejected = license_id not in allowed_licenses and not legacy_mpl and not legacy_blueoak
         approved = BUILD002_REVIEWED_LICENSE_EXCEPTIONS.get(identity)
         if approved:

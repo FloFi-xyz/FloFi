@@ -20,6 +20,12 @@ overrides:
   '@modelcontextprotocol/core@2.3.0>zod': 4.6.6
   # GHSA-w74x-v6f9-j3xg, GHSA-wjr9-j795-jxcr (moderate), GHSA-xhq7-xmqj-769h, GHSA-333x-w4r6-6crp (low): fast-uri < 3.1.9.
   'ajv@8.20.0>fast-uri': 3.1.9
+  # GHSA-g3hv-75wg-m249 (moderate): minimatch < 11.0.1 lets a crafted glob amplify brace expansion (globparts). ESLint's three
+  # consumers only build `new Minimatch()` matchers from configuration and call `.match`; 11.0.3 keeps that API.
+  'eslint@10.10.0>minimatch': 11.0.3
+  '@eslint/config-array@0.23.5>minimatch': 11.0.3
+  '@typescript-eslint/typescript-estree@8.70.0>minimatch': 11.0.3
+  'minimatch@11.0.3>@isaacs/nonrecursive-glob-match': 1.0.3
 patchedDependencies:
   '@streamparser/json@0.0.26': patches/@streamparser__json@0.0.26.patch
   '@xyflow/system@0.0.82': patches/@xyflow__system@0.0.82.patch
