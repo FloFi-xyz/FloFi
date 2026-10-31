@@ -28,7 +28,7 @@ Tell FloFi what you want to do with your crypto. It turns your goal into a clear
 
 FloFi is a **non-custodial, multichain DeFi platform**. Instead of jumping between bridges, DEXs, lending apps and block explorers, you describe a goal — *“swap 50 USDC to ETH on Base”*, *“move my USDC to Arbitrum and supply it to Aave”* — and FloFi builds the workflow for you.
 
-- **Ask in plain language.** FloFi's AI-assisted chat asks for anything that is missing and proposes the steps. You accept or change them.
+- **Ask in plain language.** FloFi's chat — assisted by its AI Copilot where a deployment enables it — turns your request into proposed steps and asks for anything that is missing. You accept or change them.
 - **Or build visually.** The optional canvas shows the same workflow as connected cards you can edit, reorder or delete.
 - **See it before you sign it.** FloFi simulates the supported path and shows a review of assets, amounts, limits, permissions and costs.
 - **You stay in control.** Your own wallet signs every transaction. FloFi never holds your keys, and an AI suggestion can never move funds.
@@ -46,21 +46,21 @@ FloFi is a **non-custodial, multichain DeFi platform**. Instead of jumping betwe
 
 ## What you can do today
 
-FloFi resolves every request by **action × network**. The mainnet paths below are implemented end to end in the app (author, quote, simulate, review, authorize, execute, reconcile and recover) and enabled in FloFi's production deployment.
+FloFi is a **mainnet product** on five networks. It resolves every request by **action × network**: the paths below are implemented end to end in the app — author, quote, simulate, review, authorize, execute, reconcile and recover — and switched on in FloFi's hosted beta at [flofi.xyz](https://flofi.xyz).
 
 | Network | Swap | Bridge | Transfer | Lend & borrow | Add liquidity |
 | --- | --- | --- | --- | --- | --- |
-| **Ethereum** | Uniswap v3 | ✓ | ✓ | Aave V3 — supply, borrow, repay, withdraw | Uniswap v3 |
-| **Base** | Uniswap v3 | ✓ | ✓ | Aave V3 — supply, borrow, repay, withdraw | Uniswap v3 |
-| **Arbitrum One** | Uniswap v3 | ✓ | ✓ | Aave V3 — supply, borrow, repay, withdraw | Uniswap v3 |
-| **Robinhood Chain** | Uniswap v3 | ✓ | ✓ | — | Uniswap v3 |
-| **Solana** | Jupiter | — | ✓ | — | Orca Whirlpools |
+| **Ethereum** | Uniswap v3 | ✓ | ✓ | Aave V3 (USDC) — supply, borrow, repay, withdraw | Uniswap v3 |
+| **Base** | Uniswap v3 | ✓ | ✓ | Aave V3 (USDC) — supply, borrow, repay, withdraw | Uniswap v3 |
+| **Arbitrum One** | Uniswap v3 | ✓ | ✓ | Aave V3 (USDC) — supply, borrow, repay, withdraw | Uniswap v3 |
+| **Robinhood Chain** | Uniswap v3, including stock tokens | ✓ | ✓ | — | Uniswap v3 |
+| **Solana** | Jupiter | ✓ | SOL and SPL tokens | — | Orca Whirlpools (SOL/USDC) |
 
-Bridges run through FloFi's cross-chain router between Ethereum, Base, Arbitrum One and Robinhood Chain. Supported assets differ per network and protocol; the app only offers the combinations it can actually execute and explains anything it refuses.
+**Bridges** connect any of the five networks — including EVM ↔ Solana — through FloFi's cross-chain router, which shows the provider, its fees and the guaranteed minimum you receive before you sign. Supported assets differ per network and protocol; the app offers only the combinations it can execute and explains anything it refuses.
 
-**Multi-step workflows.** Chain actions together — for example *bridge, then supply what arrived*. A later step can spend exactly what an earlier step delivered. You approve the workflow once and confirm each step in your wallet, in order, after the previous step has settled.
+**Multi-step workflows.** Chain actions together — for example *bridge, then swap what arrived*. FloFi runs the steps in order: each one gets a fresh review and your wallet's signature, and starts only after the previous step has settled. A later step can spend exactly what an earlier step actually delivered, never more than you authored.
 
-**Honest status.** These mainnet paths are live in beta. FloFi has not yet published independently certified mainnet execution evidence for them, and it does not claim a security audit. Each run records its own evidence; see [Status & evidence](#status--evidence).
+**Honest status.** These mainnet paths are live in beta but not yet certified: FloFi's recorded, reconciled executions so far are owner runs on test networks, and FloFi does not claim a security audit. Every run records its own evidence; see [Status & evidence](#status--evidence).
 
 ## How it works
 
@@ -90,28 +90,28 @@ FloFi accounts give you one place for your workflows and wallets, without giving
 | Surface | What it does | Availability |
 | --- | --- | --- |
 | **FloFi app** — [flofi.xyz](https://flofi.xyz) | Chat, visual builder, review, signing, dashboard | Live (beta) |
-| **AI assistants via MCP** — `https://flofi.xyz/api/mcp` | Ask ChatGPT, Claude or another MCP client to plan, validate and simulate a strategy with FloFi; it hands the approval back to you in FloFi | Live endpoint; assistants have no signing authority. Acceptance per client is still being verified |
-| **Telegram** — [@FloFiAppBot](https://t.me/FloFiAppBot) | Compose a proposal in chat and open it in FloFi to review and sign | Being activated; follows owner acceptance |
-| **WhatsApp** | Same channel model as Telegram | Built, not activated |
+| **AI assistants via MCP** — `https://flofi.xyz/api/mcp` | Connect an MCP client such as ChatGPT or Claude to plan, compose, validate and simulate strategies with FloFi; the assistant hands the approval back to you in FloFi | Endpoint live; assistants have no signing authority. Acceptance testing with ChatGPT and Claude is still in progress |
+| **Telegram** — [@FloFiAppBot](https://t.me/FloFiAppBot) | Compose a proposal in chat, then open it in FloFi to review and sign | Built; live activation pending acceptance testing |
+| **WhatsApp** | Same channel model as Telegram | Built; not activated (policy review) |
 
 Whatever the surface, the money moves only after you review in FloFi and sign with your own wallet. Saying *“yes”* or *“execute”* in a chat authorizes nothing.
 
 ## Pricing
 
-FloFi's business model is a **0.1% fee on each completed workflow**, calculated on the workflow's input and only when it completes (failed, refunded or mismatched runs are waived).
+FloFi's business model is a **0.1% fee on each completed workflow**, calculated on the workflow's input and due only when it completes — failed, refunded or mismatched runs are waived.
 
-**Today, FloFi does not collect this fee.** For completed cross-chain router workflows, FloFi already calculates the 0.1% and records it as an obligation, and the review screen states that it is not collected on-chain yet. You still pay the network's gas and any protocol or provider fees, which are itemized in review before you sign.
+**Today, FloFi does not charge or collect this fee.** For completed bridges through FloFi's cross-chain router, FloFi already calculates the 0.1% and records it, and the review screen says it is not collected on-chain yet; other workflows record no fee. How the fee will be settled is still an open decision. You pay only the network's gas and any protocol or provider fees, which are itemized in review before you sign.
 
 ## FloFi for Developers
 
 Building a wallet, dapp, agent or fintech? FloFi can be the DeFi workflow layer behind your own experience.
 
 - **Developer API** (`/api/developer/v1`) — discover capabilities, create an immutable strategy, validate and preview it, then hand the approval to your user. Follow status and evidence your user chooses to share.
-- **TypeScript SDK** — a zero-dependency client in [`packages/developer-sdk`](packages/developer-sdk/README.md) (Apache-2.0).
-- **Webhooks** — signed notifications derived from durable workflow state.
+- **TypeScript SDK** — a zero-dependency client in [`packages/developer-sdk`](packages/developer-sdk/README.md) (Apache-2.0; not yet published to npm).
+- **Webhooks** — signed notifications ([Standard Webhooks](https://www.standardwebhooks.com)) derived from durable workflow state.
 - **MCP** — the same engine for AI clients over Streamable HTTP with OAuth.
 
-API keys are server-side credentials with **zero financial authority**: nothing they can call signs, submits or approves. This release issues sandbox keys only; mainnet strategies are refused through the Developer API.
+API keys are server-side credentials with **zero financial authority**: nothing they can call signs, submits or approves. The Developer API is enabled per deployment and currently issues **sandbox (test-funds) keys only**. Because FloFi's hosted product is mainnet-only, today you build and test an integration against a local engineering deployment; production keys are not issued yet.
 
 Start with the [Developer API docs](https://flofi.xyz/docs/developer-api), the [quickstart](docs/developer/QUICKSTART.md), the [API reference](docs/developer/API.md), [webhooks](docs/developer/WEBHOOKS.md) and the [MCP guide](docs/deploy/MCP.md).
 
@@ -132,7 +132,9 @@ FloFi is in active development and released as a beta. Capabilities can differ b
 - [Current status](docs/STATUS.md) and [build reports](docs/builds) — what each release delivered and what it did not verify.
 - [Evidence levels](docs/EVIDENCE_LEVELS.md) — how FloFi labels proof, from mocked tests to recorded on-chain execution.
 
-**On the roadmap:** more networks (Tempo is next) and protocols, broader multi-step compositions, automations (scheduled DCA and price triggers) and optional *automatic within limits* execution, live activation of conversational channels and collection of the workflow fee. Roadmap items are not shipped features.
+**Built, switched on per deployment:** Automations — scheduled DCA, price triggers and daily market watches — that propose each occurrence for you to confirm and sign. Optional *automatic within limits* execution is built but stays blocked in production until a custody-grade signing service exists.
+
+**On the roadmap:** Tempo as the next network, more protocols, certified mainnet execution, live activation of conversational channels, production Developer API keys and settlement of the workflow fee. Roadmap items are not shipped features.
 
 ## Documentation
 
@@ -158,7 +160,7 @@ pnpm build
 pnpm --filter @defi-workflow-engine/reference-dapp dev
 ```
 
-Open `http://127.0.0.1:3000` for the landing page and `/app` for the builder. A local install lets you author workflows without a wallet; quotes, simulation, accounts, channels and execution need their documented configuration ([environment reference](docs/deploy/ENVIRONMENT.md)). Some runtime settings keep their legacy `GRYLOO_*` names for compatibility.
+Open `http://127.0.0.1:3000` for the landing page, `/app` for the builder and `/docs` for the documentation. A plain local run lets you author workflows without a wallet, with every execution flow off: quotes, simulation, accounts, channels and execution each need their documented configuration ([environment reference](docs/deploy/ENVIRONMENT.md)). Test networks are available only on a local engineering server (`FLOFI_NETWORK_SCOPE=ENGINEERING_TESTNETS`). Some runtime settings keep their legacy `GRYLOO_*` names for compatibility.
 
 ```bash
 pnpm check                              # typecheck, lint, build, schema drift, unit tests
