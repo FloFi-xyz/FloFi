@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-/** BUILD-FLOFI-AUTH-WALLETS-001: owner-facing text for account codes. A raw code never reaches the interface. */
+/** Owner-facing text for account codes (BUILD-FLOFI-AUTH-WALLETS-001; Privy codes since BUILD-FLOFI-PRIVY-UX-001). A raw code never reaches the interface. */
 import { floFiWalletMessage } from '../../wallet/flofi-signing';
 
 const MESSAGES: Readonly<Record<string, string>> = {
@@ -12,6 +12,32 @@ const MESSAGES: Readonly<Record<string, string>> = {
   ACCOUNT_WALLET_NOT_OWNED: 'The wallet provider could not confirm this wallet belongs to you. Nothing was saved.',
   ACCOUNT_WALLET_NOT_FOUND: 'That wallet is no longer in your account.',
   ACCOUNT_WALLET_LABEL_INVALID: 'Use 1–40 characters.',
+  ACCOUNT_WALLET_SAVE_FAILED: 'FloFi could not save that wallet to your account yet. Your wallet is safe with the provider; choose Check again.',
+  ACCOUNT_IDENTITY_CONFLICT: 'This sign-in matches more than one FloFi account, so FloFi did not sign you in. Sign in with the method you used before.',
+  ACCOUNT_PRIVY_USER_MISMATCH: 'This FloFi account belongs to another wallet-provider user. Nothing was signed in or changed.',
+  // BUILD-FLOFI-PRIVY-UX-001: Privy (sign-in and wallets).
+  PRIVY_NOT_CONFIGURED: "Sign-in isn't configured on this deployment yet.",
+  PRIVY_UNAVAILABLE: 'The wallet provider could not be reached. Nothing changed. Try again in a moment.',
+  PRIVY_TOKEN_INVALID: 'FloFi could not verify that sign-in. Nothing was signed in.',
+  PRIVY_USER_NOT_FOUND: 'FloFi could not find that sign-in at the wallet provider. Start again.',
+  PRIVY_NOT_AUTHORIZED: 'Sign-in is misconfigured on this deployment. Nothing was signed in.',
+  PRIVY_RESPONSE_INVALID: 'The wallet provider sent an answer FloFi could not read. Nothing changed.',
+  PRIVY_SIGN_IN_FAILED: 'Sign-in did not complete. Try again.',
+  PRIVY_LOGIN_METHOD_UNSUPPORTED: 'Sign in with Google, your email or a Web3 wallet.',
+  PRIVY_SESSION_REQUIRED: 'Your wallet provider session has ended in this browser. Sign in again.',
+  PRIVY_ACCOUNT_NOT_LINKED: 'Sign in again to add wallets.',
+  PRIVY_ACCOUNT_MISMATCH: 'You are signed in to the wallet provider as someone else. Sign in again.',
+  PRIVY_USER_CANCELLED: 'You closed the window before it finished. Nothing changed.',
+  PRIVY_EMAIL_CODE_FAILED: 'FloFi could not send a code to that address. Check it and try again.',
+  PRIVY_EMAIL_CODE_INVALID: 'That code is not valid or has expired. Request a new one.',
+  PRIVY_WALLET_CREATE_FAILED: 'The wallet was not created. Nothing changed. Try again.',
+  PRIVY_WALLET_IMPORT_FAILED: 'The wallet was not imported. Check the key and try again.',
+  PRIVY_WALLET_EXPORT_FAILED: 'The export could not start. Nothing was revealed.',
+  PRIVY_WALLET_LIMIT: 'Your wallet provider already holds a wallet of this kind for you. FloFi shows it instead of creating another.',
+  PRIVY_PRIVATE_KEY_INVALID: 'That does not look like a private key for this network. Nothing was imported.',
+  PRIVY_REQUEST_FAILED: 'The wallet provider did not complete the request. Nothing changed.',
+  WALLET_OPERATION_TIMEOUT: 'This is taking longer than usual. Your wallet may still be finishing; choose Check again.',
+  LEGACY_WALLET_EXPORT_ONLY: 'Wallets created in the earlier FloFi Wallet can be exported, not used to sign. Export it, then import the key here.',
   OIDC_PROVIDER_NOT_CONFIGURED: 'This sign-in method is not available on this deployment yet.',
   OIDC_ORIGIN_MISMATCH: 'Open FloFi at its main address to use this sign-in method.',
   OIDC_STATE_INVALID: 'That sign-in link expired or was opened in another browser. Start again.',
@@ -61,7 +87,7 @@ export function accountMessage(code: string): string {
   if (wallet) return wallet;
   if (/^MANAGED_WALLETS_NEED_(GOOGLE|APPLE|EMAIL)_SIGN_IN$/.test(code)) return 'Your FloFi wallets are unlocked with the method you first used for them. Sign in with it to manage them.';
   if (code.startsWith('OIDC_')) return 'FloFi could not verify that sign-in. Nothing was signed in.';
-  if (code.startsWith('MANAGED_') || code.startsWith('TURNKEY_')) return 'The wallet provider did not complete the request. Nothing changed.';
+  if (code.startsWith('MANAGED_') || code.startsWith('TURNKEY_') || code.startsWith('PRIVY_')) return 'The wallet provider did not complete the request. Nothing changed.';
   // Only catalogued messages are shown: an unexpected browser or provider error text never reaches the interface.
   return 'Something went wrong. Nothing changed. Try again.';
 }

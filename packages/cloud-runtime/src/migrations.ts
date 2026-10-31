@@ -46,6 +46,7 @@ export const SHIPPED_MIGRATIONS: readonly MigrationIdentity[] = Object.freeze([
   { version: 16, name: 'owner_history_purge', sha256: 'a3c258cadd9d7865ad9d36d63ec0921fc47455bb3651c201074f3b0486b4be6f' },
   { version: 17, name: 'copilot_metrics', sha256: 'c20a07de7bb504cbb8d95776796a0e6b412a1130c0539aee3449ceb6f89c45bf' },
   { version: 18, name: 'flofi_accounts', sha256: '0919a57a5af80a1376ada213bb00ac5db79c434ab7a9ff0ebea50e6a9664ae75' },
+  { version: 19, name: 'privy_accounts', sha256: 'f73a0944731486ce0853ec69d349f65bdf37b8ff81ec73b02e0221542eb01145' },
 ].map(migration => Object.freeze(migration)));
 
 /**
@@ -63,6 +64,11 @@ export type ForwardCompatibilityCertificate = {
  */
 export const CERTIFIED_FORWARD_MIGRATIONS: readonly ForwardCompatibilityCertificate[] = Object.freeze([
   {
+    // BUILD-FLOFI-PRIVY-UX-001: widens four 0018 CHECK constraints for Privy identities and Privy-managed wallets (additive, no data change).
+    base: { version: 18, name: 'flofi_accounts', sha256: '0919a57a5af80a1376ada213bb00ac5db79c434ab7a9ff0ebea50e6a9664ae75' },
+    migrations: [{ version: 19, name: 'privy_accounts', sha256: 'f73a0944731486ce0853ec69d349f65bdf37b8ff81ec73b02e0221542eb01145' }],
+    assessment: 'docs/deploy/SCHEMA-COMPATIBILITY.md#13-certificate-0019_privy_accounts',
+  }, {
     base: { version: 17, name: 'copilot_metrics', sha256: 'c20a07de7bb504cbb8d95776796a0e6b412a1130c0539aee3449ceb6f89c45bf' },
     // BUILD-FLOFI-AUTH-WALLETS-001: six new flofi_account* tables; nothing on any pre-existing relation, function, trigger or index.
     migrations: [{ version: 18, name: 'flofi_accounts', sha256: '0919a57a5af80a1376ada213bb00ac5db79c434ab7a9ff0ebea50e6a9664ae75' }],

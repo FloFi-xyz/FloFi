@@ -1,8 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { NextConfig } from 'next';
+import { PRIVY_CONNECT_SOURCES } from './src/accounts/privy-hosts.ts';
+
+/**
+ * BUILD-FLOFI-PRIVY-UX-001: optional `@privy-io/react-auth` packages that FloFi removes (pnpm-workspace.yaml overrides) resolve to a module
+ * that refuses to run (src/vendor/privy-removed-dependency.ts). Privy imports them only inside features FloFi never turns on.
+ */
+const PRIVY_REMOVED = './src/vendor/privy-removed-dependency.ts';
+export const PRIVY_REMOVED_DEPENDENCIES = Object.freeze(['@walletconnect/ethereum-provider', '@walletconnect/universal-provider', 'x402/client', '@stripe/crypto']);
 
 const config: NextConfig = {
   reactStrictMode: true,
+  turbopack: { resolveAlias: Object.fromEntries(PRIVY_REMOVED_DEPENDENCIES.map(name => [name, PRIVY_REMOVED])) },
   poweredByHeader: false,
   images: { unoptimized: true },
   // CI containers can expose the host CPU count. Bound page-generation workers to keep the build and PostgreSQL inside the runner's memory budget.
@@ -24,12 +33,15 @@ const config: NextConfig = {
     // BUILD-MCP-002: the approval and connections pages hold a handoff secret or account choices: never framed, cached, indexed or referred.
     const sensitive = [{ key: 'X-Frame-Options', value: 'DENY' }, { key: 'Content-Security-Policy', value: "connect-src 'self'; frame-ancestors 'none'" },
       { key: 'Referrer-Policy', value: 'no-referrer' }, { key: 'X-Robots-Tag', value: 'noindex, nofollow' }, { key: 'Cache-Control', value: 'no-store' }];
-    const cardProvider = 'https://api.mercadopago.com https://api-static.mercadopago.com https://secure-fields.mercadopago.com';
+    // BUILD-FLOFI-PRIVY-UX-001: plus Privy's API, wallet-frame and RPC origins (src/accounts/privy-hosts.ts), for sign-in and signing.
+    const cardProvider = `https://api.mercadopago.com https://api-static.mercadopago.com https://secure-fields.mercadopago.com ${PRIVY_CONNECT_SOURCES.join(' ')}`;
     return [{ source: '/:path*', headers: [{ key: 'Content-Security-Policy', value: `connect-src 'self' ${cardProvider}` }] },
       { source: '/approve', headers: sensitive }, { source: '/connections', headers: sensitive },
       // BUILD-FLOFI-AUTH-WALLETS-001: sign-in, wallet onboarding and Credentials (wallet import/export) are never framed by another site.
       ...['/login', '/onboarding', '/onboarding/:path*', '/app/credentials'].map(source => ({ source, headers: [{ key: 'X-Frame-Options', value: 'DENY' },
-        { key: 'Content-Security-Policy', value: `connect-src 'self' ${cardProvider}; frame-ancestors 'none'` }, { key: 'Referrer-Policy', value: 'no-referrer' }] })),
+        { key: 'Content-Security-Policy', value: `connect-src 'self' ${cardProvider}; frame-ancestors 'none'` }, { key: 'Referrer-Policy', value: 'no-referrer' },
+        // BUILD-FLOFI-PRIVY-UX-001: never kept in a cache, so Back after Disconnect cannot show a signed-in page again.
+        { key: 'Cache-Control', value: 'no-store' }] })),
       // BUILD-ADMIN-001: the private console and its APIs are never framed, cached, indexed or referred either.
       { source: '/admin', headers: sensitive }, { source: '/admin/:path*', headers: sensitive }];
   },

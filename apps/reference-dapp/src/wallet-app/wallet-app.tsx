@@ -18,11 +18,10 @@ import { AccountIcon } from '../components/account/account-icons';
 import { useLocale } from '../i18n/locale';
 import { PRE_SIGNATURE_CODES, REJECTED_CODE } from '../wallet/flofi-signing';
 import { broadcast, classifyOpenerMessage, errorResponse, notice, okResponse, postToOpener, subscribeBroadcast } from './channel';
-import { CreateRequest, ExportRequest, ImportRequest, WalletList } from './operations';
+import { ExportRequest, WalletList } from './operations';
 import type { WalletOperation, WalletResponse, WalletResult } from './protocol';
 import { forgetWalletKey, walletPublicKey } from './provider-client';
 import type { RequestEnv, WalletAppConfig } from './request-parts';
-import { EvmTransactionRequest, SignMessageRequest, SolanaTransactionRequest } from './signing';
 import { UnlockPanel, type Unlocked } from './unlock-panel';
 import { walletApi, WalletApiError, type WalletContext } from './wallet-api';
 import { codeOf, walletMessage } from './wallet-messages';
@@ -179,6 +178,8 @@ export function WalletApp({ config }: { config: WalletAppConfig }) {
       succeed(active.id, { wallets: context.wallets.map(wallet => ({ ecosystem: wallet.ecosystem, address: wallet.address, label: wallet.label })) },
         t('FloFi can now see the addresses of your FloFi Wallets.'));
     else if (active.operation.op === 'manage') succeed(active.id, { done: true }, '');
+    // BUILD-FLOFI-PRIVY-UX-001: FloFi Wallet is legacy and export-only; creating, importing and signing happen with Privy in FloFi itself.
+    else if (active.operation.op !== 'export') refuse(active.id, 'LEGACY_WALLET_EXPORT_ONLY');
   }, [active, phase, context]); // Answers once per request (answer() is idempotent).
   useEffect(() => { if (!active && outcome) outcomeRef.current?.focus(); }, [active, outcome]);
 
@@ -201,18 +202,12 @@ export function WalletApp({ config }: { config: WalletAppConfig }) {
   const account = phase === 'ready' && context
     ? { label: context.label, unlocked, minutesLeft, onLock: signing || locking ? null : () => void lock(), locking } : null;
   let body: ReactNode;
-  if (phase === 'ready' && context && active && active.operation.op !== 'connect' && active.operation.op !== 'manage') {
+  if (phase === 'ready' && context && active && active.operation.op === 'export') {
     const id = active.id;
     const env: RequestEnv = { id, config, appHost, context, unlocked, freshUnlock, onUnlocked, onContext: setContext, onLockRequired, setSigning,
       succeed: (result, text) => succeed(id, result, text), refuse: (code, display) => refuse(id, code, display) };
     const operation = active.operation;
-    body = operation.op === 'create' ? <CreateRequest key={id} env={env} ecosystem={operation.ecosystem}/>
-      : operation.op === 'import' ? <ImportRequest key={id} env={env} ecosystem={operation.ecosystem}/>
-      : operation.op === 'export' ? <ExportRequest key={id} env={env} walletId={operation.walletId} kind={operation.kind}/>
-      : operation.op === 'evm_sign_message' ? <SignMessageRequest key={id} env={env} ecosystem="evm" address={operation.address} message={operation.message}/>
-      : operation.op === 'solana_sign_message' ? <SignMessageRequest key={id} env={env} ecosystem="solana" address={operation.address} message={operation.message}/>
-      : operation.op === 'evm_sign_transaction' ? <EvmTransactionRequest key={id} env={env} address={operation.address} tx={operation.tx} signing={operation.signing}/>
-      : <SolanaTransactionRequest key={id} env={env} address={operation.address} chain={operation.chain} transaction={operation.transaction} signing={operation.signing}/>;
+    body = operation.op === 'export' ? <ExportRequest key={id} env={env} walletId={operation.walletId} kind={operation.kind}/> : null;
   } else if (phase === 'ready' && context) {
     body = <>
       {outcome && <div ref={outcomeRef} tabIndex={-1} className={outcome.tone === 'done' ? styles.match : outcome.tone === 'account' ? styles.warning : styles.error}

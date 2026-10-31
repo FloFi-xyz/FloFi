@@ -35,6 +35,7 @@ export const WALLET_MESSAGES: Readonly<Record<string, string>> = Object.freeze({
   WALLET_CROSS_ORIGIN: 'FloFi Wallet refused a request that did not come from this window.',
   WALLET_REQUEST_FAILED: 'FloFi Wallet could not complete that request. Nothing changed. Try again.',
   WALLET_UNLOCK_REQUIRED: 'Unlock FloFi Wallet to continue.',
+  LEGACY_WALLET_EXPORT_ONLY: 'FloFi Wallet now only exports wallets created here before. New wallets are created, imported and used in FloFi itself.',
   WALLET_UNLOCK_METHOD_UNAVAILABLE: 'This FloFi account can’t unlock FloFi Wallet with that method.',
   WALLET_UNLOCK_IDENTITY_MISMATCH: 'That Google or Apple account isn’t the one linked to this FloFi account. Nothing was unlocked.',
   SIGNER_NOT_MANAGED: 'That address isn’t a FloFi Wallet of this account. Nothing was signed.',

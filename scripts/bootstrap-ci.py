@@ -399,12 +399,35 @@ BUILDMCP001_DIRECT_VERSIONS = {
 # @noble/curves@1.9.0, borsh, cbor-js, @peculiar/x509 and its asn1 packages, asn1js, pvtsutils, pvutils, reflect-metadata, tsyringe and
 # tslib@1.14.1 (0BSD, exact identity below). Owner review: Turnkey's own encryption of the email code to its enclave (verified enclave
 # signature, HPKE) and verification-token check; FloFi writes no cryptography. No install scripts; no eval/new Function.
-REGISTRY_PACKAGE_COUNT = 295
+# BUILD-FLOFI-PRIVY-UX-001 moves accounts and embedded wallets to Privy and adds 210 (295 -> 505, none removed; the Turnkey pins stay
+# for the legacy export path): @privy-io/react-auth@3.51.0 and @privy-io/node@0.36.0 with Privy's 11 support packages, @solana/kit@8.5.0
+# (43 @solana/* modules) with the @solana-program memo/system/token clients, viem/ox/abitype, @coinbase/wallet-sdk, @base-org/account,
+# react-aria/headlessui/floating-ui, styled-components, hCaptcha/Turnstile, svix/standardwebhooks, jose and ws (its optional native peers
+# bufferutil/utf-8-validate are not resolved; none of the 210 has an install script). Licences: MIT 165, Apache-2.0 29 (none ships a
+# NOTICE file), ISC 11, BSD-3-Clause 2 and three exact identities below (no registry license, Unlicense, BlueOak-1.0.0). Owner review:
+# exact pnpm-workspace.yaml overrides remove four React SDK dependencies FloFi does not use: @walletconnect/ethereum-provider and
+# @walletconnect/universal-provider (WalletConnect Community License, proprietary), x402 (wagmi connectors and the MetaMask SDK under
+# ConsenSys' non-commercial licence) and @stripe/crypto (card onramp). GHSA-mrhx-c7xc-m3w5: mirroring the MCP SDK's zod override above,
+# @privy-io/api-base@1.12.0's zod (^3.25.76; no fixed 3.x exists) moves to the already locked zod@4.6.6 by exact override, so zod 3
+# never enters the graph and abitype's optional zod peer resolves to 4.6.6. All 210 passed the 7-day release age without a waiver.
+REGISTRY_PACKAGE_COUNT = 505
 # BUILD-FLOFI-AUTH-WALLETS-001: the embedded-wallet provider's browser stampers (docs/builds/BUILD-FLOFI-AUTH-WALLETS-001.md).
 BUILDAUTHWALLETS001_DIRECT_VERSIONS = {
     "@turnkey/crypto": "2.13.3",
     "@turnkey/iframe-stamper": "2.11.1",
     "@turnkey/indexed-db-stamper": "1.3.12",
+}
+# BUILD-FLOFI-PRIVY-UX-001: Privy accounts and embedded wallets (React SDK, server SDK) and the Solana client the React SDK's Solana
+# support requires, with its matching program clients (docs/builds/BUILD-FLOFI-PRIVY-UX-001.md). The four @solana packages satisfy the
+# React SDK's optional Solana peers; @privy-io/node's optional @solana/kit peer (^5.1.0) is allowed to share 8.5.0 by the exact
+# pnpm-workspace.yaml peerDependencyRules entry. Their peer-resolved importer versions must name a snapshot the pinned hash covers.
+BUILDPRIVYUX001_DIRECT_VERSIONS = {
+    "@privy-io/node": "0.36.0",
+    "@privy-io/react-auth": "3.51.0",
+    "@solana-program/memo": "0.16.0",
+    "@solana-program/system": "0.16.0",
+    "@solana-program/token": "0.18.0",
+    "@solana/kit": "8.5.0",
 }
 
 # The pre-existing BUILD-001 MPL tooling exception is exact-name scoped too.
@@ -457,7 +480,7 @@ def verify_dependencies():
     if lock.count("\npackages:\n") != 1 or lock.count("\nsnapshots:\n") != 1:
         raise RuntimeError("Unrecognized lockfile sections")
     resolved_sections = "packages:\n" + lock.split("\npackages:\n", 1)[1]
-    if hashlib.sha256(resolved_sections.encode()).hexdigest() != "978db9a42627fb6d11316e6496ef8ccd76dc2f92a0e6269a63ba0be5d908b7ac":
+    if hashlib.sha256(resolved_sections.encode()).hexdigest() != "9923bcc712f14c7c66a3e30b7bff7f8358f64ae0480e0c4e636cfced39fcd8e4":
         errors.append("Baseline registry packages/snapshots or peer resolutions changed")
     packages_text = lock.split("\npackages:\n", 1)[1].split("\nsnapshots:\n", 1)[0]
     snapshots_text = lock.split("\nsnapshots:\n", 1)[1]
@@ -522,6 +545,7 @@ def verify_dependencies():
         "@sinclair/typebox": "0.34.52",
         "ajv": "8.20.0",
         **BUILDAUTHWALLETS001_DIRECT_VERSIONS,
+        **BUILDPRIVYUX001_DIRECT_VERSIONS,
     }
     expected_app_dev = {key: BUILD002_DIRECT_VERSIONS[key] for key in
                         ("@playwright/test", "@types/react", "@types/react-dom")}
@@ -624,6 +648,14 @@ def verify_dependencies():
             errors.append(f"BUILD-FLOFI-AUTH-WALLETS-001 direct lock identity missing: {identity}@{version}")
         if not re.search(rf"(?m)^      '{re.escape(identity)}':\n        specifier: {re.escape(version)}\n        version: {re.escape(version)}$", app_importer):
             errors.append(f"BUILD-FLOFI-AUTH-WALLETS-001 app lock importer differs: {identity}")
+    for identity, version in BUILDPRIVYUX001_DIRECT_VERSIONS.items():
+        if identity + "@" + version not in locked:
+            errors.append(f"BUILD-FLOFI-PRIVY-UX-001 direct lock identity missing: {identity}@{version}")
+        # These pins have peers, so pnpm appends the exact peer resolution to the version; it must be one hash-pinned snapshot.
+        resolved = re.findall(rf"(?m)^      '{re.escape(identity)}':\n        specifier: {re.escape(version)}\n"
+                              rf"        version: ({re.escape(version)}(?:\(.+\))?)$", app_importer)
+        if len(resolved) != 1 or identity + "@" + resolved[0] not in snapshot_blocks:
+            errors.append(f"BUILD-FLOFI-PRIVY-UX-001 app lock importer differs: {identity}")
     for manifest_path in [Path("package.json"), *Path("packages").glob("*/package.json"),
                           Path("apps/reference-dapp/package.json")]:
         manifest = json.loads(manifest_path.read_text())
@@ -635,7 +667,8 @@ def verify_dependencies():
                         and BUILD003D_DIRECT_VERSIONS.get(name) != version
                         and BUILDCLOUD001_DIRECT_VERSIONS.get(name) != version
                         and BUILDMCP001_DIRECT_VERSIONS.get(name) != version
-                        and BUILDAUTHWALLETS001_DIRECT_VERSIONS.get(name) != version):
+                        and BUILDAUTHWALLETS001_DIRECT_VERSIONS.get(name) != version
+                        and BUILDPRIVYUX001_DIRECT_VERSIONS.get(name) != version):
                     errors.append(f"Unapproved direct pin: {name}@{version}")
 
     def dependencies(body, group):
@@ -739,7 +772,19 @@ def verify_dependencies():
         # tsyringe@4.10.0's TypeScript helper runtime, reached only through @turnkey/crypto@2.13.3 → @peculiar/x509. The existing
         # tslib@2.8.1 exception is unchanged; no other 0BSD package or version is accepted by this line.
         reviewed_0bsd = license_id == "0BSD" and identity == "tslib@1.14.1"
-        rejected = license_id not in allowed_licenses and not legacy_mpl and not legacy_blueoak and not reviewed_0bsd
+        # BUILD-FLOFI-PRIVY-UX-001 (owner review), exact identities only; THIRD_PARTY_NOTICES.md records each archive's legal text.
+        # No license declared: @privy-io/api-base@1.12.0's registry metadata and manifest have no `license`, but its SRI-pinned archive
+        # ships the Apache License 2.0 as package/LICENSE (byte-identical to @privy-io/react-auth@3.51.0's). Its evidence keeps the
+        # registry value (null); a missing license on any other identity or version is still rejected.
+        reviewed_undeclared = license_id is None and identity == "@privy-io/api-base@1.12.0"
+        # Unlicense (OSI-approved public-domain dedication: no attribution or notice obligation). fast-sha256@1.3.0 is reached only
+        # through @privy-io/node@0.36.0 → svix → standardwebhooks (server-side webhook signature checks).
+        reviewed_unlicense = license_id == "Unlicense" and identity == "fast-sha256@1.3.0"
+        # BlueOak-1.0.0 (permissive, OSI-approved; recipients get its text or link), the minimatch author's lru-cache@11.5.3, reached
+        # only as @privy-io/node@0.36.0's cache. The two BlueOak identities above are unchanged.
+        reviewed_blueoak = license_id == "BlueOak-1.0.0" and identity == "lru-cache@11.5.3"
+        rejected = (license_id not in allowed_licenses and not legacy_mpl and not legacy_blueoak and not reviewed_0bsd
+                    and not reviewed_undeclared and not reviewed_unlicense and not reviewed_blueoak)
         approved = BUILD002_REVIEWED_LICENSE_EXCEPTIONS.get(identity)
         if approved:
             if (license_id != approved["license"] or integrity != approved["integrity"]):
@@ -813,8 +858,9 @@ def verify_dependencies():
     print("Exact temporary owner-approved release-age waivers:", sorted(age_waivers), flush=True)
     print("Release-age waivers past normal eligibility (remove in a follow-up change):", sorted(removable_waivers), flush=True)
     print("Exact reviewed license exception set:", len(rejected_identities), flush=True)
+    # A reviewed identity without a registry license is counted as NOASSERTION (its evidence keeps null).
     print("License inventory:",
-          dict(sorted(collections.Counter(r["license"] for r in records).items())), flush=True)
+          dict(sorted(collections.Counter(r["license"] or "NOASSERTION" for r in records).items())), flush=True)
     print("Dependency evidence SHA-256:", hashlib.sha256(destination.read_bytes()).hexdigest(), flush=True)
 
 if __name__ == "__main__":

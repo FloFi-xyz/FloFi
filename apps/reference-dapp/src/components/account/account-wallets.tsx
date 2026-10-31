@@ -1,51 +1,64 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 'use client';
 /**
- * BUILD-FLOFI-AUTH-WALLETS-001: "My wallets" in Credentials — the wallets saved to the signed-in FloFi account, beside the existing
- * device-local wallet references (whose localStorage schema and semantics are unchanged).
+ * "My wallets" in Credentials (BUILD-FLOFI-AUTH-WALLETS-001; Privy since BUILD-FLOFI-PRIVY-UX-001) — the wallets saved to the signed-in
+ * FloFi account, beside the existing device-local wallet references (whose localStorage schema and semantics are unchanged).
  *
- * Each wallet shows its name, ecosystem, public address, provider and type (generated, imported or external) and, for external
- * wallets, whether it is connected in this browser. Removing a wallet removes FloFi's association only. Export is offered only for
- * FloFi-managed wallets whose provider supports it, and happens entirely in FloFi Wallet (its own origin): a fresh unlock there, an
- * explicit confirmation there, and the secret shown only inside the provider's frame there. This page never holds a wallet key.
+ * Each wallet shows its name, ecosystem, public address, provider and type (created, imported or external) and, for external wallets,
+ * whether it is connected in this browser. Removing a wallet removes FloFi's association only. Export:
+ * - a Privy wallet opens Privy's own export screen (the key is shown inside Privy's isolated frame, never to FloFi);
+ * - a legacy FloFi Wallet (Turnkey) wallet, created before Privy, keeps its export in FloFi Wallet on its own origin (fresh unlock,
+ *   explicit confirmation, the secret shown only inside Turnkey's frame). That is its migration path: export it, then import the key
+ *   with Privy (Add wallets → Import key). FloFi never moves funds or replaces an address by itself.
  * MetaMask, Phantom and other external wallets never offer key export: FloFi never held their keys.
  */
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useLocale } from '../../i18n/locale';
 import { accountState, deleteFloFiAccount, linkAccountWallet, removeAccountWallet, renameAccountWallet, type AccountState } from '../../app/account-action';
 import { openFloFiWallet, requestFloFiWallet } from '../../wallet/flofi-wallet-channel';
-import { exportActions, shortAddress, WALLET_LABEL_MAX, type AccountWallet } from '../../accounts/account-model';
+import { syncFloFiWallets } from '../../wallet/flofi-wallet-sync';
+import { exportActions, isLegacyWallet, isPrivyWallet, shortAddress, WALLET_LABEL_MAX, type AccountWallet } from '../../accounts/account-model';
+import { useFloFiPrivy } from '../../accounts/privy-client';
 import { ECOSYSTEM_LABEL } from '../../wallet/wallet-registry';
 import { useWalletProof, walletProofMessage, type Namespace } from '../wallet-proof';
+import { useFloFiWallet } from '../flofi-wallet-continue';
 import { AccountIcon } from './account-icons';
 import { accountMessage } from './account-messages';
-import { managedReadiness, useFloFiWalletReady } from './add-wallets';
 import styles from './account.module.css';
 
 export type ActiveWallet = { readonly ecosystem: 'evm' | 'solana'; readonly address: string };
 const ORIGIN_LABEL = { generated: 'Generated', imported: 'Imported', external: 'External' } as const;
 
 /**
- * The export entry point on the product page. It shows no secret and asks for no confirmation of its own: export happens in FloFi Wallet
- * (another origin), which asks for a fresh unlock and the explicit confirmation, then shows the secret only inside Turnkey's frame.
+ * The export entry point. It never shows a secret itself: a Privy wallet's key appears only in Privy's own export screen; a legacy
+ * FloFi Wallet (Turnkey) wallet exports in FloFi Wallet (another origin), which asks for a fresh unlock and confirmation there.
  */
 export function ExportWalletDialog({ wallet, state, onClose }: { wallet: AccountWallet; state: AccountState; onClose(): void }) {
   const { t } = useLocale();
+  const privy = useFloFiPrivy();
+  const legacyChannel = useFloFiWallet();
   const dialog = useRef<HTMLDialogElement>(null), titleId = useId();
-  const readiness = managedReadiness(state), ready = useFloFiWalletReady(readiness);
+  const legacy = isLegacyWallet(wallet);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
   const actions = exportActions(wallet);
+  const ready = legacy ? state.availability.legacyWallets && legacyChannel.configured : Boolean(privy?.ready && privy.authenticated);
   useEffect(() => {
     const element = dialog.current, previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     if (element && !element.open) element.showModal();
     return () => { if (element?.open) element.close(); if (previous?.isConnected) previous.focus({ preventScroll: true }); };
   }, []);
-  /** Opens FloFi Wallet in this click (popups need the gesture), then asks it to export there. */
+  useEffect(() => { if (legacy && state.availability.legacyWallets) void syncFloFiWallets({ force: true }); }, [legacy, state.availability.legacyWallets]);
   function open(kind: 'private-key' | 'recovery-phrase') {
     if (busy) return;
     setBusy(true); setError(null); setDone(false);
+    if (!legacy) {
+      void privy!.exportWallet(wallet.ecosystem, wallet.address).then(() => setDone(true),
+        cause => setError(cause instanceof Error ? cause.message : 'PRIVY_WALLET_EXPORT_FAILED')).finally(() => setBusy(false));
+      return;
+    }
+    // Legacy FloFi Wallet: opened in this click (popups need the gesture), then asked to export there.
     try { openFloFiWallet(); } catch (cause) { setBusy(false); setError(cause instanceof Error ? cause.message : 'FLOFI_WALLET_NOT_OPEN'); return; }
     void requestFloFiWallet({ op: 'export', walletId: wallet.id, kind }).then(() => setDone(true),
       cause => setError(cause instanceof Error ? cause.message : 'MANAGED_EXPORT_UNAVAILABLE')).finally(() => setBusy(false));
@@ -58,19 +71,20 @@ export function ExportWalletDialog({ wallet, state, onClose }: { wallet: Account
       <div className={styles.warning} role="note"><AccountIcon name="warning" size={18}/><span>{t('Never share your private key or recovery phrase with anyone. Whoever has it controls this wallet and its funds. FloFi will never ask for it.')}</span></div>
       <div className={styles.walletBox}><span>{t('Your wallet')}</span>
         <div className={styles.walletLine}><span><strong>{wallet.label}</strong><br/><code title={wallet.address}>{shortAddress(wallet.address)}</code></span></div></div>
-      <p className={styles.small}>{t('Export happens in FloFi Wallet, a separate secure window: you unlock it again there, confirm, and the secret is shown only inside Turnkey’s secure frame. This page never sees it.')}</p>
-      {readiness !== 'ready' && <p className={styles.small} role="status">
-        {t(accountMessage(readiness === 'needs-identity' ? 'MANAGED_WALLETS_NEED_SOCIAL_SIGN_IN' : 'MANAGED_WALLETS_NOT_CONFIGURED'))}</p>}
+      <p className={styles.small}>{t(legacy
+        ? 'This wallet was created in the earlier FloFi Wallet. Export happens there, in a separate secure window: you unlock it again, confirm, and the secret is shown only inside Turnkey’s secure frame. To keep using it in FloFi, import the key afterwards in Add wallets.'
+        : 'Export happens in Privy’s own secure screen. The key is shown only there; FloFi never sees it.')}</p>
+      {!ready && <p className={styles.small} role="status">{t(accountMessage(legacy ? 'MANAGED_WALLETS_NOT_CONFIGURED' : 'PRIVY_SESSION_REQUIRED'))}</p>}
       <div className={styles.exportActions}>
         {actions.includes('private-key') && <button type="button" className={styles.primary} disabled={busy || !ready} onClick={() => open('private-key')}>
-          <AccountIcon name="key" size={18}/>{t('Export private key in FloFi Wallet')}</button>}
+          <AccountIcon name="key" size={18}/>{t(legacy ? 'Export private key in FloFi Wallet' : 'Export private key')}</button>}
         {actions.includes('recovery-phrase') && <button type="button" className={styles.primary} disabled={busy || !ready} onClick={() => open('recovery-phrase')}>
           <AccountIcon name="phrase" size={18}/>{t('Export recovery phrase in FloFi Wallet')}</button>}
       </div>
-      {busy && <p className={styles.status} role="status">{t('Continue in FloFi Wallet…')}</p>}
-      {done && <p className={styles.status} role="status">{t('Export finished in FloFi Wallet.')}</p>}
+      {busy && <p className={styles.status} role="status">{t(legacy ? 'Continue in FloFi Wallet…' : 'Continue in the export screen…')}</p>}
+      {done && <p className={styles.status} role="status">{t(legacy ? 'Export finished in FloFi Wallet.' : 'Export screen closed.')}</p>}
       {error && <p className={styles.error} role="alert">{t(accountMessage(error))}</p>}
-      <p className={styles.protected}><AccountIcon name="lock" size={14}/>{t('Protected by')} <strong>Turnkey</strong></p>
+      <p className={styles.protected}><AccountIcon name="lock" size={14}/>{t('Protected by')} <strong>{legacy ? 'Turnkey' : 'Privy'}</strong></p>
     </div>
   </dialog>;
 }
@@ -92,17 +106,19 @@ function AccountWalletCard({ wallet, active, state, signIn, onChanged, onStatus 
   async function remove() {
     const result = await removeAccountWallet(wallet.id).catch(() => ({ ok: false as const, code: 'ACCOUNTS_UNAVAILABLE' }));
     if (!result.ok) { setError(result.code); return; }
-    onStatus(t(managed ? '{0} removed from your FloFi account. The wallet still exists at Turnkey and its funds are unchanged.'
+    onStatus(t(managed ? '{0} removed from your FloFi account. The wallet still exists with its provider and its funds are unchanged.'
       : '{0} removed from your FloFi account. Your wallet and its funds are unchanged.', wallet.label)); onChanged();
   }
-  const state_ = managed ? t('Managed by Turnkey') : t(active ? 'Connected' : 'Not connected');
+  const legacy = isLegacyWallet(wallet);
+  const state_ = legacy ? t('Legacy FloFi Wallet') : managed ? t('Managed by Privy') : t(active ? 'Connected' : 'Not connected');
   return <article className="workspace-wallet-card" aria-label={`${wallet.label}, ${ECOSYSTEM_LABEL[wallet.ecosystem]}`} data-origin={wallet.origin} data-active={active ? 'true' : 'false'}>
     <div className="workspace-wallet-heading">
       <span className="workspace-network-icon"><img src={wallet.ecosystem === 'evm' ? '/brand/crypto/ethereum.svg' : '/brand/crypto/solana.svg'} width="28" height="28" alt=""/></span>
       <div><h3>{wallet.label}</h3><p>{wallet.providerName} · {ECOSYSTEM_LABEL[wallet.ecosystem]} · {t(ORIGIN_LABEL[wallet.origin])}</p></div>
       <span className={`workspace-wallet-status${active ? ' workspace-wallet-status-active' : ''}`}>{state_}</span>
     </div>
-    {managed && <p className="workspace-wallet-signing" data-managed-signing="flofi-wallet">{t('Signs in FloFi Wallet, after you review the transaction in FloFi.')}</p>}
+    {isPrivyWallet(wallet) && <p className="workspace-wallet-signing" data-managed-signing="privy">{t('Signs with your FloFi wallet (Privy), after you review the transaction in FloFi.')}</p>}
+    {legacy && <p className="workspace-wallet-signing" data-managed-signing="legacy">{t(accountMessage('LEGACY_WALLET_EXPORT_ONLY'))}</p>}
     <div className="workspace-wallet-address"><code title={wallet.address}>{shortAddress(wallet.address)}</code>
       <button type="button" className="workspace-copy" aria-label={t('Copy {0} address', wallet.label)} title={t('Copy address')}
         onClick={() => void navigator.clipboard.writeText(wallet.address).then(() => onStatus(t('Address copied.')), () => onStatus(t('Address could not be copied.')))}>
@@ -114,7 +130,7 @@ function AccountWalletCard({ wallet, active, state, signIn, onChanged, onStatus 
       <div className="workspace-wallet-actions"><button type="submit" className="workspace-action">{t('Save name')}</button>
         <button type="button" className="workspace-action" onClick={() => { setMode('view'); setDraft(wallet.label); setError(null); }}>{t('Cancel')}</button></div>
     </form> : mode === 'remove' ? <div className="workspace-inline-form" role="group" aria-label={t('Remove {0}', wallet.label)}>
-      <p>{t(managed ? 'Remove {0} from your FloFi account? The wallet is not deleted: it stays with Turnkey, and its funds are unchanged. Export it first if you want to keep using it elsewhere.'
+      <p>{t(managed ? 'Remove {0} from your FloFi account? The wallet is not deleted: it stays with its provider, and its funds are unchanged. Export it first if you want to keep using it elsewhere.'
         : 'Remove {0} from your FloFi account? Only FloFi’s association is removed; the wallet and its assets are not affected.', wallet.label)}
         {signIn ? ` ${t('You will no longer be able to sign in with this wallet, unless it is your only way to sign in.')}` : ''}</p>
       <div className="workspace-wallet-actions"><button type="button" className="workspace-action workspace-action-danger" onClick={() => void remove()}>{t('Remove')}</button>
@@ -165,7 +181,7 @@ function DeleteAccount({ state }: { state: AccountState }) {
   return <div className="workspace-inline-form" role="group" aria-label={t('Delete FloFi account')}>
     {confirming ? <>
       <p>{t('Delete your FloFi account? Your sign-in identities, sessions and saved wallet addresses are deleted from FloFi.')}{' '}
-        {t(managed ? 'Wallets created or imported with Turnkey are not deleted and FloFi can no longer show or export them: export them first if you want to keep using them.'
+        {t(managed ? 'Wallets created or imported in FloFi are not deleted: they stay with their provider and their funds are unchanged. Export them first if you want to keep using them elsewhere.'
           : 'Your wallets and their funds are not affected.')}</p>
       <div className="workspace-wallet-actions"><button type="button" className="workspace-action workspace-action-danger" onClick={() => void remove()}>{t('Delete account')}</button>
         <button type="button" className="workspace-action" onClick={() => { setConfirming(false); setError(null); }}>{t('Cancel')}</button></div>

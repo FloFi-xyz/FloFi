@@ -1,156 +1,131 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /**
- * BUILD-FLOFI-AUTH-WALLETS-001: account orchestration (server only).
+ * Account orchestration (server only). BUILD-FLOFI-AUTH-WALLETS-001 introduced accounts; BUILD-FLOFI-PRIVY-UX-001 moved sign-in and
+ * embedded wallets to Privy.
  *
- * Every entry point receives identity that the server itself verified — an OIDC ID token checked against the provider's keys, a
- * one-time code verified by the provider (encrypted in the browser; FloFi checks the provider-signed verification token), or a wallet
- * session sealed after FloFi verified the wallet's signature — never a claim from the browser. Signing in creates no wallet, opens no
- * wallet-provider session, grants no permission, starts no transaction and delegates no signer. Managed wallets are unlocked, created,
- * imported, signed with and exported only in FloFi Wallet on its own origin (wallet-service.ts). Saving a managed wallet requires the
- * provider to confirm that the address belongs to this person's own organization; linking an external wallet requires a fresh wallet
- * proof in this browser.
+ * Every entry point receives identity that the server itself verified, never a claim from the browser: a Privy access token checked with
+ * the official SDK and the Privy user read back from Privy's API (privy-server.ts), or a wallet session sealed after FloFi verified the
+ * wallet's signature. Signing in grants no permission, starts no transaction and delegates no signer. A Privy-managed wallet is saved to
+ * the account only after Privy's API confirms that this account's own Privy user holds it; creating or importing a wallet authorizes
+ * nothing. Wallets created in FloFi Wallet (Turnkey) before Privy keep their records unchanged (legacy, export only).
  */
-import { accountWalletId, canonicalAddress, MANAGED_PROVIDER, MANAGED_PROVIDER_NAME, normalizeEmail, parseAccountWalletId, validProvider,
-  walletLabel, type AccountView, type AccountWallet, type IdentityKind } from './account-model.ts';
-import { freshlyAuthenticated, SESSION_PUBLIC_KEY, type AccountSessionToken, type EmailFlow, type OidcFlow } from './account-session.ts';
-import type { AccountStore, IdentityClaim } from './account-store.ts';
-import { createHash } from 'node:crypto';
-import { exchangeGoogleCode, verifyIdToken, type OidcConfig } from './oidc.ts';
-import type { TurnkeyServer } from './turnkey-server.ts';
+import { accountWalletId, canonicalAddress, isPrivyWallet, MANAGED_PROVIDER, MANAGED_PROVIDER_NAME, validProvider, walletLabel, type AccountView,
+  type AccountWallet, type IdentityKind } from './account-model.ts';
+import { freshlyAuthenticated, SESSION_PUBLIC_KEY, type AccountSessionToken } from './account-session.ts';
+import type { AccountStore } from './account-store.ts';
+import type { PrivyEmbeddedWallet, PrivyServer, PrivyUser } from './privy-server.ts';
 import type { WalletEcosystem } from '../wallet/wallet-registry';
 
-/** The outcome of a verified sign-in. Signing in never opens a wallet-provider session (`managed` is always null; kept for callers). */
-export type SignInOutcome = { readonly session: AccountSessionToken; readonly created: boolean; readonly onboarding: AccountView['onboarding'];
-  readonly managed: null; readonly managedError: string | null };
+/** The outcome of a verified sign-in. */
+export type SignInOutcome = { readonly session: AccountSessionToken; readonly created: boolean; readonly onboarding: AccountView['onboarding'] };
+/** The result of saving the person's Privy wallets: what is saved now, and how many Privy wallets another FloFi account already holds. */
+export type PrivyWalletSync = { readonly wallets: readonly AccountWallet[]; readonly heldElsewhere: number };
 
 const fail = (code: string): never => { throw new Error(code); };
-const CODE = /^[A-Z][A-Z0-9_]{2,80}$/;
-const classified = (error: unknown, fallback: string) => error instanceof Error && CODE.test(error.message) ? error.message : fallback;
-export function createAccountService(input: { readonly store: AccountStore; readonly turnkey: TurnkeyServer | null; readonly now?: () => Date;
-  readonly transport?: typeof fetch }) {
-  const { store, turnkey } = input, now = input.now ?? (() => new Date()), transport = input.transport ?? fetch;
+const ECOSYSTEM_LABEL: Readonly<Record<WalletEcosystem, string>> = Object.freeze({ evm: 'EVM wallet', solana: 'Solana wallet' });
+export function createAccountService(input: { readonly store: AccountStore; readonly privy: PrivyServer | null; readonly now?: () => Date }) {
+  const { store, privy } = input, now = input.now ?? (() => new Date());
+  const provider = () => privy ?? fail('PRIVY_NOT_CONFIGURED');
 
-  async function establish(claim: IdentityClaim, intent: 'sign-in' | 'link', current: AccountSessionToken | null): Promise<{ session: AccountSessionToken; created: boolean }> {
-    if (intent === 'link') {
-      // Linking adds a verified identity to the signed-in account; it never moves one from another account.
-      if (!current || !freshlyAuthenticated(current, now())) fail('ACCOUNT_REAUTHENTICATION_REQUIRED');
-      await store.linkIdentity(current!.accountId, claim, now());
-      return { session: current!, created: false };
-    }
-    const signed = await store.signIn(claim, now());
-    return { session: signed, created: signed.created };
-  }
   async function onboardingOf(accountId: string) { return (await store.account(accountId))?.onboarding ?? 'pending'; }
+  /** The Privy user behind `token`, required to be the one linked to this signed-in account. */
+  async function ownPrivyUser(session: AccountSessionToken, token: unknown): Promise<PrivyUser> {
+    const verified = await provider().verify(token);
+    const linked = await store.privyUser(session.accountId);
+    if (!linked) fail('PRIVY_ACCOUNT_NOT_LINKED');
+    if (linked !== verified.userId) fail('PRIVY_ACCOUNT_MISMATCH');
+    return provider().user(verified.userId);
+  }
+  /**
+   * Saves one embedded wallet of the account's own Privy user. Idempotent; an address another FloFi account holds is refused and never
+   * moved; an address this account already holds keeps its record unchanged (never silently replaced).
+   */
+  async function saveEmbedded(session: AccountSessionToken, wallet: PrivyEmbeddedWallet, label: string | null): Promise<AccountWallet> {
+    const holder = await store.walletHolder(wallet.ecosystem, wallet.address);
+    if (holder && holder !== session.accountId) fail('ACCOUNT_WALLET_LINKED_ELSEWHERE');
+    if (holder) {
+      const existing = (await store.wallets(session.accountId)).find(entry => entry.ecosystem === wallet.ecosystem && entry.address === wallet.address);
+      if (existing) return existing;
+    }
+    const fallback = wallet.imported ? `Imported ${ECOSYSTEM_LABEL[wallet.ecosystem]}` : ECOSYSTEM_LABEL[wallet.ecosystem];
+    return store.saveWallet(session.accountId, { ecosystem: wallet.ecosystem, address: wallet.address, origin: wallet.imported ? 'imported' : 'generated',
+      provider: MANAGED_PROVIDER, providerName: MANAGED_PROVIDER_NAME, providerResource: wallet.walletId, label: walletLabel(label) ?? fallback }, now());
+  }
+  /** Saves every embedded wallet of the Privy user that is not saved yet (recovers a creation or import whose save never finished). */
+  async function syncEmbedded(session: AccountSessionToken, user: PrivyUser): Promise<PrivyWalletSync> {
+    let heldElsewhere = 0;
+    for (const wallet of user.wallets) {
+      try { await saveEmbedded(session, wallet, null); }
+      catch (error) { if (error instanceof Error && error.message === 'ACCOUNT_WALLET_LINKED_ELSEWHERE') heldElsewhere++; else throw error; }
+    }
+    return { wallets: await store.wallets(session.accountId), heldElsewhere };
+  }
 
   const service = {
+    privyConfigured: () => privy !== null,
     /**
-     * Google (code + PKCE) or Apple (form_post ID token): verify, then sign in or link. Signing in to FloFi opens no wallet-provider
-     * session; managed wallets are unlocked separately in FloFi Wallet, on its own origin.
+     * Privy sign-in (Google, email code or an external Web3 wallet, all completed in Privy). FloFi verifies the access token, reads the
+     * user's verified identities from Privy's API, and signs in to the one account they belong to (account-store.ts `signInPrivy`), then
+     * saves any embedded wallet of that user the account does not list yet. Signing in creates no wallet and authorizes nothing.
      */
-    async completeOidc(config: OidcConfig, flow: OidcFlow, response: { readonly code?: unknown; readonly idToken?: unknown }, current: AccountSessionToken | null): Promise<SignInOutcome> {
-      const idToken = config.provider === 'google' ? await exchangeGoogleCode(config, response.code, flow.verifier, transport) : response.idToken;
-      const identity = await verifyIdToken(config, idToken, flow, { now: now(), transport });
-      // Each ID token signs in once: a replayed token is refused.
-      if (!await store.consumeProof(createHash('sha256').update(idToken as string).digest('hex'), identity.expiresAt, now())) fail('OIDC_TOKEN_REPLAYED');
-      const email = identity.emailVerified ? identity.email : null;
-      const { session, created } = await establish({ kind: config.provider, subject: identity.subject, label: email }, flow.intent, current);
-      return { session, created, onboarding: await onboardingOf(session.accountId), managed: null, managedError: null };
+    async completePrivy(token: unknown): Promise<SignInOutcome> {
+      const verified = await provider().verify(token);
+      const user = await provider().user(verified.userId);
+      if (!user.method) fail('PRIVY_LOGIN_METHOD_UNSUPPORTED');
+      const signed = await store.signInPrivy({ privyUser: user.id, identities: user.identities, method: user.method! }, now());
+      const session: AccountSessionToken = { accountId: signed.accountId, sessionId: signed.sessionId, method: signed.method,
+        authenticatedAt: signed.authenticatedAt, expiresAt: signed.expiresAt };
+      // A wallet whose save never finished (a closed tab, a timeout) is saved now; a failure here never blocks signing in.
+      await syncEmbedded(session, user).catch(() => undefined);
+      return { session, created: signed.created, onboarding: await onboardingOf(session.accountId) };
     },
     /**
-     * Sends an email one-time code through the provider (encrypted-OTP activity), at most 5 per address per hour (and a
-     * deployment-wide ceiling). `browserKey` is the public half of a key the sign-in page created for this attempt only: the code
-     * the person types is encrypted with it to the provider's enclave, so FloFi's server never sees the code.
+     * Saves one wallet just created or imported in the person's Privy embedded wallet. The address must be one of the embedded wallets
+     * Privy's API lists for this account's own Privy user (never an external wallet, never another user's). `label` is the name the person
+     * typed when importing; it is display text only.
      */
-    async startEmail(email: unknown, browserKey: string): Promise<{ challengeId: string; email: string; targetBundle: string }> {
-      if (!turnkey) fail('EMAIL_SIGN_IN_NOT_CONFIGURED');
-      const address = normalizeEmail(email) ?? fail('EMAIL_INVALID');
-      if (!SESSION_PUBLIC_KEY.test(browserKey)) fail('ACCOUNT_SESSION_KEY_INVALID');
-      if (!await store.emailChallengeAllowed(address, now())) fail('EMAIL_RATE_LIMITED');
-      const otp = await turnkey!.initEmailOtp(address);
-      return { challengeId: await store.startEmailChallenge({ email: address, providerChallenge: otp.otpId, browserBinding: browserKey }, now()), email: address,
-        targetBundle: otp.targetBundle };
+    async savePrivyWallet(session: AccountSessionToken, token: unknown, request: { readonly ecosystem: unknown; readonly address: unknown; readonly label?: unknown }): Promise<AccountWallet> {
+      if (request.ecosystem !== 'evm' && request.ecosystem !== 'solana') fail('ACCOUNT_WALLET_INVALID');
+      const ecosystem = request.ecosystem as WalletEcosystem, address = canonicalAddress(ecosystem, request.address) ?? fail('ACCOUNT_WALLET_INVALID');
+      const label = request.label === undefined || request.label === null || request.label === '' ? null : walletLabel(request.label) ?? fail('ACCOUNT_WALLET_LABEL_INVALID');
+      const user = await ownPrivyUser(session, token);
+      const wallet = user.wallets.find(entry => entry.ecosystem === ecosystem && entry.address === address) ?? fail('ACCOUNT_WALLET_NOT_OWNED');
+      return saveEmbedded(session, wallet!, label);
+    },
+    /** Saves every embedded wallet of the account's own Privy user that the account does not list yet (refresh and timeout recovery). */
+    async syncPrivyWallets(session: AccountSessionToken, token: unknown): Promise<PrivyWalletSync> {
+      return syncEmbedded(session, await ownPrivyUser(session, token));
     },
     /**
-     * Verifies the encrypted code with the provider, then checks the provider-signed verification token is for exactly this address
-     * and this browser's key, and has not been used before. Only then signs in or links the verified email.
+     * Links an external wallet proven in this browser (a fresh EIP-4361 / Sign-In With Solana wallet session) to the signed-in account, as
+     * an identity and as an external wallet (public metadata; never exportable). A wallet held by another account is refused.
      */
-    async completeEmail(flow: EmailFlow, encryptedOtpBundle: unknown, current: AccountSessionToken | null): Promise<SignInOutcome> {
-      if (!turnkey) fail('EMAIL_SIGN_IN_NOT_CONFIGURED');
-      if (typeof encryptedOtpBundle !== 'string' || encryptedOtpBundle.length < 64 || encryptedOtpBundle.length > 4_096) fail('EMAIL_CODE_INVALID');
-      // Server-side attempt budget: at most 5 tries per challenge, whatever the provider allows; then a new code is required.
-      const challenge = await store.attemptEmailChallenge(flow.challengeId, now()) ?? fail('EMAIL_CHALLENGE_EXPIRED');
-      const { email, providerChallenge, browserBinding } = challenge!;
-      // A FloFi Wallet unlock challenge never signs anyone in (wallet-service.ts `unlockChallengeKey`).
-      if (email.startsWith('wallet-unlock:')) fail('EMAIL_CHALLENGE_EXPIRED');
-      let verificationToken: string;
-      try { verificationToken = await turnkey!.verifyEmailOtp(providerChallenge, encryptedOtpBundle as string); }
-      catch (error) {
-        // A wrong or expired code is a completed-but-failed provider activity; transport and configuration failures keep their own code.
-        const code = classified(error, 'EMAIL_CODE_REJECTED');
-        throw new Error(code === 'TURNKEY_ACTIVITY_NOT_COMPLETED' || code === 'TURNKEY_REQUEST_FAILED' ? 'EMAIL_CODE_REJECTED' : code, { cause: error });
-      }
-      const claims = await turnkey!.verificationClaims(verificationToken, { contact: email, publicKey: browserBinding }, now().getTime());
-      // A verification token signs in once, even within its lifetime.
-      if (!await store.consumeProof(createHash('sha256').update(`otp:${claims.id}`).digest('hex'), new Date(claims.expiresAtMs), now())) fail('EMAIL_VERIFICATION_REPLAYED');
-      await store.consumeEmailChallenge(flow.challengeId, now());
-      const { session, created } = await establish({ kind: 'email', subject: email, label: email }, flow.intent, current);
-      return { session, created, onboarding: await onboardingOf(session.accountId), managed: null, managedError: null };
-    },
-    /**
-     * Web3 Wallet sign-in: the wallet session FloFi sealed after verifying the wallet's EIP-4361 / Sign-In With Solana signature.
-     * The wallet is recorded as an external wallet of the account (public metadata; never exportable).
-     */
-    async completeWallet(proof: { readonly namespace: 'eip155' | 'solana'; readonly address: string }, provider: { readonly key: unknown; readonly name: unknown },
-      intent: 'sign-in' | 'link', current: AccountSessionToken | null): Promise<SignInOutcome> {
-      const ecosystem: WalletEcosystem = proof.namespace === 'eip155' ? 'evm' : 'solana', address = canonicalAddress(ecosystem, proof.address) ?? fail('WALLET_ADDRESS_INVALID');
-      // Linking checks the wallet record first, so a wallet held by another account never leaves a half-linked identity behind.
-      const holder = await store.walletHolder(ecosystem, address);
-      if (intent === 'link' && holder && holder !== current?.accountId) fail('ACCOUNT_WALLET_LINKED_ELSEWHERE');
-      const { session, created } = await establish({ kind: proof.namespace, subject: address, label: null }, intent, current);
-      const key = validProvider(provider.key) ? provider.key : 'injected', name = walletLabel(provider.name) ?? (ecosystem === 'evm' ? 'EVM wallet' : 'Solana wallet');
-      // A wallet whose record belongs to another account (for example an exported managed wallet) still signs in to its own identity's
-      // account; its record is never moved.
-      if (!holder) await store.saveWallet(session.accountId, { ecosystem, address, origin: 'external', provider: key, providerName: name, providerResource: null, label: name }, now());
-      return { session, created, onboarding: await onboardingOf(session.accountId), managed: null, managedError: 'MANAGED_WALLETS_NEED_SOCIAL_SIGN_IN' };
+    async linkExternalWallet(session: AccountSessionToken, proof: { readonly namespace: 'eip155' | 'solana'; readonly address: string } | null,
+      provider: { readonly key: unknown; readonly name: unknown }): Promise<AccountWallet> {
+      if (!proof) fail('WALLET_SESSION_REQUIRED');
+      const ecosystem: WalletEcosystem = proof!.namespace === 'eip155' ? 'evm' : 'solana', address = canonicalAddress(ecosystem, proof!.address) ?? fail('WALLET_ADDRESS_INVALID');
+      if (!freshlyAuthenticated(session, now())) fail('ACCOUNT_REAUTHENTICATION_REQUIRED');
+      // Checked first, so a wallet held by another account never leaves a half-linked identity behind.
+      const holder = await store.walletHolder(ecosystem, address!);
+      if (holder && holder !== session.accountId) fail('ACCOUNT_WALLET_LINKED_ELSEWHERE');
+      await store.linkIdentity(session.accountId, { kind: proof!.namespace, subject: address!, label: null }, now());
+      // An external wallet's provider key can never pose as a managed provider.
+      const key = validProvider(provider.key) && provider.key !== MANAGED_PROVIDER && provider.key !== 'turnkey' ? provider.key : 'injected';
+      const name = walletLabel(provider.name) ?? ECOSYSTEM_LABEL[ecosystem];
+      if (!holder) await store.saveWallet(session.accountId, { ecosystem, address: address!, origin: 'external', provider: key, providerName: name, providerResource: null, label: name }, now());
+      return (await store.wallets(session.accountId)).find(wallet => wallet.id === accountWalletId(ecosystem, address!)) ?? fail('ACCOUNT_WALLET_NOT_FOUND');
     },
     async view(session: AccountSessionToken): Promise<AccountView | null> {
       const account = await store.account(session.accountId);
       if (!account) return null;
-      return { accountId: account.accountId, method: session.method, identities: account.identities, onboarding: account.onboarding, wallets: account.wallets,
-        managedLogin: account.organization?.login ?? null, authenticatedAt: new Date(session.authenticatedAt * 1000).toISOString(),
-        expiresAt: new Date(session.expiresAt * 1000).toISOString() };
+      return { accountId: account.accountId, method: session.method, identities: account.identities.filter(identity => identity.kind !== 'privy'),
+        onboarding: account.onboarding, wallets: account.wallets, managedLogin: account.organization?.login ?? null,
+        privy: account.identities.some(identity => identity.kind === 'privy'),
+        authenticatedAt: new Date(session.authenticatedAt * 1000).toISOString(), expiresAt: new Date(session.expiresAt * 1000).toISOString() };
     },
-    /** Saves managed wallets after the provider confirms each address belongs to this person's organization. */
-    async saveManagedWallets(session: AccountSessionToken, ids: unknown): Promise<AccountWallet[]> {
-      if (!turnkey) fail('MANAGED_WALLETS_NOT_CONFIGURED');
-      const requested = (Array.isArray(ids) ? ids : []).slice(0, 8).map(parseAccountWalletId);
-      if (!requested.length || requested.some(entry => entry === null)) fail('ACCOUNT_WALLET_INVALID');
-      const organization = (await store.account(session.accountId))?.organization ?? fail('MANAGED_ORGANIZATION_MISSING');
-      const [accounts, wallets, keys] = await Promise.all([turnkey!.walletAccounts(organization!.organization), turnkey!.wallets(organization!.organization),
-        turnkey!.privateKeys(organization!.organization)]);
-      const saved: AccountWallet[] = [];
-      for (const entry of requested as { ecosystem: WalletEcosystem; address: string }[]) {
-        const format = entry.ecosystem === 'evm' ? 'ADDRESS_FORMAT_ETHEREUM' : 'ADDRESS_FORMAT_SOLANA';
-        const same = (candidate: string) => canonicalAddress(entry.ecosystem, candidate) === entry.address;
-        const account = accounts.find(candidate => candidate.format === format && same(candidate.address));
-        const generated = account && wallets.find(wallet => wallet.walletId === account.walletId && !wallet.imported);
-        const imported = !generated ? keys.find(key => key.imported && key.addresses.some(address => address.format === format && same(address.address))) : undefined;
-        if (!generated && !imported) fail('ACCOUNT_WALLET_NOT_OWNED');
-        const label = entry.ecosystem === 'evm' ? 'EVM wallet' : 'Solana wallet';
-        saved.push(await store.saveWallet(session.accountId, { ecosystem: entry.ecosystem, address: entry.address, origin: generated ? 'generated' : 'imported',
-          provider: MANAGED_PROVIDER, providerName: MANAGED_PROVIDER_NAME, providerResource: generated ? generated.walletId : imported!.privateKeyId,
-          label: generated ? label : `Imported ${label}` }, now()));
-      }
-      return saved;
-    },
-    /** Links an external wallet proven in this browser (fresh wallet session) to the signed-in account. */
-    async linkExternalWallet(session: AccountSessionToken, proof: { readonly namespace: 'eip155' | 'solana'; readonly address: string } | null,
-      provider: { readonly key: unknown; readonly name: unknown }): Promise<AccountWallet> {
-      if (!proof) fail('WALLET_SESSION_REQUIRED');
-      await service.completeWallet(proof!, provider, 'link', session);
-      const ecosystem: WalletEcosystem = proof!.namespace === 'eip155' ? 'evm' : 'solana';
-      return (await store.wallets(session.accountId)).find(wallet => wallet.id === accountWalletId(ecosystem, canonicalAddress(ecosystem, proof!.address)!))
-        ?? fail('ACCOUNT_WALLET_NOT_FOUND');
+    /** The account's Privy-managed wallets (the only managed wallets FloFi signs with). */
+    async privyWallets(session: AccountSessionToken): Promise<AccountWallet[]> {
+      return (await store.wallets(session.accountId)).filter(isPrivyWallet);
     },
     /** Deletes the signed-in account (recent sign-in required). Provider wallets and on-chain assets are untouched. */
     async deleteAccount(session: AccountSessionToken): Promise<void> {

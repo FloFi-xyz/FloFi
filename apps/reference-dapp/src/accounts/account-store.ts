@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /**
- * BUILD-FLOFI-AUTH-WALLETS-001: durable FloFi accounts (PostgreSQL, migration 0018).
+ * BUILD-FLOFI-AUTH-WALLETS-001: durable FloFi accounts (PostgreSQL, migrations 0018 and, for Privy, 0019).
  *
  * Every statement is scoped by the deployment tenant and, after sign-in, by the verified account id: a guessed account,
  * session or wallet id from another account is never sufficient. Identities are unique per tenant and are never merged or moved
@@ -8,8 +8,9 @@
  * identity subjects, session records and public wallet metadata (see the migration's CHECK constraints).
  */
 import type { Database, Queryable } from '@defi-workflow-engine/cloud-runtime';
-import { accountWalletId, ACCOUNT_ID, canonicalAddress, MANAGED_PROVIDER, readAccountWallet, validProvider, walletLabel, type AccountIdentity,
-  type AccountWallet, type IdentityKind, type ManagedLogin, type Onboarding, type WalletExport, type WalletOrigin } from './account-model.ts';
+import { accountWalletId, ACCOUNT_ID, canonicalAddress, exportOf, isManagedProvider, LEGACY_MANAGED_PROVIDER, PRIVY_USER_ID, readAccountWallet, validProvider,
+  walletLabel, type AccountIdentity, type AccountWallet, type IdentityKind, type ManagedLogin, type Onboarding, type SessionMethod, type WalletExport,
+  type WalletOrigin } from './account-model.ts';
 import { ACCOUNT_SESSION_TTL_SECONDS, newAccountId, newSessionId, type AccountSessionToken } from './account-session.ts';
 import type { WalletEcosystem } from '../wallet/wallet-registry';
 
@@ -20,16 +21,17 @@ export type AccountRecord = { readonly accountId: string; readonly onboarding: O
 export type NewWallet = { readonly ecosystem: WalletEcosystem; readonly address: string; readonly origin: WalletOrigin; readonly provider: string;
   readonly providerName: string; readonly providerResource: string | null; readonly label: string };
 
-const KIND_SQL: Readonly<Record<IdentityKind, string>> = Object.freeze({ google: 'GOOGLE', apple: 'APPLE', email: 'EMAIL', eip155: 'EIP155', solana: 'SOLANA' });
-const KIND_OF: Readonly<Record<string, IdentityKind>> = Object.freeze({ GOOGLE: 'google', APPLE: 'apple', EMAIL: 'email', EIP155: 'eip155', SOLANA: 'solana' });
+const KIND_SQL: Readonly<Record<IdentityKind, string>> = Object.freeze({ google: 'GOOGLE', apple: 'APPLE', email: 'EMAIL', eip155: 'EIP155', solana: 'SOLANA',
+  privy: 'PRIVY' });
+const KIND_OF: Readonly<Record<string, IdentityKind>> = Object.freeze({ GOOGLE: 'google', APPLE: 'apple', EMAIL: 'email', EIP155: 'eip155', SOLANA: 'solana',
+  PRIVY: 'privy' });
 const ORIGIN_SQL: Readonly<Record<WalletOrigin, string>> = Object.freeze({ generated: 'GENERATED', imported: 'IMPORTED', external: 'EXTERNAL' });
-const EXPORT_OF: Readonly<Record<WalletOrigin, WalletExport>> = Object.freeze({ generated: 'recovery-phrase', imported: 'private-key', external: 'none' });
 const EXPORT_SQL: Readonly<Record<WalletExport, string>> = Object.freeze({ none: 'NONE', 'recovery-phrase': 'RECOVERY_PHRASE', 'private-key': 'PRIVATE_KEY' });
 const PROVIDER_RESOURCE = /^[A-Za-z0-9-]{8,64}$/, ORGANIZATION = /^[A-Za-z0-9-]{8,64}$/;
 const EMAIL_CHALLENGE = /^[A-Za-z0-9-]{8,128}$/, BINDING = /^0[23][0-9a-f]{64}$/;
 const SUBJECT: Readonly<Record<IdentityKind, RegExp>> = Object.freeze({
   google: /^[A-Za-z0-9._-]{1,255}$/, apple: /^[A-Za-z0-9._-]{1,255}$/, email: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
-  eip155: /^0x[0-9a-f]{40}$/, solana: /^[1-9A-HJ-NP-Za-km-z]{32,44}$/,
+  eip155: /^0x[0-9a-f]{40}$/, solana: /^[1-9A-HJ-NP-Za-km-z]{32,44}$/, privy: PRIVY_USER_ID,
 });
 const fail = (code: string): never => { throw new Error(code); };
 const iso = (value: unknown) => (value instanceof Date ? value : new Date(String(value))).toISOString();
@@ -39,14 +41,18 @@ export function validIdentity(claim: IdentityClaim): boolean {
 }
 
 type WalletRow = { ecosystem: string; address: string; origin: string; provider: string; provider_name: string; export: string; label: string; created_at: Date };
+const EXPORT_FROM_SQL: Readonly<Record<string, WalletExport>> = Object.freeze({ NONE: 'none', RECOVERY_PHRASE: 'recovery-phrase', PRIVATE_KEY: 'private-key' });
 function walletOf(row: WalletRow): AccountWallet | null {
   const ecosystem = row.ecosystem === 'EVM' ? 'evm' : 'solana', origin = (row.origin.toLowerCase()) as WalletOrigin;
+  // The stored export capability must be exactly the one this origin and provider carry (readAccountWallet refuses anything else).
   return readAccountWallet({ id: accountWalletId(ecosystem, row.address), ecosystem, address: row.address, origin, provider: row.provider,
-    providerName: row.provider_name, export: EXPORT_OF[origin], label: row.label, addedAt: iso(row.created_at) });
+    providerName: row.provider_name, export: EXPORT_FROM_SQL[row.export] ?? 'invalid', label: row.label, addedAt: iso(row.created_at) });
 }
+/** What a verified Privy sign-in claims: the Privy user, plus the Google/Apple/email/external-wallet identities Privy verified for it. */
+export type PrivySignIn = { readonly privyUser: string; readonly identities: readonly IdentityClaim[]; readonly method: SessionMethod };
 
 export function createAccountStore(db: Database, tenantId: string) {
-  async function sessionRow(tx: Queryable, accountId: string, method: IdentityKind, now: Date): Promise<AccountSessionToken> {
+  async function sessionRow(tx: Queryable, accountId: string, method: SessionMethod, now: Date): Promise<AccountSessionToken> {
     const sessionId = newSessionId(), authenticatedAt = Math.floor(now.getTime() / 1000), expiresAt = authenticatedAt + ACCOUNT_SESSION_TTL_SECONDS;
     // Expired records are pruned on each sign-in (this account's at once; any account's after a 30-day grace), so dormant sessions
     // do not accumulate. Revoked ones remain until they expire.
@@ -62,11 +68,12 @@ export function createAccountStore(db: Database, tenantId: string) {
      * server-side session record. The identity must already be verified by the caller (OIDC token, provider OTP, wallet proof).
      */
     async signIn(identity: IdentityClaim, now = new Date()): Promise<AccountSessionToken & { readonly created: boolean }> {
-      if (!validIdentity(identity)) fail('ACCOUNT_IDENTITY_INVALID');
+      if (!validIdentity(identity) || identity.kind === 'privy') fail('ACCOUNT_IDENTITY_INVALID');
+      const method = identity.kind as SessionMethod;
       return db.transaction(async tx => {
         const existing = (await tx.query<{ account_id: string }>(`UPDATE flofi_account_identities SET last_used_at=$4, label=COALESCE($5, label)
           WHERE tenant_id=$1 AND kind=$2 AND subject=$3 RETURNING account_id`, [tenantId, KIND_SQL[identity.kind], identity.subject, now, identity.label])).rows[0];
-        if (existing) return { ...await sessionRow(tx, existing.account_id, identity.kind, now), created: false };
+        if (existing) return { ...await sessionRow(tx, existing.account_id, method, now), created: false };
         const accountId = newAccountId();
         // One clock for every identity row (here and in linkIdentity): the identity an account was created with is always its oldest,
         // which is what FloFi Wallet treats as the account's primary identity (wallet-service.ts).
@@ -75,11 +82,67 @@ export function createAccountStore(db: Database, tenantId: string) {
           ON CONFLICT DO NOTHING RETURNING account_id`, [tenantId, KIND_SQL[identity.kind], identity.subject, accountId, identity.label, now]);
         // A concurrent first sign-in with the same identity won the race: retry as a returning sign-in (this transaction rolls back).
         if (!inserted.rowCount) fail('ACCOUNT_SIGN_IN_RACE');
-        return { ...await sessionRow(tx, accountId, identity.kind, now), created: true };
+        return { ...await sessionRow(tx, accountId, method, now), created: true };
       }).catch(async (error: unknown) => {
         if (error instanceof Error && error.message === 'ACCOUNT_SIGN_IN_RACE') return store.signIn(identity, now);
         throw error;
       });
+    },
+    /**
+     * BUILD-FLOFI-PRIVY-UX-001: signs in with a verified Privy user. The account is, in order: the one already linked to this Privy user;
+     * else the single existing account that holds any identity Privy verified for it (Google subject, verified email, external wallet:
+     * same kind and subject only, never across kinds), which preserves every pre-Privy account; else a new account. Identities are never
+     * merged or moved: two different accounts matching is refused (`ACCOUNT_IDENTITY_CONFLICT`), an account already linked to another
+     * Privy user is refused (`ACCOUNT_PRIVY_USER_MISMATCH`), and a verified identity that another account holds is left with it.
+     */
+    async signInPrivy(input: PrivySignIn, now = new Date()): Promise<AccountSessionToken & { readonly created: boolean; readonly skipped: number }> {
+      const privy: IdentityClaim = { kind: 'privy', subject: input.privyUser, label: null };
+      const others = input.identities.filter(identity => identity.kind !== 'privy');
+      if (!validIdentity(privy) || !others.every(validIdentity) || others.length > 32) fail('ACCOUNT_IDENTITY_INVALID');
+      return db.transaction(async tx => {
+        const holders = async (claims: readonly IdentityClaim[]) => claims.length ? (await tx.query<{ kind: string; subject: string; account_id: string }>(
+          `SELECT kind, subject, account_id FROM flofi_account_identities WHERE tenant_id=$1 AND (kind, subject) IN (SELECT * FROM unnest($2::text[], $3::text[]))
+           FOR UPDATE`, [tenantId, claims.map(claim => KIND_SQL[claim.kind]), claims.map(claim => claim.subject)])).rows : [];
+        const linked = (await holders([privy]))[0]?.account_id ?? null;
+        const matched = await holders(others);
+        let accountId = linked, created = false;
+        if (!accountId) {
+          const accounts = [...new Set(matched.map(row => row.account_id))];
+          if (accounts.length > 1) fail('ACCOUNT_IDENTITY_CONFLICT');
+          accountId = accounts[0] ?? null;
+          if (accountId) {
+            const other = (await tx.query<{ subject: string }>("SELECT subject FROM flofi_account_identities WHERE tenant_id=$1 AND account_id=$2 AND kind='PRIVY'",
+              [tenantId, accountId])).rows[0];
+            if (other && other.subject !== input.privyUser) fail('ACCOUNT_PRIVY_USER_MISMATCH');
+          } else {
+            accountId = newAccountId(); created = true;
+            await tx.query('INSERT INTO flofi_accounts (tenant_id, account_id, created_at, updated_at) VALUES ($1,$2,$3,$3)', [tenantId, accountId, now]);
+          }
+          const inserted = await tx.query(`INSERT INTO flofi_account_identities (tenant_id, kind, subject, account_id, label, created_at, last_used_at)
+            VALUES ($1,'PRIVY',$2,$3,NULL,$4,$4) ON CONFLICT DO NOTHING RETURNING account_id`, [tenantId, input.privyUser, accountId, now]);
+          // A concurrent first sign-in of the same Privy user won the race: retry as a returning sign-in (this transaction rolls back).
+          if (!inserted.rowCount) fail('ACCOUNT_SIGN_IN_RACE');
+        }
+        let skipped = 0;
+        for (const claim of others) {
+          const holder = matched.find(row => row.kind === KIND_SQL[claim.kind] && row.subject === claim.subject)?.account_id;
+          if (holder && holder !== accountId) { skipped++; continue; }
+          const row = (await tx.query<{ account_id: string }>(`INSERT INTO flofi_account_identities (tenant_id, kind, subject, account_id, label, created_at, last_used_at)
+            VALUES ($1,$2,$3,$4,$5,$6,$6) ON CONFLICT (tenant_id, kind, subject) DO UPDATE SET last_used_at=EXCLUDED.last_used_at,
+            label=COALESCE(EXCLUDED.label, flofi_account_identities.label) WHERE flofi_account_identities.account_id=EXCLUDED.account_id RETURNING account_id`,
+          [tenantId, KIND_SQL[claim.kind], claim.subject, accountId, claim.label, now])).rows[0];
+          if (!row) skipped++;
+        }
+        await tx.query("UPDATE flofi_account_identities SET last_used_at=$3 WHERE tenant_id=$1 AND kind='PRIVY' AND subject=$2", [tenantId, input.privyUser, now]);
+        return { ...await sessionRow(tx, accountId!, input.method, now), created, skipped };
+      }).catch(async (error: unknown) => {
+        if (error instanceof Error && error.message === 'ACCOUNT_SIGN_IN_RACE') return store.signInPrivy(input, now);
+        throw error;
+      });
+    },
+    /** The Privy user linked to this account, or null (an account that has not signed in through Privy yet). */
+    async privyUser(accountId: string): Promise<string | null> {
+      return store.identitySubject(accountId, 'privy');
     },
     /** The session record behind a sealed cookie, when it still exists, belongs to that account, is unrevoked and unexpired. */
     async verifySession(token: AccountSessionToken, now = new Date()): Promise<boolean> {
@@ -150,7 +213,8 @@ export function createAccountStore(db: Database, tenantId: string) {
     },
     /** Adds a verified identity to this account. An identity held by another account is never moved or merged. */
     async linkIdentity(accountId: string, identity: IdentityClaim, now = new Date()): Promise<void> {
-      if (!validIdentity(identity)) fail('ACCOUNT_IDENTITY_INVALID');
+      // A Privy user is linked only by `signInPrivy`, from a verified access token.
+      if (!validIdentity(identity) || identity.kind === 'privy') fail('ACCOUNT_IDENTITY_INVALID');
       const holder = (await db.query<{ account_id: string }>(`INSERT INTO flofi_account_identities (tenant_id, kind, subject, account_id, label, created_at, last_used_at)
         SELECT $1,$2,$3,$4,$5,$6,$6 WHERE EXISTS (SELECT 1 FROM flofi_accounts WHERE tenant_id=$1 AND account_id=$4)
         ON CONFLICT (tenant_id, kind, subject) DO UPDATE SET last_used_at=EXCLUDED.last_used_at WHERE flofi_account_identities.account_id=EXCLUDED.account_id
@@ -165,7 +229,7 @@ export function createAccountStore(db: Database, tenantId: string) {
         WHERE tenant_id=$1 AND account_id=$2 ORDER BY created_at, kind`, [tenantId, accountId])).rows
         .map(row => ({ kind: KIND_OF[row.kind]!, label: row.label ?? row.subject }));
       return { accountId, onboarding: account.onboarding.toLowerCase() as Onboarding, identities, wallets: await store.wallets(accountId), createdAt: iso(account.created_at),
-        organization: account.wallet_provider === 'turnkey' && account.wallet_organization && account.wallet_user && account.wallet_login
+        organization: account.wallet_provider === LEGACY_MANAGED_PROVIDER && account.wallet_organization && account.wallet_user && account.wallet_login
           ? { provider: 'turnkey', organization: account.wallet_organization, user: account.wallet_user, login: account.wallet_login.toLowerCase() as ManagedLogin } : null };
     },
     async identitySubject(accountId: string, kind: IdentityKind): Promise<string | null> {
@@ -212,14 +276,16 @@ export function createAccountStore(db: Database, tenantId: string) {
       const address = canonicalAddress(wallet.ecosystem, wallet.address), label = walletLabel(wallet.label), providerName = walletLabel(wallet.providerName);
       if (!address || !label || !providerName || !validProvider(wallet.provider)) fail('ACCOUNT_WALLET_INVALID');
       const managed = wallet.origin !== 'external';
-      if (managed !== (wallet.provider === MANAGED_PROVIDER) || managed !== (wallet.providerResource !== null)
+      // External wallets carry no resource; a legacy Turnkey wallet always has one; a Privy wallet id is optional public metadata.
+      if (managed !== isManagedProvider(wallet.provider) || (!managed && wallet.providerResource !== null)
+        || (wallet.provider === LEGACY_MANAGED_PROVIDER && wallet.providerResource === null)
         || (wallet.providerResource !== null && !PROVIDER_RESOURCE.test(wallet.providerResource))) fail('ACCOUNT_WALLET_INVALID');
       const row = (await db.query<WalletRow & { account_id: string }>(`INSERT INTO flofi_account_wallets (tenant_id, ecosystem, address, account_id, origin, provider, provider_name,
           provider_resource, export, label, created_at, updated_at)
         SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$11 WHERE EXISTS (SELECT 1 FROM flofi_accounts WHERE tenant_id=$1 AND account_id=$4)
         ON CONFLICT (tenant_id, ecosystem, address) DO UPDATE SET updated_at=EXCLUDED.updated_at WHERE flofi_account_wallets.account_id=EXCLUDED.account_id
         RETURNING *`, [tenantId, wallet.ecosystem === 'evm' ? 'EVM' : 'SOLANA', address, accountId, ORIGIN_SQL[wallet.origin], wallet.provider, providerName,
-        wallet.providerResource, EXPORT_SQL[EXPORT_OF[wallet.origin]], label, now])).rows[0];
+        wallet.providerResource, EXPORT_SQL[exportOf(wallet.origin, wallet.provider)], label, now])).rows[0];
       if (!row) fail('ACCOUNT_WALLET_LINKED_ELSEWHERE');
       return walletOf(row!) ?? fail('ACCOUNT_WALLET_INVALID');
     },

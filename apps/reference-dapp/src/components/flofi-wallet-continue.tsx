@@ -60,14 +60,13 @@ export function FloFiWalletContinue() {
 }
 
 /**
- * The FloFi Wallet hint next to an Authorize action: shown only when the wallet that will sign is a FloFi Wallet address. Authorize opens
- * FloFi Wallet; a locked FloFi Wallet must be unlocked first, so a short-lived Review (60 s on Solana) does not expire during an unlock.
+ * The FloFi wallet hint next to an Authorize action: shown only when the wallet that will sign is one of the person's FloFi wallets (Privy).
+ * Authorize opens Privy's confirmation screen for the exact transaction; a stopped Authorize shows why (`issue`).
  */
 export function FloFiWalletLockHint({ account, issue }: { account: string | null | undefined; issue?: string | null }) {
   const { t } = useLocale();
-  const state = useFloFiWallet();
+  useFloFiWallet();
   if (!usesFloFiWallet(account)) return null;
-  const code = issue ?? (state.lock === 'locked' ? 'FLOFI_WALLET_LOCKED' : null);
-  const text = code ? floFiWalletMessage(code) : !state.open ? 'Authorize opens FloFi Wallet, where you confirm the exact transaction.' : null;
-  return text ? <p className="canvas-sequence-note" role="status" data-flofi-wallet-lock={state.lock}>{t(text)}</p> : null;
+  const text = issue ? floFiWalletMessage(issue) : 'Authorize opens your FloFi wallet, where you confirm the exact transaction.';
+  return text ? <p className="canvas-sequence-note" role="status" data-flofi-wallet-hint={issue ? 'issue' : 'ready'}>{t(text)}</p> : null;
 }

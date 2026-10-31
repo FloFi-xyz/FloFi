@@ -10,7 +10,7 @@
  *   account and, for the relay, claims the attempt so FloFi Wallet signs each reviewed attempt at most once.
  */
 import { createHash } from 'node:crypto';
-import { canonicalAddress, MANAGED_PROVIDER, type AccountWallet } from '../accounts/account-model';
+import { canonicalAddress, isPrivyWallet, type AccountWallet } from '../accounts/account-model';
 import type { AccountStore } from '../accounts/account-store';
 import { cloudFlow } from '../server/flow-runtime';
 import { localCatalogNetworkMode } from '../server/catalog-networks';
@@ -52,8 +52,11 @@ export const managedEvmFees = (chainId: number) => evm<ManagedEvmFees>('fees', [
 export const managedEvmBroadcast = (chainId: number, raw: string, expected: ManagedEvmExpected) =>
   evm<ManagedEvmBroadcast>('broadcast', [chainHex(chainId), raw, expected], s => s.broadcast(chainHex(chainId), raw, expected));
 
-/** The managed wallets (generated or imported in FloFi Wallet) among an account's saved wallets. */
-export const managedWallets = (wallets: readonly AccountWallet[]) => wallets.filter(wallet => wallet.provider === MANAGED_PROVIDER && wallet.origin !== 'external');
+/**
+ * The managed wallets FloFi signs with among an account's saved wallets: its Privy wallets (BUILD-FLOFI-PRIVY-UX-001). Legacy FloFi Wallet
+ * (Turnkey) wallets are export-only and never resolve a signing request.
+ */
+export const managedWallets = (wallets: readonly AccountWallet[]) => wallets.filter(isPrivyWallet);
 /** The resolver's dependencies for one account's managed wallets. */
 export function signingDeps(wallets: readonly AccountWallet[]): ManagedSigningDeps {
   const managed = managedWallets(wallets);

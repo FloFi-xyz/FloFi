@@ -10,6 +10,9 @@ import { ProductWorkspace } from '../../components/product-workspace';
 import { LocaleProvider } from '../../i18n/locale';
 import { LANGUAGE_COOKIE, parseLanguage } from '../../i18n/language';
 import { parseWalletHint, WALLET_HINT_COOKIE } from '../../wallet/wallet-hint';
+import { FloFiPrivyProvider } from '../../accounts/privy-client';
+import { privyBrowserConfig } from '../../accounts/privy-server';
+import { SessionGuard } from '../../components/account/session-guard';
 import '@xyflow/react/dist/style.css';
 import '../globals.css';
 
@@ -25,7 +28,10 @@ export default async function ProductLayout({ children }: { children: ReactNode 
   const jar = await cookies();
   const configured = copilotConfig(process.env).mode;
   const bootstrap = { walletHint: parseWalletHint(jar.get(WALLET_HINT_COOKIE)?.value), copilotMode: configured };
+  // BUILD-FLOFI-PRIVY-UX-001: the person's Privy wallets sign here (with Privy's own confirmation), and Disconnect logs out of Privy.
   return <LocaleProvider initialLanguage={parseLanguage(jar.get(LANGUAGE_COOKIE)?.value) ?? 'EN'}>
-    <ProductWorkspace initialWorkflowId={initialWorkflowId} engineeringEnabled={await engineeringUiAllowed()} networkScope={networkScope()} bootstrap={bootstrap}/>{children}
+    <FloFiPrivyProvider config={privyBrowserConfig(process.env)} accounts={Boolean(process.env.DATABASE_URL)}><SessionGuard/>
+      <ProductWorkspace initialWorkflowId={initialWorkflowId} engineeringEnabled={await engineeringUiAllowed()} networkScope={networkScope()} bootstrap={bootstrap}/>{children}
+    </FloFiPrivyProvider>
   </LocaleProvider>;
 }

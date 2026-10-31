@@ -5,7 +5,9 @@ import { useLocale } from '../i18n/locale';
 import { useEffect, useId, useRef, useState } from 'react';
 import Link from 'next/link';
 import { learningAvailability } from '../app/learning-action';
-import { accountSignOut, accountState, type AccountState } from '../app/account-action';
+import { accountState, type AccountState } from '../app/account-action';
+import { disconnectToLogin } from '../accounts/disconnect';
+import { useFloFiPrivy } from '../accounts/privy-client';
 
 export function HeaderSettings({ onDisconnect, disconnectDisabled, onSupport }: { onDisconnect: () => void; disconnectDisabled: boolean; onSupport?: () => void }) {
   const { t: tr } = useLocale();
@@ -21,6 +23,7 @@ export function HeaderSettings({ onDisconnect, disconnectDisabled, onSupport }: 
   const [privacy, setPrivacy] = useState(false), checked = useRef(false);
   // BUILD-FLOFI-AUTH-WALLETS-001: the FloFi account entry, only where this deployment offers accounts (read when the menu first opens).
   const [account, setAccount] = useState<AccountState | null>(null);
+  const privy = useFloFiPrivy();
   useEffect(() => {
     if (!open || checked.current) return;
     checked.current = true;
@@ -28,10 +31,11 @@ export function HeaderSettings({ onDisconnect, disconnectDisabled, onSupport }: 
     // Not inside the embedded MCP approval: signing in there would navigate away from the approval.
     if (window.location.pathname !== '/mcp/approve') void accountState().then(setAccount, () => undefined);
   }, [open]);
-  async function signOut() {
-    await accountSignOut().catch(() => undefined);
-    window.location.assign('/login');
-  }
+  /**
+   * Sign out is Disconnect (shown only with an account, i.e. where `onDisconnect` is the full flow of src/accounts/disconnect.ts): the
+   * wallet connection, Privy and the FloFi session end, then the sign-in page. Without a page-level Disconnect it still signs out.
+   */
+  async function signOut() { if (disconnectDisabled) await disconnectToLogin(privy); else onDisconnect(); }
   const languageDescriptionId = useId(), themeDescriptionId = useId();
   useEffect(() => {
     let saved: 'light' | 'dark' = 'light';

@@ -111,6 +111,7 @@ export const FLOFI_WALLET_MESSAGES = Object.freeze({
   FLOFI_WALLET_REQUEST_INVALID: 'FloFi Wallet could not read this request. Nothing was signed.',
   FLOFI_WALLET_ACCOUNT_REQUIRED: 'Sign in to your FloFi account to use FloFi Wallet.',
   FLOFI_WALLET_ACCOUNT_MISMATCH: 'This address is not a FloFi Wallet of the FloFi account you are signed in to.',
+  FLOFI_WALLET_SIGN_IN_REQUIRED: 'Sign in to FloFi again in this browser to use your FloFi wallet. Nothing was signed.',
 } as const);
 export type FloFiWalletCode = keyof typeof FLOFI_WALLET_MESSAGES;
 export const floFiWalletMessage = (code: string): string | null => Object.hasOwn(FLOFI_WALLET_MESSAGES, code) ? FLOFI_WALLET_MESSAGES[code as FloFiWalletCode] : null;
@@ -130,7 +131,7 @@ export const PRE_SIGNATURE_CODES: ReadonlySet<string> = new Set([
   // Not FLOFI_WALLET_ALREADY_SIGNED: this request reached nothing, but the attempt's single signature already exists somewhere, so its
   // outcome is unknown and must be reconciled, never retried as if nothing had been signed.
   'FLOFI_WALLET_NONCE_MISMATCH', 'FLOFI_WALLET_FEE_TOO_HIGH', 'FLOFI_WALLET_NETWORK_READ_FAILED',
-  'FLOFI_WALLET_ACCOUNT_REQUIRED', 'FLOFI_WALLET_REQUEST_INVALID', 'FLOFI_WALLET_ACCOUNT_MISMATCH',
+  'FLOFI_WALLET_ACCOUNT_REQUIRED', 'FLOFI_WALLET_REQUEST_INVALID', 'FLOFI_WALLET_ACCOUNT_MISMATCH', 'FLOFI_WALLET_SIGN_IN_REQUIRED',
   // FloFi Wallet's own session and relay refusals (src/accounts/wallet-relay.ts): nothing was forwarded to the provider.
   'WALLET_SESSION_REQUIRED', 'WALLET_UNLOCK_REQUIRED', 'WALLET_HANDOFF_INVALID', 'ACCOUNT_SESSION_REQUIRED', 'MANAGED_WALLETS_NOT_CONFIGURED',
   'SIGNER_NOT_MANAGED', 'SIGN_REQUEST_INVALID', 'MANAGED_ORGANIZATION_MISSING', 'PROVIDER_ORGANIZATION_MISMATCH', 'PROVIDER_REQUEST_NOT_CANONICAL',

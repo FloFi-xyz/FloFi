@@ -28,6 +28,26 @@ overrides:
   '@eslint/config-array@0.23.5>minimatch': 11.0.3
   '@typescript-eslint/typescript-estree@8.70.0>minimatch': 11.0.3
   'minimatch@11.0.3>@isaacs/nonrecursive-glob-match': 1.0.3
+  # BUILD-FLOFI-PRIVY-UX-001: Privy's React SDK lists packages for features FloFi does not use. FloFi removes them (owner review,
+  # docs/builds/BUILD-FLOFI-PRIVY-UX-001.md §Dependencies); next.config.ts resolves their lazy imports to a module that refuses to run.
+  # - WalletConnect (also disabled in FloFi's Privy config, `externalWallets.walletConnect.enabled: false`): WalletConnect Community
+  #   License (proprietary; network and paid-commercial conditions). FloFi has never offered WalletConnect; injected wallets are unchanged.
+  # - x402 payments (`useX402Fetch`, unused): pulls wagmi connectors and the MetaMask SDK (ConsenSys non-commercial licence).
+  # - Stripe crypto onramp (`useFundWallet` card onramp, unused).
+  '@privy-io/react-auth@3.51.0>@walletconnect/ethereum-provider': '-'
+  '@privy-io/react-auth@3.51.0>@walletconnect/universal-provider': '-'
+  '@privy-io/react-auth@3.51.0>x402': '-'
+  '@privy-io/react-auth@3.51.0>@stripe/crypto': '-'
+  # GHSA-mrhx-c7xc-m3w5 (high), as for the MCP SDK above: Privy's @privy-io/api-base@1.12.0 asks for zod ^3.25.76 (no fixed 3.x exists).
+  # It builds one error schema with z.object / z.string().optional() / z.nativeEnum, unchanged in zod 4.6.6 (privy-zod.test.ts parses it).
+  '@privy-io/api-base@1.12.0>zod': 4.6.6
 patchedDependencies:
   '@streamparser/json@0.0.26': patches/@streamparser__json@0.0.26.patch
   '@xyflow/system@0.0.82': patches/@xyflow__system@0.0.82.patch
+peerDependencyRules:
+  allowedVersions:
+    # BUILD-FLOFI-PRIVY-UX-001: Privy pins viem 2.57.8 in @privy-io/react-auth and @privy-io/js-sdk-core but 2.56.5 in its own
+    # @privy-io/ethereum (same minor line; one viem copy). @privy-io/node's optional @solana/kit peer is for its solana-kit entry, which
+    # FloFi does not import; the React SDK's Solana support uses @solana/kit 8.5.0 with the matching @solana-program packages.
+    '@privy-io/ethereum@0.2.5>viem': 2.57.8
+    '@privy-io/node@0.36.0>@solana/kit': 8.5.0

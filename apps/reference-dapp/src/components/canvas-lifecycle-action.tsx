@@ -5,8 +5,9 @@ import { projectCanvasAction } from '../domain/canvas-lifecycle';
 import type { ExecutionControls, ExecutionControlsState } from '../state/execution-controls';
 import { useLocale } from '../i18n/locale';
 import { WalletPendingNotice } from './wallet-pending-notice';
-import { floFiWalletSnapshot, openFloFiWallet, usesFloFiWallet } from '../wallet/flofi-wallet-channel';
-import { FloFiWalletLockHint, useFloFiWallet } from './flofi-wallet-continue';
+import { usesFloFiWallet } from '../wallet/flofi-wallet-channel';
+import { useFloFiPrivy } from '../accounts/privy-client';
+import { FloFiWalletLockHint } from './flofi-wallet-continue';
 
 export function CanvasLifecycleAction(props: ExecutionControlsState & {
   controls: ExecutionControls; simulate?: () => void | Promise<void>; simulationDisabled?: boolean;
@@ -18,20 +19,18 @@ export function CanvasLifecycleAction(props: ExecutionControlsState & {
   const { t, language } = useLocale();
   const c = props.controls, action = projectCanvasAction(c.current, c);
   const disabled = action.disabled || action.kind === 'simulate' && (!props.simulate || props.simulationDisabled) || action.kind === 'execute' && !c.view.canExecute;
-  // BUILD-FLOFI-AUTH-WALLETS-001: why the last Authorize stopped before any wallet request because FloFi Wallet was not ready (spec §9).
-  const [floFiIssue, setFloFiIssue] = useState<string | null>(null), floFi = useFloFiWallet();
-  useEffect(() => { if (floFi.lock === 'unlocked') setFloFiIssue(null); }, [floFi.lock]);
+  // Why the last Authorize stopped before any wallet request because the person's FloFi wallet (Privy) was not ready in this page.
+  const [floFiIssue, setFloFiIssue] = useState<string | null>(null), privy = useFloFiPrivy();
+  const privyReady = Boolean(privy?.ready && privy.authenticated);
+  useEffect(() => { if (privyReady) setFloFiIssue(null); }, [privyReady]);
   function act() {
     // Re-project at the click boundary; background tabs cannot preserve expired authority.
     const next = projectCanvasAction(c.current, c);
     if (next.disabled || next.kind !== action.kind) return;
-    // BUILD-FLOFI-AUTH-WALLETS-001 (spec §1, §9): when FloFi Wallet will sign, it opens in this click (a browser allows a pop-up only here,
-    // and the wallet request comes after several awaits). Authorize starts only once FloFi Wallet reported it is unlocked, so a short-lived
-    // Review never expires during an unlock; until then nothing is accepted or requested.
+    // BUILD-FLOFI-PRIVY-UX-001: when the person's FloFi wallet (Privy) will sign, Authorize starts only once Privy is ready in this page,
+    // so a short-lived Review is never accepted for a wallet that cannot show it; until then nothing is accepted or requested.
     if ((next.kind === 'approve' || next.kind === 'execute' || next.kind === 'continue') && usesFloFiWallet(props.wallet.account)) {
-      try { openFloFiWallet(); } catch (cause) { setFloFiIssue(cause instanceof Error ? cause.message : 'FLOFI_WALLET_UNAVAILABLE'); return; }
-      const lock = floFiWalletSnapshot().lock;
-      if (lock !== 'unlocked') { setFloFiIssue(lock === 'locked' ? 'FLOFI_WALLET_LOCKED' : 'FLOFI_WALLET_OPENING'); return; }
+      if (!privyReady) { setFloFiIssue('FLOFI_WALLET_SIGN_IN_REQUIRED'); return; }
       setFloFiIssue(null);
     }
     if (next.kind === 'simulate' && !props.simulationDisabled) void props.simulate?.();

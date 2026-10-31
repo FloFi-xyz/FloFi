@@ -15,7 +15,7 @@
  * A stolen handoff token gives its holder a wallet session for the account but no provider session and no way to unlock one.
  */
 import { createHash, randomBytes } from 'node:crypto';
-import { ACCOUNT_ID, type IdentityKind } from './account-model.ts';
+import { ACCOUNT_ID, type SessionMethod } from './account-model.ts';
 import { SESSION_PUBLIC_KEY, sealWalletToken, unsealWalletToken, type AccountSessionToken } from './account-session.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
@@ -28,15 +28,15 @@ export type WalletSession = { readonly account: AccountSessionToken; readonly is
   /** The wallet-origin key the provider opened a session for, and when; null until the person unlocks. */
   readonly unlockedKey: string | null; readonly unlockedAt: number | null; readonly unlockedUntil: number | null };
 
-const METHODS: readonly IdentityKind[] = ['google', 'apple', 'email', 'eip155', 'solana'];
+const METHODS: readonly SessionMethod[] = ['google', 'apple', 'email', 'eip155', 'solana'];
 const HEX32 = /^[0-9a-f]{32}$/;
 const seconds = (now: Date) => Math.floor(now.getTime() / 1000);
 const fail = (code: string): never => { throw new Error(code); };
 
 function accountOf(v: Record<string, unknown>): AccountSessionToken | null {
-  return typeof v.a === 'string' && ACCOUNT_ID.test(v.a) && typeof v.s === 'string' && HEX32.test(v.s) && METHODS.includes(v.m as IdentityKind)
+  return typeof v.a === 'string' && ACCOUNT_ID.test(v.a) && typeof v.s === 'string' && HEX32.test(v.s) && METHODS.includes(v.m as SessionMethod)
     && Number.isSafeInteger(v.t) && Number.isSafeInteger(v.x)
-    ? { accountId: v.a, sessionId: v.s, method: v.m as IdentityKind, authenticatedAt: v.t as number, expiresAt: v.x as number } : null;
+    ? { accountId: v.a, sessionId: v.s, method: v.m as SessionMethod, authenticatedAt: v.t as number, expiresAt: v.x as number } : null;
 }
 const accountClaims = (session: AccountSessionToken) =>
   ({ a: session.accountId, s: session.sessionId, m: session.method, t: session.authenticatedAt, x: session.expiresAt });
