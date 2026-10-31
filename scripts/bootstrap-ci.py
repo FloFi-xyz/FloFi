@@ -395,9 +395,14 @@ BUILDMCP001_DIRECT_VERSIONS = {
 # BUILD-FLOFI-AUTH-WALLETS-001 adds 8 (Apache-2.0/MIT): @turnkey/iframe-stamper (no dependencies) and @turnkey/indexed-db-stamper
 # with @turnkey/encoding, @turnkey/sdk-types, bs58, bs58check, base-x and @noble/hashes. Owner review: these are the provider's
 # isolated import/export iframe bridge and its non-extractable WebCrypto session-key stamper; FloFi holds no wallet key.
-REGISTRY_PACKAGE_COUNT = 272
+# BUILD-FLOFI-AUTH-WALLETS-001 (encrypted email codes) adds 23 with @turnkey/crypto@2.13.3 (Apache-2.0): @noble/ciphers@1.3.0,
+# @noble/curves@1.9.0, borsh, cbor-js, @peculiar/x509 and its asn1 packages, asn1js, pvtsutils, pvutils, reflect-metadata, tsyringe and
+# tslib@1.14.1 (0BSD, exact identity below). Owner review: Turnkey's own encryption of the email code to its enclave (verified enclave
+# signature, HPKE) and verification-token check; FloFi writes no cryptography. No install scripts; no eval/new Function.
+REGISTRY_PACKAGE_COUNT = 295
 # BUILD-FLOFI-AUTH-WALLETS-001: the embedded-wallet provider's browser stampers (docs/builds/BUILD-FLOFI-AUTH-WALLETS-001.md).
 BUILDAUTHWALLETS001_DIRECT_VERSIONS = {
+    "@turnkey/crypto": "2.13.3",
     "@turnkey/iframe-stamper": "2.11.1",
     "@turnkey/indexed-db-stamper": "1.3.12",
 }
@@ -452,7 +457,7 @@ def verify_dependencies():
     if lock.count("\npackages:\n") != 1 or lock.count("\nsnapshots:\n") != 1:
         raise RuntimeError("Unrecognized lockfile sections")
     resolved_sections = "packages:\n" + lock.split("\npackages:\n", 1)[1]
-    if hashlib.sha256(resolved_sections.encode()).hexdigest() != "ed035b7fc333fa44d962f774913551edee8df28d16903613b059319ca608dc13":
+    if hashlib.sha256(resolved_sections.encode()).hexdigest() != "978db9a42627fb6d11316e6496ef8ccd76dc2f92a0e6269a63ba0be5d908b7ac":
         errors.append("Baseline registry packages/snapshots or peer resolutions changed")
     packages_text = lock.split("\npackages:\n", 1)[1].split("\nsnapshots:\n", 1)[0]
     snapshots_text = lock.split("\nsnapshots:\n", 1)[1]
@@ -730,7 +735,11 @@ def verify_dependencies():
         # moves ESLint's three consumers to minimatch@11.0.3, which adds its author's @isaacs/nonrecursive-glob-match (same license).
         legacy_blueoak = (license_id == "BlueOak-1.0.0" and
                           identity in {"minimatch@11.0.3", "@isaacs/nonrecursive-glob-match@1.0.3"})
-        rejected = license_id not in allowed_licenses and not legacy_mpl and not legacy_blueoak
+        # 0BSD (OSI-approved, public-domain-equivalent: no attribution or notice obligation), exact identity only. tslib@1.14.1 is
+        # tsyringe@4.10.0's TypeScript helper runtime, reached only through @turnkey/crypto@2.13.3 → @peculiar/x509. The existing
+        # tslib@2.8.1 exception is unchanged; no other 0BSD package or version is accepted by this line.
+        reviewed_0bsd = license_id == "0BSD" and identity == "tslib@1.14.1"
+        rejected = license_id not in allowed_licenses and not legacy_mpl and not legacy_blueoak and not reviewed_0bsd
         approved = BUILD002_REVIEWED_LICENSE_EXCEPTIONS.get(identity)
         if approved:
             if (license_id != approved["license"] or integrity != approved["integrity"]):
