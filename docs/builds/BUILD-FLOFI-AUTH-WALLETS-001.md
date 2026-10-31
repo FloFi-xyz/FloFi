@@ -644,7 +644,7 @@ A product page can be compromised (no `script-src` on `/app`), so FloFi Wallet n
 | `tsc` (app), ESLint (repo `pnpm lint`) | clean |
 | Unit (app + backend, CI exclusions) | 373 files / 4,767 tests pass, 2 skipped (on `34790730`); affected areas re-run after the review fixes: 4,799 pass (the only failures are `*.live`/`*.remote` tests, which need public networks and are excluded in CI) |
 | PostgreSQL (accounts) | 59 / 59 (account service, store, FloFi Wallet service: replay, rate limits, cross-account, identity mismatch, wallet-first root) |
-| `auth-wallets` browser profile (MOCKED loopback, new in the guarded CI plan) | **12 / 12** locally via `guarded-release-browser.mjs` (details below) |
+| `auth-wallets` browser profile (MOCKED loopback, new in the guarded CI plan) | **13 / 13** locally via `guarded-release-browser.mjs` after the mainnet-only change (details below) |
 | Canvas-heavy profiles after the canvas fix | universal-bridge 11, canvas-corrections 6, canvas-workflow-ux 8, workflow-ux-authoring 11, base/robinhood/arbitrum/ethereum authoring 4/4/18/18, canvas-automation-ux 18: all pass. `default-product` 112 pass, with 9 failures identical on main in this container (environment-specific baselines). |
 | `governance_lite` + 21 tests, `test_ci_*` (109), `agent_guard check` | pass |
 | CircleCI `34790730` (workflow `a129af2e`) | governance, certification-checks, browser-1, browser-2 (incl. `auth-wallets`), certification: **all succeeded on the first run** |
