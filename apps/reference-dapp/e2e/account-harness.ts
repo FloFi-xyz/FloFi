@@ -39,6 +39,11 @@ if (!/^http:\/\/127\.0\.0\.1:\d+$/.test(appOrigin) || !/^0[23][0-9a-f]{64}$/.tes
   || !/^[0-9a-f]{64}$/.test(otpSignerPrivate)) throw new Error('ACCOUNT_HARNESS_CONFIG_INVALID');
 // The provider stand-in (stamps, encrypted OTP, client signatures, disposable signing keys): e2e/turnkey-emulator.ts.
 const emulator = createTurnkeyEmulator({ parentPublicKey: parentKey, parentOrg, otpSignerPrivateKey: otpSignerPrivate });
+/**
+ * How many signing activities reached this provider stand-in, whatever their outcome: the browser suite reads it (GET
+ * `/__e2e/signing-activity`, from the test process) to prove that a request FloFi Wallet refused never got here. Counts only, never content.
+ */
+const signingActivity = { sign_raw_payload: 0, sign_transaction: 0 };
 
 const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
 const jwk = { ...publicKey.export({ format: 'jwk' }), kid: 'e2e-1', alg: 'RS256', use: 'sig' };
@@ -119,9 +124,12 @@ createServer(async (request, response) => {
     }
     const match = /^\/public\/v1\/((?:submit|query)\/[a-z_]+)$/.exec(url.pathname);
     if (match && request.method === 'POST') {
+      if (match[1] === 'submit/sign_raw_payload') signingActivity.sign_raw_payload += 1;
+      if (match[1] === 'submit/sign_transaction') signingActivity.sign_transaction += 1;
       const [status, value] = emulator.request(match[1]!, await read(request), request.headers['x-stamp'] as string | undefined);
       return send(response, status, JSON.stringify(value));
     }
+    if (url.pathname === '/__e2e/signing-activity' && request.method === 'GET') return send(response, 200, JSON.stringify(signingActivity));
     if (url.pathname === '/health') return send(response, 200, '{"ok":true}');
     send(response, 404, '{}');
   } catch (error) { send(response, 500, JSON.stringify({ message: String(error) })); }

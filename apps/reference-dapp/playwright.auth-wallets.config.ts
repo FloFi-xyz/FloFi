@@ -3,10 +3,12 @@
  * BUILD-FLOFI-AUTH-WALLETS-001 browser suite: sign-in, wallet onboarding, My wallets and export on normal routes, against the MOCKED
  * loopback identity provider and wallet provider (e2e/account-harness.ts) and a disposable LOOPBACK PostgreSQL database. Every key and
  * secret below is generated for this run in memory and never written; no public provider is contacted and no real identity is used.
+ * FloFi Wallet's signing journeys add the MOCKED loopback Solana Devnet/Orca harness (e2e/solana-devnet-harness.mjs): MOCKED evidence only.
  */
 import { defineConfig } from '@playwright/test';
 import { createECDH, randomBytes, randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { E2E_APP_ORIGIN, E2E_APP_PORT, e2eNetworkScopeEnv } from './e2e/app-origin';
 
@@ -33,6 +35,14 @@ const parentOrg = randomUUID(), googleClient = 'flofi-e2e.apps.loopback', google
 export const WALLET_ORIGIN = `http://localhost:${E2E_APP_PORT}`;
 process.env.FLOFI_E2E_WALLET_ORIGIN = WALLET_ORIGIN;
 const walletGoogleClient = 'flofi-wallet-e2e.apps.loopback', walletGoogleSecret = randomBytes(24).toString('hex'), walletAppleClient = 'xyz.flofi.wallet.e2e';
+// FloFi Wallet signing journeys: a reviewed Solana Devnet swap on the MOCKED loopback Devnet/Orca harness (127.0.0.1:8552, e2e/solana-devnet-harness.mjs)
+// only; never public Devnet, never a public broadcast, MOCKED evidence only. The app's run journal is a fresh directory under the OS temp directory
+// (workers inherit the runner's value, so fixtures and the server share it).
+if (process.env.GRYLOO_SOLANA_DEVNET_E2E !== undefined && process.env.GRYLOO_SOLANA_DEVNET_E2E !== 'MOCKED_LOOPBACK_ONLY') throw Error('SOLANA_DEVNET_E2E_PERMITS_ONLY_MOCKED_LOOPBACK');
+process.env.GRYLOO_SOLANA_DEVNET_E2E = 'MOCKED_LOOPBACK_ONLY';
+process.env.GRYLOO_SOLANA_DEVNET_JOURNAL ??= join(tmpdir(), `gryloo-demo001-auth-wallets-${Date.now()}-${process.pid}`);
+const devnetJournal = process.env.GRYLOO_SOLANA_DEVNET_JOURNAL;
+if (!devnetJournal.startsWith(join(tmpdir(), 'gryloo-demo001-'))) throw Error('SOLANA_DEVNET_JOURNAL_MUST_BE_A_TEMPORARY_DIRECTORY');
 
 export default defineConfig({
   testDir: './e2e', testMatch: 'auth-wallets.spec.ts', workers: 1, fullyParallel: false, retries: 0,
@@ -47,8 +57,11 @@ export default defineConfig({
         FLOFI_ACCOUNT_HARNESS_OTP_SIGNER_PRIVATE_KEY: otpSigner.getPrivateKey('hex').padStart(64, '0'), FLOFI_ACCOUNT_HARNESS_WALLET_ORIGIN: WALLET_ORIGIN,
         FLOFI_ACCOUNT_HARNESS_WALLET_GOOGLE_CLIENT: walletGoogleClient, FLOFI_ACCOUNT_HARNESS_WALLET_GOOGLE_SECRET: walletGoogleSecret,
         FLOFI_ACCOUNT_HARNESS_WALLET_APPLE_CLIENT: walletAppleClient } },
+    { command: 'node e2e/solana-devnet-harness.mjs --serve', url: 'http://127.0.0.1:8552', reuseExistingServer: false, timeout: 30_000 },
     { command: 'pnpm --filter @defi-workflow-engine/reference-dapp start', url: E2E_APP_ORIGIN, reuseExistingServer: false, timeout: 90_000,
       env: { PORT: String(E2E_APP_PORT), ...e2eNetworkScopeEnv(), FLOFI_COPILOT: 'replay', NEXT_TELEMETRY_DISABLED: '1', PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1',
+        // The Devnet swap is authored through the loopback-only engineering form (/__engineering) and runs only on the MOCKED harness above.
+        FLOFI_ENGINEERING_UI: 'LOOPBACK_ONLY', GRYLOO_SOLANA_DEVNET_HARNESS: 'MOCKED_LOOPBACK_ONLY', GRYLOO_SOLANA_DEVNET_JOURNAL: devnetJournal,
         FLOFI_PUBLIC_ORIGIN: E2E_APP_ORIGIN, DATABASE_URL: process.env.FLOFI_E2E_DATABASE_URL!, FLOFI_SESSION_SECRET: randomBytes(32).toString('hex'),
         FLOFI_GOOGLE_CLIENT_ID: googleClient, FLOFI_GOOGLE_CLIENT_SECRET: googleSecret, FLOFI_APPLE_CLIENT_ID: appleClient,
         FLOFI_AUTH_E2E_IDP: 'MOCKED_LOOPBACK_ONLY', FLOFI_AUTH_E2E_IDP_ORIGIN: ACCOUNT_HARNESS_ORIGIN,
