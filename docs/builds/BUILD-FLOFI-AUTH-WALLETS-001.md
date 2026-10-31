@@ -650,15 +650,27 @@ A product page can be compromised (no `script-src` on `/app`), so FloFi Wallet n
 | CircleCI `34790730` (workflow `a129af2e`) | governance, certification-checks, browser-1, browser-2 (incl. `auth-wallets`), certification: **all succeeded on the first run** |
 | Vercel Preview `34790730` | READY (`dpl_HKDYRazp2pa2mZj7gDfj6wo4cCJM`); not production |
 
-The 12 `auth-wallets` journeys cover:
+The 13 `auth-wallets` journeys cover:
 - sign-in (Apple, Google, encrypted email, Web3 wallet), cancellation and tampered state;
 - FloFi Wallet on its own origin:
   - unlock with Google, through its own client;
   - unlock with the 8-character email code, where a sign-in code is refused;
   - create EVM and Solana wallets, import in the provider frame, export only after a fresh unlock and the acknowledgement;
   - Lock, and the host and CSP isolation;
-- **signing**: FloFi Wallet names the run, shows FloFi's own Review values, and arms Sign only in a focused window. FloFi then submits and
-  reconciles a Solana Devnet swap (MOCKED evidence class). Changed bytes or a missing binding are refused, and nothing reaches the provider;
+- **signing, on mainnet-shaped transactions only** (MOCKED loopback harnesses, MOCKED evidence class; §16.11):
+  - **Solana (`jupiter-swap`, Jupiter mainnet harness).** The UI authors a 10 USDC → SOL swap and connects the "FloFi Wallet" Solana
+    entry. FloFi Wallet names the run, shows FloFi's own Review values (amounts, minimum received, slippage, fee, provider, fee payer)
+    and arms Sign only in a focused window. One `sign_raw_payload` is relayed with the binding; the signature is in slot 0 and every
+    other byte is unchanged. FloFi then submits and reconciles the swap (RECONCILED/CONFIRMED).
+  - **Solana refusals.** One changed blockhash byte, a missing binding, and the same bytes and binding on `solana:devnet` are all
+    refused. Nothing reaches the provider and the attempt stays PREPARED.
+  - **EVM (`base-mainnet-transfer`, Base mainnet harness chain).** A 0.001 ETH transfer from the account's generated wallet. A copy on
+    Base Sepolia (84532) is refused with `FLOFI_WALLET_NETWORK_UNSUPPORTED` before anything reaches FloFi Wallet's server or the
+    provider. FloFi Wallet shows FloFi's Review next to its own decoding (Base 8453, from, to, value, nonce, gas, fees, maximum cost
+    before the L1 data fee). One `sign_transaction` is relayed with the binding, and the signed bytes decode to the same fields.
+  - **EVM broadcast and reconciliation.** FloFi broadcasts as `floFiEvmBroadcast` does: a single broadcast claim (a second is refused),
+    and the `managed-wallet-evm` broadcast on the harness chain under the real hash. FloFi then reconciles after two confirmations.
+    The browser cannot call the server action directly, so the test composes these same steps in its process;
 - the database scan for secret-shaped values.
 
 ### 16.9 What is not proven, and what the owner must provide
