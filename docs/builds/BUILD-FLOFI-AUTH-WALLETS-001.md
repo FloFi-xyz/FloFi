@@ -601,3 +601,102 @@ A product page can be compromised (no `script-src` on `/app`), so FloFi Wallet n
   - Measured clearance is now 64 px.
   - Ten canvas-heavy browser profiles pass. `default-product`'s 9 local failures are identical on main in this container
     (environment-specific baselines; they pass in CI).
+
+### 16.7 Independent adversarial review of the integrated code
+- **Method.** Six lenses (signing binding, origin and sessions, unlock and authentication, what the person sees, product integration,
+  export). Every finding was checked by two independent skeptics.
+- **Result.** 19 findings: 17 confirmed (none critical or high), 2 refuted. No path was found to a signature or an export without the
+  person's confirmation in FloFi Wallet.
+- **All 17 confirmed findings are fixed** (commit "FloFi Wallet: fixes from the adversarial review"):
+  - **Catalog swap store.** A refusal FloFi Wallet proves happened before any signature (`4100` with a pre-signature code, for example a
+    Review that expired during the unlock) is now REJECTED, with FloFi Wallet's message. Before, it was UNKNOWN, which locked the run and,
+    on Arbitrum and Ethereum, the reserved nonce.
+  - **Relay.** An attempt's single-signature claim is given back only when the provider created no activity (`400`/`401`/`403` to the
+    submit). Before, a provider auth refusal became a false "already signed".
+  - **Broadcast.** The nonce and fees that FloFi Wallet filled are not re-derived from a newer network read: they were bounded when the
+    signature was granted. All bound fields, the sender and the expiry are still checked.
+  - **FloFi Wallet root.** Only the identity the account was created with (Google, Apple or email) can create the provider organization,
+    never a sign-in linked later on the product origin. This includes accounts first created with a Web3 wallet (PostgreSQL test).
+  - **Sessions.**
+    - An open FloFi Wallet window that lost its session asks for a new handoff, and a click on a locked or unbound window binds it again.
+    - Tokens decode canonically, and a handoff is single-use per verified nonce (one handoff could be redeemed under several spellings).
+  - **Host routing.** The wallet host never serves the product, even with an invalid `FLOFI_WALLET_ORIGIN`.
+  - **Unlock and sign-in.**
+    - A Google/Apple unlock waits for a new unlock of the window's own key.
+    - A sign-in address cannot contain `:`, so it can never name a wallet-unlock budget key.
+  - **Honest display.**
+    - The summary says "Exactly the transaction FloFi prepared for this strategy". The server proves FloFi built those bytes, not who
+      reviewed them, so the person checks every line there.
+    - Base fees are labelled "before the L1 data fee".
+    - Solana compute limits decode unsigned, with the runtime's 1.4M clamp.
+    - Sign is not offered, and no success is announced, once the requesting FloFi page has been closed.
+    - An expiring sign-in request stays answerable.
+  - **Selector.** Each FloFi Wallet EVM address has its own key, so a saved second address reconnects that address.
+- **Refuted.**
+  - A claimed gap between the broadcast record and the attempt: FloFi's existing observation reconciles by nonce and hash.
+  - A claim about FloFi Wallet behaviour that MetaMask, Phantom and Solflare share.
+- **Noted, not changed.** A run that cannot be loaded at all, including an unknown run id, is "Review unavailable" (`503`, fail closed),
+  not "no matching review". Run ids are 128-bit random.
+
+### 16.8 Test evidence (pinned Node 24.21.0, pnpm 11.22.0)
+| Check | Result |
+| --- | --- |
+| `tsc` (app), ESLint (repo `pnpm lint`) | clean |
+| Unit (app + backend, CI exclusions) | 373 files / 4,767 tests pass, 2 skipped (on `34790730`); affected areas re-run after the review fixes: 4,799 pass (the only failures are `*.live`/`*.remote` tests, which need public networks and are excluded in CI) |
+| PostgreSQL (accounts) | 59 / 59 (account service, store, FloFi Wallet service: replay, rate limits, cross-account, identity mismatch, wallet-first root) |
+| `auth-wallets` browser profile (MOCKED loopback, new in the guarded CI plan) | **12 / 12** locally via `guarded-release-browser.mjs` (details below) |
+| Canvas-heavy profiles after the canvas fix | universal-bridge 11, canvas-corrections 6, canvas-workflow-ux 8, workflow-ux-authoring 11, base/robinhood/arbitrum/ethereum authoring 4/4/18/18, canvas-automation-ux 18: all pass. `default-product` 112 pass, with 9 failures identical on main in this container (environment-specific baselines). |
+| `governance_lite` + 21 tests, `test_ci_*` (109), `agent_guard check` | pass |
+| CircleCI `34790730` (workflow `a129af2e`) | governance, certification-checks, browser-1, browser-2 (incl. `auth-wallets`), certification: **all succeeded on the first run** |
+| Vercel Preview `34790730` | READY (`dpl_HKDYRazp2pa2mZj7gDfj6wo4cCJM`); not production |
+
+The 12 `auth-wallets` journeys cover:
+- sign-in (Apple, Google, encrypted email, Web3 wallet), cancellation and tampered state;
+- FloFi Wallet on its own origin:
+  - unlock with Google, through its own client;
+  - unlock with the 8-character email code, where a sign-in code is refused;
+  - create EVM and Solana wallets, import in the provider frame, export only after a fresh unlock and the acknowledgement;
+  - Lock, and the host and CSP isolation;
+- **signing**: FloFi Wallet names the run, shows FloFi's own Review values, and arms Sign only in a focused window. FloFi then submits and
+  reconciles a Solana Devnet swap (MOCKED evidence class). Changed bytes or a missing binding are refused, and nothing reaches the provider;
+- the database scan for secret-shaped values.
+
+### 16.9 What is not proven, and what the owner must provide
+- **No live provider has been exercised.** Google, Apple and Turnkey ran only through the MOCKED loopback emulator, which verifies FloFi's
+  own checks (HPKE, ES256 tokens, client signatures, stamps, disposable keys).
+  - [`LIVE-VERIFICATION-AUTH-WALLETS.md`](../deploy/LIVE-VERIFICATION-AUTH-WALLETS.md) is the isolated non-production runbook. **It has not
+    been run.**
+  - The Turnkey behaviours it lists remain unverified: single-use tokens, `invalidateExisting`, root users and policies, and the contact
+    check in `OTP_LOGIN_V2`.
+- **The product's Authorize → FloFi Wallet path for a MOCKED run is not driven by a browser.**
+  - By existing policy, a MOCKED simulation cannot authorize in the UI.
+  - The browser journey therefore accepts the Review through FloFi's own service. It then exercises FloFi Wallet, its server binding, the
+    relay, the provider signature, submission and reconciliation.
+  - The product side is covered by unit tests: the providers, the channel, the stores' binding and the error classes.
+- **EVM signing.** FloFi Wallet signs EVM only on the four catalog mainnets. A live EVM check would move real funds, so it needs the owner's
+  explicit decision.
+- **Owner provisioning.** None of the following is done by this PR:
+  - Production: `wallet.flofi.xyz` added to the same Vercel project (DNS and domain), and FloFi Wallet's own Google client and Apple
+    Services ID.
+  - The live run: a Turnkey **test** organization, a Preview-only wallet host and test OAuth clients.
+- **Release order.** Release A must come before migration 0018
+  ([`RELEASE-AUTH-WALLETS-0018.md`](../deploy/RELEASE-AUTH-WALLETS-0018.md)).
+
+### 16.10 GO / NO-GO
+- **Code: ready for owner review.** It implements the requested scope:
+  - encrypted email OTP compatible with `CREATE_SUB_ORGANIZATION_V8`;
+  - FloFi Wallet on its own origin, with create, import and export;
+  - EVM and Solana signing bound to reviewed FloFi attempts, with the person's confirmation in FloFi Wallet;
+  - accurate account UI, a fixed CI root cause, and the dependency policy.
+- **Merge or production: NO-GO** until all of the following hold:
+  1. Release A is deployed and verified, then 0018 is applied in order.
+  2. The live verification runbook passes on an isolated Preview with disposable identities. At minimum:
+     - Google, Apple and email sign-in;
+     - FloFi Wallet unlock, create, import and export;
+     - one Solana Devnet signature.
+
+     Its unverified Turnkey facts must be recorded.
+  3. The owner provisions the wallet domain and FloFi Wallet's OIDC clients.
+  4. CI is green on the final head.
+
+  Until then, managed wallets stay off wherever `FLOFI_WALLET_ORIGIN` or the Turnkey settings are absent, and the product says so.
