@@ -14,6 +14,34 @@
       "path": "packages/action-registry/test/execution-capabilities.test.ts",
       "stage": "unit"
     },
+    "app.accounts.account-model": {
+      "path": "apps/reference-dapp/src/accounts/account-model.test.ts",
+      "stage": "unit"
+    },
+    "app.accounts.account-service.pg": {
+      "path": "apps/reference-dapp/src/accounts/account-service.pg.test.ts",
+      "stage": "postgres"
+    },
+    "app.accounts.account-session": {
+      "path": "apps/reference-dapp/src/accounts/account-session.test.ts",
+      "stage": "unit"
+    },
+    "app.accounts.account-store.pg": {
+      "path": "apps/reference-dapp/src/accounts/account-store.pg.test.ts",
+      "stage": "postgres"
+    },
+    "app.accounts.oidc": {
+      "path": "apps/reference-dapp/src/accounts/oidc.test.ts",
+      "stage": "unit"
+    },
+    "app.accounts.provider-relay": {
+      "path": "apps/reference-dapp/src/accounts/provider-relay.test.ts",
+      "stage": "unit"
+    },
+    "app.accounts.turnkey-server": {
+      "path": "apps/reference-dapp/src/accounts/turnkey-server.test.ts",
+      "stage": "unit"
+    },
     "app.admin.analytics.workflows": {
       "path": "apps/reference-dapp/src/admin/analytics/workflows.test.ts",
       "stage": "unit"
@@ -145,6 +173,10 @@
     "app.domain.intelligence.conversation-regression": {
       "path": "apps/reference-dapp/src/domain/intelligence/conversation-regression.test.ts",
       "stage": "unit"
+    },
+    "app.e2e.auth-wallets": {
+      "path": "apps/reference-dapp/e2e/auth-wallets.spec.ts",
+      "stage": "browser"
     },
     "app.e2e.build-entry": {
       "path": "apps/reference-dapp/e2e/build-entry.spec.ts",
@@ -349,6 +381,10 @@
     "cloud-runtime.evidence-telemetry": {
       "path": "packages/cloud-runtime/test/evidence-telemetry.test.ts",
       "stage": "unit"
+    },
+    "cloud-runtime.flofi-accounts-migration.pg": {
+      "path": "packages/cloud-runtime/test/flofi-accounts-migration.pg.test.ts",
+      "stage": "postgres"
     },
     "cloud-runtime.forward-compatibility.pg": {
       "path": "packages/cloud-runtime/test/forward-compatibility.pg.test.ts",
@@ -5955,6 +5991,65 @@
       "gaps": [
         "Mapped suites are representative boundary tests, not exhaustive path or public execution coverage.",
         "Mapped fork suites include existing owner-gated cases that may skip; a successful stage is not proof those optional cases ran."
+      ]
+    },
+    {
+      "id": "accounts--identity-wallets",
+      "primary": "flofi-security",
+      "dependencies": [
+        "flofi-data-privacy",
+        "flofi-frontend-ux",
+        "flofi-infrastructure-ci",
+        "flofi-wallet-execution"
+      ],
+      "sharedFinancialCore": false,
+      "sources": [
+        "apps/reference-dapp/playwright.auth-wallets.config.ts",
+        "apps/reference-dapp/src/accounts/account-host.ts",
+        "apps/reference-dapp/src/accounts/account-model.ts",
+        "apps/reference-dapp/src/accounts/account-service.ts",
+        "apps/reference-dapp/src/accounts/account-session.ts",
+        "apps/reference-dapp/src/accounts/account-store.ts",
+        "apps/reference-dapp/src/accounts/account-theme.ts",
+        "apps/reference-dapp/src/accounts/oidc-callback.ts",
+        "apps/reference-dapp/src/accounts/oidc.ts",
+        "apps/reference-dapp/src/accounts/provider-relay.ts",
+        "apps/reference-dapp/src/accounts/turnkey-browser.ts",
+        "apps/reference-dapp/src/accounts/turnkey-server.ts",
+        "apps/reference-dapp/src/app/(account)/layout.tsx",
+        "apps/reference-dapp/src/app/(account)/login/page.tsx",
+        "apps/reference-dapp/src/app/(account)/onboarding/page.tsx",
+        "apps/reference-dapp/src/app/(account)/onboarding/wallets/page.tsx",
+        "apps/reference-dapp/src/app/account-action.ts",
+        "apps/reference-dapp/src/app/api/account/provider/[...path]/route.ts",
+        "apps/reference-dapp/src/app/auth/callback/apple/route.ts",
+        "apps/reference-dapp/src/app/auth/callback/google/route.ts",
+        "apps/reference-dapp/src/components/account/account-icons.tsx",
+        "apps/reference-dapp/src/components/account/account-messages.ts",
+        "apps/reference-dapp/src/components/account/account-shell.tsx",
+        "apps/reference-dapp/src/components/account/account-wallets.tsx",
+        "apps/reference-dapp/src/components/account/account.module.css",
+        "apps/reference-dapp/src/components/account/add-wallets.tsx",
+        "apps/reference-dapp/src/components/account/sign-in.tsx",
+        "apps/reference-dapp/src/components/account/wallet-intro.tsx",
+        "apps/reference-dapp/src/i18n/pt-accounts.ts",
+        "packages/cloud-runtime/migrations/0018_flofi_accounts.sql"
+      ],
+      "suites": [
+        "app.accounts.account-model",
+        "app.accounts.account-service.pg",
+        "app.accounts.account-session",
+        "app.accounts.account-store.pg",
+        "app.accounts.oidc",
+        "app.accounts.provider-relay",
+        "app.accounts.turnkey-server",
+        "app.e2e.auth-wallets",
+        "cloud-runtime.flofi-accounts-migration.pg"
+      ],
+      "gaps": [
+        "Live Google, Apple and Turnkey integrations are unverified: suites use test RSA keys, an in-process provider stand-in and the MOCKED loopback harness (e2e/account-harness.ts). They certify FloFi's verification, isolation and authorization rules, not the providers.",
+        "Turnkey activity versions and result shapes come from @turnkey/http 6.7.0 declarations; confirm on a Turnkey test organization before enabling production.",
+        "Managed wallets cannot sign FloFi transactions in this build (no signing adapter); Build/Simulate/Execute regressions are covered by the existing suites, not by this module."
       ]
     }
   ],

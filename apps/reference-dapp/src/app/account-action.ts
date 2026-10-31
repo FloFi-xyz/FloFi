@@ -1,0 +1,154 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+'use server';
+/**
+ * BUILD-FLOFI-AUTH-WALLETS-001: account server actions. Each one derives the account from the verified HttpOnly session
+ * (sealed cookie + server-side record), never from an argument. Arguments are wallet ids, labels and choices only: no key,
+ * phrase, token or code leaves the browser except the six-digit email code, which is forwarded to the provider once.
+ * None of these actions signs, submits or authorizes a transaction.
+ */
+import { cookies } from 'next/headers';
+import { accountAvailability, accountHost, clearAccountCookie, currentAccountSession, flowCookieOptions, managedHint, nextPath, setAccountCookie,
+  type AccountAvailability, type AccountHost } from '../accounts/account-host';
+import { ACCOUNT_EMAIL_COOKIE, ACCOUNT_FLOW_TTL_SECONDS, ACCOUNT_OIDC_COOKIE, newOidcFlow, readEmailFlow, safeReturnPath, sealEmailFlow, sealOidcFlow,
+  type AccountIntent, type AccountSessionToken } from '../accounts/account-session';
+import { parseAccountWalletId, type AccountView, type AccountWallet } from '../accounts/account-model';
+import type { ExportGrant, ManagedSession } from '../accounts/account-service';
+import { authorizationUrl, oidcConfig } from '../accounts/oidc';
+import type { TurnkeyBrowserConfig } from '../accounts/turnkey-server';
+import { currentSolanaSession, currentWalletSession, requestOrigin } from '../server/session-principal';
+import { WALLET_SESSION_TTL_SECONDS } from '../server/wallet-session';
+import { ACCOUNT_REAUTH_SECONDS } from '../accounts/account-session';
+
+type Result<T> = { ok: true; value: T } | { ok: false; code: string };
+const CODE = /^[A-Z][A-Z0-9_]{2,80}$/;
+const failure = (cause: unknown, fallback = 'ACCOUNT_REQUEST_FAILED'): { ok: false; code: string } =>
+  ({ ok: false, code: cause instanceof Error && CODE.test(cause.message) ? cause.message : fallback });
+const fail = (code: string): never => { throw new Error(code); };
+async function host(): Promise<AccountHost> {
+  try { return await accountHost() ?? fail('ACCOUNTS_NOT_CONFIGURED'); } catch (error) { throw new Error(failure(error, 'ACCOUNTS_UNAVAILABLE').code, { cause: error }); }
+}
+/** The wallet proven in this browser within the last few minutes (a new EIP-4361 / SIWS signature), or null. */
+async function freshWalletProof(namespace: 'eip155' | 'solana'): Promise<{ namespace: 'eip155' | 'solana'; address: string } | null> {
+  const proof = namespace === 'eip155' ? await currentWalletSession() : namespace === 'solana' ? await currentSolanaSession() : fail('WALLET_NAMESPACE_INVALID');
+  if (!proof) return null;
+  const issued = Date.parse(proof.expiresAt) / 1000 - WALLET_SESSION_TTL_SECONDS;
+  return Date.now() / 1000 - issued <= ACCOUNT_REAUTH_SECONDS ? { namespace, address: proof.account } : fail('WALLET_PROOF_STALE');
+}
+async function signedIn(): Promise<{ host: AccountHost; session: AccountSessionToken }> {
+  const h = await host(), session = await currentAccountSession(h);
+  return session ? { host: h, session } : fail('ACCOUNT_SESSION_REQUIRED');
+}
+export type AccountState = { readonly availability: AccountAvailability; readonly account: AccountView | null;
+  /** The provider session this browser's key received at sign-in, while it lasts (hint for the browser; the provider enforces it). */
+  readonly managed: ManagedSession | null; readonly provider: TurnkeyBrowserConfig | null };
+export async function accountState(): Promise<AccountState> {
+  let h: AccountHost | null;
+  try { h = await accountHost(); } catch { h = null; }
+  const availability = accountAvailability(process.env, h), session = await currentAccountSession(h);
+  if (!h || !session) return { availability, account: null, managed: null, provider: h?.turnkey ?? null };
+  const [account, context] = await Promise.all([h.service.view(session).catch(() => null), h.service.managedContext(session).catch(() => null)]);
+  const managed = context && session.managedKey && session.managedUntil
+    ? { organizationId: context.organizationId, userId: context.userId, sessionKey: session.managedKey, expiresAt: new Date(session.managedUntil * 1000).toISOString() } : null;
+  return { availability, account, managed, provider: h.turnkey };
+}
+
+/** Starts Google or Apple sign-in: returns the provider URL and seals state, nonce and PKCE verifier in an HttpOnly flow cookie. */
+export async function startSocialSignIn(provider: 'google' | 'apple', sessionKey: string | null, intent: AccountIntent = 'sign-in', returnTo = '/app'): Promise<Result<{ url: string }>> {
+  try {
+    await host();
+    if (provider !== 'google' && provider !== 'apple') fail('OIDC_PROVIDER_INVALID');
+    if (intent !== 'sign-in' && intent !== 'link') fail('ACCOUNT_INTENT_INVALID');
+    const config = oidcConfig(provider, process.env) ?? fail('OIDC_PROVIDER_NOT_CONFIGURED');
+    const origin = await requestOrigin();
+    // The provider returns to FLOFI_PUBLIC_ORIGIN; a flow started on any other host would lose its cookie, so it is refused up front.
+    if (!config.redirectUri.startsWith(`${origin.uri}/`)) fail('OIDC_ORIGIN_MISMATCH');
+    const flow = newOidcFlow(provider, sessionKey, intent, returnTo);
+    (await cookies()).set(ACCOUNT_OIDC_COOKIE, sealOidcFlow(process.env, flow, origin.domain, new Date()), flowCookieOptions(origin.secure, ACCOUNT_FLOW_TTL_SECONDS));
+    return { ok: true, value: { url: authorizationUrl(config, flow) } };
+  } catch (cause) { return failure(cause); }
+}
+
+/** Sends a one-time code (through the wallet provider) and seals the challenge for this browser's key. */
+export async function startEmailSignIn(email: string, sessionKey: string, intent: AccountIntent = 'sign-in', returnTo = '/app'): Promise<Result<{ email: string }>> {
+  try {
+    const h = await host();
+    if (!h.service.validSessionKey(sessionKey)) fail('ACCOUNT_SESSION_KEY_INVALID');
+    if (intent !== 'sign-in' && intent !== 'link') fail('ACCOUNT_INTENT_INVALID');
+    const started = await h.service.startEmail(email), origin = await requestOrigin();
+    (await cookies()).set(ACCOUNT_EMAIL_COOKIE, sealEmailFlow(process.env, { otpId: started.otpId, email: started.email, sessionKey, intent, returnTo: safeReturnPath(returnTo) },
+      origin.domain, new Date()), flowCookieOptions(origin.secure, ACCOUNT_FLOW_TTL_SECONDS));
+    return { ok: true, value: { email: started.email } };
+  } catch (cause) { return failure(cause, 'EMAIL_SIGN_IN_FAILED'); }
+}
+export async function completeEmailSignIn(code: string): Promise<Result<{ next: string; managed: ManagedSession | null; managedError: string | null }>> {
+  try {
+    const h = await host(), origin = await requestOrigin(), jar = await cookies();
+    const flow = readEmailFlow(process.env, jar.get(ACCOUNT_EMAIL_COOKIE)?.value, new Date(), origin.domain) ?? fail('EMAIL_CHALLENGE_EXPIRED');
+    const outcome = await h.service.completeEmail(flow, code, await currentAccountSession(h));
+    // The challenge is single-use once the provider accepted the code.
+    jar.set(ACCOUNT_EMAIL_COOKIE, '', flowCookieOptions(origin.secure, 0));
+    await setAccountCookie(managedHint(outcome));
+    return { ok: true, value: { next: nextPath(outcome, flow.intent, flow.returnTo), managed: outcome.managed, managedError: outcome.managedError } };
+  } catch (cause) { return failure(cause, 'EMAIL_SIGN_IN_FAILED'); }
+}
+
+/**
+ * Web3 Wallet sign-in after the existing wallet proof (EIP-4361 or Sign-In With Solana) sealed a wallet session in this browser.
+ * `provider` is display metadata only; the address comes from the verified wallet session.
+ */
+export async function walletAccountSignIn(namespace: 'eip155' | 'solana', providerKey: string, providerName: string, returnTo = '/app'): Promise<Result<{ next: string }>> {
+  try {
+    const h = await host(), proof = await freshWalletProof(namespace) ?? fail('WALLET_SESSION_REQUIRED');
+    const outcome = await h.service.completeWallet(proof, { key: providerKey, name: providerName }, 'sign-in', null);
+    await setAccountCookie(outcome.session);
+    return { ok: true, value: { next: nextPath(outcome, 'sign-in', returnTo) } };
+  } catch (cause) { return failure(cause, 'WALLET_SIGN_IN_FAILED'); }
+}
+
+/** Signs this browser out (server-side revocation), or every browser of the account. Wallet sessions are separate and unchanged. */
+export async function accountSignOut(everywhere = false): Promise<void> {
+  try {
+    const h = await accountHost(), session = await currentAccountSession(h);
+    if (h && session) await (everywhere ? h.store.revokeAllSessions(session.accountId) : h.store.revokeSession(session));
+  } catch { /* the cookie is cleared regardless */ }
+  await clearAccountCookie();
+}
+export async function setAccountOnboarding(value: 'completed' | 'dismissed'): Promise<Result<null>> {
+  try {
+    const { host: h, session } = await signedIn();
+    if (value !== 'completed' && value !== 'dismissed') fail('ONBOARDING_INVALID');
+    await h.store.setOnboarding(session.accountId, value);
+    return { ok: true, value: null };
+  } catch (cause) { return failure(cause); }
+}
+export async function saveManagedWallets(ids: string[]): Promise<Result<AccountWallet[]>> {
+  try { const { host: h, session } = await signedIn(); return { ok: true, value: await h.service.saveManagedWallets(session, ids) }; }
+  catch (cause) { return failure(cause, 'ACCOUNT_WALLET_SAVE_FAILED'); }
+}
+/** Links the external wallet proven in this browser (fresh EIP-4361 / SIWS session) to the signed-in account. */
+export async function linkAccountWallet(namespace: 'eip155' | 'solana', providerKey: string, providerName: string): Promise<Result<AccountWallet>> {
+  try {
+    const { host: h, session } = await signedIn();
+    return { ok: true, value: await h.service.linkExternalWallet(session, await freshWalletProof(namespace), { key: providerKey, name: providerName }) };
+  } catch (cause) { return failure(cause, 'ACCOUNT_WALLET_LINK_FAILED'); }
+}
+export async function renameAccountWallet(id: string, label: string): Promise<Result<null>> {
+  try {
+    const { host: h, session } = await signedIn(), wallet = parseAccountWalletId(id) ?? fail('ACCOUNT_WALLET_INVALID');
+    await h.store.renameWallet(session.accountId, wallet!.ecosystem, wallet!.address, label);
+    return { ok: true, value: null };
+  } catch (cause) { return failure(cause); }
+}
+/** Removes FloFi's association only. The wallet, its keys at the provider and its assets are unchanged. */
+export async function removeAccountWallet(id: string): Promise<Result<null>> {
+  try {
+    const { host: h, session } = await signedIn(), wallet = parseAccountWalletId(id) ?? fail('ACCOUNT_WALLET_INVALID');
+    await h.store.removeWallet(session.accountId, wallet!.ecosystem, wallet!.address);
+    return { ok: true, value: null };
+  } catch (cause) { return failure(cause); }
+}
+/** Authorizes one export of a managed wallet; the browser then asks the provider to encrypt it to the export iframe's key. */
+export async function authorizeWalletExport(id: string, kind: 'private-key' | 'recovery-phrase'): Promise<Result<ExportGrant>> {
+  try { const { host: h, session } = await signedIn(); return { ok: true, value: await h.service.authorizeExport(session, id, kind) }; }
+  catch (cause) { return failure(cause, 'EXPORT_NOT_AUTHORIZED'); }
+}

@@ -367,7 +367,7 @@ class FullDependencyGate(unittest.TestCase):
     def test_full_inventory_and_existing_exceptions_pass(self):
         self.verify()
         evidence = json.loads((Path(self.scratch.name) / 'build-002-dependencies.json').read_text())
-        self.assertEqual(len(evidence), 263)
+        self.assertEqual(len(evidence), 271)
 
     def test_integrity_license_age_platform_and_missing_entry_fail_without_evidence(self):
         mutations = ['integrity', 'license', 'age', 'platform', 'missing']
@@ -425,7 +425,7 @@ class SbomValidation(unittest.TestCase):
     def test_complete_reviewed_inventory_passes(self):
         result = self.validate()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn('263 exact registry components', result.stdout)
+        self.assertIn('271 exact registry components', result.stdout)
 
     def test_missing_duplicate_unreviewed_and_dangling_components_fail(self):
         saved = json.dumps(self.document)

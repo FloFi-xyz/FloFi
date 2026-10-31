@@ -391,7 +391,15 @@ BUILDMCP001_DIRECT_VERSIONS = {
 # GHSA-mrhx-c7xc-m3w5: the MCP SDK's zod moves 4.6.5 → 4.6.6 by exact override (MIT, no dependencies); the count is unchanged.
 # GHSA-w74x-v6f9-j3xg, GHSA-wjr9-j795-jxcr, GHSA-xhq7-xmqj-769h, GHSA-333x-w4r6-6crp: ajv's fast-uri moves 3.1.8 → 3.1.9 by exact
 # override (BSD-3-Clause, no dependencies); the count is unchanged.
-REGISTRY_PACKAGE_COUNT = 263
+# BUILD-FLOFI-AUTH-WALLETS-001 adds 8 (Apache-2.0/MIT): @turnkey/iframe-stamper (no dependencies) and @turnkey/indexed-db-stamper
+# with @turnkey/encoding, @turnkey/sdk-types, bs58, bs58check, base-x and @noble/hashes. Owner review: these are the provider's
+# isolated import/export iframe bridge and its non-extractable WebCrypto session-key stamper; FloFi holds no wallet key.
+REGISTRY_PACKAGE_COUNT = 271
+# BUILD-FLOFI-AUTH-WALLETS-001: the embedded-wallet provider's browser stampers (docs/builds/BUILD-FLOFI-AUTH-WALLETS-001.md).
+BUILDAUTHWALLETS001_DIRECT_VERSIONS = {
+    "@turnkey/iframe-stamper": "2.11.1",
+    "@turnkey/indexed-db-stamper": "1.3.12",
+}
 
 # The pre-existing BUILD-001 MPL tooling exception is exact-name scoped too.
 BUILD001_LIGHTNINGCSS_NAMES = {
@@ -439,7 +447,7 @@ def verify_dependencies():
     if lock.count("\npackages:\n") != 1 or lock.count("\nsnapshots:\n") != 1:
         raise RuntimeError("Unrecognized lockfile sections")
     resolved_sections = "packages:\n" + lock.split("\npackages:\n", 1)[1]
-    if hashlib.sha256(resolved_sections.encode()).hexdigest() != "829b227b583d1010a75aeb0b969609807ad1b4e03aaa4816183b95681e911d8a":
+    if hashlib.sha256(resolved_sections.encode()).hexdigest() != "f245305f39847f86493048d092091cd6c30990c463b988f9bde3b7730a36c333":
         errors.append("Baseline registry packages/snapshots or peer resolutions changed")
     packages_text = lock.split("\npackages:\n", 1)[1].split("\nsnapshots:\n", 1)[0]
     snapshots_text = lock.split("\nsnapshots:\n", 1)[1]
@@ -503,6 +511,7 @@ def verify_dependencies():
         **BUILDMCP001_DIRECT_VERSIONS,
         "@sinclair/typebox": "0.34.52",
         "ajv": "8.20.0",
+        **BUILDAUTHWALLETS001_DIRECT_VERSIONS,
     }
     expected_app_dev = {key: BUILD002_DIRECT_VERSIONS[key] for key in
                         ("@playwright/test", "@types/react", "@types/react-dom")}
@@ -600,6 +609,11 @@ def verify_dependencies():
             errors.append(f"BUILD-MCP-001 direct lock identity missing: {identity}@{version}")
         if not re.search(rf"(?m)^      '{re.escape(identity)}':\n        specifier: {re.escape(version)}\n        version: {re.escape(version)}$", app_importer):
             errors.append(f"BUILD-MCP-001 app lock importer differs: {identity}")
+    for identity, version in BUILDAUTHWALLETS001_DIRECT_VERSIONS.items():
+        if identity + "@" + version not in locked:
+            errors.append(f"BUILD-FLOFI-AUTH-WALLETS-001 direct lock identity missing: {identity}@{version}")
+        if not re.search(rf"(?m)^      '{re.escape(identity)}':\n        specifier: {re.escape(version)}\n        version: {re.escape(version)}$", app_importer):
+            errors.append(f"BUILD-FLOFI-AUTH-WALLETS-001 app lock importer differs: {identity}")
     for manifest_path in [Path("package.json"), *Path("packages").glob("*/package.json"),
                           Path("apps/reference-dapp/package.json")]:
         manifest = json.loads(manifest_path.read_text())
@@ -610,7 +624,8 @@ def verify_dependencies():
                 if (name + "@" + version not in pins and BUILD002_DIRECT_VERSIONS.get(name) != version
                         and BUILD003D_DIRECT_VERSIONS.get(name) != version
                         and BUILDCLOUD001_DIRECT_VERSIONS.get(name) != version
-                        and BUILDMCP001_DIRECT_VERSIONS.get(name) != version):
+                        and BUILDMCP001_DIRECT_VERSIONS.get(name) != version
+                        and BUILDAUTHWALLETS001_DIRECT_VERSIONS.get(name) != version):
                     errors.append(f"Unapproved direct pin: {name}@{version}")
 
     def dependencies(body, group):
