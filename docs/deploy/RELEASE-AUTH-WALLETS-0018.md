@@ -78,6 +78,9 @@ on schema 17. Check `/readyz`, logs (`migrate.applied versions=none schema_versi
      `https://wallet.flofi.xyz` in production. That host must be added to the same Vercel deployment (DNS + domain). FloFi Wallet also
      uses its own Google client (`FLOFI_WALLET_GOOGLE_CLIENT_ID` / `_SECRET`) and Apple Services ID (`FLOFI_WALLET_APPLE_CLIENT_ID`),
      whose only redirect URIs are `https://wallet.flofi.xyz/wallet/callback/{google,apple}`.
+     Its EVM nonce/fee reads and its attempt-bound broadcast run on the API's `managed-wallet-evm` flow (Railway API first, as above),
+     with each catalog network's existing RPC setting (`GRYLOO_BASE_RPC_URL`, …) and existing live gate: nothing new to configure, and a
+     network that is not live there is refused, never simulated.
    Configure each only after the live verification above, then check each method once with an owner-controlled identity.
    None of these settings changes the database: migration 0018 is the same in this round.
 

@@ -520,3 +520,84 @@ key held in the **product origin's** IndexedDB.
   - Raw payloads are limited to FloFi's own SIWE/SIWS messages for the product host (EVM: EIP-191 bytes hashed by Turnkey with
     keccak256, never a pre-hashed digest) or a Solana v0 message whose fee payer is the managed wallet.
   - Never relayed: `eth_send_*`/`sol_send_*`, policies, users or API keys.
+
+### 16.4 Managed signing (EVM and Solana), bound to the reviewed FloFi attempt
+A product page can be compromised (no `script-src` on `/app`), so FloFi Wallet never signs bytes on its word.
+- **Binding.** Every signing request carries `{flow, runId}`. FloFi Wallet's server (`/api/wallet/sign-context`) loads that run through
+  the flow's own service (`app/flofi-wallet-signing.ts`). `server/managed-signing.ts` then accepts the bytes only when all of these hold:
+  - the flow is one FloFi can bind;
+  - the run is pending and authorized for its current Review;
+  - its attempt is PREPARED (or SUBMITTING after the durable handoff), with no signature or hash recorded yet;
+  - the owner is a managed wallet saved to this account;
+  - the bytes are exactly the attempt's:
+    - Solana: the reviewed v0 message;
+    - EVM: chain, from, to, value, data and gas, plus the nonce and fees wherever the attempt binds them.
+
+  The summary FloFi Wallet shows ("Matches your reviewed FloFi strategy": amounts, minimum received, recipient, fees, expiry) comes from
+  the server's Review only, never from the request.
+- **One signature, one broadcast.**
+  - The relay re-resolves the same binding (`x-flofi-signing`) right before forwarding and claims the attempt's single signature
+    (`flofi_account_used_proofs`).
+  - For EVM, FloFi broadcasts the signed bytes itself (`floFiEvmBroadcast`), and only after these steps: decode them, recover the sender,
+    re-match every field to the attempt, and claim the attempt's single broadcast. An unclear send is decided with
+    `eth_getTransactionByHash`; any doubt is UNKNOWN.
+- **Fields FloFi Wallet fills (catalog EVM swaps only).**
+  - The nonce must be the owner's pending nonce.
+  - The fee cap must stay within 4× the network's current fees (`FILLED_FEE_BOUND`).
+  - So two different signatures for one attempt cannot both be valid.
+- **Scope.**
+  - **Supported:** `jupiter-swap`, `solana-devnet-swap`, `solana-transfer`, `solana-devnet-transfer`, `robinhood-`/`base-`/
+    `arbitrum-`/`ethereum-mainnet-transfer`, and `robinhood-`/`base-`/`arbitrum-`/`ethereum-swap`.
+  - **Refused by name** (`FLOFI_WALLET_FLOW_NOT_SUPPORTED`, which tells the person to use MetaMask, Phantom or Solflare): every other flow,
+    including the EVM testnet flows. FloFi Wallet's EVM provider exposes only the four catalog mainnets.
+  - **Rejected formats:** legacy `gasPrice` and any non-EIP-1559 transaction.
+- **Confirmation in FloFi Wallet.**
+  - The window shows the server summary next to its own decoding:
+    - EVM: chain, from, to, value, function selector, decoded ERC-20 transfer/approve, nonce, gas, maximum total cost;
+    - Solana: fee payer, programs, decoded System/SPL transfers and approvals, message hash.
+  - Sign arms only after the request has been on screen in a focused window for a full second, and disarms on blur
+    (`wallet-app/arming.ts`).
+  - The provider's result is checked against the request before it is used:
+    - EVM: the same transaction;
+    - Solana: the same message, with the signature in slot 0.
+- **Failure classes** (`wallet/flofi-signing.ts`):
+  - Cancel before Sign is the only `4001`.
+  - Refusals proven to happen before any signing activity are `4100`.
+  - Everything else is UNKNOWN and is reconciled, never retried as "nothing signed". That includes a closed window, a provider error after
+    submission, and a second request for an attempt that was already signed (`FLOFI_WALLET_ALREADY_SIGNED`, reclassified in this round).
+- **Product side.**
+  - Each managed address is one wallet entry: an EIP-1193 provider per EVM address, registered directly (never announced), and a Wallet
+    Standard wallet per Solana address.
+  - These entries are not offered inside frames or embedded hosts.
+  - Authorize opens FloFi Wallet inside the click and starts only once FloFi Wallet reports itself unlocked, so a short Review cannot expire
+    during an unlock.
+  - Each store binds its single signature call to its run (`bindFloFiSigning`), which has no effect on any other wallet. MetaMask, Phantom
+    and Solflare paths are unchanged.
+
+### 16.5 Accounts UI matches the real capability
+- **Onboarding** (`/onboarding/wallets`):
+  - It says wallets open in FloFi Wallet, a separate secure window where the person unlocks and confirms every signature.
+  - Its buttons are enabled only after the page has learned FloFi Wallet's origin from the server, because the window must open inside the
+    click.
+  - It says so when this deployment has no FloFi Wallet ("isn't available on this deployment yet"), or when the account signed in with a
+    wallet only.
+- **Credentials → My wallets:** each managed wallet says "Signs in FloFi Wallet, after you review the transaction in FloFi."
+  - Export opens FloFi Wallet. Nothing secret is shown on the product page, and imported keys never offer a recovery phrase.
+  - External wallets never offer export.
+- **No mock behind production paths.** The emulator, its OTP signer key and the MOCKED IdP exist only under the `*_E2E=MOCKED_LOOPBACK_ONLY`
+  gates, which hosted deployments refuse.
+
+### 16.6 CI failure investigated: `universal-bridge.spec.ts:275` (pre-existing UI defect, fixed)
+- **Symptom.** CircleCI browser job 2 failed twice on this branch (`1ca90f6`, `fe4b26f`): the canvas zoom slider intercepted the click on
+  the destination picker's WETH option. A rerun on `fe4b26f` passed, as did 5/5 local runs and main's recent runs.
+- **Root cause.** I measured it at 1440×900:
+  - the open picker's last option ended **6 px** above the floating canvas navigator;
+  - the picker's height depends on an asynchronous status line ("Arbitrum tokens are unavailable right now" + Try again).
+  - The insertion fit keeps cards clear of that band only when a card is inserted.
+  - So with other font metrics or timing, the option slid under the navigator, for a real person as much as for the test.
+- **Fix** (`components/canvas-panel-reveal.tsx`): when a composer side panel opens, resizes or finishes animating, the canvas pans up just
+  enough to lift the card and its panel above the bottom margin and any overlapping bottom control.
+  - It never zooms and never pushes the card above the top margin.
+  - Measured clearance is now 64 px.
+  - Ten canvas-heavy browser profiles pass. `default-product`'s 9 local failures are identical on main in this container
+    (environment-specific baselines; they pass in CI).
