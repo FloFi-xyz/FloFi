@@ -1,83 +1,178 @@
 # BUILD-FLOFI-LANDING07-README-001 — Landing Page 07 and the end-user README
 
-Status: **PARTIAL — README delivered; Landing 07 BLOCKED on input.** Nothing was merged, deployed, configured or executed. No
-transaction was signed or sent.
+Status: **implemented on a review branch, not merged, not deployed.** Nothing was configured, migrated or executed; no transaction was
+signed or sent. Evidence level: LOCAL (loopback production builds and MOCKED loopback providers).
 
-| Part | State |
+| Part | Result |
 | --- | --- |
-| Install Caio's Landing 07 at `/` and route its entry CTAs into the PR #143 sign-in flow | **Blocked.** The package `FloFi-Landing-07-Alrimar-2026-10-30.zip` was not available in this session (see §2). No landing file, asset, route or test was changed. |
-| Rewrite `README.md` as an end-user product README | **Done** (§4). |
+| Install Caio's Landing 07 at `/`, unchanged | Done. Package files byte-identical. `/` renders pixel-identically to the package's own route (§3, §6). |
+| Route its entry links into PR #143's sign-in | Done. Only the destination of the 8 `/app` links changed, to `/login` (§4). |
+| Rewrite `README.md` for end users | Done (§7). |
 
 ## 1. Base
 
-- Repository: `FloFi-xyz/FloFi` (the session's remote `alrimarleskovar/FloFi` redirects there; PR #143 reports `FloFi-xyz/FloFi`).
-- Dependency: PR #143 `BUILD-FLOFI-AUTH-WALLETS-001`, **open, not merged**, head branch `claude/wonderful-shannon-nacbbz` at
-  `a5fa5c838b4bd4f2b6a00b826383f0ec31c194cb`, base `main` at `39459013b125c7ef5bf6c92b9fb9326005ed55fe` (checked 2026-10-31).
-- This build: branch `claude/build-flofi-landing07-readme-001`, created from `a5fa5c8` and stacked on PR #143. PR #143's branch was
-  not modified.
+- Repository: `FloFi-xyz/FloFi`. The session's remote, `alrimarleskovar/FloFi`, redirects there.
+- Dependency: PR #143 `BUILD-FLOFI-AUTH-WALLETS-001`.
+  - State: **open, not merged**.
+  - Head: branch `claude/wonderful-shannon-nacbbz` at `a5fa5c838b4bd4f2b6a00b826383f0ec31c194cb`.
+  - Base: `main` at `39459013b125c7ef5bf6c92b9fb9326005ed55fe` (checked 2026-10-31).
+- This build: branch `claude/build-flofi-landing07-readme-001`, created from `a5fa5c8` and stacked on PR #143.
+  - PR #143's branch was not modified.
+  - If both are accepted, merge PR #143 first.
 
-## 2. Landing 07 input — not available
+## 2. Package received
 
-The prompt names the attachment `FloFi-Landing-07-Alrimar-2026-10-30.zip` (with `COPY_INTO_REPO/`, `ROUTE_EXAMPLE/page.tsx`,
-`SHA256SUMS.txt`, `README_COMECE_AQUI.md`, `INTEGRACAO.md`, `VALIDACAO_E_LIMITES.md`, `PENDENCIA_HERO_F.md`, `ASSET_NOTES.md`,
-`BRAND_REFERENCE`, `VISUAL_REFERENCES`, `PREVIEWS`, `ISSUES`). Searched, with no match:
+`FloFi-Landing-07-Alrimar-2026-10-30.zip` (uploaded by the owner on 2026-10-31):
+- 18,118,868 bytes; SHA-256 `293b7fc4a0c68ae4d35f61182e2d974fe8ac482b3a8211f26cd9107e78db2fc5`.
+- Unpacked into an isolated scratch folder.
+- Its documentation was read as data. `APPLY_COPY_ONLY.ps1` was not executed.
+- All 34 entries of `SHA256SUMS.txt` verify, and the file list matches exactly.
 
-- the session container (whole filesystem, by name and for any recent `.zip`), the attachment and upload mounts;
-- the repository (all 286 remote refs) and GitHub code/PR search for `landing07`;
-- the owner's mailbox (attachments, `.zip`, Drive links, messages from or to Caio).
+| Installed file (from `COPY_INTO_REPO/`) | SHA-256 | In repo |
+| --- | --- | --- |
+| `src/components/marketing/landing07-page.tsx` | `e620623f24475af1e1829e416df82b69ae5f14d927ee79e64b5ab46f386aadf1` | changed: 8 destinations only (§4) → `9b77213e…b1f2ba` |
+| `src/components/marketing/landing07-demo.tsx` | `2c876746c727ef533d05a4fcf86a135a9c76b2d50c4b27365e15732385b41a74` | identical |
+| `src/components/marketing/landing07-copy.ts` | `5a686a3061cb88215502d1eb98ea227fc4e0052b81f189d61c96d7ab6fb259a8` | identical |
+| `src/components/marketing/landing07.module.css` | `c3816f1bbaaef896456942f2e7cea156930e9c410dc89093c8d6337f885287ce` | identical |
+| `public/landing07/ribbon-reference-v2.png` | `2b0acc79dd59b22bf0fdc504a2286c0b2d65123323f9e187ed91f31f263af14f` | identical |
+| `public/landing07/mascot-reference-v2.png` | `ac3e12093be0c56345e553d0a43d821a627fb78cb83bd29af3f4b8d64ce2ffcf` | identical |
+| `public/landing07/bubble-reference-v2.png` | `bed026403c94af2ffe67d44416910713d5b12c511a0847ca44e49eeb5148132f` | identical |
+| `public/landing07/swap-sculpture.png` | `141465f1157e8947a61eb43ce5b7c832173db113883d6bad348baf59d0fd3278` | identical |
+| `public/landing07/transfer-sculpture.png` | `268496fb033fe319783e7ffda5417bf8a5fec9a364f7b190e91e6c3b7d5e64a9` | identical |
+| `public/landing07/strategy-sculpture.png` | `012891ec99dd89e1a25c5865ad5b64f24ae3ace1ae0e8337f0232d1b0ea4a292` | identical |
+| `public/landing07/clock.webp` | `dbaec3dc60229b75101f5cff2ee2ad11260c3be33aba794c2dd6d93d6648d396` | identical |
+| `public/landing07/ASSET_NOTES.md` | `9fb1e39120c8a2a5805afdf8bbb2ec037a47983f5afbfb694b23119c9be3f1bb` | identical |
 
-Because the approved design must be installed byte for byte and must not be recreated, nothing was approximated. Consequently there
-is **no** list of received hashes, no source-vs-integrated diff, no screenshots and no route change in this build. `PENDENCIA_HERO_F.md`
-could not be read; the hero "F" observation is carried forward only as the owner reported it, unaddressed by design.
+Paths are relative to `apps/reference-dapp/`.
+- `BRAND_REFERENCE/` (6 files) is byte-identical to the repository's current `public/brand/` files; nothing was copied.
+- `ROUTE_EXAMPLE/` was reconciled into the route (§3).
+- `VISUAL_REFERENCES/`, `PREVIEWS/` and `ISSUES/` were used for review only and are not served.
 
-### 2.1 Integration plan once the package is supplied (no design change)
+## 3. Route `/` and display font
 
-1. Unpack into an empty scratch directory; record `sha256sum` of every file and check it against `SHA256SUMS.txt`.
-2. Copy only `COPY_INTO_REPO/apps/reference-dapp/src/components/marketing/landing07-{page.tsx,demo.tsx,copy.ts,module.css}` and
-   `COPY_INTO_REPO/apps/reference-dapp/public/landing07/*`; re-hash them in the repository (expected: identical).
-3. `apps/reference-dapp/src/app/page.tsx`: render `Landing07Page` instead of the old `LandingPage`, reconciling `ROUTE_EXAMPLE/page.tsx`
-   with the current root layout (`app/layout.tsx`, `base.css`, `fonts.css`) and metadata. Any font the package needs is provisioned for
-   `/` only, never globally for `/app` or `/login`.
-4. Entry CTAs: PR #143 sends every landing "Launch" CTA to `/login`. `/login` already restores a valid session (onboarding when pending,
-   otherwise a safe `returnTo`, default `/app`) and offers *Explore the builder without an account*; `/app` stays open. If Caio's CTAs
-   point to `/app` (the snapshot predates PR #143), the only change is that destination, reported line by line; classes, markup, text
-   and motion stay untouched. `/docs` and every other link stay as delivered.
-5. Old-landing browser specs that assert the previous layout (`landing-structure`, `ux-ui-002-landing`, `earth-footer`,
-   `brand-motion-001`, `beta-ui`, `native-docs`) are retargeted to Landing 07 without editing the landing.
-6. Desktop and mobile screenshots compared with `VISUAL_REFERENCES` / `PREVIEWS`; `/` → `/login` → onboarding → `/app`, returning
-   session, direct `/app` and `/docs` exercised on the MOCKED loopback harness (`playwright.auth-wallets.config.ts`).
+`apps/reference-dapp/src/app/page.tsx` now renders `Landing07Page`.
+- **Metadata:** the package route's metadata, verbatim. The previous route took its metadata from the old landing's copy module; the
+  root layout's metadata for other routes is unchanged.
+- **Display font:**
+  - The package declares `Anton` through `next/font/google`. FloFi deliberately does not fetch Google fonts at build time
+    (`public/fonts/README.md`: a Next.js 16.4.1 URL-parser failure, and builds must not depend on Google CSS).
+  - The three WOFF2 payloads that `next/font/google` generated for the package route were captured from a local production build of
+    that exact route and vendored under `public/fonts/landing07/`, with `Anton.OFL.txt` (OFL-1.1), `manifest.json` and `README.md`.
+  - `src/app/landing07-fonts.css` keeps the generated faces, Unicode ranges and `Anton Fallback` metrics unchanged.
+  - The route preloads the Latin file, as `next/font` did, and wraps the page in `.landing07-fonts`, which sets
+    `--font-landing-display`.
+  - Only `/` imports this CSS. `/app`, `/login` and `/docs` keep Outfit and load no Anton (browser-tested).
+  - A unit test (`src/config/landing07-fonts.test.ts`) pins the digests.
+  - The landing's `--font-outfit` already comes from the root layout's `.flofi-fonts`.
+- **Fidelity:** `/` built from the package's own `ROUTE_EXAMPLE/page.tsx` was compared with the integrated route over 16 captures:
+  PT and EN; 1440, 1662, 800 and 390 px; full page with reduced motion, and the first viewport with motion. Result: **0 differing
+  pixels** (`BUILD-FLOFI-LANDING07-README-001-EVIDENCE/pixel-comparison.json`).
 
-## 3. Files changed
+## 4. Entry links → sign-in (the only change inside the package files)
 
-| File | Change |
+PR #143 sends every landing "Launch" link to `/login`:
+- A valid session continues to `/app`, or to `/onboarding` if the social account still needs it.
+- `/login` validates `returnTo` (default `/app`).
+- It offers *Explore the builder without an account*; `/app` stays open.
+
+Caio's integration note anticipated this case: "adapt the CTAs in `landing07-page.tsx`". No wrapper or redirect was used: the alternative was intercepting clicks or redirecting `/app`. Either would have made links lie about their destination or changed the `/app` access policy.
+
+Word-level diff against the package, `landing07-page.tsx`. Only `href="/app"` → `href="/login"`; every class, attribute, text and style is unchanged.
+
+| Line | Link (PT / EN) |
 | --- | --- |
-| `README.md` | Rewritten (§4). |
-| `docs/builds/BUILD-FLOFI-LANDING07-README-001.md` | This record. |
+| 90 | header button *Começar com FloFi / Abrir FloFi* — *Start with FloFi / Open FloFi* |
+| 101 | hero primary *Começar com FloFi* — *Start with FloFi* |
+| 111 | demo *Explorar o produto* — *Explore the product* |
+| 116 | possibilities rail *ABRIR FLOFI* — *LAUNCH APP* |
+| 119 | swap card arrow (*Explorar trocas no FloFi*) |
+| 120 | transfer card arrow (*Explorar transferências no FloFi*) |
+| 121 | strategies card arrow (*Explorar estratégias no FloFi*) |
+| 135 | closing *Abrir o FloFi* — *Open FloFi* |
 
-No application code, test, asset, dependency, workflow, migration, provider, fee or security control changed.
+The following are unchanged:
+- `/docs` (header and footer);
+- in-page anchors (`#main`, `#como-funciona`);
+- the owner contact `https://x.com/FloFi_xyz` (*Para empresas*, *Contato*).
 
-## 4. README
+Session, `returnTo`, onboarding, wallet proof and `/app` access were not modified.
+
+## 5. Tests changed (owner review)
+
+**New:**
+- `e2e/landing07.spec.ts`, in the CI `default-product` profile and the dedicated motion config. 15 tests:
+  - structure, the 8 `/login` links, Docs, anchors and the contact link;
+  - PT/EN with persistence, at 320–1920 px with no overflow;
+  - keyboard: skip link, language group, FAQ;
+  - reduced motion, and the illustrative demo with motion (plays in view, pause, resume, restart; app origin only);
+  - ribbon and section reveal on scroll;
+  - served bytes equal the package hashes, the font is local, and no Google font reference;
+  - `/` → `/login` → `/app` and `/docs`, and `/app`, `/login`, `/docs` without Anton.
+
+**Retargeted to Landing 07 without changing it** (assertions about the previous landing's content replaced; their other tests are
+untouched):
+- `brand-ux-001`: the landing/entry test, reduced motion, scroll, and the "no landing heading in `/app`" check.
+- `beta-ui`: the header CTA test. The yellow "Launch Beta FloFi" was the previous landing's; the `/app` Beta notice tests are unchanged.
+- `native-docs`: the landing-links test.
+- `auth-wallets`: entry from Landing 07's header link, plus a returning signed-in visitor entering from the landing → `/app`.
+
+**Retired** — kept in Git and listed with reasons in `playwright.config.ts` (`RETIRED_LANDING_SPECS`). Each covers previous-landing
+features that are no longer routed:
+- `ux-ui-002-landing`: community links, MCP card, conversation demo, mascot journey;
+- `landing-structure`: section layout;
+- `earth-footer`: Earth closing;
+- `brand-motion-001`: mascot motion;
+- `brand-visual-refinement`: infrastructure diagram;
+- `workflow-story`: three-phase story.
+
+**CI profile change (intentional):**
+- `scripts/guarded-release-browser.mjs` `default-product` and its mirror in `scripts/test_ci_optimization.py`:
+  `ux-ui-002-landing.spec.ts` → `landing07.spec.ts`.
+- `playwright.motion.config.ts` now matches `landing07.spec.ts`.
+
+**Not removed:** the previous landing's components (`components/marketing/page.tsx` and siblings) and their unit test stay in the
+repository, unrouted. Removing them is a separate decision.
+
+`docs/engineering/coverage.json` and `COVERAGE.md` map the new files and suites (agent guard: PASS).
+
+## 6. Validation (Node 24.21.0, pnpm 11.22.0, Chromium headless shell 1243, loopback PostgreSQL 16)
+
+| Check | Result |
+| --- | --- |
+| `pnpm check` (typecheck, lint, build, 11 schema exports, unit tests) | pass — 466 files, 5,856 tests, 2 pre-existing skips |
+| `governance_lite.py` + self-tests, `test_ci_*.py`, `agent_guard.py check` | pass (agent guard: 19 domains, 163 modules) |
+| `landing07.spec.ts` | 15/15 |
+| `brand-ux-001`, `beta-ui` (CI `default-product` members) | 15/15, 4/4 |
+| `native-docs` | 8/9. The failure is **pre-existing and unrelated**: `public/docs/api-reference.json` still lists testnets while `docs/developer/openapi.json` is mainnet-only. Neither file is touched by this branch, and the docs suite is not in CI. |
+| `playwright.auth-wallets.config.ts` (MOCKED loopback Google/Apple/Turnkey, loopback DB) | 8/8, starting from Landing 07; includes onboarding, persistence and the returning-session entry |
+| Pixel comparison, package route vs integrated route | 0 differing pixels in 16 captures |
+
+- The browser specs ran under a local app-only Playwright config: the same app server and settings, without the Mode A fork server,
+  because Foundry Anvil is not installed here. CI runs the full harness.
+- CircleCI certification and the full guarded browser suites were **not run here**.
+- MOCKED providers do not prove live Google, Apple or Turnkey behaviour; that remains PR #143's external gate.
+
+Screenshots and the side-by-side with Caio's `PREVIEWS/` are in `BUILD-FLOFI-LANDING07-README-001-EVIDENCE/`.
+
+## 7. README
 
 Language: English. Structure:
-
-1. Identity — logo, tagline from the product copy (*Many ways in. One clear path.*), official links, a real product screenshot
-   (`docs/builds/BUILD0-UX-001-EVIDENCE/build0-desktop-dark-1240.png`, Build 0 with the *FloFi Beta Mainnet* banner) and a one-line
-   real-funds beta notice.
+1. Identity — logo, tagline, official links, a real Build 0 screenshot and a one-line real-funds beta notice.
 2. What is FloFi — non-custodial multichain DeFi; chat (AI Copilot where enabled) and the optional visual builder; simulate, review,
    sign, track.
-3. Why people use it — user-value table.
-4. What you can do today — action × network table for the five mainnets, bridges (including EVM ↔ Solana), multi-step workflows, and
-   the honest evidence boundary.
+3. Why people use it.
+4. What you can do today — action × network for the five mainnets; bridges including EVM ↔ Solana; multi-step workflows; the
+   evidence boundary.
 5. How it works — sign in/connect → describe or build → review → authorize → track; the canvas is optional.
-6. Your account and wallets — PR #143 methods and embedded wallets, with their rollout state.
-7. Use FloFi where you already are — app, MCP, Telegram, WhatsApp with real availability.
+6. Your account and wallets — PR #143 methods and embedded wallets, with rollout state.
+7. Use FloFi where you already are — app, MCP, Telegram, WhatsApp, with real availability.
 8. Pricing — the 0.1% model versus what the code does today.
 9. FloFi for Developers — API, SDK, webhooks, MCP and their current limits.
 10. Security — principles; no audit claim.
-11. Status & evidence — built-but-per-deployment features and the roadmap.
-12. Documentation, local run for developers (`FloFi-xyz/FloFi`), contributing, license and the Gryloo note.
+11. Status & evidence — features built and switched on per deployment, and the roadmap.
+12. Documentation, local run (`FloFi-xyz/FloFi`), contributing, license and the Gryloo note.
 
-### 4.1 Sources of truth for each claim
+### 7.1 Sources of truth for each claim
 
 | README claim | Source |
 | --- | --- |
@@ -96,30 +191,56 @@ Language: English. Structure:
 | Social links | `src/components/marketing/social-links.tsx` (owner-supplied) |
 | Website and MCP URL | `src/platform/navigation.ts`; production MCP navigation result |
 
-Links to `flofi.xyz` and `github.com` could not be fetched over HTTP from this session (the network policy denies both hosts). The
-website and MCP URLs were confirmed through the production MCP server's own result; the repository URL through the GitHub API.
+`flofi.xyz` and `github.com` could not be fetched over HTTP from this session (network policy). The website and MCP URLs were confirmed
+through the production MCP server's own result; the repository URL through the GitHub API.
 
-## 5. Validation
+## 8. Items from the package, recorded and not changed
 
-Toolchain: Node 24.21.0, pnpm 11.22.0.
+**Package items:**
+- **Hero "F"** (`PENDENCIA_HERO_F.md`, `ISSUES/hero-F-topo-encoberto.png`): the top bar of the F is hidden behind the ribbon on
+  desktop. It is visible in the integration exactly as in Caio's preview. It is a visual decision for the owner and Caio, untouched
+  here.
+- **Illustrations:** `ASSET_NOTES.md` states that the ribbon, mascot, bubble and three sculptures were produced with an image tool
+  from approved references. They are installed byte-for-byte as delivered. Caio's `INTEGRACAO.md` asks for final rights and approval
+  review of these derived illustrations before publication.
+- **"Para empresas" / "Contato"** point to `https://x.com/FloFi_xyz`. Caio asks to confirm this destination before publication.
+- **Document language:**
+  - On first load `<html lang>` stays the root layout's (`en`) while the landing shows PT; it follows the landing after a switch.
+  - The landing root declares its own `lang`.
+  - After a reload with EN chosen, the tab title keeps the route metadata (PT).
+  - Same code as the package route; documented in `VALIDACAO_E_LIMITES.md`.
+- **Landing copy:**
+  - The FAQ and copy describe FloFi as structuring, reviewing and simulating flows, with wallet authorization for execution.
+  - The demo remains illustrative and is not connected to any engine, quote or wallet.
+  - Copy and claims were not edited.
 
-| Check | Result |
-| --- | --- |
-| `pnpm check` | pass — typecheck 16/16, lint, build 9/9, 11 schema exports, 465 test files · 5,855 tests passed · 2 pre-existing skips |
-| `python3 scripts/governance_lite.py` | pass |
-| `python3 scripts/test_governance_lite.py` | pass (19 tests) |
-| README relative links and images | all resolve |
-| Landing, login-flow and screenshot checks | **not run** — Landing 07 was not installed; the app is unchanged from PR #143, whose own browser evidence applies |
+**Outside the package, not changed by this build:**
+- **Stale repository links:** the docs header "Source code" link and the in-app Getting Started clone command point to
+  `alrimarleskovar/gryloo`.
+- **Stale status documents:**
+  - `docs/STATUS.md`: no entries for PRs #118–#141; "No FloFi fee exists yet" predates the recorded 0.1% obligation; matrix counts
+    51/9 vs the file's 52/8.
+  - `docs/deploy/TELEGRAM.md`: describes the allowlist as the default; the code defaults to public when enabled.
+  - The matrix row `bridge-evm-solana` says no such route exists.
+- **Published API contract:** `public/docs/api-reference.json` differs from `docs/developer/openapi.json` (§6).
+- **Missing policy:** the repository has no vulnerability-disclosure policy (`SECURITY.md`); the README does not invent one.
 
-## 6. Open items for the owner
+## 9. Files changed (relative to PR #143's head)
 
-- **Supply the Landing 07 package** (§2); integration then follows §2.1 in this same PR.
-- Hero "F" / ribbon crossing (`PENDENCIA_HERO_F.md`): pre-existing visual item of the package, left for the owner and Caio.
-- Live Google, Apple and Turnkey verification remains a PR #143 external gate; MOCKED provider tests do not prove it.
-- Outdated repository links outside this build's scope, not changed: the current landing footer
-  (`components/marketing/page.tsx`), the docs header "Source code" link (`components/docs/docs-shell.tsx`) and the in-app Getting
-  Started clone command (`components/docs/content.ts`) still point to `alrimarleskovar/gryloo`.
-- Stale status documents, not changed: `docs/STATUS.md` (no entries for PRs #118–#141; "No FloFi fee exists yet" predates the
-  recorded 0.1% obligation; matrix counts 51/9 vs the file's 52/8), `docs/deploy/TELEGRAM.md` (allowlist described as default; code
-  defaults to public when enabled), the matrix row `bridge-evm-solana` (says no route exists).
-- The repository has no vulnerability-disclosure policy (`SECURITY.md`); the README does not invent one.
+- **Landing:**
+  - `apps/reference-dapp/src/components/marketing/landing07-{page.tsx,demo.tsx,copy.ts,.module.css}`
+  - `apps/reference-dapp/public/landing07/*`
+- **Route and font:**
+  - `apps/reference-dapp/src/app/page.tsx`, `src/app/landing07-fonts.css`
+  - `public/fonts/landing07/*`
+  - `src/config/landing07-fonts.test.ts`
+- **Tests and CI:**
+  - `apps/reference-dapp/e2e/landing07.spec.ts`; `brand-ux-001`, `beta-ui`, `native-docs`, `auth-wallets` specs
+  - `playwright.config.ts`, `playwright.motion.config.ts`
+  - `scripts/guarded-release-browser.mjs`, `scripts/test_ci_optimization.py`
+  - `docs/engineering/coverage.json`, `COVERAGE.md`
+- **Docs:**
+  - `README.md`
+  - this record and `BUILD-FLOFI-LANDING07-README-001-EVIDENCE/`
+
+No dependency, lockfile, migration, provider, session, wallet, fee or execution code changed.
