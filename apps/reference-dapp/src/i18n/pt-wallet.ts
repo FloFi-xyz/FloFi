@@ -81,7 +81,18 @@ export const portugueseWallet: Readonly<Record<string, string>> = {
   'Transaction': 'Transação', 'Sign a transaction on {0}': 'Assinar uma transação na {0}', 'Sign a Solana transaction': 'Assinar uma transação Solana',
   'Sign a Solana Devnet transaction': 'Assinar uma transação na Solana Devnet',
   'Checking this request against your Review in FloFi…': 'Conferindo este pedido com a sua Revisão no FloFi…',
-  'Reviewed in FloFi': 'Revisado no FloFi', 'Matches your reviewed FloFi strategy': 'Corresponde à estratégia que você revisou no FloFi',
+  // Summary lines built by FloFi's server (server/managed-signing.ts)
+  'Network fee (estimate)': 'Taxa de rede (estimativa)', 'Approve': 'Aprovar', 'For': 'Para', 'Max network fee': 'Taxa de rede máxima',
+  'Max network fee (set by FloFi Wallet)': 'Taxa de rede máxima (definida pela FloFi Wallet)',
+  'Max network fee before the L1 data fee': 'Taxa de rede máxima antes da taxa de dados L1',
+  'Max network fee before the L1 data fee (set by FloFi Wallet)': 'Taxa de rede máxima antes da taxa de dados L1 (definida pela FloFi Wallet)',
+  'Maximum cost before the L1 data fee': 'Custo máximo antes da taxa de dados L1',
+  'The FloFi page that asked for this was closed, so FloFi Wallet signed nothing. Start again from FloFi.':
+    'A página do FloFi que pediu isto foi fechada, então a FloFi Wallet não assinou nada. Comece de novo pelo FloFi.',
+  'The FloFi page that asked for this was closed before it received the signature. FloFi Wallet discarded it and nothing was sent. Check the status in FloFi before you try again.':
+    'A página do FloFi que pediu isto foi fechada antes de receber a assinatura. A FloFi Wallet a descartou e nada foi enviado. Confira o status no FloFi antes de tentar de novo.',
+  'Prepared by FloFi': 'Preparado pelo FloFi', 'Exactly the transaction FloFi prepared for this strategy': 'Exatamente a transação que o FloFi preparou para esta estratégia',
+  'Check every line below before you sign.': 'Confira cada linha abaixo antes de assinar.',
   'Network': 'Rede', 'Real funds': 'Fundos reais', 'Review expires': 'A Revisão expira',
   'Signed. FloFi sends the transaction and records the result.': 'Assinado. O FloFi envia a transação e registra o resultado.',
   'What you are signing': 'O que você está assinando', 'From': 'De', 'To': 'Para', 'Sends': 'Envia', 'Action': 'Ação', 'Nonce': 'Nonce', 'Gas limit': 'Limite de gas',

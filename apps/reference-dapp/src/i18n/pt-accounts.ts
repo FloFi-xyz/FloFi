@@ -57,8 +57,8 @@ export const portugueseAccounts: Readonly<Record<string, string>> = {
   "Creating and importing wallets isn't available on this deployment yet.": 'Criar e importar carteiras ainda não está disponível nesta implantação.',
   'You can still connect MetaMask, Phantom or Solflare in Credentials and use them with FloFi.': 'Você ainda pode conectar MetaMask, Phantom ou Solflare em Credenciais e usá-las com o FloFi.',
   'You signed in with a wallet.': 'Você entrou com uma carteira.',
-  'Creating or importing wallets needs a Google, Apple or email sign-in, which also protects their recovery. Your connected wallet keeps working as it is.':
-    'Criar ou importar carteiras exige login com Google, Apple ou email, que também protege a recuperação delas. Sua carteira conectada continua funcionando como está.',
+  'FloFi Wallet needs a FloFi account created with Google, Apple or email, which also protects its recovery. A sign-in linked later cannot take that role. Your connected wallet keeps working as it is.':
+    'A FloFi Wallet precisa de uma conta FloFi criada com Google, Apple ou email, que também protege a recuperação. Um login vinculado depois não pode assumir esse papel. Sua carteira conectada continua funcionando como está.',
   'Confirm it’s you to add wallets': 'Confirme que é você para adicionar carteiras',
   'Your secure wallet session in this browser has ended. Sign in again to create or import wallets.':
     'Sua sessão segura de carteira neste navegador terminou. Entre novamente para criar ou importar carteiras.',

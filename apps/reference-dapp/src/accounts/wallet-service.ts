@@ -72,13 +72,15 @@ export function createWalletService(input: { readonly store: AccountStore; reado
     return await store.account(session.account.accountId) ?? fail('ACCOUNT_NOT_FOUND');
   }
   /**
-   * The unlock method of this account: the one its provider organization was created with or, before it has one, its primary (oldest)
-   * Google, Apple or email identity only. An identity linked later can never create the organization (security review finding 11).
+   * The unlock method of this account: the one its provider organization was created with or, before it has one, the identity the account
+   * was created with, when that is Google, Apple or email. An identity linked later can never create the organization (security review
+   * finding 11), including on an account created with a Web3 wallet: linking happens on the product origin, so a later link must not
+   * decide who controls the wallets FloFi Wallet creates.
    */
   async function methodsOf(accountId: string, organization: { login: ManagedLogin } | null): Promise<UnlockMethod[]> {
     if (organization) return [organization.login];
-    const primary = (await store.account(accountId))?.identities.find(identity => isManagedLogin(identity.kind));
-    return primary ? [primary.kind as ManagedLogin] : [];
+    const created = (await store.account(accountId))?.identities[0];
+    return created && isManagedLogin(created.kind) ? [created.kind as ManagedLogin] : [];
   }
   async function bind(accountId: string, login: ManagedLogin, locate: () => Promise<{ organization: string; user: string } | null>,
     create: () => Promise<{ organization: string; user: string }>) {

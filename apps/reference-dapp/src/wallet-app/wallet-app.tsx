@@ -78,10 +78,16 @@ export function WalletApp({ config }: { config: WalletAppConfig }) {
     const current = live.current.active;
     if (current && !live.current.signing) refuse(current.id, PRE_SIGNATURE_CODES.has(code) || code === REJECTED_CODE ? code : 'WALLET_SESSION_REQUIRED', code);
   };
-  const end = (code: string) => {
+  /**
+   * Ends this window's binding. `rebind`: the bound session was lost (expired, revoked, signed out elsewhere), so FloFi is told this page
+   * needs a new handoff (`ready`) and an open window recovers instead of refusing every later request. Never after the person's own Lock
+   * or a failed handoff (no loop): those stay ended until FloFi opens the window again from a click.
+   */
+  const end = (code: string, options: { readonly rebind?: boolean } = {}) => {
     live.current.bound = false;
     cancelActive(code);
     setEndedCode(code); setPhase('ended');
+    if (options.rebind && window.opener) postToOpener(window.opener, config.appOrigin, notice('ready'));
   };
   const accountChanged = async (next: WalletContext) => {
     const cancelled = live.current.active !== null && !live.current.signing;
@@ -114,7 +120,7 @@ export function WalletApp({ config }: { config: WalletAppConfig }) {
       const next = await walletApi.session(config.appOrigin);
       if (next.accountId !== state.context.accountId) await accountChanged(next);
       setContext(next);
-    } catch (cause) { if (cause instanceof WalletApiError && cause.status === 401) end('FLOFI_WALLET_LOCKED'); }
+    } catch (cause) { if (cause instanceof WalletApiError && cause.status === 401) end('FLOFI_WALLET_LOCKED', { rebind: true }); }
   };
 
   useEffect(() => {
@@ -127,7 +133,8 @@ export function WalletApp({ config }: { config: WalletAppConfig }) {
       if (state.answered.has(id) || state.active?.id === id) return;
       if (message.kind === 'invalid-request') { answer(errorResponse(id, 'FLOFI_WALLET_REQUEST_INVALID')); return; }
       if (state.active) { answer(errorResponse(id, 'FLOFI_WALLET_BUSY')); return; }
-      if (state.phase === 'ended') { answer(errorResponse(id, 'WALLET_SESSION_REQUIRED')); return; }
+      // While a new handoff is being redeemed the request waits for it (FloFi sends the handoff first, then the request).
+      if (state.phase === 'ended' && !state.redeeming) { answer(errorResponse(id, 'WALLET_SESSION_REQUIRED')); return; }
       setOutcome(null); setActive({ id, operation: message.request.request });
       postToOpener(window.opener, config.appOrigin, notice('busy'));
       try { window.focus(); } catch { /* the browser decides */ }

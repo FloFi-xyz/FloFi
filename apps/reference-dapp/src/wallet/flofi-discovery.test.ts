@@ -2,7 +2,7 @@
 // BUILD-FLOFI-AUTH-WALLETS-001: FloFi Wallet joins EVM discovery directly: selectable next to announced and legacy wallets, never the passive
 // provider, never impersonated by an announcement, and its removal ends its selection.
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { chooseEvmWallet, chosenEvmProvider, evmWalletEntries, FLOFI_WALLET_RDNS, injected, registerManagedEvmProvider } from './evm-discovery';
+import { chooseEvmWallet, chosenEvmProvider, evmWalletEntries, floFiWalletKey, injected, registerManagedEvmProvider } from './evm-discovery';
 import { updateWalletPreference } from './wallet-registry';
 
 const ICON = 'data:image/svg+xml;base64,PHN2Zy8+', ADDRESS = '0x' + 'ab'.repeat(20);
@@ -24,7 +24,7 @@ describe('FloFi Wallet in EVM discovery', () => {
     registerManagedEvmProvider(floFi, { address: ADDRESS, name: 'FloFi Wallet' });
     expect(evmWalletEntries().map(entry => entry.choice)).toEqual([
       { id: 'evm:injected#0', ecosystem: 'evm', key: 'injected', name: 'Browser wallet', icon: null },
-      { id: `evm:flofi:${ADDRESS}`, ecosystem: 'evm', key: FLOFI_WALLET_RDNS, name: 'FloFi Wallet', icon: null }]);
+      { id: `evm:flofi:${ADDRESS}`, ecosystem: 'evm', key: floFiWalletKey(ADDRESS), name: 'FloFi Wallet', icon: null }]);
     expect(injected()).toBe(legacy);
     expect(floFi.request).not.toHaveBeenCalled();
   });
@@ -32,7 +32,7 @@ describe('FloFi Wallet in EVM discovery', () => {
     const target = browser(), rabby = provider(), floFi = provider();
     target.addEventListener('eip6963:requestProvider', () => announce(target, rabby, { rdns: 'io.rabby', uuid: 'r', name: 'Rabby Wallet' }));
     registerManagedEvmProvider(floFi, { address: ADDRESS, name: 'FloFi Wallet' });
-    expect(evmWalletEntries().map(entry => entry.choice.key)).toEqual(['io.rabby', FLOFI_WALLET_RDNS]);
+    expect(evmWalletEntries().map(entry => entry.choice.key)).toEqual(['io.rabby', floFiWalletKey(ADDRESS)]);
     expect(injected()).toBe(rabby);
   });
   it('ignores an announcement claiming FloFi Wallet’s rdns', () => {

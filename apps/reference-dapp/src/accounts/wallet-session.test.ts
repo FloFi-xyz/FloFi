@@ -77,3 +77,16 @@ describe('reopening FloFi Wallet', () => {
     expect(redeemedWalletSession(account, newWalletSession(account, now), later(60)).unlockedKey).toBeNull();
   });
 });
+
+describe('handoff spellings', () => {
+  it('accepts only the canonical token, so one handoff has one single-use digest', () => {
+    const token = sealWalletHandoff(env, account, 'wallet.flofi.xyz', now);
+    const digest = readWalletHandoff(env, token, now, 'wallet.flofi.xyz')?.digest;
+    expect(digest).toMatch(/^[0-9a-f]{64}$/);
+    for (const variant of [`${token}=`, `${token}==`, `${token} `, `${token}\n`, `${token}!`]) expect(readWalletHandoff(env, variant, now, 'wallet.flofi.xyz')).toBeNull();
+    // A spare-bit variant of the last MAC character decodes to the same bytes and is refused too.
+    const last = token.at(-1)!, alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+    const sibling = alphabet[(alphabet.indexOf(last) & ~3) | ((alphabet.indexOf(last) + 1) & 3)]!;
+    expect(readWalletHandoff(env, token.slice(0, -1) + sibling, now, 'wallet.flofi.xyz')).toBeNull();
+  });
+});

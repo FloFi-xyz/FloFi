@@ -31,6 +31,9 @@ describe('account wallet records', () => {
     expect(parseAccountWalletId('evm:0x' + 'a'.repeat(40) + ':x')).toBeNull();
     expect(normalizeEmail('  Ana@Example.COM ')).toBe('ana@example.com');
     expect(normalizeEmail('ana@example')).toBeNull();
+    // A sign-in address can never name a wallet-unlock challenge key (or any other prefixed key).
+    expect(normalizeEmail('wallet-unlock:ana@example.com')).toBeNull();
+    expect(normalizeEmail('ana@exa:mple.com')).toBeNull();
     expect(normalizeEmail('a\nb@example.com')).toBeNull();
   });
 });

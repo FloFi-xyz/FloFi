@@ -74,6 +74,16 @@ export async function claimAttempt(store: Pick<AccountStore, 'consumeProof'>, pu
 }
 
 /**
+ * Gives an attempt's signature claim back, only when the provider refused the signing request without creating any activity (it
+ * answered 400, 401 or 403 to the submit): nothing was signed, so the person may sign that reviewed attempt again. An unclear outcome
+ * (no answer, 5xx, success) never releases it.
+ */
+export const RELEASABLE_PROVIDER_STATUSES: ReadonlySet<number> = new Set([400, 401, 403]);
+export async function releaseAttempt(store: Pick<AccountStore, 'releaseProof'>, attempt: string): Promise<void> {
+  await store.releaseProof(claimDigest('signature', attempt));
+}
+
+/**
  * FloFi Wallet's gate for one wallet session (wallet origin only). `claim: false` (sign-context) only resolves and summarizes; `claim: true`
  * (the relay, right before forwarding a signing activity) also consumes the attempt's single signature, so a second signature for the same
  * reviewed attempt is refused (`FLOFI_WALLET_ALREADY_SIGNED`) whoever asks for it.

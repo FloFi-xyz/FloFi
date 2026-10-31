@@ -2,7 +2,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { approvalFrameAncestors } from './server/embedded-approval';
 import { accountPagePolicy, cspNonce, isAccountPage } from './accounts/account-csp';
-import { isWalletAsset, isWalletPath, walletOrigin, walletPagePolicy } from './accounts/wallet-origin';
+import { isWalletAsset, isWalletPath, reservedWalletHosts, walletOrigin, walletPagePolicy } from './accounts/wallet-origin';
 
 const notFound = () => new NextResponse('Not found', { status: 404, headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' } });
 /** A response carrying a fresh nonce policy, and the request headers Next.js reads to put the nonce on its own scripts. */
@@ -23,7 +23,9 @@ export function proxy(request: NextRequest) {
   // BUILD-FLOFI-AUTH-WALLETS-001: FloFi Wallet. Its host serves only its own pages, route handlers and static assets (no product page,
   // no server action), and its paths do not exist on the product host. See src/accounts/wallet-origin.ts.
   const wallet = walletOrigin(process.env), host = (request.headers.get('host') ?? '').toLowerCase();
-  if (wallet && host === wallet.host.toLowerCase()) {
+  // Fail closed: the wallet host is wallet-only even when its configuration is invalid (its pages then say FloFi Wallet is unavailable and
+  // its routes answer MANAGED_WALLETS_NOT_CONFIGURED); it never falls through to the product.
+  if (wallet ? host === wallet.host.toLowerCase() : reservedWalletHosts(process.env).has(host)) {
     if (request.headers.has('next-action')) return notFound();
     if (isWalletAsset(pathname) || pathname.startsWith('/api/wallet')) {
       const response = NextResponse.next();

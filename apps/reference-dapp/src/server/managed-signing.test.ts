@@ -109,6 +109,11 @@ describe('catalog swap attempts', () => {
     expect(await resolveManagedSigning(context, evm({ ...signedSwap, nonce: 8n }), deps(swapRun()))).toEqual({ ok: false, code: 'FLOFI_WALLET_NONCE_MISMATCH' });
     expect(await resolveManagedSigning(context, evm({ ...signedSwap, maxFeePerGas: 1_000_000_000n * FILLED_FEE_BOUND + 1n }), deps(swapRun())))
       .toEqual({ ok: false, code: 'FLOFI_WALLET_FEE_TOO_HIGH' });
+    // At broadcast the filled values were bounded when the relay granted the signature: a newer fee or nonce read cannot drop it, while
+    // every bound field is still compared.
+    const later = { ...deps(swapRun()), filledBoundedAtSigning: true, fees: async () => { throw new Error('not read'); }, pendingNonce: async () => { throw new Error('not read'); } };
+    expect((await resolveManagedSigning(context, evm({ ...signedSwap, maxFeePerGas: 1_000_000_000n * FILLED_FEE_BOUND + 1n }), later)).ok).toBe(true);
+    expect(await resolveManagedSigning(context, evm({ ...signedSwap, value: 1n }), later)).toEqual({ ok: false, code: 'FLOFI_WALLET_NO_MATCHING_REVIEW' });
     expect(await resolveManagedSigning(context, evm(signedSwap), deps(swapRun(), { pendingNonce: undefined }))).toEqual({ ok: false, code: 'FLOFI_WALLET_NETWORK_READ_FAILED' });
     expect(await resolveManagedSigning(context, evm(signedSwap), deps(swapRun(), { fees: async () => { throw new Error('down'); } }))).toEqual({ ok: false, code: 'FLOFI_WALLET_NETWORK_READ_FAILED' });
   });

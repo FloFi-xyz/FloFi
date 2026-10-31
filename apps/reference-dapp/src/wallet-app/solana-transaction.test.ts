@@ -103,6 +103,12 @@ describe('what the person sees', () => {
     expect(review.maxFeeLamports).toBe(5_000n + 200_000n);
     expect(review.durableNonce).toBe(false);
   });
+  it('reads compute limits of 2^31 and more as unsigned, and bounds the fee with the runtime’s 1.4M clamp', () => {
+    const huge: SolanaInstruction = { ...limit, data: Uint8Array.from([2, ...le(0xffff_ffffn, 4)]) };
+    const review = reviewSolanaTransaction(parseUnsignedTransaction(unsigned(message([huge, price, transfer])), OWNER));
+    expect(review.instructions[0]).toEqual({ kind: 'compute-unit-limit', units: 0xffff_ffff });
+    expect(review.maxFeeLamports).toBe(5_000n + 1_400_000n);
+  });
   it('flags a durable nonce, names lookup-table accounts honestly and leaves unknown programs undecoded', () => {
     const nonce: SolanaInstruction = { programId: SYSTEM_PROGRAM, accounts: [meta(OTHER), meta(key(15), false, false), meta(OWNER, true, false)], data: Uint8Array.from([4, 0, 0, 0]) };
     const unknown: SolanaInstruction = { programId: key(16), accounts: [meta(FAR)], data: Uint8Array.from([1, 2, 3]) };

@@ -12,7 +12,7 @@ import { floFiEvmBroadcast, floFiEvmFees, floFiEvmPendingNonce, floFiWalletHando
 import { configureFloFiWallet, markFloFiAccount, requestThroughFloFiWallet } from './flofi-wallet-channel';
 import { createFloFiEvmProvider, retireFloFiEvmProvider, type FloFiEvmDeps, type FloFiEvmProvider } from './flofi-evm-provider';
 import { createFloFiSolanaWallet, FLOFI_WALLET_NAME, retireFloFiSolanaWallet, type FloFiSolanaWallet } from './flofi-solana-wallet';
-import { FLOFI_WALLET_RDNS, registerManagedEvmProvider } from './evm-discovery';
+import { isFloFiWalletKey, registerManagedEvmProvider } from './evm-discovery';
 import { registerSolanaWallet } from './solana-wallet';
 import type { WalletChoice } from './wallet-registry';
 
@@ -56,5 +56,5 @@ export function syncFloFiWallets(options: { readonly force?: boolean } = {}): Pr
 }
 /** Whether a selector choice is one of FloFi Wallet's own entries. */
 export function isFloFiWalletChoice(choice: Pick<WalletChoice, 'ecosystem' | 'key'>): boolean {
-  return choice.ecosystem === 'evm' ? choice.key === FLOFI_WALLET_RDNS : [...solana.values()].some(entry => entry.wallet.name === choice.key);
+  return choice.ecosystem === 'evm' ? isFloFiWalletKey(choice.key) : [...solana.values()].some(entry => entry.wallet.name === choice.key);
 }

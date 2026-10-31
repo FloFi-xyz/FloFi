@@ -67,7 +67,7 @@ describe('FloFi Wallet screens', () => {
     const tx = { from: EVM, to: SPENDER, value: '0x0', data: '0x', chainId: '0x2105', nonce: '0x1', gas: '0x5208', maxFeePerGas: '0x10', maxPriorityFeePerGas: '0x1' };
     const html = renderToStaticMarkup(<EvmTransactionRequest env={env()} address={EVM} tx={tx} signing={{ flow: 'base-swap', runId: `bas-${'c'.repeat(24)}` }}/>);
     expect(text(html)).toContain('Checking this request against your Review in FloFi…');
-    expect(text(html)).not.toContain('Matches your reviewed FloFi strategy');
+    expect(text(html)).not.toContain('Exactly the transaction FloFi prepared for this strategy');
     expect(html).toMatch(/disabled="" aria-describedby="req_12345678-arming">Sign</);
     // No binding, or a foreign signer: nothing is rendered (the request is refused when it mounts).
     expect(renderToStaticMarkup(<EvmTransactionRequest env={env()} address={EVM} tx={tx} signing={undefined}/>)).toBe('');

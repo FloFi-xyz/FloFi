@@ -175,6 +175,24 @@ describe('FloFi Wallet Google/Apple unlock and organization binding', () => {
   });
 });
 
+describe('FloFi Wallet root on a wallet-first account', () => {
+  it('never lets a Google, Apple or email identity linked later become the root of an account created with a Web3 wallet', async () => {
+    const created = await store().signIn({ kind: 'eip155', subject: '0x' + 'b'.repeat(40), label: null }, clock);
+    clock = new Date(clock.getTime() + 60_000);
+    const ecdh = createECDH('prime256v1'); ecdh.generateKeys();
+    const started = await accounts().startEmail('linked@example.com', ecdh.getPublicKey('hex', 'compressed'));
+    const bundle = await encryptOtpCodeToBundle(E2E_SIGN_IN_CODE, started.targetBundle, ecdh.getPublicKey('hex', 'compressed'), emulator.otpSignerPublicKey);
+    const fresh = { ...created, authenticatedAt: Math.floor(clock.getTime() / 1000) };
+    await t.db.query('UPDATE flofi_account_sessions SET authenticated_at=to_timestamp($3) WHERE tenant_id=$1 AND session_id=$2', ['default', created.sessionId, fresh.authenticatedAt]);
+    await accounts().completeEmail({ challengeId: started.challengeId, intent: 'link', returnTo: '/app' }, bundle, fresh);
+    expect((await store().account(created.accountId))!.identities.map(identity => identity.kind)).toEqual(['eip155', 'email']);
+    const session = newWalletSession(fresh, clock);
+    expect((await wallets().context(session)).methods).toEqual([]);
+    await expect(wallets().startEmailUnlock(session, walletKey().public)).rejects.toThrow('WALLET_UNLOCK_METHOD_UNAVAILABLE');
+    expect((await store().account(created.accountId))!.organization).toBeNull();
+  });
+});
+
 describe('FloFi Wallet export authorization', () => {
   it('needs an unlock in the last 5 minutes and a managed wallet saved to this account', async () => {
     const ana = await emailAccount('ana@example.com'), session = newWalletSession(ana, clock), unlock = await emailUnlock(session);

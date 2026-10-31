@@ -167,7 +167,10 @@ export type DecodedInstruction =
   | { readonly kind: 'compute-unit-price'; readonly microLamports: bigint }
   | { readonly kind: 'other'; readonly program: string; readonly accounts: number; readonly dataBytes: number };
 
-const u32 = (data: Uint8Array, at: number) => data[at]! | (data[at + 1]! << 8) | (data[at + 2]! << 16) | (data[at + 3]! * 0x1000000);
+/** The most compute units a transaction can be charged for (larger limits are clamped by the runtime). */
+export const MAX_COMPUTE_UNITS = 1_400_000;
+/** Little-endian unsigned 32-bit (`| ` alone would turn values of 2^31 and more negative). */
+const u32 = (data: Uint8Array, at: number) => ((data[at]! | (data[at + 1]! << 8) | (data[at + 2]! << 16)) >>> 0) + data[at + 3]! * 0x1000000;
 const u64 = (data: Uint8Array, at: number) => { let value = 0n; for (let i = 7; i >= 0; i--) value = (value << 8n) | BigInt(data[at + i]!); return value; };
 const U64_MAX = (1n << 64n) - 1n;
 
@@ -222,7 +225,9 @@ export function reviewSolanaTransaction(parsed: ParsedSolanaTransaction): Solana
   for (const ix of parsed.message.instructions) { const program = parsed.message.staticKeys[ix.programIdIndex]!; if (!programs.includes(program)) programs.push(program); }
   const limit = instructions.find(ix => ix.kind === 'compute-unit-limit'), price = instructions.find(ix => ix.kind === 'compute-unit-price');
   const base = 5_000n * BigInt(parsed.wire.signatures.length);
-  const priority = limit?.kind === 'compute-unit-limit' && price?.kind === 'compute-unit-price' ? (BigInt(limit.units) * price.microLamports + 999_999n) / 1_000_000n : null;
+  // The runtime clamps a larger limit to 1,400,000 compute units and charges the priority fee on the clamped value.
+  const priority = limit?.kind === 'compute-unit-limit' && price?.kind === 'compute-unit-price'
+    ? (BigInt(Math.min(limit.units, MAX_COMPUTE_UNITS)) * price.microLamports + 999_999n) / 1_000_000n : null;
   return { feePayer: parsed.feePayer, signatures: parsed.wire.signatures.length, programs: programs.map(address => ({ address, name: programName(address) })), instructions,
     // A durable nonce makes the transaction valid until the nonce advances, not for about a minute like a blockhash.
     durableNonce: instructions[0]?.kind === 'advance-nonce', lookupTables: parsed.message.lookups.length,

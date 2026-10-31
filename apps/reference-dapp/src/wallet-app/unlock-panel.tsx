@@ -78,6 +78,7 @@ export function UnlockPanel({ config, context, onUnlocked, title, reason }: { co
   function startOidc(chosen: 'google' | 'apple') {
     setError(null);
     // Opened synchronously inside the click; the provider's URL is set once the server answers.
+    const before = context.unlockedAt ?? 0;
     const child = window.open('about:blank', `flofi-wallet-signin-${crypto.randomUUID()}`, 'popup,width=480,height=720');
     if (!child) { setError('FLOFI_WALLET_SIGN_IN_WINDOW_BLOCKED'); return; }
     try { child.opener = null; } catch { /* already cut */ }
@@ -89,10 +90,13 @@ export function UnlockPanel({ config, context, onUnlocked, title, reason }: { co
         const key = await walletPublicKey(), url = await walletApi.oidcStart(chosen, key);
         if (controller.signal.aborted) return;
         child.location.replace(url);
-        const result = await waitForUnlock({ check: async () => (await walletApi.session(config.appOrigin)).unlocked, subscribe: subscribeBroadcast, signal: controller.signal });
+        // Only a new unlock for this window's key counts: the session may already read "unlocked" (an older unlock, before an export's
+        // fresh one), and an error notice must never turn into success because of that older state.
+        const fresh = (session: WalletContext) => session.unlocked && session.unlockedKey === key && (session.unlockedAt ?? 0) > before;
+        const result = await waitForUnlock({ check: async () => fresh(await walletApi.session(config.appOrigin)), subscribe: subscribeBroadcast, signal: controller.signal });
         if (!result.ok) throw new Error(result.code);
         const unlocked = await walletApi.session(config.appOrigin);
-        if (!unlocked.unlocked) throw new Error('OIDC_SIGN_IN_FAILED');
+        if (!fresh(unlocked)) throw new Error('OIDC_SIGN_IN_FAILED');
         oidc.current = null;
         onUnlocked({ context: unlocked, until: unlocked.unlockedUntil, key });
       } catch (cause) {

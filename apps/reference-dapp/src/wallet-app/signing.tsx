@@ -16,7 +16,7 @@ import { AccountIcon } from '../components/account/account-icons';
 import { useLocale } from '../i18n/locale';
 import { PRE_SIGNATURE_CODES, REJECTED_CODE, type SigningSummary } from '../wallet/flofi-signing';
 import { bytesToHex, formatUnits, reviewEvmTransaction, unsignedEip1559, verifySignedEip1559, type EvmCall, type EvmReview } from './evm-transaction';
-import type { EvmTransaction, SigningBinding, SolanaWalletChain } from './protocol';
+import type { EvmTransaction, SigningBinding, SolanaWalletChain, WalletResult } from './protocol';
 import { signEvmTransaction, signSignInMessage, signSolanaMessage, WalletSigningError } from './provider-client';
 import { managedWallet, RequestHeading, SignControls, type RequestEnv } from './request-parts';
 import { parseFloFiSignIn } from './sign-in-message';
@@ -41,6 +41,13 @@ function refuseBeforeSigning(env: RequestEnv, code: string, fallback: string) {
   if (code === 'FLOFI_WALLET_ALREADY_SIGNED') { env.refuse(code, code); return; }
   env.refuse(PRE_SIGNATURE_CODES.has(code) || code === REJECTED_CODE ? code : fallback, code);
 }
+/** The FloFi page that asked is gone: nothing could receive a signature, so nothing is signed (or announced as sent). */
+const openerGone = () => { try { return !window.opener || (window.opener as Window).closed; } catch { return true; } };
+/** Delivers a signature only while the FloFi page that asked can still receive it; otherwise says honestly that it was discarded. */
+function deliver(env: RequestEnv, result: WalletResult, text: string) {
+  if (openerGone()) env.refuse('FLOFI_WALLET_SIGNATURE_UNKNOWN', 'FLOFI_WALLET_OPENER_CLOSED_AFTER_SIGNING');
+  else env.succeed(result, text);
+}
 /** The one way a signing attempt ends badly: retry after an unlock, a refusal proven before signing, or unknown. */
 function signingFailed(env: RequestEnv, cause: unknown, retry: (code: string) => void) {
   env.setSigning(false);
@@ -56,7 +63,10 @@ function signingFailed(env: RequestEnv, cause: unknown, retry: (code: string) =>
 export function SignMessageRequest({ env, ecosystem, address, message }: { env: RequestEnv; ecosystem: 'evm' | 'solana'; address: string; message: string }) {
   const { t } = useLocale();
   const app = useMemo(() => ({ host: env.appHost, origin: env.config.appOrigin }), [env.appHost, env.config.appOrigin]);
-  const wallet = managedWallet(env.context, ecosystem, address), parsed = parseFloFiSignIn(message, ecosystem, address, app);
+  // Parsed once, when the request arrives: if the message expires while it is on screen the card stays (with Cancel) and the click
+  // re-checks it and refuses, instead of the request vanishing with no answer to FloFi.
+  const [parsed] = useState(() => parseFloFiSignIn(message, ecosystem, address, app));
+  const wallet = managedWallet(env.context, ecosystem, address);
   const [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null);
   useEffect(() => {
     if (!wallet) env.refuse('SIGNER_NOT_MANAGED');
@@ -67,10 +77,11 @@ export function SignMessageRequest({ env, ecosystem, address, message }: { env: 
     const organization = env.context.organization;
     // Re-checked at the click: the message may have expired while it was on screen.
     if (!organization || !parseFloFiSignIn(message, ecosystem, address, app)) { env.refuse('FLOFI_WALLET_MESSAGE_UNSUPPORTED'); return; }
+    if (openerGone()) { env.refuse('FLOFI_WALLET_REJECTED', 'FLOFI_WALLET_OPENER_CLOSED'); return; }
     setBusy(true); setError(null); env.setSigning(true);
     try {
       const signature = await signSignInMessage(organization.organizationId, wallet!.address, ecosystem, message);
-      env.succeed({ signature: ecosystem === 'evm' ? `0x${signature}` : signature }, t('Signed in to FloFi with {0}.', wallet!.label));
+      deliver(env, { signature: ecosystem === 'evm' ? `0x${signature}` : signature }, t('Signed in to FloFi with {0}.', wallet!.label));
     } catch (cause) { signingFailed(env, cause, setError); }
     finally { setBusy(false); }
   }
@@ -112,11 +123,13 @@ function useReviewSummary(env: RequestEnv, binding: SigningBinding | undefined, 
 }
 function SummaryCard({ summary }: { summary: SigningSummary }) {
   const { t } = useLocale();
-  return <div className={styles.match} role="group" aria-label={t('Reviewed in FloFi')}>
-    <AccountIcon name="check" size={18}/>
+  // What the server verified, and no more: these exact bytes are the ones FloFi prepared for this run. It cannot prove who reviewed it,
+  // so the person is asked to check the lines below here, where the product page cannot reach.
+  return <div className={styles.match} role="group" aria-label={t('Prepared by FloFi')}>
+    <AccountIcon name="shield" size={18}/>
     <div className={styles.matchBody}>
-      <strong>{t('Matches your reviewed FloFi strategy')}</strong>
-      <span>{summary.action}</span>
+      <strong>{t('Exactly the transaction FloFi prepared for this strategy')}</strong>
+      <span>{summary.action} · {t('Check every line below before you sign.')}</span>
       <dl className={styles.fields}>
         <dt>{t('Network')}</dt><dd>{summary.network} {summary.realFunds && <span className={`${styles.badge} ${styles.badgeReal}`}>{t('Real funds')}</span>}</dd>
         {summary.lines.map((line, index) => <Row key={index} label={t(line.label)}>{line.value}</Row>)}
@@ -179,7 +192,7 @@ export function EvmDetails({ review }: { review: EvmReview }) {
       <Row label={t('Gas limit')} mono>{review.gas.toString()}</Row>
       <Row label={t('Max fee per gas')}>{formatUnits(review.maxFeePerGas, GWEI)} gwei</Row>
       <Row label={t('Max priority fee')}>{formatUnits(review.maxPriorityFeePerGas, GWEI)} gwei</Row>
-      <Row label={t('Maximum total cost')}><strong>{coin(review.maxTotalCost)}</strong></Row>
+      <Row label={t(review.chain.separateL1Fee ? 'Maximum cost before the L1 data fee' : 'Maximum total cost')}><strong>{coin(review.maxTotalCost)}</strong></Row>
     </dl>
     {review.call.kind === 'unknown' && <details className={styles.details}><summary>{t('Show call data')}</summary><pre className={styles.pre}>{review.data}</pre></details>}
   </div>;
@@ -197,12 +210,13 @@ export function EvmTransactionRequest({ env, address, tx, signing }: { env: Requ
     const organization = env.context.organization;
     if (!organization) { env.refuse('MANAGED_ORGANIZATION_MISSING'); return; }
     if (expired(summary)) { env.refuse('FLOFI_WALLET_REVIEW_EXPIRED'); return; }
+    if (openerGone()) { env.refuse('FLOFI_WALLET_REJECTED', 'FLOFI_WALLET_OPENER_CLOSED'); return; }
     setBusy(true); setError(null); env.setSigning(true);
     try {
       const signed = await signEvmTransaction(organization.organizationId, wallet!.address, bytesToHex(unsignedEip1559(tx)), signing!);
       let raw: string;
       try { raw = verifySignedEip1559(tx, signed); } catch { throw new WalletSigningError('FLOFI_WALLET_SIGNED_TRANSACTION_MISMATCH', true); }
-      env.succeed({ signedTransaction: raw }, t('Signed. FloFi sends the transaction and records the result.'));
+      deliver(env, { signedTransaction: raw }, t('Signed. FloFi sends the transaction and records the result.'));
     } catch (cause) { signingFailed(env, cause, setError); }
     finally { setBusy(false); }
   }
@@ -283,13 +297,14 @@ export function SolanaTransactionRequest({ env, address, chain, transaction, sig
     const organization = env.context.organization;
     if (!organization) { env.refuse('MANAGED_ORGANIZATION_MISSING'); return; }
     if (expired(summary)) { env.refuse('FLOFI_WALLET_REVIEW_EXPIRED'); return; }
+    if (openerGone()) { env.refuse('FLOFI_WALLET_REJECTED', 'FLOFI_WALLET_OPENER_CLOSED'); return; }
     setBusy(true); setError(null); env.setSigning(true);
     try {
       const signature = await signSolanaMessage(organization.organizationId, wallet!.address, messageHex(parsed!), signing!);
       const bytes = Uint8Array.from(signature.match(/../g)!, pair => parseInt(pair, 16));
       let signed: string;
       try { signed = withFeePayerSignature(transaction, bytes); } catch { throw new WalletSigningError('FLOFI_WALLET_SIGNED_TRANSACTION_MISMATCH', true); }
-      env.succeed({ signedTransaction: signed }, t('Signed. FloFi sends the transaction and records the result.'));
+      deliver(env, { signedTransaction: signed }, t('Signed. FloFi sends the transaction and records the result.'));
     } catch (cause) { signingFailed(env, cause, setError); }
     finally { setBusy(false); }
   }

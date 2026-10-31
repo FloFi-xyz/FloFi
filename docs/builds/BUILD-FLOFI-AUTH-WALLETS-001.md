@@ -533,7 +533,7 @@ A product page can be compromised (no `script-src` on `/app`), so FloFi Wallet n
     - Solana: the reviewed v0 message;
     - EVM: chain, from, to, value, data and gas, plus the nonce and fees wherever the attempt binds them.
 
-  The summary FloFi Wallet shows ("Matches your reviewed FloFi strategy": amounts, minimum received, recipient, fees, expiry) comes from
+  The summary FloFi Wallet shows ("Exactly the transaction FloFi prepared for this strategy": amounts, minimum received, recipient, fees, expiry) comes from
   the server's Review only, never from the request.
 - **One signature, one broadcast.**
   - The relay re-resolves the same binding (`x-flofi-signing`) right before forwarding and claims the attempt's single signature

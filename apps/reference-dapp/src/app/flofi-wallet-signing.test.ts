@@ -9,7 +9,7 @@ vi.mock('./solana-devnet-action', () => ({ solanaDevnetStatus: status.devnet }))
 vi.mock('./solana-transfer-action', () => ({ solanaTransferStatus: status.solanaTransfer }));
 vi.mock('./robinhood-transfer-action', () => ({ transferStatus: status.transfer }));
 vi.mock('./public-testnet-action', () => ({ publicStatus: status.swap }));
-const { claimAttempt, claimDigest, loadSigningRun, managedWallets, signingDeps, signingGate } = await import('./flofi-wallet-signing');
+const { claimAttempt, claimDigest, loadSigningRun, managedWallets, RELEASABLE_PROVIDER_STATUSES, releaseAttempt, signingDeps, signingGate } = await import('./flofi-wallet-signing');
 import type { AccountWallet } from '../accounts/account-model';
 import type { ManagedSigningDeps } from '../server/managed-signing';
 
@@ -61,6 +61,16 @@ describe('signing gate', () => {
     expect(store.consumeProof.mock.calls[0]![0]).toBe(claimDigest('signature', `base-mainnet-transfer:${transferRecord.id}:TRANSFER:7`));
     expect(await signingGate({ consumeProof: async () => { throw new Error('db'); } }, [], { claim: true }, deps)(context, request))
       .toEqual({ ok: false, code: 'FLOFI_WALLET_REVIEW_UNAVAILABLE' });
+  });
+  it('gives the claim back only when the provider provably created no activity, so the person can sign that attempt again', async () => {
+    const claimed = new Set<string>();
+    const store = { consumeProof: vi.fn(async (digest: string) => !claimed.has(digest) && Boolean(claimed.add(digest))),
+      releaseProof: vi.fn(async (digest: string) => { claimed.delete(digest); }) };
+    const gate = signingGate(store, [], { claim: true }, deps), first = await gate(context, request);
+    expect(first.ok).toBe(true);
+    await releaseAttempt(store, (first as { value: { attempt: string } }).value.attempt);
+    expect((await gate(context, request)).ok).toBe(true);
+    expect([...RELEASABLE_PROVIDER_STATUSES].sort()).toEqual([400, 401, 403]); // never 5xx or a missing answer: those may have signed
   });
   it('never claims a refused request', async () => {
     const store = { consumeProof: vi.fn(async () => true) };

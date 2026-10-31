@@ -131,6 +131,11 @@ export function createAccountStore(db: Database, tenantId: string) {
       return (await db.query('INSERT INTO flofi_account_used_proofs (tenant_id, digest, expires_at) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING',
         [tenantId, digest, expiresAt > now ? expiresAt : new Date(now.getTime() + 60_000)])).rowCount === 1;
     },
+    /** Releases a single-use proof again. Only for a claim whose use provably never happened (see `releaseAttempt`). */
+    async releaseProof(digest: string): Promise<void> {
+      if (!/^[0-9a-f]{64}$/.test(digest)) fail('ACCOUNT_PROOF_INVALID');
+      await db.query('DELETE FROM flofi_account_used_proofs WHERE tenant_id=$1 AND digest=$2', [tenantId, digest]);
+    },
     /**
      * Deletes the account and, through the foreign keys, its identities, sessions and saved wallet metadata. Wallets at the provider
      * and on-chain assets are untouched: FloFi cannot delete or move them.

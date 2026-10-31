@@ -54,7 +54,10 @@ function seal(kind: Kind, payload: object, key: Buffer): string {
 function unseal(kind: Kind, token: unknown, key: Buffer, now: Date, domain: string): Record<string, unknown> | null {
   if (typeof token !== 'string' || token.length > 4_096) return null;
   const [prefix, body, mac, ...rest] = token.split('.');
-  if (prefix !== kind || !body || !mac || rest.length) return null;
+  // Canonical encodings only: Node's base64url decoder ignores padding, whitespace, stray characters and spare bits, so a lenient read
+  // would accept many spellings of one token (and defeat any digest of the token string).
+  if (prefix !== kind || !body || !mac || rest.length || !/^[A-Za-z0-9_-]{43}$/.test(mac) || !/^[A-Za-z0-9_-]+$/.test(body)
+    || Buffer.from(mac, 'base64url').toString('base64url') !== mac || Buffer.from(body, 'base64url').toString('base64url') !== body) return null;
   const expected = createHmac('sha256', key).update(`${kind}.${body}`).digest(), supplied = Buffer.from(mac, 'base64url');
   if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) return null;
   let value: unknown;

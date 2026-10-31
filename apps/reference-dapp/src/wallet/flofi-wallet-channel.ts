@@ -172,6 +172,9 @@ export function openFloFiWallet(): void {
     watch();
   } else {
     try { state.popup!.focus(); } catch { /* focusing is best effort; the window stays open */ }
+    // A window that is locked, lost its session or never finished its handoff is bound again from this click: a fresh single-use
+    // handoff (the same account session keeps a live unlock; another one starts locked). Requests wait until it has been sent.
+    if (!state.ready || state.lock !== 'unlocked') { state.ready = false; state.generation += 1; void deliverHandoff(state.popup!, state.generation); }
   }
   const waiting = state.waiting;
   if (waiting && !state.pending) { state.waiting = null; start(waiting.request, waiting); }

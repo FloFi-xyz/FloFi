@@ -28,7 +28,10 @@ type Added = { readonly ecosystem: WalletEcosystem; readonly address: string; re
 /** Whether this account can use FloFi Wallet on this deployment. Unlocking happens in FloFi Wallet itself. */
 export function managedReadiness(state: AccountState | null): Readiness {
   if (!state?.account || !state.availability.managedWallets) return 'not-configured';
-  return state.account.identities.some(identity => isManagedLogin(identity.kind)) ? 'ready' : 'needs-identity';
+  // The identity the account was created with must be Google, Apple or email (wallet-service.ts methodsOf): a later link cannot become the
+  // root of FloFi Wallet.
+  const created = state.account.identities[0];
+  return created && isManagedLogin(created.kind) ? 'ready' : 'needs-identity';
 }
 
 /**
@@ -92,7 +95,7 @@ export function AddWallets({ state }: { state: AccountState }) {
       <p>{t('You can still connect MetaMask, Phantom or Solflare in Credentials and use them with FloFi.')}</p></div>}
     {readiness === 'ready' && !ready && <p className={styles.status} role="status">{t('Connecting to FloFi Wallet…')}</p>}
     {readiness === 'needs-identity' && <div className={styles.banner} role="status"><strong>{t('You signed in with a wallet.')}</strong>
-      <p>{t('Creating or importing wallets needs a Google, Apple or email sign-in, which also protects their recovery. Your connected wallet keeps working as it is.')}</p></div>}
+      <p>{t('FloFi Wallet needs a FloFi account created with Google, Apple or email, which also protects its recovery. A sign-in linked later cannot take that role. Your connected wallet keeps working as it is.')}</p></div>}
     <section className={`${styles.ecosystem} ${styles.ecosystemEvm}`} aria-label="EVM">
       <div className={styles.ecosystemTab}><img src="/brand/crypto/ethereum.svg" alt=""/><span>EVM</span></div>
       <div className={styles.tiles}>{tile('evm', 'create')}{tile('evm', 'import')}</div>

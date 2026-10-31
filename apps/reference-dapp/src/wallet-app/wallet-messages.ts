@@ -12,6 +12,8 @@ export const WALLET_MESSAGES: Readonly<Record<string, string>> = Object.freeze({
   FLOFI_WALLET_SIGNED_TRANSACTION_MISMATCH: 'The wallet provider returned a different transaction from the one you approved. FloFi Wallet discarded it and sent nothing.',
   FLOFI_WALLET_UNLOCK_TIMEOUT: 'The sign-in did not finish within 3 minutes. Nothing was unlocked. Try again.',
   FLOFI_WALLET_UNLOCK_INVALID: 'FloFi Wallet could not safely finish unlocking. Nothing was unlocked. Start again.',
+  FLOFI_WALLET_OPENER_CLOSED: 'The FloFi page that asked for this was closed, so FloFi Wallet signed nothing. Start again from FloFi.',
+  FLOFI_WALLET_OPENER_CLOSED_AFTER_SIGNING: 'The FloFi page that asked for this was closed before it received the signature. FloFi Wallet discarded it and nothing was sent. Check the status in FloFi before you try again.',
   FLOFI_WALLET_SIGN_IN_WINDOW_BLOCKED: 'Your browser blocked the sign-in window. Allow pop-ups for FloFi Wallet, then try again.',
   FLOFI_WALLET_ACCOUNT_MISMATCH: 'FloFi Wallet switched to another FloFi account. This request was cancelled and nothing was signed.',
   FLOFI_WALLET_REQUEST_INVALID: 'FloFi Wallet could not read this request, so it signed nothing.',

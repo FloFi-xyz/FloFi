@@ -38,6 +38,18 @@ export function walletOrigin(env: Env): WalletOrigin | null {
   if (url.protocol !== 'https:' && !(loopback && env.FLOFI_TURNKEY_E2E === 'MOCKED_LOOPBACK_ONLY' && !isHostedDeployment(env))) return null;
   return { origin: url.origin, host: url.host, appOrigin: appUrl.origin, appHost: appUrl.host, secure: url.protocol === 'https:' };
 }
+/**
+ * Hosts that must never serve the product, even when the wallet configuration is missing or invalid (fail closed): the production wallet
+ * host and the host named by `FLOFI_WALLET_ORIGIN` when it parses. A host equal to the product's own is never reserved (that
+ * misconfiguration only disables managed wallets).
+ */
+export function reservedWalletHosts(env: Env): ReadonlySet<string> {
+  const hosts = new Set<string>([new URL(FLOFI_PRODUCTION_WALLET_ORIGIN).host]);
+  try { if (env.FLOFI_WALLET_ORIGIN) hosts.add(new URL(env.FLOFI_WALLET_ORIGIN).host.toLowerCase()); } catch { /* unparseable: nothing to reserve */ }
+  const app = publicOrigin(env);
+  try { if (app) hosts.delete(new URL(app).host.toLowerCase()); } catch { /* no product origin */ }
+  return hosts;
+}
 /** Managed wallets need both the provider and the wallet origin. */
 export function managedWalletsAvailable(env: Env): boolean {
   return turnkeyConfig(env) !== null && walletOrigin(env) !== null;

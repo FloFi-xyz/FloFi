@@ -109,10 +109,11 @@ export function verifySignedEip1559(tx: EvmTransaction, signedHex: string): stri
 }
 
 // ── What the person sees ─────────────────────────────────────────────────────────────────────────────────────────────────────────
-export type EvmChain = { readonly chainId: number; readonly name: string; readonly symbol: 'ETH' };
+/** `separateL1Fee`: an OP Stack chain (Base) also charges an L1 data fee that gas × maxFeePerGas does not bound. */
+export type EvmChain = { readonly chainId: number; readonly name: string; readonly symbol: 'ETH'; readonly separateL1Fee?: true };
 /** The catalog mainnets FloFi Wallet signs for (spec decision 6). Every other chain is refused before anything is shown as signable. */
 export const FLOFI_WALLET_EVM_CHAINS: Readonly<Record<number, EvmChain>> = Object.freeze({
-  1: { chainId: 1, name: 'Ethereum', symbol: 'ETH' }, 8453: { chainId: 8453, name: 'Base', symbol: 'ETH' },
+  1: { chainId: 1, name: 'Ethereum', symbol: 'ETH' }, 8453: { chainId: 8453, name: 'Base', symbol: 'ETH', separateL1Fee: true },
   42161: { chainId: 42161, name: 'Arbitrum One', symbol: 'ETH' }, 4663: { chainId: 4663, name: 'Robinhood Chain', symbol: 'ETH' },
 });
 export const evmChain = (chainIdHex: string): EvmChain | null => {
@@ -179,7 +180,8 @@ export function decodeEvmCall(data: string): EvmCall {
 
 export type EvmReview = { readonly chain: EvmChain; readonly from: string; readonly to: string; readonly value: bigint; readonly nonce: bigint;
   readonly gas: bigint; readonly maxFeePerGas: bigint; readonly maxPriorityFeePerGas: bigint;
-  /** value + gas × maxFeePerGas: the most this transaction can take from the sender in the native coin. */
+  /** value + gas × maxFeePerGas: the most this transaction can take from the sender in the native coin, except on a chain with
+   * `separateL1Fee` (Base), where the L1 data fee comes on top and the figure is shown as such. */
   readonly maxTotalCost: bigint; readonly call: EvmCall; readonly data: string };
 /** Everything the person needs to judge the transaction, or null when the chain is not one FloFi Wallet signs on. */
 export function reviewEvmTransaction(tx: EvmTransaction): EvmReview | null {

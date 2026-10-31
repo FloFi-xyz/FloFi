@@ -39,6 +39,12 @@ export type ManagedSigningDeps = {
   readonly pendingNonce?: (chainId: number, address: string) => Promise<bigint>;
   readonly fees?: (chainId: number) => Promise<{ readonly maxFeePerGas: bigint; readonly maxPriorityFeePerGas: bigint }>;
   readonly now?: () => number;
+  /**
+   * Broadcast of signed bytes only: the nonce and fees FloFi Wallet filled were bounded against the network when the relay granted this
+   * attempt's single signature, so they are not re-derived from a newer read (a fee move after signing must not drop a valid signature).
+   * Every field the attempt binds, the owner and the expiry are still checked.
+   */
+  readonly filledBoundedAtSigning?: boolean;
 };
 /** A matched attempt: what FloFi Wallet shows, and the identity the caller claims once (signature, broadcast). */
 export type ManagedSigningMatch = { readonly summary: SigningSummary; readonly attempt: string; readonly owner: string; readonly expiresAtMs: number;
@@ -167,6 +173,7 @@ async function evmFields(request: ManagedSigningRequest, bound: { from: string; 
     || tx.chainId !== BigInt(bound.chainId) || tx.gas !== big(bound.gas) || tx.gas <= 0n || tx.maxPriorityFeePerGas > tx.maxFeePerGas) return { ok: false, code: NO_MATCH };
   if ((bound.nonce !== undefined && (nonce === null || tx.nonce !== nonce)) || (bound.maxFeePerGas !== undefined && (maxFee === null || tx.maxFeePerGas !== maxFee))
     || (bound.maxPriorityFeePerGas !== undefined && (priority === null || tx.maxPriorityFeePerGas !== priority))) return { ok: false, code: NO_MATCH };
+  if (deps.filledBoundedAtSigning) return { ok: true, tx, filled: bound.nonce === undefined || bound.maxFeePerGas === undefined };
   if (bound.nonce === undefined) {
     if (!deps.pendingNonce) return { ok: false, code: 'FLOFI_WALLET_NETWORK_READ_FAILED' };
     let pending: bigint;
@@ -223,7 +230,8 @@ async function evmSwap(flow: SigningFlow, runId: string, run: PublicRun, request
   if (!Number.isFinite(expires) || expires <= now) return refuse('FLOFI_WALLET_REVIEW_EXPIRED');
   const inDecimals = sideDecimals(q.inputDecimals, q.inputSymbol), outDecimals = sideDecimals(q.outputDecimals, q.outputSymbol);
   if (inDecimals === null || outDecimals === null) return refuse('FLOFI_WALLET_FLOW_NOT_SUPPORTED');
-  const fee = units(fields.tx.gas * fields.tx.maxFeePerGas, 18, 'ETH');
+  // On Base (OP Stack) the L1 data fee is charged on top of gas × maxFeePerGas: the line says so instead of calling it a maximum.
+  const fee = units(fields.tx.gas * fields.tx.maxFeePerGas, 18, 'ETH'), l1 = network.chainId === 8453 ? ' before the L1 data fee' : '';
   let summaryLines: Line[] | null;
   if (attempt.step === 'approval') {
     // An exact ERC-20 approve(spender, amount) of the reviewed input token, as the swap service built it.
@@ -232,13 +240,13 @@ async function evmSwap(flow: SigningFlow, runId: string, run: PublicRun, request
     const spender = `0x${data.slice(34, 74)}`, amount = BigInt(`0x${data.slice(74)}`);
     if (!/^0x0{24}/.test(`0x${data.slice(10, 34)}`) || amount !== BigInt(q.amountIn)) return refuse(NO_MATCH);
     summaryLines = lines(['Approve', units(amount, inDecimals, q.inputSymbol)], ['Spender', spender], ['For', `Swap ${q.inputSymbol} → ${q.outputSymbol}`],
-      [fields.filled ? 'Max network fee (set by FloFi Wallet)' : 'Max network fee', fee]);
+      [`Max network fee${l1}${fields.filled ? ' (set by FloFi Wallet)' : ''}`, fee]);
   } else summaryLines = lines(
     ['You pay', units(q.amountIn, inDecimals, q.inputSymbol)],
     ['Expected to receive', units(q.expectedOut, outDecimals, q.outputSymbol)],
     ['Minimum received', units(q.minimumOut, outDecimals, q.outputSymbol)],
     ['Max slippage', percent(q.slippageBps)],
-    [fields.filled ? 'Max network fee (set by FloFi Wallet)' : 'Max network fee', fee],
+    [`Max network fee${l1}${fields.filled ? ' (set by FloFi Wallet)' : ''}`, fee],
     ['Nonce', fields.tx.nonce.toString()]);
   if (!summaryLines) return refuse(NO_MATCH);
   return { ok: true, value: { attempt: `${flow}:${attempt.attemptId}`, owner, expiresAtMs: expires, evm: { chainId: network.chainId, tx: fields.tx },

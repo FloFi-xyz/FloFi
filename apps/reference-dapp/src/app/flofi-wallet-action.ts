@@ -95,7 +95,7 @@ export async function floFiEvmBroadcast(signing: unknown, raw: unknown): Promise
     if (!decoded) fail('FLOFI_WALLET_SIGNED_TRANSACTION_INVALID');
     const { host, session } = await signedIn(), wallets = await accountManagedWallets(host, session);
     // The same resolution FloFi Wallet's relay applied before signing, now on the signed bytes and their recovered sender.
-    const resolved = await resolveManagedSigning(context!, { ecosystem: 'evm', tx: decoded!.tx }, signingDeps(wallets));
+    const resolved = await resolveManagedSigning(context!, { ecosystem: 'evm', tx: decoded!.tx }, { ...signingDeps(wallets), filledBoundedAtSigning: true });
     if (!resolved.ok) fail(resolved.code);
     const match = (resolved as Extract<typeof resolved, { ok: true }>).value;
     if (!match.evm || match.owner !== decoded!.tx.from) fail('FLOFI_WALLET_SIGNER_MISMATCH');

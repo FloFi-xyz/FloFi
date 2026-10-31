@@ -44,11 +44,14 @@ function legacy(target: Window): { readonly providers: EvmProvider[]; readonly m
 }
 /** The rdns FloFi Wallet's own entries use; no announced provider may claim it. */
 export const FLOFI_WALLET_RDNS = 'xyz.flofi.wallet';
+/** One key per FloFi Wallet address (`xyz.flofi.wallet:<address>`): a saved credential reconnects that address, never the first one. */
+export const floFiWalletKey = (address: string) => `${FLOFI_WALLET_RDNS}:${address.toLowerCase()}`;
+export const isFloFiWalletKey = (key: string | null | undefined) => typeof key === 'string' && (key === FLOFI_WALLET_RDNS || key.startsWith(`${FLOFI_WALLET_RDNS}:`));
 function passiveProvider(target: Window, discovery: Discovery): EvmProvider | null {
   const announced = [...discovery.announced].filter(([provider, info]) => !braveWallet(provider, info.rdns));
   const preferred = walletPreference().evm;
   // The owner last chose FloFi Wallet: no other wallet is read silently in its place (FloFi Wallet itself is never passive).
-  if (preferred === FLOFI_WALLET_RDNS) return null;
+  if (isFloFiWalletKey(preferred)) return null;
   const remembered = preferred ? announced.filter(([, info]) => info.rdns === preferred) : [];
   if (remembered.length === 1) return remembered[0]![0];
   const announcedMetaMask = announced.filter(([, info]) => info.rdns === 'io.metamask');
@@ -148,7 +151,7 @@ export function registerManagedEvmProvider(provider: EvmProvider, entry: { reado
   const target = browser();
   if (!target || !usableEvmProvider(provider)) return () => undefined;
   const discovery = discover(target);
-  discovery.managed.set(provider, { id: `evm:flofi:${entry.address.toLowerCase()}`, ecosystem: 'evm', key: FLOFI_WALLET_RDNS,
+  discovery.managed.set(provider, { id: `evm:flofi:${entry.address.toLowerCase()}`, ecosystem: 'evm', key: floFiWalletKey(entry.address),
     name: safeWalletName(entry.name, 'FloFi Wallet'), icon: null });
   for (const listener of discovery.catalogue) listener();
   return () => {

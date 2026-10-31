@@ -51,7 +51,8 @@ export function sealWalletHandoff(env: Env, session: AccountSessionToken, wallet
 export function readWalletHandoff(env: Env, token: unknown, now: Date, walletHost: string): { account: AccountSessionToken; digest: string; expiresAt: number } | null {
   const v = unsealWalletToken(env, 'h1', token, now, walletHost);
   const account = v && typeof v.n === 'string' && /^[A-Za-z0-9_-]{22}$/.test(v.n) ? accountOf(v) : null;
-  return account ? { account, digest: createHash('sha256').update(`wallet-handoff:${token as string}`).digest('hex'), expiresAt: v!.e as number } : null;
+  // Single use is keyed on the verified content (its random nonce and account session), never on how the token string is spelled.
+  return account ? { account, digest: createHash('sha256').update(`wallet-handoff:${account.sessionId}:${v!.n as string}`).digest('hex'), expiresAt: v!.e as number } : null;
 }
 
 export function sealWalletSession(env: Env, session: WalletSession, walletHost: string): string {

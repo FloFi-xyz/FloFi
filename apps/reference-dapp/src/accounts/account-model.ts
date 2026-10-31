@@ -85,7 +85,9 @@ export const validProvider = (value: unknown): value is string => typeof value =
 export function normalizeEmail(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   const email = value.trim().toLowerCase();
-  return email.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && withoutControlCharacters(email) === email ? email : null;
+  // No ':' anywhere: FloFi keeps other kinds of email challenges under prefixed keys (`wallet-unlock:<email>`), and a sign-in address must
+  // never be able to name one of those keys (or another provider's contact syntax).
+  return email.length <= 254 && /^[^\s@:]+@[^\s@:]+\.[^\s@:]+$/.test(email) && withoutControlCharacters(email) === email ? email : null;
 }
 
 const exactKeys = (value: object, keys: readonly string[]) => {

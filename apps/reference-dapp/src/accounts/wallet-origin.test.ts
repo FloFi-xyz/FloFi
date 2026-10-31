@@ -61,13 +61,13 @@ describe('wallet page policy', () => {
 
 describe('proxy routing by host', () => {
   const env = { ...hosted, ...provider };
-  async function route(url: string, init: { method?: string; headers?: Record<string, string> } = {}) {
-    const previous = { ...process.env };
-    Object.assign(process.env, env);
+  async function route(url: string, init: { method?: string; headers?: Record<string, string> } = {}, overrides: Record<string, string> = {}) {
+    const previous = { ...process.env }, applied = { ...env, ...overrides };
+    Object.assign(process.env, applied);
     try {
       const target = new URL(url);
       return proxy(new NextRequest(url, { method: init.method ?? 'GET', headers: { host: target.host, ...init.headers } }));
-    } finally { for (const key of Object.keys(env)) if (!(key in previous)) delete process.env[key]; Object.assign(process.env, previous); }
+    } finally { for (const key of Object.keys(applied)) if (!(key in previous)) delete process.env[key]; Object.assign(process.env, previous); }
   }
   it('serves only wallet pages, wallet routes and static assets on the wallet host, under the strict policy', async () => {
     const page = await route('https://wallet.flofi.example/wallet');
@@ -81,6 +81,14 @@ describe('proxy routing by host', () => {
     // No server action runs on the wallet host, whatever page it is posted to.
     expect((await route('https://wallet.flofi.example/wallet', { method: 'POST', headers: { 'next-action': 'abc' } })).status).toBe(404);
     expect((await route('https://wallet.flofi.example/brand/logo.svg')).status).toBe(200);
+  });
+  it('fails closed: with an invalid wallet configuration the wallet host still serves no product page', async () => {
+    for (const broken of [{ FLOFI_WALLET_ORIGIN: 'http://wallet.flofi.example' }, { FLOFI_WALLET_ORIGIN: 'https://wallet.flofi.example/path' }]) {
+      for (const path of ['/app', '/login', '/', '/api/account/x']) expect((await route(`https://wallet.flofi.example${path}`, {}, broken)).status, path).toBe(404);
+      expect((await route('https://app.flofi.example/app', {}, broken)).status).not.toBe(404);
+    }
+    // The production wallet host is reserved even when the variable is missing.
+    expect((await route('https://wallet.flofi.xyz/app', {}, { FLOFI_WALLET_ORIGIN: '' })).status).toBe(404);
   });
   it('has no wallet routes on the product host and keeps the product policies unchanged', async () => {
     for (const path of ['/wallet', '/wallet/callback/google', '/api/wallet/session']) expect((await route(`https://app.flofi.example${path}`)).status, path).toBe(404);

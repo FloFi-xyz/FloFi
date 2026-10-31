@@ -57,7 +57,7 @@ export function parseSigningHeader(value: string | null | undefined): SigningCon
   return index > 0 ? parseSigningContext({ flow: value.slice(0, index), runId: value.slice(index + 1) }) : null;
 }
 
-/** What FloFi Wallet shows next to "Matches your reviewed FloFi strategy": built by the server from its Review, never by the product page. */
+/** What FloFi Wallet shows next to "Exactly the transaction FloFi prepared for this strategy": built by the server from its Review, never by the product page. */
 export type SigningSummary = { readonly flow: SigningFlow; readonly runId: string; readonly network: string; readonly chain: string; readonly realFunds: boolean;
   readonly action: string; readonly owner: string; readonly lines: readonly { readonly label: string; readonly value: string }[]; readonly expiresAt: string | null };
 /** Printable, single-line text (no control characters), bounded. */

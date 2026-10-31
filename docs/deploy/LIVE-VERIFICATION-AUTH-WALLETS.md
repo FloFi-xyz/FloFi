@@ -55,7 +55,7 @@ Never set `FLOFI_TURNKEY_E2E`, `FLOFI_AUTH_E2E_IDP` or `FLOFI_TURNKEY_OTP_SIGNER
 11. **Solana Devnet transfer** to a second test address with FloFi Wallet as the wallet. Check, in order:
     - Simulate, then Review and the Strategy Manifest;
     - Authorize;
-    - FloFi Wallet shows "Matches your reviewed FloFi strategy" with the same recipient, amount and fee;
+    - FloFi Wallet shows "Exactly the transaction FloFi prepared for this strategy" with the same recipient, amount and fee;
     - Sign;
     - FloFi broadcasts, the run reconciles, and the evidence is recorded.
     Also confirm that a request not matching a reviewed attempt is refused.
