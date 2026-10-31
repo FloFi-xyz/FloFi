@@ -35,16 +35,27 @@ export function stampPublicKey(stamp: string): string | null {
 }
 
 /**
- * Whether `message` is exactly a FloFi sign-in message for the product host: `<appHost> wants you to sign in with your <chain> account:`,
- * the signing address, FloFi's own statement and `URI: <appOrigin>`. Another dapp's domain or statement is never signed.
+ * Whether `message` is exactly a FloFi sign-in message for the product host, as FloFi's server writes it (server/wallet-session.ts
+ * `walletSignInMessage` / `solanaSignInMessage`): `<appHost> wants you to sign in with your <chain> account:`, the signing address, FloFi's
+ * own statement, `URI: <appOrigin>`, version 1, the chain (EVM: one of FloFi's mainnets), a server nonce, the issue and expiry times, and
+ * nothing else; unexpired at `now`. Another dapp's domain or statement, extra lines or an expired message are never signed.
  */
-export function floFiSignInMessage(message: string, ecosystem: 'evm' | 'solana', address: string, app: { readonly host: string; readonly origin: string }): boolean {
-  if (!SIGN_IN_MESSAGE.test(message)) return false;
-  const lines = message.split('\n'), chain = ecosystem === 'evm' ? 'Ethereum' : 'Solana';
-  const statement = ecosystem === 'evm' ? WALLET_SIGN_IN_STATEMENT : SOLANA_SIGN_IN_STATEMENT;
-  // EVM: the message's chain must be one of FloFi Wallet's mainnets (Solana sign-in messages name no cluster).
-  const evmChain = ecosystem === 'evm' ? /^Chain ID: ([1-9][0-9]{0,15})$/.exec(lines[7] ?? '') : null;
-  if (ecosystem === 'evm' && (!evmChain || !FLOFI_WALLET_EVM_CHAIN_IDS.has(Number(evmChain[1])))) return false;
+const SIGN_IN_ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/, SIGN_IN_NONCE = /^[0-9a-f]{32}$/;
+export function floFiSignInMessage(message: string, ecosystem: 'evm' | 'solana', address: string, app: { readonly host: string; readonly origin: string },
+  now = Date.now()): boolean {
+  if (!SIGN_IN_MESSAGE.test(message) || message.length > 2_048 || /[\0\r]/.test(message)) return false;
+  const lines = message.split('\n'), evm = ecosystem === 'evm', chain = evm ? 'Ethereum' : 'Solana';
+  if (lines.length !== (evm ? 11 : 10)) return false;
+  const statement = evm ? WALLET_SIGN_IN_STATEMENT : SOLANA_SIGN_IN_STATEMENT;
+  // EVM: the message's chain must be one of FloFi's mainnets (Solana sign-in messages name no cluster).
+  const evmChain = evm ? /^Chain ID: ([1-9][0-9]{0,15})$/.exec(lines[7] ?? '') : null;
+  if (evm && (!evmChain || !FLOFI_WALLET_EVM_CHAIN_IDS.has(Number(evmChain[1])))) return false;
+  const [nonceLine = '', issuedLine = '', expiresLine = ''] = lines.slice(evm ? 8 : 7);
+  const nonce = nonceLine.startsWith('Nonce: ') ? nonceLine.slice(7) : '', issuedAt = issuedLine.startsWith('Issued At: ') ? issuedLine.slice(11) : '';
+  const expiresAt = expiresLine.startsWith('Expiration Time: ') ? expiresLine.slice(17) : '';
+  if (!SIGN_IN_NONCE.test(nonce) || !SIGN_IN_ISO.test(issuedAt) || !SIGN_IN_ISO.test(expiresAt)) return false;
+  const issued = Date.parse(issuedAt), expires = Date.parse(expiresAt);
+  if (!Number.isFinite(issued) || !Number.isFinite(expires) || expires <= issued || expires <= now) return false;
   return lines[0] === `${app.host} wants you to sign in with your ${chain} account:` && canonicalAddress(ecosystem, lines[1] ?? '') === address
     && lines[2] === '' && lines[3] === statement && lines[4] === '' && lines[5] === `URI: ${app.origin}` && lines[6] === 'Version: 1';
 }

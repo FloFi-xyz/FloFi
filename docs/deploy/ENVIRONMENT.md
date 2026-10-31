@@ -324,10 +324,12 @@ sign-in is not configured and nothing is simulated.
 | `PRIVY_VERIFICATION_KEY` | optional: the app's access-token verification key (Privy dashboard, PEM; `\n` escapes accepted). Without it the official SDK fetches the app's JWKS from `api.privy.io` | no | optional | recommended | JWKS |
 | `FLOFI_PRIVY_APPLE_LOGIN` | `enabled` shows Apple sign-in, only after Apple is configured in Privy with FloFi's own Apple Services ID (so existing Apple accounts keep their subject) | no | optional | after Apple setup | off |
 
-Privy dashboard (owner): allowed origins `https://flofi.xyz` (plus each preview origin that should sign in); login methods Google, email and
-external wallets (Apple only when configured); embedded wallets for Ethereum and Solana with **no automatic creation** (FloFi creates on
-click), no session signers / delegated actions; Google client configured in Privy (the same Google account keeps the same `sub`, so existing
-Google accounts are found). The CSP already allows `auth.privy.io`, `*.rpc.privy.systems` and Privy's bot-check frames (src/accounts/privy-hosts.ts).
+Privy dashboard (owner), production app: allowed origin `https://flofi.xyz` only — never a preview origin, since preview code must not obtain
+tokens that production accepts; previews use their own Privy app (its allowed origins are the preview origins). Login methods Google, email
+and external wallets (Apple only when configured); embedded wallets for Ethereum and Solana with **no automatic creation** (FloFi creates on
+click), no session signers / delegated actions; recommended: require MFA (or re-authentication) for wallet export in Privy, because FloFi
+does not add its own step before Privy's export screen; Google client configured in Privy (the same Google account keeps the same `sub`, so
+existing Google accounts are found). The CSP already allows `auth.privy.io`, `*.rpc.privy.systems` and Privy's bot-check frames (src/accounts/privy-hosts.ts).
 
 Legacy FloFi Wallet (Turnkey, export of wallets created before Privy only): `FLOFI_TURNKEY_ORGANIZATION_ID`, `FLOFI_TURNKEY_API_PUBLIC_KEY`,
 `FLOFI_TURNKEY_API_PRIVATE_KEY` (**secret**), `FLOFI_WALLET_ORIGIN` and FloFi Wallet's own `FLOFI_WALLET_GOOGLE_CLIENT_ID` /

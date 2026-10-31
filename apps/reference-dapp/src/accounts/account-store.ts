@@ -8,7 +8,8 @@
  * identity subjects, session records and public wallet metadata (see the migration's CHECK constraints).
  */
 import type { Database, Queryable } from '@defi-workflow-engine/cloud-runtime';
-import { accountWalletId, ACCOUNT_ID, canonicalAddress, exportOf, isManagedProvider, LEGACY_MANAGED_PROVIDER, PRIVY_USER_ID, readAccountWallet, validProvider,
+import { accountWalletId, ACCOUNT_ID, canonicalAddress, exportOf, isManagedProvider, LEGACY_MANAGED_PROVIDER, MANAGED_PROVIDER, MANAGED_PROVIDER_NAME, PRIVY_USER_ID,
+  readAccountWallet, validProvider,
   walletLabel, type AccountIdentity, type AccountWallet, type IdentityKind, type ManagedLogin, type Onboarding, type SessionMethod, type WalletExport,
   type WalletOrigin } from './account-model.ts';
 import { ACCOUNT_SESSION_TTL_SECONDS, newAccountId, newSessionId, type AccountSessionToken } from './account-session.ts';
@@ -111,6 +112,9 @@ export function createAccountStore(db: Database, tenantId: string) {
           if (accounts.length > 1) fail('ACCOUNT_IDENTITY_CONFLICT');
           accountId = accounts[0] ?? null;
           if (accountId) {
+            // Serializes first Privy sign-ins that reach this account through different identities (two Privy users, one with the email,
+            // one with the Google account): the second waits here and then sees the first one's Privy link, so it is refused, never added.
+            await tx.query('SELECT 1 FROM flofi_accounts WHERE tenant_id=$1 AND account_id=$2 FOR UPDATE', [tenantId, accountId]);
             const other = (await tx.query<{ subject: string }>("SELECT subject FROM flofi_account_identities WHERE tenant_id=$1 AND account_id=$2 AND kind='PRIVY'",
               [tenantId, accountId])).rows[0];
             if (other && other.subject !== input.privyUser) fail('ACCOUNT_PRIVY_USER_MISMATCH');
@@ -289,6 +293,20 @@ export function createAccountStore(db: Database, tenantId: string) {
       if (!row) fail('ACCOUNT_WALLET_LINKED_ELSEWHERE');
       return walletOf(row!) ?? fail('ACCOUNT_WALLET_INVALID');
     },
+    /**
+     * BUILD-FLOFI-PRIVY-UX-001, the person's own legacy migration: the key of a legacy FloFi Wallet (Turnkey) was exported and imported into
+     * this account's Privy user, which now lists the same address as an imported embedded wallet. The record keeps its address and name and
+     * becomes that Privy wallet (signable through Privy; exported from Privy). Only a legacy record of this same account changes; nothing else
+     * is replaced, and nothing at Turnkey or on-chain changes.
+     */
+    async adoptLegacyWallet(accountId: string, ecosystem: WalletEcosystem, address: string, privyWalletId: string | null, now = new Date()): Promise<AccountWallet | null> {
+      if (privyWalletId !== null && !PROVIDER_RESOURCE.test(privyWalletId)) fail('ACCOUNT_WALLET_INVALID');
+      const row = (await db.query<WalletRow>(`UPDATE flofi_account_wallets SET origin=$5, provider=$6, provider_name=$7, provider_resource=$8, export=$9, updated_at=$10
+          WHERE tenant_id=$1 AND account_id=$2 AND ecosystem=$3 AND address=$4 AND provider=$11 RETURNING *`,
+        [tenantId, accountId, ecosystem === 'evm' ? 'EVM' : 'SOLANA', address, ORIGIN_SQL.imported, MANAGED_PROVIDER, MANAGED_PROVIDER_NAME, privyWalletId,
+          EXPORT_SQL[exportOf('imported', MANAGED_PROVIDER)], now, LEGACY_MANAGED_PROVIDER])).rows[0];
+      return row ? walletOf(row) : null;
+    },
     async renameWallet(accountId: string, ecosystem: WalletEcosystem, address: string, label: unknown, now = new Date()): Promise<void> {
       const next = walletLabel(label);
       if (!next) fail('ACCOUNT_WALLET_LABEL_INVALID');
@@ -302,6 +320,13 @@ export function createAccountStore(db: Database, tenantId: string) {
      */
     async removeWallet(accountId: string, ecosystem: WalletEcosystem, address: string): Promise<void> {
       await db.transaction(async tx => {
+        // BUILD-FLOFI-PRIVY-UX-001: a wallet FloFi's provider keeps for this person (Privy, or a legacy FloFi Wallet that stays exportable)
+        // is never removed: a Privy wallet belongs to the account's Privy user and would come back at the next sync, and a legacy record is
+        // the person's only way to export it. Only external wallets can be removed.
+        const held = await tx.query<{ provider: string }>(`SELECT provider FROM flofi_account_wallets WHERE tenant_id=$1 AND account_id=$2 AND ecosystem=$3
+          AND address=$4 FOR UPDATE`, [tenantId, accountId, ecosystem === 'evm' ? 'EVM' : 'SOLANA', address]);
+        if (!held.rows[0]) fail('ACCOUNT_WALLET_NOT_FOUND');
+        if (isManagedProvider(held.rows[0]!.provider)) fail('ACCOUNT_WALLET_MANAGED_KEPT');
         const removed = await tx.query('DELETE FROM flofi_account_wallets WHERE tenant_id=$1 AND account_id=$2 AND ecosystem=$3 AND address=$4',
           [tenantId, accountId, ecosystem === 'evm' ? 'EVM' : 'SOLANA', address]);
         if (!removed.rowCount) fail('ACCOUNT_WALLET_NOT_FOUND');

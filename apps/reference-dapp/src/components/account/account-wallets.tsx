@@ -106,8 +106,7 @@ function AccountWalletCard({ wallet, active, state, signIn, onChanged, onStatus 
   async function remove() {
     const result = await removeAccountWallet(wallet.id).catch(() => ({ ok: false as const, code: 'ACCOUNTS_UNAVAILABLE' }));
     if (!result.ok) { setError(result.code); return; }
-    onStatus(t(managed ? '{0} removed from your FloFi account. The wallet still exists with its provider and its funds are unchanged.'
-      : '{0} removed from your FloFi account. Your wallet and its funds are unchanged.', wallet.label)); onChanged();
+    onStatus(t('{0} removed from your FloFi account. Your wallet and its funds are unchanged.', wallet.label)); onChanged();
   }
   const legacy = isLegacyWallet(wallet);
   const state_ = legacy ? t('Legacy FloFi Wallet') : managed ? t('Managed by Privy') : t(active ? 'Connected' : 'Not connected');
@@ -130,15 +129,15 @@ function AccountWalletCard({ wallet, active, state, signIn, onChanged, onStatus 
       <div className="workspace-wallet-actions"><button type="submit" className="workspace-action">{t('Save name')}</button>
         <button type="button" className="workspace-action" onClick={() => { setMode('view'); setDraft(wallet.label); setError(null); }}>{t('Cancel')}</button></div>
     </form> : mode === 'remove' ? <div className="workspace-inline-form" role="group" aria-label={t('Remove {0}', wallet.label)}>
-      <p>{t(managed ? 'Remove {0} from your FloFi account? The wallet is not deleted: it stays with its provider, and its funds are unchanged. Export it first if you want to keep using it elsewhere.'
-        : 'Remove {0} from your FloFi account? Only FloFi’s association is removed; the wallet and its assets are not affected.', wallet.label)}
+      <p>{t('Remove {0} from your FloFi account? Only FloFi’s association is removed; the wallet and its assets are not affected.', wallet.label)}
         {signIn ? ` ${t('You will no longer be able to sign in with this wallet, unless it is your only way to sign in.')}` : ''}</p>
       <div className="workspace-wallet-actions"><button type="button" className="workspace-action workspace-action-danger" onClick={() => void remove()}>{t('Remove')}</button>
         <button type="button" className="workspace-action" onClick={() => setMode('view')}>{t('Cancel')}</button></div>
     </div> : <div className="workspace-wallet-actions">
       <button type="button" className="workspace-action" aria-label={t('Rename {0}', wallet.label)} onClick={() => { setDraft(wallet.label); setMode('rename'); }}>{t('Rename')}</button>
       {exportActions(wallet).length > 0 && <button type="button" className="workspace-action" aria-label={t('Export {0}', wallet.label)} onClick={() => setExporting(true)}>{t('Export')}</button>}
-      <button type="button" className="workspace-action" aria-label={t('Remove {0}', wallet.label)} onClick={() => setMode('remove')}>{t('Remove')}</button>
+      {/* BUILD-FLOFI-PRIVY-UX-001: wallets FloFi's provider keeps (Privy, legacy FloFi Wallet) stay in the account (account-store.ts removeWallet). */}
+      {!managed && <button type="button" className="workspace-action" aria-label={t('Remove {0}', wallet.label)} onClick={() => setMode('remove')}>{t('Remove')}</button>}
     </div>}
     {error && <p className="workspace-inline-error" role="alert">{t(accountMessage(error))}</p>}
     {exporting && <ExportWalletDialog wallet={wallet} state={state} onClose={() => setExporting(false)}/>}

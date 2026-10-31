@@ -46,6 +46,10 @@
       "path": "apps/reference-dapp/src/accounts/privy-server.test.ts",
       "stage": "unit"
     },
+    "app.accounts.privy-zod": {
+      "path": "apps/reference-dapp/src/accounts/privy-zod.test.ts",
+      "stage": "unit"
+    },
     "app.accounts.turnkey-server": {
       "path": "apps/reference-dapp/src/accounts/turnkey-server.test.ts",
       "stage": "unit"
@@ -6269,6 +6273,7 @@
         "app.accounts.oidc",
         "app.accounts.privy-client",
         "app.accounts.privy-server",
+        "app.accounts.privy-zod",
         "app.accounts.turnkey-server",
         "app.accounts.wallet-origin",
         "app.accounts.wallet-relay",

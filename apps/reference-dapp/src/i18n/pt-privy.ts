@@ -33,15 +33,14 @@ export const portuguesePrivy: Readonly<Record<string, string>> = {
     'Esta carteira foi criada na FloFi Wallet anterior. A exportação acontece lá, numa janela segura separada: você a desbloqueia de novo, confirma, e o segredo aparece só dentro do quadro seguro da Turnkey. Para continuar a usá-la no FloFi, importe a chave depois em Adicionar carteiras.',
   'Export happens in Privy’s own secure screen. The key is shown only there; FloFi never sees it.': 'A exportação acontece na tela segura da própria Privy. A chave aparece só ali; o FloFi nunca a vê.',
   'Export private key': 'Exportar chave privada', 'Continue in the export screen…': 'Continue na tela de exportação…', 'Export screen closed.': 'Tela de exportação fechada.',
-  '{0} removed from your FloFi account. The wallet still exists with its provider and its funds are unchanged.': '{0} removida da sua conta FloFi. A carteira continua existindo no provedor e os fundos não mudaram.',
   'Managed by Privy': 'Gerenciada pela Privy',
   'Signs with your FloFi wallet (Privy), after you review the transaction in FloFi.': 'Assina com sua carteira FloFi (Privy), depois que você revisa a transação no FloFi.',
-  'Remove {0} from your FloFi account? The wallet is not deleted: it stays with its provider, and its funds are unchanged. Export it first if you want to keep using it elsewhere.':
-    'Remover {0} da sua conta FloFi? A carteira não é apagada: ela continua no provedor e os fundos não mudam. Exporte antes se quiser continuar a usá-la em outro lugar.',
   'Wallets created or imported in FloFi are not deleted: they stay with their provider and their funds are unchanged. Export them first if you want to keep using them elsewhere.':
     'As carteiras criadas ou importadas no FloFi não são apagadas: continuam no provedor e os fundos não mudam. Exporte-as antes se quiser continuar a usá-las em outro lugar.',
   'Authorize opens your FloFi wallet, where you confirm the exact transaction.': 'Autorizar abre sua carteira FloFi, onde você confirma a transação exata.',
   // Messages (account-messages.ts, flofi-signing.ts, wallet-messages.ts)
+  'This address is already one of your FloFi wallets, so it is not added again as an external wallet.': 'Este endereço já é uma das suas carteiras FloFi, por isso não é adicionado de novo como carteira externa.',
+  'Wallets FloFi keeps for you stay in your account. Export one if you want to use it elsewhere.': 'As carteiras que o FloFi guarda para você continuam na sua conta. Exporte uma se quiser usá-la em outro lugar.',
   'FloFi could not save that wallet to your account yet. Your wallet is safe with the provider; choose Check again.':
     'O FloFi ainda não conseguiu salvar essa carteira na sua conta. Sua carteira está segura no provedor; escolha Verificar de novo.',
   'This sign-in matches more than one FloFi account, so FloFi did not sign you in. Sign in with the method you used before.':
@@ -68,4 +67,7 @@ export const portuguesePrivy: Readonly<Record<string, string>> = {
   'Wallets created in the earlier FloFi Wallet can be exported, not used to sign. Export it, then import the key here.':
     'As carteiras criadas na FloFi Wallet anterior podem ser exportadas, não usadas para assinar. Exporte-a e depois importe a chave aqui.',
   'Sign in to FloFi again in this browser to use your FloFi wallet. Nothing was signed.': 'Entre no FloFi de novo neste navegador para usar sua carteira FloFi. Nada foi assinado.',
+  'That sign-in was already used or is too old. Sign in again.': 'Esse acesso já foi usado ou é antigo demais. Entre de novo.',
+  'This Review expires in a few seconds, too soon to confirm it in your wallet. Simulate again, then Authorize. Nothing was signed.': 'Esta Revisão expira em poucos segundos, cedo demais para confirmá-la na sua carteira. Simule de novo e depois Autorize. Nada foi assinado.',
+  'Your FloFi wallet is still loading in this page. Wait a moment, then choose Authorize again. Nothing was signed.': 'Sua carteira FloFi ainda está carregando nesta página. Aguarde um momento e escolha Autorizar de novo. Nada foi assinado.',
 };

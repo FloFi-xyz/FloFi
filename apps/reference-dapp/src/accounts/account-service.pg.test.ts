@@ -26,16 +26,21 @@ const EVM_1 = '0x' + '1'.repeat(40), EVM_2 = '0x' + '2'.repeat(40), EVM_X = '0x'
 
 let t: TestDatabase, clock: Date;
 const users = new Map<string, Linked[]>();
-/** Privy's two answers: a token is `h.<base64url DID>.s` (unknown or malformed ones are refused like a bad signature). */
+/**
+ * Privy's two answers: a token is `h.<base64url DID>.s<n>` issued now (each one unique, as Privy's are), or `h.<DID>.t<seconds>` issued at
+ * that time; unknown or malformed ones are refused like a bad signature.
+ */
 const api: PrivyApi = {
   verifyAccessToken: async token => {
-    const user = token.startsWith('h.') ? Buffer.from(token.split('.')[1]!, 'base64url').toString() : '';
+    const [head, body = '', tail = ''] = token.split('.'), user = head === 'h' ? Buffer.from(body, 'base64url').toString() : '';
     if (!users.has(user)) throw new Error('Authentication token is invalid');
-    return { app_id: APP, user_id: user, session_id: 'sid', issued_at: 1, expiration: Math.floor(Date.now() / 1000) + 3600 };
+    const issuedAt = tail.startsWith('t') ? Number(tail.slice(1)) : Math.floor(clock.getTime() / 1000);
+    return { app_id: APP, user_id: user, session_id: 'sid', issued_at: issuedAt, expiration: Math.floor(Date.now() / 1000) + 3600 };
   },
   getUser: async id => ({ id, linked_accounts: users.get(id) ?? [] }),
 };
-const tokenOf = (id: string) => `h.${Buffer.from(id).toString('base64url')}.s`;
+let issued = 0;
+const tokenOf = (id: string, issuedAtSeconds?: number) => `h.${Buffer.from(id).toString('base64url')}.${issuedAtSeconds === undefined ? `s${++issued}` : `t${issuedAtSeconds}`}`;
 const store = () => createAccountStore(t.db, 'default');
 const service = () => createAccountService({ store: store(), privy: createPrivyServer(config, api), now: () => clock });
 const signIn = (id: string) => service().completePrivy(tokenOf(id));
@@ -119,6 +124,17 @@ describe('Privy sign-in reaches exactly one FloFi account', () => {
     expect(await identities(holder.accountId)).toEqual([{ kind: 'EIP155', subject: EVM_1 }]);
   });
 
+  it('signs in only with a token Privy just issued, and only once', async () => {
+    users.set(did(14), [email('once@example.com')]);
+    const token = tokenOf(did(14));
+    const first = await service().completePrivy(token);
+    await expect(service().completePrivy(token)).rejects.toThrow('PRIVY_SIGN_IN_STALE');
+    const old = Math.floor(clock.getTime() / 1000) - 11 * 60;
+    await expect(service().completePrivy(tokenOf(did(14), old))).rejects.toThrow('PRIVY_SIGN_IN_STALE');
+    expect((await service().completePrivy(tokenOf(did(14)))).session.accountId).toBe(first.session.accountId);
+    expect((await t.db.query("SELECT count(*)::int AS n FROM flofi_account_sessions WHERE revoked_at IS NULL")).rows).toEqual([{ n: 2 }]);
+  });
+
   it('refuses an unverifiable token and writes nothing', async () => {
     await expect(service().completePrivy(tokenOf(did(99)))).rejects.toThrow('PRIVY_TOKEN_INVALID');
     await expect(service().completePrivy('not a token')).rejects.toThrow('PRIVY_TOKEN_INVALID');
@@ -130,6 +146,17 @@ describe('Privy sign-in reaches exactly one FloFi account', () => {
     const [one, two] = await Promise.all([signIn(did(11)), signIn(did(11))]);
     expect(one.session.accountId).toBe(two.session.accountId);
     expect((await t.db.query('SELECT count(*)::int AS n FROM flofi_accounts')).rows).toEqual([{ n: 1 }]);
+  });
+
+  it('never links two Privy users to one existing account, even when they sign in at the same time through different identities', async () => {
+    const before = await store().signIn({ kind: 'email', subject: 'both@example.com', label: 'both@example.com' });
+    await store().linkIdentity(before.accountId, { kind: 'google', subject: 'g-12', label: null });
+    users.set(did(12), [email('both@example.com')]);
+    users.set(did(13), [google('g-12')]);
+    const results = await Promise.allSettled([signIn(did(12)), signIn(did(13))]);
+    expect(results.filter(result => result.status === 'fulfilled')).toHaveLength(1);
+    expect(results.flatMap(result => result.status === 'rejected' ? [(result.reason as Error).message] : [])).toEqual(['ACCOUNT_PRIVY_USER_MISMATCH']);
+    expect((await t.db.query("SELECT count(*)::int AS n FROM flofi_account_identities WHERE kind='PRIVY' AND account_id=$1", [before.accountId])).rows).toEqual([{ n: 1 }]);
   });
 });
 
@@ -205,15 +232,39 @@ describe('Privy wallets are saved only for the account’s own Privy user', () =
     expect(view?.wallets.map(wallet => `${wallet.provider}:${wallet.origin}:${wallet.export}`).sort()).toEqual(['privy:generated:private-key', 'turnkey:generated:recovery-phrase']);
     expect(view?.managedLogin).toBe('email');
     expect((await service().privyWallets(outcome.session)).map(wallet => wallet.address)).toEqual([EVM_1]);
+    // A background sync never changes the legacy record, even once Privy lists the same address (its key imported into Privy)…
+    users.set(did(25), [email('legacy@example.com'), embedded(EVM_1), embedded(EVM_X, { imported: true, id: 'privywalletlegacy0000001' })]);
+    await service().syncPrivyWallets(outcome.session, tokenOf(did(25)));
+    expect((await t.db.query('SELECT * FROM flofi_account_wallets WHERE address=$1', [EVM_X])).rows).toEqual(before);
+    // …only the person's explicit Import key does: the same address and name become that Privy wallet, now signable and exported from Privy.
+    const adopted = await service().savePrivyWallet(outcome.session, tokenOf(did(25)), { ecosystem: 'evm', address: EVM_X, label: 'Imported again' });
+    expect(adopted).toMatchObject({ address: EVM_X, label: 'EVM wallet', provider: 'privy', origin: 'imported', export: 'private-key' });
+    expect((await service().privyWallets(outcome.session)).map(wallet => wallet.address).sort()).toEqual([EVM_1, EVM_X].sort());
+    expect((await store().account(legacy.accountId))?.organization).toMatchObject({ provider: 'turnkey', organization: 'org-12345678' });
   });
 
-  it('still asks for a recent sign-in before deleting an account', async () => {
-    users.set(did(26), [google('g-26')]);
+  it('never links one of the account’s own FloFi (Privy) wallets as an external wallet or a sign-in identity', async () => {
+    users.set(did(27), [google('g-27'), embedded(EVM_2)]);
+    const { session } = await signIn(did(27));
+    expect((await service().view(session))?.wallets.map(wallet => wallet.address)).toEqual([EVM_2]);
+    await expect(service().linkExternalWallet(session, { namespace: 'eip155', address: EVM_2 }, { key: 'io.metamask', name: 'MetaMask' }))
+      .rejects.toThrow('ACCOUNT_WALLET_IS_FLOFI_WALLET');
+    expect((await identities(session.accountId)).map(identity => identity.kind).sort()).toEqual(['GOOGLE', 'PRIVY']);
+    expect(await service().linkExternalWallet(session, { namespace: 'eip155', address: EVM_X }, { key: 'io.metamask', name: 'MetaMask' }))
+      .toMatchObject({ address: EVM_X, origin: 'external', provider: 'io.metamask' });
+  });
+
+  it('deletes an account and all its data (Privy identity, sign-ins, sessions, wallets) only after a recent sign-in', async () => {
+    users.set(did(26), [google('g-26'), email('ana26@example.com'), embedded(EVM_2)]);
     const { session } = await signIn(did(26));
+    expect((await service().view(session))?.wallets.map(wallet => wallet.address)).toEqual([EVM_2]);
     clock = new Date(clock.getTime() + 11 * 60_000);
     await expect(service().deleteAccount(session)).rejects.toThrow('ACCOUNT_REAUTHENTICATION_REQUIRED');
     clock = new Date(session.authenticatedAt * 1000);
     await service().deleteAccount(session);
-    expect((await t.db.query('SELECT count(*)::int AS n FROM flofi_accounts')).rows).toEqual([{ n: 0 }]);
+    for (const table of ['flofi_accounts', 'flofi_account_identities', 'flofi_account_sessions', 'flofi_account_wallets'])
+      expect((await t.db.query(`SELECT count(*)::int AS n FROM ${table}`)).rows, table).toEqual([{ n: 0 }]);
+    // The same Privy user signing in again gets a new, empty account (its Privy wallet is listed again by the sign-in sync).
+    expect(await signIn(did(26))).toMatchObject({ created: true });
   });
 });

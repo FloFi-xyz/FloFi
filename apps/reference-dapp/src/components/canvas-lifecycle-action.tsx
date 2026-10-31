@@ -6,7 +6,7 @@ import type { ExecutionControls, ExecutionControlsState } from '../state/executi
 import { useLocale } from '../i18n/locale';
 import { WalletPendingNotice } from './wallet-pending-notice';
 import { usesFloFiWallet } from '../wallet/flofi-wallet-channel';
-import { useFloFiPrivy } from '../accounts/privy-context';
+import { floFiPrivyWalletIssue, useFloFiPrivy } from '../accounts/privy-context';
 import { FloFiWalletLockHint } from './flofi-wallet-continue';
 
 export function CanvasLifecycleAction(props: ExecutionControlsState & {
@@ -21,16 +21,17 @@ export function CanvasLifecycleAction(props: ExecutionControlsState & {
   const disabled = action.disabled || action.kind === 'simulate' && (!props.simulate || props.simulationDisabled) || action.kind === 'execute' && !c.view.canExecute;
   // Why the last Authorize stopped before any wallet request because the person's FloFi wallet (Privy) was not ready in this page.
   const [floFiIssue, setFloFiIssue] = useState<string | null>(null), privy = useFloFiPrivy();
-  const privyReady = Boolean(privy?.ready && privy.authenticated);
-  useEffect(() => { if (privyReady) setFloFiIssue(null); }, [privyReady]);
+  const account = props.wallet.account, ecosystem = typeof account === 'string' && /^0x/i.test(account) ? 'evm' as const : 'solana' as const;
+  const privyCanSign = typeof account === 'string' && Boolean(privy?.canSign(ecosystem, account));
+  useEffect(() => { if (privyCanSign) setFloFiIssue(null); }, [privyCanSign]);
   function act() {
     // Re-project at the click boundary; background tabs cannot preserve expired authority.
     const next = projectCanvasAction(c.current, c);
     if (next.disabled || next.kind !== action.kind) return;
-    // BUILD-FLOFI-PRIVY-UX-001: when the person's FloFi wallet (Privy) will sign, Authorize starts only once Privy is ready in this page,
+    // BUILD-FLOFI-PRIVY-UX-001: when the person's FloFi wallet (Privy) will sign, Authorize starts only once Privy can sign with it here,
     // so a short-lived Review is never accepted for a wallet that cannot show it; until then nothing is accepted or requested.
     if ((next.kind === 'approve' || next.kind === 'execute' || next.kind === 'continue') && usesFloFiWallet(props.wallet.account)) {
-      if (!privyReady) { setFloFiIssue('FLOFI_WALLET_SIGN_IN_REQUIRED'); return; }
+      if (!privyCanSign) { setFloFiIssue(floFiPrivyWalletIssue(privy, ecosystem, account ?? '')); return; }
       setFloFiIssue(null);
     }
     if (next.kind === 'simulate' && !props.simulationDisabled) void props.simulate?.();

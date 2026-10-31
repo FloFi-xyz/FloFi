@@ -7,7 +7,7 @@ import { erc7710 } from '@defi-workflow-engine/reference-compiler';
 import { floFiSignInMessage, stampPublicKey, walletRelayDecision } from './wallet-relay';
 import { exportOf, isLegacyWallet, type AccountWallet } from './account-model';
 import type { WalletSession } from './wallet-session';
-import { SOLANA_SIGN_IN_STATEMENT, WALLET_SIGN_IN_STATEMENT } from '../server/wallet-session';
+import { SOLANA_SIGN_IN_STATEMENT, solanaSignInMessage, WALLET_SIGN_IN_STATEMENT, walletSignInMessage } from '../server/wallet-session';
 
 const NOW = new Date('2026-10-31T12:00:00.000Z'), T = Math.floor(NOW.getTime() / 1000);
 const KEY = '02' + 'a'.repeat(64), OTHER_KEY = '03' + 'b'.repeat(64);
@@ -128,16 +128,27 @@ describe('wallet relay: legacy and export-only', () => {
 });
 
 describe('FloFi sign-in messages', () => {
-  it('accepts only FloFi’s own sign-in message for this host and that wallet, on FloFi Wallet’s mainnets', () => {
-    const siws = `${APP.host} wants you to sign in with your Solana account:\n${SOLANA}\n\n${SOLANA_SIGN_IN_STATEMENT}\n\nURI: ${APP.origin}\nVersion: 1\nNonce: abc`;
-    expect(floFiSignInMessage(siws, 'solana', SOLANA, APP)).toBe(true);
-    expect(floFiSignInMessage(siws.replace(APP.host, 'evil.example'), 'solana', SOLANA, APP)).toBe(false);
-    expect(floFiSignInMessage(siws, 'solana', '22222222222222222222222222222222', APP)).toBe(false);
-    expect(floFiSignInMessage(siws.replace(SOLANA_SIGN_IN_STATEMENT, 'Approve everything.'), 'solana', SOLANA, APP)).toBe(false);
-    const siwe = (chain: number) => `${APP.host} wants you to sign in with your Ethereum account:\n${EVM}\n\n${WALLET_SIGN_IN_STATEMENT}\n\nURI: ${APP.origin}\nVersion: 1\nChain ID: ${chain}`;
-    // EVM sign-in on FloFi Wallet's four mainnets only; a testnet chain (Base Sepolia, Sepolia, Robinhood Chain Testnet) is refused.
-    for (const chain of [1, 8453, 42161, 4663]) expect(floFiSignInMessage(siwe(chain), 'evm', EVM, APP)).toBe(true);
-    for (const chain of [84532, 11155111, 46630, 421614]) expect(floFiSignInMessage(siwe(chain), 'evm', EVM, APP)).toBe(false);
-    expect(floFiSignInMessage(siwe(8453).replace(`URI: ${APP.origin}`, 'URI: https://evil.example'), 'evm', EVM, APP)).toBe(false);
+  const NOW = Date.parse('2026-10-31T12:00:00.000Z'), nonce = 'ab'.repeat(16);
+  const times = { nonce, issuedAt: '2026-10-31T11:59:00.000Z', expirationTime: '2026-10-31T12:04:00.000Z' };
+  const siws = solanaSignInMessage({ domain: APP.host, uri: APP.origin, address: SOLANA, ...times });
+  const siwe = (chainId: number) => walletSignInMessage({ domain: APP.host, uri: APP.origin, address: EVM, chainId, ...times });
+  it('accepts exactly the message FloFi’s server writes, for this host and that wallet, on FloFi’s mainnets', () => {
+    expect(floFiSignInMessage(siws, 'solana', SOLANA, APP, NOW)).toBe(true);
+    expect(floFiSignInMessage(siws.replace(APP.host, 'evil.example'), 'solana', SOLANA, APP, NOW)).toBe(false);
+    expect(floFiSignInMessage(siws, 'solana', '22222222222222222222222222222222', APP, NOW)).toBe(false);
+    expect(floFiSignInMessage(siws.replace(SOLANA_SIGN_IN_STATEMENT, 'Approve everything.'), 'solana', SOLANA, APP, NOW)).toBe(false);
+    // EVM sign-in on FloFi's four mainnets only; a testnet chain (Base Sepolia, Sepolia, Robinhood Chain Testnet) is refused.
+    for (const chain of [1, 8453, 42161, 4663]) expect(floFiSignInMessage(siwe(chain), 'evm', EVM, APP, NOW)).toBe(true);
+    for (const chain of [84532, 11155111, 46630, 421614]) expect(floFiSignInMessage(siwe(chain), 'evm', EVM, APP, NOW)).toBe(false);
+    expect(floFiSignInMessage(siwe(8453).replace(`URI: ${APP.origin}`, 'URI: https://evil.example'), 'evm', EVM, APP, NOW)).toBe(false);
+  });
+  it('refuses extra or missing lines, malformed fields, carriage returns and expired messages', () => {
+    for (const [message, ecosystem, address] of [
+      [`${siws}\nResources:\n- https://evil.example`, 'solana', SOLANA], [siws.split('\n').slice(0, 8).join('\n'), 'solana', SOLANA],
+      [siws.replace(`Nonce: ${nonce}`, 'Nonce: abc'), 'solana', SOLANA], [siws.replace('Issued At: 2026-10-31T11:59:00.000Z', 'Issued At: yesterday'), 'solana', SOLANA],
+      [siws.replace('\n', '\r\n'), 'solana', SOLANA], [`${siwe(8453)}\nRequest ID: 1`, 'evm', EVM], [siwe(8453).replace('Chain ID: 8453', 'Chain ID: 8453 '), 'evm', EVM],
+    ] as const) expect(floFiSignInMessage(message, ecosystem, address, APP, NOW), message).toBe(false);
+    expect(floFiSignInMessage(siws, 'solana', SOLANA, APP, Date.parse(times.expirationTime))).toBe(false);
+    expect(floFiSignInMessage(siwe(8453), 'evm', EVM, APP, Date.parse(times.expirationTime) + 1)).toBe(false);
   });
 });

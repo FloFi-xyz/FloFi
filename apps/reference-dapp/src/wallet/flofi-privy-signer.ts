@@ -11,7 +11,7 @@
  * before Privy was asked is that refusal's code (4100); anything after Privy was asked is unknown and is reconciled, never retried blindly.
  */
 import { floFiMessageGate, floFiSigningGate } from '../app/flofi-wallet-action';
-import { currentFloFiPrivy, privyErrorCode, type PrivyReview } from '../accounts/privy-context';
+import { currentFloFiPrivy, floFiPrivyWalletIssue, privyErrorCode, type PrivyReview } from '../accounts/privy-context';
 import type { SigningSummary } from './flofi-signing';
 import type { FloFiWalletRequest } from './flofi-wallet-channel';
 import type { WalletResult } from '../wallet-app/protocol';
@@ -31,6 +31,10 @@ export async function requestThroughPrivy(request: FloFiWalletRequest): Promise<
   const privy = currentFloFiPrivy();
   // Without a Privy session in this page nothing can be shown or signed: a refusal before any signature.
   if (!privy?.ready || !privy.authenticated) throw new Error('FLOFI_WALLET_SIGN_IN_REQUIRED');
+  // The wallet must be usable in this page before the reviewed attempt's single signature is claimed: otherwise the claim would be spent on
+  // a request Privy can never show (an address Privy does not list for this person, or a Solana wallet Privy has not loaded yet).
+  const ecosystem = request.op === 'evm_sign_transaction' || request.op === 'evm_sign_message' ? 'evm' : 'solana';
+  if ('address' in request && !privy.canSign(ecosystem, request.address)) throw new Error(floFiPrivyWalletIssue(privy, ecosystem, request.address));
   switch (request.op) {
     case 'evm_sign_transaction': case 'solana_sign_transaction': {
       const gate = await floFiSigningGate(request).catch(() => ({ ok: false as const, code: 'FLOFI_WALLET_REVIEW_UNAVAILABLE' }));
@@ -46,7 +50,6 @@ export async function requestThroughPrivy(request: FloFiWalletRequest): Promise<
       catch (cause) { throw afterPrivy(cause, 'FLOFI_WALLET_SIGNATURE_UNKNOWN'); }
     }
     case 'evm_sign_message': case 'solana_sign_message': {
-      const ecosystem = request.op === 'evm_sign_message' ? 'evm' : 'solana';
       const gate = await floFiMessageGate(ecosystem, request.address, request.message).catch(() => ({ ok: false as const, code: 'FLOFI_WALLET_MESSAGE_UNSUPPORTED' }));
       if (!gate.ok) throw new Error(gate.code);
       try {

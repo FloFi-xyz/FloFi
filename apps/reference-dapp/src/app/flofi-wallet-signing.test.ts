@@ -10,9 +10,10 @@ vi.mock('./solana-devnet-action', () => ({ solanaDevnetStatus: status.devnet }))
 vi.mock('./solana-transfer-action', () => ({ solanaTransferStatus: status.solanaTransfer }));
 vi.mock('./robinhood-transfer-action', () => ({ transferStatus: status.transfer }));
 vi.mock('./public-testnet-action', () => ({ publicStatus: status.swap }));
-const { claimAttempt, claimDigest, loadSigningRun, managedWallets, RELEASABLE_PROVIDER_STATUSES, releaseAttempt, signingDeps, signingGate } = await import('./flofi-wallet-signing');
+const { claimAttempt, claimDigest, loadSigningRun, managedWallets, PRIVY_EVM_SIGNING_WINDOW_MS, RELEASABLE_PROVIDER_STATUSES, releaseAttempt, signingDeps, signingGate } = await import('./flofi-wallet-signing');
 import type { AccountWallet } from '../accounts/account-model';
 import type { ManagedSigningDeps } from '../server/managed-signing';
+import { classifySigningFailure } from '../wallet/flofi-signing';
 
 const EVM = '0x' + '1'.repeat(40), SOLANA = '7'.repeat(32) + 'abcd';
 const wallet = (ecosystem: 'evm' | 'solana', address: string, origin: AccountWallet['origin'] = 'generated', provider = 'privy'): AccountWallet => ({ id: `${ecosystem}:${address}`,
@@ -77,6 +78,15 @@ describe('signing gate', () => {
     await releaseAttempt(store, (first as { value: { attempt: string } }).value.attempt);
     expect((await gate(context, request)).ok).toBe(true);
     expect([...RELEASABLE_PROVIDER_STATUSES].sort()).toEqual([400, 401, 403]); // never 5xx or a missing answer: those may have signed
+  });
+  it('never claims an EVM attempt whose Review would expire while the person confirms in Privy', async () => {
+    const store = { consumeProof: vi.fn(async () => true) }, expires = Date.parse('2026-10-31T12:01:00.000Z');
+    const record = { ...transferRecord, review: { ...transferRecord.review, expiresAt: new Date(expires).toISOString() } };
+    const at = (now: number) => signingGate(store, [], { claim: true }, { ...deps, load: async () => structuredClone(record), now: () => now })(context, request);
+    expect(await at(expires - PRIVY_EVM_SIGNING_WINDOW_MS + 1)).toEqual({ ok: false, code: 'FLOFI_WALLET_REVIEW_EXPIRING' });
+    expect(store.consumeProof).not.toHaveBeenCalled();
+    expect(classifySigningFailure('FLOFI_WALLET_REVIEW_EXPIRING')).toBe('refused');
+    expect((await at(expires - PRIVY_EVM_SIGNING_WINDOW_MS)).ok).toBe(true);
   });
   it('never claims a refused request', async () => {
     const store = { consumeProof: vi.fn(async () => true) };

@@ -23,6 +23,8 @@ export type FloFiPrivy = {
   readonly userId: string | null;
   /** The person's embedded wallets as Privy reports them in this browser (public addresses). */
   readonly embedded: readonly PrivyEmbedded[];
+  /** Whether this page can ask Privy to sign with this embedded wallet now (it is one of the person's and Privy has loaded it). */
+  readonly canSign: (ecosystem: WalletEcosystem, address: string) => boolean;
   readonly getAccessToken: () => Promise<string | null>;
   /** Called after each completed Privy sign-in in this page (also after Google's redirect back). */
   readonly onLogin: (listener: (event: PrivyLoginEvent) => void) => () => void;
@@ -58,6 +60,13 @@ export const useAccountsOffered = () => useContext(AccountsContext);
 /** FloFi's Privy interface, or null on a deployment without Privy (pages then say what is unavailable). */
 export const useFloFiPrivy = () => useContext(Context);
 export { Context as FloFiPrivyContext, AccountsContext as FloFiAccountsContext };
+
+/** Why this page cannot sign with `address` now: not one of the person's Privy wallets here, or Privy has not finished loading it. */
+export function floFiPrivyWalletIssue(privy: FloFiPrivy | null, ecosystem: WalletEcosystem, address: string): string {
+  if (!privy?.ready || !privy.authenticated) return 'FLOFI_WALLET_SIGN_IN_REQUIRED';
+  const listed = privy.embedded.some(wallet => wallet.ecosystem === ecosystem && wallet.address === (ecosystem === 'evm' ? address.toLowerCase() : address));
+  return listed ? 'FLOFI_WALLET_NOT_READY' : 'FLOFI_WALLET_ACCOUNT_MISMATCH';
+}
 
 const PRIVY_CODES: readonly [RegExp, string][] = [
   [/exited|closed|cancel|rejected|denied|user_exited/i, 'PRIVY_USER_CANCELLED'],

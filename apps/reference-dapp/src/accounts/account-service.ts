@@ -9,8 +9,9 @@
  * the account only after Privy's API confirms that this account's own Privy user holds it; creating or importing a wallet authorizes
  * nothing. Wallets created in FloFi Wallet (Turnkey) before Privy keep their records unchanged (legacy, export only).
  */
-import { accountWalletId, canonicalAddress, isPrivyWallet, MANAGED_PROVIDER, MANAGED_PROVIDER_NAME, validProvider, walletLabel, type AccountView,
+import { accountWalletId, canonicalAddress, isPrivyWallet, LEGACY_MANAGED_PROVIDER, MANAGED_PROVIDER, MANAGED_PROVIDER_NAME, validProvider, walletLabel, type AccountView,
   type AccountWallet, type IdentityKind } from './account-model.ts';
+import { createHash } from 'node:crypto';
 import { freshlyAuthenticated, SESSION_PUBLIC_KEY, type AccountSessionToken } from './account-session.ts';
 import type { AccountStore } from './account-store.ts';
 import type { PrivyEmbeddedWallet, PrivyServer, PrivyUser } from './privy-server.ts';
@@ -23,6 +24,8 @@ export type PrivyWalletSync = { readonly wallets: readonly AccountWallet[]; read
 
 const fail = (code: string): never => { throw new Error(code); };
 const ECOSYSTEM_LABEL: Readonly<Record<WalletEcosystem, string>> = Object.freeze({ evm: 'EVM wallet', solana: 'Solana wallet' });
+/** How old a Privy access token may be when it signs in (Privy issues a new one at each login; later API calls may use older ones). */
+export const PRIVY_SIGN_IN_MAX_AGE_MS = 10 * 60_000;
 export function createAccountService(input: { readonly store: AccountStore; readonly privy: PrivyServer | null; readonly now?: () => Date }) {
   const { store, privy } = input, now = input.now ?? (() => new Date());
   const provider = () => privy ?? fail('PRIVY_NOT_CONFIGURED');
@@ -40,11 +43,15 @@ export function createAccountService(input: { readonly store: AccountStore; read
    * Saves one embedded wallet of the account's own Privy user. Idempotent; an address another FloFi account holds is refused and never
    * moved; an address this account already holds keeps its record unchanged (never silently replaced).
    */
-  async function saveEmbedded(session: AccountSessionToken, wallet: PrivyEmbeddedWallet, label: string | null): Promise<AccountWallet> {
+  async function saveEmbedded(session: AccountSessionToken, wallet: PrivyEmbeddedWallet, label: string | null, adoptLegacy = false): Promise<AccountWallet> {
     const holder = await store.walletHolder(wallet.ecosystem, wallet.address);
     if (holder && holder !== session.accountId) fail('ACCOUNT_WALLET_LINKED_ELSEWHERE');
     if (holder) {
       const existing = (await store.wallets(session.accountId)).find(entry => entry.ecosystem === wallet.ecosystem && entry.address === wallet.address);
+      // The person just imported, into Privy, the key of this account's own legacy FloFi Wallet (its documented migration): the record
+      // becomes that Privy wallet, same address and name. Only on that explicit import, never on a background sync.
+      if (existing && adoptLegacy && wallet.imported && existing.provider === LEGACY_MANAGED_PROVIDER)
+        return await store.adoptLegacyWallet(session.accountId, wallet.ecosystem, wallet.address, wallet.walletId, now()) ?? existing;
       if (existing) return existing;
     }
     const fallback = wallet.imported ? `Imported ${ECOSYSTEM_LABEL[wallet.ecosystem]}` : ECOSYSTEM_LABEL[wallet.ecosystem];
@@ -70,6 +77,11 @@ export function createAccountService(input: { readonly store: AccountStore; read
      */
     async completePrivy(token: unknown): Promise<SignInOutcome> {
       const verified = await provider().verify(token);
+      // A sign-in uses a token Privy just issued for this login, once: a copied or replayed token never opens another FloFi session.
+      const at = now().getTime();
+      if (verified.issuedAt * 1000 < at - PRIVY_SIGN_IN_MAX_AGE_MS || verified.issuedAt * 1000 > at + 60_000) fail('PRIVY_SIGN_IN_STALE');
+      if (!await store.consumeProof(createHash('sha256').update(`flofi-privy-sign-in:${token as string}`).digest('hex'), new Date(verified.expiresAt * 1000), now()))
+        fail('PRIVY_SIGN_IN_STALE');
       const user = await provider().user(verified.userId);
       if (!user.method) fail('PRIVY_LOGIN_METHOD_UNSUPPORTED');
       const signed = await store.signInPrivy({ privyUser: user.id, identities: user.identities, method: user.method! }, now());
@@ -90,7 +102,7 @@ export function createAccountService(input: { readonly store: AccountStore; read
       const label = request.label === undefined || request.label === null || request.label === '' ? null : walletLabel(request.label) ?? fail('ACCOUNT_WALLET_LABEL_INVALID');
       const user = await ownPrivyUser(session, token);
       const wallet = user.wallets.find(entry => entry.ecosystem === ecosystem && entry.address === address) ?? fail('ACCOUNT_WALLET_NOT_OWNED');
-      return saveEmbedded(session, wallet!, label);
+      return saveEmbedded(session, wallet!, label, true);
     },
     /** Saves every embedded wallet of the account's own Privy user that the account does not list yet (refresh and timeout recovery). */
     async syncPrivyWallets(session: AccountSessionToken, token: unknown): Promise<PrivyWalletSync> {
@@ -108,6 +120,9 @@ export function createAccountService(input: { readonly store: AccountStore; read
       // Checked first, so a wallet held by another account never leaves a half-linked identity behind.
       const holder = await store.walletHolder(ecosystem, address!);
       if (holder && holder !== session.accountId) fail('ACCOUNT_WALLET_LINKED_ELSEWHERE');
+      // A wallet FloFi's provider keeps for this account (Privy, legacy FloFi Wallet) is never also an external wallet or a sign-in identity.
+      if (holder && (await store.wallets(session.accountId)).some(wallet => wallet.ecosystem === ecosystem && wallet.address === address && wallet.origin !== 'external'))
+        fail('ACCOUNT_WALLET_IS_FLOFI_WALLET');
       await store.linkIdentity(session.accountId, { kind: proof!.namespace, subject: address!, label: null }, now());
       // An external wallet's provider key can never pose as a managed provider.
       const key = validProvider(provider.key) && provider.key !== MANAGED_PROVIDER && provider.key !== 'turnkey' ? provider.key : 'injected';

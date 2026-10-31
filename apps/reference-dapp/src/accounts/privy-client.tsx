@@ -28,7 +28,7 @@ export { currentFloFiPrivy, FloFiPrivyContext, privyErrorCode, useAccountsOffere
   type PrivyLoginEvent, type PrivyReview } from './privy-context';
 import type { WalletEcosystem } from '../wallet/wallet-registry';
 
-/** The four mainnets FloFi signs on (privy-chains.test.ts checks them against the action registry). Base is the default. */
+/** The four mainnets FloFi signs on (privy-client.test.ts checks them against the action registry). Base is the default. */
 export const PRIVY_EVM_CHAINS = Object.freeze([
   { id: 8453, name: 'Base', rpc: 'https://base-mainnet.rpc.privy.systems' },
   { id: 1, name: 'Ethereum', rpc: 'https://mainnet.rpc.privy.systems' },
@@ -92,17 +92,21 @@ function PrivyBridge({ children }: { children: ReactNode }) {
   const { signMessage: signEvmText } = useSignMessage();
   const { signTransaction: signSolana } = useSignSolanaTransaction();
   const { signMessage: signSolanaText } = useSignSolanaMessage();
-  const { wallets: solanaWallets } = useSolanaWallets();
+  const { wallets: solanaWallets, ready: solanaReady } = useSolanaWallets();
   const solanaWallet = useCallback((address: string) => solanaWallets.find(wallet => wallet.address === address)
     ?? fail('FLOFI_WALLET_ACCOUNT_MISMATCH'), [solanaWallets]);
 
   const value = useMemo<FloFiPrivy>(() => {
     const embedded = embeddedWallets(privy.user);
-    const own = (ecosystem: WalletEcosystem, address: string) => embedded.some(wallet => wallet.ecosystem === ecosystem
-      && wallet.address === (ecosystem === 'evm' ? address.toLowerCase() : address)) || fail('FLOFI_WALLET_ACCOUNT_MISMATCH');
+    const listed = (ecosystem: WalletEcosystem, address: string) => embedded.some(wallet => wallet.ecosystem === ecosystem
+      && wallet.address === (ecosystem === 'evm' ? address.toLowerCase() : address));
+    const own = (ecosystem: WalletEcosystem, address: string) => listed(ecosystem, address) || fail('FLOFI_WALLET_ACCOUNT_MISMATCH');
+    // Solana signing also needs Privy's Solana wallet object, which loads separately (`useWallets().ready`).
+    const canSign = (ecosystem: WalletEcosystem, address: string) => privy.ready && privy.authenticated && listed(ecosystem, address)
+      && (ecosystem === 'evm' || solanaReady && solanaWallets.some(wallet => wallet.address === address));
     const wrap = async <T,>(run: () => Promise<T>, fallback: string): Promise<T> => { try { return await run(); } catch (cause) { throw new Error(privyErrorCode(cause, fallback), { cause }); } };
     return {
-      ready: privy.ready, authenticated: privy.ready && privy.authenticated, userId: privy.user?.id ?? null, embedded,
+      ready: privy.ready, authenticated: privy.ready && privy.authenticated, userId: privy.user?.id ?? null, embedded, canSign,
       getAccessToken: () => privy.getAccessToken().catch(() => null),
       onLogin: listener => { loginListeners.current.add(listener); return () => { loginListeners.current.delete(listener); }; },
       onLoginError: listener => { errorListeners.current.add(listener); return () => { errorListeners.current.delete(listener); }; },
@@ -136,7 +140,7 @@ function PrivyBridge({ children }: { children: ReactNode }) {
       logout: () => logout().catch(() => undefined),
     };
   }, [privy, oauth, email, login, logout, createEvm, createSolana, importEvm, importSolana, exportEvm, exportSolana, signEvm, signEvmText, signSolana,
-    signSolanaText, solanaWallet]);
+    signSolanaText, solanaWallet, solanaWallets, solanaReady]);
   return <Context.Provider value={value}><Registrar/>{children}</Context.Provider>;
 }
 
@@ -145,7 +149,7 @@ function PrivyBridge({ children }: { children: ReactNode }) {
  * only when the server itself runs in MOCKED loopback mode (`FLOFI_PRIVY_E2E`, refused on every hosted deployment) and the page is served
  * from a loopback host; otherwise there is no Privy at all (fail closed). The implementation lives in the test harness, not in FloFi.
  */
-export type PrivyDriver = Omit<FloFiPrivy, 'ready' | 'authenticated' | 'userId' | 'embedded'> & {
+export type PrivyDriver = Omit<FloFiPrivy, 'ready' | 'authenticated' | 'userId' | 'embedded' | 'canSign'> & {
   readonly snapshot: () => { readonly ready: boolean; readonly authenticated: boolean; readonly userId: string | null; readonly embedded: readonly PrivyEmbedded[] };
   readonly subscribe: (listener: () => void) => () => void;
   /** Test only: receives FloFi's own signing request function (src/wallet/flofi-privy-signer.ts). */
@@ -171,7 +175,9 @@ function EmulatedPrivy({ children }: { children: ReactNode }) {
     const wrap = <A extends unknown[], R>(run: (...args: A) => Promise<R>, fallback: string) => async (...args: A): Promise<R> => {
       try { return await run(...args); } catch (cause) { throw new Error(privyErrorCode(cause, fallback), { cause }); }
     };
-    return { ...snapshot, getAccessToken: driver.getAccessToken, onLogin: driver.onLogin, onLoginError: driver.onLoginError, loginWithWallet: driver.loginWithWallet,
+    const canSign = (ecosystem: WalletEcosystem, address: string) => snapshot.ready && snapshot.authenticated && snapshot.embedded.some(wallet =>
+      wallet.ecosystem === ecosystem && wallet.address === (ecosystem === 'evm' ? address.toLowerCase() : address));
+    return { ...snapshot, canSign, getAccessToken: driver.getAccessToken, onLogin: driver.onLogin, onLoginError: driver.onLoginError, loginWithWallet: driver.loginWithWallet,
       logout: driver.logout, loginWithOAuth: wrap(driver.loginWithOAuth, 'PRIVY_SIGN_IN_FAILED'), sendEmailCode: wrap(driver.sendEmailCode, 'PRIVY_EMAIL_CODE_FAILED'),
       loginWithEmailCode: wrap(driver.loginWithEmailCode, 'PRIVY_EMAIL_CODE_INVALID'), createWallet: wrap(driver.createWallet, 'PRIVY_WALLET_CREATE_FAILED'),
       importWallet: wrap(driver.importWallet, 'PRIVY_WALLET_IMPORT_FAILED'), exportWallet: wrap(driver.exportWallet, 'PRIVY_WALLET_EXPORT_FAILED'),

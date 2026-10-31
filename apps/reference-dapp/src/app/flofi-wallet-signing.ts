@@ -89,11 +89,18 @@ export async function releaseAttempt(store: Pick<AccountStore, 'releaseProof'>, 
  * (`FLOFI_WALLET_ALREADY_SIGNED`) whoever asks for it. A cancel in Privy never gives the claim back: only the browser says it happened, so the
  * person simulates again (a fresh attempt) instead.
  */
+/**
+ * The least Review lifetime an EVM attempt must still have when its signature is claimed for Privy: the person confirms in Privy after the
+ * claim, and FloFi refuses to broadcast a transaction signed after its Review expired (`floFiEvmBroadcast`), which would leave the attempt
+ * UNKNOWN. Solana needs no margin: its flow's own submit turns a stale Review into a clean cancellation with nothing sent.
+ */
+export const PRIVY_EVM_SIGNING_WINDOW_MS = 20_000;
 export function signingGate(store: Pick<AccountStore, 'consumeProof'>, wallets: readonly AccountWallet[], options: { readonly claim: boolean },
   deps: ManagedSigningDeps = signingDeps(wallets)) {
   return async (context: SigningContext, request: ManagedSigningRequest): Promise<ManagedSigningResult> => {
     const resolved = await resolveManagedSigning(context, request, deps);
     if (!resolved.ok || !options.claim) return resolved;
+    if (resolved.value.evm && resolved.value.expiresAtMs - (deps.now ?? Date.now)() < PRIVY_EVM_SIGNING_WINDOW_MS) return { ok: false, code: 'FLOFI_WALLET_REVIEW_EXPIRING' };
     let claimed: boolean;
     try { claimed = await claimAttempt(store, 'signature', resolved.value.attempt, resolved.value.expiresAtMs); }
     catch { return { ok: false, code: 'FLOFI_WALLET_REVIEW_UNAVAILABLE' }; }

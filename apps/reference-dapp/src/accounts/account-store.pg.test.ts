@@ -80,8 +80,14 @@ describe('FloFi account store', () => {
     expect(await store().managedResource(ana.accountId, 'evm', evm)).toBeNull();
     await store().renameWallet(ana.accountId, 'solana', solana, '  Trading   wallet ');
     expect((await store().wallets(ana.accountId)).map(wallet => [wallet.label, wallet.export])).toEqual([['MetaMask', 'none'], ['Trading wallet', 'recovery-phrase']]);
+    // BUILD-FLOFI-PRIVY-UX-001: a provider-kept wallet (legacy FloFi Wallet here, or Privy) is never removed; an external one is.
+    await expect(store().removeWallet(ana.accountId, 'solana', solana)).rejects.toThrow('ACCOUNT_WALLET_MANAGED_KEPT');
     await store().removeWallet(ana.accountId, 'evm', evm);
     expect((await store().wallets(ana.accountId)).map(wallet => wallet.id)).toEqual([`solana:${solana}`]);
+    const privy = await store().saveWallet(bruno.accountId, { ecosystem: 'evm', address: '0x' + '7'.repeat(40), origin: 'generated', provider: 'privy',
+      providerName: 'Privy', providerResource: null, label: 'EVM' });
+    await expect(store().removeWallet(bruno.accountId, 'evm', privy.address)).rejects.toThrow('ACCOUNT_WALLET_MANAGED_KEPT');
+    expect((await store().wallets(bruno.accountId)).map(wallet => wallet.id)).toEqual([privy.id]);
   });
 
   it('refuses inconsistent wallet metadata before it reaches the database', async () => {

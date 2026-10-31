@@ -9,7 +9,8 @@ import { classifySigningFailure } from './flofi-signing';
 
 const gate = vi.fn(), messageGate = vi.fn();
 vi.mock('../app/flofi-wallet-action', () => ({ floFiSigningGate: (...args: unknown[]) => gate(...args), floFiMessageGate: (...args: unknown[]) => messageGate(...args) }));
-const privy = { ready: true, authenticated: true, signEvmTransaction: vi.fn(), signEvmMessage: vi.fn(), signSolanaTransaction: vi.fn(), signSolanaMessage: vi.fn() };
+const privy = { ready: true, authenticated: true, embedded: [] as { ecosystem: string; address: string; imported: boolean }[], canSign: vi.fn<(ecosystem: string, address: string) => boolean>(() => true),
+  signEvmTransaction: vi.fn(), signEvmMessage: vi.fn(), signSolanaTransaction: vi.fn(), signSolanaMessage: vi.fn() };
 let current: typeof privy | null = privy;
 vi.mock('../accounts/privy-context', async importOriginal => ({ ...await importOriginal<object>(), currentFloFiPrivy: () => current }));
 const { requestThroughPrivy } = await import('./flofi-privy-signer');
@@ -23,7 +24,7 @@ const SUMMARY = { flow: 'base-mainnet-transfer', runId: evm.signing.runId, netwo
   lines: [{ label: 'You send', value: '0.000000000000000001 ETH' }], expiresAt: null };
 const code = async (run: Promise<unknown>) => run.then(() => 'OK', (error: Error) => error.message);
 
-beforeEach(() => { vi.clearAllMocks(); current = privy; privy.ready = true; privy.authenticated = true; });
+beforeEach(() => { vi.clearAllMocks(); current = privy; privy.ready = true; privy.authenticated = true; privy.embedded = []; privy.canSign.mockImplementation(() => true); });
 
 describe('Privy signing behind the reviewed-attempt gate', () => {
   it('asks the server first and hands Privy exactly the reviewed EIP-1559 fields on the attempt’s chain', async () => {
@@ -54,6 +55,18 @@ describe('Privy signing behind the reviewed-attempt gate', () => {
     expect(await code(requestThroughPrivy(evm))).toBe('FLOFI_WALLET_SIGN_IN_REQUIRED');
     expect(gate).not.toHaveBeenCalled();
     expect(classifySigningFailure('FLOFI_WALLET_SIGN_IN_REQUIRED')).toBe('refused');
+  });
+  it('refuses before the gate (claiming nothing) when this page cannot sign with the wallet: not listed, or not loaded yet', async () => {
+    privy.canSign.mockImplementation(() => false);
+    expect(await code(requestThroughPrivy(evm))).toBe('FLOFI_WALLET_ACCOUNT_MISMATCH');
+    privy.embedded = [{ ecosystem: 'solana', address: solana.address, imported: false }];
+    expect(await code(requestThroughPrivy(solana))).toBe('FLOFI_WALLET_NOT_READY');
+    expect(privy.canSign).toHaveBeenCalledWith('solana', solana.address);
+    expect(gate).not.toHaveBeenCalled();
+    expect(privy.signEvmTransaction).not.toHaveBeenCalled();
+    expect(privy.signSolanaTransaction).not.toHaveBeenCalled();
+    expect(classifySigningFailure('FLOFI_WALLET_ACCOUNT_MISMATCH')).toBe('refused');
+    expect(classifySigningFailure('FLOFI_WALLET_NOT_READY')).toBe('refused');
   });
   it('a cancel in Privy is a rejection; any other failure after Privy was asked is unknown, never a refusal', async () => {
     gate.mockResolvedValue({ ok: true, value: SUMMARY });

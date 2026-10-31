@@ -42,7 +42,8 @@ Browser (flofi.xyz)                                   FloFi server              
 ## 3. Security properties
 
 1. **Server-verified identity only.** Every sign-in and wallet save re-verifies a Privy access token server-side and reads the user from
-   Privy's API; nothing the browser claims (address, method, identity) is trusted. Tokens are never stored or logged.
+   Privy's API; nothing the browser claims (address, method, identity) is trusted. Tokens are never stored or logged. A sign-in uses a token
+   issued in the last 10 minutes, once (its digest is consumed): a copied or replayed token never opens another FloFi session.
 2. **No custody, no server signing.** FloFi's server holds the Privy app secret (API reads) and no authorization key, session signer or
    wallet key. Creating or importing a wallet authorizes nothing and delegates nothing.
 3. **Private keys never reach FloFi.** The import screen reads the key once from an uncontrolled password field, clears it, and hands it to
@@ -53,7 +54,10 @@ Browser (flofi.xyz)                                   FloFi server              
    PREPARED/SUBMITTING attempt of one of the account's Privy wallets, carrying exactly these bytes, on a mainnet, and claimed its single
    signature. Privy then shows its confirmation; FloFi alone broadcasts after re-checking the signed bytes (`floFiEvmBroadcast`; Solana: the
    flow's own submit). Error contract unchanged: cancel = 4001 (nothing signed), refusal before Privy = 4100, anything after Privy = unknown
-   and reconciled. Messages: only FloFi's own sign-in message for this host and wallet (`floFiMessageGate`).
+   and reconciled. Messages: only FloFi's own sign-in message for this host and wallet, exactly as the server writes it and unexpired
+   (`floFiMessageGate`). Before the gate, the page must be able to sign with that very wallet (`canSign`: listed by Privy for this person and,
+   for Solana, loaded); otherwise the request is refused before any claim (`FLOFI_WALLET_ACCOUNT_MISMATCH` / `FLOFI_WALLET_NOT_READY`). An
+   EVM attempt is claimed only while its Review has at least 20 s left (`FLOFI_WALLET_REVIEW_EXPIRING`), the time to confirm in Privy.
 5. **No merges, no takeovers** (§4), **no automatic reconnection** (§6).
 6. **CSP.** Account pages allow only Privy's API/frame/RPC origins and its bot-check frames (src/accounts/privy-hosts.ts); WalletConnect
    relays are absent; the product's global `connect-src` adds the same Privy origins.
@@ -68,7 +72,8 @@ Browser (flofi.xyz)                                   FloFi server              
 
 Refused, with nothing written: identities matching two accounts (`ACCOUNT_IDENTITY_CONFLICT`); an account already linked to another Privy
 user (`ACCOUNT_PRIVY_USER_MISMATCH`). An identity another account holds stays with it. Embedded wallets are never sign-in identities.
-Concurrent first sign-ins of one Privy user produce one account. Session methods stay within 0018's set (the most recently verified
+Concurrent first sign-ins of one Privy user produce one account; concurrent first sign-ins of two Privy users reaching one existing account
+through different identities are serialized on the account row, so the second is refused (`ACCOUNT_PRIVY_USER_MISMATCH`). Session methods stay within 0018's set (the most recently verified
 method), so a version-18 build never sees a `PRIVY` session. Tests: `account-service.pg.test.ts` (15).
 
 ## 5. Wallets: one click, recoverable, never replaced
@@ -79,7 +84,11 @@ method), so a version-18 build never sees a `PRIVY` session. Tests: `account-ser
   creating another; a 60 s ceiling shows "Check again" instead of spinning.
 - Recovery: on Add your wallets and at every sign-in, `syncPrivyWallets` saves any embedded wallet the account does not list yet.
 - Never replaced or moved: an address another account holds is refused (`ACCOUNT_WALLET_LINKED_ELSEWHERE`); an address this account already
-  lists keeps its record.
+  lists keeps its record, except the person's own legacy migration (§7).
+- Kept: a Privy or legacy wallet is never removed from the account (My wallets offers Remove for external wallets only; the store refuses
+  `ACCOUNT_WALLET_MANAGED_KEPT`), because a Privy wallet belongs to the account's Privy user and would come back at the next sync, and a
+  legacy record is the only way to export it. An account's own FloFi wallet is never linked again as an external wallet or a sign-in
+  identity (`ACCOUNT_WALLET_IS_FLOFI_WALLET`).
 
 ## 6. Disconnect and sign-out
 
@@ -97,7 +106,9 @@ Disconnect keeps its wallet-only behaviour (there is no sign-in to return to).
 - Existing Turnkey records are unchanged (0019 only widens constraints). Legacy wallets are listed as "Legacy FloFi Wallet", export-only,
   with their addresses. FloFi Wallet (`wallet.flofi.xyz`) keeps unlock and export for accounts that already have a Turnkey organization; its
   relay forwards only export activities; it never creates an organization, saves or signs. Migration path for owners: export there, then
-  Import key with Privy. FloFi never exports a key server-side, moves funds or replaces an address.
+  Import key with Privy. When Privy then lists that same address as the person's imported wallet, that explicit import (never a background
+  sync) turns the legacy record into the Privy wallet, same address and name, so it signs through Privy (`adoptLegacyWallet`). FloFi never
+  exports a key server-side, moves funds or replaces an address.
 - Production was not inspected in this session: the read-only SQL in RELEASE-PRIVY-0019.md decides whether the legacy path and the
   `@turnkey/*` dependencies can be removed later.
 
@@ -157,6 +168,36 @@ verifies with the official SDK, serves Privy's user API, and signs with disposab
 6. A cancel in Privy's confirmation spends that reviewed attempt (the claim precedes Privy, and a browser-reported cancel cannot be
    verified); the person simulates again.
 7. WalletConnect (mobile QR wallets) is unavailable unless the owner accepts the WalletConnect Community License.
+8. Export step-up: FloFi opens Privy's export screen without its own re-authentication (Privy holds the key; FloFi cannot gate its frame).
+   The owner should require MFA or re-authentication for export in the Privy dashboard (ENVIRONMENT.md §5j); the live runbook records it.
+9. A signed EVM transaction can still outlive its Review if the person waits more than the 20 s margin in Privy's confirmation: FloFi then
+   refuses to broadcast it and the attempt is UNKNOWN until reconciled (fail-closed; nothing is sent).
+10. Not introduced here, still open: "Sign in again" for `ACCOUNT_REAUTHENTICATION_REQUIRED` (delete account, link a wallet) returns to the
+    same page while the session is valid; Disconnect, then sign in, is the working path.
+
+## 11a. Specialist review (CLAUDE.md procedure)
+
+`agent_guard.py impact --base origin/main` selected, among others, flofi-security, flofi-wallet-execution and flofi-data-privacy; those
+three reviewed the diff read-only (they were run as general agents following `.claude/agents/*.md`, because the twins were added to `main`
+after this session started). Findings and disposition:
+
+| Finding (severity) | Disposition |
+| --- | --- |
+| Wallet not usable in the page spent the attempt as UNKNOWN (medium) | Fixed: `canSign` before the gate and in Authorize; test |
+| EVM Review could expire while confirming in Privy (medium) | Mitigated: 20 s minimum at claim; test; residual case in §11.9 |
+| Legacy → Privy migration left the wallet export-only (medium) | Fixed: explicit import adopts the legacy record; pg test |
+| Removing a Privy wallet was undone by the next sync (medium) | Fixed: managed wallets are kept; Remove only for external; pg test |
+| Message gate weaker than the removed parser (low) | Fixed: exact server message, nonce, times, unexpired; tests |
+| Two Privy users could link to one account in a race (low) | Fixed: account row lock; pg test that fails without it |
+| Privy sign-in token reusable (low) | Fixed: 10-minute freshness and single use; pg test |
+| Embedded wallet linkable as sign-in identity (low) | Fixed: refused (`ACCOUNT_WALLET_IS_FLOFI_WALLET`); pg test |
+| Export without recent sign-in (low) | Documented (§11.8), dashboard MFA recommended |
+| Cited `privy-zod` test missing (low) | Added `privy-zod.test.ts` (api-base under zod 4.6.6) |
+| Account-deletion test weakened (low) | Restored: all four tables empty, Privy identity and wallet included |
+| Privacy notice did not name Privy (low) | `/privacy` (EN, PT) names Privy and what it processes; legal review is the owner's |
+| Preview origins on the production Privy app (doc) | ENVIRONMENT.md: production app allows `https://flofi.xyz` only |
+| Password managers may offer to save the key (unverified) | Live runbook step 5 records it per browser |
+| "Sign in again" loop (pre-existing on main) | §11.10 |
 
 ## 12. GO / NO-GO
 

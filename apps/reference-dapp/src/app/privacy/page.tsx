@@ -41,6 +41,7 @@ const sectionsPT: readonly Paragraphs[] = [
   ] },
   { title: 'Terceiros e transferências de dados', paragraphs: [
     'O funcionamento pode envolver o Telegram (mensagens), Vercel (site e funções), Railway (API), infraestrutura PostgreSQL/Neon (dados da aplicação) e prestadores de serviços blockchain. Apenas se a interpretação de mensagens por IA estiver ativada, poderá ser utilizado um fornecedor de modelos como a OpenAI. O Telegram trata as mensagens de acordo com as suas próprias políticas.',
+    'As contas FloFi usam a Privy para o início de sessão e as carteiras incorporadas: a Privy trata os identificadores de início de sessão (email, conta Google, endereço de carteira externa) e guarda as chaves das carteiras incorporadas no seu próprio ambiente seguro, incluindo uma chave privada que importe. A FloFi nunca recebe essas chaves; a Privy trata estes dados de acordo com as suas próprias políticas.',
     'Dependendo dos fornecedores e regiões de alojamento, podem existir transferências internacionais de dados, sujeitas às garantias legais aplicáveis.'
   ] },
   { title: 'Os seus direitos', paragraphs: [
@@ -76,6 +77,7 @@ const sectionsEN: readonly Paragraphs[] = [
   ] },
   { title: 'Service providers and transfers', paragraphs: [
     'Services may involve Telegram (messages), Vercel (website/functions), Railway (API), PostgreSQL/Neon (application data) and blockchain providers. Only if AI message interpretation is enabled may a model provider such as OpenAI be used. Telegram processes messages under its own policies.',
+    'FloFi accounts use Privy for sign-in and embedded wallets: Privy processes your sign-in identifiers (email, Google account, external wallet address) and keeps your embedded wallets’ keys in its own secure environment, including a private key you import. FloFi never receives those keys; Privy processes this data under its own policies.',
     'Depending on providers and hosting regions, international data transfers may take place, subject to applicable legal safeguards.'
   ] },
   { title: 'Your rights', paragraphs: [
