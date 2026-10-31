@@ -51,9 +51,9 @@ test.describe.configure({ mode: 'serial' });
 
 test('the landing opens sign-in with exactly Apple, Google, Email and Web3 Wallet (desktop, mobile, PT/EN, light/dark)', async ({ page }) => {
   await setup(page);
-  await page.addInitScript(() => sessionStorage.setItem('flofi-alive-intro-v1', 'seen'));
   await page.goto('/');
-  await page.locator('header').getByRole('link', { name: 'Launch Beta FloFi', exact: true }).click();
+  // BUILD-FLOFI-LANDING07-README-001: Landing 07's header entry link (Portuguese first) opens sign-in.
+  await page.locator('header').getByRole('link', { name: 'Começar com FloFi', exact: true }).click();
   await expect(page).toHaveURL('/login');
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Sign inyour way');
   // Never framed by another site (clickjacking), never referred.
@@ -147,6 +147,10 @@ test('first Google sign-in: verified server session, wallet introduction, create
   await shot(page, '05-credentials-my-wallets');
   // The onboarding is not shown again to a completed account.
   await page.goto('/login'); await expect(page).toHaveURL('/app');
+  // BUILD-FLOFI-LANDING07-README-001: a returning, signed-in visitor entering from Landing 07 goes straight on to the app.
+  await page.goto('/');
+  await page.locator('main').getByRole('link', { name: 'Começar com FloFi', exact: true }).click();
+  await expect(page).toHaveURL('/app');
 });
 
 test('export: only managed wallets, explicit confirmation, provider frame only, no clipboard or storage writes', async ({ page }) => {
