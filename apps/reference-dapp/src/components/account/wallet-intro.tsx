@@ -13,9 +13,9 @@ import { AccountIcon } from './account-icons';
 import { accountMessage } from './account-messages';
 import { AccountShell, accountStyles as styles } from './account-shell';
 
+/** Signs this browser out of FloFi (server-side revocation). FloFi Wallet's session is bound to it and ends with it. */
 export async function signOutThisBrowser(): Promise<void> {
   await accountSignOut().catch(() => undefined);
-  try { await (await import('../../accounts/turnkey-browser')).clearSessionKey(); } catch { /* no provider key here */ }
 }
 export function accountDisplay(account: NonNullable<AccountState['account']>): { name: string; method: string } {
   const own = account.identities.find(identity => identity.kind === account.method) ?? account.identities[0];
@@ -45,8 +45,8 @@ export function WalletIntro({ state }: { state: AccountState }) {
     <h1 className={styles.heading}>{t('Your wallets. One FloFi account.')}</h1>
     <p className={`${styles.lead} ${styles.center}`} style={{ textAlign: 'center' }}>{t('Your account is how you sign in. A wallet is what signs transactions — and only after you review them.')}</p>
     <ul className={styles.explain}>
-      <li><AccountIcon name="plus"/><span><strong>{t('Create a new wallet.')}</strong> {t('Generated in seconds by our wallet provider, Turnkey. FloFi never sees the key.')}</span></li>
-      <li><AccountIcon name="import"/><span><strong>{t('Import one you have.')}</strong> {t('Your key is typed into Turnkey’s isolated secure field, never into FloFi.')}</span></li>
+      <li><AccountIcon name="plus"/><span><strong>{t('Create a new wallet.')}</strong> {t('Generated in seconds by our wallet provider, Turnkey. FloFi never sees the key.')} {t('It opens in FloFi Wallet, a separate secure window where you confirm every signature.')}</span></li>
+      <li><AccountIcon name="import"/><span><strong>{t('Import one you have.')}</strong> {t('Your key is typed into Turnkey’s isolated secure field, never into FloFi.')} {t('It opens in FloFi Wallet, a separate secure window where you confirm every signature.')}</span></li>
       <li><AccountIcon name="wallet"/><span><strong>{t('Connect the wallet you use.')}</strong> {t('Keep MetaMask, Phantom or Solflare. Your keys stay in your wallet.')}</span></li>
     </ul>
     <a className={styles.primary} href="/onboarding/wallets" aria-disabled={busy || undefined}>{t('Add wallets')}</a>

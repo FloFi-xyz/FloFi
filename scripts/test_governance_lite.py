@@ -9,8 +9,8 @@ import sys
 import tempfile
 import unittest
 
-from governance_lite import (AGE_WAIVER, APPROVED_AGE_WAIVERS, CONTRACTS, GOVERNANCE, control_errors, secret_errors, validate,
-                             dependency_age_waivers, dependency_release_age_allowed)
+from governance_lite import (AGE_POLICY, AGE_WAIVER, APPROVED_AGE_WAIVERS, CONTRACTS, GOVERNANCE, LEGACY_AGE_WAIVERS, control_errors,
+                             secret_errors, validate, age_waiver_entry_errors, dependency_age_waivers, dependency_release_age_allowed)
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -22,6 +22,8 @@ def safety_files():
              "LICENSES/Apache-2.0.txt", "LICENSES/AGPL-3.0-only.txt"]
     if (ROOT / AGE_WAIVER).is_file():
         paths.append(AGE_WAIVER)
+    if (ROOT / AGE_POLICY).is_file():
+        paths.append(AGE_POLICY)
     return {path: (ROOT / path).read_text() for path in paths}
 
 
@@ -213,13 +215,17 @@ class GovernanceLite(unittest.TestCase):
         waivers, errors = dependency_age_waivers(self.files)
         self.assertEqual(errors, [])
         self.assertEqual(waivers, {(w["package"], w["version"]) for w in APPROVED_AGE_WAIVERS})
-        self.assertIn(("source-map-js", "1.2.2"), waivers)
-        self.assertIn(("fast-uri", "3.1.9"), waivers)
+        # The earlier owner-approved exceptions stay; the minimatch security fix and its new dependency are added exactly.
+        for identity in (("source-map-js", "1.2.2"), ("fast-uri", "3.1.9"), ("minimatch", "11.0.3"), ("@isaacs/nonrecursive-glob-match", "1.0.3")):
+            self.assertIn(identity, waivers)
         cutoff = datetime.datetime(2026, 9, 30, tzinfo=datetime.timezone.utc)
         young = cutoff + datetime.timedelta(days=1)
         for name, version, expected in (("source-map-js", "1.2.2", True), ("fast-uri", "3.1.9", True),
+                ("minimatch", "11.0.3", True), ("@isaacs/nonrecursive-glob-match", "1.0.3", True),
                 ("source-map-js", "1.2.1", False), ("source-map-js", "1.2.3", False),
                 ("fast-uri", "3.1.8", False), ("fast-uri", "3.1.10", False),
+                ("minimatch", "11.0.2", False), ("minimatch", "11.0.4", False), ("minimatch", "10.2.6", False),
+                ("@isaacs/nonrecursive-glob-match", "1.0.2", False), ("nonrecursive-glob-match", "1.0.3", False),
                 ("another-package", "1.2.2", False), ("sharp", "0.35.5", False)):
             with self.subTest(name=name, version=version):
                 self.assertEqual(dependency_release_age_allowed(name, version, young, cutoff, waivers), expected)
@@ -229,12 +235,28 @@ class GovernanceLite(unittest.TestCase):
             self.assertFalse(dependency_release_age_allowed(name, version,
                 cutoff + datetime.timedelta(microseconds=1), cutoff, waivers))
 
+    def test_age_waiver_minimum_age_itself_is_unchanged(self):
+        workspace = self.files["pnpm-workspace.yaml"]
+        self.assertIn("\nminimumReleaseAge: 10080\n", workspace)
+        self.assertEqual(workspace.count("minimumReleaseAge:"), 1)
+        files = dict(self.files)
+        files["pnpm-workspace.yaml"] = workspace.replace("minimumReleaseAge: 10080", "minimumReleaseAge: 1440")
+        self.assertTrue(validate(files, "codex/future-product"))
+
     def test_broad_or_undocumented_age_waivers_fail(self):
-        base_exclude = "minimumReleaseAgeExclude:\n  - source-map-js@1.2.2\n  - fast-uri@3.1.9\n"
+        base_exclude = ("minimumReleaseAgeExclude:\n  - source-map-js@1.2.2\n  - fast-uri@3.1.9\n  - minimatch@11.0.3\n"
+                        "  - '@isaacs/nonrecursive-glob-match@1.0.3'\n")
+        self.assertIn(base_exclude, self.files["pnpm-workspace.yaml"])
         for spec in ("source-map-js", "source-map-js@*", "source-map-js@>=1.2.2",
                      "source-map-js@1.2.1", "source-map-js@1.2.3", "sharp@0.35.5", "fast-uri@3.1.8",
                      "source-map-js@1.2.2\n  - sharp@0.35.5",
-                     "fast-uri@3.1.9\n  - source-map-js@1.2.2"):  # wrong order
+                     "fast-uri@3.1.9\n  - source-map-js@1.2.2",  # wrong order
+                     "source-map-js@1.2.2\n  - fast-uri@3.1.9",  # the new exceptions missing
+                     "source-map-js@1.2.2\n  - fast-uri@3.1.9\n  - minimatch@11.0.3",
+                     "source-map-js@1.2.2\n  - fast-uri@3.1.9\n  - minimatch@11.0.3\n  - '@isaacs/nonrecursive-glob-match@*'",
+                     "source-map-js@1.2.2\n  - fast-uri@3.1.9\n  - minimatch@^11.0.3\n  - '@isaacs/nonrecursive-glob-match@1.0.3'",
+                     "source-map-js@1.2.2\n  - fast-uri@3.1.9\n  - minimatch\n  - '@isaacs/nonrecursive-glob-match@1.0.3'",
+                     "source-map-js@1.2.2\n  - fast-uri@3.1.9\n  - minimatch@11.0.3\n  - '@isaacs/*'"):
             files = dict(self.files)
             files["pnpm-workspace.yaml"] = files["pnpm-workspace.yaml"].replace(base_exclude, "minimumReleaseAgeExclude:\n  - " + spec + "\n")
             self.assertTrue(dependency_age_waivers(files)[1], spec)
@@ -255,6 +277,42 @@ class GovernanceLite(unittest.TestCase):
         self.assertTrue(dependency_age_waivers(files)[1])
         files = dict(self.files)
         del files[AGE_WAIVER]
+        self.assertTrue(dependency_age_waivers(files)[1])
+
+    def test_new_age_waivers_need_category_evidence_and_exact_binding(self):
+        new = [dict(entry) for entry in APPROVED_AGE_WAIVERS if f"{entry['package']}@{entry['version']}" not in LEGACY_AGE_WAIVERS]
+        self.assertEqual([f"{entry['package']}@{entry['version']}" for entry in new], ["minimatch@11.0.3", "@isaacs/nonrecursive-glob-match@1.0.3"])
+        for entry in new:
+            self.assertEqual(age_waiver_entry_errors(entry, self.files), [])
+        base = new[0]
+        broken = {
+            "missing integrity": {k: v for k, v in base.items() if k != "integrity"},
+            "unknown field": {**base, "expires": "never"},
+            "category": {**base, "category": "convenience"},
+            "no advisory": {**base, "advisories": []},
+            "bad advisory": {**base, "advisories": ["CVE-2026-0001"]},
+            "integrity format": {**base, "integrity": "sha256-abc"},
+            "eligibility shortened": {**base, "eligible_at": "2026-10-29T20:00:34.713Z"},
+            "eligibility missing time": {**base, "published_at": "2026-10-28"},
+            "range identity": {**base, "version": "^11.0.3"},
+            "glob identity": {**base, "package": "@isaacs/*"},
+            "required_by range": {**base, "required_by": "minimatch@^11"},
+            "review missing": {**base, "review": "docs/security/NOT-A-REVIEW.md"},
+            "approval missing": {**base, "approval": ""},
+            "approval date": {**base, "approved_at": "yesterday"},
+        }
+        for label, entry in broken.items():
+            with self.subTest(label=label):
+                self.assertTrue(age_waiver_entry_errors(entry, self.files))
+        # A reviewed product dependency needs its review document but no advisory.
+        reviewed = {k: v for k, v in base.items() if k != "advisories"}
+        reviewed["category"] = "reviewed-dependency"
+        self.assertEqual(age_waiver_entry_errors(reviewed, self.files), [])
+        # The metadata must stay identical to the approved list, so schema changes there fail as a whole.
+        files = dict(self.files)
+        metadata = json.loads(files[AGE_WAIVER])
+        metadata["waivers"][2]["integrity"] = "sha512-" + "A" * 86 + "=="
+        files[AGE_WAIVER] = json.dumps(metadata)
         self.assertTrue(dependency_age_waivers(files)[1])
 
 

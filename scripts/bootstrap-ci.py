@@ -20,7 +20,8 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from governance_lite import AGE_WAIVER, dependency_age_waivers, dependency_release_age_allowed
+from governance_lite import (AGE_WAIVER, APPROVED_AGE_WAIVERS, LEGACY_AGE_WAIVERS, dependency_age_waivers,
+                             dependency_release_age_allowed)
 from ci_archive_cache import verified_archive
 
 NODE_VERSION = "24.21.0"
@@ -394,9 +395,14 @@ BUILDMCP001_DIRECT_VERSIONS = {
 # BUILD-FLOFI-AUTH-WALLETS-001 adds 8 (Apache-2.0/MIT): @turnkey/iframe-stamper (no dependencies) and @turnkey/indexed-db-stamper
 # with @turnkey/encoding, @turnkey/sdk-types, bs58, bs58check, base-x and @noble/hashes. Owner review: these are the provider's
 # isolated import/export iframe bridge and its non-extractable WebCrypto session-key stamper; FloFi holds no wallet key.
-REGISTRY_PACKAGE_COUNT = 271
+# BUILD-FLOFI-AUTH-WALLETS-001 (encrypted email codes) adds 23 with @turnkey/crypto@2.13.3 (Apache-2.0): @noble/ciphers@1.3.0,
+# @noble/curves@1.9.0, borsh, cbor-js, @peculiar/x509 and its asn1 packages, asn1js, pvtsutils, pvutils, reflect-metadata, tsyringe and
+# tslib@1.14.1 (0BSD, exact identity below). Owner review: Turnkey's own encryption of the email code to its enclave (verified enclave
+# signature, HPKE) and verification-token check; FloFi writes no cryptography. No install scripts; no eval/new Function.
+REGISTRY_PACKAGE_COUNT = 295
 # BUILD-FLOFI-AUTH-WALLETS-001: the embedded-wallet provider's browser stampers (docs/builds/BUILD-FLOFI-AUTH-WALLETS-001.md).
 BUILDAUTHWALLETS001_DIRECT_VERSIONS = {
+    "@turnkey/crypto": "2.13.3",
     "@turnkey/iframe-stamper": "2.11.1",
     "@turnkey/indexed-db-stamper": "1.3.12",
 }
@@ -433,6 +439,10 @@ def verify_dependencies():
     waiver_files = {"pnpm-workspace.yaml": Path("pnpm-workspace.yaml").read_text()}
     if Path(AGE_WAIVER).is_file():
         waiver_files[AGE_WAIVER] = Path(AGE_WAIVER).read_text()
+    for entry in APPROVED_AGE_WAIVERS:
+        review = str(entry.get("review", "")).split("#", 1)[0]
+        if review and Path(review).is_file():
+            waiver_files[review] = Path(review).read_text()
     age_waivers, waiver_errors = dependency_age_waivers(waiver_files)
     errors.extend(waiver_errors)
     plan = Path("docs/builds/BUILD-001-PLAN.md").read_text()
@@ -447,7 +457,7 @@ def verify_dependencies():
     if lock.count("\npackages:\n") != 1 or lock.count("\nsnapshots:\n") != 1:
         raise RuntimeError("Unrecognized lockfile sections")
     resolved_sections = "packages:\n" + lock.split("\npackages:\n", 1)[1]
-    if hashlib.sha256(resolved_sections.encode()).hexdigest() != "f245305f39847f86493048d092091cd6c30990c463b988f9bde3b7730a36c333":
+    if hashlib.sha256(resolved_sections.encode()).hexdigest() != "978db9a42627fb6d11316e6496ef8ccd76dc2f92a0e6269a63ba0be5d908b7ac":
         errors.append("Baseline registry packages/snapshots or peer resolutions changed")
     packages_text = lock.split("\npackages:\n", 1)[1].split("\nsnapshots:\n", 1)[0]
     snapshots_text = lock.split("\nsnapshots:\n", 1)[1]
@@ -721,9 +731,15 @@ def verify_dependencies():
         license_id = package.get("license")
         legacy_mpl = (license_id == "MPL-2.0" and version == "1.33.0" and
                       name in BUILD001_LIGHTNINGCSS_NAMES)
+        # BlueOak-1.0.0 (permissive, OSI-approved), exact identities only. minimatch@10.2.6 was reviewed earlier; GHSA-g3hv-75wg-m249
+        # moves ESLint's three consumers to minimatch@11.0.3, which adds its author's @isaacs/nonrecursive-glob-match (same license).
         legacy_blueoak = (license_id == "BlueOak-1.0.0" and
-                          identity == "minimatch@10.2.6")
-        rejected = license_id not in allowed_licenses and not legacy_mpl and not legacy_blueoak
+                          identity in {"minimatch@11.0.3", "@isaacs/nonrecursive-glob-match@1.0.3"})
+        # 0BSD (OSI-approved, public-domain-equivalent: no attribution or notice obligation), exact identity only. tslib@1.14.1 is
+        # tsyringe@4.10.0's TypeScript helper runtime, reached only through @turnkey/crypto@2.13.3 → @peculiar/x509. The existing
+        # tslib@2.8.1 exception is unchanged; no other 0BSD package or version is accepted by this line.
+        reviewed_0bsd = license_id == "0BSD" and identity == "tslib@1.14.1"
+        rejected = license_id not in allowed_licenses and not legacy_mpl and not legacy_blueoak and not reviewed_0bsd
         approved = BUILD002_REVIEWED_LICENSE_EXCEPTIONS.get(identity)
         if approved:
             if (license_id != approved["license"] or integrity != approved["integrity"]):
@@ -743,6 +759,33 @@ def verify_dependencies():
                   "optional": bool(re.search(r"(?m)^    optional: true$",
                                               snapshot_blocks.get(identity, "")))}
         return record, issues, rejected
+
+    # Each waiver is bound to the exact reviewed tarball and publication: the identity must be locked with the recorded integrity,
+    # and the registry must report the recorded publication time. Waivers past normal eligibility are reported for removal.
+    removable_waivers = []
+    for entry in APPROVED_AGE_WAIVERS:
+        identity = f"{entry['package']}@{entry['version']}"
+        if identity not in locked:
+            errors.append(f"Release-age waiver for an unlocked identity: {identity}")
+            continue
+        if "integrity" in entry and locked[identity] != entry["integrity"]:
+            errors.append(f"Release-age waiver integrity differs from the lockfile: {identity}")
+        published = metadata_records[identity][1]
+        if "published_at" in entry and isinstance(published, str):
+            try:
+                registry_time = datetime.datetime.fromisoformat(published.replace("Z", "+00:00"))
+                if identity in LEGACY_AGE_WAIVERS:  # recorded to the second before this binding existed
+                    registry_time = registry_time.replace(microsecond=0)
+                same = registry_time == datetime.datetime.fromisoformat(entry["published_at"].replace("Z", "+00:00"))
+            except ValueError:
+                same = False
+            if not same:
+                errors.append(f"Release-age waiver publication time differs from the registry: {identity}")
+        try:
+            if datetime.datetime.fromisoformat(str(published).replace("Z", "+00:00")) <= cutoff:
+                removable_waivers.append(identity)
+        except ValueError:
+            pass
 
     records = []
     rejected_identities = set()
@@ -768,6 +811,7 @@ def verify_dependencies():
     destination.write_text(json.dumps(records, indent=2, sort_keys=True) + "\n")
     print("Registry entries/integrities/release ages verified:", len(records), flush=True)
     print("Exact temporary owner-approved release-age waivers:", sorted(age_waivers), flush=True)
+    print("Release-age waivers past normal eligibility (remove in a follow-up change):", sorted(removable_waivers), flush=True)
     print("Exact reviewed license exception set:", len(rejected_identities), flush=True)
     print("License inventory:",
           dict(sorted(collections.Counter(r["license"] for r in records).items())), flush=True)

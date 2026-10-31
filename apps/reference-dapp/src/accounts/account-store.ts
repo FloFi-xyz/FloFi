@@ -68,9 +68,11 @@ export function createAccountStore(db: Database, tenantId: string) {
           WHERE tenant_id=$1 AND kind=$2 AND subject=$3 RETURNING account_id`, [tenantId, KIND_SQL[identity.kind], identity.subject, now, identity.label])).rows[0];
         if (existing) return { ...await sessionRow(tx, existing.account_id, identity.kind, now), created: false };
         const accountId = newAccountId();
-        await tx.query('INSERT INTO flofi_accounts (tenant_id, account_id) VALUES ($1,$2)', [tenantId, accountId]);
-        const inserted = await tx.query(`INSERT INTO flofi_account_identities (tenant_id, kind, subject, account_id, label) VALUES ($1,$2,$3,$4,$5)
-          ON CONFLICT DO NOTHING RETURNING account_id`, [tenantId, KIND_SQL[identity.kind], identity.subject, accountId, identity.label]);
+        // One clock for every identity row (here and in linkIdentity): the identity an account was created with is always its oldest,
+        // which is what FloFi Wallet treats as the account's primary identity (wallet-service.ts).
+        await tx.query('INSERT INTO flofi_accounts (tenant_id, account_id, created_at, updated_at) VALUES ($1,$2,$3,$3)', [tenantId, accountId, now]);
+        const inserted = await tx.query(`INSERT INTO flofi_account_identities (tenant_id, kind, subject, account_id, label, created_at, last_used_at) VALUES ($1,$2,$3,$4,$5,$6,$6)
+          ON CONFLICT DO NOTHING RETURNING account_id`, [tenantId, KIND_SQL[identity.kind], identity.subject, accountId, identity.label, now]);
         // A concurrent first sign-in with the same identity won the race: retry as a returning sign-in (this transaction rolls back).
         if (!inserted.rowCount) fail('ACCOUNT_SIGN_IN_RACE');
         return { ...await sessionRow(tx, accountId, identity.kind, now), created: true };
@@ -128,6 +130,11 @@ export function createAccountStore(db: Database, tenantId: string) {
       await db.query('DELETE FROM flofi_account_used_proofs WHERE tenant_id=$1 AND expires_at <= $2', [tenantId, now]);
       return (await db.query('INSERT INTO flofi_account_used_proofs (tenant_id, digest, expires_at) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING',
         [tenantId, digest, expiresAt > now ? expiresAt : new Date(now.getTime() + 60_000)])).rowCount === 1;
+    },
+    /** Releases a single-use proof again. Only for a claim whose use provably never happened (see `releaseAttempt`). */
+    async releaseProof(digest: string): Promise<void> {
+      if (!/^[0-9a-f]{64}$/.test(digest)) fail('ACCOUNT_PROOF_INVALID');
+      await db.query('DELETE FROM flofi_account_used_proofs WHERE tenant_id=$1 AND digest=$2', [tenantId, digest]);
     },
     /**
      * Deletes the account and, through the foreign keys, its identities, sessions and saved wallet metadata. Wallets at the provider

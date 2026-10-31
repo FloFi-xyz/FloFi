@@ -12,7 +12,7 @@ const key = '02' + 'c'.repeat(64);
 describe('sealed account session cookie', () => {
   it('round-trips only for the same key, host and lifetime', () => {
     const token = sealAccountSession(env, session, 'flofi.xyz', now);
-    expect(readAccountSession(env, token, now, 'flofi.xyz')).toEqual({ ...session, managedKey: null, managedUntil: null });
+    expect(readAccountSession(env, token, now, 'flofi.xyz')).toEqual(session);
     expect(readAccountSession(other, token, now, 'flofi.xyz')).toBeNull();
     expect(readAccountSession(env, token, now, 'preview.flofi.xyz')).toBeNull();
     expect(readAccountSession(env, token, new Date((at + 3601) * 1000), 'flofi.xyz')).toBeNull();
@@ -21,11 +21,10 @@ describe('sealed account session cookie', () => {
     expect(readAccountSession(env, `${kind}.${forged}.${mac}`, now, 'flofi.xyz')).toBeNull();
     expect(readAccountSession(env, undefined, now, 'flofi.xyz')).toBeNull();
   });
-  it('carries the provider-session hint only while it is valid, and never other claims', () => {
-    const token = sealAccountSession(env, { ...session, managedKey: key, managedUntil: at + 600 }, 'flofi.xyz', now);
-    expect(readAccountSession(env, token, now, 'flofi.xyz')).toMatchObject({ managedKey: key, managedUntil: at + 600 });
-    expect(readAccountSession(env, token, new Date((at + 601) * 1000), 'flofi.xyz')).toMatchObject({ managedKey: null, managedUntil: null });
-    expect(Buffer.from(token.split('.')[1]!, 'base64url').toString()).not.toMatch(/token|secret|private|seed|mnemonic/i);
+  it('carries only the session claims: no provider key, token or secret', () => {
+    const token = sealAccountSession(env, { ...session, managedKey: key, managedUntil: at + 600 } as typeof session, 'flofi.xyz', now);
+    expect(readAccountSession(env, token, now, 'flofi.xyz')).toEqual(session);
+    expect(Buffer.from(token.split('.')[1]!, 'base64url').toString()).not.toMatch(/token|secret|private|seed|mnemonic|"k"/i);
   });
   it('refuses to seal malformed sessions and requires a recent sign-in for sensitive actions', () => {
     expect(() => sealAccountSession(env, { ...session, accountId: 'acct_x' }, 'flofi.xyz', now)).toThrow('ACCOUNT_SESSION_INVALID');

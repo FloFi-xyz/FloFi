@@ -5,7 +5,7 @@
  * and Web3 Wallet. Each one is verified by FloFi's server; the browser never decides who is signed in. A method this deployment
  * cannot run is shown disabled with the reason, never simulated. Signing in approves nothing and moves no funds.
  */
-import { useId, useState } from 'react';
+import { useId, useRef, useState } from 'react';
 import { useLocale } from '../../i18n/locale';
 import { completeEmailSignIn, startEmailSignIn, startSocialSignIn, walletAccountSignIn, type AccountState } from '../../app/account-action';
 import { useWalletProof, walletProofMessage, type Namespace } from '../wallet-proof';
@@ -15,11 +15,6 @@ import { accountMessage } from './account-messages';
 import { AccountShell, accountStyles as styles } from './account-shell';
 
 type Method = 'google' | 'apple' | 'email' | 'wallet';
-/** The provider session key, only when this deployment has managed wallets (it is created in this browser's IndexedDB). */
-async function managedKey(state: AccountState): Promise<string | null> {
-  if (!state.availability.managedWallets) return null;
-  try { return await (await import('../../accounts/turnkey-browser')).sessionPublicKey(); } catch { return null; }
-}
 
 function SignInContent({ state, initialError, returnTo, intent, initialMethod }: { state: AccountState; initialError: string | null; returnTo: string;
   intent: 'sign-in' | 'link'; initialMethod: Method | null }) {
@@ -30,6 +25,8 @@ function SignInContent({ state, initialError, returnTo, intent, initialMethod }:
   /** A wallet proof's owner-facing message (already human text from walletProofMessage); never a raw provider or browser error. */
   const [proofError, setProofError] = useState<string | null>(null);
   const [email, setEmail] = useState(''), [code, setCode] = useState(''), [sent, setSent] = useState<string | null>(null), [notice, setNotice] = useState('');
+  /** This attempt's encryption target and browser key (public half): the code is encrypted to the provider in this page. */
+  const attempt = useRef<{ targetBundle: string; browserKey: string } | null>(null);
   const evm = useWalletProof('eip155'), solana = useWalletProof('solana');
   const emailId = useId(), codeId = useId(), statusId = useId();
   const available = state.availability;
@@ -37,23 +34,34 @@ function SignInContent({ state, initialError, returnTo, intent, initialMethod }:
 
   async function social(provider: 'google' | 'apple') {
     setError(null); setBusy(provider);
-    const started = await startSocialSignIn(provider, await managedKey(state), intent, returnTo).catch(() => ({ ok: false as const, code: 'ACCOUNT_REQUEST_FAILED' }));
+    const started = await startSocialSignIn(provider, null, intent, returnTo).catch(() => ({ ok: false as const, code: 'ACCOUNT_REQUEST_FAILED' }));
     if (started.ok) { go(started.value.url); return; }
     setBusy(null); setError(started.code);
   }
   async function sendCode(event?: { preventDefault(): void }) {
     event?.preventDefault();
     setError(null); setNotice(''); setBusy('email');
-    const key = await managedKey(state);
-    if (!key) { setBusy(null); setError('MANAGED_SESSION_KEY_UNAVAILABLE'); return; }
+    let key: string;
+    try { key = await (await import('../../accounts/otp-browser')).attemptPublicKey(); }
+    catch { setBusy(null); setError('OTP_KEY_UNAVAILABLE'); return; }
     const started = await startEmailSignIn(email, key, intent, returnTo).catch(() => ({ ok: false as const, code: 'EMAIL_SIGN_IN_FAILED' }));
     setBusy(null);
-    if (started.ok) { if (sent) setNotice(t('A new code was sent to {0}.', started.value.email)); setSent(started.value.email); setCode(''); } else setError(started.code);
+    if (started.ok) {
+      attempt.current = { targetBundle: started.value.targetBundle, browserKey: key };
+      if (sent) setNotice(t('A new code was sent to {0}.', started.value.email)); setSent(started.value.email); setCode('');
+    } else setError(started.code);
   }
   async function verify(event: { preventDefault(): void }) {
     event.preventDefault();
+    const current = attempt.current;
+    if (!current) { setError('EMAIL_CHALLENGE_EXPIRED'); return; }
     setError(null); setBusy('email');
-    const done = await completeEmailSignIn(code.replace(/\s+/g, '')).catch(() => ({ ok: false as const, code: 'EMAIL_SIGN_IN_FAILED' }));
+    let bundle: string;
+    try {
+      bundle = await (await import('../../accounts/otp-browser')).encryptEmailCode(code.replace(/\s+/g, ''), current.targetBundle, current.browserKey,
+        state.provider?.otpSignerPublicKey ?? null);
+    } catch (cause) { setBusy(null); setError(cause instanceof Error ? cause.message : 'EMAIL_SIGN_IN_FAILED'); return; }
+    const done = await completeEmailSignIn(bundle).catch(() => ({ ok: false as const, code: 'EMAIL_SIGN_IN_FAILED' }));
     if (done.ok) { go(done.value.next); return; }
     setBusy(null); setError(done.code);
   }

@@ -639,4 +639,5 @@ Release order remains certificate first: every version-17 database consumer must
 is applied. This PR supplies the schema-18 code and assessment; promotion requires a reviewed certificate-bearing version-17 release
 followed by the migration-bearing release. No production migration or release was performed during engineering. Rollback must
 retain the certificate or use a schema-18 compatible artifact; do not drop the account tables or loosen schema validation to
-accommodate an older binary.
+accommodate an older binary. The exact Release A contents, deployment order and rollback table are in
+[RELEASE-AUTH-WALLETS-0018.md](./RELEASE-AUTH-WALLETS-0018.md).

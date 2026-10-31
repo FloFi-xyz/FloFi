@@ -57,8 +57,8 @@ export const portugueseAccounts: Readonly<Record<string, string>> = {
   "Creating and importing wallets isn't available on this deployment yet.": 'Criar e importar carteiras ainda não está disponível nesta implantação.',
   'You can still connect MetaMask, Phantom or Solflare in Credentials and use them with FloFi.': 'Você ainda pode conectar MetaMask, Phantom ou Solflare em Credenciais e usá-las com o FloFi.',
   'You signed in with a wallet.': 'Você entrou com uma carteira.',
-  'Creating or importing wallets needs a Google, Apple or email sign-in, which also protects their recovery. Your connected wallet keeps working as it is.':
-    'Criar ou importar carteiras exige login com Google, Apple ou email, que também protege a recuperação delas. Sua carteira conectada continua funcionando como está.',
+  'FloFi Wallet needs a FloFi account created with Google, Apple or email, which also protects its recovery. A sign-in linked later cannot take that role. Your connected wallet keeps working as it is.':
+    'A FloFi Wallet precisa de uma conta FloFi criada com Google, Apple ou email, que também protege a recuperação. Um login vinculado depois não pode assumir esse papel. Sua carteira conectada continua funcionando como está.',
   'Confirm it’s you to add wallets': 'Confirme que é você para adicionar carteiras',
   'Your secure wallet session in this browser has ended. Sign in again to create or import wallets.':
     'Sua sessão segura de carteira neste navegador terminou. Entre novamente para criar ou importar carteiras.',
@@ -171,4 +171,90 @@ export const portugueseAccounts: Readonly<Record<string, string>> = {
   'That sign-in was already used. Start again.': 'Esse login já foi usado. Comece de novo.',
   'This FloFi account no longer exists.': 'Esta conta FloFi não existe mais.',
   'Link a wallet from Credentials → My wallets': 'Vincule uma carteira em Credenciais → Minhas carteiras',
+  // FloFi Wallet (separate secure origin)
+  'Continue in FloFi Wallet…': 'Continue na FloFi Wallet…', 'Waiting for FloFi Wallet…': 'Aguardando a FloFi Wallet…',
+  'Your wallets open in FloFi Wallet': 'Suas carteiras abrem na FloFi Wallet',
+  'FloFi Wallet is a separate secure window. You unlock it with your email code or Google/Apple sign-in, and you confirm every signature there, after reviewing it in FloFi. FloFi’s own pages never hold your wallet.':
+    'A FloFi Wallet é uma janela segura separada. Você a desbloqueia com o código do seu email ou com o login do Google/Apple, e confirma cada assinatura lá, depois de revisá-la no FloFi. As páginas do FloFi nunca guardam sua carteira.',
+  'Wallets saved to your account': 'Carteiras salvas na sua conta', 'Opening FloFi…': 'Abrindo o FloFi…',
+  'It opens in FloFi Wallet, a separate secure window where you confirm every signature.': 'Ela abre na FloFi Wallet, uma janela segura separada onde você confirma cada assinatura.',
+  'Export happens in FloFi Wallet, a separate secure window: you unlock it again there, confirm, and the secret is shown only inside Turnkey’s secure frame. This page never sees it.':
+    'A exportação acontece na FloFi Wallet, uma janela segura separada: você a desbloqueia de novo lá, confirma, e o segredo aparece só dentro do quadro seguro da Turnkey. Esta página nunca o vê.',
+  'Export private key in FloFi Wallet': 'Exportar chave privada na FloFi Wallet', 'Export recovery phrase in FloFi Wallet': 'Exportar frase de recuperação na FloFi Wallet',
+  'Export finished in FloFi Wallet.': 'Exportação concluída na FloFi Wallet.',
+  'Signs in FloFi Wallet, after you review the transaction in FloFi.': 'Assina na FloFi Wallet, depois que você revisa a transação no FloFi.',
+  // FloFi Wallet on product pages (flofi-wallet-continue.tsx, wallet-selector.tsx)
+  'Connecting to FloFi Wallet…': 'Conectando à FloFi Wallet…',
+  'Continue in FloFi Wallet': 'Continuar na FloFi Wallet', 'Nothing is signed until you confirm there.': 'Nada é assinado até você confirmar lá.',
+  'FloFi Wallet needs to open to show the transaction you authorized.': 'A FloFi Wallet precisa abrir para mostrar a transação que você autorizou.',
+  'FloFi Wallet needs to open to sign FloFi\'s sign-in message.': 'A FloFi Wallet precisa abrir para assinar a mensagem de login do FloFi.',
+  'FloFi Wallet needs to open to continue.': 'A FloFi Wallet precisa abrir para continuar.',
+  'Authorize opens FloFi Wallet, where you confirm the exact transaction.': 'Autorizar abre a FloFi Wallet, onde você confirma a transação exata.',
+  'Your FloFi account wallet. You confirm every signature in the FloFi Wallet window.':
+    'A carteira da sua conta FloFi. Você confirma cada assinatura na janela da FloFi Wallet.',
+  // FloFi Wallet product-side codes (src/wallet/flofi-signing.ts FLOFI_WALLET_MESSAGES)
+  'FloFi Wallet is not open. Choose Continue in FloFi Wallet.':
+    'A FloFi Wallet não está aberta. Escolha Continuar na FloFi Wallet.',
+  'FloFi Wallet is not available here. Sign in to your FloFi account, or use MetaMask, Phantom or Solflare.':
+    'A FloFi Wallet não está disponível aqui. Entre na sua conta FloFi ou use MetaMask, Phantom ou Solflare.',
+  'Your browser blocked the FloFi Wallet window. Allow pop-ups for FloFi, then try again.':
+    'Seu navegador bloqueou a janela da FloFi Wallet. Permita pop-ups para a FloFi e tente de novo.',
+  'FloFi Wallet closed before it answered. Check the recorded status before you try again.':
+    'A FloFi Wallet fechou antes de responder. Confira o status registrado antes de tentar de novo.',
+  'FloFi Wallet is already handling a request. Finish or cancel it there first.':
+    'A FloFi Wallet já está tratando um pedido. Conclua ou cancele lá primeiro.',
+  'Unlock FloFi Wallet first, then authorize again.':
+    'Desbloqueie a FloFi Wallet primeiro e autorize de novo.',
+  'You cancelled the request in FloFi Wallet. Nothing was signed.':
+    'Você cancelou o pedido na FloFi Wallet. Nada foi assinado.',
+  'FloFi Wallet found no reviewed FloFi strategy that matches this request, so it signed nothing.':
+    'A FloFi Wallet não encontrou uma estratégia revisada na FloFi que corresponda a este pedido; nada foi assinado.',
+  'FloFi Wallet can\'t sign this action yet — use MetaMask, Phantom or Solflare.':
+    'A FloFi Wallet ainda não pode assinar esta ação — use MetaMask, Phantom ou Solflare.',
+  'This Review has expired. Simulate again before you sign.':
+    'Esta revisão expirou. Simule de novo antes de assinar.',
+  'FloFi Wallet could not load the Review right now. Nothing was signed. Try again shortly.':
+    'A FloFi Wallet não conseguiu carregar a revisão agora. Nada foi assinado. Tente em instantes.',
+  'FloFi Wallet signs only actions you reviewed and authorized in FloFi.':
+    'A FloFi Wallet só assina ações que você revisou e autorizou na FloFi.',
+  'FloFi Wallet signs only EIP-1559 transactions. Use another wallet for this action.':
+    'A FloFi Wallet só assina transações EIP-1559. Use outra carteira para esta ação.',
+  'FloFi Wallet works on Base, Arbitrum, Ethereum and Robinhood Chain.':
+    'A FloFi Wallet funciona em Base, Arbitrum, Ethereum e Robinhood Chain.',
+  'FloFi Wallet does not support this wallet request.':
+    'A FloFi Wallet não oferece suporte a este pedido.',
+  'FloFi Wallet signs only FloFi\'s own sign-in messages.':
+    'A FloFi Wallet só assina as mensagens de login da própria FloFi.',
+  'Your FloFi Wallet has another pending transaction. Wait for it to confirm, then simulate again.':
+    'Sua FloFi Wallet tem outra transação pendente. Aguarde a confirmação e simule de novo.',
+  'Network fees are far above the expected range right now. Try again shortly.':
+    'As taxas de rede estão muito acima do esperado agora. Tente em instantes.',
+  'FloFi could not read the network right now. Nothing was signed. Try again shortly.':
+    'A FloFi não conseguiu ler a rede agora. Nada foi assinado. Tente em instantes.',
+  'FloFi Wallet already signed this attempt once. FloFi is checking its status; do not sign again.':
+    'A FloFi Wallet já assinou esta tentativa. A FloFi está verificando o status; não assine de novo.',
+  'The signature does not belong to the reviewed FloFi Wallet address. FloFi did not broadcast it.':
+    'A assinatura não pertence ao endereço revisado da FloFi Wallet. A FloFi não a transmitiu.',
+  'FloFi Wallet signed, but FloFi cannot confirm the broadcast. FloFi keeps checking the network; do not sign again.':
+    'A FloFi Wallet assinou, mas a FloFi não consegue confirmar o envio. A FloFi segue verificando a rede; não assine de novo.',
+  'FloFi Wallet may have signed, but FloFi did not receive the signature, so nothing was submitted. Simulate again to retry.':
+    'A FloFi Wallet pode ter assinado, mas a FloFi não recebeu a assinatura, então nada foi enviado. Simule de novo.',
+  'FloFi Wallet is opening. Unlock it if it asks, then choose Authorize again.':
+    'A FloFi Wallet está abrindo. Desbloqueie-a se pedir e escolha Autorizar de novo.',
+  'FloFi Wallet could not read this request. Nothing was signed.':
+    'A FloFi Wallet não conseguiu ler este pedido. Nada foi assinado.',
+  'Sign in to your FloFi account to use FloFi Wallet.':
+    'Entre na sua conta FloFi para usar a FloFi Wallet.',
+  'This address is not a FloFi Wallet of the FloFi account you are signed in to.':
+    'Este endereço não é uma FloFi Wallet da conta FloFi em que você entrou.',
+  'Unlock FloFi Wallet to continue.': 'Desbloqueie a FloFi Wallet para continuar.', 'Open FloFi Wallet from FloFi to continue.': 'Abra a FloFi Wallet pelo FloFi para continuar.',
+  'FloFi Wallet unlocks with the email, Google or Apple sign-in you created your account with.': 'A FloFi Wallet é desbloqueada com o login por email, Google ou Apple com que você criou sua conta.',
+  'That is not the Google or Apple account linked to this FloFi account. Nothing was unlocked.': 'Esta não é a conta Google ou Apple vinculada a esta conta FloFi. Nada foi desbloqueado.',
+  'FloFi Wallet could not confirm this request with its key. Nothing was changed. Try again.': 'A FloFi Wallet não conseguiu confirmar este pedido com a chave dela. Nada foi alterado. Tente de novo.',
+  'That wallet is not one of your FloFi Wallet wallets.': 'Esta carteira não é uma das suas carteiras da FloFi Wallet.',
+  'FloFi could not verify the email provider’s encryption key. Your code was not sent. Request a new code.': 'O FloFi não conseguiu verificar a chave de criptografia do provedor de email. Seu código não foi enviado. Peça um novo código.',
+  'The email provider’s confirmation could not be verified. Nothing was signed in.': 'A confirmação do provedor de email não pôde ser verificada. Ninguém entrou.',
+  'That confirmation is not for this email or this browser. Nothing was signed in.': 'Esta confirmação não é para este email ou este navegador. Ninguém entrou.',
+  'That code was already used. Request a new one.': 'Este código já foi usado. Peça um novo.',
+  'This browser could not create a secure key for the code. Update your browser and try again.': 'Este navegador não conseguiu criar uma chave segura para o código. Atualize o navegador e tente de novo.',
 };

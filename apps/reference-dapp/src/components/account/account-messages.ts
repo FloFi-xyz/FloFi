@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /** BUILD-FLOFI-AUTH-WALLETS-001: owner-facing text for account codes. A raw code never reaches the interface. */
+import { floFiWalletMessage } from '../../wallet/flofi-signing';
+
 const MESSAGES: Readonly<Record<string, string>> = {
   ACCOUNTS_NOT_CONFIGURED: "Accounts aren't available on this deployment yet.",
   ACCOUNTS_UNAVAILABLE: 'FloFi accounts are temporarily unavailable. Try again in a moment.',
@@ -26,6 +28,11 @@ const MESSAGES: Readonly<Record<string, string>> = {
   OIDC_TOKEN_REPLAYED: 'That sign-in was already used. Start again.',
   ACCOUNT_NOT_FOUND: 'This FloFi account no longer exists.',
   EMAIL_SIGN_IN_FAILED: 'Email sign-in did not complete. Try again.',
+  EMAIL_TARGET_UNVERIFIED: 'FloFi could not verify the email provider’s encryption key. Your code was not sent. Request a new code.',
+  EMAIL_VERIFICATION_INVALID: 'The email provider’s confirmation could not be verified. Nothing was signed in.',
+  EMAIL_VERIFICATION_MISMATCH: 'That confirmation is not for this email or this browser. Nothing was signed in.',
+  EMAIL_VERIFICATION_REPLAYED: 'That code was already used. Request a new one.',
+  OTP_KEY_UNAVAILABLE: 'This browser could not create a secure key for the code. Update your browser and try again.',
   MANAGED_SESSION_KEY_UNAVAILABLE: 'This browser could not create a secure session key. Allow site storage and try again.',
   WALLET_SESSION_REQUIRED: 'Your wallet did not sign the sign-in message. Nothing was signed in.',
   WALLET_PROOF_STALE: 'Sign the new sign-in message in your wallet to continue.',
@@ -41,9 +48,17 @@ const MESSAGES: Readonly<Record<string, string>> = {
   MANAGED_EXPORT_UNAVAILABLE: 'Secure export could not start. Nothing was revealed.',
   EXPORT_NOT_SUPPORTED: 'This wallet cannot be exported from FloFi.',
   MANAGED_ORGANIZATION_MISSING: 'Create or import a wallet first.',
+  // FloFi Wallet (its own origin). Its FLOFI_WALLET_* codes have one catalogue, src/wallet/flofi-signing.ts.
+  WALLET_UNLOCK_REQUIRED: 'Unlock FloFi Wallet to continue.',
+  WALLET_UNLOCK_METHOD_UNAVAILABLE: 'FloFi Wallet unlocks with the email, Google or Apple sign-in you created your account with.',
+  WALLET_UNLOCK_IDENTITY_MISMATCH: 'That is not the Google or Apple account linked to this FloFi account. Nothing was unlocked.',
+  TURNKEY_CLIENT_SIGNATURE_INVALID: 'FloFi Wallet could not confirm this request with its key. Nothing was changed. Try again.',
+  SIGNER_NOT_MANAGED: 'That wallet is not one of your FloFi Wallet wallets.',
 };
 export function accountMessage(code: string): string {
   if (MESSAGES[code]) return MESSAGES[code]!;
+  const wallet = code.startsWith('FLOFI_WALLET_') ? floFiWalletMessage(code) : null;
+  if (wallet) return wallet;
   if (/^MANAGED_WALLETS_NEED_(GOOGLE|APPLE|EMAIL)_SIGN_IN$/.test(code)) return 'Your FloFi wallets are unlocked with the method you first used for them. Sign in with it to manage them.';
   if (code.startsWith('OIDC_')) return 'FloFi could not verify that sign-in. Nothing was signed in.';
   if (code.startsWith('MANAGED_') || code.startsWith('TURNKEY_')) return 'The wallet provider did not complete the request. Nothing changed.';

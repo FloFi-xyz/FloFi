@@ -8,7 +8,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
 import { requestOrigin } from '../server/session-principal.ts';
-import { accountHost, currentAccountSession, flowCookieOptions, managedHint, nextPath, setAccountCookie, supersede } from './account-host.ts';
+import { accountHost, currentAccountSession, flowCookieOptions, nextPath, setAccountCookie, supersede } from './account-host.ts';
 import { ACCOUNT_OIDC_COOKIE, readOidcFlow, safeReturnPath, type OidcProvider } from './account-session.ts';
 import { oidcConfig } from './oidc.ts';
 
@@ -41,7 +41,7 @@ export async function oidcCallback(provider: OidcProvider, params: Params): Prom
     const current = cookieSession ?? (flow.intent === 'link' && flow.linkSession && await host.store.verifySession(flow.linkSession).catch(() => false) ? flow.linkSession : null);
     const outcome = await host.service.completeOidc(config, flow, { code: text('code'), idToken: text('id_token') }, current);
     await supersede(host, cookieSession, outcome.session);
-    await setAccountCookie(managedHint(outcome));
+    await setAccountCookie(outcome.session);
     return NextResponse.redirect(new URL(nextPath(outcome, flow.intent, flow.returnTo), origin.uri), 303);
   } catch (error) {
     return back(error instanceof Error && CODE.test(error.message) ? error.message : 'OIDC_SIGN_IN_FAILED');
