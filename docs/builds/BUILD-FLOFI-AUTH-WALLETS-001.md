@@ -330,6 +330,15 @@ certification; MOCKED loopback results prove FloFi's own code paths only.
 | `certification-browser-2` | ✅ | cloud and journey provenance, execution continuity, workflow/swap acceptance, automations, delegated execution, admin console, CoW, card provider, MCP routes, developer journey, MCP in chat, MCP embedded signing, channel signing, channel approve, approve/authorize journeys, approve workflow run, universal bridge, owner history | MCP, channels, approval and execution unaffected |
 | `certification` | not run | depends on the jobs above | — |
 
+**On `1ca90f6`** (workflow `808ced39`, the commit with the `brand-ux-001` fix, before the `minimatch` commit):
+
+| Job | Result |
+| --- | --- |
+| `governance` | ✅ |
+| `certification-checks` | ❌ step 108, the same pre-existing `minimatch` audit finding |
+| `certification-browser-1` | ✅ critical tier and all of shard 1 (`default-product` with `brand-ux-001` at seven widths, provenance profiles, Copilot, Solana/Robinhood/Base/Ethereum/Arbitrum authoring, Canvas workflow UX) |
+| `certification-browser-2` | ✅ after one rerun. First run: 21 of 22 profiles passed; one test, `universal-bridge.spec.ts:275` (a picker click intercepted by the Canvas navigator), timed out and **passed on the runner's own diagnostic rerun** ("the failure is intermittent; the profile stays FAILED"); fail-fast skipped `owner-history`. This build changes no Canvas, bridge or picker code. Locally `universal-bridge` passed twice (11/11) and `owner-history` once (11/11). Rerun of the failed jobs (workflow `f83ecbf0`): **✅ all 23 shard-2 profiles passed**, including `universal-bridge` and `owner-history` |
+
 ### 15.2 CI fixes
 
 1. **`brand-ux-001`** follows the new journey: *Launch Beta FloFi* → `/login` (language kept, no horizontal overflow at every width) →
