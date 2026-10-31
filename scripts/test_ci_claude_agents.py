@@ -8,6 +8,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import stat
 import subprocess
 import sys
@@ -134,6 +135,11 @@ class ReadOnlyGuard(Repository):
             # combined -ie still supplies the pattern; context options take counts, not directories.
             "grep -ie FAKE src", "grep -e X -C src", "grep -C src x", "grep --context=src x src/a.ts", "rg -A src x",
             "git status --ignored", "git ls-files -i --exclude-standard -o", "git log -n x",
+            # batch 6: quoted redirects write files; operands are checked even without -e; REV:path; %G.
+            "ls src 2>'&1'", 'ls src 2>"&1"', "ls src 2>\\&1", "ls src 2\\>&1", "cat '2'>&1", "grep -C 5 src",
+            "grep -C 5 .env.local", "grep src src/a.ts", "rg x .env.local", "git show stash^3:.env.local",
+            "git show HEAD:local-state/notes", "git log --format='%G?' -1", "git log --pretty=format:%GG -1",
+            "git ls-files -o", "git ls-files --others --directory",
             # ugrep (Claude Code's grep) recurses into directory operands, reading ignored files:
             "grep -n LOCAL src", "grep -n LOCAL .", "cat src", "head src", "sed -n '1,2p' src",
         ]:
@@ -166,13 +172,14 @@ class ReadOnlyGuard(Repository):
     def test_tokenizer_matches_bash_word_splitting(self):
         for words in ["a 'b|c' \"d|e\" f\\|g", "\"x y\" 'z'", 'a"b"c', "'a'\"b\"", "-e 'x && y'", "a\\ b",
                       '"a\\"b"', "'a\\b'", '"a\\\\b"', '"a\\b"', "x 2>/dev/null y", "x 2>&1", "'2>/dev/null' z",
-                      "ü\u00a0x", "'#' '*' '[' '~'", "a~b HEAD~1"]:
+                      "ü\u00a0x", "'#' '*' '[' '~'", "a~b HEAD~1", "'2>/dev/null' \"2>&1\""]:
             with self.subTest(words=words):
                 bash = subprocess.run(["bash", "-c", f"set -- {words}; printf '%s\\0' \"$@\""], capture_output=True,
                                       text=True, check=True).stdout.split("\0")[:-1]
                 self.assertEqual(hooks.pipeline_words(words), [bash])
         self.assertEqual(hooks.pipeline_words("a | b c|d"), [["a"], ["b", "c"], ["d"]])
-        for refused in ["a ; b", "a && b", "a & b", "a > b", "a $x", "a `b`", "a #c", "a *", "~/x", "x=~/y", "a\\\nb", "'open"]:
+        for refused in ["a ; b", "a && b", "a & b", "a > b", "a $x", "a `b`", "a #c", "a *", "~/x", "x=~/y", "a\\\nb", "'open",
+                        "a 2>'&1'", 'a 2>"&1"', "a 2>\\&1", "a 2\\>&1", "a '2'>&1", "a 2>/dev/'null'"]:
             with self.subTest(refused=refused):
                 with self.assertRaises(ValueError):
                     hooks.pipeline_words(refused)
@@ -181,6 +188,9 @@ class ReadOnlyGuard(Repository):
         (self.root / "node_modules/.cache").mkdir(parents=True)
         (self.root / "node_modules/.cache/token").write_text("cached\n")
         self.assertIsNotNone(self.guard("Read", file_path="node_modules/.cache/token"))
+        (self.root / "local-state/node_modules").mkdir(parents=True)
+        (self.root / "local-state/node_modules/x.js").write_text("ignored\n")
+        self.assertIsNotNone(self.guard("Read", file_path="local-state/node_modules/x.js"))
         self.assertIsNone(self.guard("Read", file_path="node_modules/pkg/index.js"))
 
     def test_working_directory_must_be_a_readable_repository_location(self):
@@ -327,19 +337,33 @@ class LifecycleLedger(Repository):
         vitest = "pnpm exec vitest run packages/a/test/x.test.ts apps/b/src/y.test.tsx"
         entry = hooks.gate_record({"hook_event_name": "PostToolUse", "tool_input": {"command": vitest}, "tool_response": {}})
         self.assertEqual(entry["suites"], ["apps/b/src/y.test.tsx", "packages/a/test/x.test.ts"])
-        scopes = {command: hooks.gate_record({"hook_event_name": "PostToolUse", "tool_input": {"command": command},
-                                              "tool_response": {}})["scopes"]
-                  for command in ["pnpm test", "pnpm test --reporter=json --outputFile=/tmp/u.json", "pnpm test -t name",
-                                  "node scripts/guarded-release-browser.mjs critical", vitest]}
-        self.assertEqual(list(scopes.values()), [{"pnpm-test": "full"}, {"pnpm-test": "full"}, {"pnpm-test": "filtered"},
-                                                 {"guarded-browser": "critical"}, {"vitest-focused": "filtered"}])
+        def scope(command):
+            entry = hooks.gate_record({"hook_event_name": "PostToolUse", "tool_input": {"command": command}, "tool_response": {}})
+            return list(entry["scopes"].values())[0]
+        self.assertEqual([scope(c) for c in ["pnpm test", "pnpm test --reporter=json --outputFile=/tmp/u.json",
+                                             "pnpm test:fork --testTimeout=30000", "node scripts/guarded-release-browser.mjs critical",
+                                             "python3 scripts/agent_guard.py verify-results /tmp/u.json"]],
+                         ["full", "full", "full", "critical", "full"])
+        distinct = [scope(c) for c in ["pnpm test -t name", "pnpm test -t other", "pnpm test:fork -t x",
+                                       "node scripts/guarded-release-browser.mjs profile wallet-isolation",
+                                       "node scripts/guarded-release-browser.mjs profile canvas",
+                                       "node scripts/guarded-release-browser.mjs extended --shard 1/4",
+                                       "pnpm exec vitest run packages/domain", "pnpm --filter app exec vitest run apps/web",
+                                       "python3 -m unittest discover -s scripts -p 'test_governance_lite.py'",
+                                       "python3 scripts/agent_guard.py verify-results --stage postgres /tmp/p.json"]]
+        self.assertEqual(len(set(distinct)), len(distinct), distinct)
+        self.assertTrue(all(re.fullmatch(r"args-[0-9a-f]{12}", s) for s in distinct))
+        self.assertNotIn("asus", json.dumps(hooks.gate_record({"hook_event_name": "PostToolUse", "tool_input": {
+            "command": "pnpm exec vitest run /home/asus/x.test.ts"}, "tool_response": {}})))
+        self.assertEqual(hooks.gate_record({"hook_event_name": "PostToolUse", "tool_input": {
+            "command": "pnpm lint # first && pnpm test"}, "tool_response": {}})["gates"], ["pnpm-lint"])
         command = (f"pnpm exec vitest run {self.root}/src/b.test.ts /home/someone/other/x.test.ts "
                    f"../escape/y.test.ts {'a' * 300}.test.ts")
         entry = hooks.gate_record({"hook_event_name": "PostToolUse", "tool_input": {"command": command}, "tool_response": {}}, self.root)
         self.assertEqual(entry["suites"], ["src/b.test.ts"])
         self.assertNotIn("someone", json.dumps(entry))
         for command in ["ls", "git status", "echo pnpm check", "pnpm install", "rm -rf node_modules",
-                        "grep -e 'x && pnpm test ' a.txt", "echo 'pnpm check; pnpm test'"]:
+                        "grep -e 'x && pnpm test ' a.txt", "echo 'pnpm check; pnpm test'", "ls # && pnpm test"]:
             self.assertIsNone(hooks.gate_record({"hook_event_name": "PostToolUse", "tool_input": {"command": command}}))
 
     def test_failed_interrupted_and_background_gates_are_not_reported_as_passing(self):
@@ -430,6 +454,10 @@ class LifecycleLedger(Repository):
         hooks.subprocess.run = original
         self.record(hook_event_name="SubagentStart", agent_type="flofi-swap", agent_id="a1")
         self.assertEqual(self.ledger()[0]["event"], "subagent_start")  # the row is never dropped
+
+    def test_session_start_without_git_still_records_the_row(self):
+        hooks.record({"session_id": SESSION, "hook_event_name": "SessionStart", "source": "startup"}, self.root)
+        self.assertEqual((self.ledger()[0]["event"], self.ledger()[0]["head"]), ("session_start", None))
 
     def test_symlinked_claude_directory_writes_nothing(self):
         moved = Path(self.outside, "claude")

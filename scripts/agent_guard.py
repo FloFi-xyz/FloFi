@@ -423,6 +423,8 @@ def ledger_row(row):
     if not isinstance(row, dict):
         return None
     event = row.get("event")
+    if not isinstance(event, str):
+        return None
     name = (lambda value: value if isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9_.:-]{1,64}", value) else "other")
     head, stamp = row.get("head"), row.get("t")
     if (head is not None and not (isinstance(head, str) and re.fullmatch(r"[0-9a-f]{40}", head))) or (
@@ -449,11 +451,12 @@ def ledger_row(row):
         clean["source"] = row.get("source") if row.get("source") in {
             "startup", "resume", "clear", "compact", "fork"} else "other"
     elif event == "test":
-        gates, suites, scopes = row.get("gates"), row.get("suites"), row.get("scopes", {})
+        gates, suites, scopes = row.get("gates"), row.get("suites"), row.get("scopes")
+        scopes = {gate: "legacy" for gate in gates} if scopes is None and isinstance(gates, list) else scopes
         if not isinstance(gates, list) or not gates or not all(
                 isinstance(gate, str) and re.fullmatch(r"[a-z0-9-]{1,40}", gate) for gate in gates):
             return None
-        if not isinstance(scopes, dict) or any(key not in gates or not isinstance(value, str)
+        if not isinstance(scopes, dict) or any(not isinstance(key, str) or key not in gates or not isinstance(value, str)
                                                or not re.fullmatch(r"[a-z0-9-]{1,40}", value)
                                                for key, value in scopes.items()):
             return None
@@ -493,7 +496,7 @@ def read_runs(session, root=ROOT):
     for line in data.splitlines():
         try:
             row = ledger_row(json.loads(line.decode("utf-8")))
-        except (ValueError, RecursionError):  # includes UnicodeDecodeError
+        except (ValueError, TypeError, RecursionError):  # includes UnicodeDecodeError
             row = None
         if row:
             events.append(row)
@@ -556,11 +559,11 @@ def review_summary(data, plan, runs, skips=None, reports=(), root=ROOT, streams=
                                                 "error": None, "session": run["session"], "start": session_head,
                                                 "startDirty": None})
                 if entry["status"] != "failed":  # a reported termination is never upgraded
-                    entry.update(status="completed", review=row.get("review"),
-                                 stop=row.get("head") or entry["start"], stopDirty=row.get("dirty"))
+                    entry.update(status="completed", review=row.get("review"), stop=row.get("head"),
+                                 stopDirty=row.get("dirty"))
                 running.discard(key)
             elif row["event"] == "test":
-                tests.append(row)
+                tests.append((min((r["t"] for r in run["events"] if r.get("t")), default=""), len(tests), row))
             elif row["event"] == "guard_deny":
                 denials[row.get("agent")] += 1
     current = {}
@@ -609,14 +612,15 @@ def review_summary(data, plan, runs, skips=None, reports=(), root=ROOT, streams=
                 warnings.append(f"{stale}; accepted: {accepted[domain]}")
             else:
                 problems.append(stale)
-    tests.sort(key=lambda test: test.get("t") or "")  # time order across sessions
+    # Sessions in the order they started; rows within a session in written order (clock steps never reorder them).
+    tests = [row for _start, _index, row in sorted(tests, key=lambda item: item[:2])]
     latest, failed_once = {}, set()
     for test in tests:
-        # A failure counts until a later pass of the same run (gate, scope and suites) or a full run of the
-        # gate; a narrower pass or an unknown result never clears it.
+        # A failure counts until a later pass of the same run (gate and scope) or a full run of the gate;
+        # a different, narrower or unknown run never clears it.
         for gate in test.get("gates", []):
-            scope = test.get("scopes", {}).get(gate, "full")
-            key = (gate, scope, tuple(test.get("suites", [])) if scope == "filtered" else ())
+            scope = test.get("scopes", {}).get(gate, "legacy")
+            key = (gate, scope)
             if test.get("ok") is True and scope == "full":
                 latest.update({k: True for k in latest if k[0] == gate})
             if test.get("ok") is not None or key not in latest:
@@ -629,11 +633,14 @@ def review_summary(data, plan, runs, skips=None, reports=(), root=ROOT, streams=
         warnings.append(f"Earlier gate failures later passed: {', '.join(superseded)}")
     problems.extend(f"Recorded gate failed: {describe(key)}" for key, ok in sorted(latest.items()) if ok is False)
     try:
-        dirty_now = subprocess.run(["git", "--no-optional-locks", "status", "--porcelain"], cwd=root,
-                                   capture_output=True, text=True, timeout=10).stdout.strip()
+        status = subprocess.run(["git", "--no-optional-locks", "status", "--porcelain"], cwd=root,
+                                capture_output=True, text=True, timeout=10)
+        dirty_now = status.stdout.strip() if status.returncode == 0 else None
     except (OSError, subprocess.SubprocessError):
-        dirty_now = ""
-    if head_now and dirty_now:
+        dirty_now = None
+    if head_now and dirty_now is None:
+        problems.append("Could not determine whether the worktree has uncommitted changes")
+    elif head_now and dirty_now:
         problems.append("The worktree has uncommitted changes; reviews cover commits only")
     if peak > MAX_CONCURRENT_REVIEWS:
         problems.append(f"Observed {peak} concurrent flofi-* reviewers; the limit is {MAX_CONCURRENT_REVIEWS}")

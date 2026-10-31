@@ -293,7 +293,8 @@ class EngineeringGuard(unittest.TestCase):
             {"event": "subagent_stop", "agent": "flofi-bridge", "agentId": "a1",
              "review": {"result": "findings", "findings": 1, "highest": "high"}},
             {"event": "subagent_start", "agent": "Explore", "agentId": "e1"},
-            {"event": "test", "gates": ["pnpm-check"], "ok": False, "exit": 1, "piped": False, "suites": [], "agent": "main"})
+            {"event": "test", "gates": ["pnpm-check"], "scopes": {"pnpm-check": "full"}, "ok": False, "exit": 1,
+             "piped": False, "suites": [], "agent": "main"})
         summary = guard.review_summary(self.data, plan, [run], root=self.root)
         rows = {row["domain"]: row for row in summary["specialists"]}
         self.assertEqual(rows["flofi-bridge"]["status"], "completed")
@@ -434,8 +435,8 @@ class EngineeringGuard(unittest.TestCase):
 
     def test_gates_count_by_their_latest_known_result(self):
         plan = {**guard.impact(self.data, ["docs/notes.md"]), "base": "origin/main"}
-        gate = lambda ok: {"event": "test", "gates": ["pnpm-check"], "ok": ok, "exit": None, "piped": False,
-                           "suites": [], "agent": "main"}
+        gate = lambda ok: {"event": "test", "gates": ["pnpm-check"], "scopes": {"pnpm-check": "full"}, "ok": ok,
+                           "exit": None, "piped": False, "suites": [], "agent": "main"}
         fixed = guard.review_summary(self.data, plan, [self.runs(gate(False), gate(True))], root=self.root)
         self.assertEqual(fixed["problems"], [])
         self.assertIn("Earlier gate failures later passed: pnpm-check", fixed["warnings"])
@@ -449,11 +450,12 @@ class EngineeringGuard(unittest.TestCase):
         def gate(ok, scope="full", suites=(), stamp="2026-10-31T10:00:00Z"):
             return {"event": "test", "gates": ["pnpm-test"], "scopes": {"pnpm-test": scope}, "ok": ok, "exit": None,
                     "piped": False, "suites": list(suites), "agent": "main", "t": stamp}
-        cases = [((gate(False), gate(True, "filtered", ["a.test.ts"])), ["Recorded gate failed: pnpm-test"]),
-                 ((gate(False, "filtered", ["a.test.ts"]), gate(True, "filtered", ["a.test.ts"])), []),
-                 ((gate(False, "filtered", ["a.test.ts"]), gate(True, "filtered", ["b.test.ts"])),
-                  ["Recorded gate failed: pnpm-test (filtered)"]),
-                 ((gate(False, "filtered", ["a.test.ts"]), gate(True)), [])]
+        cases = [((gate(False), gate(True, "args-aaaaaaaaaaaa")), ["Recorded gate failed: pnpm-test"]),
+                 ((gate(False, "args-aaaaaaaaaaaa"), gate(True, "args-aaaaaaaaaaaa")), []),
+                 ((gate(False, "args-aaaaaaaaaaaa"), gate(True, "args-bbbbbbbbbbbb")),
+                  ["Recorded gate failed: pnpm-test (args-aaaaaaaaaaaa)"]),
+                 ((gate(False, "args-aaaaaaaaaaaa"), gate(True)), []),
+                 ((gate(False, "legacy"), gate(True, "args-aaaaaaaaaaaa")), ["Recorded gate failed: pnpm-test (legacy)"])]
         for events, problems in cases:
             with self.subTest(events=[(e["ok"], e["scopes"]["pnpm-test"], e["suites"]) for e in events]):
                 self.assertEqual(guard.review_summary(self.data, plan, [self.runs(*events)], root=self.root)["problems"], problems)
@@ -476,6 +478,8 @@ class EngineeringGuard(unittest.TestCase):
                                          + b'{"event":"subagent_start","agent":"flofi-swap","dirty":"yes"}\n')
         run = guard.read_runs("odd", self.root)
         self.assertEqual((len(run["events"]), run["malformed"]), (1, 4))
+        (runs / "shapes.jsonl").write_text('{"event":[]}\n{"event":{}}\n{"event":"test","gates":["x"],"scopes":{"1":2}}\n')
+        self.assertEqual(guard.read_runs("shapes", self.root)["malformed"], 3)
 
     def test_report_paths_and_uncommitted_worktrees(self):
         self.commit_fixture()

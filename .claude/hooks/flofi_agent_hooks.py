@@ -87,8 +87,8 @@ GIT = {
     "diff-tree": options("rpsM", "U", _DIFF + "--no-commit-id --root", _DIFF_VALUED, numbers="-U --unified"),
     # No --ignored: reviewers do not need the names of ignored local files.
     "status": options("sb", "", "--short --branch --porcelain --long"),
-    "ls-files": options("comdzst", "", "--cached --others --modified --deleted --exclude-standard "
-                        "--full-name --stage --directory --error-unmatch"),
+    # No -o/--others: untracked listings include ignored names without --exclude-standard.
+    "ls-files": options("cmdzst", "", "--cached --modified --deleted --full-name --stage --error-unmatch"),
     "grep": options("nilLcwvEFPhHpoqI", "eABCm", "--line-number --ignore-case --files-with-matches "
                     "--files-without-match --count --word-regexp --invert-match --extended-regexp --fixed-strings "
                     "--perl-regexp --cached --untracked --heading --break --show-function --name-only --only-matching "
@@ -147,9 +147,13 @@ def path_reason(value, cwd, root=ROOT):
         return "Git internals are not readable"
     if any(sensitive(part) for part in relative.parts):
         return "secret or local-state paths are not readable"
-    exempt = "node_modules" in relative.parts and not any(
-        part.startswith(".") and part != ".pnpm"
-        for part in relative.parts[relative.parts.index("node_modules") + 1:]) if "node_modules" in relative.parts else False
+    exempt = False
+    if "node_modules" in relative.parts:
+        position = relative.parts.index("node_modules")
+        exempt = not any(part.startswith(".") and part != ".pnpm" for part in relative.parts[position + 1:])
+        if exempt and position:  # node_modules inside an ignored directory is not exempt
+            exempt = subprocess.run(["git", "check-ignore", "-q", "--", str(Path(*relative.parts[:position]))],
+                                    cwd=root, stdin=subprocess.DEVNULL, capture_output=True, timeout=5).returncode == 1
     if relative.parts and not exempt:
         ignored = subprocess.run(["git", "check-ignore", "-q", "--", str(relative)], cwd=root,
                                  stdin=subprocess.DEVNULL, capture_output=True, timeout=5)
@@ -178,17 +182,17 @@ def pipeline_words(command):
     scanner is refused: expansion, unquoted comment/glob characters, home-directory
     tildes, chaining, redirection other than 2>/dev/null or 2>&1, and continuations.
     """
-    stages, word, in_word, operator, quote, previous, index = [[]], [], False, False, None, " ", 0
+    stages, word, in_word, operator, quoted, quote, previous, index = [[]], [], False, False, False, None, " ", 0
 
     def finish():
-        nonlocal word, in_word, operator
+        nonlocal word, in_word, operator, quoted
         if in_word:
             text = "".join(word)
             if not operator:
                 stages[-1].append(text)
-            elif text not in REDIRECT_WORDS:
+            elif quoted or text not in REDIRECT_WORDS:  # 2>'&1' writes a file named &1
                 raise ValueError("command chaining, redirection, subshells and background jobs are not allowed")
-        word, in_word, operator = [], False, False
+        word, in_word, operator, quoted = [], False, False, False
 
     while index < len(command):
         char = command[index]
@@ -214,7 +218,7 @@ def pipeline_words(command):
             if not following or following in "\n\r":
                 raise ValueError("line continuations are not allowed")
             word.append(following)
-            in_word = True
+            in_word = quoted = True
             index += 1
         elif char in " \t":
             finish()
@@ -224,7 +228,7 @@ def pipeline_words(command):
                 raise ValueError("only simple pipes are allowed")
             stages.append([])
         elif char in "'\"":
-            quote, in_word = char, True
+            quote, in_word, quoted = char, True, True
         elif char in "$`":
             raise ValueError("shell expansion is not allowed")
         elif char in "#*?[":
@@ -253,6 +257,8 @@ def parse_options(name, args, spec):
         nonlocal patterns
         if option in spec["numbers"] and not COUNT.fullmatch(value):
             return f"{name} {option} takes a number"
+        if option in {"--format", "--pretty"} and "%G" in value:
+            return "signature placeholders run gpg or ssh-keygen"
         if option in PATTERN_OPTIONS:
             patterns = True  # a pattern is never opened as a file
         else:
@@ -353,9 +359,13 @@ def segment_reason(argv, cwd, root=ROOT):
         positionals, values, patterns = parsed
     else:
         return f"{name} is not an allowed read-only inspection command"
-    if name in {"grep", "rg", "git grep"} and not patterns and positionals:
-        positionals = positionals[1:]  # the first operand is the pattern, never opened as a file
+    # Every operand is checked, even a would-be pattern: ugrep's context options take an optional
+    # argument, so the operand after `-C 5` may be a file. Patterns given with -e are exempt.
     for position, value in enumerate(positionals + values):
+        if name.startswith("git") and ":" in value and not value.startswith("-"):
+            reason = path_reason(value.split(":", 1)[1] or ".", root, root)  # REV:path reads that path
+            if reason:
+                return reason
         if looks_like_path(value, cwd):
             reason = path_reason(value, cwd, root)
             if reason:
@@ -520,6 +530,9 @@ def command_parts(command):
         elif char in "'\"":
             quote = char
             current.append(char)
+        elif char == "#" and (not current or current[-1][-1:].isspace()):
+            while index + 1 < len(command) and command[index + 1] != "\n":
+                index += 1  # an unquoted word-initial # starts a comment
         elif pair in {"&&", "||"}:
             parts.append(("".join(current), pair))
             current = []
@@ -536,15 +549,25 @@ def command_parts(command):
     return parts
 
 
+NEUTRAL_ARGUMENTS = ("--reporter=", "--outputFile=", "--testTimeout=", "--maxWorkers=")
+BASE_WORDS = {"guarded-browser": 2, "governance-unittests": 3, "agent-guard-verify-results": 3}
+
+
 def gate_scope(gate, words):
-    """Which run of a gate this was, so a narrower pass never clears a full-run failure."""
-    if gate == "guarded-browser":
-        profile = words[2] if len(words) > 2 else ""
-        return profile if re.fullmatch(r"[a-z0-9-]{1,40}", profile) else "other"
-    if gate == "vitest-focused":
-        return "filtered"
-    extra = [w for w in words[2:] if not w.startswith(("--reporter=", "--outputFile="))]
-    return "filtered" if gate.startswith("pnpm-test") and extra else "full"
+    """Which run of a gate this was, so one run's pass never clears another run's failure.
+
+    "full" when no filtering arguments were given; a readable browser profile name; or a
+    digest of the arguments, which never stores paths or names from the command.
+    """
+    start = words.index("run") + 1 if gate == "vitest-focused" else BASE_WORDS.get(gate, 2)
+    extra = [w for w in words[start:] if not w.startswith(NEUTRAL_ARGUMENTS)]
+    if gate == "agent-guard-verify-results":
+        extra = [w for w in extra if not w.endswith(".json")]  # the fresh report path, not a filter
+    if not extra:
+        return "full"
+    if gate == "guarded-browser" and len(extra) == 1 and re.fullmatch(r"[a-z0-9-]{1,40}", extra[0]):
+        return extra[0]
+    return "args-" + hashlib.sha256("\0".join(extra).encode()).hexdigest()[:12]
 
 
 def gate_record(event, root=ROOT):
@@ -611,10 +634,8 @@ def record(event, root=ROOT):
             if path.is_file() and not path.is_symlink():
                 definitions[path.stem] = hashlib.sha256(path.read_bytes()).hexdigest()[:16]
         source = event.get("source")
-        head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, stdin=subprocess.DEVNULL,
-                              capture_output=True, text=True, timeout=5).stdout.strip()
         append(session, {"event": "session_start", "definitions": definitions,
-                         "head": head if re.fullmatch(r"[0-9a-f]{40}", head) else None,
+                         "head": worktree_state(root)["head"],
                          "source": source if source in {"startup", "resume", "clear", "compact", "fork"} else "other"}, root)
     elif name == "SubagentStart" and event.get("agent_type"):
         append(session, {"event": "subagent_start", **agent_fields(event), **worktree_state(root)}, root)
