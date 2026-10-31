@@ -9,7 +9,7 @@ import re
 import subprocess
 import tomllib
 
-from agent_guard import DOMAINS
+from agent_guard import CLAUDE_FILES, CLAUDE_FRONTMATTER, CLAUDE_SETTINGS, CLAUDE_SETTINGS_CONTENT, DOMAINS, parse_claude_agent
 from governance_lite import secret_errors
 
 MANIFEST = 'cloudbuild-source-manifest.json'
@@ -28,6 +28,8 @@ def inspect_file(root, relative):
             part in {'.git', '.aws', '.agents', '.vercel', 'node_modules', '.next', 'test-results'} for part in path.parts):
         raise ValueError('Unsafe source path: ' + relative)
     if '.codex' in path.parts and relative not in PROJECT_CODEX_FILES:
+        raise ValueError('Unsafe source path: ' + relative)
+    if '.claude' in path.parts and relative not in CLAUDE_FILES:
         raise ValueError('Unsafe source path: ' + relative)
     if path.name.startswith('.env') and path.name != '.env.example':
         raise ValueError('Environment file refused: ' + relative)
@@ -52,6 +54,20 @@ def inspect_file(root, relative):
               or any(not isinstance(definition.get(key), str) or not definition[key].strip()
                      for key in ('name', 'description', 'developer_instructions'))):
             raise ValueError('Invalid project agent definition: ' + relative)
+    if relative in CLAUDE_FILES and relative.endswith(('.json', '.md')):
+        # Same rule for Claude Code: generated read-only agents and the exact
+        # hook settings only; no env, API key helper, MCP servers or permissions.
+        try:
+            text = data.decode()
+            if relative == CLAUDE_SETTINGS:
+                valid = json.loads(text) == CLAUDE_SETTINGS_CONTENT
+            else:
+                fields, _ = parse_claude_agent(text)
+                valid = fields['name'] == path.stem and all(fields[k] == v for k, v in CLAUDE_FRONTMATTER.items())
+        except (UnicodeDecodeError, ValueError):
+            valid = False
+        if not valid:
+            raise ValueError('Invalid project Claude definition: ' + relative)
     if b'\0' not in data:
         try:
             errors = secret_errors(relative, data.decode())
