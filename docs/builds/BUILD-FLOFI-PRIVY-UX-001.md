@@ -1,7 +1,7 @@
 # BUILD-FLOFI-PRIVY-UX-001 — Full Privy migration and end-user wallet UX
 
 Owner decision: Privy permanently replaces Turnkey as FloFi's authentication and embedded-wallet provider, in this one build, for real
-end users. Base: `main` at `749e5cd1` (PR #143 and #144 merged). One branch, one PR. Production is unchanged until the owner releases it
+end users. Base: `main` at `d37b6168` (PRs #142, #143 and #144 merged). One branch, one PR. Production is unchanged until the owner releases it
 ([RELEASE-PRIVY-0019.md](../deploy/RELEASE-PRIVY-0019.md)).
 
 ## 1. What changed for people
