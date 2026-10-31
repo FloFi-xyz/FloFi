@@ -81,6 +81,10 @@ class ReadOnlyGuard(Repository):
                         "rg -n 'export' src 2>/dev/null", "rg -t ts export", "grep -n export src/a.ts",
                         "rg 'a*b' src", "git log HEAD~1 -1", "git log --format='%h #%s' -3", "find src -name '*.ts'",
                         "git log --oneline --since='2 days' -- src", "grep -c -e export src/a.ts",
+                        "git grep -e '/home/' -- src/a.ts", "rg 'a|b' src", "grep -e 'x|y' src/a.ts",
+                        "grep -n 'export|import' src/a.ts", "git --no-optional-locks status --short",
+                        "grep -A 2 -e export src/a.ts", "tail -n +2 src/a.ts",
+                        "cat CLAUDE.md '|' sort",  # Bash passes '|' and sort to cat as literal operands
                         "sed -n '1,40p' src/a.ts", "find src -name '*.ts' | wc -l", "cat CLAUDE.md", "ls -la src",
                         "head -n 5 src/a.ts", "tail -n 5 src/a.ts", "sort -n src/a.ts | head",
                         "git diff origin/main...HEAD | sed -n '1,200p'", "git log -1 | tail -1",
@@ -124,6 +128,12 @@ class ReadOnlyGuard(Repository):
             "git cat-file --batch-all-objects --batch-check", "cat .GIT/config", "git log --show-signature",
             "git log -L1,5:CLAUDE.md", "git log --textconv -p", "find . -name x -fprint out", "find . -fls out",
             "find . -printf x", "cat --x=~/y", "ls ~", "ls :~",
+            # batch 5 flofi-security: quoted or escaped | is an argument to Bash, not a pipe.
+            "cat -- '|' find -name .env.local", 'cat -- "|" find -name .env.local', "cat -- \\| find -name .env.local",
+            "ls 'x'|'y'",
+            # combined -ie still supplies the pattern; context options take counts, not directories.
+            "grep -ie FAKE src", "grep -e X -C src", "grep -C src x", "grep --context=src x src/a.ts", "rg -A src x",
+            "git status --ignored", "git ls-files -i --exclude-standard -o", "git log -n x",
             # ugrep (Claude Code's grep) recurses into directory operands, reading ignored files:
             "grep -n LOCAL src", "grep -n LOCAL .", "cat src", "head src", "sed -n '1,2p' src",
         ]:
@@ -152,6 +162,26 @@ class ReadOnlyGuard(Repository):
         self.assertIsNotNone(read(str(saved / "b1el7won7.txt"), session="../x"))
         (saved / "link.txt").symlink_to(self.outside / "secret.txt")
         self.assertIsNotNone(read(str(saved / "link.txt")))
+
+    def test_tokenizer_matches_bash_word_splitting(self):
+        for words in ["a 'b|c' \"d|e\" f\\|g", "\"x y\" 'z'", 'a"b"c', "'a'\"b\"", "-e 'x && y'", "a\\ b",
+                      '"a\\"b"', "'a\\b'", '"a\\\\b"', '"a\\b"', "x 2>/dev/null y", "x 2>&1", "'2>/dev/null' z",
+                      "ü\u00a0x", "'#' '*' '[' '~'", "a~b HEAD~1"]:
+            with self.subTest(words=words):
+                bash = subprocess.run(["bash", "-c", f"set -- {words}; printf '%s\\0' \"$@\""], capture_output=True,
+                                      text=True, check=True).stdout.split("\0")[:-1]
+                self.assertEqual(hooks.pipeline_words(words), [bash])
+        self.assertEqual(hooks.pipeline_words("a | b c|d"), [["a"], ["b", "c"], ["d"]])
+        for refused in ["a ; b", "a && b", "a & b", "a > b", "a $x", "a `b`", "a #c", "a *", "~/x", "x=~/y", "a\\\nb", "'open"]:
+            with self.subTest(refused=refused):
+                with self.assertRaises(ValueError):
+                    hooks.pipeline_words(refused)
+
+    def test_ignored_dot_directories_under_node_modules_stay_unreadable(self):
+        (self.root / "node_modules/.cache").mkdir(parents=True)
+        (self.root / "node_modules/.cache/token").write_text("cached\n")
+        self.assertIsNotNone(self.guard("Read", file_path="node_modules/.cache/token"))
+        self.assertIsNone(self.guard("Read", file_path="node_modules/pkg/index.js"))
 
     def test_working_directory_must_be_a_readable_repository_location(self):
         for cwd in ["/tmp", str(self.outside), str(self.root / "local-state"), str(self.root / ".git"), None]:
@@ -278,6 +308,7 @@ class LifecycleLedger(Repository):
             ("pnpm test || true", ["pnpm-test"], False, None),
             ("pnpm test; echo done", ["pnpm-test"], False, None),
             ("pnpm test & wait", ["pnpm-test"], False, None),
+            ("pnpm test 2>&1 && echo done", ["pnpm-test"], False, True),
             ("DATABASE_URL=postgres://owner:hunter2@db.invalid/flofi pnpm test:postgres", ["pnpm-test-postgres"], False, True),
             ("pnpm test --reporter=default --reporter=json --outputFile=/tmp/u.json", ["pnpm-test"], False, True),
             ("pnpm exec vitest run packages/a/test/x.test.ts apps/b/src/y.test.tsx", ["vitest-focused"], False, True),
@@ -296,12 +327,19 @@ class LifecycleLedger(Repository):
         vitest = "pnpm exec vitest run packages/a/test/x.test.ts apps/b/src/y.test.tsx"
         entry = hooks.gate_record({"hook_event_name": "PostToolUse", "tool_input": {"command": vitest}, "tool_response": {}})
         self.assertEqual(entry["suites"], ["apps/b/src/y.test.tsx", "packages/a/test/x.test.ts"])
+        scopes = {command: hooks.gate_record({"hook_event_name": "PostToolUse", "tool_input": {"command": command},
+                                              "tool_response": {}})["scopes"]
+                  for command in ["pnpm test", "pnpm test --reporter=json --outputFile=/tmp/u.json", "pnpm test -t name",
+                                  "node scripts/guarded-release-browser.mjs critical", vitest]}
+        self.assertEqual(list(scopes.values()), [{"pnpm-test": "full"}, {"pnpm-test": "full"}, {"pnpm-test": "filtered"},
+                                                 {"guarded-browser": "critical"}, {"vitest-focused": "filtered"}])
         command = (f"pnpm exec vitest run {self.root}/src/b.test.ts /home/someone/other/x.test.ts "
                    f"../escape/y.test.ts {'a' * 300}.test.ts")
         entry = hooks.gate_record({"hook_event_name": "PostToolUse", "tool_input": {"command": command}, "tool_response": {}}, self.root)
         self.assertEqual(entry["suites"], ["src/b.test.ts"])
         self.assertNotIn("someone", json.dumps(entry))
-        for command in ["ls", "git status", "echo pnpm check", "pnpm install", "rm -rf node_modules"]:
+        for command in ["ls", "git status", "echo pnpm check", "pnpm install", "rm -rf node_modules",
+                        "grep -e 'x && pnpm test ' a.txt", "echo 'pnpm check; pnpm test'"]:
             self.assertIsNone(hooks.gate_record({"hook_event_name": "PostToolUse", "tool_input": {"command": command}}))
 
     def test_failed_interrupted_and_background_gates_are_not_reported_as_passing(self):
@@ -379,6 +417,19 @@ class LifecycleLedger(Repository):
         self.record(hook_event_name="SubagentStop", agent_type="flofi-swap", agent_id="a1", last_assistant_message="")
         start, stop = self.ledger()
         self.assertEqual((start["head"], stop["head"], stop["dirty"]), (head, head, True))  # fixture has untracked files
+
+    def test_worktree_state_is_unknown_not_clean_when_git_fails(self):
+        self.assertEqual(hooks.worktree_state(self.outside), {"head": None, "dirty": None})
+        original = hooks.subprocess.run
+        self.addCleanup(setattr, hooks.subprocess, "run", original)
+
+        def slow(*_args, **_kwargs):
+            raise hooks.subprocess.TimeoutExpired("git", 5)
+        hooks.subprocess.run = slow
+        self.assertEqual(hooks.worktree_state(self.root), {"head": None, "dirty": None})
+        hooks.subprocess.run = original
+        self.record(hook_event_name="SubagentStart", agent_type="flofi-swap", agent_id="a1")
+        self.assertEqual(self.ledger()[0]["event"], "subagent_start")  # the row is never dropped
 
     def test_symlinked_claude_directory_writes_nothing(self):
         moved = Path(self.outside, "claude")

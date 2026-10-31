@@ -16,7 +16,6 @@ import json
 import os
 from pathlib import Path
 import re
-import shlex
 import stat
 import subprocess
 import sys
@@ -32,36 +31,44 @@ SENSITIVE_NAMES = {"id_rsa", "id_ed25519", "id_ecdsa", "credentials", "credentia
                    "credentials.db", "application_default_credentials.json", ".netrc", "disposable-phrase",
                    ".mode-a", ".public-testnet", "flofi-agent-runs"}
 SENSITIVE_SUFFIXES = (".pem", ".key", ".p12", ".pfx", ".jks", ".keystore")
-REDIRECTS = re.compile(r"(?<!\S)2>(?:/dev/null|&1)(?!\S)")
 RESULT = re.compile(r'FLOFI_REVIEW_RESULT (\{.*\})')
 LEDGER_LIMIT = 1 << 20
 
 
-def options(flags="", valued="", longs="", long_valued="", numeric=False):
+def options(flags="", valued="", longs="", long_valued="", numeric=False, numbers=""):
     """An explicit option allowlist. Anything else, abbreviations included, is refused:
     GNU tools and git accept unambiguous prefixes, and Claude Code's grep (ugrep) and
-    find (bfs) add pager, filter and exec options of their own."""
+    find (bfs) add pager, filter and exec options of their own. `numbers` lists options
+    whose value must be a count (ugrep's optional-argument context options would
+    otherwise take a directory operand as their value)."""
     return {"flags": set(flags), "valued": set(valued), "longs": set(longs.split()),
-            "long_valued": set(long_valued.split()), "numeric": numeric}
+            "long_valued": set(long_valued.split()), "numeric": numeric, "numbers": set(numbers.split())}
+
+
+COUNT = re.compile(r"[+-]?\d{1,9}[KMGkmgb]?")
+PATTERN_OPTIONS = {"-e", "--regexp"}
 
 
 COMMANDS = {
     "cat": options("nAbeEsStTuv"), "wc": options("lwcmL"), "ls": options("laA1RhdFStrpi"),
-    "head": options("qv", "nc", "", "--lines --bytes", numeric=True),
-    "tail": options("qv", "nc", "", "--lines --bytes", numeric=True),
+    "head": options("qv", "nc", "", "--lines --bytes", numeric=True, numbers="-n -c --lines --bytes"),
+    "tail": options("qv", "nc", "", "--lines --bytes", numeric=True, numbers="-n -c --lines --bytes"),
     "cut": options("s", "dfcb", "", "--delimiter --fields --characters --bytes"), "tr": options("dsc"),
     "sort": options("nrufbhVMg", "kt", "", "--key --field-separator"), "stat": options("L", "c", "", "--format"),
     "basename": options(), "dirname": options(), "realpath": options("e"), "pwd": options(),
     "grep": options("nilLcwxvohHEFsq", "eABCm", "--line-number --ignore-case --files-with-matches --count "
                     "--word-regexp --line-regexp --invert-match --only-matching --extended-regexp --fixed-strings "
-                    "--no-filename --with-filename", "--regexp --after-context --before-context --context --max-count"),
+                    "--no-filename --with-filename", "--regexp --after-context --before-context --context --max-count",
+                    numbers="-A -B -C -m --after-context --before-context --context --max-count"),
     # No -g/--glob (overrides .gitignore), --hidden (.git), -u, --pre, -L or -z.
     "rg": options("nNiSslcwxvoFUHIq", "eABCmtTM", "--line-number --no-line-number --ignore-case --smart-case "
                   "--case-sensitive --files --files-with-matches --files-without-match --count --count-matches "
                   "--word-regexp --line-regexp --invert-match --only-matching --fixed-strings --multiline --heading "
                   "--no-heading --with-filename --no-filename --column --vimgrep --json --stats --trim --quiet",
                   "--regexp --after-context --before-context --context --max-count --type --type-not --sort --sortr "
-                  "--max-columns --max-depth --max-filesize"),
+                  "--max-columns --max-depth --max-filesize",
+                  numbers="-A -B -C -m -M --after-context --before-context --context --max-count --max-columns "
+                  "--max-depth --max-filesize"),
 }
 FILE_COMMANDS = {"cat", "head", "tail", "wc", "cut", "sort", "grep", "sed"}  # files only: ugrep recurses directories
 _DIFF = ("--stat --shortstat --numstat --name-only --name-status --summary --patch --no-patch --no-color "
@@ -72,25 +79,29 @@ _LOG = ("--oneline --graph --decorate --no-decorate --first-parent --no-merges -
         "--abbrev-commit --all --topo-order --date-order ")
 _LOG_VALUED = "--max-count --skip --since --until --after --before --author --committer --grep --format --pretty --date --abbrev "
 GIT = {
-    "diff": options("pswbRM", "U", _DIFF, _DIFF_VALUED),
-    "log": options("pswbM", "nSGU", _DIFF + _LOG, _DIFF_VALUED + _LOG_VALUED, numeric=True),
-    "show": options("pswbM", "U", _DIFF + "--oneline --abbrev-commit", _DIFF_VALUED + "--format --pretty --date --abbrev"),
-    "diff-tree": options("rpsM", "U", _DIFF + "--no-commit-id --root", _DIFF_VALUED),
-    "status": options("sb", "", "--short --branch --porcelain --long --ignored"),
-    "ls-files": options("comdizst", "", "--cached --others --modified --deleted --ignored --exclude-standard "
+    "diff": options("pswbRM", "U", _DIFF, _DIFF_VALUED, numbers="-U --unified"),
+    "log": options("pswbM", "nSGU", _DIFF + _LOG, _DIFF_VALUED + _LOG_VALUED, numeric=True,
+                   numbers="-n -U --unified --max-count --skip"),
+    "show": options("pswbM", "U", _DIFF + "--oneline --abbrev-commit", _DIFF_VALUED + "--format --pretty --date --abbrev",
+                    numbers="-U --unified"),
+    "diff-tree": options("rpsM", "U", _DIFF + "--no-commit-id --root", _DIFF_VALUED, numbers="-U --unified"),
+    # No --ignored: reviewers do not need the names of ignored local files.
+    "status": options("sb", "", "--short --branch --porcelain --long"),
+    "ls-files": options("comdzst", "", "--cached --others --modified --deleted --exclude-standard "
                         "--full-name --stage --directory --error-unmatch"),
     "grep": options("nilLcwvEFPhHpoqI", "eABCm", "--line-number --ignore-case --files-with-matches "
                     "--files-without-match --count --word-regexp --invert-match --extended-regexp --fixed-strings "
                     "--perl-regexp --cached --untracked --heading --break --show-function --name-only --only-matching "
                     "--quiet --all-match --and --or --not",
-                    "--regexp --after-context --before-context --context --max-count --max-depth"),
+                    "--regexp --after-context --before-context --context --max-count --max-depth",
+                    numbers="-A -B -C -m --after-context --before-context --context --max-count --max-depth"),
     "rev-parse": options("q", "", "--abbrev-ref --short --show-toplevel --verify --is-inside-work-tree "
                          "--symbolic-full-name --quiet"),
     "merge-base": options("a", "", "--is-ancestor --all --fork-point --octopus"),
     "blame": options("wsecltfnMC", "L", "--porcelain --line-porcelain --show-name --show-number"),
     "ls-tree": options("rdtlz", "", "--long --name-only --name-status --full-name --full-tree", "--abbrev"),
-    "rev-list": options("n", "", "--count --all --first-parent --merges --no-merges --reverse --left-right",
-                        "--max-count --since --until"),
+    "rev-list": options("", "n", "--count --all --first-parent --merges --no-merges --reverse --left-right",
+                        "--max-count --since --until", numbers="-n --max-count"),
     "shortlog": options("sne", "", "--summary --numbered --email"),
     "describe": options("", "", "--tags --always --long --contains --all", "--abbrev --match"),
     "name-rev": options("", "", "--name-only --tags --always"),
@@ -136,7 +147,10 @@ def path_reason(value, cwd, root=ROOT):
         return "Git internals are not readable"
     if any(sensitive(part) for part in relative.parts):
         return "secret or local-state paths are not readable"
-    if relative.parts and "node_modules" not in relative.parts:
+    exempt = "node_modules" in relative.parts and not any(
+        part.startswith(".") and part != ".pnpm"
+        for part in relative.parts[relative.parts.index("node_modules") + 1:]) if "node_modules" in relative.parts else False
+    if relative.parts and not exempt:
         ignored = subprocess.run(["git", "check-ignore", "-q", "--", str(relative)], cwd=root,
                                  stdin=subprocess.DEVNULL, capture_output=True, timeout=5)
         if ignored.returncode != 1:
@@ -153,39 +167,97 @@ def looks_like_path(value, cwd):
         return True  # e.g. ENAMETOOLONG: let path_reason refuse it
 
 
-def unquoted_reason(command):
-    """Refuse every construct whose meaning differs between Bash and shlex."""
-    quote, index, previous = None, 0, " "
+REDIRECT_WORDS = {"2>/dev/null", "2>&1"}
+
+
+def pipeline_words(command):
+    """Split a command the way Bash would for this restricted grammar.
+
+    Only an unquoted | separates stages (shlex returned a quoted '|' as a pipe).
+    Quotes are removed; anything whose meaning could differ between Bash and this
+    scanner is refused: expansion, unquoted comment/glob characters, home-directory
+    tildes, chaining, redirection other than 2>/dev/null or 2>&1, and continuations.
+    """
+    stages, word, in_word, operator, quote, previous, index = [[]], [], False, False, None, " ", 0
+
+    def finish():
+        nonlocal word, in_word, operator
+        if in_word:
+            text = "".join(word)
+            if not operator:
+                stages[-1].append(text)
+            elif text not in REDIRECT_WORDS:
+                raise ValueError("command chaining, redirection, subshells and background jobs are not allowed")
+        word, in_word, operator = [], False, False
+
     while index < len(command):
         char = command[index]
+        following = command[index + 1] if index + 1 < len(command) else ""
         if quote == "'":
             if char == "'":
                 quote = None
-        elif char == "\\":
-            index += 1
-            if index < len(command) and command[index] in "\n\r":
-                return "line continuations are not allowed"
-        elif char in "$`":
-            return "shell expansion is not allowed"
+            else:
+                word.append(char)
         elif quote == '"':
             if char == '"':
                 quote = None
+            elif char in "$`":
+                raise ValueError("shell expansion is not allowed")
+            elif char == "\\" and following and following in '"\\':
+                word.append(following)
+                index += 1
+            elif char == "\\" and following and following in "\n\r":
+                raise ValueError("line continuations are not allowed")
+            else:
+                word.append(char)
+        elif char == "\\":
+            if not following or following in "\n\r":
+                raise ValueError("line continuations are not allowed")
+            word.append(following)
+            in_word = True
+            index += 1
+        elif char in " \t":
+            finish()
+        elif char == "|":
+            finish()
+            if following == "|":
+                raise ValueError("only simple pipes are allowed")
+            stages.append([])
         elif char in "'\"":
-            quote = char
-        elif char in ";&<>(){}\n\r":
-            return "command chaining, redirection, subshells and background jobs are not allowed"
+            quote, in_word = char, True
+        elif char in "$`":
+            raise ValueError("shell expansion is not allowed")
         elif char in "#*?[":
-            return "unquoted comments and glob patterns are not allowed; quote patterns"
-        elif char == "~" and (previous.isspace() or previous in "=:"):
-            return "home-directory expansion is not allowed"
+            raise ValueError("unquoted comments and glob patterns are not allowed; quote patterns")
+        elif char == "~" and (not in_word or previous in "=:"):
+            raise ValueError("home-directory expansion is not allowed")
+        elif char in ";&<>(){}\n\r":
+            word.append(char)
+            in_word = operator = True
+        else:
+            word.append(char)
+            in_word = True
         previous = char
         index += 1
-    return "unterminated quote" if quote else None
+    if quote:
+        raise ValueError("unterminated quote")
+    finish()
+    return stages
 
 
 def parse_options(name, args, spec):
-    """Positionals and option values, or a denial reason, under an explicit allowlist."""
-    positionals, values, index, ended = [], [], 0, False
+    """(positionals, path-like option values, pattern given) or a denial reason."""
+    positionals, values, index, ended, patterns = [], [], 0, False, False
+
+    def take(option, value):
+        nonlocal patterns
+        if option in spec["numbers"] and not COUNT.fullmatch(value):
+            return f"{name} {option} takes a number"
+        if option in PATTERN_OPTIONS:
+            patterns = True  # a pattern is never opened as a file
+        else:
+            values.append(value)
+        return None
     while index < len(args):
         arg = args[index]
         index += 1
@@ -196,14 +268,16 @@ def parse_options(name, args, spec):
         elif arg.startswith("--"):
             option, has_value, value = arg.partition("=")
             if has_value and option in spec["long_valued"]:
-                values.append(value)
+                reason = take(option, value)
             elif not has_value and option in spec["longs"]:
-                pass
+                reason = None
             elif not has_value and option in spec["long_valued"] and index < len(args):
-                values.append(args[index])
+                reason = take(option, args[index])
                 index += 1
             else:
                 return f"{name} {option} is not an allowed option"
+            if reason:
+                return reason
         elif spec["numeric"] and arg[1:].isdigit():
             pass
         else:
@@ -217,10 +291,12 @@ def parse_options(name, args, spec):
                             return f"{name} -{letter} needs a value"
                         value = args[index]
                         index += 1
-                    values.append(value)
+                    reason = take("-" + letter, value)
+                    if reason:
+                        return reason
                     break
                 return f"{name} -{letter} is not an allowed option"
-    return positionals, values
+    return positionals, values, patterns
 
 
 def find_reason(args, cwd, root):
@@ -253,37 +329,38 @@ def segment_reason(argv, cwd, root=ROOT):
         if len(args) < 2 or args[0] != "-n" or not re.fullmatch(r"(?:\d+|\$)(?:,(?:\d+|\$))?p", args[1]) or any(
                 arg.startswith("-") for arg in args[2:]):
             return "sed is limited to sed -n 'N,Mp' [FILE...]"
-        positionals, values = args[2:], []
+        positionals, values, patterns = args[2:], [], True
     elif name == "python3":
         script = (Path(cwd) / args[0]).resolve() if args else None
         if (script != root.resolve() / "scripts/agent_guard.py" or len(args) < 2 or args[1] not in GUARD_SCRIPTS
                 or any(not re.fullmatch(r"[A-Za-z0-9_./@^~:=-]+", arg) for arg in args[2:])):
             return "python3 may only run scripts/agent_guard.py check, impact, report or domain"
-        positionals, values = args[2:], []
+        positionals, values, patterns = args[2:], [], True
     elif name == "git":
-        while args and args[0] == "--no-pager":
+        while args and args[0] in {"--no-pager", "--no-optional-locks"}:
             args = args[1:]
         if not args or args[0] not in GIT:
             return "only read-only git subcommands without global options are allowed"
         parsed = parse_options("git " + args[0], args[1:], GIT[args[0]])
         if isinstance(parsed, str):
             return parsed
-        positionals, values = parsed
+        positionals, values, patterns = parsed
+        name = "git " + args[0]
     elif name in COMMANDS:
         parsed = parse_options(name, args, COMMANDS[name])
         if isinstance(parsed, str):
             return parsed
-        positionals, values = parsed
+        positionals, values, patterns = parsed
     else:
         return f"{name} is not an allowed read-only inspection command"
-    pattern_first = name in {"grep", "rg"} and not any(a.startswith(("-e", "--regexp")) for a in args)
+    if name in {"grep", "rg", "git grep"} and not patterns and positionals:
+        positionals = positionals[1:]  # the first operand is the pattern, never opened as a file
     for position, value in enumerate(positionals + values):
         if looks_like_path(value, cwd):
             reason = path_reason(value, cwd, root)
             if reason:
                 return reason
-        is_file_operand = position < len(positionals) and not (pattern_first and position == 0)
-        if name in FILE_COMMANDS and is_file_operand and (Path(cwd) / value).is_dir():
+        if name in FILE_COMMANDS and position < len(positionals) and (Path(cwd) / value).is_dir():
             return f"{name} takes files, not directories (it could recurse into ignored files)"
     return None
 
@@ -294,31 +371,14 @@ def bash_reason(tool_input, cwd, root=ROOT):
         return "empty or oversized command"
     if tool_input.get("run_in_background"):
         return "background commands are not allowed"
-    command = REDIRECTS.sub(" ", command)
-    reason = unquoted_reason(command)
-    if reason:
-        return reason
     try:
-        lexer = shlex.shlex(command, posix=True, punctuation_chars="|")
-        lexer.whitespace_split = True
-        lexer.commenters = ""
-        tokens = list(lexer)
-    except ValueError:
-        return "unparseable command"
-    segments, current = [], []
-    for token in tokens:
-        if token == "|":
-            segments.append(current)
-            current = []
-        elif set(token) == {"|"}:
-            return "only simple pipes are allowed"
-        else:
-            current.append(token)
-    segments.append(current)
-    if any(not segment or "=" in segment[0] for segment in segments):
+        stages = pipeline_words(command)
+    except ValueError as exc:
+        return str(exc)
+    if any(not stage or "=" in stage[0] for stage in stages):
         return "empty pipeline stages and environment assignments are not allowed"
-    for segment in segments:
-        reason = segment_reason(segment, cwd, root)
+    for stage in stages:
+        reason = segment_reason(stage, cwd, root)
         if reason:
             return reason
     return None
@@ -442,49 +502,105 @@ def suite_path(token, root=ROOT):
     return token
 
 
+def command_parts(command):
+    """Quote-aware split of a main-session command line into (segment, separator) pairs."""
+    parts, current, quote, index = [], [], None, 0
+    while index < len(command):
+        char, pair = command[index], command[index:index + 2]
+        if quote:
+            current.append(char)
+            if char == quote:
+                quote = None
+            elif char == "\\" and quote == '"' and index + 1 < len(command):
+                current.append(command[index + 1])
+                index += 1
+        elif char == "\\" and index + 1 < len(command):
+            current.append(command[index:index + 2])
+            index += 1
+        elif char in "'\"":
+            quote = char
+            current.append(char)
+        elif pair in {"&&", "||"}:
+            parts.append(("".join(current), pair))
+            current = []
+            index += 1
+        elif pair in {">&", "&>"} or (char == "&" and command[index - 1:index] == ">"):
+            current.append(char)  # redirections such as 2>&1 are not separators
+        elif char in ";&|\n":
+            parts.append(("".join(current), char))
+            current = []
+        else:
+            current.append(char)
+        index += 1
+    parts.append(("".join(current), ""))
+    return parts
+
+
+def gate_scope(gate, words):
+    """Which run of a gate this was, so a narrower pass never clears a full-run failure."""
+    if gate == "guarded-browser":
+        profile = words[2] if len(words) > 2 else ""
+        return profile if re.fullmatch(r"[a-z0-9-]{1,40}", profile) else "other"
+    if gate == "vitest-focused":
+        return "filtered"
+    extra = [w for w in words[2:] if not w.startswith(("--reporter=", "--outputFile="))]
+    return "filtered" if gate.startswith("pnpm-test") and extra else "full"
+
+
 def gate_record(event, root=ROOT):
     tool_input = event.get("tool_input") if isinstance(event.get("tool_input"), dict) else {}
     command = tool_input.get("command")
     if not isinstance(command, str):
         return None
-    gates, suites, piped = [], [], False
-    command = REDIRECTS.sub(" ", command)
-    # Only an all-&& chain lets one exit status speak for each gate in it.
-    certain = all(separator == "&&" for separator in re.findall(r"&&|\|\||[;&|\n]", command))
-    segments = re.split(r"&&|\|\||;|\n", command)
-    for segment in segments:
-        stages = segment.split("|")
-        head = re.sub(r"^\s*(?:cd \S+\s*$|(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*(?:timeout \d+[smh]? )?)", "", stages[0]).strip()
+    parts = command_parts(command)
+    separators = [separator for _segment, separator in parts if separator]
+    gates, suites, scopes = [], [], {}
+    for segment, _separator in parts:
+        head = re.sub(r"^\s*(?:cd \S+\s*$|(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*(?:timeout \d+[smh]? )?)", "", segment)
+        head = re.sub(r"(?<!\S)2>(?:/dev/null|&1)(?!\S)", " ", head).strip()
         for gate, pattern in GATES:
             if re.fullmatch(pattern, head):
                 gates.append(gate)
-                piped = piped or len(stages) > 1
+                scopes[gate] = gate_scope(gate, head.split())
                 suites += [path for path in (suite_path(token, root) for token in head.split()) if path]
     if not gates:
         return None
+    piped = "|" in separators
     record = {"event": "test", "gates": sorted(set(gates)), "piped": piped, "suites": sorted(set(suites))[:20],
+              "scopes": dict(sorted(scopes.items())),
               "agent": agent_fields(event)["agent"] if event.get("agent_type") else "main"}
     if tool_input.get("run_in_background"):
         return {**record, "ok": None, "exit": None}
     if event.get("hook_event_name") == "PostToolUseFailure":
         code = re.match(r"Exit code (\d+)", str(event.get("error", "")))
-        if len(segments) == 1 and not piped:
+        if not separators:
             return {**record, "ok": False, "exit": int(code[1]) if code else None}
         return {**record, "ok": None, "exit": None}  # another command may have failed or stopped the gate
     response = event.get("tool_response") if isinstance(event.get("tool_response"), dict) else {}
     if response.get("interrupted"):
         return {**record, "ok": False, "exit": None}
+    # Only an all-&& chain lets one exit status speak for each gate in it.
+    certain = all(separator == "&&" for separator in separators)
     return {**record, "ok": True, "exit": 0} if certain else {**record, "ok": None, "exit": None}
 
 
 def worktree_state(root=ROOT):
-    """The commit a specialist reviewed, and whether uncommitted changes were also present."""
+    """The commit a specialist reviewed, and whether uncommitted changes were present.
+
+    A failed or slow Git call yields unknown (None), never "clean", and never drops the row.
+    """
     def git(*args):
-        return subprocess.run(["git", *args], cwd=root, stdin=subprocess.DEVNULL, capture_output=True,
-                              text=True, timeout=5).stdout
-    head = git("rev-parse", "HEAD").strip()
+        result = subprocess.run(["git", "--no-optional-locks", *args], cwd=root, stdin=subprocess.DEVNULL,
+                                capture_output=True, text=True, timeout=5,
+                                env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"})
+        return result.stdout if result.returncode == 0 else None
+    try:
+        head, status = git("rev-parse", "HEAD"), git("status", "--porcelain")
+    except (OSError, subprocess.SubprocessError):
+        head = status = None
+    head = head.strip() if head else ""
     return {"head": head if re.fullmatch(r"[0-9a-f]{40}", head) else None,
-            "dirty": bool(git("status", "--porcelain").strip())}
+            "dirty": None if status is None else bool(status.strip())}
 
 
 def record(event, root=ROOT):

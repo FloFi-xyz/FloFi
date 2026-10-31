@@ -2,6 +2,7 @@
 
 import copy
 import importlib.util
+import os
 import json
 from pathlib import Path
 import shutil
@@ -381,9 +382,10 @@ class EngineeringGuard(unittest.TestCase):
         run["malformed"] = 2
         summary = guard.review_summary(self.data, plan, [run], root=self.root)
         self.assertIn(f"Ledger {run['session']}: 2 rows failed validation", summary["problems"])
-        self.assertTrue(any(p.startswith("flofi-swap: reviewed aaaaaaaaaaaa, not the current clean HEAD")
+        self.assertTrue(any(p.startswith("flofi-swap: reviewed aaaaaaaaaaaa+unknown-worktree, not the current clean HEAD")
                             for p in summary["problems"]), summary["problems"])
-        self.assertEqual(next(r for r in summary["specialists"] if r["domain"] == "flofi-swap")["reviewedCommits"], ["a" * 40])
+        self.assertEqual(next(r for r in summary["specialists"] if r["domain"] == "flofi-swap")["reviewedCommits"],
+                         ["aaaaaaaaaaaa+unknown-worktree"])
         accepted = guard.review_summary(self.data, plan, [run], root=self.root,
                                         accepted={"flofi-swap": "Only documentation changed since"})
         self.assertFalse(any(p.startswith("flofi-swap: reviewed") for p in accepted["problems"]))
@@ -401,13 +403,19 @@ class EngineeringGuard(unittest.TestCase):
         head = self.commit_fixture()
         plan = {**guard.impact(self.data, self.data["modules"][0]["sources"][:1]), "base": "origin/main"}
         done = {"result": "no-findings", "findings": 0, "highest": "none"}
-        # A commit made in the same session after SessionStart: the stop row's HEAD wins.
+        # A commit made in the same session after SessionStart: the review's own start/stop HEAD wins.
         fresh = self.runs({"event": "session_start", "definitions": {}, "head": "a" * 40},
-                          {"event": "subagent_start", "agent": "flofi-swap", "agentId": "s1", "head": "a" * 40},
+                          {"event": "subagent_start", "agent": "flofi-swap", "agentId": "s1", "head": head, "dirty": False},
                           {"event": "subagent_stop", "agent": "flofi-swap", "agentId": "s1", "head": head,
                            "dirty": False, "review": done})
         summary = guard.review_summary(self.data, plan, [fresh], root=self.root)
         self.assertFalse(any(p.startswith("flofi-swap: reviewed") for p in summary["problems"]), summary["problems"])
+        # HEAD moved while the review ran (batch 5 flofi-infrastructure-ci finding 1): not a review of HEAD.
+        moved = self.runs({"event": "subagent_start", "agent": "flofi-swap", "agentId": "s4", "head": "a" * 40, "dirty": False},
+                          {"event": "subagent_stop", "agent": "flofi-swap", "agentId": "s4", "head": head,
+                           "dirty": False, "review": done})
+        summary = guard.review_summary(self.data, plan, [moved], root=self.root)
+        self.assertTrue(any(p.startswith(f"flofi-swap: reviewed aaaaaaaaaaaa..{head[:12]}") for p in summary["problems"]))
         # Legacy rows without a HEAD use the SessionStart that preceded them, not a later compaction's.
         legacy = self.runs({"event": "session_start", "definitions": {}, "head": "b" * 40},
                            {"event": "subagent_start", "agent": "flofi-swap", "agentId": "s2"},
@@ -415,10 +423,10 @@ class EngineeringGuard(unittest.TestCase):
                            {"event": "session_start", "definitions": {}, "head": head, "source": "compact"})
         summary = guard.review_summary(self.data, plan, [legacy], root=self.root)
         swap = next(r for r in summary["specialists"] if r["domain"] == "flofi-swap")
-        self.assertEqual(swap["reviewedCommits"], ["b" * 40])
+        self.assertEqual(swap["reviewedCommits"], ["bbbbbbbbbbbb+unknown-worktree"])
         self.assertTrue(any(p.startswith("flofi-swap: reviewed bbbbbbbbbbbb") for p in summary["problems"]))
         # Uncommitted changes at review time do not count as a review of HEAD.
-        dirty = self.runs({"event": "subagent_start", "agent": "flofi-swap", "agentId": "s3", "head": head},
+        dirty = self.runs({"event": "subagent_start", "agent": "flofi-swap", "agentId": "s3", "head": head, "dirty": False},
                           {"event": "subagent_stop", "agent": "flofi-swap", "agentId": "s3", "head": head,
                            "dirty": True, "review": done})
         summary = guard.review_summary(self.data, plan, [dirty], root=self.root)
@@ -434,6 +442,50 @@ class EngineeringGuard(unittest.TestCase):
         for events in [(gate(False), gate(None)), (gate(True), gate(False))]:
             summary = guard.review_summary(self.data, plan, [self.runs(*events)], root=self.root)
             self.assertEqual(summary["problems"], ["Recorded gate failed: pnpm-check"])
+
+    def test_gate_failures_are_cleared_only_by_the_same_or_a_full_run(self):
+        plan = {**guard.impact(self.data, ["docs/notes.md"]), "base": "origin/main"}
+
+        def gate(ok, scope="full", suites=(), stamp="2026-10-31T10:00:00Z"):
+            return {"event": "test", "gates": ["pnpm-test"], "scopes": {"pnpm-test": scope}, "ok": ok, "exit": None,
+                    "piped": False, "suites": list(suites), "agent": "main", "t": stamp}
+        cases = [((gate(False), gate(True, "filtered", ["a.test.ts"])), ["Recorded gate failed: pnpm-test"]),
+                 ((gate(False, "filtered", ["a.test.ts"]), gate(True, "filtered", ["a.test.ts"])), []),
+                 ((gate(False, "filtered", ["a.test.ts"]), gate(True, "filtered", ["b.test.ts"])),
+                  ["Recorded gate failed: pnpm-test (filtered)"]),
+                 ((gate(False, "filtered", ["a.test.ts"]), gate(True)), [])]
+        for events, problems in cases:
+            with self.subTest(events=[(e["ok"], e["scopes"]["pnpm-test"], e["suites"]) for e in events]):
+                self.assertEqual(guard.review_summary(self.data, plan, [self.runs(*events)], root=self.root)["problems"], problems)
+        # Across sessions, time order decides, not argument order (batch 5 flofi-infrastructure-ci finding 5).
+        later_pass = self.runs(gate(True, stamp="2026-10-31T12:00:00Z"), session="a")
+        earlier_fail = self.runs(gate(False, stamp="2026-10-31T11:00:00Z"), session="b")
+        self.assertEqual(guard.review_summary(self.data, plan, [later_pass, earlier_fail], root=self.root)["problems"], [])
+
+    def test_ledger_reader_applies_the_writers_file_rules(self):
+        runs = self.root / guard.CLAUDE_RUNS
+        runs.mkdir(parents=True)
+        outside = self.root / "outside.jsonl"
+        outside.write_text('{"event":"session_end"}\n')
+        (runs / "linked.jsonl").symlink_to(outside)
+        os.link(outside, runs / "hard.jsonl")
+        for session in ["linked", "hard"]:
+            self.assertFalse(guard.read_runs(session, self.root)["found"], session)
+        (runs / "odd.jsonl").write_bytes(b'{"event":"session_end"}\n\xff\xfe\n' + b"[" * 100000 + b"\n"
+                                         + b'{"event":"subagent_start","agent":"flofi-swap","head":"not-a-commit"}\n'
+                                         + b'{"event":"subagent_start","agent":"flofi-swap","dirty":"yes"}\n')
+        run = guard.read_runs("odd", self.root)
+        self.assertEqual((len(run["events"]), run["malformed"]), (1, 4))
+
+    def test_report_paths_and_uncommitted_worktrees(self):
+        self.commit_fixture()
+        report = self.root / "unit-report.json"
+        report.write_text(json.dumps({"success": True, "testResults": []}))
+        plan = {**guard.impact(self.data, ["docs/notes.md"]), "base": "origin/main"}
+        summary = guard.review_summary(self.data, plan, [self.runs()], reports=[("unit", str(report))], root=self.root)
+        self.assertEqual(summary["reports"][0]["report"], "unit-report.json")
+        self.assertNotIn(str(self.root), json.dumps(summary))
+        self.assertIn("The worktree has uncommitted changes; reviews cover commits only", summary["problems"])
 
     def test_a_full_ledger_is_a_problem(self):
         self.write(f"{guard.CLAUDE_RUNS}/full.jsonl", '{"event":"session_end"}\n' + " " * guard.LEDGER_LIMIT)

@@ -14,6 +14,7 @@ import json
 import os
 from pathlib import Path, PurePosixPath
 import re
+import stat
 import subprocess
 import sys
 import tomllib
@@ -418,20 +419,24 @@ def review_fields(value):
 
 
 def ledger_row(row):
-    """Re-validate a local ledger row on read and keep only the documented fields."""
+    """Re-validate a local ledger row on read; a field that fails validation fails the row."""
     if not isinstance(row, dict):
         return None
     event = row.get("event")
     name = (lambda value: value if isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9_.:-]{1,64}", value) else "other")
-    clean = {"event": event}
-    head = row.get("head")
-    head = head if isinstance(head, str) and re.fullmatch(r"[0-9a-f]{40}", head) else None
+    head, stamp = row.get("head"), row.get("t")
+    if (head is not None and not (isinstance(head, str) and re.fullmatch(r"[0-9a-f]{40}", head))) or (
+            stamp is not None and not (isinstance(stamp, str) and re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", stamp))):
+        return None
+    clean = {"event": event, "t": stamp}
     if event in {"subagent_start", "subagent_stop", "guard_deny"}:
         agent_id = row.get("agentId")
         clean.update(agent=name(row.get("agent")), agentId=agent_id if isinstance(agent_id, str)
                      and re.fullmatch(r"[A-Za-z0-9_-]{1,128}", agent_id) else None)
     if event in {"subagent_start", "subagent_stop"}:
-        clean.update(head=head, dirty=row.get("dirty") is True)
+        if row.get("dirty") not in (True, False, None):
+            return None
+        clean.update(head=head, dirty=row.get("dirty"))  # None: unknown, never treated as clean
     if event == "subagent_stop":
         clean["review"] = review_fields(row.get("review"))
     elif event == "guard_deny":
@@ -444,32 +449,51 @@ def ledger_row(row):
         clean["source"] = row.get("source") if row.get("source") in {
             "startup", "resume", "clear", "compact", "fork"} else "other"
     elif event == "test":
-        gates, suites = row.get("gates"), row.get("suites")
+        gates, suites, scopes = row.get("gates"), row.get("suites"), row.get("scopes", {})
         if not isinstance(gates, list) or not gates or not all(
                 isinstance(gate, str) and re.fullmatch(r"[a-z0-9-]{1,40}", gate) for gate in gates):
             return None
+        if not isinstance(scopes, dict) or any(key not in gates or not isinstance(value, str)
+                                               or not re.fullmatch(r"[a-z0-9-]{1,40}", value)
+                                               for key, value in scopes.items()):
+            return None
         clean.update(gates=gates, ok=row.get("ok") if row.get("ok") in (True, False, None) else None,
                      exit=row.get("exit") if type(row.get("exit")) is int else None, piped=row.get("piped") is True,
-                     agent=name(row.get("agent")), suites=[s for s in suites if isinstance(s, str) and safe_path(s)
-                                                            and len(s) <= 220][:20] if isinstance(suites, list) else [])
+                     scopes=scopes, agent=name(row.get("agent")),
+                     suites=[s for s in suites if isinstance(s, str) and safe_path(s) and len(s) <= 220][:20]
+                     if isinstance(suites, list) else [])
     elif event not in {"subagent_start", "session_end"}:
         return None
     return clean
 
 
 def read_runs(session, root=ROOT):
-    """Hook-recorded lifecycle for one Claude session; never contains prompts or output."""
+    """Hook-recorded lifecycle for one Claude session; never contains prompts or output.
+
+    Read under the writer's rules: no symlinks, a regular owner-only file with one link.
+    """
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", session):
         raise ValueError("Invalid Claude session id")
     runs = root / CLAUDE_RUNS
-    path = runs / f"{session}.jsonl"
-    events, malformed = [], 0
-    found = (not runs.parent.is_symlink() and not runs.is_symlink() and path.is_file() and not path.is_symlink())
-    full = found and path.stat().st_size >= LEDGER_LIMIT
-    for line in path.read_text().splitlines() if found else []:
+    events, malformed, found, full, data = [], 0, False, False, b""
+    if not runs.parent.is_symlink() and not runs.is_symlink() and runs.is_dir():
         try:
-            row = ledger_row(json.loads(line))
-        except ValueError:
+            descriptor = os.open(runs / f"{session}.jsonl", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        except OSError:
+            descriptor = None
+        if descriptor is not None:
+            try:
+                info = os.fstat(descriptor)
+                if stat.S_ISREG(info.st_mode) and info.st_nlink == 1 and info.st_uid == os.geteuid():
+                    found, full = True, info.st_size >= LEDGER_LIMIT
+                    with os.fdopen(os.dup(descriptor), "rb") as stream:
+                        data = stream.read(LEDGER_LIMIT * 2)
+            finally:
+                os.close(descriptor)
+    for line in data.splitlines():
+        try:
+            row = ledger_row(json.loads(line.decode("utf-8")))
+        except (ValueError, RecursionError):  # includes UnicodeDecodeError
             row = None
         if row:
             events.append(row)
@@ -519,7 +543,7 @@ def review_summary(data, plan, runs, skips=None, reports=(), root=ROOT, streams=
                 failure = streams.get(run["session"], {}).get("failed", {}).get(agent_id)
                 agents[key] = {"agent": row.get("agent"), "status": "failed" if failure else "started",
                                "review": None, "error": failure, "session": run["session"],
-                               "head": row.get("head") or session_head, "dirty": row.get("dirty")}
+                               "start": row.get("head") or session_head, "startDirty": row.get("dirty")}
                 if str(row.get("agent")).startswith("flofi-"):
                     running.add(key)
                     peak = max(peak, len(running))
@@ -529,11 +553,11 @@ def review_summary(data, plan, runs, skips=None, reports=(), root=ROOT, streams=
                                 and a["agent"] == row.get("agent") and a["status"] == "started"),
                                f"{run['session']}/#{number}")
                 entry = agents.setdefault(key, {"agent": row.get("agent"), "status": "started", "review": None,
-                                                "error": None, "session": run["session"]})
+                                                "error": None, "session": run["session"], "start": session_head,
+                                                "startDirty": None})
                 if entry["status"] != "failed":  # a reported termination is never upgraded
-                    # The commit at completion is what was reviewed, not the session's first HEAD.
                     entry.update(status="completed", review=row.get("review"),
-                                 head=row.get("head") or entry.get("head"), dirty=bool(row.get("dirty") or entry.get("dirty")))
+                                 stop=row.get("head") or entry["start"], stopDirty=row.get("dirty"))
                 running.discard(key)
             elif row["event"] == "test":
                 tests.append(row)
@@ -557,10 +581,10 @@ def review_summary(data, plan, runs, skips=None, reports=(), root=ROOT, streams=
         reviews = [a["review"] for a in done if isinstance(a["review"], dict)]
         status = ("completed" if done else "failed" if failed else "incomplete" if seen
                   else "skipped" if domain in skips else "not-invoked")
-        reviewed = sorted({(a.get("head") or "unrecorded")
-                           + ("+uncommitted" if a.get("dirty") else "") for a in done})
-        current_review = any(a.get("head") == head_now and not a.get("dirty") and isinstance(a["review"], dict)
-                             for a in done)
+        reviewed = sorted({commit_label(a) for a in done})
+        # Clean review of HEAD: started and finished on HEAD with a known-clean worktree.
+        current_review = any(a.get("start") == a.get("stop") == head_now and a.get("startDirty") is False
+                             and a.get("stopDirty") is False and isinstance(a["review"], dict) for a in done)
         rows.append({"domain": domain, "selectedBecause": plan.get("reasons", {}).get(domain, []),
                      "reviewedCommits": reviewed,
                      "defined": current.get(domain) is not None,
@@ -580,21 +604,37 @@ def review_summary(data, plan, runs, skips=None, reports=(), root=ROOT, streams=
         if any(review.get("result") == "blocked" for review in reviews):
             problems.append(f"{domain}: specialist reported its review as blocked")
         if done and head_now and not current_review:
-            stale = f"{domain}: reviewed {', '.join(c[:12] + ('+uncommitted' if c.endswith('+uncommitted') else '') for c in reviewed)}, not the current clean HEAD {head_now[:12]}"
+            stale = f"{domain}: reviewed {', '.join(reviewed)}, not the current clean HEAD {head_now[:12]}"
             if domain in accepted:
                 warnings.append(f"{stale}; accepted: {accepted[domain]}")
             else:
                 problems.append(stale)
-    latest = {}
-    for test in tests:  # a failed gate counts until a later run passes; an unknown result never clears it
+    tests.sort(key=lambda test: test.get("t") or "")  # time order across sessions
+    latest, failed_once = {}, set()
+    for test in tests:
+        # A failure counts until a later pass of the same run (gate, scope and suites) or a full run of the
+        # gate; a narrower pass or an unknown result never clears it.
         for gate in test.get("gates", []):
-            if test.get("ok") is not None or gate not in latest:
-                latest[gate] = test.get("ok")
-    superseded = sorted({gate for test in tests if test.get("ok") is False for gate in test.get("gates", [])
-                         if latest.get(gate) is True})
+            scope = test.get("scopes", {}).get(gate, "full")
+            key = (gate, scope, tuple(test.get("suites", [])) if scope == "filtered" else ())
+            if test.get("ok") is True and scope == "full":
+                latest.update({k: True for k in latest if k[0] == gate})
+            if test.get("ok") is not None or key not in latest:
+                latest[key] = test.get("ok")
+            if test.get("ok") is False:
+                failed_once.add(key)
+    describe = (lambda key: key[0] + (f" ({key[1]})" if key[1] != "full" else ""))
+    superseded = sorted(describe(key) for key in failed_once if latest.get(key) is True)
     if superseded:
         warnings.append(f"Earlier gate failures later passed: {', '.join(superseded)}")
-    problems.extend(f"Recorded gate failed: {gate}" for gate, ok in sorted(latest.items()) if ok is False)
+    problems.extend(f"Recorded gate failed: {describe(key)}" for key, ok in sorted(latest.items()) if ok is False)
+    try:
+        dirty_now = subprocess.run(["git", "--no-optional-locks", "status", "--porcelain"], cwd=root,
+                                   capture_output=True, text=True, timeout=10).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        dirty_now = ""
+    if head_now and dirty_now:
+        problems.append("The worktree has uncommitted changes; reviews cover commits only")
     if peak > MAX_CONCURRENT_REVIEWS:
         problems.append(f"Observed {peak} concurrent flofi-* reviewers; the limit is {MAX_CONCURRENT_REVIEWS}")
     problems.extend(f"Unmapped maintained source: {path}" for path in plan["unmapped"])
@@ -605,7 +645,7 @@ def review_summary(data, plan, runs, skips=None, reports=(), root=ROOT, streams=
     verified = []
     for stage, path in reports:
         errors = verify_results(data, json.loads(Path(path).read_text()), root, stage)
-        verified.append({"stage": stage, "report": str(path), "errors": errors})
+        verified.append({"stage": stage, "report": Path(path).name, "errors": errors})  # no local paths
         problems.extend(errors)
     changed_definitions = {}
     for session, recorded in definitions:  # every SessionStart (startup, compact, resume) is a baseline
@@ -629,6 +669,14 @@ def review_summary(data, plan, runs, skips=None, reports=(), root=ROOT, streams=
     }
 
 
+def commit_label(agent):
+    """start..stop when the HEAD moved during the review; +uncommitted/+unknown worktree state."""
+    start, stop = agent.get("start") or "unrecorded", agent.get("stop") or agent.get("start") or "unrecorded"
+    label = stop[:12] if start == stop else f"{start[:12]}..{stop[:12]}"
+    states = {agent.get("startDirty"), agent.get("stopDirty")}
+    return label + ("+uncommitted" if True in states else "+unknown-worktree" if None in states else "")
+
+
 def review_markdown(summary):
     lines = ["# FloFi Claude review summary", "", summary["evidence"], "",
              f"Base: `{summary['base']}`. Sessions: " + (", ".join(
@@ -650,7 +698,7 @@ def review_markdown(summary):
         if row["guardDenials"]:
             result += f"; {row['guardDenials']} guard denials"
         if row["reviewedCommits"]:
-            result += " @ " + ", ".join(commit[:12] for commit in row["reviewedCommits"])
+            result += " @ " + ", ".join(row["reviewedCommits"])
         seen = {True: "yes", False: "no", None: "not observed"}
         lines.append(f"| {row['domain']} | {', '.join(row['selectedBecause'])} | {seen[row['defined']]} | "
                      f"{seen[row['discovered']]} | {row['status']} | {result or '—'} |")
@@ -805,7 +853,7 @@ def main():
         streams = {}
         for path in args.stream_json:
             streams.update(stream_sessions(Path(path).read_text()))
-        sessions = args.session or sorted(streams) or [os.environ.get("CLAUDE_CODE_SESSION_ID", "")]
+        sessions = list(dict.fromkeys(args.session or sorted(streams) or [os.environ.get("CLAUDE_CODE_SESSION_ID", "")]))
         if not all(sessions):
             parser.error("review requires --session when CLAUDE_CODE_SESSION_ID is not set")
         skips = dict(item.split("=", 1) for item in args.skip if "=" in item and item.split("=", 1)[1].strip())
